@@ -56,7 +56,7 @@ def test_the_script_writes_the_directory_indexes_of_the_pool_under_its_home(
 
     _generate(tmp_path)
 
-    assert "* [Retry rule](retry.md) - retries above three hurt" in (
+    assert "* [retry](retry.md) - retries above three hurt" in (
         pool / "topics" / "index.md"
     ).read_text(encoding="utf-8")
     assert "* [topics/](topics/index.md) - 1 notes" in (pool / "index.md").read_text(
@@ -99,7 +99,7 @@ def test_an_untracked_draft_is_invisible_and_a_staged_note_is_counted(tmp_path: 
     _generate(tmp_path)
 
     index = (pool / "topics" / "index.md").read_text(encoding="utf-8")
-    assert "* [Draft rule](draft.md) - not staged yet" in index
+    assert "* [draft](draft.md) - not staged yet" in index
     assert "* [topics/](topics/index.md) - 2 notes" in (pool / "index.md").read_text(
         encoding="utf-8"
     )
@@ -169,6 +169,6 @@ def test_an_untracked_draft_is_named_on_stderr_and_never_indexed(tmp_path: Path)
     res = _generate_result(tmp_path)
 
     assert "untracked .md not indexed" not in res.stderr
-    assert "* [Draft rule](draft.md) - held back" in (pool / "topics" / "index.md").read_text(
+    assert "* [draft](draft.md) - held back" in (pool / "topics" / "index.md").read_text(
         encoding="utf-8"
     )
