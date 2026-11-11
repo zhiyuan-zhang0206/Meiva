@@ -1,7 +1,7 @@
 // meiva:note
-// Fleet route jumps (task #2909): the deep links an inspector widget button produces. `?notice=`
-// opens one notice's detail in the Inbox; `?task=` selects a task, mounts the Tasks surface, and
-// must not rewrite the durable view preference; malformed params are inert. The real surfaces and
+// Fleet route jumps (task #2909): the deep links an inspector widget button produces. `?task=`
+// selects a task, mounts the Tasks surface, and must not rewrite the durable view preference;
+// malformed params are inert. The real surfaces and
 // the real data hooks run here — a jump is asserted on what it puts on screen, not on a stub that
 // echoes its props. The canvases themselves are covered by graph-view.test / task-graph.test.
 // meiva:link ui/web/src/docs/frontend-components/fleet-view.md
@@ -15,13 +15,8 @@ import { AGENTS_QUERY_KEY } from "@/lib/agents/use-agents";
 import {
   USER_SETTING_DEFAULTS,
   type AgentRow,
-  type NoticeItem,
   type TaskRow,
 } from "@/lib/contracts/types";
-import {
-  NOTICES_QUERY_KEY,
-  NOTICES_RESOLVED_QUERY_KEY,
-} from "@/lib/notifications/use-notices";
 import { SETTINGS_QUERY_KEY } from "@/lib/state/use-user-settings";
 
 import { FleetView } from "./fleet-view";
@@ -63,8 +58,7 @@ const AGENTS: AgentRow[] = [
     machine: "test",
     supports_vision: true,
     llm_model: null, reasoning_effort: null,
-    awaiting_response_count: 0, has_pending_question: false, highest_notice_priority: null,
-    unread_notice_count: 0,
+    has_pending_question: false,
     has_unread_user_messages: false,
     heartbeat_paused_until: null,
     liveness_state: "online",
@@ -75,44 +69,11 @@ const putSettingMock = vi.fn((key: string, value: unknown) =>
   Promise.resolve({ key, value, updated_at: "2026-06-14T00:00:00Z" }),
 );
 
-// meiva:note
-// What a test states about the queue: the three lists the feed hook renders.
-interface FeedRows {
-  open: NoticeItem[];
-  awaiting: NoticeItem[];
-  resolved: NoticeItem[];
-}
-
-const NO_NOTICES: FeedRows = { open: [], awaiting: [], resolved: [] };
-
 beforeEach(() => {
   resetTransport();
-  transport.getNotices.mockImplementation(() =>
-      Promise.resolve({ open: [], awaiting: [], resolved_page: [], next_cursor: null }));
-  transport.resolveNotice.mockImplementation(() => Promise.resolve({ status: "ok" }));
   transport.getSettings.mockImplementation(() => Promise.resolve({ settings: [] }));
   transport.putSetting.mockImplementation((key: string, value: unknown) => putSettingMock(key, value));
 });
-
-function notice(over: Partial<NoticeItem> & { id: number; title: string }): NoticeItem {
-  return {
-    id: over.id,
-    agent_id: over.agent_id ?? 7,
-    agent_label: over.agent_label ?? "worker",
-    title: over.title,
-    content: null,
-    priority: over.priority ?? "P2",
-    require_response: over.require_response ?? true,
-    blocking: false,
-    created_at: over.created_at ?? "2026-06-14T00:00:00Z",
-    updated_at: null,
-    resolved_at: null,
-    resolution: null,
-    reply: null,
-    task_id: over.task_id ?? null,
-    expire_at: "2026-06-15T00:00:00Z",
-  };
-}
 
 function task(over: Partial<TaskRow> & { id: number }): TaskRow {
   return {
@@ -135,34 +96,20 @@ function task(over: Partial<TaskRow> & { id: number }): TaskRow {
 }
 
 // meiva:note
-// The test door for this file: the roster, the notice feed and the task registry a jump lands in
+// The test door for this file: the roster and the task registry a jump lands in
 // enter through the caches the hooks read, in the shape the app stores; the transport answers the
 // reads the surfaces still make, including an empty graph for the Agents tab.
 // meiva:link ui/web/src/docs/frontend-components/fleet-view.md
 function wrap(
   ui: ReactElement,
-  {
-    agents = AGENTS,
-    notices = NO_NOTICES,
-    tasks = [],
-  }: { agents?: AgentRow[]; notices?: FeedRows; tasks?: TaskRow[] } = {},
+  { agents = AGENTS, tasks = [] }: { agents?: AgentRow[]; tasks?: TaskRow[] } = {},
 ) {
   const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   qc.setQueryData(SETTINGS_QUERY_KEY, { ...USER_SETTING_DEFAULTS });
   qc.setQueryData(AGENTS_QUERY_KEY, { agents, ancestors: [] });
-  qc.setQueryData(NOTICES_QUERY_KEY, {
-    open: notices.open,
-    awaiting: notices.awaiting,
-    resolved_page: [],
-    next_cursor: null,
-  });
-  qc.setQueryData(NOTICES_RESOLVED_QUERY_KEY, {
-    pages: [{ resolved_page: notices.resolved, next_cursor: null }],
-    pageParams: [undefined],
-  });
   // meiva:note
-  // The board reads the graph projection of the 24h window and the queue joins against the 7d
-  // summary projection, so both keys are seeded with the same rows.
+  // The board reads the graph projection of the 24h window and the 7d summary projection, so
+  // both keys are seeded with the same rows.
   for (const window of ["24h", "7d", "30d", "all"] as const) {
     qc.setQueryData(["tasks", "graph", window], { tasks });
   }
@@ -212,36 +159,6 @@ describe("fleet route jumps", () => {
     expect(screen.queryByLabelText("Task graph legend")).toBeNull();
   });
 
-  it("?notice= opens that notice's detail (targeting a non-default row)", async () => {
-    const notices: FeedRows = {
-      open: [],
-      awaiting: [
-        notice({ id: 7, title: "first notice", created_at: "2026-06-14T00:00:00Z" }),
-        notice({ id: 8, title: "second notice", created_at: "2026-06-14T01:00:00Z" }),
-      ],
-      resolved: [],
-    };
-    window.history.replaceState(null, "", "/fleet?notice=8");
-    wrap(<FleetView navigate={navigate} />, { notices });
-    // The reply box (require_response notice) carries the selected notice's
-    // title in its accessible name — the unambiguous "which detail is open".
-    await waitFor(() => {
-      expect(screen.getByRole("textbox", { name: /second notice/ })).toBeTruthy();
-    });
-  });
-
-  it("without ?notice= the queue keeps its own default selection", async () => {
-    const notices: FeedRows = {
-      open: [],
-      awaiting: [notice({ id: 7, title: "first notice" })],
-      resolved: [],
-    };
-    wrap(<FleetView navigate={navigate} />, { notices });
-    await waitFor(() => {
-      expect(screen.getByRole("textbox", { name: /first notice/ })).toBeTruthy();
-    });
-  });
-
   it("?task= on mobile switches to the tasks tab", async () => {
     window.innerWidth = 375;
     const tasks: TaskRow[] = [task({ id: 42, owner: 7 })];
@@ -255,22 +172,9 @@ describe("fleet route jumps", () => {
   });
 
   it("malformed route ids are inert (default view, no crash)", () => {
-    window.history.replaceState(null, "", "/fleet?task=abc&notice=");
+    window.history.replaceState(null, "", "/fleet?task=abc");
     wrap(<FleetView navigate={navigate} />);
     expect(screen.getByLabelText("Agent graph legend")).toBeTruthy();
     expect(screen.queryByLabelText("Task graph legend")).toBeNull();
-  });
-
-  it("an unknown ?notice= id leaves the default selection alone", async () => {
-    const notices: FeedRows = {
-      open: [],
-      awaiting: [notice({ id: 7, title: "first notice" })],
-      resolved: [],
-    };
-    window.history.replaceState(null, "", "/fleet?notice=999");
-    wrap(<FleetView navigate={navigate} />, { notices });
-    await waitFor(() => {
-      expect(screen.getByRole("textbox", { name: /first notice/ })).toBeTruthy();
-    });
   });
 });

@@ -103,8 +103,9 @@ export {
   type StatsWindowHours,
 } from "./sidebar-stats";
 
+// meiva:note
 // Relative time formatting for sidebar rows (and, transitively, every other
-// consumer of this re-export — alerts, inbox-queue). The exact date is in
+// consumer of this re-export — alerts). The exact date is in
 // the hover tooltip (ISO string passed as title). Delegates to the shared
 // helper (`@/lib/time`) so this and every other relative-time surface in the
 // app read the same wording scheme (tz audit, 2026-08: this used to be one

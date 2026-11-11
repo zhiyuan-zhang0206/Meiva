@@ -257,7 +257,6 @@ export function liveFixture(overrides: Partial<AgentInspectLive> = {}): AgentIns
     ],
     config_overlay: { llm_model: "claude-opus-4-8", auto_compact_fraction: 0.7 },
     heartbeat: { interval_s: 300, next_at: null, paused_until: null, heartbeat_pending: false, last_pause: null },
-    notice: null,
     spawned_at: "2026-06-14T12:00:00Z",
     ...overrides,
   };
@@ -280,10 +279,7 @@ export function rosterFixture(overrides: Partial<WireAgentCard> = {}): AgentRost
       llm_model: "claude-opus-4-8", reasoning_effort: "high",
       liveness_state: "online",
       observation: { runtime_owner: "unknown" },
-      awaiting_response_count: 0,
       has_pending_question: false,
-      highest_notice_priority: null,
-      unread_notice_count: 0,
       has_unread_user_messages: false,
       heartbeat_paused_until: null,
       ...overrides,

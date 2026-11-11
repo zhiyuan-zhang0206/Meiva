@@ -9,10 +9,6 @@ import { AutoExpandTextarea } from "@/components/ui/auto-expand-textarea";
 import { SendButton } from "@/components/ui/send-button";
 import { newOperationKey } from "@/lib/transport/operation-key";
 import { errMsg } from "@/lib/contracts/errors";
-import { PRIORITY_BG } from "@/lib/notifications/notices";
-import { formatRelative } from "@/lib/format/time";
-import { useWallDate } from "@/lib/format/now/use-wall-date";
-import { useTimeFormat } from "@/lib/format/use-time-format";
 import type { NoticeAnswer, OpenNotice, ResolveNoticeIn } from "@/lib/contracts/types";
 import { cn } from "@/lib/format/utils";
 import { FLEX, FLEX_1 } from "@/lib/layout/layout";
@@ -24,23 +20,17 @@ export function OpenNoticeDetail({
   agentId,
   notice,
   onResolved,
-  onCycle,
   autoFocus = false,
-  showTimestamp = false,
   className,
 }: {
   agentId: number;
   notice: OpenNotice;
   onResolved?: () => void;
-  onCycle?: (direction: -1 | 1) => void;
   autoFocus?: boolean;
-  showTimestamp?: boolean;
   className?: string;
 }) {
   const client = useApi();
   const t = useTranslations("noticeDetail");
-  const now = useWallDate();
-  const { formatAbsolute } = useTimeFormat();
   const [reply, setReply] = useState("");
   const [structuredAnswer, setStructuredAnswer] = useState<NoticeAnswer | null>(null);
   const [unavailable, setUnavailable] = useState(false);
@@ -108,37 +98,6 @@ export function OpenNoticeDetail({
   return (
     <div className={cn("space-y-3 text-[13px]", className)}>
       <div className="space-y-1.5">
-        <div className={cn("flex-wrap items-center gap-1.5", FLEX)}>
-          <span
-            className={cn(
-              "shrink-0 rounded px-1 text-xs font-semibold text-white",
-              PRIORITY_BG[notice.priority],
-            )}
-          >
-            {notice.priority}
-          </span>
-          {notice.blocking && (
-            <span className="shrink-0 rounded bg-destructive/10 px-1 text-xs font-medium tracking-wide text-destructive uppercase">
-              {t("blocking")}
-            </span>
-          )}
-          {showTimestamp ? (
-            <>
-              <span aria-hidden className="text-[10px] text-muted-foreground">·</span>
-              <span className="text-[10px] text-muted-foreground">
-                {formatRelative(notice.created_at, now, { capitalize: true })}, {formatAbsolute(notice.created_at)}
-              </span>
-            </>
-          ) : null}
-          {notice.expire_at ? (
-            <>
-              <span aria-hidden className="text-[10px] text-muted-foreground">·</span>
-              <span className="text-[10px] text-muted-foreground">
-                {t("expires", { time: formatRelative(notice.expire_at, now) })}
-              </span>
-            </>
-          ) : null}
-        </div>
         <h4 className="text-[13px] font-semibold leading-snug break-words"><ChatMarkdown content={notice.title} inline /></h4>
         {notice.content && (
           <div className="text-[13px] break-words text-foreground/85">
@@ -172,12 +131,6 @@ export function OpenNoticeDetail({
               value={reply}
               onChange={(e) => setReply(e.target.value)}
               onSend={answer}
-              onKeyDown={(e) => {
-                if (onCycle && !reply.trim() && (e.key === "ArrowUp" || e.key === "ArrowDown")) {
-                  e.preventDefault();
-                  onCycle(e.key === "ArrowUp" ? -1 : 1);
-                }
-              }}
               placeholder={t("answerPlaceholder")}
               disabled={pending}
               aria-label={t("replyTo", { title: notice.title })}

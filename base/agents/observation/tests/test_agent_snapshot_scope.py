@@ -139,15 +139,13 @@ def test_notice_body_cannot_expand_roster_card(
     seed(db_conn, [(1, "user", "idling")])
     with db_conn.cursor() as cur:
         cur.execute(
-            "INSERT INTO agent_notices (agent_id,local_id,title,content,priority,blocking,require_response,expire_at) VALUES (1,1,'question',%s,'P0',true,true,now()+interval '1 day')",
+            "INSERT INTO agent_notices (agent_id,local_id,title,content,priority,require_response,question) VALUES (1,1,'question',%s,'P2',true,'{\"type\":\"text\"}')",
             ("x" * 1_000_000,),
         )
     card = select_roster(
         db_conn, catalog=model_catalog, default_model=settings.lm.llm_model
     ).agents[0]
-    assert card.awaiting_response_count == 1
-    assert card.has_pending_question is False
-    assert card.highest_notice_priority == "P0"
+    assert card.has_pending_question is True
     assert "notices_awaiting_response" not in AgentCard.model_fields
     assert len(card.model_dump_json()) < 1500
 
@@ -172,8 +170,8 @@ def test_roster_distinguishes_pending_questions_from_resolved_questions_and_regu
             db_conn, catalog=model_catalog, default_model=settings.lm.llm_model
         ).agents
     }
-    assert (cards[1].awaiting_response_count, cards[1].has_pending_question) == (2, True)
-    assert (cards[2].awaiting_response_count, cards[2].has_pending_question) == (1, False)
+    assert cards[1].has_pending_question is True
+    assert cards[2].has_pending_question is False
 
 
 @pytest.mark.parametrize("limit", [0, 201])

@@ -12,7 +12,7 @@ import { useWallDate } from "@/lib/format/now/use-wall-date";
 import { formatRelative, formatUptime } from "@/lib/format/time";
 import { cn } from "@/lib/format/utils";
 import { FLEX, FLEX_1, MIN_W_0 } from "@/lib/layout/layout";
-import { PRIORITY_BG } from "@/lib/notifications/notices";
+import { PRIORITY_BG } from "@/lib/notifications/task-priority";
 import type { TaskWindow } from "@/lib/notifications/use-tasks";
 
 import { taskFill } from "./presentation/task-palette";

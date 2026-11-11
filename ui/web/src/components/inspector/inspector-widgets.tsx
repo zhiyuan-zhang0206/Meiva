@@ -16,7 +16,7 @@ import { useTranslations } from "next-intl";
 
 import { Section } from "@/components/inspector/inspector-section";
 import { fleetTaskHref } from "@/lib/inspector/inspector-widgets";
-import { PRIORITY_BG } from "@/lib/notifications/notices";
+import { PRIORITY_BG } from "@/lib/notifications/task-priority";
 import type { InspectWidget } from "@/lib/contracts/types";
 import { cn } from "@/lib/format/utils";
 import { FLEX, FLEX_1, MIN_W_0 } from "@/lib/layout/layout";

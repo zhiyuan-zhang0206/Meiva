@@ -22,8 +22,6 @@ import { SidebarHeader } from "./header";
 import { SearchOverlay } from "./search-overlay";
 import { SidebarIconButton } from "./icon-button";
 import { SidebarSettingsPopover } from "./settings-popover";
-import { fleetHref } from "./links";
-import Link from "next/link";
 import { SpawnPopover } from "./spawn-popover";
 import type { DesktopProps, MobileProps, Props } from "./types";
 import { FLEX, FLEX_COL, ICON_SIZE_CLASS } from "@/lib/layout/layout";
@@ -161,26 +159,6 @@ export function AgentSidebar(props: Props) {
 function DesktopSidebar(props: DesktopProps) {
   const t = useTranslations("sidebar");
   const { collapsed, onSearchOpen, onToggleCollapsed, viewMode, onToggleViewMode, showTerminated, onToggleTerminated } = props;
-  // meiva:note
-  // The waiting count is a live signal, not a setting: it moved from the removed
-  // toolbar row to the header, next to the controls, and stays opt-in behind
-  // notification.awaiting_reply (quiet defaults).
-  // meiva:link ui/web/src/docs/frontend-components/frontend-components.md
-  const { settings } = useUserSettings();
-  const waiting = props.agents.reduce((n, a) => n + a.awaiting_response_count, 0);
-  const awaitingBadge =
-    settings["notification.awaiting_reply"] === true && waiting > 0 ? (
-      <Link
-        href={fleetHref(props.activeId)}
-        className="shrink-0 items-center gap-1 px-1 text-[11px] text-muted-foreground hover:text-foreground"
-        title={String(waiting)}
-        style={{ display: "inline-flex" }}
-      >
-        <span className="size-1.5 rounded-full bg-destructive" />
-        <span>{waiting}</span>
-      </Link>
-    ) : null;
-
   if (collapsed) return null;
 
   return (
@@ -205,7 +183,6 @@ function DesktopSidebar(props: DesktopProps) {
             <SidebarIconButton label={t("searchAgents")} onClick={onSearchOpen}>
               <Search className={ICON_SIZE_CLASS} />
             </SidebarIconButton>
-            {awaitingBadge}
             <SidebarSettingsPopover
               viewMode={viewMode}
               onToggleViewMode={onToggleViewMode}

@@ -1,6 +1,0 @@
-[uses]
-"detail.tsx" = ["keys.ts", "rows.tsx"]
-"inbox-queue-history.test.tsx" = ["index.tsx"]
-"inbox-queue.test.tsx" = ["index.tsx"]
-"index.tsx" = ["detail.tsx", "keys.ts", "list.tsx"]
-"list.tsx" = ["keys.ts", "rows.tsx"]

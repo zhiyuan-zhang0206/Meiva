@@ -58,3 +58,6 @@ the timeline) was rejected for the model below.
 - If the first unseen delivery's item is not in the loaded window the page loads up to five older pages;
   beyond that it lands on the oldest unseen item it has.
 - A user with several windows shares one cursor: seeing an agent in one window clears its dot in all.
+
+Updated by [`2026-11-11-remove-inbox-and-counts.md`](2026-11-11-remove-inbox-and-counts.md): the Inbox page,
+the header aggregate and the roster counters named above are removed, not merely hidden.

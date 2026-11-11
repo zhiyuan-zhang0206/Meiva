@@ -58,4 +58,4 @@ on Enter without a reload.
 ## Relationship to Other Nodes
 
 - [Frontend Components](frontend-components.md) — the catalog this node hangs from; the Composer bullet describes its states, drafts and submissions.
-- [Fleet View](fleet-view.md) — the Inbox and composer question queue share `OpenNoticeDetail`, whose question form is one of these fields.
+- [Fleet View](fleet-view.md) — the composer question queue renders `OpenNoticeDetail`, whose question form is one of these fields.

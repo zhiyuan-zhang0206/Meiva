@@ -31,7 +31,7 @@ from gateway.http.config import (
 from gateway.inspect import _metrics, _plugin_metrics, _plugin_widgets, neighbors
 from gateway.inspect._cache import InspectCacheFullError, InspectQueryCache
 from gateway.inspect._heartbeat import HeartbeatCadence, HeartbeatState
-from gateway.inspect._live import db_rows_blocking, notice_blocking, project_heartbeat
+from gateway.inspect._live import db_rows_blocking, project_heartbeat
 from gateway.inspect._plugin_faces import SHIPPED_PLUGINS_DIR, enabled_plugin_names
 from gateway.inspect.schemas import (
     AgentInspectLive,
@@ -206,8 +206,7 @@ async def get_agent_inspect_live(agent_id: int, request: Request) -> AgentInspec
     pool = gateway_state(request).db_pool
     heartbeat = gateway_config(request).heartbeat
     db = await asyncio.to_thread(db_rows_blocking, pool, agent_id)
-    notice, shells, last_pause = await asyncio.gather(
-        asyncio.to_thread(notice_blocking, pool, agent_id),
+    shells, last_pause = await asyncio.gather(
         _probe_agent_shells(
             gateway_state(request).db, agent_id, db.machine, pool, rpc=gateway_rpc(request)
         ),
@@ -224,7 +223,6 @@ async def get_agent_inspect_live(agent_id: int, request: Request) -> AgentInspec
         shells_available=shells[1],
         observation=db.observation,
         config_overlay=db.config_overlay,
-        notice=notice,
         heartbeat=project_heartbeat(
             HeartbeatState(
                 agent_id=agent_id,

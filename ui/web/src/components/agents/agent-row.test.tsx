@@ -92,8 +92,7 @@ function ag(agent_id: number, overrides: Partial<AgentRowType> = {}): AgentRowTy
     supports_vision: true,
     llm_model: null, reasoning_effort: null,
     liveness_state: "online",
-    awaiting_response_count: 0, has_pending_question: false, highest_notice_priority: null,
-    unread_notice_count: 0,
+    has_pending_question: false,
     has_unread_user_messages: false,
     heartbeat_paused_until: null,
     ...overrides,
@@ -395,13 +394,13 @@ describe("AgentRow attention indicator", () => {
     expect(container.querySelectorAll('[role="img"]')).toHaveLength(1);
   });
 
-  it("has no third state: an open reply request alone shows nothing", () => {
-    const { container } = show({ awaiting_response_count: 3, unread_notice_count: 2 });
+  it("has no third state: an agent with no question and no unread delivery shows nothing", () => {
+    const { container } = show({});
     expect(container.querySelectorAll('[role="img"]')).toHaveLength(0);
   });
 
   it("shows only the question mark when a question is pending, even with unread deliveries", () => {
-    const { container } = show({ has_pending_question: true, awaiting_response_count: 2, has_unread_user_messages: true });
+    const { container } = show({ has_pending_question: true, has_unread_user_messages: true });
     const mark = screen.getByRole("img", { name: "Question awaiting an answer" });
     expect(mark.querySelector("svg")?.getAttribute("class")).toContain("text-meiva-sunset-orange");
     expect(mark.querySelector("span.rounded-full")).toBeNull();
@@ -435,7 +434,7 @@ describe("AgentRow hover card attention marks", () => {
   }
 
   it("marks a pending question with the sidebar's orange question mark, with no count", async () => {
-    const card = await openCard({ has_pending_question: true, awaiting_response_count: 1, highest_notice_priority: "P1" });
+    const card = await openCard({ has_pending_question: true });
     expect(card.textContent).toContain("Question awaiting an answer");
     expect(card.textContent).not.toMatch(/awaiting reply|\d unread/);
     expect(card.querySelector("svg")?.getAttribute("class")).toContain("text-meiva-sunset-orange");
@@ -448,8 +447,8 @@ describe("AgentRow hover card attention marks", () => {
     expect(card.querySelector("p span.rounded-full.bg-meiva-sunset-orange")).not.toBeNull();
   });
 
-  it("shows no attention line for a bare reply request, or for the conversation being read", async () => {
-    const bare = await openCard({ awaiting_response_count: 2 });
+  it("shows no attention line for a quiet agent, or for the conversation being read", async () => {
+    const bare = await openCard({});
     expect(bare.textContent).not.toContain("awaiting");
     expect(bare.querySelector("p span.bg-meiva-sunset-orange")).toBeNull();
     cleanup();
@@ -495,8 +494,6 @@ describe("AgentRow single-line truncation and hover peek card", () => {
               spawner: "agent:42",
               spawned_at: "2026-05-07T00:00:00Z",
               last_active_at: "2026-05-07T02:55:00Z",
-              awaiting_response_count: 2,
-              highest_notice_priority: "P1",
               heartbeat_paused_until: "2026-05-07T05:30:00Z",
             })}
             depth={0}

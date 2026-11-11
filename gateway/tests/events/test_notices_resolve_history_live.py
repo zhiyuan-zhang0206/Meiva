@@ -133,31 +133,10 @@ def test_feed_defaults_come_from_display_config(
     a = seed_agent(db_conn)
     insert_notice(db_conn, a, "open older", require_response=True)
     insert_notice(db_conn, a, "open newer", require_response=True)
-    insert_notice(
-        db_conn,
-        a,
-        "resolved r0",
-        require_response=True,
-        resolved_at="2026-06-14T01:00:00Z",
-        resolution="answered",
-        reply="x",
-    )
-    insert_notice(
-        db_conn,
-        a,
-        "resolved r1",
-        require_response=True,
-        resolved_at="2026-06-14T02:00:00Z",
-        resolution="answered",
-        reply="x",
-    )
 
-    with gateway_test_client(
-        fields={"notices_open_default_limit": 1, "notices_resolved_default_page": 1}
-    ) as client:
+    with gateway_test_client(fields={"notices_open_default_limit": 1}) as client:
         feed = client.get("/api/notices").json()
     assert [r["title"] for r in feed["awaiting"]] == ["open older"]
-    assert [r["title"] for r in feed["resolved_page"]] == ["resolved r1"]
 
 
 def test_check_constraints_reject_illegal_states(db_conn: psycopg.Connection) -> None:
@@ -205,47 +184,6 @@ def test_check_constraints_reject_illegal_states(db_conn: psycopg.Connection) ->
     db_conn.commit()
 
 
-def test_live_returns_new_open_notices_oldest_first(
-    db_conn: psycopg.Connection,
-) -> None:
-    a1 = seed_agent(db_conn)
-    a2 = seed_agent(db_conn)
-    insert_notice(db_conn, a1, "FYI one", require_response=False)
-    n2 = insert_notice(db_conn, a2, "Decision", require_response=True)
-    insert_notice(db_conn, a1, "FYI two", require_response=False)
-
-    with gateway_test_client() as client:
-        r = client.get("/api/notices/live", params={"after": 0})
-        assert r.status_code == 200
-        items = r.json()
-        assert [it["id"] for it in items] == [n2]
-        assert items[0]["title"] == "Decision"
-        assert items[0]["require_response"] is True
-        assert items[0]["agent_id"] == a2
-
-        r2 = client.get("/api/notices/live", params={"after": n2})
-        assert r2.status_code == 200
-        assert [it["id"] for it in r2.json()] == []
-
-
-def test_live_excludes_resolved(db_conn: psycopg.Connection) -> None:
-    a1 = seed_agent(db_conn)
-    n1 = insert_notice(db_conn, a1, "Open question", require_response=True)
-    insert_notice(
-        db_conn,
-        a1,
-        "Stay",
-        require_response=False,
-        resolved_at="2026-08-06T00:00:00+00:00",
-        resolution="read",
-    )
-
-    with gateway_test_client() as client:
-        r = client.get("/api/notices/live", params={"after": 0})
-        assert r.status_code == 200
-        assert [it["id"] for it in r.json()] == [n1]
-
-
 def test_old_include_awaiting_flag_cannot_restore_fyi(
     db_conn: psycopg.Connection,
 ) -> None:
@@ -268,16 +206,6 @@ def test_old_include_awaiting_flag_cannot_restore_fyi(
         )
         both2 = client.get("/api/notices/open", params={"include_awaiting": True}).json()
         assert all(it["title"] != "Gone" for it in both2)
-
-
-def test_live_empty_after_cursor(db_conn: psycopg.Connection) -> None:
-    a1 = seed_agent(db_conn)
-    n1 = insert_notice(db_conn, a1, "Only", require_response=False)
-
-    with gateway_test_client() as client:
-        r = client.get("/api/notices/live", params={"after": n1})
-        assert r.status_code == 200
-        assert r.json() == []
 
 
 # meiva:note

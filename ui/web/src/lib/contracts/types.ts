@@ -125,7 +125,7 @@ export function projectAgentStatusValue(status: WireAgentStatus): PublicAgentSta
 // Project one gateway card or selected detail before it enters frontend state.
 export function projectAgentStatus(row: WireAgentCard | WireAgentRow): AgentRow {
   const status: PublicAgentStatus = projectAgentStatusValue(row.status);
-  if ("awaiting_response_count" in row) {
+  if (!("notices_awaiting_response" in row)) {
     return status === row.status ? row : { ...row, status };
   }
   // Keep future wire fields by default; selected-detail bodies and lineage/probe
@@ -145,18 +145,17 @@ export function projectAgentStatus(row: WireAgentCard | WireAgentRow): AgentRow 
     // meiva:link ui/web/src/docs/frontend-components/agent-sidebar.md
     llm_model: null,
     reasoning_effort: null,
-    awaiting_response_count: notices_awaiting_response.length,
     has_pending_question: notices_awaiting_response.some((notice) => notice.question != null),
-    highest_notice_priority: notices_awaiting_response.map((n) => n.priority).sort()[0] ?? null,
   };
 }
-// OpenNotice rides the agent snapshot (notices_awaiting_response — the open
-// require_response worklist). NoticeItem is the standalone feed element (the FYI
-// queue + the resolved history). ResolveNoticeIn is the resolve request body.
+// meiva:note
+// OpenNotice rides the agent snapshot (notices_awaiting_response — the agent's
+// unresolved questions). NoticeItem is the standalone feed element.
+// ResolveNoticeIn is the resolve request body.
 export type OpenNotice = Schemas["OpenNotice"];
 export type NoticeItem = Schemas["NoticeItem"];
-// The unified inbox feed (Task #1024, R4 layer 2, Q1=A): open (FYI) +
-// awaiting (require_response) + one keyset page of the resolved history.
+// meiva:note
+// The unresolved-questions feed (GET /api/notices).
 export type NoticesFeed = Schemas["NoticesFeed"];
 export type ResolveNoticeIn = Schemas["ResolveNoticeIn"];
 export type NoticeQuestion = NonNullable<OpenNotice["question"]>;

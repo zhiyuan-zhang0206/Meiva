@@ -8,7 +8,6 @@
 import {
   Activity,
   AlertTriangle,
-  Bell,
   Calendar,
   CalendarClock,
   CircleDot,
@@ -101,13 +100,6 @@ export default function DisplaySettingsPage({ mode = "all" }: { mode?: "general"
     <div className="space-y-6">
       {general && (
       <SettingsSection id="display-notifications" title={t("notifications")}>
-        <ToggleRow
-          icon={Bell}
-          label={t("awaitingReply")}
-          description={t("awaitingReplyDescription")}
-          value={settings["notification.awaiting_reply"] === true}
-          onChange={(v) => setSetting("notification.awaiting_reply", v)}
-        />
         <NotificationCategoryRows />
       </SettingsSection>
       )}

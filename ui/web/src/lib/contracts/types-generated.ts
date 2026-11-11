@@ -975,22 +975,6 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/notices/live": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get: operations["get_notices_live_api_notices_live_get"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
     "/api/notices": {
         parameters: {
             query?: never;
@@ -2295,11 +2279,8 @@ export interface components {
             liveness_state: components["schemas"]["LivenessState"];
             availability?: components["schemas"]["AgentAvailability"] | null;
             observation: components["schemas"]["AgentObservation"];
-            awaiting_response_count: number;
             has_pending_question: boolean;
-            highest_notice_priority: components["schemas"]["Priority"] | null;
             has_unread_user_messages: boolean;
-            unread_notice_count: number;
             heartbeat_paused_until: string | null;
             harness_exit_code?: number | null;
             harness_exit_at?: string | null;
@@ -2349,7 +2330,6 @@ export interface components {
             config_overlay: {
                 [key: string]: unknown;
             };
-            notice?: components["schemas"]["OpenNotice"] | null;
             heartbeat: components["schemas"]["HeartbeatInfo"];
         };
         AgentInspectStatistics: {
@@ -2439,7 +2419,6 @@ export interface components {
             observation?: components["schemas"]["AgentObservation"] | null;
             notices_awaiting_response: components["schemas"]["OpenNotice"][];
             has_unread_user_messages: boolean;
-            unread_notice_count: number;
             heartbeat_paused_until: string | null;
             harness_exit_code?: number | null;
             harness_exit_at?: string | null;
@@ -3288,15 +3267,8 @@ export interface components {
             label: string;
             description?: string | null;
         };
-        NoticesCursor: {
-            before_at: string;
-            before_id: number;
-        };
         NoticesFeed: {
-            open: components["schemas"]["NoticeItem"][];
             awaiting: components["schemas"]["NoticeItem"][];
-            resolved_page: components["schemas"]["NoticeItem"][];
-            next_cursor: components["schemas"]["NoticesCursor"] | null;
         };
         NotificationAuditResponse: {
             window: components["schemas"]["AuditWindow"];
@@ -6079,43 +6051,10 @@ export interface operations {
             };
         };
     };
-    get_notices_live_api_notices_live_get: {
-        parameters: {
-            query?: {
-                after?: number;
-                limit?: number | null;
-            };
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["NoticeItem"][];
-                };
-            };
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
     get_notices_feed_api_notices_get: {
         parameters: {
             query?: {
                 limit?: number | null;
-                resolved_limit?: number | null;
-                before_at?: string | null;
-                before_id?: number | null;
             };
             header?: never;
             path?: never;

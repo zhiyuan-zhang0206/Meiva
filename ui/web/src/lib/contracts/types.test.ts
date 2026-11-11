@@ -17,7 +17,7 @@ const detail: Required<WireAgentRow> = {
   label: "detail row", machine: "test-host", supports_vision: true,
   liveness_state: "unknown", last_probe_at: "2026-09-01T00:00:00Z",
   availability, observation: null, notices_awaiting_response: [],
-  unread_notice_count: 2, heartbeat_paused_until: null,
+    heartbeat_paused_until: null,
   has_unread_user_messages: false,
   harness_exit_code: null, harness_exit_at: null,
 };
@@ -27,8 +27,8 @@ const wireCard: Required<WireAgentCard> = {
   last_active_at: "2026-09-01T00:00:00Z", last_inbound_at: "2026-09-01T00:00:00Z",
   label: "card", machine: "test-host", supports_vision: true, liveness_state: "unknown",
   llm_model: "claude-opus-4-8", reasoning_effort: "high",
-  availability, observation: { runtime_owner: "unknown" }, awaiting_response_count: 3, has_pending_question: false,
-  highest_notice_priority: "P2", unread_notice_count: 2, has_unread_user_messages: false, heartbeat_paused_until: null,
+  availability, observation: { runtime_owner: "unknown" }, has_pending_question: false,
+    has_unread_user_messages: false, heartbeat_paused_until: null,
   harness_exit_code: null, harness_exit_at: null,
 };
 function card(overrides: Partial<WireAgentCard>): Required<WireAgentCard> {
@@ -39,7 +39,7 @@ it("keeps every card field and input identity when status is unchanged", () => {
   const input = card({ status: "idling" });
   expect(projectAgentStatus(input)).toBe(input);
 });
-it("keeps optional detail extensions while dropping detail-only fields and aggregating notices", () => {
+it("keeps optional detail extensions while dropping detail-only fields and deriving the question flag", () => {
   const notices: WireAgentRow["notices_awaiting_response"] = (["P3", "P1", "P2"] as const).map(
     (priority, index) => ({
       id: index, title: `notice ${index}`, content: "selected-detail-only body", priority,
@@ -54,7 +54,7 @@ it("keeps optional detail extensions while dropping detail-only fields and aggre
   const projected = projectAgentStatus(input);
   const { notices_awaiting_response: _notices, fork_source_checkpoint_id: _fork, last_probe_at: _probe, ...shared } = input;
   expect(projected).toEqual({
-    ...shared, awaiting_response_count: 3, has_pending_question: true, highest_notice_priority: "P1",
+    ...shared, has_pending_question: true,
     llm_model: null, reasoning_effort: null,
   });
   for (const excluded of ["notices_awaiting_response", "fork_source_checkpoint_id", "last_probe_at"]) {
@@ -63,10 +63,8 @@ it("keeps optional detail extensions while dropping detail-only fields and aggre
   expect(input).toEqual(before);
   expect(projected.availability?.reason).toBe("launch_unreachable");
 });
-it("a detail retains native status and the empty-notice aggregate", () => {
+it("a detail retains native status and an empty question flag", () => {
   const projected = projectAgentStatus({ ...detail, status: "running" });
   expect(projected.status).toBe("running");
-  expect(projected.awaiting_response_count).toBe(0);
   expect(projected.has_pending_question).toBe(false);
-  expect(projected.highest_notice_priority).toBeNull();
 });

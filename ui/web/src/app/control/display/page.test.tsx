@@ -55,8 +55,7 @@ async function replySuggestionsToggle(): Promise<HTMLButtonElement> {
 describe("DisplaySettingsPage", () => {
   it("puts everyday preferences in General and leaves clock details in Advanced", async () => {
     renderPage("general");
-    expect(await screen.findByRole("switch", { name: "Awaiting-reply notification" })).toBeTruthy();
-    expect(screen.getByLabelText("English")).toBeTruthy();
+    expect(await screen.findByLabelText("English")).toBeTruthy();
     expect(screen.queryByText("Clock format")).toBeNull();
     expect(screen.queryByText("Show weekday in timestamps")).toBeNull();
     expect(screen.queryByText("Single realtime connection")).toBeNull();
@@ -67,7 +66,6 @@ describe("DisplaySettingsPage", () => {
     renderPage("advanced");
     fireEvent.click(await screen.findByLabelText("12-hour"));
     await waitFor(() => expect(transport.putSetting).toHaveBeenCalledWith("display.clock_format", "12h"));
-    expect(screen.queryByText("Awaiting-reply notification")).toBeNull();
     expect(screen.queryByLabelText("English")).toBeNull();
   });
 
@@ -148,7 +146,6 @@ describe("DisplaySettingsPage", () => {
     expect(screen.getByText("Clock format")).toBeTruthy();
     expect(screen.queryByText("Time display mode")).toBeNull();
     expect(screen.getByText("Date format")).toBeTruthy();
-    expect(screen.getByText("Awaiting-reply notification")).toBeTruthy();
     expect(screen.getByText("Confirm before terminate")).toBeTruthy();
     expect(screen.getByText("Confirm before restart")).toBeTruthy();
     expect(screen.getByText("Confirm before force kill")).toBeTruthy();

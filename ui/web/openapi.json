@@ -3113,69 +3113,6 @@
         }
       }
     },
-    "/api/notices/live": {
-      "get": {
-        "summary": "Get Notices Live",
-        "operationId": "get_notices_live_api_notices_live_get",
-        "parameters": [
-          {
-            "name": "after",
-            "in": "query",
-            "required": false,
-            "schema": {
-              "type": "integer",
-              "minimum": 0,
-              "default": 0,
-              "title": "After"
-            }
-          },
-          {
-            "name": "limit",
-            "in": "query",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "integer",
-                  "maximum": 500,
-                  "minimum": 1
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Limit"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "array",
-                  "items": {
-                    "$ref": "#/components/schemas/NoticeItem"
-                  },
-                  "title": "Response Get Notices Live Api Notices Live Get"
-                }
-              }
-            }
-          },
-          "422": {
-            "description": "Validation Error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
     "/api/notices": {
       "get": {
         "summary": "Get Notices Feed",
@@ -3197,57 +3134,6 @@
                 }
               ],
               "title": "Limit"
-            }
-          },
-          {
-            "name": "resolved_limit",
-            "in": "query",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "integer",
-                  "maximum": 100,
-                  "minimum": 1
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Resolved Limit"
-            }
-          },
-          {
-            "name": "before_at",
-            "in": "query",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string",
-                  "format": "date-time"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Before At"
-            }
-          },
-          {
-            "name": "before_id",
-            "in": "query",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "integer"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Before Id"
             }
           }
         ],
@@ -8324,32 +8210,14 @@
           "observation": {
             "$ref": "#/components/schemas/AgentObservation"
           },
-          "awaiting_response_count": {
-            "type": "integer",
-            "title": "Awaiting Response Count"
-          },
           "has_pending_question": {
             "type": "boolean",
             "title": "Has Pending Question"
-          },
-          "highest_notice_priority": {
-            "anyOf": [
-              {
-                "$ref": "#/components/schemas/Priority"
-              },
-              {
-                "type": "null"
-              }
-            ]
           },
           "has_unread_user_messages": {
             "type": "boolean",
             "title": "Has Unread User Messages",
             "default": false
-          },
-          "unread_notice_count": {
-            "type": "integer",
-            "title": "Unread Notice Count"
           },
           "heartbeat_paused_until": {
             "anyOf": [
@@ -8404,10 +8272,7 @@
           "reasoning_effort",
           "liveness_state",
           "observation",
-          "awaiting_response_count",
           "has_pending_question",
-          "highest_notice_priority",
-          "unread_notice_count",
           "heartbeat_paused_until"
         ],
         "title": "AgentCard",
@@ -8671,16 +8536,6 @@
             "additionalProperties": true,
             "type": "object",
             "title": "Config Overlay"
-          },
-          "notice": {
-            "anyOf": [
-              {
-                "$ref": "#/components/schemas/OpenNotice"
-              },
-              {
-                "type": "null"
-              }
-            ]
           },
           "heartbeat": {
             "$ref": "#/components/schemas/HeartbeatInfo"
@@ -9256,10 +9111,6 @@
             "type": "boolean",
             "title": "Has Unread User Messages"
           },
-          "unread_notice_count": {
-            "type": "integer",
-            "title": "Unread Notice Count"
-          },
           "heartbeat_paused_until": {
             "anyOf": [
               {
@@ -9314,7 +9165,6 @@
           "last_probe_at",
           "notices_awaiting_response",
           "has_unread_user_messages",
-          "unread_notice_count",
           "heartbeat_paused_until"
         ],
         "title": "AgentRow",
@@ -14518,66 +14368,19 @@
         ],
         "title": "NoticeOption"
       },
-      "NoticesCursor": {
-        "properties": {
-          "before_at": {
-            "type": "string",
-            "format": "date-time",
-            "title": "Before At"
-          },
-          "before_id": {
-            "type": "integer",
-            "title": "Before Id"
-          }
-        },
-        "type": "object",
-        "required": [
-          "before_at",
-          "before_id"
-        ],
-        "title": "NoticesCursor",
-        "description": "Keyset cursor for the resolved-history page of GET /api/notices —\na (resolved_at, id) pair. Supplied together or not at all;\n`before_at` is the last row's resolution time, `before_id` its id."
-      },
       "NoticesFeed": {
         "properties": {
-          "open": {
-            "items": {
-              "$ref": "#/components/schemas/NoticeItem"
-            },
-            "type": "array",
-            "title": "Open"
-          },
           "awaiting": {
             "items": {
               "$ref": "#/components/schemas/NoticeItem"
             },
             "type": "array",
             "title": "Awaiting"
-          },
-          "resolved_page": {
-            "items": {
-              "$ref": "#/components/schemas/NoticeItem"
-            },
-            "type": "array",
-            "title": "Resolved Page"
-          },
-          "next_cursor": {
-            "anyOf": [
-              {
-                "$ref": "#/components/schemas/NoticesCursor"
-              },
-              {
-                "type": "null"
-              }
-            ]
           }
         },
         "type": "object",
         "required": [
-          "open",
-          "awaiting",
-          "resolved_page",
-          "next_cursor"
+          "awaiting"
         ],
         "title": "NoticesFeed"
       },

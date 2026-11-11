@@ -241,10 +241,7 @@ ROUTE_CONTRACTS: dict[tuple[str, str], RouteContract] = {
         Idempotency.AT_LEAST_ONCE_WITH_KEY,
         note="advances the agent's monotonic seen cursor; the cursor and its receipt commit together",
     ),
-    ("GET", "/api/notices"): RouteContract(
-        note="unified inbox feed — open + awaiting + resolved page (R4 layer 2)"
-    ),
-    ("GET", "/api/notices/live"): RouteContract(),
+    ("GET", "/api/notices"): RouteContract(note="unresolved questions across the fleet"),
     ("GET", "/api/notices/open"): RouteContract(),
     ("POST", "/api/keyed/v1/agents/{agent_id}/notices/{notice_id}/resolve"): RouteContract(
         Idempotency.AT_LEAST_ONCE_WITH_KEY,

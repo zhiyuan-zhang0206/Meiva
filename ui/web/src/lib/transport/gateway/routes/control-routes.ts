@@ -1,17 +1,9 @@
 import type { AlertClassRow, AlertsWindow } from "../../../contracts/types";
 import { withQuery } from "./route-query";
 
-export function noticesPath(params?: {
-  limit?: number;
-  resolvedLimit?: number;
-  beforeAt?: string;
-  beforeId?: number;
-}): string {
+export function noticesPath(params?: { limit?: number }): string {
   const sp = new URLSearchParams();
   if (params?.limit != null) sp.set("limit", String(params.limit));
-  if (params?.resolvedLimit != null) sp.set("resolved_limit", String(params.resolvedLimit));
-  if (params?.beforeAt != null) sp.set("before_at", params.beforeAt);
-  if (params?.beforeId != null) sp.set("before_id", String(params.beforeId));
   return withQuery("/api/notices", sp);
 }
 

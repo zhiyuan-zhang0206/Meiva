@@ -37,19 +37,16 @@ class OwnerMessage:
 
 
 # meiva:note
-# A terminated owner is skipped unless `queue_when_terminated`. A shell
-# message tells the agent that a job died, so delivering it
-# to a later life would open that life on work that no longer exists; notice
-# expiry passes the flag because its message reports the owner's own notice.
-# Even then nothing wakes a dead owner, and no notification path resurrects one:
-# every `system:` trigger is refused by `ops.lifecycle.resurrect_gates`.
+# A terminated owner is skipped. A shell message tells the agent that a job
+# died, so delivering it to a later life would open that life on work that no
+# longer exists. No notification path resurrects a dead owner: every `system:`
+# trigger is refused by `ops.lifecycle.resurrect_gates`.
 def notify_owner(
     conn: psycopg.Connection,
     agent_id: int,
     content: str,
     *,
     source: str = "system",
-    queue_when_terminated: bool = False,
 ) -> OwnerMessage | None:
     with conn.cursor() as cur:
         cur.execute("SELECT status FROM agents_meta WHERE id = %s", (agent_id,))
@@ -57,7 +54,7 @@ def notify_owner(
         if row is None:
             return None
         live = row[0] in _NOTIFIABLE_STATUSES
-        if not live and not queue_when_terminated:
+        if not live:
             return None
         # meiva:note
         # A system-sourced chat produces no lineage event, so only the wake is

@@ -32,7 +32,7 @@ ships carry.
 
 | module | records | test files that write it | why it is a double |
 |---|---:|---|---|
-| `ui/web/src/components/agent-sidebar/sidebar-test-mock.tsx` | 140 | `agent-sidebar.test.tsx` (34), `sidebar-status-cards.test.tsx` (48), `sidebar-tree-and-search.test.tsx` (56) | the rail's scenario object: the props the page hands it, and the settings, stats and plugin declarations it reads |
+| `ui/web/src/components/agent-sidebar/sidebar-test-mock.tsx` | 140 | `agent-sidebar.test.tsx` (34), `sidebar-status-cards.test.tsx` (48), `sidebar-tree-and-search.test.tsx` (51) | the rail's scenario object: the props the page hands it, and the settings, stats and plugin declarations it reads |
 | `ui/web/src/app/page-test-mock.tsx` | 97 | `page.test.tsx` (61), `page-dispatch.test.tsx` (36) | the home page's `hooksState` and its provider wrapper |
 | `ui/web/src/components/inspector/inspector-test-mock.tsx` | 4 | `inspector-panel-chrome.test.tsx` (3), `inspector-panel-notices.test.tsx` (1) | the inspector's `inspectorMockState` |
 
@@ -48,7 +48,7 @@ A record is one write into the double, so each number is a per-file upper bound 
 moves it in either direction: task #6548's hover card reads the agent's model and reasoning effort off the
 roster, so the rail's scenario agent gained those two fields — `sidebar-test-mock.tsx` 138 → 140; #8080 retired `display.composer_context_meter`, which took the two
 assignments that set it, and merged two setup lines — `page-test-mock.tsx` 95 → 91; task #6540's two Status-card tests write the rail's scenario object, so
-`sidebar-status-cards.test.tsx` moved 46 → 48. Every change to this
+`sidebar-status-cards.test.tsx` moved 46 → 48; the Inbox removal dropped the three roster counters from the rail scenario agent and deleted the awaiting-reply tests — `sidebar-test-mock.tsx` 140 → 135. Every change to this
 table therefore says which sites moved and why; the test can report that a number moved, never why.
 
 The name is the whole review surface of this half, and that is why the suffix is `-test-mock` and not

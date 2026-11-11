@@ -11,7 +11,7 @@ import type { AgentRow, SystemEvent } from "../contracts/types";
 import { AGENTS_QUERY_KEY, foldAgents, AGENT_DIRECTORY_QUERY_KEY, AGENT_DETAIL_QUERY_KEY } from "./agents";
 import { foldFleetGraph } from "./graph";
 import { foldAgainstCache, applyEvent } from "./index";
-import { foldNotices, NOTICES_QUERY_KEY, NOTICES_RESOLVED_QUERY_KEY } from "./notices";
+import { foldNotices, NOTICES_QUERY_KEY } from "./notices";
 import { foldTasks, TASKS_QUERY_KEY } from "./tasks";
 import { FLEET_GRAPH_KEY_PREFIX } from "./graph";
 
@@ -27,8 +27,7 @@ const baseAgent: AgentRow = {
   machine: "test",
   supports_vision: true,
   llm_model: null, reasoning_effort: null,
-  awaiting_response_count: 0, has_pending_question: false, highest_notice_priority: null,
-  unread_notice_count: 0,
+    has_pending_question: false,
   has_unread_user_messages: false,
   heartbeat_paused_until: null,
   liveness_state: "online",
@@ -62,14 +61,14 @@ describe("foldAgents", () => {
 });
 
 describe("invalidation policies", () => {
-  it("notice_posted invalidates only the open queue", () => {
+  it("notice_posted invalidates only the questions query", () => {
     const o = foldNotices({ role: "notice_posted", notice_id: 1, priority: "P2", title: "t", task_id: null } as unknown as SystemEvent);
     expect(o.invalidations).toEqual([{ key: NOTICES_QUERY_KEY }]);
   });
 
-  it("notice_resolved invalidates the open queue AND the history", () => {
+  it("notice_resolved invalidates the questions query", () => {
     const o = foldNotices({ role: "notice_resolved", agent_id: 1, notice_id: 1 } as unknown as SystemEvent);
-    expect(o.invalidations.map((i) => i.key)).toEqual([NOTICES_QUERY_KEY, NOTICES_RESOLVED_QUERY_KEY, ["agent-inspect-live", 1]]);
+    expect(o.invalidations).toEqual([{ key: NOTICES_QUERY_KEY }]);
   });
 
   it("fleet-graph invalidates on spawn/update; tasks on create/update", () => {

@@ -38,7 +38,6 @@ def test_agent_row_wire_shape() -> None:
         liveness_state=LivenessState.ONLINE,
         last_probe_at=None,
         notices_awaiting_response=[],
-        unread_notice_count=0,
         has_unread_user_messages=False,
         heartbeat_paused_until=None,
     )
@@ -49,7 +48,6 @@ def test_agent_row_wire_shape() -> None:
     assert d["harness"] == "meiva"
     assert d["supports_vision"] is True
     assert d["notices_awaiting_response"] == []
-    assert d["unread_notice_count"] == 0
 
 
 def test_notice_item_wire_shape() -> None:

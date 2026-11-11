@@ -18,8 +18,6 @@
   "timelineMaxWidth": "Timeline max width",
   "timelineMaxWidthDesc": "Max width of the conversation column in pixels ({min}px–{max}px). The column fills its pane up to this ceiling and centers with side gutters when wider. Default {def}px.",
   "notifications": "Notifications",
-  "awaitingReply": "Awaiting-reply notification",
-  "awaitingReplyDesc": "Show the total number of notices awaiting a reply in the sidebar header",
   "confirmations": "Confirmations",
   "confirmTerminate": "Confirm before terminate",
   "confirmTerminateDesc": "Show a confirmation dialog when terminating an agent",
@@ -36,7 +34,6 @@
   "categories": {
     "coreNeedsInput": "Agent is waiting on your answer"
   },
-  "awaitingReplyDescription": "Show the total number of notices awaiting a reply in the sidebar header.",
   "theme": "Theme",
   "appearance": "Appearance",
   "appearanceDescription": "Follow the system color scheme or force light or dark mode.",

@@ -134,8 +134,6 @@ class _TransferOptions:
 @dataclass(frozen=True)
 class _NoticesListOptions:
     agent: int | None
-    priority: str | None
-    type: Literal["decision"] | None
     stale: bool
 
 
@@ -339,8 +337,6 @@ def _h_notices_list(args: argparse.Namespace) -> int:
     return cmd_notices_list(
         gateway_access_from_boot(runtime_of(args).config),
         agent_id=opts.agent,
-        priority=opts.priority,
-        type_filter=opts.type,
         stale=opts.stale,
     )
 
@@ -614,25 +610,23 @@ def add_agents_parser(sub: argparse._SubParsersAction[argparse.ArgumentParser]) 
 def _add_notices_parsers(sub: argparse._SubParsersAction[argparse.ArgumentParser]) -> None:
     notices_p = sub.add_parser(
         "notices",
-        help="inspect and resolve the agent notification queue (Task #949)",
+        help="list, answer and clear the questions agents ask (meiva.ui.ask)",
     )
     notices_sub = notices_p.add_subparsers(dest="notices_cmd", required=True)
 
     notices_list_p = notices_sub.add_parser(
         "list",
-        help="list open notices (both kinds); filter with --agent/--priority/--type",
+        help="list unresolved questions; filter with --agent",
     )
     notices_list_p.add_argument("--agent", type=int, default=None, help="agent id")
-    notices_list_p.add_argument("--priority", default=None, help="P0|P1|P2|P3")
-    notices_list_p.add_argument("--type", choices=("decision",), default=None)
     notices_list_p.add_argument(
-        "--stale", action="store_true", help="only notices of terminated agents"
+        "--stale", action="store_true", help="only questions of terminated agents"
     )
     notices_list_p.set_defaults(func=_h_notices_list)
 
     notices_resolve_p = notices_sub.add_parser(
         "resolve",
-        help="resolve one notice (answer|dismiss)",
+        help="resolve one question (answer|dismiss)",
     )
     notices_resolve_p.add_argument("notice_id", type=int)
     notices_resolve_p.add_argument("--agent", type=int, required=True)
@@ -642,14 +636,14 @@ def _add_notices_parsers(sub: argparse._SubParsersAction[argparse.ArgumentParser
 
     notices_clear_p = notices_sub.add_parser(
         "clear",
-        help="resolve every open notice of one agent (dismiss without answering)",
+        help="resolve every open question of one agent (dismiss without answering)",
     )
     notices_clear_p.add_argument("--agent", type=int, required=True)
     notices_clear_p.add_argument("--force", action="store_true")
     notices_clear_p.add_argument(
         "--stale",
         action="store_true",
-        help="clear open notices of terminated agents (not --agent)",
+        help="clear open questions of terminated agents (not --agent)",
     )
     notices_clear_p.set_defaults(func=_h_notices_clear)
 

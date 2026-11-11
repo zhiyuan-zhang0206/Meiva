@@ -1,12 +1,10 @@
-exports = ["notices.ts", "task-notify.ts", "use-alerts.tsx", "use-cluster-health.ts", "use-notices.ts", "use-tasks.ts"]
+exports = ["task-priority.ts", "use-alerts.tsx", "use-cluster-health.ts", "use-notices.ts", "use-tasks.ts"]
 
 [uses]
-"task-notify.test.ts" = ["task-notify.ts"]
 "use-alerts.test.tsx" = ["use-alerts.tsx"]
 "use-cluster-health.test.tsx" = ["use-cluster-health.ts"]
 "use-notices.test.ts" = ["use-notices.ts"]
 "use-tasks.test.ts" = ["use-tasks.ts"]
 
 [purity]
-"notices.ts" = "strict"
-"task-notify.ts" = "strict"
+"task-priority.ts" = "strict"

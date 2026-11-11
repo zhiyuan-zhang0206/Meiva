@@ -67,8 +67,7 @@ def test_answer_round_trip_and_retry_deliver_one_numbered_inbound(
     assert len(inbound) == 1
     assert inbound[0][0] == "system:notice-reply"
     assert "Comment: Use 1 later." in inbound[0][1]
-    resolved = client.get("/api/notices").json()["resolved_page"]
-    assert next(n for n in resolved if n["id"] == notice)["answer"] == row[1]
+    assert client.get("/api/notices").json()["awaiting"] == []
 
 
 @pytest.mark.parametrize(
@@ -155,16 +154,6 @@ def test_invalid_question_does_not_supersede_the_current_question(
     assert db_conn.execute(
         "SELECT resolved_at FROM agent_notices WHERE id=%s", (notice,)
     ).fetchone() == (None,)
-
-
-def test_inspector_carries_the_same_question(
-    client: TestClient, db_conn: psycopg.Connection
-) -> None:
-    agent = seed_agent(db_conn)
-    post_question(client, agent)
-    response = client.get(f"/api/agents/{agent}/inspect/live")
-    assert response.status_code == 200, response.text
-    assert response.json()["notice"]["question"] == QUESTION
 
 
 def test_ask_rejects_other_before_effects(

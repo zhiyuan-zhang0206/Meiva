@@ -2,47 +2,31 @@
 
 "use client";
 
-import { useInfiniteQuery, useQuery, type QueryClient } from "@tanstack/react-query";
+import { useQuery, type QueryClient } from "@tanstack/react-query";
 
 import { useApi } from "../transport/transport-context";
 import type { NoticeItem } from "../contracts/types";
 
-/** The open-queue query (open + awaiting in one response). */
+// meiva:note
+// The unresolved-questions query (GET /api/notices).
 export const NOTICES_QUERY_KEY = ["notices"] as const;
-/** The resolved-history infinite query. */
-export const NOTICES_RESOLVED_QUERY_KEY = ["notices-resolved"] as const;
 
-interface ResolvedCursor {
-  beforeAt: string;
-  beforeId: number;
-}
-
-
-/** Wire shape of GET /api/notices as cached under NOTICES_QUERY_KEY (the
- *  useQuery data — camelCase fields, unlike the hook's flattened NoticesFeed). */
+// meiva:note
+// Wire shape of GET /api/notices as cached under NOTICES_QUERY_KEY.
 export interface NoticesFeedWire {
-  open: NoticeItem[];
   awaiting: NoticeItem[];
-  resolved_page: NoticeItem[];
-  next_cursor: { before_at: string; before_id: number } | null;
 }
 
 export interface NoticesFeed {
   // meiva:link meiva_builtins/plugins/meiva_fleet/docs/notify.md
-  open: NoticeItem[];
-  /** Open require_response notices — the "waiting on you" worklist. */
+  // meiva:note
+  // Unresolved questions across the fleet, oldest first.
   awaiting: NoticeItem[];
-
-  resolved: NoticeItem[];
-  fetchNextPage: () => void;
-  hasNextPage: boolean;
-  isFetchingNextPage: boolean;
-  /** The open-queue fetch failed. Stale-while-error: `open`/`awaiting` keep
-   *  their last data; the view flags the failure so "queue empty" is never
-   *  indistinguishable from "couldn't load". */
+  // meiva:note
+  // The fetch failed. Stale-while-error: `awaiting` keeps its last data; the
+  //  view flags the failure so "no questions" is never indistinguishable from
+  //  "couldn't load".
   error: boolean;
-  /** The resolved-history fetch failed (same stale-while-error semantics). */
-  resolvedError: boolean;
   /** First load in flight with nothing loaded yet. */
   isLoading: boolean;
 }
@@ -59,13 +43,14 @@ const tombstoneState = {
 // times over while keeping an unconfirmed drop from lingering.
 const TOMBSTONE_MS = 15_000;
 
-/** Drop tombstoned ids from one incoming open-queue snapshot. A snapshot
- *  that no longer lists an id proves the server resolved it — retire that
- *  tombstone; the deadline retires any tombstone no confirmation reaches. */
+// meiva:note
+// Drop tombstoned ids from one incoming snapshot. A snapshot that no longer
+//  lists an id proves the server resolved it — retire that tombstone; the
+//  deadline retires any tombstone no confirmation reaches.
 function withoutDroppedRows(wire: NoticesFeedWire): NoticesFeedWire {
   const { timers } = tombstoneState;
   if (timers.size === 0) return wire;
-  const listed = new Set([...wire.open.map((n) => n.id), ...wire.awaiting.map((n) => n.id)]);
+  const listed = new Set(wire.awaiting.map((n) => n.id));
   for (const [id, timer] of [...timers.entries()]) {
     if (!listed.has(id)) {
       clearTimeout(timer);
@@ -73,66 +58,37 @@ function withoutDroppedRows(wire: NoticesFeedWire): NoticesFeedWire {
     }
   }
   if (timers.size === 0) return wire;
-  return {
-    ...wire,
-    open: wire.open.filter((n) => !timers.has(n.id)),
-    awaiting: wire.awaiting.filter((n) => !timers.has(n.id)),
-  };
-}
-
-function initialResolvedCursor(): ResolvedCursor | undefined {
-  return undefined;
+  return { ...wire, awaiting: wire.awaiting.filter((n) => !timers.has(n.id)) };
 }
 
 export function useNotices(): NoticesFeed {
   const api = useApi();
   const feedQuery = useQuery({
     queryKey: NOTICES_QUERY_KEY,
-    // Page sizes come from the server defaults
-    // (display.notices_open_default_limit / notices_resolved_default_page,
-    // task #3696); the client pins no window.
+    // meiva:note
+    // The page size comes from the server default
+    // (display.notices_open_default_limit, task #3696); the client pins no window.
     queryFn: async () => withoutDroppedRows(await api.getNotices()),
   });
 
-  const resolvedQuery = useInfiniteQuery({
-    queryKey: NOTICES_RESOLVED_QUERY_KEY,
-    queryFn: ({ pageParam }) => api.getNotices({ ...pageParam }),
-    initialPageParam: initialResolvedCursor(),
-    // The endpoint returns next_cursor in wire shape (snake_case); the api
-    // layer expects camelCase params, so translate here. None = end.
-    getNextPageParam: (lastPage): ResolvedCursor | undefined =>
-      lastPage.next_cursor == null
-        ? undefined
-        : { beforeAt: lastPage.next_cursor.before_at, beforeId: lastPage.next_cursor.before_id },
-  });
-
   return {
-    open: feedQuery.data?.open ?? [],
     awaiting: feedQuery.data?.awaiting ?? [],
-    resolved: resolvedQuery.data?.pages.flatMap((p) => p.resolved_page) ?? [],
-    fetchNextPage: () => void resolvedQuery.fetchNextPage(),
-    hasNextPage: resolvedQuery.hasNextPage,
-    isFetchingNextPage: resolvedQuery.isFetchingNextPage,
     error: feedQuery.isError,
-    resolvedError: resolvedQuery.isError,
-    isLoading: feedQuery.isLoading || resolvedQuery.isLoading,
+    isLoading: feedQuery.isLoading,
   };
 }
 
-
-/** Remove notices from the open-queue cache — the instant local half of a
- *  resolve (Task #1814). The Inbox used to wait for the SSE notice_resolved
- *  round trip + the fold's debounced refetch, so a mark-read row stayed
- *  visible ~2s after the click; dropping it here makes the queue reflect the
- *  read immediately. The SSE-triggered refetch reconciles a beat later (and
- *  is a no-op against server truth), and the resolved history still arrives
- *  from the server. Only the open feed is touched — awaiting entries are
- *  filtered too (defensive).
- *
- *  Any in-flight open-queue refetch is cancelled first so a pre-resolve
- *  snapshot cannot land over the drop and resurrect the row (task #3269),
- *  and the dropped ids stay tombstoned for a beat so a refetch newly
- *  initiated after the drop cannot either (task #3272). */
+// meiva:note
+// Remove questions from the cache — the instant local half of a resolve
+//  (Task #1814). Waiting for the SSE notice_resolved round trip + the fold's
+//  debounced refetch left an answered question visible ~2s after the click;
+//  dropping it here makes the list reflect the answer immediately. The
+//  SSE-triggered refetch reconciles a beat later (and is a no-op against
+//  server truth).
+//  Any in-flight refetch is cancelled first so a pre-resolve snapshot cannot
+//  land over the drop and resurrect the row (task #3269), and the dropped ids
+//  stay tombstoned for a beat so a refetch newly initiated after the drop
+//  cannot either (task #3272).
 export function dropOpenNotices(queryClient: QueryClient, noticeIds: number[]): void {
   if (noticeIds.length === 0) return;
   // Arm the tombstone before the optimistic drop: a refetch newly initiated
@@ -149,20 +105,17 @@ export function dropOpenNotices(queryClient: QueryClient, noticeIds: number[]): 
       }, TOMBSTONE_MS),
     );
   }
-  // Cancel the in-flight open-queue refetch first: its snapshot predates this
-  // drop, and letting it land would resurrect the just-resolved row until the
-  // next SSE-driven refetch corrects it — visible as the row bouncing back
-  // during a resolve burst (task #3269). Same guard as the settings optimistic
-  // update (use-user-settings.ts).
+  // meiva:note
+  // Cancel the in-flight refetch first: its snapshot predates this drop, and
+  // letting it land would resurrect the just-resolved row until the next
+  // SSE-driven refetch corrects it — visible as the row bouncing back during a
+  // resolve burst (task #3269). Same guard as the settings optimistic update
+  // (use-user-settings.ts).
   void queryClient.cancelQueries({ queryKey: NOTICES_QUERY_KEY });
   const gone = new Set(noticeIds);
   queryClient.setQueryData<NoticesFeedWire>(NOTICES_QUERY_KEY, (old) => {
     if (!old) return old;
-    return {
-      ...old,
-      open: old.open.filter((n) => !gone.has(n.id)),
-      awaiting: old.awaiting.filter((n) => !gone.has(n.id)),
-    };
+    return { ...old, awaiting: old.awaiting.filter((n) => !gone.has(n.id)) };
   });
 }
 

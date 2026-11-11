@@ -155,11 +155,3 @@ def test_no_zone_renders_the_host_zone() -> None:
     host = at.astimezone(None)
 
     assert owner_text.wall_clock(at, zone=None, today=host.date()) == host.strftime("%H:%M")
-
-
-def test_the_expired_notice_never_reads_as_a_reply() -> None:
-    text = owner_text.notice_expired_message(4, "Ship the release?", "09:30")
-
-    assert text.startswith('Notice #4 "Ship the release?" reached its expiry at 09:30')
-    assert "without a response from the user" in text
-    assert not text.startswith("Re:")

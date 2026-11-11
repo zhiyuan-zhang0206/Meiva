@@ -38,8 +38,8 @@ Selection rings (`isRinged`) carry `pointerEvents="none"` and node bounds read
 
 Every edge uses `text-muted-foreground` (`stroke="currentColor"`), distinguished
 by opacity and width alone. Incident edges highlight at `0.96` opacity; unselected
-lineage edges render at `0.86`; dimmed lineage edges (when another node or Inbox
-agent is selected) stay at `0.48` opacity rather than near-zero so the task tree
+lineage edges render at `0.86`; dimmed lineage edges (when another node
+is selected) stay at `0.48` opacity rather than near-zero so the task tree
 skeleton remains readable on dark canvases. Stroke widths scale gently by
 `Math.sqrt(viewSpan / 900)` above a 900-unit `viewBox` span (capped at `2x`) so
 multi-branch graphs do not shrink into sub-pixel hairlines.

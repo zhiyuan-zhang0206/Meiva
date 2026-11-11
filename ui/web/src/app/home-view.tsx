@@ -29,7 +29,6 @@ import type { AgentRow, DeliveredUploadStatus, UserMessage } from "@/lib/contrac
 import { errMsg } from "@/lib/contracts/errors";
 import { cn } from "@/lib/format/utils";
 import type { Harness } from "@/lib/harness/harness";
-import { PRIORITY_RANK } from "@/lib/notifications/notices";
 import { useNotices } from "@/lib/notifications/use-notices";
 import type { useInspectorOpen } from "@/lib/inspector/inspector-panel-store";
 import { FLEX, FLEX_1, FLEX_COL, MIN_H_0, MIN_W_0, OVERFLOW_HIDDEN } from "@/lib/layout/layout";
@@ -453,7 +452,7 @@ function HomeContent({
   const publications = useUserMessages(activeId);
   const questions = useNotices();
   const pendingQuestions = useMemo(() => questions.awaiting.filter((item) => item.agent_id === activeId)
-    .sort((a, b) => PRIORITY_RANK[a.priority] - PRIORITY_RANK[b.priority] || a.created_at.localeCompare(b.created_at)), [questions.awaiting, activeId]);
+    .sort((a, b) => a.created_at.localeCompare(b.created_at)), [questions.awaiting, activeId]);
   const displayedItems = useMemo(() => withUserMessages(items, publications.data?.items ?? []), [items, publications.data]);
   const loadOlderForReveal = useCallback(() => loadOlder("background"), [loadOlder]);
   const reveal = useSeenPosition({

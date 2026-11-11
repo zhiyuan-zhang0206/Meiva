@@ -91,3 +91,7 @@ Updated by [`2026-08-02-notice-sdk-slimming.md`](2026-08-02-notice-sdk-slimming.
 `list_notices` removed, `edit_notice`/`dismiss_notice` lose the id argument
 (at most one notice is open per agent), `self.log` removed.
 ```
+
+Narrowed by [`2026-11-11-remove-inbox-and-counts.md`](../../frontend/ui/2026-11-11-remove-inbox-and-counts.md):
+the FYI feed, the resolved-history page, the priority and `blocking` axes and the aggregate counts are gone;
+only questions (`meiva.ui.ask`) remain open items.

@@ -30,15 +30,3 @@ def wall_clock(dt: datetime, *, zone: ZoneInfo | None, today: date) -> str:
     if local.date() != today:
         stamp = f"{local.strftime('%m-%d')} {stamp}"
     return stamp
-
-
-# meiva:note
-# What the owner reads when its notice expired: which notice, when it lapsed, that nothing is
-# pending any more, and how to ask again. Deliberately not shaped like a reply ("Re: ..."),
-# because the user did not answer and the agent must not mistake a lapse for one.
-def notice_expired_message(local_id: int, title: str, expired_at: str) -> str:
-    return (
-        f'Notice #{local_id} "{title}" reached its expiry at {expired_at} '
-        "without a response from the user, so it is resolved as expired. It no longer "
-        "waits for an answer. Ask again with meiva.ui.ask(title, ...) if it still matters."
-    )

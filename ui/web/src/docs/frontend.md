@@ -19,7 +19,7 @@ Meiva's web user interface — Next.js 16 (App Router) + React 19 + Tailwind CSS
 
 ```
 /                             Chat view — sidebar + timeline + composer (homepage)
-/fleet                        Fleet supervision view — relationship graph + Task graph + unified Inbox queue (InboxQueue, replaces old Decisions/Reviews dual queues)
+/fleet                        Fleet supervision view — relationship graph + Task graph
 /login                        Login page
 /shell/[agentId]/[sessionId]  Terminal session (session backend proxy)
 /control                      Control vertical long page — write/admin surface (observation surface split to /insights)

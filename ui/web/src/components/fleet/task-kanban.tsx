@@ -10,7 +10,7 @@ import type { Route } from "next";
 import { useTranslations } from "next-intl";
 import { useEffect, useRef } from "react";
 
-import { PRIORITY_BG, PRIORITY_RANK } from "@/lib/notifications/notices";
+import { PRIORITY_BG, PRIORITY_RANK } from "@/lib/notifications/task-priority";
 import type { TaskGraphRow, TaskStatus } from "@/lib/contracts/types";
 import { cn } from "@/lib/format/utils";
 import { useCoarsePointer } from "@/lib/input/use-coarse-pointer";

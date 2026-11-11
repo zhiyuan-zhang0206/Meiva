@@ -51,7 +51,7 @@ declared server snapshot instead: asking the port for a media answer there throw
 `scrollIntoView`, `assign`, `push`, `replace` and `back` are on the port too: a
 component asks the browser to move or scroll, and the port is the one place that
 happens, so a test asserts what was scrolled where without a DOM stub. The slash
-menu, the inbox queue's route anchor, both anchor-nav pages and the config page's
+menu, both anchor-nav pages and the config page's
 focus jump scroll through `browser.view`; the shared-context panel moves through
 `browser.navigation`.
 

@@ -11,11 +11,7 @@
 import { AGENTS_QUERY_KEY, AGENT_DIRECTORY_QUERY_KEY, AGENT_DETAIL_QUERY_KEY, foldAgents } from "./agents";
 import type { SystemEvent } from "../contracts/types";
 import { FLEET_GRAPH_KEY_PREFIX, foldFleetGraph } from "./graph";
-import {
-  foldNotices,
-  NOTICES_QUERY_KEY,
-  NOTICES_RESOLVED_QUERY_KEY,
-} from "./notices";
+import { foldNotices, NOTICES_QUERY_KEY } from "./notices";
 import { foldTasks, TASKS_QUERY_KEY } from "./tasks";
 import type { FoldInvalidation, FoldOutcome, FoldWrite } from "./types";
 import { NO_FOLD } from "./types";
@@ -30,12 +26,11 @@ export const RECONNECT_QUERY_KEYS: readonly (readonly unknown[])[] = [
   ["to-user"],
   ["user-messages"],
   NOTICES_QUERY_KEY,
-  NOTICES_RESOLVED_QUERY_KEY,
   FLEET_GRAPH_KEY_PREFIX,
   TASKS_QUERY_KEY,
 ];
 export { AGENTS_QUERY_KEY, AGENT_DIRECTORY_QUERY_KEY, AGENT_DETAIL_QUERY_KEY } from "./agents";
-export { NOTICES_QUERY_KEY, NOTICES_RESOLVED_QUERY_KEY } from "./notices";
+export { NOTICES_QUERY_KEY } from "./notices";
 export { TASKS_QUERY_KEY } from "./tasks";
 export { FLEET_GRAPH_KEY_PREFIX } from "./graph";
 export {

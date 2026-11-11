@@ -98,6 +98,8 @@ Database read failure in `agent_model_target` retains its separate historical
 contract: it logs the error and returns the caller's explicit fallback. That
 execution lookup requires a complete catalog; it does not use nullable metadata.
 
-Agent cards carry a count of unresolved response-required notices and whether
-any of those notices has a structured question. The roster and directory compute
-both from the same set without returning the notice bodies.
+Agent cards carry `has_pending_question` (an unresolved row with a question) and
+`has_unread_user_messages` (a delivery past the agent's seen position); there are no
+counters. The roster and directory compute both without returning the notice bodies.
+The agent snapshot additionally lists the unresolved questions in
+`notices_awaiting_response`.

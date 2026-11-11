@@ -59,4 +59,4 @@ row therefore answers "which credential posted this" rather than "which agent
 the caller said it was". In-process writers that present no credential at all
 (task maintenance) write the literal `internal`, and rows written before the
 column existed keep `NULL`. The value rides the notice feed
-(`GET /api/notices`, `/open`, `/live`) and `meiva notices list`.
+(`GET /api/notices` and `/open`) and `meiva notices list`.

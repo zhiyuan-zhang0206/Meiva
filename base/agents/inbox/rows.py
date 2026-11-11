@@ -22,17 +22,6 @@ class InboundRow(NamedTuple):
     payload: dict[str, object] | None = None
 
 
-# FYI notice (require_response=false) lifetime in the open queue: after this many
-# days an unread FYI is auto-resolved ('read') — the open feed, the unread badge
-# and the IM bridge stop carrying it (audit 05-gateway-lifecycle C1: open FYIs
-# used to pile up forever). require_response notices NEVER expire — the user's
-# answer is the only close. The expiry is applied as a query-side rule
-# (created_at cutoff, `make_interval(days => ...)`) plus a lazy auto-resolve in
-# the gateway's open-feed query, so no background sweeper is needed. One knob:
-# change it here (and re-run the notice tests) to configure the TTL.
-NOTICE_FYI_TTL_DAYS = 30
-
-
 # meiva:note
 # Pending chats stay in the composer strip. A claimed chat for the native
 # harness moves to the conversation at claim. External chats remain visible

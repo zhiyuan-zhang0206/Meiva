@@ -97,10 +97,14 @@ shows at most one indicator, decided by `agentAttention`
 (`lib/agents/agent-attention.ts`) and shared by the hover card: an unresolved
 structured question shows a Sunset Orange (`--meiva-sunset-orange`, `#ED8755`) circled
 question mark and outranks everything; otherwise `has_unread_user_messages` shows a
-Sunset Orange solid dot. There is no count, and no state for an open reply request:
-`awaiting_response_count` and the notice counters take no part in the row or the card
-(restored 2026-11-10, superseding the 2026-11-07 removal; see
+Sunset Orange solid dot. There is no count, and no state for an open reply request: the roster carries
+`has_pending_question` and `has_unread_user_messages` and no counters (restored 2026-11-10,
+superseding the 2026-11-07 removal; see
 [the decision](../../../../../docs/decisions/frontend/ui/2026-11-10-restore-unread-dot.md)).
+The header carries no aggregate either: the Inbox page and the summed red dot were removed
+([the decision](../../../../../docs/decisions/frontend/ui/2026-11-11-remove-inbox-and-counts.md)),
+so a pending question shows only on its agent's row and in the question bar above that
+agent's composer.
 The hover card names the same state with the same mark.
 
 What the dot means is one number per agent: the **seen position**, the newest delivery
@@ -126,8 +130,7 @@ Only then does it advance the cursor, through one idempotent
 fetched; records the page has not received are never claimed. A failed advance is
 retried after 1 s, 3 s and 9 s, then waits for the next trigger (a newer record or a
 refetched feed). Additional lifecycle
-markers and the header's aggregate reply count remain opt-in through
-`display.show_agent_status` and `notification.awaiting_reply`, respectively.
+markers remain opt-in through `display.show_agent_status`.
 Rows keep timestamps in the hover card. Labels truncate with a single-line
 ellipsis (`truncate`) so long names and deep
 tree indents never wrap or vary row height. On fine pointers (`!useCoarsePointer()`),

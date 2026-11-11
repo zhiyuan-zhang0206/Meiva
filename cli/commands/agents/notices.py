@@ -27,14 +27,12 @@ def _api(access: GatewayAccess) -> str:
 
 
 # meiva:note
-# One open notice as the gateway lists it, with the fields the CLI reads. Other fields of the
+# One unresolved question as the gateway lists it, with the fields the CLI reads. Other fields of the
 # answer are ignored.
 class _Notice(BaseModel):
     id: int
     agent_id: int
-    priority: str
     title: str
-    require_response: bool
     agent_label: str | None = None
     source_verified_by: str | None = None
     content: str | None = None
@@ -49,7 +47,7 @@ class _AgentStatus(BaseModel):
 
 
 def _print_notice(n: _Notice, i: int, total: int, *, agent_status: str | None = None) -> None:
-    kind = "NOTICE"
+    kind = "QUESTION"
     label = n.agent_label or ""
     status = f" [{agent_status}]" if agent_status else ""
     # meiva:note
@@ -58,7 +56,7 @@ def _print_notice(n: _Notice, i: int, total: int, *, agent_status: str | None = 
     # agent_id cannot. Absent on rows written before the column existed.
     source = n.source_verified_by
     print(
-        f"[{i}/{total}] #{n.id} {kind} {n.priority} "
+        f"[{i}/{total}] #{n.id} {kind} "
         f"agent#{n.agent_id} {label}{status}: {n.title}"
         + (f"  [source: {source}]" if source else "")
     )
@@ -69,9 +67,9 @@ def _print_notice(n: _Notice, i: int, total: int, *, agent_status: str | None = 
 
 
 # meiva:note
-# Resolve only agents referenced by the bounded notice result.
+# Resolve only agents referenced by the bounded question result.
 #
-# Missing agents remain unknown and cannot authorize stale-notice cleanup.
+# Missing agents remain unknown and cannot authorize stale-question cleanup.
 def _agent_status_map(access: GatewayAccess, agent_ids: set[int]) -> dict[int, str]:
     statuses: dict[int, str] = {}
     for agent_id in sorted(agent_ids):
@@ -92,28 +90,15 @@ def _fetch_open_notices(access: GatewayAccess) -> list[_Notice]:
         f"{_api(access)}/notices/open",
         timeout=_TIMEOUT_S,
         headers=gateway_auth_headers(access),
-        params={"include_awaiting": True},
     )
     resp.raise_for_status()
     return _NOTICES.validate_json(resp.content)
 
 
-def _filter_notices(
-    notices: list[_Notice],
-    *,
-    agent_id: int | None,
-    priority: str | None,
-    type_filter: str | None,
-) -> list[_Notice]:
-    if agent_id is not None:
-        notices = [n for n in notices if n.agent_id == agent_id]
-    if priority:
-        notices = [n for n in notices if n.priority == priority.upper()]
-    if type_filter == "fyi":
-        notices = [n for n in notices if not n.require_response]
-    elif type_filter == "decision":
-        notices = [n for n in notices if n.require_response]
-    return notices
+def _filter_notices(notices: list[_Notice], *, agent_id: int | None) -> list[_Notice]:
+    if agent_id is None:
+        return notices
+    return [n for n in notices if n.agent_id == agent_id]
 
 
 # meiva:note
@@ -124,9 +109,9 @@ def _confirm_clear(
 ) -> bool:
     for i, n in enumerate(notices, start=1):
         _print_notice(n, i, len(notices))
-    target = "stale (terminated-agent) notices" if stale else f"agent #{agent_id}"
+    target = "stale (terminated-agent) questions" if stale else f"agent #{agent_id}"
     print(
-        f"Clear {len(notices)} notice(s): {target}? "
+        f"Clear {len(notices)} question(s): {target}? "
         "(dismiss without answering; re-run with --force to skip this prompt)"
     )
     print("y/N: ", end="", flush=True)
@@ -135,28 +120,24 @@ def _confirm_clear(
 
 
 # meiva:note
-# `meiva notices list` — every open notice across the fleet (or one agent).
+# `meiva notices list` — every unresolved question across the fleet (or one agent).
 #
-# --stale narrows to notices whose agent is terminated: the invalid backlog of dead agents,
-# as opposed to live agents' open notices (Task #1149).
+# --stale narrows to questions whose agent is terminated: the invalid backlog of dead agents,
+# as opposed to live agents' open questions (Task #1149).
 def cmd_notices_list(
     access: GatewayAccess,
     *,
     agent_id: int | None,
-    priority: str | None,
-    type_filter: str | None,
     stale: bool = False,
 ) -> int:
     notices = _fetch_open_notices(access)
-    notices = _filter_notices(
-        notices, agent_id=agent_id, priority=priority, type_filter=type_filter
-    )
+    notices = _filter_notices(notices, agent_id=agent_id)
     statuses: dict[int, str] = {}
     if stale:
         statuses = _agent_status_map(access, {n.agent_id for n in notices})
         notices = [n for n in notices if statuses.get(n.agent_id) == "terminated"]
     if not notices:
-        print("No open notices." if not stale else "No stale notices (terminated agents).")
+        print("No open questions." if not stale else "No stale questions (terminated agents).")
         return 0
     total = len(notices)
     for i, n in enumerate(notices, start=1):
@@ -165,7 +146,7 @@ def cmd_notices_list(
 
 
 # meiva:note
-# `meiva notices resolve <id> --agent <id> --action ...` — resolve one notice.
+# `meiva notices resolve <id> --agent <id> --action ...` — resolve one question.
 def cmd_notices_resolve(
     access: GatewayAccess,
     *,
@@ -188,7 +169,7 @@ def cmd_notices_resolve(
         json={"action": action, "reply": reply},
     )
     resp.raise_for_status()
-    print(f"notice #{notice_id} resolved: {action}")
+    print(f"question #{notice_id} resolved: {action}")
     return 0
 
 
@@ -228,15 +209,15 @@ def cmd_notices_clear(
         notices = [n for n in notices if n.agent_id == agent_id]
     if not notices:
         print(
-            "No stale notices (terminated agents)."
+            "No stale questions (terminated agents)."
             if stale
-            else f"agent #{agent_id}: no open notices."
+            else f"agent #{agent_id}: no open questions."
         )
         return 0
     if not force and not _confirm_clear(notices, stale=stale, agent_id=agent_id, stdin=stdin):
         print("aborted.")
         return 1
     cleared = _resolve_all(access, notices, rng)
-    target = "stale notices" if stale else f"agent #{agent_id}"
-    print(f"cleared {cleared}/{len(notices)} notices: {target}")
+    target = "stale questions" if stale else f"agent #{agent_id}"
+    print(f"cleared {cleared}/{len(notices)} questions: {target}")
     return 0

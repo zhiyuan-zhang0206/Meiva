@@ -155,7 +155,6 @@ export default tseslint.config(
       "src/components/agents/agent-prompt-dialog.tsx",
       "src/components/agents/agent-row.tsx",
       "src/components/agent-sidebar/search-overlay.tsx",
-      "src/components/fleet/inbox-queue/detail.tsx",
     ],
     rules: {
       "jsx-a11y/no-autofocus": "off",

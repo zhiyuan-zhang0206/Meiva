@@ -3,7 +3,7 @@
 The Meiva cluster's web UI — Next.js 16 (App Router, Turbopack) + React 19 +
 Tailwind 4 + shadcn/ui (Radix primitives). It is the user-facing control
 surface for the Meiva agent cluster: per-agent chat timelines, the fleet view
-(graph / inbox / task board), system control pages (/control), insights and
+(graph / task board), system control pages (/control), insights and
 the memory graph.
 
 ## How it talks to the backend

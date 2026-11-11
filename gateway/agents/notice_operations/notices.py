@@ -1,5 +1,5 @@
 # meiva:note
-# The notice surface: resolve a question and the inbox feeds.
+# The question surface: resolve a question and read the unresolved ones.
 # meiva:link gateway/routers/docs/frontend-ui-data.md
 
 from __future__ import annotations
@@ -30,7 +30,6 @@ from gateway.agents.notice_operations.notice_plan import (
 from gateway.agents.schemas import (
     AgentMessageEnqueued,
     NoticeItem,
-    NoticesCursor,
     NoticesFeed,
     ResolveNoticeIn,
 )
@@ -78,7 +77,6 @@ _SELECT = (
 # meiva:link gateway/routers/docs/frontend-ui-data.md
 _ACTION_RESOLUTION = {"answer": "answered", "dismiss": "dismissed"}
 _OPEN_FEED_MAX_LIMIT = 500
-_RESOLVED_PAGE_MAX_LIMIT = 100
 
 
 def _open_notices_blocking(
@@ -92,37 +90,9 @@ def _open_notices_blocking(
             _SELECT
             + "WHERE n.require_response AND n.resolved_at IS NULL "
             + agent_clause
-            + "ORDER BY n.priority ASC, n.blocking DESC, n.created_at ASC, n.id ASC LIMIT %s",
+            + "ORDER BY n.created_at ASC, n.id ASC LIMIT %s",
             params,
         )
-        return cur.fetchall()
-
-
-# meiva:note
-# Sync resolved-history query — via to_thread.
-def _resolved_notices_blocking(
-    pool: ConnectionPool,
-    resolved_limit: int,
-    *,
-    before_at: datetime | None = None,
-    before_id: int | None = None,
-) -> list[NoticeItem]:
-    with pool.connection() as conn, conn.cursor(row_factory=class_row(NoticeItem)) as cur:
-        if before_at is not None:
-            cur.execute(
-                _SELECT
-                + "WHERE n.require_response AND n.resolved_at IS NOT NULL "
-                + "AND (n.resolved_at, n.id) < (%s, %s) "
-                + "ORDER BY n.resolved_at DESC, n.id DESC LIMIT %s",
-                (before_at, before_id, resolved_limit),
-            )
-        else:
-            cur.execute(
-                _SELECT
-                + "WHERE n.require_response AND n.resolved_at IS NOT NULL "
-                + "ORDER BY n.resolved_at DESC, n.id DESC LIMIT %s",
-                (resolved_limit,),
-            )
         return cur.fetchall()
 
 
@@ -143,72 +113,18 @@ async def get_open_notices(
     )
 
 
-def _notices_after_blocking(pool: ConnectionPool, after: int, limit: int) -> list[NoticeItem]:
-    # meiva:link gateway/routers/docs/frontend-ui-data.md
-    with pool.connection() as conn, conn.cursor(row_factory=class_row(NoticeItem)) as cur:
-        cur.execute(
-            _SELECT
-            + "WHERE n.id > %s AND n.resolved_at IS NULL AND n.require_response "
-            + "ORDER BY n.id ASC LIMIT %s",
-            (after, limit),
-        )
-        return cur.fetchall()
-
-
-@router.get("/api/notices/live")
-async def get_notices_live(
-    request: Request,
-    after: Annotated[int, Query(ge=0)] = 0,
-    limit: Annotated[int | None, Query(ge=1, le=_OPEN_FEED_MAX_LIMIT)] = None,
-) -> list[NoticeItem]:
-    # meiva:link gateway/routers/docs/frontend-ui-data.md
-    if limit is None:
-        limit = gateway_config(request).display.notices_open_default_limit
-    return await asyncio.to_thread(
-        _notices_after_blocking, gateway_state(request).db_pool, after, limit
-    )
-
-
 @router.get("/api/notices")
 async def get_notices_feed(
     request: Request,
     limit: Annotated[int | None, Query(ge=1, le=_OPEN_FEED_MAX_LIMIT)] = None,
-    resolved_limit: Annotated[int | None, Query(ge=1, le=_RESOLVED_PAGE_MAX_LIMIT)] = None,
-    before_at: Annotated[datetime | None, Query()] = None,
-    before_id: Annotated[int | None, Query()] = None,
 ) -> NoticesFeed:
     # meiva:link gateway/routers/docs/frontend-ui-data.md
-    if (before_at is None) != (before_id is None):
-        raise HTTPException(
-            status_code=422, detail="before_at and before_id must be supplied together"
-        )
-    pool = gateway_state(request).db_pool
     if limit is None:
         limit = gateway_config(request).display.notices_open_default_limit
-    if resolved_limit is None:
-        resolved_limit = gateway_config(request).display.notices_resolved_default_page
-    awaiting_rows, resolved_rows = await asyncio.gather(
-        asyncio.to_thread(_open_notices_blocking, pool, limit),
-        asyncio.to_thread(
-            _resolved_notices_blocking,
-            pool,
-            resolved_limit,
-            before_at=before_at,
-            before_id=before_id,
-        ),
+    awaiting = await asyncio.to_thread(
+        _open_notices_blocking, gateway_state(request).db_pool, limit
     )
-    resolved_page = resolved_rows
-    next_cursor = None
-    if len(resolved_page) == resolved_limit:
-        last = resolved_page[-1]
-        if last.resolved_at is not None:
-            next_cursor = NoticesCursor(before_at=last.resolved_at, before_id=last.id)
-    return NoticesFeed(
-        open=[],
-        awaiting=awaiting_rows,
-        resolved_page=resolved_page,
-        next_cursor=next_cursor,
-    )
+    return NoticesFeed(awaiting=awaiting)
 
 
 async def post_notice_resolve(

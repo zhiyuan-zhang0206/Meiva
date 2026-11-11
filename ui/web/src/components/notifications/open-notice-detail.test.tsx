@@ -9,7 +9,6 @@ import { afterEach, describe, expect, it, vi, beforeEach } from "vitest";
 
 import { OpenNoticeDetail } from "./open-notice-detail";
 import { pressEnter } from "@/test-support/enter-key";
-import { formatAbsolute, formatRelative } from "@/lib/format/time";
 import { USER_SETTING_DEFAULTS, type OpenNotice } from "@/lib/contracts/types";
 import { SETTINGS_QUERY_KEY } from "@/lib/state/use-user-settings";
 import { WallClockProvider } from "@/lib/transport/transport-context";
@@ -46,7 +45,7 @@ function ntc(overrides: Partial<OpenNotice> = {}): OpenNotice {
     id: 11,
     title: "Approve deploy?",
     content: "push to prod?",
-    priority: "P0",
+    priority: "P2",
     require_response: true,
     blocking: false,
     created_at: "2026-06-14T12:00:00Z",
@@ -67,56 +66,6 @@ afterEach(() => {
 function field(): HTMLTextAreaElement {
   return screen.getAllByRole<HTMLTextAreaElement>("textbox")[0];
 }
-
-describe("OpenNoticeDetail — timestamp", () => {
-  const createdAt = "2026-06-14T12:00:00Z";
-  const timestamp = `${formatRelative(createdAt, new Date(NOW))}, ${formatAbsolute(createdAt)}`;
-
-  it("hides the created time by default", () => {
-    renderNotice(<OpenNoticeDetail agentId={7} notice={ntc({ created_at: createdAt })} />);
-
-    expect(screen.queryByText(timestamp)).toBeNull();
-  });
-
-  it("shows the created time when requested", () => {
-    renderNotice(
-      <OpenNoticeDetail
-        agentId={7}
-        notice={ntc({ created_at: createdAt })}
-        showTimestamp
-      />,
-    );
-
-    expect(screen.getByText(timestamp)).toBeTruthy();
-  });
-
-  it("shows expiry time when expire_at is present", () => {
-    const expireAt = "2026-06-15T12:00:00Z";
-    renderNotice(<OpenNoticeDetail agentId={7} notice={ntc({ expire_at: expireAt })} />);
-    expect(screen.getByText(new RegExp(formatRelative(expireAt, new Date(NOW))))).toBeTruthy();
-  });
-
-  // meiva:note
-  // The label follows the clock the page hands in: the same notice read at two instants says two
-  // different things, so a component that goes back to reading the global clock fails here.
-  it("draws the created time against the page's clock, not the runner's", () => {
-    const later = NOW + 3 * 60 * 60 * 1000;
-    const label = (now: number) => {
-      const view = renderNotice(
-        <OpenNoticeDetail agentId={7} notice={ntc({ created_at: createdAt })} showTimestamp />,
-        now,
-      );
-      const text = view.getByText(new RegExp(formatRelative(createdAt, new Date(now)))).textContent;
-      cleanup();
-      return text;
-    };
-    const atOpen = label(NOW);
-    const threeHoursLater = label(later);
-    expect(atOpen).toContain(formatRelative(createdAt, new Date(NOW)));
-    expect(threeHoursLater).toContain(formatRelative(createdAt, new Date(later)));
-    expect(threeHoursLater).not.toBe(atOpen);
-  });
-});
 
 describe("OpenNoticeDetail — require_response", () => {
   it("uses the same monospace input typography as the page composer", () => {

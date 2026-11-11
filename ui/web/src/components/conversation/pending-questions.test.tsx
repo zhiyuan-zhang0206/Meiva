@@ -11,7 +11,7 @@ import { PendingQuestions } from "./pending-questions";
 
 const questions: NoticeItem[] = [1, 2].map((id) => ({
   id, agent_id: 7, agent_label: null, title: `Question ${id}`, content: null,
-  priority: "P1", require_response: true, blocking: false,
+  priority: "P2", require_response: true, blocking: false,
   created_at: "2026-11-07T00:00:00Z", expire_at: null, resolved_at: null,
   question: { type: "text", note_suggestion: `Suggested answer ${id}` },
 }));
@@ -57,7 +57,7 @@ it("opens expanded by default above the composer and retains independent drafts 
 it("resolves only the selected question and drops it from the shared pending queue", async () => {
   transport.resolveNotice.mockResolvedValue({ status: "ok" });
   const { queryClient } = renderQuestions(<PendingQuestions questions={questions} failed={false} />);
-  queryClient.setQueryData(NOTICES_QUERY_KEY, { awaiting: questions, open: [], resolved_page: [], next_cursor: null });
+  queryClient.setQueryData(NOTICES_QUERY_KEY, { awaiting: questions });
   const first = within(screen.getByRole("article", { name: "Question 1" }));
   fireEvent.change(first.getByRole("textbox"), { target: { value: "First answer" } });
   fireEvent.click(first.getByRole("button", { name: "Submit answer" }));
