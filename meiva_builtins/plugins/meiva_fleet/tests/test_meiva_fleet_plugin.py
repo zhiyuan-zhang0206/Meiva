@@ -438,3 +438,14 @@ def test_fleet_declares_no_notification_category() -> None:
     manifest = load_manifest(Path(agent_runtime.__file__).parent)
 
     assert not manifest.contributions.get("notifications")
+
+
+def test_an_external_harness_is_told_to_prefer_meiva_questions_over_its_own() -> None:
+    from base.api_contracts.agent_contract import Harness
+    from meiva_builtins.plugins.meiva_fleet import agent_runtime
+
+    (contribution,) = agent_runtime.contribute().harness_contributions
+    assert Harness.CODEX in contribution.harnesses
+    (rule,) = contribution.overlaps
+    assert "`meiva.ui.ask`" in rule
+    assert "ask-user" in rule

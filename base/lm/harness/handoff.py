@@ -39,7 +39,13 @@ def compaction_reminder(path: Path) -> str:
 
 
 DEFAULT_OVERLAPS: tuple[str, ...] = (
-    "Use your native tools for files, shell commands, search, and background tasks or monitors.",
+    "Use your native tools for files, shell commands, search, background commands, monitors, "
+    "and timers or wake-ups; Meiva does not provide separate ones.",
+    "When another agent should do part of the work, spawn or message a Meiva agent "
+    "(`meiva.agents.spawn`, `meiva.agents.send_message`; see `meiva.help(meiva.agents)`) in "
+    "preference to your CLI's own subagent or task tool. Meiva agents have an identity and a "
+    "timeline that people can see, steer and take over, while a CLI subagent is invisible to "
+    "them and ends with your session.",
     "Reach cluster state through `meiva` rather than connecting to Postgres or Redis directly.",
 )
 

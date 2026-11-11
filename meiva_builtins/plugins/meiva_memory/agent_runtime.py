@@ -291,6 +291,13 @@ _MEMORY_HARNESS_CONTRIBUTION = HarnessContribution(
             "read and update shared cluster (`meiva.memory.PATH`) and personal memory",
         ),
     ),
+    overlaps=(
+        "Record what must outlive this session in Meiva Memory (`meiva.memory`; see "
+        "`meiva.help(meiva.memory)`) in preference to your CLI's own memory or notes-file "
+        "feature. Meiva Memory is shared with the cluster's other agents and kept in order by "
+        "Meiva, while a CLI's memory is local to that install and no peer or later agent "
+        "reads it.",
+    ),
 )
 
 

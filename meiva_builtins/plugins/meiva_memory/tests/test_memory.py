@@ -305,3 +305,14 @@ def test_the_subprocess_face_imports_no_decision_stack_agent_runtime_or_new_http
     assert boundary["imported"][1:] == ["meiva_builtins.plugins.meiva_memory.plugin"]
     assert boundary["absolute"] == []
     assert boundary["added_httpx"] == []
+
+
+def test_an_external_harness_is_told_to_prefer_meiva_memory_over_its_own() -> None:
+    from base.api_contracts.agent_contract import Harness
+    from meiva_builtins.plugins.meiva_memory import agent_runtime
+
+    (contribution,) = agent_runtime.contribute().harness_contributions
+    assert Harness.CLAUDE_CODE in contribution.harnesses
+    (rule,) = contribution.overlaps
+    assert "meiva.help(meiva.memory)" in rule
+    assert "in preference to your CLI's own memory" in rule
