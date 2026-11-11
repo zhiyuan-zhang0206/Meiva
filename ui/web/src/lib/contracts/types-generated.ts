@@ -3903,6 +3903,7 @@ export interface components {
             kind: "inbound_chat" | "inbound_compact_summary" | "inbound_compact_request" | "attach" | "agent_chat" | "agent_code" | "agent_reasoning" | "code_output" | "subagent_text" | "system_prompt" | "system_marker";
             source?: string | null;
             parent_item_id?: string | null;
+            tool_use_id?: string | null;
             payload: string;
             created_at?: string | null;
             inbound_id?: number | null;

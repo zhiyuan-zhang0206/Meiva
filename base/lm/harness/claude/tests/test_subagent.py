@@ -30,6 +30,29 @@ def test_a_subagent_text_block_is_subagent_text_and_its_thinking_is_dropped() ->
     ]
 
 
+def test_a_subagents_tool_call_and_result_name_the_call_that_started_it() -> None:
+    call = fake.AssistantMessage(
+        content=[fake.ToolUseBlock(id="toolu_BASH", name="Bash", input={"command": "echo hi"})],
+        parent_tool_use_id=AGENT_CALL,
+    )
+    result = fake.UserMessage(
+        content=[fake.ToolResultBlock(tool_use_id="toolu_BASH", content="hi")],
+        parent_tool_use_id=AGENT_CALL,
+    )
+    assert map_message(call, turn_id="turn-1") == [
+        ToolUse("turn-1", "toolu_BASH", "Bash", {"command": "echo hi"}, AGENT_CALL)
+    ]
+    assert map_message(result, turn_id="turn-1") == [
+        ToolResult("turn-1", "toolu_BASH", False, "hi", AGENT_CALL)
+    ]
+
+
+def test_the_main_agents_own_tool_call_names_no_subagent() -> None:
+    call = fake.AssistantMessage(content=[fake.ToolUseBlock(id="toolu_X", name="Bash", input={})])
+    [event] = map_message(call, turn_id="turn-1")
+    assert isinstance(event, ToolUse) and event.parent_tool_use_id is None
+
+
 def test_the_main_agents_own_text_and_thinking_are_unchanged() -> None:
     message = fake.AssistantMessage(
         content=[fake.ThinkingBlock(thinking="plan"), fake.TextBlock(text="ALPHA")]
@@ -68,7 +91,15 @@ async def test_a_background_subagent_speaks_after_its_launching_turn_ended(tmp_p
         assert {e.turn_id for e in texts} == {woken.turn_id} == {answer.turn_id}
         assert answer.text == "DONE", "the sub-agent's words are not the turn's reply"
         assert [e.text for e in harness.of(AssistantText) if e.turn_id == woken.turn_id] == ["DONE"]
-        assert [e.name for e in harness.of(ToolUse) if e.turn_id == woken.turn_id] == ["Bash"]
-        assert [e.content for e in harness.of(ToolResult) if e.turn_id == woken.turn_id] == ["hi"]
+        assert [
+            (e.name, e.parent_tool_use_id)
+            for e in harness.of(ToolUse)
+            if e.turn_id == woken.turn_id
+        ] == [("Bash", AGENT_CALL)]
+        assert [
+            (e.content, e.parent_tool_use_id)
+            for e in harness.of(ToolResult)
+            if e.turn_id == woken.turn_id
+        ] == [("hi", AGENT_CALL)]
     finally:
         await harness.stop()

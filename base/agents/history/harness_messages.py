@@ -79,6 +79,27 @@ async def aget_next_harness_message_seq(conn: AsyncConnection, agent_id: int) ->
         return _int_from_row(await cur.fetchone())
 
 
+# meiva:note
+# The timeline item id of the `agent_code` item that recorded the CLI tool call `tool_use_id`, or None.
+# A sub-agent can keep working after the graph invocation that saw its spawning call ended, and the
+# next invocation's projector has no memory of that call; the item itself carries the CLI's id, so
+# the call is found by it. The filter reads one agent's rows, which is what an agent's
+# timeline is, and is asked once per call id per invocation.
+# meiva:link base/lm/harness/docs/subagent-text.md
+async def aget_harness_call_item_id(
+    conn: AsyncConnection, agent_id: int, tool_use_id: str
+) -> str | None:
+    async with conn.cursor() as cur:
+        await cur.execute(
+            "SELECT seq FROM agent_harness_messages WHERE agent_id = %s "
+            "AND item->>'kind' = 'agent_code' AND item->>'tool_use_id' = %s "
+            "ORDER BY seq DESC LIMIT 1",
+            (agent_id, tool_use_id),
+        )
+        row = await cur.fetchone()
+    return None if row is None else f"h{row[0]}.0"
+
+
 def load_harness_message_count(conn: Connection, agent_id: int) -> int:
     with conn.cursor() as cur:
         cur.execute(

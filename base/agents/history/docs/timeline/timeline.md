@@ -35,6 +35,8 @@ projection. Reply suggestions use only user-facing chat.
 
 An external harness's own sub-agent text is a `subagent_text` item: `payload` the text, `source` the CLI's label for
 the sub-agent, `parent_item_id` the `agent_code` item of the call that started it (when known), `user_facing` false.
+The `agent_code` / `code_output` items of a tool call the sub-agent made carry the same `parent_item_id`; an
+`agent_code` item also stores the CLI's `tool_use_id`, which is how a later invocation finds the call.
 It exists only in `agent_harness_messages`, is always work detail (Details, collapsed), and is never a delivery,
 an unread or a push. See [sub-agent text](../../../../lm/harness/docs/subagent-text.md).
 

@@ -64,6 +64,18 @@ export interface CardConfig {
   readonly copy: boolean;
 }
 
+// meiva:note
+// Work a CLI's own sub-agent did (its text, and the tool calls and outputs it made) names the call that
+// started it in `parent_item_id`; the main agent's own tool activity names none. The row nests it
+// under that call and the tool header says whose it is.
+// meiva:link ui/web/src/docs/frontend-components/timeline-view/card-chrome.md
+export function isSubagentWork(item: BackendTimelineItem): boolean {
+  return (
+    !!item.parent_item_id &&
+    (item.kind === "agent_code" || item.kind === "code_output" || item.kind === "subagent_text")
+  );
+}
+
 export function messageCardConfig(item: BackendTimelineItem): CardConfig | null {
   switch (item.kind) {
     case "system_prompt":
@@ -296,7 +308,17 @@ export const CardHeader = memo(function CardHeader({
         )}
       />
       {config.rich ? (
-        <Summary item={item} now={now} live={live} />
+        <>
+          <Summary item={item} now={now} live={live} />
+          {isSubagentWork(item) ? (
+            <span
+              data-testid="subagent-badge"
+              className="shrink-0 rounded-sm bg-muted px-1 text-[10px] leading-4 text-muted-foreground"
+            >
+              {t("timeline.subagent")}
+            </span>
+          ) : null}
+        </>
       ) : (
         <span className={cn("items-center gap-1.5", FLEX, MIN_W_0)}>
           {Icon ? <Icon className="size-3.5 shrink-0 opacity-80" /> : null}

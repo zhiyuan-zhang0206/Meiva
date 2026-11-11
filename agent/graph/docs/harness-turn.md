@@ -41,7 +41,8 @@ checkpoints. The external activity projector writes to
 `agent_harness_messages` as events arrive.
 
 A CLI sub-agent's text (`SubagentText`) is written as a capped, non-user-facing `subagent_text` item beside the
-call that started it ([sub-agent text](../../../base/lm/harness/docs/subagent-text.md)).
+call that started it, and the tool calls it made are written as ordinary tool items tied to the same call
+([sub-agent text](../../../base/lm/harness/docs/subagent-text.md)).
 
 The first text or reasoning fragment, complete blocks, and tool start and
 result checkpoints are written while the big turn is active. Additional

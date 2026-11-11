@@ -491,6 +491,8 @@ class CodexSession(BaseHarnessSession[CodexConfig]):
             return
         if (event := self._subagents.text(method, params, turn_id=local)) is not None:
             self._emit(event)
+        for tool_event in self._subagents.tools(method, params, turn_id=local):
+            self._emit(tool_event)
 
     def _buffer_early_notification(self, message: Inbound, params: JsonObject) -> None:
         if not message.turn_id or params.get("threadId") != self._session_id:

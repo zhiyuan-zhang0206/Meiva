@@ -12,6 +12,7 @@ into.
 | `item/started` / `item/completed` (`commandExecution`) | `ToolUse` / `ToolResult` (`is_error` when the status is failed/declined or the exit code is non-zero) |
 | `item/started` / `item/completed` (`fileChange`) | `ToolUse` / `ToolResult` named `patch` |
 | `item/completed` (`agentMessage`) of a thread a `spawnAgent` item named in `receiverThreadIds` | `SubagentText`, keyed by the spawn call's item ID ([sub-agent text](../../docs/subagent-text.md)) |
+| `item/started` / `item/completed` of a tool item (`commandExecution`, `fileChange`, `mcpToolCall`, `dynamicToolCall`, `webSearch`, `collabAgentToolCall`) of such a thread | `ToolUse` / `ToolResult` with `parent_tool_use_id` set to the spawn call's item ID |
 | `item/*` (`mcpToolCall`, `dynamicToolCall`, `webSearch`) | `ToolUse` / `ToolResult` |
 | `item/started` / `item/completed` (`collabAgentToolCall`) | `ToolUse` / `ToolResult`, keyed by item ID with the operation and receiver status |
 | `item/reasoning/summaryTextDelta`, `item/reasoning/textDelta` | `ReasoningDelta` |

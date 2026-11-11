@@ -1,10 +1,10 @@
-# What a CLI's own sub-agents say
+# What a CLI's own sub-agents say and do
 
 A harness CLI can start sub-agents of its own (Claude Code's Agent/Task tool, Codex's `spawnAgent`).
 They are not cluster agents: no id, no lineage, no inbox (see the
 [external harness decision](../../../../docs/decisions/agents/graph/2026-10-19-external-harness.md)).
 Their work used to be invisible to a person, who saw one tool call and its final result. The text they
-write now reaches the timeline as work detail.
+write and the tool calls they make now reach the timeline as work detail, tied to the call that started them.
 
 ## The event
 
@@ -19,6 +19,15 @@ visibility prefix and is not part of `TurnCompleted.text`.
 | Codex | `item/completed` `agentMessage` of a thread named in a `spawnAgent` item's `receiverThreadIds` | none on the frames |
 | Antigravity | not read (below) | |
 
+A sub-agent's tool calls are the ordinary `ToolUse` / `ToolResult` events with `parent_tool_use_id` set to
+the same call id (None for the main agent's own). Claude Code: the `parent_tool_use_id` of the
+`tool_use` / `tool_result` frame. Codex: the child thread's tool items (`commandExecution`, `fileChange`,
+`mcpToolCall`, `dynamicToolCall`, `webSearch`, a nested `collabAgentToolCall`) mapped by the same function as the
+parent's and attributed through `SubagentThreads`. The recorded child thread sends a tool item as
+`item/completed` alone, so a completed item the child never started is shown as a call followed by its
+result.
+
+
 What the CLIs send, recorded on Claude Code (claude-agent-sdk 0.2.168) and Codex 0.166:
 
 - **Claude Code.** In this version the Agent tool starts an async sub-agent by default
@@ -30,8 +39,8 @@ What the CLIs send, recorded on Claude Code (claude-agent-sdk 0.2.168) and Codex
   own (it became the turn's reply text) and, arriving with no turn open, began a harness turn of cause
   UNKNOWN. Now thinking and the token stream of a sub-agent are dropped, its text blocks are
   `SubagentText`, and a sub-agent frame that arrives with no turn open begins a harness turn of cause
-  `BACKGROUND_TASK`. Its tool calls and results still flow as the main agent's `ToolUse` / `ToolResult`
-  (not yet labelled as the sub-agent's).
+  `BACKGROUND_TASK`. Its tool calls and results are `ToolUse` / `ToolResult` carrying the call id in
+  `parent_tool_use_id`.
 - **Codex.** A sub-agent is a thread on the same app-server connection. Its notifications carry its own
   `threadId` and were dropped as another thread's. `SubagentThreads` learns the child id when the
   parent's `spawnAgent` item completes and shows the child's finished messages in the turn that is
@@ -43,12 +52,24 @@ What the CLIs send, recorded on Claude Code (claude-agent-sdk 0.2.168) and Codex
 ## On the timeline
 
 The projector writes a `subagent_text` item per event: `payload` is the text, `source` the label,
-`parent_item_id` the `agent_code` item of the spawning call when this projector saw the call (None for
-text that outlives its run), `user_facing=False`. It is secondary work: it folds into Details beside
+`parent_item_id` the `agent_code` item of the spawning call, `user_facing=False`. It is secondary work: it folds into Details beside
 the tool call, writes no `agent_user_messages` row, moves no unread cursor and sends no push.
 
+A tool call a sub-agent made is the usual `agent_code` / `code_output` pair with the same
+`parent_item_id`; the main agent's own pair has none. The Details view nests the sub-agent's rows under a left
+rule and badges its tool headers `Sub-agent`.
+
+Finding the spawning call: the projector knows the calls it wrote itself. A background sub-agent can speak or
+act after the graph invocation that wrote its call ended, in a later invocation whose projector never saw it.
+Every `agent_code` item of an external harness therefore stores the CLI's call id (`tool_use_id`), and the
+projector looks the call up by that id once per call id and invocation
+(`aget_harness_call_item_id`). A call found nowhere (the CLI's id was never written to this agent's timeline,
+for example a forked history that predates the field) leaves `parent_item_id` empty and the item unmarked.
+
 Volume: one message is cut at `SUBAGENT_ITEM_CHARS` (8,000) and one graph invocation stops after
-`SUBAGENT_RUN_CHARS` (200,000) in total, leaving one `status:` marker. The main agent's own text and tool
-output are not capped; these limits exist because nobody asked the agent to produce this text.
+`SUBAGENT_RUN_CHARS` (200,000) in total, leaving one `status:` marker. A sub-agent's tool call input and
+output count against the same total and are cut at the same size; after the limit a call writes nothing and an
+output already running is replaced by `[output omitted: sub-agent limit reached]`. The main agent's own text and
+tool output are not capped; these limits exist because nobody asked the agent to produce this text.
 
 Parent: [harness](harness.md).

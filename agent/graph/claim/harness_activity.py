@@ -31,13 +31,15 @@ TEXT_CHECKPOINT_SECONDS = 0.2
 # Sub-agent text is work detail a CLI can produce without bound, and every item is a database row the
 # timeline pages through, so it is capped twice: one message is cut at `SUBAGENT_ITEM_CHARS`, and
 # one projector (one graph invocation) stops writing sub-agent items after `SUBAGENT_RUN_CHARS` in
-# total, leaving a single marker item where it stopped. The main agent's own text and tool output are
+# total, leaving a single marker item where it stopped. A sub-agent's tool calls and their output count
+# against the same budget and are cut the same way. The main agent's own text and tool output are
 # not capped here; these limits are only for the part a person never asked the agent to produce.
 # meiva:link base/lm/harness/docs/subagent-text.md
 SUBAGENT_ITEM_CHARS = 8_000
 SUBAGENT_RUN_CHARS = 200_000
 SUBAGENT_CUT = "\n[... sub-agent text cut]"
 SUBAGENT_LIMIT_NOTE = "Sub-agent text limit reached; further sub-agent text is not shown."
+SUBAGENT_OMITTED = "[output omitted: sub-agent limit reached]"
 
 
 def _elapsed(start: datetime, end: datetime) -> int:
@@ -57,6 +59,7 @@ class HarnessTurnProjector:
         non_human_wake: bool = False,
         explicit_visibility: bool = False,
         delivery_mode: str | None = None,
+        find_call: Callable[[str], Awaitable[str | None]] | None = None,
     ) -> None:
         self._checkpoint = checkpoint
         self._next_idx = self._base_idx = self._committed_count = base_idx
@@ -76,6 +79,8 @@ class HarnessTurnProjector:
         self._seen_tools: set[str] = set()
         self._tool_items: dict[str, str] = {}
         self._subagent_chars = 0
+        self._find_call = find_call
+        self._unfound_calls: set[str] = set()
         self._pending: dict[str, TimelineItem] = {}
         self._dirty = asyncio.Event()
         self._lock = asyncio.Lock()
@@ -95,10 +100,10 @@ class HarnessTurnProjector:
                 case ReasoningDelta() | ReasoningText() | TextDelta() | AssistantText():
                     await self._on_text(event, now)
                 case SubagentText():
-                    self._on_subagent_text(event, now)
+                    await self._on_subagent_text(event, now)
                     await self._flush()
                 case ToolUse():
-                    self._on_tool_use(event, now)
+                    await self._on_tool_use(event, now)
                     await self._flush()
                 case ToolResult():
                     self._on_tool_result(event, now)
@@ -262,45 +267,85 @@ class HarnessTurnProjector:
         self._text_item = None
         self._text = ""
 
-    def _on_tool_use(self, event: ToolUse, now: datetime) -> None:
+    # meiva:note
+    # The `agent_code` item of the call that started a sub-agent: one this projector wrote, else one an
+    # earlier graph invocation wrote, found by the CLI's call id (a background sub-agent outlives the
+    # invocation that saw its spawning call). A call found nowhere stays None, and is not asked again.
+    # meiva:link base/lm/harness/docs/subagent-text.md
+    async def _call_item(self, tool_use_id: str) -> str | None:
+        if (known := self._tool_items.get(tool_use_id)) is not None:
+            return known
+        if self._find_call is None or tool_use_id in self._unfound_calls:
+            return None
+        found = await self._find_call(tool_use_id)
+        if found is None:
+            self._unfound_calls.add(tool_use_id)
+        else:
+            self._tool_items[tool_use_id] = found
+        return found
+
+    def _within_subagent_budget(self, size: int, now: datetime) -> bool:
+        if self._subagent_chars > SUBAGENT_RUN_CHARS:
+            return False
+        self._subagent_chars += size
+        if self._subagent_chars > SUBAGENT_RUN_CHARS:
+            _ = self._new_item("system_marker", f"status:{SUBAGENT_LIMIT_NOTE}", now)
+            return False
+        return True
+
+    @staticmethod
+    def _cut_subagent(text: str) -> str:
+        return (
+            text[:SUBAGENT_ITEM_CHARS] + SUBAGENT_CUT if len(text) > SUBAGENT_ITEM_CHARS else text
+        )
+
+    async def _on_tool_use(self, event: ToolUse, now: datetime) -> None:
         if event.tool_use_id in self._seen_tools:
             return
         self._seen_tools.add(event.tool_use_id)
         self._close_text(now)
         self._last_chat_raw = ""
-        code_ms = _elapsed(self._reasoning_ended or self._activity_started, now)
+        subagent = event.parent_tool_use_id is not None
+        payload = format_tool_use(event.name, event.tool_input)
+        parent = None
+        if event.parent_tool_use_id is not None:
+            parent = await self._call_item(event.parent_tool_use_id)
+            payload = self._cut_subagent(payload)
+            if not self._within_subagent_budget(len(payload), now):
+                return
+        code_ms = 0 if subagent else _elapsed(self._reasoning_ended or self._activity_started, now)
         code_item = self._new_item(
             "agent_code",
-            format_tool_use(event.name, event.tool_input),
+            payload,
             now,
             source=event.name if event.name != "execute_code" else None,
             activity_pending=True,
             sdk_calls=[SdkCall(method=event.name, count=1)],
+            parent_item_id=parent,
+            tool_use_id=event.tool_use_id,
         )
-        output_item = self._new_item("code_output", "Tool running", now, activity_pending=True)
+        output_item = self._new_item(
+            "code_output", "Tool running", now, activity_pending=True, parent_item_id=parent
+        )
         self._tool_items[event.tool_use_id] = code_item.item_id
         self._tools[event.tool_use_id] = (code_item, output_item, code_ms, now)
-        self._activity_started = now
-        self._reasoning_ended = None
+        if not subagent:
+            self._activity_started = now
+            self._reasoning_ended = None
 
-    def _on_subagent_text(self, event: SubagentText, now: datetime) -> None:
+    async def _on_subagent_text(self, event: SubagentText, now: datetime) -> None:
         if self._subagent_chars > SUBAGENT_RUN_CHARS or not event.text.strip():
             return
         self._close_text(now)
         self._last_chat_raw = ""
-        self._subagent_chars += len(event.text)
-        if self._subagent_chars > SUBAGENT_RUN_CHARS:
-            _ = self._new_item("system_marker", f"status:{SUBAGENT_LIMIT_NOTE}", now)
+        if not self._within_subagent_budget(len(event.text), now):
             return
-        text = event.text
-        if len(text) > SUBAGENT_ITEM_CHARS:
-            text = text[:SUBAGENT_ITEM_CHARS] + SUBAGENT_CUT
         _ = self._new_item(
             "subagent_text",
-            text,
+            self._cut_subagent(event.text),
             now,
             source=event.agent,
-            parent_item_id=self._tool_items.get(event.tool_use_id),
+            parent_item_id=await self._call_item(event.tool_use_id),
             user_facing=False,
         )
 
@@ -314,14 +359,20 @@ class HarnessTurnProjector:
             code_elapsed_ms=code_ms,
             activity_pending=False,
         )
+        output = event.content or ("Tool failed" if event.is_error else "")
+        subagent = event.parent_tool_use_id is not None
+        if subagent:
+            cut = self._cut_subagent(output)
+            output = cut if self._within_subagent_budget(len(cut), now) else SUBAGENT_OMITTED
         self._revise(
             output_item,
-            event.content or ("Tool failed" if event.is_error else ""),
+            output,
             exec_ms=_elapsed(started, now),
             activity_pending=False,
             created_at=now.isoformat(),
         )
-        self._activity_started = now
+        if not subagent:
+            self._activity_started = now
 
     def _check_visibility(self, text: str) -> None:
         if self._explicit_visibility and text.strip() and parse_reply_visibility(text) is None:

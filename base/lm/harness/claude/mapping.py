@@ -161,6 +161,7 @@ def _assistant(message: object, turn_id: str | None) -> list[BridgeEvent]:
                     tool_use_id=str(getattr(block, "id", "")),
                     name=str(getattr(block, "name", "")),
                     tool_input=_dict(getattr(block, "input", None)),
+                    parent_tool_use_id=parent,
                 )
             )
     return events
@@ -184,6 +185,7 @@ def _user(message: object, turn_id: str | None) -> list[BridgeEvent]:
     if turn_id is None:
         return []
     events: list[BridgeEvent] = []
+    parent = _parent_tool_use_id(message)
     for block in _as_list(getattr(message, "content", None)):
         if type(block).__name__ != "ToolResultBlock":
             continue
@@ -193,6 +195,7 @@ def _user(message: object, turn_id: str | None) -> list[BridgeEvent]:
                 tool_use_id=str(getattr(block, "tool_use_id", "")),
                 is_error=bool(getattr(block, "is_error", False)),
                 content=_render(getattr(block, "content", None)),
+                parent_tool_use_id=parent,
             )
         )
     return events
