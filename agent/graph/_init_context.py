@@ -36,7 +36,7 @@ from base.paths import workspace_dir
 from .claim import route_target
 from .claim.harness_render import pending_messages, render_messages
 from .hooks.cwd import ValidateCwdAfterInitHook
-from .hooks.question_context import read_agent_open_questions
+from .hooks.question_context import mark_questions_owner, read_agent_open_questions
 from .node_log import StallConfig, node_lifecycle
 from .prompt.context_notes import (
     context_notes,
@@ -135,9 +135,15 @@ def _reset_inputs(
     handoff: Handoff,
     notes: Sequence[BaseMessage],
     tail: Sequence[BaseMessage],
+    question_notes: Sequence[BaseMessage],
 ) -> tuple[list[dict[str, object]], list[BaseMessage]]:
     tail_msgs = pending_messages(tail)
-    pending: list[BaseMessage] = [SystemMessage(content=handoff.render()), *notes, *tail_msgs]
+    pending: list[BaseMessage] = [
+        SystemMessage(content=handoff.render()),
+        *notes,
+        *tail_msgs,
+        *question_notes,
+    ]
     newest = max(
         (
             iid
@@ -188,7 +194,9 @@ async def _establish_external_harness_context(
     }
     if target in ("before_turn", "harness_turn") and reset.tail:
         grounded = handoff or _build_grounded_handoff(ctx, agent_id=agent_id)
-        inputs, view = _reset_inputs(grounded, notes, reset.tail)
+        inputs, view = _reset_inputs(
+            grounded, notes, reset.tail, await _open_questions_note(ctx, agent_id, reset)
+        )
         ext_update["harness_inputs"] = inputs
         ext_update["harness_view"] = view
     return Command[NodeName](update=ext_update, goto=target)
@@ -281,7 +289,12 @@ async def _open_questions_note(
         return []
     now = ctx.require_clock().now()
     return [
-        system_note_message(content=text, tag=NoteTag.CONTEXT, picked_up_at=now, created_at=now)
+        mark_questions_owner(
+            system_note_message(
+                content=text, tag=NoteTag.CONTEXT, picked_up_at=now, created_at=now
+            ),
+            agent_id,
+        )
     ]
 
 

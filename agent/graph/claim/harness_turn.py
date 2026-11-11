@@ -656,10 +656,11 @@ class ForegroundRun:
             publish_inbound(self._ctx, self._agent_id, items)
         if not handed:
             return True
+        compaction_note = await self._compaction_note()
         self.last_key = handed[-1].key
         self.fg = self.fg.hand(tuple(handed))
         try:
-            await self._bridge.deliver(inputs, compaction_note=await self._compaction_note())
+            await self._bridge.deliver(inputs, compaction_note=compaction_note)
         except HarnessNotDeliveredError:
             await self._take_back(handed)
             raise

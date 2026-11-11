@@ -43,6 +43,7 @@ def _reminder(questions: list[OpenQuestion]) -> str:
         catalog=build_model_catalog(home=meiva_home()),
         extensions=EMPTY,
         open_questions=questions,
+        owner_agent_id=7,
         now=_NOW,
     )
     assert update is not None

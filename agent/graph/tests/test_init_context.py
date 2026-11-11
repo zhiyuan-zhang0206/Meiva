@@ -9,6 +9,7 @@ is what these tests pin down now that there is one owner.
 import os
 import random
 from collections.abc import Callable, Mapping
+from dataclasses import replace
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, cast
@@ -23,13 +24,17 @@ from psycopg.types.json import Jsonb
 from psycopg_pool import AsyncConnectionPool
 
 from agent.graph._init_context import init_context_node
-from agent.graph.hooks.compact import build_compact_transition
+from agent.graph.hooks.question_context import (
+    mark_questions_owner,
+    read_agent_open_questions,
+    without_foreign_question_notes,
+)
 from agent.graph.hooks.tests.scripted_model import ScriptedModel
 from agent.nodes import CLAIM
 from agent.state import AgentState, CapabilitiesState, ContextReset
 from base.agents.context import MeivaContext
 from base.agents.context.identity import AgentIdentity
-from base.agents.messages.kwargs import MeivaMsgType, read_meiva_kwargs
+from base.agents.messages.kwargs import read_meiva_kwargs
 from base.api_contracts.agent_contract import Harness
 from base.clock import SYSTEM_TIMERS, Clock
 from base.clock.tests.seeded_rng import seeded_rng
@@ -40,6 +45,8 @@ from base.events.live.bus import EventBus
 from base.host.boundary.json_values import is_object_list
 from base.host.env.agent_slices import AgentSlices
 from base.lm.catalog import ModelCatalog
+from base.log.tests.log_records import LogRecords
+from base.log.tests.log_records import loguru_records as loguru_records
 from base.native_process.turn_identity import HostedTurnResources
 from base.packages.extensions import install_registry
 from base.packages.extensions.install_registry import InstalledPackage
@@ -749,14 +756,37 @@ async def test_a_fork_shows_only_its_own_questions(
     )
 
 
-def test_every_compaction_path_parks_its_summary_in_the_reset_tail_this_node_serves() -> None:
-    transition = build_compact_transition(
-        "SUMMARY",
-        resume=CLAIM,
-        summary_kwargs={
-            "additional_kwargs": {"meiva_msg_type": MeivaMsgType.COMPACT_SUMMARY.value}
-        },
+async def test_a_database_failure_leaves_the_list_out_and_reports_it(
+    loguru_records: LogRecords,
+) -> None:
+    class BrokenDb:
+        def connect(self) -> object:
+            raise TimeoutError("pool timed out")
+
+    context = replace(
+        _runtime(None, database_gate=cast("ProcessDbGate", object())).context,
+        db=cast("Database", BrokenDb()),
     )
-    reset = cast("ContextReset", transition["context_reset"])
-    assert transition["goto"] == "init_context"
-    assert "SUMMARY" in str(reset.tail[0].content)
+    assert await read_agent_open_questions(context, 7) == []
+    assert loguru_records.events("open_questions_unavailable")
+
+
+def test_a_note_listing_another_agents_questions_is_not_shown_to_this_agent() -> None:
+    mine: AnyMessage = HumanMessage(content="mine")
+    theirs: AnyMessage = HumanMessage(content="theirs")
+    plain: AnyMessage = HumanMessage(content="plain")
+    _ = mark_questions_owner(mine, 7)
+    _ = mark_questions_owner(theirs, 3)
+    assert without_foreign_question_notes([mine, theirs, plain], 7) == [mine, plain]
+
+
+async def test_the_rebuilt_context_marks_its_question_note_with_its_owner(
+    db_conn: psycopg.Connection, aops_pool: AsyncConnectionPool, database_gate: ProcessDbGate
+) -> None:
+    agent = create_agent(db_conn)
+    _ask(db_conn, agent, "Which database?")
+    db_conn.commit()
+    messages = await _rebuilt(aops_pool, database_gate, agent, _tail())
+    [note] = [m for m in messages if "still unanswered" in str(m.content)]
+    assert read_meiva_kwargs(note).get("meiva_questions_agent_id") == agent
+    assert without_foreign_question_notes(messages, agent + 1000).count(note) == 0

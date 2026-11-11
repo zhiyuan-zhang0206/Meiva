@@ -12,7 +12,7 @@ from langgraph.graph.message import REMOVE_ALL_MESSAGES
 from langgraph.runtime import Runtime
 from psycopg_pool import AsyncConnectionPool
 
-from agent.graph.hooks.question_context import read_agent_open_questions
+from agent.graph.hooks.question_context import mark_questions_owner, read_agent_open_questions
 from agent.graph.interrupt import (
     ModelInterruptedError,
     interrupt_halt,
@@ -594,6 +594,7 @@ def compact_reminder_update(
     catalog: ModelCatalog,
     extensions: ExtensionRegistry,
     open_questions: Sequence[OpenQuestion],
+    owner_agent_id: int | None,
     now: datetime,
 ) -> dict[str, Any] | None:
     if not reminder_due(state, agent, catalog=catalog):
@@ -606,20 +607,18 @@ def compact_reminder_update(
         event="compact_reminder",
         body=f"injecting wind-down note, tokens≈{_context_occupancy(state.messages)}",
     )
+    note = system_note_message(
+        content=_reminder_content(
+            agent, catalog=catalog, extensions=extensions, open_questions=open_questions
+        ),
+        tag=NoteTag.COMPACT_REMINDER,
+        picked_up_at=now,
+        created_at=now,
+    )
+    if open_questions and owner_agent_id is not None:
+        mark_questions_owner(note, owner_agent_id)
     return {
-        "messages": [
-            system_note_message(
-                content=_reminder_content(
-                    agent,
-                    catalog=catalog,
-                    extensions=extensions,
-                    open_questions=open_questions,
-                ),
-                tag=NoteTag.COMPACT_REMINDER,
-                picked_up_at=now,
-                created_at=now,
-            )
-        ],
+        "messages": [note],
         "compact": compact.model_copy(
             update={"reminder_shown": True, "reminder_seen_version": seen}
         ),
@@ -644,15 +643,14 @@ class _CompactReminderHook(Hook):
             return None
         if not reminder_due(state, agent, catalog=catalog):
             return None
+        owner = runtime.context.identity.agent_id if runtime.context.identity else None
         return compact_reminder_update(
             state,
             agent,
             catalog=catalog,
             extensions=runtime.context.plugin_registry(),
-            open_questions=await read_agent_open_questions(
-                runtime.context,
-                runtime.context.identity.agent_id if runtime.context.identity else None,
-            ),
+            open_questions=await read_agent_open_questions(runtime.context, owner),
+            owner_agent_id=owner,
             now=runtime.context.require_clock().now(),
         )
 
