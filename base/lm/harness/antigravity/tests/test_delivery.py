@@ -69,6 +69,15 @@ def test_the_recorded_trajectory_reply_is_decoded_and_a_wrong_shape_is_refused()
         _ = parse_trajectory({"status": "CASCADE_RUN_STATUS_IDLE", "numTotalSteps": 1})
 
 
+def test_a_conversation_with_no_step_yet_is_idle_and_empty_not_a_wrong_shape() -> None:
+    parsed = parse_trajectory(FIXTURE["trajectory_reply_empty"])
+    assert (parsed.status, parsed.num_steps, parsed.steps) == (RunStatus.IDLE, 0, ())
+    with pytest.raises(AgyInterfaceError, match="steps"):
+        _ = parse_trajectory(
+            {"status": "CASCADE_RUN_STATUS_IDLE", "numTotalSteps": 2, "trajectory": {}}
+        )
+
+
 async def test_an_input_for_a_running_turn_carries_its_id_and_enters_the_context(
     tmp_path: Path,
 ) -> None:

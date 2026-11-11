@@ -23,5 +23,16 @@
         {"type": "CORTEX_STEP_TYPE_USER_INPUT", "status": "CORTEX_STEP_STATUS_DONE", "userInput": {"clientMessageId": "cmid-a"}}
       ]
     }
+  },
+  "trajectory_reply_empty": {
+    "note": "GetCascadeTrajectory of a conversation with no step yet, recorded on agy 1.5.5 right after init (live verification 2026-11-11): proto3 JSON omits numTotalSteps and trajectory.steps; ids replaced",
+    "status": "CASCADE_RUN_STATUS_IDLE",
+    "trajectory": {
+      "cascadeId": "00000000-0000-0000-0000-000000000000",
+      "trajectoryId": "00000000-0000-0000-0000-000000000001",
+      "source": "CORTEX_TRAJECTORY_SOURCE_CASCADE_CLIENT",
+      "trajectoryType": "CORTEX_TRAJECTORY_TYPE_CASCADE",
+      "metadata": {"createdAt": "2026-11-11T00:00:00Z"}
+    }
   }
 }
