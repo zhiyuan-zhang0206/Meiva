@@ -57,8 +57,14 @@ QUEUED_INPUT_REVIVED)`, an idle one closes it with the answers read from the tra
 already attributed are ignored when stdout replays them, so the next turn's text is its own (its
 `result` still carries the combined usage). Frames of an earlier process generation are dropped.
 
-Known limits. An image can only ride on a running turn (`media`); starting a turn with an image is
-refused, because the stdin protocol has no image field. The trajectory reply of a text-only step was
+Known limits. An image can only ride on a running turn (`media`): the stdin protocol has no image field. An
+input with an image for an idle conversation therefore starts its turn with the text alone (which says the
+image follows) and the image is steered into that turn as a second input, `<key>:images`, once the trajectory
+reports the turn running (`AntigravityConfig.image_follow_seconds`, 30 s). Verified on a live agy: a turn
+running `sleep 45` took a steered red image (answer "Red"), and an idle delivery of a blue image answered
+"Blue" with the two acknowledgements `k1` then `k1:images`. The second key settles only itself; if the turn ends
+or never runs in time, the image is not sent, `harness_image_not_delivered` is logged and the second key is
+rejected, so the text of the message still stands and names the image. The trajectory reply of a text-only step was
 not observed to carry the text, so the phantom turn's answer comes from the transcript file.
 `deliveryStrategy=WHEN_IDLE` was tried once, never against an idle conversation, so nothing here relies on it.
 

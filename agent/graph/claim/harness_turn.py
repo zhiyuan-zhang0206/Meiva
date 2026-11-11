@@ -40,7 +40,12 @@ from agent.graph.claim.harness_inbox import (
     requeue_handed,
     reserve_head_batch,
 )
-from agent.graph.claim.harness_render import render_message, render_messages
+from agent.graph.claim.harness_render import (
+    native_images,
+    render_message,
+    render_messages,
+    skipped_images_note,
+)
 from agent.graph.claim.lost_turn import report_lost_turn
 from agent.graph.claim.timeline import append_turn_timeline
 from agent.graph.claim.turn_stamp import persist_last_active
@@ -72,6 +77,7 @@ from base.lm.harness import (
     HarnessNotDeliveredError,
     HarnessSetupError,
     HarnessTurnFaultedError,
+    ImageBlock,
     ReasoningDelta,
     ReasoningText,
     TextDelta,
@@ -253,6 +259,7 @@ class ForegroundRun:
         self.fg = Foreground()
         self._synthetic: list[tuple[Handed, str]] = []
         self._prompts: dict[str, str] = {}
+        self._images: dict[str, tuple[ImageBlock, ...]] = {}
         for raw in state.harness_inputs:
             key, prompt = str(raw["key"]), str(raw["prompt"])
             items = _TIMELINE_ITEMS.validate_python(raw.get("timeline_items", []))
@@ -572,8 +579,12 @@ class ForegroundRun:
     def _handed_of(self, item: ClaimedInbound) -> tuple[Handed, str]:
         messages = prepare_steered_inbound(self._ctx, item)
         text = render_messages(messages)
+        images, skipped = native_images(messages)
+        if skipped:
+            text = f"{text}\n\n{skipped_images_note(skipped)}"
         items, _ = build_timeline_items(messages, inputs=self._ctx.timestamp_policy())
         entry = Handed(f"inbound-{item.id}", item.id, tuple(items), human=is_human_wake_item(item))
+        self._images[entry.key] = images
         return entry, text
 
     async def _render(self, rows: Sequence[ClaimedInbound]) -> list[tuple[Handed, str]]:
@@ -598,7 +609,9 @@ class ForegroundRun:
         for entry, text in await self._render(rows):
             if text.strip():
                 handed.append(entry)
-                inputs.append(HarnessInput(key=entry.key, text=text))
+                inputs.append(
+                    HarnessInput(key=entry.key, text=text, images=self._images.get(entry.key, ()))
+                )
             else:
                 settled_now.append(entry)
         if not handed and not settled_now:

@@ -195,17 +195,6 @@ async def test_a_trajectory_of_an_unexpected_shape_fails_the_delivery(tmp_path: 
         await harness.stop()
 
 
-async def test_an_image_cannot_start_a_turn_on_stdin(tmp_path: Path) -> None:
-    harness = await start(tmp_path, turns=[say("one")])
-    try:
-        image = ImageBlock("image/png", "aGk=")
-        with pytest.raises(ValueError, match="image"):
-            await harness.session.deliver([HarnessInput("img", "look", (image,))])
-        assert [e.key for e in await seen(harness, InputRejected)] == ["img"]
-    finally:
-        await harness.stop()
-
-
 def _watchers() -> list[asyncio.Task[Any]]:
     return [task for task in asyncio.all_tasks() if "_watch" in repr(task.get_coro())]
 
@@ -234,3 +223,21 @@ async def test_closing_with_an_unsettled_input_stops_the_trajectory_poll(tmp_pat
     assert _watchers()
     await asyncio.wait_for(harness.stop(), 10)
     assert _watchers() == []
+
+
+async def test_an_image_for_an_idle_conversation_starts_the_turn_with_text_and_is_steered_in_after(
+    tmp_path: Path,
+) -> None:
+    harness = await start(tmp_path, turns=[{"hang": True}])
+    try:
+        image = ImageBlock("image/png", "aGk=")
+        await harness.session.deliver([HarnessInput("img-1", "look at this", (image,))])
+        await harness.wait_until(lambda: len(harness.rpc_payloads()) == 1)
+        [sent] = harness.rpc_payloads()
+        assert harness.messages()[0] == "look at this\n\n(The image for this message follows next.)"
+        assert sent["clientMessageId"] == "img-1:images"
+        assert sent["media"] == [{"mimeType": "image/png", "inlineData": "aGk="}]
+        started = (await seen(harness, TurnStarted))[-1]
+        assert started.keys == ("img-1",), "the caller's key is the text input that began the turn"
+    finally:
+        await harness.stop()

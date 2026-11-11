@@ -33,6 +33,10 @@ subscription is primed with it. The run writes one status line naming the cause 
 any other; the invocation ends only when no input is unsettled, no turn runs and no event is waiting to be read.
 The turn is presented once, by whichever run reads its start ([background work](../../../base/lm/harness/docs/background-work.md)).
 
+Images of a message go to the harness as images (`HarnessInput.images`, built from the message's inlined
+`image_url` blocks by `native_images`), with the "Attached images" path listing left in the text. Bounds and the
+per-CLI delivery are in [harness delivery](../../../base/lm/harness/docs/delivery.md).
+
 Inputs without an inbox row (a restart or resurrect note, a fork marker, a continuation after a context
 reset, pre-turn hook notes, a visibility or delivery correction) are synthetic inputs in `harness_inputs`.
 Each has a stable key, goes through the same `deliver()`, and writes its timeline entries at ACK 2. A fork's

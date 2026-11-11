@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import base64
 from collections.abc import Sequence
 
 from langchain_core.messages import AIMessage, BaseMessage, ToolMessage
@@ -8,6 +9,7 @@ from agent import state as _state
 from base.agents.messages.kwargs import read_meiva_kwargs
 from base.host.boundary.json_values import is_object_dict, is_object_list
 from base.lm.content import message_content
+from base.lm.harness import ImageBlock
 
 
 # meiva:note
@@ -98,3 +100,56 @@ def render_message(message: BaseMessage) -> str:
         text, body_start=body_start if isinstance(body_start, int) else None
     )
     return f"{cleaned}\n\n{image_note}" if cleaned.strip() else image_note
+
+
+# meiva:note
+# The size bounds of an image handed to an external CLI as an image, not as a path. One image is bounded by
+# the smallest per-image limit of the three providers behind the CLIs (the Anthropic API takes at most
+# 5 MB per image); the images of one input together are bounded by what fits a provider's request
+# once base64 inflates them (Gemini's inline request limit is 20 MB, so 15 MB of raw bytes). An image over
+# either bound is not sent inline; the text says so and names the path it already lists.
+# meiva:link agent/graph/docs/harness-foreground.md
+MAX_IMAGE_BYTES = 5 * 1024 * 1024
+MAX_INPUT_IMAGE_BYTES = 15 * 1024 * 1024
+_DATA_URL = "data:"
+
+
+# meiva:note
+# The images a message carries as native content (the `image_url` data-URL blocks the claim inlined from
+# the uploads), as `ImageBlock`s in order, and how many were left out for size. A data URL that is not a
+# base64 image of a supported type raises: the claim only writes those.
+def native_images(messages: Sequence[BaseMessage]) -> tuple[tuple[ImageBlock, ...], int]:
+    images: list[ImageBlock] = []
+    skipped = 0
+    total = 0
+    for message in messages:
+        content = message_content(message)
+        if isinstance(content, str):
+            continue
+        for block in content:
+            if isinstance(block, str) or block.get("type") != "image_url":
+                continue
+            image_url = block.get("image_url")
+            url = image_url.get("url") if is_object_dict(image_url) else None
+            if not isinstance(url, str) or not url.startswith(_DATA_URL):
+                raise ValueError("an inlined image block must carry a data URL")
+            head, _, data = url.partition(",")
+            mime, _, encoding = head[len(_DATA_URL) :].partition(";")
+            if encoding != "base64":
+                raise ValueError(f"an inlined image must be base64, got {encoding!r}")
+            size = len(base64.b64decode(data, validate=True))
+            if size > MAX_IMAGE_BYTES or total + size > MAX_INPUT_IMAGE_BYTES:
+                skipped += 1
+                continue
+            total += size
+            images.append(ImageBlock(mime_type=mime, data_base64=data))
+    return tuple(images), skipped
+
+
+def skipped_images_note(skipped: int) -> str:
+    noun = "image was" if skipped == 1 else "images were"
+    return (
+        f"{skipped} attached {noun} not sent inline because of its size (limit "
+        f"{MAX_IMAGE_BYTES // (1024 * 1024)} MB per image, {MAX_INPUT_IMAGE_BYTES // (1024 * 1024)} MB "
+        "per message); open the file at the path listed above."
+    )

@@ -9,8 +9,10 @@ from base.lm.harness import (
     BridgeEvent,
     ContextCompacted,
     SessionStarted,
+    TurnCompleted,
     TurnOrigin,
     TurnStarted,
+    Usage,
 )
 from base.lm.harness.delivery import HarnessInput
 from base.lm.harness.events import AckSignal, HarnessCause, InputInContext, InputReceived
@@ -75,6 +77,53 @@ async def test_a_compaction_seen_while_idle_puts_the_reminder_on_the_next_delive
 
     assert [batch[0].text for batch in session.delivered] == [
         f"{doc.render().strip()}\n\none",
+        f"{compaction_reminder(instructions)}\n\ntwo",
+        "three",
+    ]
+
+
+async def test_a_compaction_turn_between_turns_puts_the_reminder_on_the_very_next_delivery() -> (
+    None
+):
+    # meiva:note
+    # The shape a real Codex showed after `thread/compact/start`: a turn the server began itself, the compaction
+    # item some seconds in, the turn's end, and the next input arriving right behind it. The reminder
+    # rides that next input, not the one after.
+    # meiva:link base/lm/harness/docs/delivery.md
+    session = DeliveringSession()
+    instructions = Path("/agents/6984/instructions.md")
+    doc = handoff().with_reference_file(instructions)
+    bridge = make_bridge(session, handoff=doc)
+    subscription = await bridge.subscribe()
+    await bridge.deliver([HarnessInput(key="inbound-1", text="one")])
+
+    session._queue.append(_own("compaction"))
+    session._queue.append(ContextCompacted(turn_id="compaction"))
+    session._queue.append(
+        TurnCompleted(
+            turn_id="compaction",
+            session_id=None,
+            text="",
+            subtype="completed",
+            is_error=False,
+            interrupted=False,
+            stop_reason=None,
+            num_turns=1,
+            duration_ms=1,
+            usage=Usage(),
+            cost_usd=None,
+            cumulative_cost_usd=None,
+            permission_denials=(),
+            generation=1,
+        )
+    )
+    async with asyncio.timeout(2):
+        while not isinstance(await subscription.get(), TurnCompleted):
+            pass
+    await bridge.deliver([HarnessInput(key="inbound-2", text="two")])
+    await bridge.deliver([HarnessInput(key="inbound-3", text="three")])
+
+    assert [batch[0].text for batch in session.delivered][1:] == [
         f"{compaction_reminder(instructions)}\n\ntwo",
         "three",
     ]

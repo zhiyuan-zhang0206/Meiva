@@ -5,6 +5,8 @@
 from __future__ import annotations
 
 import asyncio
+import base64
+import json
 import traceback
 from collections.abc import AsyncGenerator, Callable, Sequence
 from contextlib import asynccontextmanager
@@ -713,6 +715,45 @@ async def test_a_revived_queued_input_is_not_announced_as_a_turn_of_the_cli(
     timeline = await _timeline(aops_pool, agent_id)
     assert _markers(timeline) == []
     assert len(_chats(timeline)) == 1
+
+
+async def test_a_message_with_an_image_hands_the_harness_the_image_itself(
+    tmp_path: Path,
+    db_conn: psycopg.Connection,
+    aops_pool: AsyncConnectionPool,
+    hosted_resources: HostedTurnResources,
+) -> None:
+    agent_id = agent_row(db_conn)
+    png = b"\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR"
+    path = tmp_path / "shot.png"
+    path.write_bytes(png)
+    upload = {
+        "name": "shot.png",
+        "size": len(png),
+        "content_type": "image/png",
+        "path": str(path),
+        "batch_id": "b" * 32,
+        "ordinal": 0,
+    }
+    row = _insert(
+        db_conn,
+        agent_id,
+        "chat",
+        "user",
+        "what is this",
+        payload=json.dumps({"image_uploads": [upload]}),
+    )
+    engine = FakeEngine()
+    rt = runtime(engine, ops_pool=aops_pool, hosted_resources=hosted_resources)
+
+    async with asyncio.timeout(20):
+        await harness_turn_node(AgentState(), rt, config(agent_id))
+
+    [[sent]] = engine.delivered
+    assert [image.mime_type for image in sent.images] == ["image/png"]
+    assert base64.b64decode(sent.images[0].data_base64) == png
+    assert "what is this" in sent.text and str(path) in sent.text, "the path stays listed"
+    assert _status(db_conn, row) == "done"
 
 
 # meiva:note

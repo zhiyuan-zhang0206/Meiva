@@ -22,6 +22,7 @@ from base.lm.harness.antigravity.trajectory import (
     PhantomAction,
     PhantomTurn,
     Route,
+    RunStatus,
     Trajectory,
     phantom_action,
     route,
@@ -57,6 +58,7 @@ from base.lm.harness.process import (
     watch_tree,
 )
 from base.lm.harness.session import BackgroundWork, SessionClosedError, SessionTotals
+from base.log import logger
 
 TRAJECTORY_POLL_SECONDS = 0.5
 
@@ -199,9 +201,56 @@ class AgySession(BaseHarnessSession[AntigravityConfig]):
             )
             return
         if entry.images:
-            self._apply(self._ledger.rejected(entry.key, "agy cannot start a turn with an image"))
-            raise ValueError("Antigravity can carry an image only on a running turn")
+            self._start_with_images(entry)
+            return
         _ = self._start_input_turn(entry)
+
+    # meiva:note
+    # agy takes an image only through `SendUserCascadeMessage` on a running turn, never on stdin. An idle
+    # conversation therefore starts its turn with the text alone (it says the image follows) and the image
+    # is steered into that turn as a second input of its own, `<key>:images`, once the trajectory reports
+    # the turn running. The caller's key is the text, settled like any input; the second input only
+    # settles its own key. If the turn ends before it runs, the image is not sent and that is logged and
+    # recorded as a rejection of the second key, never silently.
+    # meiva:link base/lm/harness/docs/delivery.md
+    def _start_with_images(self, entry: HarnessInput) -> None:
+        many = len(entry.images) > 1
+        plural = "images" if many else "image"
+        verb = "follow" if many else "follows"
+        lead = HarnessInput(
+            entry.key,
+            f"{entry.text.strip()}\n\n(The {plural} for this message {verb} next.)".strip(),
+        )
+        turn = self._start_input_turn(lead)
+        follow = HarnessInput(
+            f"{entry.key}:images", f"The {plural} the previous message refers to.", entry.images
+        )
+        self._ledger = self._ledger.sent(follow.key)
+        _ = self._spawn(self._follow_with_images(turn, follow))
+
+    async def _follow_with_images(self, turn: ActiveTurn, follow: HarnessInput) -> None:
+        deadline = self._clock.now().timestamp() + self.config.image_follow_seconds
+        reason = "the turn ended before it was running"
+        try:
+            while self._active is turn and not self._closed:
+                if self._session_id is not None and self._transport is not None:
+                    snapshot_ = await self._transport.trajectory(conversation_id=self._session_id)
+                    if snapshot_.status is RunStatus.RUNNING:
+                        await self._steer_input(self._transport, follow)
+                        return
+                if self._clock.now().timestamp() >= deadline:
+                    reason = "the turn was not running in time"
+                    break
+                await self._clock.asleep(TRAJECTORY_POLL_SECONDS)
+        except Exception as exc:
+            reason = f"the steer failed: {exc!r}"
+        self._apply(self._ledger.rejected(follow.key, reason))
+        logger.warning(
+            "agent {agent_id}: an image was not delivered to agy ({reason})",
+            event="harness_image_not_delivered",
+            agent_id=self.agent_id,
+            reason=reason,
+        )
 
     async def _steer_input(self, transport: AgyTransport, entry: HarnessInput) -> None:
         media = [
