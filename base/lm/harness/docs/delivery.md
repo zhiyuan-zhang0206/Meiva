@@ -16,7 +16,7 @@ returns "did it work": a refusal is an `InputRejected` event, a protocol failure
 input joins the running turn or starts one is the adapter's choice. `submit()` and `steer()` remain
 for the graph as thin wrappers: `steer()` now answers with the fact: True when the input entered the model's context (also when
 it became a turn of its own, which Claude does for an input that missed the last tool boundary),
-False on a rejection, an error when it was lost.
+False on a rejection, `InputLostError` when the harness declared it lost (both can go back to the queue); any other error means the session failed and the outcome is unknown.
 
 ## The events (`events.py`)
 
