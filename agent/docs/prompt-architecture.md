@@ -539,7 +539,10 @@ ablation design is TBD, but the on/off surface is already in place to run it.
 The workspace guidance explains that `to_user.md` is continuously displayed beside messages.
 Markdown links may refer to relative, absolute or home-relative files on the agent's machine;
 Meiva serves those references without a publication step. Legacy HTML context must be
-rewritten into Markdown, and raw HTML is not rendered.
+rewritten into Markdown. Only Markdown, images and videos render; HTML files must
+not be used for user interaction or reports. Normal Markdown links (`[label](path-or-url)`)
+are directly clickable in every user-visible surface, including conversation messages
+and `to_user.md`.
 It imposes no document schema. The agent-ID context note includes the current file
 contents when a context is created or compacted; forks read their own workspace.
 Invalid or unreadable documents produce a repair note rather than preventing the

@@ -349,8 +349,7 @@ Read all results:
 
 Integrate all findings and review opinions, then generate the final Markdown report.
 
-Render the report to a self-contained HTML file in your workspace, then deliver it with
-meiva.ui.publish() (the summary and the file path).
+Write a Markdown (.md) report in your workspace and share a normal Markdown link.
 
 After completion, message no one.
 """,

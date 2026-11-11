@@ -442,7 +442,7 @@ Write to {hf(7, f"review_{suffix}")}. Message no one.
     # 1 publisher
     publisher_prompt = f"""You are Publisher.
 Read the two reviews ({hf(7, "review_a")} and {hf(7, "review_b")}),
-merge revision suggestions, generate final Markdown, render it to a self-contained HTML file, and deliver it with meiva.ui.publish().
+merge revision suggestions, write the final Markdown (.md) report in your workspace and link it with a normal Markdown link.
 Title: "AI Coding Agent 2026 Competitive Landscape"
 Message no one — publishing IS the handoff.
 """
@@ -483,6 +483,6 @@ if __name__ == "__main__":
     #   ↓
     # wave6()
     #   ↓
-    # wave7()  ← render to a self-contained HTML file and deliver with meiva.ui.publish()
+    # wave7()  ← write a Markdown (.md) report in the workspace and deliver a normal Markdown link
 
     log("Wave 1 spawned. Orchestrator going idle, watcher will wake me.")
