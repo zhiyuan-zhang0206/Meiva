@@ -187,6 +187,10 @@ class FakeEngine:
     def generation(self) -> int:
         return 0
 
+    @property
+    def has_unpresented_turn(self) -> bool:
+        return False
+
     async def reconcile(self, keys: Sequence[str]) -> Mapping[str, Reconciliation]:
         raise AssertionError("these tests never reconcile")
 

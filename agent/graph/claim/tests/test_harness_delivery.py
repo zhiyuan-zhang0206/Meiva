@@ -22,7 +22,12 @@ from agent.db import claim_inbound_batch
 from agent.graph.claim.harness_turn import harness_turn_node
 from agent.graph.claim.node import claim_node
 from agent.graph.claim.tests.claim_support import make_runtime
-from agent.graph.claim.tests.harness_support import FakeEngine, completed, in_a_turn, rejecting
+from agent.graph.claim.tests.harness_support import (
+    FakeEngine,
+    completed,
+    in_a_turn,
+    rejecting,
+)
 from agent.graph.claim.tests.test_harness_turn import config, runtime
 from agent.graph.claim.tests.test_harness_turn import hosted_resources as hosted_resources
 from agent.graph.llm_errors import FatalLLMStreamError
@@ -37,6 +42,7 @@ from base.db.code_version_gate import ProcessDbGate
 from base.lm.harness import (
     AssistantText,
     BridgeEvent,
+    HarnessCause,
     HarnessInput,
     HarnessNotDeliveredError,
     InputInContext,
@@ -577,6 +583,136 @@ async def test_a_message_followed_by_a_stop_is_delivered_and_then_the_stop_is_ta
     assert stop.goto == "claim" and dict[str, object](stop.update or {}).get("halted") is True, (
         "the stop is taken"
     )
+
+
+# meiva:note
+# A turn the CLI begins on its own (a fired timer, a finished background task) is presented by the same
+# run that presents any other turn: its text lands on the timeline with the cause named, exactly once,
+# whether it began while the agent was idle or while a run was delivering.
+# meiva:link agent/graph/docs/harness-foreground.md
+_REPLY = "MEIVA_DISPLAY_TO_USER\nthe timer fired"
+
+
+def _own_turn(turn_id: str, cause: HarnessCause, reply: str = _REPLY) -> list[BridgeEvent]:
+    return [
+        TurnStarted(turn_id, TurnOrigin.HARNESS, (), 1, cause=cause),
+        AssistantText(turn_id, reply),
+        completed(turn_id, reply),
+    ]
+
+
+async def _timeline(pool: AsyncConnectionPool, agent_id: int) -> list[tuple[str, str]]:
+    async with pool.connection() as conn:
+        items = await aload_harness_timeline_items(conn, agent_id)
+    return [(item.kind, str(item.payload)) for item in items]
+
+
+def _chats(timeline: list[tuple[str, str]]) -> list[str]:
+    return [payload for kind, payload in timeline if kind == "agent_chat"]
+
+
+def _markers(timeline: list[tuple[str, str]]) -> list[str]:
+    return [payload for kind, payload in timeline if kind == "system_marker"]
+
+
+async def test_a_timer_turn_while_the_agent_is_idle_is_entered_and_shown_with_its_cause(
+    redis_url: str,
+    db_conn: psycopg.Connection,
+    aops_pool: AsyncConnectionPool,
+    database_gate: ProcessDbGate,
+    hosted_resources: HostedTurnResources,
+) -> None:
+    agent_id = agent_row(db_conn)
+    engine = FakeEngine()
+    engine.own_turn_events = _own_turn("w1", HarnessCause.SCHEDULED_WAKE)
+    rt = Runtime(context=_external_ctx(aops_pool, database_gate, engine, hosted_resources))
+    state = AgentState(halted=True)
+
+    async with asyncio.timeout(30):
+        entry = await claim_node(state, rt, config(agent_id))
+        assert entry.goto == "before_turn", "an unpresented turn of the CLI is the claim's work"
+        await harness_turn_node(state.model_copy(update=entry.update or {}), rt, config(agent_id))
+        after = await claim_node(state, rt, config(agent_id))
+
+    timeline = await _timeline(aops_pool, agent_id)
+    assert engine.delivered == [], "nothing was handed to the CLI: the turn is its own"
+    assert _markers(timeline) == ["status:The CLI started a turn on a scheduled wake."]
+    assert [text for text in _chats(timeline) if "the timer fired" in text] != []
+    assert len(_chats(timeline)) == 1
+    assert after.goto != "before_turn", "presented once: the next claim finds nothing"
+
+
+async def test_a_background_task_turn_names_its_cause(
+    db_conn: psycopg.Connection,
+    aops_pool: AsyncConnectionPool,
+    hosted_resources: HostedTurnResources,
+) -> None:
+    agent_id = agent_row(db_conn)
+    engine = FakeEngine()
+    engine.own_turn_events = _own_turn("b1", HarnessCause.BACKGROUND_TASK)
+    rt = runtime(engine, ops_pool=aops_pool, hosted_resources=hosted_resources)
+
+    async with asyncio.timeout(20):
+        await harness_turn_node(AgentState(), rt, config(agent_id))
+
+    assert _markers(await _timeline(aops_pool, agent_id)) == [
+        "status:The CLI started a turn for a finished background task."
+    ]
+
+
+async def test_a_turn_the_cli_begins_while_a_run_is_delivering_is_shown_once(
+    db_conn: psycopg.Connection,
+    aops_pool: AsyncConnectionPool,
+    hosted_resources: HostedTurnResources,
+) -> None:
+    agent_id = agent_row(db_conn)
+    first = _insert(db_conn, agent_id, "chat", "user", "start")
+    engine = _silent()
+    rt = runtime(engine, ops_pool=aops_pool, hosted_resources=hosted_resources)
+
+    async with asyncio.timeout(20), asyncio.TaskGroup() as tasks:
+        node = tasks.create_task(harness_turn_node(AgentState(), rt, config(agent_id)))
+        await _until(lambda: bool(engine.delivered), "delivery")
+        engine.emit(*in_a_turn([f"inbound-{first}"], "MEIVA_DISPLAY_TO_USER\nanswer"))
+        engine.emit(*_own_turn("w1", HarnessCause.SCHEDULED_WAKE))
+        await node
+
+    timeline = await _timeline(aops_pool, agent_id)
+    assert len([t for t in _chats(timeline) if "the timer fired" in t]) == 1
+    assert len(_markers(timeline)) == 1
+
+
+async def test_a_turn_of_our_own_input_carries_no_cause_marker(
+    db_conn: psycopg.Connection,
+    aops_pool: AsyncConnectionPool,
+    hosted_resources: HostedTurnResources,
+) -> None:
+    agent_id = agent_row(db_conn)
+    _ = _insert(db_conn, agent_id, "chat", "user", "hello")
+    rt = runtime(FakeEngine(), ops_pool=aops_pool, hosted_resources=hosted_resources)
+
+    async with asyncio.timeout(20):
+        await harness_turn_node(AgentState(), rt, config(agent_id))
+
+    assert _markers(await _timeline(aops_pool, agent_id)) == []
+
+
+async def test_a_revived_queued_input_is_not_announced_as_a_turn_of_the_cli(
+    db_conn: psycopg.Connection,
+    aops_pool: AsyncConnectionPool,
+    hosted_resources: HostedTurnResources,
+) -> None:
+    agent_id = agent_row(db_conn)
+    engine = FakeEngine()
+    engine.own_turn_events = _own_turn("q1", HarnessCause.QUEUED_INPUT_REVIVED)
+    rt = runtime(engine, ops_pool=aops_pool, hosted_resources=hosted_resources)
+
+    async with asyncio.timeout(20):
+        await harness_turn_node(AgentState(), rt, config(agent_id))
+
+    timeline = await _timeline(aops_pool, agent_id)
+    assert _markers(timeline) == []
+    assert len(_chats(timeline)) == 1
 
 
 # meiva:note

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import os
 import sys
-from collections.abc import Iterable, Mapping
+from collections.abc import Callable, Iterable, Mapping
 from dataclasses import dataclass, replace
 from datetime import datetime, tzinfo
 from pathlib import Path
@@ -192,12 +192,14 @@ _handoff_for = handoff_for
 # meiva:note
 # What the host root read once for the bridges it builds: the clock their turns and
 # registrations read, the controller pid a registration names, and the generator the session
-# handle (a bearer credential) is drawn from, which the root makes a `random.SystemRandom`.
+# handle (a bearer credential) is drawn from, which the root makes a `random.SystemRandom`, and what
+# to tell the host (with the agent id) when a CLI begins a turn of its own while nothing is listening.
 @dataclass(frozen=True)
 class BridgeRootValues:
     clock: SessionClock
     controller_pid: int
     handle_rng: SecureRandom
+    own_turn: Callable[[int], None]
 
 
 # meiva:note
@@ -260,4 +262,5 @@ def bridge_for(
         clock=root.clock,
         handle_rng=root.handle_rng,
         controller_pid=root.controller_pid,
+        own_turn=lambda: root.own_turn(agent_id),
     )

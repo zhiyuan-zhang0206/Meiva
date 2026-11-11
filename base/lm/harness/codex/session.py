@@ -615,7 +615,6 @@ class CodexSession(BaseHarnessSession[CodexConfig]):
             self._complete(ticket)
         else:
             self._observed.discard(local)
-            self._wake_for_harness_turn(local, settlement.completed.text)
 
     # meiva:note
     # A command item still `inProgress` is pending only while the process tree agrees: the

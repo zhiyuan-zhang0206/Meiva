@@ -181,13 +181,17 @@ async def claim_node_impl(
 # Rows an earlier process handed to the harness and left claimed also enter the turn: the turn
 # reconciles them against the harness's record before it delivers anything, so a message is never
 # stranded between a crash and the next message.
+#
+# A turn the CLI began on its own while the agent was idle enters the same way: the host's wake found
+# nothing in the inbox, but the engine holds a turn nobody has presented, and the run's subscription is
+# primed with it.
 # meiva:link agent/graph/docs/harness-foreground.md
 async def _harness_delivery_entry(
     ctx: MeivaContext, state: _state.AgentState, agent_id: int
 ) -> Command[ClaimGoto] | None:
     head = await peek_head_batch(ctx, agent_id)
     claimed = await claimed_deliverable(ctx, agent_id, include_deferred=False)
-    if not head and not claimed:
+    if not head and not claimed and not ctx.require_harness_bridge().has_unpresented_turn:
         return None
     view = [msg for item in head for msg in prepare_steered_inbound(ctx, item)]
     if any(is_human_wake_item(item) for item in (*claimed, *head)):

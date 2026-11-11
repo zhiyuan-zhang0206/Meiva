@@ -27,8 +27,8 @@ and `ScheduleWakeup` timers live in the process (they do not survive a resume), 
 
 Every close ends in `HarnessSessions._close` → `HarnessBridge.close`. The adapter reads
 its CLI's stream in its own read loop for as long as the session lives, idle or not; what
-no turn of ours owns goes to the sink (`UnsolicitedOutput`) and wakes the agent as a
-`system:harness` inbound.
+no turn of ours owns is a turn the CLI began itself (below) or goes to the sink (`UnsolicitedOutput`, e.g.
+a background-task report) and wakes the agent as a `system:harness` inbound.
 
 ## Keeping a session that holds work
 
@@ -69,12 +69,17 @@ reconciled input (`reconciled-resume-…`, see `delivery.md`).
 
 ## Turns the CLI starts itself
 
-A turn the CLI starts while the agent is idle (a fired timer) is observed as
-`TurnStarted(origin=HARNESS)`. When it ends, `_wake_for_harness_turn` hands its reply to
-the sink as `UnsolicitedOutput(source="harness-turn")` so the graph takes a turn over it.
-Turns answering a background-task report (already delivered) or a queued input of ours (it
-has its own ledger) are not reported again. Presenting such turns in the graph and the
-timeline belongs to the event pump work, not to this file.
+A turn the CLI starts while the agent is idle (a fired timer, a finished background task) is observed as
+`TurnStarted(origin=HARNESS)` and presented like any other turn, not relayed as an inbound message. The
+event pump (`pump.py`) keeps that turn's events from its start until a subscriber has read its
+`TurnStarted`, and calls the owner's `own_turn` (the host's wake for the agent). The claim finds no inbox
+row but sees `bridge.has_unpresented_turn` and enters a graph run; its subscription is primed with the
+turn's events so far, so the turn's text and tools reach the timeline as they would for an input's turn,
+behind one status line naming the cause (scheduled wake, background task, its own accord). A turn that
+begins while a run is subscribed is read by that run and never replayed to a later one: the same turn is
+presented once, however it straddles a run's start or end. The revival of a queued input of ours has its
+own timeline entry (the input's) and gets no status line. The reply follows the same visibility prefix
+rule as any reply.
 
 ## Records, migration and transfer
 
