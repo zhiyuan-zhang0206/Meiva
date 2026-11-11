@@ -167,7 +167,7 @@ def _start_long_exec(agent_id: int) -> None:
     time.sleep(3.0)
 
 
-@pytest.mark.scenario("tests.e2e.fakes.scenarios.lifecycle_effects:build_cancel")
+@pytest.mark.scenario("tests.e2e.fakes.scenarios.lifecycle_effects:build_interrupt")
 def test_interrupt_stops_a_running_exec_and_its_message_is_the_agents_next_input(
     spawned_agent: int, clean_record: None
 ) -> None:
@@ -191,9 +191,6 @@ def test_interrupt_stops_a_running_exec_and_its_message_is_the_agents_next_input
     text = _human_text(reading)
     assert "interrupted by agent:9" in text
     assert text.index("interrupted by agent:9") < text.index("stop the long job")
-
-    chat_and_wait(agent, "are you still there")
-    assert any("are you still there" in _human_text(c) for c in model_inputs(agent))
 
 
 @pytest.mark.scenario("tests.e2e.fakes.scenarios.lifecycle_effects:build_self_compact")

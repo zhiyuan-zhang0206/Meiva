@@ -78,6 +78,26 @@ def build_cancel(model: str, *, agent_id: int | None) -> RecordingModel:
     )
 
 
+# meiva:note
+# The interrupt of a running exec. The interrupted turn's runtime is gone, so the model that reads the
+# interrupt message is built cold and its script starts over: its first reply is the same exec call.
+# The code therefore sleeps only the first time it runs (the flag file), so the second run returns at
+# once and the marker is written by the interrupted run alone, which must never finish.
+def build_interrupt(model: str, *, agent_id: int | None) -> RecordingModel:
+    flag = str(scratch_root("lifecycle") / "exec-ran")
+    code = (
+        "import os, time\n"
+        f"first = not os.path.exists({flag!r})\n"
+        f"open({flag!r}, 'w').write('1')\n"
+        "print('exec-started')\n"
+        "if first:\n"
+        f"    time.sleep({LONG_SLEEP_SECONDS})\n"
+        f"    open({exec_finished_marker()!r}, 'w').write('done')\n"
+        "print('exec-finished')"
+    )
+    return RecordingModel(agent_id=agent_id, script=(exec_call(1, code), say("after interrupt")))
+
+
 def build_self_compact(model: str, *, agent_id: int | None) -> RecordingModel:
     code = f"import meiva\nmeiva.self.compact({COMPACT_SUMMARY!r})"
     return RecordingModel(agent_id=agent_id, script=(exec_call(1, code), say(FINAL)))
