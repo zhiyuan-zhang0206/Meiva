@@ -6,6 +6,8 @@
   root downtime includes its entry port; it has no separate OS job or detached
   launcher. See [Fleet UI Gate](../../../services/entrypoints/gate/docs/gate.md).
 
+- `agents/observe.py` holds `meiva agents get` and `meiva agents inbox` (gateway read routes, the
+  `management/query/` shape below).
 - `agents/timeline.py` exposes the existing timeline API as `meiva agents timeline`
   and its exact `context` alias.
 

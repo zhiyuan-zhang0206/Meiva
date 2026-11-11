@@ -39,6 +39,7 @@ from gateway.agents import lifecycle as agents_lifecycle_router
 from gateway.agents import router as agents_router
 from gateway.agents import state as agents_state_router
 from gateway.agents.history import conversation as conversation_router
+from gateway.agents.history import inbound as inbound_router
 from gateway.agents.history import timeline as timeline_router
 from gateway.agents.history import understanding as agents_understanding_router
 from gateway.agents.notice_operations import notices as notices_router
@@ -527,6 +528,7 @@ def create_app(
         commands_router.router,
         config_router.router,
         conversation_router.router,
+        inbound_router.router,
         settings_router.router,
         notifications_router.router,
         schedules_router.router,

@@ -4225,6 +4225,146 @@
         }
       }
     },
+    "/api/agents/{agent_id}/inbound": {
+      "get": {
+        "summary": "Get Agent Inbound",
+        "description": "One agent's inbound queue, newest first: every kind and status, not only what is still queued (`GET .../pending`) or already in the conversation (the timeline).\n\nFilters compose (AND): `status` (pending / claimed / done), `kind` (chat, system_note, heartbeat, ...; an unknown value is 422), `source` (the exact source tag, e.g. `user` or `agent:12`). The window is the last `hours` (default 24, cap 8760); `limit` defaults to the configured message window (`display.messages_default_limit`) and is capped at 1000. `content` is the first 200 characters with `content_truncated` set when cut; `full=true` returns the whole text. `meta.has_more` says older rows exist inside the window.\n\n404: the agent does not exist. 503: the read ran past its statement timeout.",
+        "operationId": "get_agent_inbound_api_agents__agent_id__inbound_get",
+        "parameters": [
+          {
+            "name": "agent_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "title": "Agent Id"
+            }
+          },
+          {
+            "name": "status",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "enum": [
+                    "pending",
+                    "claimed",
+                    "done"
+                  ],
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Status"
+            }
+          },
+          {
+            "name": "kind",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "$ref": "#/components/schemas/InboundKind"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Kind"
+            }
+          },
+          {
+            "name": "source",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "minLength": 1
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Source"
+            }
+          },
+          {
+            "name": "hours",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "number",
+                  "maximum": 8760.0,
+                  "exclusiveMinimum": 0
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Hours"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "integer",
+                  "maximum": 1000,
+                  "minimum": 1
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Limit"
+            }
+          },
+          {
+            "name": "full",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "boolean",
+              "default": false,
+              "title": "Full"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/InboundHistoryResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/settings": {
       "get": {
         "summary": "Get Settings",
@@ -12548,6 +12688,140 @@
           "items"
         ],
         "title": "HostPermissionsPayload"
+      },
+      "InboundHistoryItem": {
+        "properties": {
+          "id": {
+            "type": "integer",
+            "title": "Id"
+          },
+          "kind": {
+            "$ref": "#/components/schemas/InboundKind"
+          },
+          "source": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Source"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "pending",
+              "claimed",
+              "done"
+            ],
+            "title": "Status"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Created At"
+          },
+          "claimed_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Claimed At"
+          },
+          "content": {
+            "type": "string",
+            "title": "Content"
+          },
+          "content_truncated": {
+            "type": "boolean",
+            "title": "Content Truncated"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "kind",
+          "source",
+          "status",
+          "created_at",
+          "claimed_at",
+          "content",
+          "content_truncated"
+        ],
+        "title": "InboundHistoryItem"
+      },
+      "InboundHistoryMeta": {
+        "properties": {
+          "window_from": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Window From"
+          },
+          "limit": {
+            "type": "integer",
+            "title": "Limit"
+          },
+          "has_more": {
+            "type": "boolean",
+            "title": "Has More"
+          }
+        },
+        "type": "object",
+        "required": [
+          "window_from",
+          "limit",
+          "has_more"
+        ],
+        "title": "InboundHistoryMeta"
+      },
+      "InboundHistoryResponse": {
+        "properties": {
+          "agent_id": {
+            "type": "integer",
+            "title": "Agent Id"
+          },
+          "meta": {
+            "$ref": "#/components/schemas/InboundHistoryMeta"
+          },
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/InboundHistoryItem"
+            },
+            "type": "array",
+            "title": "Items"
+          }
+        },
+        "type": "object",
+        "required": [
+          "agent_id",
+          "meta",
+          "items"
+        ],
+        "title": "InboundHistoryResponse"
+      },
+      "InboundKind": {
+        "type": "string",
+        "enum": [
+          "chat",
+          "system_note",
+          "compact_summary",
+          "compact_request",
+          "cancel",
+          "terminate",
+          "restart",
+          "resurrect",
+          "fork",
+          "heartbeat"
+        ],
+        "title": "InboundKind",
+        "description": "Legal values for inbound_messages.kind — in sync with the CHECK constraint in db/schema.sql.\n\nStrEnum lets the enum value be both a str (can be passed to SQL) and comparable\nto literals. The claim node's `match item.kind:` uses `case InboundKind.CHAT:`\nso pyright statically exhaustively checks (when a new kind is added but\ndispatch isn't synced, pyright reports \"unmatched\"). Same pattern as\n`base.api_contracts.agent_contract.AgentStatus(StrEnum)`."
       },
       "InspectMetricsMetadata": {
         "properties": {

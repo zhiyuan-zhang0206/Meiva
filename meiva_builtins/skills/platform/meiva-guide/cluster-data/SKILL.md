@@ -16,6 +16,8 @@ to a read-only query only when none fits.
 |---|---|
 | Your own identity | `meiva.self.AGENT_ID` |
 | Which agents exist, their status and machine | `meiva.agents` (`meiva.help(meiva.agents)`), or `meiva agents ls [--scope live\|terminated\|all] [--query Q] [--limit N]` |
+| One agent's status, machine, harness, last activity | `meiva agents get <agent_id> [--json]` |
+| Whether a message reached an agent and whether it was picked up (pending, claimed, done; chat, system notes, heartbeats) | `meiva agents inbox <agent_id> [--status pending\|claimed\|done] [--kind K] [--source S] [--hours H] [--limit N] [--full]` (newest first; content is a 200-character preview unless `--full`) |
 | What an agent has been doing | `meiva agents timeline <agent_id> [--limit N] [--before ITEM_ID]` |
 | Tasks: read, create, update, log progress | `meiva.tasks` (`get`, `list`, `create`, `update`, `log`; `meiva.help(meiva.tasks)`) |
 | Tasks from a shell: which tasks an agent owns, which are open or stale, one task in full with its reminder state | `meiva tasks ls [--owner ID] [--status in_progress\|done\|cancelled] [--window 24h\|7d\|30d\|all]` (at least one filter), `meiva tasks get <id>`; `--json` for scripts |
@@ -33,7 +35,7 @@ question, stop there.
 
 ## 2. Query the database read-only
 
-The cross-agent inbox, cost split per model and day, and the scheduler's bookkeeping have no entry. Your process environment carries
+Searching message text across agents, cost split per model and day, and the scheduler's bookkeeping have no entry. Your process environment carries
 `MEIVA_DB_URL`, the cluster's database address, so a query is one call away:
 
 ```python
@@ -88,16 +90,6 @@ names that occurred in a short window with `meiva events count --by event_name -
 then filter on it with `meiva events ls --name <event_name>`.
 
 ### Example queries
-
-Messages an agent has not consumed yet:
-
-```sql
-SELECT id, kind, source, created_at
-FROM inbound_messages
-WHERE agent_id = 123 AND status = 'pending'
-ORDER BY id
-LIMIT 50;
-```
 
 Schedules that are failing:
 

@@ -20,6 +20,7 @@ OKF viewer. Fleet graph keeps its route-local query.
 
 ### Agent core (lifecycle + observability)
 - **agents** (`/api/agents/*`) — [lifecycle and projection contract](../../agents/docs/agents-router/agents-router.md).
+- **agent_inbound** (`/api/agents/{id}/inbound`) — one agent's inbound queue as bounded history, newest first: every status and kind, filters status / kind / source / hours / limit, content a preview unless `full`; one agent's rows only
 - **agent_events** (`/api/agents/{id}/events` + `/events/stream`) — historical REST query over the unified event stream (Loki) + real-time SSE tail (filtered by agent_id)
 - **events** (`/api/events`) — unified event stream query (Wave 2): every category (audit / telemetry / log) through one surface: audit rows from Postgres `audit_events`, telemetry/log from Postgres `telemetry_events`, merged newest-first; filters category/event_name/agent_id/trace_id/machine/level + time window (`from`/`to` or `hours`) + offset paging, `meta` (total/window/has_more) envelope; `/api/events/counts` counts the same filtered stream per value of one dimension (`by` = event_name / machine / level / agent_id / category) in SQL, largest group first, under the same statement timeout
 - **run_timeline** (`/api/agents/{id}/run-timeline`) — see [the understanding tree and message units over a window](../../../services/derived/insights/run_timeline/docs/run_timeline.md) (its `/messages` range read included).

@@ -306,6 +306,9 @@ ROUTE_CONTRACTS: dict[tuple[str, str], RouteContract] = {
     ("GET", "/api/agents/{agent_id}/traces/{trace_id}/messages"): RouteContract(),
     ("GET", "/api/agents/{agent_id}/last-message"): RouteContract(),
     ("GET", "/api/agents/{agent_id}/pending"): RouteContract(),
+    ("GET", "/api/agents/{agent_id}/inbound"): RouteContract(
+        note="one agent's inbound queue as bounded history, newest first"
+    ),
     ("GET", "/api/agents/{agent_id}/token-usage"): RouteContract(),
     ("GET", "/api/agents/{agent_id}/context-breakdown"): RouteContract(),
     ("GET", "/api/agents/{agent_id}/system"): RouteContract(),
