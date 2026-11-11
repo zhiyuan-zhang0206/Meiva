@@ -184,18 +184,11 @@ export interface AgentUpdatedEvent extends BaseEvent {
 export interface NoticePostedEvent extends BaseEvent {
   readonly role: "notice_posted";
   readonly notice_id: number;
-  readonly priority: string;
   readonly title: string;
-
-  readonly task_id: number | null;
 }
 export interface NoticeResolvedEvent extends BaseEvent {
   readonly role: "notice_resolved";
   readonly notice_id: number;
-  readonly resolution?: string | null;
-  readonly require_response?: boolean | null;
-  readonly age_seconds?: number | null;
-  readonly had_reply?: boolean | null;
 }
 export interface TaskCreatedEvent extends BaseEvent {
   readonly role: "task_created";

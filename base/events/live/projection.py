@@ -455,31 +455,22 @@ class LabelUpdated(_Base):
 
 # meiva:note
 # Published when the agent asks a question via `meiva.ui.ask`. Carries only the lightweight header
-# (not the body), so the unified Inbox refetches its queue. A notice that needs a response also
+# (not the body), so the open-question list refetches. A notice that needs a response also
 # publishes AgentUpdated, which invalidates the selected agent's authoritative detail read for
 # inspector consumers.
 class NoticePosted(_Base):
     role: Literal["notice_posted"] = "notice_posted"
     notice_id: int
-    priority: str
     title: str
-    # The task this notice belongs to, or None when it names none — lets the
-    # frontend group the FYI feed by task like the authoritative notice read.
-    task_id: int | None = None
 
 
+# meiva:note
+# Published when an open question leaves the queue; the frontend refetches the open questions.
+# The resolution's write or delivery path also publishes AgentUpdated, keeping the inspector
+# snapshot independent of this event.
 class NoticeResolved(_Base):
-    """Published when an open notice leaves the queue. The frontend refetches the
-    open and resolved Inbox views. The resolution's write or delivery path also
-    publishes AgentUpdated when it removes a response-required notice, keeping
-    the inspector snapshot independent of this Inbox event."""
-
     role: Literal["notice_resolved"] = "notice_resolved"
     notice_id: int
-    resolution: str | None = None
-    require_response: bool | None = None
-    age_seconds: int | None = None
-    had_reply: bool | None = None
 
 
 class TaskCreated(_Base):

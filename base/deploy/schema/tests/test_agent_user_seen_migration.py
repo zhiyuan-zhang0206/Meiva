@@ -3,7 +3,6 @@ from __future__ import annotations
 from typing import LiteralString, cast
 
 import psycopg
-import pytest
 
 from base.cluster.machine import MachineIdentityReader
 from base.deploy.schema.migration_layout import MIGRATIONS_DIR
@@ -25,6 +24,7 @@ def _apply(url: str, machine_identity: MachineIdentityReader) -> list[str]:
 
 
 def _restore_previous_schema(conn: psycopg.Connection) -> None:
+    conn.execute("ALTER TABLE agent_user_messages ADD COLUMN read_at TIMESTAMPTZ")
     conn.execute("DROP TABLE agent_user_seen")
     conn.execute("DROP INDEX agent_user_messages_by_agent")
     conn.execute("DELETE FROM schema_migrations WHERE name=%s", (_SEEN_MIGRATION,))
@@ -43,17 +43,16 @@ def _record(
 # meiva:note
 # An upgrade keeps each agent's unread state: the cursor stops just before its oldest unread
 # delivery, sits at its newest delivery when everything was read, and is absent when it has none.
-# A fresh database already has the table, so the replay is idempotent and reaches the same cursors.
-@pytest.mark.parametrize("upgrade", [False, True])
+# The baseline no longer has `read_at` (it stamps this migration as folded), so the test rebuilds
+# the schema this migration upgrades, and the later drop migration then removes the column.
 def test_seen_cursor_is_backfilled_from_per_record_read_state(
-    db_url: str, machine_identity: MachineIdentityReader, upgrade: bool
+    db_url: str, machine_identity: MachineIdentityReader
 ) -> None:
     _ = db_url
     with throwaway_database("agent_user_seen_upgrade") as url:
         with psycopg.connect(url, autocommit=True) as conn:
             conn.execute(cast(LiteralString, SCHEMA_SQL.read_text()))
-            if upgrade:
-                _restore_previous_schema(conn)
+            _restore_previous_schema(conn)
             for agent in (1, 2, 3, 4):
                 conn.execute("INSERT INTO agents (id) VALUES (%s)", (agent,))
             _record(conn, 1, "a", read=True)
@@ -77,6 +76,11 @@ def test_seen_cursor_is_backfilled_from_per_record_read_state(
             index = conn.execute(
                 "SELECT to_regclass('agent_user_messages_by_agent')::text"
             ).fetchone()
+            columns = conn.execute(
+                "SELECT column_name FROM information_schema.columns "
+                "WHERE table_name='agent_user_messages' AND column_name='read_at'"
+            ).fetchall()
+        assert columns == []
         assert index == ("agent_user_messages_by_agent",)
         assert seen == {
             1: ids[(1, "c")] - 1,

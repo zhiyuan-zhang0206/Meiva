@@ -40,10 +40,10 @@ it("keeps every card field and input identity when status is unchanged", () => {
   expect(projectAgentStatus(input)).toBe(input);
 });
 it("keeps optional detail extensions while dropping detail-only fields and deriving the question flag", () => {
-  const notices: WireAgentRow["notices_awaiting_response"] = (["P3", "P1", "P2"] as const).map(
-    (priority, index) => ({
-      id: index, title: `notice ${index}`, content: "selected-detail-only body", priority,
-      require_response: true, blocking: false, created_at: "2026-09-01T00:00:00Z",
+  const notices: WireAgentRow["notices_awaiting_response"] = ([0, 1, 2] as const).map(
+    (index) => ({
+      id: index, title: `notice ${index}`, content: "selected-detail-only body",
+      created_at: "2026-09-01T00:00:00Z",
       question: index === 1 ? { type: "text" } : null,
     }),
   );

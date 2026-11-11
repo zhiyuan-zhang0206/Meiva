@@ -3175,19 +3175,13 @@ export interface components {
             agent_label: string | null;
             title: string;
             content: string | null;
-            priority: components["schemas"]["Priority"];
-            require_response: boolean;
-            blocking: boolean;
             created_at: string;
-            updated_at?: string | null;
             resolved_at?: string | null;
             resolution?: string | null;
             reply?: string | null;
             question?: (components["schemas"]["ChoiceQuestion"] | components["schemas"]["TextQuestion"]) | null;
             answer?: components["schemas"]["NoticeAnswer"] | null;
-            task_id?: number | null;
             source_verified_by?: string | null;
-            expire_at: string | null;
         };
         NoticeOption: {
             id: string;
@@ -3235,13 +3229,8 @@ export interface components {
             id: number;
             title: string;
             content: string | null;
-            priority: components["schemas"]["Priority"];
-            require_response: boolean;
-            blocking: boolean;
             created_at: string;
-            expire_at?: string | null;
             question?: (components["schemas"]["ChoiceQuestion"] | components["schemas"]["TextQuestion"]) | null;
-            task_id?: number | null;
         };
         OpenTaskRow: {
             id: number;

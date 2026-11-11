@@ -100,11 +100,11 @@ def stalled_subtask(db: psycopg.Connection, *, reminder_count: int = 3) -> tuple
     return parent_owner, owner, tid
 
 
-def inbox_notices(db: psycopg.Connection, agent_id: int) -> list[tuple[str, bool]]:
+def inbox_notices(db: psycopg.Connection, agent_id: int) -> list[tuple[str]]:
     db.rollback()
     with db.cursor() as cur:
         cur.execute(
-            "SELECT title, require_response FROM agent_notices "
+            "SELECT title FROM agent_notices "
             "WHERE agent_id = %s AND resolved_at IS NULL ORDER BY id",
             (agent_id,),
         )

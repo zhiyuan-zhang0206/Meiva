@@ -11,8 +11,7 @@ import { PendingQuestions } from "./pending-questions";
 
 const questions: NoticeItem[] = [1, 2].map((id) => ({
   id, agent_id: 7, agent_label: null, title: `Question ${id}`, content: null,
-  priority: "P2", require_response: true, blocking: false,
-  created_at: "2026-11-07T00:00:00Z", expire_at: null, resolved_at: null,
+  created_at: "2026-11-07T00:00:00Z", resolved_at: null,
   question: { type: "text", note_suggestion: `Suggested answer ${id}` },
 }));
 

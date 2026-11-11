@@ -46,12 +46,9 @@ async def ask(
                 if cur.fetchone() is None:
                     raise HTTPException(404, "agent does not exist")
                 cur.execute(
-                    "INSERT INTO agent_notices (agent_id, local_id, title, content, priority, "
-                    "require_response, blocking, expire_at, question, source_verified_by) "
-                    "VALUES (%s, COALESCE((SELECT MAX(local_id) FROM agent_notices WHERE agent_id=%s), -1)+1, "
-                    "%s,%s,'P2',true,false,NULL,%s,%s) RETURNING id",
+                    "INSERT INTO agent_notices (agent_id, title, content, question, source_verified_by) "
+                    "VALUES (%s,%s,%s,%s,%s) RETURNING id",
                     (
-                        agent_id,
                         agent_id,
                         body.title,
                         body.content,
@@ -67,7 +64,5 @@ async def ask(
             return question_id
 
     question_id = await asyncio.to_thread(write)
-    await publish_notice_posted(
-        gateway_state(request).bus, agent_id, question_id, "P2", body.title, None
-    )
+    await publish_notice_posted(gateway_state(request).bus, agent_id, question_id, body.title)
     return {"id": question_id}

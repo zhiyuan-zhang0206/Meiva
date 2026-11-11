@@ -195,7 +195,7 @@ def test_runner_appends_visible_deliveries_without_rewriting_history(runner_db: 
         ).fetchall() == [("Done",)]
         with pytest.raises(psycopg.errors.InsufficientPrivilege):
             conn.execute(
-                "UPDATE agent_user_messages SET read_at=now() WHERE agent_id=%s", (agent_id,)
+                "UPDATE agent_user_messages SET content='rewritten' WHERE agent_id=%s", (agent_id,)
             )
         with pytest.raises(psycopg.errors.InsufficientPrivilege):
             conn.execute("DELETE FROM agent_user_messages WHERE agent_id=%s", (agent_id,))

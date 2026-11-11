@@ -21,18 +21,13 @@ OPEN_TARGET = "/api/notices/open"
 NO_STDIN = io.StringIO()
 
 
-def _notice(
-    nid: int, agent: int, *, title: str = "T", require_response: bool = False
-) -> dict[str, JsonValue]:
+def _notice(nid: int, agent: int, *, title: str = "T") -> dict[str, JsonValue]:
     return {
         "id": nid,
         "agent_id": agent,
         "agent_label": "test",
         "title": title,
         "content": None,
-        "priority": "P2",
-        "require_response": require_response,
-        "blocking": False,
     }
 
 
@@ -152,7 +147,7 @@ def test_resolve_rejects_conflicts_without_claiming_success(
 
 
 def test_clear_resolves_each_open() -> None:
-    notices = [_notice(1, 7, title="dec", require_response=True), _notice(2, 7), _notice(3, 9)]
+    notices = [_notice(1, 7, title="dec"), _notice(2, 7), _notice(3, 9)]
     routes: dict[tuple[str, str], Reply] = {
         OPEN: Reply(body=notices),
         _resolve_route(7, 1): Reply(201),
@@ -267,7 +262,7 @@ def test_stale_lookup_deduplicates_only_agents_in_filtered_questions() -> None:
 
 def test_clear_stale_resolves_only_terminated() -> None:
     routes: dict[tuple[str, str], Reply] = {
-        OPEN: Reply(body=[_notice(1, 7, title="dead agent", require_response=True), _notice(2, 9)]),
+        OPEN: Reply(body=[_notice(1, 7, title="dead agent"), _notice(2, 9)]),
         _agent_route(7): Reply(body={"agent_id": 7, "status": "terminated"}),
         _agent_route(9): Reply(body={"agent_id": 9, "status": "idling"}),
         _resolve_route(7, 1): Reply(201),
@@ -345,7 +340,7 @@ def test_a_gateway_failure_reading_the_queue_is_not_swallowed() -> None:
 def test_list_cuts_a_long_notice_body_to_one_line(
     capsys: pytest.CaptureFixture[str],
 ) -> None:
-    decision: dict[str, JsonValue] = _notice(4, 7, title="Pick one", require_response=True)
+    decision: dict[str, JsonValue] = _notice(4, 7, title="Pick one")
     decision["content"] = "x" * 200
     with serving({OPEN: Reply(body=[decision])}) as gateway:
         code = cmd_notices_list(access_to(gateway.url), agent_id=None)

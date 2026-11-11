@@ -227,31 +227,7 @@ BEGIN
     END IF;
 END $$;
 
--- ─────────────── agent_notices ───────────────
--- The agent->user question queue: every row asks for an answer (require_response
--- is always TRUE for rows written today), and `blocking` separates the two
--- rungs that remain: blocking=FALSE keeps the agent working while it waits,
--- blocking=TRUE means it is stalled on the reply. The stakes axis priority
--- P0..P3 is orthogonal. blocking is meaningful only when require_response is
--- TRUE, enforced by a CHECK. meiva.ui.ask() INSERTs one row per call; an agent
--- may hold several open questions at once.
---
--- title = one-line headline (queue list); content = optional detail body shown
--- on click. resolved_at + resolution + reply is the single close triple:
---   answered  -- user answered a require_response notice (reply = the answer)
---   dismissed -- user waved away a require_response notice without answering
---   read      -- user reviewed an FYI notice (reply optional)
---   withdrawn  -- historical only: the agent withdrew its own notice; no writer produces it now
---   superseded -- historical only: a newer notice replaced this one before the
---               one-open-notice rule (2026-10-21); no writer produces it now
--- reply caches the user's free-text reply for history/display; the live delivery
--- to the agent rides the chat-inbound path, not this column. updated_at tracks
--- the former in-place edit of a still-open notice; no writer produces it now.
---
--- The snapshot inlines the still-open notices (notices_awaiting_response, the
--- bounded worklist). unread_notice_count and the FYI feed remain for the rows
--- written before FYI stopped being accepted (2026-10-19); new writes are all
--- require_response, so nothing new lands in that feed.
+-- ─────────────── agent_user_messages ───────────────
 CREATE TABLE IF NOT EXISTS agent_user_messages (
     id BIGSERIAL PRIMARY KEY,
     agent_id BIGINT NOT NULL REFERENCES agents(id) ON DELETE CASCADE,
@@ -260,31 +236,41 @@ CREATE TABLE IF NOT EXISTS agent_user_messages (
     content TEXT,
     suggestions JSONB NOT NULL CHECK (jsonb_typeof(suggestions) = 'array'),
     created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
-    read_at TIMESTAMPTZ,
     UNIQUE (agent_id, source_key),
     CHECK (content IS NULL OR length(btrim(content)) > 0),
     CHECK (content IS NOT NULL OR suggestions = '[]'::jsonb)
 );
-CREATE INDEX IF NOT EXISTS agent_user_messages_pending ON agent_user_messages (agent_id, id)
-    WHERE content IS NOT NULL AND read_at IS NULL;
 CREATE INDEX IF NOT EXISTS agent_user_messages_by_agent ON agent_user_messages (agent_id, id)
     WHERE content IS NOT NULL;
--- read_at and agent_user_messages_pending are no longer read or written (the seen cursor below
--- replaced per-record read state); a later migration drops them.
+-- Unread is the seen cursor below; deliveries carry no per-record read state.
 CREATE TABLE IF NOT EXISTS agent_user_seen (
     agent_id BIGINT PRIMARY KEY REFERENCES agents(id) ON DELETE CASCADE,
     seen_id BIGINT NOT NULL CHECK (seen_id >= 0)
 );
 COMMENT ON TABLE agent_user_seen IS 'The user has seen deliveries (agent_user_messages.id) up to seen_id; no row means none.';
 
+-- ─────────────── agent_notices ───────────────
+-- The agent->user question queue: meiva.ui.ask() INSERTs one row per call and an agent may
+-- hold several open questions at once. title = one-line headline; content = optional detail
+-- body; question = the structured question payload. An unresolved row is an open question.
+-- resolved_at + resolution + reply (+ answer) is the single close triple:
+--   answered  -- the user answered (reply = the answer)
+--   dismissed -- the user waved the question away without answering
+--   expired   -- resolved by the legacy-notice cleanup
+--   read, withdrawn, superseded -- historical only; no writer produces them now
+-- reply caches the user's free-text reply for history/display; the live delivery to the agent
+-- rides the chat-inbound path, not this column.
+--
+-- local_id, priority, require_response, blocking, updated_at, task_id and expire_at are no longer
+-- read or written; a later migration drops them.
 CREATE TABLE agent_notices (
     id              BIGSERIAL PRIMARY KEY,
-    local_id        INTEGER NOT NULL,
+    local_id        INTEGER,
     agent_id        BIGINT NOT NULL REFERENCES agents(id),
     title           TEXT NOT NULL,
     content         TEXT,
-    priority        TEXT NOT NULL CHECK (priority IN ('P0', 'P1', 'P2', 'P3')),
-    require_response BOOLEAN NOT NULL,
+    priority        TEXT NOT NULL DEFAULT 'P2' CHECK (priority IN ('P0', 'P1', 'P2', 'P3')),
+    require_response BOOLEAN NOT NULL DEFAULT TRUE,
     blocking        BOOLEAN NOT NULL DEFAULT FALSE,
     created_at      TIMESTAMPTZ NOT NULL DEFAULT now(),
     updated_at      TIMESTAMPTZ,
@@ -305,13 +291,6 @@ CREATE TABLE agent_notices (
     -- NULL = written before the column existed.
     source_verified_by TEXT,
     expire_at       TIMESTAMPTZ,
-    -- The schedule whose run posted this notice, as its writer reported it
-    -- (`MEIVA_SCHEDULE_ID`); the server refuses one that names no schedule.
-    -- Provenance, not identity. NULL = an agent's own notice, a manual run, or
-    -- a row written before the column existed. Declared last because the
-    -- migration that introduced it appends the column, and the convergence
-    -- check compares column order. Its CHECK lives in that migration too.
-    schedule_id     BIGINT,
     CONSTRAINT agent_notices_question_requires_response
         CHECK (question IS NULL OR (jsonb_typeof(question) = 'object' AND require_response)),
     CONSTRAINT agent_notices_answer_requires_question
@@ -327,35 +306,13 @@ CREATE TABLE agent_notices (
                OR (require_response AND resolution IN ('answered', 'dismissed', 'withdrawn', 'superseded', 'expired'))
                OR (NOT require_response AND resolution IN ('answered', 'read', 'withdrawn', 'superseded', 'expired'))),
     CONSTRAINT agent_notices_answered_has_reply
-        CHECK (resolution IS DISTINCT FROM 'answered' OR reply IS NOT NULL),
-    -- Named here as well as in the migration that introduced the column: the baseline is
-    -- the squashed net effect, and the migration's DO block skips when this name exists.
-    CONSTRAINT agent_notices_schedule_id_positive
-        CHECK (schedule_id IS NULL OR schedule_id > 0)
+        CHECK (resolution IS DISTINCT FROM 'answered' OR reply IS NOT NULL)
 );
 
--- Open notices that need a response: serves the snapshot's
--- notices_awaiting_response inline array (the bounded worklist).
-CREATE INDEX agent_notices_awaiting_idx
+-- Open questions: serves the snapshot's notices_awaiting_response inline array and the
+-- open-question feed. Every unresolved row is an open question.
+CREATE INDEX agent_notices_open_idx
     ON agent_notices (agent_id, created_at)
-    WHERE require_response AND resolved_at IS NULL;
-
--- Open FYI notices: serves the snapshot's unread_notice_count and the
--- off-snapshot cross-fleet feed.
-CREATE INDEX agent_notices_unread_idx
-    ON agent_notices (agent_id, created_at)
-    WHERE NOT require_response AND resolved_at IS NULL;
-
--- Resolved-history page (Inbox's greyed history): ORDER BY resolved_at DESC,
--- id DESC on the resolved half — the table accumulates forever, so the
--- history query needs an index, not a seq scan + sort.
-CREATE INDEX agent_notices_resolved_idx
-    ON agent_notices (resolved_at DESC, id DESC)
-    WHERE resolved_at IS NOT NULL;
-
--- Active open notices index on expire_at for TTL reaper cleanup sweeps.
-CREATE INDEX agent_notices_expire_at_idx
-    ON agent_notices (expire_at)
     WHERE resolved_at IS NULL;
 
 -- ─────────────── inbound_messages ───────────────
@@ -2082,6 +2039,9 @@ INSERT INTO schema_migrations (name) VALUES ('20261107T103500_drop-agent-imperso
 -- The cost split's columns are already in this file's table definitions above, so a
 -- fresh database never replays the migration that adds them to an older one.
 INSERT INTO schema_migrations (name) VALUES ('20261108T122000_split-llm-cost-by-billing-mode');
+-- The seen-cursor migration backfills from agent_user_messages.read_at, which this file no
+-- longer has, so a fresh database must not replay it.
+INSERT INTO schema_migrations (name) VALUES ('20261110T153500_agent-user-seen');
 
 -- Domain receipts never expire into fresh notice effects.
 CREATE TABLE notice_operation_receipts (
@@ -2439,8 +2399,6 @@ CREATE TABLE IF NOT EXISTS notification_events (
     subject         TEXT NOT NULL,
     body            TEXT,
     href            TEXT,
-    -- Retired: no writer since the push became question + unread; dropped by a later contract migration.
-    dedupe_key      TEXT,
     importance      TEXT NOT NULL CHECK (importance IN ('low', 'normal', 'high')),
     -- Producing agent, or 0 for a system-level notification.
     agent_id        BIGINT NOT NULL DEFAULT 0,
@@ -2462,11 +2420,6 @@ COMMENT ON COLUMN notification_events.tag IS
 
 CREATE INDEX IF NOT EXISTS notification_events_created_idx
     ON notification_events (created_at DESC);
-
--- Retired with dedupe_key; dropped by a later contract migration.
-CREATE INDEX IF NOT EXISTS notification_events_dedupe_idx
-    ON notification_events (category, dedupe_key, created_at DESC)
-    WHERE dedupe_key IS NOT NULL;
 
 -- The outbox sweep: the oldest deliveries still owed a live event.
 CREATE INDEX IF NOT EXISTS notification_events_pending_idx

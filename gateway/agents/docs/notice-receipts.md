@@ -44,7 +44,7 @@ canonicalizes selected IDs into its original number order, commits answer JSON
 refused),
 readable reply, notice state, inbound and operation receipt together. Text-only
 clients use the same validator after parsing the numbered first line. Numbers inside the optional comment never select an option. Replay keeps the original inbound and
-answer without validating against later state; new expired-question answers fail.
+answer without validating against later state.
 Legacy operation normalization omits absent question/answer fields so old accepted
 receipt requests retain their equality across this additive schema upgrade.
 

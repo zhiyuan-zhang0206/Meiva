@@ -15,14 +15,12 @@ from gateway.tests.support.live_events.recorder import recording_live_events
 
 
 @pytest.mark.parametrize("reply", [None, "Acknowledged"])
-@pytest.mark.parametrize("require_response", [False, True])
 def test_new_read_operations_are_rejected_without_effects(
     db_conn: psycopg.Connection,
     reply: str | None,
-    require_response: bool,
 ) -> None:
     agent = seed_agent(db_conn)
-    notice = insert_notice(db_conn, agent, "Question", require_response=require_response)
+    notice = insert_notice(db_conn, agent, "Question")
     with gateway_test_client() as client:
         result = client.post(
             f"/api/keyed/v1/agents/{agent}/notices/{notice}/resolve",
@@ -41,7 +39,7 @@ def test_read_keeps_question_in_snapshot(
     db_conn: psycopg.Connection, *, model_catalog: ModelCatalog
 ) -> None:
     a = seed_agent(db_conn)
-    nid = insert_notice(db_conn, a, "needs answer", require_response=True)
+    nid = insert_notice(db_conn, a, "needs answer")
     with gateway_test_client() as client:
         resp = client.post(
             f"/api/keyed/v1/agents/{a}/notices/{nid}/resolve",
@@ -74,7 +72,7 @@ def test_resolve_nonexistent_409(db_conn: psycopg.Connection) -> None:
 
 def test_resolve_twice_second_is_409_and_delivers_once(db_conn: psycopg.Connection) -> None:
     a = seed_agent(db_conn)
-    nid = insert_notice(db_conn, a, "q?", require_response=True)
+    nid = insert_notice(db_conn, a, "q?")
     with gateway_test_client() as client:
         first = client.post(
             f"/api/keyed/v1/agents/{a}/notices/{nid}/resolve",
@@ -96,7 +94,7 @@ def test_resolve_cross_agent_path_409(
 ) -> None:
     a = seed_agent(db_conn)
     b = seed_agent(db_conn)
-    nid = insert_notice(db_conn, a, "for a", require_response=True)
+    nid = insert_notice(db_conn, a, "for a")
     with gateway_test_client() as client:
         resp = client.post(
             f"/api/keyed/v1/agents/{b}/notices/{nid}/resolve",
@@ -118,9 +116,9 @@ def test_open_default_limit_comes_from_display_config(
     db_conn: psycopg.Connection,
 ) -> None:
     a = seed_agent(db_conn)
-    insert_notice(db_conn, a, "older", require_response=True)
-    insert_notice(db_conn, a, "newer", require_response=True)
-    insert_notice(db_conn, a, "newest", require_response=True)
+    insert_notice(db_conn, a, "older")
+    insert_notice(db_conn, a, "newer")
+    insert_notice(db_conn, a, "newest")
 
     with gateway_test_client(fields={"notices_open_default_limit": 2}) as client:
         data = client.get("/api/notices/open").json()
@@ -131,8 +129,8 @@ def test_feed_defaults_come_from_display_config(
     db_conn: psycopg.Connection,
 ) -> None:
     a = seed_agent(db_conn)
-    insert_notice(db_conn, a, "open older", require_response=True)
-    insert_notice(db_conn, a, "open newer", require_response=True)
+    insert_notice(db_conn, a, "open older")
+    insert_notice(db_conn, a, "open newer")
 
     with gateway_test_client(fields={"notices_open_default_limit": 1}) as client:
         feed = client.get("/api/notices").json()
@@ -145,19 +143,15 @@ def test_check_constraints_reject_illegal_states(db_conn: psycopg.Connection) ->
 
     def _raw_insert(
         *,
-        require_response: bool,
-        blocking: bool = False,
         resolved_at: str | None = None,
         resolution: str | None = None,
         reply: str | None = None,
     ) -> None:
         with db_conn.cursor() as cur:
             cur.execute(
-                "INSERT INTO agent_notices "
-                "(agent_id, local_id, title, priority, require_response, blocking, "
-                "resolved_at, resolution, reply, expire_at) "
-                "VALUES (%s, COALESCE((SELECT MAX(local_id) FROM agent_notices WHERE agent_id = %s), -1) + 1, 'x', 'P2', %s, %s, %s::timestamptz, %s, %s, now() + interval '1 day')",
-                (a, a, require_response, blocking, resolved_at, resolution, reply),
+                "INSERT INTO agent_notices (agent_id, title, resolved_at, resolution, reply) "
+                "VALUES (%s, 'x', %s::timestamptz, %s, %s)",
+                (a, resolved_at, resolution, reply),
             )
 
     def _expect_violation(insert: Callable[[], None]) -> None:
@@ -165,67 +159,25 @@ def test_check_constraints_reject_illegal_states(db_conn: psycopg.Connection) ->
             insert()
         db_conn.rollback()
 
-    _expect_violation(lambda: _raw_insert(require_response=False, blocking=True))
-    _expect_violation(lambda: _raw_insert(require_response=True, resolved_at=ts))
-    _expect_violation(lambda: _raw_insert(require_response=True, resolution="answered", reply="x"))
-    _expect_violation(lambda: _raw_insert(require_response=True, resolved_at=ts, resolution="read"))
-    _expect_violation(
-        lambda: _raw_insert(require_response=True, resolved_at=ts, resolution="answered")
-    )
+    _expect_violation(lambda: _raw_insert(resolved_at=ts))
+    _expect_violation(lambda: _raw_insert(resolution="answered", reply="x"))
+    _expect_violation(lambda: _raw_insert(resolved_at=ts, resolution="read"))
+    _expect_violation(lambda: _raw_insert(resolved_at=ts, resolution="answered"))
 
-    _raw_insert(require_response=True, resolved_at=ts, resolution="superseded")
-    _raw_insert(require_response=False, resolved_at=ts, resolution="superseded")
-    _raw_insert(require_response=True, resolved_at=ts, resolution="expired")
-    _raw_insert(require_response=False, resolved_at=ts, resolution="expired")
-
-    _raw_insert(require_response=True, resolved_at=ts, resolution="answered", reply="ok")
-    _raw_insert(require_response=False, resolved_at=ts, resolution="read")
-    _raw_insert(require_response=False, resolved_at=ts, resolution="answered", reply="ok")
+    _raw_insert(resolved_at=ts, resolution="superseded")
+    _raw_insert(resolved_at=ts, resolution="expired")
+    _raw_insert(resolved_at=ts, resolution="dismissed")
+    _raw_insert(resolved_at=ts, resolution="answered", reply="ok")
     db_conn.commit()
-
-
-def test_old_include_awaiting_flag_cannot_restore_fyi(
-    db_conn: psycopg.Connection,
-) -> None:
-    a1 = seed_agent(db_conn)
-    insert_notice(db_conn, a1, "FYI one", require_response=False)
-    insert_notice(db_conn, a1, "Decision", require_response=True)
-
-    with gateway_test_client() as client:
-        default = client.get("/api/notices/open").json()
-        assert [it["title"] for it in default] == ["Decision"]
-        both = client.get("/api/notices/open", params={"include_awaiting": True}).json()
-        assert {it["title"] for it in both} == {"Decision"}
-        insert_notice(
-            db_conn,
-            a1,
-            "Gone",
-            require_response=False,
-            resolved_at="2026-08-06T00:00:00+00:00",
-            resolution="read",
-        )
-        both2 = client.get("/api/notices/open", params={"include_awaiting": True}).json()
-        assert all(it["title"] != "Gone" for it in both2)
 
 
 # meiva:note
-# The published event carries the GLOBAL id, not the agent-local one: the SDK's id
-# space is local and the frontend feed matches on global ids, so a local id here
-# leaves the resolved row in the open list until a refresh.
+# The published event carries the row id, which the frontend feed matches on, so the resolved
+# row leaves the open list without a refresh.
 # meiva:link gateway/agents/docs/notice-receipts.md
-def test_resolution_publishes_global_notice_id(
-    db_conn: psycopg.Connection, event_bus: EventBus
-) -> None:
+def test_resolution_publishes_notice_id(db_conn: psycopg.Connection, event_bus: EventBus) -> None:
     agent_id = seed_agent(db_conn)
-    with db_conn.cursor() as cur:
-        cur.execute("SELECT coalesce(max(id), 0) FROM agent_notices")
-        row = cur.fetchone()
-        assert row is not None
-        local_skew = int(row[0]) + 100
-    open_id = insert_notice(db_conn, agent_id, "open notice", require_response=True)
-    with db_conn.cursor() as cur:
-        cur.execute("UPDATE agent_notices SET local_id = %s WHERE id = %s", (local_skew, open_id))
-    db_conn.commit()
+    open_id = insert_notice(db_conn, agent_id, "open notice")
 
     with recording_live_events(event_bus) as live, gateway_test_client() as client:
         resp = client.post(
@@ -235,4 +187,4 @@ def test_resolution_publishes_global_notice_id(
         )
         published = [event.payload["notice_id"] for event in live.settle("notice_resolved", 1)]
     assert resp.status_code == 201, resp.text
-    assert published == [open_id], f"expected global id {open_id}, got {published}"
+    assert published == [open_id]

@@ -25,9 +25,6 @@ from base.events.notifications.publish import stage_question_resolved
 from base.host.boundary.json_values import is_object_dict
 from gateway.agents.inbound_provenance import request_inbound_provenance
 from gateway.agents.notice_operations.notice_answers import resolution_answer, resolution_inbound
-from gateway.agents.notice_operations.notice_plan import (
-    question_expired,
-)
 from gateway.agents.schemas import (
     AgentMessageEnqueued,
     NoticeItem,
@@ -35,7 +32,7 @@ from gateway.agents.schemas import (
     ResolveNoticeIn,
 )
 from gateway.http.auth.request_principal import PrincipalScopeError, request_key
-from gateway.http.config import gateway_clock, gateway_config, gateway_rpc, gateway_state
+from gateway.http.config import gateway_config, gateway_rpc, gateway_state
 from ops import lifecycle as _ops
 from ops.agents import get_agent_status
 
@@ -48,11 +45,8 @@ router = APIRouter()
 @dataclass(frozen=True)
 class _ResolveTarget:
     title: str
-    require_response: bool
     resolved_at: datetime | None
     question: object
-    expire_at: datetime | None
-    created_at: datetime
 
 
 # meiva:note
@@ -64,10 +58,8 @@ class _StoredReceipt:
 
 
 _SELECT = (
-    "SELECT n.id, n.agent_id, t.label AS agent_label, n.title, n.content, n.priority, "
-    "n.require_response, n.blocking, n.created_at, n.updated_at, "
-    "n.resolved_at, n.resolution, n.reply, n.task_id, n.expire_at, n.question, n.answer, "
-    "n.source_verified_by "
+    "SELECT n.id, n.agent_id, t.label AS agent_label, n.title, n.content, n.created_at, "
+    "n.resolved_at, n.resolution, n.reply, n.question, n.answer, n.source_verified_by "
     "FROM agent_notices n JOIN agents t ON t.id = n.agent_id "
 )
 
@@ -89,7 +81,7 @@ def _open_notices_blocking(
         params = (limit,) if agent_id is None else (agent_id, limit)
         cur.execute(
             _SELECT
-            + "WHERE n.require_response AND n.resolved_at IS NULL "
+            + "WHERE n.resolved_at IS NULL "
             + agent_clause
             + "ORDER BY n.created_at ASC, n.id ASC LIMIT %s",
             params,
@@ -143,17 +135,14 @@ async def post_notice_resolve(
     action = body.action
     reply = body.reply
 
-    resolution: _ops.NoticeResolutionFacts | None = None
-
     def _resolve(conn: psycopg.Connection) -> str | None:
-        nonlocal resolution
         if action == "read":
             raise HTTPException(
                 status_code=422, detail="notices require a reply or an explicit dismissal"
             )
         with conn.cursor(row_factory=class_row(_ResolveTarget)) as cur:
             cur.execute(
-                "SELECT title, require_response, resolved_at, question, expire_at, created_at "
+                "SELECT title, resolved_at, question "
                 "FROM agent_notices WHERE id = %s AND agent_id = %s FOR UPDATE",
                 (notice_id, agent_id),
             )
@@ -163,26 +152,13 @@ async def post_notice_resolve(
                     status_code=409,
                     detail=f"notice {notice_id} does not exist for agent {agent_id}",
                 )
-            if target.question is not None and question_expired(
-                target.expire_at, now=gateway_clock(request).now()
-            ):
-                raise HTTPException(status_code=409, detail="this question has expired")
             resolved_answer = resolution_answer(body, target.question)
             reply = resolved_answer.reply
-            resolution = _ops.notice_resolution_facts(
-                _ACTION_RESOLUTION[action],
-                require_response=target.require_response,
-                created_at=target.created_at,
-                now=gateway_clock(request).now(),
-                replied=reply is not None or resolved_answer.answer is not None,
-            )
             if target.resolved_at is not None:
                 raise HTTPException(
                     status_code=409,
                     detail=f"notice {notice_id} is already resolved for agent {agent_id}",
                 )
-            if not target.require_response:
-                raise HTTPException(status_code=409, detail="legacy FYI entries are not notices")
             if action == "answer" and reply is None:
                 raise HTTPException(status_code=422, detail="action 'answer' requires a reply")
             cur.execute(
@@ -255,9 +231,7 @@ async def post_notice_resolve(
         )
     else:
         status = await asyncio.to_thread(get_agent_status, gateway_state(request).db, agent_id)
-    await _ops.publish_notice_resolved(
-        gateway_state(request).bus, agent_id, notice_id, facts=resolution
-    )
+    await _ops.publish_notice_resolved(gateway_state(request).bus, agent_id, notice_id)
     return AgentMessageEnqueued(status=status, inbound_id=inbound_id)
 
 

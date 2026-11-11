@@ -62,11 +62,7 @@ _AWAITING_NOTICES = [
         "agent_label": "other-agent",
         "title": "Needs a decision",
         "content": "Pick A or B.",
-        "priority": "P2",
-        "require_response": True,
-        "blocking": False,
         "created_at": "2026-08-07T00:00:00Z",
-        "updated_at": "2026-08-07T00:00:00Z",
     }
 ]
 

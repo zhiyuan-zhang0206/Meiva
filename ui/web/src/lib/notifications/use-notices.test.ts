@@ -33,11 +33,7 @@ function notice(id: number, title: string): NoticeItem {
     agent_label: null,
     title,
     content: null,
-    priority: "P2",
-    require_response: true,
-    blocking: false,
     created_at: "2026-06-14T00:00:00Z",
-    expire_at: null,
   };
 }
 
@@ -105,7 +101,7 @@ describe("useNotices", () => {
     await stream.whenSourceExists();
 
     desk.awaiting = [notice(8, "q")];
-    stream.deliver({ role: "notice_posted", agent_id: 1, notice_id: 8, priority: "P2", title: "q", task_id: null });
+    stream.deliver({ role: "notice_posted", agent_id: 1, notice_id: 8, title: "q" });
 
     await waitFor(() => expect(ids(result.current.awaiting)).toEqual([8]));
   });

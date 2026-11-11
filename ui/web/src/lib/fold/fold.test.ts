@@ -41,7 +41,7 @@ describe("foldAgents", () => {
     ] });
   });
   it.each(["notice_posted", "notice_resolved"] as const)("%s repairs scalar attention without a lifecycle hint", (role) => {
-    const event = { role, agent_id: 1, notice_id: 7, priority: "P2", title: "FYI", task_id: null } as SystemEvent;
+    const event = { role, agent_id: 1, notice_id: 7, title: "FYI" } as SystemEvent;
     const ctx = { getQueryData: () => undefined, setQueryData: vi.fn(), invalidateQueries: vi.fn() };
     applyEvent(ctx, event);
     expect(ctx.invalidateQueries).toHaveBeenCalledWith(AGENTS_QUERY_KEY);
@@ -62,7 +62,7 @@ describe("foldAgents", () => {
 
 describe("invalidation policies", () => {
   it("notice_posted invalidates only the questions query", () => {
-    const o = foldNotices({ role: "notice_posted", notice_id: 1, priority: "P2", title: "t", task_id: null } as unknown as SystemEvent);
+    const o = foldNotices({ role: "notice_posted", notice_id: 1, title: "t" } as unknown as SystemEvent);
     expect(o.invalidations).toEqual([{ key: NOTICES_QUERY_KEY }]);
   });
 

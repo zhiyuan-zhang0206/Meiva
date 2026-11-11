@@ -140,13 +140,11 @@ def _pause(db: psycopg.Connection, tid: int, *, seconds_ahead: float) -> None:
     db.commit()
 
 
-def _open_notices(db: psycopg.Connection, agent_id: int) -> list[tuple[str, str, bool, int]]:
-    """Open notices on an agent: (title, priority, require_response, task_id)."""
+def _open_notices(db: psycopg.Connection, agent_id: int) -> list[tuple[str]]:
     db.rollback()  # the daemon committed on its own connection; refresh our view
     with db.cursor() as cur:
         cur.execute(
-            "SELECT title, priority, require_response, task_id FROM agent_notices "
-            "WHERE agent_id = %s AND resolved_at IS NULL ORDER BY local_id",
+            "SELECT title FROM agent_notices WHERE agent_id = %s AND resolved_at IS NULL ORDER BY id",
             (agent_id,),
         )
         return cur.fetchall()

@@ -13,7 +13,7 @@ from typing import TypeGuard
 from uuid import UUID
 
 import psycopg
-from pydantic import BaseModel, Field
+from pydantic import BaseModel
 
 from base.agents.observation.evidence import (
     AgentAvailability,
@@ -21,7 +21,6 @@ from base.agents.observation.evidence import (
     availability,
     observation,
 )
-from base.agents.tasks.priority import Priority
 from base.api_contracts.agent_contract import AgentStatus, Harness, LivenessState
 from base.api_contracts.notice_question import NoticeQuestion
 from base.db import Database
@@ -56,10 +55,10 @@ _FULL_COLS = (
     "a.liveness_state, a.last_probe_at, "
     "COALESCE("
     "(SELECT json_agg(json_build_object("
-    "'id', n.id, 'title', n.title, 'content', n.content, 'priority', n.priority, "
-    "'blocking', n.blocking, 'created_at', n.created_at, 'task_id', n.task_id, 'expire_at', n.expire_at, 'question', n.question) ORDER BY n.created_at) "
+    "'id', n.id, 'title', n.title, 'content', n.content, "
+    "'created_at', n.created_at, 'question', n.question) ORDER BY n.created_at) "
     "FROM agent_notices n "
-    "WHERE n.agent_id = a.id AND n.require_response AND n.resolved_at IS NULL), "
+    "WHERE n.agent_id = a.id AND n.resolved_at IS NULL), "
     "'[]'::json) AS notices_awaiting_response, "
     "EXISTS (SELECT 1 FROM agent_user_messages d WHERE d.agent_id=a.id AND d.content IS NOT NULL "
     "AND d.id > COALESCE((SELECT seen_id FROM agent_user_seen WHERE agent_id=a.id), 0)) AS has_unread_user_messages "
@@ -88,24 +87,15 @@ _GROUP = ""
 
 
 # meiva:note
-# One open notice (a `meiva.ui.ask` question; migration 0053). The agent snapshot's
-# `notices_awaiting_response` carries only the question rows (the "needs response"
-# worklist); this model also serves the per-agent inspector panel. `title` is the one-line
-# headline; `content` is the optional detail body. `priority` is P0..P3 (the stakes axis) and
-# `blocking` says whether the agent is stalled waiting on the answer (the urgency axis).
+# One open question (`meiva.ui.ask`). The agent snapshot's `notices_awaiting_response` carries
+# only the unresolved rows (the "needs response" worklist); this model also serves the per-agent
+# inspector panel. `title` is the one-line headline; `content` is the optional detail body.
 class OpenNotice(BaseModel):
     id: int
     title: str
     content: str | None
-    priority: Priority
-    require_response: bool = Field(default=True)
-    blocking: bool
     created_at: datetime
-    expire_at: datetime | None = None
     question: NoticeQuestion | None = None
-    # The task this notice belongs to, or None — the human queue groups notices
-    # by it (falling back to the owner agent's task when absent).
-    task_id: int | None = None
 
 
 # meiva:note
