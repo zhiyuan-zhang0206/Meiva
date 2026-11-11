@@ -10,13 +10,14 @@ from __future__ import annotations
 
 import subprocess
 import sys
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from pathlib import Path
 from typing import assert_never
 
 from base.cluster.machine import MachineRoles
 from base.deploy import start_trace
+from base.native_process.root_control.ipc import UnitState
 from base.paths import skills_dir
 from base.telemetry import EventPipeline
 from cli.commands import _repo
@@ -24,14 +25,23 @@ from cli.commands.converge.spec import ConvergeAdvisoryError, ConvergeStep
 from cli.commands.data_plane import bringup, completion
 from cli.commands.data_plane.config import DataPlaneConfig
 from cli.commands.extensions import materialize
-from cli.commands.lifecycle import converge_host
+from cli.commands.lifecycle import converge_host, root_driver
+from cli.commands.lifecycle.root_control.snapshot import root_units
 from cli.commands.lifecycle.start.cold_start_plan import ColdStep, plan_cold_start
 from cli.commands.lifecycle.start.migrations import cmd_migrations_apply
 from cli.database import OperatorDatabaseFactory
 from cli.database.runtime import CommandRuntime
 from services.supervision.roster.service_spec import ServiceSpec
 
-__all__ = ["ColdStart", "cold_start_steps", "prepare_cold_start", "prepare_live_start"]
+__all__ = [
+    "ColdStart",
+    "cold_start_steps",
+    "live_schema_behind",
+    "prepare_cold_start",
+    "prepare_live_migrations",
+    "prepare_live_start",
+    "running_db_units",
+]
 
 
 # meiva:note
@@ -96,6 +106,77 @@ def prepare_cold_start(
 def prepare_live_start(cold: ColdStart, roster: tuple[ServiceSpec, ...]) -> int:
     with start_trace.phase("converge host (live root)"):
         return _run_step(ColdStep.CONVERGE, cold, roster, [])
+
+
+# meiva:note
+# Whether the database lacks migrations this checkout carries (read-only).
+#
+# Any other verdict, including a database ahead of the code, is the schema check's to report right
+# after; an unreachable database raises here exactly as that check would.
+def live_schema_behind(db_url: str) -> bool:
+    from base.deploy.schema.migrations import (
+        CodeBehindSchema,
+        SchemaVersionMismatch,
+        assert_schema_current,
+    )
+
+    try:
+        assert_schema_current(db_url)
+    except SchemaVersionMismatch:
+        return True
+    except CodeBehindSchema:
+        return False
+    return False
+
+
+# meiva:note
+# The requested units that use the database and run under the live root now.
+def running_db_units(
+    roster: tuple[ServiceSpec, ...], *, home: Path, environ: Mapping[str, str], pid: int
+) -> tuple[str, ...]:
+    snapshot = root_driver.root_status(root_driver.root_client(home, environ=environ, pid=pid))
+    if snapshot is None:
+        return ()
+    units = root_units(snapshot)
+    return tuple(
+        spec.session
+        for spec in roster
+        if spec.requires_db
+        and (unit := units.get(spec.session)) is not None
+        and unit["state"] == UnitState.RUNNING.value
+    )
+
+
+# meiva:note
+# Run `steps` (`plan_live_migration`) to apply the migrations a live root's database is missing.
+#
+# A migration changes the schema under whatever still uses it, so it runs only when the root hosts
+# no database-using unit (a stop that keeps the shell sessions stops the rest): a unit still
+# running is a writer of the old schema and the start refuses with its name. A failed migration
+# fails the start like the cold path's.
+def prepare_live_migrations(
+    cold: ColdStart,
+    roster: tuple[ServiceSpec, ...],
+    *,
+    steps: tuple[ColdStep, ...],
+    running: tuple[str, ...],
+    retained_children: list[subprocess.Popen[bytes]],
+) -> int:
+    if running:
+        print(
+            "  ✗ the database is missing migrations this checkout carries, and the running root "
+            f"still hosts services that use it: {', '.join(running)}. A migration needs them "
+            "stopped: run `meiva stop` for the whole host (without keeping those services) and "
+            "start again",
+            file=sys.stderr,
+        )
+        return 1
+    for step in steps:
+        with start_trace.phase(f"{step.value} (live root)"):
+            rc = _run_step(step, cold, roster, retained_children)
+        if rc != 0:
+            return rc
+    return 0
 
 
 def _run_step(

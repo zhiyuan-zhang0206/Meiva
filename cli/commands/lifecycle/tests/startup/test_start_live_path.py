@@ -1,8 +1,8 @@
 # meiva:note
 # `meiva start` over a live application root, end to end against real resources.
 #
-# A running root with the requested generation is not launched again and no storage is prepared or
-# migrated; the host converge table still runs (minus the steps that cannot run while the root
+# A running root with the requested generation is not launched again and no storage is prepared;
+# a gateway whose database is behind applies the pending migrations first; the host converge table still runs (minus the steps that cannot run while the root
 # does), and the start reports readiness. What the plans decide is asserted in
 # `../start_plans`; these tests show the shell dials the root, runs the plans in order, and
 # publishes serving only after the readiness verdict. The root is a real control socket
@@ -311,8 +311,8 @@ def test_a_selection_naming_no_such_service_launches_nothing(start_run: StartRun
 
 
 # meiva:note
-# A live generation is only inspected: pending schema changes need a stopped writer boundary
-# and never run as a repeat-start effect.
+# A pure runner never applies migrations (the schema is its gateway's): a live generation whose
+# database is behind is refused and nothing is changed.
 def test_a_live_schema_that_does_not_match_the_code_refuses_without_applying_migrations(
     start_run: StartRun, db_conn: psycopg.Connection, capsys: pytest.CaptureFixture[str]
 ) -> None:
@@ -404,3 +404,80 @@ def test_a_source_file_written_before_the_root_launched_does_not_fail_the_start(
             assert start_serving.is_serving(run.home)
 
     assert run.runtime.loaded.source_digest != run.runtime.identity_now().source_digest
+
+
+def _forget_newest_migration(db_conn: psycopg.Connection) -> str:
+    newest = db_conn.execute(
+        "SELECT name FROM schema_migrations ORDER BY name DESC LIMIT 1"
+    ).fetchone()
+    assert newest is not None
+    db_conn.execute("DELETE FROM schema_migrations WHERE name = %s", newest)
+    db_conn.commit()
+    return str(newest[0])
+
+
+def _is_applied(db_conn: psycopg.Connection, name: str) -> bool:
+    return (
+        db_conn.execute("SELECT 1 FROM schema_migrations WHERE name = %s", (name,)).fetchone()
+        is not None
+    )
+
+
+# meiva:note
+# A migration changes the schema under whatever still uses it: while the root hosts a running
+# service that uses the database, the live start refuses by name and applies nothing.
+def test_a_gateways_live_start_refuses_migrations_while_a_database_service_runs(
+    start_run: StartRun, db_conn: psycopg.Connection, capsys: pytest.CaptureFixture[str]
+) -> None:
+    run = start_run
+    forgotten = _forget_newest_migration(db_conn)
+    try:
+        run.declare(gateway=True, agent_runner=False, remote_plane=True)
+        writer = next(spec.session for spec in run.roster(GATEWAY) if spec.requires_db)
+        generation = run.generation(GATEWAY, run.roster(GATEWAY, only=(writer,)))
+        row = _row(run, GATEWAY, writer)
+
+        with run.root([row], launch_digest=generation.launch_digest) as root:
+            assert run.start(only=(writer,)) == 1
+
+        assert not _is_applied(db_conn, forgotten)
+        err = capsys.readouterr().err
+        assert "still hosts services that use it" in err and writer in err
+        assert [call for call in root.calls if call[0] != "status"] == []
+        assert not run.serving_published
+    finally:
+        if not _is_applied(db_conn, forgotten):
+            db_conn.execute("INSERT INTO schema_migrations (name) VALUES (%s)", (forgotten,))
+            db_conn.commit()
+
+
+# meiva:note
+# The live path's migration is the cold path's own: a refusal of the applier (here another
+# gateway owning the cluster) fails the start, and nothing is launched.
+def test_a_gateways_live_start_fails_when_the_migration_fails(
+    start_run: StartRun, db_conn: psycopg.Connection, capsys: pytest.CaptureFixture[str]
+) -> None:
+    run = start_run
+    forgotten = _forget_newest_migration(db_conn)
+    db_conn.execute(
+        "INSERT INTO machine_units (machine_name, home, serve_gateway) "
+        "VALUES ('rival-gateway', '/rival', true)"
+    )
+    db_conn.commit()
+    try:
+        run.declare(gateway=True, agent_runner=False, remote_plane=True)
+        generation = run.generation(GATEWAY, run.roster(GATEWAY, only=("pty-sessions",)))
+        row = _row(run, GATEWAY, "pty-sessions")
+
+        with run.root([row], launch_digest=generation.launch_digest) as root:
+            assert run.start(only=("pty-sessions",)) == 1
+
+        assert not _is_applied(db_conn, forgotten)
+        assert "migrations apply failed" in capsys.readouterr().err
+        assert [call for call in root.calls if call[0] != "status"] == []
+        assert not run.serving_published
+    finally:
+        db_conn.execute("DELETE FROM machine_units WHERE machine_name = 'rival-gateway'")
+        if not _is_applied(db_conn, forgotten):
+            db_conn.execute("INSERT INTO schema_migrations (name) VALUES (%s)", (forgotten,))
+        db_conn.commit()

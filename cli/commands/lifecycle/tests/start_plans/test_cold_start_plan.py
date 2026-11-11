@@ -11,6 +11,7 @@ from cli.commands.lifecycle.start.cold_start_plan import (
     SchemaCheck,
     migration_authority,
     plan_cold_start,
+    plan_live_migration,
     plan_schema_checks,
 )
 
@@ -91,3 +92,16 @@ def test_a_plane_this_home_owns_migrates_over_its_owner_socket() -> None:
 
 def test_a_remote_managed_plane_never_gets_a_local_owner_authority() -> None:
     assert migration_authority(remote_plane=True) is MigrationAuthority.ACCESS_URL
+
+
+# meiva:note
+# A live-root start of a gateway applies pending migrations and then re-grants what they created
+# (the pooler completion); the storage is already up, so no data-plane step runs. A runner never
+# applies a schema that is its gateway's.
+def test_a_gateways_live_migration_applies_then_completes_the_pooler() -> None:
+    assert plan_live_migration({"gateway"}) == (ColdStep.MIGRATIONS, ColdStep.POOLER)
+    assert plan_live_migration({"gateway", "agent-runner"}) == plan_live_migration({"gateway"})
+
+
+def test_a_runner_has_no_live_migration() -> None:
+    assert plan_live_migration({"agent-runner"}) == ()

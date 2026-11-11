@@ -4,7 +4,7 @@
 
 ## Steps, in order
 
-1. `meiva start` with the operator's service selection on the gateway first, then across all runners in parallel; on macOS through a run-once `gui/<uid>` LaunchAgent, because the helper's launchd job lives in `gui/<uid>`. Each start must exit 0.
+1. `meiva start` with the operator's service selection on the gateway first, then across all runners in parallel; on macOS through a run-once `gui/<uid>` LaunchAgent, because the helper's launchd job lives in `gui/<uid>`. Each start must exit 0. A gateway whose root was kept across the window (`--keep-shell-sessions`) applies the pending migrations in that live start; a gateway whose root was stopped applies them in its cold start.
 2. The roster gate: every listed machine online with checkout and running code on one commit; unlisted machines are reported and never block.
 3. `meiva packages refresh` across all hosts in parallel; it never forces.
 4. The drift checks, last, in parallel: `meiva schedules verify --no-notify` on the gateway, `meiva plugins verify` on every host and `meiva harness verify-sessions` on every host (a session record the code cannot read, such as one left in an older layout because the start did not migrate it, fails the half). Every check runs to the end and a red fails `up` with all the details — after the refresh, so a red never skips it.

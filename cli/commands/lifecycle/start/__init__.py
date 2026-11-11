@@ -50,10 +50,17 @@ from cli.commands.lifecycle.start.admission import (
 from cli.commands.lifecycle.start.cold_start import (
     ColdStart,
     cold_start_steps,
+    live_schema_behind,
     prepare_cold_start,
+    prepare_live_migrations,
     prepare_live_start,
+    running_db_units,
 )
-from cli.commands.lifecycle.start.cold_start_plan import SchemaCheck, plan_schema_checks
+from cli.commands.lifecycle.start.cold_start_plan import (
+    SchemaCheck,
+    plan_live_migration,
+    plan_schema_checks,
+)
 from cli.commands.lifecycle.start.gateway_hint import gateway_hint_lines
 from cli.commands.lifecycle.start.login_link import print_login_link
 from cli.commands.lifecycle.start.occupied_ports import Occupant, refusal_text
@@ -239,8 +246,8 @@ def _roster_for(start: _Start) -> tuple[ServiceSpec, ...]:
 
 def _check_schema(start: _Start, *, live: bool) -> int | None:
     # meiva:note
-    # A live generation may only be inspected here; pending schema changes
-    # require a stopped writer boundary and never run as a repeat-start effect.
+    # A live generation is only inspected here: the migrations a gateway's live start applies
+    # (`prepare_live_migrations`) ran just before, so a database still behind is refused.
     db_url = start.database_factory.db_url()
     with start_trace.phase("schema check (post-admission)"):
         for check in plan_schema_checks(live=live):
@@ -275,9 +282,9 @@ def _admit(start: _Start, *, retained_children: list[subprocess.Popen[bytes]]) -
             )
         # meiva:note
         # Both paths converge the host before anything launches. A cold start then prepares the
-        # storage; a live root is otherwise only inspected, because its schema never changes as a
-        # repeat-start effect. The live table omits the steps that name a reason not to run
-        # while the root runs.
+        # storage; a live root is otherwise only inspected, except that a gateway whose database
+        # is behind applies the pending migrations once no database-using service runs. The live
+        # table omits the steps that name a reason not to run while the root runs.
         table = cold_start_steps() if start.converge_steps is None else start.converge_steps
         cold = ColdStart(
             command=command,
@@ -296,6 +303,25 @@ def _admit(start: _Start, *, retained_children: list[subprocess.Popen[bytes]]) -
         )
         if rc:
             return rc
+        if (
+            live
+            and "gateway" in start.roles
+            and live_schema_behind(start.database_factory.db_url())
+        ):
+            rc = prepare_live_migrations(
+                cold,
+                roster,
+                steps=plan_live_migration(start.roles),
+                running=running_db_units(
+                    roster,
+                    home=command.home,
+                    environ=start.launch_inputs.environment,
+                    pid=command.pid,
+                ),
+                retained_children=retained_children,
+            )
+            if rc:
+                return rc
     except (RuntimeError, OSError, ValueError) as exc:
         print(f"  \u2717 start admission/preparation failed: {exc}", file=sys.stderr)
         return 1

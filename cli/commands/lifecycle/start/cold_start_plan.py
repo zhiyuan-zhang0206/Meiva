@@ -1,10 +1,13 @@
 # meiva:note
 # The ordered preparation a start performs before anything launches.
 #
-# A start with no live application root prepares the host and its storage; a start that finds
-# a live root only inspects, because pending schema changes need a stopped writer boundary and
-# never run as a repeat-start effect. What happens, and in which order, is the plan returned
-# here; the start shell executes each step and stops at the first one that fails.
+# A start with no live application root prepares the host and its storage. A start that finds a
+# live root (a stop that kept the shell sessions leaves it running) only converges the host and
+# inspects the schema, except that a gateway whose database is behind the code applies the pending
+# migrations first (`plan_live_migration`): the root then hosts no service that uses the database,
+# which is the stopped writer boundary a schema change needs, and a repeat start of a healthy host
+# has nothing pending and changes no schema. What happens, and in which order, is the plan
+# returned here; the start shell executes each step and stops at the first one that fails.
 
 from __future__ import annotations
 
@@ -17,6 +20,7 @@ __all__ = [
     "SchemaCheck",
     "migration_authority",
     "plan_cold_start",
+    "plan_live_migration",
     "plan_schema_checks",
 ]
 
@@ -70,10 +74,23 @@ def plan_cold_start(roles: Collection[str]) -> tuple[ColdStep, ...]:
 
 
 # meiva:note
+# The steps a live-root start runs when the schema is behind the code: the cold start's own
+# migration step and the pooler completion that re-grants what a migration created.
+#
+# Only a gateway applies migrations (the schema belongs to it); a runner whose database is behind
+# its code has nothing to run and the schema check refuses it. The data plane is already up (the
+# stop kept it, or the live check could not have read the schema).
+def plan_live_migration(roles: Collection[str]) -> tuple[ColdStep, ...]:
+    if "gateway" not in roles:
+        return ()
+    return (ColdStep.MIGRATIONS, ColdStep.POOLER)
+
+
+# meiva:note
 # The database checks every admitted start performs before launching.
 #
-# A live root is only inspected: it additionally verifies the checkpoint schema, since no
-# cold preparation just brought it current.
+# A live root is only inspected (after any migrations `plan_live_migration` ran): it additionally
+# verifies the checkpoint schema, since no cold preparation just brought it current.
 def plan_schema_checks(*, live: bool) -> tuple[SchemaCheck, ...]:
     if live:
         return (SchemaCheck.MEIVA, SchemaCheck.CHECKPOINT)
