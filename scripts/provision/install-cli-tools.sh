@@ -3,7 +3,7 @@
 # verification image, scripts/verify/Dockerfile) RUNs it.
 #
 # Installs: apt baseline (gnupg / ca-cert / curl) + GitHub CLI keyring +
-# high-frequency CLI tools used by the agent (git / rg / jq / fd / bat /
+# high-frequency CLI tools used by the agent (git / rg / jq / fd /
 # tree / fzf / htop / gh).
 #
 # Does NOT touch: nodejs / uv / Python deps / playwright / mcp-language-server
@@ -48,7 +48,7 @@ report_missing() {
 
 if [ "$OS" = "macos" ]; then
     missing=()
-    for bin in git rg jq fd bat tree fzf htop gh; do
+    for bin in git rg jq fd tree fzf htop gh; do
         command -v "$bin" >/dev/null 2>&1 || missing+=("$bin")
     done
     # coreutils is deliberately absent from this list: no code in the repository calls
@@ -72,15 +72,15 @@ if [ "$OS" = "macos" ]; then
 
     echo "install-cli-tools.sh: installing missing tools via Homebrew: ${missing[*]}"
     export HOMEBREW_NO_AUTO_UPDATE=1 HOMEBREW_NO_INSTALL_UPGRADE=1 NONINTERACTIVE=1
-    brew install git ripgrep jq fd bat tree fzf htop gh bash coreutils gnu-sed grep findutils gawk gnu-tar < /dev/null
+    brew install git ripgrep jq fd tree fzf htop gh bash coreutils gnu-sed grep findutils gawk gnu-tar < /dev/null
     exit 0
 fi
 
 # The complete tool set, keyed by the binary each package provides (Debian
-# renames fd-find -> fdfind and bat -> batcat). A host that already carries
+# renames fd-find -> fdfind). A host that already carries
 # every one of them — a host without sudo, a pre-provisioned CI image —
 # skips apt entirely.
-TOOL_BINS=(curl gpg git rg jq fdfind batcat tree fzf htop gh)
+TOOL_BINS=(curl gpg git rg jq fdfind tree fzf htop gh)
 missing=()
 for bin in "${TOOL_BINS[@]}"; do
     command -v "$bin" >/dev/null 2>&1 || missing+=("$bin")
@@ -95,7 +95,7 @@ fi
 
 if ! command -v apt-get >/dev/null 2>&1; then
     echo "install-cli-tools.sh: requires apt-get (Debian/Ubuntu)." >&2
-    echo "  macOS: brew install git ripgrep jq fd bat tree fzf htop gh" >&2
+    echo "  macOS: brew install git ripgrep jq fd tree fzf htop gh" >&2
     exit 2
 fi
 
@@ -127,4 +127,4 @@ fi
 
 prov_sudo apt-get install -y --no-install-recommends \
     git ripgrep jq \
-    fd-find bat tree fzf htop gh
+    fd-find tree fzf htop gh
