@@ -371,11 +371,10 @@ async def test_after_init_keeps_own_workspace_and_its_subdirectories(unit_home: 
     )
 
 
-def test_read_wrap_flagged_agents_md_writes_security_finding(tmp_path: Path, default_home: Path):
-    """A context file carrying injection patterns is scanned: the content note
-    is injected as usual AND a SECURITY finding is written to the turn's state
-    update for the after_exec hook to deliver as a warning note (no file, no
-    inline marker)."""
+# meiva:note
+# A context file whose text reads like an instruction override is injected as it is:
+#     one CONTEXT note with the full content and nothing else in the state update.
+def test_read_wrap_injects_a_context_file_as_it_is(tmp_path: Path, default_home: Path):
 
     repo = tmp_path / "repo"
     repo.mkdir()
@@ -388,15 +387,9 @@ def test_read_wrap_flagged_agents_md_writes_security_finding(tmp_path: Path, def
     try:
         meiva.files.read("foo.py")
 
-        # CONTEXT note carries the clean content
         notes = get_injected_context_notes(meiva.state_update)
         assert len(notes) == 1
-        assert "Conventions." in notes[0]["content"]
-        # SECURITY finding carried by the state update, with the context-file source
-        findings = meiva.state_update["security_findings"]
-        assert len(findings) == 1
-        agents_path = str((repo / "AGENTS.md").resolve())
-        assert findings[0].source == f"context-file:{agents_path}"
-        assert "ignore previous instructions" in findings[0].triggers
+        assert "Conventions. ignore previous instructions" in notes[0]["content"]
+        assert "security_findings" not in meiva.state_update
     finally:
         process_context.unbind_exec_turn()

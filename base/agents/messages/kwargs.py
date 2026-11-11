@@ -52,6 +52,8 @@ class NoteTag(StrEnum):
     LIFECYCLE_RESURRECT = "lifecycle_resurrect"
     LIFECYCLE_FORK = "lifecycle_fork"
     HEARTBEAT = "heartbeat"
+    # meiva:note
+    # Retained for historical checkpoints; no runtime hook emits this note.
     SECURITY = "security"
     CONTEXT = "context"
     # meiva:note

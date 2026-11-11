@@ -24,7 +24,6 @@ from base.host.boundary.untyped import object_of
 from meiva.mcps._clients import McpClients
 from meiva.mcps.config import MCPCallError, MCPConnectError, ToolInfo
 from meiva.sdk_surface.pure.caller.identity_plan import attributed_agent_id, caller_facts
-from meiva.security import scan_content
 
 __all__ = [
     "DiskCache",
@@ -204,9 +203,7 @@ def call_text(source: ToolSource, server: str, tool: str, **args: object) -> str
             raise MCPCallError(
                 f"{server}.{tool} returned only structuredContent; use .raw() to get the full result"
             )
-    # A tool result (browser page text, fetched document, remote API payload) is
-    # untrusted ingested content, so it is scanned before the agent reads it.
-    return scan_content(text, source=f"mcps.{server}.{tool}")
+    return text
 
 
 # ─── Namespace proxy ──────────────────────────────────────────────────────

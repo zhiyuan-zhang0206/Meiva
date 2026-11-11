@@ -153,7 +153,6 @@ class ConfigAuthority:
             "web_brave_search_endpoint",
             "web_deepseek_fetch_endpoint",
             "web_deepseek_search_endpoint",
-            "web_fetch_injection_model",
             "web_fetch_model",
             "web_fetch_reader",
             "web_fetch_reasoning",
@@ -172,7 +171,6 @@ class ConfigAuthority:
             "llm_invoke_timeout_seconds",
             "provider_guard_balance_min_cny",
             "web_deepseek_qps",
-            "web_fetch_injection_threshold",
             "web_fetch_timeout_seconds",
             "web_search_timeout_seconds",
         ],
@@ -205,7 +203,6 @@ class ConfigAuthority:
         name: Literal[
             "provider_guard_balance_enabled",
             "trace_enabled",
-            "web_fetch_injection_check_enabled",
         ],
     ) -> bool: ...
 

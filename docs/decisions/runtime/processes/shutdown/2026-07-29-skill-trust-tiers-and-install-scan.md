@@ -1,5 +1,7 @@
 # Skill supply chain: refuse-by-default install scan + a trust tier that outlives it
 
+> Status 2026-11-12: `install_registry.trust_by_name()` was deleted. Nothing reads the trust tier at runtime; it is a recorded label, and the "runtime layers consult the tier" rule below is not implemented.
+
 ## Context
 
 `meiva skill install` takes an Agent Skills standard package from a git URL and

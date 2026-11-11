@@ -1,46 +1,13 @@
 # Prompt injection — boundary map + what is (and is not) built
 
-> **Status: a content-layer scanner IS built and on by default. The structural
-> boundary is still deferred.** The 2026-06-07 header on this doc said "deliberately
-> not built" and stayed stale through the 2026-06-30 implementation — it was never
-> updated. Corrected here.
->
-> **Built** — `meiva/security.py` (~240 lines), a rule-based scanner gated on
-> `MEIVA_SECURITY_SCAN_ENABLED` (`base/config/domains/agent/settings.py`), **default on**. It is
-> wired into every one of these ingestion points:
->
-> | Call site | Source tag |
-> |---|---|
-> | `meiva/files.py` — `meiva.files.read` | `file.read:<path>` |
-> | `meiva/web/` — `web.search` results, `web.fetch` answers | `web.search` / `web.fetch` |
-> | `meiva/mcps/__init__.py` — **every MCP tool return** | `mcps.<server>.<tool>` |
-> | `agent/graph/claim/_chat_inbound.py` — **inbound chat** | `inbound.chat:<source>` |
-| `agent/graph/claim/_dispatch.py` — **inbound system notes** (peer-authored task notes) | `inbound.system_note:<source>` |
-> | `meiva_builtins/plugins/meiva_code/plugin.py` — the `AGENTS.md` auto-injection | `context-file:<path>` |
->
-> Design points worth keeping: a hit **does not mutate the content** (no marker
-> prepended, so the scan is trivially idempotent and never corrupts what the agent
-> reads) — findings raised during an exec turn are appended by the exec child to its
-> state update (`state.security_findings`) and surface as a SECURITY system note
-> delivered by the after_exec hook (`agent/hooks/security.py`) right behind the
-> exec-result ToolMessage;
-> findings on inbound chat / system notes are returned by the scan and appended by
-> the claim node (`agent/graph/claim/_dispatch.py`) in its own delta right behind the
-> flagged message — the agent host holds no findings buffer, because one process
-> interleaves many agents' turns; there is no side-channel file (user ruling
-> 2026-08-11). Memory writes are not scanned or marked: `meiva.files.write` stores
-> exactly what it is given, and a note's content is only checked for the pool's
-> format rules and for duplicates (the meiva_memory write check).
->
-> **Not built** — everything structural: the sandboxed deprivileged reader, egress
-> allowlisting, privilege separation. (On-install skill scanning **is** built —
-> `base/packages/skills/scan.py` refuses a third-party skill package carrying critical
-> supply-chain patterns; see
-> [`skill-supply-chain-trust.md`](skill-supply-chain-trust.md).) Those remain
-> deferred for the reasons this doc lays out, and they are the ones that would
-> actually *close* the hole rather than lower the rate.
->
-> **Two real gaps in the built coverage** (see "Coverage gaps" at the end).
+> **Status 2026-11-12: nothing scans or marks external content.** A rule-based
+> content scanner (`meiva/security.py`, a model check on `web.fetch`, SECURITY notes on
+> flagged content) existed and was deleted: it only matched keywords, never blocked, and
+> gave a false sense of protection ([decision](../../../docs/decisions/data/security/2026-11-12-no-content-scan.md)).
+> Content that enters an agent's context (web pages, files, MCP results, peer and
+> inbound messages, context files, memory) reaches it unchanged. The only injection-aware
+> gate left is the install-time skill scan (`base/packages/skills/scan.py`). Everything
+> structural (sandboxed reader, egress allowlist, privilege separation) is still deferred.
 
 ## Why this is categorically different from the auth question
 
@@ -128,29 +95,6 @@ trigger has a starting point rather than a blank page.
 4. **AGENTS.md auto-injection from trusted repos only** — gate the auto-walk so a
    freshly-cloned untrusted repo's `AGENTS.md` isn't silently injected.
 
-### What "we deprioritized content-layer defenses" turned out to mean
-
-The original text here ranked content-layer work outside the priority list, on the
-grounds that the model is already RL-trained to resist injection so a prompt
-directive is marginal. That judgment stands **for the kind of content-layer defense
-it was actually about** — and that kind is still not built:
-
-- ❌ **Not built, still deliberately not:** delimiters / escaping / "treat the
-  following as data, never instructions" wording in the system prompt. Marginal
-  against an RL-trained model, and it cuts against the prompt-minimalism rule.
-
-What *was* built is a different thing the original list did not anticipate:
-
-- ✅ **Built:** a rule-based **scanner** at the ingestion boundary that flags
-  suspicious content and reports it out-of-band as a system note. It changes
-  nothing about the prompt and does not touch the content itself — it is
-  detection, not persuasion.
-
-The distinction matters because the two get conflated under "content layer": one
-tries to *instruct the model* out of being injected (rejected); the other *tells the
-operator and the memory pool* that something looked wrong (shipped). Neither is a
-boundary — point 1 of "The boundary truth" is unchanged.
-
 ## Triggers — when to actually build
 
 - Installing skills / plugins from **untrusted or third-party** sources (today
@@ -161,23 +105,6 @@ boundary — point 1 of "The boundary truth" is unchanged.
 - Going **multi-user** or exposing anything publicly (couples with the auth
   trigger).
 - **Any real incident** — a single confirmed injection flips the cost/benefit.
-
-## Coverage gaps in the scanner that IS built
-
-Two ingestion points from the surface map above have **zero** `scan_content` calls,
-and both are load-bearing:
-
-1. **The content-source skills** (`web-sources` — rss / youtube / generic —
-   plus `web-ai` / `audio-transcribe`, and the x / zhihu / xiaohongshu / douyin family). These are
-   *by definition* untrusted third-party content, and they are the one category the
-   surface map calls out as such. They fetch through their own scripts rather than
-   `meiva.web.*`, so they bypass the scanned path entirely. This is the widest gap.
-2. **`meiva.understand(url)`** (`meiva/_understand.py`) — listed in the ingestion surface
-   below as an arbitrary-web-content entry point, but it does not import
-   `meiva.security` and is not in the call-site table above.
-
-Both are cheap to close (they are call-site additions, not new machinery), and
-closing them is what makes the built scanner's coverage claim honest.
 
 ## Open research (the "how broad is the surface" question)
 

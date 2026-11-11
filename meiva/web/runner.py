@@ -1,9 +1,6 @@
 # meiva:note
 # Run a planned search or fetch batch against the deps, one thread per item up to the plan's
 # concurrency, results in input order. DeepSeek request starts of one batch share a rate limiter.
-# The workers return the findings of what they read next to it; the batch hands them to
-# `meiva.security.deliver` once, with the process facts the caller read (`delivery`), also when a
-# fetch fails after its injection check judged the page.
 
 from __future__ import annotations
 
@@ -12,14 +9,7 @@ from typing import assert_never
 
 from base.clock import Timers
 from base.host.net.resilience import Policy
-from meiva import security
 from meiva.sdk_surface.batch import run_batch
-from meiva.sdk_surface.pure.media.finding_plan import (
-    CarriedFindingsError,
-    FindingDelivery,
-    Scanned,
-    gather,
-)
 from meiva.web import brave, deepseek, reader
 from meiva.web.deps import FetchDeps, SearchDeps, SearchProvider
 from meiva.web.plans import FetchPlan, SearchPlan
@@ -33,14 +23,13 @@ __all__ = ["run_fetch", "run_search"]
 def run_search(
     plan: SearchPlan,
     deps: SearchDeps,
-    delivery: FindingDelivery,
     *,
     timers: Timers,
     policy: Policy = WEB_READ_POLICY,
 ) -> list[list[Hit]]:
     pacer = RateLimiter(deps.deepseek.qps, timers=timers)
 
-    def search_one(query: str) -> Scanned[list[Hit]]:
+    def search_one(query: str) -> list[Hit]:
         match deps.provider:
             case SearchProvider.BRAVE:
                 return brave.search_one(query, plan.count, deps, policy=policy)
@@ -49,9 +38,7 @@ def run_search(
             case _:
                 assert_never(deps.provider)
 
-    run = gather(asyncio.run(run_batch(plan.queries, search_one, plan.max_concurrent)))
-    security.deliver(delivery, run.findings)
-    return run.value
+    return asyncio.run(run_batch(plan.queries, search_one, plan.max_concurrent))
 
 
 # meiva:note
@@ -61,33 +48,17 @@ def run_search(
 def run_fetch(
     plan: FetchPlan,
     deps: FetchDeps,
-    delivery: FindingDelivery,
     *,
     timers: Timers,
     policy: Policy = WEB_READ_POLICY,
 ) -> list[str]:
     pacer = RateLimiter(deps.deepseek.qps, timers=timers)
-    try:
-        run = gather(
-            asyncio.run(
-                run_batch(
-                    plan.targets,
-                    lambda pair: reader.fetch_one(
-                        pair[0],
-                        pair[1],
-                        plan.max_chars,
-                        plan.effort,
-                        deps,
-                        pacer,
-                        policy=policy,
-                    ),
-                    plan.max_concurrent,
-                )
-            )
+    return asyncio.run(
+        run_batch(
+            plan.targets,
+            lambda pair: reader.fetch_one(
+                pair[0], pair[1], plan.max_chars, plan.effort, deps, pacer, policy=policy
+            ),
+            plan.max_concurrent,
         )
-    except CarriedFindingsError as failed:
-        error = security.deliver_kept(delivery, failed)
-    else:
-        security.deliver(delivery, run.findings)
-        return run.value
-    raise error
+    )

@@ -29,7 +29,6 @@ from base.paths.home import user_home
 from meiva.sdk_surface import agent_identity, process_context
 from meiva.sdk_surface.pure.media.attach.attach_plan import resolve_in
 from meiva.sdk_surface.validation import coerce_str, coerce_typed
-from meiva.security import scan_content
 
 
 def _home() -> Path:
@@ -263,17 +262,13 @@ def read(
     with_line_numbers = coerce_typed(with_line_numbers, "with_line_numbers", bool)
     end = _end_from_limit(start, end, limit)
 
-    # A read is an ingestion surface: file bytes flow straight into the agent's
-    # context, so the returned text is scanned for injection patterns before it
-    # leaves. Clean content is returned byte-for-byte (scan_content is a no-op).
-    source = f"file.read:{path}"
     p = resolve(path)
     # A SKILL.md body entering the context is skill consumption — attribute
     # it even though the generic file API bypasses the lazy proxy hook.
     _record_skill_read(p)
     text = p.read_text(encoding="utf-8")
     if start is None and end is None and not with_line_numbers:
-        return scan_content(text, source=source)
+        return text
     _check_bounds(start, end)
     lines = text.splitlines(keepends=True)
     lo = (start - 1) if start is not None else 0
@@ -282,9 +277,8 @@ def read(
     if with_line_numbers:
         last_no = lo + len(selected)
         width = max(1, len(str(last_no)))
-        numbered = "".join(f"{lo + i + 1:>{width}}: {line}" for i, line in enumerate(selected))
-        return scan_content(numbered, source=source)
-    return scan_content("".join(selected), source=source)
+        return "".join(f"{lo + i + 1:>{width}}: {line}" for i, line in enumerate(selected))
+    return "".join(selected)
 
 
 # meiva:note

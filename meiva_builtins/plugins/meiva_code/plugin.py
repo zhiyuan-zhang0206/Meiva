@@ -103,7 +103,6 @@ def _process_context_file(
     from agent.messages import NoteTag, system_note_message
     from meiva.sdk_surface import process_context
     from meiva.sdk_surface import settings as sdk_settings
-    from meiva.security import scan_content
 
     ctx_file_str = str(ctx_file)
     if ctx_file_str in injected:
@@ -141,10 +140,6 @@ def _process_context_file(
     if content_hash in hashes:
         injected.add(ctx_file_str)
         return True
-    # Injection-pattern scan: records a SECURITY finding (delivered as a
-    # system note by the exec node) when the content carries injection
-    # patterns; the content itself is returned clean.
-    scan_content(content, source=f"context-file:{ctx_file}")
     # Deliver the context file as a system note in THIS exec's messages
     # delta (in-memory — no side-channel file). Oversized content is
     # truncated head+tail with the full text archived to the workspace

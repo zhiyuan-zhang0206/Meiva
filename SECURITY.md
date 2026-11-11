@@ -18,9 +18,10 @@ valuable.
 Meiva does not sandbox model-authored code. `execute_code` runs the agent's
 generated Python in the agent process, on the host, with the permissions of
 whichever user started it — the same trust model as a human running that
-code themselves. Pattern-matching checks are a **mitigation layer, not a
-security boundary**: they lower the rate of a bad command executing, they do
-not close off the possibility (see the module docstring in `base/agents/messages/injection_scan.py`).
+code themselves. Nothing scans or marks the external content an agent reads
+(web pages, files, MCP results, messages, context files, memory): it reaches the
+agent unchanged, and agents inside a cluster trust each other. A hijacked agent
+can do whatever the OS user it runs as can do.
 
 Third-party **skills** are the one ingestion path with a gate of its own, for the
 same reason: a skill is text an agent is instructed to follow, so a malicious one
@@ -30,7 +31,8 @@ download-and-execute pipeline, an obfuscated payload, a credential store read
 paired with an outbound sink, instructions to work behind the user's back)
 **refuses the install**. It is pattern matching, so the same sentence applies:
 a clean report means "no rule matched", not "safe". Installed third-party
-content stays at trust tier `unreviewed` until a person runs `meiva skill trust`.
+content is recorded at trust tier `unreviewed` until a person runs `meiva skill trust`;
+the tier is a label that nothing reads at runtime.
 
 ### Local privileged services
 

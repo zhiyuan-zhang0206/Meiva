@@ -148,13 +148,6 @@ fixture/incident scope.
 
 ## Wontfix
 
-### docstring-budget:meiva/security.py:module
-- **class**: docstring-budget
-- **status**: wontfix
-- **evidence**: module docstring trimmed 15 -> 6 lines this pass (soft cap 2). Kept: the module is off the default prompt surface (not in `__all_for_meiva__`, not in the SDK-expand list), so the standing prompt pays nothing; the residue is the purpose + the mitigation caveat, for `help()` drill-down readers. Cutting further would drop the non-boundary warning.
-- **first-seen**: 2026-09-23
-- **last-verified**: 2026-09-23
-
 ### docstring-budget:meiva/ui.py:serve
 - **class**: docstring-budget
 - **status**: wontfix

@@ -8,7 +8,7 @@ Preserving the request prefix preserves its cache opportunity. Forced summarizat
 
 Every applied compact clears the entire messages channel and parks its summary behind a newly established standing head through INIT_CONTEXT. Raw conversation is never retained as a tail; claim defers co-batched chats to pending and finalizes previously claimed history before replacement.
 
-Framework lifecycle markers may follow the summary. A security note attached to a deferred chat goes with that chat; the fresh delivery scans it again. RemoveMessage operations are channel instructions, not summary content. History dumps are taken before the wipe and their notes go only into the fresh tail: inserting a note inside an AI/tool pair would break provider message ordering. Both paths stamp the summary message type and, when present, the live compact run id so timeline readers can join it to the running operation.
+Framework lifecycle markers may follow the summary. RemoveMessage operations are channel instructions, not summary content. History dumps are taken before the wipe and their notes go only into the fresh tail: inserting a note inside an AI/tool pair would break provider message ordering. Both paths stamp the summary message type and, when present, the live compact run id so timeline readers can join it to the running operation.
 
 ## Compact failure boundary
 

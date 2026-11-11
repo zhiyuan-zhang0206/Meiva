@@ -1,13 +1,11 @@
 # meiva:note
 # The DeepSeek Search and Fetch tools: build each request, send it paced by the batch's rate
-# limiter, scan what comes back for injection patterns, and return the hits with the findings, or
-# the page.
+# limiter, and return the hits or the page.
 # meiva:link meiva/web/docs/providers.md
 
 from __future__ import annotations
 
 from base.host.net.resilience import Policy
-from meiva.sdk_surface.pure.media.finding_plan import Scanned
 from meiva.web import deepseek_wire, transport, wire
 from meiva.web.deps import FetchDeps, SearchDeps
 from meiva.web.errors import FetchError, SearchError
@@ -23,7 +21,7 @@ def search_one(
     pacer: transport.RateLimiter,
     *,
     policy: Policy = WEB_READ_POLICY,
-) -> Scanned[list[wire.Hit]]:
+) -> list[wire.Hit]:
     config = deps.deepseek
     data = transport.send_json(
         deepseek_wire.deepseek_search_request(config, query, count),
@@ -35,8 +33,7 @@ def search_one(
         rng=deps.rng,
         policy=policy,
     )
-    hits = deepseek_wire.deepseek_search_hits(data)
-    return Scanned(hits, wire.hit_findings(hits))
+    return deepseek_wire.deepseek_search_hits(data)
 
 
 def read_page(

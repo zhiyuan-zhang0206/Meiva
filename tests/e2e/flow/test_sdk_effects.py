@@ -72,7 +72,7 @@ def test_a_raising_or_crashing_exec_is_reported_and_the_agent_carries_on(
 
 
 @pytest.mark.scenario("tests.e2e.fakes.scenarios.sdk_effects:build_files_edges")
-def test_files_edit_reports_missing_and_ambiguous_matches_and_read_flags_injection(
+def test_files_edit_reports_missing_and_ambiguous_matches_and_read_returns_text_unchanged(
     spawned_agent: int, clean_world: None
 ) -> None:
     chat_and_wait(spawned_agent, "exercise files")
@@ -86,10 +86,7 @@ def test_files_edit_reports_missing_and_ambiguous_matches_and_read_flags_injecti
     assert "edited XX bb XX" in out, out
     assert (world.sandbox() / "edit.txt").read_text() == "XX bb XX"
 
-    security = [m["text"] for m in calls[2] if m["tag"] == "security"]
-    assert len(security) == 1, f"expected one security note, saw {security}"
-    assert "inject.txt" in security[0], security[0]
-    assert world.INJECTION not in security[0]
+    assert not any(m["tag"] == "security" for m in calls[2]), "a read adds no note of its own"
 
 
 @pytest.fixture

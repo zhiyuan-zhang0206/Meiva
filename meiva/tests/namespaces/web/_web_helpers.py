@@ -13,7 +13,7 @@ from collections.abc import Callable, Iterator
 from dataclasses import dataclass, replace
 from datetime import UTC, datetime
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
-from typing import Any, cast
+from typing import Any
 
 import pytest
 from pydantic import SecretStr
@@ -24,8 +24,6 @@ from base.config.service_read import ConfigAuthority
 from base.lm.catalog import ModelCatalog
 from base.lm.effort import ReasoningEffort
 from base.packages.tests.model_catalog import inert_keys
-from meiva.sdk_surface import process_context
-from meiva.sdk_surface.pure.media.finding_plan import FindingDelivery
 from meiva.sdk_surface.pure.plans.batch_plan import DEFAULT_BATCH_MAX_CONCURRENT
 from meiva.tests.fixtures.scripted_chat_model import OVERRIDE, ScriptedModels
 from meiva.web import plans, runner, wiring
@@ -125,8 +123,6 @@ def loopback() -> Iterator[Loopback]:
 #
 # `set_brave` / `set_jina` / `set_model` change the config values of the deps, `script` scripts
 # the answer model the fetch deps name, and `search` / `fetch` run the SDK calls against them.
-# Findings the calls raise land in the state update of the exec turn `use_exec_turn` binds, and
-# `findings` reads them back from there.
 # meiva:note
 # The read policy without its waits: the same attempts and classification, a zero backoff and no
 # jitter, so a case that exercises a retry does not spend the backoff. The zero comes from a
@@ -188,39 +184,6 @@ class WebHarness:
         )
 
     # meiva:note
-    # Make a finding deliverable: the calls run inside an exec turn bound in this process (the
-    # fixture unbinds it), and the injection check reads its settings from `authority` and its
-    # decision model from `catalog`.
-    def use_exec_turn(self, authority: ConfigAuthority, catalog: ModelCatalog) -> None:
-        process_context.set_state(object())
-        process_context.set_state_update({})
-        self.fetch_deps = dataclasses.replace(
-            self.fetch_deps,
-            injection=wiring.injection_inputs(
-                authority,
-                catalog,
-                keys=inert_keys(catalog),
-                agent_id=None,
-                delivery_active=True,
-                now=self.fetch_deps.fetch_model.now,
-            ),
-        )
-
-    # meiva:note
-    # The findings delivered to the bound exec turn so far; none outside one.
-    @property
-    def findings(self) -> list[Any]:
-        if not process_context.in_exec_turn():
-            return []
-        update = cast("dict[str, Any]", process_context.get_state_update())
-        return list(update.get("security_findings", []))
-
-    # meiva:note
-    # What the facade reads before a call: scanning is enabled, and a turn is running or not.
-    def delivery(self) -> FindingDelivery:
-        return FindingDelivery(enabled=True, in_turn=process_context.in_exec_turn())
-
-    # meiva:note
     # Script the answer model the fetch deps name.
     def script(self, *replies: Any):
         return self.scripted_models.script(self.fetch_deps.fetch_model.model, *replies)
@@ -234,7 +197,6 @@ class WebHarness:
         return runner.run_search(
             plans.plan_search(queries, count, max_concurrent),
             self.search_deps,
-            self.delivery(),
             timers=self.timers,
             policy=NO_WAIT_READ_POLICY,
         )
@@ -249,7 +211,6 @@ class WebHarness:
         return runner.run_fetch(
             plans.plan_fetch(targets, max_chars, effort, max_concurrent),
             self.fetch_deps,
-            self.delivery(),
             timers=self.timers,
             policy=NO_WAIT_READ_POLICY,
         )
@@ -257,9 +218,6 @@ class WebHarness:
 
 # meiva:note
 # The web deps of the test configuration, every provider pointed at the loopback listener.
-#
-# The calls run outside an exec turn, so a finding is dropped and the injection check is off;
-# `use_exec_turn` turns them on.
 @pytest.fixture
 def web_harness(
     loopback: Loopback,
@@ -275,8 +233,6 @@ def web_harness(
         catalog=model_catalog,
         keys=inert_keys(model_catalog),
         overrides=model_overrides(),
-        delivery_active=False,
-        agent_id=None,
         now=lambda: datetime(2026, 8, 17, tzinfo=UTC),
         rng=seeded_rng(),
     )
@@ -302,7 +258,6 @@ def web_harness(
         fetch_deps=fetch,
     )
     yield harness
-    process_context.unbind_exec_turn()
 
 
 __all__ = ["Loopback", "Received", "Reply", "WebHarness", "loopback", "web_harness"]

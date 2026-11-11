@@ -116,22 +116,21 @@ def differing_paths(
 
 PackageType = Literal["skill", "plugin", "mcp"]
 
+# meiva:note
+# How much a package's *content* may be trusted, recorded where it enters:
+#
+# - "builtin" — the content came from this Meiva checkout (`meiva_builtins/`), so it
+#   ships under the same review as the code. Written by converge.
+# - "reviewed" — third-party content a human on this cluster read and approved
+#   (`meiva skill trust <name>`). Never inferred: a clean
+#   `base.packages.skills.scan` report is "no rule matched", not "someone looked".
+# - "unreviewed" — the default for anything ingested from outside.
+#
+# The tier is a recorded label: no runtime code reads it.
+#
+# The default is the least-trusted tier, so a registry row written before this
+# field existed reads as third-party until the next converge re-stamps it.
 TrustTier = Literal["builtin", "reviewed", "unreviewed"]
-"""How much a package's *content* may be trusted, recorded where it enters:
-
-- "builtin" — the content came from this Meiva checkout (`meiva_builtins/`), so it
-  ships under the same review as the code. Written by converge.
-- "reviewed" — third-party content a human on this cluster read and approved
-  (`meiva skill trust <name>`). Never inferred: a clean
-  `base.packages.skills.scan` report is "no rule matched", not "someone looked".
-- "unreviewed" — the default for anything ingested from outside. Installed and
-  usable by an agent that deliberately opens it, but any runtime layer that
-  pulls skill text into a context *without* a human in the loop (skill recall)
-  must treat it as attacker-controlled.
-
-The default is the least-trusted tier, so a registry row written before this
-field existed reads as third-party until the next converge re-stamps it.
-"""
 
 PackageOrigin = Literal["repo", "plugin", "user"]
 """Who owns a package's content in `~/.meiva/skills/`:
@@ -485,18 +484,6 @@ def enabled_skill_names(*, home: Path) -> set[str]:
     plugin's own registry entry rather than a duplicate skill entry.
     """
     return {p.name for p in load(home=home).packages if p.type in ("skill", "plugin") and p.enabled}
-
-
-def trust_by_name(*, home: Path) -> dict[str, TrustTier]:
-    """Every tracked package's trust tier, keyed by name — one registry read for
-    a caller classifying a whole skill tree at once.
-
-    A name absent from the map is a package the registry does not track at all,
-    which the skill scanner already refuses to load; a caller that still meets
-    one (a runtime provider root registered by a plugin, which never passes
-    through the registry) must treat it as `"unreviewed"`, the safe direction.
-    """
-    return {p.name: p.trust for p in load(home=home).packages}
 
 
 # meiva:note

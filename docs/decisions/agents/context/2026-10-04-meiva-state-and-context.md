@@ -1,5 +1,7 @@
 # `meiva.state` is the graph state, `meiva.context` is the runtime context, the plugin wiring is a value
 
+> Status 2026-11-12: the `security_findings` channel named below was deleted with the content scan ([no content scan](../../data/security/2026-11-12-no-content-scan.md)).
+
 ## Context
 
 The `meiva` package is a namespace of free functions that agent code calls inside an exec child, a

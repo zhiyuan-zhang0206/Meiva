@@ -11,7 +11,6 @@ from enum import StrEnum
 from base.host.env.agent_slices import ModelOverrides
 from base.lm.catalog import ModelCatalog
 from base.lm.catalog.provider_keys import ProviderKeys
-from meiva.sdk_surface.injection_check import InjectionCheckInputs
 from meiva.web.configs import BraveConfig, DeepSeekFetchConfig, DeepSeekSearchConfig, JinaConfig
 
 __all__ = [
@@ -89,7 +88,6 @@ class FetchDeps:
     jina: JinaConfig
     deepseek: DeepSeekFetchConfig
     fetch_model: FetchModel
-    injection: InjectionCheckInputs
     # meiva:note
     # The process generator, as in `SearchDeps`: both deps bundles hand it to `send_json`.
     rng: random.Random = field(compare=False, repr=False)

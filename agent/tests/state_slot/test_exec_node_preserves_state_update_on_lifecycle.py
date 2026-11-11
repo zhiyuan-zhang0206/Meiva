@@ -8,7 +8,6 @@ from typing import Any, cast
 from unittest.mock import AsyncMock
 
 from langchain_core.messages import HumanMessage
-from langgraph.types import Overwrite
 
 from agent.graph.exec.node import exec_node_impl
 from agent.graph.exec.process import SubprocessExecProcess
@@ -18,7 +17,6 @@ from agent.tests.test_state_slot import (
     ai_message_with_code,
     make_runtime_and_config,
     messages_plugin_state_cls,
-    scan_flagged_code,
 )
 from agent.tests.test_state_slot import (
     reset_state_slot as reset_state_slot,
@@ -68,35 +66,13 @@ async def test_exec_node_preserves_state_update_on_lifecycle(*, database_gate: P
     assert not process_context.in_exec_turn()
 
 
-async def test_exec_node_commits_security_finding_to_graph_state(*, database_gate: ProcessDbGate):
-    state = BaseAgentState(
-        messages=[ai_message_with_code(scan_flagged_code("shell.run"))],
-        halted=False,
-    )
-    runtime, config = make_runtime_and_config(AsyncMock(), database_gate=database_gate)
-
-    cmd = await exec_node_impl(
-        state, runtime, config, process=SubprocessExecProcess(live_parent_facts(), rng=_rng())
-    )
-
-    update = cast(dict[str, Any], cmd.update)
-    assert [m.type for m in update["messages"]] == ["tool", "human"]
-    assert update["messages"][0].tool_call_id == "call_1"
-    assert update["messages"][1].additional_kwargs["meiva_note_tag"] == "security"
-    assert "shell.run" in update["messages"][1].content
-    assert update["security_findings"] == Overwrite([])
-
-
-async def test_exec_node_keeps_plugin_notes_after_toolmessage_beside_findings(
-    *, database_gate: ProcessDbGate
-):
+async def test_exec_node_keeps_plugin_notes_after_toolmessage(*, database_gate: ProcessDbGate):
     state_cls = messages_plugin_state_cls()
 
     code = (
-        scan_flagged_code("context-file:/repo/AGENTS.md")
-        + "import meiva\n"
-        + "from langchain_core.messages import HumanMessage\n"
-        + "meiva.state_update['messages'] = [HumanMessage(content='project note', id='p1')]\n"
+        "import meiva\n"
+        "from langchain_core.messages import HumanMessage\n"
+        "meiva.state_update['messages'] = [HumanMessage(content='project note', id='p1')]\n"
     )
     state = state_cls(messages=[ai_message_with_code(code)], halted=False)
     runtime, config = make_runtime_and_config(AsyncMock(), database_gate=database_gate)
@@ -107,14 +83,11 @@ async def test_exec_node_keeps_plugin_notes_after_toolmessage_beside_findings(
 
     update = cast(dict[str, Any], cmd.update)
     msgs = update["messages"]
-    assert [m.type for m in msgs] == ["tool", "human", "human"], (
-        f"expected [tool, plugin, security], got {[m.type for m in msgs]}"
+    assert [m.type for m in msgs] == ["tool", "human"], (
+        f"expected [tool, plugin], got {[m.type for m in msgs]}"
     )
     assert msgs[1].id == "p1"
     assert msgs[1].content == "project note"
-    assert msgs[2].additional_kwargs["meiva_note_tag"] == "security"
-    assert "context-file:/repo/AGENTS.md" in msgs[2].content
-    assert update["security_findings"] == Overwrite([])
 
 
 async def test_exec_node_checkpoints_child_attachment(
@@ -164,12 +137,13 @@ async def test_exec_node_checkpoints_child_attachment(
     assert "render.png" in caption_block["text"]
 
 
+# meiva:note
+# The compact path (SystemHalt) writes nothing back — claim REMOVE_ALLs
+#     the whole history — so plugin notes must not
+#     leak into the update.
 async def test_exec_node_compact_path_drops_notes_and_findings(
     tmp_path: Path, *, database_gate: ProcessDbGate
 ):
-    """The compact path (SystemHalt) writes nothing back — claim REMOVE_ALLs
-    the whole history — so neither plugin notes nor the child's findings may
-    leak into the update (the findings channel is reset instead)."""
 
     state_cls = messages_plugin_state_cls()
     # The real exec child rejects attach for a text-only model (user ruling
@@ -179,13 +153,12 @@ async def test_exec_node_compact_path_drops_notes_and_findings(
     image = tmp_path / "render.png"
     image.write_bytes(b"png")
     code = (
-        scan_flagged_code("shell.run")
-        + "import meiva\n"
-        + "from langchain_core.messages import HumanMessage\n"
-        + "meiva.state_update['messages'] = [HumanMessage(content='x')]\n"
-        + f"meiva.self.attach({str(image)!r})\n"
-        + "from base.agents.lifecycle import SystemHalt\n"
-        + "raise SystemHalt()\n"
+        "import meiva\n"
+        "from langchain_core.messages import HumanMessage\n"
+        "meiva.state_update['messages'] = [HumanMessage(content='x')]\n"
+        f"meiva.self.attach({str(image)!r})\n"
+        "from base.agents.lifecycle import SystemHalt\n"
+        "raise SystemHalt()\n"
     )
     state = state_cls(
         messages=[ai_message_with_code(code)],
@@ -205,5 +178,4 @@ async def test_exec_node_compact_path_drops_notes_and_findings(
         f"compact path must write no messages back, got {update.get('messages')!r}"
     )
     assert update.get("halted") is True
-    assert update["security_findings"] == Overwrite([])
     assert "attach" not in update

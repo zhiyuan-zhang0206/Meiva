@@ -17,7 +17,6 @@ from base.sessions.env_forwarding import cwd_is_inside_checkout, forward_env_dic
 from base.telemetry.delivery.pipeline import EventPipeline
 from meiva.files import agent_workspace
 from meiva.sdk_surface.validation import coerce_str, coerce_typed
-from meiva.security import scan_content
 from meiva.shell import session_env, session_plan
 from meiva.shell.handle import SessionHandle
 from meiva.shell.session_env import SessionHost
@@ -110,12 +109,9 @@ class ShellSessions:
     def send_keys(self, session_id: int, *keys: str) -> None:
         self._backend.send_keys(self.resolve(session_id), *keys)
 
-    # meiva:note
-    # A session holds whatever ran in it, an interactive fetch or a coding agent rendering a web page, so reading one ingests exactly as `shell.run` does. The text is scanned for the same reason and comes back byte-for-byte.
     def capture(self, session_id: int, lines: int, *, scrollback: bool) -> str:
         name = self.resolve(session_id)
-        pane = self._backend.capture_pane(name, lines, scrollback=scrollback)
-        return scan_content(pane, source="shell.sessions.capture")
+        return self._backend.capture_pane(name, lines, scrollback=scrollback)
 
     def kill(self, session_id: int) -> None:
         ok, _mode = self._backend.kill_session(self.resolve(session_id), graceful=False)

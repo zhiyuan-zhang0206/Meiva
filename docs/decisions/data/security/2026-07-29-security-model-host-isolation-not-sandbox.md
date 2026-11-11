@@ -1,5 +1,7 @@
 # Security model: deployment-host isolation, not code-execution sandboxing
 
+> Status 2026-11-12: the prompt-injection scanning of `meiva/security.py` named below was deleted ([no content scan](2026-11-12-no-content-scan.md)); the decision itself stands.
+
 ## Context
 
 An open-source-readiness audit caught a direct contradiction in `SECURITY.md`:

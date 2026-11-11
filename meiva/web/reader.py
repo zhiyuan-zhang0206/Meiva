@@ -1,7 +1,6 @@
 # meiva:note
 # Fetch one page and have a model answer a prompt about it: read the page through the
-# configured reader, judge its text for injection beside the answer, answer from a framed copy
-# of it, and scan the answer.
+# configured reader and answer from a framed copy of it.
 
 from __future__ import annotations
 
@@ -11,15 +10,6 @@ from base.host.net.resilience import Policy
 from base.lm import factory
 from base.lm.call import answer_text
 from base.lm.effort import ReasoningEffort
-from meiva.sdk_surface.injection_check import begin_check
-from meiva.sdk_surface.pure.media.finding_plan import (
-    CarriedFindingsError,
-    Findings,
-    Scanned,
-    findings_of,
-    model_finding,
-)
-from meiva.sdk_surface.pure.media.injection.injection_plan import finding_source
 from meiva.web import deepseek, transport, wire
 from meiva.web.deps import FetchDeps, ReaderProvider
 from meiva.web.errors import FetchError
@@ -93,20 +83,8 @@ def _answer(
 
 
 # meiva:note
-# The finding of the injection check, if its verdict reaches the threshold.
-def _verdict_findings(url: str, probability: float | None, deps: FetchDeps) -> Findings:
-    source = finding_source(url, probability, deps.injection.threshold)
-    if source is None or probability is None:
-        return ()
-    return (model_finding(source, probability),)
-
-
-# meiva:note
 # Read one page and answer one prompt, the synchronous unit of work the batch schedules in a
-# thread. The injection check judges the page text itself, which the scan of the summary never
-# sees; it needs only the page, so it runs beside `_answer`, and its finding is kept even when
-# the answer fails: the failure then travels as `CarriedFindingsError`, which the facade unwraps
-# after delivering the finding.
+# thread.
 def fetch_one(
     url: str,
     prompt: str,
@@ -116,15 +94,6 @@ def fetch_one(
     pacer: transport.RateLimiter,
     *,
     policy: Policy = WEB_READ_POLICY,
-) -> Scanned[str]:
+) -> str:
     page = read_page(url, max_chars, deps, pacer, policy=policy)
-    check = begin_check(url, page.title, page.content, inputs=deps.injection)
-    try:
-        answer = _answer(prompt, page, effort, deps)
-    except Exception as error:
-        raise CarriedFindingsError(error, _verdict_findings(url, check.finish(), deps)) from error
-    except BaseException:
-        check.finish()
-        raise
-    verdict = _verdict_findings(url, check.finish(), deps)
-    return Scanned(answer, (*verdict, *findings_of(answer, "web.fetch")))
+    return _answer(prompt, page, effort, deps)
