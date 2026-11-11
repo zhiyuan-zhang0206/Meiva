@@ -492,16 +492,6 @@ def cancel(agent_id: int) -> CancelResult:
     return CancelResult(gateway_client.cancel(agent_id))
 
 
-def compact(agent_id: int) -> None:
-    """Queue a compaction of the agent's history for its next turn.
-
-    Returns once the request is durable; the summary is generated and applied
-    by the agent itself, and no result is reported back."""
-    agent_id = coerce_typed(agent_id, "agent_id", int)
-    schedule_capability.assert_schedule_capability("agents.compact", target_agent_id=agent_id)
-    gateway_client.compact(agent_id)
-
-
 def resurrect(agent_id: int, prompt: str) -> ResurrectResult:
     """Wake a terminated agent on its current harness with its previous conversation state intact."""
     agent_id = coerce_typed(agent_id, "agent_id", int)

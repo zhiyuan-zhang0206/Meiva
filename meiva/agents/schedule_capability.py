@@ -3,7 +3,7 @@
 # that identity belongs to. A schedule is a script in this process, and it reaches the database, the
 # filesystem and the shell like any other, so a list of permitted SDK entries would neither describe
 # nor bound what it can do -- `schedules/` already calls tasks, shell, web and
-# `agents.spawn/terminate/resurrect`. What it must not do is end, restart, compact, resurrect
+# `agents.spawn/terminate/resurrect`. What it must not do is end, restart, resurrect
 # or cancel the loop it speaks for: that is how a timer seizes the agent it was handed.
 #
 # The actor string is the evidence. The runner binds `schedule:<id>` with the owner as the agent id,
@@ -26,7 +26,6 @@ _SCHEDULE_ACTOR_PREFIX = "schedule:"
 _STEERING_ACTIONS: frozenset[str] = frozenset(
     {
         "agents.cancel",
-        "agents.compact",
         "agents.restart",
         "agents.resurrect",
         "agents.terminate",
@@ -49,7 +48,7 @@ def assert_schedule_capability(action: str, *, target_agent_id: int | None) -> N
     raise RuntimeError(
         f"meiva.{action}({target_agent_id}) is refused here: this process was launched by a "
         f"schedule and carries agent {target_agent_id} as its identity (`schedule:<id>` with that "
-        f"owner bound). Ending, restarting, compacting, resurrecting or cancelling the "
+        f"owner bound). Ending, restarting, resurrecting or cancelling the "
         f"loop it speaks for would let a timer seize the agent it was handed. Drive a worker "
         f"instead, or do this from the agent itself. This is not a sandbox: the script still holds "
         f"the database, the filesystem and the shell of the process it runs in."

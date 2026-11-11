@@ -42,10 +42,6 @@ Cancel the agent's running turn. `cancelled` means a native turn was
 cancelled, `enqueued` means an external foreground cancel is pending, and
 `not_running` means there was no running turn.
 
-### `meiva.agents.compact(agent_id: int) -> None`
-
-Queue a compaction of the agent's history for its next turn. Returns once the request is durable; the agent generates and applies the summary itself.
-
 ### `meiva.agents.resurrect(agent_id: int, prompt: str) -> ResurrectResult`
 
 Resurrect a terminated agent. The agent retains its previous conversation state and receives `prompt` to understand why it was woken.

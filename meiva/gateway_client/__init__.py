@@ -382,13 +382,6 @@ def cancel(agent_id: int) -> str:
     return _StatusAnswer.model_validate(_transport.json_object(response)).status
 
 
-# meiva:note
-# POST /api/agents/{id}/compact → the queued `compact_request` inbound id.
-def compact(agent_id: int) -> int:
-    response = _run(Request("POST", f"/api/agents/{agent_id}/compact", body={}), _ctx(None))
-    return _InboundIdAnswer.model_validate(_transport.json_object(response)).inbound_id
-
-
 def resurrect(agent_id: int, *, prompt: str, resurrected_by: str | None = None) -> str:
     """POST /api/agents/{id}/resurrect -> status string.
 

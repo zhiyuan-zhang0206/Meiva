@@ -147,9 +147,6 @@ class TestAgentsEntries:
                 lambda: agents.cancel(cast(Any, ("7",))), "agent_id must be int", id="cancel"
             ),
             pytest.param(
-                lambda: agents.compact(cast(Any, ("7",))), "agent_id must be int", id="compact"
-            ),
-            pytest.param(
                 lambda: agents.get_status(("7",)),  # pyright: ignore[reportArgumentType]
                 "agent_id must be int",
                 id="get_status",  # pyright: ignore[reportArgumentType]
