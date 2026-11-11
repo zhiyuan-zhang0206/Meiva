@@ -56,7 +56,7 @@ def test_the_rebuild_writes_one_pointer_line_per_note_and_directory(tmp_path: Pa
     assert (pool / "MEMORY.md").read_text(encoding="utf-8") == (
         "Preamble text.\n\n`## Pointers` is only quoted in prose.\n\n"
         "## Pointers\n\n\n"
-        "- [Alpha](alpha.md) \u2014 first note\n"
+        "- [alpha](alpha.md) \u2014 first note\n"
         "- [beta](beta.md) \u2014 \n"
         "- [people/](people/index.md) \u2014 3 notes\n"
     )
@@ -71,7 +71,7 @@ def test_a_pool_without_an_index_file_gets_one(tmp_path: Path) -> None:
 
     assert res.returncode == 0, res.stderr
     assert (pool / "MEMORY.md").read_text(encoding="utf-8") == (
-        "## Pointers\n\n\n- [Solo](solo.md) \u2014 only note\n"
+        "## Pointers\n\n\n- [solo](solo.md) \u2014 only note\n"
     )
 
 
@@ -85,7 +85,7 @@ def test_a_missing_heading_appends_after_the_existing_preamble(tmp_path: Path) -
 
     assert res.returncode == 0, res.stderr
     assert (pool / "MEMORY.md").read_text(encoding="utf-8") == (
-        "Setup prose only.\n\n## Pointers\n\n\n- [Solo](solo.md) \u2014 \n"
+        "Setup prose only.\n\n## Pointers\n\n\n- [solo](solo.md) \u2014 \n"
     )
 
 

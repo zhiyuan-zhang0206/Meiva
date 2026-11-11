@@ -38,7 +38,7 @@ def test_a_subdirectory_holding_no_note_is_not_listed(tmp_path: Path) -> None:
     area = (pool / "area" / "index.md").read_text(encoding="utf-8")
     assert "* [area/](area/index.md) - 1 notes" in root
     assert "__pycache__" not in area
-    assert "* [Area note](note.md) - Area note" in area
+    assert "* [note](note.md) - Area note" in area
 
 
 def test_a_subdirectory_whose_notes_are_only_deeper_is_still_listed(tmp_path: Path) -> None:
@@ -95,3 +95,11 @@ def test_existing_introductions_survive_all_generator_entry_points(tmp_path: Pat
     for target in targets:
         assert target.read_bytes() == introduction
     assert "1 notes" in (pool / "MEMORY.md").read_text(encoding="utf-8")
+
+
+def test_legacy_titles_do_not_override_index_labels(tmp_path: Path) -> None:
+    _note(tmp_path / "root.md", "Legacy title")
+    _note(tmp_path / "area" / "nested.md", "Other legacy title")
+    regenerate_indexes(tmp_path)
+    assert "- [root](root.md)" in (tmp_path / "MEMORY.md").read_text()
+    assert "* [nested](nested.md)" in (tmp_path / "area" / "index.md").read_text()

@@ -203,7 +203,7 @@ def _note_lines(pool: Path, dir_rel: str, mds: list[str]) -> list[str]:
     for md in mds:
         rel = (dir_rel + "/" if dir_rel else "") + md
         fm = frontmatter(pool, rel)
-        t = str(fm.get("title") or md[:-3])
+        t = md[:-3]
         d = str(fm.get("description") or "").replace("\n", " ")
         lines.append(f"* [{t}]({md}) - {d}")
     return lines or ["*(none)*"]
@@ -280,7 +280,7 @@ def rebuild_root_memory_index(pool: Path) -> None:
     lines: list[str] = []
     for rel in root_files:
         fm = frontmatter(pool, rel)
-        title = str(fm.get("title") or Path(rel).name[:-3])
+        title = Path(rel).name[:-3]
         desc = str(fm.get("description") or "").replace("\n", " ")
         lines.append(f"- [{title}]({rel}) \u2014 {desc}")
     for top in sorted(tops):

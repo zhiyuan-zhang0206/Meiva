@@ -32,7 +32,6 @@ from meiva_builtins.plugins.meiva_memory.template.validate import (
     source_repos,
 )
 
-_LEGACY_FIELDS = ("type", "meiva_agent", "meiva_machine", "tags", "timestamp", "generated")
 _CONFLICT_MARKER = "<<<<<<< "
 _COMMIT_PREFIX = "__COMMIT__"
 _IGNORED_GIT_CHANGED_TARGETS = frozenset(
@@ -76,11 +75,9 @@ def _read_note_record(pool: Path, rel: str) -> NoteRecord | None:
     pure_md = not text.startswith("---\n")
     parts = note_parts(text)
     fm = parts[0] if parts is not None else {}
-    if "sources" in fm:
-        raise ValueError(f"{path}: frontmatter sources is forbidden; use inline Markdown links")
     desc_val = fm.get("description")
     desc = desc_val.strip() if isinstance(desc_val, str) else ""
-    legacy = tuple(k for k in _LEGACY_FIELDS if k in fm)
+    legacy = tuple(k for k in fm if k not in {"description", "verified", "stale_after"})
     return NoteRecord(
         path=rel,
         pure_markdown=pure_md,

@@ -221,12 +221,6 @@ def test_dream_gather_cli_json_and_markdown(
     assert "`note.md` (pure-md)" in md_out
 
 
-def test_gather_rejects_frontmatter_sources(tmp_path: Path) -> None:
-    _ = (tmp_path / "note.md").write_text("---\nsources: null\n---\n# Rule")
-    with pytest.raises(ValueError, match="frontmatter sources is forbidden"):
-        _ = dream_gather.gather_signals(tmp_path, today=_dt.date(2026, 11, 9))
-
-
 def test_vault_file_history_drives_source_drift(tmp_path: Path) -> None:
     vault = _init_git_repo(tmp_path / "vault")
     pool = vault / "memory"
@@ -286,3 +280,38 @@ def test_gather_hash_mode_and_cross_host_scope(tmp_path: Path) -> None:
     trapped = report["scope_trapped_candidates"]
     assert is_object_list(trapped) and len(trapped) == 2
     assert "## Scope-Trapped Promotion Candidates (2)" in dream_gather.render_report(report)
+
+
+@pytest.mark.parametrize(
+    "key",
+    [
+        "type",
+        "name",
+        "title",
+        "tags",
+        "timestamp",
+        "meiva_agent",
+        "meiva_machine",
+        "ava_agent",
+        "ava_machine",
+        "sources",
+        "generated",
+        "unknown",
+    ],
+)
+def test_gather_flags_every_unknown_frontmatter_key(tmp_path: Path, key: str) -> None:
+    pool = _init_git_repo(tmp_path / "pool")
+    (pool / "rule.md").write_text(
+        f'---\ndescription: Rule\nverified: "2026-11-09"\n{key}: legacy\n---\n# Rule\n'
+    )
+    report = dream_gather.gather_signals(
+        pool,
+        home=tmp_path,
+        repos={},
+        today=_dt.date(2026, 11, 9),
+        since_days=7,
+        max_verified_age_days=30,
+    )
+    gaps = report["missing_okf_notes"]
+    assert is_object_list(gaps)
+    assert any(is_object_dict(row) and row.get("legacy_fields") == [key] for row in gaps)

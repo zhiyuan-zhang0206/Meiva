@@ -37,85 +37,73 @@ def build(root: Path) -> None:
         "MEMORY.md",
         "- [Good](good.md) — x\n- [Wrong title](titled.md)\n- [dup](dup.md)\n- [dup2](dup.md)\n- [gone](gone.md)\n- [http](https://x.md)\n- [Dirpointed](pointed/index.md)\n",
     )
-    w(root, "good.md", fm(type="note", meiva_agent="1", description="d", tags="[type/user]"))
+    w(root, "good.md", fm(description="d"))
     w(
         root,
         "titled.md",
-        fm(
-            type="note",
-            meiva_agent="1",
-            title="Real Title",
-            description="d",
-            tags="[type/feedback]",
-        ),
+        fm(description="d"),
     )
-    w(root, "dup.md", fm(type="note", meiva_agent="1", description="d", tags="[type/env, project]"))
+    w(root, "dup.md", fm(description="d"))
     w(
         root,
         "orphan.md",
-        fm(type="note", meiva_agent="1", description="d", tags="[type/role, type/user]"),
+        fm(description="d"),
     )
     w(root, "nofm.md", "no frontmatter\n")
     w(root, "unclosed.md", "---\ntype: a\n")
     w(root, "badyaml.md", "---\n: : :\n  - [\n---\nx\n")
     w(root, "notmap.md", "---\n- a\n- b\n---\nx\n")
-    w(root, "notype.md", "---\nmeiva_agent: 1\ndescription: d\ntags: [a, 1]\n---\nx\n")
+    w(root, "notype.md", "---\ndescription: d\n---\nx\n")
     w(
         root,
         "nulls.md",
-        '---\ntype: ""\nmeiva_agent: null\ndescription: ""\ntags: notalist\n---\nx\n',
+        '---\ndescription: ""\n---\nx\n',
     )
     w(
         root,
         "ts.md",
-        fm(
-            type="n",
-            meiva_agent="1",
-            description="d",
-            tags="[type/user]",
-            timestamp="2026-01-01T00:00:00",
-        ),
+        fm(description="d"),
     )
     w(
         root,
         "ts2.md",
-        fm(type="n", meiva_agent="1", description="d", tags="[type/user]", timestamp="bogus"),
+        fm(description="d"),
     )
     w(
         root,
         "gen.md",
-        fm(type="n", meiva_agent="1", description="d", tags="[type/user]", generated="x"),
+        fm(description="d"),
     )
     w(
         root,
         "gen2.md",
-        '---\ntype: n\nmeiva_agent: 1\ndescription: d\ntags: [type/user]\ngenerated:\n  by: ""\n  at: nope\n---\n',
+        "---\ndescription: d\n---\n",
     )
     w(
         root,
         "misread.md",
-        "---\ntype: n\nmeiva_agent: 1\ndescription: has # hash\ntags: [type/user]\n---\n",
+        "---\ndescription: has # hash\n---\n",
     )
-    w(root, "badtype.md", fm(type="n", meiva_agent="1", description="d", tags="[type/bogus, repo]"))
+    w(root, "badtype.md", fm(description="d"))
     w(
         root,
         "projects/alpha/a.md",
-        fm(type="n", meiva_agent="1", description="d", tags="[type/project, alpha]"),
+        fm(description="d"),
     )
     w(
         root,
         "misplaced.md",
-        fm(type="n", meiva_agent="1", description="d", tags="[type/project, alpha]"),
+        fm(description="d"),
     )
     w(
         root,
         "both.md",
-        fm(type="n", meiva_agent="1", description="d", tags="[type/project, alpha, beta, meiva]"),
+        fm(description="d"),
     )
     w(
         root,
         "projects/beta/b.md",
-        fm(type="n", meiva_agent="1", description="d", tags="[type/project]"),
+        fm(description="d"),
     )
     w(
         root,
@@ -125,21 +113,21 @@ def build(root: Path) -> None:
     w(
         root,
         "pointed/a.md",
-        fm(type="n", meiva_agent="1", title="Real Title", description="d", tags="[type/user]"),
+        fm(description="d"),
     )
-    w(root, "pointed/b.md", fm(type="n", meiva_agent="1", description="d", tags="[type/user]"))
-    w(root, "pointed/c.md", fm(type="n", meiva_agent="1", description="d", tags="[type/user]"))
-    w(root, "noindex/n.md", fm(type="n", meiva_agent="1", description="d", tags="[type/user]"))
-    w(root, "fmindex/index.md", "---\nx: 1\n---\n- [n](n.md)\n")
-    w(root, "fmindex/n.md", fm(type="n", meiva_agent="1", description="d", tags="[type/user]"))
-    w(root, ".hidden/h.md", fm(type="n"))
+    w(root, "pointed/b.md", fm(description="d"))
+    w(root, "pointed/c.md", fm(description="d"))
+    w(root, "noindex/n.md", fm(description="d"))
+    w(root, "fmindex/index.md", "---\ndescription: d\n---\n- [n](n.md)\n")
+    w(root, "fmindex/n.md", fm(description="d"))
+    w(root, ".hidden/h.md", fm(description="d"))
     w(
         root,
         "fc.md",
         "<!-- fact-check: test -d /nonexistent_x -->\n<!-- fact-check: ! test -d / -->\n<!-- fact-check: rm -rf x -->\n<!-- fact-check: test -d / -->\n",
     )
     for i in range(22):
-        w(root, f"many/n{i}.md", fm(type="n", meiva_agent="1", description="d", tags="[type/user]"))
+        w(root, f"many/n{i}.md", fm(description="d"))
     for i in range(21):
         (root / f"dirs/d{i}").mkdir(parents=True)
     w(root, "unicode.md", "x")
@@ -255,10 +243,7 @@ def _note(tmp_path: Path, text: str, name: str = "n.md") -> Path:
     return path
 
 
-_GOOD = (
-    "---\ntype: Memory\nmeiva_agent: 7\nmeiva_machine: box\ntimestamp: '2026-01-31T09:30:00+00:00'\n"
-    "title: A rule\ndescription: What it holds\ntags: [type/feedback]\n---\nBody.\n"
-)
+_GOOD = "---\ndescription: What it holds\n---\n# A rule\n\nBody.\n"
 
 
 def test_validate_note_accepts_a_complete_note(tmp_path: Path) -> None:
@@ -272,7 +257,9 @@ def test_validate_note_accepts_a_complete_note(tmp_path: Path) -> None:
     )
     assert (
         validator.validate_note(
-            _note(tmp_path, "---\ntitle: Optional frontmatter only\n---\n# Heading\n", "opt.md")
+            _note(
+                tmp_path, "---\ndescription: Optional frontmatter only\n---\n# Heading\n", "opt.md"
+            )
         )
         == []
     )
@@ -303,11 +290,15 @@ def test_validate_note_accepts_a_complete_note(tmp_path: Path) -> None:
         ),
         (
             "---\nsources: not-a-list\n---\n# Heading\n",
-            ["Frontmatter 'sources' is forbidden; use inline Markdown file links"],
+            [
+                "Frontmatter key 'sources' is forbidden; allowed keys: description, verified, stale_after"
+            ],
         ),
         (
             '---\nsources:\n  - "repo:meiva:a.py"\n  - "  "\n---\n# Heading\n',
-            ["Frontmatter 'sources' is forbidden; use inline Markdown file links"],
+            [
+                "Frontmatter key 'sources' is forbidden; allowed keys: description, verified, stale_after"
+            ],
         ),
         (
             "---\nverified: 2026-11-09\n---\n# Heading\n",
@@ -389,7 +380,7 @@ def test_note_helpers(tmp_path: Path) -> None:
     parts = validator.note_parts(_GOOD)
     assert parts is not None
     frontmatter, body = parts
-    assert frontmatter["description"] == "What it holds" and body == "Body.\n"
+    assert frontmatter["description"] == "What it holds" and body == "# A rule\n\nBody.\n"
     assert validator.note_parts("no frontmatter") == ({}, "no frontmatter")
     assert validator.note_parts("---\nunclosed\n") is None
     assert validator.note_parts("---\n: : :\n  - [\n---\nx\n") is None
@@ -444,7 +435,7 @@ def test_validator_scans_memory_tree_only(tmp_path: Path) -> None:
 def test_sources_frontmatter_always_forbidden(tmp_path: Path, value: str) -> None:
     note = _note(tmp_path, f"---\nsources: {value}\n---\n# Rule")
     assert validate.validate_file(note) == [
-        "Frontmatter 'sources' is forbidden; use inline Markdown file links"
+        "Frontmatter key 'sources' is forbidden; allowed keys: description, verified, stale_after"
     ]
 
 
@@ -504,3 +495,42 @@ def test_evidence_links_do_not_cover_notes(tmp_path: Path) -> None:
     w(bundle, "x.md", "# Claim\n")
     w(bundle, "MEMORY.md", "[Evidence](/sources/x.md)\n")
     assert validate.validate_pointers(bundle) == ["orphan note (no pointer in MEMORY.md): x.md"]
+
+
+@pytest.mark.parametrize(
+    "key",
+    [
+        "type",
+        "name",
+        "title",
+        "tags",
+        "timestamp",
+        "meiva_agent",
+        "meiva_machine",
+        "ava_agent",
+        "ava_machine",
+        "sources",
+        "generated",
+        "unknown",
+        "42",
+    ],
+)
+def test_unknown_frontmatter_keys_are_rejected(tmp_path: Path, key: str) -> None:
+    errors = validate.validate_file(_note(tmp_path, f"---\n{key}: value\n---\n# Rule\n"))
+    parsed_key = 42 if key == "42" else key
+    assert errors == [
+        f"Frontmatter key {parsed_key!r} is forbidden; allowed keys: description, verified, stale_after"
+    ]
+
+
+@pytest.mark.parametrize(
+    "comment", ["<!-- agent-7 -->", "<!--ava-agent: 3-->", "<!--  ava-machine: box\n-->"]
+)
+def test_legacy_attribution_comments_are_rejected(tmp_path: Path, comment: str) -> None:
+    assert validate.validate_file(_note(tmp_path, f"# Rule\n{comment}\n")) == [
+        "Legacy HTML attribution comments are forbidden"
+    ]
+
+
+def test_other_html_comments_remain_valid(tmp_path: Path) -> None:
+    assert validate.validate_file(_note(tmp_path, "# Rule\n<!-- fact-check: test -d / -->\n")) == []
