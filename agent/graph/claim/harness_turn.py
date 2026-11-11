@@ -51,6 +51,7 @@ from agent.graph.claim.lost_turn import report_lost_turn
 from agent.graph.claim.timeline import append_turn_timeline
 from agent.graph.claim.turn_stamp import persist_last_active
 from agent.graph.hooks.question_context import read_agent_open_questions
+from agent.graph.hooks.node import HOOK_NOTES_KEY
 from agent.graph.hooks.user_delivery import capture_items, delivery_end_reminder
 from agent.graph.interrupt import (
     ModelInterruptedError,
@@ -632,6 +633,8 @@ class ForegroundRun:
             return False
         rows = recovery_notes_first(await self._reserve())
         synthetic, self._synthetic = self._synthetic, []
+        rendered = await self._render(rows)
+        synthetic, rendered = fold_hook_notes(synthetic, rendered)
         handed: list[Handed] = []
         inputs: list[HarnessInput] = []
         for entry, prompt in synthetic:
@@ -639,7 +642,7 @@ class ForegroundRun:
             handed.append(entry)
             inputs.append(HarnessInput(key=entry.key, text=prompt))
         settled_now: list[Handed] = []
-        for entry, text in await self._render(rows):
+        for entry, text in rendered:
             if text.strip():
                 handed.append(entry)
                 inputs.append(
@@ -707,6 +710,28 @@ class ForegroundRun:
         self._correcting = True
         self._synthetic.append(correction)
         return True
+
+
+# meiva:note
+# The pre-turn hooks' note joins the first row that has text, after the message, in one input. A note
+# of its own is a second write right behind the one that starts the turn: Claude Code runs it as a turn
+# of its own, Codex and Antigravity steer it into the turn after the first model request has gone out
+# with the note alone, so the agent first answers a note and only then the person. The note has no row
+# and no acknowledgement of its own; it settles with the row it rides on. A wake with no row text keeps
+# the note as an input of its own.
+# meiva:link agent/graph/docs/harness-turn.md
+def fold_hook_notes(
+    synthetic: Sequence[tuple[Handed, str]], rendered: Sequence[tuple[Handed, str]]
+) -> tuple[list[tuple[Handed, str]], list[tuple[Handed, str]]]:
+    notes = [prompt for entry, prompt in synthetic if entry.key.startswith(HOOK_NOTES_KEY)]
+    target = next((i for i, (_, text) in enumerate(rendered) if text.strip()), None)
+    if not notes or target is None:
+        return list(synthetic), list(rendered)
+    entry, text = rendered[target]
+    folded = list(rendered)
+    folded[target] = (entry, "\n\n".join([text, *notes]))
+    rest = [pair for pair in synthetic if not pair[0].key.startswith(HOOK_NOTES_KEY)]
+    return rest, folded
 
 
 # meiva:note
