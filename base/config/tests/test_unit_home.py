@@ -20,5 +20,4 @@ def test_pidfile_fields_rooted_under_unit_home() -> None:
     root = resolve_unit_home()
     s = Settings()
     assert s.services.gateway_pidfile == root / "run" / "gateway.pid"
-    assert s.services.memory_root == root / "memory"
     assert s.services.memory_search_data_dir == root / "memory-search"

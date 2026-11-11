@@ -166,20 +166,6 @@ class ServiceRuntimeSettings(EnvSettings):
         },
     )
 
-    memory_root: Path = Field(
-        title="Memory pool directory",
-        default_factory=lambda: unit_home() / "memory",
-        alias="MEIVA_MEMORY_ROOT",
-        description="Root directory of the meiva.memory pool's markdown files; the memory indexer watches this path.",
-        json_schema_extra={
-            "restart_required": "",
-            "writable": False,
-            "sensitive": False,
-            "scope": "host",
-            "remote_writable": False,
-        },
-    )
-
     memory_search_backend: str = Field(
         title="Memory search storage backend",
         default="numpy",

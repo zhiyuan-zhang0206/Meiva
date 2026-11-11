@@ -61,6 +61,9 @@ MAX_CONCURRENT_DECISIONS = 30
 request goes out together, which kept the ranking near 2s in the calibration benchmark; the
 cap only bites when `memory_rerank_candidates` is raised."""
 
+# meiva:note
+# The question per purpose. `recall` and `search` are variant A of the calibration benchmark;
+# `dedup` is not calibrated.
 _QUESTIONS: dict[MemorySearchPurpose, YesNo] = {
     "recall": YesNo(
         question=(
@@ -100,8 +103,6 @@ _QUESTIONS: dict[MemorySearchPurpose, YesNo] = {
         ),
     ),
 }
-"""The question per purpose. `recall` and `search` are variant A of the calibration benchmark;
-`dedup` is not calibrated (its threshold is `memory_write_dedup_threshold`)."""
 
 _STATE_TEMPLATES: dict[MemorySearchPurpose, tuple[str, str]] = {
     "recall": (
