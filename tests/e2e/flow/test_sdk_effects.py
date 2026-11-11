@@ -113,7 +113,6 @@ def test_slash_command_expands_into_the_model_input(
     first = _human_text(calls[0])
     assert world.COMMAND_BODY in first, f"command not expanded for the model: {first[-500:]!r}"
     assert "what is the date" in first, "the free text after the command was dropped"
-    assert world.COMMAND_NAME in _last_tool(calls[1]), _last_tool(calls[1])
 
 
 @pytest.mark.scenario("tests.e2e.fakes.scenarios.sdk_effects:build_upload")

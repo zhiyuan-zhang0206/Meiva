@@ -13,7 +13,7 @@ import inspect
 import pytest
 
 import meiva
-from meiva import agents, security
+from meiva import security
 from meiva.sdk_surface.discovery import agent_visible_names
 
 _SURFACE: dict[str, list[str]] = {
@@ -22,7 +22,6 @@ _SURFACE: dict[str, list[str]] = {
         "AgentRow",
         "AgentStatus",
         "CancelResult",
-        "CommandInfo",
         "Harness",
         "HarnessAttachment",
         "HarnessAvailability",
@@ -119,9 +118,8 @@ def test_the_top_level_namespaces_are_pinned() -> None:
     [
         (security.is_flagged, "(content: str) -> bool"),
         (security.scan_content, "(content: str, source: str = 'unknown') -> str"),
-        (agents.commands, "() -> 'list[CommandInfo]'"),
     ],
-    ids=["is_flagged", "scan_content", "commands"],
+    ids=["is_flagged", "scan_content"],
 )
 def test_the_signatures_behind_the_visible_names_are_pinned(
     function: object, signature: str

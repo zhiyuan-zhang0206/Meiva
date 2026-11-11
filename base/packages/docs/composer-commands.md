@@ -1,7 +1,7 @@
 # Composer commands
 
 `composer_commands.py` is framework-internal. The claim node expands Composer
-text; gateway autocomplete and `meiva.agents.commands()` share its catalog.
+text; gateway autocomplete uses the same catalog.
 Composition roots supply the active skill reader through `CommandCatalog`.
 
 ## Catalog boundary

@@ -18,7 +18,7 @@
 
 ### Communication
 - `send_message(agent_id, content)` — send a message to a peer agent. If target is terminated, automatically resurrect. Pure INSERT — no state check, no waiting, no delivery receipt.
-- `commands() → list[CommandInfo]` — list slash commands accepted by the peer agent; send `/name <command>` to invoke. One message may invoke several (`/a … /b …`) — the receiver expands the whole chain in order inside that single message. Every command expands the same way; no combination is special-cased or refused.
+- Slash commands: send `/name <command>` as the message text to invoke a command the peer accepts. One message may invoke several (`/a … /b …`) — the receiver expands the whole chain in order inside that single message. Every command expands the same way; no combination is special-cased or refused.
 - `get_last_message(agent_id) → str | None` — read the last AI message text from the agent (None if none).
 
 ### Discovery

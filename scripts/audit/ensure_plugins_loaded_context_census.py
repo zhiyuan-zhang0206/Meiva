@@ -4,7 +4,7 @@
 # #8062 made the host-version gate take the environment its `git` runs under from the caller
 # (`MeivaContext.require_environ()`, no fallback). A load site that runs under no context — or
 # under one built without `environ=` — then raises on the first name listing (the skill scan,
-# `meiva.agents.commands()`, the metering walk), and one such failure latches the whole process
+# the metering walk), and one such failure latches the whole process
 # through `install.mark_load_failed()`. That family of misses kept arriving one call site at a
 # time, so this census counts them instead of trusting "my batch is green".
 #

@@ -11,25 +11,12 @@ from base.api_contracts.agent_contract import (
 )
 
 __all_for_meiva__ = [
-    "CommandInfo",
     "HarnessAttachment",
     "HarnessAvailability",
     "Machine",
     "Neighbor",
     "ShellSessionsKill",
 ]
-
-
-@dataclass(frozen=True)
-class CommandInfo:
-    name: str
-    description: str
-    instruction_hint: str
-
-    def __str__(self) -> str:
-        hint = f" {self.instruction_hint}" if self.instruction_hint else ""
-        desc = f"  — {self.description}" if self.description else ""
-        return f"/{self.name}{hint}{desc}"
 
 
 @dataclass(frozen=True)

@@ -58,23 +58,6 @@ class Machine:
     live: bool   # probed in real time at call time, not cached
 ```
 
-## `commands`
-
-```python
-def commands() -> list[CommandInfo]
-```
-
-List slash commands accepted by peer agents. Activated by sending a `/name <instruction>` format message.
-
-### `class CommandInfo`
-
-```python
-class CommandInfo:
-    name: str             # command name (without /)
-    description: str      # function description
-    instruction_hint: str # parameter hint
-```
-
 ## Typical Use
 
 ```python
@@ -91,10 +74,6 @@ if page.next_cursor is not None:
 for m in meiva.agents.list_machines():
     if not m.live:
         print(f"⚠️ {m.name} offline")
-
-# Query commands accepted by peers
-for cmd in meiva.agents.commands():
-    print(f"/{cmd.name} — {cmd.description}")
 ```
 
 ## Relationship to Other Subsystems
