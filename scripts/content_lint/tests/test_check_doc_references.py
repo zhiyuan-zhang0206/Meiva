@@ -149,6 +149,26 @@ def test_live_cli_options_reject_wrong_command(tmp_path: Path) -> None:
     ]
 
 
+def test_a_subcommand_that_does_not_exist_is_reported(tmp_path: Path) -> None:
+    doc = tmp_path / "doc.md"
+    doc.write_text(
+        'Wrong: `meiva agents spawn "<prompt>" --label x`.\n'
+        "Fine: `meiva agents send <id> hello --source user`, `meiva agents ls`.\n"
+        "Package order: `base < meiva < agent < gateway`.\n"
+    )
+    assert check_doc(doc, check_doc_references.meiva_flags()) == [
+        (1, "`meiva agents spawn` — no such subcommand")
+    ]
+
+
+def test_a_flag_after_a_placeholder_argument_is_still_checked(tmp_path: Path) -> None:
+    doc = tmp_path / "doc.md"
+    doc.write_text('Wrong: `meiva agents restart <id> -m "x" --overlay harness=codex`.\n')
+    assert check_doc(doc, check_doc_references.meiva_flags()) == [
+        (1, "`meiva agents restart --overlay` — no such flag")
+    ]
+
+
 def _skill(tmp_path: Path, body: str, *, name: str = "SKILL.md") -> tuple[Path, list[str]]:
     skill_dir = tmp_path / ".agents" / "skills" / "demo"
     skill_dir.mkdir(parents=True, exist_ok=True)

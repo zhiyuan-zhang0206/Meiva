@@ -37,7 +37,7 @@ they are not hidden behind a successful operation verdict.
 
 There are no process/family receipts, all-descendant disappearance proof,
 quarantine, restart adoption, held unreaped-leader registry, blocked kinds or
-`meiva backup operations` retirement commands. Old control directories are not
+backup-operations retirement commands. Old control directories are not
 read as process authority; the next run has independent scratch. Unexpected
 orphan processes require operational investigation, not an automatic census.
 

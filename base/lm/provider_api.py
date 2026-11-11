@@ -35,7 +35,7 @@
 #   binds them). It is a pure function of ``ctx`` — no caller, agent, error
 #   history, or budget is visible.
 # - The builder takes its API key from ``ctx.keys`` (``ctx.keys.require("FOO_API_KEY")``); a
-#   missing key raises ``RuntimeError`` immediately — a clear build-time error, not a server
+#   missing key raises ``MissingProviderKeyError`` (a ``RuntimeError``) immediately — a clear build-time error, not a server
 #   401 mid-turn. A builder never reads ``os.environ``.
 # - ``ctx.resolved_effort`` keeps the provider's established wire semantics.
 #   Builders with a constrained vocabulary validate with

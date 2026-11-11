@@ -49,7 +49,7 @@ proves it are [WAL-G restore and recovery drill](walg-restore.md).
 - **Pre-flight** (`check.py`, `meiva backup walg check`): binary, configuration, key,
   then one put / list / get / delete / list round trip under the prefix. The delete
   matters: retention would be the first delete, weeks after setup.
-- **Health** (`probe.py`, called by `meiva health-probe`): nine states, each with a
+- **Health** (`probe.py`, called by `meiva backup walg status`): nine states, each with a
   fixed text so an outage stays one alert episode. (1) The running Postgres carries
   the configured archive settings. (2) The archiver is not failing
   (`last_failed_time` newer than `last_archived_time`). (3) No complete WAL segment

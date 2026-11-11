@@ -11,7 +11,16 @@ from collections.abc import Iterable, Mapping
 from dataclasses import dataclass, field
 from types import MappingProxyType
 
-__all__ = ["ProviderKeys"]
+__all__ = ["MissingProviderKeyError", "ProviderKeys"]
+
+
+# meiva:note
+# A provider's API key is absent from the process's `ProviderKeys`.
+#
+# A `RuntimeError` so existing callers that catch it keep working; a caller that can degrade
+# without the provider catches this type, never the message.
+class MissingProviderKeyError(RuntimeError):
+    pass
 
 
 # meiva:note
@@ -50,12 +59,12 @@ class ProviderKeys:
         return self.secrets.get(key_env, default)
 
     # meiva:note
-    # The key named `key_env`; `RuntimeError` when it is absent, so a missing key surfaces
+    # The key named `key_env`; `MissingProviderKeyError` when it is absent, so a missing key surfaces
     # at build time instead of as a provider 401 mid-turn.
     def require(self, key_env: str) -> str:
         key = self.secrets.get(key_env)
         if not key:
-            raise RuntimeError(
+            raise MissingProviderKeyError(
                 f"{key_env} not set — this provider needs its key; "
                 "configure in ~/.meiva/.env or export before starting"
             )

@@ -5,7 +5,7 @@ Come here when you need the messages themselves, or an agent's own history.
 
 ## Getting a psql prompt
 
-There is no `meiva psql` verb. `MEIVA_DB_URL` normally points at the cluster's
+There is no psql verb on the CLI. `MEIVA_DB_URL` normally points at the cluster's
 PgBouncer listener, which is transaction-pooled — fine for a one-shot query,
 hostile to interactive exploration (`SET`, prepared statements, advisory locks
 all misbehave). Derive the direct URL the way the admin plane does:

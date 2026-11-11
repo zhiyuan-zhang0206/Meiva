@@ -130,6 +130,7 @@ if __name__ == "__main__":
 
 _FLAG = re.compile(r"^(--[a-z0-9][a-z0-9-]*)")
 _WORD = re.compile(r"^[a-z][a-z0-9_-]*$")
+_ARGUMENT = re.compile(r"""^(<[^<>]+>|"|'|-[a-zA-Z]$)""")
 _MD_LINK = re.compile(r"\[[^\]]*\]\(([^)\s]+)\)")
 # Opt-out for a `future/` link that names something not yet built — must sit
 # immediately after the link (only whitespace between), so it marks THIS link and
@@ -197,6 +198,15 @@ def _command_segments(line: str, *, fenced: bool) -> list[str]:
     return re.findall(r"`([^`]+)`", line)
 
 
+# meiva:note
+# The subcommands of a command group. A group takes a subcommand next, so a plain word after it
+# that names none is a command that does not exist (`meiva agents spawn`), not an argument. A
+# `<placeholder>`, a quoted string or a short option is an argument that keeps the command open,
+# so a flag written after it is still checked.
+def _subcommands(path: tuple[str, ...], commands: dict[tuple[str, ...], set[str]]) -> set[str]:
+    return {key[len(path)] for key in commands if len(key) > len(path) and key[: len(path)] == path}
+
+
 def _next_path(
     word: str, path: tuple[str, ...] | None, commands: dict[tuple[str, ...], set[str]]
 ) -> tuple[tuple[str, ...] | None, tuple[str, str] | None]:
@@ -213,9 +223,11 @@ def _next_path(
         return path, None
     if path is not None and (*path, word) in commands:
         return (*path, word), None  # a subcommand narrows which flags are legal
+    if path is not None and _WORD.match(word) and _subcommands(path, commands) - {word}:
+        return None, (" ".join(path), word)
     # Punctuation, a URL, a pipe — the command's reach ends; an argument
     # value keeps it alive.
-    return (None if not _WORD.match(word) else path), None
+    return (path if _WORD.match(word) or _ARGUMENT.match(word) else None), None
 
 
 def check_flags(
@@ -470,6 +482,11 @@ def _prose_problems(
     return out
 
 
+def _misuse(command: str, token: str) -> str:
+    kind = "flag" if token.startswith("--") else "subcommand"
+    return f"`{command} {token}` — no such {kind}"
+
+
 def check_doc(
     doc: Path,
     commands: dict[tuple[str, ...], set[str]],
@@ -508,8 +525,7 @@ def check_doc(
         )
         found, carry = check_flags(line, commands, carry, fenced=fenced)
         if not skip_flags:
-            for command, flag in found:
-                problems.append((lineno, f"`{command} {flag}` — no such flag"))
+            problems.extend((lineno, _misuse(command, token)) for command, token in found)
         if not (fenced or indented):
             problems.extend(
                 (lineno, message)
