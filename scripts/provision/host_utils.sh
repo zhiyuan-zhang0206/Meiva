@@ -1,9 +1,8 @@
 #!/usr/bin/env bash
 # The host utilities `meiva start` needs beyond the data plane and Node:
-# `cron` (its `crontab` binary is where every OS job registers: the daily WAL-G
-# backup, log rotation, packages refresh, health probe) and `curl` (the frontend
-# readiness probe). Linux: apt. macOS ships curl with the OS and uses launchd
-# instead of cron, so the macOS branch only verifies.
+# `cron` (its `crontab` binary is where every OS job registers: log rotation, packages
+# refresh, health probe) and `curl` (the frontend readiness probe). Linux: apt. macOS ships
+# curl with the OS and uses launchd instead of cron, so the macOS branch only verifies.
 #
 # Idempotent. Exits non-zero when a tool is still missing, so the caller
 # (`meiva start`'s host-dependency preflight) refuses before converge instead of

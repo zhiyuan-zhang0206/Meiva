@@ -48,12 +48,12 @@ below `cli/commands/cluster/` reads `settings` or the process environment.
   only then does `install_bundle` run (the cluster's login probe is the install's own) and the
   bundle file is deleted. The served keys are dropped from the identity values, never stored.
 - `health.py` runs one round: `health_readings.read_health` observes the cluster (the gateway
-  with its retry budget, the agent table, the schema, the roster's services, the disk, WAL
-  archiving, the prod checkout, the provider account) into values, `health_verdicts.judge_health`
+  with its retry budget, the agent table, the schema, the roster's services, the disk,
+  the prod checkout, the provider account) into values, `health_verdicts.judge_health`
   returns the checks in report order, and the shell prints them and emits one
   `health_probe_failing` per failed check plus the heartbeat. A round is configured by a
   `HealthOptions` that `health_options(command)` reads from the command's configuration and
-  runtime; the WAL-G configuration file is read from the options' `data_plane` only.
+  runtime.
 - `home.py` publishes the terminal intent, runs `meiva stop` from the checkout the request
   names, retires the OS jobs and (on macOS) the helper, marks the home detached and then
   drops the data directories, in the order `destroy_plan.plan_destroy` returns. The terminal

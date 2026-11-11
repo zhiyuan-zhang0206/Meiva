@@ -37,9 +37,7 @@ def _policy(*, runtime: CommandRuntime) -> MachinePolicy:
         owned_home=is_default_home_of(runtime.home, user_home=runtime.session.user_home),
         packages_refresh=refresh,
         packages_tick_seconds=view.packages.refresh_tick_seconds if refresh else None,
-        walg_configured=view.walg.walg_config_file is not None,
         production=production_identity(machine=runtime.machine, home=runtime.home),
-        backup_hour=view.services.backup_hour,
     )
 
 

@@ -89,18 +89,6 @@ instead of SQL or hand-built HTTP calls.
 - `meiva logs retention`: local, non-recursive managed-log cleanup; legacy global
   14-day fallback or explicit family tiers across service and native archives;
   open handles are excluded.
-- `meiva backup walg check|run|drill|restore|status`: the WAL-G physical backup. `check` is the
-  pre-flight: it proves the pinned binary, the configuration and key, and a
-  put/list/get/delete round trip under the bucket prefix (exit 1 on the first failing
-  step). `run` is the daily tick the OS job runs: backup, verify the archived WAL chain,
-  apply guarded retention (exit 1 only when a step failed; a skip or a concurrent run
-  exits 0). `drill` runs the weekly recovery drill now (exit 0 only if it passed).
-  `restore --dir DIR --user U [--backup NAME] [--time T | --lsn L]` recovers a backup into an
-  empty directory with a scratch Postgres and never touches the home's data directory.
-  `status` prints the configuration, key fingerprint, archiver facts and the
-  last tick and drill and never fails
-  ([WAL-G](../../../services/backup/walg/docs/walg.md),
-  [restore and drill](../../../services/backup/walg/docs/walg-restore.md)).
 - `meiva mcp ...`: isolated environments at `$MEIVA_HOME/mcps/`
   ([MCP](../../../meiva/mcps/docs/mcps.md)).
 - `meiva plugins ...`

@@ -66,7 +66,6 @@ from cli.commands.lifecycle.start.login_link import print_login_link
 from cli.commands.lifecycle.start.occupied_ports import Occupant, refusal_text
 from cli.commands.lifecycle.start.readiness_plan import (
     ReadinessFacts,
-    archive_assertion_needed,
     critical_launch_failures,
     shows_gateway_hint,
 )
@@ -441,24 +440,6 @@ def readiness_verdict(
 
 
 # meiva:note
-# The gateway is serving, so its Postgres is up: assert once that it carries the
-# archive settings this code configures (services/backup/walg/startup.py).
-def _assert_archive_after_readiness(start: _Start, wait: probe.ReadinessWait) -> None:
-    gateway_unready = any(spec.session == "gateway" for spec in wait.unready)
-    if not archive_assertion_needed(start.roles, gateway_unready=gateway_unready):
-        return
-    from services.backup.walg import probe
-    from services.backup.walg.startup import assert_configured_archive
-
-    assert_configured_archive(
-        machine=start.command.machine.name(),
-        path=start.config.data_plane.walg_config_file,
-        admin=probe.admin_connection(home=start.command.home),
-        home=start.command.home,
-    )
-
-
-# meiva:note
 # A pause marker left by a previous release claims this home is stopped; readiness just made that
 # false, so the sweep removes it here and names it in the start's own output.
 def _report_pause_markers(home: Path) -> None:
@@ -613,7 +594,6 @@ def cmd_start_body(
         verdict = readiness_verdict(launch, wait, ready_timeout=ready_timeout)
         if verdict is not None:
             return verdict
-        _assert_archive_after_readiness(start, wait)
         _report_pause_markers(command.home)
         return _finalize(start, serving_generation)
 

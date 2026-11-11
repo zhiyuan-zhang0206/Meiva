@@ -18,7 +18,6 @@ if TYPE_CHECKING:
         ServiceSettings,
         ToUserSettings,
         TransferSettings,
-        WalgSettings,
         WebSettings,
     )
     from base.host.env.dotenv_boot import EnvBootResult
@@ -48,5 +47,4 @@ class SettingsDomains:
     observability: ObservabilitySettings
     display: DisplaySettings
     packages: PackagesSettings
-    walg: WalgSettings
     general: GeneralSettings

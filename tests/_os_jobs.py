@@ -10,7 +10,6 @@ _CRON_MARKERS = (
     "# meiva-logs-maintenance",
     "# meiva-packages-refresh",
     "# meiva-pr-flow",
-    "# meiva-walg",
 )
 
 

@@ -3,6 +3,3 @@
 "services.backup.artifact.tests.passphrase" = [
     ".",
 ]
-"meiva.tests.fixtures.sdk" = [
-    "test_offsite.py"
-]

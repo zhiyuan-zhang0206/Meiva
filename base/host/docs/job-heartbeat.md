@@ -1,8 +1,8 @@
 # Generated-job heartbeats
 
 A launchd plist or crontab line that writes nothing is indistinguishable from one that was
-removed: both are silence. Four generated jobs (`logs-maintenance`, `packages-refresh`, `pr-flow`,
-`walg`) therefore declare what they promise, and the definition that runs them carries it.
+removed: both are silence. Three generated jobs (`logs-maintenance`, `packages-refresh`, `pr-flow`)
+therefore declare what they promise, and the definition that runs them carries it.
 
 `base/host/system/job_values.py` owns the declaration values — the heartbeat file the run
 writes, the owner to call when it stops moving, and how late it may be before someone is called —

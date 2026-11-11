@@ -308,7 +308,6 @@ event(s)` produced by the very emit the test provokes (the emitter's queue
 overflows under a loaded shard). The same window produced this in four other
 files that asserted an exact count or an empty list on a global sink
 (`cli/commands/lifecycle/tests/test_root_driver.py`,
-`services/backup/walg/tests/test_startup.py`,
 `base/agents/sdk/tests/test_call_policy.py`).
 
 **Correct form.** Keep the semantic ("exactly one report for this event") and
@@ -319,7 +318,7 @@ narrow the selection:
 ```
 
 When "nothing was logged" is the assertion, scope it to the module that would
-log: `message.record["name"] == "services.backup.walg.startup"`.
+log: `message.record["name"] == "<the module that would log>"`.
 
 **Lintability — not lintable (operational).** A lint could flag `logger.add(`
 in a test followed by an exact-count assertion, but which selection makes the

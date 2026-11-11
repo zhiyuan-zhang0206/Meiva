@@ -69,8 +69,6 @@ from cli.commands.data_plane.native.start_bounds import (
     off_box_host,
 )
 from cli.commands.data_plane.pg_probe import PostmasterWait, launch_failure
-from cli.commands.data_plane.walg import warn_archive_inactive
-from services.backup.walg.archive import archive_pg_args
 
 # meiva:note
 # A single cluster's own pg needs far less than a per-host shared budget. `main` on its own
@@ -201,7 +199,6 @@ def ensure_pg_data(home: Path, *, os_user: str, host: Host) -> Path:
 # Execute the launch step of a Postgres start: hand the postmaster command line, built from the
 # resolved binary and the declared addresses, to the native custody launcher.
 def _launch_postmaster(
-    config: DataPlaneConfig,
     pg_port: int,
     *,
     home: Path,
@@ -227,7 +224,6 @@ def _launch_postmaster(
             max_connections=_PG_MAX_CONNECTIONS,
             tz_args=tuple(shlex.split(pg_tz_args())),
             shm_args=tuple(shlex.split(pg_shm_args())),
-            archive_args=tuple(archive_pg_args(path=config.walg_config_file, home=home)),
         )
     )
 
@@ -291,7 +287,6 @@ def start_pg(
                     return 1
             case pg_plan.LaunchPostmaster():
                 _launch_postmaster(
-                    config,
                     pg_port,
                     home=home,
                     host=host,
@@ -312,8 +307,6 @@ def start_pg(
                 print(
                     f"  ✓ postgres ready ({dial_host}:{pg_port}, password authentication enforced)"
                 )
-            case pg_plan.CheckArchive():
-                warn_archive_inactive(config.walg_config_file, home=home)
             case _:
                 assert_never(step)
     return 0

@@ -14,7 +14,6 @@ from pathlib import Path
 
 __all__ = [
     "AwaitReachableBind",
-    "CheckArchive",
     "EnsureData",
     "LaunchPostmaster",
     "PgIdentity",
@@ -77,7 +76,7 @@ def pg_ident_body(identity: PgIdentity) -> str:
 # meiva:note
 # Everything the postmaster's command line is made of.
 #
-# The settings fragments (`tz_args`, `shm_args`, `archive_args`) arrive already split into
+# The settings fragments (`tz_args`, `shm_args`) arrive already split into
 # arguments, in the order they were produced, and are appended after the fixed settings.
 @dataclass(frozen=True)
 class PgLaunch:
@@ -89,7 +88,6 @@ class PgLaunch:
     max_connections: int
     tz_args: tuple[str, ...]
     shm_args: tuple[str, ...]
-    archive_args: tuple[str, ...]
 
 
 # meiva:note
@@ -112,7 +110,6 @@ def pg_launch_argv(launch: PgLaunch) -> list[str]:
         f"max_connections={launch.max_connections}",
         *launch.tz_args,
         *launch.shm_args,
-        *launch.archive_args,
     ]
 
 
@@ -147,19 +144,8 @@ class LaunchPostmaster: ...
 class ProveAuthentication: ...
 
 
-# meiva:note
-# Warn when WAL archiving is configured but the retained postmaster is not carrying it.
-@dataclass(frozen=True)
-class CheckArchive: ...
-
-
 PgStep = (
-    EnsureData
-    | WriteAuthentication
-    | AwaitReachableBind
-    | LaunchPostmaster
-    | ProveAuthentication
-    | CheckArchive
+    EnsureData | WriteAuthentication | AwaitReachableBind | LaunchPostmaster | ProveAuthentication
 )
 
 
@@ -181,7 +167,6 @@ def plan_pg_start(*, owner_retained: bool, off_box_host: str | None) -> tuple[Pg
         *wait,
         LaunchPostmaster(),
         ProveAuthentication(),
-        CheckArchive(),
     )
 
 

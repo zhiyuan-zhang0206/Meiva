@@ -63,7 +63,7 @@ enumerating candidate folders. The lifecycle CLI captures those candidates once,
 passes them to the real write/read/delete probe, and reuses the same paths in its
 warning. A Drive mount is never accepted from directory existence alone.
 
-Every OS job (health probe, boot autostart, logs, packages refresh, PR flow and WAL-G),
+Every OS job (health probe, boot autostart, logs, packages refresh, and PR flow),
 registering or retiring, receives `JobRoots` from its command's existing home, checkout and
 user session values. Platform dispatch remains in the existing `Host` resource shell. Their `*_content.py` owners render commands,
 launchd XML and cron entries without `Host` or ambient path reads. The registrar

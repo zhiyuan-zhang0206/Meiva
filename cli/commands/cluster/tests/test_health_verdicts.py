@@ -41,8 +41,6 @@ _HEALTHY = HealthReadings(
     population=PopulationReading(PopulationRead.COUNTED, 3, Launched(frozenset({"agent-host"}))),
     schema_skew=False,
     service_failures=(),
-    walg_failure=None,
-    walg_enabled=False,
     editable_violations=(),
     source_tree=SourceTreeReading(guard_skipped=False, findings=()),
     provider=(),
@@ -234,22 +232,6 @@ def test_failing_services_are_listed_sorted_in_one_alert_only_message() -> None:
     assert failure.failure_class is FailureClass.ALERT_ONLY
 
 
-def test_wal_archiving_is_silent_while_off_and_a_check_while_on() -> None:
-    assert "walg_archive" not in _checks(_judge())
-    on = _failed(_judge(walg_enabled=True), "walg_archive")
-    assert on.stdout == ("  ✓ WAL archiving",) and on.failure is None
-
-
-def test_a_broken_archiver_fails_with_its_own_message() -> None:
-    results = _judge(walg_enabled=True, walg_failure="WAL archiving: the archiver is failing")
-
-    failure = _failures(results)["walg_archive"]
-    assert failure == Failure(
-        "FAIL: WAL archiving: the archiver is failing", FailureClass.ALERT_ONLY
-    )
-    assert _failed(results, "walg_archive").stdout == ()
-
-
 def test_a_polluted_editable_install_lists_its_violations() -> None:
     failure = _failures(_judge(editable_violations=("a.pth -> /tmp/x", "b is missing")))[
         "editable_install"
@@ -335,8 +317,6 @@ def test_every_failing_check_reports_in_one_round_in_the_reports_order() -> None
         population=_population(PopulationRead.DB_UNREACHABLE, 0, NeverLaunched()),
         schema_skew=True,
         service_failures=("frontend",),
-        walg_enabled=True,
-        walg_failure="WAL archiving: the archiver is failing",
         editable_violations=("x",),
         source_tree=SourceTreeReading(False, ("tracked change: M a.py",)),
         provider=(
@@ -351,7 +331,6 @@ def test_every_failing_check_reports_in_one_round_in_the_reports_order() -> None
         "agent_population",
         "schema",
         "service_probe",
-        "walg_archive",
         "editable_install",
         "source_tree",
         "provider_balance",

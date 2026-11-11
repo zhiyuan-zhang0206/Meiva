@@ -76,55 +76,6 @@ class ServiceSettings(ServiceHealthPortFields, ServiceRuntimeSettings):
             "scope": "cluster-pinned",
         },
     )
-    backup_offsite_endpoint: str = Field(
-        title="Off-site backup storage endpoint",
-        default="",
-        alias="MEIVA_BACKUP_OFFSITE_ENDPOINT",
-        description=(
-            "Aliyun OSS region endpoint (e.g. https://oss-cn-shanghai.aliyuncs.com) "
-            "the daily dump is published to. The off-site leg is skipped, with one "
-            "log line, until the endpoint, the bucket and the credentials file are "
-            "all set."
-        ),
-        json_schema_extra={
-            "restart_required": "gateway",
-            "writable": True,
-            "sensitive": False,
-            "scope": "cluster-pinned",
-            "bootstrap": False,
-        },
-    )
-    backup_offsite_bucket: str = Field(
-        title="Off-site backup storage bucket",
-        default="",
-        alias="MEIVA_BACKUP_OFFSITE_BUCKET",
-        description="Aliyun OSS bucket the daily dump is published to (under `meiva-logical/`).",
-        json_schema_extra={
-            "restart_required": "gateway",
-            "writable": True,
-            "sensitive": False,
-            "scope": "cluster-pinned",
-            "bootstrap": False,
-        },
-    )
-    backup_offsite_credentials_file: Path | None = Field(
-        title="Off-site backup credentials file",
-        default=None,
-        alias="MEIVA_BACKUP_OFFSITE_CREDENTIALS_FILE",
-        description=(
-            "0600 JSON holding the Aliyun OSS RAM AccessKey pair "
-            "(access_key_id, access_key_secret) the off-site publish uses. "
-            "Never the cluster secret."
-        ),
-        json_schema_extra={
-            "restart_required": "gateway",
-            "writable": True,
-            "sensitive": True,
-            "scope": "host",
-            "remote_writable": False,
-            "bootstrap": False,
-        },
-    )
 
     gateway_pidfile: Path = Field(
         title="Gateway process ID file",

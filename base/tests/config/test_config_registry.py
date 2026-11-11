@@ -188,22 +188,6 @@ def test_bootstrap_fields_derived_from_scope() -> None:
     assert not ({"machine_name", "gateway_pidfile", "sdk_disable"} & set(BOOTSTRAP_FIELDS))
 
 
-def test_offsite_backup_cluster_pinned_fields_are_never_bootstrap_served() -> None:
-    """A runner must never receive the off-site destination without its host credentials."""
-    from base.config import BOOTSTRAP_FIELDS, FIELD_INFOS
-
-    offsite_cluster_pinned = {
-        name
-        for name, field in FIELD_INFOS.items()
-        if name.startswith("backup_offsite_")
-        and isinstance(field.json_schema_extra, dict)
-        and field.json_schema_extra.get("scope") == "cluster-pinned"  # pyright: ignore[reportUnknownMemberType]
-    }
-
-    assert offsite_cluster_pinned
-    assert not (set(BOOTSTRAP_FIELDS) & offsite_cluster_pinned)
-
-
 @pytest.mark.usefixtures("served_gateway_home")
 def test_bootstrap_distributes_a_behavior_knob(authority: ConfigAuthority) -> None:
     """A non-default agent-behavior knob is now distributed to agent-runners."""

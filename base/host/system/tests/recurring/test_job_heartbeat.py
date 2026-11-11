@@ -17,7 +17,7 @@ from typing import cast
 
 import pytest
 
-from base.host.system import logs_content, packages_content, pr_flow_content, walg_content
+from base.host.system import logs_content, packages_content, pr_flow_content
 from base.host.system.cron import heartbeat as job_heartbeat
 from base.host.system.cron import heartbeat_population
 from base.host.system.cron.heartbeat import exit_document, render_declaration
@@ -60,12 +60,11 @@ _SCHEDULES: dict[str, JobSchedule] = {
     logs_content.LABEL: logs_content.schedule(),
     packages_content.LABEL: packages_content.schedule(tick_seconds=900),
     pr_flow_content.LABEL: pr_flow_content.schedule(),
-    walg_content.LABEL: walg_content.schedule(backup_hour=3),
 }
 
 
 # meiva:note
-# The product a registrar hands a renderer for one of the four generated jobs.
+# The product a registrar hands a renderer for one of the three generated jobs.
 def _heartbeat(label: str) -> HeartbeatRender:
     return heartbeat_for(label, _ROOTS, schedule=_SCHEDULES[label])
 
@@ -97,12 +96,7 @@ def _renders(kind: str) -> Callable[[], str]:
                 heartbeat=_heartbeat(pr_flow_content.LABEL),
             )
         case _:
-            return lambda: walg_content.launchd_plist_content(
-                backup_hour=3,
-                paths=_paths(_ROOTS),
-                path_env="/usr/bin:/bin",
-                heartbeat=_heartbeat(walg_content.LABEL),
-            )
+            raise ValueError(kind)
 
 
 _UNRENDERED = [
@@ -120,12 +114,6 @@ _UNRENDERED = [
         pr_flow_content.LABEL,
         lambda: pr_flow_content.launchd_plist_content(paths=_paths(_ROOTS), path_env="/bin"),
     ),
-    (
-        walg_content.LABEL,
-        lambda: walg_content.launchd_plist_content(
-            backup_hour=3, paths=_paths(_ROOTS), path_env="/bin"
-        ),
-    ),
 ]
 
 
@@ -138,14 +126,14 @@ def test_the_plist_carries_the_heartbeat_the_command_writes() -> None:
     assert job_heartbeat.HEARTBEAT_ENV == "MEIVA_JOB_HEARTBEAT"
 
 
-@pytest.mark.parametrize("kind", ["logs", "packages", "pr-flow", "walg"])
+@pytest.mark.parametrize("kind", ["logs", "packages", "pr-flow"])
 def test_every_generated_job_states_what_the_machine_now_expects(kind: str) -> None:
     body = _renders(kind)()
 
     # meiva:note
     # The counts are the population, not this job: every artifact states the same declared set,
-    # so a reader can see a job that dropped out of it without diffing four documents.
-    assert "declared=4 heartbeat=4 none=0 expired=0" in body
+    # so a reader can see a job that dropped out of it without diffing three documents.
+    assert "declared=3 heartbeat=3 none=0 expired=0" in body
     assert "owner=agent:405" in body
     assert "machine=macmini" in body
     assert "domain=gui/501" in body
@@ -153,7 +141,7 @@ def test_every_generated_job_states_what_the_machine_now_expects(kind: str) -> N
     assert f"<key>{job_heartbeat.HEARTBEAT_ENV}</key>" in body
 
 
-@pytest.mark.parametrize("kind", ["logs", "packages", "pr-flow", "walg"])
+@pytest.mark.parametrize("kind", ["logs", "packages", "pr-flow"])
 def test_the_cron_entry_carries_the_same_heartbeat_and_keeps_its_marker(kind: str) -> None:
     entries = {
         "logs": lambda: logs_content.cron_entry(
@@ -165,14 +153,11 @@ def test_the_cron_entry_carries_the_same_heartbeat_and_keeps_its_marker(kind: st
         "pr-flow": lambda: pr_flow_content.cron_entry(
             _paths(_ROOTS), heartbeat=_heartbeat(pr_flow_content.LABEL)
         ),
-        "walg": lambda: walg_content.cron_entry(
-            _paths(_ROOTS), backup_hour=3, heartbeat=_heartbeat(walg_content.LABEL)
-        ),
     }
     line = entries[kind]()
 
     assert "MEIVA_JOB_HEARTBEAT=/cluster/state/heartbeats/" in line
-    assert "meiva-heartbeat: declared=4" in line
+    assert "meiva-heartbeat: declared=3" in line
     # meiva:note
     # The marker stays the line's trailer: it is what a rewrite matches on, and the heartbeat
     # statement goes before it so a rewrite still finds the line.
@@ -181,7 +166,6 @@ def test_the_cron_entry_carries_the_same_heartbeat_and_keeps_its_marker(kind: st
             "logs": "# meiva-logs-maintenance",
             "packages": "# meiva-packages-refresh",
             "pr-flow": "# meiva-pr-flow",
-            "walg": "# meiva-walg",
         }[kind]
     )
 
@@ -212,7 +196,7 @@ def test_every_generated_job_module_declares_a_heartbeat() -> None:
     # The population is compared against the directory, not trusted: a new `*_content.py` that
     # nobody listed here fails this assertion, which is the CI half of the render-time refusal in
     # `heartbeat_population.verified`.
-    generated = (logs_content, packages_content, pr_flow_content, walg_content)
+    generated = (logs_content, packages_content, pr_flow_content)
     files = {path.stem for path in package.glob("*_content.py")}
     assert files == {module.__name__.rsplit(".", 1)[-1] for module in generated}
 
@@ -234,7 +218,7 @@ def test_every_generated_job_module_declares_a_heartbeat() -> None:
         today=TODAY,
     )
     jobs = cast("list[dict[str, object]]", document["jobs"])
-    assert len(jobs) == 4
+    assert len(jobs) == 3
     assert all(job["heartbeat_name"] for job in jobs)
 
 
@@ -248,9 +232,7 @@ def _policy() -> heartbeat_population.MachinePolicy:
         owned_home=True,
         packages_refresh=True,
         packages_tick_seconds=900,
-        walg_configured=True,
         production=True,
-        backup_hour=3,
     )
 
 

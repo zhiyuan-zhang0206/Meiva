@@ -1,22 +1,22 @@
-"""Cluster Postgres admin authority — the one place DDL-capable dials are built.
-
-Two forms, both over this home's owner-only Unix socket as the OS-user
-bootstrap superuser (the initdb user):
-
-- `connect` — the administrator as itself, for what only a superuser may do:
-  roles, databases, extensions, grants on the cluster's behalf.
-- `owner_session` / `OwnerAuthority` — the administrator ACTING AS the schema
-  owner (`role=<owner>` in the startup options): schema baseline, checkpoint
-  setup, migrations, start-time derived-cache DDL, logical backups, WAL-G
-  probes and rollback-snapshot retirement, and password-free owner-equivalent
-  `pg_dump`. Objects are created owner-owned and privilege checks see exactly
-  the owner's rights, but the owner itself never logs in, so it can later lose
-  LOGIN without breaking these paths.
-
-The backup and WAL-G services reach for the admin URL but must not import up
-into `cli`. Everything here is `base`-level (paths / cluster /
-private-storage), so the admin dial lives beside the identity it serves.
-"""
+# meiva:note
+# Cluster Postgres admin authority — the one place DDL-capable dials are built.
+#
+# Two forms, both over this home's owner-only Unix socket as the OS-user
+# bootstrap superuser (the initdb user):
+#
+# - `connect` — the administrator as itself, for what only a superuser may do:
+#   roles, databases, extensions, grants on the cluster's behalf.
+# - `owner_session` / `OwnerAuthority` — the administrator ACTING AS the schema
+#   owner (`role=<owner>` in the startup options): schema baseline, checkpoint
+#   setup, migrations, start-time derived-cache DDL, logical backups
+#   and rollback-snapshot retirement, and password-free owner-equivalent
+#   `pg_dump`. Objects are created owner-owned and privilege checks see exactly
+#   the owner's rights, but the owner itself never logs in, so it can later lose
+#   LOGIN without breaking these paths.
+#
+# The backup service reaches for the admin URL but must not import up
+# into `cli`. Everything here is `base`-level (paths / cluster /
+# private-storage), so the admin dial lives beside the identity it serves.
 
 from __future__ import annotations
 

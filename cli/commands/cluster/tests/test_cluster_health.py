@@ -364,24 +364,6 @@ def test_a_clean_prod_checkout_passes(cluster: Cluster, tmp_path: Path) -> None:
     assert cluster.probe(source_root=git_checkout(tmp_path / "prod-source")) == 0
 
 
-def test_a_broken_wal_archiver_configuration_fails_the_probe_alert_only(
-    cluster: Cluster, tmp_path: Path, signals: FollowedAttributes
-) -> None:
-    plane = dataclasses.replace(
-        cluster.options.data_plane, walg_config_file=tmp_path / "missing-walg.json"
-    )
-
-    assert cluster.probe(data_plane=plane) == 1
-
-    assert signals == [
-        {
-            "check": "walg_archive",
-            "failure_class": "alert-only",
-            "message": "FAIL: WAL archiving: the WAL-G configuration is unusable",
-        }
-    ]
-
-
 def test_a_low_provider_balance_and_halted_agents_both_report_in_the_same_run(
     cluster: Cluster,
     capsys: pytest.CaptureFixture[str],
@@ -497,7 +479,6 @@ def test_the_command_reads_its_round_from_its_own_configuration(
     assert options.gateway_url == "http://gw.test:8000"
     assert options.rules == HealthRules(agent_min=0, check_schema=False, disk_watermark=0.90)
     assert options.source_root == probe_command.home / "source"
-    assert options.data_plane.walg_config_file is None
     assert options.checkout_refusal is None
     assert options.provider.balance_min_cny == 500.0
 

@@ -6,7 +6,7 @@
 # it is absent: a group the repository can provision is installed through `scripts/provision/*`
 # and read again; a host-owned tool refuses the start before converge with the exact repair.
 # Nothing waits for the middle of converge to discover a missing binary: a host without
-# `crontab` used to die at the WAL-G job step, long after the start had printed green steps
+# `crontab` used to die at a job-registration step, long after the start had printed green steps
 # above it.
 #
 # `render_table` prints the same rows, and

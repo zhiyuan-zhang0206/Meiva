@@ -317,11 +317,6 @@
       "comparison": "time.monotonic() - started < N"
     },
     {
-      "path": "services/backup/walg/tests/test_restore.py",
-      "function": "test_a_role_the_restored_cluster_does_not_have_fails_at_once",
-      "comparison": "time.monotonic() - started < N"
-    },
-    {
       "path": "services/derived/memory_indexer/embeddings/tests/embeddings/test_worst_case_single_attempt_has_no_sleep.py",
       "function": "test_embed_compressed_trickle_deadline",
       "comparison": "elapsed < N"

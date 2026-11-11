@@ -232,7 +232,6 @@ def test_report_runs_the_canonical_uv_pin(tmp_path: Path) -> None:
         Reply(stdout=json.dumps([{"name": "v" + pins["pgvector"]}])),
     )
     for repo, name in (
-        ("wal-g/wal-g", "wal-g"),
         ("open-telemetry/opentelemetry-collector-releases", "otelcol-contrib"),
         ("astral-sh/uv", "uv"),
         ("pnpm/pnpm", "pnpm"),

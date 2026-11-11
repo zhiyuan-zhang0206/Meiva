@@ -43,16 +43,13 @@ it only on a macOS host that can run a helper, and a test that does not mean to 
 `refuse_helper`. Host capability steps and OS
 job registrations read that owner's live view
 at each existing step boundary, including browser, permission helpers, memory,
-transfer, GitHub PR checks, the package refresh cadence and WAL-G schedule.
-The WAL-G preparation and job steps read the same `view.walg.walg_config_file`;
-clearing it still retires the existing job without an OS registration gate.
+transfer, GitHub PR checks, the package refresh cadence.
 Creating the context does not deliver configuration or register an OS job.
 The first selected config reader captures inputs already delivered by startup;
 converge itself does not repeat dotenv delivery or replace process environment.
-PostgreSQL runtime admission, WAL-G's remote-plane refusal and health-preflight
-URLs read this same configuration owner at their original step boundaries.
-Unconfigured health checks and disabled WAL-G retain their short circuits.
-Health findings remain warning-only; invalid WAL-G and local-runtime inputs
+PostgreSQL runtime admission and health-preflight URLs read this same configuration
+owner at their original step boundaries. Unconfigured health checks retain their
+short circuit. Health findings remain warning-only; invalid local-runtime inputs
 retain their existing startup errors.
 Collector, browser and frontend preparation skip unselected services. Native
 LGTM downloads only selected backends, and invokes Loki's config validator only
@@ -94,8 +91,8 @@ Remote-managed data planes skip local server and extension preparation entirely.
   name from `/usr/bin`),
   `browser_plan.py` and `helper_plan.py` (what the browser and permissions-helper steps do
   for the host's incapability reason), `split_host_checks.py` (the transfer and GitHub PR
-  checks apply only to a runner split from its gateway), `walg_plan.py` (the WAL-G steps, in
-  order, or a refusal), `ownership_plan.py` and `firewall_report.py` (what the ownership
+  checks apply only to a runner split from its gateway), `walg_retirement.py` (when the installed `wal-g`
+  binary of a retired WAL-G setup may be removed), `ownership_plan.py` and `firewall_report.py` (what the ownership
   preflight and the firewall step and verbs tell the operator).
 - `telemetry_token.ensure_telemetry_token_step` gives a gateway home its OTLP relay bearer: a
   random token in `db-authority/telemetry-token` (0600), kept ever after and independent of the

@@ -4,7 +4,7 @@ from datetime import UTC, datetime
 
 import pytest
 
-from services.backup.artifact.names import DUMP_NAME_RE, REMOTE_ROOT, TS_FORMAT, stamp_utc
+from services.backup.artifact.names import DUMP_NAME_RE, TS_FORMAT, stamp_utc
 
 
 @pytest.mark.parametrize(
@@ -54,7 +54,3 @@ def test_the_stamp_is_the_utc_instant_it_names() -> None:
 def test_a_stamp_without_its_utc_marker_is_refused_not_guessed() -> None:
     with pytest.raises(ValueError, match="does not match format"):
         stamp_utc("20260827-030001")
-
-
-def test_the_off_site_namespace_is_the_published_one() -> None:
-    assert REMOTE_ROOT == "meiva-logical"

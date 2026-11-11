@@ -1,4 +1,4 @@
-exports = ["data_plane.py", "walg.py"]
+exports = ["data_plane.py"]
 
 [purity]
 "." = "strict"

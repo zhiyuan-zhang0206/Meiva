@@ -100,3 +100,5 @@ cluster without one.
   rather than a one-time drill result.
 - Revisit the claimed benefit once after it has run for a while: the restore drill's history
   and the probe's alerts are the evidence, not this entry.
+
+Superseded by [2026-11-12-no-offsite-postgres-backup.md](../database/2026-11-12-no-offsite-postgres-backup.md): the WAL-G path is deleted.

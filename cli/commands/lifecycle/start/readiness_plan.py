@@ -16,7 +16,6 @@ from base.host.exit_codes import SERVICES_NOT_READY_EXIT_CODE
 __all__ = [
     "ReadinessFacts",
     "ReadinessVerdict",
-    "archive_assertion_needed",
     "critical_launch_failures",
     "readiness_verdict",
     "shows_gateway_hint",
@@ -73,16 +72,6 @@ def readiness_verdict(facts: ReadinessFacts) -> ReadinessVerdict:
         report_non_critical_unready=facts.non_critical_unready,
         exit_code=SERVICES_NOT_READY_EXIT_CODE if blocked else None,
     )
-
-
-# meiva:note
-# Whether a start that is serving asserts its Postgres carries the archive settings.
-#
-# The gate is the machine's role, not what this start launched, so a start against an
-# already-running tree still checks; a gateway among the unready units skips it, because
-# its Postgres is not known to be serving.
-def archive_assertion_needed(roles: Collection[str], *, gateway_unready: bool) -> bool:
-    return "gateway" in roles and not gateway_unready
 
 
 # meiva:note

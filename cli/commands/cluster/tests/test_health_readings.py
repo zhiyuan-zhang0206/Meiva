@@ -21,7 +21,7 @@ from base.db import Database
 from base.host.net.tests.local_http import closed_port_url
 from base.host.proc import run_bounded
 from base.host.system.tests.fake_commands import fake_host
-from base.paths import meiva_home, root_manifests_path
+from base.paths import root_manifests_path
 from cli.commands.cluster.health_readings import (
     HealthOptions,
     data_plane_abnormal,
@@ -34,7 +34,6 @@ from cli.commands.cluster.health_readings import (
     read_schema_skew,
     read_service_failures,
     read_source_tree,
-    read_walg,
 )
 from cli.commands.cluster.plans.health_verdicts import (
     GatewayReading,
@@ -365,19 +364,6 @@ def test_the_disk_reading_is_the_used_fraction_of_a_real_volume(tmp_path: Path) 
 
 def test_a_volume_that_cannot_be_measured_is_none_never_a_full_disk(tmp_path: Path) -> None:
     assert disk_usage_fraction(tmp_path / "no-such-volume") is None
-
-
-def test_wal_archiving_that_is_off_is_neither_failing_nor_enabled() -> None:
-    assert read_walg(None, home=meiva_home()) == (None, False)
-
-
-def test_a_wal_g_configuration_that_does_not_exist_is_a_failure_without_dialing_postgres(
-    tmp_path: Path,
-) -> None:
-    failure, enabled = read_walg(tmp_path / "walg.json", home=meiva_home())
-
-    assert enabled is True
-    assert failure == "WAL archiving: the WAL-G configuration is unusable"
 
 
 def test_there_is_nothing_to_inspect_without_a_prod_checkout() -> None:

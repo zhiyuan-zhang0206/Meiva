@@ -51,9 +51,8 @@ import tests._test_env_file
 #
 # A credential is a whole name element, never a substring: `MEIVA_API_TOKEN`,
 # `MEIVA_CLUSTER_SECRET`, `MEIVA_DB_CAPABILITY_KEY` are credentials;
-# `MEIVA_REPLY_SUGGESTION_MAX_INPUT_TOKENS` is a budget and
-# `MEIVA_BACKUP_OFFSITE_CREDENTIALS_FILE` is a path TO a credential — a rule that called
-# those two credentials would teach the reader to ignore this one. `MEIVA_PROCESS_PROFILE`
+# `MEIVA_REPLY_SUGGESTION_MAX_INPUT_TOKENS` is a budget — a rule that called
+# it a credential would teach the reader to ignore this one. `MEIVA_PROCESS_PROFILE`
 # is no credential and rides along anyway: it names which profile the LAUNCHER ran, and the
 # suite always runs with none.
 _CREDENTIAL_NAME_ELEMENTS: frozenset[str] = frozenset(
@@ -413,21 +412,7 @@ os.environ["MEIVA_PERMISSIONS_HELPER_SPAWN"] = "false"
 # (tests/harness/test_helperproc.py).
 os.environ.pop("MEIVA_PERMISSIONS_HELPER_PID", None)
 os.environ.pop("MEIVA_PERMISSIONS_HELPER_PORT", None)
-# ── Off-site backup destination: no ambient MEIVA_BACKUP_OFFSITE_* in the suite ──
-# meiva:note
-# Same shell-leak class as the credentials above. A field the fixture `.env`
-# does not pin falls back to the BOOT-TIME environment value (candidate
-# validation reconstructs a domain from the captured `.env` image and the patch),
-# and a pytest run inside a process that carries the production destination would
-# resolve an "unconfigured" home as configured. CI carries no such env; scrubbing
-# here makes a local run resolve exactly as CI does. A test that exercises the
-# destination sets its own keys (monkeypatch / write_fields).
-for _offsite_key in [key for key in os.environ if key.startswith("MEIVA_BACKUP_OFFSITE_")]:
-    del os.environ[_offsite_key]
-# The WAL-G switch is the same class: a shell that carries it would turn archiving
-# on for every Postgres a test starts. The key is off by default and a test that
-# needs it sets it itself.
-os.environ.pop("MEIVA_WALG_CONFIG_FILE", None)
+
 
 # Repository providers read the process environment while spawn validation reads
 # the cluster `.env` file. Seed every default provider's inert key through both

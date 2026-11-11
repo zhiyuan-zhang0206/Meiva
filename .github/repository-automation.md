@@ -76,7 +76,7 @@ The `dependency-audit` job, on a weekly schedule (plus manual dispatch), runs `s
 `uv audit` over `uv.lock` (severity looked up in OSV, since its JSON carries
 none), `pnpm audit` over `ui/web` using the canonical npm advisory registry, and
 the version constants Meiva downloads outside the lockfiles (zonky Postgres,
-pgvector, wal-g, otelcol-contrib, uv, pnpm, Grafana)
+pgvector, otelcol-contrib, uv, pnpm, Grafana)
 against each upstream's newest release. One issue, found by its marker, is
 opened or updated while any advisory is high, critical or ungradable or any
 pin is behind, and closed on a clean run. The PR-time `dependency audit` job in

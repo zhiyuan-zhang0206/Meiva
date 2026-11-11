@@ -10,7 +10,7 @@ place, then closed when a run comes back clean:
   advisory OSV cannot grade is listed as `unknown`.
 - Frontend: `pnpm audit` over `ui/web/pnpm-lock.yaml`.
 - Pinned binaries: the version constants Meiva downloads or installs outside the
-  lockfiles (zonky Postgres, pgvector, wal-g, otelcol-contrib, uv, pnpm, Grafana)
+  lockfiles (zonky Postgres, pgvector, otelcol-contrib, uv, pnpm, Grafana)
   against their upstream's newest release. pgvector publishes tags, not GitHub
   releases, so its row reads tags; the zonky row compares only within the
   pinned Postgres major.

@@ -1,8 +1,8 @@
-exports = ["bringup.py", "cluster_instance.py", "completion.py", "config.py", "host_dependencies", "instance", "maintenance", "maintenance_stop.py", "maintenance_stop_report.py", "native", "pgbouncer.py", "pg_probe.py", "stop_budget.py", "stop_waits.py", "tests", "walg.py"]
+exports = ["bringup.py", "cluster_instance.py", "completion.py", "config.py", "host_dependencies", "instance", "maintenance", "maintenance_stop.py", "maintenance_stop_report.py", "native", "pgbouncer.py", "pg_probe.py", "stop_budget.py", "stop_waits.py", "tests"]
 
 [uses]
 "bringup.py" = ["cluster_instance.py", "config.py", "instance", "maintenance_stop_report.py", "native", "pgbouncer.py", "pg_probe.py", "stop_waits.py"]
-"cluster_instance.py" = ["config.py", "instance", "native", "pg_probe.py", "walg.py"]
+"cluster_instance.py" = ["config.py", "instance", "native", "pg_probe.py"]
 "pg_probe.py" = ["instance"]
 "completion.py" = ["bringup.py", "cluster_instance.py", "config.py", "instance", "native", "pgbouncer.py"]
 "host_dependencies" = ["config.py", "native"]
@@ -12,7 +12,6 @@ exports = ["bringup.py", "cluster_instance.py", "completion.py", "config.py", "h
 "_pooler_stop.py" = ["pooler", "stop_budget.py"]
 "pgbouncer.py" = ["_pooler_stop.py", "config.py", "native", "pooler"]
 "stop_waits.py" = ["maintenance", "stop_budget.py"]
-"walg.py" = ["config.py"]
 "tests" = ["_pooler_stop.py", "bringup.py", "cluster_instance.py", "completion.py", "config.py", "host_dependencies", "instance", "maintenance", "maintenance_stop.py", "maintenance_stop_report.py", "native", "pgbouncer.py", "pg_probe.py", "pooler", "stop_budget.py", "stop_waits.py"]
 
 [purity]

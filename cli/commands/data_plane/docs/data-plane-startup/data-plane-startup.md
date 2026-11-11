@@ -7,9 +7,8 @@ PgBouncer and Redis before any application service.
 
 The commands read no `settings`, no environment and no home of their own.
 `cli/commands/data_plane/config.py:DataPlaneConfig` is a frozen value of the `data_plane`,
-`services` and `walg` fields they use (the URLs and both passwords hide from the repr;
-`is_remote` is derived from the two URLs, so a copy with a swapped URL answers for it, and
-`walg_config_file` is the archive configuration path or `None`).
+and `services` fields they use (the URLs and both passwords hide from the repr;
+`is_remote` is derived from the two URLs, so a copy with a swapped URL answers for it).
 The composition roots build it once with `data_plane_config_from_boot(command.config)`: the
 `meiva start`, `meiva stop` and `meiva status` steps in `cli/commands/lifecycle`, and the pooler
 converge step (`ensure_pgbouncer_step`). Every function below them takes it as the first
@@ -21,8 +20,7 @@ clock (`Timers`) and its environment (`config.process_environment()`) arrive the
 values the shell hands down: no function here reads the clock or the environment, and the Redis,
 pooler and Postgres children all take it — the postmaster through `pg_start_env`. A test
 builds the same value with `data_plane_config_from_boot` and changes a field with
-`dataclasses.replace`. The `meiva backup walg` verbs get theirs from `walg_plane(args.runtime.config)` at the parser
-handler; `walg_config_file` is carried by this value and nowhere else.
+`dataclasses.replace`.
 
 What a service launch is delivered is `cli/commands/data_plane/instance/launch_delivery.py:LaunchDelivery`, read once at
 the start entry (`bringup.read_launch_delivery`): the home, whether the plane is remote-managed,
@@ -81,8 +79,6 @@ ordinary start re-grants the groups after migrations, converges the monitor
 and holds on any catalog/ledger mismatch
 before the pooler. `db_delivery` gives
 each launched service its class login.
-
-[WAL archiving launch arguments](wal-archiving.md) own the archive settings and when they take effect.
 
 ## Native custody
 

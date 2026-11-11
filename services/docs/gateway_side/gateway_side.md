@@ -19,7 +19,6 @@ Source of truth = services in `build_services()` of `services/supervision/roster
 | memory-indexer | memory pool vector index | [Memory Indexer](memory_indexer/memory_indexer.md) |
 | labeler | agent auto-naming | [Labeler — Agent Auto-Naming](labeler.md) |
 | pg-backup | Daily local Postgres backup (scheduler daemon, ServiceSpec service) | [PG-Backup — Daily Local Postgres Backup](../../backup/artifact/docs/backup.md) |
-| walg (no service) | WAL archiving to OSS through WAL-G: launch arguments, configuration, key pin, health probe; the daily base-backup tick; restore and the weekly recovery drill | [WAL-G — physical backup, WAL archiving base](../../backup/walg/docs/walg.md), [WAL-G daily tick — base backup, chain verification, guarded retention](../../backup/walg/docs/walg-tick.md), [WAL-G restore and weekly recovery drill](../../backup/walg/docs/walg-restore.md) |
 
 ## Also Owned by Gateway Capability, Documented Elsewhere
 The following services also run on the gateway capability (core `GATEWAY` entries or plugin-folded-in entries), but their concept docs live in their own subtrees and are not repeated here:

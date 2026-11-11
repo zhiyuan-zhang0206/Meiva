@@ -90,17 +90,13 @@ def test_put_remote_rejects_writable_non_remote_host_field(
     assert runner.calls == []
 
 
-def test_put_remote_rejects_oss_credential_fields(
+def test_put_remote_rejects_host_credential_fields(
     clean_overrides: Path, db_conn: psycopg.Connection
 ) -> None:
     with runner_ops(db_conn, REMOTE) as runner, gateway_test_client() as client:
         resp = client.put(
             f"/api/config?machine={REMOTE}",
-            json={
-                "backup_offsite_credentials_file": str(
-                    clean_overrides / "attacker-credentials.json"
-                )
-            },
+            json={"grafana_admin_password": "attacker-chosen"},
         )
         assert resp.status_code == 400, resp.text
         assert "unknown or read-only" in resp.json()["detail"]

@@ -1,12 +1,10 @@
-exports = ["intermediates.py", "names.py", "offsite.py", "offsite_plan.py", "passphrase.py", "tests"]
+exports = ["intermediates.py", "names.py", "passphrase.py", "tests"]
 
 [uses]
-"offsite.py" = ["names.py", "offsite_plan.py"]
-"tests" = ["names.py", "offsite.py", "offsite_plan.py", "passphrase.py"]
+"tests" = ["names.py", "passphrase.py"]
 
 [purity]
 "names.py" = "strict"
-"offsite_plan.py" = "strict"
 
 [roots]
 "passphrase.py" = { kinds = ["random"], why = "Mints a random 256-bit logical-backup passphrase at home birth" }

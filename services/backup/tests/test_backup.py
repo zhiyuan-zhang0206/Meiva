@@ -22,8 +22,6 @@ from psycopg.conninfo import conninfo_to_dict
 from base.paths import meiva_home
 from services.backup import dump as backup
 from services.backup.artifact import names, passphrase
-from services.backup.artifact.offsite_plan import OssTarget
-from services.backup.artifact.tests.oss_fake import BUCKET, fake_oss
 from services.backup.layout import BackupTree
 from services.backup.tests.support import held_table_lock, minted_tree, scratch_database
 
@@ -45,7 +43,6 @@ def _run(
     db_url: str,
     now: datetime = _NOW,
     *,
-    offsite_target: OssTarget | None = None,
     timeout_s: float = backup.DUMP_TIMEOUT_S,
 ) -> Path:
     return backup.run_backup(
@@ -53,7 +50,6 @@ def _run(
         tree=tree,
         db_url=db_url,
         keep=_KEEP,
-        offsite_target=offsite_target,
         timeout_s=timeout_s,
         env=dict(os.environ),
     )
@@ -281,25 +277,6 @@ def test_the_requested_timeout_bounds_a_pg_dump_that_cannot_get_its_lock(
     assert not list(tree.managed.glob("*.dump.enc"))
 
 
-def test_the_off_site_leg_publishes_the_finished_artifact_when_asked(
-    tree: BackupTree, db_url: str
-) -> None:
-    credentials = tree.root / "oss.json"
-    credentials.parent.mkdir(parents=True, exist_ok=True)
-    credentials.write_text('{"access_key_id": "id", "access_key_secret": "secret"}')
-
-    with fake_oss() as server:
-        target = OssTarget(server.endpoint, BUCKET, credentials)
-        local_only = _run(tree, db_url)
-        assert server.files == {}, "no off-site target means no network publish"
-        published = _run(tree, db_url, offsite_target=target)
-
-    assert local_only.exists() and published.exists()
-    [key] = server.files
-    assert key == f"{names.REMOTE_ROOT}/{published.name}"
-    assert server.files[key]["data"] == published.read_bytes()
-
-
 # meiva:note
 # ─── decryption ───
 
@@ -370,17 +347,3 @@ def test_db_size_breakdown_real_db(db_url: str) -> None:
 # Best-effort: a failed sample never fails the backup.
 def test_a_database_that_cannot_be_dialed_degrades_to_unavailable(db_url: str) -> None:
     assert backup.db_size_breakdown(_refused_url(db_url)) == "unavailable"
-
-
-@pytest.mark.parametrize("root", ["", "/abs", "trailing/"])
-def test_publish_offsite_entry_rejects_a_malformed_root(
-    root: str, tmp_path: Path, capsys: pytest.CaptureFixture[str]
-) -> None:
-    artifact = tmp_path / "meiva-20260916T030000Z.dump.enc"
-    artifact.write_bytes(b"encrypted")
-
-    with pytest.raises(SystemExit) as raised:
-        backup.run_offsite_publisher(["--publish-offsite", str(artifact), "--offsite-root", root])
-
-    assert raised.value.code == 2
-    assert "--offsite-root" in capsys.readouterr().err

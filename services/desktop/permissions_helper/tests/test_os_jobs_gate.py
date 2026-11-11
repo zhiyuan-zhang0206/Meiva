@@ -18,7 +18,7 @@ from pathlib import Path
 import pytest
 
 from base.config import settings
-from base.host.system import logs_content, logs_job, packages_job, pr_flow_job, walg_job
+from base.host.system import logs_content, logs_job, packages_job, pr_flow_job
 from base.host.system.boot_autostart import registration as autostart
 from base.host.system.boot_autostart.content import launchd_plist_content
 from base.host.system.cron import health_content, health_job, heartbeat_population, mechanics
@@ -127,16 +127,6 @@ def _register_calls(enabled: bool) -> list[object]:
             ),
             id="pr-flow",
         ),
-        pytest.param(
-            partial(
-                walg_job.register_walg_job,
-                enabled=enabled,
-                backup_hour=settings.services.backup_hour,
-                machine=_MACHINE,
-                today=_TODAY,
-            ),
-            id="walg",
-        ),
     ]
 
 
@@ -148,7 +138,6 @@ _UNREGISTER_CALLS: dict[str, Callable[..., None]] = {
     "logs-maintenance": logs_job.unregister_logs_job,
     "packages-refresh": packages_job.unregister_packages_job,
     "pr-flow": pr_flow_job.unregister_pr_flow_job,
-    "walg": walg_job.unregister_walg_job,
 }
 _UNREGISTERS = [pytest.param(call, id=name) for name, call in _UNREGISTER_CALLS.items()]
 
@@ -199,14 +188,6 @@ def test_registration_dispatches_when_enabled(
             roots=roots,
             enabled=True,
             production=True,
-            host=host,
-            machine=_MACHINE,
-            today=_TODAY,
-        ),
-        lambda: walg_job.register_walg_job(
-            roots=roots,
-            enabled=True,
-            backup_hour=settings.services.backup_hour,
             host=host,
             machine=_MACHINE,
             today=_TODAY,

@@ -59,9 +59,9 @@ def test_the_document_lists_every_declared_job(home: Path) -> None:
     document = json.loads(result.stdout)
     assert document["schema"] == 1
     assert document["machine"] == "host-a"
-    assert len(document["jobs"]) == len(heartbeat_population.POPULATION) == 4
+    assert len(document["jobs"]) == len(heartbeat_population.POPULATION) == 3
     names = {job["heartbeat_name"] for job in document["jobs"]}
-    assert names == {"logs-maintenance", "packages-refresh", "pr-flow", "walg"}
+    assert names == {"logs-maintenance", "packages-refresh", "pr-flow"}
     assert all(
         job["heartbeat_dir"] == str(home / "state" / "heartbeats") for job in document["jobs"]
     )

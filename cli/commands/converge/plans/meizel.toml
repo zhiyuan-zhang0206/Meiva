@@ -1,4 +1,4 @@
-exports = ["bridge_retirement.py", "bridge_status.py", "browser_plan.py", "checkout_warnings.py", "firewall_report.py", "helper_plan.py", "ownership_plan.py", "shell_rc.py", "split_host_checks.py", "step_selection.py", "walg_plan.py"]
+exports = ["bridge_retirement.py", "bridge_status.py", "browser_plan.py", "checkout_warnings.py", "firewall_report.py", "helper_plan.py", "ownership_plan.py", "shell_rc.py", "split_host_checks.py", "step_selection.py", "walg_retirement.py"]
 
 [purity]
 "__init__.py" = "strict"
@@ -12,4 +12,4 @@ exports = ["bridge_retirement.py", "bridge_status.py", "browser_plan.py", "check
 "shell_rc.py" = "strict"
 "split_host_checks.py" = "strict"
 "step_selection.py" = "strict"
-"walg_plan.py" = "strict"
+"walg_retirement.py" = "strict"

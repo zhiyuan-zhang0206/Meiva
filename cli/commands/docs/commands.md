@@ -31,8 +31,7 @@ subpackages hold the domains, each an independent package door:
 - `observability/` — native LGTM desired state, the OTel collector, trace
   shipping, logs; owns its converge steps (`lgtm_native.py`, `otel_collector.py`)
 - `data_plane/` — per-cluster Postgres/Redis/PgBouncer bring-up, their verified
-  maintenance stop (`maintenance_stop.py`), `meiva backup walg check|run|drill|restore|status` and the start-time
-  WAL-archiving warning (`walg.py`); owns its converge step (`pgbouncer.py`)
+  maintenance stop (`maintenance_stop.py`); owns its converge step (`pgbouncer.py`)
 - `cluster/` — whole-cluster verbs, the health probe, cron, `destroy` and a remote unit's
   join. Each verb is a shell around a plan: the shells (`control.py`, `health.py`,
   `home.py`, `cron.py`, `unit_join.py`) read the facts and execute, and the strict
@@ -43,8 +42,8 @@ subpackages hold the domains, each an independent package door:
 - `converge/` — the orchestrator (`host.py`), the step contract (`spec.py`),
   the warning-only start preflights (health, ports, ownership), the
   rendered-file guard, and host-wiring steps owned by no other domain
-  (firewall, Redis bridge, OS jobs including the WAL-G daily tick job, the WAL-G
-  install/validate step `walg.py`).
+  (firewall, Redis bridge, OS jobs, the retirement of what WAL-G archiving left on a
+  deployed host `walg_retirement.py`).
 - `lifecycle/` — `meiva start` / `stop` / `restart` / `maintenance` /
   `status`, the pending-migration step, and the single application root they
   drive: [Host lifecycle](../lifecycle/docs/lifecycle.md).

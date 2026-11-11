@@ -47,7 +47,7 @@ __all__ = [
 # meiva:note
 # The host-dependency step is deliberately first: a missing redis/pgbouncer/node
 # or crontab/systemctl/curl must refuse before any green converge step or service
-# launch, not after them (a host without crontab used to die at the WAL-G job).
+# launch, not after them (a host without crontab used to die at a job-registration step).
 def cold_start_steps() -> tuple[ConvergeStep, ...]:
     from cli.commands.data_plane import host_dependencies
 

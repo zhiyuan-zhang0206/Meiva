@@ -35,7 +35,6 @@ from base.config.domains.packages import PackagesSettings
 from base.config.domains.sandbox import SandboxSettings
 from base.config.domains.services.settings import ServiceSettings
 from base.config.domains.storage.data_plane import DataPlaneSettings
-from base.config.domains.storage.walg import WalgSettings
 from base.config.domains.to_user import ToUserSettings
 from base.config.domains.transfer import TransferSettings
 from base.config.domains.web import WebSettings
@@ -91,7 +90,6 @@ class Settings(BaseModel):
     observability: ObservabilitySettings = Field(default_factory=ObservabilitySettings)
     display: DisplaySettings = Field(default_factory=DisplaySettings)
     packages: PackagesSettings = Field(default_factory=PackagesSettings)
-    walg: WalgSettings = Field(default_factory=WalgSettings)
     general: GeneralSettings = Field(default_factory=GeneralSettings)
 
     def __init__(
@@ -242,7 +240,6 @@ def facade_exports() -> dict[str, object]:
         "PackagesSettings": PackagesSettings,
         "SandboxSettings": SandboxSettings,
         "ServiceSettings": ServiceSettings,
-        "WalgSettings": WalgSettings,
         "WebSettings": WebSettings,
         "ToUserSettings": ToUserSettings,
     }

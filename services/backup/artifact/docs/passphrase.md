@@ -17,8 +17,8 @@ key, so a home without the file refuses to back up or restore
 
 ## Escrow
 
-Losing the file makes every logical backup of the home unreadable, local and
-off-site alike; nothing can re-derive it. Export it once after birth and keep
+Losing the file makes every logical backup of the home unreadable;
+nothing can re-derive it. Export it once after birth and keep
 the copy with the gateway's other backup keys, off the gateway host:
 
 ```bash

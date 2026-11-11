@@ -10,7 +10,6 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from pathlib import Path
 
 from base.config import ConfigBoot
 from base.host.net.url_secret import names_foreign_host
@@ -19,10 +18,7 @@ __all__ = ["DataPlaneConfig", "data_plane_config_from_boot"]
 
 
 # meiva:note
-# The `data_plane`, `services` and `walg` fields these commands read.
-#
-# `walg_config_file` is carried here and nowhere else: a command that needs the WAL-G
-# configuration path takes it from this value.
+# The `data_plane` and `services` fields these commands read.
 @dataclass(frozen=True)
 class DataPlaneConfig:
     # meiva:note
@@ -39,7 +35,6 @@ class DataPlaneConfig:
     events_channel: str
     memory_search_backend: str
     embedding_backend: str
-    walg_config_file: Path | None
     embedding_revision: str | None = None
 
     # meiva:note
@@ -71,5 +66,4 @@ def data_plane_config_from_boot(boot: ConfigBoot) -> DataPlaneConfig:
         memory_search_backend=view.services.memory_search_backend,
         embedding_backend=view.services.embedding_backend,
         embedding_revision=view.services.embeddinggemma_revision,
-        walg_config_file=view.walg.walg_config_file,
     )

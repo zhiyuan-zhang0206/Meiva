@@ -127,11 +127,7 @@ _ENTRIES = [
     ("ui/app/android/apply_overlay.py", None),
 ]
 
-# meiva:note
-# Entries whose function is not called `main`: (file holding the guard, file defining it, name).
-_NAMED = [("services/backup/dump.py", None, "run_offsite_publisher")]
-
-_CASES = [(guard, definer, "main") for guard, definer in _ENTRIES] + _NAMED
+_CASES = [(guard, definer, "main") for guard, definer in _ENTRIES]
 
 # meiva:note
 # Parsers that a `main` hands its argument list to; they too take it as a required parameter, so

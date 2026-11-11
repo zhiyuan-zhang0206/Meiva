@@ -326,7 +326,6 @@ def test_run_drill_restores_an_encrypted_artifact_into_throwaway_postgres(
         tree=tree,
         db_url=db_url,
         keep=7,
-        offsite_target=None,
         env=dict(os.environ),
     )
 
@@ -361,7 +360,6 @@ def test_the_command_restores_an_artifact_and_prints_its_verdict(
         tree=tree,
         db_url=db_url,
         keep=7,
-        offsite_target=None,
         staging=tmp_path / "staged",
         env=dict(os.environ),
     )

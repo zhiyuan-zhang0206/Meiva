@@ -145,13 +145,10 @@ for the optional HTTPS/HTTP2 entries (`MEIVA_BROWSER_ORIGINS`, one or several), 
 
 The recovery points are the daily encrypted logical dumps (`pg-backup`, due at
 `MEIVA_BACKUP_HOUR` cluster time, the newest `MEIVA_BACKUP_KEEP` kept in
-`$MEIVA_HOME/backups/db/`, published off-site under `meiva-logical/` when
-`MEIVA_BACKUP_OFFSITE_ENDPOINT`, `MEIVA_BACKUP_OFFSITE_BUCKET` and
-`MEIVA_BACKUP_OFFSITE_CREDENTIALS_FILE` are set through `meiva config set`), proved
-by the weekly isolated logical restore drill. The self-written PITR stack was
-deleted (`docs/decisions/data/backup/2026-10-02-delete-the-self-written-pitr-stack.md`). Point-in-time
-recovery exists only while WAL-G is on (["WAL-G archiving"](#wal-g-archiving) below):
-`meiva backup walg restore`, proved weekly by the recovery drill. Never state a
+`$MEIVA_HOME/backups/db/`), proved by the weekly isolated logical restore drill.
+They are the only Postgres backup and they stay on the machine: there is no
+off-site copy and no point-in-time recovery
+(`docs/decisions/data/database/2026-11-12-no-offsite-postgres-backup.md`). Never state a
 recovery point newer than the last published dump unless the latest drill has passed.
 
 Scheduled dumps and logical restore drills use separate private scratch roots
@@ -658,10 +655,6 @@ Two traps this checklist exists to catch:
 Browser decoupling is only observable under a root-only restart: a full `stop` → `start`
 also stops Chrome, so a dead browser after a wave is not evidence that the decoupling
 regressed.
-
-### WAL-G archiving
-
-See [component operations](../../services/backup/walg/docs/operations.md).
 
 ### Agent continuation after a provider error
 

@@ -1,4 +1,4 @@
-exports = ["artifact", "dump.py", "layout.py", "restore_drill.py", "scheduler", "walg"]
+exports = ["artifact", "dump.py", "layout.py", "restore_drill.py", "scheduler"]
 
 [uses]
 "dump.py" = ["artifact", "dump_lines.py", "dump_plan.py", "layout.py"]
@@ -6,7 +6,6 @@ exports = ["artifact", "dump.py", "layout.py", "restore_drill.py", "scheduler", 
 "restore_drill.py" = ["dump.py", "dump_lines.py", "layout.py"]
 "scheduler" = ["artifact", "dump.py", "layout.py", "restore_drill.py", "schedule.py", "tests"]
 "tests" = ["artifact", "dump.py", "dump_lines.py", "dump_plan.py", "layout.py", "restore_drill.py", "schedule.py"]
-"walg" = ["artifact", "restore_drill.py"]
 
 [purity]
 "dump_lines.py" = "strict"
@@ -15,5 +14,4 @@ exports = ["artifact", "dump.py", "layout.py", "restore_drill.py", "scheduler", 
 "schedule.py" = "strict"
 
 [roots]
-"dump.py" = { kinds = ["settings", "argv"], why = "Service or operator process entry boots configuration before composing its resources; the __main__ guard reads argv[1:] once and hands it to main" }
 "restore_drill.py" = { kinds = ["clock", "environ", "home", "settings", "argv"], why = "Operator process entry boots configuration and reads the home whose backups it restores before composing its resources, reads its own environment once as the base the decrypt and restore children it spawns are given, and names the system timers its throwaway cluster's readiness wait runs on; the __main__ guard reads argv[1:] once and hands it to main" }

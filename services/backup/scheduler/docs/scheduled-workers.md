@@ -8,7 +8,7 @@ stdout/stderr. Progress and large artifact commits stay off the event loop.
 
 Each scheduler process reads its `SchedulerSettings` (cluster clock, backup hour, retention and the
 captured throwaway base) once at its root; every field is `restart_required: gateway`. Each operation
-worker reads its `DumpSettings` (plane, retention and off-site destination) once at process entry.
+worker reads its `DumpSettings` (plane and retention) once at process entry.
 Below those roots a function takes the values, never the config owner: the pure calendar lives in
 `services.backup.schedule`, the dump's argv, names and retention in `services.backup.dump_plan`, and
 the commit judgements in `commit_plan.py`. One `BackupTree` value names every path under
