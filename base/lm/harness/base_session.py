@@ -47,6 +47,15 @@ class ForkSourceUnavailableError(RuntimeError):
     pass
 
 
+# meiva:note
+# The harness declared a steered input lost: its turn ended with no completion event for it, so it never
+# reached the model's context. It is the one steer failure that is safe to hand over again, and the
+# caller can tell it apart from a session failure, where nothing says whether the input arrived.
+# meiva:link base/lm/harness/docs/delivery.md
+class InputLostError(RuntimeError):
+    pass
+
+
 class TurnTicket:
     def __init__(
         self,
@@ -233,9 +242,9 @@ class BaseHarnessSession[ConfigT: SessionConfig](ExitStatus):
     # meiva:note
     # The steering operation the graph still uses, kept as a thin wrapper over `deliver`. Its
     # answer is now a fact, not a write result: True only when the input entered the model's
-    # context, False when the harness refused it (so it can go
-    # back to the queue), and an error when the input is lost, because then nothing can say it is safe
-    # to hand over again. An input that entered a different turn than the running one (Claude Code
+    # context, False when the harness refused it, and `InputLostError` when the harness declared it
+    # lost; a refused or lost input can go back to the queue. Any other error means the session failed
+    # and nothing says whether the input arrived. An input that entered a different turn than the running one (Claude Code
     # starts a turn of its own for an input that missed the running turn's last tool boundary) was
     # still seen by the model, so it is reported as accepted: calling it unconfirmed would make the
     # graph show an uncertainty marker for something that did run.
@@ -263,7 +272,7 @@ class BaseHarnessSession[ConfigT: SessionConfig](ExitStatus):
             case InputInContext():
                 return True
             case _:
-                raise RuntimeError("turn ended before the steer receipt arrived")
+                raise InputLostError("turn ended before the steer receipt arrived")
 
     # meiva:note
     # Startup and completion can both race a cancel. Wait on the captured ticket

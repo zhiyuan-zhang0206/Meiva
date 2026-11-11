@@ -16,8 +16,13 @@ into the running foreground in a single request as long as no `cancel`,
 `restart`, or `terminate` control is pending. Steered rows stay pending with a
 reservation timestamp until the provider confirms receipt, at which point their
 timeline items and inbox consumption commit together. A definite rejection
-releases the batch reservation for the next claim. An unconfirmed delivery
-leaves uncertainty markers and is not automatically sent a second time.
+or a loss the harness declared (`InputLostError`: the turn ended with no
+completion event for the input) releases the batch reservation for the next
+claim, which delivers it again in its original queue position. A delivery whose
+outcome is unknown (the session failed while the input was in flight) leaves
+uncertainty markers and is not automatically sent a second time; reconciling it
+against the harness's durable record is the restart-and-crash step of the
+delivery unification.
 Adapters without `ForegroundSteering` leave queued work for the next claim.
 
 Cancel targets the foreground. The graph continues reading activity until the

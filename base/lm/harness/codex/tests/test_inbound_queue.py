@@ -5,6 +5,7 @@ from pathlib import Path
 
 import pytest
 
+from base.lm.harness.base_session import InputLostError
 from base.lm.harness.codex.frames import INTERNAL_ERROR, INVALID_REQUEST, JsonObject, JsonRpcError
 from base.lm.harness.codex.session import InboundQueueFullError
 from base.lm.harness.codex.tests.support import start, turn_text
@@ -103,7 +104,7 @@ async def test_steer_rejection_and_internal_error_have_distinct_outcomes(tmp_pat
         await harness.stop()
 
 
-async def test_steer_without_receipt_at_turn_completion_is_ambiguous(tmp_path: Path) -> None:
+async def test_steer_without_receipt_at_turn_completion_is_lost(tmp_path: Path) -> None:
     harness = await start(tmp_path)
     try:
         _ = harness.session.submit("one")
@@ -113,7 +114,7 @@ async def test_steer_without_receipt_at_turn_completion_is_ambiguous(tmp_path: P
         assert harness.server.params_for("turn/steer")
         harness.server.complete()
         assert not harness.session.steering_available
-        with pytest.raises(RuntimeError, match="turn ended before the steer receipt arrived"):
+        with pytest.raises(InputLostError, match="turn ended before the steer receipt arrived"):
             _ = await asyncio.wait_for(steer, 2)
         assert harness.session.pending_turns == ()
         assert len(harness.server.params_for("turn/start")) == 1
