@@ -114,6 +114,7 @@ __all__ = [
     "UnsolicitedSink",
     "Usage",
     "completed_turn",
+    "encode_items",
     "fault_of_event",
     "handle_digest",
     "is_droppable",

@@ -10,7 +10,7 @@ from base import paths
 from base.host.boundary.process import stderr_text, stdout_text
 from base.host.env.harness_binaries import with_harness_path
 from base.host.private_storage import converge_private_tree, ensure_private_file
-from base.lm.harness.registry import backfill_generation, migrate_single_slot_records
+from base.lm.harness.registry import backfill_record_fields, migrate_single_slot_records
 from cli.commands.converge.plans.checkout_warnings import hook_scan_argv, hook_scan_warnings
 from cli.commands.converge.plans.shell_rc import (
     rc_file_name,
@@ -116,9 +116,9 @@ def migrate_harness_session_records(ctx: ConvergeCtx) -> None:
     migrated = migrate_single_slot_records(root)
     if migrated:
         print(f"harness session records: migrated {len(migrated)} to one file per harness")
-    completed = backfill_generation(root)
+    completed = backfill_record_fields(root)
     if completed:
-        print(f"harness session records: added the process generation to {len(completed)}")
+        print(f"harness session records: completed the generation or background field of {len(completed)}")
 
 
 def ensure_pg_binaries_step(

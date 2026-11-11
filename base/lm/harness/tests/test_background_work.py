@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import asyncio
-import json
 import time
 from collections.abc import Sequence
 from dataclasses import replace
@@ -101,7 +100,7 @@ def test_items_survive_the_record_encoding_and_a_malformed_entry_is_refused() ->
         _ = decode_items([{"kind": "cron", "description": "x", "until": "soon"}], source="test")
 
 
-def test_a_record_keeps_its_background_and_an_old_record_has_none(tmp_path: Path) -> None:
+def test_a_record_keeps_its_background(tmp_path: Path) -> None:
     registry = FileSessionRegistry(tmp_path / "sessions")
     base = SessionRecord(
         agent_id=6984,
@@ -118,12 +117,6 @@ def test_a_record_keeps_its_background_and_an_old_record_has_none(tmp_path: Path
     with_work = replace(base, background=(_item(until=NOW + 9),))
     registry.save(with_work)
     assert registry.load(6984, harness=HARNESS) == with_work
-
-    path = registry.path(6984, HARNESS)
-    document = json.loads(path.read_text())
-    del document["background"]
-    path.write_text(json.dumps(document))
-    assert registry.load(6984, harness=HARNESS) == base
 
 
 async def test_the_first_input_after_a_restart_carries_the_lost_note_once() -> None:

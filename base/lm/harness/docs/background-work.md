@@ -72,3 +72,13 @@ the sink as `UnsolicitedOutput(source="harness-turn")` so the graph takes a turn
 Turns answering a background-task report (already delivered) or a queued input of ours (it
 has its own ledger) are not reported again. Presenting such turns in the graph and the
 timeline belongs to the event pump work, not to this file.
+
+## Records, migration and transfer
+
+`SessionRecord.background` is a required field. A record written before it existed is refused on
+read (the same way an old single-slot record is), and `meiva converge` backfills it as an empty
+list (`backfill_background_field`, run by the harness session records step) before the runner
+starts; an empty list is the true value for a record written by a process that tracked nothing.
+When an agent moves to another machine, the record travels with its pending list as it stood. The
+CLI process stays behind, so on the target the list is lost work: the target's first session reads
+it back and the agent is told once.

@@ -15,6 +15,7 @@ from base.lm.harness.claude.tests import fake_sdk as fake
 from base.lm.harness.claude.tests.fake_sdk import CallTool, Say
 from base.lm.harness.claude.tests.support import start
 from base.lm.harness.delivery import HarnessInput
+from base.lm.harness.delivery.tests.sent import send
 from base.lm.harness.events import (
     HarnessCause,
     TurnCompleted,
@@ -96,7 +97,7 @@ async def test_a_one_shot_cron_with_no_structured_result_is_dated_from_its_expre
         ],
     )
     try:
-        _ = await harness.session.submit("set it").outcome()
+        _ = await (await send(harness, "set it")).outcome()
         [item] = harness.session.background_work().items
         assert item.until is not None
         assert abs(item.until - AFTER_DUE_MARGIN_SECONDS - target.timestamp()) < 1
@@ -112,7 +113,7 @@ async def test_a_one_shot_cron_with_an_unknown_cli_zone_is_not_dated(tmp_path: P
     )
     harness = await start(tmp_path, scripts=[[call, Say("ok")]])
     try:
-        _ = await harness.session.submit("set it").outcome()
+        _ = await (await send(harness, "set it")).outcome()
         [item] = harness.session.background_work().items
         assert item.until is not None and item.until > time.time() + 6 * 24 * 3600
     finally:
@@ -202,7 +203,7 @@ async def test_a_session_counts_the_timers_the_model_sets_and_persists_them(
     )
     try:
         assert not harness.session.background_work()
-        _ = await harness.session.submit("set a cron").outcome()
+        _ = await (await send(harness, "set a cron")).outcome()
 
         work = harness.session.background_work()
         assert [item.kind for item in work.items] == [BackgroundKind.CRON]
@@ -235,7 +236,7 @@ async def test_a_new_session_reads_back_what_the_old_process_left_pending(
             ]
         ],
     )
-    _ = await first.session.submit("set a cron").outcome()
+    _ = await (await send(first, "set a cron")).outcome()
     await first.stop()
 
     second = await start(tmp_path, registry=registry, agent_id=7, session_id="session-2")
@@ -338,7 +339,7 @@ async def test_a_wake_turn_is_classified_and_clears_the_wakeup(tmp_path: Path) -
         ],
     )
     try:
-        _ = await harness.session.submit("set a wakeup").outcome()
+        _ = await (await send(harness, "set a wakeup")).outcome()
         assert harness.session.background_work()
         await asyncio.sleep(0.5)
 

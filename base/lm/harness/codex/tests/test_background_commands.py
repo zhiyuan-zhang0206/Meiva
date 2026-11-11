@@ -5,6 +5,7 @@ from pathlib import Path
 
 from base.lm.harness.codex.tests.fake_app_server import FakeAppServer
 from base.lm.harness.codex.tests.support import Harness, start
+from base.lm.harness.delivery.tests.sent import send
 from base.lm.harness.events import UnsolicitedOutput
 from base.lm.harness.registry import FileSessionRegistry
 from base.lm.harness.session import BackgroundKind
@@ -52,7 +53,7 @@ def emit_item(harness: Harness, method: str, item: dict[str, object]) -> None:
 
 
 async def run_turn_starting(harness: Harness, item: dict[str, object] | None = None) -> None:
-    turn = harness.session.submit("start a server")
+    turn = await send(harness, "start a server")
     await harness.turn_started(1)
     emit_item(harness, "item/started", item or command_item())
     harness.server.message("STARTED")
@@ -127,7 +128,7 @@ async def test_a_user_shell_command_or_a_poll_is_not_new_background_work(tmp_pat
 async def test_a_turn_that_ended_interrupted_took_its_commands_with_it(tmp_path: Path) -> None:
     harness = await start(tmp_path)
     try:
-        turn = harness.session.submit("start a server")
+        turn = await send(harness, "start a server")
         await harness.turn_started(1)
         emit_item(harness, "item/started", command_item())
         harness.probe.spawn(5001, "sleep 3917")

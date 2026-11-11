@@ -8,7 +8,7 @@ import pytest
 
 from base.lm.harness import FileSessionRegistry, SessionRecord
 from base.lm.harness.registry import (
-    backfill_generation,
+    backfill_record_fields,
     migrate_single_slot_records,
     unreadable_records,
 )
@@ -282,8 +282,8 @@ def test_converge_gives_an_older_record_generation_zero_once(tmp_path: Path) -> 
     del payload["generation"]
     path.write_text(json.dumps(payload))
 
-    assert backfill_generation(tmp_path / "sessions") == [path]
-    assert backfill_generation(tmp_path / "sessions") == []
+    assert backfill_record_fields(tmp_path / "sessions") == [path]
+    assert backfill_record_fields(tmp_path / "sessions") == []
     loaded = registry.load(6984, harness=HARNESS)
     assert loaded is not None and loaded.generation == 0
 
@@ -302,4 +302,52 @@ def test_a_home_with_a_single_slot_record_or_an_unreadable_one_is_reported(tmp_p
 
     _ = migrate_single_slot_records(root)
     (root / "7.codex.json").unlink()
+    assert unreadable_records(root) == []
+
+
+# meiva:note
+# A record written before the `background` field existed is refused on read, not read as empty: the
+# converge step backfills it, rewriting only the files that lack it, and a second run is a no-op.
+# meiva:link base/lm/harness/docs/background-work.md
+def test_a_record_without_background_is_refused_until_converge_backfills_it(tmp_path: Path) -> None:
+    root = tmp_path / "sessions"
+    registry = FileSessionRegistry(root)
+    registry.save(record(6984))
+    path = registry.path(6984, HARNESS)
+    document = json.loads(path.read_text())
+    del document["background"]
+    path.write_text(json.dumps(document))
+    current = registry.path(6985, HARNESS)
+    registry.save(record(6985))
+
+    with pytest.raises(ValueError, match="misses"):
+        _ = registry.load(6984, harness=HARNESS)
+
+    assert backfill_record_fields(root) == [path]
+    assert backfill_record_fields(root) == []
+    loaded = registry.load(6984, harness=HARNESS)
+    assert loaded is not None and loaded.background == ()
+    assert registry.load(6985, harness=HARNESS) == record(6985)
+    assert current.exists()
+
+
+def test_a_record_missing_background_is_reported_as_unreadable_like_one_missing_generation(
+    tmp_path: Path,
+) -> None:
+    root = tmp_path / "sessions"
+    registry = FileSessionRegistry(root)
+    registry.save(record(6984))
+    registry.save(record(6985, harness="codex"))
+    for agent_id, harness, field in ((6984, HARNESS, "background"), (6985, "codex", "generation")):
+        path = registry.path(agent_id, harness)
+        document = json.loads(path.read_text())
+        del document[field]
+        path.write_text(json.dumps(document))
+
+    problems = unreadable_records(root)
+
+    assert len(problems) == 2
+    assert any("6984" in line and "background" in line for line in problems)
+    assert any("6985" in line and "generation" in line for line in problems)
+    assert len(backfill_record_fields(root)) == 2
     assert unreadable_records(root) == []

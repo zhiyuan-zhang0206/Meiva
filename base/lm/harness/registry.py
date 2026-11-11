@@ -15,9 +15,19 @@ from base.host.boundary.untyped import object_of
 from base.lm.harness.session import BackgroundItem, decode_items, encode_items
 
 _REQUIRED_FIELDS = frozenset(
-    {"agent_id", "session_id", "cwd", "model", "created_at", "updated_at", "harness", "generation"}
+    {
+        "agent_id",
+        "session_id",
+        "cwd",
+        "model",
+        "created_at",
+        "updated_at",
+        "harness",
+        "generation",
+        "background",
+    }
 )
-_FIELDS = _REQUIRED_FIELDS | {"resumes", "background"}
+_FIELDS = _REQUIRED_FIELDS | {"resumes"}
 _PRE_FIELD_HARNESS = "meiva"
 _SINGLE_SLOT = re.compile(r"\d+\.json")
 _HARNESS_NAME = re.compile(r"[a-z][a-z0-9_]*")
@@ -142,17 +152,7 @@ class FileSessionRegistry:
         path = self.path(record.agent_id, record.harness)
         path.parent.mkdir(parents=True, exist_ok=True)
         document = {**asdict(record), "background": encode_items(record.background)}
-        payload = json.dumps(document, indent=2, sort_keys=True) + "\n"
-        handle, temporary = tempfile.mkstemp(dir=path.parent, prefix=".session-", suffix=".json")
-        try:
-            with os.fdopen(handle, "w", encoding="utf-8") as stream:
-                stream.write(payload)
-                stream.flush()
-                os.fsync(stream.fileno())
-            Path(temporary).replace(path)
-        except BaseException:
-            Path(temporary).unlink(missing_ok=True)
-            raise
+        _write_document(path, document)
 
     def delete_harnesses(self, agent_id: int, harnesses: Collection[str]) -> None:
         for harness in harnesses:
@@ -198,7 +198,8 @@ def migrate_single_slot_records(root: Path) -> list[Path]:
         if not is_object_dict(raw):
             raise TypeError(f"session record at {entry} is not an object")
         record = record_from_payload(
-            {"harness": _PRE_FIELD_HARNESS, "generation": 0, **raw}, source=str(entry)
+            {"harness": _PRE_FIELD_HARNESS, "generation": 0, "background": [], **raw},
+            source=str(entry),
         )
         if record.agent_id != int(entry.stem):
             raise ValueError(f"session record at {entry} names agent {record.agent_id}")
@@ -231,11 +232,15 @@ def unreadable_records(root: Path) -> list[str]:
 
 
 # meiva:note
-# Complete the records written before `generation` existed: each gets generation 0 (the first process
-# that runs under it is generation 1), written atomically in place. Idempotent; returns the files
-# changed. A file that is not a record fails naming it.
+# Complete the records written before `generation` or `background` existed: a missing `generation`
+# becomes 0 (the first process that runs under it is generation 1) and a missing `background`
+# becomes the empty list (the true value for a process that did not track background work), each
+# written atomically in place. Both fields are required on read, so a home that was not converged
+# refuses the record instead of resuming on a guess. Idempotent; returns the files changed. A file
+# that is not a record fails naming it.
 # meiva:link base/lm/harness/docs/harness.md
-def backfill_generation(root: Path) -> list[Path]:
+# meiva:link base/lm/harness/docs/background-work.md
+def backfill_record_fields(root: Path) -> list[Path]:
     if not root.is_dir():
         return []
     changed: list[Path] = []
@@ -248,12 +253,26 @@ def backfill_generation(root: Path) -> list[Path]:
             raise ValueError(f"session record at {entry} is not valid JSON") from exc
         if not is_object_dict(raw):
             raise TypeError(f"session record at {entry} is not an object")
-        if "generation" in raw:
+        if "generation" in raw and "background" in raw:
             continue
-        record = record_from_payload({**raw, "generation": 0}, source=str(entry))
+        completed = {"generation": 0, "background": [], **raw}
+        record = record_from_payload(completed, source=str(entry))
         FileSessionRegistry(root).save(record)
         changed.append(entry)
     return changed
+
+
+def _write_document(path: Path, document: dict[str, object]) -> None:
+    handle, temporary = tempfile.mkstemp(dir=path.parent, prefix=".session-", suffix=".json")
+    try:
+        with os.fdopen(handle, "w", encoding="utf-8") as stream:
+            stream.write(json.dumps(document, indent=2, sort_keys=True) + "\n")
+            stream.flush()
+            os.fsync(stream.fileno())
+        Path(temporary).replace(path)
+    except BaseException:
+        Path(temporary).unlink(missing_ok=True)
+        raise
 
 
 def _check_agent(agent_id: int) -> None:
@@ -276,9 +295,7 @@ def record_from_payload(payload: dict[str, object], *, source: str) -> SessionRe
             harness=str_field(payload, "harness"),
             resumes=int_field(payload, "resumes") if "resumes" in payload else 0,
             generation=int_field(payload, "generation"),
-            background=decode_items(payload["background"], source=source)
-            if "background" in payload
-            else (),
+            background=decode_items(payload["background"], source=source),
         )
     except (TypeError, ValueError) as exc:
         raise ValueError(f"session record at {source} has invalid values: {exc}") from exc
