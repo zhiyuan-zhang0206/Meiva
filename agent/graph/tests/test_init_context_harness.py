@@ -350,7 +350,9 @@ def _make_antigravity_recall_runtime(
     )
 
     class _Bridge(FakeEngine):
-        async def deliver(self, inputs: Sequence[HarnessInput]) -> None:
+        async def deliver(
+            self, inputs: Sequence[HarnessInput], *, compaction_note: str = ""
+        ) -> None:
             recorded_prompts.extend(item.text for item in inputs)
             await super().deliver(inputs)
 
@@ -464,3 +466,41 @@ async def test_antigravity_claim_before_turn_harness_turn_recalls_skill_and_prep
     assert ht_cmd.goto == "claim"
     assert "meiva.skills.beta" in recorded_prompts[0], "the hook note is delivered ahead of the row"
     assert "please use beta to draft the release notes" in recorded_prompts[1]
+
+
+async def test_external_context_reset_lists_the_open_questions_after_the_tail(
+    db_conn: psycopg.Connection, database_gate: ProcessDbGate
+) -> None:
+    tid = create_agent(db_conn)
+    command = await init_context_node(
+        AgentState(
+            context_reset=ContextReset(
+                tail=[HumanMessage(content="THE-SUMMARY")], resume="before_turn"
+            )
+        ),
+        _runtime(None, harness=Harness.CLAUDE_CODE, database_gate=database_gate),
+        _config(tid),
+    )
+    assert command.update is not None
+    assert "still unanswered" not in command.update["harness_inputs"][0]["prompt"]
+
+    row = db_conn.execute(
+        "INSERT INTO agent_questions (agent_id, title, question) "
+        "VALUES (%s, 'Which database?', '{\"type\": \"text\"}') RETURNING id",
+        (tid,),
+    ).fetchone()
+    assert row is not None
+    db_conn.commit()
+    command = await init_context_node(
+        AgentState(
+            context_reset=ContextReset(
+                tail=[HumanMessage(content="THE-SUMMARY")], resume="before_turn"
+            )
+        ),
+        _runtime(None, harness=Harness.CLAUDE_CODE, database_gate=database_gate),
+        _config(tid),
+    )
+    assert command.update is not None
+    prompt = command.update["harness_inputs"][0]["prompt"]
+    assert f'#{row[0]} "Which database?"' in prompt
+    assert prompt.index("THE-SUMMARY") < prompt.index("still unanswered")

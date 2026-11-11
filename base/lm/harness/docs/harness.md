@@ -96,6 +96,10 @@ resolution (`resolve_harness_binary`) are defined in
 Path resolution, discovery, catalog pinning, host convergence steps, and runner update schedules are described in
 [External harness CLI convergence and delivery](cli-convergence.md).
 
+## Unanswered questions after the CLI compacted
+
+An external CLI compacts its own context, so there is no moment before it that the platform can use; only the `ContextCompacted` event is known. The next input then carries, with the reminder to re-read the saved instructions, a list of the agent's unanswered questions read from `agent_questions` (`HarnessBridge.deliver(inputs, compaction_note=...)`, composed by the harness turn). It follows the opening-input rule: it counts as delivered only when that input is in the model's context (`InputInContext`), and a refused or lost input is handed over again with it. An agent with none gets no text. The first handoff of a new or resumed session does not list questions. A Meiva compaction of an external harness agent (a request or `meiva.self.compact`) is a different path: `init_context` carries the summary in the reset input, and the same list follows the summary there. The pre-compaction reminder is native-only (the hook returns for any external harness), so an external harness agent has no pre-compaction list.
+
 ## The handoff document
 
 The handoff is a wire format, not an internal dataclass: the waking agent reads

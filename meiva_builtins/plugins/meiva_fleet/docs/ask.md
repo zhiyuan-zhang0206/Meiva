@@ -19,6 +19,8 @@ question ID order. The reply is one inbound to the agent with a `Re: question #<
 per question; a skipped question reads `Skipped by the user.` and grants nothing. Reading a
 publication does not answer any question.
 
+The agent is shown its unanswered questions (id, title, content and options) by the platform, never by a read entry: the pre-compaction reminder (native graph only: an external harness has no such moment, its CLI compacts itself) lists them as the moment to close the ones that no longer matter; the context a native compaction rebuilds (auto, request or agent-written summary) opens with them; the input that carries a Meiva compaction (request or `meiva.self.compact`) into an external harness lists them after the summary; and an external CLI's first input after it compacted itself lists them. All are read from the database. Closed and answered questions are absent. A list names its owner and is left out of what another agent's model sees, so a native fork that copied its source's messages does not see the source's ids (an external fork inherits the CLI's own conversation, which cannot be filtered). If the database cannot be read the list is left out and a warning is logged. There is no query entry.
+
 The user gets one system notification per agent: the first open question alerts, later ones update
 it silently ("N questions awaiting an answer"), and it is retracted when the agent has no open
 question left.

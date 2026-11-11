@@ -23,6 +23,7 @@ from agent import state as _state
 from agent.graph._callbacks import RedisStreamHandler
 from agent.graph.claim.turn_stamp import persist_last_active
 from agent.graph.hooks.compact import auto_compact_for_llm
+from agent.graph.hooks.question_context import without_foreign_question_notes
 from agent.graph.hooks.user_delivery import (
     capture_reply,
     delivery_end_reminder,
@@ -380,7 +381,9 @@ async def _llm_node_impl(
         else list(state.messages)
     )
 
-    messages = await with_pending_deliveries(ctx, agent_id, messages)
+    messages = await with_pending_deliveries(
+        ctx, agent_id, without_foreign_question_notes(messages, agent_id)
+    )
 
     cancelled_cmd = await race_stream_vs_cancel(
         ctx,

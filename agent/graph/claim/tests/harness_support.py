@@ -121,6 +121,8 @@ class FakeEngine:
         self.retired: list[str] = []
         self.closed = False
         self.generation = 1
+        self.context_compacted = False
+        self.compaction_notes: list[str] = []
         # meiva:note
         # The harness's durable record as `reconcile` answers it: a key it holds maps to its answer and
         # a key it lacks is NOT_FOUND. None is a record that cannot be read at all.
@@ -166,8 +168,9 @@ class FakeEngine:
             for event in events:
                 subscription.queue.put_nowait(event)
 
-    async def deliver(self, inputs: Sequence[HarnessInput]) -> None:
+    async def deliver(self, inputs: Sequence[HarnessInput], *, compaction_note: str = "") -> None:
         self.delivered.append(list(inputs))
+        self.compaction_notes.append(compaction_note)
         self.emit(*self._script(inputs))
 
     async def reconcile(self, keys: Sequence[str]) -> Mapping[str, Reconciliation]:

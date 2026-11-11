@@ -1,0 +1,11 @@
+exports = ["model.py", "open_questions.py", "render.py"]
+
+[uses]
+"open_questions.py" = ["model.py"]
+"render.py" = ["model.py"]
+"tests" = ["model.py", "open_questions.py", "render.py"]
+
+[purity]
+"__init__.py" = "strict"
+"model.py" = "strict"
+"render.py" = "strict"

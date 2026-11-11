@@ -129,7 +129,7 @@ async def test_natural_end_requires_publication_and_reminds_once(
     assert third.goto == "claim" and len(third_update.messages) == 1
 
 
-async def test_compacted_context_restores_unread_and_unanswered_deliveries(
+async def test_compacted_context_restores_unread_publications_and_leaves_questions_to_the_rebuild(
     db_conn: psycopg.Connection,
     database_gate: ProcessDbGate,
     hosted_resources: HostedTurnResources,
@@ -140,6 +140,14 @@ async def test_compacted_context_restores_unread_and_unanswered_deliveries(
         "VALUES (%s,'Approve the smaller scope?','{\"type\":\"text\"}')",
         (agent_id,),
     )
+    publish(
+        db_conn,
+        agent_id,
+        "milestone",
+        PublishMessage(content="Finished the migration", suggestions=[]),
+        mode=UserDeliveryMode.SDK,
+        created_at=datetime.now(UTC),
+    )
     db_conn.commit()
     runtime = make_runtime(
         resources=hosted_resources, database_gate=database_gate, pins={"user_delivery_mode": "sdk"}
@@ -147,8 +155,8 @@ async def test_compacted_context_restores_unread_and_unanswered_deliveries(
     compacted = [HumanMessage(content="The workspace overview was rewritten.")]
     restored = await with_pending_deliveries(runtime.context, agent_id, compacted)
     assert len(restored) == 2
-    assert "Approve the smaller scope?" in restored[-1].content
-    assert "Open Ask" in restored[-1].content
+    assert "Finished the migration" in restored[-1].content
+    assert "Approve the smaller scope?" not in restored[-1].content
     assert len(compacted) == 1
 
 

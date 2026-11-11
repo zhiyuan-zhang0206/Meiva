@@ -458,7 +458,9 @@ async def test_an_input_that_cannot_reach_the_session_goes_back_to_the_queue(
     row = insert_row(db_conn, agent_id, "chat", "user", "work")
 
     class Unstartable(FakeEngine):
-        async def deliver(self, inputs: Sequence[HarnessInput]) -> None:
+        async def deliver(
+            self, inputs: Sequence[HarnessInput], *, compaction_note: str = ""
+        ) -> None:
             raise HarnessNotDeliveredError("session could not start")
 
     rt = runtime(Unstartable(), ops_pool=aops_pool, hosted_resources=hosted_resources)

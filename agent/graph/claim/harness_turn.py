@@ -50,6 +50,7 @@ from agent.graph.claim.harness_render import (
 from agent.graph.claim.lost_turn import report_lost_turn
 from agent.graph.claim.timeline import append_turn_timeline
 from agent.graph.claim.turn_stamp import persist_last_active
+from agent.graph.hooks.question_context import read_agent_open_questions
 from agent.graph.hooks.user_delivery import capture_items, delivery_end_reminder
 from agent.graph.interrupt import (
     ModelInterruptedError,
@@ -67,6 +68,7 @@ from base.agents.history.harness_messages import (
 )
 from base.agents.history.timeline import build_timeline_items
 from base.agents.history.timeline_item import TimelineItem
+from base.agents.questions.render import reinjection_text
 from base.db.transaction import async_write_transaction
 from base.events.live.projection import LLMDone, TimelineSnapshot
 from base.events.live.publisher import AgentEventPublisher
@@ -612,6 +614,19 @@ class ForegroundRun:
             await self._give_back(rows)
             raise
 
+    # meiva:note
+    # After the CLI compacted its own context, the next input also lists the agent's unanswered questions
+    # (read from the database). An external CLI has no moment before its compaction, so this is the only
+    # place they are shown to it; an agent with none gets no text.
+    # meiva:link base/lm/harness/docs/harness.md
+    async def _compaction_note(self) -> str:
+        if not self._bridge.context_compacted:
+            return ""
+        return reinjection_text(
+            await read_agent_open_questions(self._ctx, self._agent_id),
+            source="read from the database, not from your summary",
+        )
+
     async def _deliver_ready(self) -> bool:
         if asyncio.get_running_loop().time() < self._backoff_until:
             return False
@@ -641,10 +656,11 @@ class ForegroundRun:
             publish_inbound(self._ctx, self._agent_id, items)
         if not handed:
             return True
+        compaction_note = await self._compaction_note()
         self.last_key = handed[-1].key
         self.fg = self.fg.hand(tuple(handed))
         try:
-            await self._bridge.deliver(inputs)
+            await self._bridge.deliver(inputs, compaction_note=compaction_note)
         except HarnessNotDeliveredError:
             await self._take_back(handed)
             raise

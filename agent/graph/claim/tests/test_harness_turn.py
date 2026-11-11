@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import os
 from collections.abc import AsyncGenerator, Sequence
+from dataclasses import replace
 from datetime import UTC, datetime
 from unittest.mock import MagicMock
 
@@ -11,6 +12,7 @@ import pytest
 from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, ToolMessage
 from langchain_core.runnables import RunnableConfig
 from langgraph.runtime import Runtime
+from psycopg.types.json import Jsonb
 from psycopg_pool import AsyncConnectionPool
 
 from agent.graph.claim.harness_activity import HarnessTurnProjector, log_turn_usage
@@ -34,7 +36,9 @@ from base.clock import Clock
 from base.cluster.machine import MachineIdentityReader
 from base.config.service_read import ConfigAuthority
 from base.config.tests.configuration import defaults
+from base.db import Database
 from base.db.code_version_gate import ProcessDbGate
+from base.events.live.bus import EventBus
 from base.events.live.publisher import AgentEventPublisher
 from base.events.live.tests.live_capture import LiveEvents
 from base.host.env.agent_slices import AgentSlices
@@ -216,7 +220,9 @@ async def test_a_faulted_session_settles_the_turn_as_a_fatal_stream_abort(
     loguru_records: LogRecords,
 ) -> None:
     class FaultingEngine(FakeEngine):
-        async def deliver(self, inputs: Sequence[HarnessInput]) -> None:
+        async def deliver(
+            self, inputs: Sequence[HarnessInput], *, compaction_note: str = ""
+        ) -> None:
             self.emit(TurnFaulted("t1", "cli died"))
 
     state = AgentState(
@@ -237,7 +243,9 @@ async def test_a_faulted_session_settles_the_turn_as_a_fatal_stream_abort(
 # meiva:link agent/graph/docs/harness-turn.md
 async def test_a_session_that_cannot_start_settles_the_turn_as_a_fatal_stream_abort() -> None:
     class UnstartableEngine(FakeEngine):
-        async def deliver(self, inputs: Sequence[HarnessInput]) -> None:
+        async def deliver(
+            self, inputs: Sequence[HarnessInput], *, compaction_note: str = ""
+        ) -> None:
             raise HarnessSetupError("claude_code session could not start: no sdk")
 
     state = AgentState(
@@ -343,7 +351,9 @@ async def test_tool_activity_is_visible_before_completion_and_survives_abort(
             return await aload_harness_timeline_items(conn, agent_id)
 
     class FaultingEngine(FakeEngine):
-        async def deliver(self, inputs: Sequence[HarnessInput]) -> None:
+        async def deliver(
+            self, inputs: Sequence[HarnessInput], *, compaction_note: str = ""
+        ) -> None:
             self.emit(
                 ToolUse(
                     turn_id="t1", tool_use_id="call", name="Bash", tool_input={"command": "ls"}
@@ -541,7 +551,9 @@ async def test_terminate_interrupt_preserves_projected_tool_call_messages() -> N
     from base.agents.messages.inbound import InterruptReason
 
     class SelfTerminatingEngine(FakeEngine):
-        async def deliver(self, inputs: Sequence[HarnessInput]) -> None:
+        async def deliver(
+            self, inputs: Sequence[HarnessInput], *, compaction_note: str = ""
+        ) -> None:
             self.delivered.append(list(inputs))
             self.emit(
                 ReasoningText(turn_id="t1", text="Role complete, terminating."),
@@ -678,3 +690,48 @@ async def test_an_own_terminate_ends_an_invocation_whose_turn_cannot_finish(
         "SELECT status FROM inbound_messages WHERE id=%s", (terminate,)
     ).fetchone()
     assert row == ("pending",), "claim dispatches the terminate next"
+
+
+async def test_after_the_cli_compacted_the_next_input_carries_the_open_questions(
+    db_conn: psycopg.Connection,
+    database_gate: ProcessDbGate,
+    aops_pool: AsyncConnectionPool,
+    hosted_resources: HostedTurnResources,
+    event_bus: EventBus,
+    model_catalog: ModelCatalog,
+    config_authority: ConfigAuthority,
+    machine_identity: MachineIdentityReader,
+) -> None:
+    agent = spawn_agent(
+        catalog=model_catalog,
+        authority=config_authority,
+        database_gate=database_gate,
+        machine=machine_identity,
+    )
+    question = db_conn.execute(
+        "INSERT INTO agent_questions (agent_id, title, question) VALUES (%s, 'Which database?', %s) "
+        "RETURNING id",
+        (agent, Jsonb({"type": "text"})),
+    ).fetchone()
+    assert question is not None
+    db_conn.commit()
+    state = AgentState(
+        harness_inputs=[{"key": "inbound-7", "prompt": "do it", "timeline_items": []}]
+    )
+
+    async def notes(compacted: bool) -> list[str]:
+        engine = FakeEngine(reply="MEIVA_DISPLAY_TO_USER\ndone")
+        engine.context_compacted = compacted
+        base = runtime(engine, ops_pool=aops_pool, hosted_resources=hosted_resources)
+        context = replace(
+            base.context,
+            db=Database.from_settings(gate=database_gate),
+            bus=event_bus,
+        )
+        await harness_turn_node(state, Runtime(context=context), config(agent))
+        return engine.compaction_notes
+
+    [note] = await notes(True)
+    assert f'#{question[0]} "Which database?"' in note
+    assert "Questions you asked the user that are still unanswered" in note
+    assert await notes(False) == [""]

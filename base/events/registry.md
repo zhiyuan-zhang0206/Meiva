@@ -258,6 +258,7 @@ above (or when its name is unregistered); otherwise it stays in the JSONL mirror
 | `circuit_breaker_closed` | heartbeat circuit breaker closed | noise | — | — | events | — |
 | `heartbeat_circuit_open` | heartbeat consumed while the breaker is open | noise | — | — | events | — |
 | `compact_boundary_stamp` | compact boundary stamp failed (segment anchor not recorded) | noise | — | — | events | — |
+| `open_questions_unavailable` | an agent's open questions could not be read; the list was left out of its context | noise | — | — | events | — |
 | `llm_retry` | LLM retry sequence completion | observation | outcome, duration_seconds | — | events | — |
 | `reply_suggestion_gate` | reply suggestion gate probability | noise | — | — | events | — |
 | `reply_suggestion_gate_failed` | reply suggestion gate call failed | anomaly | — | — | events | — |

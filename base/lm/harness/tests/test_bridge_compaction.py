@@ -48,3 +48,22 @@ async def test_a_new_handoff_replaces_the_file_the_reminder_names() -> None:
 
     assert "/agents/6984/new.md" in session.submitted[1][0]
     assert "old.md" not in session.submitted[1][0]
+
+
+async def test_the_callers_note_rides_the_reminder_and_only_after_a_compaction() -> None:
+    session = FakeSession(during=[ContextCompacted(turn_id="t1")])
+    file = Path("/agents/6984/meiva_instructions.md")
+    bridge = make_bridge(session, handoff=handoff().with_reference_file(file))
+    note = 'Questions you asked the user that are still unanswered (x): #4 "Why?"'
+
+    _ = await run_turn(bridge, "one", key="inbound-1", compaction_note=note)
+    assert bridge.context_compacted
+    session._during = ()
+    _ = await run_turn(bridge, "two", key="inbound-2", compaction_note=note)
+    assert not bridge.context_compacted
+    _ = await run_turn(bridge, "three", key="inbound-3", compaction_note=note)
+
+    assert [text for text, _, _ in session.submitted][1:] == [
+        f"{compaction_reminder(file)}\n\n{note}\n\ntwo",
+        "three",
+    ]
