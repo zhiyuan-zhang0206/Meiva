@@ -8,6 +8,7 @@ from pathlib import Path
 from base.host.boundary.json_values import is_object_dict, is_object_list
 from base.host.boundary.untyped import object_of
 from base.host.env.harness_binaries import resolve_user_home
+from base.lm.harness.antigravity.subagents import INVOKE_SUBAGENT
 from base.lm.harness.events import (
     AssistantText,
     BridgeEvent,
@@ -110,6 +111,12 @@ def _map_tool_step(
     info = _mapping(update.get("tool_info"))
     name = _text(update.get("tool_name")) or _text(info.get("name")) or "unknown"
     tool_use_id = f"{turn_id}#{update.get('step_index', 0)}"
+    if name == INVOKE_SUBAGENT:
+        # meiva:note
+        # The stream shows the call's `tool` step as ACTIVE and never DONE (the `subagent` steps after it carry
+        # nothing). `SubagentReader` writes the call, with its child's conversation id and its output.
+        # meiva:link base/lm/harness/docs/subagent-text.md
+        return ()
     if state == "ACTIVE":
         params = dict(_mapping(info.get("parameters")))
         if conversation_id:

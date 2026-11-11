@@ -271,3 +271,18 @@ def test_tool_step_prefers_untruncated_transcript_args_over_truncated_stdout_par
     assert len(done_events) == 1
     assert isinstance(done_events[0], ToolResult)
     assert done_events[0].content == "full output " + ("B" * 1200)
+
+
+# meiva:note
+# Recorded on agy 1.5.5: the stream shows the call ACTIVE and never DONE. The reader writes the call
+# with the child's conversation id, so a stream copy would be a second call that never gets a result.
+def test_the_streams_invoke_subagent_step_is_left_to_the_subagent_reader() -> None:
+    active = {
+        "step_index": 2,
+        "state": "ACTIVE",
+        "step_type": "tool",
+        "tool_name": "invoke_subagent",
+        "tool_info": {"name": "invoke_subagent", "parameters": {"Role": "Worker A"}},
+    }
+    assert map_step_update(active, turn_id="turn-1") == ()
+    assert map_step_update({**active, "state": "DONE"}, turn_id="turn-1") == ()
