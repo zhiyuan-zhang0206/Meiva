@@ -133,7 +133,7 @@ def stage_open_questions(conn: psycopg.Connection, agent_id: int, *, open_before
     if row is None or not isinstance(row[0], int):
         raise TypeError("open question summary must carry a count")
     open_after = row[0]
-    first_title: object = row[1]
+    first_title = row[1] if isinstance(row[1], str) else None
     if open_after == open_before:
         return
     label = agent_label(conn, agent_id)

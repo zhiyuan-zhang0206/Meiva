@@ -2,6 +2,7 @@ from datetime import UTC, datetime
 
 from pydantic import BaseModel, TypeAdapter
 
+from base.api_contracts.question import QuestionType, TextQuestion
 from gateway.agents.schemas import (
     AgentRow,
     QuestionItem,
@@ -57,7 +58,7 @@ def test_question_item_wire_shape() -> None:
         title="deploy?",
         content="A) yes\nB) no",
         created_at=t,
-        question={"type": "text"},
+        question=TextQuestion(type=QuestionType.TEXT),
         resolved_at=None,
         resolution=None,
         reply=None,
@@ -82,5 +83,5 @@ def test_question_item_wire_shape() -> None:
     assert d["resolved_at"] is None
     assert d["resolution"] is None
     assert d["reply"] is None
-    assert d["question"] is None
+    assert d["question"] == {"type": "text"}
     assert d["answer"] is None

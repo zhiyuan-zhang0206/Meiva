@@ -4,7 +4,7 @@ from uuid import uuid4
 import psycopg
 import pytest
 from fastapi.testclient import TestClient
-from httpx import Response
+from httpx2 import Response
 from psycopg.types.json import Jsonb
 
 from base.api_contracts.idempotency import keyed_headers
@@ -91,11 +91,12 @@ def test_an_empty_or_invalid_ask_inserts_nothing(
     client: TestClient, db_conn: psycopg.Connection
 ) -> None:
     agent = seed_agent(db_conn)
-    for body in (
+    bodies: list[dict[str, object]] = [
         {"questions": []},
         {"questions": [{"title": "ok", "question": TEXT}, {"title": " ", "question": TEXT}]},
         {"questions": [{"title": "legacy", "question": QUESTION | {"allow_other": True}}]},
-    ):
+    ]
+    for body in bodies:
         response = client.post(
             f"/api/agents/{agent}/asks", json=body, headers=keyed_headers(str(uuid4()))
         )
