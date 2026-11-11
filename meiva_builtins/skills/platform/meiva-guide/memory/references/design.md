@@ -16,9 +16,10 @@ write only with the user's approval.
   state, not memory.
 - **Personal notes**: each agent's own durable state in its workspace
   (`workspaces/<agent_id>/memory/`), maintained by that agent and visible only
-  to it. Its `MEMORY.md` is the agent's index. `INHERIT.md` (plus optional
-  `inherit/<slug>.md`) is the one personal file passed to descendants the agent
-  spawns on the same machine.
+  to it. Its `MEMORY.md` is the agent's index. `INHERIT.md` is the one personal
+  file injected into descendants the agent spawns on the same machine; optional
+  detail files under `inherit/<slug>.md` are not injected, descendants read them
+  on demand.
 - **Vault**: the Git repository that holds the pool (`$MEIVA_HOME/vault`). Notes
   live in its `memory/` subtree; original evidence (rulings, papers, long
   documents) sits in sibling `sources/`, `papers/` and `repos/` directories that
@@ -81,10 +82,13 @@ injected on demand (passive recall); a standalone agent uses
 ## Sync between machines
 
 By default the Vault syncs through a private Git remote
-(`MEIVA_MEMORY_REMOTE`): each machine publishes its changes from an isolated
-worktree as a pull request, the arbiter merges validated ones into `main`, and
-`meiva memory refresh` brings the gateway checkout up to date. Direct commits to
-`main` in the shared checkout are refused. With `MEIVA_MEMORY_KEEP_LOCAL` the
+(`MEIVA_MEMORY_REMOTE`): each machine's authoring checkout (`$MEIVA_HOME/vault`)
+sits on its own `machine-<name>` branch (`main` only on a gateway-only unit), and
+the steward script pushes that branch and opens a pull request. The arbiter
+merges validated ones into `main` (Dream itself works in a temporary worktree),
+and `meiva memory refresh` brings the gateway checkout, which is on `main`, up to
+date. The commit hook checks size caps and runs `validate.py`; it does not
+refuse commits by branch. With `MEIVA_MEMORY_KEEP_LOCAL` the
 pool has no remote and its notes never leave the machine. Because of this, a
 note may take up to about a day to appear on another machine.
 
