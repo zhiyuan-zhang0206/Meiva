@@ -30,6 +30,7 @@ from .plan.old_target import (
     unfetched_old_reason,
 )
 from .plan.recovery import Recovery, recovery_action, recovery_report
+from .plan.root_generation import root_check, root_check_script, root_is_kept
 from .plan.stop_wave import StopChoices, StopStep, stop_steps
 from .plan.stored_schedules import schedule_check
 from .plan.wave_order import start_order
@@ -169,6 +170,34 @@ def _stored_schedules(s: Session, args: FleetArgs, new: str) -> None:
         s.say(note)
     if check.refusal is not None:
         raise RefusedError(check.refusal)
+
+
+# meiva:note
+# Before anything stops: could the root each host keeps serve NEW? A start over a live root of
+# another generation is refused, and `up` only meets that refusal after every service stopped.
+# Runs under `--dry-run` too (the check fetches NEW's objects and nothing else, to answer it).
+# meiva:link cli/docs/fleet-update-window/fleet-update-window.md
+def _kept_roots(s: Session, args: FleetArgs, new: str) -> None:
+    chosen = _chosen(args)
+    if not root_is_kept(shell=chosen.shell, kept=chosen.kept):
+        return
+    script = root_check_script(
+        program_text(VERIFY_SCRIPTS / "fleet_pre_root_check.sh"),
+        new=new,
+        selection=args.selection,
+        names=args.named.get(args.selection, ()),
+    )
+    hosts = start_order(args.gateway, tuple(args.runner))
+    outputs = s.run_all(hosts, lambda alias: s.run(alias, script, effect=False))
+    refusals: list[str] = []
+    for alias, output in zip(hosts, outputs, strict=True):
+        check = root_check(alias, output, new=new)
+        for note in check.notes:
+            s.say(note)
+        if check.refusal is not None:
+            refusals.append(check.refusal)
+    if refusals:
+        raise RefusedError("refused: " + "; ".join(refusals))
 
 
 def _restart(s: Session, args: FleetArgs, alias: str) -> None:
@@ -312,6 +341,7 @@ def down(s: Session, args: FleetArgs, resolved_new: str | None) -> None:
     pre = _preflight(s, args, new)
     if pre.reasons:
         raise RefusedError("refused: " + "; ".join(pre.reasons))
+    _kept_roots(s, args, new)
     _stored_schedules(s, args, new)
     hosts = start_order(args.gateway, tuple(args.runner))
     s.run_all(hosts, lambda alias: s.run(alias, prestage_command(new)))

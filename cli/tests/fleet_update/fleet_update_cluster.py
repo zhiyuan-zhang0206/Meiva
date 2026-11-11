@@ -155,7 +155,7 @@ def ssh_on_path(bin_dir: Path, script: Path) -> Path:
 # `_IDLE` record per alias plus `os` and `head`, and the roster's `names`, `silent`, `hidden`,
 # `laptop`); what a test stages (`fail`, `stop_fails`, `stop_fails_leaves_up`, `recover_fails`,
 # `output`, `incomplete`, `roster_reply`, `roster_lag`, `lease_reply`, `lease_rc`,
-# `silence_reply`, `stored_schedules`, `barriers`); what the run reports (`effects`, `commands`,
+# `silence_reply`, `stored_schedules`, `root_checks`, `barriers`); what the run reports (`effects`, `commands`,
 # `run_started_at`, `roster_reads`, `lease_reads`, `silence_open`, `silence_hours`,
 # `silence_comment`, `violations`); and the healthy baseline every host reports (`host_up`,
 # `journal`, `journal_after_stop`, `helper_hash`, `helper_cert_root`).
@@ -185,6 +185,7 @@ class Cluster:
         self.fail: dict[tuple[str, str], int] = {}
         self.output = ""
         self.stored_schedules: tuple[int, list[str]] = (0, [])
+        self.root_checks: dict[str, tuple[int, str]] = {}
         self.roster_lag = 0
         self.roster_reply: str | None = None
         self.incomplete: dict[str, str] = {}
@@ -247,6 +248,7 @@ class Cluster:
             "fail": {f"{kind}|{alias}": rc for (kind, alias), rc in self.fail.items()},
             "output": self.output,
             "stored_schedules": list(self.stored_schedules),
+            "root_checks": {alias: list(answer) for alias, answer in self.root_checks.items()},
             "roster_lag": self.roster_lag,
             "roster_reply": self.roster_reply,
             "incomplete": self.incomplete,

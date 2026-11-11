@@ -456,7 +456,8 @@ values, and a missing or conflicting one exits 2 with all of them listed before
 any host is touched. The stop and start choices are forwarded unchanged to each
 host's `meiva stop --yes` / `meiva start`; `--keep-infra|--stop-infra` goes to the
 gateway's stop only. Choose what survives the window yourself — the fleet does
-not compare your choices with the diff. A complete command:
+not compare your choices with the diff, except that a kept root which NEW's start could not reuse
+refuses the window before anything stops. A complete command:
 
 ```bash
 .venv/bin/meiva update run --channel latest \
@@ -529,8 +530,12 @@ half, use the separate commands:
   when the hosts disagree on HEAD, when `.python-version` changes under
   `--refuse-python-change`, or when it runs inside an Meiva agent's shell. It
   prints `git diff --stat OLD..NEW` over migrations, helper sources and locks,
-  fetches NEW on every host, then — still before anything stops, and also under
-  `--dry-run` — runs NEW's `meiva schedules verify` against the running gateway's
+  fetches NEW on every host and, when the stop choices keep the root (`--keep-shell-sessions` or
+  `--keep-service`), asks each host — still before anything stops, and also under `--dry-run`, where
+  it fetches NEW's objects for the purpose — whether NEW's `meiva start` could reuse the running root;
+  a host whose root has other launch inputs refuses the window (exit 2) and the message says to
+  choose `--close-shell-sessions` with `--keep-no-services` instead. Then — still before anything
+  stops, and also under `--dry-run` — it runs NEW's `meiva schedules verify` against the running gateway's
   schedule table (every stored script, agent-written ones included) from a
   throwaway worktree of NEW at `$HOME/.meiva/pre-update-verify` on the host's current
   interpreter. The table is read by the home's own (OLD) source checkout — the only code

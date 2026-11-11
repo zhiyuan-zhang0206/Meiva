@@ -154,7 +154,7 @@ def test_the_dry_run_of_down_reports_a_red_without_changing_anything(
     cluster.stored_schedules = (1, [_RED_ROW])
     assert run("down", "--dry-run") == 0
     assert _RED_ROW in capsys.readouterr().out
-    assert [k for k, _ in cluster.effects] == ["pre-verify"]
+    assert [k for k, _ in cluster.effects if k != "root-check"] == ["pre-verify"]
 
 
 def test_packages_refresh_reports_and_never_forces(

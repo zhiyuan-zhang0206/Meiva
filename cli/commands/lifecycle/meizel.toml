@@ -1,7 +1,8 @@
-exports = ["converge_host.py", "lgtm_toggle.py", "root_driver.py", "root_units.py", "start", "status", "stop", "tests"]
+exports = ["converge_host.py", "lgtm_toggle.py", "live_generation.py", "root_driver.py", "root_units.py", "start", "status", "stop", "tests"]
 
 [uses]
 "lgtm_toggle.py" = ["start"]
+"live_generation.py" = ["root_driver.py", "start"]
 "root_driver.py" = ["root_control", "root_units.py"]
 "root_units.py" = ["root_control"]
 "root_readiness.py" = ["root_control", "root_driver.py"]
@@ -9,4 +10,4 @@ exports = ["converge_host.py", "lgtm_toggle.py", "root_driver.py", "root_units.p
 "status" = ["root_control", "root_driver.py"]
 "stop" = ["root_control", "root_driver.py", "root_readiness.py", "stand_down.py", "start"]
 "stand_down.py" = []
-"tests" = ["converge_host.py", "lgtm_toggle.py", "root_control", "root_driver.py", "root_readiness.py", "stand_down.py", "start", "status", "stop"]
+"tests" = ["converge_host.py", "lgtm_toggle.py", "live_generation.py", "root_control", "root_driver.py", "root_readiness.py", "stand_down.py", "start", "status", "stop"]
