@@ -7,6 +7,7 @@ import json
 import os
 import socket
 import stat
+from collections.abc import Callable
 from dataclasses import replace
 from pathlib import Path
 
@@ -28,7 +29,7 @@ from cli.commands.converge.plans.shell_rc import (
     with_zshenv_block,
 )
 from cli.commands.converge.redis_bridge import retire_launchd_redis_bridge
-from cli.commands.converge.spec import ConvergeCtx
+from cli.commands.converge.spec import ConvergeCtx, ConvergeStep
 from cli.commands.lifecycle import converge_host
 
 # meiva:note
@@ -213,6 +214,75 @@ def test_the_session_record_migration_runs_in_the_converge_table_after_the_skele
     assert (
         names.index("harness session records layout") == names.index("$MEIVA_HOME dir skeleton") + 1
     )
+
+
+# meiva:note
+# What a start that finds the root running leaves out of the table is declared at the step, each
+# with its reason; everything else runs there. Adding a step does not add it to this list.
+def test_a_live_root_runs_the_whole_table_except_the_steps_that_name_a_reason() -> None:
+    table = converge_host.CONVERGE_STEPS
+    omitted = [step.name for step in table if step.skipped_while_root_runs]
+
+    assert omitted == [
+        "one DB URL + pgbouncer binary (when enabled)",
+        "permissions helper build + sign + load",
+    ]
+    assert [step.name for step in converge_host.live_root_steps(table)] == [
+        step.name for step in table if step.name not in omitted
+    ]
+    assert "harness session records layout" in {
+        s.name for s in converge_host.live_root_steps(table)
+    }
+
+
+def test_the_steps_a_live_root_omits_do_not_run_and_the_rest_do(ctx: ConvergeCtx) -> None:
+    ran: list[str] = []
+
+    def record(name: str) -> Callable[[ConvergeCtx], None]:
+        return lambda _ctx: ran.append(name)
+
+    table = (
+        ConvergeStep("always", record("always")),
+        ConvergeStep(
+            "needs a stopped root", record("needs a stopped root"), skipped_while_root_runs="why"
+        ),
+        ConvergeStep("also always", record("also always")),
+    )
+
+    converge_host.run_converge(
+        ctx, converge_host.live_root_steps(table), prod_install=False, partial=True
+    )
+
+    assert ran == ["always", "also always"]
+
+
+# meiva:note
+# A start that found the root running runs a subset (`partial`): a clean run clears the
+# incomplete marker only when it names a step that ran, since the rest are still unapplied.
+@pytest.mark.parametrize(
+    ("recorded", "cleared"),
+    [("ran", True), ("omitted", False)],
+)
+def test_a_clean_partial_converge_clears_only_the_marker_of_a_step_it_ran(
+    ctx: ConvergeCtx, recorded: str, cleared: bool
+) -> None:
+    from datetime import UTC, datetime
+
+    from cli.commands.converge import incomplete
+
+    incomplete.record_incomplete(
+        ctx.meiva_home, step=recorded, error="boom", now=datetime(2026, 11, 11, tzinfo=UTC)
+    )
+    table = (
+        ConvergeStep("ran", lambda _ctx: None),
+        ConvergeStep("omitted", lambda _ctx: None, skipped_while_root_runs="why"),
+    )
+
+    converge_host.run_converge(
+        ctx, converge_host.live_root_steps(table), prod_install=True, partial=True
+    )
+
+    assert (incomplete.read_incomplete(ctx.meiva_home) is None) is cleared
 
 
 def test_the_session_record_migration_step_converts_the_homes_records(

@@ -45,8 +45,8 @@ def test_runners_stop_first_and_start_last(
         kinds.index("fetch") < kinds.index("prestage") < kinds.index("stop") < kinds.index("switch")
     )
     assert set(_effect_aliases(cluster, "prestage")) == {"gw", "mac", "lin"}
-    assert kinds[-7:-4] == ["refresh"] * 3
-    assert set(kinds[-4:]) == {"schedules-verify", "plugins-verify"}
+    assert kinds[-10:-7] == ["refresh"] * 3
+    assert set(kinds[-7:]) == {"schedules-verify", "plugins-verify", "sessions-verify"}
     assert set(_effect_aliases(cluster, "refresh")) == {"gw", "mac", "lin"}
     assert all(h["up"] and h["head"] == cluster.new for h in cluster.hosts.values())
     assert not cluster.silence_open

@@ -12,7 +12,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import assert_never
 
-from cli.commands.converge.incomplete import clear_incomplete
+from cli.commands.converge.incomplete import clear_incomplete, read_incomplete
 from cli.commands.converge.incomplete import record_incomplete as record_incomplete_marker
 from cli.commands.converge.plans.step_selection import RunStep, SkipStep, StepScope, plan_steps
 from cli.commands.converge.spec import ConvergeAdvisoryError, ConvergeCtx, ConvergeStep
@@ -26,7 +26,17 @@ from cli.commands.converge.spec import ConvergeAdvisoryError, ConvergeCtx, Conve
 # pinned version could not be installed) aborted every converge on the ubuntu node before the
 # OS jobs were registered, and a cold start returns 1 at the converge step, so the host could
 # not come up either (task #6233).
-def run_converge(ctx: ConvergeCtx, steps: tuple[ConvergeStep, ...], *, prod_install: bool) -> None:
+#
+# `partial` says `steps` is a subset of the table (a start that found the root running omits the
+# `skipped_while_root_runs` steps): a clean partial run clears the incomplete marker only when the step
+# it names was among those run, since the steps it left out are still unapplied.
+def run_converge(
+    ctx: ConvergeCtx,
+    steps: tuple[ConvergeStep, ...],
+    *,
+    prod_install: bool,
+    partial: bool = False,
+) -> None:
     decisions = plan_steps(
         tuple(
             StepScope(
@@ -40,7 +50,14 @@ def run_converge(ctx: ConvergeCtx, steps: tuple[ConvergeStep, ...], *, prod_inst
     )
     print("\n→ converge host")
     blocking, advisory, stopped_at = _apply_steps(ctx, steps, decisions)
-    _judge_failures(ctx, blocking, advisory, stopped_at=stopped_at, prod_install=prod_install)
+    _judge_failures(
+        ctx,
+        blocking,
+        advisory,
+        stopped_at=stopped_at,
+        prod_install=prod_install,
+        cleared_steps=frozenset(step.name for step in steps) if partial else None,
+    )
 
 
 # meiva:note
@@ -95,6 +112,7 @@ def _judge_failures(
     *,
     stopped_at: str,
     prod_install: bool,
+    cleared_steps: frozenset[str] | None,
 ) -> None:
     if blocking:
         record_incomplete(
@@ -105,7 +123,9 @@ def _judge_failures(
             now=ctx.clock.now(),
         )
     elif prod_install:
-        clear_incomplete(ctx.meiva_home)
+        recorded = read_incomplete(ctx.meiva_home)
+        if cleared_steps is None or (recorded is not None and recorded.step in cleared_steps):
+            clear_incomplete(ctx.meiva_home)
     failed = blocking + advisory
     if failed:
         tail = (

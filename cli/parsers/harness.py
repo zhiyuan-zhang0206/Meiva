@@ -28,6 +28,13 @@ def _h_harness_exec(args: argparse.Namespace) -> int:
     )
 
 
+def _h_harness_verify_sessions(args: argparse.Namespace) -> int:
+    from cli.commands.harness import cmd_harness_verify_sessions
+    from cli.database.runtime import runtime_of
+
+    return cmd_harness_verify_sessions(home=runtime_of(args).home)
+
+
 def add_harness_parser(sub: argparse._SubParsersAction[argparse.ArgumentParser]) -> None:
     harness_p = sub.add_parser(
         "harness",
@@ -61,3 +68,9 @@ def add_harness_parser(sub: argparse._SubParsersAction[argparse.ArgumentParser])
         help="expected provider session id; refuses a handle issued for another session",
     )
     exec_p.set_defaults(func=_h_harness_exec)
+
+    verify_p = harness_sub.add_parser(
+        "verify-sessions",
+        help="fail while a session record of this home is in a layout the code cannot read",
+    )
+    verify_p.set_defaults(func=_h_harness_verify_sessions)

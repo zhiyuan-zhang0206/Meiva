@@ -1,8 +1,9 @@
 # meiva:note
 # `meiva start` over a live application root, end to end against real resources.
 #
-# A running root with the requested generation is only inspected: nothing converges, migrates or
-# launches again, and the start reports readiness. What the plans decide is asserted in
+# A running root with the requested generation is not launched again and no storage is prepared or
+# migrated; the host converge table still runs (minus the steps that cannot run while the root
+# does), and the start reports readiness. What the plans decide is asserted in
 # `../start_plans`; these tests show the shell dials the root, runs the plans in order, and
 # publishes serving only after the readiness verdict. The root is a real control socket
 # (`run.root`), the schema check and the machine registration use the suite's Postgres.
@@ -16,6 +17,7 @@ from pathlib import Path
 import psycopg
 import pytest
 
+from base import paths
 from base.deploy.lifecycle import home_lifecycle_locks, launch_failures, start_serving
 from base.host.boundary.json_values import is_object_dict
 from base.host.boundary.untyped import object_of
@@ -80,9 +82,8 @@ def test_an_identical_live_generation_is_reused_and_the_start_serves(
     assert run.serving_published
     assert gateway.requests, "a pure runner probes its gateway before launching"
     assert ("up", "pty-sessions") not in root.calls, "a running unit is not launched again"
-    assert _entries_besides_the_lifecycle_lock(run.home) == ["plugins", "run", "running_sha"], (
-        "nothing converged beyond the start's own bookmark"
-    )
+    assert "run" in _entries_besides_the_lifecycle_lock(run.home)
+    assert not (run.home / "pgdata").exists(), "no storage is prepared"
     lock = home_lifecycle_locks.lifecycle_lock_path(run.home)
     holder = object_of(json.loads, home_lifecycle_locks.holder_path(lock).read_text())
     assert is_object_dict(holder), "the lock holder is a JSON object"
@@ -91,6 +92,74 @@ def test_an_identical_live_generation_is_reused_and_the_start_serves(
     out = capsys.readouterr().out
     assert "roles = agent-runner, machine = start-test" in out
     assert "probe gateway" in out
+
+
+def _single_slot_record(home: Path, agent_id: int) -> Path:
+    sessions = paths.harness_sessions_dir(home=home)
+    sessions.mkdir(parents=True)
+    path = sessions / f"{agent_id}.json"
+    path.write_text(
+        json.dumps(
+            {
+                "agent_id": agent_id,
+                "session_id": "s",
+                "cwd": "/w",
+                "model": "m",
+                "harness": "codex",
+                "created_at": "t",
+                "updated_at": "t",
+            }
+        ),
+        encoding="utf-8",
+    )
+    return path
+
+
+# meiva:note
+# 2026-11-11: runners whose root survived the update (`--keep-shell-sessions`) took this path,
+# which converged nothing, and the new code then refused every record still in the old layout.
+# The live start runs the converge table: the migration and the idempotent preparation around it.
+def test_a_live_root_start_runs_the_converge_table(
+    start_run: StartRun, capsys: pytest.CaptureFixture[str]
+) -> None:
+    run = start_run
+    with gateway_listener() as gateway:
+        run.declare(gateway=False, agent_runner=True, gateway_url=gateway.url)
+        generation = run.generation(RUNNER, run.roster(RUNNER, only=("pty-sessions",)))
+        row = _row(run, RUNNER, "pty-sessions")
+        old = _single_slot_record(run.home, 7509)
+
+        with run.root([row], launch_digest=generation.launch_digest):
+            assert run.start(only=("pty-sessions",)) == 0
+
+    assert not old.exists()
+    assert [p.name for p in old.parent.iterdir()] == ["7509.codex.json"]
+    out = capsys.readouterr().out
+    assert "harness session records: migrated 1" in out
+    assert "✓ harness session records layout" in out
+    assert "✓ $MEIVA_HOME dir skeleton" in out
+    assert "one DB URL + pgbouncer" not in out, (
+        "a step that cannot run under a live root is omitted"
+    )
+    assert run.serving_published
+
+
+def test_a_live_root_start_fails_when_a_blocking_step_fails(
+    start_run: StartRun, capsys: pytest.CaptureFixture[str]
+) -> None:
+    run = start_run
+    with gateway_listener() as gateway:
+        run.declare(gateway=False, agent_runner=True, gateway_url=gateway.url)
+        generation = run.generation(RUNNER, run.roster(RUNNER, only=("pty-sessions",)))
+        row = _row(run, RUNNER, "pty-sessions")
+        old = _single_slot_record(run.home, 7509)
+        old.write_text("not json", encoding="utf-8")
+
+        with run.root([row], launch_digest=generation.launch_digest):
+            assert run.start(only=("pty-sessions",)) == 1
+
+    assert not run.serving_published
+    assert "7509.json is not valid JSON" in capsys.readouterr().err
 
 
 def test_a_gateway_host_does_not_probe_a_gateway_it_is(

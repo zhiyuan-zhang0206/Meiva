@@ -482,7 +482,15 @@ before opening any SSH session; see [host versioning](engineering/host-versionin
 `meiva-root`'s launch digest: each child service is spawned as a fresh OS subprocess that loads
 the checkout's current code when started, so `--keep-shell-sessions` keeps `pty-sessions`
 and `meiva-root` running across the checkout switch while `up` brings all stopped services back
-on the new code.
+on the new code. Because the root is not restarted, the start finds a live root; it still runs the
+whole host-converge table (the harness session-record migration, host preparation and OS jobs)
+except the steps that declare `skipped_while_root_runs`: `one DB URL + pgbouncer binary` (it
+rewrites `MEIVA_DB_URL` in `.env` onto a port the running data plane does not serve) and
+`permissions helper build + sign + load` (a loaded helper is only observed, and a changed one
+refuses until it is retired from outside; a full stop and start applies it). It does not prepare
+storage or apply migrations. Advisory failures are reported and do not fail the start; a blocking
+failure fails it. `meiva update up` additionally runs `meiva harness verify-sessions` on every
+host and fails while a session record is in a layout the code cannot read.
 
 On a home whose root is already running,
 `meiva start --only-service NAME` refuses when `reconcile=True` and units outside the selection
@@ -572,7 +580,9 @@ half, use the separate commands:
   reported — an info line names the differing files. Last, two read-only drift checks
   run, each to the end before `up` fails with the details in the
   log: `meiva schedules verify --no-notify` on the gateway (the stored schedule scripts, as
-  above) and `meiva plugins verify` on every listed host (each enabled plugin loads as an
+  above) and `meiva harness verify-sessions` on every listed host (fails while a session record is in a
+  layout the code cannot read; the cure is `meiva converge` on that host) and
+  `meiva plugins verify` on every listed host (each enabled plugin loads as an
   agent boot loads it; the loader skips a broken plugin, so this is what turns that into
   a failure — 2026-10-03: out-of-repo plugins calling deleted hook APIs). They come
   last so a red never skips the refresh. Only after they pass does `up`

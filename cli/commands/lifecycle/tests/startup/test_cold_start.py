@@ -25,7 +25,12 @@ from base.packages.extensions import registry as reg
 from base.paths import meiva_home
 from cli.commands.converge.spec import ConvergeStep
 from cli.commands.converge.steps import ensure_meiva_home_dirs
-from cli.commands.lifecycle.start.cold_start import ColdStart, prepare_cold_start
+from cli.commands.lifecycle.converge_host import live_root_steps
+from cli.commands.lifecycle.start.cold_start import (
+    ColdStart,
+    prepare_cold_start,
+    prepare_live_start,
+)
 from cli.commands.lifecycle.start.start_config import read_start_config
 from cli.commands.lifecycle.tests.startup.start_harness import StartRun
 
@@ -143,6 +148,40 @@ def test_an_advisory_converge_failure_still_prepares_the_host(
     captured = capsys.readouterr()
     assert "converge finished with warnings" in captured.err
     assert "npm prefix is root-owned" in captured.err
+
+
+# meiva:note
+# A start that finds the root running prepares the host the same way for the failures a step can
+# have: an advisory one is reported and the start goes on, and the step that names a reason not
+# to run under a live root does not run.
+def test_a_live_root_start_reports_an_advisory_failure_and_leaves_out_the_omitted_step(
+    start_run: StartRun, capsys: pytest.CaptureFixture[str]
+) -> None:
+    run = start_run
+    cold, _spans = _cold(run)
+    ran: list[str] = []
+
+    def boom(_ctx: object) -> None:
+        raise RuntimeError("bat is not installed")
+
+    def record(_ctx: object) -> None:
+        ran.append("pooler url")
+
+    table = (
+        ConvergeStep("CLI and GNU tools", boom, on_failure="advisory"),
+        ConvergeStep("$MEIVA_HOME dir skeleton", ensure_meiva_home_dirs),
+        ConvergeStep("pooler url", record, skipped_while_root_runs="the data plane is running"),
+    )
+    cold = dataclasses.replace(cold, converge_steps=live_root_steps(table), partial_converge=True)
+
+    rc = prepare_live_start(cold, run.roster(RUNNER, only=("pty-sessions",)))
+
+    assert rc == 0
+    assert ran == []
+    captured = capsys.readouterr()
+    assert "converge finished with warnings" in captured.err
+    assert "bat is not installed" in captured.err
+    assert "✓ $MEIVA_HOME dir skeleton" in captured.out
 
 
 _SKILL = """---

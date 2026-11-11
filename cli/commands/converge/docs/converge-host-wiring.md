@@ -1,5 +1,15 @@
 # Converge host wiring
 
+A start that finds the application root running (`--keep-shell-sessions` across an update)
+runs the converge table too, minus the steps that declare `skipped_while_root_runs`
+(`live_root_steps()`); it skips storage preparation and migrations, which need a stopped writer.
+Converge is the host's correctness guarantee, so a step runs there unless it names a concrete harm
+in the declaration. Today two do: `one DB URL + pgbouncer binary` and `permissions helper build +
+sign + load`; a full stop and start applies what they would. A migration step (for example the
+harness session records, which later record-field changes extend) therefore needs no marker to
+reach a live start. Advisory failures are reported without failing the start, a blocking one fails
+it, and a partial run clears the incomplete marker only when the step it names ran.
+
 Cold start passes its admitted service roster into preparation before publishing
 the desired service file. Service-specific steps require a selected consumer;
 host wiring and private data-plane preparation remain shared dependencies.

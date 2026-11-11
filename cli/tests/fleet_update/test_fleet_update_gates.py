@@ -49,6 +49,7 @@ def test_drift_checks_run_after_the_refresh(
     [
         (("schedules-verify", "gw"), "RED the schedules-verify detail from gw"),
         (("plugins-verify", "mac"), "RED the plugins-verify detail from mac"),
+        (("sessions-verify", "mac"), "RED the sessions-verify detail from mac"),
     ],
 )
 def test_a_red_drift_check_fails_up_with_its_detail(
@@ -66,6 +67,8 @@ def test_a_red_drift_check_fails_up_with_its_detail(
     assert "refresh" in {k for k, _ in cluster.effects}
     plugins = [a for k, a in cluster.effects if k == "plugins-verify"]
     assert len(plugins) == 3 and set(plugins) == {"gw", "mac", "lin"}
+    sessions = [a for k, a in cluster.effects if k == "sessions-verify"]
+    assert set(sessions) == {"gw", "mac", "lin"}, "every host's session records are checked"
 
 
 def test_every_red_drift_check_is_reported_not_only_the_first(

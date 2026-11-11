@@ -34,3 +34,11 @@ a file that is not a valid record fails the step naming the file. The registry h
 no read path for the old layout: while such a file remains, a load refuses and says
 to run `meiva converge`. The migration prints how many records it moved; a converged
 home has no `<agent_id>.json` files and prints nothing.
+
+The step is part of the converge table that every `meiva start` runs,
+also one that finds the application root still running (`--keep-shell-sessions`); on
+2026-11-11 only the cold-start path ran it and runners that kept their root were left with
+old-layout records. `meiva harness verify-sessions` lists every record the registry would
+refuse (old layout or unreadable); `meiva update up` runs it on every host. Any later change to
+the record's fields lands the same way: a migration inside this step, never a read path for
+the old shape.

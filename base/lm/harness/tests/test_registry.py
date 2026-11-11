@@ -7,7 +7,11 @@ from pathlib import Path
 import pytest
 
 from base.lm.harness import FileSessionRegistry, SessionRecord
-from base.lm.harness.registry import backfill_generation, migrate_single_slot_records
+from base.lm.harness.registry import (
+    backfill_generation,
+    migrate_single_slot_records,
+    unreadable_records,
+)
 
 HARNESS = "claude_code"
 
@@ -282,3 +286,20 @@ def test_converge_gives_an_older_record_generation_zero_once(tmp_path: Path) -> 
     assert backfill_generation(tmp_path / "sessions") == []
     loaded = registry.load(6984, harness=HARNESS)
     assert loaded is not None and loaded.generation == 0
+
+
+def test_a_home_with_a_single_slot_record_or_an_unreadable_one_is_reported(tmp_path: Path) -> None:
+    root = tmp_path / "sessions"
+    assert unreadable_records(root) == []
+    old = single_slot(root)
+    (root / "7.codex.json").write_text(json.dumps({"agent_id": 7}), encoding="utf-8")
+
+    problems = unreadable_records(root)
+
+    assert len(problems) == 2
+    assert f"{old}: single-slot layout" in problems
+    assert any("7.codex.json" in line and "misses" in line for line in problems)
+
+    _ = migrate_single_slot_records(root)
+    (root / "7.codex.json").unlink()
+    assert unreadable_records(root) == []
