@@ -254,6 +254,7 @@ above (or when its name is unregistered); otherwise it stays in the JSONL mirror
 | `llm_retry` | LLM retry sequence completion | observation | outcome, duration_seconds | — | events | — |
 | `reply_suggestion_gate` | reply suggestion gate probability | noise | — | — | events | — |
 | `reply_suggestion_gate_failed` | reply suggestion gate call failed | anomaly | — | — | events | — |
+| `reply_suggestion_model_key_missing` | reply suggestion model has no provider key, suggestions degrade to none | anomaly | — | — | events | — |
 | `reply_suggestion_draft_failed` | reply suggestion draft call failed | anomaly | — | — | events | — |
 | `reply_suggestion_draft_rejected` | reply suggestion draft empty or too long | noise | — | — | events | — |
 | `harness_cli_update_round` | one external harness CLI update round — status, updated/failed counts, and outcome details | observation | status, updated_count, failed_count, reason, outcomes | — | events | — |

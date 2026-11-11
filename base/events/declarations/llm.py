@@ -181,6 +181,11 @@ EVENTS: dict[str, EventSpec] = {
     "reply_suggestion_gate_failed": telemetry_event(
         "reply_suggestion_gate_failed", "reply suggestion gate call failed", tier="anomaly"
     ),
+    "reply_suggestion_model_key_missing": telemetry_event(
+        "reply_suggestion_model_key_missing",
+        "reply suggestion model has no provider key, suggestions degrade to none",
+        tier="anomaly",
+    ),
     "reply_suggestion_draft_failed": telemetry_event(
         "reply_suggestion_draft_failed", "reply suggestion draft call failed", tier="anomaly"
     ),

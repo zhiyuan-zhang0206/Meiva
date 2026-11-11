@@ -87,7 +87,7 @@ from real incidents; the concrete sizes and dates are illustrative.
   a stale session from before a rollout that the new gateway cannot adopt; a
   crash-looping script tripping the breaker (`error` is terminal — recovery is
   an explicit API restart/start, which relaunches and resets status).
-- Response: clear the stale session (`meiva shell kill` the `meiva-schedule-N`
+- Response: clear the stale session (`meiva.shell.sessions.kill(id)` on the `meiva-schedule-N`
   session, or close it through the pty-sessions service), `POST
   /api/schedules/{id}/restart`, verify `status='running'` and the next fire
   fires (check the runner's session log for "Firing:" + the downstream

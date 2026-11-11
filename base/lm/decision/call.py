@@ -30,7 +30,7 @@ from base.lm.catalog.decide.types import (
     estimate_tokens,
     question_text,
 )
-from base.lm.catalog.provider_keys import ProviderKeys
+from base.lm.catalog.provider_keys import MissingProviderKeyError, ProviderKeys
 from base.lm.usage import UsageFields, log_usage_fields
 
 DEFAULT_TIMEOUT_S = 30.0
@@ -69,7 +69,7 @@ async def decide(
     try:
         if provider.requires_key:
             keys.require(provider.key_env)
-    except RuntimeError as exc:
+    except MissingProviderKeyError as exc:
         raise DecisionKeyMissingError(str(exc)) from exc
     binding = provider.build(
         DecisionBuildContext(

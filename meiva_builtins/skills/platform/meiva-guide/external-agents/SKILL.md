@@ -9,7 +9,8 @@ Claude Code (`claude_code`), OpenAI Codex (`codex`), and Google Antigravity
 (`antigravity`) run as first-class Meiva agents alongside the built-in `meiva`
 runtime. Each external harness agent has its own `agent_id`, workspace
 (`$MEIVA_HOME/workspaces/<agent_id>`), timeline, inbox, and full `meiva.*` SDK
-surface (invoked from its shell via `meiva harness -c "..."`).
+surface (run from its shell with `meiva harness exec`, which reads one Python
+program from standard input or `--file`).
 
 `agent-host` owns a harness agent's turn lifecycle (`idling` / `running` /
 `terminated`), mid-turn steering, smooth drain, checkpointing, and resume
@@ -34,14 +35,14 @@ for row in meiva.agents.harness_availability():
     print(row.harness, row.status, row.binary, row.on_path, row.models, "|", row.reason)
 ```
 
-Spawn a fresh agent on `codex`, `claude_code`, or `antigravity` with the top-level
-`harness` keyword argument:
+Spawn a fresh agent on `codex`, `claude_code`, or `antigravity` with the
+`harness` argument; the other arguments are the ordinary spawn ones:
 
 ```python
 child_id = meiva.agents.spawn(
     prompt="Mission, required skill(s), and milestone report-back contract...",
     label="codex-auth-fix",
-    harness="codex",                # "codex" | "claude_code" | "antigravity" | "meiva"
+    harness="codex",                 # "meiva" (default) | "codex" | "claude_code" | "antigravity"
     config_overlay={
         "llm_model": "gpt-5.4",      # optional; must be supported by the chosen harness
         "reasoning_effort": "xhigh", # optional
@@ -49,10 +50,20 @@ child_id = meiva.agents.spawn(
 )
 ```
 
-From an attached harness shell:
+`meiva agents` has no `spawn` verb: creating an agent needs an acting agent
+identity, which the SDK takes from the agent (or attached harness session) that
+calls it. A shell outside Meiva either starts one from the console UI or asks an
+existing agent to spawn it (`meiva agents send <agent_id> "..." --source
+external_agent:<subject>`).
+
+From an attached harness shell, `meiva harness exec` reads the Python program from
+standard input:
 
 ```bash
-meiva harness -c 'import meiva; print(meiva.agents.spawn(prompt="<prompt>", label="codex-auth-fix", harness="codex", config_overlay={"llm_model": "gpt-5.4", "reasoning_effort": "xhigh"}))'
+meiva harness exec <<'PY'
+import meiva
+print(meiva.agents.spawn(prompt="<prompt>", label="codex-auth-fix", harness="codex"))
+PY
 ```
 
 ## Steering, Supervising, and Switching Harnesses
@@ -68,7 +79,7 @@ meiva harness -c 'import meiva; print(meiva.agents.spawn(prompt="<prompt>", labe
 - **Switch an existing agent's harness:** An `idling` or `terminated` agent can
   switch harnesses bidirectionally (`meiva` <-> external or external <-> external)
   via `meiva.agents.restart(agent_id, message="...", config_overlay={"harness": "claude_code"})`
-  (or `meiva agents restart <id> -m "..." --overlay harness=claude_code`). Follow
+  (or `meiva agents restart <id> -m "..." --config '{"harness": "claude_code"}'`). Follow
   the preconditions and handoff file contract in
   [agents](../agents/SKILL.md#switching-harnesses--handoff-process).
 

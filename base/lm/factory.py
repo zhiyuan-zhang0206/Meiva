@@ -440,8 +440,8 @@ def _metered(
 #
 # Raises:
 #     ValueError: model prefix did not match — prompts to add a branch.
-#     RuntimeError: a provider path needs its API key env; if missing,
-#         blows up immediately rather than reaching a server 401.
+#     MissingProviderKeyError (a RuntimeError): a provider path needs its API key env; if
+#         missing, blows up immediately rather than reaching a server 401.
 def build_chat_model(
     model: str,
     *,

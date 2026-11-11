@@ -364,6 +364,33 @@ async def test_a_missing_gate_key_degrades_like_any_decision_error(
     assert harness.wire.gate_receipts() == []
 
 
+async def test_a_missing_draft_key_degrades_and_warns_once_per_window(
+    make_harness: HarnessFactory, model_catalog: ModelCatalog, loguru_records: LogRecords
+) -> None:
+    draft_key = model_catalog.bindings["deepseek-"].key_env
+    keys = ProviderKeys({env: "sk-test" for env in model_catalog.key_envs if env != draft_key})
+    harness = make_harness(keys=keys)
+
+    results = [await harness.suggest(), await harness.suggest()]
+
+    assert [(r.suggestions, r.reason) for r in results] == [([], "generation_failed")] * 2
+    warnings = loguru_records.extras(event="reply_suggestion_model_key_missing")
+    assert [(w["stage"], w["suppressed_repeats"]) for w in warnings] == [("draft", 0)]
+
+
+async def test_a_missing_gate_key_warns_once_per_window(
+    make_harness: HarnessFactory, loguru_records: LogRecords
+) -> None:
+    harness = make_harness(keys=ProviderKeys({}))
+
+    await harness.suggest()
+    await harness.suggest()
+
+    warnings = loguru_records.extras(event="reply_suggestion_model_key_missing")
+    assert [w["stage"] for w in warnings] == ["gate"]
+    assert loguru_records.extras(event="reply_suggestion_gate_failed") == []
+
+
 @pytest.mark.parametrize("body", ["not JSON", "[]", '{"answers": {}}'])
 async def test_malformed_gate_responses_degrade_without_drafting(
     make_harness: HarnessFactory, body: str

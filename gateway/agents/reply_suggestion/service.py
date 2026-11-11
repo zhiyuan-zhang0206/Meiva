@@ -15,8 +15,14 @@ from base.db import Database
 from base.host.env.agent_slices import ModelOverrides
 from base.lm.call import extract_text
 from base.lm.catalog import ModelCatalog
-from base.lm.catalog.decide.types import AsyncTransport, DecisionError, Question, YesNo
-from base.lm.catalog.provider_keys import ProviderKeys
+from base.lm.catalog.decide.types import (
+    AsyncTransport,
+    DecisionError,
+    DecisionKeyMissingError,
+    Question,
+    YesNo,
+)
+from base.lm.catalog.provider_keys import MissingProviderKeyError, ProviderKeys
 from base.lm.compat.stop import StopCategory, classify_stop
 from base.lm.decision.call import decide
 from base.lm.effort import ReasoningEffort
@@ -27,6 +33,7 @@ from base.log import logger
 from gateway.agents.history.timeline import load_current_timeline_items
 from gateway.agents.reply_suggestion.cache import CACHE_ENTRIES, SuggestionCache
 from gateway.agents.reply_suggestion.context import SuggestionContext, read_context
+from gateway.agents.reply_suggestion.cooldown import WarningCooldown
 from gateway.agents.reply_suggestion.excerpt import (
     ConversationExcerpt,
     build_excerpt,
@@ -132,6 +139,7 @@ class ReplySuggestionService:
         self._llm_override = llm_override
         self._transport = transport
         self._cache = SuggestionCache(CACHE_ENTRIES)
+        self._key_warnings = WarningCooldown()
 
     async def suggest(
         self,
@@ -204,6 +212,9 @@ class ReplySuggestionService:
             useful = await self._useful_reply_probability(
                 agent_id, excerpt, policy, catalog, keys, now=lambda: now
             )
+        except DecisionKeyMissingError:
+            self._warn_key_missing(agent_id, policy.gate_model, "gate", now=now)
+            return _none("gate_failed")
         except DecisionError:
             logger.opt(exception=True).warning(
                 "reply suggestion gate failed for agent {agent_id}",
@@ -222,6 +233,23 @@ class ReplySuggestionService:
         if refusal is not None:
             return _none(refusal)
         return await self._draft(agent_id, excerpt, policy, catalog, keys, now=now)
+
+    # meiva:note
+    # A missing provider key is a standing misconfiguration, not a per-request event: the first
+    # request in a window warns (with the repeats it hides), the rest stay quiet.
+    def _warn_key_missing(self, agent_id: int, model: str, stage: str, *, now: datetime) -> None:
+        suppressed = self._key_warnings.admit(f"{stage}:{model}", now)
+        if suppressed is None:
+            return
+        logger.warning(
+            "reply suggestion {stage} model {model} has no provider key; suggestions are off "
+            "until it is configured",
+            event="reply_suggestion_model_key_missing",
+            agent_id=agent_id,
+            stage=stage,
+            model=model,
+            suppressed_repeats=suppressed,
+        )
 
     async def _useful_reply_probability(
         self,
@@ -258,9 +286,13 @@ class ReplySuggestionService:
         *,
         now: datetime,
     ) -> ReplySuggestionResponse:
-        chat = build_chat_model(
-            policy.model, catalog=catalog, keys=keys, **draft_model_options(self._llm_override)
-        )
+        try:
+            chat = build_chat_model(
+                policy.model, catalog=catalog, keys=keys, **draft_model_options(self._llm_override)
+            )
+        except MissingProviderKeyError:
+            self._warn_key_missing(agent_id, policy.model, "draft", now=now)
+            return _none("generation_failed")
         llm = chat.with_structured_output(
             DraftReplies.model_json_schema(), method="json_schema", strict=True, include_raw=True
         )

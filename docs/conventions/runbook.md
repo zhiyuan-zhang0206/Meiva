@@ -171,7 +171,7 @@ Application service commands, admitted PATH and process ancestry belong to
 [start identity](../../cli/docs/start_identity.md) and
 [root supervision](../../services/supervision/meiva_root/docs/meiva_root.md).
 Enumerate application services through `meiva status`; persistent shells through
-`meiva sessions list`. Idle and paused agent identities remain durable even when
+`meiva.shell.sessions.list()` (SDK; there is no CLI verb for it). Idle and paused agent identities remain durable even when
 no active turn task is running; see [agent runtime](../../agent/docs/agent-runtime/agent-runtime.md).
 
 PTY closure is best effort: known shell sessions close with bounded signals;

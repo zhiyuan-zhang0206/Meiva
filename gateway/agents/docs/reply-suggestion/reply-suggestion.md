@@ -64,6 +64,12 @@ simply not useful.
 
 A failed gate or draft is logged as a warning (`reply_suggestion_gate_failed`,
 `reply_suggestion_draft_failed`) and answered as above; failures are not cached.
+A gate or drafting model whose provider key is missing (`MissingProviderKeyError`, or the
+`DecisionKeyMissingError` the gate wraps it in) is a standing misconfiguration and degrades the
+same way (`gate_failed`, `generation_failed`). It warns `reply_suggestion_model_key_missing`
+once per model and stage every five minutes (`cooldown.py`; `suppressed_repeats` counts the
+hidden repeats) instead of once per page open. Memory recall that is unavailable never fails the
+request: the draft proceeds with a note saying no memory was read.
 Completed results (a draft or `not_useful`) are cached in process by agent and the
 combined bounded input identity (including feedback and recalled Memory), so several tabs share one generation.
 
@@ -98,7 +104,7 @@ can repair truncated JSON, which must not turn an unfinished reply into success.
 The per-call timeouts bound an enhancement whose late result is no longer useful.
 
 Code: `gateway/agents/reply_suggestion/` (`router.py`, `service.py`, `plan.py`, `cache.py`,
-`excerpt.py`, `configuration.py`).
+`cooldown.py`, `excerpt.py`, `configuration.py`).
 
 ## Verification scope
 

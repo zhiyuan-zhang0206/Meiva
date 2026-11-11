@@ -50,7 +50,7 @@ copied from an old doc or an old spawn; list the current roster first:
   embeddings price from the archive alone). The frontend picker and
   `/api/models` both derive from this registry, so the registry is the only
   place a model is born.
-- There is no dedicated `meiva models` CLI yet — the API above or the registry
+- There is no dedicated models CLI yet — the API above or the registry
   is how an agent lists models.
 
 A config naming an id that is not on the roster fails spawn validation as an

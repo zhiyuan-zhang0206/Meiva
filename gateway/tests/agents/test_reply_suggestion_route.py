@@ -5,7 +5,9 @@ from __future__ import annotations
 
 from collections.abc import Callable, Iterator
 from contextlib import ExitStack
+from dataclasses import replace
 from pathlib import Path
+from types import MappingProxyType
 
 import psycopg
 import pytest
@@ -13,6 +15,9 @@ import pytest
 from base.db import Database
 from base.host.env.tests.env_files import unit_env_path
 from base.lm.catalog import ModelCatalog
+from base.lm.catalog.provider_contract import BuildContext
+from base.log.tests.log_records import LogRecords
+from base.log.tests.log_records import loguru_records as loguru_records
 from base.packages.tests.model_catalog import inert_keys
 from gateway.agents.reply_suggestion.tests.provider_wire import DraftReply, GateReply, ProviderWire
 from gateway.agents.reply_suggestion.tests.support import Harness
@@ -108,3 +113,44 @@ def test_the_route_does_not_swallow_an_unknown_agent(harness: Harness) -> None:
 
     assert response.status_code == 404
     assert response.json()["reason"] == "agent_not_found"
+
+
+def test_a_missing_draft_key_is_no_suggestion_not_a_server_error(
+    harness: Harness, loguru_records: LogRecords
+) -> None:
+    assert isinstance(harness.catalog, ModelCatalog)
+    drafting = harness.catalog.bindings["deepseek-"]
+
+    def build_without_key(context: BuildContext) -> object:
+        return context.keys.require("REPLY_SUGGESTION_TEST_UNSET_KEY")
+
+    unkeyed = replace(
+        harness.catalog,
+        bindings=MappingProxyType(
+            {**harness.catalog.bindings, "deepseek-": replace(drafting, build=build_without_key)}
+        ),
+    )
+
+    path = f"/api/agents/{harness.agent_id}/reply-suggestion"
+    with gateway_test_client(catalog=unkeyed) as client:
+        responses = [client.post(path), client.post(path)]
+
+    for response in responses:
+        assert response.status_code == 200
+        assert response.json() == {
+            "suggestions": [],
+            "reason": "generation_failed",
+            "offer_id": None,
+        }
+    warnings = loguru_records.extras(event="reply_suggestion_model_key_missing")
+    assert [extra["stage"] for extra in warnings] == ["draft"]
+
+
+def test_an_unavailable_memory_indexer_degrades_the_recall_not_the_request(
+    harness: Harness, loguru_records: LogRecords
+) -> None:
+    response = post(harness)
+
+    assert response.status_code == 200
+    assert response.json()["suggestions"]
+    assert "Reply suggestion memory recall unavailable" in loguru_records.messages("WARNING")
