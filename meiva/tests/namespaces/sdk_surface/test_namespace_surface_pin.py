@@ -77,7 +77,6 @@ _SURFACE: dict[str, list[str]] = {
 
 _TOP_LEVEL = [
     "agents",
-    "attach",
     "cwd",
     "files",
     "help",

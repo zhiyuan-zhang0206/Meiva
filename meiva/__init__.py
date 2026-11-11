@@ -313,7 +313,6 @@ extend._qualname = "meiva.extend"  # type: ignore[attr-defined]  # agent-facing 
 # the SDK install runs.
 __all_for_meiva__ = [
     "agents",
-    "attach",
     "cwd",
     "files",
     "help",
@@ -415,23 +414,3 @@ if (
     and boot.is_launched_process()
 ):
     ensure_plugins_loaded()
-
-
-def attach(handle: str | None = None) -> object:
-    """Bind this external process to the Meiva agent identity it was started as.
-
-    Call it with no argument: the handle comes from `MEIVA_HARNESS_HANDLE`, which the
-    bridge exported into this process. The call is idempotent — the first one
-    attaches, later ones return the same attachment — and every session's first
-    identity read does the same thing, so calling it explicitly is optional.
-
-    Raises:
-        RegistrationError: no handle in this process, or no session matches it.
-        HarnessAttachError: the session could not be attached (expired, ended,
-            another machine); the message carries the reason and says not to retry.
-        RuntimeError: this process already has an identity of its own.
-    """
-    from .self.harness import attach as attach_identity
-
-    _guard_default_logging()
-    return attach_identity(handle)

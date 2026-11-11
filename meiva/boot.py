@@ -723,7 +723,7 @@ def bind_launched_context() -> MeivaContext | None:
 # A provider harness runs the agent loop itself and exports a registration handle
 # instead of MEIVA_AGENT_ID, so every "is this an agent-launched child" test above
 # answers no. The attachment is made on the first read that needs an identity —
-# `meiva.context`, `meiva.self.AGENT_ID`, `meiva.attach`, a plugin namespace such as
+# `meiva.context`, `meiva.self.AGENT_ID`, any `meiva.agents` call, a plugin namespace such as
 # `meiva.tasks` — and never at import: attaching replays the agent's plugin-state
 # snapshot through the codec, which opens the database, and a provider runs a fresh
 # Python per tool call.

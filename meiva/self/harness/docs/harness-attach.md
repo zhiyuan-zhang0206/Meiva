@@ -2,7 +2,7 @@
 
 A provider harness runs the agent loop in its own process and cannot use the
 handoff document alone: `import meiva` in a bare interpreter fails, because every
-`meiva.*` call needs an initialized process pipeline. `meiva.attach()` gives that process a borrowed identity through
+`meiva.*` call needs an initialized process pipeline. The SDK gives that process a borrowed identity through
 [External attachment kernel](../../../../base/agents/context/external_attachment/README.md).
 
 | Step | What it does |
@@ -20,15 +20,12 @@ the process (context, boot, pid, clock) into `HarnessInputs`; the shell reads no
 asks the lineage and clock again at each SDK call, as expiry and ancestry are rechecked then. `open_attachment(handle)` reads its row via `registration_store`; `resolve_registration`
 requires its store.
 
-`meiva.attach()` is the public entry: with no argument it reads
-`MEIVA_HARNESS_HANDLE`, attaches once and returns the attachment. Every session's
-first identity read does the same, so the call is optional.
-
-The entry belongs to external harness processes. A native-harness agent's process already
-has its identity, so its `meiva.help()` does not list `meiva.attach` and calling it raises
-`RuntimeError` ("for external harness processes"); the profile that hides it is
-`NATIVE_HIDDEN_MEMBERS` (the mirror of `HARNESS_HIDDEN_SELF_MEMBERS`). The kernel itself never goes
-through the public name: the first-use borrow is `ensure_identity`.
+There is no public attach call. `MEIVA_HARNESS_HANDLE` is read once, on the first read that needs
+an identity (the table under "Reaching the SDK from inside the child"), through the internal
+`ensure_identity`; it attaches once and later reads reuse the attachment. A native-harness agent's
+process already has its identity and never reaches this path. When the borrow fails, that first
+read raises `HarnessAttachError` carrying the reason (see below), and later reads raise the
+same error without trying again.
 
 `meiva harness exec --file script.py` is the CLI around the same seam: it reads the
 script (or stdin as `-`) and runs it inside the attachment, with no bootstrap file in
@@ -38,7 +35,7 @@ the child's workspace.
 
 **No writer lives in this tree.** This package reads and validates a registration row; the
 bridge writes it (one row per started session, retired when the session ends), so a machine
-without that wiring answers `attach()` with `no harness session matches this handle`.
+without that wiring answers the first identity read with `no harness session matches this handle`.
 
 `FileRegistrationStore` owns the file format under
 `$MEIVA_HOME/harness/registrations/`: the agent id, the harness name, the
@@ -66,7 +63,7 @@ so a file would hand the token to the very agent it authorises.
 
 ## Reaching the SDK from inside the child
 
-The bridge cannot run `attach()` inside the provider's process, and the handoff
+The bridge cannot run the attachment inside the provider's process, and the handoff
 document cannot do it either, so the SDK makes the attachment itself — on the
 **first read that needs an identity**, never at `import meiva`:
 

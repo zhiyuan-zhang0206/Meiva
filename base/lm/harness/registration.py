@@ -31,7 +31,7 @@ HANDLE_ENV = "MEIVA_HARNESS_HANDLE"
 SecureRandom = NewType("SecureRandom", random.Random)
 
 # meiva:note
-# The one status a usable row carries. `meiva.attach()` refuses a row
+# The one status a usable row carries. the attachment refuses a row
 # that says anything else, and the reader owns that vocabulary: this module cannot import
 # it, because the SDK surface sits above `base`, so the word is repeated here and a test
 # pins the pair the moment both land.

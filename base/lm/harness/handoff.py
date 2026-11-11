@@ -75,8 +75,8 @@ class HarnessContribution:
 DEFAULT_ENTRIES: tuple[EntryPoint, ...] = (
     EntryPoint(
         "meiva",
-        "the cluster SDK for this session; `meiva.attach()` binds your identity, done for "
-        "you on first use — start at meiva.help()",
+        "the cluster SDK for this session; it binds your identity on first use — start at "
+        "meiva.help()",
     ),
     EntryPoint("meiva.agents", "spawn or message another agent, or read the one that briefed you"),
     EntryPoint(
