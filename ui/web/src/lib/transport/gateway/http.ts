@@ -25,6 +25,7 @@ export interface Http {
   readonly send: (path: string, init?: RequestInit) => Promise<Response>;
   readonly ok: <T>(res: Response) => Promise<T>;
   readonly accepted: (res: Response) => Promise<void>;
+  readonly okOrConflict: <T, C>(res: Response) => Promise<DecodedOrConflict<T, C>>;
   readonly rawJson: <T>(res: Response) => Promise<T>;
   readonly decoded: <T>(res: Response, decode: (status: number, body: unknown) => T) => Promise<T>;
   readonly jsonTimed: <T>(
@@ -37,6 +38,16 @@ export interface Http {
   readonly wait: (ms: number) => Promise<void>;
   readonly newOperationKey: () => string;
   readonly openUpload: () => UploadRequest;
+}
+
+// meiva:note
+// A 409 that carries a body the caller acts on (the keyed answer submission's latest open set) is a
+// result, not an error; every other status decodes exactly as `ok`.
+export type DecodedOrConflict<T, C> = { kind: "ok"; value: T } | { kind: "conflict"; body: C };
+
+function okOrConflict<T, C>(res: Response): Promise<DecodedOrConflict<T, C>> {
+  if (res.status === 409) return res.json().then((body: C) => ({ kind: "conflict" as const, body }));
+  return ok<T>(res).then((value) => ({ kind: "ok" as const, value }));
 }
 
 function ok<T>(res: Response): Promise<T> {
@@ -133,6 +144,7 @@ export function createHttp(transport: HttpTransport, base: string, telemetry: Ht
     send,
     ok,
     accepted,
+    okOrConflict,
     rawJson,
     decoded,
     jsonTimed,

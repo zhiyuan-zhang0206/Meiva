@@ -1,15 +1,17 @@
+from collections.abc import Mapping, Sequence
 from uuid import uuid4
 
 import psycopg
 import pytest
 from fastapi.testclient import TestClient
+from httpx import Response
 from psycopg.types.json import Jsonb
 
 from base.api_contracts.idempotency import keyed_headers
 from gateway.tests.events.test_questions_endpoint import answers_path, seed_agent
 from gateway.tests.receipts.test_guarded_question_resolution import client as client
 
-QUESTION = {
+QUESTION: dict[str, object] = {
     "type": "multi_select",
     "options": [
         {"id": "web", "label": "Web", "description": None},
@@ -17,7 +19,7 @@ QUESTION = {
     ],
     "allow_other": False,
 }
-TEXT = {"type": "text"}
+TEXT: dict[str, object] = {"type": "text"}
 
 
 def ask(client: TestClient, agent: int, *items: tuple[str, dict[str, object]]) -> list[int]:
@@ -38,9 +40,9 @@ def submit(
     client: TestClient,
     agent: int,
     expected: list[int],
-    results: list[dict[str, object]],
+    results: Sequence[Mapping[str, object]],
     key: str | None = None,
-):
+) -> Response:
     return client.post(
         answers_path(agent),
         json={"expected_ids": expected, "results": results},
@@ -61,7 +63,7 @@ def test_one_ask_returns_each_question_its_own_id_in_order_and_replays(
     client: TestClient, db_conn: psycopg.Connection
 ) -> None:
     agent = seed_agent(db_conn)
-    body = {
+    body: dict[str, list[dict[str, object]]] = {
         "questions": [
             {"title": "First?", "question": TEXT},
             {"title": "Second?", "question": QUESTION},

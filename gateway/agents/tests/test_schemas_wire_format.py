@@ -57,6 +57,7 @@ def test_question_item_wire_shape() -> None:
         title="deploy?",
         content="A) yes\nB) no",
         created_at=t,
+        question={"type": "text"},
         resolved_at=None,
         resolution=None,
         reply=None,

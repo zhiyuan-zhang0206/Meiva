@@ -42,6 +42,10 @@ class _Question(BaseModel):
 _QUESTIONS = TypeAdapter(list[_Question])
 
 
+class _Conflict(BaseModel):
+    open: list[_Question]
+
+
 class _AgentStatus(BaseModel):
     status: str
 
@@ -164,7 +168,7 @@ def _submit(
         json={"expected_ids": expected_ids, "results": results},
     )
     if resp.status_code == 409:
-        latest = [item["id"] for item in resp.json().get("open", [])]
+        latest = [item.id for item in _Conflict.model_validate_json(resp.content).open]
         print(f"agent #{agent_id}: the open questions changed, nothing settled; open now: {latest}")
         return 1
     resp.raise_for_status()
@@ -194,10 +198,11 @@ def cmd_questions_answer(
             f"open: {open_ids}, given: {sorted(given)}"
         )
         return 2
-    results: list[dict[str, JsonValue]] = [
-        {"id": question_id, "reply": reply} for question_id, reply in answers
-    ]
-    results += [{"id": question_id, "skip": True} for question_id in skips]
+    results: list[dict[str, JsonValue]] = []
+    for question_id, reply in answers:
+        results.append({"id": question_id, "reply": reply})
+    for question_id in skips:
+        results.append({"id": question_id, "skip": True})
     code = _submit(access, agent_id, results, open_ids, idempotency_key)
     if code == 0:
         print(f"agent #{agent_id}: settled {len(open_ids)} question(s)")

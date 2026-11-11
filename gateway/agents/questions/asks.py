@@ -52,12 +52,18 @@ async def ask(
             open_before = open_question_count(conn, agent_id)
             ids: list[int] = []
             with conn.cursor(row_factory=scalar_row) as cur:
-                for item, raw in zip(body.questions, payload["questions"], strict=True):
+                for item in body.questions:
                     cur.execute(
                         "INSERT INTO agent_questions "
                         "(agent_id, title, content, question, source_verified_by) "
                         "VALUES (%s,%s,%s,%s,%s) RETURNING id",
-                        (agent_id, item.title, item.content, Jsonb(raw["question"]), verified_by),
+                        (
+                            agent_id,
+                            item.title,
+                            item.content,
+                            Jsonb(item.question.model_dump(mode="json")),
+                            verified_by,
+                        ),
                     )
                     question_id = cur.fetchone()
                     if not isinstance(question_id, int):

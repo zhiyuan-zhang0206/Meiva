@@ -66,7 +66,7 @@ import { confirmDraftReceipt } from "./plans";
 import { STATS_REQUEST_TIMEOUT_MS } from "./plans";
 
 export function createControlApi(http: Http) {
-  const { send: f, ok, jsonTimed: jsonWithTimeout, newOperationKey } = http;
+  const { send: f, ok, okOrConflict, jsonTimed: jsonWithTimeout, newOperationKey } = http;
 
   const draftAgent = (path: string, body: unknown, operationKey: string): Promise<GuideDraftResponse> =>
     Promise.resolve().then(() => f(path, keyedJson(body, operationKey)))
@@ -325,14 +325,9 @@ export function createControlApi(http: Http) {
       body: AnswerQuestions,
       idempotencyKey: string = newOperationKey(),
     ): Promise<AnswerQuestionsResult> =>
-      f(`/api/keyed/v1/agents/${agentId}/questions/answers`, keyedJson(body, idempotencyKey)).then(async (res) => {
-        if (res.status === 409) {
-          const changed = (await res.json()) as { open: QuestionItem[] };
-          return { kind: "changed", open: changed.open };
-        }
-        await ok<{ status: string }>(res);
-        return { kind: "settled" };
-      }),
+      f(`/api/keyed/v1/agents/${agentId}/questions/answers`, keyedJson(body, idempotencyKey))
+        .then((res) => okOrConflict<{ status: string }, { open: QuestionItem[] }>(res))
+        .then((outcome) => (outcome.kind === "conflict" ? { kind: "changed", open: outcome.body.open } : { kind: "settled" })),
 
     compact: (agentId: number): Promise<CompactAgentResponse> =>
       f(`/api/agents/${agentId}/compact`, postInit).then(ok<CompactAgentResponse>),

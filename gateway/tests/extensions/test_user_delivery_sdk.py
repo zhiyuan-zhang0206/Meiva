@@ -36,7 +36,7 @@ def test_sdk_ask_takes_a_list_of_questions_and_each_can_be_closed(
     agent_id = create_agent(db_conn)
     db_conn.commit()
     pin_agent(agent_id)
-    items = [
+    items: list[dict[str, object]] = [
         {
             "title": "Choose scope",
             "type": "single_select",
