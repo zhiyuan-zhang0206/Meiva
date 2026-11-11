@@ -460,6 +460,26 @@ def _no_stdlib_telemetry_bridge() -> Iterator[None]:
         yield
 
 
+# meiva:note
+# No test leaves the process's log sinks open. Production opens them once per process
+# (`init_gateway_process`, `init_cli_process`, `init_subprocess_logger`) and keeps them until the
+# process exits, so the initialization guard `base.log.process.init_done` never resets. A test that
+# reaches one of those entries in-process (a schedule round that emits a system event, a CLI verb
+# run through `main`) leaves a stderr sink bound to the stream that test's `capsys` replaced and the
+# guard set: every later test in the worker then writes through a sink on a closed file, and the
+# guard silently skips its own initialization. Which tests share a worker changes with every PR's
+# selected subset and with `--dist load`, so the victim is red only on some runs (2026-11-11: three
+# unrelated PRs, #8831). Releasing at teardown puts every worker back where it started, wherever the
+# opener lives. The module is read through `loaded_attribute`, so a test that never loaded it pays
+# one dict lookup, and a test that owns its sinks (`release_process_logging`'s own) is unaffected.
+@pytest.fixture(autouse=True)
+def _release_process_logging() -> Iterator[None]:
+    yield
+    release = loaded_attribute("base.log.process", "release_process_logging")
+    if release is not None:
+        release()
+
+
 # Save each public/class descriptor before monkeypatching, preserving classmethod
 # binding when a resource fixture restores it in its own monkeypatch window.
 _POSTGRES_BOUNDARIES: list[tuple[Any, str]] = [(psycopg, "connect")]
