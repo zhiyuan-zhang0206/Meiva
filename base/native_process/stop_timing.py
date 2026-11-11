@@ -32,7 +32,9 @@ HOST_GRACEFUL_EXIT_DRAIN_S = 30.0
 # in flight: most code runs end well inside it, and a restart then takes effect at the
 # turn's next boundary without cutting anything short. Cancel and terminate interrupt at
 # once. The age is the restart row's own `created_at`, read by the interrupt watcher's poll
-# (`agent.db.pending_interrupt_reason`).
+# (`agent.db.pending_interrupt_reason`). The same grace applies to an external harness agent's
+# own terminate: the closing words after `meiva.self.terminate()` arrive within seconds, and
+# a turn still running past the grace is interrupted.
 # meiva:link agent/graph/docs/turn-interrupts.md
 RESTART_INTERRUPT_GRACE_S = 10.0
 

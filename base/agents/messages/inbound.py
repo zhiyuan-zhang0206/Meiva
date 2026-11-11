@@ -27,6 +27,12 @@ class InterruptReason(StrEnum):
     RESTART = "restart"
 
 
+# meiva:note
+# Which pending rows a watcher reacts to. ALL is a native node's (a cancel or terminate at once, an
+# external restart after its grace); FOREGROUND is an external harness's cancel; LIFECYCLE is its
+# terminate and restart, and the only scope that also reads the agent's own terminate, since no exec
+# node raises it there.
+# meiva:link agent/graph/docs/turn-interrupts.md
 class InterruptScope(StrEnum):
     ALL = "all"
     FOREGROUND = "foreground"

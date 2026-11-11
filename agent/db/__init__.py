@@ -579,6 +579,15 @@ async def has_pending_interrupt(pool: AsyncConnectionSource, agent_id: int) -> b
 #     so would race the clean lifecycle exit with an external cancel. Only
 #     external interrupts (user / admin / peer) need the in-flight abort; the
 #     self row is still dispatched normally at claim.
+#
+#     The one exception is an external harness's foreground (`InterruptScope.LIFECYCLE`):
+#     its agent's `meiva.self.terminate()` runs in a shell of the CLI, not in an
+#     exec node, so nothing raises `LifecycleExit` and the row would otherwise
+#     wait for the CLI's turn to end on its own, which a provider outage the CLI
+#     retries forever never does (agent 7600, 2026-11-11). That row interrupts
+#     after the same grace a restart waits: the closing words a turn writes after
+#     the call arrive within seconds, and a turn that is still running past the
+#     grace has nothing left to say. A self restart still waits for the turn.
 # meiva:note
 # The kind and source of a pending external abort, one field per selected column. A row of another
 # width fails in the constructor naming the missing or unexpected column, not in a silent unpack — a
@@ -607,13 +616,17 @@ async def pending_interrupt_reason(
     ):
         await cur.execute(
             "SELECT i.kind, i.source FROM inbound_messages i WHERE i.agent_id=%s "
-            "AND i.source <> 'self' AND i.status='pending' AND (i.kind IN ('cancel','terminate') "
+            "AND (i.source <> 'self' OR (%s AND i.kind='terminate' "
+            "AND i.created_at <= clock_timestamp() - make_interval(secs => %s))) "
+            "AND i.status='pending' AND (i.kind IN ('cancel','terminate') "
             "OR (i.kind='restart' "
             "AND i.created_at <= clock_timestamp() - make_interval(secs => %s))) "
             "AND (%s OR i.kind <> 'cancel') AND (%s OR i.kind = 'cancel') "
             "ORDER BY i.id LIMIT 1",
             (
                 agent_id,
+                scope is InterruptScope.LIFECYCLE,
+                RESTART_INTERRUPT_GRACE_S,
                 RESTART_INTERRUPT_GRACE_S,
                 scope is not InterruptScope.LIFECYCLE,
                 scope is not InterruptScope.FOREGROUND,
