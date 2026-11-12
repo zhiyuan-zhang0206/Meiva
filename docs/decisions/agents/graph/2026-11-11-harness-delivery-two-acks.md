@@ -87,3 +87,5 @@ is the frontend.
 
 The assertions in [External harness adapters](2026-10-19-external-harness.md) that inbound is never
 inserted mid-turn and that a mid-turn `query()` is rejected by the model are superseded by this record.
+
+<!-- Superseded in part by 2026-11-12-transcript-is-the-timeline-source.md (the echo as the second acknowledgement and the separate reconciliation path: one delivery rule, the record shows the input, per CLI as it is cut over) -->

@@ -1,0 +1,16 @@
+{
+  "provenance": "CONSTRUCTED",
+  "provenance_note": "Rows are reconstructed from the trajectory captures because raw transcript_full.jsonl was not recorded.",
+  "agy_version": "1.5.6",
+  "reconstruction": "RECONSTRUCTED from the recorded trajectory because raw transcript_full.jsonl lines were not captured in the recordings. Row fields follow the A/B correspondence table of the research report (agy.md section 2.4): user text is the model-visible prompt (with the USER_REQUEST wrapper), tool results are the model-visible tool message text, planner rows carry response / thinking / tool_calls / token counts from the trajectory, CANCELED steps are dropped (the step_index hole), a step moved to the background keeps status RUNNING, created_at is the step's metadata.createdAt floored to the second. It is an approximation of the real file, not a copy of it.",
+  "sanitization": "workspace path -> /work; ~/.gemini/antigravity-cli/brain -> /work/brain; /Users/<name> -> /Users/user; local user name -> user; no account ids, tokens, userConfig, system prompts, workspace URIs or image bytes are kept; every field the parser reads is unchanged apart from those path substitutions. Non-ASCII text is stored as \\uXXXX escapes.",
+  "scenario": "s2b: ACP image content block, one-word answer",
+  "trajectory_file": "s2b.traj.json",
+  "conversation_id": "714bd943-d6be-4e4c-b289-1a7a82c067f1",
+  "acp_usage": {
+    "inputTokens": 13079,
+    "outputTokens": 142,
+    "source": "s2.log second session/prompt result"
+  },
+  "note": "steps 4-5 of the conversation only; the image bytes are not kept"
+}

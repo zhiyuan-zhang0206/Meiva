@@ -1,0 +1,25 @@
+{
+  "cli": "Claude Code 2.1.322",
+  "sdk": "claude-agent-sdk 0.2.168",
+  "scenario": "kill",
+  "recording": "s5_kill.transcripts/07f65707-36a1-42f3-9b23-dccd0ebbdd9f.jsonl",
+  "sanitization": [
+    "dropped row types session-owner, api-request, api-request-shape, api-request-blob, cost-state, file-history-snapshot, atis-latch, tools-used",
+    "kept attachment rows only of type queued_command, date, total_tokens_reminder",
+    "cleared thinking signatures; replaced inline base64 image data with a short placeholder",
+    "replaced /private/tmp/... paths with /work/path, cwd with /work/<scenario>, the local user name with user; dropped gitBranch, slug and turnAttributionKey",
+    "every field the parser reads is unchanged"
+  ],
+  "subagent_records": [],
+  "result_messages": [
+    {
+      "subtype": "error_during_execution",
+      "stop_reason": "tool_use",
+      "input_tokens": 2,
+      "cache_creation_input_tokens": 16117,
+      "cache_read_input_tokens": 11609,
+      "output_tokens": 165,
+      "num_turns": 3
+    }
+  ]
+}

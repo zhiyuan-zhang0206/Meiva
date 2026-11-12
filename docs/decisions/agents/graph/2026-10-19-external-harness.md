@@ -523,3 +523,5 @@ two entry points.
 <!-- Superseded in part by 2026-11-11-self-restart-at-turn-end.md (`meiva.self.restart` on an external harness; compact and attach stay native only) -->
 
 <!-- Superseded in part by 2026-11-11-background-work-keeps-sessions.md (the idle TTL/LRU no longer closes a session that holds background work) -->
+
+<!-- Superseded in part by 2026-11-12-transcript-is-the-timeline-source.md (the event-to-timeline-item projection: an external agent timeline is projected from the CLI record, per CLI as it is cut over) -->

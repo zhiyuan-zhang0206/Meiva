@@ -1,0 +1,152 @@
+{
+  "thread": {
+    "id": "01a1cef8-fc70-77a0-a68c-ed481c6ed343",
+    "forkedFromId": null,
+    "parentThreadId": null,
+    "agentNickname": null,
+    "source": "vscode",
+    "turns": [
+      {
+        "id": "01a1cef8-fcef-7122-823f-3ed2bdf1ba67",
+        "rootTurnId": "01a1cef8-fcef-7122-823f-3ed2bdf1ba67",
+        "items": [
+          {
+            "type": "userMessage",
+            "id": "01a1cef9-096e-76e0-a17e-d20e260ac674",
+            "clientId": "cid-s1-a",
+            "content": [
+              {
+                "type": "text",
+                "text": "First think briefly about what 17*23 is, then run the shell command `echo hello-cx` and then reply with the product and the command output.",
+                "text_elements": []
+              }
+            ],
+            "startedAtMs": 1794473789807,
+            "completedAtMs": 1794473789807
+          },
+          {
+            "type": "reasoning",
+            "id": "rs_0ac1940dbf8d65ac016af57f3fceec87d08ced5595e1dd6d6a",
+            "summary": [],
+            "content": [],
+            "startedAtMs": 1794473791722,
+            "completedAtMs": 1794473791723
+          },
+          {
+            "type": "agentMessage",
+            "id": "msg_0ac1940dbf8d65ac016af57f3ff88087d0aba762e083cf97a3",
+            "text": "\u6211\u5148\u8ba1\u7b97\u4e58\u79ef\uff0c\u7136\u540e\u6267\u884c\u6307\u5b9a\u547d\u4ee4\u3002",
+            "phase": "commentary",
+            "memoryCitation": null,
+            "delivery": null,
+            "questions": null,
+            "startedAtMs": 1794473791882,
+            "completedAtMs": 1794473792265
+          },
+          {
+            "type": "commandExecution",
+            "id": "exec-410fef3c-c1cd-4fb8-b7a0-d3611d48fe2d",
+            "pluginId": null,
+            "scriptPath": null,
+            "command": "/bin/zsh -lc 'echo hello-cx'",
+            "cwd": "/work",
+            "processId": "54071",
+            "source": "unifiedExecStartup",
+            "status": "completed",
+            "commandActions": [
+              {
+                "type": "unknown",
+                "command": "echo hello-cx"
+              }
+            ],
+            "aggregatedOutput": "hello-cx\n",
+            "exitCode": 0,
+            "durationMs": 0,
+            "startedAtMs": 1794473794095,
+            "completedAtMs": 1794473794095
+          },
+          {
+            "type": "reasoning",
+            "id": "rs_0ac1940dbf8d65ac016af57f436e6887d09a300481fc70023c",
+            "summary": [],
+            "content": [],
+            "startedAtMs": 1794473795343,
+            "completedAtMs": 1794473795344
+          },
+          {
+            "type": "agentMessage",
+            "id": "msg_0ac1940dbf8d65ac016af57f43859c87d0a61f8a228b706d06",
+            "text": "17 \u00d7 23 = 391\n\n\u547d\u4ee4\u8f93\u51fa\uff1a`hello-cx`",
+            "phase": "final_answer",
+            "memoryCitation": null,
+            "delivery": null,
+            "questions": null,
+            "startedAtMs": 1794473795422,
+            "completedAtMs": 1794473795790
+          }
+        ],
+        "itemsView": "full",
+        "status": "completed",
+        "error": null,
+        "startedAt": 1794473786,
+        "completedAt": 1794473795,
+        "durationMs": 9240
+      },
+      {
+        "id": "01a1cef9-2112-77a0-9106-2044cce3c68a",
+        "rootTurnId": "01a1cef9-2112-77a0-9106-2044cce3c68a",
+        "items": [
+          {
+            "type": "userMessage",
+            "id": "01a1cef9-2129-7ee3-9e3f-c316b393a1eb",
+            "clientId": "cid-s1-b",
+            "content": [
+              {
+                "type": "text",
+                "text": "Part one: the picture below is a solid color.",
+                "text_elements": []
+              },
+              {
+                "type": "image",
+                "url": "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAgAAAAICAIAAABLbSncAAAAEklEQVR4nGP4z8CAFWEXHbQSACj/P8Fu7N9hAAAAAElFTkSuQmCC",
+                "detail": null
+              },
+              {
+                "type": "text",
+                "text": "Part two: name that color in one word.",
+                "text_elements": []
+              }
+            ],
+            "startedAtMs": 1794473795881,
+            "completedAtMs": 1794473795881
+          },
+          {
+            "type": "reasoning",
+            "id": "rs_0ac1940dbf8d65ac016af57f455c5c87d0b6eb728889fa4537",
+            "summary": [],
+            "content": [],
+            "startedAtMs": 1794473797255,
+            "completedAtMs": 1794473797257
+          },
+          {
+            "type": "agentMessage",
+            "id": "msg_0ac1940dbf8d65ac016af57f4577e887d09d98f1ce6d6326fe",
+            "text": "Red",
+            "phase": "final_answer",
+            "memoryCitation": null,
+            "delivery": null,
+            "questions": null,
+            "startedAtMs": 1794473797373,
+            "completedAtMs": 1794473797492
+          }
+        ],
+        "itemsView": "full",
+        "status": "completed",
+        "error": null,
+        "startedAt": 1794473795,
+        "completedAt": 1794473797,
+        "durationMs": 1660
+      }
+    ]
+  }
+}
