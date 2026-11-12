@@ -79,6 +79,9 @@ def effective_completion_notice_policy(
     return validate_completion_notice_policy(value)
 
 
+# meiva:note
+# Only the policy decides: `all` delivers every notice at once and `hourly` none (the notice is
+# only counted in the digest), whatever the notice says.
 def immediate_delivery_required(policy: CompletionNoticePolicy, notice: CompletionNotice) -> bool:
     """Whether one completion notice must enter the agent inbox immediately."""
     del notice
@@ -104,18 +107,18 @@ def policy_for_agent(
     return effective_completion_notice_policy(overlay, default)
 
 
+# meiva:note
+# The decision depends on the policy alone, never on the notice's content: under `all` every notice
+# enters the inbox immediately, under `hourly` none does (a failure is not let through). An hourly
+# notice is recorded as an event before the answer returns, so the event table is the restart-safe
+# digest buffer and the authoritative count source for the canary conservation check. It is the one
+# policy decision, applied at the gateway delivery boundary.
 def delivery_required_for_agent(
     conn: psycopg.Connection,
     agent_id: int,
     notice: CompletionNotice,
     default: str,
 ) -> bool:
-    """Apply the one policy decision at the gateway delivery boundary.
-
-    Hourly events are committed before an immediate failure notification is
-    allowed through. This makes the event table the restart-safe digest buffer
-    and the authoritative count source for the canary conservation check.
-    """
     # An outbox replay must retain the policy decision made by its first
     # successful gateway admission. For a notice buffered under hourly, a
     # later config flip to `all` must not turn the replay into a second direct

@@ -28,8 +28,9 @@ class InterruptReason(StrEnum):
 
 
 # meiva:note
-# Which pending rows a watcher reacts to. ALL is a native node's (an interrupt or terminate at once, an
-# external restart after its grace); FOREGROUND is an external harness's interrupt; LIFECYCLE is its
+# Which pending rows a watcher reacts to. ALL is a native node's (a terminate at once, a restart after its
+# grace; an interrupt row is only ever written for an external harness, so a native watcher never meets
+# one); FOREGROUND is an external harness's interrupt; LIFECYCLE is its
 # terminate and restart, and the only scope that also reads the agent's own terminate, since no exec
 # node raises it there.
 # meiva:link agent/graph/docs/turn-interrupts.md

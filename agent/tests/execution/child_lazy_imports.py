@@ -109,11 +109,9 @@ def graph_reexports() -> dict[str, Any]:
 
     exported: Any = graph_package  # `from agent.graph import x` reads the same lazy `__getattr__`
     functions = [exported.build_graph, exported.claim_node, exported.exec_node, exported.llm_node]
-    note = exported.EXEC_CANCEL_NOTE
     return {
         "identity": exported.build_graph.__module__ == "agent.graph._build",
         "callable": all(callable(fn) for fn in functions),
-        "note": isinstance(note, str) and bool(note),
     }
 
 

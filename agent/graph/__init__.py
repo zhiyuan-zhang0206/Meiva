@@ -55,7 +55,6 @@ if TYPE_CHECKING:
     from ._build import build_graph as build_graph
     from .claim.node import claim_node as claim_node
     from .exec.node import exec_node as exec_node
-    from .exec.output import EXEC_CANCEL_NOTE as EXEC_CANCEL_NOTE
     from .llm.node import llm_node as llm_node
 
 # Eager `from ._build import build_graph` used to run on every `agent.graph`
@@ -66,7 +65,6 @@ if TYPE_CHECKING:
 # Static checkers see the real signatures through the TYPE_CHECKING block
 # above; at runtime `__getattr__` resolves the names lazily (PEP 562).
 __all__ = [
-    "EXEC_CANCEL_NOTE",
     "build_graph",
     "claim_node",
     "exec_node",
@@ -98,10 +96,6 @@ def __getattr__(name: str) -> object:
             from .exec.node import exec_node
 
             return exec_node
-        if name == "EXEC_CANCEL_NOTE":
-            from .exec.output import EXEC_CANCEL_NOTE
-
-            return EXEC_CANCEL_NOTE
         if name == "llm_node":
             from .llm.node import llm_node
 

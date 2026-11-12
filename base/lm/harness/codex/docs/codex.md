@@ -82,13 +82,12 @@ caller opts into it.
 
 ## Foreground input
 
-Ordinary submissions wait for the previous `turn/completed` before sending
-`turn/start`. Foreground input uses the stable `turn/steer` RPC with
-`expectedTurnId` set to the bound Codex turn and `clientUserMessageId` set to
-the Meiva inbound key. Codex rejects the request if that turn is no longer active.
-
-`deliver()` sends `turn/steer` to the running turn (a turn the server began on its own counts) or,
-when none runs, `turn/start`; both carry the input key as `clientUserMessageId`, and images go as
+`deliver()` first waits for a turn of ours that is still starting to become interruptible, then sends the
+stable `turn/steer` RPC to the running turn (a turn the server began on its own counts), with
+`expectedTurnId` set to that turn. When no turn runs and the session is idle it sends `turn/start`
+instead; when a turn it cannot steer (being interrupted, or its id not yet known) is in the way, the
+input is refused as `InputRejected`, never started beside it. Both requests carry the Meiva input key as
+`clientUserMessageId`, and Codex rejects a steer whose turn is no longer active. Images go as
 `image` data URLs (schema-supported, not yet observed against a real server). The two
 acknowledgements are separate events: the RPC response naming the expected turn is ACK 1
 (`InputReceived`, strong), and `item/completed` of a `userMessage` whose `clientId` is the key is ACK 2
