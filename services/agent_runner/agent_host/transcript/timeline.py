@@ -16,7 +16,7 @@ from base.api_contracts.agent_contract import Harness
 from base.clock import Clock
 from base.host.env.agent_slices import AgentSlices
 from base.lm.harness.registry import SessionRegistry
-from base.lm.harness.session.transcript.ports import RecordReader
+from base.lm.harness.session.transcript.ports import VersionedRecordReader
 from base.lm.harness.wiring import transcript_reader_for
 from base.log import logger
 from base.native_process.runtime_incarnation import RuntimeIncarnation
@@ -88,7 +88,7 @@ class TranscriptTimeline:
         agent_id: int,
         harness: str,
         policy: ReplyPolicy,
-        reader_for: Callable[[Callable[[], str | None]], RecordReader],
+        reader_for: Callable[[Callable[[], str | None]], VersionedRecordReader],
     ) -> None:
         self._agent_id = agent_id
         self._session_id: Callable[[], str | None] = lambda: None
@@ -107,7 +107,7 @@ class TranscriptTimeline:
             policy=policy,
             render_tool=format_tool_use,
             after_commit=self.effects.after_commit,
-            cli_version=lambda: None,
+            cli_version=lambda: reader.cli_version,
             clock=deps.clock,
         )
         self._running = False
@@ -194,7 +194,8 @@ class TranscriptTimeline:
 # meiva:note
 # The transcript-sourced timeline of this runtime, or None: only an external Claude Code agent whose
 # `harness_transcript_timeline` setting is on gets one, and only a host that gave the runtime its dependencies
-# can build it. The setting on another harness changes nothing (the other CLIs cut over later), and says so.
+# can build it. The setting on the built-in agent means nothing and is not reported; on another external harness it
+# changes nothing (the other CLIs cut over later) and says so, once per runtime built.
 # meiva:link agent/harness_timeline/README.md
 def transcript_timeline_for(
     agent_id: int,
@@ -206,6 +207,8 @@ def transcript_timeline_for(
     harness_environ: Mapping[str, str],
 ) -> TranscriptTimeline | None:
     if not slices.harness_cli.harness_transcript_timeline or deps is None:
+        return None
+    if harness is Harness.MEIVA:
         return None
     if harness is not Harness.CLAUDE_CODE:
         logger.warning(

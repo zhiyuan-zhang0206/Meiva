@@ -1,8 +1,9 @@
 # Cutting an external agent's timeline over to the CLI's own transcript
 
-Status: plan, revised 2026-11-12 after review. PR A (storage, read-in) is merged; PR B (the writer for Claude, wired
-behind the off-by-default agent setting `harness_transcript_timeline`) is open and not yet verified against a real CLI
-end to end (section 9.4). The decision is
+Status: plan, revised 2026-11-12 after review. PR A (storage, read-in) and PR B (the writer for Claude, wired behind
+the off-by-default agent setting `harness_transcript_timeline`) are merged; three follow-up PRs fix what the two
+reviews of PR B found before the setting is turned on anywhere (correctness and concurrency, linear and bounded,
+the rest), and the real-CLI end-to-end runs of section 9.4 were repeated on them. The setting is still off by default. The decision is
 [the transcript is the timeline source](../../docs/decisions/agents/graph/2026-11-12-transcript-is-the-timeline-source.md);
 the vocabulary, the projection, the three parsers and their golden tests (the shared pure core this plan builds
 on) are described in [reading a record into timeline drafts](../../base/lm/harness/docs/transcript-projection.md)

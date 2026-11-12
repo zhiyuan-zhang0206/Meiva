@@ -53,6 +53,10 @@ top-level with an anomaly (`orphan_released`, `unlinked_released`). A call whose
 the next one, is abandoned and no longer keeps the record from a quiet point. A sub-agent record that appears after the
 writer started is read from its first row; only records on disk at the start are history to skip.
 
+**The login of the CLI.** The CLI finds its login with `HOME`, `USER` and `LOGNAME`; the child environment of a session
+carries all three (`HOST_PASSTHROUGH_KEYS`, part of `session_child_env_keys`), and the writer reads the transcript under the
+same `HOME`.
+
 **Which session.** The writer reads the live session's id once the CLI has reported it and, before that, the id the session
 registry holds for the agent (`session_with_resume`), so the inputs an earlier process left claimed are decided against the
 record of the session the CLI is resuming, not against nothing.

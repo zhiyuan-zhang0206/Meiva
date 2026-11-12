@@ -10,7 +10,7 @@ from typing import BinaryIO
 
 from base.lm.harness.claude.delivery import key_uuid
 from base.lm.harness.claude.reconciliation.transcript import claude_home as resolve_claude_home
-from base.lm.harness.claude.transcript.parse import ParseState, parse_row
+from base.lm.harness.claude.transcript.parse import ParseState, parse_row, row_version
 from base.lm.harness.claude.transcript.position import (
     BAD_DEPTH,
     BAD_SIZE,
@@ -100,6 +100,7 @@ class ClaudeRecordReader:
         self._listing: tuple[int, tuple[str, ...], int] | None = None
         self._misses = 0
         self._misses_session: str | None = None
+        self._cli_version: str | None = None
         self.bytes_read = 0
 
     @classmethod
@@ -117,6 +118,10 @@ class ClaudeRecordReader:
             workspace=workspace,
             now_ns=now_ns,
         )
+
+    @property
+    def cli_version(self) -> str | None:
+        return self._cli_version
 
     def wire_id(self, key: str) -> str:
         return key_uuid(key)
@@ -330,6 +335,7 @@ class ClaudeRecordReader:
             return state, (_bad_row(record, ordinal, row.bad),), None
         try:
             _ = scrub(row.row)
+            self._cli_version = row_version(row.row) or self._cli_version
             moved, parsed = parse_row(state, row.row, line=ordinal)
             filtered = stored_row(row.row, subagent=record != MAIN_RECORD)
         except RecursionError:

@@ -106,6 +106,7 @@ _ENDING_STOPS = frozenset({"end_turn", "max_tokens", "refusal", "stop_sequence"}
 _INTERRUPT_PREFIX = "[Request interrupted by user"
 _LOCAL_COMMAND_PREFIXES = ("<local-command-stdout>", "<local-command-caveat>")
 _SYNTHETIC_MODEL = "<synthetic>"
+_HUMAN_ORIGIN = "human"
 _TAG = re.compile(r"<(task-id|tool-use-id|status|summary)>(.*?)</\1>", re.DOTALL)
 
 
@@ -255,9 +256,8 @@ def _attachment(
     source, prompt = attachment.get("source_uuid"), attachment.get("prompt")
     if not isinstance(prompt, str):
         return state, (_missing(row, "attachment.prompt"),)
-    origin = attachment.get("origin")
-    origin_kind = origin.get("kind") if is_object_dict(origin) else None
-    if isinstance(origin_kind, str):
+    origin_kind = _origin_kind(attachment.get("origin"))
+    if origin_kind is not None:
         if harness_cause(origin_kind) is HarnessCause.UNKNOWN:
             return state, (_anomaly(raw, line, AnomalyKind.UNKNOWN_TYPE, f"origin/{origin_kind}"),)
         call_id, rendered = _notification(prompt)
@@ -442,11 +442,10 @@ def _user_text(row: _Row, raw: Mapping[str, object], text: str) -> tuple[AnyEntr
     if raw.get("isSidechain") is True or text.startswith(_LOCAL_COMMAND_PREFIXES):
         return ()
     turn = raw.get("promptId")
-    origin = raw.get("origin")
-    kind = origin.get("kind") if is_object_dict(origin) else None
+    kind = _origin_kind(raw.get("origin"))
     fields = _entry_fields(row)
     turn_name = turn if isinstance(turn, str) else None
-    if isinstance(kind, str):
+    if kind is not None:
         call_id, rendered = _notification(text)
         return (
             Notice(
@@ -458,6 +457,16 @@ def _user_text(row: _Row, raw: Mapping[str, object], text: str) -> tuple[AnyEntr
             ),
         )
     return (HumanInput(**fields, turn=turn_name, wire_id=row.uuid, text=text),)
+
+
+# meiva:note
+# The origin a row names, when it is one that makes the row something the CLI told the conversation by itself. A newer
+# CLI tags what a person typed, and what the host sent for one, with `{"kind": "human"}`; that is an input like any other
+# (it carries the id we gave it and settles it), so it is read as having no origin. Any other kind is a notice when
+# `harness_cause` knows it (a finished task, a timer) and otherwise whatever the caller makes of an unknown origin.
+def _origin_kind(origin: object) -> str | None:
+    kind = origin.get("kind") if is_object_dict(origin) else None
+    return kind if isinstance(kind, str) and kind != _HUMAN_ORIGIN else None
 
 
 def _notification(text: str) -> tuple[str | None, str]:
