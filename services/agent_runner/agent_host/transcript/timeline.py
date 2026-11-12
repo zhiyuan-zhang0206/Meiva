@@ -109,6 +109,7 @@ class TranscriptTimeline:
             after_commit=self.effects.after_commit,
             cli_version=lambda: reader.cli_version,
             clock=deps.clock,
+            release_held_at_turn_end=True,
         )
         self._running = False
         self._stopped = asyncio.Event()

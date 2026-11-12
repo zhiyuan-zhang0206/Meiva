@@ -70,7 +70,8 @@ clock per call); then it is shown top-level (`orphan_released`). The output of a
 on no clock: a foreground sub-agent's link comes with the result of the call that started it, however long it runs, and
 releasing its output after a fixed time would show half of it on top and half under the call once the link came. It is
 released (`unlinked_released`) when the turn it was born in closes or is followed by the next one (nothing can link it any
-more), or when that record alone holds `HOLD_ENTRIES` items (the memory bound; the rest of that one sub-agent is then shown
+more; the Claude writer sets `release_held_at_turn_end`, because Claude's link precedes its turn's end, while the projector's
+default for adapters whose link may come after it, Codex and Antigravity, is to keep it), or when that record alone holds `HOLD_ENTRIES` items (the memory bound; the rest of that one sub-agent is then shown
 top-level). A writer that stops or a session that is replaced loses nothing: what was held is re-read from the stored rows
 (the restart point does not pass an unlinked record) and held again. A call whose turn closed, or whose turn was followed
 by the next one, is abandoned and no longer keeps the record from a quiet point, but the restart point does not pass it

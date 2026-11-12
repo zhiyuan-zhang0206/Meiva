@@ -117,6 +117,7 @@ class HarnessTimelineWriter:
         rebuild_max_rows: int = REBUILD_MAX_ROWS,
         max_transaction_bytes: int = MAX_TRANSACTION_BYTES,
         max_transaction_entries: int = MAX_TRANSACTION_ENTRIES,
+        release_held_at_turn_end: bool = False,
         calls_kept: int = CALLS_KEPT,
         retire_wait_seconds: float = RETIRE_WAIT_SECONDS,
         incarnation: RuntimeIncarnation | None,
@@ -147,7 +148,8 @@ class HarnessTimelineWriter:
         self._render_tool = render_tool
         self._after_commit = after_commit
         self._cli_version = cli_version
-        self._projector = Projector()
+        self._release_at_turn_end = release_held_at_turn_end
+        self._projector = Projector(release_held_at_turn_end=release_held_at_turn_end)
         self._sent = _Sent()
         self._positions: dict[str, StoredPosition] = {}
         self._last_ordinal: dict[str, int] = {}
@@ -504,7 +506,7 @@ class HarnessTimelineWriter:
         history: frozenset[str] = (
             frozenset(await self._reader.records()) if skip_history else frozenset()
         )
-        projector = Projector()
+        projector = Projector(release_held_at_turn_end=self._release_at_turn_end)
         for sent in self._projector.undelivered():
             projector.register(sent)
         last_ordinal: dict[str, int] = {}

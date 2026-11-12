@@ -53,7 +53,8 @@ from base.lm.harness.session.transcript.entries import (
 # bound passed (`feed(release_orphans=...)`, one clock per call). The drafts and usage of a sub-agent record whose link has
 # not been read (a foreground sub-agent that is still running: its link comes with the result of the call that started it)
 # are held while it runs and released, as top-level items, when the main turn they were born in closes or is followed by the
-# next one (nothing can link them any more), when the session ends (`feed(release_held=True)`), or when the record alone has
+# next one, for an adapter whose links always precede its turn's end (`release_held_at_turn_end`: Claude's does, Codex's and
+# Antigravity's may come after), when the session ends (`feed(release_held=True)`), or when the record alone has
 # held `HOLD_ENTRIES` items (the memory bound: a sub-agent that long before its result shows the rest top-level). Each release
 # is one `ORPHAN_RELEASED` / `UNLINKED_RELEASED` anomaly, and a record released once shows its later drafts top-level at
 # once. A call still unanswered when its turn closes, or when the next turn on the record begins, is abandoned: it no longer
@@ -111,8 +112,10 @@ class Projector:
         *,
         known_keys: Iterable[str] = (),
         seen_limit: int = SEEN_LIMIT,
+        release_held_at_turn_end: bool = False,
         calls_limit: int = CALLS_LIMIT,
     ) -> None:
+        self._release_at_turn_end = release_held_at_turn_end
         self._seen: RecentSet[str] = RecentSet(seen_limit)
         for key in known_keys:
             self._seen.add(key)
@@ -171,8 +174,10 @@ class Projector:
                 self._release_record(record, held)
 
     def _release_held_of(self, turn: str) -> None:
+        if not self._release_at_turn_end:
+            return
         for record, held in list(self._held.items()):
-            if held.turn == turn or held.turn is None:
+            if held.turn == turn:
                 del self._held[record]
                 self._release_record(record, held)
 
@@ -294,6 +299,9 @@ class Projector:
                 self._abandon(self._current)
             self._turns_seen.add(name)
             self._current = name
+            for record, held in list(self._held.items()):
+                if held.turn is None:
+                    self._held[record] = replace(held, turn=name)
             if not opens:
                 self._inferred.add(name)
             self._observe(name, entry)
