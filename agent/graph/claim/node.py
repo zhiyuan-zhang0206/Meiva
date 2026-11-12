@@ -227,7 +227,7 @@ async def _settle_external_harness_batch(
     items, _ = build_timeline_items(st.new_msgs, inputs=ctx.timestamp_policy())
     pending = [m for m in st.new_msgs if not isinstance(m, (AIMessage, ToolMessage))]
     prompt = render_messages(pending)
-    if enters_harness_turn and prompt:
+    if enters_harness_turn and prompt.strip():
         update["harness_inputs"] = [
             {
                 "key": f"control-{max(item.id for item in batch)}",

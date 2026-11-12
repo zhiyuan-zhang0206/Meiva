@@ -9,11 +9,11 @@ from typing import ClassVar, Self
 from base.lm.harness.delivery import (
     DeliveryLedger,
     HarnessInput,
-    ImageBlock,
     InputBlock,
     LedgerStep,
     Reconciliation,
     ReconciliationUnavailableError,
+    TextBlock,
 )
 from base.lm.harness.events import (
     AckSignal,
@@ -61,15 +61,11 @@ class ActiveTurn:
         self,
         *,
         turn_id: str,
-        text: str,
         key: str,
-        images: tuple[ImageBlock, ...] = (),
-        blocks: tuple[InputBlock, ...] = (),
+        blocks: tuple[InputBlock, ...],
     ) -> None:
         self.turn_id = turn_id
-        self.text = text
         self.input_key = key
-        self.images = images
         self.blocks = blocks
         self.started_at: float | None = None
         self.provider_turn_id: str | None = None
@@ -78,6 +74,10 @@ class ActiveTurn:
         self.parts: list[str] = []
         self.thoughts: list[str] = []
         self.denials: list[str] = []
+
+    @property
+    def text(self) -> str:
+        return "\n\n".join(b.text for b in self.blocks if isinstance(b, TextBlock)).strip()
 
 
 # meiva:note
@@ -282,9 +282,7 @@ class BaseHarnessSession[ConfigT: SessionConfig](ExitStatus):
     def _start_input_turn(self, entry: HarnessInput) -> ActiveTurn:
         turn = ActiveTurn(
             turn_id=self._mint_turn_id(),
-            text=entry.text.strip(),
             key=entry.key,
-            images=entry.images,
             blocks=entry.blocks,
         )
         self._discard_unconsumed_events()

@@ -69,9 +69,9 @@ def open_thread_request(
 
 # meiva:note
 # The `input` array of one delivered input: its blocks in order, each text as a text item and each
-# image as a data URL. `image` with a `url` is the app-server schema's own
-# shape for an inline image; the app-server experiments only exercised `localImage`, so inline data
-# URLs are schema-supported but not yet observed against a real server.
+# image as a data URL. `image` with a `url` is the app-server schema's own shape for an inline image;
+# Codex app-server 0.166.0 was recorded accepting inline data URLs between text items, and echoing the
+# `userMessage` with our `clientId` and the items unchanged.
 # meiva:link base/lm/harness/codex/docs/codex.md
 def _input_blocks(item: HarnessInput) -> list[JsonObject]:
     return [

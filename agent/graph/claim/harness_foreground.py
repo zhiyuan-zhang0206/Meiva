@@ -230,7 +230,9 @@ def plan_reconciliation(
 # (no row names it), so a refusal hands it back whole, text and timeline entries, and `folded` is
 # empty; `prompts` is the text each synthetic input is handed back under. `group` is the merged input
 # when it carries several rows, which is what must be marked so a crash can rebuild it. The images of
-# the input are bounded together, not per row.
+# the input are bounded together, not per row. Passive rows alone are never handed over (they wait for the
+# next input that is not passive), so when every row with text is passive, whatever else the wake
+# holds being an empty message, they are `held`: the caller returns them to the queue.
 # meiva:link agent/graph/docs/harness-turn.md
 @dataclass(frozen=True, slots=True)
 class WakePlan:
@@ -240,6 +242,7 @@ class WakePlan:
     group: Handed | None
     folded: tuple[tuple[Handed, str], ...] = ()
     prompts: Mapping[str, str] = MappingProxyType({})
+    held: tuple[Handed, ...] = ()
 
 
 def plan_wake(
@@ -251,10 +254,12 @@ def plan_wake(
 ) -> WakePlan:
     parts = [(entry, text, passive) for entry, text, passive in rows if text.strip()]
     settled_now = tuple(entry for entry, text, _ in rows if not text.strip())
+    held = tuple(entry for entry, _, _ in parts) if all(p for _, _, p in parts) else ()
+    parts = [] if held else parts
     prompts = {entry.key: prompt for entry, prompt in synthetic}
     ordered = _in_wake_order(synthetic, parts, hook_notes_key)
     if not ordered:
-        return WakePlan((), (), settled_now, None)
+        return WakePlan((), (), settled_now, None, held=held)
     wake = merge_handed([(entry, passive) for entry, _, passive in ordered])
     wake_input = _wake_input(wake, ordered, images, hook_notes_key)
     if not parts:
@@ -264,6 +269,7 @@ def plan_wake(
             settled_now,
             None,
             prompts={**prompts, wake.key: wake_input.text},
+            held=held,
         )
     return WakePlan(
         (wake,),

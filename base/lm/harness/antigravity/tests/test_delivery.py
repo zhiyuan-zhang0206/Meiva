@@ -253,3 +253,22 @@ async def test_the_text_blocks_of_one_input_reach_stdin_as_one_string_joined_by_
         await harness.wait_until(lambda: harness.messages() == ["first message\n\nsecond message"])
     finally:
         await harness.stop()
+
+
+async def test_text_blocks_with_images_start_the_turn_with_the_joined_text_and_steer_the_images(
+    tmp_path: Path,
+) -> None:
+    harness = await start(tmp_path, turns=[{"hang": True}])
+    try:
+        image = ImageBlock("image/png", "aGk=")
+        blocks = (TextBlock("first"), image, TextBlock("second"), image)
+        await harness.session.deliver([HarnessInput("wake", blocks)])
+        await harness.wait_until(lambda: len(harness.rpc_payloads()) == 1)
+        [sent] = harness.rpc_payloads()
+        assert (
+            harness.messages()[0] == "first\n\nsecond\n\n(The images for this message follow next.)"
+        )
+        assert sent["clientMessageId"] == "wake:images"
+        assert sent["media"] == [{"mimeType": "image/png", "inlineData": "aGk="}] * 2
+    finally:
+        await harness.stop()

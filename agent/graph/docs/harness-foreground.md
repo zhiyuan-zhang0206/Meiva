@@ -7,7 +7,9 @@ events. Whether the harness starts a turn for it or the running turn absorbs it 
 graph learns what happened only from events. Control kinds (restart, terminate, interrupt, resurrect, fork,
 compaction) are barriers: nothing behind one is delivered until the claim has dispatched it, and nothing is
 delivered at all while a restart or terminate is pending. A batch made only of passive notes is not handed
-over: it waits and goes along with the next input that is not passive.
+over: it waits and goes along with the next input that is not passive. That holds after the empty rows settle too: a
+batch whose only row that is not passive has no text hands over just its synthetic inputs, and its passive rows
+are returned to the queue to wait.
 
 One wake's batch is one input, one harness turn, made of blocks: a text block for each synthetic input first (a
 restart or resume note, a context reset, a continuation), then a text block for each row in queue order with the row's
