@@ -37,3 +37,13 @@ missing index kind cannot appear complete. The owner and snapshot identifiers no
 travel with each numeric row. A real permission-denial control also exposed
 os.walk silently skipping an unreadable subtree; explicit error propagation keeps
 that failed export distinguishable from an observed empty directory.
+
+## Permission-control portability
+
+The first regression control used a capability skip under privileged containers,
+which both missed the denial there and grew the frozen skip-site budget. The
+control now runs in a dedicated nonprivileged child and its own temporary tree;
+a root caller selects a nonzero child UID, while an ordinary caller keeps its
+existing UID. Setup refusal is separate from the snapshot assertion, and the
+expected PermissionError must identify the blocked directory. The parent identity,
+system accounts, production code, budget thresholds and skip ratchet are unchanged.

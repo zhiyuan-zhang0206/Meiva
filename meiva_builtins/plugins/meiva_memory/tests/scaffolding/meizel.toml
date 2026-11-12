@@ -1,4 +1,7 @@
 exports = []
 
 [uses]
-"test_template_validate.py" = ["child_note_cap.py"]
+"test_template_validate.py" = ["child_note_cap.py", "child_budget_snapshot.py"]
+
+[roots]
+"child_budget_snapshot.py" = { kinds = ["argv"], why = "isolated permission-test entry reads its explicit target UID; all identity changes and temporary files remain in that child" }

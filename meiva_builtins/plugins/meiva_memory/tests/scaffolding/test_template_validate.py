@@ -1,4 +1,3 @@
-import errno
 import json
 import os
 import sys
@@ -10,8 +9,10 @@ import pytest
 
 from base.host.proc import run_bounded
 from meiva_builtins.plugins.meiva_memory.template import validate
+from meiva_builtins.plugins.meiva_memory.tests.scaffolding.child_budget_snapshot import probe_uid
 
 _CAP_CHILD = Path(__file__).with_name("child_note_cap.py")
+_BUDGET_CHILD = Path(__file__).with_name("child_budget_snapshot.py")
 
 
 def _validator() -> ModuleType:
@@ -604,23 +605,42 @@ def test_budget_changed_paths_cannot_claim_another_vault(tmp_path: Path, name: s
 
 
 # meiva:note
-# A real permission failure must not turn into a successful snapshot omitting one subtree.
-# The capability probe prevents a privileged filesystem from pretending to exercise denial.
+# Root containers exercise the same real denial as ordinary users: only the isolated child
+# selects a nonprivileged UID and creates its own temporary files. No skip hides a missing probe.
 def test_budget_snapshot_fails_visibly_on_unreadable_subdirectory(tmp_path: Path) -> None:
-    w(tmp_path, "memory/blocked/a.md", "unreadable note")
-    blocked = tmp_path / "memory/blocked"
-    blocked.chmod(0)
-    try:
-        try:
-            _ = list(blocked.iterdir())
-        except PermissionError as error:
-            assert error.errno == errno.EACCES
-        else:
-            pytest.skip("filesystem does not enforce this directory permission denial")
-        with pytest.raises(PermissionError):
-            validate.budget_snapshot(tmp_path, [])
-    finally:
-        blocked.chmod(0o700)
+    uid = probe_uid(tmp_path.stat().st_uid)
+    result = run_bounded(
+        [sys.executable, "-I", str(_BUDGET_CHILD), str(uid)],
+        env={"PATH": os.defpath},
+        close_fds=True,
+        capture_output=True,
+        text=True,
+        timeout=30,
+    )
+    assert result.returncode == 0, result.stderr
+    assert result.stdout.strip() == "setup=denied snapshot=permission-error"
+
+
+@pytest.mark.parametrize(("owner", "target"), [(0, 65534), (1000, 1000), (65534, 65534)])
+def test_permission_probe_selects_nonprivileged_child_without_changing_parent(
+    owner: int,
+    target: int,
+) -> None:
+    assert probe_uid(owner) == target
+
+
+def test_permission_probe_refuses_root_before_touching_snapshot() -> None:
+    result = run_bounded(
+        [sys.executable, "-I", str(_BUDGET_CHILD), "0"],
+        env={"PATH": os.defpath},
+        close_fds=True,
+        capture_output=True,
+        text=True,
+        timeout=30,
+    )
+    assert result.returncode == 2
+    assert result.stdout == ""
+    assert "setup: a positive unprivileged UID is required" in result.stderr
 
 
 def test_template_snapshot_names_its_scope_and_binds_changed_identity(tmp_path: Path) -> None:
