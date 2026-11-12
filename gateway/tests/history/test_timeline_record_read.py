@@ -133,3 +133,17 @@ def test_a_session_with_no_record_is_an_empty_timeline_and_old_rows_are_never_re
 
     assert response.status_code == 200
     assert response.json() == {"items": [], "msg_count": 0, "has_more": False}
+
+
+@pytest.mark.parametrize("before", ["bogus", "12.0", "s1.cp.3.0"])
+def test_a_cursor_that_is_not_an_offset_id_is_answered_like_any_harness_and_asks_nothing(
+    client: GatewayTestClient, db_conn: psycopg.Connection, before: str
+) -> None:
+    agent = _claude_agent(db_conn)
+    runner = ScriptedRunner({"items": [], "has_more": False, "size": 0})
+    client.app.state.rpc = runner
+
+    response = client.get(f"/api/agents/{agent}/timeline?before={before}")
+
+    assert response.status_code == 200 and response.json()["items"] == []
+    assert runner.calls == []

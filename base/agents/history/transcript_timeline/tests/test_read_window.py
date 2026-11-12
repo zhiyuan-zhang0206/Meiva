@@ -5,7 +5,10 @@ from pathlib import Path
 
 from base.agents.history.timeline_item import TimelineItem
 from base.agents.history.transcript_timeline.items import format_tool_use
-from base.agents.history.transcript_timeline.read import MAX_REQUEST_BYTES, read_window
+from base.agents.history.transcript_timeline.read import (
+    MAX_REQUEST_BYTES,
+    read_window,
+)
 from base.agents.history.transcript_timeline.tests.support import (
     POLICY,
     fixture_text,

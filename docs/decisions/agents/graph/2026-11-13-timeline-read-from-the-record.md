@@ -98,6 +98,11 @@ works this way: the gateway reads the conversation archive and projects it with 
   (the CLI dies, an API error, a login that has lapsed, or a turn that did something with no record file to show for it,
   which names the session and where it was looked for) is raised as a fatal turn and the runloop sends the live `Error` event,
   exactly as for a built-in agent, whose failures are not stored either.
+- **After an interrupt a new sink may re-publish a few earlier turns.** Seen on a preview: the first snapshot of a sink
+  started after an interrupt began about four turns before the last turn's opening. The content equals a cold read, the
+  page merges by id and replies are absorbed by their keys, so it is not a correctness fault; the cause is not established
+  (an unattributed tail entry was a guess that the sample record does not support: its tail has turn names), and the
+  sink's start (`_turn_start`) is left as it is until a real post-interrupt record shows it.
 - A crash can lose the delivery (not the display) of the last reply; so can a database error while delivering, because the
   sink does not retry (its read position has moved on). The record's last turn is read again at the next invocation,
   which delivers it by key.

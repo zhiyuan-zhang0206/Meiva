@@ -94,7 +94,7 @@ def load_sent_rows(
         _settle(pending, batch, wire_id)
         if len(batch) < BATCH_ROWS:
             break
-    if pending:
+    if pending and scanned >= MAX_ROWS:
         logger.warning(
             "{count} inputs in the record match no inbox row within the newest {scanned} of the agent's rows; "
             "they are not shown",

@@ -23,6 +23,8 @@ from base.agents.history.transcript_timeline.sent import (
 from base.db import create_agent
 from base.lm.harness.claude.delivery import key_uuid
 from base.lm.harness.registry import FileSessionRegistry, SessionRecord
+from base.log.tests.log_records import LogRecords
+from base.log.tests.log_records import loguru_records as loguru_records
 from base.paths import harness_sessions_dir, workspace_dir
 from ops.harness_timeline import read_harness_timeline
 from ops.rpc_schemas import HarnessTimelineReadRequest
@@ -202,3 +204,13 @@ def test_a_row_far_back_among_many_is_found_by_its_id(db_conn: psycopg.Connectio
     found = load_sent_rows(db_conn, agent, until=newest, wanted={wire: newest}, wire_id=key_uuid)
     assert [row.input_key for row in found.rows] == ["filler-1900"]
     assert found.scanned <= MAX_ROWS
+
+
+def test_the_hosts_own_input_with_fewer_rows_than_a_batch_raises_no_warning(
+    db_conn: psycopg.Connection, loguru_records: LogRecords
+) -> None:
+    agent = create_agent(db_conn)
+    _ = _claimed(db_conn, agent, "only row", "k1")
+    at = datetime(2026, 11, 12, tzinfo=UTC)
+    found = load_sent_rows(db_conn, agent, until=at, wanted={"host-own": at}, wire_id=key_uuid)
+    assert found.rows == [] and loguru_records.events("harness_timeline_inputs_unmatched") == []
