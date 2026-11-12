@@ -1,5 +1,5 @@
 [uses]
-"tests" = ["provider.py", "decision.py", "decision_protocol.py"]
+"tests" = ["provider.py", "decision.py"]
 "provider.py" = ["decision.py"]
 "decision.py" = ["decision_protocol.py"]
 
