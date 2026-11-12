@@ -38,7 +38,13 @@ read is the notification's.
 ## Counting them as pending work
 
 The same task set backs `ClaudeSession.background_work()`, with each task's description
-and kind (command or sub-agent). The timers the model sets with `CronCreate`,
+and kind (command or sub-agent). A `Monitor` call is one of those commands: the CLI announces it with
+`TaskStarted(task_type=local_bash)`, ends it with `TaskUpdated(completed)` and a `TaskNotification`
+(`TaskStop` gives `killed` and `stopped`), so a session whose only work is a Monitor stays out of
+the idle TTL until its source ends or is stopped
+(fixture `tests/fixtures/monitor_background.json`, recorded on CLI 2.1.322). Each output line wakes
+the CLI as a turn of its own (`origin.kind` `task-notification`) with no Task frame, so those lines
+neither start nor end anything here. The timers the model sets with `CronCreate`,
 `CronDelete`, `CronList` and `ScheduleWakeup` are followed from those tool calls and their
 results (`ScheduledWork` in `inbound.py`; fixture
 `tests/fixtures/scheduled_work.json` holds the recorded shapes). They live only in the CLI
