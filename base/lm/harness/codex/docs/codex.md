@@ -141,3 +141,22 @@ while the process tree shows a descendant the app-server did not start with (the
 whose completion never comes). A turn that ends
 interrupted or failed drops its open items (its interrupt ended them,
 [what an interrupt stops](../../docs/harness.md#what-an-interrupt-stops)). See [background work](../../docs/background-work.md).
+
+## Sub-agent threads
+
+A `spawnAgent` child is a thread of the same app-server and an independent line of work: it outlives the
+parent's turn, and the turn is not ours to end for it. A working child therefore holds the session.
+`subagents.py` follows each child from the spawn call (unless `agentsStates` already reports it finished, or
+its own end frame came before the call completed, which the session remembers for the last 64 such threads)
+until its `turn/completed`, a `thread/status/changed` that is not `active`, an `error` that will not be
+retried, or a `closeAgent` call of the parent; its `turn/started` or an `active` status reopens it. A working
+child is `BackgroundKind.AGENT` work, so the idle TTL does not close the app-server it lives in and the
+session record names it should the process go anyway.
+
+The hold is bounded: every frame of a known child, shown or not (an `item/completed` included), restarts the
+clock, and a child that sent no frame for `CHILD_SILENCE_SECONDS` (7,200 s) is taken as finished. The constant
+errs long because releasing a working child kills it, while holding a dead one costs one idle process, and a
+quiet child is only one inside a single model or tool call. Once the app-server is gone
+(`_on_transport_closed`) the session reports no background work at all, so a dead process cannot keep a
+runtime from being evicted; the record keeps what was pending for the lost-work note. See
+[background work](../../docs/background-work.md).
