@@ -34,7 +34,7 @@ above `base/lm` (`base/agents`, `agent/graph/claim`), so the writer applies them
 ## Parsers
 
 A parser is a pure function from one raw row to entries, strict about the fields the projection needs. An
-unknown row type is an `Anomaly(UNKNOWN_TYPE)` (reported once per type by the projection), a known type that
+unknown row type is an `Anomaly(UNKNOWN_TYPE)` (reported by the projection once for each distinct kind and detail, here the type, among the latest `REPORTED_LIMIT` it remembers, not once for each row), a known type that
 lacks a needed field an `Anomaly(MISSING_FIELD)`; neither puts anything on a timeline. Each parser's header lists
 the row types it does not read yet. Golden tests run on sanitized recordings (`tests/fixtures/<scenario>/`,
 each with a `source.json` naming the CLI version, the recording and the sanitization rules).
@@ -103,10 +103,14 @@ position its record no longer holds.
 
 ## Origins
 
-A row or a queued command may carry `origin.kind`. `human` (what a newer CLI puts on what a person typed and on the
-inputs a host sends for one) is an input like any other: it is recognised by the id we gave it and settles it. A kind
-`harness_cause` knows (`task-notification`, a timer) is a notice. Any other kind on a queued command is an anomaly
-(`origin/<kind>`, reported once per kind) and puts nothing on the timeline, so an origin the CLI may put on our own inputs
-one day can never make them look like notices that settle nothing; on a user row an unknown kind is still shown as a
-notice. The sample of a long real session (`claude/transcript/tests/fixtures/long_session`, sanitized to structure) pins
+A row or a queued command may carry `origin.kind`. The parser keeps what the row says (`HumanInput.origin`: the kind, the
+cause the harness vocabulary has for it and the notice the row would be) and decides nothing; the projection decides, in
+this order, for a user row and a queued command alike: (1) the row's wire id is one of the inputs the writer registered:
+it is ours and it settles, whatever origin the row names (the records we have of the SDK path show no origin on our own
+inputs, so what a CLI tags them with is unknown, and an input that is not settled is sent again, which the CLI would receive
+twice); (2) the origin is one `harness_cause` knows (`task-notification`, a timer): a notice; (3) no origin, or `human`
+(what a newer CLI puts on what a person typed): an input we did not send, shown as unmatched; (4) any other origin: an
+anomaly (`origin/<kind>`) that is reported and puts nothing on the timeline, because nothing can say what it is. An
+anomaly is reported once per (type, detail) within the latest `REPORTED_LIMIT` ones the projector remembers, so a restart
+reports it again. The sample of a long real session (`claude/transcript/tests/fixtures/long_session`, sanitized to structure) pins
 this, and that the bookkeeping rows of such a session are ignored and not reported.

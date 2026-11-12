@@ -8,7 +8,7 @@ from typing import TypedDict
 
 from base.host.boundary.json_values import is_object_dict, is_object_list
 from base.lm.harness.claude.delivery import harness_cause
-from base.lm.harness.events import HarnessCause, Usage
+from base.lm.harness.events import Usage
 from base.lm.harness.session.transcript.entries import (
     MAIN_RECORD,
     AgentText,
@@ -18,8 +18,8 @@ from base.lm.harness.session.transcript.entries import (
     Compaction,
     Failure,
     HumanInput,
+    HumanOrigin,
     Interrupt,
-    Notice,
     Order,
     Reasoning,
     SubagentLink,
@@ -256,26 +256,15 @@ def _attachment(
     source, prompt = attachment.get("source_uuid"), attachment.get("prompt")
     if not isinstance(prompt, str):
         return state, (_missing(row, "attachment.prompt"),)
-    origin_kind = _origin_kind(attachment.get("origin"))
-    if origin_kind is not None:
-        if harness_cause(origin_kind) is HarnessCause.UNKNOWN:
-            return state, (_anomaly(raw, line, AnomalyKind.UNKNOWN_TYPE, f"origin/{origin_kind}"),)
-        call_id, rendered = _notification(prompt)
-        notice = Notice(
-            **_entry_fields(row),
-            text=rendered,
-            cause=harness_cause(origin_kind),
-            call_id=call_id,
-            opens_turn=False,
-        )
-        return state, (notice,)
-    if not isinstance(source, str):
+    origin = _origin(attachment.get("origin"), prompt)
+    if origin is None and not isinstance(source, str):
         return state, (_missing(row, "attachment.source_uuid"),)
     steer = HumanInput(
         **_entry_fields(row),
-        wire_id=source,
+        wire_id=source if isinstance(source, str) else None,
         text=prompt,
         joined_running_turn=True,
+        origin=origin,
     )
     return state, (steer,)
 
@@ -442,31 +431,29 @@ def _user_text(row: _Row, raw: Mapping[str, object], text: str) -> tuple[AnyEntr
     if raw.get("isSidechain") is True or text.startswith(_LOCAL_COMMAND_PREFIXES):
         return ()
     turn = raw.get("promptId")
-    kind = _origin_kind(raw.get("origin"))
-    fields = _entry_fields(row)
-    turn_name = turn if isinstance(turn, str) else None
-    if kind is not None:
-        call_id, rendered = _notification(text)
-        return (
-            Notice(
-                **fields,
-                turn=turn_name,
-                text=rendered,
-                cause=harness_cause(kind),
-                call_id=call_id,
-            ),
-        )
-    return (HumanInput(**fields, turn=turn_name, wire_id=row.uuid, text=text),)
+    return (
+        HumanInput(
+            **_entry_fields(row),
+            turn=turn if isinstance(turn, str) else None,
+            wire_id=row.uuid,
+            text=text,
+            origin=_origin(raw.get("origin"), text),
+        ),
+    )
 
 
 # meiva:note
-# The origin a row names, when it is one that makes the row something the CLI told the conversation by itself. A newer
-# CLI tags what a person typed, and what the host sent for one, with `{"kind": "human"}`; that is an input like any other
-# (it carries the id we gave it and settles it), so it is read as having no origin. Any other kind is a notice when
-# `harness_cause` knows it (a finished task, a timer) and otherwise whatever the caller makes of an unknown origin.
-def _origin_kind(origin: object) -> str | None:
+# What the row says about its source, as information for the projection and no more: nothing for a row with no origin
+# and for one the CLI tags `{"kind": "human"}` (what a person typed, and what the host sent for one), otherwise the
+# kind, the cause `harness_cause` has for it (UNKNOWN when it has none) and the notice the row would be (a finished
+# task, a timer). That a newer CLI may tag our own inputs with some origin we do not know is why this decides nothing
+# here: the projection settles an input by the id we gave it first.
+def _origin(origin: object, text: str) -> HumanOrigin | None:
     kind = origin.get("kind") if is_object_dict(origin) else None
-    return kind if isinstance(kind, str) and kind != _HUMAN_ORIGIN else None
+    if not isinstance(kind, str) or kind == _HUMAN_ORIGIN:
+        return None
+    call_id, rendered = _notification(text)
+    return HumanOrigin(kind=kind, cause=harness_cause(kind), text=rendered, call_id=call_id)
 
 
 def _notification(text: str) -> tuple[str | None, str]:

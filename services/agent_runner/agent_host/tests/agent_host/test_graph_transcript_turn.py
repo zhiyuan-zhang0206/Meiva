@@ -41,6 +41,7 @@ from base.clock.tests.fakes import system_clock
 from base.lm.harness import (
     BridgeEvent,
     HarnessInput,
+    HarnessNotDeliveredError,
     InputRejected,
     SessionFailed,
     TurnOrigin,
@@ -396,3 +397,92 @@ async def test_an_input_the_stream_calls_refused_but_the_record_shows_is_settled
     assert len(engine.delivered) == 1, "the input reached the CLI once, whatever the event said"
     assert len(loguru_records.events("harness_input_proven_by_record")) == 1
     assert loguru_records.events("harness_input_requeued") == []
+
+
+async def test_an_adoption_whose_record_cannot_be_read_leaves_the_rows_claimed_for_the_next_invocation(
+    db_conn: psycopg.Connection,
+    aops_pool: AsyncConnectionPool,
+    hosted_resources: HostedTurnResources,
+) -> None:
+    agent_id = agent_row(db_conn)
+    row = insert_row(db_conn, agent_id, "chat", "user", "was taken")
+    db_conn.execute(
+        "UPDATE inbound_messages SET status='claimed', claimed_at=now(), "
+        "payload = COALESCE(payload, '{}'::jsonb) || jsonb_build_object(%s::text, %s::text) "
+        "WHERE id=%s",
+        (INPUT_KEY_FIELD, input_key(row), row),
+    )
+    db_conn.commit()
+    record = ScriptedRecord(failing_reads=1)
+    record.write(record.take(input_key(row), "was taken"), *record.reply("ok"))
+    engine = FakeEngine(script=_cli(record))
+    rt, _ = _wire(
+        runtime(engine, ops_pool=aops_pool, hosted_resources=hosted_resources),
+        aops_pool,
+        agent_id,
+        record,
+    )
+
+    with pytest.raises(OSError, match="could not be read"):
+        _ = await harness_turn_node(AgentState(), rt, config(agent_id))
+
+    assert row_status(db_conn, row) == "claimed", (
+        "nothing is decided about an input the record has not been read for"
+    )
+    assert engine.delivered == []
+
+    rt, _ = _wire(
+        runtime(engine, ops_pool=aops_pool, hosted_resources=hosted_resources),
+        aops_pool,
+        agent_id,
+        record,
+    )
+    _ = await harness_turn_node(AgentState(), rt, config(agent_id))
+    assert row_status(db_conn, row) == "done", (
+        "the next invocation reads the record and the writer settles it"
+    )
+    assert all(input_key(row) not in [item.key for item in batch] for batch in engine.delivered)
+
+
+class _Refusing(FakeEngine):
+    def __init__(self, record: ScriptedRecord, *, written: bool) -> None:
+        super().__init__()
+        self._record = record
+        self._written = written
+
+    async def deliver(self, inputs: Sequence[HarnessInput], *, compaction_note: str = "") -> None:
+        self.delivered.append(list(inputs))
+        if self._written:
+            self._record.write(
+                *(self._record.take(item.key, item.text) for item in inputs),
+            )
+        raise HarnessNotDeliveredError("the session could not take the batch")
+
+
+async def test_a_refused_batch_the_record_shows_is_settled_and_one_it_does_not_show_goes_back(
+    db_conn: psycopg.Connection,
+    aops_pool: AsyncConnectionPool,
+    hosted_resources: HostedTurnResources,
+) -> None:
+    results: dict[bool, tuple[object, int]] = {}
+    for written in (True, False):
+        agent_id = agent_row(db_conn)
+        row = insert_row(db_conn, agent_id, "chat", "user", "hello")
+        record = ScriptedRecord()
+        engine = _Refusing(record, written=written)
+        rt, _ = _wire(
+            runtime(engine, ops_pool=aops_pool, hosted_resources=hosted_resources),
+            aops_pool,
+            agent_id,
+            record,
+        )
+        with pytest.raises(FatalLLMStreamError):
+            _ = await harness_turn_node(AgentState(), rt, config(agent_id))
+        results[written] = (row_status(db_conn, row), len(engine.delivered))
+
+    assert results[True] == ("done", 1), (
+        "the record shows the input: the writer settled it, it is not taken back"
+    )
+    assert results[False] == ("pending", 1), (
+        "the record does not show it: it goes back to the queue"
+    )

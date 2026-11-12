@@ -47,16 +47,33 @@ class Entry:
 
 
 # meiva:note
-# A message a person (or the host on a person's behalf) put into the conversation. `wire_id` is the id
-# the CLI kept for it when we gave it one (Claude's row uuid, Codex's client id, Antigravity's
+# What a row says about who put it into the conversation, when it names a source other than a person: the source's own
+# name (`kind`), the cause the harness vocabulary has for it (`HarnessCause.UNKNOWN` when it has none), and what the
+# row would show as a notice (`text`, the call whose work it reports when the row says). It is information only: whether
+# the row is a notice, an input of ours or something unknown is decided by the projection, which alone knows the inputs
+# it registered.
+@dataclass(frozen=True, slots=True, kw_only=True)
+class HumanOrigin:
+    kind: str
+    cause: HarnessCause
+    text: str
+    call_id: str | None = None
+
+
+# meiva:note
+# A message a person (or the host on a person's behalf) put into the conversation, or a row the record files like one.
+# `wire_id` is the id the CLI kept for it when we gave it one (Claude's row uuid, Codex's client id, Antigravity's
 # `clientMessageId`), or None when the record cannot say; the projection then falls back to the text.
 # `joined_running_turn` is True when the message was taken into a turn that was already running (a
-# steer) and False when it opened a turn of its own.
+# steer) and False when it opened a turn of its own. `origin` is what the row says about its source when that is
+# not a person (`HumanOrigin`): the projection settles an input of ours by `wire_id` whatever the origin says, treats a
+# row whose origin it knows as a notice, and reports an origin it does not know without showing the row.
 @dataclass(frozen=True, slots=True, kw_only=True)
 class HumanInput(Entry):
     wire_id: str | None
     text: str
     joined_running_turn: bool = False
+    origin: HumanOrigin | None = None
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)

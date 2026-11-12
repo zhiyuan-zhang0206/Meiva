@@ -251,7 +251,7 @@ EVENTS: dict[str, EventSpec] = {
     "harness_timeline_usage_unreliable": telemetry_event(
         "harness_timeline_usage_unreliable",
         "a model message of a transcript-sourced session was cut short (an interrupt): the record holds only "
-        "a placeholder count, so its spend is not in the accounting; one event per message, to count the gap",
+        "a placeholder count, so its spend is not in the accounting; one event per message (carrying its id and turn), to count the gap",
         tier="observation",
     ),
     "harness_timeline_position_lost": telemetry_event(

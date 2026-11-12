@@ -34,6 +34,7 @@ from agent.graph.claim.harness_inbox import (
     claimed_deliverable,
     commit_handed,
     defer_reconciliation,
+    harness_reply_correction,
     is_deferred,
     is_passive,
     mark_input_group,
@@ -47,22 +48,17 @@ from agent.graph.claim.harness_inbox import (
 )
 from agent.graph.claim.harness_render import (
     native_images,
-    render_message,
     render_messages,
     skipped_images_note,
 )
-from agent.graph.claim.timeline import append_turn_timeline
 from agent.graph.claim.turn_stamp import persist_last_active
 from agent.graph.hooks.node import HOOK_NOTES_KEY
 from agent.graph.hooks.question_context import read_agent_open_questions
-from agent.graph.hooks.user_delivery import delivery_end_reminder
 from agent.graph.interrupt import (
     ModelInterruptedError,
 )
-from agent.messages.reply_visibility import reply_visibility_note
 from base.agents.context import MeivaContext
 from base.agents.context.harness_timeline import TimelineSession
-from base.agents.history.timeline import build_timeline_items
 from base.agents.history.timeline_item import TimelineItem
 from base.agents.questions.render import reinjection_text
 from base.events.live.projection import LLMDone
@@ -76,6 +72,7 @@ from base.lm.harness import (
     HarnessNotDeliveredError,
     HarnessSetupError,
     ImageBlock,
+    InputInContext,
     ReasoningDelta,
     ReasoningText,
     SubagentText,
@@ -155,6 +152,7 @@ class ForegroundRun:
         self._correcting = False
         self._turn_ended = False
         self._streamed: dict[str, list[str]] = {}
+        self._turn_inputs: dict[str, list[str]] = {}
         self._changed = asyncio.Event()
         self._backoff_until = 0.0
         self._failure: Exception | None = None
@@ -494,6 +492,8 @@ class ForegroundRun:
                 | ToolResult()
             ):
                 await self._projector.on_event(event)
+            case InputInContext(key=key, turn_id=turn_id):
+                self._turn_inputs.setdefault(turn_id, []).append(key)
             case TurnCompleted():
                 await self._on_turn_completed(event)
             case _:
@@ -509,7 +509,11 @@ class ForegroundRun:
         turn = completed_turn(event, "".join(self._streamed.pop(event.turn_id, [])))
         if self._timeline is None:
             log_turn_usage(self._ctx, self._agent_id, self._bridge.model, turn)
-        await self._projector.finish((turn,), interrupted=turn.interrupted)
+        await self._projector.finish(
+            (turn,),
+            interrupted=turn.interrupted,
+            input_keys=self._turn_inputs.pop(event.turn_id, []),
+        )
         self._turn_ended = True
         if turn.interrupted:
             self.interrupted = True
@@ -772,29 +776,3 @@ class ForegroundRun:
         self._correcting = True
         self._synthetic.append(correction)
         return True
-
-
-# meiva:note
-# The correction input for a reply that broke the delivery contract, or None.
-#
-# The correction is a synthetic input like any other: its note reaches the timeline when the harness
-# reports it in context. Asking twice would loop, so a second violation is only recorded.
-async def harness_reply_correction(
-    ctx: MeivaContext,
-    agent_id: int,
-    baseline: int | None,
-    *,
-    invalid: bool,
-    key: str,
-    correcting: bool,
-) -> tuple[Handed, str] | None:
-    note = await delivery_end_reminder(ctx, agent_id, baseline, correcting=correcting)
-    if not invalid and note is None:
-        return None
-    note = note or reply_visibility_note(ctx.require_clock().now())
-    if correcting:
-        await append_turn_timeline(ctx, agent_id, [note])
-        return None
-    items, _ = build_timeline_items([note], inputs=ctx.timestamp_policy())
-    entry = Handed(f"{key}:visibility-correction", None, tuple(items))
-    return entry, render_message(note)

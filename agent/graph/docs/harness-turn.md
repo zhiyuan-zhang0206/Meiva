@@ -82,11 +82,13 @@ carries the writer (`ctx.harness_timeline`), and nothing else does:
   (when the link is known), priced on its own model. The sub-agents' tokens are therefore counted; the figure rises by
   exactly that spend. A message the CLI cut short (an interrupt) has only a placeholder count in the record and is
   not priced: that is a known gap in the accounting, counted by the event `harness_timeline_usage_unreliable` (one per
-  message); a model without a price is warned about once per runtime and its rows are written unpriced.
-- The turns the invocation finishes are paired with the record's closings one for one, in order: the n-th turn to end
-  waits for the n-th closing the record shows, so two turns that end close together each wait for their own. A turn
-  that ended in error is waited for like any other (its failure row closes it) and its spend is not compared with the
-  result's.
+  message, with the message id and turn); a model without a price is warned about once per runtime and its rows are written unpriced.
+- The turns the invocation finishes are paired with the record's closings by identity, not by count: the stream says
+  which of our inputs were in the turn (`InputInContext`), the writer knows which record turn each was delivered in
+  (the row that settled it) and waits for those turns' own closings, and the spend compared with the result's is that
+  of those turns. A closing that shows up late, a result frame that never came and the turns the CLI ran on its own
+  (no input of ours in them, nothing to wait for) therefore shift nothing for the turns after them. A turn that ended
+  in error is waited for like any other (its failure row closes it) and its spend is not compared with the result's.
 - A stop's passive note still rides into the CLI with the next input but writes no timeline entry of its own; the
   record's own interrupt row is the only "interrupted" marker, and the early write of #8911 does not apply.
 - Failure and restart: see [foreground input and cancellation](harness-foreground.md#transcript-sourced-agents).
