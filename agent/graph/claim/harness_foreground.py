@@ -10,7 +10,9 @@ from __future__ import annotations
 
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, replace
+from types import MappingProxyType
 
+from agent.graph.claim.harness_render import fit_input_images, skipped_images_note
 from base.agents.history.timeline_item import TimelineItem
 from base.lm.harness import (
     BridgeEvent,
@@ -215,6 +217,18 @@ def plan_reconciliation(
 # the model only after its first request had gone out (Codex, Antigravity): the agent first answered a
 # passive note or a hook note and only then the person. The rows keep their own timeline entries and
 # settle together with the one acknowledgement.
+#
+# What one reservation hands the harness: always one input. The synthetic inputs' text comes first (a
+# restart or resume note, a context reset, a continuation: system hints the model needs before the
+# messages), then each row in queue order, then the hook note (a native request carries hook messages
+# after the messages), separated by blank lines. The synthetic inputs ride in it with their timeline
+# entries and settle with it. A row with no text settles at once. A wake with row text is named by its
+# first row that is not passive, and `folded` is what to hand back if the input is refused, lost or not
+# taken. A wake with no row text is named by its first synthetic input and is itself a synthetic input
+# (no row names it), so a refusal hands it back whole, text and timeline entries, and `folded` is
+# empty; `prompts` is the text each synthetic input is handed back under. `group` is the merged input
+# when it carries several rows, which is what must be marked so a crash can rebuild it. The images of
+# the input are bounded together, not per row.
 # meiva:link agent/graph/docs/harness-turn.md
 @dataclass(frozen=True, slots=True)
 class WakePlan:
@@ -223,17 +237,9 @@ class WakePlan:
     settled_now: tuple[Handed, ...]
     group: Handed | None
     folded: tuple[tuple[Handed, str], ...] = ()
+    prompts: Mapping[str, str] = MappingProxyType({})
 
 
-# meiva:note
-# What one reservation hands the harness. A wake with row text is one input: the synthetic inputs'
-# text first (a restart or resume note, a context reset, a continuation: system hints the model needs
-# before the messages), then each row in queue order, then the hook note (a native request carries
-# hook messages after the messages), separated by blank lines. The synthetic inputs ride in it with
-# their timeline entries and settle with it; `folded` is what to hand back if the input is refused,
-# lost or not taken. A row with no text settles at once, and a wake with no row text hands its
-# synthetic inputs over one by one. `group` is the merged input when it carries several rows, which
-# is what must be marked so a crash can rebuild it.
 def plan_wake(
     synthetic: Sequence[tuple[Handed, str]],
     rows: Sequence[tuple[Handed, str, bool]],
@@ -243,18 +249,27 @@ def plan_wake(
 ) -> WakePlan:
     parts = [(entry, text, passive) for entry, text, passive in rows if text.strip()]
     settled_now = tuple(entry for entry, text, _ in rows if not text.strip())
-    if not parts:
-        handed = tuple(entry for entry, _ in synthetic)
-        inputs = tuple(HarnessInput(key=e.key, text=prompt) for e, prompt in synthetic)
-        return WakePlan(handed, inputs, settled_now, None)
+    prompts = {entry.key: prompt for entry, prompt in synthetic}
     ordered = _in_wake_order(synthetic, parts, hook_notes_key)
+    if not ordered:
+        return WakePlan((), (), settled_now, None)
     wake = merge_handed([(entry, passive) for entry, _, passive in ordered])
+    wake_input = _wake_input(wake, ordered, images)
+    if not parts:
+        return WakePlan(
+            (wake,),
+            (wake_input,),
+            settled_now,
+            None,
+            prompts={**prompts, wake.key: wake_input.text},
+        )
     return WakePlan(
         (wake,),
-        (_wake_input(wake, ordered, images),),
+        (wake_input,),
         settled_now,
         wake if wake.carried else None,
         tuple(synthetic),
+        prompts,
     )
 
 
@@ -273,8 +288,12 @@ def _wake_input(
     parts: Sequence[tuple[Handed, str, bool]],
     images: Mapping[str, tuple[ImageBlock, ...]],
 ) -> HarnessInput:
+    text = "\n\n".join(text for _, text, _ in parts)
+    kept, skipped = fit_input_images(
+        [image for entry, _, _ in parts for image in images.get(entry.key, ())]
+    )
     return HarnessInput(
         key=wake.key,
-        text="\n\n".join(text for _, text, _ in parts),
-        images=tuple(image for entry, _, _ in parts for image in images.get(entry.key, ())),
+        text=f"{text}\n\n{skipped_images_note(skipped)}" if skipped else text,
+        images=kept,
     )

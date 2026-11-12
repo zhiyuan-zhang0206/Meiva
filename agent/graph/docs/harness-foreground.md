@@ -16,7 +16,10 @@ timeline entries and settle, are returned or are lost together with the one ackn
 timeline entries, and a refused or lost input is handed over again with them (a delivery the session could not
 take leaves them in the checkpoint's `harness_inputs`, so the next invocation carries them too). Handing them over
 one by one made the first input open the turn alone (a passive note, a hook note) and the person's message run as
-a turn of its own about a second later. A batch of several rows marks them with `harness_input_key` in their
+a turn of its own about a second later. A wake with no row text (a restart note and a hook note, say) is one
+input the same way: its synthetic inputs are merged in the same order under the first one's key, and a refused or lost one
+is handed back whole. The images of the merged input are bounded together (15 MB), not per row; one that does not fit is
+left out and the text says so. A batch of several rows marks them with `harness_input_key` in their
 payload before it is handed over, so a later run rebuilds the group and asks the harness's record about that one
 key (a requeue clears the mark). An interrupt request still pending when
 an invocation starts was aimed at a turn that has ended; the invocation settles it before it subscribes, so it

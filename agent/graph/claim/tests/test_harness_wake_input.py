@@ -238,3 +238,97 @@ async def test_a_wakes_rows_reconcile_as_one_input_the_harness_stored_or_cannot_
     assert engine.adopted == ["inbound-3000"], "the group is adopted once, under its one key"
     assert [row_status(db_conn, i) for i in stored] == ["claimed", "claimed"]
     assert [row_status(db_conn, i) for i in unknown] == ["done", "done"], "both marked, none sent"
+
+
+def _hints_only() -> AgentState:
+    return AgentState(
+        harness_inputs=[
+            {"key": "hook-notes-9", "prompt": _HOOK_NOTE, "timeline_items": []},
+            {"key": "reconciled-resume-1", "prompt": "You were restarted.", "timeline_items": []},
+            {"key": "context-reset-2", "prompt": "Context was reset.", "timeline_items": []},
+        ]
+    )
+
+
+async def test_a_wake_with_no_row_text_hands_its_synthetic_inputs_over_as_one_input(
+    db_conn: psycopg.Connection,
+    aops_pool: AsyncConnectionPool,
+    hosted_resources: HostedTurnResources,
+) -> None:
+    agent_id = agent_row(db_conn)
+    _ = insert_row(db_conn, agent_id, "system_note", "user", "  ", _PASSIVE)
+    engine = FakeEngine()
+    rt = runtime(engine, ops_pool=aops_pool, hosted_resources=hosted_resources)
+
+    _ = await harness_turn_node(_hints_only(), rt, config(agent_id))
+
+    [[one]] = engine.delivered
+    assert one.key == "reconciled-resume-1", "named by the first hint; the hook note comes last"
+    assert (
+        one.text.index("restarted")
+        < one.text.index("Context was reset")
+        < one.text.index(_HOOK_NOTE)
+    )
+
+
+async def test_a_refused_synthetic_only_wake_is_handed_over_again_as_the_same_one_input(
+    db_conn: psycopg.Connection,
+    aops_pool: AsyncConnectionPool,
+    hosted_resources: HostedTurnResources,
+) -> None:
+    agent_id = agent_row(db_conn)
+    attempts = 0
+
+    def script(inputs: Sequence[HarnessInput]) -> Sequence[BridgeEvent]:
+        nonlocal attempts
+        attempts += 1
+        return (
+            rejecting()(inputs)
+            if attempts == 1
+            else in_a_turn([i.key for i in inputs], "MEIVA_DISPLAY_TO_USER\nok")
+        )
+
+    engine = FakeEngine(script=script)
+    rt = runtime(engine, ops_pool=aops_pool, hosted_resources=hosted_resources)
+
+    async with asyncio.timeout(20):
+        _ = await harness_turn_node(_hints_only(), rt, config(agent_id))
+
+    first, second = engine.delivered
+    assert len(first) == len(second) == 1, "one input each time, never one per synthetic input"
+    assert first[0].key == second[0].key and first[0].text == second[0].text
+    assert second[0].text.count(_HOOK_NOTE) == 1, "nothing rides twice"
+
+
+def test_plan_wake_merges_synthetic_inputs_and_keeps_a_single_one_as_it_was() -> None:
+    from agent.graph.claim.harness_foreground import Handed, plan_wake
+
+    one = (Handed("control-1", None, ()), "restarted")
+    two = (Handed("hook-notes-1", None, ()), "note")
+
+    single = plan_wake([one], [], {}, hook_notes_key="hook-notes-")
+    merged = plan_wake([two, one], [], {}, hook_notes_key="hook-notes-")
+
+    assert [i.text for i in single.inputs] == ["restarted"] and single.handed == (one[0],)
+    [wake] = merged.handed
+    assert wake.key == "control-1" and wake.row_ids == () and merged.group is None
+    assert [i.text for i in merged.inputs] == ["restarted\n\nnote"]
+    assert merged.folded == () and merged.prompts["control-1"] == "restarted\n\nnote"
+
+
+def test_plan_wake_bounds_the_images_of_the_merged_input_not_of_each_row() -> None:
+    import base64
+
+    from agent.graph.claim.harness_foreground import Handed, plan_wake
+    from agent.graph.claim.harness_render import MAX_IMAGE_BYTES
+    from base.lm.harness import ImageBlock
+
+    data = base64.b64encode(b"x" * MAX_IMAGE_BYTES).decode("ascii")
+    block = ImageBlock(mime_type="image/png", data_base64=data)
+    rows = [(Handed(f"inbound-{i}", i, ()), f"message {i}", False) for i in range(1, 5)]
+    images = {f"inbound-{i}": (block,) for i in range(1, 5)}
+
+    [wake] = plan_wake([], rows, images, hook_notes_key="hook-notes-").inputs
+
+    assert len(wake.images) == 3, "four 5 MB images in one input: the fourth is left out"
+    assert "1 attached image was not sent inline" in wake.text
