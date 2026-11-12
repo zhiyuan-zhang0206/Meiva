@@ -94,10 +94,8 @@ projector looks the call up by that id once per call id and invocation
 (`aget_harness_call_item_id`). A call found nowhere (the CLI's id was never written to this agent's timeline,
 for example a forked history that predates the field) leaves `parent_item_id` empty and the item unmarked.
 
-Volume: one message is cut at `SUBAGENT_ITEM_CHARS` (8,000) and one graph invocation stops after
-`SUBAGENT_RUN_CHARS` (200,000) in total, after which sub-agent entries stop silently. A sub-agent's tool call input and
-output count against the same total and are cut at the same size; after the limit a call writes nothing and an
-output already running is replaced by `[output omitted: sub-agent limit reached]`. The main agent's own text and
-tool output are not capped; these limits exist because nobody asked the agent to produce this text.
+Volume: one message, one tool call input and one tool output are each cut at `SUBAGENT_ITEM_CHARS` (8,000),
+with `SUBAGENT_CUT` appended. Every item is written; there is no total per graph invocation. The main agent's own
+text and tool output are not cut; the cut exists because nobody asked the agent to produce this text.
 
 Parent: [harness](harness.md).

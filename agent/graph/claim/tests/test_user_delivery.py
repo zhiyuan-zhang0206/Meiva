@@ -8,7 +8,6 @@ from psycopg_pool import AsyncConnectionPool
 from agent.graph.claim.harness_activity import (
     SUBAGENT_CUT,
     SUBAGENT_ITEM_CHARS,
-    SUBAGENT_RUN_CHARS,
 )
 from agent.graph.claim.harness_turn import harness_turn_node
 from agent.graph.claim.tests.harness_support import FakeEngine
@@ -255,10 +254,9 @@ async def test_subagent_text_is_timeline_detail_and_never_a_delivery(
 
 
 # meiva:note
-# Sub-agent text is capped twice: one message is cut, and a run stops writing items after a total,
-# leaving one marker where it stopped instead of unbounded rows.
+# Sub-agent text is cut per message; every message is still written.
 # meiva:link base/lm/harness/docs/subagent-text.md
-async def test_subagent_text_volume_is_capped_per_message_and_per_run(
+async def test_subagent_text_is_cut_per_message_and_every_message_is_written(
     db_conn: psycopg.Connection,
     aops_pool: AsyncConnectionPool,
     database_gate: ProcessDbGate,
@@ -266,14 +264,14 @@ async def test_subagent_text_volume_is_capped_per_message_and_per_run(
     live_events: LiveEvents,
 ) -> None:
     long_text = "x" * (SUBAGENT_ITEM_CHARS + 50)
-    said = (_said(long_text), _said("y" * SUBAGENT_RUN_CHARS), _said("after the limit"))
+    said = (_said(long_text), _said("y" * SUBAGENT_ITEM_CHARS), _said("later"))
     items, _ = await _subagent_turn(
         db_conn, aops_pool, database_gate, hosted_resources, live_events, said
     )
-    [cut] = [i.payload for i in items if i.kind == "subagent_text"]
+    texts = [i.payload for i in items if i.kind == "subagent_text"]
+    cut = texts[0]
+    assert texts[1:] == ["y" * SUBAGENT_ITEM_CHARS, "later"]
     assert cut.endswith(SUBAGENT_CUT) and len(cut) < len(long_text)
-    assert not [i for i in items if i.kind == "system_marker"], "the limit leaves no marker"
-    assert "after the limit" not in [i.payload for i in items]
 
 
 def _subagent_call(call: str, name: str = "Bash", *, parent: str = "call-agent") -> ToolUse:
@@ -325,10 +323,9 @@ async def test_a_subagents_tool_activity_is_tied_to_the_call_that_started_it(
 
 
 # meiva:note
-# A sub-agent's tool output is capped like its text: one output is cut, and once the run's budget is
-# spent further sub-agent calls write nothing but the single marker.
+# A sub-agent's tool output is cut like its text, and later calls are still written.
 # meiva:link base/lm/harness/docs/subagent-text.md
-async def test_a_subagents_tool_output_is_capped(
+async def test_a_subagents_tool_output_is_cut(
     db_conn: psycopg.Connection,
     aops_pool: AsyncConnectionPool,
     database_gate: ProcessDbGate,
@@ -338,16 +335,6 @@ async def test_a_subagents_tool_output_is_capped(
     said = (
         _subagent_call("big"),
         _subagent_result("big", "z" * (SUBAGENT_ITEM_CHARS + 10)),
-        _subagent_call("fill"),
-        _subagent_result("fill", "w" * SUBAGENT_ITEM_CHARS),
-        *[
-            event
-            for n in range(SUBAGENT_RUN_CHARS // SUBAGENT_ITEM_CHARS + 1)
-            for event in (
-                _subagent_call(f"c{n}"),
-                _subagent_result(f"c{n}", "v" * SUBAGENT_ITEM_CHARS),
-            )
-        ],
         _subagent_call("after"),
         _subagent_result("after", "late"),
     )
@@ -356,9 +343,7 @@ async def test_a_subagents_tool_output_is_capped(
     )
     [big] = [i for i in items if i.kind == "code_output" and i.payload.startswith("z")]
     assert big.payload.endswith(SUBAGENT_CUT) and len(big.payload) < SUBAGENT_ITEM_CHARS + 100
-    assert not [i for i in items if i.kind == "system_marker"], "the limit leaves no marker"
-    assert "late" not in [i.payload for i in items]
-    assert not [i for i in items if i.tool_use_id == "after"]
+    assert "late" in [i.payload for i in items]
     assert not [i for i in items if i.payload == "Tool running"], "no call is left running"
 
 

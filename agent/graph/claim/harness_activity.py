@@ -28,17 +28,13 @@ from base.log import logger
 TEXT_CHECKPOINT_SECONDS = 0.2
 
 # meiva:note
-# Sub-agent text is work detail a CLI can produce without bound, and every item is a database row the
-# timeline pages through, so it is capped twice: one message is cut at `SUBAGENT_ITEM_CHARS`, and
-# one projector (one graph invocation) stops writing sub-agent items after `SUBAGENT_RUN_CHARS` in
-# total, leaving a single marker item where it stopped. A sub-agent's tool calls and their output count
-# against the same budget and are cut the same way. The main agent's own text and tool output are
-# not capped here; these limits are only for the part a person never asked the agent to produce.
+# Sub-agent text is work detail a CLI can produce without bound, so one message, tool call input or
+# tool output is cut at `SUBAGENT_ITEM_CHARS`. Every item is still written; there is no per-run total.
+# The main agent's own text and tool output are not cut here; the cut is only for the part a person
+# never asked the agent to produce.
 # meiva:link base/lm/harness/docs/subagent-text.md
 SUBAGENT_ITEM_CHARS = 8_000
-SUBAGENT_RUN_CHARS = 200_000
 SUBAGENT_CUT = "\n[... sub-agent text cut]"
-SUBAGENT_OMITTED = "[output omitted: sub-agent limit reached]"
 
 
 def _elapsed(start: datetime, end: datetime) -> int:
@@ -77,7 +73,6 @@ class HarnessTurnProjector:
         self._tools: dict[str, tuple[TimelineItem, TimelineItem, int, datetime]] = {}
         self._seen_tools: set[str] = set()
         self._tool_items: dict[str, str] = {}
-        self._subagent_chars = 0
         self._find_call = find_call
         self._unfound_calls: set[str] = set()
         self._pending: dict[str, TimelineItem] = {}
@@ -283,12 +278,6 @@ class HarnessTurnProjector:
             self._tool_items[tool_use_id] = found
         return found
 
-    def _within_subagent_budget(self, size: int) -> bool:
-        if self._subagent_chars > SUBAGENT_RUN_CHARS:
-            return False
-        self._subagent_chars += size
-        return self._subagent_chars <= SUBAGENT_RUN_CHARS
-
     @staticmethod
     def _cut_subagent(text: str) -> str:
         return (
@@ -307,8 +296,6 @@ class HarnessTurnProjector:
         if event.parent_tool_use_id is not None:
             parent = await self._call_item(event.parent_tool_use_id)
             payload = self._cut_subagent(payload)
-            if not self._within_subagent_budget(len(payload)):
-                return
         code_ms = 0 if subagent else _elapsed(self._reasoning_ended or self._activity_started, now)
         code_item = self._new_item(
             "agent_code",
@@ -330,12 +317,10 @@ class HarnessTurnProjector:
             self._reasoning_ended = None
 
     async def _on_subagent_text(self, event: SubagentText, now: datetime) -> None:
-        if self._subagent_chars > SUBAGENT_RUN_CHARS or not event.text.strip():
+        if not event.text.strip():
             return
         self._close_text(now)
         self._last_chat_raw = ""
-        if not self._within_subagent_budget(len(event.text)):
-            return
         _ = self._new_item(
             "subagent_text",
             self._cut_subagent(event.text),
@@ -358,8 +343,7 @@ class HarnessTurnProjector:
         output = event.content or ("Tool failed" if event.is_error else "")
         subagent = event.parent_tool_use_id is not None
         if subagent:
-            cut = self._cut_subagent(output)
-            output = cut if self._within_subagent_budget(len(cut)) else SUBAGENT_OMITTED
+            output = self._cut_subagent(output)
         self._revise(
             output_item,
             output,
