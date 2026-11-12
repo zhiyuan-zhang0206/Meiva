@@ -51,7 +51,10 @@ def root_generation_verdict(
         host=command.host,
         home=command.home,
     )
-    env = managed_service_env(inputs.service_path, environ=inputs.environment)
+    # meiva:note
+    # The reader imports NEW from a disposable checkout; the future start still
+    # runs in repo, whose venv must supply both PATH and VIRTUAL_ENV.
+    env = managed_service_env(inputs.service_path, environ=inputs.environment, venv=repo / ".venv")
     manifest = root_driver.launch_manifest(roster, repo, roles=roles, env=env, inputs=inputs)
     try:
         root_driver.require_same_generation(manifest, snapshot, reconcile=True)

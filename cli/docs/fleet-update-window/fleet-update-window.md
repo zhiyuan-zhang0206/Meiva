@@ -35,6 +35,13 @@ window (exit 2, nothing touched) and the message names the choice to make instea
 `--close-shell-sessions` with `--keep-no-services`, which restarts the root on the new code. The
 fleet never changes the operator's choice for them. A host with no root passes; a check that
 could not run warns and the window goes on (the start would say the same thing for real).
+The target reader uses the host's future source checkout for its runtime environment,
+including that checkout's `.venv` in PATH and VIRTUAL_ENV. The disposable reader's
+import location supplies the target implementation, not the environment a future
+start will launch. Those paths remain launch inputs: changing the actual runtime
+or the declared service PATH still refuses reuse, as do configuration or delivered
+write-generation changes.
+
 The gate also runs under `--dry-run`, where it fetches NEW's objects on each host (nothing else:
 no ref, no checkout) because its answer is NEW's. A window that stops everything has no root to
 check and skips it.
