@@ -167,7 +167,7 @@ class TranscriptTimeline:
     # not read stays in the CLI's file, and the next writer starts from its stored position.
     async def read_final(self) -> None:
         try:
-            while await self.writer.read_now():
+            while await self.writer.read_now(exhaustive=True):
                 pass
         except Exception:
             logger.opt(exception=True).warning(
@@ -227,5 +227,6 @@ def transcript_timeline_for(
             environ=harness_environ,
             workspace=workspace_dir(agent_id, home=home),
             session_id=session_id,
+            now_ns=lambda: round(deps.clock.now().timestamp() * 1_000_000_000),
         ),
     )

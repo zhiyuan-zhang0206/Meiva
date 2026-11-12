@@ -66,10 +66,14 @@ sends in a transaction, the rows read by sequential scans and fetched through in
 that are never answered and a restart; it also bounds the bytes read from the CLI's files, the statements and the memory.
 
 - **Calls are found by index.** A sub-agent's item nests under its call; the call's item is found by the CLI's id through
-  the partial expression index `idx_agent_harness_messages_call` (agent, `item->>'tool_use_id'`, kind `agent_code`), one
-  statement for all the calls a batch needs and none for a call already known: the writer keeps the latest
-  `CALLS_KEPT` (4,096) `tool_use_id -> item id` it has written or looked up, absent ones included, and a call that fell out
-  of it is one lookup through the index.
+  the partial index `idx_agent_harness_messages_call` on `(agent_id, call_id)`, one statement for all the calls a batch needs
+  and none for a call already known: the writer keeps the latest `CALLS_KEPT` (4,096) `tool_use_id -> item id` it has
+  written or looked up, absent ones included, and a call that fell out of it is one lookup through the index.
+  `call_id` is a column of its own (the call id of an `agent_code` item, NULL otherwise, written by every insert of an item,
+  old path and new) and not an index over an expression of `item`: an index that references `item` would stop every
+  in-place revision of a live activity (`UPDATE ... SET item`, the old path that runs with the setting off) from being a
+  heap-only update. `tests/test_call_id_index.py` shows both: the revisions stay heap-only with this index and would not
+  with an expression index, and the lookup is planned on this index.
 - **One transaction is bounded.** Records are read in turn, each at most one reader batch (4 MiB), until a transaction has
   `MAX_TRANSACTION_BYTES` (8 MiB) or `MAX_TRANSACTION_ENTRIES` (5,000) entries; the other records are read by the next
   transaction, which starts with them. The items of a transaction are one insert (pipelined) under one lock of the agent's
@@ -79,18 +83,45 @@ that are never answered and a restart; it also bounds the bytes read from the CL
   listing is made again only when the folder's modification time moves, and the session's own file is looked up by its
   path (the all-projects search is made at the first miss and every 20th after it). There is still one thread hop per
   record per poll; the cost of it is a `stat`.
-- **Memory has a bound for every structure.** Writer: `memory_sizes()` (registered inputs only until their settlement,
-  `NON_HUMAN_LIMIT`, `TURN_USAGE_LIMIT`, `CLOSED_USAGE_KEPT`, `CALLS_KEPT`, one position per record). Projector: the
-  limits in `projection.py` (`SEEN_LIMIT`, `CALLS_LIMIT`, `TURNS_LIMIT`, `LINKS_LIMIT`, `USAGE_LIMIT`, `REPORTED_LIMIT`,
-  `HOLD_ENTRIES`). Reader: the parse state of the latest two positions per record and one stat stamp per record (cleared
-  at 4,096).
+- **Memory is bounded by the conversation's constants, plus one small entry per record.** Writer: `memory_sizes()`
+  (registered inputs only until their settlement, `NON_HUMAN_LIMIT`, `TURN_USAGE_LIMIT`, `CLOSED_USAGE_KEPT`, `CALLS_KEPT`).
+  Projector: the limits in `projection.py` (`SEEN_LIMIT`, `CALLS_LIMIT`, `TURNS_LIMIT`, `LINKS_LIMIT`, `USAGE_LIMIT`,
+  `REPORTED_LIMIT`, `HOLD_ENTRIES`). Reader: the parse state of the latest two positions of each of the latest 256 records
+  that were read (a record that falls out loses only the duration of a call that was open in it), and one stat stamp per
+  record (cleared at 4,096). What is **not** bounded by a constant is what a record is: the writer's `_positions` and
+  `_last_ordinal`, the projector's links (one per sub-agent) and the reader's listing grow by one small entry (tens of bytes)
+  for each sub-agent record of the session, and a poll costs one `stat` per record. They do not grow with the length of
+  any record or with the number of turns; a session that has run a hundred thousand sub-agents would hold a hundred
+  thousand entries. A finished sub-agent's entry is not evicted: its position is how the reader knows it has nothing more to read.
 - **A lost position is not a fault.** A position the file no longer holds (replaced, truncated, rewritten) puts the record
   at its current end, in the same way as a switch to a session with history, and raises
-  `harness_timeline_position_lost` with the agent, session, record and the position that was lost. What the CLI wrote in
-  between is not on the timeline; it is still in the local file and can be projected afterwards (delete the record's row in
-  `agent_harness_transcript_positions` and restart the runtime: the keyed items already written are skipped).
-- **Retries back off.** A failed read or commit is tried again after 2, 4, 8 ... 30 seconds; the first failure and every
-  tenth are logged with their stack, the others in one line; 60 seconds of failures without a success stop the loop with a
-  fault. A `stop` asked for before the loop ran is kept (`clear_fault` clears the fault only). A runtime that closes waits
-  10 seconds for its writer and then retires it: the read in flight finishes, and the writer reads and writes nothing
-  more, so a writer of the same agent in a new runtime is never one of two.
+  `harness_timeline_position_lost` with the agent, session, record and the position that was lost. The new position counts
+  its rows from above the highest ordinal stored for the record, so the rows of the rewritten file never take the
+  ordinals of stored ones (a stored ordinal is not written again). What the CLI wrote in between is not on the
+  timeline; it is still in the CLI's local file and can be projected afterwards:
+  set the record's stored position to the start and restart the agent's runtime.
+
+  ```sql
+  UPDATE agent_harness_transcript_positions
+     SET position = '{"start":0,"offset":0,"lines":0,"sha256":""}', rebuild_ordinal = -1
+   WHERE agent_id = :agent AND session_id = :session AND record = :record;
+  ```
+
+  (A session with no stored position at all is not a candidate: it is read as a session with history and skipped, so
+  insert the row with that position instead of updating it.) The record is then read from its first row and every row
+  already projected is skipped by its key, so only what is missing is written. What is written now is **appended to the
+  end of the timeline**, after what was shown meanwhile, not placed where it happened; the timeline stays append-only, and
+  that is a boundary of the procedure. Read order inside the recovered rows is the CLI's own.
+- **Retries back off, and a stop wakes the wait.** A failed read or commit is tried again after 2, 4, 8 ... 30 seconds; the
+  first failure and every tenth are logged with their stack, the others in one line; 60 seconds of failures without a success
+  stop the loop with a fault. A `stop` ends the wait at once and a `stop` asked for before the loop ran is kept
+  (`clear_fault` clears the fault only). A runtime that closes waits 10 seconds for its writer and then retires it: it starts
+  no read and commits no plan from then on, and waits at most `RETIRE_WAIT_SECONDS` (10) for the read in flight, which, if it
+  is stuck past that, commits nothing when it returns, so a writer of the same agent in a new runtime is never one of two
+  and a close never hangs on a read.
+- **Order of the records.** The main record is read first in every transaction and never waits; only the sub-agent records
+  rotate (every transaction reads at least one of them), so a sub-agent's output is not read ahead of the link in the
+  main record while the writer is catching up. The sub-agent folder's listing is not trusted when it was made in the same
+  clock tick as the folder's last change (the modification time cannot tell a second file of that tick), and the
+  search for the session's file in other project directories is counted per session and made at once by the last read
+  before a close.

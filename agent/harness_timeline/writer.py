@@ -9,6 +9,7 @@ from dataclasses import dataclass, field
 from psycopg_pool import AsyncConnectionPool
 
 from agent.harness_timeline.plan import ReplyPolicy, WritePlan, plan_write
+from agent.harness_timeline.rebuild import REBUILD_MAX_ROWS, rebuild_record
 from agent.harness_timeline.store import (
     PlannedTimelineItem,
     StoredPosition,
@@ -16,8 +17,6 @@ from agent.harness_timeline.store import (
     aappend_transcript_rows,
     aload_recent_agent_replies,
     aload_transcript_positions,
-    aload_transcript_row_floor,
-    aload_transcript_rows,
     aset_transcript_position,
     aset_transcript_positions,
 )
@@ -28,7 +27,6 @@ from base.agents.history.timeline_item import TimelineItem
 from base.agents.messages.inbound import InboundKind
 from base.clock import Clock
 from base.db.transaction import async_write_transaction
-from base.host.boundary.json_values import is_object_dict
 from base.lm.harness import Usage
 from base.lm.harness.session.transcript.drafts import InboundPart, Projection, SentInput
 from base.lm.harness.session.transcript.entries import MAIN_RECORD
@@ -36,7 +34,6 @@ from base.lm.harness.session.transcript.ports import (
     EntryBatch,
     PositionLostError,
     RecordReader,
-    StoredRow,
 )
 from base.lm.harness.session.transcript.projection import Projector, RecentMap, RecentSet
 from base.log import logger
@@ -79,9 +76,8 @@ MAX_TRANSACTION_BYTES = 8 * 1024 * 1024
 MAX_TRANSACTION_ENTRIES = 5_000
 CALLS_KEPT = 4_096
 PROJECTION_VERSION = 1
-REBUILD_BATCH_ROWS = 500
-REBUILD_MAX_ROWS = 20_000
 HOLD_SECONDS = 120.0
+RETIRE_WAIT_SECONDS = 10.0
 NON_HUMAN_LIMIT = 1_024
 TURN_USAGE_LIMIT = 256
 CLOSED_USAGE_KEPT = 64
@@ -108,12 +104,6 @@ class _Pending:
     batches: list[EntryBatch]
 
 
-def _mapping(row: object) -> Mapping[str, object]:
-    if not is_object_dict(row):
-        raise TypeError("a stored transcript row is not an object")
-    return row
-
-
 class HarnessTimelineWriter:
     def __init__(
         self,
@@ -127,6 +117,8 @@ class HarnessTimelineWriter:
         rebuild_max_rows: int = REBUILD_MAX_ROWS,
         max_transaction_bytes: int = MAX_TRANSACTION_BYTES,
         max_transaction_entries: int = MAX_TRANSACTION_ENTRIES,
+        calls_kept: int = CALLS_KEPT,
+        retire_wait_seconds: float = RETIRE_WAIT_SECONDS,
         incarnation: RuntimeIncarnation | None,
         reader: RecordReader,
         policy: ReplyPolicy,
@@ -146,6 +138,8 @@ class HarnessTimelineWriter:
         self._rebuild_max = rebuild_max_rows
         self._max_bytes = max_transaction_bytes
         self._max_entries = max_transaction_entries
+        self._calls_kept = calls_kept
+        self._retire_wait = retire_wait_seconds
         self._incarnation = incarnation
         self._fenced = False
         self._reader = reader
@@ -165,12 +159,13 @@ class HarnessTimelineWriter:
         self._held_since: float | None = None
         self._closed_usages: deque[Usage | None] = deque(maxlen=CLOSED_USAGE_KEPT)
         self._wake = asyncio.Event()
+        self._stop_asked = asyncio.Event()
         self._io = asyncio.Lock()
         self._closed_turns = 0
         self._items_written = 0
         self._invalid_reply = False
         self._turn_usage: RecentMap[str, Usage] = RecentMap(TURN_USAGE_LIMIT)
-        self._calls: RecentMap[str, str | None] = RecentMap(CALLS_KEPT)
+        self._calls: RecentMap[str, str | None] = RecentMap(self._calls_kept)
         self._resume_at: str | None = None
         self._stopping = False
         self._retired = False
@@ -290,16 +285,30 @@ class HarnessTimelineWriter:
 
     def stop(self) -> None:
         self._stopping = True
+        self._stop_asked.set()
         self._wake.set()
 
     # meiva:note
-    # The end of a writer that did not stop in time: it waits for the read in flight (if any) to finish, then reads and
-    # writes nothing more, whatever is bound to it later. A runtime that gave up waiting for its writer retires it, so
-    # that a writer of the same agent in a new runtime is never one of two.
+    # The end of a writer that did not stop in time: from this call on it starts no read and commits no plan, whatever
+    # is bound to it later, and it waits up to `RETIRE_WAIT_SECONDS` for the read in flight (if any) to let go. A read
+    # that is stuck past that is left to end on its own: it finds the writer retired before it commits and writes
+    # nothing. A runtime that gave up waiting for its writer retires it, so that a writer of the same agent in a new
+    # runtime is never one of two, and a close never waits on a read that does not come back.
     async def retire(self) -> None:
         self.stop()
-        async with self._io:
-            self._retired = True
+        self._retired = True
+        try:
+            async with asyncio.timeout(self._retire_wait):
+                async with self._io:
+                    pass
+        except TimeoutError:
+            logger.warning(
+                "a read of the retired transcript timeline writer is still in flight after {seconds} seconds; "
+                "it commits nothing when it returns",
+                event="harness_timeline_writer_retired",
+                agent_id=self._agent_id,
+                seconds=self._retire_wait,
+            )
 
     # meiva:note
     # One read: a plan left uncommitted is committed first, otherwise every record is read after its position,
@@ -307,11 +316,11 @@ class HarnessTimelineWriter:
     # read and the checks the delivery side makes all come through here), so a plan is committed once, its
     # accounting runs once and two callers can never read the same bytes and overwrite each other's pending plan.
     # The lock is held for the whole read, including the effects that follow its commit.
-    async def read_now(self) -> bool:
+    async def read_now(self, *, exhaustive: bool = False) -> bool:
         async with self._io:
-            return await self._read_locked()
+            return await self._read_locked(exhaustive=exhaustive)
 
-    async def _read_locked(self) -> bool:
+    async def _read_locked(self, *, exhaustive: bool) -> bool:
         sid = self._session_id()
         if sid is None or self._held or self._retired:
             return False
@@ -321,7 +330,7 @@ class HarnessTimelineWriter:
             return False
         if self._pending is not None:
             return await self._commit_pending()
-        batches = await self._read_all(sid)
+        batches = await self._read_all(sid, exhaustive=exhaustive)
         release = self._hold_expired()
         if not batches and not release:
             return False
@@ -413,7 +422,8 @@ class HarnessTimelineWriter:
     # The loop. A failed read or commit is tried again after a wait that doubles from `RETRY_SECONDS` to
     # `RETRY_MAX_SECONDS`; the first failure and every `STACK_EVERY_FAILURES`-th after it are logged with their stack,
     # the others in one line. Failing for `FAULT_AFTER_SECONDS` without a success stops the loop with a fault. A
-    # `stop` ends the loop after one last read, and a stop asked for before the loop ran is not forgotten.
+    # `stop` ends the loop after one last read, wakes a wait for the next retry and does not wait for it, and a stop
+    # asked for before the loop ran is not forgotten.
     async def run(self) -> None:
         failing_since: float | None = None
         failures = 0
@@ -438,13 +448,17 @@ class HarnessTimelineWriter:
                         agent_id=self._agent_id,
                     )
                     return
-                await asyncio.sleep(min(RETRY_SECONDS * 2 ** (failures - 1), RETRY_MAX_SECONDS))
+                with suppress(TimeoutError):
+                    await asyncio.wait_for(
+                        self._stop_asked.wait(),
+                        min(RETRY_SECONDS * 2 ** (failures - 1), RETRY_MAX_SECONDS),
+                    )
                 continue
             with suppress(TimeoutError):
                 await asyncio.wait_for(self._wake.wait(), POLL_SECONDS)
             self._wake.clear()
         if self._sid is not None and self._fault is None and not self._fenced:
-            _ = await self.read_now()
+            _ = await self.read_now(exhaustive=True)
 
     def _log_failure(self, error: Exception, failures: int) -> None:
         message = "the harness timeline writer could not read or commit"
@@ -483,7 +497,18 @@ class HarnessTimelineWriter:
             projector.register(sent)
         last_ordinal: dict[str, int] = {}
         for record, stored in positions.items():
-            await self._rebuild(sid, record, stored.rebuild_ordinal, projector, last_ordinal)
+            last = await rebuild_record(
+                self._pool,
+                self._reader,
+                projector,
+                agent_id=self._agent_id,
+                sid=sid,
+                record=record,
+                after_ordinal=stored.rebuild_ordinal,
+                max_rows=self._rebuild_max,
+            )
+            if last is not None:
+                last_ordinal[record] = last
         self._projector = projector
         self._positions = positions
         self._last_ordinal = last_ordinal
@@ -492,81 +517,37 @@ class HarnessTimelineWriter:
         self._pending = None
         self._non_human = RecentSet(NON_HUMAN_LIMIT)
         self._turn_usage = RecentMap(TURN_USAGE_LIMIT)
-        self._calls = RecentMap(CALLS_KEPT)
+        self._calls = RecentMap(self._calls_kept)
         self._resume_at = None
         self._held_since = None
         self._sid = sid
 
-    async def _rebuild(
-        self,
-        sid: str,
-        record: str,
-        after_ordinal: int,
-        projector: Projector,
-        last_ordinal: dict[str, int],
-    ) -> None:
-        cursor = await self._rebuild_floor(sid, record, after_ordinal)
-        while True:
-            async with self._pool.connection() as conn:
-                loaded = await aload_transcript_rows(
-                    conn,
-                    self._agent_id,
-                    sid,
-                    record,
-                    after_ordinal=cursor,
-                    limit=REBUILD_BATCH_ROWS,
-                )
-            if not loaded:
-                return
-            rows = [StoredRow(record, ordinal, _mapping(row)) for ordinal, row in loaded]
-            _ = projector.feed(self._reader.parse_stored(rows))
-            cursor = rows[-1].ordinal
-            last_ordinal[record] = cursor
-            if len(loaded) < REBUILD_BATCH_ROWS:
-                return
-
-    async def _rebuild_floor(self, sid: str, record: str, after_ordinal: int) -> int:
-        async with self._pool.connection() as conn:
-            floor = await aload_transcript_row_floor(
-                conn,
-                self._agent_id,
-                sid,
-                record,
-                after_ordinal=after_ordinal,
-                keep=self._rebuild_max,
-            )
-        if floor is None:
-            return after_ordinal
-        logger.warning(
-            "a turn has gone more than {limit} stored rows without a quiet point; the projector "
-            "is rebuilt from the latest {limit} only, so the output of a call that began earlier "
-            "is held for a bounded time and then shown top-level",
-            event="harness_timeline_rebuild_bounded",
-            agent_id=self._agent_id,
-            record=record,
-            limit=self._rebuild_max,
-            rebuild_ordinal=after_ordinal,
-            resumed_after=floor,
-        )
-        return floor
-
     # meiva:note
     # What one transaction may hold: records are read in turn, each at most one reader batch, until a read has brought
     # `MAX_TRANSACTION_BYTES` of the CLI's bytes or `MAX_TRANSACTION_ENTRIES` entries; the records not yet read wait for
-    # the next transaction, which starts with them, so a busy main record cannot starve the others. However many
-    # sub-agents have records, a transaction (and the lock it holds on the agent's row) is bounded.
-    async def _read_all(self, sid: str) -> list[EntryBatch]:
+    # the next transaction, which starts with them. The main record is always read first and never waits: it alone holds
+    # the links that tell a sub-agent's output which call it nests under, so catching up never reads a sub-agent's
+    # output ahead of the main record's own progress (the sub-agent's output is held for its link only for a bounded
+    # time). Only the sub-agents' records rotate, and every transaction reads at least one of them, so a busy main
+    # record cannot starve them. However many sub-agents have records, a transaction (and the lock it holds on the
+    # agent's row) is bounded.
+    async def _read_all(self, sid: str, *, exhaustive: bool) -> list[EntryBatch]:
         batches: list[EntryBatch] = []
         size = entries = 0
-        records = list(await self._reader.records())
-        if self._resume_at in records:
-            at = records.index(self._resume_at)
-            records = records[at:] + records[:at]
+        records = list(await self._reader.records(exhaustive=exhaustive))
+        others = [record for record in records if record != MAIN_RECORD]
+        if self._resume_at in others:
+            at = others.index(self._resume_at)
+            others = others[at:] + others[:at]
         self._resume_at = None
-        for record in records:
-            if size >= self._max_bytes or entries >= self._max_entries:
-                self._resume_at = record
-                break
+        ordered = [record for record in records if record == MAIN_RECORD] + others
+        took_other = False
+        for record in ordered:
+            if record != MAIN_RECORD:
+                if took_other and (size >= self._max_bytes or entries >= self._max_entries):
+                    self._resume_at = record
+                    break
+                took_other = True
             batch = await self._read_record(sid, record)
             if batch is not None:
                 batches.append(batch)
@@ -591,13 +572,15 @@ class HarnessTimelineWriter:
     # record is put at its current end, as a switch to a session with history does, and reading goes on from there; the
     # event `harness_timeline_position_lost` names the agent, session, record and the position that was lost. What the CLI
     # wrote between the lost position and the new one is not on the timeline; it can be projected afterwards from the file
-    # that is still on disk (delete the record's stored position row and restart the agent's runtime to read the record
-    # from its start: the keyed items already written are skipped). A record whose file is gone altogether has no end to
-    # go to: it is no longer read.
+    # that is still on disk (the README says how). The new position counts its rows from above the highest ordinal
+    # stored for the record, so the rows of the rewritten file never take the ordinals of rows already stored (a row
+    # whose ordinal is stored is not written again). A record whose file is gone altogether has no end to go to: it is
+    # no longer read.
     async def _reseat(
         self, sid: str, record: str, lost_at: StoredPosition | None, error: PositionLostError
     ) -> None:
-        end = await self._reader.position_before(record, ())
+        floor = max(self._last_ordinal.get(record, -1), lost_at.rebuild_ordinal if lost_at else -1)
+        end = await self._reader.position_before(record, (), after_ordinal=floor)
         logger.warning(
             "the transcript no longer holds the position stored for a record; reading goes on from the "
             "record's end",
@@ -657,7 +640,7 @@ class HarnessTimelineWriter:
     async def _commit_pending(self) -> bool:
         pending = self._pending
         sid = self._sid
-        if pending is None or sid is None:
+        if pending is None or sid is None or self._retired:
             return False
         plan = pending.plan
         positions = self._next_positions(pending)

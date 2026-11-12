@@ -14,7 +14,7 @@ from dataclasses import dataclass
 
 from psycopg import AsyncConnection
 
-from base.agents.history.harness_messages import aget_harness_call_item_ids
+from base.agents.history.harness_messages import aget_harness_call_item_ids, call_id_of
 from base.agents.history.timeline_item import TimelineItem
 from base.db.rows import aquery_all
 
@@ -33,8 +33,8 @@ def _int_from_row(row: tuple[object, ...] | None) -> int:
 
 _INSERT_PLANNED_TIMELINE_ITEM = """
 INSERT INTO agent_harness_messages
-    (agent_id, seq, harness, item, inbound_id, created_at, source_key, projection_version)
-VALUES (%s, %s, %s, %s::jsonb, %s, COALESCE(%s::timestamptz, clock_timestamp()), %s, %s)
+    (agent_id, seq, harness, item, inbound_id, created_at, source_key, projection_version, call_id)
+VALUES (%s, %s, %s, %s::jsonb, %s, COALESCE(%s::timestamptz, clock_timestamp()), %s, %s, %s)
 ON CONFLICT (agent_id, source_key) WHERE source_key IS NOT NULL DO NOTHING
 """
 
@@ -122,6 +122,7 @@ async def aappend_planned_timeline_items(
                     item.created_at,
                     key,
                     projection_version,
+                    call_id_of(item),
                 )
                 for index, (key, item) in enumerate(written)
             ],

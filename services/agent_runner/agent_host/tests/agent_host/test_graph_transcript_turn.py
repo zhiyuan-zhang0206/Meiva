@@ -52,6 +52,7 @@ from base.lm.harness import (
     completed_turn,
 )
 from base.lm.harness.claude.transcript.reader import ClaudeRecordReader
+from base.lm.harness.claude.transcript.tests.support import now_ns
 from base.lm.harness.session.transcript.entries import (
     AgentText,
     AnyEntry,
@@ -67,7 +68,9 @@ from base.native_process.turn_identity import HostedTurnResources
 from services.agent_runner.agent_host.transcript.effects import TimelineEffects
 
 REPLY = "MEIVA_DISPLAY_TO_USER\nthe answer"
-key_uuid = ClaudeRecordReader(claude_home=Path("/nonexistent"), session_id="x").wire_id
+key_uuid = ClaudeRecordReader(
+    now_ns=now_ns, claude_home=Path("/nonexistent"), session_id="x"
+).wire_id
 
 
 # meiva:note
@@ -78,7 +81,7 @@ class ScriptedRecord:
     visible: int = 0
     sequence: count[int] = field(default_factory=count)
 
-    async def records(self) -> tuple[str, ...]:
+    async def records(self, *, exhaustive: bool = False) -> tuple[str, ...]:
         return ("main",)
 
     def wire_id(self, key: str) -> str:
@@ -87,7 +90,9 @@ class ScriptedRecord:
     def parse_stored(self, rows: Sequence[StoredRow]) -> tuple[AnyEntry, ...]:
         return tuple(self.entries[row.ordinal] for row in rows)
 
-    async def position_before(self, record: str, wire_ids: Sequence[str]) -> str | None:
+    async def position_before(
+        self, record: str, wire_ids: Sequence[str], *, after_ordinal: int = -1
+    ) -> str | None:
         return None
 
     async def read_after(self, record: str, position: str | None) -> EntryBatch | None:

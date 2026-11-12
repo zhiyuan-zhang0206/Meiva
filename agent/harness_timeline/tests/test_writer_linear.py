@@ -1,13 +1,15 @@
 # meiva:note
 # The writer's whole chain is linear in the length of the conversation, measured where a quadratic term would hide:
-# in what the database scans, not in the rows it returns. A long session (a main record of hundreds of turns, forty
+# in what the database reads, not in the rows it returns. A long session (a main record of hundreds of turns, forty
 # background sub-agents that keep producing, calls that are never answered) is fed to the real reader and writer in
-# rounds, and for every statement the writer sends inside a transaction the rows read by sequential scans
-# (`seq_tup_read`) and fetched through indexes (`idx_tup_fetch`) are taken from `pg_stat_xact_user_tables` of that
-# transaction. A lookup that scans the agent's timeline for a sub-agent's call (a LIMIT 1 does not stop a scan that
-# has to filter) shows up as scans that grow with the rows stored. The scans, the bytes the reader reads, the work in
-# statements and the memory of the writer and the projector per round do not grow with what is already stored, the
-# stored rows are the whitelisted ones only, and a restart reads back only the rows after the last quiet point.
+# rounds, and for every statement the writer sends, inside a transaction or outside one, what the database read for it
+# is taken from its own counters (the tuples returned, the tuples fetched and the blocks fetched of the tables and indexes,
+# the transaction's own in a transaction and the flushed totals around a statement outside one). A lookup that scans
+# the agent's timeline for a sub-agent's call shows up as reads that grow with the rows stored. The reads, the bytes the
+# reader reads and the work in statements per round do not grow with what is already stored (the slope of a
+# straight line through the rounds is flat), the memory of the writer and the projector is within its bounds after
+# every round, the stored rows are the whitelisted ones only, and a restart reads back only the rows after the last
+# quiet point. The same run with a call cache too small for the calls shows the calls found through the index.
 # meiva:link agent/harness_timeline/README.md
 
 from __future__ import annotations
@@ -31,7 +33,7 @@ from agent.harness_timeline.writer import (
 )
 from base.clock.tests.fakes import system_clock
 from base.lm.harness.claude.transcript.reader import ClaudeRecordReader
-from base.lm.harness.claude.transcript.tests.support import FIXTURES, rows
+from base.lm.harness.claude.transcript.tests.support import FIXTURES, now_ns, rows
 from base.lm.harness.session.transcript.projection import (
     CALLS_LIMIT,
     SEEN_LIMIT,
@@ -43,17 +45,23 @@ from base.native_process.runtime_incarnation import RuntimeIncarnation
 TURNS = 160
 SUBAGENTS = 40
 SUB_ROWS_PER_ROUND = 2
-_STATS = (
-    "SELECT COALESCE(sum(seq_tup_read), 0)::bigint, COALESCE(sum(idx_tup_fetch), 0)::bigint "
-    "FROM pg_stat_xact_user_tables"
+_RELATIONS = "FROM pg_class WHERE relnamespace = 'public'::regnamespace AND relkind IN ('r', 'i')"
+_IN_TRANSACTION = (
+    "SELECT COALESCE(sum(pg_stat_get_xact_tuples_returned(oid) + pg_stat_get_xact_tuples_fetched(oid) "
+    f"+ pg_stat_get_xact_blocks_fetched(oid)), 0)::bigint {_RELATIONS}"
+)
+_FLUSHED = (
+    "SELECT COALESCE(sum(pg_stat_get_tuples_returned(oid) + pg_stat_get_tuples_fetched(oid) "
+    f"+ pg_stat_get_blocks_fetched(oid)), 0)::bigint {_RELATIONS}"
 )
 
 
 class StatementLog:
     def __init__(self) -> None:
-        self.statements: list[tuple[str, int, int, int]] = []
+        self.statements: list[tuple[str, int, int]] = []
+        self.call_lookups = 0
 
-    def drain(self) -> list[tuple[str, int, int, int]]:
+    def drain(self) -> list[tuple[str, int, int]]:
         taken, self.statements = self.statements, []
         return taken
 
@@ -61,37 +69,40 @@ class StatementLog:
 LOG = StatementLog()
 
 
-async def _scanned(cursor: AsyncCursor[tuple[object, ...]]) -> tuple[int, int] | None:
-    if cursor.connection.info.transaction_status.name != "INTRANS":
-        return None
+# meiva:note
+# What the database has read so far for the relations of the schema: this transaction's own counters inside a
+# transaction, and the totals (flushed first: a backend reports its counters only at the end of a transaction) outside
+# one, where a statement is a transaction of its own that has ended when the probe runs.
+async def _reads(cursor: AsyncCursor[tuple[object, ...]]) -> int:
+    in_transaction = cursor.connection.info.transaction_status.name == "INTRANS"
     async with AsyncCursor(cursor.connection) as probe:
-        await probe.execute(_STATS)
+        if not in_transaction:
+            await probe.execute("SELECT pg_stat_force_next_flush()")
+        await probe.execute(_IN_TRANSACTION if in_transaction else _FLUSHED)
         row = await probe.fetchone()
     assert row is not None
-    return int(str(row[0])), int(str(row[1]))
+    return int(str(row[0]))
 
 
 class CountingCursor(AsyncCursor[tuple[object, ...]]):
     async def execute(self, *args: Any, **kwargs: Any) -> Self:
-        before = await _scanned(self)
+        before = await _reads(self)
         result = await super().execute(*args, **kwargs)
         await self._record(args[0], before)
         return result
 
     async def executemany(self, *args: Any, **kwargs: Any) -> None:
-        before = await _scanned(self)
+        before = await _reads(self)
         await super().executemany(*args, **kwargs)
         await self._record(args[0], before)
 
-    async def _record(self, query: object, before: tuple[int, int] | None) -> None:
-        after = await _scanned(self)
+    async def _record(self, query: object, before: int) -> None:
         text = query if isinstance(query, str) else str(query)
-        seq = idx = 0
-        if before is not None and after is not None:
-            seq, idx = after[0] - before[0], after[1] - before[1]
+        after = await _reads(self)
         LOG.statements.append(
-            (text.lstrip().split(None, 1)[0].upper(), max(self.rowcount, 0), seq, idx)
+            (text.lstrip().split(None, 1)[0].upper(), max(self.rowcount, 0), after - before)
         )
+        LOG.call_lookups += "call_id = ANY" in text
 
 
 def _line(row: dict[str, object]) -> str:
@@ -194,13 +205,22 @@ def _sub_rows(turn: int, sub: int) -> list[str]:
     ]
 
 
-def _remembers_no_more_than_its_bounds(writer: HarnessTimelineWriter) -> None:
+# meiva:note
+# Checked after every round, not once at the end: what the writer and the projector hold is within its bounds at each
+# point of the run. What is kept per record (a link, a position) is at most one per sub-agent that has started so far.
+def _remembers_no_more_than_its_bounds(
+    writer: HarnessTimelineWriter, turn: int, calls_kept: int
+) -> None:
     projector, own = writer.projector_sizes(), writer.memory_sizes()
-    assert projector["seen"] <= SEEN_LIMIT and projector["calls"] <= CALLS_LIMIT, projector
-    assert projector["turns"] <= TURNS_LIMIT and projector["usage"] <= USAGE_LIMIT, projector
-    assert projector["links"] == SUBAGENTS, "one link per sub-agent, however long they run"
-    assert projector["orphans"] == 0 and projector["held"] == 0, "nothing is held for ever"
-    assert own["calls"] <= CALLS_KEPT and own["positions"] == SUBAGENTS + 1, own
+    started = min(turn + 1, SUBAGENTS)
+    assert projector["seen"] <= SEEN_LIMIT and projector["calls"] <= CALLS_LIMIT, (turn, projector)
+    assert projector["turns"] <= TURNS_LIMIT and projector["usage"] <= USAGE_LIMIT, (
+        turn,
+        projector,
+    )
+    assert projector["links"] <= started, (turn, "one link per sub-agent, however long they run")
+    assert projector["orphans"] == 0 and projector["held"] == 0, (turn, "nothing is held for ever")
+    assert own["calls"] <= calls_kept and own["positions"] <= started + 1, (turn, own)
     assert own["sent_items"] == own["sent_inbound"] == own["sent_wire"] == 0, own
     assert own["non_human"] <= NON_HUMAN_LIMIT and own["closed_usages"] <= CLOSED_USAGE_KEPT, own
     assert own["turn_usage"] <= TURN_USAGE_LIMIT, own
@@ -223,9 +243,11 @@ def _writer(
     home: Path,
     sid: str,
     reader: ClaudeRecordReader,
+    calls_kept: int = CALLS_KEPT,
 ) -> HarnessTimelineWriter:
     del home
     writer = HarnessTimelineWriter(
+        calls_kept=calls_kept,
         pool=pool,
         agent_id=agent_id,
         harness="claude_code",
@@ -243,28 +265,34 @@ def _writer(
     return writer
 
 
-def _volume(
-    statements: list[tuple[str, int, int, int]],
-) -> tuple[int, int, int, int, int]:
-    read = sum(rows_ for kind, rows_, _, _ in statements if kind == "SELECT")
-    written = sum(rows_ for kind, rows_, _, _ in statements if kind in ("INSERT", "UPDATE"))
-    return (
-        read,
-        written,
-        len(statements),
-        sum(s for *_, s, _ in statements),
-        sum(i for *_, i in statements),
-    )
+def _volume(statements: list[tuple[str, int, int]]) -> tuple[int, int, int, int]:
+    read = sum(rows_ for kind, rows_, _ in statements if kind == "SELECT")
+    written = sum(rows_ for kind, rows_, _ in statements if kind in ("INSERT", "UPDATE"))
+    return read, written, len(statements), sum(reads for *_, reads in statements)
 
 
-def _later_is_no_worse(per_round: list[tuple[int, ...]], slack: int, label: str) -> None:
-    full = per_round[:-1]
-    early, late = full[45:65], full[-20:]
-    for column in range(len(early[0])):
-        assert (
-            max(batch[column] for batch in late)
-            <= 1.5 * max(batch[column] for batch in early) + slack
-        ), (label, column, early, late)
+# meiva:note
+# The cost per round does not grow with the rounds: the slope of the least-squares line through the rounds (the rounds
+# while the sub-agents are still being started are left out, and the last is a partial batch) carried over the span of
+# the rounds is no more than a quarter of the mean cost, plus `slack`. A cost that grows with what is stored (a scan, a lookup of
+# every call, a re-read) has a slope of the order of the mean itself; a constant has none.
+def _does_not_grow(per_round: list[tuple[int, ...]], slack: int, label: str) -> None:
+    full = per_round[SUBAGENTS + 10 : -1]
+    n = len(full)
+    for column in range(len(full[0])):
+        values = [batch[column] for batch in full]
+        mean = sum(values) / n
+        centre = (n - 1) / 2
+        slope = sum((i - centre) * (v - mean) for i, v in enumerate(values)) / sum(
+            (i - centre) ** 2 for i in range(n)
+        )
+        assert slope * n <= 0.25 * mean + slack, (
+            label,
+            column,
+            round(slope, 2),
+            round(mean, 1),
+            values,
+        )
 
 
 async def _agent(pool: AsyncConnectionPool[Any]) -> tuple[int, RuntimeIncarnation]:
@@ -319,11 +347,10 @@ async def _stored_facts(pool: AsyncConnectionPool[Any], agent_id: int) -> int:
         return await _scalar(cursor)
 
 
-async def test_a_long_session_costs_constant_work_per_round_and_a_restart_reads_only_its_tail(
-    db_url: str, tmp_path: Path
-) -> None:
+async def _long_session(db_url: str, tmp_path: Path, calls_kept: int) -> None:
     session = rows("basic")[0]["sessionId"]
     assert isinstance(session, str)
+    LOG.call_lookups = 0
     target = tmp_path / "projects" / "p" / f"{session}.jsonl"
     folder = target.parent / session / "subagents"
     folder.mkdir(parents=True)
@@ -339,8 +366,8 @@ async def test_a_long_session_costs_constant_work_per_round_and_a_restart_reads_
     await pool.open()
     try:
         agent_id, incarnation = await _agent(pool)
-        reader = ClaudeRecordReader(claude_home=tmp_path, session_id=session)
-        writer = _writer(pool, agent_id, incarnation, tmp_path, session, reader)
+        reader = ClaudeRecordReader(now_ns=now_ns, claude_home=tmp_path, session_id=session)
+        writer = _writer(pool, agent_id, incarnation, tmp_path, session, reader, calls_kept)
         per_round: list[tuple[int, ...]] = []
         read_bytes: list[tuple[int, ...]] = []
         for turn in range(TURNS):
@@ -351,17 +378,42 @@ async def test_a_long_session_costs_constant_work_per_round_and_a_restart_reads_
                 pass
             per_round.append(_volume(LOG.drain()))
             read_bytes.append((reader.bytes_read - before,))
-        _later_is_no_worse(per_round, 40, "scanned rows and statements")
-        _later_is_no_worse(read_bytes, 1_000_000, "bytes read from the CLI's files")
-        _remembers_no_more_than_its_bounds(writer)
-        assert max(batch[3] for batch in per_round) < 5_000, ("sequential scan reads", per_round)
+            _remembers_no_more_than_its_bounds(writer, turn, calls_kept)
+        _does_not_grow(per_round, 40, "rows read, written, statements and what the database read")
+        _does_not_grow(read_bytes, 100_000, "bytes read from the CLI's files")
+        assert max(batch[3] for batch in per_round) < 8_000, ("database reads", per_round)
         stored = await _stored_facts(pool, agent_id)
         assert stored > 2_000
         _ = LOG.drain()
-        restarted_reader = ClaudeRecordReader(claude_home=tmp_path, session_id=session)
-        restarted = _writer(pool, agent_id, incarnation, tmp_path, session, restarted_reader)
+        restarted_reader = ClaudeRecordReader(
+            now_ns=now_ns, claude_home=tmp_path, session_id=session
+        )
+        restarted = _writer(
+            pool, agent_id, incarnation, tmp_path, session, restarted_reader, calls_kept
+        )
         assert not await restarted.read_now()
-        read, written, _, _, _ = _volume(LOG.drain())
-        assert written <= 5 and read < stored // 10, (read, written, stored)
+        read, written, _, db_reads = _volume(LOG.drain())
+        assert written <= 5 and read < stored // 10 and db_reads < stored, (
+            read,
+            written,
+            stored,
+            db_reads,
+        )
     finally:
         await pool.close()
+
+
+async def test_a_long_session_costs_constant_work_per_round_and_a_restart_reads_only_its_tail(
+    db_url: str, tmp_path: Path
+) -> None:
+    await _long_session(db_url, tmp_path, CALLS_KEPT)
+    assert LOG.call_lookups == 0, "every call a sub-agent nests under was in the writer's cache"
+
+
+async def test_calls_that_fell_out_of_the_cache_are_found_through_the_index_at_constant_cost(
+    db_url: str, tmp_path: Path
+) -> None:
+    await _long_session(db_url, tmp_path, 8)
+    assert LOG.call_lookups > SUBAGENTS, (
+        "the cache held 8 of the 40 calls, so the others were looked up"
+    )

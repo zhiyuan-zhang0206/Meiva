@@ -14,6 +14,7 @@ from base.lm.harness.claude.transcript.reader import ClaudeRecordReader
 from base.lm.harness.claude.transcript.tests.support import (
     FIXTURES,
     entries_of,
+    now_ns,
     rows,
 )
 from base.lm.harness.session.transcript.entries import (
@@ -64,7 +65,7 @@ def test_one_read_returns_every_entry_the_parser_would_and_the_next_read_nothing
     tmp_path: Path,
 ) -> None:
     home, _ = _home(tmp_path, "basic")
-    reader = ClaudeRecordReader(claude_home=home, session_id=_session("basic"))
+    reader = ClaudeRecordReader(now_ns=now_ns, claude_home=home, session_id=_session("basic"))
     batch = _read(reader, "main", None)
     assert batch is not None
     assert _keys(list(batch.entries)) == _keys(entries_of("basic"))
@@ -76,7 +77,7 @@ def test_reading_in_pieces_equals_reading_at_once(tmp_path: Path) -> None:
     home, target = _home(tmp_path, "steer")
     lines = target.read_text().splitlines(keepends=True)
     _ = target.write_text("".join(lines[:9]))
-    reader = ClaudeRecordReader(claude_home=home, session_id=_session("steer"))
+    reader = ClaudeRecordReader(now_ns=now_ns, claude_home=home, session_id=_session("steer"))
     first = _read(reader, "main", None)
     assert first is not None
     with target.open("a") as handle:
@@ -99,11 +100,15 @@ def test_a_new_reader_continues_from_the_stored_position_after_a_restart(tmp_pat
     lines = target.read_text().splitlines(keepends=True)
     _ = target.write_text("".join(lines[:12]))
     first = _read(
-        ClaudeRecordReader(claude_home=home, session_id=_session("interrupt")), "main", None
+        ClaudeRecordReader(now_ns=now_ns, claude_home=home, session_id=_session("interrupt")),
+        "main",
+        None,
     )
     assert first is not None
     _ = target.write_text("".join(lines))
-    restarted = ClaudeRecordReader(claude_home=home, session_id=_session("interrupt"))
+    restarted = ClaudeRecordReader(
+        now_ns=now_ns, claude_home=home, session_id=_session("interrupt")
+    )
     rest = _read(restarted, "main", first.position)
     assert rest is not None
     assert _keys([*first.entries, *rest.entries]) == _keys(entries_of("interrupt"))
@@ -112,7 +117,7 @@ def test_a_new_reader_continues_from_the_stored_position_after_a_restart(tmp_pat
 
 def test_a_position_the_file_no_longer_holds_is_a_fault_not_a_restart(tmp_path: Path) -> None:
     home, target = _home(tmp_path, "basic")
-    reader = ClaudeRecordReader(claude_home=home, session_id=_session("basic"))
+    reader = ClaudeRecordReader(now_ns=now_ns, claude_home=home, session_id=_session("basic"))
     batch = _read(reader, "main", None)
     assert batch is not None
     lines = target.read_text().splitlines(keepends=True)
@@ -129,7 +134,7 @@ def test_a_position_the_file_no_longer_holds_is_a_fault_not_a_restart(tmp_path: 
 
 def test_an_unreadable_stored_position_is_a_fault(tmp_path: Path) -> None:
     home, _ = _home(tmp_path, "basic")
-    reader = ClaudeRecordReader(claude_home=home, session_id=_session("basic"))
+    reader = ClaudeRecordReader(now_ns=now_ns, claude_home=home, session_id=_session("basic"))
     with pytest.raises(PositionLostError):
         _ = _read(reader, "main", "not a position")
 
@@ -164,7 +169,7 @@ def test_a_bad_row_is_skipped_with_an_anomaly_and_never_stops_the_rows_after_it(
         "   \n",
         *good,
     )
-    reader = ClaudeRecordReader(claude_home=home, session_id=_session("basic"))
+    reader = ClaudeRecordReader(now_ns=now_ns, claude_home=home, session_id=_session("basic"))
     batch = _read(reader, "main", None)
     assert batch is not None
     assert _bad(batch.entries) == ["not_json", "not_object", "invalid_utf8", "too_deep"]
@@ -180,7 +185,7 @@ def test_a_nul_in_tool_output_is_removed_so_the_row_can_be_stored(tmp_path: Path
     marker = '"content":"'
     assert marker in text
     _ = target.write_text(text.replace(marker, marker + "a\\u0000b", 1))
-    reader = ClaudeRecordReader(claude_home=home, session_id=_session("basic"))
+    reader = ClaudeRecordReader(now_ns=now_ns, claude_home=home, session_id=_session("basic"))
     batch = _read(reader, "main", None)
     assert batch is not None
     assert "\x00" not in repr(batch.entries) and "\\u0000" not in str(
@@ -192,7 +197,7 @@ def test_a_nul_in_tool_output_is_removed_so_the_row_can_be_stored(tmp_path: Path
 def test_a_last_row_without_a_uuid_is_still_checked_by_its_hash(tmp_path: Path) -> None:
     home, target = _home(tmp_path, "basic")
     _append(target, '{"type":"last-prompt","lastPrompt":"abc"}\n')
-    reader = ClaudeRecordReader(claude_home=home, session_id=_session("basic"))
+    reader = ClaudeRecordReader(now_ns=now_ns, claude_home=home, session_id=_session("basic"))
     batch = _read(reader, "main", None)
     assert batch is not None
     assert _read(reader, "main", batch.position) is None
@@ -206,7 +211,7 @@ def test_a_position_over_invalid_bytes_is_a_fault_not_an_uncaught_decode_error(
     tmp_path: Path,
 ) -> None:
     home, target = _home(tmp_path, "basic")
-    reader = ClaudeRecordReader(claude_home=home, session_id=_session("basic"))
+    reader = ClaudeRecordReader(now_ns=now_ns, claude_home=home, session_id=_session("basic"))
     batch = _read(reader, "main", None)
     assert batch is not None
     data = target.read_bytes()
@@ -219,7 +224,7 @@ def test_catching_up_on_a_large_file_is_a_series_of_bounded_batches(tmp_path: Pa
     home, target = _home(tmp_path, "steer")
     total = len(rows("steer"))
     reader = ClaudeRecordReader(
-        claude_home=home, session_id=_session("steer"), max_batch_bytes=2_000
+        now_ns=now_ns, claude_home=home, session_id=_session("steer"), max_batch_bytes=2_000
     )
     position: str | None = None
     seen: list[AnyEntry] = []
@@ -241,6 +246,7 @@ def test_one_row_longer_than_a_batch_is_read_whole_and_one_longer_than_the_limit
 ) -> None:
     home, target = _home(tmp_path, "basic")
     reader = ClaudeRecordReader(
+        now_ns=now_ns,
         claude_home=home,
         session_id=_session("basic"),
         max_batch_bytes=1_000,
@@ -272,7 +278,7 @@ def test_reading_again_from_the_same_position_after_a_failed_commit_gives_the_sa
     lines = target.read_text().splitlines(keepends=True)
     split = next(i for i, line in enumerate(lines) if '"tool_result"' in line)
     _ = target.write_text("".join(lines[:split]))
-    reader = ClaudeRecordReader(claude_home=home, session_id=_session("basic"))
+    reader = ClaudeRecordReader(now_ns=now_ns, claude_home=home, session_id=_session("basic"))
     first = _read(reader, "main", None)
     assert first is not None
     _append(target, "".join(lines[split:]))
@@ -287,7 +293,7 @@ def test_reading_again_from_the_same_position_after_a_failed_commit_gives_the_sa
 
 def test_the_sub_agent_files_are_records_read_the_same_way(tmp_path: Path) -> None:
     home, _ = _home(tmp_path, "subagents", copy_subagents=True)
-    reader = ClaudeRecordReader(claude_home=home, session_id=_session("subagents"))
+    reader = ClaudeRecordReader(now_ns=now_ns, claude_home=home, session_id=_session("subagents"))
     assert asyncio.run(reader.records()) == ("main", "a0044dfe6d0ac4533", SYNC_AGENT)
     batch = _read(reader, SYNC_AGENT, None)
     assert batch is not None
@@ -297,17 +303,17 @@ def test_the_sub_agent_files_are_records_read_the_same_way(tmp_path: Path) -> No
 
 
 def test_a_session_with_no_file_yet_has_nothing_to_read(tmp_path: Path) -> None:
-    reader = ClaudeRecordReader(claude_home=tmp_path, session_id="missing-session")
+    reader = ClaudeRecordReader(now_ns=now_ns, claude_home=tmp_path, session_id="missing-session")
     assert asyncio.run(reader.records()) == ()
     assert _read(reader, "main", None) is None
 
 
 def test_parsing_the_stored_rows_gives_the_entries_the_read_gave(tmp_path: Path) -> None:
     home, _ = _home(tmp_path, "subagents")
-    reader = ClaudeRecordReader(claude_home=home, session_id=_session("subagents"))
+    reader = ClaudeRecordReader(now_ns=now_ns, claude_home=home, session_id=_session("subagents"))
     batch = _read(reader, "main", None)
     assert batch is not None and batch.rows
-    again = ClaudeRecordReader(claude_home=home, session_id=_session("subagents"))
+    again = ClaudeRecordReader(now_ns=now_ns, claude_home=home, session_id=_session("subagents"))
     rebuilt = again.parse_stored(batch.rows)
     assert _keys(list(rebuilt)) == _keys(list(batch.entries))
     assert [e.order.seq for e in rebuilt] == [e.order.seq for e in batch.entries]
@@ -329,7 +335,7 @@ def test_a_record_with_history_can_be_started_just_before_the_first_row_of_an_in
 ) -> None:
     home, _ = _home(tmp_path, "basic")
     sid = _session("basic")
-    reader = ClaudeRecordReader(claude_home=home, session_id=sid)
+    reader = ClaudeRecordReader(now_ns=now_ns, claude_home=home, session_id=sid)
     index, wire = _user_row_uuid("basic")
     before = asyncio.run(reader.position_before("main", [wire]))
     assert before is not None and decode(before).lines == index
@@ -350,13 +356,13 @@ def test_a_start_before_the_first_row_is_no_position_and_a_partial_last_line_is_
     folder.mkdir(parents=True)
     rows_text = ['{"type":"user","uuid":"a1"}\n', '{"type":"user","uuid":"b2"}\n']
     _ = (folder / "s1.jsonl").write_text("".join(rows_text) + '{"type":"user","uuid":"c3"')
-    reader = ClaudeRecordReader(claude_home=home, session_id="s1")
+    reader = ClaudeRecordReader(now_ns=now_ns, claude_home=home, session_id="s1")
     assert asyncio.run(reader.position_before("main", ["a1"])) is None
     second = asyncio.run(reader.position_before("main", ["b2"]))
     assert second is not None and decode(second).lines == 1
     end = asyncio.run(reader.position_before("main", ["nope"]))
     assert end is not None and decode(end).lines == 2
-    missing = ClaudeRecordReader(claude_home=tmp_path / "empty", session_id="x")
+    missing = ClaudeRecordReader(now_ns=now_ns, claude_home=tmp_path / "empty", session_id="x")
     assert asyncio.run(missing.position_before("main", [])) is None
 
 
@@ -372,10 +378,14 @@ def test_the_same_session_under_two_project_directories_reads_the_one_of_the_age
     lines = target.read_text().splitlines(keepends=True)
     _ = (own / f"{sid}.jsonl").write_text("".join(lines[:5]))
     os.utime(own / f"{sid}.jsonl", (1, 1))
-    reader = ClaudeRecordReader(claude_home=home, session_id=sid, workspace=workspace)
+    reader = ClaudeRecordReader(
+        now_ns=now_ns, claude_home=home, session_id=sid, workspace=workspace
+    )
     batch = _read(reader, "main", None)
     assert batch is not None and decode(batch.position).lines == 5
-    elsewhere = ClaudeRecordReader(claude_home=home, session_id=sid, workspace=tmp_path / "other")
+    elsewhere = ClaudeRecordReader(
+        now_ns=now_ns, claude_home=home, session_id=sid, workspace=tmp_path / "other"
+    )
     newest = _read(elsewhere, "main", None)
     assert newest is not None and decode(newest.position).lines == len(rows("basic"))
     _ = (own / f"{sid}.jsonl").unlink()
@@ -387,12 +397,14 @@ def test_a_session_id_that_is_not_known_yet_reads_nothing_until_it_is(tmp_path: 
     home, _ = _home(tmp_path, "basic")
     sid = _session("basic")
     known: list[str | None] = [None]
-    reader = ClaudeRecordReader(claude_home=home, session_id=lambda: known[0])
+    reader = ClaudeRecordReader(now_ns=now_ns, claude_home=home, session_id=lambda: known[0])
     assert asyncio.run(reader.records()) == () and _read(reader, "main", None) is None
     known[0] = sid
     assert asyncio.run(reader.records()) == ("main",)
     assert _read(reader, "main", None) is not None
-    assert reader.wire_id("k") == ClaudeRecordReader(claude_home=home, session_id=sid).wire_id("k")
+    assert reader.wire_id("k") == ClaudeRecordReader(
+        now_ns=now_ns, claude_home=home, session_id=sid
+    ).wire_id("k")
 
 
 # meiva:note
@@ -465,7 +477,7 @@ def test_polling_an_unchanged_file_opens_and_hashes_nothing_and_a_touched_one_is
     tmp_path: Path,
 ) -> None:
     home, target = _home(tmp_path, "basic")
-    reader = ClaudeRecordReader(claude_home=home, session_id=_session("basic"))
+    reader = ClaudeRecordReader(now_ns=now_ns, claude_home=home, session_id=_session("basic"))
     batch = _read(reader, "main", None)
     assert batch is not None
     assert _read(reader, "main", batch.position) is None, "the first answer checks the last row"
@@ -482,14 +494,14 @@ def test_a_batch_reports_the_bytes_it_covers_for_the_writers_transaction_budget(
     tmp_path: Path,
 ) -> None:
     home, target = _home(tmp_path, "basic")
-    reader = ClaudeRecordReader(claude_home=home, session_id=_session("basic"))
+    reader = ClaudeRecordReader(now_ns=now_ns, claude_home=home, session_id=_session("basic"))
     batch = _read(reader, "main", None)
     assert batch is not None and batch.size == target.stat().st_size
 
 
 def test_the_sub_agent_listing_is_remembered_until_the_folder_changes(tmp_path: Path) -> None:
     home, _ = _home(tmp_path, "subagents", copy_subagents=True)
-    reader = ClaudeRecordReader(claude_home=home, session_id=_session("subagents"))
+    reader = ClaudeRecordReader(now_ns=now_ns, claude_home=home, session_id=_session("subagents"))
     first = asyncio.run(reader.records())
     assert first[0] == "main" and len(first) == 3
     folder = home / "projects" / "project" / _session("subagents") / "subagents"

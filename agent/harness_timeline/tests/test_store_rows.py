@@ -19,7 +19,7 @@ from agent.harness_timeline.store import (
 )
 from base.agents.history.timeline_item import TimelineItem
 from base.lm.harness.claude.transcript.reader import ClaudeRecordReader
-from base.lm.harness.claude.transcript.tests.support import FIXTURES, rows
+from base.lm.harness.claude.transcript.tests.support import FIXTURES, now_ns, rows
 
 SESSION = "11111111-2222-3333-4444-555555555555"
 
@@ -174,7 +174,7 @@ async def test_a_long_session_costs_linear_storage_and_constant_work_per_batch(
     target.write_text("")
     lines = _long_session(turns=120)
     agent_id = await _agent(aops_pool)
-    reader = ClaudeRecordReader(claude_home=tmp_path, session_id=session)
+    reader = ClaudeRecordReader(now_ns=now_ns, claude_home=tmp_path, session_id=session)
     position: str | None = None
     series = _Series()
     batch_size = 150

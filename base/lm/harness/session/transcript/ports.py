@@ -20,6 +20,10 @@ from base.lm.harness.session.transcript.entries import AnyEntry
 # way to start a record part-way: the position just before the first row that carries one of the given wire ids
 # (the id of an input we sent), or the end of the record when none does, or None for a record with nothing in
 # it; a session whose record already holds history reads from there, so the history is not projected again.
+# `after_ordinal` is the highest ordinal already stored for the record: the rows read from the position take ordinals
+# above it, so a record that was rewritten never writes a row over a stored one. `records(exhaustive=True)` is the
+# listing that must not miss a record (the last read before a close): an adapter that throttles its search for the
+# record's file searches at once.
 # meiva:link base/lm/harness/docs/transcript-projection.md
 
 
@@ -53,10 +57,12 @@ class EntryBatch:
 class RecordReader(Protocol):
     def read_after(self, record: str, position: str | None) -> Awaitable[EntryBatch | None]: ...
 
-    def records(self) -> Awaitable[tuple[str, ...]]: ...
+    def records(self, *, exhaustive: bool = False) -> Awaitable[tuple[str, ...]]: ...
 
     def parse_stored(self, rows: Sequence[StoredRow]) -> tuple[AnyEntry, ...]: ...
 
     def wire_id(self, key: str) -> str: ...
 
-    def position_before(self, record: str, wire_ids: Sequence[str]) -> Awaitable[str | None]: ...
+    def position_before(
+        self, record: str, wire_ids: Sequence[str], *, after_ordinal: int = -1
+    ) -> Awaitable[str | None]: ...

@@ -195,7 +195,7 @@ async def test_a_retired_runtime_reads_once_more_before_the_cli_closes_and_stops
 
 
 class _NoRecord:
-    async def records(self) -> tuple[str, ...]:
+    async def records(self, *, exhaustive: bool = False) -> tuple[str, ...]:
         return ()
 
     def wire_id(self, key: str) -> str:
@@ -205,7 +205,9 @@ class _NoRecord:
         del rows
         return ()
 
-    async def position_before(self, record: str, wire_ids: Sequence[str]) -> str | None:
+    async def position_before(
+        self, record: str, wire_ids: Sequence[str], *, after_ordinal: int = -1
+    ) -> str | None:
         del record, wire_ids
         return None
 

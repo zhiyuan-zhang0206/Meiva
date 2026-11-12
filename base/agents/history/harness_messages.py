@@ -29,9 +29,19 @@ class _ItemRow:
 
 
 _INSERT_HARNESS_TIMELINE_ITEM = """
-INSERT INTO agent_harness_messages (agent_id, seq, harness, item, inbound_id, created_at)
-VALUES (%s, %s, %s, %s::jsonb, %s, COALESCE(%s::timestamptz, clock_timestamp()))
+INSERT INTO agent_harness_messages (agent_id, seq, harness, item, inbound_id, created_at, call_id)
+VALUES (%s, %s, %s, %s::jsonb, %s, COALESCE(%s::timestamptz, clock_timestamp()), %s)
 """
+
+
+# meiva:note
+# The value of the `call_id` column of a timeline item: the CLI's id of the tool call an `agent_code` item
+# recorded, None for every other item. Every insert of an item writes it, so the column and the item agree;
+# the column exists so that the lookup by call id has an index that an in-place revision of `item` does not
+# touch (an index on an expression of `item` would stop those updates from being heap-only).
+# meiva:link base/lm/harness/docs/subagent-text.md
+def call_id_of(item: TimelineItem) -> str | None:
+    return item.tool_use_id if item.kind == "agent_code" and item.tool_use_id else None
 
 
 def _int_from_row(row: tuple[object, ...] | None) -> int:
@@ -54,8 +64,8 @@ def copy_harness_timeline(
 ) -> int:
     cur.execute(
         "INSERT INTO agent_harness_messages "
-        "(agent_id, seq, harness, item, inbound_id, created_at, source_key, projection_version) "
-        "SELECT %s, seq, harness, item, NULL, created_at, source_key, projection_version "
+        "(agent_id, seq, harness, item, inbound_id, created_at, source_key, projection_version, call_id) "
+        "SELECT %s, seq, harness, item, NULL, created_at, source_key, projection_version, call_id "
         "FROM agent_harness_messages "
         "WHERE agent_id = %s",
         (new_agent_id, source_agent_id),
@@ -82,11 +92,20 @@ async def aget_next_harness_message_seq(conn: AsyncConnection, agent_id: int) ->
 
 
 # meiva:note
+# The statement of `aget_harness_call_item_ids` (parameters: the agent id, the list of call ids), public so that a
+# test can ask the planner which index answers it.
+HARNESS_CALL_ITEMS_SQL = (
+    "SELECT call_id, MAX(seq) FROM agent_harness_messages WHERE agent_id = %s "
+    "AND call_id IS NOT NULL AND call_id = ANY(%s) GROUP BY 1"
+)
+
+
+# meiva:note
 # The timeline item ids of the `agent_code` items that recorded the CLI tool calls `tool_use_ids`: each id that has
 # one, by its call id (a call id with no item is absent from the answer). A sub-agent can keep working after the
 # graph invocation, or the process, that saw its spawning call ended, so the call is found by the CLI's own id,
-# which the item carries. One statement for all the ids, answered by the partial expression index
-# `idx_agent_harness_messages_call` (agent, call id, kind `agent_code`): the cost is that of the ids asked for,
+# which the item carries in the `call_id` column. One statement for all the ids, answered by the partial index
+# `idx_agent_harness_messages_call` (agent, call id): the cost is that of the ids asked for,
 # not of the rows the agent has. The newest item wins when a call id was recorded twice.
 # meiva:link base/lm/harness/docs/subagent-text.md
 async def aget_harness_call_item_ids(
@@ -95,11 +114,7 @@ async def aget_harness_call_item_ids(
     if not tool_use_ids:
         return {}
     async with conn.cursor() as cur:
-        await cur.execute(
-            "SELECT item->>'tool_use_id', MAX(seq) FROM agent_harness_messages WHERE agent_id = %s "
-            "AND item->>'kind' = 'agent_code' AND item->>'tool_use_id' = ANY(%s) GROUP BY 1",
-            (agent_id, list(tool_use_ids)),
-        )
+        await cur.execute(HARNESS_CALL_ITEMS_SQL, (agent_id, list(tool_use_ids)))
         found: list[tuple[object, ...]] = await cur.fetchall()
     return {str(row[0]): f"h{row[1]}.0" for row in found}
 
@@ -235,6 +250,7 @@ def append_harness_timeline_items(
                     item_json,
                     inbound_id or item.inbound_id,
                     item.created_at,
+                    call_id_of(updated),
                 ),
             )
         return persisted
@@ -275,6 +291,7 @@ async def aappend_harness_timeline_items(
                     item_json,
                     inbound_id or item.inbound_id,
                     item.created_at,
+                    call_id_of(updated),
                 ),
             )
         return persisted
@@ -282,8 +299,8 @@ async def aappend_harness_timeline_items(
 
 _INSERT_KEYED_HARNESS_TIMELINE_ITEM = """
 INSERT INTO agent_harness_messages
-    (agent_id, seq, harness, item, inbound_id, created_at, source_key, projection_version)
-VALUES (%s, %s, %s, %s::jsonb, %s, COALESCE(%s::timestamptz, clock_timestamp()), %s, %s)
+    (agent_id, seq, harness, item, inbound_id, created_at, source_key, projection_version, call_id)
+VALUES (%s, %s, %s, %s::jsonb, %s, COALESCE(%s::timestamptz, clock_timestamp()), %s, %s, %s)
 ON CONFLICT (agent_id, source_key) WHERE source_key IS NOT NULL DO NOTHING
 RETURNING seq
 """
@@ -328,6 +345,7 @@ async def aappend_keyed_timeline_items(
                     item.created_at,
                     source_key,
                     projection_version,
+                    call_id_of(updated),
                 ),
             )
             if await cur.fetchone() is not None:
@@ -442,7 +460,15 @@ async def _insert_harness_activity(
     item = _normalize_harness_item(item)
     await conn.execute(
         _INSERT_HARNESS_TIMELINE_ITEM,
-        (agent_id, seq, harness, item.model_dump_json(), item.inbound_id, item.created_at),
+        (
+            agent_id,
+            seq,
+            harness,
+            item.model_dump_json(),
+            item.inbound_id,
+            item.created_at,
+            call_id_of(item),
+        ),
     )
     return item
 

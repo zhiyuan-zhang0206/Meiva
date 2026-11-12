@@ -66,6 +66,8 @@ _STREAM_CHUNK_BYTES = 1024 * 1024
 _REMEMBERED_POSITIONS = 2
 _GLOB_EVERY_MISSES = 20
 _QUIET_KEPT = 4_096
+_STATES_KEPT = 256
+_LISTING_SETTLE_NS = 2_000_000_000
 
 
 @dataclass(frozen=True, slots=True)
@@ -83,7 +85,9 @@ class ClaudeRecordReader:
         workspace: Path | None = None,
         max_batch_bytes: int = MAX_BATCH_BYTES,
         max_row_bytes: int = MAX_ROW_BYTES,
+        now_ns: Callable[[], int],
     ) -> None:
+        self._now_ns = now_ns
         self._home = claude_home
         self._session_source = (lambda: session_id) if isinstance(session_id, str) else session_id
         self._workspace = workspace
@@ -93,8 +97,9 @@ class ClaudeRecordReader:
         self._states: dict[str, dict[str, ParseState]] = {}
         self._stored_states: dict[str, ParseState] = {}
         self._quiet: dict[str, tuple[str | None, tuple[int, int]]] = {}
-        self._listing: tuple[int, tuple[str, ...]] | None = None
+        self._listing: tuple[int, tuple[str, ...], int] | None = None
         self._misses = 0
+        self._misses_session: str | None = None
         self.bytes_read = 0
 
     @classmethod
@@ -104,11 +109,13 @@ class ClaudeRecordReader:
         environ: Mapping[str, str],
         workspace: Path,
         session_id: Callable[[], str | None],
+        now_ns: Callable[[], int],
     ) -> ClaudeRecordReader:
         return cls(
             claude_home=resolve_claude_home(None, environ),
             session_id=session_id,
             workspace=workspace,
+            now_ns=now_ns,
         )
 
     def wire_id(self, key: str) -> str:
@@ -117,14 +124,14 @@ class ClaudeRecordReader:
     def parse_stored(self, rows: Sequence[StoredRow]) -> tuple[AnyEntry, ...]:
         entries: list[AnyEntry] = []
         for stored in rows:
-            state = self._stored_states.get(stored.record, ParseState())
+            state = self._stored_states.pop(stored.record, ParseState())
             state, parsed = parse_row(state, stored.row, line=stored.ordinal)
-            self._stored_states[stored.record] = state
+            _remember(self._stored_states, stored.record, state)
             entries.extend(parsed)
         return tuple(entries)
 
-    async def records(self) -> tuple[str, ...]:
-        return await asyncio.to_thread(self._records)
+    async def records(self, *, exhaustive: bool = False) -> tuple[str, ...]:
+        return await asyncio.to_thread(self._records, exhaustive=exhaustive)
 
     async def read_after(self, record: str, position: str | None) -> EntryBatch | None:
         return await asyncio.to_thread(self._read, record, position)
@@ -137,8 +144,9 @@ class ClaudeRecordReader:
     # `_GLOB_EVERY_MISSES`-th after it, not at every poll of a session whose file has not appeared. Then the most
     # recently written file wins; and the choice is pinned for the session, so the reader never moves from one file to
     # another under a stored position (a pinned file that disappears is a lost position, not a reason to look
-    # elsewhere). A new session id forgets the pin.
-    def _main(self) -> Path | None:
+    # elsewhere). A new session id forgets the pin and starts the count of misses again, so the first poll of a session
+    # always searches; `exhaustive` (the last read before a close, the reads that must not miss a file) searches at every miss.
+    def _main(self, *, exhaustive: bool = False) -> Path | None:
         sid = self._session_source()
         if sid is None:
             return None
@@ -148,8 +156,10 @@ class ClaudeRecordReader:
         if own is not None and own.is_file():
             self._pinned = (sid, own)
             return own
+        if self._misses_session != sid:
+            self._misses_session, self._misses = sid, 0
         self._misses += 1
-        if self._misses % _GLOB_EVERY_MISSES != 1:
+        if not exhaustive and self._misses % _GLOB_EVERY_MISSES != 1:
             return None
         matches = sorted((self._home / "projects").glob(f"*/{sid}.jsonl"))
         if not matches:
@@ -180,16 +190,24 @@ class ClaudeRecordReader:
             return main
         return main.parent / main.stem / "subagents" / f"agent-{record}.jsonl"
 
-    async def position_before(self, record: str, wire_ids: Sequence[str]) -> str | None:
-        return await asyncio.to_thread(self._position_before, record, tuple(wire_ids))
+    async def position_before(
+        self, record: str, wire_ids: Sequence[str], *, after_ordinal: int = -1
+    ) -> str | None:
+        return await asyncio.to_thread(
+            self._position_before, record, tuple(wire_ids), after_ordinal
+        )
 
     # meiva:note
     # Where to start a record that already holds history: just before the first row that mentions one of the wire ids
     # (the first row of an input this process sent), or at the end of the last complete row when none does. Only
     # bytes are compared (a row that names the id anywhere), so the history is not decoded; the position is counted
     # the way a read counts it (every non-blank complete line is one row). A record with no complete row has no
-    # position, and is read from its start.
-    def _position_before(self, record: str, wire_ids: tuple[str, ...]) -> str | None:
+    # position, and is read from its start. `after_ordinal` is the highest ordinal already stored for the record: the
+    # position counts its rows from above it (the count only numbers the rows that follow, so it is free to be larger
+    # than the file's rows), which keeps the rows of a rewritten file from taking the ordinals of the stored ones.
+    def _position_before(
+        self, record: str, wire_ids: tuple[str, ...], after_ordinal: int
+    ) -> str | None:
         path = self._path(record)
         if path is None or not path.is_file():
             return None
@@ -206,14 +224,22 @@ class ClaudeRecordReader:
                 offset += len(line)
         if rows == 0:
             return None
-        return encode(Position(start=start, offset=end, lines=rows, sha256=row_digest(last)))
+        return encode(
+            Position(
+                start=start, offset=end, lines=max(rows, after_ordinal + 1), sha256=row_digest(last)
+            )
+        )
 
     # meiva:note
     # The records of the session: the main one and one per sub-agent file. The folder is listed only when its modification
-    # time has changed (a file was added); between changes the answer is the one remembered, so a session with
-    # hundreds of finished sub-agents costs one stat per poll for its listing.
-    def _records(self) -> tuple[str, ...]:
-        main = self._main()
+    # time has changed (a file was added) or the listing was made too soon after it to be trusted: a directory's
+    # modification time is a clock tick, and a second file created in the same tick leaves it where it was, so a listing
+    # made less than `_LISTING_SETTLE_NS` after the stamp it saw is made again at the next poll, until one is made after
+    # the folder had been quiet for that long (that listing could not have missed a file of the same tick). Between changes
+    # the answer is the one remembered, so a session with hundreds of finished sub-agents costs one stat per poll for
+    # its listing.
+    def _records(self, *, exhaustive: bool = False) -> tuple[str, ...]:
+        main = self._main(exhaustive=exhaustive)
         if main is None:
             return ()
         folder = main.parent / main.stem / "subagents"
@@ -222,14 +248,18 @@ class ClaudeRecordReader:
         except FileNotFoundError:
             self._listing = None
             return (MAIN_RECORD,)
-        if self._listing is None or self._listing[0] != stamp:
+        if (
+            self._listing is None
+            or self._listing[0] != stamp
+            or self._listing[2] - stamp < _LISTING_SETTLE_NS
+        ):
             children = tuple(
                 sorted(
                     path.name.removeprefix("agent-").removesuffix(".jsonl")
                     for path in folder.glob("agent-*.jsonl")
                 )
             )
-            self._listing = (stamp, children)
+            self._listing = (stamp, children, self._now_ns())
         return (MAIN_RECORD, *self._listing[1])
 
     def _read(self, record: str, stored: str | None) -> EntryBatch | None:
@@ -274,7 +304,10 @@ class ClaudeRecordReader:
         rows: Sequence[RawRow],
         chunk: _Chunk,
     ) -> EntryBatch:
-        cache = self._states.setdefault(record, {})
+        cache = self._states.pop(record, {})
+        self._states[record] = cache
+        while len(self._states) > _STATES_KEPT:
+            del self._states[next(iter(self._states))]
         state = cache.get(stored or "", ParseState())
         entries: list[AnyEntry] = []
         kept: list[StoredRow] = []
@@ -350,6 +383,12 @@ class ClaudeRecordReader:
             return _Chunk(b"".join(kept))
         start = position.offset
         return _Chunk(b"", RawRow(start, start + length, None, BAD_SIZE, digest.hexdigest()))
+
+
+def _remember(states: dict[str, ParseState], record: str, state: ParseState) -> None:
+    states[record] = state
+    while len(states) > _STATES_KEPT:
+        del states[next(iter(states))]
 
 
 def _bad_row(record: str, ordinal: int, reason: str | None) -> Anomaly:

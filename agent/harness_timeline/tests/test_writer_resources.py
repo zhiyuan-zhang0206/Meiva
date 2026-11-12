@@ -141,3 +141,78 @@ async def test_a_retired_writer_reads_and_writes_nothing_more(
     assert await timeline_of(aops_pool, agent_id) == []
     writer.bind_incarnation(None)
     assert not await writer.read_now(), "binding a new incarnation does not revive it"
+
+
+async def test_the_main_record_is_always_read_first_and_only_the_sub_agents_rotate(
+    aops_pool: AsyncConnectionPool,
+) -> None:
+    agent_id, incarnation = await make_agent(aops_pool)
+    reader, _ = _linked_subagents(10)
+    writer = make_writer(aops_pool, agent_id, incarnation, reader, [], max_transaction_entries=30)
+
+    firsts: list[str] = []
+    others: list[list[str]] = []
+    for _ in range(6):
+        reader.reads.clear()
+        if not await writer.read_now():
+            break
+        firsts.append(reader.reads[0])
+        others.append([record for record in reader.reads if record != "main"])
+    assert firsts and set(firsts) == {"main"}, firsts
+    assert all(others), (
+        "every transaction reads a sub-agent record: the main one cannot starve them"
+    )
+    assert len({record for read in others for record in read}) > len(others[0]), "and they rotate"
+
+
+async def test_a_retry_backoff_is_ended_by_a_stop_and_does_not_wait_it_out(
+    aops_pool: AsyncConnectionPool,
+) -> None:
+    agent_id, incarnation = await make_agent(aops_pool)
+    reader = ScriptedReader({"main": entries_of("basic")})
+    reader.visible["main"] = 3
+    reader.fail_next = True
+    writer = make_writer(aops_pool, agent_id, incarnation, reader, [])
+    run = asyncio.create_task(writer.run())
+    while not reader.reads:
+        await asyncio.sleep(0.01)
+    await asyncio.sleep(0.05)
+    writer.stop()
+    await asyncio.wait_for(run, timeout=1.0)
+    assert reader.exhaustive_listings >= 1, (
+        "the last read of a stopped writer is the exhaustive one"
+    )
+
+
+async def test_a_retire_does_not_wait_for_ever_for_a_read_that_does_not_come_back(
+    aops_pool: AsyncConnectionPool, loguru_records: LogRecords
+) -> None:
+    agent_id, incarnation = await make_agent(aops_pool)
+    reader = ScriptedReader({"main": entries_of("basic")})
+    reader.visible["main"] = 3
+    reader.block_listing = asyncio.Event()
+    writer = make_writer(aops_pool, agent_id, incarnation, reader, [], retire_wait_seconds=0.2)
+    stuck = asyncio.create_task(writer.read_now())
+    await asyncio.sleep(0.05)
+    await asyncio.wait_for(writer.retire(), timeout=2.0)
+    assert loguru_records.events("harness_timeline_writer_retired")
+
+    reader.block_listing.set()
+    assert not await stuck, (
+        "the read that was in flight finds the writer retired and commits nothing"
+    )
+    assert await timeline_of(aops_pool, agent_id) == []
+
+
+async def test_a_record_started_again_after_a_lost_position_counts_above_the_stored_ordinals(
+    aops_pool: AsyncConnectionPool,
+) -> None:
+    agent_id, incarnation = await make_agent(aops_pool)
+    reader = ScriptedReader({"main": entries_of("basic")})
+    writer = make_writer(aops_pool, agent_id, incarnation, reader, [])
+    reader.visible["main"] = 4
+    assert await writer.read_now()
+    reader.lose_position = True
+    reader.visible["main"] = 6
+    assert not await writer.read_now()
+    assert reader.floors[-1] == 3, "the highest ordinal stored for the record is the floor"
