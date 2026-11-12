@@ -23,9 +23,9 @@ def publish(content: str | None, *, suggestions: list[str] | None = None) -> int
     from base.api_contracts.user_delivery import PublishMessage, UserMessage
 
     body = PublishMessage(content=content, suggestions=[] if suggestions is None else suggestions)
-    context = process_context.require_bound_context()
+    context = process_context.current_context()
     result = transport.post(
-        f"/api/agents/{agent_identity.require_agent_id()}/user-messages",
+        f"/api/agents/{agent_identity.require_agent_id(context)}/user-messages",
         body.model_dump(mode="json"),
         idempotency_key=context.sdk_operation_uid(),
         context=context,
@@ -70,9 +70,9 @@ def ask(questions: list[dict[str, object]]) -> list[int]:
             spec["note_suggestion"] = raw["note_suggestion"]
         items.append({"title": raw.get("title"), "content": raw.get("content"), "question": spec})
     body = AskBatch.model_validate({"questions": items})
-    context = process_context.require_bound_context()
+    context = process_context.current_context()
     result = transport.post(
-        f"/api/agents/{agent_identity.require_agent_id()}/asks",
+        f"/api/agents/{agent_identity.require_agent_id(context)}/asks",
         body.model_dump(mode="json"),
         idempotency_key=context.sdk_operation_uid(),
         context=context,
@@ -94,9 +94,9 @@ def close_question(question_id: int) -> None:
 
     if isinstance(question_id, bool) or not isinstance(question_id, int):
         raise TypeError("question_id must be an int")
-    context = process_context.require_bound_context()
+    context = process_context.current_context()
     result = transport.post(
-        f"/api/agents/{agent_identity.require_agent_id()}/asks/{question_id}/close",
+        f"/api/agents/{agent_identity.require_agent_id(context)}/asks/{question_id}/close",
         {},
         idempotency_key=context.sdk_operation_uid(),
         context=context,

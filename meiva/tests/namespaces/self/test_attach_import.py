@@ -26,7 +26,7 @@ import pytest
 from meiva.self.harness.registration import HarnessRegistration, handle_digest
 from meiva.self.harness.store import FileRegistrationStore
 
-_REPO_ROOT = Path(__file__).resolve().parents[3]
+_REPO_ROOT = Path(__file__).resolve().parents[4]
 
 _CLEAN_ENV_STRIP = frozenset(
     {
@@ -58,7 +58,9 @@ def marker(tmp_path: Path) -> Path:
 # The probe runs a fixed argv from this file; `sys.executable` is the test's own
 # interpreter, so the subprocess call carries no shell and no caller input.
 # meiva:link meiva/self/harness/docs/harness-attach.md
-def _run_probe(marker: Path, handle: str | None = None, home: Path | None = None) -> dict[str, Any]:
+def _run_probe(
+    marker: Path, handle: str | None = None, home: Path | None = None, ui_first: str | None = None
+) -> dict[str, Any]:
     env = {key: value for key, value in os.environ.items() if key not in _CLEAN_ENV_STRIP}
     env.pop("MEIVA_HARNESS_HANDLE", None)
     if handle is not None:
@@ -66,7 +68,17 @@ def _run_probe(marker: Path, handle: str | None = None, home: Path | None = None
     if home is not None:
         env["MEIVA_HOME"] = str(home)
     proc = subprocess.run(  # noqa: S603
-        [sys.executable, "-I", "-B", "-X", "utf8", str(_PROBE), str(_REPO_ROOT), str(marker)],
+        [
+            sys.executable,
+            "-I",
+            "-B",
+            "-X",
+            "utf8",
+            str(_PROBE),
+            str(_REPO_ROOT),
+            str(marker),
+            *([] if ui_first is None else [ui_first]),
+        ],
         cwd=_REPO_ROOT,
         env=env,
         capture_output=True,
@@ -139,3 +151,13 @@ def test_a_live_registration_attaches_on_the_first_identity_read(
 # only its digest, so the value itself is the test's to choose.
 def _handle() -> str:
     return base64.urlsafe_b64encode(secrets.token_bytes(32)).rstrip(b"=").decode()
+
+
+@pytest.mark.parametrize("operation", ["ask", "publish", "close"])
+def test_first_ui_call_resolves_and_reports_the_harness_admission_failure(
+    marker: Path, tmp_path: Path, operation: str
+) -> None:
+    report = _run_probe(marker, handle="hx_no_registration", home=tmp_path, ui_first=operation)
+    assert Path(report["ui_source"]).is_relative_to(_REPO_ROOT)
+    assert report["ui_first"]["error"] == "HarnessAttachError"
+    assert "no harness session matches this handle" in report["ui_first"]["message"]

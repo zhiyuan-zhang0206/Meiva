@@ -50,6 +50,11 @@ def _exec(
 ) -> int:
     import meiva
 
+    if handle is None or not handle.strip():
+        raise ValueError(
+            "harness handle is required: run inside the bridge-launched shell with "
+            "MEIVA_HARNESS_HANDLE, or supply --handle; --agent-id only checks identity"
+        )
     code = stdin.read() if file is None or file == "-" else Path(file).read_text(encoding="utf-8")
     if not code.strip():
         raise ValueError("Python input must be nonempty")

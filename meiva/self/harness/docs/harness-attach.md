@@ -28,8 +28,11 @@ read raises `HarnessAttachError` carrying the reason (see below), and later read
 same error without trying again.
 
 `meiva harness exec --file script.py` is the CLI around the same seam: it reads the
-script (or stdin as `-`) and runs it inside the attachment, with no bootstrap file in
-the child's workspace.
+script (or stdin as `-`) and runs it inside the attachment. Its handle defaults to
+the bridge-launched shell's `MEIVA_HARNESS_HANDLE`; `--agent-id` and `--session-id`
+check the registration and grant no identity. A missing or blank handle is rejected
+before script execution. Report a missing launch environment to the bridge owner;
+never copy another agent's handle.
 
 ## The registration row
 
@@ -71,6 +74,7 @@ document cannot do it either, so the SDK makes the attachment itself — on the
 |---|---|
 | `meiva.context` (framework and plugin code), `meiva.DB`, `meiva.REDIS` | the context slot |
 | `meiva.self.AGENT_ID`, every `meiva.agents` call | `agent_identity._bound()` |
+| `meiva.ui.ask`, `publish`, `close_question` | the context slot, followed by caller validation |
 | a plugin namespace (`meiva.tasks`, …) | `boot.maybe_load_plugins_for_missing` |
 
 Attaching replays the agent's plugin-state snapshot through the codec, and that opens
@@ -85,7 +89,7 @@ fail when the borrow fails.
 A failed attachment is recorded, not raised:
 
 - calls that answer without an identity keep working — an absolute-path file
-  read, `meiva.ui` — and `meiva.files` / `meiva.shell` fall back to `$HOME`, the
+  read — and `meiva.files` / `meiva.shell` fall back to `$HOME`, the
   documented pre-bootstrap base, instead of failing. `HarnessAttachError` is a
   `ContextOutsideProcessError`, which is what makes those readers keep their own
   fallback while the reads that need an identity report the reason;

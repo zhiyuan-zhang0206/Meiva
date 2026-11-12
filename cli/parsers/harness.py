@@ -19,12 +19,15 @@ def _h_harness_exec(args: argparse.Namespace) -> int:
     from cli.database.runtime import runtime_of
 
     opts = options(args, _ExecOptions)
+    runtime = runtime_of(args)
     return cmd_harness_exec(
         file=opts.file,
-        handle=opts.handle,
+        handle=opts.handle
+        if opts.handle is not None
+        else runtime.host.environ.get("MEIVA_HARNESS_HANDLE"),
         agent_id=opts.agent_id,
         session_id=opts.session_id,
-        stdin=runtime_of(args).terminal.stdin,
+        stdin=runtime.terminal.stdin,
     )
 
 

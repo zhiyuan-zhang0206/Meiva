@@ -751,7 +751,7 @@ def harness_failure(exc: BaseException) -> HarnessAttachError:
     return HarnessAttachError(
         "this process was started by a harness bridge, but the SDK could not borrow the "
         f"session's identity: {exc}. Calls that do not need the identity still work (an "
-        "absolute-path file read, meiva.ui); meiva.self.AGENT_ID, the "
+        "absolute-path file read); meiva.ui, meiva.self.AGENT_ID, the "
         "plugin namespaces (meiva.tasks) and meiva.agents all fail with this error. A "
         "session that expired or ended cannot be attached again: stop retrying and report "
         "this failure in your reply instead of working around it."

@@ -7,6 +7,7 @@ from typing import Any
 import pytest
 
 from cli.commands.harness import cmd_harness_exec, cmd_harness_verify_sessions
+from cli.database.tests.command_inputs import command_runtime as command_runtime
 from cli.parsers import build_parser
 
 
@@ -67,7 +68,7 @@ def test_exec_reads_stdin_when_no_file_is_given(
     calls: list[tuple[Any, ...]] = []
     code = cmd_harness_exec(
         file="-",
-        handle=None,
+        handle="hx_test",
         agent_id=None,
         session_id=None,
         opener=opener(attachment, calls),
@@ -75,7 +76,7 @@ def test_exec_reads_stdin_when_no_file_is_given(
     )
     assert code == 0
     assert capsys.readouterr().out == "from stdin\n"
-    assert calls == [(None, {"agent_id": None, "session_id": None})]
+    assert calls == [("hx_test", {"agent_id": None, "session_id": None})]
 
 
 def test_an_empty_script_exits_one_with_a_message(
@@ -84,7 +85,7 @@ def test_an_empty_script_exits_one_with_a_message(
     calls: list[tuple[Any, ...]] = []
     code = cmd_harness_exec(
         file=None,
-        handle=None,
+        handle="hx_test",
         agent_id=None,
         session_id=None,
         opener=opener(RecordingAttachment(), calls),
@@ -98,7 +99,7 @@ def test_an_empty_script_exits_one_with_a_message(
 def test_a_missing_file_exits_one_with_a_message(capsys: pytest.CaptureFixture[str]) -> None:
     code = cmd_harness_exec(
         file="/nonexistent/harness-script.py",
-        handle=None,
+        handle="hx_test",
         agent_id=None,
         session_id=None,
         opener=lambda *_args, **_kwargs: RecordingAttachment(),
@@ -115,7 +116,7 @@ def test_a_refused_attachment_exits_one(capsys: pytest.CaptureFixture[str]) -> N
     code = cmd_harness_exec(
         file="-",
         stdin=io.StringIO("print('never runs')\n"),
-        handle=None,
+        handle="hx_test",
         agent_id=None,
         session_id=None,
         opener=refuse,
@@ -161,3 +162,46 @@ def test_verify_sessions_fails_naming_a_record_left_in_the_old_layout(
     assert (
         build_parser().parse_args(["harness", "verify-sessions"]).harness_cmd == "verify-sessions"
     )
+
+
+@pytest.mark.parametrize("handle", [None, "", "   "])
+def test_missing_handle_refuses_before_opening_or_running_input(
+    handle: str | None, capsys: pytest.CaptureFixture[str]
+) -> None:
+    calls: list[tuple[Any, ...]] = []
+    code = cmd_harness_exec(
+        file="-",
+        handle=handle,
+        agent_id=41,
+        session_id=None,
+        opener=opener(RecordingAttachment(), calls),
+        stdin=io.StringIO("raise AssertionError('must not run')"),
+    )
+    assert code == 1
+    assert calls == []
+    error = capsys.readouterr().err
+    assert "MEIVA_HARNESS_HANDLE" in error
+    assert "--agent-id only checks identity" in error
+
+
+def test_parser_uses_the_bridge_environment_handle(
+    command_runtime: object, capsys: pytest.CaptureFixture[str]
+) -> None:
+    from dataclasses import replace
+
+    from cli.database.runtime import CommandRuntime, Terminal
+
+    assert isinstance(command_runtime, CommandRuntime)
+    runtime = replace(
+        command_runtime,
+        host=replace(command_runtime.host, environ={"MEIVA_HARNESS_HANDLE": "hx_unregistered"}),
+        terminal=Terminal(
+            stdin=io.StringIO("raise AssertionError('must not run')"),
+            stdout=io.StringIO(),
+            stderr=io.StringIO(),
+        ),
+    )
+    args = build_parser().parse_args(["harness", "exec"])
+    args.runtime = runtime
+    assert args.func(args) == 1
+    assert "no harness session matches this handle" in capsys.readouterr().err
