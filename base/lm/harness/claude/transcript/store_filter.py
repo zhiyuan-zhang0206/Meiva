@@ -134,6 +134,10 @@ def _kept(raw: Mapping[str, object], cap: int) -> dict[str, object] | None:
         and attachment.get("type") == "queued_command"
     ):
         queued = _scalars(attachment, _QUEUED_FIELDS)
+        origin = attachment.get("origin")
+        kind = origin.get("kind") if is_object_dict(origin) else None
+        if isinstance(kind, str):
+            queued["origin"] = {"kind": _cut(kind, SCALAR_CAP_BYTES)}
         prompt = attachment.get("prompt")
         if prompt is not None:
             queued["prompt"] = _cut(prompt, cap) if isinstance(prompt, str) else None

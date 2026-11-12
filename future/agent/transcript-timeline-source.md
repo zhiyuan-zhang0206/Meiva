@@ -356,6 +356,23 @@ One rule: an input is delivered when the record shows it; the entry that shows i
       input the CLI never wrote is delivered again; (g) shows none of the parent's history re-projected.
    5. Roll back by setting it false and restarting the runtime; the old path resumes from the end of the timeline.
 
+   **Run so far (2026-11-12, this machine's logged-in `claude` 2.1.322, model `haiku`, throwaway Postgres of the test
+   harness, a scratch test, not a cluster).** The real bridge and `ClaudeSession`, the real `harness_turn` node, the
+   writer, the effects and the database; no gateway, dispatcher or host. Results: (a) a turn with a Bash call:
+   input `done`, items `inbound_chat, agent_reasoning, agent_code, code_output, agent_chat`, two `llm_usage` events,
+   5 stored rows (5 KB); (b) a steer during `sleep 12`: both inputs `done`, the absorbed steer between the output and the
+   final reply, no anomaly; (c) a stop: the record's `status:Turn interrupted` is the only interrupt marker, no
+   `turn_end_unseen`; (f) `kill -9` of the CLI between two messages, then a message: both inputs `done` once, no
+   duplicate item, the resumed session answered from the earlier turn; (d) a sub-agent and a background command: the
+   sub-agent's items nest under its call, `llm_usage` gives `agent` and `agent_subagent` events, both background
+   notifications are `Background task ... completed` markers, 22 stored rows, no anomaly. The first runs found two
+   parser gaps, fixed here: row types the CLI writes in a long session were reported as anomalies (`ai-title`, titles,
+   links, `informational`, `stop_hook_summary`, many context attachments), and a `queued_command` attachment whose own
+   `origin` is `task-notification` was read as an input nobody sent. A pitfall for whoever repeats it: the CLI finds
+   its login through `USER` and `LOGNAME`; a child environment without them answers "Not logged in".
+   **Not run**: `/compact`, a fork of the agent, a CLI-started turn while the agent is idle (`own_turn` wake), the full
+   cluster (`meiva init`/`start`) and the turn-on-while-idle rollout step; they remain for the coordinator.
+
 ## 10. Pull requests, rollback, deployment
 
 | PR | Content | Rollback |

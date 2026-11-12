@@ -8,6 +8,7 @@ from pathlib import Path
 
 import pytest
 
+from base.lm.harness.claude.transcript.parse import ParseState, parse_row
 from base.lm.harness.claude.transcript.position import PositionLostError, decode
 from base.lm.harness.claude.transcript.reader import ClaudeRecordReader
 from base.lm.harness.claude.transcript.tests.support import (
@@ -15,7 +16,13 @@ from base.lm.harness.claude.transcript.tests.support import (
     entries_of,
     rows,
 )
-from base.lm.harness.session.transcript.entries import Anomaly, AnomalyKind, AnyEntry, ToolResult
+from base.lm.harness.session.transcript.entries import (
+    Anomaly,
+    AnomalyKind,
+    AnyEntry,
+    Notice,
+    ToolResult,
+)
 from base.lm.harness.session.transcript.ports import EntryBatch
 
 SYNC_AGENT = "af6798fb938fb227f"
@@ -382,3 +389,69 @@ def test_a_session_id_that_is_not_known_yet_reads_nothing_until_it_is(tmp_path: 
     assert asyncio.run(reader.records()) == ("main",)
     assert _read(reader, "main", None) is not None
     assert reader.wire_id("k") == ClaudeRecordReader(claude_home=home, session_id=sid).wire_id("k")
+
+
+# meiva:note
+# Row types a long real session (CLI 2.1.322) carries besides the conversation: titles, links, renames, file-history
+# deltas, the informational and stop-hook system rows and the context attachments. None is a conversation fact, so
+# none is an anomaly (an anomaly is reported once per type, and these are not the ones to report).
+def test_the_non_conversation_rows_of_a_long_session_are_ignored_not_reported() -> None:
+    stamp = "2026-11-12T09:00:00Z"
+    raws: list[dict[str, object]] = [
+        {"type": "ai-title", "aiTitle": "t"},
+        {"type": "custom-title", "customTitle": "t"},
+        {"type": "agent-name", "agentName": "n"},
+        {"type": "pr-link", "prNumber": 1},
+        {"type": "bridge-session", "x": 1},
+        {"type": "relocated", "x": 1},
+        {"type": "file-history-delta", "x": 1},
+        {"type": "system", "subtype": "informational", "uuid": "u1", "timestamp": stamp},
+        {"type": "system", "subtype": "stop_hook_summary", "uuid": "u2", "timestamp": stamp},
+    ]
+    for index, kind in enumerate(
+        ("deferred_tools_record", "instructions", "file", "task_status", "nested_memory")
+    ):
+        raws.append(
+            {
+                "type": "attachment",
+                "uuid": f"a{index}",
+                "timestamp": stamp,
+                "attachment": {"type": kind},
+            }
+        )
+    state = ParseState()
+    seen: list[AnyEntry] = []
+    for line, raw in enumerate(raws):
+        state, parsed = parse_row(state, raw, line=line)
+        seen.extend(parsed)
+    assert seen == []
+
+
+# meiva:note
+# A finished background command can reach a running turn as a `queued_command` attachment whose own `origin` says
+# `task-notification` (recorded live, CLI 2.1.322): the CLI telling the conversation something, never an input of
+# ours, so it is a notice that opens no turn and not a human input nobody sent.
+def test_a_notification_queued_into_a_running_turn_is_a_notice_and_not_an_unmatched_input() -> None:
+    prompt = (
+        "<task-notification><task-id>b1</task-id><tool-use-id>toolu_1</tool-use-id>"
+        "<status>completed</status><summary>done</summary></task-notification>"
+    )
+    row: dict[str, object] = {
+        "type": "attachment",
+        "uuid": "q1",
+        "timestamp": "2026-11-12T09:00:00Z",
+        "attachment": {
+            "type": "queued_command",
+            "prompt": prompt,
+            "source_uuid": "not-ours",
+            "origin": {"kind": "task-notification"},
+        },
+    }
+    _, parsed = parse_row(ParseState(), row, line=0)
+    [notice] = parsed
+    assert isinstance(notice, Notice)
+    assert notice.call_id == "toolu_1" and not notice.opens_turn
+    assert "Background task b1 completed" in notice.text
+    plain = {**row, "attachment": {"type": "queued_command", "prompt": "hi", "source_uuid": "w"}}
+    _, steered = parse_row(ParseState(), plain, line=1)
+    assert [type(entry).__name__ for entry in steered] == ["HumanInput"]
