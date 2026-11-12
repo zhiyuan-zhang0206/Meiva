@@ -34,6 +34,7 @@ from base.lm.harness.session.transcript.ports import EntryBatch, StoredRow
 from base.lm.harness.tests.roots import bridge_root_values
 from base.lm.harness.wiring import open_session
 from base.log.tests.log_records import LogRecords
+from base.log.tests.log_records import loguru_records as loguru_records
 from base.native_process.runtime_incarnation import RuntimeIncarnation
 from services.agent_runner.agent_host.runtime import AgentRuntime, HarnessSessions, build_runtime
 from services.agent_runner.agent_host.transcript.timeline import (
@@ -196,11 +197,15 @@ async def test_a_retired_runtime_reads_once_more_before_the_cli_closes_and_stops
 
 
 class _NoRecord:
+    def __init__(self) -> None:
+        self.polls = 0
+
     @property
     def cli_version(self) -> str | None:
         return None
 
     async def records(self, *, exhaustive: bool = False) -> tuple[str, ...]:
+        self.polls += 1
         return ()
 
     def wire_id(self, key: str) -> str:
@@ -303,3 +308,59 @@ def test_the_setting_on_the_built_in_agent_means_nothing_and_is_not_reported(
     )
     assert built is None
     assert loguru_records.events("harness_timeline_unsupported_harness") == []
+
+
+class _BrokenPublisher(QuietPublisher):
+    async def start(self, task_group: asyncio.TaskGroup) -> None:
+        async def worker() -> None:
+            await asyncio.sleep(0.01)
+            raise ValueError("a publisher worker met an error that is not the transport's")
+
+        _ = task_group.create_task(worker())
+
+
+# meiva:note
+# The writers of all the agents of a host run in one task group (`HarnessSessions._tasks`). A publisher worker that
+# ends with an error that is not the transport's takes down the group it was started in; that group is the one agent's
+# own, so the error stops this agent's writer (which the next hosted turn starts again) and never reaches the host's
+# group, where it would cancel every other agent's writer.
+async def test_one_agents_publisher_failing_leaves_another_agents_writer_working(
+    aops_pool: AsyncConnectionPool, loguru_records: LogRecords
+) -> None:
+    def build(agent_id: int, publisher: QuietPublisher, reader: _NoRecord) -> TranscriptTimeline:
+        timeline = TranscriptTimeline(
+            TimelineDeps(
+                pool=aops_pool,
+                clock=system_clock(),
+                marker_id=lambda: "m",
+                publisher_factory=lambda _: publisher,
+            ),
+            agent_id=agent_id,
+            harness="claude_code",
+            policy=ReplyPolicy(explicit_visibility=False, delivery_mode=None),
+            reader_for=lambda _: reader,
+        )
+        timeline.attach(lambda: "session-1")
+        timeline.writer.start_reading()
+        return timeline
+
+    broken = build(71, _BrokenPublisher(), _NoRecord())
+    reader = _NoRecord()
+    healthy = build(72, QuietPublisher(), reader)
+
+    async def polled(after: int) -> None:
+        while reader.polls <= after:
+            healthy.wake(None)
+            await asyncio.sleep(0.01)
+
+    async with asyncio.TaskGroup() as hosts_group:
+        _ = hosts_group.create_task(healthy.run())
+        _ = hosts_group.create_task(broken.run())
+        while not loguru_records.events("harness_timeline_writer_faulted"):
+            await asyncio.sleep(0.01)
+        await asyncio.wait_for(polled(reader.polls), 10)
+        await healthy.close()
+
+    assert loguru_records.events("harness_timeline_writer_faulted"), "the failure was reported"
+    assert broken.wants_task, "the next hosted turn starts the failed agent's writer again"
+    assert healthy.writer.fault is None

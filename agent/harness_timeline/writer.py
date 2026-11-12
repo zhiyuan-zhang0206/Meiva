@@ -14,7 +14,7 @@ from agent.harness_timeline.store import (
     StoredPosition,
     aappend_planned_timeline_items,
     aappend_transcript_rows,
-    aload_recent_agent_replies,
+    ainit_reply_progress,
     aload_transcript_positions,
     aset_transcript_position,
     aset_transcript_positions,
@@ -224,13 +224,6 @@ class HarnessTimelineWriter:
 
     def projector_sizes(self) -> dict[str, int]:
         return self._projector.memory_sizes()
-
-    # meiva:note
-    # The `agent_chat` items among the agent's latest `rows` timeline rows, for the effects to offer to the (idempotent)
-    # capture of replies for delivery again when the writer starts.
-    async def recent_replies(self, rows: int) -> list[TimelineItem]:
-        async with self._pool.connection() as conn:
-            return await aload_recent_agent_replies(conn, self._agent_id, rows=rows)
 
     def clear_fault(self) -> None:
         self._fault = None
@@ -737,6 +730,7 @@ class HarnessTimelineWriter:
     ) -> tuple[list[TimelineItem], dict[str, str | None]]:
         async with async_write_transaction(self._pool) as conn:
             await lock_inbound_owner(conn, self._agent_id, incarnation=self._incarnation)
+            await ainit_reply_progress(conn, self._agent_id)
             _ = await aappend_transcript_rows(
                 conn,
                 self._agent_id,

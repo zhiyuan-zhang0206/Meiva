@@ -99,7 +99,11 @@ feed the projector, write, publish. `plan.py` (strict, pure) turns a `Projection
    withdrawn in the same statement, so it is not delivered twice.
 4. Upsert the position.
 5. After commit: publish the live events, capture user-facing items for delivery
-   (`capture_items(..., source_key="harness")`), log usage, and wake the graph's waiters.
+   (`capture_items(..., source_key="harness")`), log usage, and wake the graph's waiters. What delivery still owes is
+   durable: the first commit makes `agent_harness_timeline_progress.replies_seq` at the pre-commit end of the timeline
+   (so a fork's copy and earlier event-path history are never offered), the effects raise it after the replies up to it
+   were captured (a conflicting reply is dropped with an event, one at a time), and a restart reads only the keyed
+   `agent_chat` rows after it.
 
 **Failure.** A database error does not drop anything: the position did not advance, so the next read returns the
 same entries; the writer retries with backoff. A failure past a bound faults the session with a named error so

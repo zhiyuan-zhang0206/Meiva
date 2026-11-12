@@ -93,7 +93,7 @@ class TranscriptTimeline:
         self._agent_id = agent_id
         self._session_id: Callable[[], str | None] = lambda: None
         self._publisher = deps.publisher_factory(agent_id)
-        self.effects = TimelineEffects(agent_id, self._publisher)
+        self.effects = TimelineEffects(agent_id, self._publisher, pool=deps.pool, clock=deps.clock)
         reader = reader_for(self._current_session)
         self.writer = HarnessTimelineWriter(
             pool=deps.pool,
@@ -138,29 +138,39 @@ class TranscriptTimeline:
     # one at a time per runtime: the host starts it at the first hosted turn and again at a later one if the writer
     # stopped on its own fault (a started writer clears the fault). What the loop keeps lives in the database (the
     # positions and the stored rows), so a stopped writer loses nothing. It logs the failure it ended with instead of
-    # raising, so one agent's writer can never cancel the other agents' tasks in the group.
+    # raising: the publisher's own tasks run in a group of this agent's, and one that ends with an error that is not the transport's takes that group down and leaves it as an ExceptionGroup, which is caught around the group, so neither the writer nor its publisher can cancel the other agents' tasks in the host's group. The next hosted turn starts the writer again.
     async def run(self) -> BaseException | None:
         self._running = True
         self._stopped.clear()
         self.writer.clear_fault()
         try:
-            async with asyncio.TaskGroup() as group:
-                await self._publisher.start(group)
-                try:
-                    await self.effects.recover(self.writer.recent_replies)
-                    await self.writer.run()
-                except Exception:
-                    logger.opt(exception=True).error(
-                        "the transcript timeline writer stopped with an unexpected error",
-                        event="harness_timeline_writer_faulted",
-                        agent_id=self._agent_id,
-                    )
-                finally:
-                    await self._publisher.aclose()
+            await self._run_in_own_group()
+        except Exception:
+            logger.opt(exception=True).error(
+                "the transcript timeline's publisher failed; the writer stops and is started again by the "
+                "next hosted turn",
+                event="harness_timeline_writer_faulted",
+                agent_id=self._agent_id,
+            )
         finally:
             self._running = False
             self._stopped.set()
         return None
+
+    async def _run_in_own_group(self) -> None:
+        async with asyncio.TaskGroup() as group:
+            await self._publisher.start(group)
+            try:
+                await self.effects.recover()
+                await self.writer.run()
+            except Exception:
+                logger.opt(exception=True).error(
+                    "the transcript timeline writer stopped with an unexpected error",
+                    event="harness_timeline_writer_faulted",
+                    agent_id=self._agent_id,
+                )
+            finally:
+                await self._publisher.aclose()
 
     # meiva:note
     # A last read, then the end of the writer. Reading never fails the close: what the CLI wrote and this could

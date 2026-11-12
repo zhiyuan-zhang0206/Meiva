@@ -1,14 +1,21 @@
 from __future__ import annotations
 
+import asyncio
 from collections import deque
 from collections.abc import Awaitable, Callable
+from dataclasses import dataclass
+
+from psycopg_pool import AsyncConnectionPool
 
 from agent.graph.claim.harness_activity import resolve_pricing_model
 from agent.graph.claim.harness_inbox import Emits, publish_items
 from agent.graph.hooks.user_delivery import capture_items
+from agent.harness_timeline.store import aconfirm_replies, aload_unconfirmed_replies
 from agent.harness_timeline.writer import Committed
 from base.agents.context import MeivaContext
 from base.agents.history.timeline_item import TimelineItem
+from base.agents.to_user.delivery.store import DeliveryConflictError
+from base.clock import Clock
 from base.lm.harness.session.transcript.drafts import MessageUsage
 from base.lm.harness.session.transcript.entries import MAIN_RECORD
 from base.lm.harness.session.transcript.projection import RecentSet
@@ -25,11 +32,20 @@ from base.log import logger
 #
 # Publishing goes through a publisher of the runtime (`TimelineDeps.publisher_factory`), not the graph
 # invocation's: a row read after the invocation ended (a background sub-agent's output) reaches the live view too.
-# The replies and the spend are kept as "owed" (bounded) until they have gone through, and both are idempotent:
-# `capture_items` publishes under `harness:<item id>` and the publication is unique by that key, and a message's
-# spend is logged once per `(record, message id)`. A process that dies between a commit and its effects loses the
-# spend of that read (a log, not a table: nothing can tell what was logged), but not the replies: `recover`, run when the
-# writer starts, offers the latest stored replies to the same idempotent capture again.
+# The spend is kept as "owed" (bounded, in memory) until it has been logged once per `(record, message id)`. The
+# replies are not kept in memory at all: which replies the writer committed and nobody has handed to delivery is
+# read from the database, as the keyed `agent_chat` rows after the agent's reply progress
+# (`agent_harness_timeline_progress.replies_seq`). The writer makes that row, in the transaction of its first commit,
+# at the end of the timeline as it was before the commit, so a fork's copied history, an agent's earlier event-path
+# history and replies written while the delivery mode was `sdk` (which hands nothing over) are never offered; the
+# effects raise it only after the replies up to it have been through `capture_items`, which publishes under
+# `harness:<item id>` and is unique by that key. A process that dies between a commit and its effects loses the
+# spend of that read (a log, not a table: nothing can tell what was logged), but not the replies: the same pass runs
+# after every commit and when the writer starts (`recover`), and reads exactly the part of the timeline between the
+# progress and its end, however long the timeline is. Replies are handed over one at a time: one that conflicts with
+# a delivery already recorded (the user changed the delivery mode) is dropped with `harness_timeline_reply_dropped`
+# and does not hold the ones after it; any other failure leaves it and the ones after it for the next pass. Every
+# pass, the recovery included, runs under one lock with the pricing, so two of them never interleave.
 #
 # A message the CLI cut short (an interrupt) has only a placeholder count in the record, so it is not priced: the
 # accounting misses what such a message cost, which is a known gap, and `harness_timeline_usage_unreliable` counts
@@ -53,7 +69,7 @@ LOGGED_LIMIT = 8_192
 MODELS_LIMIT = 256
 UNMATCHED_LOG_FIRST = 20
 UNMATCHED_LOG_EVERY = 100
-RECOVER_ROWS = 500
+FAILURE_LOG_SECONDS = 60.0
 
 
 async def capture_replies(ctx: MeivaContext, agent_id: int, items: list[TimelineItem]) -> None:
@@ -66,64 +82,83 @@ class TimelineEffects:
         agent_id: int,
         publisher: Emits,
         *,
+        pool: AsyncConnectionPool,
+        clock: Clock,
         capture: Callable[
             [MeivaContext, int, list[TimelineItem]], Awaitable[None]
         ] = capture_replies,
     ) -> None:
         self._agent_id = agent_id
         self._publisher = publisher
+        self._pool = pool
+        self._clock = clock
         self._capture = capture
         self._ctx: MeivaContext | None = None
-        self._owed_replies: deque[TimelineItem] = deque(maxlen=OWED_LIMIT)
+        self._settle = asyncio.Lock()
         self._owed_usage: deque[MessageUsage] = deque(maxlen=OWED_LIMIT)
         self._logged: RecentSet[tuple[str, str]] = RecentSet(LOGGED_LIMIT)
         self._unmatched = 0
         self._models: RecentSet[str] = RecentSet(MODELS_LIMIT)
         self._unreliable: RecentSet[tuple[str, str]] = RecentSet(LOGGED_LIMIT)
+        self._failures: dict[str, _FailureLog] = {}
 
     def bind(self, ctx: MeivaContext) -> None:
         self._ctx = ctx
 
-    async def recover(self, recent_replies: Callable[[int], Awaitable[list[TimelineItem]]]) -> None:
-        await self._isolated(
-            "recover", lambda: self._recover(recent_replies), agent_id=self._agent_id
-        )
-
-    async def _recover(
-        self, recent_replies: Callable[[int], Awaitable[list[TimelineItem]]]
-    ) -> None:
-        self._owed_replies.extend(await recent_replies(RECOVER_ROWS))
+    async def recover(self) -> None:
         await self.settle_owed()
 
     async def after_commit(self, commit: Committed) -> None:
         self._report(commit)
         written = list(commit.written)
-        await self._isolated("publish", lambda: self._publish(written), agent_id=self._agent_id)
-        self._owed_replies.extend(item for item in written if item.kind == "agent_chat")
+        await self._isolated("publish", lambda: self._publish(written))
         self._owed_usage.extend(commit.plan.usage)
         await self.settle_owed()
 
     async def settle_owed(self) -> None:
-        await self._isolated("capture", self._capture_owed, agent_id=self._agent_id)
-        await self._isolated("usage", self._price_owed, agent_id=self._agent_id)
+        async with self._settle:
+            await self._isolated("capture", self._capture_owed)
+            await self._isolated("usage", self._price_owed)
 
     async def _publish(self, written: list[TimelineItem]) -> None:
         publish_items(self._publisher, self._agent_id, written)
 
     async def _capture_owed(self) -> None:
         ctx = self._ctx
-        if ctx is None or not self._owed_replies:
+        if ctx is None:
             return
-        items = list(self._owed_replies)
-        await self._capture(ctx, self._agent_id, items)
-        for _ in items:
-            _ = self._owed_replies.popleft()
+        while True:
+            async with self._pool.connection() as conn:
+                owed = await aload_unconfirmed_replies(conn, self._agent_id, limit=OWED_LIMIT)
+            if owed is None:
+                return
+            for seq, item in owed.replies:
+                try:
+                    await self._capture(ctx, self._agent_id, [item])
+                except DeliveryConflictError as error:
+                    logger.warning(
+                        "a reply conflicts with a delivery already recorded and is dropped",
+                        event="harness_timeline_reply_dropped",
+                        agent_id=self._agent_id,
+                        item_id=item.item_id,
+                        error=str(error),
+                    )
+                except Exception:
+                    await self._confirm(seq - 1)
+                    raise
+            await self._confirm(owed.reach)
+            if not owed.full:
+                return
+
+    async def _confirm(self, seq: int) -> None:
+        async with self._pool.connection() as conn:
+            await aconfirm_replies(conn, self._agent_id, seq)
 
     async def _price_owed(self) -> None:
         ctx = self._ctx
         if ctx is None:
             return
-        for _ in range(len(self._owed_usage)):
+        while self._owed_usage:
             spend = self._owed_usage.popleft()
             ident = (spend.record, spend.message_ref)
             if ident in self._logged:
@@ -203,16 +238,33 @@ class TimelineEffects:
             now=ctx.require_clock().now(),
         )
 
-    async def _isolated(
-        self, effect: str, run: Callable[[], Awaitable[None]], *, agent_id: int
-    ) -> None:
+    # meiva:note
+    # One effect on its own: a failure is logged and kept apart from the others. A failure that repeats is not a flood:
+    # the first is logged with its stack, the same effect's next ones are counted and reported at most once per
+    # `FAILURE_LOG_SECONDS` with the number since, and a success starts the count again.
+    async def _isolated(self, effect: str, run: Callable[[], Awaitable[None]]) -> None:
         try:
             await run()
         except Exception:
+            now = self._clock.monotonic()
+            seen = self._failures.get(effect)
+            if seen is not None and now - seen.logged_at < FAILURE_LOG_SECONDS:
+                seen.suppressed += 1
+                return
+            self._failures[effect] = _FailureLog(now)
             logger.opt(exception=True).warning(
                 "an effect of a committed read failed; what it owed is kept and tried again at the "
                 "next commit",
                 event="harness_timeline_effect_failed",
-                agent_id=agent_id,
+                agent_id=self._agent_id,
                 effect=effect,
+                failures_since_last_report=0 if seen is None else seen.suppressed,
             )
+        else:
+            _ = self._failures.pop(effect, None)
+
+
+@dataclass(slots=True)
+class _FailureLog:
+    logged_at: float
+    suppressed: int = 0

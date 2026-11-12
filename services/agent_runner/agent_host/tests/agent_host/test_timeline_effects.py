@@ -11,10 +11,12 @@ from __future__ import annotations
 from collections import Counter
 from collections.abc import Mapping
 
+from psycopg_pool import AsyncConnectionPool
+
 from agent.graph.claim.tests.harness_support import FakeEngine, runtime
 from agent.harness_timeline.plan import ReplyPolicy, WritePlan, plan_write
 from agent.harness_timeline.writer import Committed
-from base.agents.history.timeline_item import TimelineItem
+from base.clock.tests.fakes import system_clock
 from base.lm.harness import Usage
 from base.lm.harness.claude.transcript.tests.support import entries_of, project, sent
 from base.lm.harness.session.transcript.drafts import AnomalyReport, MessageUsage
@@ -57,10 +59,10 @@ def _plan() -> WritePlan:
 
 
 async def test_main_and_sub_agent_spend_are_logged_separately_by_call_and_model(
-    loguru_records: LogRecords,
+    loguru_records: LogRecords, aops_pool: AsyncConnectionPool
 ) -> None:
     ctx = runtime(FakeEngine()).context
-    effects = TimelineEffects(7, Published())
+    effects = TimelineEffects(7, Published(), pool=aops_pool, clock=system_clock())
     effects.bind(ctx)
     plan = _plan()
     await effects.after_commit(Committed(plan, ()))
@@ -80,10 +82,10 @@ async def test_main_and_sub_agent_spend_are_logged_separately_by_call_and_model(
 
 
 async def test_an_interrupted_message_and_an_all_zero_message_are_not_logged(
-    loguru_records: LogRecords,
+    loguru_records: LogRecords, aops_pool: AsyncConnectionPool
 ) -> None:
     ctx = runtime(FakeEngine()).context
-    effects = TimelineEffects(7, Published())
+    effects = TimelineEffects(7, Published(), pool=aops_pool, clock=system_clock())
     effects.bind(ctx)
     plan = WritePlan(
         usage=(
@@ -97,9 +99,11 @@ async def test_an_interrupted_message_and_an_all_zero_message_are_not_logged(
     assert len(loguru_records.events("llm_usage")) == 1
 
 
-async def test_what_the_parser_could_not_use_is_reported(loguru_records: LogRecords) -> None:
+async def test_what_the_parser_could_not_use_is_reported(
+    loguru_records: LogRecords, aops_pool: AsyncConnectionPool
+) -> None:
     ctx = runtime(FakeEngine()).context
-    effects = TimelineEffects(7, Published())
+    effects = TimelineEffects(7, Published(), pool=aops_pool, clock=system_clock())
     effects.bind(ctx)
     plan = WritePlan(
         anomalies=(AnomalyReport(AnomalyKind.UNKNOWN_TYPE, "weird", "k"),),
@@ -117,54 +121,11 @@ def _name(name: str, tool_input: Mapping[str, object]) -> str:
     return name
 
 
-class _Failing:
-    def __init__(self) -> None:
-        self.fail = True
-        self.captured: list[str] = []
-
-    async def capture(self, ctx: object, agent_id: int, items: list[TimelineItem]) -> None:
-        del ctx, agent_id
-        if self.fail:
-            raise OSError("the delivery store is down")
-        self.captured.extend(item.item_id for item in items)
-
-
-def _reply(item_id: str) -> TimelineItem:
-    return TimelineItem(item_id=item_id, kind="agent_chat", payload="hi", user_facing=True)
-
-
-async def test_a_failed_capture_costs_neither_the_usage_nor_the_publish_and_is_tried_again(
-    loguru_records: LogRecords,
-) -> None:
-    ctx = runtime(FakeEngine()).context
-    published = Published()
-    store = _Failing()
-    effects = TimelineEffects(7, published, capture=store.capture)
-    effects.bind(ctx)
-    usage = MessageUsage("main", "m1", "t", None, Usage(input_tokens=5, output_tokens=2), "x", True)
-    first = _reply("h1.0")
-    await effects.after_commit(Committed(WritePlan(usage=(usage,)), (first,)))
-
-    assert len(published.payloads) >= 1, "the live view was published although the capture failed"
-    assert len(loguru_records.events("llm_usage")) == 1, (
-        "the spend was logged although the capture failed"
-    )
-    failures = loguru_records.events("harness_timeline_effect_failed")
-    assert [r["extra"]["effect"] for r in failures] == ["capture"]
-
-    store.fail = False
-    await effects.after_commit(Committed(WritePlan(usage=(usage,)), (_reply("h2.0"),)))
-    assert store.captured == ["h1.0", "h2.0"], "what failed is offered again with the next commit"
-    assert len(loguru_records.events("llm_usage")) == 1, (
-        "a spend is logged once however often it is planned"
-    )
-
-
 async def test_the_first_unmatched_inputs_of_a_session_are_each_reported_and_then_one_in_a_hundred(
-    loguru_records: LogRecords,
+    loguru_records: LogRecords, aops_pool: AsyncConnectionPool
 ) -> None:
     ctx = runtime(FakeEngine()).context
-    effects = TimelineEffects(7, Published())
+    effects = TimelineEffects(7, Published(), pool=aops_pool, clock=system_clock())
     effects.bind(ctx)
     for n in range(250):
         await effects.after_commit(Committed(WritePlan(unmatched_inputs=(f"claude:u-{n}",)), ()))
@@ -175,27 +136,11 @@ async def test_the_first_unmatched_inputs_of_a_session_are_each_reported_and_the
     assert seen == [*range(1, 21), 101, 201]
 
 
-async def test_replies_committed_before_a_crash_are_offered_to_the_capture_again_at_start() -> None:
-    ctx = runtime(FakeEngine()).context
-    store = _Failing()
-    store.fail = False
-    effects = TimelineEffects(7, Published(), capture=store.capture)
-    effects.bind(ctx)
-
-    async def stored(rows: int) -> list[TimelineItem]:
-        assert rows > 0
-        return [_reply("h4.0"), _reply("h7.0")]
-
-    await effects.recover(stored)
-
-    assert store.captured == ["h4.0", "h7.0"]
-
-
 async def test_a_message_cut_short_is_counted_not_priced_and_a_model_without_a_price_is_warned_once(
-    loguru_records: LogRecords,
+    loguru_records: LogRecords, aops_pool: AsyncConnectionPool
 ) -> None:
     ctx = runtime(FakeEngine()).context
-    effects = TimelineEffects(7, Published())
+    effects = TimelineEffects(7, Published(), pool=aops_pool, clock=system_clock())
     effects.bind(ctx)
     cut = MessageUsage(
         "main", "m-cut", "t", None, Usage(input_tokens=1, output_tokens=1), "x", False

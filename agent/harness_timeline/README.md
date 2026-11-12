@@ -42,10 +42,19 @@ that began earlier is not known, so its later output is held for a bounded time 
 delivery side's checks (an input the stream calls refused, the inputs an earlier process left claimed) all read through
 it, so a plan is committed once and accounted for once. The effects that follow a commit
 (`services/agent_runner/agent_host/transcript/effects.py`) are independent of each other and of the commit: publishing
-goes through a publisher of the runtime (it outlives the invocation), the replies meant for the person and the spend are
-kept as owed until they have gone through, both idempotent, and `recover` offers the latest stored replies to the capture
-again when the writer starts, which covers a process that died between a commit and its effects. A process that dies there
-loses the spend of that one read (it is a log line, not a table).
+goes through a publisher of the runtime (it outlives the invocation), the spend is kept as owed until it is logged (once per
+message), and the replies are not kept in memory at all: the writer's first commit makes the agent's reply progress
+(`agent_harness_timeline_progress.replies_seq`) in its own transaction, at the end of the timeline as it was before that
+commit, and the effects raise it only after the replies up to it have been through `capture_items`. The replies owed are
+the keyed `agent_chat` rows after it, read as a range, so a pass reads the part not yet handed over and not the history;
+`recover`, run when the writer starts, is the same pass, which covers a process that died between a commit and its
+effects exactly once (the capture is idempotent by `harness:<item id>`). A fork, whose copy has no progress row until its
+own first commit, an agent that was on the event path, and replies written while delivery was `sdk` are therefore never
+offered again, and a reply that conflicts with a delivery already recorded is dropped with
+`harness_timeline_reply_dropped` and holds none of the others. Passes run one at a time under a lock, and a failure that
+repeats is reported once a minute. Everything an agent's writer or its publisher can raise stays in that agent's own task
+group (`TranscriptTimeline.run`), so it cannot cancel the other agents' writers in the host's group. A process that dies
+between a commit and its effects loses the spend of that one read (it is a log line, not a table).
 
 **A turn is paired with its closing by identity.** The invocation waits for the record turns its own inputs were in, not for
 "the next closing": the writer keeps, bounded, the record turn each input it settled was delivered in (`DELIVERED_KEPT`) and

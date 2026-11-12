@@ -935,18 +935,30 @@ COMMENT ON COLUMN agent_harness_transcript_positions.rebuild_ordinal IS
 COMMENT ON COLUMN agent_harness_transcript_positions.cli_version IS
     'Version of the CLI that wrote the last row read, for telemetry.';
 
+CREATE TABLE agent_harness_timeline_progress (
+    agent_id BIGINT PRIMARY KEY REFERENCES agents(id) ON DELETE CASCADE,
+    replies_seq INTEGER NOT NULL CHECK (replies_seq >= -1)
+);
+
+COMMENT ON TABLE agent_harness_timeline_progress IS
+    'Per external agent: how far the replies of its transcript-sourced timeline have been handed to delivery.';
+COMMENT ON COLUMN agent_harness_timeline_progress.replies_seq IS
+    'Highest agent_harness_messages.seq whose reply has been handed to delivery, or was already on the timeline when the row was made (-1: none). The writer offers again the replies it wrote after it; only ever raised.';
+
 DO $$ BEGIN
     IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'meiva_runner') THEN
         GRANT SELECT, INSERT ON agent_harness_messages TO meiva_runner;
         GRANT UPDATE (item) ON agent_harness_messages TO meiva_runner;
         GRANT USAGE, SELECT ON SEQUENCE agent_harness_messages_id_seq TO meiva_runner;
         GRANT SELECT, INSERT, UPDATE ON agent_harness_transcript_positions TO meiva_runner;
+        GRANT SELECT, INSERT, UPDATE ON agent_harness_timeline_progress TO meiva_runner;
         GRANT SELECT, INSERT ON agent_harness_transcript_rows TO meiva_runner;
     END IF;
     IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'meiva_gateway') THEN
         GRANT SELECT, INSERT, UPDATE, DELETE ON agent_harness_messages TO meiva_gateway;
         GRANT USAGE, SELECT ON SEQUENCE agent_harness_messages_id_seq TO meiva_gateway;
         GRANT SELECT, INSERT, UPDATE, DELETE ON agent_harness_transcript_positions TO meiva_gateway;
+        GRANT SELECT, INSERT, UPDATE, DELETE ON agent_harness_timeline_progress TO meiva_gateway;
         GRANT SELECT, INSERT, DELETE ON agent_harness_transcript_rows TO meiva_gateway;
     END IF;
 END $$;

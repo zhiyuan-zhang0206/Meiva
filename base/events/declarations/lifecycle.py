@@ -262,6 +262,12 @@ EVENTS: dict[str, EventSpec] = {
         "from the file that is still on disk (agent/harness_timeline/README.md says how)",
         tier="anomaly",
     ),
+    "harness_timeline_reply_dropped": telemetry_event(
+        "harness_timeline_reply_dropped",
+        "a reply committed to a transcript-sourced timeline conflicts with a delivery already recorded for it (the "
+        "person changed the agent's delivery mode); it is not delivered again, and the replies after it are not held",
+        tier="anomaly",
+    ),
     "harness_timeline_effect_failed": telemetry_event(
         "harness_timeline_effect_failed",
         "an effect that follows a committed read of a transcript-sourced timeline (publishing to the live "
