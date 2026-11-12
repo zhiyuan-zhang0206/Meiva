@@ -11,6 +11,7 @@ from base.lm.harness.events import (
     BridgeEvent,
     SessionStarted,
     ToolUse,
+    UnsolicitedOutput,
 )
 from base.lm.harness.session import BackgroundItem, BackgroundKind, describe
 
@@ -137,6 +138,16 @@ class BackgroundTasks:
         if status not in TERMINAL_TASK_STATUSES:
             return self
         return self.reported(task_id)
+
+
+# meiva:note
+# An idle task notification whose answering turn has not opened yet: the report as it was recorded and
+# the pending item it counts as meanwhile (see `ClaudeSession._expect_answer`).
+# meiva:link base/lm/harness/claude/docs/background-tasks.md
+@dataclass(frozen=True, slots=True)
+class AwaitedAnswer:
+    report: UnsolicitedOutput
+    item: BackgroundItem
 
 
 # meiva:note

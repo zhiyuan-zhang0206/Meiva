@@ -21,6 +21,7 @@ from base.lm.harness.events import (
     TurnStarted,
     UnsolicitedOutput,
 )
+from base.lm.harness.registry import FileSessionRegistry
 from base.lm.harness.session import BackgroundKind
 
 
@@ -151,43 +152,59 @@ async def test_a_monitor_holds_the_session_until_its_source_ends_or_is_stopped(
         replay(harness.client, "monitor_background", "stopped")
         await _eventually(lambda: not commands())
         # meiva:note
-        # The recording shows no turn after the monitor's end, so the wait for one is only the bounded claim.
+        # This fixture stops after the monitor's end notification, so no CLI turn answers it here
+        # and the wait lapses (the manual clock sleeps through it at once). A real CLI answers it
+        # (background_ends.json).
         # meiva:link base/lm/harness/claude/docs/background-tasks.md
-        timers.advance(ANSWER_WAIT_SECONDS + 1)
-        assert not harness.session.background_work()
+        await _eventually(lambda: not harness.session.background_work())
     finally:
         await harness.stop()
 
 
-async def _launched(harness: Harness) -> str:
+async def _launched(
+    harness: Harness, fixture: str = "background_bash", group: str = "launch"
+) -> str:
     launch = await send(harness, "run it", key="first")
-    replay(harness.client, "background_bash", "launch", first="first")
+    replay(harness.client, fixture, group, first="first")
     await launch.outcome()
     return launch.turn_id
+
+
+async def _stored(registry: FileSessionRegistry) -> list[BackgroundKind]:
+    stored = registry.load(7, harness="claude_code")
+    assert stored is not None
+    return [item.kind for item in stored.background]
 
 
 # meiva:note
 # Between the notification and the CLI's first frame of its own turn nothing else says work is
 # pending (the task is reported, no observed turn exists yet), and the idle TTL could recycle the
 # session before the CLI answers. The session claims the wait itself, hands over to the observed turn
-# item once the turn opens without counting it twice, and gives the claim up after
-# `ANSWER_WAIT_SECONDS` if the CLI never answers.
+# item once the turn opens without counting it twice, and gives the report to the sink after
+# `ANSWER_WAIT_SECONDS` if no turn answered it.
 # meiva:link base/lm/harness/claude/docs/background-tasks.md
 async def test_the_wait_for_the_clis_answer_counts_as_work_and_hands_over_to_its_turn(
     tmp_path: Path,
 ) -> None:
-    harness = await start(tmp_path, passive=True)
+    delivered: list[UnsolicitedOutput] = []
+    registry = FileSessionRegistry(tmp_path / "registry")
+    harness = await start(
+        tmp_path, passive=True, unsolicited=delivered.append, registry=registry, agent_id=7
+    )
     try:
         launched = await _launched(harness)
         replay(harness.client, "background_bash", "idle_report")
         await harness.wait_for(lambda event: isinstance(event, UnsolicitedOutput))
         [waiting] = harness.session.background_work().items
-        assert waiting.kind is BackgroundKind.TURN and "task-bg-1" in waiting.description
+        assert waiting.kind is BackgroundKind.TURN and "BGDONE" in waiting.description
+        assert await _stored(registry) == [BackgroundKind.TURN]
         replay(harness.client, "background_bash", "idle_turn")
         await harness.wait_for(
             lambda event: isinstance(event, TurnCompleted) and event.turn_id != launched
         )
         assert not harness.session.background_work()
+        assert await _stored(registry) == []
+        assert delivered == []
     finally:
         await harness.stop()
 
@@ -211,18 +228,172 @@ async def test_a_turn_in_progress_replaces_the_wait_without_double_counting(
         await harness.stop()
 
 
-async def test_a_notification_the_cli_never_answers_stops_counting_after_the_wait(
+# meiva:note
+# Recorded (fixtures/background_ends.json): a failed command and a Monitor that ended by itself
+# while the session was idle were answered by the CLI exactly like a finished command, so their
+# reports are not delivered either.
+# meiva:link base/lm/harness/claude/docs/background-tasks.md
+async def _answered_by_the_cli(
+    tmp_path: Path, kind: str, launch: str, between: tuple[str, ...]
+) -> None:
+    delivered: list[UnsolicitedOutput] = []
+    harness = await start(tmp_path, passive=True, unsolicited=delivered.append)
+    try:
+        launched = await _launched(harness, "background_ends", launch)
+        for group in between:
+            replay(harness.client, "background_ends", group)
+        replay(harness.client, "background_ends", f"{kind}_report")
+        await harness.wait_for(lambda event: isinstance(event, UnsolicitedOutput))
+        assert harness.session.background_work()
+        replay(harness.client, "background_ends", f"{kind}_turn")
+        done = await harness.wait_for(
+            lambda event: (
+                isinstance(event, TurnCompleted)
+                and event.turn_id != launched
+                and "completed" in event.text.lower()
+            )
+        )
+        started = next(e for e in harness.of(TurnStarted) if e.turn_id == done.turn_id)
+        assert started.cause is HarnessCause.BACKGROUND_TASK
+        assert not harness.session.background_work()
+        assert delivered == []
+    finally:
+        await harness.stop()
+
+
+async def test_a_failed_command_is_answered_by_the_cli(tmp_path: Path) -> None:
+    await _answered_by_the_cli(tmp_path, "failed", "failed_launch", ())
+
+
+async def test_a_monitor_that_ended_by_itself_is_answered_by_the_cli(tmp_path: Path) -> None:
+    await _answered_by_the_cli(tmp_path, "monitor", "monitor_launch", ("monitor_event",))
+
+
+async def test_a_stop_inside_our_turn_waits_for_nothing(tmp_path: Path) -> None:
+    delivered: list[UnsolicitedOutput] = []
+    harness = await start(tmp_path, passive=True, unsolicited=delivered.append)
+    try:
+        await _launched(harness, "background_ends", "stop_turn")
+        assert not harness.session.background_work()
+        assert [e.text for e in harness.of(UnsolicitedOutput)] == [
+            "Background task task-s reported stopped.\nsleep 120"
+        ]
+        assert delivered == []
+    finally:
+        await harness.stop()
+
+
+# meiva:note
+# The wait ends only for the turn that answers the notification: a turn of ours that starts first
+# (here the follow-up input of the recording) does not end it, because the CLI may have read the
+# notification into that turn's context or not (a task stopped while idle was recorded as folded in
+# silently), and the report is still owed to the agent when the wait lapses.
+# meiva:link base/lm/harness/claude/docs/background-tasks.md
+async def test_a_turn_of_ours_does_not_end_the_wait_for_an_unanswered_notification(
     tmp_path: Path,
 ) -> None:
-    timers = ManualTimers()
-    harness = await start(tmp_path, passive=True, clock=clock_over(timers))
+    delivered: list[UnsolicitedOutput] = []
+    harness = await start(tmp_path, passive=True, unsolicited=delivered.append)
+    try:
+        await _launched(harness, "background_ends", "stop_idle_launch")
+        replay(harness.client, "background_ends", "stop_idle_report")
+        await harness.wait_for(lambda event: isinstance(event, UnsolicitedOutput))
+        follow = await send(harness, "what happened?", key="next")
+        replay(harness.client, "background_ends", "stop_idle_followup", next="next")
+        await follow.outcome()
+        [waiting] = harness.session.background_work().items
+        assert waiting.kind is BackgroundKind.TURN and "sleep 120" in waiting.description
+        assert delivered == []
+    finally:
+        await harness.stop()
+
+
+async def test_a_second_notification_keeps_its_own_wait_until_its_own_turn(
+    tmp_path: Path,
+) -> None:
+    delivered: list[UnsolicitedOutput] = []
+    harness = await start(tmp_path, passive=True, unsolicited=delivered.append)
     try:
         await _launched(harness)
         replay(harness.client, "background_bash", "idle_report")
-        await harness.wait_for(lambda event: isinstance(event, UnsolicitedOutput))
-        timers.advance(ANSWER_WAIT_SECONDS - 1)
-        assert harness.session.background_work()
-        timers.advance(2)
-        assert not harness.session.background_work()
+        replay(harness.client, "background_ends", "failed_report")
+        await _eventually(lambda: len(harness.of(UnsolicitedOutput)) == 2)
+        assert len(harness.session.background_work().items) == 2
+        replay(harness.client, "background_bash", "idle_turn")
+        await _eventually(lambda: len(harness.of(TurnCompleted)) == 2)
+        [left] = harness.session.background_work().items
+        assert "exit 3" in left.description
+        replay(harness.client, "background_ends", "failed_turn")
+        await _eventually(lambda: not harness.session.background_work())
+        assert delivered == []
     finally:
         await harness.stop()
+
+
+# meiva:note
+# When the wait lapses with no turn opened for the report, the report goes to the sink: whatever the
+# CLI did (a stop notification it never answered, a behaviour a later version changes) the agent
+# is not left without it. The manual clock sleeps through the wait at once. Delivery empties the
+# pending record, so nothing is told twice.
+# meiva:link base/lm/harness/claude/docs/background-tasks.md
+async def test_a_report_nobody_answered_goes_to_the_sink_when_the_wait_lapses(
+    tmp_path: Path,
+) -> None:
+    delivered: list[UnsolicitedOutput] = []
+    registry = FileSessionRegistry(tmp_path / "registry")
+    timers = ManualTimers()
+    harness = await start(
+        tmp_path,
+        passive=True,
+        unsolicited=delivered.append,
+        registry=registry,
+        agent_id=7,
+        clock=clock_over(timers),
+    )
+    try:
+        await _launched(harness, "background_ends", "stop_idle_launch")
+        replay(harness.client, "background_ends", "stop_idle_report")
+        await _eventually(lambda: bool(delivered))
+        [report] = harness.of(UnsolicitedOutput)
+        assert delivered == [report] and "stopped" in report.text
+        assert ANSWER_WAIT_SECONDS in timers.sleeps
+        assert not harness.session.background_work()
+        assert await _stored(registry) == []
+        await asyncio.sleep(0.02)
+        assert delivered == [report]
+    finally:
+        await harness.stop()
+
+
+# meiva:note
+# A process lost inside the wait is not delivered to the sink by the next one (it sets no timer):
+# the next session tells the agent once what was pending, and the record is then cleared.
+# meiva:link base/lm/harness/claude/docs/background-tasks.md
+async def test_a_restart_inside_the_wait_tells_the_agent_once_and_does_not_redeliver(
+    tmp_path: Path,
+) -> None:
+    delivered: list[UnsolicitedOutput] = []
+    registry = FileSessionRegistry(tmp_path / "registry")
+    first = await start(
+        tmp_path, passive=True, unsolicited=delivered.append, registry=registry, agent_id=7
+    )
+    await _launched(first, "background_ends", "failed_launch")
+    replay(first.client, "background_ends", "failed_report")
+    await first.wait_for(lambda event: isinstance(event, UnsolicitedOutput))
+    await first.stop()
+    second = await start(
+        tmp_path,
+        passive=True,
+        unsolicited=delivered.append,
+        registry=registry,
+        agent_id=7,
+        session_id="session-2",
+    )
+    try:
+        [lost] = second.session.take_lost_background()
+        assert lost.kind is BackgroundKind.TURN and "exit code 3" in lost.description
+        assert second.session.take_lost_background() == ()
+        assert not second.session.background_work()
+        assert delivered == []
+    finally:
+        await second.stop()

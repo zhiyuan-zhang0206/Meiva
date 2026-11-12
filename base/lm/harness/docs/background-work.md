@@ -31,7 +31,8 @@ Every close ends in `HarnessSessions._close` → `HarnessBridge.close`. The adap
 its CLI's stream in its own read loop for as long as the session lives, idle or not; what
 no turn of ours owns is a turn the CLI began itself (below) or, for Codex and Antigravity, goes to the sink
 (`UnsolicitedOutput`) and wakes the agent as a `system:harness` inbound. Claude's background-task report
-does not: the CLI answers it in a turn of its own, so the report is only recorded in the event stream.
+is recorded in the event stream, and goes to the sink only if the CLI opened no turn of its own for it within two minutes
+([details](../claude/docs/background-tasks.md)).
 
 ## Keeping a session that holds work
 
