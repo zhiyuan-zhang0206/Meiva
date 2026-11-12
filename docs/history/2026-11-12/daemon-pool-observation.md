@@ -18,3 +18,9 @@ returning the borrow permits the original bounded cleanup observation to pass.
 Foreign-baseline and new-foreign controls distinguish the two assertion boundaries.
 The TTL10s and events15s observation deadlines and0.05s interval are retained.
 No production pool.close or executor cancellation behavior changes here.
+
+The acceptance owner accepted PG owned anchors/state/waits/query shapes and async
+task diagnostics as the test-only boundary. The daemon does not expose its pool
+object or Python worker ownership through this seam; diagnostics say so explicitly.
+A production pool-factory hook would expand this repair without strengthening the
+backend-release assertion, so it is deferred. No such hook is added here.

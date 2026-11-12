@@ -56,3 +56,7 @@ a separate baseline-relative global guard rejects newly surviving sessions even
 outside that gate. Baseline PID/backend-start anchors remain in diagnostics so
 an earlier client's lifetime is not attributed to the daemon being stopped.
 Pool.closed alone is insufficient while a synchronous worker holds a borrow.
+
+Daemon probes report server-side owned state and async task status. When the
+existing daemon seam does not expose its pool or Python workers, diagnostics mark
+those objects unavailable; they do not infer borrow release from pool.closed.
