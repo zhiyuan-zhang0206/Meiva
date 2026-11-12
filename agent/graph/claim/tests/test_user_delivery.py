@@ -4,7 +4,7 @@ from collections.abc import Sequence
 from dataclasses import replace
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 import psycopg
 import pytest
@@ -406,12 +406,22 @@ FIXTURE = (
 )
 SESSION = "5914ebdf-bbec-47c8-bcd6-5a6da081f08a"
 BASIC_USER = "3c3d2de5-c479-52b7-91a6-fce4e4d26db9"
-REPLY_TEXT = next(
-    block["text"]
-    for line in reversed(FIXTURE.read_text().splitlines())
-    for block in (json.loads(line).get("message") or {}).get("content", [])
-    if isinstance(block, dict) and block.get("type") == "text"
-)
+
+
+# meiva:note
+# The text of the last assistant reply in the recorded turn: the reply the page and the user are to get.
+def _recorded_reply() -> str:
+    texts: list[str] = []
+    for line in FIXTURE.read_text().splitlines():
+        row = cast("dict[str, Any]", json.loads(line))
+        message = cast("dict[str, Any]", row.get("message") or {})
+        for block in cast("list[dict[str, Any]]", message.get("content") or []):
+            if isinstance(block, dict) and block.get("type") == "text":
+                texts.append(str(block["text"]))
+    return texts[-1]
+
+
+REPLY_TEXT = _recorded_reply()
 
 
 # meiva:note
