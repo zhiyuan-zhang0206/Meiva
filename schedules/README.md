@@ -86,6 +86,12 @@ cron has not come round yet — and a stream that cannot be read at all (a
 renamed workflow, a busy API) is one named note in the round, never the end of
 the round or of the process that would report it next time.
 
+JUnit evidence accepts both raw `test-results-` and final `verdict-junit-`
+publications. Both readers verify the current GitHub attempt before selecting
+its newest same-name artifact. Pytest `-aN.xml` denotes retries within that
+attempt; it does not identify a GitHub rerun. Missing publication ownership
+remains unknown.
+
 One unreadable stream is a note. A round that cannot read **two or more** of its
 streams, or a single stream that has been unreadable for **six consecutive
 rounds** (three hours at this cadence), is a card: while that window lasts, a

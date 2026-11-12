@@ -70,3 +70,25 @@ def test_runtime_composes_the_case_reader_for_real_rounds() -> None:
         and node.func.id == "JunitReader"
     ]
     assert len(constructors) == 1
+
+
+def test_initial_failure_reader_carries_workflow_attempt_to_publication_selection() -> None:
+    function = _function(_ENTRY, "junit_case_ids")
+    calls = [
+        node
+        for node in ast.walk(function)
+        if isinstance(node, ast.Call) and isinstance(node.func, ast.Name)
+    ]
+    assert any(
+        isinstance(node.func, ast.Name) and node.func.id == "current_publications" for node in calls
+    )
+    fallback = _function(_ENTRY, "_job_failures")
+    reads = [
+        node
+        for node in ast.walk(fallback)
+        if isinstance(node, ast.Call)
+        and isinstance(node.func, ast.Name)
+        and node.func.id == "junit_case_ids"
+    ]
+    assert len(reads) == 1
+    assert any(keyword.arg == "attempt" for keyword in reads[0].keywords)

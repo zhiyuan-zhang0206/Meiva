@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass
 from enum import StrEnum
 from xml.etree import ElementTree
@@ -32,9 +33,8 @@ def collected_case_results(xml: str) -> tuple[CaseResult, ...] | None:
         return None
     results: list[CaseResult] = []
     for case in root.iter("testcase"):
-        name = case.get("name") or ""
-        location = case.get("file") or case.get("classname") or ""
-        if not name or not location:
+        identity = case_identity(case.get("file"), case.get("classname"), case.get("name") or "")
+        if identity is None:
             return None
         if case.find("failure") is not None or case.find("error") is not None:
             outcome = CaseOutcome.FAILED
@@ -42,7 +42,7 @@ def collected_case_results(xml: str) -> tuple[CaseResult, ...] | None:
             outcome = CaseOutcome.SKIPPED
         else:
             outcome = CaseOutcome.PASSED
-        results.append(CaseResult(f"{location}::{name}", outcome))
+        results.append(CaseResult(identity, outcome))
     return tuple(results)
 
 
@@ -50,3 +50,18 @@ def collected_case_results(xml: str) -> tuple[CaseResult, ...] | None:
 class CaseObservation:
     outcome: CaseOutcome
     detail: str
+
+
+# meiva:note
+# Pytest mangle_test_address replaces path separators with dots and removes
+# .py. Reverse that for a module-shaped test filename when xunit2 omits file;
+# class-qualified or unfamiliar classnames retain their original identity.
+def case_identity(file: str | None, classname: str | None, name: str) -> str | None:
+    location = file or classname or ""
+    if not file and classname and "." in classname:
+        parts = classname.split(".")
+        if all(part.isidentifier() for part in parts) and re.fullmatch(
+            r"test_[A-Za-z0-9_]+|[a-z][a-z0-9_]*_test", parts[-1]
+        ):
+            location = "/".join(parts) + ".py"
+    return f"{location}::{name}" if location and name else None

@@ -5,8 +5,8 @@
 # the same fingerprint from here, so a red is spelled one way on a card and at the merge gate.
 #
 # The id is built the way the log builds it -- `file::name` -- so one test keeps one fingerprint
-# whichever route named it. A dotted `classname` would make the same case look like two, and the
-# second sighting that turns a suspect into a card would never arrive.
+# whichever route named it. Known pytest module classnames are normalized when xunit2 omits
+# file; unfamiliar or class-qualified identities keep their published spelling.
 # meiva:link schedules/README.md
 
 from __future__ import annotations
@@ -15,6 +15,9 @@ import re
 from collections.abc import Sequence
 from dataclasses import dataclass
 from xml.etree import ElementTree
+
+from schedules.plans.watch.junit_cases import case_identity
+from schedules.plans.watch.junit_publications import JUNIT_ARTIFACT_PREFIXES
 
 __all__ = [
     "ArtifactMatch",
@@ -29,10 +32,10 @@ __all__ = [
 
 # meiva:note
 # The artifact a job's JUnit lands in, as a name this module derives from the job instead of a table
-# someone has to keep current. Every shard job names its artifact `test-results-<job>`, with a `2/4`
+# someone has to keep current. Legacy shard jobs name artifacts `test-results-<job>`, with a `2/4`
 # shard written as `2` -- so `e2e shard (2/4)` is `test-results-e2e-shard-2` and
 # `backend static 4/5` is `test-results-backend-static-4`. A name this does not reproduce is not
-# guessed at: the caller matches by prefix and falls back to the unnamed failure.
+# guessed at: the caller also matches published verdict bundles by lane and shard.
 def artifact_name_for_job(job_name: str) -> str:
     trimmed = re.sub(r"(\d+)/\d+", r"\1", job_name)
     return "test-results-" + re.sub(r"[^a-z0-9]+", "-", trimmed.lower()).strip("-")
@@ -53,7 +56,6 @@ def matching_artifact(job_name: str, names: Sequence[str]) -> str | None:
 # meiva:note
 # Every artifact this module will consider is a JUnit bundle; `e2e-logs-matrix-3` is a log bundle
 # that would otherwise win a suffix match on the same shard number.
-_ARTIFACT_PREFIX = "test-results-"
 
 
 # meiva:note
@@ -67,25 +69,20 @@ def shard_number(job_name: str) -> str | None:
 
 
 # meiva:note
-# The artifacts a reader should look at when none of them belongs to this job: names in this run's
-# bundle family that share a word with the job. The point is not to guess -- a name picked from here
-# never names a case -- but to answer "where do I look" on the card instead of leaving the reader to
-# open the run and diff the artifact list by eye.
-def _shares_a_word(job_name: str, artifact: str) -> bool:
-    words = {word for word in re.split(r"[^a-z0-9]+", job_name.lower()) if len(word) > 2}
-    return bool(
-        words & {word for word in re.split(r"[^a-z0-9]+", artifact.lower()) if len(word) > 2}
-    )
+# The first token after either publisher prefix is its lane: backend, e2e,
+# static, frontend or data. Require that exact token in the job name before
+# any name/shard tier can choose it. Population words such as shard or matrix
+# never establish lane ownership, and an undeclared lane stays unmatched.
+def _same_lane(job_name: str, artifact: str) -> bool:
+    for prefix in JUNIT_ARTIFACT_PREFIXES:
+        if artifact.startswith(prefix):
+            lane = artifact[len(prefix) :].partition("-")[0]
+            return bool(lane) and lane in re.split(r"[^a-z0-9]+", job_name.lower())
+    return False
 
 
 def artifact_candidates(job_name: str, names: Sequence[str]) -> tuple[str, ...]:
-    return tuple(
-        sorted(
-            name
-            for name in names
-            if name.startswith(_ARTIFACT_PREFIX) and _shares_a_word(job_name, name)
-        )
-    )
+    return tuple(sorted(name for name in names if _same_lane(job_name, name)))
 
 
 # meiva:note
@@ -109,6 +106,7 @@ class ArtifactMatch:
 
 
 def match_artifact(job_name: str, names: Sequence[str]) -> ArtifactMatch:
+    names = tuple(name for name in names if _same_lane(job_name, name))
     wanted = artifact_name_for_job(job_name)
     if wanted in names:
         return ArtifactMatch(wanted, "name", ())
@@ -120,13 +118,7 @@ def match_artifact(job_name: str, names: Sequence[str]) -> ArtifactMatch:
         return ArtifactMatch(max(shorter, key=len), "name", ())
     shard = shard_number(job_name)
     if shard is not None:
-        by_shard = [
-            name
-            for name in names
-            if name.startswith(_ARTIFACT_PREFIX)
-            and name.endswith(f"-{shard}")
-            and _shares_a_word(job_name, name)
-        ]
+        by_shard = [name for name in names if name.endswith(f"-{shard}")]
         if len(by_shard) == 1:
             return ArtifactMatch(
                 by_shard[0],
@@ -152,8 +144,7 @@ def failing_case_ids(xml_text: str) -> tuple[str, ...]:
     for case in root.iter("testcase"):
         if case.find("failure") is None and case.find("error") is None:
             continue
-        name = case.get("name") or ""
-        location = case.get("file") or case.get("classname") or ""
-        if name and location:
-            found.append(f"{location}::{name}")
+        identity = case_identity(case.get("file"), case.get("classname"), case.get("name") or "")
+        if identity is not None:
+            found.append(identity)
     return tuple(dict.fromkeys(found))

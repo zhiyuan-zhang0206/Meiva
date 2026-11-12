@@ -30,12 +30,12 @@ def reader(
     xml: str,
     *,
     expired: bool = False,
-    attempt: int = 1,
+    internal_attempt: int = 1,
     timers: ManualTimers | None = None,
 ) -> JunitReader:
     contents = io.BytesIO()
     with zipfile.ZipFile(contents, "w") as archive:
-        archive.writestr(f"junit-backend-shard-3-a{attempt}.xml", xml)
+        archive.writestr(f"junit-backend-shard-3-a{internal_attempt}.xml", xml)
 
     def run(
         argv: list[str],
@@ -49,13 +49,22 @@ def reader(
         if stdout is not None:
             stdout.write(contents.getvalue())
             return subprocess.CompletedProcess(argv, 0, "", "")
+        if "/artifacts?" not in argv[-1]:
+            return subprocess.CompletedProcess(
+                argv, 0, json.dumps({"run_attempt": 1, "run_started_at": WHEN.isoformat()}), ""
+            )
         return subprocess.CompletedProcess(
             argv,
             0,
             json.dumps(
                 {
                     "artifacts": [
-                        {"id": 123, "name": "test-results-backend-shard-3", "expired": expired}
+                        {
+                            "id": 123,
+                            "name": "test-results-backend-shard-3",
+                            "expired": expired,
+                            "created_at": WHEN.isoformat(),
+                        }
                     ]
                 }
             ),
@@ -98,7 +107,8 @@ def test_missing_and_invalid_evidence_stays_unknown(tmp_path: Path) -> None:
     )
     assert reader(tmp_path, "<broken")(entry(), run).outcome == CaseOutcome.UNREADABLE
     assert (
-        reader(tmp_path, "<testsuite/>", attempt=2)(entry(), run).outcome == CaseOutcome.UNREADABLE
+        reader(tmp_path, "<testsuite/>", internal_attempt=2)(entry(), run).outcome
+        == CaseOutcome.NOT_COLLECTED
     )
     absent = reader(tmp_path, "<testsuite/>")(entry(), run)
     assert absent.outcome == CaseOutcome.NOT_COLLECTED
