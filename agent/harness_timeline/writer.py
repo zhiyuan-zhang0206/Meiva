@@ -12,18 +12,21 @@ from psycopg_pool import AsyncConnectionPool
 from agent.harness_timeline.plan import PlannedItem, ReplyPolicy, WritePlan, plan_write
 from agent.ownership.inbound import RuntimeOwnershipLostError, lock_inbound_owner
 from base.agents.history.harness_messages import (
+    StoredPosition,
     aappend_keyed_timeline_items,
+    aappend_transcript_rows,
     aget_harness_call_item_id,
     aload_transcript_positions,
+    aload_transcript_rows,
     aset_transcript_position,
 )
 from base.agents.history.timeline_item import TimelineItem
 from base.agents.messages.inbound import InboundKind
 from base.clock import Clock
 from base.db.transaction import async_write_transaction
+from base.host.boundary.json_values import is_object_dict
 from base.lm.harness.session.transcript.drafts import Projection, SentInput
-from base.lm.harness.session.transcript.entries import AnyEntry
-from base.lm.harness.session.transcript.ports import RecordReader
+from base.lm.harness.session.transcript.ports import EntryBatch, RecordReader, StoredRow
 from base.lm.harness.session.transcript.projection import Projector
 from base.log import logger
 from base.native_process.runtime_incarnation import RuntimeIncarnation, StaleIncarnationError
@@ -32,17 +35,20 @@ from base.native_process.runtime_incarnation import RuntimeIncarnation, StaleInc
 # The session-scoped writer of an external agent's timeline. It lives as long as the session, not as long as a
 # graph invocation, and it does one thing in a loop: when woken (a stream frame, a `session_store` callback, a
 # poll) it reads every record after its stored position, projects what it read, and commits the result in one
-# transaction: keyed timeline items appended in the order read, the inbound rows the entries prove delivered
-# set `done`, and the new positions. A commit that fails is retried with the same plan and nothing is read in
-# between, so entries are never lost to the projector's memory of having seen them; a stale incarnation ends
-# the writer. A restart replays each record silently into a fresh projector (its pairing and delivery state)
-# and projects only what lies past the stored position. What it commits is handed to `after_commit` once, for
-# the caller to publish, capture for delivery, price and wake the graph with.
+# transaction: the whitelisted rows of the read (appended once), keyed timeline items appended in the order
+# read, the inbound rows the entries prove delivered set `done`, and the new positions. A commit that fails is
+# retried with the same plan and nothing is read in between, so entries are never lost to the projector's
+# memory of having seen them; a stale incarnation ends the writer. A restart rebuilds the projector's state
+# (pairing, delivery) from the stored rows after each record's rebuild ordinal, in bounded batches and without
+# touching the CLI's file, and projects only what lies past the stored position. What it commits is handed to
+# `after_commit` once, for the caller to publish, capture for delivery, price and wake the graph with.
 # meiva:link agent/harness_timeline/README.md
 
 POLL_SECONDS = 3.0
 RETRY_SECONDS = 2.0
 FAULT_AFTER_SECONDS = 60.0
+PROJECTION_VERSION = 1
+REBUILD_BATCH_ROWS = 500
 _SETTLE_STATUSES = ("claimed", "pending")
 
 
@@ -62,6 +68,18 @@ class Committed:
 class _Sent:
     items: dict[str, TimelineItem] = field(default_factory=dict[str, TimelineItem])
     inbound_ids: dict[str, tuple[int, ...]] = field(default_factory=dict[str, tuple[int, ...]])
+
+
+@dataclass(frozen=True, slots=True)
+class _Pending:
+    plan: WritePlan
+    batches: list[EntryBatch]
+
+
+def _mapping(row: object) -> Mapping[str, object]:
+    if not is_object_dict(row):
+        raise TypeError("a stored transcript row is not an object")
+    return row
 
 
 class HarnessTimelineWriter:
@@ -93,8 +111,9 @@ class HarnessTimelineWriter:
         self._cli_version = cli_version
         self._projector = Projector()
         self._sent = _Sent()
-        self._positions: dict[str, str] = {}
-        self._pending: tuple[WritePlan, dict[str, str]] | None = None
+        self._positions: dict[str, StoredPosition] = {}
+        self._last_ordinal: dict[str, int] = {}
+        self._pending: _Pending | None = None
         self._non_human: set[str] = set()
         self._started = False
         self._wake = asyncio.Event()
@@ -131,7 +150,7 @@ class HarnessTimelineWriter:
         batches = await self._read_all()
         if not batches:
             return False
-        projection, positions = self._project(batches)
+        projection = self._project(batches)
         plan = plan_write(
             projection,
             sent_items=self._sent.items,
@@ -141,7 +160,7 @@ class HarnessTimelineWriter:
             render_tool=self._render_tool,
         )
         self._note_turns(plan)
-        self._pending = (plan, positions)
+        self._pending = _Pending(plan, batches)
         return await self._commit_pending()
 
     async def wait_for_turn_end(
@@ -198,34 +217,42 @@ class HarnessTimelineWriter:
             self._positions = await aload_transcript_positions(
                 conn, self._agent_id, self._session_id
             )
-        for record in await self._reader.records():
-            await self._replay(record)
+        for record, stored in self._positions.items():
+            await self._rebuild(record, stored.rebuild_ordinal)
         self._started = True
 
-    async def _replay(self, record: str) -> None:
-        everything = await self._reader.read_after(record, None)
-        if everything is None:
-            return
-        stored = self._positions.get(record)
-        tail = await self._reader.read_after(record, stored) if stored is not None else everything
-        tail_keys: set[str] = {entry.key for entry in tail.entries} if tail else set()
-        _ = self._projector.feed(
-            entry for entry in everything.entries if entry.key not in tail_keys
-        )
+    async def _rebuild(self, record: str, after_ordinal: int) -> None:
+        cursor = after_ordinal
+        while True:
+            async with self._pool.connection() as conn:
+                loaded = await aload_transcript_rows(
+                    conn,
+                    self._agent_id,
+                    self._session_id,
+                    record,
+                    after_ordinal=cursor,
+                    limit=REBUILD_BATCH_ROWS,
+                )
+            if not loaded:
+                return
+            rows = [StoredRow(record, ordinal, _mapping(row)) for ordinal, row in loaded]
+            _ = self._projector.feed(self._reader.parse_stored(rows))
+            cursor = rows[-1].ordinal
+            self._last_ordinal[record] = cursor
+            if len(loaded) < REBUILD_BATCH_ROWS:
+                return
 
-    async def _read_all(self) -> list[tuple[str, tuple[AnyEntry, ...], str]]:
-        batches: list[tuple[str, tuple[AnyEntry, ...], str]] = []
+    async def _read_all(self) -> list[EntryBatch]:
+        batches: list[EntryBatch] = []
         for record in await self._reader.records():
-            batch = await self._reader.read_after(record, self._positions.get(record))
+            stored = self._positions.get(record)
+            batch = await self._reader.read_after(record, stored.position if stored else None)
             if batch is not None:
-                batches.append((record, batch.entries, batch.position))
+                batches.append(batch)
         return batches
 
-    def _project(
-        self, batches: list[tuple[str, tuple[AnyEntry, ...], str]]
-    ) -> tuple[Projection, dict[str, str]]:
-        entries = [entry for _, batch, _ in batches for entry in batch]
-        return self._projector.feed(entries), {record: position for record, _, position in batches}
+    def _project(self, batches: list[EntryBatch]) -> Projection:
+        return self._projector.feed([entry for batch in batches for entry in batch.entries])
 
     def _note_turns(self, plan: WritePlan) -> None:
         for turn in plan.observed:
@@ -238,17 +265,48 @@ class HarnessTimelineWriter:
         pending = self._pending
         if pending is None:
             return False
-        plan, positions = pending
-        written = await self._commit(plan, positions)
-        self._positions.update(positions)
+        plan = pending.plan
+        positions = self._next_positions(pending)
+        written = await self._commit(plan, pending.batches, positions)
+        self._positions.update({stored.record: stored for stored in positions})
+        for batch in pending.batches:
+            if batch.rows:
+                self._last_ordinal[batch.record] = batch.rows[-1].ordinal
         self._pending = None
         self._closed_turns += len(plan.closed)
         await self._after_commit(Committed(plan, tuple(written)))
         return True
 
-    async def _commit(self, plan: WritePlan, positions: Mapping[str, str]) -> list[TimelineItem]:
+    def _next_positions(self, pending: _Pending) -> list[StoredPosition]:
+        quiet = bool(pending.plan.closed) and self._quiet()
+        result: list[StoredPosition] = []
+        for batch in pending.batches:
+            previous = self._positions.get(batch.record)
+            last = (
+                batch.rows[-1].ordinal if batch.rows else self._last_ordinal.get(batch.record, -1)
+            )
+            rebuild = last if quiet else (previous.rebuild_ordinal if previous else -1)
+            result.append(StoredPosition(batch.record, batch.position, rebuild))
+        return result
+
+    def _quiet(self) -> bool:
+        return not (
+            self._projector.unanswered_calls()
+            or self._projector.unresolved_results()
+            or self._projector.unlinked_records()
+        )
+
+    async def _commit(
+        self, plan: WritePlan, batches: list[EntryBatch], positions: list[StoredPosition]
+    ) -> list[TimelineItem]:
         async with async_write_transaction(self._pool) as conn:
             await lock_inbound_owner(conn, self._agent_id, incarnation=self._incarnation)
+            _ = await aappend_transcript_rows(
+                conn,
+                self._agent_id,
+                self._session_id,
+                [(row.record, row.ordinal, row.row) for batch in batches for row in batch.rows],
+            )
             written = await self._append(conn, plan.items)
             for settlement in plan.settlements:
                 if settlement.inbound_ids:
@@ -266,14 +324,9 @@ class HarnessTimelineWriter:
                             ],
                         ),
                     )
-            for record, position in positions.items():
+            for stored in positions:
                 await aset_transcript_position(
-                    conn,
-                    self._agent_id,
-                    self._session_id,
-                    record,
-                    position,
-                    self._cli_version(),
+                    conn, self._agent_id, self._session_id, stored, self._cli_version()
                 )
         return written
 
@@ -296,6 +349,7 @@ class HarnessTimelineWriter:
                 self._agent_id,
                 self._harness,
                 [(planned.key, item)],
+                projection_version=PROJECTION_VERSION,
             )
             for out in stored:
                 written.append(out)

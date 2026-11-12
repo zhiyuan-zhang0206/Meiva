@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import json
 import shutil
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from pathlib import Path
 from uuid import uuid4
 
@@ -18,7 +18,7 @@ from base.lm.harness.claude.transcript.reader import ClaudeRecordReader
 from base.lm.harness.claude.transcript.tests.support import FIXTURES, entries_of, rows
 from base.lm.harness.session.transcript.drafts import InboundPart, SentInput
 from base.lm.harness.session.transcript.entries import AnyEntry
-from base.lm.harness.session.transcript.ports import EntryBatch, RecordReader
+from base.lm.harness.session.transcript.ports import EntryBatch, RecordReader, StoredRow
 from base.native_process.runtime_incarnation import RuntimeIncarnation
 
 BASIC = "3c3d2de5-c479-52b7-91a6-fce4e4d26db9"
@@ -39,6 +39,9 @@ class _ScriptedReader:
     async def records(self) -> tuple[str, ...]:
         return tuple(self.records_data)
 
+    def parse_stored(self, rows: Sequence[StoredRow]) -> tuple[AnyEntry, ...]:
+        return tuple(self.records_data[rows[0].record][row.ordinal] for row in rows) if rows else ()
+
     async def read_after(self, record: str, position: str | None) -> EntryBatch | None:
         if self.fail_next:
             self.fail_next = False
@@ -47,7 +50,11 @@ class _ScriptedReader:
         end = self.visible[record]
         if end <= start:
             return None
-        return EntryBatch(record, tuple(self.records_data[record][start:end]), str(end))
+        entries = tuple(self.records_data[record][start:end])
+        stored = tuple(
+            StoredRow(record, start + i, {"entry": start + i}) for i in range(len(entries))
+        )
+        return EntryBatch(record, entries, str(end), stored)
 
 
 async def _agent(
@@ -308,3 +315,67 @@ async def test_the_writer_reads_a_real_transcript_file_by_position_end_to_end(
     assert not await restarted.read_now()
     kinds = [kind for kind, _, _ in await _timeline(aops_pool, agent_id)]
     assert kinds.count("inbound_chat") == 1 and kinds[-1] == "agent_chat" and len(kinds) == 6
+
+
+async def _rebuild_ordinal(pool: AsyncConnectionPool, agent_id: int) -> int:
+    async with pool.connection() as conn:
+        cursor = await conn.execute(
+            "SELECT rebuild_ordinal FROM agent_harness_transcript_positions "
+            "WHERE agent_id = %s AND record = 'main'",
+            (agent_id,),
+        )
+        row = await cursor.fetchone()
+        assert row is not None
+        return int(row[0])
+
+
+async def test_a_restart_rebuilds_from_the_stored_rows_and_pairs_a_result_with_its_earlier_call(
+    aops_pool: AsyncConnectionPool,
+) -> None:
+    agent_id, incarnation = await _agent(aops_pool)
+    row = await _inbound_row(aops_pool, agent_id)
+    entries = entries_of("basic")
+    result_at = next(i for i, entry in enumerate(entries) if type(entry).__name__ == "ToolResult")
+    reader = _ScriptedReader({"main": entries})
+    reader.visible["main"] = result_at
+    first = _writer(aops_pool, agent_id, incarnation, reader, [])
+    _send(first, BASIC, "k1", row)
+    assert await first.read_now()
+    assert await _rebuild_ordinal(aops_pool, agent_id) == -1
+    kinds_before = [kind for kind, _, _ in await _timeline(aops_pool, agent_id)]
+    assert kinds_before[-1] == "agent_code"
+    reader.visible["main"] = len(entries)
+    second = _writer(aops_pool, agent_id, incarnation, reader, [])
+    _send(second, BASIC, "k1", row)
+    assert await second.read_now()
+    kinds = [kind for kind, _, _ in await _timeline(aops_pool, agent_id)]
+    assert kinds == [
+        "inbound_chat",
+        "agent_reasoning",
+        "agent_code",
+        "code_output",
+        "agent_reasoning",
+        "agent_chat",
+    ]
+    assert await _rebuild_ordinal(aops_pool, agent_id) == len(entries) - 1
+
+
+async def test_the_rebuild_point_stays_put_while_a_call_is_open_and_moves_when_the_turn_is_quiet(
+    aops_pool: AsyncConnectionPool,
+) -> None:
+    agent_id, incarnation = await _agent(aops_pool)
+    row = await _inbound_row(aops_pool, agent_id)
+    entries = entries_of("basic")
+    reader = _ScriptedReader({"main": entries})
+    writer = _writer(aops_pool, agent_id, incarnation, reader, [])
+    _send(writer, BASIC, "k1", row)
+    for visible in (3, len(entries)):
+        reader.visible["main"] = visible
+        assert await writer.read_now()
+    assert await _rebuild_ordinal(aops_pool, agent_id) == len(entries) - 1
+    async with aops_pool.connection() as conn:
+        cursor = await conn.execute(
+            "SELECT count(*) FROM agent_harness_transcript_rows WHERE agent_id = %s", (agent_id,)
+        )
+        stored = await cursor.fetchone()
+    assert stored == (len(entries),)
