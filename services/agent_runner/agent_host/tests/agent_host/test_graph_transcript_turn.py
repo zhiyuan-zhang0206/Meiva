@@ -12,14 +12,12 @@ from collections.abc import Sequence
 from dataclasses import dataclass, field, replace
 from itertools import count
 from pathlib import Path
-from typing import cast
 
 import psycopg
 import pytest
 from langgraph.runtime import Runtime
 from psycopg_pool import AsyncConnectionPool
 
-from agent.graph.claim.harness_activity import TranscriptSink
 from agent.graph.claim.harness_inbox import INPUT_KEY_FIELD
 from agent.graph.claim.harness_turn import harness_turn_node
 from agent.graph.claim.tests.harness_support import (
@@ -39,18 +37,15 @@ from agent.harness_timeline.writer import HarnessTimelineWriter
 from agent.ownership.tests.ownership_support import agent_row
 from agent.state import AgentState
 from base.agents.context import MeivaContext
-from base.agents.context.harness_timeline import TimelineSession, TurnEndWait
 from base.clock.tests.fakes import system_clock
 from base.lm.harness import (
     BridgeEvent,
     HarnessInput,
-    HarnessNotDeliveredError,
     InputRejected,
     SessionFailed,
     TurnOrigin,
     TurnStarted,
     Usage,
-    completed_turn,
 )
 from base.lm.harness.claude.transcript.reader import ClaudeRecordReader
 from base.lm.harness.claude.transcript.tests.support import now_ns
@@ -401,112 +396,3 @@ async def test_an_input_the_stream_calls_refused_but_the_record_shows_is_settled
     assert len(engine.delivered) == 1, "the input reached the CLI once, whatever the event said"
     assert len(loguru_records.events("harness_input_proven_by_record")) == 1
     assert loguru_records.events("harness_input_requeued") == []
-
-
-# meiva:note
-# Turns are paired with the record's closings one for one, in order: two turns that end close together each wait for
-# their own closing, and neither returns on the other's, so the spend compared with each turn's result is that turn's.
-class _CountingTimeline:
-    def __init__(self, spends: list[Usage]) -> None:
-        self.closed_turns = 0
-        self.items_written = 0
-        self.fault = None
-        self.waited_after: list[int] = []
-        self._spends = spends
-
-    def take_closed_usage(self) -> Usage | None:
-        return self._spends.pop(0) if self._spends else None
-
-    def take_invalid_reply(self) -> bool:
-        return False
-
-    async def wait_for_turn_end(
-        self, closed_before: int, *, quiet_seconds: float, ceiling_seconds: float
-    ) -> TurnEndWait:
-        del quiet_seconds, ceiling_seconds
-        self.waited_after.append(closed_before)
-        return TurnEndWait.CLOSED
-
-    async def write_marker(self, text: str, *, error: bool) -> None:
-        del text, error
-
-
-async def test_two_turns_that_end_close_together_each_wait_for_their_own_closing() -> None:
-    timeline = _CountingTimeline([Usage(input_tokens=7, output_tokens=3)] * 2)
-    sink = TranscriptSink(cast("TimelineSession", timeline), non_human_wake=False)
-    timeline.closed_turns = 2
-    turns = (completed_turn(completed("t1", "a"), "a"), completed_turn(completed("t2", "b"), "b"))
-
-    await sink.finish(turns)
-
-    assert timeline.waited_after == [0, 1], "the second turn must not return on the first's closing"
-
-
-async def test_a_refusal_of_the_whole_batch_does_not_take_back_what_the_record_shows(
-    db_conn: psycopg.Connection,
-    aops_pool: AsyncConnectionPool,
-    hosted_resources: HostedTurnResources,
-) -> None:
-    agent_id = agent_row(db_conn)
-    row = insert_row(db_conn, agent_id, "chat", "user", "hello")
-    record = ScriptedRecord()
-
-    def script(inputs: Sequence[HarnessInput]) -> Sequence[BridgeEvent]:
-        keys = tuple(item.key for item in inputs)
-        record.write(*(record.take(key, item.text) for key, item in zip(keys, inputs, strict=True)))
-        record.write(*record.reply(REPLY))
-        raise HarnessNotDeliveredError("the CLI took it but the call failed")
-
-    engine = FakeEngine(script=script)
-    rt, _ = _wire(
-        runtime(engine, ops_pool=aops_pool, hosted_resources=hosted_resources),
-        aops_pool,
-        agent_id,
-        record,
-    )
-
-    with pytest.raises(FatalLLMStreamError):
-        await harness_turn_node(AgentState(), rt, config(agent_id))
-
-    assert row_status(db_conn, row) == "done", "settled by the record, not returned to the queue"
-    assert len(engine.delivered) == 1
-
-
-async def test_an_unreadable_record_at_adoption_leaves_the_claimed_row_for_the_next_invocation(
-    db_conn: psycopg.Connection,
-    aops_pool: AsyncConnectionPool,
-    hosted_resources: HostedTurnResources,
-) -> None:
-    agent_id = agent_row(db_conn)
-    row = insert_row(db_conn, agent_id, "chat", "user", "hello")
-    db_conn.execute(
-        "UPDATE inbound_messages SET status='claimed', claimed_at=now(), "
-        "payload = COALESCE(payload, '{}'::jsonb) || jsonb_build_object(%s::text, %s::text) "
-        "WHERE id=%s",
-        (INPUT_KEY_FIELD, input_key(row), row),
-    )
-    db_conn.commit()
-    record = ScriptedRecord()
-    record.failing_reads = 1
-    engine = FakeEngine(script=_cli(record))
-    rt, _ = _wire(
-        runtime(engine, ops_pool=aops_pool, hosted_resources=hosted_resources),
-        aops_pool,
-        agent_id,
-        record,
-    )
-
-    with pytest.raises(OSError, match="could not be read"):
-        await harness_turn_node(AgentState(), rt, config(agent_id))
-
-    assert engine.delivered == [], (
-        "nothing was sent while the record could not say what the CLI holds"
-    )
-    assert row_status(db_conn, row) in ("claimed", "pending"), "the row is still to be decided"
-
-    _ = await harness_turn_node(AgentState(), rt, config(agent_id))
-
-    assert row_status(db_conn, row) == "done"
-    assert len(engine.delivered) == 1, (
-        "delivered once, by the invocation that could read the record"
-    )

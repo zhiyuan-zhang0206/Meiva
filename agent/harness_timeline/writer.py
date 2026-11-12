@@ -162,6 +162,7 @@ class HarnessTimelineWriter:
         self._stop_asked = asyncio.Event()
         self._io = asyncio.Lock()
         self._closed_turns = 0
+        self._finished_turns = 0
         self._items_written = 0
         self._invalid_reply = False
         self._turn_usage: RecentMap[str, Usage] = RecentMap(TURN_USAGE_LIMIT)
@@ -366,6 +367,25 @@ class HarnessTimelineWriter:
             self._held_since = None
         elif self._held_since is None:
             self._held_since = self._clock.monotonic()
+
+    # meiva:note
+    # The turn the stream reports ended is waited for here, paired with the record's closings one for one in order:
+    # the n-th turn to be reported waits for the n-th closing the record shows. The count is the writer's, not an
+    # invocation's: turns the CLI ran on its own while no invocation was there are closed in the record and are reported
+    # by the stream to the next invocation, and each of those reports finds its closing already counted. A turn whose
+    # closing the record never shows ends the wait quietly (event `harness_timeline_turn_end_unseen`) and gives its count
+    # back, so the pairing is right again for the next turn; a closing that shows up late is then counted for the turn
+    # after it, which is the one inexactness of pairing by count.
+    async def wait_for_next_turn_end(
+        self, *, quiet_seconds: float, ceiling_seconds: float
+    ) -> TurnEndWait:
+        self._finished_turns += 1
+        outcome = await self.wait_for_turn_end(
+            self._finished_turns - 1, quiet_seconds=quiet_seconds, ceiling_seconds=ceiling_seconds
+        )
+        if outcome is not TurnEndWait.CLOSED:
+            self._finished_turns = min(self._finished_turns, self._closed_turns)
+        return outcome
 
     async def wait_for_turn_end(
         self, closed_before: int, *, quiet_seconds: float, ceiling_seconds: float

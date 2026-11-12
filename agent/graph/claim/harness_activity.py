@@ -544,7 +544,6 @@ class TranscriptSink:
     def __init__(self, timeline: TimelineSession, *, non_human_wake: bool) -> None:
         self._timeline = timeline
         self._base = timeline.items_written
-        self._closed_seen = timeline.closed_turns
         self._non_human_wake = non_human_wake
 
     @property
@@ -586,10 +585,11 @@ class TranscriptSink:
     # entry, or stays quiet for `TRANSCRIPT_QUIET_SECONDS`, or `TRANSCRIPT_END_CEILING_SECONDS` have passed. Not
     # finding the closing entry is recorded by the writer as an event and never fails the turn. A turn that ended in
     # error is waited for like any other (its failure row closes it; the result says why it ended), and its spend is
-    # not compared. Turns are paired with the record's closings one for one, in order: the n-th turn to finish waits
-    # for the n-th closing the record shows (`_closed_seen` counts the turns finished here, not the closings seen), so
-    # two turns that end close together each wait for their own and neither returns on the other's. The spend the record
-    # tallied for the turn is compared with the result's, and a difference is an event.
+    # not compared. Turns are paired with the record's closings one for one, in order, by the writer
+    # (`wait_for_next_turn_end`), so two turns that end close together each wait for their own, and the turns the CLI
+    # ran on its own between invocations (closed in the record, reported to the next invocation) find their closings
+    # already counted. The spend the record tallied for the turn is compared with the result's, and a difference is
+    # an event.
     async def finish(
         self,
         turns: Sequence[HarnessTurn] = (),
@@ -599,12 +599,10 @@ class TranscriptSink:
     ) -> None:
         del interrupted
         for turn in turns:
-            _ = await self._timeline.wait_for_turn_end(
-                self._closed_seen,
+            _ = await self._timeline.wait_for_next_turn_end(
                 quiet_seconds=TRANSCRIPT_QUIET_SECONDS,
                 ceiling_seconds=TRANSCRIPT_END_CEILING_SECONDS,
             )
-            self._closed_seen += 1
             self._compare_usage(turn)
         if error is not None:
             await self._timeline.write_marker(f"Harness execution stopped: {error}", error=True)

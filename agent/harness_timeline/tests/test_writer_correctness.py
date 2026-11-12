@@ -23,7 +23,7 @@ from agent.harness_timeline.tests.support import (
     status_of,
     timeline_of,
 )
-from agent.harness_timeline.writer import HOLD_SECONDS, Committed
+from agent.harness_timeline.writer import HOLD_SECONDS, Committed, TurnEndWait
 from base.agents.history.harness_messages import aappend_keyed_timeline_items
 from base.agents.history.timeline_item import TimelineItem
 from base.clock.tests.fakes import clock_over
@@ -256,3 +256,62 @@ async def test_a_fenced_writer_that_is_bound_a_valid_incarnation_commits_once_an
 
     assert len(committed) == 1 and writer.closed_turns == 1
     assert await status_of(aops_pool, row) == "done"
+
+
+# meiva:note
+# Turns are paired with the record's closings one for one, in order, by the writer: two turns the record closed together
+# are each answered by their own closing, the closings of turns the CLI ran on its own (reported to the stream later)
+# are already counted when their reports come, and a closing the record never shows ends one wait quietly and gives the
+# count back so the next turn is paired again.
+def _turn(index: int, *, close: bool) -> list[AnyEntry]:
+    out: list[AnyEntry] = [
+        HumanInput(
+            key=f"i{index}", order=Order(3 * index), turn=f"t{index}", wire_id=None, text="q"
+        ),
+        AgentText(
+            key=f"a{index}",
+            order=Order(3 * index + 1),
+            turn=f"t{index}",
+            text="r",
+            message_ref=f"m{index}",
+        ),
+    ]
+    if close:
+        out.append(TurnEnd(key=f"e{index}", order=Order(3 * index + 2), turn=f"t{index}"))
+    return out
+
+
+async def test_turns_are_paired_with_closings_one_for_one_across_invocations_and_own_turns(
+    aops_pool: AsyncConnectionPool,
+) -> None:
+    agent_id, incarnation = await make_agent(aops_pool)
+    entries = [
+        *_turn(0, close=True),
+        *_turn(1, close=True),
+        *_turn(2, close=False),
+        *_turn(3, close=True),
+    ]
+    reader = ScriptedReader({"main": entries})
+    writer = make_writer(aops_pool, agent_id, incarnation, reader, [])
+    reader.visible["main"] = 6
+    while await writer.read_now():
+        pass
+    wait = {"quiet_seconds": 0.05, "ceiling_seconds": 2.0}
+
+    first = await writer.wait_for_next_turn_end(**wait)
+    second = await writer.wait_for_next_turn_end(**wait)
+    assert (first, second) == (TurnEndWait.CLOSED, TurnEndWait.CLOSED), "two closings, two turns"
+
+    reader.visible["main"] = 8
+    while await writer.read_now():
+        pass
+    third = await writer.wait_for_next_turn_end(**wait)
+    assert third is TurnEndWait.QUIET, "the closing of the third turn is not in the record"
+
+    reader.visible["main"] = len(entries)
+    while await writer.read_now():
+        pass
+    fourth = await writer.wait_for_next_turn_end(**wait)
+    assert fourth is TurnEndWait.CLOSED, (
+        "the count was given back, so the next turn is paired again"
+    )
