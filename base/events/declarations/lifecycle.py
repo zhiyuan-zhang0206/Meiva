@@ -181,6 +181,12 @@ EVENTS: dict[str, EventSpec] = {
         "dropped before it could settle an input or end a turn",
         tier="noise",
     ),
+    "harness_subagent_call_not_found": telemetry_event(
+        "harness_subagent_call_not_found",
+        "a CLI sub-agent's activity named a spawning call that this agent's timeline does not hold "
+        "(never written, or reset since); the line was written without a parent, once per call id",
+        tier="noise",
+    ),
     "harness_input_requeued": telemetry_event(
         "harness_input_requeued",
         "an external harness refused an input or declared it lost; the inbound went back to the "
