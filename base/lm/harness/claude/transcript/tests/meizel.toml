@@ -1,5 +1,7 @@
-exports = []
+exports = ["support.py"]
 
 [uses]
 "support.py" = []
 "test_golden.py" = ["support.py"]
+"test_reader.py" = ["support.py"]
+"test_store_filter.py" = ["support.py"]

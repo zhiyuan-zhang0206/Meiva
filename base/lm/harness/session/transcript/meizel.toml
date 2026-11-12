@@ -1,4 +1,4 @@
-exports = ["drafts.py", "entries.py", "projection.py"]
+exports = ["drafts.py", "entries.py", "ports.py", "projection.py"]
 
 [uses]
 "__init__.py" = []

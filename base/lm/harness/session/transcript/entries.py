@@ -169,12 +169,15 @@ class Failure(Entry):
 class AnomalyKind(StrEnum):
     UNKNOWN_TYPE = "unknown_type"
     MISSING_FIELD = "missing_field"
+    BAD_ROW = "bad_row"
 
 
 # meiva:note
 # A row the parser could not use. An unknown type is skipped and reported once per type; a known type
-# that lacks a field the projection needs is skipped and reported as an exception. Neither puts
-# anything on the timeline. `detail` is the type name or the missing field.
+# that lacks a field the projection needs is skipped and reported as an exception, and a row the reader
+# could not decode (not JSON, not an object, invalid text, nested too deep, too large) is skipped and
+# reported with the reason. None of them puts anything on the timeline. `detail` is the type name, the
+# missing field or the reason.
 @dataclass(frozen=True, slots=True, kw_only=True)
 class Anomaly(Entry):
     anomaly: AnomalyKind

@@ -7,7 +7,7 @@
 from __future__ import annotations
 
 import json
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from uuid import UUID
 
@@ -53,8 +53,10 @@ def copy_harness_timeline(
     cur: Cursor[tuple[object, ...]], source_agent_id: int, new_agent_id: int
 ) -> int:
     cur.execute(
-        "INSERT INTO agent_harness_messages (agent_id, seq, harness, item, inbound_id, created_at) "
-        "SELECT %s, seq, harness, item, NULL, created_at FROM agent_harness_messages "
+        "INSERT INTO agent_harness_messages "
+        "(agent_id, seq, harness, item, inbound_id, created_at, source_key, projection_version) "
+        "SELECT %s, seq, harness, item, NULL, created_at, source_key, projection_version "
+        "FROM agent_harness_messages "
         "WHERE agent_id = %s",
         (new_agent_id, source_agent_id),
     )
@@ -264,6 +266,161 @@ async def aappend_harness_timeline_items(
                 ),
             )
         return persisted
+
+
+_INSERT_KEYED_HARNESS_TIMELINE_ITEM = """
+INSERT INTO agent_harness_messages
+    (agent_id, seq, harness, item, inbound_id, created_at, source_key, projection_version)
+VALUES (%s, %s, %s, %s::jsonb, %s, COALESCE(%s::timestamptz, clock_timestamp()), %s, %s)
+ON CONFLICT (agent_id, source_key) WHERE source_key IS NOT NULL DO NOTHING
+RETURNING seq
+"""
+
+
+# meiva:note
+# Append the items projected from transcript entries, each under its stable `source_key`: an item whose key
+# the agent already has is skipped and gives no row and no sequence number, so the same entries read twice
+# write once and the sequence stays contiguous. The timeline stays append-only: the item gets the next `seq`
+# in the order the items are given. The caller holds the transaction and has taken its owner lock
+# (`lock_inbound_owner`); the agent row lock here only serializes the sequence. Returns the items that were
+# written, with their ids.
+# meiva:link base/agents/history/docs/timeline/timeline.md
+async def aappend_keyed_timeline_items(
+    conn: AsyncConnection,
+    agent_id: int,
+    harness: str,
+    keyed: Sequence[tuple[str, TimelineItem]],
+    *,
+    projection_version: int,
+) -> list[TimelineItem]:
+    if not keyed:
+        return []
+    persisted: list[TimelineItem] = []
+    async with conn.cursor() as cur:
+        await cur.execute("SELECT 1 FROM agents_meta WHERE id = %s FOR UPDATE", (agent_id,))
+        await cur.execute(
+            "SELECT COALESCE(MAX(seq) + 1, 0) FROM agent_harness_messages WHERE agent_id = %s",
+            (agent_id,),
+        )
+        next_seq = _int_from_row(await cur.fetchone())
+        for source_key, item in keyed:
+            updated = item.model_copy(update={"item_id": f"h{next_seq}.0"})
+            await cur.execute(
+                _INSERT_KEYED_HARNESS_TIMELINE_ITEM,
+                (
+                    agent_id,
+                    next_seq,
+                    harness,
+                    json.dumps(updated.model_dump(mode="json")),
+                    item.inbound_id,
+                    item.created_at,
+                    source_key,
+                    projection_version,
+                ),
+            )
+            if await cur.fetchone() is not None:
+                persisted.append(updated)
+                next_seq += 1
+    return persisted
+
+
+# meiva:note
+# Where one transcript record has been read to: the adapter's opaque `position`, and the `rebuild_ordinal`,
+# the ordinal of the last stored row at a quiet point (nothing open that a restart would need to see), from
+# which the projector's state is rebuilt out of the stored rows. Both are written in the transaction that
+# writes the rows they cover; the row is one small row per record whatever the length of the conversation.
+@dataclass(frozen=True)
+class StoredPosition:
+    record: str
+    position: str
+    rebuild_ordinal: int
+
+
+async def aload_transcript_positions(
+    conn: AsyncConnection, agent_id: int, session_id: str
+) -> dict[str, StoredPosition]:
+    rows = await aquery_all(
+        conn,
+        StoredPosition,
+        "SELECT record, position, rebuild_ordinal FROM agent_harness_transcript_positions "
+        "WHERE agent_id = %s AND session_id = %s",
+        (agent_id, session_id),
+    )
+    return {row.record: row for row in rows}
+
+
+async def aset_transcript_position(
+    conn: AsyncConnection,
+    agent_id: int,
+    session_id: str,
+    stored: StoredPosition,
+    cli_version: str | None,
+) -> None:
+    await conn.execute(
+        "INSERT INTO agent_harness_transcript_positions "
+        "(agent_id, session_id, record, position, rebuild_ordinal, cli_version) "
+        "VALUES (%s, %s, %s, %s, %s, %s) "
+        "ON CONFLICT (agent_id, session_id, record) DO UPDATE SET position = EXCLUDED.position, "
+        "rebuild_ordinal = EXCLUDED.rebuild_ordinal, "
+        "cli_version = COALESCE(EXCLUDED.cli_version, "
+        "agent_harness_transcript_positions.cli_version), updated_at = clock_timestamp()",
+        (agent_id, session_id, stored.record, stored.position, stored.rebuild_ordinal, cli_version),
+    )
+
+
+# meiva:note
+# The whitelisted rows of a transcript record, appended once and never updated: a row the agent already has
+# (same session, record and ordinal) is skipped, so a read that is repeated writes nothing twice. Only the
+# rows of the read are written, so what one call writes does not grow with what is already stored.
+# meiva:link future/agent/transcript-timeline-source.md
+async def aappend_transcript_rows(
+    conn: AsyncConnection,
+    agent_id: int,
+    session_id: str,
+    rows: Sequence[tuple[str, int, Mapping[str, object]]],
+) -> int:
+    if not rows:
+        return 0
+    async with conn.cursor() as cur:
+        await cur.executemany(
+            "INSERT INTO agent_harness_transcript_rows (agent_id, session_id, record, ordinal, row) "
+            "VALUES (%s, %s, %s, %s, %s::jsonb) ON CONFLICT DO NOTHING",
+            [
+                (agent_id, session_id, record, ordinal, json.dumps(row))
+                for record, ordinal, row in rows
+            ],
+        )
+        return cur.rowcount
+
+
+@dataclass(frozen=True)
+class _StoredRowRow:
+    ordinal: int
+    row: object
+
+
+# meiva:note
+# The stored rows of one record after an ordinal, in order, at most `limit` of them: how a restart rebuilds
+# the projector's state (from the last rebuild point on, never the whole session) and how a re-projection
+# reads a session in bounded batches.
+async def aload_transcript_rows(
+    conn: AsyncConnection,
+    agent_id: int,
+    session_id: str,
+    record: str,
+    *,
+    after_ordinal: int,
+    limit: int,
+) -> list[tuple[int, object]]:
+    rows = await aquery_all(
+        conn,
+        _StoredRowRow,
+        "SELECT ordinal, row FROM agent_harness_transcript_rows "
+        "WHERE agent_id = %s AND session_id = %s AND record = %s AND ordinal > %s "
+        "ORDER BY ordinal LIMIT %s",
+        (agent_id, session_id, record, after_ordinal, limit),
+    )
+    return [(row.ordinal, row.row) for row in rows]
 
 
 @dataclass(frozen=True)
