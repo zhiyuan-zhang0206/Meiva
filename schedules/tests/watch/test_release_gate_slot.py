@@ -1,8 +1,8 @@
 # meiva:note
 # The slot check: a six-hourly cron that stops arriving leaves nothing to read, so "no red" and "no
 # run" look the same from the red watch. These cases pin the one boundary that matters (is the slot
-# really late?), the suppression while a run is in flight, and the rule that one missing slot
-# produces one make-up dispatch however many rounds notice it.
+# really late?), suppression of a new complaint while a run is in flight, and the rule that
+# one missing slot keeps one card until a newer verified scheduled arrival.
 
 from __future__ import annotations
 

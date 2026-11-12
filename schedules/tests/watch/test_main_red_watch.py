@@ -709,9 +709,9 @@ def test_an_unreadable_liveness_stream_does_not_stop_the_round(tmp_path: Path) -
 
 
 # meiva:note
-# The slot round end to end: a cron that stopped arriving opens one card, one make-up dispatch
-# answers it, and the next scheduled run closes the card. The dispatch is what makes the card
-# actionable -- repairing the coverage -- while the card itself waits for the cron to recover.
+# The slot round end to end: a cron that stopped arriving opens one card, which waits until
+# a strictly newer verified scheduled arrival. Busy activity and certification progress cannot
+# substitute for that arrival; the round itself never dispatches the gate.
 def _slot_round(
     tmp_path: Path,
     *,
@@ -772,9 +772,8 @@ def test_a_scheduled_run_closes_the_slot_card(tmp_path: Path) -> None:
 
 
 # meiva:note
-# A slot the gate would have skipped is not a gap: `release-gate.yml` certifies only when
-# `channel/latest` trails `main`, so "nothing uncertified" and "no red" are both silence. The card
-# that already exists still closes, because its subject -- unchecked commits -- is gone.
+# A caught-up channel suppresses a new complaint but cannot establish recovery of an existing
+# scheduled-arrival gap. The old card stays in WAIT until a newer scheduled run is verified.
 def test_nothing_uncertified_does_not_resolve_an_existing_scheduled_gap(
     tmp_path: Path,
 ) -> None:

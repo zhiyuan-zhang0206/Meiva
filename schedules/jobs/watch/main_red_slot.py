@@ -1,9 +1,9 @@
 # meiva:note
 # The slot round: one workflow's cron can stop without anything going red, and the watch would
 # otherwise be silent through exactly the outage it exists to end. A missing slot opens one card
-# and the next scheduled run closes it. The round dispatches nothing: the make-up run certifies,
-# certifying releases, and a release is the user's decision -- so the card carries the command and
-# stays open until a human runs it or the cron recovers.
+# and a strictly newer verified scheduled arrival closes it. The round dispatches nothing:
+# running the gate can publish a release and requires the user's decision. A manual run or a
+# caught-up channel leaves an existing card waiting for scheduled-arrival recovery.
 #
 # It lives beside `main_red_watch.py` rather than inside it because the two judge different things
 # over one state file: one reads runs, the other watches a schedule, and the shared file is all they
@@ -32,9 +32,9 @@ __all__ = ["replace_state_slot", "slot_round"]
 # meiva:note
 # The slot round: one workflow's cron can stop without anything going red, and the watch would
 # otherwise be silent through exactly the outage it exists to end. A missing slot opens one card
-# and the next scheduled run closes it. The round dispatches nothing: the make-up run certifies,
-# certifying releases, and a release is the user's decision -- so the card carries the command and
-# stays open until a human runs it or the cron recovers.
+# and a strictly newer verified scheduled arrival closes it. The round dispatches nothing:
+# running the gate can publish a release and requires the user's decision. A manual run or a
+# caught-up channel leaves an existing card waiting for scheduled-arrival recovery.
 # meiva:note
 # How often an unreadable slot leg repeats itself on the round line. One note per three rounds --
 # ninety minutes at the current cadence -- is often enough that the line never goes quiet while the

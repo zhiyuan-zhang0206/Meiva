@@ -523,8 +523,8 @@ def _slot_note(
 
 
 # meiva:note
-# A workflow that is queued or running is about to say something, so its slot is not missing yet:
-# dispatching over it would stack two full suites on the same runner pool.
+# Queued or running workflow activity suppresses a new slot complaint. It does not prove that
+# an existing scheduled-arrival gap recovered; only the scheduled-run reader can establish that.
 def _workflow_busy(workflow: str, run_process: RunProcess) -> bool:
     import json
 
@@ -536,9 +536,9 @@ def _workflow_busy(workflow: str, run_process: RunProcess) -> bool:
 
 # meiva:note
 # How far `channel/latest` trails `main`: the gate skips a slot when nothing is uncertified, and
-# that skip is harmless. Reading the distance is what separates a harmless skip from a gap that
-# leaves commits unchecked. An unreadable compare returns None, and the card then says so rather
-# than claiming there is work waiting.
+# that skip suppresses a new complaint. This distance does not resolve an existing scheduled
+# gap. An unreadable compare returns None, and the card then says so rather than claiming there
+# is work waiting.
 def _uncertified_commits(run_process: RunProcess) -> tuple[int | None, str | None]:
     import json
 
