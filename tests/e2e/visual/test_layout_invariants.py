@@ -525,6 +525,7 @@ def test_bottom_rule_gap_is_halved(
         ).first
         viewport.evaluate("el => { el.scrollTop = el.scrollHeight; }")
         page.wait_for_timeout(400)
+        expect(page.locator('[data-testid="pending-questions"]')).to_have_count(0)
         band_box = page.locator('[data-testid="composer-band"]').bounding_box()
         row_box = page.locator(".timeline-item").last.bounding_box()
         assert band_box is not None and row_box is not None
