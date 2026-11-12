@@ -16,6 +16,7 @@ from base.lm.harness.session.transcript.entries import (
     AnomalyKind,
     AnyEntry,
     Compaction,
+    Failure,
     HumanInput,
     Interrupt,
     Notice,
@@ -40,7 +41,8 @@ from base.lm.harness.session.transcript.entries import (
 # block per row, a message's blocks sharing `message.id`), `system/compact_boundary`, and the
 # `attachment/queued_command` of an input absorbed mid-turn. Rows ignored on purpose: the bookkeeping types
 # and context attachments listed below, the `isMeta` and compact-summary rows, the CLI's synthetic
-# `<synthetic>` assistant row ("No response requested.") and a sub-agent's prompt echo.
+# `<synthetic>` assistant row ("No response requested.") and a sub-agent's prompt echo. A synthetic assistant row
+# with `isApiErrorMessage` is the CLI's record of an API error (`error`, `apiErrorStatus`): a `Failure`.
 # Not read yet: any `system` subtype other than `compact_boundary` and the attachment types of newer CLIs
 # are reported as anomalies; hook output, API error rows and `isApiErrorMessage` rows have no sample.
 # meiva:link base/lm/harness/docs/transcript-projection.md
@@ -244,6 +246,8 @@ def _attachment(
 def _assistant(
     state: ParseState, row: _Row, raw: Mapping[str, object], message: Mapping[str, object]
 ) -> tuple[ParseState, tuple[AnyEntry, ...]]:
+    if raw.get("isApiErrorMessage") is True:
+        return state, _api_error(row, raw, message)
     if message.get("model") == _SYNTHETIC_MODEL:
         return state, ()
     blocks = message.get("content")
@@ -267,6 +271,17 @@ def _assistant(
     if row.record == MAIN_RECORD and isinstance(stop, str) and stop in _ENDING_STOPS:
         entries.append(TurnEnd(**_entry_fields(row, 2, key=f"claude:{row.uuid}:end")))
     return ParseState(call_ms), tuple(entries)
+
+
+def _api_error(
+    row: _Row, raw: Mapping[str, object], message: Mapping[str, object]
+) -> tuple[AnyEntry, ...]:
+    text = _text(message.get("content"))
+    code = raw.get("error")
+    detail = text or (code if isinstance(code, str) else "")
+    if not detail:
+        return (_missing(row, "message.content"),)
+    return (Failure(**_entry_fields(row), message=detail),)
 
 
 def _block(

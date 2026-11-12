@@ -24,6 +24,7 @@ from base.lm.harness.session.transcript.drafts import (
 from base.lm.harness.session.transcript.entries import (
     AnomalyKind,
     AnyEntry,
+    Failure,
     HumanInput,
     Interrupt,
     SubagentLink,
@@ -396,3 +397,50 @@ def test_the_cli_version_is_readable_from_a_row_for_telemetry() -> None:
     assert "2.1.322" in versions
     assert source("basic")["cli"] == "Claude Code 2.1.322"
     assert parse_row(ParseState(), {"type": "user"}, line=0)[1][0].key.startswith("claude:anomaly")
+
+
+OWN_FIRST = "0a8712ed"
+OWN_SECOND = "03b7e3d9"
+
+
+def _wire(scenario: str, prefix: str) -> str:
+    return next(
+        e.wire_id
+        for e in entries_of(scenario)
+        if isinstance(e, HumanInput) and e.wire_id and e.wire_id.startswith(prefix)
+    )
+
+
+def test_a_second_input_that_missed_the_turn_is_its_own_turn_not_a_steer() -> None:
+    first, second = _wire("own_turn", OWN_FIRST), _wire("own_turn", OWN_SECOND)
+    entries = entries_of("own_turn")
+    assert not any(isinstance(e, HumanInput) and e.joined_running_turn for e in entries)
+    projector, projection = project(entries, [sent(first, "a", "t"), sent(second, "b", "t")])
+    assert [(d.input_key, d.joined_running_turn) for d in projection.deliveries] == [
+        ("a", False),
+        ("b", False),
+    ]
+    assert [t.origin for t in projection.turns_observed] == [TurnOrigin.INPUT, TurnOrigin.INPUT]
+    assert [t.reason for t in projection.turns_closed] == ["completed", "completed"]
+    assert kinds(in_order(projection.drafts)) == [
+        "inbound_chat",
+        "agent_chat",
+        "inbound_chat",
+        "agent_chat",
+    ]
+    assert in_order(projection.drafts)[-1].payload == "SECOND"
+    assert projector.undelivered() == ()
+
+
+def test_an_api_error_row_is_a_failure_that_fails_its_turn_and_costs_nothing() -> None:
+    wire = _wire("api_error", "5dbbbf43")
+    entries = entries_of("api_error")
+    (failure,) = [e for e in entries if isinstance(e, Failure)]
+    assert failure.message.startswith("There's an issue with the selected model")
+    projector, projection = project(entries, [sent(wire, "k", "t")])
+    assert [d.payload for d in projection.drafts if d.kind.value == "system_marker"] == [
+        f"error:{failure.message}"
+    ]
+    assert [t.reason for t in projection.turns_closed] == ["failed"]
+    assert not any(d.kind.value == "agent_chat" for d in projection.drafts)
+    assert projection.anomalies == () and projector.undelivered() == ()

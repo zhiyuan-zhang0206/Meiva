@@ -155,7 +155,7 @@ One rule: an input is delivered when the record shows it; the entry that shows i
 | Handed over, process killed before the CLI wrote it | not in the record: the row stays `claimed`; at the next session start the writer's first read runs, then every still-`claimed` row the projector's `undelivered()` lists is returned to `pending` for re-delivery in order. This replaces `plan_reconciliation` and `claude/reconciliation/judge.py` |
 | Written by the CLI, process killed before the writer read it | the next read finds it and settles it; the recovery input ("the turn was interrupted, continue") is queued as today (`reconciled-resume-<id>`) |
 | A steer lost to an interrupt | never in the record: stays `claimed`, then requeued, delivered as the next input |
-| A steer not absorbed | the CLI runs it as a turn of its own: a human row with our uuid, not joined; same `Delivery` (recorded before PR B, section 9) |
+| A steer not absorbed | the CLI runs it as a turn of its own: a human row with our uuid, written after the first turn's last assistant row, with a new `promptId`; not joined; same `Delivery` (recorded 2026-11-12, fixture `own_turn`) |
 | An input the record cannot place | `unmatched_inputs`: shown as an inbound item with source `unmatched` and logged; never blocks |
 
 ## 8. Where the rest goes
@@ -185,8 +185,11 @@ One rule: an input is delivered when the record shows it; the entry that shows i
 1. **Golden tests (landed).** Sanitized recordings of CLI 2.1.322: basic, multiblock, steer, interrupt, kill,
    resume, subagents, task notifications and CLI-started turns, compact, denied, fork; draft kinds, ownership,
    keys, deliveries, nesting in every arrival order, usage equal to the recorded `ResultMessage`.
-2. **Recordings to add before the writer is wired**: a steer that is not absorbed and starts its own turn, and a
-   turn that ends in an API error. (The Antigravity fixtures are CONSTRUCTED from trajectory captures, the child
+2. **Recordings added 2026-11-12** (CLI 2.1.322): a second input that missed the running turn and started its
+   own (`own_turn`), and a turn that ends in an API error (`api_error`, a nonexistent model): the CLI writes a
+   synthetic assistant row (`model` `<synthetic>`, `isApiErrorMessage`, `error`, `apiErrorStatus`, stop_sequence),
+   projected as a `Failure` that fails the turn; the `ResultMessage` reports `subtype` success with `is_error`
+   true and zero usage, which is why the result's own error ends the turn (section 6). (The Antigravity fixtures are CONSTRUCTED from trajectory captures, the child
    record partly synthesized; **raw `transcript_full.jsonl` must be re-recorded before the Antigravity cutover**,
    which this plan does not do now.)
 3. **Writer tests** against a throwaway Postgres: idempotent re-read, the unique key, stale-incarnation
@@ -234,6 +237,7 @@ Resolved by review (kept for the record): start from the end of the record at cu
 2. **Fencing for a writer with no invocation**: the writer needs the runtime's incarnation token, not the graph
    context's. To be verified with evidence in PR B.
 3. **Registered warning events** (unknown entry type, end ceiling reached, unmatched input): registered in PR B.
-4. **Not yet recorded**: a steer that is not absorbed; an API-error turn (section 9).
+4. **Not yet recorded**: an API error that arrives mid-turn after tool use, a retried 429/529, and `Failure` on
+   Codex and Antigravity (schema only).
 5. **The text fallback for Antigravity delivery** and its turn boundaries remain the weakest part of the shared
    abstraction (no turn-end row, no id on ordinary turns); revisit when its raw record is re-recorded.
