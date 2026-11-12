@@ -44,7 +44,11 @@ JSONL after a stored position (`position.py`: the last row's key, its byte span,
 next row's `Order.seq`), consumes only complete lines, checks that the last row read is still at its place, and
 treats a position the file no longer holds as a fault. A sub-agent's file is its own record. The store side is
 `aappend_keyed_timeline_items` (append-only in `seq`, idempotent by `agent_harness_messages.source_key`) and
-`agent_harness_transcript_positions`, both in `base/agents/history/harness_messages.py`; nothing calls them yet.
+`agent_harness_transcript_positions` (the position and the rebuild ordinal), the stored whitelisted rows
+(`agent_harness_transcript_rows`: `claude/transcript/store_filter.py` decides what is kept, `aappend_transcript_rows`
+appends them once, `aload_transcript_rows` reads them back by ordinal, `adelete_expired_transcript_rows` expires them
+in bounded batches), all in `base/agents/history/harness_messages.py`; nothing calls them yet. A reader returns the
+rows to store with each batch and parses stored rows back with `parse_stored`.
 
 ## Native records and the vocabulary
 

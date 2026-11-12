@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+from collections.abc import Sequence
 from pathlib import Path
 
 from base.lm.harness.claude.reconciliation.transcript import transcript_path
@@ -34,7 +35,17 @@ class ClaudeRecordReader:
         self._home = claude_home
         self._session_id = session_id
         self._states: dict[str, ParseState] = {}
+        self._stored_states: dict[str, ParseState] = {}
         self.bytes_read = 0
+
+    def parse_stored(self, rows: Sequence[StoredRow]) -> tuple[AnyEntry, ...]:
+        entries: list[AnyEntry] = []
+        for stored in rows:
+            state = self._stored_states.get(stored.record, ParseState())
+            state, parsed = parse_row(state, stored.row, line=stored.ordinal)
+            self._stored_states[stored.record] = state
+            entries.extend(parsed)
+        return tuple(entries)
 
     async def records(self) -> tuple[str, ...]:
         return await asyncio.to_thread(self._records)

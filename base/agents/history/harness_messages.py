@@ -326,42 +326,46 @@ async def aappend_keyed_timeline_items(
 
 
 # meiva:note
-# The stored read position of one transcript record, or None when it has never been read. The writer
-# stores it in the transaction that writes the rows it covers, so the two never disagree.
+# Where one transcript record has been read to: the adapter's opaque `position`, and the `rebuild_ordinal`,
+# the ordinal of the last stored row at a quiet point (nothing open that a restart would need to see), from
+# which the projector's state is rebuilt out of the stored rows. Both are written in the transaction that
+# writes the rows they cover; the row is one small row per record whatever the length of the conversation.
 @dataclass(frozen=True)
-class _PositionRow:
+class StoredPosition:
     record: str
     position: str
+    rebuild_ordinal: int
 
 
 async def aload_transcript_positions(
     conn: AsyncConnection, agent_id: int, session_id: str
-) -> dict[str, str]:
+) -> dict[str, StoredPosition]:
     rows = await aquery_all(
         conn,
-        _PositionRow,
-        "SELECT record, position FROM agent_harness_transcript_positions "
+        StoredPosition,
+        "SELECT record, position, rebuild_ordinal FROM agent_harness_transcript_positions "
         "WHERE agent_id = %s AND session_id = %s",
         (agent_id, session_id),
     )
-    return {row.record: row.position for row in rows}
+    return {row.record: row for row in rows}
 
 
 async def aset_transcript_position(
     conn: AsyncConnection,
     agent_id: int,
     session_id: str,
-    record: str,
-    position: str,
+    stored: StoredPosition,
     cli_version: str | None,
 ) -> None:
     await conn.execute(
         "INSERT INTO agent_harness_transcript_positions "
-        "(agent_id, session_id, record, position, cli_version) VALUES (%s, %s, %s, %s, %s) "
+        "(agent_id, session_id, record, position, rebuild_ordinal, cli_version) "
+        "VALUES (%s, %s, %s, %s, %s, %s) "
         "ON CONFLICT (agent_id, session_id, record) DO UPDATE SET position = EXCLUDED.position, "
+        "rebuild_ordinal = EXCLUDED.rebuild_ordinal, "
         "cli_version = COALESCE(EXCLUDED.cli_version, "
         "agent_harness_transcript_positions.cli_version), updated_at = clock_timestamp()",
-        (agent_id, session_id, record, position, cli_version),
+        (agent_id, session_id, stored.record, stored.position, stored.rebuild_ordinal, cli_version),
     )
 
 

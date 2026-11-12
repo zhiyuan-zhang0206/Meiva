@@ -7,6 +7,7 @@ from pathlib import Path
 from psycopg_pool import AsyncConnectionPool
 
 from base.agents.history.harness_messages import (
+    StoredPosition,
     aappend_transcript_rows,
     adelete_expired_transcript_rows,
     aload_transcript_rows,
@@ -121,7 +122,9 @@ async def test_a_long_session_costs_linear_storage_and_constant_work_per_batch(
             count = await aappend_transcript_rows(
                 conn, agent_id, session, [(r.record, r.ordinal, r.row) for r in batch.rows]
             )
-            await aset_transcript_position(conn, agent_id, session, "main", position, None)
+            await aset_transcript_position(
+                conn, agent_id, session, StoredPosition("main", position, -1), None
+            )
         written.append(count)
         stored_bytes.append(sum(len(json.dumps(r.row)) for r in batch.rows))
     async with aops_pool.connection() as conn:

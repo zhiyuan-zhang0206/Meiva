@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from collections.abc import Awaitable, Mapping
+from collections.abc import Awaitable, Mapping, Sequence
 from dataclasses import dataclass
 from typing import Protocol
 
@@ -13,7 +13,9 @@ from base.lm.harness.session.transcript.entries import AnyEntry
 # offset in the local file; Codex: the history cursor; Antigravity: the last step index); the writer
 # stores it per record in the transaction that writes the entries and never looks inside. Whatever
 # wakes the writer (a stream frame, a `session_store` callback, a timer) carries no content, so the
-# first read after a crash is the same code as every other read. `None` means nothing new. A position
+# first read after a crash is the same code as every other read. `parse_stored` reads stored rows of one record,
+# in ordinal order, with the same parser, which is how the projector's state is rebuilt after a restart and
+# how a session is re-projected from the database; it carries the parser's own state across calls. `None` means nothing new. A position
 # the record no longer contains is an error, never a restart from the beginning.
 # meiva:link base/lm/harness/docs/transcript-projection.md
 
@@ -41,3 +43,5 @@ class RecordReader(Protocol):
     def read_after(self, record: str, position: str | None) -> Awaitable[EntryBatch | None]: ...
 
     def records(self) -> Awaitable[tuple[str, ...]]: ...
+
+    def parse_stored(self, rows: Sequence[StoredRow]) -> tuple[AnyEntry, ...]: ...

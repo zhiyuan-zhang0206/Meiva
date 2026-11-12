@@ -91,12 +91,13 @@ the graph reports it. `StaleIncarnationError` ends the writer without retry. A p
 CLI wrote, because the next read starts at the stored position.
 
 **Restart.** The projector's state (open calls, sent inputs not yet proven, sub-agent links) is never stored as a
-blob. A new writer rebuilds it from the stored rows: it reads back, from the database, the rows since the
-last **rebuild point** of each record (the latest turn boundary or compaction boundary the stored rows hold;
-beyond a compaction nothing before it matters to pairing) and feeds them silently into a fresh projector. The
-bound is the length of one turn plus whatever background work spans it, not the session; a call that stays open
-across a rebuild point is the one case the rebuild cannot see, and its result is then shown without its call's
-nesting (reported once). The local file is used only to continue reading.
+blob. Each record's position row also holds a **rebuild ordinal**: the ordinal of the last stored row at the most
+recent *quiet point* (a commit after which no call is open, no result waits for its call and no sub-agent record
+is unlinked). A new writer reads back, from the database, the stored rows after that ordinal in bounded
+batches, parses them with the adapter's own parser (`RecordReader.parse_stored`) and feeds them silently into a
+fresh projector. The cost is the distance from the last quiet point, one turn or the span of the background work
+that kept a call open, never the session; and the CLI's local file is not read for it at all, only to continue
+reading. Keeping the rebuild ordinal is one extra column on a row the writer updates anyway.
 
 ## 4. Storage: stored records, derived timeline, strictly O(n)
 
@@ -113,7 +114,7 @@ writes. This design must not have that shape anywhere.
 | `agent_harness_messages.source_key TEXT`, partial unique `(agent_id, source_key) WHERE source_key IS NOT NULL` | the stable key of the entry a timeline row was projected from; the idempotency constraint; null for rows the graph writes itself |
 | `agent_harness_messages.projection_version INT` | the version of the projection rules that produced the row (null on rows written before) |
 | `agent_harness_transcript_rows(agent_id, session_id, record, ordinal, row JSONB, written_at)`, primary key `(agent_id, session_id, record, ordinal)` | the stored records: one row per whitelisted CLI row, appended once, never updated; `ordinal` is the row's own position in its record |
-| `agent_harness_transcript_positions(agent_id, session_id, record, position, cli_version, updated_at)`, primary key `(agent_id, session_id, record)` | where each record has been read to: one small row per record, O(1) |
+| `agent_harness_transcript_positions(agent_id, session_id, record, position, rebuild_ordinal, cli_version, updated_at)`, primary key `(agent_id, session_id, record)` | where each record has been read to, and the quiet point a restart rebuilds from: one small row per record, O(1) |
 
 The timeline stays **append-only in `seq`**, one writer making it so (the meaning of today's event-stream arrival
 order): a command that completes late is appended when it completes, a sub-agent's row when it is read, a

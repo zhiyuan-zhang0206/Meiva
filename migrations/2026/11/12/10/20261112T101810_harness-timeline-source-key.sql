@@ -39,6 +39,7 @@ CREATE TABLE IF NOT EXISTS agent_harness_transcript_positions (
     session_id TEXT NOT NULL,
     record TEXT NOT NULL,
     position TEXT NOT NULL,
+    rebuild_ordinal BIGINT NOT NULL DEFAULT -1,
     cli_version TEXT,
     updated_at TIMESTAMPTZ NOT NULL DEFAULT clock_timestamp(),
     PRIMARY KEY (agent_id, session_id, record)
@@ -50,6 +51,8 @@ COMMENT ON COLUMN agent_harness_transcript_positions.record IS
     'The record read: main, or a sub-agent record id.';
 COMMENT ON COLUMN agent_harness_transcript_positions.position IS
     'The adapter''s own opaque mark of how far the record has been read; the writer stores it and never reads it.';
+COMMENT ON COLUMN agent_harness_transcript_positions.rebuild_ordinal IS
+    'Ordinal of the last stored row at a quiet point (no call open, no sub-agent record unlinked): a restart rebuilds the projector from the stored rows after it, so the work is bounded by one turn and not the session. -1 = from the start.';
 COMMENT ON COLUMN agent_harness_transcript_positions.cli_version IS
     'Version of the CLI that wrote the last row read, for telemetry.';
 

@@ -147,3 +147,14 @@ def test_a_session_with_no_file_yet_has_nothing_to_read(tmp_path: Path) -> None:
     reader = ClaudeRecordReader(claude_home=tmp_path, session_id="missing-session")
     assert asyncio.run(reader.records()) == ()
     assert _read(reader, "main", None) is None
+
+
+def test_parsing_the_stored_rows_gives_the_entries_the_read_gave(tmp_path: Path) -> None:
+    home, _ = _home(tmp_path, "subagents")
+    reader = ClaudeRecordReader(claude_home=home, session_id=_session("subagents"))
+    batch = _read(reader, "main", None)
+    assert batch is not None and batch.rows
+    again = ClaudeRecordReader(claude_home=home, session_id=_session("subagents"))
+    rebuilt = again.parse_stored(batch.rows)
+    assert _keys(list(rebuilt)) == _keys(list(batch.entries))
+    assert [e.order.seq for e in rebuilt] == [e.order.seq for e in batch.entries]

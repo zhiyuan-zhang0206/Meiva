@@ -6,6 +6,7 @@ import psycopg
 from psycopg import AsyncConnection
 
 from base.agents.history.harness_messages import (
+    StoredPosition,
     aappend_keyed_timeline_items,
     aload_harness_timeline_items,
     aload_transcript_positions,
@@ -98,12 +99,20 @@ def test_positions_are_stored_per_record_and_upserted(
 ) -> None:
     agent_id = _seed_agent(db_conn)
 
-    async def run() -> tuple[dict[str, str], dict[str, str], dict[str, str]]:
+    async def run() -> tuple[
+        dict[str, StoredPosition], dict[str, StoredPosition], dict[str, StoredPosition]
+    ]:
         async with await AsyncConnection.connect(db_url) as conn:
             empty = await aload_transcript_positions(conn, agent_id, "s1")
-            await aset_transcript_position(conn, agent_id, "s1", "main", "p1", "2.1.322")
-            await aset_transcript_position(conn, agent_id, "s1", "agent-a", "q1", None)
-            await aset_transcript_position(conn, agent_id, "s1", "main", "p2", None)
+            await aset_transcript_position(
+                conn, agent_id, "s1", StoredPosition("main", "p1", 4), "2.1.322"
+            )
+            await aset_transcript_position(
+                conn, agent_id, "s1", StoredPosition("agent-a", "q1", -1), None
+            )
+            await aset_transcript_position(
+                conn, agent_id, "s1", StoredPosition("main", "p2", 9), None
+            )
             await conn.commit()
             return (
                 empty,
@@ -113,7 +122,10 @@ def test_positions_are_stored_per_record_and_upserted(
 
     empty, stored, other = asyncio.run(run())
     assert empty == {} and other == {}
-    assert stored == {"main": "p2", "agent-a": "q1"}
+    assert stored == {
+        "main": StoredPosition("main", "p2", 9),
+        "agent-a": StoredPosition("agent-a", "q1", -1),
+    }
     version = db_conn.execute(
         "SELECT cli_version FROM agent_harness_transcript_positions "
         "WHERE agent_id = %s AND record = 'main'",
