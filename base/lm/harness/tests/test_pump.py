@@ -67,13 +67,13 @@ async def test_a_compaction_seen_while_idle_puts_the_reminder_on_the_next_delive
     bridge = make_bridge(session, handoff=doc)
     subscription = await bridge.subscribe()
 
-    await bridge.deliver([HarnessInput(key="inbound-1", text="one")])
+    await bridge.deliver([HarnessInput.of(key="inbound-1", text="one")])
     session._queue.append(ContextCompacted())
     async with asyncio.timeout(2):
         while not isinstance(await subscription.get(), ContextCompacted):
             pass
-    await bridge.deliver([HarnessInput(key="inbound-2", text="two")])
-    await bridge.deliver([HarnessInput(key="inbound-3", text="three")])
+    await bridge.deliver([HarnessInput.of(key="inbound-2", text="two")])
+    await bridge.deliver([HarnessInput.of(key="inbound-3", text="three")])
 
     assert [batch[0].text for batch in session.delivered] == [
         f"{doc.render().strip()}\n\none",
@@ -95,7 +95,7 @@ async def test_a_compaction_turn_between_turns_puts_the_reminder_on_the_very_nex
     doc = handoff().with_reference_file(instructions)
     bridge = make_bridge(session, handoff=doc)
     subscription = await bridge.subscribe()
-    await bridge.deliver([HarnessInput(key="inbound-1", text="one")])
+    await bridge.deliver([HarnessInput.of(key="inbound-1", text="one")])
 
     session._queue.append(_own("compaction"))
     session._queue.append(ContextCompacted(turn_id="compaction"))
@@ -120,8 +120,8 @@ async def test_a_compaction_turn_between_turns_puts_the_reminder_on_the_very_nex
     async with asyncio.timeout(2):
         while not isinstance(await subscription.get(), TurnCompleted):
             pass
-    await bridge.deliver([HarnessInput(key="inbound-2", text="two")])
-    await bridge.deliver([HarnessInput(key="inbound-3", text="three")])
+    await bridge.deliver([HarnessInput.of(key="inbound-2", text="two")])
+    await bridge.deliver([HarnessInput.of(key="inbound-3", text="three")])
 
     assert [batch[0].text for batch in session.delivered][1:] == [
         f"{compaction_reminder(instructions)}\n\ntwo",

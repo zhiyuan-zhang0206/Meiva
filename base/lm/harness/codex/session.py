@@ -415,7 +415,7 @@ class CodexSession(BaseHarnessSession[CodexConfig]):
         key = ticket.input_key
         if self._ledger.phase(key) in (None, InputPhase.REJECTED, InputPhase.LOST):
             self._ledger = self._ledger.sent(key)
-        item = HarnessInput(key=key, text=ticket.text, images=ticket.images)
+        item = HarnessInput(key, ticket.blocks)
         # meiva:note
         # `turn/started` can beat this response and supply the interrupt target.
         # Activity waits for the response to certify its native turn id.

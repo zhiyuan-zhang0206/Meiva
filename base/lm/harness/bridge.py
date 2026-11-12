@@ -294,10 +294,9 @@ class HarnessBridge:
         except (HarnessClosedError, HarnessSetupError) as exc:
             raise HarnessNotDeliveredError(str(exc)) from exc
         self._register(session.session_id or "")
-        batch[0] = HarnessInput(
-            key=batch[0].key,
-            text=self._opening_input(batch[0].key, batch[0].text, session, compaction_note),
-            images=batch[0].images,
+        key = batch[0].key
+        batch[0] = batch[0].with_lead_text(
+            lambda text: self._opening_input(key, text, session, compaction_note)
         )
         await session.deliver(batch)
 

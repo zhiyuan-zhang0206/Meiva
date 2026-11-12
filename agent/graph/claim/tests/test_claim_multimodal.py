@@ -421,12 +421,10 @@ def test_fit_input_images_bounds_the_total_of_one_input_and_a_smaller_later_one_
     full = MAX_IMAGE_BYTES
     blocks, left_out = native_images([_image_message(full, full, full - 5, full, 5)])
 
-    kept, skipped = fit_input_images(blocks)
+    kept, skipped = fit_input_images([blocks[:2], blocks[2:]])
 
-    assert left_out == 0 and len(kept) == 4 and skipped == 1
-    assert [len(i.data_base64) for i in kept] == [
-        len(i.data_base64) for i in blocks[:3] + blocks[4:]
-    ]
+    assert left_out == 0 and skipped == 1
+    assert kept == (blocks[:2], (blocks[2], blocks[4]))
 
 
 def test_native_images_refuses_a_block_that_is_not_a_base64_data_url() -> None:

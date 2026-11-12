@@ -33,6 +33,7 @@ from base.lm.harness import (
     HarnessInput,
     HarnessNotDeliveredError,
     Reconciliation,
+    TextBlock,
 )
 from base.native_process.turn_identity import HostedTurnResources
 
@@ -332,3 +333,55 @@ def test_plan_wake_bounds_the_images_of_the_merged_input_not_of_each_row() -> No
 
     assert len(wake.images) == 3, "four 5 MB images in one input: the fourth is left out"
     assert "1 attached image was not sent inline" in wake.text
+
+
+def test_plan_wake_makes_a_block_per_message_with_its_images_behind_it() -> None:
+    from agent.graph.claim.harness_foreground import Handed, plan_wake
+    from base.lm.harness import ImageBlock, TextBlock
+
+    image = ImageBlock(mime_type="image/png", data_base64="aGk=")
+    rows = [
+        (Handed("inbound-1", 1, ()), "first message", False),
+        (Handed("inbound-2", 2, ()), "second message", False),
+    ]
+    synthetic = [
+        (Handed("hook-notes-2", None, ()), "a note"),
+        (Handed("control-1", None, ()), "a hint"),
+    ]
+
+    plan = plan_wake(
+        synthetic,
+        rows,
+        {"inbound-1": (image,), "inbound-2": (image, image)},
+        hook_notes_key="hook-notes-",
+    )
+
+    [wake] = plan.inputs
+    assert wake.blocks == (
+        TextBlock("a hint"),
+        TextBlock("first message"),
+        image,
+        TextBlock("second message"),
+        image,
+        image,
+        TextBlock("a note"),
+    )
+    assert plan.group is not None and plan.group.row_ids == (1, 2), "rows are marked for a crash"
+
+
+async def test_each_message_of_a_wake_keeps_its_own_timeline_entry(
+    db_conn: psycopg.Connection,
+    aops_pool: AsyncConnectionPool,
+    hosted_resources: HostedTurnResources,
+) -> None:
+    agent_id = agent_row(db_conn)
+    rows = [insert_row(db_conn, agent_id, "chat", "user", t) for t in ("first", "second")]
+    engine = FakeEngine()
+    rt = runtime(engine, ops_pool=aops_pool, hosted_resources=hosted_resources)
+
+    _ = await harness_turn_node(AgentState(), rt, config(agent_id))
+
+    [[one]] = engine.delivered
+    texts = [b.text for b in one.blocks if isinstance(b, TextBlock)]
+    assert len(texts) == 2 and texts[0].endswith("first") and texts[1].endswith("second")
+    assert await timeline_inbound_ids(aops_pool, agent_id) == rows, "a timeline entry per message"

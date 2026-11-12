@@ -10,6 +10,7 @@ from base.lm.harness.delivery import (
     DeliveryLedger,
     HarnessInput,
     ImageBlock,
+    InputBlock,
     LedgerStep,
     Reconciliation,
     ReconciliationUnavailableError,
@@ -57,12 +58,19 @@ class ForkSourceUnavailableError(RuntimeError):
 # meiva:link base/lm/harness/docs/harness.md
 class ActiveTurn:
     def __init__(
-        self, *, turn_id: str, text: str, key: str, images: tuple[ImageBlock, ...] = ()
+        self,
+        *,
+        turn_id: str,
+        text: str,
+        key: str,
+        images: tuple[ImageBlock, ...] = (),
+        blocks: tuple[InputBlock, ...] = (),
     ) -> None:
         self.turn_id = turn_id
         self.text = text
         self.input_key = key
         self.images = images
+        self.blocks = blocks
         self.started_at: float | None = None
         self.provider_turn_id: str | None = None
         self.interrupt_requested = False
@@ -277,6 +285,7 @@ class BaseHarnessSession[ConfigT: SessionConfig](ExitStatus):
             text=entry.text.strip(),
             key=entry.key,
             images=entry.images,
+            blocks=entry.blocks,
         )
         self._discard_unconsumed_events()
         self._active = turn

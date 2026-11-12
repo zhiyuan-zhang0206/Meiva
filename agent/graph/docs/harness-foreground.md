@@ -9,9 +9,9 @@ compaction) are barriers: nothing behind one is delivered until the claim has di
 delivered at all while a restart or terminate is pending. A batch made only of passive notes is not handed
 over: it waits and goes along with the next input that is not passive.
 
-One wake's batch is one input: the synthetic inputs' text first (a restart or resume note, a context reset, a
-continuation), then each row's text in queue order, then the pre-turn hook note, separated by blank
-lines, under the key of the first row that is not passive; the other rows are `Handed.carried`, keep their own
+One wake's batch is one input, one harness turn, made of blocks: a text block for each synthetic input first (a
+restart or resume note, a context reset, a continuation), then a text block for each row in queue order with the row's
+images right behind it, then a text block for each pre-turn hook note, under the key of the first row that is not passive; the other rows are `Handed.carried`, keep their own
 timeline entries and settle, are returned or are lost together with the one acknowledgement; the synthetic inputs ride in it with their
 timeline entries, and a refused or lost input is handed over again with them (a delivery the session could not
 take leaves them in the checkpoint's `harness_inputs`, so the next invocation carries them too). Handing them over
@@ -19,7 +19,8 @@ one by one made the first input open the turn alone (a passive note, a hook note
 a turn of its own about a second later. A wake with no row text (a restart note and a hook note, say) is one
 input the same way: its synthetic inputs are merged in the same order under the first one's key, and a refused or lost one
 is handed back whole. The images of the merged input are bounded together (15 MB), not per row; one that does not fit is
-left out and the text says so. A batch of several rows marks them with `harness_input_key` in their
+left out and a text block after the last row says so. The timeline is only a projection: each row still writes its own
+entry, whatever shape the input took on the way to the harness. A batch of several rows marks them with `harness_input_key` in their
 payload before it is handed over, so a later run rebuilds the group and asks the harness's record about that one
 key (a requeue clears the mark). An interrupt request still pending when
 an invocation starts was aimed at a turn that has ended; the invocation settles it before it subscribes, so it

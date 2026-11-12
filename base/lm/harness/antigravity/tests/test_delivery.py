@@ -15,7 +15,7 @@ from base.lm.harness.antigravity.trajectory import (
     parse_trajectory,
     phantom_action,
 )
-from base.lm.harness.delivery import HarnessInput, ImageBlock
+from base.lm.harness.delivery import HarnessInput, ImageBlock, TextBlock
 from base.lm.harness.delivery.tests.sent import send
 from base.lm.harness.events import (
     AckSignal,
@@ -86,7 +86,7 @@ async def test_an_input_for_a_running_turn_carries_its_id_and_enters_the_context
     try:
         ticket = await send(harness, "work", key="first")
         await running(harness, ["work"])
-        await harness.session.deliver([HarnessInput("steer-1", "also this")])
+        await harness.session.deliver([HarnessInput.of("steer-1", "also this")])
         [sent] = harness.rpc_payloads()
         assert sent["clientMessageId"] == "steer-1"
         assert sent["items"] == [{"text": "also this"}]
@@ -107,7 +107,7 @@ async def test_images_ride_in_the_media_field(tmp_path: Path) -> None:
         _ = await send(harness, "work")
         await running(harness, ["work"])
         image = ImageBlock("image/png", "aGk=")
-        await harness.session.deliver([HarnessInput("img-1", "look", (image,))])
+        await harness.session.deliver([HarnessInput.of("img-1", "look", (image,))])
         [sent] = harness.rpc_payloads()
         assert sent["media"] == [{"mimeType": "image/png", "inlineData": "aGk="}]
     finally:
@@ -121,7 +121,7 @@ async def test_an_input_for_an_idle_conversation_starts_a_turn_on_stdin_not_a_ph
     try:
         first = await send(harness, "one", key="first")
         _ = await first.outcome()
-        await harness.session.deliver([HarnessInput("late", "next input")])
+        await harness.session.deliver([HarnessInput.of("late", "next input")])
         await harness.wait_until(lambda: harness.messages() == ["one", "next input"])
         assert harness.rpc_payloads() == [], "no SendUserCascadeMessage for an idle conversation"
         started = (await seen(harness, TurnStarted))[-1]
@@ -138,7 +138,7 @@ async def test_an_input_that_finds_our_turn_just_finished_is_refused_not_sent_in
         first = await send(harness, "one", key="first")
         await harness.wait_until(lambda: harness.messages() == ["one"])
         await asyncio.sleep(0.2)
-        await harness.session.deliver([HarnessInput("late", "next input")])
+        await harness.session.deliver([HarnessInput.of("late", "next input")])
         assert harness.rpc_payloads() == []
         assert [e.key for e in await seen(harness, InputRejected)] == ["late"]
         _ = await first.outcome()
@@ -158,7 +158,7 @@ async def test_a_phantom_turn_is_observed_and_its_answer_does_not_leak_into_the_
     try:
         first = await send(harness, "one", key="first")
         _ = await first.outcome()
-        await harness.session.deliver([HarnessInput("late", "late input")])
+        await harness.session.deliver([HarnessInput.of("late", "late input")])
         assert [p["clientMessageId"] for p in harness.rpc_payloads()] == ["late"]
         await harness.wait_for(
             lambda e: isinstance(e, TurnCompleted) and e.text.startswith("phantom")
@@ -190,7 +190,7 @@ async def test_a_trajectory_of_an_unexpected_shape_fails_the_delivery(tmp_path: 
         _ = await send(harness, "work")
         await running(harness, ["work"])
         with pytest.raises(AgyInterfaceError):
-            await harness.session.deliver([HarnessInput("k", "x")])
+            await harness.session.deliver([HarnessInput.of("k", "x")])
     finally:
         await harness.stop()
 
@@ -207,7 +207,7 @@ async def test_closing_with_a_phantom_turn_open_stops_the_trajectory_poll(tmp_pa
     )
     first = await send(harness, "one", key="first")
     _ = await first.outcome()
-    await harness.session.deliver([HarnessInput("late", "late input")])
+    await harness.session.deliver([HarnessInput.of("late", "late input")])
     await harness.wait_for(lambda e: isinstance(e, TurnStarted) and e.origin is TurnOrigin.HARNESS)
     assert _watchers(), "the poll runs while the phantom turn is open"
     await asyncio.wait_for(harness.stop(), 10)
@@ -231,7 +231,7 @@ async def test_an_image_for_an_idle_conversation_starts_the_turn_with_text_and_i
     harness = await start(tmp_path, turns=[{"hang": True}])
     try:
         image = ImageBlock("image/png", "aGk=")
-        await harness.session.deliver([HarnessInput("img-1", "look at this", (image,))])
+        await harness.session.deliver([HarnessInput.of("img-1", "look at this", (image,))])
         await harness.wait_until(lambda: len(harness.rpc_payloads()) == 1)
         [sent] = harness.rpc_payloads()
         assert harness.messages()[0] == "look at this\n\n(The image for this message follows next.)"
@@ -239,5 +239,17 @@ async def test_an_image_for_an_idle_conversation_starts_the_turn_with_text_and_i
         assert sent["media"] == [{"mimeType": "image/png", "inlineData": "aGk="}]
         started = (await seen(harness, TurnStarted))[-1]
         assert started.keys == ("img-1",), "the caller's key is the text input that began the turn"
+    finally:
+        await harness.stop()
+
+
+async def test_the_text_blocks_of_one_input_reach_stdin_as_one_string_joined_by_blank_lines_a_cli_limit(
+    tmp_path: Path,
+) -> None:
+    harness = await start(tmp_path, turns=[say("ok")])
+    try:
+        blocks = (TextBlock("first message"), TextBlock("second message"))
+        await harness.session.deliver([HarnessInput("wake", blocks)])
+        await harness.wait_until(lambda: harness.messages() == ["first message\n\nsecond message"])
     finally:
         await harness.stop()

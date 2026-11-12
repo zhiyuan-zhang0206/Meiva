@@ -13,7 +13,7 @@ from base.lm.harness.codex.requests import (
     steer_request,
     turn_start_request,
 )
-from base.lm.harness.delivery import HarnessInput, ImageBlock
+from base.lm.harness.delivery import HarnessInput, ImageBlock, TextBlock
 
 
 def test_the_handshake_names_this_client() -> None:
@@ -74,7 +74,7 @@ def test_an_unset_model_is_left_to_the_accounts_own_default() -> None:
 
 
 def test_a_turn_text_is_sent_as_one_text_input_with_the_input_key() -> None:
-    assert turn_start_request("thread-1", HarnessInput("k-1", "do the thing")) == (
+    assert turn_start_request("thread-1", HarnessInput.of("k-1", "do the thing")) == (
         "turn/start",
         {
             "threadId": "thread-1",
@@ -86,7 +86,7 @@ def test_a_turn_text_is_sent_as_one_text_input_with_the_input_key() -> None:
 
 def test_an_image_is_sent_as_a_data_url_after_the_text() -> None:
     image = ImageBlock("image/png", "aGk=")
-    assert steer_request("thread-1", "turn-9", HarnessInput("k-2", "look", (image,))) == (
+    assert steer_request("thread-1", "turn-9", HarnessInput.of("k-2", "look", (image,))) == (
         "turn/steer",
         {
             "threadId": "thread-1",
@@ -164,3 +164,17 @@ def test_a_resume_that_names_no_id_keeps_the_one_it_resumed() -> None:
 
 def test_a_fresh_thread_that_names_no_id_stays_empty() -> None:
     assert OpenedThread.of({}, resume=None, model="configured", cwd="/workspace").session_id == ""
+
+
+def test_the_blocks_of_one_input_keep_their_order_in_the_input_array() -> None:
+    image = ImageBlock("image/png", "aGk=")
+    item = HarnessInput("k-3", (TextBlock("one"), image, TextBlock("two"), TextBlock("three")))
+
+    _, params = turn_start_request("thread-1", item)
+
+    assert params["input"] == [
+        {"type": "text", "text": "one"},
+        {"type": "image", "url": "data:image/png;base64,aGk="},
+        {"type": "text", "text": "two"},
+        {"type": "text", "text": "three"},
+    ]

@@ -221,12 +221,12 @@ class AgySession(BaseHarnessSession[AntigravityConfig]):
         many = len(entry.images) > 1
         plural = "images" if many else "image"
         verb = "follow" if many else "follows"
-        lead = HarnessInput(
+        lead = HarnessInput.of(
             entry.key,
             f"{entry.text.strip()}\n\n(The {plural} for this message {verb} next.)".strip(),
         )
         turn = self._start_input_turn(lead)
-        follow = HarnessInput(
+        follow = HarnessInput.of(
             f"{entry.key}:images", f"The {plural} the previous message refers to.", entry.images
         )
         self._ledger = self._ledger.sent(follow.key)

@@ -34,7 +34,7 @@ async def run_turn(
     try:
         try:
             await bridge.deliver(
-                [HarnessInput(key=key, text=text)], compaction_note=compaction_note
+                [HarnessInput.of(key=key, text=text)], compaction_note=compaction_note
             )
         except (HarnessClosedError, HarnessSetupError):
             await bridge.retire("session unavailable")

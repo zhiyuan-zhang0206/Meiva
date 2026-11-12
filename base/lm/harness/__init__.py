@@ -11,8 +11,10 @@ from base.lm.harness.bridge import (
 from base.lm.harness.delivery import (
     HarnessInput,
     ImageBlock,
+    InputBlock,
     Reconciliation,
     ReconciliationUnavailableError,
+    TextBlock,
 )
 from base.lm.harness.engine import (
     EventSubscription,
@@ -94,6 +96,7 @@ __all__ = [
     "HarnessTurn",
     "HarnessTurnFaultedError",
     "ImageBlock",
+    "InputBlock",
     "InputInContext",
     "InputLost",
     "InputReceived",
@@ -113,6 +116,7 @@ __all__ = [
     "SessionRegistry",
     "SessionStarted",
     "SubagentText",
+    "TextBlock",
     "TextDelta",
     "ToolResult",
     "ToolUse",

@@ -28,6 +28,8 @@ def _blocks(raw: list[dict[str, Any]]) -> list[Any]:
             blocks.append(fake.TextBlock(text=item["text"]))
         elif "tool" in item:
             blocks.append(fake.ToolUseBlock(**item["tool"]))
+        elif item.get("type") == "image":
+            blocks.append(item)
         else:
             blocks.append(fake.ToolResultBlock(**item["tool_result"]))
     return blocks
