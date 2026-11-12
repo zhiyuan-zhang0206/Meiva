@@ -57,6 +57,7 @@ from schedules.plans.watch.main_red import (
     RunFacts,
 )
 from schedules.plans.watch.junit import ArtifactMatch, failing_case_ids, match_artifact
+from schedules.plans.watch.junit_publications import attempt_started_at, current_publications
 from schedules.plans.watch.workflow_graph import downstream_failing_jobs
 from schedules.plans.watch.release_gate_slot import RELEASE_GATE_SLOT_CADENCE, SlotFacts
 
@@ -193,6 +194,7 @@ def _job_failures(
     job: Mapping[object, object],
     *,
     run_id: int,
+    attempt: int,
     check_steps: frozenset[str],
     scratch: Path,
     run_process: RunProcess,
@@ -213,7 +215,7 @@ def _job_failures(
     )
     if from_log and all(failure.kind != FAILURE_UNNAMED for failure in from_log):
         return from_log
-    case_ids, match = junit_case_ids(run_id, job_name, scratch, run_process)
+    case_ids, match = junit_case_ids(run_id, job_name, scratch, run_process, attempt=attempt)
     return parse_failures(
         log[-400_000:],
         job_name=job_name,
@@ -246,17 +248,26 @@ def _run_artifacts(run_id: int, run_process: RunProcess) -> tuple[dict[str, obje
 # name gets nothing rather than somebody else's shard, because naming a case from the wrong shard is
 # worse than admitting the watch cannot name it.
 def junit_case_ids(
-    run_id: int, job_name: str, scratch: Path, run_process: RunProcess
+    run_id: int,
+    job_name: str,
+    scratch: Path,
+    run_process: RunProcess,
+    *,
+    attempt: int = 1,
 ) -> tuple[tuple[str, ...], ArtifactMatch]:
-    by_name: dict[str, int] = {}
-    for artifact in _run_artifacts(run_id, run_process):
-        name = artifact.get("name")
-        identifier = artifact.get("id")
-        if isinstance(name, str) and isinstance(identifier, int):
-            by_name[name] = identifier
+    import json
+
+    artifacts = _run_artifacts(run_id, run_process)
+    try:
+        metadata = json.loads(_api(f"repos/{_REPO}/actions/runs/{run_id}", run_process))
+        if not is_object_dict(metadata):
+            return (), ArtifactMatch(None, "none", (), "workflow metadata is not an object")
+        by_name, errors = current_publications(artifacts, attempt_started_at(metadata, attempt))
+    except (ValueError, TypeError) as exc:
+        return (), ArtifactMatch(None, "none", (), f"workflow attempt unverified: {exc}")
     chosen = match_artifact(job_name, tuple(by_name))
     if chosen.name is None:
-        return (), chosen
+        return (), replace(chosen, note="; ".join(errors)) if errors else chosen
     return _artifact_case_ids(by_name[chosen.name], scratch, run_process), chosen
 
 
@@ -353,6 +364,7 @@ def fetch_runs(
                     for failure in _job_failures(
                         job,
                         run_id=int(item.get("id") or 0),
+                        attempt=listing_attempt(item),
                         check_steps=check_steps,
                         scratch=scratch,
                         run_process=run_process,

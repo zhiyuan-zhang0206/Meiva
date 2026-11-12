@@ -21,3 +21,18 @@ def test_unknown_document_cannot_claim_a_case_was_not_collected() -> None:
     assert collected_case_results("<html/>") is None
     assert collected_case_results('<testsuite><testcase name="anonymous"/></testsuite>') is None
     assert collected_case_results("<testsuite/>") == ()
+
+
+def test_classname_only_pytest_module_uses_the_same_id_as_file_metadata() -> None:
+    one = collected_case_results(
+        '<testsuite><testcase classname="tests.e2e.visual.test_layout_invariants" name="test_bottom_rule_gap_is_halved[390-844]"/></testsuite>'
+    )
+    two = collected_case_results(
+        '<testsuite><testcase file="tests/e2e/visual/test_layout_invariants.py" name="test_bottom_rule_gap_is_halved[390-844]"/></testsuite>'
+    )
+    assert one == two
+    unknown = collected_case_results(
+        '<testsuite><testcase classname="custom.ExampleClass" name="test_a"/></testsuite>'
+    )
+    assert unknown is not None
+    assert unknown[0].test_id == "custom.ExampleClass::test_a"

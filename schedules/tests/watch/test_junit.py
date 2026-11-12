@@ -5,6 +5,8 @@
 
 from __future__ import annotations
 
+import pytest
+
 from schedules.plans.watch.junit import (
     artifact_candidates,
     artifact_name_for_job,
@@ -59,7 +61,7 @@ def test_junit_names_the_cases_that_failed_or_errored() -> None:
 
     assert failing_case_ids(document) == (
         "tests/e2e/fakes/test_a.py::test_two",
-        "tests.e2e.fakes.test_b::test_three",
+        "tests/e2e/fakes/test_b.py::test_three",
     )
 
 
@@ -134,3 +136,19 @@ def test_a_job_with_no_artifact_gets_no_candidates_from_another_lane() -> None:
 
     assert artifact_candidates("Backend full suite (8/8)", names) == ()
     assert match_artifact("Backend full suite (8/8)", names).name is None
+
+
+@pytest.mark.parametrize("shard", [1, 3, 4])
+def test_measure_jobs_find_verdict_junit_without_taking_log_bundles(shard: int) -> None:
+    names = (*(f"verdict-junit-e2e-{n}" for n in (1, 3, 4)), f"e2e-logs-matrix-{shard}")
+    matched = match_artifact(f"Measure e2e ({shard}/4)", names)
+    assert matched.name == f"verdict-junit-e2e-{shard}"
+    assert matched.how == "shard"
+    assert match_artifact(f"Measure backend ({shard}/8)", names).name is None
+
+
+def test_mixed_families_do_not_guess_which_ambiguous_shard_is_the_job() -> None:
+    names = ("verdict-junit-e2e-3", "test-results-e2e-shard-3")
+    match = match_artifact("Measure e2e (3/4)", names)
+    assert match.name is None
+    assert set(match.candidates) == set(names)

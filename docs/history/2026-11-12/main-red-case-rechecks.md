@@ -45,3 +45,9 @@ geometry and fidelity locks. A positive Grafana log-record limit explicitly
 selects bounded backward range reads for raw-log tables; ordinary metric
 tables keep their existing instant-query behavior. This avoids a second
 fixture-only panel path or weakening the registration worklist assertion.
+
+## Publication contract correction
+
+The attempt-filename assumption above was superseded by
+[JUnit publisher contracts](junit-publisher-contracts.md): `-aN.xml` identifies
+pytest retries inside a job; GitHub workflow attempts require publication metadata.
