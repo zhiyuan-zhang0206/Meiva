@@ -2,6 +2,7 @@
 # The line a background session runs, the launch file that carries it, and which logs the ring evicts.
 from __future__ import annotations
 
+import shlex
 from pathlib import Path
 
 import pytest
@@ -32,7 +33,7 @@ def test_notified_line_structure(tmp_path: Path) -> None:
     assert "break;; esac; sleep " in line
     assert line.index("_polls=0") < line.index("agents send 5")
     assert "/venv/bin/meiva agents send 5" in line
-    assert "Background command 'build' finished. Full output at" in line
+    assert shlex.quote(f"Background command 'build' finished. Full output at {log}.") in line
     assert "exited with code" not in line
     assert "--source shell:3" in line
     assert f"--tail-file {log}" in line

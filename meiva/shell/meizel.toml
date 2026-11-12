@@ -1,12 +1,15 @@
-exports = ["background.py", "background_plan.py", "log_ring.py", "session_env.py", "sessions.py", "tests", "ttl_store.py"]
+exports = ["background.py", "background_plan.py", "completion_recovery.py", "log_ring.py", "session_env.py", "sessions.py", "tests", "ttl_store.py"]
 
 [uses]
+"background_plan.py" = ["completion_plan.py"]
+"completion_recovery.py" = ["completion_plan.py"]
 "__init__.py" = ["background.py", "background_plan.py", "handle.py", "log_ring.py", "sessions.py"]
 "background.py" = ["background_plan.py", "handle.py", "log_ring.py", "session_env.py", "sessions.py"]
 "sessions.py" = ["handle.py", "session_env.py", "session_plan.py", "ttl_store.py"]
-"tests" = ["background.py", "background_plan.py", "handle.py", "log_ring.py", "session_env.py", "session_plan.py", "sessions.py", "ttl_store.py"]
+"tests" = ["completion_plan.py", "completion_recovery.py", "background.py", "background_plan.py", "handle.py", "log_ring.py", "session_env.py", "session_plan.py", "sessions.py", "ttl_store.py"]
 
 [purity]
+"completion_plan.py" = "strict"
 "background_plan.py" = "strict"
 "handle.py" = "strict"
 "log_ring.py" = "strict"

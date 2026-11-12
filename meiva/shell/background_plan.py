@@ -10,6 +10,8 @@ from enum import StrEnum
 from pathlib import Path
 from typing import assert_never
 
+from meiva.shell.completion_plan import Completion
+
 # meiva:note
 # How long a closing run (keep=False) waits for its log to catch up, and how often it looks. The shell exits the moment the command does, and the session close then kills the process group; a `tee` still draining the pipe dies with the command's last lines in it, leaving a log that exists (`allocate_output_path` touches it) and stays empty. The wait is bounded so a grandchild that inherited stdout cannot postpone the notice, and it costs one `tail` in the normal case.
 LOG_FLUSH_WAIT_S = 1.0
@@ -82,10 +84,20 @@ def notified_line(
             raise ValueError(f"{what} contains shell-active characters: {part!r}")
     q_path = shlex.quote(str(output_path))
     text = f"{notice.label} finished. Full output at {output_path}."
-    send_notice = (
-        f'{shlex.quote(str(notice.cli))} agents send {notice.agent_id} "{text}" '
-        f"--source {notice.source} --tail-file {q_path}"
+    receipt = Completion(notice.agent_id, notice.source, text, str(output_path), notify is None, 0)
+    marker = output_path.with_suffix(".undelivered")
+    q_marker = shlex.quote(str(marker))
+    q_tmp = shlex.quote(str(marker) + ".tmp")
+    # meiva:note
+    # Publish the intent before dialing. A lost response can then be replayed
+    # with the same gateway idempotency key, including after process death.
+    exit_field = '"command_exit": '
+    prefix, suffix = receipt.json().rsplit(exit_field + "0", 1)
+    persist = (
+        f"printf '%s%s%s\\n' {shlex.quote(prefix + exit_field)} "
+        f'"$_ec" {shlex.quote(suffix)} > {q_tmp} && mv -f -- {q_tmp} {q_marker}'
     )
+    send_notice = shlex.join([str(notice.cli), *receipt.argv()])
     line = (
         f"exec 3> >(tee {q_path}); ( {cmd} ) >&3 2>&1; _ec=$?; "
         f"printf '[exit %s]\\n' \"$_ec\" >&3; exec 3>&-; "
@@ -99,10 +111,8 @@ def notified_line(
             f"sleep {LOG_FLUSH_POLL_S}; _polls=$((_polls + 1)); done; "
         )
     match notify:
-        case NotifyPolicy.ALWAYS:
-            line += send_notice
-        case None:
-            line += f"{send_notice} --completion"
+        case NotifyPolicy.ALWAYS | None:
+            line += f"if {persist}; then {send_notice} && rm -f -- {q_marker}; fi"
         case _:
             assert_never(notify)
     if not keep:
