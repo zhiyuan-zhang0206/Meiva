@@ -502,9 +502,12 @@ def test_a_root_launched_with_the_requested_inputs_is_the_same_generation(
     start_run: StartRun,
 ) -> None:
     run = start_run
+    assert run.runtime.code_root != paths.repo_root(), "target differs from the reader import root"
     with gateway_listener() as gateway:
         run.declare(gateway=False, agent_runner=True, gateway_url=gateway.url)
-        generation = run.generation(RUNNER, run.roster(RUNNER, only=("pty-sessions",)))
+        generation = run.generation(
+            RUNNER, run.roster(RUNNER, only=("pty-sessions",)), venv=run.runtime.code_root / ".venv"
+        )
         row = _pty_row(run)
 
         with run.root([row], launch_digest=generation.launch_digest) as root:
@@ -544,10 +547,35 @@ def test_the_program_refuses_a_selection_it_does_not_know() -> None:
 
 
 def _pty_row(run: StartRun) -> UnitRow:
-    generation = run.generation(RUNNER, run.roster(RUNNER, only=("pty-sessions",)))
+    generation = run.generation(
+        RUNNER, run.roster(RUNNER, only=("pty-sessions",)), venv=run.runtime.code_root / ".venv"
+    )
     return UnitRow(
         "pty-sessions",
         state="running",
         intent="running",
         manifest_digest=generation.units["pty-sessions"],
     )
+
+
+@pytest.mark.parametrize("difference", ["runtime path", "service path", "configuration"])
+def test_a_target_reader_preserves_real_launch_input_differences(
+    start_run: StartRun, difference: str
+) -> None:
+    run = start_run
+    with gateway_listener() as gateway:
+        run.declare(gateway=False, agent_runner=True, gateway_url=gateway.url)
+        target_venv = run.runtime.code_root / ".venv"
+        generation = run.generation(
+            RUNNER,
+            run.roster(RUNNER, only=("pty-sessions",)),
+            venv=target_venv.parent / "other-venv" if difference == "runtime path" else target_venv,
+        )
+        row = _pty_row(run)
+        if difference == "service path":
+            run.command.config.set_field("service_path", str(run.home / "other-tools"))
+        elif difference == "configuration":
+            _ = (run.home / "plugins_config.json").write_text("{}\n")
+        with run.root([row], launch_digest=generation.launch_digest) as root:
+            assert _generation_verdict(run).startswith("changed: ")
+        assert [call for call in root.calls if call[0] != "status"] == []

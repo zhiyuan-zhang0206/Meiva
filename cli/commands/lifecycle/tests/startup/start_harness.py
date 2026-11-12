@@ -162,7 +162,9 @@ class StartRun:
 
     # meiva:note
     # The generation a root that launched `roster` from this checkout would report.
-    def generation(self, roles: MachineRoles, roster: tuple[ServiceSpec, ...]) -> Generation:
+    def generation(
+        self, roles: MachineRoles, roster: tuple[ServiceSpec, ...], *, venv: Path | None = None
+    ) -> Generation:
         config = read_start_config(self.command.config)
         inputs = RootLaunchInputs(
             delivery=read_launch_delivery(
@@ -176,7 +178,7 @@ class StartRun:
             roster,
             self.runtime.code_root,
             roles=roles,
-            env=managed_service_env(inputs.service_path, environ=inputs.environment),
+            env=managed_service_env(inputs.service_path, environ=inputs.environment, venv=venv),
             inputs=inputs,
         )
         return Generation(str(manifest["launch_digest"]), root_driver.unit_digests(manifest))
