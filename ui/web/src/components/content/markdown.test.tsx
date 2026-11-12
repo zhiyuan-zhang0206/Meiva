@@ -37,6 +37,21 @@ function renderMarkdown(
 afterEach(cleanup);
 
 describe("ChatMarkdown", () => {
+  it("renders local Markdown and HTML images through the owning workspace reader", () => {
+    const { container } = renderMarkdown(<ChatMarkdown content={'![local](/Users/person/.meiva/workspaces/7632/accent/image.png)\n<img src="/home/person/.meiva/workspaces/7/plot.png" alt="html">'} />);
+    const images = container.querySelectorAll("img");
+    expect(images[0].getAttribute("src")).toContain("/api/agents/7632/files/raw?path=accent%2Fimage.png");
+    expect(images[1].getAttribute("src")).toContain("/api/agents/7/files/raw?path=plot.png");
+  });
+  it("leaves an explicit document resolver in control of image references", () => {
+    const { container } = renderMarkdown(<ChatMarkdown content="![resolved](plot.png)" resolveUrl={() => "/api/agents/1/to-user/resource?file=plot.png"} />);
+    expect(container.querySelector("img")?.getAttribute("src")).toBe("/api/agents/1/to-user/resource?file=plot.png");
+  });
+  it("decodes Markdown URI escaping before forwarding the filesystem path", () => {
+    const { container } = renderMarkdown(<ChatMarkdown content="![space](</Users/person/.meiva/workspaces/7/plot with space.png>)" />);
+    const src = container.querySelector("img")!.getAttribute("src")!;
+    expect(new URL(src, "http://gateway").searchParams.get("path")).toBe("plot with space.png");
+  });
   it("preserves KaTeX radicals and accessible math in inline labels", async () => {
     renderMarkdown(<h4><ChatMarkdown inline content={"Choose $\\sqrt{x}$"} /></h4>);
     const heading = screen.getByRole("heading");
