@@ -8,6 +8,15 @@ Text written as Markdown by a model or an author renders through the one `ChatMa
 - Timeline: agent replies, human and inter-agent `inbound_chat` bodies, reasoning, compact summaries, system prompts, and system markers (`memory` / `agent_memory` / `inherited_memory` and guidance notes).
 - Open-question content, memory-note bodies, and task descriptions / results (task graph hover card, kanban row).
 
+Ordinary Markdown images use the authenticated workspace byte reader for local
+references. Absolute `.meiva/workspaces/<id>/...` references name the file's
+owner, which can differ from the agent whose conversation shows the image.
+Relative/cwd references use the selected agent, matching file-link navigation.
+The gateway retains placement and workspace/cwd access checks; image rendering
+does not grant access to arbitrary paths on the frontend or gateway machine.
+Remote and upload images keep their URLs. The To user panel's explicit document
+resolver remains authoritative for its registered resources.
+
 Question titles and question option labels/descriptions use the same renderer in
 inline mode, including resolved history. Emphasis, links and inline code render
 inside phrasing-only spans, keeping headings and form labels valid and retaining

@@ -10,7 +10,9 @@ exports = ["code-highlighter-preloader.tsx", "copy-button.tsx", "file-path-utils
 "markdown-lazy.test.tsx" = ["lazy-chunk.ts", "markdown-renderer.tsx", "markdown.tsx"]
 "mermaid-code.tsx" = ["copy-button.tsx", "lazy-chunk.ts"]
 "mermaid-code.test.tsx" = ["lazy-chunk.ts", "markdown.tsx", "mermaid-code.tsx"]
-"markdown-renderer.tsx" = ["mermaid-code.tsx", "copy-button.tsx", "file-path-utils.ts", "python-code.tsx"]
+"markdown-renderer.tsx" = ["mermaid-code.tsx", "copy-button.tsx", "file-path-utils.ts", "markdown-image-url.ts", "python-code.tsx"]
+"markdown-image-url.test.ts" = ["markdown-image-url.ts"]
+"markdown-image-url.ts" = []
 "markdown.test.tsx" = ["fixtures", "lazy-chunk.ts", "markdown-renderer.tsx", "markdown.tsx", "python-code.tsx"]
 "markdown.tsx" = ["lazy-chunk.ts", "markdown-renderer.tsx"]
 "python-code.test.tsx" = ["lazy-chunk.ts", "python-code.tsx"]
@@ -18,3 +20,4 @@ exports = ["code-highlighter-preloader.tsx", "copy-button.tsx", "file-path-utils
 
 [purity]
 "file-path-utils.ts" = "strict"
+"markdown-image-url.ts" = "strict"

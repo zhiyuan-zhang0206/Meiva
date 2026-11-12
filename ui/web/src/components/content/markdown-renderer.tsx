@@ -16,6 +16,8 @@ import type { Plugin, PluggableList } from "unified";
 
 import { CopyButton } from "@/components/content/copy-button";
 import { isFilePath } from "@/components/content/file-path-utils";
+import { markdownImageUrl } from "./markdown-image-url";
+import { API_BASE } from "@/lib/transport/api-base";
 import { MermaidCode } from "./mermaid-code";
 import { PythonCode } from "@/components/content/python-code";
 import { useWorkspaceFileStore } from "@/lib/context/workspace-file-store";
@@ -128,7 +130,13 @@ const baseRehypePlugins = (resolve: UrlTransform, inline: boolean): PluggableLis
   rehypeSlug,
 ];
 
-const createDefaultComponents = (onOpenFile: (path: string, lineRange?: string) => void): Components => ({
+const createDefaultComponents = (onOpenFile: (path: string, lineRange?: string) => void, imageUrl: (src: string) => string): Components => ({
+  img: ({ node: _node, src, alt, ...props }) => (
+    // meiva:note
+    // Authenticated bytes must be fetched by the browser, not Next's image optimizer.
+    // eslint-disable-next-line @next/next/no-img-element
+    <img {...props} src={typeof src === "string" ? imageUrl(src) : undefined} alt={alt} />
+  ),
   pre: ({ node: _node, children }) => <>{children}</>,
   a: ({ node: _node, href, children, ...props }) => {
     const external = /^https?:/i.test(href ?? "");
@@ -282,8 +290,8 @@ export const ChatMarkdownRenderer = memo(function ChatMarkdownRenderer({
   const effectiveOpenFile = onOpenFile ?? defaultOpenFile;
 
   const defaultComponents = useMemo(
-    () => createDefaultComponents(effectiveOpenFile),
-    [effectiveOpenFile],
+    () => createDefaultComponents(effectiveOpenFile, (src) => resolveUrl ? src : markdownImageUrl(src, activeId, API_BASE)),
+    [effectiveOpenFile, resolveUrl, activeId],
   );
   const defaultInlineComponents = useMemo(
     () => createInlineComponents(effectiveOpenFile),
