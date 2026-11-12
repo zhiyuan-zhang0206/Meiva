@@ -609,9 +609,11 @@ async def test_a_turn_with_no_record_file_to_show_for_it_fails_the_way_a_setup_f
 ) -> None:
     agent_id, _folder = _claude_agent(tmp_path, db_conn)
     _ = insert_row(db_conn, agent_id, "chat", "user", "hello")
-    engine = _engine(
-        lambda inputs: in_a_turn([item.key for item in inputs], "a reply nobody can see")
-    )
+
+    def unseen(inputs: Sequence[HarnessInput]) -> Sequence[BridgeEvent]:
+        return in_a_turn([item.key for item in inputs], "a reply nobody can see")
+
+    engine = _engine(unseen)
     rt = _record_wired(
         tmp_path, engine, aops_pool, hosted_resources, database_gate, live_events, agent_id
     )

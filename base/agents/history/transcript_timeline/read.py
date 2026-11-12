@@ -11,6 +11,7 @@ from base.agents.history.transcript_timeline.project import (
     ProjectedItem,
     RecordProjector,
 )
+from base.host.boundary.json_values import is_object_dict, is_object_list
 from base.lm.harness.claude.transcript.window import (
     BLOCK_BYTES,
     MAX_BLOCK_BYTES,
@@ -132,14 +133,14 @@ def _span(rows: Sequence[FileRow]) -> tuple[datetime, datetime] | None:
 def is_input_row(row: Mapping[str, object]) -> bool:
     if row.get("type") == "attachment":
         attachment = row.get("attachment")
-        return isinstance(attachment, dict) and attachment.get("type") == "queued_command"
+        return is_object_dict(attachment) and attachment.get("type") == "queued_command"
     if row.get("type") != "user":
         return False
     message = row.get("message")
-    content = message.get("content") if isinstance(message, dict) else None
+    content = message.get("content") if is_object_dict(message) else None
     return not (
-        isinstance(content, list)
-        and any(isinstance(b, dict) and b.get("type") == "tool_result" for b in content)
+        is_object_list(content)
+        and any(is_object_dict(block) and block.get("type") == "tool_result" for block in content)
     )
 
 
