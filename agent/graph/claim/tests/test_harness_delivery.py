@@ -556,8 +556,8 @@ async def test_a_message_followed_by_a_stop_is_delivered_and_then_the_stop_is_ta
 
 # meiva:note
 # A turn the CLI begins on its own (a fired timer, a finished background task) is presented by the same
-# run that presents any other turn: its text lands on the timeline with the cause named, exactly once,
-# whether it began while the agent was idle or while a run was delivering.
+# run that presents any other turn: its text lands on the timeline exactly once, with no marker naming
+# the cause, whether it began while the agent was idle or while a run was delivering.
 # meiva:link agent/graph/docs/harness-foreground.md
 _REPLY = "MEIVA_DISPLAY_TO_USER\nthe timer fired"
 
@@ -584,7 +584,7 @@ def _markers(timeline: list[tuple[str, str]]) -> list[str]:
     return [payload for kind, payload in timeline if kind == "system_marker"]
 
 
-async def test_a_timer_turn_while_the_agent_is_idle_is_entered_and_shown_with_its_cause(
+async def test_a_timer_turn_while_the_agent_is_idle_is_entered_and_shown(
     redis_url: str,
     db_conn: psycopg.Connection,
     aops_pool: AsyncConnectionPool,
@@ -605,13 +605,13 @@ async def test_a_timer_turn_while_the_agent_is_idle_is_entered_and_shown_with_it
 
     timeline = await _timeline(aops_pool, agent_id)
     assert engine.delivered == [], "nothing was handed to the CLI: the turn is its own"
-    assert _markers(timeline) == ["status:The CLI started a turn on a scheduled wake."]
+    assert _markers(timeline) == []
     assert [text for text in _chats(timeline) if "the timer fired" in text] != []
     assert len(_chats(timeline)) == 1
     assert after.goto != "before_turn", "presented once: the next claim finds nothing"
 
 
-async def test_a_background_task_turn_names_its_cause(
+async def test_a_background_task_turn_is_shown_without_a_cause_marker(
     db_conn: psycopg.Connection,
     aops_pool: AsyncConnectionPool,
     hosted_resources: HostedTurnResources,
@@ -624,9 +624,9 @@ async def test_a_background_task_turn_names_its_cause(
     async with asyncio.timeout(20):
         await harness_turn_node(AgentState(), rt, config(agent_id))
 
-    assert _markers(await _timeline(aops_pool, agent_id)) == [
-        "status:The CLI started a turn for a finished background task."
-    ]
+    timeline = await _timeline(aops_pool, agent_id)
+    assert _markers(timeline) == []
+    assert len(_chats(timeline)) == 1
 
 
 async def test_a_turn_the_cli_begins_while_a_run_is_delivering_is_shown_once(
@@ -648,7 +648,7 @@ async def test_a_turn_the_cli_begins_while_a_run_is_delivering_is_shown_once(
 
     timeline = await _timeline(aops_pool, agent_id)
     assert len([t for t in _chats(timeline) if "the timer fired" in t]) == 1
-    assert len(_markers(timeline)) == 1
+    assert _markers(timeline) == []
 
 
 async def test_a_turn_of_our_own_input_carries_no_cause_marker(

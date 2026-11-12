@@ -20,7 +20,7 @@ import {
 } from "./card";
 import { copyPayloadFor, ItemView } from "./item";
 import { ItemErrorBoundary } from "./item-error-boundary";
-import { inboundKind, isSilentTimelineItem } from "./model/runs";
+import { inboundKind, isRenderedKind, isSilentTimelineItem } from "./model/runs";
 
 // meiva:note
 // How long a touch keeps the chrome band up: long enough to read the time and
@@ -97,6 +97,13 @@ export const TimelineRow = memo(function TimelineRow({
     };
   }, []);
 
+  if (!isRenderedKind(item.kind)) {
+    console.warn("[timeline] TimelineRow: unknown item kind", item.kind);
+  }
+  if (isSilentTimelineItem(item)) {
+    return null;
+  }
+
   if (config === null) {
     return (
       <div data-item-id={item.item_id} data-timeline-source={timelineSource} data-display-rank={displayRank} aria-live="off" className="timeline-item">
@@ -120,10 +127,6 @@ export const TimelineRow = memo(function TimelineRow({
   const isAgentProse =
     item.kind === "agent_chat" && item.user_facing !== false;
   const isPrimaryMessage = isHumanBubble || isAgentProse;
-
-  if (isSilentTimelineItem(item)) {
-    return null;
-  }
 
   const stamp =
     isPrimaryMessage && config.showTimestamp && item.created_at ? (

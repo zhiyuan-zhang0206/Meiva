@@ -43,8 +43,7 @@ polled while a turn runs.
 
 A turn the CLI began itself while the agent was idle (a timer, a finished background task) enters the same
 run: the host's wake finds an empty inbox, but the claim sees the engine's unpresented turn and the run's
-subscription is primed with it. The run writes one status line naming the cause and then projects the turn like
-any other; the invocation ends only when no input is unsettled, no turn runs and no event is waiting to be read.
+subscription is primed with it. The run projects the turn like any other, with no line naming its cause; the invocation ends only when no input is unsettled, no turn runs and no event is waiting to be read.
 The turn is presented once, by whichever run reads its start ([background work](../../../base/lm/harness/docs/background-work.md)).
 
 Images of a message go to the harness as images (`HarnessInput.images`, built from the message's inlined

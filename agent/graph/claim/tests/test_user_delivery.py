@@ -8,7 +8,6 @@ from psycopg_pool import AsyncConnectionPool
 from agent.graph.claim.harness_activity import (
     SUBAGENT_CUT,
     SUBAGENT_ITEM_CHARS,
-    SUBAGENT_LIMIT_NOTE,
     SUBAGENT_RUN_CHARS,
 )
 from agent.graph.claim.harness_turn import harness_turn_node
@@ -273,8 +272,7 @@ async def test_subagent_text_volume_is_capped_per_message_and_per_run(
     )
     [cut] = [i.payload for i in items if i.kind == "subagent_text"]
     assert cut.endswith(SUBAGENT_CUT) and len(cut) < len(long_text)
-    [marker] = [i for i in items if i.payload == f"status:{SUBAGENT_LIMIT_NOTE}"]
-    assert marker.kind == "system_marker"
+    assert not [i for i in items if i.kind == "system_marker"], "the limit leaves no marker"
     assert "after the limit" not in [i.payload for i in items]
 
 
@@ -358,7 +356,7 @@ async def test_a_subagents_tool_output_is_capped(
     )
     [big] = [i for i in items if i.kind == "code_output" and i.payload.startswith("z")]
     assert big.payload.endswith(SUBAGENT_CUT) and len(big.payload) < SUBAGENT_ITEM_CHARS + 100
-    assert [i.payload for i in items].count(f"status:{SUBAGENT_LIMIT_NOTE}") == 1
+    assert not [i for i in items if i.kind == "system_marker"], "the limit leaves no marker"
     assert "late" not in [i.payload for i in items]
     assert not [i for i in items if i.tool_use_id == "after"]
     assert not [i for i in items if i.payload == "Tool running"], "no call is left running"
