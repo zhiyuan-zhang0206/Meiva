@@ -1,9 +1,9 @@
 # meiva:note
 # The slot round: one workflow's cron can stop without anything going red, and the watch would
 # otherwise be silent through exactly the outage it exists to end. A missing slot opens one card
-# and the next scheduled run closes it. The round dispatches nothing: the make-up run certifies,
-# certifying releases, and a release is the user's decision -- so the card carries the command and
-# stays open until a human runs it or the cron recovers.
+# and a strictly newer verified scheduled arrival closes it. The round dispatches nothing:
+# running the gate can publish a release and requires the user's decision. A manual run or a
+# caught-up channel leaves an existing card waiting for scheduled-arrival recovery.
 #
 # It lives beside `main_red_watch.py` rather than inside it because the two judge different things
 # over one state file: one reads runs, the other watches a schedule, and the shared file is all they
@@ -22,6 +22,7 @@ from schedules.plans.watch.main_red import Card
 from schedules.plans.watch.release_gate_slot import (
     RELEASE_GATE_SLOT_STALE_AFTER,
     SlotFacts,
+    SlotAction,
     decide_slot,
 )
 
@@ -31,9 +32,9 @@ __all__ = ["replace_state_slot", "slot_round"]
 # meiva:note
 # The slot round: one workflow's cron can stop without anything going red, and the watch would
 # otherwise be silent through exactly the outage it exists to end. A missing slot opens one card
-# and the next scheduled run closes it. The round dispatches nothing: the make-up run certifies,
-# certifying releases, and a release is the user's decision -- so the card carries the command and
-# stays open until a human runs it or the cron recovers.
+# and a strictly newer verified scheduled arrival closes it. The round dispatches nothing:
+# running the gate can publish a release and requires the user's decision. A manual run or a
+# caught-up channel leaves an existing card waiting for scheduled-arrival recovery.
 # meiva:note
 # How often an unreadable slot leg repeats itself on the round line. One note per three rounds --
 # ninety minutes at the current cadence -- is often enough that the line never goes quiet while the
@@ -68,17 +69,18 @@ def slot_round(
         now=now,
         since=since,
         stale_after=RELEASE_GATE_SLOT_STALE_AFTER,
+        open_gap=(ledger.gap_id or "") if ledger.task_id is not None else None,
     )
-    if decision.card is None:
-        if ledger.task_id is not None:
-            close_card(
-                ledger.task_id,
-                f"release-gate slot: {decision.note or 'a scheduled release-gate run appeared'}",
-            )
+    if decision.action == SlotAction.RECOVERED:
+        assert ledger.task_id is not None
+        close_card(ledger.task_id, f"release-gate slot: {decision.note}")
         slot = SlotLedger()
+    elif decision.action == SlotAction.OPEN:
+        assert decision.card is not None
+        slot = SlotLedger(gap_id=decision.gap_id, task_id=open_card(decision.card))
     else:
-        task_id = ledger.task_id if ledger.task_id is not None else open_card(decision.card)
-        slot = SlotLedger(gap_id=decision.gap_id, task_id=task_id)
+        assert decision.action == SlotAction.WAIT
+        slot = replace(ledger, unreadable_rounds=0)
     save_state(state_path, replace_state_slot(state, slot))
     if recovered:
         back = f"release-gate slot readable again after {recovered} unreadable round(s)"

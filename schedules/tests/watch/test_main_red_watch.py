@@ -709,9 +709,9 @@ def test_an_unreadable_liveness_stream_does_not_stop_the_round(tmp_path: Path) -
 
 
 # meiva:note
-# The slot round end to end: a cron that stopped arriving opens one card, one make-up dispatch
-# answers it, and the next scheduled run closes the card. The dispatch is what makes the card
-# actionable -- repairing the coverage -- while the card itself waits for the cron to recover.
+# The slot round end to end: a cron that stopped arriving opens one card, which waits until
+# a strictly newer verified scheduled arrival. Busy activity and certification progress cannot
+# substitute for that arrival; the round itself never dispatches the gate.
 def _slot_round(
     tmp_path: Path,
     *,
@@ -749,7 +749,7 @@ def test_a_missing_slot_opens_one_card_across_rounds(tmp_path: Path) -> None:
     note = _slot_round(tmp_path, hours_ago=13.5, opened=opened, closed=closed)
     _slot_round(
         tmp_path,
-        hours_ago=13.5,
+        hours_ago=14.0,
         opened=opened,
         closed=closed,
         now=datetime(2026, 11, 4, 6, 30, tzinfo=UTC),
@@ -772,21 +772,21 @@ def test_a_scheduled_run_closes_the_slot_card(tmp_path: Path) -> None:
 
 
 # meiva:note
-# A slot the gate would have skipped is not a gap: `release-gate.yml` certifies only when
-# `channel/latest` trails `main`, so "nothing uncertified" and "no red" are both silence. The card
-# that already exists still closes, because its subject -- unchecked commits -- is gone.
-def test_a_slot_with_nothing_uncertified_closes_the_card_without_opening_another(
+# A caught-up channel suppresses a new complaint but cannot establish recovery of an existing
+# scheduled-arrival gap. The old card stays in WAIT until a newer scheduled run is verified.
+def test_nothing_uncertified_does_not_resolve_an_existing_scheduled_gap(
     tmp_path: Path,
 ) -> None:
     opened: list[Card] = []
     closed: list[tuple[int, str]] = []
 
     _slot_round(tmp_path, hours_ago=13.5, opened=opened, closed=closed)
-    note = _slot_round(tmp_path, hours_ago=13.0, uncertified=0, opened=opened, closed=closed)
+    note = _slot_round(tmp_path, hours_ago=13.5, uncertified=0, opened=opened, closed=closed)
 
     assert len(opened) == 1
-    assert [task for task, _reason in closed] == [701]
-    assert note is not None and "nothing uncertified" in note
+    assert closed == []
+    assert load_state(tmp_path / STATE_FILE).slot.task_id == 701
+    assert note is not None and "waiting" in note
 
 
 def test_a_running_release_gate_opens_no_card(tmp_path: Path) -> None:

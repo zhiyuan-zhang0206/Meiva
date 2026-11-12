@@ -1,7 +1,7 @@
-exports = ["agent_watch.py", "api_read.py", "ci_metrics.py", "qa_keepalive.py", "stall_watch.py", "inherited_reds.py", "main-red-watch-schedule.py", "main_red_watch.py", "main_red_review.py", "main_red_junit.py", "main_red_liveness.py", "main_red_blind.py", "main_red_slot.py"]
+exports = ["release_gate_reads.py", "agent_watch.py", "api_read.py", "ci_metrics.py", "qa_keepalive.py", "stall_watch.py", "inherited_reds.py", "main-red-watch-schedule.py", "main_red_watch.py", "main_red_review.py", "main_red_junit.py", "main_red_liveness.py", "main_red_blind.py", "main_red_slot.py"]
 
 [uses]
-"main-red-watch-schedule.py" = ["api_read.py", "main_red_watch.py", "main_red_junit.py", "main_red_liveness.py", "main_red_slot.py"]
+"main-red-watch-schedule.py" = ["release_gate_reads.py", "api_read.py", "main_red_watch.py", "main_red_junit.py", "main_red_liveness.py", "main_red_slot.py"]
 "main_red_watch.py" = ["main_red_blind.py", "main_red_review.py"]
 "main_red_slot.py" = ["main_red_watch.py"]
 
