@@ -3,9 +3,11 @@ from __future__ import annotations
 import asyncio
 from collections.abc import Awaitable, Callable, Sequence
 from datetime import datetime
+from typing import Protocol
 
-from agent.graph.claim.harness_tool_format import format_tool_use
+from agent.harness_timeline.tool_format import format_tool_use
 from base.agents.context import MeivaContext
+from base.agents.context.harness_timeline import TimelineSession
 from base.agents.history.timeline_item import TimelineItem
 from base.agents.messages.reply_intent import parse_reply_visibility, resolve_agent_reply
 from base.agents.sdk.telemetry import SdkCall
@@ -86,6 +88,15 @@ class HarnessTurnProjector:
     @property
     def non_human_wake(self) -> bool:
         return self._non_human_wake
+
+    records_inputs = False
+
+    def take_invalid_reply(self) -> bool:
+        invalid, self.invalid_reply_visibility = self.invalid_reply_visibility, False
+        return invalid
+
+    def mark_human(self) -> None:
+        self._non_human_wake = False
 
     async def on_event(self, event: BridgeEvent) -> None:
         async with self._lock:
@@ -416,7 +427,7 @@ class HarnessTurnProjector:
 # tokens is not logged at all: an all-zero row would read as a free call rather than
 # as a provider that said nothing.
 # meiva:link agent/graph/docs/harness-turn.md
-def _resolve_pricing_model(raw_model: str, catalog: ModelCatalog) -> str:
+def resolve_pricing_model(raw_model: str, catalog: ModelCatalog) -> str:
     candidate = raw_model.removesuffix("[1m]")
     for suffix in ("", "-high", "-medium", "-low", "-minimal"):
         if candidate.endswith(suffix) and (s := candidate.removesuffix(suffix)) in catalog.prices:
@@ -429,7 +440,7 @@ def log_turn_usage(ctx: MeivaContext, agent_id: int, model: str | None, turn: Ha
     if usage.input_tokens == 0 and usage.output_tokens == 0:
         return
     catalog = ctx.require_catalog()
-    pricing_model = _resolve_pricing_model(model or ctx.require_agent().brain.llm_model, catalog)
+    pricing_model = resolve_pricing_model(model or ctx.require_agent().brain.llm_model, catalog)
     entries = (
         [(step, 1) for step in turn.steps if step.input_tokens > 0 or step.output_tokens > 0]
         if turn.steps
@@ -475,3 +486,147 @@ def log_turn_usage(ctx: MeivaContext, agent_id: int, model: str | None, turn: Ha
             tok_cached=usage.cache_read_input_tokens,
             cache_write=usage.cache_creation_input_tokens,
         )
+
+
+# meiva:note
+# What the foreground run, the interrupt plumbing and the reconciliation helpers ask of "whatever shows the turn
+# on the timeline". Two things answer it. `HarnessTurnProjector` (the adapter-event path) builds items from the
+# events and writes them. `TranscriptSink` (the transcript path, when the agent's timeline is projected from the
+# CLI's own record) writes nothing from events: the session-scoped writer does, from the record, so the sink only
+# carries the few acts the invocation still owns: waiting for the writer at the end of a turn, a control marker
+# for something the record cannot show (a failure of the run, an interrupt that was not confirmed) and the
+# wake polarity. `records_inputs` says which: when true, the record shows the inputs, so an input is settled
+# without writing its timeline entries again.
+# meiva:link agent/graph/docs/harness-turn.md
+TRANSCRIPT_QUIET_SECONDS = 1.0
+TRANSCRIPT_END_CEILING_SECONDS = 5.0
+
+
+class TurnSink(Protocol):
+    @property
+    def has_activity(self) -> bool: ...
+
+    @property
+    def non_human_wake(self) -> bool: ...
+
+    @property
+    def records_inputs(self) -> bool: ...
+
+    def take_invalid_reply(self) -> bool: ...
+
+    def mark_human(self) -> None: ...
+
+    async def on_event(self, event: BridgeEvent) -> None: ...
+
+    async def record_control(self, text: str, *, error: bool = False) -> None: ...
+
+    async def append_inbound(
+        self,
+        commit: Callable[[], Awaitable[list[TimelineItem]]],
+        *,
+        human_input: bool = False,
+    ) -> list[TimelineItem]: ...
+
+    async def flush_text(self) -> None: ...
+
+    async def finish(
+        self,
+        turns: Sequence[HarnessTurn] = (),
+        *,
+        interrupted: bool = False,
+        error: str | None = None,
+    ) -> None: ...
+
+
+class TranscriptSink:
+    records_inputs = True
+
+    def __init__(self, timeline: TimelineSession, *, non_human_wake: bool) -> None:
+        self._timeline = timeline
+        self._base = timeline.items_written
+        self._closed_seen = timeline.closed_turns
+        self._non_human_wake = non_human_wake
+
+    @property
+    def has_activity(self) -> bool:
+        return self._timeline.items_written > self._base
+
+    @property
+    def non_human_wake(self) -> bool:
+        return self._non_human_wake
+
+    def take_invalid_reply(self) -> bool:
+        return self._timeline.take_invalid_reply()
+
+    def mark_human(self) -> None:
+        self._non_human_wake = False
+
+    async def on_event(self, event: BridgeEvent) -> None:
+        del event
+
+    async def record_control(self, text: str, *, error: bool = False) -> None:
+        await self._timeline.write_marker(text, error=error)
+
+    async def append_inbound(
+        self,
+        commit: Callable[[], Awaitable[list[TimelineItem]]],
+        *,
+        human_input: bool = False,
+    ) -> list[TimelineItem]:
+        items = await commit()
+        if human_input:
+            self.mark_human()
+        return items
+
+    async def flush_text(self) -> None:
+        return
+
+    # meiva:note
+    # A turn that ended is waited for in the writer, not in the stream: until the record shows the turn's closing
+    # entry, or stays quiet for `TRANSCRIPT_QUIET_SECONDS`, or `TRANSCRIPT_END_CEILING_SECONDS` have passed. Not
+    # finding the closing entry is recorded by the writer as an event and never fails the turn. A turn that ended in
+    # error is not waited for (the result says why it ended). The spend the record tallied for the turn is
+    # compared with the result's, and a difference is an event.
+    async def finish(
+        self,
+        turns: Sequence[HarnessTurn] = (),
+        *,
+        interrupted: bool = False,
+        error: str | None = None,
+    ) -> None:
+        del interrupted
+        for turn in turns:
+            await self._timeline.wait_for_turn_end(
+                self._closed_seen,
+                quiet_seconds=TRANSCRIPT_QUIET_SECONDS,
+                ceiling_seconds=TRANSCRIPT_END_CEILING_SECONDS,
+            )
+            self._closed_seen = self._timeline.closed_turns
+            self._compare_usage(turn)
+        if error is not None:
+            await self._timeline.write_marker(f"Harness execution stopped: {error}", error=True)
+
+    def _compare_usage(self, turn: HarnessTurn) -> None:
+        tallied = self._timeline.closed_usage
+        if tallied is None or turn.is_error:
+            return
+        reported = turn.usage
+        if (
+            tallied.input_tokens,
+            tallied.output_tokens,
+            tallied.cache_read_input_tokens,
+            tallied.cache_creation_input_tokens,
+        ) != (
+            reported.input_tokens,
+            reported.output_tokens,
+            reported.cache_read_input_tokens,
+            reported.cache_creation_input_tokens,
+        ):
+            logger.warning(
+                "the spend the transcript tallied for the turn differs from the result's",
+                event="harness_timeline_usage_mismatch",
+                tallied_in=tallied.input_tokens,
+                tallied_out=tallied.output_tokens,
+                reported_in=reported.input_tokens,
+                reported_out=reported.output_tokens,
+            )

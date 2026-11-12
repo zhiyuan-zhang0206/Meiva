@@ -1,4 +1,5 @@
 exports = []
 
 [uses]
-"test_writer.py" = []
+"test_writer.py" = ["support.py"]
+"test_writer_lifecycle.py" = ["support.py"]

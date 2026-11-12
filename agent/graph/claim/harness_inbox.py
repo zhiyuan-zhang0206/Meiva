@@ -16,7 +16,7 @@ from psycopg import sql
 
 from agent.db import CLAIM_ACQUIRE_TIMEOUT_CAP_S, ClaimedInbound
 from agent.graph.claim._dispatch import prepare_steered_inbound
-from agent.graph.claim.harness_activity import HarnessTurnProjector
+from agent.graph.claim.harness_activity import TurnSink
 from agent.graph.claim.harness_foreground import Handed, Reconciled, plan_reconciliation
 from agent.ownership.inbound import lock_inbound_owner
 from base.agents.context import MeivaContext
@@ -144,11 +144,25 @@ async def write_interrupt_notes(ctx: MeivaContext, agent_id: int) -> list[Timeli
 
 
 # meiva:note
-# The timeline entries of a row about to be handed to the harness: none for a note already written.
+# A stop's passive note: no input of the harness's, it rides in the next input's text.
+def _is_interrupt_note(row: ClaimedInbound) -> bool:
+    return (
+        row.kind == InboundKind.SYSTEM_NOTE.value
+        and row.payload is not None
+        and row.payload.get("note_tag") == NoteTag.LIFECYCLE_INTERRUPT.value
+    )
+
+
+# meiva:note
+# The timeline entries of a row about to be handed to the harness: none for a note already written, and none for
+# a stop's passive note when the timeline is projected from the CLI's record (the record's own interrupt marker is
+# the only one; the note still reaches the CLI with the next input).
 def timeline_items_of(
     row: ClaimedInbound, messages: Sequence[BaseMessage], ctx: MeivaContext
 ) -> list[TimelineItem]:
     if row.payload is not None and row.payload.get(TIMELINE_WRITTEN_KEY) is True:
+        return []
+    if ctx.harness_timeline is not None and _is_interrupt_note(row):
         return []
     items, _ = build_timeline_items(messages, inputs=ctx.timestamp_policy())
     return items
@@ -411,7 +425,7 @@ async def reconcile_handed(
 # Consume the inputs with the uncertainty marker and say so in the timeline; returns the inbox rows it
 # marked, which are the only ones a "turn lost" note may name.
 async def mark_unconfirmed(
-    ctx: MeivaContext, agent_id: int, projector: HarnessTurnProjector, handed: Sequence[Handed]
+    ctx: MeivaContext, agent_id: int, projector: TurnSink, handed: Sequence[Handed]
 ) -> list[int]:
     items = await projector.append_inbound(partial(retire_unconfirmed, ctx, agent_id, handed))
     publish_inbound(ctx, agent_id, items)
@@ -423,7 +437,7 @@ async def mark_unconfirmed(
 # back to the queue (the caller wakes the delivery loop), inputs the record cannot tell about are consumed
 # with the marker. Inputs the harness stored itself are left alone. Returns the rows marked.
 async def apply_reconciled(
-    ctx: MeivaContext, agent_id: int, projector: HarnessTurnProjector, plan: Reconciled
+    ctx: MeivaContext, agent_id: int, projector: TurnSink, plan: Reconciled
 ) -> list[int]:
     for entry in plan.commit:
         items = await projector.append_inbound(

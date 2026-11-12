@@ -1,22 +1,24 @@
 from __future__ import annotations
 
 import asyncio
-from collections.abc import Awaitable, Callable, Mapping
+from collections.abc import Awaitable, Callable, Mapping, Sequence
 from contextlib import suppress
 from dataclasses import dataclass, field
-from enum import StrEnum
 
 from psycopg import AsyncConnection
 from psycopg_pool import AsyncConnectionPool
 
 from agent.harness_timeline.plan import PlannedItem, ReplyPolicy, WritePlan, plan_write
 from agent.ownership.inbound import RuntimeOwnershipLostError, lock_inbound_owner
+from base.agents.context.harness_timeline import TurnEndWait
 from base.agents.history.harness_messages import (
     StoredPosition,
     aappend_keyed_timeline_items,
     aappend_transcript_rows,
     aget_harness_call_item_id,
+    ahas_harness_timeline,
     aload_transcript_positions,
+    aload_transcript_row_floor,
     aload_transcript_rows,
     aset_transcript_position,
 )
@@ -25,7 +27,9 @@ from base.agents.messages.inbound import InboundKind
 from base.clock import Clock
 from base.db.transaction import async_write_transaction
 from base.host.boundary.json_values import is_object_dict
-from base.lm.harness.session.transcript.drafts import Projection, SentInput
+from base.lm.harness import Usage
+from base.lm.harness.session.transcript.drafts import InboundPart, Projection, SentInput
+from base.lm.harness.session.transcript.entries import MAIN_RECORD
 from base.lm.harness.session.transcript.ports import EntryBatch, RecordReader, StoredRow
 from base.lm.harness.session.transcript.projection import Projector
 from base.log import logger
@@ -38,10 +42,25 @@ from base.native_process.runtime_incarnation import RuntimeIncarnation, StaleInc
 # transaction: the whitelisted rows of the read (appended once), keyed timeline items appended in the order
 # read, the inbound rows the entries prove delivered set `done`, and the new positions. A commit that fails is
 # retried with the same plan and nothing is read in between, so entries are never lost to the projector's
-# memory of having seen them; a stale incarnation ends the writer. A restart rebuilds the projector's state
-# (pairing, delivery) from the stored rows after each record's rebuild ordinal, in bounded batches and without
-# touching the CLI's file, and projects only what lies past the stored position. What it commits is handed to
-# `after_commit` once, for the caller to publish, capture for delivery, price and wake the graph with.
+# memory of having seen them. A restart rebuilds the projector's state (pairing, delivery) from the stored rows
+# after each record's rebuild ordinal, in bounded batches and without touching the CLI's file, and projects
+# only what lies past the stored position. What it commits is handed to `after_commit` once, for the caller to
+# publish, capture for delivery, price and wake the graph with.
+#
+# The session id is asked for at every read (it is known only once the CLI has started the session) and a new
+# one starts the writer over for that session. The runtime incarnation is whatever `bind_incarnation` last gave
+# it: the host binds the admitted one at every hosted turn, and the row's generation survives from one turn to
+# the next while the same host owns it, so a writer that is idle between turns still holds the one the row
+# carries. A commit refused by the owner lock fences the writer: it writes nothing and keeps its plan until a
+# different incarnation is bound, so a late rebinding is never a lost write and a runtime another host took
+# over never writes. Reads are repeated while they bring something, so catching up on a long record is a
+# series of bounded transactions.
+#
+# The first start of a session that has no stored position, for an agent whose timeline already has items (an
+# agent that was on the event path, a fork whose record starts with the parent's history), does not project the
+# history that was there: the main record is read from the row of the first input this process sent (found by
+# its wire id) and every sub-agent record already on disk is read from its end; with no input registered yet
+# the position is the end. An agent with no timeline yet reads everything.
 # meiva:link agent/harness_timeline/README.md
 
 POLL_SECONDS = 3.0
@@ -49,13 +68,8 @@ RETRY_SECONDS = 2.0
 FAULT_AFTER_SECONDS = 60.0
 PROJECTION_VERSION = 1
 REBUILD_BATCH_ROWS = 500
+REBUILD_MAX_ROWS = 20_000
 _SETTLE_STATUSES = ("claimed", "pending")
-
-
-class TurnEndWait(StrEnum):
-    CLOSED = "closed"
-    QUIET = "quiet"
-    CEILING = "ceiling"
 
 
 @dataclass(frozen=True, slots=True)
@@ -68,6 +82,7 @@ class Committed:
 class _Sent:
     items: dict[str, TimelineItem] = field(default_factory=dict[str, TimelineItem])
     inbound_ids: dict[str, tuple[int, ...]] = field(default_factory=dict[str, tuple[int, ...]])
+    wire_ids: dict[str, str] = field(default_factory=dict[str, str])
 
 
 @dataclass(frozen=True, slots=True)
@@ -89,7 +104,10 @@ class HarnessTimelineWriter:
         pool: AsyncConnectionPool,
         agent_id: int,
         harness: str,
-        session_id: str,
+        session_id: str | Callable[[], str | None],
+        wire_id: Callable[[str], str] = lambda key: key,
+        marker_id: Callable[[], str],
+        rebuild_max_rows: int = REBUILD_MAX_ROWS,
         incarnation: RuntimeIncarnation | None,
         reader: RecordReader,
         policy: ReplyPolicy,
@@ -102,8 +120,13 @@ class HarnessTimelineWriter:
         self._pool = pool
         self._agent_id = agent_id
         self._harness = harness
-        self._session_id = session_id
+        self._session_id = (lambda: session_id) if isinstance(session_id, str) else session_id
+        self._sid: str | None = None
+        self._wire_id = wire_id
+        self._marker_id = marker_id
+        self._rebuild_max = rebuild_max_rows
         self._incarnation = incarnation
+        self._fenced = False
         self._reader = reader
         self._policy = policy
         self._render_tool = render_tool
@@ -115,9 +138,14 @@ class HarnessTimelineWriter:
         self._last_ordinal: dict[str, int] = {}
         self._pending: _Pending | None = None
         self._non_human: set[str] = set()
-        self._started = False
+        self._skip_history = False
+        self._held = True
+        self._closed_usage: Usage | None = None
         self._wake = asyncio.Event()
         self._closed_turns = 0
+        self._items_written = 0
+        self._invalid_reply = False
+        self._turn_usage: dict[str, Usage] = {}
         self._stopping = False
         self._fault: Exception | None = None
 
@@ -125,15 +153,71 @@ class HarnessTimelineWriter:
     def closed_turns(self) -> int:
         return self._closed_turns
 
+    @property
+    def items_written(self) -> int:
+        return self._items_written
+
+    @property
+    def fault(self) -> Exception | None:
+        return self._fault
+
+    @property
+    def fenced(self) -> bool:
+        return self._fenced
+
+    @property
+    def closed_usage(self) -> Usage | None:
+        return self._closed_usage
+
+    def clear_fault(self) -> None:
+        self._fault = None
+        self._stopping = False
+
+    def start_reading(self) -> None:
+        self._held = False
+        self._wake.set()
+
+    def bind_incarnation(self, incarnation: RuntimeIncarnation | None) -> None:
+        if incarnation != self._incarnation:
+            self._incarnation = incarnation
+            self._fenced = False
+        self._wake.set()
+
+    def register_input(
+        self,
+        key: str,
+        text: str,
+        parts: Sequence[tuple[str, TimelineItem]],
+        inbound_ids: tuple[int, ...],
+    ) -> None:
+        self.forget_sent(key)
+        sent = SentInput(
+            key=key,
+            wire_id=self._wire_id(key),
+            text=text,
+            parts=tuple(InboundPart(ref=ref, text=item.payload) for ref, item in parts),
+        )
+        self.register_sent(sent, items=dict(parts), inbound_ids=inbound_ids)
+
     def register_sent(
         self, sent: SentInput, *, items: Mapping[str, TimelineItem], inbound_ids: tuple[int, ...]
     ) -> None:
         self._projector.register(sent)
         self._sent.items.update(items)
         self._sent.inbound_ids[sent.key] = inbound_ids
+        self._sent.wire_ids[sent.key] = sent.wire_id
+
+    def forget_sent(self, key: str) -> None:
+        self._projector.unregister(key)
+        self._sent.inbound_ids.pop(key, None)
+        self._sent.wire_ids.pop(key, None)
 
     def undelivered(self) -> tuple[SentInput, ...]:
         return self._projector.undelivered()
+
+    def take_invalid_reply(self) -> bool:
+        invalid, self._invalid_reply = self._invalid_reply, False
+        return invalid
 
     def wake(self) -> None:
         self._wake.set()
@@ -143,11 +227,16 @@ class HarnessTimelineWriter:
         self._wake.set()
 
     async def read_now(self) -> bool:
-        if not self._started:
-            await self._start_up()
+        sid = self._session_id()
+        if sid is None or self._held:
+            return False
+        if sid != self._sid:
+            await self._start_up(sid)
+        if self._fenced:
+            return False
         if self._pending is not None:
             return await self._commit_pending()
-        batches = await self._read_all()
+        batches = await self._read_all(sid)
         if not batches:
             return False
         projection = self._project(batches)
@@ -169,29 +258,57 @@ class HarnessTimelineWriter:
         deadline = self._clock.monotonic() + ceiling_seconds
         last_activity = self._clock.monotonic()
         while True:
-            if await self.read_now():
+            while await self.read_now():
                 last_activity = self._clock.monotonic()
             if self._closed_turns > closed_before:
                 return TurnEndWait.CLOSED
             now = self._clock.monotonic()
-            if now >= deadline:
-                return TurnEndWait.CEILING
-            if now - last_activity >= quiet_seconds:
-                return TurnEndWait.QUIET
+            outcome = (
+                TurnEndWait.CEILING
+                if now >= deadline
+                else TurnEndWait.QUIET
+                if now - last_activity >= quiet_seconds
+                else None
+            )
+            if outcome is not None:
+                logger.warning(
+                    "the transcript showed no closing entry for the turn that ended",
+                    event="harness_timeline_turn_end_unseen",
+                    agent_id=self._agent_id,
+                    outcome=outcome.value,
+                    waited_seconds=round(ceiling_seconds - (deadline - now), 3),
+                )
+                return outcome
             await asyncio.sleep(min(0.1, quiet_seconds))
 
-    @property
-    def fault(self) -> Exception | None:
-        return self._fault
+    async def write_marker(self, text: str, *, error: bool) -> None:
+        marker = TimelineItem(
+            item_id="pending",
+            kind="system_marker",
+            payload=f"{'error' if error else 'status'}:{text}",
+            created_at=self._clock.now().isoformat(),
+        )
+        async with async_write_transaction(self._pool) as conn:
+            await lock_inbound_owner(conn, self._agent_id, incarnation=self._incarnation)
+            written = await aappend_keyed_timeline_items(
+                conn,
+                self._agent_id,
+                self._harness,
+                [(f"marker:{self._marker_id()}", marker)],
+                projection_version=PROJECTION_VERSION,
+            )
+        self._items_written += len(written)
+        await self._after_commit(Committed(WritePlan(), tuple(written)))
 
     async def run(self) -> None:
         failing_since: float | None = None
         while not self._stopping:
             try:
-                _ = await self.read_now()
+                if await self.read_now():
+                    failing_since = None
+                    await asyncio.sleep(0)
+                    continue
                 failing_since = None
-            except (StaleIncarnationError, RuntimeOwnershipLostError):
-                return
             except Exception as error:
                 failing_since = (
                     failing_since if failing_since is not None else self._clock.monotonic()
@@ -203,32 +320,39 @@ class HarnessTimelineWriter:
                 )
                 if self._clock.monotonic() - failing_since >= FAULT_AFTER_SECONDS:
                     self._fault = error
+                    logger.error(
+                        "the harness timeline writer gave up after repeated failures",
+                        event="harness_timeline_writer_faulted",
+                        agent_id=self._agent_id,
+                    )
                     return
                 await asyncio.sleep(RETRY_SECONDS)
                 continue
             with suppress(TimeoutError):
                 await asyncio.wait_for(self._wake.wait(), POLL_SECONDS)
             self._wake.clear()
-        if self._started and self._fault is None:
+        if self._sid is not None and self._fault is None and not self._fenced:
             _ = await self.read_now()
 
-    async def _start_up(self) -> None:
+    async def _start_up(self, sid: str) -> None:
         async with self._pool.connection() as conn:
-            self._positions = await aload_transcript_positions(
-                conn, self._agent_id, self._session_id
+            self._positions = await aload_transcript_positions(conn, self._agent_id, sid)
+            self._skip_history = not self._positions and await ahas_harness_timeline(
+                conn, self._agent_id
             )
+        self._last_ordinal = {}
+        self._sid = sid
         for record, stored in self._positions.items():
-            await self._rebuild(record, stored.rebuild_ordinal)
-        self._started = True
+            await self._rebuild(sid, record, stored.rebuild_ordinal)
 
-    async def _rebuild(self, record: str, after_ordinal: int) -> None:
-        cursor = after_ordinal
+    async def _rebuild(self, sid: str, record: str, after_ordinal: int) -> None:
+        cursor = await self._rebuild_floor(sid, record, after_ordinal)
         while True:
             async with self._pool.connection() as conn:
                 loaded = await aload_transcript_rows(
                     conn,
                     self._agent_id,
-                    self._session_id,
+                    sid,
                     record,
                     after_ordinal=cursor,
                     limit=REBUILD_BATCH_ROWS,
@@ -242,14 +366,53 @@ class HarnessTimelineWriter:
             if len(loaded) < REBUILD_BATCH_ROWS:
                 return
 
-    async def _read_all(self) -> list[EntryBatch]:
+    async def _rebuild_floor(self, sid: str, record: str, after_ordinal: int) -> int:
+        async with self._pool.connection() as conn:
+            floor = await aload_transcript_row_floor(
+                conn,
+                self._agent_id,
+                sid,
+                record,
+                after_ordinal=after_ordinal,
+                keep=self._rebuild_max,
+            )
+        if floor is None:
+            return after_ordinal
+        logger.warning(
+            "a turn has gone more than {limit} stored rows without a quiet point; the projector "
+            "is rebuilt from the latest {limit} only, so the output of a call that began earlier "
+            "is held and not shown",
+            event="harness_timeline_rebuild_bounded",
+            agent_id=self._agent_id,
+            record=record,
+            limit=self._rebuild_max,
+            rebuild_ordinal=after_ordinal,
+            resumed_after=floor,
+        )
+        return floor
+
+    async def _read_all(self, sid: str) -> list[EntryBatch]:
         batches: list[EntryBatch] = []
         for record in await self._reader.records():
             stored = self._positions.get(record)
+            if stored is None and self._skip_history:
+                stored = await self._seed_past_history(sid, record)
             batch = await self._reader.read_after(record, stored.position if stored else None)
             if batch is not None:
                 batches.append(batch)
         return batches
+
+    async def _seed_past_history(self, sid: str, record: str) -> StoredPosition | None:
+        wire_ids = tuple(self._sent.wire_ids.values()) if record == MAIN_RECORD else ()
+        position = await self._reader.position_before(record, wire_ids)
+        if position is None:
+            return None
+        stored = StoredPosition(record, position, -1)
+        async with async_write_transaction(self._pool) as conn:
+            await lock_inbound_owner(conn, self._agent_id, incarnation=self._incarnation)
+            await aset_transcript_position(conn, self._agent_id, sid, stored, self._cli_version())
+        self._positions[record] = stored
+        return stored
 
     def _project(self, batches: list[EntryBatch]) -> Projection:
         return self._projector.feed([entry for batch in batches for entry in batch.entries])
@@ -263,19 +426,42 @@ class HarnessTimelineWriter:
 
     async def _commit_pending(self) -> bool:
         pending = self._pending
-        if pending is None:
+        sid = self._sid
+        if pending is None or sid is None:
             return False
         plan = pending.plan
         positions = self._next_positions(pending)
-        written = await self._commit(plan, pending.batches, positions)
+        try:
+            written = await self._commit(sid, plan, pending.batches, positions)
+        except (StaleIncarnationError, RuntimeOwnershipLostError):
+            self._fenced = True
+            logger.warning(
+                "the harness timeline writer no longer owns the agent's runtime row; it writes "
+                "nothing until a different incarnation is bound",
+                event="harness_timeline_fenced",
+                agent_id=self._agent_id,
+            )
+            return False
         self._positions.update({stored.record: stored for stored in positions})
         for batch in pending.batches:
             if batch.rows:
                 self._last_ordinal[batch.record] = batch.rows[-1].ordinal
         self._pending = None
-        self._closed_turns += len(plan.closed)
+        self._account(plan, len(written))
         await self._after_commit(Committed(plan, tuple(written)))
         return True
+
+    def _account(self, plan: WritePlan, written: int) -> None:
+        self._items_written += written
+        self._closed_turns += len(plan.closed)
+        self._invalid_reply = self._invalid_reply or bool(plan.invalid_reply_turns)
+        for spend in plan.usage:
+            if spend.record == MAIN_RECORD and spend.turn is not None:
+                self._turn_usage[spend.turn] = (
+                    self._turn_usage.get(spend.turn, Usage()) + spend.usage
+                )
+        for closed in plan.closed:
+            self._closed_usage = self._turn_usage.pop(closed.turn, None)
 
     def _next_positions(self, pending: _Pending) -> list[StoredPosition]:
         quiet = bool(pending.plan.closed) and self._quiet()
@@ -297,14 +483,18 @@ class HarnessTimelineWriter:
         )
 
     async def _commit(
-        self, plan: WritePlan, batches: list[EntryBatch], positions: list[StoredPosition]
+        self,
+        sid: str,
+        plan: WritePlan,
+        batches: list[EntryBatch],
+        positions: list[StoredPosition],
     ) -> list[TimelineItem]:
         async with async_write_transaction(self._pool) as conn:
             await lock_inbound_owner(conn, self._agent_id, incarnation=self._incarnation)
             _ = await aappend_transcript_rows(
                 conn,
                 self._agent_id,
-                self._session_id,
+                sid,
                 [(row.record, row.ordinal, row.row) for batch in batches for row in batch.rows],
             )
             written = await self._append(conn, plan.items)
@@ -326,7 +516,7 @@ class HarnessTimelineWriter:
                     )
             for stored in positions:
                 await aset_transcript_position(
-                    conn, self._agent_id, self._session_id, stored, self._cli_version()
+                    conn, self._agent_id, sid, stored, self._cli_version()
                 )
         return written
 

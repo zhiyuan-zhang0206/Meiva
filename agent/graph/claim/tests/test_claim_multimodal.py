@@ -324,7 +324,7 @@ def test_user_image_uploads_inbound_renders_multimodal_message_and_harness_promp
 ) -> None:
     from pathlib import Path
 
-    from agent.graph.claim.harness_turn import render_message
+    from agent.graph.claim.harness_render import render_message
     from base.agents.history.timeline import build_timeline_items
 
     batch_id = "b" * 32

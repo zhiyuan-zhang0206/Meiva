@@ -10,7 +10,7 @@ from collections.abc import Awaitable, Callable, Coroutine
 from contextlib import suppress
 from typing import Any
 
-from agent.graph.claim.harness_activity import HarnessTurnProjector
+from agent.graph.claim.harness_activity import TurnSink
 from agent.graph.claim.harness_inbox import publish_inbound, write_interrupt_notes
 from agent.graph.interrupt import interrupt_halt as interrupt_halt
 from agent.graph.interrupt import interruptible_model, subscribe_interrupt
@@ -31,7 +31,7 @@ async def await_foreground(
     ctx: MeivaContext,
     agent_id: int,
     bridge: TurnEngine,
-    projector: HarnessTurnProjector,
+    projector: TurnSink,
     execute: Callable[[], Awaitable[None]],
 ) -> None:
     resources = ctx.hosted_resources
@@ -95,7 +95,7 @@ async def _ticking(
     mark: Callable[[int], None],
     agent_id: int,
     work: Awaitable[None],
-    projector: HarnessTurnProjector,
+    projector: TurnSink,
 ) -> None:
     async def settle() -> BaseException | None:
         try:
@@ -129,10 +129,11 @@ async def _ticking(
 # pending for the next claim pass. The note is display: a failure to write it is logged and the row is
 # delivered, with its entry, along with the next input.
 # meiva:link agent/graph/docs/harness-turn.md
-async def announce_interrupt(ctx: MeivaContext, agent_id: int) -> None:
+async def announce_interrupt(ctx: MeivaContext, agent_id: int, *, write_notes: bool = True) -> None:
     assert ctx.event_publisher is not None, "interrupted turn needs ctx.event_publisher"  # noqa: S101
     try:
-        publish_inbound(ctx, agent_id, await write_interrupt_notes(ctx, agent_id))
+        if write_notes:
+            publish_inbound(ctx, agent_id, await write_interrupt_notes(ctx, agent_id))
     except Exception:
         logger.opt(exception=True).warning(
             "could not write the interrupt note to the timeline",

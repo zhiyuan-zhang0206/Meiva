@@ -228,6 +228,68 @@ EVENTS: dict[str, EventSpec] = {
         "and the accounting row for that turn is missing",
         tier="anomaly",
     ),
+    "harness_timeline_writer_retry": telemetry_event(
+        "harness_timeline_writer_retry",
+        "the timeline writer of a transcript-sourced external agent could not read the record or commit "
+        "a read; nothing was lost (the position did not move) and the same read is tried again",
+        tier="anomaly",
+    ),
+    "harness_timeline_writer_faulted": telemetry_event(
+        "harness_timeline_writer_faulted",
+        "the timeline writer failed for longer than its bound and stopped; the invocation fails as a "
+        "setup failure and the next hosted turn starts the writer again from its stored position",
+        tier="anomaly",
+    ),
+    "harness_timeline_fenced": telemetry_event(
+        "harness_timeline_fenced",
+        "the timeline writer's commit was refused because the agent's runtime row is owned by another "
+        "incarnation; it writes nothing until the host binds the new one at the next hosted turn",
+        tier="anomaly",
+    ),
+    "harness_timeline_turn_end_unseen": telemetry_event(
+        "harness_timeline_turn_end_unseen",
+        "a transcript-sourced turn ended and the record showed no closing entry within the wait "
+        "(outcome quiet or ceiling): a possible format drift; the turn is not failed and what the "
+        "record shows later is written when read",
+        tier="anomaly",
+    ),
+    "harness_timeline_rebuild_bounded": telemetry_event(
+        "harness_timeline_rebuild_bounded",
+        "a restart rebuilt the timeline projector from only the latest stored rows because the turn had "
+        "gone past the rebuild bound without a quiet point; the output of a call that began earlier is "
+        "held and not shown",
+        tier="anomaly",
+    ),
+    "harness_timeline_anomaly": telemetry_event(
+        "harness_timeline_anomaly",
+        "the transcript held a row the projection could not use (an unknown type, a missing field, an "
+        "unusable line); it is skipped and reported once per kind and detail",
+        tier="anomaly",
+    ),
+    "harness_timeline_unmatched_input": telemetry_event(
+        "harness_timeline_unmatched_input",
+        "the transcript showed a user input this process did not send; it is shown on the timeline as "
+        "an unmatched inbound and settles nothing",
+        tier="anomaly",
+    ),
+    "harness_timeline_usage_mismatch": telemetry_event(
+        "harness_timeline_usage_mismatch",
+        "the spend the transcript tallied for a turn differs from the usage on the turn's result frame",
+        tier="anomaly",
+    ),
+    "harness_timeline_input_unproven": telemetry_event(
+        "harness_timeline_input_unproven",
+        "an input the harness took was not shown by the transcript within the wait at the end of an "
+        "invocation; it stays claimed, the writer settles it when the row appears, and the next "
+        "invocation adopts it otherwise",
+        tier="anomaly",
+    ),
+    "harness_timeline_unsupported_harness": telemetry_event(
+        "harness_timeline_unsupported_harness",
+        "harness_transcript_timeline is on for an agent whose harness does not read its timeline from "
+        "the transcript yet; the setting is ignored",
+        tier="anomaly",
+    ),
     "harness_registration_renewal_failed": telemetry_event(
         "harness_registration_renewal_failed",
         "an external harness session could not renew its registration",
