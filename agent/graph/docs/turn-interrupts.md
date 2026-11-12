@@ -29,10 +29,11 @@ ended on its own first) and is settled at once. An interrupt of an agent with no
 note and no control row: its message is an ordinary chat.
 
 Terminate remains a durable inbound. The two-second DB poll in
-`agent/graph/interrupt/` (`watch_for_interrupt`, cadence `INTERRUPT_POLL_S`) observes a pending interrupt/terminate row during
-LLM/exec, halts and returns to claim; claim routes termination to `END` while a
-`kind='interrupt'` inbound keeps the agent alive and idle. A pending restart
-joins the poll after a grace, below.
+`agent/graph/interrupt/` (`watch_for_interrupt`, cadence `INTERRUPT_POLL_S`) observes a pending terminate row during
+LLM/exec, halts and returns to claim, which routes termination to `END`. A pending restart
+joins the poll after a grace, below. The `kind='interrupt'` row is an external harness's only: its claim
+handler keeps the agent alive and idle, and the foreground watcher (`InterruptScope.FOREGROUND`) reads it.
+A native node's watcher never meets one, because a native interrupt cancels the turn Task instead.
 
 A terminate **yields to a message the death decision did not see**: a chat
 co-batched with a self-initiated terminate (`meiva.self.terminate()` — the chat
@@ -58,12 +59,17 @@ Node-level discard semantics differ, and deliberately so:
 
 - **llm_node** discards the partial generation whole — nothing was committed, so
   there is nothing worth keeping.
-- **exec_node** keeps partial stdout/stderr and attributes the tool result to
-  the first observed interrupt: `[cancelled by user]` for a user command,
-  `[cancelled by system]` for maintenance or another external system command,
+- **exec_node** keeps partial stdout/stderr when its watcher fires and attributes the tool result to
+  the first observed row: `[cancelled by user]` for a user terminate,
+  `[cancelled by system]` for another source's terminate (maintenance, an external system command),
   `[interrupted by restart]` for a restart. The watcher retains that
   attribution through subprocess cleanup; a later inbound cannot relabel it.
   Existing side effects are not undone or replayed.
+- A user stop, `meiva.agents.interrupt` or a host cancel (`POST /cancel-turn`) cancels the turn Task
+  instead, so the running exec is killed (see [Hosted Turn Cancel](../exec/docs/hosted-turn-cancel.md))
+  without writing a result. The unpaired tool call then receives the synthetic
+  `[interrupted: no result was recovered ...]` result (`INTERRUPTED_TOOL_RESULT`,
+  `agent/hooks/repair.py`) at the next turn's history repair, and no partial output is kept.
 
 ## A restart interrupts after a grace and resumes the turn
 

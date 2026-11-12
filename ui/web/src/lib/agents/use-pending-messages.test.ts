@@ -14,10 +14,9 @@ function pending(over: Partial<PendingInbound> & { id: number }): PendingInbound
   };
 }
 
-// Task #3683: during an external takeover the capture trigger puts an inbound
-// into the timeline at insert time while its row stays status='pending' until
-// the executor's ACK — the strip must not show a message the timeline already
-// renders.
+// meiva:note
+// Task #3683: an external-harness chat stays in the pending list until the provider
+// confirms it, so the strip must not show a message the timeline already renders.
 describe("withoutTimelineDuplicates", () => {
   it("drops a pending inbound already rendered in the timeline", () => {
     const out = withoutTimelineDuplicates(

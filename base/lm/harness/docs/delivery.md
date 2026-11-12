@@ -57,7 +57,10 @@ a neighbouring turn, and an input delivered meanwhile is handed to that turn or 
   repeated fact is silent), the provider-turn-name to local-turn-id table, exactly-once turn end,
   and the generation. Each transition returns the next ledger and the events it announces.
 - `base_session.py` — owns the ledger, applies steps, and gates
-  the start of a turn of ours on `_idle()` (no running turn of ours, no harness-started turn, no hold).
+  provides `_idle()` (no running turn of ours, no harness-started turn, no hold), the gate only the Codex
+  adapter uses to start a turn of ours (`_deliver_one`: steer when a turn runs, else `turn/start` when idle,
+  else refuse). Claude's `deliver()` writes every input to the CLI at once, whatever its turn state, and the
+  echo says what became of it; Antigravity routes on the CLI's trajectory status (`route`), not on `_idle()`.
 - Adapters only translate protocol frames to ledger calls.
 
 ## The bridge's event pump

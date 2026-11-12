@@ -399,7 +399,7 @@ def get_last_message(
 @router.get(
     "/api/agents/{agent_id}/pending",
     dependencies=[Depends(deny_isolated_result_read)],
-    description="Chat inbounds still queued for the agent, oldest first. The web UI shows them\nin a compact strip above the composer. Native chats leave the strip when\nclaimed. External-harness chats stay visible until provider acceptance moves\nthem to the timeline or delivery uncertainty is recorded. A chat the active\ntakeover absorbed (trail or relay read) is omitted too (#3683). A multimodal\nmessage carries its image reference urls (`images`) so the strip can\nrender thumbnails before delivery. Each row also carries `sender`, the\nclosed category of its `source` tag (user / agent / automation / system),\nso a client selects human-originated rows without parsing the tag.\n\nReturns an empty list for a nonexistent agent.",
+    description="Chat inbounds still queued for the agent, oldest first. The web UI shows them\nin a compact strip above the composer. Native chats leave the strip when\nclaimed. External-harness chats stay visible until provider acceptance moves\nthem to the timeline or delivery uncertainty is recorded. A multimodal\nmessage carries its image reference urls (`images`) so the strip can\nrender thumbnails before delivery. Each row also carries `sender`, the\nclosed category of its `source` tag (user / agent / automation / system),\nso a client selects human-originated rows without parsing the tag.\n\nReturns an empty list for a nonexistent agent.",
 )
 def get_pending_messages(agent_id: int, request: Request) -> list[PendingInbound]:
 

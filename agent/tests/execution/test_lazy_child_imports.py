@@ -128,7 +128,7 @@ def test_loading_provider_plugins_stays_off_the_lm_stack() -> None:
 
 def test_graph_reexports_resolve_through_the_lazy_getattr() -> None:
     report = _run_probe("graph_reexports")
-    assert report == {"identity": True, "callable": True, "note": True}
+    assert report == {"identity": True, "callable": True}
 
 
 def test_factory_reexports_the_registry_resolution() -> None:

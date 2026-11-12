@@ -37,10 +37,6 @@ from base.paths import workspace_path
 from ._crop import CropLimits, crop_output
 from ._result import StreamCap
 
-# The default marker is the user Stop action. Maintenance and other external
-# system interruptions retain their observed attribution in the same envelope.
-EXEC_CANCEL_NOTE = "[cancelled by user]"
-
 # Overflow output is written into the agent's workspace so the agent can read /
 # grep the complete output even when only head + tail are shown inline — and it
 # survives OS temp-dir reaping and reboots, so day-old output stays greppable.

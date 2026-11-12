@@ -142,7 +142,7 @@ async def test_llm_node_restart_interrupt_discards_partial_and_marks_the_turn_un
 # must be followed by ToolMessage" protocol debt.
 #
 # This is the exact opposite of exec cancel (there tool_use is already
-# committed, exec_node must supply a [cancelled by user] tool_result).
+# committed, exec_node must supply a tool_result).
 async def test_llm_node_cancel_event_race_discards_partial_tool_call(
     redis_url: str,
     hosted_resources: HostedTurnResources,

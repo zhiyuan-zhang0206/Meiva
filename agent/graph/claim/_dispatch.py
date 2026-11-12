@@ -37,7 +37,7 @@ from base.agents.messages.lifecycle_text import by_who, restart_accepted_text
 from base.agents.messages.reply_intent import delivery_disabled_entries
 from base.api_contracts.agent_contract import Harness
 from base.deploy.lifecycle.host_exit_message import HOST_RESTART_SOURCE
-from base.events.live.projection import Cancelled, CompactionMode, CompactionStatus
+from base.events.live.projection import CompactionMode, CompactionStatus
 from base.host.env.agent_slices import AgentSlices
 from base.log import logger
 from base.packages.plugins.extensions import ExtensionRegistry
@@ -337,14 +337,7 @@ def _record_compact_request_failure(
 # INTERRUPT: the control row of an external harness's interrupt; stop in-flight work, idle.
 #
 #     The history note and the message come as their own rows ahead of it, so it adds no marker.
-async def _handle_interrupt(
-    ctx: MeivaContext,
-    agent_id: int,
-    st: BatchState,
-) -> None:
-    assert ctx.event_publisher is not None, "_handle_interrupt requires ctx.event_publisher"  # noqa: S101
-    if ctx.harness is Harness.MEIVA:
-        ctx.event_publisher.emit(Cancelled(agent_id=agent_id).model_dump_json())
+async def _handle_interrupt(st: BatchState) -> None:
     st.interrupted = True
 
 
@@ -566,7 +559,7 @@ async def _dispatch_item(
     elif kind == InboundKind.COMPACT_REQUEST:
         await _handle_compact_request(ctx, agent_id, state, item, st)
     elif kind == InboundKind.INTERRUPT:
-        await _handle_interrupt(ctx, agent_id, st)
+        await _handle_interrupt(st)
     elif kind == InboundKind.HEARTBEAT:
         await handle_heartbeat(ctx, agent_id, item, st, state)
     elif kind == InboundKind.TERMINATE:

@@ -89,13 +89,17 @@ retires the process; the next turn respawns it with `--conversation`, which keep
 the transcript while the process is replaced. Hosted foreground Cancel leaves
 the CLI running and reports that the provider lacks a foreground-only control.
 
-## Three harness differences, absorbed here
+## Harness differences, absorbed here
 
 | Difference | Where it is absorbed |
 |---|---|
 | Headless cannot prompt: a tool that needs a permission the configured policy does not grant is **auto-denied**, yet the turn still reports `status: SUCCESS` and exits 0 | `mapping.ResultFields.is_error` is true when `denied_actions` is non-empty; `TurnCompleted.permission_denials` carries the entries. A caller that only reads `status` records a silent no-op as success |
+| Every `run_command` is a fresh shell: `cd` and `export` do not survive into the next call | `handoff_rules.SHELL_SEMANTICS`, appended to the handoff by `build_handoff()` |
+| `run_command` runs non-interactively with stdin closed (`/dev/null`) under modern GNU bash | `wiring.session_environ` sets `SHELL` to the non-interactive bash wrapper script; commands reading stdin receive immediate EOF |
+| A background process started with `&` is killed when the turn ends | same: the handoff tells the agent to use `setsid nohup …` or tmux |
+| `run_command` caps `WaitMsBeforeAsync` at 10s, while cold `import meiva` attachment + plugin loading takes several seconds | same: the handoff tells the agent to pass `WaitMsBeforeAsync=10000` and batch synchronous `meiva.*` calls in one `"$MEIVA_PYTHON" -c` invocation |
 
-The shape that makes this a silent failure, captured from `agy` 1.4.2 with a
+The shape that makes the first row a silent failure, captured from `agy` 1.4.2 with a
 `request-review` profile asked to run `echo hi > file`:
 
 ```json
@@ -108,12 +112,8 @@ The shape that makes this a silent failure, captured from `agy` 1.4.2 with a
 Nothing ran, the exit code is 0, and `denied_actions` is the only structured
 signal. The adapter turns that into `subtype="denied"`, `is_error=True`,
 `permission_denials=("command:RunCommand",)`.
-| Every `run_command` is a fresh shell: `cd` and `export` do not survive into the next call | `handoff_rules.SHELL_SEMANTICS`, appended to the handoff by `build_handoff()` |
-| `run_command` runs non-interactively with stdin closed (`/dev/null`) under modern GNU bash | `wiring.session_environ` sets `SHELL` to the non-interactive bash wrapper script; commands reading stdin receive immediate EOF |
-| A background process started with `&` is killed when the turn ends | same: the handoff tells the agent to use `setsid nohup …` or tmux |
-| `run_command` caps `WaitMsBeforeAsync` at 10s, while cold `import meiva` attachment + plugin loading takes several seconds | same: the handoff tells the agent to pass `WaitMsBeforeAsync=10000` and batch synchronous `meiva.*` calls in one `"$MEIVA_PYTHON" -c` invocation |
 
-The first is enforced in code and pinned by `test_denied.py`; the shell/runtime rules are
+The first row is enforced in code and pinned by `test_denied.py`; the shell/runtime rules are
 behaviour of the CLI that the adapter cannot change, so they are disclosed in the
 text the agent reads, and `test_handoff.py` pins that the text is present (and
 absent from a plain `Handoff`).
@@ -153,6 +153,7 @@ nothing in the protocol can tell the two apart.
 | Field | Default | Reason |
 |---|---|---|
 | `cancel_settle_seconds` | 5 | how long an interrupt waits for the CLI and its children before escalating to SIGTERM/SIGKILL and reporting residue |
+| `image_follow_seconds` | 30 | how long an image sent as a follow-up steer waits for its turn to be running before it is given up on and reported (`session._follow_with_images`) |
 | `max_buffered_events` | 256 | text deltas are droppable under lag; control events never are |
 | `skip_permissions` | `False` | headless cannot prompt; a command outside the configured policy is denied, which the adapter reports as failure. Opting in trades that denial for auto-approval |
 | `MAX_FRAME_BYTES` (`transport.py`) | `256 MiB` | one NDJSON `step_update` or `result` line can carry a multi-megabyte tool result or accumulated turn state; `AgyTransport` reads 64 KiB chunks into a `bytearray` without `StreamReader.readline()`'s 8 MiB separator limit while capping one frame at 256 MiB so an unterminated stream from a wedged child cannot grow memory without bound |
