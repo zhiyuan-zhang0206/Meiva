@@ -7,7 +7,11 @@ into the runtime's turn engine. It reuses the shared contract modules
 
 ## The transport is not ACP
 
-`agy` 1.4.2 has no Agent Client Protocol server. The ACP surface is a separate
+`agy` 1.4.2 has no Agent Client Protocol server. From 1.5.6, `agy acp` provides an
+ACP stdio server; this adapter does not use it yet and still drives headless
+print mode. The migration plan is
+[Antigravity on ACP with a private injection RPC](../../../../../future/agent/antigravity-acp-hybrid.md).
+The earlier ACP surface was a separate
 Google binary (`agy_acp_server.par`, release 1.3.0, ~926 MB unpacked) with its
 own Google sign-in; it is not installed by `agy` and not used here. The CLI's own
 programmatic surface is headless print mode:
@@ -84,8 +88,6 @@ request**: the adapter sends `SIGINT`, and the CLI answers with a final `result`
 retires the process; the next turn respawns it with `--conversation`, which keeps
 the transcript while the process is replaced. Hosted foreground Cancel leaves
 the CLI running and reports that the provider lacks a foreground-only control.
-
-The CLI also offers an `agy acp` mode. This adapter uses headless stream JSON.
 
 ## Three harness differences, absorbed here
 
