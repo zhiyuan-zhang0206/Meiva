@@ -16,6 +16,7 @@ from services.desktop.browser.tests.test_browser_mcp_daemon import (
     chrome,
     expire,
     new_daemon,
+    sweep_twice,
     ttl_remaining,
 )
 
@@ -60,7 +61,7 @@ async def test_reap_expired_pages_closes_only_expired_stack_pages() -> None:
     up.calls.clear()
     expire(d, 1)
 
-    closed = await page_lifecycle.reap_expired_pages(d)
+    closed = await sweep_twice(d)
 
     assert closed == 1
     assert up.pages == {
@@ -82,7 +83,7 @@ async def test_reap_expired_pages_closes_titled_isolated_page() -> None:
     up.calls.clear()
     expire(d, 1)
 
-    closed = await page_lifecycle.reap_expired_pages(d)
+    closed = await sweep_twice(d)
 
     assert closed == 1
     assert up.pages == {}
@@ -94,7 +95,7 @@ async def test_reap_expired_pages_closes_titled_isolated_page() -> None:
 async def test_reap_expired_pages_never_touches_unregistered_page() -> None:
     d, up = browser_daemon_with_fake_upstream()
     add_user_page(d, up, 99, "https://user.example.com/mine")
-    assert await page_lifecycle.reap_expired_pages(d) == 0
+    assert await sweep_twice(d) == 0
     assert up.pages == {99: "https://user.example.com/mine"}
     assert chrome(d).closed == []
 
@@ -107,7 +108,7 @@ async def test_reap_expired_pages_drops_slot_when_page_already_gone() -> None:
     up.calls.clear()
     expire(d, 1)
 
-    assert await page_lifecycle.reap_expired_pages(d) == 0
+    assert await sweep_twice(d) == 0
     assert chrome(d).closed == []
     assert d.pages.records == {}
 
@@ -135,7 +136,7 @@ async def test_renew_page_extends_deadline_and_sweep_keeps_it() -> None:
     assert not res.is_error
     assert "renewed" in text_of(res)
     assert 3500 < ttl_remaining(d, 1) <= 3600
-    assert await page_lifecycle.reap_expired_pages(d) == 0
+    assert await sweep_twice(d) == 0
     assert up.pages == {1: "x"}
 
 
@@ -158,7 +159,7 @@ async def test_renew_page_rejected_after_deadline() -> None:
 
     assert res.is_error
     assert "cannot be renewed" in text_of(res)
-    assert await page_lifecycle.reap_expired_pages(d) == 1
+    assert await sweep_twice(d) == 1
 
 
 async def test_renew_page_rejects_bad_arguments() -> None:
@@ -200,7 +201,7 @@ async def test_ttl_expiry_surfaces_native_no_page_red_green() -> None:
     ok = await d.call_tool_for_agent("take_snapshot", {}, 7)
     assert not ok.is_error
     expire(d, 1)
-    assert await page_lifecycle.reap_expired_pages(d) == 1
+    assert await sweep_twice(d) == 1
 
     after = await d.call_tool_for_agent("take_snapshot", {}, 7)
 
@@ -308,7 +309,7 @@ async def test_expiry_emits_audit_event(emitted_events: EmittedEvents) -> None:
     expire(d, 1)
     emitted_events.clear()
 
-    assert await page_lifecycle.reap_expired_pages(d) == 1
+    assert await sweep_twice(d) == 1
 
     emitted = list(emitted_events)
     assert (emitted[0].category, emitted[0].event_name) == ("log", "chrome_page_ttl_expired")

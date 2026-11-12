@@ -80,14 +80,21 @@ recorded pins and grouped tabs are in place".
 ## Restored tabs and the page TTL
 
 Restored tabs are new CDP targets, so the page TTL ledger
-(`<home>/run/browser-pages.json`, keyed by target id) has no record of them. The
-`Meiva #<id>` groups that the reapply (or Chrome itself) puts back are what the next
-page sweep reads: each restored tab in such a group is **adopted** for the agent the
-title names with a fresh default TTL; the original deadline is not carried over (the
-ledger here records URLs only, and the stack's own sweep reconciles within one
-interval of the restore). The first sweep runs 30 s after the daemon starts, after the
-reapply has had time to put the groups back; a tab the reapply could not group is left
-alone, as is any tab outside a `Meiva #<id>` group. See [tab groups](tab-groups.md).
+(`<home>/run/browser-pages.json`, keyed by target id) does not know them. The
+`Meiva #<id>` groups that the reapply (or Chrome itself) puts back let the page sweep
+pass the record of a gone target, with its **original deadline**, to the one restored
+page with the same owner and URL, when exactly one gone record and one grouped page
+match and no other page in Chrome has that URL; the first sweep runs 30 s after the
+daemon starts, after the reapply has had time to put the groups back. A restored tab
+that matches nothing, or several tabs with the same URL, is left alone: it is never
+adopted and never closed (it leaks until the user closes it; the leak count is logged).
+
+`meivaApplyLayout` matches tabs by URL in strip order and is unchanged. When a user's
+tab has the same URL as an agent's page, the reapply can file the user's tab into the
+agent's group. The ledger never treats a page in a group as the stack's on that evidence
+alone, so such a tab is not closed; the only residual risk is the one-time migration of
+a first run, which adopts what sat in agent groups at that moment. See
+[tab groups](tab-groups.md).
 
 ## What does not set up a restore
 

@@ -10,6 +10,7 @@ from services.desktop.browser.tests.test_browser_mcp_daemon import (
     browser_daemon_with_fake_upstream,
     chrome,
     expire,
+    sweep_twice,
 )
 
 
@@ -27,7 +28,7 @@ async def test_selected_user_page_survives_automatic_cleanup(
         assert await page_lifecycle.release_agent_page(daemon, 7) is None
         assert daemon.pages.get_agent_page(7) is None
     else:
-        assert await page_lifecycle.reap_expired_pages(daemon) == 0
+        assert await sweep_twice(daemon) == 0
 
     assert upstream.pages == {99: "http://localhost:9999/user-tab"}
     assert chrome(daemon).closed == []
@@ -42,7 +43,7 @@ async def test_owned_page_keeps_creation_deadline_after_switching_to_user_tab() 
     assert daemon.pages.record_for_page(1) == deadline
 
     expire(daemon, 1)
-    assert await page_lifecycle.reap_expired_pages(daemon) == 1
+    assert await sweep_twice(daemon) == 1
     assert upstream.pages == {99: "https://example.com/user-tab"}
 
 

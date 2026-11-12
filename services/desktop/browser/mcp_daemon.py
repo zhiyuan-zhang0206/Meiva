@@ -64,7 +64,6 @@ from services.desktop.browser.mcp_upstream import (
 )
 from services.desktop.browser.page_lifecycle import (
     RENEW_PAGE_TOOL,
-    FileRecordStore,
     PageRegistry,
     expired_page_reaper,
     handle_release_agent_page,
@@ -78,6 +77,7 @@ from services.desktop.browser.tab_groups.grouping import (
     ExtensionWorker,
     staged_extension_dir,
 )
+from services.desktop.browser.tab_groups.page_store import FileRecordStore, page_ledger_path
 
 # meiva:note
 # Multi-MB tool results (screenshot / DOM snapshot) fit on one line.
@@ -236,27 +236,31 @@ class ChromeMcpDaemon:
         return current_page
 
     # meiva:note
-    # Forward a `new_page`, group it for the agent and record its TTL deadline under
-    # the target the grouping identified (a page left ungrouped carries no TTL).
+    # Forward a `new_page` and record its TTL under the target of the page it made
+    # (found between a target snapshot before and after). A page for an agent is
+    # also filed into the agent's tab group, except in an isolated browser context
+    # (extensions cannot see those tabs): that page is recorded, never grouped.
     async def _new_page(
         self, args: dict[str, object], agent_id: int | None
     ) -> types.CallToolResult:
-        group = agent_id is not None
-        if group and _in_isolated_context(args):
-            group = False
+        group = agent_id is not None and not _in_isolated_context(args)
+        if agent_id is not None and not group:
             logger.info(
                 "[browser-mcp] agent {}'s page in isolated context {!r} is not tab-grouped "
                 "(extensions cannot see isolated-context tabs)",
                 agent_id,
                 args["isolatedContext"],
             )
-        before = await self.tab_groups.snapshot() if group else None
+        before = await self.tab_groups.snapshot() if agent_id is not None else None
         result = await self._call("new_page", args)
-        if not result.is_error:
+        if not result.is_error and agent_id is not None:
             created = selected_id(result)
-            target_id = None
-            if group and agent_id is not None:
-                target_id = await self.tab_groups.group_new_page(agent_id, before, created)
+            if group:
+                target_id = await self.tab_groups.group_new_page(
+                    agent_id, before, created, on_grouped=self.pages.mark_grouped
+                )
+            else:
+                target_id = await self.tab_groups.new_target(agent_id, before)
             self.pages.register_created_page(target_id, agent_id, created)
         return result
 
@@ -540,7 +544,7 @@ async def _serve_daemon_loop(
     pages = PageRegistry(
         default_ttl_seconds=default_ttl_seconds,
         clock=clock,
-        store=FileRecordStore(page_lifecycle.page_ledger_path(home)),
+        store=FileRecordStore(page_ledger_path(home)),
     )
     async with asyncio.TaskGroup() as tasks:
         gateway = GatewaySession(tasks, browser_cdp_port, access=gateway_access, clock=clock)

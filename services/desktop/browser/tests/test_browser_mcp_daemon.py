@@ -133,6 +133,12 @@ def new_daemon(
 
 # meiva:note
 # The fake Chrome behind a daemon built by ``new_daemon``.
+# meiva:note
+# Two sweeps: a page is closed only when two consecutive sweeps found it due.
+async def sweep_twice(d: ChromeMcpDaemon) -> int:
+    return await page_lifecycle.reap_expired_pages(d) + await page_lifecycle.reap_expired_pages(d)
+
+
 def chrome(d: ChromeMcpDaemon) -> FakeBrowser:
     assert isinstance(d.tab_groups, FakeBrowser)
     return d.tab_groups
@@ -398,16 +404,18 @@ async def test_agent_affinity_accepts_integral_float_page_id() -> None:
     assert d.pages.get_agent_page(7) == 1
 
 
-async def test_isolated_context_page_is_selected_but_carries_no_ttl_record() -> None:
+async def test_isolated_context_page_is_selected_and_recorded_without_a_group() -> None:
     # meiva:note
-    # An isolated-context tab is invisible to the tab-group extension, so nothing proves it ours
-    # and it has no stable identity in the ledger: it has affinity and no deadline.
+    # An isolated-context tab is invisible to the tab-group extension: it is recorded at
+    # creation (it is ours by creation) as not grouped, and is never put in a group.
     d, _up = browser_daemon_with_fake_upstream()
     await d.call_tool_for_agent(
         "new_page", {"url": "https://discord.com/app", "isolatedContext": "reg-7"}, 7
     )
     assert d.pages.get_agent_page(7) == 1
-    assert d.pages.records == {}
+    record = d.pages.record_for_page(1)
+    assert record is not None and record.owner == 7 and not record.grouped
+    assert chrome(d).titles == {}
 
 
 async def test_agent_close_with_integral_float_drops_ttl_slot() -> None:

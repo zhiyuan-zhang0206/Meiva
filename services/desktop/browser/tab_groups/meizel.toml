@@ -1,8 +1,9 @@
-exports = ["grouping.py", "page_ledger.py"]
+exports = ["grouping.py", "page_ledger.py", "page_store.py"]
 
 [uses]
 "grouping.py" = ["page_ledger.py"]
-"tests" = ["grouping.py", "page_ledger.py"]
+"page_store.py" = ["page_ledger.py"]
+"tests" = ["grouping.py", "page_ledger.py", "page_store.py"]
 
 [purity]
 "__init__.py" = "strict"

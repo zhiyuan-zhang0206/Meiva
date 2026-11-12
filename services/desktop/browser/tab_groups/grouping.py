@@ -80,7 +80,7 @@ from __future__ import annotations
 import asyncio
 import itertools
 import json
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 from dataclasses import dataclass
 from pathlib import Path
 from typing import NotRequired, TypedDict
@@ -141,6 +141,12 @@ WORKER_WAIT_S = 5.0
 # meiva:link services/desktop/browser/docs/tab-groups.md
 UNGROUP_TIMEOUT_S = 5.0
 _WORKER_POLL_S = 0.1
+
+# meiva:note
+# How long `close_target` waits for Chrome to drop a target it was told to close
+# (polling the target list), and the poll interval.
+CLOSE_SETTLE_S = 2.0
+_CLOSE_POLL_S = 0.1
 
 
 # meiva:note
@@ -505,7 +511,9 @@ class AgentTabGroups:
         listing_timeout_s: float = LISTING_TIMEOUT_S,
         group_timeout_s: float = GROUP_TIMEOUT_S,
         ungroup_timeout_s: float = UNGROUP_TIMEOUT_S,
+        close_settle_s: float = CLOSE_SETTLE_S,
     ) -> None:
+        self._close_settle_s = close_settle_s
         self._cdp_port = cdp_port
         self._task_group = tasks
         self._worker = worker
@@ -545,23 +553,38 @@ class AgentTabGroups:
     # identified and so stays ungrouped.
     # meiva:link services/desktop/browser/docs/tab-groups.md
     async def group_new_page(
-        self, agent_id: int, before: frozenset[str] | None, page_id: int | None = None
+        self,
+        agent_id: int,
+        before: frozenset[str] | None,
+        page_id: int | None = None,
+        *,
+        on_grouped: Callable[[str], None] | None = None,
     ) -> str | None:
-        if before is None:
-            return None
-        try:
-            target_id = await asyncio.wait_for(self._new_target(before), self._listing_timeout_s)
-        except Exception as e:
-            self._warn(agent_id, e)
+        target_id = await self.new_target(agent_id, before)
+        if target_id is None:
             return None
         if page_id is not None:
             self._pages[page_id] = (agent_id, target_id)
         task = self._task_group.create_task(
-            self._file(agent_id, target_id), name=f"tab-group-agent-{agent_id}"
+            self._file(agent_id, target_id, on_grouped), name=f"tab-group-agent-{agent_id}"
         )
         self._tasks.add(task)
         task.add_done_callback(self._settled)
         return target_id
+
+    # meiva:note
+    # The CDP target of the page created since `before` (the matching
+    # `snapshot()`), or None -- with a WARNING -- when it cannot be told from a
+    # tab someone else opened meanwhile. It does not group: the page ledger uses it
+    # for a page that is not grouped too (an isolated browser context).
+    async def new_target(self, agent_id: int, before: frozenset[str] | None) -> str | None:
+        if before is None:
+            return None
+        try:
+            return await asyncio.wait_for(self._new_target(before), self._listing_timeout_s)
+        except Exception as e:
+            self._warn(agent_id, e)
+            return None
 
     async def _new_target(self, before: frozenset[str]) -> str:
         new = (await _page_target_ids(self._cdp_port)) - before
@@ -585,15 +608,18 @@ class AgentTabGroups:
             return
         await self._ungroup_last(*recorded, label=f"page {page_id}")
 
+    async def _ungroup_strict(self, agent_id: int, target_id: str) -> None:
+        await asyncio.wait_for(
+            self._worker.evaluate(
+                f"meivaUngroupLast({json.dumps(target_id)}, {json.dumps(group_title(agent_id))})",
+                timeout_s=self._ungroup_timeout_s,
+            ),
+            self._ungroup_timeout_s,
+        )
+
     async def _ungroup_last(self, agent_id: int, target_id: str, *, label: str) -> None:
         try:
-            await asyncio.wait_for(
-                self._worker.evaluate(
-                    f"meivaUngroupLast({json.dumps(target_id)}, {json.dumps(group_title(agent_id))})",
-                    timeout_s=self._ungroup_timeout_s,
-                ),
-                self._ungroup_timeout_s,
-            )
+            await self._ungroup_strict(agent_id, target_id)
         except Exception as e:
             logger.opt(exception=not isinstance(e, TimeoutError)).warning(
                 "[browser-mcp] could not ungroup agent {}'s last tab on {} ({}: {}); "
@@ -623,20 +649,32 @@ class AgentTabGroups:
         return TabState(pages=pages, agent_groups=agent_groups)
 
     # meiva:note
-    # Close one page target by its CDP target id (`/json/close/<id>`): the
-    # ungroup-before-close half first (see `release_page`, best effort), then the
-    # close, which raises when Chrome refuses or is unreachable. The id is stable
-    # for the life of the Chrome process, unlike chrome-devtools-mcp's page ids.
+    # Close one page target by its CDP target id (`/json/close/<id>`) and report
+    # whether Chrome no longer has it (it can outlive the request, for instance on a
+    # beforeunload prompt; the caller then keeps the record). A `grouped` page has
+    # its last-tab group removed first and, unlike `release_page`, a failure to do
+    # so RAISES before anything is closed: a page the ledger closes must not leave
+    # a saved group behind. The id is stable for the life of the Chrome process,
+    # unlike chrome-devtools-mcp's page ids.
     # meiva:link services/desktop/browser/docs/tab-groups.md
-    async def close_target(self, agent_id: int, target_id: str) -> None:
+    async def close_target(self, agent_id: int, target_id: str, *, grouped: bool) -> bool:
         for page_id, (_, recorded_target) in list(self._pages.items()):
             if recorded_target == target_id:
                 del self._pages[page_id]
-        await self._ungroup_last(agent_id, target_id, label=f"target {target_id}")
+        if grouped:
+            await self._ungroup_strict(agent_id, target_id)
         await asyncio.wait_for(
             http_ok(f"http://127.0.0.1:{self._cdp_port}/json/close/{quote(target_id, safe='')}"),
             self._listing_timeout_s,
         )
+        for attempt in range(int(self._close_settle_s / _CLOSE_POLL_S) + 1):
+            if attempt:
+                await asyncio.sleep(_CLOSE_POLL_S)
+            if target_id not in await asyncio.wait_for(
+                _page_target_ids(self._cdp_port), self._listing_timeout_s
+            ):
+                return True
+        return False
 
     # meiva:note
     # Converge every agent's groups across the browser: the keeper of each title
@@ -670,7 +708,9 @@ class AgentTabGroups:
             # `_file` reports its own failures; reading `exception()` marks it retrieved.
             task.exception()
 
-    async def _file(self, agent_id: int, target_id: str) -> None:
+    async def _file(
+        self, agent_id: int, target_id: str, on_grouped: Callable[[str], None] | None = None
+    ) -> None:
         title = group_title(agent_id)
         try:
             raw = await self._worker.evaluate(
@@ -682,6 +722,8 @@ class AgentTabGroups:
             self._warn(agent_id, e)
             return
         _warn_merged(report, who=f"agent {agent_id}")
+        if on_grouped is not None:
+            on_grouped(target_id)
 
     @staticmethod
     def _warn(agent_id: int, error: Exception) -> None:

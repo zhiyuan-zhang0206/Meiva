@@ -4,6 +4,7 @@ import asyncio
 import json
 import socket
 import time
+from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
@@ -17,6 +18,7 @@ from services.desktop.browser.tests.test_browser_mcp_daemon import (
     FakeUpstream,
     err,
     new_daemon,
+    sweep_twice,
     text_of,
 )
 
@@ -34,20 +36,25 @@ class RecordingGroups(FakeBrowser):
         return await super().snapshot()
 
     async def group_new_page(
-        self, agent_id: int, before: frozenset[str] | None, page_id: int | None = None
+        self,
+        agent_id: int,
+        before: frozenset[str] | None,
+        page_id: int | None = None,
+        *,
+        on_grouped: Callable[[str], None] | None = None,
     ) -> str | None:
         self.events.append(("group", (agent_id, before)))
-        return await super().group_new_page(agent_id, before, page_id)
+        return await super().group_new_page(agent_id, before, page_id, on_grouped=on_grouped)
 
     async def release_page(self, page_id: int) -> None:
         if self._order is not None:
             self._order.append(f"release:{page_id}")
         self.events.append(("release", page_id))
 
-    async def close_target(self, agent_id: int, target_id: str) -> None:
+    async def close_target(self, agent_id: int, target_id: str, *, grouped: bool) -> bool:
         if self._order is not None:
             self._order.append(f"close_target:{agent_id}")
-        await super().close_target(agent_id, target_id)
+        return await super().close_target(agent_id, target_id, grouped=grouped)
 
     async def converge_all(self) -> None:
         self.events.append(("converge", len(self.events)))
@@ -105,10 +112,11 @@ async def test_isolated_context_page_is_left_out_of_grouping() -> None:
     )
     assert not result.is_error
     assert up.isolated_contexts == {1: "reg-7"}
-    assert groups.events == []
+    assert groups.grouped() == []
     # meiva:note
-    # nothing proves an isolated-context tab ours: no TTL
-    assert d.pages.records == {}
+    # recorded at creation, never grouped: it is closed at its deadline on the record alone
+    record = d.pages.record_for_page(1)
+    assert record is not None and not record.grouped
 
 
 async def test_a_failed_new_page_is_not_grouped() -> None:
@@ -257,7 +265,7 @@ async def test_hard_ttl_reaper_closes_by_target() -> None:
     d, up, chrome = await _agent_with_one_page()
     assert d.pages.record_for_page(1) is not None
     d.pages.set_deadline(d.pages.page_targets[1], d.pages.now() - 1.0)
-    assert await page_lifecycle.reap_expired_pages(d) == 1
+    assert await sweep_twice(d) == 1
     assert len(chrome.closed) == 1
     assert up.pages == {}
 
@@ -282,6 +290,7 @@ async def test_the_public_surface_is_the_grouping_contract_and_one_ungroup() -> 
         "cancel_pending",
         "tab_state",
         "close_target",
+        "new_target",
     }
 
 

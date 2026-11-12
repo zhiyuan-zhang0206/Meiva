@@ -136,54 +136,79 @@ async def test_tab_state_raises_when_chrome_cannot_be_listed(
             await _groups(chrome, tasks).tab_state()
 
 
-async def test_close_target_ungroups_the_last_tab_and_then_closes_by_target_id(
+async def test_close_target_ungroups_the_last_tab_closes_by_target_id_and_sees_it_gone(
     chrome_factory: Callable[[dict[str, Any]], Awaitable[FakeChrome]],
 ) -> None:
     model = GroupedModel([])
     chrome = await chrome_factory(model.handlers())
     model.chrome = chrome
-    chrome.listings.append("Target is closing")
+    chrome.listings.extend(["Target is closing", [_page("T1", "https://a/")]])
 
     async with asyncio.TaskGroup() as tasks:
-        await _groups(chrome, tasks).close_target(7, "T2")
+        assert await _groups(chrome, tasks).close_target(7, "T2", grouped=True) is True
 
     ungroup = [e for e in model.expressions if e.startswith("meivaUngroupLast(")]
     assert len(ungroup) == 1 and '"T2"' in ungroup[0] and "Meiva #7" in ungroup[0]
     # meiva:note
     # the ungroup landed before the close request
     assert model.closes_seen_at_ungroup == [0]
-    assert chrome.http_urls[-1] == f"http://127.0.0.1:{chrome.port}/json/close/T2"
+    assert f"http://127.0.0.1:{chrome.port}/json/close/T2" in chrome.http_urls
+
+
+async def test_close_target_of_an_ungrouped_page_does_not_touch_the_extension(
+    chrome_factory: Callable[[dict[str, Any]], Awaitable[FakeChrome]],
+) -> None:
+    model = GroupedModel([])
+    chrome = await chrome_factory(model.handlers())
+    chrome.listings.extend(["Target is closing", []])
+
+    async with asyncio.TaskGroup() as tasks:
+        assert await _groups(chrome, tasks).close_target(7, "T2", grouped=False) is True
+
+    assert model.expressions == []
+
+
+async def test_close_target_reports_a_target_that_is_still_open_after_the_close(
+    chrome_factory: Callable[[dict[str, Any]], Awaitable[FakeChrome]],
+) -> None:
+    chrome = await chrome_factory(GroupedModel([]).handlers())
+    chrome.listings.append("Target is closing")
+    chrome.listings.extend([[_page("T2", "https://a/")]] * 50)
+
+    async with asyncio.TaskGroup() as tasks:
+        groups = AgentTabGroups(
+            chrome.port,
+            tasks,
+            worker=ExtensionWorker(chrome.port, timers=SYSTEM_TIMERS),
+            close_settle_s=0.3,
+        )
+        assert await groups.close_target(7, "T2", grouped=False) is False
 
 
 async def test_close_target_quotes_the_target_id_into_the_url(
     chrome_factory: Callable[[dict[str, Any]], Awaitable[FakeChrome]],
 ) -> None:
-    model = GroupedModel([])
-    chrome = await chrome_factory(model.handlers())
-    chrome.listings.append("Target is closing")
+    chrome = await chrome_factory(GroupedModel([]).handlers())
+    chrome.listings.extend(["Target is closing", []])
 
     async with asyncio.TaskGroup() as tasks:
-        await _groups(chrome, tasks).close_target(7, "../json/version")
+        await _groups(chrome, tasks).close_target(7, "../json/version", grouped=False)
 
-    assert chrome.http_urls[-1].endswith("/json/close/..%2Fjson%2Fversion")
+    assert any(u.endswith("/json/close/..%2Fjson%2Fversion") for u in chrome.http_urls)
 
 
-async def test_close_target_still_closes_when_the_ungroup_fails_and_says_so(
-    loguru_records: list[dict[str, Any]],
+async def test_close_target_closes_nothing_when_the_last_tab_cannot_be_ungrouped(
     chrome_factory: Callable[[dict[str, Any]], Awaitable[FakeChrome]],
 ) -> None:
     handlers = GroupedModel([]).handlers()
     handlers["Extensions.getExtensions"] = RuntimeError("no extensions")
     chrome = await chrome_factory(handlers)
-    chrome.listings.append("Target is closing")
 
     async with asyncio.TaskGroup() as tasks:
-        await _groups(chrome, tasks).close_target(7, "T2")
+        with pytest.raises(_READ_FAILURES):
+            await _groups(chrome, tasks).close_target(7, "T2", grouped=True)
 
-    assert chrome.http_urls[-1].endswith("/json/close/T2")
-    assert any(
-        "could not ungroup" in r["message"] for r in loguru_records if r["level"].name == "WARNING"
-    )
+    assert not any("/json/close/" in u for u in chrome.http_urls)
 
 
 async def test_close_target_raises_when_chrome_does_not_answer_the_close(
@@ -194,4 +219,4 @@ async def test_close_target_raises_when_chrome_does_not_answer_the_close(
 
     async with asyncio.TaskGroup() as tasks:
         with pytest.raises(_READ_FAILURES):
-            await _groups(chrome, tasks).close_target(7, "T2")
+            await _groups(chrome, tasks).close_target(7, "T2", grouped=False)

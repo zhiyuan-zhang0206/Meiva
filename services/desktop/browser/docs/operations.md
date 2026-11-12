@@ -74,21 +74,25 @@ the operating choices below do not redefine either component.
   on Chrome 156 it restores an incomplete set and drops grouped tabs
   ([browser session restore](browser-session-restore.md)).
 - **Page TTL survives restarts**: every page the agents' browser calls create has a
-  deadline (24h default, `MEIVA_CHROME_PAGE_DEFAULT_TTL_SECONDS`) recorded in
-  `<home>/run/browser-pages.json`, keyed by CDP target id, so a daemon restart (every
-  cluster update, every upstream `chrome-devtools-mcp` death) loses none. The first
-  sweep runs 30 s after the daemon starts and then every 10 minutes; each reconciles
-  the file with Chrome's tabs, adopts pages in a `Meiva #<id>` tab group that have no
-  record (a Chrome restart, a session restore and a version before the ledger all leave
-  some) with a fresh default TTL, and closes the expired ones by target id. A page is
-  closed only when Chrome shows it in a `Meiva #<id>` group; the user's own tabs, other
-  groups and unreadable state are left alone. A tab dragged into a `Meiva #<id>` group
-  is treated as the stack's. Pages in an isolated browser context are not grouped and so
-  have no TTL. Read-only checks on a host, in the `browser-mcp` log: `page ledger adopted
-  N page(s) from agent tab groups` (after an update or Chrome restart), `TTL sweep closed
-  page <target> (<url>) for agent <id>` (the sweep working), `could not read Chrome's tabs
-  and tab groups` (a WARNING: nothing was closed), and `is past its deadline but is in no
-  agent tab group` (a WARNING: a record whose page left its group; the page stays open).
+  record (owner, deadline, 24h default `MEIVA_CHROME_PAGE_DEFAULT_TTL_SECONDS`) in
+  `<home>/run/browser-pages.json`, keyed by CDP target id and written at creation
+  (isolated-context pages too), so a daemon restart (every cluster update, every
+  upstream `chrome-devtools-mcp` death) loses none. The record is the basis for
+  closing; the `Meiva #<id>` tab group only checks that the user has not taken the
+  page (a page that was in its owner's group and no longer is stays open and loses its
+  record). The first sweep runs 30 s after the daemon starts and closes nothing; later
+  sweeps run every 10 minutes and close a page only when two consecutive sweeps found it
+  due, re-check it on a fresh read right before the close, and count the close only when
+  the target is gone. A page in an agent group with **no** record is neither adopted
+  nor closed; the one exceptions are a one-time migration of the pages in agent groups
+  when the ledger file does not exist yet (first run), and the inheritance of a record
+  by the single restored page with the same owner and URL after a Chrome restart. Read-only
+  checks in the `browser-mcp` log: `page ledger migration adopted page ...` (once, first
+  run), `page ledger passed the record of gone page ...` (after a Chrome restart), `N
+  page(s) sit in an agent tab group with no ledger record` (the leak size; they are left
+  alone), `TTL sweep closed page <target> (<origin>) for agent <id>` (the sweep working),
+  `could not read Chrome's tabs and tab groups` (WARNING: nothing was closed), `could not
+  close page ... (failure N)` (WARNING, rate-limited).
 - **First login is the user's job**: the headed window opens on the host's
   desktop; **you** sign into the target sites (e.g. Google / Xiaohongshu) once — the
   agent does not (and cannot) log in for you. The dedicated profile persists the

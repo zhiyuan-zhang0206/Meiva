@@ -1,6 +1,6 @@
 # Browser Tab Groups
 
-The shared Chrome shows at most one open tab group per agent across the browser, titled `Meiva #<id>` (ids are unique, labels are not). It holds every page that agent's browser calls **created**: an explicit `new_page` and the page a page-less first `navigate_page` auto-creates. A page the agent merely selected (a user's tab) is never grouped, nor is a page opened in an isolated browser context (`isolatedContext`): extensions cannot see such tabs. The title carries no TTL and no color; Chrome assigns the color.
+The shared Chrome shows at most one open tab group per agent across the browser, titled `Meiva #<id>` (ids are unique, labels are not). It holds every page that agent's browser calls **created**: an explicit `new_page` and the page a page-less first `navigate_page` auto-creates. A page the agent merely selected (a user's tab) is never grouped, nor is a page opened in an isolated browser context (`isolatedContext`): extensions cannot see such tabs (such a page still carries a TTL record). The title carries no TTL and no color; Chrome assigns the color.
 
 The owning document is [the component doc](../../../../desktop/browser/docs/tab-groups.md); this page is the services-index view of it.
 
@@ -18,9 +18,9 @@ The owning document is [the component doc](../../../../desktop/browser/docs/tab-
 
 Nothing deletes a group, and a closed group is **not** removed: Chrome keeps a group whose last tab closes as a *saved* group on the bookmarks bar, outside the extension API (`chrome.tabGroups.query` sees only open groups, `query({saved: true})` is rejected, and the namespace has no delete). The stack therefore ungroups an agent's last tab **before** closing it (`AgentTabGroups.release_page` -> `meivaUngroupLast`), waking an idled-out service worker when needed so closing a tab >30s after creation deletes the group instead of saving it. Every path that closes an agent's pages does that ungroup first: the agent's own `close_page` through `release_page`, and the release and TTL-sweep closes (by CDP target id) through `AgentTabGroups.close_target`; a tab the user closes by hand still leaves a chip nothing here can remove. See [the owning document](../../../../desktop/browser/docs/tab-groups.md) for the measured details.
 
-## The title also keeps the page TTL across restarts
+## The page TTL ledger and the groups
 
-The group title is Chrome's own, persistent record that a page is the stack's and whose it is. The page TTL ledger (`<home>/run/browser-pages.json`, one record per CDP target id) is reconciled against it on every sweep and release: a page is closed only when Chrome shows it in a `Meiva #<id>` group right now, a grouped page without a record is adopted with a fresh default TTL, and a page in no such group is never touched. The read is `meivaGroupedTargets()` through `AgentTabGroups.tab_state()`, and the close is `AgentTabGroups.close_target` (`/json/close/<id>`, ungrouping the last tab first). Owner: [the component doc](../../../../desktop/browser/docs/tab-groups.md).
+The page TTL ledger (`<home>/run/browser-pages.json`, one record per CDP target id, written when a page is created) is the basis for closing a page; the group title only checks that the user has not taken it. A page that Chrome showed in its owner's `Meiva #<id>` group and that is no longer there is left open and loses its record; a page in an agent group with no record is neither adopted nor closed, except by a Chrome-restart inheritance (unique owner + URL) and a one-time migration on the first run. The read is `meivaGroupedTargets()` through `AgentTabGroups.tab_state()`, and the close is `AgentTabGroups.close_target` (`/json/close/<id>`, ungrouping the last tab first, re-checked just before). Owner: [the component doc](../../../../desktop/browser/docs/tab-groups.md).
 
 ## Failure policy
 

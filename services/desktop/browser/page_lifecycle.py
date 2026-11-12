@@ -11,84 +11,87 @@
 #   hook sends a ``release_agent_page`` wire request and the daemon closes every
 #   page that agent created (wire handler ``handle_release_agent_page``).
 # - ``expired_page_reaper`` / ``reap_expired_pages`` -- the hard deadline and the
-#   only safety net (2026-09-11 ruling): every page this stack CREATED (an
-#   explicit new_page, or the auto-created page on a page-less first navigate)
-#   gets a record with a deadline of ``now + MEIVA_CHROME_PAGE_DEFAULT_TTL_SECONDS``
-#   (24h default), and the sweep closes the page once that deadline passes.
-#   Activity never extends the deadline; ``renew_agent_page`` (the ``renew_page``
-#   tool) moves it to ``now + ttl`` explicitly, at most 24h per call. It bounds a
-#   page an agent keeps USING across days, and it is the only cleanup for the
+#   only safety net (2026-09-11 ruling): every page this stack CREATES (an
+#   explicit new_page, the auto-created page on a page-less first navigate, an
+#   isolated-context page too) gets a record with a deadline of
+#   ``now + MEIVA_CHROME_PAGE_DEFAULT_TTL_SECONDS`` (24h default), and the sweep
+#   closes the page once that deadline passes. Activity never extends the
+#   deadline; ``renew_agent_page`` (the ``renew_page`` tool) moves it to
+#   ``now + ttl`` explicitly, at most 24h per call. It is the only cleanup for the
 #   deaths that never reach the exit hook (SIGKILL / OOM / force-terminate) or a
 #   dev server that died under a live agent.
 #
-# The records outlive the daemon. The daemon restarts often (every cluster update,
-# every upstream ``chrome-devtools-mcp`` death) while Chrome keeps running, and a
-# deadline held only in the daemon's memory was lost each time, leaving the tab
-# with no record at all. So ``PageRegistry`` keeps one ``PageRecord`` per page
-# target in a ledger file (``<home>/run/browser-pages.json``), keyed by the CDP
-# target id -- stable for the life of the Chrome process, unlike
-# chrome-devtools-mcp's page numbers, which restart with it. The pure decisions
-# (reconciliation, which pages are due, which belong to an agent) are in
-# ``page_ledger``; this module reads Chrome, closes targets and writes the file.
+# The records outlive the daemon: the daemon restarts on every cluster update and
+# every upstream death while Chrome keeps running, so ``PageRegistry`` keeps one
+# ``PageRecord`` per CDP target id in a ledger file (``tab_groups/page_store``),
+# stable for the life of the Chrome process unlike chrome-devtools-mcp's page
+# numbers. The pure decisions are in ``tab_groups/page_ledger`` (read its header
+# for the rules); this module reads Chrome, closes targets and writes the file.
 #
-# Every pass (the sweep, and a release) first RECONCILES the ledger with Chrome's
-# tabs: records of vanished targets are dropped, and a page in a ``Meiva #<id>``
-# tab group that has no record -- left by a Chrome restart (new target ids), by a
-# session restore, or by a version before the ledger existed -- is ADOPTED for the
-# agent the title names, with a fresh default TTL. The worst case for an unrecorded
-# page is therefore one extra TTL, not forever. The one safety rule: a page is
-# closed only on positive evidence that it is ours, namely that Chrome shows it in
-# an agent's tab group right now; a page in no such group is never touched, and
-# if Chrome's tabs cannot be read nothing is closed and a warning says so.
+# The record is the one basis for closing. The ``Meiva #<id>`` tab group is the
+# check that the user has not taken the page: a grouped page that left its owner's
+# group is not closed and loses its record. A page in an agent group with no
+# record is never closed (the group worker files tabs by URL on a layout restore,
+# so a user's tab can be in one); only a Chrome-restart inheritance and the
+# one-time migration give such a page a record.
+#
+# Safeguards on every close: the page is re-checked on a fresh read of Chrome right
+# before ``/json/close`` (still there, still in its owner's group when grouped,
+# not the browser's last page); the last-tab ungroup must succeed first; the close
+# counts only when the target is really gone, else the record stays; a sweep
+# closes a page only when two consecutive sweeps found it due, and the first sweep
+# after a daemon start closes nothing (a transient wall-clock step cannot close a
+# page); if Chrome's tabs cannot be read, nothing is closed.
 #
 # Pages are closed by CDP target id (``AgentTabGroups.close_target``), not through
 # chrome-devtools-mcp's ``close_page``: its page ids mean nothing after a daemon
 # restart, its output carries no target ids to translate them, and it refuses to
-# close its last page. Closing the target is also what a user closing the tab
-# does, which the upstream already tolerates.
+# close its last page.
 #
-# Affinity records selection, including tabs the agent did not create. The
-# ledger record also proves creation: automatic cleanup requires it even when a
-# tab has affinity. A user tab the agent merely selected has no record and no
-# renewal or automatic-close path.
-# The registry lives in one ``PageRegistry`` the daemon's composition root
-# (``mcp_daemon.run``) builds for the daemon. Page ids are only meaningful within
-# the upstream process (chrome-devtools-mcp numbers pages per process), and an
-# upstream death ends the daemon, so ``affinity`` and the page-id <-> target map
-# never outlive the page numbering they record; the ledger does.
-
+# Affinity records selection, including tabs the agent did not create. A user tab
+# the agent merely selected has no record and no renewal or automatic-close path.
+# Page ids are only meaningful within the upstream process, so ``affinity`` and the
+# page-id <-> target map never outlive the page numbering they record.
 
 from __future__ import annotations
 
 import asyncio
 import math
 import re
-from collections.abc import Mapping
 from contextlib import suppress
 from datetime import UTC, datetime
-from pathlib import Path
 from typing import Protocol
+from urllib.parse import urlsplit
 
 from mcp import types
 
 from base import telemetry
 from base.clock import Clock
-from base.host.atomic_io import write_text_atomic
 from base.log import logger
-from base.paths import run_dir
 from services.desktop.browser.protocol import Response, WireRequest
 from services.desktop.browser.tab_groups.page_ledger import (
     MAX_GRANT_SECONDS,
     ExpiredPage,
+    LedgerFile,
     PageRecord,
     Reconciled,
     TabState,
     agent_pages,
-    dump_records,
-    parse_records,
+    in_owner_group,
+    may_close,
     reconcile,
     target_of_url,
 )
+from services.desktop.browser.tab_groups.page_store import (
+    FileRecordStore as FileRecordStore,
+)
+from services.desktop.browser.tab_groups.page_store import (
+    RecordStore,
+    page_ledger_path,
+    records_of,
+)
+
+__all__ = ["FileRecordStore", "page_ledger_path"]
 
 # meiva:note
 # Expiry sweep cadence: a page is closed on the first pass after its TTL
@@ -163,91 +166,24 @@ _PAGE_LINE_RE = re.compile(
 
 
 # meiva:note
-# Where the page records live between daemon processes.
-class RecordStore(Protocol):
-    def load(self) -> dict[str, PageRecord]: ...
-
-    def save(self, records: Mapping[str, PageRecord]) -> None: ...
-
-
-# meiva:note
-# The page ledger file of a home (`<home>/run/browser-pages.json`), beside the
-# browser session ledger (`browser-session.json`): runtime state that survives a
-# daemon restart and is read by no other process.
-def page_ledger_path(home: Path) -> Path:
-    return run_dir(home) / "browser-pages.json"
-
-
-# meiva:note
-# The page records as one JSON file, replaced atomically.
-#
-# A file that cannot be read or parsed is not an error: it reads as no records
-# (a WARNING says so), and the next reconciliation adopts the pages from their
-# tab groups. A failed save is a WARNING too -- the in-memory records stay
-# right, and the worst outcome is the same adoption after the next restart.
-class FileRecordStore:
-    def __init__(self, path: Path) -> None:
-        self._path = path
-
-    def load(self) -> dict[str, PageRecord]:
-        try:
-            return parse_records(self._path.read_text(encoding="utf-8"))
-        except FileNotFoundError:
-            return {}
-        except (OSError, ValueError) as e:
-            logger.warning(
-                "[browser-mcp] ignoring unreadable page ledger {} ({}: {}); the pages in agent "
-                "tab groups will be adopted with a fresh TTL",
-                self._path,
-                type(e).__name__,
-                e,
-            )
-            return {}
-
-    def save(self, records: Mapping[str, PageRecord]) -> None:
-        try:
-            self._path.parent.mkdir(parents=True, exist_ok=True)
-            write_text_atomic(self._path, dump_records(records), mode=0o600)
-        except OSError as e:
-            logger.warning(
-                "[browser-mcp] could not write the page ledger {} ({}: {}); deadlines are kept "
-                "in memory and the pages are adopted again after a restart",
-                self._path,
-                type(e).__name__,
-                e,
-            )
-
-
-# meiva:note
 # The page-keyed state of the shared browser-mcp daemon, one per process.
 #
-# Built once by the daemon's composition root and handed to its
-# ``ChromeMcpDaemon``. The daemon serves one upstream connection and exits
-# when it dies, so every page id here belongs to the upstream process that is
-# still serving.
+# Built once by the daemon's composition root and handed to its `ChromeMcpDaemon`.
+# The daemon serves one upstream connection and exits when it dies, so every page
+# id here belongs to the upstream process that is still serving.
 #
-# - ``affinity``: agent id -> current page id. The selected-page state
-#   belongs to the AGENT, not to a TCP connection: an exec subprocess child
-#   re-connecting mid-turn (or the agent process itself after a session
-#   rebuild) must land on the same tab the agent selected, not cold-start
-#   with "No page selected" on every exec. One entry per agent that has used
-#   the browser — bounded by the machine's agent count; a closed/crashed page
-#   drops the slot naturally via the existing re-pin failure path. Requests
-#   without an agent id (legacy wrapper clients) keep the per-connection
-#   fallback in the daemon.
-# - ``records``: CDP target id -> ``PageRecord`` (creating agent, deadline in
-#   wall-clock epoch seconds). Every page THIS STACK created and identified
-#   (an explicit new_page call, or the auto-created page on a page-less first
-#   navigate) gets one from ``register_created_page``, and reconciliation
-#   adopts the pages in agent tab groups that lack one. It is the ONLY
-#   candidate source for closing, so pages this stack never created (the
-#   user's own tabs) are never inspected or closed. The records are persisted
-#   on every change (see ``RecordStore``). Wall clock, not monotonic: a
-#   monotonic deadline cannot survive the process, which is the point of the
-#   ledger; ``page_ledger`` documents how a clock step is contained.
-# - ``page_targets``: page id -> target id, for the pages this process created
-#   or has matched to a target. Page ids are chrome-devtools-mcp's, so this
-#   starts empty with every daemon process.
+# - `affinity`: agent id -> current page id. The selected-page state belongs to the
+#   AGENT, not to a TCP connection: an exec subprocess child re-connecting mid-turn
+#   must land on the same tab the agent selected. Requests without an agent id
+#   (legacy wrapper clients) keep the per-connection fallback in the daemon.
+# - `records`: CDP target id -> `PageRecord`, persisted on every change (see
+#   `RecordStore`); the only candidate source for closing, so pages this stack never
+#   created (the user's own tabs) are never inspected or closed. `migrated`: the
+#   one-time migration of pages already in agent groups has run.
+# - `page_targets`: page id -> target id, for the pages this process created or has
+#   matched to a target; empty at every daemon start.
+# - `due_seen`, `close_failures`: in-memory sweep state (the previous sweep's due
+#   targets; consecutive failed closes per target, to keep the log quiet).
 class PageRegistry:
     def __init__(
         self,
@@ -260,8 +196,16 @@ class PageRegistry:
         self._clock = clock
         self._store = store
         self.affinity: dict[int, int | None] = {}
-        self.records: dict[str, PageRecord] = store.load()
+        loaded = store.load()
+        self.records: dict[str, PageRecord] = records_of(loaded)
+        self.migrated = loaded.migrated if loaded is not None else False
         self.page_targets: dict[int, str] = {}
+        self.due_seen: set[str] = set()
+        self.close_failures: dict[str, int] = {}
+        self._grouped_early: set[str] = set()
+
+    def _save(self) -> None:
+        self._store.save(LedgerFile(self.records, self.migrated))
 
     # meiva:note
     # Wall-clock epoch seconds, the unit of every deadline.
@@ -269,33 +213,43 @@ class PageRegistry:
         return self._clock.now().timestamp()
 
     def get_agent_page(self, agent_id: int) -> int | None:
-        """The agent's current page, or None when it has none."""
         return self.affinity.get(agent_id)
 
     def set_agent_page(self, agent_id: int, page_id: int | None) -> None:
-        """Record the agent's current page."""
         self.affinity[agent_id] = page_id
 
     # meiva:note
-    # Give a freshly created page its record: the owner and ``now + default TTL``.
-    #
-    # Called by the daemon right after a ``new_page`` it forwarded and the tab
-    # grouping identified the page's target. A page whose target was not
-    # identified (no agent, isolated context, grouping could not find it)
-    # carries no record: it has no stable identity and no tab group to prove
-    # it ours, so it has no TTL.
+    # Give a freshly created page its record: the owner and `now + default TTL`.
+    # Called by the daemon right after a `new_page` it forwarded once the page's
+    # target was identified (a page whose target could not be told from a tab
+    # someone else opened meanwhile, or that has no agent, carries no record). It
+    # starts `grouped` only when the background grouping already reported success.
     def register_created_page(
         self, target_id: str | None, agent_id: int | None, page_id: int | None
     ) -> None:
         if target_id is None or agent_id is None:
             return
-        self.records[target_id] = PageRecord(agent_id, self.now() + self.default_ttl_seconds)
+        grouped = target_id in self._grouped_early
+        self._grouped_early.discard(target_id)
+        self.records[target_id] = PageRecord(
+            agent_id, self.now() + self.default_ttl_seconds, grouped=grouped
+        )
         if page_id is not None:
             self.page_targets[page_id] = target_id
-        self._store.save(self.records)
+        self._save()
 
     # meiva:note
-    # The record of a page this process knows the target of.
+    # The background grouping filed the page into its owner's group.
+    def mark_grouped(self, target_id: str) -> None:
+        record = self.records.get(target_id)
+        if record is None:
+            self._grouped_early.add(target_id)
+        elif not record.grouped:
+            self.records[target_id] = PageRecord(
+                record.owner, record.expires_at, grouped=True, url=record.url
+            )
+            self._save()
+
     def record_for_page(self, page_id: int) -> PageRecord | None:
         target_id = self.page_targets.get(page_id)
         return self.records.get(target_id) if target_id is not None else None
@@ -307,17 +261,19 @@ class PageRegistry:
         return None
 
     # meiva:note
-    # Adopt a reconciled record set, writing the file only when it changed.
-    def replace_records(self, records: dict[str, PageRecord]) -> None:
-        if records != self.records:
+    # Adopt a reconciled record set, writing the file only when something changed.
+    def replace_state(self, records: dict[str, PageRecord], *, migrated: bool) -> None:
+        if records != self.records or migrated != self.migrated:
             self.records = records
-            self._store.save(records)
+            self.migrated = migrated
+            self._save()
 
-    # meiva:note
-    # Move one record's deadline (the owner stays).
     def set_deadline(self, target_id: str, expires_at: float) -> None:
-        self.records[target_id] = PageRecord(self.records[target_id].owner, expires_at)
-        self._store.save(self.records)
+        record = self.records[target_id]
+        self.records[target_id] = PageRecord(
+            record.owner, expires_at, grouped=record.grouped, url=record.url
+        )
+        self._save()
 
     # meiva:note
     # Drop the record of a page that is closed (or was never ours).
@@ -325,22 +281,21 @@ class PageRegistry:
         page_id = self.page_of_target(target_id)
         if page_id is not None:
             del self.page_targets[page_id]
+        self.close_failures.pop(target_id, None)
         if self.records.pop(target_id, None) is not None:
-            self._store.save(self.records)
+            self._save()
 
     # meiva:note
-    # Forget the record of a page closed through the upstream's ``close_page``.
+    # Forget the record of a page closed through the upstream's `close_page`.
     def drop_page_ttl(self, page_id: int | None) -> None:
         target_id = self.page_targets.get(page_id) if page_id is not None else None
         if target_id is not None:
             self.forget_target(target_id)
 
     # meiva:note
-    # Clear every agent slot naming ``page_id`` (the page is gone);
-    #
-    # returns one cleared affinity owner for logs (None when no slot named
-    # the page). Every slot is cleared — a slot left naming a closed page
-    # would make the owner's next call re-pin against a dead id first.
+    # Clear every agent slot naming `page_id` (the page is gone); returns one
+    # cleared affinity owner for logs. A slot left naming a closed page would make
+    # the owner's next call re-pin against a dead id first.
     def clear_affinity_for_page(self, page_id: int) -> int | None:
         owner: int | None = None
         for agent_id, current in list(self.affinity.items()):
@@ -356,7 +311,7 @@ class PageRegistry:
 class _TabGroups(Protocol):
     async def tab_state(self) -> TabState: ...
 
-    async def close_target(self, agent_id: int, target_id: str) -> None: ...
+    async def close_target(self, agent_id: int, target_id: str, *, grouped: bool) -> bool: ...
 
 
 class _PageDaemon(Protocol):
@@ -399,10 +354,8 @@ async def forward_legacy_call(
 
 # meiva:note
 # Read Chrome's tabs, reconcile the records with them and persist the result.
-#
 # Callers hold the daemon's serial lock. None when Chrome's tabs cannot be read:
-# the caller then closes nothing, because without them no page can be proven
-# ours. A WARNING names the failure.
+# the caller then closes nothing (a WARNING names the failure).
 async def _reconciled(daemon: _PageDaemon) -> tuple[Reconciled, TabState] | None:
     try:
         tabs = await daemon.tab_groups.tab_state()
@@ -419,52 +372,90 @@ async def _reconciled(daemon: _PageDaemon) -> tuple[Reconciled, TabState] | None
         tabs,
         now=daemon.pages.now(),
         default_ttl_seconds=daemon.pages.default_ttl_seconds,
+        migrate=not daemon.pages.migrated,
     )
-    daemon.pages.replace_records(result.records)
+    daemon.pages.replace_state(result.records, migrated=daemon.pages.migrated or result.migrated)
     _log_reconciled(result, tabs, daemon.pages.default_ttl_seconds)
     return result, tabs
 
 
+# meiva:note
+# An origin without path or query, for logs: enough to recognise a page, nothing
+# a log should carry.
+def _origin(url: str) -> str:
+    parts = urlsplit(url)
+    return f"{parts.scheme}://{parts.hostname or ''}"
+
+
 def _log_reconciled(result: Reconciled, tabs: TabState, default_ttl_seconds: float) -> None:
-    if result.adopted:
-        by_agent: dict[int, int] = {}
-        for _, agent_id in result.adopted:
-            by_agent[agent_id] = by_agent.get(agent_id, 0) + 1
-        per_agent = ", ".join(f"agent {a}: {n}" for a, n in sorted(by_agent.items()))
+    for target_id, agent_id in result.adopted:
         logger.info(
-            f"[browser-mcp] page ledger adopted {len(result.adopted)} page(s) from agent tab "
-            f"groups with a {default_ttl_seconds:g}s TTL ({per_agent})"
+            f"[browser-mcp] page ledger migration adopted page {target_id} of agent {agent_id} "
+            f"({_origin(tabs.pages[target_id])}) with a {default_ttl_seconds:g}s TTL"
+        )
+    for old_id, new_id, agent_id in result.inherited:
+        logger.info(
+            f"[browser-mcp] page ledger passed the record of gone page {old_id} to restored page "
+            f"{new_id} of agent {agent_id} ({_origin(tabs.pages[new_id])})"
+        )
+    for target_id in result.taken:
+        logger.info(
+            f"[browser-mcp] page {target_id} left its agent's tab group (taken by the user); "
+            "dropping its record, the page stays open"
         )
     if result.vanished:
         logger.info(
             f"[browser-mcp] page ledger dropped {len(result.vanished)} record(s) of pages "
             "Chrome no longer has"
         )
-    for target_id in result.lapsed:
-        logger.warning(
-            f"[browser-mcp] page {target_id} ({tabs.pages.get(target_id, '')}) is past its "
-            "deadline but is in no agent tab group; leaving it open and dropping its record"
+    if result.unrecorded:
+        logger.info(
+            f"[browser-mcp] {result.unrecorded} page(s) sit in an agent tab group with no ledger "
+            "record; they are neither adopted nor closed"
         )
 
 
 # meiva:note
-# Close one page by target id and forget it; False (with a WARNING) when Chrome refused.
-#
-# A failed close keeps the record, so the next pass tries again. Callers hold
-# the serial lock.
+# Close one recorded page; False when it stays open. The page is checked once more
+# on a fresh read of Chrome just before the close (`may_close`: still there, still
+# in its owner's group when it was grouped, not the browser's last page); a grouped
+# page that was taken since the reconciliation loses its record instead. A close
+# counts only when the target is gone, else the record stays and the next pass tries
+# again; repeated failures of one target are logged on the first and then every sixth
+# time, without a traceback. Callers hold the serial lock.
 async def _close(daemon: _PageDaemon, page: ExpiredPage) -> bool:
+    record = daemon.pages.records.get(page.target_id)
+    if record is None:
+        return False
     try:
-        await daemon.tab_groups.close_target(page.owner, page.target_id)
-    except Exception as e:
-        logger.opt(exception=not isinstance(e, TimeoutError)).warning(
-            "[browser-mcp] could not close page {} ({}) of agent {} ({}: {}); it stays recorded "
-            "and is retried on the next pass",
-            page.target_id,
-            page.url,
-            page.owner,
-            type(e).__name__,
-            e,
+        fresh = await daemon.tab_groups.tab_state()
+        if (
+            page.target_id in fresh.pages
+            and record.grouped
+            and not in_owner_group(record, page.target_id, fresh)
+        ):
+            logger.info(
+                f"[browser-mcp] page {page.target_id} left its agent's tab group (taken by the "
+                "user); dropping its record, the page stays open"
+            )
+            daemon.pages.forget_target(page.target_id)
+            return False
+        if not may_close(record, page.target_id, fresh):
+            return False
+        gone = await daemon.tab_groups.close_target(
+            page.owner, page.target_id, grouped=record.grouped
         )
+        failure = None if gone else "the target is still open after the close"
+    except Exception as e:
+        failure = f"{type(e).__name__}: {e}"
+    if failure is not None:
+        count = daemon.pages.close_failures.get(page.target_id, 0) + 1
+        daemon.pages.close_failures[page.target_id] = count
+        if count == 1 or count % 6 == 0:
+            logger.warning(
+                f"[browser-mcp] could not close page {page.target_id} ({_origin(page.url)}) of "
+                f"agent {page.owner} ({failure}); it stays recorded and is retried (failure {count})"
+            )
         return False
     page_id = daemon.pages.page_of_target(page.target_id)
     if page_id is not None:
@@ -474,17 +465,13 @@ async def _close(daemon: _PageDaemon, page: ExpiredPage) -> bool:
 
 
 # meiva:note
-# Drop affinity, closing every page this agent created.
-#
-# Called when the agent terminates (wire method ``release_agent_page``,
-# sent by the termination cleanup hook). Idempotent: an agent with no
-# created pages or affinity is a no-op. A borrowed page is deselected
-# without closing; every page owned by ``agent_id`` that Chrome shows in its
-# tab group is closed so the agent's group disappears with its last tab --
-# including pages created before a daemon restart. The returned id is the
-# closed current page (or the last closed page this process knew the id of),
-# or None. When Chrome's tabs cannot be read nothing is closed and the
-# affinity stays; the expiry sweep owns what is left.
+# Drop affinity, closing every page this agent created. Called when the agent
+# terminates (wire method `release_agent_page`, sent by the termination cleanup
+# hook). Idempotent. A borrowed page is deselected without closing; every recorded
+# page owned by `agent_id` goes through `_close`, including pages created before a
+# daemon restart. The returned id is the closed current page (or the last closed page
+# this process knew the id of), or None. When Chrome's tabs cannot be read nothing is
+# closed and the affinity stays; the expiry sweep owns what is left.
 async def release_agent_page(daemon: _PageDaemon, agent_id: int) -> int | None:
     async with daemon._lock:
         current_id = daemon.pages.get_agent_page(agent_id)
@@ -648,27 +635,25 @@ async def renew_agent_page(
 
 
 # meiva:note
-# Close stack-created pages whose TTL deadline has passed.
-#
-# The pass reconciles the ledger with Chrome first (``page_ledger.reconcile``:
-# adoption, dropping vanished targets, the due list), then closes each due
-# page by target id. Only pages with a record, shown by Chrome in an agent tab
-# group right now, are candidates, so the user's tabs are never touched; a due
-# record whose page is in no agent group is dropped and the page left open
-# (WARNING). The whole pass runs under the serial lock, so it cannot
-# interleave with a renewal or a release: a renewed page is never closed off a
-# stale read. A close that Chrome refuses keeps its record and is retried on
-# the next pass. Expiry is surfaced to the agent only by the page being
-# gone: the next page-scoped call hits the daemon's existing no-page path —
-# no invented "page expired" error.
-# Returns the number of pages closed.
+# Close recorded pages whose TTL deadline has passed. The pass reconciles the ledger
+# with Chrome first (`page_ledger.reconcile`: the one-time migration, restart
+# inheritance, pages the user took, the due list), then closes each page that this
+# sweep AND the previous one found due, through `_close` (fresh re-check, by target
+# id). A sweep that is the first since the daemon started closes nothing: a transient
+# wall-clock step forward cannot close a page. The whole pass runs under the serial
+# lock, so it cannot interleave with a renewal or a release. Expiry is surfaced to
+# the agent only by the page being gone: the next page-scoped call hits the daemon's
+# existing no-page path. Returns the number of pages closed.
 async def reap_expired_pages(daemon: _PageDaemon) -> int:
     async with daemon._lock:
         refreshed = await _reconciled(daemon)
         if refreshed is None:
             return 0
+        due = refreshed[0].due
+        confirmed = [page for page in due if page.target_id in daemon.pages.due_seen]
+        daemon.pages.due_seen = {page.target_id for page in due}
         closed = 0
-        for page in refreshed[0].to_close:
+        for page in confirmed:
             page_id = daemon.pages.page_of_target(page.target_id)
             if not await _close(daemon, page):
                 continue
@@ -686,7 +671,7 @@ async def reap_expired_pages(daemon: _PageDaemon) -> int:
             )
             closed += 1
             logger.info(
-                f"[browser-mcp] TTL sweep closed page {page.target_id} ({page.url}) "
+                f"[browser-mcp] TTL sweep closed page {page.target_id} ({_origin(page.url)}) "
                 f"for agent {page.owner}"
             )
         return closed

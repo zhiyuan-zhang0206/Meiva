@@ -83,31 +83,55 @@ and a failure to ungroup leaves a chip rather than blocking the close.
 
 A page's deadline and owner are kept in `<home>/run/browser-pages.json`, one
 record per CDP target id (stable while the Chrome process lives; the daemon's page
-ids are not), and every sweep and release first reconciles that file with Chrome's
-tabs. The reconciliation reads the tab group titles fresh (`AgentTabGroups.tab_state()`:
-`/json/list` for the page targets, `meivaGroupedTargets()` in the worker for each
-tab's group title, parsed to an agent id by `agent_id_of_title`, which accepts
-only an exact `Meiva #<id>` round trip). A page is **closed only on positive
-evidence that it is ours: Chrome shows it in a `Meiva #<id>` group right now**.
-A record alone never closes a page, and a page in no such group (the user's own
-tab, a group titled `Work`, a malformed title) is never touched; a failure to read
-the tabs closes nothing and logs a WARNING. A tab the user drags into a
-`Meiva #<id>` group is, by that rule, the stack's.
+ids are not): owner, wall-clock deadline, whether Chrome has shown the page in its
+owner's group (`grouped`) and the URL last seen. The record is written when the
+stack **creates** the page, an isolated-context page included, and it is the one
+basis for closing it. The tab group only answers "did the user take it?": a record
+is `grouped` once Chrome shows the page in `Meiva #<owner>` (the background grouping
+reports it, or the next reconciliation sees it), and a `grouped` page that is no
+longer in that group is the user's now -- its record is dropped and it is never
+closed. A record that never became `grouped` (an isolated context, a grouping that
+failed) is closed at its deadline. Every sweep and release first reconciles the file
+with Chrome's tabs (`AgentTabGroups.tab_state()`: `/json/list` plus
+`meivaGroupedTargets()`, group titles parsed by `agent_id_of_title`, which accepts
+only an exact `Meiva #<id>` round trip).
 
-A tab in an agent group with no record -- left by a Chrome restart (restored tabs
-get new target ids), by a session restore, or by a version before the ledger --
-is **adopted** for the agent the title names with a fresh default TTL, so the
-worst case is one extra TTL, never forever. Pages the stack creates
-without a group (an isolated browser context, or grouping that failed) carry no
-record and so have no TTL. `renew_page` after a restart matches the agent's
-selected page to its own recorded pages by URL and refuses an ambiguous match.
+**A page in an agent group with no record is not adopted and not closed.** The
+worker's `meivaApplyLayout` files tabs by URL when it restores a layout, so a user's
+tab with the same URL as an agent page can end up in an agent group; closing it on
+that evidence would close the user's tab. The number of such pages is logged on every
+reconciliation. Two situations with evidence are handled:
 
-`AgentTabGroups.close_target` closes by target id through `/json/close/<id>`
-rather than the upstream's `close_page`: chrome-devtools-mcp's page ids restart
-with its process and its output carries no target ids to translate them, and it
-refuses to close its last page, which the ledger instead guards itself (one page
-of the browser is always left open). Closing the target is what a user closing the
-tab does, which the upstream already tolerates.
+1. **Chrome restart inheritance.** In one reconciliation, a record whose target is
+   gone passes (original deadline, owner) to the one new page in the same owner's
+   group with the same URL, when exactly one record and one page match and no other
+   page in Chrome has that URL. With several candidates, or a same-URL tab outside the
+   group, nothing is passed: a leaked page is better than a closed user tab.
+2. **One-time migration.** When the ledger file does not exist (the first run of this
+   mechanism), the pages in agent groups at that moment are adopted once with a fresh
+   default TTL, each logged with owner and origin; the file records that it ran and it
+   never runs again. A file that exists but cannot be read migrates nothing.
+
+Before every close the page is re-checked on a fresh read of Chrome: still there,
+still in its owner's group if it was grouped, and not the browser's last page. The
+last-tab ungroup (`meivaUngroupLast`) must succeed first (a failure aborts the close),
+and a close counts only when the target is really gone; otherwise the record stays,
+with the original deadline, and the next pass tries again (repeated failures of one
+target are logged on the first and then every sixth time). A sweep closes a page only
+when two consecutive sweeps found it due, and the first sweep after a daemon start
+closes nothing, so a transient wall-clock step cannot close a page.
+
+`AgentTabGroups.close_target` closes by target id through `/json/close/<id>` rather
+than the upstream's `close_page`: chrome-devtools-mcp's page ids restart with its
+process, its output carries no target ids, and it refuses to close its last page.
+`renew_page` after a restart matches the agent's selected page to its own recorded
+pages by URL and refuses an ambiguous match.
+
+**Interaction with the layout restore.** `meivaApplyLayout` matches tabs by URL
+and is unchanged. Its one hazard for this mechanism is the same-URL user tab above;
+the rules above make it a leaked page at worst, never a closed user tab, except one
+residual case: the one-time migration adopts whatever sat in an agent group at that
+moment, including a user's tab a past layout restore filed there by mistake.
 
 ## What this cannot fix
 
