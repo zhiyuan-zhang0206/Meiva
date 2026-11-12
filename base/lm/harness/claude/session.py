@@ -31,6 +31,7 @@ from base.lm.harness.claude.delivery import (
     user_message,
 )
 from base.lm.harness.claude.inbound import (
+    AwaitedAnswer,
     BackgroundTasks,
     MessageKind,
     ScheduledWork,
@@ -38,7 +39,6 @@ from base.lm.harness.claude.inbound import (
     counts_as_step,
     is_tool_result,
     message_kind,
-    notification_plan,
     started_identity,
 )
 from base.lm.harness.claude.mapping import (
@@ -63,6 +63,7 @@ from base.lm.harness.events import (
     ToolUse,
     TurnOrigin,
     TurnStarted,
+    UnsolicitedOutput,
 )
 from base.lm.harness.process import (
     ChildProbe,
@@ -75,7 +76,13 @@ from base.lm.harness.process import (
     wait_gone,
     watch_tree,
 )
-from base.lm.harness.session import BackgroundWork, SessionClosedError
+from base.lm.harness.session import (
+    BackgroundItem,
+    BackgroundKind,
+    BackgroundWork,
+    SessionClosedError,
+    describe,
+)
 
 # meiva:note
 # One session is one turn engine with three boundaries. Inbound is `deliver()`: every input is
@@ -88,6 +95,13 @@ from base.lm.harness.session import BackgroundWork, SessionClosedError
 # `settled=None` when the CLI pid is unobservable — never a silent pass.
 # meiva:link base/lm/harness/claude/docs/claude.md
 CANCEL_POLL_SECONDS = 0.02
+# meiva:note
+# How long a session that saw an idle task notification keeps claiming work while it waits for the
+# CLI's own turn over it. Two minutes is several times the recorded wait (one model call, about 15 s
+# including the CLI's own nudge) and short enough that a notification the CLI never answers costs one
+# extra idle TTL at most.
+# meiva:link base/lm/harness/claude/docs/background-tasks.md
+ANSWER_WAIT_SECONDS = 120.0
 _EVENT_STREAM_END = EVENT_STREAM_END
 
 
@@ -172,6 +186,7 @@ class ClaudeSession(BaseHarnessSession[BridgeConfig]):
         self._uuid_keys: dict[str, str] = {}
         self._echo_seen = False
         self._pending_cause: HarnessCause | None = None
+        self._answering: tuple[AwaitedAnswer, ...] = ()
         self._subagent_labels: dict[str, str] = {}
 
     async def start(self, *, resume: str | None = None) -> None:
@@ -490,6 +505,10 @@ class ClaudeSession(BaseHarnessSession[BridgeConfig]):
     def _open_harness_turn(self, origin: str | None) -> OpenTurn:
         turn_id = self._mint_turn_id()
         cause = self._pending_cause or harness_cause(origin)
+        if origin in (None, "task-notification") and self._answering:
+            self._answering = self._answering[1:]
+            self._persist_pending()
+            cause = HarnessCause.BACKGROUND_TASK
         self._pending_cause = None
         self._baseline = tool_snapshot(self._probe, self._cli_pid)
         if cause is HarnessCause.UNKNOWN:
@@ -516,12 +535,63 @@ class ClaudeSession(BaseHarnessSession[BridgeConfig]):
     def _handle_task_notification(self, message: object) -> None:
         self._background = self._background.reported(_task_id(message))
         self._persist_pending()
-        plan = notification_plan(map_message(message, turn_id=None), claimed=self._open is not None)
-        for event in plan.stream:
+        # meiva:note
+        # An idle notification is recorded in the event stream, never delivered while the CLI can still
+        # answer it: the CLI reads it itself in a turn of its own (recorded for a finished, a failed
+        # and a monitored task). The report is kept until that turn opens, and handed to the sink
+        # only if none does within `ANSWER_WAIT_SECONDS`.
+        # meiva:link base/lm/harness/claude/docs/background-tasks.md
+        events = map_message(message, turn_id=None)
+        for event in events:
             self._emit(event)
-        if plan.report is not None:
-            self._pending_cause = HarnessCause.BACKGROUND_TASK
-            self._unsolicited(plan.report)
+        report = next((event for event in events if isinstance(event, UnsolicitedOutput)), None)
+        if (
+            self._open is None
+            and report is not None
+            and getattr(message, "status", None) != "stopped"
+        ):
+            self._expect_answer(_task_id(message), report)
+
+    # meiva:note
+    # Between a task notification that reaches an idle session and the first frame of the CLI's own
+    # turn over it there is a model call (about 15 s with the nudge the CLI may add, recorded in
+    # fixtures/background_bash.json). The task is no longer open and no observed turn exists yet, so
+    # without this the session would report no work and could be recycled by the idle TTL (a command
+    # that ran longer than it) before the CLI answered, losing the report. Each idle notification is
+    # kept with its report; the next turn the CLI opens with no origin or the `task-notification`
+    # one answers the oldest (a turn of ours or a timer's does not), and the observed-turn item takes
+    # over. After `ANSWER_WAIT_SECONDS` with no such turn the report goes to the sink, so a CLI that
+    # does not answer cannot make the agent lose it, and nothing keeps the session forever. The
+    # item is persisted, without an end time, with the other pending work until it is answered or
+    # delivered: a process lost at any point before that, inside the window or after it, tells the agent
+    # on the next session (what the report said, once, because the record is cleared when read) and the
+    # new session sets no timer, so the report is never delivered twice that way. A notification for a task
+    # that was stopped while the session was idle is not waited for at all: the CLI sent no turn for it and
+    # carried it into the next input's context (`stop_idle_*` in fixtures/background_ends.json), so
+    # delivering it would only repeat it and wake the agent for a task that was stopped on purpose.
+    # meiva:link base/lm/harness/claude/docs/background-tasks.md
+    def _expect_answer(self, task_id: str, report: UnsolicitedOutput) -> None:
+        deadline = self._clock.now().timestamp() + ANSWER_WAIT_SECONDS
+        summary = report.text.splitlines()[1:2] or [f"task {task_id}"]
+        item = BackgroundItem(
+            BackgroundKind.TURN, describe(f"the CLI did not answer yet: {summary[0]}")
+        )
+        awaited = AwaitedAnswer(report, item, deadline)
+        self._answering = (*self._answering, awaited)
+        self._persist_pending()
+        _ = self._spawn(self._deliver_unanswered(awaited))
+
+    async def _deliver_unanswered(self, awaited: AwaitedAnswer) -> None:
+        await self._clock.asleep(ANSWER_WAIT_SECONDS)
+        if self._closed:
+            return
+        if not any(entry is awaited for entry in self._answering):
+            return
+        self._answering = tuple(entry for entry in self._answering if entry is not awaited)
+        self._persist_pending()
+        sink = self._unsolicited_sink
+        if sink is not None:
+            sink(awaited.report)
 
     def _track_task_started(self, message: object) -> None:
         claimed = self._claimed_by_background | frozenset(tool_snapshot(self._probe, self._cli_pid))
@@ -599,13 +669,20 @@ class ClaudeSession(BaseHarnessSession[BridgeConfig]):
             (
                 *self._background.items,
                 *self._scheduled.pending_at(now),
+                *(a.item for a in self._answering if now < a.deadline),
                 *self._observed_turn_items(),
             )
         )
 
     def _persist_pending(self) -> None:
         now = self._clock.now().timestamp()
-        self._persist_background((*self._background.items, *self._scheduled.pending_at(now)))
+        self._persist_background(
+            (
+                *self._background.items,
+                *self._scheduled.pending_at(now),
+                *(a.item for a in self._answering),
+            )
+        )
 
     # meiva:note
     # A result ends the open turn, whoever began it: a turn of ours settles its ticket, a turn the CLI

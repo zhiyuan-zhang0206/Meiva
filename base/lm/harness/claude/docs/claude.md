@@ -70,7 +70,8 @@ and the CLI reports its end on its own:
   tool left to cross, about a second after that turn's result, as a turn of its own (the echo arrives
   with no turn open and starts one: `TurnStarted(HARNESS, QUEUED_INPUT_REVIVED, keys)`). The same
   happens to an input queued when `interrupt()` ran. Observed on CLI 2.1.301 (the SDK's pinned binary;
-  the machine's `claude --version` can be older).
+  the machine's `claude --version` can be older). The background-task answer below was recorded
+  later, on CLI 2.1.322 (`tests/fixtures/background_bash.json`).
 - **Turns are observed, not submitted.** A turn opens at the first echo of our uuid, at an echo that
   names an origin (`task-notification`, a timer word), or at the first content with no turn open; a
   `ResultMessage` ends it. Echoes that are not ours (`[Request interrupted by user]`) are ignored.

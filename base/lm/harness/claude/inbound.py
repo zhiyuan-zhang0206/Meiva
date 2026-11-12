@@ -141,27 +141,17 @@ class BackgroundTasks:
 
 
 # meiva:note
-# What one task notification delivers. Two different things arrive under one message: the
-# report the model should read, and — whenever the CLI answered it itself — a turn of the
-# CLI's own that streams right behind it. While a turn of ours is running, the CLI put the
-# report in that turn's own context, so a second delivery would be a duplicate turn and the
-# report stays in the stream; with no turn running nobody has read it, so the sink takes it
-# and dispatch is held until the CLI's own answer reports. A task notification maps to
-# exactly one report, which is why splitting the two does not reorder the stream (#5663).
+# An idle task notification whose answering turn has not opened yet: the report as it was recorded, the
+# pending item it counts as meanwhile and the moment the wait lapses (see `ClaudeSession._expect_answer`).
+# The item itself has no end time: the record keeps it until it is answered or delivered, so a process
+# lost while it is still unanswered tells the agent once on the next session, including one lost after
+# the wait lapsed but before the timer had delivered the report (a closing session never delivers).
 # meiva:link base/lm/harness/claude/docs/background-tasks.md
 @dataclass(frozen=True, slots=True)
-class NotificationPlan:
-    stream: tuple[BridgeEvent, ...]
-    report: UnsolicitedOutput | None
-
-
-def notification_plan(events: Sequence[BridgeEvent], *, claimed: bool) -> NotificationPlan:
-    report = next((event for event in events if isinstance(event, UnsolicitedOutput)), None)
-    if claimed or report is None:
-        return NotificationPlan(stream=tuple(events), report=None)
-    return NotificationPlan(
-        stream=tuple(event for event in events if event is not report), report=report
-    )
+class AwaitedAnswer:
+    report: UnsolicitedOutput
+    item: BackgroundItem
+    deadline: float
 
 
 # meiva:note

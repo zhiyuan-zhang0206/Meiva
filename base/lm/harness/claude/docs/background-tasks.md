@@ -7,20 +7,50 @@ mean different things.
 
 - `TaskNotificationMessage` is the report itself. It maps to
   `UnsolicitedOutput(source="task-notification", text=...)` — the task id, its
-  status, the provider's summary and the output file's path — and the session
-  routes it by whether a turn is running. While one is, the running turn already
-  received the notification in its own context, so the event is only recorded.
-  While none is, nobody has read it: the session holds dispatch (below) and hands
-  it to the sink, which the host writes as a `system:harness` inbound so the agent
-  takes a turn over it
-  ([attribution](../../docs/attribution.md)).
-- The CLI then answers the notification itself, in a turn this session did not start, and closes
-  it with a `ResultMessage` whose `origin.kind` is `task-notification`. That turn is observed like
-  any other ([delivery](../../docs/delivery.md)): `TurnStarted(origin=HARNESS,
-  cause=BACKGROUND_TASK)` when the notification preceded it, its text and tools attributed to it,
-  and one `TurnCompleted`. It is not read as our turn's boundary and not recorded as unsolicited
-  output. The report itself still goes to the sink while no turn runs, as above, because the
-  graph does not yet surface observed turns; that delivery goes when it does.
+  status, the provider's summary and the output file's path — and the session always records it in
+  the event stream. What else happens depends on whether a turn is running:
+  - While one is, the running turn already received the notification in its own context, so
+    nothing more happens (recorded: a `TaskStop` inside the model's own turn).
+  - While none is, the CLI is expected to read it and answer in a turn of its own (below), so the
+    session keeps the report and waits for that turn instead of delivering it.
+- **The CLI's own turn.** For a finished command, a failed command (non-zero exit) and a Monitor that
+  ended by itself, all idle, the CLI answered the notification: `task_updated`, `task_notification`,
+  `background_tasks_changed`, a fresh `init`, the answer's content, and a `ResultMessage` with
+  `origin = {kind: task-notification, producer: session-task, runId}`, with no echoed user message
+  (`tests/fixtures/background_bash.json`, `background_ends.json`; `subagent_background.json` shows it for
+  an async sub-agent). That turn is observed like any other ([delivery](../../docs/delivery.md)):
+  `TurnStarted(origin=HARNESS, cause=BACKGROUND_TASK)`, its text and tools attributed to it, one
+  `TurnCompleted`. It is not read as our turn's boundary and not recorded as unsolicited output.
+- **The wait.** The gap between the notification and the first frame of that turn is a model call
+  (about 15 s on the recordings, longer when the CLI adds its own nudge). The task is already reported
+  and no observed turn exists, so for that gap the session counts one `turn` item per notification
+  ("the CLI did not answer yet: ...") in `background_work()`, and the idle TTL cannot recycle a session
+  whose command ran longer than the TTL before the CLI answers. A turn ends the wait of the oldest item
+  when the CLI opens it with no origin or with the `task-notification` origin; a turn of ours or a timer's
+  does not. After `ANSWER_WAIT_SECONDS` (120 s, several times the recorded wait) with no such turn, the
+  kept report is handed to the sink (written by the host as a `system:harness` inbound) and the item
+  is gone, so a notification the CLI does not answer is never lost and never keeps the session alive.
+- **A task stopped while idle is neither waited for nor delivered.** Stopped through the SDK's
+  `stop_task` with the session idle, the CLI sent `task_updated(killed)` and `task_notification(stopped)`
+  and then nothing for 32 s; the next input's turn knew the task had been stopped, so the CLI carries the
+  notification into the next turn's context without a turn of its own (`background_ends.json`,
+  `stop_idle_*`). The session only records the report: delivering it would repeat what the CLI says
+  itself and wake the agent for a task stopped on purpose.
+- **Persistence.** The wait item is written to the session record, without an end time, with the other
+  pending work, and stays there until the CLI answers or the fallback delivers the report. A process
+  lost at any point before that, inside the wait or after it lapsed, leaves it: the next session tells
+  the agent once what was pending (the summary line of the report) and clears the record, and it sets no
+  timer, so the report is not also delivered to the sink. Once answered or delivered the item is removed.
+- **Known limits.** A turn the CLI opens by itself usually carries no origin when it opens (the
+  origin is only on its `Result`), so the pairing cannot tell the turn that answers a notification
+  from another CLI-started turn: a Monitor's per-line event turn, or a sub-agent text turn without an
+  echo, also ends the oldest wait in first-in-first-out order. The consequence is that this item no
+  longer takes the fallback, and the real answer, when it comes, ends nothing twice. The agent can read
+  a report twice when the answering turn only starts after the wait lapsed, or when the CLI runs an input
+  of ours inside the wait and carries the notification into it.
+- **Not verified.** The origin a real timer turn carries (`timer_wake` in `background_wake.json` is
+  constructed); the status and the turns that follow a Monitor's timeout notice; whether the CLI merges
+  an input of ours that races a notification's turn into one turn or runs two.
 - Nothing is held for the CLI's own turn: an input delivered meanwhile is written to the CLI, which
   runs it behind its own turn, and the events say which turn it entered.
 

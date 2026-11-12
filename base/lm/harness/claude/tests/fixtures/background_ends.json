@@ -1,0 +1,109 @@
+{
+ "source": "RECORDED from Claude Code CLI 2.1.322 via claude-agent-sdk 0.2.168 (claude-haiku-4-5), 2026-11-12; one run per scenario, throwaway cwd, existing login only. Not trimmed: every frame the CLI sent from the start to the end of the idle wait and of the follow-up turn is here in order, except thinking_tokens and rate-limit frames, thinking text and signatures, usage, and the shortening of ids and paths. failed_*: a background Bash `sleep 12; echo FAILMSG >&2; exit 3` ended while idle (the launch turn ended first); task_updated(failed) and task_notification(failed) were followed by an init and a CLI turn that answered it, ending in a Result with origin task-notification (runId = the task's run_id); the follow-up input 29 s later got a turn whose model knew the exit code, and no further notification. monitor_*: a Monitor (`echo tick-1; sleep 15`) woke the CLI once for its line (monitor_event: a turn with origin task-notification and no Task* frame), then ended by itself while idle: task_updated(completed), task_notification('stream ended'), then a CLI turn that answered it (origin task-notification with runId); the follow-up 29 s later got no further notification. stop_turn: the model stopped a background task itself with TaskStop inside its turn, so task_updated(killed) and task_notification(stopped) arrived with the turn open and no later turn followed in 34 s of idle; the follow-up turn answered from its own context. stop_idle_*: the same kind of task stopped through the SDK's stop_task while the session was idle (as close() does): task_updated(killed), task_notification(stopped), tasks_changed, then 32 s with no frame and no turn; the follow-up input's turn knew the task was stopped (the notification was carried into its context) and showed no notification frame of its own.",
+ "frames": {
+  "failed_launch": [
+   {"cls": "UserMessage", "uuid": "$first", "content": "Run this as a background Bash command (run_in_background=true): sleep 12; echo FAILMSG >&2; exit 3. Then reply with only the word STARTED."},
+   {"cls": "AssistantMessage", "blocks": [{"thinking": ""}]},
+   {"cls": "AssistantMessage", "blocks": [{"tool": {"id": "toolu_F", "name": "Bash", "input": {"command": "sleep 12; echo FAILMSG >&2; exit 3", "run_in_background": true}}}]},
+   {"cls": "SystemMessage", "subtype": "background_tasks_changed", "data": {"tasks": [{"task_id": "task-f", "task_type": "local_bash", "description": "sleep 12; echo FAILMSG >&2; exit 3"}]}},
+   {"cls": "TaskStartedMessage", "task_id": "task-f", "tool_use_id": "toolu_F", "description": "sleep 12; echo FAILMSG >&2; exit 3", "task_type": "local_bash"},
+   {"cls": "UserMessage", "content": [{"tool_result": {"tool_use_id": "toolu_F", "content": "Command running in background with ID: task-f. Output is being written to: /tasks/task-f.output"}}]},
+   {"cls": "AssistantMessage", "blocks": [{"thinking": ""}]},
+   {"cls": "AssistantMessage", "blocks": [{"text": "STARTED"}]},
+   {"cls": "ResultMessage", "result": "STARTED", "num_turns": 2}
+  ],
+  "failed_report": [
+   {"cls": "TaskUpdatedMessage", "task_id": "task-f", "patch": {"status": "failed"}},
+   {"cls": "TaskNotificationMessage", "task_id": "task-f", "status": "failed", "summary": "Background command \"sleep 12; echo FAILMSG >&2; exit 3\" failed with exit code 3", "output_file": "/tasks/task-f.output"},
+   {"cls": "SystemMessage", "subtype": "background_tasks_changed", "data": {"tasks": []}}
+  ],
+  "failed_turn": [
+   {"cls": "SystemMessage", "subtype": "init", "data": {"session_id": "session-1", "model": "claude-fake"}},
+   {"cls": "AssistantMessage", "blocks": [{"thinking": ""}]},
+   {"cls": "AssistantMessage", "blocks": [{"text": "Background command completed with exit code 3 as expected."}]},
+   {"cls": "ResultMessage", "result": "Background command completed with exit code 3 as expected.", "num_turns": 1, "origin": {"kind": "task-notification", "producer": "session-task", "runId": "run-f"}}
+  ],
+  "failed_followup": [
+   {"cls": "UserMessage", "uuid": "$next", "content": "Without running any tool, answer in one short sentence: did any background task you started finish, and with what exit code?"},
+   {"cls": "SystemMessage", "subtype": "init", "data": {"session_id": "session-1", "model": "claude-fake"}},
+   {"cls": "AssistantMessage", "blocks": [{"thinking": ""}]},
+   {"cls": "AssistantMessage", "blocks": [{"text": "Yes, the background task (task-f) finished with exit code 3."}]},
+   {"cls": "ResultMessage", "result": "Yes, the background task (task-f) finished with exit code 3.", "num_turns": 1}
+  ],
+  "monitor_launch": [
+   {"cls": "UserMessage", "uuid": "$first", "content": "Use the Monitor tool to monitor the shell command: echo tick-1; sleep 15. After arming it, reply with only the word ARMED."},
+   {"cls": "AssistantMessage", "blocks": [{"thinking": ""}]},
+   {"cls": "AssistantMessage", "blocks": [{"tool": {"id": "toolu_M", "name": "Monitor", "input": {"command": "echo tick-1; sleep 15", "description": "monitoring shell command output"}}}]},
+   {"cls": "SystemMessage", "subtype": "background_tasks_changed", "data": {"tasks": [{"task_id": "task-m", "task_type": "local_bash", "description": "monitoring shell command output"}]}},
+   {"cls": "TaskStartedMessage", "task_id": "task-m", "tool_use_id": "toolu_M", "description": "monitoring shell command output", "task_type": "local_bash"},
+   {"cls": "UserMessage", "content": [{"tool_result": {"tool_use_id": "toolu_M", "content": "Monitor started (task task-m, expires in 30s unless the source ends first; you get one notice at expiry)."}}]},
+   {"cls": "AssistantMessage", "blocks": [{"thinking": ""}]},
+   {"cls": "AssistantMessage", "blocks": [{"text": "ARMED"}]},
+   {"cls": "ResultMessage", "result": "ARMED", "num_turns": 3}
+  ],
+  "monitor_event": [
+   {"cls": "SystemMessage", "subtype": "init", "data": {"session_id": "session-1", "model": "claude-fake"}},
+   {"cls": "AssistantMessage", "blocks": [{"thinking": ""}]},
+   {"cls": "AssistantMessage", "blocks": [{"text": "Event received: tick-1"}]},
+   {"cls": "ResultMessage", "result": "Event received: tick-1", "num_turns": 1, "origin": {"kind": "task-notification", "producer": "session-task"}}
+  ],
+  "monitor_report": [
+   {"cls": "TaskUpdatedMessage", "task_id": "task-m", "patch": {"status": "completed"}},
+   {"cls": "TaskNotificationMessage", "task_id": "task-m", "status": "completed", "summary": "Monitor \"monitoring shell command output\" stream ended"},
+   {"cls": "SystemMessage", "subtype": "background_tasks_changed", "data": {"tasks": []}}
+  ],
+  "monitor_turn": [
+   {"cls": "SystemMessage", "subtype": "init", "data": {"session_id": "session-1", "model": "claude-fake"}},
+   {"cls": "AssistantMessage", "blocks": [{"thinking": ""}]},
+   {"cls": "AssistantMessage", "blocks": [{"text": "Monitor completed. Command finished as expected after emitting \"tick-1\" and completing the 15-second sleep."}]},
+   {"cls": "ResultMessage", "result": "Monitor completed. Command finished as expected after emitting \"tick-1\" and completing the 15-second sleep.", "num_turns": 1, "origin": {"kind": "task-notification", "producer": "session-task", "runId": "run-m"}}
+  ],
+  "monitor_followup": [
+   {"cls": "UserMessage", "uuid": "$next", "content": "Without running any tool, answer in one short sentence: did the monitor you armed end, and what did it report?"},
+   {"cls": "SystemMessage", "subtype": "init", "data": {"session_id": "session-1", "model": "claude-fake"}},
+   {"cls": "AssistantMessage", "blocks": [{"thinking": ""}]},
+   {"cls": "AssistantMessage", "blocks": [{"text": "Yes, the monitor ended and reported the single event \"tick-1\"."}]},
+   {"cls": "ResultMessage", "result": "Yes, the monitor ended and reported the single event \"tick-1\".", "num_turns": 1}
+  ],
+  "stop_turn": [
+   {"cls": "UserMessage", "uuid": "$first", "content": "Run 'sleep 120' as a background Bash command. In the next step stop that background task with the TaskStop tool. Then reply with only the word STOPPED."},
+   {"cls": "AssistantMessage", "blocks": [{"thinking": ""}]},
+   {"cls": "AssistantMessage", "blocks": [{"tool": {"id": "toolu_S", "name": "Bash", "input": {"command": "sleep 120", "run_in_background": true}}}]},
+   {"cls": "SystemMessage", "subtype": "background_tasks_changed", "data": {"tasks": [{"task_id": "task-s", "task_type": "local_bash", "description": "sleep 120"}]}},
+   {"cls": "TaskStartedMessage", "task_id": "task-s", "tool_use_id": "toolu_S", "description": "sleep 120", "task_type": "local_bash"},
+   {"cls": "UserMessage", "content": [{"tool_result": {"tool_use_id": "toolu_S", "content": "Command running in background with ID: task-s. Output is being written to: /tasks/task-s.output"}}]},
+   {"cls": "AssistantMessage", "blocks": [{"thinking": ""}]},
+   {"cls": "AssistantMessage", "blocks": [{"tool": {"id": "toolu_T", "name": "TaskStop", "input": {"task_id": "task-s"}}}]},
+   {"cls": "TaskUpdatedMessage", "task_id": "task-s", "patch": {"status": "killed"}},
+   {"cls": "TaskNotificationMessage", "task_id": "task-s", "status": "stopped", "summary": "sleep 120"},
+   {"cls": "SystemMessage", "subtype": "background_tasks_changed", "data": {"tasks": []}},
+   {"cls": "UserMessage", "content": [{"tool_result": {"tool_use_id": "toolu_T", "content": "{\"message\":\"Successfully stopped task: task-s (sleep 120)\",\"task_id\":\"task-s\",\"task_type\":\"local_bash\",\"command\":\"sleep 120\"}"}}]},
+   {"cls": "AssistantMessage", "blocks": [{"thinking": ""}]},
+   {"cls": "AssistantMessage", "blocks": [{"text": "STOPPED"}]},
+   {"cls": "ResultMessage", "result": "STOPPED", "num_turns": 4}
+  ],
+  "stop_idle_launch": [
+   {"cls": "UserMessage", "uuid": "$first", "content": "Run 'sleep 120' as a background Bash command, then reply with only the word STARTED."},
+   {"cls": "AssistantMessage", "blocks": [{"thinking": ""}]},
+   {"cls": "AssistantMessage", "blocks": [{"tool": {"id": "toolu_I", "name": "Bash", "input": {"command": "sleep 120", "run_in_background": true}}}]},
+   {"cls": "SystemMessage", "subtype": "background_tasks_changed", "data": {"tasks": [{"task_id": "task-i", "task_type": "local_bash", "description": "sleep 120"}]}},
+   {"cls": "TaskStartedMessage", "task_id": "task-i", "tool_use_id": "toolu_I", "description": "sleep 120", "task_type": "local_bash"},
+   {"cls": "UserMessage", "content": [{"tool_result": {"tool_use_id": "toolu_I", "content": "Command running in background with ID: task-i. Output is being written to: /tasks/task-i.output"}}]},
+   {"cls": "AssistantMessage", "blocks": [{"thinking": ""}]},
+   {"cls": "AssistantMessage", "blocks": [{"text": "STARTED"}]},
+   {"cls": "ResultMessage", "result": "STARTED", "num_turns": 2}
+  ],
+  "stop_idle_report": [
+   {"cls": "TaskUpdatedMessage", "task_id": "task-i", "patch": {"status": "killed"}},
+   {"cls": "TaskNotificationMessage", "task_id": "task-i", "status": "stopped", "summary": "sleep 120"},
+   {"cls": "SystemMessage", "subtype": "background_tasks_changed", "data": {"tasks": []}}
+  ],
+  "stop_idle_followup": [
+   {"cls": "UserMessage", "uuid": "$next", "content": "Without running any tool, answer in one short sentence: what happened to the background task you started?"},
+   {"cls": "SystemMessage", "subtype": "init", "data": {"session_id": "session-1", "model": "claude-fake"}},
+   {"cls": "AssistantMessage", "blocks": [{"thinking": ""}]},
+   {"cls": "AssistantMessage", "blocks": [{"text": "The background sleep task was stopped by the user before it completed."}]},
+   {"cls": "ResultMessage", "result": "The background sleep task was stopped by the user before it completed.", "num_turns": 1}
+  ]
+ }
+}
