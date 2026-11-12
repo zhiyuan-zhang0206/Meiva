@@ -159,7 +159,7 @@ def _wire(
     *,
     reading: bool = False,
 ) -> tuple[Runtime[MeivaContext], HarnessTimelineWriter]:
-    effects = TimelineEffects(agent_id, _Published())
+    effects = TimelineEffects(agent_id, _Published(), pool=pool, clock=system_clock())
     ids = count()
     writer = HarnessTimelineWriter(
         pool=pool,
