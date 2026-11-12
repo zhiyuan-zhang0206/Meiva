@@ -339,12 +339,14 @@ Every schedule row records a target `machine` (defaulting to the gateway machine
   8h49m, 13h21m) put nine hours between the slowest gap that was merely late and
   the fastest gap that really missed a slot. The round never dispatches: `release-gate.yml` certifies on success,
   so a dispatched run mints a `v*` tag and moves `channel/latest`, and a release
-  is the user's decision. The card therefore names the run that closes the gap it
-  reports -- `main-typecheck.yml`, a type-only pass of a couple of minutes -- and
-  says in the same breath what that does not restore. **Dispatch
-  `main-typecheck.yml`; never dispatch `release-gate.yml` from the watch.** A slot
-  the gate would have skipped anyway (nothing uncertified) opens no card, and the
-  card closes when a scheduled run appears again. The card also states how many
+  is the user's decision. The card names `main-typecheck.yml` as a type-only
+  coverage option that publishes nothing; such a dispatch does not restore the
+  cron. The watch dispatches neither workflow. A slot the gate would have skipped
+  anyway (nothing uncertified) opens no new card. An existing card closes only
+  when a strictly newer scheduled run appears, whether that run is red, green or
+  still busy. Manual/PR activity and channel progress keep an existing gap waiting.
+  The schedule-only listing verifies the anchored 24-hour window; empty, capped
+  or incomplete reads preserve the card as unreadable. The card also states how many
   scheduled arrivals the last 24 hours should have contained and how many it found
   (`_arrivals`), because that count is the one number a reader can check against
   the workflow's own run list: one card is then judgeable on its own, without

@@ -22,6 +22,7 @@ from schedules.plans.watch.main_red import Card
 from schedules.plans.watch.release_gate_slot import (
     RELEASE_GATE_SLOT_STALE_AFTER,
     SlotFacts,
+    SlotAction,
     decide_slot,
 )
 
@@ -68,17 +69,18 @@ def slot_round(
         now=now,
         since=since,
         stale_after=RELEASE_GATE_SLOT_STALE_AFTER,
+        open_gap=(ledger.gap_id or "") if ledger.task_id is not None else None,
     )
-    if decision.card is None:
-        if ledger.task_id is not None:
-            close_card(
-                ledger.task_id,
-                f"release-gate slot: {decision.note or 'a scheduled release-gate run appeared'}",
-            )
+    if decision.action == SlotAction.RECOVERED:
+        assert ledger.task_id is not None
+        close_card(ledger.task_id, f"release-gate slot: {decision.note}")
         slot = SlotLedger()
+    elif decision.action == SlotAction.OPEN:
+        assert decision.card is not None
+        slot = SlotLedger(gap_id=decision.gap_id, task_id=open_card(decision.card))
     else:
-        task_id = ledger.task_id if ledger.task_id is not None else open_card(decision.card)
-        slot = SlotLedger(gap_id=decision.gap_id, task_id=task_id)
+        assert decision.action == SlotAction.WAIT
+        slot = replace(ledger, unreadable_rounds=0)
     save_state(state_path, replace_state_slot(state, slot))
     if recovered:
         back = f"release-gate slot readable again after {recovered} unreadable round(s)"

@@ -92,3 +92,19 @@ def test_initial_failure_reader_carries_workflow_attempt_to_publication_selectio
     ]
     assert len(reads) == 1
     assert any(keyword.arg == "attempt" for keyword in reads[0].keywords)
+
+
+def test_slot_entry_reads_only_verified_scheduled_history() -> None:
+    calls = [
+        node
+        for node in ast.walk(_function(_ENTRY, "_slot_note"))
+        if isinstance(node, ast.Call)
+        and isinstance(node.func, ast.Name)
+        and node.func.id == "read_scheduled_starts"
+    ]
+    assert len(calls) == 1
+    assert ast.unparse(calls[0].args[1]) == "_RELEASE_GATE"
+    assert any(
+        k.arg == "branch" and isinstance(k.value, ast.Constant) and k.value.value == "main"
+        for k in calls[0].keywords
+    )

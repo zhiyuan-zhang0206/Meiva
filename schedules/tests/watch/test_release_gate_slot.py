@@ -12,6 +12,7 @@ from datetime import UTC, datetime, timedelta
 from schedules.plans.watch.release_gate_slot import (
     RELEASE_GATE_SLOT_STALE_AFTER,
     SlotFacts,
+    SlotAction,
     decide_slot,
 )
 
@@ -85,9 +86,15 @@ def test_a_running_workflow_is_not_a_missing_slot() -> None:
 
 
 def test_a_newer_scheduled_run_clears_the_gap() -> None:
-    decision = _decide(0.5)
-
+    decision = decide_slot(
+        _facts(0.5),
+        now=NOW,
+        since=None,
+        stale_after=RELEASE_GATE_SLOT_STALE_AFTER,
+        open_gap=(NOW - timedelta(hours=13)).isoformat(),
+    )
     assert decision.card is None
+    assert decision.action == SlotAction.RECOVERED
 
 
 def test_no_run_on_record_waits_out_one_threshold_from_the_first_round() -> None:

@@ -1,35 +1,24 @@
 # meiva:note
-# The six-hourly `release-gate` is the only post-merge run that covers the whole population on a
-# fixed cadence, and GitHub does not keep that cadence here: in the three days to 2026-11-04 it
-# should have run twelve times and ran six (11-01 17:56Z and 22:05Z, 11-02 06:14Z and 16:13Z,
-# 11-03 01:02Z and 14:23Z), the latest slot starting 1h48m late. A slot that never arrives is not a
-# red the watch can read -- there is nothing there -- so it needs its own check.
-#
-# The check reports; it never publishes. `release-gate.yml` certifies on success, which mints an
-# immutable `v*` tag and moves `channel/latest`, and a release is the user's decision (2026-10-28).
-# Letting "the cron drifted" trigger that would hand the release decision to the drift. So the
-# round opens a card whose first line says it publishes nothing, and the run that closes the gap
-# stays a human action.
-#
-# The gap the card names is "no full-population check for nine hours", not "no release for nine
-# hours". Those are different debts, and only the first one is the watch's to report: a type-only
-# pass (`main-typecheck.yml`) pays the first in minutes without touching the second, so the card
-# tells the reader to run that one and says plainly what it does not restore.
-#
-# Two silent slots look alike and are not: the cron may not have run, or it may have run and
-# skipped (`release-gate.yml` certifies only when `channel/latest` is behind `main`). The second is
-# harmless, so the round also reads how many commits are uncertified and opens no card when the
-# answer is none.
+# The release-gate slot card watches scheduled arrivals, not code health or
+# release publication. A manual/PR run or a caught-up channel can suppress a
+# new complaint but cannot prove that an existing cron gap recovered. Only a
+# newer verified scheduled start ends that occurrence (task #6822).
+# The check never dispatches or publishes; its arrival threshold remains nine
+# hours, independently of the workflow's six-hour cadence.
 
 from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import datetime, timedelta
+from enum import StrEnum
 
 from schedules.plans.watch.main_red import Card
 
 __all__ = [
+    "RELEASE_GATE_SLOT_CADENCE",
+    "RELEASE_GATE_SLOT_LOOKBACK",
     "RELEASE_GATE_SLOT_STALE_AFTER",
+    "SlotAction",
     "SlotDecision",
     "SlotFacts",
     "decide_slot",
@@ -73,8 +62,8 @@ _NO_RUN = "no-run-on-record"
 
 # meiva:note
 # What one round reads about the workflow: the newest run the cron started, and whether anything of
-# that workflow is still running. `busy` matters because a run in flight is about to say something;
-# dispatching over it would stack two full suites on one runner pool.
+# that workflow is still running. Busy activity suppresses a new complaint;
+# it cannot establish recovery of an already recorded scheduled-arrival gap.
 @dataclass(frozen=True)
 class SlotFacts:
     last_schedule_start: datetime | None
@@ -89,11 +78,19 @@ class SlotFacts:
     cadence: timedelta = RELEASE_GATE_SLOT_CADENCE
 
 
+class SlotAction(StrEnum):
+    WAIT = "wait"
+    OPEN = "open"
+    RECOVERED = "scheduled-recovered"
+
+
 # meiva:note
-# `gap_id` names the gap a make-up dispatch already answered, so one missing slot produces one
-# dispatch however many rounds notice it. An empty `gap_id` means there is no gap to name.
+# No card is an instruction to wait unless the decision explicitly proves
+# recovery. Keeping the distinction prevents busy/uncertified suppression from
+# resolving a previously opened scheduled-arrival gap.
 @dataclass(frozen=True)
 class SlotDecision:
+    action: SlotAction
     card: Card | None
     gap_id: str
     note: str | None
@@ -184,39 +181,67 @@ def _card(facts: SlotFacts, *, threshold: timedelta, gap_id: str) -> Card:
 
 
 # meiva:note
-# The decision a round makes about one workflow's slot. Order matters: a running workflow is never
-# a missing slot, a slot inside the late band is not late yet, and a slot that would have skipped
-# anyway (nothing uncertified) is not worth a reader's attention. Only past all three does the
-# round name a gap.
+# A recorded no-run gap ends at the first verified scheduled arrival. Otherwise
+# the scheduled timestamp must advance strictly: older or unverified history
+# cannot clear a card. An unparseable legacy gap remains visibly waiting.
+def _scheduled_advanced(latest: datetime | None, previous_gap: str) -> bool:
+    if latest is None:
+        return False
+    if previous_gap == _NO_RUN:
+        return True
+    try:
+        previous = datetime.fromisoformat(previous_gap)
+    except ValueError:
+        return False
+    return previous.tzinfo is not None and latest > previous
+
+
 def decide_slot(
     facts: SlotFacts,
     *,
     now: datetime,
     since: datetime | None,
     stale_after: timedelta,
+    open_gap: str | None = None,
 ) -> SlotDecision:
     gap_id = _gap_id(facts.last_schedule_start)
+    if open_gap is not None:
+        if _scheduled_advanced(facts.last_schedule_start, open_gap):
+            return SlotDecision(
+                SlotAction.RECOVERED,
+                None,
+                gap_id,
+                f"a newer scheduled release-gate run appeared at {gap_id}",
+            )
+        return SlotDecision(
+            SlotAction.WAIT,
+            None,
+            open_gap,
+            "release-gate gap remains open; waiting for a verifiable newer scheduled start",
+        )
     if facts.busy:
         return SlotDecision(
-            None, gap_id=gap_id, note="release-gate is running; the slot check waits"
+            SlotAction.WAIT, None, gap_id, "release-gate is running; the slot check waits"
         )
     if facts.last_schedule_start is None:
-        if since is not None and now - since < stale_after:
-            return SlotDecision(None, gap_id=_NO_GAP, note=None)
-        age = now - since if since is not None else stale_after
+        if since is None or now - since < stale_after:
+            return SlotDecision(SlotAction.WAIT, None, _NO_GAP, None)
+        age = now - since
         gap_id = _NO_RUN
     else:
         age = now - facts.last_schedule_start
         if age < stale_after:
-            return SlotDecision(None, gap_id=gap_id, note=None)
+            return SlotDecision(SlotAction.WAIT, None, gap_id, None)
     if facts.uncertified_commits == 0:
         return SlotDecision(
+            SlotAction.WAIT,
             None,
-            gap_id=gap_id,
-            note=f"release-gate slot {age.total_seconds() / 3600:.1f}h late, nothing uncertified",
+            gap_id,
+            f"release-gate slot {age.total_seconds() / 3600:.1f}h late, nothing uncertified",
         )
     return SlotDecision(
-        card=_card(facts, threshold=stale_after, gap_id=gap_id),
-        gap_id=gap_id,
-        note=f"release-gate slot missing: newest scheduled run {age.total_seconds() / 3600:.1f}h ago",
+        SlotAction.OPEN,
+        _card(facts, threshold=stale_after, gap_id=gap_id),
+        gap_id,
+        f"release-gate slot missing: newest scheduled run {age.total_seconds() / 3600:.1f}h ago",
     )

@@ -33,6 +33,7 @@ from schedules.jobs.entry import cluster_timezone, open_schedule_entry
 from schedules.jobs.loop import CronSchedule, Trigger, run_loop
 from schedules.jobs.watch.api_read import read_api
 from schedules.jobs.watch.main_red_slot import slot_round
+from schedules.jobs.watch.release_gate_reads import read_scheduled_starts
 from schedules.jobs.watch.main_red_junit import JunitReader
 from schedules.jobs.watch.main_red_watch import (
     LivenessStream,
@@ -475,23 +476,6 @@ def _last_run_start(workflow: str, run_process: RunProcess) -> datetime | None:
 
 
 # meiva:note
-# The slot check reads the cron's own runs, not the workflow's newest run: a make-up dispatch is a
-# `workflow_dispatch` run, and counting it would let the repair hide the outage it repaired. The
-# whole list comes back because the card states how many arrivals a day should have contained --
-# that count is what a reader can check against GitHub, so it has to come from the same read.
-def _schedule_starts(workflow: str, run_process: RunProcess) -> tuple[datetime, ...]:
-    import json
-
-    listing = json.loads(_api(_runs_path(workflow, 20), run_process))
-    starts = [
-        datetime.fromisoformat(run["created_at"].replace("Z", "+00:00"))
-        for run in listing.get("workflow_runs", [])
-        if run.get("event") == "schedule" and isinstance(run.get("created_at"), str)
-    ]
-    return tuple(sorted(starts, reverse=True))
-
-
-# meiva:note
 # The slot leg fails on its own. Its two reads -- the cron's own starts and whether the workflow is
 # busy -- used to sit in the argument list of `slot_round`, so one bad answer took the whole round
 # with it: `fire` has no catch above it, and a round that raises costs the heartbeat the supervisor
@@ -509,7 +493,9 @@ def _slot_note(
     report_agent: int,
 ) -> str | None:
     try:
-        starts = _schedule_starts(_RELEASE_GATE, run_process)
+        starts = read_scheduled_starts(
+            _REPO, _RELEASE_GATE, branch="main", read=partial(_api, run_process=run_process)
+        )
         busy = _workflow_busy(_RELEASE_GATE, run_process)
     except Exception as exc:
         return slot_round(
