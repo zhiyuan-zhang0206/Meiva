@@ -19,7 +19,7 @@ from services.desktop.browser import page_lifecycle
 from services.desktop.browser.mcp_daemon import ChromeMcpDaemon, text_of
 from services.desktop.browser.page_lifecycle import FileRecordStore
 from services.desktop.browser.tab_groups.page_ledger import PageRecord
-from services.desktop.browser.tests.fake_browser import FakeBrowser, MemoryStore
+from services.desktop.browser.tests.fake_browser import FakeBrowser, MemorySelection, MemoryStore
 from services.desktop.browser.tests.test_browser_mcp_daemon import (
     FakeUpstream,
     new_daemon,
@@ -52,6 +52,7 @@ class Rig:
     browser: FakeBrowser = field(default_factory=FakeBrowser)
     store: MemoryStore = field(default_factory=lambda: MemoryStore(migrated=True))
     wall: Wall = field(default_factory=Wall)
+    selection: MemorySelection = field(default_factory=MemorySelection)
 
     def start(self) -> tuple[ChromeMcpDaemon, FakeUpstream]:
         up = FakeUpstream()
@@ -61,12 +62,13 @@ class Rig:
             tab_groups=self.browser,
             default_ttl_seconds=TTL,
             store=self.store,
+            selection=self.selection,
             clock=self.wall.clock(),
         )
         return daemon, up
 
 
-async def _open(d: ChromeMcpDaemon, agent_id: int, url: str, **args: str) -> None:
+async def open_page(d: ChromeMcpDaemon, agent_id: int, url: str, **args: str) -> None:
     result = await d.call_tool_for_agent("new_page", {"url": url, **args}, agent_id)
     assert not result.is_error
 
@@ -90,7 +92,7 @@ def _messages(records: list[dict[str, Any]], level: str) -> list[str]:
 async def test_a_page_created_before_a_daemon_restart_is_swept_after_its_deadline() -> None:
     rig = Rig()
     d1, _ = rig.start()
-    await _open(d1, 7, "https://a.example/")
+    await open_page(d1, 7, "https://a.example/")
     assert len(rig.store.records) == 1
 
     # meiva:note
@@ -110,9 +112,9 @@ async def test_a_page_created_before_a_daemon_restart_is_swept_after_its_deadlin
 async def test_release_after_a_daemon_restart_closes_every_page_of_that_agent_only() -> None:
     rig = Rig()
     d1, _ = rig.start()
-    await _open(d1, 7, "https://a1.example/")
-    await _open(d1, 7, "https://a2.example/")
-    await _open(d1, 8, "https://b.example/")
+    await open_page(d1, 7, "https://a1.example/")
+    await open_page(d1, 7, "https://a2.example/")
+    await open_page(d1, 8, "https://b.example/")
     user_tab = rig.browser.add_tab("https://user.example/")
 
     d2, _ = rig.start()
@@ -129,7 +131,7 @@ async def test_release_after_a_daemon_restart_closes_every_page_of_that_agent_on
 async def test_renew_after_a_daemon_restart_moves_the_recorded_deadline() -> None:
     rig = Rig()
     d1, _ = rig.start()
-    await _open(d1, 7, "https://a.example/")
+    await open_page(d1, 7, "https://a.example/")
 
     d2, _ = rig.start()
     # meiva:note
@@ -148,8 +150,8 @@ async def test_renew_after_a_daemon_restart_moves_the_recorded_deadline() -> Non
 async def test_renew_after_a_restart_refuses_an_ambiguous_page_instead_of_guessing() -> None:
     rig = Rig()
     d1, _ = rig.start()
-    await _open(d1, 7, "https://same.example/")
-    await _open(d1, 7, "https://same.example/")
+    await open_page(d1, 7, "https://same.example/")
+    await open_page(d1, 7, "https://same.example/")
 
     d2, up2 = rig.start()
     await _sweep(d2)
@@ -162,7 +164,7 @@ async def test_renew_after_a_restart_refuses_an_ambiguous_page_instead_of_guessi
 async def test_renew_after_a_restart_refuses_a_page_the_agent_does_not_own() -> None:
     rig = Rig()
     d1, _ = rig.start()
-    await _open(d1, 8, "https://b.example/")
+    await open_page(d1, 8, "https://b.example/")
     rig.browser.add_tab("https://user.example/")
 
     d2, _ = rig.start()
@@ -175,7 +177,7 @@ async def test_renew_after_a_restart_refuses_a_page_the_agent_does_not_own() -> 
 async def test_a_record_of_a_page_chrome_no_longer_has_is_dropped() -> None:
     rig = Rig()
     d1, _ = rig.start()
-    await _open(d1, 7, "https://a.example/")
+    await open_page(d1, 7, "https://a.example/")
     (target,) = rig.store.records
     # meiva:note
     # the user closed the tab by hand while the daemon was down
@@ -193,8 +195,8 @@ async def test_a_record_of_a_page_chrome_no_longer_has_is_dropped() -> None:
 async def test_an_isolated_context_page_is_recorded_expires_and_is_released() -> None:
     rig = Rig()
     d, up = rig.start()
-    await _open(d, 7, "https://discord.com/app", isolatedContext="reg-7")
-    await _open(d, 8, "https://other.example/", isolatedContext="reg-8")
+    await open_page(d, 7, "https://discord.com/app", isolatedContext="reg-7")
+    await open_page(d, 8, "https://other.example/", isolatedContext="reg-8")
     assert up.isolated_contexts == {2: "reg-7", 3: "reg-8"}
     # meiva:note
     # never grouped
@@ -213,7 +215,7 @@ async def test_a_page_whose_grouping_failed_has_a_record_and_is_closed_at_its_de
     rig = Rig()
     rig.browser.grouping_fails = True
     d, _ = rig.start()
-    await _open(d, 7, "https://a.example/")
+    await open_page(d, 7, "https://a.example/")
     (record,) = rig.store.records.values()
     assert not record.grouped and rig.browser.titles == {}
 
@@ -225,7 +227,7 @@ async def test_a_page_whose_grouping_failed_has_a_record_and_is_closed_at_its_de
 async def test_the_background_grouping_marks_the_record_grouped() -> None:
     rig = Rig()
     d, _ = rig.start()
-    await _open(d, 7, "https://a.example/")
+    await open_page(d, 7, "https://a.example/")
     (record,) = rig.store.records.values()
     assert record.grouped
 
@@ -237,7 +239,7 @@ async def test_the_background_grouping_marks_the_record_grouped() -> None:
 async def test_a_grouped_page_the_user_dragged_out_of_its_group_is_never_closed() -> None:
     rig = Rig()
     d1, _ = rig.start()
-    await _open(d1, 7, "https://mine.example/")
+    await open_page(d1, 7, "https://mine.example/")
     (target,) = rig.store.records
     rig.browser.titles[target] = "Work"
 
@@ -253,7 +255,7 @@ async def test_a_grouped_page_the_user_dragged_out_of_its_group_is_never_closed(
 async def test_a_page_taken_between_the_reconciliation_and_the_close_stays_open() -> None:
     rig = Rig()
     d, _ = rig.start()
-    await _open(d, 7, "https://mine.example/")
+    await open_page(d, 7, "https://mine.example/")
     (target,) = rig.store.records
     rig.wall.advance(TTL + 1)
     # meiva:note
@@ -277,7 +279,7 @@ async def test_the_browsers_last_page_is_not_closed_even_if_it_became_the_last_a
 ):
     rig = Rig()
     d, _ = rig.start()
-    await _open(d, 7, "https://mine.example/")
+    await open_page(d, 7, "https://mine.example/")
     rig.wall.advance(TTL + 1)
     await _sweep(d)
 
@@ -373,7 +375,7 @@ def _daemon_on_file(rig: Rig, store: FileRecordStore) -> ChromeMcpDaemon:
 async def test_a_chrome_restart_passes_the_record_with_its_original_deadline() -> None:
     rig = Rig()
     d1, _ = rig.start()
-    await _open(d1, 7, "https://a.example/")
+    await open_page(d1, 7, "https://a.example/")
     # meiva:note
     # the record learns the URL
     await _sweep(d1)
@@ -396,8 +398,8 @@ async def test_a_chrome_restart_with_several_candidates_inherits_nothing_and_clo
 ):
     rig = Rig()
     d1, _ = rig.start()
-    await _open(d1, 7, "https://same.example/")
-    await _open(d1, 7, "https://same.example/")
+    await open_page(d1, 7, "https://same.example/")
+    await open_page(d1, 7, "https://same.example/")
     await _sweep(d1)
     rig.browser.restart_chrome()
 
@@ -414,7 +416,7 @@ async def test_a_users_tab_with_the_same_url_put_in_a_group_by_a_layout_restore_
 ):
     rig = Rig()
     d1, _ = rig.start()
-    await _open(d1, 7, "https://x.example/")
+    await open_page(d1, 7, "https://x.example/")
     # meiva:note
     # the user has the same page open
     user_tab = rig.browser.add_tab("https://x.example/")
@@ -446,7 +448,7 @@ async def test_the_first_sweep_after_a_start_closes_nothing_and_a_transient_step
 ):
     rig = Rig()
     d1, _ = rig.start()
-    await _open(d1, 7, "https://a.example/")
+    await open_page(d1, 7, "https://a.example/")
 
     d2, _ = rig.start()
     # meiva:note
@@ -470,7 +472,7 @@ async def test_the_first_sweep_after_a_start_closes_nothing_and_a_transient_step
 async def test_a_clock_stepped_backwards_never_closes_a_page_early_and_bounds_the_wait() -> None:
     rig = Rig()
     d, _ = rig.start()
-    await _open(d, 7, "https://a.example/")
+    await open_page(d, 7, "https://a.example/")
     rig.wall.advance(-10 * 86_400)
 
     assert await sweep_twice(d) == 0
@@ -485,7 +487,7 @@ async def test_a_close_that_leaves_the_target_open_keeps_the_record_and_logs_spa
 ) -> None:
     rig = Rig()
     d, _ = rig.start()
-    await _open(d, 7, "https://a.example/")
+    await open_page(d, 7, "https://a.example/")
     (target,) = rig.store.records
     # meiva:note
     # e.g. a beforeunload prompt
@@ -512,7 +514,7 @@ async def test_a_close_that_leaves_the_target_open_keeps_the_record_and_logs_spa
 async def test_a_page_whose_last_tab_cannot_be_ungrouped_is_not_closed() -> None:
     rig = Rig()
     d, _ = rig.start()
-    await _open(d, 7, "https://a.example/")
+    await open_page(d, 7, "https://a.example/")
     rig.wall.advance(TTL + 1)
     rig.browser.ungroup_error = TimeoutError("worker wedged")
 
@@ -526,7 +528,7 @@ async def test_an_unreadable_chrome_closes_nothing_and_keeps_the_records(
 ) -> None:
     rig = Rig()
     d, _ = rig.start()
-    await _open(d, 7, "https://a.example/")
+    await open_page(d, 7, "https://a.example/")
     rig.wall.advance(TTL + 1)
     await _sweep(d)
     rig.browser.read_error = TimeoutError("extension wedged")
@@ -545,7 +547,7 @@ async def test_an_unreadable_chrome_closes_nothing_and_keeps_the_records(
 async def test_a_close_chrome_refuses_keeps_the_record_and_is_retried() -> None:
     rig = Rig()
     d, _ = rig.start()
-    await _open(d, 7, "https://a.example/")
+    await open_page(d, 7, "https://a.example/")
     rig.wall.advance(TTL + 1)
     rig.browser.close_error = RuntimeError("Chrome said no")
 
@@ -558,7 +560,7 @@ async def test_the_last_page_of_the_browser_is_never_closed() -> None:
     rig = Rig()
     rig.browser = FakeBrowser(blank_tab=False)
     d, _ = rig.start()
-    await _open(d, 7, "https://only.example/")
+    await open_page(d, 7, "https://only.example/")
     rig.wall.advance(TTL + 1)
 
     assert await sweep_twice(d) == 0
@@ -571,7 +573,7 @@ async def test_the_last_page_of_the_browser_is_never_closed() -> None:
 async def test_user_tabs_and_stale_records_naming_them_are_never_closed_in_any_path() -> None:
     rig = Rig()
     d1, _ = rig.start()
-    await _open(d1, 7, "https://mine.example/")
+    await open_page(d1, 7, "https://mine.example/")
     plain = rig.browser.add_tab("https://plain.example/")
     in_work = rig.browser.add_tab("https://work.example/", title="Work")
     bad_title = rig.browser.add_tab("https://bad.example/", title="Meiva #07")
@@ -603,7 +605,7 @@ async def test_the_ledger_file_is_written_on_create_group_renew_and_close(tmp_pa
     path = tmp_path / "run" / "browser-pages.json"
     rig = Rig()
     d = _daemon_on_file(rig, FileRecordStore(path))
-    await _open(d, 7, "https://a.example/")
+    await open_page(d, 7, "https://a.example/")
     assert path.exists() and oct(path.stat().st_mode & 0o777) == "0o600"
     (record,) = (FileRecordStore(path).load() or _empty()).records.values()
     assert record.grouped and record.owner == 7
@@ -661,8 +663,8 @@ async def test_a_new_page_raced_by_another_new_tab_gets_no_record_grouped_or_iso
         store=rig.store,
         clock=rig.wall.clock(),
     )
-    await _open(d, 7, "https://a.example/")
-    await _open(d, 7, "https://iso.example/", isolatedContext="reg-7")
+    await open_page(d, 7, "https://a.example/")
+    await open_page(d, 7, "https://iso.example/", isolatedContext="reg-7")
     assert rig.store.records == {} and d.pages.records == {}
     # meiva:note
     # the pages were created and selected
@@ -677,7 +679,7 @@ async def test_the_migration_is_decided_at_start_so_an_early_write_ends_it() -> 
     d1, _ = rig.start()
     # meiva:note
     # writes the ledger before any reconciliation
-    await _open(d1, 7, "https://a.example/")
+    await open_page(d1, 7, "https://a.example/")
     assert rig.store.file is not None and rig.store.file.migrated
 
     # meiva:note
@@ -715,7 +717,7 @@ async def test_a_migrated_record_is_left_to_the_sweep_not_to_a_release() -> None
 async def test_an_ungrouped_page_the_user_filed_into_their_own_group_is_never_closed() -> None:
     rig = Rig()
     d, _ = rig.start()
-    await _open(d, 7, "https://discord.com/app", isolatedContext="reg-7")
+    await open_page(d, 7, "https://discord.com/app", isolatedContext="reg-7")
     (target,) = rig.store.records
     rig.browser.titles[target] = "Work"
     rig.wall.advance(10 * TTL)
@@ -729,8 +731,8 @@ async def test_an_ungrouped_page_the_user_filed_into_their_own_group_is_never_cl
 async def test_an_unreadable_recheck_ends_the_whole_pass_after_one_failed_read() -> None:
     rig = Rig()
     d, _ = rig.start()
-    await _open(d, 7, "https://a.example/")
-    await _open(d, 7, "https://b.example/")
+    await open_page(d, 7, "https://a.example/")
+    await open_page(d, 7, "https://b.example/")
     rig.wall.advance(TTL + 1)
     # meiva:note
     # marks both due (read 1)

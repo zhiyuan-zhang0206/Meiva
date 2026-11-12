@@ -1,6 +1,7 @@
 [uses]
 "browser_mcp_daemon" = ["fake_browser.py", "test_browser_mcp_daemon.py"]
 "test_browser_mcp_daemon.py" = ["fake_browser.py"]
+"upstream_health" = ["fake_browser.py", "test_browser_mcp_daemon.py"]
 "test_browser_mcp_daemon_stop.py" = ["test_browser_mcp_daemon_tab_groups.py"]
 "test_browser_mcp_daemon_tab_groups.py" = ["fake_browser.py", "test_browser_mcp_daemon.py"]
 "test_profile_seed_exit.py" = ["_profile_seed_child.py"]

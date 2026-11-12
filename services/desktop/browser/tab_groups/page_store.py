@@ -16,6 +16,8 @@ from services.desktop.browser.tab_groups.page_ledger import (
     PageRecord,
 )
 
+SELECTION_VERSION = 1
+
 
 def dump_records(file: LedgerFile) -> str:
     payload = {
@@ -127,6 +129,81 @@ class FileRecordStore:
             logger.warning(
                 "[browser-mcp] could not write the page ledger {} ({}: {}); deadlines are kept "
                 "in memory only until the next successful write",
+                self._path,
+                type(e).__name__,
+                e,
+            )
+
+
+# meiva:note
+# The agents' selected pages (agent id -> CDP target id) between daemon processes. The
+# upstream's page numbers restart with it; the target id is what survives. Selection is
+# presentation state, not authority: it never says a page may be closed (only the page
+# ledger does), so an unreadable file reads as no selections and a failed save is a WARNING.
+class SelectionStore(Protocol):
+    def load(self) -> dict[int, str]: ...
+
+    def save(self, selected: dict[int, str]) -> None: ...
+
+
+def selection_path(home: Path) -> Path:
+    return run_dir(home) / "browser-selected-pages.json"
+
+
+def dump_selection(selected: dict[int, str]) -> str:
+    payload = {
+        "version": SELECTION_VERSION,
+        "selected": {str(agent_id): target_id for agent_id, target_id in sorted(selected.items())},
+    }
+    return json.dumps(payload, indent=2) + "\n"
+
+
+# meiva:note
+# Raises ValueError/TypeError for anything not exactly the shape `dump_selection` writes.
+def parse_selection(text: str) -> dict[int, str]:
+    raw = object_of(json.loads, text)
+    if not is_object_dict(raw) or raw.get("version") != SELECTION_VERSION:
+        raise ValueError("not a version-1 page selection file")
+    selected = raw.get("selected")
+    if not is_object_dict(selected):
+        raise ValueError("'selected' must be an object")
+    parsed: dict[int, str] = {}
+    for agent, target_id in selected.items():
+        if not agent.isascii() or not agent.isdigit() or not isinstance(target_id, str):
+            raise TypeError(f"malformed selection entry for {agent!r}")
+        if not target_id:
+            raise ValueError(f"empty target id for agent {agent!r}")
+        parsed[int(agent)] = target_id
+    return parsed
+
+
+class FileSelectionStore:
+    def __init__(self, path: Path) -> None:
+        self._path = path
+
+    def load(self) -> dict[int, str]:
+        try:
+            return parse_selection(self._path.read_text(encoding="utf-8"))
+        except FileNotFoundError:
+            return {}
+        except (OSError, ValueError, TypeError) as e:
+            logger.warning(
+                "[browser-mcp] ignoring unreadable page selection file {} ({}: {}); agents "
+                "re-select their pages",
+                self._path,
+                type(e).__name__,
+                e,
+            )
+            return {}
+
+    def save(self, selected: dict[int, str]) -> None:
+        try:
+            self._path.parent.mkdir(parents=True, exist_ok=True)
+            write_text_atomic(self._path, dump_selection(selected), mode=0o600)
+        except OSError as e:
+            logger.warning(
+                "[browser-mcp] could not write the page selection file {} ({}: {}); selections "
+                "are kept in memory only until the next successful write",
                 self._path,
                 type(e).__name__,
                 e,

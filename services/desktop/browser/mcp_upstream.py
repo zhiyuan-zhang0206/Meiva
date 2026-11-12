@@ -12,8 +12,11 @@ from __future__ import annotations
 
 import asyncio
 from collections.abc import Awaitable, Callable
-from contextlib import AsyncExitStack, suppress
+from contextlib import AsyncExitStack
+from dataclasses import dataclass
 from datetime import timedelta
+from enum import StrEnum
+from typing import NoReturn
 
 import anyio
 from mcp import ClientSession, StdioServerParameters
@@ -21,6 +24,8 @@ from mcp.client.stdio import get_default_environment, stdio_client
 from mcp.shared.exceptions import MCPError
 from mcp.types import CONNECTION_CLOSED, REQUEST_TIMEOUT
 
+from base import telemetry
+from base.clock import Timers
 from base.log import logger
 from services.desktop.browser.shutdown_budget import SHUTDOWN_STEP_TIMEOUT_S
 
@@ -43,7 +48,7 @@ _LEAN_FLAGS = ["--usageStatistics=false"]
 # A wedged (not dead) upstream call must not hold the serial lock forever and
 # freeze every client; bound each upstream request. Generous so a slow real
 # navigation never trips it -- only a true hang does.
-_READ_TIMEOUT = timedelta(seconds=180)
+READ_TIMEOUT = timedelta(seconds=180)
 
 # meiva:note
 # Every teardown await is bounded by `SHUTDOWN_STEP_TIMEOUT_S` (see
@@ -89,10 +94,17 @@ async def bounded_stack_close(stack: AsyncExitStack | None, what: str) -> None:
         )
 
 
-async def await_stop_or_timeout(stop: asyncio.Event, timeout: float) -> None:
-    """Sleep for *timeout* seconds, waking early if *stop* is set."""
-    with suppress(asyncio.TimeoutError):
-        await asyncio.wait_for(stop.wait(), timeout=timeout)
+# meiva:note
+# Sleep for `timeout` seconds on `timers`, waking early if `stop` is set.
+async def await_stop_or_timeout(stop: asyncio.Event, timeout: float, timers: Timers) -> None:
+    async with asyncio.TaskGroup() as waiters:
+        sleeper = waiters.create_task(timers.asleep(timeout))
+        waiter = waiters.create_task(stop.wait())
+        try:
+            await asyncio.wait({sleeper, waiter}, return_when=asyncio.FIRST_COMPLETED)
+        finally:
+            sleeper.cancel()
+            waiter.cancel()
 
 
 def upstream_server_params(browser_url: str) -> StdioServerParameters:
@@ -120,7 +132,7 @@ async def open_upstream(
     try:
         read, write = await stack.enter_async_context(stdio_client(params))
         session = await stack.enter_async_context(
-            ClientSession(read, write, read_timeout_seconds=_READ_TIMEOUT.total_seconds())
+            ClientSession(read, write, read_timeout_seconds=READ_TIMEOUT.total_seconds())
         )
         await initialize_until_stop_or_timeout(
             session, stop, connect_timeout_reader=connect_timeout_reader
@@ -211,26 +223,169 @@ async def contained(work: Awaitable[object], what: str) -> None:
 
 
 # meiva:note
-# Upstream session teardown or MCP CONNECTION_CLOSED / REQUEST_TIMEOUT ends this daemon generation.
+# Upstream session teardown (a closed stdio stream, MCP `CONNECTION_CLOSED`) means the
+# upstream process is gone. `REQUEST_TIMEOUT` is NOT in this family: it only says one
+# request outlived the read timeout while the session may be perfectly alive (a slow
+# navigation, lighthouse, a trace), so it is judged by `UpstreamGuard`, not by its code.
 UPSTREAM_DOWN = (anyio.ClosedResourceError, anyio.BrokenResourceError, anyio.EndOfStream)
-_UPSTREAM_DOWN_ERROR_CODES = {CONNECTION_CLOSED, REQUEST_TIMEOUT}
 UPSTREAM_DOWN_MSG = "chrome upstream session is down; restart browser-mcp before continuing"
 
+
 # meiva:note
-# Upstream watchdog: with no client calling, a wedged upstream would sit
-# undetected forever (ping answers from the daemon, list_tools serves its
-# cache). Probe the upstream itself every interval; a missing reply within the
-# timeout marks the session dead and ends the process (2026-08-06 #899).
-_UPSTREAM_WATCHDOG_INTERVAL_S = 30.0
-_UPSTREAM_WATCHDOG_TIMEOUT_S = 10.0
+# Why a daemon generation ended (the `reason` of the `browser_mcp_exit` event): `stopped` is
+# a service stop or update, not a death; `upstream_exited` the upstream process or its
+# connection is gone; `probes_unanswered` the watchdog's pings went unanswered in a row;
+# `call_timeout_unanswered` a call timed out and the probe after it was silent;
+# `call_timeouts_repeated` calls keep timing out though pings answer.
+class DeathReason(StrEnum):
+    STOPPED = "stopped"
+    UPSTREAM_EXITED = "upstream_exited"
+    PROBES_UNANSWERED = "probes_unanswered"
+    CALL_TIMEOUT_UNANSWERED = "call_timeout_unanswered"
+    CALL_TIMEOUTS_REPEATED = "call_timeouts_repeated"
 
 
 # meiva:note
-# True when `exc` means this upstream session is unusable.
-def is_upstream_down(exc: BaseException) -> bool:
-    return isinstance(exc, UPSTREAM_DOWN) or (
-        isinstance(exc, MCPError) and exc.code in _UPSTREAM_DOWN_ERROR_CODES
+# One ping's result: `exited` the connection is closed (nothing can answer any more);
+# `unanswered` silence, or an error reply, within the timeout.
+class ProbeOutcome(StrEnum):
+    ANSWERED = "answered"
+    EXITED = "exited"
+    UNANSWERED = "unanswered"
+
+
+# meiva:note
+# How the upstream is probed. A wedged upstream has no client calling it to notice, so the
+# watchdog pings it every `interval_s` (2026-08-06 #899). One unanswered ping is NOT proof
+# of a wedge: `max_unanswered` unanswered probes in a row are, the later ones coming every
+# `retry_s` so a real wedge is found quickly. A closed connection needs no repetition and
+# is dead at once. Measured 2026-11-12 against chrome-devtools-mcp 1.6.0: its protocol layer
+# keeps answering pings during a 40 s navigation, a 40 s lighthouse audit (0.12 s worst
+# reply) and a 20 s `wait_for` -- tool calls are async behind a mutex that pings bypass --
+# so only a stalled node event loop (a long synchronous burst, a stopped process) leaves
+# pings unanswered, and 3 timeouts in a row means 50 s of that.
+@dataclass(frozen=True)
+class ProbePolicy:
+    interval_s: float = 30.0
+    timeout_s: float = 10.0
+    retry_s: float = 10.0
+    max_unanswered: int = 3
+
+    # meiva:note
+    # The longest a wedge that starts right after an answered ping stays undetected.
+    @property
+    def worst_case_s(self) -> float:
+        retries = self.max_unanswered - 1
+        return self.interval_s + self.timeout_s + retries * (self.retry_s + self.timeout_s)
+
+
+UPSTREAM_PROBE = ProbePolicy()
+
+# meiva:note
+# A call that reaches the read timeout fails alone when the upstream still answers a probe.
+# This many such timeouts in a row (no call of any kind succeeding in between) mean the
+# upstream's tool path is wedged though its protocol layer answers (a tool stuck while
+# holding the upstream's tool mutex), and end the generation. Worst case from the start of
+# the first affected call: `CALL_TIMEOUT_LIMIT` read timeouts plus one probe each (380 s).
+CALL_TIMEOUT_LIMIT = 2
+
+
+# meiva:note
+# Say why this daemon generation ends, once, so restarts can be counted by cause: a log
+# line and the `browser_mcp_exit` event. `STOPPED` is a stop or an update (expected); every
+# other reason is a death the root answers with a restart.
+def report_daemon_exit(reason: DeathReason) -> None:
+    stopped = reason is DeathReason.STOPPED
+    logger.log("INFO" if stopped else "ERROR", "[browser-mcp] daemon exiting: {}", reason)
+    telemetry.emit(
+        "telemetry",
+        "browser_mcp_exit",
+        level="info" if stopped else "error",
+        attributes={"reason": str(reason)},
     )
+
+
+# meiva:note
+# One upstream call outlived the read timeout; the upstream itself still answers.
+class UpstreamCallTimeoutError(RuntimeError):
+    pass
+
+
+# meiva:note
+# The health verdict on the one upstream session behind a daemon generation: what
+# counts as dead, why, and when. `dead` is set once, with the first reason.
+class UpstreamGuard:
+    def __init__(
+        self, session: ClientSession, timers: Timers, policy: ProbePolicy = UPSTREAM_PROBE
+    ) -> None:
+        self._session = session
+        self.timers = timers
+        self.policy = policy
+        self.dead = asyncio.Event()
+        self.reason: DeathReason | None = None
+        self._call_timeouts = 0
+
+    def mark_dead(self, reason: DeathReason) -> None:
+        if self.dead.is_set():
+            return
+        self.reason = reason
+        self.dead.set()
+        logger.error(
+            "[browser-mcp] upstream is unusable ({}); ending this daemon generation", reason
+        )
+
+    # meiva:note
+    # Ping the upstream once, bounded by the policy's timeout.
+    async def probe(self) -> ProbeOutcome:
+        try:
+            await asyncio.wait_for(self._session.send_ping(), timeout=self.policy.timeout_s)
+        except TimeoutError:
+            return ProbeOutcome.UNANSWERED
+        except UPSTREAM_DOWN:
+            return ProbeOutcome.EXITED
+        except MCPError as e:
+            return ProbeOutcome.EXITED if e.code == CONNECTION_CLOSED else ProbeOutcome.UNANSWERED
+        except Exception as e:
+            logger.warning("[browser-mcp] upstream probe failed unexpectedly: {!r}", e)
+            return ProbeOutcome.UNANSWERED
+        return ProbeOutcome.ANSWERED
+
+    # meiva:note
+    # Await one upstream request. A failure that makes the session unusable marks it dead and
+    # raises `RuntimeError(UPSTREAM_DOWN_MSG)`; a read timeout is judged by `_after_timeout`;
+    # any other error propagates unchanged.
+    async def request[T](self, what: str, work: Awaitable[T]) -> T:
+        try:
+            result = await work
+        except UPSTREAM_DOWN as e:
+            self.mark_dead(DeathReason.UPSTREAM_EXITED)
+            raise RuntimeError(UPSTREAM_DOWN_MSG) from e
+        except MCPError as e:
+            if e.code == CONNECTION_CLOSED:
+                self.mark_dead(DeathReason.UPSTREAM_EXITED)
+                raise RuntimeError(UPSTREAM_DOWN_MSG) from e
+            if e.code == REQUEST_TIMEOUT:
+                await self._after_timeout(what, e)
+            raise
+        self._call_timeouts = 0
+        return result
+
+    async def _after_timeout(self, what: str, cause: MCPError) -> NoReturn:
+        self._call_timeouts += 1
+        outcome = await self.probe()
+        if outcome is ProbeOutcome.EXITED:
+            self.mark_dead(DeathReason.UPSTREAM_EXITED)
+        elif outcome is ProbeOutcome.UNANSWERED:
+            self.mark_dead(DeathReason.CALL_TIMEOUT_UNANSWERED)
+        elif self._call_timeouts >= CALL_TIMEOUT_LIMIT:
+            self.mark_dead(DeathReason.CALL_TIMEOUTS_REPEATED)
+        if self.dead.is_set():
+            raise RuntimeError(UPSTREAM_DOWN_MSG) from cause
+        raise UpstreamCallTimeoutError(
+            f"{what} did not finish within {READ_TIMEOUT.total_seconds():.0f}s; the browser "
+            "itself is still responding, so it was not restarted. The page may be slow or busy: "
+            "retry with a lighter operation."
+        ) from cause
 
 
 # meiva:note
@@ -247,25 +402,29 @@ async def await_death_or_stop(dead: asyncio.Event, stop: asyncio.Event) -> None:
 
 
 # meiva:note
-# Periodically ping the upstream session; a wedged one (no reply within the
-# timeout) sets `dead` so the daemon exits even when no client is calling.
-async def upstream_watchdog(
-    upstream: ClientSession, dead: asyncio.Event, stop: asyncio.Event
-) -> None:
+# Ping the upstream on the policy's cadence; `max_unanswered` unanswered pings in a row (or a
+# closed connection) set `dead` so the daemon exits even when no client is calling.
+async def upstream_watchdog(guard: UpstreamGuard, stop: asyncio.Event) -> None:
+    unanswered = 0
     while not stop.is_set():
-        try:
-            await asyncio.wait_for(upstream.send_ping(), timeout=_UPSTREAM_WATCHDOG_TIMEOUT_S)
-        except (TimeoutError, MCPError) as e:
-            if stop.is_set():
-                return
-            logger.error(
-                "[browser-mcp] upstream watchdog: {} — terminating the daemon",
-                type(e).__name__,
-            )
-            dead.set()
+        outcome = await guard.probe()
+        if stop.is_set():
             return
-        except Exception as e:
-            if stop.is_set():
+        if outcome is ProbeOutcome.EXITED:
+            guard.mark_dead(DeathReason.UPSTREAM_EXITED)
+            return
+        if outcome is ProbeOutcome.ANSWERED:
+            unanswered = 0
+            wait = guard.policy.interval_s
+        else:
+            unanswered += 1
+            logger.warning(
+                "[browser-mcp] upstream ping unanswered ({}/{})",
+                unanswered,
+                guard.policy.max_unanswered,
+            )
+            if unanswered >= guard.policy.max_unanswered:
+                guard.mark_dead(DeathReason.PROBES_UNANSWERED)
                 return
-            logger.warning("[browser-mcp] upstream watchdog ping failed: {!r}; retrying", e)
-        await await_stop_or_timeout(stop, _UPSTREAM_WATCHDOG_INTERVAL_S)
+            wait = guard.policy.retry_s
+        await await_stop_or_timeout(stop, wait, guard.timers)

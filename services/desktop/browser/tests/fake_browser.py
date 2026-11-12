@@ -26,8 +26,22 @@ class BindableUpstream(Protocol):
 
 
 # meiva:note
-# The ledger file of a test: records kept in memory, saves counted.
+# The selection file of a test: the agents' saved selections kept in memory, saves counted.
+class MemorySelection:
+    def __init__(self, selected: dict[int, str] | None = None) -> None:
+        self.selected = dict(selected or {})
+        self.saves = 0
+
+    def load(self) -> dict[int, str]:
+        return dict(self.selected)
+
+    def save(self, selected: dict[int, str]) -> None:
+        self.selected = dict(selected)
+        self.saves += 1
+
+
 # meiva:note
+# The ledger file of a test: records kept in memory, saves counted.
 # No ledger yet (`load` is None) until a test gives it one or something saves.
 class MemoryStore:
     def __init__(

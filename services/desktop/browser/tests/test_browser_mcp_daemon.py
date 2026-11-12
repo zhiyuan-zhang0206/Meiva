@@ -9,9 +9,9 @@ import anyio
 import pytest
 from mcp import types
 from mcp.shared.exceptions import MCPError
-from mcp.types import CONNECTION_CLOSED, REQUEST_TIMEOUT
+from mcp.types import CONNECTION_CLOSED
 
-from base.clock import Clock
+from base.clock import SYSTEM_TIMERS, Clock
 from base.clock.tests.fakes import system_clock
 from services.desktop.browser import page_lifecycle
 from services.desktop.browser.mcp_daemon import (
@@ -21,13 +21,12 @@ from services.desktop.browser.mcp_daemon import (
     selected_id,
     text_of,
 )
-from services.desktop.browser.page_lifecycle import (
-    PageRegistry,
-    RecordStore,
-    parse_page_listing,
-)
+from services.desktop.browser.mcp_upstream import UpstreamGuard
+from services.desktop.browser.page_lifecycle import PageRegistry, parse_page_listing
+from services.desktop.browser.tab_groups.page_store import RecordStore, SelectionStore
 from services.desktop.browser.tests.fake_browser import (
     FakeBrowser,
+    MemorySelection,
     MemoryStore,
 )
 
@@ -113,6 +112,7 @@ def new_daemon(
     *,
     default_ttl_seconds: float = page_lifecycle.DEFAULT_PAGE_TTL_SECONDS,
     store: RecordStore | None = None,
+    selection: SelectionStore | None = None,
     clock: Clock | None = None,
 ) -> ChromeMcpDaemon:
     browser = tab_groups if tab_groups is not None else FakeBrowser()
@@ -126,8 +126,10 @@ def new_daemon(
             default_ttl_seconds=default_ttl_seconds,
             clock=clock or system_clock(),
             store=store or MemoryStore(),
+            selection_store=selection or MemorySelection(),
         ),
         groups,
+        UpstreamGuard(session, SYSTEM_TIMERS),
     )
 
 
@@ -290,9 +292,9 @@ async def test_list_tools_flags_dead_on_upstream_death() -> None:
     assert d.dead.is_set()
 
 
-class TimedOutUpstream:
+class ClosedConnectionUpstream:
     async def list_tools(self) -> Any:
-        raise MCPError(code=REQUEST_TIMEOUT, message="Request 'tools/list' timed out")
+        raise MCPError(code=CONNECTION_CLOSED, message="Connection closed")
 
     async def call_tool(self, name: str, args: dict[str, Any]) -> Any:
         raise MCPError(code=CONNECTION_CLOSED, message="Connection closed")
@@ -303,15 +305,15 @@ class OtherMCPErrorUpstream:
         raise MCPError(code=-32602, message="Invalid params")
 
 
-async def test_call_tool_flags_dead_on_timeout_upstream() -> None:
-    d = new_daemon(TimedOutUpstream())
+async def test_call_tool_flags_dead_on_closed_connection() -> None:
+    d = new_daemon(ClosedConnectionUpstream())
     with pytest.raises(RuntimeError, match="upstream session is down"):
         await d.call_tool("navigate_page", {"url": "https://x.com"}, None)
     assert d.dead.is_set()
 
 
-async def test_list_tools_flags_dead_on_timeout_upstream() -> None:
-    d = new_daemon(TimedOutUpstream())
+async def test_list_tools_flags_dead_on_closed_connection() -> None:
+    d = new_daemon(ClosedConnectionUpstream())
     with pytest.raises(RuntimeError, match="upstream session is down"):
         await d.list_tools()
     assert d.dead.is_set()

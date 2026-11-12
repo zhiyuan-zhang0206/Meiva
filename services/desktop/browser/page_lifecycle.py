@@ -51,7 +51,12 @@
 # Affinity records selection, including tabs the agent did not create. A user tab
 # the agent merely selected has no record and no renewal or automatic-close path.
 # Page ids are only meaningful within the upstream process, so ``affinity`` and the
-# page-id <-> target map never outlive the page numbering they record.
+# page-id <-> target map never outlive the page numbering they record. What does
+# outlive it is the agent's selection as a CDP target id (``selected_targets``, saved in
+# ``<home>/run/browser-selected-pages.json``): the agent's first call after a daemon
+# restart finds that target again in the new upstream's page list (``restored_page``)
+# and re-selects it; a target that is gone, or whose URL does not single it out, is
+# dropped. Restoring a selection grants nothing: closing rests on the records alone.
 
 from __future__ import annotations
 
@@ -66,14 +71,11 @@ from urllib.parse import urlsplit
 from mcp import types
 
 from base import telemetry
-from base.clock import Clock
 from base.log import logger
 from services.desktop.browser.protocol import Response, WireRequest
 from services.desktop.browser.tab_groups.page_ledger import (
     MAX_GRANT_SECONDS,
     ExpiredPage,
-    LedgerFile,
-    PageRecord,
     Reconciled,
     TabState,
     agent_pages,
@@ -82,14 +84,15 @@ from services.desktop.browser.tab_groups.page_ledger import (
     reconcile,
     target_of_url,
 )
+from services.desktop.browser.tab_groups.page_registry import PageRegistry as PageRegistry
+from services.desktop.browser.tab_groups.page_selection import (
+    listed_page_of_target,
+    target_of_listed_page,
+)
 from services.desktop.browser.tab_groups.page_store import (
     FileRecordStore as FileRecordStore,
 )
-from services.desktop.browser.tab_groups.page_store import (
-    RecordStore,
-    page_ledger_path,
-    records_of,
-)
+from services.desktop.browser.tab_groups.page_store import page_ledger_path
 
 __all__ = ["FileRecordStore", "page_ledger_path"]
 
@@ -163,150 +166,6 @@ def renew_page_tool_dump() -> dict[str, object]:
 _PAGE_LINE_RE = re.compile(
     r"^\s*(\d+):\s*(?:.+\s\((\S+)\)|(\S+))(?:\s+\[selected\])?(?:\s+\S+=\S+)*\s*$"
 )
-
-
-# meiva:note
-# The page-keyed state of the shared browser-mcp daemon, one per process.
-#
-# Built once by the daemon's composition root and handed to its `ChromeMcpDaemon`.
-# The daemon serves one upstream connection and exits when it dies, so every page
-# id here belongs to the upstream process that is still serving.
-#
-# - `affinity`: agent id -> current page id. The selected-page state belongs to the
-#   AGENT, not to a TCP connection: an exec subprocess child re-connecting mid-turn
-#   must land on the same tab the agent selected. Requests without an agent id
-#   (legacy wrapper clients) keep the per-connection fallback in the daemon.
-# - `records`: CDP target id -> `PageRecord`, persisted on every change (see
-#   `RecordStore`); the only candidate source for closing, so pages this stack never
-#   created (the user's own tabs) are never inspected or closed. `migrate_pending`: the
-#   process started with no ledger file, so its first reconciliation runs the one-time
-#   migration of pages already in agent groups; any saved file (whoever wrote it first)
-#   counts as the migration decided, so it never runs twice.
-# - `page_targets`: page id -> target id, for the pages this process created or has
-#   matched to a target; empty at every daemon start.
-# - `due_seen`, `close_failures`: in-memory sweep state (the previous sweep's due
-#   targets; consecutive failed closes per target, to keep the log quiet).
-class PageRegistry:
-    def __init__(
-        self,
-        default_ttl_seconds: float = DEFAULT_PAGE_TTL_SECONDS,
-        *,
-        clock: Clock,
-        store: RecordStore,
-    ) -> None:
-        self.default_ttl_seconds = float(default_ttl_seconds)
-        self._clock = clock
-        self._store = store
-        self.affinity: dict[int, int | None] = {}
-        loaded = store.load()
-        self.records: dict[str, PageRecord] = records_of(loaded)
-        self.migrate_pending = loaded is None or not loaded.migrated
-        self.page_targets: dict[int, str] = {}
-        self.due_seen: set[str] = set()
-        self.close_failures: dict[str, int] = {}
-        self._grouped_early: set[str] = set()
-
-    def _save(self) -> None:
-        self._store.save(LedgerFile(self.records, migrated=True))
-
-    # meiva:note
-    # Wall-clock epoch seconds, the unit of every deadline.
-    def now(self) -> float:
-        return self._clock.now().timestamp()
-
-    def get_agent_page(self, agent_id: int) -> int | None:
-        return self.affinity.get(agent_id)
-
-    def set_agent_page(self, agent_id: int, page_id: int | None) -> None:
-        self.affinity[agent_id] = page_id
-
-    # meiva:note
-    # Give a freshly created page its record: the owner and `now + default TTL`.
-    # Called by the daemon right after a `new_page` it forwarded once the page's
-    # target was identified (a page whose target could not be told from a tab
-    # someone else opened meanwhile, or that has no agent, carries no record). It
-    # starts `grouped` only when the background grouping already reported success.
-    def register_created_page(
-        self, target_id: str | None, agent_id: int | None, page_id: int | None
-    ) -> None:
-        if target_id is None or agent_id is None:
-            return
-        grouped = target_id in self._grouped_early
-        self._grouped_early.discard(target_id)
-        self.records[target_id] = PageRecord(
-            agent_id, self.now() + self.default_ttl_seconds, grouped=grouped
-        )
-        if page_id is not None:
-            self.page_targets[page_id] = target_id
-        self._save()
-
-    # meiva:note
-    # The background grouping filed the page into its owner's group.
-    def mark_grouped(self, target_id: str) -> None:
-        record = self.records.get(target_id)
-        if record is None:
-            self._grouped_early.add(target_id)
-        elif not record.grouped:
-            self.records[target_id] = PageRecord(
-                record.owner, record.expires_at, grouped=True, url=record.url
-            )
-            self._save()
-
-    def record_for_page(self, page_id: int) -> PageRecord | None:
-        target_id = self.page_targets.get(page_id)
-        return self.records.get(target_id) if target_id is not None else None
-
-    def page_of_target(self, target_id: str) -> int | None:
-        for page_id, known in self.page_targets.items():
-            if known == target_id:
-                return page_id
-        return None
-
-    # meiva:note
-    # Adopt a reconciled record set, writing the file only when something changed.
-    def replace_state(self, records: dict[str, PageRecord], *, migration_ran: bool) -> None:
-        if records != self.records or migration_ran:
-            self.records = records
-            self._save()
-        if migration_ran:
-            self.migrate_pending = False
-
-    def set_deadline(self, target_id: str, expires_at: float) -> None:
-        record = self.records[target_id]
-        self.records[target_id] = PageRecord(
-            record.owner, expires_at, grouped=record.grouped, url=record.url
-        )
-        self._save()
-
-    # meiva:note
-    # Drop the record of a page that is closed (or was never ours).
-    def forget_target(self, target_id: str) -> None:
-        page_id = self.page_of_target(target_id)
-        if page_id is not None:
-            del self.page_targets[page_id]
-        self.close_failures.pop(target_id, None)
-        if self.records.pop(target_id, None) is not None:
-            self._save()
-
-    # meiva:note
-    # Forget the record of a page closed through the upstream's `close_page`.
-    def drop_page_ttl(self, page_id: int | None) -> None:
-        target_id = self.page_targets.get(page_id) if page_id is not None else None
-        if target_id is not None:
-            self.forget_target(target_id)
-
-    # meiva:note
-    # Clear every agent slot naming `page_id` (the page is gone); returns one
-    # cleared affinity owner for logs. A slot left naming a closed page would make
-    # the owner's next call re-pin against a dead id first.
-    def clear_affinity_for_page(self, page_id: int) -> int | None:
-        owner: int | None = None
-        for agent_id, current in list(self.affinity.items()):
-            if current == page_id:
-                self.set_agent_page(agent_id, None)
-                if owner is None:
-                    owner = agent_id
-        return owner
 
 
 # meiva:note
@@ -532,6 +391,78 @@ async def handle_release_agent_page(
     }
 
 
+# meiva:note
+# The agent's current page. The first call of a daemon process for an agent restores the
+# page it had selected before the restart: its saved target is looked up in Chrome and in
+# the new upstream's listing, and re-selected only when both name exactly one tab with that
+# URL. Anything else (the tab is gone, an ambiguous URL, a listing that cannot be read)
+# drops the selection and the agent starts page-less, as before. Callers hold the serial lock.
+async def restored_page(daemon: _PageDaemon, agent_id: int) -> int | None:
+    pages = daemon.pages
+    if agent_id in pages.affinity:
+        return pages.affinity[agent_id]
+    target_id = pages.selected_targets.get(agent_id)
+    page_id = await _restore_selection(daemon, agent_id, target_id) if target_id else None
+    pages.set_agent_page(agent_id, page_id)
+    return page_id
+
+
+# meiva:note
+# Chrome's page targets with their URLs, or None when its tabs cannot be read (a WARNING says
+# so): the saved selection is a convenience and never worth failing a call for.
+async def _chrome_urls(daemon: _PageDaemon, what: str) -> dict[str, str] | None:
+    try:
+        return dict((await daemon.tab_groups.tab_state()).pages)
+    except Exception as e:
+        logger.warning(f"[browser-mcp] could not read Chrome's tabs to {what} ({e!r})")
+        return None
+
+
+async def _restore_selection(daemon: _PageDaemon, agent_id: int, target_id: str) -> int | None:
+    listing = await daemon._call("list_pages", {})
+    urls = await _chrome_urls(daemon, f"restore agent {agent_id}'s selected page")
+    page_id = (
+        None
+        if listing.is_error or urls is None
+        else listed_page_of_target(parse_page_listing(text_of(listing)), urls, target_id)
+    )
+    if page_id is None:
+        logger.info(
+            f"[browser-mcp] agent {agent_id}'s selected page {target_id} is gone or not "
+            "identifiable after the restart; the selection is dropped"
+        )
+        return None
+    daemon.pages.page_targets[page_id] = target_id
+    logger.info(f"[browser-mcp] agent {agent_id}'s selected page {target_id} restored as {page_id}")
+    return page_id
+
+
+# meiva:note
+# Save the target of the page ``agent_id`` now has selected (a page that changed through
+# this call) so a daemon restart can restore it. A page this process created or matched
+# has its target; any other (a tab the agent selected) is matched by its URL against
+# Chrome's tabs, ``result``'s listing first. A page that cannot be identified leaves
+# nothing saved: no stale target outlives its page. Never fails the call it follows.
+async def remember_selection(
+    daemon: _PageDaemon, agent_id: int, page_id: int | None, result: types.CallToolResult
+) -> None:
+    if page_id is None:
+        return
+    target_id = daemon.pages.page_targets.get(page_id)
+    if target_id is None:
+        try:
+            listing = parse_page_listing(text_of(result))
+            if page_id not in listing:
+                listing = parse_page_listing(text_of(await daemon._call("list_pages", {})))
+            urls = await _chrome_urls(daemon, f"save agent {agent_id}'s selected page")
+            target_id = None if urls is None else target_of_listed_page(listing, urls, page_id)
+        except Exception as e:
+            logger.warning(
+                f"[browser-mcp] could not list the pages to save agent {agent_id}'s selection ({e!r})"
+            )
+    daemon.pages.set_selected_target(agent_id, target_id)
+
+
 def parse_page_listing(text: str) -> dict[int, str]:
     """page id -> URL from a list_pages / new_page listing result.
 
@@ -618,7 +549,7 @@ async def renew_agent_page(
     if ttl > _MAX_TTL_SECONDS:
         return _tool_error(f"ttl must be at most {_MAX_TTL_SECONDS:.0f} seconds (24 hours)")
     async with daemon._lock:
-        page_id = daemon.pages.get_agent_page(agent_id)
+        page_id = await restored_page(daemon, agent_id)
         if page_id is None:
             return _tool_error("this agent has no current page to renew; open one first")
         target_id = await _target_of_page(daemon, agent_id, page_id)
