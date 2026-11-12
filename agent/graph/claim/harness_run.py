@@ -356,6 +356,20 @@ class ForegroundRun:
         await requeue_handed(self._ctx, self._agent_id, missing)
         return []
 
+    # meiva:note
+    # The one rule of delivery on the transcript path, applied to an input the event stream reports as refused or
+    # lost: the record is read once more, and the input has been delivered if the record shows it (the writer has
+    # then settled it in the transaction that wrote its entry). An input the record does not show goes back to the
+    # queue. A record that cannot be read fails the invocation, and the inputs are then decided by
+    # `retire_unconfirmed` the same way. On the event path there is no record, and the answer is no.
+    async def _record_shows(self, handed: Handed) -> bool:
+        timeline = self._timeline
+        if timeline is None:
+            return False
+        while await timeline.read_now():
+            pass
+        return handed.key not in {sent.key for sent in timeline.undelivered()}
+
     def _register_handed(self, handed: Sequence[Handed], inputs: Sequence[HarnessInput]) -> None:
         if self._timeline is None:
             return
@@ -515,6 +529,16 @@ class ForegroundRun:
                     human_input=handed.human,
                 )
                 publish_inbound(self._ctx, self._agent_id, items)
+            case Requeue(handed=handed, reason=reason) if await self._record_shows(handed):
+                logger.info(
+                    "the record shows an input the harness reported as not taken; it is settled, not sent again",
+                    event="harness_input_proven_by_record",
+                    agent_id=self._agent_id,
+                    key=handed.key,
+                    reason=reason,
+                )
+                self._forget([handed])
+                _ = self._folded.pop(handed.key, None)
             case Requeue(handed=handed, reason=reason):
                 logger.info(
                     "harness input returned to the queue",

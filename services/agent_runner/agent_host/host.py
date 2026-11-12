@@ -426,6 +426,12 @@ class AgentHost:
                 pool=self._pool,
                 clock=self._policy.clock_factory(),
                 marker_id=lambda: self._policy.rng.randbytes(8).hex(),
+                publisher_factory=lambda timeline_agent_id: AgentEventPublisher(
+                    self._bus.async_redis(),
+                    self._bus.channel,
+                    agent_id=timeline_agent_id,
+                    auth_retry=self._bus.auth_retry,
+                ),
             ),
         )
 

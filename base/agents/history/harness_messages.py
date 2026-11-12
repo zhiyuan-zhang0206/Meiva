@@ -102,6 +102,23 @@ async def aget_harness_call_item_id(
     return None if row is None else f"h{row[0]}.0"
 
 
+# meiva:note
+# The `agent_chat` items among an agent's latest `rows` timeline rows, oldest first. A bounded read of the tail
+# (`rows` is the bound, whatever the length of the timeline), for the replies a process may have committed and
+# not yet handed to delivery, which the idempotent capture then offers again.
+async def aload_recent_agent_replies(
+    conn: AsyncConnection, agent_id: int, *, rows: int
+) -> list[TimelineItem]:
+    found = await aquery_all(
+        conn,
+        _ItemRow,
+        "SELECT item FROM (SELECT seq, item FROM agent_harness_messages WHERE agent_id = %s "
+        "ORDER BY seq DESC LIMIT %s) AS tail WHERE item->>'kind' = 'agent_chat' ORDER BY seq",
+        (agent_id, rows),
+    )
+    return [TimelineItem.model_validate(row.item) for row in found]
+
+
 def load_harness_message_count(conn: Connection, agent_id: int) -> int:
     with conn.cursor() as cur:
         cur.execute(

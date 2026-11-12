@@ -42,6 +42,7 @@ from services.agent_runner.agent_host.scheduling import stored_config
 from services.agent_runner.agent_host.transcript.timeline import (
     TimelineDeps,
     TranscriptTimeline,
+    session_with_resume,
     transcript_timeline_for,
 )
 
@@ -500,8 +501,12 @@ async def build_runtime(
         fork_source_agent_id=fork_source_agent_id,
         session_wake=None if timeline is None else timeline.wake,
     )
-    if timeline is not None and bridge is not None:
-        timeline.attach(lambda: bridge.session_id)
+    if timeline is not None and bridge is not None and registry is not None:
+        timeline.attach(
+            session_with_resume(
+                lambda: bridge.session_id, registry, agent_id=agent_id, harness=harness.value
+            )
+        )
     return AgentRuntime(
         fingerprint=fingerprint,
         llm=llm,

@@ -1,11 +1,20 @@
 from __future__ import annotations
 
+from collections import deque
+from collections.abc import Awaitable, Callable
+
+from psycopg_pool import AsyncConnectionPool
+
 from agent.graph.claim.harness_activity import resolve_pricing_model
-from agent.graph.claim.harness_inbox import publish_inbound
+from agent.graph.claim.harness_inbox import Emits, publish_items
 from agent.graph.hooks.user_delivery import capture_items
 from agent.harness_timeline.writer import Committed
 from base.agents.context import MeivaContext
+from base.agents.history.harness_messages import aload_recent_agent_replies
+from base.agents.history.timeline_item import TimelineItem
 from base.lm.harness.session.transcript.drafts import MessageUsage
+from base.lm.harness.session.transcript.entries import MAIN_RECORD
+from base.lm.harness.session.transcript.projection import RecentSet
 from base.lm.usage import UsageFields, log_usage_fields
 from base.log import logger
 
@@ -13,35 +22,118 @@ from base.log import logger
 # What happens after the timeline writer commits a read, for the agent host to run beside it: the items that
 # were written are published to the live view, the replies meant for the person are captured for delivery, each
 # reliable model message's spend is logged as the same `llm_usage` event the built-in loop logs, and what the
-# parser could not use or could not place is reported. It is not part of the transaction: a failure here is
-# logged and never undoes or repeats a commit.
+# parser could not use or could not place is reported. None of it is part of the transaction, and none of it can
+# fail the commit or another effect: each runs on its own, a failure is logged as `harness_timeline_effect_failed`
+# and what failed is kept to be tried again at the next commit, so one effect failing never costs another.
+#
+# Publishing goes through a publisher of the runtime (`TimelineDeps.publisher_factory`), not the graph
+# invocation's: a row read after the invocation ended (a background sub-agent's output) reaches the live view too.
+# The replies and the spend are kept as "owed" (bounded) until they have gone through, and both are idempotent:
+# `capture_items` publishes under `harness:<item id>` and the publication is unique by that key, and a message's
+# spend is logged once per `(record, message id)`. A process that dies between a commit and its effects loses the
+# spend of that read (a log, not a table: nothing can tell what was logged), but not the replies: `recover`, run when the
+# writer starts, offers the latest stored replies to the same idempotent capture again.
 #
 # Usage is logged when the entry is read (never back-filled into a turn that was settled), once per
 # `message.id`, for every reliable message: the main record's as `usage_kind="agent"` and a sub-agent's as
-# `usage_kind="agent_subagent"` with `parent_call_id` naming the call that started it, priced on the message's
-# own model. This counts the sub-agents' tokens, which the turn result's usage excludes, so a transcript-sourced
-# agent's logged usage is higher than the adapter-event path's by exactly that spend.
+# `usage_kind="agent_subagent"` with `parent_call_id` naming the call that started it when known, priced on the
+# message's own model. This counts the sub-agents' tokens, which the turn result's usage excludes, so a
+# transcript-sourced agent's logged usage is higher than the adapter-event path's by exactly that spend.
 #
 # The context is the latest hosted turn's, bound by the host (`bind`): between turns it still carries the
-# database, bus and clock handles the effects use.
+# database, bus and clock handles the capture and the pricing use.
 # meiva:link agent/harness_timeline/README.md
 
 MAIN_USAGE_KIND = "agent"
 SUBAGENT_USAGE_KIND = "agent_subagent"
+OWED_LIMIT = 256
+LOGGED_LIMIT = 8_192
+RECOVER_ROWS = 500
+
+
+async def capture_replies(ctx: MeivaContext, agent_id: int, items: list[TimelineItem]) -> None:
+    await capture_items(ctx, agent_id, items, source_key="harness")
 
 
 class TimelineEffects:
-    def __init__(self, agent_id: int) -> None:
+    def __init__(
+        self,
+        agent_id: int,
+        publisher: Emits,
+        *,
+        capture: Callable[
+            [MeivaContext, int, list[TimelineItem]], Awaitable[None]
+        ] = capture_replies,
+    ) -> None:
         self._agent_id = agent_id
+        self._publisher = publisher
+        self._capture = capture
         self._ctx: MeivaContext | None = None
+        self._owed_replies: deque[TimelineItem] = deque(maxlen=OWED_LIMIT)
+        self._owed_usage: deque[MessageUsage] = deque(maxlen=OWED_LIMIT)
+        self._logged: RecentSet[tuple[str, str]] = RecentSet(LOGGED_LIMIT)
+        self._unmatched: RecentSet[str] = RecentSet(LOGGED_LIMIT)
 
     def bind(self, ctx: MeivaContext) -> None:
         self._ctx = ctx
 
+    async def recover(self, pool: AsyncConnectionPool) -> None:
+        await self._isolated("recover", lambda: self._recover(pool), agent_id=self._agent_id)
+
+    async def _recover(self, pool: AsyncConnectionPool) -> None:
+        async with pool.connection() as conn:
+            replies = await aload_recent_agent_replies(conn, self._agent_id, rows=RECOVER_ROWS)
+        self._owed_replies.extend(replies)
+        await self.settle_owed()
+
     async def after_commit(self, commit: Committed) -> None:
+        self._report(commit)
+        written = list(commit.written)
+        await self._isolated("publish", lambda: self._publish(written), agent_id=self._agent_id)
+        self._owed_replies.extend(item for item in written if item.kind == "agent_chat")
+        self._owed_usage.extend(commit.plan.usage)
+        await self.settle_owed()
+
+    async def settle_owed(self) -> None:
+        await self._isolated("capture", self._capture_owed, agent_id=self._agent_id)
+        await self._isolated("usage", self._price_owed, agent_id=self._agent_id)
+
+    async def _publish(self, written: list[TimelineItem]) -> None:
+        publish_items(self._publisher, self._agent_id, written)
+
+    async def _capture_owed(self) -> None:
+        ctx = self._ctx
+        if ctx is None or not self._owed_replies:
+            return
+        items = list(self._owed_replies)
+        await self._capture(ctx, self._agent_id, items)
+        for _ in items:
+            _ = self._owed_replies.popleft()
+
+    async def _price_owed(self) -> None:
         ctx = self._ctx
         if ctx is None:
-            raise RuntimeError("the timeline effects ran before any hosted turn was bound")
+            return
+        for _ in range(len(self._owed_usage)):
+            spend = self._owed_usage.popleft()
+            ident = (spend.record, spend.message_ref)
+            if ident in self._logged:
+                continue
+            try:
+                self._log_usage(ctx, spend)
+            except Exception as error:
+                self._owed_usage.append(spend)
+                logger.warning(
+                    "a message's usage could not be priced; it is tried again at the next commit",
+                    event="harness_usage_log_failed",
+                    agent_id=self._agent_id,
+                    error=repr(error),
+                    message_ref=spend.message_ref,
+                )
+                return
+            self._logged.add(ident)
+
+    def _report(self, commit: Committed) -> None:
         for report in commit.plan.anomalies:
             logger.warning(
                 "the transcript held a row the projection could not use",
@@ -51,50 +143,50 @@ class TimelineEffects:
                 detail=report.detail,
             )
         for key in commit.plan.unmatched_inputs:
+            if key in self._unmatched:
+                continue
+            self._unmatched.add(key)
             logger.warning(
                 "the transcript showed an input this process did not send",
                 event="harness_timeline_unmatched_input",
                 agent_id=self._agent_id,
                 entry_key=key,
             )
-        written = list(commit.written)
-        if written:
-            publish_inbound(ctx, self._agent_id, written)
-            await capture_items(ctx, self._agent_id, written, source_key="harness")
-        for spend in commit.plan.usage:
-            self._log_usage(ctx, spend)
 
     def _log_usage(self, ctx: MeivaContext, spend: MessageUsage) -> None:
         usage = spend.usage
         if usage.input_tokens == 0 and usage.output_tokens == 0:
             return
+        catalog = ctx.require_catalog()
+        model = resolve_pricing_model(spend.model or ctx.require_agent().brain.llm_model, catalog)
+        sub = spend.record != MAIN_RECORD
+        _ = log_usage_fields(
+            model,
+            UsageFields(
+                tok_in=usage.input_tokens,
+                tok_out=usage.output_tokens,
+                tok_cached=usage.cache_read_input_tokens or None,
+                cache_write_5m=usage.cache_creation_input_tokens,
+                source=ctx.harness.value,
+                for_agent_id=self._agent_id,
+                calls=1,
+                parent_call_id=spend.parent_call_id,
+            ),
+            usage_kind=SUBAGENT_USAGE_KIND if sub else MAIN_USAGE_KIND,
+            catalog=catalog,
+            now=ctx.require_clock().now(),
+        )
+
+    async def _isolated(
+        self, effect: str, run: Callable[[], Awaitable[None]], *, agent_id: int
+    ) -> None:
         try:
-            catalog = ctx.require_catalog()
-            model = resolve_pricing_model(
-                spend.model or ctx.require_agent().brain.llm_model, catalog
-            )
-            sub = spend.parent_call_id is not None
-            log_usage_fields(
-                model,
-                UsageFields(
-                    tok_in=usage.input_tokens,
-                    tok_out=usage.output_tokens,
-                    tok_cached=usage.cache_read_input_tokens or None,
-                    cache_write_5m=usage.cache_creation_input_tokens,
-                    source=ctx.harness.value,
-                    for_agent_id=self._agent_id,
-                    calls=1,
-                    parent_call_id=spend.parent_call_id,
-                ),
-                usage_kind=SUBAGENT_USAGE_KIND if sub else MAIN_USAGE_KIND,
-                catalog=catalog,
-                now=ctx.require_clock().now(),
-            )
-        except Exception as error:
-            logger.warning(
-                "a message's usage could not be priced; its accounting row is missing",
-                event="harness_usage_log_failed",
-                agent_id=self._agent_id,
-                error=repr(error),
-                message_ref=spend.message_ref,
+            await run()
+        except Exception:
+            logger.opt(exception=True).warning(
+                "an effect of a committed read failed; what it owed is kept and tried again at the "
+                "next commit",
+                event="harness_timeline_effect_failed",
+                agent_id=agent_id,
+                effect=effect,
             )

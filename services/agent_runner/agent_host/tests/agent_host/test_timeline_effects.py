@@ -14,6 +14,7 @@ from collections.abc import Mapping
 from agent.graph.claim.tests.harness_support import FakeEngine, runtime
 from agent.harness_timeline.plan import ReplyPolicy, WritePlan, plan_write
 from agent.harness_timeline.writer import Committed
+from base.agents.history.timeline_item import TimelineItem
 from base.lm.harness import Usage
 from base.lm.harness.claude.transcript.tests.support import entries_of, project, sent
 from base.lm.harness.session.transcript.drafts import AnomalyReport, MessageUsage
@@ -28,6 +29,14 @@ from services.agent_runner.agent_host.transcript.effects import (
 
 SUBS = "611dfcac-5809-5de8-b8c6-2e185bf7d5be"
 POLICY = ReplyPolicy(explicit_visibility=False, delivery_mode=None)
+
+
+class Published:
+    def __init__(self) -> None:
+        self.payloads: list[str] = []
+
+    def emit(self, payload: str) -> None:
+        self.payloads.append(payload)
 
 
 def _plan() -> WritePlan:
@@ -51,7 +60,7 @@ async def test_main_and_sub_agent_spend_are_logged_separately_by_call_and_model(
     loguru_records: LogRecords,
 ) -> None:
     ctx = runtime(FakeEngine()).context
-    effects = TimelineEffects(7)
+    effects = TimelineEffects(7, Published())
     effects.bind(ctx)
     plan = _plan()
     await effects.after_commit(Committed(plan, ()))
@@ -74,7 +83,7 @@ async def test_an_interrupted_message_and_an_all_zero_message_are_not_logged(
     loguru_records: LogRecords,
 ) -> None:
     ctx = runtime(FakeEngine()).context
-    effects = TimelineEffects(7)
+    effects = TimelineEffects(7, Published())
     effects.bind(ctx)
     plan = WritePlan(
         usage=(
@@ -90,7 +99,7 @@ async def test_an_interrupted_message_and_an_all_zero_message_are_not_logged(
 
 async def test_what_the_parser_could_not_use_is_reported(loguru_records: LogRecords) -> None:
     ctx = runtime(FakeEngine()).context
-    effects = TimelineEffects(7)
+    effects = TimelineEffects(7, Published())
     effects.bind(ctx)
     plan = WritePlan(
         anomalies=(AnomalyReport(AnomalyKind.UNKNOWN_TYPE, "weird", "k"),),
@@ -106,3 +115,56 @@ async def test_what_the_parser_could_not_use_is_reported(loguru_records: LogReco
 def _name(name: str, tool_input: Mapping[str, object]) -> str:
     del tool_input
     return name
+
+
+class _Failing:
+    def __init__(self) -> None:
+        self.fail = True
+        self.captured: list[str] = []
+
+    async def capture(self, ctx: object, agent_id: int, items: list[TimelineItem]) -> None:
+        del ctx, agent_id
+        if self.fail:
+            raise OSError("the delivery store is down")
+        self.captured.extend(item.item_id for item in items)
+
+
+def _reply(item_id: str) -> TimelineItem:
+    return TimelineItem(item_id=item_id, kind="agent_chat", payload="hi", user_facing=True)
+
+
+async def test_a_failed_capture_costs_neither_the_usage_nor_the_publish_and_is_tried_again(
+    loguru_records: LogRecords,
+) -> None:
+    ctx = runtime(FakeEngine()).context
+    published = Published()
+    store = _Failing()
+    effects = TimelineEffects(7, published, capture=store.capture)
+    effects.bind(ctx)
+    usage = MessageUsage("main", "m1", "t", None, Usage(input_tokens=5, output_tokens=2), "x", True)
+    first = _reply("h1.0")
+    await effects.after_commit(Committed(WritePlan(usage=(usage,)), (first,)))
+
+    assert len(published.payloads) >= 1, "the live view was published although the capture failed"
+    assert len(loguru_records.events("llm_usage")) == 1, (
+        "the spend was logged although the capture failed"
+    )
+    failures = loguru_records.events("harness_timeline_effect_failed")
+    assert [r["extra"]["effect"] for r in failures] == ["capture"]
+
+    store.fail = False
+    await effects.after_commit(Committed(WritePlan(usage=(usage,)), (_reply("h2.0"),)))
+    assert store.captured == ["h1.0", "h2.0"], "what failed is offered again with the next commit"
+    assert len(loguru_records.events("llm_usage")) == 1, (
+        "a spend is logged once however often it is planned"
+    )
+
+
+async def test_an_unmatched_input_is_reported_once_per_session(loguru_records: LogRecords) -> None:
+    ctx = runtime(FakeEngine()).context
+    effects = TimelineEffects(7, Published())
+    effects.bind(ctx)
+    plan = WritePlan(unmatched_inputs=("claude:u-1",))
+    await effects.after_commit(Committed(plan, ()))
+    await effects.after_commit(Committed(plan, ()))
+    assert len(loguru_records.events("harness_timeline_unmatched_input")) == 1

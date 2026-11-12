@@ -5,6 +5,7 @@ from collections.abc import Callable, Mapping
 from contextlib import suppress
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Protocol
 
 from psycopg_pool import AsyncConnectionPool
 
@@ -15,6 +16,7 @@ from base.agents.context import MeivaContext
 from base.api_contracts.agent_contract import Harness
 from base.clock import Clock
 from base.host.env.agent_slices import AgentSlices
+from base.lm.harness.registry import SessionRegistry
 from base.lm.harness.session.transcript.ports import RecordReader
 from base.lm.harness.wiring import transcript_reader_for
 from base.log import logger
@@ -41,14 +43,42 @@ from services.agent_runner.agent_host.transcript.effects import TimelineEffects
 # meiva:link agent/harness_timeline/README.md
 
 
+class TimelinePublisher(Protocol):
+    def emit(self, payload: str) -> None: ...
+
+    async def start(self, task_group: asyncio.TaskGroup) -> None: ...
+
+    async def aclose(self) -> None: ...
+
+
 @dataclass(frozen=True)
 class TimelineDeps:
     pool: AsyncConnectionPool
     clock: Clock
     marker_id: Callable[[], str]
+    publisher_factory: Callable[[int], TimelinePublisher]
 
 
 _CLOSE_JOIN_SECONDS = 10.0
+
+
+# meiva:note
+# The session the writer reads: the live session's id once the CLI has reported it, and before that the one the
+# session registry holds for the agent, which is the one the CLI is resuming (the id is known to the live session
+# only after its init event, which comes after the invocation has already had to decide which of the inputs an
+# earlier process left claimed the record shows). A new agent has neither, and then there is no record to read.
+# meiva:link agent/harness_timeline/README.md
+def session_with_resume(
+    live: Callable[[], str | None], registry: SessionRegistry, *, agent_id: int, harness: str
+) -> Callable[[], str | None]:
+    def current() -> str | None:
+        session_id = live()
+        if session_id is not None:
+            return session_id
+        record = registry.load(agent_id, harness=harness)
+        return None if record is None else record.session_id
+
+    return current
 
 
 class TranscriptTimeline:
@@ -63,7 +93,9 @@ class TranscriptTimeline:
     ) -> None:
         self._agent_id = agent_id
         self._session_id: Callable[[], str | None] = lambda: None
-        self.effects = TimelineEffects(agent_id)
+        self._pool = deps.pool
+        self._publisher = deps.publisher_factory(agent_id)
+        self.effects = TimelineEffects(agent_id, self._publisher)
         reader = reader_for(self._current_session)
         self.writer = HarnessTimelineWriter(
             pool=deps.pool,
@@ -114,13 +146,19 @@ class TranscriptTimeline:
         self._stopped.clear()
         self.writer.clear_fault()
         try:
-            await self.writer.run()
-        except Exception:
-            logger.opt(exception=True).error(
-                "the transcript timeline writer stopped with an unexpected error",
-                event="harness_timeline_writer_faulted",
-                agent_id=self._agent_id,
-            )
+            async with asyncio.TaskGroup() as group:
+                await self._publisher.start(group)
+                try:
+                    await self.effects.recover(self._pool)
+                    await self.writer.run()
+                except Exception:
+                    logger.opt(exception=True).error(
+                        "the transcript timeline writer stopped with an unexpected error",
+                        event="harness_timeline_writer_faulted",
+                        agent_id=self._agent_id,
+                    )
+                finally:
+                    await self._publisher.aclose()
         finally:
             self._running = False
             self._stopped.set()

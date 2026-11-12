@@ -37,8 +37,7 @@ class TimelineSession(Protocol):
     @property
     def fault(self) -> Exception | None: ...
 
-    @property
-    def closed_usage(self) -> Usage | None: ...
+    def take_closed_usage(self) -> Usage | None: ...
 
     def register_input(
         self,

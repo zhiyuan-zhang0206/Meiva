@@ -25,7 +25,7 @@ from base.config.tests.configuration import defaults
 from base.host.env.agent_slices import AgentSlices
 from base.lm.catalog import ModelCatalog
 from base.lm.catalog.provider_keys import ProviderKeys
-from base.lm.harness import FileSessionRegistry, RegistrationStore
+from base.lm.harness import FileSessionRegistry, RegistrationStore, SessionRecord
 from base.lm.harness.claude.session import ClaudeSession
 from base.lm.harness.claude.transcript.wake import WakeSessionStore
 from base.lm.harness.engine import TurnEngine
@@ -36,7 +36,22 @@ from base.lm.harness.wiring import open_session
 from base.log.tests.log_records import LogRecords
 from base.native_process.runtime_incarnation import RuntimeIncarnation
 from services.agent_runner.agent_host.runtime import AgentRuntime, HarnessSessions, build_runtime
-from services.agent_runner.agent_host.transcript.timeline import TimelineDeps, TranscriptTimeline
+from services.agent_runner.agent_host.transcript.timeline import (
+    TimelineDeps,
+    TranscriptTimeline,
+    session_with_resume,
+)
+
+
+class QuietPublisher:
+    def emit(self, payload: str) -> None:
+        del payload
+
+    async def start(self, task_group: asyncio.TaskGroup) -> None:
+        del task_group
+
+    async def aclose(self) -> None:
+        return None
 
 
 async def _build(
@@ -63,7 +78,12 @@ async def _build(
         machine="external-test",
         harness_environ={"HOME": str(tmp_path)},
         harness_root=bridge_root_values(),
-        timeline_deps=TimelineDeps(pool=pool, clock=system_clock(), marker_id=lambda: "m"),
+        timeline_deps=TimelineDeps(
+            pool=pool,
+            clock=system_clock(),
+            marker_id=lambda: "m",
+            publisher_factory=lambda _: QuietPublisher(),
+        ),
     )
 
 
@@ -198,7 +218,12 @@ async def test_the_host_binds_every_turn_and_runs_one_writer_task_until_the_runt
     aops_pool: AsyncConnectionPool, tmp_path: Path
 ) -> None:
     timeline = TranscriptTimeline(
-        TimelineDeps(pool=aops_pool, clock=system_clock(), marker_id=lambda: "m"),
+        TimelineDeps(
+            pool=aops_pool,
+            clock=system_clock(),
+            marker_id=lambda: "m",
+            publisher_factory=lambda _: QuietPublisher(),
+        ),
         agent_id=71,
         harness="claude_code",
         policy=ReplyPolicy(explicit_visibility=False, delivery_mode=None),
@@ -228,3 +253,29 @@ async def test_the_host_binds_every_turn_and_runs_one_writer_task_until_the_runt
     finally:
         await owner.aclose()
     assert owner.failures == []
+
+
+def test_the_writer_reads_the_registered_session_until_the_live_one_reports_its_id(
+    tmp_path: Path,
+) -> None:
+    registry = FileSessionRegistry(tmp_path / "sessions")
+    live: list[str | None] = [None]
+    current = session_with_resume(
+        lambda: live[0], registry, agent_id=71, harness=Harness.CLAUDE_CODE.value
+    )
+    assert current() is None, "a new agent has neither"
+    registry.save(
+        SessionRecord(
+            agent_id=71,
+            session_id="resumed-session",
+            cwd=str(tmp_path),
+            model="m",
+            created_at="2026-11-12T00:00:00+00:00",
+            updated_at="2026-11-12T00:00:00+00:00",
+            harness=Harness.CLAUDE_CODE.value,
+            generation=1,
+        )
+    )
+    assert current() == "resumed-session", "an agent that is resuming reads its record before init"
+    live[0] = "live-session"
+    assert current() == "live-session"
