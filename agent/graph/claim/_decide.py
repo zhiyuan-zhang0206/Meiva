@@ -151,15 +151,10 @@ def _fallthrough_outcome(st: BatchState, *, agent_idle: bool) -> _Outcome:
     halted = st.restart_preserves_idle and not st.committed_chat_ids
     goto = BEFORE_TURN if st.committed_chat_ids and st.next_goto == CLAIM else st.next_goto
     # meiva:note
-    # A batch whose only messages report a failed compaction request has nothing to answer: an agent
-    # that was idle stays idle with its history intact until the next inbound. An agent in the middle of
-    # a turn goes on to read the note and decide.
-    if (
-        agent_idle
-        and goto == BEFORE_TURN
-        and st.failure_notes
-        and len(st.new_msgs) == st.failure_notes
-    ):
+    # A batch whose only messages are quiet notes (a failed compaction request, a stop's passive
+    # interrupt note) has nothing to answer: an agent that was idle stays idle, the notes now in its
+    # history, until the next inbound. An agent in the middle of a turn goes on to read them and decide.
+    if agent_idle and goto == BEFORE_TURN and st.quiet_notes and len(st.new_msgs) == st.quiet_notes:
         goto = CLAIM
         halted = True
     return _Outcome(

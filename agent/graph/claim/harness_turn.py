@@ -43,6 +43,7 @@ from agent.graph.claim.harness_inbox import (
     requeue_handed,
     reserve_head_batch,
     settle_stale_interrupts,
+    timeline_items_of,
 )
 from agent.graph.claim.harness_interrupt import announce_interrupt, await_foreground
 from agent.graph.claim.harness_render import (
@@ -246,7 +247,7 @@ async def _run_harness_turn(
     await projector.finish(interrupted=run.interrupted)
     _apply_wake_polarity(state, projector, extra_updates)
     if run.interrupted:
-        announce_interrupt(ctx, agent_id)
+        await announce_interrupt(ctx, agent_id)
     return Command[HarnessGoto](update={**extra_updates, "halted": True, **_CLEARED}, goto=CLAIM)
 
 
@@ -628,7 +629,7 @@ class ForegroundRun:
         images, skipped = native_images(messages)
         if skipped:
             text = f"{text}\n\n{skipped_images_note(skipped)}"
-        items, _ = build_timeline_items(messages, inputs=self._ctx.timestamp_policy())
+        items = timeline_items_of(item, messages, self._ctx)
         entry = Handed(f"inbound-{item.id}", item.id, tuple(items), human=is_human_wake_item(item))
         self._images[entry.key] = images
         return entry, text
