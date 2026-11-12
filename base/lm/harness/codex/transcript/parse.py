@@ -5,7 +5,6 @@ from collections.abc import Collection
 from base.lm.harness.codex.transcript.clock import iso_at
 from base.lm.harness.codex.transcript.errors import MissingFieldError, UnknownValueError
 from base.lm.harness.codex.transcript.items import (
-    SLOTS,
     Where,
     as_anomaly,
     interrupt_entry,
@@ -38,7 +37,10 @@ __all__ = [
 # input is the protocol history: a `thread/items/list` page (`parse_items_page`) or the turns of
 # `thread/read` / `thread/turns/list` (`parse_turns`, `parse_thread_read`); the rollout
 # (`parse_rollout`, `rollout.py`) supplements it with token usage, the synthetic `turn_aborted` and the
-# sub-agent notification. A child thread is parsed with `record=<child thread id>`; the link from the
+# sub-agent notification. `Order.seq` is the item's position in the page or thread parsed (the
+# rollout ordinal for a rollout line) and `Order.sub` numbers the entries one item yields; a command
+# that completes late arrives as its own call and result pair carrying its original turn id, and is
+# appended when it arrives. A child thread is parsed with `record=<child thread id>`; the link from the
 # parent's `spawnAgent` call names that id. Every function is pure and returns anomalies instead of
 # raising: an item type the parser does not read is an `Anomaly(UNKNOWN_TYPE)` named by its type, a
 # known one lacking a field the projection needs an `Anomaly(MISSING_FIELD)`; rows the parser knows to
@@ -83,7 +85,7 @@ def _row_entries(row: Obj, seq: int, record: str, opened: Collection[str]) -> li
         )
         return item_entries(item, where, opened)
     except MissingFieldError as error:
-        order = Order(0, seq * SLOTS)
+        order = Order(seq, 0)
         return [as_anomaly(error, subject=f"row{seq}", order=order, record=record, turn=None)]
 
 
@@ -110,9 +112,9 @@ def parse_thread_read(result: object, *, record: str = MAIN_RECORD) -> list[AnyE
 # meiva:note
 # The turns of a thread, each with its items and its `status`. The status gives the turn's boundary
 # row: `completed` a `TurnEnd`, `interrupted` an `Interrupt`, `failed` a `Failure`; `inProgress` gives
-# none. A turn's `completedAt` is whole seconds, so its boundary row is placed at the end of that
-# second (a command started inside it sorts before the marker); a turn the server only inferred to be
-# interrupted (a killed process) has no `completedAt`, and its row goes after its last item.
+# none. Position is the item's index in the thread (the boundary row follows its turn's items) and no
+# time orders anything: the writer appends in arrival order. `at` is display only; a turn the server
+# only inferred to be interrupted (a killed process) has no `completedAt` and so no `at`.
 def parse_turns(turns: object, *, record: str = MAIN_RECORD) -> list[AnyEntry]:
     opened: set[str] = set()
     entries: list[AnyEntry] = []
@@ -134,19 +136,17 @@ def _turn_entries(
     try:
         turn_id = text(turn, "id")
     except MissingFieldError as error:
-        order = Order(0, seq * SLOTS)
+        order = Order(seq, 0)
         return [
             as_anomaly(error, subject=f"turn{seq}", order=order, record=record, turn=None)
         ], seq + 1
     entries: list[AnyEntry] = []
-    latest = (opt_int(turn, "startedAt") or 0) * 1000
     for item in items:
         read = _item_in_turn(item, turn_id, seq, record, opened)
         remember_inputs(read, opened)
         entries.extend(read)
-        latest = max(latest, max((entry.order.clock_ms for entry in read), default=0))
         seq += 1
-    entries.extend(_boundary(turn, turn_id, latest, seq, record))
+    entries.extend(_boundary(turn, turn_id, seq, record))
     return entries, seq + 1
 
 
@@ -156,27 +156,27 @@ def _item_in_turn(
     try:
         started = req_int(item, "startedAtMs")
     except MissingFieldError as error:
-        order = Order(0, seq * SLOTS)
+        order = Order(seq, 0)
         return [as_anomaly(error, subject=f"item{seq}", order=order, record=record, turn=turn_id)]
     where = Where(turn_id, record, started, opt_int(item, "completedAtMs"), seq)
     return item_entries(item, where, opened)
 
 
-def _boundary(turn: Obj, turn_id: str, latest_ms: int, seq: int, record: str) -> list[AnyEntry]:
+def _boundary(turn: Obj, turn_id: str, seq: int, record: str) -> list[AnyEntry]:
     try:
         status = text(turn, "status")
         if status == "inProgress":
             return []
         ended = opt_int(turn, "completedAt")
-        at_ms = latest_ms if ended is None else ended * 1000 + 999
+        at_ms = None if ended is None else ended * 1000
         return [_closing_entry(status, turn, turn_id, at_ms, seq, record)]
     except (MissingFieldError, UnknownValueError) as error:
-        order = Order(latest_ms, seq * SLOTS)
+        order = Order(seq, 0)
         return [as_anomaly(error, subject=turn_id, order=order, record=record, turn=turn_id)]
 
 
 def _closing_entry(
-    status: str, turn: Obj, turn_id: str, at_ms: int, seq: int, record: str
+    status: str, turn: Obj, turn_id: str, at_ms: int | None, seq: int, record: str
 ) -> TurnEnd | Interrupt | Failure:
     match status:
         case "completed":
@@ -189,12 +189,12 @@ def _closing_entry(
             raise UnknownValueError(f"turn.status={status}")
 
 
-def _failure(turn: Obj, turn_id: str, at_ms: int, seq: int, record: str) -> Failure:
+def _failure(turn: Obj, turn_id: str, at_ms: int | None, seq: int, record: str) -> Failure:
     return Failure(
         key=f"failure:{turn_id}",
-        order=Order(at_ms, seq * SLOTS),
+        order=Order(seq, 0),
         record=record,
         turn=turn_id,
-        at=iso_at(at_ms),
+        at=None if at_ms is None else iso_at(at_ms),
         message=text(obj(turn.get("error"), "error"), "message"),
     )

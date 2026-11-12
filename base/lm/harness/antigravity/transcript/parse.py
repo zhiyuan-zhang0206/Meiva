@@ -18,9 +18,9 @@ from base.lm.harness.antigravity.transcript.fields import (
 from base.lm.harness.antigravity.transcript.system_message import classify
 from base.lm.harness.antigravity.transcript.text import (
     background_notice,
-    clock_ms_of,
     iso_of,
     user_text,
+    valid_stamp,
     without_stamps,
 )
 from base.lm.harness.events import Usage
@@ -49,10 +49,16 @@ from base.lm.harness.session.transcript.entries import (
 # position and hands back, so a reader that tails the file and one that re-reads it from a crash see the
 # same entries with the same keys. Keys are `agy:<conversation id>:<step_index>[:<part>]`.
 #
-# Order. `clock_ms` is `created_at` floored to the second, in milliseconds, and made non-decreasing
-# within the record: a row never sorts before the one written before it, because rows are committed in
-# `step_index` order. `seq` is `step_index`, so holes (a cancelled step leaves one) are allowed. Every
-# entry one row yields shares its `Order`.
+# Order. `seq` is `step_index`, so holes (a cancelled step leaves one) are allowed, and `sub` numbers the
+# entries one row yields in the order they are shown (thinking, text, each call, then the usage; an
+# output row's result, then its sub-agent links). No wall-clock time orders anything: `created_at` has
+# second precision and is the step's creation time, so it is only carried as `Entry.at` for display, and
+# rows are committed in `step_index` order, which is the order they are handed over.
+#
+# Provenance. The golden fixtures are CONSTRUCTED: the recordings kept no raw `transcript_full.jsonl`
+# lines, so the rows were reconstructed from trajectory captures. A re-record of raw
+# `transcript_full.jsonl` is required before the Antigravity cutover; until then the field shapes of
+# `content` for system messages, tool outputs and checkpoints are unverified against the real file.
 #
 # Pairing. The record keeps no tool call id. Call `k` of the `PLANNER_RESPONSE` row at step `p` is
 # given the id `agy:<conversation id>:<p>:<k>`, and its output is the `GENERIC` row at step `p + 1 + k`.
@@ -86,8 +92,8 @@ class OpenCall:
 
 @dataclass(frozen=True, slots=True)
 class ParseState:
-    last_clock_ms: int = 0
     last_step: int = 0
+    last_sub: int = 0
     ordinal: int = 0
     pending: tuple[OpenCall, ...] = ()
     unanswered: tuple[OpenCall, ...] = ()
@@ -121,7 +127,6 @@ class _Row:
     step: int
     kind: str
     status: str
-    clock_ms: int
     at: str
     raw: Mapping[str, object]
 
@@ -129,9 +134,8 @@ class _Row:
         base = f"agy:{self.conversation_id}:{self.step}"
         return f"{base}:{part}" if part else base
 
-    @property
-    def order(self) -> Order:
-        return Order(self.clock_ms, self.step)
+    def order(self, sub: int = 0) -> Order:
+        return Order(self.step, sub)
 
 
 _Handler = Callable[[_Row, ParseState, TrajectorySide], tuple[list[AnyEntry], ParseState]]
@@ -159,24 +163,25 @@ def _parse_one(
 ) -> tuple[list[AnyEntry], ParseState]:
     state = replace(state, ordinal=state.ordinal + 1)
     try:
-        row = _header(raw, conversation_id, record, state.last_clock_ms)
+        row = _header(raw, conversation_id, record)
     except MissingError as gap:
         key = f"agy:{conversation_id}:row:{state.ordinal}"
-        order = Order(state.last_clock_ms, state.last_step)
+        order = Order(state.last_step, state.last_sub + 1)
         return [_anomaly(key, order, record, AnomalyKind.MISSING_FIELD, gap.detail)], state
-    state = replace(state, last_clock_ms=row.clock_ms, last_step=row.step)
+    state = replace(state, last_step=row.step, last_sub=0)
     handler = _HANDLERS.get(row.kind)
     if handler is None:
         return [_row_anomaly(row, AnomalyKind.UNKNOWN_TYPE, row.kind)], state
     try:
-        return handler(row, state, side)
+        entries, state = handler(row, state, side)
+        return entries, replace(state, last_sub=max((e.order.sub for e in entries), default=0))
     except MissingError as gap:
         return [_row_anomaly(row, AnomalyKind.MISSING_FIELD, f"{row.kind}.{gap.detail}")], state
     except UnrecognisedError as gap:
         return [_row_anomaly(row, AnomalyKind.UNKNOWN_TYPE, gap.detail)], state
 
 
-def _header(raw: object, conversation_id: str, record: str, previous_clock_ms: int) -> _Row:
+def _header(raw: object, conversation_id: str, record: str) -> _Row:
     if not is_object_dict(raw):
         raise MissingError("row")
     created_at = require_str(raw, "created_at")
@@ -186,8 +191,7 @@ def _header(raw: object, conversation_id: str, record: str, previous_clock_ms: i
         step=require_step(raw),
         kind=require_str(raw, "type"),
         status=require_str(raw, "status"),
-        clock_ms=max(clock_ms_of(created_at), previous_clock_ms),
-        at=created_at,
+        at=valid_stamp(created_at),
         raw=raw,
     )
 
@@ -197,7 +201,7 @@ def _anomaly(key: str, order: Order, record: str, anomaly: AnomalyKind, detail: 
 
 
 def _row_anomaly(row: _Row, anomaly: AnomalyKind, detail: str) -> Anomaly:
-    return _anomaly(row.key("anomaly"), row.order, row.record, anomaly, detail)
+    return _anomaly(row.key("anomaly"), row.order(), row.record, anomaly, detail)
 
 
 def _user_input(
@@ -206,7 +210,7 @@ def _user_input(
     text = user_text(require_str(row.raw, "content"))
     entry = HumanInput(
         key=row.key(),
-        order=row.order,
+        order=row.order(),
         record=row.record,
         at=row.at,
         wire_id=side.client_message_ids.get(row.step),
@@ -228,7 +232,7 @@ def _planner(
         entries.append(
             Reasoning(
                 key=row.key("thinking"),
-                order=row.order,
+                order=row.order(0),
                 record=row.record,
                 at=row.at,
                 text=thinking.strip(),
@@ -238,7 +242,7 @@ def _planner(
         entries.append(
             AgentText(
                 key=row.key(),
-                order=row.order,
+                order=row.order(1),
                 record=row.record,
                 at=row.at,
                 text=content.strip(),
@@ -246,7 +250,7 @@ def _planner(
             )
         )
     entries.extend(_call_entry(row, call) for call in calls)
-    entries.extend(_usage(row))
+    entries.extend(_usage(row, 2 + len(calls)))
     opened = tuple(
         OpenCall(row.step + 1 + k, _call_id(row, k), name, _label(args)) for k, name, args in calls
     )
@@ -276,7 +280,7 @@ def _call_entry(row: _Row, call: tuple[int, str, Mapping[str, object]]) -> ToolC
     k, name, args = call
     return ToolCall(
         key=row.key(f"call:{k}"),
-        order=row.order,
+        order=row.order(2 + k),
         record=row.record,
         at=row.at,
         call_id=_call_id(row, k),
@@ -299,7 +303,7 @@ def _label(args: Mapping[str, object]) -> str | None:
 # only mean the cache is counted beside it, and is added. `output_tokens` already contains the thinking
 # tokens. A row that reports no token field has no usage entry (unknown, not zero).
 # meiva:link base/lm/harness/antigravity/mapping.py
-def _usage(row: _Row) -> list[AnyEntry]:
+def _usage(row: _Row, sub: int) -> list[AnyEntry]:
     prompt = optional_int(row.raw, "input_tokens")
     cached = optional_int(row.raw, "cache_read_tokens")
     output = optional_int(row.raw, "output_tokens")
@@ -311,7 +315,7 @@ def _usage(row: _Row) -> list[AnyEntry]:
     return [
         TokenUsage(
             key=row.key("usage"),
-            order=row.order,
+            order=row.order(sub),
             record=row.record,
             at=row.at,
             message_ref=str(row.step),
@@ -335,7 +339,7 @@ def _generic(
     entries: list[AnyEntry] = [
         ToolResult(
             key=row.key(),
-            order=row.order,
+            order=row.order(),
             record=row.record,
             at=row.at,
             call_id=call.call_id,
@@ -372,7 +376,7 @@ def _links(row: _Row, call: OpenCall, content: str) -> list[AnyEntry]:
     return [
         SubagentLink(
             key=row.key(f"link:{index}"),
-            order=row.order,
+            order=row.order(1 + index),
             record=row.record,
             at=row.at,
             call_id=call.call_id,
@@ -392,7 +396,7 @@ def _system_message(
         return [], state
     entry = Notice(
         key=row.key(),
-        order=row.order,
+        order=row.order(),
         record=row.record,
         at=row.at,
         text=notice.text,
@@ -407,9 +411,9 @@ def _checkpoint(
     del side
     summary = require_str(row.raw, "content")
     entries: list[AnyEntry] = [
-        Compaction(key=row.key(), order=row.order, record=row.record, at=row.at, summary=summary)
+        Compaction(key=row.key(), order=row.order(), record=row.record, at=row.at, summary=summary)
     ]
-    entries.extend(_usage(row))
+    entries.extend(_usage(row, 1))
     return entries, state
 
 
@@ -425,29 +429,32 @@ _HANDLERS: Mapping[str, _Handler] = {
 # meiva:note
 # A cancel is a signal (ACP `stopReason: cancelled`, stdout `result.error: interrupted`) and leaves no
 # trace in the record except a hole where the cancelled step would be. The transport that saw the
-# signal calls this with the record's state and the signal's time: it yields an `Interrupt` and an
-# `ABORTED` result for every call no row answered, and a state with none open. The order is the signal's
-# second and the last step the parser read, so it sorts after what the record already shows and before
-# the next row, whose `created_at` cannot be earlier than the signal's second. Calls already answered by
-# a `RUNNING` row (background tasks) are not touched: the CLI keeps those running through a cancel.
+# signal calls this with the record's state and the signal's time (shown only): it yields an `Interrupt`
+# and an `ABORTED` result for every call no row answered, and a state with none open. Their order is the
+# last step the parser read with the next `sub` values, so they follow the last parsed row and precede
+# the next one. Calls already answered by a `RUNNING` row (background tasks) are not touched: the CLI
+# keeps those running through a cancel.
 def cancel_entries(
     state: ParseState, *, conversation_id: str, clock_ms: int, record: str = MAIN_RECORD
 ) -> ParseResult:
-    order = Order(max(clock_ms // 1000 * 1000, state.last_clock_ms), state.last_step)
     prefix = f"agy:{conversation_id}:cancel:{state.last_step}"
-    at = iso_of(order.clock_ms)
-    entries: list[AnyEntry] = [Interrupt(key=prefix, order=order, record=record, at=at)]
+    at = iso_of(clock_ms)
+    first = state.last_sub + 1
+    entries: list[AnyEntry] = [
+        Interrupt(key=prefix, order=Order(state.last_step, first), record=record, at=at)
+    ]
     entries.extend(
         ToolResult(
             key=f"{prefix}:{call.step}",
-            order=order,
+            order=Order(state.last_step, first + 1 + index),
             record=record,
             at=at,
             call_id=call.call_id,
             content="",
             status=ToolStatus.ABORTED,
         )
-        for call in state.open_calls
+        for index, call in enumerate(state.open_calls)
     )
-    cleared = replace(state, pending=(), unanswered=(), last_clock_ms=order.clock_ms)
+    last_sub = max(entry.order.sub for entry in entries)
+    cleared = replace(state, pending=(), unanswered=(), last_sub=last_sub)
     return ParseResult(entries=tuple(entries), state=cleared)

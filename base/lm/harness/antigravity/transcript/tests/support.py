@@ -20,6 +20,13 @@ from base.lm.harness.session.transcript.entries import AnyEntry
 
 FIXTURES = Path(__file__).parent / "fixtures"
 
+# meiva:note
+# CONSTRUCTED: the label every fixture here carries (`"provenance": "CONSTRUCTED"` in its `source.json`).
+# The recordings kept no raw `transcript_full.jsonl` lines, so each `rows.jsonl` is reconstructed from
+# a trajectory capture, and `cancel_then_subagent/child.jsonl` is synthesized from `s6.log` row summaries
+# with invented text and token counts. A re-record of raw rows is required before the Antigravity cutover.
+CONSTRUCTED = "CONSTRUCTED"
+
 
 # meiva:note
 # One recorded scenario: its `rows.jsonl` (a reconstruction of `transcript_full.jsonl`, see its

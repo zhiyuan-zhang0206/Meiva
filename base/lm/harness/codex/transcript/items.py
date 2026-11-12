@@ -35,11 +35,10 @@ from base.lm.harness.session.transcript.entries import (
 # One thread item in the protocol's own shape (`thread/items/list`, `thread/read`) read into entries.
 # The rollout's `event_msg/item_completed` is converted to this shape first (`rollout.py`), so a
 # history item and its rollout twin take the same path and get the same keys: the key of a row is its
-# kind and the item id, never its position. `Order.seq` is the caller's position times `SLOTS`, which
-# leaves room for the several entries one item produces (a call, its link, its result).
+# kind and the item id, never its position. `Order.seq` is the caller's position and `Order.sub` numbers
+# the several entries one item produces (a call, its link, its result).
 # meiva:link base/lm/harness/docs/transcript-projection.md
 
-SLOTS = 4
 COMMAND_TOOL = "command"
 SPAWN_TOOL = "spawnAgent"
 
@@ -85,7 +84,7 @@ class _Place:
     def common(self, kind: str, slot: int = 0, *, at_ms: int | None = None) -> _Common:
         return _Common(
             key=f"{kind}:{self.id}",
-            order=Order(self.started_ms, self.where.seq * SLOTS + slot),
+            order=Order(self.where.seq, slot),
             record=self.where.record,
             turn=self.turn,
             at=iso_at(self.started_ms if at_ms is None else at_ms),
@@ -123,23 +122,23 @@ def as_anomaly(
 # A turn's own boundary rows. The history reads them from a turn's `status`, the rollout from
 # `task_complete` / `turn_aborted`; both give the same key per turn, so whichever arrives second adds
 # nothing.
-def turn_end_entry(turn: str, at_ms: int, seq: int, record: str) -> TurnEnd:
+def turn_end_entry(turn: str, at_ms: int | None, seq: int, record: str) -> TurnEnd:
     return TurnEnd(
         key=f"turn-end:{turn}",
-        order=Order(at_ms, seq * SLOTS),
+        order=Order(seq, 0),
         record=record,
         turn=turn,
-        at=iso_at(at_ms),
+        at=None if at_ms is None else iso_at(at_ms),
     )
 
 
-def interrupt_entry(turn: str, at_ms: int, seq: int, record: str) -> Interrupt:
+def interrupt_entry(turn: str, at_ms: int | None, seq: int, record: str) -> Interrupt:
     return Interrupt(
         key=f"interrupt:{turn}",
-        order=Order(at_ms, seq * SLOTS),
+        order=Order(seq, 0),
         record=record,
         turn=turn,
-        at=iso_at(at_ms),
+        at=None if at_ms is None else iso_at(at_ms),
     )
 
 
@@ -161,7 +160,7 @@ def item_entries(item: Obj, where: Where, input_turns: Collection[str]) -> list[
         place = _Place(text(item, "id"), where, where.turn in input_turns)
         return handler(item, place)
     except (MissingFieldError, UnknownValueError) as error:
-        order = Order(where.started_ms, where.seq * SLOTS)
+        order = Order(where.seq, 0)
         return [
             as_anomaly(error, subject=subject, order=order, record=where.record, turn=where.turn)
         ]
@@ -230,8 +229,8 @@ def _command(item: Obj, place: _Place) -> list[AnyEntry]:
     exit_code = opt_int(item, "exitCode")
     failed = status == "completed" and exit_code not in (None, 0)
     # meiva:note
-    # The result sorts at the call's own start, not at its finish: a command that completes after its
-    # turn ended (or after the next turn began) still reads in the place it was started.
+    # Call and result are yielded together, with the turn the command started in: a command that
+    # completes after its turn ended arrives late and is appended when it does.
     duration = opt_int(item, "durationMs")
     result = ToolResult(
         **place.common("result", 1, at_ms=place.completed_ms),

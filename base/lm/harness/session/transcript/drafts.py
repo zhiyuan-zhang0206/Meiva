@@ -31,8 +31,9 @@ class DraftKind(StrEnum):
 
 
 # meiva:note
-# `key` is the idempotency key the store keeps unique. `order` and `slot` give the position (`slot`
-# orders the several drafts one entry produces). For `agent_code` the payload is empty and
+# `key` is the idempotency key the store keeps unique. `order` is the entry's position inside its own record and `slot`
+# orders the several drafts one entry produces; the writer appends drafts in the order they arrive, so neither
+# is a global position. For `agent_code` the payload is empty and
 # `tool_name` / `tool_input` carry the call, for the writer to render; `tool_use_id` ties a call to its
 # output. `parent_tool_use_id` is set on everything a sub-agent did. `part_ref` names the original
 # inbound message an `inbound_chat` draft shows. `complete` is False for text the model did not finish.

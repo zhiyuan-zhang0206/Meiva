@@ -9,7 +9,6 @@ from base.host.boundary.json_values import is_object_dict, is_object_list
 from base.lm.harness.codex.transcript.clock import iso_at, parse_iso_ms
 from base.lm.harness.codex.transcript.errors import MissingFieldError, UnknownValueError
 from base.lm.harness.codex.transcript.items import (
-    SLOTS,
     Where,
     as_anomaly,
     interrupt_entry,
@@ -81,7 +80,7 @@ def parse_rollout_line(
         at = Stamp(parse_iso_ms(text(row, "timestamp"), "timestamp"), req_int(row, "ordinal"))
         return reader(obj(row.get("payload"), "payload"), at, record, input_turns)
     except (MissingFieldError, UnknownValueError) as error:
-        order = Order(0, (opt_int(row, "ordinal") or 0) * SLOTS)
+        order = Order(opt_int(row, "ordinal") or 0, 0)
         return [as_anomaly(error, subject=subject, order=order, record=record, turn=None)]
 
 
@@ -164,7 +163,7 @@ def _message(payload: Obj, at: Stamp, record: str) -> list[AnyEntry]:
     if role == "assistant":
         message = AgentText(
             key=f"agent:{text(payload, 'id')}",
-            order=Order(at.ms, at.seq * SLOTS),
+            order=Order(at.seq, 0),
             record=record,
             turn=_passthrough_turn(payload),
             at=iso_at(at.ms),
@@ -177,7 +176,7 @@ def _message(payload: Obj, at: Stamp, record: str) -> list[AnyEntry]:
         return [
             Notice(
                 key=f"notice:{text(payload, 'id')}",
-                order=Order(at.ms, at.seq * SLOTS),
+                order=Order(at.seq, 0),
                 record=record,
                 at=iso_at(at.ms),
                 text=report,
@@ -193,7 +192,7 @@ def _usage(payload: Obj, at: Stamp, record: str, _input_turns: Collection[str]) 
     return [
         TokenUsage(
             key=f"usage:{response}",
-            order=Order(at.ms, at.seq * SLOTS),
+            order=Order(at.seq, 0),
             record=record,
             turn=text(payload, "turn_id"),
             at=iso_at(at.ms),

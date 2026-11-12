@@ -97,7 +97,27 @@ def project(
 
 
 def in_order(drafts: Iterable[TimelineDraft]) -> list[TimelineDraft]:
-    return sorted(drafts, key=lambda draft: (draft.order, draft.slot))
+    return list(drafts)
+
+
+def interleaved(scenario: str, records: Sequence[str]) -> list[AnyEntry]:
+    tagged = [
+        (raw["timestamp"], 0, line, raw)
+        for line, raw in enumerate(rows(scenario))
+        if "timestamp" in raw
+    ]
+    for index, record in enumerate(records, start=1):
+        tagged += [
+            (raw["timestamp"], index, line, raw)
+            for line, raw in enumerate(rows(scenario, record))
+            if "timestamp" in raw
+        ]
+    state = ParseState()
+    entries: list[AnyEntry] = []
+    for _, _, line, raw in sorted(tagged, key=lambda item: (str(item[0]), item[1], item[2])):
+        state, parsed = parse_row(state, raw, line=line)
+        entries.extend(parsed)
+    return entries
 
 
 def kinds(drafts: Iterable[TimelineDraft]) -> list[str]:

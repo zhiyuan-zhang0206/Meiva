@@ -36,12 +36,15 @@ accept losing streaming first, in return for correctness and stability.
 3. **One delivery rule.** An input is delivered when its id (or, for a record that keeps none, its text in
    send order) appears in the record. The settlement of the inbound row and the timeline entries of the
    messages it carried are one transaction, written by the entry that proves it.
-4. **One writer per session.** The writer follows the session, not a graph invocation: sub-agent output
-   after the parent's turn, and a turn the CLI starts on its own, are only more entries.
-5. **The event stream is a signal.** It says that something changed, that a turn started or ended, that
-   something failed, and what background work is alive. It supplies no timeline content. A turn ends for
-   the graph only after the reader has caught up with the record's last entry of that turn, and a turn
-   whose record never catches up is a fault, never a quiet end.
+4. **One writer per session, one read path.** The writer follows the session, not a graph invocation, and reads
+   each record **by stored position** and nothing else; a crash recovery is the same call as every other read.
+   The timeline is appended in the order the writer reads, so a command that finishes late is appended when it
+   finishes and a sub-agent's rows when they are read; entries carry only their order inside their own record.
+5. **The event stream is a signal.** It wakes the writer (with the SDK's `session_store` callback and a low
+   frequency poll) and says a turn started or ended, something failed, and what background work is alive. It
+   supplies no content. The end of a turn does not depend on recognising a particular last row: the graph waits
+   until the writer has seen the turn's closing entry or the record has been quiet briefly, and a row that comes
+   later is written later, never lost. A missing closing entry is a registered warning, not a fault.
 6. **Streaming is out for now.** An item appears when the CLI finishes it. A live view of the turn in
    flight, if wanted later, is a separate, non-durable layer and is never the source of a record.
 7. **Cut over per CLI**, in the order Claude Code, Codex, Antigravity. A CLI keeps its event-stream
@@ -58,9 +61,17 @@ accept losing streaming first, in return for correctness and stability.
   (which wins, which is a duplicate); the study found disagreements by design (a half-streamed message the
   stream shows and the record never has, an echo two seconds ahead of the record). It doubles the code
   that has to be right and makes neither source authoritative.
-- **Tail the files with no stream at all.** The stream is the only prompt signal for a change, a turn
-  boundary and a failure on Codex and Antigravity (their records have no turn-end for a cancel, or none
-  at all), so it stays as a signal.
+- **Push content from the SDK's `session_store` callback and re-read the file only after a crash.** Two paths
+  that overlap need de-duplication, and the recovery path would run only in an accident. One pull path
+  with the callback as a wake-up is the same shape for all three CLIs.
+- **Tail the files with no stream at all.** The stream is the prompt signal for a change, a turn boundary and a
+  failure (Codex and Antigravity records have no turn-end for a cancel, or none at all), so it stays as a
+  signal.
+- **A global sort key with mid-timeline inserts.** It would place a late Codex command and sub-agent rows by
+  logical time, at the price of re-snapshotting the live timeline and backfilling old rows. The timeline
+  keeps today's meaning, append in arrival order.
+- **Fail a turn whose last row is not recognised.** A CLI upgrade that renames a stop reason would fail every
+  turn; the writer outlives the invocation, so a late row is only late.
 - **One abstraction grown out of Claude's shape.** Claude's record is ordered by arrival and has no turn
   boundary; Codex's rows are in completion order (a late command result belongs to an earlier turn) and
   Antigravity's human messages carry no id. A vocabulary that assumes any of that breaks on the next CLI,
@@ -79,8 +90,8 @@ accept losing streaming first, in return for correctness and stability.
 - The rule "the entry proves it" replaces the live echo as the delivery signal. The echo's earlier timing
   (Claude's echo comes after the request starts, the transcript row about two seconds before) is not lost:
   the transcript is earlier.
-- The timeline store needs a stable-key column and an order key independent of insertion order, because a
-  late entry (a Codex command that finishes after the next turn began) belongs before rows already written.
+- The timeline store needs a stable-key column with a partial unique constraint and a table of read
+  positions; nothing about ordering changes.
 - The design of the cutover is in [the plan](../../../../future/agent/transcript-timeline-source.md); the
   shared layer is [the projection](../../../../base/lm/harness/docs/transcript-projection.md).
 

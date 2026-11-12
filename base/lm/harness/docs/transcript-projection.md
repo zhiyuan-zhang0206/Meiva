@@ -10,8 +10,8 @@ chosen by [the decision](../../../../docs/decisions/agents/graph/2026-11-12-tran
 
 - **Entries** (`entries.py`): `HumanInput`, `AgentText`, `Reasoning`, `ToolCall`, `ToolResult`,
   `SubagentLink`, `Notice`, `Interrupt`, `Compaction`, `TokenUsage`, `TurnEnd`, `Failure`, `Anomaly`. Each has
-  a stable `key` (idempotency), an explicit `Order(clock_ms, seq, sub)` that the parser states and arrival
-  never decides, a `record` (`main` or a sub-agent's record id) and an optional `turn`. A kind is in the
+  a stable `key` (idempotency), an `Order(seq, sub)` that gives the entry's place inside its own record (the timeline itself is
+  appended in arrival order, so no clock and no cross-record order), a `record` (`main` or a sub-agent's record id) and an optional `turn`. A kind is in the
   vocabulary only if two of the three CLIs have a counterpart.
 - **The projection** (`projection.py`, `Projector`): the only place that pairs a call with its output
   (whichever arrives first), nests a sub-agent record under the call that started it (whichever record
@@ -21,8 +21,10 @@ chosen by [the decision](../../../../docs/decisions/agents/graph/2026-11-12-tran
   `known_keys` lets a forked conversation skip history it already has. Its output is `TimelineDraft`s
   (`drafts.py`) in the existing `TimelineItem` kind vocabulary, `Delivery` conclusions, turn observations and
   closings, usage tallies and `Anomaly` reports.
-- **Ports** (`ports.py`): `EntrySink` (a reader pushes a batch) and `CatchUp` (the writer pulls after an opaque
-  position). `position` is the adapter's own mark; the writer stores it and never reads it.
+- **Port** (`ports.py`): `RecordReader`, the one way a record reaches the writer: `read_after(record, position)`
+  returns the complete entries past the position and the new one, `records()` lists the records (a sub-agent's
+  is its own). `position` is the adapter's own opaque mark; the writer stores it and never reads it. Stream
+  frames and `session_store` callbacks only wake the writer.
 
 Reply visibility (`resolve_agent_reply`) and the rendering of a tool call's payload are not here: they live
 above `base/lm` (`base/agents`, `agent/graph/claim`), so the writer applies them to a draft.
@@ -59,7 +61,7 @@ each with a `source.json` naming the CLI version, the recording and the sanitiza
   a steer accepted just before the interrupt. Owned by the stream's terminal signal; a reader may turn it into
   an `Interrupt` entry carrying an order at the last position it read.
 - **Turn end for Antigravity**, and the exact end of a Claude turn (no end row; the result frame can arrive
-  before the last row). Owned by the stream plus the writer's catch-up rule.
+  before the last row). Owned by the stream plus the writer's rule: the closing entry or a short quiet period.
 - **Which inbound message an Antigravity ordinary turn answers.** The record has text only; the projection's
   text fallback covers the common case and reports an input it cannot place as unmatched.
 - **Errors that kill the process.** No record shows them.

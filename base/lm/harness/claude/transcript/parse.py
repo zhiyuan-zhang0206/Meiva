@@ -31,9 +31,9 @@ from base.lm.harness.session.transcript.entries import (
 
 # meiva:note
 # Claude Code's transcript, read into the shared entry vocabulary. One row in, entries out; the only state
-# is `ParseState` (a per-record clock floor that keeps `Order.clock_ms` non-decreasing, because the CLI's
-# timestamps are not monotone in file order, and the start of each open tool call, for its duration), and
-# it is returned, never mutated. Observed on CLI 2.1.322; the format is the CLI's own and unpublished, so a
+# is `ParseState` (the start of each open tool call, for its duration), and it is returned, never mutated.
+# `Order` is the row's own line, so it follows file order; the CLI's timestamps are not monotone in file order
+# and are used for display and for a call's duration only. Observed on CLI 2.1.322; the format is the CLI's own and unpublished, so a
 # row of a type this module does not know is an `Anomaly`, never a guess.
 #
 # Rows read: `user` (our inputs and the CLI's synthetic text, tool results), `assistant` (one content
@@ -88,7 +88,6 @@ _TAG = re.compile(r"<(task-id|tool-use-id|status|summary)>(.*?)</\1>", re.DOTALL
 
 @dataclass(frozen=True, slots=True)
 class ParseState:
-    floors: Mapping[str, int] = field(default_factory=dict[str, int])
     call_ms: Mapping[str, int] = field(default_factory=dict[str, int])
 
 
@@ -97,7 +96,7 @@ class _Row:
     record: str
     uuid: str
     at: str
-    clock_ms: int
+    ms: int
     line: int
 
 
@@ -111,14 +110,14 @@ def parse_row(
 ) -> tuple[ParseState, tuple[AnyEntry, ...]]:
     row_type = raw.get("type")
     if not isinstance(row_type, str):
-        return state, (_anomaly(state, raw, line, AnomalyKind.MISSING_FIELD, "type"),)
+        return state, (_anomaly(raw, line, AnomalyKind.MISSING_FIELD, "type"),)
     if row_type in _BOOKKEEPING:
         return state, ()
     if row_type == "attachment":
         return _attachment(state, raw, line)
     if row_type in ("user", "assistant", "system"):
         return _conversation(state, raw, row_type, line)
-    return state, (_anomaly(state, raw, line, AnomalyKind.UNKNOWN_TYPE, row_type),)
+    return state, (_anomaly(raw, line, AnomalyKind.UNKNOWN_TYPE, row_type),)
 
 
 def _conversation(
@@ -146,16 +145,14 @@ def _locate(
     if raw.get("isSidechain") is True:
         agent = raw.get("agentId")
         if not isinstance(agent, str) or not agent:
-            return _anomaly(state, raw, line, AnomalyKind.MISSING_FIELD, "agentId")
+            return _anomaly(raw, line, AnomalyKind.MISSING_FIELD, "agentId")
         record = agent
     if not isinstance(uuid, str) or not uuid:
-        return _anomaly(state, raw, line, AnomalyKind.MISSING_FIELD, "uuid")
+        return _anomaly(raw, line, AnomalyKind.MISSING_FIELD, "uuid")
     ms = _millis(at)
     if not isinstance(at, str) or ms is None:
-        return _anomaly(state, raw, line, AnomalyKind.MISSING_FIELD, "timestamp")
-    floor = max(state.floors.get(record, 0), ms)
-    floors = {**state.floors, record: floor}
-    return _Row(record, uuid, at, floor, line), ParseState(floors, state.call_ms)
+        return _anomaly(raw, line, AnomalyKind.MISSING_FIELD, "timestamp")
+    return _Row(record, uuid, at, ms, line), state
 
 
 def _millis(value: object) -> int | None:
@@ -167,19 +164,16 @@ def _millis(value: object) -> int | None:
         return None
 
 
-def _anomaly(
-    state: ParseState, raw: Mapping[str, object], line: int, kind: AnomalyKind, detail: str
-) -> Anomaly:
-    clock = max(state.floors.values(), default=0)
+def _anomaly(raw: Mapping[str, object], line: int, kind: AnomalyKind, detail: str) -> Anomaly:
     uuid = raw.get("uuid")
     key = f"claude:anomaly:{uuid if isinstance(uuid, str) else line}:{kind.value}"
-    return Anomaly(key=key, order=Order(clock, line), anomaly=kind, detail=detail)
+    return Anomaly(key=key, order=Order(line), anomaly=kind, detail=detail)
 
 
 def _missing(row: _Row, detail: str) -> Anomaly:
     return Anomaly(
         key=f"claude:anomaly:{row.uuid}:{AnomalyKind.MISSING_FIELD.value}",
-        order=Order(row.clock_ms, row.line),
+        order=Order(row.line),
         record=row.record,
         anomaly=AnomalyKind.MISSING_FIELD,
         detail=detail,
@@ -196,7 +190,7 @@ class _Fields(TypedDict):
 def _entry_fields(row: _Row, sub: int = 0, *, key: str | None = None) -> _Fields:
     return {
         "key": key or f"claude:{row.uuid}",
-        "order": Order(row.clock_ms, row.line, sub),
+        "order": Order(row.line, sub),
         "record": row.record,
         "at": row.at,
     }
@@ -210,7 +204,7 @@ def _system(row: _Row, raw: Mapping[str, object]) -> tuple[AnyEntry, ...]:
     return (
         Anomaly(
             key=f"claude:anomaly:{row.uuid}:{AnomalyKind.UNKNOWN_TYPE.value}",
-            order=Order(row.clock_ms, row.line),
+            order=Order(row.line),
             record=row.record,
             anomaly=AnomalyKind.UNKNOWN_TYPE,
             detail=detail,
@@ -224,11 +218,11 @@ def _attachment(
     attachment = raw.get("attachment")
     kind = attachment.get("type") if is_object_dict(attachment) else None
     if not is_object_dict(attachment) or not isinstance(kind, str):
-        return state, (_anomaly(state, raw, line, AnomalyKind.MISSING_FIELD, "attachment.type"),)
+        return state, (_anomaly(raw, line, AnomalyKind.MISSING_FIELD, "attachment.type"),)
     if kind in _CONTEXT_ATTACHMENTS:
         return state, ()
     if kind != "queued_command":
-        return state, (_anomaly(state, raw, line, AnomalyKind.UNKNOWN_TYPE, f"attachment/{kind}"),)
+        return state, (_anomaly(raw, line, AnomalyKind.UNKNOWN_TYPE, f"attachment/{kind}"),)
     located = _locate(state, raw, line)
     if isinstance(located, Anomaly):
         return state, (located,)
@@ -265,14 +259,14 @@ def _assistant(
         key = f"claude:{row.uuid}" if len(blocks) == 1 else f"claude:{row.uuid}:{index}"
         entry = _block(row, key, index, block, raw, aborted=aborted)
         if isinstance(entry, ToolCall):
-            call_ms[entry.call_id] = row.clock_ms
+            call_ms[entry.call_id] = row.ms
         if entry is not None:
             entries.append(entry)
     entries.append(_usage_entry(row, ref, message.get("usage"), reliable=not aborted))
     stop = message.get("stop_reason")
     if row.record == MAIN_RECORD and isinstance(stop, str) and stop in _ENDING_STOPS:
         entries.append(TurnEnd(**_entry_fields(row, 2, key=f"claude:{row.uuid}:end")))
-    return ParseState(state.floors, call_ms), tuple(entries)
+    return ParseState(call_ms), tuple(entries)
 
 
 def _block(
@@ -314,7 +308,7 @@ def _block(
         )
     return Anomaly(
         key=f"claude:anomaly:{row.uuid}:{index}:{AnomalyKind.UNKNOWN_TYPE.value}",
-        order=Order(row.clock_ms, row.line, index * 10),
+        order=Order(row.line, index * 10),
         record=row.record,
         anomaly=AnomalyKind.UNKNOWN_TYPE,
         detail=f"content/{kind}",
@@ -440,7 +434,7 @@ def _results(
                 call_id=call_id,
                 content=_text(block.get("content")) or "",
                 status=_status(block, raw, result),
-                duration_ms=None if started is None else max(row.clock_ms - started, 0),
+                duration_ms=None if started is None else max(row.ms - started, 0),
             )
         )
         agent = result.get("agentId") if is_object_dict(result) else None
@@ -452,7 +446,7 @@ def _results(
                     child_record=agent,
                 )
             )
-    return ParseState(state.floors, call_ms), tuple(entries)
+    return ParseState(call_ms), tuple(entries)
 
 
 def _status(block: Mapping[str, object], raw: Mapping[str, object], result: object) -> ToolStatus:

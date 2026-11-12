@@ -7,16 +7,16 @@ from base.lm.harness.antigravity.transcript.errors import MissingError
 
 
 # meiva:note
-# `created_at` has second precision and is the step's creation time, so it is an ordering hint and not a
-# duration. It is floored to the second in milliseconds; the caller makes the sequence monotone.
-def clock_ms_of(created_at: str) -> int:
+# `created_at` is the step's creation time with second precision: it is shown (`Entry.at`) and never
+# used to order anything. A value that is not a timezone-aware ISO-8601 stamp is a malformed row.
+def valid_stamp(created_at: str) -> str:
     try:
         stamp = datetime.fromisoformat(created_at)
     except ValueError:
         raise MissingError("created_at") from None
     if stamp.tzinfo is None:
         raise MissingError("created_at")
-    return int(stamp.astimezone(UTC).timestamp()) * 1000
+    return created_at
 
 
 def iso_of(clock_ms: int) -> str:

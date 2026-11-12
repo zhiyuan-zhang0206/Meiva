@@ -1,4 +1,6 @@
 {
+  "provenance": "CONSTRUCTED",
+  "provenance_note": "Rows are reconstructed from the trajectory captures because raw transcript_full.jsonl was not recorded.",
   "agy_version": "1.5.6",
   "reconstruction": "RECONSTRUCTED from the recorded trajectory because raw transcript_full.jsonl lines were not captured in the recordings. Row fields follow the A/B correspondence table of the research report (agy.md section 2.4): user text is the model-visible prompt (with the USER_REQUEST wrapper), tool results are the model-visible tool message text, planner rows carry response / thinking / tool_calls / token counts from the trajectory, CANCELED steps are dropped (the step_index hole), a step moved to the background keeps status RUNNING, created_at is the step's metadata.createdAt floored to the second. It is an approximation of the real file, not a copy of it.",
   "sanitization": "workspace path -> /work; ~/.gemini/antigravity-cli/brain -> /work/brain; /Users/<name> -> /Users/user; local user name -> user; no account ids, tokens, userConfig, system prompts, workspace URIs or image bytes are kept; every field the parser reads is unchanged apart from those path substitutions. Non-ASCII text is stored as \\uXXXX escapes.",
@@ -6,5 +8,6 @@
   "trajectory_file": "s6b.traj.json",
   "conversation_id": "ce0c8ddb-a23d-4ecb-a87c-bf85d24aa5c3",
   "child_conversation_id": "aacd41ee-5b4f-472c-8932-f95418f4ca8c",
-  "child_rows": "SYNTHESIZED, not reconstructed: the recordings hold no trajectory or file content of the child conversation, only s6.log row summaries (step index, type, status, millisecond time). Types, statuses and timestamps follow that log; the task text (step 0), the run_command call (step 1) and the send_message call (step 5) follow the parent's trajectory; everything else (output text, step 3 and 7 text, token counts) is invented to give the rows a valid shape."
+  "child_rows": "SYNTHESIZED, not reconstructed: the recordings hold no trajectory or file content of the child conversation, only s6.log row summaries (step index, type, status, millisecond time). Types, statuses and timestamps follow that log; the task text (step 0), the run_command call (step 1) and the send_message call (step 5) follow the parent's trajectory; everything else (output text, step 3 and 7 text, token counts) is invented to give the rows a valid shape.",
+  "child_record_provenance": "CONSTRUCTED (synthesized: types/statuses/times from the s6.log summaries, text and token counts invented)"
 }

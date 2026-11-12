@@ -18,15 +18,15 @@ MAIN_RECORD = "main"
 
 
 # meiva:note
-# Where an entry sits in the conversation, stated by the parser and never inferred from arrival:
-# `clock_ms` is when it logically happened (a Codex command that finished late is ordered by when it
-# started, so it sorts back into its own turn) and `seq` is the record's own position (a line, an
-# ordinal, a step index; holes are allowed). The pair is total within one record; across records it
-# interleaves by `clock_ms`. `sub` orders the several entries one raw row yields (a planner step that thinks and
-# calls two tools). An entry may arrive after one that sorts later, and the projection copes.
+# Where an entry sits inside its own record, stated by the parser: `seq` is the record's own position
+# (a line, an ordinal, a step index; holes are allowed) and `sub` orders the several entries one raw
+# row yields (a planner step that thinks and calls two tools). It says nothing about records against
+# each other and nothing about wall-clock time: the timeline is appended in the order entries arrive
+# at the writer, so a command that finishes late is appended when it finishes, and a sub-agent's rows
+# when they are read. An entry may arrive after one that sorts later in its own record (a result before
+# its call), and the projection copes.
 @dataclass(frozen=True, slots=True, order=True)
 class Order:
-    clock_ms: int
     seq: int
     sub: int = 0
 

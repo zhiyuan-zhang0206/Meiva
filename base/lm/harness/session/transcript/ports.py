@@ -7,13 +7,14 @@ from typing import Protocol
 from base.lm.harness.session.transcript.entries import AnyEntry
 
 # meiva:note
-# How an adapter's reader hands entries to the one writer. `position` is the adapter's own opaque mark
-# of how far the record has been read (Claude: the count of lines of the record's local file, Codex:
-# the history cursor, Antigravity: the last step index); the writer stores it per record and hands it
-# back to `read_after` after a crash, and never looks inside. A reader may push (`EntrySink.accept`,
-# Claude's `session_store` callback) or be pulled (`CatchUp.read_after`, Codex's cursor, Antigravity's
-# file tail); an adapter that pushes also implements `CatchUp` for the rows a crash left on disk, and
-# the writer's idempotency by entry key makes the two paths safe to overlap.
+# The one way an adapter's record reaches the writer: the writer asks, after the position it stored for a
+# record, and the adapter answers with the complete entries past it. `position` is the adapter's own
+# opaque mark of how far the record has been read (Claude: the key of the last row read and its byte
+# offset in the local file; Codex: the history cursor; Antigravity: the last step index); the writer
+# stores it per record in the transaction that writes the entries and never looks inside. Whatever
+# wakes the writer (a stream frame, a `session_store` callback, a timer) carries no content, so the
+# first read after a crash is the same code as every other read. `None` means nothing new. A position
+# the record no longer contains is an error, never a restart from the beginning.
 # meiva:link base/lm/harness/docs/transcript-projection.md
 
 
@@ -21,12 +22,10 @@ from base.lm.harness.session.transcript.entries import AnyEntry
 class EntryBatch:
     record: str
     entries: tuple[AnyEntry, ...]
-    position: str | None
+    position: str
 
 
-class EntrySink(Protocol):
-    def accept(self, batch: EntryBatch) -> Awaitable[None]: ...
-
-
-class CatchUp(Protocol):
+class RecordReader(Protocol):
     def read_after(self, record: str, position: str | None) -> Awaitable[EntryBatch | None]: ...
+
+    def records(self) -> Awaitable[tuple[str, ...]]: ...

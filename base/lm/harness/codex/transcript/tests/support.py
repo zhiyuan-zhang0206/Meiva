@@ -73,9 +73,9 @@ def project(
     return projector, projector.feed(entries)
 
 
-def in_order(projection: Projection) -> list[TimelineDraft]:
-    return sorted(projection.drafts, key=lambda draft: (draft.order, draft.slot))
+def arrival(projection: Projection) -> list[TimelineDraft]:
+    return list(projection.drafts)
 
 
 def kinds(projection: Projection) -> list[str]:
-    return [draft.kind.value for draft in in_order(projection)]
+    return [draft.kind.value for draft in arrival(projection)]

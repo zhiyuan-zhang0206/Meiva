@@ -4,6 +4,7 @@ from base.lm.harness.claude.transcript.parse import ParseState, parse_row, row_v
 from base.lm.harness.claude.transcript.tests.support import (
     entries_of,
     in_order,
+    interleaved,
     kinds,
     parse_all,
     project,
@@ -25,7 +26,6 @@ from base.lm.harness.session.transcript.entries import (
     AnyEntry,
     HumanInput,
     Interrupt,
-    Order,
     SubagentLink,
     TokenUsage,
     ToolCall,
@@ -135,15 +135,15 @@ def test_a_steer_absorbed_mid_turn_is_delivered_by_its_queued_command_row() -> N
     assert total(projector.usage_by_turn()) == result_usage("steer", 0)
 
 
-def test_the_queued_command_timestamp_is_older_but_the_order_follows_the_file() -> None:
+def test_the_queued_command_timestamp_is_older_but_the_order_is_the_files_own() -> None:
     raw = rows("steer")
     stamps = {r["uuid"]: r["timestamp"] for r in raw if "uuid" in r and "timestamp" in r}
     queued = next(r for r in raw if r.get("type") == "attachment" and "queued_command" in str(r))
     previous = raw[raw.index(queued) - 1]
     assert str(queued["timestamp"]) < str(stamps[previous["uuid"]])
     entries = entries_of("steer")
-    clocks = [e.order.clock_ms for e in entries]
-    assert clocks == sorted(clocks)
+    orders = [e.order for e in entries]
+    assert orders == sorted(orders)
 
 
 def test_parallel_tool_calls_of_one_message_pair_with_their_own_results() -> None:
@@ -236,16 +236,14 @@ def test_subagent_activity_nests_under_its_call_whatever_the_arrival_order() -> 
     orders = {
         "main_first": [*main, *sync_sub, *async_sub],
         "subs_first": [*sync_sub, *async_sub, *main],
-        "by_clock": sorted([*main, *sync_sub, *async_sub], key=lambda e: e.order),
+        "interleaved": interleaved("subagents", (SYNC_AGENT, ASYNC_AGENT)),
     }
-    outcomes: dict[str, dict[str, tuple[DraftKind, str | None, str | None, Order]]] = {}
+    outcomes: dict[str, dict[str, tuple[DraftKind, str | None, str | None]]] = {}
     for name, entries in orders.items():
         projector, projection = project(entries, [sent(SUBS, "k", "t")])
         assert projector.unlinked_records() == () and projector.unanswered_calls() == ()
-        outcomes[name] = {
-            d.key: (d.kind, d.parent_tool_use_id, d.turn, d.order) for d in projection.drafts
-        }
-    assert outcomes["main_first"] == outcomes["subs_first"] == outcomes["by_clock"]
+        outcomes[name] = {d.key: (d.kind, d.parent_tool_use_id, d.turn) for d in projection.drafts}
+    assert outcomes["main_first"] == outcomes["subs_first"] == outcomes["interleaved"]
     drafts = outcomes["main_first"]
     nested = {k: v for k, v in drafts.items() if v[1] is not None}
     assert {v[1] for v in nested.values()} == {SYNC_CALL, ASYNC_CALL}
@@ -261,12 +259,12 @@ def test_subagent_activity_nests_under_its_call_whatever_the_arrival_order() -> 
 
 
 def test_subagent_output_continues_after_the_parent_turn_and_its_usage_stays_apart() -> None:
-    main, sync_sub, async_sub = _subagent_entries()
-    projector, projection = project([*main, *sync_sub, *async_sub], [sent(SUBS, "k", "t")])
+    entries = interleaved("subagents", (SYNC_AGENT, ASYNC_AGENT))
+    projector, projection = project(entries, [sent(SUBS, "k", "t")])
     drafts = in_order(projection.drafts)
-    launched = next(d for d in drafts if d.payload == "launched")
-    late = [d for d in drafts if d.parent_tool_use_id == ASYNC_CALL]
-    assert late and all(d.order > launched.order for d in late if d.kind.value != "agent_code")
+    launched = next(i for i, d in enumerate(drafts) if d.payload == "launched")
+    late = [i for i, d in enumerate(drafts) if d.parent_tool_use_id == ASYNC_CALL]
+    assert len(late) == 3 and all(index > launched for index in late)
     by_turn = projector.usage_by_turn()
     assert set(by_turn) == {t.turn for t in projection.turns_observed}
     first_turn = projection.turns_observed[0].turn
@@ -302,7 +300,8 @@ def test_a_task_notification_is_a_marker_and_its_turn_is_answered_in_place() -> 
         answer = [
             d for d in projection.drafts if d.turn == turn.turn and d.kind.value == "agent_chat"
         ]
-        assert len(answer) == 1 and answer[0].order > notice.order
+        assert len(answer) == 1
+        assert projection.drafts.index(answer[0]) > projection.drafts.index(notice)
 
 
 def test_background_launches_are_marked_as_background_results() -> None:

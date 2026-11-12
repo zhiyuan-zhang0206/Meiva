@@ -44,9 +44,12 @@ from base.lm.harness.session.transcript.entries import (
 from base.lm.harness.session.transcript.projection import Projector
 
 # meiva:note
-# Golden tests of the Antigravity parser against the shared projection. The rows are reconstructions of
-# `transcript_full.jsonl` from the recorded trajectories (each fixture's `source.json` says how, and that
-# the recordings kept no raw rows); the sub-agent's own rows are synthesized. Every test goes fixture ->
+# Golden tests of the Antigravity parser against the shared projection. Every fixture is CONSTRUCTED (see
+# `CONSTRUCTED` in `support.py`): the rows are reconstructed from trajectory captures because raw
+# `transcript_full.jsonl` lines were not recorded, and the sub-agent's own rows (`child.jsonl`) are
+# synthesized from log summaries with invented text and token counts. Passing here proves the parser
+# and the shared vocabulary fit the documented row shape, not that the real file has it; a re-record of
+# raw `transcript_full.jsonl` is required before the Antigravity cutover. Every test goes fixture ->
 # parser -> `Projector` and asserts what the projection shows, not what the parser holds.
 # meiva:link base/lm/harness/antigravity/transcript/tests/fixtures/cancel_then_subagent/source.json
 
@@ -125,10 +128,9 @@ def test_thinking_summary_becomes_a_reasoning_draft_before_the_call() -> None:
         "code_output",
         "agent_chat",
     ]
-    # meiva:note
-    # reasoning and the call of one planner row share one Order and slot 0.
     thinking, call = projection.drafts[1], projection.drafts[2]
-    assert thinking.order == call.order and thinking.slot == call.slot == 0
+    assert thinking.order.seq == call.order.seq == 1
+    assert thinking.order < call.order
 
 
 def test_ordinary_input_has_no_id_and_is_recognised_by_its_text() -> None:
@@ -196,20 +198,23 @@ def test_foreground_cancel_leaves_a_hole_and_the_call_unanswered() -> None:
     assert projector.unresolved_results() == ()
 
 
+SIGNAL_MS = 1794474081500
+
+
+# meiva:note
+# CONSTRUCTED rows (s6 parent); the cancel signal itself is a transport event the record never holds.
 def test_cancel_signal_yields_an_interrupt_that_sorts_before_the_next_row() -> None:
     scenario = load("cancel_then_subagent")
     conv = scenario.conversation_id
     first = parse_rows(scenario.rows[:2], conversation_id=conv)
-    signal_ms = first.state.last_clock_ms + 3500
-    cancelled = cancel_entries(first.state, conversation_id=conv, clock_ms=signal_ms)
+    cancelled = cancel_entries(first.state, conversation_id=conv, clock_ms=SIGNAL_MS)
     interrupt = only([entry for entry in cancelled.entries if isinstance(entry, Interrupt)])
     assert interrupt.key == f"agy:{conv}:cancel:1"
-    assert interrupt.order.clock_ms == first.state.last_clock_ms + 3000
-    assert interrupt.order.seq == 1
+    assert interrupt.order.seq == 1 and interrupt.order > first.entries[-1].order
     assert cancelled.state.open_calls == ()
     later = parse_rows(scenario.rows[2:3], conversation_id=conv, state=cancelled.state)
     assert later.entries[0].order > interrupt.order
-    again = cancel_entries(cancelled.state, conversation_id=conv, clock_ms=signal_ms)
+    again = cancel_entries(cancelled.state, conversation_id=conv, clock_ms=SIGNAL_MS)
     assert [entry for entry in again.entries if isinstance(entry, ToolResult)] == []
 
 
@@ -217,9 +222,7 @@ def test_cancel_signal_closes_the_turn_and_aborts_the_unanswered_call() -> None:
     scenario = load("cancel_then_subagent")
     conv = scenario.conversation_id
     first = parse_rows(scenario.rows[:2], conversation_id=conv)
-    cancelled = cancel_entries(
-        first.state, conversation_id=conv, clock_ms=first.state.last_clock_ms + 3500
-    )
+    cancelled = cancel_entries(first.state, conversation_id=conv, clock_ms=SIGNAL_MS)
     projector, shown = project(first.entries + cancelled.entries)
     aborted = only(drafts_of(shown, DraftKind.CODE_OUTPUT))
     assert aborted.tool_status is ToolStatus.ABORTED
@@ -267,6 +270,8 @@ def test_background_command_that_is_cancelled_stays_a_background_result_forever(
     )
 
 
+# meiva:note
+# CONSTRUCTED rows (s3); the side input is read from the trajectory.
 def test_steer_entry_is_written_after_the_step_before_it_and_joins_the_turn() -> None:
     scenario = load("steer_background")
     conv = scenario.conversation_id
@@ -318,7 +323,9 @@ def test_phantom_turn_without_a_stream_signal_is_a_normal_turn() -> None:
     assert (usage.usage.input_tokens, usage.usage.output_tokens) == (11164, 3)
 
 
-def _check_nesting(scenario: Scenario, *, child_first: bool) -> None:
+# meiva:note
+# CONSTRUCTED rows: the parent is reconstructed (s6), the child record is synthesized.
+def _check_nesting(scenario: Scenario, *, child_first: bool) -> frozenset[str]:
     child = scenario.child_id
     parent_entries, child_entries = parse(scenario).entries, parse_child(scenario).entries
     link = only([e for e in parent_entries if isinstance(e, SubagentLink)])
@@ -328,7 +335,7 @@ def _check_nesting(scenario: Scenario, *, child_first: bool) -> None:
     projector, projection = project(first)
     projection2 = projector.feed(second)
     drafts = projection.drafts + projection2.drafts
-    nested = sorted((d for d in drafts if d.record == child), key=lambda d: (d.order, d.slot))
+    nested = [d for d in drafts if d.record == child]
     assert nested and all(d.parent_tool_use_id == link.call_id for d in nested)
     assert projector.unlinked_records() == ()
     assert kinds(tuple(nested)) == [
@@ -343,6 +350,7 @@ def _check_nesting(scenario: Scenario, *, child_first: bool) -> None:
     ]
     assert nested[2].tool_status is ToolStatus.BACKGROUND
     assert all(d.parent_tool_use_id is None for d in drafts if d.record == MAIN_RECORD)
+    return frozenset(d.key for d in drafts)
 
 
 def test_subagent_link_names_the_call_and_the_child_record() -> None:
@@ -355,11 +363,16 @@ def test_subagent_link_names_the_call_and_the_child_record() -> None:
 
 
 def test_subagent_records_nest_when_the_parent_arrives_first() -> None:
-    _check_nesting(load("cancel_then_subagent"), child_first=False)
+    assert _check_nesting(load("cancel_then_subagent"), child_first=False)
 
 
 def test_subagent_records_nest_when_the_child_arrives_first() -> None:
-    _check_nesting(load("cancel_then_subagent"), child_first=True)
+    assert _check_nesting(load("cancel_then_subagent"), child_first=True)
+
+
+def test_subagent_drafts_are_the_same_set_in_either_arrival_order() -> None:
+    scenario = load("cancel_then_subagent")
+    assert _check_nesting(scenario, child_first=False) == _check_nesting(scenario, child_first=True)
 
 
 def test_subagent_usage_is_kept_apart_from_the_parent_turn() -> None:
@@ -401,6 +414,8 @@ def test_child_wakes_the_parent_through_a_notice_that_opens_a_turn() -> None:
     assert child_notices == []
 
 
+# meiva:note
+# CONSTRUCTED rows (s7/s8).
 def test_parallel_calls_pair_with_their_outputs_by_offset() -> None:
     scenario = load("timer_and_compaction")
     conv = scenario.conversation_id
@@ -433,6 +448,8 @@ def test_timer_wake_up_opens_a_turn_of_its_own() -> None:
     assert reply.turn == timer_turn.turn
 
 
+# meiva:note
+# CONSTRUCTED rows (s8); the checkpoint text is a truncated trajectory summary.
 def test_checkpoint_is_a_compaction_entry_and_the_restart_notice_is_skipped() -> None:
     scenario = load("timer_and_compaction")
     conv = scenario.conversation_id
@@ -618,7 +635,7 @@ def test_a_row_status_the_parser_does_not_know_is_reported() -> None:
     assert only([e for e in entries if isinstance(e, ToolResult)]).status is ToolStatus.ERROR
 
 
-def test_clock_is_second_precision_and_never_runs_backwards() -> None:
+def test_order_is_step_and_sub_and_created_at_is_only_displayed() -> None:
     rows = [
         {
             "step_index": 0,
@@ -643,8 +660,7 @@ def test_clock_is_second_precision_and_never_runs_backwards() -> None:
         },
     ]
     entries = parse_rows(rows, conversation_id="c").entries
-    assert [e.order.clock_ms % 60000 for e in entries] == [5000, 5000, 9000]
-    assert [e.order.seq for e in entries] == [0, 1, 3]
+    assert [(e.order.seq, e.order.sub) for e in entries] == [(0, 0), (1, 1), (3, 1)]
     assert entries[0].at == "2026-11-12T08:00:05Z" and entries[1].at == "2026-11-12T08:00:04Z"
 
 

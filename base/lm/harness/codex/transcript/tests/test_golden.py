@@ -12,8 +12,8 @@ from base.lm.harness.codex.transcript.tests.support import (
     CHILD_THREAD,
     LATE_COMMAND,
     SPAWN_CALL,
+    arrival,
     as_obj,
-    in_order,
     kinds,
     load_json,
     load_lines,
@@ -73,7 +73,7 @@ def _sorted_by_key(drafts: list[TimelineDraft]) -> list[TimelineDraft]:
 def test_a_plain_turn_reads_reasoning_a_command_and_the_answer() -> None:
     entries = parse_items_page(load_json("basic/items.json"))
     _, projection = project(entries, sent("cid-s1-a", "first"), sent("cid-s1-b", "second"))
-    first = [draft for draft in in_order(projection) if draft.turn == TURN_S1_A]
+    first = [draft for draft in arrival(projection) if draft.turn == TURN_S1_A]
     assert [draft.kind.value for draft in first] == [
         "inbound_chat",
         "agent_chat",
@@ -103,11 +103,11 @@ def test_the_history_and_the_rollout_of_one_thread_give_the_same_drafts() -> Non
     _, from_history = project(parse_items_page(load_json("basic/items.json")), *inputs)
     rollout = parse_rollout(load_lines("basic/rollout.jsonl"), record=MAIN_RECORD)
     _, from_rollout = project(rollout, *inputs)
-    assert [draft.key for draft in in_order(from_history)] == [
-        draft.key for draft in in_order(from_rollout)
+    assert [draft.key for draft in arrival(from_history)] == [
+        draft.key for draft in arrival(from_rollout)
     ]
-    assert [draft.payload for draft in in_order(from_history)] == [
-        draft.payload for draft in in_order(from_rollout)
+    assert [draft.payload for draft in arrival(from_history)] == [
+        draft.payload for draft in arrival(from_rollout)
     ]
     assert [closed.turn for closed in from_rollout.turns_closed] == [TURN_S1_A, TURN_S1_B]
 
@@ -148,7 +148,7 @@ def test_b_a_text_image_text_input_expands_into_the_messages_it_carried() -> Non
     _, projection = project(entries, sent("cid-s1-a", "first"), combined)
     shown = [
         draft
-        for draft in in_order(projection)
+        for draft in arrival(projection)
         if draft.kind.value == "inbound_chat" and draft.turn == TURN_S1_B
     ]
     assert [(draft.part_ref, draft.slot, draft.images) for draft in shown] == [
@@ -182,9 +182,9 @@ def test_c_a_steer_joins_the_turn_it_was_sent_into() -> None:
         ]
         assert kinds(projection) == [
             "inbound_chat",
+            "inbound_chat",
             "agent_code",
             "code_output",
-            "inbound_chat",
             "agent_chat",
         ]
 
@@ -210,7 +210,7 @@ def test_d_an_interrupt_closes_its_turn_and_the_lost_steer_never_appears() -> No
     assert not any("STEERED" in draft.payload for draft in projection.drafts)
     # meiva:note
     # The streamed half answer of the second turn was never recorded, so that turn shows no agent text.
-    assert [draft.kind.value for draft in in_order(projection) if draft.turn == TURN_S3_B] == [
+    assert [draft.kind.value for draft in arrival(projection) if draft.turn == TURN_S3_B] == [
         "inbound_chat",
         "system_marker",
     ]
@@ -231,35 +231,34 @@ def _late_command_arrivals() -> tuple[list[AnyEntry], list[AnyEntry], list[AnyEn
     return entries, after_next_turn, result_before_call
 
 
-def test_e_a_command_that_finished_late_sorts_back_into_its_own_turn() -> None:
+def test_e_a_command_that_finished_late_is_appended_when_it_arrives_with_its_own_turn() -> None:
     entries, after_next_turn, result_before_call = _late_command_arrivals()
     inputs = (sent("cid-s3-a", "run"), sent("cid-s3-b", "write"))
     _, natural = project(entries, *inputs)
     _, late = project(after_next_turn, *inputs)
     _, reversed_result = project(result_before_call, *inputs)
-    ordered = in_order(late)
-    position = {draft.key: index for index, draft in enumerate(ordered)}
-    next_user = next(draft for draft in ordered if draft.turn == TURN_S3_B)
-    call = ordered[position[f"call:{LATE_COMMAND}"]]
-    output = ordered[position[f"result:{LATE_COMMAND}"]]
+    emitted = arrival(late)
+    position = {draft.key: index for index, draft in enumerate(emitted)}
+    next_user = next(draft for draft in emitted if draft.turn == TURN_S3_B)
+    call = emitted[position[f"call:{LATE_COMMAND}"]]
+    output = emitted[position[f"result:{LATE_COMMAND}"]]
     assert call.turn == output.turn == TURN_S3_A
-    assert position[call.key] < position[output.key] < position[next_user.key]
+    assert position[next_user.key] < position[call.key] < position[output.key]
     assert output.exec_ms == 29889
     assert _sorted_by_key(list(natural.drafts)) == _sorted_by_key(list(late.drafts))
     assert _sorted_by_key(list(natural.drafts)) == _sorted_by_key(list(reversed_result.drafts))
-    assert [draft.key for draft in in_order(natural)] == [draft.key for draft in ordered]
 
 
-def test_e_a_background_command_that_outlived_its_turn_reads_before_the_final_answer() -> None:
+def test_e_a_background_command_that_outlived_its_turn_is_appended_after_the_reply() -> None:
     entries = parse_items_page(load_json("late_command/items.json"))
     # meiva:note
-    # The page lists the command last, because it finished last; its start puts it before the reply.
+    # The page lists the command last, because it finished last.
     assert [type(entry).__name__ for entry in entries if not isinstance(entry, Reasoning)][-2:] == [
         "ToolCall",
         "ToolResult",
     ]
     _, projection = project(entries, sent("cid-s4-a", "start"))
-    assert kinds(projection) == ["inbound_chat", "agent_code", "code_output", "agent_chat"]
+    assert kinds(projection) == ["inbound_chat", "agent_chat", "agent_code", "code_output"]
     rollout = parse_rollout(load_lines("late_command/rollout.jsonl"), record=MAIN_RECORD)
     ends = [index for index, entry in enumerate(rollout) if isinstance(entry, TurnEnd)]
     calls = [index for index, entry in enumerate(rollout) if isinstance(entry, ToolCall)]
@@ -290,7 +289,7 @@ def test_g_a_sub_agent_nests_under_the_call_that_spawned_it() -> None:
     parent_first = project(parent + child, sent("cid-s5-a", "spawn"))
     child_first = project(child + parent, sent("cid-s5-a", "spawn"))
     for projector, projection in (parent_first, child_first):
-        nested = [draft for draft in in_order(projection) if draft.record == CHILD_THREAD]
+        nested = [draft for draft in arrival(projection) if draft.record == CHILD_THREAD]
         assert {draft.parent_tool_use_id for draft in nested} == {SPAWN_CALL}
         assert [draft.kind.value for draft in nested] == [
             "subagent_text",
@@ -403,7 +402,7 @@ def test_i_a_known_type_without_a_field_it_needs_is_a_missing_field() -> None:
     }
     _, projection = project(entries, sent("cid-s1-a", "first"), sent("cid-s1-b", "second"))
     assert len(projection.anomalies) == 3
-    assert [draft.kind.value for draft in in_order(projection)] == [
+    assert [draft.kind.value for draft in arrival(projection)] == [
         "inbound_chat",
         "agent_chat",
         "agent_chat",
