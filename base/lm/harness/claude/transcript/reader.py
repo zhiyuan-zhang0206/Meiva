@@ -25,7 +25,8 @@ from base.lm.harness.claude.transcript.position import (
     rows_after,
     verify,
 )
-from base.lm.harness.claude.transcript.store_filter import scrub, stored_row
+from base.lm.harness.claude.transcript.scrub import scrub
+from base.lm.harness.claude.transcript.store_filter import stored_row
 from base.lm.harness.session.transcript.entries import (
     MAIN_RECORD,
     Anomaly,

@@ -1,5 +1,10 @@
 # Harness timeline writer
 
+**Not reachable for any harness.** A Claude Code agent's timeline is now read from its record when asked for and stored
+nowhere ([the decision](../../docs/decisions/agents/graph/2026-11-13-timeline-read-from-the-record.md)); the host builds no
+writer (the setting is ignored with a warning) and this package is removed with the tables it writes, as
+[the plan](../../future/agent/transcript-timeline-source.md) says. What follows describes it as built.
+
 The session-scoped writer of an external Claude Code agent's timeline, from
 [the plan](../../future/agent/transcript-timeline-source.md) and
 [the decision](../../docs/decisions/agents/graph/2026-11-12-transcript-is-the-timeline-source.md). It reads the

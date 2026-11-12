@@ -2,6 +2,6 @@ purity = "strict"
 exports = ["terminate.py", "transfer.py"]
 
 [uses]
-"__init__.py" = ["content.py", "messages.py", "terminate.py", "transfer.py"]
+"__init__.py" = ["content.py", "harness_timeline.py", "messages.py", "terminate.py", "transfer.py"]
 "terminate.py" = ["content.py"]
 "tests" = ["__init__.py"]

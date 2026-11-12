@@ -61,7 +61,7 @@ from base.agents.history.harness_messages import (
     aload_harness_message_count,
 )
 from base.agents.history.timeline import build_timeline_items
-from base.api_contracts.agent_contract import Harness
+from base.api_contracts.agent_contract import Harness, reads_timeline_from_record
 from base.db.transaction import async_write_transaction
 from base.events.live.projection import TimelineSnapshot
 
@@ -224,7 +224,8 @@ async def _settle_external_harness_batch(
     update: dict[str, object],
 ) -> None:
     update.pop("messages", None)
-    items, _ = build_timeline_items(st.new_msgs, inputs=ctx.timestamp_policy())
+    shown = not reads_timeline_from_record(ctx.harness.value)
+    items = build_timeline_items(st.new_msgs, inputs=ctx.timestamp_policy())[0] if shown else []
     pending = [m for m in st.new_msgs if not isinstance(m, (AIMessage, ToolMessage))]
     prompt = render_messages(pending)
     if enters_harness_turn and prompt.strip():

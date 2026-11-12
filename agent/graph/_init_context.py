@@ -25,7 +25,7 @@ from base.agents.history.timeline import build_timeline_items
 from base.agents.messages.delivery.retry_io import retryable_database_error
 from base.agents.messages.kwargs import read_meiva_kwargs
 from base.agents.questions.render import reinjection_text
-from base.api_contracts.agent_contract import Harness
+from base.api_contracts.agent_contract import Harness, reads_timeline_from_record
 from base.db.transaction import async_write_transaction
 from base.host.atomic_io import write_text_atomic
 from base.lm.harness.handoff import ClusterFact, Handoff, instructions_path
@@ -107,6 +107,12 @@ async def _seed_harness_timeline(
 ) -> tuple[Handoff | None, Sequence[BaseMessage]]:
     if ctx.ops_pool is None:
         return _build_grounded_handoff(ctx, agent_id=agent_id), ()
+    if reads_timeline_from_record(ctx.harness.value):
+        needs_context = not warm_session or bool(tail)
+        return (
+            _build_grounded_handoff(ctx, agent_id=agent_id) if needs_context else None,
+            _load_context_notes(ctx) if needs_context else (),
+        )
     async with async_write_transaction(ctx.ops_pool) as pool_conn:
         count = await aload_harness_message_count(pool_conn, agent_id)
         notes: Sequence[BaseMessage] = _load_context_notes(ctx) if (count == 0 or tail) else ()

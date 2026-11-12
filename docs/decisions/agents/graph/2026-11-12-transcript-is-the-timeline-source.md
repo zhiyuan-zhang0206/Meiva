@@ -125,3 +125,5 @@ accept losing streaming first, in return for correctness and stability.
 The event-to-item projection of [External harness adapters](2026-10-19-external-harness.md) and the
 echo-as-acknowledgement of [two acknowledgements](2026-11-11-harness-delivery-two-acks.md) are superseded
 by this record as each CLI is cut over.
+
+<!-- Superseded in part by 2026-11-13-timeline-read-from-the-record.md (decisions 4 and 7 and the rejection of "store nothing": a Claude Code timeline is read from the CLI record when asked for and stored nowhere; the other CLIs follow) -->

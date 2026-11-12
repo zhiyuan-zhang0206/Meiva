@@ -38,6 +38,7 @@ from gateway.agents.reply_suggestion.tests.support import (
     agent_text,
     conversation,
     inbound,
+    no_record_items,
 )
 from gateway.http.model_catalog import CatalogLoadFailure, ModelCatalogUnavailableError
 
@@ -440,6 +441,7 @@ async def test_candidates_feedback_and_memory_reach_one_draft_while_agent_runs(
         catalog=harness.catalog,
         keys=harness.keys,
         recall=recall,
+        record_items=no_record_items,
     )
     assert result.suggestions and result.offer_id is not None
     assert harness.wire.gate_receipts() == []

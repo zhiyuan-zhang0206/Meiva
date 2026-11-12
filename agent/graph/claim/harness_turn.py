@@ -14,12 +14,14 @@ from agent.graph.claim.harness_activity import (
     log_turn_usage,
 )
 from agent.graph.claim.harness_inbox import (
+    append_turn_timeline,
     settle_stale_interrupts,
+    stores_timeline,
 )
 from agent.graph.claim.harness_interrupt import announce_interrupt, await_foreground
+from agent.graph.claim.harness_read_sink import ReadTimelineSink, session_of
 from agent.graph.claim.harness_run import ForegroundRun
 from agent.graph.claim.lost_turn import report_lost_turn
-from agent.graph.claim.timeline import append_turn_timeline
 from agent.graph.hooks.user_delivery import capture_items
 from agent.graph.interrupt import (
     ModelInterruptedError,
@@ -126,6 +128,29 @@ async def _legacy_projector(
     )
 
 
+# meiva:note
+# What shows the turn: the read of the CLI's record for a harness whose timeline is its record, the writer's sink while
+# one is bound, and otherwise the projector of adapter events.
+# meiva:link agent/graph/docs/harness-turn.md
+async def _turn_sink(
+    state: _state.AgentState,
+    ctx: MeivaContext,
+    agent_id: int,
+    event_publisher: AgentEventPublisher,
+) -> TurnSink:
+    if not stores_timeline(ctx):
+        return ReadTimelineSink(
+            ctx,
+            agent_id,
+            event_publisher,
+            non_human_wake=state.non_human_wake,
+            session_id=session_of(ctx, agent_id, ctx.harness.value),
+        )
+    if ctx.harness_timeline is None:
+        return await _legacy_projector(state, ctx, agent_id, event_publisher)
+    return TranscriptSink(ctx.harness_timeline, non_human_wake=state.non_human_wake)
+
+
 async def _run_harness_turn(
     state: _state.AgentState,
     ctx: MeivaContext,
@@ -137,11 +162,7 @@ async def _run_harness_turn(
     extra_updates: dict[str, Any] = {}
 
     timeline = ctx.harness_timeline
-    projector = (
-        await _legacy_projector(state, ctx, agent_id, event_publisher)
-        if timeline is None
-        else TranscriptSink(timeline, non_human_wake=state.non_human_wake)
-    )
+    projector = await _turn_sink(state, ctx, agent_id, event_publisher)
     run = ForegroundRun(ctx, agent_id, bridge, projector, state, event_publisher, timeline)
     await settle_stale_interrupts(ctx, agent_id)
 
@@ -192,7 +213,9 @@ async def _run_harness_turn(
     await projector.finish(interrupted=run.interrupted)
     _apply_wake_polarity(state, projector, extra_updates)
     if run.interrupted:
-        await announce_interrupt(ctx, agent_id, write_notes=timeline is None)
+        await announce_interrupt(
+            ctx, agent_id, write_notes=timeline is None and stores_timeline(ctx)
+        )
     return Command[HarnessGoto](update={**extra_updates, "halted": True, **_CLEARED}, goto=CLAIM)
 
 

@@ -32,11 +32,12 @@ from agent.graph.claim.tests.harness_support import (
 )
 from agent.graph.claim.tests.harness_support import hosted_resources as hosted_resources
 from agent.graph.llm_errors import FatalLLMStreamError
-from agent.harness_timeline.plan import ReplyPolicy
 from agent.harness_timeline.writer import HarnessTimelineWriter
 from agent.ownership.tests.ownership_support import agent_row
 from agent.state import AgentState
 from base.agents.context import MeivaContext
+from base.agents.history.transcript_timeline.items import ReplyPolicy
+from base.api_contracts.agent_contract import Harness
 from base.clock.tests.fakes import system_clock
 from base.lm.harness import (
     BridgeEvent,
@@ -178,7 +179,7 @@ def _wire(
     )
     if reading:
         writer.start_reading()
-    wired = replace(rt.context, harness_timeline=writer)
+    wired = replace(rt.context, harness=Harness.CODEX, harness_timeline=writer)
     effects.bind(wired)
     return Runtime(context=wired), writer
 

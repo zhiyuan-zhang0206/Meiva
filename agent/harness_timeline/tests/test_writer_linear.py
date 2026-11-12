@@ -22,7 +22,6 @@ from uuid import uuid4
 from psycopg import AsyncCursor
 from psycopg_pool import AsyncConnectionPool
 
-from agent.harness_timeline.plan import ReplyPolicy
 from agent.harness_timeline.writer import (
     CALLS_KEPT,
     CLOSED_KEPT,
@@ -32,6 +31,7 @@ from agent.harness_timeline.writer import (
     Committed,
     HarnessTimelineWriter,
 )
+from base.agents.history.transcript_timeline.items import ReplyPolicy
 from base.clock.tests.fakes import system_clock
 from base.lm.harness.claude.transcript.reader import ClaudeRecordReader
 from base.lm.harness.claude.transcript.tests.support import FIXTURES, now_ns, rows

@@ -5,10 +5,10 @@ from collections.abc import Awaitable, Callable, Sequence
 from datetime import datetime
 from typing import Protocol
 
-from agent.harness_timeline.tool_format import format_tool_use
 from base.agents.context import MeivaContext
 from base.agents.context.harness_timeline import TimelineSession
 from base.agents.history.timeline_item import TimelineItem
+from base.agents.history.transcript_timeline.items import format_tool_use
 from base.agents.messages.reply_intent import parse_reply_visibility, resolve_agent_reply
 from base.agents.sdk.telemetry import SdkCall
 from base.clock import Clock

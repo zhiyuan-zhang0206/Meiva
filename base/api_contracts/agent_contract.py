@@ -65,6 +65,16 @@ class Harness(StrEnum):
 
 
 # meiva:note
+# Whether a harness's timeline is read from the CLI's own record file at the moment it is asked for
+# (nothing about it is stored), as opposed to being written into `agent_harness_messages` while the
+# turn runs. One owner for the answer: the gateway, the runner's read operation, the agent's
+# graph and the insights all ask it here. Claude Code is the first; Codex and Antigravity follow.
+# meiva:link docs/decisions/agents/graph/2026-11-13-timeline-read-from-the-record.md
+def reads_timeline_from_record(harness: str) -> bool:
+    return harness == Harness.CLAUDE_CODE.value
+
+
+# meiva:note
 # How a harness bills the work it runs, as the user states it (2026-10-20): a
 # subscription pays nothing per token, so a per-million-token price is not the
 # cost of choosing it; an API harness is metered, so its rates are the decision.

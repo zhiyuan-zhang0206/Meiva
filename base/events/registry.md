@@ -249,6 +249,11 @@ above (or when its name is unregistered); otherwise it stays in the JSONL mirror
 | `harness_timeline_usage_mismatch` | the spend the transcript tallied for a turn differs from the usage on the turn's result frame | anomaly | — | — | events | — |
 | `harness_timeline_input_unproven` | an input the harness took was not shown by the transcript within the wait at the end of an invocation; it stays claimed, the writer settles it when the row appears, and the next invocation adopts it otherwise | anomaly | — | — | events | — |
 | `harness_timeline_unsupported_harness` | harness_transcript_timeline is on for an agent whose harness does not read its timeline from the transcript yet; the setting is ignored | anomaly | — | — | events | — |
+| `harness_control_not_shown` | a control event of a harness whose timeline is its CLI record (an unconfirmed cancellation) has no place on that timeline and is logged instead | anomaly | — | — | events | — |
+| `harness_live_timeline_failed` | the live read of a harness's CLI record for the running turn failed; the next read tries again | anomaly | — | — | events | — |
+| `harness_record_not_found` | a harness is running but its CLI record file was not found, so nothing of the turn reaches the timeline yet | anomaly | — | — | events | — |
+| `harness_reply_key_conflict` | a reply's publication key already names other content; the publication is left as it was | anomaly | — | — | events | — |
+| `harness_timeline_inputs_unmatched` | inputs in a harness's CLI record match no inbox row within the row cap the read scans; they are not shown | anomaly | — | — | events | — |
 | `harness_registration_renewal_failed` | an external harness session could not renew its registration | anomaly | — | — | events | — |
 | `harness_registration_unreadable` | a harness registration row could not be read during the sweep and is left in place | anomaly | — | — | events | — |
 | `handoff_instructions_file_failed` | the handoff instructions could not be saved to the agent's workspace; the first message carries no pointer to the file, so the agent cannot re-read its instructions after a compaction | anomaly | — | — | events | — |

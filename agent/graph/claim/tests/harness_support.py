@@ -130,8 +130,9 @@ class FakeEngine:
         interrupted: bool = False,
         script: Script | None = None,
     ) -> None:
-        self.harness = Harness.CLAUDE_CODE
+        self.harness = Harness.CODEX
         self.model = "claude-sonnet-5-5"
+        self.session_id: str | None = None
         self.exit_code: int | None = None
         self.delivered: list[list[HarnessInput]] = []
         self.interrupts = 0
@@ -288,7 +289,7 @@ def runtime(
             meiva_home=meiva_home(),
             ops_pool=ops_pool,
             hosted_resources=hosted_resources,
-            harness=Harness.CLAUDE_CODE if engine is not None else Harness.MEIVA,
+            harness=Harness.CODEX if engine is not None else Harness.MEIVA,
             harness_bridge=engine,
             llm=MagicMock(),
             event_publisher=publisher or MagicMock(),

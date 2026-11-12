@@ -1,9 +1,10 @@
-exports = ["configuration.py", "conversation.py", "inbound.py", "timeline.py", "understanding.py"]
+exports = ["configuration.py", "conversation.py", "inbound.py", "record_timeline.py", "timeline.py", "understanding.py"]
 
 [uses]
 "configuration.py" = ["read_inputs.py"]
 "conversation.py" = ["timeline.py"]
-"timeline.py" = ["configuration.py", "cursor.py", "paging.py", "read_inputs.py"]
+"record_timeline.py" = ["configuration.py", "cursor.py"]
+"timeline.py" = ["configuration.py", "cursor.py", "paging.py", "read_inputs.py", "record_timeline.py"]
 "tests" = ["cursor.py", "paging.py", "read_inputs.py"]
 "understanding.py" = ["configuration.py", "read_inputs.py"]
 

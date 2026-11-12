@@ -1,4 +1,5 @@
 import asyncio
+from collections.abc import Sequence
 from datetime import datetime
 
 from langchain_core.messages import AIMessage, BaseMessage, HumanMessage
@@ -11,6 +12,7 @@ from base.agents.history.timeline_item import TimelineItem
 from base.agents.messages.kwargs import NoteTag
 from base.agents.messages.reply_intent import SDK_DELIVERY_RULE
 from base.agents.to_user.delivery.store import (
+    DeliveryConflictError,
     latest_decision,
     messages,
     pending_context,
@@ -18,6 +20,7 @@ from base.agents.to_user.delivery.store import (
 )
 from base.api_contracts.user_delivery import PublishMessage, UserDeliveryMode
 from base.events.live.announce import publish_agent_updated
+from base.log import logger
 
 
 async def delivery_baseline(ctx: MeivaContext, agent_id: int) -> int:
@@ -38,12 +41,28 @@ async def capture_items(
     *,
     source_key: str,
 ) -> None:
+    await capture_keyed_items(
+        ctx, agent_id, [(f"{source_key}:{item.item_id}", item) for item in items]
+    )
+
+
+# meiva:note
+# Publish the visible replies among `keyed` (a publication key and the item it publishes), each once: a key that
+# is already published with the same content is a no-op. `tolerate_conflicts` makes a key that is already published
+# with other content a warning and not an error.
+async def capture_keyed_items(
+    ctx: MeivaContext,
+    agent_id: int,
+    keyed: Sequence[tuple[str, TimelineItem]],
+    *,
+    tolerate_conflicts: bool = False,
+) -> None:
     mode = UserDeliveryMode(ctx.require_agent().prompt.user_delivery_mode)
     if ctx.db is None or mode is UserDeliveryMode.SDK:
         return
     visible = [
-        item
-        for item in items
+        (key, item)
+        for key, item in keyed
         if item.kind == "agent_chat"
         and item.user_facing
         and not item.activity_pending
@@ -55,15 +74,27 @@ async def capture_items(
 
     def write() -> None:
         with ctx.require_db().connect() as conn:
-            for item in visible:
-                publish(
-                    conn,
-                    agent_id,
-                    f"{source_key}:{item.item_id}",
-                    PublishMessage(content=item.payload, suggestions=[]),
-                    mode=mode,
-                    created_at=datetime.fromisoformat(item.created_at) if item.created_at else now,
-                )
+            for key, item in visible:
+                try:
+                    publish(
+                        conn,
+                        agent_id,
+                        key,
+                        PublishMessage(content=item.payload, suggestions=[]),
+                        mode=mode,
+                        created_at=datetime.fromisoformat(item.created_at)
+                        if item.created_at
+                        else now,
+                    )
+                except DeliveryConflictError:
+                    if not tolerate_conflicts:
+                        raise
+                    logger.warning(
+                        "a reply's publication key already names other content; it is left as it was",
+                        event="harness_reply_key_conflict",
+                        agent_id=agent_id,
+                        source_key=key,
+                    )
 
     await asyncio.to_thread(write)
     await publish_agent_updated(ctx.require_bus(), agent_id)

@@ -328,6 +328,32 @@ EVENTS: dict[str, EventSpec] = {
         "the transcript yet; the setting is ignored",
         tier="anomaly",
     ),
+    "harness_control_not_shown": telemetry_event(
+        "harness_control_not_shown",
+        "a control event of a harness whose timeline is its CLI record (an unconfirmed cancellation) has no place "
+        "on that timeline and is logged instead",
+        tier="anomaly",
+    ),
+    "harness_live_timeline_failed": telemetry_event(
+        "harness_live_timeline_failed",
+        "the live read of a harness's CLI record for the running turn failed; the next read tries again",
+        tier="anomaly",
+    ),
+    "harness_record_not_found": telemetry_event(
+        "harness_record_not_found",
+        "a harness is running but its CLI record file was not found, so nothing of the turn reaches the timeline yet",
+        tier="anomaly",
+    ),
+    "harness_reply_key_conflict": telemetry_event(
+        "harness_reply_key_conflict",
+        "a reply's publication key already names other content; the publication is left as it was",
+        tier="anomaly",
+    ),
+    "harness_timeline_inputs_unmatched": telemetry_event(
+        "harness_timeline_inputs_unmatched",
+        "inputs in a harness's CLI record match no inbox row within the row cap the read scans; they are not shown",
+        tier="anomaly",
+    ),
     "harness_registration_renewal_failed": telemetry_event(
         "harness_registration_renewal_failed",
         "an external harness session could not renew its registration",

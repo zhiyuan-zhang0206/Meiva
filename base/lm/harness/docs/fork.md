@@ -15,10 +15,13 @@ machine. So birth only records the intent and the clone happens on the child's *
 start**, in the runner that hosts it:
 
 1. Birth (gateway, one transaction) writes the child's `agents_meta` row with
-   `fork_source_agent_id`, inserts the `kind='fork'` inbound (as for a native fork), and copies the
-   source's `agent_harness_messages` rows to the child (`copy_harness_timeline`): same `seq`, same
-   items, `inbound_id` cleared, no `agent_publications` (so no unread), and no graph checkpoints
-   (the source's graph state holds no conversation and may sit mid-turn).
+   `fork_source_agent_id`, inserts the `kind='fork'` inbound (as for a native fork), and, for a harness whose
+   timeline is stored (Codex, Antigravity), copies the source's `agent_harness_messages` rows to the child
+   (`copy_harness_timeline`): same `seq`, same items, `inbound_id` cleared, no `agent_publications` (so no unread), and no
+   graph checkpoints (the source's graph state holds no conversation and may sit mid-turn). A Claude Code child copies
+   nothing: its timeline is its CLI's record ([the decision](../../../../docs/decisions/agents/graph/2026-11-13-timeline-read-from-the-record.md)),
+   which is empty until the first start clones the source's session, and then shows the inherited conversation (the clone keeps the
+   rows' `uuid`s; offsets are the clone's own).
 2. The host reads `fork_source_agent_id` with the stored config and hands it to the bridge through
    `SessionBinding`.
 3. `BaseHarnessSession._fork_origin` runs after the registry lookup: the child has no record of its

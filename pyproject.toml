@@ -659,6 +659,9 @@ root = "base/agents/history/hierarchy/tests"
 root = "base/agents/history/tests"
 
 [[tool.pyright.executionEnvironments]]
+root = "base/agents/history/transcript_timeline/tests"
+
+[[tool.pyright.executionEnvironments]]
 root = "base/agents/inbox/tests"
 
 [[tool.pyright.executionEnvironments]]

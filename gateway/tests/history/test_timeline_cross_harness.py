@@ -71,7 +71,7 @@ def test_pure_external_harness_agent_timeline(
     test_client: TestClient,
 ) -> None:
     tid = create_agent(db_conn)
-    _set_harness(db_conn, tid, "claude_code")
+    _set_harness(db_conn, tid, "codex")
     items = [
         TimelineItem(
             item_id="h0.0",
@@ -159,7 +159,7 @@ def test_cross_harness_over_limit_merges_checkpoint_and_reattaches_prompt(
     ]
     _put_checkpoint(tid, messages)
 
-    _set_harness(db_conn, tid, "claude_code")
+    _set_harness(db_conn, tid, "codex")
     harness_items = [
         TimelineItem(
             item_id=f"h{i}.0",

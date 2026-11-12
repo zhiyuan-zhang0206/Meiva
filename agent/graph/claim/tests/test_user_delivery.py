@@ -1,4 +1,10 @@
+import json
+import re
+from collections.abc import Sequence
 from dataclasses import replace
+from datetime import UTC, datetime
+from pathlib import Path
+from typing import Any, cast
 
 import psycopg
 import pytest
@@ -10,13 +16,15 @@ from agent.graph.claim.harness_activity import (
     SUBAGENT_ITEM_CHARS,
 )
 from agent.graph.claim.harness_turn import harness_turn_node
-from agent.graph.claim.tests.harness_support import FakeEngine
+from agent.graph.claim.tests.harness_support import FakeEngine, in_a_turn, insert_row, row_status
 from agent.graph.claim.tests.test_harness_turn import config, runtime
 from agent.graph.llm_errors import FatalLLMStreamError
+from agent.ownership.tests.ownership_support import agent_row
 from agent.state import AgentState
-from base.agents.context import HostedTurnResources
+from base.agents.context import HostedTurnResources, MeivaContext
 from base.agents.history.harness_messages import aload_harness_timeline_items
 from base.agents.history.timeline_item import TimelineItem
+from base.api_contracts.agent_contract import Harness
 from base.clock import SYSTEM_TIMERS
 from base.clock.tests.seeded_rng import seeded_rng
 from base.config.tests.configuration import defaults
@@ -28,11 +36,14 @@ from base.host.env.agent_slices import AgentSlices
 from base.lm.harness import (
     AssistantText,
     BridgeEvent,
+    HarnessInput,
     SubagentText,
     TextDelta,
     ToolResult,
     ToolUse,
 )
+from base.lm.harness.claude.delivery import key_uuid
+from base.paths import workspace_dir
 from meiva.tests.fixtures.pin_agent import hosted_resources as hosted_resources
 
 
@@ -45,7 +56,7 @@ async def test_sdk_harness_corrects_only_at_natural_end_and_keeps_raw_final_in_d
 ) -> None:
     aid = create_agent(db_conn)
     db_conn.execute(
-        "INSERT INTO agents_meta (id, status, harness) VALUES (%s, 'running', 'claude_code')",
+        "INSERT INTO agents_meta (id, status, harness) VALUES (%s, 'running', 'codex')",
         (aid,),
     )
     db_conn.commit()
@@ -117,7 +128,7 @@ async def test_harness_reply_is_published_once_whether_or_not_the_turn_was_cut_o
 ) -> None:
     aid = create_agent(db_conn)
     db_conn.execute(
-        "INSERT INTO agents_meta (id, status, harness) VALUES (%s, 'running', 'claude_code')",
+        "INSERT INTO agents_meta (id, status, harness) VALUES (%s, 'running', 'codex')",
         (aid,),
     )
     db_conn.commit()
@@ -182,7 +193,7 @@ async def _subagent_turn(
     aid = agent_id if agent_id is not None else create_agent(db_conn)
     if agent_id is None:
         db_conn.execute(
-            "INSERT INTO agents_meta (id, status, harness) VALUES (%s, 'running', 'claude_code')",
+            "INSERT INTO agents_meta (id, status, harness) VALUES (%s, 'running', 'codex')",
             (aid,),
         )
         db_conn.commit()
@@ -360,7 +371,7 @@ async def test_activity_after_the_launching_invocation_still_finds_its_call(
 ) -> None:
     aid = create_agent(db_conn)
     db_conn.execute(
-        "INSERT INTO agents_meta (id, status, harness) VALUES (%s, 'running', 'claude_code')",
+        "INSERT INTO agents_meta (id, status, harness) VALUES (%s, 'running', 'codex')",
         (aid,),
     )
     db_conn.commit()
@@ -388,3 +399,227 @@ async def test_activity_after_the_launching_invocation_still_finds_its_call(
     [late_code] = [i for i in items if i.tool_use_id == "late-bash"]
     assert (late.parent_item_id, late_code.parent_item_id) == (spawn.item_id, spawn.item_id)
     assert nobody.parent_item_id is None
+
+
+FIXTURE = (
+    Path(__file__).parents[4] / "base/lm/harness/claude/transcript/tests/fixtures/basic/main.jsonl"
+)
+SESSION = "5914ebdf-bbec-47c8-bcd6-5a6da081f08a"
+BASIC_USER = "3c3d2de5-c479-52b7-91a6-fce4e4d26db9"
+
+
+# meiva:note
+# The text of the last assistant reply in the recorded turn: the reply the page and the user are to get.
+def _recorded_reply() -> str:
+    texts: list[str] = []
+    for line in FIXTURE.read_text().splitlines():
+        row = cast("dict[str, Any]", json.loads(line))
+        message = cast("dict[str, Any]", row.get("message") or {})
+        for block in cast("list[dict[str, Any]]", message.get("content") or []):
+            if isinstance(block, dict) and block.get("type") == "text":
+                texts.append(str(block["text"]))
+    return texts[-1]
+
+
+REPLY_TEXT = _recorded_reply()
+
+
+# meiva:note
+# The CLI as far as the record goes: the input it takes is written as the rows the CLI writes for it.
+class RecordingCli:
+    def __init__(self, path: Path) -> None:
+        self.path = path
+        self.turns = 0
+
+    def write(self, key: str) -> None:
+        self.turns += 1
+        n = self.turns
+        text = FIXTURE.read_text().replace(BASIC_USER, "USERUUID")
+        text = re.sub(
+            r"\b([0-9a-f]{8})(-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\b",
+            lambda m: f"{n:08x}{m.group(2)}",
+            text,
+        )
+        text = re.sub(r"toolu_\w+", lambda m: f"{m.group(0)}x{n}", text)
+        now = datetime.now(UTC).isoformat()
+        text = re.sub(r'"timestamp":"[^"]+"', f'"timestamp":"{now}"', text)
+        with self.path.open("a") as handle:
+            handle.write(text.replace("USERUUID", key_uuid(key)))
+
+    def __call__(self, inputs: Sequence[HarnessInput]):
+        keys = [item.key for item in inputs]
+        self.write(keys[0])
+        return in_a_turn(keys, REPLY_TEXT)
+
+
+def _record_wired(
+    tmp_path: Path,
+    engine: FakeEngine,
+    pool: AsyncConnectionPool,
+    resources: HostedTurnResources,
+    gate: ProcessDbGate,
+    live: LiveEvents,
+    agent_id: int,
+) -> Runtime[MeivaContext]:
+    base = runtime(engine, ops_pool=pool, hosted_resources=resources, publisher=live.publisher)
+    return Runtime(
+        context=replace(
+            base.context,
+            harness=Harness.CLAUDE_CODE,
+            meiva_home=tmp_path / "home",
+            environ={"HOME": str(tmp_path)},
+            db=Database.from_settings(gate=gate),
+            bus=EventBus.from_settings(rng=seeded_rng(), timers=SYSTEM_TIMERS),
+            agent=AgentSlices.resolve({"user_delivery_mode": "naive"}, default_reader=defaults()),
+        )
+    )
+
+
+async def test_a_claude_turn_reaches_the_page_the_user_and_the_inbox_through_the_record(
+    tmp_path: Path,
+    db_conn: psycopg.Connection,
+    aops_pool: AsyncConnectionPool,
+    database_gate: ProcessDbGate,
+    hosted_resources: HostedTurnResources,
+    live_events: LiveEvents,
+) -> None:
+    agent_id = agent_row(db_conn)
+    db_conn.execute("UPDATE agents_meta SET harness='claude_code' WHERE id=%s", (agent_id,))
+    db_conn.commit()
+    row = insert_row(db_conn, agent_id, "chat", "user", "hello")
+    workspace = workspace_dir(agent_id, home=tmp_path / "home")
+    folder = tmp_path / ".claude/projects" / re.sub(r"[^A-Za-z0-9]", "-", str(workspace))
+    folder.mkdir(parents=True)
+    cli = RecordingCli(folder / f"{SESSION}.jsonl")
+    engine = FakeEngine(script=cli)
+    engine.session_id = SESSION
+    rt = _record_wired(
+        tmp_path, engine, aops_pool, hosted_resources, database_gate, live_events, agent_id
+    )
+
+    command = await harness_turn_node(AgentState(), rt, config(agent_id))
+
+    assert command.goto == "claim"
+    assert row_status(db_conn, row) == "done", "the input is settled without a timeline write"
+    async with aops_pool.connection() as conn:
+        assert await aload_harness_timeline_items(conn, agent_id) == [], "no stored rows"
+    _assert_page_saw_the_message(
+        [json.loads(payload) for payload in await live_events.payloads()], row
+    )
+    published = _publications(db_conn, agent_id)
+    assert len(published) == 1 and published[0][1] == REPLY_TEXT
+    assert re.fullmatch(r"harness:claude:[0-9a-f-]{36}", published[0][0])
+    restarted = FakeEngine(script=lambda _inputs: [])
+    restarted.session_id = SESSION
+    again = _record_wired(
+        tmp_path, restarted, aops_pool, hosted_resources, database_gate, live_events, agent_id
+    )
+    _ = await harness_turn_node(AgentState(), again, config(agent_id))
+    assert _publications(db_conn, agent_id) == published
+
+
+def _assert_page_saw_the_message(events: list[dict[str, Any]], row: int) -> None:
+    snapshots = [e for e in events if e.get("role") == "timeline_snapshot"]
+    shown = {item["item_id"]: item for e in snapshots for item in e["items"]}
+    first = next(iter(shown.values()))
+    assert (first["kind"], first["inbound_id"]) == ("inbound_chat", row), (
+        "the pending strip can clear"
+    )
+    assert all(re.fullmatch(r"h\d+\.\d+", item_id) for item_id in shown)
+    committed = [e["inbound_id"] for e in events if e.get("role") == "inbound_committed"]
+    assert committed == [row]
+
+
+def _publications(db_conn: psycopg.Connection, agent_id: int) -> list[tuple[str, str]]:
+    db_conn.commit()
+    rows = db_conn.execute(
+        "SELECT source_key, content FROM agent_publications WHERE agent_id=%s ORDER BY id",
+        (agent_id,),
+    ).fetchall()
+    return [(str(key), str(content)) for key, content in rows]
+
+
+def _claude_agent(tmp_path: Path, db_conn: psycopg.Connection) -> tuple[int, Path]:
+    agent_id = agent_row(db_conn)
+    db_conn.execute("UPDATE agents_meta SET harness='claude_code' WHERE id=%s", (agent_id,))
+    db_conn.commit()
+    workspace = workspace_dir(agent_id, home=tmp_path / "home")
+    folder = tmp_path / ".claude/projects" / re.sub(r"[^A-Za-z0-9]", "-", str(workspace))
+    folder.mkdir(parents=True)
+    return agent_id, folder
+
+
+def _engine(script: Any = None) -> FakeEngine:
+    engine = FakeEngine(script=script or (lambda _inputs: []))
+    engine.session_id = SESSION
+    return engine
+
+
+async def test_the_switch_from_the_old_keys_does_not_resend_and_what_follows_is_delivered_by_key(
+    tmp_path: Path,
+    db_conn: psycopg.Connection,
+    aops_pool: AsyncConnectionPool,
+    database_gate: ProcessDbGate,
+    hosted_resources: HostedTurnResources,
+    live_events: LiveEvents,
+) -> None:
+    agent_id, folder = _claude_agent(tmp_path, db_conn)
+    cli = RecordingCli(folder / f"{SESSION}.jsonl")
+    cli.write("inbound-100")
+    db_conn.execute(
+        "INSERT INTO agent_publications (agent_id, source_key, mode, content, suggestions) "
+        "VALUES (%s, 'harness:h5.0', 'naive', %s, '[]'::jsonb)",
+        (agent_id, REPLY_TEXT),
+    )
+    db_conn.commit()
+    old = _publications(db_conn, agent_id)
+
+    def run(engine: FakeEngine):
+        rt = _record_wired(
+            tmp_path, engine, aops_pool, hosted_resources, database_gate, live_events, agent_id
+        )
+        return harness_turn_node(AgentState(), rt, config(agent_id))
+
+    _ = await run(_engine())
+    assert _publications(db_conn, agent_id) == old, (
+        "the reply the old keys delivered is not sent again"
+    )
+    for _turn in range(2):
+        _ = insert_row(db_conn, agent_id, "chat", "user", "again")
+        _ = await run(_engine(cli))
+    new = _publications(db_conn, agent_id)
+    assert [content for _key, content in new] == [REPLY_TEXT] * 3, (
+        "two replies with the same text both arrive"
+    )
+    assert len({key for key, _content in new}) == 3
+    cli.write("inbound-200")
+    _ = await run(_engine())
+    assert len(_publications(db_conn, agent_id)) == 4
+    _ = await run(_engine())
+    assert len(_publications(db_conn, agent_id)) == 4, "and only once"
+
+
+async def test_a_turn_with_no_record_file_to_show_for_it_fails_the_way_a_setup_failure_does(
+    tmp_path: Path,
+    db_conn: psycopg.Connection,
+    aops_pool: AsyncConnectionPool,
+    database_gate: ProcessDbGate,
+    hosted_resources: HostedTurnResources,
+    live_events: LiveEvents,
+) -> None:
+    agent_id, _folder = _claude_agent(tmp_path, db_conn)
+    _ = insert_row(db_conn, agent_id, "chat", "user", "hello")
+
+    def unseen(inputs: Sequence[HarnessInput]) -> Sequence[BridgeEvent]:
+        return in_a_turn([item.key for item in inputs], "a reply nobody can see")
+
+    engine = _engine(unseen)
+    rt = _record_wired(
+        tmp_path, engine, aops_pool, hosted_resources, database_gate, live_events, agent_id
+    )
+
+    with pytest.raises(FatalLLMStreamError) as failed:
+        _ = await harness_turn_node(AgentState(), rt, config(agent_id))
+
+    message = str(failed.value)
+    assert SESSION in message and str(tmp_path / ".claude/projects") in message

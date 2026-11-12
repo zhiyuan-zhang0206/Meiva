@@ -475,14 +475,7 @@ async def build_runtime(
     if harness is not Harness.MEIVA and uses_harness_model_selection(birth_config):
         model = slices.brain.llm_model
         effort = slices.overrides.reasoning_effort or None
-    timeline = transcript_timeline_for(
-        agent_id,
-        harness,
-        slices,
-        timeline_deps,
-        home=home,
-        harness_environ=harness_environ,
-    )
+    timeline = transcript_timeline_for(agent_id, harness, slices, timeline_deps)
     bridge = harness_bridge_for(
         agent_id,
         harness,

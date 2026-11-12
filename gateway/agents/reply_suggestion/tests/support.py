@@ -15,6 +15,7 @@ from langgraph.checkpoint.base import CheckpointMetadata, empty_checkpoint
 from langgraph.checkpoint.postgres import PostgresSaver
 from pydantic import SecretStr
 
+from base.agents.history.timeline_item import TimelineItem
 from base.agents.messages.timestamp_policy import TimestampSource
 from base.api_contracts.agent_contract import AgentStatus
 from base.clock import Clock
@@ -137,6 +138,10 @@ class PolicyChanges(TypedDict, total=False):
 # meiva:note
 # One idle agent whose newest message is a question, plus a service wired to the gate wire and
 # the drafting provider the test gave it.
+async def no_record_items() -> list[TimelineItem]:
+    return []
+
+
 class Harness:
     def __init__(
         self,
@@ -198,6 +203,7 @@ class Harness:
             catalog=self.catalog,
             keys=None if isinstance(self.catalog, CatalogLoadFailure) else self.keys,
             recall=empty_memory,
+            record_items=no_record_items,
         )
 
 

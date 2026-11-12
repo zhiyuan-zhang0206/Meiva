@@ -13,7 +13,6 @@ from uuid import uuid4
 
 from psycopg_pool import AsyncConnectionPool
 
-from agent.harness_timeline.plan import ReplyPolicy
 from agent.harness_timeline.writer import (
     MAX_TRANSACTION_ENTRIES,
     RETIRE_WAIT_SECONDS,
@@ -21,6 +20,7 @@ from agent.harness_timeline.writer import (
     HarnessTimelineWriter,
 )
 from base.agents.history.timeline_item import TimelineItem
+from base.agents.history.transcript_timeline.items import ReplyPolicy
 from base.clock import Clock
 from base.clock.tests.fakes import system_clock
 from base.lm.harness.session.transcript.drafts import InboundPart, SentInput
