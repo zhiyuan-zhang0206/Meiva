@@ -47,6 +47,15 @@ kept as owed until they have gone through, both idempotent, and `recover` offers
 again when the writer starts, which covers a process that died between a commit and its effects. A process that dies there
 loses the spend of that one read (it is a log line, not a table).
 
+**A turn is paired with its closing by identity.** The invocation waits for the record turns its own inputs were in, not for
+"the next closing": the writer keeps, bounded, the record turn each input it settled was delivered in (`DELIVERED_KEPT`) and
+the spend of each closed turn (`CLOSED_KEPT`), `wait_for_turn_end(keys)` is over when the turns of all `keys` have closed, and
+`closed_usage(keys)` is the spend of those turns. A late closing, a lost result frame and any number of turns the CLI ran on
+its own cannot shift a later wait or compare another turn's spend (`tests/test_writer_turns.py`).
+
+**Origins.** Whose input a row is is decided by the projection, by the wire id first and the origin second
+([origins](../../base/lm/harness/docs/transcript-projection.md#origins)).
+
 **Nothing is held for ever.** A result whose call has not been read and the output of a sub-agent whose link has not been
 read are held by the projector for a bounded number of entries and by the writer for `HOLD_SECONDS`; then they are shown
 top-level with an anomaly (`orphan_released`, `unlinked_released`). A call whose turn closed, or whose turn was followed by
@@ -88,7 +97,7 @@ that are never answered and a restart; it also bounds the bytes read from the CL
   path (the all-projects search is made at the first miss and every 20th after it). There is still one thread hop per
   record per poll; the cost of it is a `stat`.
 - **Memory is bounded by the conversation's constants, plus one small entry per record.** Writer: `memory_sizes()`
-  (registered inputs only until their settlement, `NON_HUMAN_LIMIT`, `TURN_USAGE_LIMIT`, `CLOSED_USAGE_KEPT`, `CALLS_KEPT`).
+  (registered inputs only until their settlement, `NON_HUMAN_LIMIT`, `TURN_USAGE_LIMIT`, `CLOSED_KEPT`, `DELIVERED_KEPT`, `CALLS_KEPT`).
   Projector: the limits in `projection.py` (`SEEN_LIMIT`, `CALLS_LIMIT`, `TURNS_LIMIT`, `LINKS_LIMIT`, `USAGE_LIMIT`,
   `REPORTED_LIMIT`, `HOLD_ENTRIES`). Reader: the parse state of the latest two positions of each of the latest 256 records
   that were read (a record that falls out loses only the duration of a call that was open in it), and one stat stamp per

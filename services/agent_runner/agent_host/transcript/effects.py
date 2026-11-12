@@ -51,6 +51,7 @@ SUBAGENT_USAGE_KIND = "agent_subagent"
 OWED_LIMIT = 256
 LOGGED_LIMIT = 8_192
 MODELS_LIMIT = 256
+UNMATCHED_LOG_FIRST = 20
 UNMATCHED_LOG_EVERY = 100
 RECOVER_ROWS = 500
 
@@ -152,7 +153,7 @@ class TimelineEffects:
             )
         for key in commit.plan.unmatched_inputs:
             self._unmatched += 1
-            if self._unmatched % UNMATCHED_LOG_EVERY == 1:
+            if self._unmatched <= UNMATCHED_LOG_FIRST or self._unmatched % UNMATCHED_LOG_EVERY == 1:
                 logger.warning(
                     "the transcript showed an input this process did not send",
                     event="harness_timeline_unmatched_input",
@@ -170,6 +171,8 @@ class TimelineEffects:
                 event="harness_timeline_usage_unreliable",
                 agent_id=self._agent_id,
                 record=spend.record,
+                message_ref=spend.message_ref,
+                turn=spend.turn,
                 model=spend.model,
             )
 

@@ -27,6 +27,7 @@ from base.lm.harness.session.transcript.entries import (
     Entry,
     Failure,
     HumanInput,
+    HumanOrigin,
     Interrupt,
     Notice,
     Order,
@@ -305,14 +306,12 @@ class Projector:
                 self._on_result(entry)
             case AgentText() | Reasoning():
                 self._on_text(entry)
-            case HumanInput() if entry.record == MAIN_RECORD:
+            case HumanInput():
                 self._on_human(entry)
             case Notice():
                 self._on_notice(entry)
             case Interrupt() | Compaction() | Failure() | TurnEnd():
                 self._on_marker(entry)
-            case _:
-                pass
 
     def _turn(self, entry: Entry, *, opens: bool = False) -> str:
         if entry.record != MAIN_RECORD:
@@ -488,9 +487,23 @@ class Projector:
             _Extra(tool_use_id=entry.call_id, tool_status=entry.status, exec_ms=entry.duration_ms),
         )
 
+    # meiva:note
+    # What a row that the record files as an input is, decided here and nowhere else, in this order: (1) its wire id is
+    # one of the inputs we registered: it is ours, and it settles, whatever origin the row says (a newer CLI may tag
+    # our own inputs with an origin we have never seen, and an input that is not settled is sent again); (2) its origin
+    # is one the vocabulary knows (a finished task, a timer): a notice; (3) it names no origin, or `human`: an input
+    # we did not send (unmatched), shown as such; (4) any other origin: an anomaly, reported and not shown, because
+    # nothing can say what it is. A sub-agent's record carries no inputs of ours, only the notices the CLI files in it.
     def _on_human(self, entry: HumanInput) -> None:
-        turn = self._turn(entry, opens=not entry.joined_running_turn)
+        if entry.record != MAIN_RECORD:
+            if entry.origin is not None:
+                self._on_origin(entry, entry.origin)
+            return
         sent, basis = self._recognise(entry)
+        if sent is None and entry.origin is not None:
+            self._on_origin(entry, entry.origin)
+            return
+        turn = self._turn(entry, opens=not entry.joined_running_turn)
         if sent is None:
             self._out.unmatched.append(entry.key)
             self._draft(entry, DraftKind.INBOUND_CHAT, entry.text, _Extra(source="unmatched"))
@@ -516,11 +529,37 @@ class Projector:
                 )
             )
 
+    def _on_origin(self, entry: HumanInput, origin: HumanOrigin) -> None:
+        if origin.cause is HarnessCause.UNKNOWN:
+            self._on_anomaly(
+                Anomaly(
+                    key=f"{entry.key}:anomaly:origin",
+                    order=entry.order,
+                    record=entry.record,
+                    anomaly=AnomalyKind.UNKNOWN_TYPE,
+                    detail=f"origin/{origin.kind}",
+                )
+            )
+            return
+        self._on_notice(
+            Notice(
+                key=entry.key,
+                order=entry.order,
+                record=entry.record,
+                turn=entry.turn,
+                at=entry.at,
+                text=origin.text,
+                cause=origin.cause,
+                call_id=origin.call_id,
+                opens_turn=not entry.joined_running_turn,
+            )
+        )
+
     def _recognise(self, entry: HumanInput) -> tuple[SentInput | None, MatchBasis | None]:
         if entry.wire_id is not None and entry.wire_id in self._sent:
             sent = self._sent[entry.wire_id]
             return sent, self._settle(sent, MatchBasis.WIRE_ID)
-        if entry.wire_id is not None:
+        if entry.wire_id is not None or entry.origin is not None:
             return None, None
         text = entry.text.strip()
         for sent in self._unsettled:

@@ -160,14 +160,19 @@ async def test_a_failed_capture_costs_neither_the_usage_nor_the_publish_and_is_t
     )
 
 
-async def test_an_unmatched_input_is_reported_once_per_session(loguru_records: LogRecords) -> None:
+async def test_the_first_unmatched_inputs_of_a_session_are_each_reported_and_then_one_in_a_hundred(
+    loguru_records: LogRecords,
+) -> None:
     ctx = runtime(FakeEngine()).context
     effects = TimelineEffects(7, Published())
     effects.bind(ctx)
-    plan = WritePlan(unmatched_inputs=("claude:u-1",))
-    await effects.after_commit(Committed(plan, ()))
-    await effects.after_commit(Committed(plan, ()))
-    assert len(loguru_records.events("harness_timeline_unmatched_input")) == 1
+    for n in range(250):
+        await effects.after_commit(Committed(WritePlan(unmatched_inputs=(f"claude:u-{n}",)), ()))
+    seen = [
+        r["extra"]["seen_in_this_session"]
+        for r in loguru_records.events("harness_timeline_unmatched_input")
+    ]
+    assert seen == [*range(1, 21), 101, 201]
 
 
 async def test_replies_committed_before_a_crash_are_offered_to_the_capture_again_at_start() -> None:

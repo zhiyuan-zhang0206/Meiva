@@ -25,7 +25,8 @@ from psycopg_pool import AsyncConnectionPool
 from agent.harness_timeline.plan import ReplyPolicy
 from agent.harness_timeline.writer import (
     CALLS_KEPT,
-    CLOSED_USAGE_KEPT,
+    CLOSED_KEPT,
+    DELIVERED_KEPT,
     NON_HUMAN_LIMIT,
     TURN_USAGE_LIMIT,
     Committed,
@@ -222,7 +223,11 @@ def _remembers_no_more_than_its_bounds(
     assert projector["orphans"] == 0 and projector["held"] == 0, (turn, "nothing is held for ever")
     assert own["calls"] <= calls_kept and own["positions"] <= started + 1, (turn, own)
     assert own["sent_items"] == own["sent_inbound"] == own["sent_wire"] == 0, own
-    assert own["non_human"] <= NON_HUMAN_LIMIT and own["closed_usages"] <= CLOSED_USAGE_KEPT, own
+    assert (
+        own["non_human"] <= NON_HUMAN_LIMIT
+        and own["closed"] <= CLOSED_KEPT
+        and own["delivered"] <= DELIVERED_KEPT
+    ), own
     assert own["turn_usage"] <= TURN_USAGE_LIMIT, own
 
 

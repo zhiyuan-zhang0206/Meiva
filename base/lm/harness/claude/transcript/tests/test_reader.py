@@ -21,7 +21,7 @@ from base.lm.harness.session.transcript.entries import (
     Anomaly,
     AnomalyKind,
     AnyEntry,
-    Notice,
+    HumanInput,
     ToolResult,
 )
 from base.lm.harness.session.transcript.ports import EntryBatch
@@ -464,10 +464,10 @@ def test_a_notification_queued_into_a_running_turn_is_a_notice_and_not_an_unmatc
         },
     }
     _, parsed = parse_row(ParseState(), row, line=0)
-    [notice] = parsed
-    assert isinstance(notice, Notice)
-    assert notice.call_id == "toolu_1" and not notice.opens_turn
-    assert "Background task b1 completed" in notice.text
+    [told] = parsed
+    assert isinstance(told, HumanInput) and told.origin is not None and told.joined_running_turn
+    assert told.origin.call_id == "toolu_1"
+    assert "Background task b1 completed" in told.origin.text
     plain = {**row, "attachment": {"type": "queued_command", "prompt": "hi", "source_uuid": "w"}}
     _, steered = parse_row(ParseState(), plain, line=1)
     assert [type(entry).__name__ for entry in steered] == ["HumanInput"]

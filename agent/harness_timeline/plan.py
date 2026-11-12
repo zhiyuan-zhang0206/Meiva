@@ -48,6 +48,7 @@ class PlannedItem:
 class Settlement:
     input_key: str
     inbound_ids: tuple[int, ...]
+    turn: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -96,7 +97,7 @@ def plan_write(
     return WritePlan(
         items=tuple(planned),
         settlements=tuple(
-            Settlement(delivery.input_key, inbound_ids.get(delivery.input_key, ()))
+            Settlement(delivery.input_key, inbound_ids.get(delivery.input_key, ()), delivery.turn)
             for delivery in projection.deliveries
         ),
         usage=tuple(spend for spend in projection.usage if spend.reliable),
