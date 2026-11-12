@@ -95,7 +95,7 @@ projector looks the call up by that id once per call id and invocation
 for example a forked history that predates the field) leaves `parent_item_id` empty and the item unmarked.
 
 Volume: one message is cut at `SUBAGENT_ITEM_CHARS` (8,000) and one graph invocation stops after
-`SUBAGENT_RUN_CHARS` (200,000) in total, leaving one `status:` marker. A sub-agent's tool call input and
+`SUBAGENT_RUN_CHARS` (200,000) in total, after which sub-agent entries stop silently. A sub-agent's tool call input and
 output count against the same total and are cut at the same size; after the limit a call writes nothing and an
 output already running is replaced by `[output omitted: sub-agent limit reached]`. The main agent's own text and
 tool output are not capped; these limits exist because nobody asked the agent to produce this text.

@@ -25,7 +25,6 @@ from agent.graph.claim.harness_foreground import (
     Settlement,
     event_generation,
     merge_handed,
-    own_turn_note,
     plan_wake,
 )
 from agent.graph.claim.harness_inbox import (
@@ -94,7 +93,6 @@ from base.lm.harness import (
     ToolResult,
     ToolUse,
     TurnCompleted,
-    TurnStarted,
     completed_turn,
     fault_of_event,
 )
@@ -497,8 +495,6 @@ class ForegroundRun:
                 await self._projector.on_event(event)
             case TurnCompleted():
                 await self._on_turn_completed(event)
-            case TurnStarted() if (note := own_turn_note(event)) is not None:
-                await self._projector.record_control(note)
             case _:
                 pass
         self.fg, settlements = self.fg.on_event(event)

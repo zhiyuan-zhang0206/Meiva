@@ -42,6 +42,15 @@ describe("groupIntoTurns", () => {
     expect(groups).toHaveLength(3);
   });
 
+  it("an item of a kind this build does not know takes no place in a group", () => {
+    const unknown = item("agent_chat", null, "9.0", {
+      kind: "from_a_newer_backend" as BackendTimelineItem["kind"],
+    });
+    const items = [item("agent_reasoning"), unknown, item("agent_code")];
+    const groups = groupIntoTurns(items, { collapseTurns: true, liveIndex: null });
+    expect(groups.flatMap((g) => (g.kind === "turn" ? g.items : [g.item]))).not.toContain(unknown);
+  });
+
   it("folds a stretch of secondary items between two primary replies", () => {
     const items = [
       item("agent_chat"),

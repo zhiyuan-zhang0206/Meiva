@@ -38,7 +38,6 @@ TEXT_CHECKPOINT_SECONDS = 0.2
 SUBAGENT_ITEM_CHARS = 8_000
 SUBAGENT_RUN_CHARS = 200_000
 SUBAGENT_CUT = "\n[... sub-agent text cut]"
-SUBAGENT_LIMIT_NOTE = "Sub-agent text limit reached; further sub-agent text is not shown."
 SUBAGENT_OMITTED = "[output omitted: sub-agent limit reached]"
 
 
@@ -284,14 +283,11 @@ class HarnessTurnProjector:
             self._tool_items[tool_use_id] = found
         return found
 
-    def _within_subagent_budget(self, size: int, now: datetime) -> bool:
+    def _within_subagent_budget(self, size: int) -> bool:
         if self._subagent_chars > SUBAGENT_RUN_CHARS:
             return False
         self._subagent_chars += size
-        if self._subagent_chars > SUBAGENT_RUN_CHARS:
-            _ = self._new_item("system_marker", f"status:{SUBAGENT_LIMIT_NOTE}", now)
-            return False
-        return True
+        return self._subagent_chars <= SUBAGENT_RUN_CHARS
 
     @staticmethod
     def _cut_subagent(text: str) -> str:
@@ -311,7 +307,7 @@ class HarnessTurnProjector:
         if event.parent_tool_use_id is not None:
             parent = await self._call_item(event.parent_tool_use_id)
             payload = self._cut_subagent(payload)
-            if not self._within_subagent_budget(len(payload), now):
+            if not self._within_subagent_budget(len(payload)):
                 return
         code_ms = 0 if subagent else _elapsed(self._reasoning_ended or self._activity_started, now)
         code_item = self._new_item(
@@ -338,7 +334,7 @@ class HarnessTurnProjector:
             return
         self._close_text(now)
         self._last_chat_raw = ""
-        if not self._within_subagent_budget(len(event.text), now):
+        if not self._within_subagent_budget(len(event.text)):
             return
         _ = self._new_item(
             "subagent_text",
@@ -363,7 +359,7 @@ class HarnessTurnProjector:
         subagent = event.parent_tool_use_id is not None
         if subagent:
             cut = self._cut_subagent(output)
-            output = cut if self._within_subagent_budget(len(cut), now) else SUBAGENT_OMITTED
+            output = cut if self._within_subagent_budget(len(cut)) else SUBAGENT_OMITTED
         self._revise(
             output_item,
             output,

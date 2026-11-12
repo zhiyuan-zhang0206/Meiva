@@ -333,6 +333,29 @@ describe("CardHeader", () => {
     expect(open.container.querySelector("strong")?.textContent).toBe("hi");
   });
 
+  it("a row of a kind this build does not know renders nothing, not an empty row", () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(noop);
+    const unknown = item("agent_chat", { payload: "x" });
+    (unknown as { kind: string }).kind = "from_a_newer_backend";
+    const { container } = renderWithQuery(
+      <TimelineRow
+        item={unknown}
+        config={messageCardConfig(unknown)}
+        streaming={false}
+        expanded={false}
+        copyable={false}
+        onToggle={noop}
+      />,
+    );
+    expect(container.querySelector(".timeline-item")).toBeNull();
+    expect(container.textContent).toBe("");
+    expect(warn).toHaveBeenCalledWith(
+      "[timeline] TimelineRow: unknown item kind",
+      "from_a_newer_backend",
+    );
+    warn.mockRestore();
+  });
+
   const baseItem = item("agent_chat", { payload: "test" });
 
   it("renders title and chevron for a non-rich config", () => {

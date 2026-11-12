@@ -398,7 +398,6 @@ export const ItemView = memo(function ItemView({
   item: BackendTimelineItem;
   streaming: boolean;
 }) {
-  const t = useTranslations("timeline");
   // Throttle the heavy-parse content (chat markdown / python highlight) while it
   // streams. The hook is called unconditionally (rules of hooks); `live` is
   // false for every other kind, making it a no-op pass-through.
@@ -502,9 +501,7 @@ export const ItemView = memo(function ItemView({
   /* v8 ignore next 3 */
   const _exhaustive: never = item.kind;
   console.warn("[timeline] ItemView: unknown item kind", _exhaustive);
-  return (
-    <div className="text-muted-foreground font-mono text-xs">{t("unknownEventType")}</div>
-  );
+  return null;
 },
 // Custom comparator: only re-render when item reference or content changes.
 // ItemView is a pure function (DOM derived from item); same item + same streaming

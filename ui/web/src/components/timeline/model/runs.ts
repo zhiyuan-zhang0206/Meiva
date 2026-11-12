@@ -60,7 +60,30 @@ export function splitEnvelope(payload: string): { header: string; body: string }
 }
 
 // meiva:note
-// Items that intentionally render no visible DOM: the ephemeral bookkeeping
+// The item kinds this build renders. A kind outside it comes from a backend newer than the loaded
+// page; such an item renders nothing and takes no place in a turn, so a stale page shows no empty
+// row where the new kind sits.
+// meiva:link ui/web/src/docs/frontend-components/timeline-view/deep-collapse.md
+const RENDERED_KINDS: Record<BackendTimelineItem["kind"], true> = {
+  inbound_chat: true,
+  inbound_compact_summary: true,
+  inbound_compact_request: true,
+  attach: true,
+  agent_chat: true,
+  agent_code: true,
+  agent_reasoning: true,
+  code_output: true,
+  subagent_text: true,
+  system_prompt: true,
+  system_marker: true,
+};
+
+export function isRenderedKind(kind: string): boolean {
+  return Object.hasOwn(RENDERED_KINDS, kind);
+}
+
+// meiva:note
+// Items that intentionally render no visible DOM: an item of a kind this build does not know, and the ephemeral bookkeeping
 // markers (`compact_done`, `cancelled`, `status:Cancellation requested.`,
 // `compact_request:*`) and the companion
 // `[files]` placeholder after `system:upload`. Skipping them during turn
@@ -69,6 +92,7 @@ export function splitEnvelope(payload: string): { header: string; body: string }
 // note the agent read now renders (user ruling 2026-11-09).
 // meiva:link ui/web/src/docs/frontend-components/timeline-view/deep-collapse.md
 export function isSilentTimelineItem(item: BackendTimelineItem): boolean {
+  if (!isRenderedKind(item.kind)) return true;
   if (item.kind === "system_marker" && isSilentMarker(item.source, item.payload)) {
     return true;
   }
