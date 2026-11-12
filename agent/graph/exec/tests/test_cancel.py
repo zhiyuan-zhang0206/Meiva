@@ -50,13 +50,14 @@ _CONFIG: RunnableConfig = {"configurable": {"thread_id": "7"}}
 
 
 # meiva:note
-# A restart that has waited its grace ends the run, says so, and marks the turn unfinished so
-# the claim that takes it resumes the turn instead of idling the agent.
+# A terminate (user or system source) cancels the run with its attribution; a restart that has waited
+# its grace ends the run, says so, and marks the turn unfinished so the claim that takes it resumes
+# the turn instead of idling the agent. A native stop never reaches here: it cancels the turn Task.
 @pytest.mark.parametrize(
     ("kind", "source", "waited_s", "marker", "unfinished"),
     [
-        ("interrupt", "user", 0, "[cancelled by user]", False),
-        ("interrupt", "agent:9", 0, "[cancelled by system]", False),
+        ("terminate", "user", 0, "[cancelled by user]", False),
+        ("terminate", "agent:9", 0, "[cancelled by system]", False),
         ("restart", "user", RESTART_INTERRUPT_GRACE_S + 1, "[interrupted by restart]", True),
     ],
 )

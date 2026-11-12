@@ -232,11 +232,10 @@ async def test_claim_hosted_still_dispatches_an_available_batch(
 
 # meiva:note
 # interrupt inbound → pause: halted=True + re-enter CLAIM (-> idle), NOT END
-#     (process stays alive). No lifecycle marker (a pause leaves no trace); a
-#     Cancelled SSE is emitted so the live UI clears turn-active state.
+#     (process stays alive). No lifecycle marker (a pause leaves no trace). The row is an
+#     external harness's; the claim handler emits no event for it.
 # re-enter claim to idle (alive), not END (dead)
 # no marker appended — pause is silent (state.messages already had the sys msg)
-# Cancelled emitted for the live view
 async def test_claim_interrupt_kind_halts_to_idle_without_marker(
     redis_url: str,
     db_conn: psycopg.Connection,
@@ -692,8 +691,8 @@ async def test_claim_restart_before_terminate_preserves_serial_order(
 
 # meiva:note
 # cancel + restart in the same batch (user clicks Stop then Restart) → restart wins over cancel:
-#     exits normally via restart; the Cancelled event for cancel is still emitted (frontend clears
-#     turn-active), the pause intent is absorbed into 'silent idle after restart' (halted=True preserved).
+#     exits normally via restart; the pause intent is absorbed into 'silent idle after restart'
+#     (halted=True preserved).
 # restart exit, not the cancel pause branch
 # idle before restart (halted=True) + external → silent after restart
 # No phantom cancellation: the successor will consume the still-pending command.
