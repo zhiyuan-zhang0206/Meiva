@@ -100,3 +100,13 @@ bounded number of entries (`HOLD_ENTRIES`) or, for the writer, a bounded time, a
 items with an `ORPHAN_RELEASED` or `UNLINKED_RELEASED` anomaly each. An `EntryBatch` states the bytes of the CLI's file it
 covers (`size`), which the writer uses to bound a transaction. A reader raises `PositionLostError` (in `ports.py`) for a
 position its record no longer holds.
+
+## Origins
+
+A row or a queued command may carry `origin.kind`. `human` (what a newer CLI puts on what a person typed and on the
+inputs a host sends for one) is an input like any other: it is recognised by the id we gave it and settles it. A kind
+`harness_cause` knows (`task-notification`, a timer) is a notice. Any other kind on a queued command is an anomaly
+(`origin/<kind>`, reported once per kind) and puts nothing on the timeline, so an origin the CLI may put on our own inputs
+one day can never make them look like notices that settle nothing; on a user row an unknown kind is still shown as a
+notice. The sample of a long real session (`claude/transcript/tests/fixtures/long_session`, sanitized to structure) pins
+this, and that the bookkeeping rows of such a session are ignored and not reported.
