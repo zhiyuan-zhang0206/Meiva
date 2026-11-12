@@ -91,23 +91,35 @@ async def test_server_close_after_client_reset_is_not_request_completion() -> No
 
 
 async def test_active_ops_share_health_and_cleanup_within_one_daemon(ops: Ops) -> None:
-    other_daemon: dict[str, tuple[str, float]] = {}
+    # meiva:note
+    # Active includes admitted work queued on this invocation-owned executor. FIFO
+    # keeps config wedged on the real env lock before inventory can complete; two
+    # worker threads could instead finish the empty inventory op before observation.
+    with ThreadPoolExecutor(max_workers=1) as executor:
+        ops = replace(ops, executor=executor)
+        tasks = []
+        try:
+            other_daemon: dict[str, tuple[str, float]] = {}
 
-    with held_env_lock():
-        tasks = [
-            asyncio.create_task(ops.run_arm("config_write", config_write("active"))),
-            asyncio.create_task(ops.run_arm("inventory_write", {"plugins": {}, "mcp_servers": {}})),
-        ]
-        await _until(lambda: set(ops.active_ops) == {"config_write", "inventory_write"})
+            with held_env_lock():
+                tasks = [
+                    asyncio.create_task(ops.run_arm("config_write", config_write("active"))),
+                    asyncio.create_task(
+                        ops.run_arm("inventory_write", {"plugins": {}, "mcp_servers": {}})
+                    ),
+                ]
+                await _until(lambda: set(ops.active_ops) == {"config_write", "inventory_write"})
 
-        assert health.ops_components(ops.active_ops)[1]["progress"] == "2 active"
-        assert health.saturation(ops.active_ops, 2) == 1.0
-        assert health.ops_components(other_daemon)[1]["progress"] == "0 active"
+                assert health.ops_components(ops.active_ops)[1]["progress"] == "2 active"
+                assert health.saturation(ops.active_ops, 2) == 1.0
+                assert health.ops_components(other_daemon)[1]["progress"] == "0 active"
 
-    await asyncio.gather(*tasks)
-    assert ops.active_ops == {}
-    assert health.ops_components(ops.active_ops)[1]["progress"] == "0 active"
-    assert health.saturation(ops.active_ops, 2) == 0.0
+            _ = await asyncio.gather(*tasks)
+            assert ops.active_ops == {}
+            assert health.ops_components(ops.active_ops)[1]["progress"] == "0 active"
+            assert health.saturation(ops.active_ops, 2) == 0.0
+        finally:
+            _ = await asyncio.gather(*tasks, return_exceptions=True)
 
 
 async def test_a_failing_operation_leaves_no_active_entry(ops: Ops) -> None:
