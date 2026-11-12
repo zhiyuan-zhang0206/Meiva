@@ -17,6 +17,7 @@ from psycopg import AsyncConnection
 from base.agents.history.harness_messages import aget_harness_call_item_ids, call_id_of
 from base.agents.history.timeline_item import TimelineItem
 from base.db.rows import aquery_all
+from base.lm.harness.session.transcript.entries import MAIN_RECORD
 
 
 @dataclass(frozen=True)
@@ -199,8 +200,8 @@ async def aload_transcript_positions(
         conn,
         StoredPosition,
         "SELECT record, position, rebuild_ordinal FROM agent_harness_transcript_positions "
-        "WHERE agent_id = %s AND session_id = %s",
-        (agent_id, session_id),
+        "WHERE agent_id = %s AND session_id = %s ORDER BY (record <> %s), record",
+        (agent_id, session_id, MAIN_RECORD),
     )
     return {row.record: row for row in rows}
 

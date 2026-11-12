@@ -8,12 +8,15 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import os
 from pathlib import Path
 
 from base.lm.harness.claude.transcript.position import decode
 from base.lm.harness.claude.transcript.reader import ClaudeRecordReader
 from base.lm.harness.claude.transcript.tests.support import FIXTURES, now_ns, rows
+from base.lm.harness.session.transcript.entries import ToolResult
+from base.lm.harness.session.transcript.ports import EntryBatch
 
 SECOND = 1_000_000_000
 
@@ -118,16 +121,68 @@ def rows_line() -> str:
     return (FIXTURES / "basic" / "main.jsonl").read_text().splitlines()[2]
 
 
-def test_a_new_session_starts_the_parse_states_over(tmp_path: Path) -> None:
+def _call_row(call: str, at: str) -> str:
+    return json.dumps(
+        {
+            "type": "assistant",
+            "uuid": f"u-{call}",
+            "timestamp": at,
+            "isSidechain": False,
+            "message": {
+                "id": f"m-{call}",
+                "model": "claude-haiku-5-5",
+                "role": "assistant",
+                "stop_reason": "tool_use",
+                "usage": {"input_tokens": 1, "output_tokens": 1},
+                "content": [{"type": "tool_use", "id": call, "name": "Bash", "input": {}}],
+            },
+        }
+    )
+
+
+def _result_row(call: str, at: str) -> str:
+    return json.dumps(
+        {
+            "type": "user",
+            "uuid": f"r-{call}",
+            "timestamp": at,
+            "isSidechain": False,
+            "message": {
+                "role": "user",
+                "content": [{"type": "tool_result", "tool_use_id": call, "content": "ok"}],
+            },
+        }
+    )
+
+
+def _duration(batch: object) -> int | None:
+    assert isinstance(batch, EntryBatch)
+    (result,) = [entry for entry in batch.entries if isinstance(entry, ToolResult)]
+    return result.duration_ms
+
+
+def test_the_parse_state_of_a_call_lives_as_long_as_the_session_and_a_new_session_starts_over(
+    tmp_path: Path,
+) -> None:
     first, second = _session(), "99999999-aaaa-bbbb-cccc-000000000002"
     current = [first]
-    _ = _main_file(tmp_path, "p", first)
-    _ = _main_file(tmp_path, "p", second)
+    one = tmp_path / "projects" / "p" / f"{first}.jsonl"
+    two = tmp_path / "projects" / "p" / f"{second}.jsonl"
+    one.parent.mkdir(parents=True)
+    one.write_text(_call_row("t1", "2026-11-12T10:00:00.000Z") + "\n")
+    two.write_text(_result_row("t1", "2026-11-12T10:00:09.000Z") + "\n")
     reader = ClaudeRecordReader(
         now_ns=now_ns, claude_home=tmp_path, session_id=lambda: current[0], workspace=tmp_path / "w"
     )
-    batch = asyncio.run(reader.read_after("main", None))
-    assert batch is not None and reader._states, "the first session left a state"
+    opened = asyncio.run(reader.read_after("main", None))
+    assert opened is not None
+    with one.open("a") as handle:
+        handle.write(_result_row("t1", "2026-11-12T10:00:05.000Z") + "\n")
+    assert _duration(asyncio.run(reader.read_after("main", opened.position))) == 5000, (
+        "the same session keeps what it learnt of the open call"
+    )
+
     current[0] = second
-    _ = asyncio.run(reader.records())
-    assert not reader._states and not reader._quiet, "the second session starts from nothing"
+    assert _duration(asyncio.run(reader.read_after("main", None))) is None, (
+        "another session does not inherit a call of the first"
+    )

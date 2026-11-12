@@ -26,6 +26,11 @@ root on `sys.path`.
   bytes stream is a `TypeError`. `stdout_bytes` / `stderr_bytes` are the same reading for a call
   made without `text=` (raw bytes, no newline translation); a text stream is a `TypeError`.
 
+- `recent`: `RecentSet` / `RecentMap`, insertion-ordered containers with a fixed upper bound (the oldest forgotten first), for
+  a long-lived component that remembers things about a conversation of any length. They are not a value boundary: they live here
+  because this is the one standard-library-only, strict `base` package that the projection (`base/lm`), the timeline writer
+  (`agent`) and its effects (`services`) may all import, and a generic container is not any of theirs to own.
+
 When the shape is known, prefer a pydantic model or a module-level `TypeAdapter` over these
 helpers; they are for the value whose shape the reader checks by hand.
 

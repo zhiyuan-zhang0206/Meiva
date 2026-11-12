@@ -177,9 +177,20 @@ class TranscriptTimeline:
                 agent_id=self._agent_id,
             )
 
+    async def _release_held(self) -> None:
+        try:
+            await self.writer.release_held()
+        except Exception:
+            logger.opt(exception=True).warning(
+                "the writer could not show what it held back before closing",
+                event="harness_timeline_writer_retry",
+                agent_id=self._agent_id,
+            )
+
     async def close(self) -> None:
         self._closed = True
         await self.read_final()
+        await self._release_held()
         self.writer.stop()
         try:
             await asyncio.wait_for(self._stopped.wait(), _CLOSE_JOIN_SECONDS)

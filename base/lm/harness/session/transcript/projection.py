@@ -52,10 +52,12 @@ from base.lm.harness.session.transcript.entries import (
 # whose call has not been read is held for at most `HOLD_ENTRIES` further entries or until the writer says its own time
 # bound passed (`feed(release_orphans=...)`, one clock per call). The drafts and usage of a sub-agent record whose link has
 # not been read (a foreground sub-agent that is still running: its link comes with the result of the call that started it)
-# are held while it runs and released, as top-level items, when the main turn they were born in closes or is followed by the
-# next one, for an adapter whose links always precede its turn's end (`release_held_at_turn_end`: Claude's does, Codex's and
-# Antigravity's may come after), when the session ends (`feed(release_held=True)`), or when the record alone has
-# held `HOLD_ENTRIES` items (the memory bound: a sub-agent that long before its result shows the rest top-level). Each release
+# are held while it runs and released, as top-level items, when the main record's current turn is closed at the end of a feed
+# (for an adapter whose links always precede its turn's end: `release_held_at_turn_end`, Claude's does, Codex's and
+# Antigravity's may come after; judged from what was fed, never from when, so the order records were read or replayed in
+# cannot decide it), when the writer says the session or the writer itself has ended (`feed(release_held=True)`), when the
+# record alone has held `HOLD_ENTRIES` items, or when everything held together passes `HELD_TOTAL_LIMIT` (then the oldest
+# record goes first): the memory bounds, after which the rest of that sub-agent is shown top-level. Each release
 # is one `ORPHAN_RELEASED` / `UNLINKED_RELEASED` anomaly, and a record released once shows its later drafts top-level at
 # once. A call still unanswered when its turn closes, or when the next turn on the record begins, is abandoned: it no longer
 # keeps the record from being quiet, and a result that arrives later is still paired with it (`oldest_abandoned` tells the
@@ -68,6 +70,7 @@ LINKS_LIMIT = 4_096
 USAGE_LIMIT = 8_192
 REPORTED_LIMIT = 1_024
 HOLD_ENTRIES = 2_000
+HELD_TOTAL_LIMIT = 8_192
 
 INTERRUPT_MARKER = "status:Turn interrupted"
 COMPACTION_MARKER = "status:Context compacted"
@@ -91,7 +94,6 @@ class _Orphaned:
 
 @dataclass(frozen=True, slots=True)
 class _Held:
-    turn: str | None
     drafts: list[TimelineDraft]
     usage: list[MessageUsage]
 
@@ -114,7 +116,11 @@ class Projector:
         seen_limit: int = SEEN_LIMIT,
         release_held_at_turn_end: bool = False,
         calls_limit: int = CALLS_LIMIT,
+        hold_entries: int = HOLD_ENTRIES,
+        held_total_limit: int = HELD_TOTAL_LIMIT,
     ) -> None:
+        self._hold_entries = hold_entries
+        self._held_total = held_total_limit
         self._release_at_turn_end = release_held_at_turn_end
         self._seen: RecentSet[str] = RecentSet(seen_limit)
         for key in known_keys:
@@ -165,21 +171,33 @@ class Projector:
 
     def _release(self, *, everything: bool, orphans: Collection[str]) -> None:
         for call_id, orphaned in list(self._orphans.items()):
-            if everything or call_id in orphans or self._fed - orphaned.born >= HOLD_ENTRIES:
+            if everything or call_id in orphans or self._fed - orphaned.born >= self._hold_entries:
                 del self._orphans[call_id]
                 self._release_results(call_id, orphaned.results)
+        idle = self._main_idle()
         for record, held in list(self._held.items()):
-            if everything or len(held.drafts) + len(held.usage) >= HOLD_ENTRIES:
+            if everything or idle or len(held.drafts) + len(held.usage) >= self._hold_entries:
                 del self._held[record]
                 self._release_record(record, held)
+        while (
+            self._held
+            and sum(len(h.drafts) + len(h.usage) for h in self._held.values()) > self._held_total
+        ):
+            record = next(iter(self._held))
+            self._release_record(record, self._held.pop(record))
 
-    def _release_held_of(self, turn: str) -> None:
-        if not self._release_at_turn_end:
-            return
-        for record, held in list(self._held.items()):
-            if held.turn == turn:
-                del self._held[record]
-                self._release_record(record, held)
+    # meiva:note
+    # Whether nothing can link a held record any more, judged from what has been fed and not from when it was fed: the
+    # main record has been seen and its current turn is closed (a foreground sub-agent's link comes with the result of its
+    # call, inside the turn), for an adapter that says its links precede its turn's end. Checked once at the end of a feed,
+    # so the order in which records were read or replayed (a sub-agent's record before the main one) cannot decide it:
+    # before the main record is seen, nothing is idle.
+    def _main_idle(self) -> bool:
+        return (
+            self._release_at_turn_end
+            and self._current is not None
+            and self._current in self._closed
+        )
 
     def _release_results(self, call_id: str, results: list[ToolResult]) -> None:
         for result in results:
@@ -229,14 +247,17 @@ class Projector:
         return tuple(self._orphans)
 
     # meiva:note
-    # The row of the oldest call of `record` that was abandoned (its turn closed or the next one began) and has no result
-    # yet, or None: the writer keeps its restart point from passing it (for a bounded number of rows) so that a rebuilt
+    # The row of the oldest call of `record`, at row `since` or later, that was abandoned (its turn closed or the next one
+    # began) and has no result yet, or None: the writer keeps its restart point from passing it (for a bounded number of rows) so that a rebuilt
     # projector still knows the call when its result arrives.
-    def oldest_abandoned(self, record: str) -> int | None:
+    def oldest_abandoned(self, record: str, *, since: int) -> int | None:
         rows = [
             call.order.seq
             for call in self._calls.values()
-            if call.record == record and call.abandoned and not call.answered
+            if call.record == record
+            and call.abandoned
+            and not call.answered
+            and call.order.seq >= since
         ]
         return min(rows, default=None)
 
@@ -299,9 +320,6 @@ class Projector:
                 self._abandon(self._current)
             self._turns_seen.add(name)
             self._current = name
-            for record, held in list(self._held.items()):
-                if held.turn is None:
-                    self._held[record] = replace(held, turn=name)
             if not opens:
                 self._inferred.add(name)
             self._observe(name, entry)
@@ -338,7 +356,7 @@ class Projector:
     def _holding(self, record: str) -> _Held:
         held = self._held.get(record)
         if held is None:
-            held = self._held[record] = _Held(self._current, [], [])
+            held = self._held[record] = _Held([], [])
         return held
 
     def _draft(
@@ -586,7 +604,6 @@ class Projector:
         self._out.closed.append(TurnClosed(turn, reason))
 
     def _abandon(self, turn: str) -> None:
-        self._release_held_of(turn)
         for call_id, call in list(self._calls.items()):
             if call.turn == turn and not call.answered:
                 self._calls[call_id] = replace(call, abandoned=True)

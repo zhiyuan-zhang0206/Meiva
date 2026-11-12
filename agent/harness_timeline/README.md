@@ -66,17 +66,41 @@ its own cannot shift a later wait or compare another turn's spend (`tests/test_w
 
 **Nothing is held for ever, and nothing running is released for being slow.** A result whose call has not been read is
 held by the projector for a bounded number of entries and by the writer for `HOLD_SECONDS` counted for that call alone (one
-clock per call); then it is shown top-level (`orphan_released`). The output of a sub-agent whose link has not been read is
-on no clock: a foreground sub-agent's link comes with the result of the call that started it, however long it runs, and
-releasing its output after a fixed time would show half of it on top and half under the call once the link came. It is
-released (`unlinked_released`) when the turn it was born in closes or is followed by the next one (nothing can link it any
-more; the Claude writer sets `release_held_at_turn_end`, because Claude's link precedes its turn's end, while the projector's
-default for adapters whose link may come after it, Codex and Antigravity, is to keep it), or when that record alone holds `HOLD_ENTRIES` items (the memory bound; the rest of that one sub-agent is then shown
-top-level). A writer that stops or a session that is replaced loses nothing: what was held is re-read from the stored rows
-(the restart point does not pass an unlinked record) and held again. A call whose turn closed, or whose turn was followed
-by the next one, is abandoned and no longer keeps the record from a quiet point, but the restart point does not pass it
-either, for up to `ABANDONED_WINDOW_ROWS` (5,000) rows of its record: a result that arrives after a restart is still paired
-with it. Beyond that window a late result across a restart is held, then shown top-level; that is the remaining boundary.
+clock per call, started when the projector says it is held, after a read and after a restart's replay, so it is shown on
+time even if no new batch ever comes); then it is shown top-level (`orphan_released`). The output of a sub-agent whose link
+has not been read is on no clock: a foreground sub-agent's link comes with the result of the call that started it, however
+long it runs, and releasing its output after a fixed time would show half of it on top and half under the call once the link
+came. It is shown top-level (`unlinked_released`) when nothing can link it any more, which is judged from state and not from
+time or from the order records were read:
+
+- the main record has been seen and its current turn is closed at the end of a feed (the Claude writer sets
+  `release_held_at_turn_end`, because Claude's link precedes its turn's end; the projector's default, for adapters whose
+  link may come after it (Codex, Antigravity), is not to);
+- the writer is closing for good (its runtime closes: the CLI process goes away, the session is recycled, the agent is
+  dropped, the host shuts down): `release_held()` after the last read. A writer that only faulted and is started again by the
+  next hosted turn is not closing and releases nothing;
+- the session is replaced by one with another id: what the old one held is committed under the old id before the new one
+  starts;
+- the record alone holds `HOLD_ENTRIES` items, or everything held together passes `HELD_TOTAL_LIMIT` (the oldest record
+  first): the memory bounds, after which the rest of that sub-agent is shown top-level.
+
+A stop without a release loses nothing either: what was held is re-read from the stored rows (the restart point does not pass an
+unlinked record) and held again, and a release followed by a restart and then the link writes nothing twice (the items are keyed;
+what was shown top-level stays there). The replay reads the main record first and the sub-agents' records after it, so no
+decision depends on which was replayed first.
+
+A call whose turn closed, or whose turn was followed by the next one, is abandoned and no longer keeps the record from a quiet
+point, but the restart point does not pass it either: it is held back to just before the oldest such call that is within the
+latest `ABANDONED_WINDOW_ROWS` (5,000) rows of its record (`rebuild_ordinal` is that replay point, at most 5,000 rows plus what
+a turn holds; an older call neither stops the newer ones from being protected nor is waited for across a restart). A result that
+arrives after a restart for a call inside the window is still paired with it; a later one is held, then shown top-level.
+
+**Sub-agents that start sub-agents.** The projector nests an output under the call that started its record. According to the
+CLI's documentation a Claude Code sub-agent cannot start another, and none of the recorded sub-agent files in
+`claude/transcript/tests/fixtures` (two sub-agents of one real session and a long real session) holds a `Task`/`Agent` call; this
+has not been confirmed by a run that tried to make one. If a CLI version does, the writer's lookup of a parent call that is still
+held finds nothing and the inner output is written top-level (it is never lost or duplicated).
+
 A sub-agent record that appears after the writer started is read from its first row; only records on disk at the start are
 history to skip.
 

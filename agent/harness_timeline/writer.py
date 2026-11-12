@@ -7,6 +7,11 @@ from dataclasses import dataclass, field
 
 from psycopg_pool import AsyncConnectionPool
 
+from agent.harness_timeline.holds import (
+    ABANDONED_WINDOW_ROWS,
+    OrphanClocks,
+    restart_point,
+)
 from agent.harness_timeline.plan import ReplyPolicy, WritePlan, plan_write
 from agent.harness_timeline.rebuild import REBUILD_MAX_ROWS, rebuild_record
 from agent.harness_timeline.store import (
@@ -77,8 +82,6 @@ MAX_TRANSACTION_BYTES = 8 * 1024 * 1024
 MAX_TRANSACTION_ENTRIES = 5_000
 CALLS_KEPT = 4_096
 PROJECTION_VERSION = 1
-HOLD_SECONDS = 120.0
-ABANDONED_WINDOW_ROWS = 5_000
 RETIRE_WAIT_SECONDS = 10.0
 NON_HUMAN_LIMIT = 1_024
 _SETTLE_STATUSES = ("claimed", "pending")
@@ -158,7 +161,7 @@ class HarnessTimelineWriter:
         self._history_records: frozenset[str] = frozenset()
         self._seeded: set[str] = set()
         self._held = True
-        self._orphan_since: dict[str, float] = {}
+        self._orphans = OrphanClocks()
         self._turns = TurnLedger()
         self._wake = asyncio.Event()
         self._stop_asked = asyncio.Event()
@@ -170,6 +173,7 @@ class HarnessTimelineWriter:
         self._resume_at: str | None = None
         self._stopping = False
         self._retired = False
+        self._release_requested = False
         self._fault: Exception | None = None
 
     @property
@@ -326,17 +330,20 @@ class HarnessTimelineWriter:
         if sid is None or self._held or self._retired:
             return False
         if sid != self._sid:
+            if self._sid is not None and self._holds_anything():
+                return await self._release_old_session()
             await self._start_up(sid)
         if self._fenced:
             return False
         if self._pending is not None:
             return await self._commit_pending()
         batches = await self._read_all(sid, exhaustive=exhaustive)
-        expired = self._expired_orphans()
-        if not batches and not expired:
+        expired = self._orphans.expired(self._clock.monotonic())
+        release_all, self._release_requested = self._release_requested, False
+        if not batches and not expired and not release_all:
             return False
-        projection = self._project(batches, release_orphans=expired)
-        self._track_orphans()
+        projection = self._project(batches, release_orphans=expired, release_all=release_all)
+        self._orphans.track(self._projector.unresolved_results(), self._clock.monotonic())
         plan = plan_write(
             projection,
             sent_items=self._sent.items,
@@ -350,23 +357,34 @@ class HarnessTimelineWriter:
         return await self._commit_pending()
 
     # meiva:note
-    # Nothing the record shows is kept back for ever, and nothing that is only slow is released. A result whose call has
-    # not been read is held by the projector for a bounded number of entries and by the writer for `HOLD_SECONDS`, counted
-    # from when that call's result was first seen held and not for the others (one clock per call): then the next read
-    # releases it top-level. The output of a sub-agent whose link has not been read is not on a clock at all: a foreground
-    # sub-agent's link arrives with the result of the call that started it, however long it runs. The projector releases it
-    # when the turn it was born in closes or is followed by the next one, when the record alone has held its memory bound,
-    # and never because time passed.
-    def _expired_orphans(self) -> frozenset[str]:
-        now = self._clock.monotonic()
-        return frozenset(
-            call for call, since in self._orphan_since.items() if now - since >= HOLD_SECONDS
-        )
+    # Everything the writer holds back is shown now, top-level: the final act of a writer that is closing for good (its runtime
+    # closes: the CLI's process goes away, the session is recycled, the agent is dropped, the host shuts down), asked once
+    # after the last read. A writer that only faulted and will be started again by the next hosted turn is not closing and is
+    # not asked. What was held is not lost to a stop in any case (it is re-read from the stored rows and held again); this
+    # is what makes it appear when no turn will ever come.
+    async def release_held(self) -> None:
+        async with self._io:
+            self._release_requested = True
+            _ = await self._read_locked(exhaustive=True)
 
-    def _track_orphans(self) -> None:
-        now = self._clock.monotonic()
-        held = self._projector.unresolved_results()
-        self._orphan_since = {call: self._orphan_since.get(call, now) for call in held}
+    def _holds_anything(self) -> bool:
+        return bool(self._projector.unresolved_results() or self._projector.unlinked_records())
+
+    # meiva:note
+    # The session was replaced by one with another id: what the old session still holds can never be linked, so it is shown now
+    # (committed under the old session's id, with no positions to move) before the writer starts over for the new one.
+    async def _release_old_session(self) -> bool:
+        projection = self._projector.feed([], release_held=True)
+        plan = plan_write(
+            projection,
+            sent_items=self._sent.items,
+            inbound_ids=self._sent.inbound_ids,
+            non_human_turns=frozenset(self._non_human),
+            policy=self._policy,
+            render_tool=self._render_tool,
+        )
+        self._pending = _Pending(plan, [])
+        return await self._commit_pending()
 
     # meiva:note
     # The turn the stream reports ended is waited for here by identity: the record turns the inputs `keys` (the ones
@@ -533,7 +551,8 @@ class HarnessTimelineWriter:
         self._turns = TurnLedger()
         self._calls = RecentMap(self._calls_kept)
         self._resume_at = None
-        self._orphan_since = {}
+        self._orphans = OrphanClocks()
+        self._orphans.track(projector.unresolved_results(), self._clock.monotonic())
         self._sid = sid
 
     # meiva:note
@@ -639,9 +658,17 @@ class HarnessTimelineWriter:
         self._positions[record] = stored
         return stored
 
-    def _project(self, batches: list[EntryBatch], *, release_orphans: frozenset[str]) -> Projection:
+    def _project(
+        self,
+        batches: list[EntryBatch],
+        *,
+        release_orphans: frozenset[str],
+        release_all: bool = False,
+    ) -> Projection:
         return self._projector.feed(
-            [entry for batch in batches for entry in batch.entries], release_orphans=release_orphans
+            [entry for batch in batches for entry in batch.entries],
+            release_held=release_all,
+            release_orphans=release_orphans,
         )
 
     def _note_turns(self, plan: WritePlan) -> None:
@@ -697,21 +724,13 @@ class HarnessTimelineWriter:
                 batch.rows[-1].ordinal if batch.rows else self._last_ordinal.get(batch.record, -1)
             )
             before = previous.rebuild_ordinal if previous else -1
-            rebuild = self._restart_point(batch.record, last, before) if quiet else before
+            rebuild = self._restart(batch.record, last, before) if quiet else before
             result.append(StoredPosition(batch.record, batch.position, rebuild))
         return result
 
-    # meiva:note
-    # Where a restart replays from, at a quiet point: the last stored row, held back to just before the oldest call of the
-    # record that was abandoned (its turn closed) and has no result yet, as long as that call is within
-    # `ABANDONED_WINDOW_ROWS` rows of the end, and never moved back from where it was. A rebuilt projector then knows the call
-    # when its result arrives after a restart, and pairs it, instead of showing the result top-level. A call older than the
-    # window is no longer waited for across a restart: its late result is held, then shown top-level (`orphan_released`).
-    def _restart_point(self, record: str, last: int, before: int) -> int:
-        oldest = self._projector.oldest_abandoned(record)
-        if oldest is None or last - oldest > ABANDONED_WINDOW_ROWS:
-            return last
-        return max(before, min(last, oldest - 1))
+    def _restart(self, record: str, last: int, before: int) -> int:
+        oldest = self._projector.oldest_abandoned(record, since=last - ABANDONED_WINDOW_ROWS + 1)
+        return restart_point(last, before, oldest)
 
     def _quiet(self) -> bool:
         return not (

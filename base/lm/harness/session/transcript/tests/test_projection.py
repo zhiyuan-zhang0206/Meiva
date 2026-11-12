@@ -268,3 +268,49 @@ def test_the_keys_and_calls_the_projector_remembers_stop_at_their_bounds() -> No
         sizes = projector.memory_sizes()
         assert sizes["seen"] <= 10 and sizes["calls"] <= 5, (n, sizes)
     assert projector.memory_sizes()["seen"] == 10 and projector.memory_sizes()["calls"] == 5
+
+
+def _held_text(record: str, n: int) -> AgentText:
+    return AgentText(
+        key=f"{record}-{n}", order=Order(n), record=record, text="x", message_ref=f"{record}m{n}"
+    )
+
+
+def test_a_record_that_alone_holds_its_bound_is_released_top_level_and_reported() -> None:
+    projector = Projector(hold_entries=3)
+    quiet = projector.feed([_held_text("subX", 0), _held_text("subX", 1)])
+    assert quiet.drafts == () and projector.unlinked_records() == ("subX",)
+    full = projector.feed([_held_text("subX", 2)])
+    assert [d.parent_tool_use_id for d in full.drafts] == [None, None, None]
+    assert [(a.anomaly, a.detail) for a in full.anomalies] == [
+        (AnomalyKind.UNLINKED_RELEASED, "subX")
+    ]
+    assert projector.unlinked_records() == ()
+
+
+def test_everything_held_together_has_a_bound_and_the_oldest_record_goes_first() -> None:
+    projector = Projector(hold_entries=100, held_total_limit=4)
+    projector.feed([_held_text("subA", 0), _held_text("subA", 1)])
+    over = projector.feed([_held_text("subB", 0), _held_text("subB", 1), _held_text("subB", 2)])
+    assert {d.record for d in over.drafts} == {"subA"}, (
+        "five held against a bound of four: the oldest record is shown"
+    )
+    assert projector.unlinked_records() == ("subB",)
+
+
+def test_held_output_is_released_when_the_current_turn_is_closed_only_for_an_adapter_that_says_so() -> (
+    None
+):
+    entries = [
+        HumanInput(key="i", order=Order(0), turn="t0", wire_id=None, text="go"),
+        _held_text("subX", 0),
+        TurnEnd(key="e", order=Order(1), turn="t0"),
+    ]
+    assert Projector(release_held_at_turn_end=True).feed(entries).drafts != ()
+    other = Projector()
+    assert [d.record for d in other.feed(entries).drafts] == ["main"], (
+        "the sub-agent's output stays held"
+    )
+    assert other.unlinked_records() == ("subX",)
+    before = Projector(release_held_at_turn_end=True)
+    assert before.feed([_held_text("subX", 0)]).drafts == (), "no main turn seen: nothing is idle"

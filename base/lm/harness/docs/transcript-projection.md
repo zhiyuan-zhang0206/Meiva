@@ -97,9 +97,7 @@ The projector's memory has a bound for every structure that could grow with a co
 turn on its record begins, is abandoned (it no longer keeps the record from a quiet point; its late result is still
 paired); a result whose call has not been read is held for a bounded number of entries (`HOLD_ENTRIES`) or, for the
 writer, a bounded time counted for that call alone, and is then released as a top-level item with an `ORPHAN_RELEASED`
-anomaly. The output of a sub-agent whose link has not been read is held while the sub-agent runs and is released
-(`UNLINKED_RELEASED`) when the turn it was born in closes or the next one begins, or when the record alone has held
-`HOLD_ENTRIES` items, and never for the passing of time. An `EntryBatch` states the bytes of the CLI's file it
+anomaly. The output of a sub-agent whose link has not been read is held while the sub-agent runs and is released (`UNLINKED_RELEASED`) when the main record's current turn is closed at the end of a feed (for an adapter that says its links precede its turn's end), when the writer says the session or the writer has ended (`feed(release_held=True)`), when the record alone has held `HOLD_ENTRIES` items or everything held passes `HELD_TOTAL_LIMIT`, and never for the passing of time or by the order records were read in. An `EntryBatch` states the bytes of the CLI's file it
 covers (`size`), which the writer uses to bound a transaction. A reader raises `PositionLostError` (in `ports.py`) for a
 position its record no longer holds.
 
