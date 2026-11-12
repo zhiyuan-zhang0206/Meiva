@@ -252,3 +252,19 @@ def test_what_the_projector_remembers_does_not_grow_with_the_conversation() -> N
     sizes = projector.memory_sizes()
     assert max(sizes.values()) <= 20_000, sizes
     assert sizes["calls"] <= CALLS_LIMIT and sizes["turns"] <= TURNS_LIMIT
+
+
+def test_the_keys_and_calls_the_projector_remembers_stop_at_their_bounds() -> None:
+    projector = Projector(seen_limit=10, calls_limit=5)
+    for n in range(100):
+        _ = projector.feed(
+            [
+                ToolCall(
+                    key=f"c{n}", order=Order(2 * n), call_id=f"call{n}", name="Bash", tool_input={}
+                ),
+                ToolResult(key=f"r{n}", order=Order(2 * n + 1), call_id=f"call{n}", content="ok"),
+            ]
+        )
+        sizes = projector.memory_sizes()
+        assert sizes["seen"] <= 10 and sizes["calls"] <= 5, (n, sizes)
+    assert projector.memory_sizes()["seen"] == 10 and projector.memory_sizes()["calls"] == 5

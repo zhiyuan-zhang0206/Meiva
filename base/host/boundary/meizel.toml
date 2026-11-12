@@ -1,11 +1,13 @@
-exports = ["fields.py", "json_values.py", "jsonl.py", "options.py", "process.py", "tests", "untyped.py"]
+exports = ["fields.py", "json_values.py", "jsonl.py", "options.py", "process.py", "recent.py", "tests", "untyped.py"]
 
 [uses]
 "fields.py" = ["json_values.py"]
 "jsonl.py" = ["json_values.py", "untyped.py"]
 "tests" = ["fields.py", "json_values.py", "options.py", "process.py", "untyped.py"]
+"recent.py" = []
 
 [purity]
+"recent.py" = "strict"
 "json_values.py" = "strict"
 "untyped.py" = "strict"
 "jsonl.py" = { mode = "none", why = "reads a JSONL file from disk and parses its rows; callers decide what the rows mean" }

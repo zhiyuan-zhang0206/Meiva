@@ -95,9 +95,11 @@ batch and parses stored rows back with `parse_stored`.
 The projector's memory has a bound for every structure that could grow with a conversation (see the note above
 `SEEN_LIMIT` in `projection.py`). Nothing is held for ever: a call still unanswered when its turn closes, or when the next
 turn on its record begins, is abandoned (it no longer keeps the record from a quiet point; its late result is still
-paired); a result whose call has not been read, and the output of a sub-agent whose link has not been read, are held for a
-bounded number of entries (`HOLD_ENTRIES`) or, for the writer, a bounded time, and are then released as top-level
-items with an `ORPHAN_RELEASED` or `UNLINKED_RELEASED` anomaly each. An `EntryBatch` states the bytes of the CLI's file it
+paired); a result whose call has not been read is held for a bounded number of entries (`HOLD_ENTRIES`) or, for the
+writer, a bounded time counted for that call alone, and is then released as a top-level item with an `ORPHAN_RELEASED`
+anomaly. The output of a sub-agent whose link has not been read is held while the sub-agent runs and is released
+(`UNLINKED_RELEASED`) when the turn it was born in closes or the next one begins, or when the record alone has held
+`HOLD_ENTRIES` items, and never for the passing of time. An `EntryBatch` states the bytes of the CLI's file it
 covers (`size`), which the writer uses to bound a transaction. A reader raises `PositionLostError` (in `ports.py`) for a
 position its record no longer holds.
 

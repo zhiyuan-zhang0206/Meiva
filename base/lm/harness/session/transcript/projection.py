@@ -1,8 +1,9 @@
 from __future__ import annotations
 
-from collections.abc import Callable, Iterable, Iterator, Mapping
+from collections.abc import Callable, Collection, Iterable, Mapping
 from dataclasses import dataclass, replace
 
+from base.host.boundary.recent import RecentMap, RecentSet
 from base.lm.harness.events import HarnessCause, TurnOrigin, Usage
 from base.lm.harness.session.transcript.drafts import (
     AnomalyReport,
@@ -41,85 +42,23 @@ from base.lm.harness.session.transcript.entries import (
     TurnEndReason,
 )
 
-
-# meiva:note
-# The two containers the projector keeps its memory of a long conversation in: insertion-ordered, with a fixed upper
-# bound, so that what it remembers never grows with the length of the conversation. When a container is full the
-# oldest entry is forgotten first; re-adding or re-setting a present item keeps its place in the order.
-# meiva:link base/lm/harness/docs/transcript-projection.md
-class RecentSet[T]:
-    def __init__(self, limit: int) -> None:
-        self._limit = limit
-        self._items: dict[T, None] = {}
-
-    def add(self, item: T) -> None:
-        if item in self._items:
-            return
-        self._items[item] = None
-        if len(self._items) > self._limit:
-            del self._items[next(iter(self._items))]
-
-    def discard(self, item: T) -> None:
-        _ = self._items.pop(item, None)
-
-    def __contains__(self, item: object) -> bool:
-        return item in self._items
-
-    def __len__(self) -> int:
-        return len(self._items)
-
-    def __iter__(self) -> Iterator[T]:
-        return iter(self._items)
-
-
-class RecentMap[K, V]:
-    def __init__(self, limit: int) -> None:
-        self._limit = limit
-        self._items: dict[K, V] = {}
-
-    def __setitem__(self, key: K, value: V) -> None:
-        self._items[key] = value
-        if len(self._items) > self._limit:
-            del self._items[next(iter(self._items))]
-
-    def __getitem__(self, key: K) -> V:
-        return self._items[key]
-
-    def __contains__(self, key: object) -> bool:
-        return key in self._items
-
-    def __len__(self) -> int:
-        return len(self._items)
-
-    def __iter__(self) -> Iterator[K]:
-        return iter(self._items)
-
-    def get(self, key: K) -> V | None:
-        return self._items.get(key)
-
-    def pop(self, key: K) -> V | None:
-        return self._items.pop(key, None)
-
-    def values(self) -> Iterator[V]:
-        return iter(self._items.values())
-
-    def items(self) -> Iterator[tuple[K, V]]:
-        return iter(self._items.items())
-
-
 # meiva:note
 # What the projector remembers, and for how long. Everything that grows with the conversation is bounded, so the
 # projector's memory does not depend on its length: the keys of projected entries (a safety net against reading the
 # same entry twice; the reader never repeats a row), the open and recent calls, the turns seen and closed, the
 # sub-agent links, the per-message usage and the reported anomalies are each the latest N, the oldest forgotten first.
 # What a forgotten item meant is stated where it matters: a result whose call was forgotten waits like any other
-# result whose call has not arrived. Nothing is held for long. A result whose call has not been read and the
-# drafts and usage of a sub-agent record whose link has not been read are held for at most
-# `HOLD_ENTRIES` further entries (or until the writer says its time bound passed: `feed(release_held=True)`);
-# then they are put on the timeline as top-level items, one `ORPHAN_RELEASED` / `UNLINKED_RELEASED` anomaly each,
-# and a record released once shows its later drafts top-level at once. A call still unanswered when its turn
-# closes, or when the next turn on the record begins, is abandoned: it no longer keeps the record from being
-# quiet, and a result that arrives later is still paired with it.
+# result whose call has not arrived. Nothing is held for ever, and nothing running is released for being slow. A result
+# whose call has not been read is held for at most `HOLD_ENTRIES` further entries or until the writer says its own time
+# bound passed (`feed(release_orphans=...)`, one clock per call). The drafts and usage of a sub-agent record whose link has
+# not been read (a foreground sub-agent that is still running: its link comes with the result of the call that started it)
+# are held while it runs and released, as top-level items, when the main turn they were born in closes or is followed by the
+# next one (nothing can link them any more), when the session ends (`feed(release_held=True)`), or when the record alone has
+# held `HOLD_ENTRIES` items (the memory bound: a sub-agent that long before its result shows the rest top-level). Each release
+# is one `ORPHAN_RELEASED` / `UNLINKED_RELEASED` anomaly, and a record released once shows its later drafts top-level at
+# once. A call still unanswered when its turn closes, or when the next turn on the record begins, is abandoned: it no longer
+# keeps the record from being quiet, and a result that arrives later is still paired with it (`oldest_abandoned` tells the
+# writer how far back a restart must replay for that to hold across it).
 # meiva:link base/lm/harness/docs/transcript-projection.md
 SEEN_LIMIT = 20_000
 CALLS_LIMIT = 4_096
@@ -138,6 +77,7 @@ _IMPLICIT_TURN = "implicit"
 class _Call:
     order: Order
     turn: str
+    record: str = MAIN_RECORD
     answered: bool = False
     abandoned: bool = False
 
@@ -150,7 +90,7 @@ class _Orphaned:
 
 @dataclass(frozen=True, slots=True)
 class _Held:
-    born: int
+    turn: str | None
     drafts: list[TimelineDraft]
     usage: list[MessageUsage]
 
@@ -166,8 +106,14 @@ class _Held:
 # their `order` so the writer places them.
 # meiva:link base/lm/harness/docs/transcript-projection.md
 class Projector:
-    def __init__(self, *, known_keys: Iterable[str] = ()) -> None:
-        self._seen: RecentSet[str] = RecentSet(SEEN_LIMIT)
+    def __init__(
+        self,
+        *,
+        known_keys: Iterable[str] = (),
+        seen_limit: int = SEEN_LIMIT,
+        calls_limit: int = CALLS_LIMIT,
+    ) -> None:
+        self._seen: RecentSet[str] = RecentSet(seen_limit)
         for key in known_keys:
             self._seen.add(key)
         self._fed = 0
@@ -175,7 +121,7 @@ class Projector:
         self._unsettled: list[SentInput] = []
         self._turns_seen: RecentSet[str] = RecentSet(TURNS_LIMIT)
         self._current: str | None = None
-        self._calls: RecentMap[str, _Call] = RecentMap(CALLS_LIMIT)
+        self._calls: RecentMap[str, _Call] = RecentMap(calls_limit)
         self._inferred: RecentSet[str] = RecentSet(TURNS_LIMIT)
         self._closed: RecentSet[str] = RecentSet(TURNS_LIMIT)
         self._orphans: dict[str, _Orphaned] = {}
@@ -197,7 +143,13 @@ class Projector:
             self._unsettled.remove(sent)
             _ = self._sent.pop(sent.wire_id, None)
 
-    def feed(self, entries: Iterable[AnyEntry], *, release_held: bool = False) -> Projection:
+    def feed(
+        self,
+        entries: Iterable[AnyEntry],
+        *,
+        release_held: bool = False,
+        release_orphans: Collection[str] = (),
+    ) -> Projection:
         self._out = _Out()
         for entry in entries:
             if entry.key in self._seen:
@@ -205,16 +157,22 @@ class Projector:
             self._seen.add(entry.key)
             self._fed += 1
             self._dispatch(entry)
-        self._release(everything=release_held)
+        self._release(everything=release_held, orphans=release_orphans)
         return self._out.freeze()
 
-    def _release(self, *, everything: bool) -> None:
+    def _release(self, *, everything: bool, orphans: Collection[str]) -> None:
         for call_id, orphaned in list(self._orphans.items()):
-            if everything or self._fed - orphaned.born >= HOLD_ENTRIES:
+            if everything or call_id in orphans or self._fed - orphaned.born >= HOLD_ENTRIES:
                 del self._orphans[call_id]
                 self._release_results(call_id, orphaned.results)
         for record, held in list(self._held.items()):
-            if everything or self._fed - held.born >= HOLD_ENTRIES:
+            if everything or len(held.drafts) + len(held.usage) >= HOLD_ENTRIES:
+                del self._held[record]
+                self._release_record(record, held)
+
+    def _release_held_of(self, turn: str) -> None:
+        for record, held in list(self._held.items()):
+            if held.turn == turn or held.turn is None:
                 del self._held[record]
                 self._release_record(record, held)
 
@@ -264,6 +222,18 @@ class Projector:
 
     def unresolved_results(self) -> tuple[str, ...]:
         return tuple(self._orphans)
+
+    # meiva:note
+    # The row of the oldest call of `record` that was abandoned (its turn closed or the next one began) and has no result
+    # yet, or None: the writer keeps its restart point from passing it (for a bounded number of rows) so that a rebuilt
+    # projector still knows the call when its result arrives.
+    def oldest_abandoned(self, record: str) -> int | None:
+        rows = [
+            call.order.seq
+            for call in self._calls.values()
+            if call.record == record and call.abandoned and not call.answered
+        ]
+        return min(rows, default=None)
 
     def unanswered_calls(self) -> tuple[str, ...]:
         return tuple(
@@ -360,7 +330,7 @@ class Projector:
     def _holding(self, record: str) -> _Held:
         held = self._held.get(record)
         if held is None:
-            held = self._held[record] = _Held(self._fed, [], [])
+            held = self._held[record] = _Held(self._current, [], [])
         return held
 
     def _draft(
@@ -466,7 +436,7 @@ class Projector:
             "",
             _Extra(tool_use_id=entry.call_id, tool_call=(entry.name, entry.tool_input)),
         )
-        self._calls[entry.call_id] = _Call(entry.order, self._turn(entry))
+        self._calls[entry.call_id] = _Call(entry.order, self._turn(entry), entry.record)
         orphaned = self._orphans.pop(entry.call_id, None)
         for result in () if orphaned is None else orphaned.results:
             self._on_result(result)
@@ -608,6 +578,7 @@ class Projector:
         self._out.closed.append(TurnClosed(turn, reason))
 
     def _abandon(self, turn: str) -> None:
+        self._release_held_of(turn)
         for call_id, call in list(self._calls.items()):
             if call.turn == turn and not call.answered:
                 self._calls[call_id] = replace(call, abandoned=True)

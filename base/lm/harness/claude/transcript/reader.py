@@ -100,6 +100,7 @@ class ClaudeRecordReader:
         self._listing: tuple[int, tuple[str, ...], int] | None = None
         self._misses = 0
         self._misses_session: str | None = None
+        self._state_session: str | None = None
         self._cli_version: str | None = None
         self.bytes_read = 0
 
@@ -126,7 +127,31 @@ class ClaudeRecordReader:
     def wire_id(self, key: str) -> str:
         return key_uuid(key)
 
+    # meiva:note
+    # How many things the reader remembers, by name, for a test or a gauge to check that it stays bounded.
+    def memory_sizes(self) -> dict[str, int]:
+        return {
+            "states": len(self._states),
+            "stored_states": len(self._stored_states),
+            "quiet": len(self._quiet),
+        }
+
+    # meiva:note
+    # What the reader remembers for one session (the parse states, the stat stamps, the sub-agent listing) belongs to that
+    # session: a new session id (a resume, a fork, a switch) starts all of it over, so a parse state never carries the open
+    # calls of one session's record into another's.
+    def _own_session(self) -> None:
+        sid = self._session_source()
+        if sid == self._state_session:
+            return
+        self._state_session = sid
+        self._states.clear()
+        self._stored_states.clear()
+        self._quiet.clear()
+        self._listing = None
+
     def parse_stored(self, rows: Sequence[StoredRow]) -> tuple[AnyEntry, ...]:
+        self._own_session()
         entries: list[AnyEntry] = []
         for stored in rows:
             state = self._stored_states.pop(stored.record, ParseState())
@@ -244,6 +269,7 @@ class ClaudeRecordReader:
     # the answer is the one remembered, so a session with hundreds of finished sub-agents costs one stat per poll for
     # its listing.
     def _records(self, *, exhaustive: bool = False) -> tuple[str, ...]:
+        self._own_session()
         main = self._main(exhaustive=exhaustive)
         if main is None:
             return ()
@@ -268,6 +294,7 @@ class ClaudeRecordReader:
         return (MAIN_RECORD, *self._listing[1])
 
     def _read(self, record: str, stored: str | None) -> EntryBatch | None:
+        self._own_session()
         position = START if stored is None else decode(stored)
         found = self._stat(record, position)
         if found is None:

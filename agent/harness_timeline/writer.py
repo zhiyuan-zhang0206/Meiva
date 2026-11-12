@@ -19,6 +19,7 @@ from agent.harness_timeline.store import (
     aset_transcript_position,
     aset_transcript_positions,
 )
+from agent.harness_timeline.turns import TurnLedger
 from agent.ownership.inbound import RuntimeOwnershipLostError, lock_inbound_owner
 from base.agents.context.harness_timeline import TurnEndWait
 from base.agents.history.harness_messages import aappend_keyed_timeline_items, ahas_harness_timeline
@@ -26,6 +27,7 @@ from base.agents.history.timeline_item import TimelineItem
 from base.agents.messages.inbound import InboundKind
 from base.clock import Clock
 from base.db.transaction import async_write_transaction
+from base.host.boundary.recent import RecentMap, RecentSet
 from base.lm.harness import Usage
 from base.lm.harness.session.transcript.drafts import InboundPart, Projection, SentInput
 from base.lm.harness.session.transcript.entries import MAIN_RECORD
@@ -34,7 +36,7 @@ from base.lm.harness.session.transcript.ports import (
     PositionLostError,
     RecordReader,
 )
-from base.lm.harness.session.transcript.projection import Projector, RecentMap, RecentSet
+from base.lm.harness.session.transcript.projection import Projector
 from base.log import logger
 from base.native_process.runtime_incarnation import RuntimeIncarnation, StaleIncarnationError
 
@@ -76,11 +78,9 @@ MAX_TRANSACTION_ENTRIES = 5_000
 CALLS_KEPT = 4_096
 PROJECTION_VERSION = 1
 HOLD_SECONDS = 120.0
+ABANDONED_WINDOW_ROWS = 5_000
 RETIRE_WAIT_SECONDS = 10.0
 NON_HUMAN_LIMIT = 1_024
-TURN_USAGE_LIMIT = 256
-CLOSED_KEPT = 256
-DELIVERED_KEPT = 1_024
 _SETTLE_STATUSES = ("claimed", "pending")
 
 
@@ -156,16 +156,14 @@ class HarnessTimelineWriter:
         self._history_records: frozenset[str] = frozenset()
         self._seeded: set[str] = set()
         self._held = True
-        self._held_since: float | None = None
-        self._closed: RecentMap[str, Usage | None] = RecentMap(CLOSED_KEPT)
-        self._delivered: RecentMap[str, str] = RecentMap(DELIVERED_KEPT)
+        self._orphan_since: dict[str, float] = {}
+        self._turns = TurnLedger()
         self._wake = asyncio.Event()
         self._stop_asked = asyncio.Event()
         self._io = asyncio.Lock()
         self._closed_turns = 0
         self._items_written = 0
         self._invalid_reply = False
-        self._turn_usage: RecentMap[str, Usage] = RecentMap(TURN_USAGE_LIMIT)
         self._calls: RecentMap[str, str | None] = RecentMap(self._calls_kept)
         self._resume_at: str | None = None
         self._stopping = False
@@ -194,11 +192,7 @@ class HarnessTimelineWriter:
     # whose closing the record shows late, or a turn the CLI ran on its own, cannot shift which turn's spend a result
     # is compared with. The latest `CLOSED_KEPT` closed turns are kept.
     def closed_usage(self, keys: Sequence[str]) -> Usage | None:
-        total: Usage | None = None
-        for turn in dict.fromkeys(t for t in (self._delivered.get(key) for key in keys) if t):
-            if turn in self._closed and (spend := self._closed.get(turn)) is not None:
-                total = spend if total is None else total + spend
-        return total
+        return self._turns.closed_usage(keys)
 
     # meiva:note
     # The size of everything the writer remembers, by name, and of everything the projector remembers
@@ -214,9 +208,7 @@ class HarnessTimelineWriter:
             "sent_inbound": len(self._sent.inbound_ids),
             "sent_wire": len(self._sent.wire_ids),
             "non_human": len(self._non_human),
-            "turn_usage": len(self._turn_usage),
-            "closed": len(self._closed),
-            "delivered": len(self._delivered),
+            **self._turns.sizes(),
             "calls": len(self._calls),
             "positions": len(self._positions),
             "last_ordinal": len(self._last_ordinal),
@@ -338,11 +330,11 @@ class HarnessTimelineWriter:
         if self._pending is not None:
             return await self._commit_pending()
         batches = await self._read_all(sid, exhaustive=exhaustive)
-        release = self._hold_expired()
-        if not batches and not release:
+        expired = self._expired_orphans()
+        if not batches and not expired:
             return False
-        projection = self._project(batches, release_held=release)
-        self._track_hold()
+        projection = self._project(batches, release_orphans=expired)
+        self._track_orphans()
         plan = plan_write(
             projection,
             sent_items=self._sent.items,
@@ -356,23 +348,23 @@ class HarnessTimelineWriter:
         return await self._commit_pending()
 
     # meiva:note
-    # Nothing the record shows is kept back for ever: a result whose call has not been read and the output of a
-    # sub-agent whose link has not been read are held by the projector for a bounded number of entries, and when
-    # they have been held for `HOLD_SECONDS` of the writer's clock the next read releases them as top-level items.
-    def _hold_expired(self) -> bool:
-        if self._held_since is None:
-            return False
-        if self._clock.monotonic() - self._held_since < HOLD_SECONDS:
-            return False
-        self._held_since = None
-        return True
+    # Nothing the record shows is kept back for ever, and nothing that is only slow is released. A result whose call has
+    # not been read is held by the projector for a bounded number of entries and by the writer for `HOLD_SECONDS`, counted
+    # from when that call's result was first seen held and not for the others (one clock per call): then the next read
+    # releases it top-level. The output of a sub-agent whose link has not been read is not on a clock at all: a foreground
+    # sub-agent's link arrives with the result of the call that started it, however long it runs. The projector releases it
+    # when the turn it was born in closes or is followed by the next one, when the record alone has held its memory bound,
+    # and never because time passed.
+    def _expired_orphans(self) -> frozenset[str]:
+        now = self._clock.monotonic()
+        return frozenset(
+            call for call, since in self._orphan_since.items() if now - since >= HOLD_SECONDS
+        )
 
-    def _track_hold(self) -> None:
-        held = bool(self._projector.unresolved_results() or self._projector.unlinked_records())
-        if not held:
-            self._held_since = None
-        elif self._held_since is None:
-            self._held_since = self._clock.monotonic()
+    def _track_orphans(self) -> None:
+        now = self._clock.monotonic()
+        held = self._projector.unresolved_results()
+        self._orphan_since = {call: self._orphan_since.get(call, now) for call in held}
 
     # meiva:note
     # The turn the stream reports ended is waited for here by identity: the record turns the inputs `keys` (the ones
@@ -393,7 +385,7 @@ class HarnessTimelineWriter:
         while True:
             while await self.read_now():
                 last_activity = self._clock.monotonic()
-            if self._turns_closed(keys):
+            if self._turns.turns_closed(keys):
                 return TurnEndWait.CLOSED
             now = self._clock.monotonic()
             outcome = (
@@ -410,15 +402,11 @@ class HarnessTimelineWriter:
                     agent_id=self._agent_id,
                     outcome=outcome.value,
                     keys=list(keys),
-                    turns=[self._delivered.get(key) for key in keys],
+                    turns=[self._turns.turn_of(key) for key in keys],
                     waited_seconds=round(ceiling_seconds - (deadline - now), 3),
                 )
                 return outcome
             await asyncio.sleep(min(0.1, quiet_seconds))
-
-    def _turns_closed(self, keys: Sequence[str]) -> bool:
-        turns = [self._delivered.get(key) for key in keys]
-        return all(turn is not None and turn in self._closed for turn in turns)
 
     async def write_marker(self, text: str, *, error: bool) -> None:
         marker = TimelineItem(
@@ -540,12 +528,10 @@ class HarnessTimelineWriter:
         self._seeded = set()
         self._pending = None
         self._non_human = RecentSet(NON_HUMAN_LIMIT)
-        self._turn_usage = RecentMap(TURN_USAGE_LIMIT)
-        self._closed = RecentMap(CLOSED_KEPT)
-        self._delivered = RecentMap(DELIVERED_KEPT)
+        self._turns = TurnLedger()
         self._calls = RecentMap(self._calls_kept)
         self._resume_at = None
-        self._held_since = None
+        self._orphan_since = {}
         self._sid = sid
 
     # meiva:note
@@ -651,9 +637,9 @@ class HarnessTimelineWriter:
         self._positions[record] = stored
         return stored
 
-    def _project(self, batches: list[EntryBatch], *, release_held: bool) -> Projection:
+    def _project(self, batches: list[EntryBatch], *, release_orphans: frozenset[str]) -> Projection:
         return self._projector.feed(
-            [entry for batch in batches for entry in batch.entries], release_held=release_held
+            [entry for batch in batches for entry in batch.entries], release_orphans=release_orphans
         )
 
     def _note_turns(self, plan: WritePlan) -> None:
@@ -698,16 +684,7 @@ class HarnessTimelineWriter:
         self._items_written += written
         self._closed_turns += len(plan.closed)
         self._invalid_reply = self._invalid_reply or bool(plan.invalid_reply_turns)
-        for spend in plan.usage:
-            if spend.record == MAIN_RECORD and spend.turn is not None:
-                self._turn_usage[spend.turn] = (
-                    self._turn_usage.get(spend.turn) or Usage()
-                ) + spend.usage
-        for settlement in plan.settlements:
-            if settlement.turn is not None:
-                self._delivered[settlement.input_key] = settlement.turn
-        for closed in plan.closed:
-            self._closed[closed.turn] = self._turn_usage.pop(closed.turn)
+        self._turns.record(plan)
 
     def _next_positions(self, pending: _Pending) -> list[StoredPosition]:
         quiet = bool(pending.plan.closed) and self._quiet()
@@ -717,9 +694,22 @@ class HarnessTimelineWriter:
             last = (
                 batch.rows[-1].ordinal if batch.rows else self._last_ordinal.get(batch.record, -1)
             )
-            rebuild = last if quiet else (previous.rebuild_ordinal if previous else -1)
+            before = previous.rebuild_ordinal if previous else -1
+            rebuild = self._restart_point(batch.record, last, before) if quiet else before
             result.append(StoredPosition(batch.record, batch.position, rebuild))
         return result
+
+    # meiva:note
+    # Where a restart replays from, at a quiet point: the last stored row, held back to just before the oldest call of the
+    # record that was abandoned (its turn closed) and has no result yet, as long as that call is within
+    # `ABANDONED_WINDOW_ROWS` rows of the end, and never moved back from where it was. A rebuilt projector then knows the call
+    # when its result arrives after a restart, and pairs it, instead of showing the result top-level. A call older than the
+    # window is no longer waited for across a restart: its late result is held, then shown top-level (`orphan_released`).
+    def _restart_point(self, record: str, last: int, before: int) -> int:
+        oldest = self._projector.oldest_abandoned(record)
+        if oldest is None or last - oldest > ABANDONED_WINDOW_ROWS:
+            return last
+        return max(before, min(last, oldest - 1))
 
     def _quiet(self) -> bool:
         return not (

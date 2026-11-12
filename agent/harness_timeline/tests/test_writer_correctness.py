@@ -23,16 +23,13 @@ from agent.harness_timeline.tests.support import (
     status_of,
     timeline_of,
 )
-from agent.harness_timeline.writer import HOLD_SECONDS, Committed
+from agent.harness_timeline.writer import Committed
 from base.agents.history.harness_messages import aappend_keyed_timeline_items
 from base.agents.history.timeline_item import TimelineItem
-from base.clock.tests.fakes import clock_over
-from base.clock.tests.manual_timers import ManualTimers
 from base.lm.harness.claude.transcript.tests.support import entries_of
 from base.lm.harness.session.transcript.drafts import InboundPart, SentInput
 from base.lm.harness.session.transcript.entries import (
     AgentText,
-    AnomalyKind,
     AnyEntry,
     HumanInput,
     Order,
@@ -134,33 +131,6 @@ async def test_a_rebuild_that_fails_is_made_again_before_anything_is_read_on_top
     )
     kinds = [kind for kind, _, _ in await timeline_of(aops_pool, agent_id)]
     assert kinds.count("inbound_chat") == 1 and kinds[-1] == "agent_chat"
-
-
-async def test_what_is_held_for_a_link_is_released_top_level_and_reported_after_the_bound(
-    aops_pool: AsyncConnectionPool,
-) -> None:
-    agent_id, incarnation = await make_agent(aops_pool)
-    timers = ManualTimers()
-    lonely: list[AnyEntry] = [
-        AgentText(key="s-1", order=Order(0), record="subY", text="nobody links me", message_ref="m")
-    ]
-    reader = ScriptedReader({"main": [], "subY": lonely})
-    reader.visible["subY"] = 1
-    committed: list[Committed] = []
-    writer = make_writer(
-        aops_pool, agent_id, incarnation, reader, committed, clock=clock_over(timers)
-    )
-    assert await writer.read_now(), "the read itself is a commit (its position)"
-    assert await timeline_of(aops_pool, agent_id) == [], "held, not shown yet"
-
-    timers.advance(HOLD_SECONDS + 1)
-    while await writer.read_now():
-        pass
-
-    shown = await timeline_of(aops_pool, agent_id)
-    assert [(kind, parent) for kind, _, parent in shown] == [("subagent_text", None)]
-    anomalies = [a for c in committed for a in c.plan.anomalies]
-    assert [(a.anomaly, a.detail) for a in anomalies] == [(AnomalyKind.UNLINKED_RELEASED, "subY")]
 
 
 async def test_a_synthetic_input_whose_id_is_in_the_history_does_not_move_the_start(

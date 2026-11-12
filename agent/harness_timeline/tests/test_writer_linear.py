@@ -23,12 +23,10 @@ from psycopg import AsyncCursor
 from psycopg_pool import AsyncConnectionPool
 
 from agent.harness_timeline.plan import ReplyPolicy
+from agent.harness_timeline.turns import CLOSED_KEPT, DELIVERED_KEPT, TURN_USAGE_LIMIT
 from agent.harness_timeline.writer import (
     CALLS_KEPT,
-    CLOSED_KEPT,
-    DELIVERED_KEPT,
     NON_HUMAN_LIMIT,
-    TURN_USAGE_LIMIT,
     Committed,
     HarnessTimelineWriter,
 )

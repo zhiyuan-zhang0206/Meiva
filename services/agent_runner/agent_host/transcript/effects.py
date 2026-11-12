@@ -9,9 +9,9 @@ from agent.graph.hooks.user_delivery import capture_items
 from agent.harness_timeline.writer import Committed
 from base.agents.context import MeivaContext
 from base.agents.history.timeline_item import TimelineItem
+from base.host.boundary.recent import RecentSet
 from base.lm.harness.session.transcript.drafts import MessageUsage
 from base.lm.harness.session.transcript.entries import MAIN_RECORD
-from base.lm.harness.session.transcript.projection import RecentSet
 from base.lm.usage import UsageFields, log_usage_fields
 from base.log import logger
 

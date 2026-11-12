@@ -116,3 +116,18 @@ def test_a_record_started_after_a_rewrite_counts_its_rows_above_the_stored_ordin
 
 def rows_line() -> str:
     return (FIXTURES / "basic" / "main.jsonl").read_text().splitlines()[2]
+
+
+def test_a_new_session_starts_the_parse_states_over(tmp_path: Path) -> None:
+    first, second = _session(), "99999999-aaaa-bbbb-cccc-000000000002"
+    current = [first]
+    _ = _main_file(tmp_path, "p", first)
+    _ = _main_file(tmp_path, "p", second)
+    reader = ClaudeRecordReader(
+        now_ns=now_ns, claude_home=tmp_path, session_id=lambda: current[0], workspace=tmp_path / "w"
+    )
+    batch = asyncio.run(reader.read_after("main", None))
+    assert batch is not None and reader._states, "the first session left a state"
+    current[0] = second
+    _ = asyncio.run(reader.records())
+    assert not reader._states and not reader._quiet, "the second session starts from nothing"

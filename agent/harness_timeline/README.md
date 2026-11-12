@@ -43,9 +43,17 @@ delivery side's checks (an input the stream calls refused, the inputs an earlier
 it, so a plan is committed once and accounted for once. The effects that follow a commit
 (`services/agent_runner/agent_host/transcript/effects.py`) are independent of each other and of the commit: publishing
 goes through a publisher of the runtime (it outlives the invocation), the replies meant for the person and the spend are
-kept as owed until they have gone through, both idempotent, and `recover` offers the latest stored replies to the capture
-again when the writer starts, which covers a process that died between a commit and its effects. A process that dies there
-loses the spend of that one read (it is a log line, not a table).
+kept as owed until they have gone through, both idempotent. Replies are delivered durably: the agent's reply progress
+(`agent_harness_timeline_progress.replies_seq`) is the highest timeline seq whose reply has been captured, raised only after
+the capture; `recover`, run when the writer starts, offers the replies the writer committed after it (rows it keyed, so not
+the event path's) to the capture again, which covers a process that died between a commit and its effects and nothing else.
+The progress is made at the end of the timeline the first time (an agent that was on the event path, or switched reply
+mode, has nothing to offer) and a fork starts at the end of the history it copied (`copy_harness_timeline`), so a fork never
+re-delivers its parent's replies. Replies are captured one at a time: one that conflicts with a delivery already recorded is
+dropped with `harness_timeline_reply_dropped` and does not hold the ones after it; the owed queue is bounded and a reply that
+does not fit it stops the progress before it, so the next start reads it from the database. The effects' queue is under a lock,
+so `recover` and the first commit cannot both take a reply off it. A process that dies there loses the spend of that one
+read (it is a log line, not a table).
 
 **A turn is paired with its closing by identity.** The invocation waits for the record turns its own inputs were in, not for
 "the next closing": the writer keeps, bounded, the record turn each input it settled was delivered in (`DELIVERED_KEPT`) and
@@ -56,11 +64,20 @@ its own cannot shift a later wait or compare another turn's spend (`tests/test_w
 **Origins.** Whose input a row is is decided by the projection, by the wire id first and the origin second
 ([origins](../../base/lm/harness/docs/transcript-projection.md#origins)).
 
-**Nothing is held for ever.** A result whose call has not been read and the output of a sub-agent whose link has not been
-read are held by the projector for a bounded number of entries and by the writer for `HOLD_SECONDS`; then they are shown
-top-level with an anomaly (`orphan_released`, `unlinked_released`). A call whose turn closed, or whose turn was followed by
-the next one, is abandoned and no longer keeps the record from a quiet point. A sub-agent record that appears after the
-writer started is read from its first row; only records on disk at the start are history to skip.
+**Nothing is held for ever, and nothing running is released for being slow.** A result whose call has not been read is
+held by the projector for a bounded number of entries and by the writer for `HOLD_SECONDS` counted for that call alone (one
+clock per call); then it is shown top-level (`orphan_released`). The output of a sub-agent whose link has not been read is
+on no clock: a foreground sub-agent's link comes with the result of the call that started it, however long it runs, and
+releasing its output after a fixed time would show half of it on top and half under the call once the link came. It is
+released (`unlinked_released`) when the turn it was born in closes or is followed by the next one (nothing can link it any
+more), or when that record alone holds `HOLD_ENTRIES` items (the memory bound; the rest of that one sub-agent is then shown
+top-level). A writer that stops or a session that is replaced loses nothing: what was held is re-read from the stored rows
+(the restart point does not pass an unlinked record) and held again. A call whose turn closed, or whose turn was followed
+by the next one, is abandoned and no longer keeps the record from a quiet point, but the restart point does not pass it
+either, for up to `ABANDONED_WINDOW_ROWS` (5,000) rows of its record: a result that arrives after a restart is still paired
+with it. Beyond that window a late result across a restart is held, then shown top-level; that is the remaining boundary.
+A sub-agent record that appears after the writer started is read from its first row; only records on disk at the start are
+history to skip.
 
 **The login of the CLI.** The CLI finds its login with `HOME`, `USER` and `LOGNAME`; the child environment of a session
 carries all three (`HOST_PASSTHROUGH_KEYS`, part of `session_child_env_keys`), and the writer reads the transcript under the
