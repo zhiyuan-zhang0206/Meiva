@@ -7,11 +7,11 @@ import pytest
 
 from base.host.boundary.json_values import is_object_dict, is_object_list
 from base.lm.harness.claude.transcript.parse import ParseState, parse_row
+from base.lm.harness.claude.transcript.scrub import scrub
 from base.lm.harness.claude.transcript.store_filter import (
     INPUT_SIZE_KEY,
     MAIN_TEXT_CAP_BYTES,
     SUBAGENT_TEXT_CAP_BYTES,
-    scrub,
     stored_row,
 )
 from base.lm.harness.claude.transcript.tests.support import rows

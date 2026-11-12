@@ -28,8 +28,9 @@ works this way: the gateway reads the conversation archive and projects it with 
    follow, each with its own file-to-entries reader.
 2. **An item is named by the byte offset of its row: `h<offset>.<n>`.** The file only grows, so the name is stable,
    ordered and the same for a cold read and a live one, and finding a row needs no parse of what is before it.
-3. **A read costs the window.** The record is read backwards from a line boundary in blocks until `limit` items
-   are in hand; `has_more` is whether the window starts after the file's start. What a request reads follows
+3. **A read costs the window.** The record is read backwards from a line boundary, the look-back doubling at each
+   step (so the rows parsed in all are at most twice the range covered) and capped at 16 MiB a request, until `limit` items
+   are in hand (at the cap the window is what was found, `has_more` set); `has_more` is whether the window starts after the file's start. What a request reads follows
    the window's size, never the file's. A result is read together with its call and a reply with the start of its
    turn, each by at most a bounded look-back, past which a result stands alone.
 4. **The record is read where it lives.** The gateway sends one `harness_timeline_read` operation to the agent's
@@ -53,8 +54,10 @@ works this way: the gateway reads the conversation archive and projects it with 
 7. **Three duties leave the projector and stay as they were.** The reply to the user is delivered from the
    projected items, once each, under the key `harness:claude:<row uuid>`: the CLI's own id, so it is the same
    however often the row is read, and cannot meet a key of the earlier scheme (`harness:h<seq>.0`). A reply read from
-   before this process began (the crash case) is offered again and skipped when the same text was published among
-   the last 20 publications, which is how a reply the earlier scheme delivered is not delivered twice. Usage is
+   before this process began (the crash case) is offered again. At the switch from the old keys an agent has no
+   publication under `harness:claude:` yet, and the first sink then delivers only what the record gains from its start;
+   once the agent has one, everything the sink reads is offered and the key makes a delivered reply a no-op. There is no
+   comparison of text, so two replies that say the same thing both arrive. Usage is
    logged from the turn result, as before. An input is settled by the CLI's acknowledgement (or a reading of the
    record after a failure), by setting its row `done`; no timeline entry is written for it.
 8. **What Meiva wrote into the timeline and the record does not contain stops being shown**: restarts, lost
@@ -85,8 +88,14 @@ works this way: the gateway reads the conversation archive and projects it with 
   session file is kept; this decision changes no setting on any machine. Raising it is an operator step.
 - A running tool call shows as running until its result or a later turn appears; the CLI writes a synthetic
   result for a call abandoned by a killed process when it resumes, so the state ends with the next turn.
-- A crash can lose the delivery (not the display) of the last reply when the record is not found again; the
-  record's last turn is read again at the next start, which delivers it by key.
+- **A failed turn is shown only on the page of the moment.** The decision keeps nothing for it: the stored scheme
+  wrote a failure marker into the table that stayed visible after a refresh, and that is gone. A Claude turn that fails
+  (the CLI dies, an API error, a login that has lapsed, or a turn that did something with no record file to show for it,
+  which names the session and where it was looked for) is raised as a fatal turn and the runloop sends the live `Error` event,
+  exactly as for a built-in agent, whose failures are not stored either.
+- A crash can lose the delivery (not the display) of the last reply; so can a database error while delivering, because the
+  sink does not retry (its read position has moved on). The record's last turn is read again at the next invocation,
+  which delivers it by key.
 - A window that begins in the middle of a turn shows its replies as a person's (the turn's opening row is looked
   for within a bounded distance); an opening further back than that is the one imprecision.
 - The page's `msg_count` for these agents is the file's size in bytes. The page uses it only to drop running

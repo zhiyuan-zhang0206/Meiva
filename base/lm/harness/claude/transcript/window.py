@@ -9,7 +9,7 @@ from base.lm.harness.claude.delivery import key_uuid
 from base.lm.harness.claude.reconciliation.transcript import claude_home
 from base.lm.harness.claude.transcript.parse import ParseState, parse_row
 from base.lm.harness.claude.transcript.position import Position, rows_after
-from base.lm.harness.claude.transcript.store_filter import scrub
+from base.lm.harness.claude.transcript.scrub import scrub
 from base.lm.harness.session.transcript.entries import MAIN_RECORD, AnyEntry
 
 # meiva:note
@@ -23,7 +23,7 @@ from base.lm.harness.session.transcript.entries import MAIN_RECORD, AnyEntry
 # meiva:link base/lm/harness/docs/transcript-projection.md
 
 BLOCK_BYTES = 256 * 1024
-MAX_BLOCK_BYTES = 64 * 1024 * 1024
+MAX_BLOCK_BYTES = 16 * 1024 * 1024
 _CHUNK_BYTES = 64 * 1024
 
 
@@ -43,6 +43,14 @@ class Block:
 
 def wire_id(key: str) -> str:
     return key_uuid(key)
+
+
+# meiva:note
+# Where the session's file is looked for, for a message that says so: the session's project directory under its own
+# Claude home (every other project directory is searched after it).
+def record_location(environ: Mapping[str, str], workspace: Path) -> str:
+    slug = re.sub(r"[^A-Za-z0-9]", "-", str(workspace))
+    return str(claude_home(None, environ) / "projects" / slug)
 
 
 # meiva:note

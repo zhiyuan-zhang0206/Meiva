@@ -73,8 +73,10 @@ does for them, and nothing else changes:
   cold read's function and publishes a `TimelineSnapshot` (ids are row offsets, so the page merges by id; the snapshot
   carries the item published before it and every call still running). A turn's end waits, for at most two seconds, until
   the read shows a closing row. The sink's state (offset, open turn, calls awaiting a result) is in memory only; a new
-  sink starts at the start of the record's last turn. A record that cannot be found is the event
-  `harness_record_not_found`, never a failure of the turn.
+  sink starts at the start of the record's last turn. A turn that did something and ends with
+  no record file to show for it fails like a harness setup failure (a live `Error` event naming the session and where it
+  was looked for); a failed turn is not shown after a refresh, as for a built-in agent. A reply the sink could not
+  deliver is not retried: the next invocation reads the last turn again and delivers it by key.
 - An input is settled as on the event path (the echo's `InputInContext`, or the reading of the record after a failure), but
   only the inbound row is set `done` (`commit_handed`): no timeline entry is written, and no rows are written for a
   stop's passive note, an unconfirmed input, a lost turn, a restart, a harness switch, a fork or the handoff seed

@@ -79,6 +79,18 @@ def publish(
     return message
 
 
+# meiva:note
+# Whether the agent has any publication whose key starts with `prefix`, answered from the `(agent_id, source_key)`
+# unique index as a range (`prefix` up to the character after its last one), so it costs one index probe.
+def has_keyed_publication(conn: Connection, agent_id: int, prefix: str) -> bool:
+    upper = prefix[:-1] + chr(ord(prefix[-1]) + 1)
+    return conn.execute(
+        "SELECT EXISTS (SELECT 1 FROM agent_publications WHERE agent_id = %s "
+        "AND source_key >= %s AND source_key < %s)",
+        (agent_id, prefix, upper),
+    ).fetchone() == (True,)
+
+
 def seen_id(conn: Connection, agent_id: int) -> int:
     with conn.cursor(row_factory=scalar_row) as cur:
         cur.execute("SELECT seen_id FROM agent_publication_seen WHERE agent_id = %s", (agent_id,))

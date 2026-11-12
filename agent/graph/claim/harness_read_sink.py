@@ -13,16 +13,18 @@ from base.agents.history.transcript_timeline.project import (
     ProjectedItem,
     RecordProjector,
 )
-from base.agents.history.transcript_timeline.read import read_window
+from base.agents.history.transcript_timeline.read import is_input_row, read_window
 from base.agents.history.transcript_timeline.sent import load_sent_rows, sent_inputs
 from base.agents.messages.reply_intent import parse_reply_visibility
+from base.agents.to_user.delivery.store import has_keyed_publication
 from base.events.live.projection import InboundCommitted, TimelineSnapshot
 from base.events.live.publisher import AgentEventPublisher
-from base.lm.harness import AssistantText, BridgeEvent
+from base.lm.harness import AssistantText, BridgeEvent, HarnessSetupError
 from base.lm.harness.claude.transcript.window import (
     EntryParser,
     FileRow,
     RecordFile,
+    record_location,
     session_file,
     wire_id,
 )
@@ -45,14 +47,18 @@ from base.paths import harness_sessions_dir, workspace_dir
 # running (a page drops a running item a snapshot does not mention).
 # What the sink delivers: the replies of the items it projects, once each. A reply's publication key is the CLI's own id
 # of the row that holds it (`harness:claude:<row uuid>`), the same however often and from wherever it is read, so a
-# repeated read, a restart and a replay never publish it twice. A reply read from before this process began is
-# offered again after a crash (the turn it belongs to may have ended before it was delivered), and is skipped when
-# the same text was published lately, which is how a reply the previous scheme already delivered is not delivered a
-# second time. A turn's end is waited for in the record (`finish`): the turn's closing row, for at most
-# `END_WAIT_SECONDS`.
+# repeated read, a restart and a replay never publish it twice. A reply read from before this sink began is offered
+# again (a crash may have ended the process before it was delivered) once the agent has a publication under this
+# key scheme; the first sink of an agent that has none is at the switch from the old keys, and delivers only what the
+# record gains from its start (`_delivery_floor`). A turn's end is waited for in the record (`finish`), the turn's
+# closing row, for at most
+# `END_WAIT_SECONDS`, and a turn that did something with no record to show for it fails. A reply the sink could not
+# deliver (a database error in `_deliver`) is not retried by the sink, the read position having moved on: the next
+# invocation reads the record's last turn again and delivers it by key.
 # meiva:link agent/graph/docs/harness-turn.md
 
 DEBOUNCE_SECONDS = 0.5
+REPLY_KEY_PREFIX = "harness:claude:"
 END_WAIT_SECONDS = 2.0
 END_POLL_SECONDS = 0.25
 
@@ -94,6 +100,7 @@ class ReadTimelineSink:
         self._closed_turns = 0
         self._invalid = False
         self._history_end = self._start_offset()
+        self._floor: int | None = None
 
     @property
     def has_activity(self) -> bool:
@@ -175,9 +182,25 @@ class ReadTimelineSink:
         wait = bool(turns) or interrupted or error is not None
         while True:
             await self._read_logged()
+            self._require_record(ended=wait, said=any(turn.text for turn in turns))
             if not wait or self._closed_turns > before or clock.monotonic() >= deadline:
                 return
             await asyncio.sleep(END_POLL_SECONDS)
+
+    # meiva:note
+    # A turn that did something and ends with no record file to show for it is a failed turn, not a quiet one: nothing of
+    # it can reach the timeline or the user, so it fails the way any harness setup failure does (the page's live
+    # `Error` event, as for a built-in agent). The message names the session and where it was looked for.
+    def _require_record(self, *, ended: bool, said: bool) -> None:
+        if not (ended and (self._active or said)) or self._resolve() is not None:
+            return
+        ctx = self._ctx
+        workspace = workspace_dir(self._agent_id, home=ctx.require_meiva_home())
+        where = record_location(ctx.require_environ(), workspace)
+        raise HarnessSetupError(
+            f"the record of the {ctx.harness.value} session {self._session_id() or '(not started)'} was not found "
+            f"in {where} or any other project directory; nothing of this turn can be shown or delivered"
+        )
 
     async def _read_logged(self) -> None:
         try:
@@ -235,9 +258,14 @@ class ReadTimelineSink:
         )
         return window.turn_start if window.turn_start is not None else 0
 
+    # meiva:note
+    # The inbox is asked only when the new rows hold a person's input (a user row that is not a tool result, or an absorbed
+    # message): a read of an assistant's rows and tool results opens no connection.
     def _register_sent(self, rows: Sequence[FileRow]) -> None:
         stamps = [
-            parsed for row in rows if (parsed := _stamp(row.row.get("timestamp"))) is not None
+            parsed
+            for row in rows
+            if is_input_row(row.row) and (parsed := _stamp(row.row.get("timestamp"))) is not None
         ]
         if not stamps:
             return
@@ -298,19 +326,29 @@ class ReadTimelineSink:
                 )
 
     async def _deliver(self, items: Sequence[ProjectedItem]) -> None:
+        floor = await self._delivery_floor()
         replies = [
-            (f"harness:{item.key}", item.item) for item in items if item.item.kind == "agent_chat"
+            (f"{REPLY_KEY_PREFIX}{item.key.removeprefix('claude:')}", item.item)
+            for item in items
+            if item.item.kind == "agent_chat" and item.offset >= floor
         ]
-        if not replies:
-            return
-        offsets = {f"harness:{item.key}": item.offset for item in items}
-        await capture_keyed_items(
-            self._ctx,
-            self._agent_id,
-            replies,
-            skip_published=lambda key: offsets[key] < self._history_end,
-            tolerate_conflicts=True,
-        )
+        if replies:
+            await capture_keyed_items(self._ctx, self._agent_id, replies, tolerate_conflicts=True)
+
+    # meiva:note
+    # Where delivery starts, decided once per sink. An agent that has no publication under the new key scheme yet is at
+    # the switch from the old one: the replies before this sink's start were delivered under the old keys (or are not
+    # worth delivering now), so only what the record gains from here is. An agent that has one is past the switch, and
+    # everything is offered, which the key makes a no-op for what was delivered.
+    async def _delivery_floor(self) -> int:
+        if self._floor is None:
+
+            def switched() -> bool:
+                with self._ctx.require_db().connect() as conn:
+                    return has_keyed_publication(conn, self._agent_id, REPLY_KEY_PREFIX)
+
+            self._floor = 0 if await asyncio.to_thread(switched) else self._history_end
+        return self._floor
 
 
 def _stamp(value: object) -> datetime | None:

@@ -13,6 +13,7 @@ from base.agents.history.transcript_timeline.project import (
 )
 from base.lm.harness.claude.transcript.window import (
     BLOCK_BYTES,
+    MAX_BLOCK_BYTES,
     EntryParser,
     FileRow,
     RecordFile,
@@ -27,11 +28,14 @@ from base.lm.harness.claude.transcript.window import (
 # by at most `MAX_LOOKBACK_BYTES` and then given up on: the result of a call whose call is not in the rows (it is
 # read together with its call, so a pair is not split across two windows) and the start of the first item's turn
 # (whether it was a person's or a background wake decides how its reply is shown). Past the limit, a result stands
-# alone and a turn of unknown start counts as a person's. Nothing is stored: the window is a function of the file and
+# alone and a turn of unknown start counts as a person's. The look-back doubles at each step, so the rows read and
+# projected in all are at most twice the final range, and a request reads at most `MAX_REQUEST_BYTES` (16 MiB): past it
+# the window is what was found, with `has_more` set, however few items that is. Nothing is stored: the window is a function of the file and
 # of the inbox rows of the same time. `size` is the file's size, the exclusive upper bound of every item's offset.
 # meiva:link base/lm/harness/docs/transcript-projection.md
 
 MAX_LOOKBACK_BYTES = 1024 * 1024
+MAX_REQUEST_BYTES = MAX_BLOCK_BYTES
 
 
 # meiva:note
@@ -65,11 +69,12 @@ def read_window(
     tail_end = file.complete_end()
     end = tail_end if before is None else min(before, tail_end)
     rows: list[FileRow] = []
-    start, spent = end, 0
+    start, spent, read, want = end, 0, 0, BLOCK_BYTES
     while True:
-        block = file.rows_before(start, BLOCK_BYTES)
+        block = file.rows_before(start, min(want, MAX_REQUEST_BYTES - read))
         rows = [*block.rows, *rows]
         grown, start = start - block.start, block.start
+        read, want = read + grown, want * 2
         projected = _items_of(
             rows,
             tail=before is None,
@@ -80,7 +85,13 @@ def read_window(
         cut = _cut(projected, limit)
         full = len(projected.items) - cut >= limit
         spent += grown if full else 0
-        if start == 0 or spent >= MAX_LOOKBACK_BYTES or (full and _whole(projected, cut)):
+        if (
+            start == 0
+            or spent >= MAX_LOOKBACK_BYTES
+            or (full and _whole(projected, cut))
+            or read >= MAX_REQUEST_BYTES
+            or grown == 0
+        ):
             return Window(
                 items=projected.items[cut:],
                 has_more=start > 0 or cut > 0,
@@ -107,8 +118,29 @@ def _items_of(
 
 
 def _span(rows: Sequence[FileRow]) -> tuple[datetime, datetime] | None:
-    stamps = [stamp for row in rows if (stamp := _stamp(row.row.get("timestamp"))) is not None]
+    stamps = [
+        stamp
+        for row in rows
+        if is_input_row(row.row) and (stamp := _stamp(row.row.get("timestamp"))) is not None
+    ]
     return (min(stamps), max(stamps)) if stamps else None
+
+
+# meiva:note
+# A row that can be a person's input (a user row that is not a tool result, or an absorbed message): the only rows the
+# inbox is asked about, so a stretch of the record with none costs no query.
+def is_input_row(row: Mapping[str, object]) -> bool:
+    if row.get("type") == "attachment":
+        attachment = row.get("attachment")
+        return isinstance(attachment, dict) and attachment.get("type") == "queued_command"
+    if row.get("type") != "user":
+        return False
+    message = row.get("message")
+    content = message.get("content") if isinstance(message, dict) else None
+    return not (
+        isinstance(content, list)
+        and any(isinstance(b, dict) and b.get("type") == "tool_result" for b in content)
+    )
 
 
 def _stamp(value: object) -> datetime | None:

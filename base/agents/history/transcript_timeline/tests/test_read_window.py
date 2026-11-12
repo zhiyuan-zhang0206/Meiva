@@ -1,8 +1,13 @@
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
+from base.agents.history.timeline_item import TimelineItem
+from base.agents.history.transcript_timeline.items import format_tool_use
+from base.agents.history.transcript_timeline.read import MAX_REQUEST_BYTES, read_window
 from base.agents.history.transcript_timeline.tests.support import (
+    POLICY,
     fixture_text,
     generation,
     inbound,
@@ -123,3 +128,51 @@ def test_a_result_is_read_together_with_its_call(tmp_path: Path) -> None:
     page = window(file, limit=3)
     kinds = [p.item.kind for p in page.items]
     assert kinds[0] != "code_output", "a window never starts with the result of a call it lacks"
+
+
+def _filler(megabytes: float) -> str:
+    row = json.dumps({"type": "api-request-blob", "blob": "x" * 100_000}) + "\n"
+    return row * int(megabytes * 1024 * 1024 / len(row))
+
+
+def test_the_inbox_is_asked_only_about_a_stretch_with_a_persons_input(tmp_path: Path) -> None:
+    lines = fixture_text("basic").splitlines(keepends=True)
+    asked: list[int] = []
+
+    def ask(_since: object, _until: object) -> dict[str, list[TimelineItem]]:
+        asked.append(1)
+        return {}
+
+    def read(text: str) -> None:
+        _ = read_window(
+            write(tmp_path / "f.jsonl", text),
+            limit=50,
+            before=None,
+            policy=POLICY,
+            render_tool=format_tool_use,
+            load_sent=ask,
+        )
+
+    read("".join(line for line in lines if '"role":"user"' not in line or "tool_result" in line))
+    assert asked == [], "no person's input in the rows, no query"
+    read("".join(lines))
+    assert asked != []
+
+
+def test_a_sparse_record_costs_work_in_proportion_to_the_range_it_has_to_cover(
+    tmp_path: Path,
+) -> None:
+    turn = fixture_text("basic")
+    file = write(tmp_path / "sparse.jsonl", generation(turn, 1) + _filler(3) + generation(turn, 2))
+    found = window(file, limit=50)
+    assert [p.item.kind for p in found.items].count("agent_chat") == 2, "both turns are reached"
+    assert file.bytes_read <= 3 * file.size(), (
+        "the look-back doubles: a small multiple of the range"
+    )
+
+
+def test_a_request_never_reads_past_its_hard_cap_and_says_there_is_more(tmp_path: Path) -> None:
+    file = write(tmp_path / "huge.jsonl", generation(fixture_text("basic"), 1) + _filler(40))
+    found = window(file, limit=50)
+    assert found.items == () and found.has_more
+    assert file.bytes_read <= MAX_REQUEST_BYTES + 1024 * 1024

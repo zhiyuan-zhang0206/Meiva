@@ -429,13 +429,26 @@ REPLY_TEXT = _recorded_reply()
 class RecordingCli:
     def __init__(self, path: Path) -> None:
         self.path = path
+        self.turns = 0
+
+    def write(self, key: str) -> None:
+        self.turns += 1
+        n = self.turns
+        text = FIXTURE.read_text().replace(BASIC_USER, "USERUUID")
+        text = re.sub(
+            r"\b([0-9a-f]{8})(-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\b",
+            lambda m: f"{n:08x}{m.group(2)}",
+            text,
+        )
+        text = re.sub(r"toolu_\w+", lambda m: f"{m.group(0)}x{n}", text)
+        now = datetime.now(UTC).isoformat()
+        text = re.sub(r'"timestamp":"[^"]+"', f'"timestamp":"{now}"', text)
+        with self.path.open("a") as handle:
+            handle.write(text.replace("USERUUID", key_uuid(key)))
 
     def __call__(self, inputs: Sequence[HarnessInput]):
         keys = [item.key for item in inputs]
-        with self.path.open("a") as handle:
-            rows = FIXTURE.read_text().replace(BASIC_USER, key_uuid(keys[0]))
-            now = datetime.now(UTC).isoformat()
-            handle.write(re.sub(r'"timestamp":"[^"]+"', f'"timestamp":"{now}"', rows))
+        self.write(keys[0])
         return in_a_turn(keys, REPLY_TEXT)
 
 
@@ -524,3 +537,87 @@ def _publications(db_conn: psycopg.Connection, agent_id: int) -> list[tuple[str,
         (agent_id,),
     ).fetchall()
     return [(str(key), str(content)) for key, content in rows]
+
+
+def _claude_agent(tmp_path: Path, db_conn: psycopg.Connection) -> tuple[int, Path]:
+    agent_id = agent_row(db_conn)
+    db_conn.execute("UPDATE agents_meta SET harness='claude_code' WHERE id=%s", (agent_id,))
+    db_conn.commit()
+    workspace = workspace_dir(agent_id, home=tmp_path / "home")
+    folder = tmp_path / ".claude/projects" / re.sub(r"[^A-Za-z0-9]", "-", str(workspace))
+    folder.mkdir(parents=True)
+    return agent_id, folder
+
+
+def _engine(script: Any = None) -> FakeEngine:
+    engine = FakeEngine(script=script or (lambda _inputs: []))
+    engine.session_id = SESSION
+    return engine
+
+
+async def test_the_switch_from_the_old_keys_does_not_resend_and_what_follows_is_delivered_by_key(
+    tmp_path: Path,
+    db_conn: psycopg.Connection,
+    aops_pool: AsyncConnectionPool,
+    database_gate: ProcessDbGate,
+    hosted_resources: HostedTurnResources,
+    live_events: LiveEvents,
+) -> None:
+    agent_id, folder = _claude_agent(tmp_path, db_conn)
+    cli = RecordingCli(folder / f"{SESSION}.jsonl")
+    cli.write("inbound-100")
+    db_conn.execute(
+        "INSERT INTO agent_publications (agent_id, source_key, mode, content, suggestions) "
+        "VALUES (%s, 'harness:h5.0', 'naive', %s, '[]'::jsonb)",
+        (agent_id, REPLY_TEXT),
+    )
+    db_conn.commit()
+    old = _publications(db_conn, agent_id)
+
+    def run(engine: FakeEngine):
+        rt = _record_wired(
+            tmp_path, engine, aops_pool, hosted_resources, database_gate, live_events, agent_id
+        )
+        return harness_turn_node(AgentState(), rt, config(agent_id))
+
+    _ = await run(_engine())
+    assert _publications(db_conn, agent_id) == old, (
+        "the reply the old keys delivered is not sent again"
+    )
+    for _turn in range(2):
+        _ = insert_row(db_conn, agent_id, "chat", "user", "again")
+        _ = await run(_engine(cli))
+    new = _publications(db_conn, agent_id)
+    assert [content for _key, content in new] == [REPLY_TEXT] * 3, (
+        "two replies with the same text both arrive"
+    )
+    assert len({key for key, _content in new}) == 3
+    cli.write("inbound-200")
+    _ = await run(_engine())
+    assert len(_publications(db_conn, agent_id)) == 4
+    _ = await run(_engine())
+    assert len(_publications(db_conn, agent_id)) == 4, "and only once"
+
+
+async def test_a_turn_with_no_record_file_to_show_for_it_fails_the_way_a_setup_failure_does(
+    tmp_path: Path,
+    db_conn: psycopg.Connection,
+    aops_pool: AsyncConnectionPool,
+    database_gate: ProcessDbGate,
+    hosted_resources: HostedTurnResources,
+    live_events: LiveEvents,
+) -> None:
+    agent_id, _folder = _claude_agent(tmp_path, db_conn)
+    _ = insert_row(db_conn, agent_id, "chat", "user", "hello")
+    engine = _engine(
+        lambda inputs: in_a_turn([item.key for item in inputs], "a reply nobody can see")
+    )
+    rt = _record_wired(
+        tmp_path, engine, aops_pool, hosted_resources, database_gate, live_events, agent_id
+    )
+
+    with pytest.raises(FatalLLMStreamError) as failed:
+        _ = await harness_turn_node(AgentState(), rt, config(agent_id))
+
+    message = str(failed.value)
+    assert SESSION in message and str(tmp_path / ".claude/projects") in message

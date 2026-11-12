@@ -1,9 +1,8 @@
 import asyncio
-from collections.abc import Callable, Sequence
+from collections.abc import Sequence
 from datetime import datetime
 
 from langchain_core.messages import AIMessage, BaseMessage, HumanMessage
-from psycopg import Connection
 
 from agent.graph.llm_errors import FatalLLMStreamError
 from agent.messages import system_note_message
@@ -49,20 +48,13 @@ async def capture_items(
 
 # meiva:note
 # Publish the visible replies among `keyed` (a publication key and the item it publishes), each once: a key that
-# is already published with the same content is a no-op. A reply read from a record the CLI wrote (the key
-# names the row it was read from) may be read again after a restart; `skip_published` marks the keys offered
-# again, which are skipped when the agent's latest `RECENT_PUBLICATIONS` publications already hold the same text (a
-# reply the earlier key scheme delivered), and `tolerate_conflicts` makes a key that is already published with other
-# content a warning and not an error.
-RECENT_PUBLICATIONS = 20
-
-
+# is already published with the same content is a no-op. `tolerate_conflicts` makes a key that is already published
+# with other content a warning and not an error.
 async def capture_keyed_items(
     ctx: MeivaContext,
     agent_id: int,
     keyed: Sequence[tuple[str, TimelineItem]],
     *,
-    skip_published: Callable[[str], bool] | None = None,
     tolerate_conflicts: bool = False,
 ) -> None:
     mode = UserDeliveryMode(ctx.require_agent().prompt.user_delivery_mode)
@@ -82,14 +74,7 @@ async def capture_keyed_items(
 
     def write() -> None:
         with ctx.require_db().connect() as conn:
-            recent = (
-                _recent_contents(conn, agent_id)
-                if skip_published is not None and any(skip_published(key) for key, _ in visible)
-                else ()
-            )
             for key, item in visible:
-                if skip_published is not None and skip_published(key) and item.payload in recent:
-                    continue
                 try:
                     publish(
                         conn,
@@ -113,15 +98,6 @@ async def capture_keyed_items(
 
     await asyncio.to_thread(write)
     await publish_agent_updated(ctx.require_bus(), agent_id)
-
-
-def _recent_contents(conn: Connection, agent_id: int) -> set[str]:
-    rows = conn.execute(
-        "SELECT content FROM agent_publications WHERE agent_id=%s AND content IS NOT NULL "
-        "ORDER BY id DESC LIMIT %s",
-        (agent_id, RECENT_PUBLICATIONS),
-    ).fetchall()
-    return {row[0] for row in rows}
 
 
 async def capture_reply(ctx: MeivaContext, agent_id: int, message: AIMessage) -> None:

@@ -69,8 +69,8 @@ def _session(tmp_path: Path, agent: int, *, write_file: bool) -> Path:
 
 def _claimed(conn: psycopg.Connection, agent: int, content: str, key: str) -> int:
     row = conn.execute(
-        "INSERT INTO inbound_messages (agent_id, content, kind, source, status, claimed_at, payload) "
-        "VALUES (%s, %s, 'chat', 'user', 'done', '2026-11-12T08:56:58Z', %s::jsonb) RETURNING id",
+        "INSERT INTO inbound_messages (agent_id, content, kind, source, status, created_at, claimed_at, payload) "
+        "VALUES (%s, %s, 'chat', 'user', 'done', '2026-11-12T08:56:50Z', '2026-11-12T08:56:58Z', %s::jsonb) RETURNING id",
         (agent, content, f'{{"harness_input_key": "{key}"}}'),
     ).fetchone()
     conn.commit()

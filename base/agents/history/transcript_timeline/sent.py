@@ -20,12 +20,13 @@ from base.host.boundary.json_values import is_object_dict, is_object_list
 # `inbound-<id>` for a row sent alone. A row shows what the person typed (a `/command` is not expanded and no
 # envelope is added), its sender, its images and its files. A system note or a heartbeat shows as a marker; the notes
 # only the host's own lifecycle wrote (a restart, an interrupt, a lost turn) are not shown, because the record says what
-# happened. The time range is the record's own rows' stamps widened by `CLAIM_SLACK`, so a request reads rows in
+# happened. The time range is the record's own rows' stamps widened by `CLAIM_SLACK` (and, for the index on `created_at` that bounds the scan, a row queued up to `QUEUED_LOOKBACK` before it was claimed), so a request reads rows in
 # proportion to the window and not to the agent's whole history.
 # meiva:link base/lm/harness/docs/transcript-projection.md
 
 INPUT_KEY_FIELD = "harness_input_key"
 CLAIM_SLACK = timedelta(minutes=10)
+QUEUED_LOOKBACK = timedelta(days=1)
 DELIVERABLE_KINDS = (
     InboundKind.CHAT.value,
     InboundKind.SYSTEM_NOTE.value,
@@ -63,9 +64,17 @@ def load_sent_rows(
 ) -> list[SentRow]:
     cursor = conn.execute(
         "SELECT id, agent_id, kind, source, content, payload, created_at FROM inbound_messages "
-        "WHERE agent_id=%s AND claimed_at >= %s AND claimed_at <= %s AND kind = ANY(%s) "
+        "WHERE agent_id=%s AND created_at >= %s AND created_at <= %s "
+        "AND claimed_at >= %s AND claimed_at <= %s AND kind = ANY(%s) "
         "ORDER BY created_at ASC, id ASC",
-        (agent_id, since - CLAIM_SLACK, until + CLAIM_SLACK, list(DELIVERABLE_KINDS)),
+        (
+            agent_id,
+            since - QUEUED_LOOKBACK,
+            until + CLAIM_SLACK,
+            since - CLAIM_SLACK,
+            until + CLAIM_SLACK,
+            list(DELIVERABLE_KINDS),
+        ),
     )
     return [_row(values) for values in cursor.fetchall()]
 
