@@ -84,11 +84,21 @@ top-level (`unlinked_released`) only when the link cannot come or must not be wa
   the memory bounds, after which the rest of that sub-agent is shown top-level.
 
 The price: when a turn is interrupted or the CLI is killed and the link never comes, that sub-agent's output appears on the
-timeline top-level only at one of those moments, not within a time. The host learns that a CLI process exited only when it closes
+timeline top-level only at one of those moments, not within a time. How often that is: in the SDK's non-interactive mode the CLI
+starts a sub-agent in the background by default and the main record gets the result row with its `agentId` (`async_launched`) at
+the launch, so the link arrives about 100 ms after the sub-agent starts; Meiva does not set `CLAUDE_CODE_DISABLE_BACKGROUND_TASKS`
+and uses the CLI the SDK ships. A sub-agent that is held long for a link is therefore the foreground form (that variable set, or
+a CLI that changes its default), and the tests that build a late link are that form. A foreground sub-agent that the user
+interrupts has, in the main record, a result row without `agentId` (the result is the text of the rejection), so its link never
+comes from the main record and its output is shown at the next release. After a kill and a resume under the same session id the
+old sub-agent files are untouched and the CLI writes into the main record a synthetic result for the abandoned call (a row that
+says the call was interrupted, with no `agentId`), at the start of the first new turn: that is the late result of an abandoned
+call that `ABANDONED_WINDOW_ROWS` is for.
+The host learns that a CLI process exited only when it closes
 the bridge (`HarnessSessions._close`, which also runs the writer's close), so a CLI that dies between turns leaves its held output
 until the next turn fails or the runtime is evicted or replaced. Content is never lost to this (it is re-read and held again by a
-restart) and is never shown half on top and half nested; a later change can read the link from the sub-agent's own metadata and
-close this window.
+restart) and is never shown half on top and half nested; the follow-up can read the link from the sub-agent's own metadata, which
+is written whole when the sub-agent starts and names the call that started it, and close this window.
 
 A stop without a release loses nothing either: what was held is re-read from the stored rows (the restart point does not pass an
 unlinked record) and held again, and a release followed by a restart and then the link writes nothing twice (the items are keyed;
@@ -101,11 +111,12 @@ latest `ABANDONED_WINDOW_ROWS` (5,000) rows of its record (`rebuild_ordinal`, wh
 migration, is that replay point: at most 5,000 rows plus what a turn holds; an older call neither stops the newer ones from being protected nor is waited for across a restart). A result that
 arrives after a restart for a call inside the window is still paired with it; a later one is held, then shown top-level.
 
-**Sub-agents that start sub-agents.** The projector nests an output under the call that started its record. According to the
-CLI's documentation a Claude Code sub-agent cannot start another, and none of the recorded sub-agent files in
-`claude/transcript/tests/fixtures` (two sub-agents of one real session and a long real session) holds a `Task`/`Agent` call; this
-has not been confirmed by a run that tried to make one. If a CLI version does, the writer's lookup of a parent call that is still
-held finds nothing and the inner output is written top-level (it is never lost or duplicated).
+**Sub-agents that start sub-agents.** They exist: a Claude Code sub-agent's tool list has `Agent`, and the inner sub-agent's file
+lies flat in the same `subagents/` folder as the outer one's; its `meta.json` carries `parentAgentId` and `spawnDepth: 2`, and its
+`toolUseId` names a call block in the *outer sub-agent's* file, not in the main file. The projector nests an output under the call
+that started its record, so while the outer call is still held (its own record has no link yet) the inner output has no parent to
+find and is written top-level. That is a known boundary, left to the follow-up that builds links from the sub-agents' own metadata
+(the plan, section 9.5). Nothing is lost or duplicated.
 
 A sub-agent record that appears after the writer started is read from its first row; only records on disk at the start are
 history to skip.

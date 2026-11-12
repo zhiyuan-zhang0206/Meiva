@@ -414,6 +414,30 @@ One rule: an input is delivered when the record shows it; the entry that shows i
    **Not run**: `/compact`, a fork of the agent, a CLI-started turn while the agent is idle (`own_turn` wake), the full
    cluster (`meiva init`/`start`) and the turn-on-while-idle rollout step; they remain for the coordinator.
 
+### 9.5 Linking a sub-agent from its own metadata (follow-up, not built)
+
+Facts from a real run (CLI 2.1.301 shipped with the SDK 0.2.168, and 2.1.322 for comparison, about 17 turns):
+
+- Each sub-agent has `subagents/agent-<id>.meta.json`, written whole (atomically replaced) at the moment the sub-agent starts. Its
+  first appearance already holds `toolUseId`, the id of the call block that started it, and appears about 85 to 110 ms before the
+  call row in the main file and before the sub-agent's own first row. A sub-agent that starts a sub-agent has `parentAgentId`
+  and `spawnDepth: 2`, and its `toolUseId` names a call block in the outer sub-agent's file, not in the main file; its file lies
+  flat in the same folder. `finished` is not a reliable end signal (absent after a kill and after a foreground interrupt, and
+  present 17 to 85 ms before the sub-agent's last row).
+- The first row of a sub-agent carries a `promptId` equal to the `promptId` of the main turn that started it.
+- In the SDK's non-interactive mode the CLI starts a sub-agent in the background by default (`requestShape: "background"`,
+  `launchedWithDefaults: true`), and the main record writes the result row with `agentId` (`async_launched`) at the launch, so the
+  link from the main record comes about 100 ms after the start. A foreground sub-agent that is interrupted has a result row
+  without `agentId` (the result is the text of the rejection). After a kill and a resume under the same session id the
+  old sub-agent files stay as they were and the CLI writes into the main record a synthetic result for the abandoned call, without
+  `agentId`, at the start of the first new turn.
+
+The follow-up: read the link from the metadata when a sub-agent record first appears (the call is `toolUseId`, the turn is the
+first row's `promptId`), so that output never waits for the main record's result row, a sub-agent whose result row never carries an
+`agentId` is nested, and a nested sub-agent finds its parent in the outer sub-agent's record. It also replaces the release at the
+end of the session as the way held output is shown. Until then held output is released at the writer's close, at a replaced
+session and at the memory bounds (the writer README states the boundary).
+
 ## 10. Pull requests, rollback, deployment
 
 | PR | Content | Rollback |

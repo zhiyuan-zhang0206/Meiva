@@ -1,4 +1,6 @@
 # meiva:note
+# (The tests that build a link that comes late describe the foreground form of a sub-agent; in the SDK's non-interactive
+# mode the CLI starts sub-agents in the background by default and the link comes with the launch.)
 # What the writer holds back, and for how long. A result whose call has not been read is on a clock of its own per call and is
 # shown top-level when its own `HOLD_SECONDS` have passed, not when another's have. The output of a sub-agent whose link has
 # not been read is on no clock: a foreground sub-agent's link comes with the result of the call that started it, however long
@@ -446,4 +448,37 @@ async def test_a_closing_writer_commits_what_is_pending_and_then_releases_what_i
     kinds = [k for k, _, _ in await timeline_of(aops_pool, agent_id)]
     assert kinds.count("subagent_text") == 3 and kinds.count("agent_code") == 2, (
         "the plan that was pending is committed and what the projector held is shown, in one close"
+    )
+
+
+async def test_the_synthetic_result_a_resume_writes_for_a_call_killed_mid_turn_is_paired_after_the_restart(
+    aops_pool: AsyncConnectionPool,
+) -> None:
+    agent_id, incarnation = await make_agent(aops_pool)
+    entries: list[AnyEntry] = [
+        *_OPEN,
+        ToolCall(key="c", order=Order(1), turn="t0", call_id="killed", name="Task", tool_input={}),
+        HumanInput(key="i1", order=Order(2), turn="t1", wire_id="w1", text="continue"),
+        ToolResult(
+            key="synthetic",
+            order=Order(3),
+            turn="t1",
+            call_id="killed",
+            content="Tool call interrupted",
+        ),
+        AgentText(key="a1", order=Order(4), turn="t1", text="ok", message_ref="m1"),
+        TurnEnd(key="e1", order=Order(5), turn="t1"),
+    ]
+    reader = ScriptedReader({"main": entries})
+    reader.visible["main"] = 2
+    first = make_writer(aops_pool, agent_id, incarnation, reader, [])
+    await _read_all(first)
+
+    second = make_writer(aops_pool, agent_id, incarnation, reader, [])
+    reader.visible["main"] = len(entries)
+    await _read_all(second)
+    kinds = [k for k, _, _ in await timeline_of(aops_pool, agent_id)]
+    assert kinds.count("code_output") == 1 and second.projector_sizes()["orphans"] == 0, (
+        "after a kill and a resume under the same session id the CLI writes, at the start of the new turn, a result without any "
+        "link for the call that was open: it is paired with that call"
     )
