@@ -152,3 +152,28 @@ def test_mixed_families_do_not_guess_which_ambiguous_shard_is_the_job() -> None:
     match = match_artifact("Measure e2e (3/4)", names)
     assert match.name is None
     assert set(match.candidates) == set(names)
+
+
+@pytest.mark.parametrize(("lane", "other"), [("backend", "e2e"), ("e2e", "backend")])
+@pytest.mark.parametrize("publisher", ["test-results-", "verdict-junit-"])
+@pytest.mark.parametrize(
+    "job_shape",
+    ["{lane} shard (3/8)", "{lane} full matrix (3/8)", "Measure {lane} durations (3/8)"],
+)
+@pytest.mark.parametrize("artifact_shape", ["{lane}-shard-3", "{lane}-matrix-3", "{lane}-3"])
+def test_lane_ownership_precedes_every_shard_or_matrix_match(
+    lane: str, other: str, publisher: str, job_shape: str, artifact_shape: str
+) -> None:
+    job = job_shape.format(lane=lane)
+    own = publisher + artifact_shape.format(lane=lane)
+    foreign = publisher + artifact_shape.format(lane=other)
+    rejected = match_artifact(job, (foreign,))
+    assert rejected.name is None and rejected.candidates == ()
+    assert artifact_candidates(job, (foreign,)) == ()
+    assert match_artifact(job, (own, foreign)).name == own
+
+
+def test_no_lane_declaration_stays_unmatched() -> None:
+    names = ("test-results-backend-shard-3", "verdict-junit-e2e-3")
+    assert match_artifact("Measure shard (3/8)", names).name is None
+    assert artifact_candidates("Measure shard (3/8)", names) == ()

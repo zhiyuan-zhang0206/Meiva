@@ -257,3 +257,19 @@ def test_partial_lane_ignores_an_unreadable_other_lane(tmp_path: Path) -> None:
     )
     target = replace(entry(), covers_full_suite=False, job="Backend full suite (3/8)")
     assert reader(target, facts()).outcome == CaseOutcome.PASSED
+
+
+@pytest.mark.parametrize(("lane", "other"), [("backend", "e2e"), ("e2e", "backend")])
+@pytest.mark.parametrize("publisher", ["test-results-", "verdict-junit-"])
+@pytest.mark.parametrize("job_shape", ["{lane} shard (3/8)", "{lane} full matrix (3/8)"])
+def test_partial_reader_never_retires_a_case_from_the_other_lane(
+    tmp_path: Path, lane: str, other: str, publisher: str, job_shape: str
+) -> None:
+    target = replace(entry(), covers_full_suite=False, job=job_shape.format(lane=lane))
+    foreign = Bundle(publisher + other + "-shard-3", START.isoformat(), {"case.xml": PASS})
+    reader, downloads = source(tmp_path, (foreign,))
+    assert reader(target, facts()).outcome == CaseOutcome.UNREADABLE
+    assert not downloads
+    own = Bundle(publisher + lane + "-shard-3", START.isoformat(), {"case.xml": PASS})
+    reader, _ = source(tmp_path, (foreign, own))
+    assert reader(target, facts()).outcome == CaseOutcome.PASSED

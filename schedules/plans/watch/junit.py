@@ -69,25 +69,20 @@ def shard_number(job_name: str) -> str | None:
 
 
 # meiva:note
-# The artifacts a reader should look at when none of them belongs to this job: names in this run's
-# bundle family that share a word with the job. The point is not to guess -- a name picked from here
-# never names a case -- but to answer "where do I look" on the card instead of leaving the reader to
-# open the run and diff the artifact list by eye.
-def _shares_a_word(job_name: str, artifact: str) -> bool:
-    words = {word for word in re.split(r"[^a-z0-9]+", job_name.lower()) if len(word) > 2}
-    return bool(
-        words & {word for word in re.split(r"[^a-z0-9]+", artifact.lower()) if len(word) > 2}
-    )
+# The first token after either publisher prefix is its lane: backend, e2e,
+# static, frontend or data. Require that exact token in the job name before
+# any name/shard tier can choose it. Population words such as shard or matrix
+# never establish lane ownership, and an undeclared lane stays unmatched.
+def _same_lane(job_name: str, artifact: str) -> bool:
+    for prefix in JUNIT_ARTIFACT_PREFIXES:
+        if artifact.startswith(prefix):
+            lane = artifact[len(prefix) :].partition("-")[0]
+            return bool(lane) and lane in re.split(r"[^a-z0-9]+", job_name.lower())
+    return False
 
 
 def artifact_candidates(job_name: str, names: Sequence[str]) -> tuple[str, ...]:
-    return tuple(
-        sorted(
-            name
-            for name in names
-            if name.startswith(JUNIT_ARTIFACT_PREFIXES) and _shares_a_word(job_name, name)
-        )
-    )
+    return tuple(sorted(name for name in names if _same_lane(job_name, name)))
 
 
 # meiva:note
@@ -111,6 +106,7 @@ class ArtifactMatch:
 
 
 def match_artifact(job_name: str, names: Sequence[str]) -> ArtifactMatch:
+    names = tuple(name for name in names if _same_lane(job_name, name))
     wanted = artifact_name_for_job(job_name)
     if wanted in names:
         return ArtifactMatch(wanted, "name", ())
@@ -122,13 +118,7 @@ def match_artifact(job_name: str, names: Sequence[str]) -> ArtifactMatch:
         return ArtifactMatch(max(shorter, key=len), "name", ())
     shard = shard_number(job_name)
     if shard is not None:
-        by_shard = [
-            name
-            for name in names
-            if name.startswith(JUNIT_ARTIFACT_PREFIXES)
-            and name.endswith(f"-{shard}")
-            and _shares_a_word(job_name, name)
-        ]
+        by_shard = [name for name in names if name.endswith(f"-{shard}")]
         if len(by_shard) == 1:
             return ArtifactMatch(
                 by_shard[0],

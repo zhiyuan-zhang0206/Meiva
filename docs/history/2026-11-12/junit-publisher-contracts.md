@@ -41,3 +41,14 @@ and select raw/final families separately. Thus an unrelated lane's broken
 verdict does not block a valid partial result, and an exact raw name cannot
 hide a valid final verdict from the same lane. Full-suite reads retain unknown
 when an unreadable in-scope publication could contain the reviewed case.
+
+## Lane ownership correction
+
+Task #6816 reproduced `Backend shard (3/8)` selecting an e2e artifact because
+both contained the generic word `shard`. Coordinator #405 required this to
+close with #6814. Every matching tier and candidate list now uses one lane
+rule: the first token after the known publisher prefix must appear as an exact
+word in the job name. A matching shard or matrix label alone supplies no
+ownership. Both backend/e2e directions and raw/final families have matching
+and reader-level positive/negative controls; missing lane declarations stay
+unmatched. This does not rewrite old cards or deploy the watch.
