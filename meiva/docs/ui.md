@@ -2,7 +2,10 @@
 
 ## What it is
 
-`meiva.ui` lets agents publish results and ask users questions.
+`meiva.ui` lets agents publish results and ask users questions. Each operation
+resolves the caller through the SDK context entry before sending a write. In a
+bridge-launched external shell, the first UI call attaches the shell's registered
+identity just as an agents or tasks call does; a failed admission remains an error.
 
 ## User delivery in SDK mode
 

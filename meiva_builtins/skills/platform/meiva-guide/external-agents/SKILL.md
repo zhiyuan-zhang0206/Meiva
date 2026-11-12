@@ -71,6 +71,15 @@ print(meiva.agents.spawn(
 PY
 ```
 
+A bridge-launched shell may also call the SDK directly with `"$MEIVA_PYTHON"`.
+Identity-dependent operations, including `meiva.ui.ask`, resolve that shell's
+registration lazily on first use. `meiva harness exec` uses the same registration;
+its handle defaults to `MEIVA_HARNESS_HANDLE`. `--agent-id` only checks the expected
+identity. A shell missing that environment cannot acquire identity by naming an
+agent: report the launcher environment failure and keep the question in ordinary
+visible conversation until it is repaired. Never borrow a handle or create a test
+question in the user's persistent queue. There is no public `meiva.attach` call.
+
 ## Steering, Supervising, and Switching Harnesses
 
 - **Message and steer normally:** Call `meiva.agents.send_message(agent_id, content)`

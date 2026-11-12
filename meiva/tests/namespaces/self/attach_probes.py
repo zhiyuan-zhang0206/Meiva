@@ -24,6 +24,18 @@ def main() -> None:
         except BaseException as exc:
             report[label] = {"error": type(exc).__name__, "message": str(exc)}
 
+    if len(sys.argv) > 3:
+        report["ui_source"] = meiva.ui.__file__
+        operation = sys.argv[3]
+        calls = {
+            "ask": lambda: meiva.ui.ask([{"title": "Isolated invalid-session probe"}]),
+            "publish": lambda: meiva.ui.publish("Isolated invalid-session probe"),
+            "close": lambda: meiva.ui.close_question(1),
+        }
+        attempt("ui_first", calls[operation])
+        print("REPORT " + json.dumps(report))
+        return
+
     attempt("files_read", lambda: meiva.files.read(marker_path).strip())
     attempt("shell_run", lambda: meiva.shell.run("echo hi").strip())
     attempt("agent_id", lambda: meiva.self.AGENT_ID)
