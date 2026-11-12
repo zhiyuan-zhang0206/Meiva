@@ -1,4 +1,4 @@
-exports = ["plan.py", "store.py", "tool_format.py", "writer.py"]
+exports = ["plan.py", "store.py", "writer.py"]
 
 [uses]
 "__init__.py" = []
@@ -6,7 +6,7 @@ exports = ["plan.py", "store.py", "tool_format.py", "writer.py"]
 "store.py" = []
 "rebuild.py" = ["store.py"]
 "writer.py" = ["plan.py", "rebuild.py", "store.py"]
-"tests" = ["plan.py", "store.py", "writer.py"]
+"tests" = ["store.py", "writer.py"]
 
 [purity]
 "." = "strict"

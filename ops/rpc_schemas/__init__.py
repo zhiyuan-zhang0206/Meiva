@@ -34,9 +34,13 @@ from base.host.boundary.untyped import object_of
 
 # Re-exported so existing `ops.rpc_schemas` importers keep their import paths.
 from ops.rpc_schemas.content import UserContent
-from ops.rpc_schemas.messages import AgentMessageIn as AgentMessageIn
 
 # Re-exported so existing `ops.rpc_schemas` importers keep their import paths.
+from ops.rpc_schemas.harness_timeline import (
+    HarnessTimelineReadRequest as HarnessTimelineReadRequest,
+)
+from ops.rpc_schemas.harness_timeline import HarnessTimelineWindow as HarnessTimelineWindow
+from ops.rpc_schemas.messages import AgentMessageIn as AgentMessageIn
 from ops.rpc_schemas.terminate import OpenTaskRow as OpenTaskRow
 from ops.rpc_schemas.terminate import OpenTasksHint as OpenTasksHint
 from ops.rpc_schemas.terminate import TerminateAgentRequest as TerminateAgentRequest
@@ -426,6 +430,7 @@ OpKind = Literal[
     "harness_probe",
     "upload-receive-v2",
     "to_user_read",
+    "harness_timeline_read",
     "workspace_transfer_prepare",
     "workspace_transfer_import",
     "workspace_transfer_finalize",

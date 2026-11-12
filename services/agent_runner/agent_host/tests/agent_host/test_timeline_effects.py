@@ -12,9 +12,10 @@ from collections import Counter
 from collections.abc import Mapping
 
 from agent.graph.claim.tests.harness_support import FakeEngine, runtime
-from agent.harness_timeline.plan import ReplyPolicy, WritePlan, plan_write
+from agent.harness_timeline.plan import WritePlan, plan_write
 from agent.harness_timeline.writer import Committed
 from base.agents.history.timeline_item import TimelineItem
+from base.agents.history.transcript_timeline.items import ReplyPolicy
 from base.lm.harness import Usage
 from base.lm.harness.claude.transcript.tests.support import entries_of, project, sent
 from base.lm.harness.session.transcript.drafts import AnomalyReport, MessageUsage
@@ -76,7 +77,7 @@ async def test_main_and_sub_agent_spend_are_logged_separately_by_call_and_model(
     assert sorted(by_call.values()) == [217, 252]
     assert {e["model"] for e in subs} == {"claude-haiku-5-5"}
     assert all("parent_call_id" not in e for e in main)
-    assert {e["source"] for e in events} == {"claude_code"} and {e["calls"] for e in events} == {1}
+    assert {e["source"] for e in events} == {"codex"} and {e["calls"] for e in events} == {1}
 
 
 async def test_an_interrupted_message_and_an_all_zero_message_are_not_logged(

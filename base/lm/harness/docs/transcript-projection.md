@@ -2,11 +2,30 @@
 
 The shared layer in `base/lm/harness/session/transcript/` and the three parsers
 (`claude/transcript/`, `codex/transcript/`, `antigravity/transcript/`) read a CLI's own conversation record
-into one vocabulary and project it into timeline item drafts. The Claude reader and the writer
-(`agent/harness_timeline`) run only for an agent whose `harness_transcript_timeline` setting is on (default off);
-nothing else calls them:
-they are the pure core of the plan in [the transcript timeline plan](../../../../future/agent/transcript-timeline-source.md),
-chosen by [the decision](../../../../docs/decisions/agents/graph/2026-11-12-transcript-is-the-timeline-source.md).
+into one vocabulary and project it into timeline item drafts. A Claude Code agent's timeline is read from its
+record when it is asked for and stored nowhere ([the decision](../../../../docs/decisions/agents/graph/2026-11-13-timeline-read-from-the-record.md),
+which keeps the vocabulary and the one projection of
+[the transcript decision](../../../../docs/decisions/agents/graph/2026-11-12-transcript-is-the-timeline-source.md) and replaces its stored
+copy); the writer and the reader built for that copy (`agent/harness_timeline`, `claude/transcript/reader.py`) are
+unreachable and are removed with the other two CLIs, in [the plan](../../../../future/agent/transcript-timeline-source.md).
+
+## The read-time path (Claude Code)
+
+`claude/transcript/window.py` is the Claude half: `RecordFile` reads blocks of the main record backwards from a line
+boundary (and counts the bytes it reads), `EntryParser` runs `parse_row` over rows in file order with the row's byte
+offset as the entry's `seq`, and `session_file` finds the file the way the session does (the session's own `HOME`,
+the project directory named by the working directory, a search of every project directory for the session id as
+the fallback). Sub-agent files are not read: a CLI sub-agent is one tool call and its result in the main record.
+
+`base/agents/history/transcript_timeline/` is the shared half: `RecordProjector` runs the one `Projector` over those
+entries and turns each draft into an item (`items.py`, which also holds reply visibility and the tool-call
+rendering), names it `h<offset>.<n>`, marks a call that has no result and is still open as running, and does not show
+a person's input that no inbox row accounts for; `sent.py` reads back which inbox rows were handed to the CLI as which
+input (their key gives the row's `uuid`) and what each of them shows; `read.py` reads a window of `limit` items from
+the end of the file or before an item, with a bounded look-back for the call of a result and for the start of a turn.
+The same `RecordProjector` over only the bytes appended since the last read is the live view
+([harness turn](../../../../agent/graph/docs/harness-turn.md#record-read-timeline-claude-code)); the two give the same items.
+Codex and Antigravity will add only their own file-to-entries reader.
 
 ## The three pieces
 

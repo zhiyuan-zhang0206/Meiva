@@ -1,0 +1,17 @@
+exports = ["items.py", "project.py", "read.py", "sent.py"]
+
+[uses]
+"__init__.py" = []
+"items.py" = []
+"project.py" = ["items.py"]
+"read.py" = ["items.py", "project.py"]
+"sent.py" = []
+"tests" = ["items.py", "project.py", "read.py"]
+
+[purity]
+"." = "strict"
+"__init__.py" = "strict"
+"items.py" = "strict"
+"project.py" = "strict"
+"read.py" = { mode = "none", why = "the window read: it asks the record file for blocks of rows backwards from the window's end and hands them to the strict projection until the window is full; what the rows show is decided in project.py" }
+"sent.py" = { mode = "none", why = "the one inbox query that names the inputs a record's rows were sent as; what a row shows is decided by the pure functions beside it" }

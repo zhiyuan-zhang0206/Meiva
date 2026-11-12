@@ -10,7 +10,6 @@ from uuid import uuid4
 import psycopg
 from psycopg_pool import AsyncConnectionPool
 
-from agent.harness_timeline.plan import ReplyPolicy
 from agent.harness_timeline.store import (
     StoredPosition,
     aappend_transcript_rows,
@@ -30,6 +29,7 @@ from agent.harness_timeline.tests.support import (
 from agent.harness_timeline.writer import Committed, HarnessTimelineWriter
 from agent.ownership.hosted import admit_hosted_runtime
 from agent.ownership.tests.ownership_support import agent_row
+from base.agents.history.transcript_timeline.items import ReplyPolicy
 from base.clock.tests.fakes import system_clock
 from base.db import Database
 from base.lm.harness.claude.transcript.reader import ClaudeRecordReader

@@ -1,26 +1,22 @@
 from __future__ import annotations
 
 import asyncio
-from collections.abc import Callable, Mapping
+from collections.abc import Callable
 from dataclasses import dataclass
-from pathlib import Path
 from typing import Protocol
 
 from psycopg_pool import AsyncConnectionPool
 
-from agent.harness_timeline.plan import ReplyPolicy
-from agent.harness_timeline.tool_format import format_tool_use
 from agent.harness_timeline.writer import HarnessTimelineWriter
 from base.agents.context import MeivaContext
+from base.agents.history.transcript_timeline.items import ReplyPolicy, format_tool_use
 from base.api_contracts.agent_contract import Harness
 from base.clock import Clock
 from base.host.env.agent_slices import AgentSlices
 from base.lm.harness.registry import SessionRegistry
 from base.lm.harness.session.transcript.ports import VersionedRecordReader
-from base.lm.harness.wiring import transcript_reader_for
 from base.log import logger
 from base.native_process.runtime_incarnation import RuntimeIncarnation
-from base.paths import workspace_dir
 from services.agent_runner.agent_host.transcript.effects import TimelineEffects
 
 # meiva:note
@@ -202,34 +198,17 @@ def transcript_timeline_for(
     harness: Harness,
     slices: AgentSlices,
     deps: TimelineDeps | None,
-    *,
-    home: Path,
-    harness_environ: Mapping[str, str],
 ) -> TranscriptTimeline | None:
     if not slices.harness_cli.harness_transcript_timeline or deps is None:
         return None
     if harness is Harness.MEIVA:
         return None
-    if harness is not Harness.CLAUDE_CODE:
-        logger.warning(
-            "agent {agent_id}: harness_transcript_timeline is on but only Claude Code agents read their "
-            "timeline from the transcript; the setting is ignored for {harness}",
-            event="harness_timeline_unsupported_harness",
-            agent_id=agent_id,
-            harness=harness.value,
-        )
-        return None
-    mode = slices.prompt.user_delivery_mode
-    return TranscriptTimeline(
-        deps,
+    logger.warning(
+        "agent {agent_id}: harness_transcript_timeline is on but no harness is written from its transcript any "
+        "more (Claude Code's timeline is read from its record when asked for, the others follow); "
+        "the setting is ignored for {harness}",
+        event="harness_timeline_unsupported_harness",
         agent_id=agent_id,
         harness=harness.value,
-        policy=ReplyPolicy(explicit_visibility=mode == "prefix", delivery_mode=mode),
-        reader_for=lambda session_id: transcript_reader_for(
-            harness,
-            environ=harness_environ,
-            workspace=workspace_dir(agent_id, home=home),
-            session_id=session_id,
-            now_ns=lambda: round(deps.clock.now().timestamp() * 1_000_000_000),
-        ),
     )
+    return None

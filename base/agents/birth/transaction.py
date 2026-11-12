@@ -27,6 +27,7 @@ from base.api_contracts.agent_contract import (
     InvalidModelConfig,
     is_spawner_agent_id_malformed,
     parse_spawner_agent_id,
+    reads_timeline_from_record,
 )
 from base.config.service_read import ConfigAuthority
 from base.db import fetch_one
@@ -344,14 +345,14 @@ def _insert_fork_history(
         if harness is Harness.MEIVA:
             # ForkCheckpointNotFound causes the whole transaction to roll back (the with block does not commit)
             copy_checkpoint_chain(cur, fork_from, fork_checkpoint, new_id)
-        else:
-            # meiva:note
-            # An external harness agent's conversation is its CLI session, which the new
-            # agent clones on its first start. The graph checkpoints of the source hold no
-            # conversation (and may sit mid-turn, with a pending input), so they are not
-            # copied: the fork starts a fresh graph and the display rows below are what the
-            # UI shows as its inherited history.
-            # meiva:link base/lm/harness/docs/fork.md
+        # meiva:note
+        # An external harness agent's conversation is its CLI session, which the new
+        # agent clones on its first start. The graph checkpoints of the source hold no
+        # conversation (and may sit mid-turn, with a pending input), so they are not
+        # copied: the fork starts a fresh graph and the display rows below are what the
+        # UI shows as its inherited history.
+        # meiva:link base/lm/harness/docs/fork.md
+        elif not reads_timeline_from_record(harness.value):
             copy_harness_timeline(cur, fork_from, new_id)
         # The copied history reads as the source agent's identity to the new
         # process. INSERT a kind='fork' lifecycle inbound in THIS transaction

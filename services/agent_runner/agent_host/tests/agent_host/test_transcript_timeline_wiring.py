@@ -17,8 +17,7 @@ from uuid import uuid4
 
 from psycopg_pool import AsyncConnectionPool
 
-from agent.harness_timeline.plan import ReplyPolicy
-from agent.harness_timeline.writer import HarnessTimelineWriter
+from base.agents.history.transcript_timeline.items import ReplyPolicy
 from base.api_contracts.agent_contract import Harness
 from base.clock.tests.fakes import system_clock
 from base.config.tests.configuration import defaults
@@ -88,22 +87,20 @@ async def _build(
     )
 
 
-async def test_only_a_claude_agent_with_the_setting_on_gets_a_writer(
+async def test_no_harness_gets_a_writer_any_more_and_the_setting_says_so(
     tmp_path: Path,
     model_catalog: ModelCatalog,
     aops_pool: AsyncConnectionPool,
     loguru_records: LogRecords,
 ) -> None:
-    default = await _build(
-        tmp_path, model_catalog, aops_pool, harness=Harness.CLAUDE_CODE, on=False
-    )
-    assert default.harness_timeline is None, "the setting is off by default"
-    enabled = await _build(tmp_path, model_catalog, aops_pool, harness=Harness.CLAUDE_CODE, on=True)
-    assert isinstance(enabled.harness_timeline, TranscriptTimeline)
-    assert isinstance(enabled.harness_timeline.writer, HarnessTimelineWriter)
-    other = await _build(tmp_path, model_catalog, aops_pool, harness=Harness.CODEX, on=True)
-    assert other.harness_timeline is None
-    assert len(loguru_records.events("harness_timeline_unsupported_harness")) == 1
+    for harness in (Harness.CLAUDE_CODE, Harness.CODEX):
+        built = await _build(tmp_path, model_catalog, aops_pool, harness=harness, on=True)
+        assert built.harness_timeline is None, (
+            "a Claude timeline is read from its record when asked for"
+        )
+    off = await _build(tmp_path, model_catalog, aops_pool, harness=Harness.CLAUDE_CODE, on=False)
+    assert off.harness_timeline is None
+    assert len(loguru_records.events("harness_timeline_unsupported_harness")) == 2
 
 
 async def test_the_session_store_only_wakes_the_writer_and_never_returns_rows(
@@ -298,8 +295,6 @@ def test_the_setting_on_the_built_in_agent_means_nothing_and_is_not_reported(
         marker_id=lambda: "m",
         publisher_factory=lambda _: QuietPublisher(),
     )
-    built = transcript_timeline_for(
-        71, Harness.MEIVA, slices, deps, home=tmp_path, harness_environ={"HOME": str(tmp_path)}
-    )
+    built = transcript_timeline_for(71, Harness.MEIVA, slices, deps)
     assert built is None
     assert loguru_records.events("harness_timeline_unsupported_harness") == []

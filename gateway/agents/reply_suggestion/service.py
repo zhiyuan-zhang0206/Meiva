@@ -4,11 +4,13 @@ import asyncio
 import time
 from collections.abc import Awaitable, Callable
 from datetime import datetime
+from functools import partial
 from hashlib import sha256
 from typing import TypedDict, TypeGuard
 
 from langchain_core.messages import AIMessage
 
+from base.agents.history.timeline_item import TimelineItem
 from base.agents.messages.timestamp_policy import TimestampPolicy
 from base.api_contracts.agent_contract import AgentStatus
 from base.db import Database
@@ -151,6 +153,7 @@ class ReplySuggestionService:
         catalog: ModelCatalog | CatalogLoadFailure,
         keys: ProviderKeys | None,
         recall: Callable[[str], Awaitable[str]],
+        record_items: Callable[[], Awaitable[list[TimelineItem]]],
     ) -> ReplySuggestionResponse:
         status = await asyncio.to_thread(get_agent_status, db, agent_id)
         if not policy.enabled:
@@ -163,7 +166,15 @@ class ReplySuggestionService:
         context = await asyncio.to_thread(read_inputs)
         if status is not AgentStatus.IDLING and not context.has_prompt:
             return _none("agent_not_idle")
-        items = await asyncio.to_thread(load_current_timeline_items, db, agent_id, inputs=rendering)
+        items = await asyncio.to_thread(
+            partial(
+                load_current_timeline_items,
+                db,
+                agent_id,
+                inputs=rendering,
+                record_items=await record_items(),
+            )
+        )
         excerpt = build_excerpt(items, policy.max_input_tokens)
         if excerpt is None and not context.has_messages:
             return _none("no_agent_text")

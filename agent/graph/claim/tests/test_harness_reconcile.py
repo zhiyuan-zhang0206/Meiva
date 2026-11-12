@@ -428,7 +428,7 @@ async def test_the_claim_enters_the_turn_for_an_orphaned_claim_even_with_nothing
     base = make_runtime(ops_pool=aops_pool, database_gate=database_gate)
     ctx = replace(
         base.context,
-        harness=Harness.CLAUDE_CODE,
+        harness=Harness.CODEX,
         harness_bridge=h_silent(),
         hosted_resources=hosted_resources,
     )

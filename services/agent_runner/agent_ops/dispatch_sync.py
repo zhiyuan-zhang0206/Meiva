@@ -21,10 +21,12 @@ from ops import host_config, inventory
 from ops.agent_transfer import WorkspaceTransferLimits
 from ops.agent_transfer.limits import workspace_transfer_limits_from_read_model
 from ops.cluster import operations as cluster
+from ops.harness_timeline import read_harness_timeline
 from ops.rpc_schemas import (
     AgentSkillViewPayload,
     ConfigAuditReadPayload,
     ConfigWritePayload,
+    HarnessTimelineReadRequest,
     InventoryWritePayload,
     OpStatus,
     ShellCapturePayload,
@@ -125,7 +127,12 @@ def dispatch_sync(
                 local_machine.name(), now=now, environ=host.environ
             ).model_dump(mode="json")
         case (
-            "shell_probe" | "shell_kill" | "shell_capture" | "schedule_capture" | "agent_skill_view"
+            "shell_probe"
+            | "shell_kill"
+            | "shell_capture"
+            | "schedule_capture"
+            | "agent_skill_view"
+            | "harness_timeline_read"
         ):
             return OpStatus.COMPLETED, _agent_arm(
                 kind, payload, pool, home=home, now=now, environ=host.environ
@@ -173,6 +180,15 @@ def _agent_arm(
                 raise RuntimeError("agent skill view requires the native DB pool")
             return cluster.agent_skill_view_op(
                 asv.agent_id, pool, home=home, environ=environ
+            ).model_dump(mode="json")
+        case "harness_timeline_read":
+            if pool is None:
+                raise RuntimeError("Reading a harness timeline requires the native DB pool")
+            return read_harness_timeline(
+                HarnessTimelineReadRequest.model_validate(payload),
+                pool=pool,
+                home=home,
+                environ=environ,
             ).model_dump(mode="json")
         case "shell_capture":
             sc = ShellCapturePayload.model_validate(payload)

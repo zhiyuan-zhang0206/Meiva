@@ -14,6 +14,7 @@ from typing import TypeGuard
 
 from psycopg_pool import AsyncConnectionPool
 
+from base.api_contracts.agent_contract import reads_timeline_from_record
 from base.clock import Clock
 
 _log = logging.getLogger(__name__)
@@ -72,7 +73,11 @@ async def record_switch_note(
                 agent_id,
                 exc,
             )
-    elif new_harness == "meiva" and _is_pool(history.pool):
+    elif (
+        new_harness == "meiva"
+        and _is_pool(history.pool)
+        and not reads_timeline_from_record(old_harness)
+    ):
         from base.agents.history.harness_messages import aappend_harness_timeline_items
         from base.agents.history.timeline_item import TimelineItem
         from base.db.transaction import async_write_transaction

@@ -7,7 +7,7 @@ from dataclasses import dataclass, field
 
 from psycopg_pool import AsyncConnectionPool
 
-from agent.harness_timeline.plan import ReplyPolicy, WritePlan, plan_write
+from agent.harness_timeline.plan import WritePlan, plan_write
 from agent.harness_timeline.rebuild import REBUILD_MAX_ROWS, rebuild_record
 from agent.harness_timeline.store import (
     PlannedTimelineItem,
@@ -23,6 +23,7 @@ from agent.ownership.inbound import RuntimeOwnershipLostError, lock_inbound_owne
 from base.agents.context.harness_timeline import TurnEndWait
 from base.agents.history.harness_messages import aappend_keyed_timeline_items, ahas_harness_timeline
 from base.agents.history.timeline_item import TimelineItem
+from base.agents.history.transcript_timeline.items import ReplyPolicy
 from base.agents.messages.inbound import InboundKind
 from base.clock import Clock
 from base.db.transaction import async_write_transaction

@@ -1,4 +1,4 @@
-exports = ["reader.py", "tests", "wake.py"]
+exports = ["reader.py", "tests", "wake.py", "window.py"]
 
 [uses]
 "__init__.py" = []
@@ -7,6 +7,7 @@ exports = ["reader.py", "tests", "wake.py"]
 "store_filter.py" = []
 "reader.py" = ["parse.py", "position.py", "store_filter.py"]
 "wake.py" = []
+"window.py" = ["parse.py", "position.py", "store_filter.py"]
 "tests" = ["parse.py", "position.py", "reader.py", "store_filter.py", "wake.py"]
 
 [purity]
@@ -15,5 +16,6 @@ exports = ["reader.py", "tests", "wake.py"]
 "parse.py" = "strict"
 "position.py" = "strict"
 "store_filter.py" = "strict"
+"window.py" = { mode = "none", why = "the file shell of a read-time timeline of a Claude session: it reads blocks of the main record file backwards from a line boundary and counts the bytes it read; the strict position and parse modules decide where a row ends and what it means" }
 "wake.py" = { mode = "none", why = "the async callbacks the Claude SDK awaits on its session store: append signals the writer that a record grew and load answers that nothing was stored; neither reads the rows nor decides anything" }
 "reader.py" = { mode = "none", why = "the file shell of the Claude transcript reader: it finds the session's JSONL under the injected Claude home, seeks to the stored byte offset, reads the bytes past it and hands them to the strict position and parse modules, which decide what a complete row is, whether the position still holds and what each row means" }

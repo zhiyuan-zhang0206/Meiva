@@ -95,7 +95,7 @@ def _runtime(
     )
 
 
-@pytest.mark.parametrize("harness", [Harness.CLAUDE_CODE, Harness.CODEX, Harness.ANTIGRAVITY])
+@pytest.mark.parametrize("harness", [Harness.CODEX, Harness.ANTIGRAVITY])
 async def test_external_harness_cold_start_establishes_handoff_and_standing_notes(
     harness: Harness,
     db_conn: psycopg.Connection[Any],
@@ -505,3 +505,29 @@ async def test_external_context_reset_lists_the_open_questions_after_the_tail(
     prompt = command.update["harness_inputs"][0]["prompt"]
     assert f'#{row[0]} "Which database?"' in prompt
     assert prompt.index("THE-SUMMARY") < prompt.index("still unanswered")
+
+
+async def test_a_harness_read_from_its_record_gets_its_handoff_and_stores_no_timeline_rows(
+    db_conn: psycopg.Connection[Any],
+    aops_pool: AsyncConnectionPool[Any],
+    database_gate: ProcessDbGate,
+) -> None:
+    tid = create_agent(db_conn)
+    handoffs: list[object] = []
+    bridge = SimpleNamespace(session_id=None, set_handoff=handoffs.append)
+    runtime = _runtime(
+        aops_pool,
+        ExtensionRegistry(()),
+        harness=Harness.CLAUDE_CODE,
+        harness_bridge=bridge,
+        agent_id=tid,
+        database_gate=database_gate,
+    )
+    command = await init_context_node(AgentState(), runtime, _config(tid))
+
+    assert command.goto == "claim"
+    assert len(handoffs) == 1, "a session that is not running yet is given the handoff"
+    assert load_harness_timeline_items(db_conn, tid) == [], "the record is the timeline"
+    bridge.session_id = "warm-session-1"
+    _ = await init_context_node(AgentState(), runtime, _config(tid))
+    assert len(handoffs) == 1, "a running session already holds it"

@@ -12,6 +12,7 @@ from base.lm.catalog import ModelCatalog
 from base.lm.factory import process_provider_keys
 from gateway.agents.eval_guard import deny_isolated_result_read
 from gateway.agents.history.configuration import timeline_rendering
+from gateway.agents.history.record_timeline import record_items_of
 from gateway.agents.reply_suggestion.plan import ReplySuggestionPolicy
 from gateway.agents.reply_suggestion.schemas import ReplySuggestionResponse
 from gateway.agents.reply_suggestion.service import (
@@ -73,6 +74,7 @@ async def post_reply_suggestion(
                 catalog=catalog,
                 keys=keys,
                 recall=partial(suggestion_state.reply_suggestion_recall, request),
+                record_items=partial(record_items_of, request, agent_id),
             ),
             request.is_disconnected,
         )

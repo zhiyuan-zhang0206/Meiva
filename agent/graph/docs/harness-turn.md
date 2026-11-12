@@ -60,45 +60,37 @@ delivered and recorded like a completed one), marks tools whose result is unavai
 reason when the harness faults. A host custody tick keeps the invocation
 owned while the provider is quiet. It produces no timeline activity.
 
-## Transcript-sourced timeline (setting on; default off)
+## Record-read timeline (Claude Code)
 
-While an external Claude Code agent's `harness_transcript_timeline` setting is on, the timeline is not built from
-the adapter's events. The agent host builds a session-scoped writer with the runtime
-([`agent/harness_timeline`](../../harness_timeline/README.md)); it reads the CLI's own transcript by stored position,
-keeps the whitelisted rows in the database, and in one transaction per read appends keyed timeline items, settles
-the inbound rows the entries prove delivered and moves the position. What changes in this node when the context
-carries the writer (`ctx.harness_timeline`), and nothing else does:
+A Claude Code agent's timeline is not written by anyone: it is read from the CLI's record when asked for
+([the decision](../../../docs/decisions/agents/graph/2026-11-13-timeline-read-from-the-record.md); the gateway's side is the
+`harness_timeline_read` operation, the projection is in [reading a record](../../../base/lm/harness/docs/transcript-projection.md)).
+`reads_timeline_from_record` (`base/api_contracts/agent_contract.py`) decides which harnesses are such. What this node
+does for them, and nothing else changes:
 
-- The adapter events no longer write content: text, reasoning, tool and sub-agent events are not folded into items
-  (the adapter keeps mapping them, for the live overlay of the plan), and an input's echo (`InputInContext`) no
-  longer writes its entries or settles its row; the writer does both from the record, so the timeline and the inbox
-  never disagree.
-- The invocation registers what it hands over (`register_input`, before `deliver()`), delivers the inbox as before,
-  and ends a turn by waiting in the writer until the record shows the turn's closing entry, or stays quiet for 1 s,
-  or 5 s have passed; a missing closing entry is the event `harness_timeline_turn_end_unseen`, never a failure. A
-  turn whose result reports an error ends with that error.
-- Usage is logged by the writer's effects, once per model message (`message.id`), not from the turn's result frame:
-  the main agent's as `usage_kind="agent"` and a sub-agent's as `usage_kind="agent_subagent"` with `parent_call_id`
-  (when the link is known), priced on its own model. The sub-agents' tokens are therefore counted; the figure rises by
-  exactly that spend. A message the CLI cut short (an interrupt) has only a placeholder count in the record and is
-  not priced: that is a known gap in the accounting, counted by the event `harness_timeline_usage_unreliable` (one per
-  message, with the message id and turn); a model without a price is warned about once per runtime and its rows are written unpriced.
-- The turns the invocation finishes are paired with the record's closings by identity, not by count: the stream says
-  which of our inputs were in the turn (`InputInContext`), the writer knows which record turn each was delivered in
-  (the row that settled it) and waits for those turns' own closings, and the spend compared with the result's is that
-  of those turns. A closing that shows up late, a result frame that never came and the turns the CLI ran on its own
-  (no input of ours in them, nothing to wait for) therefore shift nothing for the turns after them. A turn that ended
-  in error is waited for like any other (its failure row closes it) and its spend is not compared with the result's.
-  Two observed consequences, harmless: a turn the CLI ran on its own is not waited for, so the reply visibility correction for such a turn may go out one invocation later; and a turn whose input the stream reported refused or lost but the record proves delivered skips the turn-end wait and the spend comparison.
-- A stop's passive note still rides into the CLI with the next input but writes no timeline entry of its own; the
-  record's own interrupt row is the only "interrupted" marker, and the early write of #8911 does not apply.
-- Failure and restart: see [foreground input and cancellation](harness-foreground.md#transcript-sourced-agents).
-- The CLI finds its login through `USER` and `LOGNAME` besides `HOME`; the session's child environment carries all
-  three (`HOST_PASSTHROUGH_KEYS` in `base/host/env/agent_env.py`, part of `session_child_env_keys`), and the
-  transcript the writer reads is under that `HOME` (`<home>/.claude/projects/<workspace slug>/<session id>.jsonl`).
+- The projector is `ReadTimelineSink` (`harness_read_sink.py`). The adapter's events are signals: any of them marks the
+  sink dirty, and after half a second it reads the bytes the CLI appended since its last read, projects them with the
+  cold read's function and publishes a `TimelineSnapshot` (ids are row offsets, so the page merges by id; the snapshot
+  carries the item published before it and every call still running). A turn's end waits, for at most two seconds, until
+  the read shows a closing row. The sink's state (offset, open turn, calls awaiting a result) is in memory only; a new
+  sink starts at the start of the record's last turn. A record that cannot be found is the event
+  `harness_record_not_found`, never a failure of the turn.
+- An input is settled as on the event path (the echo's `InputInContext`, or the reading of the record after a failure), but
+  only the inbound row is set `done` (`commit_handed`): no timeline entry is written, and no rows are written for a
+  stop's passive note, an unconfirmed input, a lost turn, a restart, a harness switch, a fork or the handoff seed
+  (`stores_timeline`). A message appears on the page when the read of the record shows its row, and the page's pending
+  strip clears on the item's `inbound_id` and on the `InboundCommitted` event the sink publishes with it.
+- The reply to the user is delivered from the projected items, once each, under `harness:claude:<row uuid>`
+  (`capture_keyed_items`). The reply-visibility check of a finished reply, and with it the correction input, is made on the
+  `AssistantText` event, so it does not depend on the record being found.
+- Usage is logged from the turn's result frame, as on the event path (`log_turn_usage`); the sub-agents' tokens are in
+  that figure only as the CLI reports them.
+- The CLI finds its login through `USER` and `LOGNAME` besides `HOME`; the session's child environment carries all three
+  (`HOST_PASSTHROUGH_KEYS` in `base/host/env/agent_env.py`), and the record is under that `HOME`
+  (`<home>/.claude/projects/<workspace slug>/<session id>.jsonl`).
 
-With the setting off, none of this exists and the path above is unchanged. The setting and the event-sourced path
-are deleted when all three CLIs have cut over.
+Codex and Antigravity still use the adapter-event path above, which writes `agent_harness_messages`; it is deleted with the
+table when they have followed ([the plan](../../../future/agent/transcript-timeline-source.md)).
 
 ## The bridge
 
