@@ -35,3 +35,13 @@ the filtering inside LogQL would keep an older nonempty suspect visible after
 it disappeared. Runtime provisioning and a real round remain separate
 acceptance steps; this change does not trigger CI runs or manufacture
 production cards.
+
+## CI follow-up: registry ownership
+
+The initial panel edit omitted its registration and two dashboard contracts;
+full CI exposed those omissions. The corrected panel is supplied by the core
+metric registry and regenerated through the existing renderer, preserving its
+geometry and fidelity locks. A positive Grafana log-record limit explicitly
+selects bounded backward range reads for raw-log tables; ordinary metric
+tables keep their existing instant-query behavior. This avoids a second
+fixture-only panel path or weakening the registration worklist assertion.

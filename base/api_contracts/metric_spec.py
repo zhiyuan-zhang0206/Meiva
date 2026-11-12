@@ -77,6 +77,10 @@ class MetricSpec(BaseModel):
     # render these as legendFormat values; SQL targets are named by their
     # column aliases and must not combine with target_names.
     target_names: list[str] | None = None
+    # meiva:note
+    # Raw-log tables need the latest bounded records, not an instant metric
+    # query. The renderer applies this limit to every LogQL target, backwards.
+    grafana_max_lines: int | None = Field(default=None, ge=1)
     # Optional panel look overrides, merged into the generated panel JSON:
     # `options` merges into panel "options" (legend/colorMode/noValue/...),
     # `custom` merges into fieldConfig.defaults.custom (stacking/axisLabel/
@@ -135,6 +139,14 @@ class MetricSpec(BaseModel):
                 f"target_names must name every rendered target ({expected} names, "
                 f"got {len(self.target_names)})"
             )
+        return self
+
+    @model_validator(mode="after")
+    def _grafana_log_limit_valid(self) -> MetricSpec:
+        if self.grafana_max_lines is not None and (
+            self.query_type != "logql" or self.output != ["grafana"]
+        ):
+            raise ValueError("grafana_max_lines needs Grafana-only LogQL output")
         return self
 
     @model_validator(mode="after")
