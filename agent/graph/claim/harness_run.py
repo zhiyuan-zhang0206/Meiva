@@ -13,7 +13,6 @@ from agent import state as _state
 from agent.db import ClaimedInbound
 from agent.graph.claim._dispatch import is_human_wake_item, prepare_steered_inbound
 from agent.graph.claim.harness_activity import (
-    TRANSCRIPT_END_CEILING_SECONDS,
     TurnSink,
     log_turn_usage,
 )
@@ -58,7 +57,6 @@ from agent.graph.interrupt import (
     ModelInterruptedError,
 )
 from base.agents.context import MeivaContext
-from base.agents.context.harness_timeline import TimelineSession
 from base.agents.history.timeline_item import TimelineItem
 from base.agents.questions.render import reinjection_text
 from base.events.live.projection import LLMDone
@@ -68,7 +66,6 @@ from base.lm.harness import (
     BridgeEvent,
     EventSubscription,
     HarnessClosedError,
-    HarnessInput,
     HarnessNotDeliveredError,
     HarnessSetupError,
     ImageBlock,
@@ -125,12 +122,8 @@ class ForegroundRun:
         projector: TurnSink,
         state: _state.AgentState,
         publisher: AgentEventPublisher,
-        timeline: TimelineSession | None = None,
     ) -> None:
         self._ctx = ctx
-        self._timeline = timeline
-        self._sent_keys: set[str] = set()
-        self._record_waited = 0.0
         self._agent_id = agent_id
         self._bridge = bridge
         self._projector = projector
@@ -185,8 +178,6 @@ class ForegroundRun:
         unsettled = self._unsettled()
         if not unsettled:
             return []
-        if self._timeline is not None:
-            return await self._retire_by_record(self._timeline, unsettled)
         try:
             plan = await self._reconcile_after_failure(unsettled)
         except Exception:
@@ -240,9 +231,6 @@ class ForegroundRun:
     # meiva:link agent/graph/docs/harness-foreground.md
     async def _adopt_claimed(self) -> None:
         rows = await claimed_deliverable(self._ctx, self._agent_id, include_deferred=True)
-        if self._timeline is not None:
-            await self._adopt_by_record(self._timeline, rows)
-            return
         if not rows:
             return
         handed = self._grouped(rows)
@@ -263,18 +251,15 @@ class ForegroundRun:
     # Claimed rows as the inputs they were handed over as: rows marked with the same input key are
     # one input again (a batch handed over as one), every other row is its own.
     def _grouped(self, rows: Sequence[ClaimedInbound]) -> list[Handed]:
-        return [handed for handed, _ in self._grouped_with_text(rows)]
-
-    def _grouped_with_text(self, rows: Sequence[ClaimedInbound]) -> list[tuple[Handed, str]]:
         by_key: dict[str, list[ClaimedInbound]] = {}
         for row in rows:
             key = row.payload.get(INPUT_KEY_FIELD) if row.payload else None
             by_key.setdefault(key if isinstance(key, str) else f"inbound-{row.id}", []).append(row)
-        grouped: list[tuple[Handed, str]] = []
+        grouped: list[Handed] = []
         for key, group in by_key.items():
             pairs = [(self._handed_of(row), is_passive(row)) for row in group]
             merged = merge_handed([(handed, passive) for (handed, _), passive in pairs])
-            grouped.append((replace(merged, key=key), "\n\n".join(text for (_, text), _ in pairs)))
+            grouped.append(replace(merged, key=key))
         return grouped
 
     def _queue_resume_note(self, settled: Sequence[Handed]) -> None:
@@ -295,130 +280,6 @@ class ForegroundRun:
             return
         _ = await self._apply(plan)
         await defer_reconciliation(self._ctx, self._agent_id, plan.keep)
-
-    # meiva:note
-    # The transcript path's counterpart of `_adopt_claimed`, run before anything is delivered: the rows an earlier
-    # process handed to the CLI and left claimed are registered with the timeline writer as the inputs they were,
-    # then the writer reads the record. An input the record shows is settled by the writer (the same transaction
-    # that writes its timeline entries), so nothing is decided here for it except the note that the turn it was in
-    # died with the process. An input the record does not show was never taken by the CLI: it goes back to the
-    # queue and is delivered again in its original order. A session with no record yet has nothing to show, so
-    # all of them go back. Reading starts only after they are registered; an error leaves the rows claimed and the
-    # writer waiting, for the next invocation.
-    # meiva:link agent/graph/docs/harness-foreground.md
-    async def _adopt_by_record(
-        self, timeline: TimelineSession, rows: Sequence[ClaimedInbound]
-    ) -> None:
-        grouped = self._grouped_with_text(rows)
-        for handed, text in grouped:
-            self._register(timeline, handed, text)
-        timeline.start_reading()
-        if not grouped:
-            return
-        while await timeline.read_now():
-            pass
-        shown = {sent.key for sent in timeline.undelivered()}
-        missing = [handed for handed, _ in grouped if handed.key in shown]
-        self._forget(missing)
-        await requeue_handed(self._ctx, self._agent_id, missing)
-        if missing:
-            self._changed.set()
-        self._queue_resume_note([handed for handed, _ in grouped if handed.key not in shown])
-
-    # meiva:note
-    # The transcript path's counterpart of reconciling after a failure: the session is retired first, so a CLI
-    # that still held an input in a queue of its own can no longer take it; then the record is read once more
-    # and the inputs it shows are settled by the writer. An input it does not show goes back to the queue. A
-    # record that cannot be read leaves them claimed for the next invocation. Nothing is consumed with a
-    # marker: the record decides, or the input waits.
-    async def _retire_by_record(
-        self, timeline: TimelineSession, unsettled: Sequence[Handed]
-    ) -> list[int]:
-        try:
-            await self._bridge.retire(reason="inputs handed to a failed run need settling")
-            while await timeline.read_now():
-                pass
-        except Exception:
-            logger.opt(exception=True).warning(
-                "could not read the harness's record; the inputs stay claimed to be settled by "
-                "the next invocation",
-                event="harness_reconcile_failed",
-                agent_id=self._agent_id,
-                keys=[h.key for h in unsettled],
-                where="after_failure",
-            )
-            return []
-        shown = {sent.key for sent in timeline.undelivered()}
-        missing = [h for h in unsettled if h.key in shown]
-        self._forget(missing)
-        await requeue_handed(self._ctx, self._agent_id, missing)
-        return []
-
-    # meiva:note
-    # The one rule of delivery on the transcript path, for an input the stream reports refused or lost: the record is
-    # read once more, and the input has been delivered if it shows it (the writer has then settled it). One the record
-    # does not show goes back to the queue; a record that cannot be read fails the invocation, and `retire_unconfirmed`
-    # decides the same way. On the event path there is no record, and the answer is no.
-    async def _record_shows(self, handed: Handed) -> bool:
-        timeline = self._timeline
-        if timeline is None:
-            return False
-        while await timeline.read_now():
-            pass
-        return handed.key not in {sent.key for sent in timeline.undelivered()}
-
-    def _register_handed(self, handed: Sequence[Handed], inputs: Sequence[HarnessInput]) -> None:
-        if self._timeline is None:
-            return
-        for entry, wake_input in zip(handed, inputs, strict=True):
-            self._register(self._timeline, entry, wake_input.text)
-
-    def _register(self, timeline: TimelineSession, handed: Handed, text: str) -> None:
-        refs = [f"{handed.key}:{index}" for index in range(len(handed.items))]
-        timeline.register_input(
-            handed.key,
-            text,
-            list(zip(refs, handed.items, strict=True)),
-            handed.row_ids,
-        )
-        self._sent_keys.add(handed.key)
-
-    def _forget(self, handed: Sequence[Handed]) -> None:
-        if self._timeline is None:
-            return
-        for entry in handed:
-            self._timeline.forget_sent(entry.key)
-            self._sent_keys.discard(entry.key)
-
-    # meiva:note
-    # The invocation may not end while an input it handed over is not yet shown by the record: the writer settles
-    # it when it reads the row, and an invocation that ended first would leave the row claimed for the next one.
-    # The wait is bounded by `TRANSCRIPT_END_CEILING_SECONDS` in all; past it the input stays claimed, the writer
-    # settles it when the row appears, and the next invocation adopts it if it never does. A writer that gave up
-    # fails the invocation as a setup failure.
-    async def _wait_for_record(self) -> bool:
-        timeline = self._timeline
-        if timeline is None:
-            return False
-        if (fault := timeline.fault) is not None:
-            raise HarnessSetupError(f"the transcript timeline writer failed: {fault}") from fault
-        if not self._sent_keys.intersection(sent.key for sent in timeline.undelivered()):
-            return False
-        if self._record_waited >= TRANSCRIPT_END_CEILING_SECONDS:
-            logger.warning(
-                "the transcript did not show an input the harness took; it stays claimed",
-                event="harness_timeline_input_unproven",
-                agent_id=self._agent_id,
-                keys=sorted(self._sent_keys),
-            )
-            self._sent_keys.clear()
-            return False
-        clock = self._ctx.require_clock()
-        started = clock.monotonic()
-        _ = await timeline.read_now()
-        await asyncio.sleep(0.1)
-        self._record_waited += clock.monotonic() - started
-        return True
 
     async def execute(self) -> None:
         subscription = await self._bridge.subscribe()
@@ -507,8 +368,7 @@ class ForegroundRun:
 
     async def _on_turn_completed(self, event: TurnCompleted) -> None:
         turn = completed_turn(event, "".join(self._streamed.pop(event.turn_id, [])))
-        if self._timeline is None:
-            log_turn_usage(self._ctx, self._agent_id, self._bridge.model, turn)
+        log_turn_usage(self._ctx, self._agent_id, self._bridge.model, turn)
         await self._projector.finish(
             (turn,),
             interrupted=turn.interrupted,
@@ -523,25 +383,12 @@ class ForegroundRun:
 
     async def _settle(self, settlement: Settlement) -> None:
         match settlement:
-            case Commit(handed=handed) if self._timeline is not None:
-                if handed.human:
-                    self._projector.mark_human()
             case Commit(handed=handed):
                 items = await self._projector.append_inbound(
                     lambda: commit_handed(self._ctx, self._agent_id, [handed]),
                     human_input=handed.human,
                 )
                 publish_inbound(self._ctx, self._agent_id, items)
-            case Requeue(handed=handed, reason=reason) if await self._record_shows(handed):
-                logger.info(
-                    "the record shows an input the harness reported as not taken; it is settled, not sent again",
-                    event="harness_input_proven_by_record",
-                    agent_id=self._agent_id,
-                    key=handed.key,
-                    reason=reason,
-                )
-                self._forget([handed])
-                _ = self._folded.pop(handed.key, None)
             case Requeue(handed=handed, reason=reason):
                 logger.info(
                     "harness input returned to the queue",
@@ -551,7 +398,6 @@ class ForegroundRun:
                     reason=reason,
                 )
                 self._backoff_until = asyncio.get_running_loop().time() + REDELIVER_BACKOFF_SECONDS
-                self._forget([handed])
                 if handed.inbound_id is None:
                     self._synthetic.insert(0, (handed, self._prompts[handed.key]))
                 else:
@@ -585,8 +431,6 @@ class ForegroundRun:
                 continue
             backoff = self._backoff_until - asyncio.get_running_loop().time()
             if self._nothing_left() and backoff <= 0:
-                if await self._wait_for_record():
-                    continue
                 if not await self._queue_correction():
                     return
                 continue
@@ -616,22 +460,9 @@ class ForegroundRun:
     # meiva:link agent/graph/docs/harness-foreground.md
     async def _take_back(self, handed: Sequence[Handed]) -> None:
         self.fg = self.fg.withdraw(frozenset(h.key for h in handed))
-        self._forget(handed)
         await requeue_handed(self._ctx, self._agent_id, handed)
         self._synthetic[:0] = [(h, self._prompts[h.key]) for h in handed if h.inbound_id is None]
         self._restore_folded(handed)
-
-    # meiva:note
-    # The session refused the batch, but the transcript path takes the record's word: an input it already shows is
-    # settled by the writer and not taken back (sending it again is a second copy); the others go back.
-    async def _take_back_unshown(self, handed: Sequence[Handed]) -> None:
-        shown = [h for h in handed if await self._record_shows(h)]
-        keys = frozenset(h.key for h in shown)
-        self.fg = self.fg.withdraw(keys)
-        self._forget(shown)
-        for entry in shown:
-            _ = self._folded.pop(entry.key, None)
-        await self._take_back([h for h in handed if h.key not in keys])
 
     # meiva:note
     # A refused, lost or untaken wake input is handed over again with what rode in it: the synthetic
@@ -730,11 +561,10 @@ class ForegroundRun:
         self.fg = self.fg.hand(tuple(handed))
         if group is not None:
             await mark_input_group(self._ctx, self._agent_id, group.row_ids, group.key)
-        self._register_handed(handed, inputs)
         try:
             await self._bridge.deliver(inputs, compaction_note=compaction_note)
         except HarnessNotDeliveredError:
-            await self._take_back_unshown(handed)
+            await self._take_back(handed)
             raise
         except (HarnessClosedError, HarnessSetupError, ModelInterruptedError):
             raise

@@ -9,7 +9,6 @@ from langgraph.types import Command
 from agent import state as _state
 from agent.graph.claim.harness_activity import (
     HarnessTurnProjector,
-    TranscriptSink,
     TurnSink,
     log_turn_usage,
 )
@@ -129,8 +128,8 @@ async def _legacy_projector(
 
 
 # meiva:note
-# What shows the turn: the read of the CLI's record for a harness whose timeline is its record, the writer's sink while
-# one is bound, and otherwise the projector of adapter events.
+# What shows the turn: the read of the CLI's record for a harness whose timeline is its record, and otherwise the
+# projector of adapter events.
 # meiva:link agent/graph/docs/harness-turn.md
 async def _turn_sink(
     state: _state.AgentState,
@@ -146,9 +145,7 @@ async def _turn_sink(
             non_human_wake=state.non_human_wake,
             session_id=session_of(ctx, agent_id, ctx.harness.value),
         )
-    if ctx.harness_timeline is None:
-        return await _legacy_projector(state, ctx, agent_id, event_publisher)
-    return TranscriptSink(ctx.harness_timeline, non_human_wake=state.non_human_wake)
+    return await _legacy_projector(state, ctx, agent_id, event_publisher)
 
 
 async def _run_harness_turn(
@@ -161,9 +158,8 @@ async def _run_harness_turn(
     ctx.turn_progress.mark(agent_id)
     extra_updates: dict[str, Any] = {}
 
-    timeline = ctx.harness_timeline
     projector = await _turn_sink(state, ctx, agent_id, event_publisher)
-    run = ForegroundRun(ctx, agent_id, bridge, projector, state, event_publisher, timeline)
+    run = ForegroundRun(ctx, agent_id, bridge, projector, state, event_publisher)
     await settle_stale_interrupts(ctx, agent_id)
 
     try:
@@ -176,11 +172,7 @@ async def _run_harness_turn(
             update={**extra_updates, **interrupt_halt(exc.reason), **_CLEARED}, goto=CLAIM
         )
     except (HarnessTurnFaultedError, HarnessClosedError, HarnessSetupError) as exc:
-        if (
-            timeline is None
-            and isinstance(exc, HarnessTurnFaultedError)
-            and exc.outcome is not None
-        ):
+        if isinstance(exc, HarnessTurnFaultedError) and exc.outcome is not None:
             log_turn_usage(ctx, agent_id, bridge.model, exc.outcome)
         if not isinstance(exc, HarnessTurnFaultedError) or exc.outcome is None:
             await bridge.retire(reason="session unavailable")
@@ -213,9 +205,7 @@ async def _run_harness_turn(
     await projector.finish(interrupted=run.interrupted)
     _apply_wake_polarity(state, projector, extra_updates)
     if run.interrupted:
-        await announce_interrupt(
-            ctx, agent_id, write_notes=timeline is None and stores_timeline(ctx)
-        )
+        await announce_interrupt(ctx, agent_id, write_notes=stores_timeline(ctx))
     return Command[HarnessGoto](update={**extra_updates, "halted": True, **_CLEARED}, goto=CLAIM)
 
 

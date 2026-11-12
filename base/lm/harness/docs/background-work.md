@@ -73,10 +73,6 @@ reconciled input (`reconciled-resume-…`, see `delivery.md`).
 
 ## Turns the CLI starts itself
 
-(With the agent's `harness_transcript_timeline` setting on, such a turn's content is written by the session-scoped
-writer from the record, whether or not an invocation is present; the signal side below is unchanged, and a
-background sub-agent's rows that arrive after its parent's turn are written and priced when read, never back-filled.)
-
 A turn the CLI starts while the agent is idle (a fired timer, a finished background task; recorded for a
 background `Bash` and an async sub-agent) is observed as
 `TurnStarted(origin=HARNESS)` and presented like any other turn, not relayed as an inbound message. The

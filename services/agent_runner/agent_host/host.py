@@ -108,7 +108,6 @@ from services.agent_runner.agent_host.stall_guard import (
     TurnStallTimeoutError,
     run_invocation_with_stall_guard,
 )
-from services.agent_runner.agent_host.transcript.timeline import TimelineDeps
 
 _HostGraph = CompiledStateGraph[BaseAgentState, MeivaContext, BaseAgentState, BaseAgentState]
 
@@ -422,17 +421,6 @@ class AgentHost:
             ),
             contributions=tuple(hc for _, hc in self._extensions.harness_contributions(harness)),
             unsolicited=partial(self._report_unsolicited, agent_id),
-            timeline_deps=TimelineDeps(
-                pool=self._pool,
-                clock=self._policy.clock_factory(),
-                marker_id=lambda: self._policy.rng.randbytes(8).hex(),
-                publisher_factory=lambda timeline_agent_id: AgentEventPublisher(
-                    self._bus.async_redis(),
-                    self._bus.channel,
-                    agent_id=timeline_agent_id,
-                    auth_retry=self._bus.auth_retry,
-                ),
-            ),
         )
 
     # meiva:note
@@ -524,17 +512,12 @@ class AgentHost:
             if bridge is None:
                 continue
             try:
-                if runtime.harness_timeline is not None:
-                    await runtime.harness_timeline.read_final()
                 await bridge.close(reason="host shutdown")
             except Exception:
                 logger.exception(
                     "closing an external harness session failed during shutdown",
                     event="harness_close_failed",
                 )
-            finally:
-                if runtime.harness_timeline is not None:
-                    await runtime.harness_timeline.close()
         await self._sessions.aclose()
 
     async def _drive_turns(
@@ -586,13 +569,7 @@ class AgentHost:
             # The dispatcher owns subscriptions; an empty claim ends this task.
             harness=runtime.harness,
             harness_bridge=runtime.harness_bridge,
-            harness_timeline=None
-            if runtime.harness_timeline is None
-            else runtime.harness_timeline.writer,
         )
-        if runtime.harness_timeline is not None:
-            runtime.harness_timeline.bind_turn(ctx, incarnation)
-            self._sessions.run_timeline(agent_id, runtime.harness_timeline)
         outcome = await drive_context(
             agent_id, ctx, partial(self._invoke_until_done, checkpoints=checkpoints)
         )

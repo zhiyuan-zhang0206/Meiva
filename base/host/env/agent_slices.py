@@ -92,7 +92,6 @@ class AgentKernel:
 @dataclass(frozen=True)
 class HarnessCli:
     harness_skip_permissions: bool
-    harness_transcript_timeline: bool
 
 
 def _value(

@@ -171,27 +171,14 @@ async def write_interrupt_notes(ctx: MeivaContext, agent_id: int) -> list[Timeli
 
 
 # meiva:note
-# A stop's passive note: no input of the harness's, it rides in the next input's text.
-def _is_interrupt_note(row: ClaimedInbound) -> bool:
-    return (
-        row.kind == InboundKind.SYSTEM_NOTE.value
-        and row.payload is not None
-        and row.payload.get("note_tag") == NoteTag.LIFECYCLE_INTERRUPT.value
-    )
-
-
-# meiva:note
-# The timeline entries of a row about to be handed to the harness: none for a note already written, and none for
-# a stop's passive note when the timeline is projected from the CLI's record (the record's own interrupt marker is
-# the only one; the note still reaches the CLI with the next input).
+# The timeline entries of a row about to be handed to the harness: none for a note already written, and none when
+# the timeline is the CLI's own record.
 def timeline_items_of(
     row: ClaimedInbound, messages: Sequence[BaseMessage], ctx: MeivaContext
 ) -> list[TimelineItem]:
     if not stores_timeline(ctx):
         return []
     if row.payload is not None and row.payload.get(TIMELINE_WRITTEN_KEY) is True:
-        return []
-    if ctx.harness_timeline is not None and _is_interrupt_note(row):
         return []
     items, _ = build_timeline_items(messages, inputs=ctx.timestamp_policy())
     return items

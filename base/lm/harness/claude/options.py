@@ -69,14 +69,6 @@ def option_values(
         env=build_env(environ, config.auth, host=environ),
         resume=resume,
     )
-    if config.session_store is not None:
-        # meiva:note
-        # The transcript mirror, flushed eagerly, only wakes the timeline writer: the store ignores the rows it is
-        # handed and `load` answers nothing, so a resume still reads the CLI's own file.
-        # meiva:link base/lm/harness/docs/transcript-projection.md
-        if "session_store" not in option_fields or "session_store_flush" not in option_fields:
-            raise ValueError("the installed Claude SDK has no session store option")
-        values.update(session_store=config.session_store, session_store_flush="eager")
     if fork_to is not None:
         # meiva:note
         # The clone is made by the same options every session of this agent starts with: only

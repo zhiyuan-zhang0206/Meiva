@@ -111,6 +111,7 @@ works this way: the gateway reads the conversation archive and projects it with 
 - The page's `msg_count` for these agents is the file's size in bytes. The page uses it only to drop running
   items a snapshot does not mention; every snapshot carries the item published before it and every call still
   running, so a live snapshot is never read as a gap in the page's view.
-- The writer, its `harness_transcript_timeline` setting, the stored-rows tables and the legacy projector are
-  left in place for the other two CLIs and removed by [the plan](../../../../future/agent/transcript-timeline-source.md)
-  as each follows.
+- The legacy projector is left in place for the other two CLIs and removed by
+  [the plan](../../../../future/agent/transcript-timeline-source.md) as each follows. The writer, its
+  rollout setting and the stored-rows tables were removed in a following change, since nothing
+  reached them any more.

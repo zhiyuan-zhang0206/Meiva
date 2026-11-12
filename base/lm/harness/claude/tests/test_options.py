@@ -183,24 +183,3 @@ def test_every_session_asks_the_cli_to_echo_user_messages(tmp_path: Path) -> Non
         resume=None,
     )
     assert values["extra_args"] == {"replay-user-messages": None}
-
-
-def test_a_session_store_rides_with_eager_flush_and_needs_the_sdk_option(tmp_path: Path) -> None:
-    store = object()
-    config = BridgeConfig(cwd=tmp_path, model="claude-opus-5-5", session_store=store)
-    fields = ("extra_args", "system_prompt", "session_store", "session_store_flush")
-    values = option_values(config, environ={}, cli_path=None, option_fields=fields, resume=None)
-    assert values["session_store"] is store and values["session_store_flush"] == "eager"
-    assert "enable_file_checkpointing" not in values, "the SDK refuses a store with it"
-    plain = BridgeConfig(cwd=tmp_path, model="claude-opus-5-5")
-    assert "session_store" not in option_values(
-        plain, environ={}, cli_path=None, option_fields=fields, resume=None
-    )
-    with pytest.raises(ValueError, match="no session store option"):
-        option_values(
-            config,
-            environ={},
-            cli_path=None,
-            option_fields=("extra_args", "system_prompt"),
-            resume=None,
-        )

@@ -32,8 +32,3 @@ class BridgeConfig:
     # it down as a value; None means unknown, and a one-shot cron is then not dated from its expression.
     # meiva:link base/lm/harness/claude/docs/background-tasks.md
     cron_timezone: tzinfo | None = None
-    # meiva:note
-    # The `session_store` the SDK mirrors the transcript to, which only wakes the timeline writer
-    # (`transcript/wake.py`); None leaves the SDK's own default and no mirror.
-    # meiva:link base/lm/harness/docs/transcript-projection.md
-    session_store: object | None = None

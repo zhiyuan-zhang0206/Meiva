@@ -48,7 +48,6 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Protocol, Self
 
 from base.agents.context.clients import ClientSet, LazyConnection
-from base.agents.context.harness_timeline import TimelineSession
 from base.agents.context.identity import AgentIdentity
 from base.agents.messages.timestamp_policy import TimestampPolicy
 from base.agents.observation.turn_progress import TurnProgress
@@ -356,13 +355,6 @@ class MeivaContext:
     # falling back, because a missing engine is a wiring defect, not a mode.
     # meiva:link agent/graph/docs/harness-turn.md
     harness_bridge: TurnEngine | None = None
-
-    # meiva:note
-    # The session-scoped timeline writer of an external Claude agent whose timeline is projected from the CLI's
-    # own transcript, attached by the host next to the bridge while the agent's `harness_transcript_timeline`
-    # setting is on; None runs the adapter-event path.
-    # meiva:link agent/harness_timeline/README.md
-    harness_timeline: TimelineSession | None = None
 
     clients: ClientSet = field(default_factory=ClientSet)
     """The connections this run's process holds. Built on first use; the owner of the context

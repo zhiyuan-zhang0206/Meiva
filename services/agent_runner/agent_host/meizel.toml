@@ -4,15 +4,15 @@ exports = ["daemon.py", "host.py", "host_beat.py", "invocation", "lifecycle", "r
 "daemon.py" = ["dispatcher.py", "exec_memory_guard.py", "health_routes.py", "host.py", "host_beat.py", "lifecycle", "pooled_checkpoint.py", "pools.py", "stdout_log.py"]
 "dispatcher.py" = ["scheduling", "stall_guard.py"]
 "health_routes.py" = ["dispatcher.py", "host.py", "lifecycle"]
-"host.py" = ["invocation", "lifecycle", "runtime.py", "scheduling", "settlement.py", "stall_guard.py", "transcript"]
+"host.py" = ["invocation", "lifecycle", "runtime.py", "scheduling", "settlement.py", "stall_guard.py"]
 "host_beat.py" = ["dispatcher.py", "host.py"]
 "invocation" = ["__init__.py", "db_recovery.py", "lifecycle"]
 "lifecycle" = ["pools.py", "runtime.py"]
 "recovery" = ["host.py", "settlement.py", "tests"]
-"runtime.py" = ["__init__.py", "scheduling", "transcript"]
+"runtime.py" = ["__init__.py", "scheduling"]
 "settlement.py" = ["db_recovery.py", "runtime.py", "stall_guard.py"]
 "stall_guard.py" = ["runtime.py"]
-"tests" = ["daemon.py", "dispatcher.py", "exec_memory_guard.py", "health_routes.py", "host.py", "host_beat.py", "invocation", "lifecycle", "pooled_checkpoint.py", "pools.py", "runtime.py", "scheduling", "settlement.py", "stall_guard.py", "stdout_log.py", "transcript"]
+"tests" = ["daemon.py", "dispatcher.py", "exec_memory_guard.py", "health_routes.py", "host.py", "host_beat.py", "invocation", "lifecycle", "pooled_checkpoint.py", "pools.py", "runtime.py", "scheduling", "settlement.py", "stall_guard.py", "stdout_log.py"]
 
 [purity]
 "__init__.py" = "strict"

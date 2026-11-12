@@ -1,4 +1,4 @@
-exports = ["antigravity", "base_session.py", "bridge.py", "claude", "codex", "engine.py", "events.py", "handoff.py", "process.py", "registration.py", "registry.py", "session", "tests", "wiring.py"]
+exports = ["antigravity", "base_session.py", "bridge.py", "claude", "codex", "engine.py", "handoff.py", "process.py", "registration.py", "registry.py", "session", "tests", "wiring.py"]
 
 [uses]
 "__init__.py" = ["bridge.py", "delivery", "engine.py", "events.py", "handoff.py", "registration.py", "registry.py", "session"]
