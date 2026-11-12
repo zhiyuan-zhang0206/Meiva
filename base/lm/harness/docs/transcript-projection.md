@@ -40,15 +40,22 @@ each with a `source.json` naming the CLI version, the recording and the sanitiza
 ## Readers and storage
 
 `claude/transcript/reader.py` (`ClaudeRecordReader`) is the Claude `RecordReader`: it reads the session's local
-JSONL after a stored position (`position.py`: the last row's key, its byte span, and the row count, which is the
-next row's `Order.seq`), consumes only complete lines, checks that the last row read is still at its place, and
-treats a position the file no longer holds as a fault. A sub-agent's file is its own record. The store side is
+JSONL after a stored position (`position.py`: the byte span of the last row read, the SHA-256 of that row and the
+row count, which is the next row's `Order.seq`), consumes only complete lines, at most 4 MiB of them per call (the
+writer calls again until the answer is nothing), and checks by hash, without parsing, that the last row read is
+still at its place; a position the file no longer holds is a fault. A complete line that cannot be used (not JSON,
+not an object, invalid UTF-8, nested too deep, over 64 MiB) is not a fault: it is skipped with a `BAD_ROW` anomaly
+and the position moves past it. Every row is scrubbed of what `jsonb` cannot hold (NUL, lone surrogates) before it
+is parsed or stored. The reader's parse state is keyed by the position it belongs to, so reading again from a
+position gives the same entries. A sub-agent's file is its own record. The store side is
 `aappend_keyed_timeline_items` (append-only in `seq`, idempotent by `agent_harness_messages.source_key`) and
 `agent_harness_transcript_positions` (the position and the rebuild ordinal), the stored whitelisted rows
-(`agent_harness_transcript_rows`: `claude/transcript/store_filter.py` decides what is kept, `aappend_transcript_rows`
-appends them once, `aload_transcript_rows` reads them back by ordinal, `adelete_expired_transcript_rows` expires them
-in bounded batches), all in `base/agents/history/harness_messages.py`; nothing calls them yet. A reader returns the
-rows to store with each batch and parses stored rows back with `parse_stored`.
+(`agent_harness_transcript_rows`: `claude/transcript/store_filter.py` decides what is kept and its size caps (256 KiB
+per text field for the main record, 16 KiB for a sub-agent's), `aappend_transcript_rows` appends them once,
+`aload_transcript_rows` reads them back by ordinal; `services/upkeep/events_maintenance/transcript_retention.py`
+expires the rows older than 30 days that lie before their record's rebuild point, in bounded batches), all in
+`base/agents/history/harness_messages.py`; nothing calls them yet. A reader returns the rows to store with each
+batch and parses stored rows back with `parse_stored`.
 
 ## Native records and the vocabulary
 

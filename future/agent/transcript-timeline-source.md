@@ -38,11 +38,18 @@ record has complete lines past the position), which also covers a mirror batch t
 
 **Claude.** The reader opens the record's local JSONL (`projects/*/<session>.jsonl`, sub-agents under
 `<session>/subagents/agent-<id>.jsonl`, as `reconciliation/transcript.py` finds it today), starts at the stored
-byte offset, checks that the row ending there is the stored key (the offset is for speed, the key for
-verification), and returns the complete lines after it; a trailing line without a newline is not consumed. The
-position is `{key: <last projected row's uuid>, offset: <bytes>}` per record. A position whose key is not at the
-offset (the file was replaced or truncated) is a fault with the evidence in its message; it never restarts from
-the beginning. `records()` lists the main record and the sub-agent files. Rows the CLI never wrote (the message
+byte offset, checks that the bytes ending there are still the last row read (the offset is for speed, the hash
+for verification), and returns the complete lines after it, at most 4 MiB per call (`MAX_BATCH_BYTES`; the writer
+calls again until nothing is left, so catching up on a large file is a series of bounded transactions); a trailing
+line without a newline is not consumed. The position is `{start, offset, lines, sha256}` per record: the byte span
+of the last row read, the SHA-256 of its bytes and the row count. The check hashes the span and parses nothing, so
+it works for a last row with no `uuid` and costs no JSON decode however large the row is. A position whose bytes
+are not at the offset (the file was replaced, truncated or rewritten) is a fault with the evidence in its
+message; it never restarts from the beginning. A complete line that cannot be used (not JSON, not an object,
+invalid UTF-8, nested too deep to decode, longer than `MAX_ROW_BYTES`, 64 MiB) is not a fault: it is skipped, the
+position moves past it and an anomaly (`bad_row`, with the reason) is reported, so one bad row cannot keep every
+later row from being read. NUL and lone surrogates, which `jsonb` refuses, are removed from every row before it is
+parsed or stored (a rolled-back write would otherwise leave the writer on that row for good). `records()` lists the main record and the sub-agent files. Rows the CLI never wrote (the message
 being generated when the process was killed) cannot be read; that is accepted.
 
 **`load` and resume.** `session_store.load` always returns `None`. When it returns entries the SDK materializes
@@ -144,16 +151,39 @@ projection might use as it was. The price is that the parser runs on read-back (
 which is cheap.
 
 **Large content is not duplicated.** Inline image bytes are not stored (the images we sent are already in the
-inbound rows); a stored image block keeps `{sha256, bytes, media_type}` only. A text or tool-result block above
-a cap (`ROW_TEXT_CAP_BYTES`, 256 KiB, above what the timeline shows, 8 KB for a sub-agent and the main agent's
-own full text) is cut and marked with its original length. The cap applies to sub-agent records the same way.
+inbound rows); a stored image block keeps `{sha256, bytes, media_type}` only. Every text field (a text or
+thinking block, a tool result, a queued prompt, a string value of a tool input) is cut and marked with its
+original length (`truncated_from_bytes`) above a cap that depends on the record: **256 KiB for the main record**
+(`MAIN_TEXT_CAP_BYTES`, so the main agent's own output is not truncated, as on today's timeline) and **16 KiB for a
+sub-agent record** (`SUBAGENT_TEXT_CAP_BYTES`, about twice the 8,000 characters the timeline shows of a sub-agent's
+item, `SUBAGENT_ITEM_CHARS`). A tool input is bounded as a whole: over the cap it is replaced by a shallow summary
+(scalars and short values kept, long strings cut, nested structures that are not short replaced by their type and
+size, the original size under `meiva_truncated_from_bytes`). `error` is kept only as the string the parser reads
+and `origin` only as its `kind`.
 
 **Measured on the recordings** (CLI 2.1.322, 18 transcript files): the whitelisted rows are 2-8% of the raw file
 bytes (193 KB of 5.17 MB; about 6-34 KB against 260-425 KB per recorded session, the rest being per-session
 constants such as `prompt_snapshot`, `skill_listing` and `api-request-blob`), before the `usage` objects, which
-add about 0.4 KB per assistant row. Sub-agent records are the volume at scale (264 MB of sub-agent files for one
-long session, mostly tool output); the same whitelist and cap apply, and PR A reports the stored size of the
-recordings' sub-agent files next to the raw size.
+add about 0.4 KB per assistant row.
+
+**Measured on a real heavy session** (the coordinator's own, 2026-11-12, filter as above; byte and row counts
+only, run offline, nothing stored; the file was still growing during the runs):
+
+| | files | raw rows | raw bytes | stored rows | stored bytes | stored / raw |
+|---|---|---|---|---|---|---|
+| main record | 1 | 16,962 | 35.7 MB | 4,085 | 7.2 MB | 20% |
+| sub-agent records | 124 | 72,309 | 269.9 MB | 39,786 | 66.2 MB | 25% |
+
+Sub-agent stored bytes by row type: user rows (tool results) 41.4 MB of 55.4 MB raw, assistant rows (text, thinking,
+tool inputs) 24.0 MB of 85.7 MB, queued prompts 0.8 MB; everything else (`api-request*`, `prompt_snapshot`,
+`skill_listing`, `instructions`, `deferred_tools_*`...) is dropped (about 125 MB). The 16 KiB cap truncated 251
+sub-agent rows and saved 2.0 MB (3% of what the uncapped whitelist would store); the 256 KiB main cap truncated
+none. So for a long session with many sub-agents the stored size is about a quarter of the raw size: the bytes
+are in the many ordinary-sized rows (tool results and assistant output under the cap are stored whole), not in
+a few huge ones. A cap of 8,000 instead of 16 KiB would truncate 1,280 rows and bring the sub-agent figure from
+66.2 MB to 60.7 MB, so the cap is not the lever; storing less of a sub-agent record would need a different rule
+(for example keeping only what the timeline shows of it), which re-projection would then also lose. 30-day
+retention bounds the total; the coordinator decides whether it is acceptable.
 
 ### 4.3 The O(n) checklist (every item holds, and a test enforces the shape)
 
@@ -187,8 +217,12 @@ Whether a parser fix needs it is judged by the version on the rows.
 Stored rows are kept 30 days by default (configurable) and the timeline permanently. Expiry runs in the
 existing upkeep service (`services/upkeep/events_maintenance`, the hourly pass in `daemon.py`; `ttl_reaper` reaps
 shell sessions only) as a time-batched delete on `written_at` (an index on it, at most 20 batches of 5000 rows a
-pass), never a table scan, the retention a constant for now (`TRANSCRIPT_ROW_RETENTION_DAYS = 30`), and never deletes the rows after a session's latest rebuild point so that restart rebuild
-keeps working for a live session. The coordinator decides if the measured sizes make retention unnecessary.
+pass), never a table scan, the retention a constant for now (`TRANSCRIPT_ROW_RETENTION_DAYS = 30`). A row is deleted
+only when it is older than the retention **and** lies at or before its record's rebuild point; the rows after the
+rebuild point are never deleted however old, so a live session that was idle for longer than the retention still
+rebuilds on restart. (Old rows that are protected are skipped by the index walk: they are the tail of an idle
+record, one turn's worth.) The pass is isolated from the other steps of the hourly pass: a failure is logged and
+retried the next hour. The delete runs as the gateway login, which the migration grants DELETE on the table. The coordinator decides if the measured sizes make retention unnecessary.
 
 ## 5. What the graph keeps, deletes and changes
 

@@ -217,13 +217,18 @@ def run_maintenance(
     progress.beat()
     # meiva:note
     # Retention of the stored transcript rows of external harness sessions: a bounded, time-batched delete.
-    with pool.connection() as conn:
-        expired = sweep_expired_transcript_rows(conn, now=now)
+    # Independent of the steps around it, like the telemetry replay: a failure is logged and the next pass
+    # retries, and it must not skip the blob vacuum or the success mark.
+    try:
+        with pool.connection() as conn:
+            expired = sweep_expired_transcript_rows(conn, now=now)
+        if expired:
+            events_maintenance_log.info(
+                "[events-maintenance] expired %d stored transcript rows", expired
+            )
+    except Exception:
+        events_maintenance_log.exception("[events-maintenance] transcript row retention incomplete")
     progress.beat()
-    if expired:
-        events_maintenance_log.info(
-            "[events-maintenance] expired %d stored transcript rows", expired
-        )
     # Incremental physical reclamation: a plain VACUUM (no lock) over the
     # checkpoint tables, only inside the measured agent-lowest window
     # (05:00-08:00 CLUSTER time). Logs size + dead tuples each run.

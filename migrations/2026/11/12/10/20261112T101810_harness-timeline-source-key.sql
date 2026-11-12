@@ -4,6 +4,11 @@
 -- once, with the version of the projection rules that wrote it; each transcript record gets a stored read
 -- position and the whitelisted rows the projection needs (appended once, never updated, expired by age),
 -- all written in one transaction. Nothing reads or writes any of it yet. Idempotent, so a fresh database that already has them replays it.
+--
+-- Locking: the plain (not CONCURRENTLY) CREATE UNIQUE INDEX below blocks writes to agent_harness_messages
+-- while it builds. That is accepted: migrations are applied only by `meiva start`, and during an update the
+-- services are stopped at that point, so nothing is waiting to write. source_key is NULL on every existing
+-- row, so the partial index is empty and the build costs one scan of the table.
 ALTER TABLE agent_harness_messages ADD COLUMN IF NOT EXISTS source_key TEXT;
 ALTER TABLE agent_harness_messages ADD COLUMN IF NOT EXISTS projection_version INTEGER;
 
