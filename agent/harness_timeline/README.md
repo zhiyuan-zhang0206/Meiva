@@ -55,7 +55,7 @@ offered again, and a reply that conflicts with a delivery already recorded is dr
 `harness_timeline_reply_dropped` and holds none of the others. Passes run one at a time under a lock, and a failure that
 repeats is reported once a minute. A reply that fails is tried again after an interval of the injected clock (1 second, doubled up
 to 60, with nothing read while nothing is owed), without waiting for a commit; one that conflicts, whose stored row does not
-validate or that has failed five times in a row is dropped with the event, which says why and never carries the text, and the
+validate or that has kept failing for ten minutes (over at least five attempts, from its first failure, by the injected clock; a success or a restart starts the count again) is dropped with the event, which says why, for how long and after how many attempts, and never carries the text, and the
 ones after it go on. The mode a reply is captured under is the one of the context bound at the latest hosted turn, as the
 writer's reply policy is the runtime's: a reply the CLI writes while the agent is idle, after the mode was changed and before
 the next turn, is delivered under the earlier mode. Everything an agent's writer or its publisher can raise stays in that agent's own task

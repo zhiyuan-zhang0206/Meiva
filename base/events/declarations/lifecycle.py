@@ -266,8 +266,8 @@ EVENTS: dict[str, EventSpec] = {
         "harness_timeline_reply_dropped",
         "a reply of a transcript-sourced timeline is not delivered, and the ones after it are not held: it conflicts "
         "with a delivery already recorded for it (the person changed the delivery mode), its stored row does not "
-        "validate, or its delivery failed five times in a row; it stays on the timeline, only this delivery is lost, "
-        "and the event names the reason, the error type, the publication key and the recorded mode, never the text",
+        "validate, or its delivery kept failing for ten minutes over at least five attempts; it stays on the timeline, only this delivery is lost, "
+        "and the event names the reason, the error type, how long and how often delivery failed, the publication key and the recorded mode, never the text",
         tier="anomaly",
     ),
     "harness_timeline_effect_failed": telemetry_event(

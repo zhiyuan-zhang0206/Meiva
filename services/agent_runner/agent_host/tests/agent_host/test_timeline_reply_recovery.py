@@ -14,11 +14,13 @@ from __future__ import annotations
 import asyncio
 from collections import Counter
 from collections.abc import Callable
+from contextlib import AbstractAsyncContextManager
 from itertools import count
 from typing import cast
 from unittest.mock import Mock
 
 import psycopg
+from psycopg import AsyncConnection
 from psycopg_pool import AsyncConnectionPool
 
 from agent.graph.claim.tests.harness_support import FakeEngine, runtime
@@ -60,6 +62,7 @@ class Delivery:
         self.fail = False
         self.fail_times = 0
         self.fail_on: set[str] = set()
+        self.down_until: Callable[[], bool] | None = None
         self.pause = 0.0
         self.attempts = 0
         self.attempts_on: Counter[str] = Counter()
@@ -71,6 +74,8 @@ class Delivery:
             await asyncio.sleep(self.pause)
         if self.fail:
             raise OSError("the delivery store is down")
+        if self.down_until is not None and self.down_until():
+            raise OSError("the delivery store is away")
         if self.fail_times:
             self.fail_times -= 1
             raise OSError("the delivery store blinked")
@@ -352,7 +357,7 @@ async def test_a_reply_whose_delivery_blinks_is_tried_again_without_another_comm
     assert timers.sleeps[:2] == [1.0, 2.0], "the interval doubles after a pass that fails again"
 
 
-async def test_a_reply_that_keeps_failing_is_dropped_after_five_attempts_and_the_next_ones_go_out_in_order(
+async def test_a_reply_that_keeps_failing_for_ten_minutes_is_dropped_and_the_next_ones_go_out_in_order(
     aops_pool: AsyncConnectionPool, loguru_records: LogRecords
 ) -> None:
     agent_id = await _agent(aops_pool)
@@ -368,12 +373,15 @@ async def test_a_reply_that_keeps_failing_is_dropped_after_five_attempts_and_the
         await _progress_reaches(aops_pool, agent_id, 3)
     finally:
         _ = retry.cancel()
-    assert delivery.attempts_on["cursed"] == 5
-    assert timers.sleeps == [1.0, 2.0, 4.0, 8.0]
+    assert delivery.attempts_on["cursed"] >= 5
+    assert timers.sleeps[:7] == [1.0, 2.0, 4.0, 8.0, 16.0, 32.0, 60.0]
+    assert max(timers.sleeps) == 60.0, "the interval is capped"
+    assert timers.monotonic() >= 600.0
     dropped = [r["extra"] for r in loguru_records.events("harness_timeline_reply_dropped")]
     assert [(d["reason"], d["error_type"], d["seq"]) for d in dropped] == [
         ("delivery_failed", "OSError", 1)
     ]
+    assert dropped[0]["failing_seconds"] >= 600.0 and dropped[0]["attempts"] >= 5
     assert all("cursed" not in str(d) for d in dropped), "the event carries no text"
 
 
@@ -476,3 +484,65 @@ async def test_a_failing_delivery_costs_neither_the_usage_nor_the_publish(
     assert delivery.handed == []
     assert emitted, "the live view was published"
     assert len(loguru_records.events("llm_usage")) == 1, "the spend was logged"
+
+
+async def test_a_failure_that_lasts_nine_minutes_and_ends_delivers_the_reply_and_drops_nothing(
+    aops_pool: AsyncConnectionPool, loguru_records: LogRecords
+) -> None:
+    agent_id = await _agent(aops_pool)
+    timers = ManualTimers()
+    delivery = Delivery()
+    delivery.down_until = lambda: timers.monotonic() < 540.0
+    effects = _effects(aops_pool, agent_id, delivery, clock_over(timers))
+    retry = asyncio.create_task(effects.retry_while_owed())
+    try:
+        written = await _commit(aops_pool, agent_id, "the final answer")
+        await effects.after_commit(Committed(WritePlan(), written))
+        await _until(lambda: delivery.handed == ["the final answer"])
+        await _progress_reaches(aops_pool, agent_id, 0)
+    finally:
+        _ = retry.cancel()
+    assert delivery.attempts > 5 and 540.0 <= timers.monotonic() < 600.0
+    assert not loguru_records.events("harness_timeline_reply_dropped")
+
+
+# meiva:note
+# A pool whose first connections fail, as a database that is briefly away does.
+class _AwayPool:
+    def __init__(self, real: AsyncConnectionPool, failures: int) -> None:
+        self._real = real
+        self.failures = failures
+
+    def connection(self) -> AbstractAsyncContextManager[AsyncConnection]:
+        if self.failures:
+            self.failures -= 1
+            raise OSError("the database is away")
+        return self._real.connection()
+
+
+async def test_a_pass_that_cannot_read_what_is_owed_is_tried_again_and_counts_against_no_reply(
+    aops_pool: AsyncConnectionPool, loguru_records: LogRecords
+) -> None:
+    agent_id = await _agent(aops_pool)
+    timers = ManualTimers()
+    delivery = Delivery()
+    away = _AwayPool(aops_pool, 0)
+    effects = TimelineEffects(
+        agent_id,
+        Published(),
+        pool=cast("AsyncConnectionPool", away),
+        clock=clock_over(timers),
+        capture=delivery.capture,
+    )
+    effects.bind(cast("MeivaContext", Mock()))
+    written = await _commit(aops_pool, agent_id, "the final answer")
+    away.failures = 12
+    retry = asyncio.create_task(effects.retry_while_owed())
+    try:
+        await effects.after_commit(Committed(WritePlan(), written))
+        await _until(lambda: delivery.handed == ["the final answer"])
+    finally:
+        _ = retry.cancel()
+    assert delivery.attempts == 1, "no attempt was made at the reply while it could not be read"
+    assert timers.monotonic() > 60.0
+    assert not loguru_records.events("harness_timeline_reply_dropped")

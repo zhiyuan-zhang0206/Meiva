@@ -51,7 +51,7 @@ from base.log import logger
 # the publication key keeps the record to one (an attempt that finds it there publishes nothing again, but may send
 # one more `agent_updated` to the live view). Replies are handed over one at a time: one that conflicts with a delivery
 # already recorded (the user changed the delivery mode), one whose stored row does not validate and one that has failed
-# five times in a row are dropped with `harness_timeline_reply_dropped` and do not hold the ones after it; any other
+# kept failing for ten minutes over at least five attempts are dropped with `harness_timeline_reply_dropped` and do not hold the ones after it; any other
 # failure leaves it and the ones after it owed, and `retry_while_owed` passes again after an interval of the injected
 # clock (1 second, doubled up to 60) without waiting for a commit, and not at all while nothing is owed. Every pass,
 # the recovery included, runs under one lock with the pricing, so two of them never interleave.
@@ -85,6 +85,7 @@ UNMATCHED_LOG_FIRST = 20
 UNMATCHED_LOG_EVERY = 100
 FAILURE_LOG_SECONDS = 60.0
 REPLY_ATTEMPTS = 5
+REPLY_FAILING_SECONDS = 600.0
 RETRY_FIRST_SECONDS = 1.0
 RETRY_CAP_SECONDS = 60.0
 REPLY_SOURCE = "harness"
@@ -119,7 +120,7 @@ class TimelineEffects:
         self._models: RecentSet[str] = RecentSet(MODELS_LIMIT)
         self._unreliable: RecentSet[tuple[str, str]] = RecentSet(LOGGED_LIMIT)
         self._failures: dict[str, _FailureLog] = {}
-        self._failing: tuple[int, int] | None = None
+        self._failing: tuple[int, int, float] | None = None
         self._retry = asyncio.Event()
         self._waiting_for_ctx = False
 
@@ -140,9 +141,9 @@ class TimelineEffects:
 
     async def settle_owed(self) -> None:
         async with self._settle:
-            await self._isolated("capture", self._capture_owed)
+            captured = await self._isolated("capture", self._capture_owed)
             await self._isolated("usage", self._price_owed)
-            if self._failing is not None or self._owed_usage:
+            if not captured or self._owed_usage:
                 self._retry.set()
 
     # meiva:note
@@ -167,9 +168,12 @@ class TimelineEffects:
     # meiva:note
     # Replies are handed over one at a time, in order, and the progress is raised past each one handled. A reply that
     # conflicts with a delivery already recorded, one whose stored row does not validate (no retry can change either) and
-    # one that has failed `REPLY_ATTEMPTS` times in a row is dropped with `harness_timeline_reply_dropped`, which says why
-    # and never carries the text: the reply stays on the timeline, only this delivery is lost, and the ones after it are not
-    # held for ever. Any other failure leaves the reply and the ones after it owed for the next pass.
+    # one that has kept failing for `REPLY_FAILING_SECONDS` of the injected clock, from its first failure, over at least
+    # `REPLY_ATTEMPTS` attempts, is dropped with `harness_timeline_reply_dropped`, which says why, for how long and
+    # after how many attempts, and never carries the text: the reply stays on the timeline, only this delivery is lost,
+    # and the ones after it are not held for ever. A success, or a new process, starts the count again. Any other failure
+    # leaves the reply and the ones after it owed for the next pass. A pass that cannot read what is owed (the database is
+    # briefly away) is not a failure of any reply: it counts for none of them, and the pass is tried again.
     async def _capture_owed(self) -> None:
         ctx = self._ctx
         self._waiting_for_ctx = ctx is None
@@ -204,11 +208,19 @@ class TimelineEffects:
                 reply, "conflict", type(error).__name__, await self._recorded_mode(item)
             )
         except Exception as error:
-            failed = self._failing[1] + 1 if self._failing and self._failing[0] == reply.seq else 1
-            if failed >= REPLY_ATTEMPTS:
-                await self._drop(reply, "delivery_failed", type(error).__name__, None)
+            now = self._clock.monotonic()
+            _, failed, since = (
+                self._failing
+                if self._failing is not None and self._failing[0] == reply.seq
+                else (reply.seq, 0, now)
+            )
+            failed += 1
+            if failed >= REPLY_ATTEMPTS and now - since >= REPLY_FAILING_SECONDS:
+                await self._drop(
+                    reply, "delivery_failed", type(error).__name__, None, failed, now - since
+                )
                 return
-            self._failing = (reply.seq, failed)
+            self._failing = (reply.seq, failed, since)
             raise
 
     async def _recorded_mode(self, item: TimelineItem) -> str | None:
@@ -218,7 +230,13 @@ class TimelineEffects:
             )
 
     async def _drop(
-        self, reply: OwedReply, reason: str, error_type: str, recorded_mode: str | None
+        self,
+        reply: OwedReply,
+        reason: str,
+        error_type: str,
+        recorded_mode: str | None,
+        attempts: int = 0,
+        failing_seconds: float = 0.0,
     ) -> None:
         self._failing = None
         logger.warning(
@@ -230,6 +248,8 @@ class TimelineEffects:
             error_type=error_type,
             publication_key=f"{REPLY_SOURCE}:h{reply.seq}.0",
             recorded_mode=recorded_mode,
+            attempts=attempts,
+            failing_seconds=round(failing_seconds, 1),
         )
 
     async def _confirm(self, seq: int) -> None:
@@ -324,7 +344,7 @@ class TimelineEffects:
     # One effect on its own: a failure is logged and kept apart from the others. A failure that repeats is not a flood:
     # the first is logged with its stack, the same effect's next ones are counted and reported at most once per
     # `FAILURE_LOG_SECONDS` with the number since, and a success starts the count again.
-    async def _isolated(self, effect: str, run: Callable[[], Awaitable[None]]) -> None:
+    async def _isolated(self, effect: str, run: Callable[[], Awaitable[None]]) -> bool:
         try:
             await run()
         except Exception:
@@ -332,7 +352,7 @@ class TimelineEffects:
             seen = self._failures.get(effect)
             if seen is not None and now - seen.logged_at < FAILURE_LOG_SECONDS:
                 seen.suppressed += 1
-                return
+                return False
             self._failures[effect] = _FailureLog(now)
             logger.opt(exception=True).warning(
                 "an effect of a committed read failed; what it owed is kept and tried again at the "
@@ -342,8 +362,9 @@ class TimelineEffects:
                 effect=effect,
                 failures_since_last_report=0 if seen is None else seen.suppressed,
             )
-        else:
-            _ = self._failures.pop(effect, None)
+            return False
+        _ = self._failures.pop(effect, None)
+        return True
 
 
 @dataclass(slots=True)
