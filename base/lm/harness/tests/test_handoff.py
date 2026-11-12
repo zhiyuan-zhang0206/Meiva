@@ -102,8 +102,21 @@ def test_defaults_cover_the_boundary_and_reporting_rules(tmp_path: Path) -> None
     assert "Use your native tools for files" in text
     assert "timers or wake-ups" in text
     assert "`meiva.agents.spawn`" in text
-    assert "your CLI's own subagent or task tool" in text
     assert "State what you did and the evidence for it" in text
+
+
+def test_delegation_guidance_splits_cli_subagents_from_meiva_agents(tmp_path: Path) -> None:
+    text = Handoff(
+        agent_id=6984,
+        instruction="Read hello.txt",
+        machine="macmini",
+        workspace=tmp_path,
+        home=tmp_path / "home",
+    ).render()
+    assert "use your CLI's own subagent or task tool" in text
+    assert "has no agent id or inbox" in text
+    assert "it does not notify you when it finishes" in text
+    assert "invisible" not in text
 
 
 def test_with_contributions_filters_by_harness_and_deduplicates(tmp_path: Path) -> None:
