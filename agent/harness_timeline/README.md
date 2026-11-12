@@ -1,14 +1,14 @@
 # Harness timeline writer
 
-The session-scoped writer of an external Claude Code agent's timeline, from
+The session-scoped writer of an external Claude Code or Codex agent's timeline, from
 [the plan](../../future/agent/transcript-timeline-source.md) and
 [the decision](../../docs/decisions/agents/graph/2026-11-12-transcript-is-the-timeline-source.md). It reads the
-CLI's own transcript by stored position (a `RecordReader`, see
+CLI's own record by stored position (a `RecordReader`: Claude Code's transcript file, Codex's thread history; see
 [reading a record into timeline drafts](../../base/lm/harness/docs/transcript-projection.md)), projects what it
 read, and commits keyed timeline items, the settlement of the inbound rows the entries prove delivered and the
 new positions in one transaction under the runtime's incarnation fence. It is wired behind the agent setting
 `harness_transcript_timeline` (default **off**; a temporary rollout switch deleted when Claude, Codex and
-Antigravity have all cut over).
+Antigravity have all cut over; Antigravity ignores it).
 
 - `plan.py` (pure): a projection becomes a `WritePlan` (items in read order, settlements, usage, closed turns,
   reports). Reply visibility and the rendering of a tool call are applied here, once.
@@ -138,3 +138,18 @@ that are never answered and a restart; it also bounds the bytes read from the CL
   clock tick as the folder's last change (the modification time cannot tell a second file of that tick), and the
   search for the session's file in other project directories is counted per session and made at once by the last read
   before a close.
+
+**Codex.** The same writer, projection and fence; only the reader differs (`base/lm/harness/codex/transcript/`, described in
+[the Codex adapter](../../base/lm/harness/codex/docs/codex.md#the-timeline-from-the-threads-own-record)). The record is the
+thread's item history read by the opaque cursor of `thread/items/list` over the session's own app-server connection, plus the few
+rollout lines the history lacks (a turn's end, abort or failure, a sample's token usage, a finished child's report); no call that
+returns a whole history is ever made, and `thread/resume` is sent with `excludeTurns`. The host wires it next to the bridge: the
+runtime builds one `TranscriptLink` shared by the reader and the session (`CodexConfig.transcript`), and the session's
+notifications wake the writer (`item/completed`, `turn/completed`, `turn/started`, `thread/tokenUsage/updated`; they carry no
+content). A child thread is a record while it is working. An input is delivered when `userMessage.clientId` comes back (the key we
+sent); a steer swallowed by an interrupt is in no record and goes back to the queue. Tests: `tests/test_writer_codex.py` (a turn,
+a lost steer from the recorded interrupt scenario, a restart) and `tests/test_writer_codex_linear.py` (database reads, writes and
+reader requests per round do not grow with the thread; a restart reads its tail),
+`base/lm/harness/codex/transcript/tests/test_reader_linear.py` (requests, items and bytes per round do not grow) and
+`services/agent_runner/agent_host/tests/agent_host/test_graph_codex_transcript_turn.py` (the graph branches by the writer, not by
+the harness, so Codex takes them unchanged).

@@ -8,7 +8,7 @@ the rest), and the real-CLI end-to-end runs of section 9.4 were repeated on them
 the vocabulary, the projection, the three parsers and their golden tests (the shared pure core this plan builds
 on) are described in [reading a record into timeline drafts](../../base/lm/harness/docs/transcript-projection.md)
 and landed without changing behaviour. This document is the plan for Claude Code, the first CLI to cut over;
-Codex and Antigravity follow the same shape (section 12). The user's priorities are correctness,
+Codex has followed (section 12, implemented behind the same setting); Antigravity follows the same shape. The user's priorities are correctness,
 compatibility and stability, then completeness: every choice below takes the simpler form.
 
 ## 1. What changes, in one paragraph
@@ -476,10 +476,19 @@ reaches the writer, the settlement or the turn-end wait. Nothing the overlay hol
 
 ## 12. Codex and Antigravity, in short
 
-Same port and shape. **Codex**: reader on `thread/items/list` with the history cursor as the position; rollout
-only for usage, the synthetic abort and the sub-agent notification; a late command is appended when it arrives,
-carrying its original turn; a steer is a user item of the same turn; double writes share one key; child threads
-are records linked by the spawn call. **Antigravity**: reader tails `transcript_full.jsonl` by `step_index`
+Same port and shape. **Codex** (implemented 2026-11-12 behind the same off-by-default setting; the adapter's
+[doc](../../base/lm/harness/codex/docs/codex.md#the-timeline-from-the-threads-own-record) and
+[reading a record](../../base/lm/harness/docs/transcript-projection.md) describe it): reader on `thread/items/list` with the
+opaque history cursor as the position (up to date: the newest eight items hold the last one read; behind: pages of 32 after the
+stored cursor; never `thread/read` or `thread/resume` with turns, which is sent with `excludeTurns`); the rollout by byte offset
+for what the history lacks only (a turn's end, abort or failure, a sample's token usage, a finished child's report), which is also
+the cheap "anything new" check; a late command is appended when it arrives, carrying its original turn; a steer is a user item of
+the same turn; double writes share one key; child threads are records linked by the spawn call and read while they work; every
+protocol item type has a home (edits, MCP and dynamic tools, search, plans, review mode, view/generation, sleep; hook prompts,
+function-call outputs and sub-agent activity records are known and quiet). Verified on 0.166.0 with the real app-server: plain,
+multi-block, steer, interrupt, a steer swallowed by an interrupt, a command that finishes after its turn, a spawned child that works
+on after its parent's turn, resume, compaction. Not verified: items other than the ones above (schema only: file changes, MCP,
+web search, plans), a server-started turn, a compressed rollout, the turn-on-while-idle rollout step on a cluster. **Antigravity**: reader tails `transcript_full.jsonl` by `step_index`
 (holes allowed), with `clientMessageId` and `isInterruptingStep` from the trajectory as an optional side input;
 a background command stays `RUNNING` (`BACKGROUND`) and its end is a notice; a cancel is a signal (an
 `Interrupt` entry the reader builds, and `ABORTED` results for calls no row answered); no turn-end row, so the

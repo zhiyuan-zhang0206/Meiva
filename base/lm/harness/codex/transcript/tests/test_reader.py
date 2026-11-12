@@ -6,11 +6,12 @@ from pathlib import Path
 
 import pytest
 
+from base.lm.harness.codex.frames import METHOD_NOT_FOUND, JsonRpcError
 from base.lm.harness.codex.transcript.history import PAGE_ITEMS
 from base.lm.harness.codex.transcript.position import decode
 from base.lm.harness.codex.transcript.reader import QUIET_RECHECK_SECONDS
 from base.lm.harness.codex.transcript.shapes import Obj
-from base.lm.harness.codex.transcript.tests.history_fake import FakeHistory
+from base.lm.harness.codex.transcript.tests.history_fake import write_lines
 from base.lm.harness.codex.transcript.tests.rig import (
     Rig,
     basic,
@@ -146,20 +147,10 @@ async def test_a_child_thread_is_a_record_while_it_is_working_and_not_after(
     rig = Rig(tmp_path)
     assert await rig.reader.records() == (MAIN_RECORD,)
     child = "thr-child"
-    child_history = FakeHistory(child)
-    child_rollout = tmp_path / f"rollout-2026-11-12T10-00-01-{child}.jsonl"
-    child_rollout.touch()
     rows, _ = basic()
-    child_history.append(rows[2])
-
-    class Both:
-        async def request(
-            self, method: str, params: Mapping[str, object], *, timeout: float | None = None
-        ) -> dict[str, object]:
-            target = child_history if params["threadId"] == child else rig.history
-            return await target.request(method, params, timeout=timeout)
-
-    rig.link.attach(Both(), rollout_path=str(rig.rollout), cli_version="0.166.0")
+    rig.add_child(child)
+    rig.threads.by_id[child].append(rows[2])
+    write_lines(rig.rollouts[child], [])
     rig.link.on_notification("item/completed", {"threadId": child, "turnId": "t"})
     assert rig.woken == [child]
     assert await rig.reader.records() == (MAIN_RECORD, child)
@@ -222,3 +213,39 @@ async def test_the_reader_asks_only_for_item_pages_never_for_a_whole_history(
     assert set(rig.history.methods) == {"thread/items/list"}
     assert all("limit" in params for _, params in rig.history.calls)
     assert max(int(str(params["limit"])) for _, params in rig.history.calls) <= PAGE_ITEMS * 2
+
+
+async def test_a_thread_no_turn_has_run_in_has_no_rollout_and_is_not_asked_about(
+    tmp_path: Path,
+) -> None:
+    rig = Rig(tmp_path)
+    rig.rollout.unlink()
+    for _ in range(5):
+        assert await rig.reader.read_after(MAIN_RECORD, None) is None
+    assert rig.history.calls == []
+    rig.rollout.touch()
+    rig.clock.now += 5
+    rows, lines = basic()
+    rig.feed(rows[:3], lines[:12])
+    assert len(entries_of(await rig.drain())) == 3
+
+
+async def test_an_app_server_that_refuses_the_history_method_is_reported_once_and_not_retried_hot(
+    tmp_path: Path,
+) -> None:
+    rig = Rig(tmp_path)
+    rows, lines = basic()
+    rig.feed(rows[:3], lines[:12])
+
+    class Refusing:
+        async def request(
+            self, method: str, params: Mapping[str, object], *, timeout: float | None = None
+        ) -> dict[str, object]:
+            raise JsonRpcError(METHOD_NOT_FOUND, "thread/items/list is not supported yet")
+
+    rig.link.attach(Refusing(), rollout_path=str(rig.rollout), cli_version="0.166.0")
+    first = await rig.reader.read_after(MAIN_RECORD, None)
+    assert first is not None
+    (anomaly,) = first.entries
+    assert isinstance(anomaly, Anomaly) and "not supported" in anomaly.detail
+    assert await rig.reader.read_after(MAIN_RECORD, first.position) is None

@@ -9,6 +9,7 @@ from pathlib import Path
 from base.host.boundary.json_values import is_object_dict
 from base.lm.harness.codex.frames import (
     INVALID_PARAMS,
+    METHOD_NOT_FOUND,
     History,
     JsonRpcError,
     TransportClosedError,
@@ -75,6 +76,7 @@ from base.lm.harness.session.transcript.ports import EntryBatch, PositionLostErr
 
 REQUEST_TIMEOUT_SECONDS = 30.0
 QUIET_RECHECK_SECONDS = 30.0
+LOCATE_RETRY_SECONDS = 2.0
 MAX_ROLLOUT_BYTES = 4 * 1024 * 1024
 MAX_ROLLOUT_ROW_BYTES = 64 * 1024 * 1024
 SEED_STEPS = 128
@@ -103,6 +105,7 @@ class CodexRecordReader:
         self._link = link
         self._now = now
         self._files: dict[str, RolloutFile] = {}
+        self._missing: dict[str, float] = {}
         self._known: dict[str, None] = {}
         self._active: dict[str, None] = {}
         self._opened: dict[str, dict[str, set[str]]] = {}
@@ -173,6 +176,10 @@ class CodexRecordReader:
                 raise PositionLostError(
                     f"the app-server refused the stored cursor: {error}"
                 ) from error
+            if error.code == METHOD_NOT_FOUND:
+                return self._anomaly_batch(
+                    record, f"thread/items/list refused: {error.message}", position
+                )
             if record == MAIN_RECORD:
                 raise
             return self._drop_child(record, f"app-server: {error.message}")
@@ -229,6 +236,8 @@ class CodexRecordReader:
     ) -> EntryBatch | None:
         position = CodexPosition() if stored is None else decode(stored)
         file = self._file(thread, record)
+        if file is None and position.history.fresh:
+            return None
         key = (stored or "", file.stamp() if file is not None else None, self._activity(thread))
         if self._is_quiet(record, key):
             return None
@@ -258,14 +267,23 @@ class CodexRecordReader:
             and self._now() - quiet.at < QUIET_RECHECK_SECONDS
         )
 
+    # meiva:note
+    # A rollout that does not exist yet (a thread no turn has run in has no file) is looked for again after
+    # `LOCATE_RETRY_SECONDS`, not at every read: finding a file by its thread id lists the Codex home's dated folders.
     def _file(self, thread: str, record: str) -> RolloutFile | None:
         known = self._files.get(thread)
         if known is not None:
             return known
+        asked = self._missing.get(thread)
+        if asked is not None and self._now() - asked < LOCATE_RETRY_SECONDS:
+            return None
         hint = self._link.rollout_hint if record == MAIN_RECORD else None
         found = RolloutFile.locate(self._home, thread, hint=hint)
-        if found is not None:
-            self._files[thread] = found
+        if found is None:
+            self._missing[thread] = self._now()
+            return None
+        _ = self._missing.pop(thread, None)
+        self._files[thread] = found
         return found
 
     def _read_rollout(

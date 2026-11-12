@@ -325,7 +325,7 @@ EVENTS: dict[str, EventSpec] = {
     "harness_timeline_unsupported_harness": telemetry_event(
         "harness_timeline_unsupported_harness",
         "harness_transcript_timeline is on for an agent whose harness does not read its timeline from "
-        "the transcript yet; the setting is ignored",
+        "its own record yet (Antigravity); the setting is ignored",
         tier="anomaly",
     ),
     "harness_registration_renewal_failed": telemetry_event(

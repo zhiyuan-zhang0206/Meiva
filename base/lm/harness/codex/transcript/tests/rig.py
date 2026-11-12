@@ -47,7 +47,9 @@ class Rig:
         self.threads = Threads()
         self.threads.by_id[thread] = self.history
         self.home = tmp_path
-        self.rollout = tmp_path / f"rollout-2026-11-12T10-00-00-{thread}.jsonl"
+        self.folder = tmp_path / "sessions" / "2026" / "11" / "12"
+        self.folder.mkdir(parents=True)
+        self.rollout = self.folder / f"rollout-2026-11-12T10-00-00-{thread}.jsonl"
         self.rollout.touch()
         self.rollouts: dict[str, Path] = {thread: self.rollout}
         self.woken: list[str | None] = []
@@ -62,7 +64,7 @@ class Rig:
 
     def restarted_reader(self) -> CodexRecordReader:
         return CodexRecordReader(
-            codex_home=self.rollout.parent,
+            codex_home=self.home,
             thread_id=lambda: self.history.thread,
             link=self.link,
             now=self.clock,
@@ -70,7 +72,7 @@ class Rig:
 
     def add_child(self, thread: str) -> None:
         self.threads.by_id[thread] = FakeHistory(thread)
-        path = self.home / f"rollout-2026-11-12T10-00-01-{thread}.jsonl"
+        path = self.folder / f"rollout-2026-11-12T10-00-01-{thread}.jsonl"
         path.touch()
         self.rollouts[thread] = path
 

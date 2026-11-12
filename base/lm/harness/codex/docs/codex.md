@@ -41,6 +41,7 @@ directly: the uniform surface is this adapter, not a shared wire protocol.
 | `mapping.py` | pure `ThreadItem` → event translation and usage extraction |
 | `config.py` | `CodexConfig` and the command line |
 | `auth.py` | the credential environment the child receives: which variables are removed, and the explicit opt-in that keeps them |
+| `transcript/` | reading the thread's own record into timeline entries, for the writer behind `harness_transcript_timeline` (default off): the reader, its link to the session, the history cursor position, the rollout tail and the stored-row whitelist; see [the timeline from the thread's own record](#the-timeline-from-the-threads-own-record) |
 
 `events.py`, `handoff.py`, `process.py` and `registry.py` are the shared bridge
 modules; this package does not restate them.
@@ -117,6 +118,50 @@ Adapter invariants are pinned by tests in `tests/`:
 | 6 | usage accumulates per turn | `test_session.py::test_usage_accumulates_across_turns` |
 | 7 | a resume names the recorded thread and a rejected resume fails fast | `test_session.py::test_resume_uses_the_registry` |
 | 8 | steering waits for a correlated execution receipt | `test_delivery.py` |
+
+## The timeline from the thread's own record
+
+Behind the agent setting `harness_transcript_timeline` (**default off**; a temporary rollout switch shared with Claude Code,
+deleted when all three CLIs have cut over) a Codex agent's timeline is written by the session-scoped writer
+(`agent/harness_timeline/`) from the thread's own record and not from this adapter's event stream. With the setting off none
+of this runs: `CodexConfig.transcript` is unset, the session holds no link and every request is byte-identical to what it was.
+
+- **The one reading path** is the protocol's stable `thread/items/list`, over the session's own app-server connection, by an
+  opaque cursor the server gives (`transcript/reader.py`, `history.py`). A read is the newest eight items when the stored
+  position is up to date, or the next page of at most 32 items after the stored cursor when it is behind; a position is the
+  cursor, whether it is at the last item read, that item's id, the next row ordinal and the rollout's byte span
+  (`position.py`). **No call returns a whole history**: `thread/read` and `thread/resume` with turns are never sent on this
+  path (a test scans the package for them), `thread/resume` is sent with `excludeTurns` (the reply is the thread's metadata,
+  about 2.5 KB for a thread whose full reply is 4.8 KB at two turns and 39 MiB observed at scale), and `thread/fork` already was.
+  Nothing in the adapter read the history out of a resume reply (`OpenedThread` takes the id, model, cwd, rollout path and CLI
+  version); against the real 0.166.0 app-server the notifications after a resume are identical with and without the history bar
+  one `deprecationNotice`, and the stale `thread/tokenUsage/updated` it sends for the previous turn names a turn no ticket of ours
+  holds, so attribution ignores it as before.
+- **The rollout** (`~/.codex/sessions/.../rollout-*.jsonl`, found from the path the server reports, else by thread id) is read
+  from a stored byte offset for the four things the history lacks: a turn's end or abort (`task_complete`, `turn_aborted`; a failed
+  turn writes `task_complete` with an `error` object), a sample's token usage (`token_usage_record`), a finished child's report
+  (`<subagent_notification>`), and nothing else: every other line is passed over by a byte test without being decoded. It is read
+  before the items are asked for and used only when the items reached the end of the history, so a turn's end is never read before its
+  last item. Its growth is also the cheap "anything new?" check: while the rollout has not grown, no notification names the thread
+  and the last request is under 30 s old, a read costs a `stat`.
+- **The session and the reader share one link** (`transcript/link.py`, the `TranscriptTap` protocol in `frames.py`): the session
+  attaches its connection when the thread is open and detaches it on close or when the server is gone, and passes every
+  notification on. A reader's request is one more call on the transport, which correlates replies by id under one write lock, so it
+  never interferes with a running turn's own requests; it has its own 30 s timeout and a page is bounded. A notification only
+  says that a thread had activity: `item/completed`, `turn/completed`, `turn/started` and `thread/tokenUsage/updated` wake the
+  writer, deltas and statuses do not, and none carries content.
+- **Children.** A `spawnAgent` call links its receiver thread, which is a record of its own read by the same means (its token usage
+  from its own rollout; its own turn ends are not its parent's). A child is read from the moment a notification names it or a spawn
+  call links it until a read brings nothing, so a conversation with many finished children costs a request for the main record and
+  one for each child still working; the child's items nest under the call that spawned them, also after the parent's turn ended.
+- **What an input proves.** The `clientUserMessageId` we send comes back as `userMessage.clientId`; that record is the delivery
+  (once). A steer the interrupt swallowed is in no record, so it is never proven and goes back to the queue.
+- **Positions that do not hold** (the history no longer starts with the last item read, the server refuses the stored cursor) are
+  `PositionLostError`; the writer puts the record at its current end and registers `harness_timeline_position_lost`. A server that
+  answers `thread/items/list` with "not supported yet" is reported once as an anomaly (the first run found that a thread no turn
+  has run in answers so; the reader does not ask while the rollout does not exist).
+- **What is stored** is a whitelist (`transcript/store_filter.py`): a history row by item type, a rollout line by kind, text cut at
+  256 KiB for the main record and 16 KiB for a child with its original length, inline images as their hash and size.
 
 ## Version pinning
 
