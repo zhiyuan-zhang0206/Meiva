@@ -36,7 +36,7 @@ from base.paths import workspace_dir
 from .claim import route_target
 from .claim.harness_render import pending_messages, render_messages
 from .hooks.cwd import ValidateCwdAfterInitHook
-from .hooks.question_context import mark_questions_owner, read_agent_open_questions
+from .hooks.question_context import read_agent_open_questions
 from .node_log import StallConfig, node_lifecycle
 from .prompt.context_notes import (
     context_notes,
@@ -289,12 +289,7 @@ async def _open_questions_note(
         return []
     now = ctx.require_clock().now()
     return [
-        mark_questions_owner(
-            system_note_message(
-                content=text, tag=NoteTag.CONTEXT, picked_up_at=now, created_at=now
-            ),
-            agent_id,
-        )
+        system_note_message(content=text, tag=NoteTag.CONTEXT, picked_up_at=now, created_at=now)
     ]
 
 
