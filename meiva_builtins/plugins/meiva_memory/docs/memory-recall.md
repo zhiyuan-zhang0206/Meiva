@@ -29,7 +29,7 @@ The two are complementary: injection gives the agent a "memory directory", while
 
 ```markdown
 Memory notes related to the current conversation, retrieved automatically, each with the passage that matched and its relevance score.
-These point into your note pool at meiva.memory.PATH -- read a path in full when it looks relevant.
+These point into shared memory at meiva.memory.SHARED_PATH -- read a path in full when it looks relevant.
 
 - path/to/note.md (score 0.83): description from frontmatter
   > the passage of the note that matched

@@ -1,7 +1,7 @@
 """meiva_memory plugin — shared memory pool: the full `meiva.memory` surface + passive recall hook + daily consolidation skill.
 
 Three capabilities live under one plugin because they share the same domain (the
-shared memory pool at meiva.memory.PATH):
+shared memory pool at meiva.memory.SHARED_PATH):
 
 1. **meiva.memory namespace** (PATH + PERSONAL_PATH + search) — the agent-facing SDK surface.
    This plugin OWNS the `meiva.memory` top-level namespace. Disabling it removes

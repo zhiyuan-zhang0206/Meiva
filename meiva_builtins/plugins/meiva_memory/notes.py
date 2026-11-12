@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from pathlib import Path
+
 from langchain_core.messages import HumanMessage
 
 from agent.messages import NoteTag, system_note_message
@@ -13,20 +15,32 @@ _MEMORY_INDEX_FILE = "MEMORY.md"
 # meiva:link meiva_builtins/plugins/meiva_memory/docs/memory-index-notes.md
 _PER_AGENT_MEMORY_DIRNAME = "memory"
 
+
+def personal_memory_dir(workspace: Path) -> Path:
+    return workspace / _PER_AGENT_MEMORY_DIRNAME
+
+
 # meiva:link meiva_builtins/plugins/meiva_memory/docs/memory-index-notes.md
 _NO_CONTENT = "(no content)"
 
+
+# meiva:note
+# Both index notes are also given to an external harness, which writes files with its own tools
+# rather than `meiva.files`, so the framing names a folder, not a tool: an absolute path (with the
+# SDK constant that names it) and "write a file there". The same text then holds for every harness.
 # meiva:link meiva_builtins/plugins/meiva_memory/docs/memory-index-notes.md
-_FRAMING = (
-    "The shared memory pool index — visible to every agent. Below is MEMORY.md "
-    "at meiva.memory.PATH: a Setup section carrying inline the few facts every "
-    "agent needs, then Pointers, one line per note as "
-    "`- [Title](path.md) — one-line description`. The pool itself is a plain "
-    "folder of notes there — read a pointer, list/glob/grep to browse, or "
-    "meiva.memory.search for a semantic lookup. A note's body lives in its own "
-    "file, never in a pointer line. Write a note with meiva.files.write under "
-    "meiva.memory.PATH; help(meiva.memory.PATH) shows the format."
-)
+def shared_index_framing(shared: Path) -> str:
+    return (
+        "The shared memory index — visible to every agent in the cluster (your personal "
+        "memory is separate and yours alone). Below is MEMORY.md in the shared memory folder "
+        f"{shared} (meiva.memory.SHARED_PATH): a Setup section carrying inline the few facts "
+        "every agent needs, then Pointers, one line per note as "
+        "`- [Title](path.md) — one-line description`. Shared memory is a plain folder of "
+        "notes there — read a pointer, list/glob/grep to browse, or meiva.memory.search for "
+        "a semantic lookup. A note's body lives in its own file, never in a pointer line. "
+        f"Write a shared note as a Markdown file under {shared}; "
+        "meiva.help(meiva.memory) shows the format."
+    )
 
 
 # meiva:link meiva_builtins/plugins/meiva_memory/docs/memory-index-notes.md
@@ -42,7 +56,7 @@ def memory_index_note(ctx: MeivaContext) -> HumanMessage | None:
         return None
     now = ctx.require_clock().now()
     return system_note_message(
-        content=f"{_FRAMING}\n\n{text}",
+        content=f"{shared_index_framing(path.parent)}\n\n{text}",
         tag=NoteTag.MEMORY,
         picked_up_at=now,
         created_at=now,
@@ -50,24 +64,28 @@ def memory_index_note(ctx: MeivaContext) -> HumanMessage | None:
 
 
 # meiva:link meiva_builtins/plugins/meiva_memory/docs/memory-index-notes.md
-PER_AGENT_FRAMING = (
-    "Your personal memory index. Where a compact summary records what happened "
-    "in one conversation round, this persists across compactions and sessions.\n\n"
-    "Below is `memory/MEMORY.md` in your workspace, your index of personal entry files. "
-    "`memory/MEMORY.md` and `memory/<short-kebab-slug>.md` hold your own personal "
-    "memory (tied to your own identity and task state, never inherited by descendants). "
-    "Write an entry in pure Markdown with "
-    "`meiva.files.write(meiva.memory.PERSONAL_PATH / '<slug>.md', text)`; "
-    "`help(meiva.memory.PERSONAL_PATH)` shows the format. You keep the "
-    "index yourself: one line per memory, `- [Title](<slug>.md) - description`, and never "
-    "entry content. Read an entry on demand with `meiva.files.read('memory/<slug>.md')`. "
-    "Domain context and execution rules that your spawned descendants should inherit "
-    "belong in `memory/INHERIT.md` (plus optional detail files under `memory/inherit/<slug>.md`), "
-    "written directly in pure Markdown — descendants automatically receive `memory/INHERIT.md` "
-    "at startup. Detailed task notes, logs, and "
-    "artifacts stay in workspace files; facts other agents need go to the "
-    "shared pool (meiva.memory)."
-)
+def personal_index_framing(personal: Path, shared: Path) -> str:
+    return (
+        "Your personal memory index. Where a compact summary records what happened "
+        "in one conversation round, this persists across compactions and sessions. Personal "
+        "memory is yours alone; the shared memory that every agent reads is separate "
+        f"({shared}, meiva.memory.SHARED_PATH).\n\n"
+        f"Below is MEMORY.md in your personal memory folder {personal} "
+        "(meiva.memory.PERSONAL_PATH), your index of personal entry files. "
+        "MEMORY.md and the entries `<short-kebab-slug>.md` beside it hold your own personal "
+        "memory (tied to your own identity and task state, never inherited by descendants). "
+        f"Write a personal entry as a pure Markdown file in {personal}; "
+        "meiva.help(meiva.memory) shows the format. You keep the "
+        "index yourself: one line per memory, `- [Title](<slug>.md) - description`, and never "
+        f"entry content. Read an entry on demand from `{personal}/<slug>.md`. "
+        "Domain context and execution rules that your spawned descendants should inherit "
+        f"belong in `{personal}/INHERIT.md` (plus optional detail files under "
+        f"`{personal}/inherit/<slug>.md`), written directly in pure Markdown — descendants "
+        "automatically receive INHERIT.md at startup. Detailed task notes, logs, and "
+        "artifacts stay in workspace files; facts other agents need go to shared memory "
+        f"({shared})."
+    )
+
 
 # meiva:link meiva_builtins/plugins/meiva_memory/docs/memory-index-notes.md
 _OVER_CAP_NOTE = (
@@ -97,7 +115,7 @@ def per_agent_memory_note(ctx: MeivaContext) -> HumanMessage | None:
         logger.debug("[per-agent-memory] agent id not yet established, skipping")
         return None
     ws = workspace_dir(aid, home=ctx.require_meiva_home())
-    mem_dir = ws / _PER_AGENT_MEMORY_DIRNAME
+    mem_dir = personal_memory_dir(ws)
     mem_dir.mkdir(parents=True, exist_ok=True)
     path = mem_dir / _MEMORY_INDEX_FILE
 
@@ -121,7 +139,8 @@ def per_agent_memory_note(ctx: MeivaContext) -> HumanMessage | None:
     )
     now = ctx.require_clock().now()
     return system_note_message(
-        content=f"{PER_AGENT_FRAMING}\n\n{body}{suffix}",
+        content=f"{personal_index_framing(mem_dir, memory_dir(home=ctx.require_meiva_home()))}"
+        f"\n\n{body}{suffix}",
         tag=NoteTag.AGENT_MEMORY,
         picked_up_at=now,
         created_at=now,

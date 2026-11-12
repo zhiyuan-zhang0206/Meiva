@@ -183,6 +183,7 @@ def handoff(agent_id: int = 6984) -> Handoff:
         instruction=HANDOFF_INSTRUCTION,
         machine="macmini",
         workspace=Path("/agents/6984"),
+        home=Path("/meiva-home"),
     )
 
 
@@ -443,6 +444,7 @@ def test_the_built_in_loop_has_no_bridge() -> None:
             agent_id=1,
             machine="macmini",
             workspace=Path("/agents/6984"),
+            home=Path("/meiva-home"),
             registry=FileSessionRegistry(Path("/registry")),
             registration_ttl_seconds=3600.0,
             environ={},
@@ -458,6 +460,7 @@ def test_an_external_harness_builds_its_handoff() -> None:
         agent_id=6984,
         machine="macmini",
         workspace=Path("/agents/6984"),
+        home=Path("/meiva-home"),
         registry=FileSessionRegistry(Path("/registry")),
         registration_ttl_seconds=3600.0,
         environ={},
@@ -479,6 +482,7 @@ def test_the_antigravity_wake_document_carries_its_shell_semantics() -> None:
         agent_id=6984,
         machine="macmini",
         workspace=Path("/agents/6984"),
+        home=Path("/meiva-home"),
         registry=FileSessionRegistry(Path("/registry")),
         registration_ttl_seconds=3600.0,
         environ={},
@@ -498,6 +502,7 @@ def test_the_codex_wake_document_carries_its_unicode_input_workaround() -> None:
         agent_id=6984,
         machine="macmini",
         workspace=Path("/agents/6984"),
+        home=Path("/meiva-home"),
         registry=FileSessionRegistry(Path("/registry")),
         registration_ttl_seconds=3600.0,
         environ={},

@@ -48,7 +48,7 @@ Onboarding is finished when **all four** are true:
 
 ### 1. Check memory before asking anything
 
-Never interview cold. Read `meiva.memory.PATH/MEMORY.md` and search the pool
+Never interview cold. Read `meiva.memory.SHARED_PATH/MEMORY.md` and search the pool
 for the user's profile note first. A profile exists → skip to step 3, ask only
 about missing fields. Nothing exists → run the full flow.
 
@@ -155,7 +155,7 @@ pool at absolute paths; personal working state belongs in workspace memory.
 - **Re-asking.** Interviewing before checking the pool, or not writing
   answers down, makes the user repeat themselves. The pool is the whole
   point.
-- **Personal-memory-only.** Preferences recorded only in `memory/` are
+- **Personal-memory-only.** Preferences recorded only in personal memory (`meiva.memory.PERSONAL_PATH`) are
   invisible to every other agent; the next spawn re-asks.
 - **Ending on "anything else?".** Onboarding ends with work running, not an
   open floor. The open floor produces silence, not tasks.

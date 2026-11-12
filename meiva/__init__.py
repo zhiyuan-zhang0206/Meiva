@@ -342,7 +342,7 @@ def help(*targets: object) -> None:
         NotHelpTargetError: a target is not an SDK member — an instance or a
             plain value. Name a module or namespace (`meiva.shell`), a routine
             or class (`meiva.shell.run`), or a documented constant
-            (`meiva.memory.PATH`) instead."""
+            (`meiva.memory.SHARED_PATH`) instead."""
     _guard_default_logging()
     _render_help(*targets, profile=_current_help_profile())
 

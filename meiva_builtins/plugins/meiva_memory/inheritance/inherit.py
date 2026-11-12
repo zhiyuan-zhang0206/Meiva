@@ -76,7 +76,6 @@ def _read_entries(ancestors: tuple[Ancestor, ...], home: Path) -> list[EntryBloc
         entries.append(
             EntryBlocks(
                 ancestor=ancestor,
-                entry_name=_INHERIT_FILE,
                 entry_path=str(entry),
                 blocks=(body,),
             )

@@ -20,7 +20,7 @@ _FRAMING = (
 _BLOCK_TRUNCATION = "[truncated at {cap} chars — full entry: {path}]"
 _TOTAL_TRUNCATION = (
     "[truncated: the {budget}-char inherited-memory budget is reached — "
-    "further blocks omitted; read the ancestors' memory/ entries directly]"
+    "further blocks omitted; read the ancestors' personal memory folders directly]"
 )
 _REMOTE_FOOTER = "Ancestors on other machines (not readable from here): {rows}."
 
@@ -41,7 +41,6 @@ class AncestorSplit:
 @dataclass(frozen=True)
 class EntryBlocks:
     ancestor: Ancestor
-    entry_name: str
     entry_path: str
     blocks: tuple[str, ...]
 
@@ -103,7 +102,7 @@ def _clip_blocks(entry: EntryBlocks, cap: int) -> tuple[str, list[str]]:
 
 def _section(entry: EntryBlocks, text: str) -> str:
     label = f" ({entry.ancestor.label})" if entry.ancestor.label else ""
-    return f"## ancestor #{entry.ancestor.agent_id}{label} — memory/{entry.entry_name}\n\n{text}"
+    return f"## ancestor #{entry.ancestor.agent_id}{label} — {entry.entry_path}\n\n{text}"
 
 
 # meiva:note

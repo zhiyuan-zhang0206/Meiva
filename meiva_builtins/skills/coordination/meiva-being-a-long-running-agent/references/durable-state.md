@@ -10,8 +10,8 @@ Your state splits across three stores with different audiences:
 | Store | Audience | What goes there |
 |-------|----------|-----------------|
 | **Workspace** (`meiva.cwd`) | You (on demand) | Task files, drafts, logs, artifacts. Detailed working files you read when needed. |
-| **Your memory** (`<workspace>/memory/`) | You (index always injected) | Your durable state: role, preferences, ongoing responsibilities, known pitfalls. `memory/MEMORY.md` is the index — injected into every context; each memory is one file beside it, read on demand. |
-| **Shared memory** (`meiva.memory`) | Every agent | Facts another agent would need to take over your role. Shared, searchable. |
+| **Personal memory** (`meiva.memory.PERSONAL_PATH`) | You (index always injected) | Your durable state: role, preferences, ongoing responsibilities, known pitfalls. `MEMORY.md` in that folder is the index — injected into every context; each memory is one file beside it, read on demand. |
+| **Shared memory** (`meiva.memory.SHARED_PATH`) | Every agent | Facts another agent would need to take over your role. Shared, searchable. |
 
 ### Your memory vs compact summary
 
@@ -27,7 +27,7 @@ the summary misses a detail you need.
 
 ### Maintaining your memory
 
-Your memory index (`memory/MEMORY.md`) is injected into your context after
+Your personal memory index (`MEMORY.md` in `meiva.memory.PERSONAL_PATH`) is injected into your context after
 every compaction and at session start — even when empty (it shows
 "(no content)" to remind you). Write it so your future self can resume
 immediately:
@@ -38,18 +38,18 @@ immediately:
 - **Pitfalls** — things you learned the hard way
 - **Workspace pointers** — reference paths to detailed task files, logs, artifacts
 
-Each memory is one file in `memory/` holding one fact; the index carries one
+Each memory is one file in `meiva.memory.PERSONAL_PATH` holding one fact; the index carries one
 line per memory (`- [Title](../<slug>.md) — <hook>`), never entry content. Read
-an entry on demand with `meiva.files.read("memory/<slug>.md")`. Update an
+an entry on demand with `meiva.files.read(meiva.memory.PERSONAL_PATH / "<slug>.md")`. Update an
 existing entry rather than duplicating it; delete entries that turn out wrong.
 Detailed task notes, logs, and artifacts belong in workspace files; reference
 them from the index. The index must be named `MEMORY.md` (uppercase).
 
 ### Dual memory discipline
 
-- **Your memory (`memory/`)**: your durable state — role, preferences,
+- **Personal memory (`meiva.memory.PERSONAL_PATH`)**: your durable state — role, preferences,
   responsibilities. Index always injected, always visible.
-- **Shared memory (`meiva.memory`)**: what *another agent* needs. User facts,
+- **Shared memory (`meiva.memory.SHARED_PATH`)**: what *another agent* needs. User facts,
   global constraints, reusable workflows. Found via `meiva.memory.search(...)`.
 
 Before compaction, persist to all: task progress to workspace files, state to

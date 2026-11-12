@@ -493,7 +493,7 @@ def test_help_refuses_a_live_object_instead_of_printing_it() -> None:
 
     assert buf.getvalue() == ""
     assert "sk-CANARY-DO-NOT-LEAK" not in str(refused.value)
-    for shape in ("meiva.shell", "meiva.shell.run", "meiva.memory.PATH"):
+    for shape in ("meiva.shell", "meiva.shell.run", "meiva.memory.SHARED_PATH"):
         assert shape in str(refused.value)
 
 
@@ -625,9 +625,10 @@ def test_resolve_child_returns_constant_for_module_attr_string() -> None:
     assert entry.doc == "Library version."
 
 
+# meiva:note
+# The snapshot test pins meiva.memory.SHARED_PATH to an already-~-relative value, so it cannot
+# catch a regression here — this locks the rewrite itself.
 def test_documented_const_path_under_home_renders_tilde_relative() -> None:
-    """The snapshot test pins meiva.memory.PATH to an already-~-relative value,
-    so it cannot catch a regression here — this locks the rewrite itself."""
     c = meiva.const(Path.home() / ".meiva" / "memory", doc="x")
     out = format_documented_const_stub("PATH", c)
     assert "PATH: PosixPath = ~/.meiva/memory" in out

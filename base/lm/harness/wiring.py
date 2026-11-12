@@ -160,6 +160,7 @@ def handoff_for(
     agent_id: int,
     machine: str,
     workspace: Path,
+    home: Path,
     instruction: str = HANDOFF_INSTRUCTION,
     label: str | None = None,
     cluster: Iterable[ClusterFact] = (),
@@ -171,6 +172,7 @@ def handoff_for(
             instruction=instruction,
             machine=machine,
             workspace=workspace,
+            home=home,
             label=label,
             cluster=cluster,
         )
@@ -180,6 +182,7 @@ def handoff_for(
             instruction=instruction,
             machine=machine,
             workspace=workspace,
+            home=home,
             label=label,
             cluster=tuple(cluster),
         )
@@ -214,6 +217,7 @@ def bridge_for(
     agent_id: int,
     machine: str,
     workspace: Path,
+    home: Path,
     registry: SessionRegistry,
     registrations: RegistrationStore | None = None,
     registration_ttl_seconds: float,
@@ -233,6 +237,7 @@ def bridge_for(
         agent_id=agent_id,
         machine=machine,
         workspace=workspace,
+        home=home,
         contributions=contributions,
     )
 

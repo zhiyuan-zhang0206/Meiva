@@ -6,7 +6,7 @@ window, and only the index — each memory is one file beside it, read on demand
 context notes and the `memory_discipline_section` prompt section. `plugin.py`
 declares the `meiva.memory` SDK surface. `init_context` lays down the ordered
 notes whenever a window is established. The third memory note, the
-ancestors' `memory/INHERIT.md` files read off the birth chain, is
+ancestors' `INHERIT.md` files (in their personal memory folders) read off the birth chain, is
 [Memory inheritance — INHERIT.md read off the birth chain](memory-inheritance.md).
 
 Neither note is core. Disabling `meiva_memory` removes the stores, the SDK surface
@@ -19,13 +19,13 @@ to state.
 
 ## The shared index
 
-`memory_index_note` renders the pool's `MEMORY.md` at `meiva.memory.PATH` as one
+`memory_index_note` renders the shared `MEMORY.md` at `meiva.memory.SHARED_PATH` as one
 system note, behind a framing that states location and mechanics only. The text
 is injected as it is. The note returns None
 when the layer is off (or eval-isolated) and when the index file is missing or
 empty.
 
-## The per-agent index
+## The personal index
 
 `per_agent_memory_note` returns a note when enabled and the agent id is
 established: the agent's own index
@@ -35,6 +35,15 @@ index is empty. Entry files beside the index are not injected — the agent read
 them on demand. The framing names location and mechanics only and must not claim how
 relative paths resolve — the old claim misled agents into writing memory beside
 the tracked cwd (audit #577); that statement belongs to the SDK core.
+
+## Wording of the two notes
+
+Both framings are built from absolute folders (`shared_index_framing`,
+`personal_index_framing`) and also name the SDK constant that holds each one,
+`meiva.memory.SHARED_PATH` and `meiva.memory.PERSONAL_PATH`. They never write a relative
+`memory/...` path and never name a file tool ("write a Markdown file under <folder>"), because an
+external harness receives the same two notes (`_seed_harness_timeline`) and writes files with
+its CLI's own tools, not `meiva.files`. The words shared and personal always appear as a pair.
 
 ## The per-agent soft cap
 

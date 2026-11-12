@@ -2,7 +2,7 @@
 
 ## What it is
 
-`plugins/meiva_memory/skills/consolidation/SKILL.md` (loaded name `meiva.skills.meiva_memory.consolidation`, a sub-skill of [meiva_memory root skill](../README.md)): the consolidation process for the shared memory notes (`meiva.memory.PATH`, inside the Vault git repo). During the day agents write notes into the working tree; on trigger they are merged to keep the pool committed / pushed / searchable. git / gh / refresh operations are all wrapped in the `meiva memory` CLI — the agent only runs one command per step.
+`plugins/meiva_memory/skills/consolidation/SKILL.md` (loaded name `meiva.skills.meiva_memory.consolidation`, a sub-skill of [meiva_memory root skill](../README.md)): the consolidation process for the shared memory notes (`meiva.memory.SHARED_PATH`, inside the Vault git repo). During the day agents write notes into the working tree; on trigger they are merged to keep the pool committed / pushed / searchable. git / gh / refresh operations are all wrapped in the `meiva memory` CLI — the agent only runs one command per step.
 
 ## Role naming (2026-08-01)
 

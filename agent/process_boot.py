@@ -104,17 +104,17 @@ def apply_per_agent_eval_isolation(
     memory = _memory_namespace()
     if memory is not None:
         # meiva:note
-        # The pool's documented help text is carried over verbatim: `meiva.memory.PATH` is a
+        # The pool's documented help text is carried over verbatim: `meiva.memory.SHARED_PATH` is a
         # `const(...)` whose `__doc__` is the body `help()` renders, and an isolated run must not
         # describe a different directory than the one it points at.
-        doc = object_of(getattr, object_of(getattr, memory, "PATH"), "__doc__")
+        doc = object_of(getattr, object_of(getattr, memory, "SHARED_PATH"), "__doc__")
         if not isinstance(doc, str):
-            raise TypeError("meiva.memory.PATH carries no help text to carry over")
+            raise TypeError("meiva.memory.SHARED_PATH carries no help text to carry over")
         # meiva:note
         # `memory` is `object` here (`meiva` answers plugin names as `Any`), so the two writes are
         # `setattr` with a constant name — the shape `B010` warns about, and the only shape that
         # type-checks against an opaque namespace.
-        setattr(memory, "PATH", meiva.const(isolated_pool, doc=doc))  # noqa: B010
+        setattr(memory, "SHARED_PATH", meiva.const(isolated_pool, doc=doc))  # noqa: B010
         setattr(memory, "search", _isolated_memory_search)  # noqa: B010
 
 

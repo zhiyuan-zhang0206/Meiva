@@ -516,6 +516,7 @@ def harness_bridge_for(
         agent_id=agent_id,
         machine=machine,
         workspace=workspace_dir(agent_id, home=home),
+        home=home,
         registry=registry,
         registrations=registrations,
         registration_ttl_seconds=registration_ttl_seconds,

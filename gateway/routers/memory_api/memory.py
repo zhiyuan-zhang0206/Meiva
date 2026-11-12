@@ -144,7 +144,7 @@ async def _backend_topk(
         "the request's `deadline_seconds` when that is shorter).\n"
         "\n"
         "Paths are relative to the memory root of the gateway's consolidated checkout\n"
-        "(`~/.meiva/gateway/vault/memory/` on a combined unit); the SDK caller prepends `meiva.memory.PATH` to\n"
+        "(`~/.meiva/gateway/vault/memory/` on a combined unit); the SDK caller prepends `meiva.memory.SHARED_PATH` to\n"
         "reconstruct the absolute path. fs-neutral so gateway fs (e.g.\n"
         "/Users/x) and agent-runner fs (/home/y) being different still works.\n"
         "\n"

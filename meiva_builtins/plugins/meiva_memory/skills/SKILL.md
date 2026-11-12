@@ -16,7 +16,7 @@ arbiter or steward role. Follow the role and scope supplied by the current task.
   note, then read the matching note and inspect its ownership. Another agent's role is context,
   not your identity. Do not start maintenance merely to answer a query.
 - To write or update a note, search first, then write it with `meiva.files.write`
-  under `meiva.memory.PATH` (shared) or `meiva.memory.PERSONAL_PATH` (your own)
+  under `meiva.memory.SHARED_PATH` (shared) or `meiva.memory.PERSONAL_PATH` (your own)
   directly in **pure Markdown** (`# Title` + a concise high-level description
   paragraph + body, ≤ 8000 chars) with **zero write-time validation or YAML
   frontmatter burden** (legacy `type`, `meiva_agent`, `meiva_machine`,
@@ -55,7 +55,7 @@ for writes, messages, schedules, and maintenance.
 ## Vault paths and source references
 
 The Vault Git repository is `$MEIVA_HOME/vault` (`$MEIVA_HOME/gateway/vault`
-for the gateway checkout). `meiva.memory.PATH` names its `memory/` subtree;
+for the gateway checkout). `meiva.memory.SHARED_PATH` names its `memory/` subtree;
 Git operations and repository configuration belong at the Vault root. Store
 original evidence in sibling `sources/` or `papers/` directories.
 

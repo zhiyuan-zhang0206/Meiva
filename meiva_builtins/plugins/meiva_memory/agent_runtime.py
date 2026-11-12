@@ -29,13 +29,13 @@ from base.agents.context import MeivaContext
 from base.api_contracts.agent_contract import Harness
 from base.host.env.agent_slices import AgentSlices
 from base.lm.catalog import ModelCatalog
-from base.lm.harness.handoff import EntryPoint, HarnessContribution
+from base.lm.harness.handoff import EntryPoint, Handoff, HandoffSection, HarnessContribution
 from base.log import logger
 from base.packages.plugins.extensions import ContextNote, PluginContributions
 from base.paths import memory_dir
 
 from .inheritance.inherit import inherited_memory_note
-from .notes import memory_index_note, per_agent_memory_note
+from .notes import memory_index_note, per_agent_memory_note, personal_memory_dir
 
 # The two memory indexes are declared in `contribute()` below, so `init_context` lays them down
 # with the framework's notes whenever a window is established. The ranks pin them into the
@@ -54,28 +54,29 @@ from .notes import memory_index_note, per_agent_memory_note
 _DISCIPLINE = """\
 # Remembering across sessions
 
-Your memory — three layers, one discipline.
+Your memory — shared memory, personal memory and descendant inheritance, one discipline.
 
-- Shared pool (meiva.memory.PATH): notes every agent can read. Restrained by
-  design: only reusable rules (each with a Why and a How to apply), facts many
-  agents repeatedly reach for, and user rulings. Events stay out by default —
-  git history already carries them. Judge each note by one question: "would a
-  new agent reading this in a year behave differently?" If not, it does not
-  belong in the pool.
-- Personal self (memory/MEMORY.md + memory/<slug>.md in your workspace): your
-  own durable state tied to your own identity (how you interact with the user,
-  your own role boundaries, and working state across compactions), maintained by
-  you alone and visible only to you — never inherited by descendants. Verbose is fine here:
-  process details, half-formed understanding, notes of uncertain
-  future value — keep them personal until they earn a place in the pool.
-- Descendant inheritance (memory/INHERIT.md in your workspace): when you own a
-  domain and spawn child agents to solve problems, write the domain context,
+- Shared memory (meiva.memory.SHARED_PATH): notes every agent in the cluster can
+  read. Restrained by design: only reusable rules (each with a Why and a How to
+  apply), facts many agents repeatedly reach for, and user rulings. Events stay
+  out by default — git history already carries them. Judge each note by one
+  question: "would a new agent reading this in a year behave differently?" If
+  not, it does not belong in shared memory.
+- Personal memory (meiva.memory.PERSONAL_PATH: its MEMORY.md index and the
+  <slug>.md notes beside it): your own durable state tied to your own identity
+  (how you interact with the user, your own role boundaries, and working state
+  across compactions), maintained by you alone and visible only to you — never
+  inherited by descendants. Verbose is fine here: process details, half-formed
+  understanding, notes of uncertain future value — keep them personal
+  until they earn a place in shared memory.
+- Descendant inheritance (INHERIT.md in meiva.memory.PERSONAL_PATH): when you own
+  a domain and spawn child agents to solve problems, write the domain context,
   architectural invariants, and execution rules that all descendants must inherit
-  into `memory/INHERIT.md` (and optional detail files under `memory/inherit/<slug>.md`)
-  as pure Markdown with no special tags. Every descendant on your spawn chain
-  automatically inherits `memory/INHERIT.md` at startup.
+  into INHERIT.md (and optional detail files under inherit/<slug>.md in that
+  folder) as pure Markdown with no special tags. Every descendant on your spawn
+  chain automatically inherits INHERIT.md at startup.
 
-Unsure which store? Personal — the pool is for rules other agents will use,
+Unsure which store? Personal — shared memory is for rules other agents will use,
 not your working details.
 
 Each store puts its index in front of you when a session starts and after a
@@ -127,7 +128,7 @@ Correcting stale memory is an obligation, not an option:
 - Not sure how to fix it? Ask the owning agent — but uncertainty is not an
   excuse to leave it alone: at minimum mark it "possibly stale — needs
   confirmation" so later readers do not trust it.
-- Before writing, search first: check the index and the pool for an entry
+- Before writing, search first: check the index and shared memory for an entry
   that already covers the ground. Update it if it exists; create only when
   nothing does. Deleting an entry that turns out to be wrong is a valid write.
 
@@ -150,7 +151,7 @@ be checked:
   filesystem. Read it and you know the current answer.
 - asserted: AGENTS.md, docs/conventions/, docs/decisions/, docs/**/*.meiva.okf.md.
   Maintained and reviewed, but they can lag the code.
-- remembered: the shared pool and your own memory. A snapshot, carrying an
+- remembered: shared memory and your personal memory. A snapshot, carrying an
   author and a timestamp.
 
 Repo facts must carry their verification point — the path, command, or SHA
@@ -283,21 +284,62 @@ class _PassiveMemoryRecallHook(Hook):
 passive_memory_recall_before_llm = _PassiveMemoryRecallHook()
 
 
+# meiva:note
+# An external harness reads and writes the two stores with its CLI's own file tools, so the handoff
+# names both folders by absolute path (the home and workspace of the handoff being built) and says
+# what each is for. Native agents get the same facts from the discipline section and the two index
+# notes; the section exists because an external CLI has no `meiva.files` to resolve the constants.
+# meiva:link meiva_builtins/plugins/meiva_memory/docs/memory-index-notes.md
+def _memory_handoff_section(handoff: Handoff) -> HandoffSection:
+    shared = memory_dir(home=handoff.home)
+    personal = personal_memory_dir(handoff.workspace)
+    return HandoffSection(
+        "Meiva Memory",
+        (
+            "Meiva keeps two memory stores, shared memory and personal memory. Both are plain "
+            "folders of Markdown notes that you read and write with your CLI's own file tools; "
+            "`meiva.help(meiva.memory)` describes the note format.",
+            "",
+            "**Shared memory** is read by every agent in the cluster.",
+            f"- Folder: `{shared}` (`meiva.memory.SHARED_PATH`). Its index is "
+            f"`{shared}/MEMORY.md`: a Setup section of facts every agent needs, then one pointer "
+            "line per note.",
+            "- Write here a reusable rule (with its Why and How to apply), a fact many agents "
+            "repeatedly reach for, or a user ruling. Leave events and your working details out.",
+            "- `meiva.memory.search` finds notes semantically.",
+            "",
+            "**Personal memory** is yours alone.",
+            f"- Folder: `{personal}`, inside your workspace (`meiva.memory.PERSONAL_PATH`). Only "
+            "you maintain it and no other agent reads it.",
+            f"- Index: `{personal}/MEMORY.md`, one line per note as "
+            "`- [Title](<slug>.md) - description`; the notes are `<slug>.md` beside it.",
+            "- It outlives compactions and sessions: keep your durable state here, such as how "
+            "you work with the user, your role boundaries and the working state you need after a "
+            "compaction.",
+            f"- `{personal}/INHERIT.md` (and optional `{personal}/inherit/<slug>.md`) holds "
+            "domain context and execution rules for the agents you spawn; they receive it at "
+            "startup.",
+        ),
+    )
+
+
 _MEMORY_HARNESS_CONTRIBUTION = HarnessContribution(
     harnesses=frozenset({Harness.CLAUDE_CODE, Harness.CODEX, Harness.ANTIGRAVITY}),
     entries=(
         EntryPoint(
             "meiva.memory",
-            "read and update shared cluster (`meiva.memory.PATH`) and personal memory",
+            "the memory note format (`meiva.help(meiva.memory)`) and `search` over shared "
+            "memory; both memory folders are listed under Meiva Memory below",
         ),
     ),
     overlaps=(
-        "Record what must outlive this session in Meiva Memory (`meiva.memory`; see "
-        "`meiva.help(meiva.memory)`) in preference to your CLI's own memory or notes-file "
-        "feature. Meiva Memory is shared with the cluster's other agents and kept in order by "
-        "Meiva, while a CLI's memory is local to that install and no peer or later agent "
-        "reads it.",
+        "Record what must outlive this session in Meiva Memory (shared memory and personal "
+        "memory, below) in preference to your CLI's own memory or notes-file feature. Shared "
+        "memory is read by every agent in the cluster and kept in order by Meiva; personal "
+        "memory is yours alone and survives compactions and sessions. A CLI's own memory is "
+        "local to that install, and no peer or later agent reads it.",
     ),
+    sections=(_memory_handoff_section,),
 )
 
 

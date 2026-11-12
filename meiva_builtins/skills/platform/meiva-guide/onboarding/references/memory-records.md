@@ -6,7 +6,7 @@ another working directory.
 
 ## Record to memory
 
-User preferences go into the **shared pool** (`meiva.memory.PATH`), never only
+User preferences go into **shared memory** (`meiva.memory.SHARED_PATH`), never only
 personal memory — every agent must see them. Write with absolute paths: a
 relative path resolves against `meiva.cwd`, not your workspace, and the note
 lands in the wrong directory. Search first and update an existing canonical
@@ -51,4 +51,4 @@ How to apply: <when it fires and what to do>
 ```
 
 Keep agent-private workflow state (your own checklist, drafts) in your
-personal `memory/` instead — the pool is for facts other agents need.
+personal memory (`meiva.memory.PERSONAL_PATH`) instead — shared memory is for facts other agents need.

@@ -37,7 +37,7 @@ workspace is `<cluster-home>/workspaces/<id>`. The cluster home is the
 the default production home is `~/.meiva`. A remote agent's workspace lives on its owning machine — never
 infer it by joining the ID to the gateway's home.
 
-Inside a workspace, read `memory/MEMORY.md` first and follow only the entries it
+Inside a workspace, read `<workspace>/memory/MEMORY.md` (that agent's personal memory index) first and follow only the entries it
 links when reconstructing durable context. After the sibling CLI PR lands, use
 `meiva memory search <query>` to find shared cluster memory rather than
 guessing from one agent's files. These are read-only discovery steps; rollout

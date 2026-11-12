@@ -33,7 +33,7 @@
 #
 # Not flagged: dunder assignments (`meiva.files.__doc__ = ...` — a legitimate
 # module-docstring override) and ALL-CAPS constant assignments
-# (`meiva.memory.PATH = ...`). New namespaces are declared as
+# (`meiva.memory.SHARED_PATH = ...`). New namespaces are declared as
 # `SdkNamespace` (a Call node, never matched here).
 #
 # Known gap: assignment through a module alias (`import meiva.files as f; f.read = x`)
