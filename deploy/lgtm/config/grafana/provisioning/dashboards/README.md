@@ -298,3 +298,12 @@ slow-request rules R17/R18 (gateway fast-route p95 two-tier + turn-duration
 p95, `notify_im: "false"` labels — see the table, threshold calibration,
 and notification-channel notes in [`../alerting/README.md`](../alerting/README.md)).
 Alerts land in the gateway's `/api/alerts` (Task #1224).
+
+## Main-red review snapshot
+
+The main-red suspect table shows the latest round's oldest ten entries, with
+first-seen time, snapshot age, same-workflow opportunities, case evidence and
+task id. Its timestamp is the freshness indicator. An empty current slot must
+replace an earlier row; filtering blank slots happens after the latest round
+is selected, so resolved suspects are not resurrected from historical logs.
+The round event retains `suspects_dropped` for lists beyond the panel cap.

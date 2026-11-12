@@ -49,3 +49,24 @@ def test_the_loop_hands_the_watermark_positionally() -> None:
     assert len(calls) == 1
     assert len(calls[0].args) == 3
     assert calls[0].keywords == []
+
+
+def test_runtime_composes_the_case_reader_for_real_rounds() -> None:
+    calls = [
+        node
+        for node in ast.walk(_function(_ENTRY, "watch_round"))
+        if isinstance(node, ast.Call)
+        and isinstance(node.func, ast.Name)
+        and node.func.id == "watch_once"
+    ]
+    assert len(calls) == 1
+    reader = next(keyword.value for keyword in calls[0].keywords if keyword.arg == "read_case")
+    assert isinstance(reader, ast.Name) and reader.id == "case_reader"
+    constructors = [
+        node
+        for node in ast.walk(_function(_ENTRY, "watch_round"))
+        if isinstance(node, ast.Call)
+        and isinstance(node.func, ast.Name)
+        and node.func.id == "JunitReader"
+    ]
+    assert len(constructors) == 1

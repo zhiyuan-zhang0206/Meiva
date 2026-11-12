@@ -6883,6 +6883,212 @@
     }
    ],
    "type": "table"
+  },
+  {
+   "fieldConfig": {
+    "defaults": {
+     "thresholds": {
+      "mode": "absolute",
+      "steps": []
+     },
+     "unit": "short"
+    }
+   },
+   "datasource": {
+    "type": "loki",
+    "uid": "loki"
+   },
+   "gridPos": {
+    "h": 9,
+    "w": 24,
+    "x": 0,
+    "y": 323
+   },
+   "id": 2506,
+   "options": {
+    "cellHeight": "sm",
+    "footer": {
+     "countRows": false,
+     "enablePagination": true,
+     "show": false
+    },
+    "showHeader": true,
+    "showTypeIcons": false,
+    "sortBy": [
+     {
+      "displayName": "age_seconds",
+      "desc": true
+     }
+    ]
+   },
+   "targets": [
+    {
+     "datasource": {
+      "type": "loki",
+      "uid": "loki"
+     },
+     "editorMode": "code",
+     "expr": "{service_name=\"unknown_service\", event_name=\"main_red_watch_round\"} | json | cluster=\".meiva\" | json row=\"attributes.suspects[0]\" | line_format `{{.row | default \"{\\\"fingerprint\\\":\\\"\\\"}\"}}`",
+     "refId": "A",
+     "queryType": "range",
+     "legendFormat": "suspect 1",
+     "maxLines": 1,
+     "direction": "backward"
+    },
+    {
+     "datasource": {
+      "type": "loki",
+      "uid": "loki"
+     },
+     "editorMode": "code",
+     "expr": "{service_name=\"unknown_service\", event_name=\"main_red_watch_round\"} | json | cluster=\".meiva\" | json row=\"attributes.suspects[1]\" | line_format `{{.row | default \"{\\\"fingerprint\\\":\\\"\\\"}\"}}`",
+     "refId": "B",
+     "queryType": "range",
+     "legendFormat": "suspect 2",
+     "maxLines": 1,
+     "direction": "backward"
+    },
+    {
+     "datasource": {
+      "type": "loki",
+      "uid": "loki"
+     },
+     "editorMode": "code",
+     "expr": "{service_name=\"unknown_service\", event_name=\"main_red_watch_round\"} | json | cluster=\".meiva\" | json row=\"attributes.suspects[2]\" | line_format `{{.row | default \"{\\\"fingerprint\\\":\\\"\\\"}\"}}`",
+     "refId": "C",
+     "queryType": "range",
+     "legendFormat": "suspect 3",
+     "maxLines": 1,
+     "direction": "backward"
+    },
+    {
+     "datasource": {
+      "type": "loki",
+      "uid": "loki"
+     },
+     "editorMode": "code",
+     "expr": "{service_name=\"unknown_service\", event_name=\"main_red_watch_round\"} | json | cluster=\".meiva\" | json row=\"attributes.suspects[3]\" | line_format `{{.row | default \"{\\\"fingerprint\\\":\\\"\\\"}\"}}`",
+     "refId": "D",
+     "queryType": "range",
+     "legendFormat": "suspect 4",
+     "maxLines": 1,
+     "direction": "backward"
+    },
+    {
+     "datasource": {
+      "type": "loki",
+      "uid": "loki"
+     },
+     "editorMode": "code",
+     "expr": "{service_name=\"unknown_service\", event_name=\"main_red_watch_round\"} | json | cluster=\".meiva\" | json row=\"attributes.suspects[4]\" | line_format `{{.row | default \"{\\\"fingerprint\\\":\\\"\\\"}\"}}`",
+     "refId": "E",
+     "queryType": "range",
+     "legendFormat": "suspect 5",
+     "maxLines": 1,
+     "direction": "backward"
+    },
+    {
+     "datasource": {
+      "type": "loki",
+      "uid": "loki"
+     },
+     "editorMode": "code",
+     "expr": "{service_name=\"unknown_service\", event_name=\"main_red_watch_round\"} | json | cluster=\".meiva\" | json row=\"attributes.suspects[5]\" | line_format `{{.row | default \"{\\\"fingerprint\\\":\\\"\\\"}\"}}`",
+     "refId": "F",
+     "queryType": "range",
+     "legendFormat": "suspect 6",
+     "maxLines": 1,
+     "direction": "backward"
+    },
+    {
+     "datasource": {
+      "type": "loki",
+      "uid": "loki"
+     },
+     "editorMode": "code",
+     "expr": "{service_name=\"unknown_service\", event_name=\"main_red_watch_round\"} | json | cluster=\".meiva\" | json row=\"attributes.suspects[6]\" | line_format `{{.row | default \"{\\\"fingerprint\\\":\\\"\\\"}\"}}`",
+     "refId": "G",
+     "queryType": "range",
+     "legendFormat": "suspect 7",
+     "maxLines": 1,
+     "direction": "backward"
+    },
+    {
+     "datasource": {
+      "type": "loki",
+      "uid": "loki"
+     },
+     "editorMode": "code",
+     "expr": "{service_name=\"unknown_service\", event_name=\"main_red_watch_round\"} | json | cluster=\".meiva\" | json row=\"attributes.suspects[7]\" | line_format `{{.row | default \"{\\\"fingerprint\\\":\\\"\\\"}\"}}`",
+     "refId": "H",
+     "queryType": "range",
+     "legendFormat": "suspect 8",
+     "maxLines": 1,
+     "direction": "backward"
+    },
+    {
+     "datasource": {
+      "type": "loki",
+      "uid": "loki"
+     },
+     "editorMode": "code",
+     "expr": "{service_name=\"unknown_service\", event_name=\"main_red_watch_round\"} | json | cluster=\".meiva\" | json row=\"attributes.suspects[8]\" | line_format `{{.row | default \"{\\\"fingerprint\\\":\\\"\\\"}\"}}`",
+     "refId": "I",
+     "queryType": "range",
+     "legendFormat": "suspect 9",
+     "maxLines": 1,
+     "direction": "backward"
+    },
+    {
+     "datasource": {
+      "type": "loki",
+      "uid": "loki"
+     },
+     "editorMode": "code",
+     "expr": "{service_name=\"unknown_service\", event_name=\"main_red_watch_round\"} | json | cluster=\".meiva\" | json row=\"attributes.suspects[9]\" | line_format `{{.row | default \"{\\\"fingerprint\\\":\\\"\\\"}\"}}`",
+     "refId": "J",
+     "queryType": "range",
+     "legendFormat": "suspect 10",
+     "maxLines": 1,
+     "direction": "backward"
+    }
+   ],
+   "title": "Main-red suspects - latest round",
+   "type": "table",
+   "description": "Oldest 10 suspects from the latest main_red_watch_round snapshot. Age is measured at that round; Time shows its freshness. Each query takes the latest round before filtering blank slots, so a resolved suspect does not reappear from an older round. The event carries suspects_dropped when more than 10 exist. No-opportunity and unreadable evidence are explicit.",
+   "transformations": [
+    {
+     "id": "extractFields",
+     "options": {
+      "source": "Line",
+      "format": "json",
+      "replace": true,
+      "keepTime": true
+     }
+    },
+    {
+     "id": "merge",
+     "options": {}
+    },
+    {
+     "id": "filterByValue",
+     "options": {
+      "type": "include",
+      "match": "all",
+      "filters": [
+       {
+        "fieldName": "fingerprint",
+        "config": {
+         "id": "regex",
+         "options": {
+          "value": ".+"
+         }
+        }
+       }
+      ]
+     }
+    }
+   ]
   }
  ],
  "preload": true,

@@ -140,6 +140,7 @@ def _assert_loki_panel_matches_spec(
     expected_query_type = (
         "instant"
         if spec.query_type == "logql"
+        and spec.grafana_max_lines is None
         and (spec.panel in {"stat", "table"} or "$__range" in expected[0])
         else "range"
     )
@@ -168,7 +169,7 @@ def test_dashboard_json_matches_core_registrations() -> None:
         _assert_dashboard_panel_matches_spec(panels_by_title[render_title(spec)], spec)
 
 
-def test_dashboard_has_132_loki_targets() -> None:
+def test_dashboard_has_142_loki_targets() -> None:
     path = _REPO_ROOT / "deploy/lgtm/config/grafana/provisioning/dashboards/meiva-ops-main.json"
     panels = json.loads(path.read_text())["panels"]
     loki_targets = [
@@ -177,7 +178,7 @@ def test_dashboard_has_132_loki_targets() -> None:
         for target in panel.get("targets", [])
         if target.get("datasource", panel.get("datasource", {})).get("uid") == "loki"
     ]
-    assert len(loki_targets) == 132
+    assert len(loki_targets) == 142
 
 
 def test_unresolved_gauge_names_match_the_otlp_contract() -> None:

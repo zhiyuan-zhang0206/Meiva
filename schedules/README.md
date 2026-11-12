@@ -55,13 +55,18 @@ the nightly verdict and that nightly full run are the only evidence, and on
 full run's own listing is narrowed to `main`: `ci.yml` also runs on every pull
 request, and a red branch there is that pull request's business. Every thirty
 minutes it reads their newest runs and opens **one** task for the P0 lead per red
-that no green run of the same commit explains: a first red is recorded silently
-(a single test out of 1344 is
-usually a flake, and that same commit passed the nightly an hour later), a red
-that survives into a second run becomes a card — the tree need not move for it
+that no green run of the same commit explains: a first named red with no later completed run of its workflow records
+"no re-check opportunity" and opens no card. The first later opportunity opens
+one review card with the exact JUnit result: passed, skipped, absent from the
+available bundles, or unreadable evidence. Workflow success alone does not
+prove that a case executed. A red that survives into a second run becomes a
+confirmed card — the tree need not move for it
 (`main` can stand still for days), because a run the watch has not read before
 is new evidence even on the same commit — and a green run that exercises it
-closes it. A red the
+closes it. A review card is reused if that case later confirms; its next exact
+case green can close it even inside an otherwise failed workflow. The latest
+round event and Grafana table show the bounded suspect list, age at the snapshot,
+opportunities and re-check evidence. A red the
 watch cannot name is the exception to that two-run rule: when the log carries no
 failing case and the failing step is no workflow's declared check, the run is
 reported on its **first** sighting, because the doubt two runs answer — is this

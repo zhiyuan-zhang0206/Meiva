@@ -282,10 +282,12 @@ def _options(spec: MetricSpec) -> dict[str, object]:
 
 
 def _is_instant(spec: MetricSpec, first_query: str) -> bool:
-    """Instant vs range for Loki targets: stats and tables are window totals,
-    and a ``$__range`` aggregate is a window total whatever the panel type;
-    everything else is a rate series."""
-    return spec.panel in ("stat", "table") or "$__range" in first_query
+    # meiva:note
+    # A capped log table reads records over a range. Uncapped stats/tables and
+    # window aggregates keep their existing instant-query behavior.
+    return spec.grafana_max_lines is None and (
+        spec.panel in ("stat", "table") or "$__range" in first_query
+    )
 
 
 def _targets(spec: MetricSpec) -> list[dict[str, object]]:
@@ -335,6 +337,11 @@ def _targets(spec: MetricSpec) -> list[dict[str, object]]:
                     "refId": ref_id,
                     "queryType": "instant" if _is_instant(spec, rendered[0]) else "range",
                     "legendFormat": legend,
+                    **(
+                        {"maxLines": spec.grafana_max_lines, "direction": "backward"}
+                        if spec.grafana_max_lines is not None
+                        else {}
+                    ),
                 }
             )
     return targets

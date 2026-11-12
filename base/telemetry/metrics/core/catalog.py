@@ -16,6 +16,7 @@ from base.telemetry.metrics.core import (
     dismissed,
     events,
     host,
+    main_red,
     observability,
     panels,
 )
@@ -32,6 +33,7 @@ from base.telemetry.metrics.plugin_metrics import (
 # be imported fails the collection rather than silently emptying its section.
 CORE_DEFINITION_MODULES: tuple[ModuleType, ...] = (
     panels,
+    main_red,
     cost,
     dismissed,
     *ci.DELIVERY_MODULES,
