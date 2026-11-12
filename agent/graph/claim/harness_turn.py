@@ -677,8 +677,7 @@ class ForegroundRun:
             list(plan.settled_now),
             plan.group,
         )
-        for entry, prompt in synthetic:
-            self._prompts[entry.key] = prompt
+        self._prompts.update(plan.prompts)
         if plan.folded:
             self._folded[plan.handed[0].key] = plan.folded
         if not handed and not settled_now:

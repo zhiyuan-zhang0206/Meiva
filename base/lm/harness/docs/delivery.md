@@ -16,7 +16,7 @@ Antigravity as `media` through `SendUserCascadeMessage` (an idle conversation ta
 as a second input, see the [Antigravity notes](../antigravity/docs/antigravity.md)). The graph builds `images` from
 the inlined `image_url` blocks of the message and keeps the path listing in the text. The graph bounds them: 5 MB
 per image (the Anthropic API's per-image limit, the smallest of the three providers) and 15 MB of raw bytes per
-input (base64 makes that about 20 MB, Gemini's inline request limit); an image over a bound is not sent inline,
+input (a wake's rows are one input, so the total counts all their images; base64 makes that about 20 MB, Gemini's inline request limit); an image over a bound is not sent inline,
 and the text says so.
 
 `deliver(inputs)` returns when the batch has been handed to the foreground, in order. It never

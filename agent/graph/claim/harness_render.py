@@ -105,9 +105,10 @@ def render_message(message: BaseMessage) -> str:
 # meiva:note
 # The size bounds of an image handed to an external CLI as an image, not as a path. One image is bounded by
 # the smallest per-image limit of the three providers behind the CLIs (the Anthropic API takes at most
-# 5 MB per image); the images of one input together are bounded by what fits a provider's request
-# once base64 inflates them (Gemini's inline request limit is 20 MB, so 15 MB of raw bytes). An image over
-# either bound is not sent inline; the text says so and names the path it already lists.
+# 5 MB per image); the images of one input, the merged input of a whole wake, together are bounded by
+# what fits a provider's request once base64 inflates them (Gemini's inline request limit is 20 MB, so
+# 15 MB of raw bytes). An image over either bound is not sent inline; the text says so and names the
+# path it already lists.
 # meiva:link agent/graph/docs/harness-foreground.md
 MAX_IMAGE_BYTES = 5 * 1024 * 1024
 MAX_INPUT_IMAGE_BYTES = 15 * 1024 * 1024
@@ -116,12 +117,13 @@ _DATA_URL = "data:"
 
 # meiva:note
 # The images a message carries as native content (the `image_url` data-URL blocks the claim inlined from
-# the uploads), as `ImageBlock`s in order, and how many were left out for size. A data URL that is not a
-# base64 image of a supported type raises: the claim only writes those.
+# the uploads), as `ImageBlock`s in order, and how many were left out for being over the per-image bound.
+# The per-input total is not judged here: a wake's rows are one input, so `fit_input_images` judges it
+# over all their images. A data URL that is not a base64 image of a supported type raises: the claim
+# only writes those.
 def native_images(messages: Sequence[BaseMessage]) -> tuple[tuple[ImageBlock, ...], int]:
     images: list[ImageBlock] = []
     skipped = 0
-    total = 0
     for message in messages:
         content = message_content(message)
         if isinstance(content, str):
@@ -137,13 +139,26 @@ def native_images(messages: Sequence[BaseMessage]) -> tuple[tuple[ImageBlock, ..
             mime, _, encoding = head[len(_DATA_URL) :].partition(";")
             if encoding != "base64":
                 raise ValueError(f"an inlined image must be base64, got {encoding!r}")
-            size = len(base64.b64decode(data, validate=True))
-            if size > MAX_IMAGE_BYTES or total + size > MAX_INPUT_IMAGE_BYTES:
+            if len(base64.b64decode(data, validate=True)) > MAX_IMAGE_BYTES:
                 skipped += 1
                 continue
-            total += size
             images.append(ImageBlock(mime_type=mime, data_base64=data))
     return tuple(images), skipped
+
+
+# meiva:note
+# The images of one input, in order, that fit its total bound, and how many were left out. An image that
+# does not fit is left out and a later, smaller one may still fit.
+def fit_input_images(images: Sequence[ImageBlock]) -> tuple[tuple[ImageBlock, ...], int]:
+    kept: list[ImageBlock] = []
+    total = 0
+    for image in images:
+        size = len(base64.b64decode(image.data_base64, validate=True))
+        if total + size > MAX_INPUT_IMAGE_BYTES:
+            continue
+        total += size
+        kept.append(image)
+    return tuple(kept), len(images) - len(kept)
 
 
 def skipped_images_note(skipped: int) -> str:
@@ -151,5 +166,5 @@ def skipped_images_note(skipped: int) -> str:
     return (
         f"{skipped} attached {noun} not sent inline because of its size (limit "
         f"{MAX_IMAGE_BYTES // (1024 * 1024)} MB per image, {MAX_INPUT_IMAGE_BYTES // (1024 * 1024)} MB "
-        "per message); open the file at the path listed above."
+        "per input); open the file at the path listed above."
     )

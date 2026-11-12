@@ -409,17 +409,24 @@ def test_native_images_leaves_out_an_image_over_the_per_image_bound_and_counts_i
     assert "1 attached image was not sent inline because of its size" in skipped_images_note(1)
 
 
-def test_native_images_bounds_the_total_of_one_input() -> None:
+def test_fit_input_images_bounds_the_total_of_one_input_and_a_smaller_later_one_may_fit() -> None:
     from agent.graph.claim.harness_render import (
         MAX_IMAGE_BYTES,
         MAX_INPUT_IMAGE_BYTES,
+        fit_input_images,
         native_images,
     )
 
-    count = MAX_INPUT_IMAGE_BYTES // MAX_IMAGE_BYTES + 1
-    images, skipped = native_images([_image_message(*([MAX_IMAGE_BYTES] * count))])
+    assert MAX_INPUT_IMAGE_BYTES == 3 * MAX_IMAGE_BYTES
+    full = MAX_IMAGE_BYTES
+    blocks, left_out = native_images([_image_message(full, full, full - 5, full, 5)])
 
-    assert len(images) == count - 1 and skipped == 1
+    kept, skipped = fit_input_images(blocks)
+
+    assert left_out == 0 and len(kept) == 4 and skipped == 1
+    assert [len(i.data_base64) for i in kept] == [
+        len(i.data_base64) for i in blocks[:3] + blocks[4:]
+    ]
 
 
 def test_native_images_refuses_a_block_that_is_not_a_base64_data_url() -> None:
