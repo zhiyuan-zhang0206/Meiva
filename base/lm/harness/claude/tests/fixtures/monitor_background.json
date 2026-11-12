@@ -1,0 +1,28 @@
+{
+ "source": "RECORDED from Claude Code CLI 2.1.322 via claude-agent-sdk 0.2.168 (claude-opus-5-5), 2026-11-12: two Monitor calls in one message (a short one that ends by itself after four output lines, a long one stopped with TaskStop). A Monitor is announced as TaskStarted(task_type=local_bash) carrying the Monitor tool_use_id; each output line wakes the CLI as a turn of its own whose ResultMessage.origin.kind is task-notification and which carries no Task* frame; the source ending is TaskUpdated(completed) plus TaskNotification(completed, summary 'Monitor ... stream ended'); TaskStop is TaskUpdated(killed) plus TaskNotification(stopped). Ids shortened and only the fields the adapter reads kept.",
+ "frames": {
+  "launch": [
+   {"cls": "UserMessage", "uuid": "$first", "content": "arm two monitors"},
+   {"cls": "AssistantMessage", "blocks": [{"tool": {"id": "toolu_MON_A", "name": "Monitor", "input": {"command": "for i in 1 2 3 4; do echo A-tick-$i; sleep 4; done", "description": "A short", "timeout_ms": 60000}}}]},
+   {"cls": "TaskStartedMessage", "task_id": "task-a", "tool_use_id": "toolu_MON_A", "description": "A short", "task_type": "local_bash", "data": {"is_backgrounded": true, "task_type": "local_bash"}},
+   {"cls": "UserMessage", "content": [{"tool_result": {"tool_use_id": "toolu_MON_A", "content": "Monitor started (task task-a, expires in 1m unless the source ends first; you get one notice at expiry). You will be notified on each event."}}]},
+   {"cls": "AssistantMessage", "blocks": [{"tool": {"id": "toolu_MON_B", "name": "Monitor", "input": {"command": "for i in $(seq 1 40); do echo B-tick-$i; sleep 5; done", "description": "B long", "timeout_ms": 300000}}}]},
+   {"cls": "TaskStartedMessage", "task_id": "task-b", "tool_use_id": "toolu_MON_B", "description": "B long", "task_type": "local_bash", "data": {"is_backgrounded": true, "task_type": "local_bash"}},
+   {"cls": "UserMessage", "content": [{"tool_result": {"tool_use_id": "toolu_MON_B", "content": "Monitor started (task task-b, expires in 5m unless the source ends first; you get one notice at expiry). You will be notified on each event."}}]},
+   {"cls": "AssistantMessage", "blocks": [{"text": "armed"}]},
+   {"cls": "ResultMessage", "result": "armed"}
+  ],
+  "event": [
+   {"cls": "AssistantMessage", "blocks": [{"text": "A-tick-2 received."}]},
+   {"cls": "ResultMessage", "origin": {"kind": "task-notification", "producer": "session-task"}, "result": "A-tick-2 received."}
+  ],
+  "ended": [
+   {"cls": "TaskUpdatedMessage", "task_id": "task-a", "patch": {"status": "completed"}},
+   {"cls": "TaskNotificationMessage", "task_id": "task-a", "status": "completed", "output_file": "/var/tasks/task-a.output", "summary": "Monitor \"A short\" stream ended"}
+  ],
+  "stopped": [
+   {"cls": "TaskUpdatedMessage", "task_id": "task-b", "patch": {"status": "killed"}},
+   {"cls": "TaskNotificationMessage", "task_id": "task-b", "status": "stopped", "output_file": "/var/tasks/task-b.output", "summary": "B long"}
+  ]
+ }
+}
