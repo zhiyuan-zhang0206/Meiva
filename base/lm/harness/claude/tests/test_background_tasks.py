@@ -286,8 +286,8 @@ async def test_a_stop_inside_our_turn_waits_for_nothing(tmp_path: Path) -> None:
 # meiva:note
 # The wait ends only for the turn that answers the notification: a turn of ours that starts first
 # (here the follow-up input of the recording) does not end it, because the CLI may have read the
-# notification into that turn's context or not (a task stopped while idle was recorded as folded in
-# silently), and the report is still owed to the agent when the wait lapses.
+# notification into that turn's context or not, and the report is still owed to the agent when the wait
+# lapses.
 # meiva:link base/lm/harness/claude/docs/background-tasks.md
 async def test_a_turn_of_ours_does_not_end_the_wait_for_an_unanswered_notification(
     tmp_path: Path,
@@ -295,14 +295,14 @@ async def test_a_turn_of_ours_does_not_end_the_wait_for_an_unanswered_notificati
     delivered: list[UnsolicitedOutput] = []
     harness = await start(tmp_path, passive=True, unsolicited=delivered.append)
     try:
-        await _launched(harness, "background_ends", "stop_idle_launch")
-        replay(harness.client, "background_ends", "stop_idle_report")
+        await _launched(harness, "background_ends", "failed_launch")
+        replay(harness.client, "background_ends", "failed_report")
         await harness.wait_for(lambda event: isinstance(event, UnsolicitedOutput))
         follow = await send(harness, "what happened?", key="next")
-        replay(harness.client, "background_ends", "stop_idle_followup", next="next")
+        replay(harness.client, "background_ends", "failed_followup", next="next")
         await follow.outcome()
         [waiting] = harness.session.background_work().items
-        assert waiting.kind is BackgroundKind.TURN and "sleep 120" in waiting.description
+        assert waiting.kind is BackgroundKind.TURN and "exit code 3" in waiting.description
         assert delivered == []
     finally:
         await harness.stop()
@@ -331,8 +331,40 @@ async def test_a_second_notification_keeps_its_own_wait_until_its_own_turn(
 
 
 # meiva:note
+# A task stopped while the session was idle: the CLI sent no turn for it and carried it into the next
+# input's context (`stop_idle_*` in background_ends.json), so nothing waits for it and nothing
+# is delivered, however long the session lives. The report stays in the event stream.
+# meiva:link base/lm/harness/claude/docs/background-tasks.md
+async def test_a_task_stopped_while_idle_is_recorded_and_neither_waited_for_nor_delivered(
+    tmp_path: Path,
+) -> None:
+    delivered: list[UnsolicitedOutput] = []
+    registry = FileSessionRegistry(tmp_path / "registry")
+    timers = ManualTimers()
+    harness = await start(
+        tmp_path,
+        passive=True,
+        unsolicited=delivered.append,
+        registry=registry,
+        agent_id=7,
+        clock=clock_over(timers),
+    )
+    try:
+        await _launched(harness, "background_ends", "stop_idle_launch")
+        replay(harness.client, "background_ends", "stop_idle_report")
+        await harness.wait_for(lambda event: isinstance(event, UnsolicitedOutput))
+        await asyncio.sleep(0.02)
+        assert not harness.session.background_work()
+        assert ANSWER_WAIT_SECONDS not in timers.sleeps
+        assert await _stored(registry) == []
+        assert delivered == []
+    finally:
+        await harness.stop()
+
+
+# meiva:note
 # When the wait lapses with no turn opened for the report, the report goes to the sink: whatever the
-# CLI did (a stop notification it never answered, a behaviour a later version changes) the agent
+# CLI did (a behaviour a later version changes, a state nobody recorded) the agent
 # is not left without it. The manual clock sleeps through the wait at once. Delivery empties the
 # pending record, so nothing is told twice.
 # meiva:link base/lm/harness/claude/docs/background-tasks.md
@@ -351,11 +383,11 @@ async def test_a_report_nobody_answered_goes_to_the_sink_when_the_wait_lapses(
         clock=clock_over(timers),
     )
     try:
-        await _launched(harness, "background_ends", "stop_idle_launch")
-        replay(harness.client, "background_ends", "stop_idle_report")
+        await _launched(harness, "background_ends", "failed_launch")
+        replay(harness.client, "background_ends", "failed_report")
         await _eventually(lambda: bool(delivered))
         [report] = harness.of(UnsolicitedOutput)
-        assert delivered == [report] and "stopped" in report.text
+        assert delivered == [report] and "failed" in report.text
         assert ANSWER_WAIT_SECONDS in timers.sleeps
         assert not harness.session.background_work()
         assert await _stored(registry) == []
@@ -366,10 +398,11 @@ async def test_a_report_nobody_answered_goes_to_the_sink_when_the_wait_lapses(
 
 
 # meiva:note
-# A process lost inside the wait is not delivered to the sink by the next one (it sets no timer):
-# the next session tells the agent once what was pending, and the record is then cleared.
+# A process lost before the report was answered or delivered, inside the wait or (as here, by a clock
+# long past it) after it, is not delivered to the sink by the next one (it sets no timer): the next
+# session tells the agent once what was pending, and the record is then cleared.
 # meiva:link base/lm/harness/claude/docs/background-tasks.md
-async def test_a_restart_inside_the_wait_tells_the_agent_once_and_does_not_redeliver(
+async def test_a_restart_before_the_report_was_delivered_tells_the_agent_once(
     tmp_path: Path,
 ) -> None:
     delivered: list[UnsolicitedOutput] = []
@@ -381,6 +414,8 @@ async def test_a_restart_inside_the_wait_tells_the_agent_once_and_does_not_redel
     replay(first.client, "background_ends", "failed_report")
     await first.wait_for(lambda event: isinstance(event, UnsolicitedOutput))
     await first.stop()
+    later = ManualTimers()
+    later.advance(ANSWER_WAIT_SECONDS * 10)
     second = await start(
         tmp_path,
         passive=True,
@@ -388,6 +423,7 @@ async def test_a_restart_inside_the_wait_tells_the_agent_once_and_does_not_redel
         registry=registry,
         agent_id=7,
         session_id="session-2",
+        clock=clock_over(later),
     )
     try:
         [lost] = second.session.take_lost_background()

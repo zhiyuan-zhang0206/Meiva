@@ -545,7 +545,11 @@ class ClaudeSession(BaseHarnessSession[BridgeConfig]):
         for event in events:
             self._emit(event)
         report = next((event for event in events if isinstance(event, UnsolicitedOutput)), None)
-        if self._open is None and report is not None:
+        if (
+            self._open is None
+            and report is not None
+            and getattr(message, "status", None) != "stopped"
+        ):
             self._expect_answer(_task_id(message), report)
 
     # meiva:note
@@ -557,20 +561,22 @@ class ClaudeSession(BaseHarnessSession[BridgeConfig]):
     # kept with its report; the next turn the CLI opens with no origin or the `task-notification`
     # one answers the oldest (a turn of ours or a timer's does not), and the observed-turn item takes
     # over. After `ANSWER_WAIT_SECONDS` with no such turn the report goes to the sink, so a CLI that
-    # does not answer (a task stopped while idle was recorded to be only folded into the next
-    # turn's context) cannot make the agent lose it, and nothing keeps the session forever. The item is
-    # persisted with the other pending work: a process lost inside the window tells the agent on the
-    # next session (what the report said, once, because the record is cleared when read) and the new
-    # session sets no timer, so the report is never delivered twice that way; once delivered, the
-    # item is gone from the record.
+    # does not answer cannot make the agent lose it, and nothing keeps the session forever. The
+    # item is persisted, without an end time, with the other pending work until it is answered or
+    # delivered: a process lost at any point before that, inside the window or after it, tells the agent
+    # on the next session (what the report said, once, because the record is cleared when read) and the
+    # new session sets no timer, so the report is never delivered twice that way. A notification for a task
+    # that was stopped while the session was idle is not waited for at all: the CLI sent no turn for it and
+    # carried it into the next input's context (`stop_idle_*` in fixtures/background_ends.json), so
+    # delivering it would only repeat it and wake the agent for a task that was stopped on purpose.
     # meiva:link base/lm/harness/claude/docs/background-tasks.md
     def _expect_answer(self, task_id: str, report: UnsolicitedOutput) -> None:
-        until = self._clock.now().timestamp() + ANSWER_WAIT_SECONDS
+        deadline = self._clock.now().timestamp() + ANSWER_WAIT_SECONDS
         summary = report.text.splitlines()[1:2] or [f"task {task_id}"]
         item = BackgroundItem(
-            BackgroundKind.TURN, describe(f"the CLI did not answer yet: {summary[0]}"), until
+            BackgroundKind.TURN, describe(f"the CLI did not answer yet: {summary[0]}")
         )
-        awaited = AwaitedAnswer(report, item)
+        awaited = AwaitedAnswer(report, item, deadline)
         self._answering = (*self._answering, awaited)
         self._persist_pending()
         _ = self._spawn(self._deliver_unanswered(awaited))
@@ -661,7 +667,7 @@ class ClaudeSession(BaseHarnessSession[BridgeConfig]):
             (
                 *self._background.items,
                 *self._scheduled.pending_at(now),
-                *(a.item for a in self._answering if a.item.pending_at(now)),
+                *(a.item for a in self._answering if now < a.deadline),
                 *self._observed_turn_items(),
             )
         )
@@ -672,7 +678,7 @@ class ClaudeSession(BaseHarnessSession[BridgeConfig]):
             (
                 *self._background.items,
                 *self._scheduled.pending_at(now),
-                *(a.item for a in self._answering if a.item.pending_at(now)),
+                *(a.item for a in self._answering),
             )
         )
 

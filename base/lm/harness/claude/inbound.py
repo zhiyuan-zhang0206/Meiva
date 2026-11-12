@@ -141,13 +141,16 @@ class BackgroundTasks:
 
 
 # meiva:note
-# An idle task notification whose answering turn has not opened yet: the report as it was recorded and
-# the pending item it counts as meanwhile (see `ClaudeSession._expect_answer`).
+# An idle task notification whose answering turn has not opened yet: the report as it was recorded, the
+# pending item it counts as meanwhile and the moment the wait lapses (see `ClaudeSession._expect_answer`).
+# The item itself has no end time: the record keeps it until it is answered or delivered, so a process
+# lost after the wait lapsed still tells the agent once on the next session.
 # meiva:link base/lm/harness/claude/docs/background-tasks.md
 @dataclass(frozen=True, slots=True)
 class AwaitedAnswer:
     report: UnsolicitedOutput
     item: BackgroundItem
+    deadline: float
 
 
 # meiva:note

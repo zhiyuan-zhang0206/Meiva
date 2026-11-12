@@ -30,19 +30,17 @@ mean different things.
   does not. After `ANSWER_WAIT_SECONDS` (120 s, several times the recorded wait) with no such turn, the
   kept report is handed to the sink (written by the host as a `system:harness` inbound) and the item
   is gone, so a notification the CLI does not answer is never lost and never keeps the session alive.
-- **A task stopped while idle is not answered.** Stopped through the SDK's `stop_task` with the
-  session idle, the CLI sent `task_updated(killed)` and `task_notification(stopped)` and then nothing for
-  32 s; the next input's turn knew the task had been stopped, so the notification is carried into the
-  next turn's context without a turn of its own (`background_ends.json`, `stop_idle_*`). Such a report
-  takes the 120 s fallback, and if an input of ours arrives in that time the agent can read it twice:
-  once in the CLI's context, once as the sink's inbound. This is deliberate for now (nothing is
-  dropped) and is to be decided by the project owner.
-- **Persistence.** The wait item is written to the session record with the other pending work. A
-  process lost inside the wait leaves it there: the next session tells the agent once what was pending
-  (the summary line of the report) and clears the record, and it sets no timer, so the report is not
-  delivered to the sink as well. Once the fallback has delivered the report the item is removed from the
-  record, so a later restart tells nothing. A restart after the wait lapsed with no live session to
-  deliver it (the process died first) leaves the item past its end time, which the reader leaves out.
+- **A task stopped while idle is neither waited for nor delivered.** Stopped through the SDK's
+  `stop_task` with the session idle, the CLI sent `task_updated(killed)` and `task_notification(stopped)`
+  and then nothing for 32 s; the next input's turn knew the task had been stopped, so the CLI carries the
+  notification into the next turn's context without a turn of its own (`background_ends.json`,
+  `stop_idle_*`). The session only records the report: delivering it would repeat what the CLI says
+  itself and wake the agent for a task stopped on purpose.
+- **Persistence.** The wait item is written to the session record, without an end time, with the other
+  pending work, and stays there until the CLI answers or the fallback delivers the report. A process
+  lost at any point before that, inside the wait or after it lapsed, leaves it: the next session tells
+  the agent once what was pending (the summary line of the report) and clears the record, and it sets no
+  timer, so the report is not also delivered to the sink. Once answered or delivered the item is removed.
 - Nothing is held for the CLI's own turn: an input delivered meanwhile is written to the CLI, which
   runs it behind its own turn, and the events say which turn it entered.
 
