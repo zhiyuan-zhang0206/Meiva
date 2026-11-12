@@ -132,7 +132,7 @@ export function HeaderBar({ label, onOpenSidebar, sidebarCollapsed, onToggleSide
                 {mobileAttentionState === "error" ? "?" : "…"}
               </span>
             ) : attentionCount > 0 ? (
-              <span data-testid="mobile-sidebar-attention-count" className="absolute -right-0.5 -top-0.5 rounded-full bg-meiva-sunset-orange px-1 text-[10px] font-semibold tabular-nums leading-4 text-white">
+              <span data-testid="mobile-sidebar-attention-count" className="absolute -right-0.5 -top-0.5 rounded-full bg-[#C2410C] px-1 text-[10px] font-semibold tabular-nums leading-4 text-white">
                 {attentionCount > 99 ? "99+" : attentionCount}
               </span>
             ) : null}

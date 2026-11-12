@@ -463,7 +463,7 @@ describe("context size row", () => {
     expect(second?.h ?? 0).toBeGreaterThan(0);
     expect((second?.h ?? 0) / (first?.h ?? 1)).toBeCloseTo(420 / 1050);
     expect(first?.color).toContain("#3b82f6");
-    expect(second?.color).toContain("#f59e0b");
+    expect(second?.color).toContain("#64748b");
     pointAt("input", xOf(key("uthinking-7-7")));
     await paintFrame();
     expect(await ringOf(await unitOf("thinking"))).toBe("hover");

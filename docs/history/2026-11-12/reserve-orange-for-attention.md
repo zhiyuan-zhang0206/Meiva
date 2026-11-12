@@ -36,3 +36,11 @@ request fan-out and approximate totals from limited lists. The existing global
 event repair owner refreshes the snapshot for question and publication-state
 changes and reconnects. Loading and errors remain unknown states rather than
 claiming zero. Desktop gains no attention aggregate entry.
+
+## Small numeric badge contrast
+
+Review measured white 10px digits on the existing brand orange at about 2.56:1.
+The new phone count uses a dedicated deeper orange with white (5.18:1 measured
+in both themes). Repainting the shared unread/question/priority token would
+change indicators the user explicitly retained, so the deeper background is
+local to the new numeric badge.

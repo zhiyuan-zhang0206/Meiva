@@ -348,7 +348,7 @@ describe("RunTimelineRows context size row", () => {
     const [first, second] = fills("input");
     expect(first.h / second.h).toBeCloseTo(0.5);
     expect(first.color).toContain("#3b82f6");
-    expect(second.color).toContain("#f59e0b");
+    expect(second.color).toContain("#64748b");
     expect(screen.getByTestId("run-timeline-row-context")).toBeTruthy();
     expect(screen.queryByTestId("run-timeline-row-added")).toBeNull();
   });
