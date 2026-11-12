@@ -1,6 +1,6 @@
 # meiva:note
 # Skill recall at the before_llm edge (`agent/graph/hooks/skill_recall.py`) over the real `decide()`:
-# a scripted binding replaces the Jev client (real id and price), on real SKILL.md files.
+# a scripted binding replaces the default Gemini decision client (real id and price), on real SKILL.md files.
 from __future__ import annotations
 
 import asyncio
@@ -65,7 +65,7 @@ def _inbound(content: str, source: str, inbound_id: int) -> HumanMessage:
 
 
 _CONFIG: Any = {"configurable": {"thread_id": "1042"}}
-_MODEL = "jev-1.13.0"
+_MODEL = "gemini-decision-1"
 
 
 class _Scorer:
@@ -103,7 +103,8 @@ class _Scorer:
 
 
 def _catalog(binding: _Scorer, *, spec: DecisionModelSpec | None = None) -> ModelCatalog:
-    """The real catalog with the Jev provider's client swapped for `binding`."""
+    # meiva:note
+    # The real catalog with the default decision provider swapped for the scripted binding.
     real = build_model_catalog(home=meiva_home())
     provider = real.decision_provider_of(_MODEL)
     assert provider is not None

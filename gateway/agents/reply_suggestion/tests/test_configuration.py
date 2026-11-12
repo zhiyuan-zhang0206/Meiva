@@ -15,7 +15,7 @@ def test_defaults() -> None:
 
     assert lm.reply_suggestion_enabled is True
     assert lm.reply_suggestion_model == "deepseek-flash"
-    assert lm.reply_suggestion_gate_model == "jev-1.13.0"
+    assert lm.reply_suggestion_gate_model == "gemini-decision-1"
     assert lm.reply_suggestion_gate_threshold == 0.5
     assert lm.reply_suggestion_max_input_tokens == 1500
     assert lm.reply_suggestion_max_candidates == 3
