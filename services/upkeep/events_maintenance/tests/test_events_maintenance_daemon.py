@@ -31,6 +31,8 @@ from base.daemon.endpoints import ServiceEndpoints
 from base.daemon.health import LivenessGroup, LoopProgress
 from base.db import Database
 from base.db.code_version_gate import ProcessDbGate
+from base.db.tests.pool_probe import PoolProbe
+from base.db.tests.pool_probe import pool_probe as pool_probe
 from base.native_process.loaded_commit import LoadedCommit
 from base.telemetry.delivery.mirror import event_id
 from services.upkeep.events_maintenance import daemon
@@ -40,7 +42,6 @@ from services.upkeep.events_maintenance.tests.service_probe import (
     component_names,
     components,
     healthz,
-    our_backends,
     wait_serving,
 )
 from services.upkeep.events_maintenance.tests.slices import events_maintenance_config
@@ -288,8 +289,9 @@ def _port(boot: ConfigBoot, tmp_path: Path) -> int:
 # The alert reconciliation loop exists only on a unit holding the Grafana credential.
 @pytest.mark.parametrize("credential", [True, False])
 async def test_the_health_endpoint_lists_the_loops_the_unit_runs(
-    db_conn: psycopg.Connection, database: Database, tmp_path: Path, *, credential: bool
+    db_conn: psycopg.Connection, pool_probe: PoolProbe, tmp_path: Path, *, credential: bool
 ) -> None:
+    database = pool_probe.database()
     boot = _boot(grafana_admin_password=SecretStr("grafana-test-password") if credential else None)
     port = _port(boot, tmp_path)
     service = _run(boot, database, tmp_path)
@@ -303,7 +305,7 @@ async def test_the_health_endpoint_lists_the_loops_the_unit_runs(
     assert status == 200
     expected = ["dispatch", "resolution", "registry_gauge", "escalation"]
     assert component_names(body) == expected + (["alert_reconciliation"] if credential else [])
-    await assert_released(db_conn, tmp_path / "run" / "events_maintenance.pid", port)
+    await assert_released(pool_probe, tmp_path / "run" / "events_maintenance.pid", port)
 
 
 # meiva:note
@@ -318,12 +320,13 @@ async def test_the_health_endpoint_lists_the_loops_the_unit_runs(
 )
 async def test_a_crashing_loop_cancels_its_siblings_and_ends_the_service(
     db_conn: psycopg.Connection,
-    database: Database,
+    pool_probe: PoolProbe,
     tmp_path: Path,
     crashing: str,
     table: str,
 ) -> None:
     record_maintenance_event(db_conn, level="info", event_name="heartbeat", minutes_ago=0.1)
+    database = pool_probe.database()
     boot = _boot()
     port = _port(boot, tmp_path)
     before = asyncio.all_tasks()
@@ -343,15 +346,16 @@ async def test_a_crashing_loop_cancels_its_siblings_and_ends_the_service(
         crashing
     )
     assert asyncio.all_tasks() == before, "a sibling loop was left running"
-    await assert_released(db_conn, tmp_path / "run" / "events_maintenance.pid", port)
+    await assert_released(pool_probe, tmp_path / "run" / "events_maintenance.pid", port)
 
 
 # meiva:note
 # A worker thread blocked in the database past its deadline fails health, and stopping the
 # service cancels its proxy instead of joining the thread.
 async def test_stopping_the_service_does_not_wait_for_a_pass_past_its_deadline(
-    db_conn: psycopg.Connection, database: Database, db_url: str, tmp_path: Path
+    db_conn: psycopg.Connection, pool_probe: PoolProbe, db_url: str, tmp_path: Path
 ) -> None:
+    database = pool_probe.database()
     boot = _boot(events_maintenance_pass_deadline_s=0.5)
     port = _port(boot, tmp_path)
     pidfile = tmp_path / "run" / "events_maintenance.pid"
@@ -379,6 +383,8 @@ async def test_stopping_the_service_does_not_wait_for_a_pass_past_its_deadline(
         assert service.cancelled()
         assert not pidfile.exists()
         assert asyncio.all_tasks() - before == set(), "the stopped service left a proxy alive"
-        assert our_backends(db_conn) > 0, "the blocked worker is still waiting on its lock"
+        assert pool_probe.owned(pool_probe.rows()), (
+            "the blocked worker is still waiting on its lock"
+        )
 
-    await assert_released(db_conn, pidfile, port)
+    await assert_released(pool_probe, pidfile, port)

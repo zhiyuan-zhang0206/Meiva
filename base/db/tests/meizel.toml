@@ -1,6 +1,7 @@
-exports = ["fakes.py", "lost_ack.py", "row_fakes.py", "swallowed_cancel.py"]
+exports = ["fakes.py", "pool_probe.py", "lost_ack.py", "row_fakes.py", "swallowed_cancel.py"]
 
 [uses]
+"test_pool_probe.py" = ["pool_probe.py"]
 "test_boot_authority.py" = ["_boot_authority_child.py"]
 "test_rows.py" = ["row_fakes.py"]
 "test_swallowed_cancel.py" = ["swallowed_cancel.py"]

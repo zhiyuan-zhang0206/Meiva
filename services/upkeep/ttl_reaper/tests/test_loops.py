@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import asyncio
 import socket
-import time
 from collections.abc import Generator, Iterator
 from contextlib import contextmanager
 from pathlib import Path
@@ -21,6 +20,8 @@ from base.daemon.endpoints import ServiceEndpoints
 from base.daemon.loop_health import LivenessGroup
 from base.db import Database
 from base.db.code_version_gate import ProcessDbGate
+from base.db.tests.pool_probe import PoolProbe
+from base.db.tests.pool_probe import pool_probe as pool_probe
 from base.events.live.bus import EventBus
 from base.native_process.loaded_commit import LoadedCommit
 from ops.cluster.rpc import RpcClient, worst_case_dispatch_seconds
@@ -100,22 +101,14 @@ async def test_a_crashing_loop_cancels_its_sibling_and_ends_the_service(
     assert asyncio.all_tasks() == before, "the sibling loop was left running"
 
 
-def _our_backends(db_conn: psycopg.Connection) -> int:
-    db_conn.rollback()
-    row = db_conn.execute(
-        "SELECT count(*) FROM pg_stat_activity WHERE application_name LIKE 'meiva:%%'"
-    ).fetchone()
-    assert row is not None
-    return int(row[0])
-
-
 async def test_a_crash_leaves_run_after_releasing_its_resources(
     db_conn: psycopg.Connection,
-    database: Database,
+    pool_probe: PoolProbe,
     *,
     process_config: ConfigBoot,
     tmp_path: Path,
 ) -> None:
+    database = pool_probe.database()
     runtime = tmp_path / "run"
     pidfile = runtime / "ttl_reaper.pid"
     port = ServiceEndpoints.from_boot(process_config, runtime=runtime).of("ttl_reaper").health_port
@@ -134,10 +127,7 @@ async def test_a_crash_leaves_run_after_releasing_its_resources(
     assert not pidfile.exists()
     with pytest.raises(ConnectionRefusedError), socket.create_connection(("127.0.0.1", port), 1.0):
         pass
-    deadline = time.monotonic() + 10.0
-    while _our_backends(db_conn) and time.monotonic() < deadline:
-        await asyncio.sleep(0.05)
-    assert _our_backends(db_conn) == 0, "run left its pool open"
+    await pool_probe.wait_released(10.0)
 
 
 def test_a_phase_is_claimed_once_per_interval(
