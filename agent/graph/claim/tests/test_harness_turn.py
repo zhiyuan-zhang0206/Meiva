@@ -1,8 +1,7 @@
 from __future__ import annotations
 
 import asyncio
-import os
-from collections.abc import AsyncGenerator, Sequence
+from collections.abc import Sequence
 from dataclasses import replace
 from datetime import UTC, datetime
 from unittest.mock import MagicMock
@@ -10,7 +9,6 @@ from unittest.mock import MagicMock
 import psycopg
 import pytest
 from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, ToolMessage
-from langchain_core.runnables import RunnableConfig
 from langgraph.runtime import Runtime
 from psycopg.types.json import Jsonb
 from psycopg_pool import AsyncConnectionPool
@@ -18,30 +16,30 @@ from psycopg_pool import AsyncConnectionPool
 from agent.graph.claim.harness_activity import HarnessTurnProjector, log_turn_usage
 from agent.graph.claim.harness_interrupt import interrupt_engine
 from agent.graph.claim.harness_render import pending_messages, render_messages
-from agent.graph.claim.harness_tool_format import format_tool_use
 from agent.graph.claim.harness_turn import harness_turn_node
 from agent.graph.claim.lost_turn import lost_turn_note, report_lost_turn
-from agent.graph.claim.tests.harness_support import FakeEngine
+from agent.graph.claim.tests.harness_support import (
+    FakeEngine,
+    config,
+    runtime,
+)
+from agent.graph.claim.tests.harness_support import hosted_resources as hosted_resources
 from agent.graph.llm_errors import FatalLLMStreamError
+from agent.harness_timeline.tool_format import format_tool_use
 from agent.messages import NoteTag
 from agent.ownership.tests.ownership_support import agent_row
 from agent.state import AgentState
-from base.agents.context import HostedTurnResources, MeivaContext
+from base.agents.context import HostedTurnResources
 from base.agents.history.harness_messages import aload_harness_timeline_items
 from base.agents.history.timeline_item import TimelineItem
 from base.agents.messages.kwargs import read_meiva_kwargs
 from base.agents.tests.units import spawn_agent
-from base.api_contracts.agent_contract import Harness
-from base.clock import Clock
 from base.cluster.machine import MachineIdentityReader
 from base.config.service_read import ConfigAuthority
-from base.config.tests.configuration import defaults
 from base.db import Database
 from base.db.code_version_gate import ProcessDbGate
 from base.events.live.bus import EventBus
-from base.events.live.publisher import AgentEventPublisher
 from base.events.live.tests.live_capture import LiveEvents
-from base.host.env.agent_slices import AgentSlices
 from base.lm.catalog import ModelCatalog
 from base.lm.harness import (
     AssistantText,
@@ -61,47 +59,6 @@ from base.lm.harness import (
 )
 from base.log.tests.log_records import LogRecords
 from base.log.tests.log_records import loguru_records as loguru_records
-from base.native_process.turn_identity import HostedServiceResources
-from base.packages.composer_commands import CommandCatalog
-from base.packages.plugin_providers import build_model_catalog
-from base.paths import meiva_home
-
-ENVIRON = dict(os.environ)
-
-
-def runtime(
-    engine: FakeEngine | None,
-    *,
-    ops_pool: AsyncConnectionPool | None = None,
-    hosted_resources: HostedTurnResources | None = None,
-    publisher: AgentEventPublisher | None = None,
-) -> Runtime[MeivaContext]:
-    return Runtime(
-        context=MeivaContext(
-            meiva_home=meiva_home(),
-            ops_pool=ops_pool,
-            hosted_resources=hosted_resources,
-            harness=Harness.CLAUDE_CODE if engine is not None else Harness.MEIVA,
-            harness_bridge=engine,
-            llm=MagicMock(),
-            event_publisher=publisher or MagicMock(),
-            agent=AgentSlices.resolve(default_reader=defaults()),
-            catalog=build_model_catalog(home=meiva_home()),
-            commands=CommandCatalog.system(skills=list, home=meiva_home()),
-            clock_factory=Clock.from_settings,
-            environ=ENVIRON,
-        )
-    )
-
-
-@pytest.fixture
-async def hosted_resources() -> AsyncGenerator[HostedTurnResources]:
-    """An explicit service owns the turn's watcher until the test finishes."""
-    service = HostedServiceResources()
-    try:
-        yield await service.turn()
-    finally:
-        await service.aclose()
 
 
 def _last_message_text(db: psycopg.Connection, agent_id: int) -> str | None:
@@ -117,10 +74,6 @@ def inbound(text: str, inbound_id: int) -> HumanMessage:
         content=text,
         additional_kwargs={"meiva_msg_type": "inbound", "meiva_inbound_id": inbound_id},
     )
-
-
-def config(agent_id: int = 6984) -> RunnableConfig:
-    return {"configurable": {"thread_id": str(agent_id)}}
 
 
 def test_own_replies_are_never_pending() -> None:

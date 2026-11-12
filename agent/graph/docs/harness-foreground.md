@@ -145,3 +145,23 @@ not wait for the old process before it resumes, so a CLI that survives its host 
 is not detected; the facts above are the whole protection, and no process registry was added for it.
 
 Parent: [Harness turn](harness-turn.md).
+
+## Transcript-sourced agents
+
+Only while the agent's `harness_transcript_timeline` setting is on (default off, Claude Code only). The record
+decides everything about an input, through the session-scoped writer, and `bridge.reconcile` and the lost-turn marker
+are not used.
+
+| Case | What happens |
+|---|---|
+| Normal, or absorbed mid-turn | the echo settles nothing; the writer reads the human row (or the `queued_command` attachment) with our uuid, appends the input's entries and sets its rows `done` in one transaction |
+| Refused or not taken | unchanged: back to `pending` with backoff (the input is forgotten by the writer first) |
+| The invocation fails or is interrupted with inputs in flight | the session is retired, the record is read once more, the writer settles what it shows, and what it does not show goes back to `pending`; a record that cannot be read leaves them `claimed` for the next invocation |
+| A claimed row from an earlier process (start of a run) | registered with the writer as the inputs they were, then the writer's first read: shown inputs are settled (and the recovery note is queued as before), not-shown inputs go back to `pending` and are delivered again in order |
+| A steer the CLI did not absorb | runs as a turn of its own; the human row with our uuid settles it |
+| Input the record shows that we did not send | shown as an unmatched inbound, settles nothing, event `harness_timeline_unmatched_input` |
+
+A new writer holds its reads until the first invocation has registered the claimed rows (`start_reading`): a row the
+CLI wrote for an input nobody registered would be read as unmatched and the input could never be settled. The
+invocation does not end while an input it handed over is not yet shown by the record, for at most 5 s in all; past
+that the input stays claimed (event `harness_timeline_input_unproven`) and the writer settles it when the row appears.

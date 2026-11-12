@@ -2,7 +2,9 @@
 
 The shared layer in `base/lm/harness/session/transcript/` and the three parsers
 (`claude/transcript/`, `codex/transcript/`, `antigravity/transcript/`) read a CLI's own conversation record
-into one vocabulary and project it into timeline item drafts. Nothing in the running system calls them yet:
+into one vocabulary and project it into timeline item drafts. The Claude reader and the writer
+(`agent/harness_timeline`) run only for an agent whose `harness_transcript_timeline` setting is on (default off);
+nothing else calls them:
 they are the pure core of the plan in [the transcript timeline plan](../../../../future/agent/transcript-timeline-source.md),
 chosen by [the decision](../../../../docs/decisions/agents/graph/2026-11-12-transcript-is-the-timeline-source.md).
 

@@ -1,0 +1,4 @@
+exports = ["effects.py", "timeline.py"]
+
+[uses]
+"timeline.py" = ["effects.py"]

@@ -78,6 +78,12 @@ class Projector:
         self._sent[sent.wire_id] = sent
         self._unsettled.append(sent)
 
+    def unregister(self, key: str) -> None:
+        sent = next((item for item in self._unsettled if item.key == key), None)
+        if sent is not None:
+            self._unsettled.remove(sent)
+            _ = self._sent.pop(sent.wire_id, None)
+
     def feed(self, entries: Iterable[AnyEntry]) -> Projection:
         self._out = _Out()
         for entry in entries:

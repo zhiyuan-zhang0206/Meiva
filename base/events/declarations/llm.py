@@ -31,6 +31,7 @@ class LlmUsage(TypedDict):
     usage_kind: str
     attribution: str
     source: NotRequired[str]
+    parent_call_id: NotRequired[str]
 
 
 # meiva:note

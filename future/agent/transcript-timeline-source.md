@@ -1,6 +1,8 @@
 # Cutting an external agent's timeline over to the CLI's own transcript
 
-Status: plan, revised 2026-11-12 after review. The decision is
+Status: plan, revised 2026-11-12 after review. PR A (storage, read-in) is merged; PR B (the writer for Claude, wired
+behind the off-by-default agent setting `harness_transcript_timeline`) is open and not yet verified against a real CLI
+end to end (section 9.4). The decision is
 [the transcript is the timeline source](../../docs/decisions/agents/graph/2026-11-12-transcript-is-the-timeline-source.md);
 the vocabulary, the projection, the three parsers and their golden tests (the shared pure core this plan builds
 on) are described in [reading a record into timeline drafts](../../base/lm/harness/docs/transcript-projection.md)
@@ -70,8 +72,14 @@ indents them.
 
 **Where and how long.** New package `agent/harness_timeline/` (effect shell plus pure planning; `agent` is the
 lowest layer that holds the database and the incarnation types). One writer per `AgentRuntime`, created and
-closed with the runtime's harness bridge (`services/agent_runner/agent_host/runtime.py`, `harness_bridge_for`;
-the bridge is already closed on eviction, `drop_agent` and host shutdown). It is not owned by a graph
+closed with the runtime's harness bridge (`services/agent_runner/agent_host/transcript/timeline.py`, built by
+`build_runtime` when the setting is on; closed through `HarnessSessions._close` and the host's shutdown, each with a
+last read before the CLI closes and the writer stopped after). The session id is asked for at every read (a fresh
+session learns it when the CLI starts); the runtime incarnation is whatever the host last bound (`bind_turn`, at every
+hosted turn): the row's generation survives from turn to turn while the same host owns it, so the idle writer keeps
+committing, and a different owner's admission fences it until the new one is bound (Q2, answered in section 13). A
+new writer holds its reads until the first invocation has registered the rows an earlier process left claimed
+(`start_reading`), and repeats a read while it brings something, so catching up is a series of bounded transactions. It is not owned by a graph
 invocation: output after a parent turn, a turn the CLI starts by itself and a sub-agent's late rows are written
 with no invocation present. It is one asyncio task: wait for a wake-up, read every record after its position,
 feed the projector, write, publish. `plan.py` (strict, pure) turns a `Projection` plus the writer's state into a
@@ -327,11 +335,43 @@ One rule: an input is delivered when the record shows it; the entry that shows i
    refusal, a crash between commit and publish, retry after a database failure without reordering, a requeued
    row later proven delivered, first read after a restart.
 4. **Real CLI end to end** on a throwaway cluster (`docs/conventions/dev-setup.md`, "Which home a worktree
-   reads" and the preview rule): fresh `MEIVA_HOME` from `mktemp -d` with `MEIVA_CONFIG_FETCH=skip`, the
-   checkout's own `.venv`, its own data plane and gateway; never a production home. It needs the machine's
-   logged-in `claude`, one external Claude agent, and: a plain turn with a tool, a steer during a long command, a
-   stop, a sub-agent plus a background command whose notification starts a CLI turn, `/compact`, and a `kill -9`
-   between two messages followed by a resume. Done by the coordinator after PR B.
+   reads" and the preview rule). Steps, in the checkout under test, with its own `.venv` and nothing of production:
+   1. `export MEIVA_HOME="$(mktemp -d)" MEIVA_CONFIG_FETCH=skip`; `.venv/bin/meiva init`, then `.venv/bin/meiva start`
+      (the home's own Postgres, Redis and gateway; never `~/.meiva`, a production database or gateway).
+   2. Create one external Claude agent on this machine's logged-in `claude` (no credential file is read or copied;
+      the CLI uses its own login) and turn the setting on while it is idle:
+      `meiva agents restart <id> --config '{"harness_transcript_timeline": true}' -m 'timeline from transcript'`
+      (a `config_overlay` pin; the restart rebuilds its runtime); check `meiva agents timeline <id>` is unchanged.
+   3. Scenarios, each checked against the assertions below: (a) a plain turn with a Bash tool call; (b) a steer during
+      a long command; (c) a stop; (d) a sub-agent plus a background command whose notification starts a CLI turn;
+      (e) `/compact`; (f) `kill -9` of the CLI between two messages, then a message (resume); (g) a fork of the agent;
+      (h) a message sent while the agent is mid-turn and an `own_turn` wake.
+   4. Assertions: the timeline items all carry `source_key` and appear once and in order (`agent_harness_messages`);
+      every sent input's row is `done` exactly once and no input reaches the CLI twice (the transcript holds one row per
+      wire id); `agent_harness_transcript_rows` holds only whitelisted rows and their count grows with the record, not
+      with the batch (the per-batch statement counts in the writer's linear test are the model); `llm_usage` has one
+      event per model message, sub-agent messages as `usage_kind="agent_subagent"` with `parent_call_id`, and the main
+      figure equals the result frame's usage; no `harness_timeline_*` anomaly beyond `turn_end_unseen` for (c);
+      the stop shows only the record's own interrupt marker; (f) shows no duplicate item and the claimed row of an
+      input the CLI never wrote is delivered again; (g) shows none of the parent's history re-projected.
+   5. Roll back by setting it false and restarting the runtime; the old path resumes from the end of the timeline.
+
+   **Run so far (2026-11-12, this machine's logged-in `claude` 2.1.322, model `haiku`, throwaway Postgres of the test
+   harness, a scratch test, not a cluster).** The real bridge and `ClaudeSession`, the real `harness_turn` node, the
+   writer, the effects and the database; no gateway, dispatcher or host. Results: (a) a turn with a Bash call:
+   input `done`, items `inbound_chat, agent_reasoning, agent_code, code_output, agent_chat`, two `llm_usage` events,
+   5 stored rows (5 KB); (b) a steer during `sleep 12`: both inputs `done`, the absorbed steer between the output and the
+   final reply, no anomaly; (c) a stop: the record's `status:Turn interrupted` is the only interrupt marker, no
+   `turn_end_unseen`; (f) `kill -9` of the CLI between two messages, then a message: both inputs `done` once, no
+   duplicate item, the resumed session answered from the earlier turn; (d) a sub-agent and a background command: the
+   sub-agent's items nest under its call, `llm_usage` gives `agent` and `agent_subagent` events, both background
+   notifications are `Background task ... completed` markers, 22 stored rows, no anomaly. The first runs found two
+   parser gaps, fixed here: row types the CLI writes in a long session were reported as anomalies (`ai-title`, titles,
+   links, `informational`, `stop_hook_summary`, many context attachments), and a `queued_command` attachment whose own
+   `origin` is `task-notification` was read as an input nobody sent. A pitfall for whoever repeats it: the CLI finds
+   its login through `USER` and `LOGNAME`; a child environment without them answers "Not logged in".
+   **Not run**: `/compact`, a fork of the agent, a CLI-started turn while the agent is idle (`own_turn` wake), the full
+   cluster (`meiva init`/`start`) and the turn-on-while-idle rollout step; they remain for the coordinator.
 
 ## 10. Pull requests, rollback, deployment
 
@@ -410,10 +450,20 @@ Resolved by review (kept for the record): start from the end of the record at cu
 (the record's), #8911's early write removed; reply visibility applied by the writer; the temporary setting.
 
 1. **Sub-agent usage**: ruled, counted (section 8). PR B states the change of the usage figure in its description.
-2. **Fencing for a writer with no invocation**: the writer needs the runtime's incarnation token, not the graph
-   context's. To be verified with evidence in PR B.
-3. **Registered warning events** (unknown entry type, end ceiling reached, unmatched input): registered in PR B.
-4. **Not yet recorded**: an API error that arrives mid-turn after tool use, a retried 429/529, and `Failure` on
+2. **Fencing for a writer with no invocation**: answered. The incarnation of the latest admission, bound at every
+   hosted turn. `admit_hosted_runtime` keeps the generation while the same host boot owns the row and a settled turn
+   leaves the row `idling` with it (a lifecycle restart or terminate clears it; a different owner mints a new one), so
+   the idle writer commits with the incarnation it holds and a takeover fences it. Evidence and tests:
+   `agent/harness_timeline/tests/test_writer_lifecycle.py` (admission by the same owner returns the same
+   incarnation; a different owner's admission refuses the old one until the new one is bound).
+3. **Registered warning events**: registered in PR B (`harness_timeline_anomaly`, `_turn_end_unseen`, `_unmatched_input`,
+   `_usage_mismatch`, `_input_unproven`, `_rebuild_bounded`, `_writer_retry`, `_writer_faulted`, `_fenced`,
+   `_unsupported_harness`).
+4. **Fork, rebuild bound, project path** (PR B): a session that starts with history is read from its first sent
+   input (sub-agent files already there from their ends); the rebuild reads at most the latest 20,000 rows and says
+   so; the same session id under several project directories resolves to the agent's own workspace directory, else
+   the newest file, pinned for the session.
+5. **Not yet recorded**: an API error that arrives mid-turn after tool use, a retried 429/529, and `Failure` on
    Codex and Antigravity (schema only).
-5. **The text fallback for Antigravity delivery** and its turn boundaries remain the weakest part of the shared
+6. **The text fallback for Antigravity delivery** and its turn boundaries remain the weakest part of the shared
    abstraction (no turn-end row, no id on ordinary turns); revisit when its raw record is re-recorded.

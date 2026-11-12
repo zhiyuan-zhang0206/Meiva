@@ -1,11 +1,14 @@
 from __future__ import annotations
 
 import asyncio
+import os
+import re
 import shutil
 from pathlib import Path
 
 import pytest
 
+from base.lm.harness.claude.transcript.parse import ParseState, parse_row
 from base.lm.harness.claude.transcript.position import PositionLostError, decode
 from base.lm.harness.claude.transcript.reader import ClaudeRecordReader
 from base.lm.harness.claude.transcript.tests.support import (
@@ -13,7 +16,13 @@ from base.lm.harness.claude.transcript.tests.support import (
     entries_of,
     rows,
 )
-from base.lm.harness.session.transcript.entries import Anomaly, AnomalyKind, AnyEntry, ToolResult
+from base.lm.harness.session.transcript.entries import (
+    Anomaly,
+    AnomalyKind,
+    AnyEntry,
+    Notice,
+    ToolResult,
+)
 from base.lm.harness.session.transcript.ports import EntryBatch
 
 SYNC_AGENT = "af6798fb938fb227f"
@@ -298,3 +307,151 @@ def test_parsing_the_stored_rows_gives_the_entries_the_read_gave(tmp_path: Path)
     rebuilt = again.parse_stored(batch.rows)
     assert _keys(list(rebuilt)) == _keys(list(batch.entries))
     assert [e.order.seq for e in rebuilt] == [e.order.seq for e in batch.entries]
+
+
+def _user_row_uuid(scenario: str) -> tuple[int, str]:
+    for index, row in enumerate(rows(scenario)):
+        value = row.get("uuid")
+        if row.get("type") == "user" and isinstance(value, str):
+            return index, value
+    raise AssertionError("the scenario has no user row")
+
+
+# meiva:note
+# Starting part-way: the position just before the first row that names one of the wire ids (an input this
+# process sent), found by bytes alone; with no match the end of the record; a record with nothing in it has none.
+def test_a_record_with_history_can_be_started_just_before_the_first_row_of_an_input_we_sent(
+    tmp_path: Path,
+) -> None:
+    home, _ = _home(tmp_path, "basic")
+    sid = _session("basic")
+    reader = ClaudeRecordReader(claude_home=home, session_id=sid)
+    index, wire = _user_row_uuid("basic")
+    before = asyncio.run(reader.position_before("main", [wire]))
+    assert before is not None and decode(before).lines == index
+    rest = _read(reader, "main", before)
+    assert rest is not None and rest.entries
+    assert all(entry.order.seq >= index for entry in rest.entries)
+    end = asyncio.run(reader.position_before("main", ["not-in-the-record"]))
+    assert end is not None and decode(end).lines == len(rows("basic"))
+    assert _read(reader, "main", end) is None
+    assert asyncio.run(reader.position_before("main", [])) == end
+
+
+def test_a_start_before_the_first_row_is_no_position_and_a_partial_last_line_is_not_counted(
+    tmp_path: Path,
+) -> None:
+    home = tmp_path
+    folder = home / "projects" / "p"
+    folder.mkdir(parents=True)
+    rows_text = ['{"type":"user","uuid":"a1"}\n', '{"type":"user","uuid":"b2"}\n']
+    _ = (folder / "s1.jsonl").write_text("".join(rows_text) + '{"type":"user","uuid":"c3"')
+    reader = ClaudeRecordReader(claude_home=home, session_id="s1")
+    assert asyncio.run(reader.position_before("main", ["a1"])) is None
+    second = asyncio.run(reader.position_before("main", ["b2"]))
+    assert second is not None and decode(second).lines == 1
+    end = asyncio.run(reader.position_before("main", ["nope"]))
+    assert end is not None and decode(end).lines == 2
+    missing = ClaudeRecordReader(claude_home=tmp_path / "empty", session_id="x")
+    assert asyncio.run(missing.position_before("main", [])) is None
+
+
+def test_the_same_session_under_two_project_directories_reads_the_one_of_the_agents_workspace(
+    tmp_path: Path,
+) -> None:
+    home, target = _home(tmp_path, "basic")
+    sid = _session("basic")
+    workspace = tmp_path / "work" / "agent_7"
+    slug = re.sub(r"[^A-Za-z0-9]", "-", str(workspace))
+    own = home / "projects" / slug
+    own.mkdir(parents=True)
+    lines = target.read_text().splitlines(keepends=True)
+    _ = (own / f"{sid}.jsonl").write_text("".join(lines[:5]))
+    os.utime(own / f"{sid}.jsonl", (1, 1))
+    reader = ClaudeRecordReader(claude_home=home, session_id=sid, workspace=workspace)
+    batch = _read(reader, "main", None)
+    assert batch is not None and decode(batch.position).lines == 5
+    elsewhere = ClaudeRecordReader(claude_home=home, session_id=sid, workspace=tmp_path / "other")
+    newest = _read(elsewhere, "main", None)
+    assert newest is not None and decode(newest.position).lines == len(rows("basic"))
+    _ = (own / f"{sid}.jsonl").unlink()
+    with pytest.raises(PositionLostError):
+        _ = _read(reader, "main", batch.position)
+
+
+def test_a_session_id_that_is_not_known_yet_reads_nothing_until_it_is(tmp_path: Path) -> None:
+    home, _ = _home(tmp_path, "basic")
+    sid = _session("basic")
+    known: list[str | None] = [None]
+    reader = ClaudeRecordReader(claude_home=home, session_id=lambda: known[0])
+    assert asyncio.run(reader.records()) == () and _read(reader, "main", None) is None
+    known[0] = sid
+    assert asyncio.run(reader.records()) == ("main",)
+    assert _read(reader, "main", None) is not None
+    assert reader.wire_id("k") == ClaudeRecordReader(claude_home=home, session_id=sid).wire_id("k")
+
+
+# meiva:note
+# Row types a long real session (CLI 2.1.322) carries besides the conversation: titles, links, renames, file-history
+# deltas, the informational and stop-hook system rows and the context attachments. None is a conversation fact, so
+# none is an anomaly (an anomaly is reported once per type, and these are not the ones to report).
+def test_the_non_conversation_rows_of_a_long_session_are_ignored_not_reported() -> None:
+    stamp = "2026-11-12T09:00:00Z"
+    raws: list[dict[str, object]] = [
+        {"type": "ai-title", "aiTitle": "t"},
+        {"type": "custom-title", "customTitle": "t"},
+        {"type": "agent-name", "agentName": "n"},
+        {"type": "pr-link", "prNumber": 1},
+        {"type": "bridge-session", "x": 1},
+        {"type": "relocated", "x": 1},
+        {"type": "file-history-delta", "x": 1},
+        {"type": "system", "subtype": "informational", "uuid": "u1", "timestamp": stamp},
+        {"type": "system", "subtype": "stop_hook_summary", "uuid": "u2", "timestamp": stamp},
+    ]
+    for index, kind in enumerate(
+        ("deferred_tools_record", "instructions", "file", "task_status", "nested_memory")
+    ):
+        raws.append(
+            {
+                "type": "attachment",
+                "uuid": f"a{index}",
+                "timestamp": stamp,
+                "attachment": {"type": kind},
+            }
+        )
+    state = ParseState()
+    seen: list[AnyEntry] = []
+    for line, raw in enumerate(raws):
+        state, parsed = parse_row(state, raw, line=line)
+        seen.extend(parsed)
+    assert seen == []
+
+
+# meiva:note
+# A finished background command can reach a running turn as a `queued_command` attachment whose own `origin` says
+# `task-notification` (recorded live, CLI 2.1.322): the CLI telling the conversation something, never an input of
+# ours, so it is a notice that opens no turn and not a human input nobody sent.
+def test_a_notification_queued_into_a_running_turn_is_a_notice_and_not_an_unmatched_input() -> None:
+    prompt = (
+        "<task-notification><task-id>b1</task-id><tool-use-id>toolu_1</tool-use-id>"
+        "<status>completed</status><summary>done</summary></task-notification>"
+    )
+    row: dict[str, object] = {
+        "type": "attachment",
+        "uuid": "q1",
+        "timestamp": "2026-11-12T09:00:00Z",
+        "attachment": {
+            "type": "queued_command",
+            "prompt": prompt,
+            "source_uuid": "not-ours",
+            "origin": {"kind": "task-notification"},
+        },
+    }
+    _, parsed = parse_row(ParseState(), row, line=0)
+    [notice] = parsed
+    assert isinstance(notice, Notice)
+    assert notice.call_id == "toolu_1" and not notice.opens_turn
+    assert "Background task b1 completed" in notice.text
+    plain = {**row, "attachment": {"type": "queued_command", "prompt": "hi", "source_uuid": "w"}}
+    _, steered = parse_row(ParseState(), plain, line=1)
+    assert [type(entry).__name__ for entry in steered] == ["HumanInput"]

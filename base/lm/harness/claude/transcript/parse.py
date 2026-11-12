@@ -43,7 +43,9 @@ from base.lm.harness.session.transcript.entries import (
 # and context attachments listed below, the `isMeta` and compact-summary rows, the CLI's synthetic
 # `<synthetic>` assistant row ("No response requested.") and a sub-agent's prompt echo. A synthetic assistant row
 # with `isApiErrorMessage` is the CLI's record of an API error (`error`, `apiErrorStatus`): a `Failure`.
-# Not read yet: any `system` subtype other than `compact_boundary` and the attachment types of newer CLIs
+# Observed on a long real session and ignored on purpose too: title, link and rename rows, file-history deltas, the
+# `informational` and `stop_hook_summary` system subtypes and the context attachments of the second list below.
+# Not read yet: any other `system` subtype than `compact_boundary` and the attachment types of newer CLIs
 # are reported as anomalies; hook output, API error rows and `isApiErrorMessage` rows have no sample.
 # meiva:link base/lm/harness/docs/transcript-projection.md
 
@@ -57,6 +59,13 @@ _BOOKKEEPING = frozenset(
         "tools-used",
         "mode",
         "atis-latch",
+        "ai-title",
+        "custom-title",
+        "agent-name",
+        "pr-link",
+        "bridge-session",
+        "relocated",
+        "file-history-delta",
         "api-request",
         "api-request-shape",
         "api-request-blob",
@@ -79,8 +88,20 @@ _CONTEXT_ATTACHMENTS = frozenset(
         "remote_session_change",
         "prompt_snapshot",
         "mcp_instructions_delta",
+        "deferred_tools_record",
+        "instructions",
+        "file",
+        "silent_turn_reminder",
+        "task_status",
+        "edited_text_file",
+        "thinking_drop",
+        "compact_file_reference",
+        "command_permissions",
+        "nested_memory",
+        "read_truncation_notice",
     }
 )
+_IGNORED_SYSTEM = frozenset({"informational", "stop_hook_summary"})
 _ENDING_STOPS = frozenset({"end_turn", "max_tokens", "refusal", "stop_sequence"})
 _INTERRUPT_PREFIX = "[Request interrupted by user"
 _LOCAL_COMMAND_PREFIXES = ("<local-command-stdout>", "<local-command-caveat>")
@@ -202,6 +223,8 @@ def _system(row: _Row, raw: Mapping[str, object]) -> tuple[AnyEntry, ...]:
     subtype = raw.get("subtype")
     if subtype == "compact_boundary":
         return (Compaction(**_entry_fields(row)),)
+    if subtype in _IGNORED_SYSTEM:
+        return ()
     detail = f"system/{subtype}" if isinstance(subtype, str) else "system"
     return (
         Anomaly(
@@ -230,10 +253,22 @@ def _attachment(
         return state, (located,)
     row, state = located
     source, prompt = attachment.get("source_uuid"), attachment.get("prompt")
-    if not isinstance(source, str):
-        return state, (_missing(row, "attachment.source_uuid"),)
     if not isinstance(prompt, str):
         return state, (_missing(row, "attachment.prompt"),)
+    origin = attachment.get("origin")
+    origin_kind = origin.get("kind") if is_object_dict(origin) else None
+    if isinstance(origin_kind, str):
+        call_id, rendered = _notification(prompt)
+        notice = Notice(
+            **_entry_fields(row),
+            text=rendered,
+            cause=harness_cause(origin_kind),
+            call_id=call_id,
+            opens_turn=False,
+        )
+        return state, (notice,)
+    if not isinstance(source, str):
+        return state, (_missing(row, "attachment.source_uuid"),)
     steer = HumanInput(
         **_entry_fields(row),
         wire_id=source,

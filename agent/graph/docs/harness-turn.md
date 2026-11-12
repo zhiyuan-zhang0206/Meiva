@@ -60,6 +60,33 @@ delivered and recorded like a completed one), marks tools whose result is unavai
 reason when the harness faults. A host custody tick keeps the invocation
 owned while the provider is quiet. It produces no timeline activity.
 
+## Transcript-sourced timeline (setting on; default off)
+
+While an external Claude Code agent's `harness_transcript_timeline` setting is on, the timeline is not built from
+the adapter's events. The agent host builds a session-scoped writer with the runtime
+([`agent/harness_timeline`](../../harness_timeline/README.md)); it reads the CLI's own transcript by stored position,
+keeps the whitelisted rows in the database, and in one transaction per read appends keyed timeline items, settles
+the inbound rows the entries prove delivered and moves the position. What changes in this node when the context
+carries the writer (`ctx.harness_timeline`), and nothing else does:
+
+- The adapter events no longer write content: text, reasoning, tool and sub-agent events are not folded into items
+  (the adapter keeps mapping them, for the live overlay of the plan), and an input's echo (`InputInContext`) no
+  longer writes its entries or settles its row; the writer does both from the record, so the timeline and the inbox
+  never disagree.
+- The invocation registers what it hands over (`register_input`, before `deliver()`), delivers the inbox as before,
+  and ends a turn by waiting in the writer until the record shows the turn's closing entry, or stays quiet for 1 s,
+  or 5 s have passed; a missing closing entry is the event `harness_timeline_turn_end_unseen`, never a failure. A
+  turn whose result reports an error ends with that error.
+- Usage is logged by the writer, once per model message (`message.id`), not from the turn's result frame: the main
+  agent's as `usage_kind="agent"` and a sub-agent's as `usage_kind="agent_subagent"` with `parent_call_id`, priced on
+  its own model. The sub-agents' tokens are therefore counted; the figure rises by exactly that spend.
+- A stop's passive note still rides into the CLI with the next input but writes no timeline entry of its own; the
+  record's own interrupt row is the only "interrupted" marker, and the early write of #8911 does not apply.
+- Failure and restart: see [foreground input and cancellation](harness-foreground.md#transcript-sourced-agents).
+
+With the setting off, none of this exists and the path above is unchanged. The setting and the event-sourced path
+are deleted when all three CLIs have cut over.
+
 ## The bridge
 
 `bridge.py` holds one adapter session per runtime (`AgentRuntime.harness_bridge`),
@@ -114,6 +141,9 @@ once. A switch across the native checkpoint and external display stores also
 records a handoff in the outgoing history.
 
 ## Cost and usage
+
+This section describes the adapter-event path (setting off); a transcript-sourced agent logs usage per model
+message from the record, see above.
 
 Each non-replayed terminal result with observed usage logs the same `llm_usage` row the built-in loop logs, with
 `usage_kind="agent"` and `source` set to the harness name, so the two runtimes

@@ -16,7 +16,10 @@ from base.lm.harness.session.transcript.entries import AnyEntry
 # first read after a crash is the same code as every other read. `parse_stored` reads stored rows of one record,
 # in ordinal order, with the same parser, which is how the projector's state is rebuilt after a restart and
 # how a session is re-projected from the database; it carries the parser's own state across calls. `None` means nothing new. A position
-# the record no longer contains is an error, never a restart from the beginning.
+# the record no longer contains is an error, never a restart from the beginning. `position_before` is the one
+# way to start a record part-way: the position just before the first row that carries one of the given wire ids
+# (the id of an input we sent), or the end of the record when none does, or None for a record with nothing in
+# it; a session whose record already holds history reads from there, so the history is not projected again.
 # meiva:link base/lm/harness/docs/transcript-projection.md
 
 
@@ -45,3 +48,7 @@ class RecordReader(Protocol):
     def records(self) -> Awaitable[tuple[str, ...]]: ...
 
     def parse_stored(self, rows: Sequence[StoredRow]) -> tuple[AnyEntry, ...]: ...
+
+    def wire_id(self, key: str) -> str: ...
+
+    def position_before(self, record: str, wire_ids: Sequence[str]) -> Awaitable[str | None]: ...

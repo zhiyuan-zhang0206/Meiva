@@ -5,14 +5,24 @@
 from __future__ import annotations
 
 import asyncio
-from collections.abc import Callable, Mapping, Sequence
+import os
+from collections.abc import AsyncGenerator, Callable, Mapping, Sequence
 from contextlib import suppress
+from unittest.mock import MagicMock
 
 import psycopg
+import pytest
+from langchain_core.runnables import RunnableConfig
+from langgraph.runtime import Runtime
 from psycopg_pool import AsyncConnectionPool
 
+from base.agents.context import HostedTurnResources, MeivaContext
 from base.agents.history.harness_messages import aload_harness_timeline_items
 from base.api_contracts.agent_contract import Harness
+from base.clock import Clock
+from base.config.tests.configuration import defaults
+from base.events.live.publisher import AgentEventPublisher
+from base.host.env.agent_slices import AgentSlices
 from base.lm.harness import (
     BridgeEvent,
     HarnessInput,
@@ -25,15 +35,22 @@ from base.lm.harness import (
     TurnStarted,
     Usage,
 )
+from base.native_process.turn_identity import HostedServiceResources
+from base.packages.composer_commands import CommandCatalog
+from base.packages.plugin_providers import build_model_catalog
+from base.paths import meiva_home
 
 __all__ = [
     "FakeEngine",
     "FakeSubscription",
     "completed",
+    "config",
+    "hosted_resources",
     "in_a_turn",
     "input_key",
     "insert_row",
     "row_status",
+    "runtime",
     "silent_engine",
     "timeline_inbound_ids",
     "wait_until",
@@ -254,3 +271,45 @@ async def timeline_inbound_ids(pool: AsyncConnectionPool, agent_id: int) -> list
     async with pool.connection() as conn:
         items = await aload_harness_timeline_items(conn, agent_id)
     return [item.inbound_id for item in items if item.kind == "inbound_chat"]
+
+
+ENVIRON = dict(os.environ)
+
+
+def runtime(
+    engine: FakeEngine | None,
+    *,
+    ops_pool: AsyncConnectionPool | None = None,
+    hosted_resources: HostedTurnResources | None = None,
+    publisher: AgentEventPublisher | None = None,
+) -> Runtime[MeivaContext]:
+    return Runtime(
+        context=MeivaContext(
+            meiva_home=meiva_home(),
+            ops_pool=ops_pool,
+            hosted_resources=hosted_resources,
+            harness=Harness.CLAUDE_CODE if engine is not None else Harness.MEIVA,
+            harness_bridge=engine,
+            llm=MagicMock(),
+            event_publisher=publisher or MagicMock(),
+            agent=AgentSlices.resolve(default_reader=defaults()),
+            catalog=build_model_catalog(home=meiva_home()),
+            commands=CommandCatalog.system(skills=list, home=meiva_home()),
+            clock_factory=Clock.from_settings,
+            environ=ENVIRON,
+        )
+    )
+
+
+@pytest.fixture
+async def hosted_resources() -> AsyncGenerator[HostedTurnResources]:
+    """An explicit service owns the turn's watcher until the test finishes."""
+    service = HostedServiceResources()
+    try:
+        yield await service.turn()
+    finally:
+        await service.aclose()
+
+
+def config(agent_id: int = 6984) -> RunnableConfig:
+    return {"configurable": {"thread_id": str(agent_id)}}

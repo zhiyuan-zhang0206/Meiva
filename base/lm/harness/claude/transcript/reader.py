@@ -2,12 +2,14 @@ from __future__ import annotations
 
 import asyncio
 import hashlib
-from collections.abc import Sequence
+import re
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 from typing import BinaryIO
 
-from base.lm.harness.claude.reconciliation.transcript import transcript_path
+from base.lm.harness.claude.delivery import key_uuid
+from base.lm.harness.claude.reconciliation.transcript import claude_home as resolve_claude_home
 from base.lm.harness.claude.transcript.parse import ParseState, parse_row
 from base.lm.harness.claude.transcript.position import (
     BAD_DEPTH,
@@ -19,6 +21,7 @@ from base.lm.harness.claude.transcript.position import (
     advance,
     decode,
     encode,
+    row_digest,
     rows_after,
     verify,
 )
@@ -68,17 +71,37 @@ class ClaudeRecordReader:
         self,
         *,
         claude_home: Path,
-        session_id: str,
+        session_id: str | Callable[[], str | None],
+        workspace: Path | None = None,
         max_batch_bytes: int = MAX_BATCH_BYTES,
         max_row_bytes: int = MAX_ROW_BYTES,
     ) -> None:
         self._home = claude_home
-        self._session_id = session_id
+        self._session_source = (lambda: session_id) if isinstance(session_id, str) else session_id
+        self._workspace = workspace
+        self._pinned: tuple[str, Path] | None = None
         self._max_batch = max_batch_bytes
         self._max_row = max_row_bytes
         self._states: dict[str, dict[str, ParseState]] = {}
         self._stored_states: dict[str, ParseState] = {}
         self.bytes_read = 0
+
+    @classmethod
+    def for_session(
+        cls,
+        *,
+        environ: Mapping[str, str],
+        workspace: Path,
+        session_id: Callable[[], str | None],
+    ) -> ClaudeRecordReader:
+        return cls(
+            claude_home=resolve_claude_home(None, environ),
+            session_id=session_id,
+            workspace=workspace,
+        )
+
+    def wire_id(self, key: str) -> str:
+        return key_uuid(key)
 
     def parse_stored(self, rows: Sequence[StoredRow]) -> tuple[AnyEntry, ...]:
         entries: list[AnyEntry] = []
@@ -95,20 +118,75 @@ class ClaudeRecordReader:
     async def read_after(self, record: str, position: str | None) -> EntryBatch | None:
         return await asyncio.to_thread(self._read, record, position)
 
+    # meiva:note
+    # The session's own file, `projects/<project>/<session id>.jsonl`. The session id is unique, but the CLI can
+    # leave the same one under several project directories (a resume from another working directory copies the
+    # file). The directory of the agent's own workspace wins; otherwise the most recently written file does; and the
+    # choice is pinned for the session, so the reader never moves from one file to another under a stored position
+    # (a pinned file that disappears is a lost position, not a reason to look elsewhere). A new session id forgets
+    # the pin.
     def _main(self) -> Path | None:
-        return transcript_path(self._home, self._session_id)
+        sid = self._session_source()
+        if sid is None:
+            return None
+        if self._pinned is not None and self._pinned[0] == sid:
+            return self._pinned[1]
+        matches = sorted((self._home / "projects").glob(f"*/{sid}.jsonl"))
+        if not matches:
+            return None
+        chosen = self._preferred(matches)
+        self._pinned = (sid, chosen)
+        return chosen
+
+    def _preferred(self, matches: list[Path]) -> Path:
+        if len(matches) == 1:
+            return matches[0]
+        if self._workspace is not None:
+            slug = re.sub(r"[^A-Za-z0-9]", "-", str(self._workspace))
+            own = [path for path in matches if path.parent.name == slug]
+            if own:
+                return own[0]
+        return max(matches, key=lambda path: (path.stat().st_mtime_ns, str(path)))
 
     def _path(self, record: str) -> Path | None:
         main = self._main()
         if record == MAIN_RECORD or main is None:
             return main
-        return main.parent / self._session_id / "subagents" / f"agent-{record}.jsonl"
+        return main.parent / main.stem / "subagents" / f"agent-{record}.jsonl"
+
+    async def position_before(self, record: str, wire_ids: Sequence[str]) -> str | None:
+        return await asyncio.to_thread(self._position_before, record, tuple(wire_ids))
+
+    # meiva:note
+    # Where to start a record that already holds history: just before the first row that mentions one of the wire ids
+    # (the first row of an input this process sent), or at the end of the last complete row when none does. Only
+    # bytes are compared (a row that names the id anywhere), so the history is not decoded; the position is counted
+    # the way a read counts it (every non-blank complete line is one row). A record with no complete row has no
+    # position, and is read from its start.
+    def _position_before(self, record: str, wire_ids: tuple[str, ...]) -> str | None:
+        path = self._path(record)
+        if path is None or not path.is_file():
+            return None
+        needles = tuple(wire.encode() for wire in wire_ids)
+        offset = rows = start = end = 0
+        last = b""
+        with path.open("rb") as handle:
+            for line in handle:
+                if not line.endswith(b"\n") or any(needle in line for needle in needles):
+                    break
+                if line.strip():
+                    rows += 1
+                    start, end, last = offset, offset + len(line), line
+                offset += len(line)
+        if rows == 0:
+            return None
+        return encode(Position(start=start, offset=end, lines=rows, sha256=row_digest(last)))
 
     def _records(self) -> tuple[str, ...]:
         main = self._main()
         if main is None:
             return ()
-        folder = main.parent / self._session_id / "subagents"
+        folder = main.parent / main.stem / "subagents"
         children = sorted(
             path.name.removeprefix("agent-").removesuffix(".jsonl")
             for path in (folder.glob("agent-*.jsonl") if folder.is_dir() else ())

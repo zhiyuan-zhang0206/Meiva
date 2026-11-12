@@ -256,3 +256,26 @@ def test_scrub_survives_nesting_deeper_than_the_stack() -> None:
     while isinstance(node, list):
         node = node[0]
     assert node == "leaf"
+
+
+def test_a_queued_notification_keeps_the_kind_of_its_origin_and_nothing_else_of_it() -> None:
+    raw = {
+        "type": "attachment",
+        "uuid": "q1",
+        "timestamp": "2026-11-12T09:00:00Z",
+        "attachment": {
+            "type": "queued_command",
+            "prompt": "p",
+            "source_uuid": "s",
+            "origin": {"kind": "task-notification", "accountUuid": "acct"},
+            "runId": "r",
+        },
+    }
+    kept = stored_row(raw, subagent=False)
+    assert kept is not None
+    assert kept["attachment"] == {
+        "type": "queued_command",
+        "source_uuid": "s",
+        "origin": {"kind": "task-notification"},
+        "prompt": "p",
+    }

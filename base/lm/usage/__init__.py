@@ -91,6 +91,7 @@ class UsageFields:
     source: str | None = None
     for_agent_id: int | None = None
     calls: int = 1
+    parent_call_id: str | None = None
 
 
 def log_usage_from_message(
@@ -191,6 +192,7 @@ def log_usage_fields(
             source=fields.source,
             for_agent_id=fields.for_agent_id,
             calls=fields.calls,
+            parent_call_id=fields.parent_call_id,
             catalog=catalog,
             now=now,
         )
@@ -266,6 +268,7 @@ class _UsageEvent:
     cache_write_30m: int = 0
     attribution: str | None = None
     calls: int = 1
+    parent_call_id: str | None = None
 
 
 def _log_usage(
@@ -350,18 +353,28 @@ def _log_usage(
         event="llm_usage",
         calls=event.calls,
         reason_pct=reason_pct,
-        **({"requested_model": event.requested_model} if event.requested_model is not None else {}),
         latency_ms=event.latency_ms,
         decode_ms=event.decode_ms,
         usage_kind=event.usage_kind,
-        **(
-            {"source": event.source, "transport_source": "system"}
-            if event.source is not None
-            else {}
-        ),
+        **_optional_fields(event),
         **record,
     )
     return event.in_total + event.out_total, priced.cost_usd if priced is not None else 0.0
+
+
+# meiva:note
+# The `llm_usage` fields a call carries only when it has them: the model it asked for, the source that stands for a
+# shared text caller or an external harness (with the transport provenance), and the call a sub-agent's spend
+# belongs to.
+def _optional_fields(event: _UsageEvent) -> dict[str, object]:
+    fields: dict[str, object] = {}
+    if event.requested_model is not None:
+        fields["requested_model"] = event.requested_model
+    if event.source is not None:
+        fields.update(source=event.source, transport_source="system")
+    if event.parent_call_id is not None:
+        fields["parent_call_id"] = event.parent_call_id
+    return fields
 
 
 MEIVA_BILLING_ATTR_LINE = "meiva.billing.line"

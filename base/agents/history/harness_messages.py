@@ -629,3 +629,37 @@ def harness_item_to_message(item: TimelineItem) -> BaseMessage:
 def harness_timeline_to_full_history(items: Sequence[TimelineItem]) -> FullHistory:
     messages = [harness_item_to_message(item) for item in items]
     return single_segment_history(messages)
+
+
+# meiva:note
+# Whether the agent's timeline has any item yet: how the writer tells an agent with a history (one that was on
+# the event path, a fork that inherited its parent's) from a fresh one when it starts on a session.
+async def ahas_harness_timeline(conn: AsyncConnection, agent_id: int) -> bool:
+    cursor = await conn.execute(
+        "SELECT EXISTS (SELECT 1 FROM agent_harness_messages WHERE agent_id = %s)", (agent_id,)
+    )
+    row = await cursor.fetchone()
+    return bool(row and row[0])
+
+
+# meiva:note
+# The ordinal below which a rebuild may skip stored rows so it reads at most the latest `keep` rows after
+# `after_ordinal`: the `keep + 1`-th row from the end of the record, or None when fewer than that remain. One
+# bounded index walk from the end of the record, so the cost is `keep` and not the length of the record.
+async def aload_transcript_row_floor(
+    conn: AsyncConnection,
+    agent_id: int,
+    session_id: str,
+    record: str,
+    *,
+    after_ordinal: int,
+    keep: int,
+) -> int | None:
+    cursor = await conn.execute(
+        "SELECT ordinal FROM agent_harness_transcript_rows "
+        "WHERE agent_id = %s AND session_id = %s AND record = %s AND ordinal > %s "
+        "ORDER BY ordinal DESC OFFSET %s LIMIT 1",
+        (agent_id, session_id, record, after_ordinal, keep),
+    )
+    row = await cursor.fetchone()
+    return None if row is None else _int_from_row(row)
