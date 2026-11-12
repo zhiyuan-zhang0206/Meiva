@@ -1,15 +1,17 @@
-exports = []
+exports = ["reader.py", "tests"]
 
 [uses]
 "__init__.py" = []
 "parse.py" = []
 "position.py" = []
-"reader.py" = ["parse.py", "position.py"]
-"tests" = ["parse.py", "position.py", "reader.py"]
+"store_filter.py" = []
+"reader.py" = ["parse.py", "position.py", "store_filter.py"]
+"tests" = ["parse.py", "position.py", "reader.py", "store_filter.py"]
 
 [purity]
 "." = "strict"
 "__init__.py" = "strict"
 "parse.py" = "strict"
 "position.py" = "strict"
+"store_filter.py" = "strict"
 "reader.py" = { mode = "none", why = "the file shell of the Claude transcript reader: it finds the session's JSONL under the injected Claude home, seeks to the stored byte offset, reads the bytes past it and hands them to the strict position and parse modules, which decide what a complete row is, whether the position still holds and what each row means" }

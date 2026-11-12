@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from collections.abc import Awaitable
+from collections.abc import Awaitable, Mapping
 from dataclasses import dataclass
 from typing import Protocol
 
@@ -18,11 +18,23 @@ from base.lm.harness.session.transcript.entries import AnyEntry
 # meiva:link base/lm/harness/docs/transcript-projection.md
 
 
+# meiva:note
+# One row of the CLI's record as it is kept in our database: the whitelisted, filtered raw row and its own
+# `ordinal` in the record (sparse: rows off the whitelist are not stored). The projection reads entries
+# from the CLI's rows; the stored rows are what it is re-run from after a restart or a parser fix.
+@dataclass(frozen=True, slots=True)
+class StoredRow:
+    record: str
+    ordinal: int
+    row: Mapping[str, object]
+
+
 @dataclass(frozen=True, slots=True)
 class EntryBatch:
     record: str
     entries: tuple[AnyEntry, ...]
     position: str
+    rows: tuple[StoredRow, ...] = ()
 
 
 class RecordReader(Protocol):

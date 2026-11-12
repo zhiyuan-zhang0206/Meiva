@@ -35,7 +35,9 @@ async def _append(
     url: str, agent_id: int, keyed: list[tuple[str, TimelineItem]]
 ) -> list[TimelineItem]:
     async with await AsyncConnection.connect(url) as conn:
-        written = await aappend_keyed_timeline_items(conn, agent_id, "claude_code", keyed)
+        written = await aappend_keyed_timeline_items(
+            conn, agent_id, "claude_code", keyed, projection_version=1
+        )
         await conn.commit()
         return written
 

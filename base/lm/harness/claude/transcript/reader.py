@@ -15,8 +15,9 @@ from base.lm.harness.claude.transcript.position import (
     rows_after,
     verify,
 )
+from base.lm.harness.claude.transcript.store_filter import stored_row
 from base.lm.harness.session.transcript.entries import MAIN_RECORD, AnyEntry
-from base.lm.harness.session.transcript.ports import EntryBatch
+from base.lm.harness.session.transcript.ports import EntryBatch, StoredRow
 
 # meiva:note
 # The one reader of a Claude session's transcript: it implements `RecordReader` by reading the CLI's local
@@ -33,6 +34,7 @@ class ClaudeRecordReader:
         self._home = claude_home
         self._session_id = session_id
         self._states: dict[str, ParseState] = {}
+        self.bytes_read = 0
 
     async def records(self) -> tuple[str, ...]:
         return await asyncio.to_thread(self._records)
@@ -73,17 +75,24 @@ class ClaudeRecordReader:
             return None
         state = self._states.get(record, ParseState())
         entries: list[AnyEntry] = []
+        kept: list[StoredRow] = []
         for index, row in enumerate(rows):
-            state, parsed = parse_row(state, row.row, line=position.lines + index)
+            ordinal = position.lines + index
+            state, parsed = parse_row(state, row.row, line=ordinal)
             entries.extend(parsed)
+            if (filtered := stored_row(row.row)) is not None:
+                kept.append(StoredRow(record, ordinal, filtered))
         self._states[record] = state
-        return EntryBatch(record, tuple(entries), encode(advance(position, rows)))
+        return EntryBatch(record, tuple(entries), encode(advance(position, rows)), tuple(kept))
 
-    @staticmethod
-    def _bytes_after(path: Path, position: Position) -> bytes:
+    def _bytes_after(self, path: Path, position: Position) -> bytes:
         with path.open("rb") as handle:
             if position.lines:
                 _ = handle.seek(position.start)
-                verify(position, handle.read(position.offset - position.start))
+                span = handle.read(position.offset - position.start)
+                verify(position, span)
+                self.bytes_read += len(span)
             _ = handle.seek(position.offset)
-            return handle.read()
+            data = handle.read()
+            self.bytes_read += len(data)
+            return data
