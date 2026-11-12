@@ -1,30 +1,35 @@
 from __future__ import annotations
 
+import json
 import shlex
 from collections.abc import Callable, Collection, Iterable
 from dataclasses import dataclass
 from urllib.parse import unquote, urlparse
 
 from base.host.boundary.json_values import is_object_dict, is_object_list
+from base.host.boundary.untyped import object_of
 from base.lm.harness.codex.transcript.clock import iso_at, parse_iso_ms
 from base.lm.harness.codex.transcript.errors import MissingFieldError, UnknownValueError
 from base.lm.harness.codex.transcript.items import (
-    Where,
     as_anomaly,
+    failure_entry,
     interrupt_entry,
     item_entries,
     remember_inputs,
     turn_end_entry,
 )
+from base.lm.harness.codex.transcript.place import Where
 from base.lm.harness.codex.transcript.scalars import opt_int, opt_text, req_int, text
 from base.lm.harness.codex.transcript.shapes import Obj, obj, objects, opt_objects, strings
 from base.lm.harness.events import HarnessCause, Usage
 from base.lm.harness.session.transcript.entries import (
     AgentText,
     AnyEntry,
+    Failure,
     Notice,
     Order,
     TokenUsage,
+    TurnEnd,
 )
 
 # meiva:note
@@ -107,10 +112,21 @@ def _event(payload: Obj, at: Stamp, record: str, input_turns: Collection[str]) -
     if kind == "item_completed":
         return _item_completed(payload, at, record, input_turns)
     if kind == "task_complete":
-        return [turn_end_entry(text(payload, "turn_id"), at.ms, at.seq, record)]
+        return [_completion(payload, at, record)]
     if kind == "turn_aborted":
         return [interrupt_entry(text(payload, "turn_id"), at.ms, at.seq, record)]
     raise UnknownValueError(f"event_msg/{kind}")
+
+
+# meiva:note
+# A turn that failed still writes `task_complete`, with the failure in its `error` object (the nonexistent-model
+# recording): that is the turn's failure, not its end, and it is what closes the turn.
+def _completion(payload: Obj, at: Stamp, record: str) -> TurnEnd | Failure:
+    turn = text(payload, "turn_id")
+    error = payload.get("error")
+    if is_object_dict(error):
+        return failure_entry(turn, text(error, "message"), at.ms, at.seq, record)
+    return turn_end_entry(turn, at.ms, at.seq, record)
 
 
 def _item_completed(
@@ -172,7 +188,7 @@ def _message(payload: Obj, at: Stamp, record: str) -> list[AnyEntry]:
         )
         return [message]
     if role == "user" and body.lstrip().startswith(_NOTIFICATION):
-        report = body.strip().removeprefix(_NOTIFICATION).removesuffix(_NOTIFICATION_END).strip()
+        report = _report(body.strip().removeprefix(_NOTIFICATION).removesuffix(_NOTIFICATION_END))
         return [
             Notice(
                 key=f"notice:{text(payload, 'id')}",
@@ -184,6 +200,25 @@ def _message(payload: Obj, at: Stamp, record: str) -> list[AnyEntry]:
             )
         ]
     return []
+
+
+# meiva:note
+# The report a finished child leaves in its parent is a small JSON object (`{"agent_path": <thread>, "status":
+# {"completed": "<its last message>"}}`); it is shown as a sentence when it has that shape and as the text it is
+# otherwise.
+def _report(body: str) -> str:
+    report = body.strip()
+    try:
+        found = object_of(json.loads, report)
+    except ValueError:
+        return report
+    status = found.get("status") if is_object_dict(found) else None
+    path = found.get("agent_path") if is_object_dict(found) else None
+    if not isinstance(path, str) or not is_object_dict(status) or len(status) != 1:
+        return report
+    ((state, message),) = status.items()
+    detail = f": {message}" if isinstance(message, str) and message else ""
+    return f"Sub-agent {path} {state}{detail}"
 
 
 def _usage(payload: Obj, at: Stamp, record: str, _input_turns: Collection[str]) -> list[AnyEntry]:

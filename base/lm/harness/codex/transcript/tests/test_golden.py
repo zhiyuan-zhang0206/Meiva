@@ -324,9 +324,7 @@ def test_g_the_sub_agent_report_is_a_notice_and_its_spend_stays_apart() -> None:
     rollout = parse_rollout(load_lines("subagent/rollout.jsonl"), record=MAIN_RECORD)
     (notice,) = _of(rollout, Notice)
     assert notice.cause is HarnessCause.BACKGROUND_TASK
-    assert notice.text == (
-        '{"agent_path":"01a1cefe-574e-79f2-a985-5e66bedfa3a6","status":{"completed":"BETA"}}'
-    )
+    assert notice.text == "Sub-agent 01a1cefe-574e-79f2-a985-5e66bedfa3a6 completed: BETA"
     # meiva:note
     # The child's own rollout was not recorded. A sample of the parent's file read as the child's
     # (with its own response id) stands in for it, to show the record keeps the two tallies apart.
@@ -372,13 +370,16 @@ def test_i_an_unknown_item_type_is_skipped_and_reported_once_per_type() -> None:
     rows = page_rows(page)
     row_item(rows[1])["type"] = "holographicNote"
     row_item(rows[4])["type"] = "holographicNote"
-    row_item(rows[5])["type"] = "webSearch"
+    row_item(rows[5])["type"] = "holographicLedger"
     entries = parse_items_page(page)
-    assert {entry.detail for entry in _of(entries, Anomaly)} == {"holographicNote", "webSearch"}
+    assert {entry.detail for entry in _of(entries, Anomaly)} == {
+        "holographicNote",
+        "holographicLedger",
+    }
     projector, projection = project(entries, sent("cid-s1-a", "first"), sent("cid-s1-b", "second"))
     assert sorted((a.anomaly, a.detail) for a in projection.anomalies) == [
+        (AnomalyKind.UNKNOWN_TYPE, "holographicLedger"),
         (AnomalyKind.UNKNOWN_TYPE, "holographicNote"),
-        (AnomalyKind.UNKNOWN_TYPE, "webSearch"),
     ]
     assert not any("holographic" in draft.payload for draft in projection.drafts)
     again = projector.feed(entries)

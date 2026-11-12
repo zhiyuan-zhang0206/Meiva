@@ -2,16 +2,16 @@ from __future__ import annotations
 
 from collections.abc import Collection
 
-from base.lm.harness.codex.transcript.clock import iso_at
 from base.lm.harness.codex.transcript.errors import MissingFieldError, UnknownValueError
 from base.lm.harness.codex.transcript.items import (
-    Where,
     as_anomaly,
+    failure_entry,
     interrupt_entry,
     item_entries,
     remember_inputs,
     turn_end_entry,
 )
+from base.lm.harness.codex.transcript.place import Where
 from base.lm.harness.codex.transcript.rollout import parse_rollout, parse_rollout_line
 from base.lm.harness.codex.transcript.scalars import opt_int, req_int, text
 from base.lm.harness.codex.transcript.shapes import Obj, obj, objects, opt_objects
@@ -25,9 +25,11 @@ from base.lm.harness.session.transcript.entries import (
 )
 
 __all__ = [
+    "parse_item_row",
     "parse_items_page",
     "parse_rollout",
     "parse_rollout_line",
+    "parse_stored_row",
     "parse_thread_read",
     "parse_turns",
 ]
@@ -46,13 +48,16 @@ __all__ = [
 # known one lacking a field the projection needs an `Anomaly(MISSING_FIELD)`; rows the parser knows to
 # be bookkeeping give nothing.
 #
-# Item types not read yet (they report as UNKNOWN_TYPE): hookPrompt, functionCallOutput, plan,
-# fileChange, mcpToolCall, dynamicToolCall, subAgentActivity, webSearch, imageView, sleep,
-# imageGeneration, enteredReviewMode, exitedReviewMode. Rollout rows not read: `event_msg` kinds other
-# than item_completed / task_complete / turn_aborted and the quiet ones in `rollout.py`, any
-# `response_item` kind other than message / reasoning and the tool-call kinds, and the rollout items
-# that mirror the unread types above. A turn's `error` is read for `failed` turns only; no recording
-# of a failed turn, a server-started turn, an MCP call or a file change exists to check them against.
+# Item types read: every one of the protocol's thread items has a home. Messages, reasoning, commands,
+# collab calls and compaction are in `items.py`; edits, MCP and dynamic tool calls, web search, image
+# view and generation, sleep, plans and review mode are in `tools.py`, and hook prompts, function-call
+# outputs and sub-agent activity records are known and give nothing (the model's own bookkeeping). Only
+# `commandExecution`, `collabAgentToolCall` and the messages were checked against a recording; the rest
+# follow the schema (`codex app-server generate-json-schema`, 0.166.0) and have no recording. Rollout
+# rows not read: `event_msg` kinds other than item_completed / task_complete / turn_aborted and the quiet
+# ones in `rollout.py`, any `response_item` kind other than message / reasoning and the tool-call kinds,
+# and the rollout items that mirror the types of `tools.py`. A turn's `error` closes it as a failure,
+# from `turn.status` in the history and from `task_complete.error` in the rollout.
 # meiva:link base/lm/harness/docs/transcript-projection.md
 
 
@@ -70,6 +75,24 @@ def parse_items_page(
         remember_inputs(read, opened)
         entries.extend(read)
     return entries
+
+
+# meiva:note
+# One row as the reader keeps it: a history row (`thread/items/list` entry) or a rollout line, told apart by the
+# `item` key a history row has. `seq` is the row's ordinal in its record; `opened` carries the turns whose first
+# input has been read across calls, which is how a steer is told from the input that opened its turn.
+def parse_item_row(row: Obj, seq: int, record: str, opened: set[str]) -> list[AnyEntry]:
+    read = _row_entries(row, seq, record, opened)
+    remember_inputs(read, opened)
+    return read
+
+
+def parse_stored_row(row: Obj, seq: int, record: str, opened: set[str]) -> list[AnyEntry]:
+    if "item" in row:
+        return parse_item_row(row, seq, record, opened)
+    read = parse_rollout_line(row, record=record, input_turns=opened)
+    remember_inputs(read, opened)
+    return read
 
 
 def _row_entries(row: Obj, seq: int, record: str, opened: Collection[str]) -> list[AnyEntry]:
@@ -184,17 +207,8 @@ def _closing_entry(
         case "interrupted":
             return interrupt_entry(turn_id, at_ms, seq, record)
         case "failed":
-            return _failure(turn, turn_id, at_ms, seq, record)
+            return failure_entry(
+                turn_id, text(obj(turn.get("error"), "error"), "message"), at_ms, seq, record
+            )
         case _:
             raise UnknownValueError(f"turn.status={status}")
-
-
-def _failure(turn: Obj, turn_id: str, at_ms: int | None, seq: int, record: str) -> Failure:
-    return Failure(
-        key=f"failure:{turn_id}",
-        order=Order(seq, 0),
-        record=record,
-        turn=turn_id,
-        at=None if at_ms is None else iso_at(at_ms),
-        message=text(obj(turn.get("error"), "error"), "message"),
-    )

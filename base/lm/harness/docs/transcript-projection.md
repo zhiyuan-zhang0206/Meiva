@@ -59,14 +59,30 @@ expires the rows older than 30 days that lie before their record's rebuild point
 `agent/harness_timeline/store.py` (the writer's database operations; `aappend_keyed_timeline_items` for a single marker is in `base/agents/history/harness_messages.py`). A reader returns the rows to store with each
 batch and parses stored rows back with `parse_stored`.
 
+`codex/transcript/reader.py` (`CodexRecordReader`) is the Codex `RecordReader`. A Codex thread has no file the reader may
+tail by itself (the rollout is not a published format), so it reads the protocol's own history: `thread/items/list`, over
+the session's own app-server connection (`link.py`), by an opaque cursor the server gave. It never asks for a thread's
+whole history (`thread/read`, `thread/resume` with turns): a read is the newest eight items (`TAIL_ITEMS`), which hold the last
+item read when the position is up to date, or the next page of at most 32 (`PAGE_ITEMS`) after the stored cursor when it is
+behind (`history.py` decides which, `position.py` is what is stored: the cursor, whether it is at the last item read, that
+item's id, the next row ordinal and the rollout's byte span). A cursor at the last item read yields that item first, which is
+the check that the history still holds what was read; a history that does not is a lost position. The rollout is read from
+its stored byte offset for what the history lacks (`rollout_tail.py`: a turn's end or abort, a failure's error, a sample's
+token usage, a finished child's report; every other line is passed over without being decoded), after the items reached
+the end of the history and from a snapshot taken before they were asked for, so a turn's end is never read before its last
+item. The main thread and each child thread a `spawnAgent` call started are records; a child is read while notifications
+name it and until a read of it brings nothing. A read with nothing to bring costs a `stat` of the rollout. What is stored
+is `codex/transcript/store_filter.py` (history rows by item type and rollout lines by kind, the same caps as Claude's).
+The Codex reader was written after the Claude one and shares its position, tail and stored-text helpers (`session/jsonl/`).
+
 ## Native records and the vocabulary
 
 | Entry | Claude Code transcript | Codex history items (rollout for the rest) | Antigravity `transcript_full.jsonl` |
 |---|---|---|---|
 | `HumanInput` | `user` row whose `uuid` is ours; `attachment/queued_command.source_uuid` for an absorbed one | `userMessage.clientId`; a second user input of the same turn is a steer | `USER_INPUT` (text inside `<USER_REQUEST>`); no id unless the trajectory's `clientMessageId` is supplied |
 | `AgentText` | `assistant` text block (one block per row, blocks share `message.id`); `isAbortedMidStream` is incomplete | `agentMessage` (whole, at completion) | `PLANNER_RESPONSE.content` |
-| `Reasoning` | `thinking` block, `thinkingDurationMs` | `reasoning` item, text empty (encrypted) | `PLANNER_RESPONSE.thinking`, high-thinking tier only |
-| `ToolCall` | `tool_use` block | `commandExecution`, `spawnAgent` and other items, completed state only | `PLANNER_RESPONSE.tool_calls[k]` (no id; id is `step:k`) |
+| `Reasoning` | `thinking` block, `thinkingDurationMs` | `reasoning` item, text empty (encrypted); a `plan` item is shown as reasoning | `PLANNER_RESPONSE.thinking`, high-thinking tier only |
+| `ToolCall` | `tool_use` block | `commandExecution`, `spawnAgent` and other collab calls, `fileChange` (`patch`), `mcpToolCall` (`mcp:<server>/<tool>`), `dynamicToolCall`, `webSearch`, `imageView`, `sleep`, `imageGeneration`; completed state only | `PLANNER_RESPONSE.tool_calls[k]` (no id; id is `step:k`) |
 | `ToolResult` | `tool_result` block of a `user` row (`toolDenialKind`, `toolUseResult.backgroundTaskId`) | the same item as its call | `GENERIC` row at `step + 1 + k`; `RUNNING` stays `RUNNING` = background |
 | `SubagentLink` | `toolUseResult.agentId` on the call's result; child rows `isSidechain` + `agentId` | `spawnAgent` receiver thread ids; child thread items | child id inside the spawn row; `subagents/<child>.json` |
 | `Notice` | `user` row with `origin.kind` (`<task-notification>`) | `<subagent_notification>` (pseudo turn id) | `SYSTEM_MESSAGE` (task notification, child message, timer) |
@@ -74,7 +90,7 @@ batch and parses stored rows back with `parse_stored`.
 | `Compaction` | `system/compact_boundary` | `contextCompaction` / `compacted` | `CHECKPOINT` |
 | `TokenUsage` | `message.usage` on every row of a message (deduplicated by `message.id`) | `token_usage_record` per sample (rollout only) | token fields of `PLANNER_RESPONSE` and `CHECKPOINT` rows |
 | `TurnEnd` | last assistant row of a turn (`stop_reason` end_turn, max_tokens...) | `task_complete` | none (a signal) |
-| `Failure` | none observed | `turn.error` / status `failed` (schema only) | `ERROR` status (documented, unobserved) |
+| `Failure` | none observed | `task_complete.error` in the rollout (observed: a nonexistent model), `turn.error` / status `failed` in the history | `ERROR` status (documented, unobserved) |
 
 ## What does not fit, and who owns it
 

@@ -1,25 +1,26 @@
 from __future__ import annotations
 
 from collections.abc import Callable, Collection
-from dataclasses import dataclass
-from typing import TypedDict
 
+from base.host.boundary.json_values import is_object_dict
 from base.lm.harness.codex.transcript.clock import iso_at
 from base.lm.harness.codex.transcript.errors import MissingFieldError, UnknownValueError
+from base.lm.harness.codex.transcript.place import Place, Where
 from base.lm.harness.codex.transcript.scalars import opt_int, opt_text, text
 from base.lm.harness.codex.transcript.shapes import (
     Obj,
     objects,
     opt_objects,
     opt_strings,
-    strings,
 )
+from base.lm.harness.codex.transcript.tools import HANDLERS as TOOL_HANDLERS
 from base.lm.harness.session.transcript.entries import (
     AgentText,
     Anomaly,
     AnomalyKind,
     AnyEntry,
     Compaction,
+    Failure,
     HumanInput,
     Interrupt,
     Order,
@@ -36,64 +37,12 @@ from base.lm.harness.session.transcript.entries import (
 # The rollout's `event_msg/item_completed` is converted to this shape first (`rollout.py`), so a
 # history item and its rollout twin take the same path and get the same keys: the key of a row is its
 # kind and the item id, never its position. `Order.seq` is the caller's position and `Order.sub` numbers
-# the several entries one item produces (a call, its link, its result).
+# the several entries one item produces (a call, its link, its result). The tool-like items (edits, MCP and
+# dynamic tools, web search, plans...) are in `tools.py`.
 # meiva:link base/lm/harness/docs/transcript-projection.md
 
 COMMAND_TOOL = "command"
 SPAWN_TOOL = "spawnAgent"
-
-
-class _Common(TypedDict):
-    key: str
-    order: Order
-    record: str
-    turn: str | None
-    at: str | None
-
-
-# meiva:note
-# Where an item sits: the turn and record it belongs to, when it started and (if it has) finished, and
-# its position in the caller's sequence.
-@dataclass(frozen=True, slots=True)
-class Where:
-    turn: str
-    record: str
-    started_ms: int
-    completed_ms: int | None
-    seq: int
-
-
-@dataclass(frozen=True, slots=True)
-class _Place:
-    id: str
-    where: Where
-    joined: bool
-
-    @property
-    def turn(self) -> str:
-        return self.where.turn
-
-    @property
-    def started_ms(self) -> int:
-        return self.where.started_ms
-
-    @property
-    def completed_ms(self) -> int | None:
-        return self.where.completed_ms
-
-    def common(self, kind: str, slot: int = 0, *, at_ms: int | None = None) -> _Common:
-        return _Common(
-            key=f"{kind}:{self.id}",
-            order=Order(self.where.seq, slot),
-            record=self.where.record,
-            turn=self.turn,
-            at=iso_at(self.started_ms if at_ms is None else at_ms),
-        )
-
-    def elapsed_ms(self) -> int | None:
-        if self.completed_ms is None:
-            return None
-        return max(self.completed_ms - self.started_ms, 0)
 
 
 def as_anomaly(
@@ -132,6 +81,17 @@ def turn_end_entry(turn: str, at_ms: int | None, seq: int, record: str) -> TurnE
     )
 
 
+def failure_entry(turn: str, message: str, at_ms: int | None, seq: int, record: str) -> Failure:
+    return Failure(
+        key=f"failure:{turn}",
+        order=Order(seq, 0),
+        record=record,
+        turn=turn,
+        at=None if at_ms is None else iso_at(at_ms),
+        message=message,
+    )
+
+
 def interrupt_entry(turn: str, at_ms: int | None, seq: int, record: str) -> Interrupt:
     return Interrupt(
         key=f"interrupt:{turn}",
@@ -157,7 +117,7 @@ def item_entries(item: Obj, where: Where, input_turns: Collection[str]) -> list[
     subject = opt_text(item, "id") or "?"
     try:
         handler = _handler(text(item, "type"))
-        place = _Place(text(item, "id"), where, where.turn in input_turns)
+        place = Place(text(item, "id"), where, where.turn in input_turns)
         return handler(item, place)
     except (MissingFieldError, UnknownValueError) as error:
         order = Order(where.seq, 0)
@@ -166,14 +126,14 @@ def item_entries(item: Obj, where: Where, input_turns: Collection[str]) -> list[
         ]
 
 
-def _handler(kind: str) -> Callable[[Obj, _Place], list[AnyEntry]]:
+def _handler(kind: str) -> Callable[[Obj, Place], list[AnyEntry]]:
     handler = _HANDLERS.get(kind)
     if handler is None:
         raise UnknownValueError(kind)
     return handler
 
 
-def _user(item: Obj, place: _Place) -> list[AnyEntry]:
+def _user(item: Obj, place: Place) -> list[AnyEntry]:
     parts = [
         text(part, "text") for part in objects(item, "content") if opt_text(part, "type") == "text"
     ]
@@ -189,11 +149,11 @@ def _user(item: Obj, place: _Place) -> list[AnyEntry]:
 
 # meiva:note
 # `AgentText` has no phase, so Codex's `commentary` / `final_answer` distinction is dropped.
-def _agent(item: Obj, place: _Place) -> list[AnyEntry]:
+def _agent(item: Obj, place: Place) -> list[AnyEntry]:
     return [AgentText(**place.common("agent"), text=text(item, "text"), message_ref=place.id)]
 
 
-def _reasoning(item: Obj, place: _Place) -> list[AnyEntry]:
+def _reasoning(item: Obj, place: Place) -> list[AnyEntry]:
     readable = opt_strings(item, "summary") or opt_strings(item, "content")
     return [
         Reasoning(
@@ -202,7 +162,7 @@ def _reasoning(item: Obj, place: _Place) -> list[AnyEntry]:
     ]
 
 
-def _compaction(_item: Obj, place: _Place) -> list[AnyEntry]:
+def _compaction(_item: Obj, place: Place) -> list[AnyEntry]:
     return [Compaction(**place.common("compaction"))]
 
 
@@ -213,7 +173,7 @@ _COMMAND_STATUS = {
 }
 
 
-def _command(item: Obj, place: _Place) -> list[AnyEntry]:
+def _command(item: Obj, place: Place) -> list[AnyEntry]:
     command = text(item, "command")
     status = text(item, "status")
     tool_input: dict[str, object] = {"command": command}
@@ -249,10 +209,10 @@ _COLLAB_STATUS = {
 }
 
 
-def _collab(item: Obj, place: _Place) -> list[AnyEntry]:
+def _collab(item: Obj, place: Place) -> list[AnyEntry]:
     tool = text(item, "tool")
     status = text(item, "status")
-    receivers = strings(item, "receiverThreadIds")
+    receivers = opt_strings(item, "receiverThreadIds")
     tool_input: dict[str, object] = {"receivers": receivers}
     for field in ("prompt", "model"):
         if (value := opt_text(item, field)) is not None:
@@ -279,12 +239,28 @@ def _collab(item: Obj, place: _Place) -> list[AnyEntry]:
         ToolResult(
             **place.common("result", 2, at_ms=place.completed_ms),
             call_id=place.id,
-            content=", ".join(receivers),
+            content=_collab_report(item) or ", ".join(receivers),
             status=_COLLAB_STATUS[status],
             duration_ms=place.elapsed_ms(),
         )
     )
     return entries
+
+
+# meiva:note
+# What a collab call hands back to the model, when it carries words: the message each receiver's state holds (a
+# `wait` returns the children's last messages this way). A spawn's states carry none and its result stays the
+# receiver ids.
+def _collab_report(item: Obj) -> str:
+    states = item.get("agentsStates")
+    if not is_object_dict(states):
+        return ""
+    lines: list[str] = []
+    for thread, state in states.items():
+        message = opt_text(state, "message") if is_object_dict(state) else None
+        if message:
+            lines.append(f"{thread}: {message}")
+    return "\n".join(lines)
 
 
 def _nicknames(item: Obj) -> dict[str, str]:
@@ -296,11 +272,12 @@ def _nicknames(item: Obj) -> dict[str, str]:
     return labels
 
 
-_HANDLERS: dict[str, Callable[[Obj, _Place], list[AnyEntry]]] = {
+_HANDLERS: dict[str, Callable[[Obj, Place], list[AnyEntry]]] = {
     "userMessage": _user,
     "agentMessage": _agent,
     "reasoning": _reasoning,
     "contextCompaction": _compaction,
     "commandExecution": _command,
     "collabAgentToolCall": _collab,
+    **TOOL_HANDLERS,
 }

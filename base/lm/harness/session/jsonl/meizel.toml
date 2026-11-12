@@ -1,10 +1,11 @@
-exports = ["position.py", "store_shapes.py", "store_text.py"]
+exports = ["position.py", "store_shapes.py", "store_text.py", "tail.py"]
 
 [uses]
 "__init__.py" = []
 "position.py" = []
 "store_shapes.py" = ["store_text.py"]
 "store_text.py" = []
+"tail.py" = ["position.py"]
 
 [purity]
 "." = "strict"
@@ -12,3 +13,4 @@ exports = ["position.py", "store_shapes.py", "store_text.py"]
 "position.py" = "strict"
 "store_shapes.py" = "strict"
 "store_text.py" = "strict"
+"tail.py" = { mode = "none", why = "the file shell every JSONL record reader shares: it seeks to a stored byte offset, reads the bytes past it (and, backwards from the end, the last complete row) and returns them to the caller's strict position and parse code, which decides what they mean" }

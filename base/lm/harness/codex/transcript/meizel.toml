@@ -1,15 +1,19 @@
-exports = []
+exports = ["link.py", "reader.py"]
 
 [uses]
 "__init__.py" = []
 "clock.py" = ["errors.py"]
 "errors.py" = []
-"items.py" = ["clock.py", "errors.py", "scalars.py", "shapes.py"]
-"parse.py" = ["clock.py", "errors.py", "items.py", "rollout.py", "scalars.py", "shapes.py"]
-"rollout.py" = ["clock.py", "errors.py", "items.py", "scalars.py", "shapes.py"]
+"history.py" = ["errors.py", "position.py", "scalars.py", "shapes.py"]
+"items.py" = ["clock.py", "errors.py", "place.py", "scalars.py", "shapes.py", "tools.py"]
+"parse.py" = ["errors.py", "items.py", "place.py", "rollout.py", "scalars.py", "shapes.py"]
+"place.py" = ["clock.py"]
+"reader.py" = ["history.py", "link.py", "parse.py", "position.py", "rollout_tail.py", "shapes.py", "store_filter.py"]
+"rollout.py" = ["clock.py", "errors.py", "items.py", "place.py", "scalars.py", "shapes.py"]
 "scalars.py" = ["errors.py", "shapes.py"]
 "shapes.py" = ["errors.py"]
-"tests" = ["parse.py"]
+"tests" = ["history.py", "link.py", "parse.py", "position.py", "reader.py", "shapes.py", "store_filter.py"]
+"tools.py" = ["errors.py", "place.py", "scalars.py", "shapes.py"]
 
 [purity]
 "." = "strict"
@@ -21,3 +25,11 @@ exports = []
 "rollout.py" = "strict"
 "scalars.py" = "strict"
 "shapes.py" = "strict"
+"history.py" = "strict"
+"place.py" = "strict"
+"position.py" = "strict"
+"store_filter.py" = "strict"
+"tools.py" = "strict"
+"link.py" = { mode = "none", why = "the one object the Codex session and the transcript reader share: the session attaches its app-server connection and gives it every notification, the reader asks for the connection and for which threads were active; it stores two references and a counter per thread and decides nothing about what a thread's history means" }
+"reader.py" = { mode = "none", why = "the shell of the Codex transcript reader: it sends the history requests over the session's own app-server connection, reads the few rollout lines the history lacks from the rollout file and keeps the per-position parse state; what a page means, whether a position still holds and what each row is are decided in the strict history, position, parse and store_filter modules" }
+"rollout_tail.py" = { mode = "none", why = "the file shell of the Codex transcript reader: it finds a thread's rollout under the injected Codex home, seeks to the stored byte offset and hands the bytes after it to the strict position and parse modules" }
