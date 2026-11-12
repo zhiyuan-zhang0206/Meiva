@@ -48,6 +48,10 @@ def _home(tmp_path: Path, scenario: str, *, copy_subagents: bool = False) -> tup
     return tmp_path, target
 
 
+def rows_text(scenario: str) -> str:
+    return (FIXTURES / scenario / "main.jsonl").read_text()
+
+
 def _keys(entries: list[AnyEntry]) -> list[str]:
     return [entry.key for entry in entries]
 
@@ -455,3 +459,39 @@ def test_a_notification_queued_into_a_running_turn_is_a_notice_and_not_an_unmatc
     plain = {**row, "attachment": {"type": "queued_command", "prompt": "hi", "source_uuid": "w"}}
     _, steered = parse_row(ParseState(), plain, line=1)
     assert [type(entry).__name__ for entry in steered] == ["HumanInput"]
+
+
+def test_polling_an_unchanged_file_opens_and_hashes_nothing_and_a_touched_one_is_read_again(
+    tmp_path: Path,
+) -> None:
+    home, target = _home(tmp_path, "basic")
+    reader = ClaudeRecordReader(claude_home=home, session_id=_session("basic"))
+    batch = _read(reader, "main", None)
+    assert batch is not None
+    assert _read(reader, "main", batch.position) is None, "the first answer checks the last row"
+    settled = reader.bytes_read
+    for _ in range(5):
+        assert _read(reader, "main", batch.position) is None
+    assert reader.bytes_read == settled, "five polls of a file that did not change read nothing"
+    with target.open("a") as handle:
+        _ = handle.write(rows_text("api_error"))
+    assert _read(reader, "main", batch.position) is not None, "a longer file is read"
+
+
+def test_a_batch_reports_the_bytes_it_covers_for_the_writers_transaction_budget(
+    tmp_path: Path,
+) -> None:
+    home, target = _home(tmp_path, "basic")
+    reader = ClaudeRecordReader(claude_home=home, session_id=_session("basic"))
+    batch = _read(reader, "main", None)
+    assert batch is not None and batch.size == target.stat().st_size
+
+
+def test_the_sub_agent_listing_is_remembered_until_the_folder_changes(tmp_path: Path) -> None:
+    home, _ = _home(tmp_path, "subagents", copy_subagents=True)
+    reader = ClaudeRecordReader(claude_home=home, session_id=_session("subagents"))
+    first = asyncio.run(reader.records())
+    assert first[0] == "main" and len(first) == 3
+    folder = home / "projects" / "project" / _session("subagents") / "subagents"
+    _ = shutil.copyfile(next(folder.glob("agent-*.jsonl")), folder / "agent-late.jsonl")
+    assert "late" in asyncio.run(reader.records()), "a file added to the folder is listed"

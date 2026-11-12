@@ -56,3 +56,41 @@ writer started is read from its first row; only records on disk at the start are
 **Which session.** The writer reads the live session's id once the CLI has reported it and, before that, the id the session
 registry holds for the agent (`session_with_resume`), so the inputs an earlier process left claimed are decided against the
 record of the session the CLI is resuming, not against nothing.
+
+## Linear, bounded, orderly
+
+The cost of a round does not depend on how much is already stored, and the test that says so
+(`tests/test_writer_linear.py`) measures it where a quadratic term hides: it takes, for every statement the writer
+sends in a transaction, the rows read by sequential scans and fetched through indexes from the database's own counters
+(`pg_stat_xact_user_tables`), for a session with hundreds of turns, forty background sub-agents that keep producing, calls
+that are never answered and a restart; it also bounds the bytes read from the CLI's files, the statements and the memory.
+
+- **Calls are found by index.** A sub-agent's item nests under its call; the call's item is found by the CLI's id through
+  the partial expression index `idx_agent_harness_messages_call` (agent, `item->>'tool_use_id'`, kind `agent_code`), one
+  statement for all the calls a batch needs and none for a call already known: the writer keeps the latest
+  `CALLS_KEPT` (4,096) `tool_use_id -> item id` it has written or looked up, absent ones included, and a call that fell out
+  of it is one lookup through the index.
+- **One transaction is bounded.** Records are read in turn, each at most one reader batch (4 MiB), until a transaction has
+  `MAX_TRANSACTION_BYTES` (8 MiB) or `MAX_TRANSACTION_ENTRIES` (5,000) entries; the other records are read by the next
+  transaction, which starts with them. The items of a transaction are one insert (pipelined) under one lock of the agent's
+  row, the settlements one `UPDATE`, the positions one pipelined upsert, whatever their number.
+- **An idle poll costs one `stat`.** The reader remembers, per record, the size and modification time at which a read from
+  the stored position found nothing new, and answers without opening the file while they are unchanged; the sub-agent
+  listing is made again only when the folder's modification time moves, and the session's own file is looked up by its
+  path (the all-projects search is made at the first miss and every 20th after it). There is still one thread hop per
+  record per poll; the cost of it is a `stat`.
+- **Memory has a bound for every structure.** Writer: `memory_sizes()` (registered inputs only until their settlement,
+  `NON_HUMAN_LIMIT`, `TURN_USAGE_LIMIT`, `CLOSED_USAGE_KEPT`, `CALLS_KEPT`, one position per record). Projector: the
+  limits in `projection.py` (`SEEN_LIMIT`, `CALLS_LIMIT`, `TURNS_LIMIT`, `LINKS_LIMIT`, `USAGE_LIMIT`, `REPORTED_LIMIT`,
+  `HOLD_ENTRIES`). Reader: the parse state of the latest two positions per record and one stat stamp per record (cleared
+  at 4,096).
+- **A lost position is not a fault.** A position the file no longer holds (replaced, truncated, rewritten) puts the record
+  at its current end, in the same way as a switch to a session with history, and raises
+  `harness_timeline_position_lost` with the agent, session, record and the position that was lost. What the CLI wrote in
+  between is not on the timeline; it is still in the local file and can be projected afterwards (delete the record's row in
+  `agent_harness_transcript_positions` and restart the runtime: the keyed items already written are skipped).
+- **Retries back off.** A failed read or commit is tried again after 2, 4, 8 ... 30 seconds; the first failure and every
+  tenth are logged with their stack, the others in one line; 60 seconds of failures without a success stop the loop with a
+  fault. A `stop` asked for before the loop ran is kept (`clear_fault` clears the fault only). A runtime that closes waits
+  10 seconds for its writer and then retires it: the read in flight finishes, and the writer reads and writes nothing
+  more, so a writer of the same agent in a new runtime is never one of two.

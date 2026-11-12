@@ -7,6 +7,7 @@ from dataclasses import dataclass
 
 from base.host.boundary.json_values import is_object_dict
 from base.host.boundary.untyped import object_of
+from base.lm.harness.session.transcript.ports import PositionLostError
 
 # meiva:note
 # How far a Claude transcript file has been read, as the writer stores it: the byte span of the last row read
@@ -29,10 +30,6 @@ BAD_JSON = "not_json"
 BAD_OBJECT = "not_object"
 BAD_DEPTH = "too_deep"
 BAD_SIZE = "oversize"
-
-
-class PositionLostError(Exception):
-    pass
 
 
 @dataclass(frozen=True, slots=True)

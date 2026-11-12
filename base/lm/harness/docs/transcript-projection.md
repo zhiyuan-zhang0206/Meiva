@@ -50,13 +50,13 @@ not an object, invalid UTF-8, nested too deep, over 64 MiB) is not a fault: it i
 and the position moves past it. Every row is scrubbed of what `jsonb` cannot hold (NUL, lone surrogates) before it
 is parsed or stored. The reader's parse state is keyed by the position it belongs to, so reading again from a
 position gives the same entries. A sub-agent's file is its own record. The store side is
-`aappend_keyed_timeline_items` (append-only in `seq`, idempotent by `agent_harness_messages.source_key`) and
+`aappend_planned_timeline_items` (a batch, append-only in `seq`, idempotent by `agent_harness_messages.source_key`) and
 `agent_harness_transcript_positions` (the position and the rebuild ordinal), the stored whitelisted rows
 (`agent_harness_transcript_rows`: `claude/transcript/store_filter.py` decides what is kept and its size caps (256 KiB
 per text field for the main record, 16 KiB for a sub-agent's), `aappend_transcript_rows` appends them once,
 `aload_transcript_rows` reads them back by ordinal; `services/upkeep/events_maintenance/transcript_retention.py`
 expires the rows older than 30 days that lie before their record's rebuild point, in bounded batches), all in
-`base/agents/history/harness_messages.py`; nothing calls them yet. A reader returns the rows to store with each
+`agent/harness_timeline/store.py` (the writer's database operations; `aappend_keyed_timeline_items` for a single marker is in `base/agents/history/harness_messages.py`). A reader returns the rows to store with each
 batch and parses stored rows back with `parse_stored`.
 
 ## Native records and the vocabulary
@@ -89,3 +89,14 @@ batch and parses stored rows back with `parse_stored`.
 - **Errors that kill the process.** No record shows them.
 - **Image bytes**, which the record keeps inline (Claude, Codex) or as a path (Antigravity); the projection
   takes images from the table of what we sent.
+
+## Bounds and what is held
+
+The projector's memory has a bound for every structure that could grow with a conversation (see the note above
+`SEEN_LIMIT` in `projection.py`). Nothing is held for ever: a call still unanswered when its turn closes, or when the next
+turn on its record begins, is abandoned (it no longer keeps the record from a quiet point; its late result is still
+paired); a result whose call has not been read, and the output of a sub-agent whose link has not been read, are held for a
+bounded number of entries (`HOLD_ENTRIES`) or, for the writer, a bounded time, and are then released as top-level
+items with an `ORPHAN_RELEASED` or `UNLINKED_RELEASED` anomaly each. An `EntryBatch` states the bytes of the CLI's file it
+covers (`size`), which the writer uses to bound a transaction. A reader raises `PositionLostError` (in `ports.py`) for a
+position its record no longer holds.

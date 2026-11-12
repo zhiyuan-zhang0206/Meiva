@@ -6,23 +6,24 @@ from collections.abc import Awaitable, Callable, Mapping, Sequence
 from contextlib import suppress
 from dataclasses import dataclass, field
 
-from psycopg import AsyncConnection
 from psycopg_pool import AsyncConnectionPool
 
-from agent.harness_timeline.plan import PlannedItem, ReplyPolicy, WritePlan, plan_write
-from agent.ownership.inbound import RuntimeOwnershipLostError, lock_inbound_owner
-from base.agents.context.harness_timeline import TurnEndWait
-from base.agents.history.harness_messages import (
+from agent.harness_timeline.plan import ReplyPolicy, WritePlan, plan_write
+from agent.harness_timeline.store import (
+    PlannedTimelineItem,
     StoredPosition,
-    aappend_keyed_timeline_items,
+    aappend_planned_timeline_items,
     aappend_transcript_rows,
-    aget_harness_call_item_id,
-    ahas_harness_timeline,
+    aload_recent_agent_replies,
     aload_transcript_positions,
     aload_transcript_row_floor,
     aload_transcript_rows,
     aset_transcript_position,
+    aset_transcript_positions,
 )
+from agent.ownership.inbound import RuntimeOwnershipLostError, lock_inbound_owner
+from base.agents.context.harness_timeline import TurnEndWait
+from base.agents.history.harness_messages import aappend_keyed_timeline_items, ahas_harness_timeline
 from base.agents.history.timeline_item import TimelineItem
 from base.agents.messages.inbound import InboundKind
 from base.clock import Clock
@@ -31,7 +32,12 @@ from base.host.boundary.json_values import is_object_dict
 from base.lm.harness import Usage
 from base.lm.harness.session.transcript.drafts import InboundPart, Projection, SentInput
 from base.lm.harness.session.transcript.entries import MAIN_RECORD
-from base.lm.harness.session.transcript.ports import EntryBatch, RecordReader, StoredRow
+from base.lm.harness.session.transcript.ports import (
+    EntryBatch,
+    PositionLostError,
+    RecordReader,
+    StoredRow,
+)
 from base.lm.harness.session.transcript.projection import Projector, RecentMap, RecentSet
 from base.log import logger
 from base.native_process.runtime_incarnation import RuntimeIncarnation, StaleIncarnationError
@@ -66,7 +72,12 @@ from base.native_process.runtime_incarnation import RuntimeIncarnation, StaleInc
 
 POLL_SECONDS = 3.0
 RETRY_SECONDS = 2.0
+RETRY_MAX_SECONDS = 30.0
+STACK_EVERY_FAILURES = 10
 FAULT_AFTER_SECONDS = 60.0
+MAX_TRANSACTION_BYTES = 8 * 1024 * 1024
+MAX_TRANSACTION_ENTRIES = 5_000
+CALLS_KEPT = 4_096
 PROJECTION_VERSION = 1
 REBUILD_BATCH_ROWS = 500
 REBUILD_MAX_ROWS = 20_000
@@ -86,6 +97,7 @@ class Committed:
 @dataclass(slots=True)
 class _Sent:
     items: dict[str, TimelineItem] = field(default_factory=dict[str, TimelineItem])
+    refs: dict[str, tuple[str, ...]] = field(default_factory=dict[str, tuple[str, ...]])
     inbound_ids: dict[str, tuple[int, ...]] = field(default_factory=dict[str, tuple[int, ...]])
     wire_ids: dict[str, str] = field(default_factory=dict[str, str])
 
@@ -113,6 +125,8 @@ class HarnessTimelineWriter:
         wire_id: Callable[[str], str] = lambda key: key,
         marker_id: Callable[[], str],
         rebuild_max_rows: int = REBUILD_MAX_ROWS,
+        max_transaction_bytes: int = MAX_TRANSACTION_BYTES,
+        max_transaction_entries: int = MAX_TRANSACTION_ENTRIES,
         incarnation: RuntimeIncarnation | None,
         reader: RecordReader,
         policy: ReplyPolicy,
@@ -130,6 +144,8 @@ class HarnessTimelineWriter:
         self._wire_id = wire_id
         self._marker_id = marker_id
         self._rebuild_max = rebuild_max_rows
+        self._max_bytes = max_transaction_bytes
+        self._max_entries = max_transaction_entries
         self._incarnation = incarnation
         self._fenced = False
         self._reader = reader
@@ -154,7 +170,10 @@ class HarnessTimelineWriter:
         self._items_written = 0
         self._invalid_reply = False
         self._turn_usage: RecentMap[str, Usage] = RecentMap(TURN_USAGE_LIMIT)
+        self._calls: RecentMap[str, str | None] = RecentMap(CALLS_KEPT)
+        self._resume_at: str | None = None
         self._stopping = False
+        self._retired = False
         self._fault: Exception | None = None
 
     @property
@@ -180,9 +199,39 @@ class HarnessTimelineWriter:
     def take_closed_usage(self) -> Usage | None:
         return self._closed_usages.popleft() if self._closed_usages else None
 
+    # meiva:note
+    # The size of everything the writer remembers, by name, and of everything the projector remembers
+    # (`projector_sizes`): the bounds that keep the memory of a session of any length fixed. The writer's are: the
+    # inputs registered and not yet settled (`sent_*`, dropped when the commit that settles them lands or the delivery
+    # side forgets them), `non_human` (the latest `NON_HUMAN_LIMIT` turns), `turn_usage` (`TURN_USAGE_LIMIT`), the closed
+    # turns' spend nobody asked for (`CLOSED_USAGE_KEPT`), the known calls (`CALLS_KEPT`) and one position per record
+    # of the session. The projector's are stated in `projection.py`.
+    def memory_sizes(self) -> dict[str, int]:
+        return {
+            "sent_items": len(self._sent.items),
+            "sent_refs": len(self._sent.refs),
+            "sent_inbound": len(self._sent.inbound_ids),
+            "sent_wire": len(self._sent.wire_ids),
+            "non_human": len(self._non_human),
+            "turn_usage": len(self._turn_usage),
+            "closed_usages": len(self._closed_usages),
+            "calls": len(self._calls),
+            "positions": len(self._positions),
+            "last_ordinal": len(self._last_ordinal),
+        }
+
+    def projector_sizes(self) -> dict[str, int]:
+        return self._projector.memory_sizes()
+
+    # meiva:note
+    # The `agent_chat` items among the agent's latest `rows` timeline rows, for the effects to offer to the (idempotent)
+    # capture of replies for delivery again when the writer starts.
+    async def recent_replies(self, rows: int) -> list[TimelineItem]:
+        async with self._pool.connection() as conn:
+            return await aload_recent_agent_replies(conn, self._agent_id, rows=rows)
+
     def clear_fault(self) -> None:
         self._fault = None
-        self._stopping = False
 
     def start_reading(self) -> None:
         self._held = False
@@ -215,13 +264,19 @@ class HarnessTimelineWriter:
     ) -> None:
         self._projector.register(sent)
         self._sent.items.update(items)
+        self._sent.refs[sent.key] = tuple(items)
         self._sent.inbound_ids[sent.key] = inbound_ids
         self._sent.wire_ids[sent.key] = sent.wire_id
 
     def forget_sent(self, key: str) -> None:
         self._projector.unregister(key)
-        self._sent.inbound_ids.pop(key, None)
-        self._sent.wire_ids.pop(key, None)
+        self._drop_sent(key)
+
+    def _drop_sent(self, key: str) -> None:
+        for ref in self._sent.refs.pop(key, ()):
+            _ = self._sent.items.pop(ref, None)
+        _ = self._sent.inbound_ids.pop(key, None)
+        _ = self._sent.wire_ids.pop(key, None)
 
     def undelivered(self) -> tuple[SentInput, ...]:
         return self._projector.undelivered()
@@ -238,6 +293,15 @@ class HarnessTimelineWriter:
         self._wake.set()
 
     # meiva:note
+    # The end of a writer that did not stop in time: it waits for the read in flight (if any) to finish, then reads and
+    # writes nothing more, whatever is bound to it later. A runtime that gave up waiting for its writer retires it, so
+    # that a writer of the same agent in a new runtime is never one of two.
+    async def retire(self) -> None:
+        self.stop()
+        async with self._io:
+            self._retired = True
+
+    # meiva:note
     # One read: a plan left uncommitted is committed first, otherwise every record is read after its position,
     # projected, planned and committed. Reads are mutually exclusive (the loop, the invocation's waits, the final
     # read and the checks the delivery side makes all come through here), so a plan is committed once, its
@@ -249,7 +313,7 @@ class HarnessTimelineWriter:
 
     async def _read_locked(self) -> bool:
         sid = self._session_id()
-        if sid is None or self._held:
+        if sid is None or self._held or self._retired:
             return False
         if sid != self._sid:
             await self._start_up(sid)
@@ -331,6 +395,8 @@ class HarnessTimelineWriter:
             created_at=self._clock.now().isoformat(),
         )
         async with self._io:
+            if self._retired:
+                return
             async with async_write_transaction(self._pool) as conn:
                 await lock_inbound_owner(conn, self._agent_id, incarnation=self._incarnation)
                 written = await aappend_keyed_timeline_items(
@@ -343,24 +409,27 @@ class HarnessTimelineWriter:
             self._items_written += len(written)
             await self._after_commit(Committed(WritePlan(), tuple(written)))
 
+    # meiva:note
+    # The loop. A failed read or commit is tried again after a wait that doubles from `RETRY_SECONDS` to
+    # `RETRY_MAX_SECONDS`; the first failure and every `STACK_EVERY_FAILURES`-th after it are logged with their stack,
+    # the others in one line. Failing for `FAULT_AFTER_SECONDS` without a success stops the loop with a fault. A
+    # `stop` ends the loop after one last read, and a stop asked for before the loop ran is not forgotten.
     async def run(self) -> None:
         failing_since: float | None = None
+        failures = 0
         while not self._stopping:
             try:
                 if await self.read_now():
-                    failing_since = None
+                    failing_since, failures = None, 0
                     await asyncio.sleep(0)
                     continue
-                failing_since = None
+                failing_since, failures = None, 0
             except Exception as error:
+                failures += 1
                 failing_since = (
                     failing_since if failing_since is not None else self._clock.monotonic()
                 )
-                logger.opt(exception=True).warning(
-                    "the harness timeline writer could not read or commit",
-                    event="harness_timeline_writer_retry",
-                    agent_id=self._agent_id,
-                )
+                self._log_failure(error, failures)
                 if self._clock.monotonic() - failing_since >= FAULT_AFTER_SECONDS:
                     self._fault = error
                     logger.error(
@@ -369,13 +438,31 @@ class HarnessTimelineWriter:
                         agent_id=self._agent_id,
                     )
                     return
-                await asyncio.sleep(RETRY_SECONDS)
+                await asyncio.sleep(min(RETRY_SECONDS * 2 ** (failures - 1), RETRY_MAX_SECONDS))
                 continue
             with suppress(TimeoutError):
                 await asyncio.wait_for(self._wake.wait(), POLL_SECONDS)
             self._wake.clear()
         if self._sid is not None and self._fault is None and not self._fenced:
             _ = await self.read_now()
+
+    def _log_failure(self, error: Exception, failures: int) -> None:
+        message = "the harness timeline writer could not read or commit"
+        if failures % STACK_EVERY_FAILURES == 1:
+            logger.opt(exception=True).warning(
+                message,
+                event="harness_timeline_writer_retry",
+                agent_id=self._agent_id,
+                failures=failures,
+            )
+        else:
+            logger.warning(
+                message,
+                event="harness_timeline_writer_retry",
+                agent_id=self._agent_id,
+                failures=failures,
+                error=repr(error),
+            )
 
     # meiva:note
     # Start over for a session: its stored positions, whether it starts with history (a session with no stored
@@ -405,6 +492,8 @@ class HarnessTimelineWriter:
         self._pending = None
         self._non_human = RecentSet(NON_HUMAN_LIMIT)
         self._turn_usage = RecentMap(TURN_USAGE_LIMIT)
+        self._calls = RecentMap(CALLS_KEPT)
+        self._resume_at = None
         self._held_since = None
         self._sid = sid
 
@@ -461,17 +550,73 @@ class HarnessTimelineWriter:
         )
         return floor
 
+    # meiva:note
+    # What one transaction may hold: records are read in turn, each at most one reader batch, until a read has brought
+    # `MAX_TRANSACTION_BYTES` of the CLI's bytes or `MAX_TRANSACTION_ENTRIES` entries; the records not yet read wait for
+    # the next transaction, which starts with them, so a busy main record cannot starve the others. However many
+    # sub-agents have records, a transaction (and the lock it holds on the agent's row) is bounded.
     async def _read_all(self, sid: str) -> list[EntryBatch]:
         batches: list[EntryBatch] = []
-        for record in await self._reader.records():
-            stored = self._positions.get(record)
-            if stored is None and record in self._history_records and record not in self._seeded:
-                stored = await self._seed_past_history(sid, record)
-                self._seeded.add(record)
-            batch = await self._reader.read_after(record, stored.position if stored else None)
+        size = entries = 0
+        records = list(await self._reader.records())
+        if self._resume_at in records:
+            at = records.index(self._resume_at)
+            records = records[at:] + records[:at]
+        self._resume_at = None
+        for record in records:
+            if size >= self._max_bytes or entries >= self._max_entries:
+                self._resume_at = record
+                break
+            batch = await self._read_record(sid, record)
             if batch is not None:
                 batches.append(batch)
+                size += batch.size
+                entries += len(batch.entries)
         return batches
+
+    async def _read_record(self, sid: str, record: str) -> EntryBatch | None:
+        stored = self._positions.get(record)
+        if stored is None and record in self._history_records and record not in self._seeded:
+            stored = await self._seed_past_history(sid, record)
+            self._seeded.add(record)
+        try:
+            return await self._reader.read_after(record, stored.position if stored else None)
+        except PositionLostError as lost:
+            await self._reseat(sid, record, stored, lost)
+            return None
+
+    # meiva:note
+    # A position the record no longer holds (the file was replaced, truncated or rewritten under it) is not a failure to
+    # retry: the same read would fail the same way for ever and the inputs have long been handed to the CLI. The
+    # record is put at its current end, as a switch to a session with history does, and reading goes on from there; the
+    # event `harness_timeline_position_lost` names the agent, session, record and the position that was lost. What the CLI
+    # wrote between the lost position and the new one is not on the timeline; it can be projected afterwards from the file
+    # that is still on disk (delete the record's stored position row and restart the agent's runtime to read the record
+    # from its start: the keyed items already written are skipped). A record whose file is gone altogether has no end to
+    # go to: it is no longer read.
+    async def _reseat(
+        self, sid: str, record: str, lost_at: StoredPosition | None, error: PositionLostError
+    ) -> None:
+        end = await self._reader.position_before(record, ())
+        logger.warning(
+            "the transcript no longer holds the position stored for a record; reading goes on from the "
+            "record's end",
+            event="harness_timeline_position_lost",
+            agent_id=self._agent_id,
+            session_id=sid,
+            record=record,
+            position=None if lost_at is None else lost_at.position,
+            reseated_at=end,
+            reason=str(error),
+        )
+        if end is None:
+            _ = self._positions.pop(record, None)
+            return
+        stored = StoredPosition(record, end, lost_at.rebuild_ordinal if lost_at else -1)
+        async with async_write_transaction(self._pool) as conn:
+            await lock_inbound_owner(conn, self._agent_id, incarnation=self._incarnation)
+            await aset_transcript_position(conn, self._agent_id, sid, stored, self._cli_version())
+        self._positions[record] = stored
 
     # meiva:note
     # Only a record that was on disk when the writer started is history to skip, and it is decided once for the
@@ -517,7 +662,7 @@ class HarnessTimelineWriter:
         plan = pending.plan
         positions = self._next_positions(pending)
         try:
-            written = await self._commit(sid, plan, pending.batches, positions)
+            written, learnt = await self._commit(sid, plan, pending.batches, positions)
         except (StaleIncarnationError, RuntimeOwnershipLostError):
             self._fenced = True
             logger.warning(
@@ -532,6 +677,10 @@ class HarnessTimelineWriter:
             if batch.rows:
                 self._last_ordinal[batch.record] = batch.rows[-1].ordinal
         self._pending = None
+        for call, item_id in learnt.items():
+            self._calls[call] = item_id
+        for settlement in plan.settlements:
+            self._drop_sent(settlement.input_key)
         self._account(plan, len(written))
         await self._after_commit(Committed(plan, tuple(written)))
         return True
@@ -573,7 +722,7 @@ class HarnessTimelineWriter:
         plan: WritePlan,
         batches: list[EntryBatch],
         positions: list[StoredPosition],
-    ) -> list[TimelineItem]:
+    ) -> tuple[list[TimelineItem], dict[str, str | None]]:
         async with async_write_transaction(self._pool) as conn:
             await lock_inbound_owner(conn, self._agent_id, incarnation=self._incarnation)
             _ = await aappend_transcript_rows(
@@ -582,52 +731,35 @@ class HarnessTimelineWriter:
                 sid,
                 [(row.record, row.ordinal, row.row) for batch in batches for row in batch.rows],
             )
-            written = await self._append(conn, plan.items)
-            for settlement in plan.settlements:
-                if settlement.inbound_ids:
-                    _ = await conn.execute(
-                        "UPDATE inbound_messages SET status='done' "
-                        "WHERE agent_id=%s AND id=ANY(%s) AND status = ANY(%s) AND kind = ANY(%s)",
-                        (
-                            self._agent_id,
-                            list(settlement.inbound_ids),
-                            list(_SETTLE_STATUSES),
-                            [
-                                InboundKind.CHAT.value,
-                                InboundKind.SYSTEM_NOTE.value,
-                                InboundKind.HEARTBEAT.value,
-                            ],
-                        ),
-                    )
-            for stored in positions:
-                await aset_transcript_position(
-                    conn, self._agent_id, sid, stored, self._cli_version()
-                )
-        return written
-
-    async def _append(
-        self, conn: AsyncConnection, items: tuple[PlannedItem, ...]
-    ) -> list[TimelineItem]:
-        written: list[TimelineItem] = []
-        calls: dict[str, str] = {}
-        for planned in items:
-            item = planned.item
-            if planned.parent_tool_use_id is not None:
-                parent = calls.get(planned.parent_tool_use_id)
-                if parent is None:
-                    parent = await aget_harness_call_item_id(
-                        conn, self._agent_id, planned.parent_tool_use_id
-                    )
-                item = item.model_copy(update={"parent_item_id": parent})
-            stored = await aappend_keyed_timeline_items(
+            written, learnt = await aappend_planned_timeline_items(
                 conn,
                 self._agent_id,
                 self._harness,
-                [(planned.key, item)],
+                [PlannedTimelineItem(i.key, i.item, i.parent_tool_use_id) for i in plan.items],
+                calls=self._known_calls(plan),
                 projection_version=PROJECTION_VERSION,
             )
-            for out in stored:
-                written.append(out)
-                if out.kind == "agent_code" and out.tool_use_id:
-                    calls[out.tool_use_id] = out.item_id
-        return written
+            settled = sorted({i for s in plan.settlements for i in s.inbound_ids})
+            if settled:
+                _ = await conn.execute(
+                    "UPDATE inbound_messages SET status='done' "
+                    "WHERE agent_id=%s AND id=ANY(%s) AND status = ANY(%s) AND kind = ANY(%s)",
+                    (
+                        self._agent_id,
+                        settled,
+                        list(_SETTLE_STATUSES),
+                        [
+                            InboundKind.CHAT.value,
+                            InboundKind.SYSTEM_NOTE.value,
+                            InboundKind.HEARTBEAT.value,
+                        ],
+                    ),
+                )
+            await aset_transcript_positions(
+                conn, self._agent_id, sid, positions, self._cli_version()
+            )
+        return written, learnt
+
+    def _known_calls(self, plan: WritePlan) -> dict[str, str | None]:
+        wanted = {i.parent_tool_use_id for i in plan.items if i.parent_tool_use_id is not None}
+        return {call: self._calls.get(call) for call in wanted if call in self._calls}

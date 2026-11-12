@@ -868,6 +868,10 @@ CREATE TABLE agent_harness_messages (
 CREATE INDEX idx_agent_harness_messages_agent_seq ON agent_harness_messages (agent_id, seq DESC);
 CREATE UNIQUE INDEX idx_agent_harness_messages_source_key
     ON agent_harness_messages (agent_id, source_key) WHERE source_key IS NOT NULL;
+-- The timeline item of a CLI tool call is found by the CLI's own id (a sub-agent's output nests under its call).
+CREATE INDEX IF NOT EXISTS idx_agent_harness_messages_call
+    ON agent_harness_messages (agent_id, (item->>'tool_use_id'))
+    WHERE item->>'kind' = 'agent_code';
 
 COMMENT ON TABLE agent_harness_messages IS
     'Timeline item store for external harnesses, with in-place revisions for live activity.';

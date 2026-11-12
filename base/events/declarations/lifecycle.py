@@ -241,6 +241,22 @@ EVENTS: dict[str, EventSpec] = {
         "earlier commit's effects still owe is kept apart) and the same read is tried again",
         tier="anomaly",
     ),
+    "harness_timeline_writer_retired": telemetry_event(
+        "harness_timeline_writer_retired",
+        "a runtime closed and its transcript timeline writer did not stop within the bound; the writer is "
+        "retired (it finishes the read in flight, then reads and writes nothing more) so that a writer of "
+        "the same agent in a new runtime is never one of two",
+        tier="anomaly",
+    ),
+    "harness_timeline_position_lost": telemetry_event(
+        "harness_timeline_position_lost",
+        "the transcript no longer holds the position stored for a record of a transcript-sourced timeline "
+        "(the file was replaced, truncated or rewritten); the record is put at its current end and read on "
+        "from there. What the CLI wrote in between is not on the timeline and can be projected afterwards "
+        "from the file that is still on disk (delete the record's stored position row and restart the "
+        "runtime)",
+        tier="anomaly",
+    ),
     "harness_timeline_effect_failed": telemetry_event(
         "harness_timeline_effect_failed",
         "an effect that follows a committed read of a transcript-sourced timeline (publishing to the live "

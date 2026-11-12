@@ -27,6 +27,13 @@ from base.lm.harness.session.transcript.entries import AnyEntry
 # One row of the CLI's record as it is kept in our database: the whitelisted, filtered raw row and its own
 # `ordinal` in the record (sparse: rows off the whitelist are not stored). The projection reads entries
 # from the CLI's rows; the stored rows are what it is re-run from after a restart or a parser fix.
+# meiva:note
+# A stored position the record no longer holds (the file was replaced, truncated or rewritten): raised by a reader's
+# `read_after`, never a restart from the beginning. The writer puts the record at its current end and says so.
+class PositionLostError(Exception):
+    pass
+
+
 @dataclass(frozen=True, slots=True)
 class StoredRow:
     record: str
@@ -40,6 +47,7 @@ class EntryBatch:
     entries: tuple[AnyEntry, ...]
     position: str
     rows: tuple[StoredRow, ...] = ()
+    size: int = 0
 
 
 class RecordReader(Protocol):

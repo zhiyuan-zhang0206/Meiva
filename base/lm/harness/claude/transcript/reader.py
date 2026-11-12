@@ -47,6 +47,12 @@ from base.lm.harness.session.transcript.ports import EntryBatch, StoredRow
 # skipped unread (its end is found by streaming) and reported as a bad row. Each row is scrubbed (`scrub`)
 # before it is parsed or filtered, so the timeline and the stored rows agree and both are storable.
 #
+# What a read costs when nothing is new: one `stat` of the file. The reader remembers, per record, the size and
+# modification time at which a read from the stored position found no complete row after it (after the hash of the
+# last row read had been checked), and answers "nothing new" without opening the file while both are unchanged; so a
+# poll of an idle session or of hundreds of finished sub-agents opens nothing and hashes nothing. A file that is
+# longer or touched is read, with the last row checked as always.
+#
 # The only memory it keeps is each record's parse state (the start of the open tool calls, for durations),
 # keyed by the position it belongs to, never advanced past what the caller holds: a read from the position it
 # was given is a function of that position, so a batch whose database write failed is read again with the
@@ -58,6 +64,8 @@ MAX_BATCH_BYTES = 4 * 1024 * 1024
 MAX_ROW_BYTES = 64 * 1024 * 1024
 _STREAM_CHUNK_BYTES = 1024 * 1024
 _REMEMBERED_POSITIONS = 2
+_GLOB_EVERY_MISSES = 20
+_QUIET_KEPT = 4_096
 
 
 @dataclass(frozen=True, slots=True)
@@ -84,6 +92,9 @@ class ClaudeRecordReader:
         self._max_row = max_row_bytes
         self._states: dict[str, dict[str, ParseState]] = {}
         self._stored_states: dict[str, ParseState] = {}
+        self._quiet: dict[str, tuple[str | None, tuple[int, int]]] = {}
+        self._listing: tuple[int, tuple[str, ...]] | None = None
+        self._misses = 0
         self.bytes_read = 0
 
     @classmethod
@@ -121,22 +132,37 @@ class ClaudeRecordReader:
     # meiva:note
     # The session's own file, `projects/<project>/<session id>.jsonl`. The session id is unique, but the CLI can
     # leave the same one under several project directories (a resume from another working directory copies the
-    # file). The directory of the agent's own workspace wins; otherwise the most recently written file does; and the
-    # choice is pinned for the session, so the reader never moves from one file to another under a stored position
-    # (a pinned file that disappears is a lost position, not a reason to look elsewhere). A new session id forgets
-    # the pin.
+    # file). The directory of the agent's own workspace wins and is looked for by its path (one stat); only when it is
+    # not there are all the project directories searched, and that search is made at the first miss and at every
+    # `_GLOB_EVERY_MISSES`-th after it, not at every poll of a session whose file has not appeared. Then the most
+    # recently written file wins; and the choice is pinned for the session, so the reader never moves from one file to
+    # another under a stored position (a pinned file that disappears is a lost position, not a reason to look
+    # elsewhere). A new session id forgets the pin.
     def _main(self) -> Path | None:
         sid = self._session_source()
         if sid is None:
             return None
         if self._pinned is not None and self._pinned[0] == sid:
             return self._pinned[1]
+        own = self._own(sid)
+        if own is not None and own.is_file():
+            self._pinned = (sid, own)
+            return own
+        self._misses += 1
+        if self._misses % _GLOB_EVERY_MISSES != 1:
+            return None
         matches = sorted((self._home / "projects").glob(f"*/{sid}.jsonl"))
         if not matches:
             return None
         chosen = self._preferred(matches)
         self._pinned = (sid, chosen)
         return chosen
+
+    def _own(self, sid: str) -> Path | None:
+        if self._workspace is None:
+            return None
+        slug = re.sub(r"[^A-Za-z0-9]", "-", str(self._workspace))
+        return self._home / "projects" / slug / f"{sid}.jsonl"
 
     def _preferred(self, matches: list[Path]) -> Path:
         if len(matches) == 1:
@@ -182,30 +208,72 @@ class ClaudeRecordReader:
             return None
         return encode(Position(start=start, offset=end, lines=rows, sha256=row_digest(last)))
 
+    # meiva:note
+    # The records of the session: the main one and one per sub-agent file. The folder is listed only when its modification
+    # time has changed (a file was added); between changes the answer is the one remembered, so a session with
+    # hundreds of finished sub-agents costs one stat per poll for its listing.
     def _records(self) -> tuple[str, ...]:
         main = self._main()
         if main is None:
             return ()
         folder = main.parent / main.stem / "subagents"
-        children = sorted(
-            path.name.removeprefix("agent-").removesuffix(".jsonl")
-            for path in (folder.glob("agent-*.jsonl") if folder.is_dir() else ())
-        )
-        return (MAIN_RECORD, *children)
+        try:
+            stamp = folder.stat().st_mtime_ns
+        except FileNotFoundError:
+            self._listing = None
+            return (MAIN_RECORD,)
+        if self._listing is None or self._listing[0] != stamp:
+            children = tuple(
+                sorted(
+                    path.name.removeprefix("agent-").removesuffix(".jsonl")
+                    for path in folder.glob("agent-*.jsonl")
+                )
+            )
+            self._listing = (stamp, children)
+        return (MAIN_RECORD, *self._listing[1])
 
     def _read(self, record: str, stored: str | None) -> EntryBatch | None:
         position = START if stored is None else decode(stored)
-        path = self._path(record)
-        if path is None or not path.is_file():
-            if position.lines:
-                raise PositionLostError(f"the transcript of record {record!r} is gone")
+        found = self._stat(record, position)
+        if found is None:
+            return None
+        path, stamp = found
+        if self._quiet.get(record) == (stored, stamp):
             return None
         with path.open("rb") as handle:
             self._verify(handle, position)
             chunk = self._next_chunk(handle, position)
         rows = (*rows_after(position, chunk.data), *((chunk.skipped,) if chunk.skipped else ()))
         if not rows:
+            self._remember_quiet(record, stored, stamp)
             return None
+        return self._batch(record, stored, position, rows, chunk)
+
+    def _stat(self, record: str, position: Position) -> tuple[Path, tuple[int, int]] | None:
+        path = self._path(record)
+        try:
+            status = path.stat() if path is not None else None
+        except FileNotFoundError:
+            status = None
+        if path is None or status is None or not path.is_file():
+            if position.lines:
+                raise PositionLostError(f"the transcript of record {record!r} is gone")
+            return None
+        return path, (status.st_size, status.st_mtime_ns)
+
+    def _remember_quiet(self, record: str, stored: str | None, stamp: tuple[int, int]) -> None:
+        if len(self._quiet) >= _QUIET_KEPT:
+            self._quiet.clear()
+        self._quiet[record] = (stored, stamp)
+
+    def _batch(
+        self,
+        record: str,
+        stored: str | None,
+        position: Position,
+        rows: Sequence[RawRow],
+        chunk: _Chunk,
+    ) -> EntryBatch:
         cache = self._states.setdefault(record, {})
         state = cache.get(stored or "", ParseState())
         entries: list[AnyEntry] = []
@@ -220,7 +288,7 @@ class ClaudeRecordReader:
         cache[moved] = state
         while len(cache) > _REMEMBERED_POSITIONS:
             del cache[next(iter(cache))]
-        return EntryBatch(record, tuple(entries), moved, tuple(kept))
+        return EntryBatch(record, tuple(entries), moved, tuple(kept), len(chunk.data))
 
     def _row(
         self, record: str, ordinal: int, row: RawRow, state: ParseState

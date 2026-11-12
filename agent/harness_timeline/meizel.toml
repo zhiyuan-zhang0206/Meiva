@@ -1,13 +1,15 @@
-exports = ["plan.py", "tool_format.py", "writer.py"]
+exports = ["plan.py", "store.py", "tool_format.py", "writer.py"]
 
 [uses]
 "__init__.py" = []
 "plan.py" = []
-"writer.py" = ["plan.py"]
-"tests" = ["plan.py", "writer.py"]
+"store.py" = []
+"writer.py" = ["plan.py", "store.py"]
+"tests" = ["plan.py", "store.py", "writer.py"]
 
 [purity]
 "." = "strict"
 "__init__.py" = "strict"
 "plan.py" = "strict"
+"store.py" = { mode = "none", why = "the database operations of the harness timeline writer: the batch append of projected items, the stored read positions and the whitelisted transcript rows; each is one bounded statement or a pipelined batch" }
 "writer.py" = { mode = "none", why = "the effect shell of the harness timeline writer: it waits for a wake-up, asks the reader for the entries past each stored position, and commits what the strict plan decided (keyed items, settlements, positions) in one write transaction under the runtime's incarnation; what an entry becomes and what a delivery settles are decided in plan.py and the shared projection" }

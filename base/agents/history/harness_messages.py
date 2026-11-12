@@ -7,7 +7,7 @@
 from __future__ import annotations
 
 import json
-from collections.abc import Mapping, Sequence
+from collections.abc import Sequence
 from dataclasses import dataclass
 from uuid import UUID
 
@@ -82,41 +82,36 @@ async def aget_next_harness_message_seq(conn: AsyncConnection, agent_id: int) ->
 
 
 # meiva:note
-# The timeline item id of the `agent_code` item that recorded the CLI tool call `tool_use_id`, or None.
-# A sub-agent can keep working after the graph invocation that saw its spawning call ended, and the
-# next invocation's projector has no memory of that call; the item itself carries the CLI's id, so
-# the call is found by it. The filter reads one agent's rows, which is what an agent's
-# timeline is, and is asked once per call id per invocation.
+# The timeline item ids of the `agent_code` items that recorded the CLI tool calls `tool_use_ids`: each id that has
+# one, by its call id (a call id with no item is absent from the answer). A sub-agent can keep working after the
+# graph invocation, or the process, that saw its spawning call ended, so the call is found by the CLI's own id,
+# which the item carries. One statement for all the ids, answered by the partial expression index
+# `idx_agent_harness_messages_call` (agent, call id, kind `agent_code`): the cost is that of the ids asked for,
+# not of the rows the agent has. The newest item wins when a call id was recorded twice.
+# meiva:link base/lm/harness/docs/subagent-text.md
+async def aget_harness_call_item_ids(
+    conn: AsyncConnection, agent_id: int, tool_use_ids: Sequence[str]
+) -> dict[str, str]:
+    if not tool_use_ids:
+        return {}
+    async with conn.cursor() as cur:
+        await cur.execute(
+            "SELECT item->>'tool_use_id', MAX(seq) FROM agent_harness_messages WHERE agent_id = %s "
+            "AND item->>'kind' = 'agent_code' AND item->>'tool_use_id' = ANY(%s) GROUP BY 1",
+            (agent_id, list(tool_use_ids)),
+        )
+        found: list[tuple[object, ...]] = await cur.fetchall()
+    return {str(row[0]): f"h{row[1]}.0" for row in found}
+
+
+# meiva:note
+# The timeline item id of the `agent_code` item that recorded the CLI tool call `tool_use_id`, or None: one call
+# id of `aget_harness_call_item_ids`.
 # meiva:link base/lm/harness/docs/subagent-text.md
 async def aget_harness_call_item_id(
     conn: AsyncConnection, agent_id: int, tool_use_id: str
 ) -> str | None:
-    async with conn.cursor() as cur:
-        await cur.execute(
-            "SELECT seq FROM agent_harness_messages WHERE agent_id = %s "
-            "AND item->>'kind' = 'agent_code' AND item->>'tool_use_id' = %s "
-            "ORDER BY seq DESC LIMIT 1",
-            (agent_id, tool_use_id),
-        )
-        row = await cur.fetchone()
-    return None if row is None else f"h{row[0]}.0"
-
-
-# meiva:note
-# The `agent_chat` items among an agent's latest `rows` timeline rows, oldest first. A bounded read of the tail
-# (`rows` is the bound, whatever the length of the timeline), for the replies a process may have committed and
-# not yet handed to delivery, which the idempotent capture then offers again.
-async def aload_recent_agent_replies(
-    conn: AsyncConnection, agent_id: int, *, rows: int
-) -> list[TimelineItem]:
-    found = await aquery_all(
-        conn,
-        _ItemRow,
-        "SELECT item FROM (SELECT seq, item FROM agent_harness_messages WHERE agent_id = %s "
-        "ORDER BY seq DESC LIMIT %s) AS tail WHERE item->>'kind' = 'agent_chat' ORDER BY seq",
-        (agent_id, rows),
-    )
-    return [TimelineItem.model_validate(row.item) for row in found]
+    return (await aget_harness_call_item_ids(conn, agent_id, [tool_use_id])).get(tool_use_id)
 
 
 def load_harness_message_count(conn: Connection, agent_id: int) -> int:
@@ -341,105 +336,6 @@ async def aappend_keyed_timeline_items(
     return persisted
 
 
-# meiva:note
-# Where one transcript record has been read to: the adapter's opaque `position`, and the `rebuild_ordinal`,
-# the ordinal of the last stored row at a quiet point (nothing open that a restart would need to see), from
-# which the projector's state is rebuilt out of the stored rows. Both are written in the transaction that
-# writes the rows they cover; the row is one small row per record whatever the length of the conversation.
-@dataclass(frozen=True)
-class StoredPosition:
-    record: str
-    position: str
-    rebuild_ordinal: int
-
-
-async def aload_transcript_positions(
-    conn: AsyncConnection, agent_id: int, session_id: str
-) -> dict[str, StoredPosition]:
-    rows = await aquery_all(
-        conn,
-        StoredPosition,
-        "SELECT record, position, rebuild_ordinal FROM agent_harness_transcript_positions "
-        "WHERE agent_id = %s AND session_id = %s",
-        (agent_id, session_id),
-    )
-    return {row.record: row for row in rows}
-
-
-async def aset_transcript_position(
-    conn: AsyncConnection,
-    agent_id: int,
-    session_id: str,
-    stored: StoredPosition,
-    cli_version: str | None,
-) -> None:
-    await conn.execute(
-        "INSERT INTO agent_harness_transcript_positions "
-        "(agent_id, session_id, record, position, rebuild_ordinal, cli_version) "
-        "VALUES (%s, %s, %s, %s, %s, %s) "
-        "ON CONFLICT (agent_id, session_id, record) DO UPDATE SET position = EXCLUDED.position, "
-        "rebuild_ordinal = EXCLUDED.rebuild_ordinal, "
-        "cli_version = COALESCE(EXCLUDED.cli_version, "
-        "agent_harness_transcript_positions.cli_version), updated_at = clock_timestamp()",
-        (agent_id, session_id, stored.record, stored.position, stored.rebuild_ordinal, cli_version),
-    )
-
-
-# meiva:note
-# The whitelisted rows of a transcript record, appended once and never updated: a row the agent already has
-# (same session, record and ordinal) is skipped, so a read that is repeated writes nothing twice. Only the
-# rows of the read are written, so what one call writes does not grow with what is already stored.
-# meiva:link future/agent/transcript-timeline-source.md
-async def aappend_transcript_rows(
-    conn: AsyncConnection,
-    agent_id: int,
-    session_id: str,
-    rows: Sequence[tuple[str, int, Mapping[str, object]]],
-) -> int:
-    if not rows:
-        return 0
-    async with conn.cursor() as cur:
-        await cur.executemany(
-            "INSERT INTO agent_harness_transcript_rows (agent_id, session_id, record, ordinal, row) "
-            "VALUES (%s, %s, %s, %s, %s::jsonb) ON CONFLICT DO NOTHING",
-            [
-                (agent_id, session_id, record, ordinal, json.dumps(row))
-                for record, ordinal, row in rows
-            ],
-        )
-        return cur.rowcount
-
-
-@dataclass(frozen=True)
-class _StoredRowRow:
-    ordinal: int
-    row: object
-
-
-# meiva:note
-# The stored rows of one record after an ordinal, in order, at most `limit` of them: how a restart rebuilds
-# the projector's state (from the last rebuild point on, never the whole session) and how a re-projection
-# reads a session in bounded batches.
-async def aload_transcript_rows(
-    conn: AsyncConnection,
-    agent_id: int,
-    session_id: str,
-    record: str,
-    *,
-    after_ordinal: int,
-    limit: int,
-) -> list[tuple[int, object]]:
-    rows = await aquery_all(
-        conn,
-        _StoredRowRow,
-        "SELECT ordinal, row FROM agent_harness_transcript_rows "
-        "WHERE agent_id = %s AND session_id = %s AND record = %s AND ordinal > %s "
-        "ORDER BY ordinal LIMIT %s",
-        (agent_id, session_id, record, after_ordinal, limit),
-    )
-    return [(row.ordinal, row.row) for row in rows]
-
-
 @dataclass(frozen=True)
 class _HarnessTimelineOwner:
     status: str
@@ -657,26 +553,3 @@ async def ahas_harness_timeline(conn: AsyncConnection, agent_id: int) -> bool:
     )
     row = await cursor.fetchone()
     return bool(row and row[0])
-
-
-# meiva:note
-# The ordinal below which a rebuild may skip stored rows so it reads at most the latest `keep` rows after
-# `after_ordinal`: the `keep + 1`-th row from the end of the record, or None when fewer than that remain. One
-# bounded index walk from the end of the record, so the cost is `keep` and not the length of the record.
-async def aload_transcript_row_floor(
-    conn: AsyncConnection,
-    agent_id: int,
-    session_id: str,
-    record: str,
-    *,
-    after_ordinal: int,
-    keep: int,
-) -> int | None:
-    cursor = await conn.execute(
-        "SELECT ordinal FROM agent_harness_transcript_rows "
-        "WHERE agent_id = %s AND session_id = %s AND record = %s AND ordinal > %s "
-        "ORDER BY ordinal DESC OFFSET %s LIMIT 1",
-        (agent_id, session_id, record, after_ordinal, keep),
-    )
-    row = await cursor.fetchone()
-    return None if row is None else _int_from_row(row)
