@@ -12,8 +12,10 @@ compatibility and stability, then completeness: every choice below takes the sim
 
 Today the graph invocation subscribes to adapter events, a stateful `HarnessTurnProjector` rebuilds items from
 them, and the inbound row is settled by the live echo. After the cutover a **session-scoped writer** reads the
-CLI's transcript **by position**, runs the entries through the shared `Projector`, and in one transaction per
-read appends keyed timeline items, settles the inbound rows the entries prove, and stores the new position. The
+CLI's transcript **by position**, keeps the rows the projection needs in the database (a whitelist of filtered
+raw rows, section 4), runs them through the shared `Projector`, and in one transaction per read stores those
+rows, appends keyed timeline items, settles the inbound rows the entries prove, and stores the new position.
+The timeline is a derived, re-projectable result of the stored rows. The
 event stream stays, as a signal that wakes the writer and says a turn started or ended or something failed. The
 graph invocation still delivers the inbox and ends a turn, but it no longer produces or settles anything from
 content.
@@ -72,8 +74,9 @@ feed the projector, write, publish. `plan.py` (strict, pure) turns a `Projection
 **One transaction per read**, on the ops pool:
 1. `lock_inbound_owner(conn, agent_id, incarnation=...)` (`agent/ownership/inbound.py`): the fence
    `commit_handed` and `aupsert_harness_timeline_item` use. A stale writer writes nothing and stops itself.
-2. Insert each draft `ON CONFLICT (agent_id, source_key) DO NOTHING` at the next `seq` (the `h<seq>.0` item id
-   stays flat and append-only).
+2. Append the whitelisted rows of this read to the record table (section 4), once each. Insert each draft
+   `ON CONFLICT (agent_id, source_key) DO NOTHING` at the next `seq` (the `h<seq>.0` item id stays flat and
+   append-only).
 3. For each `Delivery`, `UPDATE inbound_messages SET status='done' ... WHERE status='claimed'` as
    `commit_handed` does, checked against the rows the sent-input table says the input carried; a row already
    `done` is a no-op; a row that was returned to `pending` before the record proved it is settled as done and
@@ -87,22 +90,103 @@ same entries; the writer retries with backoff. A failure past a bound faults the
 the graph reports it. `StaleIncarnationError` ends the writer without retry. A process crash loses nothing the
 CLI wrote, because the next read starts at the stored position.
 
-## 4. Storage
+**Restart.** The projector's state (open calls, sent inputs not yet proven, sub-agent links) is never stored as a
+blob. A new writer rebuilds it from the stored rows: it reads back, from the database, the rows since the
+last **rebuild point** of each record (the latest turn boundary or compaction boundary the stored rows hold;
+beyond a compaction nothing before it matters to pairing) and feeds them silently into a fresh projector. The
+bound is the length of one turn plus whatever background work spans it, not the session; a call that stays open
+across a rebuild point is the one case the rebuild cannot see, and its result is then shown without its call's
+nesting (reported once). The local file is used only to continue reading.
 
-One expand-only migration (`db/docs/migrations.md`; the baseline `db/schema.sql` is synchronized):
+## 4. Storage: stored records, derived timeline, strictly O(n)
+
+The user's rulings (2026-11-12): the transcript's entries go into our database, only what we need, and the design
+exploits that the prefix of a conversation almost never changes, so nothing is rewritten or re-read in
+proportion to the conversation. The native checkpoint stores whole message state, inline images included, and
+rewrites all of it on every save; reads and writes grew with the square of the conversation and once stalled
+writes. This design must not have that shape anywhere.
+
+### 4.1 Tables (one expand-only migration; `db/docs/migrations.md`, `schema.sql` synchronized)
 
 | Change | Meaning |
 |---|---|
-| `agent_harness_messages.source_key TEXT` | the stable key of the entry's draft; null for rows the graph writes itself |
-| partial unique `(agent_id, source_key) WHERE source_key IS NOT NULL` | the idempotency constraint |
-| table `agent_harness_transcript_positions(agent_id, session_id, record, position TEXT, cli_version TEXT, updated_at, PRIMARY KEY (agent_id, session_id, record))` | where each record has been read to; written in the transaction that writes the rows; `cli_version` is the CLI version telemetry reports |
+| `agent_harness_messages.source_key TEXT`, partial unique `(agent_id, source_key) WHERE source_key IS NOT NULL` | the stable key of the entry a timeline row was projected from; the idempotency constraint; null for rows the graph writes itself |
+| `agent_harness_messages.projection_version INT` | the version of the projection rules that produced the row (null on rows written before) |
+| `agent_harness_transcript_rows(agent_id, session_id, record, ordinal, row JSONB, written_at)`, primary key `(agent_id, session_id, record, ordinal)` | the stored records: one row per whitelisted CLI row, appended once, never updated; `ordinal` is the row's own position in its record |
+| `agent_harness_transcript_positions(agent_id, session_id, record, position, cli_version, updated_at)`, primary key `(agent_id, session_id, record)` | where each record has been read to: one small row per record, O(1) |
 
-The timeline stays **append-only in `seq`**, one writer making it so: the same meaning as today's event-stream
-arrival order. A command that completes late is appended when it completes (its call and its result together,
-with its original turn on the draft), a sub-agent's row when it is read, a phantom or CLI-started turn when it
-is read. There is no sort key, no mid-timeline insert, no backfill. An agent that already has a timeline at the
-cutover has its position set to the end of its current record by the first writer start (a catch-up that
-projects nothing).
+The timeline stays **append-only in `seq`**, one writer making it so (the meaning of today's event-stream arrival
+order): a command that completes late is appended when it completes, a sub-agent's row when it is read, a
+phantom or CLI-started turn when it is read. No sort key, no mid-timeline insert, no backfill. An agent that
+already has a timeline at the cutover has its position set to the end of its current record by the first
+writer start (a read that stores and projects nothing).
+
+### 4.2 What is stored: filtered raw rows, by whitelist
+
+**Whitelist, not blacklist.** Only the row types and fields the projection consumes are stored. For Claude Code:
+`user`, `assistant`, `system/compact_boundary` and `attachment/queued_command`, with the fields `uuid`,
+`timestamp`, `type`, `isSidechain`, `agentId`, `isMeta`, `isCompactSummary`, `isApiErrorMessage`,
+`isAbortedMidStream`, `promptId`, `origin`, `toolUseResult.agentId`/`isAsync`/`backgroundTaskId`,
+`toolDenialKind`, `thinkingDurationMs`, `error`, `apiErrorStatus`, `subtype`, `attachment` (queued command), and
+`message` (`id`, `model`, `stop_reason`, `usage`, `content`). Never stored: the bookkeeping rows
+(`api-request`, `api-request-shape`, `api-request-blob`, `queue-operation`, `file-history-snapshot`,
+`session-owner`, `cost-state`, `last-prompt`, `mode`, `tools-used`, titles), the context attachments
+(`prompt_snapshot`, `skill_listing`, `environment`...), and any row carrying an account identifier or a full
+request body. A row of a type the parser does not know is not stored; it is counted and reported once per type
+as a registered anomaly. The fallback is the CLI's own local file (kept 30 days by default): if a new type
+turns out to be needed, the whitelist changes and the record is re-read from the file.
+
+**Raw rows, not normalized entries.** What is stored is the filtered row as the CLI wrote it, not the parser's
+entries, because the test is whether a corrected parser can reproduce a correct timeline from the database
+alone: entries bake in the parser's mistakes (a misread field is gone), a filtered raw row keeps every field the
+projection might use as it was. The price is that the parser runs on read-back (re-projection and restart),
+which is cheap.
+
+**Large content is not duplicated.** Inline image bytes are not stored (the images we sent are already in the
+inbound rows); a stored image block keeps `{sha256, bytes, media_type}` only. A text or tool-result block above
+a cap (`ROW_TEXT_CAP_BYTES`, 256 KiB, above what the timeline shows, 8 KB for a sub-agent and the main agent's
+own full text) is cut and marked with its original length. The cap applies to sub-agent records the same way.
+
+**Measured on the recordings** (CLI 2.1.322, 18 transcript files): the whitelisted rows are 2-8% of the raw file
+bytes (193 KB of 5.17 MB; about 6-34 KB against 260-425 KB per recorded session, the rest being per-session
+constants such as `prompt_snapshot`, `skill_listing` and `api-request-blob`), before the `usage` objects, which
+add about 0.4 KB per assistant row. Sub-agent records are the volume at scale (264 MB of sub-agent files for one
+long session, mostly tool output); the same whitelist and cap apply, and PR A reports the stored size of the
+recordings' sub-agent files next to the raw size.
+
+### 4.3 The O(n) checklist (every item holds, and a test enforces the shape)
+
+- **Storage:** each row is written once, appended; no column or blob is rewritten per update; the positions
+  table is one small row per record. The projector's state is never stored whole (section 3, restart).
+- **Reading in:** always incremental by position. Claude seeks to the stored byte offset and never scans from
+  the start; Codex uses only the history cursor (`thread/items/list`) and never a call that returns the whole
+  history (`thread/read`, `thread/resume` with turns; resume uses `excludeTurns`); Antigravity continues by
+  `step_index`, and its cumulative trajectory is fetched only when an inbound id is needed and is never stored.
+- **Quadratic sources in the CLI's files are kept out:** the per-request `api-request-blob` (the whole request
+  every call), cumulative file-history snapshots, repeated summaries after compaction, repeated context
+  attachments: none is on the whitelist.
+- **Writing the timeline:** append only, no reorder, no backfill.
+- **Reading the timeline:** by window, as today; storing records does not touch that query.
+- **Re-projection is the one O(n) operation** and an explicit operator action, never on a regular path.
+- **A CI protection:** a synthetic long session (thousands of entries) is fed in batches; the test asserts that
+  total rows and bytes written grow linearly with the number of entries and that the rows and bytes read and
+  written per batch do not grow with the length already stored.
+
+### 4.4 Re-projection
+
+The timeline rows are a derived result. Re-projecting an agent (or one session) is an explicit action: take a
+new `projection_version`, replay the stored rows of that session in order through the current parser and
+projector into the same `source_key` space (`ON CONFLICT DO NOTHING` keeps what exists; rows whose projection
+changed are written by a purpose-built rebuild that replaces the agent's derived rows in one operation, and is
+refused while the agent's writer is running). It reads the stored rows once, in order, in bounded batches.
+Whether a parser fix needs it is judged by the version on the rows.
+
+### 4.5 Retention
+
+Stored rows are kept 30 days by default (configurable) and the timeline permanently. Expiry runs in the
+existing upkeep sweeper (`services/upkeep/ttl_reaper`) as a time-batched delete on `written_at` (an index on it),
+never a table scan, and never deletes the rows after a session's latest rebuild point so that restart rebuild
+keeps working for a live session. The coordinator decides if the measured sizes make retention unnecessary.
 
 ## 5. What the graph keeps, deletes and changes
 
@@ -218,8 +302,8 @@ One rule: an input is delivered when the record shows it; the entry that shows i
 | PR | Content | Rollback |
 |---|---|---|
 | 1 (#8922) | shared vocabulary, projection, read port; three parsers; golden tests; decision and plan. No behaviour change | revert |
-| A | expand migration (`source_key`, partial unique, positions table, `schema.sql`), keyed append, the Claude position reader (pure position/line handling plus a thin file shell), tests. No behaviour change | the columns are nullable and unused; revert the code |
-| B | the writer (plan + shell) for Claude, behind an off-by-default agent setting; wake-ups from the stream and `session_store` (`options.py`); settlement by the writer; the turn-end rule of section 6; the graph changes of section 5 effective when the setting is on; DB tests | setting off |
+| A | expand migration (`source_key`, partial unique, `projection_version`, record table, positions table, `schema.sql`), keyed append, whitelist filter and idempotent record-row append, the Claude position reader, the linear-growth test, retention in the upkeep sweeper, tests. No behaviour change | the columns are nullable and unused; revert the code |
+| B | the writer (plan + shell) for Claude, projecting from the stored rows and rebuilding its state from the last rebuild point on restart, behind an off-by-default agent setting; wake-ups from the stream and `session_store` (`options.py`); settlement by the writer; the turn-end rule of section 6; the graph changes of section 5 effective when the setting is on; DB tests | setting off |
 | later | Claude formal cutover (delete the old path and the setting), then the live overlay for Claude (section 11, its own PR), then Codex (history cursor), then Antigravity (with ACP) | per CLI |
 | last | cleanup: delete `aupsert_harness_timeline_item`, `activity_*` fields, `delivery/reconcile.py` | revert |
 

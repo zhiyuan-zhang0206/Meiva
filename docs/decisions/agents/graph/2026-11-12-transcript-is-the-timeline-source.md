@@ -47,7 +47,15 @@ accept losing streaming first, in return for correctness and stability.
    later is written later, never lost. A missing closing entry is a registered warning, not a fault.
 6. **Streaming is out for now.** An item appears when the CLI finishes it. A live view of the turn in
    flight, if wanted later, is a separate, non-durable layer and is never the source of a record.
-7. **Cut over per CLI**, in the order Claude Code, Codex, Antigravity. A CLI keeps its event-stream
+7. **The records go into our database, only what we need, strictly O(n).** The whitelisted rows of each record
+   (filtered raw rows, not parsed entries) are stored in the transaction that writes the timeline, so the
+   timeline is a derived result that can be re-projected from the database when the parser is fixed, and a
+   restart rebuilds the projector's state from a bounded tail of stored rows, not from the CLI's file. Nothing
+   is rewritten or re-read in proportion to the conversation: rows are appended once, positions are one row,
+   reading is incremental by position, and the CLI's quadratic sources (full request blobs, cumulative
+   snapshots, repeated summaries, inline image bytes) never enter the database. Stored rows expire after a
+   retention period (30 days by default); the timeline does not.
+8. **Cut over per CLI**, in the order Claude Code, Codex, Antigravity. A CLI keeps its event-stream
    projection until its own cutover and loses it in the same change as the cutover; there is no
    compatibility layer. A conversation that already has a timeline starts projecting from the end of the
    record at the cutover and never replays its history.
@@ -64,6 +72,17 @@ accept losing streaming first, in return for correctness and stability.
 - **Push content from the SDK's `session_store` callback and re-read the file only after a crash.** Two paths
   that overlap need de-duplication, and the recovery path would run only in an accident. One pull path
   with the callback as a wake-up is the same shape for all three CLIs.
+- **Store nothing and project from the CLI's local file every time.** The file is the CLI's, can be swept,
+  and leaves recovery, re-projection and a parser fix depending on a file that may be gone; keeping the
+  whitelisted rows costs a few percent of the file's size.
+- **Store parsed entries.** A parser mistake is then baked into the stored data and a fix cannot reproduce a
+  correct timeline; filtered raw rows keep the original fields.
+- **Store everything the CLI writes.** Most of a Claude session file is per-request bookkeeping and
+  repeated context, the same shape of mistake as the native checkpoint, which stored whole message state with
+  inline images and rewrote it on every save (reads and writes grew with the square of the conversation and
+  once stalled writes).
+- **Store the projector's state as a blob.** It would be rewritten on every read; the state is rebuilt from a
+  bounded tail of stored rows instead.
 - **Tail the files with no stream at all.** The stream is the prompt signal for a change, a turn boundary and a
   failure (Codex and Antigravity records have no turn-end for a cancel, or none at all), so it stays as a
   signal.
@@ -94,6 +113,10 @@ accept losing streaming first, in return for correctness and stability.
 - The rule "the entry proves it" replaces the live echo as the delivery signal. The echo's earlier timing
   (Claude's echo comes after the request starts, the transcript row about two seconds before) is not lost:
   the transcript is earlier.
+- The database holds the whitelisted record rows (a few percent of the CLI's file; sub-agent records are the
+  bulk and get the same whitelist and a per-block cap) and expires them after the retention period; an
+  unknown row type is not stored, is counted and reported once, and the CLI's local file is the fallback to
+  re-read from after the whitelist changes.
 - The timeline store needs a stable-key column with a partial unique constraint and a table of read
   positions; nothing about ordering changes.
 - The design of the cutover is in [the plan](../../../../future/agent/transcript-timeline-source.md); the
