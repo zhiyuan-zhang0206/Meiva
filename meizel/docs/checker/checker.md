@@ -53,6 +53,8 @@ of its diagnostic `--limit`. It reports the existing source file/directory budge
 rows with at most ten percent remaining enter the human summary. A full run with
 no changed surface still publishes the full table and has no near-cap summary.
 Existing hard gates retain their limits and exit behavior; this report adds none.
+An additional Source column binds each numeric row to its displayed owner, snapshot
+and measurement provenance.
 Unavailable measurements are identified explicitly rather than represented as zero.
 
 A standalone Memory pool retains ownership of its own limits. To include one,
@@ -63,6 +65,19 @@ python /path/to/vault/validate.py --budget-report --bundle /path/to/vault \
   --changed memory/topic/note.md > /tmp/pool-budgets.json
 python -m meizel check --budget-input /tmp/pool-budgets.json --changed app/edited.py
 ```
+
+Coverage is explicit: a missing pool input is `not-provided`, a requested unreadable
+or malformed input is `unavailable`, and empty rows, missing kinds or missing
+provenance are `partial`. `complete` means the declared scope has readings and
+provenance; it proves neither live freshness nor deployment. Unknown readings get
+no fabricated zero row. Source metadata remains visible beside the complete table
+and any changed-row summary.
+
+The Meiva scaffold's `memory-template` filesystem scope and the live Vault owner's
+`memory-pool` tracked/staged scope are separate. A template snapshot never satisfies
+live pool coverage. The live owner's required kinds include the hook-owned index
+character budget; omitting it keeps that owner partial. Limits and counting remain
+with their owners rather than being copied into the consumer.
 
 Snapshots describe the readings at export time; regenerate after an edit. The
 checker never discovers a live Vault or executes the code of an inspected project.

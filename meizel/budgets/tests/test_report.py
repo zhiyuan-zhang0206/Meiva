@@ -7,7 +7,8 @@ import json
 
 import pytest
 
-from meizel.budgets.report import BudgetRow, changed_location, decode_rows, render_table
+from meizel.budgets.report import BudgetRow, changed_location, render_table
+from meizel.budgets.snapshot import decode_snapshot
 
 
 @pytest.mark.parametrize(
@@ -57,7 +58,7 @@ def test_six_historical_locations_share_one_table_without_a_row_limit() -> None:
 )
 def test_bad_snapshots_are_rejected_atomically(bad: object) -> None:
     with pytest.raises((ValueError, TypeError)):
-        decode_rows(json.dumps({"schema": "meizel.budgets/v1", "rows": [bad]}))
+        decode_snapshot(json.dumps({"schema": "meizel.budgets/v1", "rows": [bad]}))
 
 
 def test_changed_directories_do_not_match_sibling_prefixes() -> None:

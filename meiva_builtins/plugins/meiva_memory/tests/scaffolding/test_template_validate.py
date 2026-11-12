@@ -1,3 +1,4 @@
+import errno
 import json
 import os
 import sys
@@ -600,3 +601,34 @@ def test_report_cli_returns_measurements_without_executing_validation(tmp_path: 
 def test_budget_changed_paths_cannot_claim_another_vault(tmp_path: Path, name: str) -> None:
     with pytest.raises(ValueError, match="relative to the Vault"):
         validate.budget_snapshot(tmp_path, [name])
+
+
+# meiva:note
+# A real permission failure must not turn into a successful snapshot omitting one subtree.
+# The capability probe prevents a privileged filesystem from pretending to exercise denial.
+def test_budget_snapshot_fails_visibly_on_unreadable_subdirectory(tmp_path: Path) -> None:
+    w(tmp_path, "memory/blocked/a.md", "unreadable note")
+    blocked = tmp_path / "memory/blocked"
+    blocked.chmod(0)
+    try:
+        try:
+            _ = list(blocked.iterdir())
+        except PermissionError as error:
+            assert error.errno == errno.EACCES
+        else:
+            pytest.skip("filesystem does not enforce this directory permission denial")
+        with pytest.raises(PermissionError):
+            validate.budget_snapshot(tmp_path, [])
+    finally:
+        blocked.chmod(0o700)
+
+
+def test_template_snapshot_names_its_scope_and_binds_changed_identity(tmp_path: Path) -> None:
+    w(tmp_path, "memory/note.md", "small")
+    snapshot = validate.budget_snapshot(tmp_path, ["memory/note.md"])
+    assert snapshot["owner"] == "memory-template"
+    assert "memory-index-characters" not in snapshot["expected_kinds"]
+    provenance = snapshot["provenance"]
+    assert provenance["root"] == provenance["changed_root"] == str(tmp_path)
+    assert provenance["snapshot"] == provenance["changed_snapshot"]
+    assert "not live Vault index" in provenance["inventory"]

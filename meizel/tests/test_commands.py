@@ -530,8 +530,8 @@ def test_explicit_budget_snapshot_merges_and_bad_input_remains_report_only(
     assert run(root, "check", "--budget-input", "pool.json") == 0
     assert "| 8001 | 8000 | -1 | **yes** |" in capsys.readouterr().err
     assert run(root, "check", "--budget-input", "missing.json") == 0
-    assert "supplemental measurements unavailable" in capsys.readouterr().err
-    assert "Unavailable measurements" in (root / ".cache/meizel/budgets.md").read_text()
+    assert "measurements unavailable" in capsys.readouterr().err
+    assert "coverage=unavailable" in (root / ".cache/meizel/budgets.md").read_text()
 
 
 def test_unwritable_report_artifact_prints_the_complete_table_and_keeps_the_verdict(
@@ -545,3 +545,15 @@ def test_unwritable_report_artifact_prints_the_complete_table_and_keeps_the_verd
     assert "budget artifact unavailable" in captured.err
     assert "| Kind | Location | Current | Limit | Remaining | Changed |" in captured.out
     assert "| directory-entries | pkg |" in captured.out
+
+
+def test_no_snapshot_coverage_is_visible_in_command_output_and_full_artifact(
+    make_repo: RepoFactory,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    root = make_repo({**SOURCES, **MANIFESTS})
+    assert run(root, "check") == 0
+    assert "memory-pool=not-provided" in capsys.readouterr().out
+    table = (root / ".cache/meizel/budgets.md").read_text()
+    assert "Memory-pool coverage: not-provided" in table
+    assert "memory-index-characters | 0" not in table

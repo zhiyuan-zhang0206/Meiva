@@ -73,3 +73,10 @@ changed paths are relative to that Vault. Over-limit rows remain measurements an
 do not fail this mode. The ordinary validation and commit-hook gates are unchanged.
 Pass the snapshot to `meizel check --budget-input <file>` to view pool and source
 budgets in one table, without letting the checker discover or execute a live pool.
+
+
+The scaffold identifies itself as `memory-template`, with explicit filesystem
+inventory and effective-limit provenance. It does not represent the independently
+maintained live Vault validator or its staged-blob index character budget. Unknown
+or incomplete coverage remains visible in the consumer. An unreadable subtree
+fails snapshot export visibly instead of silently returning an incomplete inventory.

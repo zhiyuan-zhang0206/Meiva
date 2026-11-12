@@ -20,3 +20,20 @@ would obscure which workspace and authority a reported budget belongs to.
 The original six locations motivated the contract; they are historical examples,
 not six new rules or a reason to restore retired code-document character caps.
 The current Memory pool owns its active note-character and directory limits.
+
+
+## Owner and review follow-up
+
+The Memory Arbiter's review established that the deployed Vault validator and the
+Meiva scaffold had diverged: tracked/staged inventory, reserved-file handling and
+the hook-owned index cap require their actual owner. Template tests therefore
+prove only their explicit filesystem scope. The live owner supplies its own
+fixed-index snapshot through separate Vault engineering; the consumer does not
+scan it, execute its producer, or copy its gate logic.
+
+We made missing input and incomplete scope visible, preserved provenance through
+the final table and summary, and kept completeness advisory. Empty rows or a
+missing index kind cannot appear complete. The owner and snapshot identifiers now
+travel with each numeric row. A real permission-denial control also exposed
+os.walk silently skipping an unreadable subtree; explicit error propagation keeps
+that failed export distinguishable from an observed empty directory.
