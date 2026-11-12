@@ -1,4 +1,4 @@
 exports = []
 
 [uses]
-"test_template_validate.py" = ["child_note_cap.py"]
+"test_template_validate.py" = ["child_note_cap.py", "child_budget_snapshot.py"]

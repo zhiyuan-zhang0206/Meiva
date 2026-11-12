@@ -60,9 +60,7 @@ def test_the_band_names_a_changed_file_beside_the_violations(tmp_path: Path) -> 
     )
     assert violations == []
     [warning] = warnings
-    assert warning.startswith(
-        "meizel: warning: base/near.py:795: within 10 lines of the 800-line hard ceiling — "
-    )
+    assert "| python-lines | base/near.py | 795 | 800 | 5 | **yes** |" in warning
 
 
 def test_the_file_scope_skips_hidden_cache_and_migration_directories(tmp_path: Path) -> None:

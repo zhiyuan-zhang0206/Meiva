@@ -11,10 +11,11 @@ from __future__ import annotations
 from collections.abc import Collection, Iterable, Mapping
 from pathlib import Path, PurePosixPath
 
+from meizel.budgets.report import render_table, source_rows
+
 __all__ = [
     "DIRECTORY_CEILING",
     "HARD_CEILING",
-    "NEAR_CEILING_BAND",
     "ceiling_report",
     "entry_candidate",
     "is_python_file",
@@ -25,12 +26,6 @@ __all__ = [
 
 HARD_CEILING = 800
 DIRECTORY_CEILING = 20
-# meiva:note
-# How close to the file ceiling a changed file has to be before the run says so: ten lines is a
-# change small enough to make somewhere else, so it is the last width at which a warning can still
-# move the code instead of merely reporting the crossing.
-NEAR_CEILING_BAND = 10
-
 _PYTHON_SUFFIX = ".py"
 _MANIFEST = "meizel.toml"
 # meiva:note
@@ -165,21 +160,17 @@ def judged_path(target: Path, scope: Path, repo_root: Path) -> Path | None:
 
 
 # meiva:note
-# Both ceilings' report for one run, in the order the ceilings have always been printed in: a line
-# per file over the hard ceiling, ordered by path *parts* (so `app/a/b.py` precedes `app/a.py`, as
-# walking `Path` objects did), then a line per judged directory over the entry cap, by name. The
-# second list is the band below the file ceiling, which names a file only when the change itself
-# touches it: a repository where hundreds of files already sit near the ceiling would otherwise warn
-# about all of them on every run, and a warning nobody can act on is noise. Over the ceiling the
-# violation already speaks, so the band stops there.
+# Hard violations retain their existing gate. The former per-file warning is now the same
+# changed-only headroom table as `check`, shared by every measured kind including directories.
 def ceiling_report(
     texts: Mapping[Path, str],
     repo_root: Path,
     judged: Mapping[str, int],
     changed: Collection[str] = frozenset(),
 ) -> tuple[list[str], list[str]]:
+    rows = source_rows(texts, repo_root, judged, changed, HARD_CEILING, DIRECTORY_CEILING)
     files = sorted(
-        ((_label(path, repo_root), _line_count(text)) for path, text in texts.items()),
+        ((row.location, row.current) for row in rows if row.kind == "python-lines"),
         key=lambda named: PurePosixPath(named[0]).parts,
     )
     violations = [
@@ -196,28 +187,10 @@ def ceiling_report(
             if count > DIRECTORY_CEILING
         ),
     ]
-    warnings = [
-        f"meizel: warning: {name}:{count}: within {NEAR_CEILING_BAND} lines of the"
-        f" {HARD_CEILING}-line hard ceiling — the next change to this file needs a boundary, not"
-        f" more lines. See {_DOC}."
-        for name, count in files
-        if name in changed and HARD_CEILING - NEAR_CEILING_BAND < count <= HARD_CEILING
-    ]
+    attention = [row for row in rows if row.attention]
+    warnings = (
+        ["meizel: changed budgets with <=10% remaining (report only):\n" + render_table(attention)]
+        if attention
+        else []
+    )
     return violations, warnings
-
-
-# meiva:note
-# What counts as a line of a judged file: every line `str.splitlines` splits, with no trailing empty
-# line counted for a file that ends at a newline.
-def _line_count(text: str) -> int:
-    return len(text.splitlines())
-
-
-# meiva:note
-# How a judged path is named in the report: repository-relative, or its absolute posix form when it
-# sits outside the repository.
-def _label(path: Path, root: Path) -> str:
-    try:
-        return path.relative_to(root).as_posix()
-    except ValueError:
-        return path.as_posix()

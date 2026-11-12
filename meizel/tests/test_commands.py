@@ -484,3 +484,76 @@ def test_a_bool_is_not_a_whole_number() -> None:
 def test_a_shape_that_is_not_a_dataclass_is_refused() -> None:
     with pytest.raises(MeizelError, match="not a dataclass"):
         read_args(argparse.Namespace(paths=[]), dict)
+
+
+# meiva:note
+# A real command invocation preserves the original gate while publishing the full report.
+# Unchanged near-cap rows stay in the artifact; the summary contains only edited rows.
+def test_check_reports_changed_headroom_without_a_new_failure(
+    make_repo: RepoFactory,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    root = make_repo(
+        {
+            "app/edited.py": "VALUE = 1\n" * 720,
+            "app/untouched.py": "VALUE = 1\n" * 799,
+            "meizel.toml": '[roles]\napplication = ["app"]\n',
+        }
+    )
+    assert run(root, "check", "--limit", "0", "--changed", "app/edited.py") == 0
+    captured = capsys.readouterr()
+    assert "| python-lines | app/edited.py | 720 | 800 | 80 | **yes** |" in captured.err
+    assert "app/untouched.py" not in captured.err
+    table = (root / ".cache/meizel/budgets.md").read_text()
+    assert "| python-lines | app/untouched.py | 799 | 800 | 1 | no |" in table
+    assert run(root, "check", "--changed", "app/untouched.py") == 0
+    assert "app/edited.py" not in capsys.readouterr().err
+
+
+def test_explicit_budget_snapshot_merges_and_bad_input_remains_report_only(
+    make_repo: RepoFactory,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    snapshot = {
+        "schema": "meizel.budgets/v1",
+        "rows": [
+            {
+                "kind": "memory-note-characters",
+                "location": "/vault/memory/x.md",
+                "current": 8001,
+                "limit": 8000,
+                "changed": True,
+            }
+        ],
+    }
+    root = make_repo({**SOURCES, **MANIFESTS, "pool.json": json.dumps(snapshot)})
+    assert run(root, "check", "--budget-input", "pool.json") == 0
+    assert "| 8001 | 8000 | -1 | **yes** |" in capsys.readouterr().err
+    assert run(root, "check", "--budget-input", "missing.json") == 0
+    assert "measurements unavailable" in capsys.readouterr().err
+    assert "coverage=unavailable" in (root / ".cache/meizel/budgets.md").read_text()
+
+
+def test_unwritable_report_artifact_prints_the_complete_table_and_keeps_the_verdict(
+    make_repo: RepoFactory,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    root = make_repo({**SOURCES, **MANIFESTS})
+    (root / ".cache").write_text("a file blocks artifact directory creation")
+    assert run(root, "check") == 0
+    captured = capsys.readouterr()
+    assert "budget artifact unavailable" in captured.err
+    assert "| Kind | Location | Current | Limit | Remaining | Changed |" in captured.out
+    assert "| directory-entries | pkg |" in captured.out
+
+
+def test_no_snapshot_coverage_is_visible_in_command_output_and_full_artifact(
+    make_repo: RepoFactory,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    root = make_repo({**SOURCES, **MANIFESTS})
+    assert run(root, "check") == 0
+    assert "memory-pool=not-provided" in capsys.readouterr().out
+    table = (root / ".cache/meizel/budgets.md").read_text()
+    assert "Memory-pool coverage: not-provided" in table
+    assert "memory-index-characters | 0" not in table

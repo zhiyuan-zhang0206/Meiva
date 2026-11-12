@@ -5,13 +5,16 @@
 
 from __future__ import annotations
 
+import argparse
+import hashlib
+import json
 import os
 import re
 import subprocess
 import sys
 from collections.abc import Callable, Mapping
 from pathlib import Path
-from typing import ParamSpec, TypeGuard
+from typing import ParamSpec, TypedDict, TypeGuard
 
 import yaml
 
@@ -495,8 +498,129 @@ def validate_bundle(bundle: Path) -> tuple[list[str], int]:
     return errors, len(md_files)
 
 
-def main() -> int:
-    errors, checked = validate_bundle(_BUNDLE)
+class _BudgetRow(TypedDict):
+    kind: str
+    location: str
+    current: int
+    limit: int
+    changed: bool
+
+
+class _BudgetSnapshot(TypedDict):
+    schema: str
+    owner: str
+    expected_kinds: list[str]
+    provenance: dict[str, str]
+    rows: list[_BudgetRow]
+    unavailable: dict[str, str]
+
+
+# meiva:note
+# os.walk otherwise swallows unreadable children and returns a plausible partial inventory.
+# An explicit snapshot must fail visibly so a consumer can label that source unavailable.
+def _walk_error(error: OSError) -> None:
+    raise error
+
+
+def _template_provenance(
+    bundle: Path,
+    rows: list[_BudgetRow],
+    cap: int,
+    changed: list[str],
+) -> dict[str, str]:
+    identity = hashlib.sha256(json.dumps([rows, changed], sort_keys=True).encode()).hexdigest()
+    override = "default" if os.environ.get("MEIVA_MEMORY_NOTE_CAP") is None else "explicit override"
+    return {
+        "producer": "meiva-memory-template/v1",
+        "source_revision": "sha256:" + hashlib.sha256(Path(__file__).read_bytes()).hexdigest(),
+        "snapshot": identity,
+        "root": str(bundle),
+        "changed_root": str(bundle),
+        "changed_snapshot": identity,
+        "inventory": "explicit filesystem traversal/non-atomic disk contents; not live Vault index",
+        "units": "memory-markdown-files=files; memory-subdirectories=directories; "
+        "memory-note-characters=Unicode characters",
+        "effective_limits": f"MAX_FILES_PER_DIR={MAX_FILES_PER_DIR}; "
+        f"MAX_SUBDIRS_PER_DIR={MAX_SUBDIRS_PER_DIR}; note_char_cap={cap} "
+        f"(MEIVA_MEMORY_NOTE_CAP {override})",
+    }
+
+
+# meiva:note
+# Standalone owners export measurements as data. The repository checker may merge this
+# explicit snapshot, but cannot import a pool's code or silently discover a live Vault.
+def budget_snapshot(bundle: Path, changed: list[str]) -> _BudgetSnapshot:
+    if not bundle.is_absolute():
+        raise ValueError("budget bundle must be an explicit absolute path")
+    changed = [Path(name).as_posix() for name in changed]
+    if any(Path(name).is_absolute() or ".." in Path(name).parts for name in changed):
+        raise ValueError("changed paths must be relative to the Vault without parent traversal")
+    rows: list[_BudgetRow] = []
+    memory = bundle / "memory"
+    if not memory.is_dir():
+        raise ValueError(f"memory directory missing: {memory}")
+    cap = note_char_cap()
+
+    def row(kind: str, path: Path, current: int, limit: int) -> None:
+        relative = path.relative_to(bundle).as_posix()
+        rows.append(
+            {
+                "kind": kind,
+                "location": path.as_posix(),
+                "current": current,
+                "limit": limit,
+                "changed": any(
+                    name == relative or name.startswith(relative + "/") for name in changed
+                ),
+            }
+        )
+
+    for dirpath, dirnames, filenames in os.walk(memory, onerror=_walk_error):
+        directory = Path(dirpath)
+        if any(part.startswith(".") for part in directory.relative_to(memory).parts):
+            continue
+        row(
+            "memory-markdown-files",
+            directory,
+            sum(name.endswith(".md") and name not in ("index.md", "log.md") for name in filenames),
+            MAX_FILES_PER_DIR,
+        )
+        row("memory-subdirectories", directory, len(dirnames), MAX_SUBDIRS_PER_DIR)
+        for name in sorted(filenames):
+            if is_note_name(name):
+                path = directory / name
+                row("memory-note-characters", path, len(path.read_text(encoding="utf-8")), cap)
+    return {
+        "schema": "meizel.budgets/v1",
+        "owner": "memory-template",
+        "expected_kinds": [
+            "memory-markdown-files",
+            "memory-subdirectories",
+            "memory-note-characters",
+        ],
+        "provenance": _template_provenance(bundle, rows, cap, changed),
+        "rows": rows,
+        "unavailable": {},
+    }
+
+
+class _Options(argparse.Namespace):
+    budget_report: bool
+    bundle: Path
+    changed: list[str]
+
+
+def main(argv: list[str]) -> int:
+    parser = argparse.ArgumentParser(description="Validate a Memory pool, or report its budgets")
+    parser.add_argument("--budget-report", action="store_true", help="report-only JSON snapshot")
+    parser.add_argument("--bundle", type=Path, default=_BUNDLE, help="explicit Vault directory")
+    parser.add_argument("--changed", nargs="*", default=[], help="changed paths relative to Vault")
+    args = _Options()
+    _ = parser.parse_args(argv, namespace=args)
+    if args.budget_report:
+        print(json.dumps(budget_snapshot(args.bundle, args.changed)))
+        return 0
+    errors, checked = validate_bundle(args.bundle)
     if checked == 0:
         print("No .md files found.", file=sys.stderr)
         return 1
@@ -512,4 +636,4 @@ def main() -> int:
 
 
 if __name__ == "__main__":
-    sys.exit(main())
+    sys.exit(main(sys.argv[1:]))
