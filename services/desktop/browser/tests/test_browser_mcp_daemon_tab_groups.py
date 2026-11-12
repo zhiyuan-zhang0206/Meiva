@@ -171,7 +171,10 @@ async def test_grouping_failure_leaves_the_page_created_and_selected_without_a_t
     assert d.pages.records == {}
     warnings = [r for r in loguru_records if r["level"].name == "WARNING"]
     assert warnings, "a grouping failure must leave a trace"
-    assert all("tab group" in r["message"] for r in warnings)
+    # meiva:note
+    # The same unreadable Chrome also stops the agent's selection from being saved for a
+    # restart; that is a warning of its own, never an error of the call.
+    assert all("tab group" in r["message"] or "to save agent" in r["message"] for r in warnings)
 
 
 class WedgedChrome:

@@ -361,6 +361,17 @@ EVENTS: dict[str, EventSpec] = {
             'services/desktop/browser/page_lifecycle.py:renew_agent_page telemetry.emit("telemetry", ...)'
         ),
     ),
+    "browser_mcp_exit": telemetry_event(
+        "browser_mcp_exit",
+        "a browser-mcp daemon generation ended; attributes carry reason (stopped | "
+        "upstream_exited | probes_unanswered | call_timeout_unanswered | call_timeouts_repeated); "
+        "stopped is a service stop or update, every other reason is an upstream death the root "
+        "restarts",
+        tier="observation",
+        site=(
+            'services/desktop/browser/mcp_upstream.py:report_daemon_exit telemetry.emit("telemetry", ...)'
+        ),
+    ),
     "memory_search_rerank": telemetry_event(
         "memory_search_rerank",
         "memory-search rerank skipped candidate notes it could not read; they are ranked out "

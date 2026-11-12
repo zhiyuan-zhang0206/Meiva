@@ -1,10 +1,12 @@
-exports = ["grouping.py", "page_ledger.py", "page_store.py"]
+exports = ["grouping.py", "page_ledger.py", "page_registry.py", "page_selection.py", "page_store.py"]
 
 [uses]
 "grouping.py" = ["page_ledger.py"]
+"page_registry.py" = ["page_ledger.py", "page_store.py"]
 "page_store.py" = ["page_ledger.py"]
-"tests" = ["grouping.py", "page_ledger.py", "page_store.py"]
+"tests" = ["grouping.py", "page_ledger.py", "page_selection.py", "page_store.py"]
 
 [purity]
 "__init__.py" = "strict"
 "page_ledger.py" = "strict"
+"page_selection.py" = "strict"

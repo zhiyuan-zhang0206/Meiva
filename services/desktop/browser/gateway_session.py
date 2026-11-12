@@ -114,7 +114,7 @@ class GatewaySession:
         """
         while not stop.is_set():
             await self.inject_once()
-            await await_stop_or_timeout(stop, self._refresh_interval_s)
+            await await_stop_or_timeout(stop, self._refresh_interval_s, self._clock.timers)
 
 
 def stop_on_signals() -> asyncio.Event:

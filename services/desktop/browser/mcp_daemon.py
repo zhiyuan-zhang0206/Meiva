@@ -28,7 +28,6 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from mcp import ClientSession, types
-from mcp.shared.exceptions import MCPError
 
 from base.clock import SYSTEM_TIMERS, Clock
 from base.clock.configuration import clock_config_from_boot
@@ -51,20 +50,20 @@ from base.telemetry.process_logging import init_gateway_process
 from services.desktop.browser import page_lifecycle, session_restore
 from services.desktop.browser.gateway_session import GatewaySession, stop_on_signals
 from services.desktop.browser.mcp_upstream import (
-    UPSTREAM_DOWN,
     UPSTREAM_DOWN_MSG,
+    DeathReason,
     StoppingError,
+    UpstreamGuard,
     await_death_or_stop,
     bounded,
     bounded_stack_close,
     contained,
     create_upstream,
-    is_upstream_down,
+    report_daemon_exit,
     upstream_watchdog,
 )
 from services.desktop.browser.page_lifecycle import (
     RENEW_PAGE_TOOL,
-    PageRegistry,
     expired_page_reaper,
     handle_release_agent_page,
     renew_agent_page,
@@ -77,7 +76,13 @@ from services.desktop.browser.tab_groups.grouping import (
     ExtensionWorker,
     staged_extension_dir,
 )
-from services.desktop.browser.tab_groups.page_store import FileRecordStore, page_ledger_path
+from services.desktop.browser.tab_groups.page_registry import PageRegistry
+from services.desktop.browser.tab_groups.page_store import (
+    FileRecordStore,
+    FileSelectionStore,
+    page_ledger_path,
+    selection_path,
+)
 
 # meiva:note
 # Multi-MB tool results (screenshot / DOM snapshot) fit on one line.
@@ -146,50 +151,40 @@ class ChromeMcpDaemon:
         upstream: ClientSession,
         pages: PageRegistry,
         tab_groups: AgentTabGroups,
+        guard: UpstreamGuard,
     ) -> None:
         self._upstream = upstream
         self.pages = pages
         self.tab_groups = tab_groups
+        self.guard = guard
         self._lock = asyncio.Lock()
         self._tools: list[types.Tool] | None = None
         # meiva:note
-        # Set when an upstream call hits a closed session; run() watches it to
-        # terminate this unusable daemon.
-        self.dead = asyncio.Event()
+        # Set by the guard when the upstream session is judged unusable; run() watches
+        # it to terminate this unusable daemon.
+        self.dead = guard.dead
 
     # meiva:note
-    # Forward to upstream, flagging `dead` on session death and releasing the page's
-    # tab group first on `close_page` (best-effort).
+    # Forward to upstream under the guard's verdict (`UpstreamGuard.request`: a dead
+    # session flags `dead`, a read timeout fails this call alone while the upstream
+    # still answers) and release the page's tab group first on `close_page`
+    # (best-effort).
     # meiva:link services/desktop/browser/docs/tab-groups.md
     async def _call(self, name: str, args: dict[str, object]) -> types.CallToolResult:
         if name == "close_page":
             closing = _page_id(args.get("pageId"))
             if closing is not None:
                 await self.tab_groups.release_page(closing)
-        try:
-            return await self._upstream.call_tool(name, args)
-        except UPSTREAM_DOWN as e:
-            self.dead.set()
-            raise RuntimeError(UPSTREAM_DOWN_MSG) from e
-        except (MCPError, TimeoutError) as e:
-            if is_upstream_down(e):
-                self.dead.set()
-                raise RuntimeError(UPSTREAM_DOWN_MSG) from e
-            raise
+        return await self.guard.request(
+            f"browser tool {name!r}", lambda: self._upstream.call_tool(name, args)
+        )
 
     async def list_tools(self) -> list[dict[str, object]]:
         async with self._lock:
             if self._tools is None:
-                try:
-                    self._tools = (await self._upstream.list_tools()).tools
-                except UPSTREAM_DOWN as e:
-                    self.dead.set()
-                    raise RuntimeError(UPSTREAM_DOWN_MSG) from e
-                except (MCPError, TimeoutError) as e:
-                    if is_upstream_down(e):
-                        self.dead.set()
-                        raise RuntimeError(UPSTREAM_DOWN_MSG) from e
-                    raise
+                self._tools = (
+                    await self.guard.request("tool listing", self._upstream.list_tools)
+                ).tools
         # meiva:note
         # Daemon-owned tool appended after the upstream's verbatim passthrough:
         # `chrome-devtools-mcp` has no TTL concept, so `renew_page` is
@@ -216,9 +211,11 @@ class ChromeMcpDaemon:
         if name == RENEW_PAGE_TOOL:
             return await renew_agent_page(self, agent_id, args)
         async with self._lock:
-            page = self.pages.get_agent_page(agent_id)
+            page = await page_lifecycle.restored_page(self, agent_id)
             result, updated = await self._affinity_call(name, args, page, agent_id)
             self.pages.set_agent_page(agent_id, updated)
+            if updated != page:
+                await page_lifecycle.remember_selection(self, agent_id, updated, result)
             return result
 
     # meiva:note
@@ -545,6 +542,7 @@ async def _serve_daemon_loop(
         default_ttl_seconds=default_ttl_seconds,
         clock=clock,
         store=FileRecordStore(page_ledger_path(home)),
+        selection_store=FileSelectionStore(selection_path(home)),
     )
     async with asyncio.TaskGroup() as tasks:
         gateway = GatewaySession(tasks, browser_cdp_port, access=gateway_access, clock=clock)
@@ -563,6 +561,7 @@ async def _serve_daemon_loop(
             try:
                 session, current_stack = await open_upstream()
             except StoppingError:
+                report_daemon_exit(DeathReason.STOPPED)
                 return
             if reapply_session:
                 # meiva:note
@@ -577,9 +576,11 @@ async def _serve_daemon_loop(
                         "browser session restore",
                     )
                 )
-            daemon = ChromeMcpDaemon(session, pages, tab_groups)
+            guard = UpstreamGuard(session, clock.timers)
+            daemon = ChromeMcpDaemon(session, pages, tab_groups, guard)
             daemon_ref[0] = daemon
             await _serve_generation(daemon, stop, gateway)
+            report_daemon_exit(guard.reason or DeathReason.STOPPED)
             if daemon.dead.is_set():
                 raise RuntimeError("browser-mcp upstream died; explicit service restart required")
         finally:
@@ -667,7 +668,7 @@ async def _serve_generation(
     async with asyncio.TaskGroup() as helpers:
         watchdog = helpers.create_task(
             contained(
-                upstream_watchdog(daemon._upstream, daemon.dead, stop),
+                upstream_watchdog(daemon.guard, stop),
                 "upstream watchdog",
             )
         )

@@ -137,6 +137,10 @@ than the upstream's `close_page`: chrome-devtools-mcp's page ids restart with it
 process, its output carries no target ids, and it refuses to close its last page.
 `renew_page` after a restart matches the agent's selected page to its own recorded
 pages by URL and refuses an ambiguous match.
+The agent's selected page itself is saved by target id (`browser-selected-pages.json`)
+and restored on its first call after a restart; restoring it adds nothing to the ledger
+and grants no right to close it, so a user tab the agent merely selected stays out of
+every close path (see [operations](operations.md)).
 
 **Interaction with the layout restore.** `meivaApplyLayout` matches tabs by URL
 and is unchanged. Its one hazard for this mechanism is the same-URL user tab above;
