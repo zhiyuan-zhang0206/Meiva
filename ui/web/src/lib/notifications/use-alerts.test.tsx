@@ -6,6 +6,7 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { act, cleanup, renderHook, waitFor } from "@testing-library/react";
 import type { ReactNode } from "react";
+import { renderToString } from "react-dom/server";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { AuthProvider, notifySessionInvalid, useAuth } from "../auth/auth-context";
@@ -167,6 +168,20 @@ afterEach(async () => {
   vi.useRealTimers();
   defineVisibility("visible");
   await gateway.close();
+});
+
+describe("AlertsProvider server rendering", () => {
+  it("renders without acquiring browser stream resources", () => {
+    installTab("shared");
+    const transport = {
+      ...tab.transport,
+      get page(): never { throw new Error("browser resource acquired during SSR"); },
+    };
+    hub = new StreamHub(transport, { checkAuth: auth.checkAuth, sessionInvalid: notifySessionInvalid }, "");
+    const Wrapper = alertsWrapper();
+    expect(() => renderToString(<Wrapper>server shell</Wrapper>)).not.toThrow();
+    expect(tab.sources).toHaveLength(0);
+  });
 });
 
 describe("useAlertsSection", () => {

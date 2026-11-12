@@ -92,13 +92,17 @@ function useSseConnection(
   const [retryNonce, setRetryNonce] = useState(0);
   const failCountRef = useRef(0);
   const lastReconnectNonce = useRef(reconnectNonce);
-  const transport = hub.transportFor(sseRuntime.useMergedChannels());
+  const mergedChannels = sseRuntime.useMergedChannels();
 
   useEffect(() => {
-    if (authStatus !== "authenticated" || !isVisible || (!transport && path === null)) {
+    if (authStatus !== "authenticated" || !isVisible) {
       lastReconnectNonce.current = reconnectNonce;
       return;
     }
+    // meiva:note
+    // Browser resources are acquired after commit, never during SSR or an abandoned render.
+    const transport = hub.transportFor(mergedChannels);
+    if (!transport && path === null) return;
     const mode = hub.modeEventOnce();
     if (mode !== null) trackTransport("sse-transport", mode);
     // meiva:note
@@ -225,11 +229,11 @@ function useSseConnection(
     // path + authStatus + reconnectNonce + retryNonce are the levers (retryNonce is
     // the local connect-failure backoff). subscribersRef / bumpReconnect are
     // stable identities included only to satisfy the lint.
-  }, [path, channel, activeId, isVisible, transport, authStatus, reconnectNonce, retryNonce,
+  }, [path, channel, activeId, isVisible, mergedChannels, authStatus, reconnectNonce, retryNonce,
     bumpReconnect, subscribersRef, hub]);
 
   const subscribe = useSubscribe(subscribersRef);
-  const canConnect = authStatus === "authenticated" && isVisible && (Boolean(transport) || path !== null);
+  const canConnect = authStatus === "authenticated" && isVisible;
   return { subscribe, sseOpen: canConnect && sseOpen };
 }
 

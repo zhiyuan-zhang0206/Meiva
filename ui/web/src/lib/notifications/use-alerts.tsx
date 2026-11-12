@@ -97,7 +97,7 @@ export function AlertsProvider({ children }: { children: ReactNode }) {
   // Stable reconnect callback (mirrors useEventStream's bumpReconnect).
   const bumpReconnect = useCallback(() => setReconnectNonce((n) => n + 1), []);
   const isVisible = useDocumentVisible();
-  const transport = hub.transportFor(useMergedSseChannels());
+  const mergedChannels = useMergedSseChannels();
 
   useEffect(() => {
     if (authStatus !== "authenticated" || !isVisible) {
@@ -109,6 +109,7 @@ export function AlertsProvider({ children }: { children: ReactNode }) {
       return;
     }
 
+    const transport = hub.transportFor(mergedChannels);
     let parseFailures = 0;
     const timers = createSseTimers({
       failCount: failCountRef,
@@ -190,7 +191,7 @@ export function AlertsProvider({ children }: { children: ReactNode }) {
     // reconnectNonce + retryNonce are the reopen levers; isVisible gates the
     // stream on tab visibility; the cache folders are stable identities
     // included only to satisfy the lint.
-  }, [queryClient, reconnectNonce, retryNonce, bumpReconnect, authStatus, isVisible, transport, hub]);
+  }, [queryClient, reconnectNonce, retryNonce, bumpReconnect, authStatus, isVisible, mergedChannels, hub]);
 
   return children;
 }
