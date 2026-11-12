@@ -64,12 +64,11 @@ keep production governance separate from the root distribution environment.
   judgment is in `budget_plans.py` (both ceilings, which directory entries are
   candidates, what counts as a Python file, which of a target and a structure
   directory is judged, which directories a target selects with their entry counts,
-  what counts as a line, the wording and order of both reports and the band
-  below the file ceiling that names a file only when the run's change touches
-  it), while
+  what counts as a line, and the wording and order of hard violations), while
   `limits.py` walks and reads the checkout and `directory_budget.py` lists a
   directory and tests a judged path's links. `scripts/lint/code_structure.py`
-  drives them.
+  drives them. Near-cap reporting shares `check`'s changed-only, ten-percent
+  headroom summary; it does not add a failure condition.
 - `owners/` — one owner per external capability: `decisions.py` holds Rule 5
   (`decision_table(policy)`: each design decision has exactly one owning module,
   every other site is a bypass, and a listed exemption that goes stale fails; the

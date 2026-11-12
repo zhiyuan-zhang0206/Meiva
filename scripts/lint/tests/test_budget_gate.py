@@ -75,7 +75,9 @@ def test_subdirectories_ci_never_checks_out_do_not_count(
     (package / "hidden_only").mkdir()
     (package / "hidden_only" / ".DS_Store").write_bytes(b"")
     assert lcs.main([], repo_root=tmp_path, baseline_base="HEAD", parse_ast=ast.parse) == 0
-    assert capsys.readouterr().out == ""
+    assert (
+        "| directory-entries | tests/package | 20 | 20 | 0 | **yes** |" in capsys.readouterr().out
+    )
 
     _module(package / "real_pkg" / "module.py")
     _track(package / "real_pkg")
@@ -218,7 +220,7 @@ def test_untracked_local_artifacts_do_not_add_slots(
             (folder / name / f"local_{index}.bin").write_bytes(b"\x00")
 
     assert lcs.main([], repo_root=tmp_path, baseline_base="HEAD", parse_ast=ast.parse) == 0
-    assert capsys.readouterr().out == ""
+    assert "| directory-entries | docs | 20 | 20 | 0 | **yes** |" in capsys.readouterr().out
 
 
 @pytest.mark.parametrize(
@@ -269,7 +271,7 @@ def test_a_tracked_symlink_takes_one_slot_without_traversal(
         )
         == 0
     )
-    assert capsys.readouterr().out == ""
+    assert "| directory-entries | docs | 20 | 20 | 0 | **yes** |" in capsys.readouterr().out
     (folder / "extra.md").write_text("Extra.\n", encoding="utf-8")
     _track(folder / "extra.md")
     assert (
@@ -316,7 +318,7 @@ def test_a_gitlink_takes_one_slot_without_scanning_local_contents(
     assert result.returncode == 0, result.stderr
 
     assert lcs.main([], repo_root=tmp_path, baseline_base="HEAD", parse_ast=ast.parse) == 0
-    assert capsys.readouterr().out == ""
+    assert "| directory-entries | docs | 20 | 20 | 0 | **yes** |" in capsys.readouterr().out
     (folder / "extra.md").write_text("Extra.\n", encoding="utf-8")
     _track(folder / "extra.md")
     assert lcs.main([], repo_root=tmp_path, baseline_base="HEAD", parse_ast=ast.parse) == 1
@@ -478,7 +480,7 @@ def test_explicit_deep_target_checks_all_ancestors_without_an_unrelated_sibling(
 # ceiling the violation is exactly what it was, with no warning beside it.
 @pytest.mark.parametrize(
     ("lines", "touched", "code", "warns"),
-    [(791, True, 0, True), (800, True, 0, True), (799, False, 0, False), (801, True, 1, False)],
+    [(791, True, 0, True), (800, True, 0, True), (799, False, 0, False), (801, True, 1, True)],
 )
 def test_the_file_band_names_only_a_changed_file(
     tmp_path: pathlib.Path,
@@ -493,7 +495,7 @@ def test_the_file_band_names_only_a_changed_file(
     if touched:
         _git(tmp_path, "add", "base/near.py")
     assert lcs.main([], repo_root=tmp_path, baseline_base="HEAD", parse_ast=ast.parse) == code
-    assert ("meizel: warning: base/near.py:" in capsys.readouterr().out) is warns
+    assert ("| python-lines | base/near.py |" in capsys.readouterr().out) is warns
 
 
 # meiva:note
@@ -511,6 +513,4 @@ def test_the_file_band_names_a_file_the_change_has_not_committed(
 
     assert lcs.main([], repo_root=tmp_path, baseline_base="HEAD", parse_ast=ast.parse) == 0
 
-    assert "meizel: warning: base/edit.py:795: within 10 lines of the 800-line hard ceiling" in (
-        capsys.readouterr().out
-    )
+    assert "| python-lines | base/edit.py | 795 | 800 | 5 | **yes** |" in (capsys.readouterr().out)

@@ -534,3 +534,69 @@ def test_legacy_attribution_comments_are_rejected(tmp_path: Path, comment: str) 
 
 def test_other_html_comments_remain_valid(tmp_path: Path) -> None:
     assert validate.validate_file(_note(tmp_path, "# Rule\n<!-- fact-check: test -d / -->\n")) == []
+
+
+# meiva:note
+# The standalone producer keeps the pool's existing scope: MEMORY.md counts toward directory
+# shape but is reserved from note length. The report reads actual limits, never adds a gate.
+def test_budget_snapshot_uses_pool_limits_and_changed_paths(tmp_path: Path) -> None:
+    w(tmp_path, "memory/MEMORY.md", "index")
+    w(tmp_path, "memory/near.md", "x" * 7999)
+    w(tmp_path, "memory/over.md", "x" * 8001)
+    w(tmp_path, "memory/index.md", "ignored in directory count")
+    (tmp_path / "memory/child").mkdir()
+    snapshot = validate.budget_snapshot(tmp_path, ["./memory/near.md"])
+    rows = snapshot["rows"]
+    assert isinstance(rows, list)
+    assert {row["kind"] for row in rows} == {
+        "memory-note-characters",
+        "memory-subdirectories",
+        "memory-markdown-files",
+    }
+    by_key = {(row["kind"], row["location"]): row for row in rows}
+    directory = by_key[("memory-markdown-files", str(tmp_path / "memory"))]
+    assert (directory["current"], directory["limit"], directory["changed"]) == (3, 20, True)
+    near = by_key[("memory-note-characters", str(tmp_path / "memory/near.md"))]
+    assert (near["current"], near["limit"], near["changed"]) == (
+        7999,
+        validate.note_char_cap(),
+        True,
+    )
+    assert not by_key[("memory-note-characters", str(tmp_path / "memory/over.md"))]["changed"]
+    assert ("memory-note-characters", str(tmp_path / "memory/MEMORY.md")) not in by_key
+
+
+def test_budget_snapshot_missing_pool_is_not_reported_as_zero(tmp_path: Path) -> None:
+    with pytest.raises(ValueError, match="memory directory missing"):
+        validate.budget_snapshot(tmp_path, [])
+
+
+def test_report_cli_returns_measurements_without_executing_validation(tmp_path: Path) -> None:
+    w(tmp_path, "memory/over.md", "x" * 8001)
+    result = run_bounded(
+        [
+            sys.executable,
+            "-I",
+            validate.__file__,
+            "--budget-report",
+            "--bundle",
+            str(tmp_path),
+            "--changed",
+            "memory/over.md",
+        ],
+        env={"PATH": os.defpath, "MEIVA_MEMORY_NOTE_CAP": "50"},
+        capture_output=True,
+        text=True,
+        timeout=30,
+    )
+    assert result.returncode == 0, result.stderr
+    snapshot = json.loads(result.stdout)
+    assert snapshot["schema"] == "meizel.budgets/v1"
+    [note] = [row for row in snapshot["rows"] if row["kind"] == "memory-note-characters"]
+    assert (note["current"], note["limit"], note["changed"]) == (8001, 50, True)
+
+
+@pytest.mark.parametrize("name", ["/outside.md", "../outside.md"])
+def test_budget_changed_paths_cannot_claim_another_vault(tmp_path: Path, name: str) -> None:
+    with pytest.raises(ValueError, match="relative to the Vault"):
+        validate.budget_snapshot(tmp_path, [name])

@@ -13,6 +13,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Protocol, TypeGuard
 
+from meizel.budgets import check_report
 from meizel.contracts import enumerations
 from meizel.contracts.analysis import Analysis, analyze
 from meizel.contracts.bootstrap import Bootstrap, bootstrap
@@ -223,6 +224,7 @@ def read_args[T](args: argparse.Namespace, shape: type[T]) -> T:
 # it is hashable — argparse hands over the list it built and nobody hashes it.
 @dataclass(frozen=True)
 class Check:
+    budget_input: Sequence[str]
     paths: Sequence[str]
     changed: Sequence[str] | None
     jobs: int | None
@@ -246,6 +248,7 @@ def _run_check(repo: Repository, deps: CommandDeps, opts: Check) -> int:
             raise MeizelError(f"{raw}: not a tracked file or directory")
     diagnostics = _select(analysis, targets)
     print(analysis.coverage_line())
+    check_report.emit(repo, deps.read_roles, only, opts.budget_input)
     # meiva:note
     # Warnings report a declaration the run cannot honour; they never change the verdict, because
     # no rule is violated by writing a table the policy does not reach. A file target names a file
@@ -269,6 +272,7 @@ def build_parser() -> argparse.ArgumentParser:
     commands = parser.add_subparsers(dest="command", required=True)
     check = commands.add_parser("check", help="gate: fail on any violation")
     check.add_argument("paths", nargs="*", help="report only diagnostics under these paths")
+    check.add_argument("--budget-input", action="append", default=[], metavar="file")
     check.add_argument("--limit", type=int, help="print at most this many diagnostics")
     check.add_argument(
         "--changed",

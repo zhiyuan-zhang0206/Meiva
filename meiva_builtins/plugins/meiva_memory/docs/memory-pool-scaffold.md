@@ -63,3 +63,13 @@ forbidden. Absolute link paths resolve from the Vault root, code links under
 resolve from the note directory while staying inside Vault. The validator
 requires files, rejects protocol targets, and skips links inside code. See
 [the memory skill](../skills/SKILL.md#vault-paths-and-source-references).
+
+
+## Reporting headroom
+
+The pool remains the owner of note and directory caps. Its validator can export a
+report-only snapshot with `--budget-report --bundle <vault> --changed <paths...>`;
+changed paths are relative to that Vault. Over-limit rows remain measurements and
+do not fail this mode. The ordinary validation and commit-hook gates are unchanged.
+Pass the snapshot to `meizel check --budget-input <file>` to view pool and source
+budgets in one table, without letting the checker discover or execute a live pool.

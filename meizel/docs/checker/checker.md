@@ -15,7 +15,7 @@ Python uses stdlib AST; TypeScript uses the locked Node compiler. See TypeScript
 scanning below for setup and coverage.
 
 ```
-python -m meizel check [paths... | --changed files...] [--limit N]
+python -m meizel check [paths... | --changed files...] [--limit N] [--budget-input snapshot.json]
 python -m meizel debt [--json] | record <paths...> | prune | carry | diff --against <ref> --on-growth fail|warn
 python -m meizel explain <path>
 python -m meizel impacted [--python] [paths...]
@@ -44,6 +44,30 @@ python -m meizel roles list <role>... | projects | check | write
 - `bootstrap --out DIR` writes one `meizel.toml` per directory under `DIR` from
   current fact edges (non-edge tables kept) and a `report.json` of edge counts,
   components, witness facts and violation counts; the repository is untouched.
+
+## Budget headroom
+
+`check` publishes one complete table in `.cache/meizel/budgets.md`, independently
+of its diagnostic `--limit`. It reports the existing source file/directory budgets;
+`--changed` marks the edited files and their ancestor directories. Only changed
+rows with at most ten percent remaining enter the human summary. A full run with
+no changed surface still publishes the full table and has no near-cap summary.
+Existing hard gates retain their limits and exit behavior; this report adds none.
+Unavailable measurements are identified explicitly rather than represented as zero.
+
+A standalone Memory pool retains ownership of its own limits. To include one,
+explicitly export its snapshot and pass it with `--budget-input` (repeatable):
+
+```sh
+python /path/to/vault/validate.py --budget-report --bundle /path/to/vault \
+  --changed memory/topic/note.md > /tmp/pool-budgets.json
+python -m meizel check --budget-input /tmp/pool-budgets.json --changed app/edited.py
+```
+
+Snapshots describe the readings at export time; regenerate after an edit. The
+checker never discovers a live Vault or executes the code of an inspected project.
+A missing/unreadable snapshot appears as unavailable and leaves the graph verdict
+unchanged. An unwritable artifact falls back to printing the complete table.
 
 ## Fact edges
 

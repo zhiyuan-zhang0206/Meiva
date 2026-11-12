@@ -100,12 +100,14 @@ def test_a_report_with_nothing_over_a_ceiling_is_empty() -> None:
 @pytest.mark.parametrize(
     ("lines", "touched", "warns"),
     [
-        (790, True, False),
+        (719, True, False),
+        (720, True, True),
+        (790, True, True),
         (791, True, True),
         (799, True, True),
         (800, True, True),
         (799, False, False),
-        (801, True, False),
+        (801, True, True),
     ],
 )
 def test_the_band_names_a_file_only_when_the_change_touches_it(
@@ -118,18 +120,11 @@ def test_the_band_names_a_file_only_when_the_change_touches_it(
     assert bool(warnings) is warns
 
 
-# meiva:note
-# The warning says what is about to happen rather than how much room is left: a note about remaining
-# lines invites filling them, and the point of the band is the boundary the next change needs.
-def test_a_band_warning_names_the_path_the_count_and_the_boundary() -> None:
-    [warning] = budget_plans.ceiling_report(
+def test_the_shared_table_names_the_path_count_limit_and_remaining() -> None:
+    [report] = budget_plans.ceiling_report(
         {_PACKAGE / "near.py": _text(795)}, _ROOT, {}, {"app/near.py"}
     )[1]
-    assert warning.startswith(
-        "meizel: warning: app/near.py:795: within 10 lines of the 800-line hard ceiling — "
-    )
-    assert "the next change to this file needs a boundary, not more lines" in warning
-    assert "docs/conventions/python-conventions.md" in warning
+    assert "| python-lines | app/near.py | 795 | 800 | 5 | **yes** |" in report
 
 
 @pytest.mark.parametrize(

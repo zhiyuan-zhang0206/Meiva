@@ -1,9 +1,11 @@
-exports = ["budget_plans.py", "directory_budget.py", "limits.py"]
+exports = ["budget_plans.py", "limits.py", "check_report.py", "report.py"]
 
 [uses]
+"budget_plans.py" = ["report.py"]
+"check_report.py" = ["budget_plans.py", "report.py"]
 "directory_budget.py" = ["budget_plans.py"]
 "limits.py" = ["budget_plans.py", "directory_budget.py"]
-"tests" = ["budget_plans.py", "directory_budget.py", "limits.py"]
+"tests" = ["report.py", "budget_plans.py", "directory_budget.py", "limits.py"]
 
 [purity]
 "." = "strict"

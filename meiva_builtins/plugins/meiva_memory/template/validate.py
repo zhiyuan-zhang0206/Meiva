@@ -5,13 +5,15 @@
 
 from __future__ import annotations
 
+import argparse
+import json
 import os
 import re
 import subprocess
 import sys
 from collections.abc import Callable, Mapping
 from pathlib import Path
-from typing import ParamSpec, TypeGuard
+from typing import ParamSpec, TypedDict, TypeGuard
 
 import yaml
 
@@ -495,8 +497,81 @@ def validate_bundle(bundle: Path) -> tuple[list[str], int]:
     return errors, len(md_files)
 
 
-def main() -> int:
-    errors, checked = validate_bundle(_BUNDLE)
+class _BudgetRow(TypedDict):
+    kind: str
+    location: str
+    current: int
+    limit: int
+    changed: bool
+
+
+class _BudgetSnapshot(TypedDict):
+    schema: str
+    rows: list[_BudgetRow]
+
+
+# meiva:note
+# Standalone owners export measurements as data. The repository checker may merge this
+# explicit snapshot, but cannot import a pool's code or silently discover a live Vault.
+def budget_snapshot(bundle: Path, changed: list[str]) -> _BudgetSnapshot:
+    changed = [Path(name).as_posix() for name in changed]
+    if any(Path(name).is_absolute() or ".." in Path(name).parts for name in changed):
+        raise ValueError("changed paths must be relative to the Vault without parent traversal")
+    rows: list[_BudgetRow] = []
+    memory = bundle / "memory"
+    if not memory.is_dir():
+        raise ValueError(f"memory directory missing: {memory}")
+    cap = note_char_cap()
+
+    def row(kind: str, path: Path, current: int, limit: int) -> None:
+        relative = path.relative_to(bundle).as_posix()
+        rows.append(
+            {
+                "kind": kind,
+                "location": path.as_posix(),
+                "current": current,
+                "limit": limit,
+                "changed": any(
+                    name == relative or name.startswith(relative + "/") for name in changed
+                ),
+            }
+        )
+
+    for dirpath, dirnames, filenames in os.walk(memory):
+        directory = Path(dirpath)
+        if any(part.startswith(".") for part in directory.relative_to(memory).parts):
+            continue
+        row(
+            "memory-markdown-files",
+            directory,
+            sum(name.endswith(".md") and name not in ("index.md", "log.md") for name in filenames),
+            MAX_FILES_PER_DIR,
+        )
+        row("memory-subdirectories", directory, len(dirnames), MAX_SUBDIRS_PER_DIR)
+        for name in sorted(filenames):
+            if is_note_name(name):
+                path = directory / name
+                row("memory-note-characters", path, len(path.read_text(encoding="utf-8")), cap)
+    return {"schema": "meizel.budgets/v1", "rows": rows}
+
+
+class _Options(argparse.Namespace):
+    budget_report: bool
+    bundle: Path
+    changed: list[str]
+
+
+def main(argv: list[str]) -> int:
+    parser = argparse.ArgumentParser(description="Validate a Memory pool, or report its budgets")
+    parser.add_argument("--budget-report", action="store_true", help="report-only JSON snapshot")
+    parser.add_argument("--bundle", type=Path, default=_BUNDLE, help="explicit Vault directory")
+    parser.add_argument("--changed", nargs="*", default=[], help="changed paths relative to Vault")
+    args = _Options()
+    _ = parser.parse_args(argv, namespace=args)
+    if args.budget_report:
+        print(json.dumps(budget_snapshot(args.bundle, args.changed)))
+        return 0
+    errors, checked = validate_bundle(args.bundle)
     if checked == 0:
         print("No .md files found.", file=sys.stderr)
         return 1
@@ -512,4 +587,4 @@ def main() -> int:
 
 
 if __name__ == "__main__":
-    sys.exit(main())
+    sys.exit(main(sys.argv[1:]))
