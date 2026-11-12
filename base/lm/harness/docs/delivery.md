@@ -88,16 +88,12 @@ subscription. The graph's `harness_turn` is the one consumer: it settles each in
 `InputRejected` or `InputLost` and stays until nothing is unsettled and no turn runs
 ([foreground input and cancellation](../../../../agent/graph/docs/harness-foreground.md)).
 
-## Transcript-sourced agents (setting on)
+## Record-read agents (Claude Code)
 
-For an external Claude agent whose timeline is projected from the CLI's own transcript (default off), the graph
-settles an input from the record, not from `InputInContext`, and does not call `reconcile`: the writer matches the
-human row by the uuid `key_uuid(key)` gave the input (`RecordReader.wire_id`) and the stream's acknowledgements
-remain only the signals that a turn started or ended or an input was refused or lost. The `session_store` the SDK
-mirrors the transcript to (`WakeSessionStore`, `BridgeConfig.session_store`, eager flush) only wakes the writer, and
-its `load` always returns nothing, so resume stays on the CLI's own file. See
-[transcript projection](transcript-projection.md) and
-[harness turn](../../../../agent/graph/docs/harness-turn.md#transcript-sourced-timeline-setting-on-default-off).
+For a Claude Code agent whose timeline is read from the CLI's own record, an input is settled as above, by the stream's
+acknowledgements and, after a failure, by reading the record (`reconcile`); only the inbox row is set `done`, and no
+timeline entry is written. See [transcript projection](transcript-projection.md) and
+[harness turn](../../../../agent/graph/docs/harness-turn.md#record-read-timeline-claude-code).
 
 ## Reconciliation
 

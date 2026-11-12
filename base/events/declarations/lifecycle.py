@@ -187,12 +187,6 @@ EVENTS: dict[str, EventSpec] = {
         "queue at its original position and is delivered again",
         tier="noise",
     ),
-    "harness_input_proven_by_record": telemetry_event(
-        "harness_input_proven_by_record",
-        "an external harness reported an input as refused or lost but its transcript shows it; the "
-        "input is settled by the record and is not sent again",
-        tier="anomaly",
-    ),
     "harness_close_settled": telemetry_event(
         "harness_close_settled",
         "an external harness session closed and none of its observed processes survived",
@@ -232,100 +226,6 @@ EVENTS: dict[str, EventSpec] = {
         "harness_usage_log_failed",
         "an external harness turn finished but its usage could not be priced; the reply stands "
         "and the accounting row for that turn is missing",
-        tier="anomaly",
-    ),
-    "harness_timeline_writer_retry": telemetry_event(
-        "harness_timeline_writer_retry",
-        "the timeline writer of a transcript-sourced external agent could not read the record or commit "
-        "a read; the transaction rolled back, so neither the position nor the timeline moved (what an "
-        "earlier commit's effects still owe is kept apart) and the same read is tried again",
-        tier="anomaly",
-    ),
-    "harness_timeline_writer_retired": telemetry_event(
-        "harness_timeline_writer_retired",
-        "a runtime closed and its transcript timeline writer did not stop within the bound, or a read of a "
-        "retired writer was still in flight when the wait for it ended; the writer is retired (it starts no "
-        "read and commits no plan, so that a writer of the same agent in a new runtime is never one of two)",
-        tier="anomaly",
-    ),
-    "harness_timeline_usage_unreliable": telemetry_event(
-        "harness_timeline_usage_unreliable",
-        "a model message of a transcript-sourced session was cut short (an interrupt): the record holds only "
-        "a placeholder count, so its spend is not in the accounting; one event per message (carrying its id and turn), to count the gap",
-        tier="observation",
-    ),
-    "harness_timeline_position_lost": telemetry_event(
-        "harness_timeline_position_lost",
-        "the transcript no longer holds the position stored for a record of a transcript-sourced timeline "
-        "(the file was replaced, truncated or rewritten); the record is put at its current end and read on "
-        "from there. What the CLI wrote in between is not on the timeline and can be projected afterwards "
-        "from the file that is still on disk (agent/harness_timeline/README.md says how)",
-        tier="anomaly",
-    ),
-    "harness_timeline_effect_failed": telemetry_event(
-        "harness_timeline_effect_failed",
-        "an effect that follows a committed read of a transcript-sourced timeline (publishing to the live "
-        "view, capturing a reply for delivery, pricing usage) failed; the commit stands, the other effects "
-        "ran, and what the failed one owed is kept and tried again at the next commit",
-        tier="anomaly",
-    ),
-    "harness_timeline_writer_faulted": telemetry_event(
-        "harness_timeline_writer_faulted",
-        "the timeline writer failed for longer than its bound and stopped; the invocation fails as a "
-        "setup failure and the next hosted turn starts the writer again from its stored position",
-        tier="anomaly",
-    ),
-    "harness_timeline_fenced": telemetry_event(
-        "harness_timeline_fenced",
-        "the timeline writer's commit was refused because the agent's runtime row is owned by another "
-        "incarnation; it writes nothing until the host binds the new one at the next hosted turn",
-        tier="anomaly",
-    ),
-    "harness_timeline_turn_end_unseen": telemetry_event(
-        "harness_timeline_turn_end_unseen",
-        "a transcript-sourced turn ended and the record showed no closing entry within the wait "
-        "(outcome quiet or ceiling): a possible format drift; the turn is not failed and what the "
-        "record shows later is written when read",
-        tier="anomaly",
-    ),
-    "harness_timeline_rebuild_bounded": telemetry_event(
-        "harness_timeline_rebuild_bounded",
-        "a restart rebuilt the timeline projector from only the latest stored rows because the turn had "
-        "gone past the rebuild bound without a quiet point; the output of a call that began earlier is "
-        "held for a bounded time and then shown top-level",
-        tier="anomaly",
-    ),
-    "harness_timeline_anomaly": telemetry_event(
-        "harness_timeline_anomaly",
-        "the transcript held a row the projection could not use (an unknown type, a missing field, an "
-        "unusable line, an origin it does not know) or held an item too long and released it (a result "
-        "whose call was never read: orphan_released; the output of a sub-agent whose link was never "
-        "read: unlinked_released, shown top-level); it is skipped or released and reported once per "
-        "kind and detail",
-        tier="anomaly",
-    ),
-    "harness_timeline_unmatched_input": telemetry_event(
-        "harness_timeline_unmatched_input",
-        "the transcript showed a user input this process did not send; it is shown on the timeline as "
-        "an unmatched inbound and settles nothing",
-        tier="anomaly",
-    ),
-    "harness_timeline_usage_mismatch": telemetry_event(
-        "harness_timeline_usage_mismatch",
-        "the spend the transcript tallied for a turn differs from the usage on the turn's result frame",
-        tier="anomaly",
-    ),
-    "harness_timeline_input_unproven": telemetry_event(
-        "harness_timeline_input_unproven",
-        "an input the harness took was not shown by the transcript within the wait at the end of an "
-        "invocation; it stays claimed, the writer settles it when the row appears, and the next "
-        "invocation adopts it otherwise",
-        tier="anomaly",
-    ),
-    "harness_timeline_unsupported_harness": telemetry_event(
-        "harness_timeline_unsupported_harness",
-        "harness_transcript_timeline is on for an agent whose harness does not read its timeline from "
-        "the transcript yet; the setting is ignored",
         tier="anomaly",
     ),
     "harness_control_not_shown": telemetry_event(

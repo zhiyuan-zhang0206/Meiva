@@ -25,8 +25,7 @@ GATEWAY_APPEND_ONLY_TABLES = ("audit_events", "telemetry_events")
 
 _RUNNER_TABLE_GRANTS: tuple[tuple[LiteralString, tuple[str, ...]], ...] = (
     ("SELECT, UPDATE", ("inbound_messages", "agents_meta")),
-    ("SELECT, INSERT", ("agent_harness_messages", "agent_harness_transcript_rows")),
-    ("SELECT, INSERT, UPDATE", ("agent_harness_transcript_positions",)),
+    ("SELECT, INSERT", ("agent_harness_messages",)),
     ("INSERT", ("agent_publications",)),
     ("INSERT, UPDATE", ("upload_delivery_copies",)),
     ("INSERT", ("inbound_messages",)),

@@ -11,9 +11,6 @@ runner may mark `announced_at` and nothing else, and convergence revokes the
 table-wide UPDATE a cluster installed before that narrowing. External harness
 activity checkpoints can update the `item` JSON column in `agent_harness_messages`
 while the stored sequence, harness, and other row coordinates stay fixed.
-The transcript timeline writer appends the whitelisted transcript rows (SELECT, INSERT: never updated) and moves each
-record's read position (SELECT, INSERT, UPDATE); the gateway's blanket DML covers the retention delete that
-`events_maintenance` runs as the gateway login.
 Projection tables permit SELECT, INSERT and DELETE.
 Runner capture of visible assistant replies can append `agent_publications` and
 read retry receipts. Updating read state and deleting publications remain gateway operations.

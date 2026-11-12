@@ -1,10 +1,9 @@
-exports = ["drafts.py", "entries.py", "ports.py", "projection.py"]
+exports = ["drafts.py", "entries.py", "projection.py"]
 
 [uses]
 "__init__.py" = []
 "drafts.py" = ["entries.py"]
 "entries.py" = []
-"ports.py" = ["entries.py"]
 "projection.py" = ["drafts.py", "entries.py"]
 "tests" = ["drafts.py", "entries.py", "projection.py"]
 
@@ -13,5 +12,4 @@ exports = ["drafts.py", "entries.py", "ports.py", "projection.py"]
 "__init__.py" = "strict"
 "drafts.py" = "strict"
 "entries.py" = "strict"
-"ports.py" = "strict"
 "projection.py" = "strict"

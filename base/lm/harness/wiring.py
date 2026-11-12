@@ -26,8 +26,6 @@ from base.lm.harness.base_session import SessionBinding, SessionClock
 from base.lm.harness.bridge import HarnessBridge, HarnessSession
 from base.lm.harness.claude import BridgeConfig
 from base.lm.harness.claude.session import ClaudeSession
-from base.lm.harness.claude.transcript.reader import ClaudeRecordReader
-from base.lm.harness.claude.transcript.wake import WakeSessionStore
 from base.lm.harness.codex import CodexConfig
 from base.lm.harness.codex.session import CodexSession
 from base.lm.harness.events import UnsolicitedSink
@@ -101,7 +99,6 @@ def open_session(
     skip_permissions: bool = True,
     unsolicited: UnsolicitedSink | None = None,
     fork_source_agent_id: int | None = None,
-    session_wake: Callable[[str | None], None] | None = None,
 ) -> HarnessSession:
     binding = SessionBinding(agent_id, registry, unsolicited, fork_source_agent_id)
     if harness is Harness.CLAUDE_CODE:
@@ -114,8 +111,6 @@ def open_session(
         )
         if model is not None:
             claude_config = replace(claude_config, model=model)
-        if session_wake is not None:
-            claude_config = replace(claude_config, session_store=WakeSessionStore(session_wake))
         return ClaudeSession(
             claude_config,
             environ={**dict.fromkeys(process_environment(), ""), **claude_env},
@@ -234,7 +229,6 @@ def bridge_for(
     contributions: Iterable[HarnessContribution] = (),
     unsolicited: UnsolicitedSink | None = None,
     fork_source_agent_id: int | None = None,
-    session_wake: Callable[[str | None], None] | None = None,
 ) -> HarnessBridge | None:
     if harness is Harness.MEIVA:
         return None
@@ -260,7 +254,6 @@ def bridge_for(
             skip_permissions=skip_permissions,
             unsolicited=unsolicited,
             fork_source_agent_id=fork_source_agent_id,
-            session_wake=session_wake,
         )
 
     return HarnessBridge(
@@ -275,29 +268,4 @@ def bridge_for(
         handle_rng=root.handle_rng,
         controller_pid=root.controller_pid,
         own_turn=lambda: root.own_turn(agent_id),
-    )
-
-
-# meiva:note
-# The reader of an external session's own transcript, for the timeline writer: Claude Code only for now (Codex and
-# Antigravity read their records through their own readers when they cut over). It resolves the CLI's home the
-# way the session does (`session_environ`, the same `HOME`), takes the session id as a callable because a fresh
-# session learns its id only when the CLI starts it, and prefers the project directory of the agent's own
-# workspace when the same session id is found under several.
-# meiva:link base/lm/harness/docs/transcript-projection.md
-def transcript_reader_for(
-    harness: Harness,
-    *,
-    environ: Mapping[str, str],
-    workspace: Path,
-    session_id: Callable[[], str | None],
-    now_ns: Callable[[], int],
-) -> ClaudeRecordReader:
-    if harness is not Harness.CLAUDE_CODE:
-        raise ValueError(f"no transcript reader for harness {harness.value!r}")
-    return ClaudeRecordReader.for_session(
-        environ=session_environ(environ),
-        workspace=workspace,
-        session_id=session_id,
-        now_ns=now_ns,
     )

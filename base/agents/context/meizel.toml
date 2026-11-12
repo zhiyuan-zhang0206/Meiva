@@ -1,7 +1,7 @@
-exports = ["clients.py", "external_attachment", "gateway_client", "harness_timeline.py", "identity.py"]
+exports = ["clients.py", "external_attachment", "gateway_client", "identity.py"]
 
 [uses]
-"__init__.py" = ["clients.py", "harness_timeline.py", "identity.py"]
+"__init__.py" = ["clients.py", "identity.py"]
 "external_attachment" = ["__init__.py", "clients.py"]
 "gateway_client" = ["__init__.py", "clients.py", "identity.py"]
 "tests" = ["__init__.py", "clients.py", "identity.py"]
@@ -10,5 +10,4 @@ exports = ["clients.py", "external_attachment", "gateway_client", "harness_timel
 "clients.py" = "a lazy connection proxy that forwards every attribute to the connection it builds on first use; the names are whatever the driver exposes"
 
 [purity]
-"harness_timeline.py" = "strict"
 "identity.py" = "strict"

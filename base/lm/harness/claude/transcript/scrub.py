@@ -10,7 +10,7 @@ _DIRTY = re.compile("[\x00\ud800-\udfff]")
 # meiva:note
 # Make a decoded JSON value storable as `jsonb`, in place: the NUL character is removed and a lone surrogate
 # becomes U+FFFD, in every string and key. Returns the value, or the cleaned string when given a string. The
-# reader runs it on every raw row before the row is parsed, so the timeline items and the stored rows agree.
+# window read runs it on every raw row before the row is parsed.
 def scrub(value: object) -> object:
     if isinstance(value, str):
         return _clean(value)

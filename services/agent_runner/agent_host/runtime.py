@@ -39,12 +39,6 @@ from base.log import logger
 from base.paths import workspace_dir
 from services.agent_runner.agent_host import TurnOutcome as TurnOutcome
 from services.agent_runner.agent_host.scheduling import stored_config
-from services.agent_runner.agent_host.transcript.timeline import (
-    TimelineDeps,
-    TranscriptTimeline,
-    session_with_resume,
-    transcript_timeline_for,
-)
 
 __all__ = [
     "AgentRuntime",
@@ -162,11 +156,6 @@ class AgentRuntime:
     # meiva:link agent/graph/docs/harness-turn.md
     harness: Harness = Harness.MEIVA
     harness_bridge: TurnEngine | None = None
-    # meiva:note
-    # The transcript-sourced timeline of an external Claude agent whose `harness_transcript_timeline` setting is
-    # on, built with the bridge and closed with it; None everywhere else.
-    # meiva:link agent/harness_timeline/README.md
-    harness_timeline: TranscriptTimeline | None = None
     last_used: float = field(default_factory=time.monotonic)
     last_reconstruction: tuple[str, list[BaseMessage]] | None = None
 
@@ -457,7 +446,6 @@ async def build_runtime(
     harness_root: BridgeRootValues,
     contributions: Iterable[HarnessContribution] = (),
     unsolicited: UnsolicitedSink | None = None,
-    timeline_deps: TimelineDeps | None = None,
 ) -> AgentRuntime:
     """Build the retained model after the host repaired its original admission."""
     llm, _binding = await boot_agent_scope(
@@ -475,7 +463,6 @@ async def build_runtime(
     if harness is not Harness.MEIVA and uses_harness_model_selection(birth_config):
         model = slices.brain.llm_model
         effort = slices.overrides.reasoning_effort or None
-    timeline = transcript_timeline_for(agent_id, harness, slices, timeline_deps)
     bridge = harness_bridge_for(
         agent_id,
         harness,
@@ -492,20 +479,12 @@ async def build_runtime(
         unsolicited=unsolicited,
         home=home,
         fork_source_agent_id=fork_source_agent_id,
-        session_wake=None if timeline is None else timeline.wake,
     )
-    if timeline is not None and bridge is not None and registry is not None:
-        timeline.attach(
-            session_with_resume(
-                lambda: bridge.session_id, registry, agent_id=agent_id, harness=harness.value
-            )
-        )
     return AgentRuntime(
         fingerprint=fingerprint,
         llm=llm,
         harness=harness,
         harness_bridge=bridge,
-        harness_timeline=timeline,
     )
 
 
@@ -526,7 +505,6 @@ def harness_bridge_for(
     unsolicited: UnsolicitedSink | None = None,
     home: Path,
     fork_source_agent_id: int | None = None,
-    session_wake: Callable[[str | None], None] | None = None,
 ) -> HarnessBridge | None:
     if harness is Harness.MEIVA:
         return None
@@ -551,7 +529,6 @@ def harness_bridge_for(
         contributions=contributions,
         unsolicited=unsolicited,
         fork_source_agent_id=fork_source_agent_id,
-        session_wake=session_wake,
     )
 
 
@@ -632,7 +609,7 @@ class HarnessSessions:
         if agent_id in self._retiring:
             raise RuntimeError(f"agent {agent_id} already has a retiring harness session")
         task = self._tasks.create_task(
-            self._close(agent_id, bridge, reason, runtime.harness_timeline),
+            self._close(agent_id, bridge, reason),
             name=f"harness-close-{runtime.harness.value}-{agent_id}",
         )
         self._pending.add(task)
@@ -654,23 +631,6 @@ class HarnessSessions:
             raise error
         if self._retiring.get(agent_id) is task:
             del self._retiring[agent_id]
-
-    # meiva:note
-    # Run a transcript-sourced timeline's writer loop in this owner's task group, once per runtime: the host calls it at
-    # every hosted turn (after binding the turn to the writer) and it starts the loop only when none is running, so a
-    # writer that stopped on its own fault is started again at the next turn. The group joins the loop at shutdown
-    # and `TranscriptTimeline.close` ends it with its runtime.
-    # meiva:link agent/harness_timeline/README.md
-    def run_timeline(self, agent_id: int, timeline: TranscriptTimeline) -> None:
-        if not self._started:
-            raise RuntimeError(
-                "a transcript timeline cannot run before the host's session owner started"
-            )
-        if not timeline.wants_task:
-            return
-        task = self._tasks.create_task(timeline.run(), name=f"harness-timeline-{agent_id}")
-        self._pending.add(task)
-        task.add_done_callback(self._collect)
 
     def notify(
         self, agent_id: int, event: UnsolicitedOutput, *, db: Database, bus: EventBus
@@ -735,17 +695,11 @@ class HarnessSessions:
         agent_id: int,
         bridge: TurnEngine,
         reason: str,
-        timeline: TranscriptTimeline | None = None,
     ) -> BaseException | None:
         try:
-            if timeline is not None:
-                await timeline.read_final()
             await bridge.close(reason=reason)
         except BaseException as error:
             return error
-        finally:
-            if timeline is not None:
-                await timeline.close()
         # meiva:note
         # Only a close that succeeded reports an exit status: a failed teardown keeps
         # the previous value (or NULL) rather than recording a code nobody observed.

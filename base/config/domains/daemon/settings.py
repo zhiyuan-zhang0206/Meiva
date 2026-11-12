@@ -162,22 +162,6 @@ class DaemonSettings(
         },
     )
 
-    harness_transcript_timeline: bool = Field(
-        title="Project an external Claude agent's timeline from its transcript",
-        default=False,
-        alias="MEIVA_HARNESS_TRANSCRIPT_TIMELINE",
-        description="Hosted agent-runner, temporary rollout switch (deleted when the Claude, Codex and Antigravity cutovers are complete): write an external Claude Code agent's timeline from the CLI's own transcript, read by position, instead of from the adapter's event stream. Default false. Turn it on for one agent through config_overlay while the agent is idle; the agent's runtime is rebuilt, and its writer starts at the end of the transcript it already has. See future/agent/transcript-timeline-source.md.",
-        json_schema_extra={
-            "capability": "agent-runner",
-            "restart_required": "all",
-            "writable": True,
-            "sensitive": False,
-            "scope": "cluster-default",
-            "per_agent": True,
-            "lifecycle": "live",
-        },
-    )
-
     chrome_page_default_ttl_seconds: float = Field(
         title="Browser page default lifetime (seconds)",
         default=86400.0,

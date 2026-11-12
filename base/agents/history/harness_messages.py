@@ -297,63 +297,6 @@ async def aappend_harness_timeline_items(
         return persisted
 
 
-_INSERT_KEYED_HARNESS_TIMELINE_ITEM = """
-INSERT INTO agent_harness_messages
-    (agent_id, seq, harness, item, inbound_id, created_at, source_key, projection_version, call_id)
-VALUES (%s, %s, %s, %s::jsonb, %s, COALESCE(%s::timestamptz, clock_timestamp()), %s, %s, %s)
-ON CONFLICT (agent_id, source_key) WHERE source_key IS NOT NULL DO NOTHING
-RETURNING seq
-"""
-
-
-# meiva:note
-# Append the items projected from transcript entries, each under its stable `source_key`: an item whose key
-# the agent already has is skipped and gives no row and no sequence number, so the same entries read twice
-# write once and the sequence stays contiguous. The timeline stays append-only: the item gets the next `seq`
-# in the order the items are given. The caller holds the transaction and has taken its owner lock
-# (`lock_inbound_owner`); the agent row lock here only serializes the sequence. Returns the items that were
-# written, with their ids.
-# meiva:link base/agents/history/docs/timeline/timeline.md
-async def aappend_keyed_timeline_items(
-    conn: AsyncConnection,
-    agent_id: int,
-    harness: str,
-    keyed: Sequence[tuple[str, TimelineItem]],
-    *,
-    projection_version: int,
-) -> list[TimelineItem]:
-    if not keyed:
-        return []
-    persisted: list[TimelineItem] = []
-    async with conn.cursor() as cur:
-        await cur.execute("SELECT 1 FROM agents_meta WHERE id = %s FOR UPDATE", (agent_id,))
-        await cur.execute(
-            "SELECT COALESCE(MAX(seq) + 1, 0) FROM agent_harness_messages WHERE agent_id = %s",
-            (agent_id,),
-        )
-        next_seq = _int_from_row(await cur.fetchone())
-        for source_key, item in keyed:
-            updated = item.model_copy(update={"item_id": f"h{next_seq}.0"})
-            await cur.execute(
-                _INSERT_KEYED_HARNESS_TIMELINE_ITEM,
-                (
-                    agent_id,
-                    next_seq,
-                    harness,
-                    json.dumps(updated.model_dump(mode="json")),
-                    item.inbound_id,
-                    item.created_at,
-                    source_key,
-                    projection_version,
-                    call_id_of(updated),
-                ),
-            )
-            if await cur.fetchone() is not None:
-                persisted.append(updated)
-                next_seq += 1
-    return persisted
-
-
 @dataclass(frozen=True)
 class _HarnessTimelineOwner:
     status: str
@@ -568,14 +511,3 @@ def harness_item_to_message(item: TimelineItem) -> BaseMessage:
 def harness_timeline_to_full_history(items: Sequence[TimelineItem]) -> FullHistory:
     messages = [harness_item_to_message(item) for item in items]
     return single_segment_history(messages)
-
-
-# meiva:note
-# Whether the agent's timeline has any item yet: how the writer tells an agent with a history (one that was on
-# the event path, a fork that inherited its parent's) from a fresh one when it starts on a session.
-async def ahas_harness_timeline(conn: AsyncConnection, agent_id: int) -> bool:
-    cursor = await conn.execute(
-        "SELECT EXISTS (SELECT 1 FROM agent_harness_messages WHERE agent_id = %s)", (agent_id,)
-    )
-    row = await cursor.fetchone()
-    return bool(row and row[0])

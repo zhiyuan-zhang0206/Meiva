@@ -63,8 +63,6 @@ END_POLL_SECONDS = 0.25
 
 
 class ReadTimelineSink:
-    records_inputs = True
-
     def __init__(
         self,
         ctx: MeivaContext,

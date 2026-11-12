@@ -165,23 +165,6 @@ def test_a_failing_replay_does_not_stop_the_rest_of_the_pass(
     assert progress.snapshot()["last_success_at"] is not None
 
 
-def test_a_failing_transcript_retention_does_not_stop_the_rest_of_the_pass(
-    db_conn: psycopg.Connection,
-    database: Database,
-    pool: ConnectionPool,
-    process_config: ConfigBoot,
-    tmp_path: Path,
-    caplog: pytest.LogCaptureFixture,
-) -> None:
-    progress = LoopProgress("dispatch", timeout_s=60.0, clock=system_clock())
-
-    with table_missing(db_conn, "agent_harness_transcript_rows"):
-        _pass(pool, database, process_config, tmp_path, progress)
-
-    assert "transcript row retention incomplete" in caplog.text
-    assert progress.snapshot()["last_success_at"] is not None
-
-
 # meiva:note
 # An event the live projection missed stays absent from `agent_metric_observations` however
 # many maintenance passes run: nothing re-derives observations from `telemetry_events`.

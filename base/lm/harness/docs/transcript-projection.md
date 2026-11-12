@@ -6,8 +6,8 @@ into one vocabulary and project it into timeline item drafts. A Claude Code agen
 record when it is asked for and stored nowhere ([the decision](../../../../docs/decisions/agents/graph/2026-11-13-timeline-read-from-the-record.md),
 which keeps the vocabulary and the one projection of
 [the transcript decision](../../../../docs/decisions/agents/graph/2026-11-12-transcript-is-the-timeline-source.md) and replaces its stored
-copy); the writer and the reader built for that copy (`agent/harness_timeline`, `claude/transcript/reader.py`) are
-unreachable and are removed with the other two CLIs, in [the plan](../../../../future/agent/transcript-timeline-source.md).
+copy). The writer, the reader and the tables that kept that copy are gone; Codex and Antigravity follow, in
+[the plan](../../../../future/agent/transcript-timeline-source.md).
 
 ## The read-time path (Claude Code)
 
@@ -27,7 +27,7 @@ The same `RecordProjector` over only the bytes appended since the last read is t
 ([harness turn](../../../../agent/graph/docs/harness-turn.md#record-read-timeline-claude-code)); the two give the same items.
 Codex and Antigravity will add only their own file-to-entries reader.
 
-## The three pieces
+## The two pieces
 
 - **Entries** (`entries.py`): `HumanInput`, `AgentText`, `Reasoning`, `ToolCall`, `ToolResult`,
   `SubagentLink`, `Notice`, `Interrupt`, `Compaction`, `TokenUsage`, `TurnEnd`, `Failure`, `Anomaly`. Each has
@@ -42,13 +42,9 @@ Codex and Antigravity will add only their own file-to-entries reader.
   `known_keys` lets a forked conversation skip history it already has. Its output is `TimelineDraft`s
   (`drafts.py`) in the existing `TimelineItem` kind vocabulary, `Delivery` conclusions, turn observations and
   closings, usage tallies and `Anomaly` reports.
-- **Port** (`ports.py`): `RecordReader`, the one way a record reaches the writer: `read_after(record, position)`
-  returns the complete entries past the position and the new one, `records()` lists the records (a sub-agent's
-  is its own). `position` is the adapter's own opaque mark; the writer stores it and never reads it. Stream
-  frames and `session_store` callbacks only wake the writer.
 
 Reply visibility (`resolve_agent_reply`) and the rendering of a tool call's payload are not here: they live
-above `base/lm` (`base/agents`, `agent/graph/claim`), so the writer applies them to a draft.
+above `base/lm` (`base/agents`, `agent/graph/claim`), so whoever turns a draft into an item applies them.
 
 ## Parsers
 
@@ -58,25 +54,13 @@ lacks a needed field an `Anomaly(MISSING_FIELD)`; neither puts anything on a tim
 the row types it does not read yet. Golden tests run on sanitized recordings (`tests/fixtures/<scenario>/`,
 each with a `source.json` naming the CLI version, the recording and the sanitization rules).
 
-## Readers and storage
+## Readers
 
-`claude/transcript/reader.py` (`ClaudeRecordReader`) is the Claude `RecordReader`: it reads the session's local
-JSONL after a stored position (`position.py`: the byte span of the last row read, the SHA-256 of that row and the
-row count, which is the next row's `Order.seq`), consumes only complete lines, at most 4 MiB of them per call (the
-writer calls again until the answer is nothing), and checks by hash, without parsing, that the last row read is
-still at its place; a position the file no longer holds is a fault. A complete line that cannot be used (not JSON,
-not an object, invalid UTF-8, nested too deep, over 64 MiB) is not a fault: it is skipped with a `BAD_ROW` anomaly
-and the position moves past it. Every row is scrubbed of what `jsonb` cannot hold (NUL, lone surrogates) before it
-is parsed or stored. The reader's parse state is keyed by the position it belongs to, so reading again from a
-position gives the same entries. A sub-agent's file is its own record. The store side is
-`aappend_planned_timeline_items` (a batch, append-only in `seq`, idempotent by `agent_harness_messages.source_key`) and
-`agent_harness_transcript_positions` (the position and the rebuild ordinal), the stored whitelisted rows
-(`agent_harness_transcript_rows`: `claude/transcript/store_filter.py` decides what is kept and its size caps (256 KiB
-per text field for the main record, 16 KiB for a sub-agent's), `aappend_transcript_rows` appends them once,
-`aload_transcript_rows` reads them back by ordinal; `services/upkeep/events_maintenance/transcript_retention.py`
-expires the rows older than 30 days that lie before their record's rebuild point, in bounded batches), all in
-`agent/harness_timeline/store.py` (the writer's database operations; `aappend_keyed_timeline_items` for a single marker is in `base/agents/history/harness_messages.py`). A reader returns the rows to store with each
-batch and parses stored rows back with `parse_stored`.
+`claude/transcript/window.py` reads the session's local JSONL, and `position.py` (`rows_after`) splits the bytes
+of a block into rows: only complete lines (ending in a newline) are used, so a row the CLI is still writing is read
+on a later pass. A complete line that cannot be used (not JSON, not an object, invalid UTF-8, nested too deep) is
+not a fault: it is skipped and the read goes on. Every row is scrubbed of what `jsonb` cannot hold (NUL, lone
+surrogates) before it is parsed. Nothing is stored: the position of a read lives in the reader's memory only.
 
 ## Native records and the vocabulary
 
@@ -102,7 +86,7 @@ batch and parses stored rows back with `parse_stored`.
   a steer accepted just before the interrupt. Owned by the stream's terminal signal; a reader may turn it into
   an `Interrupt` entry carrying an order at the last position it read.
 - **Turn end for Antigravity**, and the exact end of a Claude turn (no end row; the result frame can arrive
-  before the last row). Owned by the stream plus the writer's rule: the closing entry or a short quiet period.
+  before the last row). Owned by the stream plus the record's closing entry, when the CLI writes one.
 - **Which inbound message an Antigravity ordinary turn answers.** The record has text only; the projection's
   text fallback covers the common case and reports an input it cannot place as unmatched.
 - **Errors that kill the process.** No record shows them.
@@ -115,16 +99,14 @@ The projector's memory has a bound for every structure that could grow with a co
 `SEEN_LIMIT` in `projection.py`). Nothing is held for ever: a call still unanswered when its turn closes, or when the next
 turn on its record begins, is abandoned (it no longer keeps the record from a quiet point; its late result is still
 paired); a result whose call has not been read, and the output of a sub-agent whose link has not been read, are held for a
-bounded number of entries (`HOLD_ENTRIES`) or, for the writer, a bounded time, and are then released as top-level
-items with an `ORPHAN_RELEASED` or `UNLINKED_RELEASED` anomaly each. An `EntryBatch` states the bytes of the CLI's file it
-covers (`size`), which the writer uses to bound a transaction. A reader raises `PositionLostError` (in `ports.py`) for a
-position its record no longer holds.
+bounded number of entries (`HOLD_ENTRIES`) and are then released as top-level
+items with an `ORPHAN_RELEASED` or `UNLINKED_RELEASED` anomaly each.
 
 ## Origins
 
 A row or a queued command may carry `origin.kind`. The parser keeps what the row says (`HumanInput.origin`: the kind, the
 cause the harness vocabulary has for it and the notice the row would be) and decides nothing; the projection decides, in
-this order, for a user row and a queued command alike: (1) the row's wire id is one of the inputs the writer registered:
+this order, for a user row and a queued command alike: (1) the row's wire id is one of the inputs we sent (`SentInput`):
 it is ours and it settles, whatever origin the row names (the records we have of the SDK path show no origin on our own
 inputs, so what a CLI tags them with is unknown, and an input that is not settled is sent again, which the CLI would receive
 twice); (2) the origin is one `harness_cause` knows (`task-notification`, a timer): a notice; (3) no origin, or `human`
