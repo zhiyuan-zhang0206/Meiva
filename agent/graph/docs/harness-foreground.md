@@ -7,7 +7,18 @@ events. Whether the harness starts a turn for it or the running turn absorbs it 
 graph learns what happened only from events. Control kinds (restart, terminate, interrupt, resurrect, fork,
 compaction) are barriers: nothing behind one is delivered until the claim has dispatched it, and nothing is
 delivered at all while a restart or terminate is pending. A batch made only of passive notes is not handed
-over: it waits and goes along with the next input that is not passive. An interrupt request still pending when
+over: it waits and goes along with the next input that is not passive.
+
+One wake's batch is one input: the synthetic inputs' text first (a restart or resume note, a context reset, a
+continuation), then each row's text in queue order, then the pre-turn hook note, separated by blank
+lines, under the key of the first row that is not passive; the other rows are `Handed.carried`, keep their own
+timeline entries and settle, are returned or are lost together with the one acknowledgement; the synthetic inputs ride in it with their
+timeline entries, and a refused or lost input is handed over again with them (a delivery the session could not
+take leaves them in the checkpoint's `harness_inputs`, so the next invocation carries them too). Handing them over
+one by one made the first input open the turn alone (a passive note, a hook note) and the person's message run as
+a turn of its own about a second later. A batch of several rows marks them with `harness_input_key` in their
+payload before it is handed over, so a later run rebuilds the group and asks the harness's record about that one
+key (a requeue clears the mark). An interrupt request still pending when
 an invocation starts was aimed at a turn that has ended; the invocation settles it before it subscribes, so it
 cannot cut short the turn that answers the interrupt's message.
 
@@ -19,8 +30,8 @@ changes nothing visible. A turn ending settles nothing: only ACK 2, a refusal (`
 (`InputLost`) does. A refused or lost row returns to `pending` with no claim time, so it keeps its original
 position and is handed over again before anything newer, with the same key and in the same order; the retry
 waits for the next inbound wake or the fallback tick and never before a short backoff, so a harness that
-refuses input at a turn boundary is not asked in a loop. Settlement is per input: a batch may be partly in
-context and partly returned.
+refuses input at a turn boundary is not asked in a loop. Settlement is per input (a wake's rows are one input): a delivery of several
+inputs may be partly in context and partly returned.
 
 The graph invocation (`harness_turn`) stays for as long as there is something to settle: it ends only when no
 input is handed over and unsettled and no turn is running. Claude Code runs an input that missed the last

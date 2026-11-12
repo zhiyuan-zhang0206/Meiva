@@ -1,8 +1,10 @@
 from datetime import UTC, datetime
+from pathlib import Path
 
 import psycopg
 from psycopg_pool import AsyncConnectionPool
 
+from agent.graph.claim._dispatch import fork_marker_text
 from agent.graph.claim.tests.claim_support import make_runtime, thread_config
 from agent.graph.claim.tests.cursor_fixture import fresh_snapshot_cursor as fresh_snapshot_cursor
 from agent.state import AgentState
@@ -103,3 +105,17 @@ def test_claim_will_idle_shares_the_impl_and_wrapper_contract() -> None:
     parked.messages = [HumanMessage(content="hello")]
     parked.circuit = CircuitState(open=True, reason=CIRCUIT_REASON_BILLING)
     assert claim_will_idle(parked)
+
+
+def test_a_native_fork_marker_names_no_directory() -> None:
+    text = fork_marker_text("[t] ", "agent:7", 9, None)
+    assert text.startswith("[t] You have been forked from agent:7. ")
+    assert text.endswith("Continue as agent 9.")
+    assert "working directory" not in text
+
+
+def test_an_external_fork_marker_names_the_childs_workspace() -> None:
+    text = fork_marker_text("", "agent:7", 9, Path("/home/meiva/workspaces/9"))
+    assert text.endswith(
+        "Continue as agent 9. Your working directory is now /home/meiva/workspaces/9."
+    )

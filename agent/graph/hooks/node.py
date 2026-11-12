@@ -48,10 +48,14 @@ def _hook_input_state(state: _state.AgentState, *, is_external: bool) -> _state.
     return state.model_copy(update={"messages": list(state.harness_view)})
 
 
+HOOK_NOTES_KEY = "hook-notes"
+
+
 # meiva:note
-# What the pre-turn hooks emit for an external harness becomes an input of its own, ahead of the rows
-# the turn delivers: it has no inbox row, a stable key named after the first row it accompanies, and
-# no timeline entry (hook notes were never shown there).
+# What the pre-turn hooks emit for an external harness is one synthetic input with no inbox row and no
+# timeline entry (hook notes were never shown there). Delivery folds its text into the first row's
+# input, after the message, the way a native turn's request carries the same note after the message
+# (see `agent/graph/claim/harness_turn.py`); it is sent alone only when the wake has no row to join.
 def _fold_external_hook_messages(
     state: _state.AgentState,
     cmd_update: dict[str, object],
@@ -74,7 +78,7 @@ def _fold_external_hook_messages(
         None,
     )
     note: dict[str, object] = {
-        "key": f"hook-notes-{first}" if first is not None else "hook-notes",
+        "key": f"{HOOK_NOTES_KEY}-{first}" if first is not None else HOOK_NOTES_KEY,
         "prompt": pre_text,
         "timeline_items": [],
     }

@@ -464,8 +464,9 @@ async def test_antigravity_claim_before_turn_harness_turn_recalls_skill_and_prep
     finally:
         await service.aclose()
     assert ht_cmd.goto == "claim"
-    assert "meiva.skills.beta" in recorded_prompts[0], "the hook note is delivered ahead of the row"
-    assert "please use beta to draft the release notes" in recorded_prompts[1]
+    [prompt] = recorded_prompts
+    message_at = prompt.index("please use beta to draft the release notes")
+    assert prompt.index("meiva.skills.beta") > message_at, "the hook note rides after the message"
 
 
 async def test_external_context_reset_lists_the_open_questions_after_the_tail(

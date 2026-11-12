@@ -735,3 +735,65 @@ async def test_after_the_cli_compacted_the_next_input_carries_the_open_questions
     assert f'#{question[0]} "Which database?"' in note
     assert "Questions you asked the user that are still unanswered" in note
     assert await notes(False) == [""]
+
+
+# meiva:note
+# A wake's pre-turn hook note and the person's message reach the harness as one input, so its first
+# model request already holds the message; the compaction question list stays a prefix apart.
+# meiva:link agent/graph/docs/harness-turn.md
+_HOOK_NOTE = "Skill recommendation: read the `inspect-a-trace` skill."
+
+
+async def test_a_wake_after_a_compaction_carries_the_questions_and_the_hook_note_with_the_message(
+    db_conn: psycopg.Connection,
+    database_gate: ProcessDbGate,
+    aops_pool: AsyncConnectionPool,
+    hosted_resources: HostedTurnResources,
+    event_bus: EventBus,
+    model_catalog: ModelCatalog,
+    config_authority: ConfigAuthority,
+    machine_identity: MachineIdentityReader,
+) -> None:
+    agent = spawn_agent(
+        catalog=model_catalog,
+        authority=config_authority,
+        database_gate=database_gate,
+        machine=machine_identity,
+    )
+    _ = db_conn.execute(
+        "INSERT INTO agent_questions (agent_id, title, question) VALUES (%s, 'Which database?', %s)",
+        (agent, Jsonb({"type": "text"})),
+    )
+    db_conn.commit()
+    inserted = db_conn.execute(
+        "INSERT INTO inbound_messages (agent_id, content, kind, source) "
+        "VALUES (%s, 'why is the build red?', 'chat', 'user') RETURNING id",
+        (agent,),
+    ).fetchone()
+    assert inserted is not None
+    row = inserted[0]
+    db_conn.commit()
+    engine = FakeEngine()
+    engine.context_compacted = True
+    note: dict[str, object] = {
+        "key": f"hook-notes-{row}",
+        "prompt": _HOOK_NOTE,
+        "timeline_items": [],
+    }
+    base = runtime(engine, ops_pool=aops_pool, hosted_resources=hosted_resources)
+    context = replace(base.context, db=Database.from_settings(gate=database_gate), bus=event_bus)
+
+    _ = await harness_turn_node(
+        AgentState(harness_inputs=[note]), Runtime(context=context), config(agent)
+    )
+
+    [batch] = engine.delivered
+    assert [item.key for item in batch] == [f"inbound-{row}"], "one input for the wake"
+    assert batch[0].text.endswith(f"\n\n{_HOOK_NOTE}")
+    assert "why is the build red?" in batch[0].text
+    [questions] = engine.compaction_notes
+    assert "Which database?" in questions, "the question list is the compaction prefix, apart"
+    assert "Which database?" not in batch[0].text
+    async with aops_pool.connection() as conn:
+        shown = [str(item.payload) for item in await aload_harness_timeline_items(conn, agent)]
+    assert not any(_HOOK_NOTE in payload for payload in shown), "never shown as the person's"

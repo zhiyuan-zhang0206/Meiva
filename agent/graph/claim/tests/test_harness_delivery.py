@@ -79,9 +79,10 @@ async def test_an_idle_harness_gets_the_head_of_the_inbox_and_a_turn_begins(
 
     assert command.goto == "claim"
     [batch] = engine.delivered
-    assert [item.key for item in batch] == [input_key(first), input_key(second)], (
-        "one batch, in queue order"
+    assert [(item.key, item.text) for item in batch] == [(input_key(first), batch[0].text)], (
+        "one wake, one input named by its first row"
     )
+    assert batch[0].text.index("first") < batch[0].text.index("a note"), "in queue order"
     assert [row_status(db_conn, i) for i in (first, second)] == ["done", "done"]
     assert await timeline_inbound_ids(aops_pool, agent_id) == [first]
 
@@ -202,11 +203,11 @@ async def test_a_refused_batch_goes_back_in_order_and_is_delivered_again_after_t
         await harness_turn_node(AgentState(), rt, config(agent_id))
 
     keys = [[item.key for item in batch] for batch in engine.delivered]
-    assert keys == [[input_key(i) for i in rows]] * 2, "same keys, same order, delivered twice"
+    assert keys == [[input_key(rows[0])]] * 2, "the one input, delivered twice"
     assert [row_status(db_conn, i) for i in rows] == ["done"] * 3
 
 
-async def test_a_batch_settles_one_input_at_a_time(
+async def test_a_wakes_rows_are_one_input_that_settles_and_is_lost_together(
     db_conn: psycopg.Connection,
     aops_pool: AsyncConnectionPool,
     hosted_resources: HostedTurnResources,
@@ -221,13 +222,8 @@ async def test_a_batch_settles_one_input_at_a_time(
         attempts += 1
         keys = [i.key for i in inputs]
         if attempts == 1:
-            return [
-                TurnStarted("t1", TurnOrigin.INPUT, (keys[0],), 1),
-                InputInContext(keys[0], "t1", 1),
-                InputLost(keys[1], 1),
-                completed("t1", "MEIVA_DISPLAY_TO_USER\nfirst only"),
-            ]
-        return in_a_turn(keys, "MEIVA_DISPLAY_TO_USER\nsecond", turn_id="t2")
+            return [InputLost(keys[0], 1)]
+        return in_a_turn(keys, "MEIVA_DISPLAY_TO_USER\nanswer", turn_id="t2")
 
     engine = FakeEngine(script=script)
     rt = runtime(engine, ops_pool=aops_pool, hosted_resources=hosted_resources)
@@ -235,10 +231,11 @@ async def test_a_batch_settles_one_input_at_a_time(
     async with asyncio.timeout(20):
         await harness_turn_node(AgentState(), rt, config(agent_id))
 
-    assert [[i.key for i in batch] for batch in engine.delivered] == [
-        [input_key(first), input_key(second)],
-        [input_key(second)],
-    ], "only the input that missed the context is handed over again"
+    assert [[i.key for i in batch] for batch in engine.delivered] == [[input_key(first)]] * 2
+    assert all("kept" in batch[0].text and "lost" in batch[0].text for batch in engine.delivered), (
+        "both rows ride every delivery"
+    )
+    assert [row_status(db_conn, i) for i in (first, second)] == ["done", "done"]
     assert await timeline_inbound_ids(aops_pool, agent_id) == [first, second]
 
 

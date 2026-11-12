@@ -24,14 +24,19 @@ from agent.graph.claim.harness_foreground import (
     Requeue,
     Settlement,
     event_generation,
+    merge_handed,
     own_turn_note,
+    plan_wake,
 )
 from agent.graph.claim.harness_inbox import (
+    INPUT_KEY_FIELD,
     apply_reconciled,
     claimed_deliverable,
     commit_handed,
     defer_reconciliation,
     is_deferred,
+    is_passive,
+    mark_input_group,
     mark_unconfirmed,
     publish_inbound,
     reconcile_handed,
@@ -50,6 +55,7 @@ from agent.graph.claim.harness_render import (
 from agent.graph.claim.lost_turn import report_lost_turn
 from agent.graph.claim.timeline import append_turn_timeline
 from agent.graph.claim.turn_stamp import persist_last_active
+from agent.graph.hooks.node import HOOK_NOTES_KEY
 from agent.graph.hooks.question_context import read_agent_open_questions
 from agent.graph.hooks.user_delivery import capture_items, delivery_end_reminder
 from agent.graph.interrupt import (
@@ -77,7 +83,6 @@ from base.lm.harness import (
     BridgeEvent,
     EventSubscription,
     HarnessClosedError,
-    HarnessInput,
     HarnessNotDeliveredError,
     HarnessSetupError,
     HarnessTurnFaultedError,
@@ -272,6 +277,7 @@ class ForegroundRun:
         self.fg = Foreground()
         self._synthetic: list[tuple[Handed, str]] = []
         self._prompts: dict[str, str] = {}
+        self._folded: dict[str, tuple[tuple[Handed, str], ...]] = {}
         self._images: dict[str, tuple[ImageBlock, ...]] = {}
         for raw in state.harness_inputs:
             key, prompt = str(raw["key"]), str(raw["prompt"])
@@ -369,13 +375,13 @@ class ForegroundRun:
         rows = await claimed_deliverable(self._ctx, self._agent_id, include_deferred=True)
         if not rows:
             return
-        handed = [self._handed_of(item)[0] for item in rows]
+        handed = self._grouped(rows)
         plan = await reconcile_handed(self._bridge, self._agent_id, handed, where="session_start")
         if plan is None:
             _ = await mark_unconfirmed(self._ctx, self._agent_id, self._projector, handed)
             return
         deferred = {r.id for r in rows if is_deferred(r)}
-        keep = tuple(h for h in plan.keep if h.inbound_id not in deferred)
+        keep = tuple(h for h in plan.keep if not deferred.intersection(h.row_ids))
         _ = await self._apply(plan)
         self._queue_resume_note((*plan.commit, *keep))
         if keep:
@@ -383,10 +389,25 @@ class ForegroundRun:
             self._kept = {h.key for h in keep}
             self._bridge.adopt([h.key for h in keep])
 
+    # meiva:note
+    # Claimed rows as the inputs they were handed over as: rows marked with the same input key are
+    # one input again (a batch handed over as one), every other row is its own.
+    def _grouped(self, rows: Sequence[ClaimedInbound]) -> list[Handed]:
+        by_key: dict[str, list[ClaimedInbound]] = {}
+        for row in rows:
+            key = row.payload.get(INPUT_KEY_FIELD) if row.payload else None
+            by_key.setdefault(key if isinstance(key, str) else f"inbound-{row.id}", []).append(row)
+        return [
+            replace(
+                merge_handed([(self._handed_of(row)[0], is_passive(row)) for row in group]), key=key
+            )
+            for key, group in by_key.items()
+        ]
+
     def _queue_resume_note(self, settled: Sequence[Handed]) -> None:
         if not settled or self._synthetic:
             return
-        newest = max(h.inbound_id or 0 for h in settled)
+        newest = max((i for h in settled for i in h.row_ids), default=0)
         self._synthetic.append(
             (Handed(f"reconciled-resume-{newest}", None, ()), RESUME_AFTER_RESTART)
         )
@@ -519,6 +540,7 @@ class ForegroundRun:
                     self._synthetic.insert(0, (handed, self._prompts[handed.key]))
                 else:
                     await requeue_handed(self._ctx, self._agent_id, [handed])
+                self._restore_folded([handed])
 
     async def _deliver_until_quiet(self) -> None:
         while self._failure is None:
@@ -578,17 +600,25 @@ class ForegroundRun:
         self.fg = self.fg.withdraw(frozenset(h.key for h in handed))
         await requeue_handed(self._ctx, self._agent_id, handed)
         self._synthetic[:0] = [(h, self._prompts[h.key]) for h in handed if h.inbound_id is None]
+        self._restore_folded(handed)
+
+    # meiva:note
+    # A refused, lost or untaken wake input is handed over again with what rode in it: the synthetic
+    # inputs go back in front of the pending ones and fold into the next wake input the same way.
+    def _restore_folded(self, handed: Sequence[Handed]) -> None:
+        for entry in reversed(handed):
+            self._synthetic[:0] = self._folded.pop(entry.key, ())
 
     # meiva:note
     # Reserve the head of the inbox, unless a refusal is still backing off. A refusal can be folded in
     # while the reservation runs; what was just reserved is then handed back unsent, so the refused
     # inputs keep their place ahead of anything newer.
     # meiva:link agent/graph/docs/harness-turn.md
-    async def _reserve(self) -> list[ClaimedInbound]:
+    async def _reserve(self) -> list[ClaimedInbound] | None:
         rows = await reserve_head_batch(self._ctx, self._agent_id)
-        if rows and asyncio.get_running_loop().time() < self._backoff_until:
+        if asyncio.get_running_loop().time() < self._backoff_until:
             await self._give_back(rows)
-            return []
+            return None
         return rows
 
     async def _give_back(self, rows: Sequence[ClaimedInbound]) -> None:
@@ -630,23 +660,31 @@ class ForegroundRun:
     async def _deliver_ready(self) -> bool:
         if asyncio.get_running_loop().time() < self._backoff_until:
             return False
-        rows = recovery_notes_first(await self._reserve())
+        reserved = await self._reserve()
+        if reserved is None:
+            return False
+        rows = recovery_notes_first(reserved)
         synthetic, self._synthetic = self._synthetic, []
-        handed: list[Handed] = []
-        inputs: list[HarnessInput] = []
+        rendered = await self._render(rows)
+        plan = plan_wake(
+            synthetic,
+            [
+                (entry, text, is_passive(row))
+                for row, (entry, text) in zip(rows, rendered, strict=True)
+            ],
+            self._images,
+            hook_notes_key=HOOK_NOTES_KEY,
+        )
+        handed, inputs, settled_now, group = (
+            list(plan.handed),
+            list(plan.inputs),
+            list(plan.settled_now),
+            plan.group,
+        )
         for entry, prompt in synthetic:
             self._prompts[entry.key] = prompt
-            handed.append(entry)
-            inputs.append(HarnessInput(key=entry.key, text=prompt))
-        settled_now: list[Handed] = []
-        for entry, text in await self._render(rows):
-            if text.strip():
-                handed.append(entry)
-                inputs.append(
-                    HarnessInput(key=entry.key, text=text, images=self._images.get(entry.key, ()))
-                )
-            else:
-                settled_now.append(entry)
+        if plan.folded:
+            self._folded[plan.handed[0].key] = plan.folded
         if not handed and not settled_now:
             return False
         if settled_now:
@@ -659,6 +697,8 @@ class ForegroundRun:
         compaction_note = await self._compaction_note()
         self.last_key = handed[-1].key
         self.fg = self.fg.hand(tuple(handed))
+        if group is not None:
+            await mark_input_group(self._ctx, self._agent_id, group.row_ids, group.key)
         try:
             await self._bridge.deliver(inputs, compaction_note=compaction_note)
         except HarnessNotDeliveredError:
