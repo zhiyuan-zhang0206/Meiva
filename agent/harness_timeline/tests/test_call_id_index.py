@@ -6,6 +6,9 @@
 
 from __future__ import annotations
 
+from pathlib import Path
+from typing import LiteralString, cast
+
 from psycopg import AsyncConnection
 from psycopg_pool import AsyncConnectionPool
 
@@ -143,3 +146,35 @@ async def test_the_call_lookup_is_answered_by_the_call_index_not_a_scan(
         plan = "\n".join(str(row[0]) for row in await cursor.fetchall())
     assert "idx_agent_harness_messages_call" in plan, plan
     assert "Seq Scan" not in plan, plan
+
+
+_MIGRATION = next(
+    Path(__file__).resolve().parents[3].glob("migrations/**/*_harness-call-item-index.sql")
+)
+
+
+async def test_the_migration_backfills_the_call_ids_of_rows_written_before_it_in_batches_and_replays(
+    aops_pool: AsyncConnectionPool,
+) -> None:
+    async with aops_pool.connection() as conn, conn.transaction(force_rollback=True):
+        agent_id = await _agent(conn)
+        await conn.execute("DROP INDEX idx_agent_harness_messages_call")
+        await conn.execute("ALTER TABLE agent_harness_messages DROP COLUMN call_id")
+        await conn.execute(
+            "INSERT INTO agent_harness_messages (agent_id, seq, harness, item) "
+            "SELECT %s, n, 'claude_code', CASE WHEN n %% 3 = 0 "
+            "THEN jsonb_build_object('kind', 'agent_code', 'tool_use_id', 'call-' || n) "
+            "WHEN n %% 3 = 1 THEN jsonb_build_object('kind', 'agent_code') "
+            "ELSE jsonb_build_object('kind', 'agent_chat', 'tool_use_id', 'not-a-call') END "
+            "FROM generate_series(0, 12999) AS n",
+            (agent_id,),
+        )
+        for _ in range(2):
+            await conn.execute(cast("LiteralString", _MIGRATION.read_text()))
+            cursor = await conn.execute(
+                "SELECT count(*), count(*) FILTER (WHERE call_id = 'call-' || seq) "
+                "FROM agent_harness_messages WHERE call_id IS NOT NULL"
+            )
+            assert await cursor.fetchone() == (4334, 4334), "only agent_code items with a call id"
+        found = await aget_harness_call_item_ids(conn, agent_id, ["call-0", "call-12999", "call-1"])
+    assert found == {"call-0": "h0.0", "call-12999": "h12999.0"}
