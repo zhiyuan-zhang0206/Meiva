@@ -25,9 +25,7 @@ from psycopg_pool import AsyncConnectionPool
 
 from agent.graph._init_context import init_context_node
 from agent.graph.hooks.question_context import (
-    mark_questions_owner,
     read_agent_open_questions,
-    without_foreign_question_notes,
 )
 from agent.graph.hooks.tests.scripted_model import ScriptedModel
 from agent.nodes import CLAIM
@@ -769,24 +767,3 @@ async def test_a_database_failure_leaves_the_list_out_and_reports_it(
     )
     assert await read_agent_open_questions(context, 7) == []
     assert loguru_records.events("open_questions_unavailable")
-
-
-def test_a_note_listing_another_agents_questions_is_not_shown_to_this_agent() -> None:
-    mine: AnyMessage = HumanMessage(content="mine")
-    theirs: AnyMessage = HumanMessage(content="theirs")
-    plain: AnyMessage = HumanMessage(content="plain")
-    _ = mark_questions_owner(mine, 7)
-    _ = mark_questions_owner(theirs, 3)
-    assert without_foreign_question_notes([mine, theirs, plain], 7) == [mine, plain]
-
-
-async def test_the_rebuilt_context_marks_its_question_note_with_its_owner(
-    db_conn: psycopg.Connection, aops_pool: AsyncConnectionPool, database_gate: ProcessDbGate
-) -> None:
-    agent = create_agent(db_conn)
-    _ask(db_conn, agent, "Which database?")
-    db_conn.commit()
-    messages = await _rebuilt(aops_pool, database_gate, agent, _tail())
-    [note] = [m for m in messages if "still unanswered" in str(m.content)]
-    assert read_meiva_kwargs(note).get("meiva_questions_agent_id") == agent
-    assert without_foreign_question_notes(messages, agent + 1000).count(note) == 0

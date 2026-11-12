@@ -105,7 +105,6 @@ class MeivaMessageKwargs(TypedDict, total=False):
     meiva_image_uploads: list[dict[str, object]]
     meiva_upload_files: list[dict[str, object]]
     meiva_note_tag: str
-    meiva_questions_agent_id: int
     meiva_task_id: int
     meiva_exec_ms: int | None
     meiva_exec_status: str
