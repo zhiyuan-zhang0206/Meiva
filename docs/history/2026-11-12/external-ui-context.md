@@ -17,3 +17,10 @@ Tests use controlled HTTP for native/external UI semantics and fresh children wi
 invalid registrations for first-call refusal. They create no production questions.
 The earlier attachment probe had pointed one directory below the repository root;
 correcting it and checking the UI module path ensures children test this source.
+
+Additional acceptance evidence uses the existing gateway fixture with owned
+throwaway Postgres and Redis. Native identity and a real isolated harness
+registration/attachment each write, replay and read back their question batch.
+This separates durable API behavior from the controlled-HTTP transport tests;
+the API positives use already-admitted contexts within pytest, while fresh-child
+probes cover first-use context resolution and refusal.
