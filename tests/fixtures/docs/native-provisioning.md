@@ -10,7 +10,10 @@ keep the sentinels and driver refusal.
 Static processes refuse native resource requests but retain session safety
 hooks. Entry image resolution occurs before tests can replace subprocess
 behavior. Gateway clients receive only the test secret; authentication tests
-explicitly remove it.
+explicitly remove it. The first bootstrap also drops inherited native agent IDs
+and external harness handles before project imports. Tests that exercise attachment
+inject their own isolated registration/launch markers after bootstrap; the suite
+never borrows the launching agent's identity.
 
 The session-start guard refuses a non-test database before fixtures or tests can
 run. The full-run guard resolves positional arguments against the invocation

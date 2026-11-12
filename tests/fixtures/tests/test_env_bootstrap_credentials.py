@@ -29,6 +29,7 @@ _INVENTED_NAMES = (
     "MEIVA_CF_API_TOKEN",
     "MEIVA_CLUSTER_SECRET",
     "MEIVA_FEISHU_APP_SECRET",
+    "MEIVA_HARNESS_HANDLE",
     "MEIVA_PROCESS_PROFILE",
 )
 
@@ -76,6 +77,7 @@ def test_the_delivered_login_marker_does_not_survive_the_bootstrap() -> None:
         ("MEIVA_DB_CAPABILITY_KEY", True),
         ("MEIVA_REDIS_ADMIN_PASSWORD", True),
         ("MEIVA_PROCESS_PROFILE", True),
+        ("MEIVA_HARNESS_HANDLE", True),
         ("MEIVA_REPLY_SUGGESTION_MAX_INPUT_TOKENS", False),
         ("DEEPSEEK_API_KEY", False),
         ("MEIVA_GATEWAY_URL", False),
@@ -132,3 +134,18 @@ def test_a_child_that_arrives_with_the_suites_sentinels_reports_no_survivor() ->
     report = json.loads(result.stdout)
     assert report["survived"] == [], report
     assert set(report["outcome"].values()) == {"replaced"}, report
+
+
+def test_identity_markers_are_scrubbed_but_a_child_can_supply_its_own_handle() -> None:
+    names = ("MEIVA_AGENT_ID", "MEIVA_HARNESS_HANDLE")
+    result = run_bounded(
+        [sys.executable, str(_PROBE), *names, "--inject-harness"],
+        env={**os.environ, **{name: "invented-" + name for name in names}},
+        capture_output=True,
+        text=True,
+        timeout=60,
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+    report = json.loads(result.stdout)
+    assert report["outcome"] == dict.fromkeys(names, "absent")
+    assert report["injected_harness_error"] == "HarnessAttachError"

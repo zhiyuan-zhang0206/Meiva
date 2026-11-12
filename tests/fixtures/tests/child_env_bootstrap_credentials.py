@@ -17,7 +17,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[3]))
 from tests.fixtures import env_bootstrap
 
 outcome = {}
-for name in sys.argv[1:]:
+for name in (arg for arg in sys.argv[1:] if arg != "--inject-harness"):
     current = os.environ.get(name)
     if current is None:
         outcome[name] = "absent"
@@ -25,11 +25,22 @@ for name in sys.argv[1:]:
         outcome[name] = "LEAKED"
     else:
         outcome[name] = "replaced"
+injected_harness_error = None
+if "--inject-harness" in sys.argv:
+    os.environ["MEIVA_HARNESS_HANDLE"] = "isolated-child-handle"
+    from meiva.sdk_surface import process_context
+
+    try:
+        process_context.current_context()
+    except process_context.ContextOutsideProcessError as error:
+        injected_harness_error = type(error).__name__
+
 json.dump(
     {
         "seen": sorted(env_bootstrap.AMBIENT_CREDENTIAL_DIGESTS),
         "survived": env_bootstrap.survived_credential_names(),
         "outcome": outcome,
+        "injected_harness_error": injected_harness_error,
     },
     sys.stdout,
 )

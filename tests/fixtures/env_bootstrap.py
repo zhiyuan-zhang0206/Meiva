@@ -56,7 +56,7 @@ import tests._test_env_file
 # is no credential and rides along anyway: it names which profile the LAUNCHER ran, and the
 # suite always runs with none.
 _CREDENTIAL_NAME_ELEMENTS: frozenset[str] = frozenset(
-    {"TOKEN", "SECRET", "PASSWORD", "KEY", "PROFILE"}
+    {"TOKEN", "SECRET", "PASSWORD", "KEY", "PROFILE", "HANDLE"}
 )
 
 
@@ -200,6 +200,12 @@ os.environ["MEIVA_COMPACT_HISTORY_DUMP"] = "false"
 # stays green. Pop the marker here, before the first Settings() construction,
 # so local runs match CI (2026-08-06, PR #1650 verification).
 os.environ.pop("MEIVA_PROCESS_PROFILE", None)
+# meiva:note
+# The suite owns its identities. Inheriting a native id or external registration handle
+# would attach SDK reads to the launcher rather than the test's isolated home. A test
+# that exercises attachment supplies its own launch markers after this bootstrap.
+os.environ.pop("MEIVA_AGENT_ID", None)
+os.environ.pop("MEIVA_HARNESS_HANDLE", None)
 
 # meiva:note
 # Credentials the launching process carries do not reach the suite. Two ways one arrives
@@ -533,7 +539,6 @@ from base.host.env.port_table import FIXED_PORTS
 from base.host.env.registry import health_port_env_aliases
 from base.native_process.os_platform import raise_fd_limit
 
-os.environ.pop("MEIVA_AGENT_ID", None)
 os.environ["MEIVA_EXEC_TIMEOUT_SECONDS"] = "60.0"
 
 
