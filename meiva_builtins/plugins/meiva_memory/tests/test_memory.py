@@ -1,11 +1,8 @@
-"""`meiva.memory.PATH` + `PERSONAL_PATH` + `search` + `IndexerUnavailable` unit tests.
-
-After PR-1 (`feat: route meiva.memory.search through gateway`), the SDK calls the
-local gateway over HTTP, **no longer** importing the embedder or a vector store directly.
-Data-plane behaviour unit tests live in `gateway/tests/routers/test_memory_search.py`
-(gateway-side primary embeds + searches the memory-search service directly; secondary forwards). This file
-only tests the SDK ↔ gateway wire and PATH prefix conversion.
-"""
+# meiva:note
+# `meiva.memory.SHARED_PATH` + `PERSONAL_PATH` + `search` + `IndexerUnavailable` unit tests. The SDK
+# calls the local gateway over HTTP and never imports the embedder or a vector store; the
+# data-plane behaviour tests live in `gateway/tests/routers/test_memory_search.py`. This file
+# only tests the SDK-gateway wire and the SHARED_PATH prefix conversion.
 
 import json
 from collections.abc import Iterator
@@ -20,7 +17,7 @@ from base.agents.context.gateway_client.memory_search import MemorySearchResult
 from base.agents.sdk.tests.sampling_owners import fixed_sampling_owner
 from base.packages.plugin_config_images import DiskPluginConfigImages
 from base.packages.plugins.extensions import ExtensionRegistry
-from base.paths import meiva_home
+from base.paths import meiva_home, memory_dir, workspace_dir
 from base.paths.home import resolve_meiva_home
 from meiva.gateway_client import use_client
 from meiva.sdk_surface import install
@@ -40,23 +37,21 @@ def _install_memory_sdk() -> Iterator[None]:
     install.uninstall()
 
 
-# ── PATH constant ────────────────────────────────────────────────────────
-
-
+# meiva:note
+# An agent builds absolute note paths as `SHARED_PATH / "xxx.md"`, so the constant is an absolute
+# `pathlib.Path` and not a string.
 def test_path_is_absolute() -> None:
-    """PATH is an absolute Path — agent uses `PATH / "xxx.md"` to build absolute paths."""
-    assert meiva.memory.PATH.is_absolute()
+    assert meiva.memory.SHARED_PATH.is_absolute()
 
 
 def test_path_under_unit_home() -> None:
     # meiva:note
     # Shared notes are rooted beneath the unit's Vault checkout.
-    assert meiva_home() / "vault" / "memory" == meiva.memory.PATH
+    assert meiva_home() / "vault" / "memory" == meiva.memory.SHARED_PATH
 
 
 def test_path_is_path_object() -> None:
-    """PATH is pathlib.Path, not str — agent can directly .iterdir() / .glob() / join /."""
-    assert isinstance(meiva.memory.PATH, Path)
+    assert isinstance(meiva.memory.SHARED_PATH, Path)
 
 
 # ── PERSONAL_PATH constant ───────────────────────────────────────────────
@@ -87,12 +82,14 @@ def test_there_is_no_memory_writer() -> None:
     assert not hasattr(meiva.memory, "write")
 
 
-@pytest.mark.parametrize("name", ["PATH", "PERSONAL_PATH"])
+@pytest.mark.parametrize("name", ["SHARED_PATH", "PERSONAL_PATH"])
 def test_path_docs_carry_the_note_format(name: str) -> None:
     from meiva.tests.fixtures.pin_agent import pin_agent
 
     pin_agent(17)
-    doc = {"PATH": meiva.memory.PATH, "PERSONAL_PATH": meiva.memory.PERSONAL_PATH}[name].__doc__
+    doc = {"SHARED_PATH": meiva.memory.SHARED_PATH, "PERSONAL_PATH": meiva.memory.PERSONAL_PATH}[
+        name
+    ].__doc__
     assert "pure Markdown" in doc
     assert "# <Title>" in doc
     assert "8000 characters" in doc
@@ -188,8 +185,8 @@ def test_search_prefixes_paths_with_memory_path(search_wire: _SearchWire) -> Non
     )
     results = meiva.memory.search("any")
     assert [m.path for m in results] == [
-        meiva.memory.PATH / "notes" / "foo.md",
-        meiva.memory.PATH / "bar.md",
+        meiva.memory.SHARED_PATH / "notes" / "foo.md",
+        meiva.memory.SHARED_PATH / "bar.md",
     ]
     assert all(m.path.is_absolute() for m in results)
 
@@ -227,7 +224,7 @@ def test_indexer_unavailable_importable_but_not_in_all() -> None:
 
 
 def test_path_exported_in_all() -> None:
-    assert "PATH" in meiva.memory.__all_for_meiva__
+    assert "SHARED_PATH" in meiva.memory.__all_for_meiva__
 
 
 def test_search_exported_in_all() -> None:
@@ -255,13 +252,13 @@ def test_search_returns_named_matches(search_wire: _SearchWire) -> None:
     results = meiva.memory.search("project")
     assert results == [
         meiva.memory.MemoryMatch(
-            meiva.memory.PATH / "notes" / "project.md",
+            meiva.memory.SHARED_PATH / "notes" / "project.md",
             "Project note",
             ["type/project", "x"],
             0.82,
             "the passage",
         ),
-        meiva.memory.MemoryMatch(meiva.memory.PATH / "bar.md", "", [], 0.3, "other"),
+        meiva.memory.MemoryMatch(meiva.memory.SHARED_PATH / "bar.md", "", [], 0.3, "other"),
     ]
     first = results[0]
     assert (first.path, first.description, first.tags, first.score, first.chunk) == tuple(first)
@@ -314,5 +311,35 @@ def test_an_external_harness_is_told_to_prefer_meiva_memory_over_its_own() -> No
     (contribution,) = agent_runtime.contribute().harness_contributions
     assert Harness.CLAUDE_CODE in contribution.harnesses
     (rule,) = contribution.overlaps
-    assert "meiva.help(meiva.memory)" in rule
     assert "in preference to your CLI's own memory" in rule
+    assert "shared memory" in rule and "personal memory" in rule
+    assert "shared with the cluster" not in rule
+
+
+def test_an_external_harness_is_told_where_both_memories_live(tmp_path: Path) -> None:
+    from base.api_contracts.agent_contract import Harness
+    from base.lm.harness.handoff import Handoff
+    from meiva_builtins.plugins.meiva_memory import agent_runtime
+
+    home = tmp_path / "home"
+    workspace = workspace_dir(7, home=home)
+    handoff = Handoff(
+        agent_id=7, instruction="Work.", machine="m", workspace=workspace, home=home
+    ).with_contributions(agent_runtime.contribute().harness_contributions, harness=Harness.CODEX)
+    text = handoff.render()
+    (section,) = handoff.sections
+    shared, personal = memory_dir(home=home), workspace / "memory"
+    assert section.title == "Meiva Memory"
+    for path in (
+        shared,
+        shared / "MEMORY.md",
+        personal,
+        personal / "MEMORY.md",
+        personal / "INHERIT.md",
+    ):
+        assert f"`{path}`" in text
+    assert "meiva.help(meiva.memory)" in text
+    assert "meiva.files" not in text
+    boundaries = text.index("## Tool & Environment Boundaries")
+    reporting = text.index("## Collaboration & Reporting")
+    assert boundaries < text.index("## Meiva Memory") < reporting

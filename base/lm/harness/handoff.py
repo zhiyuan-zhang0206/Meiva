@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from collections.abc import Iterable
+from collections.abc import Callable, Iterable
 from dataclasses import dataclass, field, replace
 from pathlib import Path
 
@@ -8,11 +8,11 @@ from base.api_contracts.agent_contract import Harness
 
 # meiva:note
 # The startup prompt is a wire format between the host and every external provider:
-# the same six sections are rendered for Claude, Codex and Antigravity, and a waking
+# the same sections are rendered for Claude, Codex and Antigravity, and a waking
 # agent reads them on its first turn. Changing the dataclass fields or the section
 # order means bumping `HANDOFF_VERSION`, and the field-set test fails until you do.
 # meiva:link base/lm/harness/docs/harness.md
-HANDOFF_VERSION = 2
+HANDOFF_VERSION = 3
 
 # meiva:note
 # The file a handoff's text is also saved to, directly under the agent's workspace. An
@@ -65,11 +65,26 @@ class EntryPoint:
 
 
 @dataclass(frozen=True, slots=True)
+class HandoffSection:
+    title: str
+    lines: tuple[str, ...]
+
+
+# meiva:note
+# A plugin's extra section of the handoff, rendered between "Tool & Environment Boundaries" and
+# "Collaboration & Reporting". A section is a function of the handoff, not a fixed text, because
+# what a plugin has to say is often an absolute path under this agent's home or workspace, which
+# only the handoff being built knows.
+SectionBuilder = Callable[["Handoff"], HandoffSection]
+
+
+@dataclass(frozen=True, slots=True)
 class HarnessContribution:
     harnesses: frozenset[Harness]
     entries: tuple[EntryPoint, ...] = ()
     overlaps: tuple[str, ...] = ()
     discipline: tuple[str, ...] = ()
+    sections: tuple[SectionBuilder, ...] = ()
 
 
 DEFAULT_ENTRIES: tuple[EntryPoint, ...] = (
@@ -99,11 +114,13 @@ class Handoff:
     instruction: str
     machine: str
     workspace: Path
+    home: Path
     label: str | None = None
     cluster: tuple[ClusterFact, ...] = ()
     entries: tuple[EntryPoint, ...] = field(default_factory=lambda: DEFAULT_ENTRIES)
     overlaps: tuple[str, ...] = field(default_factory=lambda: DEFAULT_OVERLAPS)
     discipline: tuple[str, ...] = field(default_factory=lambda: DEFAULT_DISCIPLINE)
+    sections: tuple[HandoffSection, ...] = ()
     # meiva:note
     # Where this document is saved, set only once the save succeeded: the closing pointer in
     # `render()` names this path, so a handoff whose file could not be written must not carry
@@ -131,6 +148,7 @@ class Handoff:
         seen_entries = {entry.name: entry for entry in self.entries}
         overlaps = list(self.overlaps)
         discipline = list(self.discipline)
+        sections = list(self.sections)
         for item in contributions:
             if harness not in item.harnesses:
                 continue
@@ -143,11 +161,16 @@ class Handoff:
             for rule in item.discipline:
                 if rule not in discipline:
                     discipline.append(rule)
+            for build in item.sections:
+                section = build(self)
+                if section not in sections:
+                    sections.append(section)
         return replace(
             self,
             entries=tuple(seen_entries.values()),
             overlaps=tuple(overlaps),
             discipline=tuple(discipline),
+            sections=tuple(sections),
         )
 
     def with_reference_file(self, path: Path) -> Handoff:
@@ -183,7 +206,7 @@ class Handoff:
             lines.extend(
                 [
                     "",
-                    "# Read or write shared cluster memory",
+                    "# Memory note format and search over shared memory",
                     "meiva.help(meiva.memory)",
                 ]
             )
@@ -237,6 +260,7 @@ class Handoff:
             "## Tool & Environment Boundaries",
             *_bullets(list(self.overlaps)),
             "",
+            *[line for section in self.sections for line in _section_lines(section)],
             "## Collaboration & Reporting",
             *_bullets(list(self.discipline)),
             "",
@@ -255,6 +279,10 @@ class Handoff:
             "the instructions above in full (they appear only as a summary, or not at all), read "
             "that file before doing anything else, and follow it for the rest of the session.",
         ]
+
+
+def _section_lines(section: HandoffSection) -> list[str]:
+    return [f"## {section.title}", *section.lines, ""]
 
 
 def _bullets(items: list[str]) -> list[str]:

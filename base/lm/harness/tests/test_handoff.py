@@ -10,6 +10,7 @@ from base.lm.harness import ClusterFact, EntryPoint, Handoff, HarnessContributio
 from base.lm.harness.handoff import (
     HANDOFF_VERSION,
     INSTRUCTIONS_FILENAME,
+    HandoffSection,
     compaction_reminder,
     instructions_path,
 )
@@ -31,6 +32,7 @@ def handoff(
         instruction=instruction,
         machine="macmini",
         workspace=tmp_path,
+        home=tmp_path / "home",
         label="claude-sdk-bridge",
         cluster=cluster,
         entries=entries,
@@ -88,6 +90,7 @@ def test_defaults_cover_the_boundary_and_reporting_rules(tmp_path: Path) -> None
         instruction="Read hello.txt",
         machine="macmini",
         workspace=tmp_path,
+        home=tmp_path / "home",
     ).render()
     assert "meiva.files" not in text
     assert "meiva.tasks" not in text
@@ -109,6 +112,7 @@ def test_with_contributions_filters_by_harness_and_deduplicates(tmp_path: Path) 
         instruction="Read hello.txt",
         machine="macmini",
         workspace=tmp_path,
+        home=tmp_path / "home",
     )
     contributions = (
         HarnessContribution(
@@ -130,6 +134,23 @@ def test_with_contributions_filters_by_harness_and_deduplicates(tmp_path: Path) 
     assert "duplicate should be ignored" not in text
     assert "meiva.agy_only" not in text
     assert "Report progress to your agreed delegator." in text
+
+
+def test_a_contributed_section_is_built_from_the_handoff_and_rendered_before_reporting(
+    tmp_path: Path,
+) -> None:
+    def build(doc: Handoff) -> HandoffSection:
+        return HandoffSection("Extra", (f"home is `{doc.home}`",))
+
+    merged = handoff(tmp_path).with_contributions(
+        [HarnessContribution(frozenset({Harness.CODEX}), sections=(build,))] * 2,
+        harness=Harness.CODEX,
+    )
+    text = merged.render()
+    assert merged.sections == (HandoffSection("Extra", (f"home is `{tmp_path / 'home'}`",)),)
+    assert text.index("## Tool & Environment Boundaries") < text.index("## Extra")
+    assert text.index("## Extra") < text.index("## Collaboration & Reporting")
+    assert f"home is `{tmp_path / 'home'}`" in text
 
 
 def test_empty_cluster_and_entries_render_placeholders(tmp_path: Path) -> None:
@@ -188,18 +209,20 @@ PINNED_HANDOFF_FIELDS = (
     "instruction",
     "machine",
     "workspace",
+    "home",
     "label",
     "cluster",
     "entries",
     "overlaps",
     "discipline",
+    "sections",
     "reference_file",
 )
 
 
 def test_field_set_is_pinned_to_the_handoff_version() -> None:
     names = tuple(entry.name for entry in fields(Handoff))
-    assert HANDOFF_VERSION == 2, (
+    assert HANDOFF_VERSION == 3, (
         "HANDOFF_VERSION moved without PINNED_HANDOFF_FIELDS following it; the "
         "version pins the field set every adapter reads"
     )

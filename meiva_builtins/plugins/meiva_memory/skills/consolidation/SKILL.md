@@ -5,7 +5,7 @@ description: "Consolidates Meiva's shared memory. Use for assigned single-box ma
 
 # Memory pool consolidation (Meiva Dream)
 
-The shared memory pool (`meiva.memory.PATH`) is the Vault git repo’s `memory/` directory. Agents write notes into the working tree. Consolidation runs the four-phase **Meiva Dream**
+The shared memory pool (`meiva.memory.SHARED_PATH`) is the Vault git repo’s `memory/` directory. Agents write notes into the working tree. Consolidation runs the four-phase **Meiva Dream**
 cycle (`Orientation` -> `Gather Signal` -> `Consolidation` -> `Prune & Index`) to keep the pool canonical, committed and searchable.
 
 Index rebuild, validation and refresh use scripts under `../scripts/`, `scripts/`, and the Vault root. `--pool` accepts the notes directory
@@ -272,7 +272,7 @@ The one thing it cannot do for you is the remote:
 
 Paths and remote used below:
 - **VAULT** = the Git repository root (`~/.meiva/vault`).
-- **POOL** = the notes path, `meiva.memory.PATH` (`~/.meiva/vault/memory`).
+- **POOL** = the notes path, `meiva.memory.SHARED_PATH` (`~/.meiva/vault/memory`).
 - **REPO** = the pool's GitHub `owner/name`. Get it once:
   `git -C VAULT remote get-url origin` then take `owner/name` from the
   `git@github.com:owner/name.git` form.

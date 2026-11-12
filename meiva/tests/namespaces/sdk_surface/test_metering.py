@@ -207,7 +207,7 @@ def test_instrument_targets_selects_routines_not_classes_or_constants() -> None:
     # classes and constants exposed in __all_for_meiva__ are never wrapped
     assert "agents.AgentRow" not in fqs  # a class
     assert "self.AGENT_ID" not in fqs  # a constant
-    assert "memory.PATH" not in fqs  # a constant
+    assert "memory.SHARED_PATH" not in fqs  # a constant
     # meiva.skills' __all_for_meiva__ is the live skill index only. Its entries are
     # served by module __getattr__ and the static walk resolves none of them, so
     # they are never wrapped (skill use is attributed by skill_invoked events

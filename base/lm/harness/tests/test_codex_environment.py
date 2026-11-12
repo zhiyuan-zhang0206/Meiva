@@ -107,6 +107,7 @@ async def test_bridge_recaptures_environment_and_registration_when_resuming(tmp_
         agent_id=7,
         machine="local-environment-test",
         workspace=tmp_path,
+        home=tmp_path / "home",
         registry=FileSessionRegistry(tmp_path / "registry"),
         registration_ttl_seconds=60,
         environ=environment,

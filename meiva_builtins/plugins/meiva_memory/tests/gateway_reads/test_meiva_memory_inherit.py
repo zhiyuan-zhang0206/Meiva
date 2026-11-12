@@ -91,7 +91,6 @@ def _entries(*texts: str, agent_id: int = 7, label: str | None = None) -> list[E
     return [
         EntryBlocks(
             ancestor=ancestor,
-            entry_name=f"entry-{index}.md",
             entry_path=f"/home/{agent_id}/memory/entry-{index}.md",
             blocks=(text,),
         )
@@ -139,14 +138,12 @@ _NO_CAPS = SizeCaps(block_chars=0, total_chars=0)
 
 def test_nothing_declared_renders_nothing() -> None:
     assert render_inherited([], [], depth=1, caps=_NO_CAPS) is None
-    empty = EntryBlocks(Ancestor(7, None, "here"), "e.md", "/e.md", ())
+    empty = EntryBlocks(Ancestor(7, None, "here"), "/e.md", ())
     assert render_inherited([empty], [], depth=1, caps=_NO_CAPS) is None
 
 
 def test_a_section_names_the_ancestor_and_joins_one_entrys_fences() -> None:
-    entry = EntryBlocks(
-        Ancestor(7, "Parent", "here"), "rules.md", "/rules.md", ("block one", "block two")
-    )
+    entry = EntryBlocks(Ancestor(7, "Parent", "here"), "/rules.md", ("block one", "block two"))
 
     rendered = render_inherited([entry], [], depth=2, caps=_NO_CAPS)
 
@@ -154,7 +151,7 @@ def test_a_section_names_the_ancestor_and_joins_one_entrys_fences() -> None:
     assert rendered.text.startswith(
         "Memory your ancestors chose to share with descendants (depth 2,"
     )
-    assert "## ancestor #7 (Parent) — memory/rules.md\n\nblock one\n\nblock two" in rendered.text
+    assert "## ancestor #7 (Parent) — /rules.md\n\nblock one\n\nblock two" in rendered.text
     assert (rendered.block_count, rendered.section_count, rendered.warnings) == (2, 1, ())
 
 
@@ -266,9 +263,13 @@ def test_direct_parent_inherit_md_is_injected_and_personal_notes_stay_private(
     content = _note_text(note)
     assert content.startswith("<system_note>\nMemory your ancestors chose to share")
     assert "verify facts that conflict with current evidence" in content
-    assert "## ancestor #600311 (Parent) — memory/INHERIT.md" in content
+    assert (
+        f"## ancestor #600311 (Parent) — {meiva_home()}/workspaces/600311/memory/INHERIT.md"
+        in content
+    )
     assert "Report in Chinese." in content
-    assert "private" not in content
+    assert "private personal note" not in content
+    assert "private.md" not in content
 
 
 def test_blocks_render_nearest_ancestor_first(
@@ -286,8 +287,11 @@ def test_blocks_render_nearest_ancestor_first(
     assert note is not None
     content = _note_text(note)
     assert content.index("#600321") < content.index("#600322")
-    assert "## ancestor #600321 (Parent) — memory/INHERIT.md" in content
-    assert "## ancestor #600322 — memory/INHERIT.md" in content
+    assert (
+        f"## ancestor #600321 (Parent) — {meiva_home()}/workspaces/600321/memory/INHERIT.md"
+        in content
+    )
+    assert f"## ancestor #600322 — {meiva_home()}/workspaces/600322/memory/INHERIT.md" in content
     assert "parent block one\n\nparent block two" in content
     assert "grandparent block" in content
 

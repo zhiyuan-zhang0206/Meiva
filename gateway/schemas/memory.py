@@ -86,17 +86,13 @@ class MemorySearchResultItem(BaseModel):
     )
 
 
+# meiva:note
+# Paths are RELATIVE to the memory root: the SDK caller (`meiva.memory.search`) joins each onto
+# `meiva.memory.SHARED_PATH` to rebuild an absolute path, so a gateway (e.g. /Users/x) and an
+# agent-runner (/home/y) with different filesystems agree. `results` carries path, description,
+# tags, score and matched chunk for each match, most relevant first.
+# meiva:link gateway/routers/docs/memory.md
 class MemorySearchResponse(BaseModel):
-    """POST /api/memory/search response — RELATIVE paths from memory pool root.
-
-    Caller (SDK `meiva.memory.search`) uses `meiva.memory.PATH / p` to
-    reconstruct absolute paths. fs-neutral makes mismatched gateway
-    (e.g. /Users/x) and agent-runner (/home/y) filesystems work.
-
-    `results` carries path, description, tags, score and matched chunk for each
-    match, most relevant first.
-    """
-
     results: list[MemorySearchResultItem]
 
 

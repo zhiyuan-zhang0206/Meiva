@@ -196,21 +196,38 @@ def test_indexer_is_declared_by_the_plugin_not_the_core_roster() -> None:
     assert "memory-indexer" not in literals
 
 
-def test_per_agent_framing_makes_no_path_resolution_claim(memory_plugin: Any) -> None:
-    from meiva_builtins.plugins.meiva_memory.notes import PER_AGENT_FRAMING
+def test_per_agent_framing_names_absolute_paths_for_both_memories(tmp_path: Path) -> None:
+    from meiva_builtins.plugins.meiva_memory.notes import personal_index_framing
 
-    assert "resolve" not in PER_AGENT_FRAMING
-    assert "memory/INHERIT.md" in PER_AGENT_FRAMING
-    assert "meiva:inheritable" not in PER_AGENT_FRAMING
+    shared, personal = tmp_path / "vault" / "memory", tmp_path / "workspaces" / "17" / "memory"
+    text = personal_index_framing(personal, shared)
+    assert "resolve" not in text
+    assert f"`{personal}/INHERIT.md`" in text
+    assert f"{personal} (meiva.memory.PERSONAL_PATH)" in text
+    assert f"({shared})" in text
+    assert "meiva:inheritable" not in text
+    assert "memory/" not in text.replace(str(personal), "").replace(str(shared), "")
+    assert "meiva.files" not in text
 
 
-def test_discipline_describes_three_memory_layers(memory_plugin: Any) -> None:
+def test_shared_framing_names_the_absolute_folder(tmp_path: Path) -> None:
+    from meiva_builtins.plugins.meiva_memory.notes import shared_index_framing
+
+    shared = tmp_path / "vault" / "memory"
+    text = shared_index_framing(shared)
+    assert f"{shared} (meiva.memory.SHARED_PATH)" in text
+    assert "meiva.files" not in text
+    assert "memory/" not in text.replace(str(shared), "")
+
+
+def test_discipline_describes_shared_personal_and_inherited_memory(memory_plugin: Any) -> None:
     section = memory_plugin.memory_discipline_section(
         _slices(), catalog=build_model_catalog(home=meiva_home())
     )
-    assert "Shared pool (meiva.memory.PATH)" in section
-    assert "Personal self (memory/MEMORY.md + memory/<slug>.md in your workspace)" in section
-    assert "Descendant inheritance (memory/INHERIT.md in your workspace)" in section
+    assert "Shared memory (meiva.memory.SHARED_PATH)" in section
+    assert "Personal memory (meiva.memory.PERSONAL_PATH" in section
+    assert "Descendant inheritance (INHERIT.md in meiva.memory.PERSONAL_PATH)" in section
+    assert "memory/" not in section
     assert "meiva:inheritable" not in section
 
 

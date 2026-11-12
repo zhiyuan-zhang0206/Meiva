@@ -46,7 +46,7 @@ def isolated() -> None:
     process_context.bind_context(
         MeivaContext(identity=AgentIdentity(417, True), meiva_home=resolve_meiva_home())
     )
-    original_path_doc = meiva.memory.PATH.__doc__
+    original_path_doc = meiva.memory.SHARED_PATH.__doc__
     apply_per_agent_eval_isolation(
         agent_id=417,
         default_reader=defaults(agent__eval_isolation=True, agent__eval_network_allowlist=[]),
@@ -59,10 +59,10 @@ def isolated() -> None:
     assert not hasattr(meiva, "ui")
     assert not hasattr(meiva.agents, "get_last_message")
     assert not hasattr(meiva, "tasks")
-    assert meiva.memory.PATH.name == "memory-pool"
-    assert meiva.memory.PATH.parent.name == "417"
-    assert meiva.memory.PATH.is_dir()
-    assert meiva.memory.PATH.__doc__ == original_path_doc
+    assert meiva.memory.SHARED_PATH.name == "memory-pool"
+    assert meiva.memory.SHARED_PATH.parent.name == "417"
+    assert meiva.memory.SHARED_PATH.is_dir()
+    assert meiva.memory.SHARED_PATH.__doc__ == original_path_doc
     assert meiva.memory.search("shared result") == []
     assert not hasattr(meiva.memory, "search_detailed")
     print("ok")
@@ -80,7 +80,7 @@ def isolated_in_other_home() -> None:
         home=other_home,
     )
 
-    assert other_home / "workspaces" / "417" / "memory-pool" == meiva.memory.PATH
+    assert other_home / "workspaces" / "417" / "memory-pool" == meiva.memory.SHARED_PATH
     assert not (resolve_meiva_home() / "workspaces" / "417").exists()
     print("ok")
 
@@ -121,7 +121,7 @@ def missing_agent() -> None:
 def off() -> None:
     _install()
     process_context.bind_context(MeivaContext(meiva_home=resolve_meiva_home()))
-    original_path = meiva.memory.PATH
+    original_path = meiva.memory.SHARED_PATH
     apply_per_agent_eval_isolation(
         agent_id=None,
         default_reader=defaults(agent__eval_isolation=False),
@@ -133,7 +133,7 @@ def off() -> None:
     assert hasattr(meiva, "mcps")
     assert hasattr(meiva, "ui")
     assert hasattr(meiva.agents, "get_last_message")
-    assert original_path == meiva.memory.PATH
+    assert original_path == meiva.memory.SHARED_PATH
     print("ok")
 
 

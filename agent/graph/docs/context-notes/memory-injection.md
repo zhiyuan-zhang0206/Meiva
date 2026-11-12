@@ -15,17 +15,17 @@ Context]] for the registry itself.
 
 ## The notes
 
-- **Shared MEMORY.md** (rank 20; memory pool root `meiva.memory.PATH`, pointer
+- **Shared MEMORY.md** (rank 20; shared memory root `meiva.memory.SHARED_PATH`, pointer
   index, visible to all agents) — `settings.agent.memory_index_inject_enabled`.
   Not `on_fork` (cluster-wide; grafting duplicated it — issue #1320).
-- **Per-agent memory** (rank 40; workspace `memory/` dir: `memory/MEMORY.md`
-  index, entries as sibling files read on demand) —
+- **Personal memory** (rank 40; `meiva.memory.PERSONAL_PATH`, the workspace's `memory/`
+  folder: its `MEMORY.md` index, entries as sibling files read on demand) —
   `settings.agent.memory_per_agent_inject_enabled`, `on_fork`. Empty index
   created if missing. **Only the index is injected**; past
   `memory_per_agent_index_max_lines` (default 200, 0=off) a maintenance
   reminder is appended — no truncation.
-- **Inherited memory** (rank 45; `inheritance/inherit.py`): the `memory/INHERIT.md`
-  files of an agent's ancestors (pure Markdown in their workspaces), read at every
+- **Inherited memory** (rank 45; `inheritance/inherit.py`): the `INHERIT.md`
+  files in the personal memory folders of an agent's ancestors (pure Markdown in their workspaces), read at every
   window establishment from the first `memory_inherit_depth` hops (default 1,
   0..10, 0=off) up the immutable birth chain (`agents_meta.born_spawner`;
   on a fork the chain is the fork source's). Chain read: one light gateway call
@@ -48,9 +48,10 @@ leading YAML frontmatter block with `_frontmatter_body`, and trims whitespace.
 ## Write discipline
 
 `agent_runtime.py:memory_discipline_section` supplies fixed system-prompt text
-for three layers: the shared pool at `meiva.memory.PATH`, personal state in
-`memory/MEMORY.md` and `memory/<slug>.md`, and descendant context in
-`memory/INHERIT.md`. Shared notes hold reusable rules, broadly useful facts and
+for three layers: shared memory at `meiva.memory.SHARED_PATH`, personal state in
+`MEMORY.md` and `<slug>.md` under `meiva.memory.PERSONAL_PATH`, and descendant context in
+`INHERIT.md` there. All agent-facing text names these by constant or absolute path, never as a
+relative `memory/...`. Shared notes hold reusable rules, broadly useful facts and
 user rulings; personal notes may retain verbose working state.
 
 Two-Stage OKF keeps writing simple: agents write pure Markdown (`# Title`, a

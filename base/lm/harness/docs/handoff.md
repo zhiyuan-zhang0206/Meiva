@@ -7,9 +7,9 @@ The handoff is a wire format, not an internal dataclass: the waking agent reads
 it as the first message of a fresh session, and its rendered size is a per-wake
 cost the host reports (`Handoff.size_bytes()`, and a `HandoffInjected` event).
 
-Section order is fixed — identity, cluster, entry points, boundaries, reporting,
-instructions — because an agent that skims it still meets the instructions last.
-`HANDOFF_VERSION` pins the dataclass field set across adapters.
+Section order is fixed — identity, cluster, entry points, boundaries, plugin sections,
+reporting, instructions — because an agent that skims it still meets the instructions last.
+`HANDOFF_VERSION` pins the dataclass field set across adapters (3: `home` and `sections` were added).
 
 Section 3 names where to start, not an inventory: `DEFAULT_ENTRIES` holds the
 `meiva` entry — which attaches this session's identity on first use — plus
@@ -20,12 +20,22 @@ and in-turn background tools, so `meiva.files` is not exposed in `DEFAULT_ENTRIE
 Listing every namespace there would become a second copy of `meiva.help()` that
 drifts from the SDK; the entry point and its pointer are enough to start.
 
+## Plugin sections
+
+A plugin that has facts an external agent needs in a section of their own, beyond a one-line entry
+point or rule, contributes a `HarnessContribution.sections` builder: a function from the `Handoff`
+being built to a `HandoffSection(title, lines)`, run by `Handoff.with_contributions` and rendered
+between the boundaries and the reporting rules. It takes the handoff because what such a section
+states is mostly absolute paths under this agent's `home` and `workspace`, which only the handoff
+knows. The memory plugin uses it for `Meiva Memory`: both memory folders, their indexes and what
+each is for. Core `handoff.py` holds no memory knowledge.
+
 ## Where the CLI's own tools end
 
 The harness owns the work inside one context; Meiva owns identity, persistence, peers and
 the human's attention. Section 4 therefore tells an external agent, by preference and with a
 reason for each, to use Meiva rather than the CLI's own feature in three places: durable
-memory (`meiva.memory`, contributed by the memory plugin) instead of the CLI's memory or
+memory (shared and personal memory under `meiva.memory`, contributed by the memory plugin) instead of the CLI's memory or
 notes file, since peers and later agents never read the latter; questions for the user
 (`meiva.ui.ask`, contributed by the fleet plugin) instead of the CLI's ask-user tool, since
 a CLI prompt never reaches the person in Meiva; and other agents (`meiva.agents.spawn`,

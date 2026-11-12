@@ -38,10 +38,12 @@ Skill nodes see [Meiva Memory Skills](../skills/README.md).
 
 This plugin **owns** the `meiva.memory` namespace — `plugin.py` assembles it and declares it as `SdkNamespace("memory", ...)`. There is no core `meiva/memory.py`; disabling the plugin removes the surface entirely.
 
-- `meiva.memory.PATH` — memory pool root path (`$MEIVA_HOME/vault/memory`, from the bound context's Meiva home each time it is read, so reading it outside a bound context raises), shared by all agents
+- `meiva.memory.SHARED_PATH` — shared memory root path (`$MEIVA_HOME/vault/memory`, from the bound context's Meiva home each time it is read, so reading it outside a bound context raises), read by all agents
 - `meiva.memory.search(query, k=5)` — semantic search, returns `list[MemoryMatch]` (`path`, `description`, `tags`, `score`, `chunk`), most relevant first
   (description empty string when absent; tags are empty or come from optional frontmatter tags)
-- `meiva.memory.PERSONAL_PATH` — the agent's own memory folder (`<workspace>/memory`), resolved from the SDK identity when read
+- `meiva.memory.PERSONAL_PATH` — the agent's personal memory folder (`<workspace>/memory`), resolved from the SDK identity when read; maintained by that agent alone
+
+**External harness handoff**: for Claude Code, Codex and Antigravity the plugin contributes the `meiva.memory` entry point, one boundary rule (prefer Meiva Memory over the CLI's own memory or notes file) and a `Meiva Memory` handoff section built from the handoff's `home` and `workspace`. The section names both folders by absolute path, says what belongs in shared memory and what personal memory keeps across compactions and sessions, where each `MEMORY.md` index and `INHERIT.md` live, and that the CLI's own file tools read and write them (`agent_runtime.py:_memory_handoff_section`; the section mechanism is in [the handoff document](../../../../base/lm/harness/docs/handoff.md)).
 
 There is no writer: an agent writes notes with `meiva.files.write` (see [Memory API](memory-api.md)). `IndexerUnavailable` remains reachable but deliberately excluded from `help(meiva.memory)`.
 

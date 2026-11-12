@@ -39,7 +39,13 @@ async def until(predicate: Callable[[], bool]) -> None:
 
 
 def handoff(tmp_path: Path) -> Handoff:
-    return Handoff(agent_id=7, instruction="Acknowledge only.", machine="test", workspace=tmp_path)
+    return Handoff(
+        agent_id=7,
+        instruction="Acknowledge only.",
+        machine="test",
+        workspace=tmp_path,
+        home=tmp_path / "home",
+    )
 
 
 @pytest.mark.parametrize("disconnect", [False, True])

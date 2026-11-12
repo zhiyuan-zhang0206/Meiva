@@ -2,8 +2,8 @@
 
 A note is a markdown file (pure Markdown by default; YAML frontmatter is optional). There is no
 writer function: create and update notes with `meiva.files.write` and `meiva.files.edit` under
-`PATH` (notes every agent can read) or `PERSONAL_PATH` (your own), following the format described
-on those two paths.
+`SHARED_PATH` (shared notes that every agent can read) or `PERSONAL_PATH` (your personal notes,
+which only you maintain), following the format described on those two paths.
 """
 
 from __future__ import annotations
@@ -19,7 +19,7 @@ from base.api_contracts.agent_contract import IndexerUnavailable as IndexerUnava
 from meiva.sdk_surface import process_context
 from meiva.sdk_surface.validation import coerce_str, coerce_typed
 
-__all_for_meiva__ = ["PATH", "PERSONAL_PATH", "MemoryMatch", "search"]
+__all_for_meiva__ = ["SHARED_PATH", "PERSONAL_PATH", "MemoryMatch", "search"]
 
 
 _NOTE_FORMAT = """A note is a .md file written directly in pure Markdown (YAML frontmatter is optional):
@@ -37,26 +37,29 @@ an existing note before writing a new one and update it in place when it already
 Nothing checks a note when you write it, so follow this format yourself; a note that breaks it is
 fixed or removed later when the notes are consolidated."""
 
-_PATH_DOC = (
-    """Root folder of the shared notes that every agent can read. When the pool spans machines,
-notes sync within about a day, so a path `search` returns may not have arrived here yet; retry
-later.
+_SHARED_PATH_DOC = (
+    """Root folder of the shared notes that every agent in the cluster can read. When the pool
+spans machines, notes sync within about a day, so a path `search` returns may not have arrived
+here yet; retry later.
 
-Write a note with `meiva.files.write(meiva.memory.PATH / "topic/name.md", text)`; use the absolute
-path so a changed `meiva.cwd` cannot misplace it. A topic subfolder is fine.
+The shared index is `MEMORY.md` in this folder. Write a shared note with
+`meiva.files.write(meiva.memory.SHARED_PATH / "topic/name.md", text)`; use the absolute path so a
+changed `meiva.cwd` cannot misplace it. A topic subfolder is fine. Your personal notes live under
+`meiva.memory.PERSONAL_PATH`.
 """
     + "\n"
     + _NOTE_FORMAT
 )
 
 _PERSONAL_PATH_DOC = (
-    """Root folder of your own notes: the memory folder of your workspace. Only you maintain it.
+    """Root folder of your personal notes: the memory folder of your workspace. Only you maintain it,
+and the shared notes every agent reads live under `meiva.memory.SHARED_PATH`.
 Keep one line per personal note in MEMORY.md in this folder, `- [Title](file.md) - description`;
 the personal notes (`<slug>.md`) stay beside it and are visible only to you.
 To pass domain context and execution rules to descendants you spawn, write pure Markdown in
 `INHERIT.md` (and optional detail files under `inherit/<slug>.md`) in this folder.
 
-Write a note with `meiva.files.write(meiva.memory.PERSONAL_PATH / "name.md", text)`.
+Write a personal note with `meiva.files.write(meiva.memory.PERSONAL_PATH / "name.md", text)`.
 """
     + "\n"
     + _NOTE_FORMAT
@@ -66,17 +69,17 @@ Write a note with `meiva.files.write(meiva.memory.PERSONAL_PATH / "name.md", tex
 @functools.cache
 def _documented_pool(home: Path) -> Path:
     """The pool root for `home`, wrapped once so every read of one home is one object."""
-    return _meiva.const(base.paths.memory_dir(home=home), doc=_PATH_DOC)
+    return _meiva.const(base.paths.memory_dir(home=home), doc=_SHARED_PATH_DOC)
 
 
 def __getattr__(name: str) -> Path:
-    """`PATH` and `PERSONAL_PATH`, resolved when read so the module never captures the home or
+    """`SHARED_PATH` and `PERSONAL_PATH`, resolved when read so the module never captures the home or
     the agent identity at import.
 
-    An assignment (`memory.PATH = ...`, the isolated-evaluation boot in
+    An assignment (`memory.SHARED_PATH = ...`, the isolated-evaluation boot in
     `agent/process_boot.py`) creates a real attribute that shadows this hook.
     """
-    if name == "PATH":
+    if name == "SHARED_PATH":
         return _documented_pool(process_context.current_context().require_meiva_home())
     if name == "PERSONAL_PATH":
         from meiva.sdk_surface.agent_identity import agent_id
@@ -94,8 +97,8 @@ def __getattr__(name: str) -> Path:
 
 
 def pool_root() -> Path:
-    """The pool root as `PATH` reads: an assigned value wins, else the home's."""
-    return globals().get("PATH") or __getattr__("PATH")
+    """The pool root as `SHARED_PATH` reads: an assigned value wins, else the home's."""
+    return globals().get("SHARED_PATH") or __getattr__("SHARED_PATH")
 
 
 class MemoryMatch(NamedTuple):

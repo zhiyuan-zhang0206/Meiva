@@ -219,7 +219,7 @@ def _not_a_target(target: object) -> NotHelpTargetError:
         f"meiva.help() documents SDK targets and {type(target).__name__} is not one. Pass a "
         "meiva module or namespace (meiva.shell), a routine or class it exposes "
         "(meiva.shell.run, meiva.shell.SessionHandle), or a documented constant "
-        "(meiva.memory.PATH). An instance or a plain value has no documentation to print, and "
+        "(meiva.memory.SHARED_PATH). An instance or a plain value has no documentation to print, and "
         "printing it would show every value it holds."
     )
 

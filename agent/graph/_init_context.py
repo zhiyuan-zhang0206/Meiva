@@ -225,6 +225,7 @@ def _build_grounded_handoff(ctx: MeivaContext, *, agent_id: int) -> Handoff:
         agent_id=agent_id,
         machine=machine_clause(ctx) or "",
         workspace=workspace_dir(agent_id, home=ctx.require_meiva_home()),
+        home=ctx.require_meiva_home(),
         instruction=instruction,
         label=label,
         cluster=cluster,

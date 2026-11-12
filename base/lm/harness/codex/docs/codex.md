@@ -18,7 +18,7 @@ directly: the uniform surface is this adapter, not a shared wire protocol.
    `thread/resume` with the recorded thread id. A rejected `thread/resume` fails
    fast instead of silently starting a fresh thread.
 2. **The handoff rides the first input.** The bridge puts the rendered
-   six-section document in front of the first input of a fresh thread; a resumed
+   sectioned document in front of the first input of a fresh thread; a resumed
    thread gets none. The handoff directs macOS Codex Computer Use to
    paste non-ASCII text and verify the field value. Native `typeText` dropped
    the Chinese characters in a mixed-script Chrome input while plain-text

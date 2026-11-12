@@ -15,7 +15,7 @@ from dataclasses import dataclass
 _FRAMING = (
     "Memory notes related to the current conversation, retrieved "
     "automatically, each with the passage that matched and its relevance score. "
-    "These point into your note pool at meiva.memory.PATH -- read a path in full "
+    "These point into shared memory at meiva.memory.SHARED_PATH -- read a path in full "
     "when it looks relevant."
 )
 
