@@ -7,20 +7,22 @@ mean different things.
 
 - `TaskNotificationMessage` is the report itself. It maps to
   `UnsolicitedOutput(source="task-notification", text=...)` — the task id, its
-  status, the provider's summary and the output file's path — and the session
-  routes it by whether a turn is running. While one is, the running turn already
-  received the notification in its own context, so the event is only recorded.
-  While none is, nobody has read it: the session holds dispatch (below) and hands
-  it to the sink, which the host writes as a `system:harness` inbound so the agent
-  takes a turn over it
-  ([attribution](../../docs/attribution.md)).
-- The CLI then answers the notification itself, in a turn this session did not start, and closes
+  status, the provider's summary and the output file's path — and the session only
+  records it in the event stream. It is never handed to the sink: the CLI reads the
+  notification itself, in the running turn's context when a turn runs, and otherwise in a
+  turn of its own (below). Delivering it too would give the agent the same report twice and
+  run a second turn.
+- The CLI answers the notification in a turn this session did not start, and closes
   it with a `ResultMessage` whose `origin.kind` is `task-notification`. That turn is observed like
   any other ([delivery](../../docs/delivery.md)): `TurnStarted(origin=HARNESS,
   cause=BACKGROUND_TASK)` when the notification preceded it, its text and tools attributed to it,
   and one `TurnCompleted`. It is not read as our turn's boundary and not recorded as unsolicited
-  output. The report itself still goes to the sink while no turn runs, as above, because the
-  graph does not yet surface observed turns; that delivery goes when it does.
+  output. The order was recorded from a real CLI (`tests/fixtures/background_bash.json`, a
+  background `Bash` that ended while the agent was idle, twice with the same result;
+  `subagent_background.json` records the same for an async sub-agent): `task_updated`,
+  `task_notification`, `background_tasks_changed`, a fresh `init`, the answer's content, and a
+  `ResultMessage` with `origin = {kind: task-notification, producer: session-task}`. No user message
+  is echoed for it, and the CLI started the turn on its own after the command ended.
 - Nothing is held for the CLI's own turn: an input delivered meanwhile is written to the CLI, which
   runs it behind its own turn, and the events say which turn it entered.
 

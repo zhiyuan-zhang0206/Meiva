@@ -10,20 +10,15 @@ from base.lm.harness.claude.inbound import (
     counts_as_step,
     is_tool_result,
     message_kind,
-    notification_plan,
     started_identity,
 )
 from base.lm.harness.events import (
     AssistantText,
-    RateLimitObserved,
     ReasoningText,
     SessionStarted,
     TextDelta,
     ToolUse,
-    UnsolicitedOutput,
 )
-
-REPORT = UnsolicitedOutput(source="task-notification", text="Background task t1 completed.")
 
 
 def test_the_class_name_decides_which_kind_a_message_is() -> None:
@@ -72,33 +67,6 @@ def test_the_turns_text_is_its_assistant_text_and_nothing_else() -> None:
 
     assert assistant_texts(events) == ("one", "two")
     assert assistant_texts([]) == ()
-
-
-def test_a_report_nobody_has_read_goes_to_the_sink_on_its_own() -> None:
-    plan = notification_plan([REPORT], claimed=False)
-
-    assert plan.report is REPORT
-    assert plan.stream == ()
-
-
-def test_a_report_inside_a_running_turn_stays_in_the_stream() -> None:
-    plan = notification_plan([REPORT], claimed=True)
-
-    assert plan.report is None
-    assert plan.stream == (REPORT,)
-
-
-def test_a_message_without_a_report_streams_whole_and_keeps_its_order() -> None:
-    signal = RateLimitObserved(
-        status="allowed", utilization=None, resets_at=None, rate_limit_type=None
-    )
-
-    assert notification_plan([signal], claimed=False).report is None
-    assert notification_plan([signal], claimed=False).stream == (signal,)
-
-    plan = notification_plan([signal, REPORT], claimed=False)
-    assert plan.stream == (signal,)
-    assert plan.report is REPORT
 
 
 def test_a_started_task_stays_open_until_a_report_or_a_terminal_update() -> None:

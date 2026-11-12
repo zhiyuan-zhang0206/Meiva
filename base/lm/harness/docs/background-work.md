@@ -29,8 +29,9 @@ of a turn does not touch background work, but it does end the foreground command
 
 Every close ends in `HarnessSessions._close` → `HarnessBridge.close`. The adapter reads
 its CLI's stream in its own read loop for as long as the session lives, idle or not; what
-no turn of ours owns is a turn the CLI began itself (below) or goes to the sink (`UnsolicitedOutput`, e.g.
-a background-task report) and wakes the agent as a `system:harness` inbound.
+no turn of ours owns is a turn the CLI began itself (below) or, for Codex and Antigravity, goes to the sink
+(`UnsolicitedOutput`) and wakes the agent as a `system:harness` inbound. Claude's background-task report
+does not: the CLI answers it in a turn of its own, so the report is only recorded in the event stream.
 
 ## Keeping a session that holds work
 
@@ -71,7 +72,8 @@ reconciled input (`reconciled-resume-…`, see `delivery.md`).
 
 ## Turns the CLI starts itself
 
-A turn the CLI starts while the agent is idle (a fired timer, a finished background task) is observed as
+A turn the CLI starts while the agent is idle (a fired timer, a finished background task; recorded for a
+background `Bash` and an async sub-agent) is observed as
 `TurnStarted(origin=HARNESS)` and presented like any other turn, not relayed as an inbound message. The
 event pump (`pump.py`) keeps that turn's events from its start until a subscriber has read its
 `TurnStarted`, and calls the owner's `own_turn` (the host's wake for the agent). The claim finds no inbox

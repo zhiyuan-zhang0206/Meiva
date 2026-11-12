@@ -38,7 +38,6 @@ from base.lm.harness.claude.inbound import (
     counts_as_step,
     is_tool_result,
     message_kind,
-    notification_plan,
     started_identity,
 )
 from base.lm.harness.claude.mapping import (
@@ -516,12 +515,14 @@ class ClaudeSession(BaseHarnessSession[BridgeConfig]):
     def _handle_task_notification(self, message: object) -> None:
         self._background = self._background.reported(_task_id(message))
         self._persist_pending()
-        plan = notification_plan(map_message(message, turn_id=None), claimed=self._open is not None)
-        for event in plan.stream:
+        # meiva:note
+        # The CLI answers every notification itself, in a turn this session did not start, so the
+        # report is recorded in the event stream and never delivered to the sink.
+        # meiva:link base/lm/harness/claude/docs/background-tasks.md
+        for event in map_message(message, turn_id=None):
             self._emit(event)
-        if plan.report is not None:
+        if self._open is None:
             self._pending_cause = HarnessCause.BACKGROUND_TASK
-            self._unsolicited(plan.report)
 
     def _track_task_started(self, message: object) -> None:
         claimed = self._claimed_by_background | frozenset(tool_snapshot(self._probe, self._cli_pid))

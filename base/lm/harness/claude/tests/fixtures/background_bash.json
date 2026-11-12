@@ -1,0 +1,25 @@
+{
+  "source": "RECORDED from Claude Code CLI 2.1.322 via claude-agent-sdk 0.2.168 (claude-haiku-4-5), 2026-11-12, twice with the same result: a `sleep 12; echo BGDONE` Bash call with run_in_background=true, the launching turn answered and ended, then about 11 seconds of idle before the command ended. Nothing was written in between. The CLI reported the end (task_updated, task_notification, background_tasks_changed), re-sent its init, and ran a turn of its own that read the notification and answered it; that turn ended with a ResultMessage whose origin is {kind: task-notification, producer: session-task}, while the launching turn's Result has no origin. No user message was echoed for the notification. In the second run the first response had no visible output, so the CLI inserted a user text nudge (no uuid, no origin) and the same turn went on to answer; both runs closed with the same Result. Ids, paths, thinking text and usage are shortened or removed; frame order and field names are as the CLI sent them.",
+  "frames": {
+    "launch": [
+      {"cls": "UserMessage", "uuid": "$first", "content": "Run the shell command sleep 12; echo BGDONE as a background Bash command, then reply with only the word STARTED."},
+      {"cls": "AssistantMessage", "blocks": [{"thinking": ""}]},
+      {"cls": "AssistantMessage", "blocks": [{"tool": {"id": "toolu_BG", "name": "Bash", "input": {"command": "sleep 12; echo BGDONE", "run_in_background": true}}}]},
+      {"cls": "SystemMessage", "subtype": "background_tasks_changed", "data": {"tasks": [{"task_id": "task-bg-1", "task_type": "local_bash", "description": "sleep 12; echo BGDONE"}]}},
+      {"cls": "TaskStartedMessage", "task_id": "task-bg-1", "tool_use_id": "toolu_BG", "description": "sleep 12; echo BGDONE", "task_type": "local_bash"},
+      {"cls": "UserMessage", "content": [{"tool_result": {"tool_use_id": "toolu_BG", "content": "Command running in background with ID: task-bg-1. Output is being written to: /tasks/task-bg-1.output"}}]},
+      {"cls": "AssistantMessage", "blocks": [{"thinking": ""}]},
+      {"cls": "AssistantMessage", "blocks": [{"text": "STARTED"}]},
+      {"cls": "ResultMessage", "result": "STARTED", "num_turns": 2}
+    ],
+    "idle_answer": [
+      {"cls": "TaskUpdatedMessage", "task_id": "task-bg-1", "patch": {"status": "completed"}},
+      {"cls": "TaskNotificationMessage", "task_id": "task-bg-1", "status": "completed", "output_file": "/tasks/task-bg-1.output", "summary": "Background command \"sleep 12; echo BGDONE\" completed (exit code 0)"},
+      {"cls": "SystemMessage", "subtype": "background_tasks_changed", "data": {"tasks": []}},
+      {"cls": "SystemMessage", "subtype": "init", "data": {"session_id": "session-1", "model": "claude-fake"}},
+      {"cls": "AssistantMessage", "blocks": [{"thinking": ""}]},
+      {"cls": "AssistantMessage", "blocks": [{"text": "Background command completed. Exit code: 0. Output: `BGDONE`"}]},
+      {"cls": "ResultMessage", "origin": {"kind": "task-notification", "producer": "session-task"}, "result": "Background command completed. Exit code: 0. Output: `BGDONE`", "num_turns": 1}
+    ]
+  }
+}

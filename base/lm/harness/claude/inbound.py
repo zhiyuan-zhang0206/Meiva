@@ -11,7 +11,6 @@ from base.lm.harness.events import (
     BridgeEvent,
     SessionStarted,
     ToolUse,
-    UnsolicitedOutput,
 )
 from base.lm.harness.session import BackgroundItem, BackgroundKind, describe
 
@@ -138,30 +137,6 @@ class BackgroundTasks:
         if status not in TERMINAL_TASK_STATUSES:
             return self
         return self.reported(task_id)
-
-
-# meiva:note
-# What one task notification delivers. Two different things arrive under one message: the
-# report the model should read, and — whenever the CLI answered it itself — a turn of the
-# CLI's own that streams right behind it. While a turn of ours is running, the CLI put the
-# report in that turn's own context, so a second delivery would be a duplicate turn and the
-# report stays in the stream; with no turn running nobody has read it, so the sink takes it
-# and dispatch is held until the CLI's own answer reports. A task notification maps to
-# exactly one report, which is why splitting the two does not reorder the stream (#5663).
-# meiva:link base/lm/harness/claude/docs/background-tasks.md
-@dataclass(frozen=True, slots=True)
-class NotificationPlan:
-    stream: tuple[BridgeEvent, ...]
-    report: UnsolicitedOutput | None
-
-
-def notification_plan(events: Sequence[BridgeEvent], *, claimed: bool) -> NotificationPlan:
-    report = next((event for event in events if isinstance(event, UnsolicitedOutput)), None)
-    if claimed or report is None:
-        return NotificationPlan(stream=tuple(events), report=None)
-    return NotificationPlan(
-        stream=tuple(event for event in events if event is not report), report=report
-    )
 
 
 # meiva:note

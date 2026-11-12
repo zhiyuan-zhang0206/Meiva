@@ -222,8 +222,8 @@ def _rate_limit(message: object, turn_id: str | None) -> list[BridgeEvent]:
 # the `SystemMessage` entry above therefore never sees it. The report is content
 # that belongs to no turn of ours: the CLI either folded it into the turn that was
 # running (that turn's model already read it) or answered it in a turn of its own.
-# Either way it is the agent's to read, so it maps to `UnsolicitedOutput` and the
-# session decides whether anyone has seen it yet.
+# Either way the agent is told by the CLI, so it maps to `UnsolicitedOutput` only to be
+# recorded in the event stream; the session never delivers it.
 # meiva:link base/lm/harness/claude/docs/claude.md
 def _task_notification(message: object, turn_id: str | None) -> list[BridgeEvent]:
     del turn_id

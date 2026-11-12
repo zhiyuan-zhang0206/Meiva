@@ -128,22 +128,6 @@ async def test_an_interrupted_turn_ends_and_the_queued_input_revives_as_a_new_tu
         await harness.stop()
 
 
-async def test_a_turn_the_cli_began_for_a_finished_background_task_is_observed(
-    tmp_path: Path,
-) -> None:
-    harness = await start(tmp_path, passive=True)
-    try:
-        replay(harness.client, "background_wake", "task_answer")
-        await asyncio.sleep(0.02)
-        [started] = await seen(harness, TurnStarted)
-        assert (started.origin, started.cause) == (TurnOrigin.HARNESS, HarnessCause.BACKGROUND_TASK)
-        [done] = await seen(harness, TurnCompleted)
-        assert done.turn_id == started.turn_id
-        assert done.text == "The background command finished."
-    finally:
-        await harness.stop()
-
-
 async def test_a_turn_the_cli_began_on_a_timer_names_the_scheduled_cause(tmp_path: Path) -> None:
     harness = await start(tmp_path, passive=True)
     try:

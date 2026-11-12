@@ -36,23 +36,40 @@ def _answer(text: str = "The background command finished with exit code 0.") -> 
     return fake.ResultMessage(origin={"kind": "task-notification"}, result=text)
 
 
-async def test_a_background_answer_is_an_observed_turn_with_its_cause(tmp_path: Path) -> None:
-    harness = await start(tmp_path)
+# meiva:note
+# Recorded with a real CLI (fixtures/background_bash.json): a background command ended while the
+# agent was idle, and the CLI read its own notification and answered it in a turn of its own. The
+# notification is therefore recorded in the event stream and never delivered to the sink; delivering
+# it too would hand the agent the same report twice and run a second turn.
+# meiva:link base/lm/harness/claude/docs/background-tasks.md
+async def test_an_idle_background_end_is_answered_by_the_cli_and_not_delivered(
+    tmp_path: Path,
+) -> None:
+    delivered: list[UnsolicitedOutput] = []
+    harness = await start(tmp_path, passive=True, unsolicited=delivered.append)
     try:
-        harness.client.push(_report())
-        harness.client.push(
-            fake.AssistantMessage(content=[fake.TextBlock(text="The command finished.")])
+        launch = await send(harness, "run it", key="first")
+        replay(harness.client, "background_bash", "launch", first="first")
+        assert (await launch.outcome()).text == "STARTED"
+        assert [task.description for task in harness.session.background_work().items] == [
+            "sleep 12; echo BGDONE"
+        ]
+        replay(harness.client, "background_bash", "idle_answer")
+        answer = await harness.wait_for(
+            lambda event: isinstance(event, TurnCompleted) and event.turn_id != launch.turn_id
         )
-        harness.client.push(_answer())
-        completed = await harness.wait_for(lambda event: isinstance(event, TurnCompleted))
-        [started] = harness.of(TurnStarted)
-        assert started.origin is TurnOrigin.HARNESS
-        assert started.cause is HarnessCause.BACKGROUND_TASK
-        assert completed.turn_id == started.turn_id
-        assert [event.turn_id for event in harness.of(AssistantText)] == [started.turn_id]
+        [_, woken] = harness.of(TurnStarted)
+        assert (woken.origin, woken.cause) == (TurnOrigin.HARNESS, HarnessCause.BACKGROUND_TASK)
+        assert answer.turn_id == woken.turn_id
+        assert answer.text == "Background command completed. Exit code: 0. Output: `BGDONE`"
+        assert [e.turn_id for e in harness.of(AssistantText) if e.text == answer.text] == [
+            woken.turn_id
+        ]
+        [report] = harness.of(UnsolicitedOutput)
+        assert "task-bg-1 reported completed" in report.text
+        assert delivered == []
+        assert not harness.session.background_work()
         assert harness.of(SessionFailed) == [] and harness.of(TurnFaulted) == []
-        late = await send(harness, "ours")
-        assert (await late.outcome()).turn_id == late.turn_id
     finally:
         await harness.stop()
 
