@@ -397,6 +397,54 @@ async def test_a_report_nobody_answered_goes_to_the_sink_when_the_wait_lapses(
         await harness.stop()
 
 
+class _GatedTimers(ManualTimers):
+    def __init__(self) -> None:
+        super().__init__()
+        self.gate = asyncio.Event()
+
+    async def asleep(self, seconds: float) -> None:
+        self.sleeps.append(seconds)
+        await self.gate.wait()
+
+
+# meiva:note
+# `close()` marks the session closed before it waits for the CLI to stop its tasks and only then
+# cancels the wait timers, so a wait that lapses in between must not deliver to a closing session.
+# meiva:link base/lm/harness/claude/docs/background-tasks.md
+async def test_a_wait_that_lapses_while_the_session_is_closing_delivers_nothing(
+    tmp_path: Path,
+) -> None:
+    delivered: list[UnsolicitedOutput] = []
+    timers = _GatedTimers()
+    harness = await start(
+        tmp_path, passive=True, unsolicited=delivered.append, clock=clock_over(timers)
+    )
+    stopping = asyncio.Event()
+    release = asyncio.Event()
+
+    async def slow_stop(task_id: str) -> None:
+        stopping.set()
+        await release.wait()
+
+    try:
+        await _launched(harness)
+        harness.client.push(fake.TaskStartedMessage(subtype="task_started", data={}, task_id="t2"))
+        replay(harness.client, "background_bash", "idle_report")
+        await harness.wait_for(lambda event: isinstance(event, UnsolicitedOutput))
+        harness.client.stop_task = slow_stop
+        closing = asyncio.create_task(harness.session.close(reason="test"))
+        await stopping.wait()
+        timers.gate.set()
+        await asyncio.sleep(0.02)
+        assert delivered == []
+        release.set()
+        await closing
+        assert delivered == []
+    finally:
+        release.set()
+        await harness.stop()
+
+
 # meiva:note
 # A process lost before the report was answered or delivered, inside the wait or (as here, by a clock
 # long past it) after it, is not delivered to the sink by the next one (it sets no timer): the next

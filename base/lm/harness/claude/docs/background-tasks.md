@@ -41,6 +41,16 @@ mean different things.
   lost at any point before that, inside the wait or after it lapsed, leaves it: the next session tells
   the agent once what was pending (the summary line of the report) and clears the record, and it sets no
   timer, so the report is not also delivered to the sink. Once answered or delivered the item is removed.
+- **Known limits.** A turn the CLI opens by itself usually carries no origin when it opens (the
+  origin is only on its `Result`), so the pairing cannot tell the turn that answers a notification
+  from another CLI-started turn: a Monitor's per-line event turn, or a sub-agent text turn without an
+  echo, also ends the oldest wait in first-in-first-out order. The consequence is that this item no
+  longer takes the fallback, and the real answer, when it comes, ends nothing twice. The agent can read
+  a report twice when the answering turn only starts after the wait lapsed, or when the CLI runs an input
+  of ours inside the wait and carries the notification into it.
+- **Not verified.** The origin a real timer turn carries (`timer_wake` in `background_wake.json` is
+  constructed); the status and the turns that follow a Monitor's timeout notice; whether the CLI merges
+  an input of ours that races a notification's turn into one turn or runs two.
 - Nothing is held for the CLI's own turn: an input delivered meanwhile is written to the CLI, which
   runs it behind its own turn, and the events say which turn it entered.
 

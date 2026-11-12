@@ -583,6 +583,8 @@ class ClaudeSession(BaseHarnessSession[BridgeConfig]):
 
     async def _deliver_unanswered(self, awaited: AwaitedAnswer) -> None:
         await self._clock.asleep(ANSWER_WAIT_SECONDS)
+        if self._closed:
+            return
         if not any(entry is awaited for entry in self._answering):
             return
         self._answering = tuple(entry for entry in self._answering if entry is not awaited)
