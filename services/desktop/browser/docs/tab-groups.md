@@ -90,7 +90,9 @@ basis for closing it. The tab group only answers "did the user take it?": a reco
 is `grouped` once Chrome shows the page in `Meiva #<owner>` (the background grouping
 reports it, or the next reconciliation sees it), and a `grouped` page that is no
 longer in that group is the user's now -- its record is dropped and it is never
-closed. A record that never became `grouped` (an isolated context, a grouping that
+closed. An ungrouped record whose page shows up in **any** group that is not its
+owner's (the user's own `Work` group, another agent's) is taken the same way; in its
+owner's group it becomes `grouped`. A record that never became `grouped` (an isolated context, a grouping that
 failed) is closed at its deadline. Every sweep and release first reconciles the file
 with Chrome's tabs (`AgentTabGroups.tab_state()`: `/json/list` plus
 `meivaGroupedTargets()`, group titles parsed by `agent_id_of_title`, which accepts
@@ -102,18 +104,27 @@ tab with the same URL as an agent page can end up in an agent group; closing it 
 that evidence would close the user's tab. The number of such pages is logged on every
 reconciliation. Two situations with evidence are handled:
 
-1. **Chrome restart inheritance.** In one reconciliation, a record whose target is
-   gone passes (original deadline, owner) to the one new page in the same owner's
-   group with the same URL, when exactly one record and one page match and no other
-   page in Chrome has that URL. With several candidates, or a same-URL tab outside the
+1. **Chrome restart inheritance.** Only when Chrome restarted, meaning not one record
+   of the ledger matches a page Chrome has: a record whose target is gone passes
+   (original deadline, owner) to the one new page in the same owner's group with the
+   same URL, when exactly one record and one page match and no other page in Chrome has
+   that URL. A tab the user closed and restored while the rest are still there is not a
+   restart: its record is just dropped. With several candidates, or a same-URL tab outside the
    group, nothing is passed: a leaked page is better than a closed user tab.
-2. **One-time migration.** When the ledger file does not exist (the first run of this
-   mechanism), the pages in agent groups at that moment are adopted once with a fresh
-   default TTL, each logged with owner and origin; the file records that it ran and it
-   never runs again. A file that exists but cannot be read migrates nothing.
+2. **One-time migration.** Decided when the daemon starts: if the ledger file does not
+   exist (the first run of this mechanism), its first reconciliation adopts the pages
+   in agent groups at that moment once with a fresh default TTL, each logged with owner
+   and origin. Any saved ledger file counts as the decision made, whoever wrote it
+   first (a page created before the first reconciliation saves one), so it never runs
+   twice. A file that exists but cannot be read migrates nothing. Deleting the ledger
+   file asks for the migration again; that is accepted. An adopted record is the
+   weakest evidence the ledger holds, so `release_agent_page` leaves it alone and only
+   the sweep closes it at its deadline.
 
-Before every close the page is re-checked on a fresh read of Chrome: still there,
-still in its owner's group if it was grouped, and not the browser's last page. The
+Before every close the page is re-checked on a fresh read of Chrome: still there, not
+taken by the user (above), and not the browser's last page. If that read fails the
+whole pass ends (one warning; no per-page timeouts under the serial lock) and the run of
+consecutive "due" sweeps is broken. The
 last-tab ungroup (`meivaUngroupLast`) must succeed first (a failure aborts the close),
 and a close counts only when the target is really gone; otherwise the record stays,
 with the original deadline, and the next pass tries again (repeated failures of one
@@ -132,6 +143,11 @@ and is unchanged. Its one hazard for this mechanism is the same-URL user tab abo
 the rules above make it a leaked page at worst, never a closed user tab, except one
 residual case: the one-time migration adopts whatever sat in an agent group at that
 moment, including a user's tab a past layout restore filed there by mistake.
+
+Accepted leaks (the safe direction): if the extension returns an incomplete list once, a
+`grouped` page missing from it is judged taken and loses its record; and a page that
+does not close on `/json/close` (a beforeunload prompt) is, once ungrouped, judged taken
+on the next pass. Both leave the page open.
 
 ## What this cannot fix
 

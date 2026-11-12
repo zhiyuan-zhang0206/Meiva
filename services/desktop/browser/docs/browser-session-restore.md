@@ -83,7 +83,7 @@ Restored tabs are new CDP targets, so the page TTL ledger
 (`<home>/run/browser-pages.json`, keyed by target id) does not know them. The
 `Meiva #<id>` groups that the reapply (or Chrome itself) puts back let the page sweep
 pass the record of a gone target, with its **original deadline**, to the one restored
-page with the same owner and URL, when exactly one gone record and one grouped page
+page with the same owner and URL, when no recorded page survived the restart, exactly one gone record and one grouped page
 match and no other page in Chrome has that URL; the first sweep runs 30 s after the
 daemon starts, after the reapply has had time to put the groups back. A restored tab
 that matches nothing, or several tabs with the same URL, is left alone: it is never

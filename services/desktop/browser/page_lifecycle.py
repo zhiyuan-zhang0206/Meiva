@@ -77,7 +77,7 @@ from services.desktop.browser.tab_groups.page_ledger import (
     Reconciled,
     TabState,
     agent_pages,
-    in_owner_group,
+    is_taken,
     may_close,
     reconcile,
     target_of_url,
@@ -178,8 +178,10 @@ _PAGE_LINE_RE = re.compile(
 #   (legacy wrapper clients) keep the per-connection fallback in the daemon.
 # - `records`: CDP target id -> `PageRecord`, persisted on every change (see
 #   `RecordStore`); the only candidate source for closing, so pages this stack never
-#   created (the user's own tabs) are never inspected or closed. `migrated`: the
-#   one-time migration of pages already in agent groups has run.
+#   created (the user's own tabs) are never inspected or closed. `migrate_pending`: the
+#   process started with no ledger file, so its first reconciliation runs the one-time
+#   migration of pages already in agent groups; any saved file (whoever wrote it first)
+#   counts as the migration decided, so it never runs twice.
 # - `page_targets`: page id -> target id, for the pages this process created or has
 #   matched to a target; empty at every daemon start.
 # - `due_seen`, `close_failures`: in-memory sweep state (the previous sweep's due
@@ -198,14 +200,14 @@ class PageRegistry:
         self.affinity: dict[int, int | None] = {}
         loaded = store.load()
         self.records: dict[str, PageRecord] = records_of(loaded)
-        self.migrated = loaded.migrated if loaded is not None else False
+        self.migrate_pending = loaded is None or not loaded.migrated
         self.page_targets: dict[int, str] = {}
         self.due_seen: set[str] = set()
         self.close_failures: dict[str, int] = {}
         self._grouped_early: set[str] = set()
 
     def _save(self) -> None:
-        self._store.save(LedgerFile(self.records, self.migrated))
+        self._store.save(LedgerFile(self.records, migrated=True))
 
     # meiva:note
     # Wall-clock epoch seconds, the unit of every deadline.
@@ -262,11 +264,12 @@ class PageRegistry:
 
     # meiva:note
     # Adopt a reconciled record set, writing the file only when something changed.
-    def replace_state(self, records: dict[str, PageRecord], *, migrated: bool) -> None:
-        if records != self.records or migrated != self.migrated:
+    def replace_state(self, records: dict[str, PageRecord], *, migration_ran: bool) -> None:
+        if records != self.records or migration_ran:
             self.records = records
-            self.migrated = migrated
             self._save()
+        if migration_ran:
+            self.migrate_pending = False
 
     def set_deadline(self, target_id: str, expires_at: float) -> None:
         record = self.records[target_id]
@@ -372,9 +375,9 @@ async def _reconciled(daemon: _PageDaemon) -> tuple[Reconciled, TabState] | None
         tabs,
         now=daemon.pages.now(),
         default_ttl_seconds=daemon.pages.default_ttl_seconds,
-        migrate=not daemon.pages.migrated,
+        migrate=daemon.pages.migrate_pending,
     )
-    daemon.pages.replace_state(result.records, migrated=daemon.pages.migrated or result.migrated)
+    daemon.pages.replace_state(result.records, migration_ran=result.migrated)
     _log_reconciled(result, tabs, daemon.pages.default_ttl_seconds)
     return result, tabs
 
@@ -416,10 +419,18 @@ def _log_reconciled(result: Reconciled, tabs: TabState, default_ttl_seconds: flo
 
 
 # meiva:note
+# The re-read of Chrome's tabs before a close failed: the caller ends its pass.
+class _ChromeUnreadableError(Exception):
+    pass
+
+
+# meiva:note
 # Close one recorded page; False when it stays open. The page is checked once more
-# on a fresh read of Chrome just before the close (`may_close`: still there, still
-# in its owner's group when it was grouped, not the browser's last page); a grouped
-# page that was taken since the reconciliation loses its record instead. A close
+# on a fresh read of Chrome just before the close (`may_close`: still there, not taken
+# by the user, not the browser's last page); a page taken since the reconciliation
+# loses its record instead. When that read fails the pass is abandoned
+# (`_ChromeUnreadableError`) rather than waiting out one timeout per page under the
+# serial lock. A close
 # counts only when the target is gone, else the record stays and the next pass tries
 # again; repeated failures of one target are logged on the first and then every sixth
 # time, without a traceback. Callers hold the serial lock.
@@ -429,19 +440,25 @@ async def _close(daemon: _PageDaemon, page: ExpiredPage) -> bool:
         return False
     try:
         fresh = await daemon.tab_groups.tab_state()
-        if (
-            page.target_id in fresh.pages
-            and record.grouped
-            and not in_owner_group(record, page.target_id, fresh)
-        ):
-            logger.info(
-                f"[browser-mcp] page {page.target_id} left its agent's tab group (taken by the "
-                "user); dropping its record, the page stays open"
-            )
-            daemon.pages.forget_target(page.target_id)
-            return False
-        if not may_close(record, page.target_id, fresh):
-            return False
+    except Exception as e:
+        logger.opt(exception=not isinstance(e, TimeoutError)).warning(
+            "[browser-mcp] could not re-read Chrome's tabs before closing page {} ({}: {}); "
+            "ending this pass",
+            page.target_id,
+            type(e).__name__,
+            e,
+        )
+        raise _ChromeUnreadableError from e
+    if is_taken(record, page.target_id, fresh):
+        logger.info(
+            f"[browser-mcp] page {page.target_id} is in a tab group that is not its owner's "
+            "(taken by the user); dropping its record, the page stays open"
+        )
+        daemon.pages.forget_target(page.target_id)
+        return False
+    if not may_close(record, page.target_id, fresh):
+        return False
+    try:
         gone = await daemon.tab_groups.close_target(
             page.owner, page.target_id, grouped=record.grouped
         )
@@ -481,7 +498,11 @@ async def release_agent_page(daemon: _PageDaemon, agent_id: int) -> int | None:
         closed_ids: list[int] = []
         for page in agent_pages(daemon.pages.records, refreshed[1], agent_id):
             page_id = daemon.pages.page_of_target(page.target_id)
-            if await _close(daemon, page) and page_id is not None:
+            try:
+                closed = await _close(daemon, page)
+            except _ChromeUnreadableError:
+                break
+            if closed and page_id is not None:
                 closed_ids.append(page_id)
         daemon.pages.set_agent_page(agent_id, None)
         if current_id in closed_ids:
@@ -648,6 +669,9 @@ async def reap_expired_pages(daemon: _PageDaemon) -> int:
     async with daemon._lock:
         refreshed = await _reconciled(daemon)
         if refreshed is None:
+            # meiva:note
+            # a pass that could not read Chrome breaks the run
+            daemon.pages.due_seen = set()
             return 0
         due = refreshed[0].due
         confirmed = [page for page in due if page.target_id in daemon.pages.due_seen]
@@ -655,8 +679,12 @@ async def reap_expired_pages(daemon: _PageDaemon) -> int:
         closed = 0
         for page in confirmed:
             page_id = daemon.pages.page_of_target(page.target_id)
-            if not await _close(daemon, page):
-                continue
+            try:
+                if not await _close(daemon, page):
+                    continue
+            except _ChromeUnreadableError:
+                daemon.pages.due_seen = set()
+                return closed
             telemetry.emit(
                 "log",
                 "chrome_page_ttl_expired",

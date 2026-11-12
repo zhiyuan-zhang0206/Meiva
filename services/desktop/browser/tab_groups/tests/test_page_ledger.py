@@ -12,6 +12,7 @@ from services.desktop.browser.tab_groups.page_ledger import (
     Reconciled,
     TabState,
     agent_pages,
+    is_taken,
     may_close,
     reconcile,
     target_of_url,
@@ -148,8 +149,8 @@ def test_the_migration_adopts_grouped_unrecorded_pages_with_a_fresh_ttl() -> Non
     tabs = _tabs({"T1": "https://a/", "T2": "https://b/", "T3": "https://u/"}, {"T1": 7, "T2": 9})
     result = _reconcile({}, tabs, migrate=True)
     assert result.records == {
-        "T1": PageRecord(7, NOW + TTL, grouped=True, url="https://a/"),
-        "T2": PageRecord(9, NOW + TTL, grouped=True, url="https://b/"),
+        "T1": PageRecord(7, NOW + TTL, grouped=True, url="https://a/", adopted=True),
+        "T2": PageRecord(9, NOW + TTL, grouped=True, url="https://b/", adopted=True),
     }
     assert result.adopted == (("T1", 7), ("T2", 9))
     assert result.migrated and result.unrecorded == 0
@@ -259,7 +260,48 @@ def test_may_close_rechecks_presence_group_and_the_last_page() -> None:
     assert not may_close(grouped, "T1", _tabs({"T1": "a", "T2": "b"}, {"T1": 9}))
 
 
-def test_agent_pages_are_the_agents_recorded_pages_chrome_still_has() -> None:
+def test_agent_pages_leaves_a_migrated_record_to_the_sweep() -> None:
+    tabs = _tabs({"T1": "a", "T2": "b", "U": "u"}, {"T1": 7, "T2": 7})
+    records = {"T1": _rec(), "T2": PageRecord(7, NOW, grouped=True, adopted=True)}
+    assert [p.target_id for p in agent_pages(records, tabs, 7)] == ["T1"]
+    assert [p.target_id for p in _reconcile(records, tabs, now=NOW + 1).due] == ["T2"]
+
+
+def test_an_ungrouped_record_whose_page_sits_in_any_other_group_is_taken() -> None:
+    for tabs in (
+        # meiva:note
+        # the user's own group
+        TabState({"T1": "a", "U": "u"}, {}, frozenset({"T1"})),
+        # meiva:note
+        # another agent's group
+        TabState({"T1": "a", "U": "u"}, {"T1": 9}),
+    ):
+        result = _reconcile({"T1": _rec(grouped=False, expires_at=NOW - 1)}, tabs)
+        assert result.taken == ("T1",) and result.records == {} and result.due == ()
+        assert not may_close(_rec(grouped=False), "T1", tabs)
+
+
+def test_an_ungrouped_record_in_its_owners_group_becomes_grouped_not_taken() -> None:
+    tabs = _tabs({"T1": "a", "U": "u"}, {"T1": 7})
+    result = _reconcile({"T1": _rec(grouped=False)}, tabs)
+    assert result.taken == () and result.records["T1"].grouped
+
+
+def test_inheritance_only_happens_when_not_one_record_matches_a_page_chrome_has() -> None:
+    # meiva:note
+    # a user who closed one agent tab and restored it before the next reconciliation is
+    # not a Chrome restart: the vanished record is dropped, not handed to a look-alike
+    tabs = _tabs({"KEPT": "https://k/", "N1": "https://a/", "U": "u"}, {"KEPT": 7, "N1": 7})
+    records = {"KEPT": _rec(url="https://k/"), "OLD": _rec(url="https://a/")}
+    result = _reconcile(records, tabs)
+    assert result.inherited == () and set(result.records) == {"KEPT"}
+    assert result.vanished == ("OLD",) and result.unrecorded == 1
+
+
+def test_a_page_in_any_group_is_not_a_user_tab_in_no_group() -> None:
+    tabs = _tabs({"T1": "a", "U": "u"})
+    assert not is_taken(_rec(grouped=False), "T1", tabs)
+    assert not is_taken(_rec(grouped=False), "GONE", tabs)
     tabs = _tabs({"T1": "a", "T2": "b", "T3": "c"}, {"T1": 7})
     records = {"T1": _rec(), "T2": _rec(grouped=False), "T3": _rec(owner=8), "T9": _rec()}
     assert [p.target_id for p in agent_pages(records, tabs, 7)] == ["T1", "T2"]
@@ -280,7 +322,11 @@ def test_target_of_url_needs_exactly_one_match_among_the_agents_own_recorded_pag
 
 def test_a_ledger_round_trips_through_the_file_format() -> None:
     file = LedgerFile(
-        {"T2": _rec(8, 12.5, grouped=False, url="https://x/"), "T1": _rec(7, 1.7e9, url="u")},
+        {
+            "T2": _rec(8, 12.5, grouped=False, url="https://x/"),
+            "T1": _rec(7, 1.7e9, url="u"),
+            "T3": PageRecord(9, 5.0, grouped=True, url="v", adopted=True),
+        },
         migrated=True,
     )
     assert parse_records(dump_records(file)) == file
@@ -302,6 +348,7 @@ def test_a_ledger_round_trips_through_the_file_format() -> None:
         '{"version": 1, "migrated": true, "pages": []}',
         '{"version": 1, "migrated": true, "pages": {"T1": []}}',
         '{"version": 1, "migrated": true, "pages": {"T1": {"owner": 7, "expires_at": 1}}}',
+        '{"version": 1, "migrated": true, "pages": {"T1": {"owner": 7, "expires_at": 1, "grouped": true, "url": ""}}}',
         '{"version": 1, "migrated": true, "pages": {"T1": {"owner": 7.5, "expires_at": 1, "grouped": true, "url": ""}}}',
         '{"version": 1, "migrated": true, "pages": {"T1": {"owner": 7, "expires_at": NaN, "grouped": true, "url": ""}}}',
         '{"version": 1, "migrated": true, "pages": {"T1": {"owner": 7, "expires_at": 1, "grouped": 1, "url": ""}}}',

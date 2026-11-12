@@ -536,7 +536,10 @@ async def test_an_unreadable_chrome_closes_nothing_and_keeps_the_records(
     assert rig.browser.closed == [] and len(rig.store.records) == 1
     assert any("could not read Chrome's tabs" in m for m in _messages(loguru_records, "WARNING"))
     rig.browser.read_error = None
-    assert await _sweep(d) == 1
+    # meiva:note
+    # the pass that could not read Chrome broke the run
+    assert d.pages.due_seen == set()
+    assert await sweep_twice(d) == 1
 
 
 async def test_a_close_chrome_refuses_keeps_the_record_and_is_retried() -> None:
@@ -631,3 +634,122 @@ async def test_an_entry_with_a_bad_field_rejects_the_whole_file(tmp_path: Path) 
         path.write_text(head + entry + "}}", encoding="utf-8")
         loaded = FileRecordStore(path).load()
         assert loaded is not None and loaded.records == {} and loaded.migrated
+
+
+# meiva:note
+# ── Review hardening ────────────────────────────────────────────────────────
+
+
+# meiva:note
+# An upstream whose `new_page` is raced by a tab the user opens at the same moment.
+class _RacyUpstream(FakeUpstream):
+    async def call_tool(self, name: str, args: dict[str, Any]) -> Any:
+        result = await super().call_tool(name, args)
+        if name == "new_page" and self.browser is not None:
+            self.browser.add_tab("https://user-opened.example/")
+        return result
+
+
+async def test_a_new_page_raced_by_another_new_tab_gets_no_record_grouped_or_isolated() -> None:
+    rig = Rig()
+    up = _RacyUpstream()
+    rig.browser.rebind(up)
+    d = new_daemon(
+        up,
+        tab_groups=rig.browser,
+        default_ttl_seconds=TTL,
+        store=rig.store,
+        clock=rig.wall.clock(),
+    )
+    await _open(d, 7, "https://a.example/")
+    await _open(d, 7, "https://iso.example/", isolatedContext="reg-7")
+    assert rig.store.records == {} and d.pages.records == {}
+    # meiva:note
+    # the pages were created and selected
+    assert d.pages.get_agent_page(7) == up.selected
+
+
+async def test_the_migration_is_decided_at_start_so_an_early_write_ends_it() -> None:
+    # meiva:note
+    # no ledger file when the first daemon starts
+    rig = Rig(store=MemoryStore())
+    stray = rig.browser.add_tab("https://stray.example/", title="Meiva #9")
+    d1, _ = rig.start()
+    # meiva:note
+    # writes the ledger before any reconciliation
+    await _open(d1, 7, "https://a.example/")
+    assert rig.store.file is not None and rig.store.file.migrated
+
+    # meiva:note
+    # the first daemon died before its first sweep
+    d2, _ = rig.start()
+    assert await _sweep(d2) == 0
+    assert stray not in rig.store.records and len(rig.store.records) == 1
+
+
+async def test_a_migration_that_adopted_nothing_still_marks_the_ledger() -> None:
+    rig = Rig(store=MemoryStore())
+    d, _ = rig.start()
+    await _sweep(d)
+    assert rig.store.file is not None and rig.store.file.migrated
+    late = rig.browser.add_tab("https://late.example/", title="Meiva #9")
+    d2, _ = rig.start()
+    await _sweep(d2)
+    assert late not in rig.store.records
+
+
+async def test_a_migrated_record_is_left_to_the_sweep_not_to_a_release() -> None:
+    rig = Rig(store=MemoryStore())
+    stray = rig.browser.add_tab("https://stray.example/", title="Meiva #9")
+    d, _ = rig.start()
+    await _sweep(d)
+    assert rig.store.records[stray].adopted
+
+    assert await page_lifecycle.release_agent_page(d, 9) is None
+    assert stray in rig.browser.targets
+    rig.wall.advance(TTL + 1)
+    assert await sweep_twice(d) == 1
+    assert stray not in rig.browser.targets
+
+
+async def test_an_ungrouped_page_the_user_filed_into_their_own_group_is_never_closed() -> None:
+    rig = Rig()
+    d, _ = rig.start()
+    await _open(d, 7, "https://discord.com/app", isolatedContext="reg-7")
+    (target,) = rig.store.records
+    rig.browser.titles[target] = "Work"
+    rig.wall.advance(10 * TTL)
+
+    for _ in range(3):
+        assert await _sweep(d) == 0
+    await page_lifecycle.release_agent_page(d, 7)
+    assert target in rig.browser.targets and rig.store.records == {}
+
+
+async def test_an_unreadable_recheck_ends_the_whole_pass_after_one_failed_read() -> None:
+    rig = Rig()
+    d, _ = rig.start()
+    await _open(d, 7, "https://a.example/")
+    await _open(d, 7, "https://b.example/")
+    rig.wall.advance(TTL + 1)
+    # meiva:note
+    # marks both due (read 1)
+    assert await _sweep(d) == 0
+    reads_before = rig.browser.state_reads
+
+    def wedge_on_recheck(read: int) -> None:
+        # meiva:note
+        # the first page's re-check, right after the reconciliation
+        if read == reads_before + 2:
+            rig.browser.read_error = TimeoutError("extension wedged")
+
+    rig.browser.on_state_read = wedge_on_recheck
+    assert await _sweep(d) == 0
+    # meiva:note
+    # not one timeout per page
+    assert rig.browser.state_reads == reads_before + 2
+    assert rig.browser.closed == [] and d.pages.due_seen == set()
+
+    rig.browser.read_error = None
+    rig.browser.on_state_read = None
+    assert await sweep_twice(d) == 2

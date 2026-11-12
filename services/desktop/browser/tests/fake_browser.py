@@ -184,7 +184,8 @@ class FakeBrowser:
             for target_id, title in self.titles.items()
             if target_id in self.targets and (agent_id := agent_id_of_title(title)) is not None
         }
-        return TabState(pages=dict(self.targets), agent_groups=agent_groups)
+        other = frozenset(t for t in self.titles if t in self.targets and t not in agent_groups)
+        return TabState(pages=dict(self.targets), agent_groups=agent_groups, other_groups=other)
 
     async def close_target(self, agent_id: int, target_id: str, *, grouped: bool) -> bool:
         if self.on_before_close is not None:

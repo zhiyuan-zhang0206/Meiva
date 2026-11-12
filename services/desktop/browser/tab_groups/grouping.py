@@ -642,11 +642,18 @@ class AgentTabGroups:
         raw = await self._worker.evaluate("meivaGroupedTargets()", timeout_s=self._group_timeout_s)
         grouped = _GROUPED_TABS.validate_python(raw)
         agent_groups: dict[str, int] = {}
+        other_groups: set[str] = set()
         for tab in grouped:
+            if tab["targetId"] not in pages:
+                continue
             agent_id = agent_id_of_title(tab["title"])
-            if agent_id is not None and tab["targetId"] in pages:
+            if agent_id is None:
+                other_groups.add(tab["targetId"])
+            else:
                 agent_groups[tab["targetId"]] = agent_id
-        return TabState(pages=pages, agent_groups=agent_groups)
+        return TabState(
+            pages=pages, agent_groups=agent_groups, other_groups=frozenset(other_groups)
+        )
 
     # meiva:note
     # Close one page target by its CDP target id (`/json/close/<id>`) and report

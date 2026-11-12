@@ -84,9 +84,12 @@ the operating choices below do not redefine either component.
   sweeps run every 10 minutes and close a page only when two consecutive sweeps found it
   due, re-check it on a fresh read right before the close, and count the close only when
   the target is gone. A page in an agent group with **no** record is neither adopted
-  nor closed; the one exceptions are a one-time migration of the pages in agent groups
-  when the ledger file does not exist yet (first run), and the inheritance of a record
-  by the single restored page with the same owner and URL after a Chrome restart. Read-only
+  nor closed; the exceptions are a one-time migration of the pages in agent groups when the
+  daemon starts with no ledger file (first run; deleting the file asks for it again;
+  migrated pages are closed only by the sweep, never by an agent's release), and the
+  inheritance of a record by the single restored page with the same owner and URL after
+  a Chrome restart (only when no recorded page survived). If Chrome's tabs cannot be
+  re-read before a close, the whole sweep ends. Read-only
   checks in the `browser-mcp` log: `page ledger migration adopted page ...` (once, first
   run), `page ledger passed the record of gone page ...` (after a Chrome restart), `N
   page(s) sit in an agent tab group with no ledger record` (the leak size; they are left

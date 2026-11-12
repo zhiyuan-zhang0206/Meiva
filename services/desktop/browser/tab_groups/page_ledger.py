@@ -19,20 +19,32 @@
 # A page in an agent group with no record is NOT adopted as a rule: the tab-group
 # worker files tabs by URL when it restores a layout, so a user's tab can sit in an
 # agent group, and closing it on that evidence would close the user's tab. Two
-# situations with evidence are handled: (a) after a Chrome restart a record whose
-# target is gone passes to the one page in the same owner's group with the same URL
-# (the restored tab), when both are unique and no other page of Chrome has that
-# URL; (b) the first reconciliation of a
-# ledger that does not exist yet (the first run of this mechanism) adopts the pages
-# that are in agent groups at that moment, once, with a fresh default TTL.
+# situations with evidence are handled: (a) when Chrome restarted -- not one record
+# of the whole ledger matches a page Chrome has -- a record whose target is gone passes
+# to the one page in the same owner's group with the same URL (the restored tab), when
+# both are unique and no other page of Chrome has that URL; (b) the first
+# reconciliation of a process that started with no ledger file adopts the pages that
+# are in agent groups at that moment, once, with a fresh default TTL. An adopted
+# record is the weakest evidence the ledger holds: it is closed only by the sweep at
+# its deadline, never by an agent's release. Whoever deletes the ledger file asks for
+# the migration again.
+#
+# A page the user took is never closed: a grouped record whose page left its owner's
+# group, and an ungrouped record whose page sits in any group that is not its
+# owner's (the user's own ``Work`` group, another agent's), lose their record.
 #
 # Deadlines are wall-clock epoch seconds. A monotonic clock does not survive the
 # process, and this ledger exists to outlive it. The price is that a wall-clock
 # step is visible: a step backwards can only keep a page longer, never close it
 # early, and ``reconcile`` caps how far ahead a deadline may sit so a large step
 # back cannot keep one for longer than one grant; a step forwards closes pages
-# early by the size of the step, which the shell softens by closing only a record
-# that two consecutive sweeps found due.
+# early by the size of the step. The shell closes a page only when two consecutive
+# sweeps found it due (a sweep that could not read Chrome breaks the run), which
+# forgives a step that is corrected within one sweep interval and nothing longer.
+#
+# The file format carries the fields of this version only: it has not shipped, so
+# ``LEDGER_VERSION`` stays 1 and a file of any other shape is rejected whole (read as
+# empty, nothing migrated).
 
 from __future__ import annotations
 
@@ -52,23 +64,27 @@ LEDGER_VERSION = 1
 #
 # ``pages``: every open page target with its URL. ``agent_groups``: the agent
 # each page target belongs to by its tab group's title (``Meiva #<id>``); a
-# target missing from it is in no agent group.
+# target missing from it is in no agent group. ``other_groups``: page targets in
+# a tab group whose title is not an agent's (the user's own groups).
 @dataclass(frozen=True)
 class TabState:
     pages: Mapping[str, str]
     agent_groups: Mapping[str, int]
+    other_groups: frozenset[str] = frozenset()
 
 
 # meiva:note
 # A stack-created page: its owner, deadline (epoch seconds), whether Chrome has
 # shown it in the owner's group (``grouped``) and the URL last seen (how a page
-# is recognised after a Chrome restart).
+# is recognised after a Chrome restart). ``adopted``: taken in by the one-time
+# migration, not created by the stack that holds the record.
 @dataclass(frozen=True)
 class PageRecord:
     owner: int
     expires_at: float
     grouped: bool
     url: str = ""
+    adopted: bool = False
 
 
 # meiva:note
@@ -112,15 +128,33 @@ class Reconciled:
     migrated: bool
 
 
-def in_owner_group(record: PageRecord, target_id: str, tabs: TabState) -> bool:
+def _in_owner_group(record: PageRecord, target_id: str, tabs: TabState) -> bool:
     return tabs.agent_groups.get(target_id) == record.owner
 
 
 # meiva:note
-# new target -> gone target, for every (owner, URL) with exactly one of each.
+# Whether the user has taken the page: a grouped record whose page is no longer in
+# its owner's group, or an ungrouped record whose page sits in some other group.
+def is_taken(record: PageRecord, target_id: str, tabs: TabState) -> bool:
+    if target_id not in tabs.pages:
+        return False
+    if record.grouped:
+        return not _in_owner_group(record, target_id, tabs)
+    elsewhere = target_id in tabs.other_groups or target_id in tabs.agent_groups
+    return elsewhere and not _in_owner_group(record, target_id, tabs)
+
+
+# meiva:note
+# new target -> gone target, for every (owner, URL) with exactly one of each, and only
+# when Chrome restarted: not one record matches a page Chrome has.
 def _inheritance(
-    gone: Mapping[str, PageRecord], free: Mapping[str, int], tabs: TabState
+    records: Mapping[str, PageRecord],
+    gone: Mapping[str, PageRecord],
+    free: Mapping[str, int],
+    tabs: TabState,
 ) -> dict[str, str]:
+    if not records or len(gone) != len(records):
+        return {}
     gone_by_key: dict[tuple[int, str], list[str]] = {}
     for target_id, record in gone.items():
         if record.grouped and record.url:
@@ -155,13 +189,12 @@ def _surviving(
     for target_id, record in records.items():
         if target_id not in tabs.pages:
             continue
-        here = in_owner_group(record, target_id, tabs)
-        if record.grouped and not here:
+        if is_taken(record, target_id, tabs):
             taken.append(target_id)
             continue
         kept[target_id] = replace(
             record,
-            grouped=record.grouped or here,
+            grouped=record.grouped or _in_owner_group(record, target_id, tabs),
             expires_at=min(record.expires_at, ceiling),
             url=tabs.pages[target_id],
         )
@@ -188,7 +221,7 @@ def _migrated(
     if not migrate:
         return {}
     return {
-        t: PageRecord(agent_id, now + ttl, grouped=True, url=tabs.pages[t])
+        t: PageRecord(agent_id, now + ttl, grouped=True, url=tabs.pages[t], adopted=True)
         for t, agent_id in leftover.items()
     }
 
@@ -210,7 +243,7 @@ def reconcile(
     ceiling = now + max(default_ttl_seconds, MAX_GRANT_SECONDS)
     gone = {t: r for t, r in records.items() if t not in tabs.pages}
     free = {t: a for t, a in tabs.agent_groups.items() if t in tabs.pages and t not in records}
-    passed = _inheritance(gone, free, tabs)
+    passed = _inheritance(records, gone, free, tabs)
     kept, taken = _surviving(records, tabs, ceiling)
     inherited = _inherited(passed, gone, tabs, ceiling)
     leftover = {t: a for t, a in free.items() if t not in passed}
@@ -235,18 +268,19 @@ def reconcile(
 def may_close(record: PageRecord, target_id: str, tabs: TabState) -> bool:
     if target_id not in tabs.pages or len(tabs.pages) <= 1:
         return False
-    return not record.grouped or in_owner_group(record, target_id, tabs)
+    return not is_taken(record, target_id, tabs)
 
 
 # meiva:note
-# Every page ``agent_id`` owns that Chrome still has.
+# Every page ``agent_id`` created that Chrome still has (a migrated, ``adopted``
+# record is left to the sweep).
 def agent_pages(
     records: Mapping[str, PageRecord], tabs: TabState, agent_id: int
 ) -> list[ExpiredPage]:
     return [
         ExpiredPage(t, agent_id, r.url, r.grouped)
         for t, r in records.items()
-        if r.owner == agent_id and t in tabs.pages
+        if r.owner == agent_id and not r.adopted and t in tabs.pages
     ]
 
 

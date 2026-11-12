@@ -27,6 +27,7 @@ def dump_records(file: LedgerFile) -> str:
                 "expires_at": record.expires_at,
                 "grouped": record.grouped,
                 "url": record.url,
+                "adopted": record.adopted,
             }
             for target_id, record in sorted(file.records.items())
         },
@@ -47,9 +48,10 @@ def _parse_record(target_id: str, entry: object) -> PageRecord:
         or not math.isfinite(expires_at)
     ):
         raise ValueError(f"malformed expires_at for {target_id!r}")
-    if not isinstance(grouped, bool) or not isinstance(url, str):
-        raise TypeError(f"malformed grouped/url for {target_id!r}")
-    return PageRecord(owner, float(expires_at), grouped=grouped, url=url)
+    adopted = entry.get("adopted")
+    if not isinstance(grouped, bool) or not isinstance(url, str) or not isinstance(adopted, bool):
+        raise TypeError(f"malformed grouped/url/adopted for {target_id!r}")
+    return PageRecord(owner, float(expires_at), grouped=grouped, url=url, adopted=adopted)
 
 
 # meiva:note
