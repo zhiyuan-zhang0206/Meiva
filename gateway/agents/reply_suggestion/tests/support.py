@@ -1,6 +1,6 @@
 # meiva:note
 # A reply-suggestion harness over throwaway Postgres and a real loopback HTTP provider.
-# The Jev binding and LangChain Responses adapter own wire parsing; tests supply response facts.
+# The native decision bindings and LangChain Responses adapter own wire parsing; tests supply response facts.
 
 from __future__ import annotations
 
@@ -54,23 +54,22 @@ def with_provider_wire(catalog: ModelCatalog, wire: ProviderWire) -> ModelCatalo
         )
 
     local = replace(binding, build=build)
-    decision_provider = catalog.decision_provider_of("jev-1.13.0")
-    assert decision_provider is not None
-
-    original_build = decision_provider.build
 
     def build_gate(context: DecisionBuildContext) -> DecisionBinding:
-        return original_build(replace(context, transport=LocalTransport(wire.url)))
+        provider = catalog.decision_provider_of(context.model)
+        assert provider is not None
+        return provider.build(replace(context, transport=LocalTransport(wire.url)))
+
+    decisions = dict(catalog.decision_providers)
+    for model in ("jev-1.13.0", "gemini-decision-1"):
+        provider = catalog.decision_provider_of(model)
+        assert provider is not None
+        decisions[provider.prefix] = replace(provider, build=build_gate)
 
     return replace(
         catalog,
         bindings=MappingProxyType({**catalog.bindings, binding.prefix: local}),
-        decision_providers=MappingProxyType(
-            {
-                **catalog.decision_providers,
-                decision_provider.prefix: replace(decision_provider, build=build_gate),
-            }
-        ),
+        decision_providers=MappingProxyType(decisions),
     )
 
 

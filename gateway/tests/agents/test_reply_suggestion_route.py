@@ -23,7 +23,9 @@ from gateway.agents.reply_suggestion.tests.provider_wire import DraftReply, Gate
 from gateway.agents.reply_suggestion.tests.support import Harness
 from gateway.tests.auth.gateway_config import gateway_test_client
 
-_KEYS = "TYPESAFE_API_KEY=ts-test-key\nDEEPSEEK_API_KEY=sk-test-key\n"
+_KEYS = (
+    "TYPESAFE_API_KEY=ts-test-key\nGEMINI_API_KEY=gemini-test-key\nDEEPSEEK_API_KEY=sk-test-key\n"
+)
 
 
 @pytest.fixture
@@ -154,3 +156,15 @@ def test_an_unavailable_memory_indexer_degrades_the_recall_not_the_request(
     assert response.status_code == 200
     assert response.json()["suggestions"]
     assert "Reply suggestion memory recall unavailable" in loguru_records.messages("WARNING")
+
+
+@pytest.mark.parametrize("model", ["gemini-decision-1", "jev-1.13.0"])
+def test_explicit_decision_model_overrides_reach_the_native_adapter(
+    harness: Harness, model: str
+) -> None:
+    response = post(harness, reply_suggestion_gate_model=model)
+    assert response.status_code == 200
+    assert response.json()["suggestions"]
+    receipt = harness.wire.gate_receipts()
+    assert len(receipt) == 1
+    assert receipt[0]["model"] == model
