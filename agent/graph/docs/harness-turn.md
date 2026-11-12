@@ -89,6 +89,7 @@ carries the writer (`ctx.harness_timeline`), and nothing else does:
   of those turns. A closing that shows up late, a result frame that never came and the turns the CLI ran on its own
   (no input of ours in them, nothing to wait for) therefore shift nothing for the turns after them. A turn that ended
   in error is waited for like any other (its failure row closes it) and its spend is not compared with the result's.
+  Two observed consequences, harmless: a turn the CLI ran on its own is not waited for, so the reply visibility correction for such a turn may go out one invocation later; and a turn whose input the stream reported refused or lost but the record proves delivered skips the turn-end wait and the spend comparison.
 - A stop's passive note still rides into the CLI with the next input but writes no timeline entry of its own; the
   record's own interrupt row is the only "interrupted" marker, and the early write of #8911 does not apply.
 - Failure and restart: see [foreground input and cancellation](harness-foreground.md#transcript-sourced-agents).

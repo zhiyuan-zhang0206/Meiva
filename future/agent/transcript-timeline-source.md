@@ -390,7 +390,7 @@ One rule: an input is delivered when the record shows it; the entry that shows i
    no stored position: only the new turn is projected, no duplicate. The first run of the four-turn scenario showed four
    `harness_timeline_turn_end_unseen`: the turns the CLI ran on its own are reported to the next invocation after
    their closings were counted, so pairing by an invocation's own count waited for closings that were already there; the
-   writer now owns the count (section 6 of the code: `wait_for_next_turn_end`) and the rerun has none. The real session
+   turns are now paired with closings by identity (the stream names the inputs that were in a turn, the writer knows the record turn each was delivered in: `wait_for_turn_end(keys)`), not by a count, and the rerun has none. The real session
    also showed an origin the first recordings did not: `{"kind": "human"}` on user rows and on `queued_command` steers
    (a human input, now read as one), and `peer` (reported, not shown).
    **Not run**: the full cluster (`meiva init` / `meiva start`), a fork made by the gateway rather than by copying
