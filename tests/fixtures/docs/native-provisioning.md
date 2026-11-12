@@ -52,3 +52,18 @@ Sync and async connection fixtures share these guards. Async pools use
 check_connection and autocommit, and inbound listeners own a dedicated
 reconnecting subscription that closes on teardown. Tests needing a particular
 agent channel construct that listener explicitly.
+
+Daemon cleanup checks distinguish invocation-owned sessions from other tagged
+clients in the same test database. A unique gate identifies the tested handle;
+a separate baseline-relative global guard rejects newly surviving sessions even
+outside that gate. Baseline PID/backend-start anchors remain in diagnostics so
+an earlier client's lifetime is not attributed to the daemon being stopped.
+Pool.closed alone is insufficient while a synchronous worker holds a borrow.
+
+Daemon probes report server-side owned state and async task status. When the
+existing daemon seam does not expose its pool or Python workers, diagnostics mark
+those objects unavailable; they do not infer borrow release from pool.closed.
+
+The activity probe does not retrieve SQL statement text. Every query field is a
+fixed unknown/omitted marker, including incomplete or unrecognized statements;
+server state and wait metadata provide diagnostics without a partial SQL lexer.
