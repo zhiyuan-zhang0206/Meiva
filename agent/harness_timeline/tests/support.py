@@ -5,6 +5,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 from collections.abc import Callable, Mapping, Sequence
 from itertools import count
@@ -13,13 +14,23 @@ from uuid import uuid4
 from psycopg_pool import AsyncConnectionPool
 
 from agent.harness_timeline.plan import ReplyPolicy
-from agent.harness_timeline.writer import Committed, HarnessTimelineWriter
+from agent.harness_timeline.writer import (
+    MAX_TRANSACTION_ENTRIES,
+    RETIRE_WAIT_SECONDS,
+    Committed,
+    HarnessTimelineWriter,
+)
 from base.agents.history.timeline_item import TimelineItem
 from base.clock import Clock
 from base.clock.tests.fakes import system_clock
 from base.lm.harness.session.transcript.drafts import InboundPart, SentInput
 from base.lm.harness.session.transcript.entries import AnyEntry, HumanInput
-from base.lm.harness.session.transcript.ports import EntryBatch, RecordReader, StoredRow
+from base.lm.harness.session.transcript.ports import (
+    EntryBatch,
+    PositionLostError,
+    RecordReader,
+    StoredRow,
+)
 from base.native_process.runtime_incarnation import RuntimeIncarnation
 
 BASIC = "3c3d2de5-c479-52b7-91a6-fce4e4d26db9"
@@ -40,11 +51,19 @@ class ScriptedReader:
         self.listed = list(records if listed is None else listed)
         self.fail_next = False
         self.fail_parse_stored = False
+        self.lose_position = False
+        self.reads: list[str] = []
+        self.floors: list[int] = []
+        self.exhaustive_listings = 0
+        self.block_listing: asyncio.Event | None = None
 
     def appear(self, record: str) -> None:
         self.listed.append(record)
 
-    async def records(self) -> tuple[str, ...]:
+    async def records(self, *, exhaustive: bool = False) -> tuple[str, ...]:
+        self.exhaustive_listings += exhaustive
+        if self.block_listing is not None:
+            await self.block_listing.wait()
         return tuple(self.listed)
 
     def parse_stored(self, rows: Sequence[StoredRow]) -> tuple[AnyEntry, ...]:
@@ -56,7 +75,10 @@ class ScriptedReader:
     def wire_id(self, key: str) -> str:
         return key
 
-    async def position_before(self, record: str, wire_ids: Sequence[str]) -> str | None:
+    async def position_before(
+        self, record: str, wire_ids: Sequence[str], *, after_ordinal: int = -1
+    ) -> str | None:
+        self.floors.append(after_ordinal)
         end = self.visible[record]
         for index, entry in enumerate(self.records_data[record][:end]):
             if isinstance(entry, HumanInput) and entry.wire_id in wire_ids:
@@ -64,6 +86,10 @@ class ScriptedReader:
         return str(end) if end else None
 
     async def read_after(self, record: str, position: str | None) -> EntryBatch | None:
+        self.reads.append(record)
+        if self.lose_position and position is not None:
+            self.lose_position = False
+            raise PositionLostError("the file is not the one the position was read in")
         if self.fail_next:
             self.fail_next = False
             raise OSError("the transcript could not be read")
@@ -141,6 +167,8 @@ def make_writer(
     session: str | Callable[[], str | None] = "session-1",
     reading: bool = True,
     clock: Clock | None = None,
+    max_transaction_entries: int = MAX_TRANSACTION_ENTRIES,
+    retire_wait_seconds: float = RETIRE_WAIT_SECONDS,
 ) -> HarnessTimelineWriter:
     async def after(commit: Committed) -> None:
         committed.append(commit)
@@ -159,6 +187,8 @@ def make_writer(
         after_commit=after,
         cli_version=lambda: "2.1.322",
         clock=clock or system_clock(),
+        max_transaction_entries=max_transaction_entries,
+        retire_wait_seconds=retire_wait_seconds,
     )
     if reading:
         writer.start_reading()

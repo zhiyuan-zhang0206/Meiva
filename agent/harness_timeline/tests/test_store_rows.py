@@ -7,14 +7,19 @@ from pathlib import Path
 from psycopg import AsyncConnection
 from psycopg_pool import AsyncConnectionPool
 
-from base.agents.history.harness_messages import (
+from agent.harness_timeline.store import (
+    PlannedTimelineItem,
     StoredPosition,
+    aappend_planned_timeline_items,
     aappend_transcript_rows,
+    aload_transcript_positions,
     aload_transcript_rows,
     aset_transcript_position,
+    aset_transcript_positions,
 )
+from base.agents.history.timeline_item import TimelineItem
 from base.lm.harness.claude.transcript.reader import ClaudeRecordReader
-from base.lm.harness.claude.transcript.tests.support import FIXTURES, rows
+from base.lm.harness.claude.transcript.tests.support import FIXTURES, now_ns, rows
 
 SESSION = "11111111-2222-3333-4444-555555555555"
 
@@ -169,7 +174,7 @@ async def test_a_long_session_costs_linear_storage_and_constant_work_per_batch(
     target.write_text("")
     lines = _long_session(turns=120)
     agent_id = await _agent(aops_pool)
-    reader = ClaudeRecordReader(claude_home=tmp_path, session_id=session)
+    reader = ClaudeRecordReader(now_ns=now_ns, claude_home=tmp_path, session_id=session)
     position: str | None = None
     series = _Series()
     batch_size = 150
@@ -195,3 +200,72 @@ async def test_a_long_session_costs_linear_storage_and_constant_work_per_batch(
         series.written.append(count)
         series.stored_bytes.append(sum(len(json.dumps(r.row)) for r in batch.rows))
     await _assert_linear(aops_pool, agent_id, series, file_lines=len(lines))
+
+
+async def test_positions_are_stored_per_record_and_upserted(aops_pool: AsyncConnectionPool) -> None:
+    agent_id = await _agent(aops_pool)
+    async with aops_pool.connection() as conn:
+        empty = await aload_transcript_positions(conn, agent_id, "s1")
+        await aset_transcript_position(
+            conn, agent_id, "s1", StoredPosition("main", "p1", 4), "2.1.322"
+        )
+        await aset_transcript_positions(
+            conn,
+            agent_id,
+            "s1",
+            [StoredPosition("agent-a", "q1", -1), StoredPosition("main", "p2", 9)],
+            None,
+        )
+        stored = await aload_transcript_positions(conn, agent_id, "s1")
+        other = await aload_transcript_positions(conn, agent_id, "other-session")
+        cursor = await conn.execute(
+            "SELECT cli_version FROM agent_harness_transcript_positions "
+            "WHERE agent_id = %s AND record = 'main'",
+            (agent_id,),
+        )
+        version = await cursor.fetchone()
+    assert empty == {} and other == {}
+    assert stored == {
+        "main": StoredPosition("main", "p2", 9),
+        "agent-a": StoredPosition("agent-a", "q1", -1),
+    }
+    assert version == ("2.1.322",), (
+        "a later position without a version keeps the one that was stored"
+    )
+
+
+async def test_a_batch_is_appended_in_one_go_and_calls_resolve_from_the_store_the_cache_and_the_batch(
+    aops_pool: AsyncConnectionPool,
+) -> None:
+    agent_id = await _agent(aops_pool)
+    call = TimelineItem(item_id="x", kind="agent_code", payload="Task", tool_use_id="call-1")
+    note = TimelineItem(item_id="x", kind="subagent_text", payload="hi")
+    async with aops_pool.connection() as conn:
+        first, learnt = await aappend_planned_timeline_items(
+            conn,
+            agent_id,
+            "claude_code",
+            [PlannedTimelineItem("k1", call, None)],
+            calls={},
+            projection_version=1,
+        )
+        assert [i.item_id for i in first] == ["h0.0"] and learnt == {"call-1": "h0.0"}
+        written, learnt = await aappend_planned_timeline_items(
+            conn,
+            agent_id,
+            "claude_code",
+            [
+                PlannedTimelineItem("k1", call, None),
+                PlannedTimelineItem("k2", note, "call-1"),
+                PlannedTimelineItem("k3", note, "call-gone"),
+                PlannedTimelineItem("k4", note, "call-cached"),
+            ],
+            calls={"call-cached": "h99.0"},
+            projection_version=1,
+        )
+    assert [(i.item_id, i.parent_item_id) for i in written] == [
+        ("h1.0", "h0.0"),
+        ("h2.0", None),
+        ("h3.0", "h99.0"),
+    ], "a key the agent has is skipped and the sequence stays contiguous"
+    assert learnt == {"call-1": "h0.0", "call-gone": None}, "found and absent calls are learnt"

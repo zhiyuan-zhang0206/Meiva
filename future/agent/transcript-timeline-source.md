@@ -83,8 +83,8 @@ new writer holds its reads until the first invocation has registered the rows an
 invocation: output after a parent turn, a turn the CLI starts by itself and a sub-agent's late rows are written
 with no invocation present. It is one asyncio task: wait for a wake-up, read every record after its position,
 feed the projector, write, publish. `plan.py` (strict, pure) turns a `Projection` plus the writer's state into a
-`WritePlan`; `writer.py` (shell) owns the loop and the transaction; the SQL stays in
-`base/agents/history/harness_messages.py`.
+`WritePlan`; `writer.py` (shell) owns the loop and the transaction; the SQL is in
+`agent/harness_timeline/store.py` (and the call lookup in `base/agents/history/harness_messages.py`).
 
 **One transaction per read**, on the ops pool:
 1. `lock_inbound_owner(conn, agent_id, incarnation=...)` (`agent/ownership/inbound.py`): the fence

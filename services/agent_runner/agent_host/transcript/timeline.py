@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import asyncio
 from collections.abc import Callable, Mapping
-from contextlib import suppress
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Protocol
@@ -93,7 +92,6 @@ class TranscriptTimeline:
     ) -> None:
         self._agent_id = agent_id
         self._session_id: Callable[[], str | None] = lambda: None
-        self._pool = deps.pool
         self._publisher = deps.publisher_factory(agent_id)
         self.effects = TimelineEffects(agent_id, self._publisher)
         reader = reader_for(self._current_session)
@@ -149,7 +147,7 @@ class TranscriptTimeline:
             async with asyncio.TaskGroup() as group:
                 await self._publisher.start(group)
                 try:
-                    await self.effects.recover(self._pool)
+                    await self.effects.recover(self.writer.recent_replies)
                     await self.writer.run()
                 except Exception:
                     logger.opt(exception=True).error(
@@ -169,7 +167,7 @@ class TranscriptTimeline:
     # not read stays in the CLI's file, and the next writer starts from its stored position.
     async def read_final(self) -> None:
         try:
-            while await self.writer.read_now():
+            while await self.writer.read_now(exhaustive=True):
                 pass
         except Exception:
             logger.opt(exception=True).warning(
@@ -182,8 +180,15 @@ class TranscriptTimeline:
         self._closed = True
         await self.read_final()
         self.writer.stop()
-        with suppress(TimeoutError):
+        try:
             await asyncio.wait_for(self._stopped.wait(), _CLOSE_JOIN_SECONDS)
+        except TimeoutError:
+            logger.warning(
+                "the transcript timeline writer did not stop in time; it is retired and reads and writes nothing more",
+                event="harness_timeline_writer_retired",
+                agent_id=self._agent_id,
+            )
+            await self.writer.retire()
 
 
 # meiva:note
@@ -222,5 +227,6 @@ def transcript_timeline_for(
             environ=harness_environ,
             workspace=workspace_dir(agent_id, home=home),
             session_id=session_id,
+            now_ns=lambda: round(deps.clock.now().timestamp() * 1_000_000_000),
         ),
     )

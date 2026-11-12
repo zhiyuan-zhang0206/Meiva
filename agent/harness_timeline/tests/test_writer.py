@@ -20,7 +20,7 @@ from agent.harness_timeline.tests.support import (
 )
 from agent.harness_timeline.writer import Committed, TurnEndWait
 from base.lm.harness.claude.transcript.reader import ClaudeRecordReader
-from base.lm.harness.claude.transcript.tests.support import FIXTURES, entries_of, rows
+from base.lm.harness.claude.transcript.tests.support import FIXTURES, entries_of, now_ns, rows
 from base.native_process.runtime_incarnation import RuntimeIncarnation
 
 
@@ -177,7 +177,7 @@ async def test_the_writer_reads_a_real_transcript_file_by_position_end_to_end(
     target.write_text("".join(lines[:9]))
     agent_id, incarnation = await make_agent(aops_pool)
     row = await make_inbound_row(aops_pool, agent_id)
-    reader = ClaudeRecordReader(claude_home=tmp_path, session_id=session)
+    reader = ClaudeRecordReader(now_ns=now_ns, claude_home=tmp_path, session_id=session)
     writer = make_writer(aops_pool, agent_id, incarnation, reader, [])
     send_input(writer, BASIC, "k1", row)
     _ = await writer.read_now()
@@ -187,7 +187,7 @@ async def test_the_writer_reads_a_real_transcript_file_by_position_end_to_end(
         aops_pool,
         agent_id,
         incarnation,
-        ClaudeRecordReader(claude_home=tmp_path, session_id=session),
+        ClaudeRecordReader(now_ns=now_ns, claude_home=tmp_path, session_id=session),
         [],
     )
     send_input(restarted, BASIC, "k1", row)

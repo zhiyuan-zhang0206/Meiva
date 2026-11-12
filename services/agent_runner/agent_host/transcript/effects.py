@@ -3,14 +3,11 @@ from __future__ import annotations
 from collections import deque
 from collections.abc import Awaitable, Callable
 
-from psycopg_pool import AsyncConnectionPool
-
 from agent.graph.claim.harness_activity import resolve_pricing_model
 from agent.graph.claim.harness_inbox import Emits, publish_items
 from agent.graph.hooks.user_delivery import capture_items
 from agent.harness_timeline.writer import Committed
 from base.agents.context import MeivaContext
-from base.agents.history.harness_messages import aload_recent_agent_replies
 from base.agents.history.timeline_item import TimelineItem
 from base.lm.harness.session.transcript.drafts import MessageUsage
 from base.lm.harness.session.transcript.entries import MAIN_RECORD
@@ -77,13 +74,15 @@ class TimelineEffects:
     def bind(self, ctx: MeivaContext) -> None:
         self._ctx = ctx
 
-    async def recover(self, pool: AsyncConnectionPool) -> None:
-        await self._isolated("recover", lambda: self._recover(pool), agent_id=self._agent_id)
+    async def recover(self, recent_replies: Callable[[int], Awaitable[list[TimelineItem]]]) -> None:
+        await self._isolated(
+            "recover", lambda: self._recover(recent_replies), agent_id=self._agent_id
+        )
 
-    async def _recover(self, pool: AsyncConnectionPool) -> None:
-        async with pool.connection() as conn:
-            replies = await aload_recent_agent_replies(conn, self._agent_id, rows=RECOVER_ROWS)
-        self._owed_replies.extend(replies)
+    async def _recover(
+        self, recent_replies: Callable[[int], Awaitable[list[TimelineItem]]]
+    ) -> None:
+        self._owed_replies.extend(await recent_replies(RECOVER_ROWS))
         await self.settle_owed()
 
     async def after_commit(self, commit: Committed) -> None:

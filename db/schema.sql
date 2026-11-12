@@ -862,12 +862,17 @@ CREATE TABLE agent_harness_messages (
     created_at TIMESTAMPTZ NOT NULL DEFAULT clock_timestamp(),
     source_key TEXT,
     projection_version INTEGER,
+    call_id TEXT,
     UNIQUE (agent_id, seq)
 );
 
 CREATE INDEX idx_agent_harness_messages_agent_seq ON agent_harness_messages (agent_id, seq DESC);
 CREATE UNIQUE INDEX idx_agent_harness_messages_source_key
     ON agent_harness_messages (agent_id, source_key) WHERE source_key IS NOT NULL;
+-- The timeline item of a CLI tool call is found by the CLI's own id (a sub-agent's output nests under its call).
+-- The id is a column, not an expression over `item`, so in-place revisions of `item` stay heap-only updates.
+CREATE INDEX IF NOT EXISTS idx_agent_harness_messages_call_id
+    ON agent_harness_messages (agent_id, call_id) WHERE call_id IS NOT NULL;
 
 COMMENT ON TABLE agent_harness_messages IS
     'Timeline item store for external harnesses, with in-place revisions for live activity.';
@@ -885,6 +890,8 @@ COMMENT ON COLUMN agent_harness_messages.created_at IS
     'Timestamp when the item was inserted.';
 COMMENT ON COLUMN agent_harness_messages.projection_version IS
     'Version of the projection rules that produced this row; NULL for rows written before it existed.';
+COMMENT ON COLUMN agent_harness_messages.call_id IS
+    'The CLI''s id of the tool call an agent_code item recorded (the item''s tool_use_id); NULL for every other item. Indexed, so a sub-agent''s output finds the item it nests under; never changed by an in-place revision, so those stay heap-only updates.';
 COMMENT ON COLUMN agent_harness_messages.source_key IS
     'Stable key of the transcript entry this row was projected from; NULL for rows the graph writes itself. Unique per agent.';
 

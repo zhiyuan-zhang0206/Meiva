@@ -291,9 +291,13 @@ def transcript_reader_for(
     environ: Mapping[str, str],
     workspace: Path,
     session_id: Callable[[], str | None],
+    now_ns: Callable[[], int],
 ) -> ClaudeRecordReader:
     if harness is not Harness.CLAUDE_CODE:
         raise ValueError(f"no transcript reader for harness {harness.value!r}")
     return ClaudeRecordReader.for_session(
-        environ=session_environ(environ), workspace=workspace, session_id=session_id
+        environ=session_environ(environ),
+        workspace=workspace,
+        session_id=session_id,
+        now_ns=now_ns,
     )

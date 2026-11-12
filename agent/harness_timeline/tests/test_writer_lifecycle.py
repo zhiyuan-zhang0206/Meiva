@@ -11,6 +11,11 @@ import psycopg
 from psycopg_pool import AsyncConnectionPool
 
 from agent.harness_timeline.plan import ReplyPolicy
+from agent.harness_timeline.store import (
+    StoredPosition,
+    aappend_transcript_rows,
+    aset_transcript_position,
+)
 from agent.harness_timeline.tests.support import (
     BASIC,
     POLICY,
@@ -25,15 +30,10 @@ from agent.harness_timeline.tests.support import (
 from agent.harness_timeline.writer import Committed, HarnessTimelineWriter
 from agent.ownership.hosted import admit_hosted_runtime
 from agent.ownership.tests.ownership_support import agent_row
-from base.agents.history.harness_messages import (
-    StoredPosition,
-    aappend_transcript_rows,
-    aset_transcript_position,
-)
 from base.clock.tests.fakes import system_clock
 from base.db import Database
 from base.lm.harness.claude.transcript.reader import ClaudeRecordReader
-from base.lm.harness.claude.transcript.tests.support import FIXTURES, entries_of, rows
+from base.lm.harness.claude.transcript.tests.support import FIXTURES, entries_of, now_ns, rows
 from base.lm.harness.session.transcript.entries import AnyEntry
 from base.lm.harness.session.transcript.ports import StoredRow
 from base.native_process.runtime_incarnation import RuntimeIncarnation
@@ -244,7 +244,7 @@ async def test_a_session_that_starts_with_history_projects_only_from_the_first_i
         aops_pool,
         agent_id,
         incarnation,
-        ClaudeRecordReader(claude_home=tmp_path, session_id=session),
+        ClaudeRecordReader(now_ns=now_ns, claude_home=tmp_path, session_id=session),
         committed,
         session=session,
     )
@@ -298,7 +298,7 @@ async def test_a_fresh_agent_with_no_timeline_reads_the_whole_record(
         aops_pool,
         agent_id,
         incarnation,
-        ClaudeRecordReader(claude_home=tmp_path, session_id=session),
+        ClaudeRecordReader(now_ns=now_ns, claude_home=tmp_path, session_id=session),
         [],
         session=session,
     )

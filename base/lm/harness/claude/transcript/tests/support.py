@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import time
 from collections.abc import Iterable, Mapping, Sequence
 from pathlib import Path
 from typing import cast
@@ -19,6 +20,10 @@ from base.lm.harness.session.transcript.entries import AnyEntry
 from base.lm.harness.session.transcript.projection import Projector
 
 FIXTURES = Path(__file__).parent / "fixtures"
+
+
+def now_ns() -> int:
+    return time.time_ns()
 
 
 def _object(text: str) -> dict[str, object]:

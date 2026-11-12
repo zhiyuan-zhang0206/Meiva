@@ -168,3 +168,19 @@ async def test_an_unmatched_input_is_reported_once_per_session(loguru_records: L
     await effects.after_commit(Committed(plan, ()))
     await effects.after_commit(Committed(plan, ()))
     assert len(loguru_records.events("harness_timeline_unmatched_input")) == 1
+
+
+async def test_replies_committed_before_a_crash_are_offered_to_the_capture_again_at_start() -> None:
+    ctx = runtime(FakeEngine()).context
+    store = _Failing()
+    store.fail = False
+    effects = TimelineEffects(7, Published(), capture=store.capture)
+    effects.bind(ctx)
+
+    async def stored(rows: int) -> list[TimelineItem]:
+        assert rows > 0
+        return [_reply("h4.0"), _reply("h7.0")]
+
+    await effects.recover(stored)
+
+    assert store.captured == ["h4.0", "h7.0"]
