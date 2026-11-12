@@ -5,9 +5,8 @@
 from __future__ import annotations
 
 import asyncio
-import re
 import time
-from dataclasses import dataclass, replace
+from dataclasses import dataclass
 from datetime import datetime
 from uuid import uuid4
 
@@ -38,13 +37,6 @@ class Backend:
         return self.pid, self.backend_start
 
 
-def query_shape(query: str) -> str:
-    query = re.sub(r"(\$[A-Za-z_][A-Za-z_0-9]*\$|\$\$).*?\1", "?", query, flags=re.S)
-    query = re.sub(r"(?:[eE])?'(?:\\.|''|[^'\\])*'", "?", query)
-    query = re.sub(r"/\*.*?\*/|--[^\n]*", "", query, flags=re.S)
-    return re.sub(r"\b\d+(?:\.\d+)?\b", "?", query)[:500]
-
-
 class PoolProbe:
     def __init__(self, observer: psycopg.Connection, gate: ProcessDbGate) -> None:
         self.observer = observer
@@ -62,10 +54,10 @@ class PoolProbe:
         with self.observer.cursor(row_factory=class_row(Backend)) as cursor:
             cursor.execute(
                 "SELECT pid, backend_start, application_name, datname, state, wait_event_type, "
-                "wait_event, query FROM pg_stat_activity "
+                "wait_event, 'unknown (query omitted)' AS query FROM pg_stat_activity "
                 "WHERE application_name LIKE 'meiva:%%'"
             )
-            return [replace(row, query=query_shape(row.query)) for row in cursor.fetchall()]
+            return cursor.fetchall()
 
     def owned(self, rows: list[Backend]) -> list[Backend]:
         return [row for row in rows if row.application_name == self.name]

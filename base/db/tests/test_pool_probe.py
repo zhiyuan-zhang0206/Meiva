@@ -1,9 +1,11 @@
 from __future__ import annotations
 
+from typing import LiteralString
+
 import psycopg
 import pytest
 
-from base.db.tests.pool_probe import PoolProbe, query_shape
+from base.db.tests.pool_probe import PoolProbe
 from base.db.tests.pool_probe import pool_probe as pool_probe
 
 
@@ -58,15 +60,35 @@ async def test_a_closed_pool_with_a_held_owned_borrow_still_fails_until_returned
 
 
 @pytest.mark.parametrize(
-    "query",
+    ("query", "invalid"),
     [
-        "SELECT 'synthetic-private-value'",
-        "SELECT $$synthetic-private-value$$",
-        "SELECT $tag$synthetic-private-value$tag$",
-        r"SELECT E'synthetic-private-value\'still-private'",
+        ("SELECT 'synthetic-private-value'", False),
+        ("SELECT $$synthetic-private-value$$", False),
+        ("SELECT $tag$synthetic-private-value$tag$", False),
+        (r"SELECT E'synthetic-private-value\'still-private'", False),
+        ("SELECT $π$synthetic-private-value$π$", False),
+        ("SELECT 1 /* outer /* inner */ synthetic-private-value */", False),
+        ("SELECT 'synthetic-private-value", True),
     ],
 )
-def test_diagnostics_keep_sql_shape_without_string_values(query: str) -> None:
-    shape = query_shape(query)
-    assert shape.startswith("SELECT")
-    assert "private" not in shape
+async def test_diagnostics_never_read_or_echo_sql_statement_text(
+    pool_probe: PoolProbe, query: LiteralString, invalid: bool
+) -> None:
+    pool = pool_probe.database().pool(min_size=0, max_size=1)
+    try:
+        with pool.connection() as conn:
+            if invalid:
+                with pytest.raises(psycopg.errors.SyntaxError):
+                    conn.execute(query)
+            else:
+                conn.execute(query)
+            rows = pool_probe.rows()
+            assert pool_probe.owned(rows)
+            assert all(row.query == "unknown (query omitted)" for row in rows)
+            with pytest.raises(AssertionError, match="owned pool connections remain") as raised:
+                pool_probe.assert_owned_released()
+            assert "private" not in str(raised.value)
+            conn.rollback()
+    finally:
+        pool.close()
+    await pool_probe.wait_released(10.0)

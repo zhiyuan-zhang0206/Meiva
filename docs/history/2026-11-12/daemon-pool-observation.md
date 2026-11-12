@@ -24,3 +24,10 @@ task diagnostics as the test-only boundary. The daemon does not expose its pool
 object or Python worker ownership through this seam; diagnostics say so explicitly.
 A production pool-factory hook would expand this repair without strengthening the
 backend-release assertion, so it is deferred. No such hook is added here.
+
+Adversarial review found that regex literal/comment stripping leaked values for
+Unicode dollar tags, nested comments and truncated quoted fragments. The observer
+now omits SQL text entirely: its SELECT returns a fixed unknown marker instead of
+reading pg_stat_activity.query. This supersedes the initial query-shape approach;
+PID/backend-start, application/database identity, state/waits and async task status
+remain available without recreating PostgreSQL's lexer.

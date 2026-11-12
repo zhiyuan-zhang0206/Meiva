@@ -60,3 +60,7 @@ Pool.closed alone is insufficient while a synchronous worker holds a borrow.
 Daemon probes report server-side owned state and async task status. When the
 existing daemon seam does not expose its pool or Python workers, diagnostics mark
 those objects unavailable; they do not infer borrow release from pool.closed.
+
+The activity probe does not retrieve SQL statement text. Every query field is a
+fixed unknown/omitted marker, including incomplete or unrecognized statements;
+server state and wait metadata provide diagnostics without a partial SQL lexer.
