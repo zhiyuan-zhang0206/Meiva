@@ -135,6 +135,9 @@ class FakeEngine:
         # The events of a turn the CLI began while nothing was subscribed: the next subscription is primed
         # with them, the way the real pump primes it, and the engine reports it as not yet presented.
         self.own_turn_events: list[BridgeEvent] = []
+        # meiva:note
+        # What a CLI sub-agent did with no turn running, as `take_unattached` hands it over.
+        self.unattached_events: list[BridgeEvent] = []
 
         def ordinary(inputs: Sequence[HarnessInput]) -> Sequence[BridgeEvent]:
             return in_a_turn(
@@ -154,6 +157,10 @@ class FakeEngine:
     @property
     def has_unpresented_turn(self) -> bool:
         return bool(self.own_turn_events)
+
+    def take_unattached(self) -> list[BridgeEvent]:
+        taken, self.unattached_events = self.unattached_events, []
+        return taken
 
     async def subscribe(self) -> FakeSubscription:
         subscription = FakeSubscription(self)

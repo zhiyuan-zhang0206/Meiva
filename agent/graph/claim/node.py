@@ -85,6 +85,7 @@ from ._present import (
     publish_inbound_committed,
 )
 from ._routing import ClaimGoto, resolve_routing, route_target
+from .harness_activity import present_unattached
 from .harness_inbox import claimed_deliverable, peek_head_batch
 from .harness_render import render_messages
 from .turn_end import settle_turn_end
@@ -184,7 +185,8 @@ async def claim_node_impl(
 #
 # A turn the CLI began on its own while the agent was idle enters the same way: the host's wake found
 # nothing in the inbox, but the engine holds a turn nobody has presented, and the run's subscription is
-# primed with it.
+# primed with it. What a CLI sub-agent did with no turn running is only written to the timeline here
+# (`present_unattached`): no run, no hooks, nothing delivered.
 # meiva:link agent/graph/docs/harness-foreground.md
 async def _harness_delivery_entry(
     ctx: MeivaContext, state: _state.AgentState, agent_id: int
@@ -192,6 +194,7 @@ async def _harness_delivery_entry(
     head = await peek_head_batch(ctx, agent_id)
     claimed = await claimed_deliverable(ctx, agent_id, include_deferred=False)
     if not head and not claimed and not ctx.require_harness_bridge().has_unpresented_turn:
+        await present_unattached(ctx, agent_id)
         return None
     view = [msg for item in head for msg in prepare_steered_inbound(ctx, item)]
     if any(is_human_wake_item(item) for item in (*claimed, *head)):

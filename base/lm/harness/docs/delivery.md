@@ -88,8 +88,8 @@ subscription. The graph's `harness_turn` is the one consumer: it settles each in
 `InputRejected` or `InputLost` and stays until nothing is unsettled and no turn runs
 ([foreground input and cancellation](../../../../agent/graph/docs/harness-foreground.md)).
 Besides a turn the CLI began, the pump keeps a CLI sub-agent's activity that belongs to no turn
-(`turn_id == NO_TURN`, [sub-agent text](subagent-text.md)) until a run reads it, and wakes the owner the same
-way; it begins no turn.
+(`turn_id == NO_TURN`, [sub-agent text](subagent-text.md)) until the owner takes it (`take_orphans`,
+`TurnEngine.take_unattached`) or a subscription reads it; it begins no turn.
 
 ## Reconciliation
 

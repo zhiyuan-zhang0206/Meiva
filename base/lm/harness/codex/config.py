@@ -8,6 +8,16 @@ SANDBOX_MODES = ("read-only", "workspace-write", "danger-full-access")
 APPROVAL_POLICIES = ("never", "untrusted", "on-request")
 APPROVAL_DECISIONS = ("accept", "decline")
 
+# meiva:note
+# Two hours without any frame from a child thread. A frame arrives for every message, tool item and
+# status change, so a quiet child is one inside a single model call or tool call; a command a model waits
+# on runs minutes, and the longest quiet stretches of a working child are well inside two hours, while a
+# child whose end frame was lost would otherwise hold a runtime until the 32-runtime cache bound evicts
+# it (and that bound takes held sessions last). The bound errs long because releasing a working child
+# kills it, while holding a dead one costs one idle process.
+# meiva:link base/lm/harness/docs/background-work.md
+CHILD_SILENCE_SECONDS = 7200.0
+
 
 # meiva:note
 # `sandbox` defaults to danger-full-access because the bridge must run commands and

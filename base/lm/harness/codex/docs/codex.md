@@ -149,12 +149,17 @@ outlives the parent's turn, and the turn is not ours to end for it. The adapter 
 what it says; it does not manage it ([sub-agent text](../../docs/subagent-text.md)).
 
 - **Shown.** The child's messages, tool items and failure reach the timeline under the spawn call,
-  with no turn when the parent has none (`NO_TURN`); the pump keeps them until a run reads them and
-  wakes the owner. No turn is invented for the child's own `turn/*` frames.
+  with no turn when the parent has none (`NO_TURN`); the pump keeps them and wakes the owner, and the
+  claim writes them without a run (no hook, nothing delivered). A tool item is shown when it completes.
+  No turn is invented for the child's own `turn/*` frames.
 - **Held.** `subagents.py` follows each child from the spawn call (unless `agentsStates` already
-  reports it finished) until its `turn/completed`, a `thread/status/changed` that is not `active`, an
-  `error` that will not be retried, or a `closeAgent` call of the parent; its `turn/started` or an
-  `active` status reopens it. A working child is `BackgroundKind.AGENT` work, so the idle TTL does not
-  close the app-server it lives in and the session record names it should the process go anyway.
-  A child whose end never arrives holds the session until the cache bound takes it, as a command
-  whose completion never arrives would if the process tree were not checked.
+  reports it finished, or its own end frame came before the call completed) until its `turn/completed`, a
+  `thread/status/changed` that is not `active`, an `error` that will not be retried, or a `closeAgent` call
+  of the parent; its `turn/started` or an `active` status reopens it. A working child is
+  `BackgroundKind.AGENT` work, so the idle TTL does not close the app-server it lives in and the session
+  record names it should the process go anyway. The hold is bounded: a child that sent no frame for
+  `CHILD_SILENCE_SECONDS` (7,200 s) is taken as finished. The constant errs long because releasing a
+  working child kills it, while holding a dead one costs one idle process, and a quiet child is only one
+  inside a single model or tool call. Once the app-server is gone (`_on_transport_closed`) the session
+  reports no background work at all, so a dead process cannot keep a runtime from being evicted; the
+  record keeps what was pending for the lost-work note.

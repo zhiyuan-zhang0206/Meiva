@@ -28,8 +28,11 @@ from base.log import logger
 # Read means read: an event still unread in a subscription that closed is not a presented turn.
 #
 # A sub-agent's activity with no turn (`turn_id == NO_TURN`: Codex's child thread speaking after its
-# parent's turn ended) is kept the same way and wakes the owner, so it reaches the timeline under the call
-# that started the sub-agent. It begins no turn: the run it wakes projects it and ends.
+# parent's turn ended) is kept too, so it reaches the timeline under the call that started the sub-agent.
+# It begins no turn and is not a turn's work: the owner takes it (`take_orphans`) and writes it, and a run
+# that is subscribed reads it live instead. The owner is woken for the first event kept while nobody is
+# subscribed and nothing is waiting to be taken, so a burst is one wake; a subscription that leaves with
+# some of it unread wakes the owner again.
 # meiva:link base/lm/harness/docs/delivery.md
 
 
@@ -90,7 +93,11 @@ class EventPump:
 
     @property
     def has_unpresented_turn(self) -> bool:
-        return bool(self._own) or bool(self._orphans)
+        return bool(self._own)
+
+    def take_orphans(self) -> list[BridgeEvent]:
+        taken, self._orphans = self._orphans, []
+        return taken
 
     def subscribe(self) -> Subscription:
         subscription = Subscription(self)
@@ -113,7 +120,7 @@ class EventPump:
 
     def _keep_own_turn(self, event: BridgeEvent) -> bool:
         if isinstance(event, SubagentText | ToolUse | ToolResult) and event.turn_id == NO_TURN:
-            began = not self._orphans
+            began = not self._orphans and not self._subscriptions
             self._orphans.append(event)
             return began
         if isinstance(event, TurnStarted):
@@ -128,6 +135,8 @@ class EventPump:
 
     def unsubscribe(self, subscription: Subscription) -> None:
         self._subscriptions.discard(subscription)
+        if self._orphans and not self._subscriptions and self._own_turn is not None:
+            self._own_turn()
 
     async def run(self) -> None:
         try:

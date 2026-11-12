@@ -5,11 +5,20 @@ from collections.abc import Awaitable, Callable, Sequence
 from datetime import datetime
 
 from agent.graph.claim.harness_tool_format import format_tool_use
+from agent.graph.hooks.user_delivery import capture_items
 from base.agents.context import MeivaContext
+from base.agents.history.harness_messages import (
+    aget_harness_call_item_id,
+    aget_next_harness_message_seq,
+    aupsert_harness_timeline_item,
+)
 from base.agents.history.timeline_item import TimelineItem
 from base.agents.messages.reply_intent import parse_reply_visibility, resolve_agent_reply
 from base.agents.sdk.telemetry import SdkCall
 from base.clock import Clock
+from base.db.transaction import async_write_transaction
+from base.events.live.projection import TimelineSnapshot
+from base.events.live.publisher import AgentEventPublisher
 from base.lm.catalog import ModelCatalog
 from base.lm.harness import (
     AssistantText,
@@ -274,6 +283,16 @@ class HarnessTurnProjector:
         found = await self._find_call(tool_use_id)
         if found is None:
             self._unfound_calls.add(tool_use_id)
+            # meiva:note
+            # Only the nesting is lost (the call's entry was never written to this agent's timeline, or
+            # the timeline was reset since): the sub-agent's line is still written, as a top-level row, and
+            # the gap is recorded once per call id, never failing a turn for a display detail.
+            # meiva:link base/lm/harness/docs/subagent-text.md
+            logger.warning(
+                "sub-agent activity names a call with no timeline entry; shown without a parent",
+                event="harness_subagent_call_not_found",
+                tool_use_id=tool_use_id,
+            )
         else:
             self._tool_items[tool_use_id] = found
         return found
@@ -475,3 +494,82 @@ def log_turn_usage(ctx: MeivaContext, agent_id: int, model: str | None, turn: Ha
             tok_cached=usage.cache_read_input_tokens,
             cache_write=usage.cache_creation_input_tokens,
         )
+
+
+async def _checkpoint_activity(
+    ctx: MeivaContext,
+    agent_id: int,
+    publisher: AgentEventPublisher,
+    item: TimelineItem,
+    msg_count: int,
+) -> None:
+    if ctx.ops_pool is not None:
+        async with async_write_transaction(ctx.ops_pool) as conn:
+            saved = await aupsert_harness_timeline_item(
+                conn, agent_id, ctx.harness, item, incarnation=ctx.original_incarnation
+            )
+            if saved is None:
+                raise RuntimeError(
+                    f"Harness activity checkpoint rejected for agent {agent_id}: {item.item_id}"
+                )
+    publisher.emit(
+        TimelineSnapshot(
+            agent_id=agent_id, items=[item.model_dump()], msg_count=msg_count
+        ).model_dump_json()
+    )
+
+
+# meiva:note
+# The projector that writes an external harness's activity to the agent's timeline: each item is
+# checkpointed under one position and the calls an earlier invocation wrote are found by the CLI's call id.
+# meiva:link agent/graph/docs/harness-turn.md
+async def activity_projector(
+    ctx: MeivaContext,
+    agent_id: int,
+    publisher: AgentEventPublisher,
+    *,
+    non_human_wake: bool,
+) -> HarnessTurnProjector:
+    base_idx = 0
+    if ctx.ops_pool is not None:
+        async with ctx.ops_pool.connection() as pool_conn:
+            base_idx = await aget_next_harness_message_seq(pool_conn, agent_id)
+
+    async def checkpoint(item: TimelineItem, msg_count: int) -> None:
+        await _checkpoint_activity(ctx, agent_id, publisher, item, msg_count)
+        await capture_items(ctx, agent_id, [item], source_key="harness")
+
+    async def find_call(tool_use_id: str) -> str | None:
+        if ctx.ops_pool is None:
+            return None
+        async with ctx.ops_pool.connection() as pool_conn:
+            return await aget_harness_call_item_id(pool_conn, agent_id, tool_use_id)
+
+    return HarnessTurnProjector(
+        checkpoint=checkpoint,
+        find_call=find_call,
+        base_idx=base_idx,
+        clock=ctx.require_clock(),
+        non_human_wake=non_human_wake,
+        explicit_visibility=ctx.require_agent().prompt.user_delivery_mode == "prefix",
+        delivery_mode=ctx.require_agent().prompt.user_delivery_mode,
+    )
+
+
+# meiva:note
+# What a CLI sub-agent did while no turn ran (Codex's child thread after its parent's turn ended) is
+# written to the timeline under the call that started it, and that is all: it is not a run. No
+# before-turn hook runs, so no hook note becomes an input, and nothing is delivered to the CLI,
+# because the sub-agent's work is not a reason to start a model turn. Inputs left in the inbox wait for
+# the claim's ordinary wake.
+# meiva:link base/lm/harness/docs/subagent-text.md
+async def present_unattached(ctx: MeivaContext, agent_id: int) -> None:
+    events = ctx.require_harness_bridge().take_unattached()
+    if not events:
+        return
+    publisher = ctx.event_publisher
+    assert publisher is not None, "presenting sub-agent activity requires ctx.event_publisher"  # noqa: S101
+    projector = await activity_projector(ctx, agent_id, publisher, non_human_wake=True)
+    for event in events:
+        await projector.on_event(event)
+    await projector.finish()

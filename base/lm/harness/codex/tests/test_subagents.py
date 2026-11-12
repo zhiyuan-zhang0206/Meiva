@@ -3,6 +3,10 @@ from __future__ import annotations
 import asyncio
 from pathlib import Path
 
+from base.clock import Clock
+from base.clock.tests.fakes import clock_over
+from base.clock.tests.manual_timers import ManualTimers
+from base.lm.harness.codex import CHILD_SILENCE_SECONDS
 from base.lm.harness.codex.tests.support import Harness, replay, start
 from base.lm.harness.delivery.tests.sent import send
 from base.lm.harness.events import (
@@ -112,8 +116,8 @@ async def test_a_thread_no_spawn_call_named_is_not_shown(tmp_path: Path) -> None
         await harness.stop()
 
 
-async def _spawn_then_finish_parent(tmp_path: Path) -> Harness:
-    harness = await start(tmp_path)
+async def _spawn_then_finish_parent(tmp_path: Path, *, clock: Clock | None = None) -> Harness:
+    harness = await start(tmp_path, clock=clock)
     turn = await send(harness, "delegate")
     await harness.turn_started(1)
     replay(harness.server, "subagent_thread", "spawn")
@@ -178,7 +182,14 @@ async def test_a_child_tool_item_without_a_turn_is_shown_once_when_it_completes(
         await harness.stop()
 
 
-async def test_a_child_failure_is_shown_under_the_spawn_call(tmp_path: Path) -> None:
+def _failed_turn(message: str | None) -> dict[str, object]:
+    turn: dict[str, object] = {"id": "child-turn-1", "status": "failed", "items": []}
+    if message is not None:
+        turn["error"] = {"message": message}
+    return {"threadId": "child-thread-1", "turn": turn}
+
+
+async def test_a_child_failure_is_shown_once_under_the_spawn_call(tmp_path: Path) -> None:
     harness = await _spawn_then_finish_parent(tmp_path)
     try:
         before = len(harness.events)
@@ -192,24 +203,31 @@ async def test_a_child_failure_is_shown_under_the_spawn_call(tmp_path: Path) -> 
                     "error": {"message": message},
                 },
             )
-        harness.server.emit(
-            "turn/completed",
-            {
-                "threadId": "child-thread-1",
-                "turn": {
-                    "id": "child-turn-1",
-                    "status": "failed",
-                    "error": {"message": "boom"},
-                    "items": [],
-                },
-            },
-        )
-        await harness.wait_until(lambda: len(harness.events) >= before + 2)
+        harness.server.emit("turn/completed", _failed_turn("usage limit"))
+        await harness.wait_until(lambda: len(harness.events) >= before + 1)
+        await asyncio.sleep(0.05)
         later = [e for e in harness.events[before:] if isinstance(e, SubagentText)]
         assert [(e.tool_use_id, e.text) for e in later] == [
-            ("call-spawn", "Sub-agent error: usage limit"),
-            ("call-spawn", "Sub-agent turn failed: boom"),
-        ]
+            ("call-spawn", "Sub-agent error: usage limit")
+        ], "the failed turn that follows its error adds no second line"
+    finally:
+        await harness.stop()
+
+
+async def test_a_failed_child_turn_with_no_error_before_it_is_shown_and_a_new_turn_resets(
+    tmp_path: Path,
+) -> None:
+    harness = await _spawn_then_finish_parent(tmp_path)
+    try:
+        before = len(harness.events)
+        harness.server.emit("turn/completed", _failed_turn("boom"))
+        _child(harness, "turn/started", turn={"id": "child-turn-2", "status": "inProgress"})
+        _child(harness, "error", willRetry=False, error={"message": "again"})
+        harness.server.emit("turn/completed", _failed_turn("again"))
+        await harness.wait_until(lambda: len(harness.events) >= before + 2)
+        await asyncio.sleep(0.05)
+        later = [e.text for e in harness.events[before:] if isinstance(e, SubagentText)]
+        assert later == ["Sub-agent turn failed: boom", "Sub-agent error: again"]
     finally:
         await harness.stop()
 
@@ -294,5 +312,68 @@ async def test_a_child_the_spawn_call_reports_finished_holds_nothing(tmp_path: P
         harness.server.complete()
         await asyncio.wait_for(turn.outcome(), 2)
         assert not harness.session.background_work()
+    finally:
+        await harness.stop()
+
+
+async def test_a_child_that_goes_silent_stops_holding_the_session_after_the_bound(
+    tmp_path: Path,
+) -> None:
+    timers = ManualTimers()
+    harness = await _spawn_then_finish_parent(tmp_path, clock=clock_over(timers))
+    try:
+        timers.advance(CHILD_SILENCE_SECONDS - 1)
+        assert harness.session.background_work(), "inside the bound it still holds"
+        _child(
+            harness, "item/started", turnId="child-turn-1", item={"type": "reasoning", "id": "r"}
+        )
+        timers.advance(CHILD_SILENCE_SECONDS - 1)
+        assert harness.session.background_work(), "any frame of the child restarts the bound"
+        timers.advance(2)
+        assert not harness.session.background_work(), "no frame for the whole bound: finished"
+        _child(harness, "turn/started", turn={"id": "child-turn-2", "status": "inProgress"})
+        assert harness.session.background_work(), "a child that speaks again is working again"
+    finally:
+        await harness.stop()
+
+
+async def test_a_child_that_ended_before_its_spawn_call_completed_is_not_held(
+    tmp_path: Path,
+) -> None:
+    harness = await start(tmp_path)
+    try:
+        turn = await send(harness, "delegate")
+        await harness.turn_started(1)
+        _child(harness, "turn/completed", turn={"id": "child-turn-1", "status": "completed"})
+        replay(harness.server, "subagent_thread", "spawn")
+        harness.server.complete()
+        await asyncio.wait_for(turn.outcome(), 2)
+        assert not harness.session.background_work(), (
+            "its end came first and nothing clears it later"
+        )
+    finally:
+        await harness.stop()
+
+
+async def test_a_child_tool_item_is_shown_only_when_it_completes(tmp_path: Path) -> None:
+    harness = await _spawn_then_finish_parent(tmp_path)
+    try:
+        before = len(harness.events)
+        item = {"type": "commandExecution", "id": "c9", "command": "ls", "status": "inProgress"}
+        _child(harness, "item/started", turnId="child-turn-1", item=item)
+        await asyncio.sleep(0.05)
+        assert not [e for e in harness.events[before:] if isinstance(e, ToolUse | ToolResult)], (
+            "a call is never written without its result"
+        )
+    finally:
+        await harness.stop()
+
+
+async def test_a_dead_app_server_holds_nothing(tmp_path: Path) -> None:
+    harness = await _spawn_then_finish_parent(tmp_path)
+    try:
+        assert harness.session.background_work()
+        await harness.server.close()
+        assert not harness.session.background_work(), "nothing is running in a dead app-server"
     finally:
         await harness.stop()

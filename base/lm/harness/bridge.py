@@ -165,13 +165,20 @@ class HarnessBridge:
         return 0 if self._session is None else self._session.generation
 
     # meiva:note
-    # Whether the CLI began a turn of its own that no subscriber has read yet, or a CLI sub-agent
-    # produced activity that belongs to no turn: the graph enters a run for it (the host wakes the
-    # agent through `own_turn`), and the subscription that run opens is primed with the events so far.
+    # Whether the CLI began a turn of its own that no subscriber has read yet: the graph enters a run for
+    # it (the host wakes the agent through `own_turn`), and the subscription that run opens is primed
+    # with the turn's events so far.
     # meiva:link base/lm/harness/docs/delivery.md
     @property
     def has_unpresented_turn(self) -> bool:
         return self._pump is not None and self._pump.has_unpresented_turn
+
+    # meiva:note
+    # What a CLI sub-agent did with no turn running (`NO_TURN`), handed over once: the claim writes it
+    # to the timeline without a run of its own, so no hook runs and nothing is delivered for it.
+    # meiva:link base/lm/harness/docs/subagent-text.md
+    def take_unattached(self) -> list[BridgeEvent]:
+        return [] if self._pump is None else self._pump.take_orphans()
 
     async def ensure(self) -> HarnessSession:
         if self._close_error is not None:

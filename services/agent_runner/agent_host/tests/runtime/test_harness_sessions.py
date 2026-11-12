@@ -9,7 +9,13 @@ import pytest
 
 from base.api_contracts.agent_contract import Harness
 from base.clock.tests.fakes import system_clock
-from base.lm.harness import EventSubscription, HarnessInput, Reconciliation, RegistrationStore
+from base.lm.harness import (
+    BridgeEvent,
+    EventSubscription,
+    HarnessInput,
+    Reconciliation,
+    RegistrationStore,
+)
 from base.lm.harness.antigravity import AgyTransport, AntigravityConfig
 from base.log.tests.log_records import LogRecords
 from services.agent_runner.agent_host.runtime import AgentRuntime, HarnessSessions
@@ -45,6 +51,9 @@ class ClosingEngine:
     @property
     def has_unpresented_turn(self) -> bool:
         return False
+
+    def take_unattached(self) -> list[BridgeEvent]:
+        return []
 
     async def reconcile(self, keys: Sequence[str]) -> Mapping[str, Reconciliation]:
         raise AssertionError("these tests never reconcile")
@@ -270,6 +279,9 @@ class TransportBackedEngine:
     @property
     def has_unpresented_turn(self) -> bool:
         return False
+
+    def take_unattached(self) -> list[BridgeEvent]:
+        return []
 
     async def reconcile(self, keys: Sequence[str]) -> Mapping[str, Reconciliation]:
         raise AssertionError("these tests never reconcile")

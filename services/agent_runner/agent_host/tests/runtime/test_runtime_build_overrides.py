@@ -26,6 +26,7 @@ from base.lm.harness import (
     BackgroundItem,
     BackgroundKind,
     BackgroundWork,
+    BridgeEvent,
     EventSubscription,
     FileSessionRegistry,
     HarnessInput,
@@ -194,6 +195,9 @@ class FakeEngine:
     @property
     def has_unpresented_turn(self) -> bool:
         return False
+
+    def take_unattached(self) -> list[BridgeEvent]:
+        return []
 
     async def reconcile(self, keys: Sequence[str]) -> Mapping[str, Reconciliation]:
         raise AssertionError("these tests never reconcile")

@@ -202,24 +202,59 @@ async def test_a_turn_unread_when_its_subscriber_left_is_still_presented() -> No
     await task
 
 
-async def test_subagent_activity_with_no_turn_is_kept_wakes_once_and_begins_no_turn() -> None:
+def _said(text: str, turn_id: str = NO_TURN) -> SubagentText:
+    return SubagentText(turn_id, "call", None, text)
+
+
+async def test_subagent_activity_with_no_turn_is_kept_for_the_owner_and_begins_no_turn() -> None:
     source: asyncio.Queue[BridgeEvent | None] = asyncio.Queue()
     woken: list[str] = []
     pump = EventPump(_stream(source), observe=lambda _e: None, own_turn=lambda: woken.append("w"))
     task = asyncio.create_task(pump.run())
 
-    said = [SubagentText(NO_TURN, "call", None, text) for text in ("one", "two")]
-    for event in said:
+    burst = [_said(text) for text in ("one", "two", "three")]
+    for event in burst:
         source.put_nowait(event)
-    source.put_nowait(SubagentText("t1", "call", None, "in a turn"))
+    source.put_nowait(_said("in a turn", "t1"))
     await asyncio.sleep(0)
     await asyncio.sleep(0)
-    assert woken == ["w"], "one wake for the batch"
-    assert pump.has_unpresented_turn
+    assert woken == ["w"], "a burst of N frames is one wake"
+    assert not pump.has_unpresented_turn, "it is not a turn"
 
-    late = pump.subscribe()
-    assert [(await late.get()) for _ in said] == said
-    assert not pump.has_unpresented_turn, "once read, it is presented"
+    assert pump.take_orphans() == burst
+    assert pump.take_orphans() == [], "handed over once"
+    source.put_nowait(_said("later"))
+    await asyncio.sleep(0)
+    await asyncio.sleep(0)
+    assert woken == ["w", "w"], "after the owner took them, the next frame wakes it again"
+    source.put_nowait(None)
+    await task
+
+
+async def test_subagent_activity_is_read_live_by_a_subscriber_and_wakes_nobody() -> None:
+    source: asyncio.Queue[BridgeEvent | None] = asyncio.Queue()
+    woken: list[str] = []
+    pump = EventPump(_stream(source), observe=lambda _e: None, own_turn=lambda: woken.append("w"))
+    task = asyncio.create_task(pump.run())
+    live = pump.subscribe()
+
+    first, second = _said("one"), _said("two")
+    source.put_nowait(first)
+    source.put_nowait(second)
+    await asyncio.sleep(0)
+    await asyncio.sleep(0)
+    assert woken == [], "a run in flight reads it itself"
+    assert await live.get() is first
+    live.close()
+    assert woken == ["w"], "a subscription that leaves with some unread wakes the owner"
+    assert pump.take_orphans() == [second]
+
+    drained = pump.subscribe()
+    source.put_nowait(_said("three"))
+    await asyncio.sleep(0)
+    assert (await drained.get()) is not None
+    drained.close()
+    assert woken == ["w"], "read events are not left behind"
     source.put_nowait(None)
     await task
 

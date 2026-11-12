@@ -15,7 +15,11 @@ from pydantic import TypeAdapter
 from agent import state as _state
 from agent.db import ClaimedInbound
 from agent.graph.claim._dispatch import is_human_wake_item, prepare_steered_inbound
-from agent.graph.claim.harness_activity import HarnessTurnProjector, log_turn_usage
+from agent.graph.claim.harness_activity import (
+    HarnessTurnProjector,
+    activity_projector,
+    log_turn_usage,
+)
 from agent.graph.claim.harness_foreground import (
     Commit,
     Foreground,
@@ -57,7 +61,7 @@ from agent.graph.claim.timeline import append_turn_timeline
 from agent.graph.claim.turn_stamp import persist_last_active
 from agent.graph.hooks.node import HOOK_NOTES_KEY
 from agent.graph.hooks.question_context import read_agent_open_questions
-from agent.graph.hooks.user_delivery import capture_items, delivery_end_reminder
+from agent.graph.hooks.user_delivery import delivery_end_reminder
 from agent.graph.interrupt import (
     ModelInterruptedError,
     interrupt_halt,
@@ -67,16 +71,10 @@ from agent.graph.node_log import StallConfig, node_lifecycle
 from agent.messages.reply_visibility import reply_visibility_note
 from agent.nodes import CLAIM, HARNESS_TURN
 from base.agents.context import MeivaContext, agent_id_from_config
-from base.agents.history.harness_messages import (
-    aget_harness_call_item_id,
-    aget_next_harness_message_seq,
-    aupsert_harness_timeline_item,
-)
 from base.agents.history.timeline import build_timeline_items
 from base.agents.history.timeline_item import TimelineItem
 from base.agents.questions.render import reinjection_text
-from base.db.transaction import async_write_transaction
-from base.events.live.projection import LLMDone, TimelineSnapshot
+from base.events.live.projection import LLMDone
 from base.events.live.publisher import AgentEventPublisher
 from base.lm.harness import (
     AssistantText,
@@ -177,29 +175,8 @@ async def _run_harness_turn(
     ctx.turn_progress.mark(agent_id)
     extra_updates: dict[str, Any] = {}
 
-    base_idx = 0
-    if ctx.ops_pool is not None:
-        async with ctx.ops_pool.connection() as pool_conn:
-            base_idx = await aget_next_harness_message_seq(pool_conn, agent_id)
-
-    async def checkpoint(item: TimelineItem, msg_count: int) -> None:
-        await _checkpoint_activity(ctx, agent_id, event_publisher, item, msg_count)
-        await capture_items(ctx, agent_id, [item], source_key="harness")
-
-    async def find_call(tool_use_id: str) -> str | None:
-        if ctx.ops_pool is None:
-            return None
-        async with ctx.ops_pool.connection() as pool_conn:
-            return await aget_harness_call_item_id(pool_conn, agent_id, tool_use_id)
-
-    projector = HarnessTurnProjector(
-        checkpoint=checkpoint,
-        find_call=find_call,
-        base_idx=base_idx,
-        clock=ctx.require_clock(),
-        non_human_wake=state.non_human_wake,
-        explicit_visibility=ctx.require_agent().prompt.user_delivery_mode == "prefix",
-        delivery_mode=ctx.require_agent().prompt.user_delivery_mode,
+    projector = await activity_projector(
+        ctx, agent_id, event_publisher, non_human_wake=state.non_human_wake
     )
     run = ForegroundRun(ctx, agent_id, bridge, projector, state, event_publisher)
     await settle_stale_interrupts(ctx, agent_id)
@@ -772,26 +749,3 @@ async def harness_reply_correction(
     items, _ = build_timeline_items([note], inputs=ctx.timestamp_policy())
     entry = Handed(f"{key}:visibility-correction", None, tuple(items))
     return entry, render_message(note)
-
-
-async def _checkpoint_activity(
-    ctx: MeivaContext,
-    agent_id: int,
-    publisher: AgentEventPublisher,
-    item: TimelineItem,
-    msg_count: int,
-) -> None:
-    if ctx.ops_pool is not None:
-        async with async_write_transaction(ctx.ops_pool) as conn:
-            saved = await aupsert_harness_timeline_item(
-                conn, agent_id, ctx.harness, item, incarnation=ctx.original_incarnation
-            )
-            if saved is None:
-                raise RuntimeError(
-                    f"Harness activity checkpoint rejected for agent {agent_id}: {item.item_id}"
-                )
-    publisher.emit(
-        TimelineSnapshot(
-            agent_id=agent_id, items=[item.model_dump()], msg_count=msg_count
-        ).model_dump_json()
-    )

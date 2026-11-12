@@ -11,13 +11,17 @@ from agent.graph.claim.harness_activity import (
     SUBAGENT_ITEM_CHARS,
 )
 from agent.graph.claim.harness_turn import harness_turn_node
+from agent.graph.claim.node import claim_node
+from agent.graph.claim.tests.claim_support import make_runtime
 from agent.graph.claim.tests.harness_support import FakeEngine
 from agent.graph.claim.tests.test_harness_turn import config, runtime
 from agent.graph.llm_errors import FatalLLMStreamError
+from agent.ownership.tests.ownership_support import agent_row
 from agent.state import AgentState
 from base.agents.context import HostedTurnResources
 from base.agents.history.harness_messages import aload_harness_timeline_items
 from base.agents.history.timeline_item import TimelineItem
+from base.api_contracts.agent_contract import Harness
 from base.clock import SYSTEM_TIMERS
 from base.clock.tests.seeded_rng import seeded_rng
 from base.config.tests.configuration import defaults
@@ -35,6 +39,7 @@ from base.lm.harness import (
     ToolResult,
     ToolUse,
 )
+from base.log.tests.log_records import LogRecords
 from meiva.tests.fixtures.pin_agent import hosted_resources as hosted_resources
 
 
@@ -232,10 +237,12 @@ async def test_subagent_text_is_timeline_detail_and_never_a_delivery(
     database_gate: ProcessDbGate,
     hosted_resources: HostedTurnResources,
     live_events: LiveEvents,
+    loguru_records: LogRecords,
 ) -> None:
     said = (
         _said("ALPHA", agent="general-purpose"),
         _said("orphan", call="unseen-call"),
+        _said("orphan again", call="unseen-call"),
         _said("   "),
     )
     items, rows = await _subagent_turn(
@@ -250,7 +257,12 @@ async def test_subagent_text_is_timeline_detail_and_never_a_delivery(
     assert detail == [
         ("ALPHA", "general-purpose", call.item_id, False),
         ("orphan", None, None, False),
+        ("orphan again", None, None, False),
     ]
+    assert [
+        e["tool_use_id"]
+        for e in loguru_records.extras(event="harness_subagent_call_not_found", level="WARNING")
+    ] == ["unseen-call"], "a call that cannot be found is recorded once"
     reply = next(i for i in items if i.kind == "agent_chat")
     assert rows == [(f"harness:{reply.item_id}", "MEIVA_DISPLAY_TO_USER\nthe answer")]
 
@@ -392,43 +404,80 @@ async def test_activity_after_the_launching_invocation_still_finds_its_call(
     assert nobody.parent_item_id is None
 
 
+async def _timeline(pool: AsyncConnectionPool, agent_id: int) -> list[TimelineItem]:
+    async with pool.connection() as conn:
+        return await aload_harness_timeline_items(conn, agent_id)
+
+
+def _later(call: str, *, turn_id: str = NO_TURN) -> list[SubagentText | ToolUse | ToolResult]:
+    return [
+        SubagentText(turn_id=turn_id, tool_use_id=call, agent=None, text="AFTER"),
+        ToolUse(
+            turn_id=turn_id,
+            tool_use_id="late-bash",
+            name="Bash",
+            tool_input={"command": "echo hi"},
+            parent_tool_use_id=call,
+        ),
+        ToolResult(
+            turn_id=turn_id,
+            tool_use_id="late-bash",
+            is_error=False,
+            content="hi",
+            parent_tool_use_id=call,
+        ),
+    ]
+
+
 # meiva:note
-# A Codex child thread that speaks after its parent's turn ended has no turn to belong to. The engine
-# reports its activity as unpresented, the claim enters a run for it, and the run writes it under the
-# spawning call and ends without delivering anything.
+# A Codex child thread that speaks after its parent's turn ended has no turn to belong to. The claim
+# writes what it did under the spawning call and ends the invocation: no run is entered, so no
+# before-turn hook runs and no hook note can become an input, and nothing is handed to the CLI.
 # meiva:link base/lm/harness/docs/subagent-text.md
-async def test_subagent_activity_with_no_turn_is_written_under_its_call_and_the_run_ends(
+async def test_subagent_activity_with_no_turn_is_written_without_a_run_or_a_delivery(
+    redis_url: str,
     db_conn: psycopg.Connection,
     aops_pool: AsyncConnectionPool,
     database_gate: ProcessDbGate,
     hosted_resources: HostedTurnResources,
-    live_events: LiveEvents,
 ) -> None:
-    aid = create_agent(db_conn)
-    db_conn.execute(
-        "INSERT INTO agents_meta (id, status, harness) VALUES (%s, 'running', 'claude_code')",
-        (aid,),
+    agent_id = agent_row(db_conn)
+    launched = FakeEngine(
+        events=(
+            ToolUse(turn_id="t1", tool_use_id="call-agent", name="Agent", tool_input={}),
+            ToolResult(turn_id="t1", tool_use_id="call-agent", is_error=False, content="ok"),
+        )
     )
-    db_conn.commit()
-    await _subagent_turn(
-        db_conn, aops_pool, database_gate, hosted_resources, live_events, (), agent_id=aid
+    first = runtime(launched, ops_pool=aops_pool, hosted_resources=hosted_resources)
+    await harness_turn_node(
+        AgentState(harness_inputs=[{"key": "req", "prompt": "Work", "timeline_items": []}]),
+        first,
+        config(agent_id),
     )
+
     engine = FakeEngine()
-    engine.own_turn_events = [
-        SubagentText(turn_id=NO_TURN, tool_use_id="call-agent", agent=None, text="AFTER"),
-        replace(_subagent_call("late-bash"), turn_id=NO_TURN),
-        replace(_subagent_result("late-bash", "hi"), turn_id=NO_TURN),
-    ]
-    rt = runtime(engine, ops_pool=aops_pool, hosted_resources=hosted_resources)
+    engine.unattached_events = list(_later("call-agent"))
+    base = make_runtime(ops_pool=aops_pool, database_gate=database_gate)
+    ctx = replace(
+        base.context,
+        harness=Harness.CLAUDE_CODE,
+        harness_bridge=engine,
+        hosted_resources=hosted_resources,
+    )
+    rt = Runtime(context=ctx)
 
-    async with asyncio.timeout(20):
-        await harness_turn_node(AgentState(), rt, config(aid))
+    async with asyncio.timeout(30):
+        result = await claim_node(AgentState(halted=True), rt, config(agent_id))
+        again = await claim_node(AgentState(halted=True), rt, config(agent_id))
 
-    async with aops_pool.connection() as conn:
-        items = await aload_harness_timeline_items(conn, aid)
+    items = await _timeline(aops_pool, agent_id)
     [spawn] = [i for i in items if i.tool_use_id == "call-agent"]
     [after] = [i for i in items if i.payload == "AFTER"]
     [late_code] = [i for i in items if i.tool_use_id == "late-bash"]
     assert (after.parent_item_id, late_code.parent_item_id) == (spawn.item_id, spawn.item_id)
-    assert engine.delivered == []
     assert [i for i in items if i.kind == "code_output" and i.payload == "hi"]
+    assert result.goto not in {"before_turn", "harness_turn"}, "no run, so no before-turn hooks"
+    assert engine.delivered == []
+    assert engine.unattached_events == [], "taken once"
+    assert len([i for i in await _timeline(aops_pool, agent_id) if i.payload == "AFTER"]) == 1
+    assert again.goto == result.goto
