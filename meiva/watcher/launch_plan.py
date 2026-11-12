@@ -121,8 +121,8 @@ def stale_names(names: Iterable[str], alive: Collection[int]) -> tuple[str, ...]
 # meiva:note
 # The line the launch file carries: the command teed to the output log, followed by the
 # completion notice, sent from the shell level so a crashed or hard-killed child cannot skip it.
-# The session closes itself after the notice (`keep=False`); a notice that fails to send leaves
-# the session open as the post-mortem site.
+# The session closes with the child's status (`keep=False`); failed delivery leaves a
+# durable completion intent and output log for the host's existing recovery hook.
 def launch_line(
     files: LaunchFiles,
     *,

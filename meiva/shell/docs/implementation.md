@@ -37,7 +37,7 @@ and a real resource.
   `notify_policy` turns the caller's text into a member or refuses it with a `ValueError`,
   and `notified_line` takes only members).
 - `meiva/shell/log_ring.py` (strict) — where the logs live and which ones the per-workspace
-  ring evicts; a log whose session is still live is never evicted.
+  ring evicts; live-session logs and logs awaiting completion delivery survive the cap.
 
 ## Tests
 
@@ -46,3 +46,28 @@ database (`meiva/shell/tests/live_shell.py`: `live_shell`, and `live_host` whose
 test home, so a session never reads the developer's profile or finds the developer's
 programs). The completion CLI is a small script that records its argv. The SDK entries are
 tested in `meiva/tests/namespaces/shell` with the bound agent and the same service.
+
+## Completion recovery boundary
+
+A completed command and an accepted completion notice are separate outcomes.
+The shell preserves the command status even when the gateway is unavailable.
+It publishes a `.undelivered` intent beside its output before sending; failed
+or uncertain sends leave that intent and log available for operator recovery.
+The original send and replay use the same gateway client-message identity,
+so acceptance followed by a lost response can be retried without another message.
+This applies to shell-level completions, including watchers; it does not replay
+a watcher's own application messages or rerun its program.
+
+The operator wires `scripts/host_ops/recover_background_notices.py` into an
+existing healthy-gateway check on each participating host. A pass uses explicit
+local workspace and installed CLI paths, a host lock, bounded send attempts and
+retry spacing; it creates no daemon and performs no remote SSH scans. The
+macmini gateway-recovery watcher is the initial integration point. Other hosts
+need their own existing authorized recovery entry before automatic replay is
+available there. A merged producer alone does not establish fleet recovery.
+
+Malformed receipts remain visible as errors; failed or timed-out sends retain
+their intent. Acceptance clears only the intent, leaving the ordinary log ring
+to reclaim output later. Pending delivery can therefore exceed the normal log
+cap and needs operator attention during a sustained outage. Processes killed
+before they publish a completion intent retain the existing no-notice gap.

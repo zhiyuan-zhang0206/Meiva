@@ -7,6 +7,7 @@ exports = ["check_worktree_remove.py", "onboarding", "release"]
 "update_schedule_script.py" = "compiles a user-written schedule script before replacing the stored copy"
 
 [roots]
+"recover_background_notices.py" = { kinds = ["argv", "clock"], why = "Host-local recovery CLI reads its explicit path/budget arguments and stamps the health-check attempt time; no daemon or remote polling" }
 "admission_run.py" = { kinds = ["argv", "home"], why = "host admission wrapper CLI passthrough runner reads its command line (argv) once and resolves admission home, as the process entry" }
 "check_worktree_remove.py" = { kinds = ["home", "pid", "argv"], why = "Entry point of the pre-removal guard: it names itself by its pid and process group for the process scan and resolves the home whose pty-sessions socket it asks; it also reads its command line (argv) in `main()` (the argument count and the worktree path), as the process entry" }
 "guard_editable_venv.py" = { kinds = ["cwd", "environ", "home", "argv"], why = "Dependency-free pre-uv preflight entry: main() reads the inherited VIRTUAL_ENV, defaults to the current checkout directory before Settings can import, and expands the `~` the operator names in the checkout and VIRTUAL_ENV exactly once, then hands both values down; it also reads its command line (argv): the `__main__` guard reads argv[1:] once and hands it to main" }

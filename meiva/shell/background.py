@@ -27,14 +27,18 @@ def cli_path() -> Path:
 
 
 # meiva:note
-# Create (touch) and return the log file for one background run, pruning the directory's oldest logs beyond the ring size. Touching the file up front makes the path immediately readable, so progress can be tailed mid-run. `live` is the ids of the agent's live sessions, whose logs survive the ring cap.
+# Create (touch) and return the log file for one background run, pruning the directory's oldest logs beyond the ring size. Touching the file up front makes the path immediately readable, so progress can be tailed mid-run. `live` is the ids of the agent's live sessions, whose logs survive the ring cap. Logs with an undelivered completion intent also survive until acceptance, so recovery can attach the original output tail.
 def allocate_output_path(
     session_id: int, name: str, *, log_dir: Path, live: Collection[int]
 ) -> Path:
     log_dir.mkdir(parents=True, exist_ok=True)
     path = log_ring.log_path(log_dir, session_id, name)
     path.touch()
-    logs = [log_ring.LogFile(log.name, log.stat().st_mtime) for log in log_dir.glob("*.log")]
+    logs = [
+        log_ring.LogFile(log.name, log.stat().st_mtime)
+        for log in log_dir.glob("*.log")
+        if not log.with_suffix(".undelivered").exists()
+    ]
     for victim in log_ring.evictions(logs, live):
         old = log_dir / victim
         old.unlink(missing_ok=True)
