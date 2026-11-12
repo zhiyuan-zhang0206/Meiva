@@ -158,9 +158,11 @@ class FakeEngine:
     def has_unpresented_turn(self) -> bool:
         return bool(self.own_turn_events)
 
-    def take_unattached(self) -> list[BridgeEvent]:
-        taken, self.unattached_events = self.unattached_events, []
-        return taken
+    def unattached(self) -> list[BridgeEvent]:
+        return list(self.unattached_events)
+
+    def acknowledge_unattached(self, count: int) -> None:
+        del self.unattached_events[:count]
 
     async def subscribe(self) -> FakeSubscription:
         subscription = FakeSubscription(self)

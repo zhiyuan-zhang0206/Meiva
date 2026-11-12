@@ -71,15 +71,15 @@ class SubagentThreads:
     def learned(
         self, method: str, params: RequestParams, *, session_id: str | None, now: float
     ) -> SubagentThreads:
+        state = self
         if method == "item/completed" and session_id is not None:
-            spawned = self._with_spawned(params, session_id, now)
-            return spawned._with_closed(params, session_id)
+            state = self._with_spawned(params, session_id, now)._with_closed(params, session_id)
         thread = as_text(params.get("threadId"))
-        if thread is None:
-            return self
-        if self._call_of(params) is None:
-            return self._with_unknown(method, thread, params)
-        return self._with_child_frame(method, thread, params, now)
+        if thread is None or thread == session_id:
+            return state
+        if state._call_of(params) is None:
+            return state._with_unknown(method, thread, params)
+        return state._with_child_frame(method, thread, params, now)
 
     def _with_spawned(self, params: RequestParams, session_id: str, now: float) -> SubagentThreads:
         item = as_object(params.get("item"))

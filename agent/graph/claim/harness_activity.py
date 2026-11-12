@@ -562,14 +562,30 @@ async def activity_projector(
 # before-turn hook runs, so no hook note becomes an input, and nothing is delivered to the CLI,
 # because the sub-agent's work is not a reason to start a model turn. Inputs left in the inbox wait for
 # the claim's ordinary wake.
+# The events are read, written and only then acknowledged, one by one: this is display data, so a write
+# that fails is recorded (`harness_subagent_activity_unwritten`) and never fails the claim, and what was
+# not written stays for the next wake (which the pump spaces by `ORPHAN_REWAKE_SECONDS`).
 # meiva:link base/lm/harness/docs/subagent-text.md
 async def present_unattached(ctx: MeivaContext, agent_id: int) -> None:
-    events = ctx.require_harness_bridge().take_unattached()
+    bridge = ctx.require_harness_bridge()
+    events = bridge.unattached()
     if not events:
         return
     publisher = ctx.event_publisher
     assert publisher is not None, "presenting sub-agent activity requires ctx.event_publisher"  # noqa: S101
-    projector = await activity_projector(ctx, agent_id, publisher, non_human_wake=True)
-    for event in events:
-        await projector.on_event(event)
-    await projector.finish()
+    written = 0
+    try:
+        projector = await activity_projector(ctx, agent_id, publisher, non_human_wake=True)
+        for event in events:
+            await projector.on_event(event)
+            bridge.acknowledge_unattached(1)
+            written += 1
+        await projector.finish()
+    except Exception as error:
+        logger.warning(
+            "sub-agent activity could not be written to the timeline; {kept} event(s) kept for the next wake",
+            event="harness_subagent_activity_unwritten",
+            agent_id=agent_id,
+            kept=len(events) - written,
+            error=repr(error),
+        )

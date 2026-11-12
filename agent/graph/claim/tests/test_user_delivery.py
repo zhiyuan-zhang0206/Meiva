@@ -9,6 +9,7 @@ from psycopg_pool import AsyncConnectionPool
 from agent.graph.claim.harness_activity import (
     SUBAGENT_CUT,
     SUBAGENT_ITEM_CHARS,
+    present_unattached,
 )
 from agent.graph.claim.harness_turn import harness_turn_node
 from agent.graph.claim.node import claim_node
@@ -25,7 +26,7 @@ from base.api_contracts.agent_contract import Harness
 from base.clock import SYSTEM_TIMERS
 from base.clock.tests.seeded_rng import seeded_rng
 from base.config.tests.configuration import defaults
-from base.db import Database, create_agent
+from base.db import PG_KEEPALIVE_KWARGS, Database, create_agent
 from base.db.code_version_gate import ProcessDbGate
 from base.events.live.bus import EventBus
 from base.events.live.tests.live_capture import LiveEvents
@@ -481,3 +482,39 @@ async def test_subagent_activity_with_no_turn_is_written_without_a_run_or_a_deli
     assert engine.unattached_events == [], "taken once"
     assert len([i for i in await _timeline(aops_pool, agent_id) if i.payload == "AFTER"]) == 1
     assert again.goto == result.goto
+
+
+# meiva:note
+# Sub-agent activity is display data: a write that fails is recorded and the events stay for the next
+# wake, the claim is not failed, and the next successful write shows each event once.
+# meiva:link base/lm/harness/docs/subagent-text.md
+async def test_a_failed_write_of_subagent_activity_keeps_it_and_does_not_fail_the_claim(
+    redis_url: str,
+    db_conn: psycopg.Connection,
+    aops_pool: AsyncConnectionPool,
+    database_gate: ProcessDbGate,
+    hosted_resources: HostedTurnResources,
+    loguru_records: LogRecords,
+) -> None:
+    agent_id = agent_row(db_conn)
+    engine = FakeEngine()
+    engine.unattached_events = list(_later("call-agent"))
+    base = make_runtime(ops_pool=aops_pool, database_gate=database_gate)
+    ctx = replace(
+        base.context,
+        harness=Harness.CLAUDE_CODE,
+        harness_bridge=engine,
+        hosted_resources=hosted_resources,
+    )
+    unopened = AsyncConnectionPool(open=False, kwargs={**PG_KEEPALIVE_KWARGS})
+
+    await present_unattached(replace(ctx, ops_pool=unopened), agent_id)
+
+    assert len(engine.unattached_events) == 3, "nothing was written, so nothing was dropped"
+    [warning] = loguru_records.extras(event="harness_subagent_activity_unwritten", level="WARNING")
+    assert warning["kept"] == 3
+    await present_unattached(ctx, agent_id)
+    await present_unattached(ctx, agent_id)
+    assert engine.unattached_events == []
+    items = await _timeline(aops_pool, agent_id)
+    assert len([i for i in items if i.payload == "AFTER"]) == 1, "written once, not repeated"

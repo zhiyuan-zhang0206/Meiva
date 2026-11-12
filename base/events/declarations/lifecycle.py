@@ -187,6 +187,12 @@ EVENTS: dict[str, EventSpec] = {
         "(never written, or reset since); the line was written without a parent, once per call id",
         tier="noise",
     ),
+    "harness_subagent_activity_unwritten": telemetry_event(
+        "harness_subagent_activity_unwritten",
+        "a CLI sub-agent's activity could not be written to the timeline; the unwritten events were "
+        "kept and are tried again at the next wake, and the claim went on",
+        tier="anomaly",
+    ),
     "harness_input_requeued": telemetry_event(
         "harness_input_requeued",
         "an external harness refused an input or declared it lost; the inbound went back to the "

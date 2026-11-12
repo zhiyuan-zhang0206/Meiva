@@ -12,6 +12,7 @@ from base.lm.harness.events import (
     TurnOrigin,
     TurnStarted,
 )
+from base.lm.harness.session import SessionClock
 from base.log import logger
 
 # meiva:note
@@ -29,11 +30,22 @@ from base.log import logger
 #
 # A sub-agent's activity with no turn (`turn_id == NO_TURN`: Codex's child thread speaking after its
 # parent's turn ended) is kept too, so it reaches the timeline under the call that started the sub-agent.
-# It begins no turn and is not a turn's work: the owner takes it (`take_orphans`) and writes it, and a run
+# It begins no turn and is not a turn's work: the owner reads it (`orphans`), writes it and acknowledges what it wrote
+# (`acknowledge_orphans`), so a write that fails loses nothing; a run
 # that is subscribed reads it live instead. The owner is woken for the first event kept while nobody is
 # subscribed and nothing is waiting to be taken, so a burst is one wake; a subscription that leaves with
 # some of it unread wakes the owner again.
 # meiva:link base/lm/harness/docs/delivery.md
+
+
+# meiva:note
+# How long a sub-agent's unwritten activity waits before a new frame wakes the owner again. The first wake can be
+# refused (a deployment lock, an admission freeze, a claim that returns before it reaches the sub-agent branch)
+# and nothing else would wake the owner for events already kept; a working child's frames arrive seconds apart, so
+# thirty seconds bounds the retries to a couple a minute while a host that recovers is served within half a minute
+# of the next frame. The same interval spaces the retry after a failed write.
+# meiva:link base/lm/harness/docs/subagent-text.md
+ORPHAN_REWAKE_SECONDS = 30.0
 
 
 class Subscription:
@@ -78,8 +90,11 @@ class EventPump:
         *,
         observe: Callable[[BridgeEvent], None],
         own_turn: Callable[[], None] | None = None,
+        clock: SessionClock,
     ) -> None:
         self._events = events
+        self._clock = clock
+        self._woke_at = 0.0
         self._observe = observe
         self._own_turn = own_turn
         self._own: dict[str, list[BridgeEvent]] = {}
@@ -95,9 +110,11 @@ class EventPump:
     def has_unpresented_turn(self) -> bool:
         return bool(self._own)
 
-    def take_orphans(self) -> list[BridgeEvent]:
-        taken, self._orphans = self._orphans, []
-        return taken
+    def orphans(self) -> list[BridgeEvent]:
+        return list(self._orphans)
+
+    def acknowledge_orphans(self, count: int) -> None:
+        del self._orphans[:count]
 
     def subscribe(self) -> Subscription:
         subscription = Subscription(self)
@@ -120,8 +137,12 @@ class EventPump:
 
     def _keep_own_turn(self, event: BridgeEvent) -> bool:
         if isinstance(event, SubagentText | ToolUse | ToolResult) and event.turn_id == NO_TURN:
-            began = not self._orphans and not self._subscriptions
+            now = self._clock.now().timestamp()
+            due = not self._orphans or now - self._woke_at >= ORPHAN_REWAKE_SECONDS
+            began = due and not self._subscriptions
             self._orphans.append(event)
+            if began:
+                self._woke_at = now
             return began
         if isinstance(event, TurnStarted):
             if event.origin is not TurnOrigin.HARNESS:
@@ -136,6 +157,7 @@ class EventPump:
     def unsubscribe(self, subscription: Subscription) -> None:
         self._subscriptions.discard(subscription)
         if self._orphans and not self._subscriptions and self._own_turn is not None:
+            self._woke_at = self._clock.now().timestamp()
             self._own_turn()
 
     async def run(self) -> None:

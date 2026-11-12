@@ -492,7 +492,8 @@ class CodexSession(BaseHarnessSession[CodexConfig]):
     # A sub-agent's finished message, tool calls and failure are shown in the turn that is running when
     # they arrive. With no turn running (a sub-agent thread that outlives its parent's turn) they are
     # still shown, attributed to the call that started it and to no turn (`NO_TURN`): Codex names no
-    # turn for that work, so none is invented, and the pump wakes a run to write it down.
+    # turn for that work, so none is invented; the pump wakes the owner, and the claim writes it down
+    # without a run.
     # meiva:link base/lm/harness/docs/subagent-text.md
     def _on_subagent(self, method: str, params: JsonObject) -> None:
         local = self._running_turn_id() or NO_TURN

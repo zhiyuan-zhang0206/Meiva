@@ -43,6 +43,9 @@ checkpoints. The external activity projector writes to
 A CLI sub-agent's text (`SubagentText`) is written as a capped, non-user-facing `subagent_text` item beside the
 call that started it, and the tool calls it made are written as ordinary tool items tied to the same call
 ([sub-agent text](../../../base/lm/harness/docs/subagent-text.md)).
+Sub-agent activity that arrives while no turn runs is not a run: when the claim finds nothing else to do it
+writes that activity itself (`present_unattached`) and ends the invocation, so no before-turn hook runs and
+nothing is delivered.
 
 The first text or reasoning fragment, complete blocks, and tool start and
 result checkpoints are written while the big turn is active. Additional

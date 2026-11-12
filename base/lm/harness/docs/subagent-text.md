@@ -46,18 +46,22 @@ What the CLIs send, recorded on Claude Code (claude-agent-sdk 0.2.168) and Codex
   parent's `spawnAgent` item completes and shows the child's finished messages in the turn that is
   running. A child that speaks while no turn runs is shown all the same: its text, tool calls and failure
   are attributed to the spawn call and carry `turn_id == NO_TURN` (`events.py`), because Codex names no
-  turn for that thread's work and none is invented. The pump keeps such activity (`take_orphans`) and
-  wakes the owner for the first frame kept while nobody is subscribed, so a burst is one wake; a run that is
+  turn for that thread's work and none is invented. The pump keeps such activity (`orphans`, `acknowledge_orphans`) and
+  wakes the owner for the first frame kept while nobody is subscribed, so a burst is one wake (a wake the
+  host refused is repeated by a later frame after `ORPHAN_REWAKE_SECONDS`, 30 s); a run that is
   already subscribed reads it live and wakes nobody, and one that leaves with some unread wakes the owner
-  again. The claim, finding no inbox row, no claimed row and no unpresented turn, takes it
-  (`TurnEngine.take_unattached`) and writes the entries under the spawn call itself
-  (`harness_activity.py: present_unattached`): it is not a run, so no before-turn hook runs (no hook note
+  again. The claim, finding no inbox row, no claimed row and no unpresented turn, reads it
+  (`TurnEngine.unattached`), writes the entries under the spawn call itself and acknowledges each one it
+  wrote (`harness_activity.py: present_unattached`); a write that fails logs
+  `harness_subagent_activity_unwritten`, keeps the unwritten events for the next wake and does not fail
+  the claim; it: it is not a run, so no before-turn hook runs (no hook note
   becomes a synthetic input) and nothing is delivered to the CLI; inputs in the inbox wait for the ordinary
-  wake. Frames spread over time cost one such claim each (a read and a write, no model call). A child tool
+  wake. Accepted behavior: frames spread over time cost one such claim each (a read and a write, no model call). A child tool
   item is shown when it completes, as a call followed by its result, whether or not a turn runs: a call
   written earlier could be left unfinished by a run that ends before the result arrives, or be shown twice
-  by the next run, so no child call is written without its result (the cost: a long child command appears
-  when it finishes). A child's failure, an `error` that will not be retried or a `turn/completed` that is
+  by the next run, so no child call is written without its result (accepted behavior: a long child command shows no running
+  state in a turn and appears when it finishes, and a call that never completes, because the parent's turn was
+  interrupted or the app-server died, does not appear). A child's failure, an `error` that will not be retried or a `turn/completed` that is
   `failed` or `interrupted`, is one `SubagentText` line (`Sub-agent error: ...`, `Sub-agent turn failed:
   ...`) under the spawn call; the `turn/completed` that follows an `error` of the same turn adds none. The
   parent's own `collabAgentToolCall` result carries `agentsStates` only for a call that waits on the child,

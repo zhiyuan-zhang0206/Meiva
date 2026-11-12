@@ -52,6 +52,11 @@ run: the host's wake finds an empty inbox, but the claim sees the engine's unpre
 subscription is primed with it. The run projects the turn like any other, with no line naming its cause; the invocation ends only when no input is unsettled, no turn runs and no event is waiting to be read.
 The turn is presented once, by whichever run reads its start ([background work](../../../base/lm/harness/docs/background-work.md)).
 
+A CLI sub-agent's activity with no turn running (`turn_id == NO_TURN`) is not a run: `_harness_delivery_entry`, finding
+no inbox row, no claimed row and no unpresented turn, calls `present_unattached`, which writes it under the spawn call and
+acknowledges what it wrote; the claim then idles as usual. No before-turn hook runs and nothing is delivered
+([sub-agent text](../../../base/lm/harness/docs/subagent-text.md)).
+
 Images of a message go to the harness as images (`HarnessInput.images`, built from the message's inlined
 `image_url` blocks by `native_images`), with the "Attached images" path listing left in the text. Bounds and the
 per-CLI delivery are in [harness delivery](../../../base/lm/harness/docs/delivery.md).

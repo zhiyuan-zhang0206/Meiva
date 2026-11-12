@@ -174,11 +174,16 @@ class HarnessBridge:
         return self._pump is not None and self._pump.has_unpresented_turn
 
     # meiva:note
-    # What a CLI sub-agent did with no turn running (`NO_TURN`), handed over once: the claim writes it
-    # to the timeline without a run of its own, so no hook runs and nothing is delivered for it.
+    # What a CLI sub-agent did with no turn running (`NO_TURN`): the claim reads it, writes it to the
+    # timeline without a run of its own (so no hook runs and nothing is delivered for it) and acknowledges
+    # what it wrote, so a write that fails loses nothing.
     # meiva:link base/lm/harness/docs/subagent-text.md
-    def take_unattached(self) -> list[BridgeEvent]:
-        return [] if self._pump is None else self._pump.take_orphans()
+    def unattached(self) -> list[BridgeEvent]:
+        return [] if self._pump is None else self._pump.orphans()
+
+    def acknowledge_unattached(self, count: int) -> None:
+        if self._pump is not None:
+            self._pump.acknowledge_orphans(count)
 
     async def ensure(self) -> HarnessSession:
         if self._close_error is not None:
@@ -215,7 +220,9 @@ class HarnessBridge:
     # here; a turn waiter, or any other caller of `subscribe`, only watches it.
     # meiva:link base/lm/harness/docs/delivery.md
     async def _start_pump(self, session: HarnessSession) -> None:
-        pump = EventPump(session.events(), observe=self._observe, own_turn=self._own_turn)
+        pump = EventPump(
+            session.events(), observe=self._observe, own_turn=self._own_turn, clock=self._clock
+        )
         group = asyncio.TaskGroup()
         _ = await group.__aenter__()
         self._pump = pump

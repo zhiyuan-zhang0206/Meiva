@@ -325,7 +325,10 @@ async def test_a_child_that_goes_silent_stops_holding_the_session_after_the_boun
         timers.advance(CHILD_SILENCE_SECONDS - 1)
         assert harness.session.background_work(), "inside the bound it still holds"
         _child(
-            harness, "item/started", turnId="child-turn-1", item={"type": "reasoning", "id": "r"}
+            harness,
+            "item/completed",
+            turnId="child-turn-1",
+            item={"type": "agentMessage", "id": "m", "text": "still going", "phase": "commentary"},
         )
         timers.advance(CHILD_SILENCE_SECONDS - 1)
         assert harness.session.background_work(), "any frame of the child restarts the bound"
@@ -375,5 +378,31 @@ async def test_a_dead_app_server_holds_nothing(tmp_path: Path) -> None:
         assert harness.session.background_work()
         await harness.server.close()
         assert not harness.session.background_work(), "nothing is running in a dead app-server"
+    finally:
+        await harness.stop()
+
+
+async def test_a_child_that_only_sends_completed_items_is_held_across_the_bound(
+    tmp_path: Path,
+) -> None:
+    timers = ManualTimers()
+    harness = await _spawn_then_finish_parent(tmp_path, clock=clock_over(timers))
+    try:
+        for step in range(3):
+            timers.advance(CHILD_SILENCE_SECONDS / 2)
+            _child(
+                harness,
+                "item/completed",
+                turnId="child-turn-1",
+                item={
+                    "type": "commandExecution",
+                    "id": f"c{step}",
+                    "command": "ls",
+                    "status": "completed",
+                },
+            )
+            assert harness.session.background_work(), "each completed item is a sign of life"
+        timers.advance(CHILD_SILENCE_SECONDS)
+        assert not harness.session.background_work()
     finally:
         await harness.stop()

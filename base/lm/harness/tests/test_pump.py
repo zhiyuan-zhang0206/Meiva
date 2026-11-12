@@ -1,9 +1,11 @@
 from __future__ import annotations
 
 import asyncio
-from collections.abc import AsyncIterator, Sequence
+from collections.abc import AsyncIterator, Callable, Sequence
 from pathlib import Path
 
+from base.clock.tests.fakes import clock_over
+from base.clock.tests.manual_timers import ManualTimers
 from base.lm.harness import (
     AssistantText,
     BridgeEvent,
@@ -24,7 +26,7 @@ from base.lm.harness.events import (
     SubagentText,
 )
 from base.lm.harness.handoff import compaction_reminder
-from base.lm.harness.pump import EventPump
+from base.lm.harness.pump import ORPHAN_REWAKE_SECONDS, EventPump
 from base.lm.harness.tests.test_bridge import FakeSession, handoff, make_bridge
 
 
@@ -36,7 +38,7 @@ async def _stream(source: asyncio.Queue[BridgeEvent | None]) -> AsyncIterator[Br
 async def test_a_subscriber_sees_only_what_the_pump_reads_after_it_subscribed() -> None:
     source: asyncio.Queue[BridgeEvent | None] = asyncio.Queue()
     seen: list[BridgeEvent] = []
-    pump = EventPump(_stream(source), observe=seen.append)
+    pump = _pump(source, observe=seen.append)
     task = asyncio.create_task(pump.run())
 
     source.put_nowait(ContextCompacted())
@@ -50,6 +52,21 @@ async def test_a_subscriber_sees_only_what_the_pump_reads_after_it_subscribed() 
     assert [type(event) async for event in late] == [SessionStarted]
     assert pump.ended
     assert await pump.subscribe().get() is None
+
+
+def _pump(
+    source: asyncio.Queue[BridgeEvent | None],
+    *,
+    observe: Callable[[BridgeEvent], None] = lambda _e: None,
+    own_turn: Callable[[], None] | None = None,
+    timers: ManualTimers | None = None,
+) -> EventPump:
+    return EventPump(
+        _stream(source),
+        observe=observe,
+        own_turn=own_turn,
+        clock=clock_over(timers or ManualTimers()),
+    )
 
 
 class DeliveringSession(FakeSession):
@@ -145,7 +162,7 @@ async def test_a_turn_the_cli_begins_with_nobody_subscribed_is_kept_and_primes_t
 ):
     source: asyncio.Queue[BridgeEvent | None] = asyncio.Queue()
     woken: list[str] = []
-    pump = EventPump(_stream(source), observe=lambda _e: None, own_turn=lambda: woken.append("w"))
+    pump = _pump(source, own_turn=lambda: woken.append("w"))
     task = asyncio.create_task(pump.run())
 
     source.put_nowait(_own("w1"))
@@ -167,7 +184,7 @@ async def test_a_turn_the_cli_begins_with_nobody_subscribed_is_kept_and_primes_t
 
 async def test_a_turn_read_by_a_live_subscriber_is_not_offered_to_the_next_one() -> None:
     source: asyncio.Queue[BridgeEvent | None] = asyncio.Queue()
-    pump = EventPump(_stream(source), observe=lambda _e: None)
+    pump = _pump(source)
     task = asyncio.create_task(pump.run())
     live = pump.subscribe()
 
@@ -187,7 +204,7 @@ async def test_a_turn_read_by_a_live_subscriber_is_not_offered_to_the_next_one()
 
 async def test_a_turn_unread_when_its_subscriber_left_is_still_presented() -> None:
     source: asyncio.Queue[BridgeEvent | None] = asyncio.Queue()
-    pump = EventPump(_stream(source), observe=lambda _e: None)
+    pump = _pump(source)
     task = asyncio.create_task(pump.run())
     leaving = pump.subscribe()
 
@@ -209,7 +226,7 @@ def _said(text: str, turn_id: str = NO_TURN) -> SubagentText:
 async def test_subagent_activity_with_no_turn_is_kept_for_the_owner_and_begins_no_turn() -> None:
     source: asyncio.Queue[BridgeEvent | None] = asyncio.Queue()
     woken: list[str] = []
-    pump = EventPump(_stream(source), observe=lambda _e: None, own_turn=lambda: woken.append("w"))
+    pump = _pump(source, own_turn=lambda: woken.append("w"))
     task = asyncio.create_task(pump.run())
 
     burst = [_said(text) for text in ("one", "two", "three")]
@@ -221,8 +238,11 @@ async def test_subagent_activity_with_no_turn_is_kept_for_the_owner_and_begins_n
     assert woken == ["w"], "a burst of N frames is one wake"
     assert not pump.has_unpresented_turn, "it is not a turn"
 
-    assert pump.take_orphans() == burst
-    assert pump.take_orphans() == [], "handed over once"
+    assert pump.orphans() == burst
+    pump.acknowledge_orphans(2)
+    assert pump.orphans() == burst[2:], "only what was acknowledged is gone"
+    pump.acknowledge_orphans(1)
+    assert pump.orphans() == []
     source.put_nowait(_said("later"))
     await asyncio.sleep(0)
     await asyncio.sleep(0)
@@ -231,10 +251,36 @@ async def test_subagent_activity_with_no_turn_is_kept_for_the_owner_and_begins_n
     await task
 
 
+async def test_a_wake_that_was_refused_is_repeated_after_the_interval_not_before() -> None:
+    source: asyncio.Queue[BridgeEvent | None] = asyncio.Queue()
+    woken: list[str] = []
+    timers = ManualTimers()
+    pump = _pump(source, own_turn=lambda: woken.append("w"), timers=timers)
+    task = asyncio.create_task(pump.run())
+
+    source.put_nowait(_said("one"))
+    await asyncio.sleep(0)
+    await asyncio.sleep(0)
+    assert woken == ["w"]
+    timers.advance(ORPHAN_REWAKE_SECONDS - 1)
+    source.put_nowait(_said("two"))
+    await asyncio.sleep(0)
+    await asyncio.sleep(0)
+    assert woken == ["w"], "inside the interval a kept event does not wake again"
+    timers.advance(2)
+    source.put_nowait(_said("three"))
+    await asyncio.sleep(0)
+    await asyncio.sleep(0)
+    assert woken == ["w", "w"], "the owner never took them: wake it again"
+    assert len(pump.orphans()) == 3, "nothing was lost meanwhile"
+    source.put_nowait(None)
+    await task
+
+
 async def test_subagent_activity_is_read_live_by_a_subscriber_and_wakes_nobody() -> None:
     source: asyncio.Queue[BridgeEvent | None] = asyncio.Queue()
     woken: list[str] = []
-    pump = EventPump(_stream(source), observe=lambda _e: None, own_turn=lambda: woken.append("w"))
+    pump = _pump(source, own_turn=lambda: woken.append("w"))
     task = asyncio.create_task(pump.run())
     live = pump.subscribe()
 
@@ -247,7 +293,8 @@ async def test_subagent_activity_is_read_live_by_a_subscriber_and_wakes_nobody()
     assert await live.get() is first
     live.close()
     assert woken == ["w"], "a subscription that leaves with some unread wakes the owner"
-    assert pump.take_orphans() == [second]
+    assert pump.orphans() == [second]
+    pump.acknowledge_orphans(1)
 
     drained = pump.subscribe()
     source.put_nowait(_said("three"))
@@ -262,7 +309,7 @@ async def test_subagent_activity_is_read_live_by_a_subscriber_and_wakes_nobody()
 async def test_a_turn_begun_by_our_own_input_is_never_kept_or_announced() -> None:
     source: asyncio.Queue[BridgeEvent | None] = asyncio.Queue()
     woken: list[str] = []
-    pump = EventPump(_stream(source), observe=lambda _e: None, own_turn=lambda: woken.append("w"))
+    pump = _pump(source, own_turn=lambda: woken.append("w"))
     task = asyncio.create_task(pump.run())
 
     source.put_nowait(TurnStarted("t1", TurnOrigin.INPUT, ("k",), 1))

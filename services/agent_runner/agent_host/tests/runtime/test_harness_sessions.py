@@ -52,8 +52,11 @@ class ClosingEngine:
     def has_unpresented_turn(self) -> bool:
         return False
 
-    def take_unattached(self) -> list[BridgeEvent]:
+    def unattached(self) -> list[BridgeEvent]:
         return []
+
+    def acknowledge_unattached(self, count: int) -> None:
+        return None
 
     async def reconcile(self, keys: Sequence[str]) -> Mapping[str, Reconciliation]:
         raise AssertionError("these tests never reconcile")
@@ -280,8 +283,11 @@ class TransportBackedEngine:
     def has_unpresented_turn(self) -> bool:
         return False
 
-    def take_unattached(self) -> list[BridgeEvent]:
+    def unattached(self) -> list[BridgeEvent]:
         return []
+
+    def acknowledge_unattached(self, count: int) -> None:
+        return None
 
     async def reconcile(self, keys: Sequence[str]) -> Mapping[str, Reconciliation]:
         raise AssertionError("these tests never reconcile")
