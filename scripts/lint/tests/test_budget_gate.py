@@ -474,10 +474,9 @@ def test_explicit_deep_target_checks_all_ancestors_without_an_unrelated_sibling(
 
 
 # meiva:note
-# The band below the file ceiling, at the gate: a file the change touches within ten lines of 800
-# prints one warning and still exits 0; the same file untouched is silent, so a repository holding
-# hundreds of files parked near the ceiling does not warn about them on every run; and over the
-# ceiling the violation is exactly what it was, with no warning beside it.
+# The shared headroom table names changed files with at most ten percent remaining, including
+# negative headroom. Unchanged files stay out of the summary; the original over-ceiling gate
+# retains its exit status and violation alongside the report.
 @pytest.mark.parametrize(
     ("lines", "touched", "code", "warns"),
     [(791, True, 0, True), (800, True, 0, True), (799, False, 0, False), (801, True, 1, True)],

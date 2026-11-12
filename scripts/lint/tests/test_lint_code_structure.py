@@ -134,7 +134,9 @@ def test_directory_cap_counts_py_pyi_and_subdirectories(
     _write(directory, "config.json", 1)
     _git(tmp_path, "add", "tests/package")
     assert lcs.main([], repo_root=tmp_path, baseline_base="HEAD", parse_ast=ast.parse) == 0
-    assert capsys.readouterr().out == ""
+    assert (
+        "| directory-entries | tests/package | 20 | 20 | 0 | **yes** |" in capsys.readouterr().out
+    )
 
     _write(directory, "extra.pyi", 1)
     _git(tmp_path, "add", "tests/package/extra.pyi")
@@ -153,7 +155,9 @@ def test_directory_budgets_are_recursive_and_independent(
     assert (
         lcs.main([str(parent)], repo_root=tmp_path, baseline_base="HEAD", parse_ast=ast.parse) == 0
     )
-    assert capsys.readouterr().out == ""
+    output = capsys.readouterr().out
+    assert "| directory-entries | tests/package | 20 | 20 | 0 | **yes** |" in output
+    assert "| directory-entries | tests/package/child | 20 | 20 | 0 | **yes** |" in output
 
     _write(child, "extra.py", 1)
     _git(tmp_path, "add", "tests/package/child/extra.py")
@@ -390,7 +394,9 @@ def test_explicit_file_checks_parent_count_without_scanning_siblings(
     assert (
         lcs.main([str(target)], repo_root=tmp_path, baseline_base="HEAD", parse_ast=ast.parse) == 0
     )
-    assert capsys.readouterr().out == ""
+    assert (
+        "| directory-entries | tests/package | 20 | 20 | 0 | **yes** |" in capsys.readouterr().out
+    )
 
     _write(directory, "extra.py", 1)
     _git(tmp_path, "add", "tests/package/extra.py")
