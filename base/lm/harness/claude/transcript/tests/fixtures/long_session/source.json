@@ -1,0 +1,12 @@
+{
+  "cli": "Claude Code 2.1.317 and 2.1.321 (interactive sessions, as the CLI wrote them)",
+  "scenario": "long_session",
+  "recording": "one long real interactive session (about 17,000 rows), read only; the fixture holds 40 rows of it",
+  "sanitization": [
+    "built by sampling rows by type, never by copying the file: one row of each bookkeeping type the parser ignores (custom-title, agent-name, pr-link, mode, bridge-session, relocated, atis-latch, last-prompt, tools-used, file-history-delta, api-request-shape, cost-state, queue-operation), one coherent turn of 22 conversation rows, one user row and three queued_command attachments whose origin is human, task-notification and peer",
+    "bookkeeping rows keep their field names and the timestamp only: every string is the placeholder [text], every number 0, every nested value dropped; the session id is a fixed placeholder",
+    "conversation rows went through the storage whitelist (store_filter.stored_row), which drops account identifiers, request bodies, working directories and branches, and then every text, thinking block, tool input string and tool result became a placeholder naming only its length; a task notification keeps its task-id, tool-use-id and status tags and a placeholder summary",
+    "the fields the parser reads keep their shape: types, uuids, timestamps, models, stop reasons, usage, origin kind, source_uuid, promptId; the message ids and the tool use and result ids are replaced one for one by fake ids (`msg_fakeNN`, `toolu_fakeNN`), so the pairing of a call with its result and of a message with its rows is kept and no id of the API is"
+  ],
+  "subagent_records": []
+}

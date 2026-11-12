@@ -150,18 +150,16 @@ async def test_the_turn_end_wait_sees_a_closing_entry_or_gives_up_quietly(
     aops_pool: AsyncConnectionPool,
 ) -> None:
     agent_id, incarnation = await make_agent(aops_pool)
+    row = await make_inbound_row(aops_pool, agent_id)
     reader = ScriptedReader({"main": entries_of("basic")})
     reader.visible["main"] = len(reader.records_data["main"])
     writer = make_writer(aops_pool, agent_id, incarnation, reader, [])
-    closed = await writer.wait_for_turn_end(0, quiet_seconds=0.05, ceiling_seconds=2.0)
+    send_input(writer, BASIC, "k", row)
+    closed = await writer.wait_for_turn_end(["k"], quiet_seconds=0.05, ceiling_seconds=2.0)
     assert closed is TurnEndWait.CLOSED
-    quiet = await writer.wait_for_turn_end(
-        writer.closed_turns, quiet_seconds=0.05, ceiling_seconds=2.0
-    )
+    quiet = await writer.wait_for_turn_end(["unknown"], quiet_seconds=0.05, ceiling_seconds=2.0)
     assert quiet is TurnEndWait.QUIET
-    ceiling = await writer.wait_for_turn_end(
-        writer.closed_turns, quiet_seconds=5.0, ceiling_seconds=0.05
-    )
+    ceiling = await writer.wait_for_turn_end(["unknown"], quiet_seconds=5.0, ceiling_seconds=0.05)
     assert ceiling is TurnEndWait.CEILING
 
 

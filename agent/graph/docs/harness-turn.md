@@ -77,12 +77,25 @@ carries the writer (`ctx.harness_timeline`), and nothing else does:
   and ends a turn by waiting in the writer until the record shows the turn's closing entry, or stays quiet for 1 s,
   or 5 s have passed; a missing closing entry is the event `harness_timeline_turn_end_unseen`, never a failure. A
   turn whose result reports an error ends with that error.
-- Usage is logged by the writer, once per model message (`message.id`), not from the turn's result frame: the main
-  agent's as `usage_kind="agent"` and a sub-agent's as `usage_kind="agent_subagent"` with `parent_call_id`, priced on
-  its own model. The sub-agents' tokens are therefore counted; the figure rises by exactly that spend.
+- Usage is logged by the writer's effects, once per model message (`message.id`), not from the turn's result frame:
+  the main agent's as `usage_kind="agent"` and a sub-agent's as `usage_kind="agent_subagent"` with `parent_call_id`
+  (when the link is known), priced on its own model. The sub-agents' tokens are therefore counted; the figure rises by
+  exactly that spend. A message the CLI cut short (an interrupt) has only a placeholder count in the record and is
+  not priced: that is a known gap in the accounting, counted by the event `harness_timeline_usage_unreliable` (one per
+  message, with the message id and turn); a model without a price is warned about once per runtime and its rows are written unpriced.
+- The turns the invocation finishes are paired with the record's closings by identity, not by count: the stream says
+  which of our inputs were in the turn (`InputInContext`), the writer knows which record turn each was delivered in
+  (the row that settled it) and waits for those turns' own closings, and the spend compared with the result's is that
+  of those turns. A closing that shows up late, a result frame that never came and the turns the CLI ran on its own
+  (no input of ours in them, nothing to wait for) therefore shift nothing for the turns after them. A turn that ended
+  in error is waited for like any other (its failure row closes it) and its spend is not compared with the result's.
+  Two observed consequences, harmless: a turn the CLI ran on its own is not waited for, so the reply visibility correction for such a turn may go out one invocation later; and a turn whose input the stream reported refused or lost but the record proves delivered skips the turn-end wait and the spend comparison.
 - A stop's passive note still rides into the CLI with the next input but writes no timeline entry of its own; the
   record's own interrupt row is the only "interrupted" marker, and the early write of #8911 does not apply.
 - Failure and restart: see [foreground input and cancellation](harness-foreground.md#transcript-sourced-agents).
+- The CLI finds its login through `USER` and `LOGNAME` besides `HOME`; the session's child environment carries all
+  three (`HOST_PASSTHROUGH_KEYS` in `base/host/env/agent_env.py`, part of `session_child_env_keys`), and the
+  transcript the writer reads is under that `HOME` (`<home>/.claude/projects/<workspace slug>/<session id>.jsonl`).
 
 With the setting off, none of this exists and the path above is unchanged. The setting and the event-sourced path
 are deleted when all three CLIs have cut over.

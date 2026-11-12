@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import asyncio
-from collections import deque
 from collections.abc import Awaitable, Callable, Mapping, Sequence
 from contextlib import suppress
 from dataclasses import dataclass, field
@@ -80,7 +79,8 @@ HOLD_SECONDS = 120.0
 RETIRE_WAIT_SECONDS = 10.0
 NON_HUMAN_LIMIT = 1_024
 TURN_USAGE_LIMIT = 256
-CLOSED_USAGE_KEPT = 64
+CLOSED_KEPT = 256
+DELIVERED_KEPT = 1_024
 _SETTLE_STATUSES = ("claimed", "pending")
 
 
@@ -157,7 +157,8 @@ class HarnessTimelineWriter:
         self._seeded: set[str] = set()
         self._held = True
         self._held_since: float | None = None
-        self._closed_usages: deque[Usage | None] = deque(maxlen=CLOSED_USAGE_KEPT)
+        self._closed: RecentMap[str, Usage | None] = RecentMap(CLOSED_KEPT)
+        self._delivered: RecentMap[str, str] = RecentMap(DELIVERED_KEPT)
         self._wake = asyncio.Event()
         self._stop_asked = asyncio.Event()
         self._io = asyncio.Lock()
@@ -188,18 +189,23 @@ class HarnessTimelineWriter:
         return self._fenced
 
     # meiva:note
-    # The spend the record tallied for the oldest closed turn nobody has asked about yet, taken once. One entry is
-    # kept per closed turn, in the order the turns closed, so two turns that close in one read are asked about one
-    # after the other; the latest 64 are kept.
-    def take_closed_usage(self) -> Usage | None:
-        return self._closed_usages.popleft() if self._closed_usages else None
+    # The spend the record tallied for the record turns the inputs `keys` were delivered in (summed when they were in
+    # several), or None when none of them has closed or none has a tally. Looked up by identity, never by order: a turn
+    # whose closing the record shows late, or a turn the CLI ran on its own, cannot shift which turn's spend a result
+    # is compared with. The latest `CLOSED_KEPT` closed turns are kept.
+    def closed_usage(self, keys: Sequence[str]) -> Usage | None:
+        total: Usage | None = None
+        for turn in dict.fromkeys(t for t in (self._delivered.get(key) for key in keys) if t):
+            if turn in self._closed and (spend := self._closed.get(turn)) is not None:
+                total = spend if total is None else total + spend
+        return total
 
     # meiva:note
     # The size of everything the writer remembers, by name, and of everything the projector remembers
     # (`projector_sizes`): the bounds that keep the memory of a session of any length fixed. The writer's are: the
     # inputs registered and not yet settled (`sent_*`, dropped when the commit that settles them lands or the delivery
     # side forgets them), `non_human` (the latest `NON_HUMAN_LIMIT` turns), `turn_usage` (`TURN_USAGE_LIMIT`), the closed
-    # turns' spend nobody asked for (`CLOSED_USAGE_KEPT`), the known calls (`CALLS_KEPT`) and one position per record
+    # turns' spend (`CLOSED_KEPT`), the turn each delivered input was in (`DELIVERED_KEPT`), the known calls (`CALLS_KEPT`) and one position per record
     # of the session. The projector's are stated in `projection.py`.
     def memory_sizes(self) -> dict[str, int]:
         return {
@@ -209,7 +215,8 @@ class HarnessTimelineWriter:
             "sent_wire": len(self._sent.wire_ids),
             "non_human": len(self._non_human),
             "turn_usage": len(self._turn_usage),
-            "closed_usages": len(self._closed_usages),
+            "closed": len(self._closed),
+            "delivered": len(self._delivered),
             "calls": len(self._calls),
             "positions": len(self._positions),
             "last_ordinal": len(self._last_ordinal),
@@ -367,15 +374,26 @@ class HarnessTimelineWriter:
         elif self._held_since is None:
             self._held_since = self._clock.monotonic()
 
+    # meiva:note
+    # The turn the stream reports ended is waited for here by identity: the record turns the inputs `keys` (the ones
+    # the stream says were in that turn) were delivered in, and every one of them closed. The writer knows each
+    # delivered input's turn from the record row that settled it, and each closing by the turn it names, so a closing
+    # that shows up late is the closing of its own turn and no other turn's wait ends early, however many turns the
+    # CLI ran on its own in between (they hold none of our inputs and are not waited for: with no `keys` the wait
+    # is over at once). A turn whose closing the record never shows ends the wait quietly (event
+    # `harness_timeline_turn_end_unseen`, naming the keys and turns) and the turn is simply not closed yet when the
+    # record shows it.
     async def wait_for_turn_end(
-        self, closed_before: int, *, quiet_seconds: float, ceiling_seconds: float
+        self, keys: Sequence[str], *, quiet_seconds: float, ceiling_seconds: float
     ) -> TurnEndWait:
+        if not keys:
+            return TurnEndWait.CLOSED
         deadline = self._clock.monotonic() + ceiling_seconds
         last_activity = self._clock.monotonic()
         while True:
             while await self.read_now():
                 last_activity = self._clock.monotonic()
-            if self._closed_turns > closed_before:
+            if self._turns_closed(keys):
                 return TurnEndWait.CLOSED
             now = self._clock.monotonic()
             outcome = (
@@ -391,10 +409,16 @@ class HarnessTimelineWriter:
                     event="harness_timeline_turn_end_unseen",
                     agent_id=self._agent_id,
                     outcome=outcome.value,
+                    keys=list(keys),
+                    turns=[self._delivered.get(key) for key in keys],
                     waited_seconds=round(ceiling_seconds - (deadline - now), 3),
                 )
                 return outcome
             await asyncio.sleep(min(0.1, quiet_seconds))
+
+    def _turns_closed(self, keys: Sequence[str]) -> bool:
+        turns = [self._delivered.get(key) for key in keys]
+        return all(turn is not None and turn in self._closed for turn in turns)
 
     async def write_marker(self, text: str, *, error: bool) -> None:
         marker = TimelineItem(
@@ -517,6 +541,8 @@ class HarnessTimelineWriter:
         self._pending = None
         self._non_human = RecentSet(NON_HUMAN_LIMIT)
         self._turn_usage = RecentMap(TURN_USAGE_LIMIT)
+        self._closed = RecentMap(CLOSED_KEPT)
+        self._delivered = RecentMap(DELIVERED_KEPT)
         self._calls = RecentMap(self._calls_kept)
         self._resume_at = None
         self._held_since = None
@@ -677,8 +703,11 @@ class HarnessTimelineWriter:
                 self._turn_usage[spend.turn] = (
                     self._turn_usage.get(spend.turn) or Usage()
                 ) + spend.usage
+        for settlement in plan.settlements:
+            if settlement.turn is not None:
+                self._delivered[settlement.input_key] = settlement.turn
         for closed in plan.closed:
-            self._closed_usages.append(self._turn_usage.pop(closed.turn))
+            self._closed[closed.turn] = self._turn_usage.pop(closed.turn)
 
     def _next_positions(self, pending: _Pending) -> list[StoredPosition]:
         quiet = bool(pending.plan.closed) and self._quiet()

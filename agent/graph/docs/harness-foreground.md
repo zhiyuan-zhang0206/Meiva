@@ -155,11 +155,17 @@ are not used.
 | Case | What happens |
 |---|---|
 | Normal, or absorbed mid-turn | the echo settles nothing; the writer reads the human row (or the `queued_command` attachment) with our uuid, appends the input's entries and sets its rows `done` in one transaction |
-| Refused or not taken | unchanged: back to `pending` with backoff (the input is forgotten by the writer first) |
+| Refused or lost by the stream (`InputRejected`, `InputLost`), or the whole batch refused by `deliver` | the record is read first (the one rule: an input is delivered when the record shows it): an input the record shows is settled by the writer and not sent again (event `harness_input_proven_by_record`); the others go back to `pending` with backoff (forgotten by the writer first) |
 | The invocation fails or is interrupted with inputs in flight | the session is retired, the record is read once more, the writer settles what it shows, and what it does not show goes back to `pending`; a record that cannot be read leaves them `claimed` for the next invocation |
 | A claimed row from an earlier process (start of a run) | registered with the writer as the inputs they were, then the writer's first read: shown inputs are settled (and the recovery note is queued as before), not-shown inputs go back to `pending` and are delivered again in order |
 | A steer the CLI did not absorb | runs as a turn of its own; the human row with our uuid settles it |
 | Input the record shows that we did not send | shown as an unmatched inbound, settles nothing, event `harness_timeline_unmatched_input` |
+
+The session the claimed rows are decided against is the one the CLI is resuming: the writer reads the live session's id
+once the CLI has reported it and, before that, the id the session registry holds for the agent, because the live id
+comes with the CLI's init event, later than the adoption. A new agent has neither (nothing could be in a record), and a
+record that cannot be read at adoption fails the invocation and leaves the rows claimed (`harness_run._adopt_by_record`
+starts the writer's reads first, so nothing is sent while the record cannot say what the CLI holds).
 
 A new writer holds its reads until the first invocation has registered the claimed rows (`start_reading`): a row the
 CLI wrote for an input nobody registered would be read as unmatched and the input could never be settled. The

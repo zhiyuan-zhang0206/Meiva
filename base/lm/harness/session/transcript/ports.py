@@ -66,3 +66,11 @@ class RecordReader(Protocol):
     def position_before(
         self, record: str, wire_ids: Sequence[str], *, after_ordinal: int = -1
     ) -> Awaitable[str | None]: ...
+
+
+# meiva:note
+# A reader that also knows the version of the CLI that wrote the rows it has read (None before it has read one), which
+# the writer stores with each position for telemetry.
+class VersionedRecordReader(RecordReader, Protocol):
+    @property
+    def cli_version(self) -> str | None: ...

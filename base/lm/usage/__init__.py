@@ -92,6 +92,11 @@ class UsageFields:
     for_agent_id: int | None = None
     calls: int = 1
     parent_call_id: str | None = None
+    # meiva:note
+    # True when the caller has already said once that this model is unpriced (the transcript-sourced timeline logs one
+    # message at a time and would otherwise say it for every message of a session). The usage event and the billing
+    # span are the same; only the warning line is left out.
+    unpriced_already_reported: bool = False
 
 
 def log_usage_from_message(
@@ -193,6 +198,7 @@ def log_usage_fields(
             for_agent_id=fields.for_agent_id,
             calls=fields.calls,
             parent_call_id=fields.parent_call_id,
+            unpriced_already_reported=fields.unpriced_already_reported,
             catalog=catalog,
             now=now,
         )
@@ -269,6 +275,7 @@ class _UsageEvent:
     attribution: str | None = None
     calls: int = 1
     parent_call_id: str | None = None
+    unpriced_already_reported: bool = False
 
 
 def _log_usage(
@@ -302,11 +309,12 @@ def _log_usage(
     if priced is not None:
         snapshot = _price_snapshot(priced)
     else:
-        logger.warning(
-            "[llm usage] model {model!r} is unpriced; add it to "
-            "base/lm/pricing/pricing_catalog_archive.json or the plugin price registry",
-            model=event.model,
-        )
+        if not event.unpriced_already_reported:
+            logger.warning(
+                "[llm usage] model {model!r} is unpriced; add it to "
+                "base/lm/pricing/pricing_catalog_archive.json or the plugin price registry",
+                model=event.model,
+            )
         snapshot = {"unpriced": 1}
     # meiva:note
     # The one figure set both the event and (via `record_out`) the message carry.

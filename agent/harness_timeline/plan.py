@@ -22,7 +22,9 @@ from base.lm.harness.session.transcript.drafts import (
 # what to report. No I/O: the writer takes the plan into one transaction. Reply visibility
 # (`resolve_agent_reply`, which lives above `base/lm`) and the rendering of a tool call are applied here,
 # once, so the projection stays free of both. A sub-agent's text and tool output are cut at
-# `SUBAGENT_ITEM_CHARS`, as they are on the event path today.
+# `SUBAGENT_ITEM_CHARS`, as they are on the event path today. A message the CLI cut short (an interrupt) has only a
+# placeholder count in the record: it is not priced but is passed on as `unreliable_usage`, which the effects count
+# as an event, so the gap in the accounting is a number and not a silence.
 # meiva:link agent/harness_timeline/README.md
 
 SUBAGENT_ITEM_CHARS = 8_000
@@ -46,6 +48,7 @@ class PlannedItem:
 class Settlement:
     input_key: str
     inbound_ids: tuple[int, ...]
+    turn: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -53,6 +56,7 @@ class WritePlan:
     items: tuple[PlannedItem, ...] = ()
     settlements: tuple[Settlement, ...] = ()
     usage: tuple[MessageUsage, ...] = ()
+    unreliable_usage: tuple[MessageUsage, ...] = ()
     closed: tuple[TurnClosed, ...] = ()
     observed: tuple[TurnObserved, ...] = ()
     anomalies: tuple[AnomalyReport, ...] = ()
@@ -93,10 +97,11 @@ def plan_write(
     return WritePlan(
         items=tuple(planned),
         settlements=tuple(
-            Settlement(delivery.input_key, inbound_ids.get(delivery.input_key, ()))
+            Settlement(delivery.input_key, inbound_ids.get(delivery.input_key, ()), delivery.turn)
             for delivery in projection.deliveries
         ),
         usage=tuple(spend for spend in projection.usage if spend.reliable),
+        unreliable_usage=tuple(spend for spend in projection.usage if not spend.reliable),
         closed=projection.turns_closed,
         observed=projection.turns_observed,
         anomalies=projection.anomalies,

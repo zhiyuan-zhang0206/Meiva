@@ -1,8 +1,9 @@
 # Cutting an external agent's timeline over to the CLI's own transcript
 
-Status: plan, revised 2026-11-12 after review. PR A (storage, read-in) is merged; PR B (the writer for Claude, wired
-behind the off-by-default agent setting `harness_transcript_timeline`) is open and not yet verified against a real CLI
-end to end (section 9.4). The decision is
+Status: plan, revised 2026-11-12 after review. PR A (storage, read-in) and PR B (the writer for Claude, wired behind
+the off-by-default agent setting `harness_transcript_timeline`) are merged; three follow-up PRs fix what the two
+reviews of PR B found before the setting is turned on anywhere (correctness and concurrency, linear and bounded,
+the rest), and the real-CLI end-to-end runs of section 9.4 were repeated on them. The setting is still off by default. The decision is
 [the transcript is the timeline source](../../docs/decisions/agents/graph/2026-11-12-transcript-is-the-timeline-source.md);
 the vocabulary, the projection, the three parsers and their golden tests (the shared pure core this plan builds
 on) are described in [reading a record into timeline drafts](../../base/lm/harness/docs/transcript-projection.md)
@@ -355,6 +356,46 @@ One rule: an input is delivered when the record shows it; the entry that shows i
       the stop shows only the record's own interrupt marker; (f) shows no duplicate item and the claimed row of an
       input the CLI never wrote is delivered again; (g) shows none of the parent's history re-projected.
    5. Roll back by setting it false and restarting the runtime; the old path resumes from the end of the timeline.
+
+   **Run so far (2026-11-12, this machine's logged-in `claude` 2.1.322, model `haiku`, throwaway Postgres of the test
+   harness, a scratch test, not a cluster).** The real bridge and `ClaudeSession`, the real `harness_turn` node, the
+   writer, the effects and the database; no gateway, dispatcher or host. Results: (a) a turn with a Bash call:
+   input `done`, items `inbound_chat, agent_reasoning, agent_code, code_output, agent_chat`, two `llm_usage` events,
+   5 stored rows (5 KB); (b) a steer during `sleep 12`: both inputs `done`, the absorbed steer between the output and the
+   final reply, no anomaly; (c) a stop: the record's `status:Turn interrupted` is the only interrupt marker, no
+   `turn_end_unseen`; (f) `kill -9` of the CLI between two messages, then a message: both inputs `done` once, no
+   duplicate item, the resumed session answered from the earlier turn; (d) a sub-agent and a background command: the
+   sub-agent's items nest under its call, `llm_usage` gives `agent` and `agent_subagent` events, both background
+   notifications are `Background task ... completed` markers, 22 stored rows, no anomaly. The first runs found two
+   parser gaps, fixed here: row types the CLI writes in a long session were reported as anomalies (`ai-title`, titles,
+   links, `informational`, `stop_hook_summary`, many context attachments), and a `queued_command` attachment whose own
+   `origin` is `task-notification` was read as an input nobody sent. A pitfall for whoever repeats it: the CLI finds
+   its login through `USER` and `LOGNAME`; a child environment without them answers "Not logged in".
+   **Run again on the follow-up PRs (2026-11-12, `claude` 2.1.322, model `haiku`, the same scratch harness: real bridge
+   and `ClaudeSession`, the real `harness_turn` node, writer, effects and a throwaway Postgres; no gateway or host).**
+   `meiva init` could not make a cluster of its own on this machine (the fixed port table is occupied by another
+   cluster), so the full-cluster steps of 9.4.1-9.4.2 were not run. Results: (a) a turn with a Bash call, input `done`,
+   usage one event per message; (f) `kill -9` between two messages, then a message: no duplicate item, resumed;
+   (b) a steer during `sleep 14`: both inputs `done`, the steer between the output and the final reply; (c) a stop of a
+   long Python sleep: the record's `status:Turn interrupted` is the only marker, the next message works;
+   (d) four background sub-agents that keep producing for about 25 s plus a background command: every sub-agent item and
+   output nests under its own call (12 nested items), five `agent_subagent` usage events with the sub-agent's own model,
+   the CLI's own turns after the invocation ended (notifications and replies) are written by the writer alone and the
+   live view got 19 events through the runtime publisher; database reads for the whole run: 17 index fetches and no
+   sequential scan on `agent_harness_messages`, 42 stored transcript rows;
+   (e) a native `/compact` delivered through the bridge: the input is settled and the timeline shows `status:Context compacted`
+   (through the Meiva command catalog `/compact` is a request to call `meiva.self.compact`, which needs a cluster and
+   failed here, as an ordinary agent turn); (g) a fork: the copied history is not projected again, only the child's
+   turn; (h) CLI-started turns while idle, as in (d); the setting turned on for an agent that already has a timeline and
+   no stored position: only the new turn is projected, no duplicate. The first run of the four-turn scenario showed four
+   `harness_timeline_turn_end_unseen`: the turns the CLI ran on its own are reported to the next invocation after
+   their closings were counted, so pairing by an invocation's own count waited for closings that were already there; the
+   turns are now paired with closings by identity (the stream names the inputs that were in a turn, the writer knows the record turn each was delivered in: `wait_for_turn_end(keys)`), not by a count, and the rerun has none. The real session
+   also showed an origin the first recordings did not: `{"kind": "human"}` on user rows and on `queued_command` steers
+   (a human input, now read as one), and `peer` (reported, not shown).
+   **Not run**: the full cluster (`meiva init` / `meiva start`), a fork made by the gateway rather than by copying
+   the rows, and the rollout step of turning the setting on through `meiva agents restart`.
+5. Roll back by setting it false and restarting the runtime; the old path resumes from the end of the timeline.
 
    **Run so far (2026-11-12, this machine's logged-in `claude` 2.1.322, model `haiku`, throwaway Postgres of the test
    harness, a scratch test, not a cluster).** The real bridge and `ClaudeSession`, the real `harness_turn` node, the

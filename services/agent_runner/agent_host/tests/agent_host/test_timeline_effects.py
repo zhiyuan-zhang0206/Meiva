@@ -160,14 +160,19 @@ async def test_a_failed_capture_costs_neither_the_usage_nor_the_publish_and_is_t
     )
 
 
-async def test_an_unmatched_input_is_reported_once_per_session(loguru_records: LogRecords) -> None:
+async def test_the_first_unmatched_inputs_of_a_session_are_each_reported_and_then_one_in_a_hundred(
+    loguru_records: LogRecords,
+) -> None:
     ctx = runtime(FakeEngine()).context
     effects = TimelineEffects(7, Published())
     effects.bind(ctx)
-    plan = WritePlan(unmatched_inputs=("claude:u-1",))
-    await effects.after_commit(Committed(plan, ()))
-    await effects.after_commit(Committed(plan, ()))
-    assert len(loguru_records.events("harness_timeline_unmatched_input")) == 1
+    for n in range(250):
+        await effects.after_commit(Committed(WritePlan(unmatched_inputs=(f"claude:u-{n}",)), ()))
+    seen = [
+        r["extra"]["seen_in_this_session"]
+        for r in loguru_records.events("harness_timeline_unmatched_input")
+    ]
+    assert seen == [*range(1, 21), 101, 201]
 
 
 async def test_replies_committed_before_a_crash_are_offered_to_the_capture_again_at_start() -> None:
@@ -184,3 +189,34 @@ async def test_replies_committed_before_a_crash_are_offered_to_the_capture_again
     await effects.recover(stored)
 
     assert store.captured == ["h4.0", "h7.0"]
+
+
+async def test_a_message_cut_short_is_counted_not_priced_and_a_model_without_a_price_is_warned_once(
+    loguru_records: LogRecords,
+) -> None:
+    ctx = runtime(FakeEngine()).context
+    effects = TimelineEffects(7, Published())
+    effects.bind(ctx)
+    cut = MessageUsage(
+        "main", "m-cut", "t", None, Usage(input_tokens=1, output_tokens=1), "x", False
+    )
+    unpriced = [
+        MessageUsage(
+            "main",
+            f"m{i}",
+            "t",
+            None,
+            Usage(input_tokens=5, output_tokens=2),
+            "no-such-model",
+            True,
+        )
+        for i in range(3)
+    ]
+    plan = WritePlan(usage=tuple(unpriced), unreliable_usage=(cut, cut))
+    await effects.after_commit(Committed(plan, ()))
+    assert len(loguru_records.events("harness_timeline_usage_unreliable")) == 1, (
+        "one event per message"
+    )
+    assert len(loguru_records.events("llm_usage")) == 3, "the unpriced messages are all written"
+    warned = [m for m in loguru_records.messages("WARNING") if "is unpriced" in m]
+    assert len(warned) == 1, "and warned about once"

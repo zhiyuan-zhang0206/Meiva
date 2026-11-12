@@ -18,6 +18,10 @@ from agent.db import CLAIM_ACQUIRE_TIMEOUT_CAP_S, ClaimedInbound
 from agent.graph.claim._dispatch import prepare_steered_inbound
 from agent.graph.claim.harness_activity import TurnSink
 from agent.graph.claim.harness_foreground import Handed, Reconciled, plan_reconciliation
+from agent.graph.claim.harness_render import render_message
+from agent.graph.claim.timeline import append_turn_timeline
+from agent.graph.hooks.user_delivery import delivery_end_reminder
+from agent.messages.reply_visibility import reply_visibility_note
 from agent.ownership.inbound import lock_inbound_owner
 from base.agents.context import MeivaContext
 from base.agents.history.harness_messages import aappend_harness_timeline_items
@@ -527,3 +531,29 @@ def publish_items(publisher: Emits, agent_id: int, items: list[TimelineItem]) ->
             publisher.emit(
                 InboundCommitted(agent_id=agent_id, inbound_id=item.inbound_id).model_dump_json()
             )
+
+
+# meiva:note
+# The correction input for a reply that broke the delivery contract, or None.
+#
+# The correction is a synthetic input like any other: its note reaches the timeline when the harness
+# reports it in context. Asking twice would loop, so a second violation is only recorded.
+async def harness_reply_correction(
+    ctx: MeivaContext,
+    agent_id: int,
+    baseline: int | None,
+    *,
+    invalid: bool,
+    key: str,
+    correcting: bool,
+) -> tuple[Handed, str] | None:
+    note = await delivery_end_reminder(ctx, agent_id, baseline, correcting=correcting)
+    if not invalid and note is None:
+        return None
+    note = note or reply_visibility_note(ctx.require_clock().now())
+    if correcting:
+        await append_turn_timeline(ctx, agent_id, [note])
+        return None
+    items, _ = build_timeline_items([note], inputs=ctx.timestamp_policy())
+    entry = Handed(f"{key}:visibility-correction", None, tuple(items))
+    return entry, render_message(note)

@@ -21,7 +21,7 @@ from base.lm.harness.session.transcript.entries import (
     Anomaly,
     AnomalyKind,
     AnyEntry,
-    Notice,
+    HumanInput,
     ToolResult,
 )
 from base.lm.harness.session.transcript.ports import EntryBatch
@@ -464,10 +464,10 @@ def test_a_notification_queued_into_a_running_turn_is_a_notice_and_not_an_unmatc
         },
     }
     _, parsed = parse_row(ParseState(), row, line=0)
-    [notice] = parsed
-    assert isinstance(notice, Notice)
-    assert notice.call_id == "toolu_1" and not notice.opens_turn
-    assert "Background task b1 completed" in notice.text
+    [told] = parsed
+    assert isinstance(told, HumanInput) and told.origin is not None and told.joined_running_turn
+    assert told.origin.call_id == "toolu_1"
+    assert "Background task b1 completed" in told.origin.text
     plain = {**row, "attachment": {"type": "queued_command", "prompt": "hi", "source_uuid": "w"}}
     _, steered = parse_row(ParseState(), plain, line=1)
     assert [type(entry).__name__ for entry in steered] == ["HumanInput"]
@@ -497,6 +497,7 @@ def test_a_batch_reports_the_bytes_it_covers_for_the_writers_transaction_budget(
     reader = ClaudeRecordReader(now_ns=now_ns, claude_home=home, session_id=_session("basic"))
     batch = _read(reader, "main", None)
     assert batch is not None and batch.size == target.stat().st_size
+    assert reader.cli_version == "2.1.322", "the version the rows say, for the stored position"
 
 
 def test_the_sub_agent_listing_is_remembered_until_the_folder_changes(tmp_path: Path) -> None:

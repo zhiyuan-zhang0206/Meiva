@@ -12,7 +12,7 @@ from base.lm.harness.session.transcript.drafts import SentInput
 # What a graph invocation asks of the session-scoped timeline writer of an external agent whose timeline is
 # projected from the CLI's own transcript (`agent/harness_timeline/`, composed by the agent host). The writer
 # outlives every invocation: the invocation hands it what it sent (`register_sent`, before the hand-over), asks
-# it to read now and waits for the turn's closing entry (`wait_for_turn_end`), and asks which inputs the record
+# it to read now and waits for the turn's closing entry (`wait_for_turn_end`, by the keys of the inputs that were in the turn), and asks which inputs the record
 # has not yet shown (`undelivered`). It never hands the writer content: what the timeline shows comes from the
 # record. A new writer holds its reads until an invocation has registered the inputs an earlier process left
 # claimed and calls `start_reading` (a row the CLI wrote for an input nobody registered would be read as unmatched
@@ -29,15 +29,12 @@ class TurnEndWait(StrEnum):
 
 class TimelineSession(Protocol):
     @property
-    def closed_turns(self) -> int: ...
-
-    @property
     def items_written(self) -> int: ...
 
     @property
     def fault(self) -> Exception | None: ...
 
-    def take_closed_usage(self) -> Usage | None: ...
+    def closed_usage(self, keys: Sequence[str]) -> Usage | None: ...
 
     def register_input(
         self,
@@ -58,7 +55,7 @@ class TimelineSession(Protocol):
     def read_now(self) -> Awaitable[bool]: ...
 
     def wait_for_turn_end(
-        self, closed_before: int, *, quiet_seconds: float, ceiling_seconds: float
+        self, keys: Sequence[str], *, quiet_seconds: float, ceiling_seconds: float
     ) -> Awaitable[TurnEndWait]: ...
 
     def write_marker(self, text: str, *, error: bool) -> Awaitable[None]: ...

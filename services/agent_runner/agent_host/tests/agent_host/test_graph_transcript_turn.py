@@ -12,14 +12,12 @@ from collections.abc import Sequence
 from dataclasses import dataclass, field, replace
 from itertools import count
 from pathlib import Path
-from typing import cast
 
 import psycopg
 import pytest
 from langgraph.runtime import Runtime
 from psycopg_pool import AsyncConnectionPool
 
-from agent.graph.claim.harness_activity import TranscriptSink
 from agent.graph.claim.harness_inbox import INPUT_KEY_FIELD
 from agent.graph.claim.harness_turn import harness_turn_node
 from agent.graph.claim.tests.harness_support import (
@@ -39,17 +37,16 @@ from agent.harness_timeline.writer import HarnessTimelineWriter
 from agent.ownership.tests.ownership_support import agent_row
 from agent.state import AgentState
 from base.agents.context import MeivaContext
-from base.agents.context.harness_timeline import TimelineSession, TurnEndWait
 from base.clock.tests.fakes import system_clock
 from base.lm.harness import (
     BridgeEvent,
     HarnessInput,
+    HarnessNotDeliveredError,
     InputRejected,
     SessionFailed,
     TurnOrigin,
     TurnStarted,
     Usage,
-    completed_turn,
 )
 from base.lm.harness.claude.transcript.reader import ClaudeRecordReader
 from base.lm.harness.claude.transcript.tests.support import now_ns
@@ -80,6 +77,7 @@ class ScriptedRecord:
     entries: list[AnyEntry] = field(default_factory=list)
     visible: int = 0
     sequence: count[int] = field(default_factory=count)
+    failing_reads: int = 0
 
     async def records(self, *, exhaustive: bool = False) -> tuple[str, ...]:
         return ("main",)
@@ -96,6 +94,9 @@ class ScriptedRecord:
         return None
 
     async def read_after(self, record: str, position: str | None) -> EntryBatch | None:
+        if self.failing_reads:
+            self.failing_reads -= 1
+            raise OSError("the transcript could not be read")
         start = 0 if position is None else int(position)
         if self.visible <= start:
             return None
@@ -398,40 +399,90 @@ async def test_an_input_the_stream_calls_refused_but_the_record_shows_is_settled
     assert loguru_records.events("harness_input_requeued") == []
 
 
-# meiva:note
-# Turns are paired with the record's closings one for one, in order: two turns that end close together each wait for
-# their own closing, and neither returns on the other's, so the spend compared with each turn's result is that turn's.
-class _CountingTimeline:
-    def __init__(self, spends: list[Usage]) -> None:
-        self.closed_turns = 0
-        self.items_written = 0
-        self.fault = None
-        self.waited_after: list[int] = []
-        self._spends = spends
+async def test_an_adoption_whose_record_cannot_be_read_leaves_the_rows_claimed_for_the_next_invocation(
+    db_conn: psycopg.Connection,
+    aops_pool: AsyncConnectionPool,
+    hosted_resources: HostedTurnResources,
+) -> None:
+    agent_id = agent_row(db_conn)
+    row = insert_row(db_conn, agent_id, "chat", "user", "was taken")
+    db_conn.execute(
+        "UPDATE inbound_messages SET status='claimed', claimed_at=now(), "
+        "payload = COALESCE(payload, '{}'::jsonb) || jsonb_build_object(%s::text, %s::text) "
+        "WHERE id=%s",
+        (INPUT_KEY_FIELD, input_key(row), row),
+    )
+    db_conn.commit()
+    record = ScriptedRecord(failing_reads=1)
+    record.write(record.take(input_key(row), "was taken"), *record.reply("ok"))
+    engine = FakeEngine(script=_cli(record))
+    rt, _ = _wire(
+        runtime(engine, ops_pool=aops_pool, hosted_resources=hosted_resources),
+        aops_pool,
+        agent_id,
+        record,
+    )
 
-    def take_closed_usage(self) -> Usage | None:
-        return self._spends.pop(0) if self._spends else None
+    with pytest.raises(OSError, match="could not be read"):
+        _ = await harness_turn_node(AgentState(), rt, config(agent_id))
 
-    def take_invalid_reply(self) -> bool:
-        return False
+    assert row_status(db_conn, row) == "claimed", (
+        "nothing is decided about an input the record has not been read for"
+    )
+    assert engine.delivered == []
 
-    async def wait_for_turn_end(
-        self, closed_before: int, *, quiet_seconds: float, ceiling_seconds: float
-    ) -> TurnEndWait:
-        del quiet_seconds, ceiling_seconds
-        self.waited_after.append(closed_before)
-        return TurnEndWait.CLOSED
+    rt, _ = _wire(
+        runtime(engine, ops_pool=aops_pool, hosted_resources=hosted_resources),
+        aops_pool,
+        agent_id,
+        record,
+    )
+    _ = await harness_turn_node(AgentState(), rt, config(agent_id))
+    assert row_status(db_conn, row) == "done", (
+        "the next invocation reads the record and the writer settles it"
+    )
+    assert all(input_key(row) not in [item.key for item in batch] for batch in engine.delivered)
 
-    async def write_marker(self, text: str, *, error: bool) -> None:
-        del text, error
+
+class _Refusing(FakeEngine):
+    def __init__(self, record: ScriptedRecord, *, written: bool) -> None:
+        super().__init__()
+        self._record = record
+        self._written = written
+
+    async def deliver(self, inputs: Sequence[HarnessInput], *, compaction_note: str = "") -> None:
+        self.delivered.append(list(inputs))
+        if self._written:
+            self._record.write(
+                *(self._record.take(item.key, item.text) for item in inputs),
+            )
+        raise HarnessNotDeliveredError("the session could not take the batch")
 
 
-async def test_two_turns_that_end_close_together_each_wait_for_their_own_closing() -> None:
-    timeline = _CountingTimeline([Usage(input_tokens=7, output_tokens=3)] * 2)
-    sink = TranscriptSink(cast("TimelineSession", timeline), non_human_wake=False)
-    timeline.closed_turns = 2
-    turns = (completed_turn(completed("t1", "a"), "a"), completed_turn(completed("t2", "b"), "b"))
+async def test_a_refused_batch_the_record_shows_is_settled_and_one_it_does_not_show_goes_back(
+    db_conn: psycopg.Connection,
+    aops_pool: AsyncConnectionPool,
+    hosted_resources: HostedTurnResources,
+) -> None:
+    results: dict[bool, tuple[object, int]] = {}
+    for written in (True, False):
+        agent_id = agent_row(db_conn)
+        row = insert_row(db_conn, agent_id, "chat", "user", "hello")
+        record = ScriptedRecord()
+        engine = _Refusing(record, written=written)
+        rt, _ = _wire(
+            runtime(engine, ops_pool=aops_pool, hosted_resources=hosted_resources),
+            aops_pool,
+            agent_id,
+            record,
+        )
+        with pytest.raises(FatalLLMStreamError):
+            _ = await harness_turn_node(AgentState(), rt, config(agent_id))
+        results[written] = (row_status(db_conn, row), len(engine.delivered))
 
-    await sink.finish(turns)
-
-    assert timeline.waited_after == [0, 1], "the second turn must not return on the first's closing"
+    assert results[True] == ("done", 1), (
+        "the record shows the input: the writer settled it, it is not taken back"
+    )
+    assert results[False] == ("pending", 1), (
+        "the record does not show it: it goes back to the queue"
+    )

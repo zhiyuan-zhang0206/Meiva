@@ -40,6 +40,7 @@ from services.agent_runner.agent_host.transcript.timeline import (
     TimelineDeps,
     TranscriptTimeline,
     session_with_resume,
+    transcript_timeline_for,
 )
 
 
@@ -195,6 +196,10 @@ async def test_a_retired_runtime_reads_once_more_before_the_cli_closes_and_stops
 
 
 class _NoRecord:
+    @property
+    def cli_version(self) -> str | None:
+        return None
+
     async def records(self, *, exhaustive: bool = False) -> tuple[str, ...]:
         return ()
 
@@ -281,3 +286,20 @@ def test_the_writer_reads_the_registered_session_until_the_live_one_reports_its_
     assert current() == "resumed-session", "an agent that is resuming reads its record before init"
     live[0] = "live-session"
     assert current() == "live-session"
+
+
+def test_the_setting_on_the_built_in_agent_means_nothing_and_is_not_reported(
+    tmp_path: Path, aops_pool: AsyncConnectionPool, loguru_records: LogRecords
+) -> None:
+    slices = AgentSlices.resolve({"harness_transcript_timeline": True}, default_reader=defaults())
+    deps = TimelineDeps(
+        pool=aops_pool,
+        clock=system_clock(),
+        marker_id=lambda: "m",
+        publisher_factory=lambda _: QuietPublisher(),
+    )
+    built = transcript_timeline_for(
+        71, Harness.MEIVA, slices, deps, home=tmp_path, harness_environ={"HOME": str(tmp_path)}
+    )
+    assert built is None
+    assert loguru_records.events("harness_timeline_unsupported_harness") == []

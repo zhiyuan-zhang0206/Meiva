@@ -34,7 +34,7 @@ above `base/lm` (`base/agents`, `agent/graph/claim`), so the writer applies them
 ## Parsers
 
 A parser is a pure function from one raw row to entries, strict about the fields the projection needs. An
-unknown row type is an `Anomaly(UNKNOWN_TYPE)` (reported once per type by the projection), a known type that
+unknown row type is an `Anomaly(UNKNOWN_TYPE)` (reported by the projection once for each distinct kind and detail, here the type, among the latest `REPORTED_LIMIT` it remembers, not once for each row), a known type that
 lacks a needed field an `Anomaly(MISSING_FIELD)`; neither puts anything on a timeline. Each parser's header lists
 the row types it does not read yet. Golden tests run on sanitized recordings (`tests/fixtures/<scenario>/`,
 each with a `source.json` naming the CLI version, the recording and the sanitization rules).
@@ -100,3 +100,17 @@ bounded number of entries (`HOLD_ENTRIES`) or, for the writer, a bounded time, a
 items with an `ORPHAN_RELEASED` or `UNLINKED_RELEASED` anomaly each. An `EntryBatch` states the bytes of the CLI's file it
 covers (`size`), which the writer uses to bound a transaction. A reader raises `PositionLostError` (in `ports.py`) for a
 position its record no longer holds.
+
+## Origins
+
+A row or a queued command may carry `origin.kind`. The parser keeps what the row says (`HumanInput.origin`: the kind, the
+cause the harness vocabulary has for it and the notice the row would be) and decides nothing; the projection decides, in
+this order, for a user row and a queued command alike: (1) the row's wire id is one of the inputs the writer registered:
+it is ours and it settles, whatever origin the row names (the records we have of the SDK path show no origin on our own
+inputs, so what a CLI tags them with is unknown, and an input that is not settled is sent again, which the CLI would receive
+twice); (2) the origin is one `harness_cause` knows (`task-notification`, a timer): a notice; (3) no origin, or `human`
+(what a newer CLI puts on what a person typed): an input we did not send, shown as unmatched; (4) any other origin: an
+anomaly (`origin/<kind>`) that is reported and puts nothing on the timeline, because nothing can say what it is. An
+anomaly is reported once per (type, detail) within the latest `REPORTED_LIMIT` ones the projector remembers, so a restart
+reports it again. The sample of a long real session (`claude/transcript/tests/fixtures/long_session`, sanitized to structure) pins
+this, and that the bookkeeping rows of such a session are ignored and not reported.
