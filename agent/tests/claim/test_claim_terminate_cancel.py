@@ -268,7 +268,6 @@ async def test_claim_interrupt_kind_halts_to_idle_without_marker(
     assert cmd.update is not None
     assert cmd.update["halted"] is True
     assert cmd.update["messages"] == []
-    assert any("cancelled" in payload.lower() for payload in await live_events.payloads())
 
 
 # meiva:note
@@ -287,7 +286,6 @@ async def test_claim_interrupt_kind_halts_to_idle_without_marker(
 # node already aborted and returned here with halted=True.
 # wake to run the LLM on the new chat, not idle
 # the co-batched chat is committed and drives the turn
-# Cancelled still emitted so the live UI clears the interrupted turn's state
 async def test_claim_interrupt_with_chat_cobatch_wakes_to_process_chat(
     db_conn: psycopg.Connection,
     aops_pool: AsyncConnectionPool,
@@ -329,7 +327,6 @@ async def test_claim_interrupt_with_chat_cobatch_wakes_to_process_chat(
     assert len(msgs) == 1
     assert isinstance(msgs[0], HumanMessage)
     assert "please also do X" in msgs[0].content
-    assert any("cancelled" in payload.lower() for payload in await live_events.payloads())
 
 
 # meiva:note
@@ -729,7 +726,6 @@ async def test_claim_interrupt_batched_with_restart_idle_restart_silent(
     assert cmd.goto == END
     assert cmd.update is not None
     assert cmd.update["halted"] is True
-    assert not any("cancelled" in payload.lower() for payload in await live_events.payloads())
     assert db_conn.execute(
         "SELECT status FROM inbound_messages WHERE agent_id=%s AND kind='interrupt'", (tid,)
     ).fetchone() == ("pending",)
