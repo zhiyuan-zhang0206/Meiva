@@ -282,12 +282,21 @@ class ProbePolicy:
 UPSTREAM_PROBE = ProbePolicy()
 
 # meiva:note
-# A call that reaches the read timeout fails alone when the upstream still answers a probe.
-# This many such timeouts in a row (no call of any kind succeeding in between) mean the
-# upstream's tool path is wedged though its protocol layer answers (a tool stuck while
-# holding the upstream's tool mutex), and end the generation. Worst case from the start of
-# the first affected call: `CALL_TIMEOUT_LIMIT` read timeouts plus one probe each (380 s).
-CALL_TIMEOUT_LIMIT = 2
+# A call that reaches the read timeout is followed by probes (the watchdog's `ProbePolicy`:
+# up to `max_unanswered` pings `retry_s` apart, so a node event loop briefly stalled by the
+# call's own heavy work gets the same grace as in the watchdog); it fails alone when one is
+# answered. Such a call holds the serial lock for the whole read timeout, so slow-but-ending
+# calls must not be able to block every agent again and again: `CALL_TIMEOUT_LIMIT` read
+# timeouts within `CALL_TIMEOUT_WINDOW_S` end the generation, a success in between does not
+# reset the count (a tool stuck while holding the upstream's tool mutex looks the same as a
+# tool that always runs just over the limit). Blocked time: one timeout costs at most
+# `READ_TIMEOUT` + 10 s while the first probe answers, so a pattern that survives (at most
+# `CALL_TIMEOUT_LIMIT - 1` timeouts per window) blocks all agents at most 380 s per 30 min,
+# and the call that would be the third ends the generation: back-to-back timeouts end it
+# within 3 x (180 + 10) = 570 s of the first. The window is long enough to catch a repeating
+# offender and short enough that a timeout from yesterday does not count.
+CALL_TIMEOUT_LIMIT = 3
+CALL_TIMEOUT_WINDOW_S = 1800.0
 
 
 # meiva:note
@@ -323,7 +332,7 @@ class UpstreamGuard:
         self.policy = policy
         self.dead = asyncio.Event()
         self.reason: DeathReason | None = None
-        self._call_timeouts = 0
+        self._timeouts_at: list[float] = []
 
     def mark_dead(self, reason: DeathReason) -> None:
         if self.dead.is_set():
@@ -333,6 +342,19 @@ class UpstreamGuard:
         logger.error(
             "[browser-mcp] upstream is unusable ({}); ending this daemon generation", reason
         )
+
+    # meiva:note
+    # Probe like the watchdog does after a stall: `max_unanswered` pings `retry_s` apart, the
+    # first answer (or a closed connection) settles it; at most
+    # `timeout_s + (max_unanswered - 1) * (retry_s + timeout_s)` = 50 s with the production policy.
+    async def probe_with_retries(self) -> ProbeOutcome:
+        outcome = await self.probe()
+        for _ in range(self.policy.max_unanswered - 1):
+            if outcome is not ProbeOutcome.UNANSWERED:
+                break
+            await self.timers.asleep(self.policy.retry_s)
+            outcome = await self.probe()
+        return outcome
 
     # meiva:note
     # Ping the upstream once, bounded by the policy's timeout.
@@ -354,9 +376,11 @@ class UpstreamGuard:
     # Await one upstream request. A failure that makes the session unusable marks it dead and
     # raises `RuntimeError(UPSTREAM_DOWN_MSG)`; a read timeout is judged by `_after_timeout`;
     # any other error propagates unchanged.
-    async def request[T](self, what: str, work: Awaitable[T]) -> T:
+    async def request[T](self, what: str, work: Callable[[], Awaitable[T]]) -> T:
+        if self.dead.is_set():
+            raise RuntimeError(UPSTREAM_DOWN_MSG)
         try:
-            result = await work
+            result = await work()
         except UPSTREAM_DOWN as e:
             self.mark_dead(DeathReason.UPSTREAM_EXITED)
             raise RuntimeError(UPSTREAM_DOWN_MSG) from e
@@ -367,17 +391,18 @@ class UpstreamGuard:
             if e.code == REQUEST_TIMEOUT:
                 await self._after_timeout(what, e)
             raise
-        self._call_timeouts = 0
         return result
 
     async def _after_timeout(self, what: str, cause: MCPError) -> NoReturn:
-        self._call_timeouts += 1
-        outcome = await self.probe()
+        now = self.timers.monotonic()
+        self._timeouts_at = [t for t in self._timeouts_at if now - t < CALL_TIMEOUT_WINDOW_S]
+        self._timeouts_at.append(now)
+        outcome = await self.probe_with_retries()
         if outcome is ProbeOutcome.EXITED:
             self.mark_dead(DeathReason.UPSTREAM_EXITED)
         elif outcome is ProbeOutcome.UNANSWERED:
             self.mark_dead(DeathReason.CALL_TIMEOUT_UNANSWERED)
-        elif self._call_timeouts >= CALL_TIMEOUT_LIMIT:
+        elif len(self._timeouts_at) >= CALL_TIMEOUT_LIMIT:
             self.mark_dead(DeathReason.CALL_TIMEOUTS_REPEATED)
         if self.dead.is_set():
             raise RuntimeError(UPSTREAM_DOWN_MSG) from cause

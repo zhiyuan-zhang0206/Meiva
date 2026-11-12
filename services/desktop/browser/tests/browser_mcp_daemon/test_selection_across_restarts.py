@@ -8,6 +8,10 @@
 # selection grants no right to close the page; only the ledger's records do.
 from __future__ import annotations
 
+import asyncio
+
+import pytest
+
 from services.desktop.browser import page_lifecycle
 from services.desktop.browser.tab_groups.page_store import (
     FileSelectionStore,
@@ -186,3 +190,29 @@ def test_a_file_store_survives_a_restart_and_reads_unreadable_files_as_empty(
     ):
         path.write_text(broken, encoding="utf-8")
         assert FileSelectionStore(path).load() == {}
+
+
+async def test_moving_the_selection_clears_the_old_page_before_anything_is_awaited() -> None:
+    rig = Rig()
+    first = rig.browser.add_tab("https://first.example/")
+    rig.browser.add_tab("https://second.example/")
+    d1, _ = rig.start()
+    await d1.call_tool_for_agent(
+        "select_page", {"pageId": rig.browser.page_id_of("https://first.example/")}, AGENT
+    )
+    assert rig.selection.selected == {AGENT: first}
+
+    # meiva:note
+    # the daemon is cancelled while it identifies the new page in Chrome
+    def cancelled(_read: int) -> None:
+        raise asyncio.CancelledError
+
+    rig.browser.on_state_read = cancelled
+    second_page = rig.browser.page_id_of("https://second.example/")
+    with pytest.raises(asyncio.CancelledError):
+        await d1.call_tool_for_agent("select_page", {"pageId": second_page}, AGENT)
+
+    assert rig.selection.selected == {}
+    d2, up2 = rig.start()
+    assert (await d2.call_tool_for_agent("take_snapshot", {}, AGENT)).is_error
+    assert _selected_url(up2) is None

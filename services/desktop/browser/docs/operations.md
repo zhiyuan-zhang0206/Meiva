@@ -101,9 +101,12 @@ the operating choices below do not redefine either component.
   `chrome-devtools-mcp` is judged unusable (`UpstreamGuard`, `mcp_upstream.py`):
   the upstream process or connection is gone (at once); 3 watchdog pings in a row unanswered
   (ping every 30 s, 10 s timeout, retries 10 s apart: a wedge is found within at most 80 s
-  of the last answered ping); a call that hit the 180 s read timeout while the probe that
-  follows it goes unanswered (at once); or 2 read timeouts in a row with no call succeeding
-  between them (at most 2 x (180 + 10) = 380 s after the first affected call). A single
+  of the last answered ping); a call that hit the 180 s read timeout while none of the up
+  to 3 probes after it (10 s apart, at most 50 s, the watchdog's own policy) is answered; or
+  3 read timeouts within 30 minutes, successful calls in between not resetting the count
+  (back-to-back: at most 3 x (180 + 10) = 570 s after the first; a pattern that stays
+  under the limit blocks every agent at most 2 x 190 = 380 s per 30 minutes, since a
+  timed-out call holds the serial lock for the whole read timeout). A single
   slow call (a slow navigation, lighthouse, a trace) whose upstream still answers fails
   alone with `UpstreamCallTimeoutError` and nobody else notices. Measured against 1.6.0
   (2026-11-12): pings are answered within 0.12 s during a 40 s navigation, a 40 s
@@ -120,7 +123,12 @@ the operating choices below do not redefine either component.
   a target that is gone (or a Chrome restart, which renews every target id) or whose URL is
   shared by another tab is dropped and the agent starts page-less, as before. A restored
   selection gives no right to close the page: only the records of the page ledger do. Log
-  lines: `restored as <page>` / `selection is dropped`.
+  lines: `restored as <page>` / `selection is dropped`. A transient failure (`list_pages`
+  erroring, `tab_state` timing out) also clears the saved selection, and moving the selection
+  clears the old page before the new one is identified: wrong-page restores are worse than a
+  lost selection, so this is deliberately conservative. A `new_page` that times out but is
+  still created by the upstream afterwards leaves a page with no record, which the TTL sweep
+  never closes (the safe direction of leak).
 - **First login is the user's job**: the headed window opens on the host's
   desktop; **you** sign into the target sites (e.g. Google / Xiaohongshu) once — the
   agent does not (and cannot) log in for you. The dedicated profile persists the

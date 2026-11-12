@@ -18,7 +18,7 @@ from mcp.types import REQUEST_TIMEOUT
 
 from base.clock.tests.fakes import system_clock
 from services.desktop.browser.mcp_daemon import serve_with_upstream
-from services.desktop.browser.mcp_upstream import UpstreamCallTimeoutError
+from services.desktop.browser.mcp_upstream import DeathReason, UpstreamCallTimeoutError
 from services.desktop.browser.tests.test_browser_mcp_daemon import FakeUpstream, new_daemon
 
 
@@ -117,3 +117,45 @@ async def test_a_stop_ends_the_daemon_as_stopped_not_as_a_death(
     exits = [r for r in loguru_records if "daemon exiting" in r["message"]]
     assert [r["message"].rsplit(": ", 1)[1] for r in exits] == ["stopped"]
     assert exits[0]["level"].name == "INFO"
+
+
+# meiva:note
+# Every `take_snapshot` outlives the read timeout (raised at once here); pings answer.
+class AlwaysSlowUpstream(FakeUpstream):
+    def __init__(self) -> None:
+        super().__init__()
+        self.snapshot_attempts = 0
+
+    async def send_ping(self) -> None:
+        return None
+
+    async def call_tool(self, name: str, args: dict[str, Any]) -> types.CallToolResult:
+        if name == "take_snapshot":
+            self.snapshot_attempts += 1
+            raise MCPError(code=REQUEST_TIMEOUT, message="Request 'tools/call' timed out")
+        return await super().call_tool(name, args)
+
+
+async def test_queued_agents_stop_waiting_once_the_timeouts_end_the_generation() -> None:
+    up = AlwaysSlowUpstream()
+    d = new_daemon(up)
+    agents = [7, 8, 9, 10]
+    for agent in agents:
+        await d.call_tool_for_agent("new_page", {"url": f"https://{agent}.example/"}, agent)
+
+    outcomes = await asyncio.gather(
+        *(d.call_tool_for_agent("take_snapshot", {}, agent) for agent in agents),
+        return_exceptions=True,
+    )
+
+    # meiva:note
+    # the first two time out alone, the third ends the generation, the fourth (already queued)
+    # is refused without a fourth wait for the read timeout
+    assert [type(o) for o in outcomes] == [
+        UpstreamCallTimeoutError,
+        UpstreamCallTimeoutError,
+        RuntimeError,
+        RuntimeError,
+    ]
+    assert up.snapshot_attempts == 3
+    assert d.dead.is_set() and d.guard.reason is DeathReason.CALL_TIMEOUTS_REPEATED

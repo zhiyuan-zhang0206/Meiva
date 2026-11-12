@@ -84,7 +84,7 @@ from services.desktop.browser.tab_groups.page_ledger import (
     reconcile,
     target_of_url,
 )
-from services.desktop.browser.tab_groups.page_registry import PageRegistry as PageRegistry
+from services.desktop.browser.tab_groups.page_registry import PageRegistry
 from services.desktop.browser.tab_groups.page_selection import (
     listed_page_of_target,
     target_of_listed_page,
@@ -450,6 +450,11 @@ async def remember_selection(
         return
     target_id = daemon.pages.page_targets.get(page_id)
     if target_id is None:
+        # meiva:note
+        # The old saved page must not outlive the move: a daemon killed while these awaits
+        # are pending would restore the agent to the page it just left. Clear it first, write
+        # the new one only once it is identified.
+        daemon.pages.set_selected_target(agent_id, None)
         try:
             listing = parse_page_listing(text_of(result))
             if page_id not in listing:

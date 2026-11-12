@@ -22,7 +22,8 @@ from services.desktop.browser.mcp_daemon import (
     text_of,
 )
 from services.desktop.browser.mcp_upstream import UpstreamGuard
-from services.desktop.browser.page_lifecycle import PageRegistry, parse_page_listing
+from services.desktop.browser.page_lifecycle import parse_page_listing
+from services.desktop.browser.tab_groups.page_registry import PageRegistry
 from services.desktop.browser.tab_groups.page_store import RecordStore, SelectionStore
 from services.desktop.browser.tests.fake_browser import (
     FakeBrowser,

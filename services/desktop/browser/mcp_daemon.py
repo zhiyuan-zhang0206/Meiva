@@ -64,7 +64,6 @@ from services.desktop.browser.mcp_upstream import (
 )
 from services.desktop.browser.page_lifecycle import (
     RENEW_PAGE_TOOL,
-    PageRegistry,
     expired_page_reaper,
     handle_release_agent_page,
     renew_agent_page,
@@ -77,6 +76,7 @@ from services.desktop.browser.tab_groups.grouping import (
     ExtensionWorker,
     staged_extension_dir,
 )
+from services.desktop.browser.tab_groups.page_registry import PageRegistry
 from services.desktop.browser.tab_groups.page_store import (
     FileRecordStore,
     FileSelectionStore,
@@ -176,14 +176,14 @@ class ChromeMcpDaemon:
             if closing is not None:
                 await self.tab_groups.release_page(closing)
         return await self.guard.request(
-            f"browser tool {name!r}", self._upstream.call_tool(name, args)
+            f"browser tool {name!r}", lambda: self._upstream.call_tool(name, args)
         )
 
     async def list_tools(self) -> list[dict[str, object]]:
         async with self._lock:
             if self._tools is None:
                 self._tools = (
-                    await self.guard.request("tool listing", self._upstream.list_tools())
+                    await self.guard.request("tool listing", self._upstream.list_tools)
                 ).tools
         # meiva:note
         # Daemon-owned tool appended after the upstream's verbatim passthrough:
