@@ -29,6 +29,7 @@ from base.lm.catalog.provider_keys import ProviderKeys
 from base.lm.factory import validate_model_launch
 from base.lm.harness import BackgroundWorkReporting, UnsolicitedOutput, UnsolicitedSink
 from base.lm.harness.bridge import HarnessBridge
+from base.lm.harness.codex.frames import TranscriptTap
 from base.lm.harness.engine import TurnEngine
 from base.lm.harness.handoff import HarnessContribution
 from base.lm.harness.registration import RegistrationStore, SecureRandom
@@ -500,6 +501,7 @@ async def build_runtime(
         home=home,
         fork_source_agent_id=fork_source_agent_id,
         session_wake=None if timeline is None else timeline.wake,
+        codex_transcript=None if timeline is None else timeline.codex_link,
     )
     if timeline is not None and bridge is not None and registry is not None:
         timeline.attach(
@@ -534,6 +536,7 @@ def harness_bridge_for(
     home: Path,
     fork_source_agent_id: int | None = None,
     session_wake: Callable[[str | None], None] | None = None,
+    codex_transcript: TranscriptTap | None = None,
 ) -> HarnessBridge | None:
     if harness is Harness.MEIVA:
         return None
@@ -559,6 +562,7 @@ def harness_bridge_for(
         unsolicited=unsolicited,
         fork_source_agent_id=fork_source_agent_id,
         session_wake=session_wake,
+        codex_transcript=codex_transcript,
     )
 
 

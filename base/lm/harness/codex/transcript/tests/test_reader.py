@@ -1,22 +1,23 @@
 from __future__ import annotations
 
 import copy
-from collections.abc import AsyncIterator, Mapping, Sequence
+from collections.abc import AsyncIterator, Mapping
 from pathlib import Path
 
 import pytest
 
 from base.lm.harness.codex.transcript.history import PAGE_ITEMS
-from base.lm.harness.codex.transcript.link import TranscriptLink
 from base.lm.harness.codex.transcript.position import decode
-from base.lm.harness.codex.transcript.reader import QUIET_RECHECK_SECONDS, CodexRecordReader
+from base.lm.harness.codex.transcript.reader import QUIET_RECHECK_SECONDS
 from base.lm.harness.codex.transcript.shapes import Obj
-from base.lm.harness.codex.transcript.tests.history_fake import FakeHistory, write_lines
+from base.lm.harness.codex.transcript.tests.history_fake import FakeHistory
+from base.lm.harness.codex.transcript.tests.rig import (
+    Rig,
+    basic,
+    entries_of,
+)
 from base.lm.harness.codex.transcript.tests.support import (
-    as_obj,
     load_json,
-    load_lines,
-    page_rows,
     project,
     row_item,
     sent,
@@ -27,70 +28,11 @@ from base.lm.harness.session.transcript.entries import (
     MAIN_RECORD,
     AgentText,
     Anomaly,
-    AnyEntry,
     HumanInput,
     SubagentLink,
     TurnEnd,
 )
 from base.lm.harness.session.transcript.ports import EntryBatch, PositionLostError, StoredRow
-
-THREAD = "thr-main"
-STAMP = "2026-11-12T08:57:13.042Z"
-
-
-class Clock:
-    def __init__(self) -> None:
-        self.now = 1000.0
-
-    def __call__(self) -> float:
-        return self.now
-
-
-class Rig:
-    def __init__(self, tmp_path: Path, thread: str = THREAD) -> None:
-        self.history = FakeHistory(thread)
-        self.rollout = tmp_path / f"rollout-2026-11-12T10-00-00-{thread}.jsonl"
-        self.rollout.touch()
-        self.woken: list[str | None] = []
-        self.link = TranscriptLink(self.woken.append)
-        self.link.attach(self.history, rollout_path=str(self.rollout))
-        self.clock = Clock()
-        self.reader = CodexRecordReader(
-            codex_home=tmp_path, thread_id=lambda: thread, link=self.link, now=self.clock
-        )
-        self.position: dict[str, str | None] = {}
-        self.lines = 1000
-
-    def feed(self, rows: Sequence[Obj], lines: Sequence[Obj] = ()) -> None:
-        for row in rows:
-            self.history.append(row)
-        filler: Obj = {
-            "type": "turn_context",
-            "timestamp": STAMP,
-            "ordinal": self.lines,
-            "payload": {},
-        }
-        self.lines += 1
-        write_lines(self.rollout, [*lines, filler])
-
-    async def drain(self, record: str = MAIN_RECORD) -> list[EntryBatch]:
-        batches: list[EntryBatch] = []
-        while (
-            batch := await self.reader.read_after(record, self.position.get(record))
-        ) is not None:
-            self.position[record] = batch.position
-            batches.append(batch)
-            assert len(batches) < 1000
-        return batches
-
-
-def entries_of(batches: list[EntryBatch]) -> list[AnyEntry]:
-    return [entry for batch in batches for entry in batch.entries]
-
-
-def basic() -> tuple[list[Obj], list[Obj]]:
-    rows = [as_obj(row) for row in page_rows(copy.deepcopy(load_json("basic/items.json")))]
-    return rows, load_lines("basic/rollout.jsonl")
 
 
 async def test_a_thread_is_read_to_its_end_with_turn_ends_and_usage_after_the_items(
@@ -217,7 +159,7 @@ async def test_a_child_thread_is_a_record_while_it_is_working_and_not_after(
             target = child_history if params["threadId"] == child else rig.history
             return await target.request(method, params, timeout=timeout)
 
-    rig.link.attach(Both(), rollout_path=str(rig.rollout))
+    rig.link.attach(Both(), rollout_path=str(rig.rollout), cli_version="0.166.0")
     rig.link.on_notification("item/completed", {"threadId": child, "turnId": "t"})
     assert rig.woken == [child]
     assert await rig.reader.records() == (MAIN_RECORD, child)

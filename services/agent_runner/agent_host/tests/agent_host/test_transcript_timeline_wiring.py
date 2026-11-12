@@ -1,9 +1,10 @@
 # meiva:note
-# How the agent host wires the transcript-sourced timeline of an external Claude agent (the agent's
+# How the agent host wires the transcript-sourced timeline of an external Claude or Codex agent (the agent's
 # `harness_transcript_timeline` setting, off by default): which runtimes get a writer, how the SDK's
 # `session_store` reaches it as a wake-up only, that `load` never returns rows (so resume stays on the CLI's own
-# file), and that every way of closing a runtime reads once more before the CLI goes away and stops the writer
-# after it.
+# file), how a Codex session and the reader of its thread share one link (the session's notifications wake the
+# writer, the session resumes without its history), and that every way of closing a runtime reads once more before
+# the CLI goes away and stops the writer after it.
 # meiva:link agent/harness_timeline/README.md
 
 from __future__ import annotations
@@ -28,11 +29,13 @@ from base.lm.catalog.provider_keys import ProviderKeys
 from base.lm.harness import FileSessionRegistry, RegistrationStore, SessionRecord
 from base.lm.harness.claude.session import ClaudeSession
 from base.lm.harness.claude.transcript.wake import WakeSessionStore
+from base.lm.harness.codex.session import CodexSession
+from base.lm.harness.codex.transcript.link import TranscriptLink
 from base.lm.harness.engine import TurnEngine
 from base.lm.harness.session.transcript.entries import AnyEntry
 from base.lm.harness.session.transcript.ports import EntryBatch, StoredRow
 from base.lm.harness.tests.roots import bridge_root_values
-from base.lm.harness.wiring import open_session
+from base.lm.harness.wiring import TranscriptSource, open_session, transcript_reader_for
 from base.log.tests.log_records import LogRecords
 from base.native_process.runtime_incarnation import RuntimeIncarnation
 from services.agent_runner.agent_host.runtime import AgentRuntime, HarnessSessions, build_runtime
@@ -88,7 +91,7 @@ async def _build(
     )
 
 
-async def test_only_a_claude_agent_with_the_setting_on_gets_a_writer(
+async def test_only_a_claude_or_codex_agent_with_the_setting_on_gets_a_writer(
     tmp_path: Path,
     model_catalog: ModelCatalog,
     aops_pool: AsyncConnectionPool,
@@ -101,9 +104,59 @@ async def test_only_a_claude_agent_with_the_setting_on_gets_a_writer(
     enabled = await _build(tmp_path, model_catalog, aops_pool, harness=Harness.CLAUDE_CODE, on=True)
     assert isinstance(enabled.harness_timeline, TranscriptTimeline)
     assert isinstance(enabled.harness_timeline.writer, HarnessTimelineWriter)
-    other = await _build(tmp_path, model_catalog, aops_pool, harness=Harness.CODEX, on=True)
+    assert enabled.harness_timeline.codex_link is None
+    codex_off = await _build(tmp_path, model_catalog, aops_pool, harness=Harness.CODEX, on=False)
+    assert codex_off.harness_timeline is None
+    codex = await _build(tmp_path, model_catalog, aops_pool, harness=Harness.CODEX, on=True)
+    assert isinstance(codex.harness_timeline, TranscriptTimeline)
+    assert isinstance(codex.harness_timeline.codex_link, TranscriptLink)
+    other = await _build(tmp_path, model_catalog, aops_pool, harness=Harness.ANTIGRAVITY, on=True)
     assert other.harness_timeline is None
     assert len(loguru_records.events("harness_timeline_unsupported_harness")) == 1
+
+
+async def test_a_codex_session_and_the_reader_of_its_thread_share_one_link_that_wakes_the_writer(
+    tmp_path: Path,
+    model_catalog: ModelCatalog,
+    aops_pool: AsyncConnectionPool,
+) -> None:
+    runtime = await _build(tmp_path, model_catalog, aops_pool, harness=Harness.CODEX, on=True)
+    timeline = runtime.harness_timeline
+    assert timeline is not None and timeline.codex_link is not None
+    session = open_session(
+        Harness.CODEX,
+        agent_id=71,
+        cwd=tmp_path,
+        registry=FileSessionRegistry(tmp_path / "sessions"),
+        environ={},
+        clock=bridge_root_values().clock,
+        codex_transcript=timeline.codex_link,
+    )
+    assert isinstance(session, CodexSession) and session.config.transcript is timeline.codex_link
+    plain = open_session(
+        Harness.CODEX,
+        agent_id=71,
+        cwd=tmp_path,
+        registry=FileSessionRegistry(tmp_path / "sessions"),
+        environ={},
+        clock=bridge_root_values().clock,
+    )
+    assert isinstance(plain, CodexSession) and plain.config.transcript is None
+    woken: list[str | None] = []
+    source = transcript_reader_for(
+        Harness.CODEX,
+        environ={"HOME": str(tmp_path)},
+        workspace=tmp_path,
+        session_id=lambda: "thread-1",
+        wake=woken.append,
+        now_ns=lambda: 0,
+        monotonic=lambda: 0.0,
+    )
+    assert source.codex_link is not None
+    source.codex_link.on_notification("item/completed", {"threadId": "thread-1"})
+    source.codex_link.on_notification("item/agentMessage/delta", {"threadId": "thread-1"})
+    source.codex_link.on_notification("mcpServer/startupStatus/updated", {"threadId": "thread-1"})
+    assert woken == ["thread-1"], "a completion wakes the writer; a delta or a status does not"
 
 
 async def test_the_session_store_only_wakes_the_writer_and_never_returns_rows(
@@ -234,7 +287,7 @@ async def test_the_host_binds_every_turn_and_runs_one_writer_task_until_the_runt
         agent_id=71,
         harness="claude_code",
         policy=ReplyPolicy(explicit_visibility=False, delivery_mode=None),
-        reader_for=lambda _: _NoRecord(),
+        reader_for=lambda _, __: TranscriptSource(_NoRecord()),
     )
     ids: list[str | None] = [None]
     timeline.attach(lambda: ids[0])

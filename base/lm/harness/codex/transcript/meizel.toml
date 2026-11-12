@@ -1,4 +1,4 @@
-exports = ["link.py", "reader.py"]
+exports = ["link.py", "reader.py", "shapes.py", "tests"]
 
 [uses]
 "__init__.py" = []

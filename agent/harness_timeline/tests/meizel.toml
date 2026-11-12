@@ -2,6 +2,8 @@ exports = []
 
 [uses]
 "test_writer.py" = ["support.py"]
+"test_writer_codex.py" = ["support.py"]
+"test_writer_codex_linear.py" = ["support.py", "test_writer_linear.py"]
 "test_writer_lifecycle.py" = ["support.py"]
 "test_writer_correctness.py" = ["support.py"]
 "test_writer_resources.py" = ["support.py"]

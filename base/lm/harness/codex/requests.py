@@ -45,7 +45,9 @@ def initialize_request() -> tuple[str, JsonObject]:
 # `thread/resume` otherwise resets the thread's execution policy to `read-only` with restricted
 # network and strips inherited environment variables such as `MEIVA_HARNESS_HANDLE`. `model` is
 # omitted rather than sent empty: an unset model means the account's default, not a request for
-# no model.
+# no model. `exclude_turns` is the timeline-from-transcript mode: the resume then returns the thread's metadata
+# only and not its whole history (nothing here reads the history from the reply: the transcript reader pages it
+# with `thread/items/list`), which for a long-lived thread is tens of MiB on one line.
 def open_thread_request(
     resume: str | None,
     *,
@@ -53,6 +55,7 @@ def open_thread_request(
     model: str | None,
     approval_policy: str,
     sandbox: str,
+    exclude_turns: bool = False,
 ) -> tuple[str, JsonObject]:
     params: JsonObject = {
         "cwd": cwd,
@@ -63,7 +66,10 @@ def open_thread_request(
     if model:
         params["model"] = model
     if resume:
-        return ("thread/resume", {"threadId": resume, **params})
+        return (
+            "thread/resume",
+            {"threadId": resume, **params, **({"excludeTurns": True} if exclude_turns else {})},
+        )
     return ("thread/start", params)
 
 
@@ -157,6 +163,8 @@ class OpenedThread:
     session_id: str
     model: str | None
     cwd: str
+    path: str | None = None
+    cli_version: str | None = None
 
     @classmethod
     def of(
@@ -167,4 +175,6 @@ class OpenedThread:
             session_id=str(thread.get("id") or (resume or "")),
             model=as_text(result.get("model")) or as_text(thread.get("model")) or model,
             cwd=as_text(result.get("cwd")) or as_text(thread.get("cwd")) or cwd,
+            path=as_text(thread.get("path")),
+            cli_version=as_text(thread.get("cliVersion")),
         )

@@ -1,9 +1,10 @@
-exports = ["support.py"]
+exports = ["rig.py", "support.py"]
 
 [uses]
+"rig.py" = ["history_fake.py", "support.py"]
 "support.py" = []
 "test_golden.py" = ["support.py"]
-"test_reader.py" = ["history_fake.py", "support.py"]
-"test_reader_linear.py" = ["support.py", "test_reader.py"]
+"test_reader.py" = ["history_fake.py", "rig.py", "support.py"]
+"test_reader_linear.py" = ["rig.py", "support.py"]
 "test_rollout_lines.py" = ["support.py"]
 "test_store_filter.py" = ["support.py"]

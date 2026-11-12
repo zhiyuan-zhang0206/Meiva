@@ -6,8 +6,8 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from base.lm.harness.codex.transcript.history import PAGE_ITEMS
+from base.lm.harness.codex.transcript.tests.rig import STAMP, Rig, entries_of
 from base.lm.harness.codex.transcript.tests.support import as_obj, load_json, page_rows, row_item
-from base.lm.harness.codex.transcript.tests.test_reader import STAMP, Rig, entries_of
 from base.lm.harness.session.transcript.entries import AgentText
 
 # meiva:note

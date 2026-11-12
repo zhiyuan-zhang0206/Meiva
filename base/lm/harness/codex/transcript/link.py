@@ -1,7 +1,8 @@
 from __future__ import annotations
 
-from collections.abc import Awaitable, Callable, Mapping
-from typing import Protocol
+from collections.abc import Callable, Mapping
+
+from base.lm.harness.codex.frames import History
 
 # meiva:note
 # The one thing a Codex session shares with the reader of its own transcript: the app-server the session already
@@ -30,22 +31,20 @@ _WAKING = frozenset(
 )
 
 
-class History(Protocol):
-    def request(
-        self, method: str, params: Mapping[str, object], *, timeout: float | None = None
-    ) -> Awaitable[dict[str, object]]: ...
-
-
 class TranscriptLink:
     def __init__(self, wake: Callable[[str | None], None]) -> None:
         self._wake = wake
         self._history: History | None = None
         self._rollout_hint: str | None = None
+        self._cli_version: str | None = None
         self._activity: dict[str, int] = {}
 
-    def attach(self, history: History, *, rollout_path: str | None) -> None:
+    def attach(
+        self, history: History, *, rollout_path: str | None, cli_version: str | None
+    ) -> None:
         self._history = history
         self._rollout_hint = rollout_path
+        self._cli_version = cli_version
 
     def detach(self) -> None:
         self._history = None
@@ -56,6 +55,10 @@ class TranscriptLink:
     @property
     def rollout_hint(self) -> str | None:
         return self._rollout_hint
+
+    @property
+    def cli_version(self) -> str | None:
+        return self._cli_version
 
     def activity(self) -> Mapping[str, int]:
         return self._activity

@@ -16,8 +16,7 @@ from base.api_contracts.agent_contract import Harness
 from base.clock import Clock
 from base.host.env.agent_slices import AgentSlices
 from base.lm.harness.registry import SessionRegistry
-from base.lm.harness.session.transcript.ports import VersionedRecordReader
-from base.lm.harness.wiring import transcript_reader_for
+from base.lm.harness.wiring import TranscriptSource, transcript_reader_for
 from base.log import logger
 from base.native_process.runtime_incarnation import RuntimeIncarnation
 from base.paths import workspace_dir
@@ -88,13 +87,17 @@ class TranscriptTimeline:
         agent_id: int,
         harness: str,
         policy: ReplyPolicy,
-        reader_for: Callable[[Callable[[], str | None]], VersionedRecordReader],
+        reader_for: Callable[
+            [Callable[[], str | None], Callable[[str | None], None]], TranscriptSource
+        ],
     ) -> None:
         self._agent_id = agent_id
         self._session_id: Callable[[], str | None] = lambda: None
         self._publisher = deps.publisher_factory(agent_id)
         self.effects = TimelineEffects(agent_id, self._publisher)
-        reader = reader_for(self._current_session)
+        source = reader_for(self._current_session, self.wake)
+        reader = source.reader
+        self.codex_link = source.codex_link
         self.writer = HarnessTimelineWriter(
             pool=deps.pool,
             agent_id=agent_id,
@@ -210,10 +213,10 @@ def transcript_timeline_for(
         return None
     if harness is Harness.MEIVA:
         return None
-    if harness is not Harness.CLAUDE_CODE:
+    if harness not in (Harness.CLAUDE_CODE, Harness.CODEX):
         logger.warning(
-            "agent {agent_id}: harness_transcript_timeline is on but only Claude Code agents read their "
-            "timeline from the transcript; the setting is ignored for {harness}",
+            "agent {agent_id}: harness_transcript_timeline is on but only Claude Code and Codex agents read "
+            "their timeline from the transcript; the setting is ignored for {harness}",
             event="harness_timeline_unsupported_harness",
             agent_id=agent_id,
             harness=harness.value,
@@ -225,11 +228,13 @@ def transcript_timeline_for(
         agent_id=agent_id,
         harness=harness.value,
         policy=ReplyPolicy(explicit_visibility=mode == "prefix", delivery_mode=mode),
-        reader_for=lambda session_id: transcript_reader_for(
+        reader_for=lambda session_id, wake: transcript_reader_for(
             harness,
             environ=harness_environ,
             workspace=workspace_dir(agent_id, home=home),
             session_id=session_id,
+            wake=wake,
             now_ns=lambda: round(deps.clock.now().timestamp() * 1_000_000_000),
+            monotonic=deps.clock.monotonic,
         ),
     )

@@ -10,8 +10,7 @@ from base.api_contracts.agent_contract import Harness
 from base.clock.tests.fakes import system_clock
 from base.lm.harness import HarnessClosedError, HarnessTurnFaultedError
 from base.lm.harness.base_session import SessionBinding
-from base.lm.harness.codex import CodexConfig
-from base.lm.harness.codex.auth import SECRET_ENV_NAMES, build_env
+from base.lm.harness.codex import SECRET_ENV_NAMES, CodexConfig, build_env
 from base.lm.harness.codex.session import CodexSession
 from base.lm.harness.codex.tests import child_environment_server
 from base.lm.harness.registration import HANDLE_ENV

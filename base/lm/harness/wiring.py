@@ -29,11 +29,15 @@ from base.lm.harness.claude.session import ClaudeSession
 from base.lm.harness.claude.transcript.reader import ClaudeRecordReader
 from base.lm.harness.claude.transcript.wake import WakeSessionStore
 from base.lm.harness.codex import CodexConfig
+from base.lm.harness.codex.frames import TranscriptTap
 from base.lm.harness.codex.session import CodexSession
+from base.lm.harness.codex.transcript.link import TranscriptLink
+from base.lm.harness.codex.transcript.reader import CodexRecordReader
 from base.lm.harness.events import UnsolicitedSink
 from base.lm.harness.handoff import ClusterFact, Handoff, HarnessContribution
 from base.lm.harness.registration import HANDLE_ENV, RegistrationStore, SecureRandom
 from base.lm.harness.registry import SessionRegistry
+from base.lm.harness.session.transcript.ports import VersionedRecordReader
 
 # meiva:note
 # The document a fresh session wakes on. It states who the agent is and where it
@@ -102,6 +106,7 @@ def open_session(
     unsolicited: UnsolicitedSink | None = None,
     fork_source_agent_id: int | None = None,
     session_wake: Callable[[str | None], None] | None = None,
+    codex_transcript: TranscriptTap | None = None,
 ) -> HarnessSession:
     binding = SessionBinding(agent_id, registry, unsolicited, fork_source_agent_id)
     if harness is Harness.CLAUDE_CODE:
@@ -124,7 +129,9 @@ def open_session(
         )
     if harness is Harness.CODEX:
         return CodexSession(
-            CodexConfig(cwd=cwd, model=model, reasoning_effort=reasoning_effort),
+            CodexConfig(
+                cwd=cwd, model=model, reasoning_effort=reasoning_effort, transcript=codex_transcript
+            ),
             environ=environ,
             binding=binding,
             clock=clock,
@@ -235,6 +242,7 @@ def bridge_for(
     unsolicited: UnsolicitedSink | None = None,
     fork_source_agent_id: int | None = None,
     session_wake: Callable[[str | None], None] | None = None,
+    codex_transcript: TranscriptTap | None = None,
 ) -> HarnessBridge | None:
     if harness is Harness.MEIVA:
         return None
@@ -261,6 +269,7 @@ def bridge_for(
             unsolicited=unsolicited,
             fork_source_agent_id=fork_source_agent_id,
             session_wake=session_wake,
+            codex_transcript=codex_transcript,
         )
 
     return HarnessBridge(
@@ -279,25 +288,43 @@ def bridge_for(
 
 
 # meiva:note
-# The reader of an external session's own transcript, for the timeline writer: Claude Code only for now (Codex and
-# Antigravity read their records through their own readers when they cut over). It resolves the CLI's home the
-# way the session does (`session_environ`, the same `HOME`), takes the session id as a callable because a fresh
-# session learns its id only when the CLI starts it, and prefers the project directory of the agent's own
-# workspace when the same session id is found under several.
+# The reader of an external session's own transcript, for the timeline writer, and what the session must share with
+# it. Claude Code: the reader tails the CLI's local file (`session_store` wakes the writer, see `session_wake`).
+# Codex: the reader asks the session's own app-server for the thread's item history, so the session and the reader
+# share one `TranscriptLink` (the session attaches its connection and tells it the notifications; the reader's wake is
+# the link's), which the runtime hands to the bridge as `codex_transcript`. Both resolve the CLI's home the way the
+# session does (`session_environ`, the same `HOME`) and take the session id as a callable because a fresh session
+# learns its id only when the CLI starts it. Antigravity has no reader yet.
 # meiva:link base/lm/harness/docs/transcript-projection.md
+@dataclass(frozen=True)
+class TranscriptSource:
+    reader: VersionedRecordReader
+    codex_link: TranscriptLink | None = None
+
+
 def transcript_reader_for(
     harness: Harness,
     *,
     environ: Mapping[str, str],
     workspace: Path,
     session_id: Callable[[], str | None],
+    wake: Callable[[str | None], None],
     now_ns: Callable[[], int],
-) -> ClaudeRecordReader:
+    monotonic: Callable[[], float],
+) -> TranscriptSource:
+    if harness is Harness.CODEX:
+        link = TranscriptLink(wake)
+        reader = CodexRecordReader.for_session(
+            environ=session_environ(environ), thread_id=session_id, link=link, now=monotonic
+        )
+        return TranscriptSource(reader, link)
     if harness is not Harness.CLAUDE_CODE:
         raise ValueError(f"no transcript reader for harness {harness.value!r}")
-    return ClaudeRecordReader.for_session(
-        environ=session_environ(environ),
-        workspace=workspace,
-        session_id=session_id,
-        now_ns=now_ns,
+    return TranscriptSource(
+        ClaudeRecordReader.for_session(
+            environ=session_environ(environ),
+            workspace=workspace,
+            session_id=session_id,
+            now_ns=now_ns,
+        )
     )

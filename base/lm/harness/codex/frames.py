@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 from collections.abc import Awaitable, Callable, Mapping
 from dataclasses import dataclass
+from typing import Protocol
 
 from base.host.boundary.json_values import is_object_dict
 from base.host.boundary.untyped import object_of
@@ -162,3 +163,28 @@ def classify(line: bytes) -> ServerRequest | Reply | Notification | None:
     if request_id is None:
         return None
     return Reply(request_id, message)
+
+
+# meiva:note
+# The two shapes a Codex session shares with whoever reads its thread's own record (`transcript/link.py` is the
+# implementation): `History` is what that reader may ask of the session's app-server connection, one JSON-RPC
+# request, and `TranscriptTap` is what the session tells it (the connection once the thread is open, the
+# notifications it receives, and that the connection is gone). They are protocols so that the session's
+# configuration, which is plain data, can hold one without importing the reader.
+# meiva:link base/lm/harness/codex/docs/codex.md
+
+
+class History(Protocol):
+    def request(
+        self, method: str, params: Mapping[str, object], *, timeout: float | None = None
+    ) -> Awaitable[dict[str, object]]: ...
+
+
+class TranscriptTap(Protocol):
+    def attach(
+        self, history: History, *, rollout_path: str | None, cli_version: str | None
+    ) -> None: ...
+
+    def detach(self) -> None: ...
+
+    def on_notification(self, method: str, params: Mapping[str, object]) -> None: ...

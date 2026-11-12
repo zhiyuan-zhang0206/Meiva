@@ -7,7 +7,12 @@ from dataclasses import dataclass, replace
 from pathlib import Path
 
 from base.host.boundary.json_values import is_object_dict
-from base.lm.harness.codex.frames import INVALID_PARAMS, JsonRpcError, TransportClosedError
+from base.lm.harness.codex.frames import (
+    INVALID_PARAMS,
+    History,
+    JsonRpcError,
+    TransportClosedError,
+)
 from base.lm.harness.codex.reconciliation.rollout import codex_home as resolve_codex_home
 from base.lm.harness.codex.transcript.history import (
     PAGE_ITEMS,
@@ -21,7 +26,7 @@ from base.lm.harness.codex.transcript.history import (
     page_of,
     tail_rows,
 )
-from base.lm.harness.codex.transcript.link import History, TranscriptLink
+from base.lm.harness.codex.transcript.link import TranscriptLink
 from base.lm.harness.codex.transcript.parse import parse_item_row, parse_stored_row
 from base.lm.harness.codex.transcript.position import CodexPosition, HistoryMark, decode, encode
 from base.lm.harness.codex.transcript.rollout_tail import RolloutFile, RolloutRead
@@ -122,6 +127,10 @@ class CodexRecordReader:
 
     def wire_id(self, key: str) -> str:
         return key
+
+    @property
+    def cli_version(self) -> str | None:
+        return self._link.cli_version
 
     def parse_stored(self, rows: Sequence[StoredRow]) -> tuple[AnyEntry, ...]:
         entries: list[AnyEntry] = []

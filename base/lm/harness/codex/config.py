@@ -3,6 +3,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 from pathlib import Path
 
+from base.lm.harness.codex.frames import TranscriptTap
+
 DEFAULT_BINARY = "codex"
 SANDBOX_MODES = ("read-only", "workspace-write", "danger-full-access")
 APPROVAL_POLICIES = ("never", "untrusted", "on-request")
@@ -29,7 +31,9 @@ CHILD_SILENCE_SECONDS = 7200.0
 # `approval_policy` defaults to "never" so a headless turn cannot park on a prompt;
 # when it is set to "untrusted"/"on-request" the server asks the bridge and
 # `approval_decision` answers. `model=None` inherits the codex config default
-# instead of pinning an id that the account may not serve.
+# instead of pinning an id that the account may not serve. `transcript` is set only for an agent whose timeline is
+# written from the CLI's own record (`harness_transcript_timeline`): the session then shares its app-server
+# connection and its notifications with the reader of that record and resumes a thread without its history.
 # meiva:link base/lm/harness/codex/docs/codex.md
 @dataclass(frozen=True, slots=True)
 class CodexConfig:
@@ -45,6 +49,7 @@ class CodexConfig:
     startup_timeout_seconds: float = 120.0
     cancel_settle_seconds: float = 5.0
     max_buffered_events: int = 256
+    transcript: TranscriptTap | None = None
 
     def __post_init__(self) -> None:
         if self.sandbox not in SANDBOX_MODES:

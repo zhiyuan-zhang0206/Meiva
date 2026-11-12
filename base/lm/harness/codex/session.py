@@ -202,6 +202,7 @@ class CodexSession(BaseHarnessSession[CodexConfig]):
                 model=self.config.model,
                 approval_policy=self.config.approval_policy,
                 sandbox=self.config.sandbox,
+                exclude_turns=self.config.transcript is not None,
             )
         )
         opened = OpenedThread.of(
@@ -209,6 +210,10 @@ class CodexSession(BaseHarnessSession[CodexConfig]):
         )
         self._session_id = opened.session_id
         self._model = opened.model
+        if self.config.transcript is not None:
+            self.config.transcript.attach(
+                self._transport, rollout_path=opened.path, cli_version=opened.cli_version
+            )
         # meiva:note
         # Record the opened thread identity and emit `SessionStarted`.
         self._emit(
@@ -241,6 +246,7 @@ class CodexSession(BaseHarnessSession[CodexConfig]):
             return
         self._persist_pending()
         self._closed = True
+        self._detach_transcript()
         watched = watch_tree(self._probe, self._transport.pid)
         self._commands = OpenCommands()
         await self._close_tasks()
@@ -470,7 +476,13 @@ class CodexSession(BaseHarnessSession[CodexConfig]):
         ticket.interrupt_ready.set()
         return True
 
+    def _detach_transcript(self) -> None:
+        if self.config.transcript is not None:
+            self.config.transcript.detach()
+
     def _on_notification(self, method: str, params: JsonObject) -> None:
+        if self.config.transcript is not None:
+            self.config.transcript.on_notification(method, params)
         now = self._clock.now().timestamp()
         before = self._subagents.background(now)
         self._subagents = self._subagents.learned(
@@ -722,6 +734,7 @@ class CodexSession(BaseHarnessSession[CodexConfig]):
             return
         self._observed.clear()
         self._app_server_gone = True
+        self._detach_transcript()
         self._emit(SessionFailed(error=f"app-server: {reason}"))
         self._fail_active(TransportClosedError(reason))
 

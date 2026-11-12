@@ -100,7 +100,12 @@ class FakeAppServer:
             if self.resume_fails:
                 raise JsonRpcError(-32603, "thread not found")
             return {
-                "thread": {"id": params["threadId"], "cwd": self.resume_cwd},
+                "thread": {
+                    "id": params["threadId"],
+                    "cwd": self.resume_cwd,
+                    "path": "/codex/sessions/rollout-fake.jsonl",
+                    "cliVersion": "0.0.0-fake",
+                },
                 "model": "gpt-fake",
             }
         if method == "turn/start":
