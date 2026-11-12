@@ -41,11 +41,15 @@ def compaction_reminder(path: Path) -> str:
 DEFAULT_OVERLAPS: tuple[str, ...] = (
     "Use your native tools for files, shell commands, search, background commands, monitors, "
     "and timers or wake-ups; Meiva does not provide separate ones.",
-    "When another agent should do part of the work, spawn or message a Meiva agent "
-    "(`meiva.agents.spawn`, `meiva.agents.send_message`; see `meiva.help(meiva.agents)`) in "
-    "preference to your CLI's own subagent or task tool. Meiva agents have an identity and a "
-    "timeline that people can see, steer and take over, while a CLI subagent is invisible to "
-    "them and ends with your session.",
+    "For a one-off delegation within your turn (searching code, reading a batch of files, "
+    "checking several things in parallel) whose result comes back into your current context, "
+    "use your CLI's own subagent or task tool. It has no agent id or inbox, other agents and "
+    "people cannot message it, and it ends with your session.",
+    "For work that needs its own identity, should keep going, or should be seen and talked to "
+    "by people or other agents, spawn or message a Meiva agent (`meiva.agents.spawn`, "
+    "`meiva.agents.send_message`; see `meiva.help(meiva.agents)`). A Meiva agent is a "
+    "long-lived peer; it does not notify you when it finishes, so its result arrives only if "
+    "it messages you.",
     "Reach cluster state through `meiva` rather than connecting to Postgres or Redis directly.",
 )
 
