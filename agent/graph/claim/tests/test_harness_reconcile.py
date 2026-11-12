@@ -257,8 +257,10 @@ async def test_a_batch_of_claimed_inputs_is_judged_one_by_one_and_redelivered_in
         await harness_turn_node(AgentState(), rt, config(agent_id))
 
     [batch] = engine.delivered
-    assert [i.key for i in batch] == [f"reconciled-resume-{stored}", h_key(lost)]
-    assert "queued while down" in batch[1].text
+    [one] = batch
+    assert one.key == h_key(lost), "the resume note rides the wake's one input"
+    assert one.text.index("restarted") < one.text.index("not in the record")
+    assert "queued while down" in one.text
     assert engine.adopted == [h_key(stored)]
     assert [h_status(db_conn, i) for i in (seen, lost, unknown, newer)] == ["done"] * 4
     assert h_status(db_conn, stored) == "claimed"
@@ -306,8 +308,10 @@ async def test_the_recovery_note_is_delivered_before_the_messages_that_queued_up
         await harness_turn_node(state, rt, config(agent_id))
 
     [batch] = engine.delivered
-    assert [i.key for i in batch] == ["control-9", h_key(lost)]
-    assert "queued" in batch[1].text
+    [one] = batch
+    assert one.key == h_key(lost)
+    assert one.text.index("you were restarted") < one.text.index("claimed before the restart")
+    assert "queued during the restart" in one.text
 
 
 async def test_a_frame_of_an_earlier_generation_does_not_settle_the_current_generations_input(

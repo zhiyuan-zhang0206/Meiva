@@ -277,6 +277,7 @@ class ForegroundRun:
         self.fg = Foreground()
         self._synthetic: list[tuple[Handed, str]] = []
         self._prompts: dict[str, str] = {}
+        self._folded: dict[str, tuple[tuple[Handed, str], ...]] = {}
         self._images: dict[str, tuple[ImageBlock, ...]] = {}
         for raw in state.harness_inputs:
             key, prompt = str(raw["key"]), str(raw["prompt"])
@@ -539,6 +540,7 @@ class ForegroundRun:
                     self._synthetic.insert(0, (handed, self._prompts[handed.key]))
                 else:
                     await requeue_handed(self._ctx, self._agent_id, [handed])
+                self._restore_folded([handed])
 
     async def _deliver_until_quiet(self) -> None:
         while self._failure is None:
@@ -598,17 +600,25 @@ class ForegroundRun:
         self.fg = self.fg.withdraw(frozenset(h.key for h in handed))
         await requeue_handed(self._ctx, self._agent_id, handed)
         self._synthetic[:0] = [(h, self._prompts[h.key]) for h in handed if h.inbound_id is None]
+        self._restore_folded(handed)
+
+    # meiva:note
+    # A refused, lost or untaken wake input is handed over again with what rode in it: the synthetic
+    # inputs go back in front of the pending ones and fold into the next wake input the same way.
+    def _restore_folded(self, handed: Sequence[Handed]) -> None:
+        for entry in reversed(handed):
+            self._synthetic[:0] = self._folded.pop(entry.key, ())
 
     # meiva:note
     # Reserve the head of the inbox, unless a refusal is still backing off. A refusal can be folded in
     # while the reservation runs; what was just reserved is then handed back unsent, so the refused
     # inputs keep their place ahead of anything newer.
     # meiva:link agent/graph/docs/harness-turn.md
-    async def _reserve(self) -> list[ClaimedInbound]:
+    async def _reserve(self) -> list[ClaimedInbound] | None:
         rows = await reserve_head_batch(self._ctx, self._agent_id)
-        if rows and asyncio.get_running_loop().time() < self._backoff_until:
+        if asyncio.get_running_loop().time() < self._backoff_until:
             await self._give_back(rows)
-            return []
+            return None
         return rows
 
     async def _give_back(self, rows: Sequence[ClaimedInbound]) -> None:
@@ -650,7 +660,10 @@ class ForegroundRun:
     async def _deliver_ready(self) -> bool:
         if asyncio.get_running_loop().time() < self._backoff_until:
             return False
-        rows = recovery_notes_first(await self._reserve())
+        reserved = await self._reserve()
+        if reserved is None:
+            return False
+        rows = recovery_notes_first(reserved)
         synthetic, self._synthetic = self._synthetic, []
         rendered = await self._render(rows)
         plan = plan_wake(
@@ -669,8 +682,9 @@ class ForegroundRun:
             plan.group,
         )
         for entry, prompt in synthetic:
-            if entry in plan.handed:
-                self._prompts[entry.key] = prompt
+            self._prompts[entry.key] = prompt
+        if plan.folded:
+            self._folded[plan.handed[0].key] = plan.folded
         if not handed and not settled_now:
             return False
         if settled_now:

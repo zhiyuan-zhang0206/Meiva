@@ -244,13 +244,18 @@ class WakePlan:
     inputs: tuple[HarnessInput, ...]
     settled_now: tuple[Handed, ...]
     group: Handed | None
+    folded: tuple[tuple[Handed, str], ...] = ()
 
 
 # meiva:note
-# What one reservation hands the harness: the synthetic inputs, then the wake's rows as one input (a
-# row with no text settles at once, a wake with no row text keeps the hook note as an input of its
-# own). `group` is the merged input when it carries several rows, which is what must be marked so a
-# crash can rebuild it.
+# What one reservation hands the harness. A wake with row text is one input: the synthetic inputs'
+# text first (a restart or resume note, a context reset, a continuation: system hints the model needs
+# before the messages), then each row in queue order, then the hook note (a native request carries
+# hook messages after the messages), separated by blank lines. The synthetic inputs ride in it with
+# their timeline entries and settle with it; `folded` is what to hand back if the input is refused,
+# lost or not taken. A row with no text settles at once, and a wake with no row text hands its
+# synthetic inputs over one by one. `group` is the merged input when it carries several rows, which
+# is what must be marked so a crash can rebuild it.
 def plan_wake(
     synthetic: Sequence[tuple[Handed, str]],
     rows: Sequence[tuple[Handed, str, bool]],
@@ -261,36 +266,37 @@ def plan_wake(
     parts = [(entry, text, passive) for entry, text, passive in rows if text.strip()]
     settled_now = tuple(entry for entry, text, _ in rows if not text.strip())
     if not parts:
-        return WakePlan(*_own_inputs(synthetic), settled_now, None)
-    notes = [prompt for entry, prompt in synthetic if entry.key.startswith(hook_notes_key)]
-    own = [pair for pair in synthetic if not pair[0].key.startswith(hook_notes_key)]
-    handed, inputs = _own_inputs(own)
-    wake = merge_handed([(entry, passive) for entry, _, passive in parts])
+        handed = tuple(entry for entry, _ in synthetic)
+        inputs = tuple(HarnessInput(key=e.key, text=prompt) for e, prompt in synthetic)
+        return WakePlan(handed, inputs, settled_now, None)
+    ordered = _in_wake_order(synthetic, parts, hook_notes_key)
+    wake = merge_handed([(entry, passive) for entry, _, passive in ordered])
     return WakePlan(
-        (*handed, wake),
-        (*inputs, _wake_input(wake, parts, notes, images)),
+        (wake,),
+        (_wake_input(wake, ordered, images),),
         settled_now,
         wake if wake.carried else None,
+        tuple(synthetic),
     )
+
+
+def _in_wake_order(
+    synthetic: Sequence[tuple[Handed, str]],
+    parts: Sequence[tuple[Handed, str, bool]],
+    hook_notes_key: str,
+) -> list[tuple[Handed, str, bool]]:
+    notes = [(e, p, True) for e, p in synthetic if e.key.startswith(hook_notes_key)]
+    hints = [(e, p, True) for e, p in synthetic if not e.key.startswith(hook_notes_key)]
+    return [*hints, *parts, *notes]
 
 
 def _wake_input(
     wake: Handed,
     parts: Sequence[tuple[Handed, str, bool]],
-    notes: Sequence[str],
     images: Mapping[str, tuple[ImageBlock, ...]],
 ) -> HarnessInput:
     return HarnessInput(
         key=wake.key,
-        text="\n\n".join([*(text for _, text, _ in parts), *notes]),
+        text="\n\n".join(text for _, text, _ in parts),
         images=tuple(image for entry, _, _ in parts for image in images.get(entry.key, ())),
-    )
-
-
-def _own_inputs(
-    synthetic: Sequence[tuple[Handed, str]],
-) -> tuple[tuple[Handed, ...], tuple[HarnessInput, ...]]:
-    return (
-        tuple(entry for entry, _ in synthetic),
-        tuple(HarnessInput(key=entry.key, text=prompt) for entry, prompt in synthetic),
     )

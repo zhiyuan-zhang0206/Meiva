@@ -9,9 +9,12 @@ compaction) are barriers: nothing behind one is delivered until the claim has di
 delivered at all while a restart or terminate is pending. A batch made only of passive notes is not handed
 over: it waits and goes along with the next input that is not passive.
 
-One wake's batch is one input: each row's text in queue order, then the pre-turn hook note, separated by blank
+One wake's batch is one input: the synthetic inputs' text first (a restart or resume note, a context reset, a
+continuation), then each row's text in queue order, then the pre-turn hook note, separated by blank
 lines, under the key of the first row that is not passive; the other rows are `Handed.carried`, keep their own
-timeline entries and settle, are returned or are lost together with the one acknowledgement. Handing them over
+timeline entries and settle, are returned or are lost together with the one acknowledgement; the synthetic inputs ride in it with their
+timeline entries, and a refused or lost input is handed over again with them (a delivery the session could not
+take leaves them in the checkpoint's `harness_inputs`, so the next invocation carries them too). Handing them over
 one by one made the first input open the turn alone (a passive note, a hook note) and the person's message run as
 a turn of its own about a second later. A batch of several rows marks them with `harness_input_key` in their
 payload before it is handed over, so a later run rebuilds the group and asks the harness's record about that one
