@@ -53,8 +53,9 @@ def copy_harness_timeline(
     cur: Cursor[tuple[object, ...]], source_agent_id: int, new_agent_id: int
 ) -> int:
     cur.execute(
-        "INSERT INTO agent_harness_messages (agent_id, seq, harness, item, inbound_id, created_at) "
-        "SELECT %s, seq, harness, item, NULL, created_at FROM agent_harness_messages "
+        "INSERT INTO agent_harness_messages "
+        "(agent_id, seq, harness, item, inbound_id, created_at, source_key) "
+        "SELECT %s, seq, harness, item, NULL, created_at, source_key FROM agent_harness_messages "
         "WHERE agent_id = %s",
         (new_agent_id, source_agent_id),
     )
@@ -264,6 +265,98 @@ async def aappend_harness_timeline_items(
                 ),
             )
         return persisted
+
+
+_INSERT_KEYED_HARNESS_TIMELINE_ITEM = """
+INSERT INTO agent_harness_messages (agent_id, seq, harness, item, inbound_id, created_at, source_key)
+VALUES (%s, %s, %s, %s::jsonb, %s, COALESCE(%s::timestamptz, clock_timestamp()), %s)
+ON CONFLICT (agent_id, source_key) WHERE source_key IS NOT NULL DO NOTHING
+RETURNING seq
+"""
+
+
+# meiva:note
+# Append the items projected from transcript entries, each under its stable `source_key`: an item whose key
+# the agent already has is skipped and gives no row and no sequence number, so the same entries read twice
+# write once and the sequence stays contiguous. The timeline stays append-only: the item gets the next `seq`
+# in the order the items are given. The caller holds the transaction and has taken its owner lock
+# (`lock_inbound_owner`); the agent row lock here only serializes the sequence. Returns the items that were
+# written, with their ids.
+# meiva:link base/agents/history/docs/timeline/timeline.md
+async def aappend_keyed_timeline_items(
+    conn: AsyncConnection,
+    agent_id: int,
+    harness: str,
+    keyed: Sequence[tuple[str, TimelineItem]],
+) -> list[TimelineItem]:
+    if not keyed:
+        return []
+    persisted: list[TimelineItem] = []
+    async with conn.cursor() as cur:
+        await cur.execute("SELECT 1 FROM agents_meta WHERE id = %s FOR UPDATE", (agent_id,))
+        await cur.execute(
+            "SELECT COALESCE(MAX(seq) + 1, 0) FROM agent_harness_messages WHERE agent_id = %s",
+            (agent_id,),
+        )
+        next_seq = _int_from_row(await cur.fetchone())
+        for source_key, item in keyed:
+            updated = item.model_copy(update={"item_id": f"h{next_seq}.0"})
+            await cur.execute(
+                _INSERT_KEYED_HARNESS_TIMELINE_ITEM,
+                (
+                    agent_id,
+                    next_seq,
+                    harness,
+                    json.dumps(updated.model_dump(mode="json")),
+                    item.inbound_id,
+                    item.created_at,
+                    source_key,
+                ),
+            )
+            if await cur.fetchone() is not None:
+                persisted.append(updated)
+                next_seq += 1
+    return persisted
+
+
+# meiva:note
+# The stored read position of one transcript record, or None when it has never been read. The writer
+# stores it in the transaction that writes the rows it covers, so the two never disagree.
+@dataclass(frozen=True)
+class _PositionRow:
+    record: str
+    position: str
+
+
+async def aload_transcript_positions(
+    conn: AsyncConnection, agent_id: int, session_id: str
+) -> dict[str, str]:
+    rows = await aquery_all(
+        conn,
+        _PositionRow,
+        "SELECT record, position FROM agent_harness_transcript_positions "
+        "WHERE agent_id = %s AND session_id = %s",
+        (agent_id, session_id),
+    )
+    return {row.record: row.position for row in rows}
+
+
+async def aset_transcript_position(
+    conn: AsyncConnection,
+    agent_id: int,
+    session_id: str,
+    record: str,
+    position: str,
+    cli_version: str | None,
+) -> None:
+    await conn.execute(
+        "INSERT INTO agent_harness_transcript_positions "
+        "(agent_id, session_id, record, position, cli_version) VALUES (%s, %s, %s, %s, %s) "
+        "ON CONFLICT (agent_id, session_id, record) DO UPDATE SET position = EXCLUDED.position, "
+        "cli_version = COALESCE(EXCLUDED.cli_version, "
+        "agent_harness_transcript_positions.cli_version), updated_at = clock_timestamp()",
+        (agent_id, session_id, record, position, cli_version),
+    )
 
 
 @dataclass(frozen=True)

@@ -37,6 +37,15 @@ lacks a needed field an `Anomaly(MISSING_FIELD)`; neither puts anything on a tim
 the row types it does not read yet. Golden tests run on sanitized recordings (`tests/fixtures/<scenario>/`,
 each with a `source.json` naming the CLI version, the recording and the sanitization rules).
 
+## Readers and storage
+
+`claude/transcript/reader.py` (`ClaudeRecordReader`) is the Claude `RecordReader`: it reads the session's local
+JSONL after a stored position (`position.py`: the last row's key, its byte span, and the row count, which is the
+next row's `Order.seq`), consumes only complete lines, checks that the last row read is still at its place, and
+treats a position the file no longer holds as a fault. A sub-agent's file is its own record. The store side is
+`aappend_keyed_timeline_items` (append-only in `seq`, idempotent by `agent_harness_messages.source_key`) and
+`agent_harness_transcript_positions`, both in `base/agents/history/harness_messages.py`; nothing calls them yet.
+
 ## Native records and the vocabulary
 
 | Entry | Claude Code transcript | Codex history items (rollout for the rest) | Antigravity `transcript_full.jsonl` |

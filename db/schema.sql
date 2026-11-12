@@ -860,10 +860,13 @@ CREATE TABLE agent_harness_messages (
     item JSONB NOT NULL,
     inbound_id BIGINT,
     created_at TIMESTAMPTZ NOT NULL DEFAULT clock_timestamp(),
+    source_key TEXT,
     UNIQUE (agent_id, seq)
 );
 
 CREATE INDEX idx_agent_harness_messages_agent_seq ON agent_harness_messages (agent_id, seq DESC);
+CREATE UNIQUE INDEX idx_agent_harness_messages_source_key
+    ON agent_harness_messages (agent_id, source_key) WHERE source_key IS NOT NULL;
 
 COMMENT ON TABLE agent_harness_messages IS
     'Timeline item store for external harnesses, with in-place revisions for live activity.';
@@ -879,16 +882,39 @@ COMMENT ON COLUMN agent_harness_messages.inbound_id IS
     'Optional inbound message id if this item was produced from a specific inbound trigger.';
 COMMENT ON COLUMN agent_harness_messages.created_at IS
     'Timestamp when the item was inserted.';
+COMMENT ON COLUMN agent_harness_messages.source_key IS
+    'Stable key of the transcript entry this row was projected from; NULL for rows the graph writes itself. Unique per agent.';
+
+CREATE TABLE agent_harness_transcript_positions (
+    agent_id BIGINT NOT NULL REFERENCES agents(id) ON DELETE CASCADE,
+    session_id TEXT NOT NULL,
+    record TEXT NOT NULL,
+    position TEXT NOT NULL,
+    cli_version TEXT,
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT clock_timestamp(),
+    PRIMARY KEY (agent_id, session_id, record)
+);
+
+COMMENT ON TABLE agent_harness_transcript_positions IS
+    'How far each transcript record of an external harness session has been read into agent_harness_messages.';
+COMMENT ON COLUMN agent_harness_transcript_positions.record IS
+    'The record read: main, or a sub-agent record id.';
+COMMENT ON COLUMN agent_harness_transcript_positions.position IS
+    'The adapter''s own opaque mark of how far the record has been read; the writer stores it and never reads it.';
+COMMENT ON COLUMN agent_harness_transcript_positions.cli_version IS
+    'Version of the CLI that wrote the last row read, for telemetry.';
 
 DO $$ BEGIN
     IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'meiva_runner') THEN
         GRANT SELECT, INSERT ON agent_harness_messages TO meiva_runner;
         GRANT UPDATE (item) ON agent_harness_messages TO meiva_runner;
         GRANT USAGE, SELECT ON SEQUENCE agent_harness_messages_id_seq TO meiva_runner;
+        GRANT SELECT, INSERT, UPDATE ON agent_harness_transcript_positions TO meiva_runner;
     END IF;
     IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'meiva_gateway') THEN
         GRANT SELECT, INSERT, UPDATE, DELETE ON agent_harness_messages TO meiva_gateway;
         GRANT USAGE, SELECT ON SEQUENCE agent_harness_messages_id_seq TO meiva_gateway;
+        GRANT SELECT, INSERT, UPDATE, DELETE ON agent_harness_transcript_positions TO meiva_gateway;
     END IF;
 END $$;
 

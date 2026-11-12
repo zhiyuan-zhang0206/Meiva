@@ -10,7 +10,7 @@ exports = ["session.py", "tests"]
 "session.py" = ["config.py", "delivery.py", "inbound.py", "mapping.py", "options.py", "reconciliation", "settle.py"]
 "reconciliation" = ["delivery.py"]
 "settle.py" = ["mapping.py"]
-"transcript" = ["delivery.py"]
+"transcript" = ["delivery.py", "reconciliation"]
 "tests" = ["auth.py", "config.py", "delivery.py", "inbound.py", "mapping.py", "options.py", "session.py", "settle.py"]
 
 [purity]
