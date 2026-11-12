@@ -229,19 +229,30 @@ def test_pid_reuse_protection(unit_home: Path) -> None:
 
 
 def test_session_record_reclaimed(unit_home: Path) -> None:
-    """A record whose process died out from under it is unlinked as
-    list_sessions walks, so the listing reflects reality."""
     backend = _backend(unit_home)
     name = "meiva-test-posixbe-reclaim"
-    assert backend.new_session(name, _SLEEP, unit_home, env=dict(os.environ)) is True  # pyright: ignore[reportUnknownArgumentType]
-    pid = _pid(name, unit_home)
-    # Kill the process WITHOUT going through kill_session, so the record lingers.
-    proc = psutil.Process(pid)
-    proc.kill()
-    proc.wait(timeout=5)
-    assert posixproc.record_path(name, home=unit_home).exists()
-    assert backend.list_sessions(prefix="meiva-test-posixbe-") == []
-    assert not posixproc.record_path(name, home=unit_home).exists()
+    # meiva:note
+    # Reclamation needs an empty group, not just an exited leader. A login
+    # shell can leave startup children alive; use one execed fixture process.
+    command = "exec " + _SLEEP
+    assert (
+        backend.new_session(name, command, unit_home, env=dict(os.environ), login_shell=False)
+        is True
+    )  # pyright: ignore[reportUnknownArgumentType]
+    try:
+        pid = _pid(name, unit_home)
+        poll_until(
+            lambda: psutil.Process(pid).exe() == os.path.realpath("/bin/sleep"),
+            what="reclaim fixture has execed sleep",
+        )
+        proc = psutil.Process(pid)
+        proc.kill()
+        _ = proc.wait(timeout=5)
+        assert posixproc.record_path(name, home=unit_home).exists()
+        assert backend.list_sessions(prefix="meiva-test-posixbe-") == []
+        assert not posixproc.record_path(name, home=unit_home).exists()
+    finally:
+        _ = backend.kill_session(name, graceful=False)
 
 
 # ---------------------------------------------------------------------------
