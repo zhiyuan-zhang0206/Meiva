@@ -118,6 +118,23 @@ class UsageTally:
     reliable: bool
 
 
+# meiva:note
+# One model message's spend, reported once, when the projection first reads it: `record` says whose it is (the
+# main record or a sub-agent's) and `parent_call_id` the call that started that sub-agent, so a sub-agent's
+# tokens are attributed to the same agent and never merged into the main figure. `turn` is the turn the call
+# belongs to; a background sub-agent's message read after that turn was settled is still reported when read
+# and never back-filled into the settled turn. `reliable` is False for a message cut short.
+@dataclass(frozen=True, slots=True)
+class MessageUsage:
+    record: str
+    message_ref: str
+    turn: str | None
+    parent_call_id: str | None
+    usage: Usage
+    model: str | None
+    reliable: bool
+
+
 @dataclass(frozen=True, slots=True)
 class AnomalyReport:
     anomaly: AnomalyKind
@@ -133,3 +150,4 @@ class Projection:
     turns_observed: tuple[TurnObserved, ...] = ()
     turns_closed: tuple[TurnClosed, ...] = ()
     anomalies: tuple[AnomalyReport, ...] = ()
+    usage: tuple[MessageUsage, ...] = ()

@@ -9,6 +9,7 @@ from base.lm.harness.session.transcript.drafts import (
     Delivery,
     DraftKind,
     MatchBasis,
+    MessageUsage,
     Projection,
     SentInput,
     TimelineDraft,
@@ -69,6 +70,7 @@ class Projector:
         self._held: dict[str, list[TimelineDraft]] = {}
         self._usage: dict[tuple[str, str], TokenUsage] = {}
         self._unreliable: set[tuple[str, str]] = set()
+        self._held_usage: dict[str, list[MessageUsage]] = {}
         self._reported: set[tuple[str, str]] = set()
         self._out = _Out()
 
@@ -213,6 +215,8 @@ class Projector:
         call = self._calls.get(entry.call_id)
         for draft in self._held.pop(entry.child_record, []):
             self._emit(replace(draft, turn=call[1]) if call else draft)
+        for spend in self._held_usage.pop(entry.child_record, []):
+            self._out.usage.append(self._attributed(spend))
 
     def _on_usage(self, entry: TokenUsage) -> None:
         ident = (entry.record, entry.message_ref)
@@ -220,9 +224,34 @@ class Projector:
             if not entry.reliable:
                 self._unreliable.add(ident)
             return
-        self._usage[ident] = entry if entry.turn else replace(entry, turn=self._turn(entry))
+        stored = entry if entry.turn else replace(entry, turn=self._turn(entry))
+        self._usage[ident] = stored
         if not entry.reliable:
             self._unreliable.add(ident)
+        self._report_usage(
+            MessageUsage(
+                record=entry.record,
+                message_ref=entry.message_ref,
+                turn=stored.turn,
+                parent_call_id=None,
+                usage=entry.usage,
+                model=entry.model,
+                reliable=entry.reliable,
+            )
+        )
+
+    def _report_usage(self, spend: MessageUsage) -> None:
+        if spend.record == MAIN_RECORD:
+            self._out.usage.append(spend)
+        elif spend.record in self._links:
+            self._out.usage.append(self._attributed(spend))
+        else:
+            self._held_usage.setdefault(spend.record, []).append(spend)
+
+    def _attributed(self, spend: MessageUsage) -> MessageUsage:
+        call = self._links[spend.record]
+        known = self._calls.get(call)
+        return replace(spend, parent_call_id=call, turn=known[1] if known else spend.turn)
 
     def _on_text(self, entry: AgentText | Reasoning) -> None:
         if not entry.text.strip():
@@ -354,6 +383,7 @@ class _Out:
         self.observed: list[TurnObserved] = []
         self.closed: list[TurnClosed] = []
         self.anomalies: list[AnomalyReport] = []
+        self.usage: list[MessageUsage] = []
 
     def freeze(self) -> Projection:
         return Projection(
@@ -363,6 +393,7 @@ class _Out:
             turns_observed=tuple(self.observed),
             turns_closed=tuple(self.closed),
             anomalies=tuple(self.anomalies),
+            usage=tuple(self.usage),
         )
 
 

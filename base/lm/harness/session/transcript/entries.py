@@ -138,12 +138,14 @@ class Compaction(Entry):
 # meiva:note
 # One model call's spend, named by the model message it belongs to so a message the record repeats on
 # several rows (Claude writes one row per content block) is counted once. `reliable` is False for a
-# message cut short, whose count is a placeholder.
+# message cut short, whose count is a placeholder. `model` is the model the message ran on when the record says
+# (a sub-agent may run another model than the main agent), for pricing.
 @dataclass(frozen=True, slots=True, kw_only=True)
 class TokenUsage(Entry):
     message_ref: str
     usage: Usage
     reliable: bool = True
+    model: str | None = None
 
 
 class TurnEndReason(StrEnum):

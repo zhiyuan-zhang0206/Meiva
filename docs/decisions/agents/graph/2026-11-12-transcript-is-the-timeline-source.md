@@ -87,6 +87,10 @@ accept losing streaming first, in return for correctness and stability.
 - The timeline depends on three unpublished formats. Mitigation: parsers are strict about the fields the
   projection needs and tolerant of unknown entry types (skipped, reported once per type); the CLI version
   is recorded in telemetry; golden tests run on sanitized real records labelled with the CLI version.
+- Sub-agent tokens are counted in usage (user ruling, 2026-11-12): each message of a sub-agent record is
+  reported once from the record and logged separately, on its own model, attributed to the same agent and to the
+  call that started it; the figure the stream reports (main record only) is no longer the source. Reported
+  usage rises by the sub-agent share.
 - The rule "the entry proves it" replaces the live echo as the delivery signal. The echo's earlier timing
   (Claude's echo comes after the request starts, the transcript row about two seconds before) is not lost:
   the transcript is earlier.

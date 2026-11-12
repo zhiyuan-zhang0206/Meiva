@@ -266,7 +266,9 @@ def _assistant(
             call_ms[entry.call_id] = row.ms
         if entry is not None:
             entries.append(entry)
-    entries.append(_usage_entry(row, ref, message.get("usage"), reliable=not aborted))
+    entries.append(
+        _usage_entry(row, ref, message.get("usage"), message.get("model"), reliable=not aborted)
+    )
     stop = message.get("stop_reason")
     if row.record == MAIN_RECORD and isinstance(stop, str) and stop in _ENDING_STOPS:
         entries.append(TurnEnd(**_entry_fields(row, 2, key=f"claude:{row.uuid}:end")))
@@ -336,13 +338,16 @@ def _message_ref(raw: Mapping[str, object]) -> str | None:
     return ref if isinstance(ref, str) else None
 
 
-def _usage_entry(row: _Row, ref: str, raw_usage: object, *, reliable: bool) -> TokenUsage:
+def _usage_entry(
+    row: _Row, ref: str, raw_usage: object, model: object, *, reliable: bool
+) -> TokenUsage:
     data = raw_usage if is_object_dict(raw_usage) else {}
     return TokenUsage(
         **_entry_fields(row, 1, key=f"claude:{row.uuid}:usage"),
         message_ref=ref,
         usage=_usage(data),
         reliable=reliable,
+        model=model if isinstance(model, str) else None,
     )
 
 

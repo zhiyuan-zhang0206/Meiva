@@ -165,10 +165,21 @@ One rule: an input is delivered when the record shows it; the entry that shows i
   explicit_visibility, delivery_mode)` in one place and calls `capture_items` after commit.
   `resolve_agent_reply` is in `base/agents`; `base/lm` cannot import it without a cycle. The correction input for
   an invalid prefix (`harness_reply_correction`, ~40 lines) stays in the graph, fed by the writer's per-turn flag.
-- **Usage.** Logged by the writer when a turn closes, one row per distinct `message.id`, excluding unreliable
-  (interrupted) messages; for success turns the main record's tally equals the recorded `ResultMessage.usage`
-  (tested). `ResultMessage.usage` excludes sub-agent tokens; the record has them (`usage_by_record`). Until the
-  user rules, only the main record's tally is logged (today's behaviour).
+- **Usage (ruled 2026-11-12: sub-agent tokens count).** The projection reports each model message's spend once,
+  when it first reads it (`Projection.usage`, `MessageUsage`: deduplicated by `message.id`, with `record`, the
+  `parent_call_id` of the sub-agent record, the turn of that call, the message's own model and `reliable`).
+  The writer logs one `llm_usage` event per reliable message, priced with `_resolve_pricing_model` on that
+  message's model (a sub-agent may run another model than the main agent), as the same agent. A sub-agent's
+  message is a separate event, never merged into the main figure: it carries a sub-agent marker (the `llm_usage`
+  event is a log event with `usage_kind`, `source` and `for_agent_id`, not a table, so there is no migration;
+  PR B adds the sub-agent marker as a new `usage_kind` value plus the `parent_call_id` attribute on
+  `UsageFields` and checks the consumers of `usage_kind` first). Attribution rule: an entry is reported when it
+  is read; a background sub-agent's message read after its parent turn was settled is reported then, labelled
+  with that turn, and never back-filled into a settled turn's figure. A sub-agent message read before the link to
+  its call waits for the link. Interrupted (unreliable) messages are not logged. For success turns the main
+  record's tally equals the recorded `ResultMessage.usage`, which excludes sub-agent tokens (turn 1 of the
+  recording: main 858, sub-agents 252 and 217; tested), so logged usage rises by exactly the sub-agent
+  figure. `persist_last_active` and `LLMDone` follow the writer's turn-closed signal.
 - **Background work, keep-alive and reaping.** Signal-side and untouched. The notification's display is the
   record's `Notice` row.
 - **Interrupts.** The CLI's `[Request interrupted by user...]` row projects to a marker and closes the turn: the
@@ -233,7 +244,7 @@ rule of section 6 ends a turn on the quiet period.
 Resolved by review (kept for the record): start from the end of the record at cutover; one "interrupted" marker
 (the record's), #8911's early write removed; reply visibility applied by the writer; the temporary setting.
 
-1. **Subagent usage** (user): whether sub-agent tokens are logged. Until ruled, main record only.
+1. **Sub-agent usage**: ruled, counted (section 8). PR B states the change of the usage figure in its description.
 2. **Fencing for a writer with no invocation**: the writer needs the runtime's incarnation token, not the graph
    context's. To be verified with evidence in PR B.
 3. **Registered warning events** (unknown entry type, end ceiling reached, unmatched input): registered in PR B.

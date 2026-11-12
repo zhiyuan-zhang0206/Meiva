@@ -16,8 +16,8 @@ chosen by [the decision](../../../../docs/decisions/agents/graph/2026-11-12-tran
 - **The projection** (`projection.py`, `Projector`): the only place that pairs a call with its output
   (whichever arrives first), nests a sub-agent record under the call that started it (whichever record
   arrives first), recognises an input we sent (by the id the CLI kept, else by text in send order) and expands
-  it into the original inbound messages it carried, opens and closes turns, and tallies usage once per model
-  message. It does no I/O and reads no clock; an entry whose key was projected gives nothing a second time, and
+  it into the original inbound messages it carried, opens and closes turns, and reports each model message's usage once (`Projection.usage`: main or sub-agent record, the call that
+  started the sub-agent, the message's model) and tallies it per turn and per record. It does no I/O and reads no clock; an entry whose key was projected gives nothing a second time, and
   `known_keys` lets a forked conversation skip history it already has. Its output is `TimelineDraft`s
   (`drafts.py`) in the existing `TimelineItem` kind vocabulary, `Delivery` conclusions, turn observations and
   closings, usage tallies and `Anomaly` reports.

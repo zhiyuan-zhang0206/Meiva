@@ -444,3 +444,29 @@ def test_an_api_error_row_is_a_failure_that_fails_its_turn_and_costs_nothing() -
     assert [t.reason for t in projection.turns_closed] == ["failed"]
     assert not any(d.kind.value == "agent_chat" for d in projection.drafts)
     assert projection.anomalies == () and projector.undelivered() == ()
+
+
+def test_subagent_tokens_are_reported_separately_with_their_call_and_model() -> None:
+    main, sync_sub, async_sub = _subagent_entries()
+    projector, _ = project([], [sent(SUBS, "k", "t")])
+    first = projector.feed(main)
+    assert {u.record for u in first.usage} == {"main"}
+    assert all(u.parent_call_id is None for u in first.usage)
+    second = projector.feed([*sync_sub, *async_sub])
+    spent: dict[str | None, int] = {}
+    for spend in second.usage:
+        spent[spend.parent_call_id] = spent.get(spend.parent_call_id, 0) + spend.usage.output_tokens
+    assert spent == {SYNC_CALL: 252, ASYNC_CALL: 217}
+    assert {s.model for s in second.usage} == {"claude-haiku-5-5"}
+    assert all(s.reliable for s in second.usage)
+    first_turn = first.usage[0].turn
+    assert sum(u.usage.output_tokens for u in first.usage if u.turn == first_turn) == 858
+
+
+def test_subagent_usage_waits_for_its_link_and_never_enters_a_main_turn_figure() -> None:
+    main, sync_sub, async_sub = _subagent_entries()
+    projector, early = project([*sync_sub, *async_sub], [sent(SUBS, "k", "t")])
+    assert early.usage == ()
+    late = projector.feed(main)
+    assert {u.parent_call_id for u in late.usage if u.record != "main"} == {SYNC_CALL, ASYNC_CALL}
+    assert sum(t.usage.output_tokens for t in projector.usage_by_turn().values()) == 1040
