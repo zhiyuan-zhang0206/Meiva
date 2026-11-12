@@ -5,7 +5,7 @@ Status: plan, revised 2026-11-12 after review. The decision is
 the vocabulary, the projection, the three parsers and their golden tests (the shared pure core this plan builds
 on) are described in [reading a record into timeline drafts](../../base/lm/harness/docs/transcript-projection.md)
 and landed without changing behaviour. This document is the plan for Claude Code, the first CLI to cut over;
-Codex and Antigravity follow the same shape (section 11). The user's priorities are correctness,
+Codex and Antigravity follow the same shape (section 12). The user's priorities are correctness,
 compatibility and stability, then completeness: every choice below takes the simpler form.
 
 ## 1. What changes, in one paragraph
@@ -116,7 +116,7 @@ Line counts are orders of magnitude from the files at the time of writing.
 | `harness_activity.py` (477) | `log_turn_usage`, `_resolve_pricing_model` (~60) | `HarnessTurnProjector` and its constants (~370) | none |
 | `harness_interrupt.py` (171), `harness_render.py` (177), `harness_tool_format.py` (75) | all | none | `announce_interrupt` stops writing the note on an external harness (~-20; the native path is untouched) |
 | `base/agents/history/harness_messages.py` (474) | loaders, copy, `aget_harness_call_item_id` | `aupsert_harness_timeline_item` revision path (~60, after all CLIs) | add keyed append (~80) |
-| `base/lm/harness/claude/` | `session.py` delivery, interrupt, background work, signals | `mapping.py` content mapping (~120), the echo handling of `inbound.py` (~150), `reconciliation/` (~70) | `inbound.py` keeps turn start/end signals; `options.py` adds the store (wake-up only) |
+| `base/lm/harness/claude/` | `session.py` delivery, interrupt, background work, signals | the echo handling of `inbound.py` (~150), `reconciliation/` (~70), the content-to-item consumers of `mapping.py`'s output; **`mapping.py`'s mapping of stream deltas and tool frames to events (`_stream`, `_assistant`, `_user`, ~120) is kept for the live overlay (section 11), no longer consumed by the write path** | `inbound.py` keeps turn start/end signals; `options.py` adds the store (wake-up only) |
 | `base/lm/harness/delivery/reconcile.py` | read by the other two CLIs | deleted with the last CLI | none |
 
 `HarnessBridge.deliver()` and the `key_uuid` scheme are unchanged; the sent-input table is filled from `Handed`
@@ -220,7 +220,7 @@ One rule: an input is delivered when the record shows it; the entry that shows i
 | 1 (#8922) | shared vocabulary, projection, read port; three parsers; golden tests; decision and plan. No behaviour change | revert |
 | A | expand migration (`source_key`, partial unique, positions table, `schema.sql`), keyed append, the Claude position reader (pure position/line handling plus a thin file shell), tests. No behaviour change | the columns are nullable and unused; revert the code |
 | B | the writer (plan + shell) for Claude, behind an off-by-default agent setting; wake-ups from the stream and `session_store` (`options.py`); settlement by the writer; the turn-end rule of section 6; the graph changes of section 5 effective when the setting is on; DB tests | setting off |
-| later | Claude formal cutover (delete the old path and the setting), then Codex (history cursor), then Antigravity (with ACP) | per CLI |
+| later | Claude formal cutover (delete the old path and the setting), then the live overlay for Claude (section 11, its own PR), then Codex (history cursor), then Antigravity (with ACP) | per CLI |
 | last | cleanup: delete `aupsert_harness_timeline_item`, `activity_*` fields, `delivery/reconcile.py` | revert |
 
 Deployment: PR A needs the migration (`meiva start` applies it). PR B changes nothing while the setting is off.
@@ -228,7 +228,52 @@ Turning it on for an agent is a restart of that agent's runtime; each agent's wr
 current record, so the rows of a turn in flight at that moment are written by the old path only up to its last
 event: turn it on while the agent is idle. No full-cluster stop is required.
 
-## 11. Codex and Antigravity, in short
+## 11. Live overlay (optional, after cutover)
+
+Streaming was given up for correctness (decision point 6); the user wants it back as a nice to have, on top of
+this, and this section only leaves room for it so the cutover does not delete what the overlay needs. It is a
+separate PR after the Claude cutover is verified. It is **not durable and not a source**: it never writes
+`agent_harness_messages`, takes no part in settlement or in ending a turn, and losing or garbling it changes no
+record.
+
+**Source.** The adapter event stream's increments: text and reasoning deltas (`TextDelta`, `ReasoningDelta`),
+a tool call's start and its running output. The adapters already map these (Claude: `mapping.py` `_stream`,
+`_assistant`, `_user`; Codex: the delta and output-delta notifications; Antigravity: ACP message chunks after the
+ACP migration), so the mapping stays in the adapters and the write path stops consuming it.
+
+**What native does today, and the gap (checked on this tree).** Native streams from the LLM node and nothing of
+it is stored: the live events (`base/events/live/projection.py`: `chat_start` / `chat_delta`, `reasoning_start` /
+`reasoning_delta`, `code_start` / `code_delta`, `exec_start` / `exec_output_chunk` / `exec_output`; deltas
+coalesced by `base/events/live/coalescer.py`) reach the frontend, whose fold (`ui/web/src/lib/fold/timeline.ts`)
+keeps the in-flight items by id in `streamingIds`, merges them with the next `timeline_snapshot`
+(`mergeSnapshotWithStreaming`, which drops a streaming id once a snapshot carries it) and removes an abandoned
+generation by id on `cancelled`. Native pairs the streamed item with the committed one **by item id**, because
+the item id is the position (`msg_idx.block_idx`) known before the commit. External is the opposite today: the
+projector writes revisable rows (`activity_pending`, `activity_revision`) and the position `h<seq>.0` exists only
+after the write. So the gap is the pairing key, not the mechanism.
+
+**Plan: external uses native's path.** The overlay emits the same live events (`chat_start/_delta`,
+`reasoning_*`, `code_*`, `exec_*`) with an overlay id, to the live channel only. The frontend keeps them in
+`streamingIds` like native's. When the durable item arrives in a snapshot, the overlay item is replaced by
+pairing on provider ids, not positions: the durable `TimelineItem` already has `source_message_id` and
+`source_block_idx` (durable source coordinates, today unused for external items) and `tool_use_id`; the writer
+fills `source_message_id` with the provider's message id (Claude: the stream's `message.id` equals the
+transcript's `message.id`; the tool's `tool_use_id` is the same on both sides; Codex: the item id; Antigravity:
+the ACP chunks carry no message id, so an overlay item can be paired only by "the next durable item of that kind
+in this turn", which is not reliable; the overlay for Antigravity shows text and drops it when the turn's
+durable items arrive). A pairing that fails is not repaired: when a turn closes or the writer has caught up
+(section 6), **every remaining overlay item of that turn is cleared**; a flash is better than a ghost. A
+`cancelled` or restart clears them as native does. With this, `activity_pending` / `activity_revision` have no
+user and the fields can be deleted when all three CLIs have cut over.
+
+**What each CLI can give.** Claude: character deltas (`include_partial_messages`), tool starts, no running tool
+output. Codex: text deltas and running command output (`outputDelta`), exactly what its record lacks while a
+command runs. Antigravity (ACP): message and thought chunks and tool call updates, no ids.
+
+**Failure semantics.** An error in the overlay is logged and that item's overlay display is stopped; it never
+reaches the writer, the settlement or the turn-end wait. Nothing the overlay holds is needed to restart.
+
+## 12. Codex and Antigravity, in short
 
 Same port and shape. **Codex**: reader on `thread/items/list` with the history cursor as the position; rollout
 only for usage, the synthetic abort and the sub-agent notification; a late command is appended when it arrives,
@@ -239,7 +284,7 @@ a background command stays `RUNNING` (`BACKGROUND`) and its end is a notice; a c
 `Interrupt` entry the reader builds, and `ABORTED` results for calls no row answered); no turn-end row, so the
 rule of section 6 ends a turn on the quiet period.
 
-## 12. Open questions
+## 13. Open questions
 
 Resolved by review (kept for the record): start from the end of the record at cutover; one "interrupted" marker
 (the record's), #8911's early write removed; reply visibility applied by the writer; the temporary setting.
