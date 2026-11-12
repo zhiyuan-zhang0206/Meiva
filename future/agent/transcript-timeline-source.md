@@ -185,8 +185,9 @@ Whether a parser fix needs it is judged by the version on the rows.
 ### 4.5 Retention
 
 Stored rows are kept 30 days by default (configurable) and the timeline permanently. Expiry runs in the
-existing upkeep sweeper (`services/upkeep/ttl_reaper`) as a time-batched delete on `written_at` (an index on it),
-never a table scan, and never deletes the rows after a session's latest rebuild point so that restart rebuild
+existing upkeep service (`services/upkeep/events_maintenance`, the hourly pass in `daemon.py`; `ttl_reaper` reaps
+shell sessions only) as a time-batched delete on `written_at` (an index on it, at most 20 batches of 5000 rows a
+pass), never a table scan, the retention a constant for now (`TRANSCRIPT_ROW_RETENTION_DAYS = 30`), and never deletes the rows after a session's latest rebuild point so that restart rebuild
 keeps working for a live session. The coordinator decides if the measured sizes make retention unnecessary.
 
 ## 5. What the graph keeps, deletes and changes

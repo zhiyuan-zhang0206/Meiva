@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import json
-from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 from psycopg_pool import AsyncConnectionPool
@@ -9,7 +8,6 @@ from psycopg_pool import AsyncConnectionPool
 from base.agents.history.harness_messages import (
     StoredPosition,
     aappend_transcript_rows,
-    adelete_expired_transcript_rows,
     aload_transcript_rows,
     aset_transcript_position,
 )
@@ -52,28 +50,6 @@ async def test_stored_rows_are_appended_once_and_read_back_in_order_after_an_ord
         )
     assert loaded == [(0, {"type": "user"}), (2, {"type": "assistant"})]
     assert later == [(2, {"type": "assistant"})] and limited == loaded[:1]
-
-
-async def test_expired_rows_are_deleted_in_bounded_batches_oldest_first(
-    aops_pool: AsyncConnectionPool,
-) -> None:
-    agent_id = await _agent(aops_pool)
-    async with aops_pool.connection() as conn:
-        _ = await aappend_transcript_rows(
-            conn, agent_id, SESSION, [("main", n, {"n": n}) for n in range(5)]
-        )
-        old = datetime.now(UTC) - timedelta(days=40)
-        await conn.execute(
-            "UPDATE agent_harness_transcript_rows SET written_at = %s WHERE ordinal < 4", (old,)
-        )
-        cutoff = datetime.now(UTC) - timedelta(days=30)
-        assert await adelete_expired_transcript_rows(conn, cutoff=cutoff, limit=3) == 3
-        assert await adelete_expired_transcript_rows(conn, cutoff=cutoff, limit=3) == 1
-        assert await adelete_expired_transcript_rows(conn, cutoff=cutoff, limit=3) == 0
-        left = await aload_transcript_rows(
-            conn, agent_id, SESSION, "main", after_ordinal=-1, limit=10
-        )
-    assert left == [(4, {"n": 4})]
 
 
 def _long_session(turns: int) -> list[str]:

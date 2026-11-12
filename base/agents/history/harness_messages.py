@@ -9,7 +9,6 @@ from __future__ import annotations
 import json
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
-from datetime import datetime
 from uuid import UUID
 
 from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, SystemMessage, ToolMessage
@@ -422,25 +421,6 @@ async def aload_transcript_rows(
         (agent_id, session_id, record, after_ordinal, limit),
     )
     return [(row.ordinal, row.row) for row in rows]
-
-
-# meiva:note
-# Retention: delete at most `limit` stored rows older than `cutoff`, oldest first through the `written_at`
-# index, so one sweep is a bounded batch and never a table scan. Returns how many it deleted; the caller repeats
-# until it returns less than `limit`.
-async def adelete_expired_transcript_rows(
-    conn: AsyncConnection, *, cutoff: datetime, limit: int
-) -> int:
-    async with conn.cursor() as cur:
-        await cur.execute(
-            "DELETE FROM agent_harness_transcript_rows t USING ("
-            "  SELECT agent_id, session_id, record, ordinal FROM agent_harness_transcript_rows "
-            "  WHERE written_at < %s ORDER BY written_at LIMIT %s"
-            ") old WHERE t.agent_id = old.agent_id AND t.session_id = old.session_id "
-            "AND t.record = old.record AND t.ordinal = old.ordinal",
-            (cutoff, limit),
-        )
-        return cur.rowcount
 
 
 @dataclass(frozen=True)

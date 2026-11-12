@@ -110,6 +110,7 @@ from services.upkeep.events_maintenance.resolution import AutoDismissCadence, ru
 from services.upkeep.events_maintenance.rollup import compute_rollup
 from services.upkeep.events_maintenance.telemetry_replay import recover_telemetry_events
 from services.upkeep.events_maintenance.token_totals import fold_totals
+from services.upkeep.events_maintenance.transcript_retention import sweep_expired_transcript_rows
 
 
 # meiva:note
@@ -214,6 +215,15 @@ def run_maintenance(
     with pool.connection() as conn:
         emit_checkpoint_table_sizes(conn)
     progress.beat()
+    # meiva:note
+    # Retention of the stored transcript rows of external harness sessions: a bounded, time-batched delete.
+    with pool.connection() as conn:
+        expired = sweep_expired_transcript_rows(conn, now=now)
+    progress.beat()
+    if expired:
+        events_maintenance_log.info(
+            "[events-maintenance] expired %d stored transcript rows", expired
+        )
     # Incremental physical reclamation: a plain VACUUM (no lock) over the
     # checkpoint tables, only inside the measured agent-lowest window
     # (05:00-08:00 CLUSTER time). Logs size + dead tuples each run.
