@@ -1,0 +1,13 @@
+exports = []
+
+[uses]
+"__init__.py" = []
+"plan.py" = []
+"writer.py" = ["plan.py"]
+"tests" = ["plan.py", "writer.py"]
+
+[purity]
+"." = "strict"
+"__init__.py" = "strict"
+"plan.py" = "strict"
+"writer.py" = { mode = "none", why = "the effect shell of the harness timeline writer: it waits for a wake-up, asks the reader for the entries past each stored position, and commits what the strict plan decided (keyed items, settlements, positions) in one write transaction under the runtime's incarnation; what an entry becomes and what a delivery settles are decided in plan.py and the shared projection" }
