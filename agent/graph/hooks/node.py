@@ -67,7 +67,7 @@ def _fold_external_hook_messages(
         else []
     )
     pre_text = _render_messages(pre_messages)
-    if not pre_text:
+    if not pre_text.strip():
         return
     first = next(
         (

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import base64
 import binascii
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 
 # meiva:note
@@ -31,16 +31,59 @@ class ImageBlock:
 
 
 @dataclass(frozen=True, slots=True)
+class TextBlock:
+    text: str
+
+    def __post_init__(self) -> None:
+        if not self.text.strip():
+            raise ValueError("a text block needs text")
+
+
+InputBlock = TextBlock | ImageBlock
+
+
+# meiva:note
+# What one input holds is an ordered sequence of blocks, text and images: a wake's messages each
+# become a text block with the images that belong to the message right behind it. An adapter that
+# can carry blocks (Claude Code, Codex) sends them as they are; one that cannot (Antigravity's stdin
+# takes a single string and an image only as a separate RPC) reads the flattened views, `text` (the
+# text blocks joined by a blank line) and `images` (every image, in order).
+@dataclass(frozen=True, slots=True)
 class HarnessInput:
     key: str
-    text: str
-    images: tuple[ImageBlock, ...] = ()
+    blocks: tuple[InputBlock, ...]
 
     def __post_init__(self) -> None:
         if not self.key.strip():
             raise ValueError("an input needs a key")
-        if not self.text.strip() and not self.images:
+        if not self.blocks:
             raise ValueError("an input needs text or an image")
+
+    # meiva:note
+    # One text block, then the images after it: the shape of a single message.
+    @classmethod
+    def of(cls, key: str, text: str, images: Sequence[ImageBlock] = ()) -> HarnessInput:
+        lead = (TextBlock(text),) if text.strip() else ()
+        return cls(key, (*lead, *images))
+
+    @property
+    def text(self) -> str:
+        return "\n\n".join(b.text for b in self.blocks if isinstance(b, TextBlock))
+
+    @property
+    def images(self) -> tuple[ImageBlock, ...]:
+        return tuple(b for b in self.blocks if isinstance(b, ImageBlock))
+
+    # meiva:note
+    # The same input with its first text block rewritten (what rides in front of the first message:
+    # the handoff, a reminder). An input that opens with an image gets the rewrite of "" as a text
+    # block of its own in front.
+    def with_lead_text(self, rewrite: Callable[[str], str]) -> HarnessInput:
+        first = self.blocks[0]
+        if isinstance(first, TextBlock):
+            return HarnessInput(self.key, (TextBlock(rewrite(first.text)), *self.blocks[1:]))
+        lead = rewrite("")
+        return HarnessInput(self.key, (*((TextBlock(lead),) if lead.strip() else ()), *self.blocks))
 
 
 # meiva:note

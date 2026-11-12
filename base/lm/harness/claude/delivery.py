@@ -3,7 +3,7 @@ from __future__ import annotations
 import uuid
 from dataclasses import dataclass, replace
 
-from base.lm.harness.delivery import HarnessInput
+from base.lm.harness.delivery import HarnessInput, TextBlock
 from base.lm.harness.events import HarnessCause
 
 # meiva:note
@@ -29,21 +29,21 @@ def key_uuid(key: str) -> str:
 
 
 def user_message(item: HarnessInput) -> dict[str, object]:
-    blocks: list[dict[str, object]] = []
-    if item.text.strip():
-        blocks.append({"type": "text", "text": item.text})
-    blocks.extend(
-        {
+    blocks: list[dict[str, object]] = [
+        {"type": "text", "text": block.text}
+        if isinstance(block, TextBlock)
+        else {
             "type": "image",
             "source": {
                 "type": "base64",
-                "media_type": image.mime_type,
-                "data": image.data_base64,
+                "media_type": block.mime_type,
+                "data": block.data_base64,
             },
         }
-        for image in item.images
-    )
-    content: object = item.text if not item.images else blocks
+        for block in item.blocks
+    ]
+    only = item.blocks[0]
+    content: object = only.text if len(item.blocks) == 1 and isinstance(only, TextBlock) else blocks
     return {
         "type": "user",
         "message": {"role": "user", "content": content},

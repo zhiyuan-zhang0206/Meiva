@@ -4,7 +4,7 @@ from dataclasses import dataclass
 
 from base.lm.harness.codex.frames import JsonObject, RequestParams, as_object, as_text
 from base.lm.harness.codex.mapping import approval_denial
-from base.lm.harness.delivery import HarnessInput
+from base.lm.harness.delivery import HarnessInput, TextBlock
 
 # meiva:note
 # What this bridge tells the app-server about itself. The version is the protocol handshake's, not a
@@ -68,20 +68,18 @@ def open_thread_request(
 
 
 # meiva:note
-# The `input` array of one delivered input: its text, then each image as a data URL. The text block
-# is omitted when the input is images only. `image` with a `url` is the app-server schema's own
-# shape for an inline image; the app-server experiments only exercised `localImage`, so inline data
-# URLs are schema-supported but not yet observed against a real server.
+# The `input` array of one delivered input: its blocks in order, each text as a text item and each
+# image as a data URL. `image` with a `url` is the app-server schema's own shape for an inline image;
+# Codex app-server 0.166.0 was recorded accepting inline data URLs between text items, and echoing the
+# `userMessage` with our `clientId` and the items unchanged.
 # meiva:link base/lm/harness/codex/docs/codex.md
 def _input_blocks(item: HarnessInput) -> list[JsonObject]:
-    blocks: list[JsonObject] = []
-    if item.text.strip():
-        blocks.append({"type": "text", "text": item.text})
-    blocks.extend(
-        {"type": "image", "url": f"data:{image.mime_type};base64,{image.data_base64}"}
-        for image in item.images
-    )
-    return blocks
+    return [
+        {"type": "text", "text": block.text}
+        if isinstance(block, TextBlock)
+        else {"type": "image", "url": f"data:{block.mime_type};base64,{block.data_base64}"}
+        for block in item.blocks
+    ]
 
 
 def turn_start_request(

@@ -367,7 +367,7 @@ async def test_a_turn_started_through_delivery_is_not_reported_as_the_clis_own(
     delivered: list[UnsolicitedOutput] = []
     harness = await start(tmp_path, unsolicited=delivered.append, scripts=[[Say("created")]])
     try:
-        await harness.session.deliver([HarnessInput(key="in-1", text="make it")])
+        await harness.session.deliver([HarnessInput.of(key="in-1", text="make it")])
         _ = await harness.wait_for(lambda event: isinstance(event, TurnCompleted))
         assert delivered == []
     finally:

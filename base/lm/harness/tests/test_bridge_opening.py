@@ -14,7 +14,13 @@ import pytest
 
 from base.api_contracts.agent_contract import Harness
 from base.clock.tests.fakes import system_clock
-from base.lm.harness import HarnessBridge, HarnessInput, HarnessNotDeliveredError, InputRejected
+from base.lm.harness import (
+    HarnessBridge,
+    HarnessInput,
+    HarnessNotDeliveredError,
+    InputRejected,
+    TextBlock,
+)
 from base.lm.harness.registration import SecureRandom
 from base.lm.harness.tests.test_bridge import FakeSession, handoff, make_bridge
 
@@ -43,11 +49,11 @@ async def test_a_refused_first_input_is_handed_over_again_with_the_handoff() -> 
     bridge = make_bridge(session, handoff=doc)
     subscription = await bridge.subscribe()
     try:
-        await bridge.deliver([HarnessInput("inbound-1", "hello")])
+        await bridge.deliver([HarnessInput.of("inbound-1", "hello")])
         await _until_events_are_read()
-        await bridge.deliver([HarnessInput("inbound-1", "hello")])
+        await bridge.deliver([HarnessInput.of("inbound-1", "hello")])
         await _until_events_are_read()
-        await bridge.deliver([HarnessInput("inbound-2", "later")])
+        await bridge.deliver([HarnessInput.of("inbound-2", "later")])
     finally:
         subscription.close()
 
@@ -65,8 +71,8 @@ async def test_a_second_batch_before_the_first_is_acknowledged_does_not_repeat_t
     doc = handoff()
     bridge = make_bridge(session, handoff=doc)
 
-    await bridge.deliver([HarnessInput("inbound-1", "one")])
-    await bridge.deliver([HarnessInput("inbound-2", "two")])
+    await bridge.deliver([HarnessInput.of("inbound-1", "one")])
+    await bridge.deliver([HarnessInput.of("inbound-2", "two")])
 
     texts = [text for text, _key, _turn in session.submitted]
     assert texts[0].startswith(doc.render().strip())
@@ -87,6 +93,21 @@ async def test_a_session_that_cannot_start_hands_nothing_over() -> None:
     )
 
     with pytest.raises(HarnessNotDeliveredError):
-        await bridge.deliver([HarnessInput("inbound-1", "one")])
+        await bridge.deliver([HarnessInput.of("inbound-1", "one")])
 
     assert session.submitted == []
+
+
+async def test_the_handoff_goes_before_the_first_block_of_a_multi_block_input() -> None:
+    session = RejectingFirstSession()
+    doc = handoff()
+    bridge = make_bridge(session, handoff=doc)
+    subscription = await bridge.subscribe()
+    try:
+        blocks = (TextBlock("one"), TextBlock("two"))
+        await bridge.deliver([HarnessInput("inbound-1", blocks)])
+    finally:
+        subscription.close()
+
+    [(text, _key, _turn)] = session.submitted
+    assert text.startswith(doc.render().strip()) and text.endswith("one\n\ntwo")

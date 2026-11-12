@@ -147,18 +147,25 @@ def native_images(messages: Sequence[BaseMessage]) -> tuple[tuple[ImageBlock, ..
 
 
 # meiva:note
-# The images of one input, in order, that fit its total bound, and how many were left out. An image that
-# does not fit is left out and a later, smaller one may still fit.
-def fit_input_images(images: Sequence[ImageBlock]) -> tuple[tuple[ImageBlock, ...], int]:
-    kept: list[ImageBlock] = []
+# The images of one input that fit its total bound, row by row in order, and how many were left out.
+# An image that does not fit is left out and a later, smaller one may still fit.
+def fit_input_images(
+    rows: Sequence[Sequence[ImageBlock]],
+) -> tuple[tuple[tuple[ImageBlock, ...], ...], int]:
     total = 0
-    for image in images:
-        size = len(base64.b64decode(image.data_base64, validate=True))
-        if total + size > MAX_INPUT_IMAGE_BYTES:
-            continue
-        total += size
-        kept.append(image)
-    return tuple(kept), len(images) - len(kept)
+    skipped = 0
+    kept: list[tuple[ImageBlock, ...]] = []
+    for images in rows:
+        fits: list[ImageBlock] = []
+        for image in images:
+            size = len(base64.b64decode(image.data_base64, validate=True))
+            if total + size > MAX_INPUT_IMAGE_BYTES:
+                skipped += 1
+                continue
+            total += size
+            fits.append(image)
+        kept.append(tuple(fits))
+    return tuple(kept), skipped
 
 
 def skipped_images_note(skipped: int) -> str:

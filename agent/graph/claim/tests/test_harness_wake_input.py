@@ -7,9 +7,11 @@ from __future__ import annotations
 
 import asyncio
 from collections.abc import Sequence
+from dataclasses import replace
 
 import psycopg
 import pytest
+from langgraph.runtime import Runtime
 from psycopg_pool import AsyncConnectionPool
 
 from agent.graph.claim.harness_turn import harness_turn_node
@@ -28,13 +30,26 @@ from agent.graph.claim.tests.test_harness_turn import hosted_resources as hosted
 from agent.graph.llm_errors import FatalLLMStreamError
 from agent.ownership.tests.ownership_support import agent_row
 from agent.state import AgentState
+from base.agents.context import MeivaContext
+from base.config.tests.configuration import defaults
+from base.host.env.agent_slices import AgentSlices
 from base.lm.harness import (
     BridgeEvent,
     HarnessInput,
     HarnessNotDeliveredError,
     Reconciliation,
+    TextBlock,
 )
 from base.native_process.turn_identity import HostedTurnResources
+
+
+def _without_timestamps(
+    engine: FakeEngine, aops_pool: AsyncConnectionPool, resources: HostedTurnResources
+) -> Runtime[MeivaContext]:
+    context = runtime(engine, ops_pool=aops_pool, hosted_resources=resources).context
+    slices = AgentSlices.resolve(default_reader=defaults(general__message_timestamps=False))
+    return Runtime(context=replace(context, agent=slices))
+
 
 _PASSIVE = '{"note_tag": "lifecycle_interrupt", "passive": true}'
 _HOOK_NOTE = "Skill recommendation: read the `inspect-a-trace` skill."
@@ -332,3 +347,191 @@ def test_plan_wake_bounds_the_images_of_the_merged_input_not_of_each_row() -> No
 
     assert len(wake.images) == 3, "four 5 MB images in one input: the fourth is left out"
     assert "1 attached image was not sent inline" in wake.text
+
+
+def test_plan_wake_makes_a_block_per_message_with_its_images_behind_it() -> None:
+    from agent.graph.claim.harness_foreground import Handed, plan_wake
+    from base.lm.harness import ImageBlock, TextBlock
+
+    image = ImageBlock(mime_type="image/png", data_base64="aGk=")
+    rows = [
+        (Handed("inbound-1", 1, ()), "first message", False),
+        (Handed("inbound-2", 2, ()), "second message", False),
+    ]
+    synthetic = [
+        (Handed("hook-notes-2", None, ()), "a note"),
+        (Handed("control-1", None, ()), "a hint"),
+    ]
+
+    plan = plan_wake(
+        synthetic,
+        rows,
+        {"inbound-1": (image,), "inbound-2": (image, image)},
+        hook_notes_key="hook-notes-",
+    )
+
+    [wake] = plan.inputs
+    assert wake.blocks == (
+        TextBlock("a hint"),
+        TextBlock("first message"),
+        image,
+        TextBlock("second message"),
+        image,
+        image,
+        TextBlock("a note"),
+    )
+    assert plan.group is not None and plan.group.row_ids == (1, 2), "rows are marked for a crash"
+
+
+async def test_each_message_of_a_wake_keeps_its_own_timeline_entry(
+    db_conn: psycopg.Connection,
+    aops_pool: AsyncConnectionPool,
+    hosted_resources: HostedTurnResources,
+) -> None:
+    agent_id = agent_row(db_conn)
+    rows = [insert_row(db_conn, agent_id, "chat", "user", t) for t in ("first", "second")]
+    engine = FakeEngine()
+    rt = runtime(engine, ops_pool=aops_pool, hosted_resources=hosted_resources)
+
+    _ = await harness_turn_node(AgentState(), rt, config(agent_id))
+
+    [[one]] = engine.delivered
+    texts = [b.text for b in one.blocks if isinstance(b, TextBlock)]
+    assert len(texts) == 2 and texts[0].endswith("first") and texts[1].endswith("second")
+    assert await timeline_inbound_ids(aops_pool, agent_id) == rows, "a timeline entry per message"
+
+
+async def test_passive_rows_are_not_handed_over_when_the_only_row_that_is_not_passive_has_no_text(
+    db_conn: psycopg.Connection,
+    aops_pool: AsyncConnectionPool,
+    hosted_resources: HostedTurnResources,
+) -> None:
+    agent_id = agent_row(db_conn)
+    blank = insert_row(db_conn, agent_id, "chat", "user", "  ")
+    passive = insert_row(
+        db_conn, agent_id, "system_note", "user", "Your turn was interrupted.", _PASSIVE
+    )
+    attempts = 0
+
+    def script(inputs: Sequence[HarnessInput]) -> Sequence[BridgeEvent]:
+        nonlocal attempts
+        attempts += 1
+        return (
+            rejecting()(inputs)
+            if attempts == 1
+            else in_a_turn([i.key for i in inputs], "MEIVA_DISPLAY_TO_USER\nok")
+        )
+
+    engine = FakeEngine(script=script)
+    rt = _without_timestamps(engine, aops_pool, hosted_resources)
+
+    async with asyncio.timeout(20):
+        _ = await harness_turn_node(_hints_only(), rt, config(agent_id))
+
+    first, second = engine.delivered
+    assert first[0].text == second[0].text, "the refused input is handed over again, once"
+    assert second[0].text.count(_HOOK_NOTE) == 1 and second[0].text.count("restarted") == 1
+    assert "interrupted" not in first[0].text, "a passive note is never handed over on its own"
+    assert row_status(db_conn, blank) == "done"
+    assert row_status(db_conn, passive) == "pending", (
+        "it waits for the next input that is not passive"
+    )
+
+
+def test_the_note_about_left_out_images_follows_the_last_message_before_the_hook_note() -> None:
+    import base64
+
+    from agent.graph.claim.harness_foreground import Handed, plan_wake
+    from agent.graph.claim.harness_render import MAX_IMAGE_BYTES, skipped_images_note
+    from base.lm.harness import ImageBlock, TextBlock
+
+    data = base64.b64encode(b"x" * MAX_IMAGE_BYTES).decode("ascii")
+    image = ImageBlock(mime_type="image/png", data_base64=data)
+    rows = [(Handed(f"inbound-{i}", i, ()), f"message {i}", False) for i in range(1, 5)]
+    images = {f"inbound-{i}": (image,) for i in range(1, 5)}
+    note = (Handed("hook-notes-4", None, ()), "a hook note")
+
+    [wake] = plan_wake([note], rows, images, hook_notes_key="hook-notes-").inputs
+
+    assert wake.blocks == (
+        TextBlock("message 1"),
+        image,
+        TextBlock("message 2"),
+        image,
+        TextBlock("message 3"),
+        image,
+        TextBlock("message 4"),
+        TextBlock(skipped_images_note(1)),
+        TextBlock("a hook note"),
+    )
+
+
+def test_passive_rows_alone_are_held_and_never_become_the_wake() -> None:
+    from agent.graph.claim.harness_foreground import Handed, plan_wake
+
+    passive = (Handed("inbound-2", 2, ()), "interrupted", True)
+    blank = (Handed("inbound-1", 1, ()), "  ", False)
+    hint = (Handed("control-1", None, ()), "restarted")
+
+    with_hint = plan_wake([hint], [blank, passive], {}, hook_notes_key="hook-notes-")
+    alone = plan_wake([], [blank, passive], {}, hook_notes_key="hook-notes-")
+
+    assert [i.text for i in with_hint.inputs] == ["restarted"]
+    assert with_hint.handed[0].row_ids == () and with_hint.group is None
+    assert with_hint.held == (passive[0],) and with_hint.settled_now == (blank[0],)
+    assert alone.inputs == () and alone.held == (passive[0],)
+
+
+async def test_a_synthetic_input_with_no_text_fails_before_any_row_is_reserved(
+    db_conn: psycopg.Connection,
+    aops_pool: AsyncConnectionPool,
+    hosted_resources: HostedTurnResources,
+) -> None:
+    agent_id = agent_row(db_conn)
+    chat = insert_row(db_conn, agent_id, "chat", "user", "carry on")
+    state = AgentState(
+        harness_inputs=[{"key": "hook-notes-1", "prompt": "  \n", "timeline_items": []}]
+    )
+    engine = FakeEngine()
+    rt = runtime(engine, ops_pool=aops_pool, hosted_resources=hosted_resources)
+
+    with pytest.raises(ValueError, match="hook-notes-1"):
+        _ = await harness_turn_node(state, rt, config(agent_id))
+
+    assert engine.delivered == [] and row_status(db_conn, chat) == "pending"
+
+
+async def test_a_crash_rebuilds_the_blocks_of_a_wake_as_the_first_delivery_made_them(
+    db_conn: psycopg.Connection,
+    aops_pool: AsyncConnectionPool,
+    hosted_resources: HostedTurnResources,
+) -> None:
+    fresh_agent = agent_row(db_conn)
+    for text in ("first of the wake", "second of the wake"):
+        _ = insert_row(db_conn, fresh_agent, "chat", "user", text)
+    fresh = FakeEngine()
+    _ = await harness_turn_node(
+        AgentState(),
+        _without_timestamps(fresh, aops_pool, hosted_resources),
+        config(fresh_agent),
+    )
+    crashed_agent = agent_row(db_conn)
+    _ = _claimed_group(db_conn, crashed_agent, "inbound-6000")
+    _ = _claimed_group(db_conn, crashed_agent, "inbound-7000")
+    rebuilt = FakeEngine()
+    rebuilt.records = {"inbound-6000": Reconciliation.IN_CONTEXT}
+
+    _ = await harness_turn_node(
+        AgentState(),
+        _without_timestamps(rebuilt, aops_pool, hosted_resources),
+        config(crashed_agent),
+    )
+
+    [[first]] = fresh.delivered
+    [[again]] = rebuilt.delivered
+    assert [b.text for b in first.blocks if isinstance(b, TextBlock)] == [
+        "first of the wake",
+        "second of the wake",
+    ]
+    assert again.blocks[1:] == first.blocks, "the same message blocks, delivered again as one input"
+    assert isinstance(again.blocks[0], TextBlock) and "restarted" in again.blocks[0].text

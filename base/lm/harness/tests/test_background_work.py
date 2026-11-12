@@ -187,11 +187,11 @@ async def test_a_refused_input_hands_the_lost_note_over_again_until_it_is_in_con
     bridge = make_bridge(session)
     subscription = await bridge.subscribe()
     try:
-        await bridge.deliver([HarnessInput(key="inbound-1", text="one")])
+        await bridge.deliver([HarnessInput.of(key="inbound-1", text="one")])
         await asyncio.sleep(0.05)
-        await bridge.deliver([HarnessInput(key="inbound-1", text="one")])
+        await bridge.deliver([HarnessInput.of(key="inbound-1", text="one")])
         await asyncio.sleep(0.05)
-        await bridge.deliver([HarnessInput(key="inbound-2", text="two")])
+        await bridge.deliver([HarnessInput.of(key="inbound-2", text="two")])
     finally:
         subscription.close()
 

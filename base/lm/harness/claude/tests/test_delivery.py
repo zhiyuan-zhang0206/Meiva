@@ -1,12 +1,13 @@
 from __future__ import annotations
 
 import asyncio
+import json
 from pathlib import Path
 from typing import Any
 
 from base.lm.harness.claude.delivery import key_uuid
 from base.lm.harness.claude.tests.support import Harness, replay, start
-from base.lm.harness.delivery import HarnessInput, ImageBlock
+from base.lm.harness.delivery import HarnessInput, ImageBlock, TextBlock
 from base.lm.harness.delivery.tests.sent import send
 from base.lm.harness.events import (
     AckSignal,
@@ -39,7 +40,7 @@ async def test_an_input_written_during_a_tool_is_absorbed_into_the_running_turn(
     harness = await start(tmp_path, passive=True)
     try:
         ticket = await first_turn(harness)
-        await harness.session.deliver([HarnessInput("steer", "also this")])
+        await harness.session.deliver([HarnessInput.of("steer", "also this")])
         assert (await seen(harness, InputReceived))[-1].signal is AckSignal.WEAK
         assert await seen(harness, InputInContext) == []
         replay(harness.client, "absorbed_at_tool", "turn", first="first", steer="steer")
@@ -62,7 +63,7 @@ async def test_a_deferred_input_becomes_its_own_visible_turn_after_the_result(
     harness = await start(tmp_path, passive=True)
     try:
         ticket = await first_turn(harness)
-        await harness.session.deliver([HarnessInput("steer", "late input")])
+        await harness.session.deliver([HarnessInput.of("steer", "late input")])
         replay(harness.client, "deferred_new_turn", "turn1", first="first", steer="steer")
         outcome = await asyncio.wait_for(ticket.outcome(), 2)
         assert outcome.text == "1. Lions ... 120. Owls"
@@ -90,7 +91,7 @@ async def test_a_turn_submitted_right_after_does_not_take_the_deferred_turns_res
     harness = await start(tmp_path, passive=True)
     try:
         first = await first_turn(harness)
-        await harness.session.deliver([HarnessInput("steer", "late input")])
+        await harness.session.deliver([HarnessInput.of("steer", "late input")])
         replay(harness.client, "deferred_new_turn", "turn1", first="first", steer="steer")
         await asyncio.wait_for(first.outcome(), 2)
         second = await send(harness, "next instruction", key="next")
@@ -112,7 +113,7 @@ async def test_an_interrupted_turn_ends_and_the_queued_input_revives_as_a_new_tu
     harness = await start(tmp_path, passive=True)
     try:
         ticket = await first_turn(harness)
-        await harness.session.deliver([HarnessInput("steer", "queued before interrupt")])
+        await harness.session.deliver([HarnessInput.of("steer", "queued before interrupt")])
         replay(harness.client, "interrupt_revive", "interrupted", first="first", steer="steer")
         outcome = await asyncio.wait_for(ticket.outcome(), 2)
         assert outcome.interrupted
@@ -159,7 +160,7 @@ async def test_a_turn_the_cli_began_on_a_timer_names_the_scheduled_cause(tmp_pat
 async def test_a_write_alone_is_only_a_weak_receipt(tmp_path: Path) -> None:
     harness = await start(tmp_path, passive=True)
     try:
-        await harness.session.deliver([HarnessInput("k1", "a"), HarnessInput("k2", "b")])
+        await harness.session.deliver([HarnessInput.of("k1", "a"), HarnessInput.of("k2", "b")])
         received = await seen(harness, InputReceived)
         assert [(e.key, e.signal) for e in received] == [
             ("k1", AckSignal.WEAK),
@@ -176,7 +177,7 @@ async def test_images_ride_as_base64_content_blocks(tmp_path: Path) -> None:
     harness = await start(tmp_path, passive=True)
     try:
         image = ImageBlock("image/png", "aGk=")
-        await harness.session.deliver([HarnessInput("k1", "look", (image,))])
+        await harness.session.deliver([HarnessInput.of("k1", "look", (image,))])
         content = harness.client.sent[0]["message"]["content"]
         assert content == [
             {"type": "text", "text": "look"},
@@ -211,3 +212,43 @@ def test_a_hook_report_is_about_the_session_not_content_of_a_turn() -> None:
     from base.lm.harness.claude.inbound import MessageKind, message_kind
 
     assert message_kind("HookEventMessage") is MessageKind.SESSION
+
+
+def _recorded_blocks(name: str) -> tuple[list[dict[str, Any]], tuple[Any, ...]]:
+    path = Path(__file__).parent / "fixtures" / "multi_block_input.json"
+    sent: list[dict[str, Any]] = json.loads(path.read_text())["sent"][name]
+    blocks = tuple(
+        TextBlock(b["text"])
+        if b["type"] == "text"
+        else ImageBlock(b["source"]["media_type"], b["source"]["data"])
+        for b in sent
+    )
+    return sent, blocks
+
+
+async def test_a_wake_of_several_messages_is_one_user_message_of_alternating_blocks(
+    tmp_path: Path,
+) -> None:
+    harness = await start(tmp_path, passive=True)
+    try:
+        sent, blocks = _recorded_blocks("images")
+        await harness.session.deliver([HarnessInput("wake", blocks)])
+        assert harness.client.sent[0]["message"]["content"] == sent, "as the recorded CLI took it"
+        replay(harness.client, "multi_block_input", "images", k="wake")
+        done = await harness.wait_for(lambda e: isinstance(e, TurnCompleted))
+        assert [e.key for e in await seen(harness, InputInContext)] == ["wake"]
+        assert done.text == "A=red, B=blue"
+    finally:
+        await harness.stop()
+
+
+async def test_several_text_blocks_without_images_stay_separate_blocks(tmp_path: Path) -> None:
+    harness = await start(tmp_path, passive=True)
+    try:
+        sent, blocks = _recorded_blocks("texts")
+        await harness.session.deliver([HarnessInput("wake", blocks)])
+        assert harness.client.sent[0]["message"]["content"] == sent
+        replay(harness.client, "multi_block_input", "texts", k="wake")
+        assert [e.key for e in await seen(harness, InputInContext)] == ["wake"]
+    finally:
+        await harness.stop()

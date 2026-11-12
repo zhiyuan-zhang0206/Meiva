@@ -280,6 +280,8 @@ class ForegroundRun:
         self._images: dict[str, tuple[ImageBlock, ...]] = {}
         for raw in state.harness_inputs:
             key, prompt = str(raw["key"]), str(raw["prompt"])
+            if not prompt.strip():
+                raise ValueError(f"synthetic input {key!r} has no text")
             items = _TIMELINE_ITEMS.validate_python(raw.get("timeline_items", []))
             self._synthetic.append((Handed(key, None, tuple(items)), prompt))
         self.last_key = f"inbound-turn-{agent_id}"
@@ -688,6 +690,7 @@ class ForegroundRun:
                 lambda: commit_handed(self._ctx, self._agent_id, settled_now)
             )
             publish_inbound(self._ctx, self._agent_id, items)
+        await requeue_handed(self._ctx, self._agent_id, plan.held)
         if not handed:
             return True
         compaction_note = await self._compaction_note()

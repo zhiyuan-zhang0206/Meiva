@@ -7,9 +7,20 @@ its evidence are in
 
 ## The input
 
-`HarnessInput(key, text, images)` (`delivery/inputs.py`). `key` is the caller's own id and names the
-input in every later event. An image is an `ImageBlock(mime_type, data_base64)`; the type and the
-base64 are validated when the value is built, and a batch must have unique keys.
+`HarnessInput(key, blocks)` (`delivery/inputs.py`). `key` is the caller's own id and names the
+input in every later event. `blocks` is an ordered sequence of `TextBlock(text)` and
+`ImageBlock(mime_type, data_base64)`; a wake's messages are one input, a text block per message with
+that message's images right behind it, the synthetic hints first and the hook note last.
+`HarnessInput.of(key, text, images)` is the single-message shape (one text block, then the images). The
+type and the base64 are validated when the value is built, and a batch must have unique keys.
+`HarnessInput.text` (the text blocks joined by a blank line) and `.images` are the flattened views.
+What rides in front of the first message (the handoff, the compaction reminder) is added to the first
+text block (`with_lead_text`). Claude Code takes the blocks as the `content` of one user message
+(a single text block is sent as a plain string), Codex as the items of one `input` array; both were
+recorded accepting several text blocks and alternating images with the echo (`uuid` / `clientId`)
+arriving as usual (`multi_block_input.json` in each adapter's fixtures). Antigravity's stdin protocol has
+one content string and takes an image only as a separate RPC, so it keeps its flattened behavior: the
+text blocks joined by blank lines, the images as before (a CLI protocol limit).
 
 Images reach all three CLIs as images: Claude as an `image` content block, Codex as an `image` input with a data URL,
 Antigravity as `media` through `SendUserCascadeMessage` (an idle conversation takes the text first and the image

@@ -88,7 +88,8 @@ stable `turn/steer` RPC to the running turn (a turn the server began on its own 
 instead; when a turn it cannot steer (being interrupted, or its id not yet known) is in the way, the
 input is refused as `InputRejected`, never started beside it. Both requests carry the Meiva input key as
 `clientUserMessageId`, and Codex rejects a steer whose turn is no longer active. Images go as
-`image` data URLs (schema-supported, not yet observed against a real server). The two
+`image` data URLs (recorded against app-server 0.166.0 between text items, with the `userMessage` echo carrying
+our `clientId`). The two
 acknowledgements are separate events: the RPC response naming the expected turn is ACK 1
 (`InputReceived`, strong), and `item/completed` of a `userMessage` whose `clientId` is the key is ACK 2
 (`InputInContext`, attributed to the turn named by the notification). A turn that completes while a

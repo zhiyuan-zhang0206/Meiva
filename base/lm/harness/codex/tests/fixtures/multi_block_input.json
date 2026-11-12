@@ -1,0 +1,165 @@
+{
+ "source": "codex app-server 0.166.0 over stdio (scratch cwd, read-only sandbox, approval never): two turn/start calls, the first with input text/image/text/image/text, the second with three text items. userMessage items came back with our clientId and the items unchanged (text items gain empty text_elements); the model answered from all items (A=red, B=blue; PINEAPPLE GRANITE). thread/turn ids replaced by placeholders.",
+ "sent": {
+  "images": [
+   {
+    "type": "text",
+    "text": "Message one: the first color image follows."
+   },
+   {
+    "type": "image",
+    "url": "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAgAAAAICAIAAABLbSncAAAAEklEQVR4nGP4z8CAFWEXHbQSACj/P8Fu7N9hAAAAAElFTkSuQmCC"
+   },
+   {
+    "type": "text",
+    "text": "Message two: the second color image follows."
+   },
+   {
+    "type": "image",
+    "url": "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAgAAAAICAIAAABLbSncAAAAEElEQVR4nGNgYPiPAw0pCQCpcD/BFMrqcwAAAABJRU5ErkJggg=="
+   },
+   {
+    "type": "text",
+    "text": "Message three (no image). Reply with exactly: A=<color of image 1>, B=<color of image 2>."
+   }
+  ],
+  "texts": [
+   {
+    "type": "text",
+    "text": "Message one: remember the word PINEAPPLE."
+   },
+   {
+    "type": "text",
+    "text": "Message two: remember the word GRANITE."
+   },
+   {
+    "type": "text",
+    "text": "Message three: reply with exactly the two words, in order."
+   }
+  ]
+ },
+ "frames": {
+  "images": [
+   {
+    "method": "item/completed",
+    "params": {
+     "threadId": "$thread",
+     "turnId": "$turn",
+     "item": {
+      "type": "userMessage",
+      "id": "user-1",
+      "clientId": "rec-cid-1",
+      "content": [
+       {
+        "type": "text",
+        "text": "Message one: the first color image follows.",
+        "text_elements": []
+       },
+       {
+        "type": "image",
+        "url": "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAgAAAAICAIAAABLbSncAAAAEklEQVR4nGP4z8CAFWEXHbQSACj/P8Fu7N9hAAAAAElFTkSuQmCC",
+        "detail": null
+       },
+       {
+        "type": "text",
+        "text": "Message two: the second color image follows.",
+        "text_elements": []
+       },
+       {
+        "type": "image",
+        "url": "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAgAAAAICAIAAABLbSncAAAAEElEQVR4nGNgYPiPAw0pCQCpcD/BFMrqcwAAAABJRU5ErkJggg==",
+        "detail": null
+       },
+       {
+        "type": "text",
+        "text": "Message three (no image). Reply with exactly: A=<color of image 1>, B=<color of image 2>.",
+        "text_elements": []
+       }
+      ]
+     }
+    }
+   },
+   {
+    "method": "item/completed",
+    "params": {
+     "threadId": "$thread",
+     "turnId": "$turn",
+     "item": {
+      "type": "agentMessage",
+      "id": "msg-1",
+      "text": "A=red, B=blue.",
+      "phase": "final_answer"
+     }
+    }
+   },
+   {
+    "method": "turn/completed",
+    "params": {
+     "threadId": "$thread",
+     "turn": {
+      "id": "$turn",
+      "status": "completed",
+      "durationMs": 1,
+      "items": []
+     }
+    }
+   }
+  ],
+  "texts": [
+   {
+    "method": "item/completed",
+    "params": {
+     "threadId": "$thread",
+     "turnId": "$turn",
+     "item": {
+      "type": "userMessage",
+      "id": "user-1",
+      "clientId": "rec-cid-2",
+      "content": [
+       {
+        "type": "text",
+        "text": "Message one: remember the word PINEAPPLE.",
+        "text_elements": []
+       },
+       {
+        "type": "text",
+        "text": "Message two: remember the word GRANITE.",
+        "text_elements": []
+       },
+       {
+        "type": "text",
+        "text": "Message three: reply with exactly the two words, in order.",
+        "text_elements": []
+       }
+      ]
+     }
+    }
+   },
+   {
+    "method": "item/completed",
+    "params": {
+     "threadId": "$thread",
+     "turnId": "$turn",
+     "item": {
+      "type": "agentMessage",
+      "id": "msg-1",
+      "text": "PINEAPPLE GRANITE",
+      "phase": "final_answer"
+     }
+    }
+   },
+   {
+    "method": "turn/completed",
+    "params": {
+     "threadId": "$thread",
+     "turn": {
+      "id": "$turn",
+      "status": "completed",
+      "durationMs": 1,
+      "items": []
+     }
+    }
+   }
+  ]
+ }
+}

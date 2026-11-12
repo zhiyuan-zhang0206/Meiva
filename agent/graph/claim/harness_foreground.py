@@ -18,12 +18,14 @@ from base.lm.harness import (
     BridgeEvent,
     HarnessInput,
     ImageBlock,
+    InputBlock,
     InputInContext,
     InputLost,
     InputReceived,
     InputRejected,
     InterruptConfirmed,
     Reconciliation,
+    TextBlock,
     TurnCompleted,
     TurnStarted,
 )
@@ -211,7 +213,7 @@ def plan_reconciliation(
 
 # meiva:note
 # One wake's rows and the pre-turn hooks' note are one input, so the model's first request holds all of
-# them: each row's text in queue order, then the note, separated by blank lines (a native request
+# them: each row's text in queue order, then the note, as blocks of the one input (a native request
 # carries the same messages in one call). Handing them over one by one made the first input open the
 # turn alone and every other one run as a turn of its own about a second later (Claude Code), or reach
 # the model only after its first request had gone out (Codex, Antigravity): the agent first answered a
@@ -221,14 +223,16 @@ def plan_reconciliation(
 # What one reservation hands the harness: always one input. The synthetic inputs' text comes first (a
 # restart or resume note, a context reset, a continuation: system hints the model needs before the
 # messages), then each row in queue order, then the hook note (a native request carries hook messages
-# after the messages), separated by blank lines. The synthetic inputs ride in it with their timeline
+# after the messages), each its own text block with a row's images right behind its text. The synthetic inputs ride in it with their timeline
 # entries and settle with it. A row with no text settles at once. A wake with row text is named by its
 # first row that is not passive, and `folded` is what to hand back if the input is refused, lost or not
 # taken. A wake with no row text is named by its first synthetic input and is itself a synthetic input
 # (no row names it), so a refusal hands it back whole, text and timeline entries, and `folded` is
 # empty; `prompts` is the text each synthetic input is handed back under. `group` is the merged input
 # when it carries several rows, which is what must be marked so a crash can rebuild it. The images of
-# the input are bounded together, not per row.
+# the input are bounded together, not per row. Passive rows alone are never handed over (they wait for the
+# next input that is not passive), so when every row with text is passive, whatever else the wake
+# holds being an empty message, they are `held`: the caller returns them to the queue.
 # meiva:link agent/graph/docs/harness-turn.md
 @dataclass(frozen=True, slots=True)
 class WakePlan:
@@ -238,6 +242,7 @@ class WakePlan:
     group: Handed | None
     folded: tuple[tuple[Handed, str], ...] = ()
     prompts: Mapping[str, str] = MappingProxyType({})
+    held: tuple[Handed, ...] = ()
 
 
 def plan_wake(
@@ -249,12 +254,14 @@ def plan_wake(
 ) -> WakePlan:
     parts = [(entry, text, passive) for entry, text, passive in rows if text.strip()]
     settled_now = tuple(entry for entry, text, _ in rows if not text.strip())
+    held = tuple(entry for entry, _, _ in parts) if all(p for _, _, p in parts) else ()
+    parts = [] if held else parts
     prompts = {entry.key: prompt for entry, prompt in synthetic}
     ordered = _in_wake_order(synthetic, parts, hook_notes_key)
     if not ordered:
-        return WakePlan((), (), settled_now, None)
+        return WakePlan((), (), settled_now, None, held=held)
     wake = merge_handed([(entry, passive) for entry, _, passive in ordered])
-    wake_input = _wake_input(wake, ordered, images)
+    wake_input = _wake_input(wake, ordered, images, hook_notes_key)
     if not parts:
         return WakePlan(
             (wake,),
@@ -262,6 +269,7 @@ def plan_wake(
             settled_now,
             None,
             prompts={**prompts, wake.key: wake_input.text},
+            held=held,
         )
     return WakePlan(
         (wake,),
@@ -273,6 +281,8 @@ def plan_wake(
     )
 
 
+# meiva:note
+# The hints and the rows in queue order, then the hook notes: the order of the blocks of the input.
 def _in_wake_order(
     synthetic: Sequence[tuple[Handed, str]],
     parts: Sequence[tuple[Handed, str, bool]],
@@ -283,17 +293,23 @@ def _in_wake_order(
     return [*hints, *parts, *notes]
 
 
+# meiva:note
+# The one input of a wake: a text block per hint, per row and per hook note, in that order, and the
+# images of a row right behind its text block. The images are bounded together; a note that some were
+# left out follows the last row, before the hook notes.
 def _wake_input(
     wake: Handed,
     parts: Sequence[tuple[Handed, str, bool]],
     images: Mapping[str, tuple[ImageBlock, ...]],
+    hook_notes_key: str,
 ) -> HarnessInput:
-    text = "\n\n".join(text for _, text, _ in parts)
-    kept, skipped = fit_input_images(
-        [image for entry, _, _ in parts for image in images.get(entry.key, ())]
-    )
-    return HarnessInput(
-        key=wake.key,
-        text=f"{text}\n\n{skipped_images_note(skipped)}" if skipped else text,
-        images=kept,
-    )
+    kept, skipped = fit_input_images([images.get(entry.key, ()) for entry, _, _ in parts])
+    blocks: list[InputBlock] = []
+    notes_from = len(parts) - sum(e.key.startswith(hook_notes_key) for e, _, _ in parts)
+    for index, ((_, text, _), fits) in enumerate(zip(parts, kept, strict=True)):
+        if skipped and index == notes_from:
+            blocks.append(TextBlock(skipped_images_note(skipped)))
+        blocks.extend((TextBlock(text), *fits))
+    if skipped and notes_from == len(parts):
+        blocks.append(TextBlock(skipped_images_note(skipped)))
+    return HarnessInput(wake.key, tuple(blocks))

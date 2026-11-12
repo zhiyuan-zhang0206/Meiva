@@ -8,6 +8,8 @@ from base.lm.harness.delivery.inputs import (
     IMAGE_MIME_TYPES,
     HarnessInput,
     ImageBlock,
+    InputBlock,
+    TextBlock,
     validated_batch,
 )
 from base.lm.harness.delivery.ledger import DeliveryLedger, InputPhase, LedgerStep
@@ -22,10 +24,12 @@ __all__ = [
     "DeliveryLedger",
     "HarnessInput",
     "ImageBlock",
+    "InputBlock",
     "InputPhase",
     "LedgerStep",
     "Reconciliation",
     "ReconciliationUnavailableError",
+    "TextBlock",
     "home_in",
     "validated_batch",
 ]

@@ -80,7 +80,7 @@ async def send(
     harness: Any, text: str, *, key: str | None = None, images: tuple[ImageBlock, ...] = ()
 ) -> Sent:
     key = key or f"input-{next(_keys)}"
-    await harness.session.deliver([HarnessInput(key=key, text=text, images=images)])
+    await harness.session.deliver([HarnessInput.of(key=key, text=text, images=images)])
     await asyncio.sleep(0.005)
     return Sent(harness, key)
 
@@ -92,5 +92,7 @@ async def send(
 def send_nowait(harness: Any, text: str, *, key: str | None = None) -> Sent:
     key = key or f"input-{next(_keys)}"
     sent = Sent(harness, key)
-    sent.delivery = asyncio.create_task(harness.session.deliver([HarnessInput(key=key, text=text)]))
+    sent.delivery = asyncio.create_task(
+        harness.session.deliver([HarnessInput.of(key=key, text=text)])
+    )
     return sent
