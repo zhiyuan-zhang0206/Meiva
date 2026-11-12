@@ -4,6 +4,7 @@ from collections.abc import Callable, Collection
 from dataclasses import dataclass
 from typing import TypedDict
 
+from base.host.boundary.json_values import is_object_dict
 from base.lm.harness.codex.transcript.clock import iso_at
 from base.lm.harness.codex.transcript.errors import MissingFieldError, UnknownValueError
 from base.lm.harness.codex.transcript.scalars import opt_int, opt_text, text
@@ -14,6 +15,7 @@ from base.lm.harness.codex.transcript.shapes import (
     opt_strings,
     strings,
 )
+from base.lm.harness.events import HarnessCause
 from base.lm.harness.session.transcript.entries import (
     AgentText,
     Anomaly,
@@ -22,6 +24,7 @@ from base.lm.harness.session.transcript.entries import (
     Compaction,
     HumanInput,
     Interrupt,
+    Notice,
     Order,
     Reasoning,
     SubagentLink,
@@ -355,7 +358,66 @@ def _web_search(item: Obj, place: _Place) -> list[AnyEntry]:
     )
 
 
+def _arguments(value: object) -> dict[str, object]:
+    return dict(value) if is_object_dict(value) else {"arguments": value}
+
+
+# meiva:note
+# An MCP call: the name the live events give it, the call's own arguments, and the text parts of its result joined; a
+# part that is not text is named by its type and never copied. It is an error when the item says it failed or the
+# result says `isError`.
+def _mcp_call(item: Obj, place: _Place) -> list[AnyEntry]:
+    name = f"mcp:{text(item, 'server')}/{text(item, 'tool')}"
+    status = text(item, "status")
+    if status not in ("completed", "failed"):
+        raise UnknownValueError(f"mcpToolCall.status={status}")
+    result = item.get("result")
+    parts: list[str] = []
+    failed = status == "failed"
+    if is_object_dict(result):
+        failed = failed or result.get("isError") is True
+        for part in opt_objects(result, "content"):
+            body = opt_text(part, "text")
+            parts.append(body if body is not None else f"[{opt_text(part, 'type') or 'content'}]")
+    return _finished_pair(
+        place,
+        name,
+        _arguments(item.get("arguments")),
+        "\n".join(parts),
+        ToolStatus.ERROR if failed else ToolStatus.OK,
+    )
+
+
+def _sleep(item: Obj, place: _Place) -> list[AnyEntry]:
+    return _finished_pair(
+        place, "sleep", {"durationMs": opt_int(item, "durationMs")}, "", ToolStatus.OK
+    )
+
+
+# meiva:note
+# The activity record of a sub-agent in the main record: its start and its end are each one status marker naming the agent,
+# and a message sent to it is nothing. No call is paired across turns.
+def _sub_agent_activity(item: Obj, place: _Place) -> list[AnyEntry]:
+    kind = text(item, "kind")
+    if kind == "interacted":
+        return []
+    if kind not in ("started", "completed"):
+        raise UnknownValueError(f"subAgentActivity.kind={kind}")
+    who = opt_text(item, "agentPath") or opt_text(item, "agentThreadId") or "?"
+    return [
+        Notice(
+            **place.common("sub-agent"),
+            text=f"Sub-agent {who} {kind}",
+            cause=HarnessCause.BACKGROUND_TASK,
+            opens_turn=False,
+        )
+    ]
+
+
 _HANDLERS: dict[str, Callable[[Obj, _Place], list[AnyEntry]]] = {
+    "mcpToolCall": _mcp_call,
+    "sleep": _sleep,
+    "subAgentActivity": _sub_agent_activity,
     "fileChange": _file_change,
     "imageView": _image_view,
     "webSearch": _web_search,

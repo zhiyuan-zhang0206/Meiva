@@ -69,6 +69,7 @@ def read_window(
     render_tool: Callable[[str, Mapping[str, object]], str],
     load_sent: LoadSent,
 ) -> Window:
+    file.prepare(before)
     size = file.size()
     tail_end = file.complete_end()
     end = tail_end if before is None else min(before, tail_end)

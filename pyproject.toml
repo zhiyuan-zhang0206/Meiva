@@ -65,6 +65,9 @@ dependencies = [
     # 0.x minor bump is a mapping change to review, not something to pick up
     # silently.
     "claude-agent-sdk>=0.2.168,<0.3",
+    # Imported directly by base/lm/harness/session/transcript/record_file.py: a Codex rollout the CLI has
+    # compressed (`.jsonl.zst`) is read as a stream of decompressed bytes, never by the external `zstd` command.
+    "zstandard>=0.25.0",
     # --- Common runtime libraries ---
     # Imported directly by first-party code (Pillow, requests, mdit,
     # cryptography, websockets, trafilatura, feedparser) and

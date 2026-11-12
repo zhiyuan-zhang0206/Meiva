@@ -5,6 +5,8 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
 
+import zstandard
+
 from base.lm.harness.session.transcript.position import Position, rows_after
 from base.lm.harness.session.transcript.scrub import scrub
 
@@ -21,6 +23,7 @@ from base.lm.harness.session.transcript.scrub import scrub
 BLOCK_BYTES = 256 * 1024
 MAX_BLOCK_BYTES = 16 * 1024 * 1024
 _CHUNK_BYTES = 64 * 1024
+_STREAM_CHUNK_BYTES = 1024 * 1024
 
 
 @dataclass(frozen=True, slots=True)
@@ -41,6 +44,12 @@ class RecordFile:
     def __init__(self, path: Path) -> None:
         self._path = path
         self.bytes_read = 0
+        self._floor = 0
+
+    # meiva:note
+    # Gets the file ready for a window that ends before the row at `before` (None: at the end). A plain file needs nothing.
+    def prepare(self, before: int | None) -> None:
+        del before
 
     def size(self) -> int:
         return self._path.stat().st_size
@@ -63,10 +72,10 @@ class RecordFile:
 
     # meiva:note
     # The rows in the block of about `want` bytes that ends at `end` (a line boundary): the block starts at the
-    # first line boundary inside it, widened while one row is longer than the block. `start == 0` means
-    # the file's first row is in it.
+    # first line boundary inside it, widened while one row is longer than the block (up to `MAX_BLOCK_BYTES`, past which the
+    # block is empty and the window ends before that row). `start == 0` means the file's first row is in it.
     def rows_before(self, end: int, want: int = BLOCK_BYTES) -> Block:
-        low = max(0, end - want)
+        low = max(self._floor, end - want)
         while True:
             data = self._read(max(0, low - 1), end)
             first = max(0, low - 1)
@@ -76,10 +85,10 @@ class RecordFile:
                 data, start = data[1:], low
             else:
                 cut = data.find(b"\n")
-                if cut < 0:
-                    if low == 0 or end - low >= MAX_BLOCK_BYTES:
+                if cut < 0 or first + cut + 1 >= end:
+                    if low <= self._floor or end - low >= MAX_BLOCK_BYTES:
                         return Block(end, end, ())
-                    low = max(0, low - max(want, end - low))
+                    low = max(self._floor, low - max(want, end - low))
                     continue
                 data, start = data[cut + 1 :], first + cut + 1
             break
@@ -124,3 +133,64 @@ def stamp_of(value: object) -> datetime | None:
     except ValueError:
         return None
     return parsed if parsed.tzinfo else parsed.replace(tzinfo=UTC)
+
+
+# meiva:note
+# A rollout the CLI has compressed (`.jsonl.zst`, one zstd stream of exactly the bytes of the plain file; the CLI restores
+# the plain file under its own name when it resumes the thread). A row's offset is its offset in the decompressed bytes, so
+# a row has the same name here as in the plain file. `prepare` makes one streaming pass: it counts the decompressed bytes and
+# keeps in memory only the last `MAX_BLOCK_BYTES` before the window's end (before the row at `before`, or the end of the
+# stream), and a window is then read from that tail like from a file whose first `floor` bytes are not there: the window
+# ends before that point, with `has_more`. Nothing is read twice and nothing larger than the tail is held. A file that
+# cannot be decoded raises `zstandard.ZstdError`.
+class ZstdRecordFile(RecordFile):
+    def __init__(self, path: Path) -> None:
+        super().__init__(path)
+        self._tail = b""
+        self._total = 0
+
+    def prepare(self, before: int | None) -> None:
+        ring = bytearray()
+        position, kept_end = 0, None
+        with self._path.open("rb") as handle:
+            reader = zstandard.ZstdDecompressor().stream_reader(handle, read_across_frames=True)
+            while chunk := reader.read(_STREAM_CHUNK_BYTES):
+                self.bytes_read += len(chunk)
+                position += len(chunk)
+                if kept_end is not None:
+                    continue
+                ring += chunk
+                if before is not None and position >= before:
+                    del ring[len(ring) - (position - before) :]
+                    kept_end = before
+                if len(ring) > MAX_BLOCK_BYTES:
+                    del ring[: len(ring) - MAX_BLOCK_BYTES]
+        end = position if kept_end is None else kept_end
+        start = end - len(ring)
+        first = bytes(ring).find(b"\n") if start > 0 else -1
+        if start > 0:
+            self._tail = bytes(ring[first + 1 :]) if first >= 0 else b""
+            self._floor = end if first < 0 else start + first + 1
+        else:
+            self._tail = bytes(ring)
+            self._floor = 0
+        self._total = position
+
+    @property
+    def held_bytes(self) -> int:
+        return len(self._tail)
+
+    def size(self) -> int:
+        return self._total
+
+    def complete_end(self) -> int:
+        cut = self._tail.rfind(b"\n")
+        return self._floor + cut + 1 if cut >= 0 else self._floor
+
+    def _read(self, low: int, end: int) -> bytes:
+        known = (b"\n" if self._floor > 0 else b"") + self._tail
+        origin = max(self._floor - 1, 0)
+        return known[low - origin : end - origin]
+
+    def rows_after(self, start: int) -> Block:
+        raise NotImplementedError("a compressed record is read as a window, never followed")

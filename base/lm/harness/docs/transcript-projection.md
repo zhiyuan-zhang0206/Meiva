@@ -12,7 +12,8 @@ copy). The writer, the reader and the tables that kept that copy are gone; Antig
 ## The read-time path (Claude Code, Codex)
 
 `session/transcript/record_file.py` is the half every CLI shares: `RecordFile` reads blocks of the main record backwards
-from a line boundary (and counts the bytes it reads). Each CLI has a `window.py` for what is its own. `claude/transcript/window.py`:
+from a line boundary (and counts the bytes it reads); `ZstdRecordFile` does the same for a compressed Codex rollout from a
+bounded tail of one decompression pass. Each CLI has a `window.py` for what is its own. `claude/transcript/window.py`:
 `EntryParser` runs `parse_row` over rows in file order with the row's byte offset as the entry's `seq`, and
 `session_file` finds the file the way the session does (the session's own `HOME`, the project directory named by the
 working directory, a search of every project directory for the session id as the fallback). `codex/transcript/window.py`:

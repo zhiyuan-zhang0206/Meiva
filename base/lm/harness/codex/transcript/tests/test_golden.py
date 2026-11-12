@@ -370,13 +370,13 @@ def test_i_an_unknown_item_type_is_skipped_and_reported_once_per_type() -> None:
     rows = page_rows(page)
     row_item(rows[1])["type"] = "holographicNote"
     row_item(rows[4])["type"] = "holographicNote"
-    row_item(rows[5])["type"] = "mcpToolCall"
+    row_item(rows[5])["type"] = "plan"
     entries = parse_items_page(page)
-    assert {entry.detail for entry in _of(entries, Anomaly)} == {"holographicNote", "mcpToolCall"}
+    assert {entry.detail for entry in _of(entries, Anomaly)} == {"holographicNote", "plan"}
     projector, projection = project(entries, sent("cid-s1-a", "first"), sent("cid-s1-b", "second"))
     assert sorted((a.anomaly, a.detail) for a in projection.anomalies) == [
         (AnomalyKind.UNKNOWN_TYPE, "holographicNote"),
-        (AnomalyKind.UNKNOWN_TYPE, "mcpToolCall"),
+        (AnomalyKind.UNKNOWN_TYPE, "plan"),
     ]
     assert not any("holographic" in draft.payload for draft in projection.drafts)
     again = projector.feed(entries)

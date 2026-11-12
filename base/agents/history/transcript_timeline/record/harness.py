@@ -83,12 +83,25 @@ def record_location(harness: str, environ: Mapping[str, str], workspace: Path) -
 
 
 # meiva:note
-# The name of a file of the session that was found but is not of a form this reader reads (None when there is none:
-# Claude's record has only the one form). A file that is there and unreadable is told from one that is not there.
-def unreadable_file(harness: str, environ: Mapping[str, str], session_id: str) -> str | None:
+# The compressed form of a session's record, when the CLI keeps one (Codex) and the plain file is not there.
+def compressed_file(harness: str, environ: Mapping[str, str], session_id: str) -> Path | None:
     match Harness(harness):
         case Harness.CODEX:
-            return codex.unreadable_file(environ, session_id)
+            return codex.compressed_file(environ, session_id)
+        case _:
+            return None
+
+
+# meiva:note
+# The name of a file of the session that was found but is not of a form this reader reads (None when there is none: Claude's
+# record has only the one form). A file that is there and unreadable is told from one that is not there. `packed_is_readable`
+# says whether the compressed form counts as readable (the cold read reads it; the live path does not).
+def unreadable_file(
+    harness: str, environ: Mapping[str, str], session_id: str, *, packed_is_readable: bool
+) -> str | None:
+    match Harness(harness):
+        case Harness.CODEX:
+            return codex.unreadable_file(environ, session_id, packed_is_readable=packed_is_readable)
         case _:
             return None
 

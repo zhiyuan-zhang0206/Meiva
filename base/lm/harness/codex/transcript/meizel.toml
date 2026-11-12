@@ -10,7 +10,7 @@ exports = ["window.py"]
 "scalars.py" = ["errors.py", "shapes.py"]
 "shapes.py" = ["errors.py"]
 "window.py" = ["rollout.py"]
-"tests" = ["parse.py"]
+"tests" = ["items.py", "parse.py"]
 
 [purity]
 "." = "strict"

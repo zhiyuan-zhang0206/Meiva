@@ -61,11 +61,11 @@ def test_a_row_of_a_kind_the_parser_does_not_know_is_an_anomaly_not_an_error() -
                     "type": "item_completed",
                     "turn_id": TURN,
                     "started_at_ms": 1,
-                    "item": {"type": "McpToolCall", "id": "fc-1"},
+                    "item": {"type": "Plan", "id": "fc-1"},
                 },
             ),
             AnomalyKind.UNKNOWN_TYPE,
-            "item_completed/McpToolCall",
+            "item_completed/Plan",
         ),
     ]
     for line, kind, detail in cases:

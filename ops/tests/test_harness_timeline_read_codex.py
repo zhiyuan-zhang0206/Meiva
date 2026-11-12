@@ -13,6 +13,7 @@ from pathlib import Path
 
 import psycopg
 import pytest
+import zstandard
 from psycopg_pool import ConnectionPool
 
 from base.db import create_agent
@@ -153,3 +154,22 @@ def test_a_page_before_an_item_ends_at_that_row(
     )
     assert head.has_more
     assert all(int(i.item_id.removeprefix("h").split(".")[0]) < oldest for i in page.items)
+
+
+def test_a_compressed_rollout_is_read_when_the_plain_file_is_not_there(
+    tmp_path: Path, db_conn: psycopg.Connection, pool: ConnectionPool
+) -> None:
+    agent = create_agent(db_conn)
+    _ = [_claimed(db_conn, agent, key) for key in KEYS]
+    plain_home = _thread(tmp_path, agent, file_name=ROLLOUT)
+    environ = _environ(tmp_path)
+    expected = read_harness_timeline(_request(agent), pool=pool, home=plain_home, environ=environ)
+    day = tmp_path / "codex/sessions/2026/11/13"
+    (day / ROLLOUT).unlink()
+    (day / f"{ROLLOUT}.zst").write_bytes(
+        zstandard.ZstdCompressor(level=3).compress(FIXTURE.read_bytes())
+    )
+
+    window = read_harness_timeline(_request(agent), pool=pool, home=plain_home, environ=environ)
+
+    assert window == expected and window.items

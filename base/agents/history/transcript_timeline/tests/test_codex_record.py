@@ -5,10 +5,14 @@ import re
 from collections.abc import Sequence
 from pathlib import Path
 
+import pytest
+import zstandard
+
 from base.agents.history.timeline_item import TimelineItem
 from base.agents.history.transcript_timeline.items import format_tool_use
 from base.agents.history.transcript_timeline.project import ProjectedItem, RecordProjector
 from base.agents.history.transcript_timeline.record.harness import (
+    compressed_file,
     entry_reader,
     reply_key,
     reply_key_prefix,
@@ -18,7 +22,12 @@ from base.agents.history.transcript_timeline.record.harness import (
 )
 from base.agents.history.transcript_timeline.tests.support import POLICY, inbound, window
 from base.host.boundary.json_values import is_object_dict, is_object_list
-from base.lm.harness.session.transcript.record_file import BLOCK_BYTES, RecordFile
+from base.lm.harness.session.transcript.record_file import (
+    BLOCK_BYTES,
+    MAX_BLOCK_BYTES,
+    RecordFile,
+    ZstdRecordFile,
+)
 from base.log import logger
 
 # meiva:note
@@ -295,13 +304,93 @@ def test_a_file_that_is_there_in_another_form_is_told_from_one_that_is_not(
     day.mkdir(parents=True)
     environ = {"CODEX_HOME": str(tmp_path)}
     thread = "01a1d14b-0f88-7ee3-8636-d3b8c1507a76"
+    stem = f"rollout-2026-11-13T03-45-19-{thread}.jsonl"
     assert session_file(CODEX, environ, tmp_path, thread) is None
-    assert unreadable_file(CODEX, environ, thread) is None
-    (day / f"rollout-2026-11-13T03-45-19-{thread}.jsonl.zst").write_bytes(b"x")
+    assert compressed_file(CODEX, environ, thread) is None
+    assert unreadable_file(CODEX, environ, thread, packed_is_readable=False) is None
+    (day / f"{stem}.zst").write_bytes(b"x")
     assert session_file(CODEX, environ, tmp_path, thread) is None
-    assert (
-        unreadable_file(CODEX, environ, thread) == f"rollout-2026-11-13T03-45-19-{thread}.jsonl.zst"
-    )
-    (day / f"rollout-2026-11-13T03-45-19-{thread}.jsonl").write_text("")
+    packed = compressed_file(CODEX, environ, thread)
+    assert packed is not None and packed.name == f"{stem}.zst"
+    assert unreadable_file(CODEX, environ, thread, packed_is_readable=True) is None
+    assert unreadable_file(CODEX, environ, thread, packed_is_readable=False) == f"{stem}.zst"
+    (day / f"{stem}.gz").write_bytes(b"x")
+    assert unreadable_file(CODEX, environ, thread, packed_is_readable=True) == f"{stem}.gz"
+    (day / stem).write_text("")
     found = session_file(CODEX, environ, tmp_path, thread)
-    assert found is not None and found.name.endswith(f"{thread}.jsonl")
+    assert found is not None and found.name == stem
+
+
+def _packed(tmp_path: Path, text: str, name: str = "packed") -> ZstdRecordFile:
+    path = tmp_path / f"{name}.jsonl.zst"
+    path.write_bytes(zstandard.ZstdCompressor(level=3).compress(text.encode()))
+    return ZstdRecordFile(path)
+
+
+def _dump(items: Sequence[ProjectedItem]) -> list[dict[str, object]]:
+    return [p.item.model_dump() for p in items]
+
+
+def test_a_compressed_rollout_reads_as_the_plain_one_does(tmp_path: Path) -> None:
+    text = _text("session")
+    plain = window(_read(tmp_path, text), harness=CODEX, sent=_sent())
+    packed = window(_packed(tmp_path, text), harness=CODEX, sent=_sent())
+    assert _dump(packed.items) == _dump(plain.items)
+    assert (packed.size, packed.has_more) == (plain.size, plain.has_more)
+
+
+def test_a_compressed_rollout_pages_as_the_plain_one_does(tmp_path: Path) -> None:
+    text = _text("session")
+    plain_file, packed_file = _read(tmp_path, text), _packed(tmp_path, text)
+    before: int | None = None
+    pages = 0
+    while True:
+        plain = window(plain_file, harness=CODEX, limit=4, before=before, sent=_sent())
+        packed = window(packed_file, harness=CODEX, limit=4, before=before, sent=_sent())
+        assert _dump(packed.items) == _dump(plain.items)
+        assert packed.has_more == plain.has_more
+        pages += 1
+        if not plain.has_more:
+            break
+        before = plain.items[0].offset
+    assert pages > 2
+
+
+def test_a_compressed_rollout_holds_only_a_bounded_tail_and_ends_the_window_before_it(
+    tmp_path: Path,
+) -> None:
+    one = _text("session")
+    text = "".join(_generation(one, i) for i in range(1, 60))
+    big = text * 6
+    assert len(big) > MAX_BLOCK_BYTES
+    file = _packed(tmp_path, big)
+    result = window(file, harness=CODEX, limit=100_000)
+    assert result.size == len(big.encode()) and result.has_more
+    assert file.held_bytes <= MAX_BLOCK_BYTES
+    newest = window(_packed(tmp_path, big, "again"), harness=CODEX, limit=5)
+    plain = window(_read(tmp_path, big), harness=CODEX, limit=5)
+    assert _dump(newest.items) == _dump(plain.items), (
+        "the newest window is the same as the plain one"
+    )
+
+
+def test_a_row_longer_than_a_block_is_read_by_widening_the_block(tmp_path: Path) -> None:
+    rows = [json.loads(line) for line in _text("fork").splitlines()]
+    pad = "x" * (BLOCK_BYTES * 2)
+    for row in rows:
+        if row["type"] == "event_msg" and row["payload"].get("type") == "task_started":
+            row["payload"]["pad"] = pad
+    text = "".join(json.dumps(row) + "\n" for row in rows)
+    plain = window(_read(tmp_path, _text("fork")), harness=CODEX, sent={"cid-a2-2": [inbound(9)]})
+    wide = window(_read(tmp_path, text), harness=CODEX, sent={"cid-a2-2": [inbound(9)]})
+    assert [p.item.kind for p in wide.items] == [p.item.kind for p in plain.items]
+    assert not wide.has_more
+
+
+def test_a_compressed_rollout_that_cannot_be_decoded_raises_for_the_caller_to_report(
+    tmp_path: Path,
+) -> None:
+    path = tmp_path / "bad.jsonl.zst"
+    path.write_bytes(b"not zstd at all")
+    with pytest.raises(zstandard.ZstdError):
+        _ = window(ZstdRecordFile(path), harness=CODEX)

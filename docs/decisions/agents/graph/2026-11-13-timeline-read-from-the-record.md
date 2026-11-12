@@ -93,9 +93,13 @@ code Claude uses). What the rollout holds is in [what a Codex rollout holds](../
 5. **The reply is delivered under `harness:codex:<AgentMessage id>`**, the CLI's own id of the message (the same however often
    it is read, and not a key of the earlier scheme `harness:h<seq>.0`); the first sink after the switch does not resend what
    the record already holds, as for Claude. Usage, settlement of an input and the correction input are as before.
-6. **A file that is there but in a form the reader does not read** (Codex may compress a rollout; none was met) is not an
-   empty history: the cold read returns empty and logs `harness_record_unreadable` with the thread and the file name, and a turn
-   that ends with no readable file fails as one with no file does.
+6. **A compressed rollout is read, any other form is reported.** The CLI compresses a rollout idle for seven days to
+   `<name>.jsonl.zst` (one zstd stream of the plain bytes) and restores the plain file under its name when it resumes the thread,
+   before appending (source and measurement in the rollout document), so a live reader never sees a compressed file. The cold
+   read reads it when the plain file is absent: one streaming decompression per request, ids from the decompressed offsets
+   (the same as the plain file's), and only the last 16 MiB before the window's end held in memory. A stream that cannot be
+   decoded or a file of another form is not an empty history: the cold read returns empty and logs `harness_record_unreadable`
+   with the thread and the file name, and a turn that ends with no readable file fails as one with no file does.
 7. **No picture is copied into an item.** An input of ours shows the images of its inbox row (an upload address); the image
    view of a tool and any other row show no bytes, only the file's name. The inline data URLs in a row are read into
    memory (a request is bounded by the block limits) and dropped.

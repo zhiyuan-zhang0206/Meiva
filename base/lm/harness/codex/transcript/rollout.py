@@ -39,11 +39,21 @@ from base.lm.harness.session.transcript.entries import (
 # `turn_aborted` event says the same).
 # meiva:link base/lm/harness/docs/transcript-projection.md
 
-_QUIET_LINES = frozenset({"session_meta", "turn_context", "world_state", "compacted"})
+_QUIET_LINES = frozenset(
+    {
+        "session_meta",
+        "turn_context",
+        "world_state",
+        "compacted",
+        "inter_agent_communication_metadata",
+    }
+)
 _QUIET_EVENTS = frozenset({"task_started", "token_count", "thread_settings_applied"})
 _QUIET_RESPONSES = frozenset(
     {
         "reasoning",
+        "agent_message",
+        "configuration_update",
         "additional_tools",
         "custom_tool_call",
         "custom_tool_call_output",
@@ -305,6 +315,8 @@ def _image_view_item(item: Obj) -> Obj:
 
 def _extension_item(item: Obj) -> Obj:
     kind = text(item, "kind")
+    if kind == "clock.sleep":
+        return {"type": "sleep", "id": text(item, "id"), "durationMs": item.get("durationMs")}
     if kind != "web.search":
         raise UnknownValueError(f"item_completed/Extension:{kind}")
     return {
@@ -315,7 +327,34 @@ def _extension_item(item: Obj) -> Obj:
     }
 
 
+# meiva:note
+# The rollout's sub-agent activity and MCP call are spelled as the protocol's, except for the camel case of a few names
+# and the duration (a seconds and nanoseconds pair, not read).
+def _sub_agent_item(item: Obj) -> Obj:
+    return {
+        "type": "subAgentActivity",
+        "id": text(item, "id"),
+        "kind": item.get("kind"),
+        "agentPath": item.get("agent_path"),
+        "agentThreadId": item.get("agent_thread_id"),
+    }
+
+
+def _mcp_item(item: Obj) -> Obj:
+    return {
+        "type": "mcpToolCall",
+        "id": text(item, "id"),
+        "server": item.get("server"),
+        "tool": item.get("tool"),
+        "arguments": item.get("arguments"),
+        "result": item.get("result"),
+        "status": item.get("status"),
+    }
+
+
 _CONVERT: dict[str, Callable[[Obj], Obj]] = {
+    "SubAgentActivity": _sub_agent_item,
+    "McpToolCall": _mcp_item,
     "FileChange": _file_change_item,
     "ImageView": _image_view_item,
     "Extension": _extension_item,

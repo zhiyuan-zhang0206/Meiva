@@ -38,13 +38,26 @@ def session_file(environ: Mapping[str, str], thread_id: str) -> Path | None:
 
 
 # meiva:note
-# A file the thread has under its home that this reader does not read (Codex may keep a rollout in a compressed
-# form; none was met): its name, so that "found but unreadable" is told from "not there".
-def unreadable_file(environ: Mapping[str, str], thread_id: str) -> str | None:
+# The thread's rollout in the form the CLI compresses it to once it is cold (`<name>.jsonl.zst`), when the plain file is not
+# there: the CLI restores the plain file under its own name when it resumes the thread, so this form is only ever read as a
+# whole window, never followed.
+def compressed_file(environ: Mapping[str, str], thread_id: str) -> Path | None:
+    found = sorted((codex_home(environ) / "sessions").glob(f"*/*/*/rollout-*{thread_id}.jsonl.zst"))
+    return found[-1] if found else None
+
+
+# meiva:note
+# A file the thread has under its home that this reader does not read (neither the plain nor the compressed form): its
+# name, so that "found but unreadable" is told from "not there". With `packed_is_readable` false the compressed form
+# counts too, for the live path, which never reads it.
+def unreadable_file(
+    environ: Mapping[str, str], thread_id: str, *, packed_is_readable: bool
+) -> str | None:
     found = sorted(
         path.name
         for path in (codex_home(environ) / "sessions").glob(f"*/*/*/rollout-*{thread_id}*")
         if not path.name.endswith(".jsonl")
+        and not (packed_is_readable and path.name.endswith(".jsonl.zst"))
     )
     return found[-1] if found else None
 

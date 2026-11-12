@@ -198,7 +198,13 @@ class ReadTimelineSink:
         workspace = workspace_dir(self._agent_id, home=ctx.require_meiva_home())
         where = record_location(self._harness, ctx.require_environ(), workspace)
         sid = self._session_id()
-        name = None if sid is None else unreadable_file(self._harness, ctx.require_environ(), sid)
+        name = (
+            None
+            if sid is None
+            else unreadable_file(
+                self._harness, ctx.require_environ(), sid, packed_is_readable=False
+            )
+        )
         if name is not None:
             logger.warning(
                 "the record of session {session_id} is in a form the live timeline does not read: {name}",
