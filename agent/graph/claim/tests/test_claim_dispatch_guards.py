@@ -259,3 +259,142 @@ async def test_the_note_naming_the_interrupter_comes_before_its_message_and_a_he
     assert "Your running turn was interrupted by agent:7. Their message follows." in texts[0]
     assert "do Y instead" in texts[1]
     assert "Heartbeat" in texts[2]
+
+
+# meiva:note
+# A stop's note is passive but the gateway still wakes a native agent for it. The claim that wake starts
+# puts the note into the message list and idles again: no model turn, and the row is consumed, so the
+# agent's next input does not carry it a second time.
+async def test_a_stops_passive_note_enters_the_history_and_the_agent_stays_idle(
+    redis_url: str,
+    db_conn: psycopg.Connection,
+    aops_pool: AsyncConnectionPool,
+    *,
+    model_catalog: ModelCatalog,
+    config_authority: ConfigAuthority,
+    database_gate: ProcessDbGate,
+    machine_identity: MachineIdentityReader,
+) -> None:
+    tid = spawn_agent(
+        catalog=model_catalog,
+        authority=config_authority,
+        database_gate=database_gate,
+        machine=machine_identity,
+    )
+    with db_conn.cursor() as cur:
+        cur.execute(
+            "INSERT INTO inbound_messages (agent_id, content, kind, source, payload) "
+            "VALUES (%s, %s, 'system_note', 'user', "
+            '\'{"note_tag": "lifecycle_interrupt", "passive": true}\'::jsonb) RETURNING id',
+            (tid, interrupt_note("user", with_message=False)),
+        )
+        row = cur.fetchone()
+    assert row is not None
+    db_conn.commit()
+    await await_inbound_visible(aops_pool, row[0])
+    runtime = make_runtime(ops_pool=aops_pool, database_gate=database_gate)
+    earlier: list[AnyMessage] = [SystemMessage(content="sys"), HumanMessage(content="earlier")]
+
+    first = await claim_node(AgentState(messages=earlier, halted=True), runtime, thread_config(tid))
+
+    assert first.goto == "claim", "no model turn"
+    assert first.update is not None and first.update["halted"] is True
+    noted = cast("list[AnyMessage]", first.update["messages"])
+    assert len(noted) == 1 and "interrupted by user." in str(noted[0].content)
+
+    second = await claim_node(
+        AgentState(messages=[*earlier, *noted], halted=True), runtime, thread_config(tid)
+    )
+
+    assert second.goto == "__end__"
+    assert not cast("dict[str, object]", second.update or {}).get("messages")
+
+
+# meiva:note
+# A stop's note is quiet only on its own: a heartbeat in the same batch has something to answer, so the
+# batch goes on to the model by the existing rule, and the note is in the history once, ahead of it.
+async def test_a_passive_note_beside_a_heartbeat_goes_on_to_the_model(
+    redis_url: str,
+    db_conn: psycopg.Connection,
+    aops_pool: AsyncConnectionPool,
+    *,
+    model_catalog: ModelCatalog,
+    config_authority: ConfigAuthority,
+    database_gate: ProcessDbGate,
+    machine_identity: MachineIdentityReader,
+) -> None:
+    tid = spawn_agent(
+        catalog=model_catalog,
+        authority=config_authority,
+        database_gate=database_gate,
+        machine=machine_identity,
+    )
+    with db_conn.cursor() as cur:
+        cur.execute(
+            "INSERT INTO inbound_messages (agent_id, content, kind, source, payload) "
+            "VALUES (%s, %s, 'system_note', 'user', "
+            '\'{"note_tag": "lifecycle_interrupt", "passive": true}\'::jsonb)',
+            (tid, interrupt_note("user", with_message=False)),
+        )
+    db_conn.commit()
+    heartbeat_id = insert_inbound_kind(db_conn, tid, "Heartbeat. Review.", "heartbeat", "system")
+    await await_inbound_visible(aops_pool, heartbeat_id)
+
+    cmd = await claim_node(
+        AgentState(messages=[SystemMessage(content="sys")], halted=True),
+        make_runtime(ops_pool=aops_pool, database_gate=database_gate),
+        thread_config(tid),
+    )
+
+    assert cmd.goto == "before_turn"
+    assert cmd.update is not None
+    texts = [str(m.content) for m in cast("list[AnyMessage]", cmd.update["messages"])]
+    assert len(texts) == 2
+    assert "interrupted by user." in texts[0] and "Heartbeat" in texts[1]
+
+
+# meiva:note
+# The recovery path: the wake or the host was lost between the cancel and the claim, so the passive
+# note is still pending when the next real input arrives. It rides in that claim, once, ahead of it.
+async def test_an_unclaimed_passive_note_rides_in_the_next_real_inputs_claim(
+    redis_url: str,
+    db_conn: psycopg.Connection,
+    aops_pool: AsyncConnectionPool,
+    database: Database,
+    event_bus: EventBus,
+    *,
+    model_catalog: ModelCatalog,
+    config_authority: ConfigAuthority,
+    database_gate: ProcessDbGate,
+    machine_identity: MachineIdentityReader,
+) -> None:
+    tid = spawn_agent(
+        catalog=model_catalog,
+        authority=config_authority,
+        database_gate=database_gate,
+        machine=machine_identity,
+    )
+    with db_conn.cursor() as cur:
+        cur.execute(
+            "INSERT INTO inbound_messages (agent_id, content, kind, source, payload) "
+            "VALUES (%s, %s, 'system_note', 'user', "
+            '\'{"note_tag": "lifecycle_interrupt", "passive": true}\'::jsonb)',
+            (tid, interrupt_note("user", with_message=False)),
+        )
+    db_conn.commit()
+    chat_id = insert_inbound_message(
+        db_conn, tid, "carry on", source="user", bus=event_bus, database=database
+    )
+    await await_inbound_visible(aops_pool, chat_id)
+
+    cmd = await claim_node(
+        AgentState(messages=[SystemMessage(content="sys")], halted=True),
+        make_runtime(ops_pool=aops_pool, database_gate=database_gate),
+        thread_config(tid),
+    )
+
+    assert cmd.goto == "before_turn"
+    assert cmd.update is not None
+    texts = [str(m.content) for m in cast("list[AnyMessage]", cmd.update["messages"])]
+    assert len(texts) == 2
+    assert "interrupted by user." in texts[0] and "carry on" in texts[1]

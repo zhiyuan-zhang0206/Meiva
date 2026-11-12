@@ -11,14 +11,17 @@ from collections.abc import Sequence
 from functools import partial
 from typing import LiteralString
 
+from langchain_core.messages import BaseMessage
 from psycopg import sql
 
 from agent.db import CLAIM_ACQUIRE_TIMEOUT_CAP_S, ClaimedInbound
+from agent.graph.claim._dispatch import prepare_steered_inbound
 from agent.graph.claim.harness_activity import HarnessTurnProjector
 from agent.graph.claim.harness_foreground import Handed, Reconciled, plan_reconciliation
 from agent.ownership.inbound import lock_inbound_owner
 from base.agents.context import MeivaContext
 from base.agents.history.harness_messages import aappend_harness_timeline_items
+from base.agents.history.timeline import build_timeline_items
 from base.agents.history.timeline_item import TimelineItem
 from base.agents.messages.inbound import PASSIVE_INBOUND_KEY, InboundKind, not_passive_inbound
 from base.agents.messages.kwargs import NoteTag
@@ -91,6 +94,64 @@ async def settle_stale_interrupts(ctx: MeivaContext, agent_id: int) -> None:
             "WHERE agent_id=%s AND kind=%s AND status='pending'",
             (agent_id, InboundKind.INTERRUPT.value),
         )
+
+
+# meiva:note
+# The payload flag of a passive note whose timeline entry was written ahead of its delivery. The row is
+# still pending and rides in the harness's next input as text, but its entry is not written a second time.
+TIMELINE_WRITTEN_KEY = "timeline_written"
+
+# meiva:note
+# The passive interrupt notes of a stop that are not yet on the timeline, flagged as they are taken.
+_UNWRITTEN_INTERRUPT_NOTES: LiteralString = (
+    "UPDATE inbound_messages SET payload = payload || jsonb_build_object(%(written)s::text, true) "  # noqa: S608
+    "WHERE agent_id=%(agent)s AND status='pending' AND kind=%(kind)s "
+    "  AND payload->>'note_tag'=%(tag)s AND payload->'passive'='true'::jsonb "
+    "  AND NOT COALESCE(payload->%(written)s::text='true'::jsonb, false) "
+    f"RETURNING {_COLUMNS}"
+)
+
+
+# meiva:note
+# A confirmed stop is on the timeline at once. Its passive note is no input of the harness's (a
+# delivery would start a turn), so it waits in the inbox for the next real input; here its entry is
+# written and the row flagged in one transaction, and `timeline_items_of` drops the entry when the row is
+# finally delivered, so the note appears once: a crash before this transaction leaves the row to be
+# delivered with its entry, one after it leaves the entry already written. A row an input already
+# reserved is not touched: that input writes the entry when it settles.
+async def write_interrupt_notes(ctx: MeivaContext, agent_id: int) -> list[TimelineItem]:
+    pool = ctx.ops_pool
+    if pool is None:
+        return []
+    async with async_write_transaction(pool) as conn:
+        await lock_inbound_owner(conn, agent_id, incarnation=ctx.original_incarnation)
+        cursor = await conn.execute(
+            sql.SQL(_UNWRITTEN_INTERRUPT_NOTES),
+            {
+                "agent": agent_id,
+                "kind": InboundKind.SYSTEM_NOTE.value,
+                "tag": NoteTag.LIFECYCLE_INTERRUPT.value,
+                "written": TIMELINE_WRITTEN_KEY,
+            },
+        )
+        rows = sorted(
+            (ClaimedInbound.from_row(row) for row in await cursor.fetchall()),
+            key=lambda row: (row.created_at, row.id),
+        )
+        messages = [msg for row in rows for msg in prepare_steered_inbound(ctx, row)]
+        items, _ = build_timeline_items(messages, inputs=ctx.timestamp_policy())
+        return await aappend_harness_timeline_items(conn, agent_id, ctx.harness.value, items)
+
+
+# meiva:note
+# The timeline entries of a row about to be handed to the harness: none for a note already written.
+def timeline_items_of(
+    row: ClaimedInbound, messages: Sequence[BaseMessage], ctx: MeivaContext
+) -> list[TimelineItem]:
+    if row.payload is not None and row.payload.get(TIMELINE_WRITTEN_KEY) is True:
+        return []
+    items, _ = build_timeline_items(messages, inputs=ctx.timestamp_policy())
+    return items
 
 
 async def peek_head_batch(ctx: MeivaContext, agent_id: int) -> list[ClaimedInbound]:

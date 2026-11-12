@@ -7,6 +7,7 @@ from __future__ import annotations
 import asyncio
 from collections.abc import Iterator
 from pathlib import Path
+from typing import Any, cast
 
 import httpx
 import psycopg
@@ -14,6 +15,7 @@ import pytest
 from psycopg_pool import ConnectionPool
 
 from base.api_contracts.agent_contract import AgentNotFound, InterruptResult
+from base.cluster import inbound_channel
 from base.db import Database, create_agent
 from base.events.live.bus import EventBus
 from ops.cluster.rpc import RpcClient
@@ -165,6 +167,42 @@ async def test_the_stop_button_leaves_a_passive_note_and_no_chat(
         "Your running turn was interrupted by user.",
         {"note_tag": "lifecycle_interrupt", "passive": True},
     )
+
+
+@pytest.mark.parametrize(("harness", "woken"), [("meiva", True), ("codex", False)])
+async def test_only_a_native_stop_publishes_a_wake_for_its_passive_note(
+    db_conn: psycopg.Connection,
+    interrupt_pool: ConnectionPool,
+    database: Database,
+    event_bus: EventBus,
+    rpc: RpcClient,
+    harness: str,
+    woken: bool,
+) -> None:
+    agent_id = _agent(db_conn, harness=harness)
+    redis = event_bus.sync_redis(decode_responses=True)
+    pubsub: Any = cast("Any", redis).pubsub()
+    pubsub.subscribe(inbound_channel(agent_id, event_bus.channel))
+    assert pubsub.get_message(timeout=2) is not None
+
+    await _interrupt(
+        interrupt_pool, database, event_bus, rpc, agent_id, message=None, source="user"
+    )
+
+    woken_ids: set[str] = set()
+    while (message := pubsub.get_message(timeout=0.5)) is not None:
+        woken_ids.add(str(message["data"]))
+    pubsub.close()
+    redis.close()
+    [note_id] = [
+        str(row[0])
+        for row in db_conn.execute(
+            "SELECT id FROM inbound_messages WHERE agent_id = %s AND kind = 'system_note'",
+            (agent_id,),
+        ).fetchall()
+    ]
+    db_conn.commit()
+    assert (note_id in woken_ids) is woken
 
 
 async def test_the_stop_button_on_an_idle_agent_writes_nothing(

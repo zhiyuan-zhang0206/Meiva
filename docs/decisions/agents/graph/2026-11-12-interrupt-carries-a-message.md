@@ -40,10 +40,15 @@ background work and shell sessions are untouched, and a new input starts a new t
    wake that arrived during a cancelled turn used to wait for the next scan. `cancel_turn(rearm=True)`
    (set by an interrupt, not by a force terminate) closes the gap.
 4. **The stop button is a person's interrupt with no text.** It sends the same request as `user` with no
-   message, writes one passive note ("Your running turn was interrupted by user.", delivered at the agent's
-   next real wake, no wake of its own) and, for an external harness, the control row. It is a
-   system-generated explanation, not a message put in the user's mouth, and the agent stays idle until a
-   real input as before.
+   message, writes one passive note ("Your running turn was interrupted by user.") and, for an external
+   harness, the control row. It is a system-generated explanation, not a message put in the user's
+   mouth, and the agent stays idle until a real input. The note enters the agent's message list and the
+   timeline at once, without waking it to a model turn (user ruling, 2026-11-12: the inserted message
+   must be in the agent's messages list, so it knows it was interrupted, but it does not wake it). A
+   native agent's claim takes it and idles again; an external harness's foreground writes its timeline
+   entry when the interrupt is confirmed, while the CLI's context still receives the note with its next
+   input (sending the CLI input is waking it). See
+   [turn interrupts](../../../../agent/graph/docs/turn-interrupts.md).
 5. **No durable native control row.** #6488 removed it on purpose and this does not bring it back: a
    native interrupt is the host's task cancel plus ordinary inbound rows.
 6. **The kind is renamed too.** `inbound_messages.kind` `cancel` becomes `interrupt`, and the audit event

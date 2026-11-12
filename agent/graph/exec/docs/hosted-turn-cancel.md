@@ -11,8 +11,9 @@ owns the agent's status:
   `meiva.agents.interrupt`) leaves the row alone: the turn Task unwinds, the
   settle boundary idles the row and the next input starts a fresh turn from a
   halted checkpoint. It asks for `rearm`: a wake that arrived during the cancelled turn (the
-  interrupt's own message, committed before the cancel) starts that next turn at once instead of
-  waiting for a scan, because `_pump` restarts a successor only after a completed turn. The API
+  interrupt's own message, or, for a stop with no message, the wake of its passive note: the claim
+  that wake starts takes the note into the history and idles again with no model call) starts that
+  next turn at once instead of waiting for a scan, because `_pump` restarts a successor only after a completed turn. The API
   answers `interrupted` or `not_running`; an unreachable host is an error, not `not_running`, and
   the message stays queued.
 - force terminate (`ops.lifecycle.terminate_agent_op`) writes `terminated` in its

@@ -278,9 +278,12 @@ class InterruptDelivery(NamedTuple):
 #     message as an ordinary chat from `source`, and (external harness only) the interrupt control
 #     row its foreground watcher reacts to; the control row comes last, behind the input it
 #     accompanies (a stop, which has no input, writes it first). A message to an agent with no running turn is a plain chat: no note, no control
-#     row. Without a message (the web stop button) the note is passive, so the agent is not woken to
-#     a turn of its own, and an idle agent is left alone. The caller interrupts the turn only after
-#     this commits, so the message is queued whether or not the interruption lands.
+#     row. Without a message (the web stop button) the note is passive: it never makes the agent
+#     answer anything, and an idle agent is left alone. A native agent's passive note still publishes a
+#     wake, so the claim that follows the cancelled turn takes it into the message list at once and
+#     idles again without a model call; an external harness's is written to the timeline by its
+#     foreground when the interruption is confirmed. The caller interrupts the turn only after this
+#     commits, so the message is queued whether or not the interruption lands.
 async def deliver_interrupt(
     pool: ConnectionPool,
     db: Database,
@@ -330,7 +333,7 @@ class _InterruptRows:
         self.events.append(event)
         self.wakes.append(inbound_id)
 
-    def note(self, *, with_message: bool) -> None:
+    def note(self, *, with_message: bool, wake: bool) -> None:
         payload: dict[str, object] = {"note_tag": NoteTag.LIFECYCLE_INTERRUPT.value}
         if not with_message:
             payload[PASSIVE_INBOUND_KEY] = True
@@ -343,7 +346,7 @@ class _InterruptRows:
             payload=payload,
         )
         self.events.append(event)
-        if with_message:
+        if wake:
             self.wakes.append(inbound_id)
 
     def chat(self, message: str, provenance: InboundProvenance | None) -> ChatInboundReceipt:
@@ -392,7 +395,7 @@ def _write_interrupt_rows(
     if control_first:
         rows.control()
     if running:
-        rows.note(with_message=message is not None)
+        rows.note(with_message=message is not None, wake=message is not None or not external)
     if message is not None:
         chat = rows.chat(message, provenance)
     if running:

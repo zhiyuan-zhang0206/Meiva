@@ -31,7 +31,7 @@ from agent.nodes import BEFORE_TURN, CLAIM, END
 from agent.ownership.hosted import turn_crash_marked
 from base.agents.context import MeivaContext
 from base.agents.messages.envelope import sender_class
-from base.agents.messages.inbound import InboundKind
+from base.agents.messages.inbound import PASSIVE_INBOUND_KEY, InboundKind
 from base.agents.messages.kwargs import MeivaMsgType
 from base.agents.messages.lifecycle_text import by_who, restart_accepted_text
 from base.agents.messages.reply_intent import delivery_disabled_entries
@@ -68,7 +68,7 @@ class BatchState:
     restart_preserves_idle: bool = False
     restart_requested: bool = False
     committed_chat_ids: list[int] = field(default_factory=list[int])
-    failure_notes: int = 0
+    quiet_notes: int = 0
 
 
 def _ts_prefix(ctx: MeivaContext) -> str:
@@ -187,6 +187,9 @@ async def _handle_system_note(
     st.new_msgs.extend(prepare_system_note_inbound(ctx, item))
     if tag is NoteTag.LIFECYCLE_RESTART and st.next_goto == CLAIM:
         st.next_goto = BEFORE_TURN
+    passive = item.payload is not None and item.payload.get(PASSIVE_INBOUND_KEY) is True
+    if tag is NoteTag.LIFECYCLE_INTERRUPT and passive:
+        st.quiet_notes += 1
 
 
 def _close_superseded_compact(ctx: MeivaContext, agent_id: int, st: BatchState) -> None:
@@ -330,7 +333,7 @@ def _record_compact_request_failure(
         body=f"request not applied: {reason}",
     )
     st.new_msgs.append(compact.compact_failure_note(ctx, reason))
-    st.failure_notes += 1
+    st.quiet_notes += 1
 
 
 # meiva:note

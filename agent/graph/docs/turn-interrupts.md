@@ -21,12 +21,34 @@ is the last of the three, so claim consumes it only after the note and the messa
 delivered. Session shutdown remains a separate operation.
 
 The web stop button has no text: it sends the same request without a message and as `user`. The agent
-is left one passive note (`Your running turn was interrupted by user.`) that it reads along with its next
-real input, and it is not woken to a turn of its own. On an external harness a passive note alone is never
-handed to the harness (a delivery would start a turn for it), so the control row is written ahead of the
-note, where claim takes it. An interrupt request still pending when an invocation starts is stale (its turn
-ended on its own first) and is settled at once. An interrupt of an agent with no running turn writes no
-note and no control row: its message is an ordinary chat.
+is left one passive note (`Your running turn was interrupted by user.`). Passive means it asks for no
+answer: the agent is never made to run a model turn for it. It is nevertheless in the agent's history and
+on the timeline as soon as the interrupt has taken effect:
+
+- **Native.** The gateway publishes a wake for the note like any inbound. The host rearms the cancelled
+  turn's successor, whose claim takes the note into `state.messages` (a quiet-note batch: `quiet_notes`
+  in `_decide.py`) and returns to claim with `halted`, so the agent idles again with no model call. The
+  row is consumed by that claim, so the next input does not carry it a second time. If the wake or the
+  host is lost between the cancel and the claim, the row simply stays pending and rides in the next real
+  input's claim, once, as before this change. That idle invocation is a hosted turn with no model
+  call, so it admits the runtime (`status` running then idling again, `last_admission_at`, two
+  `status_change` events, a turn span and one concurrency slot for a few database round trips). None
+  of that reads as activity: `last_active_at`, which the heartbeat idle clock reads, is written only by a completed model turn (the
+  API's last-active field reads inbound rows, which the stop's note already touched), and the claim of a passive note clears no breaker
+  (admission refuses a tripped breaker before the claim). It is the accepted cost of one extra
+  invocation per stop.
+- **External harness.** A passive note alone is never handed to the harness (a delivery would start a turn
+  for it), so the control row is written ahead of the note, where claim takes it. When the foreground
+  confirms the interrupt (the harness's interrupted `TurnCompleted`), `announce_interrupt` writes the
+  pending passive notes' timeline entries and flags each row `timeline_written` in one transaction
+  (`write_interrupt_notes`). The row still waits for the next real input and rides in its text, which is
+  how the CLI's context learns of it; its entry is not written again (`timeline_items_of`). A crash before
+  that transaction leaves the row unflagged, so the entry is written when the row is delivered; a crash
+  after it leaves the entry written and the flag set. Either way the note appears once.
+
+An interrupt request still pending when an invocation starts is stale (its turn ended on its own first)
+and is settled at once. An interrupt of an agent with no running turn writes no note and no control row:
+its message is an ordinary chat.
 
 Terminate remains a durable inbound. The two-second DB poll in
 `agent/graph/interrupt/` (`watch_for_interrupt`, cadence `INTERRUPT_POLL_S`) observes a pending terminate row during
