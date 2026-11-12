@@ -15,7 +15,7 @@ from base.lm.catalog.decide.types import (
 
 
 # meiva:note
-# POST once; omit authentication when the provider has no configured credential.
+# POST once with the provider authentication headers or the existing bearer-key form.
 async def post_json(
     ctx: DecisionBuildContext,
     *,

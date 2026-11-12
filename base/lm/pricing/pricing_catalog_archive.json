@@ -1,6 +1,6 @@
 {
   "schema_version": 2,
-  "catalog_version": "2026-10-29-deepseek-v4-pro-continuation",
+  "catalog_version": "2026-11-12-gemini-decisions",
   "currency": "USD",
   "unit_tokens": 1000000,
   "models": {
