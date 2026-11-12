@@ -52,12 +52,11 @@ from base.lm.harness.session.transcript.entries import (
 # whose call has not been read is held for at most `HOLD_ENTRIES` further entries or until the writer says its own time
 # bound passed (`feed(release_orphans=...)`, one clock per call). The drafts and usage of a sub-agent record whose link has
 # not been read (a foreground sub-agent that is still running: its link comes with the result of the call that started it)
-# are held while it runs and released, as top-level items, when the main record's current turn is closed at the end of a feed
-# (for an adapter whose links always precede its turn's end: `release_held_at_turn_end`, Claude's does, Codex's and
-# Antigravity's may come after; judged from what was fed, never from when, so the order records were read or replayed in
-# cannot decide it), when the writer says the session or the writer itself has ended (`feed(release_held=True)`), when the
-# record alone has held `HOLD_ENTRIES` items, or when everything held together passes `HELD_TOTAL_LIMIT` (then the oldest
-# record goes first): the memory bounds, after which the rest of that sub-agent is shown top-level. Each release
+# are held until the link comes and released, as top-level items, only when it cannot come any more or must not be waited
+# for: when the writer says the session or the writer itself has ended (`feed(release_held=True)`), when the record alone has
+# held `HOLD_ENTRIES` items, or when everything held together passes `HELD_TOTAL_LIMIT` (then the oldest record goes first):
+# the memory bounds, after which the rest of that sub-agent is shown top-level. Nothing is inferred from what was read (that
+# the main record's turn is closed says only how far the main record has been read, not what the CLI is doing). Each release
 # is one `ORPHAN_RELEASED` / `UNLINKED_RELEASED` anomaly, and a record released once shows its later drafts top-level at
 # once. A call still unanswered when its turn closes, or when the next turn on the record begins, is abandoned: it no longer
 # keeps the record from being quiet, and a result that arrives later is still paired with it (`oldest_abandoned` tells the
@@ -114,14 +113,12 @@ class Projector:
         *,
         known_keys: Iterable[str] = (),
         seen_limit: int = SEEN_LIMIT,
-        release_held_at_turn_end: bool = False,
         calls_limit: int = CALLS_LIMIT,
         hold_entries: int = HOLD_ENTRIES,
         held_total_limit: int = HELD_TOTAL_LIMIT,
     ) -> None:
         self._hold_entries = hold_entries
         self._held_total = held_total_limit
-        self._release_at_turn_end = release_held_at_turn_end
         self._seen: RecentSet[str] = RecentSet(seen_limit)
         for key in known_keys:
             self._seen.add(key)
@@ -174,9 +171,8 @@ class Projector:
             if everything or call_id in orphans or self._fed - orphaned.born >= self._hold_entries:
                 del self._orphans[call_id]
                 self._release_results(call_id, orphaned.results)
-        idle = self._main_idle()
         for record, held in list(self._held.items()):
-            if everything or idle or len(held.drafts) + len(held.usage) >= self._hold_entries:
+            if everything or len(held.drafts) + len(held.usage) >= self._hold_entries:
                 del self._held[record]
                 self._release_record(record, held)
         while (
@@ -185,19 +181,6 @@ class Projector:
         ):
             record = next(iter(self._held))
             self._release_record(record, self._held.pop(record))
-
-    # meiva:note
-    # Whether nothing can link a held record any more, judged from what has been fed and not from when it was fed: the
-    # main record has been seen and its current turn is closed (a foreground sub-agent's link comes with the result of its
-    # call, inside the turn), for an adapter that says its links precede its turn's end. Checked once at the end of a feed,
-    # so the order in which records were read or replayed (a sub-agent's record before the main one) cannot decide it:
-    # before the main record is seen, nothing is idle.
-    def _main_idle(self) -> bool:
-        return (
-            self._release_at_turn_end
-            and self._current is not None
-            and self._current in self._closed
-        )
 
     def _release_results(self, call_id: str, results: list[ToolResult]) -> None:
         for result in results:

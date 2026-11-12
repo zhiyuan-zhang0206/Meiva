@@ -168,7 +168,6 @@ def make_writer(
     reading: bool = True,
     clock: Clock | None = None,
     max_transaction_entries: int = MAX_TRANSACTION_ENTRIES,
-    release_held_at_turn_end: bool = True,
     retire_wait_seconds: float = RETIRE_WAIT_SECONDS,
 ) -> HarnessTimelineWriter:
     async def after(commit: Committed) -> None:
@@ -189,7 +188,6 @@ def make_writer(
         cli_version=lambda: "2.1.322",
         clock=clock or system_clock(),
         max_transaction_entries=max_transaction_entries,
-        release_held_at_turn_end=release_held_at_turn_end,
         retire_wait_seconds=retire_wait_seconds,
     )
     if reading:

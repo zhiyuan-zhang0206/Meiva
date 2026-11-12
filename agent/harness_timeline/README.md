@@ -70,19 +70,25 @@ clock per call, started when the projector says it is held, after a read and aft
 time even if no new batch ever comes); then it is shown top-level (`orphan_released`). The output of a sub-agent whose link
 has not been read is on no clock: a foreground sub-agent's link comes with the result of the call that started it, however
 long it runs, and releasing its output after a fixed time would show half of it on top and half under the call once the link
-came. It is shown top-level (`unlinked_released`) when nothing can link it any more, which is judged from state and not from
-time or from the order records were read:
+came. Nothing is inferred from what has been read: that the main record's turn is closed says how far the main record has
+been read, not what the CLI is doing (a sub-agent's file can be read ahead of the main record's rows that name it). It is shown
+top-level (`unlinked_released`) only when the link cannot come or must not be waited for:
 
-- the main record has been seen and its current turn is closed at the end of a feed (the Claude writer sets
-  `release_held_at_turn_end`, because Claude's link precedes its turn's end; the projector's default, for adapters whose
-  link may come after it (Codex, Antigravity), is not to);
-- the writer is closing for good (its runtime closes: the CLI process goes away, the session is recycled, the agent is
-  dropped, the host shuts down): `release_held()` after the last read. A writer that only faulted and is started again by the
-  next hosted turn is not closing and releases nothing;
-- the session is replaced by one with another id: what the old one held is committed under the old id before the new one
-  starts;
-- the record alone holds `HOLD_ENTRIES` items, or everything held together passes `HELD_TOTAL_LIMIT` (the oldest record
-  first): the memory bounds, after which the rest of that sub-agent is shown top-level.
+- the writer is closing for good (its runtime closes: the host evicts it, drops the agent, shuts down, or closes the bridge
+  after a failed turn): `release_held()` after the last read commits what is still pending, then shows what the projector held
+  (a bounded number of rounds). A writer that only faulted and is started again by the next hosted turn is not closing and
+  releases nothing;
+- the session is replaced by one with another id: what the old one held is committed under the old id before the new one starts
+  (the plan that does it is kept until it has been committed);
+- the record alone holds `HOLD_ENTRIES` items, or everything held together passes `HELD_TOTAL_LIMIT` (the oldest record first):
+  the memory bounds, after which the rest of that sub-agent is shown top-level.
+
+The price: when a turn is interrupted or the CLI is killed and the link never comes, that sub-agent's output appears on the
+timeline top-level only at one of those moments, not within a time. The host learns that a CLI process exited only when it closes
+the bridge (`HarnessSessions._close`, which also runs the writer's close), so a CLI that dies between turns leaves its held output
+until the next turn fails or the runtime is evicted or replaced. Content is never lost to this (it is re-read and held again by a
+restart) and is never shown half on top and half nested; a later change can read the link from the sub-agent's own metadata and
+close this window.
 
 A stop without a release loses nothing either: what was held is re-read from the stored rows (the restart point does not pass an
 unlinked record) and held again, and a release followed by a restart and then the link writes nothing twice (the items are keyed;
@@ -91,8 +97,8 @@ decision depends on which was replayed first.
 
 A call whose turn closed, or whose turn was followed by the next one, is abandoned and no longer keeps the record from a quiet
 point, but the restart point does not pass it either: it is held back to just before the oldest such call that is within the
-latest `ABANDONED_WINDOW_ROWS` (5,000) rows of its record (`rebuild_ordinal` is that replay point, at most 5,000 rows plus what
-a turn holds; an older call neither stops the newer ones from being protected nor is waited for across a restart). A result that
+latest `ABANDONED_WINDOW_ROWS` (5,000) rows of its record (`rebuild_ordinal`, whose column comment in the schema still says "within a turn" and is not changed because it comes from a merged
+migration, is that replay point: at most 5,000 rows plus what a turn holds; an older call neither stops the newer ones from being protected nor is waited for across a restart). A result that
 arrives after a restart for a call inside the window is still paired with it; a later one is held, then shown top-level.
 
 **Sub-agents that start sub-agents.** The projector nests an output under the call that started its record. According to the

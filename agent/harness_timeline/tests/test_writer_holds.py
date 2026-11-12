@@ -3,12 +3,16 @@
 # shown top-level when its own `HOLD_SECONDS` have passed, not when another's have. The output of a sub-agent whose link has
 # not been read is on no clock: a foreground sub-agent's link comes with the result of the call that started it, however long
 # it runs, so nothing that is only slow is released (and then nested half on top and half under the call); it is released
-# when the turn it was born in closes, since nothing can link it any more. A call abandoned with its turn is still known
+# only when the writer closes for good or the session is replaced, never from what has been read of the main record. A call abandoned with its turn is still known
 # after a restart when its result comes, within a bounded number of rows.
 # meiva:link agent/harness_timeline/README.md
 
 from __future__ import annotations
 
+from typing import cast
+
+import pytest
+from psycopg import OperationalError
 from psycopg_pool import AsyncConnectionPool
 
 from agent.harness_timeline.holds import HOLD_SECONDS
@@ -117,31 +121,6 @@ async def test_a_foreground_sub_agent_that_runs_longer_than_the_hold_time_is_not
         "all of the first sub-agent's output is under its own call: none of it was shown on top"
     )
     assert [a for c in committed for a in c.plan.anomalies] == []
-
-
-async def test_what_is_held_for_a_link_is_released_top_level_when_its_turn_closes_and_reported(
-    aops_pool: AsyncConnectionPool,
-) -> None:
-    agent_id, incarnation = await make_agent(aops_pool)
-    main: list[AnyEntry] = [*_OPEN, *_task(1), *_CLOSE]
-    reader = ScriptedReader({"main": main, "sub1": [_sub("sub1", 0)]})
-    reader.visible.update({"main": 2, "sub1": 1})
-    committed: list[Committed] = []
-    writer = make_writer(aops_pool, agent_id, incarnation, reader, committed)
-    while await writer.read_now():
-        pass
-    assert [k for k, _, _ in await timeline_of(aops_pool, agent_id)] == [
-        "inbound_chat",
-        "agent_code",
-    ]
-
-    reader.visible["main"] = 3
-    while await writer.read_now():
-        pass
-    shown = await timeline_of(aops_pool, agent_id)
-    assert [(kind, parent) for kind, _, parent in shown][-1] == ("subagent_text", None)
-    anomalies = [a for c in committed for a in c.plan.anomalies]
-    assert [(a.anomaly, a.detail) for a in anomalies] == [(AnomalyKind.UNLINKED_RELEASED, "sub1")]
 
 
 async def test_a_result_without_its_call_is_released_on_its_own_clock_not_another_calls(
@@ -364,3 +343,107 @@ async def test_a_result_a_replay_finds_held_is_shown_when_its_own_time_is_up_wit
     timers.advance(HOLD_SECONDS + 1)
     assert await second.read_now(), "no new batch is needed for its time to be up"
     assert [k for k, _, _ in await timeline_of(aops_pool, agent_id)].count("code_output") == 1
+
+
+class _FlakyPool:
+    # meiva:note
+    # A pool of the test database that refuses to lend a connection while armed, once: what a transient database error
+    # looks like to the writer's transaction.
+    def __init__(self, pool: AsyncConnectionPool) -> None:
+        self._pool = pool
+        self.fail_next = False
+
+    def connection(self, timeout: float | None = None) -> object:
+        if self.fail_next:
+            self.fail_next = False
+            raise OperationalError("the connection could not be taken")
+        return self._pool.connection(timeout=timeout)
+
+
+async def test_a_sub_agent_file_that_is_ahead_of_main_is_not_released_for_a_turn_main_has_closed(
+    aops_pool: AsyncConnectionPool,
+) -> None:
+    agent_id, incarnation = await make_agent(aops_pool)
+    main: list[AnyEntry] = [
+        HumanInput(key="i0", order=Order(0), turn="t0", wire_id="w0", text="first"),
+        AgentText(key="a0", order=Order(1), turn="t0", text="done", message_ref="m0"),
+        TurnEnd(key="e0", order=Order(2), turn="t0"),
+    ]
+    reader = ScriptedReader({"main": main, "a1sub": [_sub("a1sub", n) for n in range(3)]})
+    reader.visible.update({"main": 3, "a1sub": 3})
+    committed: list[Committed] = []
+    writer = make_writer(aops_pool, agent_id, incarnation, reader, committed)
+    await _read_all(writer)
+    shown = [k for k, _, _ in await timeline_of(aops_pool, agent_id)]
+    assert "subagent_text" not in shown, (
+        "main closed a turn, but the sub-agent belongs to the one it has not read yet"
+    )
+
+    main.extend(
+        [
+            HumanInput(key="i1", order=Order(3), turn="t1", wire_id="w1", text="second"),
+            ToolCall(
+                key="c1", order=Order(4), turn="t1", call_id="call1", name="Task", tool_input={}
+            ),
+            ToolResult(key="r1", order=Order(5), turn="t1", call_id="call1", content="done"),
+            SubagentLink(
+                key="l1", order=Order(6), turn="t1", call_id="call1", child_record="a1sub"
+            ),
+        ]
+    )
+    reader.visible["main"] = len(main)
+    await _read_all(writer)
+    rows = await timeline_of(aops_pool, agent_id)
+    call = next(item_id for kind, item_id, _ in rows if kind == "agent_code")
+    assert [p for k, _, p in rows if k == "subagent_text"] == [call] * 3
+    assert [a for c in committed for a in c.plan.anomalies] == []
+
+
+async def test_what_a_replaced_session_held_is_not_lost_when_the_first_commit_fails(
+    aops_pool: AsyncConnectionPool,
+) -> None:
+    agent_id, incarnation = await make_agent(aops_pool)
+    main, sub = _running_foreground_sub_agent()
+    reader = ScriptedReader({"main": main, "a1sub": sub})
+    reader.visible.update({"main": 5, "a1sub": 3})
+    session = ["session-1"]
+    pool = _FlakyPool(aops_pool)
+    writer = make_writer(
+        cast("AsyncConnectionPool", pool),
+        agent_id,
+        incarnation,
+        reader,
+        [],
+        session=lambda: session[0],
+    )
+    await _read_all(writer)
+    session[0] = "session-2"
+    pool.fail_next = True
+    with pytest.raises(OperationalError):
+        _ = await writer.read_now()
+    assert await writer.read_now(), (
+        "the plan that releases what was held is kept and committed again"
+    )
+    assert [k for k, _, _ in await timeline_of(aops_pool, agent_id)].count("subagent_text") == 3
+
+
+async def test_a_closing_writer_commits_what_is_pending_and_then_releases_what_it_held(
+    aops_pool: AsyncConnectionPool,
+) -> None:
+    agent_id, incarnation = await make_agent(aops_pool)
+    main, sub = _running_foreground_sub_agent()
+    reader = ScriptedReader({"main": main, "a1sub": sub})
+    reader.visible.update({"main": 4, "a1sub": 0})
+    pool = _FlakyPool(aops_pool)
+    writer = make_writer(cast("AsyncConnectionPool", pool), agent_id, incarnation, reader, [])
+    await _read_all(writer)
+    reader.visible.update({"main": 5, "a1sub": 3})
+    pool.fail_next = True
+    with pytest.raises(OperationalError):
+        _ = await writer.read_now()
+
+    await writer.release_held()
+    kinds = [k for k, _, _ in await timeline_of(aops_pool, agent_id)]
+    assert kinds.count("subagent_text") == 3 and kinds.count("agent_code") == 2, (
+        "the plan that was pending is committed and what the projector held is shown, in one close"
+    )

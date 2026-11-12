@@ -4,6 +4,7 @@ from collections.abc import Iterable
 
 HOLD_SECONDS = 120.0
 ABANDONED_WINDOW_ROWS = 5_000
+RELEASE_ROUNDS = 8
 
 
 # meiva:note

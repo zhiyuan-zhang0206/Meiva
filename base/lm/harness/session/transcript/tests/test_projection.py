@@ -298,7 +298,7 @@ def test_everything_held_together_has_a_bound_and_the_oldest_record_goes_first()
     assert projector.unlinked_records() == ("subB",)
 
 
-def test_held_output_is_released_when_the_current_turn_is_closed_only_for_an_adapter_that_says_so() -> (
+def test_a_closed_main_turn_releases_nothing_held_because_it_only_says_how_far_main_was_read() -> (
     None
 ):
     entries = [
@@ -306,11 +306,7 @@ def test_held_output_is_released_when_the_current_turn_is_closed_only_for_an_ada
         _held_text("subX", 0),
         TurnEnd(key="e", order=Order(1), turn="t0"),
     ]
-    assert Projector(release_held_at_turn_end=True).feed(entries).drafts != ()
-    other = Projector()
-    assert [d.record for d in other.feed(entries).drafts] == ["main"], (
-        "the sub-agent's output stays held"
-    )
-    assert other.unlinked_records() == ("subX",)
-    before = Projector(release_held_at_turn_end=True)
-    assert before.feed([_held_text("subX", 0)]).drafts == (), "no main turn seen: nothing is idle"
+    projector = Projector()
+    assert [d.record for d in projector.feed(entries).drafts] == ["main"]
+    assert projector.unlinked_records() == ("subX",)
+    assert [d.record for d in projector.feed([], release_held=True).drafts] == ["subX"]

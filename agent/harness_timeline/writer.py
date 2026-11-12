@@ -9,6 +9,7 @@ from psycopg_pool import AsyncConnectionPool
 
 from agent.harness_timeline.holds import (
     ABANDONED_WINDOW_ROWS,
+    RELEASE_ROUNDS,
     OrphanClocks,
     restart_point,
 )
@@ -105,6 +106,7 @@ class _Sent:
 class _Pending:
     plan: WritePlan
     batches: list[EntryBatch]
+    release: bool = False
 
 
 class HarnessTimelineWriter:
@@ -120,7 +122,6 @@ class HarnessTimelineWriter:
         rebuild_max_rows: int = REBUILD_MAX_ROWS,
         max_transaction_bytes: int = MAX_TRANSACTION_BYTES,
         max_transaction_entries: int = MAX_TRANSACTION_ENTRIES,
-        release_held_at_turn_end: bool = False,
         calls_kept: int = CALLS_KEPT,
         retire_wait_seconds: float = RETIRE_WAIT_SECONDS,
         incarnation: RuntimeIncarnation | None,
@@ -151,8 +152,7 @@ class HarnessTimelineWriter:
         self._render_tool = render_tool
         self._after_commit = after_commit
         self._cli_version = cli_version
-        self._release_at_turn_end = release_held_at_turn_end
-        self._projector = Projector(release_held_at_turn_end=release_held_at_turn_end)
+        self._projector = Projector()
         self._sent = _Sent()
         self._positions: dict[str, StoredPosition] = {}
         self._last_ordinal: dict[str, int] = {}
@@ -330,8 +330,8 @@ class HarnessTimelineWriter:
         if sid is None or self._held or self._retired:
             return False
         if sid != self._sid:
-            if self._sid is not None and self._holds_anything():
-                return await self._release_old_session()
+            if self._releasing_old_session():
+                return await self._commit_pending()
             await self._start_up(sid)
         if self._fenced:
             return False
@@ -344,14 +344,7 @@ class HarnessTimelineWriter:
             return False
         projection = self._project(batches, release_orphans=expired, release_all=release_all)
         self._orphans.track(self._projector.unresolved_results(), self._clock.monotonic())
-        plan = plan_write(
-            projection,
-            sent_items=self._sent.items,
-            inbound_ids=self._sent.inbound_ids,
-            non_human_turns=frozenset(self._non_human),
-            policy=self._policy,
-            render_tool=self._render_tool,
-        )
+        plan = self._plan(projection)
         self._note_turns(plan)
         self._pending = _Pending(plan, batches)
         return await self._commit_pending()
@@ -365,7 +358,14 @@ class HarnessTimelineWriter:
     async def release_held(self) -> None:
         async with self._io:
             self._release_requested = True
-            _ = await self._read_locked(exhaustive=True)
+            for _ in range(RELEASE_ROUNDS):
+                _ = await self._read_locked(exhaustive=True)
+                if (
+                    self._pending is None
+                    and not self._release_requested
+                    and not self._holds_anything()
+                ):
+                    return
 
     def _holds_anything(self) -> bool:
         return bool(self._projector.unresolved_results() or self._projector.unlinked_records())
@@ -373,9 +373,8 @@ class HarnessTimelineWriter:
     # meiva:note
     # The session was replaced by one with another id: what the old session still holds can never be linked, so it is shown now
     # (committed under the old session's id, with no positions to move) before the writer starts over for the new one.
-    async def _release_old_session(self) -> bool:
-        projection = self._projector.feed([], release_held=True)
-        plan = plan_write(
+    def _plan(self, projection: Projection) -> WritePlan:
+        return plan_write(
             projection,
             sent_items=self._sent.items,
             inbound_ids=self._sent.inbound_ids,
@@ -383,8 +382,18 @@ class HarnessTimelineWriter:
             policy=self._policy,
             render_tool=self._render_tool,
         )
-        self._pending = _Pending(plan, [])
-        return await self._commit_pending()
+
+    def _releasing_old_session(self) -> bool:
+        if self._sid is None:
+            return False
+        if self._pending is None and self._holds_anything():
+            self._pending = self._release_plan()
+        return self._pending is not None and self._pending.release
+
+    def _release_plan(self) -> _Pending:
+        projection = self._projector.feed([], release_held=True)
+        plan = self._plan(projection)
+        return _Pending(plan, [], release=True)
 
     # meiva:note
     # The turn the stream reports ended is waited for here by identity: the record turns the inputs `keys` (the ones
@@ -524,7 +533,7 @@ class HarnessTimelineWriter:
         history: frozenset[str] = (
             frozenset(await self._reader.records()) if skip_history else frozenset()
         )
-        projector = Projector(release_held_at_turn_end=self._release_at_turn_end)
+        projector = Projector()
         for sent in self._projector.undelivered():
             projector.register(sent)
         last_ordinal: dict[str, int] = {}
