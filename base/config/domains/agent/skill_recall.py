@@ -30,7 +30,7 @@ class AgentSkillRecallSettings(EnvSettings):
 
     skill_recall_model: str = Field(
         title="Skill suggestion decision model",
-        default="jev-1.13.0",
+        default="gemini-decision-1",
         alias="MEIVA_SKILL_RECALL_MODEL",
         description=(
             "Decision model that scores the skill index for skill recall: one request per "

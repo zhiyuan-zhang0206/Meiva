@@ -1,5 +1,5 @@
 # meiva:note
-# A finite local HTTP provider, not a chat-model implementation. The real Jev and LangChain
+# A finite local HTTP provider, not a chat-model implementation. The real decision and LangChain
 # adapters serialize requests and parse replies. The listener persists the bytes it received;
 # tests inspect that receipt rather than replacing or spying on model calls.
 from __future__ import annotations
@@ -113,7 +113,8 @@ class ProviderWire:
                 (directory / f"{ordinal}.json").write_text(
                     json.dumps({"path": self.path, "body": json.loads(body)})
                 )
-                if self.path == "/v1/systemone":
+                if self.path in ("/v1/systemone", "/v1beta/decisions"):
+                    gemini = self.path == "/v1beta/decisions"
                     replies = wire.gate_receipts()
                     reply = gate[min(len(replies) - 1, len(gate) - 1)]
                     data = (
@@ -121,11 +122,19 @@ class ProviderWire:
                         if reply.body is not None
                         else json.dumps(
                             {
-                                "model": "jev-1.13.0",
+                                "model": "gemini-decision-1" if gemini else "jev-1.13.0",
                                 "answers": {
-                                    "useful_reply": {"type": "noul", "noul": reply.probability}
+                                    "useful_reply": {
+                                        "type": "noul",
+                                        "noul": reply.probability,
+                                        "confidence": max(reply.probability, 1 - reply.probability),
+                                    }
                                 },
-                                "usage": {"input_tokens": 80, "output_tokens": 0},
+                                "usage": (
+                                    {"total_input_tokens": 80, "total_output_tokens": 0}
+                                    if gemini
+                                    else {"input_tokens": 80, "output_tokens": 0}
+                                ),
                             }
                         )
                     )
@@ -183,16 +192,16 @@ class ProviderWire:
         assert not self._thread.is_alive()
 
     def gate_receipts(self) -> list[dict[str, object]]:
-        return self._receipts("/v1/systemone")
+        return self._receipts("/v1/systemone", "/v1beta/decisions")
 
     def draft_receipts(self) -> list[dict[str, object]]:
         return self._receipts("/responses")
 
-    def _receipts(self, path: str) -> list[dict[str, object]]:
+    def _receipts(self, *paths: str) -> list[dict[str, object]]:
         records = [
             _RECEIPT.validate_json(p.read_text()) for p in sorted(self.directory.glob("*.json"))
         ]
-        return [record["body"] for record in records if record["path"] == path]
+        return [record["body"] for record in records if record["path"] in paths]
 
     def response(self) -> dict[str, object]:
         return {

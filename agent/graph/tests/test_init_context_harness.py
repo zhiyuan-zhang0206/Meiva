@@ -335,7 +335,7 @@ def _make_antigravity_recall_runtime(
             )
 
     base_catalog = build_model_catalog(home=unit_home)
-    provider = base_catalog.decision_provider_of("jev-1.13.0")
+    provider = base_catalog.decision_provider_of("gemini-decision-1")
     assert provider is not None
 
     def _build_scorer(_ctx: Any) -> _Scorer:

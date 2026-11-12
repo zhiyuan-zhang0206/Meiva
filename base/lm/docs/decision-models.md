@@ -101,6 +101,7 @@ Optional registered local HTTP services and their capacity/identity boundaries:
 
 | Plugin | Decision id | Wire model | Endpoint | Key | Window | Price (per 1M input) |
 |---|---|---|---|---|---|---|
+| `lm_google` | `gemini-decision-1` | `gemini-decision-1` | `POST https://generativelanguage.googleapis.com/v1beta/decisions` | `GEMINI_API_KEY` | 256K conservative text request ceiling | $0.10 |
 | `lm_typesafe` | `jev-1.13.0` | `jev-1.13.0` (pinned, no alias) | `POST https://api.typesafe.ai/v1/systemone` | `TYPESAFE_API_KEY` | 32K state + longest question, 64K total, text only | $0.042 |
 | `lm_openai` | `gpt-6-luna-decisions` | `gpt-6-luna` | `POST https://api.openai.com/v1/decisions` | `OPENAI_API_KEY` | 272K, text (images unused) | $0.10 |
 
@@ -111,3 +112,7 @@ in an array echoing each name; its `predicate` answer is the probability of true
 `YesNo.true_if`/`false_if` are Jev's `criteria`; for OpenAI, which has none, they are
 appended to the instructions. `Score` labels and rubric become `"label: description"`
 criteria for Jev and `levels` for OpenAI.
+
+The default skill recall, memory rerank and reply-suggestion gate now use Gemini Decision 1. Explicit per-agent or environment model overrides remain authoritative. This changes decision calls only; chat models and harness selections are separate. Existing thresholds retain their previous calibration and have not been retuned for Gemini. Production activation follows the normal rollout boundary; changing source defaults does not migrate stored pins or running processes.
+
+Gemini uses `x-goog-api-key`, `input` content blocks and a keyed question map. Its `noul` criteria use `true_description`/`false_description`; score probabilities use numeric indices translated back to caller labels. Billed input comes from `usage.total_input_tokens`, including invalid billed answers. The common text-only decide entry does not send media although the provider supports it.

@@ -14,7 +14,7 @@ The `# Capabilities` index asks the agent to match every task against it by hand
 - **Questions** (one `YesNo` per candidate, keyed by the skill's display identifier): "if the agent loads this skill now and follows it, will that clearly help it handle the latest request?" with the skill's index-line description. The wording lives in `skill_recall.py` and nowhere else. The question keeps the display spelling it was calibrated on (`meiva.skills.<identifier>`); the offered note spells each skill as its loadable path (`meiva.skills.web_sources.youtube`).
 - **Candidates**: `agent/graph/prompt/capabilities.py:recall_candidates`: everything the capability index covers, described by exactly the text its index line quotes (`_one_line`, at most 300 characters). A skill that `skills_to_expand_at_start` preloaded is not a candidate. Read and already-offered skills are removed by the hook.
 
-The prompt, the model (`skill_recall_model`, default `jev-1.13.0`) and `skill_recall_threshold` (0.60) were calibrated together by the 2026-10-11 benchmark. They are one unit: change the wording, the description format or the model and the threshold needs recalibrating.
+The current `skill_recall_model` default is `gemini-decision-1`. The prompt and `skill_recall_threshold` (0.60) were calibrated with Jev on 2026-10-11; that historical calibration does not establish equivalent behavior with Gemini. The model switch preserves the threshold, wording and description format; production-quality threshold recalibration remains separate from protocol verification. Explicit model pins remain authoritative.
 
 ## From scores to a note
 
@@ -31,7 +31,7 @@ When `compact.version` is past `window` the hook clears both (`Overwrite([])` an
 
 ## Failure semantics
 
-The hook runs before every inbound turn's LLM call, so nothing it does may kill the turn. The whole pass runs under `skill_recall_deadline_seconds` (3.0; independent of `memory_recall_deadline_seconds`); a timeout, any `DecisionError` (provider failure, missing key, unknown model) and a `DecisionInputTooLargeError` are logged under `event=skill_recall` and the turn proceeds with no note. The request grows with the catalog (about 150 tokens per question), so a catalog of roughly 400 skills reaches Jev's 64K request limit; `decide()` then raises `DecisionInputTooLargeError` before sending anything. The state is never truncated and the candidate list is never chunked or sampled: a partial score would offer the best of an arbitrary subset. Such an agent gets no recall until its catalog shrinks or the limit grows.
+The hook runs before every inbound turn's LLM call, so nothing it does may kill the turn. The whole pass runs under `skill_recall_deadline_seconds` (3.0; independent of `memory_recall_deadline_seconds`); a timeout, any `DecisionError` (provider failure, missing key, unknown model) and a `DecisionInputTooLargeError` are logged under `event=skill_recall` and the turn proceeds with no note. The request grows with the catalog (about 150 tokens per question), with an explicit Jev pin, roughly 400 skills reach its 64K request limit; `decide()` then raises `DecisionInputTooLargeError` before sending anything. The state is never truncated and the candidate list is never chunked or sampled: a partial score would offer the best of an arbitrary subset. Gemini additionally caps a request at 1,000 questions; its adapter raises the same typed capacity error before any HTTP request. Such an agent gets no recall until its catalog shrinks or the limit grows.
 
 ## Configuration
 

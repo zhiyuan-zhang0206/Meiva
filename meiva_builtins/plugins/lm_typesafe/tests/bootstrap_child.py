@@ -42,7 +42,11 @@ async def verify() -> None:
         return
     selected = build_model_catalog(home=home)
     if mode == "scratch":
-        assert set(selected.decision_models) == {"jev-1.13.0", "gpt-6-luna-decisions"}
+        assert set(selected.decision_models) == {
+            "jev-1.13.0",
+            "gpt-6-luna-decisions",
+            "gemini-decision-1",
+        }
         assert not (home / "configs").exists()
         return
     assert MODEL in selected.decision_models

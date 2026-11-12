@@ -1,25 +1,25 @@
-"""Skill recall: offer the skills that clearly fit the conversation's latest request.
-
-The standing `# Capabilities` index asks the agent to match every task against it by hand, and an
-index of hundreds of skills is easy to skim past. Before a turn woken by a person's message or a
-schedule, one decision-model request scores every candidate skill against the recent conversation
-and the best matches are named in a system note, so a fitting playbook is in front of the agent
-without it having to find the line.
-
-One request, one question per skill. The conversation is sent once as the state and every skill
-adds only its own yes/no question (about 150 tokens each), so the request grows with the catalog.
-A catalog too large for the decision model's request limit raises `DecisionInputTooLargeError`;
-that is logged and nothing is offered. The state is never truncated and the catalog is never
-chunked here: a partial score over some of the skills would offer the best of an arbitrary subset,
-and a request split by chunks would multiply the cost of every inbound turn.
-
-The wording of the state preamble and of the question, and the model and threshold in
-`AgentSkillRecallSettings`, were calibrated together by the 2026-10-11 benchmark. They are one
-unit: changing any of them means recalibrating the threshold.
-
-A removable layer, like passive memory recall: a decision failure of any kind returns `None`
-and the turn goes on without the note.
-"""
+# meiva:note
+# Skill recall: offer the skills that clearly fit the conversation's latest request.
+#
+# The standing `# Capabilities` index asks the agent to match every task against it by hand, and an
+# index of hundreds of skills is easy to skim past. Before a turn woken by a person's message or a
+# schedule, one decision-model request scores every candidate skill against the recent conversation
+# and the best matches are named in a system note, so a fitting playbook is in front of the agent
+# without it having to find the line.
+#
+# One request, one question per skill. The conversation is sent once as the state and every skill
+# adds only its own yes/no question (about 150 tokens each), so the request grows with the catalog.
+# A catalog too large for the decision model's request limit raises `DecisionInputTooLargeError`;
+# that is logged and nothing is offered. The state is never truncated and the catalog is never
+# chunked here: a partial score over some of the skills would offer the best of an arbitrary subset,
+# and a request split by chunks would multiply the cost of every inbound turn.
+#
+# The wording and threshold were calibrated with Jev by the 2026-10-11 benchmark. The
+# Gemini default preserves that threshold; protocol verification does not transfer the historical
+# calibration to a different model. Threshold recalibration is a separate evaluation.
+#
+# A removable layer, like passive memory recall: a decision failure of any kind returns `None`
+# and the turn goes on without the note.
 
 from __future__ import annotations
 

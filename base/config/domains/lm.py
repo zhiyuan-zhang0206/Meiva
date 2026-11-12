@@ -107,7 +107,7 @@ class LmSettings(EnvSettings):
 
     reply_suggestion_gate_model: str = Field(
         title="Reply suggestion decision model",
-        default="jev-1.13.0",
+        default="gemini-decision-1",
         alias="MEIVA_REPLY_SUGGESTION_GATE_MODEL",
         description=(
             "Decision model that judges whether a reply suggestion would help the user "

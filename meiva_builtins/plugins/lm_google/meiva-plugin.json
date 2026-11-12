@@ -8,6 +8,9 @@
   "contributions": {
     "providers": [
       "gemini-"
+    ],
+    "decisionProviders": [
+      "gemini-"
     ]
   },
   "displayName": "Google",

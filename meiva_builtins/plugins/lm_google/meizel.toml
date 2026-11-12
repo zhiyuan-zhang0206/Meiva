@@ -1,5 +1,7 @@
 [uses]
-"tests" = ["provider.py"]
+"tests" = ["provider.py", "decision.py"]
+"provider.py" = ["decision.py"]
+"decision.py" = ["decision_protocol.py"]
 
 [purity]
 "plugin.py" = "strict"

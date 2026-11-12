@@ -15,14 +15,26 @@ from base.lm.catalog.decide.types import (
 
 
 # meiva:note
-# POST once; omit authentication when the provider has no configured credential.
+# POST once with the provider authentication headers or the existing bearer-key form.
 async def post_json(
-    ctx: DecisionBuildContext, *, url: str, api_key: str | None, payload: Mapping[str, object]
+    ctx: DecisionBuildContext,
+    *,
+    url: str,
+    api_key: str | None,
+    payload: Mapping[str, object],
+    headers: Mapping[str, str] | None = None,
 ) -> dict[str, object]:
     # meiva:note
     # The lightweight provider contract loads on the exec-child boot path.
     import httpx
 
+    if api_key is not None and headers is not None:
+        raise ValueError("choose bearer api_key or explicit authentication headers, not both")
+    request_headers = (
+        dict(headers)
+        if headers is not None
+        else ({"Authorization": f"Bearer {api_key}"} if api_key is not None else {})
+    )
     transport = ctx.transport
     if transport is not None and not isinstance(transport, httpx.AsyncBaseTransport):
         raise TypeError(
@@ -33,7 +45,7 @@ async def post_json(
             response = await client.post(
                 url,
                 json=payload,
-                headers={"Authorization": f"Bearer {api_key}"} if api_key is not None else {},
+                headers=request_headers,
             )
     except httpx.HTTPError as exc:
         raise transport_failure(ctx.model, url, exc) from exc

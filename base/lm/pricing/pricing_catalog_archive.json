@@ -1,6 +1,6 @@
 {
   "schema_version": 2,
-  "catalog_version": "2026-10-29-deepseek-v4-pro-continuation",
+  "catalog_version": "2026-11-12-gemini-decisions",
   "currency": "USD",
   "unit_tokens": 1000000,
   "models": {
@@ -1718,6 +1718,29 @@
                 "input": "4.0",
                 "cache_read": "0.20",
                 "output": "20.0"
+              },
+              "utc_daily_overrides": []
+            }
+          ]
+        }
+      ]
+    },
+    "gemini-decision-1": {
+      "vendor": "google",
+      "source_url": "https://blog.google/innovation-and-ai/technology/developers-tools/gemini-decisions-api/",
+      "source_checked_at": "2026-11-12",
+      "periods": [
+        {
+          "effective_from": null,
+          "effective_until": null,
+          "tiers": [
+            {
+              "input_tokens_min": 0,
+              "input_tokens_max": null,
+              "rates": {
+                "input": "0.10",
+                "cache_read": "0.10",
+                "output": "0"
               },
               "utc_daily_overrides": []
             }
