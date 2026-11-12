@@ -3,7 +3,15 @@ from __future__ import annotations
 import asyncio
 from collections.abc import AsyncIterator, Callable
 
-from base.lm.harness.events import BridgeEvent, TurnOrigin, TurnStarted
+from base.lm.harness.events import (
+    NO_TURN,
+    BridgeEvent,
+    SubagentText,
+    ToolResult,
+    ToolUse,
+    TurnOrigin,
+    TurnStarted,
+)
 from base.log import logger
 
 # meiva:note
@@ -18,6 +26,10 @@ from base.log import logger
 # that turn's events from its start until a subscriber has read its `TurnStarted`, calls `own_turn` so
 # the owner wakes the agent, and primes whoever subscribes next with what the turn has produced so far.
 # Read means read: an event still unread in a subscription that closed is not a presented turn.
+#
+# A sub-agent's activity with no turn (`turn_id == NO_TURN`: Codex's child thread speaking after its
+# parent's turn ended) is kept the same way and wakes the owner, so it reaches the timeline under the call
+# that started the sub-agent. It begins no turn: the run it wakes projects it and ends.
 # meiva:link base/lm/harness/docs/delivery.md
 
 
@@ -68,6 +80,7 @@ class EventPump:
         self._observe = observe
         self._own_turn = own_turn
         self._own: dict[str, list[BridgeEvent]] = {}
+        self._orphans: list[BridgeEvent] = []
         self._subscriptions: set[Subscription] = set()
         self._ended = False
 
@@ -77,13 +90,15 @@ class EventPump:
 
     @property
     def has_unpresented_turn(self) -> bool:
-        return bool(self._own)
+        return bool(self._own) or bool(self._orphans)
 
     def subscribe(self) -> Subscription:
         subscription = Subscription(self)
         for events in self._own.values():
             for event in events:
                 subscription.offer(event)
+        for event in self._orphans:
+            subscription.offer(event)
         if self._ended:
             subscription.offer(None)
         else:
@@ -93,8 +108,14 @@ class EventPump:
     def read(self, event: BridgeEvent) -> None:
         if isinstance(event, TurnStarted) and event.origin is TurnOrigin.HARNESS:
             _ = self._own.pop(event.turn_id, None)
+        elif self._orphans:
+            self._orphans = [kept for kept in self._orphans if kept is not event]
 
     def _keep_own_turn(self, event: BridgeEvent) -> bool:
+        if isinstance(event, SubagentText | ToolUse | ToolResult) and event.turn_id == NO_TURN:
+            began = not self._orphans
+            self._orphans.append(event)
+            return began
         if isinstance(event, TurnStarted):
             if event.origin is not TurnOrigin.HARNESS:
                 return False
@@ -124,6 +145,7 @@ class EventPump:
         finally:
             self._ended = True
             self._own.clear()
+            self._orphans.clear()
             for subscription in tuple(self._subscriptions):
                 subscription.offer(None)
             self._subscriptions.clear()

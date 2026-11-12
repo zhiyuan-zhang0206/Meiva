@@ -141,3 +141,20 @@ while the process tree shows a descendant the app-server did not start with (the
 whose completion never comes). A turn that ends
 interrupted or failed drops its open items (its interrupt ended them,
 [what an interrupt stops](../../docs/harness.md#what-an-interrupt-stops)). See [background work](../../docs/background-work.md).
+
+## Sub-agent threads
+
+A `spawnAgent` child is a thread of the same app-server, and it is an independent line of work: it
+outlives the parent's turn, and the turn is not ours to end for it. The adapter listens and projects
+what it says; it does not manage it ([sub-agent text](../../docs/subagent-text.md)).
+
+- **Shown.** The child's messages, tool items and failure reach the timeline under the spawn call,
+  with no turn when the parent has none (`NO_TURN`); the pump keeps them until a run reads them and
+  wakes the owner. No turn is invented for the child's own `turn/*` frames.
+- **Held.** `subagents.py` follows each child from the spawn call (unless `agentsStates` already
+  reports it finished) until its `turn/completed`, a `thread/status/changed` that is not `active`, an
+  `error` that will not be retried, or a `closeAgent` call of the parent; its `turn/started` or an
+  `active` status reopens it. A working child is `BackgroundKind.AGENT` work, so the idle TTL does not
+  close the app-server it lives in and the session record names it should the process go anyway.
+  A child whose end never arrives holds the session until the cache bound takes it, as a command
+  whose completion never arrives would if the process tree were not checked.

@@ -87,6 +87,9 @@ handoff or compaction reminder on the batch's first input; results come back as 
 subscription. The graph's `harness_turn` is the one consumer: it settles each input from `InputInContext`,
 `InputRejected` or `InputLost` and stays until nothing is unsettled and no turn runs
 ([foreground input and cancellation](../../../../agent/graph/docs/harness-foreground.md)).
+Besides a turn the CLI began, the pump keeps a CLI sub-agent's activity that belongs to no turn
+(`turn_id == NO_TURN`, [sub-agent text](subagent-text.md)) until a run reads it, and wakes the owner the same
+way; it begins no turn.
 
 ## Reconciliation
 

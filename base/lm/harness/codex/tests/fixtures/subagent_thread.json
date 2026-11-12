@@ -1,5 +1,5 @@
 {
- "source": "RECORDED from codex app-server 0.166 (gpt-5.6-luna, one spawnAgent + wait), 2026-11-11. Thread and turn ids replaced; the order of frames and the field names are as the server sent them.",
+ "source": "RECORDED from codex app-server 0.166 (gpt-5.6-luna, one spawnAgent + wait), 2026-11-11. Thread and turn ids replaced; the order of frames and the field names are as the server sent them. CONSTRUCTED use: test_subagents.py also replays the `child` group after the parent's turn completed (a child outliving its parent's turn was not recorded; the frames are the recorded ones, only their position relative to the parent's `turn/completed` is constructed), and builds the child `error`, failed `turn/completed`, `thread/status/changed` and `closeAgent` frames from the 0.166 schema (`codex app-server generate-json-schema`).",
  "frames": {
   "spawn": [
    {

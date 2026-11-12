@@ -1,3 +1,4 @@
+import asyncio
 from dataclasses import replace
 
 import psycopg
@@ -26,6 +27,7 @@ from base.events.live.bus import EventBus
 from base.events.live.tests.live_capture import LiveEvents
 from base.host.env.agent_slices import AgentSlices
 from base.lm.harness import (
+    NO_TURN,
     AssistantText,
     BridgeEvent,
     SubagentText,
@@ -388,3 +390,45 @@ async def test_activity_after_the_launching_invocation_still_finds_its_call(
     [late_code] = [i for i in items if i.tool_use_id == "late-bash"]
     assert (late.parent_item_id, late_code.parent_item_id) == (spawn.item_id, spawn.item_id)
     assert nobody.parent_item_id is None
+
+
+# meiva:note
+# A Codex child thread that speaks after its parent's turn ended has no turn to belong to. The engine
+# reports its activity as unpresented, the claim enters a run for it, and the run writes it under the
+# spawning call and ends without delivering anything.
+# meiva:link base/lm/harness/docs/subagent-text.md
+async def test_subagent_activity_with_no_turn_is_written_under_its_call_and_the_run_ends(
+    db_conn: psycopg.Connection,
+    aops_pool: AsyncConnectionPool,
+    database_gate: ProcessDbGate,
+    hosted_resources: HostedTurnResources,
+    live_events: LiveEvents,
+) -> None:
+    aid = create_agent(db_conn)
+    db_conn.execute(
+        "INSERT INTO agents_meta (id, status, harness) VALUES (%s, 'running', 'claude_code')",
+        (aid,),
+    )
+    db_conn.commit()
+    await _subagent_turn(
+        db_conn, aops_pool, database_gate, hosted_resources, live_events, (), agent_id=aid
+    )
+    engine = FakeEngine()
+    engine.own_turn_events = [
+        SubagentText(turn_id=NO_TURN, tool_use_id="call-agent", agent=None, text="AFTER"),
+        replace(_subagent_call("late-bash"), turn_id=NO_TURN),
+        replace(_subagent_result("late-bash", "hi"), turn_id=NO_TURN),
+    ]
+    rt = runtime(engine, ops_pool=aops_pool, hosted_resources=hosted_resources)
+
+    async with asyncio.timeout(20):
+        await harness_turn_node(AgentState(), rt, config(aid))
+
+    async with aops_pool.connection() as conn:
+        items = await aload_harness_timeline_items(conn, aid)
+    [spawn] = [i for i in items if i.tool_use_id == "call-agent"]
+    [after] = [i for i in items if i.payload == "AFTER"]
+    [late_code] = [i for i in items if i.tool_use_id == "late-bash"]
+    assert (after.parent_item_id, late_code.parent_item_id) == (spawn.item_id, spawn.item_id)
+    assert engine.delivered == []
+    assert [i for i in items if i.kind == "code_output" and i.payload == "hi"]

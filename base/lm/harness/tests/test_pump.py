@@ -15,7 +15,14 @@ from base.lm.harness import (
     Usage,
 )
 from base.lm.harness.delivery import HarnessInput
-from base.lm.harness.events import AckSignal, HarnessCause, InputInContext, InputReceived
+from base.lm.harness.events import (
+    NO_TURN,
+    AckSignal,
+    HarnessCause,
+    InputInContext,
+    InputReceived,
+    SubagentText,
+)
 from base.lm.harness.handoff import compaction_reminder
 from base.lm.harness.pump import EventPump
 from base.lm.harness.tests.test_bridge import FakeSession, handoff, make_bridge
@@ -191,6 +198,28 @@ async def test_a_turn_unread_when_its_subscriber_left_is_still_presented() -> No
 
     successor = pump.subscribe()
     assert isinstance(await successor.get(), TurnStarted)
+    source.put_nowait(None)
+    await task
+
+
+async def test_subagent_activity_with_no_turn_is_kept_wakes_once_and_begins_no_turn() -> None:
+    source: asyncio.Queue[BridgeEvent | None] = asyncio.Queue()
+    woken: list[str] = []
+    pump = EventPump(_stream(source), observe=lambda _e: None, own_turn=lambda: woken.append("w"))
+    task = asyncio.create_task(pump.run())
+
+    said = [SubagentText(NO_TURN, "call", None, text) for text in ("one", "two")]
+    for event in said:
+        source.put_nowait(event)
+    source.put_nowait(SubagentText("t1", "call", None, "in a turn"))
+    await asyncio.sleep(0)
+    await asyncio.sleep(0)
+    assert woken == ["w"], "one wake for the batch"
+    assert pump.has_unpresented_turn
+
+    late = pump.subscribe()
+    assert [(await late.get()) for _ in said] == said
+    assert not pump.has_unpresented_turn, "once read, it is presented"
     source.put_nowait(None)
     await task
 

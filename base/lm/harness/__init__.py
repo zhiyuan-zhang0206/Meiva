@@ -24,6 +24,7 @@ from base.lm.harness.engine import (
     completed_turn,
 )
 from base.lm.harness.events import (
+    NO_TURN,
     AssistantText,
     BridgeEvent,
     ContextCompacted,
@@ -72,6 +73,7 @@ from base.lm.harness.session import (
 
 __all__ = [
     "HANDLE_ENV",
+    "NO_TURN",
     "AssistantText",
     "BackgroundItem",
     "BackgroundKind",

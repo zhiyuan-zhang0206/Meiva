@@ -58,6 +58,14 @@ class AssistantText:
 
 
 # meiva:note
+# The `turn_id` of a sub-agent's activity that arrived while no turn ran (a Codex child thread that
+# outlives its parent's turn). The CLI named no turn for it, so none is invented: the activity is
+# attributed to the call that started the sub-agent alone, and the pump keeps it until a run reads it.
+# meiva:link base/lm/harness/docs/subagent-text.md
+NO_TURN = ""
+
+
+# meiva:note
 # Text a CLI's own sub-agent said, attributed to the tool call that started it (`tool_use_id`; Claude's
 # Agent/Task call, Codex's spawn call) and to the turn that made the call. It is work detail, never
 # the agent's reply: it stays out of `AssistantText`, so it is not parsed for a visibility prefix and is

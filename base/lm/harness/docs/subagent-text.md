@@ -44,7 +44,19 @@ What the CLIs send, recorded on Claude Code (claude-agent-sdk 0.2.168) and Codex
 - **Codex.** A sub-agent is a thread on the same app-server connection. Its notifications carry its own
   `threadId` and were dropped as another thread's. `SubagentThreads` learns the child id when the
   parent's `spawnAgent` item completes and shows the child's finished messages in the turn that is
-  running. A child that speaks while no turn runs is not shown.
+  running. A child that speaks while no turn runs is shown all the same: its text, tool calls and failure
+  are attributed to the spawn call and carry `turn_id == NO_TURN` (`events.py`), because Codex names no
+  turn for that thread's work and none is invented. The pump keeps such activity until a run reads it and
+  wakes the owner, the claim enters a run for it (`has_unpresented_turn`), and the run writes the entries
+  under the spawn call and ends: it begins no turn and delivers nothing. A tool item the child had not
+  completed is shown when it completes, as a call followed by its result (a call whose `item/started` was
+  seen in an earlier turn is shown again, because a later run's projector cannot finish a call it never
+  opened). A child's failure, an `error` that will not be retried or a `turn/completed` that is `failed`
+  or `interrupted`, is a `SubagentText` line (`Sub-agent error: ...`, `Sub-agent turn failed: ...`) under
+  the spawn call; the parent's own `collabAgentToolCall` result carries `agentsStates` only for a call
+  that waits on the child, so it is not relied on. A child that is working also holds the session, see
+  [background work](background-work.md). The child-to-call map lives in the session object, so a child
+  thread the map does not know (after the app-server was restarted) is not shown.
 - **Antigravity.** `invoke_subagent` creates a sibling conversation (its own `brain/<id>/` directory) and
   its result returns to the parent as a system message. The stream-json frames carry nothing of the child
   and no usable step for the call (a `tool` step for `invoke_subagent` goes ACTIVE and never DONE, followed

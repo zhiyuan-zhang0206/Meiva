@@ -24,7 +24,9 @@ into.
 | `error` with `willRetry=false`, naming our turn | `TurnFaulted` |
 | `error` with `willRetry=false`, naming any other turn | `UnsolicitedOutput(source="error")` |
 
-Plan, image, sub-agent thread lifecycle (`thread/*`, `turn/*` of a child), queue and rate-limit notifications have no timeline activity mapping.
+A child thread's `error` (`willRetry=false`) and a `turn/completed` that is `failed` or `interrupted` become a `SubagentText` line under the spawn call. With no turn running, the child's events carry `turn_id == NO_TURN` ([sub-agent text](../../docs/subagent-text.md)). A child's `turn/*`, `thread/status/changed` and `closeAgent` call also feed the held-work tracking ([Codex bridge](codex.md#sub-agent-threads)).
+
+Plan, image, a child's reasoning and token usage, queue and rate-limit notifications have no timeline activity mapping.
 
 The authoritative `turn/start` response binds the turn before
 buffered notifications are dispatched.

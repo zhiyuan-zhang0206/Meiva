@@ -61,6 +61,7 @@ from base.lm.harness.codex.turns import (
 )
 from base.lm.harness.delivery import HarnessInput, InputPhase, Reconciliation, validated_batch
 from base.lm.harness.events import (
+    NO_TURN,
     AckSignal,
     AssistantText,
     HarnessCause,
@@ -470,7 +471,10 @@ class CodexSession(BaseHarnessSession[CodexConfig]):
         return True
 
     def _on_notification(self, method: str, params: JsonObject) -> None:
+        before = self._subagents.working
         self._subagents = self._subagents.learned(method, params, session_id=self._session_id)
+        if self._subagents.working != before:
+            self._persist_pending()
         message = inbound(method, params, session_id=self._session_id)
         if message is None:
             self._on_subagent(method, params)
@@ -481,18 +485,20 @@ class CodexSession(BaseHarnessSession[CodexConfig]):
         self._dispatch_notification(message, params)
 
     # meiva:note
-    # A sub-agent's finished message is shown in the turn that is running when it arrives; with no
-    # turn running (a sub-agent that outlives its parent's turn) it has nowhere to be attributed
-    # and is not shown.
+    # A sub-agent's finished message, tool calls and failure are shown in the turn that is running when
+    # they arrive. With no turn running (a sub-agent thread that outlives its parent's turn) they are
+    # still shown, attributed to the call that started it and to no turn (`NO_TURN`): Codex names no
+    # turn for that work, so none is invented, and the pump wakes a run to write it down.
     # meiva:link base/lm/harness/docs/subagent-text.md
     def _on_subagent(self, method: str, params: JsonObject) -> None:
-        local = self._running_turn_id()
-        if local is None:
-            return
-        if (event := self._subagents.text(method, params, turn_id=local)) is not None:
-            self._emit(event)
-        for tool_event in self._subagents.tools(method, params, turn_id=local):
-            self._emit(tool_event)
+        local = self._running_turn_id() or NO_TURN
+        for event in (
+            self._subagents.text(method, params, turn_id=local),
+            self._subagents.failure(method, params, turn_id=local),
+            *self._subagents.tools(method, params, turn_id=local),
+        ):
+            if event is not None:
+                self._emit(event)
 
     def _buffer_early_notification(self, message: Inbound, params: JsonObject) -> None:
         if not message.turn_id or params.get("threadId") != self._session_id:
@@ -676,10 +682,12 @@ class CodexSession(BaseHarnessSession[CodexConfig]):
     def background_work(self) -> BackgroundWork:
         if self._closed:
             return BackgroundWork()
-        return BackgroundWork((*self._pending_commands(), *self._observed_turn_items()))
+        return BackgroundWork(
+            (*self._pending_commands(), *self._subagents.background, *self._observed_turn_items())
+        )
 
     def _persist_pending(self) -> None:
-        self._persist_background(self._pending_commands())
+        self._persist_background((*self._pending_commands(), *self._subagents.background))
 
     def _on_request(self, method: str, params: JsonObject) -> JsonObject:
         answer = answer_request(method, params, decision=self.config.approval_decision)

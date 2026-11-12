@@ -165,9 +165,9 @@ class HarnessBridge:
         return 0 if self._session is None else self._session.generation
 
     # meiva:note
-    # Whether the CLI began a turn of its own that no subscriber has read yet: the graph enters a run for
-    # it (the host wakes the agent through `own_turn`), and the subscription that run opens is primed
-    # with the turn's events so far.
+    # Whether the CLI began a turn of its own that no subscriber has read yet, or a CLI sub-agent
+    # produced activity that belongs to no turn: the graph enters a run for it (the host wakes the
+    # agent through `own_turn`), and the subscription that run opens is primed with the events so far.
     # meiva:link base/lm/harness/docs/delivery.md
     @property
     def has_unpresented_turn(self) -> bool:
