@@ -8,6 +8,7 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 
+from base.lm.catalog.decide.types import DecisionInputTooLargeError
 from base.lm.provider_api import (
     DecisionBinding,
     DecisionBuildContext,
@@ -36,7 +37,9 @@ class GeminiDecisionBinding:
 
     async def decide(self, state: str, questions: Mapping[str, Question]) -> DecisionResult:
         if len(questions) > 1000:
-            raise ValueError("Gemini Decisions supports at most 1000 questions per request")
+            raise DecisionInputTooLargeError(
+                "Gemini Decisions supports at most 1000 questions per request"
+            )
         body = await post_json(
             self._ctx,
             url=ENDPOINT,

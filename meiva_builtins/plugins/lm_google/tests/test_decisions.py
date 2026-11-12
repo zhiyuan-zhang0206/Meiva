@@ -15,6 +15,7 @@ from base.lm.catalog import ModelCatalog
 from base.lm.catalog.decide.types import (
     Choice,
     DecisionBuildContext,
+    DecisionInputTooLargeError,
     DecisionRequestError,
     DecisionResponseError,
     Score,
@@ -101,10 +102,12 @@ async def test_native_schema_auth_and_all_question_types() -> None:
     assert score is not None and score > 0.8
 
 
-@pytest.mark.parametrize("kind", ["missing", "extra", "out_of_range", "wrong_type"])
+@pytest.mark.parametrize("kind", ["empty", "missing", "extra", "out_of_range", "wrong_type"])
 async def test_bad_answers_fail_without_losing_billed_input(kind: str) -> None:
     body = response()
-    if kind == "missing":
+    if kind == "empty":
+        body["answers"] = {}
+    elif kind == "missing":
         del body["answers"]["blue"]
     elif kind == "extra":
         body["answers"]["other"] = body["answers"]["blue"]
@@ -137,7 +140,7 @@ async def test_question_limit_fails_before_request() -> None:
     def unexpected(_: httpx.Request) -> httpx.Response:
         raise AssertionError("network was called")
 
-    with pytest.raises(ValueError, match="1000"):
+    with pytest.raises(DecisionInputTooLargeError, match="1000"):
         await binding(unexpected).decide("text", {str(n): QUESTIONS["blue"] for n in range(1001)})
 
 
