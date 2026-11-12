@@ -141,6 +141,12 @@ EVENTS: dict[str, EventSpec] = {
         "and claim dispatches it again on the next pass",
         tier="anomaly",
     ),
+    "harness_interrupt_note_failed": telemetry_event(
+        "harness_interrupt_note_failed",
+        "a confirmed stop's passive note could not be written to the timeline; the row stays "
+        "pending, unflagged, and is delivered with its entry along with the next input",
+        tier="anomaly",
+    ),
     "harness_delivery_pool_timeout": telemetry_event(
         "harness_delivery_pool_timeout",
         "delivering the inbox to an external harness could not borrow a database connection; "
