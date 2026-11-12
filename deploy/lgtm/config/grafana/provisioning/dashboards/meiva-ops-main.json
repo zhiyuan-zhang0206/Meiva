@@ -6883,6 +6883,211 @@
     }
    ],
    "type": "table"
+  },
+  {
+   "id": 2506,
+   "type": "table",
+   "title": "Main-red suspects - latest round",
+   "description": "Oldest 10 suspects from the latest main_red_watch_round snapshot. Age is measured at that round; Time shows its freshness. Each query takes the latest round before filtering blank slots, so a resolved suspect does not reappear from an older round. The event carries suspects_dropped when more than 10 exist. No-opportunity and unreadable evidence are explicit.",
+   "datasource": {
+    "type": "loki",
+    "uid": "loki"
+   },
+   "gridPos": {
+    "x": 0,
+    "y": 323,
+    "w": 24,
+    "h": 9
+   },
+   "fieldConfig": {
+    "defaults": {
+     "custom": {
+      "align": "auto",
+      "cellOptions": {
+       "type": "auto"
+      }
+     }
+    },
+    "overrides": [
+     {
+      "matcher": {
+       "id": "byName",
+       "options": "age_seconds"
+      },
+      "properties": [
+       {
+        "id": "unit",
+        "value": "s"
+       }
+      ]
+     }
+    ]
+   },
+   "options": {
+    "showHeader": true,
+    "cellHeight": "sm",
+    "sortBy": [
+     {
+      "displayName": "age_seconds",
+      "desc": true
+     }
+    ]
+   },
+   "targets": [
+    {
+     "refId": "A",
+     "datasource": {
+      "type": "loki",
+      "uid": "loki"
+     },
+     "editorMode": "code",
+     "expr": "{event_name=\"main_red_watch_round\"} | json | cluster=\".meiva\" | json row=\"attributes.suspects[0]\" | line_format `{{.row | default \"{\\\"fingerprint\\\":\\\"\\\"}\"}}`",
+     "queryType": "range",
+     "maxLines": 1,
+     "direction": "backward"
+    },
+    {
+     "refId": "B",
+     "datasource": {
+      "type": "loki",
+      "uid": "loki"
+     },
+     "editorMode": "code",
+     "expr": "{event_name=\"main_red_watch_round\"} | json | cluster=\".meiva\" | json row=\"attributes.suspects[1]\" | line_format `{{.row | default \"{\\\"fingerprint\\\":\\\"\\\"}\"}}`",
+     "queryType": "range",
+     "maxLines": 1,
+     "direction": "backward"
+    },
+    {
+     "refId": "C",
+     "datasource": {
+      "type": "loki",
+      "uid": "loki"
+     },
+     "editorMode": "code",
+     "expr": "{event_name=\"main_red_watch_round\"} | json | cluster=\".meiva\" | json row=\"attributes.suspects[2]\" | line_format `{{.row | default \"{\\\"fingerprint\\\":\\\"\\\"}\"}}`",
+     "queryType": "range",
+     "maxLines": 1,
+     "direction": "backward"
+    },
+    {
+     "refId": "D",
+     "datasource": {
+      "type": "loki",
+      "uid": "loki"
+     },
+     "editorMode": "code",
+     "expr": "{event_name=\"main_red_watch_round\"} | json | cluster=\".meiva\" | json row=\"attributes.suspects[3]\" | line_format `{{.row | default \"{\\\"fingerprint\\\":\\\"\\\"}\"}}`",
+     "queryType": "range",
+     "maxLines": 1,
+     "direction": "backward"
+    },
+    {
+     "refId": "E",
+     "datasource": {
+      "type": "loki",
+      "uid": "loki"
+     },
+     "editorMode": "code",
+     "expr": "{event_name=\"main_red_watch_round\"} | json | cluster=\".meiva\" | json row=\"attributes.suspects[4]\" | line_format `{{.row | default \"{\\\"fingerprint\\\":\\\"\\\"}\"}}`",
+     "queryType": "range",
+     "maxLines": 1,
+     "direction": "backward"
+    },
+    {
+     "refId": "F",
+     "datasource": {
+      "type": "loki",
+      "uid": "loki"
+     },
+     "editorMode": "code",
+     "expr": "{event_name=\"main_red_watch_round\"} | json | cluster=\".meiva\" | json row=\"attributes.suspects[5]\" | line_format `{{.row | default \"{\\\"fingerprint\\\":\\\"\\\"}\"}}`",
+     "queryType": "range",
+     "maxLines": 1,
+     "direction": "backward"
+    },
+    {
+     "refId": "G",
+     "datasource": {
+      "type": "loki",
+      "uid": "loki"
+     },
+     "editorMode": "code",
+     "expr": "{event_name=\"main_red_watch_round\"} | json | cluster=\".meiva\" | json row=\"attributes.suspects[6]\" | line_format `{{.row | default \"{\\\"fingerprint\\\":\\\"\\\"}\"}}`",
+     "queryType": "range",
+     "maxLines": 1,
+     "direction": "backward"
+    },
+    {
+     "refId": "H",
+     "datasource": {
+      "type": "loki",
+      "uid": "loki"
+     },
+     "editorMode": "code",
+     "expr": "{event_name=\"main_red_watch_round\"} | json | cluster=\".meiva\" | json row=\"attributes.suspects[7]\" | line_format `{{.row | default \"{\\\"fingerprint\\\":\\\"\\\"}\"}}`",
+     "queryType": "range",
+     "maxLines": 1,
+     "direction": "backward"
+    },
+    {
+     "refId": "I",
+     "datasource": {
+      "type": "loki",
+      "uid": "loki"
+     },
+     "editorMode": "code",
+     "expr": "{event_name=\"main_red_watch_round\"} | json | cluster=\".meiva\" | json row=\"attributes.suspects[8]\" | line_format `{{.row | default \"{\\\"fingerprint\\\":\\\"\\\"}\"}}`",
+     "queryType": "range",
+     "maxLines": 1,
+     "direction": "backward"
+    },
+    {
+     "refId": "J",
+     "datasource": {
+      "type": "loki",
+      "uid": "loki"
+     },
+     "editorMode": "code",
+     "expr": "{event_name=\"main_red_watch_round\"} | json | cluster=\".meiva\" | json row=\"attributes.suspects[9]\" | line_format `{{.row | default \"{\\\"fingerprint\\\":\\\"\\\"}\"}}`",
+     "queryType": "range",
+     "maxLines": 1,
+     "direction": "backward"
+    }
+   ],
+   "transformations": [
+    {
+     "id": "extractFields",
+     "options": {
+      "source": "Line",
+      "format": "json",
+      "replace": true,
+      "keepTime": true
+     }
+    },
+    {
+     "id": "merge",
+     "options": {}
+    },
+    {
+     "id": "filterByValue",
+     "options": {
+      "type": "include",
+      "match": "all",
+      "filters": [
+       {
+        "fieldName": "fingerprint",
+        "config": {
+         "id": "regex",
+         "options": {
+          "value": ".+"
+         }
+        }
+       }
+      ]
+     }
+    }
+   ]
   }
  ],
  "preload": true,

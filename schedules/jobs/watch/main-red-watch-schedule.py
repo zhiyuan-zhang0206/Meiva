@@ -24,7 +24,7 @@ from pathlib import Path
 
 import meiva
 from meiva_builtins.plugins.meiva_fleet import task_registry
-from base.clock import SYSTEM_TIMERS
+from base.clock import Deadline, SYSTEM_TIMERS
 from base.daemon.schedules.inputs import ScheduleInputs
 from base.host.boundary.json_values import is_object_dict, is_object_list
 from base.config import settings
@@ -33,6 +33,7 @@ from schedules.jobs.entry import cluster_timezone, open_schedule_entry
 from schedules.jobs.loop import CronSchedule, Trigger, run_loop
 from schedules.jobs.watch.api_read import read_api
 from schedules.jobs.watch.main_red_slot import slot_round
+from schedules.jobs.watch.main_red_junit import JunitReader
 from schedules.jobs.watch.main_red_watch import (
     LivenessStream,
     already_read,
@@ -611,12 +612,19 @@ def watch_round(
 ) -> None:
     state_path = home / "run" / STATE_FILE
     run_process = subprocess.run
+    case_reader = JunitReader(
+        home / "run" / "main-red-artifacts",
+        run_process,
+        budget=partial(Deadline.after, SYSTEM_TIMERS, 120),
+    )
     line = watch_once(
         state_path=state_path,
         now=datetime.now(UTC),
         fetch=partial(
             fetch_runs, run_process=run_process, scratch=home / "run" / "main-red-artifacts"
         ),
+        read_case=case_reader,
+        review_history=case_reader.history,
         last_start=partial(_last_run_start, run_process=run_process),
         open_card=partial(_open_card, report_agent=report_agent),
         close_card=_close_card,

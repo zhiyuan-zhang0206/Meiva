@@ -7,6 +7,7 @@ exports = [
     "main_red.py",
     "workflow_graph.py",
     "junit.py",
+    "junit_cases.py",
 ]
 
 [purity]
@@ -18,7 +19,9 @@ exports = [
 "main_red.py" = "strict"
 "workflow_graph.py" = "strict"
 "junit.py" = "strict"
+"junit_cases.py" = "strict"
 
 [uses]
+"main_red.py" = ["junit_cases.py"]
 "release_gate_slot.py" = ["main_red.py"]
 "blind_window.py" = ["main_red.py"]

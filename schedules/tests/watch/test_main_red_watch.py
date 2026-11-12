@@ -1470,6 +1470,11 @@ def test_a_suspect_without_a_later_run_reports_no_recheck_opportunity(tmp_path: 
             "first_seen_at": when.isoformat(),
             "red_count": 1,
             "opportunities": 0,
+            "age_seconds": 21600.0,
+            "review_run_id": 0,
+            "review_outcome": "no-opportunity",
+            "review_detail": "",
+            "task_id": None,
         }
     ]
 

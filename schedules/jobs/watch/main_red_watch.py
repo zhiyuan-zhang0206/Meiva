@@ -25,6 +25,15 @@ from pathlib import Path
 from typing import NamedTuple
 
 from base.host.boundary.json_values import is_object_dict
+from schedules.plans.watch.junit_cases import CaseOutcome
+from schedules.jobs.watch.main_red_review import (
+    CaseReader,
+    backfill_reviews,
+    review_run,
+    first_suspect,
+    no_opportunity_notes,
+    suspect_rows,
+)
 from schedules.plans.watch.main_red import (
     FAILURE_TEST,
     FAILURE_UNNAMED,
@@ -283,6 +292,11 @@ def load_state(path: Path) -> WatchState:
             # re-check that closes an open card skips it instead of asking about an older one.
             run_id=int(value.get("run_id") or 0),
             opportunities=int(value.get("opportunities") or 0),
+            review_run_id=int(value.get("review_run_id") or 0),
+            review_outcome=CaseOutcome(value["review_outcome"])
+            if value.get("review_outcome")
+            else None,
+            review_detail=value.get("review_detail") or "",
             # meiva:note
             # A ledger written before the field existed holds full-suite reds (the push gate's were
             # the only partial ones), so the default keeps an upgrade from re-reading an old red as
@@ -322,6 +336,9 @@ def save_state(path: Path, state: WatchState) -> None:
                 "job": entry.job,
                 "run_id": entry.run_id,
                 "opportunities": entry.opportunities,
+                "review_run_id": entry.review_run_id,
+                "review_outcome": entry.review_outcome.value if entry.review_outcome else None,
+                "review_detail": entry.review_detail,
                 "covers_full_suite": entry.covers_full_suite,
                 "artifact_candidates": list(entry.artifact_candidates),
                 "artifact_note": entry.artifact_note,
@@ -474,6 +491,8 @@ def _recheck_open_cards(
         return 0
     closed = 0
     for entry in list(entries.values()):
+        if entry.state == STATE_SUSPECTED or entry.review_run_id:
+            continue
         if entry.task_id is None or not entry.job or not entry.run_id:
             continue
         try:
@@ -499,63 +518,6 @@ def _recheck_open_cards(
 # The event is persisted, so it can afford the list; the line is read by humans in a log, so it says
 # the first few and counts the rest. Both caps are reported rather than silently applied: a
 # truncated list with no count reads as "this is all of them".
-_SUSPECT_LIMIT = 10
-_SUSPECT_NOTE_LIMIT = 3
-
-
-# meiva:note
-# The suspects, oldest first, as rows the round event carries. Oldest first because the age of a
-# suspect is the whole question: one seen a week ago with no chance to re-check is the case that
-# never reaches anyone (task #6488).
-def suspect_rows(
-    entries: Mapping[str, Entry], *, limit: int = _SUSPECT_LIMIT
-) -> tuple[list[dict[str, object]], int]:
-    rows: list[dict[str, object]] = [
-        {
-            "fingerprint": entry.fingerprint,
-            "first_seen_at": entry.first_seen_at.isoformat(),
-            "red_count": entry.red_count,
-            "opportunities": entry.opportunities,
-        }
-        for entry in entries.values()
-        if entry.state == STATE_SUSPECTED
-    ]
-    rows.sort(key=lambda row: str(row["first_seen_at"]))
-    return rows[:limit], max(0, len(rows) - limit)
-
-
-# meiva:note
-# The one thing about a suspect that the round says out loud, and it is not its age: an age with no
-# chance to re-check says something about `main`, not about the red. A suspect with zero
-# opportunities has waited through no run at all, so nothing will ever confirm or retire it -- that
-# is the shape with no exit, and it is the only shape worth a line every round (405, 2026-11-08).
-def no_opportunity_notes(
-    rows: Sequence[Mapping[str, object]], *, limit: int = _SUSPECT_NOTE_LIMIT
-) -> tuple[str, ...]:
-    waiting = [row for row in rows if row.get("opportunities") == 0]
-    lines = [
-        f"suspect {row['fingerprint']} has had no re-check opportunity since {row['first_seen_at']}"
-        for row in waiting[:limit]
-    ]
-    if len(waiting) > limit:
-        lines.append(f"{len(waiting) - limit} more suspects have had no re-check opportunity")
-    return tuple(lines)
-
-
-# meiva:note
-# The one-shot notice 405 asked for: the round that gives this watch its first suspect says so,
-# once. It is a transition, not a state -- every round after it has a suspect already and stays
-# quiet -- so the message marks the moment the question became real instead of being a promise that
-# somebody will remember to look (405, 2026-11-08).
-def first_suspect(previous: Mapping[str, Entry], current: Mapping[str, Entry]) -> Entry | None:
-    if any(entry.state == STATE_SUSPECTED for entry in previous.values()):
-        return None
-    fresh = [entry for entry in current.values() if entry.state == STATE_SUSPECTED]
-    if not fresh:
-        return None
-    return min(fresh, key=lambda entry: entry.first_seen_at)
-
-
 # meiva:note
 # One run's effects, kept out of the round so the round stays a loop over streams: what a run does
 # to the ledger is apply the verdict, keep the newest green, and act on the cards it confirms or
@@ -571,8 +533,9 @@ def _apply_one_run(
     close_card: Callable[[int, str], None],
     notes: list[str],
     attempt_of: AttemptOf | None = None,
+    preserve_suspects: bool = False,
 ) -> tuple[dict[str, Entry], int, int, int]:
-    plan = apply_run(entries, run)
+    plan = apply_run(entries, run, preserve_suspects=preserve_suspects)
     entries = dict(plan.entries)
     if run.conclusion == "success" and run.covers_full_suite and run.head_sha:
         greens[run.workflow] = run.head_sha
@@ -580,6 +543,8 @@ def _apply_one_run(
     unnamed = sum(1 for failure in run.failures if failure.kind == FAILURE_UNNAMED)
     opened = 0
     for entry in plan.confirmed:
+        if entry.task_id is not None:
+            continue
         decision = _attempt_decision(entry, run, attempt_of, notes)
         if decision == ATTEMPT_PENDING:
             continue
@@ -666,21 +631,19 @@ def watch_once(
     compare: Compare | None = None,
     attempt_of: AttemptOf | None = None,
     notify: Callable[[str], None] | None,
+    read_case: CaseReader | None = None,
+    review_history: Callable[[str], tuple[RunFacts, ...]] | None = None,
     blind_min_streams: int = BLIND_STREAMS,
     blind_stream_rounds: int = BLIND_STREAM_ROUNDS,
 ) -> str:
     state = load_state(state_path)
-    entries = dict(state.entries)
-    watermarks = dict(state.watermarks)
-    first_seen = dict(state.first_seen)
-    greens = dict(state.greens)
+    entries, watermarks = dict(state.entries), dict(state.watermarks)
+    first_seen, greens = dict(state.first_seen), dict(state.greens)
     for workflow in (*workflows, *(stream.workflow for stream in liveness)):
         first_seen.setdefault(workflow, now.isoformat())
     notes: list[str] = []
     stale = 0
-    opened = 0
-    infra = 0
-    unnamed = 0
+    opened = infra = unnamed = 0
     # meiva:note
     # What this round could not read, and what each stream answered when it could. The first is
     # what the blindness card is made of; the second is how the round that reads a stream again
@@ -705,6 +668,7 @@ def watch_once(
                 continue
             if newest is None or (run.created_at, run.attempt) > (newest[0], newest[1] or 0):
                 newest = (run.created_at, run.attempt)
+            before_run = dict(entries)
             entries, run_opened, run_infra, run_unnamed = _apply_one_run(
                 entries,
                 run,
@@ -714,11 +678,26 @@ def watch_once(
                 close_card=close_card,
                 notes=notes,
                 attempt_of=attempt_of,
+                preserve_suspects=read_case is not None,
             )
+            if read_case is not None:
+                review_run(before_run, entries, run, read_case, open_card, close_card, notes)
             opened += run_opened
             infra += run_infra
             unnamed += run_unnamed
-        _charge_opportunities(entries, workflow, runs)
+        if read_case is None:
+            _charge_opportunities(entries, workflow, runs)
+        elif review_history is not None:
+            backfill_reviews(
+                entries,
+                workflow,
+                review_history,
+                read_case,
+                open_card,
+                close_card,
+                notes,
+                seen_through=newest[0] if newest else None,
+            )
         if newest is not None:
             watermarks[workflow] = _format_watermark(newest[0], newest[1])
     silent, silence = _silence_notes(liveness, last_start, now, first_seen)
@@ -730,7 +709,7 @@ def watch_once(
     # deliberate: it is a fresh read of a live attempt, so it can only close a card on a green that
     # landed between the two reads -- never keep one open that the gate would have suppressed.
     _recheck_open_cards(entries, attempt_of, close_card, notes)
-    rows, dropped = suspect_rows(entries)
+    rows, dropped = suspect_rows(entries, now=now)
     notes.extend(no_opportunity_notes(rows))
     newcomer = first_suspect(state.entries, entries)
     if newcomer is not None and notify is not None:

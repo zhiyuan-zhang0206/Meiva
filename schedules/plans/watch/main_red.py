@@ -19,6 +19,8 @@ import re
 from dataclasses import dataclass, replace
 from datetime import datetime, timedelta
 
+from schedules.plans.watch.junit_cases import CaseOutcome
+
 
 __all__ = [
     "FAILURE_INFRA",
@@ -230,6 +232,9 @@ class Entry:
     # only runs the watermark has not covered: recomputing from a listing would count the same run
     # again every round, while adding what the round read counts each run once.
     opportunities: int = 0
+    review_run_id: int = 0
+    review_outcome: CaseOutcome | None = None
+    review_detail: str = ""
     # meiva:note
     # Whether the run that reported this red ran the whole population. It decides what may retire
     # the card: a full-suite red is evidence about the whole tree, so any full-suite green on a
@@ -442,10 +447,14 @@ def _green_ran_the_red(run: RunFacts, entry: Entry) -> bool:
     return run.covers_full_suite and entry.covers_full_suite
 
 
-def _resolve_green(plan_entries: dict[str, Entry], run: RunFacts) -> tuple[int, ...]:
+def _resolve_green(
+    plan_entries: dict[str, Entry], run: RunFacts, *, preserve_suspects: bool
+) -> tuple[int, ...]:
     closes: list[int] = []
     for name, entry in list(plan_entries.items()):
-        if entry.state == STATE_INFRA:
+        if entry.state == STATE_INFRA or (
+            preserve_suspects and (entry.state == STATE_SUSPECTED or entry.review_run_id)
+        ):
             continue
         if run.created_at < entry.last_red_at:
             continue
@@ -457,12 +466,12 @@ def _resolve_green(plan_entries: dict[str, Entry], run: RunFacts) -> tuple[int, 
     return tuple(closes)
 
 
-def apply_run(entries: dict[str, Entry], run: RunFacts) -> Plan:
+def apply_run(entries: dict[str, Entry], run: RunFacts, *, preserve_suspects: bool = False) -> Plan:
     plan_entries = dict(entries)
     notes: list[str] = []
     confirmed: list[Entry] = []
     if run.conclusion == "success":
-        closes = _resolve_green(plan_entries, run)
+        closes = _resolve_green(plan_entries, run, preserve_suspects=preserve_suspects)
         for task_id in closes:
             notes.append(f"green run {run.head_sha} closes card {task_id}")
         return Plan(tuple(plan_entries.items()), (), closes, tuple(notes))
