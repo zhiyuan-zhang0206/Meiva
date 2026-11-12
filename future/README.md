@@ -24,6 +24,7 @@ lives with the current agent documentation; these rows track its remaining work.
 |------|------|
 | [Meiva / Meiva Code prompt architecture](../agent/docs/prompt-architecture.md) | Living doc; the core-vs-`meiva_code` responsibility split + the mechanics-vs-behavior axis. Open: malicious-code refusal stance (pending a threat-model call), a minor whitespace nudge. The `meiva_code` memory layer was **rejected**, not deferred |
 | [Compaction redesign](agent/compaction-redesign.md) | Forced / command / spontaneous compact mechanics |
+| [External agent timeline from the CLI transcript](agent/transcript-timeline-source.md) | **The cutover** — the shared vocabulary, projection and the three parsers landed (no behaviour change); left: the keyed/ordered store, the session-scoped writer, the Claude `session_store` reader and the Claude cutover (with deletion of its event projection), then Codex, then Antigravity |
 | [Antigravity on ACP with a private injection RPC](agent/antigravity-acp-hybrid.md) | **All of it** — not started, gated on five message-semantics rulings: move the adapter from print mode to `agy acp`, keep the non-public local RPC only for mid-turn injection; verify image injection, per-session processes, resume reconnect |
 | [Import an existing agent's history](agent/import-existing-agent-history.md) | Onboarding demo script — distil a new user's Claude Code / Codex history into the memory pool. Gated on going public |
 

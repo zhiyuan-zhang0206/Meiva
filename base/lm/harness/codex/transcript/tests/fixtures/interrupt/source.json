@@ -1,0 +1,18 @@
+{
+ "codex_cli_version": "0.166.0",
+ "scenario": "s3: a command interrupted, a steer accepted and interrupted at once (it never reached the record), a streaming reply interrupted; the command finishes 30 s later",
+ "recordings": [
+  "s8-read-s3.json"
+ ],
+ "note": "thread/read taken after the late command finished. No rollout was recorded for this scenario, so turn_aborted is not covered by a recording.",
+ "sanitization": [
+  "The local working directory is replaced by /work (also inside file:// URLs).",
+  "The local home directory /Users/<name>/ is replaced by /home/user/ and any remaining occurrence of the local user name by user.",
+  "Keys dropped everywhere: creator_user_id, creator_account_id, session_id, sessionId, base_instructions, rate_limits, originator, path, environments, cwd of a thread, backwardsCursor, metadata.",
+  "Encrypted reasoning blobs (encrypted_content) are replaced by the placeholder <encrypted>.",
+  "Rollout lines dropped whole: response_item/additional_tools, response_item/message with role developer, and role user messages that are the AGENTS.md or environment-context injections.",
+  "Rollout bookkeeping lines are reduced to the few fields that name them: session_meta (id, timestamp, cli_version, forked_from_id, history_mode), turn_context (turn_id, root_turn_id, model), world_state (state replaced by <dropped>), compacted (message and replacement_history replaced by <dropped>), thread_settings_applied (payload type only).",
+  "Any string longer than 400 characters is cut to its first 400 characters followed by [truncated] (only tool output and tool-call source are affected).",
+  "Every other field the parser reads (ids, clientIds, turn ids, timestamps, content, statuses, usage numbers) is unchanged."
+ ]
+}

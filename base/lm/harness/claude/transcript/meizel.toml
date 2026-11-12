@@ -1,0 +1,11 @@
+exports = []
+
+[uses]
+"__init__.py" = []
+"parse.py" = []
+"tests" = ["parse.py"]
+
+[purity]
+"." = "strict"
+"__init__.py" = "strict"
+"parse.py" = "strict"

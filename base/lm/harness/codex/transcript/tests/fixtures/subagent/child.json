@@ -1,0 +1,99 @@
+{
+ "thread": {
+  "id": "01a1cefe-574e-79f2-a985-5e66bedfa3a6",
+  "forkedFromId": null,
+  "parentThreadId": "01a1cefe-1af6-7613-bdc3-27a1a8729093",
+  "agentNickname": "Sagan",
+  "source": {
+   "subAgent": {
+    "thread_spawn": {
+     "parent_thread_id": "01a1cefe-1af6-7613-bdc3-27a1a8729093",
+     "depth": 1,
+     "agent_path": null,
+     "agent_nickname": "Sagan",
+     "agent_role": null
+    }
+   }
+  },
+  "turns": [
+   {
+    "id": "01a1cefe-5764-7421-8a79-30cff8efdc74",
+    "rootTurnId": "01a1cefe-1b10-7702-84c6-59faba75cdf8",
+    "items": [
+     {
+      "type": "userMessage",
+      "id": "01a1cefe-5f80-7f72-a69b-0f5b452eb8c5",
+      "clientId": null,
+      "content": [
+       {
+        "type": "text",
+        "text": "Say ALPHA, then run the shell command `sleep 12; echo hi`, then say BETA.",
+        "text_elements": []
+       }
+      ],
+      "startedAtMs": 1794474139521,
+      "completedAtMs": 1794474139521
+     },
+     {
+      "type": "reasoning",
+      "id": "rs_0c3ef838a0ce932e016af5809d373487d0bad821c0328dd375",
+      "summary": [],
+      "content": [],
+      "startedAtMs": 1794474141202,
+      "completedAtMs": 1794474141202
+     },
+     {
+      "type": "agentMessage",
+      "id": "msg_0c3ef838a0ce932e016af5809d5bf887d0a82c208640b34124",
+      "text": "ALPHA",
+      "phase": "commentary",
+      "memoryCitation": null,
+      "delivery": null,
+      "questions": null,
+      "startedAtMs": 1794474141364,
+      "completedAtMs": 1794474141546
+     },
+     {
+      "type": "commandExecution",
+      "id": "exec-899560f8-bd4d-455d-b3a9-6f49902f3a08",
+      "pluginId": null,
+      "scriptPath": null,
+      "command": "/bin/zsh -lc 'sleep 12; echo hi'",
+      "cwd": "/work",
+      "processId": "47565",
+      "source": "unifiedExecStartup",
+      "status": "completed",
+      "commandActions": [
+       {
+        "type": "unknown",
+        "command": "sleep 12; echo hi"
+       }
+      ],
+      "aggregatedOutput": "hi\n",
+      "exitCode": 0,
+      "durationMs": 11898,
+      "startedAtMs": 1794474142341,
+      "completedAtMs": 1794474154239
+     },
+     {
+      "type": "agentMessage",
+      "id": "msg_0c3ef838a0ce932e016af580aba7a487d0a95ad6195401da82",
+      "text": "BETA",
+      "phase": "final_answer",
+      "memoryCitation": null,
+      "delivery": null,
+      "questions": null,
+      "startedAtMs": 1794474155629,
+      "completedAtMs": 1794474155703
+     }
+    ],
+    "itemsView": "full",
+    "status": "completed",
+    "error": null,
+    "startedAt": 1794474137,
+    "completedAt": 1794474155,
+    "durationMs": 18511
+   }
+  ]
+ }
+}

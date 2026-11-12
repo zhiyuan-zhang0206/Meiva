@@ -1,0 +1,5 @@
+exports = ["support.py"]
+
+[uses]
+"support.py" = []
+"test_golden.py" = ["support.py"]

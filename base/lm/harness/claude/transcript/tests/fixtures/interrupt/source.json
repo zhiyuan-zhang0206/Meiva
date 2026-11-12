@@ -1,0 +1,43 @@
+{
+  "cli": "Claude Code 2.1.322",
+  "sdk": "claude-agent-sdk 0.2.168",
+  "scenario": "interrupt",
+  "recording": "s4_interrupt.transcripts/01b8bcd9-2034-4beb-8e3e-e535ce383b08.jsonl",
+  "sanitization": [
+    "dropped row types session-owner, api-request, api-request-shape, api-request-blob, cost-state, file-history-snapshot, atis-latch, tools-used",
+    "kept attachment rows only of type queued_command, date, total_tokens_reminder",
+    "cleared thinking signatures; replaced inline base64 image data with a short placeholder",
+    "replaced /private/tmp/... paths with /work/path, cwd with /work/<scenario>, the local user name with user; dropped gitBranch, slug and turnAttributionKey",
+    "every field the parser reads is unchanged"
+  ],
+  "subagent_records": [],
+  "result_messages": [
+    {
+      "subtype": "error_during_execution",
+      "stop_reason": "tool_use",
+      "input_tokens": 2,
+      "cache_creation_input_tokens": 16113,
+      "cache_read_input_tokens": 11609,
+      "output_tokens": 268,
+      "num_turns": 3
+    },
+    {
+      "subtype": "error_during_execution",
+      "stop_reason": null,
+      "input_tokens": 0,
+      "cache_creation_input_tokens": 0,
+      "cache_read_input_tokens": 0,
+      "output_tokens": 0,
+      "num_turns": 2
+    },
+    {
+      "subtype": "success",
+      "stop_reason": "end_turn",
+      "input_tokens": 2,
+      "cache_creation_input_tokens": 8407,
+      "cache_read_input_tokens": 32334,
+      "output_tokens": 143,
+      "num_turns": 1
+    }
+  ]
+}

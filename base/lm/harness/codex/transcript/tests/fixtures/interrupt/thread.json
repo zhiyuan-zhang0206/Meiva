@@ -1,0 +1,112 @@
+{
+  "thread": {
+    "id": "01a1cefa-6407-7ca1-ab8d-c19c295dd98c",
+    "forkedFromId": null,
+    "parentThreadId": null,
+    "agentNickname": null,
+    "source": "vscode",
+    "turns": [
+      {
+        "id": "01a1cefa-641e-7311-b99e-8c19287d1fa1",
+        "rootTurnId": "01a1cefa-641e-7311-b99e-8c19287d1fa1",
+        "items": [
+          {
+            "type": "userMessage",
+            "id": "01a1cefa-6faf-7e02-96fb-5d820efcdc00",
+            "clientId": "cid-s3-a",
+            "content": [
+              {
+                "type": "text",
+                "text": "Run the shell command `sleep 30; echo slept` and then reply with one short sentence.",
+                "text_elements": []
+              }
+            ],
+            "startedAtMs": 1794473881520,
+            "completedAtMs": 1794473881520
+          },
+          {
+            "type": "reasoning",
+            "id": "rs_0900ac83c89725b6016af57f9b109c87d09245bcafb8ebc282",
+            "summary": [],
+            "content": [],
+            "startedAtMs": 1794473883013,
+            "completedAtMs": 1794473883014
+          },
+          {
+            "type": "agentMessage",
+            "id": "msg_0900ac83c89725b6016af57f9b30e887d09b5905a9d269ff0f",
+            "text": "\u6b63\u5728\u8fd0\u884c\u6307\u5b9a\u547d\u4ee4\u3002",
+            "phase": "commentary",
+            "memoryCitation": null,
+            "delivery": null,
+            "questions": null,
+            "startedAtMs": 1794473883139,
+            "completedAtMs": 1794473883472
+          },
+          {
+            "type": "commandExecution",
+            "id": "exec-0b106fcd-871d-47a6-98d7-9f43278b35b5",
+            "pluginId": null,
+            "scriptPath": null,
+            "command": "/bin/zsh -lc 'sleep 30; echo slept'",
+            "cwd": "/work",
+            "processId": "74563",
+            "source": "unifiedExecStartup",
+            "status": "completed",
+            "commandActions": [
+              {
+                "type": "unknown",
+                "command": "sleep 30; echo slept"
+              }
+            ],
+            "aggregatedOutput": "slept\n",
+            "exitCode": 0,
+            "durationMs": 29889,
+            "startedAtMs": 1794473885335,
+            "completedAtMs": 1794473915225
+          }
+        ],
+        "itemsView": "full",
+        "status": "interrupted",
+        "error": null,
+        "startedAt": 1794473878,
+        "completedAt": 1794473885,
+        "durationMs": 7098
+      },
+      {
+        "id": "01a1cefa-87b2-7b52-91ed-5653b7e03aae",
+        "rootTurnId": "01a1cefa-87b2-7b52-91ed-5653b7e03aae",
+        "items": [
+          {
+            "type": "userMessage",
+            "id": "01a1cefa-87de-7a11-b987-9156be2c74d2",
+            "clientId": "cid-s3-b",
+            "content": [
+              {
+                "type": "text",
+                "text": "Write the numbers 1 to 400, one per line, with a short fun fact about each. No tools.",
+                "text_elements": []
+              }
+            ],
+            "startedAtMs": 1794473887710,
+            "completedAtMs": 1794473887710
+          },
+          {
+            "type": "reasoning",
+            "id": "rs_0900ac83c89725b6016af57fa1728c87d0bebdafdb29851188",
+            "summary": [],
+            "content": [],
+            "startedAtMs": 1794473889346,
+            "completedAtMs": 1794473889348
+          }
+        ],
+        "itemsView": "full",
+        "status": "interrupted",
+        "error": null,
+        "startedAt": 1794473887,
+        "completedAt": 1794473890,
+        "durationMs": 2504
+      }
+    ]
+  }
+}

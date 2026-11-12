@@ -1,0 +1,80 @@
+{
+ "data": [
+  {
+   "turnId": "01a1cefd-5933-7f40-8255-8ba5b4a29838",
+   "item": {
+    "type": "userMessage",
+    "id": "01a1cefd-6251-75b3-8f9f-f1461acc50ac",
+    "clientId": "cid-s4-a",
+    "content": [
+     {
+      "type": "text",
+      "text": "Start the shell command `sleep 14; echo BGLATE` as a background job: call exec_command with a yield_time_ms of 500 so the call returns right away, do NOT wait for it, do NOT poll, do NOT call wait. Then immediately reply with the single word started.",
+      "text_elements": []
+     }
+    ],
+    "startedAtMs": 1794474074706,
+    "completedAtMs": 1794474074706
+   },
+   "startedAtMs": 1794474074706,
+   "completedAtMs": 1794474074706
+  },
+  {
+   "turnId": "01a1cefd-5933-7f40-8255-8ba5b4a29838",
+   "item": {
+    "type": "reasoning",
+    "id": "rs_0195e1454b557cb1016af5805c595487d0b1687add35146fa5",
+    "summary": [],
+    "content": [],
+    "startedAtMs": 1794474076241,
+    "completedAtMs": 1794474076243
+   },
+   "startedAtMs": 1794474076241,
+   "completedAtMs": 1794474076243
+  },
+  {
+   "turnId": "01a1cefd-5933-7f40-8255-8ba5b4a29838",
+   "item": {
+    "type": "agentMessage",
+    "id": "msg_0195e1454b557cb1016af5805eb40887d0a90256f773524445",
+    "text": "started",
+    "phase": "final_answer",
+    "memoryCitation": null,
+    "delivery": null,
+    "questions": null,
+    "startedAtMs": 1794474078600,
+    "completedAtMs": 1794474078650
+   },
+   "startedAtMs": 1794474078600,
+   "completedAtMs": 1794474078650
+  },
+  {
+   "turnId": "01a1cefd-5933-7f40-8255-8ba5b4a29838",
+   "item": {
+    "type": "commandExecution",
+    "id": "exec-832b53b0-ab39-4b1a-8859-4b1fa1c515f2",
+    "pluginId": null,
+    "scriptPath": null,
+    "command": "/bin/zsh -lc 'sleep 14; echo BGLATE'",
+    "cwd": "/work",
+    "processId": "32364",
+    "source": "unifiedExecStartup",
+    "status": "completed",
+    "commandActions": [
+     {
+      "type": "unknown",
+      "command": "sleep 14; echo BGLATE"
+     }
+    ],
+    "aggregatedOutput": "BGLATE\n",
+    "exitCode": 0,
+    "durationMs": 13890,
+    "startedAtMs": 1794474077207,
+    "completedAtMs": 1794474091097
+   },
+   "startedAtMs": 1794474077207,
+   "completedAtMs": 1794474091097
+  }
+ ],
+ "nextCursor": null
+}

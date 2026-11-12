@@ -1,0 +1,100 @@
+{
+  "thread": {
+    "id": "01a1cef9-b235-7ac0-88c7-b67ca3f7641a",
+    "forkedFromId": null,
+    "parentThreadId": null,
+    "agentNickname": null,
+    "source": "vscode",
+    "turns": [
+      {
+        "id": "01a1cef9-b24f-7d73-961b-a77a83fbadc5",
+        "rootTurnId": "01a1cef9-b24f-7d73-961b-a77a83fbadc5",
+        "items": [
+          {
+            "type": "userMessage",
+            "id": "01a1cef9-bee9-75d0-b7bb-fc6b4ce1dea3",
+            "clientId": "cid-s2-a",
+            "content": [
+              {
+                "type": "text",
+                "text": "Run the shell command `sleep 20; echo slept` and then reply with one short sentence.",
+                "text_elements": []
+              }
+            ],
+            "startedAtMs": 1794473836266,
+            "completedAtMs": 1794473836266
+          },
+          {
+            "type": "reasoning",
+            "id": "rs_0d6e9366dadb000c016af57f6de77887d09f6e7e4b4faf70ca",
+            "summary": [],
+            "content": [],
+            "startedAtMs": 1794473837805,
+            "completedAtMs": 1794473837807
+          },
+          {
+            "type": "userMessage",
+            "id": "01a1cef9-cdb4-73c0-9f05-395673dbd470",
+            "clientId": "cid-s2-steer",
+            "content": [
+              {
+                "type": "text",
+                "text": "Also, in your final sentence, include the word STEERED.",
+                "text_elements": []
+              }
+            ],
+            "startedAtMs": 1794473840053,
+            "completedAtMs": 1794473840053
+          },
+          {
+            "type": "reasoning",
+            "id": "rs_0d6e9366dadb000c016af57f7137e887d0b1ed39dca42b7951",
+            "summary": [],
+            "content": [],
+            "startedAtMs": 1794473841123,
+            "completedAtMs": 1794473841124
+          },
+          {
+            "type": "commandExecution",
+            "id": "exec-aeab7c02-5980-467b-af17-d3f9424428a4",
+            "pluginId": null,
+            "scriptPath": null,
+            "command": "/bin/zsh -lc 'sleep 20; echo slept'",
+            "cwd": "/work",
+            "processId": "28768",
+            "source": "unifiedExecStartup",
+            "status": "completed",
+            "commandActions": [
+              {
+                "type": "unknown",
+                "command": "sleep 20; echo slept"
+              }
+            ],
+            "aggregatedOutput": "slept\n",
+            "exitCode": 0,
+            "durationMs": 19889,
+            "startedAtMs": 1794473838872,
+            "completedAtMs": 1794473858762
+          },
+          {
+            "type": "agentMessage",
+            "id": "msg_0d6e9366dadb000c016af57f83c51487d0a488a8e85a80612d",
+            "text": "The command completed successfully\u2014STEERED.",
+            "phase": "final_answer",
+            "memoryCitation": null,
+            "delivery": null,
+            "questions": null,
+            "startedAtMs": 1794473859700,
+            "completedAtMs": 1794473859915
+          }
+        ],
+        "itemsView": "full",
+        "status": "completed",
+        "error": null,
+        "startedAt": 1794473833,
+        "completedAt": 1794473859,
+        "durationMs": 26913
+      }
+    ]
+  }
+}

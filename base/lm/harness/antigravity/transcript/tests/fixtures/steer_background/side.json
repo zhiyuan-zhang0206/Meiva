@@ -1,0 +1,8 @@
+{
+  "client_message_ids": {
+    "10": "tx-steer-1"
+  },
+  "interrupting_steps": [
+    10
+  ]
+}

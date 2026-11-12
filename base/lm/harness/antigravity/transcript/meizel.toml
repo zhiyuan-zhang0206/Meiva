@@ -1,0 +1,19 @@
+exports = []
+
+[uses]
+"__init__.py" = []
+"errors.py" = []
+"fields.py" = ["errors.py"]
+"parse.py" = ["errors.py", "fields.py", "system_message.py", "text.py"]
+"system_message.py" = ["errors.py"]
+"text.py" = ["errors.py"]
+"tests" = ["parse.py"]
+
+[purity]
+"." = "strict"
+"__init__.py" = "strict"
+"errors.py" = "strict"
+"fields.py" = "strict"
+"parse.py" = "strict"
+"system_message.py" = "strict"
+"text.py" = "strict"

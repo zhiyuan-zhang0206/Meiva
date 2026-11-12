@@ -1,0 +1,23 @@
+exports = []
+
+[uses]
+"__init__.py" = []
+"clock.py" = ["errors.py"]
+"errors.py" = []
+"items.py" = ["clock.py", "errors.py", "scalars.py", "shapes.py"]
+"parse.py" = ["clock.py", "errors.py", "items.py", "rollout.py", "scalars.py", "shapes.py"]
+"rollout.py" = ["clock.py", "errors.py", "items.py", "scalars.py", "shapes.py"]
+"scalars.py" = ["errors.py", "shapes.py"]
+"shapes.py" = ["errors.py"]
+"tests" = ["parse.py"]
+
+[purity]
+"." = "strict"
+"__init__.py" = "strict"
+"clock.py" = "strict"
+"errors.py" = "strict"
+"items.py" = "strict"
+"parse.py" = "strict"
+"rollout.py" = "strict"
+"scalars.py" = "strict"
+"shapes.py" = "strict"
