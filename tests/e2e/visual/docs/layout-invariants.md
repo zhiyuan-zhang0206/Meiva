@@ -10,7 +10,9 @@ cannot open the real cookie-gated SSE stream and `page.route` cannot stream to a
 EventSource, so an injected fake carries the snapshot → delta → reconnect
 sequence; without a growing stream every invariant would false-pass.
 The shared question stub answers the agent-scoped open-questions request and
-filters by `agent_id`. The bottom-gap case requires that agent's queue to be
+filters the returned array by `agent_id`. A fixture contract case checks empty
+and nonempty agent feeds and renders a current-agent question as a positive
+control. The bottom-gap case requires that agent's queue to be
 empty: a failed request renders an error strip above the composer and changes
 the state whose geometry is measured.
 The shared agent stub explicitly owns the Meiva harness, matching the required

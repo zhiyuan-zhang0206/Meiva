@@ -514,6 +514,50 @@ def test_bottom_rules_are_independent(
         ctx.close()
 
 
+def test_question_fixture_preserves_the_open_feed_contract(
+    playwright_browser: Browser, frontend_target: str
+) -> None:
+    ctx = playwright_browser.new_context(viewport={"width": 390, "height": 844})
+    page = open_page(ctx, frontend_target, "/", stub_api=True)
+    wait_layout_settled(page)
+    try:
+        for agent_id, expected_ids in ((1, []), (2, [1])):
+            response = page.evaluate(
+                "async id => (await fetch(`/api/questions/open?agent_id=${id}`)).json()",
+                agent_id,
+            )
+            assert isinstance(response, list), "the open-questions wire response must be an array"
+            assert [
+                question["id"] for question in cast("list[dict[str, object]]", response)
+            ] == expected_ids
+        expect(page.locator('[data-testid="pending-questions"]')).to_have_count(0)
+        page.route(
+            "**/api/questions/open?agent_id=1",
+            lambda route: route.fulfill(json=_question_for_current_agent()),
+        )
+        page.reload()
+        expect(page.locator('[data-testid="pending-questions"]')).to_contain_text(
+            "Current agent needs a decision"
+        )
+    finally:
+        ctx.close()
+
+
+def _question_for_current_agent() -> list[dict[str, object]]:
+    return [
+        {
+            "id": 2,
+            "agent_id": 1,
+            "agent_label": "layout-test",
+            "resolved_at": None,
+            "question": {"type": "text"},
+            "title": "Current agent needs a decision",
+            "content": "Pick A or B.",
+            "created_at": "2026-08-07T00:00:00Z",
+        }
+    ]
+
+
 @pytest.mark.parametrize("width,height", [(390, 844), (768, 900), (1440, 900)])
 def test_bottom_rule_gap_is_halved(
     width: int, height: int, playwright_browser: Browser, frontend_target: str
