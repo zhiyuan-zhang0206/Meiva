@@ -9,12 +9,12 @@ from psycopg_pool import AsyncConnectionPool
 
 from agent.harness_timeline.plan import ReplyPolicy, WritePlan, plan_write
 from agent.harness_timeline.rebuild import REBUILD_MAX_ROWS, rebuild_record
+from agent.harness_timeline.reply_progress import ainit_reply_progress
 from agent.harness_timeline.store import (
     PlannedTimelineItem,
     StoredPosition,
     aappend_planned_timeline_items,
     aappend_transcript_rows,
-    ainit_reply_progress,
     aload_transcript_positions,
     aset_transcript_position,
     aset_transcript_positions,

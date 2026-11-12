@@ -10,7 +10,12 @@ from psycopg_pool import AsyncConnectionPool
 from agent.graph.claim.harness_activity import resolve_pricing_model
 from agent.graph.claim.harness_inbox import Emits, publish_items
 from agent.graph.hooks.user_delivery import capture_items
-from agent.harness_timeline.store import aconfirm_replies, aload_unconfirmed_replies
+from agent.harness_timeline.reply_progress import (
+    OwedReply,
+    aconfirm_replies,
+    aload_publication_mode,
+    aload_unconfirmed_replies,
+)
 from agent.harness_timeline.writer import Committed
 from base.agents.context import MeivaContext
 from base.agents.history.timeline_item import TimelineItem
@@ -42,10 +47,19 @@ from base.log import logger
 # `harness:<item id>` and is unique by that key. A process that dies between a commit and its effects loses the
 # spend of that read (a log, not a table: nothing can tell what was logged), but not the replies: the same pass runs
 # after every commit and when the writer starts (`recover`), and reads exactly the part of the timeline between the
-# progress and its end, however long the timeline is. Replies are handed over one at a time: one that conflicts with
-# a delivery already recorded (the user changed the delivery mode) is dropped with `harness_timeline_reply_dropped`
-# and does not hold the ones after it; any other failure leaves it and the ones after it for the next pass. Every
-# pass, the recovery included, runs under one lock with the pricing, so two of them never interleave.
+# progress and its end, however long the timeline is. A reply is therefore tried at least once after its commit and
+# the publication key keeps the record to one (an attempt that finds it there publishes nothing again, but may send
+# one more `agent_updated` to the live view). Replies are handed over one at a time: one that conflicts with a delivery
+# already recorded (the user changed the delivery mode), one whose stored row does not validate and one that has failed
+# five times in a row are dropped with `harness_timeline_reply_dropped` and do not hold the ones after it; any other
+# failure leaves it and the ones after it owed, and `retry_while_owed` passes again after an interval of the injected
+# clock (1 second, doubled up to 60) without waiting for a commit, and not at all while nothing is owed. Every pass,
+# the recovery included, runs under one lock with the pricing, so two of them never interleave.
+#
+# The delivery mode a reply is captured under is the one of the context the host bound at the latest hosted turn (as the
+# writer's reply policy is the runtime's): a reply the CLI writes while the agent is idle, after the person changed the
+# mode and before the next turn, is delivered under the mode of the turn before. The next turn's binding closes the
+# window, and the writer and the capture agree with each other throughout.
 #
 # A message the CLI cut short (an interrupt) has only a placeholder count in the record, so it is not priced: the
 # accounting misses what such a message cost, which is a known gap, and `harness_timeline_usage_unreliable` counts
@@ -70,10 +84,14 @@ MODELS_LIMIT = 256
 UNMATCHED_LOG_FIRST = 20
 UNMATCHED_LOG_EVERY = 100
 FAILURE_LOG_SECONDS = 60.0
+REPLY_ATTEMPTS = 5
+RETRY_FIRST_SECONDS = 1.0
+RETRY_CAP_SECONDS = 60.0
+REPLY_SOURCE = "harness"
 
 
 async def capture_replies(ctx: MeivaContext, agent_id: int, items: list[TimelineItem]) -> None:
-    await capture_items(ctx, agent_id, items, source_key="harness")
+    await capture_items(ctx, agent_id, items, source_key=REPLY_SOURCE)
 
 
 class TimelineEffects:
@@ -101,9 +119,14 @@ class TimelineEffects:
         self._models: RecentSet[str] = RecentSet(MODELS_LIMIT)
         self._unreliable: RecentSet[tuple[str, str]] = RecentSet(LOGGED_LIMIT)
         self._failures: dict[str, _FailureLog] = {}
+        self._failing: tuple[int, int] | None = None
+        self._retry = asyncio.Event()
+        self._waiting_for_ctx = False
 
     def bind(self, ctx: MeivaContext) -> None:
         self._ctx = ctx
+        if self._waiting_for_ctx:
+            self._retry.set()
 
     async def recover(self) -> None:
         await self.settle_owed()
@@ -119,36 +142,95 @@ class TimelineEffects:
         async with self._settle:
             await self._isolated("capture", self._capture_owed)
             await self._isolated("usage", self._price_owed)
+            if self._failing is not None or self._owed_usage:
+                self._retry.set()
+
+    # meiva:note
+    # What is still owed is tried again without waiting for another commit: while a pass leaves a reply (or a spend)
+    # undone it sets `_retry`, and this loop, which the timeline runs beside its writer, then waits an interval of the
+    # injected clock (`RETRY_FIRST_SECONDS`, doubled after each pass that fails again, at most `RETRY_CAP_SECONDS`) and
+    # passes again. With nothing owed `_retry` is not set, so the loop waits on it and nothing reads the database.
+    async def retry_while_owed(self) -> None:
+        delay = RETRY_FIRST_SECONDS
+        while True:
+            await self._retry.wait()
+            await self._clock.asleep(delay)
+            self._retry.clear()
+            await self.settle_owed()
+            delay = (
+                min(delay * 2, RETRY_CAP_SECONDS) if self._retry.is_set() else RETRY_FIRST_SECONDS
+            )
 
     async def _publish(self, written: list[TimelineItem]) -> None:
         publish_items(self._publisher, self._agent_id, written)
 
+    # meiva:note
+    # Replies are handed over one at a time, in order, and the progress is raised past each one handled. A reply that
+    # conflicts with a delivery already recorded, one whose stored row does not validate (no retry can change either) and
+    # one that has failed `REPLY_ATTEMPTS` times in a row is dropped with `harness_timeline_reply_dropped`, which says why
+    # and never carries the text: the reply stays on the timeline, only this delivery is lost, and the ones after it are not
+    # held for ever. Any other failure leaves the reply and the ones after it owed for the next pass.
     async def _capture_owed(self) -> None:
         ctx = self._ctx
+        self._waiting_for_ctx = ctx is None
         if ctx is None:
             return
         while True:
             async with self._pool.connection() as conn:
                 owed = await aload_unconfirmed_replies(conn, self._agent_id, limit=OWED_LIMIT)
             if owed is None:
+                self._failing = None
                 return
-            for seq, item in owed.replies:
+            for reply in owed.replies:
                 try:
-                    await self._capture(ctx, self._agent_id, [item])
-                except DeliveryConflictError as error:
-                    logger.warning(
-                        "a reply conflicts with a delivery already recorded and is dropped",
-                        event="harness_timeline_reply_dropped",
-                        agent_id=self._agent_id,
-                        item_id=item.item_id,
-                        error=str(error),
-                    )
+                    await self._hand_over(ctx, reply)
                 except Exception:
-                    await self._confirm(seq - 1)
+                    await self._confirm(reply.seq - 1)
                     raise
+            self._failing = None
             await self._confirm(owed.reach)
             if not owed.full:
                 return
+
+    async def _hand_over(self, ctx: MeivaContext, reply: OwedReply) -> None:
+        item = reply.item
+        if item is None:
+            await self._drop(reply, "invalid_item", reply.invalid or "", None)
+            return
+        try:
+            await self._capture(ctx, self._agent_id, [item])
+        except DeliveryConflictError as error:
+            await self._drop(
+                reply, "conflict", type(error).__name__, await self._recorded_mode(item)
+            )
+        except Exception as error:
+            failed = self._failing[1] + 1 if self._failing and self._failing[0] == reply.seq else 1
+            if failed >= REPLY_ATTEMPTS:
+                await self._drop(reply, "delivery_failed", type(error).__name__, None)
+                return
+            self._failing = (reply.seq, failed)
+            raise
+
+    async def _recorded_mode(self, item: TimelineItem) -> str | None:
+        async with self._pool.connection() as conn:
+            return await aload_publication_mode(
+                conn, self._agent_id, f"{REPLY_SOURCE}:{item.item_id}"
+            )
+
+    async def _drop(
+        self, reply: OwedReply, reason: str, error_type: str, recorded_mode: str | None
+    ) -> None:
+        self._failing = None
+        logger.warning(
+            "a reply is not delivered and is dropped; it stays on the timeline",
+            event="harness_timeline_reply_dropped",
+            agent_id=self._agent_id,
+            seq=reply.seq,
+            reason=reason,
+            error_type=error_type,
+            publication_key=f"{REPLY_SOURCE}:h{reply.seq}.0",
+            recorded_mode=recorded_mode,
+        )
 
     async def _confirm(self, seq: int) -> None:
         async with self._pool.connection() as conn:

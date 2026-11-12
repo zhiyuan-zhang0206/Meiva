@@ -160,6 +160,7 @@ class TranscriptTimeline:
     async def _run_in_own_group(self) -> None:
         async with asyncio.TaskGroup() as group:
             await self._publisher.start(group)
+            retries = group.create_task(self.effects.retry_while_owed())
             try:
                 await self.effects.recover()
                 await self.writer.run()
@@ -170,6 +171,7 @@ class TranscriptTimeline:
                     agent_id=self._agent_id,
                 )
             finally:
+                _ = retries.cancel()
                 await self._publisher.aclose()
 
     # meiva:note

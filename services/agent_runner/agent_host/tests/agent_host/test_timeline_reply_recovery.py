@@ -12,6 +12,8 @@
 from __future__ import annotations
 
 import asyncio
+from collections import Counter
+from collections.abc import Callable
 from itertools import count
 from typing import cast
 from unittest.mock import Mock
@@ -19,18 +21,27 @@ from unittest.mock import Mock
 import psycopg
 from psycopg_pool import AsyncConnectionPool
 
+from agent.graph.claim.tests.harness_support import FakeEngine, runtime
 from agent.graph.tests.test_llm_helpers import make_runtime
 from agent.harness_timeline.plan import WritePlan
-from agent.harness_timeline.store import ainit_reply_progress, aload_unconfirmed_replies
+from agent.harness_timeline.reply_progress import (
+    ainit_reply_progress,
+    aload_unconfirmed_replies,
+)
 from agent.harness_timeline.writer import Committed
 from base.agents.context import HostedTurnResources, MeivaContext
 from base.agents.history.harness_messages import aappend_keyed_timeline_items, copy_harness_timeline
 from base.agents.history.timeline_item import TimelineItem
-from base.agents.to_user.delivery.store import DeliveryConflictError
-from base.clock.tests.fakes import system_clock
+from base.agents.to_user.delivery.store import DeliveryConflictError, publish
+from base.api_contracts.user_delivery import PublishMessage, UserDeliveryMode
+from base.clock import Clock
+from base.clock.tests.fakes import clock_over, system_clock
+from base.clock.tests.manual_timers import ManualTimers
 from base.db.code_version_gate import ProcessDbGate
 from base.events.live.tests.live_capture import LiveEvents
 from base.events.live.tests.live_capture import live_events as live_events
+from base.lm.harness import Usage
+from base.lm.harness.session.transcript.drafts import MessageUsage
 from base.log.tests.log_records import LogRecords
 from base.log.tests.log_records import loguru_records as loguru_records
 from meiva.tests.fixtures.pin_agent import hosted_resources as hosted_resources
@@ -47,8 +58,11 @@ class Delivery:
         self.handed: list[str] = []
         self.conflicts: set[str] = set()
         self.fail = False
+        self.fail_times = 0
+        self.fail_on: set[str] = set()
         self.pause = 0.0
         self.attempts = 0
+        self.attempts_on: Counter[str] = Counter()
 
     async def capture(self, ctx: object, agent_id: int, items: list[TimelineItem]) -> None:
         del ctx, agent_id
@@ -57,15 +71,23 @@ class Delivery:
             await asyncio.sleep(self.pause)
         if self.fail:
             raise OSError("the delivery store is down")
+        if self.fail_times:
+            self.fail_times -= 1
+            raise OSError("the delivery store blinked")
         for item in items:
+            self.attempts_on[item.payload] += 1
+            if item.payload in self.fail_on:
+                raise OSError("this reply cannot be delivered")
             if item.payload in self.conflicts:
                 raise DeliveryConflictError(item.payload)
             self.handed.append(item.payload)
 
 
-def _effects(pool: AsyncConnectionPool, agent_id: int, delivery: Delivery) -> TimelineEffects:
+def _effects(
+    pool: AsyncConnectionPool, agent_id: int, delivery: Delivery, clock: Clock | None = None
+) -> TimelineEffects:
     effects = TimelineEffects(
-        agent_id, Published(), pool=pool, clock=system_clock(), capture=delivery.capture
+        agent_id, Published(), pool=pool, clock=clock or system_clock(), capture=delivery.capture
     )
     effects.bind(cast("MeivaContext", Mock()))
     return effects
@@ -213,8 +235,9 @@ async def test_a_reply_that_conflicts_is_dropped_with_an_event_and_holds_none_of
     await effects.after_commit(Committed(WritePlan(), written))
     assert delivery.handed == ["one", "three"]
     assert [
-        r["extra"]["item_id"] for r in loguru_records.events("harness_timeline_reply_dropped")
-    ] == [written[1].item_id]
+        r["extra"]["publication_key"]
+        for r in loguru_records.events("harness_timeline_reply_dropped")
+    ] == [f"harness:{written[1].item_id}"]
     assert not loguru_records.events("harness_timeline_effect_failed")
     later = Delivery()
     await _effects(aops_pool, agent_id, later).recover()
@@ -291,3 +314,165 @@ async def test_a_backlog_longer_than_one_read_is_handed_over_in_pages(
     await effects.recover()
     assert delivery.handed == ["seed", *texts]
     assert await _progress(aops_pool, agent_id) == OWED_LIMIT + 5
+
+
+async def _progress_reaches(pool: AsyncConnectionPool, agent_id: int, seq: int) -> None:
+    for _ in range(1_000):
+        if await _progress(pool, agent_id) == seq:
+            return
+        await asyncio.sleep(0.01)
+    raise AssertionError("the progress did not reach the seq")
+
+
+async def _until(done: Callable[[], bool], limit: int = 2_000) -> None:
+    for _ in range(limit):
+        if done():
+            return
+        await asyncio.sleep(0)
+    raise AssertionError("what the retry loop was to do did not happen")
+
+
+async def test_a_reply_whose_delivery_blinks_is_tried_again_without_another_commit(
+    aops_pool: AsyncConnectionPool,
+) -> None:
+    agent_id = await _agent(aops_pool)
+    timers = ManualTimers()
+    delivery = Delivery()
+    delivery.fail_times = 2
+    effects = _effects(aops_pool, agent_id, delivery, clock_over(timers))
+    retry = asyncio.create_task(effects.retry_while_owed())
+    try:
+        written = await _commit(aops_pool, agent_id, "the final answer")
+        await effects.after_commit(Committed(WritePlan(), written))
+        assert delivery.handed == [], "the first attempt failed"
+        await _until(lambda: delivery.handed == ["the final answer"])
+        await _progress_reaches(aops_pool, agent_id, 0)
+    finally:
+        _ = retry.cancel()
+    assert timers.sleeps[:2] == [1.0, 2.0], "the interval doubles after a pass that fails again"
+
+
+async def test_a_reply_that_keeps_failing_is_dropped_after_five_attempts_and_the_next_ones_go_out_in_order(
+    aops_pool: AsyncConnectionPool, loguru_records: LogRecords
+) -> None:
+    agent_id = await _agent(aops_pool)
+    timers = ManualTimers()
+    delivery = Delivery()
+    delivery.fail_on = {"cursed"}
+    effects = _effects(aops_pool, agent_id, delivery, clock_over(timers))
+    retry = asyncio.create_task(effects.retry_while_owed())
+    try:
+        written = await _commit(aops_pool, agent_id, "first", "cursed", "third", "fourth")
+        await effects.after_commit(Committed(WritePlan(), written))
+        await _until(lambda: delivery.handed == ["first", "third", "fourth"])
+        await _progress_reaches(aops_pool, agent_id, 3)
+    finally:
+        _ = retry.cancel()
+    assert delivery.attempts_on["cursed"] == 5
+    assert timers.sleeps == [1.0, 2.0, 4.0, 8.0]
+    dropped = [r["extra"] for r in loguru_records.events("harness_timeline_reply_dropped")]
+    assert [(d["reason"], d["error_type"], d["seq"]) for d in dropped] == [
+        ("delivery_failed", "OSError", 1)
+    ]
+    assert all("cursed" not in str(d) for d in dropped), "the event carries no text"
+
+
+async def test_a_stored_row_that_does_not_validate_is_dropped_at_once_and_holds_nothing(
+    aops_pool: AsyncConnectionPool, loguru_records: LogRecords
+) -> None:
+    agent_id = await _agent(aops_pool)
+    delivery = Delivery()
+    effects = _effects(aops_pool, agent_id, delivery)
+    _ = await _commit(aops_pool, agent_id, "before")
+    async with aops_pool.connection() as conn:
+        await conn.execute(
+            "INSERT INTO agent_harness_messages (agent_id, seq, harness, item, source_key) "
+            "VALUES (%s, 1, 'claude_code', '{\"kind\": \"agent_chat\"}'::jsonb, 'broken')",
+            (agent_id,),
+        )
+    written = await _commit(aops_pool, agent_id, "after")
+    await effects.after_commit(Committed(WritePlan(), written))
+    assert delivery.handed == ["before", "after"]
+    dropped = [r["extra"] for r in loguru_records.events("harness_timeline_reply_dropped")]
+    assert [(d["reason"], d["seq"], d["error_type"]) for d in dropped] == [
+        ("invalid_item", 1, "ValidationError")
+    ]
+
+
+async def test_nothing_owed_means_no_timer_and_no_read(aops_pool: AsyncConnectionPool) -> None:
+    agent_id = await _agent(aops_pool)
+    timers = ManualTimers()
+    delivery = Delivery()
+    effects = _effects(aops_pool, agent_id, delivery, clock_over(timers))
+    retry = asyncio.create_task(effects.retry_while_owed())
+    try:
+        written = await _commit(aops_pool, agent_id, "done")
+        await effects.after_commit(Committed(WritePlan(), written))
+        for _ in range(200):
+            await asyncio.sleep(0)
+    finally:
+        _ = retry.cancel()
+    assert timers.sleeps == [] and delivery.attempts == 1
+
+
+async def test_a_conflict_is_reported_with_the_key_and_the_recorded_mode_and_not_the_text(
+    aops_pool: AsyncConnectionPool,
+    db_conn: psycopg.Connection,
+    database_gate: ProcessDbGate,
+    hosted_resources: HostedTurnResources,
+    live_events: LiveEvents,
+    loguru_records: LogRecords,
+) -> None:
+    agent_id = await _agent(aops_pool)
+    ctx = make_runtime(
+        resources=hosted_resources,
+        database_gate=database_gate,
+        event_publisher=live_events.publisher,
+        pins={"user_delivery_mode": "naive"},
+    ).context
+    effects = TimelineEffects(agent_id, Published(), pool=aops_pool, clock=system_clock())
+    effects.bind(ctx)
+    first = await _commit(aops_pool, agent_id, "the secret text")
+    _ = publish(
+        db_conn,
+        agent_id,
+        f"harness:{first[0].item_id}",
+        PublishMessage(content="other", suggestions=[]),
+        mode=UserDeliveryMode.SDK,
+        created_at=ctx.require_clock().now(),
+    )
+    db_conn.commit()
+    second = await _commit(aops_pool, agent_id, "next")
+    await effects.after_commit(Committed(WritePlan(), (*first, *second)))
+    dropped = [r["extra"] for r in loguru_records.events("harness_timeline_reply_dropped")]
+    assert [(d["reason"], d["publication_key"], d["recorded_mode"]) for d in dropped] == [
+        ("conflict", "harness:h0.0", "sdk")
+    ]
+    assert "the secret text" not in str(dropped)
+    assert db_conn.execute(
+        "SELECT content FROM agent_publications WHERE agent_id = %s AND mode = 'naive'", (agent_id,)
+    ).fetchall() == [("next",)]
+
+
+async def test_a_failing_delivery_costs_neither_the_usage_nor_the_publish(
+    aops_pool: AsyncConnectionPool, loguru_records: LogRecords
+) -> None:
+    agent_id = await _agent(aops_pool)
+    delivery = Delivery()
+    delivery.fail = True
+    emitted: list[str] = []
+
+    class Sink:
+        def emit(self, payload: str) -> None:
+            emitted.append(payload)
+
+    effects = TimelineEffects(
+        agent_id, Sink(), pool=aops_pool, clock=system_clock(), capture=delivery.capture
+    )
+    effects.bind(runtime(FakeEngine()).context)
+    usage = MessageUsage("main", "m1", "t", None, Usage(input_tokens=5, output_tokens=2), "x", True)
+    written = await _commit(aops_pool, agent_id, "reply")
+    await effects.after_commit(Committed(WritePlan(usage=(usage,)), written))
+    assert delivery.handed == []
+    assert emitted, "the live view was published"
+    assert len(loguru_records.events("llm_usage")) == 1, "the spend was logged"

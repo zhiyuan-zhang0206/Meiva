@@ -19,12 +19,6 @@ from base.agents.history.timeline_item import TimelineItem
 from base.db.rows import aquery_all
 
 
-@dataclass(frozen=True)
-class _ReplyRow:
-    seq: int
-    item: object
-
-
 def _int_from_row(row: tuple[object, ...] | None) -> int:
     if not row or row[0] is None:
         return 0
@@ -38,69 +32,6 @@ INSERT INTO agent_harness_messages
 VALUES (%s, %s, %s, %s::jsonb, %s, COALESCE(%s::timestamptz, clock_timestamp()), %s, %s, %s)
 ON CONFLICT (agent_id, source_key) WHERE source_key IS NOT NULL DO NOTHING
 """
-
-
-# meiva:note
-# The reply progress of an agent's transcript-sourced timeline (`agent_harness_timeline_progress.replies_seq`): the
-# highest timeline seq whose reply the writer has handed to delivery. The writer makes it, in the transaction of its
-# first commit, at the end of the timeline as it was before that commit, so history that was already there (an agent
-# that was on the event path, a fork's copy of its parent's timeline) is never the writer's to deliver. Never moves an
-# existing one.
-async def ainit_reply_progress(conn: AsyncConnection, agent_id: int) -> None:
-    await conn.execute(
-        "INSERT INTO agent_harness_timeline_progress (agent_id, replies_seq) "
-        "SELECT %s, COALESCE(MAX(seq), -1) FROM agent_harness_messages WHERE agent_id = %s "
-        "ON CONFLICT (agent_id) DO NOTHING",
-        (agent_id, agent_id),
-    )
-
-
-@dataclass(frozen=True)
-class UnconfirmedReplies:
-    replies: list[tuple[int, TimelineItem]]
-    reach: int
-    full: bool
-
-
-# meiva:note
-# The replies the writer committed (rows it keyed) after the agent's reply progress, oldest first, at most `limit`,
-# with the seq the progress can be raised to once they have been handled (the last one read when the read was full,
-# otherwise the end of the timeline as it was when the read began; a seq read first, so a row committed meanwhile is
-# never passed over). None when the agent has no progress (its writer has not committed yet). One range read after the
-# progress: its size is the part of the timeline not yet handled, not the length of the timeline.
-async def aload_unconfirmed_replies(
-    conn: AsyncConnection, agent_id: int, *, limit: int
-) -> UnconfirmedReplies | None:
-    cursor = await conn.execute(
-        "SELECT p.replies_seq, (SELECT COALESCE(MAX(seq), -1) FROM agent_harness_messages "
-        "WHERE agent_id = %s) FROM agent_harness_timeline_progress p WHERE p.agent_id = %s",
-        (agent_id, agent_id),
-    )
-    head: tuple[object, ...] | None = await cursor.fetchone()
-    if head is None:
-        return None
-    done, end = int(str(head[0])), int(str(head[1]))
-    found = await aquery_all(
-        conn,
-        _ReplyRow,
-        "SELECT seq, item FROM agent_harness_messages WHERE agent_id = %s AND seq > %s AND seq <= %s "
-        "AND source_key IS NOT NULL AND item->>'kind' = 'agent_chat' ORDER BY seq LIMIT %s",
-        (agent_id, done, end, limit),
-    )
-    replies = [(row.seq, TimelineItem.model_validate(row.item)) for row in found]
-    full = len(replies) == limit
-    return UnconfirmedReplies(replies, replies[-1][0] if full else end, full)
-
-
-# meiva:note
-# Raise the agent's reply progress to `seq`: every reply up to it has been handed to delivery (or dropped with an
-# event). Only ever raised, so a late or repeated call is harmless.
-async def aconfirm_replies(conn: AsyncConnection, agent_id: int, seq: int) -> None:
-    await conn.execute(
-        "UPDATE agent_harness_timeline_progress SET replies_seq = GREATEST(replies_seq, %s) "
-        "WHERE agent_id = %s",
-        (seq, agent_id),
-    )
 
 
 # meiva:note

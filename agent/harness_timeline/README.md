@@ -48,11 +48,17 @@ message), and the replies are not kept in memory at all: the writer's first comm
 commit, and the effects raise it only after the replies up to it have been through `capture_items`. The replies owed are
 the keyed `agent_chat` rows after it, read as a range, so a pass reads the part not yet handed over and not the history;
 `recover`, run when the writer starts, is the same pass, which covers a process that died between a commit and its
-effects exactly once (the capture is idempotent by `harness:<item id>`). A fork, whose copy has no progress row until its
+effects: a reply is tried at least once after its commit, and the publication key (`harness:<item id>`) keeps the record to
+one (an extra attempt that finds the record there publishes nothing again, but may send one more `agent_updated`). A fork, whose copy has no progress row until its
 own first commit, an agent that was on the event path, and replies written while delivery was `sdk` are therefore never
 offered again, and a reply that conflicts with a delivery already recorded is dropped with
 `harness_timeline_reply_dropped` and holds none of the others. Passes run one at a time under a lock, and a failure that
-repeats is reported once a minute. Everything an agent's writer or its publisher can raise stays in that agent's own task
+repeats is reported once a minute. A reply that fails is tried again after an interval of the injected clock (1 second, doubled up
+to 60, with nothing read while nothing is owed), without waiting for a commit; one that conflicts, whose stored row does not
+validate or that has failed five times in a row is dropped with the event, which says why and never carries the text, and the
+ones after it go on. The mode a reply is captured under is the one of the context bound at the latest hosted turn, as the
+writer's reply policy is the runtime's: a reply the CLI writes while the agent is idle, after the mode was changed and before
+the next turn, is delivered under the earlier mode. Everything an agent's writer or its publisher can raise stays in that agent's own task
 group (`TranscriptTimeline.run`), so it cannot cancel the other agents' writers in the host's group. A process that dies
 between a commit and its effects loses the spend of that one read (it is a log line, not a table).
 

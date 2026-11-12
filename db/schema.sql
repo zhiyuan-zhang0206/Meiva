@@ -958,7 +958,6 @@ DO $$ BEGIN
         GRANT SELECT, INSERT, UPDATE, DELETE ON agent_harness_messages TO meiva_gateway;
         GRANT USAGE, SELECT ON SEQUENCE agent_harness_messages_id_seq TO meiva_gateway;
         GRANT SELECT, INSERT, UPDATE, DELETE ON agent_harness_transcript_positions TO meiva_gateway;
-        GRANT SELECT, INSERT, UPDATE, DELETE ON agent_harness_timeline_progress TO meiva_gateway;
         GRANT SELECT, INSERT, DELETE ON agent_harness_transcript_rows TO meiva_gateway;
     END IF;
 END $$;

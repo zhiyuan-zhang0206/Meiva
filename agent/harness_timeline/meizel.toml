@@ -1,17 +1,19 @@
-exports = ["plan.py", "store.py", "tool_format.py", "writer.py"]
+exports = ["plan.py", "reply_progress.py", "tool_format.py", "writer.py"]
 
 [uses]
 "__init__.py" = []
 "plan.py" = []
+"reply_progress.py" = []
 "store.py" = []
 "rebuild.py" = ["store.py"]
-"writer.py" = ["plan.py", "rebuild.py", "store.py"]
-"tests" = ["plan.py", "store.py", "writer.py"]
+"writer.py" = ["plan.py", "rebuild.py", "reply_progress.py", "store.py"]
+"tests" = ["plan.py", "reply_progress.py", "store.py", "writer.py"]
 
 [purity]
 "." = "strict"
 "__init__.py" = "strict"
 "plan.py" = "strict"
 "rebuild.py" = { mode = "none", why = "the stored-row replay of the harness timeline writer after a restart: it pages one record's stored rows out of the database and feeds them to the projector the caller owns, in bounded batches, without touching the CLI's file" }
+"reply_progress.py" = { mode = "none", why = "the database operations on the reply progress of a transcript-sourced timeline (the one table the agent host that hands replies to delivery reads and writes): make it, read the replies after it, raise it, and read the mode of a recorded publication; each is one bounded statement" }
 "store.py" = { mode = "none", why = "the database operations of the harness timeline writer: the batch append of projected items, the stored read positions and the whitelisted transcript rows; each is one bounded statement or a pipelined batch" }
 "writer.py" = { mode = "none", why = "the effect shell of the harness timeline writer: it waits for a wake-up, asks the reader for the entries past each stored position, and commits what the strict plan decided (keyed items, settlements, positions) in one write transaction under the runtime's incarnation; what an entry becomes and what a delivery settles are decided in plan.py and the shared projection" }
