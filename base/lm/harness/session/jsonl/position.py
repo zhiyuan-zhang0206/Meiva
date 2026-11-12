@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import json
-from collections.abc import Mapping, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 
 from base.host.boundary.json_values import is_object_dict
@@ -22,7 +22,9 @@ from base.lm.harness.session.transcript.ports import PositionLostError
 # A complete line that cannot be used is never a fault and never stops the read: it is returned as a `RawRow`
 # with `bad` naming why (`BAD_*`: invalid UTF-8, not JSON, not an object, nested too deep to decode, larger
 # than `MAX_ROW_BYTES`), it counts as a line so the position moves past it, and the reader reports it as an
-# anomaly. One bad row must not keep every later row from being read.
+# anomaly. One bad row must not keep every later row from being read. A reader that needs only some rows of a large
+# file passes `wanted` (a test on the line's bytes); a line it rejects is returned with `bad == SKIPPED`, which counts
+# as a line and moves the position but is neither decoded nor reported.
 # meiva:link base/lm/harness/docs/transcript-projection.md
 
 BAD_UTF8 = "invalid_utf8"
@@ -30,6 +32,7 @@ BAD_JSON = "not_json"
 BAD_OBJECT = "not_object"
 BAD_DEPTH = "too_deep"
 BAD_SIZE = "oversize"
+SKIPPED = "skipped"
 
 
 @dataclass(frozen=True, slots=True)
@@ -106,14 +109,19 @@ def row_digest(data: bytes) -> str:
     return hashlib.sha256(data).hexdigest()
 
 
-def rows_after(position: Position, data: bytes) -> tuple[RawRow, ...]:
+def rows_after(
+    position: Position, data: bytes, wanted: Callable[[bytes], bool] | None = None
+) -> tuple[RawRow, ...]:
     rows: list[RawRow] = []
     cursor = 0
     while (newline := data.find(b"\n", cursor)) >= 0:
         line = data[cursor:newline]
         if line.strip():
             start, end = position.offset + cursor, position.offset + newline + 1
-            rows.append(_row(line, start, end))
+            if wanted is not None and not wanted(line):
+                rows.append(RawRow(start, end, None, SKIPPED))
+            else:
+                rows.append(_row(line, start, end))
         cursor = newline + 1
     return tuple(rows)
 

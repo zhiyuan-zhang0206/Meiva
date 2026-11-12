@@ -1,8 +1,9 @@
-exports = ["transcript"]
+exports = ["jsonl", "transcript"]
 
 [uses]
 "__init__.py" = ["background.py", "turn.py", "vocabulary.py"]
 "background.py" = []
+"jsonl" = ["transcript"]
 "turn.py" = []
 "vocabulary.py" = []
 

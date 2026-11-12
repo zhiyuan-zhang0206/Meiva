@@ -11,9 +11,9 @@ import asyncio
 import os
 from pathlib import Path
 
-from base.lm.harness.claude.transcript.position import decode
 from base.lm.harness.claude.transcript.reader import ClaudeRecordReader
 from base.lm.harness.claude.transcript.tests.support import FIXTURES, now_ns, rows
+from base.lm.harness.session.jsonl.position import decode
 
 SECOND = 1_000_000_000
 

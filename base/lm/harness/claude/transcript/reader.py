@@ -11,7 +11,8 @@ from typing import BinaryIO
 from base.lm.harness.claude.delivery import key_uuid
 from base.lm.harness.claude.reconciliation.transcript import claude_home as resolve_claude_home
 from base.lm.harness.claude.transcript.parse import ParseState, parse_row, row_version
-from base.lm.harness.claude.transcript.position import (
+from base.lm.harness.claude.transcript.store_filter import scrub, stored_row
+from base.lm.harness.session.jsonl.position import (
     BAD_DEPTH,
     BAD_SIZE,
     START,
@@ -25,7 +26,6 @@ from base.lm.harness.claude.transcript.position import (
     rows_after,
     verify,
 )
-from base.lm.harness.claude.transcript.store_filter import scrub, stored_row
 from base.lm.harness.session.transcript.entries import (
     MAIN_RECORD,
     Anomaly,

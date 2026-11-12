@@ -1,0 +1,14 @@
+exports = ["position.py", "store_shapes.py", "store_text.py"]
+
+[uses]
+"__init__.py" = []
+"position.py" = []
+"store_shapes.py" = ["store_text.py"]
+"store_text.py" = []
+
+[purity]
+"." = "strict"
+"__init__.py" = "strict"
+"position.py" = "strict"
+"store_shapes.py" = "strict"
+"store_text.py" = "strict"

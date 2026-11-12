@@ -9,7 +9,6 @@ from pathlib import Path
 import pytest
 
 from base.lm.harness.claude.transcript.parse import ParseState, parse_row
-from base.lm.harness.claude.transcript.position import PositionLostError, decode
 from base.lm.harness.claude.transcript.reader import ClaudeRecordReader
 from base.lm.harness.claude.transcript.tests.support import (
     FIXTURES,
@@ -17,6 +16,7 @@ from base.lm.harness.claude.transcript.tests.support import (
     now_ns,
     rows,
 )
+from base.lm.harness.session.jsonl.position import decode
 from base.lm.harness.session.transcript.entries import (
     Anomaly,
     AnomalyKind,
@@ -24,7 +24,7 @@ from base.lm.harness.session.transcript.entries import (
     HumanInput,
     ToolResult,
 )
-from base.lm.harness.session.transcript.ports import EntryBatch
+from base.lm.harness.session.transcript.ports import EntryBatch, PositionLostError
 
 SYNC_AGENT = "af6798fb938fb227f"
 
