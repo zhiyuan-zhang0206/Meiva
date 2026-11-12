@@ -1,7 +1,6 @@
 import asyncio
 import json
 import tempfile
-import time
 from pathlib import Path
 from typing import Any
 from uuid import uuid4
@@ -12,6 +11,7 @@ from mcp import types
 from mcp.shared.exceptions import MCPError
 from mcp.types import CONNECTION_CLOSED, REQUEST_TIMEOUT
 
+from base.clock import Clock
 from base.clock.tests.fakes import system_clock
 from services.desktop.browser import page_lifecycle
 from services.desktop.browser.mcp_daemon import (
@@ -23,7 +23,12 @@ from services.desktop.browser.mcp_daemon import (
 )
 from services.desktop.browser.page_lifecycle import (
     PageRegistry,
+    RecordStore,
     parse_page_listing,
+)
+from services.desktop.browser.tests.fake_browser import (
+    FakeBrowser,
+    MemoryStore,
 )
 
 
@@ -33,6 +38,7 @@ class FakeUpstream:
         self.pages: dict[int, str] = {}
         self.selected: int | None = None
         self.isolated_contexts: dict[int, str] = {}
+        self.browser: FakeBrowser | None = None
         self.calls: list[tuple[str, dict[str, Any], int | None]] = []
 
     async def list_tools(self) -> Any:
@@ -49,6 +55,8 @@ class FakeUpstream:
             if isinstance(context, str) and context:
                 self.isolated_contexts[pid] = context
             self.selected = pid
+            if self.browser is not None:
+                self.browser.upstream_page_created(pid, self.pages[pid])
             return self._listing()
         if name == "select_page":
             pid = args["pageId"]
@@ -59,6 +67,8 @@ class FakeUpstream:
         if name == "close_page":
             pid = args["pageId"]
             self.pages.pop(pid, None)
+            if self.browser is not None:
+                self.browser.upstream_page_closed(pid)
             if self.selected == pid:
                 self.selected = None
             return self._listing()
@@ -94,34 +104,46 @@ def err(text: str) -> types.CallToolResult:
     return types.CallToolResult(content=[types.TextContent(type="text", text=text)], is_error=True)
 
 
-class NoTabGroups:
-    async def snapshot(self) -> frozenset[str] | None:
-        return None
-
-    async def group_new_page(
-        self, agent_id: int, before: frozenset[str] | None, page_id: int | None = None
-    ) -> None:
-        return None
-
-    async def release_page(self, page_id: int) -> None:
-        return None
-
-    async def converge_all(self) -> None:
-        return None
-
-
+# meiva:note
+# A daemon over ``upstream``. Without ``tab_groups`` it gets a fresh ``FakeBrowser``
+# bound to the upstream; pass an existing one (and ``store``) to model a daemon restart.
 def new_daemon(
     upstream: Any,
     tab_groups: Any = None,
     *,
     default_ttl_seconds: float = page_lifecycle.DEFAULT_PAGE_TTL_SECONDS,
+    store: RecordStore | None = None,
+    clock: Clock | None = None,
 ) -> ChromeMcpDaemon:
-    groups: Any = tab_groups if tab_groups is not None else NoTabGroups()
+    browser = tab_groups if tab_groups is not None else FakeBrowser()
+    if isinstance(browser, FakeBrowser) and isinstance(upstream, FakeUpstream):
+        browser.bind(upstream)
+    groups: Any = browser
+    session: Any = upstream
     return ChromeMcpDaemon(
-        upstream,
-        PageRegistry(default_ttl_seconds=default_ttl_seconds, clock=system_clock()),
+        session,
+        PageRegistry(
+            default_ttl_seconds=default_ttl_seconds,
+            clock=clock or system_clock(),
+            store=store or MemoryStore(),
+        ),
         groups,
     )
+
+
+# meiva:note
+# The fake Chrome behind a daemon built by ``new_daemon``.
+def chrome(d: ChromeMcpDaemon) -> FakeBrowser:
+    assert isinstance(d.tab_groups, FakeBrowser)
+    return d.tab_groups
+
+
+# meiva:note
+# A tab the user opened: the upstream lists it, Chrome has it, no tab group holds it.
+def add_user_page(d: ChromeMcpDaemon, up: FakeUpstream, page_id: int, url: str) -> str:
+    up.pages[page_id] = url
+    chrome(d).upstream_page_created(page_id, url)
+    return chrome(d).target_of_upstream_page(page_id)
 
 
 def browser_daemon_with_fake_upstream() -> tuple[ChromeMcpDaemon, FakeUpstream]:
@@ -376,22 +398,26 @@ async def test_agent_affinity_accepts_integral_float_page_id() -> None:
     assert d.pages.get_agent_page(7) == 1
 
 
-async def test_agent_affinity_isolated_context_suffix_registers_page() -> None:
+async def test_isolated_context_page_is_selected_but_carries_no_ttl_record() -> None:
+    # meiva:note
+    # An isolated-context tab is invisible to the tab-group extension, so nothing proves it ours
+    # and it has no stable identity in the ledger: it has affinity and no deadline.
     d, _up = browser_daemon_with_fake_upstream()
     await d.call_tool_for_agent(
         "new_page", {"url": "https://discord.com/app", "isolatedContext": "reg-7"}, 7
     )
     assert d.pages.get_agent_page(7) == 1
-    assert d.pages.ttl_deadlines[1] > time.monotonic()
+    assert d.pages.records == {}
 
 
 async def test_agent_close_with_integral_float_drops_ttl_slot() -> None:
     d, _up = browser_daemon_with_fake_upstream()
     await d.call_tool_for_agent("new_page", {"url": "a"}, 7)
     await d.call_tool_for_agent("new_page", {"url": "b"}, 7)
-    assert 2 in d.pages.ttl_deadlines
+    assert d.pages.record_for_page(2) is not None
     await d.call_tool_for_agent("close_page", {"pageId": 2.0}, 7)
-    assert 2 not in d.pages.ttl_deadlines
+    assert d.pages.record_for_page(2) is None
+    assert len(d.pages.records) == 1
 
 
 async def test_handle_client_agent_id_adopts_agent_page(tmp_path: Path) -> None:
@@ -453,8 +479,10 @@ async def test_release_agent_page_closes_only_that_agent() -> None:
     page_id = await page_lifecycle.release_agent_page(d, 7)
 
     assert page_id == 2
-    assert ("close_page", {"pageId": 1}, 3) in up.calls
-    assert ("close_page", {"pageId": 2}, 3) in up.calls
+    # meiva:note
+    # closed by target id, not through the upstream's close_page
+    assert up.calls == []
+    assert len(chrome(d).closed) == 2
     assert 1 not in up.pages and 2 not in up.pages
     assert up.pages == {3: "b"}
     assert d.pages.get_agent_page(7) is None
@@ -469,23 +497,25 @@ async def test_release_agent_page_idempotent_and_no_slot() -> None:
     assert await page_lifecycle.release_agent_page(d, 7) == 1
     assert await page_lifecycle.release_agent_page(d, 7) is None
     assert await page_lifecycle.release_agent_page(d, 99) is None
-    assert [c[0] for c in up.calls] == ["close_page"]
+    assert len(chrome(d).closed) == 1
 
 
-async def test_release_agent_page_keeps_slot_when_upstream_down() -> None:
-    d = new_daemon(DeadUpstream())
-    d.pages.set_agent_page(7, 1)
-    d.pages.register_created_page(1)
-    with pytest.raises(RuntimeError, match="upstream session is down"):
-        await page_lifecycle.release_agent_page(d, 7)
+async def test_release_agent_page_keeps_slot_when_chrome_tabs_cannot_be_read() -> None:
+    d, up = browser_daemon_with_fake_upstream()
+    await d.call_tool_for_agent("new_page", {"url": "a"}, 7)
+    chrome(d).read_error = TimeoutError("wedged")
+    assert await page_lifecycle.release_agent_page(d, 7) is None
     assert d.pages.get_agent_page(7) == 1
+    assert up.pages == {1: "a"}
+    assert chrome(d).closed == []
 
 
 async def test_release_agent_page_wire_method() -> None:
     import contextlib
 
     up = FakeUpstream()
-    daemon_ref: list[ChromeMcpDaemon | None] = [new_daemon(up)]
+    wire_daemon = new_daemon(up)
+    daemon_ref: list[ChromeMcpDaemon | None] = [wire_daemon]
     sock_path = Path(tempfile.gettempdir()) / f"meiva-bmd-{uuid4().hex}.sock"
     server = await asyncio.start_unix_server(
         lambda r, w: handle_client(r, w, daemon_ref), path=sock_path
@@ -532,8 +562,8 @@ def test_parse_page_listing_extracts_urls() -> None:
 
 
 def expire(d: ChromeMcpDaemon, page_id: int) -> None:
-    assert page_id in d.pages.ttl_deadlines
-    d.pages.ttl_deadlines[page_id] = time.monotonic() - 1.0
+    target_id = d.pages.page_targets[page_id]
+    d.pages.set_deadline(target_id, d.pages.now() - 1.0)
 
 
 def record_emits(events: list[tuple[tuple[Any, ...], dict[str, Any]]]) -> Any:
@@ -545,7 +575,9 @@ def record_emits(events: list[tuple[tuple[Any, ...], dict[str, Any]]]) -> Any:
 
 
 def ttl_remaining(d: ChromeMcpDaemon, page_id: int) -> float:
-    return d.pages.ttl_deadlines[page_id] - time.monotonic()
+    record = d.pages.record_for_page(page_id)
+    assert record is not None
+    return record.expires_at - d.pages.now()
 
 
 class TitledListing(FakeUpstream):

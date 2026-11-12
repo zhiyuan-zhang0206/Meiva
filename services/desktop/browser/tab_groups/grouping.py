@@ -83,7 +83,8 @@ import json
 from collections.abc import Iterator
 from dataclasses import dataclass
 from pathlib import Path
-from typing import TypedDict
+from typing import NotRequired, TypedDict
+from urllib.parse import quote
 
 import websockets
 from pydantic import TypeAdapter
@@ -105,7 +106,9 @@ from services.desktop.browser.session import (
     cdp_call,
     cdp_evaluate,
     http_json,
+    http_ok,
 )
+from services.desktop.browser.tab_groups.page_ledger import TabState
 
 # meiva:note
 # The unpacked extension files shipped inside the package. The service-worker
@@ -146,6 +149,21 @@ _WORKER_POLL_S = 0.1
 # labels can repeat, ids cannot. Chrome assigns the color.
 def group_title(agent_id: int) -> str:
     return f"Meiva #{agent_id}"
+
+
+# meiva:note
+# The inverse of `group_title`: the agent id a tab group title names, or None
+# for any other title (a user's own group, `Meiva #x`, a padded or zero-led id,
+# trailing text). Strict on purpose: it is the proof that a tab belongs to this
+# stack, and only an exact `group_title` round trip counts.
+def agent_id_of_title(title: object) -> int | None:
+    if not isinstance(title, str) or not title.startswith("Meiva #"):
+        return None
+    digits = title[len("Meiva #") :]
+    if not (digits.isascii() and digits.isdigit()):
+        return None
+    agent_id = int(digits)
+    return agent_id if group_title(agent_id) == title else None
 
 
 # meiva:note
@@ -255,6 +273,7 @@ class _NoUniqueNewPageError(RuntimeError):
 class _Listed(TypedDict):
     id: str
     type: str
+    url: NotRequired[str]
 
 
 class _Background(TypedDict):
@@ -269,10 +288,25 @@ _LISTING = TypeAdapter(list[_Listed])
 _MANIFEST = TypeAdapter(_Manifest)
 
 
-async def _page_target_ids(cdp_port: int) -> frozenset[str]:
+async def _page_targets(cdp_port: int) -> dict[str, str]:
     raw_listing = await http_json(f"http://127.0.0.1:{cdp_port}/json/list")
     listing = _LISTING.validate_python(raw_listing if raw_listing is not None else [])
-    return frozenset(t["id"] for t in listing if t["type"] == "page")
+    return {t["id"]: t.get("url", "") for t in listing if t["type"] == "page"}
+
+
+async def _page_target_ids(cdp_port: int) -> frozenset[str]:
+    return frozenset(await _page_targets(cdp_port))
+
+
+# meiva:note
+# One tab the worker reports through `meivaGroupedTargets`: its CDP target and
+# the title of the tab group it sits in.
+class _GroupedTab(TypedDict):
+    targetId: str
+    title: str | None
+
+
+_GROUPED_TABS = TypeAdapter(list[_GroupedTab])
 
 
 # meiva:note
@@ -506,18 +540,20 @@ class AgentTabGroups:
     # Start filing the page created since `before` into the agent's tab group.
     # `before` is the matching `snapshot()`; None skips. Finds the new page's
     # target with one short listing, records `page_id` for `release_page`, then
-    # hands the grouping to a background task and returns.
+    # hands the grouping to a background task and returns the target id (the
+    # page's stable identity for the page ledger), or None when the page was not
+    # identified and so stays ungrouped.
     # meiva:link services/desktop/browser/docs/tab-groups.md
     async def group_new_page(
         self, agent_id: int, before: frozenset[str] | None, page_id: int | None = None
-    ) -> None:
+    ) -> str | None:
         if before is None:
-            return
+            return None
         try:
             target_id = await asyncio.wait_for(self._new_target(before), self._listing_timeout_s)
         except Exception as e:
             self._warn(agent_id, e)
-            return
+            return None
         if page_id is not None:
             self._pages[page_id] = (agent_id, target_id)
         task = self._task_group.create_task(
@@ -525,6 +561,7 @@ class AgentTabGroups:
         )
         self._tasks.add(task)
         task.add_done_callback(self._settled)
+        return target_id
 
     async def _new_target(self, before: frozenset[str]) -> str:
         new = (await _page_target_ids(self._cdp_port)) - before
@@ -546,7 +583,9 @@ class AgentTabGroups:
         recorded = self._pages.pop(page_id, None)
         if recorded is None:
             return
-        agent_id, target_id = recorded
+        await self._ungroup_last(*recorded, label=f"page {page_id}")
+
+    async def _ungroup_last(self, agent_id: int, target_id: str, *, label: str) -> None:
         try:
             await asyncio.wait_for(
                 self._worker.evaluate(
@@ -557,13 +596,47 @@ class AgentTabGroups:
             )
         except Exception as e:
             logger.opt(exception=not isinstance(e, TimeoutError)).warning(
-                "[browser-mcp] could not ungroup agent {}'s last tab on page {} ({}: {}); "
+                "[browser-mcp] could not ungroup agent {}'s last tab on {} ({}: {}); "
                 "closing it will leave a saved tab group behind",
                 agent_id,
-                page_id,
+                label,
                 type(e).__name__,
                 e,
             )
+
+    # meiva:note
+    # Chrome's tabs right now, read fresh: every page target with its URL from
+    # `/json/list`, and for each tab in a tab group the group's title from the
+    # extension worker, parsed to an agent id by `agent_id_of_title`. Unlike the
+    # grouping calls this one RAISES: its caller closes pages on the strength of
+    # it, so an unreadable Chrome must stop the caller, not read as "no groups".
+    # meiva:link services/desktop/browser/docs/tab-groups.md
+    async def tab_state(self) -> TabState:
+        pages = await asyncio.wait_for(_page_targets(self._cdp_port), self._listing_timeout_s)
+        raw = await self._worker.evaluate("meivaGroupedTargets()", timeout_s=self._group_timeout_s)
+        grouped = _GROUPED_TABS.validate_python(raw)
+        agent_groups: dict[str, int] = {}
+        for tab in grouped:
+            agent_id = agent_id_of_title(tab["title"])
+            if agent_id is not None and tab["targetId"] in pages:
+                agent_groups[tab["targetId"]] = agent_id
+        return TabState(pages=pages, agent_groups=agent_groups)
+
+    # meiva:note
+    # Close one page target by its CDP target id (`/json/close/<id>`): the
+    # ungroup-before-close half first (see `release_page`, best effort), then the
+    # close, which raises when Chrome refuses or is unreachable. The id is stable
+    # for the life of the Chrome process, unlike chrome-devtools-mcp's page ids.
+    # meiva:link services/desktop/browser/docs/tab-groups.md
+    async def close_target(self, agent_id: int, target_id: str) -> None:
+        for page_id, (_, recorded_target) in list(self._pages.items()):
+            if recorded_target == target_id:
+                del self._pages[page_id]
+        await self._ungroup_last(agent_id, target_id, label=f"target {target_id}")
+        await asyncio.wait_for(
+            http_ok(f"http://127.0.0.1:{self._cdp_port}/json/close/{quote(target_id, safe='')}"),
+            self._listing_timeout_s,
+        )
 
     # meiva:note
     # Converge every agent's groups across the browser: the keeper of each title

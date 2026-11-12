@@ -11,8 +11,8 @@
 #   it before forwarding a page-scoped call, cold-starting or returning the no-page error when empty.
 #
 # Page lifetime (2026-09-11 ruling): every page this stack creates carries a hard TTL deadline
-# (`MEIVA_CHROME_PAGE_DEFAULT_TTL_SECONDS`, 24h default) and is closed by the expiry sweep when
-# the deadline passes. `renew_page` moves the deadline to now + ttl (at most 24h per call); see
+# (`MEIVA_CHROME_PAGE_DEFAULT_TTL_SECONDS`, 24h default), kept in a per-home ledger file that
+# survives a daemon restart, and is closed by the expiry sweep when the deadline passes. `renew_page` moves the deadline to now + ttl (at most 24h per call); see
 # `services.desktop.browser.page_lifecycle`. Every page an agent creates is also filed into that
 # agent's Chrome tab group (`services.desktop.browser.tab_groups`, presentation-only).
 
@@ -64,6 +64,7 @@ from services.desktop.browser.mcp_upstream import (
 )
 from services.desktop.browser.page_lifecycle import (
     RENEW_PAGE_TOOL,
+    FileRecordStore,
     PageRegistry,
     expired_page_reaper,
     handle_release_agent_page,
@@ -235,7 +236,8 @@ class ChromeMcpDaemon:
         return current_page
 
     # meiva:note
-    # Forward a `new_page`, register its TTL deadline, and group it for the agent.
+    # Forward a `new_page`, group it for the agent and record its TTL deadline under
+    # the target the grouping identified (a page left ungrouped carries no TTL).
     async def _new_page(
         self, args: dict[str, object], agent_id: int | None
     ) -> types.CallToolResult:
@@ -252,9 +254,10 @@ class ChromeMcpDaemon:
         result = await self._call("new_page", args)
         if not result.is_error:
             created = selected_id(result)
-            self.pages.register_created_page(created, agent_id=agent_id)
+            target_id = None
             if group and agent_id is not None:
-                await self.tab_groups.group_new_page(agent_id, before, created)
+                target_id = await self.tab_groups.group_new_page(agent_id, before, created)
+            self.pages.register_created_page(target_id, agent_id, created)
         return result
 
     async def _bootstrap_page(
@@ -534,7 +537,11 @@ async def _serve_daemon_loop(
     daemon_ref: list[ChromeMcpDaemon | None] = [None]
     clients: set[asyncio.Task[None]] = set()
     sock, server = await _open_daemon_socket(home, browser_cdp_port, daemon_ref, clients)
-    pages = PageRegistry(default_ttl_seconds=default_ttl_seconds, clock=clock)
+    pages = PageRegistry(
+        default_ttl_seconds=default_ttl_seconds,
+        clock=clock,
+        store=FileRecordStore(page_lifecycle.page_ledger_path(home)),
+    )
     async with asyncio.TaskGroup() as tasks:
         gateway = GatewaySession(tasks, browser_cdp_port, access=gateway_access, clock=clock)
         extension_worker = ExtensionWorker(

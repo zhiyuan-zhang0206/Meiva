@@ -348,14 +348,14 @@ EVENTS: dict[str, EventSpec] = {
         name="chrome_page_ttl_expired",
         category="log",
         tier="observation",
-        doc="the browser-mcp TTL sweep closed a Chrome page whose hard deadline passed; attributes carry page_id, url, agent_id (None when no affinity slot still named the page)",
+        doc="the browser-mcp TTL sweep closed a Chrome page whose hard deadline passed; attributes carry page_id (None for a page created before the daemon restarted), target_id, url, agent_id (the owner)",
         site=(
             'services/desktop/browser/page_lifecycle.py:reap_expired_pages telemetry.emit("log", ...)'
         ),
     ),
     "chrome_page_ttl_renewed": telemetry_event(
         "chrome_page_ttl_renewed",
-        "Chrome page TTL deadline renewed via the renew_page tool; attributes carry page_id, ttl_s, new_expires_at",
+        "Chrome page TTL deadline renewed via the renew_page tool; attributes carry page_id, target_id, ttl_s, new_expires_at",
         tier="observation",
         site=(
             'services/desktop/browser/page_lifecycle.py:renew_agent_page telemetry.emit("telemetry", ...)'

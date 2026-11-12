@@ -3,7 +3,9 @@
 Every page an agent creates is filed into the tab group titled `Meiva #<id>`
 (`tab_groups/grouping.py`, extension worker `extension/group-*.js`). The title
 is the whole identity: nothing maps an agent to a group id, so a daemon restart
-or a Chrome restart needs no repair.
+or a Chrome restart needs no repair. The same fact is what lets the page TTL
+survive those restarts: the title is the persistent proof that a page is the
+stack's and whose it is (see "Page TTL across restarts" below).
 
 ## The invariant
 
@@ -38,6 +40,7 @@ presentation only.
 | every page creation | `meivaGroup(targetId, title)` converges that title across the browser before filing (`AgentTabGroups.group_new_page`) |
 | session layout restore | `meivaApplyLayout(spec)` converges `Meiva #<digits>` groups through `meivaConvergeTitle` (`session_restore.reapply`) |
 | daemon start and every upstream reconnect | `AgentTabGroups.converge_all()` -> `meivaConvergeAll()` (`mcp_daemon._serve_generation`) |
+| page ledger reconciliation (first sweep, every sweep, every release) | read-only `meivaGroupedTargets()` -> `AgentTabGroups.tab_state()` |
 | Chrome start and extension update/install | `chrome.runtime.onStartup` / `onInstalled` call `meivaConvergeAll()` inside the worker |
 
 All four run the same stateless pass, and inside `browser-mcp` one shared
@@ -61,7 +64,9 @@ per open/close cycle, and saved groups sync into the signed-in user's own Chrome
 
 The daemon ungroups an agent's **last** tab *before* closing it
 (`AgentTabGroups.release_page`, called from `ChromeMcpDaemon._call` for every
-`close_page`). Because Chrome stops an MV3 service worker ~30s after idle while
+`close_page` an agent sends, and the same ungroup inside
+`AgentTabGroups.close_target`, the by-target-id close the page release and the
+TTL sweep use). Because Chrome stops an MV3 service worker ~30s after idle while
 leaving open tab groups in the tab strip, `release_page` wakes/reloads the
 worker via `ExtensionWorker` (`Extensions.loadUnpacked`) when needed before
 calling `meivaUngroupLast`. An ungrouped last tab deletes its group instead of
@@ -73,6 +78,36 @@ never touched.
 
 Both halves are best-effort and warn only: a page that must close still closes,
 and a failure to ungroup leaves a chip rather than blocking the close.
+
+## Page TTL across restarts
+
+A page's deadline and owner are kept in `<home>/run/browser-pages.json`, one
+record per CDP target id (stable while the Chrome process lives; the daemon's page
+ids are not), and every sweep and release first reconciles that file with Chrome's
+tabs. The reconciliation reads the tab group titles fresh (`AgentTabGroups.tab_state()`:
+`/json/list` for the page targets, `meivaGroupedTargets()` in the worker for each
+tab's group title, parsed to an agent id by `agent_id_of_title`, which accepts
+only an exact `Meiva #<id>` round trip). A page is **closed only on positive
+evidence that it is ours: Chrome shows it in a `Meiva #<id>` group right now**.
+A record alone never closes a page, and a page in no such group (the user's own
+tab, a group titled `Work`, a malformed title) is never touched; a failure to read
+the tabs closes nothing and logs a WARNING. A tab the user drags into a
+`Meiva #<id>` group is, by that rule, the stack's.
+
+A tab in an agent group with no record -- left by a Chrome restart (restored tabs
+get new target ids), by a session restore, or by a version before the ledger --
+is **adopted** for the agent the title names with a fresh default TTL, so the
+worst case is one extra TTL, never forever. Pages the stack creates
+without a group (an isolated browser context, or grouping that failed) carry no
+record and so have no TTL. `renew_page` after a restart matches the agent's
+selected page to its own recorded pages by URL and refuses an ambiguous match.
+
+`AgentTabGroups.close_target` closes by target id through `/json/close/<id>`
+rather than the upstream's `close_page`: chrome-devtools-mcp's page ids restart
+with its process and its output carries no target ids to translate them, and it
+refuses to close its last page, which the ledger instead guards itself (one page
+of the browser is always left open). Closing the target is what a user closing the
+tab does, which the upstream already tolerates.
 
 ## What this cannot fix
 
