@@ -207,6 +207,32 @@ self.meivaUngroupLast = async (targetId, title) => {
 };
 
 // meiva:note
+// Every tab that sits in a tab group, as `{ targetId, title }`: the CDP target id
+// the daemon's page ledger keys on, and the group's title (null when untitled).
+// Read-only, and the title is the daemon's proof that a page belongs to an agent
+// (`Meiva #<id>`): the daemon parses it, this function judges nothing.
+// meiva:link services/desktop/browser/docs/tab-groups.md
+self.meivaGroupedTargets = async () => {
+  const targets = await chrome.debugger.getTargets();
+  const tabs = await chrome.tabs.query({});
+  const groupOf = new Map(tabs.map((t) => [t.id, t.groupId]));
+  const groups = await chrome.tabGroups.query({});
+  const titles = new Map(groups.map((g) => [g.id, g.title]));
+  const grouped = [];
+  for (const target of targets) {
+    if (target.type !== "page" || target.tabId === undefined) {
+      continue;
+    }
+    const groupId = groupOf.get(target.tabId);
+    if (groupId === undefined || groupId === chrome.tabGroups.TAB_GROUP_ID_NONE) {
+      continue;
+    }
+    grouped.push({ targetId: target.id, title: titles.get(groupId) ?? null });
+  }
+  return grouped;
+};
+
+// meiva:note
 // Every open window's tabs in strip order, with the two layout attributes that a
 // browser restart does not always bring back: `pinned` and the tab group's title.
 // Read-only, and the only thing that looks at windows: the stop-time session

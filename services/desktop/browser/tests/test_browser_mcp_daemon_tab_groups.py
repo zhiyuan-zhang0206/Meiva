@@ -4,6 +4,7 @@ import asyncio
 import json
 import socket
 import time
+from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
@@ -12,16 +13,19 @@ from base.clock.tests.fakes import system_clock
 from services.desktop.browser import page_lifecycle
 from services.desktop.browser.mcp_daemon import ChromeMcpDaemon, serve_with_upstream
 from services.desktop.browser.tab_groups.grouping import AgentTabGroups, ExtensionWorker
+from services.desktop.browser.tests.fake_browser import FakeBrowser
 from services.desktop.browser.tests.test_browser_mcp_daemon import (
     FakeUpstream,
     err,
     new_daemon,
+    sweep_twice,
     text_of,
 )
 
 
-class RecordingGroups:
+class RecordingGroups(FakeBrowser):
     def __init__(self, *, order: list[str] | None = None) -> None:
+        super().__init__()
         self.events: list[tuple[str, Any]] = []
         self.snapshots = 0
         self._order = order
@@ -29,17 +33,28 @@ class RecordingGroups:
     async def snapshot(self) -> frozenset[str] | None:
         self.snapshots += 1
         self.events.append(("snapshot", self.snapshots))
-        return frozenset({f"before-{self.snapshots}"})
+        return await super().snapshot()
 
     async def group_new_page(
-        self, agent_id: int, before: frozenset[str] | None, page_id: int | None = None
-    ) -> None:
+        self,
+        agent_id: int,
+        before: frozenset[str] | None,
+        page_id: int | None = None,
+        *,
+        on_grouped: Callable[[str], None] | None = None,
+    ) -> str | None:
         self.events.append(("group", (agent_id, before)))
+        return await super().group_new_page(agent_id, before, page_id, on_grouped=on_grouped)
 
     async def release_page(self, page_id: int) -> None:
         if self._order is not None:
             self._order.append(f"release:{page_id}")
         self.events.append(("release", page_id))
+
+    async def close_target(self, agent_id: int, target_id: str, *, grouped: bool) -> bool:
+        if self._order is not None:
+            self._order.append(f"close_target:{agent_id}")
+        return await super().close_target(agent_id, target_id, grouped=grouped)
 
     async def converge_all(self) -> None:
         self.events.append(("converge", len(self.events)))
@@ -58,7 +73,7 @@ async def test_explicit_new_page_is_grouped_around_the_upstream_call() -> None:
     d, up, groups = _grouped_daemon()
     result = await d.call_tool_for_agent("new_page", {"url": "https://a.example/"}, 7)
     assert not result.is_error
-    assert groups.events == [("snapshot", 1), ("group", (7, frozenset({"before-1"})))]
+    assert groups.events == [("snapshot", 1), ("group", (7, frozenset({"T1"})))]
     assert [c[0] for c in up.calls] == ["new_page"]
 
 
@@ -68,7 +83,7 @@ async def test_first_navigate_auto_created_page_is_grouped() -> None:
     assert not result.is_error
     assert up.pages == {1: "https://a.example/"}
     assert groups.grouped() == [7]
-    assert 1 in d.pages.ttl_deadlines
+    assert d.pages.record_for_page(1) is not None
 
 
 async def test_one_agent_many_pages_and_two_agents_are_told_apart_by_agent_id() -> None:
@@ -97,8 +112,11 @@ async def test_isolated_context_page_is_left_out_of_grouping() -> None:
     )
     assert not result.is_error
     assert up.isolated_contexts == {1: "reg-7"}
-    assert groups.events == []
-    assert 1 in d.pages.ttl_deadlines
+    assert groups.grouped() == []
+    # meiva:note
+    # recorded at creation, never grouped: it is closed at its deadline on the record alone
+    record = d.pages.record_for_page(1)
+    assert record is not None and not record.grouped
 
 
 async def test_a_failed_new_page_is_not_grouped() -> None:
@@ -113,7 +131,7 @@ async def test_a_failed_new_page_is_not_grouped() -> None:
     result = await d.call_tool_for_agent("new_page", {"url": "https://nope.invalid/"}, 7)
     assert result.is_error
     assert groups.grouped() == []
-    assert d.pages.ttl_deadlines == {}
+    assert d.pages.records == {}
 
 
 async def test_agentless_legacy_connection_is_not_grouped() -> None:
@@ -129,7 +147,7 @@ def _closed_local_port() -> int:
         return sock.getsockname()[1]
 
 
-async def test_grouping_failure_leaves_the_page_created_registered_and_selected(
+async def test_grouping_failure_leaves_the_page_created_and_selected_without_a_ttl_record(
     loguru_records: list[dict[str, Any]],
 ) -> None:
     up = FakeUpstream()
@@ -150,7 +168,7 @@ async def test_grouping_failure_leaves_the_page_created_registered_and_selected(
     assert text_of(explicit) == "  1: https://a.example/ [selected]"
     assert d.pages.get_agent_page(7) == 1
     assert d.pages.get_agent_page(8) == 2
-    assert set(d.pages.ttl_deadlines) == {1, 2}
+    assert d.pages.records == {}
     warnings = [r for r in loguru_records if r["level"].name == "WARNING"]
     assert warnings, "a grouping failure must leave a trace"
     assert all("tab group" in r["message"] for r in warnings)
@@ -223,35 +241,33 @@ async def test_a_stuck_grouping_neither_delays_new_page_nor_holds_the_daemon_loc
             groups.cancel_pending()
 
 
-class _CloseObserver(FakeUpstream):
-    def closed_pages(self) -> list[int]:
-        return [args["pageId"] for name, args, _sel in self.calls if name == "close_page"]
-
-
 async def _agent_with_one_page(
     groups: RecordingGroups | None = None,
-) -> tuple[ChromeMcpDaemon, _CloseObserver]:
-    up = _CloseObserver()
-    d = new_daemon(up, tab_groups=groups or RecordingGroups())
+) -> tuple[ChromeMcpDaemon, FakeUpstream, RecordingGroups]:
+    up = FakeUpstream()
+    chrome = groups or RecordingGroups()
+    d = new_daemon(up, tab_groups=chrome)
     await d.call_tool_for_agent("new_page", {"url": "http://localhost:9/dev"}, 7)
     up.calls.clear()
-    return d, up
+    return d, up, chrome
 
 
-async def test_release_closes_the_agents_last_page_through_close_page() -> None:
-    d, up = await _agent_with_one_page()
+async def test_release_closes_every_page_of_the_agent_by_target_not_through_close_page() -> None:
+    d, up, chrome = await _agent_with_one_page()
     await d.call_tool_for_agent("new_page", {"url": "http://localhost:9/dev-2"}, 7)
     up.calls.clear()
     assert await page_lifecycle.release_agent_page(d, 7) == 2
-    assert up.closed_pages() == [1, 2]
+    assert len(chrome.closed) == 2
+    assert [name for name, _args, _sel in up.calls] == []
 
 
-async def test_hard_ttl_reaper_closes_through_close_page() -> None:
-    d, up = await _agent_with_one_page()
-    assert 1 in d.pages.ttl_deadlines
-    d.pages.ttl_deadlines[1] = time.monotonic() - 1.0
-    assert await page_lifecycle.reap_expired_pages(d) == 1
-    assert up.closed_pages() == [1]
+async def test_hard_ttl_reaper_closes_by_target() -> None:
+    d, up, chrome = await _agent_with_one_page()
+    assert d.pages.record_for_page(1) is not None
+    d.pages.set_deadline(d.pages.page_targets[1], d.pages.now() - 1.0)
+    assert await sweep_twice(d) == 1
+    assert len(chrome.closed) == 1
+    assert up.pages == {}
 
 
 async def test_the_public_surface_is_the_grouping_contract_and_one_ungroup() -> None:
@@ -261,8 +277,9 @@ async def test_the_public_surface_is_the_grouping_contract_and_one_ungroup() -> 
     # leaves a saved group that the title lookup can no longer see. The decision
     # about WHICH tab may be ungrouped stays in the extension (`meivaUngroupLast`
     # checks the title and the single member), so this side never names a group.
-    # Keep the surface at four names; a new helper here would be a second write
-    # path to reconcile.
+    # The two reads/closes the page ledger needs (`tab_state`, `close_target`) go
+    # through the same door; keep the surface at these names, a new helper here
+    # would be a second write path to reconcile.
     # meiva:link services/desktop/browser/docs/tab-groups.md
     public = {n for n in dir(AgentTabGroups) if not n.startswith("_")}
     assert public == {
@@ -271,6 +288,9 @@ async def test_the_public_surface_is_the_grouping_contract_and_one_ungroup() -> 
         "release_page",
         "converge_all",
         "cancel_pending",
+        "tab_state",
+        "close_target",
+        "new_target",
     }
 
 
@@ -297,26 +317,24 @@ async def test_close_page_ungroups_the_last_tab_before_the_upstream_closes_it() 
     assert order == ["release:1", "close_page"], order
 
 
-async def test_release_of_an_agents_pages_also_ungroups_each_before_closing() -> None:
+async def test_release_of_an_agents_pages_closes_each_through_the_target_door() -> None:
     # meiva:note
-    # `release_agent_page` (the termination hook) closes through the same door.
+    # `release_agent_page` (the termination hook) closes by target through
+    # `AgentTabGroups.close_target`, which ungroups the last tab itself (see the
+    # tab_groups tests); the upstream's `close_page` is not involved.
     # meiva:link services/desktop/browser/docs/tab-groups.md
     order: list[str] = []
-
-    class OrderedUpstream(FakeUpstream):
-        async def call_tool(self, name: str, args: dict[str, Any]) -> Any:
-            if name == "close_page":
-                order.append("close_page")
-            return await super().call_tool(name, args)
-
     groups = RecordingGroups(order=order)
-    d = new_daemon(OrderedUpstream(), tab_groups=groups)
+    up = FakeUpstream()
+    d = new_daemon(up, tab_groups=groups)
     await d.call_tool_for_agent("new_page", {"url": "https://a.example/"}, 7)
     await d.call_tool_for_agent("new_page", {"url": "https://b.example/"}, 7)
+    up.calls.clear()
 
     await page_lifecycle.release_agent_page(d, 7)
 
-    assert order == ["release:1", "close_page", "release:2", "close_page"], order
+    assert order == ["close_target:7", "close_target:7"], order
+    assert up.calls == []
 
 
 # meiva:note

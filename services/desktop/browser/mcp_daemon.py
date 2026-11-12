@@ -11,8 +11,8 @@
 #   it before forwarding a page-scoped call, cold-starting or returning the no-page error when empty.
 #
 # Page lifetime (2026-09-11 ruling): every page this stack creates carries a hard TTL deadline
-# (`MEIVA_CHROME_PAGE_DEFAULT_TTL_SECONDS`, 24h default) and is closed by the expiry sweep when
-# the deadline passes. `renew_page` moves the deadline to now + ttl (at most 24h per call); see
+# (`MEIVA_CHROME_PAGE_DEFAULT_TTL_SECONDS`, 24h default), kept in a per-home ledger file that
+# survives a daemon restart, and is closed by the expiry sweep when the deadline passes. `renew_page` moves the deadline to now + ttl (at most 24h per call); see
 # `services.desktop.browser.page_lifecycle`. Every page an agent creates is also filed into that
 # agent's Chrome tab group (`services.desktop.browser.tab_groups`, presentation-only).
 
@@ -77,6 +77,7 @@ from services.desktop.browser.tab_groups.grouping import (
     ExtensionWorker,
     staged_extension_dir,
 )
+from services.desktop.browser.tab_groups.page_store import FileRecordStore, page_ledger_path
 
 # meiva:note
 # Multi-MB tool results (screenshot / DOM snapshot) fit on one line.
@@ -235,26 +236,32 @@ class ChromeMcpDaemon:
         return current_page
 
     # meiva:note
-    # Forward a `new_page`, register its TTL deadline, and group it for the agent.
+    # Forward a `new_page` and record its TTL under the target of the page it made
+    # (found between a target snapshot before and after). A page for an agent is
+    # also filed into the agent's tab group, except in an isolated browser context
+    # (extensions cannot see those tabs): that page is recorded, never grouped.
     async def _new_page(
         self, args: dict[str, object], agent_id: int | None
     ) -> types.CallToolResult:
-        group = agent_id is not None
-        if group and _in_isolated_context(args):
-            group = False
+        group = agent_id is not None and not _in_isolated_context(args)
+        if agent_id is not None and not group:
             logger.info(
                 "[browser-mcp] agent {}'s page in isolated context {!r} is not tab-grouped "
                 "(extensions cannot see isolated-context tabs)",
                 agent_id,
                 args["isolatedContext"],
             )
-        before = await self.tab_groups.snapshot() if group else None
+        before = await self.tab_groups.snapshot() if agent_id is not None else None
         result = await self._call("new_page", args)
-        if not result.is_error:
+        if not result.is_error and agent_id is not None:
             created = selected_id(result)
-            self.pages.register_created_page(created, agent_id=agent_id)
-            if group and agent_id is not None:
-                await self.tab_groups.group_new_page(agent_id, before, created)
+            if group:
+                target_id = await self.tab_groups.group_new_page(
+                    agent_id, before, created, on_grouped=self.pages.mark_grouped
+                )
+            else:
+                target_id = await self.tab_groups.new_target(agent_id, before)
+            self.pages.register_created_page(target_id, agent_id, created)
         return result
 
     async def _bootstrap_page(
@@ -534,7 +541,11 @@ async def _serve_daemon_loop(
     daemon_ref: list[ChromeMcpDaemon | None] = [None]
     clients: set[asyncio.Task[None]] = set()
     sock, server = await _open_daemon_socket(home, browser_cdp_port, daemon_ref, clients)
-    pages = PageRegistry(default_ttl_seconds=default_ttl_seconds, clock=clock)
+    pages = PageRegistry(
+        default_ttl_seconds=default_ttl_seconds,
+        clock=clock,
+        store=FileRecordStore(page_ledger_path(home)),
+    )
     async with asyncio.TaskGroup() as tasks:
         gateway = GatewaySession(tasks, browser_cdp_port, access=gateway_access, clock=clock)
         extension_worker = ExtensionWorker(

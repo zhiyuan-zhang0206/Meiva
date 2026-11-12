@@ -170,6 +170,14 @@ async def http_json(url: str) -> object:
 
 
 # meiva:note
+# GET ``url`` and require a success status. For CDP's plain-text endpoints such as
+# ``/json/close/<id>``, whose body is a sentence and not JSON.
+async def http_ok(url: str) -> None:
+    async with httpx.AsyncClient(timeout=_HTTP_TIMEOUT_S) as client:
+        (await client.get(url)).raise_for_status()
+
+
+# meiva:note
 # The browser-level websocket URL of the Chrome on `cdp_port`.
 async def browser_ws_url(cdp_port: int) -> str:
     version = BROWSER_VERSION.validate_python(

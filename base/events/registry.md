@@ -165,7 +165,7 @@ above (or when its name is unregistered); otherwise it stays in the JSONL mirror
 | `memory_index_patrol` | memory indexer patrol pass — paths still behind, consecutive failures, over-limit flag | noise | pending_paths, consecutive_failures, over_limit, last_success_at | — | events | — |
 | `upload_delivery_held` | a delivered upload batch was held after a permanent copy failure or its last copy attempt; nothing retries it and the person has to upload again | anomaly | agent_id, batch_id, reason | — | events | — |
 | `gate_auth_probe_failed` | gate auth probe failed — carries the classification (auth/timeout/network/application) and exception shape | anomaly | category, exception_type, exception_value, status, latency_ms | — | events | — |
-| `chrome_page_ttl_renewed` | Chrome page TTL deadline renewed via the renew_page tool; attributes carry page_id, ttl_s, new_expires_at | observation | — | — | events | — |
+| `chrome_page_ttl_renewed` | Chrome page TTL deadline renewed via the renew_page tool; attributes carry page_id, target_id, ttl_s, new_expires_at | observation | — | — | events | — |
 | `memory_search_rerank` | memory-search rerank skipped candidate notes it could not read; they are ranked out of this search | anomaly | — | — | events | — |
 | `host_stale_running_settled` | hosted boot settle restored rows a previous host instance left running without a task (crash / kill -9); carries n = rows settled | noise | — | — | events | — |
 | `host_dispatcher_subscribed` | hosted dispatcher subscribed to the inbound wake pattern | noise | — | — | events | — |
@@ -356,7 +356,7 @@ above (or when its name is unregistered); otherwise it stays in the JSONL mirror
 |------|------|------|-----------------|------|
 | `shell_ttl_expired` | the TTL reaper killed a persistent shell whose declared TTL passed; attributes carry agent_id, session_id, mode | observation | — | events |
 | `shell_ttl_stale_dropped` | the TTL reaper dropped the tracking row of a persistent shell session its home machine no longer lists; attributes carry agent_id, session_id, machine, created_at, expires_at and evidence (session_gone | machine_absent) | observation | — | events |
-| `chrome_page_ttl_expired` | the browser-mcp TTL sweep closed a Chrome page whose hard deadline passed; attributes carry page_id, url, agent_id (None when no affinity slot still named the page) | observation | — | events |
+| `chrome_page_ttl_expired` | the browser-mcp TTL sweep closed a Chrome page whose hard deadline passed; attributes carry page_id (None for a page created before the daemon restarted), target_id, url, agent_id (the owner) | observation | — | events |
 | `log` | bare log line | noise | msg | events |
 
 ## 5. SSE roles (live channel, not persisted)

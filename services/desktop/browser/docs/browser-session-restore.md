@@ -77,6 +77,25 @@ The line is printed once per restore: `report_pending` is cleared after it.
 Chrome restored itself still counts, because the number answers "how many of the
 recorded pins and grouped tabs are in place".
 
+## Restored tabs and the page TTL
+
+Restored tabs are new CDP targets, so the page TTL ledger
+(`<home>/run/browser-pages.json`, keyed by target id) does not know them. The
+`Meiva #<id>` groups that the reapply (or Chrome itself) puts back let the page sweep
+pass the record of a gone target, with its **original deadline**, to the one restored
+page with the same owner and URL, when no recorded page survived the restart, exactly one gone record and one grouped page
+match and no other page in Chrome has that URL; the first sweep runs 30 s after the
+daemon starts, after the reapply has had time to put the groups back. A restored tab
+that matches nothing, or several tabs with the same URL, is left alone: it is never
+adopted and never closed (it leaks until the user closes it; the leak count is logged).
+
+`meivaApplyLayout` matches tabs by URL in strip order and is unchanged. When a user's
+tab has the same URL as an agent's page, the reapply can file the user's tab into the
+agent's group. The ledger never treats a page in a group as the stack's on that evidence
+alone, so such a tab is not closed; the only residual risk is the one-time migration of
+a first run, which adopts what sat in agent groups at that moment. See
+[tab groups](tab-groups.md).
+
 ## What does not set up a restore
 
 - `--keep-browser`: the browser is never stopped, so nothing is recorded and no
