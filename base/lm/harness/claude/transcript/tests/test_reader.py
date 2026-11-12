@@ -497,6 +497,7 @@ def test_a_batch_reports_the_bytes_it_covers_for_the_writers_transaction_budget(
     reader = ClaudeRecordReader(now_ns=now_ns, claude_home=home, session_id=_session("basic"))
     batch = _read(reader, "main", None)
     assert batch is not None and batch.size == target.stat().st_size
+    assert reader.cli_version == "2.1.322", "the version the rows say, for the stored position"
 
 
 def test_the_sub_agent_listing_is_remembered_until_the_folder_changes(tmp_path: Path) -> None:

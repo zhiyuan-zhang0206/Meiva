@@ -31,6 +31,11 @@ from base.log import logger
 # spend of that read (a log, not a table: nothing can tell what was logged), but not the replies: `recover`, run when the
 # writer starts, offers the latest stored replies to the same idempotent capture again.
 #
+# A message the CLI cut short (an interrupt) has only a placeholder count in the record, so it is not priced: the
+# accounting misses what such a message cost, which is a known gap, and `harness_timeline_usage_unreliable` counts
+# those messages (one event each, per record and message) so that the gap is a number. A model the catalog does not
+# price is warned about once per runtime, not once per message (the usage rows themselves are all written, unpriced).
+#
 # Usage is logged when the entry is read (never back-filled into a turn that was settled), once per
 # `message.id`, for every reliable message: the main record's as `usage_kind="agent"` and a sub-agent's as
 # `usage_kind="agent_subagent"` with `parent_call_id` naming the call that started it when known, priced on the
@@ -45,6 +50,8 @@ MAIN_USAGE_KIND = "agent"
 SUBAGENT_USAGE_KIND = "agent_subagent"
 OWED_LIMIT = 256
 LOGGED_LIMIT = 8_192
+MODELS_LIMIT = 256
+UNMATCHED_LOG_EVERY = 100
 RECOVER_ROWS = 500
 
 
@@ -69,7 +76,9 @@ class TimelineEffects:
         self._owed_replies: deque[TimelineItem] = deque(maxlen=OWED_LIMIT)
         self._owed_usage: deque[MessageUsage] = deque(maxlen=OWED_LIMIT)
         self._logged: RecentSet[tuple[str, str]] = RecentSet(LOGGED_LIMIT)
-        self._unmatched: RecentSet[str] = RecentSet(LOGGED_LIMIT)
+        self._unmatched = 0
+        self._models: RecentSet[str] = RecentSet(MODELS_LIMIT)
+        self._unreliable: RecentSet[tuple[str, str]] = RecentSet(LOGGED_LIMIT)
 
     def bind(self, ctx: MeivaContext) -> None:
         self._ctx = ctx
@@ -142,14 +151,26 @@ class TimelineEffects:
                 detail=report.detail,
             )
         for key in commit.plan.unmatched_inputs:
-            if key in self._unmatched:
+            self._unmatched += 1
+            if self._unmatched % UNMATCHED_LOG_EVERY == 1:
+                logger.warning(
+                    "the transcript showed an input this process did not send",
+                    event="harness_timeline_unmatched_input",
+                    agent_id=self._agent_id,
+                    entry_key=key,
+                    seen_in_this_session=self._unmatched,
+                )
+        for spend in commit.plan.unreliable_usage:
+            ident = (spend.record, spend.message_ref)
+            if ident in self._unreliable:
                 continue
-            self._unmatched.add(key)
-            logger.warning(
-                "the transcript showed an input this process did not send",
-                event="harness_timeline_unmatched_input",
+            self._unreliable.add(ident)
+            logger.info(
+                "a model message was cut short and its spend is not in the accounting",
+                event="harness_timeline_usage_unreliable",
                 agent_id=self._agent_id,
-                entry_key=key,
+                record=spend.record,
+                model=spend.model,
             )
 
     def _log_usage(self, ctx: MeivaContext, spend: MessageUsage) -> None:
@@ -159,6 +180,8 @@ class TimelineEffects:
         catalog = ctx.require_catalog()
         model = resolve_pricing_model(spend.model or ctx.require_agent().brain.llm_model, catalog)
         sub = spend.record != MAIN_RECORD
+        known = model in self._models
+        self._models.add(model)
         _ = log_usage_fields(
             model,
             UsageFields(
@@ -170,6 +193,7 @@ class TimelineEffects:
                 for_agent_id=self._agent_id,
                 calls=1,
                 parent_call_id=spend.parent_call_id,
+                unpriced_already_reported=known,
             ),
             usage_kind=SUBAGENT_USAGE_KIND if sub else MAIN_USAGE_KIND,
             catalog=catalog,

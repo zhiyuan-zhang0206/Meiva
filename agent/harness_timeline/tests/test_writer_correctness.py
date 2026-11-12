@@ -8,6 +8,7 @@
 from __future__ import annotations
 
 import asyncio
+from uuid import uuid4
 
 import pytest
 from psycopg_pool import AsyncConnectionPool
@@ -28,7 +29,7 @@ from base.agents.history.timeline_item import TimelineItem
 from base.clock.tests.fakes import clock_over
 from base.clock.tests.manual_timers import ManualTimers
 from base.lm.harness.claude.transcript.tests.support import entries_of
-from base.lm.harness.session.transcript.drafts import SentInput
+from base.lm.harness.session.transcript.drafts import InboundPart, SentInput
 from base.lm.harness.session.transcript.entries import (
     AgentText,
     AnomalyKind,
@@ -39,6 +40,7 @@ from base.lm.harness.session.transcript.entries import (
     ToolCall,
     TurnEnd,
 )
+from base.native_process.runtime_incarnation import RuntimeIncarnation
 
 
 async def _history(pool: AsyncConnectionPool, agent_id: int) -> None:
@@ -206,3 +208,51 @@ async def test_a_session_that_is_not_known_yet_reads_nothing_and_shows_the_input
     known[0] = "session-1"
     assert await writer.read_now()
     assert writer.undelivered() == ()
+
+
+async def test_one_input_that_carried_several_rows_settles_all_of_them_in_one_commit(
+    aops_pool: AsyncConnectionPool,
+) -> None:
+    agent_id, incarnation = await make_agent(aops_pool)
+    first = await make_inbound_row(aops_pool, agent_id)
+    second = await make_inbound_row(aops_pool, agent_id, status="pending")
+    reader = ScriptedReader({"main": entries_of("basic")})
+    reader.visible["main"] = 6
+    writer = make_writer(aops_pool, agent_id, incarnation, reader, [])
+    item = TimelineItem(item_id="x", kind="inbound_chat", payload="hello", inbound_id=first)
+    writer.register_sent(
+        SentInput(key="k1", wire_id=BASIC, text="hello", parts=(InboundPart("p1", "hello"),)),
+        items={"p1": item},
+        inbound_ids=(first, second),
+    )
+
+    assert await writer.read_now()
+
+    assert [await status_of(aops_pool, first), await status_of(aops_pool, second)] == [
+        "done",
+        "done",
+    ]
+
+
+async def test_a_fenced_writer_that_is_bound_a_valid_incarnation_commits_once_and_runs_its_effects_once(
+    aops_pool: AsyncConnectionPool,
+) -> None:
+    agent_id, incarnation = await make_agent(aops_pool)
+    row = await make_inbound_row(aops_pool, agent_id)
+    reader = ScriptedReader({"main": entries_of("basic")})
+    reader.visible["main"] = len(reader.records_data["main"])
+    committed: list[Committed] = []
+    stale = RuntimeIncarnation(agent_id, uuid4(), uuid4())
+    writer = make_writer(aops_pool, agent_id, stale, reader, committed)
+    send_input(writer, BASIC, "k1", row)
+
+    assert not await writer.read_now() and writer.fenced
+    assert not await writer.read_now(), "fenced, it keeps its plan and writes nothing"
+    assert committed == [] and await timeline_of(aops_pool, agent_id) == []
+
+    writer.bind_incarnation(incarnation)
+    assert await writer.read_now()
+    assert not await writer.read_now()
+
+    assert len(committed) == 1 and writer.closed_turns == 1
+    assert await status_of(aops_pool, row) == "done"

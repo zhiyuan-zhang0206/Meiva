@@ -357,11 +357,10 @@ class ForegroundRun:
         return []
 
     # meiva:note
-    # The one rule of delivery on the transcript path, applied to an input the event stream reports as refused or
-    # lost: the record is read once more, and the input has been delivered if the record shows it (the writer has
-    # then settled it in the transaction that wrote its entry). An input the record does not show goes back to the
-    # queue. A record that cannot be read fails the invocation, and the inputs are then decided by
-    # `retire_unconfirmed` the same way. On the event path there is no record, and the answer is no.
+    # The one rule of delivery on the transcript path, for an input the stream reports refused or lost: the record is
+    # read once more, and the input has been delivered if it shows it (the writer has then settled it). One the record
+    # does not show goes back to the queue; a record that cannot be read fails the invocation, and `retire_unconfirmed`
+    # decides the same way. On the event path there is no record, and the answer is no.
     async def _record_shows(self, handed: Handed) -> bool:
         timeline = self._timeline
         if timeline is None:
@@ -619,6 +618,18 @@ class ForegroundRun:
         self._restore_folded(handed)
 
     # meiva:note
+    # The session refused the batch, but the transcript path takes the record's word: an input it already shows is
+    # settled by the writer and not taken back (sending it again is a second copy); the others go back.
+    async def _take_back_unshown(self, handed: Sequence[Handed]) -> None:
+        shown = [h for h in handed if await self._record_shows(h)]
+        keys = frozenset(h.key for h in shown)
+        self.fg = self.fg.withdraw(keys)
+        self._forget(shown)
+        for entry in shown:
+            _ = self._folded.pop(entry.key, None)
+        await self._take_back([h for h in handed if h.key not in keys])
+
+    # meiva:note
     # A refused, lost or untaken wake input is handed over again with what rode in it: the synthetic
     # inputs go back in front of the pending ones and fold into the next wake input the same way.
     def _restore_folded(self, handed: Sequence[Handed]) -> None:
@@ -719,7 +730,7 @@ class ForegroundRun:
         try:
             await self._bridge.deliver(inputs, compaction_note=compaction_note)
         except HarnessNotDeliveredError:
-            await self._take_back(handed)
+            await self._take_back_unshown(handed)
             raise
         except (HarnessClosedError, HarnessSetupError, ModelInterruptedError):
             raise

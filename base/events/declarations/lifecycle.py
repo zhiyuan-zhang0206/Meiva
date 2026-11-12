@@ -248,6 +248,12 @@ EVENTS: dict[str, EventSpec] = {
         "read and commits no plan, so that a writer of the same agent in a new runtime is never one of two)",
         tier="anomaly",
     ),
+    "harness_timeline_usage_unreliable": telemetry_event(
+        "harness_timeline_usage_unreliable",
+        "a model message of a transcript-sourced session was cut short (an interrupt): the record holds only "
+        "a placeholder count, so its spend is not in the accounting; one event per message, to count the gap",
+        tier="observation",
+    ),
     "harness_timeline_position_lost": telemetry_event(
         "harness_timeline_position_lost",
         "the transcript no longer holds the position stored for a record of a transcript-sourced timeline "

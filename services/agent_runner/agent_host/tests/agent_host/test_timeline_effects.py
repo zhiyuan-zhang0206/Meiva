@@ -184,3 +184,34 @@ async def test_replies_committed_before_a_crash_are_offered_to_the_capture_again
     await effects.recover(stored)
 
     assert store.captured == ["h4.0", "h7.0"]
+
+
+async def test_a_message_cut_short_is_counted_not_priced_and_a_model_without_a_price_is_warned_once(
+    loguru_records: LogRecords,
+) -> None:
+    ctx = runtime(FakeEngine()).context
+    effects = TimelineEffects(7, Published())
+    effects.bind(ctx)
+    cut = MessageUsage(
+        "main", "m-cut", "t", None, Usage(input_tokens=1, output_tokens=1), "x", False
+    )
+    unpriced = [
+        MessageUsage(
+            "main",
+            f"m{i}",
+            "t",
+            None,
+            Usage(input_tokens=5, output_tokens=2),
+            "no-such-model",
+            True,
+        )
+        for i in range(3)
+    ]
+    plan = WritePlan(usage=tuple(unpriced), unreliable_usage=(cut, cut))
+    await effects.after_commit(Committed(plan, ()))
+    assert len(loguru_records.events("harness_timeline_usage_unreliable")) == 1, (
+        "one event per message"
+    )
+    assert len(loguru_records.events("llm_usage")) == 3, "the unpriced messages are all written"
+    warned = [m for m in loguru_records.messages("WARNING") if "is unpriced" in m]
+    assert len(warned) == 1, "and warned about once"
