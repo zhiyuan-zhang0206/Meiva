@@ -24,7 +24,7 @@ export interface ContextMeterProps {
 
 // meiva:note
 // The inspector's context readout: a fixed-width (`w-32`) gauge whose fill
-// turns amber past the soft (wind-down) threshold and red past the hard
+// turns red past either the soft (wind-down) threshold or the hard
 // (force-compact) ceiling, with tick marks at both, plus an optional numeric
 // summary. The soft/hard values are the agent model's own — a fraction of its
 // context window (see `base/lm/context_budget.py`), so a 200K-window model
@@ -53,15 +53,11 @@ export function ContextMeter({
   const pct = (v: number) => Math.min(100, Math.max(0, (v / maxContextTokens) * 100));
   const fillPct = hasWindow ? pct(contextTokens) : 0;
 
-  // Fill color communicates urgency: neutral below soft, amber in the
-  // wind-down band, red once past the force-compact ceiling.
+  // meiva:note
+  // Both existing warning bands use red; ordinary usage follows foreground.
   const overHard = hasThresholds && contextTokens > hardCompactTokens;
   const overSoft = hasThresholds && contextTokens > softCompactTokens;
-  const fillColor = overHard
-    ? "bg-destructive"
-    : overSoft
-      ? "bg-amber-500"
-      : "bg-muted-foreground/60";
+  const fillColor = overHard || overSoft ? "bg-destructive" : "bg-foreground";
 
   const label = hasThresholds
     ? t("contextWindDown", {
@@ -100,7 +96,7 @@ export function ContextMeter({
             <>
               <span
                 data-testid="context-meter-soft-mark"
-                className="absolute inset-y-0 w-px bg-amber-500/80"
+                className="absolute inset-y-0 w-px bg-muted-foreground/80"
                 style={{ left: `${pct(softCompactTokens)}%` }}
               />
               <span

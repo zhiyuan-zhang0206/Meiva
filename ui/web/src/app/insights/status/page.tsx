@@ -84,22 +84,23 @@ export default function StatusPage() {
 
 // ── shared status verdicts ──
 //
+// meiva:note
 // One machine → one (label, tone) verdict, used by the gateway card and the
-// runner table alike. Colors: green = online/running, amber = paused,
+// runner table alike. Colors: green = online/running, neutral = paused,
 // red = error (offline / identity mismatch), muted = deliberate stop / unknown.
 
 type StatusTone = "ok" | "warn" | "error" | "muted";
 
 const TONE_TEXT: Record<StatusTone, string> = {
   ok: "text-green-600 dark:text-green-400",
-  warn: "text-amber-600 dark:text-amber-400",
+  warn: "text-muted-foreground",
   error: "text-destructive",
   muted: "text-muted-foreground",
 };
 
 const TONE_DOT: Record<StatusTone, string> = {
   ok: "bg-green-500",
-  warn: "bg-amber-500",
+  warn: "bg-muted-foreground",
   error: "bg-destructive",
   muted: "bg-muted-foreground",
 };
@@ -140,7 +141,7 @@ function StatusText({ m, runningLabel }: { m: MachineStatus; runningLabel: "runn
       {v.label === "running" ? t(runningLabel) : t(v.label)}
       {codeDrift && (
         <span
-          className="text-amber-600 dark:text-amber-400"
+          className="text-muted-foreground"
           title={t("codeDrift", { running: m.running_sha?.slice(0, 7) ?? "?", head: m.head_sha?.slice(0, 7) ?? "?" })}
         >
           ⚠{m.running_sha?.slice(0, 7)}
@@ -188,7 +189,7 @@ function ServicesPanel({ data }: { data: ClusterPanel }) {
           ].filter(Boolean).join(" + ") || t("noCapability"),
         })}
         {data.current_paused && (
-          <span className="ml-1 text-amber-600 dark:text-amber-400">{t("pausedDetail")}</span>
+          <span className="ml-1 text-muted-foreground">{t("pausedDetail")}</span>
         )}
       </div>
 
@@ -223,7 +224,7 @@ function GatewayCard({ m, currentMachine }: { m: MachineStatus; currentMachine: 
           <div className="mt-0.5 text-sm font-medium">
             {m.name}
             {m.is_staging && (
-              <span className="ml-1.5 rounded-sm border border-amber-500/50 px-1 text-[10px] font-normal text-amber-600 dark:text-amber-400" title={t("stagingTitle")}>
+              <span className="ml-1.5 rounded-sm border border-border px-1 text-[10px] font-normal text-muted-foreground" title={t("stagingTitle")}>
                 {t("staging")}
               </span>
             )}
@@ -277,7 +278,7 @@ function AgentRunnersCard({ runners }: { runners: MachineStatus[] }) {
               <TableCell className="font-medium">
                 {m.name}
                 {m.is_staging && (
-                  <span className="ml-1.5 rounded-sm border border-amber-500/50 px-1 text-[10px] font-normal text-amber-600 dark:text-amber-400" title={t("stagingTitle")}>
+                  <span className="ml-1.5 rounded-sm border border-border px-1 text-[10px] font-normal text-muted-foreground" title={t("stagingTitle")}>
                     {t("staging")}
                   </span>
                 )}

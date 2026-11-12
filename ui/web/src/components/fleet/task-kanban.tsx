@@ -221,7 +221,7 @@ function KanbanCard({
             )}
           </span>
         ) : (
-          <span className="text-amber-500">{t("unowned")}</span>
+          <span className="text-muted-foreground">{t("unowned")}</span>
         )}
       </div>
     </div>

@@ -68,7 +68,16 @@ matching the rail behaviour they mirror.
 
 The collapsed rail's restore control and a collapsed right panel's reopen control are pinned to HeaderBar's own edges, never to the centred conversation column.
 
-The restore control also carries the unresolved-alert count (`alertCount`, a count bubble at its top-right corner, nothing at zero) and names it in its label: the rail is the one surface that disappears when collapsed, so the count that leads the sidebar's icon row would otherwise vanish with it (user 2026-10-21). The phone's menu button, which opens the same sidebar as a drawer, carries the same bubble, because a closed drawer hides the row for the same reason. It is the only signal a closed sidebar shows — no agent list, status dots or other badges.
+The restore control carries the unresolved-alert count and names it in its label,
+so collapsing the desktop rail keeps alert visibility (user 2026-10-21). The
+phone's menu button keeps the same alert-first behavior. With no alerts, the
+phone alone shows an orange attention count: unread agents, counted once each,
+plus individual unanswered questions (user 2026-11-12). A batch of questions
+contributes each unanswered question. The count includes eligible unread
+publications of non-live agents and is independent of list display limits.
+Known zero stays quiet; loading and read failure use neutral unknown markers
+with accessible labels. Reads, answers and reconnects refresh the snapshot.
+Desktop restore controls continue to show alerts alone.
 
 ## Column frame
 

@@ -1,5 +1,6 @@
 import type {
   QuestionsFeed,
+  AttentionCounts,
   AgentInspectStatistics,
   AgentInspectLive,
   InspectWidget,
@@ -200,6 +201,7 @@ export function createApi(http: Http) {
     // meiva:note
     // One agent's whole open set, in question id order: the answer form needs exactly that set, so it
     // is not read from the fleet-wide feed, which the server cuts at a display limit.
+    getAttentionCounts: (): Promise<AttentionCounts> => f("/api/attention/counts").then(ok<AttentionCounts>),
     getAgentQuestions: (agentId: number): Promise<QuestionsFeed> => {
       return f(agentQuestionsPath(agentId))
         .then(ok<QuestionsFeed["awaiting"]>)

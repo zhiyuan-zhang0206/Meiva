@@ -256,7 +256,7 @@ export function paintUnits(p: PaintCtx, layout: RowLayout, state: PaintState, de
 }
 
 const BLUE = "#3b82f6";
-const AMBER = "#f59e0b";
+const SLATE = "#64748b";
 
 /** The Context size row: one bar per block a request has read, as tall as the context through it, sessions alternating in color. */
 export function paintBars(p: PaintCtx, layout: RowLayout, top: number, state: PaintState, deco: RowDeco) {
@@ -272,7 +272,7 @@ export function paintBars(p: PaintCtx, layout: RowLayout, top: number, state: Pa
     return { unit, lifted, hovered, height: heightOf(key) };
   };
   const colorOf = (s: NonNullable<ReturnType<typeof stateOf>>) => {
-    const hue = s.unit.session % 2 === 0 ? BLUE : AMBER;
+    const hue = s.unit.session % 2 === 0 ? BLUE : SLATE;
     const solid = mix(hue, s.unit.session % 2 === 0 ? 0.7 : 0.8, "var(--card)");
     return state.selection !== null && !s.lifted && !s.hovered ? mix(solid, DIM_SHARE, p.trackBg) : solid;
   };

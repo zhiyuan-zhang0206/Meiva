@@ -4,5 +4,8 @@
   "insights": "Insights",
   "control": "Control",
   "backToAgents": "Back to agents",
-  "openOkfGraph": "Open OKF graph"
+  "openOkfGraph": "Open OKF graph",
+  "pendingAttention": "{count} pending updates and questions",
+  "attentionUnavailable": "Pending updates and questions unavailable",
+  "attentionLoading": "Checking pending updates and questions"
 }

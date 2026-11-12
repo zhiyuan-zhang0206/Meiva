@@ -34,6 +34,10 @@ interface Props {
   // meiva:link ui/web/src/docs/frontend-components/home-shell-chrome/home-shell-chrome.md
   alertCount?: number;
   // meiva:note
+  // Exact unread-agent + unanswered-question total, only shown on the phone.
+  mobileAttentionCount?: number | null;
+  mobileAttentionState?: "ready" | "loading" | "error";
+  // meiva:note
   // A control that belongs to the viewport's right edge rather than to the
   // centred conversation column: the home page passes the reopen control of a
   // collapsed right panel here (user 2026-10-20).
@@ -46,10 +50,11 @@ interface Props {
   maxWidthCss?: string;
 }
 
-export function HeaderBar({ label, onOpenSidebar, sidebarCollapsed, onToggleSidebar, alertCount = 0, pinnedRight, children, maxWidthCss }: Props) {
+export function HeaderBar({ label, onOpenSidebar, sidebarCollapsed, onToggleSidebar, alertCount = 0, mobileAttentionCount = 0, mobileAttentionState = "ready", pinnedRight, children, maxWidthCss }: Props) {
   const t = useTranslations("nav");
   const sidebarT = useTranslations("sidebar");
   const alertsT = useTranslations("alerts");
+  const attentionCount = mobileAttentionCount ?? 0;
 
   // meiva:note
   // While the sidebar is collapsed its restore button belongs to the viewport's
@@ -112,12 +117,24 @@ export function HeaderBar({ label, onOpenSidebar, sidebarCollapsed, onToggleSide
             aria-label={
               alertCount > 0
                 ? `${t("openSidebar")}, ${alertsT("unresolvedAlerts", { count: alertCount })}`
-                : t("openSidebar")
+                : mobileAttentionState !== "ready"
+                  ? `${t("openSidebar")}, ${t(mobileAttentionState === "error" ? "attentionUnavailable" : "attentionLoading")}`
+                : attentionCount > 0
+                  ? `${t("openSidebar")}, ${t("pendingAttention", { count: attentionCount })}`
+                  : t("openSidebar")
             }
           >
             <Menu className={ICON_SIZE_CLASS} />
             {alertCount > 0 ? (
               <AlertsCountPill count={alertCount} testId="mobile-sidebar-alert-count" />
+            ) : mobileAttentionState !== "ready" ? (
+              <span data-testid="mobile-sidebar-attention-unknown" className="absolute -right-0.5 -top-0.5 rounded-full bg-muted px-1 text-[10px] font-semibold leading-4 text-muted-foreground">
+                {mobileAttentionState === "error" ? "?" : "…"}
+              </span>
+            ) : attentionCount > 0 ? (
+              <span data-testid="mobile-sidebar-attention-count" className="absolute -right-0.5 -top-0.5 rounded-full bg-meiva-sunset-orange px-1 text-[10px] font-semibold tabular-nums leading-4 text-white">
+                {attentionCount > 99 ? "99+" : attentionCount}
+              </span>
             ) : null}
           </button>
           <span className="truncate">{label}</span>

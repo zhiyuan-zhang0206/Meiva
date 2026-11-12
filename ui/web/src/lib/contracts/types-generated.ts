@@ -1007,6 +1007,22 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/attention/counts": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["get_attention_counts_api_attention_counts_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/keyed/v1/agents/{agent_id}/questions/answers": {
         parameters: {
             query?: never;
@@ -2569,6 +2585,10 @@ export interface components {
             parent: number;
             priority: components["schemas"]["Priority"];
             remind_interval_seconds?: number | null;
+        };
+        AttentionCounts: {
+            unread_agents: number;
+            open_questions: number;
         };
         AvailabilityReason: "unknown" | "host_unavailable" | "awaiting_admission" | "admitted" | "launch_unreachable" | "launch_rejected" | "launch_unknown";
         Body_stage_upload_api_keyed_v1_agents__agent_id__uploads_staged_post: {
@@ -6112,6 +6132,25 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_attention_counts_api_attention_counts_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AttentionCounts"];
                 };
             };
         };

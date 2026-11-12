@@ -11,7 +11,7 @@ from fastapi import APIRouter, Query, Request
 from psycopg.rows import class_row
 from psycopg_pool import ConnectionPool
 
-from gateway.agents.schemas import QuestionItem, QuestionsFeed
+from gateway.agents.schemas import AttentionCounts, QuestionItem, QuestionsFeed
 from gateway.http.config import gateway_config, gateway_state
 
 router = APIRouter()
@@ -74,3 +74,26 @@ async def get_questions_feed(
         limit = gateway_config(request).display.questions_open_default_limit
     awaiting = await asyncio.to_thread(open_questions, gateway_state(request).db_pool, limit)
     return QuestionsFeed(awaiting=awaiting)
+
+
+# meiva:note
+# Count unread agents once and unresolved question rows in one snapshot.
+def attention_counts(pool: ConnectionPool) -> AttentionCounts:
+    with pool.connection() as conn, conn.cursor(row_factory=class_row(AttentionCounts)) as cur:
+        cur.execute(
+            "SELECT (SELECT COUNT(*) FROM agents a WHERE EXISTS ("
+            "SELECT 1 FROM agent_publications m WHERE m.agent_id = a.id "
+            "AND m.content IS NOT NULL AND m.id > COALESCE(("
+            "SELECT seen_id FROM agent_publication_seen WHERE agent_id = a.id), 0))) AS unread_agents, "
+            "(SELECT COUNT(*) FROM agent_questions "
+            "WHERE resolved_at IS NULL AND question IS NOT NULL) AS open_questions"
+        )
+        row = cur.fetchone()
+        if row is None:
+            raise RuntimeError("Attention count query returned no row")
+        return row
+
+
+@router.get("/api/attention/counts")
+async def get_attention_counts(request: Request) -> AttentionCounts:
+    return await asyncio.to_thread(attention_counts, gateway_state(request).db_pool)

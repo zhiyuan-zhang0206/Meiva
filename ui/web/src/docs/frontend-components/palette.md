@@ -6,11 +6,27 @@ the two lists equal, and a skin (plugin theme pack) may repaint any of them.
 
 ## The light block: Crisp Daylight
 
-Achromatic neutral daylight ramp (`R = G = B`, zero yellow cast and zero blue cast) anchored with Brand Sunset Orange (`--meiva-sunset-orange: #ED8755`) focus rings:
+Achromatic neutral daylight ramp (`R = G = B`, zero yellow cast and zero blue cast) with neutral focus rings:
 - Canvas (`--background` / `--theme-color`), cards (`--card`), and popovers (`--popover`) are pure `#FFFFFF`;
 - Sidebar (`--sidebar`) sits on neutral `#F7F7F7` with `--sidebar-accent` on `#E6E6E6` while `.agent-row-pill-active` paints `#FFFFFF` Crisp Card pills above the rail;
 - Muted/secondary surfaces (`--muted` / `--secondary` / `--accent`) use `#F3F3F3` and borders (`--border` / `--input` / `--sidebar-border`) use `#E5E5E5`;
 - Primary foreground (`--foreground` / `--primary`) uses `#2E2E2E`, muted foreground (`--muted-foreground`) uses `#666666`, and sidebar active foreground (`--sidebar-foreground` / `--sidebar-accent-foreground`) uses softened charcoal `#3B3B3B`.
+
+## Attention and interaction color
+
+Orange is reserved for unread updates, pending questions and Task Priority. Focus
+rings, selected controls, running-state dots and optional chart accents use
+neutral tones. Keyboard focus remains visible, including text fields whose
+`:focus-visible` state can persist after a mouse click. The startup connection
+form follows the same neutral focus convention.
+
+Usage cards show normal values in theme foreground and existing `warn`/`error`
+states in destructive red. The context gauge likewise uses foreground below its
+existing thresholds and red after either threshold; its soft marker is neutral.
+Thresholds, values and status labels retain their original meaning. Operational
+warnings and unconfirmed states keep their labels with neutral surfaces; errors
+remain red. Fixed brand artwork, syntax-highlighted content and the independent
+Computer Use screen marker keep their own color requirements.
 
 ## The dark block: Coal Black & Moonlight White
 

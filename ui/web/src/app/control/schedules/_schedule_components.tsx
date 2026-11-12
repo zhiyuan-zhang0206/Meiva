@@ -33,10 +33,10 @@ function schedulePresentation(schedule: ScheduleSummary) {
   if (schedule.placement_status !== "ok") return { label: "needsAttention", tone: "bg-destructive/10 text-destructive" } as const;
   if (schedule.status === "error") return { label: "needsAttention", tone: "bg-destructive/10 text-destructive" } as const;
   if (schedule.status === "completed") return { label: "completedState", tone: "bg-muted text-muted-foreground" } as const;
-  if (!schedule.enabled && schedule.status === "running") return { label: "stopUnconfirmed", tone: "bg-amber-500/10 text-amber-700 dark:text-amber-300" } as const;
+  if (!schedule.enabled && schedule.status === "running") return { label: "stopUnconfirmed", tone: "bg-muted text-muted-foreground" } as const;
   if (!schedule.enabled && schedule.status === "stopped") return { label: "stoppedState", tone: "bg-muted text-muted-foreground" } as const;
   if (schedule.enabled && schedule.status === "running") return { label: "enabledState", tone: "bg-blue-500/10 text-blue-700 dark:text-blue-300" } as const;
-  if (schedule.enabled && schedule.status === "stopped") return { label: "startUnconfirmed", tone: "bg-amber-500/10 text-amber-700 dark:text-amber-300" } as const;
+  if (schedule.enabled && schedule.status === "stopped") return { label: "startUnconfirmed", tone: "bg-muted text-muted-foreground" } as const;
   return { label: "unknownState", tone: "bg-muted text-muted-foreground" } as const;
 }
 

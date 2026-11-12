@@ -156,6 +156,7 @@ export type OpenQuestion = Schemas["OpenQuestion"];
 export type QuestionItem = Schemas["QuestionItem"];
 // meiva:note
 // The unresolved-questions feed (GET /api/questions).
+export type AttentionCounts = Schemas["AttentionCounts"];
 export type QuestionsFeed = Schemas["QuestionsFeed"];
 export type AnswerQuestions = Schemas["AnswerQuestions"];
 export type QuestionResult = Schemas["QuestionResult"];

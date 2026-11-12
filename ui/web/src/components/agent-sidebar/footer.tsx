@@ -339,8 +339,7 @@ function PluginStatCard({ card }: { card: PluginStatCardModel }) {
       <span
         className={cn(
           "whitespace-pre-line break-words text-sm font-medium leading-5 tabular-nums",
-          card.status === "error" && "text-destructive",
-          card.status === "warn" && "text-amber-600 dark:text-amber-400",
+          (card.status === "error" || card.status === "warn") ? "text-destructive" : "text-foreground",
         )}
       >
         {card.value ?? "—"}

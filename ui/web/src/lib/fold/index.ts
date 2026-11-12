@@ -17,6 +17,8 @@ import { foldTasks, TASKS_QUERY_KEY } from "./tasks";
 import type { FoldInvalidation, FoldOutcome, FoldWrite } from "./types";
 import { NO_FOLD } from "./types";
 
+export const ATTENTION_COUNTS_KEY = ["attention-counts"] as const;
+
 /** Cache families whose snapshots are repaired by the global system stream.
  * Reconnect invalidates only these owners; unrelated server data such as
  * settings, config, and inspector aggregates did not miss global-fold events. */
@@ -27,6 +29,7 @@ export const RECONNECT_QUERY_KEYS: readonly (readonly unknown[])[] = [
   ["to-user"],
   ["user-messages"],
   QUESTIONS_QUERY_KEY,
+  ATTENTION_COUNTS_KEY,
   FLEET_GRAPH_KEY_PREFIX,
   TASKS_QUERY_KEY,
 ];
@@ -78,6 +81,9 @@ export function foldAgainstCache(
   const invalidations: FoldInvalidation[] = [];
 
   invalidations.push(...foldAgents(ev).invalidations);
+  if (ev.role === "agent_updated" || ev.role === "question_asked" || ev.role === "question_resolved") {
+    invalidations.push({ key: ATTENTION_COUNTS_KEY });
+  }
 
   if (ev.role === "agent_updated") {
     invalidations.push({ key: ["user-messages", ev.agent_id] });
