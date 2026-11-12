@@ -93,10 +93,12 @@ async def aget_next_harness_message_seq(conn: AsyncConnection, agent_id: int) ->
 
 # meiva:note
 # The statement of `aget_harness_call_item_ids` (parameters: the agent id, the list of call ids), public so that a
-# test can ask the planner which index answers it.
+# test can ask the planner which index answers it. The pair `(agent_id, call_id)` is compared against the ids, which
+# the planner can only answer through the partial index on that pair, one probe per id; `agent_id = ... AND
+# call_id = ANY(...)` lets it walk all of the agent's rows and filter when its statistics say the agent has none.
 HARNESS_CALL_ITEMS_SQL = (
-    "SELECT call_id, MAX(seq) FROM agent_harness_messages WHERE agent_id = %s "
-    "AND call_id IS NOT NULL AND call_id = ANY(%s) GROUP BY 1"
+    "SELECT call_id, MAX(seq) FROM agent_harness_messages "
+    "WHERE (agent_id, call_id) IN (SELECT %s, unnest(%s::text[])) GROUP BY 1"
 )
 
 

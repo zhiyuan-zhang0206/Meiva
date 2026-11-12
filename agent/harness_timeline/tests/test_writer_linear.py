@@ -103,7 +103,7 @@ class CountingCursor(AsyncCursor[tuple[object, ...]]):
         LOG.statements.append(
             (text.lstrip().split(None, 1)[0].upper(), max(self.rowcount, 0), after - before)
         )
-        LOG.call_lookups += "call_id = ANY" in text
+        LOG.call_lookups += "(agent_id, call_id) IN" in text
 
 
 def _line(row: dict[str, object]) -> str:
@@ -352,6 +352,24 @@ async def _stored_facts(pool: AsyncConnectionPool[Any], agent_id: int) -> int:
         return await _scalar(cursor)
 
 
+# meiva:note
+# Rows of other agents in the same table with the planner's statistics taken, as a database that has served other agents
+# (a shared test database, a cluster) is: a lookup by the agent's own keys must not depend on the table being empty
+# of anyone else's rows, where a plan that walks all of the agent's rows and filters would cost more every round.
+async def _other_agents_rows(pool: AsyncConnectionPool[Any]) -> None:
+    for _ in range(8):
+        other, _incarnation = await _agent(pool)
+        async with pool.connection() as conn:
+            await conn.execute(
+                "INSERT INTO agent_harness_messages (agent_id, seq, harness, item, source_key) "
+                "SELECT %s, g, 'claude_code', '{\"kind\": \"agent_code\"}'::jsonb, 'k' || g "
+                "FROM generate_series(0, 6000) AS g",
+                (other,),
+            )
+    async with pool.connection() as conn:
+        await conn.execute("ANALYZE")
+
+
 async def _long_session(db_url: str, tmp_path: Path, calls_kept: int) -> None:
     session = rows("basic")[0]["sessionId"]
     assert isinstance(session, str)
@@ -370,6 +388,7 @@ async def _long_session(db_url: str, tmp_path: Path, calls_kept: int) -> None:
     )
     await pool.open()
     try:
+        await _other_agents_rows(pool)
         agent_id, incarnation = await _agent(pool)
         reader = ClaudeRecordReader(now_ns=now_ns, claude_home=tmp_path, session_id=session)
         writer = _writer(pool, agent_id, incarnation, tmp_path, session, reader, calls_kept)

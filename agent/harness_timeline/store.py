@@ -54,6 +54,10 @@ class PlannedTimelineItem:
 # `tool_use_id -> item id` (a value of None is a call looked up and absent); the answer says what was learnt:
 # the calls found in the store, the calls looked up and absent, and the calls this batch wrote. The caller holds
 # the transaction and has taken its owner lock (`lock_inbound_owner`). Returns the items written, with their ids.
+# The existence check compares the pair `(agent_id, source_key)` against the keys, which the planner can only answer
+# through the unique index on that pair, one probe per key: a plain `agent_id = ... AND source_key = ANY(...)` lets it
+# walk all of the agent's rows through the `(agent_id, seq)` index and filter when its statistics (taken before the
+# agent had rows) say the agent has none, a read that grows with the agent's timeline.
 # meiva:link base/agents/history/docs/timeline/timeline.md
 async def aappend_planned_timeline_items(
     conn: AsyncConnection,
@@ -69,7 +73,8 @@ async def aappend_planned_timeline_items(
     async with conn.cursor() as cur:
         await cur.execute("SELECT 1 FROM agents_meta WHERE id = %s FOR UPDATE", (agent_id,))
         await cur.execute(
-            "SELECT source_key FROM agent_harness_messages WHERE agent_id = %s AND source_key = ANY(%s)",
+            "SELECT source_key FROM agent_harness_messages "
+            "WHERE (agent_id, source_key) IN (SELECT %s, unnest(%s::text[]))",
             (agent_id, [entry.key for entry in planned]),
         )
         existing: list[tuple[object, ...]] = await cur.fetchall()
