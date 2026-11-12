@@ -95,7 +95,7 @@ def _runtime(
     )
 
 
-@pytest.mark.parametrize("harness", [Harness.CODEX, Harness.ANTIGRAVITY])
+@pytest.mark.parametrize("harness", [Harness.ANTIGRAVITY])
 async def test_external_harness_cold_start_establishes_handoff_and_standing_notes(
     harness: Harness,
     db_conn: psycopg.Connection[Any],

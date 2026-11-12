@@ -1,4 +1,4 @@
-exports = ["auth.py", "frames.py", "session.py", "tests"]
+exports = ["auth.py", "session.py", "tests", "transcript"]
 
 [uses]
 "__init__.py" = ["config.py", "frames.py"]
@@ -12,6 +12,7 @@ exports = ["auth.py", "frames.py", "session.py", "tests"]
 "requests.py" = ["frames.py", "mapping.py"]
 "session.py" = ["admission.py", "auth.py", "commands.py", "config.py", "fork.py", "frames.py", "mapping.py", "reconciliation", "requests.py", "subagents.py", "transport.py", "turns.py"]
 "subagents.py" = ["config.py", "frames.py", "mapping.py"]
+"transcript" = ["reconciliation"]
 "tests" = ["__init__.py", "auth.py", "frames.py", "mapping.py", "requests.py", "session.py", "transport.py", "turns.py"]
 "transport.py" = ["frames.py"]
 "turns.py" = ["frames.py", "mapping.py"]

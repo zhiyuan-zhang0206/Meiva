@@ -68,10 +68,10 @@ class Harness(StrEnum):
 # Whether a harness's timeline is read from the CLI's own record file at the moment it is asked for
 # (nothing about it is stored), as opposed to being written into `agent_harness_messages` while the
 # turn runs. One owner for the answer: the gateway, the runner's read operation, the agent's
-# graph and the insights all ask it here. Claude Code is the first; Codex and Antigravity follow.
+# graph and the insights all ask it here. Claude Code and Codex do; Antigravity follows.
 # meiva:link docs/decisions/agents/graph/2026-11-13-timeline-read-from-the-record.md
 def reads_timeline_from_record(harness: str) -> bool:
-    return harness == Harness.CLAUDE_CODE.value
+    return harness in (Harness.CLAUDE_CODE.value, Harness.CODEX.value)
 
 
 # meiva:note

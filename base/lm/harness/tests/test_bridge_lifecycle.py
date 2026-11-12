@@ -3,7 +3,7 @@ from __future__ import annotations
 import asyncio
 import os
 import random
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from datetime import datetime
 from pathlib import Path
 
@@ -25,7 +25,6 @@ from base.lm.harness.claude.tests.fake_sdk import (
     ScriptedProbe,
 )
 from base.lm.harness.codex import CodexConfig
-from base.lm.harness.codex.frames import JsonObject, RequestParams
 from base.lm.harness.codex.session import CodexSession
 from base.lm.harness.codex.tests.fake_app_server import FakeAppServer
 from base.lm.harness.registration import RegistrationStore, SecureRandom
@@ -189,8 +188,8 @@ class StartingServer(FakeAppServer):
         self.allow_start = asyncio.Event()
 
     async def request(
-        self, method: str, params: RequestParams, *, timeout: float | None = None
-    ) -> JsonObject:
+        self, method: str, params: Mapping[str, object], *, timeout: float | None = None
+    ) -> dict[str, object]:
         if method == "turn/start":
             self.starting.set()
             await self.allow_start.wait()

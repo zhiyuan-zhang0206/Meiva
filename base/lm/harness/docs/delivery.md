@@ -88,12 +88,12 @@ subscription. The graph's `harness_turn` is the one consumer: it settles each in
 `InputRejected` or `InputLost` and stays until nothing is unsettled and no turn runs
 ([foreground input and cancellation](../../../../agent/graph/docs/harness-foreground.md)).
 
-## Record-read agents (Claude Code)
+## Record-read agents (Claude Code, Codex)
 
-For a Claude Code agent whose timeline is read from the CLI's own record, an input is settled as above, by the stream's
+For a Claude Code or Codex agent whose timeline is read from the CLI's own record, an input is settled as above, by the stream's
 acknowledgements and, after a failure, by reading the record (`reconcile`); only the inbox row is set `done`, and no
 timeline entry is written. See [transcript projection](transcript-projection.md) and
-[harness turn](../../../../agent/graph/docs/harness-turn.md#record-read-timeline-claude-code).
+[harness turn](../../../../agent/graph/docs/harness-turn.md#record-read-timeline-claude-code-codex).
 
 ## Reconciliation
 

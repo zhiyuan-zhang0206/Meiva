@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
-from datetime import UTC, datetime
+from datetime import datetime
 
 from base.agents.history.timeline_item import TimelineItem
 from base.agents.history.transcript_timeline.items import ReplyPolicy
@@ -11,14 +11,16 @@ from base.agents.history.transcript_timeline.project import (
     ProjectedItem,
     RecordProjector,
 )
-from base.host.boundary.json_values import is_object_dict, is_object_list
-from base.lm.harness.claude.transcript.window import (
+from base.agents.history.transcript_timeline.record.harness import (
+    entry_reader,
+    input_wire_ids,
+    wire_id,
+)
+from base.lm.harness.session.transcript.record_file import (
     BLOCK_BYTES,
     MAX_BLOCK_BYTES,
-    EntryParser,
     FileRow,
     RecordFile,
-    wire_id,
 )
 
 # meiva:note
@@ -60,6 +62,7 @@ LoadSent = Callable[[datetime, Mapping[str, datetime]], Mapping[str, Sequence[Ti
 def read_window(
     file: RecordFile,
     *,
+    harness: str,
     limit: int,
     before: int | None,
     policy: ReplyPolicy,
@@ -78,6 +81,7 @@ def read_window(
         read, want = read + grown, want * 2
         projected = _items_of(
             rows,
+            harness=harness,
             tail=before is None,
             policy=policy,
             render_tool=render_tool,
@@ -104,67 +108,21 @@ def read_window(
 def _items_of(
     rows: Sequence[FileRow],
     *,
+    harness: str,
     tail: bool,
     policy: ReplyPolicy,
     render_tool: Callable[[str, Mapping[str, object]], str],
     load_sent: LoadSent,
 ) -> Projected:
-    projector = RecordProjector(policy=policy, render_tool=render_tool, wire_id=wire_id)
-    wanted = input_wire_ids(rows)
+    projector = RecordProjector(
+        policy=policy, render_tool=render_tool, wire_id=lambda key: wire_id(harness, key)
+    )
+    wanted = input_wire_ids(harness, rows)
     if wanted:
         for key, items in load_sent(max(wanted.values()), wanted).items():
             projector.register(key, items)
-    entries = EntryParser().entries(rows)
+    entries = entry_reader(harness).entries(rows)
     return projector.feed(entries, tail=tail, release_held=True)
-
-
-# meiva:note
-# The ids the CLI kept for the person's inputs among the rows, each with the time its row was written: the ids to match
-# to inbox rows. A user row names its own `uuid`, an absorbed message the `source_uuid` of its attachment.
-def input_wire_ids(rows: Sequence[FileRow]) -> dict[str, datetime]:
-    wanted: dict[str, datetime] = {}
-    for row in rows:
-        stamp = _stamp(row.row.get("timestamp"))
-        wire = _wire_of(row.row)
-        if stamp is not None and wire is not None and is_input_row(row.row):
-            wanted[wire] = stamp
-    return wanted
-
-
-def _wire_of(row: Mapping[str, object]) -> str | None:
-    attachment = row.get("attachment")
-    wire = attachment.get("source_uuid") if is_object_dict(attachment) else row.get("uuid")
-    return wire if isinstance(wire, str) else None
-
-
-# meiva:note
-# A row that can be a person's input (a user row that is not a tool result, or an absorbed message): the only rows the
-# inbox is asked about, so a stretch of the record with none costs no query.
-def is_input_row(row: Mapping[str, object]) -> bool:
-    if row.get("type") == "attachment":
-        attachment = row.get("attachment")
-        return is_object_dict(attachment) and attachment.get("type") == "queued_command"
-    if row.get("type") != "user":
-        return False
-    origin = row.get("origin")
-    if is_object_dict(origin) and origin.get("kind") not in (None, "human"):
-        return False
-    message = row.get("message")
-    content = message.get("content") if is_object_dict(message) else None
-    return not (
-        is_object_list(content)
-        and any(is_object_dict(block) and block.get("type") == "tool_result" for block in content)
-    )
-
-
-def _stamp(value: object) -> datetime | None:
-    if not isinstance(value, str):
-        return None
-    try:
-        parsed = datetime.fromisoformat(value)
-    except ValueError:
-        return None
-    return parsed if parsed.tzinfo else parsed.replace(tzinfo=UTC)
 
 
 # meiva:note

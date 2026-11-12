@@ -296,7 +296,69 @@ def _nicknames(item: Obj) -> dict[str, str]:
     return labels
 
 
+# meiva:note
+# The tools that are one finished item with no state in between (the rollout writes only the finished item): the
+# call and its result together, under the tool names the live events use (`patch`, `view_image`, `web_search`).
+# What goes into the call is paths and short text: a result that holds a picture or a long page is named, not copied.
+RESULT_ITEM_CHARS = 2000
+
+
+def _finished_pair(
+    place: _Place, name: str, tool_input: dict[str, object], content: str, status: ToolStatus
+) -> list[AnyEntry]:
+    call = ToolCall(**place.common("call"), call_id=place.id, name=name, tool_input=tool_input)
+    result = ToolResult(
+        **place.common("result", 1, at_ms=place.completed_ms),
+        call_id=place.id,
+        content=content[:RESULT_ITEM_CHARS],
+        status=status,
+        duration_ms=place.elapsed_ms(),
+    )
+    return [call, result]
+
+
+def _file_change(item: Obj, place: _Place) -> list[AnyEntry]:
+    changes: list[dict[str, object]] = []
+    for change in opt_objects(item, "changes"):
+        path = opt_text(change, "path")
+        if path is None:
+            continue
+        entry: dict[str, object] = {"path": path}
+        if (kind := opt_text(change, "kind")) is not None:
+            entry["kind"] = kind
+        if (diff := opt_text(change, "diff")) is not None:
+            entry["diff"] = diff
+        changes.append(entry)
+    status = text(item, "status")
+    if status not in _COMMAND_STATUS:
+        raise UnknownValueError(f"fileChange.status={status}")
+    tool_input: dict[str, object] = {"paths": [str(change["path"]) for change in changes]}
+    if changes:
+        tool_input["changes"] = changes
+    return _finished_pair(
+        place, "patch", tool_input, opt_text(item, "output") or "", _COMMAND_STATUS[status]
+    )
+
+
+def _image_view(item: Obj, place: _Place) -> list[AnyEntry]:
+    return _finished_pair(place, "view_image", {"path": text(item, "path")}, "", ToolStatus.OK)
+
+
+def _web_search(item: Obj, place: _Place) -> list[AnyEntry]:
+    query = text(item, "query")
+    found = [
+        f"{opt_text(result, 'title') or ''} {opt_text(result, 'url') or ''}".strip()
+        for result in opt_objects(item, "results")
+    ]
+    return _finished_pair(
+        place, "web_search", {"query": query}, "\n".join(found[:8]), ToolStatus.OK
+    )
+
+
 _HANDLERS: dict[str, Callable[[Obj, _Place], list[AnyEntry]]] = {
+    "fileChange": _file_change,
+    "imageView": _image_view,
+    "webSearch": _web_search,
     "userMessage": _user,
     "agentMessage": _agent,
     "reasoning": _reasoning,

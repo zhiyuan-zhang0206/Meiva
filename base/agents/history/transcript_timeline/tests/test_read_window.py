@@ -5,7 +5,7 @@ from pathlib import Path
 
 from base.agents.history.timeline_item import TimelineItem
 from base.agents.history.transcript_timeline.items import format_tool_use
-from base.agents.history.transcript_timeline.read import (
+from base.agents.history.transcript_timeline.record.read import (
     MAX_REQUEST_BYTES,
     read_window,
 )
@@ -149,6 +149,7 @@ def test_the_inbox_is_asked_only_about_a_stretch_with_a_persons_input(tmp_path: 
     def read(text: str) -> None:
         _ = read_window(
             write(tmp_path / "f.jsonl", text),
+            harness="claude_code",
             limit=50,
             before=None,
             policy=POLICY,

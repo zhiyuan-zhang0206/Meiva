@@ -1,4 +1,4 @@
-exports = []
+exports = ["window.py"]
 
 [uses]
 "__init__.py" = []
@@ -9,6 +9,7 @@ exports = []
 "rollout.py" = ["clock.py", "errors.py", "items.py", "scalars.py", "shapes.py"]
 "scalars.py" = ["errors.py", "shapes.py"]
 "shapes.py" = ["errors.py"]
+"window.py" = ["rollout.py"]
 "tests" = ["parse.py"]
 
 [purity]
@@ -21,3 +22,4 @@ exports = []
 "rollout.py" = "strict"
 "scalars.py" = "strict"
 "shapes.py" = "strict"
+"window.py" = { mode = "none", why = "the file shell of a read-time timeline of a Codex thread: it finds the rollout file and names where its rows are inputs; the strict rollout parser decides what a row means" }

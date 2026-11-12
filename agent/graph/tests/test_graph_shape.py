@@ -125,7 +125,7 @@ def _stream(graph: Any, state: AgentState, context: MeivaContext) -> AsyncIterat
 async def test_unmarked_harness_reply_gets_one_correction_turn() -> None:
     engine = FakeEngine(reply="Unmarked answer.")
 
-    seen = await executed_nodes(Harness.CODEX, engine)
+    seen = await executed_nodes(Harness.ANTIGRAVITY, engine)
 
     [(original, _), (correction, _)] = engine.submitted
     assert original == "do it"
@@ -136,7 +136,7 @@ async def test_unmarked_harness_reply_gets_one_correction_turn() -> None:
 async def test_an_external_harness_never_enters_the_native_turn_nodes() -> None:
     engine = FakeEngine()
 
-    seen = await executed_nodes(Harness.CODEX, engine)
+    seen = await executed_nodes(Harness.ANTIGRAVITY, engine)
 
     assert "harness_turn" in seen, "the harness node is the turn"
     assert not NATIVE_NODES.intersection(seen), f"native turn nodes ran: {seen}"
@@ -175,7 +175,7 @@ async def test_a_context_reset_keeps_an_external_harness_off_the_native_nodes() 
     async for chunk in _stream(
         build_graph(None, EMPTY, parent=live_parent_facts(), rng=_rng()),
         state,
-        make_context(Harness.CODEX, engine),
+        make_context(Harness.ANTIGRAVITY, engine),
     ):
         seen.extend(chunk.keys())
 
@@ -189,7 +189,7 @@ async def test_a_context_reset_keeps_an_external_harness_off_the_native_nodes() 
 
 
 def test_route_target_rewrites_only_the_work_verdict() -> None:
-    external = make_context(Harness.CODEX, FakeEngine())
+    external = make_context(Harness.ANTIGRAVITY, FakeEngine())
     native = make_context(Harness.MEIVA, None)
 
     assert route_target(external, "llm") == "harness_turn"

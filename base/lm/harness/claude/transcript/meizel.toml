@@ -3,13 +3,11 @@ exports = ["window.py"]
 [uses]
 "__init__.py" = []
 "parse.py" = []
-"position.py" = []
-"window.py" = ["parse.py", "position.py", "scrub.py"]
+"window.py" = ["parse.py"]
 "tests" = ["parse.py"]
 
 [purity]
 "." = "strict"
 "__init__.py" = "strict"
 "parse.py" = "strict"
-"position.py" = "strict"
-"window.py" = { mode = "none", why = "the file shell of a read-time timeline of a Claude session: it reads blocks of the main record file backwards from a line boundary and counts the bytes it read; the strict position and parse modules decide where a row ends and what it means" }
+"window.py" = { mode = "none", why = "the file shell of a read-time timeline of a Claude session: it finds the main record file and names where its rows are inputs; the strict parse module decides what a row means" }

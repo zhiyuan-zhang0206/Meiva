@@ -60,9 +60,9 @@ delivered and recorded like a completed one), marks tools whose result is unavai
 reason when the harness faults. A host custody tick keeps the invocation
 owned while the provider is quiet. It produces no timeline activity.
 
-## Record-read timeline (Claude Code)
+## Record-read timeline (Claude Code, Codex)
 
-A Claude Code agent's timeline is not written by anyone: it is read from the CLI's record when asked for
+A Claude Code or Codex agent's timeline is not written by anyone: it is read from the CLI's record when asked for
 ([the decision](../../../docs/decisions/agents/graph/2026-11-13-timeline-read-from-the-record.md); the gateway's side is the
 `harness_timeline_read` operation, the projection is in [reading a record](../../../base/lm/harness/docs/transcript-projection.md)).
 `reads_timeline_from_record` (`base/api_contracts/agent_contract.py`) decides which harnesses are such. What this node

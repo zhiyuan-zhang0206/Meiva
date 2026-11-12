@@ -24,8 +24,8 @@ works this way: the gateway reads the conversation archive and projects it with 
 1. **The timeline of a Claude Code agent is a function of its record file and of the inbox.** Nothing is
    written for it: not the rows of the record, not the items, not a read position. The projection is the shared
    one (`Projector` over the parser's entries); a read runs it over a window of the main record. A harness enters
-   this model by `reads_timeline_from_record` (`base/api_contracts/agent_contract.py`); Codex and Antigravity
-   follow, each with its own file-to-entries reader.
+   this model by `reads_timeline_from_record` (`base/api_contracts/agent_contract.py`); Claude Code and Codex are in it, Antigravity
+   follows, each CLI with its own file-to-entries reader.
 2. **An item is named by the byte offset of its row: `h<offset>.<n>`.** The file only grows, so the name is stable,
    ordered and the same for a cold read and a live one, and finding a row needs no parse of what is before it.
 3. **A read costs the window.** The record is read backwards from a line boundary, the look-back doubling at each
@@ -71,6 +71,41 @@ works this way: the gateway reads the conversation archive and projects it with 
    own record is not read. A fork shows nothing before its first start. The run timeline of the insights does
    not support these agents and never reads the rows an earlier scheme left; those rows are not migrated.
 
+## Codex
+
+Codex follows the same model; only where its record is and how its rows are read differ
+(`base/lm/harness/codex/transcript/window.py`, chosen by `base/lm/harness/records.py`; everything after the entries is the
+code Claude uses). What the rollout holds is in [what a Codex rollout holds](../../../../base/lm/harness/codex/docs/rollout.md).
+
+1. **The rollout is read from disk, not through the app-server.** The cold read runs in the runner's ops process, which is not the
+   agent host and holds no app-server connection; and an earlier attempt that read the history through the connection took a
+   missing connection for an empty history and had an input that was already delivered sent again. A file has no lifecycle
+   to mistake. The file is found by the thread id under `CODEX_HOME` (else `$HOME/.codex`) of the session's own environment.
+2. **The file only grows, so the offset names an item** (observed: a recording compared row by row with the final file had no
+   difference; a resume appends to the same file, a compaction appends and keeps every earlier row, a fork is a new file holding
+   only its own rows). An item is `h<offset>.<n>` as for Claude.
+3. **One path through the rows**: the `item_completed` rows carry the content (the same message is also written as a
+   `response_item`, and is not read, so that a window's first row cannot name an item differently than a read from further back),
+   and the file order is shown (rows are written in the order items complete; a message added to a running turn is
+   written before the command that was still running; no case needing another order was met).
+4. **The input is matched by the `clientUserMessageId`** we sent, which is the input key, so `wire_id` is the key itself and the
+   inbox query is the same one, by id, with the same bounds.
+5. **The reply is delivered under `harness:codex:<AgentMessage id>`**, the CLI's own id of the message (the same however often
+   it is read, and not a key of the earlier scheme `harness:h<seq>.0`); the first sink after the switch does not resend what
+   the record already holds, as for Claude. Usage, settlement of an input and the correction input are as before.
+6. **A file that is there but in a form the reader does not read** (Codex may compress a rollout; none was met) is not an
+   empty history: the cold read returns empty and logs `harness_record_unreadable` with the thread and the file name, and a turn
+   that ends with no readable file fails as one with no file does.
+7. **No picture is copied into an item.** An input of ours shows the images of its inbox row (an upload address); the image
+   view of a tool and any other row show no bytes, only the file's name. The inline data URLs in a row are read into
+   memory (a request is bounded by the block limits) and dropped.
+
+What is not shown for Codex, beyond what Claude loses: a command that is still running (a command is written when it finishes,
+so there is no running item); a reply that was streaming when the turn was interrupted (never written); the history before a
+fork (the clone's file starts at the clone); the tool kinds with no recorded sample (MCP calls, plans: skipped and reported once
+by kind). The rollout is not a published interface, so a row or item kind of a newer CLI is skipped and reported once, not an
+error.
+
 ## Alternatives rejected
 
 - **Keep the writer, store the rows, project into the table** (the previous decision). Rejected above: the copy is
@@ -111,7 +146,7 @@ works this way: the gateway reads the conversation archive and projects it with 
 - The page's `msg_count` for these agents is the file's size in bytes. The page uses it only to drop running
   items a snapshot does not mention; every snapshot carries the item published before it and every call still
   running, so a live snapshot is never read as a gap in the page's view.
-- The legacy projector is left in place for the other two CLIs and removed by
+- The legacy projector is left in place for Antigravity and removed by
   [the plan](../../../../future/agent/transcript-timeline-source.md) as each follows. The writer, its
   rollout setting and the stored-rows tables were removed in a following change, since nothing
   reached them any more.

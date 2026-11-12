@@ -1,10 +1,13 @@
-exports = ["drafts.py", "entries.py", "projection.py"]
+exports = ["drafts.py", "entries.py", "projection.py", "record_file.py"]
 
 [uses]
 "__init__.py" = []
 "drafts.py" = ["entries.py"]
 "entries.py" = []
+"position.py" = []
 "projection.py" = ["drafts.py", "entries.py"]
+"record_file.py" = ["position.py", "scrub.py"]
+"scrub.py" = []
 "tests" = ["drafts.py", "entries.py", "projection.py"]
 
 [purity]
@@ -12,4 +15,7 @@ exports = ["drafts.py", "entries.py", "projection.py"]
 "__init__.py" = "strict"
 "drafts.py" = "strict"
 "entries.py" = "strict"
+"position.py" = "strict"
 "projection.py" = "strict"
+"record_file.py" = { mode = "none", why = "the file shell shared by the read-time timelines of the CLIs' own records: it reads blocks of a record file backwards from a line boundary and counts the bytes it read; the strict position module decides where a row ends" }
+"scrub.py" = "strict"
