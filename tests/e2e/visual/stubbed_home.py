@@ -19,6 +19,7 @@ from __future__ import annotations
 import json
 import os
 from collections.abc import Mapping, Sequence
+from urllib.parse import parse_qs, urlsplit
 
 from playwright.sync_api import Browser, BrowserContext, Page, Route
 
@@ -60,6 +61,8 @@ _AWAITING_QUESTIONS = [
         "id": 1,
         "agent_id": 2,
         "agent_label": "other-agent",
+        "resolved_at": None,
+        "question": {"type": "text"},
         "title": "Needs a decision",
         "content": "Pick A or B.",
         "created_at": "2026-08-07T00:00:00Z",
@@ -104,7 +107,7 @@ API_STUBS: dict[str, object] = {
         "fork_source_checkpoint_id": None,
         "last_probe_at": None,
     },
-    "/api/questions": {"awaiting": _AWAITING_QUESTIONS},
+    "/api/questions/open": _AWAITING_QUESTIONS,
     "/api/tasks": _TASKS,
     "/api/agents/1/timeline": {"items": [], "msg_count": 0, "has_more": False},
     "/api/agents/1/token-usage": {
@@ -491,6 +494,13 @@ def open_page(
             url = route.request.url
             endpoint = "/api/" + url.split("/api/", 1)[1].split("?", 1)[0]
             body = API_STUBS.get(endpoint)
+            if endpoint == "/api/questions/open":
+                agent_ids = parse_qs(urlsplit(url).query).get("agent_id", [])
+                body = [
+                    question
+                    for question in _AWAITING_QUESTIONS
+                    if not agent_ids or str(question["agent_id"]) in agent_ids
+                ]
             if timeline_items is not None and endpoint == "/api/agents/1/timeline":
                 body = {
                     "items": timeline_items,

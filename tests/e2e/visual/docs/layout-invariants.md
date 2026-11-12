@@ -9,6 +9,12 @@ The suite drives the stubbed Home page (`stubbed_home.py`: a fake EventSource,
 cannot open the real cookie-gated SSE stream and `page.route` cannot stream to an
 EventSource, so an injected fake carries the snapshot → delta → reconnect
 sequence; without a growing stream every invariant would false-pass.
+The shared question stub answers the agent-scoped open-questions request and
+filters the returned array by `agent_id`. A fixture contract case checks empty
+and nonempty agent feeds and renders a current-agent question as a positive
+control. The bottom-gap case requires that agent's queue to be
+empty: a failed request renders an error strip above the composer and changes
+the state whose geometry is measured.
 The shared agent stub explicitly owns the Meiva harness, matching the required
 roster/detail contract. Its system prompt supplies the pinned work-detail block;
 an unknown or external harness correctly hides that native prompt.
