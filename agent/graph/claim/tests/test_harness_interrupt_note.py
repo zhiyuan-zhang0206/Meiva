@@ -6,10 +6,13 @@
 from __future__ import annotations
 
 import asyncio
+from unittest.mock import MagicMock
 
 import psycopg
 from psycopg_pool import AsyncConnectionPool
 
+from agent.graph.claim.harness_inbox import write_interrupt_notes
+from agent.graph.claim.harness_interrupt import announce_interrupt
 from agent.graph.claim.harness_turn import harness_turn_node
 from agent.graph.claim.tests.harness_support import (
     completed,
@@ -26,6 +29,8 @@ from agent.ownership.tests.ownership_support import agent_row
 from agent.state import AgentState
 from base.agents.history.harness_messages import aload_harness_timeline_items
 from base.lm.harness import InputInContext, TurnOrigin, TurnStarted
+from base.log.tests.log_records import LogRecords
+from base.log.tests.log_records import loguru_records as loguru_records
 from base.native_process.turn_identity import HostedTurnResources
 
 _NOTE = "Your running turn was interrupted by user."
@@ -134,3 +139,53 @@ async def test_a_note_that_is_not_passive_is_left_to_its_message(
 
     assert await _markers(aops_pool, agent_id) == []
     assert row_status(db_conn, note) == "pending"
+
+
+# meiva:note
+# A note an input already reserved is that input's to write: it settles with its own timeline entry, so
+# the foreground's write leaves the claimed row alone and unflagged.
+async def test_a_note_already_reserved_by_an_input_is_not_flagged(
+    db_conn: psycopg.Connection,
+    aops_pool: AsyncConnectionPool,
+    hosted_resources: HostedTurnResources,
+) -> None:
+    agent_id = agent_row(db_conn)
+    note = insert_row(db_conn, agent_id, "system_note", "user", _NOTE, payload=_PASSIVE_NOTE)
+    db_conn.execute(
+        "UPDATE inbound_messages SET status='claimed', claimed_at=now() WHERE id=%s", (note,)
+    )
+    db_conn.commit()
+    rt = runtime(silent_engine(), ops_pool=aops_pool, hosted_resources=hosted_resources)
+
+    written = await write_interrupt_notes(rt.context, agent_id)
+
+    assert written == []
+    row = db_conn.execute("SELECT payload FROM inbound_messages WHERE id=%s", (note,)).fetchone()
+    assert row is not None and "timeline_written" not in row[0]
+    assert await _markers(aops_pool, agent_id) == []
+
+
+# meiva:note
+# The note is display: a store that cannot take it is reported with its event, the live view is still
+# told the turn ended, and the row stays pending and unflagged so its next delivery carries the entry.
+async def test_a_note_that_cannot_be_written_is_reported_and_the_row_stays_deliverable(
+    db_conn: psycopg.Connection,
+    db_url: str,
+    hosted_resources: HostedTurnResources,
+    loguru_records: LogRecords,
+) -> None:
+    agent_id = agent_row(db_conn)
+    note = insert_row(db_conn, agent_id, "system_note", "user", _NOTE, payload=_PASSIVE_NOTE)
+    closed: AsyncConnectionPool = AsyncConnectionPool(db_url, open=False)
+    publisher = MagicMock()
+    rt = runtime(
+        silent_engine(), ops_pool=closed, hosted_resources=hosted_resources, publisher=publisher
+    )
+
+    await announce_interrupt(rt.context, agent_id)
+
+    assert len(loguru_records.events("harness_interrupt_note_failed")) == 1
+    assert "cancelled" in str(publisher.emit.call_args).lower()
+    assert row_status(db_conn, note) == "pending"
+    row = db_conn.execute("SELECT payload FROM inbound_messages WHERE id=%s", (note,)).fetchone()
+    assert row is not None and "timeline_written" not in row[0]

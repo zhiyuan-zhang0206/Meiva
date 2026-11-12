@@ -311,6 +311,49 @@ async def test_a_stops_passive_note_enters_the_history_and_the_agent_stays_idle(
 
 
 # meiva:note
+# A stop's note is quiet only on its own: a heartbeat in the same batch has something to answer, so the
+# batch goes on to the model by the existing rule, and the note is in the history once, ahead of it.
+async def test_a_passive_note_beside_a_heartbeat_goes_on_to_the_model(
+    redis_url: str,
+    db_conn: psycopg.Connection,
+    aops_pool: AsyncConnectionPool,
+    *,
+    model_catalog: ModelCatalog,
+    config_authority: ConfigAuthority,
+    database_gate: ProcessDbGate,
+    machine_identity: MachineIdentityReader,
+) -> None:
+    tid = spawn_agent(
+        catalog=model_catalog,
+        authority=config_authority,
+        database_gate=database_gate,
+        machine=machine_identity,
+    )
+    with db_conn.cursor() as cur:
+        cur.execute(
+            "INSERT INTO inbound_messages (agent_id, content, kind, source, payload) "
+            "VALUES (%s, %s, 'system_note', 'user', "
+            '\'{"note_tag": "lifecycle_interrupt", "passive": true}\'::jsonb)',
+            (tid, interrupt_note("user", with_message=False)),
+        )
+    db_conn.commit()
+    heartbeat_id = insert_inbound_kind(db_conn, tid, "Heartbeat. Review.", "heartbeat", "system")
+    await await_inbound_visible(aops_pool, heartbeat_id)
+
+    cmd = await claim_node(
+        AgentState(messages=[SystemMessage(content="sys")], halted=True),
+        make_runtime(ops_pool=aops_pool, database_gate=database_gate),
+        thread_config(tid),
+    )
+
+    assert cmd.goto == "before_turn"
+    assert cmd.update is not None
+    texts = [str(m.content) for m in cast("list[AnyMessage]", cmd.update["messages"])]
+    assert len(texts) == 2
+    assert "interrupted by user." in texts[0] and "Heartbeat" in texts[1]
+
+
+# meiva:note
 # The recovery path: the wake or the host was lost between the cancel and the claim, so the passive
 # note is still pending when the next real input arrives. It rides in that claim, once, ahead of it.
 async def test_an_unclaimed_passive_note_rides_in_the_next_real_inputs_claim(

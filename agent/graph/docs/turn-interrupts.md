@@ -30,7 +30,13 @@ on the timeline as soon as the interrupt has taken effect:
   in `_decide.py`) and returns to claim with `halted`, so the agent idles again with no model call. The
   row is consumed by that claim, so the next input does not carry it a second time. If the wake or the
   host is lost between the cancel and the claim, the row simply stays pending and rides in the next real
-  input's claim, once, as before this change.
+  input's claim, once, as before this change. That idle invocation is a hosted turn with no model
+  call, so it admits the runtime (`status` running then idling again, `last_admission_at`, two
+  `status_change` events, a turn span and one concurrency slot for a few database round trips). None
+  of that reads as activity: `last_active_at`, which the heartbeat idle clock reads, is written only by a completed model turn (the
+  API's last-active field reads inbound rows, which the stop's note already touched), and the claim of a passive note clears no breaker
+  (admission refuses a tripped breaker before the claim). It is the accepted cost of one extra
+  invocation per stop.
 - **External harness.** A passive note alone is never handed to the harness (a delivery would start a turn
   for it), so the control row is written ahead of the note, where claim takes it. When the foreground
   confirms the interrupt (the harness's interrupted `TurnCompleted`), `announce_interrupt` writes the
