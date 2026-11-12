@@ -6,6 +6,7 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import Any, cast
 
+from base.clock import Clock
 from base.clock.tests.fakes import system_clock
 from base.lm.harness.base_session import SessionBinding
 from base.lm.harness.claude.config import BridgeConfig
@@ -154,6 +155,7 @@ async def start(
     passive: bool = False,
     fork_source_agent_id: int | None = None,
     sdk: FakeSDK | None = None,
+    clock: Clock | None = None,
     **config_overrides: Any,
 ) -> Harness:
     sdk = sdk if sdk is not None else FakeSDK(scripts, cli_pid=CLI_PID)
@@ -180,7 +182,7 @@ async def start(
         binding=SessionBinding(agent_id, registry, unsolicited, fork_source_agent_id),
         sdk=sdk,
         probe=scripted_probe,
-        clock=system_clock(),
+        clock=clock if clock is not None else system_clock(),
     )
     await session.start(resume=resume)
     return Harness(session, sdk, scripted_probe)

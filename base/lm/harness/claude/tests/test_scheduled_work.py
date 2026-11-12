@@ -278,6 +278,16 @@ async def test_a_cleanly_finished_background_command_leaves_nothing_to_lose(
                 subtype="task_notification", data={}, task_id="bg-1", status="completed"
             )
         )
+        await _eventually(
+            lambda: (
+                [i.kind for i in harness.session.background_work().items] == [BackgroundKind.TURN]
+            )
+        )
+        stored = registry.load(7, harness="claude_code")
+        assert stored is not None and [i.kind for i in stored.background] == [BackgroundKind.TURN]
+
+        harness.client.push(fake.AssistantMessage(content=[fake.TextBlock(text="it finished")]))
+        harness.client.push(fake.ResultMessage(result="it finished"))
         await _eventually(lambda: not harness.session.background_work())
         stored = registry.load(7, harness="claude_code")
         assert stored is not None and stored.background == ()

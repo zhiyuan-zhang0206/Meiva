@@ -12,10 +12,12 @@
       {"cls": "AssistantMessage", "blocks": [{"text": "STARTED"}]},
       {"cls": "ResultMessage", "result": "STARTED", "num_turns": 2}
     ],
-    "idle_answer": [
+    "idle_report": [
       {"cls": "TaskUpdatedMessage", "task_id": "task-bg-1", "patch": {"status": "completed"}},
       {"cls": "TaskNotificationMessage", "task_id": "task-bg-1", "status": "completed", "output_file": "/tasks/task-bg-1.output", "summary": "Background command \"sleep 12; echo BGDONE\" completed (exit code 0)"},
-      {"cls": "SystemMessage", "subtype": "background_tasks_changed", "data": {"tasks": []}},
+      {"cls": "SystemMessage", "subtype": "background_tasks_changed", "data": {"tasks": []}}
+    ],
+    "idle_turn": [
       {"cls": "SystemMessage", "subtype": "init", "data": {"session_id": "session-1", "model": "claude-fake"}},
       {"cls": "AssistantMessage", "blocks": [{"thinking": ""}]},
       {"cls": "AssistantMessage", "blocks": [{"text": "Background command completed. Exit code: 0. Output: `BGDONE`"}]},

@@ -4,9 +4,12 @@ import asyncio
 from collections.abc import Callable
 from pathlib import Path
 
+from base.clock.tests.fakes import clock_over
+from base.clock.tests.manual_timers import ManualTimers
+from base.lm.harness.claude.session import ANSWER_WAIT_SECONDS
 from base.lm.harness.claude.tests import fake_sdk as fake
 from base.lm.harness.claude.tests.fake_sdk import Emit, Say
-from base.lm.harness.claude.tests.support import replay, start
+from base.lm.harness.claude.tests.support import Harness, replay, start
 from base.lm.harness.delivery.tests.sent import send
 from base.lm.harness.events import (
     AssistantText,
@@ -32,10 +35,6 @@ def _report(task_id: str = "task-1") -> fake.TaskNotificationMessage:
     )
 
 
-def _answer(text: str = "The background command finished with exit code 0.") -> fake.ResultMessage:
-    return fake.ResultMessage(origin={"kind": "task-notification"}, result=text)
-
-
 # meiva:note
 # Recorded with a real CLI (fixtures/background_bash.json): a background command ended while the
 # agent was idle, and the CLI read its own notification and answered it in a turn of its own. The
@@ -54,7 +53,8 @@ async def test_an_idle_background_end_is_answered_by_the_cli_and_not_delivered(
         assert [task.description for task in harness.session.background_work().items] == [
             "sleep 12; echo BGDONE"
         ]
-        replay(harness.client, "background_bash", "idle_answer")
+        replay(harness.client, "background_bash", "idle_report")
+        replay(harness.client, "background_bash", "idle_turn")
         answer = await harness.wait_for(
             lambda event: isinstance(event, TurnCompleted) and event.turn_id != launch.turn_id
         )
@@ -124,7 +124,8 @@ async def _eventually(predicate: Callable[[], bool]) -> None:
 async def test_a_monitor_holds_the_session_until_its_source_ends_or_is_stopped(
     tmp_path: Path,
 ) -> None:
-    harness = await start(tmp_path, passive=True)
+    timers = ManualTimers()
+    harness = await start(tmp_path, passive=True, clock=clock_over(timers))
     try:
         ticket = await send(harness, "arm two monitors", key="first")
         replay(harness.client, "monitor_background", "launch", first="first")
@@ -140,11 +141,88 @@ async def test_a_monitor_holds_the_session_until_its_source_ends_or_is_stopped(
         assert len(harness.session.background_work().items) == 2
 
         replay(harness.client, "monitor_background", "ended")
-        await _eventually(lambda: len(harness.session.background_work().items) == 1)
-        [left] = harness.session.background_work().items
+        commands = lambda: [  # noqa: E731
+            i for i in harness.session.background_work().items if i.kind is BackgroundKind.COMMAND
+        ]
+        await _eventually(lambda: len(commands()) == 1)
+        [left] = commands()
         assert left.description == "B long"
 
         replay(harness.client, "monitor_background", "stopped")
-        await _eventually(lambda: not harness.session.background_work())
+        await _eventually(lambda: not commands())
+        # meiva:note
+        # The recording shows no turn after the monitor's end, so the wait for one is only the bounded claim.
+        # meiva:link base/lm/harness/claude/docs/background-tasks.md
+        timers.advance(ANSWER_WAIT_SECONDS + 1)
+        assert not harness.session.background_work()
+    finally:
+        await harness.stop()
+
+
+async def _launched(harness: Harness) -> str:
+    launch = await send(harness, "run it", key="first")
+    replay(harness.client, "background_bash", "launch", first="first")
+    await launch.outcome()
+    return launch.turn_id
+
+
+# meiva:note
+# Between the notification and the CLI's first frame of its own turn nothing else says work is
+# pending (the task is reported, no observed turn exists yet), and the idle TTL could recycle the
+# session before the CLI answers. The session claims the wait itself, hands over to the observed turn
+# item once the turn opens without counting it twice, and gives the claim up after
+# `ANSWER_WAIT_SECONDS` if the CLI never answers.
+# meiva:link base/lm/harness/claude/docs/background-tasks.md
+async def test_the_wait_for_the_clis_answer_counts_as_work_and_hands_over_to_its_turn(
+    tmp_path: Path,
+) -> None:
+    harness = await start(tmp_path, passive=True)
+    try:
+        launched = await _launched(harness)
+        replay(harness.client, "background_bash", "idle_report")
+        await harness.wait_for(lambda event: isinstance(event, UnsolicitedOutput))
+        [waiting] = harness.session.background_work().items
+        assert waiting.kind is BackgroundKind.TURN and "task-bg-1" in waiting.description
+        replay(harness.client, "background_bash", "idle_turn")
+        await harness.wait_for(
+            lambda event: isinstance(event, TurnCompleted) and event.turn_id != launched
+        )
+        assert not harness.session.background_work()
+    finally:
+        await harness.stop()
+
+
+async def test_a_turn_in_progress_replaces_the_wait_without_double_counting(
+    tmp_path: Path,
+) -> None:
+    harness = await start(tmp_path, passive=True)
+    try:
+        await _launched(harness)
+        replay(harness.client, "background_bash", "idle_report")
+        harness.client.push(fake.AssistantMessage(content=[fake.TextBlock(text="reading it")]))
+        await harness.wait_for(
+            lambda event: (
+                isinstance(event, TurnStarted) and event.cause is HarnessCause.BACKGROUND_TASK
+            )
+        )
+        [running] = harness.session.background_work().items
+        assert running.kind is BackgroundKind.TURN and "started by itself" in running.description
+    finally:
+        await harness.stop()
+
+
+async def test_a_notification_the_cli_never_answers_stops_counting_after_the_wait(
+    tmp_path: Path,
+) -> None:
+    timers = ManualTimers()
+    harness = await start(tmp_path, passive=True, clock=clock_over(timers))
+    try:
+        await _launched(harness)
+        replay(harness.client, "background_bash", "idle_report")
+        await harness.wait_for(lambda event: isinstance(event, UnsolicitedOutput))
+        timers.advance(ANSWER_WAIT_SECONDS - 1)
+        assert harness.session.background_work()
+        timers.advance(2)
+        assert not harness.session.background_work()
     finally:
         await harness.stop()

@@ -23,6 +23,16 @@ mean different things.
   `task_notification`, `background_tasks_changed`, a fresh `init`, the answer's content, and a
   `ResultMessage` with `origin = {kind: task-notification, producer: session-task}`. No user message
   is echoed for it, and the CLI started the turn on its own after the command ended.
+- The gap between the notification and the first frame of that turn is a model call (about 15 s on
+  the recording, longer when the CLI adds its own nudge). The task is already reported and no
+  observed turn exists, so for that gap the session claims one `turn` item ("the CLI is answering the
+  end of task ...") in `background_work()`, and the idle TTL cannot recycle a session whose command ran
+  longer than the TTL before the CLI answers. It ends when any turn opens (the observed-turn item takes
+  over, never counted twice) or after `ANSWER_WAIT_SECONDS` (120 s, several times the recorded wait), so
+  a notification the CLI never answers cannot keep the session forever. A task the model stopped itself
+  (`stopped`) is not waited for. The item is persisted with the other pending work, so a process lost
+  inside the window is told to the agent on the next session while the item is unexpired; once the 120 s
+  have passed it is left out like any item past its end time, and the report is lost with nothing said.
 - Nothing is held for the CLI's own turn: an input delivered meanwhile is written to the CLI, which
   runs it behind its own turn, and the events say which turn it entered.
 

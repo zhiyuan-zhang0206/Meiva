@@ -9,7 +9,7 @@ from base.log import logger
 # meiva:note
 # The one reader of a session's event stream. It lives as long as the session does, not as long as a
 # turn: an event that arrives while nothing waits for a turn (a CLI-started turn, a late
-# acknowledgement, a background-task report) is still read, observed by the owner and offered to every
+# acknowledgement) is still read, observed by the owner and offered to every
 # current subscriber instead of piling up in the session's own queue. A subscriber sees only what the
 # pump reads after it subscribed, so a waiter subscribes before it hands anything to the session.
 #
