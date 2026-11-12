@@ -7,6 +7,7 @@ import { createContext, createElement, useContext, useEffect, useState } from "r
 import type { ReactNode } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { create } from "zustand";
+import { renderToString } from "react-dom/server";
 
 import { AGENTS_QUERY_KEY, RECONNECT_QUERY_KEYS } from "../fold";
 import { useFoldOwner } from "../fold/owner";
@@ -30,6 +31,8 @@ import {
   EventStreamProvider,
   useEventStream,
 } from "./useEventStream";
+
+const noMergedChannels = [] as const;
 
 const useStore = create<SseStoreSlice>()((set) => ({
   reconnectNonce: 0,
@@ -112,6 +115,7 @@ beforeEach(() => {
     useAuthStatus: () => useAuth().status,
     useStore,
     useDocumentVisible,
+    useMergedChannels: () => noMergedChannels,
   });
 });
 
@@ -178,6 +182,20 @@ function withProviderAndClient() {
 
 
 // -- tests ─────────────────────────────────────────────────────────────────
+
+describe("server rendering", () => {
+  it("renders the provider without acquiring browser stream resources", () => {
+    const transport = {
+      ...tab.transport,
+      get page(): never { throw new Error("browser resource acquired during SSR"); },
+    };
+    hub = new StreamHub(transport, { checkAuth: auth.checkAuth, sessionInvalid: notifySessionInvalid }, "");
+    registerSseRuntime({ useMergedChannels: () => ["system", "alerts"] });
+    const Wrapper = withProvider();
+    expect(() => renderToString(createElement(Wrapper, null, "server shell"))).not.toThrow();
+    expect(tab.sources).toHaveLength(0);
+  });
+});
 
 describe("EventStreamProvider connection lifecycle", () => {
   it("without profile APIs, separate pages keep their own EventSources", async () => {
