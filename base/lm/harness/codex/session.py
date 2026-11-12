@@ -168,6 +168,7 @@ class CodexSession(BaseHarnessSession[CodexConfig]):
         self._started = False
         self._commands = OpenCommands()
         self._subagents = SubagentThreads()
+        self._app_server_gone = False
         self._start_tree: dict[int, str] = {}
 
     def _read_records(
@@ -470,7 +471,13 @@ class CodexSession(BaseHarnessSession[CodexConfig]):
         return True
 
     def _on_notification(self, method: str, params: JsonObject) -> None:
-        self._subagents = self._subagents.learned(method, params, session_id=self._session_id)
+        now = self._clock.now().timestamp()
+        before = self._subagents.background(now)
+        self._subagents = self._subagents.learned(
+            method, params, session_id=self._session_id, now=now
+        )
+        if self._subagents.background(now) != before:
+            self._persist_pending()
         message = inbound(method, params, session_id=self._session_id)
         if message is None:
             self._on_subagent(method, params)
@@ -674,12 +681,20 @@ class CodexSession(BaseHarnessSession[CodexConfig]):
         return items if grown else ()
 
     def background_work(self) -> BackgroundWork:
-        if self._closed:
+        if self._closed or self._app_server_gone:
             return BackgroundWork()
-        return BackgroundWork((*self._pending_commands(), *self._observed_turn_items()))
+        now = self._clock.now().timestamp()
+        return BackgroundWork(
+            (
+                *self._pending_commands(),
+                *self._subagents.background(now),
+                *self._observed_turn_items(),
+            )
+        )
 
     def _persist_pending(self) -> None:
-        self._persist_background(self._pending_commands())
+        now = self._clock.now().timestamp()
+        self._persist_background((*self._pending_commands(), *self._subagents.background(now)))
 
     def _on_request(self, method: str, params: JsonObject) -> JsonObject:
         answer = answer_request(method, params, decision=self.config.approval_decision)
@@ -698,12 +713,15 @@ class CodexSession(BaseHarnessSession[CodexConfig]):
     # The app-server is gone: no turn it ran can end any more and no acknowledgement can arrive. The
     # turns it began on its own are dropped with it. An input it had received but not put in the
     # context is not declared lost here — the process dying says nothing about whether the thread
-    # recorded it — and is left for reconciliation against the rollout.
+    # recorded it — and is left for reconciliation against the rollout. Nothing it ran is held any more:
+    # `background_work()` reports none (a dead app-server must not keep a runtime from being evicted),
+    # while the record keeps what was pending, so the next session tells the agent it was lost.
     # meiva:link base/lm/harness/docs/delivery.md
     def _on_transport_closed(self, reason: str) -> None:
         if self._closed:
             return
         self._observed.clear()
+        self._app_server_gone = True
         self._emit(SessionFailed(error=f"app-server: {reason}"))
         self._fail_active(TransportClosedError(reason))
 
