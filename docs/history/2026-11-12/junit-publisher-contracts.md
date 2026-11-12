@@ -26,3 +26,18 @@ valid internal retry evidence remains readable; the identical older archive is
 excluded after the next workflow attempt starts. No workflow rerun, production
 card rewrite, UI repair or rollout is part of this change. Runtime acceptance
 for #6488 remains pending deployment.
+
+## Mixed-evidence review correction
+
+Independent review by agent #7633 found a false-green interaction in the first
+PR head: a readable raw pass returned before accumulated verdict publication
+or XML errors were inspected. Mixed controls now cover missing verdict identity,
+malformed verdict XML and equally timed competing IDs in either artifact order.
+An error in the requested read scope makes the observation unreadable before
+any passing case can close a card; the diagnostic retains the failed publication.
+
+Partial lanes filter unrelated publications before validating their metadata
+and select raw/final families separately. Thus an unrelated lane's broken
+verdict does not block a valid partial result, and an exact raw name cannot
+hide a valid final verdict from the same lane. Full-suite reads retain unknown
+when an unreadable in-scope publication could contain the reviewed case.

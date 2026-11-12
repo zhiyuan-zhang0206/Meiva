@@ -16,7 +16,11 @@ from base.clock import Deadline
 from base.host.boundary.json_values import is_object_dict, is_object_list
 from base.host.boundary.untyped import object_of
 from schedules.plans.watch.junit import match_artifact
-from schedules.plans.watch.junit_publications import attempt_started_at, current_publications
+from schedules.plans.watch.junit_publications import (
+    JUNIT_ARTIFACT_PREFIXES,
+    attempt_started_at,
+    current_publications,
+)
 from schedules.plans.watch.junit_cases import CaseObservation, CaseOutcome, collected_case_results
 from schedules.plans.watch.main_red import Entry, RunFacts
 
@@ -103,11 +107,17 @@ class JunitReader:
         evidence = (
             f"run {run.run_id} attempt {run.attempt}, bundles: {', '.join(bundles) or 'none'}"
         )
+        # meiva:note
+        # A readable case cannot settle the review while the requested scope
+        # contains unverified publications or unreadable XML: that publication
+        # can contain the final verdict that would supersede a raw passing retry.
+        if errors:
+            return CaseObservation(CaseOutcome.UNREADABLE, f"{evidence}; {'; '.join(errors)}")
         if outcome is not None:
             if outcome == CaseOutcome.UNREADABLE:
                 evidence += "; conflicting case results at the same publisher/retry"
             return CaseObservation(outcome, evidence)
-        if errors or not bundles:
+        if not bundles:
             return CaseObservation(
                 CaseOutcome.UNREADABLE, f"{evidence}; {'; '.join(errors) or 'no published JUnit'}"
             )
@@ -135,16 +145,26 @@ class JunitReader:
         except (OSError, ValueError, TypeError, subprocess.SubprocessError) as exc:
             return {}, (), (f"workflow attempt cannot be verified: {type(exc).__name__}: {exc}",)
         records = tuple(item for item in artifacts if is_object_dict(item))
+        if job_scope is not None:
+            records = tuple(
+                item
+                for item in records
+                if isinstance(name := item.get("name"), str)
+                and match_artifact(job_scope, (name,)).name is not None
+            )
         by_name, publication_errors = current_publications(records, cutoff)
         if job_scope is not None:
-            chosen = match_artifact(job_scope, tuple(by_name))
-            if chosen.name is None:
+            scoped = _scoped_publications(job_scope, by_name)
+            if not scoped:
                 return (
                     {},
                     (),
-                    (f"no current JUnit for partial lane {job_scope}", *publication_errors),
+                    (
+                        f"no unambiguous current JUnit for partial lane {job_scope}",
+                        *publication_errors,
+                    ),
                 )
-            by_name = {chosen.name: by_name[chosen.name]}
+            by_name = scoped
         cases: dict[str, CaseOutcome] = {}
         versions: dict[str, tuple[int, int]] = {}
         bundles: list[str] = []
@@ -219,3 +239,18 @@ class JunitReader:
 def _internal_attempt(name: str) -> int:
     match = re.search(r"-a(\d+)\.xml$", name)
     return int(match.group(1)) if match else 0
+
+
+# meiva:note
+# Partial lanes can publish both raw retries and a final verdict. Select each
+# publisher independently so an exact raw name cannot hide its final verdict;
+# ambiguity within one publisher still makes this lane unreadable.
+def _scoped_publications(job: str, by_name: dict[str, int]) -> dict[str, int]:
+    selected: dict[str, int] = {}
+    for prefix in JUNIT_ARTIFACT_PREFIXES:
+        match = match_artifact(job, tuple(name for name in by_name if name.startswith(prefix)))
+        if match.name is not None:
+            selected[match.name] = by_name[match.name]
+        elif match.candidates:
+            return {}
+    return selected

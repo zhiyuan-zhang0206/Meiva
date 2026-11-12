@@ -160,13 +160,28 @@ def test_later_internal_retry_supersedes_only_cases_it_contains(tmp_path: Path) 
 
 
 @pytest.mark.parametrize("reverse", [False, True])
-def test_final_verdict_wins_over_raw_retry_results(tmp_path: Path, reverse: bool) -> None:
+@pytest.mark.parametrize("partial", [False, True])
+@pytest.mark.parametrize("verdict_passes", [False, True])
+def test_final_verdict_wins_over_raw_retry_results(
+    tmp_path: Path, reverse: bool, partial: bool, verdict_passes: bool
+) -> None:
     bundles = (
-        Bundle("test-results-backend-shard-3", START.isoformat(), {"raw-a2.xml": FAIL}),
-        Bundle("verdict-junit-backend-3", START.isoformat(), {"backend-3.xml": PASS}),
+        Bundle(
+            "test-results-backend-shard-3",
+            START.isoformat(),
+            {"raw-a2.xml": FAIL if verdict_passes else PASS},
+        ),
+        Bundle(
+            "verdict-junit-backend-3",
+            START.isoformat(),
+            {"backend-3.xml": PASS if verdict_passes else FAIL},
+        ),
     )
     reader, _ = source(tmp_path, tuple(reversed(bundles)) if reverse else bundles)
-    assert reader(entry(), facts()).outcome == CaseOutcome.PASSED
+    target = replace(entry(), covers_full_suite=not partial, job="Backend shard (3/8)")
+    assert reader(target, facts()).outcome == (
+        CaseOutcome.PASSED if verdict_passes else CaseOutcome.FAILED
+    )
 
 
 def test_conflicting_results_without_retry_order_stay_unknown(tmp_path: Path) -> None:
@@ -201,3 +216,44 @@ def test_identical_publication_timestamps_with_different_ids_are_ambiguous() -> 
     selected, errors = current_publications(records, START)
     assert not selected
     assert "ambiguous" in errors[0]
+
+
+@pytest.mark.parametrize("reverse", [False, True])
+@pytest.mark.parametrize("problem", ["unverified", "malformed", "ambiguous"])
+@pytest.mark.parametrize("partial", [False, True])
+def test_raw_pass_cannot_mask_unreadable_final_publication(
+    tmp_path: Path, problem: str, reverse: bool, partial: bool
+) -> None:
+    verdict = Bundle(
+        "verdict-junit-backend-3",
+        None if problem == "unverified" else START.isoformat(),
+        {"backend-3.xml": "<broken" if problem == "malformed" else PASS},
+    )
+    bundles = (
+        Bundle("test-results-backend-shard-3", START.isoformat(), {"raw-a2.xml": PASS}),
+        verdict,
+    )
+    if problem == "ambiguous":
+        bundles = (*bundles, verdict)
+    reader, _ = source(tmp_path, tuple(reversed(bundles)) if reverse else bundles)
+    target = replace(entry(), covers_full_suite=not partial, job="Backend full suite (3/8)")
+    observation = reader(target, facts())
+    assert observation.outcome == CaseOutcome.UNREADABLE
+    assert "verdict-junit-backend-3" in observation.detail
+    assert {
+        "unverified": "cannot be tied",
+        "malformed": "unreadable JUnit",
+        "ambiguous": "ambiguous publications",
+    }[problem] in observation.detail
+
+
+def test_partial_lane_ignores_an_unreadable_other_lane(tmp_path: Path) -> None:
+    reader, _ = source(
+        tmp_path,
+        (
+            Bundle("test-results-backend-shard-3", START.isoformat(), {"raw-a2.xml": PASS}),
+            Bundle("verdict-junit-e2e-3", None, {"e2e-3.xml": "<broken"}),
+        ),
+    )
+    target = replace(entry(), covers_full_suite=False, job="Backend full suite (3/8)")
+    assert reader(target, facts()).outcome == CaseOutcome.PASSED
