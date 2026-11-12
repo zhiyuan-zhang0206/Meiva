@@ -89,12 +89,18 @@ async def test_the_session_store_only_wakes_the_writer_and_never_returns_rows(
     tmp_path: Path,
 ) -> None:
     woken: list[str | None] = []
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    fake = bin_dir / "claude"
+    fake.write_text("#!/bin/sh\n")
+    fake.chmod(0o755)
+    environ = {"PATH": str(bin_dir)}
     session = open_session(
         Harness.CLAUDE_CODE,
         agent_id=71,
         cwd=tmp_path,
         registry=FileSessionRegistry(tmp_path / "sessions"),
-        environ={},
+        environ=environ,
         clock=bridge_root_values().clock,
         session_wake=woken.append,
     )
@@ -110,7 +116,7 @@ async def test_the_session_store_only_wakes_the_writer_and_never_returns_rows(
         agent_id=71,
         cwd=tmp_path,
         registry=FileSessionRegistry(tmp_path / "sessions"),
-        environ={},
+        environ=environ,
         clock=bridge_root_values().clock,
     )
     assert isinstance(plain, ClaudeSession) and plain.config.session_store is None

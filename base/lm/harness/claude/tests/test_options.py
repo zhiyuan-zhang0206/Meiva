@@ -191,6 +191,7 @@ def test_a_session_store_rides_with_eager_flush_and_needs_the_sdk_option(tmp_pat
     fields = ("extra_args", "system_prompt", "session_store", "session_store_flush")
     values = option_values(config, environ={}, cli_path=None, option_fields=fields, resume=None)
     assert values["session_store"] is store and values["session_store_flush"] == "eager"
+    assert "enable_file_checkpointing" not in values, "the SDK refuses a store with it"
     plain = BridgeConfig(cwd=tmp_path, model="claude-opus-5-5")
     assert "session_store" not in option_values(
         plain, environ={}, cli_path=None, option_fields=fields, resume=None
