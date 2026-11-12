@@ -6,7 +6,7 @@
 from __future__ import annotations
 
 import json
-from collections.abc import Mapping, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from itertools import count
 from uuid import uuid4
 
@@ -15,6 +15,7 @@ from psycopg_pool import AsyncConnectionPool
 from agent.harness_timeline.plan import ReplyPolicy
 from agent.harness_timeline.writer import Committed, HarnessTimelineWriter
 from base.agents.history.timeline_item import TimelineItem
+from base.clock import Clock
 from base.clock.tests.fakes import system_clock
 from base.lm.harness.session.transcript.drafts import InboundPart, SentInput
 from base.lm.harness.session.transcript.entries import AnyEntry, HumanInput
@@ -31,15 +32,25 @@ def render_tool(name: str, tool_input: Mapping[str, object]) -> str:
 
 
 class ScriptedReader:
-    def __init__(self, records: dict[str, list[AnyEntry]]) -> None:
+    def __init__(
+        self, records: dict[str, list[AnyEntry]], *, listed: Sequence[str] | None = None
+    ) -> None:
         self.records_data = records
         self.visible = dict.fromkeys(records, 0)
+        self.listed = list(records if listed is None else listed)
         self.fail_next = False
+        self.fail_parse_stored = False
+
+    def appear(self, record: str) -> None:
+        self.listed.append(record)
 
     async def records(self) -> tuple[str, ...]:
-        return tuple(self.records_data)
+        return tuple(self.listed)
 
     def parse_stored(self, rows: Sequence[StoredRow]) -> tuple[AnyEntry, ...]:
+        if self.fail_parse_stored:
+            self.fail_parse_stored = False
+            raise OSError("the stored rows could not be parsed")
         return tuple(self.records_data[rows[0].record][row.ordinal] for row in rows) if rows else ()
 
     def wire_id(self, key: str) -> str:
@@ -127,8 +138,9 @@ def make_writer(
     reader: RecordReader,
     committed: list[Committed],
     *,
-    session: str = "session-1",
+    session: str | Callable[[], str | None] = "session-1",
     reading: bool = True,
+    clock: Clock | None = None,
 ) -> HarnessTimelineWriter:
     async def after(commit: Committed) -> None:
         committed.append(commit)
@@ -146,7 +158,7 @@ def make_writer(
         render_tool=render_tool,
         after_commit=after,
         cli_version=lambda: "2.1.322",
-        clock=system_clock(),
+        clock=clock or system_clock(),
     )
     if reading:
         writer.start_reading()

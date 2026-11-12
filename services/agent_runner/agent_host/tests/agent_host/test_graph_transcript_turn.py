@@ -12,16 +12,19 @@ from collections.abc import Sequence
 from dataclasses import dataclass, field, replace
 from itertools import count
 from pathlib import Path
+from typing import cast
 
 import psycopg
 import pytest
 from langgraph.runtime import Runtime
 from psycopg_pool import AsyncConnectionPool
 
+from agent.graph.claim.harness_activity import TranscriptSink
 from agent.graph.claim.harness_inbox import INPUT_KEY_FIELD
 from agent.graph.claim.harness_turn import harness_turn_node
 from agent.graph.claim.tests.harness_support import (
     FakeEngine,
+    completed,
     config,
     in_a_turn,
     input_key,
@@ -36,14 +39,17 @@ from agent.harness_timeline.writer import HarnessTimelineWriter
 from agent.ownership.tests.ownership_support import agent_row
 from agent.state import AgentState
 from base.agents.context import MeivaContext
+from base.agents.context.harness_timeline import TimelineSession, TurnEndWait
 from base.clock.tests.fakes import system_clock
 from base.lm.harness import (
     BridgeEvent,
     HarnessInput,
+    InputRejected,
     SessionFailed,
     TurnOrigin,
     TurnStarted,
     Usage,
+    completed_turn,
 )
 from base.lm.harness.claude.transcript.reader import ClaudeRecordReader
 from base.lm.harness.session.transcript.entries import (
@@ -134,6 +140,11 @@ class ScriptedRecord:
         return out
 
 
+class _Published:
+    def emit(self, payload: str) -> None:
+        del payload
+
+
 def _wire(
     rt: Runtime[MeivaContext],
     pool: AsyncConnectionPool,
@@ -142,7 +153,7 @@ def _wire(
     *,
     reading: bool = False,
 ) -> tuple[Runtime[MeivaContext], HarnessTimelineWriter]:
-    effects = TimelineEffects(agent_id)
+    effects = TimelineEffects(agent_id, _Published())
     ids = count()
     writer = HarnessTimelineWriter(
         pool=pool,
@@ -344,3 +355,78 @@ async def test_a_stop_writes_no_note_of_its_own_on_the_timeline(
         shown = await cursor.fetchone()
     assert shown == (0,), "the note rides into the CLI with the input, not onto the timeline"
     assert any("stopped by the user" in item.text for batch in engine.delivered for item in batch)
+
+
+async def test_an_input_the_stream_calls_refused_but_the_record_shows_is_settled_not_sent_again(
+    db_conn: psycopg.Connection,
+    aops_pool: AsyncConnectionPool,
+    hosted_resources: HostedTurnResources,
+    loguru_records: LogRecords,
+) -> None:
+    agent_id = agent_row(db_conn)
+    row = insert_row(db_conn, agent_id, "chat", "user", "hello")
+    record = ScriptedRecord()
+
+    def script(inputs: Sequence[HarnessInput]) -> Sequence[BridgeEvent]:
+        keys = tuple(item.key for item in inputs)
+        record.write(*(record.take(key, item.text) for key, item in zip(keys, inputs, strict=True)))
+        record.write(*record.reply(REPLY))
+        return [
+            TurnStarted("t1", TurnOrigin.INPUT, keys, 1),
+            *(InputRejected(key, "the CLI said its queue was full", 1) for key in keys),
+            completed("t1", REPLY),
+        ]
+
+    engine = FakeEngine(script=script)
+    rt, _ = _wire(
+        runtime(engine, ops_pool=aops_pool, hosted_resources=hosted_resources),
+        aops_pool,
+        agent_id,
+        record,
+    )
+
+    _ = await harness_turn_node(AgentState(), rt, config(agent_id))
+
+    assert row_status(db_conn, row) == "done", "the record proved delivery"
+    assert len(engine.delivered) == 1, "the input reached the CLI once, whatever the event said"
+    assert len(loguru_records.events("harness_input_proven_by_record")) == 1
+    assert loguru_records.events("harness_input_requeued") == []
+
+
+# meiva:note
+# Turns are paired with the record's closings one for one, in order: two turns that end close together each wait for
+# their own closing, and neither returns on the other's, so the spend compared with each turn's result is that turn's.
+class _CountingTimeline:
+    def __init__(self, spends: list[Usage]) -> None:
+        self.closed_turns = 0
+        self.items_written = 0
+        self.fault = None
+        self.waited_after: list[int] = []
+        self._spends = spends
+
+    def take_closed_usage(self) -> Usage | None:
+        return self._spends.pop(0) if self._spends else None
+
+    def take_invalid_reply(self) -> bool:
+        return False
+
+    async def wait_for_turn_end(
+        self, closed_before: int, *, quiet_seconds: float, ceiling_seconds: float
+    ) -> TurnEndWait:
+        del quiet_seconds, ceiling_seconds
+        self.waited_after.append(closed_before)
+        return TurnEndWait.CLOSED
+
+    async def write_marker(self, text: str, *, error: bool) -> None:
+        del text, error
+
+
+async def test_two_turns_that_end_close_together_each_wait_for_their_own_closing() -> None:
+    timeline = _CountingTimeline([Usage(input_tokens=7, output_tokens=3)] * 2)
+    sink = TranscriptSink(cast("TimelineSession", timeline), non_human_wake=False)
+    timeline.closed_turns = 2
+    turns = (completed_turn(completed("t1", "a"), "a"), completed_turn(completed("t2", "b"), "b"))
+
+    await sink.finish(turns)
+
+    assert timeline.waited_after == [0, 1], "the second turn must not return on the first's closing"

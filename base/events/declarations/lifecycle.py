@@ -187,6 +187,12 @@ EVENTS: dict[str, EventSpec] = {
         "queue at its original position and is delivered again",
         tier="noise",
     ),
+    "harness_input_proven_by_record": telemetry_event(
+        "harness_input_proven_by_record",
+        "an external harness reported an input as refused or lost but its transcript shows it; the "
+        "input is settled by the record and is not sent again",
+        tier="anomaly",
+    ),
     "harness_close_settled": telemetry_event(
         "harness_close_settled",
         "an external harness session closed and none of its observed processes survived",
@@ -231,7 +237,15 @@ EVENTS: dict[str, EventSpec] = {
     "harness_timeline_writer_retry": telemetry_event(
         "harness_timeline_writer_retry",
         "the timeline writer of a transcript-sourced external agent could not read the record or commit "
-        "a read; nothing was lost (the position did not move) and the same read is tried again",
+        "a read; the transaction rolled back, so neither the position nor the timeline moved (what an "
+        "earlier commit's effects still owe is kept apart) and the same read is tried again",
+        tier="anomaly",
+    ),
+    "harness_timeline_effect_failed": telemetry_event(
+        "harness_timeline_effect_failed",
+        "an effect that follows a committed read of a transcript-sourced timeline (publishing to the live "
+        "view, capturing a reply for delivery, pricing usage) failed; the commit stands, the other effects "
+        "ran, and what the failed one owed is kept and tried again at the next commit",
         tier="anomaly",
     ),
     "harness_timeline_writer_faulted": telemetry_event(
@@ -257,13 +271,16 @@ EVENTS: dict[str, EventSpec] = {
         "harness_timeline_rebuild_bounded",
         "a restart rebuilt the timeline projector from only the latest stored rows because the turn had "
         "gone past the rebuild bound without a quiet point; the output of a call that began earlier is "
-        "held and not shown",
+        "held for a bounded time and then shown top-level",
         tier="anomaly",
     ),
     "harness_timeline_anomaly": telemetry_event(
         "harness_timeline_anomaly",
         "the transcript held a row the projection could not use (an unknown type, a missing field, an "
-        "unusable line); it is skipped and reported once per kind and detail",
+        "unusable line, an origin it does not know) or held an item too long and released it (a result "
+        "whose call was never read: orphan_released; the output of a sub-agent whose link was never "
+        "read: unlinked_released, shown top-level); it is skipped or released and reported once per "
+        "kind and detail",
         tier="anomaly",
     ),
     "harness_timeline_unmatched_input": telemetry_event(

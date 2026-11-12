@@ -9,7 +9,7 @@ from __future__ import annotations
 
 from collections.abc import Sequence
 from functools import partial
-from typing import LiteralString
+from typing import LiteralString, Protocol
 
 from langchain_core.messages import BaseMessage
 from psycopg import sql
@@ -498,9 +498,23 @@ def is_deferred(row: ClaimedInbound) -> bool:
     return bool(row.payload and row.payload.get("harness_reconcile_deferred") is True)
 
 
+class Emits(Protocol):
+    def emit(self, payload: str) -> None: ...
+
+
 def publish_inbound(ctx: MeivaContext, agent_id: int, items: list[TimelineItem]) -> None:
     publisher = ctx.event_publisher
-    if publisher is None or not items:
+    if publisher is None:
+        return
+    publish_items(publisher, agent_id, items)
+
+
+# meiva:note
+# The live view's snapshot of written timeline items, and the inbound-committed event of each inbound item, on a
+# given publisher: the invocation's own (`publish_inbound`), or the runtime-scoped one the transcript timeline
+# writer publishes on, which does not stop when an invocation ends.
+def publish_items(publisher: Emits, agent_id: int, items: list[TimelineItem]) -> None:
+    if not items:
         return
     count = int(items[-1].item_id.split(".")[0].removeprefix("h")) + 1
     publisher.emit(

@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from base.lm.harness.events import HarnessCause, TurnOrigin
+from base.lm.harness.events import HarnessCause, TurnOrigin, Usage
 from base.lm.harness.session.transcript.drafts import (
     DraftKind,
     InboundPart,
@@ -9,15 +9,24 @@ from base.lm.harness.session.transcript.drafts import (
 )
 from base.lm.harness.session.transcript.entries import (
     AgentText,
+    AnomalyKind,
     HumanInput,
+    Interrupt,
     Notice,
     Order,
     Reasoning,
     SubagentLink,
+    TokenUsage,
     ToolCall,
     ToolResult,
+    TurnEnd,
 )
-from base.lm.harness.session.transcript.projection import Projector
+from base.lm.harness.session.transcript.projection import (
+    CALLS_LIMIT,
+    HOLD_ENTRIES,
+    TURNS_LIMIT,
+    Projector,
+)
 
 
 def _order(clock: int, seq: int = 0) -> Order:
@@ -132,3 +141,114 @@ def test_a_child_records_notice_becomes_nested_sub_agent_text_in_the_calls_turn(
 def test_reasoning_without_text_shows_nothing() -> None:
     projection = Projector().feed([Reasoning(key="r", order=_order(1), text="", duration_ms=5)])
     assert projection.drafts == ()
+
+
+# meiva:note
+# Nothing is held for ever and nothing grows without bound: a call whose turn closed is abandoned and no longer keeps
+# the record from being quiet (its late result is still paired); a result whose call never comes, and the output of a
+# sub-agent whose link never comes, are released top-level with an anomaly each, after a number of entries or when the
+# writer says so; what the projector remembers has a fixed size however long the conversation.
+def _call(key: str, call_id: str, seq: int) -> ToolCall:
+    return ToolCall(key=key, order=_order(seq), call_id=call_id, name="Bash", tool_input={})
+
+
+def test_a_call_unanswered_when_its_turn_closes_is_abandoned_and_a_late_result_still_pairs() -> (
+    None
+):
+    projector = Projector()
+    _ = projector.feed(
+        [
+            HumanInput(key="h", order=_order(0), turn="t1", wire_id=None, text="go"),
+            _call("c", "call-1", 1),
+            Interrupt(key="i", order=_order(2), turn="t1"),
+        ]
+    )
+    assert projector.unanswered_calls() == (), "the interrupted call no longer blocks a quiet point"
+    late = projector.feed(
+        [ToolResult(key="r", order=_order(3), turn="t1", call_id="call-1", content="done")]
+    )
+    assert [d.kind for d in late.drafts] == [DraftKind.CODE_OUTPUT]
+
+
+def test_a_call_left_open_by_a_turn_that_never_closed_is_abandoned_when_the_next_turn_begins() -> (
+    None
+):
+    projector = Projector()
+    _ = projector.feed(
+        [
+            HumanInput(key="h1", order=_order(0), turn="t1", wire_id=None, text="go"),
+            _call("c", "call-1", 1),
+        ]
+    )
+    assert projector.unanswered_calls() == ("call-1",)
+    _ = projector.feed(
+        [HumanInput(key="h2", order=_order(2), turn="t2", wire_id=None, text="more")]
+    )
+    assert projector.unanswered_calls() == ()
+
+
+def test_a_result_whose_call_never_comes_is_released_top_level_after_the_bound() -> None:
+    projector = Projector()
+    first = projector.feed(
+        [ToolResult(key="r", order=_order(0), turn="t", call_id="gone", content="late output")]
+    )
+    assert first.drafts == () and projector.unresolved_results() == ("gone",)
+    filler = [
+        AgentText(key=f"a{i}", order=_order(i + 1), turn="t", text="x", message_ref=f"m{i}")
+        for i in range(HOLD_ENTRIES)
+    ]
+    released = projector.feed(filler)
+    assert projector.unresolved_results() == ()
+    assert [d.payload for d in released.drafts if d.kind is DraftKind.CODE_OUTPUT] == [
+        "late output"
+    ]
+    assert [(a.anomaly, a.detail) for a in released.anomalies] == [
+        (AnomalyKind.ORPHAN_RELEASED, "gone")
+    ]
+
+
+def test_the_output_of_a_sub_agent_that_is_never_linked_is_released_and_later_output_follows() -> (
+    None
+):
+    projector = Projector()
+    held = projector.feed(
+        [AgentText(key="s1", order=_order(0), record="sub", text="one", message_ref="m1")]
+    )
+    assert held.drafts == () and projector.unlinked_records() == ("sub",)
+    released = projector.feed([], release_held=True)
+    assert [d.payload for d in released.drafts] == ["one"]
+    assert [(a.anomaly, a.detail) for a in released.anomalies] == [
+        (AnomalyKind.UNLINKED_RELEASED, "sub")
+    ]
+    later = projector.feed(
+        [AgentText(key="s2", order=_order(1), record="sub", text="two", message_ref="m2")]
+    )
+    assert [(d.payload, d.parent_tool_use_id) for d in later.drafts] == [("two", None)]
+    assert projector.unlinked_records() == ()
+
+
+def test_what_the_projector_remembers_does_not_grow_with_the_conversation() -> None:
+    projector = Projector()
+    for turn in range(3_000):
+        _ = projector.feed(
+            [
+                HumanInput(
+                    key=f"h{turn}", order=_order(turn), turn=f"t{turn}", wire_id=None, text="q"
+                ),
+                _call(f"c{turn}", f"call-{turn}", turn),
+                ToolResult(
+                    key=f"r{turn}", order=_order(turn, 1), call_id=f"call-{turn}", content="ok"
+                ),
+                TokenUsage(
+                    key=f"u{turn}",
+                    order=_order(turn, 2),
+                    turn=f"t{turn}",
+                    message_ref=f"m{turn}",
+                    usage=Usage(input_tokens=1, output_tokens=1),
+                ),
+                TurnEnd(key=f"e{turn}", order=_order(turn, 3), turn=f"t{turn}"),
+            ]
+        )
+    sizes = projector.memory_sizes()
+    assert max(sizes.values()) <= 20_000, sizes
+    assert sizes["calls"] <= CALLS_LIMIT and sizes["turns"] <= TURNS_LIMIT

@@ -170,6 +170,8 @@ class AnomalyKind(StrEnum):
     UNKNOWN_TYPE = "unknown_type"
     MISSING_FIELD = "missing_field"
     BAD_ROW = "bad_row"
+    ORPHAN_RELEASED = "orphan_released"
+    UNLINKED_RELEASED = "unlinked_released"
 
 
 # meiva:note
@@ -177,7 +179,9 @@ class AnomalyKind(StrEnum):
 # that lacks a field the projection needs is skipped and reported as an exception, and a row the reader
 # could not decode (not JSON, not an object, invalid text, nested too deep, too large) is skipped and
 # reported with the reason. None of them puts anything on the timeline. `detail` is the type name, the
-# missing field or the reason.
+# missing field or the reason. `ORPHAN_RELEASED` and `UNLINKED_RELEASED` are the projection's own: an item it held
+# too long (a result whose call was never read, the output of a sub-agent whose link was never read) and then put on
+# the timeline top-level; `detail` is the call id or the record.
 @dataclass(frozen=True, slots=True, kw_only=True)
 class Anomaly(Entry):
     anomaly: AnomalyKind

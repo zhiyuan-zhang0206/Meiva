@@ -8,7 +8,7 @@ from typing import TypedDict
 
 from base.host.boundary.json_values import is_object_dict, is_object_list
 from base.lm.harness.claude.delivery import harness_cause
-from base.lm.harness.events import Usage
+from base.lm.harness.events import HarnessCause, Usage
 from base.lm.harness.session.transcript.entries import (
     MAIN_RECORD,
     AgentText,
@@ -258,6 +258,8 @@ def _attachment(
     origin = attachment.get("origin")
     origin_kind = origin.get("kind") if is_object_dict(origin) else None
     if isinstance(origin_kind, str):
+        if harness_cause(origin_kind) is HarnessCause.UNKNOWN:
+            return state, (_anomaly(raw, line, AnomalyKind.UNKNOWN_TYPE, f"origin/{origin_kind}"),)
         call_id, rendered = _notification(prompt)
         notice = Notice(
             **_entry_fields(row),
