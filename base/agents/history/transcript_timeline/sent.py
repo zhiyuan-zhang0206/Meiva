@@ -1,8 +1,8 @@
 from __future__ import annotations
 
-from collections.abc import Mapping, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
-from datetime import datetime, timedelta
+from datetime import UTC, datetime, timedelta
 
 from psycopg import Connection
 
@@ -11,22 +11,22 @@ from base.agents.messages.inbound import InboundKind
 from base.agents.messages.inbound_images import inbound_upload_files
 from base.agents.messages.kwargs import NoteTag
 from base.host.boundary.json_values import is_object_dict, is_object_list
+from base.log import logger
 
 # meiva:note
 # Which inbox rows were handed to a harness as one input, read back from the inbox, and what each of them shows on
 # the timeline. An input is sent to the CLI with an id derived from its key, and the row of the CLI's record that holds
-# it names only that id, so who said what is recovered here: the rows the agent claimed around the time the record's
-# rows were written, grouped by the key the claim marked them with (a batch handed over as one input shares a key) or
+# it names only that id, so who said what is recovered here: the agent's inbox rows, grouped by the key the claim marked them with (a batch handed over as one input shares a key) or
 # `inbound-<id>` for a row sent alone. A row shows what the person typed (a `/command` is not expanded and no
 # envelope is added), its sender, its images and its files. A system note or a heartbeat shows as a marker; the notes
 # only the host's own lifecycle wrote (a restart, an interrupt, a lost turn) are not shown, because the record says what
-# happened. The time range is the record's own rows' stamps widened by `CLAIM_SLACK` (and, for the index on `created_at` that bounds the scan, a row queued up to `QUEUED_LOOKBACK` before it was claimed), so a request reads rows in
-# proportion to the window and not to the agent's whole history.
+# happened. How the rows are found is `load_sent_rows`.
 # meiva:link base/lm/harness/docs/transcript-projection.md
 
 INPUT_KEY_FIELD = "harness_input_key"
 CLAIM_SLACK = timedelta(minutes=10)
-QUEUED_LOOKBACK = timedelta(days=1)
+BATCH_ROWS = 200
+MAX_ROWS = 1000
 DELIVERABLE_KINDS = (
     InboundKind.CHAT.value,
     InboundKind.SYSTEM_NOTE.value,
@@ -59,24 +59,88 @@ class SentRow:
         return key if isinstance(key, str) else f"inbound-{self.id}"
 
 
+# meiva:note
+# The inbox rows that account for the person's inputs in a stretch of the record, found by the one fact that ties them: the
+# row's input key gives the id the CLI kept (`wire_id`), so a row of the record is matched to its inbox row by id and by no
+# window of time. `wanted` maps the ids to match to the time of their rows in the record. The agent's deliverable rows are
+# read newest first, `BATCH_ROWS` at a time, from the last created at or before `until` (an index scan on
+# `(agent_id, created_at)` with a limit, so what a request reads follows `BATCH_ROWS` and `MAX_ROWS` and never the agent's
+# whole inbox), and reading goes on while an id is unmatched. An id is given up on, with no further reading for it, when the rows
+# read have reached ones claimed more than `CLAIM_SLACK` before its row was written: rows are claimed in the order they were
+# created, so an older row cannot be the one, and the id is the host's own input (a context reset, a recovery note) that no
+# inbox row names; that costs one batch at most. An id still unmatched when `MAX_ROWS` are read is reported
+# (`harness_timeline_inputs_unmatched`, with the count) and not shown.
+@dataclass(frozen=True, slots=True)
+class Found:
+    rows: list[SentRow]
+    scanned: int
+
+
 def load_sent_rows(
-    conn: Connection, agent_id: int, *, since: datetime, until: datetime
-) -> list[SentRow]:
-    cursor = conn.execute(
-        "SELECT id, agent_id, kind, source, content, payload, created_at FROM inbound_messages "
-        "WHERE agent_id=%s AND created_at >= %s AND created_at <= %s "
-        "AND claimed_at >= %s AND claimed_at <= %s AND kind = ANY(%s) "
-        "ORDER BY created_at ASC, id ASC",
-        (
-            agent_id,
-            since - QUEUED_LOOKBACK,
-            until + CLAIM_SLACK,
-            since - CLAIM_SLACK,
-            until + CLAIM_SLACK,
-            list(DELIVERABLE_KINDS),
-        ),
+    conn: Connection,
+    agent_id: int,
+    *,
+    until: datetime,
+    wanted: Mapping[str, datetime],
+    wire_id: Callable[[str], str],
+) -> Found:
+    pending = dict(wanted)
+    found: list[SentRow] = []
+    scanned = 0
+    while pending and scanned < MAX_ROWS:
+        batch = _batch(conn, agent_id, until + CLAIM_SLACK, scanned)
+        scanned += len(batch)
+        found.extend(row for row, _claimed in batch)
+        _settle(pending, batch, wire_id)
+        if len(batch) < BATCH_ROWS:
+            break
+    if pending:
+        logger.warning(
+            "{count} inputs in the record match no inbox row within the newest {scanned} of the agent's rows; "
+            "they are not shown",
+            event="harness_timeline_inputs_unmatched",
+            agent_id=agent_id,
+            count=len(pending),
+            scanned=scanned,
+        )
+    mine = [row for row in found if wire_id(row.input_key) in wanted]
+    ordered = sorted(
+        mine, key=lambda row: (row.created_at or datetime.min.replace(tzinfo=UTC), row.id)
     )
-    return [_row(values) for values in cursor.fetchall()]
+    return Found(ordered, scanned)
+
+
+# meiva:note
+# What one batch settles of the ids still wanted: the ones its rows carry are matched, and the ones whose rows were written
+# long after the oldest claim in the batch are given up on (see `load_sent_rows`).
+def _settle(
+    pending: dict[str, datetime],
+    batch: Sequence[tuple[SentRow, datetime | None]],
+    wire_id: Callable[[str], str],
+) -> None:
+    for wire in {wire_id(row.input_key) for row, _claimed in batch} & pending.keys():
+        del pending[wire]
+    oldest_claim = min((c for _row, c in batch if c is not None), default=None)
+    if oldest_claim is None:
+        return
+    for wire, stamp in list(pending.items()):
+        if oldest_claim < stamp - CLAIM_SLACK:
+            del pending[wire]
+
+
+def _batch(
+    conn: Connection, agent_id: int, until: datetime, skip: int
+) -> list[tuple[SentRow, datetime | None]]:
+    cursor = conn.execute(
+        "SELECT id, agent_id, kind, source, content, payload, created_at, claimed_at FROM inbound_messages "
+        "WHERE agent_id=%s AND created_at <= %s AND kind = ANY(%s) AND claimed_at IS NOT NULL "
+        "ORDER BY created_at DESC, id DESC LIMIT %s OFFSET %s",
+        (agent_id, until, list(DELIVERABLE_KINDS), BATCH_ROWS, skip),
+    )
+    return [
+        (_row(values[:7]), values[7] if isinstance(values[7], datetime) else None)
+        for values in cursor.fetchall()
+    ]
 
 
 def _row(values: tuple[object, ...]) -> SentRow:

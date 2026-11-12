@@ -54,7 +54,7 @@ class Window:
         return [projected.item for projected in self.items]
 
 
-LoadSent = Callable[[datetime, datetime], Mapping[str, Sequence[TimelineItem]]]
+LoadSent = Callable[[datetime, Mapping[str, datetime]], Mapping[str, Sequence[TimelineItem]]]
 
 
 def read_window(
@@ -110,21 +110,31 @@ def _items_of(
     load_sent: LoadSent,
 ) -> Projected:
     projector = RecordProjector(policy=policy, render_tool=render_tool, wire_id=wire_id)
-    span = _span(rows)
-    if span is not None:
-        for key, items in load_sent(*span).items():
+    wanted = input_wire_ids(rows)
+    if wanted:
+        for key, items in load_sent(max(wanted.values()), wanted).items():
             projector.register(key, items)
     entries = EntryParser().entries(rows)
     return projector.feed(entries, tail=tail, release_held=True)
 
 
-def _span(rows: Sequence[FileRow]) -> tuple[datetime, datetime] | None:
-    stamps = [
-        stamp
-        for row in rows
-        if is_input_row(row.row) and (stamp := _stamp(row.row.get("timestamp"))) is not None
-    ]
-    return (min(stamps), max(stamps)) if stamps else None
+# meiva:note
+# The ids the CLI kept for the person's inputs among the rows, each with the time its row was written: the ids to match
+# to inbox rows. A user row names its own `uuid`, an absorbed message the `source_uuid` of its attachment.
+def input_wire_ids(rows: Sequence[FileRow]) -> dict[str, datetime]:
+    wanted: dict[str, datetime] = {}
+    for row in rows:
+        stamp = _stamp(row.row.get("timestamp"))
+        wire = _wire_of(row.row)
+        if stamp is not None and wire is not None and is_input_row(row.row):
+            wanted[wire] = stamp
+    return wanted
+
+
+def _wire_of(row: Mapping[str, object]) -> str | None:
+    attachment = row.get("attachment")
+    wire = attachment.get("source_uuid") if is_object_dict(attachment) else row.get("uuid")
+    return wire if isinstance(wire, str) else None
 
 
 # meiva:note
@@ -135,6 +145,9 @@ def is_input_row(row: Mapping[str, object]) -> bool:
         attachment = row.get("attachment")
         return is_object_dict(attachment) and attachment.get("type") == "queued_command"
     if row.get("type") != "user":
+        return False
+    origin = row.get("origin")
+    if is_object_dict(origin) and origin.get("kind") not in (None, "human"):
         return False
     message = row.get("message")
     content = message.get("content") if is_object_dict(message) else None

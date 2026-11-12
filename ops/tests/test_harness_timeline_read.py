@@ -8,13 +8,20 @@ from __future__ import annotations
 
 import re
 from collections.abc import Iterator
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 import psycopg
 import pytest
 from psycopg_pool import ConnectionPool
 
+from base.agents.history.transcript_timeline.sent import (
+    BATCH_ROWS,
+    MAX_ROWS,
+    load_sent_rows,
+)
 from base.db import create_agent
+from base.lm.harness.claude.delivery import key_uuid
 from base.lm.harness.registry import FileSessionRegistry, SessionRecord
 from base.paths import harness_sessions_dir, workspace_dir
 from ops.harness_timeline import read_harness_timeline
@@ -67,11 +74,18 @@ def _session(tmp_path: Path, agent: int, *, write_file: bool) -> Path:
     return home
 
 
-def _claimed(conn: psycopg.Connection, agent: int, content: str, key: str) -> int:
+def _claimed(
+    conn: psycopg.Connection,
+    agent: int,
+    content: str,
+    key: str,
+    created: str = "2026-11-12T08:56:50Z",
+    claimed: str = "2026-11-12T08:56:58Z",
+) -> int:
     row = conn.execute(
         "INSERT INTO inbound_messages (agent_id, content, kind, source, status, created_at, claimed_at, payload) "
-        "VALUES (%s, %s, 'chat', 'user', 'done', '2026-11-12T08:56:50Z', '2026-11-12T08:56:58Z', %s::jsonb) RETURNING id",
-        (agent, content, f'{{"harness_input_key": "{key}"}}'),
+        "VALUES (%s, %s, 'chat', 'user', 'done', %s, %s, %s::jsonb) RETURNING id",
+        (agent, content, created, claimed, f'{{"harness_input_key": "{key}"}}'),
     ).fetchone()
     conn.commit()
     assert row is not None
@@ -141,3 +155,50 @@ def test_a_harness_whose_timeline_is_stored_is_refused(
         _ = read_harness_timeline(
             _request(agent, harness="codex"), pool=pool, home=tmp_path, environ={}
         )
+
+
+def test_a_message_queued_for_days_before_it_was_claimed_is_still_matched(
+    tmp_path: Path, db_conn: psycopg.Connection, pool: ConnectionPool
+) -> None:
+    agent = create_agent(db_conn)
+    queued = _claimed(db_conn, agent, "sent days ago", "k1", created="2026-11-07T08:56:50Z")
+    home = _session(tmp_path, agent, write_file=True)
+    window = read_harness_timeline(
+        _request(agent), pool=pool, home=home, environ={"HOME": str(tmp_path)}
+    )
+    assert window.items[0].inbound_id == queued, "the wait does not matter, only the id"
+
+
+def _rows(conn: psycopg.Connection, agent: int, count: int, claimed: str) -> None:
+    conn.execute(
+        "INSERT INTO inbound_messages (agent_id, content, kind, source, status, created_at, claimed_at, payload) "
+        "SELECT %s, 'x', 'chat', 'user', 'done', TIMESTAMPTZ '2026-10-01' + g * interval '1 minute', %s, "
+        "jsonb_build_object('harness_input_key', 'filler-' || g) FROM generate_series(1, %s) AS g",
+        (agent, claimed, count),
+    )
+    conn.commit()
+
+
+def test_an_input_no_inbox_row_names_costs_one_batch_and_one_that_cannot_be_found_stops_at_the_cap(
+    db_conn: psycopg.Connection,
+) -> None:
+    agent = create_agent(db_conn)
+    _rows(db_conn, agent, 2500, "2026-11-20T00:00:00Z")
+    at = datetime(2026, 11, 12, tzinfo=UTC)
+    own = load_sent_rows(
+        db_conn, agent, until=at, wanted={"unknown": at + timedelta(days=30)}, wire_id=key_uuid
+    )
+    assert (own.rows, own.scanned) == ([], BATCH_ROWS)
+    newest = at + timedelta(days=19)
+    capped = load_sent_rows(db_conn, agent, until=newest, wanted={"unknown": at}, wire_id=key_uuid)
+    assert capped.scanned == MAX_ROWS
+
+
+def test_a_row_far_back_among_many_is_found_by_its_id(db_conn: psycopg.Connection) -> None:
+    agent = create_agent(db_conn)
+    _rows(db_conn, agent, 2500, "2026-12-01T00:00:00Z")
+    newest = datetime(2026, 12, 1, tzinfo=UTC)  # time-bomb-ok: rows of a fixed-date fixture
+    wire = key_uuid("filler-1900")
+    found = load_sent_rows(db_conn, agent, until=newest, wanted={wire: newest}, wire_id=key_uuid)
+    assert [row.input_key for row in found.rows] == ["filler-1900"]
+    assert found.scanned <= MAX_ROWS

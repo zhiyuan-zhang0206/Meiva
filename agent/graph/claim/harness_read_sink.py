@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import asyncio
 from collections.abc import Awaitable, Callable, Sequence
-from datetime import UTC, datetime
 
 from agent.graph.hooks.user_delivery import capture_keyed_items
 from base.agents.context import MeivaContext
@@ -13,7 +12,7 @@ from base.agents.history.transcript_timeline.project import (
     ProjectedItem,
     RecordProjector,
 )
-from base.agents.history.transcript_timeline.read import is_input_row, read_window
+from base.agents.history.transcript_timeline.read import input_wire_ids, read_window
 from base.agents.history.transcript_timeline.sent import load_sent_rows, sent_inputs
 from base.agents.messages.reply_intent import parse_reply_visibility
 from base.agents.to_user.delivery.store import has_keyed_publication
@@ -254,7 +253,7 @@ class ReadTimelineSink:
             before=None,
             policy=ReplyPolicy(explicit_visibility=False, delivery_mode=None),
             render_tool=format_tool_use,
-            load_sent=lambda _since, _until: {},
+            load_sent=lambda _until, _wanted: {},
         )
         return window.turn_start if window.turn_start is not None else 0
 
@@ -262,16 +261,18 @@ class ReadTimelineSink:
     # The inbox is asked only when the new rows hold a person's input (a user row that is not a tool result, or an absorbed
     # message): a read of an assistant's rows and tool results opens no connection.
     def _register_sent(self, rows: Sequence[FileRow]) -> None:
-        stamps = [
-            parsed
-            for row in rows
-            if is_input_row(row.row) and (parsed := _stamp(row.row.get("timestamp"))) is not None
-        ]
-        if not stamps:
+        wanted = input_wire_ids(rows)
+        if not wanted:
             return
         with self._ctx.require_db().connect() as conn:
             found = sent_inputs(
-                load_sent_rows(conn, self._agent_id, since=min(stamps), until=max(stamps))
+                load_sent_rows(
+                    conn,
+                    self._agent_id,
+                    until=max(wanted.values()),
+                    wanted=wanted,
+                    wire_id=wire_id,
+                ).rows
             )
         for key, items in found.items():
             if not self._projector.knows(key):
@@ -349,16 +350,6 @@ class ReadTimelineSink:
 
             self._floor = 0 if await asyncio.to_thread(switched) else self._history_end
         return self._floor
-
-
-def _stamp(value: object) -> datetime | None:
-    if not isinstance(value, str):
-        return None
-    try:
-        parsed = datetime.fromisoformat(value)
-    except ValueError:
-        return None
-    return parsed if parsed.tzinfo else parsed.replace(tzinfo=UTC)
 
 
 # meiva:note

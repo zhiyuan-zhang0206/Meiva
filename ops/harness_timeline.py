@@ -11,7 +11,7 @@ from base.agents.history.transcript_timeline.items import ReplyPolicy, format_to
 from base.agents.history.transcript_timeline.read import read_window
 from base.agents.history.transcript_timeline.sent import load_sent_rows, sent_inputs
 from base.api_contracts.agent_contract import Harness
-from base.lm.harness.claude.transcript.window import RecordFile, session_file
+from base.lm.harness.claude.transcript.window import RecordFile, session_file, wire_id
 from base.lm.harness.registry import FileSessionRegistry
 from base.paths import harness_sessions_dir
 from ops.rpc_schemas import HarnessTimelineReadRequest, HarnessTimelineWindow
@@ -43,9 +43,12 @@ def read_harness_timeline(
     if path is None:
         return _EMPTY
 
-    def load_sent(since: datetime, until: datetime) -> dict[str, list[TimelineItem]]:
+    def load_sent(until: datetime, wanted: Mapping[str, datetime]) -> dict[str, list[TimelineItem]]:
         with pool.connection() as conn:
-            return sent_inputs(load_sent_rows(conn, request.agent_id, since=since, until=until))
+            rows = load_sent_rows(
+                conn, request.agent_id, until=until, wanted=wanted, wire_id=wire_id
+            )
+        return sent_inputs(rows.rows)
 
     try:
         window = read_window(

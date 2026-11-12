@@ -139,7 +139,7 @@ def test_the_inbox_is_asked_only_about_a_stretch_with_a_persons_input(tmp_path: 
     lines = fixture_text("basic").splitlines(keepends=True)
     asked: list[int] = []
 
-    def ask(_since: object, _until: object) -> dict[str, list[TimelineItem]]:
+    def ask(_until: object, _wanted: object) -> dict[str, list[TimelineItem]]:
         asked.append(1)
         return {}
 

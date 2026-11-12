@@ -39,11 +39,16 @@ works this way: the gateway reads the conversation archive and projects it with 
    empty timeline. The native conversation archive of an agent that was once built-in merges by `created_at` as
    before.
 5. **Who said what comes from the inbox.** A person's message in the record is the text we composed; its row's
-   `uuid` is derived from our input key, and the inbox rows claimed around the rows' time carry that key
+   `uuid` is derived from our input key, and the agent's inbox rows carry that key
    (`payload.harness_input_key`, or `inbound-<id>` for a row sent alone). The window is joined to them, so an
    item carries `inbound_id`, source, images and files, one item per message of a merged input; that is what
    clears the page's pending strip. A person's input no row accounts for (a context reset, a recovery note) is
-   the host's own and is not shown. A message shows what the person typed: a `/command` is not expanded and no
+   the host's own and is not shown. The match is by id and by no window of time (a message may have waited days to
+   be claimed): the agent's deliverable rows are read newest first, 200 at a time, until every id of the window is matched,
+   given up on (the rows read were claimed before the input's row was written, and rows are claimed in creation order, so
+   it is the host's own: one batch at most) or 1000 rows are read, when the count unmatched is the event
+   `harness_timeline_inputs_unmatched`. No index on `claimed_at` is needed: the scan is the `(agent_id, created_at)` index
+   with a limit. A message shows what the person typed: a `/command` is not expanded and no
    envelope is added.
 6. **The live view is the same projection, read incrementally.** The CLI's events say only that the record grew;
    after a short debounce the agent process reads the bytes appended since its last read (its offset, the open turn

@@ -65,7 +65,7 @@ def window(
         before=before,
         policy=POLICY,
         render_tool=format_tool_use,
-        load_sent=lambda _since, _until: dict(sent or {}),
+        load_sent=lambda _until, _wanted: dict(sent or {}),
     )
 
 
