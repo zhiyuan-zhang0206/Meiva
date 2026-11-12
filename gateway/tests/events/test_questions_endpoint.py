@@ -344,3 +344,84 @@ def test_answer_publishes_question_resolved(
     assert len(resolved) == 1
     event = resolved[0]
     assert event["question_id"] == nid
+
+
+def test_attention_counts_deduplicate_publications_and_follow_seen_and_answers(
+    db_conn: psycopg.Connection,
+) -> None:
+    a = seed_agent(db_conn)
+    b = seed_agent(db_conn, "terminated")
+    with gateway_test_client() as client:
+        assert client.get("/api/attention/counts").json() == {
+            "unread_agents": 0,
+            "open_questions": 0,
+        }
+        for agent_id, key, content in (
+            (a, "a1", "first"),
+            (a, "a2", "second"),
+            (b, "b1", "third"),
+            (a, "hidden", None),
+        ):
+            db_conn.execute(
+                "INSERT INTO agent_publications (agent_id,source_key,mode,content,suggestions) "
+                "VALUES (%s,%s,'sdk',%s,'[]')",
+                (agent_id, key, content),
+            )
+        db_conn.commit()
+        question_id = insert_question(db_conn, a, "answer me")
+        assert client.get("/api/attention/counts").json() == {
+            "unread_agents": 2,
+            "open_questions": 1,
+        }
+        db_conn.execute(
+            "INSERT INTO agent_publication_seen (agent_id,seen_id) "
+            "SELECT %s,MAX(id) FROM agent_publications WHERE agent_id=%s",
+            (a, a),
+        )
+        db_conn.execute(
+            "UPDATE agent_questions SET resolved_at=now(), resolution='dismissed' WHERE id=%s",
+            (question_id,),
+        )
+        db_conn.commit()
+        assert client.get("/api/attention/counts").json() == {
+            "unread_agents": 1,
+            "open_questions": 0,
+        }
+
+
+def test_attention_counts_are_not_capped_by_the_question_feed_limit(
+    db_conn: psycopg.Connection,
+) -> None:
+    a = seed_agent(db_conn)
+    db_conn.execute(
+        "INSERT INTO agent_questions (agent_id,title,question) "
+        "SELECT %s,'pending', '{\"type\":\"text\"}'::jsonb FROM generate_series(1,501)",
+        (a,),
+    )
+    db_conn.commit()
+    with gateway_test_client() as client:
+        assert len(client.get("/api/questions/open?limit=1").json()) == 1
+        assert client.get("/api/attention/counts").json() == {
+            "unread_agents": 0,
+            "open_questions": 501,
+        }
+
+
+def test_attention_counts_each_question_in_one_ask_batch(db_conn: psycopg.Connection) -> None:
+    a = seed_agent(db_conn)
+    with gateway_test_client() as client:
+        response = client.post(
+            f"/api/agents/{a}/asks",
+            json={
+                "questions": [
+                    {"title": "first decision", "question": {"type": "text"}},
+                    {"title": "second decision", "question": {"type": "text"}},
+                ]
+            },
+            headers={"Idempotency-Key": str(uuid4()), "Idempotency-Scope": "principal-v1"},
+        )
+        assert response.status_code == 201
+        assert client.get("/api/attention/counts").json() == {
+            "unread_agents": 0,
+            "open_questions": 2,
+        }

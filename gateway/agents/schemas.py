@@ -131,6 +131,13 @@ class QuestionItem(BaseModel):
     source_verified_by: str | None = None
 
 
+# meiva:note
+# Exact attention totals, independent of directory/feed display limits.
+class AttentionCounts(BaseModel):
+    unread_agents: int
+    open_questions: int
+
+
 class QuestionsFeed(BaseModel):
     # meiva:link gateway/routers/docs/frontend-ui-data.md
 

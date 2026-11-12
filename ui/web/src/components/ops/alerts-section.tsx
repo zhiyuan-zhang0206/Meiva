@@ -31,13 +31,14 @@ import { useAlertsSection } from "@/lib/notifications/use-alerts";
 import { cn } from "@/lib/format/utils";
 import { useTimeFormat } from "@/lib/format/use-time-format";
 
-// Unresolved severity pill fill — critical = destructive, error = orange,
-// warning = yellow. Resolved pills use muted tokens below; the word stays
+// meiva:note
+// Unresolved severity pill fill — critical/error = destructive,
+// warning = neutral. Resolved pills use muted tokens below; the word stays
 // visible, so color is never the only signal.
 const SEVERITY_BG: Record<AlertSeverity, string> = {
   critical: "bg-destructive",
-  error: "bg-orange-500",
-  warning: "bg-amber-500",
+  error: "bg-destructive",
+  warning: "bg-muted-foreground",
 };
 
 // Status — colors with a text label beside them (never color alone).

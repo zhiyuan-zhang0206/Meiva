@@ -29,6 +29,7 @@ import type { AgentRow, DeliveredUploadStatus, UserMessage } from "@/lib/contrac
 import { errMsg } from "@/lib/contracts/errors";
 import { cn } from "@/lib/format/utils";
 import type { Harness } from "@/lib/harness/harness";
+import { useMobileAttention } from "@/lib/notifications/use-mobile-attention";
 import { useQuestions } from "@/lib/notifications/use-questions";
 import type { useInspectorOpen } from "@/lib/inspector/inspector-panel-store";
 import { FLEX, FLEX_1, FLEX_COL, MIN_H_0, MIN_W_0, OVERFLOW_HIDDEN } from "@/lib/layout/layout";
@@ -452,6 +453,7 @@ function HomeContent({
   const publications = useUserMessages(activeId);
   const questions = useQuestions(activeId);
   const pendingQuestions = questions.awaiting;
+  const mobileAttention = useMobileAttention(breakpoint.isNarrow);
   const displayedItems = useMemo(() => withUserMessages(items, publications.data?.items ?? []), [items, publications.data]);
   const loadOlderForReveal = useCallback(() => loadOlder("background"), [loadOlder]);
   const reveal = useSeenPosition({
@@ -514,6 +516,8 @@ function HomeContent({
             onOpenSidebar={() => store.setMobileSidebarOpen(true)}
             sidebarCollapsed={sidebar.collapsed}
             alertCount={unresolvedAlerts}
+            mobileAttentionCount={breakpoint.isNarrow ? mobileAttention.count : 0}
+            mobileAttentionState={breakpoint.isNarrow ? mobileAttention.state : "ready"}
             onToggleSidebar={() => {
               if (isNarrow) store.setMobileSidebarOpen(true);
               else sidebar.setCollapsed(!sidebar.collapsed);

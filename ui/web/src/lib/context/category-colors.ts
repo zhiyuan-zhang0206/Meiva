@@ -12,10 +12,10 @@ export const CATEGORY_COLOR: Record<string, string> = {
   system_notes: "#64748b",
   user_input: "#22c55e",
   agent_messages: "#84cc16",
-  automation: "#f97316",
+  automation: "#737373",
   reasoning: "#ec4899",
   output: "#3b82f6",
-  tool_call: "#f59e0b",
+  tool_call: "#525252",
   tool_response: "#ef4444",
 };
 

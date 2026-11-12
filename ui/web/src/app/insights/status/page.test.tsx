@@ -235,7 +235,7 @@ describe("StatusPage Services and Gateway sections", () => {
     expect(screen.queryByText("stopped")).toBeNull();
   });
 
-  it("reachable runner with unknown status is amber, never green", async () => {
+  it("reachable runner with unknown status is neutral, never green", async () => {
     transport.getSystemStatus.mockResolvedValue({
       ...STATUS_OK,
       cluster: {
@@ -248,7 +248,7 @@ describe("StatusPage Services and Gateway sections", () => {
     wrap(<StatusPage />);
 
     const unknown = await screen.findByText("status unknown");
-    expect(unknown.className).toContain("text-amber");
+    expect(unknown.className).toContain("text-muted-foreground");
     expect(unknown.className).not.toContain("text-green");
   });
 

@@ -3236,6 +3236,24 @@
         }
       }
     },
+    "/api/attention/counts": {
+      "get": {
+        "summary": "Get Attention Counts",
+        "operationId": "get_attention_counts_api_attention_counts_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AttentionCounts"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/keyed/v1/agents/{agent_id}/questions/answers": {
       "post": {
         "summary": "Answer Questions",
@@ -10271,6 +10289,24 @@
           "parent"
         ],
         "title": "AssignmentTaskIn"
+      },
+      "AttentionCounts": {
+        "properties": {
+          "unread_agents": {
+            "type": "integer",
+            "title": "Unread Agents"
+          },
+          "open_questions": {
+            "type": "integer",
+            "title": "Open Questions"
+          }
+        },
+        "type": "object",
+        "required": [
+          "unread_agents",
+          "open_questions"
+        ],
+        "title": "AttentionCounts"
       },
       "AvailabilityReason": {
         "type": "string",

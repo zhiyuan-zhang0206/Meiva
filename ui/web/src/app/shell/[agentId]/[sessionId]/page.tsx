@@ -248,7 +248,7 @@ export function ShellMonitorView({ params, bfcacheId }: ShellMonitorViewProps) {
   // The header carries the session's meta facts (runtime + TTL, moved here from the inspector by a
   // user correction on 2026-08-28), the theme toggle (system -> light -> dark -> system), the lines
   // control and a manual refresh. The health indicator follows the actual poll, not a hardcoded
-  // green: a failing poll turns it amber + "stale" while the pane keeps showing the last-good
+  // green: a failing poll marks it "stale" while the pane keeps showing the last-good
   // output below, and a healthy poll is green + "live". The terminal pane below is theme-aware via
   // that toggle.
   // meiva:link ui/web/src/docs/frontend-state/frontend-state.md

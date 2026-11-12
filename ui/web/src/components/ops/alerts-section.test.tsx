@@ -99,12 +99,12 @@ describe("AlertsSection", () => {
     expect(screen.getByText("health-probe")).toBeTruthy();
 
     const unresolvedSeverity = within(screen.getByTestId("alert-row-7")).getByText("error");
-    expect(unresolvedSeverity.className).toContain("bg-orange-500");
+    expect(unresolvedSeverity.className).toContain("bg-destructive");
 
     const resolvedSeverity = within(screen.getByTestId("alert-row-8")).getByText("error");
     expect(resolvedSeverity.className).toContain("bg-muted");
     expect(resolvedSeverity.className).toContain("text-muted-foreground");
-    expect(resolvedSeverity.className).not.toContain("bg-orange-500");
+    expect(resolvedSeverity.className).not.toContain("bg-destructive");
   });
 
   it("measures an unresolved alert's age on the clock the page hands in", async () => {

@@ -24,3 +24,13 @@ agent the whole open set is returned unless `limit` is given, because an answer 
 (the 409 of the answer route carries it whole too).
 Resolved questions are not listed: a resolution removes the row from both feeds
 and the frontend learns of it through `question_resolved`.
+
+## Mobile attention total
+
+The phone's closed sidebar needs a precise count while its underlying lists may
+be capped or omit non-live agents. Its read-only attention snapshot counts an
+agent once when a visible publication lies past that agent's seen cursor, and
+counts each unanswered question separately. It uses the same cluster visibility
+as those shared read models. There is no persisted aggregate; question and
+publication-state hints, plus reconnect, prompt a new read. This total is not an
+Inbox or a desktop navigation surface.

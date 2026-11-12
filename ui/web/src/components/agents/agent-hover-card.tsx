@@ -34,7 +34,7 @@ export const AGENT_HOVER_OPEN_DELAY_MS = 400;
 export const AGENT_HOVER_WARMUP_MS = 300;
 
 export const STATUS_DOT: Record<PublicAgentStatus, string> = {
-  running: "bg-[#ED8755]",
+  running: "bg-muted-foreground",
   idling: "bg-[#427C6E]",
   terminated: "bg-destructive",
 };

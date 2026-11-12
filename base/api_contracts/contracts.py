@@ -248,6 +248,7 @@ ROUTE_CONTRACTS: dict[tuple[str, str], RouteContract] = {
     ),
     ("GET", "/api/questions"): RouteContract(note="unresolved questions across the fleet"),
     ("GET", "/api/questions/open"): RouteContract(),
+    ("GET", "/api/attention/counts"): RouteContract(),
     ("POST", "/api/keyed/v1/agents/{agent_id}/questions/answers"): RouteContract(
         Idempotency.AT_LEAST_ONCE_WITH_KEY,
         note="required verified principal key settles every open question of the agent in one transaction and replays its original inbound",

@@ -1,6 +1,6 @@
 // meiva:note
 // ContextMeter tests — the inspector's context readout: a gauge whose fill
-// crosses amber past the soft (wind-down) threshold and red past the hard
+// turns red past either the soft (wind-down) threshold or the hard
 // (force-compact) ceiling, with tick marks at both, plus a numeric summary.
 //
 // happy-dom + RTL — vitest globals=false; explicit cleanup.
@@ -63,12 +63,12 @@ describe("ContextMeter", () => {
 
   it("fill is neutral below the soft threshold", () => {
     render(<ContextMeter {...full} contextTokens={300_000} />);
-    expect(screen.getByTestId("context-meter-fill").className).toContain("bg-muted-foreground/60");
+    expect(screen.getByTestId("context-meter-fill").className).toContain("bg-foreground");
   });
 
-  it("fill turns amber in the wind-down band (soft < occupancy <= hard)", () => {
+  it("fill turns red in the wind-down band (soft < occupancy <= hard)", () => {
     render(<ContextMeter {...full} contextTokens={700_000} />);
-    expect(screen.getByTestId("context-meter-fill").className).toContain("bg-amber-500");
+    expect(screen.getByTestId("context-meter-fill").className).toContain("bg-destructive");
   });
 
   it("fill turns red past the hard ceiling and clamps the width", () => {

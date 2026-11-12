@@ -1,8 +1,9 @@
-exports = ["task-priority.ts", "use-alerts.tsx", "use-cluster-health.ts", "use-questions.ts", "use-tasks.ts"]
+exports = ["use-mobile-attention.ts", "task-priority.ts", "use-alerts.tsx", "use-cluster-health.ts", "use-questions.ts", "use-tasks.ts"]
 
 [uses]
 "use-alerts.test.tsx" = ["use-alerts.tsx"]
 "use-cluster-health.test.tsx" = ["use-cluster-health.ts"]
+"use-mobile-attention.test.tsx" = ["use-mobile-attention.ts"]
 "use-questions.test.ts" = ["use-questions.ts"]
 "use-tasks.test.ts" = ["use-tasks.ts"]
 

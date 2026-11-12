@@ -4,5 +4,8 @@
   "insights": "洞察",
   "control": "控制台",
   "backToAgents": "返回对话",
-  "openOkfGraph": "打开 OKF 图谱"
+  "openOkfGraph": "打开 OKF 图谱",
+  "pendingAttention": "{count} pending updates and questions",
+  "attentionUnavailable": "Pending updates and questions unavailable",
+  "attentionLoading": "Checking pending updates and questions"
 }

@@ -154,3 +154,35 @@ describe("HeaderBar", () => {
     expect(screen.queryByTestId("mobile-sidebar-alert-count")).toBeNull();
   });
 });
+
+describe("mobile sidebar attention", () => {
+  const props = { label: "agent", onOpenSidebar: vi.fn(), sidebarCollapsed: true, onToggleSidebar: vi.fn() };
+  it.each([0, 1, 3, 101])("shows the phone total %s with an accessible exact count", (count) => {
+    render(<HeaderBar {...props} mobileAttentionCount={count} />);
+    const pill = screen.queryByTestId("mobile-sidebar-attention-count");
+    if (count === 0) expect(pill).toBeNull();
+    else {
+      expect(pill?.textContent).toBe(count > 99 ? "99+" : String(count));
+      expect(screen.getByRole("button", { name: `Open sidebar, ${count} pending updates and questions` })).toBeTruthy();
+      expect(pill?.closest("button")?.className).toContain("md:hidden");
+    }
+    expect(screen.getByTestId("sidebar-toggle").textContent).not.toMatch(/\d/);
+  });
+  it("reduces after reads and answers and keeps alerts ahead of attention", () => {
+    const { rerender } = render(<HeaderBar {...props} mobileAttentionCount={3} />);
+    rerender(<HeaderBar {...props} mobileAttentionCount={1} />);
+    expect(screen.getByTestId("mobile-sidebar-attention-count").textContent).toBe("1");
+    rerender(<HeaderBar {...props} mobileAttentionCount={0} />);
+    expect(screen.queryByTestId("mobile-sidebar-attention-count")).toBeNull();
+    rerender(<HeaderBar {...props} mobileAttentionCount={3} alertCount={2} />);
+    expect(screen.queryByTestId("mobile-sidebar-attention-count")).toBeNull();
+    expect(screen.getByTestId("mobile-sidebar-alert-count").textContent).toBe("2");
+    expect(screen.getByRole("button", { name: /Open sidebar/ }).getAttribute("aria-label")).toContain("2 unresolved alerts");
+  });
+  it.each(["loading", "error"] as const)("names %s without pretending the total is zero", (state) => {
+    render(<HeaderBar {...props} mobileAttentionCount={null} mobileAttentionState={state} />);
+    expect(screen.queryByTestId("mobile-sidebar-attention-count")).toBeNull();
+    expect(screen.getByTestId("mobile-sidebar-attention-unknown").textContent).toBe(state === "error" ? "?" : "…");
+    expect(screen.getByRole("button", { name: /Open sidebar/ }).getAttribute("aria-label")).toMatch(/Checking|unavailable/);
+  });
+});
