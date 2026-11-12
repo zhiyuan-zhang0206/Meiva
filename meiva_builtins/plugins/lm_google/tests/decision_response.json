@@ -1,0 +1,42 @@
+{
+  "answers": {
+    "blue": {
+      "confidence": 0.9510290585106047,
+      "noul": 0.9510290585106047,
+      "type": "noul"
+    },
+    "clean": {
+      "confidence": 0.8983109298408255,
+      "score": 0.8983109298408255,
+      "probabilities": {
+        "1": 0.8983109298408255,
+        "0": 0.10168907015917447
+      },
+      "legend": {
+        "1": "Clean",
+        "0": "Dirty"
+      },
+      "type": "score"
+    },
+    "color": {
+      "confidence": 0.9947556111364078,
+      "choice": "blue",
+      "probabilities": {
+        "blue": 0.9947556111364078,
+        "red": 0.0052443888635923305
+      },
+      "type": "choice"
+    }
+  },
+  "usage": {
+    "total_tokens": 225,
+    "total_input_tokens": 225,
+    "input_tokens_by_modality": [
+      {
+        "modality": "text",
+        "tokens": 225
+      }
+    ],
+    "total_output_tokens": 0
+  }
+}

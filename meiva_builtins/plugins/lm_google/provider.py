@@ -26,6 +26,8 @@ from base.lm.provider_api import (
 from base.lm.registry import ModelSpec, ModelTuning
 from base.packages.plugins.extensions import PluginContributions
 
+from .decision import DECISION_PROVIDER
+
 _GEMINI_EFFORT_LEVELS = ("minimal", "low", "medium", "high")
 
 
@@ -362,4 +364,4 @@ PROVIDER = ProviderContribution(
 
 
 def contribute() -> PluginContributions:
-    return PluginContributions(providers=(PROVIDER,))
+    return PluginContributions(providers=(PROVIDER,), decision_providers=(DECISION_PROVIDER,))

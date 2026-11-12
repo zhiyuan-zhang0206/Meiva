@@ -289,7 +289,7 @@ class ServiceRuntimeSettings(EnvSettings):
 
     memory_rerank_model: str = Field(
         title="Memory search ranking model",
-        default="jev-1.13.0",
+        default="gemini-decision-1",
         alias="MEIVA_MEMORY_RERANK_MODEL",
         description=(
             "Decision model that ranks memory search results. After vector search, the "

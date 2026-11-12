@@ -215,20 +215,25 @@ def test_every_decision_model_needs_a_price_and_the_prefix() -> None:
         )
 
 
-def test_repo_catalog_registers_both_decision_providers() -> None:
+def test_repo_catalog_registers_builtin_decision_providers() -> None:
     catalog = build_model_catalog(home=meiva_home())
 
-    assert set(catalog.decision_models) == {"jev-1.13.0", "gpt-6-luna-decisions"}
+    assert set(catalog.decision_models) == {
+        "jev-1.13.0",
+        "gpt-6-luna-decisions",
+        "gemini-decision-1",
+    }
     assert {p.key_env for p in catalog.decision_providers.values()} == {
         "TYPESAFE_API_KEY",
         "OPENAI_API_KEY",
         "LOCAL_DECISION_API_KEY",
+        "GEMINI_API_KEY",
     }
     assert catalog.decision_models["jev-1.13.0"].context_window == 32_000
     assert catalog.decision_models["jev-1.13.0"].request_limit == 64_000
     assert catalog.decision_models["jev-1.13.0"].media_types == frozenset()
     assert catalog.decision_models["gpt-6-luna-decisions"].media_types == frozenset({"image"})
-    assert not {"jev-1.13.0", "gpt-6-luna-decisions"} & set(catalog.models)
+    assert not {"jev-1.13.0", "gpt-6-luna-decisions", "gemini-decision-1"} & set(catalog.models)
     assert "jev-1.13.0" not in str(catalog.supported_models)
 
 
