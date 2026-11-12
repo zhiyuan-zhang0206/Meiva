@@ -66,7 +66,7 @@ sends in a transaction, the rows read by sequential scans and fetched through in
 that are never answered and a restart; it also bounds the bytes read from the CLI's files, the statements and the memory.
 
 - **Calls are found by index.** A sub-agent's item nests under its call; the call's item is found by the CLI's id through
-  the partial index `idx_agent_harness_messages_call` on `(agent_id, call_id)`, one statement for all the calls a batch needs
+  the partial index `idx_agent_harness_messages_call_id` on `(agent_id, call_id)`, one statement for all the calls a batch needs
   and none for a call already known: the writer keeps the latest `CALLS_KEPT` (4,096) `tool_use_id -> item id` it has
   written or looked up, absent ones included, and a call that fell out of it is one lookup through the index.
   `call_id` is a column of its own (the call id of an `agent_code` item, NULL otherwise, written by every insert of an item,
@@ -80,7 +80,7 @@ that are never answered and a restart; it also bounds the bytes read from the CL
   row, the settlements one `UPDATE`, the positions one pipelined upsert, whatever their number.
 - **An idle poll costs one `stat`.** The reader remembers, per record, the size and modification time at which a read from
   the stored position found nothing new, and answers without opening the file while they are unchanged; the sub-agent
-  listing is made again only when the folder's modification time moves, and the session's own file is looked up by its
+  listing is made again only when the folder's modification time moves (and at every poll for the 2 seconds after it moved, because a second file of the same clock tick leaves it where it was), and the session's own file is looked up by its
   path (the all-projects search is made at the first miss and every 20th after it). There is still one thread hop per
   record per poll; the cost of it is a `stat`.
 - **Memory is bounded by the conversation's constants, plus one small entry per record.** Writer: `memory_sizes()`

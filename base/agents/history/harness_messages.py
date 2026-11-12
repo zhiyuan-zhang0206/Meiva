@@ -105,7 +105,7 @@ HARNESS_CALL_ITEMS_SQL = (
 # one, by its call id (a call id with no item is absent from the answer). A sub-agent can keep working after the
 # graph invocation, or the process, that saw its spawning call ended, so the call is found by the CLI's own id,
 # which the item carries in the `call_id` column. One statement for all the ids, answered by the partial index
-# `idx_agent_harness_messages_call` (agent, call id): the cost is that of the ids asked for,
+# `idx_agent_harness_messages_call_id` (agent, call id): the cost is that of the ids asked for,
 # not of the rows the agent has. The newest item wins when a call id was recorded twice.
 # meiva:link base/lm/harness/docs/subagent-text.md
 async def aget_harness_call_item_ids(

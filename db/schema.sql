@@ -871,7 +871,7 @@ CREATE UNIQUE INDEX idx_agent_harness_messages_source_key
     ON agent_harness_messages (agent_id, source_key) WHERE source_key IS NOT NULL;
 -- The timeline item of a CLI tool call is found by the CLI's own id (a sub-agent's output nests under its call).
 -- The id is a column, not an expression over `item`, so in-place revisions of `item` stay heap-only updates.
-CREATE INDEX IF NOT EXISTS idx_agent_harness_messages_call
+CREATE INDEX IF NOT EXISTS idx_agent_harness_messages_call_id
     ON agent_harness_messages (agent_id, call_id) WHERE call_id IS NOT NULL;
 
 COMMENT ON TABLE agent_harness_messages IS

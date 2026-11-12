@@ -144,7 +144,7 @@ async def test_the_call_lookup_is_answered_by_the_call_index_not_a_scan(
             "EXPLAIN " + HARNESS_CALL_ITEMS_SQL, (agent_id, ["call-10", "call-20", "call-30"])
         )
         plan = "\n".join(str(row[0]) for row in await cursor.fetchall())
-    assert "idx_agent_harness_messages_call" in plan, plan
+    assert "idx_agent_harness_messages_call_id" in plan, plan
     assert "Seq Scan" not in plan, plan
 
 
@@ -158,13 +158,13 @@ async def test_the_migration_backfills_the_call_ids_of_rows_written_before_it_in
 ) -> None:
     async with aops_pool.connection() as conn, conn.transaction(force_rollback=True):
         agent_id = await _agent(conn)
-        await conn.execute("DROP INDEX idx_agent_harness_messages_call")
+        await conn.execute("DROP INDEX idx_agent_harness_messages_call_id")
         await conn.execute("ALTER TABLE agent_harness_messages DROP COLUMN call_id")
         await conn.execute(
             "INSERT INTO agent_harness_messages (agent_id, seq, harness, item) "
             "SELECT %s, n, 'claude_code', CASE WHEN n %% 3 = 0 "
             "THEN jsonb_build_object('kind', 'agent_code', 'tool_use_id', 'call-' || n) "
-            "WHEN n %% 3 = 1 THEN jsonb_build_object('kind', 'agent_code') "
+            "WHEN n %% 3 = 1 THEN jsonb_build_object('kind', 'agent_code', 'tool_use_id', '') "
             "ELSE jsonb_build_object('kind', 'agent_chat', 'tool_use_id', 'not-a-call') END "
             "FROM generate_series(0, 12999) AS n",
             (agent_id,),
@@ -177,4 +177,9 @@ async def test_the_migration_backfills_the_call_ids_of_rows_written_before_it_in
             )
             assert await cursor.fetchone() == (4334, 4334), "only agent_code items with a call id"
         found = await aget_harness_call_item_ids(conn, agent_id, ["call-0", "call-12999", "call-1"])
+        cursor = await conn.execute(
+            "SELECT indexdef FROM pg_indexes WHERE indexname = 'idx_agent_harness_messages_call'"
+        )
+        stale = await cursor.fetchall()
     assert found == {"call-0": "h0.0", "call-12999": "h12999.0"}
+    assert stale == [], "an index of the earlier version under its name is dropped"
