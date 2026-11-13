@@ -1,4 +1,4 @@
-exports = []
+exports = ["window.py"]
 
 [uses]
 "__init__.py" = []
@@ -7,6 +7,7 @@ exports = []
 "parse.py" = ["errors.py", "fields.py", "system_message.py", "text.py"]
 "system_message.py" = ["errors.py"]
 "text.py" = ["errors.py"]
+"window.py" = ["errors.py", "system_message.py", "text.py"]
 "tests" = ["parse.py"]
 
 [purity]
@@ -17,3 +18,5 @@ exports = []
 "parse.py" = "strict"
 "system_message.py" = "strict"
 "text.py" = "strict"
+
+"window.py" = { mode = "none", why = "the Antigravity record boundary locates the file and reports unknown shapes; its entries follow file offsets and tool adjacency" }

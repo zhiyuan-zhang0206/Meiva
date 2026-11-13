@@ -1,16 +1,18 @@
 from __future__ import annotations
 
 from collections.abc import Callable, Mapping, Sequence
-from dataclasses import dataclass
-from datetime import UTC, datetime, timedelta
+from dataclasses import dataclass, replace
+from datetime import UTC, datetime
 
 from psycopg import Connection
 
 from base.agents.history.timeline_item import TimelineItem
+from base.agents.history.transcript_timeline.record.match import CLAIM_SLACK, assign_inputs
 from base.agents.messages.inbound import InboundKind
 from base.agents.messages.inbound_images import inbound_upload_files
 from base.agents.messages.kwargs import NoteTag
 from base.host.boundary.json_values import is_object_dict, is_object_list
+from base.lm.harness.session.transcript.entries import InputRow
 from base.log import logger
 
 # meiva:note
@@ -24,7 +26,6 @@ from base.log import logger
 # meiva:link base/lm/harness/docs/transcript-projection.md
 
 INPUT_KEY_FIELD = "harness_input_key"
-CLAIM_SLACK = timedelta(minutes=10)
 BATCH_ROWS = 200
 MAX_ROWS = 1000
 DELIVERABLE_KINDS = (
@@ -52,6 +53,7 @@ class SentRow:
     content: str
     payload: Mapping[str, object] | None
     created_at: datetime | None
+    claimed_at: datetime | None = None
 
     @property
     def input_key(self) -> str:
@@ -76,12 +78,15 @@ class Found:
     scanned: int
 
 
+# meiva:note
+# Antigravity supplies text-bearing InputRows instead of injected wire ids. The same bounded inbox scan
+# supplies candidates; assign_inputs applies content, claim time and file order, preserving the original payload.
 def load_sent_rows(
     conn: Connection,
     agent_id: int,
     *,
     until: datetime,
-    wanted: Mapping[str, datetime],
+    wanted: Mapping[str, InputRow],
     wire_id: Callable[[str], str],
 ) -> Found:
     pending = dict(wanted)
@@ -103,18 +108,31 @@ def load_sent_rows(
             count=len(pending),
             scanned=scanned,
         )
-    mine = [row for row in found if wire_id(row.input_key) in wanted]
+    mine = _matched_rows(found, wanted, wire_id)
     ordered = sorted(
         mine, key=lambda row: (row.created_at or datetime.min.replace(tzinfo=UTC), row.id)
     )
     return Found(ordered, scanned)
 
 
+def _matched_rows(
+    found: Sequence[SentRow], wanted: Mapping[str, InputRow], wire_id: Callable[[str], str]
+) -> list[SentRow]:
+    if any(held.text is not None for held in wanted.values()):
+        assigned = assign_inputs(found, wanted)
+        return [
+            replace(row, payload={**(row.payload or {}), INPUT_KEY_FIELD: key})
+            for key, rows in assigned.items()
+            for row in rows
+        ]
+    return [row for row in found if wire_id(row.input_key) in wanted]
+
+
 # meiva:note
 # What one batch settles of the ids still wanted: the ones its rows carry are matched, and the ones whose rows were written
 # long after the oldest claim in the batch are given up on (see `load_sent_rows`).
 def _settle(
-    pending: dict[str, datetime],
+    pending: dict[str, InputRow],
     batch: Sequence[tuple[SentRow, datetime | None]],
     wire_id: Callable[[str], str],
 ) -> None:
@@ -124,7 +142,7 @@ def _settle(
     if oldest_claim is None:
         return
     for wire, stamp in list(pending.items()):
-        if oldest_claim < stamp - CLAIM_SLACK:
+        if oldest_claim < stamp.stamp - CLAIM_SLACK:
             del pending[wire]
 
 
@@ -138,7 +156,12 @@ def _batch(
         (agent_id, until, list(DELIVERABLE_KINDS), BATCH_ROWS, skip),
     )
     return [
-        (_row(values[:7]), values[7] if isinstance(values[7], datetime) else None)
+        (
+            replace(
+                _row(values[:7]), claimed_at=values[7] if isinstance(values[7], datetime) else None
+            ),
+            values[7] if isinstance(values[7], datetime) else None,
+        )
         for values in cursor.fetchall()
     ]
 

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 from dataclasses import dataclass
+from datetime import datetime
 from enum import StrEnum
 
 from base.lm.harness.events import HarnessCause, Usage
@@ -15,6 +16,15 @@ from base.lm.harness.events import HarnessCause, Usage
 # meiva:link base/lm/harness/docs/transcript-projection.md
 
 MAIN_RECORD = "main"
+
+
+# meiva:note
+# An input to account for in the inbox: an id-only CLI needs its timestamp, while Antigravity
+# also needs its USER_REQUEST text. This value carries no file or database authority.
+@dataclass(frozen=True, slots=True)
+class InputRow:
+    stamp: datetime
+    text: str | None = None
 
 
 # meiva:note

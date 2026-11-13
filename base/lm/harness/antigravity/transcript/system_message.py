@@ -38,10 +38,17 @@ class SystemNotice:
 def classify(content: str) -> SystemNotice | None:
     if "[Notice]" in content and _RESTART_MARKER in content:
         return None
+    wrapped = re.search(
+        r"<SYSTEM_MESSAGE>\s*(\[Message\].*?)\s*</SYSTEM_MESSAGE>", content, re.DOTALL
+    )
+    if wrapped is not None:
+        content = wrapped.group(1)
     found = _ENVELOPE.match(content)
     if found is None:
         raise UnrecognisedError(f"system_message:{content.split(maxsplit=1)[0]}")
     sender, text = found.group(2), found.group(4).strip()
+    if sender == "system":
+        return None
     if not text:
         raise UnrecognisedError("system_message:empty")
     return SystemNotice(text=text, cause=_cause(sender, text), sender=sender)

@@ -20,16 +20,19 @@ from agent.graph.claim.harness_turn import harness_turn_node
 from agent.graph.claim.lost_turn import lost_turn_note, report_lost_turn
 from agent.graph.claim.tests.harness_support import (
     FakeEngine,
+    RuntimeFixture,
     config,
+    read_recorded_items,
     runtime,
+)
+from agent.graph.claim.tests.harness_support import (
+    harness_runtime as harness_runtime,
 )
 from agent.graph.claim.tests.harness_support import hosted_resources as hosted_resources
 from agent.graph.llm_errors import FatalLLMStreamError
 from agent.messages import NoteTag
 from agent.ownership.tests.ownership_support import agent_row
 from agent.state import AgentState
-from base.agents.context import HostedTurnResources
-from base.agents.history.harness_messages import aload_harness_timeline_items
 from base.agents.history.timeline_item import TimelineItem
 from base.agents.history.transcript_timeline.items import format_tool_use
 from base.agents.messages.kwargs import read_meiva_kwargs
@@ -96,14 +99,17 @@ def test_multimodal_content_renders_its_text_and_marks_the_rest() -> None:
     assert render_messages([message]) == "look\n[image_url]"
 
 
-async def test_a_turn_submits_the_pending_messages_and_commits_the_reply() -> None:
+async def test_a_turn_submits_the_pending_messages_and_commits_the_reply(
+    db_conn: psycopg.Connection, harness_runtime: RuntimeFixture
+) -> None:
+    agent_id = agent_row(db_conn)
     engine = FakeEngine(reply="MEIVA_DISPLAY_TO_USER\ndone")
     state = AgentState(
         harness_inputs=[{"key": "inbound-7", "prompt": "do it", "timeline_items": []}]
     )
-
-    command = await harness_turn_node(state, runtime(engine), config())
-
+    command = await harness_turn_node(
+        state, harness_runtime(engine, agent_id=agent_id), config(agent_id)
+    )
     assert command.goto == "claim"
     assert command.update is not None
     [(prompt, key)] = engine.submitted
@@ -113,25 +119,29 @@ async def test_a_turn_submits_the_pending_messages_and_commits_the_reply() -> No
     assert command.update["halted"] is True
 
 
-async def test_a_turn_with_nothing_pending_ends_without_calling_the_engine() -> None:
+async def test_a_turn_with_nothing_pending_ends_without_calling_the_engine(
+    db_conn: psycopg.Connection, harness_runtime: RuntimeFixture
+) -> None:
+    agent_id = agent_row(db_conn)
     engine = FakeEngine()
     state = AgentState()
-
-    command = await harness_turn_node(state, runtime(engine), config())
-
+    command = await harness_turn_node(
+        state, harness_runtime(engine, agent_id=agent_id), config(agent_id)
+    )
     assert command.goto == "claim"
     assert engine.submitted == []
     assert command.update == {"halted": True, "harness_inputs": [], "harness_view": []}
 
 
-async def test_a_turn_logs_usage_under_the_harness(loguru_records: LogRecords) -> None:
+async def test_a_turn_logs_usage_under_the_harness(
+    loguru_records: LogRecords, db_conn: psycopg.Connection, harness_runtime: RuntimeFixture
+) -> None:
+    agent_id = agent_row(db_conn)
     engine = FakeEngine(usage=Usage(input_tokens=1200, output_tokens=34))
     state = AgentState(
         harness_inputs=[{"key": "inbound-7", "prompt": "do it", "timeline_items": []}]
     )
-
-    await harness_turn_node(state, runtime(engine), config(6984))
-
+    await harness_turn_node(state, harness_runtime(engine, agent_id=agent_id), config(agent_id))
     usage = loguru_records.events("llm_usage")
     assert len(usage) == 1
     extras = usage[0]["extra"]
@@ -148,8 +158,9 @@ async def test_a_turn_logs_usage_under_the_harness(loguru_records: LogRecords) -
 # rejects — the shape a provider produces when the adapter misreports its fields.
 # meiva:link agent/graph/docs/harness-turn.md
 async def test_an_unpriceable_usage_keeps_the_reply_and_reports_the_gap(
-    loguru_records: LogRecords,
+    loguru_records: LogRecords, db_conn: psycopg.Connection, harness_runtime: RuntimeFixture
 ) -> None:
+    agent_id = agent_row(db_conn)
     engine = FakeEngine(
         reply="MEIVA_DISPLAY_TO_USER\ndone",
         usage=Usage(input_tokens=8, output_tokens=3, cache_read_input_tokens=99),
@@ -157,21 +168,23 @@ async def test_an_unpriceable_usage_keeps_the_reply_and_reports_the_gap(
     state = AgentState(
         harness_inputs=[{"key": "inbound-7", "prompt": "do it", "timeline_items": []}]
     )
-
-    command = await harness_turn_node(state, runtime(engine), config())
-
+    command = await harness_turn_node(
+        state, harness_runtime(engine, agent_id=agent_id), config(agent_id)
+    )
     assert command.update is not None
     assert command.update["harness_inputs"] == []
     assert command.update["halted"] is True
     warned = loguru_records.events("harness_usage_log_failed")
     assert len(warned) == 1
-    assert warned[0]["extra"]["agent_id"] == 6984
+    assert warned[0]["extra"]["agent_id"] == agent_id
     assert loguru_records.events("llm_usage") == []
 
 
 async def test_a_faulted_session_settles_the_turn_as_a_fatal_stream_abort(
-    loguru_records: LogRecords,
+    loguru_records: LogRecords, db_conn: psycopg.Connection, harness_runtime: RuntimeFixture
 ) -> None:
+    agent_id = agent_row(db_conn)
+
     class FaultingEngine(FakeEngine):
         async def deliver(
             self, inputs: Sequence[HarnessInput], *, compaction_note: str = ""
@@ -181,10 +194,10 @@ async def test_a_faulted_session_settles_the_turn_as_a_fatal_stream_abort(
     state = AgentState(
         harness_inputs=[{"key": "inbound-7", "prompt": "do it", "timeline_items": []}]
     )
-
     with pytest.raises(FatalLLMStreamError, match="antigravity harness turn aborted: cli died"):
-        await harness_turn_node(state, runtime(FaultingEngine()), config())
-
+        await harness_turn_node(
+            state, harness_runtime(FaultingEngine(), agent_id=agent_id), config(agent_id)
+        )
     assert loguru_records.events("llm_usage") == [], "an aborted turn logs no usage"
 
 
@@ -194,7 +207,11 @@ async def test_a_faulted_session_settles_the_turn_as_a_fatal_stream_abort(
 # the next inbound, the same way a dead model stream does. Before this, the exception
 # escaped the node and cost the host a crash per wake.
 # meiva:link agent/graph/docs/harness-turn.md
-async def test_a_session_that_cannot_start_settles_the_turn_as_a_fatal_stream_abort() -> None:
+async def test_a_session_that_cannot_start_settles_the_turn_as_a_fatal_stream_abort(
+    db_conn: psycopg.Connection, harness_runtime: RuntimeFixture
+) -> None:
+    agent_id = agent_row(db_conn)
+
     class UnstartableEngine(FakeEngine):
         async def deliver(
             self, inputs: Sequence[HarnessInput], *, compaction_note: str = ""
@@ -204,9 +221,10 @@ async def test_a_session_that_cannot_start_settles_the_turn_as_a_fatal_stream_ab
     state = AgentState(
         harness_inputs=[{"key": "inbound-7", "prompt": "do it", "timeline_items": []}]
     )
-
     with pytest.raises(FatalLLMStreamError, match="harness turn aborted"):
-        await harness_turn_node(state, runtime(UnstartableEngine()), config())
+        await harness_turn_node(
+            state, harness_runtime(UnstartableEngine(), agent_id=agent_id), config(agent_id)
+        )
 
 
 class SettledReport:
@@ -257,8 +275,7 @@ async def test_an_interrupt_that_raises_is_reported_not_raised(
 async def test_a_completed_turn_stamps_the_reply_as_the_last_message(
     redis_url: str,
     db_conn: psycopg.Connection,
-    aops_pool: AsyncConnectionPool,
-    hosted_resources: HostedTurnResources,
+    harness_runtime: RuntimeFixture,
     *,
     model_catalog: ModelCatalog,
     config_authority: ConfigAuthority,
@@ -272,20 +289,18 @@ async def test_a_completed_turn_stamps_the_reply_as_the_last_message(
         machine=machine_identity,
     )
     engine = FakeEngine(reply="MEIVA_DISPLAY_TO_USER\nthe answer")
-
     await harness_turn_node(
         AgentState(harness_inputs=[{"key": "inbound-7", "prompt": "do it", "timeline_items": []}]),
-        runtime(engine, ops_pool=aops_pool, hosted_resources=hosted_resources),
+        harness_runtime(engine, agent_id=agent_id),
         config(agent_id),
     )
-
     assert _last_message_text(db_conn, agent_id) == "the answer"
 
 
 async def test_tool_activity_is_visible_before_completion_and_survives_abort(
     redis_url: str,
     aops_pool: AsyncConnectionPool,
-    hosted_resources: HostedTurnResources,
+    harness_runtime: RuntimeFixture,
     *,
     model_catalog: ModelCatalog,
     config_authority: ConfigAuthority,
@@ -301,7 +316,7 @@ async def test_tool_activity_is_visible_before_completion_and_survives_abort(
 
     async def load() -> list[TimelineItem]:
         async with aops_pool.connection() as conn:
-            return await aload_harness_timeline_items(conn, agent_id)
+            return await read_recorded_items(conn, agent_id)
 
     class FaultingEngine(FakeEngine):
         async def deliver(
@@ -320,40 +335,28 @@ async def test_tool_activity_is_visible_before_completion_and_survives_abort(
     )
     with pytest.raises(FatalLLMStreamError, match="provider disconnected"):
         await harness_turn_node(
-            state,
-            runtime(FaultingEngine(), ops_pool=aops_pool, hosted_resources=hosted_resources),
-            config(agent_id),
+            state, harness_runtime(FaultingEngine(), agent_id=agent_id), config(agent_id)
         )
-
     result = await load()
-    assert [item.payload for item in result] == [
-        "ls",
-        "README",
-        "error:Harness execution stopped: provider disconnected",
-    ]
+    assert [item.payload for item in result] == ["ls", "README"]
 
 
 async def test_intra_turn_events_project_to_live_sse_and_committed_messages(
     live_events: LiveEvents,
+    db_conn: psycopg.Connection,
+    aops_pool: AsyncConnectionPool,
+    harness_runtime: RuntimeFixture,
 ) -> None:
-
+    agent_id = agent_row(db_conn)
     engine = FakeEngine(
         reply="MEIVA_DISPLAY_TO_USER\nall done",
         events=(
             TextDelta(turn_id="t1", text="MEIVA_HIDE_FROM_USER\nChecking "),
             TextDelta(turn_id="t1", text="files..."),
             ToolUse(
-                turn_id="t1",
-                tool_use_id="call_1",
-                name="Bash",
-                tool_input={"command": "ls -la"},
+                turn_id="t1", tool_use_id="call_1", name="Bash", tool_input={"command": "ls -la"}
             ),
-            ToolResult(
-                turn_id="t1",
-                tool_use_id="call_1",
-                content="README.md\n",
-                is_error=False,
-            ),
+            ToolResult(turn_id="t1", tool_use_id="call_1", content="README.md\n", is_error=False),
             TextDelta(turn_id="t1", text="MEIVA_DISPLAY_TO_USER\nall done"),
         ),
     )
@@ -361,27 +364,30 @@ async def test_intra_turn_events_project_to_live_sse_and_committed_messages(
         harness_inputs=[{"key": "inbound-7", "prompt": "list files", "timeline_items": []}]
     )
     command = await harness_turn_node(
-        state, runtime(engine, publisher=live_events.publisher), config()
+        state,
+        harness_runtime(engine, publisher=live_events.publisher, agent_id=agent_id),
+        config(agent_id),
     )
     assert command.update == {"halted": True, "harness_inputs": [], "harness_view": []}
     events = await live_events.events()
     assert events[-1]["role"] == "llm_done"
-    assert [(e["items"][0]["item_id"], e["items"][0]["payload"]) for e in events[:-1]] == [
-        ("h0.0", "Checking "),
-        ("h0.0", "Checking files..."),
-        ("h1.0", "ls -la"),
-        ("h2.0", "Tool running"),
-        ("h1.0", "ls -la"),
-        ("h2.0", "README.md\n"),
-        ("h3.0", "all done"),
-        ("h3.0", "all done"),
+    latest = {item["item_id"]: item for event in events for item in event.get("items", [])}
+    assert [(item["kind"], item["payload"]) for item in latest.values()] == [
+        ("agent_code", "ls -la"),
+        ("code_output", "README.md"),
+        ("agent_chat", "all done"),
     ]
+    async with aops_pool.connection() as conn:
+        stored = await read_recorded_items(conn, agent_id)
+    assert {item.item_id: item.payload for item in stored} == {
+        key: item["payload"] for key, item in latest.items()
+    }
 
 
 async def test_consecutive_assistant_text_blocks_project_to_distinct_ai_messages(
-    live_events: LiveEvents,
+    live_events: LiveEvents, db_conn: psycopg.Connection, harness_runtime: RuntimeFixture
 ) -> None:
-
+    agent_id = agent_row(db_conn)
     engine = FakeEngine(
         reply="MEIVA_DISPLAY_TO_USER\nSecond message",
         events=(
@@ -397,17 +403,18 @@ async def test_consecutive_assistant_text_blocks_project_to_distinct_ai_messages
         harness_inputs=[{"key": "inbound-7", "prompt": "two steps", "timeline_items": []}]
     )
     command = await harness_turn_node(
-        state, runtime(engine, publisher=live_events.publisher), config(6985)
+        state,
+        harness_runtime(engine, publisher=live_events.publisher, agent_id=agent_id),
+        config(agent_id),
     )
     assert command.update == {"halted": True, "harness_inputs": [], "harness_view": []}
     events = await live_events.events()
-    items = [event["items"][0] for event in events if event["role"] == "timeline_snapshot"]
-    assert [(item["item_id"], item["payload"], item["user_facing"]) for item in items] == [
-        ("h0.0", "", False),
-        ("h0.0", "First message", False),
-        ("h1.0", "", False),
-        ("h1.0", "Second message", True),
+    latest = {item["item_id"]: item for event in events for item in event.get("items", [])}
+    assert [(item["payload"], item["user_facing"]) for item in latest.values()] == [
+        ("First message", False),
+        ("Second message", True),
     ]
+    assert len(set(latest)) == 2
 
 
 def test_format_tool_use_renders_patch_diffs_and_paths() -> None:
@@ -459,47 +466,47 @@ async def test_multi_step_turn_logs_each_step_usage_and_calls(
     assert all("unpriced" not in row["extra"] for row in rows)
 
 
-async def test_harness_turn_projects_reasoning_and_step_timing(live_events: LiveEvents) -> None:
-
+async def test_harness_turn_projects_recorded_reasoning_tools_and_reply(
+    live_events: LiveEvents, db_conn: psycopg.Connection, harness_runtime: RuntimeFixture
+) -> None:
+    agent_id = agent_row(db_conn)
     engine = FakeEngine(
         events=(
             ReasoningDelta(turn_id="t1", text="Planning "),
             ReasoningDelta(turn_id="t1", text="tool call"),
             ReasoningText(turn_id="t1", text="Planning tool call"),
             ToolUse(
-                turn_id="t1",
-                tool_use_id="call-1",
-                name="Bash",
-                tool_input={"command": "echo ok"},
+                turn_id="t1", tool_use_id="call-1", name="Bash", tool_input={"command": "echo ok"}
             ),
-            ToolResult(
-                turn_id="t1",
-                tool_use_id="call-1",
-                is_error=False,
-                content="ok\n",
-            ),
+            ToolResult(turn_id="t1", tool_use_id="call-1", is_error=False, content="ok\n"),
             ReasoningText(turn_id="t1", text="Synthesizing reply"),
             AssistantText(turn_id="t1", text="MEIVA_DISPLAY_TO_USER\nFinal answer"),
-        ),
+        )
     )
     state = AgentState(
         harness_inputs=[{"key": "inbound-9", "prompt": "run it", "timeline_items": []}]
     )
     command = await harness_turn_node(
-        state, runtime(engine, publisher=live_events.publisher), config(6985)
+        state,
+        harness_runtime(engine, publisher=live_events.publisher, agent_id=agent_id),
+        config(agent_id),
     )
     assert command.update == {"halted": True, "harness_inputs": [], "harness_view": []}
     events = await live_events.events()
     latest = {item["item_id"]: item for event in events for item in event.get("items", [])}
-    assert latest["h0.0"]["payload"] == "Planning tool call"
-    assert latest["h0.0"]["reasoning_ms"] >= 0
-    assert latest["h1.0"]["kind"] == "agent_code"
-    assert latest["h2.0"]["exec_ms"] >= 0
-    assert latest["h3.0"]["payload"] == "Synthesizing reply"
-    assert latest["h4.0"]["payload"] == "Final answer"
+    assert [(item["kind"], item["payload"]) for item in latest.values()] == [
+        ("agent_reasoning", "Planning tool call"),
+        ("agent_code", "echo ok"),
+        ("code_output", "ok"),
+        ("agent_reasoning", "Synthesizing reply"),
+        ("agent_chat", "Final answer"),
+    ]
 
 
-async def test_terminate_interrupt_preserves_projected_tool_call_messages() -> None:
+async def test_terminate_interrupt_preserves_projected_tool_call_messages(
+    db_conn: psycopg.Connection, harness_runtime: RuntimeFixture
+) -> None:
+    agent_id = agent_row(db_conn)
     from agent.graph.interrupt import ModelInterruptedError
     from base.agents.messages.inbound import InterruptReason
 
@@ -525,8 +532,9 @@ async def test_terminate_interrupt_preserves_projected_tool_call_messages() -> N
             {"key": "window-4", "prompt": "[Heartbeat]: check in", "timeline_items": []}
         ]
     )
-
-    command = await harness_turn_node(state, runtime(engine), config(6986))
+    command = await harness_turn_node(
+        state, harness_runtime(engine, agent_id=agent_id), config(agent_id)
+    )
     [(prompt, key)] = engine.submitted
     assert prompt == "[Heartbeat]: check in"
     assert key == "window-4"
@@ -604,14 +612,12 @@ async def test_a_lost_turn_appends_one_note_and_a_quiet_turn_appends_none() -> N
 # (the host's exit then closes the session). The row is aged instead of waiting out the grace.
 # meiva:link agent/graph/docs/turn-interrupts.md
 async def test_an_own_terminate_ends_an_invocation_whose_turn_cannot_finish(
-    db_conn: psycopg.Connection,
-    aops_pool: AsyncConnectionPool,
-    hosted_resources: HostedTurnResources,
+    db_conn: psycopg.Connection, harness_runtime: RuntimeFixture
 ) -> None:
+
     def insert(kind: str, source: str) -> int:
         row = db_conn.execute(
-            "INSERT INTO inbound_messages (agent_id, content, kind, source) "
-            "VALUES (%s, '', %s, %s) RETURNING id",
+            "INSERT INTO inbound_messages (agent_id, content, kind, source) VALUES (%s, '', %s, %s) RETURNING id",
             (agent_id, kind, source),
         ).fetchone()
         db_conn.commit()
@@ -621,8 +627,7 @@ async def test_an_own_terminate_ends_an_invocation_whose_turn_cannot_finish(
     agent_id = agent_row(db_conn)
     key = f"inbound-{insert('chat', 'user')}"
     engine = FakeEngine(script=lambda _inputs: [])
-    rt = runtime(engine, ops_pool=aops_pool, hosted_resources=hosted_resources)
-
+    rt = harness_runtime(engine, agent_id=agent_id)
     async with asyncio.timeout(20), asyncio.TaskGroup() as tasks:
         node = tasks.create_task(harness_turn_node(AgentState(), rt, config(agent_id)))
         while not engine.delivered:
@@ -630,13 +635,11 @@ async def test_an_own_terminate_ends_an_invocation_whose_turn_cannot_finish(
         engine.emit(TurnStarted("t1", TurnOrigin.INPUT, (key,), 1), InputInContext(key, "t1", 1))
         terminate = insert("terminate", "self")
         db_conn.execute(
-            "UPDATE inbound_messages SET created_at = clock_timestamp() - interval '1 minute' "
-            "WHERE id=%s",
+            "UPDATE inbound_messages SET created_at = clock_timestamp() - interval '1 minute' WHERE id=%s",
             (terminate,),
         )
         db_conn.commit()
         command = await node
-
     assert command.goto == "claim"
     assert command.update is not None and command.update["halted"] is True
     row = db_conn.execute(
@@ -648,12 +651,11 @@ async def test_an_own_terminate_ends_an_invocation_whose_turn_cannot_finish(
 async def test_after_the_cli_compacted_the_next_input_carries_the_open_questions(
     db_conn: psycopg.Connection,
     database_gate: ProcessDbGate,
-    aops_pool: AsyncConnectionPool,
-    hosted_resources: HostedTurnResources,
     event_bus: EventBus,
     model_catalog: ModelCatalog,
     config_authority: ConfigAuthority,
     machine_identity: MachineIdentityReader,
+    harness_runtime: RuntimeFixture,
 ) -> None:
     agent = spawn_agent(
         catalog=model_catalog,
@@ -662,8 +664,7 @@ async def test_after_the_cli_compacted_the_next_input_carries_the_open_questions
         machine=machine_identity,
     )
     question = db_conn.execute(
-        "INSERT INTO agent_questions (agent_id, title, question) VALUES (%s, 'Which database?', %s) "
-        "RETURNING id",
+        "INSERT INTO agent_questions (agent_id, title, question) VALUES (%s, 'Which database?', %s) RETURNING id",
         (agent, Jsonb({"type": "text"})),
     ).fetchone()
     assert question is not None
@@ -675,11 +676,9 @@ async def test_after_the_cli_compacted_the_next_input_carries_the_open_questions
     async def notes(compacted: bool) -> list[str]:
         engine = FakeEngine(reply="MEIVA_DISPLAY_TO_USER\ndone")
         engine.context_compacted = compacted
-        base = runtime(engine, ops_pool=aops_pool, hosted_resources=hosted_resources)
+        base = harness_runtime(engine, agent_id=agent)
         context = replace(
-            base.context,
-            db=Database.from_settings(gate=database_gate),
-            bus=event_bus,
+            base.context, db=Database.from_settings(gate=database_gate), bus=event_bus
         )
         await harness_turn_node(state, Runtime(context=context), config(agent))
         return engine.compaction_notes
@@ -701,11 +700,11 @@ async def test_a_wake_after_a_compaction_carries_the_questions_and_the_hook_note
     db_conn: psycopg.Connection,
     database_gate: ProcessDbGate,
     aops_pool: AsyncConnectionPool,
-    hosted_resources: HostedTurnResources,
     event_bus: EventBus,
     model_catalog: ModelCatalog,
     config_authority: ConfigAuthority,
     machine_identity: MachineIdentityReader,
+    harness_runtime: RuntimeFixture,
 ) -> None:
     agent = spawn_agent(
         catalog=model_catalog,
@@ -719,8 +718,7 @@ async def test_a_wake_after_a_compaction_carries_the_questions_and_the_hook_note
     )
     db_conn.commit()
     inserted = db_conn.execute(
-        "INSERT INTO inbound_messages (agent_id, content, kind, source) "
-        "VALUES (%s, 'why is the build red?', 'chat', 'user') RETURNING id",
+        "INSERT INTO inbound_messages (agent_id, content, kind, source) VALUES (%s, 'why is the build red?', 'chat', 'user') RETURNING id",
         (agent,),
     ).fetchone()
     assert inserted is not None
@@ -733,13 +731,11 @@ async def test_a_wake_after_a_compaction_carries_the_questions_and_the_hook_note
         "prompt": _HOOK_NOTE,
         "timeline_items": [],
     }
-    base = runtime(engine, ops_pool=aops_pool, hosted_resources=hosted_resources)
+    base = harness_runtime(engine, agent_id=agent)
     context = replace(base.context, db=Database.from_settings(gate=database_gate), bus=event_bus)
-
     _ = await harness_turn_node(
         AgentState(harness_inputs=[note]), Runtime(context=context), config(agent)
     )
-
     [batch] = engine.delivered
     assert [item.key for item in batch] == [f"inbound-{row}"], "one input for the wake"
     assert batch[0].text.endswith(f"\n\n{_HOOK_NOTE}")
@@ -748,5 +744,5 @@ async def test_a_wake_after_a_compaction_carries_the_questions_and_the_hook_note
     assert "Which database?" in questions, "the question list is the compaction prefix, apart"
     assert "Which database?" not in batch[0].text
     async with aops_pool.connection() as conn:
-        shown = [str(item.payload) for item in await aload_harness_timeline_items(conn, agent)]
+        shown = [str(item.payload) for item in await read_recorded_items(conn, agent)]
     assert not any(_HOOK_NOTE in payload for payload in shown), "never shown as the person's"

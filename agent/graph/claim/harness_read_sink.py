@@ -22,6 +22,7 @@ from base.agents.history.transcript_timeline.record.harness import (
     unreadable_file,
     wire_id,
 )
+from base.agents.history.transcript_timeline.record.match import CLAIM_EARLY, CLAIM_SLACK
 from base.agents.history.transcript_timeline.record.read import read_window
 from base.agents.history.transcript_timeline.sent import load_sent_rows, sent_inputs
 from base.agents.messages.reply_intent import parse_reply_visibility
@@ -31,12 +32,13 @@ from base.events.live.publisher import AgentEventPublisher
 from base.lm.harness import AssistantText, BridgeEvent, HarnessSetupError
 from base.lm.harness.engine import HarnessTurn
 from base.lm.harness.registry import FileSessionRegistry
+from base.lm.harness.session.transcript.entries import InputRow
 from base.lm.harness.session.transcript.record_file import FileRow, RecordFile
 from base.log import logger
 from base.paths import harness_sessions_dir, workspace_dir
 
 # meiva:note
-# The timeline of a Claude Code or Codex agent's turn while it runs. The CLI's events say only that something new happened; what
+# The timeline of a Claude Code, Codex or Antigravity agent's turn while it runs. The CLI's events say only that something new happened; what
 # happened is read from the CLI's own record file, which is the one source of the timeline. A signal marks the sink
 # dirty, and after `DEBOUNCE_SECONDS` the bytes appended since the last read are projected with the same function a
 # cold read uses and published as a `TimelineSnapshot`: item ids are the rows' byte offsets, so a page that has read
@@ -94,6 +96,7 @@ class ReadTimelineSink:
         self._parser = entry_reader(self._harness)
         self._last: ProjectedItem | None = None
         self._announced: set[int] = set()
+        self._input_context: dict[str, InputRow] = {}
         self._dirty = asyncio.Event()
         self._busy = asyncio.Lock()
         self._active = False
@@ -182,8 +185,8 @@ class ReadTimelineSink:
         wait = bool(turns) or interrupted or error is not None
         while True:
             await self._read_logged()
-            self._require_record(ended=wait, said=any(turn.text for turn in turns))
             if not wait or self._closed_turns > before or clock.monotonic() >= deadline:
+                self._require_record(ended=wait, said=any(turn.text for turn in turns))
                 return
             await asyncio.sleep(END_POLL_SECONDS)
 
@@ -261,7 +264,9 @@ class ReadTimelineSink:
             return None, block.end
         self._register_sent(block.rows)
         entries = self._parser.entries(block.rows)
-        return self._projector.feed(entries, tail=True, release_held=False), block.end
+        return self._projector.feed(
+            entries, tail=self._parser.pending_calls, release_held=False
+        ), block.end
 
     def _turn_start(self, file: RecordFile) -> int:
         window = read_window(
@@ -282,19 +287,32 @@ class ReadTimelineSink:
         wanted = input_wire_ids(self._harness, rows)
         if not wanted:
             return
+        if any(row.text is not None for row in wanted.values()):
+            self._input_context.update(wanted)
+            floor = max(row.stamp for row in wanted.values()) - (CLAIM_SLACK + CLAIM_EARLY)
+            self._input_context = {
+                key: row for key, row in self._input_context.items() if row.stamp >= floor
+            }
+            self._input_context = dict(list(self._input_context.items())[-1000:])
+            wanted = self._input_context
         with self._ctx.require_db().connect() as conn:
             found = sent_inputs(
                 load_sent_rows(
                     conn,
                     self._agent_id,
-                    until=max(wanted.values()),
+                    until=max(row.stamp for row in wanted.values()),
                     wanted=wanted,
                     wire_id=lambda key: wire_id(self._harness, key),
                 ).rows
             )
         for key, items in found.items():
             if not self._projector.knows(key):
-                self._projector.register(key, items)
+                fresh = [
+                    item
+                    for item in items
+                    if item.inbound_id is None or item.inbound_id not in self._announced
+                ]
+                self._projector.register(key, fresh)
 
     def _resolve(self) -> RecordFile | None:
         if self._file is not None:
@@ -350,7 +368,7 @@ class ReadTimelineSink:
     async def _deliver(self, items: Sequence[ProjectedItem]) -> None:
         floor = await self._delivery_floor()
         replies = [
-            (reply_key(self._harness, item.key), item.item)
+            (reply_key(self._harness, item.key, self._session_id()), item.item)
             for item in items
             if item.item.kind == "agent_chat" and item.offset >= floor
         ]

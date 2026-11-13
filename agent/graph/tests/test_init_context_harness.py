@@ -22,6 +22,7 @@ from agent.graph._init_context import init_context_node
 from agent.graph.claim.harness_turn import harness_turn_node
 from agent.graph.claim.node import claim_node
 from agent.graph.claim.tests.harness_support import FakeEngine
+from agent.graph.claim.tests.harness_support import runtime as record_runtime
 from agent.graph.hooks.framework import hooks_at
 from agent.graph.hooks.node import hook_node
 from agent.messages import NoteTag, system_note_message
@@ -40,6 +41,7 @@ from base.events.live.bus import EventBus
 from base.host.env.agent_slices import AgentSlices
 from base.lm.catalog import ModelCatalog
 from base.lm.harness import HarnessInput
+from base.lm.harness.handoff import Handoff
 from base.lm.provider_api import Decision, DecisionResult, Question
 from base.log import logger
 from base.native_process.turn_identity import HostedServiceResources
@@ -125,7 +127,7 @@ async def test_external_harness_cold_start_establishes_handoff_and_standing_note
         )
     )
 
-    handoffs: list[object] = []
+    handoffs: list[Handoff] = []
     bridge = SimpleNamespace(session_id=None, set_handoff=handoffs.append)
     runtime = _runtime(
         aops_pool,
@@ -139,8 +141,9 @@ async def test_external_harness_cold_start_establishes_handoff_and_standing_note
 
     assert command.update is not None and "messages" not in command.update
     items = load_harness_timeline_items(db_conn, tid)
-    assert len(items) >= 3 and items[0].kind == "system_prompt"
-    head_text = str(items[0].payload)
+    assert items == [], "the CLI record owns the timeline"
+    assert len(handoffs) == 1
+    head_text = handoffs[0].render()
     assert all(
         s in head_text
         for s in (
@@ -150,7 +153,15 @@ async def test_external_harness_cold_start_establishes_handoff_and_standing_note
             "# Custom Plugin Section",
         )
     )
-    note_texts = "\n".join(str(it.payload) for it in items[1:])
+    reset = await init_context_node(
+        AgentState(
+            context_reset=ContextReset(tail=[HumanMessage(content="tail")], resume="before_turn")
+        ),
+        runtime,
+        _config(tid),
+    )
+    assert reset.update is not None
+    note_texts = reset.update["harness_inputs"][0]["prompt"]
     assert all(
         s in note_texts
         for s in (
@@ -163,11 +174,11 @@ async def test_external_harness_cold_start_establishes_handoff_and_standing_note
         isinstance(command.update["capabilities"], CapabilitiesState)
         and command.update["context_reset"] == ContextReset()
         and command.goto == "claim"
-        and len(handoffs) == 1
+        and len(handoffs) == 2
     )
     bridge.session_id = "warm-session-1"
     _ = await init_context_node(AgentState(), runtime, _config(tid))
-    assert len(handoffs) == 1 and len(load_harness_timeline_items(db_conn, tid)) == len(items)
+    assert len(handoffs) == 2 and load_harness_timeline_items(db_conn, tid) == []
 
 
 @pytest.mark.parametrize("harness", [Harness.CLAUDE_CODE, Harness.CODEX])
@@ -356,11 +367,12 @@ def _make_antigravity_recall_runtime(
             recorded_prompts.extend(item.text for item in inputs)
             await super().deliver(inputs)
 
-    bridge: Any = _Bridge(reply="MEIVA_DISPLAY_TO_USER\nRelease notes drafted.")
+    bridge = _Bridge(reply="MEIVA_DISPLAY_TO_USER\nRelease notes drafted.")
+    _ = record_runtime(bridge, agent_id=tid, database_gate=database_gate)
     return Runtime(
         context=MeivaContext(
             meiva_home=unit_home,
-            environ=os.environ,
+            environ={**os.environ, "HOME": str(unit_home)},
             user_home=Path.home(),
             identity=AgentIdentity(agent_id=tid, owns_loop=True),
             clients=snapshot_clients(),
@@ -507,18 +519,20 @@ async def test_external_context_reset_lists_the_open_questions_after_the_tail(
     assert prompt.index("THE-SUMMARY") < prompt.index("still unanswered")
 
 
+@pytest.mark.parametrize("harness", [Harness.CLAUDE_CODE, Harness.CODEX, Harness.ANTIGRAVITY])
 async def test_a_harness_read_from_its_record_gets_its_handoff_and_stores_no_timeline_rows(
+    harness: Harness,
     db_conn: psycopg.Connection[Any],
     aops_pool: AsyncConnectionPool[Any],
     database_gate: ProcessDbGate,
 ) -> None:
     tid = create_agent(db_conn)
-    handoffs: list[object] = []
+    handoffs: list[Handoff] = []
     bridge = SimpleNamespace(session_id=None, set_handoff=handoffs.append)
     runtime = _runtime(
         aops_pool,
         ExtensionRegistry(()),
-        harness=Harness.CLAUDE_CODE,
+        harness=harness,
         harness_bridge=bridge,
         agent_id=tid,
         database_gate=database_gate,

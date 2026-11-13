@@ -5,9 +5,13 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import os
 from collections.abc import AsyncGenerator, Callable, Mapping, Sequence
 from contextlib import suppress
+from dataclasses import dataclass
+from datetime import UTC, datetime
+from pathlib import Path
 from unittest.mock import MagicMock
 
 import psycopg
@@ -17,24 +21,37 @@ from langgraph.runtime import Runtime
 from psycopg_pool import AsyncConnectionPool
 
 from base.agents.context import HostedTurnResources, MeivaContext
-from base.agents.history.harness_messages import aload_harness_timeline_items
+from base.agents.history.timeline_item import TimelineItem
+from base.agents.history.transcript_timeline.items import ReplyPolicy, format_tool_use
+from base.agents.history.transcript_timeline.record.read import read_window
+from base.agents.history.transcript_timeline.sent import load_sent_rows, sent_inputs
 from base.api_contracts.agent_contract import Harness
 from base.clock import Clock
 from base.config.tests.configuration import defaults
+from base.db import Database
+from base.db.code_version_gate import ProcessDbGate
+from base.events.live.bus import EventBus
 from base.events.live.publisher import AgentEventPublisher
 from base.host.env.agent_slices import AgentSlices
 from base.lm.harness import (
+    AssistantText,
     BridgeEvent,
+    HarnessCause,
     HarnessInput,
     InputInContext,
     InputRejected,
+    ReasoningText,
     Reconciliation,
     ReconciliationUnavailableError,
+    ToolResult,
+    ToolUse,
     TurnCompleted,
     TurnOrigin,
     TurnStarted,
     Usage,
 )
+from base.lm.harness.session.transcript.entries import InputRow
+from base.lm.harness.session.transcript.record_file import RecordFile
 from base.native_process.turn_identity import HostedServiceResources
 from base.packages.composer_commands import CommandCatalog
 from base.packages.plugin_providers import build_model_catalog
@@ -49,6 +66,7 @@ __all__ = [
     "in_a_turn",
     "input_key",
     "insert_row",
+    "read_recorded_items",
     "row_status",
     "runtime",
     "silent_engine",
@@ -115,7 +133,10 @@ class FakeSubscription:
         return not self.queue.empty()
 
     async def get(self) -> BridgeEvent | None:
-        return await self.queue.get()
+        event = await self.queue.get()
+        if self._engine.read_error is not None:
+            raise self._engine.read_error
+        return event
 
     def close(self) -> None:
         self._engine.subscriptions.discard(self)
@@ -130,6 +151,9 @@ class FakeEngine:
         interrupted: bool = False,
         script: Script | None = None,
     ) -> None:
+        self.record: AgyRecord | None = None
+        self.record_inputs: dict[str, str] = {}
+        self.read_error: BaseException | None = None
         self.harness = Harness.ANTIGRAVITY
         self.model = "claude-sonnet-5-5"
         self.session_id: str | None = None
@@ -176,18 +200,25 @@ class FakeEngine:
     async def subscribe(self) -> FakeSubscription:
         subscription = FakeSubscription(self)
         for event in self.own_turn_events:
+            if self.record is not None:
+                self.record.observe(event)
             subscription.queue.put_nowait(event)
         self.own_turn_events = []
         self.subscriptions.add(subscription)
         return subscription
 
     def emit(self, *events: BridgeEvent) -> None:
+        if self.record is not None:
+            for event in events:
+                self.record.observe(event)
         for subscription in tuple(self.subscriptions):
             for event in events:
                 subscription.queue.put_nowait(event)
 
     async def deliver(self, inputs: Sequence[HarnessInput], *, compaction_note: str = "") -> None:
         self.delivered.append(list(inputs))
+        if self.record is not None:
+            self.record.inputs.update((item.key, item) for item in inputs)
         self.compaction_notes.append(compaction_note)
         self.emit(*self._script(inputs))
 
@@ -195,7 +226,12 @@ class FakeEngine:
         self.reconciled.append(list(keys))
         if self.records is None:
             raise ReconciliationUnavailableError("the fake harness has no readable record")
-        return {key: self.records.get(key, Reconciliation.NOT_FOUND) for key in keys}
+        answers = {key: self.records.get(key, Reconciliation.NOT_FOUND) for key in keys}
+        if self.record is not None:
+            for key, answer in answers.items():
+                if answer is Reconciliation.IN_CONTEXT and key in self.record_inputs:
+                    self.record.confirm_input(key, self.record_inputs[key])
+        return answers
 
     def adopt(self, keys: Sequence[str]) -> None:
         self.adopted.extend(keys)
@@ -270,7 +306,7 @@ def input_key(inbound_id: int) -> str:
 
 async def timeline_inbound_ids(pool: AsyncConnectionPool, agent_id: int) -> list[int | None]:
     async with pool.connection() as conn:
-        items = await aload_harness_timeline_items(conn, agent_id)
+        items = await read_recorded_items(conn, agent_id)
     return [item.inbound_id for item in items if item.kind == "inbound_chat"]
 
 
@@ -280,14 +316,22 @@ ENVIRON = dict(os.environ)
 def runtime(
     engine: FakeEngine | None,
     *,
+    agent_id: int | None = None,
+    database_gate: ProcessDbGate | None = None,
+    event_bus: EventBus | None = None,
     ops_pool: AsyncConnectionPool | None = None,
     hosted_resources: HostedTurnResources | None = None,
     publisher: AgentEventPublisher | None = None,
 ) -> Runtime[MeivaContext]:
+    if engine is not None and agent_id is not None:
+        engine.record = AgyRecord(agent_id, engine.record_inputs)
+        engine.session_id = engine.record.session
     return Runtime(
         context=MeivaContext(
             meiva_home=meiva_home(),
             ops_pool=ops_pool,
+            bus=event_bus,
+            db=Database.from_settings(gate=database_gate) if database_gate is not None else None,
             hosted_resources=hosted_resources,
             harness=Harness.ANTIGRAVITY if engine is not None else Harness.MEIVA,
             harness_bridge=engine,
@@ -297,7 +341,7 @@ def runtime(
             catalog=build_model_catalog(home=meiva_home()),
             commands=CommandCatalog.system(skills=list, home=meiva_home()),
             clock_factory=Clock.from_settings,
-            environ=ENVIRON,
+            environ={**ENVIRON, "HOME": str(meiva_home())},
         )
     )
 
@@ -314,3 +358,157 @@ async def hosted_resources() -> AsyncGenerator[HostedTurnResources]:
 
 def config(agent_id: int = 6984) -> RunnableConfig:
     return {"configurable": {"thread_id": str(agent_id)}}
+
+
+class AgyRecord:
+    def __init__(self, agent_id: int, known_inputs: Mapping[str, str]) -> None:
+        self.known_inputs = known_inputs
+        self.confirmed: set[str] = set()
+        self.session = f"11111111-1111-1111-1111-{agent_id:012d}"
+        self.path = _record_path(agent_id)
+        self.inputs: dict[str, HarnessInput] = {}
+        self.planner_text: dict[str, str] = {}
+
+    def write(self, kind: str, **fields: object) -> None:
+        self.path.parent.mkdir(parents=True, exist_ok=True)
+        with self.path.open("a") as handle:
+            _ = handle.write(
+                json.dumps(
+                    {
+                        "type": kind,
+                        "status": "DONE",
+                        "created_at": datetime.now(UTC).isoformat(),
+                        "step_index": 1,
+                        **fields,
+                    }
+                )
+                + "\n"
+            )
+
+    def confirm_input(self, key: str, text: str) -> None:
+        if key not in self.confirmed:
+            self.confirmed.add(key)
+            self.write("USER_INPUT", content=f"<USER_REQUEST>{text}</USER_REQUEST>")
+
+    def observe(self, event: BridgeEvent) -> None:
+        if isinstance(event, InputInContext):
+            item = self.inputs.get(event.key)
+            if item is not None:
+                self.confirm_input(event.key, item.text)
+            elif event.key in self.known_inputs:
+                self.confirm_input(event.key, self.known_inputs[event.key])
+        elif isinstance(event, (ToolUse, ToolResult)):
+            self._tool(event)
+        elif isinstance(event, ReasoningText):
+            self.write("PLANNER_RESPONSE", thinking=event.text)
+        elif isinstance(event, AssistantText):
+            self.planner_text[event.turn_id] = event.text
+            if event.text:
+                self.write("PLANNER_RESPONSE", content=event.text)
+        elif isinstance(event, TurnCompleted):
+            previous = self.planner_text.pop(event.turn_id, None)
+            text = event.text if previous is None else ""
+            if text:
+                self.write("PLANNER_RESPONSE", content=text)
+        elif isinstance(event, TurnStarted):
+            self._started(event)
+
+    def _tool(self, event: ToolUse | ToolResult) -> None:
+        if isinstance(event, ToolUse):
+            if event.parent_tool_use_id is None:
+                self.write(
+                    "PLANNER_RESPONSE", tool_calls=[{"name": event.name, "args": event.tool_input}]
+                )
+        elif isinstance(event, ToolResult) and event.parent_tool_use_id is None:
+            self.write(
+                "GENERIC",
+                content=event.content,
+                status="ERROR" if event.is_error else "DONE",
+                error=event.content if event.is_error else "",
+            )
+
+    def _started(self, event: TurnStarted) -> None:
+        if event.origin is not TurnOrigin.INPUT:
+            sender = (
+                "system"
+                if event.cause in (HarnessCause.QUEUED_INPUT_REVIVED, HarnessCause.UNKNOWN)
+                else "fake/task-1"
+            )
+            self.write(
+                "SYSTEM_MESSAGE",
+                content=f"<SYSTEM_MESSAGE>\n[Message] timestamp=t sender={sender} priority=normal content=Synthetic background wake\n</SYSTEM_MESSAGE>",
+            )
+
+
+def _record_path(agent_id: int) -> Path:
+    session = f"11111111-1111-1111-1111-{agent_id:012d}"
+    return (
+        meiva_home()
+        / ".gemini/antigravity-cli/brain"
+        / session
+        / ".system_generated/logs/transcript_full.jsonl"
+    )
+
+
+async def read_recorded_items(
+    conn: psycopg.AsyncConnection,
+    agent_id: int,
+    *,
+    policy: ReplyPolicy | None = None,
+) -> list[TimelineItem]:
+    path = _record_path(agent_id)
+    if not path.is_file():
+        return []
+    with psycopg.connect(conn.info.dsn) as db:
+
+        def load(until: datetime, wanted: Mapping[str, InputRow]) -> dict[str, list[TimelineItem]]:
+            return sent_inputs(
+                load_sent_rows(
+                    db, agent_id, until=until, wanted=wanted, wire_id=lambda key: key
+                ).rows
+            )
+
+        return read_window(
+            RecordFile(path),
+            harness="antigravity",
+            limit=1000,
+            before=None,
+            policy=policy if policy is not None else ReplyPolicy(True, "prefix"),
+            render_tool=format_tool_use,
+            load_sent=load,
+        ).timeline_items
+
+
+@dataclass(frozen=True)
+class RuntimeFixture:
+    pool: AsyncConnectionPool
+    resources: HostedTurnResources
+    gate: ProcessDbGate
+    bus: EventBus
+
+    def __call__(
+        self,
+        engine: FakeEngine | None,
+        *,
+        agent_id: int,
+        publisher: AgentEventPublisher | None = None,
+    ) -> Runtime[MeivaContext]:
+        return runtime(
+            engine,
+            agent_id=agent_id,
+            database_gate=self.gate,
+            event_bus=self.bus,
+            ops_pool=self.pool,
+            hosted_resources=self.resources,
+            publisher=publisher,
+        )
+
+
+@pytest.fixture
+async def harness_runtime(
+    aops_pool: AsyncConnectionPool,
+    hosted_resources: HostedTurnResources,
+    database_gate: ProcessDbGate,
+    event_bus: EventBus,
+) -> RuntimeFixture:
+    return RuntimeFixture(aops_pool, hosted_resources, database_gate, event_bus)

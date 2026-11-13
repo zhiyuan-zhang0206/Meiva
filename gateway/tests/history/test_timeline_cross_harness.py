@@ -11,7 +11,8 @@ from base.agents.history.harness_messages import append_harness_timeline_items
 from base.agents.history.timeline import TimelineItem
 from base.config import settings
 from base.db import create_agent
-from gateway.tests.auth.gateway_config import gateway_test_client
+from gateway.tests.auth.gateway_config import GatewayTestClient, gateway_test_client
+from gateway.tests.history.test_timeline_record_read import ScriptedRunner
 
 
 @pytest.fixture
@@ -64,273 +65,6 @@ def test_pure_meiva_agent_timeline(
     assert data["msg_count"] == 3
     assert len(data["items"]) == 3
     assert [it["item_id"] for it in data["items"]] == ["0.0", "1.0", "2.0"]
-
-
-def test_pure_external_harness_agent_timeline(
-    db_conn: psycopg.Connection,
-    test_client: TestClient,
-) -> None:
-    tid = create_agent(db_conn)
-    _set_harness(db_conn, tid, "antigravity")
-    items = [
-        TimelineItem(
-            item_id="h0.0",
-            kind="inbound_chat",
-            payload="Initial harness task",
-            created_at="2026-05-01T10:00:00+00:00",
-        ),
-        TimelineItem(
-            item_id="h1.0",
-            kind="agent_chat",
-            payload="Working on task",
-            created_at="2026-05-01T10:01:00+00:00",
-        ),
-    ]
-    append_harness_timeline_items(db_conn, tid, "claude_code", items)
-    db_conn.commit()
-
-    resp = test_client.get(f"/api/agents/{tid}/timeline")
-    assert resp.status_code == 200
-    data = resp.json()
-    assert len(data["items"]) == 2
-    assert [it["item_id"] for it in data["items"]] == ["h0.0", "h1.0"]
-    assert data["items"][0]["payload"] == "Initial harness task"
-    assert data["items"][1]["payload"] == "Working on task"
-
-
-def test_cross_harness_under_limit_merges_checkpoints(
-    db_conn: psycopg.Connection,
-    test_client: TestClient,
-) -> None:
-    tid = create_agent(db_conn)
-    messages = [
-        SystemMessage(content="System prompt"),
-        HumanMessage(
-            content="Meiva question",
-            additional_kwargs={"meiva_created_at": "2026-05-01T09:00:00+00:00"},
-        ),
-        AIMessage(
-            content="Meiva answer",
-            additional_kwargs={"meiva_created_at": "2026-05-01T09:01:00+00:00"},
-        ),
-    ]
-    _put_checkpoint(tid, messages)
-
-    _set_harness(db_conn, tid, "antigravity")
-    items = [
-        TimelineItem(
-            item_id="h0.0",
-            kind="inbound_chat",
-            payload="Codex follow-up",
-            created_at="2026-05-01T09:02:00+00:00",
-        ),
-        TimelineItem(
-            item_id="h1.0",
-            kind="agent_chat",
-            payload="Codex response",
-            created_at="2026-05-01T09:03:00+00:00",
-        ),
-    ]
-    append_harness_timeline_items(db_conn, tid, "claude_code", items)
-    db_conn.commit()
-
-    resp = test_client.get(f"/api/agents/{tid}/timeline?limit=10")
-    assert resp.status_code == 200
-    data = resp.json()
-    assert len(data["items"]) == 5
-    item_ids = [it["item_id"] for it in data["items"]]
-    assert item_ids == ["0.0", "1.0", "2.0", "h0.0", "h1.0"]
-    assert data["items"][0]["kind"] == "system_prompt"
-    assert data["items"][3]["payload"] == "Codex follow-up"
-    assert data["items"][4]["payload"] == "Codex response"
-
-
-def test_cross_harness_over_limit_merges_checkpoint_and_reattaches_prompt(
-    db_conn: psycopg.Connection,
-    test_client: TestClient,
-) -> None:
-    tid = create_agent(db_conn)
-    messages = [
-        SystemMessage(content="System prompt"),
-        HumanMessage(
-            content="Old message",
-            additional_kwargs={"meiva_created_at": "2026-05-01T09:00:00+00:00"},
-        ),
-    ]
-    _put_checkpoint(tid, messages)
-
-    _set_harness(db_conn, tid, "antigravity")
-    harness_items = [
-        TimelineItem(
-            item_id=f"h{i}.0",
-            kind="agent_chat",
-            payload=f"Harness turn {i}",
-            created_at=f"2026-05-01T10:{i:02d}:00+00:00",
-        )
-        for i in range(10)
-    ]
-    append_harness_timeline_items(db_conn, tid, "claude_code", harness_items)
-    db_conn.commit()
-
-    resp = test_client.get(f"/api/agents/{tid}/timeline?limit=5")
-    assert resp.status_code == 200
-    data = resp.json()
-    assert len(data["items"]) == 6
-    assert data["has_more"] is True
-    assert [it["item_id"] for it in data["items"]] == [
-        "0.0",
-        "h5.0",
-        "h6.0",
-        "h7.0",
-        "h8.0",
-        "h9.0",
-    ]
-
-
-def test_external_harness_over_limit_excludes_pre_compact_and_lifecycle_head_markers(
-    db_conn: psycopg.Connection,
-    test_client: TestClient,
-) -> None:
-    tid = create_agent(db_conn)
-    pre_compact_harness = [
-        TimelineItem(
-            item_id="h0.0",
-            kind="inbound_chat",
-            payload="Ancient pre-compact message",
-            created_at="2026-05-01T08:00:00+00:00",
-        ),
-        TimelineItem(
-            item_id="h1.0",
-            kind="system_marker",
-            source="impersonation",
-            payload="Retired impersonation marker",
-            created_at="2026-05-01T08:01:00+00:00",
-        ),
-        TimelineItem(
-            item_id="h2.0",
-            kind="system_marker",
-            source="lifecycle_resurrect",
-            payload="Agent 1 resurrected",
-            created_at="2026-05-01T08:02:00+00:00",
-        ),
-        TimelineItem(
-            item_id="h3.0",
-            kind="system_marker",
-            source="lifecycle_restart",
-            payload="Agent 1 restarted",
-            created_at="2026-05-01T08:03:00+00:00",
-        ),
-    ]
-    post_compact_harness = [
-        TimelineItem(
-            item_id="h4.0",
-            kind="system_marker",
-            source="lifecycle_restart",
-            payload="Post-compact restart",
-            created_at="2026-05-01T12:01:00+00:00",
-        ),
-        *[
-            TimelineItem(
-                item_id=f"h{5 + i}.0",
-                kind="agent_chat",
-                payload=f"Post-compact turn {i}",
-                created_at=f"2026-05-01T12:{2 + i:02d}:00+00:00",
-            )
-            for i in range(6)
-        ],
-    ]
-    append_harness_timeline_items(
-        db_conn, tid, "antigravity", [*pre_compact_harness, *post_compact_harness]
-    )
-    db_conn.commit()
-
-    messages = [
-        SystemMessage(content="System prompt"),
-        HumanMessage(
-            content="<system_note>\nmemory note\n</system_note>",
-            additional_kwargs={
-                "meiva_msg_type": "system_note",
-                "meiva_note_tag": "memory",
-                "meiva_created_at": "2026-05-01T11:59:00+00:00",
-            },
-        ),
-        HumanMessage(
-            content="Compact summary [2026-05-01]: context compacted",
-            additional_kwargs={
-                "meiva_msg_type": "compact_summary",
-                "meiva_created_at": "2026-05-01T12:00:00+00:00",
-            },
-        ),
-    ]
-    _put_checkpoint(tid, messages)
-    _set_harness(db_conn, tid, "antigravity")
-
-    resp = test_client.get(f"/api/agents/{tid}/timeline?limit=5")
-    assert resp.status_code == 200
-    data = resp.json()
-    assert [it["item_id"] for it in data["items"]] == [
-        "0.0",
-        "1.0",
-        "2.0",
-        "h6.0",
-        "h7.0",
-        "h8.0",
-        "h9.0",
-        "h10.0",
-    ]
-    assert data["has_more"] is True
-
-    older = test_client.get(f"/api/agents/{tid}/timeline?before=h6.0&limit=5")
-    assert older.status_code == 200
-    older_data = older.json()
-    assert [it["item_id"] for it in older_data["items"]] == [
-        "0.0",
-        "1.0",
-        "2.0",
-        "h4.0",
-        "h5.0",
-    ]
-    assert older_data["has_more"] is False
-
-
-def test_cross_harness_paging_backward(
-    db_conn: psycopg.Connection,
-    test_client: TestClient,
-) -> None:
-    tid = create_agent(db_conn)
-    messages = [
-        SystemMessage(content="System prompt"),
-        HumanMessage(
-            content="Original prompt",
-            additional_kwargs={"meiva_created_at": "2026-05-01T08:00:00+00:00"},
-        ),
-    ]
-    _put_checkpoint(tid, messages)
-
-    _set_harness(db_conn, tid, "antigravity")
-    harness_items = [
-        TimelineItem(
-            item_id="h0.0",
-            kind="inbound_chat",
-            payload="Antigravity prompt",
-            created_at="2026-05-01T09:00:00+00:00",
-        ),
-        TimelineItem(
-            item_id="h1.0",
-            kind="agent_chat",
-            payload="Antigravity reply",
-            created_at="2026-05-01T09:01:00+00:00",
-        ),
-    ]
-    append_harness_timeline_items(db_conn, tid, "claude_code", harness_items)
-    db_conn.commit()
-
-    resp = test_client.get(f"/api/agents/{tid}/timeline?before=h0.0&limit=10")
-    assert resp.status_code == 200
-    data = resp.json()
-    assert len(data["items"]) == 2
-    assert [it["item_id"] for it in data["items"]] == ["0.0", "1.0"]
-    assert data["has_more"] is False
 
 
 def test_switched_agent_meiva_external_meiva_chronological(
@@ -410,3 +144,50 @@ def test_compact_excludes_pre_compact_harness_items(
     assert len(data["items"]) == 3
     assert [it["item_id"] for it in data["items"]] == ["0.0", "1.0", "2.0"]
     assert all(it["item_id"] != "h0.0" for it in data["items"])
+
+
+# meiva:note
+# The current record owns both pages, even when older stored histories exceed the limit.
+@pytest.mark.parametrize("checkpoint_count", [0, 3, 25])
+@pytest.mark.parametrize("limit", [2, 10])
+def test_current_antigravity_session_excludes_previous_harness_history(
+    db_conn: psycopg.Connection, test_client: GatewayTestClient, checkpoint_count: int, limit: int
+) -> None:
+    agent = create_agent(db_conn)
+    if checkpoint_count:
+        _put_checkpoint(
+            agent,
+            [
+                SystemMessage(content="old system"),
+                *[AIMessage(content=f"old checkpoint {i}") for i in range(checkpoint_count)],
+            ],
+        )
+    append_harness_timeline_items(
+        db_conn,
+        agent,
+        "antigravity",
+        [
+            TimelineItem(item_id=f"h{i}.0", kind="agent_chat", payload=f"old stored row {i}")
+            for i in range(25)
+        ],
+    )
+    _set_harness(db_conn, agent, "antigravity")
+    db_conn.execute("UPDATE agents_meta SET machine='macmini' WHERE id=%s", (agent,))
+    db_conn.commit()
+    rows = [
+        TimelineItem(item_id="h800.0", kind="agent_chat", payload="current CLI reply").model_dump(
+            mode="json"
+        )
+    ]
+    runner = ScriptedRunner({"items": rows, "has_more": True, "size": 1200})
+    test_client.app.state.rpc = runner
+    response = test_client.get(f"/api/agents/{agent}/timeline?limit={limit}")
+    assert response.status_code == 200
+    assert response.json() == {"items": rows, "msg_count": 1200, "has_more": True}
+    assert runner.calls[-1][2]["limit"] == limit
+    older: dict[str, object] = {"items": [], "has_more": False, "size": 1200}
+    runner.answer = older
+    page = test_client.get(f"/api/agents/{agent}/timeline?before=h800.0&limit={limit}")
+    assert page.status_code == 200
+    assert page.json() == {"items": [], "msg_count": 1200, "has_more": False}
+    assert runner.calls[-1][2]["before"] == 800

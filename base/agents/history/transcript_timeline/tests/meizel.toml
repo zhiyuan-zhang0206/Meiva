@@ -1,6 +1,7 @@
 exports = ["support.py"]
 
 [uses]
+"test_antigravity_record.py" = ["support.py"]
 "support.py" = []
 "test_codex_record.py" = ["support.py"]
 "test_live_projection.py" = ["support.py"]

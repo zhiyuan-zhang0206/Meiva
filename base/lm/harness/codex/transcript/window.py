@@ -1,13 +1,18 @@
 from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
-from datetime import datetime
 from pathlib import Path
 
 from base.host.boundary.json_values import is_object_dict
 from base.lm.harness.codex.reconciliation.rollout import codex_home, rollout_path
 from base.lm.harness.codex.transcript.rollout import parse_rollout_line
-from base.lm.harness.session.transcript.entries import MAIN_RECORD, Anomaly, AnyEntry, HumanInput
+from base.lm.harness.session.transcript.entries import (
+    MAIN_RECORD,
+    Anomaly,
+    AnyEntry,
+    HumanInput,
+    InputRow,
+)
 from base.lm.harness.session.transcript.record_file import FileRow, UnreadRows, stamp_of
 
 # meiva:note
@@ -67,6 +72,8 @@ def unreadable_file(
 # read after another and one given them all at once agree. A row the parser cannot use is skipped, and reported once
 # per kind of row for this parser (not an error: the file is the CLI's own and moves with its version).
 class EntryParser:
+    pending_calls = True
+
     def __init__(self) -> None:
         self._opened: set[str] = set()
         self._unread = UnreadRows("Codex")
@@ -92,13 +99,13 @@ class EntryParser:
 # meiva:note
 # The ids Codex kept for the person's inputs among the rows, each with the time its row was written: the ids to match
 # to inbox rows. Only a user message that carries our `clientUserMessageId` can be one of ours.
-def input_wire_ids(rows: Sequence[FileRow]) -> dict[str, datetime]:
-    wanted: dict[str, datetime] = {}
+def input_wire_ids(rows: Sequence[FileRow]) -> dict[str, InputRow]:
+    wanted: dict[str, InputRow] = {}
     for row in rows:
         wire = _client_id(row.row)
         stamp = stamp_of(row.row.get("timestamp"))
         if wire is not None and stamp is not None:
-            wanted[wire] = stamp
+            wanted[wire] = InputRow(stamp)
     return wanted
 
 

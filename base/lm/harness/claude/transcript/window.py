@@ -2,14 +2,13 @@ from __future__ import annotations
 
 import re
 from collections.abc import Mapping, Sequence
-from datetime import datetime
 from pathlib import Path
 
 from base.host.boundary.json_values import is_object_dict, is_object_list
 from base.lm.harness.claude.delivery import key_uuid
 from base.lm.harness.claude.reconciliation.transcript import claude_home
 from base.lm.harness.claude.transcript.parse import ParseState, parse_row
-from base.lm.harness.session.transcript.entries import MAIN_RECORD, Anomaly, AnyEntry
+from base.lm.harness.session.transcript.entries import MAIN_RECORD, Anomaly, AnyEntry, InputRow
 from base.lm.harness.session.transcript.record_file import FileRow, UnreadRows, stamp_of
 
 # meiva:note
@@ -67,6 +66,8 @@ def transcript_path(claude_home: Path, workspace: Path, session_id: str) -> Path
 # that the main file should not hold) yields nothing. A row the parser cannot use is skipped and reported once for
 # each kind of row by this parser.
 class EntryParser:
+    pending_calls = True
+
     def __init__(self) -> None:
         self._state = ParseState()
         self._unread = UnreadRows("Claude Code")
@@ -86,13 +87,13 @@ class EntryParser:
 # meiva:note
 # The ids the CLI kept for the person's inputs among the rows, each with the time its row was written: the ids to match
 # to inbox rows. A user row names its own `uuid`, an absorbed message the `source_uuid` of its attachment.
-def input_wire_ids(rows: Sequence[FileRow]) -> dict[str, datetime]:
-    wanted: dict[str, datetime] = {}
+def input_wire_ids(rows: Sequence[FileRow]) -> dict[str, InputRow]:
+    wanted: dict[str, InputRow] = {}
     for row in rows:
         stamp = stamp_of(row.row.get("timestamp"))
         wire = _wire_of(row.row)
         if stamp is not None and wire is not None and is_input_row(row.row):
-            wanted[wire] = stamp
+            wanted[wire] = InputRow(stamp)
     return wanted
 
 

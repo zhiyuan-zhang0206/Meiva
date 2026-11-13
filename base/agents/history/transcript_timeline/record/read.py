@@ -16,11 +16,14 @@ from base.agents.history.transcript_timeline.record.harness import (
     input_wire_ids,
     wire_id,
 )
+from base.agents.history.transcript_timeline.record.match import CLAIM_SLACK
+from base.lm.harness.session.transcript.entries import InputRow
 from base.lm.harness.session.transcript.record_file import (
     BLOCK_BYTES,
     MAX_BLOCK_BYTES,
     FileRow,
     RecordFile,
+    stamp_of,
 )
 
 # meiva:note
@@ -37,7 +40,7 @@ from base.lm.harness.session.transcript.record_file import (
 # of the inbox rows of the same time. `size` is the file's size, the exclusive upper bound of every item's offset.
 # meiva:link base/lm/harness/docs/transcript-projection.md
 
-MAX_LOOKBACK_BYTES = 1024 * 1024
+MAX_LOOKBACK_BYTES = MAX_BLOCK_BYTES
 MAX_REQUEST_BYTES = MAX_BLOCK_BYTES
 
 
@@ -56,7 +59,7 @@ class Window:
         return [projected.item for projected in self.items]
 
 
-LoadSent = Callable[[datetime, Mapping[str, datetime]], Mapping[str, Sequence[TimelineItem]]]
+LoadSent = Callable[[datetime, Mapping[str, InputRow]], Mapping[str, Sequence[TimelineItem]]]
 
 
 def read_window(
@@ -94,7 +97,11 @@ def read_window(
         if (
             start == 0
             or spent >= MAX_LOOKBACK_BYTES
-            or (full and _whole(projected, cut))
+            or (
+                full
+                and _whole(projected, cut)
+                and _input_context_complete(rows, projected, cut, harness)
+            )
             or read >= MAX_REQUEST_BYTES
             or grown == 0
         ):
@@ -120,10 +127,11 @@ def _items_of(
     )
     wanted = input_wire_ids(harness, rows)
     if wanted:
-        for key, items in load_sent(max(wanted.values()), wanted).items():
+        for key, items in load_sent(max(row.stamp for row in wanted.values()), wanted).items():
             projector.register(key, items)
-    entries = entry_reader(harness).entries(rows)
-    return projector.feed(entries, tail=tail, release_held=True)
+    reader = entry_reader(harness)
+    entries = reader.entries(rows)
+    return projector.feed(entries, tail=tail and reader.pending_calls, release_held=True)
 
 
 # meiva:note
@@ -134,13 +142,21 @@ def _cut(projected: Projected, limit: int) -> int:
     cut = max(len(items) - limit, 0)
     if cut >= len(items):
         return cut
-    first = items[cut]
-    if first.is_call or first.call_id is None:
-        return cut
-    calls = [
-        i for i, item in enumerate(items[:cut]) if item.is_call and item.call_id == first.call_id
-    ]
-    return calls[-1] if calls else cut
+    while True:
+        previous = cut
+        while cut > 0 and items[cut - 1].offset == items[cut].offset:
+            cut -= 1
+        first = items[cut]
+        if not first.is_call and first.call_id is not None:
+            calls = [
+                i
+                for i, item in enumerate(items[:cut])
+                if item.is_call and item.call_id == first.call_id
+            ]
+            if calls:
+                cut = calls[-1]
+        if cut == previous:
+            return cut
 
 
 # meiva:note
@@ -154,3 +170,17 @@ def _whole(projected: Projected, cut: int) -> bool:
     if not first.is_call and first.call_id is not None:
         return False
     return first.turn is None or first.turn in projected.opened_turns
+
+
+# meiva:note
+# Text-matched inputs need the earlier inputs in their claim window as context, so a repeated
+# message cannot move to a later input merely because a page starts there. The existing lookback
+# and request budgets still bound this context; the file start is definitive.
+def _input_context_complete(
+    rows: Sequence[FileRow], projected: Projected, cut: int, harness: str
+) -> bool:
+    wanted = input_wire_ids(harness, rows)
+    if not wanted or all(row.text is None for row in wanted.values()):
+        return True
+    stamp = stamp_of(projected.items[cut].item.created_at)
+    return stamp is not None and min(row.stamp for row in wanted.values()) <= stamp - CLAIM_SLACK

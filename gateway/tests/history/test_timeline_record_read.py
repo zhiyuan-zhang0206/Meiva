@@ -15,6 +15,7 @@ import pytest
 
 from base.agents.history.harness_messages import append_harness_timeline_items
 from base.agents.history.timeline_item import TimelineItem
+from base.api_contracts.agent_contract import Harness
 from base.db import create_agent
 from gateway.tests.auth.gateway_config import GatewayTestClient, gateway_test_client
 from ops.cluster.rpc import ClusterOpUnreachable
@@ -43,17 +44,22 @@ class ScriptedRunner:
         return self.answer
 
 
+@pytest.fixture(params=["claude_code", "antigravity"])
+def record_harness(request: pytest.FixtureRequest) -> str:
+    return str(request.param)
+
+
 @pytest.fixture
 def client(db_url: str) -> Iterator[GatewayTestClient]:
     with gateway_test_client() as value:
         yield value
 
 
-def _claude_agent(conn: psycopg.Connection) -> int:
+def _record_agent(conn: psycopg.Connection, harness: str) -> int:
     agent = create_agent(conn)
     conn.execute(
-        "INSERT INTO agents_meta (id, machine, status, harness) VALUES (%s, 'macmini', 'idling', 'claude_code')",
-        (agent,),
+        "INSERT INTO agents_meta (id, machine, status, harness) VALUES (%s, 'macmini', 'idling', %s)",
+        (agent, harness),
     )
     conn.commit()
     return agent
@@ -68,9 +74,11 @@ def _item(
 
 
 def test_the_timeline_is_a_window_of_the_record_read_on_the_agents_machine(
-    client: GatewayTestClient, db_conn: psycopg.Connection
+    client: GatewayTestClient,
+    db_conn: psycopg.Connection,
+    record_harness: str,
 ) -> None:
-    agent = _claude_agent(db_conn)
+    agent = _record_agent(db_conn, record_harness)
     runner = ScriptedRunner(
         {
             "items": [_item("h413.0", "inbound_chat", "hi"), _item("h2620.0", "agent_chat", "yes")],
@@ -86,14 +94,16 @@ def test_the_timeline_is_a_window_of_the_record_read_on_the_agents_machine(
     assert (body["msg_count"], body["has_more"]) == (9800, True)
     [(machine, kind, payload)] = runner.calls
     assert (machine, kind) == ("macmini", "harness_timeline_read")
-    assert payload["agent_id"] == agent and payload["harness"] == "claude_code"
+    assert payload["agent_id"] == agent and payload["harness"] == record_harness
     assert payload["before"] is None and isinstance(payload["limit"], int)
 
 
 def test_a_page_before_an_item_asks_for_the_window_that_ends_at_its_row(
-    client: GatewayTestClient, db_conn: psycopg.Connection
+    client: GatewayTestClient,
+    db_conn: psycopg.Connection,
+    record_harness: str,
 ) -> None:
-    agent = _claude_agent(db_conn)
+    agent = _record_agent(db_conn, record_harness)
     runner = ScriptedRunner(
         {"items": [_item("h100.0", "agent_chat", "old")], "has_more": False, "size": 9800}
     )
@@ -106,9 +116,11 @@ def test_a_page_before_an_item_asks_for_the_window_that_ends_at_its_row(
 
 
 def test_an_unreachable_machine_is_a_503_and_not_an_empty_history(
-    client: GatewayTestClient, db_conn: psycopg.Connection
+    client: GatewayTestClient,
+    db_conn: psycopg.Connection,
+    record_harness: str,
 ) -> None:
-    agent = _claude_agent(db_conn)
+    agent = _record_agent(db_conn, record_harness)
     client.app.state.rpc = ScriptedRunner(ClusterOpUnreachable("the machine is down"))
 
     response = client.get(f"/api/agents/{agent}/timeline")
@@ -117,13 +129,15 @@ def test_an_unreachable_machine_is_a_503_and_not_an_empty_history(
 
 
 def test_a_session_with_no_record_is_an_empty_timeline_and_old_rows_are_never_read(
-    client: GatewayTestClient, db_conn: psycopg.Connection
+    client: GatewayTestClient,
+    db_conn: psycopg.Connection,
+    record_harness: str,
 ) -> None:
-    agent = _claude_agent(db_conn)
+    agent = _record_agent(db_conn, record_harness)
     append_harness_timeline_items(
         db_conn,
         agent,
-        "claude_code",
+        Harness(record_harness).value,
         [TimelineItem(item_id="0.0", kind="agent_chat", payload="stale row from the old scheme")],
     )
     db_conn.commit()
@@ -137,9 +151,12 @@ def test_a_session_with_no_record_is_an_empty_timeline_and_old_rows_are_never_re
 
 @pytest.mark.parametrize("before", ["bogus", "12.0", "s1.cp.3.0"])
 def test_a_cursor_that_is_not_an_offset_id_is_answered_like_any_harness_and_asks_nothing(
-    client: GatewayTestClient, db_conn: psycopg.Connection, before: str
+    client: GatewayTestClient,
+    db_conn: psycopg.Connection,
+    before: str,
+    record_harness: str,
 ) -> None:
-    agent = _claude_agent(db_conn)
+    agent = _record_agent(db_conn, record_harness)
     runner = ScriptedRunner({"items": [], "has_more": False, "size": 0})
     client.app.state.rpc = runner
 

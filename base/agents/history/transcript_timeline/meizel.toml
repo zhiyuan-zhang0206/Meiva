@@ -5,8 +5,8 @@ exports = ["items.py", "project.py", "record", "sent.py"]
 "items.py" = []
 "project.py" = ["items.py"]
 "record" = ["items.py", "project.py"]
-"sent.py" = []
-"tests" = ["items.py", "project.py", "record"]
+"sent.py" = ["record"]
+"tests" = ["items.py", "project.py", "record", "sent.py"]
 
 [purity]
 "." = "strict"

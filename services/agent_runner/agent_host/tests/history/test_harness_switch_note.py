@@ -14,9 +14,8 @@ from services.agent_runner.agent_host import health_routes
 from services.agent_runner.agent_host.health_routes import prepare_harness_switch_route
 
 # meiva:note
-# The outgoing history records a switch across native and external stores. For
-# external-to-native transitions the writer uses the control pool with a fallback
-# to the workload pool. A missing display store must not block the switch.
+# A record-backed outgoing history writes no switch marker, with either pool or no pool.
+# Existing stored rows remain untouched and the switch still succeeds.
 
 
 def _drop_agent(_agent_id: int) -> None:
@@ -92,15 +91,7 @@ async def _harness_rows(
     return [(str(row[0]), str(row[1]), str(row[2])) for row in rows]
 
 
-def _assert_switch_note(rows: list[tuple[str, str, str]]) -> None:
-    assert len(rows) == 1
-    harness, kind, payload = rows[0]
-    assert harness == "antigravity"
-    assert kind == "system_marker"
-    assert "Harness switched from 'antigravity' to 'meiva'" in payload
-
-
-async def test_control_pool_records_the_switch_note(
+async def test_control_pool_does_not_append_to_a_record_backed_history(
     aops_pool: AsyncConnectionPool[Any],
 ) -> None:
     agent_id = 9211
@@ -111,10 +102,10 @@ async def test_control_pool_records_the_switch_note(
 
     assert status_code == 200
     assert b'"ok":true' in body
-    _assert_switch_note(await _harness_rows(aops_pool, agent_id))
+    assert await _harness_rows(aops_pool, agent_id) == []
 
 
-async def test_pool_fallback_records_the_switch_note(
+async def test_pool_fallback_does_not_append_to_a_record_backed_history(
     aops_pool: AsyncConnectionPool[Any],
 ) -> None:
     agent_id = 9212
@@ -125,7 +116,7 @@ async def test_pool_fallback_records_the_switch_note(
 
     assert status_code == 200
     assert b'"ok":true' in body
-    _assert_switch_note(await _harness_rows(aops_pool, agent_id))
+    assert await _harness_rows(aops_pool, agent_id) == []
 
 
 async def test_switch_between_external_harnesses_leaves_the_note_to_the_destination(
@@ -174,7 +165,9 @@ async def test_no_pool_skips_the_write_and_still_answers_ok(
     assert [record for record in caplog.records if record.name == health_routes.__name__] == []
 
 
-@pytest.mark.parametrize(("old", "agent_id"), [("claude_code", 9214), ("codex", 9215)])
+@pytest.mark.parametrize(
+    ("old", "agent_id"), [("claude_code", 9214), ("codex", 9215), ("antigravity", 9216)]
+)
 async def test_leaving_a_harness_read_from_its_record_writes_no_note(
     aops_pool: AsyncConnectionPool[Any], old: str, agent_id: int
 ) -> None:

@@ -14,22 +14,41 @@ from psycopg_pool import AsyncConnectionPool
 from agent.graph.claim.harness_activity import (
     SUBAGENT_CUT,
     SUBAGENT_ITEM_CHARS,
+    HarnessTurnProjector,
 )
 from agent.graph.claim.harness_turn import harness_turn_node
-from agent.graph.claim.tests.harness_support import FakeEngine, in_a_turn, insert_row, row_status
+from agent.graph.claim.tests.harness_support import (
+    FakeEngine,
+    RuntimeFixture,
+    in_a_turn,
+    insert_row,
+    read_recorded_items,
+    row_status,
+)
+from agent.graph.claim.tests.harness_support import (
+    harness_runtime as harness_runtime,
+)
 from agent.graph.claim.tests.test_harness_turn import config, runtime
+from agent.graph.hooks.user_delivery import capture_items
 from agent.graph.llm_errors import FatalLLMStreamError
 from agent.ownership.tests.ownership_support import agent_row
 from agent.state import AgentState
 from base.agents.context import HostedTurnResources, MeivaContext
-from base.agents.history.harness_messages import aload_harness_timeline_items
+from base.agents.history.harness_messages import (
+    aget_harness_call_item_id,
+    aget_next_harness_message_seq,
+    aload_harness_timeline_items,
+    aupsert_harness_timeline_item,
+)
 from base.agents.history.timeline_item import TimelineItem
+from base.agents.history.transcript_timeline.items import ReplyPolicy
 from base.api_contracts.agent_contract import Harness
 from base.clock import SYSTEM_TIMERS
 from base.clock.tests.seeded_rng import seeded_rng
 from base.config.tests.configuration import defaults
 from base.db import Database, create_agent
 from base.db.code_version_gate import ProcessDbGate
+from base.db.transaction import async_write_transaction
 from base.events.live.bus import EventBus
 from base.events.live.tests.live_capture import LiveEvents
 from base.host.env.agent_slices import AgentSlices
@@ -56,7 +75,7 @@ async def test_sdk_harness_corrects_only_at_natural_end_and_keeps_raw_final_in_d
 ) -> None:
     aid = create_agent(db_conn)
     db_conn.execute(
-        "INSERT INTO agents_meta (id, status, harness) VALUES (%s, 'running', 'codex')",
+        "INSERT INTO agents_meta (id, status, harness) VALUES (%s, 'running', 'antigravity')",
         (aid,),
     )
     db_conn.commit()
@@ -66,6 +85,8 @@ async def test_sdk_harness_corrects_only_at_natural_end_and_keeps_raw_final_in_d
         ops_pool=aops_pool,
         hosted_resources=hosted_resources,
         publisher=live_events.publisher,
+        agent_id=aid,
+        database_gate=database_gate,
     )
     sdk = Runtime(
         context=replace(
@@ -84,20 +105,24 @@ async def test_sdk_harness_corrects_only_at_natural_end_and_keeps_raw_final_in_d
     assert [item.key for item in first] == ["human-request"]
     assert [item.key for item in second] == ["human-request:visibility-correction"]
     async with aops_pool.connection() as conn:
-        items = await aload_harness_timeline_items(conn, aid)
+        items = await read_recorded_items(conn, aid, policy=ReplyPolicy(False, "sdk"))
     raw = [item for item in items if item.kind == "agent_chat"]
     assert len(raw) == 2 and all(item.user_facing is False for item in raw)
     assert engine.interrupts == 0
 
 
-async def test_harness_turn_does_not_inject_visibility_rule_and_corrects_once_on_violation() -> (
-    None
-):
+async def test_harness_turn_does_not_inject_visibility_rule_and_corrects_once_on_violation(
+    db_conn: psycopg.Connection,
+    harness_runtime: RuntimeFixture,
+) -> None:
+    agent_id = agent_row(db_conn)
     engine_valid = FakeEngine(reply="MEIVA_DISPLAY_TO_USER\nhello")
     state = AgentState(
         harness_inputs=[{"key": "inbound-10", "prompt": "hello from user", "timeline_items": []}]
     )
-    cmd_valid = await harness_turn_node(state, runtime(engine_valid), config())
+    cmd_valid = await harness_turn_node(
+        state, harness_runtime(engine_valid, agent_id=agent_id), config(agent_id)
+    )
     assert cmd_valid.goto == "claim"
     assert cmd_valid.update is not None
     assert cmd_valid.update["harness_inputs"] == []
@@ -105,7 +130,9 @@ async def test_harness_turn_does_not_inject_visibility_rule_and_corrects_once_on
     assert prompt == "hello from user"
 
     engine_invalid = FakeEngine(reply="unprefixed reply")
-    cmd_invalid = await harness_turn_node(state, runtime(engine_invalid), config())
+    cmd_invalid = await harness_turn_node(
+        state, harness_runtime(engine_invalid, agent_id=agent_id), config(agent_id)
+    )
     assert cmd_invalid.goto == "claim"
     [(original, _), (correction, correction_key)] = engine_invalid.submitted
     assert original == "hello from user"
@@ -128,7 +155,7 @@ async def test_harness_reply_is_published_once_whether_or_not_the_turn_was_cut_o
 ) -> None:
     aid = create_agent(db_conn)
     db_conn.execute(
-        "INSERT INTO agents_meta (id, status, harness) VALUES (%s, 'running', 'codex')",
+        "INSERT INTO agents_meta (id, status, harness) VALUES (%s, 'running', 'antigravity')",
         (aid,),
     )
     db_conn.commit()
@@ -138,9 +165,7 @@ async def test_harness_reply_is_published_once_whether_or_not_the_turn_was_cut_o
     )
     engine = FakeEngine(
         reply="" if interrupted else "Half a reply",
-        events=deltas
-        if interrupted
-        else (*deltas, AssistantText(turn_id="t1", text="Half a reply")),
+        events=(*deltas, AssistantText(turn_id="t1", text="Half a reply")),
         interrupted=interrupted,
     )
     base = runtime(
@@ -148,6 +173,8 @@ async def test_harness_reply_is_published_once_whether_or_not_the_turn_was_cut_o
         ops_pool=aops_pool,
         hosted_resources=hosted_resources,
         publisher=live_events.publisher,
+        agent_id=aid,
+        database_gate=database_gate,
     )
     naive = Runtime(
         context=replace(
@@ -163,12 +190,17 @@ async def test_harness_reply_is_published_once_whether_or_not_the_turn_was_cut_o
     await harness_turn_node(state, naive, config(aid))
 
     async with aops_pool.connection() as conn:
-        items = await aload_harness_timeline_items(conn, aid)
+        items = await read_recorded_items(conn, aid, policy=ReplyPolicy(False, "naive"))
     [chat] = [item for item in items if item.kind == "agent_chat"]
-    assert chat.payload == "Half a reply" and chat.activity_pending is False
+    assert chat.payload == "Half a reply" and chat.activity_pending is None
     assert db_conn.execute(
         "SELECT source_key, content FROM agent_publications WHERE agent_id=%s", (aid,)
-    ).fetchall() == [(f"harness:{chat.item_id}", "Half a reply")]
+    ).fetchall() == [
+        (
+            f"harness:antigravity:{engine.session_id}:{chat.item_id[1:].split(chr(46))[0]}",
+            "Half a reply",
+        )
+    ]
 
 
 def _said(text: str, *, call: str = "call-agent", agent: str | None = None) -> SubagentText:
@@ -176,8 +208,8 @@ def _said(text: str, *, call: str = "call-agent", agent: str | None = None) -> S
 
 
 # meiva:note
-# One delivery-mode "naive" turn in which the agent launches a sub-agent and the CLI reports what it
-# said, run against a real database; the timeline items and the agent's delivery rows come back.
+# The retained adapter-event projector runs directly against a real database. Its sub-agent
+# detail and old publication keys remain covered while current harness turns use their records.
 # meiva:link base/lm/harness/docs/subagent-text.md
 async def _subagent_turn(
     db_conn: psycopg.Connection,
@@ -221,14 +253,47 @@ async def _subagent_turn(
             agent=AgentSlices.resolve({"user_delivery_mode": "naive"}, default_reader=defaults()),
         )
     )
-    state = AgentState(harness_inputs=[{"key": "req", "prompt": "Work", "timeline_items": []}])
-    await harness_turn_node(state, naive, config(aid))
+    projector = await _stored_projector(naive.context, aid, aops_pool)
+    for event in (
+        *((launch, launched) if launching else ()),
+        *said,
+        AssistantText(turn_id="t1", text="MEIVA_DISPLAY_TO_USER\nthe answer"),
+    ):
+        await projector.on_event(event)
+    await projector.finish()
     async with aops_pool.connection() as conn:
         items = await aload_harness_timeline_items(conn, aid)
     rows = db_conn.execute(
         "SELECT source_key, content FROM agent_publications WHERE agent_id=%s", (aid,)
     ).fetchall()
     return items, rows
+
+
+async def _stored_projector(
+    ctx: MeivaContext, agent: int, pool: AsyncConnectionPool
+) -> HarnessTurnProjector:
+    async with pool.connection() as conn:
+        start = await aget_next_harness_message_seq(conn, agent)
+
+    async def checkpoint(item: TimelineItem, _count: int) -> None:
+        async with async_write_transaction(pool) as conn:
+            saved = await aupsert_harness_timeline_item(
+                conn, agent, ctx.harness, item, incarnation=ctx.original_incarnation
+            )
+        assert saved is not None
+        await capture_items(ctx, agent, [item], source_key="harness")
+
+    async def find_call(key: str) -> str | None:
+        async with pool.connection() as conn:
+            return await aget_harness_call_item_id(conn, agent, key)
+
+    return HarnessTurnProjector(
+        checkpoint=checkpoint,
+        base_idx=start,
+        clock=ctx.require_clock(),
+        delivery_mode="naive",
+        find_call=find_call,
+    )
 
 
 # meiva:note
