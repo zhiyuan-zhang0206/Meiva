@@ -32,6 +32,8 @@ from agent.ownership.tests.ownership_support import agent_row
 from agent.state import AgentState
 from base.agents.context import MeivaContext
 from base.config.tests.configuration import defaults
+from base.db.code_version_gate import ProcessDbGate
+from base.events.live.bus import EventBus
 from base.host.env.agent_slices import AgentSlices
 from base.lm.harness import (
     BridgeEvent,
@@ -44,9 +46,22 @@ from base.native_process.turn_identity import HostedTurnResources
 
 
 def _without_timestamps(
-    engine: FakeEngine, aops_pool: AsyncConnectionPool, resources: HostedTurnResources
+    engine: FakeEngine,
+    aops_pool: AsyncConnectionPool,
+    resources: HostedTurnResources,
+    *,
+    agent_id: int,
+    database_gate: ProcessDbGate,
+    event_bus: EventBus,
 ) -> Runtime[MeivaContext]:
-    context = runtime(engine, ops_pool=aops_pool, hosted_resources=resources).context
+    context = runtime(
+        engine,
+        ops_pool=aops_pool,
+        hosted_resources=resources,
+        agent_id=agent_id,
+        database_gate=database_gate,
+        event_bus=event_bus,
+    ).context
     slices = AgentSlices.resolve(default_reader=defaults(general__message_timestamps=False))
     return Runtime(context=replace(context, agent=slices))
 
@@ -59,6 +74,8 @@ async def test_a_passive_note_a_message_and_a_hook_note_open_one_turn_that_holds
     db_conn: psycopg.Connection,
     aops_pool: AsyncConnectionPool,
     hosted_resources: HostedTurnResources,
+    database_gate: ProcessDbGate,
+    event_bus: EventBus,
 ) -> None:
     agent_id = agent_row(db_conn)
     passive = insert_row(
@@ -71,7 +88,14 @@ async def test_a_passive_note_a_message_and_a_hook_note_open_one_turn_that_holds
         "prompt": _HOOK_NOTE,
         "timeline_items": [],
     }
-    rt = runtime(engine, ops_pool=aops_pool, hosted_resources=hosted_resources)
+    rt = runtime(
+        engine,
+        ops_pool=aops_pool,
+        hosted_resources=hosted_resources,
+        agent_id=agent_id,
+        database_gate=database_gate,
+        event_bus=event_bus,
+    )
 
     _ = await harness_turn_node(AgentState(harness_inputs=[note]), rt, config(agent_id))
 
@@ -103,13 +127,22 @@ async def test_a_crash_settles_a_wakes_rows_by_the_one_key_they_were_handed_over
     db_conn: psycopg.Connection,
     aops_pool: AsyncConnectionPool,
     hosted_resources: HostedTurnResources,
+    database_gate: ProcessDbGate,
+    event_bus: EventBus,
 ) -> None:
     agent_id = agent_row(db_conn)
     seen = _claimed_group(db_conn, agent_id, "inbound-1000")
     lost = _claimed_group(db_conn, agent_id, "inbound-2000")
     engine = FakeEngine()
     engine.records = {"inbound-1000": Reconciliation.IN_CONTEXT}
-    rt = runtime(engine, ops_pool=aops_pool, hosted_resources=hosted_resources)
+    rt = runtime(
+        engine,
+        ops_pool=aops_pool,
+        hosted_resources=hosted_resources,
+        agent_id=agent_id,
+        database_gate=database_gate,
+        event_bus=event_bus,
+    )
 
     _ = await harness_turn_node(AgentState(), rt, config(agent_id))
 
@@ -142,6 +175,8 @@ async def test_the_rows_are_marked_before_the_harness_is_handed_the_input_and_a_
     db_conn: psycopg.Connection,
     aops_pool: AsyncConnectionPool,
     hosted_resources: HostedTurnResources,
+    database_gate: ProcessDbGate,
+    event_bus: EventBus,
 ) -> None:
     agent_id = agent_row(db_conn)
     rows = [insert_row(db_conn, agent_id, "chat", "user", text) for text in ("one", "two")]
@@ -156,7 +191,14 @@ async def test_the_rows_are_marked_before_the_harness_is_handed_the_input_and_a_
         )
 
     engine = FakeEngine(script=script)
-    rt = runtime(engine, ops_pool=aops_pool, hosted_resources=hosted_resources)
+    rt = runtime(
+        engine,
+        ops_pool=aops_pool,
+        hosted_resources=hosted_resources,
+        agent_id=agent_id,
+        database_gate=database_gate,
+        event_bus=event_bus,
+    )
 
     async with asyncio.timeout(20), asyncio.TaskGroup() as tasks:
         node = tasks.create_task(harness_turn_node(AgentState(), rt, config(agent_id)))
@@ -175,6 +217,8 @@ async def test_a_refused_wake_is_handed_over_again_with_its_hint_and_hook_note(
     db_conn: psycopg.Connection,
     aops_pool: AsyncConnectionPool,
     hosted_resources: HostedTurnResources,
+    database_gate: ProcessDbGate,
+    event_bus: EventBus,
 ) -> None:
     agent_id = agent_row(db_conn)
     chat = insert_row(db_conn, agent_id, "chat", "user", "carry on")
@@ -190,7 +234,14 @@ async def test_a_refused_wake_is_handed_over_again_with_its_hint_and_hook_note(
         )
 
     engine = FakeEngine(script=script)
-    rt = runtime(engine, ops_pool=aops_pool, hosted_resources=hosted_resources)
+    rt = runtime(
+        engine,
+        ops_pool=aops_pool,
+        hosted_resources=hosted_resources,
+        agent_id=agent_id,
+        database_gate=database_gate,
+        event_bus=event_bus,
+    )
 
     async with asyncio.timeout(20):
         _ = await harness_turn_node(_hint_and_note(chat), rt, config(agent_id))
@@ -204,6 +255,8 @@ async def test_a_wake_the_session_could_not_take_is_delivered_with_its_hint_and_
     db_conn: psycopg.Connection,
     aops_pool: AsyncConnectionPool,
     hosted_resources: HostedTurnResources,
+    database_gate: ProcessDbGate,
+    event_bus: EventBus,
 ) -> None:
     agent_id = agent_row(db_conn)
     chat = insert_row(db_conn, agent_id, "chat", "user", "carry on")
@@ -218,13 +271,27 @@ async def test_a_wake_the_session_could_not_take_is_delivered_with_its_hint_and_
     with pytest.raises(FatalLLMStreamError):
         _ = await harness_turn_node(
             state,
-            runtime(Unstartable(), ops_pool=aops_pool, hosted_resources=hosted_resources),
+            runtime(
+                Unstartable(),
+                ops_pool=aops_pool,
+                hosted_resources=hosted_resources,
+                agent_id=agent_id,
+                database_gate=database_gate,
+                event_bus=event_bus,
+            ),
             config(agent_id),
         )
     engine = FakeEngine()
     _ = await harness_turn_node(
         state,
-        runtime(engine, ops_pool=aops_pool, hosted_resources=hosted_resources),
+        runtime(
+            engine,
+            ops_pool=aops_pool,
+            hosted_resources=hosted_resources,
+            agent_id=agent_id,
+            database_gate=database_gate,
+            event_bus=event_bus,
+        ),
         config(agent_id),
     )
 
@@ -237,6 +304,8 @@ async def test_a_wakes_rows_reconcile_as_one_input_the_harness_stored_or_cannot_
     db_conn: psycopg.Connection,
     aops_pool: AsyncConnectionPool,
     hosted_resources: HostedTurnResources,
+    database_gate: ProcessDbGate,
+    event_bus: EventBus,
 ) -> None:
     agent_id = agent_row(db_conn)
     stored = _claimed_group(db_conn, agent_id, "inbound-3000")
@@ -246,7 +315,14 @@ async def test_a_wakes_rows_reconcile_as_one_input_the_harness_stored_or_cannot_
         "inbound-3000": Reconciliation.PERSISTED_UNDELIVERED,
         "inbound-4000": Reconciliation.UNKNOWN,
     }
-    rt = runtime(engine, ops_pool=aops_pool, hosted_resources=hosted_resources)
+    rt = runtime(
+        engine,
+        ops_pool=aops_pool,
+        hosted_resources=hosted_resources,
+        agent_id=agent_id,
+        database_gate=database_gate,
+        event_bus=event_bus,
+    )
 
     _ = await harness_turn_node(AgentState(), rt, config(agent_id))
 
@@ -269,11 +345,20 @@ async def test_a_wake_with_no_row_text_hands_its_synthetic_inputs_over_as_one_in
     db_conn: psycopg.Connection,
     aops_pool: AsyncConnectionPool,
     hosted_resources: HostedTurnResources,
+    database_gate: ProcessDbGate,
+    event_bus: EventBus,
 ) -> None:
     agent_id = agent_row(db_conn)
     _ = insert_row(db_conn, agent_id, "system_note", "user", "  ", _PASSIVE)
     engine = FakeEngine()
-    rt = runtime(engine, ops_pool=aops_pool, hosted_resources=hosted_resources)
+    rt = runtime(
+        engine,
+        ops_pool=aops_pool,
+        hosted_resources=hosted_resources,
+        agent_id=agent_id,
+        database_gate=database_gate,
+        event_bus=event_bus,
+    )
 
     _ = await harness_turn_node(_hints_only(), rt, config(agent_id))
 
@@ -290,6 +375,8 @@ async def test_a_refused_synthetic_only_wake_is_handed_over_again_as_the_same_on
     db_conn: psycopg.Connection,
     aops_pool: AsyncConnectionPool,
     hosted_resources: HostedTurnResources,
+    database_gate: ProcessDbGate,
+    event_bus: EventBus,
 ) -> None:
     agent_id = agent_row(db_conn)
     attempts = 0
@@ -304,7 +391,14 @@ async def test_a_refused_synthetic_only_wake_is_handed_over_again_as_the_same_on
         )
 
     engine = FakeEngine(script=script)
-    rt = runtime(engine, ops_pool=aops_pool, hosted_resources=hosted_resources)
+    rt = runtime(
+        engine,
+        ops_pool=aops_pool,
+        hosted_resources=hosted_resources,
+        agent_id=agent_id,
+        database_gate=database_gate,
+        event_bus=event_bus,
+    )
 
     async with asyncio.timeout(20):
         _ = await harness_turn_node(_hints_only(), rt, config(agent_id))
@@ -387,11 +481,20 @@ async def test_each_message_of_a_wake_keeps_its_own_timeline_entry(
     db_conn: psycopg.Connection,
     aops_pool: AsyncConnectionPool,
     hosted_resources: HostedTurnResources,
+    database_gate: ProcessDbGate,
+    event_bus: EventBus,
 ) -> None:
     agent_id = agent_row(db_conn)
     rows = [insert_row(db_conn, agent_id, "chat", "user", t) for t in ("first", "second")]
     engine = FakeEngine()
-    rt = runtime(engine, ops_pool=aops_pool, hosted_resources=hosted_resources)
+    rt = runtime(
+        engine,
+        ops_pool=aops_pool,
+        hosted_resources=hosted_resources,
+        agent_id=agent_id,
+        database_gate=database_gate,
+        event_bus=event_bus,
+    )
 
     _ = await harness_turn_node(AgentState(), rt, config(agent_id))
 
@@ -405,6 +508,8 @@ async def test_passive_rows_are_not_handed_over_when_the_only_row_that_is_not_pa
     db_conn: psycopg.Connection,
     aops_pool: AsyncConnectionPool,
     hosted_resources: HostedTurnResources,
+    database_gate: ProcessDbGate,
+    event_bus: EventBus,
 ) -> None:
     agent_id = agent_row(db_conn)
     blank = insert_row(db_conn, agent_id, "chat", "user", "  ")
@@ -423,7 +528,14 @@ async def test_passive_rows_are_not_handed_over_when_the_only_row_that_is_not_pa
         )
 
     engine = FakeEngine(script=script)
-    rt = _without_timestamps(engine, aops_pool, hosted_resources)
+    rt = _without_timestamps(
+        engine,
+        aops_pool,
+        hosted_resources,
+        agent_id=agent_id,
+        database_gate=database_gate,
+        event_bus=event_bus,
+    )
 
     async with asyncio.timeout(20):
         _ = await harness_turn_node(_hints_only(), rt, config(agent_id))
@@ -486,6 +598,8 @@ async def test_a_synthetic_input_with_no_text_fails_before_any_row_is_reserved(
     db_conn: psycopg.Connection,
     aops_pool: AsyncConnectionPool,
     hosted_resources: HostedTurnResources,
+    database_gate: ProcessDbGate,
+    event_bus: EventBus,
 ) -> None:
     agent_id = agent_row(db_conn)
     chat = insert_row(db_conn, agent_id, "chat", "user", "carry on")
@@ -493,7 +607,14 @@ async def test_a_synthetic_input_with_no_text_fails_before_any_row_is_reserved(
         harness_inputs=[{"key": "hook-notes-1", "prompt": "  \n", "timeline_items": []}]
     )
     engine = FakeEngine()
-    rt = runtime(engine, ops_pool=aops_pool, hosted_resources=hosted_resources)
+    rt = runtime(
+        engine,
+        ops_pool=aops_pool,
+        hosted_resources=hosted_resources,
+        agent_id=agent_id,
+        database_gate=database_gate,
+        event_bus=event_bus,
+    )
 
     with pytest.raises(ValueError, match="hook-notes-1"):
         _ = await harness_turn_node(state, rt, config(agent_id))
@@ -505,6 +626,8 @@ async def test_a_crash_rebuilds_the_blocks_of_a_wake_as_the_first_delivery_made_
     db_conn: psycopg.Connection,
     aops_pool: AsyncConnectionPool,
     hosted_resources: HostedTurnResources,
+    database_gate: ProcessDbGate,
+    event_bus: EventBus,
 ) -> None:
     fresh_agent = agent_row(db_conn)
     for text in ("first of the wake", "second of the wake"):
@@ -512,7 +635,14 @@ async def test_a_crash_rebuilds_the_blocks_of_a_wake_as_the_first_delivery_made_
     fresh = FakeEngine()
     _ = await harness_turn_node(
         AgentState(),
-        _without_timestamps(fresh, aops_pool, hosted_resources),
+        _without_timestamps(
+            fresh,
+            aops_pool,
+            hosted_resources,
+            agent_id=fresh_agent,
+            database_gate=database_gate,
+            event_bus=event_bus,
+        ),
         config(fresh_agent),
     )
     crashed_agent = agent_row(db_conn)
@@ -523,7 +653,14 @@ async def test_a_crash_rebuilds_the_blocks_of_a_wake_as_the_first_delivery_made_
 
     _ = await harness_turn_node(
         AgentState(),
-        _without_timestamps(rebuilt, aops_pool, hosted_resources),
+        _without_timestamps(
+            rebuilt,
+            aops_pool,
+            hosted_resources,
+            agent_id=crashed_agent,
+            database_gate=database_gate,
+            event_bus=event_bus,
+        ),
         config(crashed_agent),
     )
 

@@ -71,7 +71,7 @@ class Harness(StrEnum):
 # graph and the insights all ask it here. Claude Code and Codex do; Antigravity follows.
 # meiva:link docs/decisions/agents/graph/2026-11-13-timeline-read-from-the-record.md
 def reads_timeline_from_record(harness: str) -> bool:
-    return harness in (Harness.CLAUDE_CODE.value, Harness.CODEX.value)
+    return harness in (Harness.CLAUDE_CODE.value, Harness.CODEX.value, Harness.ANTIGRAVITY.value)
 
 
 # meiva:note

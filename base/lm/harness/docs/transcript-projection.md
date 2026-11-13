@@ -2,14 +2,14 @@
 
 The shared layer in `base/lm/harness/session/transcript/` and the three parsers
 (`claude/transcript/`, `codex/transcript/`, `antigravity/transcript/`) read a CLI's own conversation record
-into one vocabulary and project it into timeline item drafts. A Claude Code or Codex agent's timeline is read from its
+into one vocabulary and project it into timeline item drafts. An external agent's timeline is read from its
 record when it is asked for and stored nowhere ([the decision](../../../../docs/decisions/agents/graph/2026-11-13-timeline-read-from-the-record.md),
 which keeps the vocabulary and the one projection of
 [the transcript decision](../../../../docs/decisions/agents/graph/2026-11-12-transcript-is-the-timeline-source.md) and replaces its stored
-copy). The writer, the reader and the tables that kept that copy are gone; Antigravity follows, in
+copy). The stored transcript pipeline has been removed. Antigravity now uses the same record-read path; the older adapter-event projector and display table remain until its authorized stable rollout, in
 [the plan](../../../../future/agent/transcript-timeline-source.md).
 
-## The read-time path (Claude Code, Codex)
+## The read-time path
 
 `session/transcript/record_file.py` is the half every CLI shares: `RecordFile` reads blocks of the main record backwards
 from a line boundary (and counts the bytes it reads); `ZstdRecordFile` does the same for a compressed Codex rollout from a
@@ -29,15 +29,15 @@ call and its result in the main record. [What the Codex rollout holds](../codex/
 entries and turns each draft into an item (`items.py`, which also holds reply visibility and the tool-call
 rendering), names it `h<offset>.<n>`, marks a call that has no result and is still open as running, and does not show
 a person's input that no inbox row accounts for. A row of a kind a CLI's reader does not know is skipped and
-reported once for each kind (`harness_record_row_unread`, by `UnreadRows` of `record_file.py`), for both CLIs. A marker that is not a tagged note reaches the page as a `status:` or
+reported once for each kind (`harness_record_row_unread`, by `UnreadRows` of `record_file.py`), for all three CLIs. A marker that is not a tagged note reaches the page as a `status:` or
 an `error:` line, the only two a page shows: the interrupt, compaction and failure markers are written that way, and a
 notice the CLI filed (a finished background task, a timer, a sub-agent's start or end) is made a status line in
 `items.py`, with its cause kept as the item's source. `sent.py` reads back which inbox rows were handed to the CLI as which
 input (their key gives the row's `uuid`) and what each of them shows; `read.py` reads a window of `limit` items from
 the end of the file or before an item, with a bounded look-back for the call of a result and for the start of a turn.
 The same `RecordProjector` over only the bytes appended since the last read is the live view
-([harness turn](../../../../agent/graph/docs/harness-turn.md#record-read-timeline-claude-code-codex)); the two give the same items.
-Antigravity will add only its own file-to-entries reader.
+([harness turn](../../../../agent/graph/docs/harness-turn.md#record-read-timeline-external-harnesses)); the two give the same items.
+Antigravity reads the main full transcript in file order, with the same bounded reader. Its input attribution uses the user-selected content-and-order rule rather than adding an identifier to the model-visible prompt. Repeated step indices never establish identity. Background handoffs and missing results leave closed call displays.
 
 ## The two pieces
 
@@ -81,15 +81,15 @@ surrogates) before it is parsed. Nothing is stored: the position of a read lives
 | `HumanInput` | `user` row whose `uuid` is ours; `attachment/queued_command.source_uuid` for an absorbed one | `userMessage.clientId`; a second user input of the same turn is a steer | `USER_INPUT` (text inside `<USER_REQUEST>`); no id unless the trajectory's `clientMessageId` is supplied |
 | `AgentText` | `assistant` text block (one block per row, blocks share `message.id`); `isAbortedMidStream` is incomplete | `agentMessage` (whole, at completion) | `PLANNER_RESPONSE.content` |
 | `Reasoning` | `thinking` block, `thinkingDurationMs` | `reasoning` item, text empty (encrypted) | `PLANNER_RESPONSE.thinking`, high-thinking tier only |
-| `ToolCall` | `tool_use` block | `commandExecution`, `spawnAgent` and other items, completed state only | `PLANNER_RESPONSE.tool_calls[k]` (no id; id is `step:k`) |
-| `ToolResult` | `tool_result` block of a `user` row (`toolDenialKind`, `toolUseResult.backgroundTaskId`) | the same item as its call | `GENERIC` row at `step + 1 + k`; `RUNNING` stays `RUNNING` = background |
+| `ToolCall` | `tool_use` block | `commandExecution`, `spawnAgent` and other items, completed state only | `PLANNER_RESPONSE.tool_calls[k]` (no id; identity is the row offset and call position) |
+| `ToolResult` | `tool_result` block of a `user` row (`toolDenialKind`, `toolUseResult.backgroundTaskId`) | the same item as its call | `GENERIC` rows following the call in file order; `RUNNING` means a completed background handoff |
 | `SubagentLink` | `toolUseResult.agentId` on the call's result; child rows `isSidechain` + `agentId` | `spawnAgent` receiver thread ids; child thread items | child id inside the spawn row; `subagents/<child>.json` |
 | `Notice` | `user` row with `origin.kind` (`<task-notification>`) | `<subagent_notification>` (pseudo turn id) | `SYSTEM_MESSAGE` (task notification, child message, timer) |
 | `Interrupt` | `user` row `[Request interrupted by user...]` | `turn_aborted` / turn status `interrupted` | none (a signal) |
 | `Compaction` | `system/compact_boundary` | `contextCompaction` / `compacted` | `CHECKPOINT` |
 | `TokenUsage` | `message.usage` on every row of a message (deduplicated by `message.id`) | `token_usage_record` per sample (rollout only) | token fields of `PLANNER_RESPONSE` and `CHECKPOINT` rows |
 | `TurnEnd` | last assistant row of a turn (`stop_reason` end_turn, max_tokens...) | `task_complete` | none (a signal) |
-| `Failure` | none observed | `turn.error` / status `failed` (schema only) | `ERROR` status (documented, unobserved) |
+| `Failure` | none observed | `turn.error` / status `failed` (schema only) | `ERROR_MESSAGE.error`; `GENERIC/ERROR` and `GENERIC/INVALID` are failed tool results |
 
 ## What does not fit, and who owns it
 

@@ -19,6 +19,7 @@ from base.agents.history.transcript_timeline.record.read import read_window
 from base.agents.history.transcript_timeline.sent import load_sent_rows, sent_inputs
 from base.api_contracts.agent_contract import reads_timeline_from_record
 from base.lm.harness.registry import FileSessionRegistry
+from base.lm.harness.session.transcript.entries import InputRow
 from base.lm.harness.session.transcript.record_file import RecordFile, ZstdRecordFile
 from base.log import logger
 from base.paths import harness_sessions_dir
@@ -58,7 +59,7 @@ def read_harness_timeline(
             return _EMPTY
         file = ZstdRecordFile(packed)
 
-    def load_sent(until: datetime, wanted: Mapping[str, datetime]) -> dict[str, list[TimelineItem]]:
+    def load_sent(until: datetime, wanted: Mapping[str, InputRow]) -> dict[str, list[TimelineItem]]:
         with pool.connection() as conn:
             rows = load_sent_rows(
                 conn,

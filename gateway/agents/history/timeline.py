@@ -284,6 +284,8 @@ def load_current_timeline_items(
             )
             if not from_record and not has_harness_messages(conn, agent_id):
                 return harness_items
+            if from_record:
+                return harness_items
             messages = load_current_messages(db, agent_id)
             if not messages:
                 return harness_items
@@ -598,10 +600,10 @@ def _external_harness_response(
         harness_items, harness_count, record_more = record_window_for(
             request, agent_id, harness, limit, before, cursor
         )
-    else:
-        with gateway_state(request).db_pool.connection() as conn:
-            harness_items = load_harness_timeline_items(conn, agent_id)
-            harness_count = len(harness_items)
+        return TimelineResponse(items=harness_items, msg_count=harness_count, has_more=record_more)
+    with gateway_state(request).db_pool.connection() as conn:
+        harness_items = load_harness_timeline_items(conn, agent_id)
+        harness_count = len(harness_items)
 
     if before is not None:
         return _external_harness_page_before(

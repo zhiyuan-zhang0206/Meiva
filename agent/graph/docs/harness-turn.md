@@ -60,9 +60,9 @@ delivered and recorded like a completed one), marks tools whose result is unavai
 reason when the harness faults. A host custody tick keeps the invocation
 owned while the provider is quiet. It produces no timeline activity.
 
-## Record-read timeline (Claude Code, Codex)
+## Record-read timeline (external harnesses)
 
-A Claude Code or Codex agent's timeline is not written by anyone: it is read from the CLI's record when asked for
+An external agent's timeline is not written by anyone: it is read from the CLI's record when asked for
 ([the decision](../../../docs/decisions/agents/graph/2026-11-13-timeline-read-from-the-record.md); the gateway's side is the
 `harness_timeline_read` operation, the projection is in [reading a record](../../../base/lm/harness/docs/transcript-projection.md)).
 `reads_timeline_from_record` (`base/api_contracts/agent_contract.py`) decides which harnesses are such. What this node
@@ -91,8 +91,8 @@ does for them, and nothing else changes:
   (`HOST_PASSTHROUGH_KEYS` in `base/host/env/agent_env.py`), and the record is under that `HOME`
   (`<home>/.claude/projects/<workspace slug>/<session id>.jsonl`).
 
-Codex and Antigravity still use the adapter-event path above, which writes `agent_harness_messages`; it is deleted with the
-table when they have followed ([the plan](../../../future/agent/transcript-timeline-source.md)).
+Codex and Antigravity use the same record-read path. The adapter-event projector and its table remain until the authorized
+Antigravity rollout has proved stable ([the plan](../../../future/agent/transcript-timeline-source.md)).
 
 ## The bridge
 

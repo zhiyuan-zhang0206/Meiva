@@ -3,11 +3,11 @@
 # directory, the file lives where the session's own Claude home puts it, and the inbox rows claimed around the
 # time the rows were written say who sent what. A session with no record, or no file yet, has an empty timeline.
 # meiva:link docs/decisions/agents/graph/2026-11-13-timeline-read-from-the-record.md
-
 from __future__ import annotations
 
+import json
 import re
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
@@ -15,6 +15,7 @@ import psycopg
 import pytest
 from psycopg_pool import ConnectionPool
 
+from base.agents.history.timeline_item import TimelineItem
 from base.agents.history.transcript_timeline.sent import (
     BATCH_ROWS,
     MAX_ROWS,
@@ -23,11 +24,12 @@ from base.agents.history.transcript_timeline.sent import (
 from base.db import create_agent
 from base.lm.harness.claude.delivery import key_uuid
 from base.lm.harness.registry import FileSessionRegistry, SessionRecord
+from base.lm.harness.session.transcript.entries import InputRow
 from base.log.tests.log_records import LogRecords
 from base.log.tests.log_records import loguru_records as loguru_records
 from base.paths import harness_sessions_dir, workspace_dir
 from ops.harness_timeline import read_harness_timeline
-from ops.rpc_schemas import HarnessTimelineReadRequest
+from ops.rpc_schemas import HarnessTimelineReadRequest, HarnessTimelineWindow
 
 FIXTURE = (
     Path(__file__).parents[2] / "base/lm/harness/claude/transcript/tests/fixtures/basic/main.jsonl"
@@ -149,13 +151,13 @@ def test_a_page_before_an_item_ends_at_that_row(
     assert all(int(i.item_id.removeprefix("h").split(".")[0]) < oldest for i in page.items)
 
 
-def test_a_harness_whose_timeline_is_stored_is_refused(
+def test_a_native_harness_is_refused_by_the_external_record_reader(
     tmp_path: Path, db_conn: psycopg.Connection, pool: ConnectionPool
 ) -> None:
     agent = create_agent(db_conn)
     with pytest.raises(ValueError, match="not read from its record"):
         _ = read_harness_timeline(
-            _request(agent, harness="antigravity"), pool=pool, home=tmp_path, environ={}
+            _request(agent, harness="meiva"), pool=pool, home=tmp_path, environ={}
         )
 
 
@@ -188,11 +190,17 @@ def test_an_input_no_inbox_row_names_costs_one_batch_and_one_that_cannot_be_foun
     _rows(db_conn, agent, 2500, "2026-11-20T00:00:00Z")
     at = datetime(2026, 11, 12, tzinfo=UTC)
     own = load_sent_rows(
-        db_conn, agent, until=at, wanted={"unknown": at + timedelta(days=30)}, wire_id=key_uuid
+        db_conn,
+        agent,
+        until=at,
+        wanted={"unknown": InputRow(at + timedelta(days=30))},
+        wire_id=key_uuid,
     )
     assert (own.rows, own.scanned) == ([], BATCH_ROWS)
     newest = at + timedelta(days=19)
-    capped = load_sent_rows(db_conn, agent, until=newest, wanted={"unknown": at}, wire_id=key_uuid)
+    capped = load_sent_rows(
+        db_conn, agent, until=newest, wanted={"unknown": InputRow(at)}, wire_id=key_uuid
+    )
     assert capped.scanned == MAX_ROWS
 
 
@@ -201,7 +209,9 @@ def test_a_row_far_back_among_many_is_found_by_its_id(db_conn: psycopg.Connectio
     _rows(db_conn, agent, 2500, "2026-12-01T00:00:00Z")
     newest = datetime(2026, 12, 1, tzinfo=UTC)  # time-bomb-ok: rows of a fixed-date fixture
     wire = key_uuid("filler-1900")
-    found = load_sent_rows(db_conn, agent, until=newest, wanted={wire: newest}, wire_id=key_uuid)
+    found = load_sent_rows(
+        db_conn, agent, until=newest, wanted={wire: InputRow(newest)}, wire_id=key_uuid
+    )
     assert [row.input_key for row in found.rows] == ["filler-1900"]
     assert found.scanned <= MAX_ROWS
 
@@ -212,5 +222,121 @@ def test_the_hosts_own_input_with_fewer_rows_than_a_batch_raises_no_warning(
     agent = create_agent(db_conn)
     _ = _claimed(db_conn, agent, "only row", "k1")
     at = datetime(2026, 11, 12, tzinfo=UTC)
-    found = load_sent_rows(db_conn, agent, until=at, wanted={"host-own": at}, wire_id=key_uuid)
+    found = load_sent_rows(
+        db_conn, agent, until=at, wanted={"host-own": InputRow(at)}, wire_id=key_uuid
+    )
     assert found.rows == [] and loguru_records.events("harness_timeline_inputs_unmatched") == []
+
+
+def test_agy_text_matching_preserves_uploads_notes_and_page_identity(
+    tmp_path: Path, db_conn: psycopg.Connection, pool: ConnectionPool
+) -> None:
+    agent = create_agent(db_conn)
+    other = create_agent(db_conn)
+    first = _claimed(db_conn, agent, "hello attachments", "original-key")
+    _ = _claimed(db_conn, other, "hello attachments", "wrong-owner")
+    note = _claimed(db_conn, agent, "memory instruction", "note-key")
+    hidden = _claimed(db_conn, agent, "restart note", "hidden-key")
+    upload = {
+        "name": "paper.txt",
+        "size": 12,
+        "content_type": "text/plain",
+        "batch_id": "a" * 32,
+        "ordinal": 0,
+    }
+    db_conn.execute(
+        "UPDATE inbound_messages SET payload=%s::jsonb WHERE id=%s",
+        (
+            json.dumps(
+                {
+                    "image_uploads": [{"batch_id": "b" * 32, "ordinal": 1}],
+                    "upload_files": [upload, {"batch_id": "bad"}],
+                }
+            ),
+            first,
+        ),
+    )
+    db_conn.execute(
+        "UPDATE inbound_messages SET kind='system_note', payload=%s::jsonb WHERE id=%s",
+        (json.dumps({"note_tag": "memory"}), note),
+    )
+    db_conn.execute(
+        "UPDATE inbound_messages SET kind='system_note', payload=%s::jsonb WHERE id=%s",
+        (json.dumps({"note_tag": "lifecycle_restart"}), hidden),
+    )
+    db_conn.commit()
+    home = tmp_path / "home"
+    FileSessionRegistry(harness_sessions_dir(home=home)).save(
+        SessionRecord(
+            agent_id=agent,
+            session_id=SESSION,
+            cwd=str(tmp_path),
+            model="m",
+            created_at="2026-11-12T08:00:00Z",
+            updated_at="2026-11-12T08:00:00Z",
+            harness="antigravity",
+            generation=1,
+        )
+    )
+    record = (
+        tmp_path
+        / ".gemini/antigravity-cli/brain"
+        / SESSION
+        / ".system_generated/logs/transcript_full.jsonl"
+    )
+    record.parent.mkdir(parents=True)
+    rows = [
+        {
+            "type": "USER_INPUT",
+            "content": "<USER_REQUEST>hello attachments memory instruction restart note</USER_REQUEST>",
+        },
+        {"type": "PLANNER_RESPONSE", "content": "first reply"},
+        {
+            "type": "USER_INPUT",
+            "content": "<USER_REQUEST>hello attachments memory instruction restart note</USER_REQUEST>",
+        },
+        {"type": "PLANNER_RESPONSE", "content": "second reply"},
+    ]
+    record.write_text(
+        "".join(
+            json.dumps(
+                {"status": "DONE", "step_index": 1, "created_at": "2026-11-12T08:57:00Z", **row}
+            )
+            + "\n"
+            for row in rows
+        )
+    )
+
+    def read(before: int | None = None, limit: int = 50):
+        return read_harness_timeline(
+            _request(agent, harness="antigravity", before=before, limit=limit),
+            pool=pool,
+            home=home,
+            environ={"HOME": str(tmp_path)},
+        )
+
+    full = read()
+    inbound = [item for item in full.items if item.kind == "inbound_chat"]
+    assert len(inbound) == 1
+    assert inbound[0].inbound_id == first
+    assert inbound[0].images == [f"/api/agents/{agent}/uploads/{'b' * 32}/1"]
+    assert inbound[0].files is not None
+    assert len(inbound[0].files) == 1
+    assert inbound[0].files[0].url == f"/api/agents/{agent}/uploads/{'a' * 32}/0"
+    notes = [item for item in full.items if item.kind == "system_marker"]
+    assert [(item.source, item.payload) for item in notes] == [("memory", "memory instruction")]
+    assert _paged_items(read) == full.items
+
+
+def _paged_items(read: Callable[[int | None, int], HarnessTimelineWindow]) -> list[TimelineItem]:
+    actual = []
+    before = None
+    for _ in range(10):
+        page = read(before, 1)
+        actual = page.items + actual
+        if not page.has_more:
+            break
+        before = int(page.items[0].item_id[1:].split(".")[0])
+    else:
+        pytest.fail("page cursor did not finish")
+    return actual

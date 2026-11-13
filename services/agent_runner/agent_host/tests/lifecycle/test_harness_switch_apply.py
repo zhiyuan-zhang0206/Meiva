@@ -179,7 +179,7 @@ async def test_a_malformed_transition_is_refused_before_any_effect(
     assert _stored_harness(db_conn, owner.agent_id) == "claude_code"
 
 
-async def test_leaving_an_external_harness_for_the_native_one_marks_the_outgoing_history(
+async def test_leaving_a_record_backed_harness_applies_the_switch_without_a_stored_marker(
     db_conn: psycopg.Connection,
     aops_pool: AsyncConnectionPool,
     event_bus: EventBus,
@@ -206,9 +206,6 @@ async def test_leaving_an_external_harness_for_the_native_one_marks_the_outgoing
     )
 
     assert kind == "restart"
+    assert _stored_harness(db_conn, owner.agent_id) == "meiva"
     async with async_write_transaction(aops_pool) as conn:
-        [marker] = await aload_harness_timeline_items(conn, owner.agent_id)
-    assert marker.kind == "system_marker"
-    assert "Harness switched from 'antigravity' to 'meiva' by yourself: back to native" in str(
-        marker.payload
-    )
+        assert await aload_harness_timeline_items(conn, owner.agent_id) == []

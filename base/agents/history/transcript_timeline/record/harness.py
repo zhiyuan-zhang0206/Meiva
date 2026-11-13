@@ -1,14 +1,14 @@
 from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
-from datetime import datetime
 from pathlib import Path
 from typing import Protocol
 
 from base.api_contracts.agent_contract import Harness
+from base.lm.harness.antigravity.transcript import window as antigravity
 from base.lm.harness.claude.transcript import window as claude
 from base.lm.harness.codex.transcript import window as codex
-from base.lm.harness.session.transcript.entries import AnyEntry
+from base.lm.harness.session.transcript.entries import AnyEntry, InputRow
 from base.lm.harness.session.transcript.record_file import FileRow
 
 # meiva:note
@@ -21,6 +21,8 @@ from base.lm.harness.session.transcript.record_file import FileRow
 
 
 class EntryReader(Protocol):
+    pending_calls: bool
+
     def entries(self, rows: Sequence[FileRow]) -> tuple[AnyEntry, ...]: ...
 
 
@@ -30,6 +32,8 @@ def entry_reader(harness: str) -> EntryReader:
             return claude.EntryParser()
         case Harness.CODEX:
             return codex.EntryParser()
+        case Harness.ANTIGRAVITY:
+            return antigravity.EntryParser()
         case other:
             raise ValueError(f"the timeline of harness {other.value!r} is not read from its record")
 
@@ -40,16 +44,20 @@ def wire_id(harness: str, key: str) -> str:
             return claude.wire_id(key)
         case Harness.CODEX:
             return codex.wire_id(key)
+        case Harness.ANTIGRAVITY:
+            return antigravity.wire_id(key)
         case other:
             raise ValueError(f"the timeline of harness {other.value!r} is not read from its record")
 
 
-def input_wire_ids(harness: str, rows: Sequence[FileRow]) -> dict[str, datetime]:
+def input_wire_ids(harness: str, rows: Sequence[FileRow]) -> dict[str, InputRow]:
     match Harness(harness):
         case Harness.CLAUDE_CODE:
             return claude.input_wire_ids(rows)
         case Harness.CODEX:
             return codex.input_wire_ids(rows)
+        case Harness.ANTIGRAVITY:
+            return antigravity.input_wire_ids(rows)
         case other:
             raise ValueError(f"the timeline of harness {other.value!r} is not read from its record")
 
@@ -66,6 +74,8 @@ def session_file(
             return claude.session_file(environ, workspace, session_id)
         case Harness.CODEX:
             return codex.session_file(environ, session_id)
+        case Harness.ANTIGRAVITY:
+            return antigravity.session_file(environ, session_id)
         case other:
             raise ValueError(f"the timeline of harness {other.value!r} is not read from its record")
 
@@ -78,6 +88,8 @@ def record_location(harness: str, environ: Mapping[str, str], workspace: Path) -
             return claude.record_location(environ, workspace)
         case Harness.CODEX:
             return codex.record_location(environ)
+        case Harness.ANTIGRAVITY:
+            return antigravity.record_location(environ)
         case other:
             raise ValueError(f"the timeline of harness {other.value!r} is not read from its record")
 
@@ -110,18 +122,26 @@ def unreadable_file(
 # A reply's publication key: the CLI's own id of the row that holds it, under a prefix per harness, so it is the same
 # however often and from wherever the row is read and cannot meet a key of another scheme. `entry_key` is the key of the
 # entry the reply was projected from.
-REPLY_KEY_PREFIX = {Harness.CLAUDE_CODE: "harness:claude:", Harness.CODEX: "harness:codex:"}
+REPLY_KEY_PREFIX = {
+    Harness.CLAUDE_CODE: "harness:claude:",
+    Harness.CODEX: "harness:codex:",
+    Harness.ANTIGRAVITY: "harness:antigravity:",
+}
 
 
 def reply_key_prefix(harness: str) -> str:
     return REPLY_KEY_PREFIX[Harness(harness)]
 
 
-def reply_key(harness: str, entry_key: str) -> str:
+def reply_key(harness: str, entry_key: str, conversation_id: str | None = None) -> str:
     match Harness(harness):
         case Harness.CLAUDE_CODE:
             return f"{reply_key_prefix(harness)}{entry_key.removeprefix('claude:')}"
         case Harness.CODEX:
             return f"{reply_key_prefix(harness)}{entry_key.removeprefix('agent:')}"
+        case Harness.ANTIGRAVITY:
+            if conversation_id is None:
+                raise ValueError("Antigravity publication requires a conversation id")
+            return f"{reply_key_prefix(harness)}{conversation_id}:{entry_key.removeprefix('agy:')}"
         case other:
             raise ValueError(f"the timeline of harness {other.value!r} is not read from its record")

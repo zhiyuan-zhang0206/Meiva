@@ -1,12 +1,15 @@
-exports = ["harness.py", "read.py"]
+exports = ["harness.py", "match.py", "read.py"]
 
 [uses]
 "__init__.py" = []
 "harness.py" = []
-"read.py" = ["harness.py"]
+"read.py" = ["harness.py", "match.py"]
+"match.py" = []
 
 [purity]
 "." = "strict"
 "__init__.py" = "strict"
 "harness.py" = { mode = "none", why = "the choice of what differs between the CLIs whose timeline is read from their own record (where the record is and how its rows are read) by the harness; it reads a path and decides nothing about what a timeline shows" }
 "read.py" = { mode = "none", why = "the window read: it asks the record file for blocks of rows backwards from the window's end and hands them to the strict projection until the window is full; what the rows show is decided in project.py" }
+
+"match.py" = "strict"

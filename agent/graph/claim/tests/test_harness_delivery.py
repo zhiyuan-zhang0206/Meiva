@@ -26,15 +26,21 @@ from agent.graph.claim.node import claim_node
 from agent.graph.claim.tests.claim_support import make_runtime
 from agent.graph.claim.tests.harness_support import (
     FakeEngine,
+    FakeSubscription,
+    RuntimeFixture,
     completed,
     in_a_turn,
     input_key,
     insert_row,
+    read_recorded_items,
     rejecting,
     row_status,
     silent_engine,
     timeline_inbound_ids,
     wait_until,
+)
+from agent.graph.claim.tests.harness_support import (
+    harness_runtime as harness_runtime,
 )
 from agent.graph.claim.tests.test_harness_turn import config, runtime
 from agent.graph.claim.tests.test_harness_turn import hosted_resources as hosted_resources
@@ -42,11 +48,11 @@ from agent.graph.llm_errors import FatalLLMStreamError
 from agent.ownership.tests.ownership_support import admit_owner, agent_row
 from agent.state import AgentState
 from base.agents.context import MeivaContext
-from base.agents.history.harness_messages import aload_harness_timeline_items
 from base.agents.inbox.rows import list_pending_inbounds
 from base.api_contracts.agent_contract import Harness
 from base.db import PG_KEEPALIVE_KWARGS
 from base.db.code_version_gate import ProcessDbGate
+from base.events.live.bus import EventBus
 from base.lm.harness import (
     AssistantText,
     BridgeEvent,
@@ -63,9 +69,7 @@ from base.native_process.turn_identity import HostedTurnResources
 
 
 async def test_an_idle_harness_gets_the_head_of_the_inbox_and_a_turn_begins(
-    db_conn: psycopg.Connection,
-    aops_pool: AsyncConnectionPool,
-    hosted_resources: HostedTurnResources,
+    db_conn: psycopg.Connection, aops_pool: AsyncConnectionPool, harness_runtime: RuntimeFixture
 ) -> None:
     agent_id = agent_row(db_conn)
     first = insert_row(db_conn, agent_id, "chat", "user", "first")
@@ -73,10 +77,8 @@ async def test_an_idle_harness_gets_the_head_of_the_inbox_and_a_turn_begins(
         db_conn, agent_id, "system_note", "system", "a note", payload='{"note_tag": "agent_reply"}'
     )
     engine = FakeEngine()
-    rt = runtime(engine, ops_pool=aops_pool, hosted_resources=hosted_resources)
-
+    rt = harness_runtime(engine, agent_id=agent_id)
     command = await harness_turn_node(AgentState(), rt, config(agent_id))
-
     assert command.goto == "claim"
     [batch] = engine.delivered
     assert [(item.key, item.text) for item in batch] == [(input_key(first), batch[0].text)], (
@@ -88,17 +90,14 @@ async def test_an_idle_harness_gets_the_head_of_the_inbox_and_a_turn_begins(
 
 
 async def test_a_message_is_pending_until_it_is_in_the_context_and_then_in_the_timeline(
-    db_conn: psycopg.Connection,
-    aops_pool: AsyncConnectionPool,
-    hosted_resources: HostedTurnResources,
+    db_conn: psycopg.Connection, aops_pool: AsyncConnectionPool, harness_runtime: RuntimeFixture
 ) -> None:
     agent_id = agent_row(db_conn)
     db_conn.execute("UPDATE agents_meta SET harness='antigravity' WHERE id=%s", (agent_id,))
     db_conn.commit()
     row = insert_row(db_conn, agent_id, "chat", "user", "hello")
     engine = silent_engine()
-    rt = runtime(engine, ops_pool=aops_pool, hosted_resources=hosted_resources)
-
+    rt = harness_runtime(engine, agent_id=agent_id)
     async with asyncio.timeout(20), asyncio.TaskGroup() as tasks:
         node = tasks.create_task(harness_turn_node(AgentState(), rt, config(agent_id)))
         await wait_until(lambda: bool(engine.delivered), "delivery")
@@ -107,22 +106,18 @@ async def test_a_message_is_pending_until_it_is_in_the_context_and_then_in_the_t
         assert await timeline_inbound_ids(aops_pool, agent_id) == []
         engine.emit(*in_a_turn([input_key(row)], "MEIVA_DISPLAY_TO_USER\nhi"))
         await node
-
     assert row_status(db_conn, row) == "done"
     assert list_pending_inbounds(db_conn, agent_id) == []
     assert await timeline_inbound_ids(aops_pool, agent_id) == [row]
 
 
 async def test_a_message_that_arrives_mid_turn_is_delivered_on_the_wake_and_absorbed(
-    db_conn: psycopg.Connection,
-    aops_pool: AsyncConnectionPool,
-    hosted_resources: HostedTurnResources,
+    db_conn: psycopg.Connection, aops_pool: AsyncConnectionPool, harness_runtime: RuntimeFixture
 ) -> None:
     agent_id = agent_row(db_conn)
     first = insert_row(db_conn, agent_id, "chat", "user", "start")
     engine = silent_engine()
-    rt = runtime(engine, ops_pool=aops_pool, hosted_resources=hosted_resources)
-
+    rt = harness_runtime(engine, agent_id=agent_id)
     async with asyncio.timeout(20), asyncio.TaskGroup() as tasks:
         node = tasks.create_task(harness_turn_node(AgentState(), rt, config(agent_id)))
         await wait_until(lambda: len(engine.delivered) == 1, "first delivery")
@@ -139,21 +134,17 @@ async def test_a_message_that_arrives_mid_turn_is_delivered_on_the_wake_and_abso
             completed("t1", "MEIVA_DISPLAY_TO_USER\ndone"),
         )
         await node
-
     assert [row_status(db_conn, i) for i in (first, second)] == ["done", "done"]
     assert await timeline_inbound_ids(aops_pool, agent_id) == [first, second]
 
 
 async def test_an_input_deferred_to_a_new_turn_settles_at_ack_two_and_the_call_stays(
-    db_conn: psycopg.Connection,
-    aops_pool: AsyncConnectionPool,
-    hosted_resources: HostedTurnResources,
+    db_conn: psycopg.Connection, aops_pool: AsyncConnectionPool, harness_runtime: RuntimeFixture
 ) -> None:
     agent_id = agent_row(db_conn)
     first = insert_row(db_conn, agent_id, "chat", "user", "start")
     engine = silent_engine()
-    rt = runtime(engine, ops_pool=aops_pool, hosted_resources=hosted_resources)
-
+    rt = harness_runtime(engine, agent_id=agent_id)
     async with asyncio.timeout(20), asyncio.TaskGroup() as tasks:
         node = tasks.create_task(harness_turn_node(AgentState(), rt, config(agent_id)))
         await wait_until(lambda: len(engine.delivered) == 1, "first delivery")
@@ -175,15 +166,12 @@ async def test_an_input_deferred_to_a_new_turn_settles_at_ack_two_and_the_call_s
             completed("t2", ""),
         )
         await node
-
     assert row_status(db_conn, second) == "done"
     assert await timeline_inbound_ids(aops_pool, agent_id) == [first, second]
 
 
 async def test_a_refused_batch_goes_back_in_order_and_is_delivered_again_after_the_backoff(
-    db_conn: psycopg.Connection,
-    aops_pool: AsyncConnectionPool,
-    hosted_resources: HostedTurnResources,
+    db_conn: psycopg.Connection, harness_runtime: RuntimeFixture
 ) -> None:
     agent_id = agent_row(db_conn)
     rows = [insert_row(db_conn, agent_id, "chat", "user", text) for text in ("a", "b", "c")]
@@ -197,20 +185,16 @@ async def test_a_refused_batch_goes_back_in_order_and_is_delivered_again_after_t
         return in_a_turn([i.key for i in inputs], "MEIVA_DISPLAY_TO_USER\nok")
 
     engine = FakeEngine(script=script)
-    rt = runtime(engine, ops_pool=aops_pool, hosted_resources=hosted_resources)
-
+    rt = harness_runtime(engine, agent_id=agent_id)
     async with asyncio.timeout(20):
         await harness_turn_node(AgentState(), rt, config(agent_id))
-
     keys = [[item.key for item in batch] for batch in engine.delivered]
     assert keys == [[input_key(rows[0])]] * 2, "the one input, delivered twice"
     assert [row_status(db_conn, i) for i in rows] == ["done"] * 3
 
 
 async def test_a_wakes_rows_are_one_input_that_settles_and_is_lost_together(
-    db_conn: psycopg.Connection,
-    aops_pool: AsyncConnectionPool,
-    hosted_resources: HostedTurnResources,
+    db_conn: psycopg.Connection, aops_pool: AsyncConnectionPool, harness_runtime: RuntimeFixture
 ) -> None:
     agent_id = agent_row(db_conn)
     first = insert_row(db_conn, agent_id, "chat", "user", "kept")
@@ -226,11 +210,9 @@ async def test_a_wakes_rows_are_one_input_that_settles_and_is_lost_together(
         return in_a_turn(keys, "MEIVA_DISPLAY_TO_USER\nanswer", turn_id="t2")
 
     engine = FakeEngine(script=script)
-    rt = runtime(engine, ops_pool=aops_pool, hosted_resources=hosted_resources)
-
+    rt = harness_runtime(engine, agent_id=agent_id)
     async with asyncio.timeout(20):
         await harness_turn_node(AgentState(), rt, config(agent_id))
-
     assert [[i.key for i in batch] for batch in engine.delivered] == [[input_key(first)]] * 2
     assert all("kept" in batch[0].text and "lost" in batch[0].text for batch in engine.delivered), (
         "both rows ride every delivery"
@@ -240,19 +222,15 @@ async def test_a_wakes_rows_are_one_input_that_settles_and_is_lost_together(
 
 
 async def test_a_control_row_is_a_barrier_that_delivery_does_not_cross(
-    db_conn: psycopg.Connection,
-    aops_pool: AsyncConnectionPool,
-    hosted_resources: HostedTurnResources,
+    db_conn: psycopg.Connection, harness_runtime: RuntimeFixture
 ) -> None:
     agent_id = agent_row(db_conn)
     before = insert_row(db_conn, agent_id, "chat", "user", "before")
     barrier = insert_row(db_conn, agent_id, "resurrect", "system", "")
     behind = insert_row(db_conn, agent_id, "chat", "user", "behind")
     engine = FakeEngine()
-    rt = runtime(engine, ops_pool=aops_pool, hosted_resources=hosted_resources)
-
+    rt = harness_runtime(engine, agent_id=agent_id)
     await harness_turn_node(AgentState(), rt, config(agent_id))
-
     assert [i.key for batch in engine.delivered for i in batch] == [input_key(before)]
     assert [row_status(db_conn, i) for i in (before, barrier, behind)] == [
         "done",
@@ -261,10 +239,8 @@ async def test_a_control_row_is_a_barrier_that_delivery_does_not_cross(
     ]
 
 
-async def test_synthetic_inputs_have_no_row_and_reach_the_timeline_at_ack_two(
-    db_conn: psycopg.Connection,
-    aops_pool: AsyncConnectionPool,
-    hosted_resources: HostedTurnResources,
+async def test_synthetic_inputs_are_accepted_without_inventing_record_markers(
+    db_conn: psycopg.Connection, aops_pool: AsyncConnectionPool, harness_runtime: RuntimeFixture
 ) -> None:
     agent_id = agent_row(db_conn)
     marker = {
@@ -277,32 +253,28 @@ async def test_synthetic_inputs_have_no_row_and_reach_the_timeline_at_ack_two(
         harness_inputs=[{"key": "control-9", "prompt": "continue", "timeline_items": [marker]}]
     )
     engine = silent_engine()
-    rt = runtime(engine, ops_pool=aops_pool, hosted_resources=hosted_resources)
-
+    rt = harness_runtime(engine, agent_id=agent_id)
     async with asyncio.timeout(20), asyncio.TaskGroup() as tasks:
         node = tasks.create_task(harness_turn_node(state, rt, config(agent_id)))
         await wait_until(lambda: bool(engine.delivered), "delivery")
         assert [(i.key, i.text) for i in engine.delivered[0]] == [("control-9", "continue")]
         async with aops_pool.connection() as conn:
-            assert await aload_harness_timeline_items(conn, agent_id) == []
+            assert await read_recorded_items(conn, agent_id) == []
         engine.emit(*in_a_turn(["control-9"], "MEIVA_DISPLAY_TO_USER\nok"))
         await node
-
     async with aops_pool.connection() as conn:
-        items = await aload_harness_timeline_items(conn, agent_id)
-    assert [item.payload for item in items if item.kind == "system_marker"] == ["restart accepted"]
+        items = await read_recorded_items(conn, agent_id)
+    assert [item.payload for item in items if item.kind == "system_marker"] == []
+    assert [item.payload for item in items if item.kind == "agent_chat"] == ["ok"]
 
 
 async def test_an_interrupt_stops_the_foreground_and_the_call_ends_only_when_the_harness_does(
-    db_conn: psycopg.Connection,
-    aops_pool: AsyncConnectionPool,
-    hosted_resources: HostedTurnResources,
+    db_conn: psycopg.Connection, harness_runtime: RuntimeFixture
 ) -> None:
     agent_id = agent_row(db_conn)
     row = insert_row(db_conn, agent_id, "chat", "user", "work")
     engine = silent_engine()
-    rt = runtime(engine, ops_pool=aops_pool, hosted_resources=hosted_resources)
-
+    rt = harness_runtime(engine, agent_id=agent_id)
     async with asyncio.timeout(20), asyncio.TaskGroup() as tasks:
         node = tasks.create_task(harness_turn_node(AgentState(), rt, config(agent_id)))
         await wait_until(lambda: bool(engine.delivered), "delivery")
@@ -316,22 +288,18 @@ async def test_an_interrupt_stops_the_foreground_and_the_call_ends_only_when_the
         assert not node.done(), "only the harness's terminal event ends the turn"
         engine.emit(completed("t1", "", interrupted=True))
         command = await node
-
     assert command.goto == "claim"
     assert row_status(db_conn, cancel) == "pending", "claim dispatches the cancel next"
     assert not engine.closed
 
 
 async def test_a_message_not_in_context_when_the_turn_is_interrupted_is_still_delivered(
-    db_conn: psycopg.Connection,
-    aops_pool: AsyncConnectionPool,
-    hosted_resources: HostedTurnResources,
+    db_conn: psycopg.Connection, aops_pool: AsyncConnectionPool, harness_runtime: RuntimeFixture
 ) -> None:
     agent_id = agent_row(db_conn)
     first = insert_row(db_conn, agent_id, "chat", "user", "work")
     engine = silent_engine()
-    rt = runtime(engine, ops_pool=aops_pool, hosted_resources=hosted_resources)
-
+    rt = harness_runtime(engine, agent_id=agent_id)
     async with asyncio.timeout(20), asyncio.TaskGroup() as tasks:
         node = tasks.create_task(harness_turn_node(AgentState(), rt, config(agent_id)))
         await wait_until(lambda: len(engine.delivered) == 1, "first delivery")
@@ -351,7 +319,6 @@ async def test_a_message_not_in_context_when_the_turn_is_interrupted_is_still_de
             completed("t2", "MEIVA_DISPLAY_TO_USER\nhandled"),
         )
         await node
-
     assert row_status(db_conn, queued) == "done"
     assert await timeline_inbound_ids(aops_pool, agent_id) == [first, queued]
 
@@ -403,12 +370,21 @@ async def test_a_pool_timeout_while_reserving_is_retried_and_the_message_is_deli
     db_conn: psycopg.Connection,
     aops_pool: AsyncConnectionPool,
     hosted_resources: HostedTurnResources,
+    database_gate: ProcessDbGate,
+    event_bus: EventBus,
 ) -> None:
     agent_id = agent_row(db_conn)
     row = insert_row(db_conn, agent_id, "chat", "user", "keep the logs")
     pool = _ReserveTimeoutPool(aops_pool)
     engine = FakeEngine()
-    rt = runtime(engine, ops_pool=pool, hosted_resources=hosted_resources)
+    rt = runtime(
+        engine,
+        ops_pool=pool,
+        hosted_resources=hosted_resources,
+        agent_id=agent_id,
+        database_gate=database_gate,
+        event_bus=event_bus,
+    )
 
     async with asyncio.timeout(20):
         await harness_turn_node(AgentState(), rt, config(agent_id))
@@ -425,31 +401,39 @@ async def test_a_pool_timeout_while_reserving_is_retried_and_the_message_is_deli
 # projector fail, so the failure path of an invocation can be observed.
 # meiva:link agent/graph/docs/harness-foreground.md
 async def test_a_failure_in_the_foreground_gives_the_handed_inputs_an_explicit_outcome(
-    db_conn: psycopg.Connection,
-    aops_pool: AsyncConnectionPool,
-    hosted_resources: HostedTurnResources,
+    db_conn: psycopg.Connection, aops_pool: AsyncConnectionPool, harness_runtime: RuntimeFixture
 ) -> None:
     agent_id = agent_row(db_conn)
     row = insert_row(db_conn, agent_id, "chat", "user", "work")
-    engine = silent_engine()
-    rt = runtime(engine, ops_pool=aops_pool, hosted_resources=hosted_resources)
 
+    class BrokenSubscription(FakeSubscription):
+        async def get(self) -> BridgeEvent | None:
+            await self.queue.get()
+            raise TypeError("synthetic foreground read failure")
+
+    class BrokenEngine(FakeEngine):
+        async def subscribe(self) -> FakeSubscription:
+            sub = BrokenSubscription(self)
+            self.subscriptions.add(sub)
+            return sub
+
+    engine = BrokenEngine(script=lambda _inputs: [])
+    rt = harness_runtime(engine, agent_id=agent_id)
     node = asyncio.create_task(harness_turn_node(AgentState(), rt, config(agent_id)))
     await wait_until(lambda: bool(engine.delivered), "delivery")
-    engine.emit(TextDelta("t1", 5))  # pyright: ignore[reportArgumentType]
+    engine.emit(TextDelta("t1", "wake the failing reader"))
     with pytest.raises(TypeError):
         await asyncio.wait_for(node, 20)
-
     assert row_status(db_conn, row) == "done", "consumed, never left claimed for a silent sweep"
     async with aops_pool.connection() as conn:
-        items = await aload_harness_timeline_items(conn, agent_id)
-    assert any("could not be confirmed" in item.payload for item in items)
+        items = await read_recorded_items(conn, agent_id)
+    assert not any("could not be confirmed" in item.payload for item in items), (
+        "host-only uncertainty is not a CLI record"
+    )
 
 
 async def test_an_input_that_cannot_reach_the_session_goes_back_to_the_queue(
-    db_conn: psycopg.Connection,
-    aops_pool: AsyncConnectionPool,
-    hosted_resources: HostedTurnResources,
+    db_conn: psycopg.Connection, aops_pool: AsyncConnectionPool, harness_runtime: RuntimeFixture
 ) -> None:
     agent_id = agent_row(db_conn)
     row = insert_row(db_conn, agent_id, "chat", "user", "work")
@@ -460,21 +444,17 @@ async def test_an_input_that_cannot_reach_the_session_goes_back_to_the_queue(
         ) -> None:
             raise HarnessNotDeliveredError("session could not start")
 
-    rt = runtime(Unstartable(), ops_pool=aops_pool, hosted_resources=hosted_resources)
-
+    rt = harness_runtime(Unstartable(), agent_id=agent_id)
     with pytest.raises(FatalLLMStreamError):
         await harness_turn_node(AgentState(), rt, config(agent_id))
-
     assert row_status(db_conn, row) == "pending", "never handed over, so delivered again later"
     async with aops_pool.connection() as conn:
-        items = await aload_harness_timeline_items(conn, agent_id)
+        items = await read_recorded_items(conn, agent_id)
     assert not any("could not be confirmed" in item.payload for item in items)
 
 
 async def test_a_settlement_that_arrives_after_its_turn_ended_is_still_written(
-    db_conn: psycopg.Connection,
-    aops_pool: AsyncConnectionPool,
-    hosted_resources: HostedTurnResources,
+    db_conn: psycopg.Connection, aops_pool: AsyncConnectionPool, harness_runtime: RuntimeFixture
 ) -> None:
     agent_id = agent_row(db_conn)
     row = insert_row(db_conn, agent_id, "chat", "user", "work")
@@ -487,24 +467,34 @@ async def test_a_settlement_that_arrives_after_its_turn_ended_is_still_written(
             *(InputInContext(key, "t1", 1) for key in keys),
         ]
 
-    rt = runtime(FakeEngine(script=script), ops_pool=aops_pool, hosted_resources=hosted_resources)
-
+    rt = harness_runtime(FakeEngine(script=script), agent_id=agent_id)
     async with asyncio.timeout(20):
         await harness_turn_node(AgentState(), rt, config(agent_id))
-
     assert row_status(db_conn, row) == "done"
     assert await timeline_inbound_ids(aops_pool, agent_id) == [row]
 
 
 def _external_ctx(
+    agent_id: int,
     aops_pool: AsyncConnectionPool,
     database_gate: ProcessDbGate,
     engine: FakeEngine,
     resources: HostedTurnResources,
 ) -> MeivaContext:
     base = make_runtime(ops_pool=aops_pool, database_gate=database_gate)
+    recorded = runtime(
+        engine,
+        agent_id=agent_id,
+        database_gate=database_gate,
+        ops_pool=aops_pool,
+        hosted_resources=resources,
+    )
     return replace(
-        base.context, harness=Harness.ANTIGRAVITY, harness_bridge=engine, hosted_resources=resources
+        base.context,
+        harness=Harness.ANTIGRAVITY,
+        harness_bridge=engine,
+        hosted_resources=resources,
+        environ=recorded.context.environ,
     )
 
 
@@ -534,7 +524,7 @@ async def test_a_message_followed_by_a_stop_is_delivered_and_then_the_stop_is_ta
         return in_a_turn([i.key for i in inputs], "MEIVA_DISPLAY_TO_USER\nok")
 
     engine = FakeEngine(script=script)
-    ctx = _external_ctx(aops_pool, database_gate, engine, hosted_resources)
+    ctx = _external_ctx(agent_id, aops_pool, database_gate, engine, hosted_resources)
     if not refused_first:
         stops.append(insert_row(db_conn, agent_id, "interrupt", "user", ""))
     rt = Runtime(context=ctx)
@@ -572,7 +562,7 @@ def _own_turn(turn_id: str, cause: HarnessCause, reply: str = _REPLY) -> list[Br
 
 async def _timeline(pool: AsyncConnectionPool, agent_id: int) -> list[tuple[str, str]]:
     async with pool.connection() as conn:
-        items = await aload_harness_timeline_items(conn, agent_id)
+        items = await read_recorded_items(conn, agent_id)
     return [(item.kind, str(item.payload)) for item in items]
 
 
@@ -594,7 +584,9 @@ async def test_a_timer_turn_while_the_agent_is_idle_is_entered_and_shown(
     agent_id = agent_row(db_conn)
     engine = FakeEngine()
     engine.own_turn_events = _own_turn("w1", HarnessCause.SCHEDULED_WAKE)
-    rt = Runtime(context=_external_ctx(aops_pool, database_gate, engine, hosted_resources))
+    rt = Runtime(
+        context=_external_ctx(agent_id, aops_pool, database_gate, engine, hosted_resources)
+    )
     state = AgentState(halted=True)
 
     async with asyncio.timeout(30):
@@ -605,90 +597,71 @@ async def test_a_timer_turn_while_the_agent_is_idle_is_entered_and_shown(
 
     timeline = await _timeline(aops_pool, agent_id)
     assert engine.delivered == [], "nothing was handed to the CLI: the turn is its own"
-    assert _markers(timeline) == []
+    assert _markers(timeline) == ["status:Synthetic background wake"]
     assert [text for text in _chats(timeline) if "the timer fired" in text] != []
     assert len(_chats(timeline)) == 1
     assert after.goto != "before_turn", "presented once: the next claim finds nothing"
 
 
-async def test_a_background_task_turn_is_shown_without_a_cause_marker(
-    db_conn: psycopg.Connection,
-    aops_pool: AsyncConnectionPool,
-    hosted_resources: HostedTurnResources,
+async def test_a_background_task_turn_shows_the_cli_notice_once(
+    db_conn: psycopg.Connection, aops_pool: AsyncConnectionPool, harness_runtime: RuntimeFixture
 ) -> None:
     agent_id = agent_row(db_conn)
     engine = FakeEngine()
     engine.own_turn_events = _own_turn("b1", HarnessCause.BACKGROUND_TASK)
-    rt = runtime(engine, ops_pool=aops_pool, hosted_resources=hosted_resources)
-
+    rt = harness_runtime(engine, agent_id=agent_id)
     async with asyncio.timeout(20):
         await harness_turn_node(AgentState(), rt, config(agent_id))
-
     timeline = await _timeline(aops_pool, agent_id)
-    assert _markers(timeline) == []
+    assert _markers(timeline) == ["status:Synthetic background wake"]
     assert len(_chats(timeline)) == 1
 
 
 async def test_a_turn_the_cli_begins_while_a_run_is_delivering_is_shown_once(
-    db_conn: psycopg.Connection,
-    aops_pool: AsyncConnectionPool,
-    hosted_resources: HostedTurnResources,
+    db_conn: psycopg.Connection, aops_pool: AsyncConnectionPool, harness_runtime: RuntimeFixture
 ) -> None:
     agent_id = agent_row(db_conn)
     first = insert_row(db_conn, agent_id, "chat", "user", "start")
     engine = silent_engine()
-    rt = runtime(engine, ops_pool=aops_pool, hosted_resources=hosted_resources)
-
+    rt = harness_runtime(engine, agent_id=agent_id)
     async with asyncio.timeout(20), asyncio.TaskGroup() as tasks:
         node = tasks.create_task(harness_turn_node(AgentState(), rt, config(agent_id)))
         await wait_until(lambda: bool(engine.delivered), "delivery")
         engine.emit(*in_a_turn([f"inbound-{first}"], "MEIVA_DISPLAY_TO_USER\nanswer"))
         engine.emit(*_own_turn("w1", HarnessCause.SCHEDULED_WAKE))
         await node
-
     timeline = await _timeline(aops_pool, agent_id)
     assert len([t for t in _chats(timeline) if "the timer fired" in t]) == 1
-    assert _markers(timeline) == []
+    assert _markers(timeline) == ["status:Synthetic background wake"]
 
 
 async def test_a_turn_of_our_own_input_carries_no_cause_marker(
-    db_conn: psycopg.Connection,
-    aops_pool: AsyncConnectionPool,
-    hosted_resources: HostedTurnResources,
+    db_conn: psycopg.Connection, aops_pool: AsyncConnectionPool, harness_runtime: RuntimeFixture
 ) -> None:
     agent_id = agent_row(db_conn)
     _ = insert_row(db_conn, agent_id, "chat", "user", "hello")
-    rt = runtime(FakeEngine(), ops_pool=aops_pool, hosted_resources=hosted_resources)
-
+    rt = harness_runtime(FakeEngine(), agent_id=agent_id)
     async with asyncio.timeout(20):
         await harness_turn_node(AgentState(), rt, config(agent_id))
-
     assert _markers(await _timeline(aops_pool, agent_id)) == []
 
 
 async def test_a_revived_queued_input_is_not_announced_as_a_turn_of_the_cli(
-    db_conn: psycopg.Connection,
-    aops_pool: AsyncConnectionPool,
-    hosted_resources: HostedTurnResources,
+    db_conn: psycopg.Connection, aops_pool: AsyncConnectionPool, harness_runtime: RuntimeFixture
 ) -> None:
     agent_id = agent_row(db_conn)
     engine = FakeEngine()
     engine.own_turn_events = _own_turn("q1", HarnessCause.QUEUED_INPUT_REVIVED)
-    rt = runtime(engine, ops_pool=aops_pool, hosted_resources=hosted_resources)
-
+    rt = harness_runtime(engine, agent_id=agent_id)
     async with asyncio.timeout(20):
         await harness_turn_node(AgentState(), rt, config(agent_id))
-
     timeline = await _timeline(aops_pool, agent_id)
     assert _markers(timeline) == []
     assert len(_chats(timeline)) == 1
 
 
 async def test_a_message_with_an_image_hands_the_harness_the_image_itself(
-    tmp_path: Path,
-    db_conn: psycopg.Connection,
-    aops_pool: AsyncConnectionPool,
-    hosted_resources: HostedTurnResources,
+    tmp_path: Path, db_conn: psycopg.Connection, harness_runtime: RuntimeFixture
 ) -> None:
     agent_id = agent_row(db_conn)
     png = b"\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR"
@@ -711,11 +684,9 @@ async def test_a_message_with_an_image_hands_the_harness_the_image_itself(
         payload=json.dumps({"image_uploads": [upload]}),
     )
     engine = FakeEngine()
-    rt = runtime(engine, ops_pool=aops_pool, hosted_resources=hosted_resources)
-
+    rt = harness_runtime(engine, agent_id=agent_id)
     async with asyncio.timeout(20):
         await harness_turn_node(AgentState(), rt, config(agent_id))
-
     [[sent]] = engine.delivered
     assert [image.mime_type for image in sent.images] == ["image/png"]
     assert base64.b64decode(sent.images[0].data_base64) == png
@@ -758,9 +729,7 @@ def test_the_migration_moves_only_old_reservations_of_external_agents(
 # the control row all pending. The message is answered, not interrupted: the control row aimed at a
 # turn that no longer exists.
 async def test_an_interrupt_after_its_turn_ended_does_not_cut_the_answer_short(
-    db_conn: psycopg.Connection,
-    aops_pool: AsyncConnectionPool,
-    hosted_resources: HostedTurnResources,
+    db_conn: psycopg.Connection, harness_runtime: RuntimeFixture
 ) -> None:
     agent_id = agent_row(db_conn)
     note = insert_row(
@@ -774,8 +743,7 @@ async def test_an_interrupt_after_its_turn_ended_does_not_cut_the_answer_short(
     message = insert_row(db_conn, agent_id, "chat", "agent:7", "do Y instead")
     insert_row(db_conn, agent_id, "interrupt", "agent:7", "")
     engine = silent_engine()
-    rt = runtime(engine, ops_pool=aops_pool, hosted_resources=hosted_resources)
-
+    rt = harness_runtime(engine, agent_id=agent_id)
     async with asyncio.timeout(20), asyncio.TaskGroup() as tasks:
         node = tasks.create_task(harness_turn_node(AgentState(), rt, config(agent_id)))
         await wait_until(lambda: bool(engine.delivered), "the note and message are delivered")

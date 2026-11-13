@@ -9,10 +9,13 @@ import random
 # an agent on an external harness reaches `harness_turn` instead of the native turn
 # nodes. Both run a real compiled graph rather than reading `_build.py`.
 # meiva:link agent/graph/docs/graph.md
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Callable
+from dataclasses import replace
 from typing import Any
 from unittest.mock import MagicMock
 
+import psycopg
+import pytest
 from langchain_core.messages import HumanMessage, SystemMessage
 from pydantic import BaseModel
 
@@ -20,12 +23,16 @@ import agent.state as agent_state
 from agent.graph import build_graph
 from agent.graph.claim.node import route_target
 from agent.graph.claim.tests.harness_support import FakeEngine
+from agent.graph.claim.tests.harness_support import runtime as record_runtime
 from agent.graph.exec.tests.process_inputs import live_parent_facts
+from agent.ownership.tests.ownership_support import agent_row
 from agent.state import AgentState, ContextReset
 from base.agents.context import MeivaContext
 from base.api_contracts.agent_contract import Harness
 from base.clock import Clock
 from base.config.tests.configuration import defaults
+from base.db.code_version_gate import ProcessDbGate
+from base.events.live.bus import EventBus
 from base.host.env.agent_slices import AgentSlices
 from base.packages.plugin_providers import build_model_catalog
 from base.packages.plugins.extensions import EMPTY, ExtensionRegistry, PluginContributions
@@ -82,8 +89,35 @@ def make_context(harness: Harness, engine: FakeEngine | None) -> MeivaContext:
     )
 
 
+@pytest.fixture
+def recorded_graph(
+    db_conn: psycopg.Connection, database_gate: ProcessDbGate, event_bus: EventBus
+) -> tuple[int, Callable[[FakeEngine], MeivaContext]]:
+    agent_id = agent_row(db_conn)
+    _ = db_conn.execute("UPDATE agents_meta SET harness='antigravity' WHERE id=%s", (agent_id,))
+    db_conn.commit()
+
+    def context(engine: FakeEngine) -> MeivaContext:
+        wired = record_runtime(
+            engine, agent_id=agent_id, database_gate=database_gate, event_bus=event_bus
+        ).context
+        return replace(
+            make_context(Harness.ANTIGRAVITY, engine),
+            db=wired.db,
+            bus=event_bus,
+            environ=wired.require_environ(),
+        )
+
+    return agent_id, context
+
+
 async def executed_nodes(
-    harness: Harness, engine: FakeEngine | None, *, stop_at: frozenset[str] = frozenset()
+    harness: Harness,
+    engine: FakeEngine | None,
+    *,
+    stop_at: frozenset[str] = frozenset(),
+    context: MeivaContext | None = None,
+    agent_id: int = 6984,
 ) -> list[str]:
     graph = build_graph(None, EMPTY, parent=live_parent_facts(), rng=_rng())
     state = AgentState(
@@ -101,7 +135,7 @@ async def executed_nodes(
         ),
     )
     seen: list[str] = []
-    stream = _stream(graph, state, make_context(harness, engine))
+    stream = _stream(graph, state, context or make_context(harness, engine), agent_id=agent_id)
     async for chunk in stream:
         seen.extend(chunk.keys())
         if stop_at.intersection(seen):
@@ -113,19 +147,26 @@ async def executed_nodes(
 # `astream` is typed as an overload set that is partially unknown under this repo's
 # strict test rules; the one ignore keeps the driver readable at the call site.
 # meiva:link agent/graph/docs/graph.md
-def _stream(graph: Any, state: AgentState, context: MeivaContext) -> AsyncIterator[dict[str, Any]]:
+def _stream(
+    graph: Any, state: AgentState, context: MeivaContext, *, agent_id: int = 6984
+) -> AsyncIterator[dict[str, Any]]:
     return graph.astream(  # pyright: ignore[reportUnknownMemberType]
         state,
-        {"configurable": {"thread_id": "6984"}},
+        {"configurable": {"thread_id": str(agent_id)}},
         context=context,
         stream_mode="updates",
     )
 
 
-async def test_unmarked_harness_reply_gets_one_correction_turn() -> None:
+async def test_unmarked_harness_reply_gets_one_correction_turn(
+    recorded_graph: tuple[int, Callable[[FakeEngine], MeivaContext]],
+) -> None:
+    agent_id, context = recorded_graph
     engine = FakeEngine(reply="Unmarked answer.")
 
-    seen = await executed_nodes(Harness.ANTIGRAVITY, engine)
+    seen = await executed_nodes(
+        Harness.ANTIGRAVITY, engine, context=context(engine), agent_id=agent_id
+    )
 
     [(original, _), (correction, _)] = engine.submitted
     assert original == "do it"
@@ -133,10 +174,15 @@ async def test_unmarked_harness_reply_gets_one_correction_turn() -> None:
     assert seen.count("harness_turn") == 1, "the correction is delivered inside the same invocation"
 
 
-async def test_an_external_harness_never_enters_the_native_turn_nodes() -> None:
+async def test_an_external_harness_never_enters_the_native_turn_nodes(
+    recorded_graph: tuple[int, Callable[[FakeEngine], MeivaContext]],
+) -> None:
+    agent_id, context = recorded_graph
     engine = FakeEngine()
 
-    seen = await executed_nodes(Harness.ANTIGRAVITY, engine)
+    seen = await executed_nodes(
+        Harness.ANTIGRAVITY, engine, context=context(engine), agent_id=agent_id
+    )
 
     assert "harness_turn" in seen, "the harness node is the turn"
     assert not NATIVE_NODES.intersection(seen), f"native turn nodes ran: {seen}"
@@ -163,7 +209,10 @@ async def test_the_built_in_loop_never_enters_the_harness_node() -> None:
 # routing only claim's verdicts left a compacted external-harness agent resuming into
 # `llm`, where the native model answered and the CLI session sat idle.
 # meiva:link agent/graph/docs/harness-turn.md
-async def test_a_context_reset_keeps_an_external_harness_off_the_native_nodes() -> None:
+async def test_a_context_reset_keeps_an_external_harness_off_the_native_nodes(
+    recorded_graph: tuple[int, Callable[[FakeEngine], MeivaContext]],
+) -> None:
+    agent_id, context = recorded_graph
     engine = FakeEngine()
     state = AgentState(
         messages=[],
@@ -175,7 +224,8 @@ async def test_a_context_reset_keeps_an_external_harness_off_the_native_nodes() 
     async for chunk in _stream(
         build_graph(None, EMPTY, parent=live_parent_facts(), rng=_rng()),
         state,
-        make_context(Harness.ANTIGRAVITY, engine),
+        context(engine),
+        agent_id=agent_id,
     ):
         seen.extend(chunk.keys())
 
@@ -183,7 +233,7 @@ async def test_a_context_reset_keeps_an_external_harness_off_the_native_nodes() 
     assert "before_turn" in seen
     assert "harness_turn" in seen, "the reset resumes into the harness node"
     assert len(engine.submitted) == 1
-    assert "# Role & Operating Context — Agent #6984" in engine.submitted[0][0]
+    assert f"# Role & Operating Context — Agent #{agent_id}" in engine.submitted[0][0]
     assert engine.submitted[0][0].endswith("\n\nthe compacted summary")
     assert not NATIVE_NODES.intersection(seen), f"native turn nodes ran: {seen}"
 

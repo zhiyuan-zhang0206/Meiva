@@ -1,10 +1,11 @@
-exports = ["mapping.py", "rpc.py", "session.py", "tests", "transport.py"]
+exports = ["mapping.py", "rpc.py", "session.py", "tests", "transcript", "transport.py"]
 
 [uses]
 "__init__.py" = ["config.py", "handoff_rules.py", "mapping.py", "rpc.py", "session.py", "transport.py"]
 "handoff_rules.py" = []
 "mapping.py" = ["subagents.py"]
 "reconciliation" = ["trajectory.py"]
+"transcript" = ["reconciliation"]
 "schedules.py" = []
 "session.py" = ["config.py", "mapping.py", "reconciliation", "schedules.py", "subagent_files.py", "trajectory.py", "transport.py"]
 "subagent_files.py" = ["mapping.py", "subagents.py"]

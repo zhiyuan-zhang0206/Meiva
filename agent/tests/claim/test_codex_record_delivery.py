@@ -6,6 +6,7 @@
 # old keys does not send the old replies again; a turn with no readable record fails.
 # meiva:link docs/decisions/agents/graph/2026-11-13-timeline-read-from-the-record.md
 
+import asyncio
 import json
 import re
 from collections.abc import Sequence
@@ -278,3 +279,105 @@ async def test_a_rollout_in_a_form_the_reader_does_not_read_fails_the_turn_and_i
 
     (event,) = loguru_records.events("harness_record_unreadable")
     assert event["extra"]["name"] == packed.name and event["extra"]["session_id"] == SESSION
+
+
+class RecordingAntigravity:
+    def __init__(self, path: Path) -> None:
+        self.path = path
+
+    def write(self) -> None:
+        stamp = datetime.now(UTC).isoformat()
+        rows: list[dict[str, object]] = [
+            {"type": "USER_INPUT", "content": "<USER_REQUEST>hello</USER_REQUEST>"},
+            {"type": "PLANNER_RESPONSE", "content": REPLY, "tool_calls": []},
+        ]
+        self.path.parent.mkdir(parents=True, exist_ok=True)
+        with self.path.open("a") as handle:
+            for row in rows:
+                handle.write(
+                    json.dumps({"step_index": 1, "status": "DONE", "created_at": stamp, **row})
+                    + "\n"
+                )
+
+
+async def test_antigravity_content_matching_and_conversation_publications_are_idempotent(
+    tmp_path: Path,
+    db_conn: psycopg.Connection,
+    aops_pool: AsyncConnectionPool,
+    database_gate: ProcessDbGate,
+    hosted_resources: HostedTurnResources,
+    live_events: LiveEvents,
+) -> None:
+    agent_id = agent_row(db_conn)
+    db_conn.execute("UPDATE agents_meta SET harness='antigravity' WHERE id=%s", (agent_id,))
+    db_conn.commit()
+    row_id = insert_row(db_conn, agent_id, "chat", "user", "hello")
+    path = (
+        tmp_path
+        / ".gemini/antigravity-cli/brain"
+        / SESSION
+        / ".system_generated/logs/transcript_full.jsonl"
+    )
+    cli = RecordingAntigravity(path)
+
+    def record(inputs: Sequence[HarnessInput]):
+        cli.write()
+        return in_a_turn([item.key for item in inputs], REPLY)
+
+    def rt(engine: FakeEngine) -> Runtime[MeivaContext]:
+        wired = _wired(tmp_path, engine, aops_pool, hosted_resources, database_gate, live_events)
+        return Runtime(context=replace(wired.context, harness=Harness.ANTIGRAVITY))
+
+    await harness_turn_node(AgentState(), rt(_engine(record)), config(agent_id))
+    assert row_status(db_conn, row_id) == "done"
+    first = _publications(db_conn, agent_id)
+    assert len(first) == 1 and first[0][0].startswith(f"harness:antigravity:{SESSION}:")
+    _assert_page_saw_the_message([json.loads(p) for p in await live_events.payloads()], row_id)
+    await harness_turn_node(AgentState(), rt(_engine()), config(agent_id))
+    assert _publications(db_conn, agent_id) == first
+    async with aops_pool.connection() as conn:
+        assert await aload_harness_timeline_items(conn, agent_id) == []
+
+
+@pytest.mark.parametrize("harness", [Harness.CODEX, Harness.ANTIGRAVITY])
+async def test_finish_waits_for_a_record_written_after_the_cli_completed_signal(
+    harness: Harness,
+    tmp_path: Path,
+    db_conn: psycopg.Connection,
+    aops_pool: AsyncConnectionPool,
+    database_gate: ProcessDbGate,
+    hosted_resources: HostedTurnResources,
+    live_events: LiveEvents,
+) -> None:
+    agent_id = _codex_agent(db_conn)
+    _ = db_conn.execute("UPDATE agents_meta SET harness=%s WHERE id=%s", (harness.value, agent_id))
+    db_conn.commit()
+    _ = insert_row(db_conn, agent_id, "chat", "user", "hello")
+    if harness is Harness.ANTIGRAVITY:
+        cli = RecordingAntigravity(
+            tmp_path
+            / ".gemini/antigravity-cli/brain"
+            / SESSION
+            / ".system_generated/logs/transcript_full.jsonl"
+        )
+
+        def write(key: str) -> None:
+            del key
+            cli.write()
+    else:
+        codex = RecordingCodex(tmp_path / "codex" / DAY / ROLLOUT)
+        write = codex.write
+
+    def delayed(inputs: Sequence[HarnessInput]):
+        asyncio.get_running_loop().call_later(0.05, write, inputs[0].key)
+        return in_a_turn([item.key for item in inputs], REPLY)
+
+    rt = _wired(tmp_path, _engine(delayed), aops_pool, hosted_resources, database_gate, live_events)
+    rt = Runtime(context=replace(rt.context, harness=harness))
+    await harness_turn_node(AgentState(), rt, config(agent_id))
+    rows = _publications(db_conn, agent_id)
+    assert len(rows) == 1 and rows[0][1] == REPLY
+    if harness is Harness.CODEX:
+        assert rows == [("harness:codex:msg_1", REPLY)]
+    else:
+        assert rows[0][0].startswith(f"harness:antigravity:{SESSION}:")

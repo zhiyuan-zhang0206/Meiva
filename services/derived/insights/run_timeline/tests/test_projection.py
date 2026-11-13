@@ -374,7 +374,9 @@ def test_failed_segment_keeps_the_committed_prefix_and_retries(world: World) -> 
         assert capture_source(conn, AGENT).ready
 
 
-def test_external_harness_messages_project_into_run_timeline(world: World) -> None:
+def test_retained_external_messages_of_a_native_agent_project_into_run_timeline(
+    world: World,
+) -> None:
     from base.agents.history.timeline_item import TimelineItem
 
     harness_agent = 9999
@@ -420,7 +422,7 @@ def test_external_harness_messages_project_into_run_timeline(world: World) -> No
             (harness_agent,),
         )
         conn.execute(
-            "INSERT INTO agents_meta (id, harness, status) VALUES (%s, 'antigravity', 'running')"
+            "INSERT INTO agents_meta (id, harness, status) VALUES (%s, 'meiva', 'running')"
             " ON CONFLICT (id) DO NOTHING",
             (harness_agent,),
         )
@@ -454,7 +456,9 @@ def test_external_harness_messages_project_into_run_timeline(world: World) -> No
     assert "text" in kinds
 
 
-@pytest.mark.parametrize(("harness", "agent"), [("claude_code", 9998), ("codex", 9997)])
+@pytest.mark.parametrize(
+    ("harness", "agent"), [("claude_code", 9998), ("codex", 9997), ("antigravity", 9996)]
+)
 def test_a_harness_read_from_its_record_has_no_run_timeline_and_its_old_rows_are_not_read(
     world: World, harness: str, agent: int
 ) -> None:

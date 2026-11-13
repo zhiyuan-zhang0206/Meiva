@@ -28,20 +28,24 @@ from agent.graph.claim.node import claim_node
 from agent.graph.claim.tests.claim_support import make_runtime
 from agent.graph.claim.tests.harness_support import (
     FakeEngine,
+    RuntimeFixture,
     completed,
     in_a_turn,
     input_key,
     insert_row,
+    read_recorded_items,
     row_status,
     silent_engine,
     wait_until,
 )
-from agent.graph.claim.tests.test_harness_turn import config, runtime
+from agent.graph.claim.tests.harness_support import (
+    harness_runtime as harness_runtime,
+)
+from agent.graph.claim.tests.test_harness_turn import config
 from agent.graph.claim.tests.test_harness_turn import hosted_resources as hosted_resources
 from agent.graph.llm_errors import FatalLLMStreamError
 from agent.ownership.tests.ownership_support import agent_row
 from agent.state import AgentState
-from base.agents.history.harness_messages import aload_harness_timeline_items
 from base.agents.messages.lifecycle_text import interrupt_note
 from base.api_contracts.agent_contract import Harness
 from base.db.code_version_gate import ProcessDbGate
@@ -94,7 +98,7 @@ async def h_until(condition: object, what: str) -> None:
 
 async def h_timeline(pool: AsyncConnectionPool, agent_id: int) -> list[tuple[str, int | None, str]]:
     async with pool.connection() as conn:
-        items = await aload_harness_timeline_items(conn, agent_id)
+        items = await read_recorded_items(conn, agent_id)
     return [(item.kind, item.inbound_id, item.payload) for item in items]
 
 
@@ -113,19 +117,16 @@ def h_silent() -> FakeEngine:
 
 
 async def test_a_claimed_input_the_harness_has_in_context_is_settled_and_the_agent_is_told_to_go_on(
-    db_conn: psycopg.Connection,
-    aops_pool: AsyncConnectionPool,
-    hosted_resources: HostedTurnResources,
+    db_conn: psycopg.Connection, aops_pool: AsyncConnectionPool, harness_runtime: RuntimeFixture
 ) -> None:
     agent_id = agent_row(db_conn)
     row = h_insert(db_conn, agent_id, "seen before the crash", claimed=True)
     engine = FakeEngine()
+    engine.record_inputs = {h_key(row): "seen before the crash"}
     engine.records = {h_key(row): Reconciliation.IN_CONTEXT}
-    rt = runtime(engine, ops_pool=aops_pool, hosted_resources=hosted_resources)
-
+    rt = harness_runtime(engine, agent_id=agent_id)
     async with asyncio.timeout(20):
         await harness_turn_node(AgentState(), rt, config(agent_id))
-
     [[note]] = engine.delivered
     assert note.key == f"reconciled-resume-{row}", "the input is not sent again, only a note"
     assert "restarted" in note.text and "interrupted" in note.text
@@ -134,19 +135,15 @@ async def test_a_claimed_input_the_harness_has_in_context_is_settled_and_the_age
 
 
 async def test_a_claimed_input_the_harness_stored_is_adopted_nudged_and_asked_about_once_more(
-    db_conn: psycopg.Connection,
-    aops_pool: AsyncConnectionPool,
-    hosted_resources: HostedTurnResources,
+    db_conn: psycopg.Connection, harness_runtime: RuntimeFixture
 ) -> None:
     agent_id = agent_row(db_conn)
     row = h_insert(db_conn, agent_id, "queued inside the CLI", claimed=True)
     engine = FakeEngine()
     engine.records = {h_key(row): Reconciliation.PERSISTED_UNDELIVERED}
-    rt = runtime(engine, ops_pool=aops_pool, hosted_resources=hosted_resources)
-
+    rt = harness_runtime(engine, agent_id=agent_id)
     async with asyncio.timeout(20):
         await harness_turn_node(AgentState(), rt, config(agent_id))
-
     assert engine.adopted == [h_key(row)]
     assert [i.key for batch in engine.delivered for i in batch] == [f"reconciled-resume-{row}"], (
         "a stdin input is what makes the CLI deliver its own queue; the stored input is not sent"
@@ -159,9 +156,7 @@ async def test_a_claimed_input_the_harness_stored_is_adopted_nudged_and_asked_ab
 
 
 async def test_a_stored_input_that_appears_while_the_agent_works_is_settled_by_its_own_fact(
-    db_conn: psycopg.Connection,
-    aops_pool: AsyncConnectionPool,
-    hosted_resources: HostedTurnResources,
+    db_conn: psycopg.Connection, aops_pool: AsyncConnectionPool, harness_runtime: RuntimeFixture
 ) -> None:
     agent_id = agent_row(db_conn)
     row = h_insert(db_conn, agent_id, "queued inside the CLI", claimed=True)
@@ -171,21 +166,18 @@ async def test_a_stored_input_that_appears_while_the_agent_works_is_settled_by_i
         return in_a_turn([*keys, h_key(row)], "MEIVA_DISPLAY_TO_USER\nok")
 
     engine = FakeEngine(script=script)
+    engine.record_inputs = {h_key(row): "queued inside the CLI"}
     engine.records = {h_key(row): Reconciliation.PERSISTED_UNDELIVERED}
-    rt = runtime(engine, ops_pool=aops_pool, hosted_resources=hosted_resources)
-
+    rt = harness_runtime(engine, agent_id=agent_id)
     async with asyncio.timeout(20):
         await harness_turn_node(AgentState(), rt, config(agent_id))
-
     assert engine.reconciled == [[h_key(row)]], "settled by the event, nothing left to ask about"
     assert h_status(db_conn, row) == "done"
     assert [i for k, i, _ in await h_timeline(aops_pool, agent_id) if k == "inbound_chat"] == [row]
 
 
 async def test_a_stored_input_the_cli_dropped_goes_back_when_the_second_question_finds_it_gone(
-    db_conn: psycopg.Connection,
-    aops_pool: AsyncConnectionPool,
-    hosted_resources: HostedTurnResources,
+    db_conn: psycopg.Connection, harness_runtime: RuntimeFixture
 ) -> None:
     agent_id = agent_row(db_conn)
     row = h_insert(db_conn, agent_id, "queued inside the CLI", claimed=True)
@@ -201,30 +193,24 @@ async def test_a_stored_input_the_cli_dropped_goes_back_when_the_second_question
             return dict.fromkeys(keys, answer)
 
     engine = Dropping()
-    rt = runtime(engine, ops_pool=aops_pool, hosted_resources=hosted_resources)
-
+    rt = harness_runtime(engine, agent_id=agent_id)
     async with asyncio.timeout(20):
         await harness_turn_node(AgentState(), rt, config(agent_id))
-
     assert [i.key for i in engine.delivered[-1]] == [h_key(row)], "delivered again, in this run"
     assert h_status(db_conn, row) == "done"
 
 
 async def test_a_claimed_input_the_harness_never_saw_goes_back_and_is_delivered_in_order(
-    db_conn: psycopg.Connection,
-    aops_pool: AsyncConnectionPool,
-    hosted_resources: HostedTurnResources,
+    db_conn: psycopg.Connection, harness_runtime: RuntimeFixture
 ) -> None:
     agent_id = agent_row(db_conn)
     lost = h_insert(db_conn, agent_id, "never reached the CLI", claimed=True)
     newer = h_insert(db_conn, agent_id, "arrived while the host was down")
     engine = FakeEngine()
     engine.records = {}
-    rt = runtime(engine, ops_pool=aops_pool, hosted_resources=hosted_resources)
-
+    rt = harness_runtime(engine, agent_id=agent_id)
     async with asyncio.timeout(20):
         await harness_turn_node(AgentState(), rt, config(agent_id))
-
     [batch] = engine.delivered
     [one] = batch
     assert one.key == h_key(lost)
@@ -235,9 +221,7 @@ async def test_a_claimed_input_the_harness_never_saw_goes_back_and_is_delivered_
 
 
 async def test_a_batch_of_claimed_inputs_is_judged_one_by_one_and_redelivered_in_order(
-    db_conn: psycopg.Connection,
-    aops_pool: AsyncConnectionPool,
-    hosted_resources: HostedTurnResources,
+    db_conn: psycopg.Connection, aops_pool: AsyncConnectionPool, harness_runtime: RuntimeFixture
 ) -> None:
     agent_id = agent_row(db_conn)
     seen = h_insert(db_conn, agent_id, "in the context", claimed=True)
@@ -246,16 +230,15 @@ async def test_a_batch_of_claimed_inputs_is_judged_one_by_one_and_redelivered_in
     unknown = h_insert(db_conn, agent_id, "the record cannot tell", claimed=True)
     newer = h_insert(db_conn, agent_id, "queued while down")
     engine = FakeEngine()
+    engine.record_inputs = {h_key(seen): "in the context"}
     engine.records = {
         h_key(seen): Reconciliation.IN_CONTEXT,
         h_key(stored): Reconciliation.PERSISTED_UNDELIVERED,
         h_key(unknown): Reconciliation.UNKNOWN,
     }
-    rt = runtime(engine, ops_pool=aops_pool, hosted_resources=hosted_resources)
-
+    rt = harness_runtime(engine, agent_id=agent_id)
     async with asyncio.timeout(20):
         await harness_turn_node(AgentState(), rt, config(agent_id))
-
     [batch] = engine.delivered
     [one] = batch
     assert one.key == h_key(lost), "the resume note rides the wake's one input"
@@ -265,34 +248,27 @@ async def test_a_batch_of_claimed_inputs_is_judged_one_by_one_and_redelivered_in
     assert [h_status(db_conn, i) for i in (seen, lost, unknown, newer)] == ["done"] * 4
     assert h_status(db_conn, stored) == "claimed"
     timeline = await h_timeline(aops_pool, agent_id)
-    assert [i for _, i, p in timeline if "could not be confirmed" in p] == [unknown]
+    assert not any(("could not be confirmed" in p for _, _, p in timeline))
+    assert unknown not in [i for _, i, _ in timeline]
 
 
-async def test_an_unreadable_record_is_never_guessed_at_and_the_marker_is_written(
-    db_conn: psycopg.Connection,
-    aops_pool: AsyncConnectionPool,
-    hosted_resources: HostedTurnResources,
+async def test_an_unreadable_record_is_never_guessed_at_or_invented_on_the_record_timeline(
+    db_conn: psycopg.Connection, aops_pool: AsyncConnectionPool, harness_runtime: RuntimeFixture
 ) -> None:
     agent_id = agent_row(db_conn)
     row = h_insert(db_conn, agent_id, "unknown fate", claimed=True)
     engine = h_silent()
-    rt = runtime(engine, ops_pool=aops_pool, hosted_resources=hosted_resources)
-
+    rt = harness_runtime(engine, agent_id=agent_id)
     async with asyncio.timeout(20):
         await harness_turn_node(AgentState(), rt, config(agent_id))
-
     assert engine.reconciled == [[h_key(row)]]
     assert engine.delivered == []
     assert h_status(db_conn, row) == "done"
-    assert any(
-        "could not be confirmed" in text for _, _, text in await h_timeline(aops_pool, agent_id)
-    )
+    assert await h_timeline(aops_pool, agent_id) == []
 
 
 async def test_the_recovery_note_is_delivered_before_the_messages_that_queued_up(
-    db_conn: psycopg.Connection,
-    aops_pool: AsyncConnectionPool,
-    hosted_resources: HostedTurnResources,
+    db_conn: psycopg.Connection, harness_runtime: RuntimeFixture
 ) -> None:
     agent_id = agent_row(db_conn)
     lost = h_insert(db_conn, agent_id, "claimed before the restart", claimed=True)
@@ -302,11 +278,9 @@ async def test_the_recovery_note_is_delivered_before_the_messages_that_queued_up
     )
     engine = FakeEngine()
     engine.records = {}
-    rt = runtime(engine, ops_pool=aops_pool, hosted_resources=hosted_resources)
-
+    rt = harness_runtime(engine, agent_id=agent_id)
     async with asyncio.timeout(20):
         await harness_turn_node(state, rt, config(agent_id))
-
     [batch] = engine.delivered
     [one] = batch
     assert one.key == h_key(lost)
@@ -315,16 +289,13 @@ async def test_the_recovery_note_is_delivered_before_the_messages_that_queued_up
 
 
 async def test_a_frame_of_an_earlier_generation_does_not_settle_the_current_generations_input(
-    db_conn: psycopg.Connection,
-    aops_pool: AsyncConnectionPool,
-    hosted_resources: HostedTurnResources,
+    db_conn: psycopg.Connection, harness_runtime: RuntimeFixture
 ) -> None:
     agent_id = agent_row(db_conn)
     row = h_insert(db_conn, agent_id, "delivered again after a respawn")
     engine = h_silent()
     engine.generation = 2
-    rt = runtime(engine, ops_pool=aops_pool, hosted_resources=hosted_resources)
-
+    rt = harness_runtime(engine, agent_id=agent_id)
     async with asyncio.timeout(20), asyncio.TaskGroup() as tasks:
         node = tasks.create_task(harness_turn_node(AgentState(), rt, config(agent_id)))
         await h_until(lambda: bool(engine.delivered), "delivery")
@@ -337,13 +308,11 @@ async def test_a_frame_of_an_earlier_generation_does_not_settle_the_current_gene
         assert not node.done()
         engine.emit(InputInContext(h_key(row), "t1", 2))
         await node
-
     assert h_status(db_conn, row) == "done"
 
 
 # meiva:note
-# The delta carries a number where text belongs, which no harness sends: it is how a test makes the
-# projector fail, so the failure path of an invocation can be observed.
+# A receive-port failure exercises invocation cleanup independently of transcript rendering.
 # meiva:link agent/graph/docs/harness-foreground.md
 @pytest.mark.parametrize(
     ("answer", "status", "in_timeline"),
@@ -359,35 +328,32 @@ async def test_a_failed_invocation_reconciles_what_it_had_handed_over(
     in_timeline: bool,
     db_conn: psycopg.Connection,
     aops_pool: AsyncConnectionPool,
-    hosted_resources: HostedTurnResources,
+    harness_runtime: RuntimeFixture,
 ) -> None:
     agent_id = agent_row(db_conn)
     row = h_insert(db_conn, agent_id, "work")
     engine = h_silent()
+    engine.record_inputs = {h_key(row): "work"}
     engine.records = {h_key(row): answer} if answer is not Reconciliation.NOT_FOUND else {}
-    rt = runtime(engine, ops_pool=aops_pool, hosted_resources=hosted_resources)
-
+    rt = harness_runtime(engine, agent_id=agent_id)
     node = asyncio.create_task(harness_turn_node(AgentState(), rt, config(agent_id)))
     await h_until(lambda: bool(engine.delivered), "delivery")
-    engine.emit(TextDelta("t1", 5))  # pyright: ignore[reportArgumentType]
+    engine.read_error = TypeError("synthetic receive failure")
+    engine.emit(TextDelta("t1", "wake"))
     with pytest.raises(TypeError):
         await asyncio.wait_for(node, 20)
-
     assert engine.retired, "the session is retired first, so the CLI cannot take the input later"
     assert h_status(db_conn, row) == status
     timeline = await h_timeline(aops_pool, agent_id)
     assert (row in [i for k, i, _ in timeline if k == "inbound_chat"]) is in_timeline
-    assert not any("could not be confirmed" in text for _, _, text in timeline)
+    assert not any(("could not be confirmed" in text for _, _, text in timeline))
 
 
 # meiva:note
-# The delta carries a number where text belongs, which no harness sends: it is how a test makes the
-# projector fail, so the failure path of an invocation can be observed.
+# A receive-port failure exercises invocation cleanup independently of transcript rendering.
 # meiva:link agent/graph/docs/harness-foreground.md
 async def test_a_session_that_cannot_be_retired_falls_back_to_the_marker(
-    db_conn: psycopg.Connection,
-    aops_pool: AsyncConnectionPool,
-    hosted_resources: HostedTurnResources,
+    db_conn: psycopg.Connection, aops_pool: AsyncConnectionPool, harness_runtime: RuntimeFixture
 ) -> None:
     agent_id = agent_row(db_conn)
     row = h_insert(db_conn, agent_id, "work")
@@ -398,19 +364,16 @@ async def test_a_session_that_cannot_be_retired_falls_back_to_the_marker(
 
     engine = Stuck(script=lambda _inputs: [])
     engine.records = {}
-    rt = runtime(engine, ops_pool=aops_pool, hosted_resources=hosted_resources)
-
+    rt = harness_runtime(engine, agent_id=agent_id)
     node = asyncio.create_task(harness_turn_node(AgentState(), rt, config(agent_id)))
     await h_until(lambda: bool(engine.delivered), "delivery")
-    engine.emit(TextDelta("t1", 5))  # pyright: ignore[reportArgumentType]
+    engine.read_error = TypeError("synthetic receive failure")
+    engine.emit(TextDelta("t1", "wake"))
     with pytest.raises((TypeError, FatalLLMStreamError)):
         await asyncio.wait_for(node, 20)
-
     assert engine.reconciled == [], "an input is judged absent only once the CLI is certainly gone"
     assert h_status(db_conn, row) == "done"
-    assert any(
-        "could not be confirmed" in text for _, _, text in await h_timeline(aops_pool, agent_id)
-    )
+    assert await h_timeline(aops_pool, agent_id) == []
 
 
 @pytest.mark.parametrize("orphaned", [True, False])
@@ -489,45 +452,37 @@ class Unreadable(FakeEngine):
 
 
 async def test_a_record_that_exists_but_cannot_be_read_leaves_the_rows_for_the_next_wake(
-    db_conn: psycopg.Connection,
-    aops_pool: AsyncConnectionPool,
-    hosted_resources: HostedTurnResources,
+    db_conn: psycopg.Connection, aops_pool: AsyncConnectionPool, harness_runtime: RuntimeFixture
 ) -> None:
     agent_id = agent_row(db_conn)
     first = h_insert(db_conn, agent_id, "one", claimed=True)
     second = h_insert(db_conn, agent_id, "two", claimed=True)
-    rt = runtime(Unreadable(), ops_pool=aops_pool, hosted_resources=hosted_resources)
-
+    rt = harness_runtime(Unreadable(), agent_id=agent_id)
     with pytest.raises(OSError, match="could not be read"):
         async with asyncio.timeout(20):
             await harness_turn_node(AgentState(), rt, config(agent_id))
-
     assert [h_status(db_conn, i) for i in (first, second)] == ["claimed", "claimed"]
     assert not any(
-        "could not be confirmed" in p for _, _, p in await h_timeline(aops_pool, agent_id)
+        ("could not be confirmed" in p for _, _, p in await h_timeline(aops_pool, agent_id))
     )
 
 
 # meiva:note
-# The delta carries a number where text belongs, which no harness sends: it is how a test makes the
-# projector fail, so the failure path of an invocation can be observed.
+# A receive-port failure exercises invocation cleanup independently of transcript rendering.
 # meiva:link agent/graph/docs/harness-foreground.md
 async def test_a_failed_run_whose_record_cannot_be_read_keeps_its_rows_and_its_own_error(
-    db_conn: psycopg.Connection,
-    aops_pool: AsyncConnectionPool,
-    hosted_resources: HostedTurnResources,
+    db_conn: psycopg.Connection, harness_runtime: RuntimeFixture
 ) -> None:
     agent_id = agent_row(db_conn)
     row = h_insert(db_conn, agent_id, "work")
     engine = Unreadable(script=lambda _inputs: [])
-    rt = runtime(engine, ops_pool=aops_pool, hosted_resources=hosted_resources)
-
+    rt = harness_runtime(engine, agent_id=agent_id)
     node = asyncio.create_task(harness_turn_node(AgentState(), rt, config(agent_id)))
     await h_until(lambda: bool(engine.delivered), "delivery")
-    engine.emit(TextDelta("t1", 5))  # pyright: ignore[reportArgumentType]
+    engine.read_error = TypeError("synthetic receive failure")
+    engine.emit(TextDelta("t1", "wake"))
     with pytest.raises(TypeError):
         await asyncio.wait_for(node, 20)
-
     assert h_status(db_conn, row) == "claimed", "reconciled at the next wake, not consumed"
 
 
@@ -540,39 +495,32 @@ async def test_the_lost_turn_note_names_only_what_was_consumed_with_the_marker(
     records: dict[str, Reconciliation] | None,
     named: bool,
     db_conn: psycopg.Connection,
-    aops_pool: AsyncConnectionPool,
-    hosted_resources: HostedTurnResources,
     loguru_records: LogRecords,
+    harness_runtime: RuntimeFixture,
 ) -> None:
     agent_id = agent_row(db_conn)
     row = h_insert(db_conn, agent_id, "work")
     engine = h_silent()
     engine.records = records
-    rt = runtime(engine, ops_pool=aops_pool, hosted_resources=hosted_resources)
-
+    rt = harness_runtime(engine, agent_id=agent_id)
     node = asyncio.create_task(harness_turn_node(AgentState(), rt, config(agent_id)))
     await h_until(lambda: bool(engine.delivered), "delivery")
     engine.emit(SessionClosed("the CLI went away"))
     with pytest.raises(FatalLLMStreamError):
         await asyncio.wait_for(node, 20)
-
     reported = [r["extra"]["inbound_ids"] for r in loguru_records.events("turn_fault_lost_inbound")]
     assert reported == ([[row]] if named else []), "only a consumed row is reported as lost"
     assert h_status(db_conn, row) == ("done" if named else "pending")
 
 
 async def test_a_restart_note_goes_ahead_of_the_messages_that_were_returned_to_the_queue(
-    db_conn: psycopg.Connection,
-    aops_pool: AsyncConnectionPool,
-    hosted_resources: HostedTurnResources,
+    db_conn: psycopg.Connection, harness_runtime: RuntimeFixture
 ) -> None:
     agent_id = agent_row(db_conn)
     _ = h_insert(db_conn, agent_id, "claimed before the restart", claimed=True)
     _ = h_insert(db_conn, agent_id, "queued while it restarted")
     row = db_conn.execute(
-        "INSERT INTO inbound_messages (agent_id, content, kind, source, payload) "
-        "VALUES (%s, 'you were restarted', 'system_note', 'system', "
-        "jsonb_build_object('note_tag', 'lifecycle_restart')) RETURNING id",
+        "INSERT INTO inbound_messages (agent_id, content, kind, source, payload) VALUES (%s, 'you were restarted', 'system_note', 'system', jsonb_build_object('note_tag', 'lifecycle_restart')) RETURNING id",
         (agent_id,),
     ).fetchone()
     db_conn.commit()
@@ -580,11 +528,9 @@ async def test_a_restart_note_goes_ahead_of_the_messages_that_were_returned_to_t
     note = row[0]
     engine = FakeEngine()
     engine.records = {}
-    rt = runtime(engine, ops_pool=aops_pool, hosted_resources=hosted_resources)
-
+    rt = harness_runtime(engine, agent_id=agent_id)
     async with asyncio.timeout(20):
         await harness_turn_node(AgentState(), rt, config(agent_id))
-
     [batch] = engine.delivered
     [one] = batch
     assert one.key == h_key(note)
@@ -596,54 +542,44 @@ async def test_a_restart_note_goes_ahead_of_the_messages_that_were_returned_to_t
 
 
 async def test_a_row_the_harness_still_has_undelivered_is_left_to_the_next_real_wake(
-    db_conn: psycopg.Connection,
-    aops_pool: AsyncConnectionPool,
-    hosted_resources: HostedTurnResources,
+    db_conn: psycopg.Connection, harness_runtime: RuntimeFixture
 ) -> None:
     agent_id = agent_row(db_conn)
     row = h_insert(db_conn, agent_id, "stored by the CLI", claimed=True)
     db_conn.execute(
-        "UPDATE inbound_messages SET payload=jsonb_build_object('harness_reconcile_deferred', true) "
-        "WHERE id=%s",
+        "UPDATE inbound_messages SET payload=jsonb_build_object('harness_reconcile_deferred', true) WHERE id=%s",
         (row,),
     )
     db_conn.commit()
     engine = FakeEngine()
     engine.records = {h_key(row): Reconciliation.PERSISTED_UNDELIVERED}
-    rt = runtime(engine, ops_pool=aops_pool, hosted_resources=hosted_resources)
-
+    rt = harness_runtime(engine, agent_id=agent_id)
     assert await claimed_deliverable(rt.context, agent_id, include_deferred=False) == []
     assert [
         r.id for r in await claimed_deliverable(rt.context, agent_id, include_deferred=True)
     ] == [row]
     async with asyncio.timeout(20):
         await harness_turn_node(AgentState(), rt, config(agent_id))
-
     assert engine.delivered == [], "no nudge and no wait: it was already asked about"
     assert engine.adopted == []
     assert h_status(db_conn, row) == "claimed"
 
 
 async def test_a_deferred_row_is_settled_when_a_later_run_finds_it_in_the_context(
-    db_conn: psycopg.Connection,
-    aops_pool: AsyncConnectionPool,
-    hosted_resources: HostedTurnResources,
+    db_conn: psycopg.Connection, harness_runtime: RuntimeFixture
 ) -> None:
     agent_id = agent_row(db_conn)
     row = h_insert(db_conn, agent_id, "stored by the CLI", claimed=True)
     db_conn.execute(
-        "UPDATE inbound_messages SET payload=jsonb_build_object('harness_reconcile_deferred', true) "
-        "WHERE id=%s",
+        "UPDATE inbound_messages SET payload=jsonb_build_object('harness_reconcile_deferred', true) WHERE id=%s",
         (row,),
     )
     db_conn.commit()
     engine = FakeEngine()
     engine.records = {h_key(row): Reconciliation.IN_CONTEXT}
-    rt = runtime(engine, ops_pool=aops_pool, hosted_resources=hosted_resources)
-
+    rt = harness_runtime(engine, agent_id=agent_id)
     async with asyncio.timeout(20):
         await harness_turn_node(AgentState(), rt, config(agent_id))
-
     assert h_status(db_conn, row) == "done"
 
 
@@ -668,16 +604,13 @@ def test_lifecycle_notes_go_first_and_everything_else_keeps_its_order() -> None:
 # The three rows an interrupt commits reach the harness as the note then the message, and the control
 # row, last in the queue, stays pending behind them until claim takes it.
 async def test_an_interrupts_note_and_message_are_delivered_in_order_ahead_of_its_control_row(
-    db_conn: psycopg.Connection,
-    aops_pool: AsyncConnectionPool,
-    hosted_resources: HostedTurnResources,
+    db_conn: psycopg.Connection, harness_runtime: RuntimeFixture
 ) -> None:
     agent_id = agent_row(db_conn)
     first = insert_row(db_conn, agent_id, "chat", "user", "work")
     engine = silent_engine()
-    rt = runtime(engine, ops_pool=aops_pool, hosted_resources=hosted_resources)
+    rt = harness_runtime(engine, agent_id=agent_id)
     note_text = interrupt_note("agent:7", with_message=True)
-
     async with asyncio.timeout(20), asyncio.TaskGroup() as tasks:
         node = tasks.create_task(harness_turn_node(AgentState(), rt, config(agent_id)))
         await wait_until(lambda: len(engine.delivered) == 1, "first delivery")
@@ -706,7 +639,6 @@ async def test_an_interrupts_note_and_message_are_delivered_in_order_ahead_of_it
             completed("t2", "MEIVA_DISPLAY_TO_USER\nhandled"),
         )
         await node
-
     delivered = [i for batch in engine.delivered[1:] for i in batch]
     assert [i.key for i in delivered] == [input_key(note)]
     assert delivered[0].text.index(note_text) < delivered[0].text.index("do Y instead")
@@ -718,15 +650,12 @@ async def test_an_interrupts_note_and_message_are_delivered_in_order_ahead_of_it
 # the turn, and the passive note is not handed to the harness: a delivery would start a turn of the
 # harness's own for a note that asked for none. It waits for the next real input.
 async def test_the_stop_buttons_passive_note_does_not_start_a_turn(
-    db_conn: psycopg.Connection,
-    aops_pool: AsyncConnectionPool,
-    hosted_resources: HostedTurnResources,
+    db_conn: psycopg.Connection, harness_runtime: RuntimeFixture
 ) -> None:
     agent_id = agent_row(db_conn)
     first = insert_row(db_conn, agent_id, "chat", "user", "work")
     engine = silent_engine()
-    rt = runtime(engine, ops_pool=aops_pool, hosted_resources=hosted_resources)
-
+    rt = harness_runtime(engine, agent_id=agent_id)
     async with asyncio.timeout(20), asyncio.TaskGroup() as tasks:
         node = tasks.create_task(harness_turn_node(AgentState(), rt, config(agent_id)))
         await wait_until(lambda: len(engine.delivered) == 1, "first delivery")
@@ -747,7 +676,6 @@ async def test_the_stop_buttons_passive_note_does_not_start_a_turn(
         await wait_until(lambda: engine.interrupts == 1, "the control row interrupts")
         engine.emit(completed("t1", "", interrupted=True))
         await node
-
     assert len(engine.delivered) == 1, "the passive note started no turn"
     assert row_status(db_conn, note) == "pending"
     assert row_status(db_conn, control) == "pending", "claim takes the control row next"
@@ -756,9 +684,7 @@ async def test_the_stop_buttons_passive_note_does_not_start_a_turn(
 # meiva:note
 # A passive note waits for the next real input and goes along with it, ahead of it, in queue order.
 async def test_a_passive_note_goes_along_with_the_next_real_input(
-    db_conn: psycopg.Connection,
-    aops_pool: AsyncConnectionPool,
-    hosted_resources: HostedTurnResources,
+    db_conn: psycopg.Connection, harness_runtime: RuntimeFixture
 ) -> None:
     agent_id = agent_row(db_conn)
     _ = insert_row(
@@ -771,8 +697,7 @@ async def test_a_passive_note_goes_along_with_the_next_real_input(
     )
     chat = insert_row(db_conn, agent_id, "chat", "user", "carry on")
     engine = silent_engine()
-    rt = runtime(engine, ops_pool=aops_pool, hosted_resources=hosted_resources)
-
+    rt = harness_runtime(engine, agent_id=agent_id)
     async with asyncio.timeout(20), asyncio.TaskGroup() as tasks:
         node = tasks.create_task(harness_turn_node(AgentState(), rt, config(agent_id)))
         while not engine.delivered:
