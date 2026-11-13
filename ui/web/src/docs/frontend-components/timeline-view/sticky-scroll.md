@@ -27,7 +27,9 @@ A pending bookmark restore lands before the pin. A follower returns to the
 natural end of the conversation, including messages that arrived while away.
 A reader at the end of the additional scroll space returns to their saved row
 and offset. When collapsing a work block created that space, the restore
-recreates as much of it as the saved offset needs.
+recreates as much of it as the saved offset needs. Wheel, touch, keyboard
+scrolling and track interaction reveal the timeline scrollbar. Position restores
+and layout updates keep an idle scrollbar hidden.
 The down arrow sits at the bottom center of the conversation and uses the same
 icon while loading or generating. It takes the reader to the last human message
 or the tail according to the [reading position](send-anchor.md). A smooth ride

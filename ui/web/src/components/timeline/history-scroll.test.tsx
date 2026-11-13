@@ -331,7 +331,7 @@ describe("agent switch reading positions", () => {
     resize();
     expect(viewport().scrollTop).toBe(4744);
     expect(readingOffset("17.0")).toBe(56);
-    expect(screen.getByTestId("scroll-to-bottom")).toBeTruthy();
+    expect(screen.queryByTestId("scroll-to-bottom")).toBeNull();
   });
 
   it("recreates the space needed for a bookmark beyond the shortened conversation", () => {

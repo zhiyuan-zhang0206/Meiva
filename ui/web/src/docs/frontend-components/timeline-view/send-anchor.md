@@ -9,8 +9,12 @@ away while the row is arriving takes precedence over automatic positioning.
 The centered down arrow jumps to the latest visible human message when that
 message is below the reading offset. The window mounts that row first if it was
 virtualized. From the reading offset or farther down, the arrow jumps to the
-current content end and resumes following. Manually opening a live work block
-also goes to the tail. Automatic expansion follows the current reading mode.
+current content end and resumes following when the end is farther down. If the
+reader is already in the additional space below the content, the arrow uses
+the remaining scroll range. The arrow is hidden at the scrollable end,
+including when the last human message is aligned using that space. Manually
+opening a live work block goes to the tail. Automatic expansion follows the
+current reading mode.
 
 A reserve below the conversation gives the last human message enough room to
 reach the reading offset by wheel, drag, touch, or arrow, including after a send

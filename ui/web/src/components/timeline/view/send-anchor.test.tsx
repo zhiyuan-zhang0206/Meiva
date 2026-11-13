@@ -98,11 +98,7 @@ describe("send anchor", () => {
     // meiva:link ui/web/src/docs/frontend-components/timeline-view/send-anchor.md
     expect(top).toBe(1244);
     expect(reservePx()).toBe(444);
-    // meiva:note
-    // The viewport is at the bottom of a padded document here, so the control is
-    // the reader's only way back into following and stays shown.
-    // meiva:link ui/web/src/docs/frontend-components/timeline-view/send-anchor.md
-    expect(screen.getByTestId("scroll-to-bottom")).toBeTruthy();
+    expect(screen.queryByTestId("scroll-to-bottom")).toBeNull();
 
     content = 1700;
     resize();
@@ -186,10 +182,25 @@ describe("send anchor", () => {
 
     act(() => { viewport().scrollTop = viewport().scrollHeight; viewport().dispatchEvent(new Event("scroll")); });
     expect(top).toBe(1244);
+    expect(screen.queryByTestId("scroll-to-bottom")).toBeNull();
     content = 1500;
     resize();
     expect(top).toBe(1244);
     expect(reservePx()).toBe(344);
+  });
+
+  it("moves down through the remaining reserve when the content end is above the reader", () => {
+    const view = render(<TimelineView items={[earlier]} />);
+    act(() => { top = 100; viewport().dispatchEvent(new Event("scroll")); });
+    content = 1400;
+    view.rerender(<TimelineView items={[earlier, sent]} />);
+    act(() => { top = 1000; viewport().dispatchEvent(new Event("scroll")); });
+    const button = screen.getByTestId("scroll-to-bottom");
+
+    act(() => { button.click(); });
+
+    expect(top).toBe(1244);
+    expect(screen.queryByTestId("scroll-to-bottom")).toBeNull();
   });
 
   it("allows an upward wheel to leave a followed tail before the next output arrives", () => {
@@ -221,25 +232,19 @@ describe("send anchor", () => {
     expect(top).toBe(1800);
   });
 
-  it("follows again when the jump-to-latest control is clicked", () => {
+  it("hides the arrow at the padded end and shows it when the response extends past the viewport", () => {
     const view = render(<TimelineView items={[earlier]} />);
     act(() => { useTimelineStore.getState().requestSendAnchor(7); });
     content = 1400;
     view.rerender(<TimelineView items={[earlier, sent]} />);
     expect(top).toBe(1244);
-    vi.spyOn(viewport(), "scrollTo").mockImplementation((options?: ScrollToOptions | number) => {
-      if (typeof options === "object") viewport().scrollTop = options.top ?? 0;
-    });
-    act(() => {
-      screen.getByTestId("scroll-to-bottom").click();
-      viewport().dispatchEvent(new Event("scroll"));
-      viewport().dispatchEvent(new Event("scrollend"));
-    });
-    expect(top).toBe(800);
     expect(reservePx()).toBe(444);
+    expect(screen.queryByTestId("scroll-to-bottom")).toBeNull();
+
     content = 2400;
     resize();
-    expect(top).toBe(1800);
+    expect(top).toBe(1244);
+    expect(screen.getByTestId("scroll-to-bottom")).toBeTruthy();
   });
 
   it("keeps the centered arrow when a work block starts and leaves the sent message in place", () => {

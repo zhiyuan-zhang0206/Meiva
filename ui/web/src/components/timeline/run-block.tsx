@@ -164,7 +164,7 @@ export const TurnBlock = memo(function TurnBlock({
         type="button"
         onClick={(event) => onToggle(toggleKey ?? id, expanded, event.currentTarget)}
         className={cn(
-          "w-[calc(100%+0.5rem)] -ml-2 px-2 py-0.5 items-start gap-1.5 text-left select-none transition-colors",
+          "w-[calc(100%+0.5rem)] -ml-2 px-2 py-0.5 items-start gap-1.5 text-left select-none",
           expanded
             ? "sticky z-20 bg-background rounded-md text-muted-foreground hover:text-foreground hover:bg-muted"
             : "rounded-lg text-muted-foreground/75 hover:text-foreground hover:bg-muted/50",
@@ -177,7 +177,7 @@ export const TurnBlock = memo(function TurnBlock({
       >
         <ChevronRight
           className={cn(
-            "size-3.5 shrink-0 opacity-60 mt-0.5 transition-transform duration-200 motion-reduce:transition-none",
+            "size-3.5 shrink-0 opacity-60 mt-0.5",
             expanded && "rotate-90",
           )}
         />

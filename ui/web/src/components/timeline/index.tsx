@@ -272,25 +272,13 @@ export const TimelineView = memo(function TimelineView({
   const measureAtBottom = useCallback(() => {
     const viewport = viewportRef.current;
     if (!viewport) return;
-    if (scrollToBottomRideRef.current.active) {
-      setAtBottom(true);
-      return;
-    }
-    if (holdRestoredPositionRef.current) {
-      setAtBottom(viewport.scrollHeight - viewport.scrollTop - viewport.clientHeight <= 1);
-      return;
-    }
-    // meiva:note
-    // At the padded bottom, the arrow can still switch a reader to following.
-    // meiva:link ui/web/src/docs/frontend-components/timeline-view/sticky-scroll.md
-    const tail = { scrollTop: viewport.scrollTop, scrollHeight: tailHeight(viewport), clientHeight: viewport.clientHeight };
+    const { scrollTop, scrollHeight, clientHeight } = viewport;
     setAtBottom(
-      isFollowing()
-        ? isAtBottom(tail, stickyThresholds)
-        : viewport.scrollHeight - viewport.scrollTop - viewport.clientHeight <= 1 &&
-          !controller.isAnchored() && readingReserve() === 0,
+      scrollToBottomRideRef.current.active ||
+      scrollHeight - scrollTop - clientHeight <= 1 ||
+      (isFollowing() && isAtBottom({ scrollTop, scrollHeight: tailHeight(viewport), clientHeight }, stickyThresholds)),
     );
-  }, [controller, readingReserve, isFollowing, stickyThresholds, tailHeight]);
+  }, [isFollowing, stickyThresholds, tailHeight]);
 
   const pinToBottom = useCallback(
     (viewport: HTMLElement, freshRun = false) => {
@@ -637,6 +625,11 @@ export const TimelineView = memo(function TimelineView({
       wrapperRef.current?.querySelector<HTMLElement>('[data-slot="scroll-area-viewport"]') ??
       null;
     if (!viewport) return;
+    const { scrollTop, scrollHeight, clientHeight } = viewport;
+    if (scrollHeight - scrollTop - clientHeight <= 1) {
+      measureAtBottom();
+      return;
+    }
 
     const latestGroupIndex = latestTarget ? groupEntries.findIndex(({ group }) =>
       group.kind === "single" && group.member.item.item_id === latestTarget.id && group.member.rank === latestTarget.rank) : -1;
@@ -644,8 +637,14 @@ export const TimelineView = memo(function TimelineView({
 
     cancelPendingJump();
     cancelBookmark();
-    controller.requestStick();
     maintainSendAnchor(viewport);
+    if (viewport.scrollTop >= tailHeight(viewport) - viewport.clientHeight) {
+      viewport.scrollTop = viewport.scrollHeight;
+      controller.notifyAnchored({ scrollTop: viewport.scrollTop, scrollHeight: viewport.scrollHeight, clientHeight: viewport.clientHeight });
+      measureAtBottom();
+      return;
+    }
+    controller.requestStick();
     setAtBottom(true);
     startScrollToBottomRide({
       ride: scrollToBottomRideRef.current,
@@ -667,6 +666,7 @@ export const TimelineView = memo(function TimelineView({
       <ScrollArea
         className="h-full text-[13px] leading-relaxed"
         viewportClassName="[overflow-anchor:none] overscroll-y-contain"
+        scrollbarActivity="input"
       >
         <div ref={historySpaceRef} data-history-pull-space aria-hidden="true" />
         <div
