@@ -20,6 +20,7 @@ from base.agents.history.transcript_timeline.tests.support import (
     with_wire_ids,
     write,
 )
+from base.log import logger
 
 BASIC_KINDS = [
     "inbound_chat",
@@ -195,3 +196,21 @@ def test_a_request_never_reads_past_its_hard_cap_and_says_there_is_more(tmp_path
     found = window(file, limit=50)
     assert found.items == () and found.has_more
     assert file.bytes_read <= MAX_REQUEST_BYTES + 1024 * 1024
+
+
+# meiva:note
+# A row of a kind the reader does not know is skipped and said once, so a CLI that begins to write something new is
+# noticed and not silently missing from the timeline.
+def test_a_row_the_reader_does_not_know_is_skipped_and_reported_once(tmp_path: Path) -> None:
+    unknown = (
+        json.dumps({"type": "mystery-row", "uuid": "u", "timestamp": "2026-11-01T00:00:00Z"}) + "\n"
+    )
+    messages: list[str] = []
+    sink = logger.add(lambda message: messages.append(str(message)), level="WARNING")
+    try:
+        text = unknown + fixture_text("basic") + unknown + unknown
+        kinds = [p.item.kind for p in window(write(tmp_path / "unknown.jsonl", text)).items]
+    finally:
+        logger.remove(sink)
+    assert kinds == [k for k in BASIC_KINDS if k != "inbound_chat"]
+    assert len([m for m in messages if "mystery-row" in m]) == 1

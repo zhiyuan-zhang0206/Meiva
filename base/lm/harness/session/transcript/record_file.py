@@ -7,8 +7,10 @@ from pathlib import Path
 
 import zstandard
 
+from base.lm.harness.session.transcript.entries import Anomaly
 from base.lm.harness.session.transcript.position import Position, rows_after
 from base.lm.harness.session.transcript.scrub import scrub
+from base.log import logger
 
 # meiva:note
 # A harness CLI's own record file read in bounded pieces, whatever the CLI is (Claude Code's transcript and Codex's
@@ -121,6 +123,29 @@ def _scrubbed(row: Mapping[str, object] | None) -> Mapping[str, object]:
         raise ValueError("a bad row has no content")
     _ = scrub(row)
     return row
+
+
+# meiva:note
+# The rows of a record that its parser could not use, said once for each kind by one reader. The record is the CLI's
+# own and moves with its version, so a row of a kind this code does not know is skipped, never guessed at; the report
+# is how a kind a newer CLI began to write is noticed instead of being silently absent from the timeline.
+class UnreadRows:
+    def __init__(self, cli: str) -> None:
+        self._cli = cli
+        self._reported: set[tuple[str, str]] = set()
+
+    def report(self, anomaly: Anomaly) -> None:
+        mark = (anomaly.anomaly.value, anomaly.detail)
+        if mark in self._reported:
+            return
+        self._reported.add(mark)
+        logger.warning(
+            "a row of the {cli} record is not read: {kind} {detail}",
+            event="harness_record_row_unread",
+            cli=self._cli,
+            kind=anomaly.anomaly.value,
+            detail=anomaly.detail,
+        )
 
 
 # meiva:note

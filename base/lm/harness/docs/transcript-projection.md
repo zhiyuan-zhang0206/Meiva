@@ -28,7 +28,8 @@ call and its result in the main record. [What the Codex rollout holds](../codex/
 `base/agents/history/transcript_timeline/` is the shared half: `RecordProjector` runs the one `Projector` over those
 entries and turns each draft into an item (`items.py`, which also holds reply visibility and the tool-call
 rendering), names it `h<offset>.<n>`, marks a call that has no result and is still open as running, and does not show
-a person's input that no inbox row accounts for. A marker that is not a tagged note reaches the page as a `status:` or
+a person's input that no inbox row accounts for. A row of a kind a CLI's reader does not know is skipped and
+reported once for each kind (`harness_record_row_unread`, by `UnreadRows` of `record_file.py`), for both CLIs. A marker that is not a tagged note reaches the page as a `status:` or
 an `error:` line, the only two a page shows: the interrupt, compaction and failure markers are written that way, and a
 notice the CLI filed (a finished background task, a timer, a sub-agent's start or end) is made a status line in
 `items.py`, with its cause kept as the item's source. `sent.py` reads back which inbox rows were handed to the CLI as which

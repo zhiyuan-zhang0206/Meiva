@@ -11,6 +11,7 @@ from base.lm.harness.codex.transcript.errors import MissingFieldError, UnknownVa
 from base.lm.harness.codex.transcript.items import (
     Where,
     as_anomaly,
+    failure_entry,
     interrupt_entry,
     item_entries,
     remember_inputs,
@@ -117,10 +118,24 @@ def _event(payload: Obj, at: Stamp, record: str, input_turns: Collection[str]) -
     if kind == "item_completed":
         return _item_completed(payload, at, record, input_turns)
     if kind == "task_complete":
-        return [turn_end_entry(text(payload, "turn_id"), at.ms, at.seq, record)]
+        return [_turn_end(payload, at, record)]
     if kind == "turn_aborted":
-        return [interrupt_entry(text(payload, "turn_id"), at.ms, at.seq, record)]
+        return [interrupt_entry(opt_text(payload, "turn_id"), at.ms, at.seq, record)]
     raise UnknownValueError(f"event_msg/{kind}")
+
+
+# meiva:note
+# A turn's own end. A turn that failed says so on this row and on no other: `error` holds the CLI's `message` and its
+# `codex_error_info` (a word such as `unauthorized`, or an object). An abort may name no turn (`"turn_id": null` was seen
+# in real rollouts); it is an interrupt of the turn that is open.
+def _turn_end(payload: Obj, at: Stamp, record: str) -> AnyEntry:
+    turn = text(payload, "turn_id")
+    error = payload.get("error")
+    if not is_object_dict(error):
+        return turn_end_entry(turn, at.ms, at.seq, record)
+    info = error.get("codex_error_info")
+    said = (opt_text(error, "message") or "").strip() or (info if isinstance(info, str) else "")
+    return failure_entry(turn, said or "the turn failed", at.ms, at.seq, record)
 
 
 def _item_completed(

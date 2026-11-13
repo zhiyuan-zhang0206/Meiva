@@ -6,7 +6,7 @@ exports = ["drafts.py", "entries.py", "projection.py", "record_file.py"]
 "entries.py" = []
 "position.py" = []
 "projection.py" = ["drafts.py", "entries.py"]
-"record_file.py" = ["position.py", "scrub.py"]
+"record_file.py" = ["entries.py", "position.py", "scrub.py"]
 "scrub.py" = []
 "tests" = ["drafts.py", "entries.py", "projection.py"]
 

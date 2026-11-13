@@ -9,8 +9,8 @@ from base.host.boundary.json_values import is_object_dict, is_object_list
 from base.lm.harness.claude.delivery import key_uuid
 from base.lm.harness.claude.reconciliation.transcript import claude_home
 from base.lm.harness.claude.transcript.parse import ParseState, parse_row
-from base.lm.harness.session.transcript.entries import MAIN_RECORD, AnyEntry
-from base.lm.harness.session.transcript.record_file import FileRow, stamp_of
+from base.lm.harness.session.transcript.entries import MAIN_RECORD, Anomaly, AnyEntry
+from base.lm.harness.session.transcript.record_file import FileRow, UnreadRows, stamp_of
 
 # meiva:note
 # The Claude half of reading a session's timeline at the moment it is asked for: where the main record
@@ -64,16 +64,22 @@ def transcript_path(claude_home: Path, workspace: Path, session_id: str) -> Path
 # Rows read into entries, in file order, each entry named by its row's offset. The parser's only memory is when each
 # open tool call started, for the call's duration, so a parser that is given the rows of one read after another
 # (a live read) and one given them all at once (a cold read) agree. A row of another record (a sub-agent's row
-# that the main file should not hold) yields nothing.
+# that the main file should not hold) yields nothing. A row the parser cannot use is skipped and reported once for
+# each kind of row by this parser.
 class EntryParser:
     def __init__(self) -> None:
         self._state = ParseState()
+        self._unread = UnreadRows("Claude Code")
 
     def entries(self, rows: Sequence[FileRow]) -> tuple[AnyEntry, ...]:
         found: list[AnyEntry] = []
         for file_row in rows:
             self._state, parsed = parse_row(self._state, file_row.row, line=file_row.offset)
-            found.extend(entry for entry in parsed if entry.record == MAIN_RECORD)
+            for entry in parsed:
+                if isinstance(entry, Anomaly):
+                    self._unread.report(entry)
+                elif entry.record == MAIN_RECORD:
+                    found.append(entry)
         return tuple(found)
 
 

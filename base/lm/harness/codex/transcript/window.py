@@ -8,8 +8,7 @@ from base.host.boundary.json_values import is_object_dict
 from base.lm.harness.codex.reconciliation.rollout import codex_home, rollout_path
 from base.lm.harness.codex.transcript.rollout import parse_rollout_line
 from base.lm.harness.session.transcript.entries import MAIN_RECORD, Anomaly, AnyEntry, HumanInput
-from base.lm.harness.session.transcript.record_file import FileRow, stamp_of
-from base.log import logger
+from base.lm.harness.session.transcript.record_file import FileRow, UnreadRows, stamp_of
 
 # meiva:note
 # The Codex half of reading a thread's timeline at the moment it is asked for: where the rollout file lives, which
@@ -70,7 +69,7 @@ def unreadable_file(
 class EntryParser:
     def __init__(self) -> None:
         self._opened: set[str] = set()
-        self._reported: set[tuple[str, str]] = set()
+        self._unread = UnreadRows("Codex")
 
     def entries(self, rows: Sequence[FileRow]) -> tuple[AnyEntry, ...]:
         found: list[AnyEntry] = []
@@ -82,24 +81,12 @@ class EntryParser:
             )
             for entry in read:
                 if isinstance(entry, Anomaly):
-                    self._report(entry)
+                    self._unread.report(entry)
                     continue
                 if isinstance(entry, HumanInput) and entry.turn is not None:
                     self._opened.add(entry.turn)
                 found.append(entry)
         return tuple(found)
-
-    def _report(self, anomaly: Anomaly) -> None:
-        mark = (anomaly.anomaly.value, anomaly.detail)
-        if mark in self._reported:
-            return
-        self._reported.add(mark)
-        logger.warning(
-            "a row of the Codex rollout is not read: {kind} {detail}",
-            event="harness_record_row_unread",
-            kind=anomaly.anomaly.value,
-            detail=anomaly.detail,
-        )
 
 
 # meiva:note

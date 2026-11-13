@@ -12,6 +12,9 @@ from base.lm.harness.codex.transcript.items import RESULT_ITEM_CHARS
 from base.lm.harness.codex.transcript.parse import parse_rollout_line
 from base.lm.harness.session.transcript.entries import (
     MAIN_RECORD,
+    Anomaly,
+    Failure,
+    Interrupt,
     Notice,
     ToolCall,
     ToolResult,
@@ -89,6 +92,44 @@ def test_a_sub_agent_start_and_end_are_status_markers_and_a_message_to_it_is_not
     )
     assert not started.opens_turn and not completed.opens_turn
     assert activity("interacted") == []
+    (interrupted,) = activity("interrupted")
+    assert isinstance(interrupted, Notice)
+    assert interrupted.text == "Sub-agent /root/helper interrupted"
+
+
+# meiva:note
+# A turn that failed ends with a `task_complete` that carries `error` (`message` and `codex_error_info`, a word or an
+# object) and no `last_agent_message`: the one row of the rollout that says the turn failed and why.
+def test_a_turn_that_failed_is_an_error_with_what_the_cli_said() -> None:
+    def ended(error: dict[str, object]) -> list[object]:
+        payload: dict[str, object] = {
+            "type": "task_complete",
+            "turn_id": TURN,
+            "root_turn_id": TURN,
+            "started_at": 1,
+            "completed_at": 2,
+            "duration_ms": 5,
+            "error": error,
+        }
+        return list(parse_rollout_line(_line("event_msg", payload), record=MAIN_RECORD))
+
+    (failed,) = ended({"message": "sign in again", "codex_error_info": "unauthorized"})
+    assert isinstance(failed, Failure)
+    assert (failed.turn, failed.message) == (TURN, "sign in again")
+    (worded,) = ended({"message": "", "codex_error_info": {"http": {"status": 500}}})
+    assert isinstance(worded, Failure) and worded.message, (
+        "a failure with no message still says it failed"
+    )
+
+
+# meiva:note
+# An abort the CLI wrote with no turn id (`"turn_id": null`): the interrupt is shown all the same, in the turn that is
+# open.
+def test_an_abort_that_names_no_turn_is_still_an_interrupt() -> None:
+    aborted = _line("event_msg", {"type": "turn_aborted", "turn_id": None, "reason": "interrupted"})
+    (entry,) = parse_rollout_line(aborted, record=MAIN_RECORD)
+    assert isinstance(entry, Interrupt) and not isinstance(entry, Anomaly)
+    assert entry.turn is None
 
 
 def _mcp(**fields: object) -> dict[str, object]:

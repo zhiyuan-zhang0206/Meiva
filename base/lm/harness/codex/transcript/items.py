@@ -22,6 +22,7 @@ from base.lm.harness.session.transcript.entries import (
     AnomalyKind,
     AnyEntry,
     Compaction,
+    Failure,
     HumanInput,
     Interrupt,
     Notice,
@@ -135,9 +136,20 @@ def turn_end_entry(turn: str, at_ms: int | None, seq: int, record: str) -> TurnE
     )
 
 
-def interrupt_entry(turn: str, at_ms: int | None, seq: int, record: str) -> Interrupt:
+def failure_entry(turn: str, message: str, at_ms: int | None, seq: int, record: str) -> Failure:
+    return Failure(
+        key=f"turn-failed:{turn}",
+        order=Order(seq, 0),
+        record=record,
+        turn=turn,
+        at=None if at_ms is None else iso_at(at_ms),
+        message=message,
+    )
+
+
+def interrupt_entry(turn: str | None, at_ms: int | None, seq: int, record: str) -> Interrupt:
     return Interrupt(
-        key=f"interrupt:{turn}",
+        key=f"interrupt:{turn if turn is not None else seq}",
         order=Order(seq, 0),
         record=record,
         turn=turn,
@@ -395,13 +407,13 @@ def _sleep(item: Obj, place: _Place) -> list[AnyEntry]:
 
 
 # meiva:note
-# The activity record of a sub-agent in the main record: its start and its end are each one status marker naming the agent,
-# and a message sent to it is nothing. No call is paired across turns.
+# The activity record of a sub-agent in the main record: its start, its end and its being interrupted are each one status
+# marker naming the agent, and a message sent to it is nothing. No call is paired across turns.
 def _sub_agent_activity(item: Obj, place: _Place) -> list[AnyEntry]:
     kind = text(item, "kind")
     if kind == "interacted":
         return []
-    if kind not in ("started", "completed"):
+    if kind not in ("started", "completed", "interrupted"):
         raise UnknownValueError(f"subAgentActivity.kind={kind}")
     who = opt_text(item, "agentPath") or opt_text(item, "agentThreadId") or "?"
     return [

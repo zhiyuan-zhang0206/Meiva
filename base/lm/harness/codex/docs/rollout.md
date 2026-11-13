@@ -57,10 +57,11 @@ Each row is `{timestamp, ordinal, type, payload}`. The ones the timeline reads:
 | `event_msg/item_completed` `FileChange`, `ImageView`, `Extension` (`kind: web.search`) | a call and its result (`patch`, `view_image`, `web_search`); the image view names the file only |
 | `event_msg/item_completed` `McpToolCall` | a call `mcp:<server>/<tool>` with its `arguments`, and a result of the text parts of `result.content` joined (other parts by type name only, cut at 2000 characters); an error when `status` is `failed` or `result.isError` |
 | `event_msg/item_completed` `Extension` (`kind: clock.sleep`) | a call `sleep` with `durationMs` and an empty result |
-| `event_msg/item_completed` `SubAgentActivity` | `started` and `completed` each a status marker naming `agent_path`; `interacted` nothing; no call is paired across turns |
+| `event_msg/item_completed` `SubAgentActivity` | `started`, `completed` and `interrupted` each a status marker naming `agent_path`; `interacted` nothing; no call is paired across turns |
 | `event_msg/item_completed` `CollabAgentToolCall` | a call (`spawn_agent`) and its result; the child thread's own file is not read |
 | `event_msg/item_completed` `ContextCompaction` | the compaction marker |
-| `event_msg/task_complete`, `turn_aborted` | the end of a turn; the interrupt marker |
+| `event_msg/task_complete` | the end of a turn; with an `error` (`message`, `codex_error_info`) the turn failed, and the row is the error marker with the CLI's message |
+| `event_msg/turn_aborted` | the interrupt marker; `turn_id` may be null, and the interrupt is then of the turn that is open |
 | `response_item/message` role user holding `<subagent_notification>` | the sub-agent's report, shown as a marker that opens no turn (it is filed under a pseudo turn id, `auto-compact-N`) |
 | `token_usage_record` | usage, read by the parser (the usage logged for a turn still comes from the turn result) |
 
@@ -78,6 +79,26 @@ to 0.166; only row kinds, key names and value types, no content) and not from a 
 for this had no sleep tool and no MCP server or second agent was configured. The tests build those rows from the observed
 shapes (`transcript/tests/test_observed_shapes.py`). A thread may record a sub-agent as `SubAgentActivity` rows only (CLI 0.166 on
 one machine) or as `CollabAgentToolCall` (others); both are shown.
+
+A replay of the reader over every rollout of Meiva agents on five machines (180 files; counts only, no content) showed
+three more shapes, also built in those tests from what was counted: a `task_complete` with `error` (a failed turn; 21
+rows), a `turn_aborted` whose `turn_id` is null (11 rows) and a `SubAgentActivity` of kind `interrupted` (13 rows). In
+production one sub-agent writes one `completed` for every round it finishes (about ten for each `started`), and the
+collaboration calls of CLI 0.166 are almost all `wait` with an empty result. The text a sub-agent reports back is in
+`response_item/agent_message`, which is not read, so the timeline shows that a sub-agent finished and not what it said.
+
+## Codex's own paged history
+
+Every thread's `session_meta` says `history_mode: paginated`, and the Codex home holds a store of its own
+(`thread_history_1.sqlite`: items and turns by thread, and for each thread the byte offset of the rollout it has read up
+to). It is Codex's projection of the rollout, and the app-server's stable `thread/items/list` and `thread/turns/list`
+answer from it. Measured on 71 threads of running agents on three machines: the store holds exactly the item ids the
+rollout's `item_completed` rows hold (58,728 items, none on one side only), and every thread's offset equals the size of
+its file. A turn the store calls failed is a `task_complete` with `error` in the rollout. So the two say the same
+thing, and reading the file needs no process: a fresh `codex app-server` does answer for a thread it never loaded, but it
+answers from the store (a thread the store does not hold is an empty list and no error; only `thread/resume` fills it from
+the rollout), and starting one opens outbound connections and writes several state files of the home. The store is the
+reference to compare a reader against, not the path a page load takes.
 
 ## The same content is in the file twice
 

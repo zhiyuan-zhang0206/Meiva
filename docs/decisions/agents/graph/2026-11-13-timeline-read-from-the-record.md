@@ -123,6 +123,16 @@ error.
   the place.
 - **Read the whole file in the gateway.** The record is on the agent's machine; shipping a file per page view is
   the cost the operation avoids.
+- **Ask Codex for its own paged history (`thread/items/list` of the app-server) instead of reading the rollout.** It is
+  the stable interface and Codex maintains its format, and what it returns was measured to be item for item what the
+  rollout holds (58,728 items of 71 threads). It was not taken because a page load would then depend on a Codex process
+  on the agent's machine that has to be kept running (each start opens outbound connections and writes the home's state
+  files), and on Codex's own store: a thread the store does not hold reads as empty without an error. The store stays
+  the reference a replay of the reader is compared against, and the path to take if a CLI stops writing the rollout;
+  the handlers of the items are the same either way.
+- **The Agent Client Protocol as the source.** Only Antigravity speaks it natively; for Claude Code and Codex it is an
+  adapter over the same records. The protocol has no place for three things the timeline needs: a message added to a
+  running turn, an id of ours on an input, and a turn the agent starts by itself.
 
 ## Consequences
 
