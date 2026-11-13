@@ -1,9 +1,14 @@
-import { useCallback, useLayoutEffect, useRef, type RefObject } from "react";
+import { useCallback, useLayoutEffect, useMemo, useRef, useState, type RefObject } from "react";
 
 import type { BackendTimelineItem } from "@/lib/contracts/types";
 import type { StickyController } from "@/lib/layout/sticky";
 import type { SavedScroll } from "@/lib/layout/scroll-memory";
+import { parseItemIdParts } from "@/lib/timeline/timeline";
+import type { CompactTransitionBuffer } from "@/lib/layout/compact-transition";
 import { useTimelineStore } from "@/lib/timeline/timeline-store";
+
+import { materializeBeforeAnchor } from "./materialize-prefix";
+import { inboundKind, isSilentTimelineItem } from "./runs";
 
 // meiva:note
 // Where the viewport goes when the READER asks for something, rather than when
@@ -53,22 +58,20 @@ export function useThreadPin({
   }, [pinToBottom, setAtBottom, threadKey, viewportRef, wrapperRef, anchorRef, pendingRef, settledRef, holdRef]);
 }
 
-// meiva:note
-// The send anchor: once the reader's own message is committed and mounted, park
-// that row at the top of the viewport (below the header) and let following go,
-// so the reply streams into the space below it instead of dragging the reader
-// down chunk by chunk. A bottom reserve makes the parking position reachable
-// while the reply is still shorter than the viewport: it fills exactly the
-// missing height and gives it back as the reply grows, so scrollHeight - and
-// with it the reader's viewport - stays where it is. The controller owns the
-// follow flag; this hook only writes positions and reports them.
-// meiva:link ui/web/src/docs/frontend-components/timeline-view/send-anchor.md
+export interface ReadingTarget {
+  id: string;
+  rank: number;
+}
+
 export interface SendAnchorArgs {
   items: readonly BackendTimelineItem[];
+  compactBuffer: CompactTransitionBuffer | null;
+  threadKey: string | undefined;
   viewportRef: RefObject<HTMLElement | null>;
   wrapperRef: RefObject<HTMLDivElement | null>;
   reserveRef: RefObject<HTMLDivElement | null>;
   controller: StickyController;
+  isFollowing: () => boolean;
   topOffset: number;
   measureAtBottom: () => void;
   cancelBookmark: () => void;
@@ -82,13 +85,6 @@ function snapshotOf(viewport: HTMLElement) {
   };
 }
 
-// meiva:note
-// The numbers behind a send anchor, as pure decisions: the scrollTop that puts a
-// row `topOffset` px below the viewport's top edge, and the empty height that
-// must stand below the natural content for that position to be reachable while
-// the reply is still short (zero once the reply has grown past the viewport).
-// The hook only measures and writes.
-// meiva:link ui/web/src/docs/frontend-components/timeline-view/send-anchor.md
 export function parkScrollTop(rowDocTop: number, topOffset: number): number {
   return Math.max(0, Math.round(rowDocTop - topOffset));
 }
@@ -97,123 +93,154 @@ export function parkReserve(top: number, clientHeight: number, naturalHeight: nu
   return Math.max(0, top + clientHeight - naturalHeight);
 }
 
-function reserveHeight(element: HTMLElement): number {
-  return element.offsetHeight;
+function isHumanMessage(item: BackendTimelineItem): boolean {
+  return item.kind === "inbound_chat" && inboundKind(item.source) === "human" && !isSilentTimelineItem(item);
+}
+
+function rowFor(viewport: HTMLElement, target: ReadingTarget): HTMLElement | null {
+  return viewport.querySelector<HTMLElement>(
+    `[data-message-role="user"][data-item-id="${CSS.escape(target.id)}"][data-display-rank="${target.rank}"]`,
+  );
+}
+
+function offsetInViewport(viewport: HTMLElement, node: HTMLElement): number {
+  return node.getBoundingClientRect().top - viewport.getBoundingClientRect().top;
 }
 
 // meiva:note
-// Which committed row a send anchor belongs to: the inbound the receipt named,
-// or, when the receipt carried none, the newest user message the timeline shows.
-// meiva:link ui/web/src/docs/frontend-components/timeline-view/sticky-scroll.md
-function targetItemId(
-  items: readonly BackendTimelineItem[],
-  inboundId: number | null,
-): string | null {
-  if (inboundId !== null) {
-    return items.find((item) => item.inbound_id === inboundId)?.item_id ?? null;
-  }
-  for (let index = items.length - 1; index >= 0; index -= 1) {
-    if (items[index].kind === "inbound_chat") return items[index].item_id;
-  }
-  return null;
-}
-
-function findRow(viewport: HTMLElement, itemId: string): HTMLElement | null {
-  const escaped = CSS.escape(itemId);
-  return viewport.querySelector<HTMLElement>('.timeline-item[data-item-id="' + escaped + '"]')
-    ?? viewport.querySelector<HTMLElement>('[data-turn-expanded="false"][data-item-id="' + escaped + '"]');
-}
-
+// The reserve belongs to the latest human row, even while the reader is in
+// history. Its leading edge gives the real content height independently of
+// the viewport's minimum scrollHeight and of any previous reserve.
+// meiva:link ui/web/src/docs/frontend-components/timeline-view/send-anchor.md
 export function useSendAnchor({
-  items,
-  viewportRef,
-  wrapperRef,
-  reserveRef,
-  controller,
-  topOffset,
-  measureAtBottom,
-  cancelBookmark,
-}: SendAnchorArgs): { maintain: () => void } {
+  items, compactBuffer, threadKey, viewportRef, wrapperRef, reserveRef, controller,
+  isFollowing, topOffset, measureAtBottom, cancelBookmark,
+}: SendAnchorArgs) {
   const request = useTimelineStore((state) => state.sendAnchor);
-  // meiva:note
-  // One anchor is three pieces of state: the sequence already consumed (a
-  // request recorded before this view mounted belongs to a thread it never
-  // showed, so it is not owed here), the inbound still waiting for its row
-  // (`undefined` = nothing owed, `null` = the newest user message stands in),
-  // and the position being held (null while no reserve is outstanding).
-  // meiva:link ui/web/src/docs/frontend-components/timeline-view/send-anchor.md
   const consumedSeq = useRef(request.seq);
-  const pending = useRef<number | null | undefined>(undefined);
-  const anchoredTop = useRef<number | null>(null);
+  const pendingSend = useRef<number | null | undefined>(undefined);
+  const [pendingJump, setPendingJump] = useState<{ target: ReadingTarget; automatic: boolean; threadKey: string | undefined } | null>(null);
+  const latestHuman = items.findLast(isHumanMessage);
+  const latestRank = latestHuman === undefined ? 0 :
+    compactBuffer?.rows.find((row) => row.item === latestHuman)?.rank ?? parseItemIdParts(latestHuman.item_id)?.rank ?? 0;
+  const latestId = latestHuman?.item_id;
+  const latestTarget = useMemo(() => latestId === undefined ? null : {
+    id: latestId, rank: latestRank,
+  }, [latestId, latestRank]);
+  const reserveTarget = useRef<ReadingTarget | null>(null);
+  const parkedTarget = useRef<ReadingTarget | null>(null);
 
-  const writeReserve = useCallback((height: number) => {
-    const element = reserveRef.current;
-    if (!element) return;
-    const next = Math.max(0, Math.ceil(height));
-    if (Math.abs(reserveHeight(element) - next) <= 1) return;
-    element.style.height = `${next}px`;
-  }, [reserveRef]);
-
-  const maintain = useCallback(() => {
-    const viewport = viewportRef.current;
-    const element = reserveRef.current;
-    const top = anchoredTop.current;
-    if (!viewport || !element || top === null) return;
-    if (controller.isSticky()) {
-      // meiva:note
-      // Following again: the reserve no longer holds the reader, and keeping it
-      // would park blank space between them and the tail.
-      // meiva:link ui/web/src/docs/frontend-components/timeline-view/send-anchor.md
-      anchoredTop.current = null;
-      writeReserve(0);
-      return;
-    }
-    writeReserve(parkReserve(top, viewport.clientHeight, viewport.scrollHeight - reserveHeight(element)));
-  }, [controller, reserveRef, viewportRef, writeReserve]);
-
-  const anchorRow = useCallback((viewport: HTMLElement, node: HTMLElement) => {
-    // meiva:note
-    // The reader asked for the message they just wrote, so a bookmark still
-    // settling no longer owns the viewport. Released here rather than when the
-    // request arrives: until the row mounts there is nothing to park.
-    // meiva:link ui/web/src/docs/frontend-components/timeline-view/send-anchor.md
-    cancelBookmark();
+  const writeReserve = useCallback((viewport: HTMLElement, node: HTMLElement | null) => {
     const reserve = reserveRef.current;
-    const rowTop = node.getBoundingClientRect().top - viewport.getBoundingClientRect().top + viewport.scrollTop;
-    const top = parkScrollTop(rowTop, topOffset);
-    const natural = viewport.scrollHeight - (reserve ? reserveHeight(reserve) : 0);
-    writeReserve(parkReserve(top, viewport.clientHeight, natural));
-    viewport.scrollTop = top;
-    pending.current = undefined;
-    // meiva:note
-    // The reserved height makes `top` reachable, so the browser keeps it; a
-    // clamp would become the held position instead of a fight with the layout.
-    // meiva:link ui/web/src/docs/frontend-components/timeline-view/send-anchor.md
-    anchoredTop.current = viewport.scrollTop;
+    if (!reserve) return;
+    const height = node ? parkReserve(
+      parkScrollTop(viewport.scrollTop + offsetInViewport(viewport, node), topOffset),
+      viewport.clientHeight,
+      viewport.scrollTop + offsetInViewport(viewport, reserve),
+    ) : 0;
+    const next = `${Math.ceil(height)}px`;
+    if (reserve.style.height !== next) reserve.style.height = next;
+  }, [reserveRef, topOffset]);
+
+  const maintain = useCallback((viewport: HTMLElement) => {
+    const row = latestTarget && rowFor(viewport, latestTarget);
+    if (row || latestTarget !== reserveTarget.current) writeReserve(viewport, row);
+    reserveTarget.current = latestTarget;
+    if (!controller.isAnchored()) parkedTarget.current = null;
+    if (row && parkedTarget.current === latestTarget) {
+      // meiva:note
+      // The pending strip can shrink or grow the viewport in several commits
+      // around the send. Keep the alignment until the reader navigates.
+      // meiva:link ui/web/src/docs/frontend-components/timeline-view/send-anchor.md
+      const target = parkScrollTop(viewport.scrollTop + offsetInViewport(viewport, row), topOffset);
+      if (Math.abs(viewport.scrollTop - target) > 1) {
+        viewport.scrollTop = target;
+        controller.notifyAnchored(snapshotOf(viewport));
+      }
+    }
+  }, [controller, latestTarget, topOffset, writeReserve]);
+
+  const park = useCallback((viewport: HTMLElement, row: HTMLElement) => {
+    cancelBookmark();
+    materializeBeforeAnchor(viewport, row);
+    writeReserve(viewport, row);
+    viewport.scrollTop = parkScrollTop(viewport.scrollTop + offsetInViewport(viewport, row), topOffset);
     controller.notifyAnchored(snapshotOf(viewport));
+    parkedTarget.current = latestTarget && rowFor(viewport, latestTarget) === row ? latestTarget : null;
     measureAtBottom();
-  }, [cancelBookmark, controller, measureAtBottom, reserveRef, topOffset, writeReserve]);
+  }, [cancelBookmark, controller, latestTarget, measureAtBottom, topOffset, writeReserve]);
+
+  const jumpToLatestHuman = useCallback((viewport: HTMLElement, latestRowBelowWindow: boolean) => {
+    if (!latestTarget) return false;
+    const row = rowFor(viewport, latestTarget);
+    if (row) {
+      if (offsetInViewport(viewport, row) <= topOffset + 1) return false;
+      park(viewport, row);
+    } else {
+      if (!latestRowBelowWindow) return false;
+      cancelBookmark();
+      setPendingJump({ target: latestTarget, automatic: false, threadKey });
+    }
+    return true;
+  }, [cancelBookmark, latestTarget, park, threadKey, topOffset]);
+
+  const cancelPendingJump = useCallback(() => {
+    pendingSend.current = undefined;
+    parkedTarget.current = null;
+    setPendingJump(null);
+  }, []);
 
   useLayoutEffect(() => {
+    pendingSend.current = undefined;
+    reserveTarget.current = null;
+    parkedTarget.current = null;
+  }, [threadKey]);
+
+  // meiva:note
+  // A virtual row must mount before the alignment is measured. The layout
+  // pass queues that window change before paint and consumes it once mounted.
+  // meiva:link ui/web/src/docs/frontend-components/timeline-view/send-anchor.md
+  useLayoutEffect(() => {
     const viewport = viewportRef.current
-      ?? wrapperRef.current?.querySelector<HTMLElement>('[data-slot="scroll-area-viewport"]')
-      ?? null;
+      ?? wrapperRef.current?.querySelector<HTMLElement>('[data-slot="scroll-area-viewport"]');
     if (!viewport) return;
 
     if (request.seq !== consumedSeq.current) {
       consumedSeq.current = request.seq;
-      pending.current = request.inboundId;
-      anchoredTop.current = null;
-      writeReserve(0);
+      pendingSend.current = isFollowing() ? request.inboundId : undefined;
     }
 
-    if (pending.current !== undefined && anchoredTop.current === null) {
-      const itemId = targetItemId(items, pending.current);
-      const node = itemId === null ? null : findRow(viewport, itemId);
-      if (node) anchorRow(viewport, node);
+    if (pendingSend.current !== undefined) {
+      const inboundId = pendingSend.current;
+      if (!isFollowing()) pendingSend.current = undefined;
+      else {
+        const item = inboundId === null ? latestHuman : items.find((candidate) => candidate.inbound_id === inboundId && isHumanMessage(candidate));
+        if (item) {
+          pendingSend.current = undefined;
+          const rank = compactBuffer?.rows.find((row) => row.item === item)?.rank ?? parseItemIdParts(item.item_id)?.rank ?? 0;
+          const target = { id: item.item_id, rank };
+          const row = rowFor(viewport, target);
+          if (row) park(viewport, row);
+          else setPendingJump({ target, automatic: true, threadKey });
+        }
+      }
     }
-    maintain();
+
+    if (pendingJump && pendingJump.threadKey === threadKey) {
+      const row = rowFor(viewport, pendingJump.target);
+      if (pendingJump.automatic && !isFollowing()) setPendingJump(null);
+      else if (row) {
+        park(viewport, row);
+        setPendingJump(null);
+      }
+    }
+  }, [compactBuffer, isFollowing, items, latestHuman, park, pendingJump, request, threadKey, viewportRef, wrapperRef]);
+
+  useLayoutEffect(() => {
+    const viewport = viewportRef.current;
+    if (viewport) maintain(viewport);
   });
 
-  return { maintain };
+  const pendingTarget = pendingJump?.threadKey === threadKey ? pendingJump?.target ?? null : null;
+  return { latestTarget, pendingTarget, jumpToLatestHuman, cancelPendingJump, maintain };
 }

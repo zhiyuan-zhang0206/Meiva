@@ -75,7 +75,6 @@ interface Props {
   retainedItemsMax?: number;
 
   loading?: boolean;
-  loadingNew?: boolean;
   maxWidthCss?: string;
   // meiva:note
   // A request to bring one item to the upper part of the viewport, as the reader's own bookmark would: it
@@ -99,7 +98,6 @@ export const TimelineView = memo(function TimelineView({
   onLoadOlder,
   retainedItemsMax = 250,
   loading = false,
-  loadingNew = false,
   maxWidthCss,
   reveal = null,
 }: Props) {
@@ -133,10 +131,8 @@ export const TimelineView = memo(function TimelineView({
   const wrapperRef = useRef<HTMLDivElement>(null);
   const historySpaceRef = useRef<HTMLDivElement>(null);
   // meiva:note
-  // The send anchor's bottom reserve: empty height the reply consumes as it
-  // streams in, which is what keeps the reader's own message parked a fixed
-  // share down the viewport. It sits outside the content column so it carries
-  // no row spacing, and useSendAnchor writes its height directly.
+  // Extra scroll space lets the last human message reach the reading offset.
+  // It sits outside the content column so it carries no row spacing.
   // meiva:link ui/web/src/docs/frontend-components/timeline-view/sticky-scroll.md
   const sendReserveRef = useRef<HTMLDivElement>(null);
 
@@ -197,11 +193,15 @@ export const TimelineView = memo(function TimelineView({
     controller, compactBuffer, canonicalItems,
   });
 
+  const readingReserve = useCallback(() => sendReserveRef.current?.offsetHeight ?? 0, []);
+  const tailHeight = useCallback((viewport: HTMLElement) =>
+    Math.max(viewport.clientHeight, viewport.scrollHeight - readingReserve()), [readingReserve]);
+
   useLayoutEffect(() => () => {
     const mem = scrollMemoryRef.current;
     const viewport = viewportRef.current;
-    if (mem && viewport && !restoreInFlight()) rememberTimelinePosition(viewport, mem.entryKey, mem.contentKey, controller);
-  }, [restoreInFlight, controller]);
+    if (mem && viewport && !restoreInFlight()) rememberTimelinePosition(viewport, mem.entryKey, mem.contentKey, controller, readingReserve() > 0);
+  }, [restoreInFlight, controller, readingReserve]);
 
   const isFollowing = useCallback(() => !holdRestoredPositionRef.current && controller.isSticky(), [controller]);
   const canonicalItemsRef = useRef(canonicalItems);
@@ -244,10 +244,10 @@ export const TimelineView = memo(function TimelineView({
     }
     controller.notifyContentShrunk({
       scrollTop: viewport.scrollTop,
-      scrollHeight: viewport.scrollHeight,
+      scrollHeight: tailHeight(viewport),
       clientHeight: viewport.clientHeight,
     });
-  }, [controller, viewportRef]);
+  }, [controller, tailHeight, viewportRef]);
   useLayoutEffect(() => {
     declareShrink();
   });
@@ -271,37 +271,31 @@ export const TimelineView = memo(function TimelineView({
       return;
     }
     // meiva:note
-    // The control's presence follows the measured distance, with one exception:
-    // a send anchor holds the bottom up, so the viewport is "at the bottom" by
-    // position while the button still has a job (resume following). Hiding it
-    // there would leave the reader no way back.
+    // At the padded bottom, the arrow can still switch a reader to following.
     // meiva:link ui/web/src/docs/frontend-components/timeline-view/sticky-scroll.md
+    const tail = { scrollTop: viewport.scrollTop, scrollHeight: tailHeight(viewport), clientHeight: viewport.clientHeight };
     setAtBottom(
-      !controller.isAnchored() &&
-      isAtBottom(
-        {
-          scrollTop: viewport.scrollTop,
-          scrollHeight: viewport.scrollHeight,
-          clientHeight: viewport.clientHeight,
-        },
-        stickyThresholds,
-      ),
+      isFollowing()
+        ? isAtBottom(tail, stickyThresholds)
+        : viewport.scrollHeight - viewport.scrollTop - viewport.clientHeight <= 1 &&
+          !controller.isAnchored() && readingReserve() === 0,
     );
-  }, [controller, stickyThresholds]);
+  }, [controller, readingReserve, isFollowing, stickyThresholds, tailHeight]);
 
   const pinToBottom = useCallback(
     (viewport: HTMLElement, freshRun = false) => {
-      viewport.scrollTop = viewport.scrollHeight;
+      const height = tailHeight(viewport);
+      viewport.scrollTop = height - viewport.clientHeight;
       controller.notifyPinnedToBottom(
         {
           scrollTop: viewport.scrollTop,
-          scrollHeight: viewport.scrollHeight,
+          scrollHeight: height,
           clientHeight: viewport.clientHeight,
         },
         freshRun,
       );
     },
-    [controller],
+    [controller, tailHeight],
   );
 
   const coldFillRef = useRef({ pages: 0, open: true, inFlight: false, sawLoading: false });
@@ -333,12 +327,15 @@ export const TimelineView = memo(function TimelineView({
     holdRestoredPositionRef.current = false;
   }, [pendingAnchorRef]);
 
-  const { maintain: maintainSendAnchor } = useSendAnchor({
+  const { latestTarget, pendingTarget, jumpToLatestHuman, cancelPendingJump, maintain: maintainSendAnchor } = useSendAnchor({
     items,
+    compactBuffer,
+    threadKey,
     viewportRef,
     wrapperRef,
     reserveRef: sendReserveRef,
     controller,
+    isFollowing,
     topOffset: READING_TOP_PX,
     measureAtBottom,
     cancelBookmark,
@@ -467,6 +464,9 @@ export const TimelineView = memo(function TimelineView({
     applyPendingRestore,
     settleRestoredPosition,
     maintainSendAnchor,
+    readingReserve,
+    tailHeight,
+    cancelPendingJump,
   });
 
   const [, applyReveal] = useReducer((count: number) => count + 1, 0);
@@ -538,10 +538,10 @@ export const TimelineView = memo(function TimelineView({
     isFollowing,
     pendingAnchor: pendingAnchorRef.current,
     compactPin,
-    restoreAnchor:
+    restoreAnchor: pendingTarget ?? (
       !pendingRestoreRef.current?.followBottom && pendingRestoreRef.current?.anchor
         ? { id: pendingRestoreRef.current.anchor.itemId, rank: pendingRestoreRef.current.anchor.rank }
-        : null,
+        : null),
     restoreTop: pendingRestoreRef.current?.scrollTop ?? null,
   });
 
@@ -553,36 +553,30 @@ export const TimelineView = memo(function TimelineView({
   // meiva:link ui/web/src/docs/frontend-components/timeline-view/live-block.md
   const lastGroup = groupEntries.at(-1);
   const liveBlockExpanded = lastGroup !== undefined && lastGroup.isLiveTurn && lastGroup.runExpanded;
-  const prevLiveBlockExpandedRef = useRef(false);
   const pendingLiveExpandPinRef = useRef(false);
   useLayoutEffect(() => {
-    const opened = liveBlockExpanded && !prevLiveBlockExpandedRef.current;
-    prevLiveBlockExpandedRef.current = liveBlockExpanded;
-    const shouldFollowOpenedLiveBlock =
-      pendingLiveExpandPinRef.current ||
-      (opened && (controller.isSticky() || controller.isAnchored()));
-    controller.notifyLiveBlock(liveBlockExpanded);
-    if (shouldFollowOpenedLiveBlock) {
+    if (liveBlockExpanded && pendingLiveExpandPinRef.current) {
       pendingLiveExpandPinRef.current = false;
       const viewport =
         viewportRef.current ??
         wrapperRef.current?.querySelector<HTMLElement>('[data-slot="scroll-area-viewport"]') ??
         null;
       if (viewport) {
-        maintainSendAnchor();
+        maintainSendAnchor(viewport);
         pinToBottom(viewport, true);
         setAtBottom(true);
         startScrollToBottomRide({
           ride: scrollToBottomRideRef.current,
           viewport,
           controller,
+          tailHeight,
           pinToBottom,
           measureAtBottom,
           trimFollowing,
         });
       }
     }
-  }, [controller, liveBlockExpanded, maintainSendAnchor, measureAtBottom, pinToBottom, trimFollowing]);
+  }, [controller, liveBlockExpanded, maintainSendAnchor, measureAtBottom, pinToBottom, tailHeight, trimFollowing]);
 
   const handleToggleTurn = useCallback(
     (id: string, currentlyExpanded: boolean) => {
@@ -595,7 +589,6 @@ export const TimelineView = memo(function TimelineView({
         if (isLiveTurnToggle) {
           cancelBookmark();
           controller.requestStick();
-          maintainSendAnchor();
           setAtBottom(true);
           pendingLiveExpandPinRef.current = true;
         } else {
@@ -605,7 +598,7 @@ export const TimelineView = memo(function TimelineView({
       }
       toggleTurn(id, currentlyExpanded);
     },
-    [cancelBookmark, controller, lastGroup, maintainSendAnchor, toggleTurn],
+    [cancelBookmark, controller, lastGroup, toggleTurn],
   );
 
   const handleScrollToBottom = useCallback(() => {
@@ -615,19 +608,25 @@ export const TimelineView = memo(function TimelineView({
       null;
     if (!viewport) return;
 
+    const latestGroupIndex = latestTarget ? groupEntries.findIndex(({ group }) =>
+      group.kind === "single" && group.member.item.item_id === latestTarget.id && group.member.rank === latestTarget.rank) : -1;
+    if (jumpToLatestHuman(viewport, latestGroupIndex >= virtualRange.end)) return;
+
+    cancelPendingJump();
     cancelBookmark();
     controller.requestStick();
-    maintainSendAnchor();
+    maintainSendAnchor(viewport);
     setAtBottom(true);
     startScrollToBottomRide({
       ride: scrollToBottomRideRef.current,
       viewport,
       controller,
+      tailHeight,
       pinToBottom,
       measureAtBottom,
       trimFollowing,
     });
-  }, [cancelBookmark, controller, maintainSendAnchor, measureAtBottom, pinToBottom, trimFollowing]);
+  }, [cancelBookmark, cancelPendingJump, controller, groupEntries, jumpToLatestHuman, latestTarget, maintainSendAnchor, measureAtBottom, pinToBottom, tailHeight, trimFollowing, virtualRange.end]);
 
   return (
     <div ref={wrapperRef} className={cn("relative", FLEX_1, MIN_H_0, OVERFLOW_HIDDEN)}>
@@ -680,7 +679,7 @@ export const TimelineView = memo(function TimelineView({
         </div>
         <div ref={sendReserveRef} data-send-reserve aria-hidden="true" />
       </ScrollArea>
-      <ScrollToBottomButton atBottom={atBottom} working={turnActive} refreshing={loadingNew && !loadingOlder} onClick={handleScrollToBottom} />
+      <ScrollToBottomButton atBottom={atBottom} onClick={handleScrollToBottom} />
     </div>
   );
 });

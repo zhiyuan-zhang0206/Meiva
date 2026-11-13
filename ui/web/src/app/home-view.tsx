@@ -104,7 +104,6 @@ type TimelineViewState = Pick<
   | "retainedItemsMax"
   | "error"
   | "isFetching"
-  | "loadingNewer"
   | "retryTimeline"
 >;
 
@@ -389,7 +388,6 @@ function HomeContent({
     retainedItemsMax,
     error: timelineError,
     isFetching,
-    loadingNewer,
     retryTimeline,
   } = timeline;
   const pendingMessages = usePendingMessages(activeId, showError);
@@ -507,7 +505,6 @@ function HomeContent({
             onLoadOlder={loadOlder}
             retainedItemsMax={retainedItemsMax}
             loading={isLoading || (agentsLoading && activeId === null)}
-            loadingNew={loadingNewer && items.length > 0}
             maxWidthCss={contentColumnMaxWidth}
             reveal={reveal}
           />

@@ -128,14 +128,14 @@ export interface StickyController {
   // meiva:note
   // Whether the reader is watching the tail right now: inside the bottom zone, or only short of it because a chunk grew the content ahead of the pin that will follow it. A position save reads this instead of a raw distance, so a switch away inside a streaming frame still records "follow the bottom" rather than a row's pixel, and a released reader parked mid-history is never mistaken for one.
   // meiva:link ui/web/src/docs/frontend-components/timeline-view/sticky-scroll.md
-  isAtTail(view: ScrollSnapshot): boolean;
+  isAtTail(view: ScrollSnapshot, paddedBottom?: boolean): boolean;
   /** Feed every viewport scroll event here (snapshot read from the live
    * DOM, not the event). Upward movement accumulates into a run; a run of
    * more than one bottom zone releases following — regardless of how small
    * the individual events were or how many pins interrupted it. */
   /** Classifies scroll movement for history paging. Layout clamps and our
    * own pin echoes return none, so they cannot grant upward intent. */
-  handleScroll(view: ScrollSnapshot): "up" | "down" | "none";
+  handleScroll(view: ScrollSnapshot, paddedBottom?: boolean): "up" | "down" | "none";
   /** Feed every wheel event here. An upward notch outside the bottom zone
    * (measured against both the current and last-known bottom) is an early
    * "stop following" signal (a notch can arrive before the position
@@ -152,7 +152,7 @@ export interface StickyController {
    * even though the zone says "at bottom" — re-sticking them is what
    * re-armed the pin they were escaping. Returns whether the viewport
    * should be pinned. */
-  handleLayoutChange(view: ScrollSnapshot): boolean;
+  handleLayoutChange(view: ScrollSnapshot, paddedBottom?: boolean): boolean;
   /** A touch drag started (touchstart). While a drag is in progress the
    * user's finger IS the scroll position — layout-change pins must not
    * fight it (#1016: on touch devices a slow scroll-up during streaming
@@ -214,33 +214,8 @@ export interface StickyController {
    *  mid-timeline position would be yanked to the bottom by the next layout
    *  growth, and a restored at-bottom position would not keep following. */
   notifyRestored(view: ScrollSnapshot): void;
-  // meiva:note
-  // Reports a performed send anchor: the reader's own message now sits a fixed
-  // share down the viewport, propped from below by a reserve that the stream
-  // consumes. Following stops here, and while that reserve holds the bottom up
-  // the position decides nothing - the viewport sits at the bottom of a padded
-  // document, not at the tail of the conversation - so the at-bottom
-  // reconciliation must not resurrect following until the reply has eaten the
-  // reserve and left the reader genuinely away from the bottom.
-  // meiva:link ui/web/src/docs/frontend-components/timeline-view/sticky-scroll.md
   notifyAnchored(view: ScrollSnapshot): void;
-  // meiva:note
-  // Whether a send anchor still holds the bottom up. The scroll-to-bottom
-  // control reads this: while the reserve is there the viewport is already at
-  // the bottom by position, but the button is not a dead click - it is the
-  // reader's way back into following.
-  // meiva:link ui/web/src/docs/frontend-components/timeline-view/sticky-scroll.md
   isAnchored(): boolean;
-  // meiva:note
-  // Reports whether an expanded live work block is open. Opening an active
-  // working block jumps to its bottom and enables tail-following so the reader
-  // immediately sees the latest in-progress step and follows new steps as they
-  // stream in (user ruling 2026-11-09, replacing the earlier fixed-top-edge
-  // rule). While the block remains open, ordinary upward scroll/wheel gestures
-  // still release following so the reader can inspect earlier steps inside the
-  // block.
-  // meiva:link ui/web/src/docs/frontend-components/timeline-view/live-block.md
-  notifyLiveBlock(open: boolean): void;
   // meiva:note
   // Reports that the reader manually expanded a work block to inspect its
   // contents. Opening a block stops following and marks the departure as
@@ -306,21 +281,9 @@ export function createStickyController(
   // the bottom meanwhile).
   let prevNearBottom = true;
   // meiva:note
-  // A send anchor owns the bottom while its reserve is between the reader and
-  // the true end of the content: the viewport reads "at bottom" because the
-  // reserve IS the rest of the document, not because the reader follows the
-  // tail. Cleared by the first observation that leaves the bottom zone - the
-  // point where the reply has filled the reserve and position means what it
-  // says again - and by any performed pin or restore, which take the viewport
-  // back deliberately.
-  // meiva:link ui/web/src/docs/frontend-components/timeline-view/sticky-scroll.md
+  // A reading position or an interrupted jump waits for an intentional return.
+  // meiva:link ui/web/src/docs/frontend-components/timeline-view/send-anchor.md
   let anchored = false;
-  // meiva:note
-  // Tracks whether the active working block is currently expanded so opening it
-  // transitions into bottom-following once without re-sticking on every streamed
-  // commit while it stays open. See `notifyLiveBlock`.
-  // meiva:link ui/web/src/docs/frontend-components/timeline-view/live-block.md
-  let liveBlockOpen = false;
 
   // Following: remember where the bottom was, so a later growth can be
   // told apart from a user scrolling away.
@@ -362,24 +325,15 @@ export function createStickyController(
     }
   };
 
-  // meiva:note
-  // The anchor lets go the moment the viewport is away from the bottom for
-  // real: from there the ordinary rules decide again, so a reader who scrolls
-  // back down re-follows and one who stays keeps their place.
-  // meiva:link ui/web/src/docs/frontend-components/timeline-view/sticky-scroll.md
-  const releaseAnchor = (view: ScrollSnapshot) => {
-    if (anchored && !isAtBottom(view, thresholds)) anchored = false;
-  };
-
   return {
     isSticky: () => sticky,
     isAnchored: () => anchored,
 
-    isAtTail: (view) =>
-      isAtBottom(view, thresholds) || (sticky && nearLastKnownBottom(view)),
+    isAtTail: (view, paddedBottom = false) =>
+      sticky ? isAtBottom(view, thresholds) || nearLastKnownBottom(view)
+        : !anchored && !paddedBottom && isAtBottom(view, thresholds),
 
-    handleScroll(view) {
-      releaseAnchor(view);
+    handleScroll(view, paddedBottom = false) {
       const zone = bottomZone(view.clientHeight, thresholds);
       const atBottom = isAtBottom(view, thresholds);
       const movedUp = prevScrollTop - view.scrollTop;
@@ -411,7 +365,7 @@ export function createStickyController(
           // a gesture: nothing to depart from. Reconcile and start a
           // fresh run.
           upwardRun = 0;
-          reconcileAtBottom(view);
+          if (!paddedBottom || sticky) reconcileAtBottom(view);
         } else {
           direction = "up";
           // Upward movement, however small the single event: accumulate
@@ -422,7 +376,7 @@ export function createStickyController(
           upwardRun += effectiveMovedUp;
           if (upwardRun > zone) {
             unstick();
-          } else if (atBottom) {
+          } else if (atBottom && sticky) {
             // Still inside the live zone: following continues.
             stick(view);
           }
@@ -434,8 +388,13 @@ export function createStickyController(
         // Deliberate downward movement: a fresh run starts; landing back
         // inside the zone re-sticks (the manual return path).
         upwardRun = 0;
-        if (atBottom) stick(view);
-      } else if (atBottom) {
+        if (atBottom && (!paddedBottom || sticky)) {
+          if (!anchored || view.scrollHeight - view.scrollTop - view.clientHeight <= 1) {
+            anchored = false;
+            stick(view);
+          }
+        }
+      } else if (atBottom && (!paddedBottom || sticky)) {
         // Echoes and sub-noise wobble decide nothing by themselves, but
         // the zone flag must still track the live position. A
         // bottom-follower who never moved keeps the anchor at the last
@@ -474,7 +433,7 @@ export function createStickyController(
       unstick();
     },
 
-    handleLayoutChange(view) {
+    handleLayoutChange(view, paddedBottom = false) {
       // An active touch drag is the user's own scroll position — never
       // pin under their finger. The growth is not lost: the drag's own
       // scroll events keep feeding handleScroll, and the position rule
@@ -491,9 +450,8 @@ export function createStickyController(
       // released mid-pull is NOT reconciled: they are inside the zone by
       // position but left it by intent, and re-sticking here re-arms the
       // pin they are escaping.
-      releaseAnchor(view);
       const atBottom = isAtBottom(view, thresholds);
-      if (atBottom) {
+      if (atBottom && (!paddedBottom || sticky)) {
         reconcileAtBottom(view);
       } else if (sticky) {
         // Keep the anchor current even when the viewport has drifted from
@@ -588,16 +546,6 @@ export function createStickyController(
       prevNearBottom = atBottom;
     },
 
-    notifyLiveBlock(open) {
-      if (liveBlockOpen === open) return;
-      liveBlockOpen = open;
-      if (open) {
-        sticky = true;
-        anchored = false;
-        upwardRun = 0;
-      }
-    },
-
     notifyBlockExpanded() {
       unstick();
       upwardRun = Number.POSITIVE_INFINITY;
@@ -606,6 +554,7 @@ export function createStickyController(
     notifyAnchored(view) {
       anchored = true;
       unstick();
+      shrinkPending = false;
       upwardRun = 0;
       prevScrollTop = view.scrollTop;
       prevScrollHeight = view.scrollHeight;

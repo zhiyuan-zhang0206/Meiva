@@ -223,14 +223,9 @@ describe("touch drag vs streaming pin (#1016)", () => {
     // Back to the bottom (re-stick via the position rule).
     viewport.scrollTop = 400;
     viewport.dispatchEvent(new Event("scroll"));
-    // Growth now pins again. (happy-dom does not clamp scrollTop on
-    // assignment; a real browser clamps the pin's scrollTop =
-    // scrollHeight write to scrollHeight - clientHeight = 600. The
-    // assertion is on the pin HAVING happened — scrollTop moved from
-    // 400 to the written scrollHeight.)
     viewportGeom(viewport, 1200, 600);
     fireRO();
-    expect(viewport.scrollTop).toBe(1200); // pinned (real browser: 600)
+    expect(viewport.scrollTop).toBe(600);
   });
 });
 

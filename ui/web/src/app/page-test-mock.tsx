@@ -241,7 +241,6 @@ export function homePageProps(): HomePageProps {
       retainedItemsMax: 0,
       error: state.timelineError,
       isFetching: state.timelineFetching,
-      loadingNewer: false,
       retryTimeline: state.retryTimeline,
     },
     timelineStore: { requestSendAnchor: state.requestSendAnchor, liveAnchorAt: 0 },

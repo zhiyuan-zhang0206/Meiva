@@ -15,13 +15,6 @@ import { FLEX, OVERFLOW_HIDDEN } from "@/lib/layout/layout";
 const RING_SIZE = 20;
 
 // meiva:note
-// One ring, one geometry. The pull strip and the scroll-to-bottom button both
-// draw this, so its size cannot land on one of them and miss the other: the
-// button used to carry its own circle drawn to the button's edges, r=16.5 in a
-// 36-unit box, which read as a dial rather than a loader (user report
-// 2026-10-20). An arc fraction of 1 is a whole circle; the pull strip's grows
-// with the pull, the button's is fixed.
-// meiva:note
 // Two presentations, one ring: it turns while a load is in flight, and a
 // reader who asked for reduced motion gets the same ring breathing (opacity
 // only) instead of a frozen one.
@@ -135,72 +128,29 @@ export function ColdLoadSpinner({ show }: { show: boolean }) {
 }
 
 // meiva:note
-// Scroll-to-bottom button: present whenever the viewport is measured away from
-// the bottom, and clicking it smooth-scrolls back. While a refresh is in flight
-// it rests as the same ring the pull-to-load gesture uses; hovering (or
-// focusing it from the keyboard) swaps in the arrow, because a ring alone does
-// not read as something to click (user report 2026-10-19).
-
-// meiva:note
-// At the bottom the control is not rendered at all: nothing is left to scroll
-// to, so a faded-but-present button only produced a hover target that turned
-// into an arrow over a click that did nothing (user report 2026-10-30). A
-// refresh in flight does not override that — a ring over the same dead click is
-// the same problem. `atBottom` is the measured distance to the bottom, so
-// content appended above re-decides it.
+// A solid surface avoids repainting the content beneath the arrow in WebKit.
 // meiva:link ui/web/src/docs/frontend-components/timeline-view/sticky-scroll.md
-export function ScrollToBottomButton({
-  atBottom,
-  refreshing = false,
-  working = false,
-  onClick,
-}: {
-  atBottom: boolean;
-  refreshing?: boolean;
-  working?: boolean;
-  onClick: () => void;
-}) {
+export function ScrollToBottomButton({ atBottom, onClick }: { atBottom: boolean; onClick: () => void }) {
   const t = useTranslations("timeline");
   if (atBottom) return null;
   return (
     <button
       type="button"
       onClick={onClick}
-      aria-label={working ? t("jumpToLatestWorking") : t("scrollToBottom")}
-      aria-busy={refreshing}
+      aria-label={t("scrollDown")}
       data-testid="scroll-to-bottom"
-      data-working={working ? "true" : undefined}
       className={cn(
-        "absolute bottom-4 right-4 z-30",
+        "absolute bottom-4 left-1/2 -translate-x-1/2 z-30",
         "size-9 rounded-full",
-        // Solid bg, no backdrop-blur: backdrop-filter over the scroll
-        // area forces iOS WebKit to re-sample the content behind it,
-        // a known repaint-cost / blank-tile aggravator during streaming.
         "bg-background border border-border",
         "shadow-md hover:shadow-lg",
-        "group items-center justify-center",
+        "items-center justify-center",
         "text-muted-foreground hover:text-foreground",
-        "transition-all duration-300 ease-out",
-        FLEX
+        "transition-colors duration-300 ease-out",
+        FLEX,
       )}
     >
-      {refreshing ? (
-        <>
-          <LoadingRing testId="latest-loading-ring" arc={0.37}
-            className="group-hover:hidden group-focus-visible:hidden" />
-          <ArrowDown data-testid="scroll-to-bottom-arrow" className="hidden size-4 group-hover:block group-focus-visible:block" />
-          <span role="status" className="sr-only">{t("loadingLatest")}</span>
-        </>
-      ) : (
-        <ArrowDown data-testid="scroll-to-bottom-arrow" className="size-4" />
-      )}
-      {working ? (
-        <span
-          aria-hidden="true"
-          data-testid="scroll-to-bottom-working"
-          className="absolute -right-0.5 -top-0.5 size-2.5 animate-pulse rounded-full border border-background bg-emerald-500"
-        />
-      ) : null}
+      <ArrowDown aria-hidden="true" data-testid="scroll-to-bottom-arrow" className="size-4" />
     </button>
   );
 }

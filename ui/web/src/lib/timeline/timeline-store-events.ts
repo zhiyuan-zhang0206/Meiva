@@ -76,8 +76,8 @@ export interface TimelineState {
   // The reader's own send, waiting to be placed: `seq` makes every request a
   // new one and `inboundId` names the message the gateway stored (null when the
   // receipt carried none, so the newest user message stands in). The timeline
-  // consumes it once the committed row reaches the DOM, parks that row a fixed
-  // share down the viewport and stops following.
+  // consumes it after the committed row arrives. A reader who was following
+  // starts at that row, with space for the reply to grow below it.
   // meiva:link ui/web/src/docs/frontend-components/timeline-view/sticky-scroll.md
   sendAnchor: { seq: number; inboundId: number | null };
   requestSendAnchor: (inboundId: number | null) => void;

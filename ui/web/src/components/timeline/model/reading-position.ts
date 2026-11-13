@@ -6,14 +6,14 @@ import type { StickyController } from "@/lib/layout/sticky";
 // A saved position is one of two kinds. A reader watching the tail (the follow rule's own `isAtTail`, not a raw distance) is not reading a row, so the bookmark says "follow the bottom" and a return lands on the newest message however much arrived meanwhile — including when the switch happens between a streamed chunk and the pin that would have followed it. Any other reader keeps the visible item and its offset and is returned to that item.
 // meiva:link ui/web/src/docs/frontend-components/timeline-view/sticky-scroll.md
 export function rememberTimelinePosition(
-  viewport: HTMLElement, entryKey: string, contentKey: string, controller: StickyController,
+  viewport: HTMLElement, entryKey: string, contentKey: string, controller: StickyController, paddedBottom = false,
 ) {
   const position = {
     scrollTop: viewport.scrollTop,
     scrollHeight: viewport.scrollHeight,
     clientHeight: viewport.clientHeight,
   };
-  if (controller.isAtTail(position)) {
+  if (controller.isAtTail(position, paddedBottom)) {
     saveScrollMemory(entryKey, { contentKey, scrollTop: position.scrollTop, followBottom: true });
     return;
   }

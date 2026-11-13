@@ -1,15 +1,10 @@
 # The expanded live block
 
-An active turn's expanded block reports itself through
-`createStickyController().notifyLiveBlock(open)`. Opening an active `Working`
-block jumps directly to the bottom of its expanded content and enables
-tail-following (`sticky = true`) so the reader immediately sees the latest
-in-progress step and follows subsequent streamed output (user ruling 2026-11-09,
-superseding the earlier fixed-top-edge rule). While the block remains open,
-ordinary upward scroll or wheel gestures still release following so the reader
-can inspect earlier steps inside the block. Manually expanding a settled
-historical `TurnBlock` calls `notifyBlockExpanded()` instead, keeping the
-viewport where the reader clicked.
+Manually opening an active `Working` block jumps to the bottom of its expanded
+content and starts following new output. An automatically expanded block follows
+the reader's current scroll mode. In either case, the reader can scroll up to
+inspect earlier steps. Manually expanding a settled `TurnBlock` keeps the
+viewport at the clicked position through `notifyBlockExpanded()`.
 
 ## Relationship to Other Nodes
 
