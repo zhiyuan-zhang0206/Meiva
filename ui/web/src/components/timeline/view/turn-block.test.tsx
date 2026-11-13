@@ -110,6 +110,7 @@ describe("TurnBlock component", () => {
     expect(rail?.className).toContain("ml-1.5");
     expect(rail?.className).toContain("pl-2");
     expect(rail?.className).not.toContain("pl-3");
+    expect(rail?.className).not.toContain("border");
   });
 
   it("shares the identical unboxed chrome when liveWindow is true", () => {

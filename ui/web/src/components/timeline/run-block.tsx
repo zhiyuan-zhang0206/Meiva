@@ -173,9 +173,12 @@ export const TurnBlock = memo(function TurnBlock({
         data-expanded={expanded}
       >
         <ChevronRight
+          aria-hidden="true"
           className={cn(
-            "size-3.5 shrink-0 opacity-60 mt-0.5",
-            expanded && "rotate-90",
+            "size-3.5 shrink-0 mt-0.5",
+            expanded
+              ? "rotate-90 opacity-60"
+              : "opacity-0 group-hover/turn-toggle:opacity-60 group-focus-visible/turn-toggle:opacity-60 pointer-coarse:opacity-60",
           )}
         />
         <span className={cn("gap-0.5", FLEX, FLEX_COL, MIN_W_0, FLEX_1)}>
@@ -199,7 +202,7 @@ export const TurnBlock = memo(function TurnBlock({
       >
         <div className={cn(OVERFLOW_HIDDEN, MIN_H_0, MIN_W_0)}>
           {expanded ? (
-            <div className="mt-1.5 ml-1.5 pl-2 pr-2 border-l border-border/60 space-y-1">
+            <div className="mt-1.5 ml-1.5 pl-2 pr-2 space-y-1">
               {children}
             </div>
           ) : null}
