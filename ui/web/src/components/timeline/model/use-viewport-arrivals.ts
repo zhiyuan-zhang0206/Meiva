@@ -147,7 +147,8 @@ export function useSendAnchor({
     if (row || latestTarget !== reserveTarget.current) writeReserve(viewport, row);
     reserveTarget.current = latestTarget;
     if (!controller.isAnchored()) parkedTarget.current = null;
-    if (row && parkedTarget.current === latestTarget) {
+    const parked = parkedTarget.current !== null && parkedTarget.current === latestTarget;
+    if (row && parked) {
       // meiva:note
       // The pending strip can shrink or grow the viewport in several commits
       // around the send. Keep the alignment until the reader navigates.
@@ -158,6 +159,7 @@ export function useSendAnchor({
         controller.notifyAnchored(snapshotOf(viewport));
       }
     }
+    return parked;
   }, [controller, latestTarget, topOffset, writeReserve]);
 
   const park = useCallback((viewport: HTMLElement, row: HTMLElement) => {
@@ -171,7 +173,7 @@ export function useSendAnchor({
   }, [cancelBookmark, controller, latestTarget, measureAtBottom, topOffset, writeReserve]);
 
   const jumpToLatestHuman = useCallback((viewport: HTMLElement, latestRowBelowWindow: boolean) => {
-    if (!latestTarget) return false;
+    if (!latestTarget || (parkedTarget.current === latestTarget && controller.isAnchored())) return false;
     const row = rowFor(viewport, latestTarget);
     if (row) {
       if (offsetInViewport(viewport, row) <= topOffset + 1) return false;
@@ -182,7 +184,7 @@ export function useSendAnchor({
       setPendingJump({ target: latestTarget, automatic: false, threadKey });
     }
     return true;
-  }, [cancelBookmark, latestTarget, park, threadKey, topOffset]);
+  }, [cancelBookmark, controller, latestTarget, park, threadKey, topOffset]);
 
   const cancelPendingJump = useCallback(() => {
     pendingSend.current = undefined;

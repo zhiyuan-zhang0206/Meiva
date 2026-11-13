@@ -135,6 +135,24 @@ describe("send anchor", () => {
     expect(reservePx()).toBe(478);
   });
 
+  it("keeps a clicked question aligned through a layout scroll before ResizeObserver", () => {
+    const view = render(<TimelineView items={[earlier]} />);
+    act(() => { top = 100; viewport().dispatchEvent(new Event("scroll")); });
+    content = 1400;
+    view.rerender(<TimelineView items={[earlier, sent]} />);
+    act(() => { screen.getByTestId("scroll-to-bottom").click(); });
+    expect(top).toBe(1244);
+
+    humanTop += 350;
+    content = 2800;
+    act(() => { viewport().dispatchEvent(new Event("scroll")); });
+    expect(top).toBe(1594);
+
+    const scrollTo = vi.spyOn(viewport(), "scrollTo");
+    act(() => { screen.getByTestId("scroll-to-bottom").click(); });
+    expect(scrollTo).toHaveBeenCalledWith({ top: 2200, behavior: "smooth" });
+  });
+
   it("keeps history in place on send and uses the current position for each arrow click", () => {
     const view = render(<TimelineView items={[earlier]} />);
     act(() => { top = 100; viewport().dispatchEvent(new Event("scroll")); });
@@ -193,7 +211,11 @@ describe("send anchor", () => {
     resize();
     expect(top).toBe(1244);
 
-    act(() => { top = 1300; viewport().dispatchEvent(new Event("scroll")); });
+    act(() => {
+      viewport().dispatchEvent(new WheelEvent("wheel", { deltaY: 80, bubbles: true }));
+      top = 1300;
+      viewport().dispatchEvent(new Event("scroll"));
+    });
     content = 2400;
     resize();
     expect(top).toBe(1800);

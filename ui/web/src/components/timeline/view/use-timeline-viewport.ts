@@ -259,7 +259,7 @@ export function useTimelineViewport({
   // pass and not to a later one, where the reader would see the reserve and the
   // growth fight for one frame.
   // meiva:link ui/web/src/docs/frontend-components/timeline-view/sticky-scroll.md
-  maintainSendAnchor: (viewport: HTMLElement) => void;
+  maintainSendAnchor: (viewport: HTMLElement) => boolean;
   readingReserve: () => number;
   tailHeight: (viewport: HTMLElement) => number;
   cancelPendingJump: () => void;
@@ -283,7 +283,13 @@ export function useTimelineViewport({
           viewport.scrollTop > tailHeight(viewport) - viewport.clientHeight + 1) {
         controller.notifyAnchored({ ...snapshot(), scrollHeight: viewport.scrollHeight });
       }
-      const direction = holdRestoredPositionRef.current && !pendingRestoreRef.current ? "none" : controller.handleScroll(snapshot(), padded);
+      // meiva:note
+      // A parked row owns its position until reader input releases it. Resize
+      // and reserve changes can dispatch scroll before the resize observer.
+      // meiva:link ui/web/src/docs/frontend-components/timeline-view/send-anchor.md
+      const parked = controller.isAnchored() && maintainSendAnchor(viewport);
+      const direction = parked || (holdRestoredPositionRef.current && !pendingRestoreRef.current)
+        ? "none" : controller.handleScroll(snapshot(), padded);
       if (direction === "up" && !scrollToBottomRideRef.current.active) coldFillRef.current.open = false;
 
       if (scrollToBottomRideRef.current.active) {
