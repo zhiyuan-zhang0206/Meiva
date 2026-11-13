@@ -5,12 +5,13 @@ from collections.abc import Callable, Collection, Iterable
 from dataclasses import dataclass
 from urllib.parse import unquote, urlparse
 
-from base.host.boundary.json_values import is_object_dict, is_object_list
+from base.host.boundary.json_values import is_object_dict
 from base.lm.harness.codex.transcript.clock import iso_at, parse_iso_ms
 from base.lm.harness.codex.transcript.errors import MissingFieldError, UnknownValueError
 from base.lm.harness.codex.transcript.items import (
     Where,
     as_anomaly,
+    failure_entry,
     interrupt_entry,
     item_entries,
     remember_inputs,
@@ -20,7 +21,6 @@ from base.lm.harness.codex.transcript.scalars import opt_int, opt_text, req_int,
 from base.lm.harness.codex.transcript.shapes import Obj, obj, objects, opt_objects, strings
 from base.lm.harness.events import HarnessCause, Usage
 from base.lm.harness.session.transcript.entries import (
-    AgentText,
     AnyEntry,
     Notice,
     Order,
@@ -40,10 +40,21 @@ from base.lm.harness.session.transcript.entries import (
 # `turn_aborted` event says the same).
 # meiva:link base/lm/harness/docs/transcript-projection.md
 
-_QUIET_LINES = frozenset({"session_meta", "turn_context", "world_state", "compacted"})
+_QUIET_LINES = frozenset(
+    {
+        "session_meta",
+        "turn_context",
+        "world_state",
+        "compacted",
+        "inter_agent_communication_metadata",
+    }
+)
 _QUIET_EVENTS = frozenset({"task_started", "token_count", "thread_settings_applied"})
 _QUIET_RESPONSES = frozenset(
     {
+        "reasoning",
+        "agent_message",
+        "configuration_update",
         "additional_tools",
         "custom_tool_call",
         "custom_tool_call_output",
@@ -107,10 +118,24 @@ def _event(payload: Obj, at: Stamp, record: str, input_turns: Collection[str]) -
     if kind == "item_completed":
         return _item_completed(payload, at, record, input_turns)
     if kind == "task_complete":
-        return [turn_end_entry(text(payload, "turn_id"), at.ms, at.seq, record)]
+        return [_turn_end(payload, at, record)]
     if kind == "turn_aborted":
-        return [interrupt_entry(text(payload, "turn_id"), at.ms, at.seq, record)]
+        return [interrupt_entry(opt_text(payload, "turn_id"), at.ms, at.seq, record)]
     raise UnknownValueError(f"event_msg/{kind}")
+
+
+# meiva:note
+# A turn's own end. A turn that failed says so on this row and on no other: `error` holds the CLI's `message` and its
+# `codex_error_info` (a word such as `unauthorized`, or an object). An abort may name no turn (`"turn_id": null` was seen
+# in real rollouts); it is an interrupt of the turn that is open.
+def _turn_end(payload: Obj, at: Stamp, record: str) -> AnyEntry:
+    turn = text(payload, "turn_id")
+    error = payload.get("error")
+    if not is_object_dict(error):
+        return turn_end_entry(turn, at.ms, at.seq, record)
+    info = error.get("codex_error_info")
+    said = (opt_text(error, "message") or "").strip() or (info if isinstance(info, str) else "")
+    return failure_entry(turn, said or "the turn failed", at.ms, at.seq, record)
 
 
 def _item_completed(
@@ -127,50 +152,22 @@ def _item_completed(
     return item_entries(_as_history_item(item), where, input_turns)
 
 
-def _response(payload: Obj, at: Stamp, record: str, input_turns: Collection[str]) -> list[AnyEntry]:
+def _response(
+    payload: Obj, at: Stamp, record: str, _input_turns: Collection[str]
+) -> list[AnyEntry]:
     kind = text(payload, "type")
     if kind in _QUIET_RESPONSES:
         return []
     if kind == "message":
         return _message(payload, at, record)
-    if kind == "reasoning":
-        item: Obj = {"type": "reasoning", "id": text(payload, "id"), "summary": _summary(payload)}
-        where = Where(_passthrough_turn(payload), record, at.ms, None, at.seq)
-        return item_entries(item, where, input_turns)
     raise UnknownValueError(f"response_item/{kind}")
-
-
-def _summary(payload: Obj) -> list[str]:
-    summary = payload.get("summary")
-    found: list[str] = []
-    for part in summary if is_object_list(summary) else []:
-        if isinstance(part, str):
-            found.append(part)
-        elif is_object_dict(part) and isinstance(value := part.get("text"), str):
-            found.append(value)
-    return found
-
-
-def _passthrough_turn(payload: Obj) -> str:
-    return text(
-        obj(payload.get("internal_chat_message_metadata_passthrough"), "passthrough"), "turn_id"
-    )
 
 
 def _message(payload: Obj, at: Stamp, record: str) -> list[AnyEntry]:
     role = text(payload, "role")
+    if role != "user":
+        return []
     body = "".join(text(part, "text") for part in opt_objects(payload, "content") if "text" in part)
-    if role == "assistant":
-        message = AgentText(
-            key=f"agent:{text(payload, 'id')}",
-            order=Order(at.seq, 0),
-            record=record,
-            turn=_passthrough_turn(payload),
-            at=iso_at(at.ms),
-            text=body,
-            message_ref=text(payload, "id"),
-        )
-        return [message]
     if role == "user" and body.lstrip().startswith(_NOTIFICATION):
         report = body.strip().removeprefix(_NOTIFICATION).removesuffix(_NOTIFICATION_END).strip()
         return [
@@ -181,6 +178,7 @@ def _message(payload: Obj, at: Stamp, record: str) -> list[AnyEntry]:
                 at=iso_at(at.ms),
                 text=report,
                 cause=HarnessCause.BACKGROUND_TASK,
+                opens_turn=False,
             )
         ]
     return []
@@ -296,7 +294,85 @@ def _collab_item(item: Obj) -> Obj:
     }
 
 
+# meiva:note
+# The rollout's file change is a map from path to `{type, content | unified_diff}`; the protocol's is a list of
+# `{path, kind, diff}`. A picture is never copied: the image view names the file only.
+def _file_change_item(item: Obj) -> Obj:
+    changes: list[Obj] = []
+    raw = item.get("changes")
+    for path, change in (raw if is_object_dict(raw) else {}).items():
+        if not is_object_dict(change):
+            continue
+        diff = change.get("unified_diff") or change.get("content")
+        changes.append(
+            {
+                "path": path,
+                "kind": change.get("type"),
+                "diff": diff if isinstance(diff, str) else None,
+            }
+        )
+    return {
+        "type": "fileChange",
+        "id": text(item, "id"),
+        "changes": changes,
+        "status": text(item, "status"),
+        "output": item.get("stdout"),
+    }
+
+
+def _image_view_item(item: Obj) -> Obj:
+    return {
+        "type": "imageView",
+        "id": text(item, "id"),
+        "path": unquote(urlparse(text(item, "path")).path),
+    }
+
+
+def _extension_item(item: Obj) -> Obj:
+    kind = text(item, "kind")
+    if kind == "clock.sleep":
+        return {"type": "sleep", "id": text(item, "id"), "durationMs": item.get("durationMs")}
+    if kind != "web.search":
+        raise UnknownValueError(f"item_completed/Extension:{kind}")
+    return {
+        "type": "webSearch",
+        "id": text(item, "id"),
+        "query": text(item, "query"),
+        "results": item.get("results"),
+    }
+
+
+# meiva:note
+# The rollout's sub-agent activity and MCP call are spelled as the protocol's, except for the camel case of a few names
+# and the duration (a seconds and nanoseconds pair, not read).
+def _sub_agent_item(item: Obj) -> Obj:
+    return {
+        "type": "subAgentActivity",
+        "id": text(item, "id"),
+        "kind": item.get("kind"),
+        "agentPath": item.get("agent_path"),
+        "agentThreadId": item.get("agent_thread_id"),
+    }
+
+
+def _mcp_item(item: Obj) -> Obj:
+    return {
+        "type": "mcpToolCall",
+        "id": text(item, "id"),
+        "server": item.get("server"),
+        "tool": item.get("tool"),
+        "arguments": item.get("arguments"),
+        "result": item.get("result"),
+        "status": item.get("status"),
+    }
+
+
 _CONVERT: dict[str, Callable[[Obj], Obj]] = {
+    "SubAgentActivity": _sub_agent_item,
+    "McpToolCall": _mcp_item,
+    "FileChange": _file_change_item,
+    "ImageView": _image_view_item,
+    "Extension": _extension_item,
     "UserMessage": _user_item,
     "AgentMessage": _agent_item,
     "Reasoning": _reasoning_item,

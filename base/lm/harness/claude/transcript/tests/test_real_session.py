@@ -9,6 +9,7 @@
 
 from __future__ import annotations
 
+from base.lm.harness.claude.transcript.parse import ParseState, parse_row
 from base.lm.harness.claude.transcript.tests.support import entries_of
 from base.lm.harness.events import HarnessCause
 from base.lm.harness.session.transcript.entries import (
@@ -57,3 +58,37 @@ def test_a_task_notification_is_a_notice_with_its_cause() -> None:
     assert [d.payload for d in shown if d.source == HarnessCause.BACKGROUND_TASK.value] == [
         notices[0].text
     ]
+
+
+# meiva:note
+# Two rows production records hold that no recording of ours does (found by a statistic over the records of real
+# sessions that counted row kinds, key names and value types and read no content; the values here are invented): the
+# notice of a request that failed and is retried, and the attachment that tells the model its permission mode. Neither
+# is something a timeline shows, and neither is reported as unknown.
+def test_a_retry_notice_and_a_mode_attachment_are_ignored_not_reported_as_unknown() -> None:
+    common = {
+        "uuid": "11111111-1111-4111-8111-111111111111",
+        "timestamp": "2026-11-01T00:00:00.000Z",
+        "sessionId": "s",
+        "isSidechain": False,
+    }
+    retry = {
+        **common,
+        "type": "system",
+        "subtype": "api_error",
+        "level": "error",
+        "source": "request_retry",
+        "retryAttempt": 1,
+        "maxRetries": 10,
+        "retryInMs": 500,
+        "error": {"message": "x", "formatted": "x", "isNetworkDown": False},
+    }
+    mode = {
+        **common,
+        "type": "attachment",
+        "attachment": {"type": "auto_mode", "bypass": True, "steerOnly": True},
+        "renderedRole": "system",
+    }
+    for row in (retry, mode):
+        _state, entries = parse_row(ParseState(), row, line=0)
+        assert entries == ()

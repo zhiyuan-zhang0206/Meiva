@@ -191,7 +191,7 @@ async def test_leaving_an_external_harness_for_the_native_one_marks_the_outgoing
         db_conn,
         aops_pool,
         database_gate,
-        stored="codex",
+        stored="antigravity",
         transition=RestartTransition("meiva", {"llm_model": "deepseek-flash"}),
         message="back to native",
     )
@@ -209,6 +209,6 @@ async def test_leaving_an_external_harness_for_the_native_one_marks_the_outgoing
     async with async_write_transaction(aops_pool) as conn:
         [marker] = await aload_harness_timeline_items(conn, owner.agent_id)
     assert marker.kind == "system_marker"
-    assert "Harness switched from 'codex' to 'meiva' by yourself: back to native" in str(
+    assert "Harness switched from 'antigravity' to 'meiva' by yourself: back to native" in str(
         marker.payload
     )

@@ -98,7 +98,8 @@ steer`, a missing method and invalid params are `InputRejected` (the rest of the
 it); any other RPC error raises. `clientUserMessageId` carries no replay guarantee, so a lost input may
 be handed over again, and only after a rollout reconciliation says it is not there
 (`reconciliation/`, matching `item_completed.item.client_id`; the rollout format was observed on
-app-server 0.166 and is not a published interface).
+app-server 0.166 and is not a published interface). The same file is the source of the agent's timeline, read from disk
+when it is asked for ([what the rollout holds](rollout.md)).
 
 A `turn/started` for a turn this session did not start, with `status: inProgress`, while none of ours runs,
 is observed as a harness turn (`TurnStarted(origin=HARNESS, cause=UNKNOWN)`): its text, tools and usage are

@@ -11,7 +11,8 @@ from base.agents.history.transcript_timeline.tests.support import (
     inbound,
     window,
 )
-from base.lm.harness.claude.transcript.window import EntryParser, RecordFile, wire_id
+from base.lm.harness.claude.transcript.window import EntryParser, wire_id
+from base.lm.harness.session.transcript.record_file import RecordFile
 
 
 # meiva:note

@@ -467,9 +467,6 @@ class TestRestart:
         assert resp.status_code == 404
 
     def test_harness_switch_meiva_to_codex(self, db_conn: psycopg.Connection) -> None:
-        from base.agents.history.harness_messages import append_harness_timeline_items
-        from base.agents.history.timeline_item import TimelineItem
-
         with gateway_test_client() as client:
             _seed_restart_harnesses(client)
             agent_id = spawn_via_http(client, {}).json()["id"]
@@ -498,21 +495,6 @@ class TestRestart:
                 assert row[2].get("reasoning_effort") == "medium"
                 assert "harness" not in row[2]
                 assert row[3] is not None
-
-            item = TimelineItem(
-                item_id="1.0",
-                kind="agent_chat",
-                source="codex",
-                payload="hello from codex",
-                created_at="2026-11-01T12:00:00Z",
-            )
-            append_harness_timeline_items(db_conn, agent_id, "codex", [item])
-            db_conn.commit()
-
-            t_resp = client.get(f"/api/agents/{agent_id}/timeline")
-            assert t_resp.status_code == 200
-            items = t_resp.json()["items"]
-            assert any(i.get("payload") == "hello from codex" for i in items)
 
     def test_harness_switch_codex_to_meiva(self, db_conn: psycopg.Connection) -> None:
         from base import paths

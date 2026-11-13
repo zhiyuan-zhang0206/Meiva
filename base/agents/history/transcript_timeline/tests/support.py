@@ -7,9 +7,9 @@ from pathlib import Path
 
 from base.agents.history.timeline_item import TimelineItem
 from base.agents.history.transcript_timeline.items import ReplyPolicy, format_tool_use
-from base.agents.history.transcript_timeline.read import Window, read_window
+from base.agents.history.transcript_timeline.record.read import Window, read_window
 from base.lm.harness.claude.delivery import key_uuid
-from base.lm.harness.claude.transcript.window import RecordFile
+from base.lm.harness.session.transcript.record_file import RecordFile
 
 FIXTURES = Path(__file__).parents[4] / "lm/harness/claude/transcript/tests/fixtures"
 POLICY = ReplyPolicy(explicit_visibility=False, delivery_mode=None)
@@ -58,9 +58,11 @@ def window(
     limit: int = 1000,
     before: int | None = None,
     sent: Mapping[str, Sequence[TimelineItem]] | None = None,
+    harness: str = "claude_code",
 ) -> Window:
     return read_window(
         file,
+        harness=harness,
         limit=limit,
         before=before,
         policy=POLICY,

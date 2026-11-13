@@ -2,5 +2,6 @@ exports = ["support.py"]
 
 [uses]
 "support.py" = []
+"test_codex_record.py" = ["support.py"]
 "test_live_projection.py" = ["support.py"]
 "test_read_window.py" = ["support.py"]

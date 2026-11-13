@@ -135,7 +135,7 @@ async def test_a_turn_logs_usage_under_the_harness(loguru_records: LogRecords) -
     usage = loguru_records.events("llm_usage")
     assert len(usage) == 1
     extras = usage[0]["extra"]
-    assert extras["source"] == "codex"
+    assert extras["source"] == "antigravity"
     assert extras["in_total"] == 1200
     assert extras["model"] == "claude-sonnet-5-5"
     assert extras["usage_kind"] == "agent"
@@ -182,7 +182,7 @@ async def test_a_faulted_session_settles_the_turn_as_a_fatal_stream_abort(
         harness_inputs=[{"key": "inbound-7", "prompt": "do it", "timeline_items": []}]
     )
 
-    with pytest.raises(FatalLLMStreamError, match="codex harness turn aborted: cli died"):
+    with pytest.raises(FatalLLMStreamError, match="antigravity harness turn aborted: cli died"):
         await harness_turn_node(state, runtime(FaultingEngine()), config())
 
     assert loguru_records.events("llm_usage") == [], "an aborted turn logs no usage"
@@ -199,7 +199,7 @@ async def test_a_session_that_cannot_start_settles_the_turn_as_a_fatal_stream_ab
         async def deliver(
             self, inputs: Sequence[HarnessInput], *, compaction_note: str = ""
         ) -> None:
-            raise HarnessSetupError("codex session could not start: no sdk")
+            raise HarnessSetupError("antigravity session could not start: no sdk")
 
     state = AgentState(
         harness_inputs=[{"key": "inbound-7", "prompt": "do it", "timeline_items": []}]
@@ -544,7 +544,7 @@ def test_the_lost_turn_note_says_it_is_not_a_reply_and_never_returns() -> None:
     note = lost_turn_note(
         [7379],
         "turn-1",
-        "HarnessTurnFaultedError: codex turn turn-1 failed (API 400): boom",
+        "HarnessTurnFaultedError: antigravity turn turn-1 failed (API 400): boom",
         now=now,
     )
     kwargs = read_meiva_kwargs(note)
@@ -577,7 +577,7 @@ async def test_a_lost_turn_appends_one_note_and_a_quiet_turn_appends_none() -> N
     now = datetime(2026, 11, 4, 2, 11, tzinfo=UTC)
     ctx = MagicMock()
     ctx.require_clock.return_value.now.return_value = now
-    ctx.harness.value = "codex"
+    ctx.harness.value = "antigravity"
     appended: list[list[BaseMessage]] = []
 
     async def append(_ctx: object, _agent_id: int, messages: Sequence[BaseMessage]) -> None:

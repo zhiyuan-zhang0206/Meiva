@@ -45,8 +45,11 @@ from base.lm.harness.session.transcript.entries import (
 # with `isApiErrorMessage` is the CLI's record of an API error (`error`, `apiErrorStatus`): a `Failure`.
 # Observed on a long real session and ignored on purpose too: title, link and rename rows, file-history deltas, the
 # `informational` and `stop_hook_summary` system subtypes and the context attachments of the second list below.
-# Not read yet: any other `system` subtype than `compact_boundary` and the attachment types of newer CLIs
-# are reported as anomalies; hook output, API error rows and `isApiErrorMessage` rows have no sample.
+# Seen in the records of real sessions (by a count of row kinds, key names and value types that read no content) and
+# ignored on purpose as well: `system/api_error`, the notice of a request that failed and is being retried (`retryAttempt`,
+# `maxRetries`; a request that failed for good is the `isApiErrorMessage` row), and the `auto_mode` attachment.
+# Not read: any other `system` subtype and the attachment types of newer CLIs are anomalies, which the reader reports
+# once for each kind; hook output has no sample.
 # meiva:link base/lm/harness/docs/transcript-projection.md
 
 _BOOKKEEPING = frozenset(
@@ -99,9 +102,10 @@ _CONTEXT_ATTACHMENTS = frozenset(
         "command_permissions",
         "nested_memory",
         "read_truncation_notice",
+        "auto_mode",
     }
 )
-_IGNORED_SYSTEM = frozenset({"informational", "stop_hook_summary"})
+_IGNORED_SYSTEM = frozenset({"informational", "stop_hook_summary", "api_error"})
 _ENDING_STOPS = frozenset({"end_turn", "max_tokens", "refusal", "stop_sequence"})
 _INTERRUPT_PREFIX = "[Request interrupted by user"
 _LOCAL_COMMAND_PREFIXES = ("<local-command-stdout>", "<local-command-caveat>")

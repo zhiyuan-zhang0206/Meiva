@@ -155,7 +155,7 @@ def test_a_harness_whose_timeline_is_stored_is_refused(
     agent = create_agent(db_conn)
     with pytest.raises(ValueError, match="not read from its record"):
         _ = read_harness_timeline(
-            _request(agent, harness="codex"), pool=pool, home=tmp_path, environ={}
+            _request(agent, harness="antigravity"), pool=pool, home=tmp_path, environ={}
         )
 
 

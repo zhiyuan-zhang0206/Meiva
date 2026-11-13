@@ -12,28 +12,31 @@ from base.agents.history.transcript_timeline.project import (
     ProjectedItem,
     RecordProjector,
 )
-from base.agents.history.transcript_timeline.read import input_wire_ids, read_window
+from base.agents.history.transcript_timeline.record.harness import (
+    entry_reader,
+    input_wire_ids,
+    record_location,
+    reply_key,
+    reply_key_prefix,
+    session_file,
+    unreadable_file,
+    wire_id,
+)
+from base.agents.history.transcript_timeline.record.read import read_window
 from base.agents.history.transcript_timeline.sent import load_sent_rows, sent_inputs
 from base.agents.messages.reply_intent import parse_reply_visibility
 from base.agents.to_user.delivery.store import has_keyed_publication
 from base.events.live.projection import InboundCommitted, TimelineSnapshot
 from base.events.live.publisher import AgentEventPublisher
 from base.lm.harness import AssistantText, BridgeEvent, HarnessSetupError
-from base.lm.harness.claude.transcript.window import (
-    EntryParser,
-    FileRow,
-    RecordFile,
-    record_location,
-    session_file,
-    wire_id,
-)
 from base.lm.harness.engine import HarnessTurn
 from base.lm.harness.registry import FileSessionRegistry
+from base.lm.harness.session.transcript.record_file import FileRow, RecordFile
 from base.log import logger
 from base.paths import harness_sessions_dir, workspace_dir
 
 # meiva:note
-# The timeline of a Claude agent's turn while it runs. The CLI's events say only that something new happened; what
+# The timeline of a Claude Code or Codex agent's turn while it runs. The CLI's events say only that something new happened; what
 # happened is read from the CLI's own record file, which is the one source of the timeline. A signal marks the sink
 # dirty, and after `DEBOUNCE_SECONDS` the bytes appended since the last read are projected with the same function a
 # cold read uses and published as a `TimelineSnapshot`: item ids are the rows' byte offsets, so a page that has read
@@ -45,7 +48,7 @@ from base.paths import harness_sessions_dir, workspace_dir
 # by id, and a snapshot that continues what the page holds is never read as a gap in it) and every call still
 # running (a page drops a running item a snapshot does not mention).
 # What the sink delivers: the replies of the items it projects, once each. A reply's publication key is the CLI's own id
-# of the row that holds it (`harness:claude:<row uuid>`), the same however often and from wherever it is read, so a
+# of the row that holds it (`harness:claude:<row uuid>`, `harness:codex:<message id>`), the same however often and from wherever it is read, so a
 # repeated read, a restart and a replay never publish it twice. A reply read from before this sink began is offered
 # again (a crash may have ended the process before it was delivered) once the agent has a publication under this
 # key scheme; the first sink of an agent that has none is at the switch from the old keys, and delivers only what the
@@ -57,7 +60,6 @@ from base.paths import harness_sessions_dir, workspace_dir
 # meiva:link agent/graph/docs/harness-turn.md
 
 DEBOUNCE_SECONDS = 0.5
-REPLY_KEY_PREFIX = "harness:claude:"
 END_WAIT_SECONDS = 2.0
 END_POLL_SECONDS = 0.25
 
@@ -77,6 +79,7 @@ class ReadTimelineSink:
         self._publisher = publisher
         self._non_human_wake = non_human_wake
         self._session_id = session_id
+        self._harness = ctx.harness.value
         mode = ctx.require_agent().prompt.user_delivery_mode
         self._policy = ReplyPolicy(explicit_visibility=mode == "prefix", delivery_mode=mode)
         self._replied = False
@@ -84,11 +87,11 @@ class ReadTimelineSink:
         self._projector = RecordProjector(
             policy=self._policy,
             render_tool=format_tool_use,
-            wire_id=wire_id,
+            wire_id=lambda key: wire_id(self._harness, key),
         )
         self._file: RecordFile | None = None
         self._from: int | None = None
-        self._parser = EntryParser()
+        self._parser = entry_reader(self._harness)
         self._last: ProjectedItem | None = None
         self._announced: set[int] = set()
         self._dirty = asyncio.Event()
@@ -193,7 +196,23 @@ class ReadTimelineSink:
             return
         ctx = self._ctx
         workspace = workspace_dir(self._agent_id, home=ctx.require_meiva_home())
-        where = record_location(ctx.require_environ(), workspace)
+        where = record_location(self._harness, ctx.require_environ(), workspace)
+        sid = self._session_id()
+        name = (
+            None
+            if sid is None
+            else unreadable_file(
+                self._harness, ctx.require_environ(), sid, packed_is_readable=False
+            )
+        )
+        if name is not None:
+            logger.warning(
+                "the record of session {session_id} is in a form the live timeline does not read: {name}",
+                event="harness_record_unreadable",
+                agent_id=self._agent_id,
+                session_id=sid,
+                name=name,
+            )
         raise HarnessSetupError(
             f"the record of the {ctx.harness.value} session {self._session_id() or '(not started)'} was not found "
             f"in {where} or any other project directory; nothing of this turn can be shown or delivered"
@@ -247,6 +266,7 @@ class ReadTimelineSink:
     def _turn_start(self, file: RecordFile) -> int:
         window = read_window(
             file,
+            harness=self._harness,
             limit=1,
             before=None,
             policy=ReplyPolicy(explicit_visibility=False, delivery_mode=None),
@@ -259,7 +279,7 @@ class ReadTimelineSink:
     # The inbox is asked only when the new rows hold a person's input (a user row that is not a tool result, or an absorbed
     # message): a read of an assistant's rows and tool results opens no connection.
     def _register_sent(self, rows: Sequence[FileRow]) -> None:
-        wanted = input_wire_ids(rows)
+        wanted = input_wire_ids(self._harness, rows)
         if not wanted:
             return
         with self._ctx.require_db().connect() as conn:
@@ -269,7 +289,7 @@ class ReadTimelineSink:
                     self._agent_id,
                     until=max(wanted.values()),
                     wanted=wanted,
-                    wire_id=wire_id,
+                    wire_id=lambda key: wire_id(self._harness, key),
                 ).rows
             )
         for key, items in found.items():
@@ -284,7 +304,10 @@ class ReadTimelineSink:
             return None
         ctx = self._ctx
         path = session_file(
-            ctx.require_environ(), workspace_dir(self._agent_id, home=ctx.require_meiva_home()), sid
+            self._harness,
+            ctx.require_environ(),
+            workspace_dir(self._agent_id, home=ctx.require_meiva_home()),
+            sid,
         )
         if path is None:
             return None
@@ -327,7 +350,7 @@ class ReadTimelineSink:
     async def _deliver(self, items: Sequence[ProjectedItem]) -> None:
         floor = await self._delivery_floor()
         replies = [
-            (f"{REPLY_KEY_PREFIX}{item.key.removeprefix('claude:')}", item.item)
+            (reply_key(self._harness, item.key), item.item)
             for item in items
             if item.item.kind == "agent_chat" and item.offset >= floor
         ]
@@ -344,7 +367,9 @@ class ReadTimelineSink:
 
             def switched() -> bool:
                 with self._ctx.require_db().connect() as conn:
-                    return has_keyed_publication(conn, self._agent_id, REPLY_KEY_PREFIX)
+                    return has_keyed_publication(
+                        conn, self._agent_id, reply_key_prefix(self._harness)
+                    )
 
             self._floor = 0 if await asyncio.to_thread(switched) else self._history_end
         return self._floor

@@ -2,30 +2,42 @@
 
 The shared layer in `base/lm/harness/session/transcript/` and the three parsers
 (`claude/transcript/`, `codex/transcript/`, `antigravity/transcript/`) read a CLI's own conversation record
-into one vocabulary and project it into timeline item drafts. A Claude Code agent's timeline is read from its
+into one vocabulary and project it into timeline item drafts. A Claude Code or Codex agent's timeline is read from its
 record when it is asked for and stored nowhere ([the decision](../../../../docs/decisions/agents/graph/2026-11-13-timeline-read-from-the-record.md),
 which keeps the vocabulary and the one projection of
 [the transcript decision](../../../../docs/decisions/agents/graph/2026-11-12-transcript-is-the-timeline-source.md) and replaces its stored
-copy). The writer, the reader and the tables that kept that copy are gone; Codex and Antigravity follow, in
+copy). The writer, the reader and the tables that kept that copy are gone; Antigravity follows, in
 [the plan](../../../../future/agent/transcript-timeline-source.md).
 
-## The read-time path (Claude Code)
+## The read-time path (Claude Code, Codex)
 
-`claude/transcript/window.py` is the Claude half: `RecordFile` reads blocks of the main record backwards from a line
-boundary (and counts the bytes it reads), `EntryParser` runs `parse_row` over rows in file order with the row's byte
-offset as the entry's `seq`, and `session_file` finds the file the way the session does (the session's own `HOME`,
-the project directory named by the working directory, a search of every project directory for the session id as
-the fallback). Sub-agent files are not read: a CLI sub-agent is one tool call and its result in the main record.
+`session/transcript/record_file.py` is the half every CLI shares: `RecordFile` reads blocks of the main record backwards
+from a line boundary (and counts the bytes it reads); `ZstdRecordFile` does the same for a compressed Codex rollout from a
+bounded tail of one decompression pass. Each CLI has a `window.py` for what is its own. `claude/transcript/window.py`:
+`EntryParser` runs `parse_row` over rows in file order with the row's byte offset as the entry's `seq`, and
+`session_file` finds the file the way the session does (the session's own `HOME`, the project directory named by the
+working directory, a search of every project directory for the session id as the fallback). `codex/transcript/window.py`:
+`EntryParser` runs `parse_rollout_line` the same way (the offset replaces the rollout's own `ordinal`), and `session_file`
+finds `<codex home>/sessions/YYYY/MM/DD/rollout-*<thread id>.jsonl` (the home the session's environment names: `CODEX_HOME`,
+else `$HOME/.codex`). Both name which rows are a person's input and the id our input was sent with: Claude's row `uuid`
+(derived from the input key), Codex's `client_id` on the `UserMessage` item, which is the input key itself.
+`base/agents/history/transcript_timeline/record/harness.py` is where the harness is chosen, by enum, for these functions and for the reply's publication
+key (`harness:claude:<row uuid>`, `harness:codex:<message id>`). Sub-agent files are not read: a CLI sub-agent is one tool
+call and its result in the main record. [What the Codex rollout holds](../codex/docs/rollout.md) is stated beside the adapter.
 
 `base/agents/history/transcript_timeline/` is the shared half: `RecordProjector` runs the one `Projector` over those
 entries and turns each draft into an item (`items.py`, which also holds reply visibility and the tool-call
 rendering), names it `h<offset>.<n>`, marks a call that has no result and is still open as running, and does not show
-a person's input that no inbox row accounts for; `sent.py` reads back which inbox rows were handed to the CLI as which
+a person's input that no inbox row accounts for. A row of a kind a CLI's reader does not know is skipped and
+reported once for each kind (`harness_record_row_unread`, by `UnreadRows` of `record_file.py`), for both CLIs. A marker that is not a tagged note reaches the page as a `status:` or
+an `error:` line, the only two a page shows: the interrupt, compaction and failure markers are written that way, and a
+notice the CLI filed (a finished background task, a timer, a sub-agent's start or end) is made a status line in
+`items.py`, with its cause kept as the item's source. `sent.py` reads back which inbox rows were handed to the CLI as which
 input (their key gives the row's `uuid`) and what each of them shows; `read.py` reads a window of `limit` items from
 the end of the file or before an item, with a bounded look-back for the call of a result and for the start of a turn.
 The same `RecordProjector` over only the bytes appended since the last read is the live view
-([harness turn](../../../../agent/graph/docs/harness-turn.md#record-read-timeline-claude-code)); the two give the same items.
-Codex and Antigravity will add only their own file-to-entries reader.
+([harness turn](../../../../agent/graph/docs/harness-turn.md#record-read-timeline-claude-code-codex)); the two give the same items.
+Antigravity will add only its own file-to-entries reader.
 
 ## The two pieces
 
@@ -56,7 +68,7 @@ each with a `source.json` naming the CLI version, the recording and the sanitiza
 
 ## Readers
 
-`claude/transcript/window.py` reads the session's local JSONL, and `position.py` (`rows_after`) splits the bytes
+`session/transcript/record_file.py` reads the session's local JSONL, and `position.py` (`rows_after`) splits the bytes
 of a block into rows: only complete lines (ending in a newline) are used, so a row the CLI is still writing is read
 on a later pass. A complete line that cannot be used (not JSON, not an object, invalid UTF-8, nested too deep) is
 not a fault: it is skipped and the read goes on. Every row is scrubbed of what `jsonb` cannot hold (NUL, lone

@@ -244,6 +244,16 @@ EVENTS: dict[str, EventSpec] = {
         "a harness is running but its CLI record file was not found, so nothing of the turn reaches the timeline yet",
         tier="anomaly",
     ),
+    "harness_record_unreadable": telemetry_event(
+        "harness_record_unreadable",
+        "a harness session's record file is there but in a form the reader does not read, so the timeline is empty",
+        tier="anomaly",
+    ),
+    "harness_record_row_unread": telemetry_event(
+        "harness_record_row_unread",
+        "a row of a harness CLI's record has a kind the reader does not know and is skipped; reported once for each kind",
+        tier="anomaly",
+    ),
     "harness_reply_key_conflict": telemetry_event(
         "harness_reply_key_conflict",
         "a reply's publication key already names other content; the publication is left as it was",

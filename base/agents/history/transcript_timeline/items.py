@@ -69,7 +69,18 @@ def item_of(
                 user_facing=False,
             )
         case DraftKind.SYSTEM_MARKER:
-            return _base(draft, "system_marker", draft.payload, source=draft.source)
+            return _base(draft, "system_marker", _marker_line(draft), source=draft.source)
+
+
+# meiva:note
+# A page shows a marker that is not a tagged note only as a `status:` or an `error:` line and flags any other payload
+# as one it does not recognise. The markers the projection writes itself (an interrupt, a compaction, a failure) are
+# such lines already; a notice the CLI filed (a finished background task, a timer, a sub-agent's start) carries its
+# cause as the source, which is no note tag, and its own words as the payload, so it is made a status line here.
+def _marker_line(draft: TimelineDraft) -> str:
+    if draft.source is None or draft.payload.startswith(("status:", "error:")):
+        return draft.payload
+    return f"status:{draft.payload}"
 
 
 def _inbound(draft: TimelineDraft, sent_items: Mapping[str, TimelineItem]) -> TimelineItem:

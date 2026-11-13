@@ -146,12 +146,12 @@ is not detected; the facts above are the whole protection, and no process regist
 
 Parent: [Harness turn](harness-turn.md).
 
-## Record-read agents (Claude Code)
+## Record-read agents (Claude Code, Codex)
 
-A Claude Code agent's inputs are decided as above, by the stream's acknowledgements and, after a failure, by reading the
+A Claude Code or Codex agent's inputs are decided as above, by the stream's acknowledgements and, after a failure, by reading the
 CLI's record (`bridge.reconcile`); what differs is only that nothing is written to a timeline when a row settles: the row
 is set `done` (`commit_handed`, `commit_reconciled`) and the record is what the page shows
-([harness turn](harness-turn.md#record-read-timeline-claude-code)). The lost-turn note, the unconfirmed-input entry, the
+([harness turn](harness-turn.md#record-read-timeline-claude-code-codex)). The lost-turn note, the unconfirmed-input entry, the
 stop note and the visibility-correction note are not shown for these agents (the correction is still sent to the CLI).
 A message of ours the record does not account for does not exist as a row, so a person's input that no inbox row names
 (a context reset, a recovery note) is not shown.

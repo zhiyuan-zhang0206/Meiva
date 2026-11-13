@@ -2,15 +2,15 @@ from __future__ import annotations
 
 import re
 from collections.abc import Mapping, Sequence
-from dataclasses import dataclass
+from datetime import datetime
 from pathlib import Path
 
+from base.host.boundary.json_values import is_object_dict, is_object_list
 from base.lm.harness.claude.delivery import key_uuid
 from base.lm.harness.claude.reconciliation.transcript import claude_home
 from base.lm.harness.claude.transcript.parse import ParseState, parse_row
-from base.lm.harness.claude.transcript.position import Position, rows_after
-from base.lm.harness.claude.transcript.scrub import scrub
-from base.lm.harness.session.transcript.entries import MAIN_RECORD, AnyEntry
+from base.lm.harness.session.transcript.entries import MAIN_RECORD, Anomaly, AnyEntry
+from base.lm.harness.session.transcript.record_file import FileRow, UnreadRows, stamp_of
 
 # meiva:note
 # The Claude half of reading a session's timeline at the moment it is asked for: where the main record
@@ -21,24 +21,6 @@ from base.lm.harness.session.transcript.entries import MAIN_RECORD, AnyEntry
 # the size of the window it asks for and not the size of the file. A row that cannot be decoded is
 # skipped: the file is the CLI's own and its rows are never repaired here. Sub-agent files are not read.
 # meiva:link base/lm/harness/docs/transcript-projection.md
-
-BLOCK_BYTES = 256 * 1024
-MAX_BLOCK_BYTES = 16 * 1024 * 1024
-_CHUNK_BYTES = 64 * 1024
-
-
-@dataclass(frozen=True, slots=True)
-class FileRow:
-    offset: int
-    end: int
-    row: Mapping[str, object]
-
-
-@dataclass(frozen=True, slots=True)
-class Block:
-    start: int
-    end: int
-    rows: tuple[FileRow, ...]
 
 
 def wire_id(key: str) -> str:
@@ -79,100 +61,62 @@ def transcript_path(claude_home: Path, workspace: Path, session_id: str) -> Path
 
 
 # meiva:note
-# One transcript file, read in bounded pieces, counting the bytes it reads (`bytes_read`) so a test or a gauge
-# can state what a request cost.
-class RecordFile:
-    def __init__(self, path: Path) -> None:
-        self._path = path
-        self.bytes_read = 0
-
-    def size(self) -> int:
-        return self._path.stat().st_size
-
-    # meiva:note
-    # The end of the last complete line: a row the CLI is still writing is not read.
-    def complete_end(self) -> int:
-        with self._path.open("rb") as handle:
-            position = handle.seek(0, 2)
-            while position > 0:
-                low = max(0, position - _CHUNK_BYTES)
-                _ = handle.seek(low)
-                data = handle.read(position - low)
-                self.bytes_read += len(data)
-                cut = data.rfind(b"\n")
-                if cut >= 0:
-                    return low + cut + 1
-                position = low
-        return 0
-
-    # meiva:note
-    # The rows in the block of about `want` bytes that ends at `end` (a line boundary): the block starts at the
-    # first line boundary inside it, widened while one row is longer than the block. `start == 0` means
-    # the file's first row is in it.
-    def rows_before(self, end: int, want: int = BLOCK_BYTES) -> Block:
-        low = max(0, end - want)
-        while True:
-            data = self._read(max(0, low - 1), end)
-            first = max(0, low - 1)
-            if low == 0:
-                start = 0
-            elif data[:1] == b"\n":
-                data, start = data[1:], low
-            else:
-                cut = data.find(b"\n")
-                if cut < 0:
-                    if low == 0 or end - low >= MAX_BLOCK_BYTES:
-                        return Block(end, end, ())
-                    low = max(0, low - max(want, end - low))
-                    continue
-                data, start = data[cut + 1 :], first + cut + 1
-            break
-        rows = tuple(
-            FileRow(raw.start, raw.end, _scrubbed(raw.row))
-            for raw in rows_after(Position(start=0, offset=start, lines=0, sha256=""), data)
-            if raw.row is not None
-        )
-        return Block(start, end, rows)
-
-    def _read(self, low: int, end: int) -> bytes:
-        with self._path.open("rb") as handle:
-            _ = handle.seek(low)
-            data = handle.read(end - low)
-        self.bytes_read += len(data)
-        return data
-
-    def rows_after(self, start: int) -> Block:
-        end = self.complete_end()
-        if end <= start:
-            return Block(start, start, ())
-        data = self._read(start, end)
-        rows = tuple(
-            FileRow(raw.start, raw.end, _scrubbed(raw.row))
-            for raw in rows_after(Position(start=0, offset=start, lines=0, sha256=""), data)
-            if raw.row is not None
-        )
-        return Block(start, end, rows)
-
-
-def _scrubbed(row: Mapping[str, object] | None) -> Mapping[str, object]:
-    if row is None:
-        raise ValueError("a bad row has no content")
-    _ = scrub(row)
-    return row
-
-
-# meiva:note
 # Rows read into entries, in file order, each entry named by its row's offset. The parser's only memory is when each
 # open tool call started, for the call's duration, so a parser that is given the rows of one read after another
 # (a live read) and one given them all at once (a cold read) agree. A row of another record (a sub-agent's row
-# that the main file should not hold) yields nothing.
+# that the main file should not hold) yields nothing. A row the parser cannot use is skipped and reported once for
+# each kind of row by this parser.
 class EntryParser:
     def __init__(self) -> None:
         self._state = ParseState()
+        self._unread = UnreadRows("Claude Code")
 
     def entries(self, rows: Sequence[FileRow]) -> tuple[AnyEntry, ...]:
         found: list[AnyEntry] = []
         for file_row in rows:
             self._state, parsed = parse_row(self._state, file_row.row, line=file_row.offset)
-            found.extend(entry for entry in parsed if entry.record == MAIN_RECORD)
+            for entry in parsed:
+                if isinstance(entry, Anomaly):
+                    self._unread.report(entry)
+                elif entry.record == MAIN_RECORD:
+                    found.append(entry)
         return tuple(found)
+
+
+# meiva:note
+# The ids the CLI kept for the person's inputs among the rows, each with the time its row was written: the ids to match
+# to inbox rows. A user row names its own `uuid`, an absorbed message the `source_uuid` of its attachment.
+def input_wire_ids(rows: Sequence[FileRow]) -> dict[str, datetime]:
+    wanted: dict[str, datetime] = {}
+    for row in rows:
+        stamp = stamp_of(row.row.get("timestamp"))
+        wire = _wire_of(row.row)
+        if stamp is not None and wire is not None and is_input_row(row.row):
+            wanted[wire] = stamp
+    return wanted
+
+
+def _wire_of(row: Mapping[str, object]) -> str | None:
+    attachment = row.get("attachment")
+    wire = attachment.get("source_uuid") if is_object_dict(attachment) else row.get("uuid")
+    return wire if isinstance(wire, str) else None
+
+
+# meiva:note
+# A row that can be a person's input (a user row that is not a tool result, or an absorbed message): the only rows the
+# inbox is asked about, so a stretch of the record with none costs no query.
+def is_input_row(row: Mapping[str, object]) -> bool:
+    if row.get("type") == "attachment":
+        attachment = row.get("attachment")
+        return is_object_dict(attachment) and attachment.get("type") == "queued_command"
+    if row.get("type") != "user":
+        return False
+    origin = row.get("origin")
+    if is_object_dict(origin) and origin.get("kind") not in (None, "human"):
+        return False
+    message = row.get("message")
+    content = message.get("content") if is_object_dict(message) else None
+    return not (
+        is_object_list(content)
+        and any(is_object_dict(block) and block.get("type") == "tool_result" for block in content)
+    )

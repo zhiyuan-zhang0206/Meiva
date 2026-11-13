@@ -3,9 +3,11 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+import pytest
+
 from base.agents.history.timeline_item import TimelineItem
 from base.agents.history.transcript_timeline.items import format_tool_use
-from base.agents.history.transcript_timeline.read import (
+from base.agents.history.transcript_timeline.record.read import (
     MAX_REQUEST_BYTES,
     read_window,
 )
@@ -18,6 +20,7 @@ from base.agents.history.transcript_timeline.tests.support import (
     with_wire_ids,
     write,
 )
+from base.log import logger
 
 BASIC_KINDS = [
     "inbound_chat",
@@ -114,6 +117,19 @@ def test_an_interrupted_turn_shows_the_interrupt_the_record_wrote(tmp_path: Path
     assert "status:Turn interrupted" in payloads
 
 
+# meiva:note
+# A page shows a marker that is not a tagged note only as a `status:` or an `error:` line; any other payload it flags
+# as a marker it does not recognise. A notice the CLI files (a finished background task) is such a marker.
+@pytest.mark.parametrize(
+    "scenario", ["compact", "long_session", "subagents", "interrupt", "api_error"]
+)
+def test_every_marker_of_a_record_is_a_line_a_page_shows(tmp_path: Path, scenario: str) -> None:
+    file = write(tmp_path / f"{scenario}.jsonl", fixture_text(scenario))
+    markers = [p.item for p in window(file).items if p.item.kind == "system_marker"]
+    assert markers
+    assert [m.payload for m in markers if not m.payload.startswith(("status:", "error:"))] == []
+
+
 def test_a_request_reads_about_the_window_and_not_the_file(tmp_path: Path) -> None:
     turn = fixture_text("basic")
     small = write(tmp_path / "small.jsonl", "".join(generation(turn, i) for i in range(1, 40)))
@@ -149,6 +165,7 @@ def test_the_inbox_is_asked_only_about_a_stretch_with_a_persons_input(tmp_path: 
     def read(text: str) -> None:
         _ = read_window(
             write(tmp_path / "f.jsonl", text),
+            harness="claude_code",
             limit=50,
             before=None,
             policy=POLICY,
@@ -179,3 +196,21 @@ def test_a_request_never_reads_past_its_hard_cap_and_says_there_is_more(tmp_path
     found = window(file, limit=50)
     assert found.items == () and found.has_more
     assert file.bytes_read <= MAX_REQUEST_BYTES + 1024 * 1024
+
+
+# meiva:note
+# A row of a kind the reader does not know is skipped and said once, so a CLI that begins to write something new is
+# noticed and not silently missing from the timeline.
+def test_a_row_the_reader_does_not_know_is_skipped_and_reported_once(tmp_path: Path) -> None:
+    unknown = (
+        json.dumps({"type": "mystery-row", "uuid": "u", "timestamp": "2026-11-01T00:00:00Z"}) + "\n"
+    )
+    messages: list[str] = []
+    sink = logger.add(lambda message: messages.append(str(message)), level="WARNING")
+    try:
+        text = unknown + fixture_text("basic") + unknown + unknown
+        kinds = [p.item.kind for p in window(write(tmp_path / "unknown.jsonl", text)).items]
+    finally:
+        logger.remove(sink)
+    assert kinds == [k for k in BASIC_KINDS if k != "inbound_chat"]
+    assert len([m for m in messages if "mystery-row" in m]) == 1

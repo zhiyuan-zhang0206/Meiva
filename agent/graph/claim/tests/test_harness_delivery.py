@@ -93,7 +93,7 @@ async def test_a_message_is_pending_until_it_is_in_the_context_and_then_in_the_t
     hosted_resources: HostedTurnResources,
 ) -> None:
     agent_id = agent_row(db_conn)
-    db_conn.execute("UPDATE agents_meta SET harness='codex' WHERE id=%s", (agent_id,))
+    db_conn.execute("UPDATE agents_meta SET harness='antigravity' WHERE id=%s", (agent_id,))
     db_conn.commit()
     row = insert_row(db_conn, agent_id, "chat", "user", "hello")
     engine = silent_engine()
@@ -504,7 +504,7 @@ def _external_ctx(
 ) -> MeivaContext:
     base = make_runtime(ops_pool=aops_pool, database_gate=database_gate)
     return replace(
-        base.context, harness=Harness.CODEX, harness_bridge=engine, hosted_resources=resources
+        base.context, harness=Harness.ANTIGRAVITY, harness_bridge=engine, hosted_resources=resources
     )
 
 
@@ -731,7 +731,7 @@ def test_the_migration_moves_only_old_reservations_of_external_agents(
 ) -> None:
     external = agent_row(db_conn)
     native = agent_row(db_conn)
-    db_conn.execute("UPDATE agents_meta SET harness='codex' WHERE id=%s", (external,))
+    db_conn.execute("UPDATE agents_meta SET harness='antigravity' WHERE id=%s", (external,))
     db_conn.commit()
 
     def reserved(agent_id: int, kind: str) -> int:

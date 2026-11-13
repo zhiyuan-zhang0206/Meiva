@@ -33,7 +33,9 @@ def _route(host: Any) -> Any:
     )
 
 
-def _payload(agent_id: int, *, new_harness: str = "meiva", old_harness: str = "codex") -> bytes:
+def _payload(
+    agent_id: int, *, new_harness: str = "meiva", old_harness: str = "antigravity"
+) -> bytes:
     return json.dumps(
         {
             "agent_id": agent_id,
@@ -51,7 +53,7 @@ async def _setup_agent(pool: AsyncConnectionPool[Any], agent_id: int) -> None:
             "INSERT INTO agents (id) VALUES (%s) ON CONFLICT DO NOTHING", (agent_id,)
         )
         await conn.execute(
-            "INSERT INTO agents_meta (id, status, harness) VALUES (%s, 'idling', 'codex') "
+            "INSERT INTO agents_meta (id, status, harness) VALUES (%s, 'idling', 'antigravity') "
             "ON CONFLICT (id) DO UPDATE SET "
             "  status = EXCLUDED.status, "
             "  harness = EXCLUDED.harness",
@@ -64,7 +66,7 @@ async def _seed_known_row(pool: AsyncConnectionPool[Any], agent_id: int) -> None
         await aappend_harness_timeline_items(
             conn,
             agent_id,
-            "codex",
+            "antigravity",
             [
                 TimelineItem(
                     item_id="0.0",
@@ -93,9 +95,9 @@ async def _harness_rows(
 def _assert_switch_note(rows: list[tuple[str, str, str]]) -> None:
     assert len(rows) == 1
     harness, kind, payload = rows[0]
-    assert harness == "codex"
+    assert harness == "antigravity"
     assert kind == "system_marker"
-    assert "Harness switched from 'codex' to 'meiva'" in payload
+    assert "Harness switched from 'antigravity' to 'meiva'" in payload
 
 
 async def test_control_pool_records_the_switch_note(
@@ -133,7 +135,7 @@ async def test_switch_between_external_harnesses_leaves_the_note_to_the_destinat
     await _setup_agent(aops_pool, agent_id)
     host = _host(_control_pool=aops_pool)
 
-    status_code, _, _ = await _route(host)(_payload(agent_id, new_harness="codex"))
+    status_code, _, _ = await _route(host)(_payload(agent_id, new_harness="antigravity"))
 
     assert status_code == 200
     assert await _harness_rows(aops_pool, agent_id) == []
@@ -151,7 +153,9 @@ async def test_no_pool_skips_the_write_and_still_answers_ok(
     # "no new row" assertion below observes the route's behaviour rather than a query that
     # cannot see rows at all.
     await _seed_known_row(aops_pool, agent_id)
-    assert await _harness_rows(aops_pool, agent_id) == [("codex", "system_marker", "known row")]
+    assert await _harness_rows(aops_pool, agent_id) == [
+        ("antigravity", "system_marker", "known row")
+    ]
 
     host = _host(_control_pool=None, _pool=None)
 
@@ -160,7 +164,9 @@ async def test_no_pool_skips_the_write_and_still_answers_ok(
 
     assert status_code == 200
     assert b'"ok":true' in body
-    assert await _harness_rows(aops_pool, agent_id) == [("codex", "system_marker", "known row")]
+    assert await _harness_rows(aops_pool, agent_id) == [
+        ("antigravity", "system_marker", "known row")
+    ]
     # meiva:note
     # The guard skips the write before attempting one, so this path stays quiet. A warning
     # here means the branch reached the writer with no pool and survived only because the
@@ -168,16 +174,14 @@ async def test_no_pool_skips_the_write_and_still_answers_ok(
     assert [record for record in caplog.records if record.name == health_routes.__name__] == []
 
 
+@pytest.mark.parametrize(("old", "agent_id"), [("claude_code", 9214), ("codex", 9215)])
 async def test_leaving_a_harness_read_from_its_record_writes_no_note(
-    aops_pool: AsyncConnectionPool[Any],
+    aops_pool: AsyncConnectionPool[Any], old: str, agent_id: int
 ) -> None:
-    agent_id = 9214
     await _setup_agent(aops_pool, agent_id)
     host = _host(_control_pool=aops_pool)
 
-    status_code, body, _content_type = await _route(host)(
-        _payload(agent_id, old_harness="claude_code")
-    )
+    status_code, body, _content_type = await _route(host)(_payload(agent_id, old_harness=old))
 
     assert status_code == 200 and b'"ok":true' in body
     assert await _harness_rows(aops_pool, agent_id) == [], "the record shows what happened"

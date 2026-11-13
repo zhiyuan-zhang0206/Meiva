@@ -420,14 +420,14 @@ def test_external_harness_messages_project_into_run_timeline(world: World) -> No
             (harness_agent,),
         )
         conn.execute(
-            "INSERT INTO agents_meta (id, harness, status) VALUES (%s, 'codex', 'running')"
+            "INSERT INTO agents_meta (id, harness, status) VALUES (%s, 'antigravity', 'running')"
             " ON CONFLICT (id) DO NOTHING",
             (harness_agent,),
         )
         for seq, item in enumerate(items):
             conn.execute(
                 "INSERT INTO agent_harness_messages (agent_id, seq, harness, item, created_at)"
-                " VALUES (%s, %s, 'codex', %s::jsonb, %s::timestamptz)",
+                " VALUES (%s, %s, 'antigravity', %s::jsonb, %s::timestamptz)",
                 (harness_agent, seq, item.model_dump_json(), item.created_at),
             )
         conn.commit()
@@ -454,10 +454,10 @@ def test_external_harness_messages_project_into_run_timeline(world: World) -> No
     assert "text" in kinds
 
 
+@pytest.mark.parametrize(("harness", "agent"), [("claude_code", 9998), ("codex", 9997)])
 def test_a_harness_read_from_its_record_has_no_run_timeline_and_its_old_rows_are_not_read(
-    world: World,
+    world: World, harness: str, agent: int
 ) -> None:
-    agent = 9998
     with world.pool.connection() as conn:
         conn.execute(
             "INSERT INTO agents (id, label, created_at) VALUES (%s, 'test-claude', now())"
@@ -465,14 +465,14 @@ def test_a_harness_read_from_its_record_has_no_run_timeline_and_its_old_rows_are
             (agent,),
         )
         conn.execute(
-            "INSERT INTO agents_meta (id, harness, status) VALUES (%s, 'claude_code', 'running')"
+            "INSERT INTO agents_meta (id, harness, status) VALUES (%s, %s, 'running')"
             " ON CONFLICT (id) DO NOTHING",
-            (agent,),
+            (agent, harness),
         )
         conn.execute(
             "INSERT INTO agent_harness_messages (agent_id, seq, harness, item, created_at)"
-            " VALUES (%s, 0, 'claude_code', %s::jsonb, now())",
-            (agent, '{"item_id": "h0.0", "kind": "agent_chat", "payload": "stale"}'),
+            " VALUES (%s, 0, %s, %s::jsonb, now())",
+            (agent, harness, '{"item_id": "h0.0", "kind": "agent_chat", "payload": "stale"}'),
         )
         conn.commit()
         source = capture_source(conn, agent)

@@ -268,12 +268,12 @@ def test_e_a_background_command_that_outlived_its_turn_is_appended_after_the_rep
     assert {draft.turn for draft in from_rollout.drafts} == {"01a1cefd-5933-7f40-8255-8ba5b4a29838"}
 
 
-def test_f_the_two_writes_of_one_message_make_one_draft() -> None:
+def test_f_the_two_writes_of_one_message_are_read_once() -> None:
     rollout = parse_rollout(load_lines("steer/rollout.jsonl"), record=MAIN_RECORD)
     answer = "agent:msg_0d6e9366dadb000c016af57f83c51487d0a488a8e85a80612d"
-    assert [entry.key for entry in _of(rollout, AgentText)].count(answer) == 2
+    assert [entry.key for entry in _of(rollout, AgentText)].count(answer) == 1
     reasoning_keys = [entry.key for entry in _of(rollout, Reasoning)]
-    assert len(reasoning_keys) == 4 and len(set(reasoning_keys)) == 2
+    assert len(reasoning_keys) == 2 and len(set(reasoning_keys)) == 2
     _, projection = project(rollout, sent("cid-s2-a", "run"), sent("cid-s2-steer", "also"))
     assert [draft.key for draft in projection.drafts].count(answer) == 1
     assert len([draft for draft in projection.drafts if draft.kind.value == "agent_chat"]) == 1
@@ -344,11 +344,9 @@ def test_g_the_sub_agent_report_is_a_notice_and_its_spend_stays_apart() -> None:
     assert projector.usage_by_turn()[PARENT_TURN].messages == 5
     notices = [draft for draft in projection.drafts if draft.kind.value == "system_marker"]
     assert [draft.source for draft in notices] == ["background_task"]
-    assert [
-        observed.cause
-        for observed in projection.turns_observed
-        if observed.origin is TurnOrigin.HARNESS
-    ] == [HarnessCause.BACKGROUND_TASK]
+    assert not [
+        observed for observed in projection.turns_observed if observed.origin is TurnOrigin.HARNESS
+    ]
 
 
 def test_h_a_compaction_is_a_marker_in_its_own_turn_with_its_own_spend() -> None:
@@ -372,13 +370,13 @@ def test_i_an_unknown_item_type_is_skipped_and_reported_once_per_type() -> None:
     rows = page_rows(page)
     row_item(rows[1])["type"] = "holographicNote"
     row_item(rows[4])["type"] = "holographicNote"
-    row_item(rows[5])["type"] = "webSearch"
+    row_item(rows[5])["type"] = "plan"
     entries = parse_items_page(page)
-    assert {entry.detail for entry in _of(entries, Anomaly)} == {"holographicNote", "webSearch"}
+    assert {entry.detail for entry in _of(entries, Anomaly)} == {"holographicNote", "plan"}
     projector, projection = project(entries, sent("cid-s1-a", "first"), sent("cid-s1-b", "second"))
     assert sorted((a.anomaly, a.detail) for a in projection.anomalies) == [
         (AnomalyKind.UNKNOWN_TYPE, "holographicNote"),
-        (AnomalyKind.UNKNOWN_TYPE, "webSearch"),
+        (AnomalyKind.UNKNOWN_TYPE, "plan"),
     ]
     assert not any("holographic" in draft.payload for draft in projection.drafts)
     again = projector.feed(entries)
