@@ -10,7 +10,7 @@ choose how to work; direct execution, peer cooperation, and script orchestration
 remain valid. Loading this skill does not require task creation or a manager
 role. The procedures below apply to chosen Fleet work. Read the
 [operating contract](reference/operating-contract.md) before using its labels,
-notices, delegation, or task tracking; it owns detailed operating obligations.
+questions, delegation, or task tracking; it owns detailed operating obligations.
 
 A **fleet** is a graph of agents working toward a human's goals, supervised from one **fleet view** — a live picture of who is responsible for what, and what each is doing right now. The human steers *decomposition* (how the work is split) and judges *results* (what came back), without opening any agent's conversation. You are one node in that graph: you may direct other agents and be directed by them at any moment, and the relationships that matter are who is talking to whom right now, not any fixed rank.
 
@@ -118,8 +118,11 @@ When a requester needs your acceptance or timing to coordinate, communicate
 that commitment. Otherwise, act on received messages without a courtesy reply.
 An explicit reporting agreement and protocol receipt ACKs still apply.
 
-Progress and conclusions reach the delegator for aggregation; user authorization
-or decisions reach the user directly. With no delegator, deliver directly.
+Apply the core user-attention test before any user-visible delivery. Progress
+and conclusions reach the delegator for aggregation; necessary user authorization
+or decisions reach the user directly. Having no delegator chooses a direct route
+only for information that passes that test; completion and standing responsibilities
+do not create an independent reason to publish. Keep other results in working records.
 For communication with the user, follow `reduce-context-switch-for-human`.
 For mechanical monitoring and waiting, use `meiva-being-a-long-running-agent`
 and `meiva.help(meiva.watcher)`; generated watchers and schedules follow the same fleet contract.
@@ -184,8 +187,10 @@ a valid line in a brief — but the default is silence between milestones.
 (Task-assignment delivery stays full-text by design; a summary-plus-link
 redesign was rejected because it costs an extra round-trip.)
 
-Use Ask for questions in both live and asynchronous conversations. Deliver
-information through the configured publish/text protocol; keep routine work in Details.
+Use Ask for questions only the user can answer, in live and asynchronous
+conversations. Deliver qualifying information once through the configured
+publish/text protocol. Required process narration stays in Details in prefix
+mode and unpublished in SDK mode; naive text delivery has no hidden-text prefix.
 
 ## Artifacts: File + Message, Never Shared Mutable State
 

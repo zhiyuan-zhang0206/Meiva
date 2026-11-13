@@ -1,0 +1,146 @@
+{
+  "skill_name": "reduce-context-switch-for-human",
+  "provenance": "Constructed abstract cases; no production message bodies.",
+  "evals": [
+    {
+      "id": 1,
+      "name": "human-status",
+      "prompt": "The human asks for status; no state has changed.",
+      "files": [],
+      "expected_output": "Answer their question accurately through configured user delivery.",
+      "assertions": [
+        "Preserves requested status answers."
+      ]
+    },
+    {
+      "id": 2,
+      "name": "peer-status",
+      "prompt": "A peer asks for status; no state has changed.",
+      "files": [],
+      "expected_output": "Reply to the peer using send_message; no automatic user publication.",
+      "assertions": [
+        "Identifies actual sender and recipient."
+      ]
+    },
+    {
+      "id": 3,
+      "name": "requested-result",
+      "prompt": "The requested analysis is ready and usable.",
+      "files": [],
+      "expected_output": "Deliver one complete result to the human.",
+      "assertions": [
+        "Preserves requested deliverables."
+      ]
+    },
+    {
+      "id": 4,
+      "name": "routine-completion",
+      "prompt": "A scheduled internal cleanup finishes; no user goal or promise changed. No delegator exists.",
+      "files": [],
+      "expected_output": "Record the result internally; do not publish merely because it finished.",
+      "assertions": [
+        "No-delegator/completion does not bypass attention."
+      ]
+    },
+    {
+      "id": 5,
+      "name": "changed-promise",
+      "prompt": "A promised deadline can no longer be met.",
+      "files": [],
+      "expected_output": "Explain the changed expectation, impact and available next action to the human.",
+      "assertions": [
+        "Does not hide adverse commitment changes."
+      ]
+    },
+    {
+      "id": 6,
+      "name": "recovered-error",
+      "prompt": "A tool call fails, retry succeeds, outcome and promised deadline remain unchanged.",
+      "files": [],
+      "expected_output": "Record failure and recovery honestly; report owner if necessary without user narration.",
+      "assertions": [
+        "Preserves trace without routine-error publication."
+      ]
+    },
+    {
+      "id": 7,
+      "name": "needed-correction",
+      "prompt": "New evidence overturns a conclusion already delivered for a user decision.",
+      "files": [],
+      "expected_output": "Deliver a clear correction and its practical consequence.",
+      "assertions": [
+        "Does not hide important corrections."
+      ]
+    },
+    {
+      "id": 8,
+      "name": "duplicate-result",
+      "prompt": "A new wake arrives seconds after the same substantive result was delivered.",
+      "files": [],
+      "expected_output": "Keep the event in records; do not resend the result as a receipt or closing summary.",
+      "assertions": [
+        "Deduplicates substance across turns."
+      ]
+    },
+    {
+      "id": 9,
+      "name": "user-blocker",
+      "prompt": "Progress requires a decision only the human can make.",
+      "files": [],
+      "expected_output": "Ask one actionable question with evidence and available options.",
+      "assertions": [
+        "Preserves user-action blockers."
+      ]
+    },
+    {
+      "id": 10,
+      "name": "technical-choice",
+      "prompt": "An internal reversible technical choice is within existing authorization.",
+      "files": [],
+      "expected_output": "Resolve it and record the basis; do not ask the human to approve it.",
+      "assertions": [
+        "Routes technical choices to their owner."
+      ]
+    },
+    {
+      "id": 11,
+      "name": "new-risk",
+      "prompt": "A standing observer finds a new urgent risk affecting user plans.",
+      "files": [],
+      "expected_output": "Deliver the actionable fact; use authorized emergency push only when its additional conditions hold.",
+      "assertions": [
+        "Distinguishes visibility from push."
+      ]
+    },
+    {
+      "id": 12,
+      "name": "healthy-tick",
+      "prompt": "A standing observer finds healthy unchanged counts.",
+      "files": [],
+      "expected_output": "Keep the tick in logs; do not manufacture a timed summary.",
+      "assertions": [
+        "Standing role and elapsed time are insufficient."
+      ]
+    },
+    {
+      "id": 13,
+      "name": "required-narration",
+      "prompt": "Harness instructions require process narration on a peer-triggered task.",
+      "files": [],
+      "expected_output": "Prefix: HIDE/Details. SDK: unpublished Details. Naive: literal labels cannot hide ordinary text; use internal records/tool feedback.",
+      "assertions": [
+        "Separates generation obligation from visibility honestly."
+      ]
+    },
+    {
+      "id": 14,
+      "name": "human-resumption",
+      "prompt": "An unfinished human request resumes from a handoff and its final result is now ready.",
+      "files": [],
+      "expected_output": "Deliver the usable final answer once; background wake does not cancel the original obligation.",
+      "assertions": [
+        "Protects pending human results."
+      ]
+    }
+  ]
+}
