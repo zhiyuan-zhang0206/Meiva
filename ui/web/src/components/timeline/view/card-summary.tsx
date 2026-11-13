@@ -2,6 +2,7 @@
 
 import {
   Bot,
+  ChevronRight,
   Code2,
   FilePen,
   FileText,
@@ -21,9 +22,25 @@ import {
   type SdkCall,
 } from "@/lib/format/item-summary";
 import { cn } from "@/lib/format/utils";
-import { FLEX, MIN_W_0 } from "@/lib/layout/layout";
 
 import { isLiveCode, isLiveExecution, itemLiveStartedAt } from "../model/reasoning-clock";
+
+export const DISCLOSURE_TITLE_CLS =
+  "truncate group-hover/disclosure:text-foreground group-focus-visible/disclosure:text-foreground";
+
+export function DisclosureChevron({ expanded }: { expanded: boolean }) {
+  return (
+    <ChevronRight
+      aria-hidden="true"
+      className={cn(
+        "size-3.5 shrink-0",
+        expanded
+          ? "rotate-90 opacity-60"
+          : "opacity-0 group-hover/disclosure:opacity-60 group-focus-visible/disclosure:opacity-60 pointer-coarse:opacity-60",
+      )}
+    />
+  );
+}
 
 export function agentChatTitle(item: BackendTimelineItem): {
   title: string;
@@ -145,10 +162,10 @@ function ThinkingSummary({
   }
 
   return (
-    <span className={cn("items-center gap-1.5", FLEX, MIN_W_0)}>
+    <>
       <Sparkles className="size-3.5 shrink-0" />
-      <span className="truncate tabular-nums">{label}</span>
-    </span>
+      <span className={cn(DISCLOSURE_TITLE_CLS, "tabular-nums")}>{label}</span>
+    </>
   );
 }
 
@@ -175,20 +192,20 @@ function CodeSummary({
 
   if (isExternalTool) {
     return (
-      <span className={cn("items-center gap-1.5", FLEX, MIN_W_0)}>
+      <>
         {renderToolIcon(item.source, "size-3.5 shrink-0")}
-        <span className="truncate tabular-nums">
+        <span className={cn(DISCLOSURE_TITLE_CLS, "tabular-nums")}>
           {timing ? <>{timing}<span className="opacity-60">{" · "}</span></> : null}
-          <span className="text-foreground/80">{item.source}</span>
+          {item.source}
         </span>
-      </span>
+      </>
     );
   }
 
   return (
-    <span className={cn("items-center gap-1.5", FLEX, MIN_W_0)}>
+    <>
       <Code2 className="size-3.5 shrink-0" />
-      <span className="truncate tabular-nums">
+      <span className={cn(DISCLOSURE_TITLE_CLS, "tabular-nums")}>
         {calls.length > 0 ? (
           <>
             {timing ? <>{timing}<span className="opacity-60">{" · "}</span></> : null}
@@ -203,17 +220,9 @@ function CodeSummary({
           timing ?? t("code")
         )}
       </span>
-    </span>
+    </>
   );
 }
-
-// meiva:note
-// Shared by the TurnBlock aggregate header so a collapsed turn reads as the same
-// clickable summary row as a card header.
-export const HEADER_CLS =
-  "w-full flex items-center gap-1.5 px-1 py-1 text-[11px] font-mono text-left " +
-  "text-muted-foreground/80 hover:text-foreground hover:bg-accent/30 " +
-  "transition-colors select-none rounded-tr-sm";
 
 export function CallBadge({ call }: { call: SdkCall }) {
   return (
@@ -236,9 +245,9 @@ function OutputSummary({ item, now }: { item: BackendTimelineItem; now: number }
     ran = t("runningFor", { duration: formatDuration(now - execStartedAt) });
   }
   return (
-    <span className={cn("items-center gap-1.5", FLEX, MIN_W_0)}>
+    <>
       <Terminal className="size-3.5 shrink-0" />
-      <span className="truncate tabular-nums">{ran ?? t("output")}</span>
-    </span>
+      <span className={cn(DISCLOSURE_TITLE_CLS, "tabular-nums")}>{ran ?? t("output")}</span>
+    </>
   );
 }

@@ -37,7 +37,7 @@ export function rememberTimelinePosition(
 }
 
 interface ReadingExpansion {
-  items: ReadonlySet<string>;
+  items: ReadonlyMap<string, boolean>;
   turns: ReadonlyMap<string, boolean>;
 }
 // Only ephemeral view choices live here. Server rows stay in the QueryClient.

@@ -5,12 +5,11 @@
 // (human inbound_chat and user-facing agent_chat) render directly in TimelineRow
 // as a right-aligned user bubble and unboxed canvas Markdown prose respectively,
 // while secondary work items inside TurnBlocks render through borderless
-// MessageCard + CardHeader (chevron + icon + title/summary).
+// MessageCard + CardHeader (icon, title or summary, and inline chevron).
 // meiva:link ui/web/src/docs/frontend-components/timeline-view/card-chrome.md
 
 import {
   Bot,
-  ChevronRight,
   FileText,
   Info,
   Paperclip,
@@ -33,7 +32,7 @@ import { inboundKind } from "./model/runs";
 import { externalAgentName } from "@/lib/format/inbound-source";
 import { isLiveCode, isLiveExecution, isLiveReasoning, LiveClockGate, useNow } from "./model/reasoning-clock";
 import { FLEX, MIN_W_0 } from "@/lib/layout/layout";
-import { agentChatTitle, HEADER_CLS, Summary, toolCallIcon } from "./view/card-summary";
+import { agentChatTitle, DisclosureChevron, DISCLOSURE_TITLE_CLS, Summary, toolCallIcon } from "./view/card-summary";
 
 export type SummaryKind = "reasoning" | "code" | "output";
 
@@ -44,14 +43,10 @@ export interface CardConfig {
   readonly titleKey?: string;
   readonly titleValues?: Record<string, string | number>;
   // meiva:note
-  // Default expanded state for a child inside an opened settled TurnBlock. True
-  // for everything the agent actually read - agent_chat, attachments, other
-  // agents' and system inbound messages, and note markers - so opening a work
-  // block shows the conversation the agent had instead of a stack of collapsed
-  // headers (user ruling 2026-11-09). False for machinery steps (thinking, code,
-  // output, compact envelopes, the system prompt, lifecycle and memory markers).
+  // Default body visibility within an opened settled TurnBlock.
   // meiva:link ui/web/src/docs/frontend-components/timeline-view/deep-collapse.md
   readonly fixedDefault: boolean;
+  readonly expandWhileWorking?: false;
   // meiva:note
   // Whether the card stamps the item's timestamp in its right-aligned hover footer.
   // meiva:link ui/web/src/docs/frontend-components/timeline-view/card-chrome.md
@@ -123,6 +118,7 @@ export function messageCardConfig(item: BackendTimelineItem): CardConfig | null 
         titleKey: item.source ? "timeline.subagentNamed" : "timeline.subagent",
         titleValues: item.source ? { name: item.source } : undefined,
         fixedDefault: false,
+        expandWhileWorking: false,
         showTimestamp: true,
         copy: false,
       };
@@ -158,7 +154,8 @@ export function messageCardConfig(item: BackendTimelineItem): CardConfig | null 
           title: `Agent ${(item.source ?? "").slice("agent:".length)}`,
           titleKey: "timeline.agent",
           titleValues: { id: (item.source ?? "").slice("agent:".length) },
-          fixedDefault: true,
+          fixedDefault: false,
+          expandWhileWorking: false,
           showTimestamp: true,
           copy: true,
         };
@@ -171,7 +168,8 @@ export function messageCardConfig(item: BackendTimelineItem): CardConfig | null 
           title: `External agent ${name}`,
           titleKey: "timeline.externalAgent",
           titleValues: { name },
-          fixedDefault: true,
+          fixedDefault: false,
+          expandWhileWorking: false,
           showTimestamp: true,
           copy: true,
         };
@@ -296,35 +294,28 @@ export const CardHeader = memo(function CardHeader({
       onClick={onToggle}
       onPointerEnter={() => void highlighter.preload()}
       onFocus={() => void highlighter.preload()}
-      className={cn(HEADER_CLS, "flex-wrap rounded-md px-1 py-1")}
+      className={cn("group/disclosure w-full flex-wrap items-center gap-1.5 rounded-md px-1 py-1 text-left font-mono text-[11px] text-muted-foreground select-none", FLEX)}
       aria-expanded={expanded}
       data-testid="card-toggle"
       data-expanded={expanded}
     >
-      <ChevronRight
-        className={cn(
-          "size-3 shrink-0 opacity-55 transition-transform duration-150 motion-reduce:transition-none",
-          expanded && "rotate-90",
+      <span className={cn("items-center gap-1.5", FLEX, MIN_W_0)}>
+        {config.rich ? <Summary item={item} now={now} live={live} /> : (
+          <>
+            {Icon ? <Icon className="size-3.5 shrink-0 opacity-80" /> : null}
+            <span className={DISCLOSURE_TITLE_CLS}>{cardTitle(config, t)}</span>
+          </>
         )}
-      />
-      {config.rich ? (
-        <>
-          <Summary item={item} now={now} live={live} />
-          {isSubagentWork(item) ? (
-            <span
-              data-testid="subagent-badge"
-              className="shrink-0 rounded-sm bg-muted px-1 text-[10px] leading-4 text-muted-foreground"
-            >
-              {t("timeline.subagent")}
-            </span>
-          ) : null}
-        </>
-      ) : (
-        <span className={cn("items-center gap-1.5", FLEX, MIN_W_0)}>
-          {Icon ? <Icon className="size-3.5 shrink-0 opacity-80" /> : null}
-          <span className="truncate">{cardTitle(config, t)}</span>
+        <DisclosureChevron expanded={expanded} />
+      </span>
+      {config.rich && isSubagentWork(item) ? (
+        <span
+          data-testid="subagent-badge"
+          className="shrink-0 rounded-sm bg-muted px-1 text-[10px] leading-4 text-muted-foreground"
+        >
+          {t("timeline.subagent")}
         </span>
-      )}
+      ) : null}
     </button>
   );
 });

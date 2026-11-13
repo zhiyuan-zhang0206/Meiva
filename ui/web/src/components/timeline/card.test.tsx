@@ -153,11 +153,14 @@ describe("messageCardConfig", () => {
   it("inbound_chat source=agent:42 → Agent 42", () => {
     const cfg = messageCardConfig(item("inbound_chat", { source: "agent:42" }));
     expect(cfg!.title).toBe("Agent 42");
-    // meiva:note
-    // Another agent's message is content this agent read, so opening the work
-    // block shows it instead of a collapsed header (user ruling 2026-11-09).
-    // meiva:link ui/web/src/docs/frontend-components/timeline-view/deep-collapse.md
-    expect(cfg!.fixedDefault).toBe(true);
+    expect(cfg!.fixedDefault).toBe(false);
+    expect(cfg!.expandWhileWorking).toBe(false);
+  });
+
+  it("keeps external agent messages collapsed in settled and live work", () => {
+    const cfg = messageCardConfig(item("inbound_chat", { source: "external_agent:codex" }));
+    expect(cfg?.fixedDefault).toBe(false);
+    expect(cfg?.expandWhileWorking).toBe(false);
   });
 
   it("inbound_chat unknown source → System", () => {

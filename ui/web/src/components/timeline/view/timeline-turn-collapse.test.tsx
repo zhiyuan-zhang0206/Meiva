@@ -31,6 +31,11 @@ describe("work block expansion", () => {
     expect(toggle.getAttribute("aria-expanded")).toBe("true");
     expect(screen.getByText("Working for 5s")).toBeTruthy();
     expect(screen.getByText("1 turn · 1 agent message")).toBeTruthy();
+    const message = screen.getByRole("button", { name: "Agent 7" });
+    expect(message.getAttribute("aria-expanded")).toBe("false");
+    expect(screen.queryByText("incoming update")).toBeNull();
+    expect(screen.getByText("live thought")).toBeTruthy();
+    fireEvent.click(message);
     expect(screen.getByText("incoming update")).toBeTruthy();
 
     fireEvent.click(toggle);
@@ -152,7 +157,28 @@ describe("work block expansion", () => {
     expect(runHeader.textContent).not.toContain("1 agent message");
     fireEvent.click(runHeader);
     expect(runHeader.textContent).toContain("1 agent message");
-    expect(screen.getByText("Agent 7")).toBeTruthy();
+    const message = screen.getByRole("button", { name: "Agent 7" });
+    expect(message.getAttribute("aria-expanded")).toBe("false");
+    expect(screen.queryByText("ping")).toBeNull();
+    fireEvent.click(message);
+    expect(screen.getByText("ping")).toBeTruthy();
+  });
+
+  it("keeps a manually collapsed child collapsed when its live turn settles", () => {
+    setUserSettings({ "display.expand_working_block": true });
+    const items = [makeItem({ item_id: "1.0", kind: "agent_reasoning", payload: "live thought" })];
+    const { rerender } = render(<TimelineView turnActive items={items} />);
+    const card = () => screen.getByTestId("card-toggle");
+    expect(card().getAttribute("aria-expanded")).toBe("true");
+    fireEvent.click(card());
+    expect(card().getAttribute("aria-expanded")).toBe("false");
+
+    rerender(<TimelineView items={items} />);
+    fireEvent.click(runToggle());
+    expect(card().getAttribute("aria-expanded")).toBe("false");
+    expect(screen.queryByText("live thought")).toBeNull();
+    fireEvent.click(card());
+    expect(screen.getByText("live thought")).toBeTruthy();
   });
 
   it("streaming items join the same work block — first chunk lands in a wrapper immediately", () => {

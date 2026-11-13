@@ -1,7 +1,5 @@
 import { useCallback, useLayoutEffect, useState } from "react";
 
-import type { BackendTimelineItem } from "@/lib/contracts/types";
-
 import { readTimelineExpansion, rememberTimelineExpansion } from "../model/reading-position";
 
 export function useTimelineExpansion({
@@ -22,25 +20,21 @@ export function useTimelineExpansion({
     });
   }, []);
 
-  const [overrides, setOverrides] = useState<ReadonlySet<string>>(
-    () => readTimelineExpansion(scrollMemoryKey)?.items ?? new Set(),
+  const [overrides, setOverrides] = useState<ReadonlyMap<string, boolean>>(
+    () => readTimelineExpansion(scrollMemoryKey)?.items ?? new Map(),
   );
-  const toggleExpanded = useCallback(
-    (id: string, _kind: BackendTimelineItem["kind"]) => {
-      setOverrides((prev) => {
-        const next = new Set(prev);
-        if (next.has(id)) next.delete(id);
-        else next.add(id);
-        return next;
-      });
-    },
-    [],
-  );
+  const toggleExpanded = useCallback((id: string, currentlyExpanded: boolean) => {
+    setOverrides((prev) => {
+      const next = new Map(prev);
+      next.set(id, !currentlyExpanded);
+      return next;
+    });
+  }, []);
 
   const [prevThreadKey, setPrevThreadKey] = useState(threadKey);
   if (prevThreadKey !== threadKey) {
     setPrevThreadKey(threadKey);
-    setOverrides(new Set());
+    setOverrides(new Map());
     setTurnOverrides(new Map());
   }
 
