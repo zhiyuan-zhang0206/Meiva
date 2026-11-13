@@ -5,10 +5,9 @@
 2. **Agent reply** (`agent_chat` with `user_facing !== false`): unboxed Markdown prose directly on the canvas (`data-testid="agent-message-prose"`, with a subtle pulsing `streaming-cursor` while `partial` is true) and a right-aligned hover chrome band (`CARD_FOOTER_CLS`) below it (user ruling 2026-11-01 — primary timestamps and Copy align uniformly on the right).
 3. **Secondary work item** (thinking, tool call, tool output, `subagent_text` (a CLI sub-agent's words: plain card titled `Sub-agent · <label>`, collapsed by default, markdown body, no Copy; the tool calls and outputs a sub-agent made are ordinary tool rows whose `parent_item_id` names the call that started it, so the row is indented and a tool header carries a `Sub-agent` badge), system prompt, attach, notes, inter-agent / system inbound, and non-user-facing `agent_chat` with `user_facing === false`): a borderless `MessageCard` + `CardHeader` (icon, title or summary, and inline chevron) inside an inline `TurnBlock` (`ml-1.5 pl-2` indentation), with its expanded body flush with the card header (`px-1 pt-0.5 pb-1.5`, no nested body indentation) and `code_output` / non-human items rendering their full payload without splitting a separate first-line header. Secondary items omit below-card timestamps and float a hover-revealed Copy pill inside the expanded body's bottom-right corner (`bottom-1 right-1 justify-end`, keeping uniform `pb-1.5` spacing with sibling blocks) only when `config.copy` is true (inter-agent / external-agent messages and non-user-facing `agent_chat`).
 
-Delivered upload rows (`system:upload`) use their structured file metadata to
-display a thumbnail for each previewable image. The thumbnail opens the image
-viewer. Other files and images whose preview fails have a file link. Legacy
-upload rows without structured files display their original text.
+Delivered upload rows (`system:upload`) display the original message body.
+Structured files appear below it as image thumbnails or file links. A
+thumbnail opens the image viewer. Images whose preview fails show a file link.
 
 Copy is **decided per block kind**, in `messageCardConfig`'s `copy` field — a
 whitelist, not "everything except …", so a kind added later has to opt in rather

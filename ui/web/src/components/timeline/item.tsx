@@ -324,7 +324,6 @@ function EnvelopeContent({
   const body = stripHumanHeader ? splitEnvelope(payload).body : payload;
   const showBody =
     Boolean(body) &&
-    !(source === "system:upload" && files?.length) &&
     !(images?.length && (body === "[image]" || body === "[files]")) &&
     !((Boolean(files?.length) || source === "user") && body === "[files]");
   // Attach items carry data URIs (self.attach media) — those render raw;

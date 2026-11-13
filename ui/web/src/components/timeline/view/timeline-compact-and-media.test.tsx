@@ -385,7 +385,8 @@ describe("ItemView: inbound_chat images", () => {
     expect(screen.queryByText("[image]")).toBeNull();
   });
 
-  it("shows upload thumbnails without duplicate file metadata and keeps links for other files", () => {
+  it("keeps the upload message text and shows each previewable image once", () => {
+    const payload = "Files uploaded with the next message (on macmini):\n- diagram.png (image/png, 4 KiB): /tmp/b/diagram.png";
     render(
       <TimelineView
         items={[
@@ -393,7 +394,7 @@ describe("ItemView: inbound_chat images", () => {
             item_id: "10.0",
             kind: "inbound_chat",
             source: "system:upload",
-            payload: "Files uploaded with the next message (on macmini):\n- diagram.png (image/png, 4 KiB): /tmp/b/diagram.png",
+            payload,
             files: [
               {
                 name: "diagram.png",
@@ -420,7 +421,7 @@ describe("ItemView: inbound_chat images", () => {
     );
     expect(screen.queryByText("[files]")).toBeNull();
     fireEvent.click(screen.getByRole("button", { name: /Context/i }));
-    expect(screen.queryByText(/Files uploaded with the next message|\/tmp\/b\/diagram.png/)).toBeNull();
+    expect(screen.getByTestId("chat-markdown").textContent).toBe(payload);
     expect(screen.queryByRole("link", { name: "diagram.png" })).toBeNull();
     expect(screen.getByRole("link", { name: "spec.pdf" }).getAttribute("href"))
       .toContain("/api/keyed/v1/agents/7/uploads/b/objects/1");
