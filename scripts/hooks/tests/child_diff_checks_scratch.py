@@ -5,12 +5,25 @@ from __future__ import annotations
 
 import os
 import signal
+import subprocess
 import sys
 import time
 from pathlib import Path
 
+import psutil
+from pydantic import BaseModel
+
 from scripts.hooks.diff_checks_pytest_child import PytestInterrupted, run_pytest_child
 from scripts.hooks.diff_checks_scratch import pytest_scratch
+
+
+class DescendantAnchor(BaseModel):
+    pid: int
+    birth: float
+    group: int
+    session: int
+    leader: int
+    argv: list[str]
 
 
 def main(arguments: list[str]) -> int:
@@ -21,6 +34,34 @@ def main(arguments: list[str]) -> int:
     if mode == "sleep":
         _ = Path(values[0]).write_text(str(os.getpid()))
         time.sleep(30)
+        return 0
+    if mode == "leader":
+        record = Path(values[0])
+        child_argv = [
+            sys.executable,
+            "-m",
+            "scripts.hooks.tests.child_diff_checks_scratch",
+            "sleep",
+            values[1],
+        ]
+        # meiva:note
+        # An anchored same-session descendant closes inherited output before leader exit.
+        child = subprocess.Popen(child_argv, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)  # noqa: S603
+        process = psutil.Process(child.pid)
+        anchor = DescendantAnchor(
+            pid=child.pid,
+            birth=process.create_time(),
+            group=os.getpgid(child.pid),
+            session=os.getsid(child.pid),
+            leader=os.getpid(),
+            argv=child_argv,
+        )
+        try:
+            _ = record.write_text(anchor.model_dump_json())
+        except BaseException:
+            child.terminate()
+            _ = child.wait(timeout=5)
+            raise
         return 0
     if mode == "owner":
         parent, pid_file, run_file = map(Path, values)

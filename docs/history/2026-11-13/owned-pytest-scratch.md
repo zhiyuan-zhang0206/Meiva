@@ -24,3 +24,13 @@ also selects nonnumeric suffixes after `pytest-` (parsed as -1). The run directo
 therefore uses `diff-checks-`, within the supported per-user root but outside
 pytest numbered cleanup. The existing macmini reaper enumerates that root without
 a filename-prefix filter; no reaper change is needed for this directory shape.
+
+
+Independent review found three missing proofs in the initial implementation:
+leader exit can leave a same-session descendant with closed output pipes; an
+opened child directory needs owner and lstat/fstat identity checks before chmod;
+and constructor failure must preserve a TERM deferred during startup. The revision
+adds those gates. If the leader has exited but its group remains or cannot be
+observed, scratch stays and cleanup fails visibly; no further signals are sent
+without the leader anchor. Construction keeps the interrupt with the original
+failure as its cause and restores the previous handler even without a child.

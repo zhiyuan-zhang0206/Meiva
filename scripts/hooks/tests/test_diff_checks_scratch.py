@@ -253,3 +253,151 @@ def test_run_scratch_is_outside_pytest_numbered_cleanup_candidates(tmp_path: Pat
     (tmp_path / "pytest-100").mkdir()
     with pytest_scratch(tmp_path) as scratch:
         assert scratch not in set(cleanup_candidates(tmp_path, prefix="pytest-", keep=3))
+
+
+@pytest.mark.parametrize("changed_index", [1, 2, 4])
+def test_directory_guard_rejects_changed_inode_device_or_uid(changed_index: int) -> None:
+    import stat
+
+    from scripts.hooks.diff_checks_scratch import require_owned_directory
+
+    expected = os.stat_result((stat.S_IFDIR | 0o700, 11, 22, 1, 501, 501, 0, 0, 0, 0))
+    require_owned_directory(expected, expected, 501)
+    candidate = list(expected)
+    candidate[changed_index] += 1
+    with pytest.raises(PermissionError):
+        require_owned_directory(os.stat_result(candidate), expected, 501)
+
+
+def test_constructor_error_preserves_deferred_term_and_restores_handler(tmp_path: Path) -> None:
+    from collections.abc import Mapping, Sequence
+
+    from scripts.hooks.diff_checks_pytest_child import PytestInterrupted
+
+    previous = signal.getsignal(signal.SIGTERM)
+    starts: list[bool] = []
+
+    def fail(
+        argv: Sequence[str], root: Path, environment: Mapping[str, str]
+    ) -> subprocess.Popen[str]:
+        del argv, root, environment
+        starts.append(True)
+        os.kill(os.getpid(), signal.SIGTERM)
+        raise OSError("synthetic constructor failure")
+
+    with pytest.raises(PytestInterrupted) as result:
+        _ = run_pytest_child((sys.executable,), tmp_path, environment={}, start=fail)
+    assert starts == [True]
+    assert result.value.signum == signal.SIGTERM
+    assert isinstance(result.value.__cause__, OSError)
+    assert signal.getsignal(signal.SIGTERM) == previous
+
+
+def test_worker_thread_refuses_before_child_construction(tmp_path: Path) -> None:
+    from collections.abc import Mapping, Sequence
+    from threading import Thread
+
+    starts: list[bool] = []
+    errors: list[BaseException] = []
+    previous = signal.getsignal(signal.SIGTERM)
+
+    def fail(
+        argv: Sequence[str], root: Path, environment: Mapping[str, str]
+    ) -> subprocess.Popen[str]:
+        del argv, root, environment
+        starts.append(True)
+        raise AssertionError("worker thread must not construct a child")
+
+    def worker() -> None:
+        try:
+            _ = run_pytest_child((sys.executable,), tmp_path, environment={}, start=fail)
+        except ValueError as error:
+            errors.append(error)
+
+    thread = Thread(target=worker)
+    thread.start()
+    thread.join(timeout=5)
+    assert not thread.is_alive()
+    assert len(errors) == 1 and not starts
+    assert signal.getsignal(signal.SIGTERM) == previous
+
+
+def test_same_session_descendant_retains_scratch_after_leader_exit(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    import psutil
+
+    from scripts.hooks.tests.child_diff_checks_scratch import DescendantAnchor
+
+    record = tmp_path / "descendant.json"
+    pid_file = tmp_path / "descendant.pid"
+    scratch_path: Path | None = None
+    try:
+        with pytest.raises(PytestChildUnreapedError), pytest_scratch(tmp_path) as scratch:
+            scratch_path = scratch
+            _ = run_pytest_child(
+                (
+                    sys.executable,
+                    "-m",
+                    "scripts.hooks.tests.child_diff_checks_scratch",
+                    "leader",
+                    str(record),
+                    str(pid_file),
+                ),
+                Path.cwd(),
+                environment=dict(os.environ),
+            )
+        anchor = DescendantAnchor.model_validate_json(record.read_text())
+        owned = psutil.Process(anchor.pid)
+        assert anchor.group == anchor.session == anchor.leader
+        assert owned.create_time() == anchor.birth
+        assert os.getpgid(owned.pid) == anchor.group
+        assert owned.is_running() and scratch.is_dir()
+        assert "retained scratch" in capsys.readouterr().err
+    finally:
+        if record.exists():
+            anchor = DescendantAnchor.model_validate_json(record.read_text())
+            owned = psutil.Process(anchor.pid)
+            assert owned.create_time() == anchor.birth, "unknown identity; no signal"
+            assert os.getpgid(owned.pid) == anchor.group, "unknown group; no signal"
+            assert owned.cmdline()[1:] == anchor.argv[1:], "unknown command; no signal"
+            owned.terminate()
+            _ = owned.wait(timeout=10)
+        if scratch_path is not None and scratch_path.exists():
+            scratch_path.rmdir()
+
+
+def test_swapped_opened_directory_is_preserved_before_chmod(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    import stat
+
+    substitute = tmp_path / "substitute"
+    substitute.mkdir(mode=0o700)
+    _ = (substitute / "keep").write_text("synthetic foreign content")
+
+    def exchange(name: str, parent_fd: int) -> int:
+        _ = os.rename(name, name + "-original", src_dir_fd=parent_fd, dst_dir_fd=parent_fd)
+        _ = os.rename(substitute, name, dst_dir_fd=parent_fd)
+        os.chmod(name, 0o500, dir_fd=parent_fd, follow_symlinks=False)
+        return os.open(name, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW, dir_fd=parent_fd)
+
+    scratch_path: Path | None = None
+    try:
+        with pytest_scratch(tmp_path, open_child=exchange) as scratch:
+            scratch_path = scratch
+            (scratch / "selected").mkdir()
+        replaced = scratch / "selected"
+        assert (replaced / "keep").read_text() == "synthetic foreign content"
+        assert stat.S_IMODE(replaced.stat().st_mode) == 0o500
+        assert "cleanup incomplete" in capsys.readouterr().err
+    finally:
+        if scratch_path is not None and scratch_path.exists():
+            if (scratch_path / "selected").exists():
+                (scratch_path / "selected").chmod(0o700)
+                _ = (scratch_path / "selected").rename(substitute)
+            if (scratch_path / "selected-original").exists():
+                (scratch_path / "selected-original").rmdir()
+            scratch_path.rmdir()
+        if substitute.exists():
+            substitute.chmod(0o700)

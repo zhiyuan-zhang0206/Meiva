@@ -7,7 +7,7 @@ import os
 import stat
 import sys
 import tempfile
-from collections.abc import Generator, Mapping
+from collections.abc import Callable, Generator, Mapping
 from contextlib import contextmanager
 from pathlib import Path
 
@@ -26,14 +26,33 @@ def pytest_scratch_parent(environ: Mapping[str, str]) -> Path:
     return temp_root / f"pytest-of-{user}"
 
 
-def _empty(directory: int) -> None:
+def require_owned_directory(
+    actual: os.stat_result, expected: os.stat_result, owner_uid: int
+) -> None:
+    if (
+        actual.st_uid != owner_uid
+        or expected.st_uid != owner_uid
+        or (actual.st_dev, actual.st_ino) != (expected.st_dev, expected.st_ino)
+        or not stat.S_ISDIR(actual.st_mode)
+    ):
+        raise PermissionError("scratch directory owner or identity changed")
+
+
+def _open_child(name: str, directory: int) -> int:
+    return os.open(name, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW, dir_fd=directory)
+
+
+def _empty(
+    directory: int, owner_uid: int, expected: os.stat_result, open_child: Callable[[str, int], int]
+) -> None:
+    require_owned_directory(os.fstat(directory), expected, owner_uid)
     os.fchmod(directory, os.fstat(directory).st_mode | stat.S_IRUSR | stat.S_IWUSR | stat.S_IXUSR)
     for name in os.listdir(directory):
         entry = os.stat(name, dir_fd=directory, follow_symlinks=False)
         if stat.S_ISDIR(entry.st_mode):
-            child = os.open(name, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW, dir_fd=directory)
+            child = open_child(name, directory)
             try:
-                _empty(child)
+                _empty(child, owner_uid, entry, open_child)
             finally:
                 os.close(child)
             os.rmdir(name, dir_fd=directory)
@@ -42,7 +61,9 @@ def _empty(directory: int) -> None:
 
 
 @contextmanager
-def pytest_scratch(parent: Path) -> Generator[Path]:
+def pytest_scratch(
+    parent: Path, *, open_child: Callable[[str, int], int] | None = None
+) -> Generator[Path]:
     parent.mkdir(mode=0o700, parents=True, exist_ok=True)
     directory = os.open(parent, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
     try:
@@ -72,7 +93,7 @@ def pytest_scratch(parent: Path) -> Generator[Path]:
                         file=sys.stderr,
                     )
                 else:
-                    _empty(owned)
+                    _empty(owned, identity.st_uid, identity, open_child or _open_child)
                     os.rmdir(scratch.name, dir_fd=directory)
             except (OSError, RuntimeError) as error:
                 print(

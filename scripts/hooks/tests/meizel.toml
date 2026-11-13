@@ -1,5 +1,2 @@
 [uses]
 "test_diff_checks_scratch.py" = ["child_diff_checks_scratch.py"]
-
-[roots]
-"child_diff_checks_scratch.py" = { kinds = ["argv", "environ", "pid", "cwd"], why = "synthetic run-owner fixture binds its own short child process inputs" }

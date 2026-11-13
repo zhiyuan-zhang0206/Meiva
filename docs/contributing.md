@@ -90,11 +90,11 @@ basetemp there; the runner reads JUnit and stores eligible cache evidence before
 removing only this run's scratch. Small failed-run JUnit and bounded log output
 are printed before removal. Cleanup failures are visible on stderr.
 The pytest-specific owner handles TERM by stopping and waiting for its own child
-before cleanup, then preserves the interruption. KILL cannot run cleanup: it can
+and confirms its group is absent before cleanup, then preserves the interruption. KILL cannot run cleanup: it can
 leave both scratch and a child. The directory shape matches the existing macmini
 basetemp reaper, whose quiet/age/ownership gates still apply; this does not install
 that reaper on another machine or promise immediate reclamation. An unconfirmed
-child exit retains scratch for diagnosis rather than deleting under the child.
+child exit or remaining group after leader exit retains scratch for diagnosis rather than deleting under the child.
 
 The `tests=` field in `diff_checks.py` reports three states: `RAN(<n>files)` with
 counted `passed`/`failed`/`errors`, `skipped(<why>)` when the change needs no test run,

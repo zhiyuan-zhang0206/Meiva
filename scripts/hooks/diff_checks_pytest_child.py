@@ -7,7 +7,7 @@ import os
 import signal
 import subprocess
 import time
-from collections.abc import Mapping, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from pathlib import Path
 from types import FrameType
 
@@ -24,8 +24,40 @@ class PytestChildUnreapedError(RuntimeError):
     pass
 
 
+def require_group_absent(group: int) -> None:
+    try:
+        os.killpg(group, 0)
+    except ProcessLookupError:
+        return
+    except OSError as error:
+        raise PytestChildUnreapedError(
+            "pytest group absence unconfirmed; scratch retained"
+        ) from error
+    raise PytestChildUnreapedError("pytest leader exited but group remains; scratch retained")
+
+
+def start_pytest_child(
+    argv: Sequence[str], root: Path, environment: Mapping[str, str]
+) -> subprocess.Popen[str]:
+    # meiva:note
+    # The supplied argv is the scoped pytest selection, run without a shell.
+    return subprocess.Popen(  # noqa: S603
+        list(argv),
+        cwd=root,
+        env=dict(environment),
+        start_new_session=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+        text=True,
+    )
+
+
 def run_pytest_child(
-    argv: Sequence[str], root: Path, *, environment: Mapping[str, str]
+    argv: Sequence[str],
+    root: Path,
+    *,
+    environment: Mapping[str, str],
+    start: Callable[[Sequence[str], Path, Mapping[str, str]], subprocess.Popen[str]] | None = None,
 ) -> tuple[int, str, float]:
     started = time.monotonic()
     child: subprocess.Popen[str] | None = None
@@ -38,17 +70,12 @@ def run_pytest_child(
 
     previous = signal.signal(signal.SIGTERM, interrupt)
     try:
-        # meiva:note
-        # explicit selected pytest argv, no shell
-        child = subprocess.Popen(  # noqa: S603
-            list(argv),
-            cwd=root,
-            env=dict(environment),
-            start_new_session=True,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.STDOUT,
-            text=True,
-        )
+        try:
+            child = (start or start_pytest_child)(argv, root, environment)
+        except BaseException as error:
+            if interrupted:
+                raise PytestInterrupted(interrupted[-1]) from error
+            raise
         if interrupted:
             raise PytestInterrupted(interrupted[-1])
         output, _ = child.communicate()
@@ -66,6 +93,8 @@ def run_pytest_child(
                 except subprocess.TimeoutExpired:
                     os.killpg(child.pid, signal.SIGKILL)
                     _ = child.communicate(timeout=5)
+            if child is not None:
+                require_group_absent(child.pid)
         except (OSError, subprocess.TimeoutExpired) as error:
             raise PytestChildUnreapedError(
                 "pytest child exit unconfirmed; scratch retained"
