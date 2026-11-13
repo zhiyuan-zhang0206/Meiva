@@ -26,7 +26,7 @@ full Gmail client.
 | Skill | Purpose | Detail |
 |-------|---------|--------|
 | gmail | Full Gmail client (read/search/send/reply/forward/draft + newsletter, pure stdlib IMAP/SMTP) | [gmail skill — Full Gmail Client](integrations/gmail/README.md) |
-| meiva-immersive-mode | Run a tight-loop live session across a shared perceptual surface while heavy work runs in the background | [meiva-immersive-mode skill — tight-loop live sessions with the human present](coordination/meiva-immersive-mode/README.md) |
+| meiva-immersive-mode | Keep live interaction responsive while background owners complete independent work | [meiva-immersive-mode skill — tight-loop live sessions with the human present](coordination/meiva-immersive-mode/README.md) |
 
 ## Ops, scheduling & lifecycle
 Operating and extending Meiva, scheduling timed tasks, background watchers, and

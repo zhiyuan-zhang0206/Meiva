@@ -1,22 +1,48 @@
 ---
 name: meiva-immersive-mode
-description: "Runs a tight-loop live session with the human present across a shared perceptual surface (chat, live preview, or device/audio output) while heavy work runs in the background. Use when the human explicitly starts a live session (immersive on, live pairing) — offer once when live steering helps, never enter on your own."
+description: "Keeps live interaction responsive across chat, shared content, or device/audio output while background owners complete independent work. Use when the human explicitly starts a live session (immersive on, live pairing) — offer once when live steering helps, never enter on your own."
 ---
 
 # Immersive Mode — Tight-Loop Shared-Surface Control
 
-A live-session discipline for a foreground agent whose human is present and
-actively steering. Keep the human's **primary perceptual surface** responsive in
-a tight feedback loop while slow, multi-step, or noisy engineering work runs
-asynchronously in the background.
+A live-session discipline organized around the human's attention, shared
+interaction, and task responsibility. The foreground agent understands intent,
+answers questions, presents feedback, and helps the human make choices.
+Background owners carry work that needs independent exploration or sustained
+execution. This applies to research, documents, planning, data analysis,
+creative work, device operation, and software work alike.
+
+## Foreground responsibility
+
+- **Serve the current interaction.** Keep brief, predictable actions inline
+  when they directly answer the human or produce feedback on the shared
+  surface. Judge the whole activity, including reasoning between calls, rather
+  than the speed of each individual tool call.
+- **Hand off an expanding inquiry.** When a brief confirmation opens up an
+  independent task, delegate it with the question, known facts, and required
+  evidence. Avoid a chain of "one more quick check" while the human waits.
+- **Transfer responsibility with the work.** Name an owner and the outcome,
+  scope, existing authority, completion evidence, and reporting condition.
+  Within that scope the owner makes routine decisions, executes, verifies,
+  and resolves ordinary problems. Reuse a suitable owner or start a worker;
+  keep the live discussion moving instead of researching the same question
+  yourself or approving each intermediate step. Delegation grants no new
+  authority and preserves required approvals.
+- **Return attention to the human.** After the handoff, continue the current
+  discussion or perceptible adjustment. When neither needs action, state the
+  wait condition once and end the turn. Waiting for the human or an agreed
+  result is a valid live-session state; ongoing background work does not keep
+  the foreground turn open. A request to stop foreground work parks this
+  session after any necessary handoff; keep immersive mode available for the
+  next interaction unless the human also ends the live session.
 
 ## Core model: shared perceptual surface
 
 When the human is live, their attention anchors on one **primary surface**:
 
 - **Conversation stream**: direct rapid Q&A, alignment, or live triage in chat.
-- **Live visual or app surface**: a hot-reloading dev server URL, or the shared
-  context panel (`to_user.md` / `meiva.ui.publish()`).
+- **Live visual or app surface**: a shared document, chart, presentation, app
+  preview, or context panel (`to_user.md` / `meiva.ui.publish()`).
 - **Physical or multimodal output**: audio test tones on speakers, GUI actions,
   or hardware probes the human perceives directly.
 
@@ -54,13 +80,13 @@ Two distinct clocks govern the loop:
      on the native harness),
    - the session contract: primary surface, silence watchdog cap (default `60`s),
      hot/cold split, and exit reversion,
-   - live rig details (port, page name, probe command), delegated owners, wait
+   - live surface details (document, URL, probe command), delegated owners, wait
      states, human decisions with one-line rationales, and evidence paths.
 2. **Announce the contract**: State the primary surface, silence watchdog cap,
    foreground/background split, tightened foreground exec ceiling (when native),
    and that the human can end the mode at any time.
 3. **Tighten `exec_timeout_seconds` (native Meiva harness)**: Call
-   `meiva.self.restart(config_overlay={"exec_timeout_seconds": <tight_s>})` to set
+   `meiva.self.restart("Enter immersive mode", config_overlay={"exec_timeout_seconds": <tight_s>})` to set
    a hard single-call ceiling (typically `25`–`30`s, at most half the silence
    watchdog cap, and strictly below `exec_node_timeout_seconds`). Kernel timeout
    enforcement prevents an accidental slow foreground call from wedging the live
@@ -74,44 +100,50 @@ Two distinct clocks govern the loop:
      ledger, and enforce the same hot/cold split by discipline alone.
 4. **Establish the live feedback rig first**: When the primary surface is
    non-text, your first operational move is a minimal tracer bullet that stands
-   up the live target the human perceives — start the HMR/dev server (e.g. running
-   in the background and sharing the local URL), update `<workspace>/to_user.md`,
-   or fire a 1-second audio/device probe to verify the output path. If initial
-   build or setup is slow, immediately dispatch the heavy setup to the background
-   while aligning details in chat, switching over once the live rig boots.
+   up the live target the human perceives — open the shared document or preview,
+   update `<workspace>/to_user.md`, or fire a 1-second audio/device probe. Delegate
+   slow setup while aligning details in chat, switching over once it is ready.
+   Hand off existing independent work on entry too; preparing a background job
+   must not become another foreground project.
 
 ## Foreground inline (hot path) vs. background delegate (cold path)
 
-- **Foreground inline (hot path)** — strictly operations that finish well inside
-  the tightened `exec_timeout_seconds` window *and* directly drive a reversible
-  observable delta on the primary surface or answer the human immediately:
-  - Direct conversation, brief cues, and decision prompts;
-  - Single-step targeted file reads or narrow state checks;
-  - Small hot-reload edits or parameter tweaks on an already-running live rig
-    (e.g., CSS/layout adjustments over HMR, filter/config knob changes);
-  - Triggering a short audio, GUI, or hardware probe.
-- **Background delegate (cold path)** — everything with uncertain duration,
-  multiple steps, heavy compute, or noisy output:
-  - Package installation, builds, and compilation;
-  - Multi-file or cross-module code changes and refactors;
-  - Test suites, typecheckers, and linters;
-  - Broad codebase searches and deep research.
-  Dispatch cold-path work via `meiva.agents.spawn`, `meiva.shell.run_background`,
-  or `meiva.watcher` and rely on event wakeups rather than foreground polling.
-  Pair both paths freely: apply a small UI tweak inline so the human sees the
-  HMR delta in seconds while running typecheck and regression tests in the
-  background to verify safety.
+Choose by attention cost, predictable duration, need for independent exploration,
+and immediate feedback. A short command can be part of a long investigation.
+
+- **Foreground inline (hot path)**: direct conversation, brief cues, a bounded
+  factual confirmation, or a small reversible adjustment to the active surface
+  (wording, chart view, layout, audio level, device setting). The whole step
+  should answer the human or produce perceptible feedback within seconds and
+  stay well inside the native execution ceiling where it applies.
+- **Background delegate (cold path)**: source comparison, document synthesis,
+  open-ended investigation, data processing, preparation, or verification that
+  requires sustained attention, uncertain duration, or multiple dependent steps.
+  Software builds and test suites are examples of the same rule.
+
+Use an agent owner for work needing judgment, follow-up, or interpretation.
+`meiva.agents.spawn` can assign a new worker; an existing suitable owner can
+continue. A self-contained mechanical operation can use
+`meiva.shell.run_background`, with `meiva.watcher` for temporary event waits.
+Putting a command in the background only delegates its execution: if preparing,
+interpreting, or repairing it needs sustained attention, give that work an owner
+too. Rely on completion events rather than foreground polling. Pair brief live
+adjustments with independent background verification when useful.
 
 ## Operating rules
 
 1. **Human preempts**: A new human message preempts — finish at most the current
    fast inline step, answer or steer immediately, then continue.
-2. **Protect the loop**: Now that user delivery (`user_facing` / explicit delivery)
-   is decoupled from internal agent turns, leaf worker `send_message` wakes do
-   not spam the user's primary surface. The foreground agent can manage leaf
-   workers directly and filter/batch what reaches the human. Batch non-urgent
-   fleet arrivals into natural session pauses; surface immediately only what
-   needs human judgment now.
+2. **Protect the loop**: User delivery (`user_facing` / explicit delivery) is
+   separate from internal worker wakeups. Agree on a useful result or milestone;
+   let owners handle routine intermediate updates. Batch non-urgent arrivals
+   into natural pauses. Routine progress needs no acknowledgment or renewed
+   instructions; record useful state and end the internal turn when no action
+   is needed. A coordinator can aggregate related work when needed;
+   worker count alone does not require another management layer. Surface results
+   relevant to the current discussion and decisions requiring the human. If
+   evidence reveals a material error or risk, route the specific concern to its
+   owner or the human as appropriate; avoid reopening the entire task yourself.
 3. **Signal, never filler**: Every chat turn carries an observable-delta cue, a
    finding, a decision, or an explicit wait notice. Never manufacture chatter,
    rush verification, or spawn cosmetic workers to look busy.
@@ -124,7 +156,7 @@ When the human ends the session:
 2. Send a concise close: what changed, what remains delegated (with owners and
    ledger path), and the next milestone under default batched reporting.
 3. On the native Meiva harness, call
-   `meiva.self.restart(config_overlay={"exec_timeout_seconds": <saved_value>})`
+   `meiva.self.restart("Exit immersive mode", config_overlay={"exec_timeout_seconds": <saved_value>})`
    to restore the original timeout recorded in the ledger; when the post-restart
    turn resumes, see the closed ledger and stop quietly without repeating the
    closing message.
