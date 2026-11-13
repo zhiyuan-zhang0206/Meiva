@@ -222,6 +222,7 @@ export function useTimelineViewport({
   settleRestoredPosition,
   maintainSendAnchor,
   releaseCollapseReserve,
+  collapseReserveHeight,
   readingReserve,
   tailHeight,
   cancelPendingJump,
@@ -262,6 +263,7 @@ export function useTimelineViewport({
   // meiva:link ui/web/src/docs/frontend-components/timeline-view/sticky-scroll.md
   maintainSendAnchor: (viewport: HTMLElement) => boolean;
   releaseCollapseReserve: (viewport: HTMLElement) => void;
+  collapseReserveHeight: () => number;
   readingReserve: () => number;
   tailHeight: (viewport: HTMLElement) => number;
   cancelPendingJump: () => void;
@@ -318,7 +320,7 @@ export function useTimelineViewport({
       trimFollowing();
       const mem = scrollMemoryRef.current;
       if (mem && !restoreInFlight()) {
-        rememberTimelinePosition(viewport, mem.entryKey, mem.contentKey, controller, readingReserve() > 0);
+        rememberTimelinePosition(viewport, mem.entryKey, mem.contentKey, controller, tailHeight(viewport), collapseReserveHeight());
       }
     };
     viewport.addEventListener("scroll", onScroll, { passive: true });
@@ -472,6 +474,7 @@ export function useTimelineViewport({
     settleRestoredPosition,
     maintainSendAnchor,
     releaseCollapseReserve,
+    collapseReserveHeight,
     readingReserve,
     tailHeight,
     cancelPendingJump,

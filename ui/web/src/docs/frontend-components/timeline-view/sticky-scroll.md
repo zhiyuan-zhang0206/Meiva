@@ -23,14 +23,11 @@ carries the grown height and an upward move and the height test alone reads a
 departure (#5678: a 254 px clamp from estimates replaced by measurements
 released a follower for good; #5680: 69 px read as growth against a commit-only
 baseline stranded one 107 px short).
-A pending bookmark restore
-lands before the pin, so the reader never sees the bottom first, and a
-bookmark saved on the tail restores the newest message rather than a row's old
-pixel: a thread that grew while the reader was away returns to its end, not to
-the row they left. The save asks the follow rule itself (`isAtTail`: inside
-the bottom zone, or only short of it because a chunk outran its pin) rather
-than a distance, so a switch away inside a streaming frame still counts as
-the tail.
+A pending bookmark restore lands before the pin. A follower returns to the
+natural end of the conversation, including messages that arrived while away.
+A reader at the end of the additional scroll space returns to their saved row
+and offset. When collapsing a work block created that space, the restore
+recreates as much of it as the saved offset needs.
 The down arrow sits at the bottom center of the conversation and uses the same
 icon while loading or generating. It takes the reader to the last human message
 or the tail according to the [reading position](send-anchor.md). A smooth ride

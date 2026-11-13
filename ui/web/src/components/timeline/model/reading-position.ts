@@ -6,14 +6,15 @@ import type { StickyController } from "@/lib/layout/sticky";
 // A saved position is one of two kinds. A reader watching the tail (the follow rule's own `isAtTail`, not a raw distance) is not reading a row, so the bookmark says "follow the bottom" and a return lands on the newest message however much arrived meanwhile — including when the switch happens between a streamed chunk and the pin that would have followed it. Any other reader keeps the visible item and its offset and is returned to that item.
 // meiva:link ui/web/src/docs/frontend-components/timeline-view/sticky-scroll.md
 export function rememberTimelinePosition(
-  viewport: HTMLElement, entryKey: string, contentKey: string, controller: StickyController, paddedBottom = false,
+  viewport: HTMLElement, entryKey: string, contentKey: string, controller: StickyController,
+  tailHeight = viewport.scrollHeight, collapseReserve = 0,
 ) {
   const position = {
     scrollTop: viewport.scrollTop,
-    scrollHeight: viewport.scrollHeight,
+    scrollHeight: tailHeight,
     clientHeight: viewport.clientHeight,
   };
-  if (controller.isAtTail(position, paddedBottom)) {
+  if (controller.isAtTail(position, tailHeight < viewport.scrollHeight)) {
     saveScrollMemory(entryKey, { contentKey, scrollTop: position.scrollTop, followBottom: true });
     return;
   }
@@ -26,6 +27,8 @@ export function rememberTimelinePosition(
   });
   saveScrollMemory(entryKey, {
     contentKey, scrollTop: viewport.scrollTop, followBottom: false,
+    ...(collapseReserve > 0 && viewport.scrollTop + viewport.clientHeight > viewport.scrollHeight - collapseReserve + 1
+      ? { usedCollapseReserve: true as const } : {}),
     anchor: node?.dataset.itemId ? {
       itemId: node.dataset.itemId, rank: Number(node.dataset.displayRank ?? 0),
       viewportTop: node.getBoundingClientRect().top - rect.top,

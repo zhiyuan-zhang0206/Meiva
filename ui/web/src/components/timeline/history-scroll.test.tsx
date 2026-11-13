@@ -94,14 +94,20 @@ beforeEach(() => {
   });
   vi.spyOn(HTMLElement.prototype, "clientHeight", "get").mockReturnValue(600);
   vi.spyOn(HTMLElement.prototype, "scrollHeight", "get").mockImplementation(function (this: HTMLElement) {
-    return this.querySelectorAll(".timeline-item").length ? height : 600;
+    if (!this.querySelectorAll(".timeline-item").length) return 600;
+    return height + [...this.querySelectorAll<HTMLElement>("[data-send-reserve], [data-turn-collapse-reserve]")]
+      .reduce((total, node) => total + node.offsetHeight, 0);
+  });
+  vi.spyOn(HTMLElement.prototype, "offsetHeight", "get").mockImplementation(function (this: HTMLElement) {
+    return Number.parseFloat(this.style.height) || 0;
   });
   vi.spyOn(HTMLElement.prototype, "scrollTop", "get").mockImplementation(() => top);
   vi.spyOn(HTMLElement.prototype, "scrollTop", "set").mockImplementation(function (this: HTMLElement, value) {
     top = Math.max(0, Math.min(value, this.scrollHeight - this.clientHeight));
   });
   vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockImplementation(function (this: HTMLElement) {
-    const y = this.dataset.itemId ? (Number.parseInt(this.dataset.itemId) - 1) * 300 - top + aboveSettle : 0;
+    const y = this.hasAttribute("data-send-reserve") ? height - top
+      : this.dataset.itemId ? (Number.parseInt(this.dataset.itemId) - 1) * 300 - top + aboveSettle : 0;
     return { top: y, bottom: y + 300, height: 300, left: 0, right: 400, width: 400 } as DOMRect;
   });
 });
@@ -313,6 +319,32 @@ describe("agent switch reading positions", () => {
     expect(viewport().scrollTop).toBe(700);
     rerender(tabs(43, "agent-tabs"));
     expect(viewport().scrollTop).toBe(1200);
+  });
+  it("restores a reader at the padded end without switching them to tail following", () => {
+    const rows = [...items, { ...items[0], item_id: "17.0", kind: "inbound_chat", source: "user", payload: "Latest question" }];
+    client.setQueryData(["timeline", 42], { ...response, items: rows });
+    const { rerender } = renderWithBrowser(tabs(42, "agent-padded-bottom"));
+    act(() => { viewport().scrollTop = 4744; fireEvent.scroll(viewport()); });
+    expect(readScrollMemory("agent-padded-bottom:agent:42")).toMatchObject({ scrollTop: 4744, followBottom: false });
+    rerender(tabs(43, "agent-padded-bottom"));
+    rerender(tabs(42, "agent-padded-bottom"));
+    resize();
+    expect(viewport().scrollTop).toBe(4744);
+    expect(readingOffset("17.0")).toBe(56);
+    expect(screen.getByTestId("scroll-to-bottom")).toBeTruthy();
+  });
+
+  it("recreates the space needed for a bookmark beyond the shortened conversation", () => {
+    saveScrollMemory("agent-collapse-space:agent:42", {
+      contentKey: "42", scrollTop: 4600, followBottom: false, usedCollapseReserve: true,
+      anchor: { itemId: "16.0", rank: 0, viewportTop: -100 },
+    });
+    const { rerender } = renderWithBrowser(tabs(43, "agent-collapse-space"));
+    rerender(tabs(42, "agent-collapse-space"));
+    resize();
+    expect(viewport().scrollTop).toBe(4600);
+    expect(readingOffset("16.0")).toBe(-100);
+    expect(viewport().querySelector<HTMLElement>("[data-turn-collapse-reserve]")?.style.height).toBe("200px");
   });
   it("saves a reader on the tail as following the bottom", () => {
     renderWithBrowser(tabs(42, "agent-tail-save"));

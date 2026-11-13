@@ -239,7 +239,8 @@ export function useSendAnchor({
   }, [compactBuffer, isFollowing, items, latestHuman, park, pendingJump, request, threadKey, viewportRef, wrapperRef]);
 
   useLayoutEffect(() => {
-    const viewport = viewportRef.current;
+    const viewport = viewportRef.current
+      ?? wrapperRef.current?.querySelector<HTMLElement>('[data-slot="scroll-area-viewport"]');
     if (viewport) maintain(viewport);
   });
 

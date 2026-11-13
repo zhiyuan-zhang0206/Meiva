@@ -194,8 +194,9 @@ export const TimelineView = memo(function TimelineView({
     controller, compactBuffer, canonicalItems,
   });
 
+  const collapseReserveHeight = useCallback(() => collapseReserveRef.current?.offsetHeight ?? 0, []);
   const readingReserve = useCallback(() =>
-    (sendReserveRef.current?.offsetHeight ?? 0) + (collapseReserveRef.current?.offsetHeight ?? 0), []);
+    (sendReserveRef.current?.offsetHeight ?? 0) + collapseReserveHeight(), [collapseReserveHeight]);
   const releaseCollapseReserve = useCallback((viewport: HTMLElement) => {
     const reserve = collapseReserveRef.current;
     if (reserve && reserve.offsetHeight > 0 &&
@@ -209,8 +210,8 @@ export const TimelineView = memo(function TimelineView({
   useLayoutEffect(() => () => {
     const mem = scrollMemoryRef.current;
     const viewport = viewportRef.current;
-    if (mem && viewport && !restoreInFlight()) rememberTimelinePosition(viewport, mem.entryKey, mem.contentKey, controller, readingReserve() > 0);
-  }, [restoreInFlight, controller, readingReserve]);
+    if (mem && viewport && !restoreInFlight()) rememberTimelinePosition(viewport, mem.entryKey, mem.contentKey, controller, tailHeight(viewport), collapseReserveHeight());
+  }, [restoreInFlight, controller, tailHeight, collapseReserveHeight]);
 
   const isFollowing = useCallback(() => !holdRestoredPositionRef.current && controller.isSticky(), [controller]);
   const canonicalItemsRef = useRef(canonicalItems);
@@ -427,8 +428,10 @@ export const TimelineView = memo(function TimelineView({
       compactBuffer,
       canonicalItems: canonicalItemsRef.current,
       controller,
+      tailHeight,
+      collapseReserve: collapseReserveRef.current,
     }),
-    [bookmarkState, compactBuffer, controller, threadKey],
+    [bookmarkState, compactBuffer, controller, tailHeight, threadKey],
   );
 
   const settleRestoredPosition = useCallback(
@@ -474,6 +477,7 @@ export const TimelineView = memo(function TimelineView({
     settleRestoredPosition,
     maintainSendAnchor,
     releaseCollapseReserve,
+    collapseReserveHeight,
     readingReserve,
     tailHeight,
     cancelPendingJump,
