@@ -13,7 +13,7 @@ from pathlib import Path
 import pytest
 
 from scripts.hooks.diff_checks_pytest_child import PytestChildUnreapedError, run_pytest_child
-from scripts.hooks.diff_checks_scratch import pytest_scratch
+from scripts.hooks.diff_checks_scratch import ScratchCleanupError, pytest_scratch
 
 
 def test_two_runs_only_remove_their_own_scratch(tmp_path: Path) -> None:
@@ -56,13 +56,13 @@ def test_unconfirmed_child_retains_owned_scratch(
 def test_replaced_scratch_name_is_not_removed(
     tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    with pytest_scratch(tmp_path) as scratch:
+    with pytest.raises(ScratchCleanupError), pytest_scratch(tmp_path) as scratch:
         moved = scratch.with_name(scratch.name + "-moved")
         _ = scratch.rename(moved)
         scratch.mkdir()
         _ = (scratch / "new-owner").write_text("keep")
     assert (scratch / "new-owner").exists()
-    assert "replaced name" in capsys.readouterr().err
+    assert "cleanup incomplete" in capsys.readouterr().err
 
 
 @pytest.mark.parametrize("code", [0, 7])
@@ -132,6 +132,7 @@ def test_kill_leaves_scratch_and_child_until_explicit_test_owner_cleanup(tmp_pat
         stderr=subprocess.PIPE,
     )
     owned: psutil.Process | None = None
+    admitted = False
     try:
         deadline = time.monotonic() + 10
         while not pid_file.exists() and time.monotonic() < deadline:
@@ -139,6 +140,14 @@ def test_kill_leaves_scratch_and_child_until_explicit_test_owner_cleanup(tmp_pat
         assert pid_file.exists()
         owned = psutil.Process(int(pid_file.read_text()))
         assert owned.ppid() == owner.pid
+        assert os.getpgid(owned.pid) == os.getsid(owned.pid) == owned.pid
+        assert owned.cmdline()[1:] == [
+            "-m",
+            "scripts.hooks.tests.child_diff_checks_scratch",
+            "sleep",
+            str(pid_file),
+        ]
+        admitted = True
         owner.kill()
         _ = owner.communicate(timeout=10)
         assert owned.is_running()
@@ -147,7 +156,7 @@ def test_kill_leaves_scratch_and_child_until_explicit_test_owner_cleanup(tmp_pat
         if owner.poll() is None:
             owner.terminate()
         _ = owner.communicate(timeout=10)
-        if owned is not None and owned.is_running():
+        if admitted and owned is not None and owned.is_running():
             owned.terminate()
             _ = owned.wait(timeout=10)
 
@@ -384,7 +393,10 @@ def test_swapped_opened_directory_is_preserved_before_chmod(
 
     scratch_path: Path | None = None
     try:
-        with pytest_scratch(tmp_path, open_child=exchange) as scratch:
+        with (
+            pytest.raises(ScratchCleanupError),
+            pytest_scratch(tmp_path, open_child=exchange) as scratch,
+        ):
             scratch_path = scratch
             (scratch / "selected").mkdir()
         replaced = scratch / "selected"
@@ -401,3 +413,120 @@ def test_swapped_opened_directory_is_preserved_before_chmod(
             scratch_path.rmdir()
         if substitute.exists():
             substitute.chmod(0o700)
+
+
+@pytest.mark.parametrize("kind", ["TERM", "INT"])
+def test_unknown_cleanup_preserves_primary_interrupt_and_scratch(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str], kind: str
+) -> None:
+    from collections.abc import Mapping, Sequence
+
+    from scripts.hooks.diff_checks_pytest_child import PytestInterrupted
+
+    previous = signal.getsignal(signal.SIGTERM)
+
+    def fail_start(
+        argv: Sequence[str], root: Path, environment: Mapping[str, str]
+    ) -> subprocess.Popen[str]:
+        del argv, root, environment
+        if kind == "TERM":
+            os.kill(os.getpid(), signal.SIGTERM)
+            raise OSError("synthetic constructor failure")
+        raise KeyboardInterrupt
+
+    def unknown_stop(child: subprocess.Popen[str] | None) -> None:
+        assert child is None
+        raise PytestChildUnreapedError("synthetic observation unknown")
+
+    expected = PytestInterrupted if kind == "TERM" else KeyboardInterrupt
+    with pytest.raises(expected) as result, pytest_scratch(tmp_path) as scratch:
+        _ = run_pytest_child(
+            (sys.executable,), tmp_path, environment={}, start=fail_start, stop=unknown_stop
+        )
+    assert isinstance(result.value.__cause__, PytestChildUnreapedError)
+    assert signal.getsignal(signal.SIGTERM) == previous
+    assert scratch.is_dir()
+    output = capsys.readouterr().err
+    assert "cleanup incomplete during interruption" in output and "retained scratch" in output
+    scratch.rmdir()
+
+
+@pytest.mark.parametrize("kind", ["TERM", "INT"])
+def test_directory_cleanup_error_keeps_original_interrupt(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str], kind: str
+) -> None:
+    from scripts.hooks.diff_checks_pytest_child import PytestInterrupted
+
+    def refuse(_name: str, _parent: int) -> int:
+        raise PermissionError("synthetic directory observation failure")
+
+    interruption = PytestInterrupted(signal.SIGTERM) if kind == "TERM" else KeyboardInterrupt()
+    with (
+        pytest.raises(type(interruption)) as result,
+        pytest_scratch(tmp_path, open_child=refuse) as scratch,
+    ):
+        (scratch / "keep").mkdir()
+        raise interruption
+    assert result.value is interruption
+    assert (scratch / "keep").is_dir()
+    assert "cleanup incomplete" in capsys.readouterr().err
+    (scratch / "keep").rmdir()
+    scratch.rmdir()
+
+
+@pytest.mark.parametrize("kind, signum", [("TERM", signal.SIGTERM), ("INT", signal.SIGINT)])
+def test_cleanup_failure_cli_retains_signal_exit(tmp_path: Path, kind: str, signum: int) -> None:
+    record = tmp_path / "run.path"
+    # meiva:note
+    # This isolated fixture synthesizes unknown cleanup without creating an external child.
+    result = subprocess.run(  # noqa: S603
+        [
+            sys.executable,
+            "-m",
+            "scripts.hooks.tests.child_diff_checks_scratch",
+            "cleanup-interrupt",
+            str(tmp_path),
+            str(record),
+            kind,
+        ],
+        capture_output=True,
+        timeout=10,
+        check=False,
+    )
+    assert result.returncode == -signum
+    scratch = Path(record.read_text())
+    assert scratch.is_dir() and b"retained scratch" in result.stderr
+    scratch.rmdir()
+
+
+@pytest.mark.parametrize("unknown", [False, True])
+def test_term_received_during_cleanup_is_recorded_and_replayed(
+    tmp_path: Path, unknown: bool
+) -> None:
+    from collections.abc import Mapping, Sequence
+
+    from scripts.hooks.diff_checks_pytest_child import PytestInterrupted
+
+    previous = signal.getsignal(signal.SIGTERM)
+
+    def fail_start(
+        argv: Sequence[str], root: Path, environment: Mapping[str, str]
+    ) -> subprocess.Popen[str]:
+        del argv, root, environment
+        raise OSError("synthetic constructor failure before interruption")
+
+    def stop(child: subprocess.Popen[str] | None) -> None:
+        assert child is None
+        os.kill(os.getpid(), signal.SIGTERM)
+        if unknown:
+            raise PytestChildUnreapedError("synthetic unknown cleanup")
+
+    with pytest.raises(PytestInterrupted) as result, pytest_scratch(tmp_path) as scratch:
+        _ = run_pytest_child(
+            (sys.executable,), tmp_path, environment={}, start=fail_start, stop=stop
+        )
+    assert result.value.signum == signal.SIGTERM
+    assert signal.getsignal(signal.SIGTERM) == previous
+    assert scratch.exists() == unknown
+    if unknown:
+        scratch.rmdir()

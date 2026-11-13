@@ -6,10 +6,12 @@ from __future__ import annotations
 import os
 import signal
 import subprocess
+import sys
 import time
 from collections.abc import Callable, Mapping, Sequence
 from pathlib import Path
 from types import FrameType
+from typing import NoReturn
 
 
 class PytestInterrupted(BaseException):
@@ -52,20 +54,61 @@ def start_pytest_child(
     )
 
 
+def stop_and_confirm(child: subprocess.Popen[str] | None) -> None:
+    if child is None:
+        return
+    try:
+        if child.poll() is None:
+            os.killpg(child.pid, signal.SIGTERM)
+            try:
+                _ = child.communicate(timeout=5)
+            except subprocess.TimeoutExpired:
+                os.killpg(child.pid, signal.SIGKILL)
+                _ = child.communicate(timeout=5)
+        require_group_absent(child.pid)
+    except (OSError, subprocess.TimeoutExpired) as error:
+        raise PytestChildUnreapedError("pytest child exit unconfirmed; scratch retained") from error
+
+
+def raise_interruption(signum: int) -> NoReturn:
+    raise PytestInterrupted(signum)
+
+
+def finish_cleanup(
+    cleanup: PytestChildUnreapedError | None,
+    primary: PytestInterrupted | KeyboardInterrupt | None,
+    pending: int | None,
+) -> None:
+    if primary is None and pending is not None:
+        primary = PytestInterrupted(pending)
+    if cleanup is not None:
+        if primary is None:
+            raise cleanup
+        diagnostic = f"pytest cleanup incomplete during interruption: {type(cleanup).__name__}"
+        print(diagnostic, file=sys.stderr)
+        primary.add_note(diagnostic)
+        raise primary from cleanup
+    if primary is not None:
+        raise primary
+
+
 def run_pytest_child(
     argv: Sequence[str],
     root: Path,
     *,
     environment: Mapping[str, str],
     start: Callable[[Sequence[str], Path, Mapping[str, str]], subprocess.Popen[str]] | None = None,
+    stop: Callable[[subprocess.Popen[str] | None], None] | None = None,
 ) -> tuple[int, str, float]:
     started = time.monotonic()
     child: subprocess.Popen[str] | None = None
     interrupted: list[int] = []
+    primary_interrupt: PytestInterrupted | KeyboardInterrupt | None = None
+    cleaning = False
 
     def interrupt(signum: int, _frame: FrameType | None) -> None:
         interrupted.append(signum)
-        if child is not None:
+        if child is not None and not cleaning:
             raise PytestInterrupted(signum)
 
     previous = signal.signal(signal.SIGTERM, interrupt)
@@ -77,27 +120,26 @@ def run_pytest_child(
                 raise PytestInterrupted(interrupted[-1]) from error
             raise
         if interrupted:
-            raise PytestInterrupted(interrupted[-1])
+            raise_interruption(interrupted[-1])
         output, _ = child.communicate()
         return child.returncode, output, time.monotonic() - started
+    except (PytestInterrupted, KeyboardInterrupt) as error:
+        primary_interrupt = error
+        raise
     finally:
         # meiva:note
-        # Restore the caller's signal contract only after our child has exited.
-        # A second TERM during this bounded cleanup must not interrupt its wait.
-        _ = signal.signal(signal.SIGTERM, signal.SIG_IGN)
+        # Cleanup keeps recording TERM without interrupting its bounded wait. Restore
+        # the caller's handler before resolving the recorded interruption and failure.
+        cleaning = True
+        cleanup_error: PytestChildUnreapedError | None = None
         try:
-            if child is not None and child.poll() is None:
-                os.killpg(child.pid, signal.SIGTERM)
-                try:
-                    _ = child.communicate(timeout=5)
-                except subprocess.TimeoutExpired:
-                    os.killpg(child.pid, signal.SIGKILL)
-                    _ = child.communicate(timeout=5)
-            if child is not None:
-                require_group_absent(child.pid)
-        except (OSError, subprocess.TimeoutExpired) as error:
-            raise PytestChildUnreapedError(
-                "pytest child exit unconfirmed; scratch retained"
-            ) from error
+            (stop or stop_and_confirm)(child)
+        except PytestChildUnreapedError as error:
+            cleanup_error = error
+        except KeyboardInterrupt as error:
+            if primary_interrupt is None:
+                primary_interrupt = error
+            cleanup_error = PytestChildUnreapedError("pytest cleanup interrupted; scratch retained")
         finally:
             _ = signal.signal(signal.SIGTERM, previous)
+        finish_cleanup(cleanup_error, primary_interrupt, interrupted[-1] if interrupted else None)

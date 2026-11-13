@@ -11,7 +11,11 @@ from collections.abc import Callable, Generator, Mapping
 from contextlib import contextmanager
 from pathlib import Path
 
-from scripts.hooks.diff_checks_pytest_child import PytestChildUnreapedError
+from scripts.hooks.diff_checks_pytest_child import PytestChildUnreapedError, PytestInterrupted
+
+
+class ScratchCleanupError(RuntimeError):
+    pass
 
 
 def pytest_scratch_parent(environ: Mapping[str, str]) -> Path:
@@ -60,6 +64,35 @@ def _empty(
             os.unlink(name, dir_fd=directory)
 
 
+def retain_for(error: BaseException) -> bool:
+    return isinstance(error, PytestChildUnreapedError) or (
+        isinstance(error, (PytestInterrupted, KeyboardInterrupt))
+        and isinstance(error.__cause__, PytestChildUnreapedError)
+    )
+
+
+def _remove_owned(
+    scratch: Path,
+    parent: int,
+    owned: int,
+    identity: os.stat_result,
+    open_child: Callable[[str, int], int],
+) -> None:
+    current = os.stat(scratch.name, dir_fd=parent, follow_symlinks=False)
+    if (current.st_dev, current.st_ino) != (identity.st_dev, identity.st_ino):
+        raise ScratchCleanupError("owned scratch name was replaced")
+    _empty(owned, identity.st_uid, identity, open_child)
+    os.rmdir(scratch.name, dir_fd=parent)
+
+
+def _cleanup_failure(scratch: Path, error: BaseException, primary: BaseException | None) -> None:
+    diagnostic = f"pytest scratch cleanup incomplete: {scratch}: {type(error).__name__}"
+    print(diagnostic, file=sys.stderr)
+    if primary is None:
+        raise ScratchCleanupError(diagnostic) from error
+    primary.add_note(diagnostic)
+
+
 @contextmanager
 def pytest_scratch(
     parent: Path, *, open_child: Callable[[str, int], int] | None = None
@@ -76,30 +109,23 @@ def pytest_scratch(
         )
         identity = os.fstat(owned)
         retained = False
+        primary: BaseException | None = None
         try:
             yield scratch
-        except PytestChildUnreapedError:
-            retained = True
-            print(f"pytest child exit unconfirmed; retained scratch: {scratch}", file=sys.stderr)
+        except BaseException as error:
+            primary = error
+            retained = retain_for(error)
+            if retained:
+                print(
+                    f"pytest child exit unconfirmed; retained scratch: {scratch}", file=sys.stderr
+                )
             raise
         finally:
             try:
-                current = os.stat(scratch.name, dir_fd=directory, follow_symlinks=False)
-                if retained:
-                    pass
-                elif (current.st_dev, current.st_ino) != (identity.st_dev, identity.st_ino):
-                    print(
-                        f"pytest scratch cleanup incomplete: replaced name: {scratch}",
-                        file=sys.stderr,
-                    )
-                else:
-                    _empty(owned, identity.st_uid, identity, open_child or _open_child)
-                    os.rmdir(scratch.name, dir_fd=directory)
+                if not retained:
+                    _remove_owned(scratch, directory, owned, identity, open_child or _open_child)
             except (OSError, RuntimeError) as error:
-                print(
-                    f"pytest scratch cleanup incomplete: {scratch}: {type(error).__name__}",
-                    file=sys.stderr,
-                )
+                _cleanup_failure(scratch, error, primary)
             finally:
                 os.close(owned)
     finally:

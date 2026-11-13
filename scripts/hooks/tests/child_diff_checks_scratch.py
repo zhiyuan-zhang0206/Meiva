@@ -8,12 +8,17 @@ import signal
 import subprocess
 import sys
 import time
+from collections.abc import Mapping, Sequence
 from pathlib import Path
 
 import psutil
 from pydantic import BaseModel
 
-from scripts.hooks.diff_checks_pytest_child import PytestInterrupted, run_pytest_child
+from scripts.hooks.diff_checks_pytest_child import (
+    PytestChildUnreapedError,
+    PytestInterrupted,
+    run_pytest_child,
+)
 from scripts.hooks.diff_checks_scratch import pytest_scratch
 
 
@@ -34,6 +39,38 @@ def main(arguments: list[str]) -> int:
     if mode == "sleep":
         _ = Path(values[0]).write_text(str(os.getpid()))
         time.sleep(30)
+        return 0
+    if mode == "cleanup-interrupt":
+        parent_text, run_text, kind = values
+        if kind not in ("TERM", "INT"):
+            raise ValueError(f"unknown interruption {kind}")
+
+        def fail_start(
+            argv: Sequence[str], root: Path, environment: Mapping[str, str]
+        ) -> subprocess.Popen[str]:
+            del argv, root, environment
+            if kind == "TERM":
+                os.kill(os.getpid(), signal.SIGTERM)
+                raise OSError("synthetic constructor failure")
+            raise KeyboardInterrupt
+
+        def unknown_stop(child: subprocess.Popen[str] | None) -> None:
+            assert child is None
+            raise PytestChildUnreapedError("synthetic group observation unknown")
+
+        try:
+            with pytest_scratch(Path(parent_text)) as scratch:
+                _ = Path(run_text).write_text(str(scratch))
+                _ = run_pytest_child(
+                    (sys.executable,),
+                    Path.cwd(),
+                    environment={},
+                    start=fail_start,
+                    stop=unknown_stop,
+                )
+        except PytestInterrupted as interruption:
+            signal.raise_signal(interruption.signum)
+            raise SystemExit(128 + interruption.signum) from None
         return 0
     if mode == "leader":
         record = Path(values[0])

@@ -88,7 +88,8 @@ Each test run owns a unique scratch directory under the caller's private
 `$TMPDIR/pytest-of-<user>` (or `/tmp/pytest-of-<user>`). Pytest receives its own
 basetemp there; the runner reads JUnit and stores eligible cache evidence before
 removing only this run's scratch. Small failed-run JUnit and bounded log output
-are printed before removal. Cleanup failures are visible on stderr.
+are printed before removal. Cleanup failures are visible on stderr and fail an otherwise successful run.
+An existing interruption remains the primary exit when cleanup also fails.
 The pytest-specific owner handles TERM by stopping and waiting for its own child
 and confirms its group is absent before cleanup, then preserves the interruption. KILL cannot run cleanup: it can
 leave both scratch and a child. The directory shape matches the existing macmini

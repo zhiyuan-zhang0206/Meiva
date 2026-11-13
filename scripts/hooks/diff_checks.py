@@ -69,11 +69,14 @@ from scripts.hooks.diff_checks_pytest import (  # noqa: E402
     pytest_failure_evidence,
 )
 from scripts.hooks.diff_checks_pytest_child import (  # noqa: E402
-    PytestChildUnreapedError,
     PytestInterrupted,
     run_pytest_child,
 )
-from scripts.hooks.diff_checks_scratch import pytest_scratch, pytest_scratch_parent  # noqa: E402
+from scripts.hooks.diff_checks_scratch import (  # noqa: E402
+    pytest_scratch,
+    pytest_scratch_parent,
+    retain_for,
+)
 
 __all__ = [
     "FIELD_ORDER",
@@ -358,7 +361,7 @@ def _run_pytest(
         try:
             code, output, seconds = execute(pytest_argv(report, tests, python=python), change.root)
         except BaseException as error:
-            if not isinstance(error, PytestChildUnreapedError):
+            if not retain_for(error):
                 pytest_failure_evidence(report, f"pytest interrupted: {type(error).__name__}")
             raise
         counts = pytest_counts(report, selected_files=len(tests), seconds=seconds)

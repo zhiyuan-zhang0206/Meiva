@@ -34,3 +34,13 @@ adds those gates. If the leader has exited but its group remains or cannot be
 observed, scratch stays and cleanup fails visibly; no further signals are sent
 without the leader anchor. Construction keeps the interrupt with the original
 failure as its cause and restores the previous handler even without a child.
+
+
+A further review control showed that cleanup failure could replace an already
+received TERM with a generic error exit. The original signal interruption or
+KeyboardInterrupt now remains the raised primary exception, with bounded cleanup
+diagnostics and its typed cause preserving the incomplete-cleanup decision.
+Without a primary exception, directory cleanup failure is an error. TERM received
+during the bounded cleanup is recorded and resolved after restoring the caller's
+handler, rather than discarded. These rules retain scratch on unknown child
+state and preserve the original CLI interruption contract.
