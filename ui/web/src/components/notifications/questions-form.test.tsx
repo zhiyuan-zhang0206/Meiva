@@ -30,6 +30,8 @@ function renderForm(questions: QuestionItem[], handlers: { onSettled?: (ids: num
   );
 }
 
+const next = () => fireEvent.click(screen.getByRole("button", { name: "Next question" }));
+const previous = () => fireEvent.click(screen.getByRole("button", { name: "Previous question" }));
 const submit = () => screen.getByRole<HTMLButtonElement>("button", { name: "Submit answers" });
 const article = (n: number) => within(screen.getByRole("article", { name: `Question ${n}` }));
 
@@ -41,16 +43,26 @@ beforeEach(() => {
 afterEach(cleanup);
 
 describe("QuestionsForm", () => {
-  it("lists the questions in id order and submits nothing until every one is answered or skipped", () => {
+  it("shows one question at a time in id order and keeps drafts while navigating", () => {
     renderForm([q(5), q(3)]);
-    expect(screen.getAllByRole("article").map((a) => a.getAttribute("aria-label"))).toEqual(["Question 3", "Question 5"]);
+    expect(screen.getAllByRole("article")).toHaveLength(1);
+    expect(screen.getByRole<HTMLButtonElement>("button", { name: "Previous question" }).disabled).toBe(true);
+    expect(screen.getByText("1 / 2")).toBeTruthy();
     expect(submit().disabled).toBe(true);
     fireEvent.change(article(3).getByRole("textbox"), { target: { value: "x" } });
     expect(submit().disabled).toBe(true);
+    next();
+    expect(screen.queryByRole("article", { name: "Question 3" })).toBeNull();
+    expect(screen.getByRole<HTMLButtonElement>("button", { name: "Next question" }).disabled).toBe(true);
+    expect(screen.getByText("2 / 2")).toBeTruthy();
     fireEvent.click(article(5).getByRole("button", { name: "Skip" }));
     expect(submit().disabled).toBe(false);
+    previous();
+    expect(article(3).getByRole<HTMLTextAreaElement>("textbox").value).toBe("x");
+    next();
     fireEvent.click(article(5).getByRole("button", { name: "Undo skip" }));
     expect(submit().disabled).toBe(true);
+    expect(transport.answerQuestions).not.toHaveBeenCalled();
   });
 
   it("sends one submission with a choice, a comment-only answer, a text answer and a skip", async () => {
@@ -58,8 +70,11 @@ describe("QuestionsForm", () => {
     const onSettled = vi.fn();
     renderForm([q(1, { question: choice("single_select") }), q(2, { question: choice("multi_select") }), q(3), q(4)], { onSettled });
     fireEvent.click(article(1).getByRole("radio", { name: /Web/ }));
+    next();
     fireEvent.change(article(2).getByRole("textbox"), { target: { value: "none of these" } });
+    next();
     fireEvent.change(article(3).getByRole("textbox"), { target: { value: "because" } });
+    next();
     fireEvent.click(article(4).getByRole("button", { name: "Skip" }));
     fireEvent.click(submit());
     await waitFor(() => expect(onSettled).toHaveBeenCalledWith([1, 2, 3, 4]));
@@ -104,6 +119,7 @@ describe("QuestionsForm", () => {
     fireEvent.change(article(1).getByRole("textbox"), { target: { value: "one" } });
     pressEnter(article(1).getByRole("textbox"));
     expect(transport.answerQuestions).not.toHaveBeenCalled();
+    next();
     fireEvent.change(article(2).getByRole("textbox"), { target: { value: "two" } });
     pressEnter(article(2).getByRole("textbox"));
     await waitFor(() => expect(transport.answerQuestions).toHaveBeenCalledTimes(1));
@@ -137,6 +153,7 @@ describe("QuestionsForm", () => {
     const onChanged = vi.fn();
     const { rerender } = renderForm([q(1), q(2)], { onChanged });
     fireEvent.change(article(1).getByRole("textbox"), { target: { value: "kept" } });
+    next();
     fireEvent.click(article(2).getByRole("button", { name: "Skip" }));
     fireEvent.click(submit());
     await waitFor(() => expect(onChanged).toHaveBeenCalledWith(latest));
@@ -144,6 +161,7 @@ describe("QuestionsForm", () => {
     rerender(<QuestionsForm agentId={7} questions={latest} onSettled={vi.fn()} onChanged={onChanged} />);
     expect(article(1).getByRole<HTMLTextAreaElement>("textbox").value).toBe("kept");
     expect(submit().disabled).toBe(true);
+    next();
     fireEvent.change(article(3).getByRole("textbox"), { target: { value: "new" } });
     expect(submit().disabled).toBe(false);
   });
@@ -151,10 +169,12 @@ describe("QuestionsForm", () => {
   it("keeps drafts and skips when the user goes to another agent and comes back", () => {
     const first = renderForm([q(1), q(2)]);
     fireEvent.change(article(1).getByRole("textbox"), { target: { value: "kept" } });
+    next();
     fireEvent.click(article(2).getByRole("button", { name: "Skip" }));
     first.unmount();
     renderForm([q(1), q(2)]);
     expect(article(1).getByRole<HTMLTextAreaElement>("textbox").value).toBe("kept");
+    next();
     expect(article(2).getByRole("button", { name: "Undo skip" })).toBeTruthy();
     expect(submit().disabled).toBe(false);
   });
@@ -173,6 +193,7 @@ describe("QuestionsForm", () => {
     transport.answerQuestions.mockResolvedValue({ kind: "settled" });
     const { rerender } = renderForm([q(1), q(2)]);
     fireEvent.change(article(1).getByRole("textbox"), { target: { value: "a" } });
+    next();
     fireEvent.change(article(2).getByRole("textbox"), { target: { value: "b" } });
     expect(Object.keys(useStore.getState().questionDrafts[7] ?? {})).toEqual(["1", "2"]);
     rerender(<QuestionsForm agentId={7} questions={[q(2)]} onSettled={vi.fn()} onChanged={vi.fn()} />);

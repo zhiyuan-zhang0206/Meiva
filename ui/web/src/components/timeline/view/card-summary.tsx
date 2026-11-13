@@ -50,7 +50,7 @@ export function agentChatTitle(item: BackendTimelineItem): {
   const suffixKey = item.partial ? "timeline.streamingSuffix" : "";
   const suffix = item.partial ? " (streaming…)" : "";
   return {
-    title: `Meiva ▸${suffix}`,
+    title: `Meiva${suffix}`,
     titleKey: "agentChat",
     titleValues: { suffixKey },
   };

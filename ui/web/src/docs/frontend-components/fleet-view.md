@@ -20,7 +20,8 @@ Full-screen supervision plane: judge 10-20 agents without opening any conversati
 
 ## Question interaction
 
-`QuestionsForm` renders one `QuestionForm` per open question, in one form, in the question bar above the composer.
+`QuestionsForm` shows one open question at a time above the composer. Left and right
+controls switch between questions. Submit answers sends the whole queue in one request.
 Questions have three types: text, single select and multi select. Ordered choices
 use native radio/checkbox rows, numbered by their immutable array position.
 Single and multi select both show an optional comment textarea at all times.

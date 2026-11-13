@@ -1,15 +1,16 @@
 "use client";
 
+import { ChevronLeft, ChevronRight, LoaderCircle } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useTranslations } from "next-intl";
 
 import { ChatMarkdown } from "@/components/content/markdown";
 import { Button } from "@/components/ui/button";
-import { SendButton } from "@/components/ui/send-button";
+import { ScrollArea } from "@/components/ui/scroll-area";
 import { errMsg } from "@/lib/contracts/errors";
 import type { AnswerQuestions, QuestionAnswer, QuestionItem } from "@/lib/contracts/types";
 import { cn } from "@/lib/format/utils";
-import { FLEX, MIN_W_0 } from "@/lib/layout/layout";
+import { FLEX, MIN_W_0, QUESTION_REGION_MAX_HEIGHT_CLASS } from "@/lib/layout/layout";
 import { newOperationKey } from "@/lib/transport/operation-key";
 import { useApi } from "@/lib/transport/transport-context";
 
@@ -48,6 +49,7 @@ export function QuestionsForm({
   const setQuestionDraft = useStore((st) => st.setQuestionDraft);
   const clearQuestionDrafts = useStore((st) => st.clearQuestionDrafts);
   const pruneQuestionDrafts = useStore((st) => st.pruneQuestionDrafts);
+  const [selectedId, setSelectedId] = useState<number | null>(null);
   const [pending, setPending] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [changed, setChanged] = useState(false);
@@ -105,7 +107,10 @@ export function QuestionsForm({
     }
   };
 
-  const ready = ordered.length > 0 && bodyFor() !== null;
+  const index = Math.max(0, ordered.findIndex((q) => q.id === selectedId));
+  const question = ordered.at(index);
+  if (!question) return null;
+  const ready = bodyFor() !== null;
 
   return (
     <form
@@ -115,31 +120,54 @@ export function QuestionsForm({
         void submit();
       }}
     >
-      <div className="divide-y divide-border">
-        {ordered.map((q) => (
-          <QuestionRow
-            key={q.id}
-            question={q}
-            draft={draftOf(q.id)}
-            pending={pending}
-            onDraftChange={(draft) => setQuestionDraft(agentId, q.id, draft)}
-            onEnter={(answer) => void submit({ id: q.id, answer })}
-          />
-        ))}
-      </div>
-      <div className={cn("items-center justify-between gap-3 border-t border-border p-3", FLEX)}>
-        <div className={cn(MIN_W_0, "space-y-1")}>
-          {changed && <p role="status" className="text-[13px] text-muted-foreground">{t("questionsChanged")}</p>}
-          {error && <p role="alert" className="text-[13px] text-destructive">{error}</p>}
-          {!ready && !error && !changed && <p className="text-xs text-muted-foreground">{t("answerAllHint")}</p>}
-        </div>
-        <SendButton
-          type="submit"
-          state={pending ? "sending" : "send"}
-          disabled={pending || !ready}
-          aria-label={t("submitAnswers")}
-          title={t("submitAnswers")}
+      <ScrollArea key={question.id} viewportClassName={cn(QUESTION_REGION_MAX_HEIGHT_CLASS, "overscroll-y-contain")}>
+        <QuestionRow
+          question={question}
+          draft={draftOf(question.id)}
+          pending={pending}
+          onDraftChange={(draft) => setQuestionDraft(agentId, question.id, draft)}
+          onEnter={(answer) => void submit({ id: question.id, answer })}
         />
+      </ScrollArea>
+      <div className="border-t border-border/60 px-4 py-2">
+        {changed && <p role="status" className="mb-2 text-xs text-muted-foreground">{t("questionsChanged")}</p>}
+        {error && <p role="alert" className="mb-2 text-xs text-destructive">{error}</p>}
+        <div className={cn("items-center justify-between gap-2", FLEX)}>
+          {ordered.length > 1 ? (
+            <nav aria-label={t("questionNavigation")} className={cn("items-center gap-1", FLEX)}>
+              <Button
+                variant="ghost"
+                size="icon"
+                aria-label={t("previousQuestion")}
+                disabled={pending || index === 0}
+                onClick={() => setSelectedId(ordered[index - 1].id)}
+              >
+                <ChevronLeft aria-hidden="true" />
+              </Button>
+              <span aria-live="polite" className="min-w-10 text-center text-xs tabular-nums text-muted-foreground">
+                {t("questionPosition", { current: index + 1, total: ordered.length })}
+              </span>
+              <Button
+                variant="ghost"
+                size="icon"
+                aria-label={t("nextQuestion")}
+                disabled={pending || index === ordered.length - 1}
+                onClick={() => setSelectedId(ordered[index + 1].id)}
+              >
+                <ChevronRight aria-hidden="true" />
+              </Button>
+            </nav>
+          ) : <span />}
+          <Button
+            type="submit"
+            disabled={pending || !ready}
+            title={ready ? undefined : t("answerAllHint")}
+            aria-busy={pending}
+          >
+            {pending && <LoaderCircle aria-hidden="true" className="size-3.5 animate-spin" />}
+            {t("submitAnswers")}
+          </Button>
+        </div>
       </div>
     </form>
   );
@@ -161,10 +189,10 @@ function QuestionRow({
   const t = useTranslations("questionDetail");
   const skipped = draft.skipped;
   return (
-    <article aria-label={question.title} className="space-y-2 p-3">
+    <article aria-label={question.title} className="space-y-3 p-4">
       <div className={cn("items-start justify-between gap-2", FLEX)}>
         <div className={cn(MIN_W_0, "space-y-1.5")}>
-          <h4 className="text-[13px] font-semibold leading-snug break-words"><ChatMarkdown content={question.title} inline /></h4>
+          <h4 className="text-sm font-semibold leading-snug break-words"><ChatMarkdown content={question.title} inline /></h4>
           {question.content && (
             <div className="text-[13px] break-words text-foreground/85">
               <ChatMarkdown content={question.content} />

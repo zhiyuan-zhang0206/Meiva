@@ -123,10 +123,10 @@ describe("messageCardConfig", () => {
     expect(cfg!.rich).toBe("output");
   });
 
-  it("agent_chat → no rich, title='Meiva ▸', expanded by default in both primary and secondary contexts", () => {
+  it("agent_chat → no rich, title='Meiva', expanded by default in both primary and secondary contexts", () => {
     const cfg = messageCardConfig(item("agent_chat"));
     expect(cfg!.rich).toBeNull();
-    expect(cfg!.title).toBe("Meiva ▸");
+    expect(cfg!.title).toBe("Meiva");
     expect(cfg!.fixedDefault).toBe(true);
     expect(cfg!.copy).toBe(true);
 
@@ -368,7 +368,8 @@ describe("CardHeader", () => {
     const { container } = renderWithQuery(
       <CardHeader item={baseItem} config={cfg} expanded={true} onToggle={noop} />,
     );
-    expect(container.textContent).toContain("Meiva ▸");
+    expect(container.textContent).toBe("Meiva");
+    expect(container.querySelectorAll("svg.lucide-chevron-right")).toHaveLength(1);
   });
 
   it("collapsed state → aria-expanded=false, data-expanded=false, no title (no hover tooltip)", () => {

@@ -13,5 +13,9 @@
   "skipped": "Skipped",
   "submitAnswers": "Submit answers",
   "questionsChanged": "The questions changed. Review them and submit again.",
-  "answerAllHint": "Answer or skip every question to submit."
+  "answerAllHint": "Answer or skip every question to submit.",
+  "questionNavigation": "Question navigation",
+  "previousQuestion": "Previous question",
+  "nextQuestion": "Next question",
+  "questionPosition": "{current} / {total}"
 }

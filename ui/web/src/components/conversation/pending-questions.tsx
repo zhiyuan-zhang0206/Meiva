@@ -6,10 +6,9 @@ import { useId, useState } from "react";
 import { useTranslations } from "next-intl";
 
 import { QuestionsForm } from "@/components/notifications/questions-form";
-import { ScrollArea } from "@/components/ui/scroll-area";
 import type { QuestionItem } from "@/lib/contracts/types";
 import { cn } from "@/lib/format/utils";
-import { FLEX, OVERFLOW_HIDDEN, QUESTION_REGION_MAX_HEIGHT_CLASS } from "@/lib/layout/layout";
+import { FLEX, OVERFLOW_HIDDEN } from "@/lib/layout/layout";
 import { dropOpenQuestions, replaceAgentQuestions } from "@/lib/notifications/use-questions";
 
 // meiva:note
@@ -40,14 +39,12 @@ export function PendingQuestions({ questions, failed, maxWidthCss }: {
           {expanded ? <ChevronDown aria-hidden className="size-4" /> : <ChevronUp aria-hidden className="size-4" />}
         </button>
         <div id={contentId} hidden={!expanded} className={cn(OVERFLOW_HIDDEN, "absolute -inset-x-px bottom-full rounded-t-xl border border-b-0 border-border bg-background shadow-lg")}>
-          <ScrollArea viewportClassName={cn(QUESTION_REGION_MAX_HEIGHT_CLASS, "overscroll-y-contain")}>
-            <QuestionsForm
-              agentId={questions[0].agent_id}
-              questions={questions}
-              onSettled={(ids) => dropOpenQuestions(cache, ids)}
-              onChanged={(open) => replaceAgentQuestions(cache, questions[0].agent_id, open)}
-            />
-          </ScrollArea>
+          <QuestionsForm
+            agentId={questions[0].agent_id}
+            questions={questions}
+            onSettled={(ids) => dropOpenQuestions(cache, ids)}
+            onChanged={(open) => replaceAgentQuestions(cache, questions[0].agent_id, open)}
+          />
         </div>
       </>}
     </div>

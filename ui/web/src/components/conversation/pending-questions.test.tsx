@@ -37,22 +37,24 @@ it("opens expanded by default above the composer and retains independent drafts 
   const answerLayer = document.getElementById(toggle.getAttribute("aria-controls")!)!;
   expect(answerLayer.className).toContain("absolute");
   expect(answerLayer.className).toContain("bottom-full");
-  const first = within(screen.getByRole("article", { name: "Question 1" })).getByRole<HTMLTextAreaElement>("textbox");
-  const second = within(screen.getByRole("article", { name: "Question 2" })).getByRole<HTMLTextAreaElement>("textbox");
-  expect(first.value).toBe("");
-  expect(second.value).toBe("");
-  fireEvent.change(first, { target: { value: "First answer" } });
-  fireEvent.change(second, { target: { value: "Second answer" } });
+  const input = () => screen.getByRole<HTMLTextAreaElement>("textbox");
+  expect(input().value).toBe("");
+  fireEvent.change(input(), { target: { value: "First answer" } });
+  fireEvent.click(screen.getByRole("button", { name: "Next question" }));
+  expect(input().value).toBe("");
+  fireEvent.change(input(), { target: { value: "Second answer" } });
   const viewport = region.querySelector('[data-slot="scroll-area-viewport"]')!;
   expect(viewport.className).toContain(QUESTION_REGION_MAX_HEIGHT_CLASS);
+  expect(viewport.contains(screen.getByRole("button", { name: "Submit answers" }))).toBe(false);
   fireEvent.click(toggle);
   expect(toggle.getAttribute("aria-expanded")).toBe("false");
   expect(screen.queryByRole("textbox")).toBeNull();
   fireEvent.click(toggle);
   expect(toggle.getAttribute("aria-expanded")).toBe("true");
-  expect(first.value).toBe("First answer");
-  expect(second.value).toBe("Second answer");
-  expect(screen.getAllByRole("textbox")).toHaveLength(2);
+  expect(input().value).toBe("Second answer");
+  fireEvent.click(screen.getByRole("button", { name: "Previous question" }));
+  expect(input().value).toBe("First answer");
+  expect(screen.getAllByRole("textbox")).toHaveLength(1);
 });
 
 it("settles every open question in one submission and drops them all from the shared queue", async () => {
@@ -63,6 +65,7 @@ it("settles every open question in one submission and drops them all from the sh
   expect(submit.disabled).toBe(true);
   fireEvent.change(within(screen.getByRole("article", { name: "Question 1" })).getByRole("textbox"), { target: { value: "First answer" } });
   expect(submit.disabled).toBe(true);
+  fireEvent.click(screen.getByRole("button", { name: "Next question" }));
   fireEvent.click(within(screen.getByRole("article", { name: "Question 2" })).getByRole("button", { name: "Skip" }));
   expect(submit.disabled).toBe(false);
   fireEvent.click(submit);

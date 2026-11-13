@@ -13,5 +13,9 @@
   "skipped": "已跳过",
   "submitAnswers": "提交回答",
   "questionsChanged": "问题已变化，请检查后重新提交。",
-  "answerAllHint": "回答或跳过每个问题后才能提交。"
+  "answerAllHint": "回答或跳过每个问题后才能提交。",
+  "questionNavigation": "切换问题",
+  "previousQuestion": "上一题",
+  "nextQuestion": "下一题",
+  "questionPosition": "{current} / {total}"
 }

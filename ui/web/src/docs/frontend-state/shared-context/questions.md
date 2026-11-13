@@ -2,19 +2,20 @@
 
 `PendingQuestions` owns the selected agent's entire awaiting-response queue,
 including legacy unstructured questions. When questions are waiting, the queue
-opens expanded by default showing all of them as one form, ordered by question id;
-the header bar shows the count and toggles collapse. When
+opens expanded by default and shows one question at a time, ordered by question
+id. The left and right controls move between questions. The header bar shows
+the count and toggles collapse. When
 collapsed, the bar occupies one stable row above the composer so it
 cannot obscure the last message or the scroll-to-bottom control. Answers expand
 upward over the conversation without changing the timeline viewport height. The inner `ScrollArea`
 viewport is capped at 45% of the visual viewport, including the on-screen
-keyboard. `QuestionsForm` owns the single submission, its operation key and retries.
+keyboard. Navigation and Submit stay below the scrolling question. `QuestionsForm`
+owns the single submission, its operation key and retries.
 Each question is answered or skipped (Skip is per question and can be undone, keeping
 the draft), and Submit is enabled only when every question is. The submission names the
 open set it was built from: when the server's set differs, nothing is settled, the latest
 set replaces the agent's rows in the shared cache, drafts and skips of questions still open
-stay, and the form states that the questions changed. Collapse hides mounted forms,
-preserving every draft. Drafts and skips are kept per agent and question in the UI store
+stay, and the form states that the questions changed. Changing the visible question or collapsing the panel preserves every draft. Drafts and skips are kept per agent and question in the UI store
 (`questionDrafts`, memory only, never written to disk or sent to the server), so going to another agent
 and back keeps them; they are cleared when the question is answered and pruned when it is no longer open. A successful submission drops all of the agent's questions from
 the shared question cache and refreshes resolved history. A failed feed preserves stale questions and visibly
