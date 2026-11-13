@@ -164,12 +164,9 @@ export const TurnBlock = memo(function TurnBlock({
         type="button"
         onClick={(event) => onToggle(toggleKey ?? id, expanded, event.currentTarget)}
         className={cn(
-          "w-[calc(100%+0.5rem)] -ml-2 px-2 py-0.5 items-start gap-1.5 text-left select-none",
-          expanded
-            ? "sticky z-20 bg-background rounded-md text-muted-foreground hover:text-foreground hover:bg-muted"
-            : "rounded-lg text-muted-foreground/75 hover:text-foreground hover:bg-muted/50",
+          "group/turn-toggle w-[calc(100%+0.5rem)] -ml-2 px-2 py-0.5 items-start gap-1.5 rounded-md bg-background text-left text-muted-foreground select-none",
           FLEX,
-          expanded && BAR_STICKY_TOP_CLASS,
+          expanded && cn("sticky z-20", BAR_STICKY_TOP_CLASS),
         )}
         aria-expanded={expanded}
         data-testid="turn-toggle"
@@ -184,7 +181,9 @@ export const TurnBlock = memo(function TurnBlock({
         <span className={cn("gap-0.5", FLEX, FLEX_COL, MIN_W_0, FLEX_1)}>
           <span className={cn("items-center gap-1.5 text-[13px] leading-snug", FLEX, MIN_W_0)}>
             <Layers className="size-3.5 shrink-0 opacity-70" />
-            <span className="truncate whitespace-nowrap tabular-nums">{workedLabel}</span>
+            <span className="truncate whitespace-nowrap tabular-nums group-hover/turn-toggle:text-foreground group-focus-visible/turn-toggle:text-foreground">
+              {workedLabel}
+            </span>
           </span>
           {actionSummary && (
             <span className="pl-5 text-xs leading-snug">{actionSummary}</span>
