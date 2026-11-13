@@ -172,15 +172,6 @@ export const TurnBlock = memo(function TurnBlock({
         data-testid="turn-toggle"
         data-expanded={expanded}
       >
-        <ChevronRight
-          aria-hidden="true"
-          className={cn(
-            "size-3.5 shrink-0 mt-0.5",
-            expanded
-              ? "rotate-90 opacity-60"
-              : "opacity-0 group-hover/turn-toggle:opacity-60 group-focus-visible/turn-toggle:opacity-60 pointer-coarse:opacity-60",
-          )}
-        />
         <span className={cn("gap-0.5", FLEX, FLEX_COL, MIN_W_0, FLEX_1)}>
           <span className={cn("items-center gap-1.5 text-[13px] leading-snug", FLEX, MIN_W_0)}>
             <Layers className="size-3.5 shrink-0 opacity-70" />
@@ -193,6 +184,15 @@ export const TurnBlock = memo(function TurnBlock({
           )}
           {sdkChips}
         </span>
+        <ChevronRight
+          aria-hidden="true"
+          className={cn(
+            "size-3.5 shrink-0 mt-0.5",
+            expanded
+              ? "rotate-90 opacity-60"
+              : "opacity-0 group-hover/turn-toggle:opacity-60 group-focus-visible/turn-toggle:opacity-60 pointer-coarse:opacity-60",
+          )}
+        />
       </button>
       <div
         className={cn(
@@ -231,11 +231,11 @@ export const PendingLiveActivityWindow = memo(function PendingLiveActivityWindow
           FLEX,
         )}
       >
-        <ChevronRight className="size-3.5 shrink-0 opacity-60 mt-0.5" />
-        <span className={cn("items-center gap-1.5 text-[13px] leading-snug", FLEX, MIN_W_0)}>
+        <span className={cn("items-center gap-1.5 text-[13px] leading-snug", FLEX, FLEX_1, MIN_W_0)}>
           <Layers className="size-3.5 shrink-0 opacity-70" />
           <span className="truncate whitespace-nowrap tabular-nums">{t("working")}</span>
         </span>
+        <ChevronRight aria-hidden="true" className="size-3.5 shrink-0 opacity-60 mt-0.5" />
       </div>
     </div>
   );
