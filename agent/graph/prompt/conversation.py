@@ -75,12 +75,21 @@ def _build_user_reply_section(
         "# Responding to human requests\n\n"
         "Reply in ordinary assistant text in this conversation. Text alongside a "
         "tool call follows the same visibility rule as a standalone reply. No separate SDK call is needed. "
-        f"{feedback_sentence}\n\n" + _USER_ATTENTION_RULE + "## Output visibility\n\n"
+        f"{feedback_sentence}\n\n"
+        "## Output visibility\n\n"
         f"{REPLY_VISIBILITY_RULE} Apply this rule on human and background wakes alike. "
+        "Details is collapsed by default in the frontend; hidden text is folded "
+        "there automatically and remains available to expand. DISPLAY content is "
+        "visible in the main messages area. Eligible completed DISPLAY replies "
+        "participate in the existing capture/publication and seen-state rules "
+        "for unread reminders. The prefix alone neither guarantees a new reminder "
+        "for every block nor clears an earlier unread marker. "
         "Text without a valid prefix is folded into Details. A system note may ask you "
         "to correct it. Tool calls, tool results and reasoning do not need a prefix. "
         "Use the hide prefix for required process narration that does not pass the "
         "user-attention test; only the display prefix delivers it to the user.\n\n"
+        + _USER_ATTENTION_RULE
+        + "## Reply routing\n\n"
         "Peer messages, watcher events, scheduled wakes and system notes do not require "
         "courtesy replies or automatic closing summaries. Follow their acknowledgment "
         "protocols separately (for example, reply to a peer via "
@@ -245,15 +254,15 @@ def delivery_prompt(mode_value: str, ordinary: str, *, opening_reply: bool) -> s
             "suggestions and Note suggestions are drafts, never user facts or consent."
         )
     start = ordinary.index("## Output visibility")
-    end = ordinary.index("Peer messages,", start)
+    end = ordinary.index("## User attention", start)
     return (
-        (ordinary[:start] + "## Delivery mechanics\n\n" + ordinary[end:]).replace(
-            "Text alongside a tool call follows the same visibility rule as a standalone reply. ",
-            "",
-        )
-        + "\n\nOrdinary assistant text in this mode is user-visible. Literal visibility "
+        ordinary[:start] + "## Delivery mechanics\n\n"
+        "Ordinary assistant text in this mode is user-visible. Literal visibility "
         "labels do not hide it. Keep internal process narration in tool feedback "
-        "or working records rather than emitting it as ordinary text."
+        "or working records rather than emitting it as ordinary text.\n\n" + ordinary[end:]
+    ).replace(
+        "Text alongside a tool call follows the same visibility rule as a standalone reply. ",
+        "",
     )
 
 

@@ -268,3 +268,13 @@ def test_attention_policy_is_shared_across_delivery_modes_and_callers(opening_re
     ]
     assert len(sections) == 6
     assert all(section == sections[0] for section in sections)
+    for mode in ("prefix", "sdk", "naive"):
+        for key, text in _rendered(mode, opening_reply=opening_reply).items():
+            if key.startswith(("native/", "harness/")):
+                assert text.index("## User attention") > text.index(
+                    "## Output visibility"
+                    if mode == "prefix"
+                    else "# User delivery"
+                    if mode == "sdk"
+                    else "## Delivery mechanics"
+                )

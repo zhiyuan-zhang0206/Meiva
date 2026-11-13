@@ -24,3 +24,14 @@ must state that limit rather than promise concealment.
 Constructed paired cases and prompt assembly checks establish instruction
 coverage. They do not establish model adherence rates. Natural behavior after an
 independently authorized rollout remains the evidence for that question.
+
+
+## Update: explain consequences before selection
+
+The user asked for two distinct teaching steps: explain the visibility mechanism,
+then teach when to choose it. We put the delivery mechanism before the common
+attention policy and explain the default collapsed Details presentation and the
+conditional unread consequence of eligible displayed replies. This preserves
+existing capture/seen behavior rather than promising one new notification per
+text block. SDK and naive delivery retain their own accurate mechanisms before
+the same attention policy; no new transport or policy is introduced.
