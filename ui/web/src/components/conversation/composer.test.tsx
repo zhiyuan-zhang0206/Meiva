@@ -511,13 +511,15 @@ it("records an accepted candidate only after sending the edited draft", async ()
   }, expect.any(String)));
 });
 
-it("records explicit rejection without sending a message", async () => {
-  transport.recordSuggestionFeedback.mockResolvedValue({ saved: true });
+it("lets the user send their own reply without dismissing the suggestion", async () => {
   const onSend = vi.fn(() => Promise.resolve(true));
   renderComposerTree(<Composer {...baseProps} onSend={onSend} mode="idle" agentId={7} suggestions={["Ship"]} suggestionOfferId={42} />);
-  fireEvent.click(screen.getByRole("button", { name: "Reject suggestion" }));
-  await waitFor(() => expect(transport.recordSuggestionFeedback).toHaveBeenCalledWith(7, {
-    offer_id: 42, candidate_index: 0, outcome: "rejected",
-  }, expect.any(String)));
-  expect(onSend).not.toHaveBeenCalled();
+  const input = screen.getByTestId<HTMLTextAreaElement>("composer-input");
+  expect(input.placeholder).toBe("Ship");
+  expect(screen.queryByRole("button", { name: "Reject suggestion" })).toBeNull();
+  fireEvent.change(input, { target: { value: "Hold the release" } });
+  fireEvent.click(screen.getByTestId("composer-send"));
+  await waitFor(() => expect(input.value).toBe(""));
+  expect(onSend).toHaveBeenCalledWith("Hold the release", [], expect.any(String));
+  expect(transport.recordSuggestionFeedback).not.toHaveBeenCalled();
 });

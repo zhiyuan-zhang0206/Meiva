@@ -517,13 +517,6 @@ export function Composer({
                 })
               }
             />
-            {offeredSuggestion && suggestionOfferId !== null && agentId !== null && <button
-              type="button" aria-label={t("rejectSuggestion")} className="text-xs text-muted-foreground"
-              onClick={() => {
-                void client.recordSuggestionFeedback(agentId, { offer_id: suggestionOfferId, candidate_index: replyIndex, outcome: "rejected" }, client.newOperationKey())
-                  .catch((error: unknown) => onUploadError?.(errMsg(error)));
-                if (suggestions) setReplySelection({ options: suggestions, agentId, index: replyIndex, consumed: true });
-              }}>{t("rejectSuggestion")}</button>}
             <SendButton
               data-testid="composer-send"
               state={sending ? "sending" : showStop ? "stop" : "send"}

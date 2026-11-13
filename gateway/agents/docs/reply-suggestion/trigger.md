@@ -28,5 +28,6 @@ modified arrows and arrows in nonempty drafts keep their ordinary behaviour.
 - [Reply Suggestion](reply-suggestion.md) — the feature this trigger belongs to.
 
 Accepting inserts an editable draft. Successful send records accepted/edited
-feedback against that offer; failed sends do not. The explicit reject control
-records rejection. Ignoring, typing independently or changing candidates does not.
+feedback against that offer. Users can ignore a suggestion by typing their own
+reply. Failed sends, independent replies and candidate changes leave feedback
+untouched.
