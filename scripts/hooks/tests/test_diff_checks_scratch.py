@@ -245,3 +245,11 @@ def test_unreadable_report_diagnostic_does_not_mask_interruption(
     pytest_failure_evidence(tmp_path, "original interruption")
     output = capsys.readouterr().err
     assert "original interruption" in output and "JUnit unavailable" in output
+
+
+def test_run_scratch_is_outside_pytest_numbered_cleanup_candidates(tmp_path: Path) -> None:
+    from _pytest.pathlib import cleanup_candidates
+
+    (tmp_path / "pytest-100").mkdir()
+    with pytest_scratch(tmp_path) as scratch:
+        assert scratch not in set(cleanup_candidates(tmp_path, prefix="pytest-", keep=3))

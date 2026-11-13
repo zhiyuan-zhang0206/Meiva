@@ -18,3 +18,9 @@ retain that boundary explicitly. The chosen directory shape reuses the existing
 macmini reaper's supported root without changing or deploying a new reaper.
 Postgres fixture ownership and general worktree garbage collection remain separate
 responsibilities.
+
+Source verification of the locked pytest version found that its numbered cleanup
+also selects nonnumeric suffixes after `pytest-` (parsed as -1). The run directory
+therefore uses `diff-checks-`, within the supported per-user root but outside
+pytest numbered cleanup. The existing macmini reaper enumerates that root without
+a filename-prefix filter; no reaper change is needed for this directory shape.

@@ -49,7 +49,7 @@ def pytest_scratch(parent: Path) -> Generator[Path]:
         info = os.fstat(directory)
         if info.st_uid != os.geteuid() or info.st_mode & 0o077:
             raise PermissionError(f"pytest scratch parent must be private and owned: {parent}")
-        scratch = Path(tempfile.mkdtemp(prefix="pytest-diff-checks-", dir=parent))
+        scratch = Path(tempfile.mkdtemp(prefix="diff-checks-", dir=parent))
         owned = os.open(
             scratch.name, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW, dir_fd=directory
         )
