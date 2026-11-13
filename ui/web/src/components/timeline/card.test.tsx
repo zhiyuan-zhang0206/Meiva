@@ -11,7 +11,7 @@
  * De-quarantined 2026-08-24.
  */
 import { describe, expect, it, vi } from "vitest";
-import { fireEvent } from "@testing-library/react";
+import { fireEvent, waitFor } from "@testing-library/react";
 import { render } from "@/lib/transport/tests/wall-clock-render";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 
@@ -312,7 +312,7 @@ describe("CardHeader", () => {
     expect(main.container.querySelector("[data-subagent-parent]")).toBeNull();
   });
 
-  it("an expanded sub-agent row shows its text as work detail, collapsed it shows only the header", () => {
+  it("an expanded sub-agent row shows its text as work detail, collapsed it shows only the header", async () => {
     const spoken = item("subagent_text", { source: "general-purpose", payload: "ALPHA says **hi**" });
     const row = (expanded: boolean) => (
       <TimelineRow
@@ -329,8 +329,10 @@ describe("CardHeader", () => {
     expect(collapsed.container.textContent).not.toContain("ALPHA says");
     collapsed.unmount();
     const open = renderWithQuery(row(true));
-    expect(open.container.textContent).toContain("ALPHA says hi");
-    expect(open.container.querySelector("strong")?.textContent).toBe("hi");
+    await waitFor(() => {
+      expect(open.container.textContent).toContain("ALPHA says hi");
+      expect(open.container.querySelector("strong")?.textContent).toBe("hi");
+    });
   });
 
   it("a row of a kind this build does not know renders nothing, not an empty row", () => {
