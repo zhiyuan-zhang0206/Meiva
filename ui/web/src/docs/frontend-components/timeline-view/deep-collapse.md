@@ -4,9 +4,9 @@
 keeps the same surface in both states. Hover and keyboard focus highlight the
 title text. On hover-capable devices the collapsed chevron appears on hover or
 keyboard focus. It stays visible while expanded, and on touch devices where
-hover is unavailable. The chevron keeps its space at the right edge, aligning
-the title and its icon to the left. The expanded body uses indentation to group its contents. Primary message and
-individual detail headers keep their existing flow.
+hover is unavailable. The chevron reserves its space immediately after the
+title text. The expanded body uses indentation to group its contents. Primary
+message and individual detail headers keep their existing flow.
 
 Secondary item headers omit token/line count suffixes (`Thought for Xs`, `Ran in Xs`, `System prompt`) and system markers (`Memory`, `Note`, lifecycle) use the same borderless monochrome header chrome without colored accent overrides (user ruling 2026-11-01). A turn's expanded state is a pinned map
 keyed by a reconciled turn key (`useTimelineGroupWindow` matches surviving
