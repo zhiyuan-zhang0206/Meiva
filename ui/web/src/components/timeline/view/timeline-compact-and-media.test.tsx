@@ -385,7 +385,7 @@ describe("ItemView: inbound_chat images", () => {
     expect(screen.queryByText("[image]")).toBeNull();
   });
 
-  it("renders system:upload inside the turn block with its system note text and uploaded file cards", () => {
+  it("shows upload thumbnails without duplicate file metadata and keeps links for other files", () => {
     render(
       <TimelineView
         items={[
@@ -393,7 +393,7 @@ describe("ItemView: inbound_chat images", () => {
             item_id: "10.0",
             kind: "inbound_chat",
             source: "system:upload",
-            payload: "Files uploaded with the next message (saved to /tmp/b):",
+            payload: "Files uploaded with the next message (on macmini):\n- diagram.png (image/png, 4 KiB): /tmp/b/diagram.png",
             files: [
               {
                 name: "diagram.png",
@@ -420,14 +420,19 @@ describe("ItemView: inbound_chat images", () => {
     );
     expect(screen.queryByText("[files]")).toBeNull();
     fireEvent.click(screen.getByRole("button", { name: /Context/i }));
-    expect(screen.getByText(/Files uploaded with the next message/)).toBeTruthy();
-    expect(screen.getByText("diagram.png")).toBeTruthy();
-    expect(screen.getByText("spec.pdf")).toBeTruthy();
+    expect(screen.queryByText(/Files uploaded with the next message|\/tmp\/b\/diagram.png/)).toBeNull();
+    expect(screen.queryByRole("link", { name: "diagram.png" })).toBeNull();
+    expect(screen.getByRole("link", { name: "spec.pdf" }).getAttribute("href"))
+      .toContain("/api/keyed/v1/agents/7/uploads/b/objects/1");
     const img = screen.getByAltText("diagram.png");
     expect(img.getAttribute("src")).toContain("/api/keyed/v1/agents/7/uploads/b/objects/0");
+    fireEvent.click(screen.getByRole("button", { name: "diagram.png" }));
+    expect(screen.getByTestId("attach-lightbox")).toBeTruthy();
+    fireEvent.keyDown(window, { key: "Escape" });
     fireEvent.error(img);
     expect(screen.queryByAltText("diagram.png")).toBeNull();
-    expect(screen.getByText("diagram.png")).toBeTruthy();
+    expect(screen.getByRole("link", { name: "diagram.png" }).getAttribute("href"))
+      .toContain("/api/keyed/v1/agents/7/uploads/b/objects/0");
   });
 });
 

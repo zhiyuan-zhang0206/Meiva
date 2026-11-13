@@ -267,34 +267,29 @@ function UploadedFileCard({ file }: { file: TimelineUploadFile }) {
   const canPreviewImage =
     isRasterImageType(file.content_type) && file.size <= MAX_INLINE_IMAGE_BYTES;
   const resolvedUrl = assetUrl(file.url);
+  if (canPreviewImage && !imgFailed) {
+    return <Thumbnail src={resolvedUrl} alt={file.name} onError={() => setImgFailed(true)} />;
+  }
   return (
-    <div data-testid="timeline-upload-file" className="space-y-1.5">
-      {canPreviewImage && !imgFailed ? (
-        <Thumbnail
-          src={resolvedUrl}
-          alt={file.name}
-          onError={() => setImgFailed(true)}
-        />
-      ) : null}
-      <div
-        className={cn(
-          "items-center gap-2 rounded-md border border-border/70 bg-background/60 px-2.5 py-1.5 text-xs",
-          FLEX,
-        )}
+    <div
+      data-testid="timeline-upload-file"
+      className={cn(
+        "items-center gap-2 rounded-md border border-border/70 bg-background/60 px-2.5 py-1.5 text-xs",
+        FLEX,
+      )}
+    >
+      <FileText className="size-3.5 shrink-0 text-muted-foreground" />
+      <a
+        href={resolvedUrl}
+        target="_blank"
+        rel="noopener noreferrer"
+        className="truncate font-mono font-medium text-foreground underline-offset-2 hover:underline"
       >
-        <FileText className="size-3.5 shrink-0 text-muted-foreground" />
-        <a
-          href={resolvedUrl}
-          target="_blank"
-          rel="noopener noreferrer"
-          className="truncate font-mono font-medium text-foreground underline-offset-2 hover:underline"
-        >
-          {file.name}
-        </a>
-        <span className="shrink-0 text-[11px] text-muted-foreground">
-          {formatFileSize(file.size)} · {file.content_type}
-        </span>
-      </div>
+        {file.name}
+      </a>
+      <span className="shrink-0 text-[11px] text-muted-foreground">
+        {formatFileSize(file.size)} · {file.content_type}
+      </span>
     </div>
   );
 }
@@ -329,6 +324,7 @@ function EnvelopeContent({
   const body = stripHumanHeader ? splitEnvelope(payload).body : payload;
   const showBody =
     Boolean(body) &&
+    !(source === "system:upload" && files?.length) &&
     !(images?.length && (body === "[image]" || body === "[files]")) &&
     !((Boolean(files?.length) || source === "user") && body === "[files]");
   // Attach items carry data URIs (self.attach media) — those render raw;
