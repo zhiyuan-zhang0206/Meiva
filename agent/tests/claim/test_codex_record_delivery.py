@@ -361,7 +361,8 @@ async def test_finish_waits_for_a_record_written_after_the_cli_completed_signal(
             / ".system_generated/logs/transcript_full.jsonl"
         )
 
-        def write(_key: str) -> None:
+        def write(key: str) -> None:
+            del key
             cli.write()
     else:
         codex = RecordingCodex(tmp_path / "codex" / DAY / ROLLOUT)
