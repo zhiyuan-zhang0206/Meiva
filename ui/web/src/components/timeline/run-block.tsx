@@ -37,7 +37,7 @@ interface TurnBlockProps {
   memberSources?: readonly string[];
   summary: TurnSummary;
   expanded: boolean;
-  onToggle: (id: string, currentlyExpanded: boolean) => void;
+  onToggle: (id: string, currentlyExpanded: boolean, button: HTMLButtonElement) => void;
   turnActive?: boolean;
   liveWindow?: boolean;
   children?: ReactNode;
@@ -162,7 +162,7 @@ export const TurnBlock = memo(function TurnBlock({
     >
       <button
         type="button"
-        onClick={() => onToggle(toggleKey ?? id, expanded)}
+        onClick={(event) => onToggle(toggleKey ?? id, expanded, event.currentTarget)}
         className={cn(
           "w-[calc(100%+0.5rem)] -ml-2 px-2 py-0.5 items-start gap-1.5 text-left select-none transition-colors",
           expanded

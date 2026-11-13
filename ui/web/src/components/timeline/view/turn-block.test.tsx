@@ -308,8 +308,9 @@ describe("TurnBlock component", () => {
     render(
       <TurnBlock id="turn-7" memberIds={["7.0"]} summary={sampleSummary} expanded={false} onToggle={onToggle} />,
     );
-    fireEvent.click(screen.getByTestId("turn-toggle"));
-    expect(onToggle).toHaveBeenCalledWith("turn-7", false);
+    const button = screen.getByTestId("turn-toggle");
+    fireEvent.click(button);
+    expect(onToggle).toHaveBeenCalledWith("turn-7", false, button);
   });
 
   it("locks the collapse wrapper shrinkable on the inline axis (#3305)", () => {

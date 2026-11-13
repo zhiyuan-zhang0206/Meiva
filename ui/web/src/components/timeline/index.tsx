@@ -135,6 +135,7 @@ export const TimelineView = memo(function TimelineView({
   // It sits outside the content column so it carries no row spacing.
   // meiva:link ui/web/src/docs/frontend-components/timeline-view/sticky-scroll.md
   const sendReserveRef = useRef<HTMLDivElement>(null);
+  const collapseReserveRef = useRef<HTMLDivElement>(null);
 
   const pendingRestoreRef = useRef<SavedScroll | null>(scrollMemoryKey ? readScrollMemory(scrollMemoryKey) : null);
 
@@ -193,7 +194,15 @@ export const TimelineView = memo(function TimelineView({
     controller, compactBuffer, canonicalItems,
   });
 
-  const readingReserve = useCallback(() => sendReserveRef.current?.offsetHeight ?? 0, []);
+  const readingReserve = useCallback(() =>
+    (sendReserveRef.current?.offsetHeight ?? 0) + (collapseReserveRef.current?.offsetHeight ?? 0), []);
+  const releaseCollapseReserve = useCallback((viewport: HTMLElement) => {
+    const reserve = collapseReserveRef.current;
+    if (reserve && reserve.offsetHeight > 0 &&
+        viewport.scrollTop <= viewport.scrollHeight - reserve.offsetHeight - viewport.clientHeight + 1) {
+      reserve.style.height = "";
+    }
+  }, []);
   const tailHeight = useCallback((viewport: HTMLElement) =>
     Math.max(viewport.clientHeight, viewport.scrollHeight - readingReserve()), [readingReserve]);
 
@@ -464,6 +473,7 @@ export const TimelineView = memo(function TimelineView({
     applyPendingRestore,
     settleRestoredPosition,
     maintainSendAnchor,
+    releaseCollapseReserve,
     readingReserve,
     tailHeight,
     cancelPendingJump,
@@ -554,6 +564,25 @@ export const TimelineView = memo(function TimelineView({
   const lastGroup = groupEntries.at(-1);
   const liveBlockExpanded = lastGroup !== undefined && lastGroup.isLiveTurn && lastGroup.runExpanded;
   const pendingLiveExpandPinRef = useRef(false);
+  const toggledHeaderRef = useRef<{ button: HTMLButtonElement; top: number } | null>(null);
+  useLayoutEffect(() => {
+    const anchor = toggledHeaderRef.current;
+    toggledHeaderRef.current = null;
+    const viewport = viewportRef.current;
+    const reserve = collapseReserveRef.current;
+    if (!anchor?.button.isConnected || !viewport || !reserve) return;
+    // meiva:note
+    // A short collapsed block can leave too little scroll range to keep its
+    // header under the pointer. Keep only the extra range the placement needs.
+    // meiva:link ui/web/src/docs/frontend-components/timeline-view/deep-collapse.md
+    const top = Math.max(0, viewport.scrollTop + anchor.button.getBoundingClientRect().top - anchor.top);
+    const height = viewport.scrollTop + reserve.getBoundingClientRect().top - viewport.getBoundingClientRect().top;
+    const extra = Math.max(0, Math.ceil(top + viewport.clientHeight - height));
+    reserve.style.height = extra ? `${extra}px` : "";
+    viewport.scrollTop = top;
+    controller.notifyAnchored({ scrollTop: viewport.scrollTop, scrollHeight: viewport.scrollHeight, clientHeight: viewport.clientHeight });
+    measureAtBottom();
+  }, [controller, measureAtBottom, turnOverrides]);
   useLayoutEffect(() => {
     if (liveBlockExpanded && pendingLiveExpandPinRef.current) {
       pendingLiveExpandPinRef.current = false;
@@ -579,26 +608,23 @@ export const TimelineView = memo(function TimelineView({
   }, [controller, liveBlockExpanded, maintainSendAnchor, measureAtBottom, pinToBottom, tailHeight, trimFollowing]);
 
   const handleToggleTurn = useCallback(
-    (id: string, currentlyExpanded: boolean) => {
-      if (!currentlyExpanded) {
-        const isLiveTurnToggle =
-          lastGroup !== undefined &&
-          lastGroup.isLiveTurn &&
-          (lastGroup.groupKey === id ||
-            (lastGroup.group.kind === "turn" && lastGroup.group.members[0]?.item.item_id === id));
-        if (isLiveTurnToggle) {
-          cancelBookmark();
-          controller.requestStick();
-          setAtBottom(true);
-          pendingLiveExpandPinRef.current = true;
-        } else {
-          cancelScrollToBottomRide(scrollToBottomRideRef.current);
-          controller.notifyBlockExpanded();
-        }
+    (id: string, currentlyExpanded: boolean, button: HTMLButtonElement) => {
+      const opensLiveBlock = !currentlyExpanded && lastGroup?.isLiveTurn &&
+        (lastGroup.groupKey === id ||
+          (lastGroup.group.kind === "turn" && lastGroup.group.members[0]?.item.item_id === id));
+      cancelPendingJump();
+      cancelBookmark();
+      if (opensLiveBlock) {
+        controller.requestStick();
+        setAtBottom(true);
+        pendingLiveExpandPinRef.current = true;
+      } else {
+        controller.notifyBlockExpanded();
+        toggledHeaderRef.current = { button, top: button.getBoundingClientRect().top };
       }
       toggleTurn(id, currentlyExpanded);
     },
-    [cancelBookmark, controller, lastGroup, toggleTurn],
+    [cancelBookmark, cancelPendingJump, controller, lastGroup, toggleTurn],
   );
 
   const handleScrollToBottom = useCallback(() => {
@@ -678,6 +704,7 @@ export const TimelineView = memo(function TimelineView({
           <div ref={endRef} />
         </div>
         <div ref={sendReserveRef} data-send-reserve aria-hidden="true" />
+        <div ref={collapseReserveRef} data-turn-collapse-reserve aria-hidden="true" />
       </ScrollArea>
       <ScrollToBottomButton atBottom={atBottom} onClick={handleScrollToBottom} />
     </div>

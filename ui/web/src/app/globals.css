@@ -350,7 +350,8 @@
   }
   .chat-md ol {
     margin-block: var(--chat-md-p-my);
-    @apply list-decimal pl-5.5;
+    @apply list-decimal;
+    padding-inline-start: max(2rem, 3.5ch);
   }
   .chat-md li { margin-block: var(--chat-md-li-my); }
   .chat-md :is(strong, b) {

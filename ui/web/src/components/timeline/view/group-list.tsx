@@ -285,7 +285,7 @@ export function TimelineGroupList({
   lastEventAt?: number;
   overrides: ReadonlySet<string>;
   toggleExpanded: (id: string, kind: BackendTimelineItem["kind"]) => void;
-  toggleTurn: (id: string, currentlyExpanded: boolean) => void;
+  toggleTurn: (id: string, currentlyExpanded: boolean, button: HTMLButtonElement) => void;
   groups: RankedTimelineGroup[];
   groupEntries: GroupEntry[];
   virtualEnabled: boolean;

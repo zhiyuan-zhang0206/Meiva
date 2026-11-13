@@ -221,6 +221,7 @@ export function useTimelineViewport({
   applyPendingRestore,
   settleRestoredPosition,
   maintainSendAnchor,
+  releaseCollapseReserve,
   readingReserve,
   tailHeight,
   cancelPendingJump,
@@ -260,6 +261,7 @@ export function useTimelineViewport({
   // growth fight for one frame.
   // meiva:link ui/web/src/docs/frontend-components/timeline-view/sticky-scroll.md
   maintainSendAnchor: (viewport: HTMLElement) => boolean;
+  releaseCollapseReserve: (viewport: HTMLElement) => void;
   readingReserve: () => number;
   tailHeight: (viewport: HTMLElement) => number;
   cancelPendingJump: () => void;
@@ -277,6 +279,7 @@ export function useTimelineViewport({
     const onScroll = () => {
       const boundaryCorrection = pullScroll(viewport);
       if (historyPullActive()) return;
+      releaseCollapseReserve(viewport);
       const padded = readingReserve() > 0;
       const ride = scrollToBottomRideRef.current;
       if (padded && controller.isSticky() && !ride.active &&
@@ -468,6 +471,7 @@ export function useTimelineViewport({
     applyPendingRestore,
     settleRestoredPosition,
     maintainSendAnchor,
+    releaseCollapseReserve,
     readingReserve,
     tailHeight,
     cancelPendingJump,
