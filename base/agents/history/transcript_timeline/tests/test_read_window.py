@@ -3,6 +3,8 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+import pytest
+
 from base.agents.history.timeline_item import TimelineItem
 from base.agents.history.transcript_timeline.items import format_tool_use
 from base.agents.history.transcript_timeline.record.read import (
@@ -112,6 +114,19 @@ def test_an_interrupted_turn_shows_the_interrupt_the_record_wrote(tmp_path: Path
     file = write(tmp_path / "interrupt.jsonl", fixture_text("interrupt"))
     payloads = [p.item.payload for p in window(file).items if p.item.kind == "system_marker"]
     assert "status:Turn interrupted" in payloads
+
+
+# meiva:note
+# A page shows a marker that is not a tagged note only as a `status:` or an `error:` line; any other payload it flags
+# as a marker it does not recognise. A notice the CLI files (a finished background task) is such a marker.
+@pytest.mark.parametrize(
+    "scenario", ["compact", "long_session", "subagents", "interrupt", "api_error"]
+)
+def test_every_marker_of_a_record_is_a_line_a_page_shows(tmp_path: Path, scenario: str) -> None:
+    file = write(tmp_path / f"{scenario}.jsonl", fixture_text(scenario))
+    markers = [p.item for p in window(file).items if p.item.kind == "system_marker"]
+    assert markers
+    assert [m.payload for m in markers if not m.payload.startswith(("status:", "error:"))] == []
 
 
 def test_a_request_reads_about_the_window_and_not_the_file(tmp_path: Path) -> None:
