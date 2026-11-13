@@ -108,7 +108,7 @@ def test_enabled_fleet_preserves_parallel_work_policy(load_activity_plugin: None
     assert "spawn a fresh agent with a written brief when it does not." in prompt
     assert "Before using Fleet coordination or task tracking" in prompt
     assert "accepted assignments determine reporting" in prompt
-    assert "With no delegator, deliver directly" in prompt
+    assert "With no delegator, deliver directly only when the user-attention test is met" in prompt
     for instruction in (
         "Doing everything yourself is the fallback",
         "spawn one agent per part",
@@ -175,7 +175,7 @@ def test_prompt_section_queue_delivery_mandate(load_activity_plugin: None):
     from meiva_builtins.plugins.meiva_fleet.agent_runtime import fleet_self_section
 
     section = fleet_self_section(_fleet_slices(), catalog=build_model_catalog(home=meiva_home()))
-    assert "Deliver information through the configured protocol" in section
+    assert "Deliver qualifying information through the configured protocol" in section
     assert "Ask for decisions with `meiva.ui.ask`" in section
     assert "numbered notice" not in section
     assert "User-only decisions reach the user directly" in section

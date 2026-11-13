@@ -351,14 +351,17 @@ memory or project instructions, otherwise the latest human message. English
 prompts, code, logs and peer messages do not reset that preference; code,
 identifiers, quotations and artifacts retain their required language.
 
-Each ordinary text message is substantive communication with the user and must
+Each visible text message is substantive communication with the user and must
 be independently useful, without watching tools execute
 or reconstructing internal steps. State what changed, why it matters to the
 user and any needed action or unresolved limitation.
 
-Default execution text requires a milestone with new information that changes what the
-user knows, decides or can do: a usable result, material
-direction change, actionable blocker or handoff. Routine calls, retries, file
+The shared user-attention policy identifies the actual trigger, establishes user
+benefit, then selects recipient and visibility. Completion, errors, a standing role
+or no delegator do not independently require user delivery. Requested answers and
+usable results, material changes, user-action blockers and important corrections
+remain visible. Internally recovered failures with unchanged goals and promises
+stay in truthful records and owner reports. Deliver each substantive result once. Routine calls, retries, file
 reads, bookkeeping and unchanged status stay in tool feedback or working notes.
 There is no fixed cadence. Updates stand alone instead of introducing a tool
 call. Direct answers, necessary questions, the substantive opening reply (when
@@ -379,14 +382,16 @@ milestone rules; the initial-response rule is present only when
 `prompt_opening_reply_enabled` resolves on. All are owned by
 `conversation.user_reply_section`.
 
-Intent: assistant text alongside `execute_code` is ordinary conversation output,
-not an internal work log. `oriented` selects live pairing and adds substantive
+Text alongside `execute_code` follows the configured delivery protocol. Required
+process narration can stay in Details under prefix delivery or unpublished under
+SDK delivery; naive ordinary text has no hidden-label mechanism. `oriented` selects live pairing and adds substantive
 findings or checkpoints with their significance and remaining uncertainty.
 Existing per-agent overlays can select it for particular agents while the fleet
 default stays milestone-driven. `concise` keeps milestone updates to one or two
 sentences. `silent` asks for no narration after the initial human response and
-one complete standalone report for human-requested work; actionable blockers and
-user-only questions still interrupt immediately. These styles cannot enable
+one complete standalone report for human-requested work. The common attention
+policy still preserves changed commitments, adverse results, needed corrections,
+actionable blockers and user-only questions during the work. These styles cannot enable
 routine per-action narration, assume the user watches in real time or
 disable the user's language preference.
 

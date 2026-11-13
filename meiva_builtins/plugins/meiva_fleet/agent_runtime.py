@@ -34,7 +34,7 @@ _FLEET_HARNESS_CONTRIBUTION = HarnessContribution(
 def fleet_self_section(_slices: AgentSlices, *, catalog: ModelCatalog) -> str:
     del catalog
     if _slices.prompt.user_delivery_mode == "sdk":
-        return "## Fleet\n\nUse meiva.tasks for task tracking and meiva.agents.send_message for peers. Publish information with meiva.ui.publish and questions with meiva.ui.ask."
+        return "## Fleet\n\nUse meiva.tasks for task tracking and meiva.agents.send_message for peers. Apply the core user-attention test before publishing information with meiva.ui.publish; use meiva.ui.ask for questions only the user can answer. Peer reporting does not itself require user publication."
     return (
         "## Fleet\n\n"
         "Fleet provides user questions "
@@ -54,12 +54,16 @@ def fleet_self_section(_slices: AgentSlices, *, catalog: ModelCatalog) -> str:
         "Use one reporter per milestone; do not relay unchanged results or "
         "duplicate task-log writes. Periodic checking does not imply periodic "
         "broadcasting, including generated watchers and schedules.\n\n"
-        "Deliver information through the configured protocol. Ask for decisions with "
+        "Apply the core user-attention test before choosing user delivery; completion, "
+        "errors and having no delegator do not alone justify a visible message. "
+        "Deliver qualifying information through the configured protocol. Ask for decisions with "
         "`meiva.ui.ask`. Text questions have one answer field; choices keep an optional "
         "Note. Questions persist until "
         "the user answers or explicitly closes them. User-only decisions reach the user "
         "directly; progress for accepted delegated work reaches its agreed "
-        "delegator. With no delegator, deliver directly."
+        "delegator. With no delegator, deliver directly only when the user-attention "
+        "test is met. Keep other results in working records; do not duplicate the "
+        "delegator's user delivery."
     )
 
 

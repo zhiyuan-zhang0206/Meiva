@@ -129,7 +129,7 @@ def test_user_facing_text_policy_survives_every_style(
     style, prompt = communication_prompt
 
     assert prompt.count("## Meaningful progress") == 1
-    assert "Treat ordinary assistant text as substantive communication with the user" in prompt
+    assert "Treat visible assistant text as substantive communication with the user" in prompt
     assert "Every message must be independently useful to the user" in prompt
     assert "without watching tool execution or reconstructing your internal steps" in prompt
     assert "Make it self-contained: state what changed, why it matters" in prompt
@@ -228,7 +228,7 @@ def _rendered(mode: str, *, opening_reply: bool) -> dict[str, str]:
 
 
 @pytest.mark.parametrize("mode", ["prefix", "sdk", "naive"])
-def test_opening_reply_on_renders_text_identical_to_before_the_switch(mode: str) -> None:
+def test_opening_reply_on_renders_reviewed_delivery_prompt(mode: str) -> None:
     for key, text in _rendered(mode, opening_reply=True).items():
         assert text == _GOLDEN[key], key
 
@@ -255,4 +255,16 @@ def test_opening_reply_off_is_default_and_drops_only_that_rule(mode: str) -> Non
         assert "respond promptly" in native
         assert "Work without narrating. While a task" in off[f"style/silent/{mode}"]
     else:
-        assert "Publish meaningful milestones during execution" in off["native/sdk"]
+        assert "Publish only information that passes the user-attention test" in off["native/sdk"]
+
+
+@pytest.mark.parametrize("opening_reply", [False, True])
+def test_attention_policy_is_shared_across_delivery_modes_and_callers(opening_reply: bool) -> None:
+    sections = [
+        text.split("## User attention\n\n", 1)[1].split("\n\n#", 1)[0]
+        for mode in ("prefix", "sdk", "naive")
+        for key, text in _rendered(mode, opening_reply=opening_reply).items()
+        if key.startswith(("native/", "harness/"))
+    ]
+    assert len(sections) == 6
+    assert all(section == sections[0] for section in sections)

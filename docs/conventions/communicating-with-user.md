@@ -30,8 +30,12 @@ decision is fine to fix or delete; git backstops.)
 
 ## Candidate next steps
 
-When reporting after finishing work, list 2–3 candidate next steps — work
-options only. Each with a one-line reason and which you'd pick first. Avoid the
+When a user-facing result warrants a next-step decision, offer useful work
+options with a reason and recommendation. Completion alone does not require a
+visible report or additional suggestions: apply the core user-attention test,
+route delegated results to their owner, and deliver each substantive result once.
+Keep requested answers, changed promises, adverse results and needed corrections
+visible. Avoid the
 "deliberately not doing" items listed in [`non-goals.md`](non-goals.md).
 
 Don't include "stop here for today" / "take a break" / "call it a day"
