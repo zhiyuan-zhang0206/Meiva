@@ -6,6 +6,7 @@
 
 from __future__ import annotations
 
+import sys
 from dataclasses import dataclass
 from pathlib import Path
 from xml.etree import ElementTree
@@ -99,4 +100,25 @@ def pytest_command(tests: tuple[str, ...], *, python: str) -> tuple[str, ...]:
 # The command line the reader above expects: the same command with pytest's own report file named
 # so this run's reader cannot pick up another run's.
 def pytest_argv(report: Path, tests: tuple[str, ...], *, python: str) -> tuple[str, ...]:
-    return (*pytest_command(tests, python=python), f"--junitxml={report}")
+    return (
+        *pytest_command(tests, python=python),
+        f"--junitxml={report}",
+        f"--basetemp={report.parent / 'pytest'}",
+    )
+
+
+def pytest_failure_evidence(report: Path, output: str) -> None:
+    # meiva:note
+    # Keep small failure evidence on the caller's output before scratch is removed.
+    print("pytest failure output (last 65536 characters):\n" + output[-65536:], file=sys.stderr)
+    if report.exists():
+        try:
+            with report.open(encoding="utf-8", errors="replace") as evidence:
+                xml = evidence.read(262145)
+        except OSError as error:
+            print(f"pytest failure JUnit unavailable: {type(error).__name__}", file=sys.stderr)
+            return
+        if len(xml) > 262144:
+            print("JUnit exceeds diagnostic limit; full report omitted", file=sys.stderr)
+        else:
+            print("pytest failure JUnit:\n" + xml, file=sys.stderr)

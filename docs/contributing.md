@@ -84,6 +84,18 @@ Before staging, `bash scripts/content_lint/code_comments/check.sh changed --work
 (or `changed origin/main --worktree`) checks working-tree source notes without
 requiring a clean index.
 
+Each test run owns a unique scratch directory under the caller's private
+`$TMPDIR/pytest-of-<user>` (or `/tmp/pytest-of-<user>`). Pytest receives its own
+basetemp there; the runner reads JUnit and stores eligible cache evidence before
+removing only this run's scratch. Small failed-run JUnit and bounded log output
+are printed before removal. Cleanup failures are visible on stderr.
+The pytest-specific owner handles TERM by stopping and waiting for its own child
+before cleanup, then preserves the interruption. KILL cannot run cleanup: it can
+leave both scratch and a child. The directory shape matches the existing macmini
+basetemp reaper, whose quiet/age/ownership gates still apply; this does not install
+that reaper on another machine or promise immediate reclamation. An unconfirmed
+child exit retains scratch for diagnosis rather than deleting under the child.
+
 The `tests=` field in `diff_checks.py` reports three states: `RAN(<n>files)` with
 counted `passed`/`failed`/`errors`, `skipped(<why>)` when the change needs no test run,
 and `broken(<why>)` when pytest wrote no report (`no-report`) or produced fewer results

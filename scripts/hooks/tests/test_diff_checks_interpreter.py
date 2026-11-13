@@ -155,3 +155,4 @@ def test_pytest_argv_names_the_interpreter_it_was_given(tmp_path: Path) -> None:
     argv = pytest_argv(tmp_path / "report.xml", ("tests/test_a.py",), python=_ELSEWHERE)
 
     assert argv[:3] == (_ELSEWHERE, "-m", "pytest")
+    assert "--basetemp=" + str(tmp_path / "pytest") in argv
