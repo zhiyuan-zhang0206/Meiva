@@ -35,6 +35,5 @@
   "closeImage": "Close image",
   "liveUpdatesReconnecting": "Live updates reconnecting…",
   "liveUpdatesDisconnected": "Live updates disconnected — reconnecting automatically. You can also retry.",
-  "retry": "Retry",
-  "rejectSuggestion": "Reject suggestion"
+  "retry": "Retry"
 }
