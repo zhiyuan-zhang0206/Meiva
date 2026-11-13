@@ -1,0 +1,2 @@
+[uses]
+"test_diff_checks_scratch.py" = ["child_diff_checks_scratch.py"]

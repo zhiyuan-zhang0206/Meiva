@@ -8,7 +8,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
-import shutil
+import signal
 import subprocess
 import sys
 import tempfile
@@ -66,6 +66,16 @@ from scripts.hooks.diff_checks_pytest import (  # noqa: E402
     pytest_argv,
     pytest_command,
     pytest_counts,
+    pytest_failure_evidence,
+)
+from scripts.hooks.diff_checks_pytest_child import (  # noqa: E402
+    PytestInterrupted,
+    run_pytest_child,
+)
+from scripts.hooks.diff_checks_scratch import (  # noqa: E402
+    pytest_scratch,
+    pytest_scratch_parent,
+    retain_for,
 )
 
 __all__ = [
@@ -332,9 +342,9 @@ def _run_pytest(
 ) -> tuple[PytestCounts, bool]:
     logical_argv = pytest_command(tests, python=python)
     key = ""
-    report_dir = Path(tempfile.mkdtemp(prefix="diff-checks-"))
-    report = report_dir / "pytest-report.xml"
-    try:
+    parent = pytest_scratch_parent(os.environ)
+    with pytest_scratch(parent) as report_dir:
+        report = report_dir / "pytest-report.xml"
         if cache is not None:
             key = cache_key(
                 mode=mode,
@@ -348,7 +358,12 @@ def _run_pytest(
                 report.write_text(cached.output, encoding="utf-8")
                 counts = pytest_counts(report, selected_files=len(tests), seconds=0.0)
                 return counts, counts.broken
-        code, _output, seconds = execute(pytest_argv(report, tests, python=python), change.root)
+        try:
+            code, output, seconds = execute(pytest_argv(report, tests, python=python), change.root)
+        except BaseException as error:
+            if not retain_for(error):
+                pytest_failure_evidence(report, f"pytest interrupted: {type(error).__name__}")
+            raise
         counts = pytest_counts(report, selected_files=len(tests), seconds=seconds)
         if (
             cache is not None
@@ -358,9 +373,9 @@ def _run_pytest(
             and counts.values.get("errors") == "0tests"
         ):
             record_run(cache, key, code=0, output=report.read_text(encoding="utf-8"))
+        if code != 0 or counts.broken:
+            pytest_failure_evidence(report, output)
         return counts, code != 0 or counts.broken
-    finally:
-        shutil.rmtree(report_dir, ignore_errors=True)
 
 
 def check(
@@ -372,6 +387,7 @@ def check(
     choose: Callable[[ChangeSet], Selection] = select_tests,
     mode: CheckMode = "incremental",
     cache: CacheContext | None = None,
+    execute_pytest: Callable[[Sequence[str], Path], tuple[int, str, float]] | None = None,
 ) -> tuple[dict[str, str], bool]:
     groups = schedule_groups(change, mode=mode, cache=cache, python=python)
     values: dict[str, str] = {"scope": scope_of(change)}
@@ -398,7 +414,12 @@ def check(
         values["errors"] = "n/a(no-test-ran)"
         return values, failed
     counts, pytest_failed = _run_pytest(
-        change, selection.tests, execute=execute, mode=mode, cache=cache, python=python
+        change,
+        selection.tests,
+        execute=execute_pytest or execute,
+        mode=mode,
+        cache=cache,
+        python=python,
     )
     values.update(counts.values)
     return values, failed or pytest_failed
@@ -490,6 +511,7 @@ def main(argv: Sequence[str]) -> int:
         change,
         skip_tests=arguments.skip_tests,
         execute=judged,
+        execute_pytest=partial(run_pytest_child, environment=child_environment(os.environ)),
         mode=mode,
         cache=cache,
         python=python,
@@ -499,4 +521,8 @@ def main(argv: Sequence[str]) -> int:
 
 
 if __name__ == "__main__":
-    raise SystemExit(main(sys.argv[1:]))
+    try:
+        raise SystemExit(main(sys.argv[1:]))
+    except PytestInterrupted as interruption:
+        signal.raise_signal(interruption.signum)
+        raise SystemExit(128 + interruption.signum) from None
