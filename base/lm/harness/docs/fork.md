@@ -15,11 +15,14 @@ machine. So birth only records the intent and the clone happens on the child's *
 start**, in the runner that hosts it:
 
 1. Birth (gateway, one transaction) writes the child's `agents_meta` row with
-   `fork_source_agent_id`, inserts the `kind='fork'` inbound (as for a native fork), and, for a harness whose
-   timeline is stored (Antigravity), copies the source's `agent_harness_messages` rows to the child
-   (`copy_harness_timeline`): same `seq`, same items, `inbound_id` cleared, no `agent_publications` (so no unread), and no
-   graph checkpoints (the source's graph state holds no conversation and may sit mid-turn). A Claude Code child copies
-   nothing: its timeline is its CLI's record ([the decision](../../../../docs/decisions/agents/graph/2026-11-13-timeline-read-from-the-record.md)),
+   `fork_source_agent_id` and inserts the `kind='fork'` inbound (as for a native fork).
+   External forks copy no graph checkpoints (the source's graph state holds no conversation
+   and may sit mid-turn) or `agent_publications` (so no unread). All current external harnesses
+   read their timelines from CLI records, so birth copies no `agent_harness_messages` rows.
+   The conditional `copy_harness_timeline` path remains for a stored-timeline harness; it does
+   not enable Antigravity forks, which are refused before birth (see Refusals below).
+   A Claude Code child's timeline is its CLI's record
+   ([the decision](../../../../docs/decisions/agents/graph/2026-11-13-timeline-read-from-the-record.md)),
    which is empty until the first start clones the source's session, and then shows the inherited conversation (the clone keeps the
    rows' `uuid`s; offsets are the clone's own). A Codex child copies nothing either, and its rollout does not carry the source's
    history: `thread/fork` starts a new file with the clone's own rows only (observed on 0.166), so the child's timeline is
