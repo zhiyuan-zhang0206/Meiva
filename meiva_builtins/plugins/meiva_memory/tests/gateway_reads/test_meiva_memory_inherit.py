@@ -36,11 +36,14 @@ def _context(
     clients: ClientSet | None,
     machine_identity: MachineIdentityReader,
     agent_id: int | None = 1,
+    timestamps_enabled: bool = True,
     **pins: Any,
 ) -> MeivaContext:
     return MeivaContext(
         identity=AgentIdentity(agent_id=agent_id, owns_loop=True) if agent_id is not None else None,
-        agent=AgentSlices.resolve(pins, default_reader=defaults()),
+        agent=AgentSlices.resolve(
+            pins, default_reader=defaults(general__message_timestamps=timestamps_enabled)
+        ),
         clock_factory=Clock.from_settings,
         machine=machine_identity,
         clients=clients if clients is not None else ClientSet(),
@@ -248,20 +251,32 @@ def test_an_empty_chain_and_a_local_ancestor_without_a_store_yield_no_note(
     assert inherit.inherited_memory_note(ctx) is None
 
 
+@pytest.mark.parametrize("timestamps_enabled", [False, True])
 def test_direct_parent_inherit_md_is_injected_and_personal_notes_stay_private(
-    wire: GatewayWire, machine_identity: MachineIdentityReader
+    wire: GatewayWire, machine_identity: MachineIdentityReader, timestamps_enabled: bool
 ) -> None:
     _write_entry(600311, "MEMORY", "- [Private](private.md) - private\n")
     _write_entry(600311, "private", "private personal note that must never be inherited\n")
     _write_inherit(600311, "# Parent Domain\n\nReport in Chinese.\n")
     _chain(wire, 1, _row(600311, machine_identity.name(), label="Parent"))
 
-    note = inherit.inherited_memory_note(_context(wire.context.clients, machine_identity))
+    ctx = _context(wire.context.clients, machine_identity, timestamps_enabled=timestamps_enabled)
+    note = inherit.inherited_memory_note(ctx)
 
     assert note is not None
     assert _note_tag(note) == "inherited_memory"
     content = _note_text(note)
-    assert content.startswith("<system_note>\nMemory your ancestors chose to share")
+    from datetime import datetime
+
+    stamp = (
+        ctx.timestamp_policy().format(
+            datetime.fromisoformat(str(note.additional_kwargs["meiva_created_at"]))
+        )
+        + " "
+        if timestamps_enabled
+        else ""
+    )
+    assert content.startswith(f"<system_note>\n{stamp}Memory your ancestors chose to share")
     assert "verify facts that conflict with current evidence" in content
     assert (
         f"## ancestor #600311 (Parent) — {meiva_home()}/workspaces/600311/memory/INHERIT.md"

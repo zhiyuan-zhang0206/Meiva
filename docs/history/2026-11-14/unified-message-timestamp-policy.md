@@ -18,3 +18,9 @@ formatting must not change which paragraphs a person sees or copies.
 A timezone note uses one captured policy for both its timezone description and
 its prefix. Reading the clock factory twice can mix independent snapshots or
 consume two supplied observations for one note, so those facts travel together.
+
+An SDK execution surface can validly bind a partial process context without
+graph AgentSlices. Its delivered SDK configuration remains the timestamp owner;
+requiring graph slices would reject those installations. Passive memory recall
+likewise retains its explicitly supplied agent as configuration owner rather
+than demanding another copy on the context that supplies its gateway and clock.

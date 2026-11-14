@@ -15,6 +15,7 @@ from typing import Literal, Protocol, overload
 from pydantic import BaseModel
 
 from base.agents.context.clients import DatabaseHandle
+from base.agents.messages.timestamp_policy import TimestampPolicy
 from base.clock import Clock
 from base.config import settings
 from base.config.service_read import ConfigAuthority
@@ -170,6 +171,16 @@ def agent_setting(name: str) -> object:
         attached[0] if attached else None,
         default_reader=lambda _domain, field: config_authority().service_field_value(field),
     )
+
+
+# meiva:note
+# An SDK operation has the delivered/attached setting and the SDK clock, even when its
+# partial process context carries no graph AgentSlices. Keep policy assembly at this root.
+def timestamp_policy() -> TimestampPolicy:
+    enabled = agent_setting("message_timestamps")
+    if not isinstance(enabled, bool):
+        raise TypeError("message_timestamps must be a boolean")
+    return TimestampPolicy.from_clock(clock(), timestamps_enabled=enabled)
 
 
 # ── Plugin config hierarchical view ──

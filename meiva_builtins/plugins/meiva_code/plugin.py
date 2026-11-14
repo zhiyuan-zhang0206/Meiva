@@ -157,7 +157,8 @@ def _process_context_file(
             ),
             now=clock.now().astimezone(clock.explicit_zone()),
         )
-    now = sdk_settings.clock().now()
+    inputs = sdk_settings.timestamp_policy()
+    now = inputs.require_now()
     update_state(
         {
             "messages": [
@@ -166,7 +167,7 @@ def _process_context_file(
                     tag=NoteTag.CONTEXT,
                     picked_up_at=now,
                     created_at=now,
-                    inputs=process_context.current_context().timestamp_policy(),
+                    inputs=inputs,
                 )
             ]
         }
