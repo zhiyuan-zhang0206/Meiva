@@ -349,14 +349,13 @@ describe("bounded timeline history (#4702)", () => {
     expect(useTimelineStore.getState().items).toHaveLength(200);
   });
 
-  it("loads one page per released pull and ignores compensation and momentum after the page lands", () => {
+  it("loads one page per upward gesture and ignores compensation and momentum after the page lands", () => {
     let rowTop = 0;
     vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockImplementation(
       function (this: HTMLElement) {
         const viewport = this.closest<HTMLElement>('[data-slot="scroll-area-viewport"]');
-        const reserve = Number.parseFloat(viewport?.querySelector<HTMLElement>("[data-history-pull-space]")?.style.height ?? "0") || 0;
         if (!this.getAttribute("data-item-id")) return new DOMRect(0, 0, 400, 600);
-        return rowRect(rowTop + reserve - (viewport?.scrollTop ?? 0));
+        return rowRect(rowTop - (viewport?.scrollTop ?? 0));
       },
     );
     const loadOlder = vi.fn();
@@ -379,19 +378,21 @@ describe("bounded timeline history (#4702)", () => {
     rowTop = 300;
     rerender(<TimelineView threadKey="42" items={[item(90), ...items]} hasMoreOlder onLoadOlder={loadOlder} />);
     expect(viewport.scrollTop).toBe(300);
-    act(() => { fireEvent.scroll(viewport); }); // the compensation echo
+    act(() => { fireEvent.scroll(viewport); });
     for (let i = 0; i < 6; i++) {
       expect(historyWheel(viewport, -100, true).defaultPrevented).toBe(true);
     }
     expect(viewport.scrollTop).toBe(300);
     expect(loadOlder).toHaveBeenCalledOnce();
 
-    // A subsequent arrival remains inert. A fresh released pull can load again.
+    historyWheel(viewport, 40, false);
     rowTop = 0;
     viewport.scrollTop = 0;
     act(() => { fireEvent.scroll(viewport); });
     historyWheel(viewport, -100, true);
     expect(loadOlder).toHaveBeenCalledOnce();
+    historyWheel(viewport, 40, false);
+    viewport.scrollTop = 0;
     pullOlderAtTop(viewport);
     expect(loadOlder).toHaveBeenCalledTimes(2);
   });

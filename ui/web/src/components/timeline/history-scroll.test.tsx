@@ -477,18 +477,6 @@ describe("restored position settles", () => {
     expect(readingOffset("3.0")).toBe(-100);
   });
 });
-it("captures the departing reading position before the native pull reserve is removed", () => {
-  vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockImplementation(function (this: HTMLElement) {
-    const reserve = Number.parseFloat(this.closest('[data-slot="scroll-area-viewport"]')?.querySelector<HTMLElement>('[data-history-pull-space]')?.style.height ?? "0") || 0;
-    const y = this.dataset.itemId ? reserve + (Number.parseInt(this.dataset.itemId) - 1) * 300 - top : 0;
-    return { top: y, bottom: y + 300, height: 300, left: 0, right: 400, width: 400 } as DOMRect;
-  });
-  const { rerender } = renderWithBrowser(tabs(42, "agent-native-reserve"));
-  act(() => { viewport().scrollTop = 700; fireEvent.scroll(viewport()); });
-  rerender(tabs(43, "agent-native-reserve"));
-  rerender(tabs(42, "agent-native-reserve"));
-  expect(viewport().scrollTop).toBe(700);
-});
   it("keeps the reader on their row when the viewport width changes", () => {
     useTimelineStore.getState().switchThread(42, items, false);
     renderWithBrowser(conversation(42, "history-width-change"));

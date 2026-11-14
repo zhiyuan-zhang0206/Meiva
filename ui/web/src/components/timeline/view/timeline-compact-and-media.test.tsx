@@ -250,7 +250,7 @@ describe("continuous compact history", () => {
     fireEvent.click(screen.getByRole("button", { name: "Load earlier messages" }));
     expect(loadOlder).toHaveBeenCalledOnce();
   });
-  it("top arrival does not fetch; a separate pull requests one page only on release", () => {
+  it("top arrival does not fetch; a separate upward gesture requests one page without moving the viewport", () => {
     const loadOlder = vi.fn();
     const items = [makeItem({ item_id: "10.0", kind: "agent_chat", payload: "ten" })];
     render(<TimelineView items={items} hasMoreOlder onLoadOlder={loadOlder} />);
@@ -268,17 +268,11 @@ describe("continuous compact history", () => {
     });
     expect(loadOlder).not.toHaveBeenCalled();
     historyWheel(viewport, -48, false);
-    expect(screen.getByTestId("load-older-spinner").dataset.state).toBe("pulling");
-    expect(screen.getByTestId("load-older-spinner").querySelector(".animate-spin")).not.toBeNull();
-    historyWheel(viewport, -48, false);
-    expect(screen.getByTestId("load-older-spinner").dataset.state).toBe("ready");
+    expect(screen.getByTestId("load-older-spinner").dataset.state).toBe("idle");
     expect(loadOlder).not.toHaveBeenCalled();
-    historyWheel(viewport, -20, true);
+    historyWheel(viewport, -48, false);
+    expect(viewport.scrollTop).toBe(0);
     expect(loadOlder).toHaveBeenCalledTimes(1);
-    // meiva:note
-    // The released pull is the reader's own read — the only origin that may
-    // present the loading strip.
-    // meiva:link ui/web/src/docs/frontend-components/timeline-view/history-paging.md
     expect(loadOlder).toHaveBeenCalledWith("reader");
     act(() => {
       viewport.dispatchEvent(new Event("scroll"));
@@ -319,16 +313,10 @@ describe("continuous compact history", () => {
     expect(loadOlder).toHaveBeenCalledTimes(1);
     rerender(<TimelineView items={items} hasMoreOlder loadingOlder onLoadOlder={loadOlder} />);
     rerender(<TimelineView items={items} hasMoreOlder onLoadOlder={loadOlder} />);
-    viewport.scrollTop = 80;
-    act(() => { viewport.dispatchEvent(new Event("scrollend")); });
-    viewport.scrollTop = 240;
-    act(() => {
-      viewport.dispatchEvent(new Event("scroll"));
-    });
+    expect(viewport.scrollTop).toBe(0);
+    historyWheel(viewport, 240, false);
     viewport.scrollTop = 0;
-    act(() => {
-      viewport.dispatchEvent(new Event("scroll"));
-    });
+    act(() => { viewport.dispatchEvent(new Event("scroll")); });
     pullOlderAtTop(viewport);
     expect(loadOlder).toHaveBeenCalledTimes(2);
   });

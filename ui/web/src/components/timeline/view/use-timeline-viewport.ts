@@ -209,10 +209,6 @@ export function useTimelineViewport({
   maybeColdFill,
   pinToBottom,
   trimFollowing,
-  prepareHistoryPull,
-  historyPullActive,
-  pullScroll,
-  pullScrollEnd,
   pullWheel,
   pullTouchStart,
   pullTouchMove,
@@ -244,10 +240,6 @@ export function useTimelineViewport({
   maybeColdFill: () => void;
   pinToBottom: (viewport: HTMLElement, freshRun?: boolean) => void;
   trimFollowing: (allowDuringRide?: boolean) => boolean;
-  prepareHistoryPull: (viewport: HTMLElement) => void;
-  historyPullActive: () => boolean;
-  pullScroll: (viewport: HTMLElement) => boolean;
-  pullScrollEnd: () => void;
   pullWheel: (e: WheelEvent, viewport: HTMLElement) => void;
   pullTouchStart: (e: TouchEvent, viewport: HTMLElement) => void;
   pullTouchMove: (e: TouchEvent, viewport: HTMLElement) => void;
@@ -279,8 +271,6 @@ export function useTimelineViewport({
     });
 
     const onScroll = () => {
-      const boundaryCorrection = pullScroll(viewport);
-      if (historyPullActive()) return;
       releaseCollapseReserve(viewport);
       const padded = readingReserve() > 0;
       const ride = scrollToBottomRideRef.current;
@@ -306,7 +296,7 @@ export function useTimelineViewport({
         }
       }
 
-      const isPrependEcho = prependEchoRef.current || boundaryCorrection;
+      const isPrependEcho = prependEchoRef.current;
       prependEchoRef.current = false;
 
       // meiva:note
@@ -326,7 +316,6 @@ export function useTimelineViewport({
     viewport.addEventListener("scroll", onScroll, { passive: true });
     const onScrollEnd = (event: Event) => {
       if (event.target !== viewport) return;
-      pullScrollEnd();
       const ride = scrollToBottomRideRef.current;
       if (ride.active) {
         ride.snapping = true;
@@ -410,12 +399,11 @@ export function useTimelineViewport({
       // not declare a shrink.
       // meiva:link ui/web/src/docs/frontend-components/timeline-view/sticky-scroll.md
       controller.recordContentHeight(snapshot());
-      prepareHistoryPull(viewport);
       applyPendingRestore(viewport);
       settleRestoredPosition(viewport, true);
       const ride = scrollToBottomRideRef.current;
       const shouldPinFromLayout =
-        !historyPullActive() && !holdRestoredPositionRef.current && controller.handleLayoutChange(snapshot(), readingReserve() > 0);
+        !holdRestoredPositionRef.current && controller.handleLayoutChange(snapshot(), readingReserve() > 0);
       if (ride.active) {
         if (ride.snapping) {
           pinToBottom(viewport, true);
@@ -461,10 +449,6 @@ export function useTimelineViewport({
     maybeColdFill,
     pinToBottom,
     trimFollowing,
-    prepareHistoryPull,
-    historyPullActive,
-    pullScroll,
-    pullScrollEnd,
     pullWheel,
     pullTouchStart,
     pullTouchMove,

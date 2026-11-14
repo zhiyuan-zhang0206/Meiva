@@ -129,7 +129,6 @@ export const TimelineView = memo(function TimelineView({
   const contentRef = useRef<HTMLDivElement>(null);
   const viewportRef = useRef<HTMLElement | null>(null);
   const wrapperRef = useRef<HTMLDivElement>(null);
-  const historySpaceRef = useRef<HTMLDivElement>(null);
   // meiva:note
   // Extra scroll space lets the last human message reach the reading offset.
   // It sits outside the content column so it carries no row spacing.
@@ -381,18 +380,15 @@ export const TimelineView = memo(function TimelineView({
     hasMoreOlderRef.current && !loadingOlderRef.current && !!loadOlderRef.current && pendingAnchorRef.current === null,
   [pendingAnchorRef]);
   const closeColdFill = useCallback(() => { coldFillRef.current.open = false; }, []);
-  const {
-    prepare: prepareHistoryPull, contentHeight: historyContentHeight, offset: olderPullOffset, progress: olderPullProgress, returning: olderPullReturning,
-    isActive: historyPullActive, finishLoad: finishHistoryPull, onScroll: pullScroll, onScrollEnd: pullScrollEnd,
-    onWheel: pullWheel, onTouchStart: pullTouchStart, onTouchMove: pullTouchMove,
+  const { onWheel: pullWheel, onTouchStart: pullTouchStart, onTouchMove: pullTouchMove,
     onTouchEnd: pullTouchEnd, onTouchCancel: cancelPullTouch,
-  } = useOlderHistoryPull(threadKey, historySpaceRef, contentRef, canPullOlder, pullOlderPage, closeColdFill);
+  } = useOlderHistoryPull(threadKey, canPullOlder, pullOlderPage, closeColdFill);
 
   const maybeColdFill = useCallback(() => {
     const fill = coldFillRef.current;
     const viewport = viewportRef.current;
     if (!fill.open || !viewport || viewport.clientHeight <= 0 || itemsRef.current.length === 0) return;
-    if (historyContentHeight(viewport) > viewport.clientHeight || fill.pages >= 2) {
+    if (viewport.scrollHeight > viewport.clientHeight || fill.pages >= 2) {
       fill.open = false;
       return;
     }
@@ -401,7 +397,7 @@ export const TimelineView = memo(function TimelineView({
       fill.inFlight = true;
       fill.pages += 1;
     }
-  }, [loadOneOlderPage, historyContentHeight]);
+  }, [loadOneOlderPage]);
 
   const bookmarkState = useRef<BookmarkState>({
     pending: pendingRestoreRef,
@@ -454,10 +450,6 @@ export const TimelineView = memo(function TimelineView({
     maybeColdFill,
     pinToBottom,
     trimFollowing,
-    prepareHistoryPull,
-    historyPullActive,
-    pullScroll,
-    pullScrollEnd,
     pullWheel,
     pullTouchStart,
     pullTouchMove,
@@ -517,17 +509,9 @@ export const TimelineView = memo(function TimelineView({
 
   const prevLoadingOlderReleaseRef = useRef(loadingOlder);
   useLayoutEffect(() => {
-    if (prevLoadingOlderReleaseRef.current && !loadingOlder) {
-      pendingAnchorRef.current = null;
-      const wasPulling = historyPullActive();
-      finishHistoryPull();
-      const viewport = viewportRef.current;
-      if (wasPulling && viewport) controller.notifyRestored({
-        scrollTop: viewport.scrollTop, scrollHeight: viewport.scrollHeight, clientHeight: viewport.clientHeight,
-      });
-    }
+    if (prevLoadingOlderReleaseRef.current && !loadingOlder) pendingAnchorRef.current = null;
     prevLoadingOlderReleaseRef.current = loadingOlder;
-  }, [loadingOlder, finishHistoryPull, historyPullActive, controller, pendingAnchorRef]);
+  }, [loadingOlder, pendingAnchorRef]);
 
   const { groups, groupEntries, virtualEnabled, virtualRange, rowRange } = useTimelineGroupWindow({
     canonicalItems,
@@ -661,7 +645,7 @@ export const TimelineView = memo(function TimelineView({
 
   return (
     <div ref={wrapperRef} className={cn("relative", FLEX_1, MIN_H_0, OVERFLOW_HIDDEN)}>
-      <LoadOlderSpinner loadingOlder={readerLoadingOlder} pullProgress={olderPullProgress} pullOffset={olderPullOffset} returning={olderPullReturning} />
+      <LoadOlderSpinner loadingOlder={readerLoadingOlder} />
       {hasMoreOlder && onLoadOlder ? <LoadOlderKeyboardButton loading={loadingOlder} onClick={pullOlderPage} /> : null}
       <ColdLoadSpinner show={loading && items.length === 0} />
       <ConnectionNotice />
@@ -670,7 +654,6 @@ export const TimelineView = memo(function TimelineView({
         viewportClassName="[overflow-anchor:none] overscroll-y-contain"
         scrollbarActivity="input"
       >
-        <div ref={historySpaceRef} data-history-pull-space aria-hidden="true" />
         <div
           ref={contentRef}
           role="log"

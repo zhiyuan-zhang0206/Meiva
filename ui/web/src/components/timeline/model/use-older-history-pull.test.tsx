@@ -1,69 +1,44 @@
 import { act, cleanup } from "@testing-library/react";
 import { renderWithBrowser } from "@/test-support/render";
-import { StrictMode, useEffect, useLayoutEffect, useRef } from "react";
+import { useEffect, useRef } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { useOlderHistoryPull } from "./use-older-history-pull";
 
-function Harness({ thread = "first", available = true, busy = false, loadPage, intent }: {
-  thread?: string; available?: boolean; busy?: boolean; loadPage: () => boolean; intent: () => void;
+function Harness({ thread = "first", available = true, loadPage }: {
+  thread?: string; available?: boolean; loadPage: () => boolean;
 }) {
   const viewportRef = useRef<HTMLDivElement>(null);
-  const spaceRef = useRef<HTMLDivElement>(null);
-  const contentRef = useRef<HTMLDivElement>(null);
-  const previousBusy = useRef(busy);
-  const pull = useOlderHistoryPull(thread, spaceRef, contentRef, () => available && !busy, loadPage, intent);
-  const { onWheel, onScroll, onScrollEnd, onTouchStart, onTouchMove, onTouchEnd, onTouchCancel, finishLoad } = pull;
-  useLayoutEffect(() => {
-    if (previousBusy.current && !busy) finishLoad();
-    previousBusy.current = busy;
-  }, [busy, finishLoad]);
+  const { onWheel, onTouchStart, onTouchMove, onTouchEnd, onTouchCancel } =
+    useOlderHistoryPull(thread, () => available, loadPage, () => undefined);
   useEffect(() => {
     const viewport = viewportRef.current!;
     const wheel = (event: WheelEvent) => onWheel(event, viewport);
-    const scroll = () => onScroll(viewport);
     const start = (event: TouchEvent) => onTouchStart(event, viewport);
-    const move = (event: TouchEvent) => onTouchMove(event, viewport);
     viewport.addEventListener("wheel", wheel, { passive: false });
-    viewport.addEventListener("scroll", scroll);
-    viewport.addEventListener("scrollend", onScrollEnd);
     viewport.addEventListener("touchstart", start);
-    viewport.addEventListener("touchmove", move, { passive: false });
+    viewport.addEventListener("touchmove", onTouchMove, { passive: false });
     viewport.addEventListener("touchend", onTouchEnd);
     viewport.addEventListener("touchcancel", onTouchCancel);
     return () => {
       viewport.removeEventListener("wheel", wheel);
-      viewport.removeEventListener("scroll", scroll);
-      viewport.removeEventListener("scrollend", onScrollEnd);
       viewport.removeEventListener("touchstart", start);
-      viewport.removeEventListener("touchmove", move);
+      viewport.removeEventListener("touchmove", onTouchMove);
       viewport.removeEventListener("touchend", onTouchEnd);
       viewport.removeEventListener("touchcancel", onTouchCancel);
     };
-  }, [onWheel, onScroll, onScrollEnd, onTouchStart, onTouchMove, onTouchEnd, onTouchCancel]);
-  return <div ref={viewportRef} data-testid="viewport" data-slot="scroll-area-viewport"><div ref={spaceRef} data-testid="space" />
-    <div ref={contentRef}><output>{pull.offset}</output><p>Reading anchor</p></div></div>;
+  }, [onWheel, onTouchStart, onTouchMove, onTouchEnd, onTouchCancel]);
+  return <div ref={viewportRef} data-testid="viewport" />;
 }
 
-describe("native release-to-load older history", () => {
+describe("older history gestures at the top", () => {
   beforeEach(() => vi.useFakeTimers());
   afterEach(() => { cleanup(); vi.useRealTimers(); });
 
   function setup() {
     const loadPage = vi.fn(() => true);
-    const intent = vi.fn();
-    const view = renderWithBrowser(<Harness loadPage={loadPage} intent={intent} />);
-    const viewport = view.getByTestId("viewport");
-    Object.defineProperty(viewport, "clientHeight", { value: 600, configurable: true });
-    Object.defineProperty(viewport, "onscrollend", { value: null, configurable: true });
-    const scrollTo = vi.fn((options?: ScrollToOptions | number) => {
-      if (typeof options === "object") viewport.scrollTop = options.top ?? 0;
-      viewport.dispatchEvent(new Event("scroll"));
-      viewport.dispatchEvent(new Event("scrollend"));
-    });
-    viewport.scrollTo = scrollTo;
-    const offset = () => Number(viewport.querySelector("output")!.textContent);
-    return { ...view, viewport, loadPage, intent, offset, scrollTo, space: view.getByTestId("space") };
+    const view = renderWithBrowser(<Harness loadPage={loadPage} />);
+    return { ...view, viewport: view.getByTestId("viewport"), loadPage };
   }
 
   function wheel(viewport: HTMLElement, deltaY: number, momentum?: boolean, extra: WheelEventInit = {}) {
@@ -73,17 +48,15 @@ describe("native release-to-load older history", () => {
     if (momentum !== undefined) Object.defineProperty(event, "momentum", { value: momentum });
     act(() => {
       viewport.dispatchEvent(event);
-      // jsdom has no default scrolling. Simulate only the browser-owned move.
       if (!event.defaultPrevented && !event.ctrlKey && Math.abs(event.deltaX) <= Math.abs(deltaY)) {
-        const pixels = deltaY * (extra.deltaMode === 1 ? 16 : extra.deltaMode === 2 ? 600 : 1);
-        viewport.scrollTop = Math.max(0, viewport.scrollTop + pixels);
-        viewport.dispatchEvent(new Event("scroll"));
+        viewport.scrollTop = Math.max(0, viewport.scrollTop + deltaY);
       }
     });
     return event;
   }
-  function end(viewport: HTMLElement) { act(() => { viewport.dispatchEvent(new Event("scrollend")); }); }
-  function quiet() { act(() => { vi.advanceTimersByTime(5000); }); }
+
+  function pause() { act(() => { vi.advanceTimersByTime(150); }); }
+
   function touch(viewport: HTMLElement, type: string, y?: number, fingers = 1) {
     const event = new Event(type, { bubbles: true, cancelable: true });
     Object.defineProperty(event, "touches", { value: y === undefined ? [] : Array.from({ length: fingers }, () => ({ clientY: y })) });
@@ -91,248 +64,93 @@ describe("native release-to-load older history", () => {
     return event;
   }
 
-  it("keeps unavailable history in natural flow and prepares only when history arrives", () => {
-    const loadPage = vi.fn(() => true);
-    const intent = vi.fn();
-    const { getByTestId, rerender } = renderWithBrowser(<Harness available={false} loadPage={loadPage} intent={intent} />);
-    const viewport = getByTestId("viewport");
-    const space = getByTestId("space");
-    const content = space.nextElementSibling as HTMLElement;
-    expect(space.style.height).toBe("");
-    expect(content.style.minHeight).toBe("");
-    viewport.scrollTop = 40;
-    viewport.dispatchEvent(new Event("scroll"));
-    expect(viewport.scrollTop).toBe(40);
-    expect(wheel(viewport, -10).defaultPrevented).toBe(false);
+  it("allows native arrival but requires a separate upward burst to load", () => {
+    const { viewport, loadPage } = setup();
+    viewport.scrollTop = 120;
+    expect(wheel(viewport, -120, false).defaultPrevented).toBe(false);
+    expect(viewport.scrollTop).toBe(0);
+    expect(wheel(viewport, -100, false).defaultPrevented).toBe(true);
+    expect(wheel(viewport, -200, true).defaultPrevented).toBe(true);
     expect(loadPage).not.toHaveBeenCalled();
-    rerender(<Harness available loadPage={loadPage} intent={intent} />);
-    expect(space.style.height).toBe("80px");
-    expect(viewport.scrollTop).toBe(110); // preserve the 30px reading position below the new reserve
-    rerender(<Harness available loadPage={loadPage} intent={intent} />);
-    expect(viewport.scrollTop).toBe(110);
-  });
-
-  it("keeps one reserve across StrictMode re-attachment and restores natural coordinates on cleanup", () => {
-    const view = renderWithBrowser(<StrictMode><Harness loadPage={() => true} intent={vi.fn()} /></StrictMode>);
-    const viewport = view.getByTestId("viewport");
-    expect(view.getByTestId("space").style.height).toBe("80px");
-    expect(viewport.scrollTop).toBe(80);
-    view.unmount();
+    pause();
+    wheel(viewport, -100, false);
+    expect(loadPage).toHaveBeenCalledOnce();
     expect(viewport.scrollTop).toBe(0);
   });
 
-  it("stops an arriving gesture and its momentum at the top until a new gesture starts", () => {
-    const { viewport, loadPage, offset } = setup();
-    viewport.scrollTop = 120;
-    expect(wheel(viewport, -120, false).defaultPrevented).toBe(true);
-    expect(viewport.scrollTop).toBe(80);
-    expect(wheel(viewport, -100, false).defaultPrevented).toBe(true);
-    expect(wheel(viewport, -200, true).defaultPrevented).toBe(true);
-    end(viewport);
-    expect(offset()).toBe(0);
-    expect(loadPage).not.toHaveBeenCalled();
-    expect(wheel(viewport, -100, false).defaultPrevented).toBe(true);
-    expect(viewport.scrollTop).toBe(80);
-    quiet();
-    wheel(viewport, -40, false);
-    expect(offset()).toBe(40);
-  });
-
-  it("keeps a new pull armed when the previous boundary correction finishes", () => {
-    const { viewport, loadPage, offset } = setup();
-    viewport.scrollTop = 120;
-    wheel(viewport, -120, false);
-    end(viewport);
-    quiet();
-
-    const nextWheel = new WheelEvent("wheel", { deltaY: -80, bubbles: true, cancelable: true });
-    Object.defineProperty(nextWheel, "timeStamp", { value: performance.now() });
-    act(() => { viewport.dispatchEvent(nextWheel); });
-    expect(nextWheel.defaultPrevented).toBe(false);
-    end(viewport);
-    act(() => {
-      viewport.scrollTop = 0;
-      viewport.dispatchEvent(new Event("scroll"));
-    });
+  it("keeps rows stationary while accumulating intent and across an empty or failed request", () => {
+    const { viewport, loadPage } = setup();
+    loadPage.mockReturnValue(false);
+    expect(wheel(viewport, -32).defaultPrevented).toBe(true);
     expect(viewport.scrollTop).toBe(0);
-    expect(offset()).toBe(80);
     expect(loadPage).not.toHaveBeenCalled();
-    end(viewport);
+    expect(wheel(viewport, -32).defaultPrevented).toBe(true);
     expect(loadPage).toHaveBeenCalledOnce();
-  });
-
-  it("stops inertial scrolling at the boundary without exposing the reserve", () => {
-    const { viewport, loadPage, offset } = setup();
-    viewport.scrollTop = 400;
-    wheel(viewport, -200, false);
-    expect(viewport.scrollTop).toBe(200);
-    expect(wheel(viewport, -200, true).defaultPrevented).toBe(true);
-    expect(viewport.scrollTop).toBe(80);
-    end(viewport);
-    expect(offset()).toBe(0);
-    expect(loadPage).not.toHaveBeenCalled();
-  });
-
-  it("moves the list in a real scroll range and holds indefinitely while fingers are stationary", () => {
-    const { viewport, loadPage, offset, space } = setup();
-    expect(wheel(viewport, -40, false).defaultPrevented).toBe(false);
-    expect(space.style.height).toBe("80px");
-    expect(offset()).toBe(40);
-    wheel(viewport, -40, false);
-    expect(offset()).toBe(80);
-    quiet();
-    expect(offset()).toBe(80);
-    expect(space.style.height).toBe("80px");
-    expect(loadPage).not.toHaveBeenCalled();
-    end(viewport); // native phase end, including a lift with no fling
+    expect(viewport.scrollTop).toBe(0);
+    wheel(viewport, -100);
     expect(loadPage).toHaveBeenCalledOnce();
-    expect(offset()).toBe(80);
-    expect(space.style.height).toBe("80px");
-    end(viewport);
-    expect(loadPage).toHaveBeenCalledOnce();
+    pause();
+    wheel(viewport, -100);
+    expect(loadPage).toHaveBeenCalledTimes(2);
   });
 
-  it("uses native momentum as release and consumes its tail after a stable landing", () => {
-    const { viewport, loadPage, intent, rerender, offset, space } = setup();
-    const anchor = viewport.querySelector("p");
-    wheel(viewport, -80, false);
-    expect(wheel(viewport, -40, true).defaultPrevented).toBe(true);
-    expect(loadPage).toHaveBeenCalledOnce();
-    expect(offset()).toBe(80);
-    rerender(<Harness busy loadPage={loadPage} intent={intent} />);
-    viewport.scrollTop = 380; // prepend compensation, with the 80px reserve
-    rerender(<Harness loadPage={loadPage} intent={intent} />);
-    expect(space.style.height).toBe("80px");
-    expect(viewport.scrollTop).toBe(380); // unchanged reserve preserves every row
-    expect(offset()).toBe(0);
-    for (let i = 0; i < 5; i++) expect(wheel(viewport, -50, true).defaultPrevented).toBe(true);
-    quiet();
-    expect(wheel(viewport, -1, true).defaultPrevented).toBe(true);
-    expect(loadPage).toHaveBeenCalledOnce();
-    expect(viewport.querySelector("p")).toBe(anchor);
-    expect(wheel(viewport, -50, false).defaultPrevented).toBe(false);
-    expect(viewport.scrollTop).toBe(330);
-  });
-
-  it("smoothly retracts a subthreshold pull after release without requesting", () => {
-    const { viewport, loadPage, offset, space } = setup();
-    wheel(viewport, -40, false);
-    quiet();
-    expect(offset()).toBe(40);
-    end(viewport);
-    expect(viewport.scrollTop).toBe(80);
-    act(() => { viewport.dispatchEvent(new Event("scroll")); });
-    end(viewport);
-    quiet();
-    expect(offset()).toBe(0);
-    expect(space.style.height).toBe("80px");
-    expect(loadPage).not.toHaveBeenCalled();
-  });
-
-  it("smoothly closes a successful pull when a standing context anchor was not displaced", () => {
-    const { viewport, loadPage, intent, rerender, offset, scrollTo } = setup();
-    wheel(viewport, -80, false);
-    end(viewport);
-    expect(loadPage).toHaveBeenCalledOnce();
-    rerender(<Harness busy loadPage={loadPage} intent={intent} />);
-    rerender(<Harness loadPage={loadPage} intent={intent} />);
-    expect(scrollTo).toHaveBeenCalledWith({ top: 80, behavior: "smooth" });
-    expect(offset()).toBe(0);
-  });
-
-  it("reversing completely closes the reserve without rearming the same gesture", () => {
-    const { viewport, loadPage, offset, space } = setup();
-    wheel(viewport, -40, false);
-    wheel(viewport, 50, false);
-    expect(space.style.height).toBe("80px");
-    expect(viewport.scrollTop).toBe(90);
-    wheel(viewport, -150, false);
-    end(viewport);
-    expect(offset()).toBe(0);
-    expect(loadPage).not.toHaveBeenCalled();
-  });
-
-  it.each([{ ctrlKey: true }, { deltaX: 200 }])("cancels for zoom/horizontal intent: %j", (extra) => {
+  it("ignores the rest of the loading gesture after a fast page prepend", () => {
     const { viewport, loadPage } = setup();
     wheel(viewport, -80, false);
-    expect(wheel(viewport, -20, false, extra).defaultPrevented).toBe(false);
-    end(viewport); quiet();
+    viewport.scrollTop = 300;
+    expect(wheel(viewport, -40, true).defaultPrevented).toBe(true);
+    expect(wheel(viewport, -40, false).defaultPrevented).toBe(true);
+    expect(viewport.scrollTop).toBe(300);
+    expect(loadPage).toHaveBeenCalledOnce();
+    pause();
+    expect(wheel(viewport, -40, false).defaultPrevented).toBe(false);
+    expect(viewport.scrollTop).toBe(260);
+  });
+
+  it("drops partial wheel input on switch, and skips a request when no history is available", () => {
+    const { viewport, loadPage, rerender } = setup();
+    wheel(viewport, -40);
+    rerender(<Harness thread="other" loadPage={loadPage} />);
+    wheel(viewport, -40);
+    expect(loadPage).not.toHaveBeenCalled();
+    rerender(<Harness thread="other" loadPage={loadPage} available={false} />);
+    wheel(viewport, -40);
     expect(loadPage).not.toHaveBeenCalled();
   });
 
-  it.each([{ available: false }, { busy: true }])("does not load after history becomes unavailable: %j", (state) => {
-    const { viewport, loadPage, intent, rerender } = setup();
-    wheel(viewport, -80, false);
-    rerender(<Harness {...state} loadPage={loadPage} intent={intent} />);
-    end(viewport); quiet();
+  it("ignores zoom, horizontal input and inertia at the top", () => {
+    const { viewport, loadPage } = setup();
+    expect(wheel(viewport, -120, false, { ctrlKey: true }).defaultPrevented).toBe(false);
+    expect(wheel(viewport, -120, false, { deltaX: 200 }).defaultPrevented).toBe(false);
+    expect(wheel(viewport, -120, true).defaultPrevented).toBe(true);
     expect(loadPage).not.toHaveBeenCalled();
   });
 
-  it("drops the reserve and old release state on conversation change", () => {
-    const { viewport, loadPage, intent, rerender, offset, space } = setup();
-    wheel(viewport, -80, false);
-    const nextLoad = vi.fn(() => true);
-    rerender(<Harness thread="second" loadPage={nextLoad} intent={intent} />);
-    expect(offset()).toBe(0);
-    expect(space.style.height).toBe("80px");
-    end(viewport); quiet();
-    expect(loadPage).not.toHaveBeenCalled();
-    expect(nextLoad).not.toHaveBeenCalled();
-    viewport.scrollTop = 80;
-    wheel(viewport, -80, false); end(viewport);
-    expect(nextLoad).toHaveBeenCalledOnce();
-  });
-
-  it("does not replace missing native scrollend with a pause-to-load timer", () => {
-    const { viewport, loadPage, offset } = setup();
-    Reflect.deleteProperty(viewport, "onscrollend");
-    wheel(viewport, -100, false); quiet();
-    expect(offset()).toBe(0);
-    expect(loadPage).not.toHaveBeenCalled();
-  });
-
-  it("cleans a canceled return on unmount without requesting", () => {
-    const { viewport, loadPage, unmount } = setup();
-    wheel(viewport, -40, false); end(viewport);
-    unmount(); quiet();
-    expect(loadPage).not.toHaveBeenCalled();
-  });
-
-  it("holds touch pulls until touchend and does not arm on arrival from within the list", () => {
-    const { viewport, loadPage, offset } = setup();
+  it("holds touch input until release and does not move the list", () => {
+    const { viewport, loadPage } = setup();
     viewport.scrollTop = 120;
     touch(viewport, "touchstart", 100);
-    viewport.scrollTop = 80;
+    viewport.scrollTop = 0;
     touch(viewport, "touchmove", 250);
     touch(viewport, "touchend");
     expect(loadPage).not.toHaveBeenCalled();
     touch(viewport, "touchstart", 100);
     expect(touch(viewport, "touchmove", 140).defaultPrevented).toBe(true);
-    expect(offset()).toBe(40);
     touch(viewport, "touchmove", 180);
-    end(viewport); quiet();
-    expect(offset()).toBe(80);
+    expect(viewport.scrollTop).toBe(0);
     expect(loadPage).not.toHaveBeenCalled();
     touch(viewport, "touchend");
     expect(loadPage).toHaveBeenCalledOnce();
-    expect(offset()).toBe(80);
   });
 
-  it.each(["touchcancel", "multitouch"])("cancels touch intent on %s", (type) => {
+  it.each(["touchcancel", "multitouch", "reversal"])("cancels touch intent on %s", (type) => {
     const { viewport, loadPage } = setup();
     touch(viewport, "touchstart", 100);
     touch(viewport, "touchmove", 220);
     if (type === "multitouch") touch(viewport, "touchmove", 240, 2);
+    else if (type === "reversal") touch(viewport, "touchmove", 90);
     else touch(viewport, type);
-    touch(viewport, "touchend"); quiet();
+    touch(viewport, "touchend");
     expect(loadPage).not.toHaveBeenCalled();
-  });
-
-  it("releases a rejected request without leaving the list displaced", () => {
-    const { viewport, loadPage, space } = setup();
-    loadPage.mockReturnValue(false);
-    wheel(viewport, -80, false); end(viewport); quiet();
-    expect(loadPage).toHaveBeenCalledOnce();
-    expect(space.style.height).toBe("80px");
   });
 });
