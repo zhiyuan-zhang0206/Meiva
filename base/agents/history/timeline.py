@@ -13,6 +13,7 @@ from langchain_core.messages import (
 )
 
 from base.agents.history.timeline_item import TimelineItem as TimelineItem
+from base.agents.messages.envelope import inbound_body
 from base.agents.messages.inbound_images import kwargs_upload_files
 from base.agents.messages.kwargs import (
     MeivaMessageKwargs,
@@ -226,12 +227,35 @@ def _inbound_item(
         # A system source's body sits inside the envelope's note tags; the card shows the
         # text, not the framing (the source metadata classifies it).
         # meiva:link agent/messages/docs/message-format.md
-        payload=_inbound_text(raw_content),
+        payload=_inbound_payload(raw_content, kwargs),
         created_at=kwargs_read_time(kwargs),
         inbound_id=embedded_id,
         images=images if images else None,
         files=kwargs_upload_files(kwargs.get("meiva_upload_files")),
     )
+
+
+# meiva:note
+# The writer's offset refers to its first text block, before any framing is
+# removed. Legacy or malformed offsets preserve text rather than guessing a head.
+def _inbound_payload(content: MessageContent, kwargs: MeivaMessageKwargs) -> str:
+    texts: list[str] = []
+    if isinstance(content, str):
+        texts.append(content)
+    else:
+        for block in content:
+            if isinstance(block, str):
+                texts.append(block)
+            elif block.get("type") == "text":
+                text = block.get("text")
+                if isinstance(text, str):
+                    texts.append(text)
+    if not texts:
+        return ""
+    start = kwargs.get("meiva_inbound_body_start")
+    if type(start) is int and 0 <= start <= len(texts[0]):
+        texts[0] = inbound_body(texts[0], source=kwargs.get("meiva_source") or "", body_start=start)
+    return "\n".join(texts)
 
 
 def _attach_images(content: MessageContent) -> list[str] | None:

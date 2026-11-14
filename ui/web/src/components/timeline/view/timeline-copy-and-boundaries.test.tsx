@@ -33,14 +33,14 @@ describe("CopyButton feedback state machine", () => {
       timeout: 1500,
     });
   });
-  it("copies human inbound_chat raw body stripped of its envelope header", async () => {
+  it("copies the display-ready human inbound body unchanged", async () => {
     const { browser } = render(
       <TimelineView
         items={[
           makeItem({
             kind: "inbound_chat",
             source: "user",
-            payload: "User [2026-05-15]:\n\nhello raw body",
+            payload: "hello raw body",
           }),
         ]}
       />,
@@ -278,36 +278,16 @@ describe("splitEnvelope boundary", () => {
     const bodyEl = screen.getByText(/body-199/);
     expect(bodyEl.textContent).toBe(payload);
   });
-  it("human inbound_chat strips a single-line leading header when \\n\\n is < 200 chars and keeps it at >= 200 chars", () => {
-    const shortHeader = `[${"2026-05-15 ".padEnd(197, "0")}]`;
-    const longHeader = `[${"2026-05-15 ".padEnd(198, "0")}]`;
-    const { rerender } = render(
-      <TimelineView
-        items={[
-          makeItem({
-            kind: "inbound_chat",
-            source: "user",
-            payload: `${shortHeader}\n\nbody-199`,
-          }),
-        ]}
-      />,
-    );
-    expect(screen.getByTestId("user-message-bubble").textContent).toBe("body-199");
-
-    rerender(
-      <TimelineView
-        items={[
-          makeItem({
-            kind: "inbound_chat",
-            source: "user",
-            payload: `${longHeader}\n\nbody-200`,
-          }),
-        ]}
-      />,
-    );
-    expect(screen.getByTestId("user-message-bubble").textContent).toBe(
-      `${longHeader}\n\nbody-200`,
-    );
+  it.each([
+    "First paragraph", "x".repeat(200), "[ordinary bracketed paragraph]",
+    "[2026-11-14 Sat 16:05:51]", "User:", "Agent 7:",
+    "<system_note>\nliteral\n</system_note>",
+  ])("preserves raw first paragraph in DOM and Copy: %s", async (first) => {
+    const payload = `${first}\n\nSecond paragraph`;
+    const { browser } = render(<TimelineView items={[makeItem({ kind: "inbound_chat", source: "user", payload })]} />);
+    expect(screen.getByTestId("user-message-bubble").textContent).toBe(payload);
+    fireEvent.click(screen.getByLabelText("Copy message"));
+    await waitFor(() => expect(browser.actions.copied).toEqual([payload]));
   });
 });
 

@@ -361,14 +361,14 @@ describe("ItemView: Markdown-authored inbound bodies", () => {
     render(
       <TimelineView
         items={[
-          makeItem({ item_id: "1.0", kind: "inbound_chat", source: "agent:7", payload: "Agent 7:\n\nsee **this**" }),
-          makeItem({ item_id: "2.0", kind: "inbound_chat", source: "user", payload: "User:\n\nrender **markdown**" }),
+          makeItem({ item_id: "1.0", kind: "inbound_chat", source: "agent:7", payload: "see **this**" }),
+          makeItem({ item_id: "2.0", kind: "inbound_chat", source: "user", payload: "render **markdown**" }),
         ]}
       />,
     );
     revealCollapsedCards();
     expect(screen.getAllByTestId("chat-markdown").map((n) => n.textContent)).toEqual([
-      "Agent 7:\n\nsee **this**",
+      "see **this**",
       "render **markdown**",
     ]);
   });
@@ -391,20 +391,19 @@ describe("ItemView: Markdown-authored inbound bodies", () => {
   });
 });
 
-describe("ItemView: inbound_chat envelope split", () => {
-  it("source='user' strips '<header>\\n\\n' envelope so only the human body renders", () => {
+describe("ItemView: display-ready inbound_chat", () => {
+  it("source='user' renders its display-ready body", () => {
     render(
       <TimelineView
         items={[
           makeItem({
             kind: "inbound_chat",
             source: "user",
-            payload: "[2026-05-15 12:00:00]\n\nhello world",
+            payload: "hello world",
           }),
         ]}
       />,
     );
-    expect(screen.queryByText(/2026-05-15 12:00:00/)).toBeNull();
     expect(screen.getByText("hello world")).toBeTruthy();
   });
   it("non-user inbound_chat renders full payload without splitting a separate header", () => {
@@ -414,14 +413,14 @@ describe("ItemView: inbound_chat envelope split", () => {
           makeItem({
             kind: "inbound_chat",
             source: "agent:5",
-            payload: "Agent 5 [2026-05-15]:\n\nhello world",
+            payload: "hello world",
           }),
         ]}
       />,
     );
     revealCollapsedCards();
     expect(screen.getByTestId("chat-markdown").textContent).toBe(
-      "Agent 5 [2026-05-15]:\n\nhello world",
+      "hello world",
     );
   });
   it("payload without '\\n\\n' → entire payload is body, no header", () => {

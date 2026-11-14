@@ -2,7 +2,7 @@
 
 // meiva:note
 // Per-item body renderer (ItemView). Human user messages render inside a clean
-// right-aligned bubble (stripping the backend "user [timestamp]:" envelope),
+// right-aligned bubble with its display-ready payload,
 // Meiva's agent_chat replies render as direct unboxed prose on the canvas, and
 // secondary steps (thinking, code, output, inter-agent messages, notes) render
 // inside collapsible TurnBlocks / the Live Activity Window through `./card` and
@@ -34,7 +34,6 @@ import { cn, formatFileSize, isRasterImageType } from "@/lib/format/utils";
 import { EphemeralSystemMarker, MarkerBody } from "./markers";
 import { classifyMarker } from "./model/marker-classify";
 import { isLiveReasoning } from "./model/reasoning-clock";
-import { inboundKind, splitEnvelope } from "./model/runs";
 import { FLEX } from "@/lib/layout/layout";
 
 // Cap how often a streaming item re-parses its content (markdown / Prism).
@@ -65,16 +64,8 @@ export function streamingParseIntervalMs(payloadLength: number): number {
 }
 
 // meiva:note
-// Strip the backend `<header>\n\n` envelope from human user messages so Copy
-// puts only the user's words on the clipboard.
-// meiva:link ui/web/src/docs/frontend-components/timeline-view/card-chrome.md
+// Timeline payloads are display-ready; Copy must preserve literal headers and paragraphs.
 export function copyPayloadFor(item: BackendTimelineItem): string {
-  if (
-    item.kind === "inbound_chat" &&
-    inboundKind(item.source) === "human"
-  ) {
-    return splitEnvelope(item.payload).body;
-  }
   return item.payload;
 }
 
@@ -300,7 +291,6 @@ function EnvelopeContent({
   files,
   source = null,
   attachMode = false,
-  stripHumanHeader = false,
   codeSurface = false,
   markdown = false,
   imageCaptions = null,
@@ -313,7 +303,6 @@ function EnvelopeContent({
   source?: string | null;
   /** Attach items render their caption lines interleaved with thumbnails. */
   attachMode?: boolean;
-  stripHumanHeader?: boolean;
   codeSurface?: boolean;
   /** The body is model-authored Markdown (compact summary, inter-agent message): render it through ChatMarkdown. */
   markdown?: boolean;
@@ -321,7 +310,7 @@ function EnvelopeContent({
   imageCaptions?: string[] | null;
 }) {
   const t = useTranslations("timeline");
-  const body = stripHumanHeader ? splitEnvelope(payload).body : payload;
+  const body = payload;
   const showBody =
     Boolean(body) &&
     !(images?.length && (body === "[image]" || body === "[files]")) &&
@@ -408,14 +397,12 @@ export const ItemView = memo(function ItemView({
 
   switch (item.kind) {
     case "inbound_chat": {
-      const isHumanUser = inboundKind(item.source) === "human";
       return (
         <EnvelopeContent
           payload={item.payload}
           images={item.images}
           files={item.files}
           source={item.source}
-          stripHumanHeader={isHumanUser}
           markdown
         />
       );
