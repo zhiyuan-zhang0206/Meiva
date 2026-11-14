@@ -1,6 +1,6 @@
 // meiva:note
 // What the answer form keeps while the user is elsewhere: per agent, per open question, the choices,
-// text, Note and skip they have entered. Memory only. These are the pure updates the store applies:
+// text and Note they have entered. Memory only. These are the pure updates the store applies:
 // each returns the same object when nothing changes, so a subscriber is not woken for no reason.
 // meiva:link ui/web/src/docs/frontend-state/shared-context/questions.md
 
@@ -8,10 +8,9 @@ export interface QuestionDraft {
   readonly optionIds: readonly string[];
   readonly text: string;
   readonly comment: string;
-  readonly skipped: boolean;
 }
 
-export const EMPTY_DRAFT: QuestionDraft = { optionIds: [], text: "", comment: "", skipped: false };
+export const EMPTY_DRAFT: QuestionDraft = { optionIds: [], text: "", comment: "" };
 
 export type AgentQuestionDrafts = Readonly<Partial<Record<number, QuestionDraft>>>;
 export type QuestionDrafts = Readonly<Partial<Record<number, AgentQuestionDrafts>>>;

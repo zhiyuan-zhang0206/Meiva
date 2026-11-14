@@ -15548,7 +15548,7 @@
           "skip": {
             "type": "boolean",
             "title": "Skip",
-            "default": false
+            "description": "Legacy explicit skip. An ID-only result also skips the question."
           }
         },
         "additionalProperties": false,

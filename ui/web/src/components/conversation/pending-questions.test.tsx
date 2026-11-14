@@ -69,12 +69,11 @@ it("settles every open question in one submission and drops them all from the sh
   fireEvent.change(within(screen.getByRole("article", { name: "Question 1" })).getByRole("textbox"), { target: { value: "First answer" } });
   expect(submit.disabled).toBe(true);
   fireEvent.click(screen.getByRole("button", { name: "Next question" }));
-  fireEvent.click(screen.getByRole("button", { name: "Skip" }));
   expect(submit.disabled).toBe(false);
   fireEvent.click(submit);
   await waitFor(() => expect(transport.answerQuestions).toHaveBeenCalledWith(7, {
     expected_ids: [1, 2],
-    results: [{ id: 1, answer: { text: "First answer" }, skip: false }, { id: 2, skip: true }],
+    results: [{ id: 1, answer: { text: "First answer" } }, { id: 2 }],
   }, expect.any(String)));
   await waitFor(() => expect(queryClient.getQueryData<{ awaiting: QuestionItem[] }>(QUESTIONS_QUERY_KEY)?.awaiting).toEqual([]));
 });

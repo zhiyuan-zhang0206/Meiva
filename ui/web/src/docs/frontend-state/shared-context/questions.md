@@ -3,22 +3,20 @@
 `PendingQuestions` owns the selected agent's entire awaiting-response queue,
 including legacy unstructured questions. When questions are waiting, the queue
 opens expanded by default and shows one question at a time, ordered by question
-id. Previous, next, the page count, Skip, and Submit share one bottom row.
+id. Previous, next, the page count, and Submit share one bottom row.
 The question grows upward to its natural height, capped at 45% of the visible
 viewport. The panel reserves one row above the composer so changes in question
 height leave the controls, timeline viewport, and composer in place. The
 collapsed panel uses a compact Questions label.
 `QuestionsForm` owns the single submission, its operation key and retries.
-Skip marks the current question and advances one page when a next question exists.
-On the last question it stays on that page. Undo skip restores the draft in place.
-Submit is enabled once each question is answered or skipped. The submission names the
-open set it was built from: when the server's set differs, nothing is settled, the latest
-set replaces the agent's rows in the shared cache, drafts and skips of questions still open
-stay, and the form states that the questions changed. Changing the visible question or collapsing the panel preserves every draft. Drafts and skips are kept per agent and question in the UI store
-(`questionDrafts`, memory only, never written to disk or sent to the server), so going to another agent
-and back keeps them; they are cleared when the question is answered and pruned when it is no longer open. A successful submission drops all of the agent's questions from
-the shared question cache and refreshes resolved history. A failed feed preserves stale questions and visibly
-reports the failure.
+Submit is available on the last question. Blank drafts become skipped results
+when the batch is submitted. The submission names the open set it was built
+from. If the set changes, the latest questions replace that agent's cached rows,
+the panel reports the change, and drafts for still-open questions stay intact.
+Drafts live in memory per agent and question and survive navigation, collapse,
+and switching agents. Resolved and closed questions leave no drafts behind.
+Successful submission removes the resolved batch from the shared cache. A
+failed feed visibly reports the failure and preserves stale questions.
 
 Pending forms appear here once. The right panel remains a document/Inspector
 surface, and resolved questions arrive in the message list as ordinary system

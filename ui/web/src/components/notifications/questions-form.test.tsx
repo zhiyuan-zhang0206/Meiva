@@ -55,13 +55,13 @@ describe("QuestionsForm", () => {
     expect(screen.queryByRole("article", { name: "Question 3" })).toBeNull();
     expect(screen.getByRole<HTMLButtonElement>("button", { name: "Next question" }).disabled).toBe(true);
     expect(screen.getByText("2 / 2")).toBeTruthy();
-    fireEvent.click(screen.getByRole("button", { name: "Skip" }));
+    expect(screen.queryByRole("button", { name: /skip/i })).toBeNull();
     expect(submit().disabled).toBe(false);
     previous();
     expect(article(3).getByRole<HTMLTextAreaElement>("textbox").value).toBe("x");
-    next();
-    fireEvent.click(screen.getByRole("button", { name: "Undo skip" }));
     expect(submit().disabled).toBe(true);
+    next();
+    expect(submit().disabled).toBe(false);
     expect(transport.answerQuestions).not.toHaveBeenCalled();
   });
 
@@ -75,7 +75,7 @@ describe("QuestionsForm", () => {
     next();
     fireEvent.change(article(3).getByRole("textbox"), { target: { value: "because" } });
     next();
-    fireEvent.click(screen.getByRole("button", { name: "Skip" }));
+    fireEvent.change(article(4).getByRole("textbox"), { target: { value: " \n " } });
     fireEvent.click(submit());
     await waitFor(() => expect(onSettled).toHaveBeenCalledWith([1, 2, 3, 4]));
     expect(transport.answerQuestions).toHaveBeenCalledTimes(1);
@@ -83,10 +83,10 @@ describe("QuestionsForm", () => {
     expect(transport.answerQuestions.mock.calls[0][1]).toEqual({
       expected_ids: [1, 2, 3, 4],
       results: [
-        { id: 1, answer: { option_ids: ["web"] }, skip: false },
-        { id: 2, answer: { option_ids: [], comment: "none of these" }, skip: false },
-        { id: 3, answer: { text: "because" }, skip: false },
-        { id: 4, skip: true },
+        { id: 1, answer: { option_ids: ["web"] } },
+        { id: 2, answer: { option_ids: [], comment: "none of these" } },
+        { id: 3, answer: { text: "because" } },
+        { id: 4 },
       ],
     });
   });
@@ -104,25 +104,16 @@ describe("QuestionsForm", () => {
     expect(submit().disabled).toBe(false);
   });
 
-  it("skips and advances, then restores the draft in place when the skip is undone", () => {
-    renderForm([q(1), q(2)]);
-    fireEvent.change(article(1).getByRole("textbox"), { target: { value: "draft" } });
-    const skip = screen.getByRole("button", { name: "Skip" });
-    fireEvent.click(skip);
-    expect(screen.getByText("2 / 2")).toBeTruthy();
-    expect(screen.getByRole("button", { name: "Skip" })).toBe(skip);
-    expect(submit().disabled).toBe(true);
-    previous();
-    expect(screen.getByText("Skipped")).toBeTruthy();
-    expect(article(1).queryByRole("textbox")).toBeNull();
-    fireEvent.click(screen.getByRole("button", { name: "Undo skip" }));
-    expect(screen.getByText("1 / 2")).toBeTruthy();
-    expect(article(1).getByRole<HTMLTextAreaElement>("textbox").value).toBe("draft");
-    next();
-    fireEvent.click(screen.getByRole("button", { name: "Skip" }));
-    expect(screen.getByText("2 / 2")).toBeTruthy();
-    expect(submit().disabled).toBe(false);
+  it("submits an all-blank batch only from the last question", async () => {
+    transport.answerQuestions.mockResolvedValue({ kind: "settled" });
+    renderForm([q(1, { question: choice("single_select") }), q(2)]);
+    fireEvent.click(submit());
     expect(transport.answerQuestions).not.toHaveBeenCalled();
+    next();
+    fireEvent.click(submit());
+    await waitFor(() => expect(transport.answerQuestions).toHaveBeenCalledWith(7, {
+      expected_ids: [1, 2], results: [{ id: 1 }, { id: 2 }],
+    }, expect.any(String)));
   });
 
   it("keeps Enter in a completed answer as a line break and submits explicitly", async () => {
@@ -169,7 +160,6 @@ describe("QuestionsForm", () => {
     const { rerender } = renderForm([q(1), q(2)], { onChanged });
     fireEvent.change(article(1).getByRole("textbox"), { target: { value: "kept" } });
     next();
-    fireEvent.click(screen.getByRole("button", { name: "Skip" }));
     fireEvent.click(submit());
     await waitFor(() => expect(onChanged).toHaveBeenCalledWith(latest));
     expect(screen.getByRole("status").textContent).toBe("The questions changed. Review them and submit again.");
@@ -177,20 +167,19 @@ describe("QuestionsForm", () => {
     expect(article(1).getByRole<HTMLTextAreaElement>("textbox").value).toBe("kept");
     expect(submit().disabled).toBe(true);
     next();
-    fireEvent.change(article(3).getByRole("textbox"), { target: { value: "new" } });
+    expect(article(3).getByRole<HTMLTextAreaElement>("textbox").value).toBe("");
     expect(submit().disabled).toBe(false);
   });
 
-  it("keeps drafts and skips when the user goes to another agent and comes back", () => {
+  it("keeps drafts when the user goes to another agent and comes back", () => {
     const first = renderForm([q(1), q(2)]);
     fireEvent.change(article(1).getByRole("textbox"), { target: { value: "kept" } });
     next();
-    fireEvent.click(screen.getByRole("button", { name: "Skip" }));
     first.unmount();
     renderForm([q(1), q(2)]);
     expect(article(1).getByRole<HTMLTextAreaElement>("textbox").value).toBe("kept");
     next();
-    expect(screen.getByRole("button", { name: "Undo skip" })).toBeTruthy();
+    expect(article(2).getByRole<HTMLTextAreaElement>("textbox").value).toBe("");
     expect(submit().disabled).toBe(false);
   });
 

@@ -20,14 +20,10 @@ import { useStore } from "@/lib/state/store";
 import { QuestionForm, answerFromDraft } from "./question-form";
 
 // meiva:note
-// One reply for every open question of one agent, in question id order: each question is answered
-// or skipped, and nothing is sent until all of them are. The submission names the open set the
-// form was built from; when the server's set differs (a question was asked or closed meanwhile)
-// nothing is settled, the caller takes the latest set, and every draft and skip of a question that
-// is still open stays. Drafts and skips live in the UI store (memory only), so they also stay when the
-// user goes to another agent and comes back; they leave it when the question is answered or is no
-// longer open. Controls are only disabled while a submission is in flight, never after a failure, so a
-// retry reuses the same operation key for the same content.
+// Submit on the last page resolves the whole open set in question ID order.
+// Empty drafts are sent as ID-only results. If the set changes, the server
+// returns the latest questions and the caller keeps drafts that are still open.
+// A retry of the same batch reuses its operation key.
 // meiva:link meiva_builtins/plugins/meiva_fleet/docs/questions.md
 export function QuestionsForm({
   agentId,
@@ -64,24 +60,21 @@ export function QuestionsForm({
     pruneQuestionDrafts(agentId, openIds);
   }, [agentId, openIds, pruneQuestionDrafts]);
 
-  const bodyFor = (): AnswerQuestions | null => {
-    const results: AnswerQuestions["results"] = [];
-    for (const q of ordered) {
-      const draft = draftOf(q.id);
-      if (draft.skipped) {
-        results.push({ id: q.id, skip: true });
-        continue;
-      }
-      const answer = answerFromDraft(q.question, draft);
-      if (!answer) return null;
-      results.push({ id: q.id, answer, skip: false });
-    }
-    return { expected_ids: ordered.map((q) => q.id), results };
-  };
+  const index = Math.max(0, ordered.findIndex((q) => q.id === selectedId));
+  const question = ordered.at(index);
+  if (!question) return null;
+  const nextQuestion = ordered.at(index + 1);
+  const draft = draftOf(question.id);
 
   const submit = async () => {
-    const body = bodyFor();
-    if (!body || pending || inFlight.current) return;
+    if (nextQuestion || inFlight.current) return;
+    const body: AnswerQuestions = {
+      expected_ids: openIds,
+      results: ordered.map((q) => {
+        const answer = answerFromDraft(q.question, draftOf(q.id));
+        return answer ? { id: q.id, answer } : { id: q.id };
+      }),
+    };
     inFlight.current = true;
     setPending(true);
     setError(null);
@@ -106,13 +99,6 @@ export function QuestionsForm({
       inFlight.current = false;
     }
   };
-
-  const index = Math.max(0, ordered.findIndex((q) => q.id === selectedId));
-  const question = ordered.at(index);
-  if (!question) return null;
-  const nextQuestion = ordered.at(index + 1);
-  const draft = draftOf(question.id);
-  const ready = bodyFor() !== null;
 
   return (
     <div className={cn("text-[13px]", className)}>
@@ -161,30 +147,9 @@ export function QuestionsForm({
             </nav>
           )}
           <Button
-            variant="ghost"
-            size="sm"
-            aria-pressed={draft.skipped}
-            onClick={() => {
-              setQuestionDraft(agentId, question.id, { ...draft, skipped: !draft.skipped });
-              if (!draft.skipped && nextQuestion) setSelectedId(nextQuestion.id);
-            }}
-            disabled={pending}
-            className="px-1.5 text-muted-foreground"
-          >
-            <span className="grid place-items-center">
-              <span
-                aria-hidden="true"
-                className="invisible col-start-1 row-start-1 before:content-[attr(data-width-label)]"
-                data-width-label={t("undoSkip")}
-              />
-              <span className="col-start-1 row-start-1">{draft.skipped ? t("undoSkip") : t("skip")}</span>
-            </span>
-          </Button>
-          <Button
             size="sm"
             className="relative px-1.5 disabled:bg-muted disabled:text-muted-foreground disabled:opacity-100"
-            disabled={pending || !ready}
-            title={ready ? undefined : t("answerAllHint")}
+            disabled={pending || Boolean(nextQuestion)}
             aria-busy={pending}
             aria-label={t("submit")}
             onClick={() => void submit()}
@@ -209,8 +174,6 @@ function QuestionRow({
   pending: boolean;
   onDraftChange: (draft: QuestionDraft) => void;
 }) {
-  const t = useTranslations("questionDetail");
-  const skipped = draft.skipped;
   return (
     <article aria-label={question.title} className="space-y-3 px-4 pb-3 pt-3.5">
       <div className="space-y-1.5">
@@ -221,16 +184,12 @@ function QuestionRow({
           </div>
         )}
       </div>
-      {skipped ? (
-        <p className="text-xs text-muted-foreground">{t("skipped")}</p>
-      ) : (
-        <QuestionForm
-          question={question.question}
-          pending={pending}
-          draft={draft}
-          onDraftChange={onDraftChange}
-        />
-      )}
+      <QuestionForm
+        question={question.question}
+        pending={pending}
+        draft={draft}
+        onDraftChange={onDraftChange}
+      />
     </article>
   );
 }
