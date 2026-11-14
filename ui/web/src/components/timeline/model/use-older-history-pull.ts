@@ -7,6 +7,7 @@ import { useBrowser } from "@/lib/browser/browser-provider";
 const PULL_SPACE_PX = 80;
 const PULL_THRESHOLD_PX = 64;
 const AT_TOP_PX = 1;
+const WHEEL_BURST_GAP_MS = 120;
 
 type Phase = "idle" | "scrolling" | "pulling" | "loading" | "returning";
 interface PullGesture {
@@ -14,12 +15,14 @@ interface PullGesture {
   viewport: HTMLElement | null;
   momentum: boolean;
   blockMomentum: boolean;
+  lastArrivalWheelAt: number | null;
   touchY: number | null;
   minHeight: string;
   offset: number;
 }
 const freshGesture = (): PullGesture => ({
-  phase: "idle", viewport: null, momentum: false, blockMomentum: false, touchY: null, minHeight: "", offset: 0,
+  phase: "idle", viewport: null, momentum: false, blockMomentum: false,
+  lastArrivalWheelAt: null, touchY: null, minHeight: "", offset: 0,
 });
 
 /** Native scroll space keeps finger pauses distinct from the end of a wheel gesture. */
@@ -139,8 +142,13 @@ export function useOlderHistoryPull(
   const onScrollEnd = useCallback(() => {
     const current = gesture.current;
     if (current.touchY !== null) return;
-    if (current.phase === "pulling") release(true);
-    else if (current.phase === "scrolling" || current.phase === "returning") {
+    if (current.phase === "pulling") {
+      // meiva:note
+      // A boundary correction can emit scrollend after a fresh wheel has armed a pull,
+      // before that wheel's native movement. Only end a pull that entered the reserve.
+      // meiva:link ui/web/src/docs/frontend-components/timeline-view/history-paging.md
+      if (current.viewport && current.viewport.scrollTop < PULL_SPACE_PX) release(true);
+    } else if (current.phase === "scrolling" || current.phase === "returning") {
       current.phase = "idle";
       show(0);
     }
@@ -157,19 +165,33 @@ export function useOlderHistoryPull(
     if (!current.viewport) return;
     const momentum = (event as WheelEvent & { readonly momentum?: boolean }).momentum;
     const atTop = viewport.scrollTop <= PULL_SPACE_PX + AT_TOP_PX;
-    if (momentum === true) {
-      release(true);
-      current.momentum = true;
-      if (current.blockMomentum || (atTop && event.deltaY < 0)) event.preventDefault();
-      return;
-    }
-    if (current.phase === "loading" || current.phase === "returning") {
+    // meiva:note
+    // Chromium can emit a scrollend for each wheel step in a burst. Keep upward
+    // steps that follow an arrival out of the reserve until a fresh pull starts.
+    // meiva:link ui/web/src/docs/frontend-components/timeline-view/history-paging.md
+    const previousArrival = current.lastArrivalWheelAt;
+    current.lastArrivalWheelAt = null;
+    if (atTop && event.deltaY < 0 && previousArrival !== null &&
+        event.timeStamp - previousArrival < WHEEL_BURST_GAP_MS) {
+      current.lastArrivalWheelAt = event.timeStamp;
       event.preventDefault();
       return;
     }
-    if (momentum === false && current.momentum && current.phase !== "pulling") current.phase = "idle";
-    current.momentum = false;
-    if (current.phase === "idle") {
+    if (momentum === true) {
+      release(true);
+      current.momentum = true;
+      if (current.blockMomentum) {
+        event.preventDefault();
+        return;
+      }
+    } else if (current.phase === "loading" || current.phase === "returning") {
+      event.preventDefault();
+      return;
+    } else {
+      if (momentum === false && current.momentum && current.phase !== "pulling") current.phase = "idle";
+      current.momentum = false;
+    }
+    if (!current.momentum && current.phase === "idle") {
       current.blockMomentum = false;
       // Allow default scrolling in the prepared reserve so Chrome retains
       // the native gesture phase through stationary fingers and a slow lift.
@@ -179,7 +201,17 @@ export function useOlderHistoryPull(
       }
       else if (!atTop) current.phase = "scrolling";
     }
-    if (current.phase !== "pulling" && atTop && event.deltaY < 0) event.preventDefault();
+    if (current.phase === "pulling" || event.deltaY >= 0) return;
+    if (atTop) {
+      event.preventDefault();
+    } else if (event.deltaMode === WheelEvent.DOM_DELTA_PIXEL &&
+        viewport.scrollTop + event.deltaY <= PULL_SPACE_PX) {
+      current.lastArrivalWheelAt = event.timeStamp;
+      if (event.cancelable) {
+        event.preventDefault();
+        viewport.scrollTop = PULL_SPACE_PX;
+      }
+    }
   }, [release]);
 
   const onTouchStart = useCallback((event: TouchEvent, viewport: HTMLElement) => {

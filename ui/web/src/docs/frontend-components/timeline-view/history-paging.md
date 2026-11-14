@@ -19,6 +19,11 @@ that event pending while fingers remain down, including a slow lift without a
 fling. `WheelEvent.momentum` can commit sooner at the first inertial event; the
 consumed momentum tail stays blocked through and after landing. The gesture
 that merely arrived from inside the list must end before a new pull can arm.
+Pixel wheel events that cross the idle boundary stop there before native scroll
+can expose the reserve. Consecutive upward wheel steps at the boundary count
+as part of the arrival until there has been a short gap in input. A boundary
+correction's `scrollend` leaves a newly
+armed pull active until its own movement has entered the reserve.
 Wheel gesture loading requires native `scrollend`; keyboard loading remains
 available when it is absent. Touch uses `touchend` and cancels on multitouch or
 `touchcancel`. Reversal below the boundary, zoom and horizontal intent cancel.

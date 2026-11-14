@@ -68,6 +68,7 @@ describe("native release-to-load older history", () => {
 
   function wheel(viewport: HTMLElement, deltaY: number, momentum?: boolean, extra: WheelEventInit = {}) {
     const event = new WheelEvent("wheel", { deltaY, bubbles: true, cancelable: true, ...extra });
+    Object.defineProperty(event, "timeStamp", { value: performance.now() });
     if (extra.ctrlKey !== undefined) Object.defineProperty(event, "ctrlKey", { value: extra.ctrlKey });
     if (momentum !== undefined) Object.defineProperty(event, "momentum", { value: momentum });
     act(() => {
@@ -123,14 +124,53 @@ describe("native release-to-load older history", () => {
   it("stops an arriving gesture and its momentum at the top until a new gesture starts", () => {
     const { viewport, loadPage, offset } = setup();
     viewport.scrollTop = 120;
-    wheel(viewport, -120, false);
+    expect(wheel(viewport, -120, false).defaultPrevented).toBe(true);
+    expect(viewport.scrollTop).toBe(80);
     expect(wheel(viewport, -100, false).defaultPrevented).toBe(true);
     expect(wheel(viewport, -200, true).defaultPrevented).toBe(true);
     end(viewport);
     expect(offset()).toBe(0);
     expect(loadPage).not.toHaveBeenCalled();
+    expect(wheel(viewport, -100, false).defaultPrevented).toBe(true);
+    expect(viewport.scrollTop).toBe(80);
+    quiet();
     wheel(viewport, -40, false);
     expect(offset()).toBe(40);
+  });
+
+  it("keeps a new pull armed when the previous boundary correction finishes", () => {
+    const { viewport, loadPage, offset } = setup();
+    viewport.scrollTop = 120;
+    wheel(viewport, -120, false);
+    end(viewport);
+    quiet();
+
+    const nextWheel = new WheelEvent("wheel", { deltaY: -80, bubbles: true, cancelable: true });
+    Object.defineProperty(nextWheel, "timeStamp", { value: performance.now() });
+    act(() => { viewport.dispatchEvent(nextWheel); });
+    expect(nextWheel.defaultPrevented).toBe(false);
+    end(viewport);
+    act(() => {
+      viewport.scrollTop = 0;
+      viewport.dispatchEvent(new Event("scroll"));
+    });
+    expect(viewport.scrollTop).toBe(0);
+    expect(offset()).toBe(80);
+    expect(loadPage).not.toHaveBeenCalled();
+    end(viewport);
+    expect(loadPage).toHaveBeenCalledOnce();
+  });
+
+  it("stops inertial scrolling at the boundary without exposing the reserve", () => {
+    const { viewport, loadPage, offset } = setup();
+    viewport.scrollTop = 400;
+    wheel(viewport, -200, false);
+    expect(viewport.scrollTop).toBe(200);
+    expect(wheel(viewport, -200, true).defaultPrevented).toBe(true);
+    expect(viewport.scrollTop).toBe(80);
+    end(viewport);
+    expect(offset()).toBe(0);
+    expect(loadPage).not.toHaveBeenCalled();
   });
 
   it("moves the list in a real scroll range and holds indefinitely while fingers are stationary", () => {
