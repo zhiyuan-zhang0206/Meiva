@@ -101,7 +101,7 @@ describe("end-to-end timeline scenarios", () => {
       snapshotItem({
         item_id: "2.0",
         kind: "inbound_chat",
-        payload: "User:\nhello idle agent",
+        payload: "hello idle agent",
         inbound_id: 100,
       }),
     ]);

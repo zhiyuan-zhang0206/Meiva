@@ -3,6 +3,7 @@ from __future__ import annotations
 from typing import Any
 
 import pytest
+from playwright.sync_api import expect
 
 from base.agents.messages.reply_intent import REPLY_VISIBILITY_CORRECTION
 from base.sessions.tests.poll_until import poll_until
@@ -72,3 +73,28 @@ def test_unmarked_text_folds_into_details_and_the_correction_asks_once(
         str(it["payload"]): it for it in _chat_items(e2e_env.gateway_url, agent_id, (HIDDEN_REPLY,))
     }
     assert hidden[HIDDEN_REPLY]["user_facing"] is False, hidden[HIDDEN_REPLY]
+
+
+@pytest.mark.scenario("tests.e2e.fakes.scenarios.message_flow:build_visibility_correction")
+def test_native_inbound_body_survives_live_view_and_cold_reload(e2e_env: E2EEnv) -> None:
+    body = "First paragraph preserves a literal [2026-11-14 Sat 16:05:51].\n\nSecond paragraph remains here."
+    page = e2e_env.page
+    page.context.grant_permissions(["clipboard-read", "clipboard-write"])
+    chat_and_wait(e2e_env.agent_id, body)
+    items = gateway_get(
+        f"{e2e_env.gateway_url}/api/agents/{e2e_env.agent_id}/timeline?limit=100"
+    ).json()["items"]
+    assert any(item["kind"] == "inbound_chat" and item["payload"] == body for item in items)
+    for reload in (False, True):
+        if reload:
+            page.reload()
+        row = page.locator('[data-message-role="user"]').filter(
+            has_text="First paragraph preserves"
+        )
+        expect(row.get_by_test_id("user-message-bubble")).to_contain_text(
+            "Second paragraph remains here."
+        )
+        row.hover()
+        row.get_by_role("button", name="Copy message").click()
+        expect(row.get_by_role("button", name="Copied", exact=True)).to_be_visible()
+        assert page.evaluate("navigator.clipboard.readText()") == body

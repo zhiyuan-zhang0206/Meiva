@@ -173,8 +173,7 @@ def _fit_body(
 # parent does not install that state into the child SDK's slot. Soft-crop archives mentioned
 # there cannot be evicted to make space.
 #
-# Format (double \n after header, same contract as wrap_inbound; the frontend splitEnvelope
-# uses this to split header / body):
+# Format (double \n after the model-facing header; display readers use recorded offsets):
 #
 #     Code execution output after running for 1min 53s [timestamp]:
 #

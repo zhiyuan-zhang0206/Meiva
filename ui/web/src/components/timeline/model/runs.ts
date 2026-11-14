@@ -47,19 +47,6 @@ export function inboundKind(source: string | null): "human" | "agent" | "externa
 export type ItemClass = "primary" | "secondary" | "bare";
 
 // meiva:note
-// Human inbound messages wrap as "<header>\n\n<body>" on a single leading line
-// (bounded below 200 chars) so the frontend can hide the leading timestamp line
-// on human messages while still sending it to the agent.
-// meiva:link agent/messages/docs/message-format.md
-export function splitEnvelope(payload: string): { header: string; body: string } {
-  const idx = payload.indexOf("\n\n");
-  if (idx > 0 && idx < 200 && !payload.slice(0, idx).includes("\n")) {
-    return { header: payload.slice(0, idx), body: payload.slice(idx + 2) };
-  }
-  return { header: "", body: payload };
-}
-
-// meiva:note
 // The item kinds this build renders. A kind outside it comes from a backend newer than the loaded
 // page; such an item renders nothing and takes no place in a turn, so a stale page shows no empty
 // row where the new kind sits.
@@ -101,7 +88,7 @@ export function isSilentTimelineItem(item: BackendTimelineItem): boolean {
     item.source === "user" &&
     !item.files?.length &&
     !item.images?.length &&
-    splitEnvelope(item.payload).body === "[files]"
+    item.payload === "[files]"
   ) {
     return true;
   }

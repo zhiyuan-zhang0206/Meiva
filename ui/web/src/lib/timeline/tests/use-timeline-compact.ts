@@ -329,7 +329,7 @@ describe("useTimeline SSE inbound flow", () => {
         snapshotItem({
           item_id: "2.0",
           kind: "inbound_chat",
-          payload: "User:\nmsg",
+          payload: "msg",
           inbound_id: 100,
         }),
       ],

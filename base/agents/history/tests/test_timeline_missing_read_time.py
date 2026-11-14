@@ -1,6 +1,10 @@
+from datetime import UTC, datetime
+
+import pytest
 from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, ToolMessage
 
 from base.agents.history.timeline import TimelineItem, build_timeline_items
+from base.agents.messages.envelope import inbound_head, wrap_inbound
 from base.agents.messages.kwargs import MeivaMsgType, NoteTag
 from base.agents.messages.timestamp_policy import TimestampPolicy
 from base.clock import Clock
@@ -102,3 +106,85 @@ def test_a_mixed_window_keeps_each_message_its_own_time() -> None:
     )
     assert stamped.created_at == "2026-10-13T08:00:00+00:00"
     assert missing.created_at is None
+
+
+@pytest.mark.parametrize(
+    "source", ["user", "agent:7", "schedule:1", "watcher:1", "system", "system:upload"]
+)
+@pytest.mark.parametrize("timestamps", [False, True])
+@pytest.mark.parametrize("multimodal", [False, True])
+def test_inbound_payload_is_writer_body_in_every_projection(
+    source: str, timestamps: bool, multimodal: bool
+) -> None:
+    policy = TimestampPolicy(
+        timestamps_enabled=timestamps,
+        timezone="UTC",
+        weekday=True,
+        now=datetime(2026, 11, 14, tzinfo=UTC),
+    )
+    body = (
+        "[2026-11-14 Sat 16:05:51]\n\nUser:\n\nAgent 7:\n\n<system_note>\nliteral\n</system_note>"
+    )
+    head = inbound_head(source, inputs=policy)
+    wrapped = wrap_inbound(body, source, inputs=policy)
+    content: str | list[str | dict[str, object]] = (
+        [
+            {"type": "text", "text": wrapped},
+            {"type": "image_url", "image_url": {"url": "data:image/png;base64,eA=="}},
+            {"type": "text", "text": "[image unavailable]"},
+        ]
+        if multimodal
+        else wrapped
+    )
+    message = HumanMessage(
+        content=content,
+        additional_kwargs={
+            "meiva_msg_type": "inbound",
+            "meiva_source": source,
+            "meiva_inbound_body_start": len(head),
+            "meiva_inbound_id": 1,
+        },
+    )
+    expected = body + ("\n[image unavailable]" if multimodal else "")
+    for prefix in ("", "s1"):
+        items, _ = build_timeline_items([message], inputs=policy, segment_prefix=prefix)
+        assert items[0].payload == expected
+        assert items[0].source == source
+        assert items[0].inbound_id == 1
+
+
+@pytest.mark.parametrize("start", [None, -1, 10000, True, "5"])
+@pytest.mark.parametrize("source", ["user", "system"])
+def test_legacy_or_invalid_inbound_offset_preserves_all_text(start: object, source: str) -> None:
+    content = "<system_note>\nFirst paragraph\n\nSecond paragraph\n</system_note>"
+    kwargs: dict[str, object] = {"meiva_msg_type": "inbound", "meiva_source": source}
+    if start is not None:
+        kwargs["meiva_inbound_body_start"] = start
+    message = HumanMessage(content=content, additional_kwargs=kwargs)
+    assert build_timeline_items([message], inputs=TimestampPolicy.off())[0][0].payload == content
+
+
+@pytest.mark.parametrize("header", ["User:\n\n", "[2026-11-14 Sat 16:05:51]\n\n"])
+def test_attachment_sentinel_is_normalized_by_recorded_offset(header: str) -> None:
+    message = HumanMessage(
+        content=header + "[files]",
+        additional_kwargs={
+            "meiva_msg_type": "inbound",
+            "meiva_source": "user",
+            "meiva_inbound_body_start": len(header),
+        },
+    )
+    assert build_timeline_items([message], inputs=TimestampPolicy.off())[0][0].payload == "[files]"
+
+
+def test_literal_system_note_in_human_body_is_not_a_model_envelope() -> None:
+    body = "<system_note>\nliteral\n</system_note>"
+    message = HumanMessage(
+        content=body,
+        additional_kwargs={
+            "meiva_msg_type": "inbound",
+            "meiva_source": "user",
+            "meiva_inbound_body_start": 0,
+        },
+    )
+    assert build_timeline_items([message], inputs=TimestampPolicy.off())[0][0].payload == body

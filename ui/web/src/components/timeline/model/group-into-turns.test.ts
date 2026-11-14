@@ -243,7 +243,7 @@ describe("groupIntoTurns", () => {
       item("system_marker", null, undefined, { payload: "compact_done" }),
       item("system_marker", null, undefined, { payload: "cancelled" }),
       item("system_marker", null, undefined, { payload: "compact_request:now" }),
-      item("inbound_chat", "user", undefined, { payload: "user [2026-11-01]:\n\n[files]" }),
+      item("inbound_chat", "user", undefined, { payload: "[files]" }),
       item("agent_code"),
     ];
     const groups = groupIntoTurns(items, { collapseTurns: true, liveIndex: null });

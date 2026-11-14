@@ -342,7 +342,7 @@ describe("ItemView: inbound_chat images", () => {
           makeItem({
             kind: "inbound_chat",
             source: "user",
-            payload: "User:\n\nwhat is this",
+            payload: "what is this",
             images: ["/api/agents/7/uploads/shot.png"],
           }),
         ]}
@@ -375,7 +375,7 @@ describe("ItemView: inbound_chat images", () => {
           makeItem({
             kind: "inbound_chat",
             source: "user",
-            payload: "User:\n\n[image]",
+            payload: "[image]",
             images: ["/api/agents/7/uploads/a.png"],
           }),
         ]}
@@ -413,7 +413,7 @@ describe("ItemView: inbound_chat images", () => {
             item_id: "11.0",
             kind: "inbound_chat",
             source: "user",
-            payload: "user [2026-11-01]:\n\n[files]",
+            payload: "[files]",
           }),
         ]}
       />,
