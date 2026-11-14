@@ -2,7 +2,7 @@
 
 import { useQueryClient } from "@tanstack/react-query";
 import { ChevronUp } from "lucide-react";
-import { useId, useState } from "react";
+import { useId } from "react";
 import { useTranslations } from "next-intl";
 
 import { QuestionsForm } from "@/components/notifications/questions-form";
@@ -10,19 +10,22 @@ import type { QuestionItem } from "@/lib/contracts/types";
 import { cn } from "@/lib/format/utils";
 import { FLEX } from "@/lib/layout/layout";
 import { dropOpenQuestions, replaceAgentQuestions } from "@/lib/notifications/use-questions";
+import { useStore } from "@/lib/state/store";
 
 // meiva:note
 // The panel reserves a single row above the composer so opening it can
 // reveal the current question without resizing the timeline.
 // meiva:link ui/web/src/docs/frontend-state/shared-context/questions.md
-export function PendingQuestions({ questions, failed, maxWidthCss }: {
+export function PendingQuestions({ agentId, questions, failed, maxWidthCss }: {
+  agentId: number;
   questions: readonly QuestionItem[];
   failed: boolean;
   maxWidthCss?: string;
 }) {
   const t = useTranslations("questionDetail");
   const cache = useQueryClient();
-  const [expanded, setExpanded] = useState(true);
+  const expanded = useStore((s) => !s.questionPanelCollapsed[agentId]);
+  const toggleQuestionPanel = useStore((s) => s.toggleQuestionPanel);
   const contentId = useId();
   if (!questions.length && !failed) return null;
   const label = t("pendingQuestions", { count: questions.length });
@@ -39,11 +42,11 @@ export function PendingQuestions({ questions, failed, maxWidthCss }: {
           <>
             <div id={contentId}>
               <QuestionsForm
-                agentId={questions[0].agent_id}
+                agentId={agentId}
                 questions={questions}
                 expanded={expanded}
                 onSettled={(ids) => dropOpenQuestions(cache, ids)}
-                onChanged={(open) => replaceAgentQuestions(cache, questions[0].agent_id, open)}
+                onChanged={(open) => replaceAgentQuestions(cache, agentId, open)}
               />
             </div>
             <button
@@ -51,7 +54,7 @@ export function PendingQuestions({ questions, failed, maxWidthCss }: {
               aria-label={label}
               aria-expanded={expanded}
               aria-controls={contentId}
-              onClick={() => setExpanded(!expanded)}
+              onClick={() => toggleQuestionPanel(agentId)}
               className={cn(
                 "absolute bottom-1 left-4 h-8 items-center gap-2 rounded-lg px-2 text-xs font-medium text-muted-foreground hover:bg-muted hover:text-foreground focus-visible:outline-2 focus-visible:-outline-offset-2",
                 FLEX,
