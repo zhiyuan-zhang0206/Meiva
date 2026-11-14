@@ -127,7 +127,7 @@ export function QuestionsForm({
       <div className="px-4 pb-3 pt-1">
         {changed && <p role="status" className="mb-2 text-xs text-muted-foreground">{t("questionsChanged")}</p>}
         {error && <p role="alert" className="mb-2 text-xs text-destructive">{error}</p>}
-        <div className={cn("min-h-8 items-center justify-end gap-1 pl-8", FLEX)}>
+        <div className={cn("min-h-8 items-center justify-end gap-0.5 pl-8", FLEX)}>
           {ordered.length > 1 && (
             <nav aria-label={t("questionNavigation")} className={cn("items-center", FLEX)}>
               <Button
@@ -139,7 +139,7 @@ export function QuestionsForm({
               >
                 <ChevronLeft aria-hidden="true" />
               </Button>
-              <span className="grid min-w-9 text-center text-xs tabular-nums text-muted-foreground">
+              <span className="grid min-w-8 text-center text-xs tabular-nums text-muted-foreground">
                 <span
                   aria-hidden="true"
                   className="invisible col-start-1 row-start-1 before:content-[attr(data-width-label)]"
@@ -169,7 +169,7 @@ export function QuestionsForm({
               if (!draft.skipped && nextQuestion) setSelectedId(nextQuestion.id);
             }}
             disabled={pending}
-            className="text-muted-foreground"
+            className="px-1.5 text-muted-foreground"
           >
             <span className="grid place-items-center">
               <span
@@ -182,7 +182,7 @@ export function QuestionsForm({
           </Button>
           <Button
             size="sm"
-            className="relative disabled:bg-muted disabled:text-muted-foreground disabled:opacity-100"
+            className="relative px-1.5 disabled:bg-muted disabled:text-muted-foreground disabled:opacity-100"
             disabled={pending || !ready}
             title={ready ? undefined : t("answerAllHint")}
             aria-busy={pending}
