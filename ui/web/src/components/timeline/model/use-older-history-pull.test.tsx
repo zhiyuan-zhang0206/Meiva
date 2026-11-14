@@ -68,6 +68,7 @@ describe("native release-to-load older history", () => {
 
   function wheel(viewport: HTMLElement, deltaY: number, momentum?: boolean, extra: WheelEventInit = {}) {
     const event = new WheelEvent("wheel", { deltaY, bubbles: true, cancelable: true, ...extra });
+    Object.defineProperty(event, "timeStamp", { value: performance.now() });
     if (extra.ctrlKey !== undefined) Object.defineProperty(event, "ctrlKey", { value: extra.ctrlKey });
     if (momentum !== undefined) Object.defineProperty(event, "momentum", { value: momentum });
     act(() => {
@@ -130,6 +131,9 @@ describe("native release-to-load older history", () => {
     end(viewport);
     expect(offset()).toBe(0);
     expect(loadPage).not.toHaveBeenCalled();
+    expect(wheel(viewport, -100, false).defaultPrevented).toBe(true);
+    expect(viewport.scrollTop).toBe(80);
+    quiet();
     wheel(viewport, -40, false);
     expect(offset()).toBe(40);
   });
@@ -139,8 +143,10 @@ describe("native release-to-load older history", () => {
     viewport.scrollTop = 120;
     wheel(viewport, -120, false);
     end(viewport);
+    quiet();
 
     const nextWheel = new WheelEvent("wheel", { deltaY: -80, bubbles: true, cancelable: true });
+    Object.defineProperty(nextWheel, "timeStamp", { value: performance.now() });
     act(() => { viewport.dispatchEvent(nextWheel); });
     expect(nextWheel.defaultPrevented).toBe(false);
     end(viewport);

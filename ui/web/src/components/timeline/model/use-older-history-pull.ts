@@ -7,6 +7,7 @@ import { useBrowser } from "@/lib/browser/browser-provider";
 const PULL_SPACE_PX = 80;
 const PULL_THRESHOLD_PX = 64;
 const AT_TOP_PX = 1;
+const WHEEL_BURST_GAP_MS = 120;
 
 type Phase = "idle" | "scrolling" | "pulling" | "loading" | "returning";
 interface PullGesture {
@@ -14,12 +15,14 @@ interface PullGesture {
   viewport: HTMLElement | null;
   momentum: boolean;
   blockMomentum: boolean;
+  lastArrivalWheelAt: number | null;
   touchY: number | null;
   minHeight: string;
   offset: number;
 }
 const freshGesture = (): PullGesture => ({
-  phase: "idle", viewport: null, momentum: false, blockMomentum: false, touchY: null, minHeight: "", offset: 0,
+  phase: "idle", viewport: null, momentum: false, blockMomentum: false,
+  lastArrivalWheelAt: null, touchY: null, minHeight: "", offset: 0,
 });
 
 /** Native scroll space keeps finger pauses distinct from the end of a wheel gesture. */
@@ -145,8 +148,7 @@ export function useOlderHistoryPull(
       // before that wheel's native movement. Only end a pull that entered the reserve.
       // meiva:link ui/web/src/docs/frontend-components/timeline-view/history-paging.md
       if (current.viewport && current.viewport.scrollTop < PULL_SPACE_PX) release(true);
-    }
-    else if (current.phase === "scrolling" || current.phase === "returning") {
+    } else if (current.phase === "scrolling" || current.phase === "returning") {
       current.phase = "idle";
       show(0);
     }
@@ -163,6 +165,18 @@ export function useOlderHistoryPull(
     if (!current.viewport) return;
     const momentum = (event as WheelEvent & { readonly momentum?: boolean }).momentum;
     const atTop = viewport.scrollTop <= PULL_SPACE_PX + AT_TOP_PX;
+    // meiva:note
+    // Chromium can emit a scrollend for each wheel step in a burst. Keep upward
+    // steps that follow an arrival out of the reserve until a fresh pull starts.
+    // meiva:link ui/web/src/docs/frontend-components/timeline-view/history-paging.md
+    const previousArrival = current.lastArrivalWheelAt;
+    current.lastArrivalWheelAt = null;
+    if (atTop && event.deltaY < 0 && previousArrival !== null &&
+        event.timeStamp - previousArrival < WHEEL_BURST_GAP_MS) {
+      current.lastArrivalWheelAt = event.timeStamp;
+      event.preventDefault();
+      return;
+    }
     if (momentum === true) {
       release(true);
       current.momentum = true;
@@ -190,10 +204,13 @@ export function useOlderHistoryPull(
     if (current.phase === "pulling" || event.deltaY >= 0) return;
     if (atTop) {
       event.preventDefault();
-    } else if (event.cancelable && event.deltaMode === WheelEvent.DOM_DELTA_PIXEL &&
-        viewport.scrollTop + event.deltaY < PULL_SPACE_PX) {
-      event.preventDefault();
-      viewport.scrollTop = PULL_SPACE_PX;
+    } else if (event.deltaMode === WheelEvent.DOM_DELTA_PIXEL &&
+        viewport.scrollTop + event.deltaY <= PULL_SPACE_PX) {
+      current.lastArrivalWheelAt = event.timeStamp;
+      if (event.cancelable) {
+        event.preventDefault();
+        viewport.scrollTop = PULL_SPACE_PX;
+      }
     }
   }, [release]);
 
