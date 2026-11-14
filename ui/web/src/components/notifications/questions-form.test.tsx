@@ -55,12 +55,12 @@ describe("QuestionsForm", () => {
     expect(screen.queryByRole("article", { name: "Question 3" })).toBeNull();
     expect(screen.getByRole<HTMLButtonElement>("button", { name: "Next question" }).disabled).toBe(true);
     expect(screen.getByText("2 / 2")).toBeTruthy();
-    fireEvent.click(article(5).getByRole("button", { name: "Skip" }));
+    fireEvent.click(screen.getByRole("button", { name: "Skip" }));
     expect(submit().disabled).toBe(false);
     previous();
     expect(article(3).getByRole<HTMLTextAreaElement>("textbox").value).toBe("x");
     next();
-    fireEvent.click(article(5).getByRole("button", { name: "Undo skip" }));
+    fireEvent.click(screen.getByRole("button", { name: "Undo skip" }));
     expect(submit().disabled).toBe(true);
     expect(transport.answerQuestions).not.toHaveBeenCalled();
   });
@@ -75,7 +75,7 @@ describe("QuestionsForm", () => {
     next();
     fireEvent.change(article(3).getByRole("textbox"), { target: { value: "because" } });
     next();
-    fireEvent.click(article(4).getByRole("button", { name: "Skip" }));
+    fireEvent.click(screen.getByRole("button", { name: "Skip" }));
     fireEvent.click(submit());
     await waitFor(() => expect(onSettled).toHaveBeenCalledWith([1, 2, 3, 4]));
     expect(transport.answerQuestions).toHaveBeenCalledTimes(1);
@@ -104,13 +104,25 @@ describe("QuestionsForm", () => {
     expect(submit().disabled).toBe(false);
   });
 
-  it("keeps a skipped question's draft when the skip is undone", () => {
-    renderForm([q(1)]);
+  it("skips and advances, then restores the draft in place when the skip is undone", () => {
+    renderForm([q(1), q(2)]);
     fireEvent.change(article(1).getByRole("textbox"), { target: { value: "draft" } });
-    fireEvent.click(article(1).getByRole("button", { name: "Skip" }));
-    fireEvent.click(article(1).getByRole("button", { name: "Undo skip" }));
+    const skip = screen.getByRole("button", { name: "Skip" });
+    fireEvent.click(skip);
+    expect(screen.getByText("2 / 2")).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Skip" })).toBe(skip);
+    expect(submit().disabled).toBe(true);
+    previous();
+    expect(screen.getByText("Skipped")).toBeTruthy();
+    expect(article(1).queryByRole("textbox")).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Undo skip" }));
+    expect(screen.getByText("1 / 2")).toBeTruthy();
     expect(article(1).getByRole<HTMLTextAreaElement>("textbox").value).toBe("draft");
+    next();
+    fireEvent.click(screen.getByRole("button", { name: "Skip" }));
+    expect(screen.getByText("2 / 2")).toBeTruthy();
     expect(submit().disabled).toBe(false);
+    expect(transport.answerQuestions).not.toHaveBeenCalled();
   });
 
   it("sends from Enter in an answer field only when the whole form is complete", async () => {
@@ -154,7 +166,7 @@ describe("QuestionsForm", () => {
     const { rerender } = renderForm([q(1), q(2)], { onChanged });
     fireEvent.change(article(1).getByRole("textbox"), { target: { value: "kept" } });
     next();
-    fireEvent.click(article(2).getByRole("button", { name: "Skip" }));
+    fireEvent.click(screen.getByRole("button", { name: "Skip" }));
     fireEvent.click(submit());
     await waitFor(() => expect(onChanged).toHaveBeenCalledWith(latest));
     expect(screen.getByRole("status").textContent).toBe("The questions changed. Review them and submit again.");
@@ -170,12 +182,12 @@ describe("QuestionsForm", () => {
     const first = renderForm([q(1), q(2)]);
     fireEvent.change(article(1).getByRole("textbox"), { target: { value: "kept" } });
     next();
-    fireEvent.click(article(2).getByRole("button", { name: "Skip" }));
+    fireEvent.click(screen.getByRole("button", { name: "Skip" }));
     first.unmount();
     renderForm([q(1), q(2)]);
     expect(article(1).getByRole<HTMLTextAreaElement>("textbox").value).toBe("kept");
     next();
-    expect(article(2).getByRole("button", { name: "Undo skip" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Undo skip" })).toBeTruthy();
     expect(submit().disabled).toBe(false);
   });
 

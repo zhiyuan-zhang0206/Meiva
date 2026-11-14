@@ -69,7 +69,7 @@ it("settles every open question in one submission and drops them all from the sh
   fireEvent.change(within(screen.getByRole("article", { name: "Question 1" })).getByRole("textbox"), { target: { value: "First answer" } });
   expect(submit.disabled).toBe(true);
   fireEvent.click(screen.getByRole("button", { name: "Next question" }));
-  fireEvent.click(within(screen.getByRole("article", { name: "Question 2" })).getByRole("button", { name: "Skip" }));
+  fireEvent.click(screen.getByRole("button", { name: "Skip" }));
   expect(submit.disabled).toBe(false);
   fireEvent.click(submit);
   await waitFor(() => expect(transport.answerQuestions).toHaveBeenCalledWith(7, {
