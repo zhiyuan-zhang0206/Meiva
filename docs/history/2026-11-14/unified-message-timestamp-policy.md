@@ -14,3 +14,7 @@ multimodal pairing without improving message provenance.
 
 The Timeline body contract remains separate from model-facing context: changing
 formatting must not change which paragraphs a person sees or copies.
+
+A timezone note uses one captured policy for both its timezone description and
+its prefix. Reading the clock factory twice can mix independent snapshots or
+consume two supplied observations for one note, so those facts travel together.

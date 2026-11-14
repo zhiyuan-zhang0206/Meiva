@@ -5,6 +5,7 @@ from __future__ import annotations
 from collections.abc import Mapping, Sequence
 from datetime import datetime
 from pathlib import Path
+from zoneinfo import ZoneInfo
 
 from langchain_core.messages import HumanMessage
 
@@ -116,14 +117,14 @@ def timezone_note(ctx: MeivaContext) -> HumanMessage | None:
 
     if _established_agent_id(ctx, "timezone") is None:
         return None
-    clock = ctx.require_clock()
-    now = clock.now()
+    inputs = ctx.timestamp_policy()
+    now = inputs.require_now()
     return system_note_message(
-        content=timezone_text(clock.timezone, now.astimezone(clock.explicit_zone())),
+        content=timezone_text(inputs.timezone, now.astimezone(ZoneInfo(inputs.timezone))),
         tag=NoteTag.TIMEZONE,
         picked_up_at=now,
         created_at=now,
-        inputs=ctx.timestamp_policy(),
+        inputs=inputs,
     )
 
 

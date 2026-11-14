@@ -19,6 +19,8 @@ from base.agents.context.identity import AgentIdentity
 from base.agents.messages.kwargs import NoteTag
 from base.clock import Clock, ClockConfig
 from base.clock.tests.manual_timers import ManualTimers
+from base.config.tests.configuration import defaults
+from base.host.env.agent_slices import AgentSlices
 
 WINTER = datetime(2026, 1, 15, 12, 0, tzinfo=UTC)
 SUMMER = datetime(2026, 7, 15, 12, 0, tzinfo=UTC)
@@ -33,6 +35,7 @@ def _context(clock: Clock, agent_id: int | None = 7) -> MeivaContext:
     return MeivaContext(
         identity=AgentIdentity(agent_id=agent_id, owns_loop=True) if agent_id is not None else None,
         clock_factory=lambda: clock,
+        agent=AgentSlices.resolve(default_reader=defaults(general__message_timestamps=False)),
     )
 
 
@@ -115,6 +118,7 @@ def test_the_clock_is_read_each_time_a_note_is_built() -> None:
     context = MeivaContext(
         identity=AgentIdentity(1, True),
         clock_factory=lambda: next(clocks),
+        agent=AgentSlices.resolve(default_reader=defaults(general__message_timestamps=False)),
     )
 
     first, second = timezone_note(context), timezone_note(context)
