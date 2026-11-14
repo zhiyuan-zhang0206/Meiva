@@ -1,7 +1,7 @@
 "use client";
 
 import { useQueryClient } from "@tanstack/react-query";
-import { ChevronDown, ChevronUp } from "lucide-react";
+import { ChevronUp } from "lucide-react";
 import { useId, useState } from "react";
 import { useTranslations } from "next-intl";
 
@@ -37,10 +37,11 @@ export function PendingQuestions({ questions, failed, maxWidthCss }: {
         {failed && <p role="status" className="px-4 py-2.5 text-xs text-muted-foreground">{t("questionsUnavailable")}</p>}
         {questions.length > 0 && (
           <>
-            <div id={contentId} hidden={!expanded}>
+            <div id={contentId}>
               <QuestionsForm
                 agentId={questions[0].agent_id}
                 questions={questions}
+                expanded={expanded}
                 onSettled={(ids) => dropOpenQuestions(cache, ids)}
                 onChanged={(open) => replaceAgentQuestions(cache, questions[0].agent_id, open)}
               />
@@ -52,16 +53,15 @@ export function PendingQuestions({ questions, failed, maxWidthCss }: {
               aria-controls={contentId}
               onClick={() => setExpanded(!expanded)}
               className={cn(
-                "items-center text-xs font-medium text-muted-foreground hover:text-foreground focus-visible:outline-2 focus-visible:-outline-offset-2",
-                expanded
-                  ? "absolute bottom-3 left-4 size-8 justify-center rounded-lg hover:bg-muted"
-                  : "h-[38px] w-full justify-between gap-2 rounded-xl px-4 text-left",
+                "absolute bottom-3 left-4 h-8 items-center gap-2 rounded-lg px-2 text-xs font-medium text-muted-foreground hover:bg-muted hover:text-foreground focus-visible:outline-2 focus-visible:-outline-offset-2",
                 FLEX,
               )}
             >
-              {expanded ? <ChevronDown aria-hidden className="size-3.5" /> : (
-                <>{t("questions")}<ChevronUp aria-hidden className="size-3.5" /></>
-              )}
+              <ChevronUp
+                aria-hidden
+                className={cn("size-4 motion-safe:transition-transform motion-safe:duration-150", expanded && "rotate-180")}
+              />
+              {!expanded && <span>{label}</span>}
             </button>
           </>
         )}

@@ -51,9 +51,11 @@ it("opens expanded by default above the composer and retains independent drafts 
   fireEvent.click(toggle);
   expect(toggle.getAttribute("aria-expanded")).toBe("false");
   expect(screen.queryByRole("textbox")).toBeNull();
-  expect(screen.getByText("Questions")).toBeTruthy();
+  expect(screen.getByText("2 questions waiting")).toBeTruthy();
+  expect(screen.queryByRole("button", { name: "Submit" })).toBeNull();
   fireEvent.click(toggle);
   expect(toggle.getAttribute("aria-expanded")).toBe("true");
+  expect(screen.queryByText("2 questions waiting")).toBeNull();
   expect(input().value).toBe("Second answer");
   fireEvent.click(screen.getByRole("button", { name: "Previous question" }));
   expect(input().value).toBe("First answer");

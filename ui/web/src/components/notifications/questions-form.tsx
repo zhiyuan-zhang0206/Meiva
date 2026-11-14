@@ -10,7 +10,7 @@ import { ScrollArea } from "@/components/ui/scroll-area";
 import { errMsg } from "@/lib/contracts/errors";
 import type { AnswerQuestions, QuestionItem } from "@/lib/contracts/types";
 import { cn } from "@/lib/format/utils";
-import { FLEX, QUESTION_REGION_MAX_HEIGHT_CLASS } from "@/lib/layout/layout";
+import { FLEX, MIN_H_0, OVERFLOW_HIDDEN, QUESTION_REGION_MAX_HEIGHT_CLASS } from "@/lib/layout/layout";
 import { newOperationKey } from "@/lib/transport/operation-key";
 import { useApi } from "@/lib/transport/transport-context";
 
@@ -28,12 +28,14 @@ import { QuestionForm, answerFromDraft } from "./question-form";
 export function QuestionsForm({
   agentId,
   questions,
+  expanded = true,
   onSettled,
   onChanged,
   className,
 }: {
   agentId: number;
   questions: readonly QuestionItem[];
+  expanded?: boolean;
   onSettled: (ids: number[]) => void;
   onChanged: (open: QuestionItem[]) => void;
   className?: string;
@@ -102,18 +104,37 @@ export function QuestionsForm({
 
   return (
     <div className={cn("text-[13px]", className)}>
-      <ScrollArea key={question.id} viewportClassName={cn(QUESTION_REGION_MAX_HEIGHT_CLASS, "overscroll-y-contain")}>
-        <QuestionRow
-          question={question}
-          draft={draft}
-          pending={pending}
-          onDraftChange={(nextDraft) => setQuestionDraft(agentId, question.id, nextDraft)}
-        />
-      </ScrollArea>
+      <div
+        inert={!expanded}
+        aria-hidden={!expanded}
+        className={cn(
+          "grid motion-safe:transition-[grid-template-rows] motion-safe:duration-150 motion-safe:ease-out",
+          expanded ? "grid-rows-[1fr]" : "grid-rows-[0fr]",
+        )}
+      >
+        <div className={cn(MIN_H_0, OVERFLOW_HIDDEN)}>
+          <ScrollArea key={question.id} viewportClassName={cn(QUESTION_REGION_MAX_HEIGHT_CLASS, "overscroll-y-contain")}>
+            <QuestionRow
+              question={question}
+              draft={draft}
+              pending={pending}
+              onDraftChange={(nextDraft) => setQuestionDraft(agentId, question.id, nextDraft)}
+            />
+          </ScrollArea>
+          {changed && <p role="status" className="px-4 pb-2 text-xs text-muted-foreground">{t("questionsChanged")}</p>}
+          {error && <p role="alert" className="px-4 pb-2 text-xs text-destructive">{error}</p>}
+        </div>
+      </div>
       <div className="px-4 pb-3 pt-1">
-        {changed && <p role="status" className="mb-2 text-xs text-muted-foreground">{t("questionsChanged")}</p>}
-        {error && <p role="alert" className="mb-2 text-xs text-destructive">{error}</p>}
-        <div className={cn("min-h-8 items-center justify-end gap-0.5 pl-8", FLEX)}>
+        <div
+          inert={!expanded}
+          aria-hidden={!expanded}
+          className={cn(
+            "min-h-8 items-center justify-end gap-0.5 pl-8",
+            !expanded && "invisible",
+            FLEX,
+          )}
+        >
           {ordered.length > 1 && (
             <nav aria-label={t("questionNavigation")} className={cn("items-center", FLEX)}>
               <Button
