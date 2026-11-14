@@ -138,6 +138,17 @@ a provider message belongs to]]; `tests/test_unsolicited.py` pins this half —
 including the residual risk that a `result` arriving mid-turn is acted on, because
 nothing in the protocol can tell the two apart.
 
+## Literal request tags
+
+The CLI does not escape request delimiters inside user text. Splitting on every
+apparent request block can therefore discard parts of a message and prevent its
+inbox identity from matching the record. The reader removes only the outer
+request frame and preserves interior delimiters, including apparent queued
+request separators. Each queued body stays contiguous for identity matching.
+Unknown or incomplete framing stays intact. An unescaped body that imitates an
+entire provider frame is intrinsically ambiguous; the reader does not infer
+interior structure from tag nesting.
+
 ## Modules
 
 | Module | Owns |

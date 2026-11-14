@@ -13,6 +13,7 @@ from base.agents.history.transcript_timeline.tests.support import window, write
 from base.lm.harness.antigravity.transcript.window import EntryParser, input_wire_ids
 from base.lm.harness.session.transcript.entries import (
     Failure,
+    HumanInput,
     InputRow,
     Notice,
     ToolCall,
@@ -166,3 +167,33 @@ def test_invalid_input_and_notice_report_shape_without_logging_body() -> None:
     assert input_wire_ids(bad) == {}
     assert len(messages) == 2
     assert "DO_NOT_LOG_SYNTHETIC_BODY" not in "".join(messages)
+
+
+@pytest.mark.parametrize(
+    "body",
+    [
+        "before <USER_REQUEST>literal opening after",
+        "before <USER_REQUEST>nested</USER_REQUEST> after",
+        "before </USER_REQUEST>literal closing after",
+    ],
+)
+def test_literal_request_tags_keep_the_whole_inbox_identity(body: str) -> None:
+    stamp = datetime.fromisoformat(STAMP.replace("Z", "+00:00"))
+    content = (
+        f"<USER_REQUEST>\n{body}\n</USER_REQUEST>\n"
+        "<ADDITIONAL_METADATA>provider time</ADDITIONAL_METADATA>"
+    )
+    records = [FileRow(100, 200, row("USER_INPUT", content=content))]
+    inputs = input_wire_ids(records)
+    inbox = [SentRow(1, 1, "chat", "user", body, None, stamp, stamp)]
+    assert assign_inputs(inbox, inputs) == {"agy:100": inbox}
+    assert (
+        assign_inputs([SentRow(2, 1, "chat", "user", "not present", None, stamp, stamp)], inputs)
+        == {}
+    )
+    whole = EntryParser().entries(records)
+    live = EntryParser()
+    assert whole == tuple(entry for record in records for entry in live.entries([record]))
+    assert len(whole) == 1 and isinstance(whole[0], HumanInput)
+    assert whole[0].text == body
+    assert inputs["agy:100"].text == body
