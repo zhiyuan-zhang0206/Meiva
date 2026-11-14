@@ -2,8 +2,10 @@
 
 `PendingQuestions` owns the selected agent's entire awaiting-response queue,
 including legacy unstructured questions. When questions are waiting, the queue
-opens expanded by default and shows one question at a time, ordered by question
-id. Previous, next, the page count, and Submit share one bottom row.
+opens expanded on the first visit and shows one question at a time, ordered by
+question id. The frontend remembers each agent's expanded or collapsed state
+for the lifetime of the tab's application. Previous, next, the page count, and
+Submit share one bottom row.
 The question grows upward to its natural height, capped at 45% of the visible
 viewport. The panel reserves one row above the composer so changes in question
 height leave the controls, timeline viewport, and composer in place. The collapsed row shows the pending count next to the same disclosure control.

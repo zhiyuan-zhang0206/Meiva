@@ -90,9 +90,10 @@ interface UISlice {
   setSearchQuery: (q: string) => void;
 
   // meiva:note
-  // The answer form's drafts and skips per agent and question, so switching to another agent and back
-  // keeps them. Memory only: never written to disk or sent to the server.
+  // The question panel's disclosure state and answer drafts survive agent switches in this tab.
   // meiva:link ui/web/src/docs/frontend-state/shared-context/questions.md
+  questionPanelCollapsed: Readonly<Record<number, boolean | undefined>>;
+  toggleQuestionPanel: (agentId: number) => void;
   questionDrafts: QuestionDrafts;
   setQuestionDraft: (agentId: number, questionId: number, draft: QuestionDraft) => void;
   clearQuestionDrafts: (agentId: number, questionIds: readonly number[]) => void;
@@ -172,6 +173,9 @@ export const useStore = create<Store>()((set) => ({
   searchQuery: "",
   setSearchQuery: (q) => set({ searchQuery: q }),
 
+  questionPanelCollapsed: {},
+  toggleQuestionPanel: (agentId) =>
+    set((s) => ({ questionPanelCollapsed: { ...s.questionPanelCollapsed, [agentId]: !s.questionPanelCollapsed[agentId] } })),
   questionDrafts: {},
   setQuestionDraft: (agentId, questionId, draft) =>
     set((s) => ({ questionDrafts: withDraft(s.questionDrafts, agentId, questionId, draft) })),

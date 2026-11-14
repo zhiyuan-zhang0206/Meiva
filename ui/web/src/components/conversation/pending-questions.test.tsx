@@ -21,14 +21,14 @@ function renderQuestions(ui: ReactElement) {
 }
 
 beforeEach(() => {
-  useStore.setState({ questionDrafts: {} });
+  useStore.setState({ questionDrafts: {}, questionPanelCollapsed: {} });
   resetTransport();
   transport.getSettings.mockResolvedValue({ settings: [] });
 });
 afterEach(() => { cleanup(); dropTombstonesResetForTest(); });
 
 it("opens expanded by default above the composer and retains independent drafts through collapse", () => {
-  renderQuestions(<PendingQuestions questions={questions} failed={false} maxWidthCss="768px" />);
+  renderQuestions(<PendingQuestions agentId={7} questions={questions} failed={false} maxWidthCss="768px" />);
   const region = screen.getByTestId("pending-questions");
   expect(region.className).toContain("relative");
   expect(region.style.maxWidth).toBe("768px");
@@ -64,7 +64,7 @@ it("opens expanded by default above the composer and retains independent drafts 
 
 it("settles every open question in one submission and drops them all from the shared queue", async () => {
   transport.answerQuestions.mockResolvedValue({ kind: "settled" });
-  const { queryClient } = renderQuestions(<PendingQuestions questions={questions} failed={false} />);
+  const { queryClient } = renderQuestions(<PendingQuestions agentId={7} questions={questions} failed={false} />);
   queryClient.setQueryData(QUESTIONS_QUERY_KEY, { awaiting: questions });
   const submit = screen.getByRole<HTMLButtonElement>("button", { name: "Submit" });
   expect(submit.disabled).toBe(true);
@@ -82,7 +82,7 @@ it("settles every open question in one submission and drops them all from the sh
 
 it("retains drafts on a failed submission and retries it under the same operation key", async () => {
   transport.answerQuestions.mockRejectedValueOnce(new Error("offline")).mockResolvedValue({ kind: "settled" });
-  renderQuestions(<PendingQuestions questions={[questions[0]]} failed={false} />);
+  renderQuestions(<PendingQuestions agentId={7} questions={[questions[0]]} failed={false} />);
   const input = screen.getByRole<HTMLTextAreaElement>("textbox");
   fireEvent.change(input, { target: { value: "Keep this" } });
   fireEvent.click(screen.getByRole("button", { name: "Submit" }));
@@ -94,9 +94,35 @@ it("retains drafts on a failed submission and retries it under the same operatio
 });
 
 it("shows a failed queue without losing its stale questions, and renders nothing for a known empty queue", () => {
-  const { rerender } = renderQuestions(<PendingQuestions questions={questions} failed />);
+  const { rerender } = renderQuestions(<PendingQuestions agentId={7} questions={questions} failed />);
   expect(screen.getByRole("status").textContent).toBe("Could not load pending questions.");
   expect(screen.getByRole("button", { name: "2 questions waiting" })).toBeTruthy();
-  rerender(<PendingQuestions questions={[]} failed={false} />);
+  rerender(<PendingQuestions agentId={7} questions={[]} failed={false} />);
   expect(screen.queryByTestId("pending-questions")).toBeNull();
+});
+
+it("restores each agent's disclosure state when its question panel remounts", () => {
+  const panel = (agentId: number, open = questions) => (
+    <PendingQuestions key={agentId} agentId={agentId} questions={open} failed={false} />
+  );
+  const otherQuestions = [{ ...questions[0], id: 3, agent_id: 8 }];
+  const { rerender } = renderQuestions(panel(7));
+  const toggle = (label: string) => screen.getByRole("button", { name: label });
+  fireEvent.click(toggle("2 questions waiting"));
+
+  rerender(panel(8, otherQuestions));
+  expect(toggle("1 question waiting").getAttribute("aria-expanded")).toBe("true");
+
+  rerender(panel(7, []));
+  expect(screen.queryByTestId("pending-questions")).toBeNull();
+  rerender(panel(7));
+  expect(toggle("2 questions waiting").getAttribute("aria-expanded")).toBe("false");
+  fireEvent.click(toggle("2 questions waiting"));
+
+  rerender(panel(8, otherQuestions));
+  fireEvent.click(toggle("1 question waiting"));
+  rerender(panel(7));
+  expect(toggle("2 questions waiting").getAttribute("aria-expanded")).toBe("true");
+  rerender(panel(8, otherQuestions));
+  expect(toggle("1 question waiting").getAttribute("aria-expanded")).toBe("false");
 });

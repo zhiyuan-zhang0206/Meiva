@@ -540,7 +540,7 @@ function HomeContent({
               </p>
             )}
             <div className="relative">
-              {activeId !== null && <PendingQuestions key={activeId} questions={pendingQuestions} failed={questions.error} maxWidthCss={composerMaxWidth} />}
+              {activeId !== null && <PendingQuestions key={activeId} agentId={activeId} questions={pendingQuestions} failed={questions.error} maxWidthCss={composerMaxWidth} />}
               <Composer
                 diagnostics={diagnostics}
                 maxWidthCss={composerMaxWidth}
