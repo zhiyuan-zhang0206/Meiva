@@ -184,20 +184,19 @@ def _place_timeline_reader(page: Page) -> None:
         if state["max"] is not None and state["max"] > TIMELINE_SCROLL_TOP + 200:
             break
         page.wait_for_timeout(300)
-    page.evaluate(
-        """
-        (top) => {
-          for (const v of document.querySelectorAll('[data-slot="scroll-area-viewport"]')) {
-            if (v.querySelectorAll('[data-item-id]').length > 0) { v.scrollTop = top; return; }
-          }
-        }
-        """,
-        TIMELINE_SCROLL_TOP,
+    viewport = page.locator('[data-slot="scroll-area-viewport"]').filter(
+        has=page.locator('[role="log"]')
     )
-    page.wait_for_timeout(400)
-    state = _timeline_state(page)
-    assert state["st"] == TIMELINE_SCROLL_TOP, (
-        f"the timeline did not take the reading position: {state}"
+    viewport.hover()
+    top = _timeline_state(page)["st"]
+    assert top is not None
+    # meiva:note
+    # Reader input releases the send anchor before moving the timeline.
+    # meiva:link ui/web/src/docs/frontend-components/timeline-view/send-anchor.md
+    page.mouse.wheel(0, TIMELINE_SCROLL_TOP - top)
+    page.wait_for_function(
+        f"(top) => Math.abs(({_TIMELINE_STATE_JS})().st - top) <= 2",
+        arg=TIMELINE_SCROLL_TOP,
     )
 
 
