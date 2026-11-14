@@ -1,4 +1,4 @@
-import { useEffect, type RefObject } from "react";
+import { useEffect, useRef, type RefObject } from "react";
 
 import type { SavedScroll } from "@/lib/layout/scroll-memory";
 import { isAtBottom, type StickyController, type StickyThresholds } from "@/lib/layout/sticky";
@@ -217,6 +217,8 @@ export function useTimelineViewport({
   applyPendingRestore,
   settleRestoredPosition,
   maintainSendAnchor,
+  releaseSendReserve,
+  sendReserveEnabled,
   releaseCollapseReserve,
   collapseReserveHeight,
   readingReserve,
@@ -254,12 +256,15 @@ export function useTimelineViewport({
   // growth fight for one frame.
   // meiva:link ui/web/src/docs/frontend-components/timeline-view/sticky-scroll.md
   maintainSendAnchor: (viewport: HTMLElement) => boolean;
+  releaseSendReserve: (viewport: HTMLElement, naturalEnd: number) => void;
+  sendReserveEnabled: () => boolean;
   releaseCollapseReserve: (viewport: HTMLElement) => void;
   collapseReserveHeight: () => number;
   readingReserve: () => number;
   tailHeight: (viewport: HTMLElement) => number;
   cancelPendingJump: () => void;
 }) {
+  const readingInputTop = useRef<number | null>(null);
   useEffect(() => {
     const viewport = wrapperRef.current?.querySelector<HTMLElement>('[data-slot="scroll-area-viewport"]') ?? null;
     if (!viewport) return;
@@ -302,6 +307,13 @@ export function useTimelineViewport({
       // meiva:note
       // The reader moved: that movement is the position from here on, so the bookmark and the hold that protected it are both spent. Keeping the hold alive here silenced the controller (holding reads every scroll as "none"), which is how a restored reader who then scrolled to the bottom stopped following for good.
       // meiva:link ui/web/src/docs/frontend-components/timeline-view/sticky-scroll.md
+      const from = readingInputTop.current;
+      if (from !== null) {
+        readingInputTop.current = viewport.scrollTop;
+        if (!isPrependEcho && !ride.active && viewport.scrollTop < from) {
+          releaseSendReserve(viewport, tailHeight(viewport) - viewport.clientHeight);
+        }
+      }
       if (direction !== "none" && !isPrependEcho) {
         pendingRestoreRef.current = null;
         holdRestoredPositionRef.current = false;
@@ -310,12 +322,13 @@ export function useTimelineViewport({
       trimFollowing();
       const mem = scrollMemoryRef.current;
       if (mem && !restoreInFlight()) {
-        rememberTimelinePosition(viewport, mem.entryKey, mem.contentKey, controller, tailHeight(viewport), collapseReserveHeight());
+        rememberTimelinePosition(viewport, mem.entryKey, mem.contentKey, controller, tailHeight(viewport), collapseReserveHeight(), sendReserveEnabled());
       }
     };
     viewport.addEventListener("scroll", onScroll, { passive: true });
     const onScrollEnd = (event: Event) => {
       if (event.target !== viewport) return;
+      readingInputTop.current = null;
       const ride = scrollToBottomRideRef.current;
       if (ride.active) {
         ride.snapping = true;
@@ -340,6 +353,7 @@ export function useTimelineViewport({
       }
     };
     const stopWatchingReadingInput = watchReadingNavigation(viewport, wrapperRef.current, () => {
+      readingInputTop.current = viewport.scrollTop;
       interruptJump();
       holdRestoredPositionRef.current = false;
     });
@@ -348,6 +362,7 @@ export function useTimelineViewport({
       if (!e.ctrlKey && e.deltaY !== 0 && Math.abs(e.deltaY) >= Math.abs(e.deltaX)) {
         holdRestoredPositionRef.current = false;
         if (Math.abs(e.deltaY) > 2) cancelPendingJump();
+        readingInputTop.current = e.deltaY < 0 ? viewport.scrollTop : null;
         if (e.deltaY < -2) {
           interruptJump();
           if (controller.isSticky()) {
@@ -362,6 +377,7 @@ export function useTimelineViewport({
     viewport.addEventListener("wheel", onWheel, { passive: false });
 
     const onTouchStart = (e: TouchEvent) => {
+      readingInputTop.current = viewport.scrollTop;
       interruptJump();
       holdRestoredPositionRef.current = false;
       controller.handleTouchStart();
@@ -376,6 +392,7 @@ export function useTimelineViewport({
       pullTouchEnd();
     };
     const onTouchCancel = () => {
+      readingInputTop.current = null;
       controller.handleTouchEnd(snapshot());
       cancelPullTouch();
     };
@@ -457,6 +474,8 @@ export function useTimelineViewport({
     applyPendingRestore,
     settleRestoredPosition,
     maintainSendAnchor,
+    releaseSendReserve,
+    sendReserveEnabled,
     releaseCollapseReserve,
     collapseReserveHeight,
     readingReserve,

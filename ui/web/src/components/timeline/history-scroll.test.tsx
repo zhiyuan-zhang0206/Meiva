@@ -292,17 +292,17 @@ describe("history entry scroll ownership", () => {
   });
 });
 
-function AgentTabs({ agentId, entry }: { agentId: number; entry: string }) {
+function AgentTabs({ agentId, entry, turnActive }: { agentId: number; entry: string; turnActive: boolean }) {
   const timeline = useTimeline(agentId, () => undefined);
   return <TimelineView key={agentId} items={timeline.items} threadKey={String(agentId)}
-    scrollMemoryKey={`${entry}:agent:${agentId}`} />;
+    scrollMemoryKey={`${entry}:agent:${agentId}`} turnActive={turnActive} />;
 }
-function tabs(agentId: number, entry: string) {
+function tabs(agentId: number, entry: string, turnActive = false) {
   return (
     <QueryClientProvider client={client}>
       <WallClockProvider wallNow={wallNow}>
         <ApiProvider api={gateway}>
-          <TestStreamProvider><AgentTabs agentId={agentId} entry={entry} /></TestStreamProvider>
+          <TestStreamProvider><AgentTabs agentId={agentId} entry={entry} turnActive={turnActive} /></TestStreamProvider>
         </ApiProvider>
       </WallClockProvider>
     </QueryClientProvider>
@@ -323,9 +323,10 @@ describe("agent switch reading positions", () => {
   it("restores a reader at the padded end without switching them to tail following", () => {
     const rows = [...items, { ...items[0], item_id: "17.0", kind: "inbound_chat", source: "user", payload: "Latest question" }];
     client.setQueryData(["timeline", 42], { ...response, items: rows });
-    const { rerender } = renderWithBrowser(tabs(42, "agent-padded-bottom"));
+    const { rerender } = renderWithBrowser(tabs(42, "agent-padded-bottom", true));
     act(() => { viewport().scrollTop = 4744; fireEvent.scroll(viewport()); });
     expect(readScrollMemory("agent-padded-bottom:agent:42")).toMatchObject({ scrollTop: 4744, followBottom: false });
+    rerender(tabs(42, "agent-padded-bottom"));
     rerender(tabs(43, "agent-padded-bottom"));
     rerender(tabs(42, "agent-padded-bottom"));
     resize();
