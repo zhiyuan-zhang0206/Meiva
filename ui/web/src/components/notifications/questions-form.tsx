@@ -131,7 +131,7 @@ export function QuestionsForm({
           aria-hidden={!expanded}
           className={cn(
             "min-h-8 items-center justify-end gap-0.5 pl-8",
-            !expanded && "invisible",
+            !expanded && "opacity-0",
             FLEX,
           )}
         >

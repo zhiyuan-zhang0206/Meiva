@@ -8,7 +8,8 @@ The question grows upward to its natural height, capped at 45% of the visible
 viewport. The panel reserves one row above the composer so changes in question
 height leave the controls, timeline viewport, and composer in place. The collapsed row shows the pending count next to the same disclosure control.
 The question area expands above the anchored footer with a short transition
-when reduced motion is off.
+when reduced motion is off. The footer controls appear and disappear together
+as soon as the panel is toggled, independently of the question area's motion.
 `QuestionsForm` owns the single submission, its operation key and retries.
 Submit is available on the last question. Blank drafts become skipped results
 when the batch is submitted. The submission names the open set it was built
