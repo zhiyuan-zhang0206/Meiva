@@ -80,6 +80,8 @@ def test_native_inbound_body_survives_live_view_and_cold_reload(e2e_env: E2EEnv)
     body = "First paragraph preserves a literal [2026-11-14 Sat 16:05:51].\n\nSecond paragraph remains here."
     page = e2e_env.page
     page.context.grant_permissions(["clipboard-read", "clipboard-write"])
+    page.goto(e2e_env.agent_url)
+    page.wait_for_selector('[data-testid="sse-ready"]', state="attached", timeout=15_000)
     chat_and_wait(e2e_env.agent_id, body)
     items = gateway_get(
         f"{e2e_env.gateway_url}/api/agents/{e2e_env.agent_id}/timeline?limit=100"
