@@ -438,20 +438,6 @@ describe("load-older circle (revealed above the messages)", () => {
     expect(overlay?.querySelector(".animate-spin")).not.toBeNull();
   });
 
-  // meiva:note
-  // The pull strip is overflow-hidden and only as tall as the revealed space, so
-  // a fixed-size ring is sliced into a bar for the first few pixels of a pull
-  // (user report 2026-10-20). The ring scales with the strip instead, and that
-  // scale rides the `scale` property: an inline transform would re-run the spin
-  // keyframes as a matrix interpolation and leave the ring still.
-  // meiva:link ui/web/src/docs/frontend-components/timeline-view/sticky-scroll.md
-  it("a short pull scales the ring instead of slicing it into a bar", () => {
-    render(<LoadOlderSpinner loadingOlder={false} pullProgress={0.4} pullOffset={8} />);
-    const ring = screen.getByTestId("load-older-spinner").querySelector("svg") as SVGElement;
-    expect(ring.style.scale).toBe("0.4");
-    expect(ring.style.transform).toBe("");
-    expect(screen.getByTestId("load-older-spinner").dataset.state).toBe("pulling");
-  });
   it("loadingOlder=false → the hidden overlay runs no spin animation", () => {
     render(<TimelineView items={[makeItem({ kind: "agent_chat", payload: "x" })]} />);
     const overlay = screen.getByTestId("load-older-spinner");

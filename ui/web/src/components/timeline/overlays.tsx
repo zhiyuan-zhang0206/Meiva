@@ -6,31 +6,19 @@ import { ArrowDown } from "lucide-react";
 import { useTranslations } from "next-intl";
 
 import { cn } from "@/lib/format/utils";
-import { FLEX, OVERFLOW_HIDDEN } from "@/lib/layout/layout";
-
-// meiva:note
-// The ring's natural box: the pull strip scales it, so this is the height at
-// which the whole circle is on screen.
-// meiva:link ui/web/src/docs/frontend-components/timeline-view/sticky-scroll.md
-const RING_SIZE = 20;
+import { FLEX } from "@/lib/layout/layout";
 
 // meiva:note
 // Two presentations, one ring: it turns while a load is in flight, and a
 // reader who asked for reduced motion gets the same ring breathing (opacity
 // only) instead of a frozen one.
-// meiva:note
-// The scale rides the `scale` property, never `transform`. An inline transform
-// makes the spin keyframes interpolate as matrices, and `rotate(360deg)`
-// decomposes to 0deg — the ring then paints the same frame forever while
-// getAnimations() reports it running (user report 2026-10-29: "it doesn't spin
-// any more, it's a static animation").
-// meiva:link ui/web/src/docs/frontend-components/timeline-view/sticky-scroll.md
-function LoadingRing({ arc = 0.72, scale = 1, testId, className }: {
-  arc?: number; scale?: number; testId?: string; className?: string;
+function LoadingRing({ testId, className }: {
+  testId?: string; className?: string;
 }) {
   const circumference = 2 * Math.PI * 8;
+  const arc = 0.72;
   return (
-    <svg data-testid={testId} viewBox="0 0 24 24" style={{ scale: `${scale}` }} aria-hidden="true"
+    <svg data-testid={testId} viewBox="0 0 24 24" aria-hidden="true"
       className={cn("size-5 shrink-0 animate-spin motion-reduce:animate-pulse pointer-events-none", className)}>
       <circle cx="12" cy="12" r="8" fill="none" stroke="currentColor" strokeWidth="1.75" opacity="0.15" />
       <circle cx="12" cy="12" r="8" fill="none" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round"
@@ -40,49 +28,25 @@ function LoadingRing({ arc = 0.72, scale = 1, testId, className }: {
 }
 
 // meiva:note
-// The circle sits inside the revealed native scroll space and scales with it.
-// No visible instructions compete with the conversation; the label remains
-// accessible.
-// meiva:note
-// `loadingOlder` is the reader's own older-page request, not the store's
-// in-flight flag: the cold first-viewport fill and compact-history retention
-// page backwards on their own, and presenting them lit this strip for history
-// nobody pulled for (user report 2026-10-29). The strip keeps one ring element
-// for the whole request, so its spin never restarts mid-load.
+// The reader's request owns this overlay. Cold fill and compact-history
+// retention run in the background without presenting another ring.
 // meiva:link ui/web/src/docs/frontend-components/timeline-view/loading-ring.md
-export function LoadOlderSpinner({ loadingOlder, pullProgress = 0, pullOffset = 0, returning = false }: {
-  loadingOlder: boolean; pullProgress?: number; pullOffset?: number; returning?: boolean;
-}) {
+export function LoadOlderSpinner({ loadingOlder }: { loadingOlder: boolean }) {
   const t = useTranslations("timeline");
-  const visible = loadingOlder || pullOffset > 0;
-  const state = loadingOlder ? "loading" : pullProgress >= 1 ? "ready" : "pulling";
-  const height = pullOffset || (loadingOlder ? 40 : 0);
-  // meiva:note
-  // The strip is the revealed pull space and it is `overflow-hidden`, so a
-  // fixed-size ring is sliced into a bar for the first few pixels of a pull
-  // (user report 2026-10-20: "a spinner with no bottom"). Scaling it with the
-  // strip keeps the whole ring on screen at every pull distance.
-  // meiva:link ui/web/src/docs/frontend-components/timeline-view/sticky-scroll.md
-  const ringScale = height > 0 ? Math.min(1, height / RING_SIZE) : 1;
-  const arc = loadingOlder ? 0.72 : 0.18 + 0.54 * pullProgress;
   return (
     <div
       role="status"
-      aria-hidden={!visible}
+      aria-hidden={!loadingOlder}
       data-testid="load-older-spinner"
-      data-state={visible ? state : "idle"}
-      data-pull-offset={pullOffset}
-      style={{ height }}
+      data-state={loadingOlder ? "loading" : "idle"}
       className={cn(
-        "absolute top-11 inset-x-0 z-20 pointer-events-none text-muted-foreground justify-center items-center",
-        returning && "transition-[height,opacity] duration-200 ease-out motion-reduce:transition-none",
-        visible ? "opacity-100" : "opacity-0",
-        OVERFLOW_HIDDEN, FLEX,
+        "absolute right-5 top-14 z-20 h-8 w-8 rounded-full bg-background pointer-events-none",
+        "items-center justify-center text-muted-foreground",
+        loadingOlder ? "opacity-100" : "opacity-0",
+        FLEX,
       )}
     >
-      {visible ? (
-        <LoadingRing arc={arc} scale={ringScale} />
-      ) : null}
+      {loadingOlder ? <LoadingRing /> : null}
       <span className="sr-only">{t("loadingEarlier")}</span>
     </div>
   );
@@ -121,7 +85,7 @@ export function ColdLoadSpinner({ show }: { show: boolean }) {
       data-testid="cold-load-spinner"
       className={cn("pointer-events-none absolute inset-x-0 top-11 z-10 justify-center py-12 text-muted-foreground", FLEX)}
     >
-      <LoadingRing testId="cold-load-ring" arc={0.72} />
+      <LoadingRing testId="cold-load-ring" />
       <span className="sr-only">{t("loadingConversation")}</span>
     </div>
   );

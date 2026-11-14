@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import re
 import time
-from typing import TypedDict
+from typing import TypedDict, cast
 
 import pytest
 from playwright.sync_api import Page, Route
@@ -39,16 +39,16 @@ _SAMPLER_JS = """
     }
     if (anchorId === null) { anchorId = fallbackId; anchorTop = fallbackTop; }
     if (window.__tl.samples.length > 20000) return;
-    const reserve = vp.querySelector('[data-history-pull-space]');
-    const reserveBox = reserve?.getBoundingClientRect();
-    const exposedPullSpace = reserveBox ? Math.max(0, Math.min(reserveBox.height, reserveBox.bottom - vpRect.top)) : 0;
-    window.__tl.samples.push({ t: Math.round(performance.now()), why, st: vp.scrollTop, sh: vp.scrollHeight, n: Number(vp.querySelector('[role=log]').dataset.timelineItemCount), anchorId, anchorTop, exposedPullSpace, tops });
+    const measured = { t: Math.round(performance.now()), why, st: vp.scrollTop, sh: vp.scrollHeight, n: Number(vp.querySelector('[role=log]').dataset.timelineItemCount), anchorId, anchorTop, tops };
+    window.__tl.samples.push(measured);
+    return measured;
   };
   let raf = 0;
   const loop = () => { sample('raf'); raf = requestAnimationFrame(loop); };
   raf = requestAnimationFrame(loop);
   window.__tl.stop = () => cancelAnimationFrame(raf);
   vp.addEventListener('scroll', () => sample('scroll'), { passive: true });
+  window.__tl.sampleNow = () => sample('before-pull');
   sample('init');
   return {ok: true, n: Number(vp.querySelector('[role=log]').dataset.timelineItemCount), sh: vp.scrollHeight};
 }
@@ -57,7 +57,7 @@ _SAMPLER_JS = """
 _SCROLL_UP_JS = """
 () => {
   const vp = window.__tl.vp;
-  const boundary = vp.querySelector('[data-history-pull-space]').getBoundingClientRect().height;
+  const boundary = 0;
   window.__tl.arrivalEnded = vp.scrollTop <= boundary;
   const ended = event => {
     if (event.target === vp && vp.scrollTop <= boundary + 1) {
@@ -81,7 +81,6 @@ _SCROLL_UP_JS = """
 class _ReadingSample(TypedDict):
     anchorId: str | None
     anchorTop: float | None
-    exposedPullSpace: float
     tops: dict[str, float]
     st: float
     sh: float
@@ -92,7 +91,7 @@ def _reading_top(sample: _ReadingSample, anchor_id: str | None = None) -> float:
     target = anchor_id if anchor_id is not None else sample["anchorId"]
     top = sample["tops"].get(target, sample["anchorTop"]) if target else sample["anchorTop"]
     assert top is not None
-    return top - (sample["exposedPullSpace"] if target == "0.0" else 0)
+    return top
 
 
 # meiva:note
@@ -108,7 +107,7 @@ def _assert_anchor_samples(
         top = _reading_top(s, anchor_id)
         assert abs(top - before_top) < 3.0, (
             f"round {round_no}: reading position moved by "
-            f"{top - before_top:.1f}px beyond pull-space motion across the landing "
+            f"{top - before_top:.1f}px across the landing "
             f"(before={before_top:.1f}, after={top:.1f}, "
             f"st={s['st']}, sh={s['sh']}, n={s['n']}, anchor={anchor_id})"
         )
@@ -127,7 +126,6 @@ def _assert_landing_holds(page: Page, sample_start: int, round_no: int) -> None:
     anchor_id = before[-1]["anchorId"]
     assert anchor_id is not None
     _assert_anchor_samples(after, anchor_id, _reading_top(before[-1], anchor_id), round_no)
-    assert after[-1]["exposedPullSpace"] < 1, "the released pull left a blank space above history"
 
 
 def _wait_landing(
@@ -224,42 +222,48 @@ def _pull_history_page(page: Page, before_requests: list[str]) -> bool:
     box = viewport.bounding_box()
     assert box is not None
     page.mouse.move(box["x"] + box["width"] / 2, box["y"] + box["height"] / 2)
-    distance = viewport.locator("[data-history-pull-space]").evaluate(
-        "el => el.getBoundingClientRect().height"
-    )
-    page.mouse.wheel(0, -distance)
+    page.mouse.wheel(0, -100)
     deadline = time.monotonic() + 5.0
     while time.monotonic() < deadline and len(before_requests) == count:
         page.wait_for_timeout(50)
-    assert len(before_requests) == count + 1, "a released pull must request exactly one page"
+    assert len(before_requests) == count + 1, "a deliberate pull must request exactly one page"
     return True
 
 
-_WAIT_WHEEL_SETTLED_JS = """
-() => new Promise(resolve => {
-  const vp = window.__tl.vp;
-  let last = vp.scrollTop;
-  let stableFrames = 0;
-  const check = () => {
-    const cur = vp.scrollTop;
-    stableFrames = cur === last ? stableFrames + 1 : 0;
-    last = cur;
-    if (stableFrames >= 15) resolve(cur);
-    else requestAnimationFrame(check);
-  };
-  requestAnimationFrame(check);
-})
-"""
+def _reject_first_page(page: Page, before_requests: list[str], paused_routes: list[Route]) -> None:
+    _ = page.evaluate(_SCROLL_UP_JS)
+    _ = page.wait_for_function("() => window.__tl.arrivalEnded")
+    sample = cast(_ReadingSample, page.evaluate("window.__tl.sampleNow()"))
+    anchor = sample["anchorId"]
+    assert anchor is not None
+    start = cast(int, page.evaluate("window.__tl.samples.length"))
+
+    assert _pull_history_page(page, before_requests)
+    paused_routes.pop().fulfill(
+        status=503,
+        json={"detail": "Checkpoint history unavailable"},
+        content_type="application/json",
+    )
+    page.get_by_text("Failed to load older messages: Checkpoint history unavailable").wait_for()
+    _ = page.evaluate(
+        "() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)))"
+    )
+
+    after = cast(list[_ReadingSample], page.evaluate("window.__tl.samples"))[start:]
+    assert after
+    _assert_anchor_samples(after, anchor, _reading_top(sample, anchor), 0)
+    assert all(s["n"] == sample["n"] for s in after)
+
+    # meiva:note
+    # Leave the top and return so the successful retry starts a fresh wheel burst.
+    _ = page.evaluate("window.__tl.vp.scrollTop = 240")
+    page.wait_for_timeout(150)
 
 
 def _load_older_at_top(page: Page, before_requests: list[str], paused_routes: list[Route]) -> None:
     assert _pull_history_page(page, before_requests), "the initial history page is unavailable"
 
     assert len(paused_routes) == 1, "the first paging request was not held"
-    # meiva:note
-    # Chromium's smooth wheel animation (~150ms) outlives the first paging request and is not
-    # cancelled by programmatic scrollTop assignment; wait for stationary RAF frames before setting 600.
-    page.evaluate(_WAIT_WHEEL_SETTLED_JS)
     before_n = page.evaluate(
         "Number(window.__tl.vp.querySelector('[role=log]').dataset.timelineItemCount)"
     )
@@ -286,7 +290,7 @@ def test_load_older_preserves_reading_position(e2e_env: E2EEnv) -> None:
 
     def pause_first_page(route: Route) -> None:
         before_requests.append(route.request.url)
-        if len(before_requests) == 1:
+        if len(before_requests) <= 2:
             paused_routes.append(route)
         else:
             route.continue_()
@@ -331,6 +335,8 @@ def test_load_older_preserves_reading_position(e2e_env: E2EEnv) -> None:
 
     init = page.evaluate(_SAMPLER_JS)
     assert init.get("ok"), init
+
+    _reject_first_page(page, before_requests, paused_routes)
 
     rounds = _run_rounds(
         page, before_requests, paused_routes, init["n"], agent_id, e2e_env.gateway_url

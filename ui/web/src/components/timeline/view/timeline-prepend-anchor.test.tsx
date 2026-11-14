@@ -5,7 +5,7 @@ vi.mock("@/components/content/markdown", () => ({ ChatMarkdown: ChatMarkdownMock
 vi.mock("@/components/ui/scroll-area", () => ({ ScrollArea: ScrollAreaMock }));
 import { TimelineView } from "..";
 afterEach(cleanupTimelineTest);
-describe("load-older prepend anchor (#659, #817, #1272; release-to-load)", () => {
+describe("load-older prepend anchor (#659, #817, #1272)", () => {
   const rect = (top: number): DOMRect =>
     ({ top, bottom: top, left: 0, right: 0, width: 0, height: 0, x: 0, y: 0, toJSON: () => ({}) });
   beforeEach(() => {
@@ -26,7 +26,7 @@ describe("load-older prepend anchor (#659, #817, #1272; release-to-load)", () =>
     });
     pullOlderAtTop(viewport);
   };
-  it("momentum arrival alone does not load, and a subsequent released pull loads exactly once", () => {
+  it("momentum arrival alone does not load, and a fresh upward gesture loads exactly once", () => {
     const loadOlder = vi.fn();
     const items = [
       makeItem({ item_id: "0.0", kind: "system_prompt", payload: "prompt", created_at: null }),
@@ -43,6 +43,7 @@ describe("load-older prepend anchor (#659, #817, #1272; release-to-load)", () =>
     viewport.dispatchEvent(new Event("scroll"));
     historyWheel(viewport, -200, true);
     expect(loadOlder).not.toHaveBeenCalled();
+    vi.advanceTimersByTime(150);
     pullOlderAtTop(viewport);
     expect(loadOlder).toHaveBeenCalledTimes(1);
     viewport.scrollTop = 0;
