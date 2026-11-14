@@ -53,7 +53,7 @@ export function PendingQuestions({ questions, failed, maxWidthCss }: {
               aria-controls={contentId}
               onClick={() => setExpanded(!expanded)}
               className={cn(
-                "absolute bottom-3 left-4 h-8 items-center gap-2 rounded-lg px-2 text-xs font-medium text-muted-foreground hover:bg-muted hover:text-foreground focus-visible:outline-2 focus-visible:-outline-offset-2",
+                "absolute bottom-1 left-4 h-8 items-center gap-2 rounded-lg px-2 text-xs font-medium text-muted-foreground hover:bg-muted hover:text-foreground focus-visible:outline-2 focus-visible:-outline-offset-2",
                 FLEX,
               )}
             >

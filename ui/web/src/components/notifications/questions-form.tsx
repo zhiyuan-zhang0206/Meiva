@@ -125,7 +125,7 @@ export function QuestionsForm({
           {error && <p role="alert" className="px-4 pb-2 text-xs text-destructive">{error}</p>}
         </div>
       </div>
-      <div className="px-4 pb-3 pt-1">
+      <div className="px-4 py-1">
         <div
           inert={!expanded}
           aria-hidden={!expanded}
