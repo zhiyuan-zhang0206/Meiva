@@ -139,7 +139,13 @@ export function useOlderHistoryPull(
   const onScrollEnd = useCallback(() => {
     const current = gesture.current;
     if (current.touchY !== null) return;
-    if (current.phase === "pulling") release(true);
+    if (current.phase === "pulling") {
+      // meiva:note
+      // A boundary correction can emit scrollend after a fresh wheel has armed a pull,
+      // before that wheel's native movement. Only end a pull that entered the reserve.
+      // meiva:link ui/web/src/docs/frontend-components/timeline-view/history-paging.md
+      if (current.viewport && current.viewport.scrollTop < PULL_SPACE_PX) release(true);
+    }
     else if (current.phase === "scrolling" || current.phase === "returning") {
       current.phase = "idle";
       show(0);
@@ -160,16 +166,18 @@ export function useOlderHistoryPull(
     if (momentum === true) {
       release(true);
       current.momentum = true;
-      if (current.blockMomentum || (atTop && event.deltaY < 0)) event.preventDefault();
-      return;
-    }
-    if (current.phase === "loading" || current.phase === "returning") {
+      if (current.blockMomentum) {
+        event.preventDefault();
+        return;
+      }
+    } else if (current.phase === "loading" || current.phase === "returning") {
       event.preventDefault();
       return;
+    } else {
+      if (momentum === false && current.momentum && current.phase !== "pulling") current.phase = "idle";
+      current.momentum = false;
     }
-    if (momentum === false && current.momentum && current.phase !== "pulling") current.phase = "idle";
-    current.momentum = false;
-    if (current.phase === "idle") {
+    if (!current.momentum && current.phase === "idle") {
       current.blockMomentum = false;
       // Allow default scrolling in the prepared reserve so Chrome retains
       // the native gesture phase through stationary fingers and a slow lift.
@@ -179,7 +187,14 @@ export function useOlderHistoryPull(
       }
       else if (!atTop) current.phase = "scrolling";
     }
-    if (current.phase !== "pulling" && atTop && event.deltaY < 0) event.preventDefault();
+    if (current.phase === "pulling" || event.deltaY >= 0) return;
+    if (atTop) {
+      event.preventDefault();
+    } else if (event.cancelable && event.deltaMode === WheelEvent.DOM_DELTA_PIXEL &&
+        viewport.scrollTop + event.deltaY < PULL_SPACE_PX) {
+      event.preventDefault();
+      viewport.scrollTop = PULL_SPACE_PX;
+    }
   }, [release]);
 
   const onTouchStart = useCallback((event: TouchEvent, viewport: HTMLElement) => {
