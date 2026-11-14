@@ -163,6 +163,8 @@ describe("mobile sidebar attention", () => {
     if (count === 0) expect(pill).toBeNull();
     else {
       expect(pill?.textContent).toBe(count > 99 ? "99+" : String(count));
+      expect(pill?.className).toContain("bg-meiva-sunset-orange");
+      expect(pill?.className).toContain("text-white");
       expect(screen.getByRole("button", { name: `Open sidebar, ${count} pending updates and questions` })).toBeTruthy();
       expect(pill?.closest("button")?.className).toContain("md:hidden");
     }

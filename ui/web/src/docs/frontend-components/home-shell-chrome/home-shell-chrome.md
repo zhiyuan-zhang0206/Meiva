@@ -71,7 +71,7 @@ The collapsed rail's restore control and a collapsed right panel's reopen contro
 The restore control carries the unresolved-alert count and names it in its label,
 so collapsing the desktop rail keeps alert visibility (user 2026-10-21). The
 phone's menu button keeps the same alert-first behavior. With no alerts, the
-phone alone shows an orange attention count: unread agents, counted once each,
+phone alone shows a sunset-orange attention count with white digits: unread agents, counted once each,
 plus individual unanswered questions (user 2026-11-12). A batch of questions
 contributes each unanswered question. The count includes eligible unread
 publications of non-live agents and is independent of list display limits.
