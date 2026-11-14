@@ -118,11 +118,12 @@ describe("useTimeline compact history retention", () => {
         snapshotItem({ item_id: "s1.a.2.0", kind: "agent_chat", payload: "page 1b" }),
       ], true)),
     ]);
-    wireReplies.set("/api/agents/42/timeline?before=s1.a.1.0", [
-      resolves(tlResp([
+    let releaseSecond!: (reply: ReturnType<typeof resolves>) => void;
+    const secondReply = new Promise<ReturnType<typeof resolves>>((resolve) => { releaseSecond = resolve; });
+    const secondValue = resolves(tlResp([
         snapshotItem({ item_id: "s2.b.1.0", kind: "agent_chat", payload: "should not refetch after trim" }),
-      ], true)),
-    ]);
+      ], true));
+    wireReplies.set("/api/agents/42/timeline?before=s1.a.1.0", [secondReply]);
     wireReplies.set("/api/agents/42/timeline?before=s1.a.2.0", [
       resolves(tlResp([
         snapshotItem({ item_id: "s1.a.1.0", kind: "agent_chat", payload: "evicted page loop" }),
@@ -148,13 +149,15 @@ describe("useTimeline compact history retention", () => {
     });
     expect(result.current.compactBuffer).toBeNull();
 
+    await waitFor(() => expect(timelineReads.filter((r) => r.before !== undefined).map((r) => r.before)).toEqual(["2.0", "s1.a.1.0"]));
     act(() => {
       useTimelineStore.getState().trimOldestWhileFollowing(4);
     });
     expect(result.current.items.map((item) => item.item_id)).toEqual(["s1.a.2.0", "0.0", "1.0", "2.0"]);
 
     const countAfterTrim = timelineReads.filter((read) => read.before !== undefined).length;
-    await ctx.delay(30);
+    await act(async () => { releaseSecond(secondValue); await secondReply; });
+    await waitFor(() => expect(useTimelineStore.getState().loadingOlder).toBe(false));
     expect(timelineReads.filter((read) => read.before !== undefined)).toHaveLength(countAfterTrim);
     expect(result.current.items.some((item) => item.payload === "evicted page loop")).toBe(false);
   });
