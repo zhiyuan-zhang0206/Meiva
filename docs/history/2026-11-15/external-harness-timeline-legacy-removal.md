@@ -5,7 +5,7 @@ Following the verified rollout of [Antigravity record projection](../2026-11-13/
 ## Removed legacy paths
 
 - **Database and grants**: `agent_harness_messages` is dropped via forward migration `20261114T165000_drop-agent-harness-messages.sql` and removed from `db/schema.sql` (with folded prior `ALTER TABLE` migrations stamped in `schema_migrations`), role grant matrices, and migration smoke checks.
-- **Projector, store, and readers**: `HarnessTurnProjector` in `agent/graph/claim/harness_activity.py`, `TurnSink` and `NullTurnSink` in `agent/graph/claim/harness_turn.py`, the `base/agents/history/harness_messages.py` table store and copy/query helpers, and all `agent_harness_messages` reader, fallback, birth-copy, switch-note, and lost-turn branches are removed.
+- **Projector, store, and readers**: `HarnessTurnProjector` and the legacy sink protocol in `agent/graph/claim/harness_activity.py`, the `base/agents/history/harness_messages.py` table store and copy/query helpers, and all `agent_harness_messages` reader, fallback, birth-copy, switch-note, and lost-turn branches are removed.
 - **Wire and session residue**: `RUNNING_REVISION` and `TimelineItem.activity_revision`, `TimelineItem.parent_item_id`, `TimelineItem.tool_use_id`, the `"subagent_text"` item kind, `"harness_messages"` / `"harness_transcript"` timeline source literals, session/adapter sub-agent staging, frontend child-nesting and revision-merge branches, and the unreferenced Antigravity `transcript.json` row parser (`parse.py`, `fields.py`, and its fixtures) are deleted.
 
 ## Retained boundaries
