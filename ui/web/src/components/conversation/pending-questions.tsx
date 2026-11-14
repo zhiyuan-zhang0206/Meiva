@@ -62,7 +62,7 @@ export function PendingQuestions({ agentId, questions, failed, maxWidthCss }: {
             >
               <ChevronUp
                 aria-hidden
-                className={cn("size-4 motion-safe:transition-transform motion-safe:duration-150", expanded && "rotate-180")}
+                className={cn("size-4", expanded && "rotate-180")}
               />
               {!expanded && <span>{label}</span>}
             </button>
