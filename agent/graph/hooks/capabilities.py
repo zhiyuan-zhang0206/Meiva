@@ -127,6 +127,7 @@ class _NewlyInstalledSkillsHook(Hook):
                     tag=NoteTag.NEW_SKILLS,
                     picked_up_at=now,
                     created_at=now,
+                    inputs=runtime.context.timestamp_policy(),
                 )
             ],
             "capabilities": CapabilitiesState(indexed=drift.identifiers),

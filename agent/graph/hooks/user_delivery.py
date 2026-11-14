@@ -11,6 +11,7 @@ from base.agents.history.timeline import ai_message_items
 from base.agents.history.timeline_item import TimelineItem
 from base.agents.messages.kwargs import NoteTag
 from base.agents.messages.reply_intent import SDK_DELIVERY_RULE
+from base.agents.messages.timestamp_policy import TimestampPolicy
 from base.agents.to_user.delivery.store import (
     DeliveryConflictError,
     latest_decision,
@@ -134,6 +135,7 @@ async def with_pending_deliveries[T: BaseMessage](
             tag=NoteTag.REPLY_VISIBILITY,
             picked_up_at=now,
             created_at=now,
+            inputs=ctx.timestamp_policy(),
         ),
     ]
 
@@ -156,14 +158,15 @@ async def delivery_end_reminder(
         raise FatalLLMStreamError(
             "SDK delivery contract violated: the turn ended twice without publishing, asking, or recording no update"
         )
-    return publication_reminder(ctx.require_clock().now())
+    return publication_reminder(ctx.require_clock().now(), inputs=ctx.timestamp_policy())
 
 
-def publication_reminder(now: datetime) -> HumanMessage:
+def publication_reminder(now: datetime, *, inputs: TimestampPolicy) -> HumanMessage:
     return system_note_message(
         content="This turn ended without publishing, asking, or explicitly recording no update. "
         + SDK_DELIVERY_RULE,
         tag=NoteTag.REPLY_VISIBILITY,
         picked_up_at=now,
         created_at=now,
+        inputs=inputs,
     )

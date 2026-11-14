@@ -2,16 +2,21 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import pytest
+
 from base.lm.harness import ContextCompacted
 from base.lm.harness.handoff import compaction_reminder
 from base.lm.harness.tests.bridge_support import run_turn
 from base.lm.harness.tests.test_bridge import FakeSession, handoff, make_bridge
 
 
-async def test_a_compaction_adds_a_reminder_to_the_next_turns_opening_input_only() -> None:
+@pytest.mark.parametrize("stamp", ["", "[2026-11-14 Sat 16:05:51] "])
+async def test_a_compaction_adds_a_reminder_to_the_next_turns_opening_input_only(
+    stamp: str,
+) -> None:
     session = FakeSession(during=[ContextCompacted(turn_id="t1")])
     doc = handoff().with_reference_file(Path("/agents/6984/meiva_instructions.md"))
-    bridge = make_bridge(session, handoff=doc)
+    bridge = make_bridge(session, handoff=doc, stamp=stamp)
 
     _ = await run_turn(bridge, "one", key="inbound-1")
     session._during = ()
@@ -20,8 +25,8 @@ async def test_a_compaction_adds_a_reminder_to_the_next_turns_opening_input_only
 
     reminder = compaction_reminder(Path("/agents/6984/meiva_instructions.md"))
     assert [text for text, _, _ in session.submitted] == [
-        f"{doc.render().strip()}\n\none",
-        f"{reminder}\n\ntwo",
+        f"{stamp}{doc.render().strip()}\n\none",
+        f"{stamp}{reminder}\n\ntwo",
         "three",
     ]
     assert "/agents/6984/meiva_instructions.md" in reminder

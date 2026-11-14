@@ -86,6 +86,7 @@ class HarnessBridge:
         agent_id: int,
         factory: Callable[[str], HarnessSession],
         *,
+        timestamp_prefix: Callable[[], str],
         machine: str = "",
         handoff: Handoff | None = None,
         registrations: RegistrationStore | None = None,
@@ -95,6 +96,7 @@ class HarnessBridge:
         controller_pid: int,
         own_turn: Callable[[], None] | None = None,
     ) -> None:
+        self._timestamp_prefix = timestamp_prefix
         self.harness = harness
         self._own_turn = own_turn
         self._agent_id = agent_id
@@ -338,10 +340,14 @@ class HarnessBridge:
             rendered = self._handoff.render().strip()
             self._opening_key = key
             if not text.startswith(rendered):
-                text = f"{rendered}\n\n{text}" if text else rendered
+                text = (
+                    f"{self._timestamp_prefix()}{rendered}\n\n{text}"
+                    if text
+                    else f"{self._timestamp_prefix()}{rendered}"
+                )
         elif self._context_compacted and self._instructions_file is not None and text:
             self._opening_key = key
-            reminder = compaction_reminder(self._instructions_file)
+            reminder = f"{self._timestamp_prefix()}{compaction_reminder(self._instructions_file)}"
             if compaction_note:
                 reminder = f"{reminder}\n\n{compaction_note}"
             text = f"{reminder}\n\n{text}"
@@ -374,6 +380,7 @@ class HarnessBridge:
             count=len(self._lost),
             harness=self.harness.value,
         )
+        note = f"{self._timestamp_prefix()}{note}"
         return f"{note}\n\n{text}" if text else note
 
     # meiva:note

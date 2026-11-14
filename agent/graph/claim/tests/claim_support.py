@@ -51,6 +51,7 @@ def make_runtime(
     event_publisher: AgentEventPublisher | None = None,
     extensions: ExtensionRegistry = EMPTY,
     agent_id: int | None = None,
+    timestamps_enabled: bool | None = None,
     database_gate: ProcessDbGate,
 ) -> Runtime[MeivaContext]:
     retained = meiva.context
@@ -65,7 +66,13 @@ def make_runtime(
         ops_pool=ops_pool,
         llm=llm if llm is not None else make_fake_llm(),
         event_publisher=event_publisher if event_publisher is not None else MagicMock(),
-        agent=AgentSlices.resolve(default_reader=defaults()),
+        agent=AgentSlices.resolve(
+            default_reader=(
+                defaults()
+                if timestamps_enabled is None
+                else defaults(general__message_timestamps=timestamps_enabled)
+            )
+        ),
         clock_factory=Clock.from_settings,
         extensions=extensions,
         db=Database.from_settings(gate=database_gate),

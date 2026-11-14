@@ -418,6 +418,7 @@ class AgentHost:
                 controller_pid=self._policy.pid,
                 handle_rng=self._policy.rng,
                 own_turn=self._wake_resumed,
+                timestamp_prefix=lambda: self._handoff_stamping.policy().prefix(),
             ),
             contributions=tuple(hc for _, hc in self._extensions.harness_contributions(harness)),
             unsolicited=partial(self._report_unsolicited, agent_id),

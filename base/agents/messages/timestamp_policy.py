@@ -51,6 +51,13 @@ class TimestampPolicy:
     def format(self, moment: datetime) -> str:
         return format_message_timestamp(moment, timezone=self.timezone, weekday=self.weekday)
 
+    # meiva:note
+    # The model-facing prefix, empty when disabled; an off policy needs no instant.
+    def prefix(self, moment: datetime | None = None) -> str:
+        if not self.timestamps_enabled:
+            return ""
+        return f"{self.format(moment) if moment is not None else self.now_stamp()} "
+
     def now_stamp(self) -> str:
         return self.format(self.require_now())
 

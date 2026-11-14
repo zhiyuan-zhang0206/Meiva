@@ -166,6 +166,7 @@ def _process_context_file(
                     tag=NoteTag.CONTEXT,
                     picked_up_at=now,
                     created_at=now,
+                    inputs=process_context.current_context().timestamp_policy(),
                 )
             ]
         }

@@ -68,6 +68,7 @@ async def test_codex_cancel_waits_for_matching_terminal_or_session_failure(
         clock=system_clock(),
         handle_rng=SecureRandom(random.SystemRandom()),
         controller_pid=os.getpid(),
+        timestamp_prefix=lambda: "",
     )
     task = asyncio.create_task(run_turn(bridge, "user work", key="inbound-1"))
     try:
@@ -117,6 +118,7 @@ async def test_a_quiet_turn_keeps_its_attachment_after_the_original_expiry(tmp_p
         clock=clock,
         handle_rng=SecureRandom(random.SystemRandom()),
         controller_pid=os.getpid(),
+        timestamp_prefix=lambda: "",
     )
 
     turn = asyncio.create_task(run_turn(bridge, "wait quietly", key="inbound-1"))
@@ -167,6 +169,7 @@ async def test_confirmed_failed_first_turn_leaves_the_session_reusable(tmp_path:
         clock=system_clock(),
         handle_rng=SecureRandom(random.SystemRandom()),
         controller_pid=os.getpid(),
+        timestamp_prefix=lambda: "",
     )
     try:
         with pytest.raises(HarnessTurnFaultedError, match="failed"):
@@ -218,6 +221,7 @@ async def test_cancel_waits_for_codex_provider_id(
         clock=system_clock(),
         handle_rng=SecureRandom(random.SystemRandom()),
         controller_pid=os.getpid(),
+        timestamp_prefix=lambda: "",
     )
     task = asyncio.create_task(run_turn(bridge, "user work", key="inbound-1"))
     try:
@@ -256,6 +260,7 @@ async def test_interrupt_error_leaves_foreground_running(tmp_path: Path) -> None
         clock=system_clock(),
         handle_rng=SecureRandom(random.SystemRandom()),
         controller_pid=os.getpid(),
+        timestamp_prefix=lambda: "",
     )
     task = asyncio.create_task(run_turn(bridge, "user work", key="inbound-1"))
     try:
@@ -296,6 +301,7 @@ async def test_observed_process_residue_blocks_subsequent_sessions(tmp_path: Pat
         clock=system_clock(),
         handle_rng=SecureRandom(random.SystemRandom()),
         controller_pid=os.getpid(),
+        timestamp_prefix=lambda: "",
     )
     await run_turn(bridge, "work", key="inbound-1")
     probe.spawn(5150, "sleep 40")
@@ -329,6 +335,7 @@ async def test_claude_cancel_during_first_turn_keeps_the_handoff_and_the_session
         clock=system_clock(),
         handle_rng=SecureRandom(random.SystemRandom()),
         controller_pid=os.getpid(),
+        timestamp_prefix=lambda: "",
     )
     task = asyncio.create_task(run_turn(bridge, "user work", key="inbound-1"))
     try:

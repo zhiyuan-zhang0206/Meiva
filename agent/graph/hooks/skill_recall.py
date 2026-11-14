@@ -145,6 +145,7 @@ class SkillRecallHook(Hook):
                     agent_id=agent_id_from_config(config),
                     peer_turn=not tail_has_skill_recall_inbound(state.messages),
                     created_at=runtime.context.require_clock().now(),
+                    inputs=runtime.context.timestamp_policy(),
                 ),
                 timeout=deadline,
             )

@@ -25,7 +25,12 @@ class _DeliverReplyVisibilityCorrection(Hook):
             if isinstance(message, AIMessage):
                 if message.tool_calls and has_invalid_reply_visibility(message):
                     return {
-                        "messages": [reply_visibility_note(runtime.context.require_clock().now())]
+                        "messages": [
+                            reply_visibility_note(
+                                runtime.context.require_clock().now(),
+                                inputs=runtime.context.timestamp_policy(),
+                            )
+                        ]
                     }
                 return None
             if read_meiva_kwargs(message).get("meiva_note_tag") == NoteTag.REPLY_VISIBILITY:

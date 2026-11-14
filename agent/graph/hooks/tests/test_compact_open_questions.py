@@ -11,6 +11,7 @@ from langchain_core.messages import AnyMessage, HumanMessage, SystemMessage
 
 from agent.graph.hooks.compact import compact_reminder_update
 from agent.state import AgentState
+from base.agents.messages.timestamp_policy import TimestampPolicy
 from base.agents.questions.model import OpenQuestion
 from base.api_contracts.question import QuestionType, TextQuestion
 from base.config.tests.configuration import defaults
@@ -44,6 +45,7 @@ def _reminder(questions: list[OpenQuestion]) -> str:
         extensions=EMPTY,
         open_questions=questions,
         now=_NOW,
+        inputs=TimestampPolicy.off(),
     )
     assert update is not None
     [note] = update["messages"]
