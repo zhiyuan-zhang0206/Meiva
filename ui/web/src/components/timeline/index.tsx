@@ -137,7 +137,9 @@ export const TimelineView = memo(function TimelineView({
   const sendReserveRef = useRef<HTMLDivElement>(null);
   const collapseReserveRef = useRef<HTMLDivElement>(null);
 
-  const pendingRestoreRef = useRef<SavedScroll | null>(scrollMemoryKey ? readScrollMemory(scrollMemoryKey) : null);
+  const [savedPosition] = useState(() => scrollMemoryKey ? readScrollMemory(scrollMemoryKey) : null);
+  const pendingRestoreRef = useRef(savedPosition);
+  const hasSavedReadingPosition = savedPosition !== null && savedPosition.contentKey === threadKey && !savedPosition.followBottom;
 
   const holdRestoredPositionRef = useRef(!!pendingRestoreRef.current && !pendingRestoreRef.current.followBottom);
   const settledRestoreRef = useRef<SavedScroll | null>(null);
@@ -473,7 +475,7 @@ export const TimelineView = memo(function TimelineView({
 
   const [, applyReveal] = useReducer((count: number) => count + 1, 0);
   useLayoutEffect(() => {
-    if (reveal === null || threadKey === undefined) return;
+    if (reveal === null || threadKey === undefined || hasSavedReadingPosition) return;
     const item = canonicalItemsRef.current.find((candidate) => candidate.item_id === reveal.itemId);
     if (item === undefined) return;
     cancelBookmark();
@@ -490,7 +492,7 @@ export const TimelineView = memo(function TimelineView({
     holdRestoredPositionRef.current = true;
     restoreProbeRef.current = { height: -1, passes: 0 };
     applyReveal();
-  }, [reveal, threadKey, cancelBookmark, restoreProbeRef]);
+  }, [reveal, threadKey, hasSavedReadingPosition, cancelBookmark, restoreProbeRef]);
 
   useThreadPin({
     threadKey,
