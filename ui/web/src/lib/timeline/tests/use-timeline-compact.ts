@@ -302,7 +302,7 @@ describe("useTimeline SSE inbound flow", () => {
     await waitFor(() => expect(timelineReads).toHaveLength(2));
   });
 
-  it("timeline_snapshot push delivers envelope-wrap inbound_chat into the timeline", async () => {
+  it("timeline_snapshot push delivers display-ready inbound_chat into the timeline", async () => {
     const showError = vi.fn();
     timeline.queue(resolves(tlResp([
       snapshotItem({ item_id: "1.0", kind: "code_output", payload: "previous" }),
@@ -337,7 +337,7 @@ describe("useTimeline SSE inbound flow", () => {
 
     await waitFor(() => {
       const inbound = result.current.items.find((i) => i.inbound_id === 100);
-      expect(inbound?.payload).toContain("User:");
+      expect(inbound?.payload).toBe("msg");
     });
     expect(result.current.items).toHaveLength(2);
   });
