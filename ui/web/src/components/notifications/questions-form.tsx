@@ -129,12 +129,12 @@ export function QuestionsForm({
           onEnter={(answer) => void submit({ id: question.id, answer })}
         />
       </ScrollArea>
-      <div className="border-t border-border/60 px-4 py-2">
+      <div className="px-4 pb-3 pt-1">
         {changed && <p role="status" className="mb-2 text-xs text-muted-foreground">{t("questionsChanged")}</p>}
         {error && <p role="alert" className="mb-2 text-xs text-destructive">{error}</p>}
         <div className={cn("items-center justify-between gap-2", FLEX)}>
           {ordered.length > 1 ? (
-            <nav aria-label={t("questionNavigation")} className={cn("items-center gap-1", FLEX)}>
+            <nav aria-label={t("questionNavigation")} className={cn("items-center gap-0.5", FLEX)}>
               <Button
                 variant="ghost"
                 size="icon"
@@ -144,7 +144,7 @@ export function QuestionsForm({
               >
                 <ChevronLeft aria-hidden="true" />
               </Button>
-              <span aria-live="polite" className="min-w-10 text-center text-xs tabular-nums text-muted-foreground">
+              <span aria-live="polite" className="min-w-9 text-center text-xs tabular-nums text-muted-foreground">
                 {t("questionPosition", { current: index + 1, total: ordered.length })}
               </span>
               <Button
@@ -160,6 +160,8 @@ export function QuestionsForm({
           ) : <span />}
           <Button
             type="submit"
+            size="sm"
+            className="disabled:bg-muted disabled:text-muted-foreground disabled:opacity-100"
             disabled={pending || !ready}
             title={ready ? undefined : t("answerAllHint")}
             aria-busy={pending}
@@ -189,12 +191,12 @@ function QuestionRow({
   const t = useTranslations("questionDetail");
   const skipped = draft.skipped;
   return (
-    <article aria-label={question.title} className="space-y-3 p-4">
+    <article aria-label={question.title} className="space-y-3 px-4 pb-3 pt-3.5">
       <div className={cn("items-start justify-between gap-2", FLEX)}>
         <div className={cn(MIN_W_0, "space-y-1.5")}>
-          <h4 className="text-sm font-semibold leading-snug break-words"><ChatMarkdown content={question.title} inline /></h4>
+          <h4 className="text-[15px] font-medium leading-snug break-words"><ChatMarkdown content={question.title} inline /></h4>
           {question.content && (
-            <div className="text-[13px] break-words text-foreground/85">
+            <div className="text-[13px] break-words text-muted-foreground">
               <ChatMarkdown content={question.content} />
             </div>
           )}

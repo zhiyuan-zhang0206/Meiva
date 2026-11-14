@@ -35,8 +35,9 @@ it("opens expanded by default above the composer and retains independent drafts 
   const toggle = screen.getByRole("button", { name: "2 questions waiting" });
   expect(toggle.getAttribute("aria-expanded")).toBe("true");
   const answerLayer = document.getElementById(toggle.getAttribute("aria-controls")!)!;
-  expect(answerLayer.className).toContain("absolute");
-  expect(answerLayer.className).toContain("bottom-full");
+  expect(answerLayer.parentElement?.className).toContain("absolute");
+  expect(answerLayer.parentElement?.className).toContain("bottom-1");
+  expect(answerLayer.parentElement).toBe(toggle.parentElement);
   const input = () => screen.getByRole<HTMLTextAreaElement>("textbox");
   expect(input().value).toBe("");
   fireEvent.change(input(), { target: { value: "First answer" } });

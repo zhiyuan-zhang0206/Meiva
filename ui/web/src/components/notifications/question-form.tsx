@@ -72,7 +72,7 @@ export function QuestionForm({
     if (focusAnswer) textRef.current?.focus();
   }, [focusAnswer]);
 
-  const inputClass = cn("min-h-9 text-foreground placeholder:text-muted-foreground/60 resize-none py-2 font-mono text-[13px] leading-snug md:text-[13px] pointer-coarse:text-base md:pointer-coarse:text-base", FLEX_1);
+  const inputClass = cn("min-h-9 text-foreground placeholder:text-muted-foreground/60 resize-none py-2 text-[13px] leading-snug md:text-[13px] pointer-coarse:text-base md:pointer-coarse:text-base", FLEX_1);
   const single = question.type === "single_select";
   const choose = (id: string, checked: boolean) => {
     setDraft({
@@ -82,7 +82,7 @@ export function QuestionForm({
         : checked ? [...draft.optionIds, id] : draft.optionIds.filter((v) => v !== id),
     });
   };
-  const optionClass = cn(FLEX, "-mx-2 cursor-pointer items-start gap-2 rounded px-2 py-1.5 text-[13px] leading-snug hover:bg-muted/40 has-[:focus-visible]:ring-2 has-[:focus-visible]:ring-ring");
+  const optionClass = cn(FLEX, "-mx-2 cursor-pointer items-start gap-2 rounded-md px-2 py-1.5 text-[13px] leading-snug hover:bg-muted/40 has-[:checked]:bg-muted/50 has-[:focus-visible]:ring-2 has-[:focus-visible]:ring-ring");
 
   const applySuggestion = (field: "text" | "comment", event: KeyboardEvent<HTMLTextAreaElement>) => {
     if (!draft[field] && question.note_suggestion && !pending && !isImeComposition(event)
