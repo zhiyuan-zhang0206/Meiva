@@ -73,6 +73,8 @@ export interface SendAnchorArgs {
   controller: StickyController;
   isFollowing: () => boolean;
   topOffset: number;
+  turnActive: boolean;
+  savedSendReserve: boolean;
   measureAtBottom: () => void;
   cancelBookmark: () => void;
 }
@@ -108,13 +110,12 @@ function offsetInViewport(viewport: HTMLElement, node: HTMLElement): number {
 }
 
 // meiva:note
-// The reserve belongs to the latest human row, even while the reader is in
-// history. Its leading edge gives the real content height independently of
-// the viewport's minimum scrollHeight and of any previous reserve.
+// The reserve's leading edge gives the real content height independently of
+// the viewport's minimum scrollHeight or any space at the end.
 // meiva:link ui/web/src/docs/frontend-components/timeline-view/send-anchor.md
 export function useSendAnchor({
   items, compactBuffer, threadKey, viewportRef, wrapperRef, reserveRef, controller,
-  isFollowing, topOffset, measureAtBottom, cancelBookmark,
+  isFollowing, topOffset, turnActive, savedSendReserve, measureAtBottom, cancelBookmark,
 }: SendAnchorArgs) {
   const request = useTimelineStore((state) => state.sendAnchor);
   const consumedSeq = useRef(request.seq);
@@ -128,12 +129,14 @@ export function useSendAnchor({
     id: latestId, rank: latestRank,
   }, [latestId, latestRank]);
   const reserveTarget = useRef<ReadingTarget | null>(null);
+  const keepReserve = useRef(false);
+  const reserveEnabled = useCallback(() => keepReserve.current, []);
   const parkedTarget = useRef<ReadingTarget | null>(null);
 
   const writeReserve = useCallback((viewport: HTMLElement, node: HTMLElement | null) => {
     const reserve = reserveRef.current;
     if (!reserve) return;
-    const height = node ? parkReserve(
+    const height = node && keepReserve.current ? parkReserve(
       parkScrollTop(viewport.scrollTop + offsetInViewport(viewport, node), topOffset),
       viewport.clientHeight,
       viewport.scrollTop + offsetInViewport(viewport, reserve),
@@ -144,7 +147,7 @@ export function useSendAnchor({
 
   const maintain = useCallback((viewport: HTMLElement) => {
     const row = latestTarget && rowFor(viewport, latestTarget);
-    if (row || latestTarget !== reserveTarget.current) writeReserve(viewport, row);
+    if (row || latestTarget !== reserveTarget.current || !keepReserve.current) writeReserve(viewport, row);
     reserveTarget.current = latestTarget;
     if (!controller.isAnchored()) parkedTarget.current = null;
     const parked = parkedTarget.current !== null && parkedTarget.current === latestTarget;
@@ -177,6 +180,8 @@ export function useSendAnchor({
     const row = rowFor(viewport, latestTarget);
     if (row) {
       if (offsetInViewport(viewport, row) <= topOffset + 1) return false;
+      if (!keepReserve.current && viewport.scrollTop + offsetInViewport(viewport, row) - topOffset >=
+          viewport.scrollHeight - viewport.clientHeight) return false;
       park(viewport, row);
     } else {
       if (!latestRowBelowWindow) return false;
@@ -196,7 +201,23 @@ export function useSendAnchor({
     pendingSend.current = undefined;
     reserveTarget.current = null;
     parkedTarget.current = null;
-  }, [threadKey]);
+    keepReserve.current = savedSendReserve;
+  }, [threadKey, savedSendReserve]);
+
+  useLayoutEffect(() => {
+    if (turnActive) keepReserve.current = true;
+  }, [threadKey, turnActive]);
+
+  // meiva:note
+  // Completing a turn keeps its layout. Once the reader moves back through
+  // the natural end, removing space below the viewport leaves the row in place.
+  // meiva:link ui/web/src/docs/frontend-components/timeline-view/send-anchor.md
+  const releaseReserve = useCallback((viewport: HTMLElement, naturalEnd: number) => {
+    if (turnActive || !keepReserve.current || viewport.scrollTop > naturalEnd) return;
+    keepReserve.current = false;
+    parkedTarget.current = null;
+    writeReserve(viewport, null);
+  }, [turnActive, writeReserve]);
 
   // meiva:note
   // A virtual row must mount before the alignment is measured. The layout
@@ -218,6 +239,7 @@ export function useSendAnchor({
       else {
         const item = inboundId === null ? latestHuman : items.find((candidate) => candidate.inbound_id === inboundId && isHumanMessage(candidate));
         if (item) {
+          keepReserve.current = true;
           pendingSend.current = undefined;
           const rank = compactBuffer?.rows.find((row) => row.item === item)?.rank ?? parseItemIdParts(item.item_id)?.rank ?? 0;
           const target = { id: item.item_id, rank };
@@ -245,5 +267,5 @@ export function useSendAnchor({
   });
 
   const pendingTarget = pendingJump?.threadKey === threadKey ? pendingJump?.target ?? null : null;
-  return { latestTarget, pendingTarget, jumpToLatestHuman, cancelPendingJump, maintain };
+  return { latestTarget, pendingTarget, jumpToLatestHuman, cancelPendingJump, maintain, releaseReserve, reserveEnabled };
 }

@@ -7,15 +7,16 @@ import type { StickyController } from "@/lib/layout/sticky";
 // meiva:link ui/web/src/docs/frontend-components/timeline-view/sticky-scroll.md
 export function rememberTimelinePosition(
   viewport: HTMLElement, entryKey: string, contentKey: string, controller: StickyController,
-  tailHeight = viewport.scrollHeight, collapseReserve = 0,
+  tailHeight = viewport.scrollHeight, collapseReserve = 0, keepSendReserve = false,
 ) {
   const position = {
     scrollTop: viewport.scrollTop,
     scrollHeight: tailHeight,
     clientHeight: viewport.clientHeight,
   };
+  const reserveMemory = keepSendReserve ? { keepSendReserve: true as const } : {};
   if (controller.isAtTail(position, tailHeight < viewport.scrollHeight)) {
-    saveScrollMemory(entryKey, { contentKey, scrollTop: position.scrollTop, followBottom: true });
+    saveScrollMemory(entryKey, { contentKey, scrollTop: position.scrollTop, followBottom: true, ...reserveMemory });
     return;
   }
   const rect = viewport.getBoundingClientRect();
@@ -26,7 +27,7 @@ export function rememberTimelinePosition(
     return box.bottom > rect.top + BAR_HEIGHT_PX && box.top < rect.bottom;
   });
   saveScrollMemory(entryKey, {
-    contentKey, scrollTop: viewport.scrollTop, followBottom: false,
+    contentKey, scrollTop: viewport.scrollTop, followBottom: false, ...reserveMemory,
     ...(collapseReserve > 0 && viewport.scrollTop + viewport.clientHeight > viewport.scrollHeight - collapseReserve + 1
       ? { usedCollapseReserve: true as const } : {}),
     anchor: node?.dataset.itemId ? {

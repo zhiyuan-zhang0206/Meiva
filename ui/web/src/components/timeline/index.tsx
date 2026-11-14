@@ -208,12 +208,6 @@ export const TimelineView = memo(function TimelineView({
   const tailHeight = useCallback((viewport: HTMLElement) =>
     Math.max(viewport.clientHeight, viewport.scrollHeight - readingReserve()), [readingReserve]);
 
-  useLayoutEffect(() => () => {
-    const mem = scrollMemoryRef.current;
-    const viewport = viewportRef.current;
-    if (mem && viewport && !restoreInFlight()) rememberTimelinePosition(viewport, mem.entryKey, mem.contentKey, controller, tailHeight(viewport), collapseReserveHeight());
-  }, [restoreInFlight, controller, tailHeight, collapseReserveHeight]);
-
   const isFollowing = useCallback(() => !holdRestoredPositionRef.current && controller.isSticky(), [controller]);
   const canonicalItemsRef = useRef(canonicalItems);
   const retainedItemsMaxRef = useRef(retainedItemsMax);
@@ -326,7 +320,8 @@ export const TimelineView = memo(function TimelineView({
     holdRestoredPositionRef.current = false;
   }, [pendingAnchorRef]);
 
-  const { latestTarget, pendingTarget, jumpToLatestHuman, cancelPendingJump, maintain: maintainSendAnchor } = useSendAnchor({
+  const { latestTarget, pendingTarget, jumpToLatestHuman, cancelPendingJump, maintain: maintainSendAnchor,
+    releaseReserve: releaseSendReserve, reserveEnabled: sendReserveEnabled } = useSendAnchor({
     items,
     compactBuffer,
     threadKey,
@@ -336,9 +331,17 @@ export const TimelineView = memo(function TimelineView({
     controller,
     isFollowing,
     topOffset: READING_TOP_PX,
+    turnActive,
+    savedSendReserve: hasSavedPosition && savedPosition.keepSendReserve === true,
     measureAtBottom,
     cancelBookmark,
   });
+
+  useLayoutEffect(() => () => {
+    const mem = scrollMemoryRef.current;
+    const viewport = viewportRef.current;
+    if (mem && viewport && !restoreInFlight()) rememberTimelinePosition(viewport, mem.entryKey, mem.contentKey, controller, tailHeight(viewport), collapseReserveHeight(), sendReserveEnabled());
+  }, [restoreInFlight, controller, tailHeight, collapseReserveHeight, sendReserveEnabled]);
 
   const compactPin = useCompactTransitionAnchor({
     controller,
@@ -458,6 +461,8 @@ export const TimelineView = memo(function TimelineView({
     applyPendingRestore,
     settleRestoredPosition,
     maintainSendAnchor,
+    releaseSendReserve,
+    sendReserveEnabled,
     releaseCollapseReserve,
     collapseReserveHeight,
     readingReserve,

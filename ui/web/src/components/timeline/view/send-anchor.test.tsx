@@ -132,10 +132,10 @@ describe("send anchor", () => {
   });
 
   it("keeps a clicked question aligned through a layout scroll before ResizeObserver", () => {
-    const view = render(<TimelineView items={[earlier]} />);
+    const view = render(<TimelineView turnActive items={[earlier]} />);
     act(() => { top = 100; viewport().dispatchEvent(new Event("scroll")); });
     content = 1400;
-    view.rerender(<TimelineView items={[earlier, sent]} />);
+    view.rerender(<TimelineView turnActive items={[earlier, sent]} />);
     act(() => { screen.getByTestId("scroll-to-bottom").click(); });
     expect(top).toBe(1244);
 
@@ -172,11 +172,11 @@ describe("send anchor", () => {
   });
 
   it("makes room to align the latest human message manually, even after a send from history", () => {
-    const view = render(<TimelineView items={[earlier]} />);
+    const view = render(<TimelineView turnActive items={[earlier]} />);
     act(() => { top = 100; viewport().dispatchEvent(new Event("scroll")); });
     act(() => { useTimelineStore.getState().requestSendAnchor(7); });
     content = 1400;
-    view.rerender(<TimelineView items={[earlier, sent]} />);
+    view.rerender(<TimelineView turnActive items={[earlier, sent]} />);
     expect(top).toBe(100);
     expect(reservePx()).toBe(444);
 
@@ -190,10 +190,10 @@ describe("send anchor", () => {
   });
 
   it("moves down through the remaining reserve when the content end is above the reader", () => {
-    const view = render(<TimelineView items={[earlier]} />);
+    const view = render(<TimelineView turnActive items={[earlier]} />);
     act(() => { top = 100; viewport().dispatchEvent(new Event("scroll")); });
     content = 1400;
-    view.rerender(<TimelineView items={[earlier, sent]} />);
+    view.rerender(<TimelineView turnActive items={[earlier, sent]} />);
     act(() => { top = 1000; viewport().dispatchEvent(new Event("scroll")); });
     const button = screen.getByTestId("scroll-to-bottom");
 
@@ -201,6 +201,52 @@ describe("send anchor", () => {
 
     expect(top).toBe(1244);
     expect(screen.queryByTestId("scroll-to-bottom")).toBeNull();
+  });
+
+  it("holds working space through completion and releases it only after scrolling up past the natural end", () => {
+    const items = [earlier, sent];
+    content = 1400;
+    const view = render(<TimelineView items={items} turnActive threadKey="42" scrollMemoryKey="finished-reserve" />);
+    const move = (next: number, wheel: number) => {
+      act(() => {
+        viewport().dispatchEvent(new WheelEvent("wheel", { deltaY: wheel, bubbles: true }));
+        viewport().scrollTop = next;
+        viewport().dispatchEvent(new Event("scroll"));
+      });
+    };
+
+    move(1244, 1000);
+    move(750, -494);
+    expect(reservePx()).toBe(444);
+    move(3000, 1000);
+    expect(top).toBe(1244);
+
+    view.rerender(<TimelineView items={items} threadKey="42" scrollMemoryKey="finished-reserve" />);
+    expect(top).toBe(1244);
+    expect(reservePx()).toBe(444);
+    move(1000, -244);
+    expect(reservePx()).toBe(444);
+    move(801, -199);
+    expect(reservePx()).toBe(444);
+    move(800, -1);
+    expect(top).toBe(800);
+    expect(reservePx()).toBe(0);
+    resize();
+    expect(reservePx()).toBe(0);
+
+    move(600, -200);
+    act(() => { screen.getByRole("button", { name: "Scroll down" }).click(); });
+    resize();
+    move(3000, 3000);
+    expect(top).toBe(800);
+    expect(reservePx()).toBe(0);
+    view.rerender(<TimelineView key="43" items={[]} threadKey="43" />);
+    view.rerender(<TimelineView key="42" items={items} threadKey="42" scrollMemoryKey="finished-reserve" />);
+    expect(top).toBe(800);
+    expect(reservePx()).toBe(0);
+
+    view.rerender(<TimelineView key="42" items={items} turnActive threadKey="42" scrollMemoryKey="finished-reserve" />);
+    expect(reservePx()).toBe(444);
   });
 
   it("allows an upward wheel to leave a followed tail before the next output arrives", () => {

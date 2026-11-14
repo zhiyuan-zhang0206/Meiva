@@ -16,13 +16,18 @@ including when the last human message is aligned using that space. Manually
 opening a live work block goes to the tail. Automatic expansion follows the
 current reading mode.
 
-A reserve below the conversation gives the last human message enough room to
-reach the reading offset by wheel, drag, touch, or arrow, including after a send
-from history and after a short reply ends. Its height is the difference between
-the reachable reading position and the natural content height. Reply growth
-uses that space before extending the scrollable end. Tail-following measures the
-natural end without the reserve, and moving down into the reserve takes the
-reader back to a fixed reading position.
+During a send and while the agent is working, a reserve below the conversation
+lets the reader align the last human message, including after sending from
+history. As the reply grows it uses that space before extending the scrollable
+end. Tail-following measures the natural end separately from the reserve.
+
+When a turn completes, its remaining reserve keeps the current layout. Once
+the reader scrolls upward to or past the natural end, the timeline removes the
+reserve below the viewport in place. The reader can go down to the natural end
+by scrolling or using the arrow. A new send or working turn can provide space
+again. Agent switches remember both the reading position and whether the
+reserve is still available. Opening an idle conversation for the first time
+uses the natural end.
 
 ## Relationship to Other Nodes
 
