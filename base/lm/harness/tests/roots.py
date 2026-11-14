@@ -18,4 +18,5 @@ def bridge_root_values() -> BridgeRootValues:
         controller_pid=os.getpid(),
         handle_rng=SecureRandom(random.SystemRandom()),
         own_turn=lambda _agent_id: None,
+        timestamp_prefix=lambda: "",
     )

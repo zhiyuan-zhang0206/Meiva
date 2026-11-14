@@ -28,6 +28,7 @@ from agent.hooks import Hook
 from agent.state import AgentState, CompactState
 from agent.tests.scripted_model import ScriptedChatModel
 from base.agents.context import MeivaContext
+from base.agents.messages.timestamp_policy import TimestampPolicy
 from base.clock import SYSTEM_TIMERS, Clock
 from base.clock.tests.seeded_rng import seeded_rng
 from base.config.tests.configuration import defaults
@@ -43,8 +44,17 @@ from base.packages.plugins.extensions import EMPTY
 from base.paths import meiva_home, resolve_meiva_home
 
 
-def pinned_slices(pins: Mapping[str, Any] | None = None) -> AgentSlices:
-    return AgentSlices.resolve(pins, default_reader=defaults())
+def pinned_slices(
+    pins: Mapping[str, Any] | None = None, *, timestamps_enabled: bool | None = None
+) -> AgentSlices:
+    return AgentSlices.resolve(
+        pins,
+        default_reader=(
+            defaults()
+            if timestamps_enabled is None
+            else defaults(general__message_timestamps=timestamps_enabled)
+        ),
+    )
 
 
 def compact_tail(update: Any) -> list[AnyMessage]:
@@ -57,6 +67,7 @@ def compact_tail(update: Any) -> list[AnyMessage]:
 
 def compact_slices(
     *,
+    timestamps_enabled: bool | None = None,
     auto_compact_tokens: int = 800_000,
     compact_reminder_tokens: int = 600_000,
 ) -> AgentSlices:
@@ -68,7 +79,8 @@ def compact_slices(
             "auto_compact_fraction": auto_compact_tokens / window,
             "compact_reminder_fraction": compact_reminder_tokens / window,
             "auto_compact_ceiling_tokens": 0,
-        }
+        },
+        timestamps_enabled=timestamps_enabled,
     )
 
 
@@ -204,7 +216,7 @@ async def test_auto_compact_hook_clears_history_and_parks_summary(
     loguru_records: LogRecords,
     database_gate: ProcessDbGate,
 ):
-    slices = compact_slices(auto_compact_tokens=1)
+    slices = compact_slices(auto_compact_tokens=1, timestamps_enabled=False)
     state = _over_threshold_state()
 
     fake_llm = make_fake_llm(LONG_SUMMARY)
@@ -220,7 +232,9 @@ async def test_auto_compact_hook_clears_history_and_parks_summary(
     assert new_msgs[0].id == REMOVE_ALL_MESSAGES
 
     reset = result["context_reset"]
-    assert [m.content for m in reset.tail] == [compose_summary_message(LONG_SUMMARY)]
+    assert [m.content for m in reset.tail] == [
+        compose_summary_message(LONG_SUMMARY, inputs=TimestampPolicy.off())
+    ]
     assert isinstance(reset.tail[0], HumanMessage)
     assert reset.resume == "claim"
     assert result["goto"] == "init_context"
@@ -295,7 +309,7 @@ async def test_auto_compact_hook_raises_when_summary_short_every_attempt(
 
 
 async def test_auto_compact_hook_retries_short_then_accepts_long(database_gate: ProcessDbGate):
-    slices = compact_slices(auto_compact_tokens=1)
+    slices = compact_slices(auto_compact_tokens=1, timestamps_enabled=False)
     llm = _fake_llm_seq("too short", LONG_SUMMARY)
     state = _over_threshold_state()
 
@@ -305,7 +319,9 @@ async def test_auto_compact_hook_retries_short_then_accepts_long(database_gate: 
 
     assert result is not None
     assert len(llm.requests) == 2
-    assert result["context_reset"].tail[0].content == compose_summary_message(LONG_SUMMARY)
+    assert result["context_reset"].tail[0].content == compose_summary_message(
+        LONG_SUMMARY, inputs=TimestampPolicy.off()
+    )
 
 
 async def test_auto_compact_hook_emits_compact_done_on_success(
@@ -454,6 +470,7 @@ def make_runtime(
     ops_pool: AsyncConnectionPool | None = None,
     llm: BaseChatModel | None = None,
     *,
+    timestamps_enabled: bool | None = None,
     database_gate: ProcessDbGate,
 ) -> Runtime[MeivaContext]:
     if ops_pool is None:
@@ -466,7 +483,7 @@ def make_runtime(
         ops_pool=ops_pool,
         llm=llm,
         event_publisher=MagicMock(),
-        agent=pinned_slices(),
+        agent=pinned_slices(timestamps_enabled=timestamps_enabled),
         db=Database.from_settings(gate=database_gate),
         bus=EventBus.from_settings(rng=seeded_rng(), timers=SYSTEM_TIMERS),
         catalog=build_model_catalog(home=meiva_home()),

@@ -118,7 +118,9 @@ async def _compact_outcome(
         now=now,
     )
     if dump_path is not None:
-        st.new_msgs.append(history_dump_note(dump_path, created_at=now))
+        st.new_msgs.append(
+            history_dump_note(dump_path, created_at=now, inputs=ctx.timestamp_policy())
+        )
     extra_msgs = [m for m in st.new_msgs if _is_any_message(m)]
     summary_kwargs: dict[str, str] = {
         "meiva_msg_type": compact_kind,
@@ -131,6 +133,7 @@ async def _compact_outcome(
         resume=st.next_goto,
         extra_msgs=extra_msgs,
         summary_kwargs={"additional_kwargs": summary_kwargs},
+        inputs=ctx.timestamp_policy(),
     )
     return _Outcome(
         command=Command[ClaimGoto](

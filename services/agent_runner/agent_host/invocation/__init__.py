@@ -134,7 +134,7 @@ async def finish_completed_invocation(
                     bus=bus,
                     resume_turn=resume_turn,
                     home=hooks.home,
-                    history=SwitchHistory(checkpoints.graph, pool, ctx.require_clock()),
+                    history=SwitchHistory(checkpoints.graph, pool, ctx.timestamp_policy()),
                 )
             logger.info(
                 "hosted lifecycle return settled",

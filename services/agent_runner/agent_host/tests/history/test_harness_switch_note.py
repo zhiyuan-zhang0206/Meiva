@@ -8,6 +8,7 @@ from psycopg_pool import AsyncConnectionPool
 
 from base.agents.history.harness_messages import aappend_harness_timeline_items
 from base.agents.history.timeline_item import TimelineItem
+from base.agents.messages.timestamp_policy import TimestampSource
 from base.clock import SYSTEM_TIMERS, Clock, ClockConfig
 from base.db.transaction import async_write_transaction
 from services.agent_runner.agent_host import health_routes
@@ -28,7 +29,11 @@ def _host(**attributes: object) -> Any:
 
 def _route(host: Any) -> Any:
     return prepare_harness_switch_route(
-        host, clock=Clock(ClockConfig("UTC", "UTC", False), timers=SYSTEM_TIMERS)
+        host,
+        timestamps=TimestampSource(
+            clock=Clock(ClockConfig("UTC", "UTC", False), timers=SYSTEM_TIMERS),
+            timestamps_enabled=True,
+        ),
     )
 
 

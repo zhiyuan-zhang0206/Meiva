@@ -21,9 +21,11 @@ def test_each_envelope_follows_its_own_policy() -> None:
     assert inbound_head("user", inputs=stamped, created_at=_INSTANT) == "[2026-10-04 12:00:00]\n\n"
 
 
-def test_system_header_carries_no_stamp() -> None:
-    inputs = TimestampPolicy.from_clock(_CLOCK, timestamps_enabled=True)
-    assert inbound_head("system:restart", inputs=inputs) == "<system_note>\n"
+@pytest.mark.parametrize("enabled", [False, True])
+def test_system_header_obeys_the_timestamp_setting(enabled: bool) -> None:
+    inputs = TimestampPolicy.from_clock(_CLOCK, timestamps_enabled=enabled)
+    prefix = "[2026-10-04 12:00:00] " if enabled else ""
+    assert inbound_head("system:restart", inputs=inputs) == f"<system_note>\n{prefix}"
 
 
 def test_external_agent_header_names_the_sender_and_follows_the_timestamp_policy() -> None:

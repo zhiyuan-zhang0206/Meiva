@@ -42,6 +42,7 @@ from agent.graph.hooks.compact import (
 from agent.state import AgentState, CompactState
 from agent.tests.scripted_model import ScriptedChatModel
 from base.agents.context import MeivaContext
+from base.agents.messages.timestamp_policy import TimestampPolicy
 from base.clock import SYSTEM_TIMERS, Clock
 from base.clock.tests.seeded_rng import seeded_rng
 from base.config.tests.configuration import defaults
@@ -134,6 +135,7 @@ async def test_generate_summary_returns_summary():
         agent_id=228,
         catalog=build_model_catalog(home=meiva_home()),
         now=Clock.from_settings().now,
+        inputs=TimestampPolicy.off(),
     )
 
     assert summary == "a synthetic summary"
@@ -159,6 +161,7 @@ async def test_generate_summary_remembers_the_call_that_produced_it() -> None:
         agent_id=228,
         catalog=build_model_catalog(home=meiva_home()),
         now=Clock.from_settings().now,
+        inputs=TimestampPolicy.off(),
     )
 
     closing = closing_of(summary)
@@ -336,6 +339,7 @@ async def test_claim_compact_request_summary_message_carries_msg_type(
                 "meiva_created_at": "2026-08-07T00:00:00+00:00",
             },
         },
+        inputs=TimestampPolicy.off(),
     )
     tail = transition["context_reset"].tail
     assert isinstance(tail[0], HumanMessage)

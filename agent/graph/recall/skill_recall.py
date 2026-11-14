@@ -32,6 +32,7 @@ from langchain_core.messages import AnyMessage, HumanMessage
 from agent.graph.prompt.capabilities import RecallCandidate, index_entry
 from agent.graph.recall.conversation_query import build_conversation_query
 from agent.messages import NoteTag, system_note_message
+from base.agents.messages.timestamp_policy import TimestampPolicy
 from base.host.env.agent_slices import AgentSlices
 from base.lm.catalog import ModelCatalog
 from base.lm.catalog.decide.types import DecisionError, DecisionInputTooLargeError, YesNo
@@ -113,6 +114,7 @@ def pick_skills(scores: Mapping[str, float], *, threshold: float, limit: int) ->
 def render_note(
     candidates: Sequence[RecallCandidate],
     *,
+    inputs: TimestampPolicy,
     created_at: datetime,
 ) -> HumanMessage:
     """The system-styled note naming `candidates`, one index line each."""
@@ -122,6 +124,7 @@ def render_note(
         tag=NoteTag.SKILL_RECALL,
         picked_up_at=created_at,
         created_at=created_at,
+        inputs=inputs,
     )
 
 
@@ -129,6 +132,7 @@ async def recall_skills(
     messages: Sequence[AnyMessage],
     candidates: Sequence[RecallCandidate],
     *,
+    inputs: TimestampPolicy,
     agent: AgentSlices,
     catalog: ModelCatalog,
     keys: ProviderKeys,
@@ -198,6 +202,7 @@ async def recall_skills(
         note=render_note(
             [by_identifier[identifier] for identifier in picked],
             created_at=created_at,
+            inputs=inputs,
         ),
         identifiers=set(picked),
     )

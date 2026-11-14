@@ -37,6 +37,7 @@ from agent.graph.recall.memory_note import SearchHit, qualifying, render_note_te
 from agent.messages import NoteTag, system_note_message
 from base.agents.context import MeivaContext
 from base.agents.context.gateway_client import memory_search as memory_client
+from base.agents.messages.timestamp_policy import TimestampPolicy
 from base.api_contracts.agent_contract import GatewayUnavailable, IndexerUnavailable
 from base.host.env.agent_slices import AgentSlices
 from base.log import logger
@@ -178,11 +179,15 @@ async def passive_memory_recall(
     if not picked:
         return None
 
-    now = context.require_clock().now()
+    inputs = TimestampPolicy.from_clock(
+        context.require_clock(), timestamps_enabled=agent.read("general", "message_timestamps")
+    )
+    now = inputs.require_now()
     note = system_note_message(
         content=render_note_text(picked),
         tag=NoteTag.MEMORY,
         picked_up_at=now,
         created_at=now,
+        inputs=inputs,
     )
     return PassiveRecall(note=note, paths={item.path for item in picked})

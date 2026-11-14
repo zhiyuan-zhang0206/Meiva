@@ -18,12 +18,24 @@ Message formats exchanged between agent, LLM, users, and other agents. `agent/me
 - `image_urls` keeps timeline reference URLs; model `content` may embed base64.
 - Two times in metadata: `meiva_created_at` keeps its meaning (an inbound's is its ARRIVAL time, the source row's `created_at`; other messages' is when they were produced). `meiva_picked_up_at` is when an injected message (inbound, note, attachment) was put into the LLM context, i.e. when the model reads it; the builders stamp the instant the caller hands in (`attach_message`: its `created_at`; `inbound_message`: `times=InboundTimes(arrived_at, picked_up_at)`). AIMessage and tool output carry no `meiva_picked_up_at`: their `meiva_created_at` already is the read time. Time-ordered readers (timeline, history tree, history dump) use `message_read_time()` (`meiva_picked_up_at`, else `meiva_created_at`); delivery tracking uses `inbound_messages.created_at`. The body envelope header (`wrap_inbound`) keeps the arrival time so the agent knows when a message came in.
 
-### Inbound timestamp ownership
+### Timestamp ownership
 
-`base.agents.messages.timestamp_policy.TimestampPolicy` carries the producer's timestamp
-switch, timezone, weekday flag and the instant of the unit of work as one frozen value. `inbound_head` and `wrap_inbound` require it. User
-and agent headers follow the switch; system and asserted-caller headers carry no
-stamp. Arrival-time formatting and source validation keep their existing order.
+`TimestampPolicy` carries the configured `message_timestamps` switch, cluster timezone,
+weekday flag and captured instant. All Meiva inbox sources, including `system` and
+`system:*`, use that policy. Chat stamps its original creation time; the recorded
+body offset includes the complete emitted head in either switch state.
+`system_note_message` owns its prefix, using `created_at` or otherwise `picked_up_at`.
+Callers pass unprefixed content and the policy rather than adding a second timestamp.
+Lifecycle, heartbeat and generated context notes use this writer.
+
+Compaction uses the same policy. Replacement summaries keep their classifier heading
+first, then the configured timestamp immediately before the summary body. Both
+configuration switches remain available. Historical checkpoints are not rewritten.
+The Timeline body contract stays independent of model-facing formatting.
+
+Provider-owned subagents and internal runtime events receive no Meiva prefix.
+The execute_code attachment package remains an internal multimodal companion to
+its already stamped ToolMessage; its caption/image pairing is unchanged.
 
 ### NoteTag Enum
 - Marks the source and nature of the message

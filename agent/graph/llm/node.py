@@ -447,7 +447,9 @@ async def _llm_node_impl(
                 goto=BEFORE_TURN,
             )
         if has_invalid_reply_visibility(final_msg):
-            note = reply_visibility_note(ctx.require_clock().now())
+            note = reply_visibility_note(
+                ctx.require_clock().now(), inputs=runtime.context.timestamp_policy()
+            )
             already_correcting = _is_reply_correction(state.messages)
             return Command[LlmGoto](
                 update={"messages": [final_msg, note], "halted": already_correcting, **cut_update},

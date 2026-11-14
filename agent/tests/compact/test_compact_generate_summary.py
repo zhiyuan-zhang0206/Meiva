@@ -24,6 +24,7 @@ from agent.llm import execute_code
 from agent.tests.test_compact import make_fake_llm, pinned_slices
 from base.agents.history.closing_request import METADATA_KEY as CLOSING_METADATA_KEY
 from base.agents.history.closing_request import ClosingRequest
+from base.agents.messages.timestamp_policy import TimestampPolicy
 from base.clock import SYSTEM_TIMERS
 from base.lm.catalog import ModelCatalog
 from base.log.tests.log_records import LogRecords
@@ -107,6 +108,7 @@ async def test_generate_summary_reports_the_compaction_call_as_agent_usage(
             agent_id=228,
             catalog=model_catalog,
             now=_now,
+            inputs=TimestampPolicy.off(),
         )
         == "a complete summary"
     )
@@ -138,6 +140,7 @@ async def test_generate_summary_includes_whole_conversation():
         agent_id=228,
         catalog=build_model_catalog(home=meiva_home()),
         now=_now,
+        inputs=TimestampPolicy.off(),
     )
 
     [llm_input] = llm.requests
@@ -159,6 +162,7 @@ async def test_generate_summary_reuses_conversation_prefix_for_cache():
         agent_id=228,
         catalog=build_model_catalog(home=meiva_home()),
         now=_now,
+        inputs=TimestampPolicy.off(),
     )
 
     assert llm.bound_tools == [[execute_code]]
@@ -181,6 +185,7 @@ async def test_generate_summary_raises_on_empty_llm_text():
             agent_id=228,
             catalog=build_model_catalog(home=meiva_home()),
             now=_now,
+            inputs=TimestampPolicy.off(),
         )
 
 
@@ -203,6 +208,7 @@ async def test_generate_summary_extracts_text_from_block_content():
         agent_id=228,
         catalog=build_model_catalog(home=meiva_home()),
         now=_now,
+        inputs=TimestampPolicy.off(),
     )
     assert summary == "the real summary"
 
@@ -223,6 +229,7 @@ async def test_generate_summary_raises_on_tool_use_only_block_content():
             agent_id=228,
             catalog=build_model_catalog(home=meiva_home()),
             now=_now,
+            inputs=TimestampPolicy.off(),
         )
 
 
@@ -236,4 +243,5 @@ async def test_generate_summary_raises_on_empty_conversation():
             agent_id=228,
             catalog=build_model_catalog(home=meiva_home()),
             now=_now,
+            inputs=TimestampPolicy.off(),
         )

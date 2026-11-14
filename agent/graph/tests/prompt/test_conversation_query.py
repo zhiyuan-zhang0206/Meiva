@@ -8,6 +8,7 @@ from agent.graph.recall.conversation_query import (
     build_conversation_query,
 )
 from agent.messages import InboundTimes, NoteTag, inbound_message, system_note_message
+from base.agents.messages.timestamp_policy import TimestampPolicy
 
 _PICKED_UP_AT = datetime(2026, 1, 1, tzinfo=UTC)
 
@@ -27,7 +28,10 @@ def test_the_query_is_the_genuine_messages_oldest_first() -> None:
         _inbound("first question"),
         AIMessage(content="an answer", id="a1"),
         system_note_message(
-            content="a framework note", tag=NoteTag.MEMORY, picked_up_at=_PICKED_UP_AT
+            content="a framework note",
+            tag=NoteTag.MEMORY,
+            picked_up_at=_PICKED_UP_AT,
+            inputs=TimestampPolicy.off(),
         ),
         _inbound("follow-up", 2),
     ]
@@ -62,7 +66,14 @@ def test_multimodal_content_contributes_its_text_blocks() -> None:
 def test_a_conversation_of_notes_alone_is_an_empty_query() -> None:
     assert (
         build_conversation_query(
-            [system_note_message(content="n", tag=NoteTag.MEMORY, picked_up_at=_PICKED_UP_AT)]
+            [
+                system_note_message(
+                    content="n",
+                    tag=NoteTag.MEMORY,
+                    picked_up_at=_PICKED_UP_AT,
+                    inputs=TimestampPolicy.off(),
+                )
+            ]
         )
         == ""
     )

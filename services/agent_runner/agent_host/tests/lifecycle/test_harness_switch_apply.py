@@ -19,6 +19,7 @@ from agent.ownership.tests.ownership_support import BusTap, admit_owner, agent_r
 from base import paths
 from base.agents.history.harness_messages import aload_harness_timeline_items
 from base.agents.incarnation.restart_transition import RestartTransition
+from base.agents.messages.timestamp_policy import TimestampPolicy
 from base.clock import SYSTEM_TIMERS, Clock, ClockConfig
 from base.db.code_version_gate import ProcessDbGate
 from base.db.transaction import async_write_transaction
@@ -198,7 +199,9 @@ async def test_leaving_a_record_backed_harness_applies_the_switch_without_a_stor
     history = SwitchHistory(
         graph=None,
         pool=aops_pool,
-        clock=Clock(ClockConfig("UTC", "UTC", False), timers=SYSTEM_TIMERS),
+        timestamps=TimestampPolicy.from_clock(
+            Clock(ClockConfig("UTC", "UTC", False), timers=SYSTEM_TIMERS), timestamps_enabled=True
+        ),
     )
 
     kind = await apply_lifecycle_command(

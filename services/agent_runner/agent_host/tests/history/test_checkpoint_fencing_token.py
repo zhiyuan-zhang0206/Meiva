@@ -15,6 +15,7 @@ from psycopg.rows import DictRow
 from psycopg_pool import AsyncConnectionPool
 
 from agent.db import claim_inbound_batch
+from base.agents.messages.timestamp_policy import TimestampSource
 from base.clock import SYSTEM_TIMERS, Clock, ClockConfig
 from base.native_process.runtime_incarnation import RuntimeIncarnation, StaleIncarnationError
 from services.agent_runner.agent_host.health_routes import prepare_harness_switch_route
@@ -401,7 +402,11 @@ async def test_prepare_harness_switch_with_fenced_saver_succeeds(
     graph = _build_test_graph(saver)
     host = SimpleNamespace(_graph=graph, _machine=machine, drop_agent=_drop_agent)
     route = prepare_harness_switch_route(
-        cast(Any, host), clock=Clock(ClockConfig("UTC", "UTC", False), timers=SYSTEM_TIMERS)
+        cast(Any, host),
+        timestamps=TimestampSource(
+            clock=Clock(ClockConfig("UTC", "UTC", False), timers=SYSTEM_TIMERS),
+            timestamps_enabled=True,
+        ),
     )
 
     payload = json.dumps(

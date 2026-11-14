@@ -53,13 +53,15 @@ def _context(
     agent_id: int | None = 29,
     runner: MachineIdentityReader | None = None,
     workspace: bool = False,
+    timestamps_enabled: bool = False,
 ) -> MeivaContext:
     return MeivaContext(
         meiva_home=resolve_meiva_home(),
         user_home=Path.home(),
         identity=AgentIdentity(agent_id=agent_id, owns_loop=True) if agent_id is not None else None,
         agent=AgentSlices.resolve(
-            {"workspace_in_system_prompt": workspace}, default_reader=defaults()
+            {"workspace_in_system_prompt": workspace},
+            default_reader=defaults(general__message_timestamps=timestamps_enabled),
         ),
         clock_factory=_clock,
         machine=runner,
@@ -452,3 +454,20 @@ def test_unset_machine_name_drops_only_the_machine_clause(
                 machine_clause(_context(ClientSet(), runner=broken))
     finally:
         loop_home.unlink(missing_ok=True)
+
+
+@pytest.mark.parametrize("enabled", [False, True])
+@pytest.mark.parametrize("weekday", [False, True])
+def test_identity_note_uses_the_configured_timestamp_policy(
+    clients: ClientSet, enabled: bool, weekday: bool
+) -> None:
+    from datetime import UTC, datetime
+
+    from base.clock.tests.manual_timers import ManualTimers
+
+    at = datetime(2026, 11, 14, 8, 5, 51, tzinfo=UTC)
+    timers = ManualTimers(wall_start=at)
+    clock = Clock(ClockConfig("UTC", "UTC", weekday), timers=timers, now=timers.now)
+    context = replace(_context(clients, timestamps_enabled=enabled), clock_factory=lambda: clock)
+    stamp = "[2026-11-14 Sat 08:05:51] " if weekday else "[2026-11-14 08:05:51] "
+    assert _content(agent_id_note(context)) == (stamp if enabled else "") + "Your Agent ID is 29."

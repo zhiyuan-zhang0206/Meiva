@@ -36,6 +36,7 @@ from agent.state import AgentState
 from base.agents.history.timeline_item import TimelineItem
 from base.agents.history.transcript_timeline.items import format_tool_use
 from base.agents.messages.kwargs import read_meiva_kwargs
+from base.agents.messages.timestamp_policy import TimestampPolicy
 from base.agents.tests.units import spawn_agent
 from base.cluster.machine import MachineIdentityReader
 from base.config.service_read import ConfigAuthority
@@ -554,6 +555,7 @@ def test_the_lost_turn_note_says_it_is_not_a_reply_and_never_returns() -> None:
         "turn-1",
         "HarnessTurnFaultedError: antigravity turn turn-1 failed (API 400): boom",
         now=now,
+        inputs=TimestampPolicy.off(),
     )
     kwargs = read_meiva_kwargs(note)
     content = str(note.content)

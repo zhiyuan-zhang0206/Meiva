@@ -20,6 +20,7 @@ from langchain_core.messages import BaseMessage
 
 from agent.messages import NoteTag, system_note_message
 from base.agents.context import MeivaContext
+from base.agents.messages.timestamp_policy import TimestampPolicy
 from base.log import logger
 
 __all__ = ["lost_turn_note", "report_lost_turn"]
@@ -29,7 +30,12 @@ __all__ = ["lost_turn_note", "report_lost_turn"]
 # The note says three things and no fourth: the message was not answered, which rows were consumed
 # (the caller passes only those), and that they will not come back.
 def lost_turn_note(
-    inbound_ids: Sequence[int], turn_key: str, reason: str, *, now: datetime
+    inbound_ids: Sequence[int],
+    turn_key: str,
+    reason: str,
+    *,
+    inputs: TimestampPolicy,
+    now: datetime,
 ) -> BaseMessage:
     labelled = ", ".join(str(value) for value in inbound_ids) or "none recorded"
     return system_note_message(
@@ -43,6 +49,7 @@ def lost_turn_note(
         tag=NoteTag.TURN_LOST,
         picked_up_at=now,
         created_at=now,
+        inputs=inputs,
     )
 
 
@@ -58,7 +65,11 @@ async def report_lost_turn(
     reason = f"{type(error).__name__}: {error}"
     now = ctx.require_clock().now()
     try:
-        await append(ctx, agent_id, [lost_turn_note(inbound_ids, turn_key, reason, now=now)])
+        await append(
+            ctx,
+            agent_id,
+            [lost_turn_note(inbound_ids, turn_key, reason, now=now, inputs=ctx.timestamp_policy())],
+        )
     except Exception:
         # meiva:note
         # Recording the loss must not become a second failure: the caller raises the original fault

@@ -4,6 +4,7 @@ import json
 import os
 import tempfile
 from collections.abc import AsyncIterator
+from datetime import datetime
 from pathlib import Path
 from typing import Any, cast
 
@@ -11,6 +12,8 @@ from langchain_core.callbacks import AsyncCallbackManagerForLLMRun
 from langchain_core.messages import AIMessage, BaseMessage
 from langchain_core.outputs import ChatGenerationChunk, ChatResult
 
+from base.agents.messages.timestamp_policy import TimestampPolicy
+from base.lm.system_note import unwrap_system_note
 from tests.e2e.fakes.scripted_model import ScriptedFakeChatModel, user_facing, working_note
 
 __all__ = [
@@ -94,6 +97,8 @@ class RecordingModel(ScriptedFakeChatModel):
                     "type": m.type,
                     "text": _text(m.content),
                     "tag": m.additional_kwargs.get("meiva_note_tag"),
+                    "note_at": m.additional_kwargs.get("meiva_created_at")
+                    or m.additional_kwargs.get("meiva_picked_up_at"),
                     "tool_calls": [tc["name"] for tc in getattr(m, "tool_calls", [])],
                 }
                 for m in messages
@@ -135,3 +140,22 @@ def model_inputs(agent_id: int | None = None) -> list[list[dict[str, Any]]]:
         return []
     entries = [json.loads(line) for line in _complete_lines_text(path).splitlines()]
     return [e["messages"] for e in entries if agent_id is None or e["agent_id"] == agent_id]
+
+
+# meiva:note
+# The recording keeps raw model text and its time anchor. Decode only its known policy prefix;
+# reject missing metadata or mismatched framing instead of guessing from the message body.
+def note_bodies(call: list[dict[str, Any]], tag: str, *, inputs: TimestampPolicy) -> list[str]:
+    bodies: list[str] = []
+    for message in call:
+        if message["tag"] != tag:
+            continue
+        text = message["text"]
+        assert text.startswith("<system_note>\n") and text.endswith("\n</system_note>")
+        body = unwrap_system_note(text)
+        note_at = message["note_at"]
+        assert isinstance(note_at, str), "a recorded Meiva note needs its creation/pickup instant"
+        prefix = inputs.prefix(datetime.fromisoformat(note_at))
+        assert body.startswith(prefix), "the recorded prefix must agree with its timestamp policy"
+        bodies.append(body[len(prefix) :])
+    return bodies

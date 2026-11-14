@@ -109,6 +109,7 @@ class _ToUserLimitHook(Hook):
                     tag=NoteTag.TO_USER_SOFT_LIMIT,
                     picked_up_at=now,
                     created_at=now,
+                    inputs=runtime.context.timestamp_policy(),
                 )
             ],
         }

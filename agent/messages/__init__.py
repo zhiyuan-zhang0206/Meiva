@@ -53,6 +53,7 @@ from base.agents.messages.kwargs import (
     NoteTag,
     read_meiva_kwargs,
 )
+from base.agents.messages.timestamp_policy import TimestampPolicy
 from base.lm.system_note import wrap_system_note
 
 __all__ = [
@@ -136,6 +137,7 @@ def inbound_message(
 def system_note_message(
     *,
     content: str,
+    inputs: TimestampPolicy,
     tag: NoteTag,
     picked_up_at: datetime,
     task_id: int | None = None,
@@ -168,7 +170,7 @@ def system_note_message(
     if task_id is not None:
         kwargs["meiva_task_id"] = task_id
     return HumanMessage(
-        content=wrap_system_note(content),
+        content=wrap_system_note(f"{inputs.prefix(created_at or picked_up_at)}{content}"),
         additional_kwargs=_stamp_created_at(_stamp_picked_up(kwargs, picked_up_at), created_at),
     )
 

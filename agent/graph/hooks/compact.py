@@ -1,5 +1,6 @@
 __description__ = "Auto-compact history when token count exceeds threshold"
 
+
 from collections.abc import Callable, Sequence
 from datetime import datetime
 from typing import Any
@@ -39,6 +40,7 @@ from base.agents.context import MeivaContext, agent_id_from_config
 from base.agents.history.closing_request import ClosingRequest
 from base.agents.history.compact_boundary import mark_compact_boundary
 from base.agents.messages.kwargs import MeivaMsgType, read_meiva_kwargs
+from base.agents.messages.timestamp_policy import TimestampPolicy
 from base.agents.questions.model import OpenQuestion
 from base.agents.questions.render import reminder_text
 from base.agents.to_user import DOCUMENT_FILENAME
@@ -99,20 +101,16 @@ def compaction_failure(exc: Exception) -> bool:
 # The system note that tells an agent its compaction did not happen and why, so the failure is part of the history and the timeline rather than a live event only. The history is untouched.
 def compact_failure_note(ctx: MeivaContext, reason: str) -> HumanMessage:
     clock = ctx.require_clock()
-    prefix = (
-        f"{clock.now_timestamp()} "
-        if ctx.require_agent().read("general", "message_timestamps")
-        else ""
-    )
     now = clock.now()
     return system_note_message(
         content=(
-            f"{prefix}Compaction failed ({reason}). The history was not changed. "
+            f"Compaction failed ({reason}). The history was not changed. "
             "Request compaction again after the cause is resolved."
         ),
         tag=NoteTag.COMPACT_FAILED,
         picked_up_at=now,
         created_at=now,
+        inputs=ctx.timestamp_policy(),
     )
 
 
@@ -205,6 +203,7 @@ async def generate_summary(
     llm: BaseChatModel,
     slices: AgentSlices,
     *,
+    inputs: TimestampPolicy,
     agent_id: int,
     catalog: ModelCatalog,
     now: Callable[[], datetime],
@@ -222,7 +221,7 @@ async def generate_summary(
     # meiva:link agent/messages/docs/message-format.md
     instruction = HumanMessage(
         content=wrap_system_note(
-            f"{COMPACTION_INSTRUCTION}\nmeiva.self.compact contract:\n"
+            f"{inputs.prefix()}{COMPACTION_INSTRUCTION}\nmeiva.self.compact contract:\n"
             f"{compact_contract(read_compact_doc())}"
         )
     )
@@ -300,6 +299,7 @@ async def auto_compact_summary(
     content_count: int,
     slices: AgentSlices,
     *,
+    inputs: TimestampPolicy,
     agent_id: int,
     catalog: ModelCatalog,
     now: Callable[[], datetime],
@@ -309,7 +309,7 @@ async def auto_compact_summary(
     for attempt in range(1, COMPACT_MAX_ATTEMPTS + 1):
         try:
             summary = await generate_summary(
-                messages, llm, slices, agent_id=agent_id, catalog=catalog, now=now
+                messages, llm, slices, agent_id=agent_id, catalog=catalog, now=now, inputs=inputs
             )
         except Exception as e:
             if not compaction_retryable(e):
@@ -401,6 +401,7 @@ async def auto_compact_for_llm(
                     agent_id=agent_id,
                     catalog=catalog,
                     now=runtime.context.require_clock().now,
+                    inputs=runtime.context.timestamp_policy(),
                 ),
                 interrupted,
             )
@@ -474,9 +475,16 @@ async def auto_compact_for_llm(
         summary,
         resume=CLAIM,
         extra_msgs=(
-            [history_dump_note(dump_path, created_at=now)] if dump_path is not None else None
+            [
+                history_dump_note(
+                    dump_path, created_at=now, inputs=runtime.context.timestamp_policy()
+                )
+            ]
+            if dump_path is not None
+            else None
         ),
         summary_kwargs=summary_kwargs,
+        inputs=runtime.context.timestamp_policy(),
     )
     await stamp_compact_boundary(
         runtime.context.ops_pool,
@@ -499,6 +507,7 @@ async def auto_compact_for_llm(
 def build_compact_transition(
     summary: str,
     *,
+    inputs: TimestampPolicy,
     resume: NodeName,
     extra_msgs: list[AnyMessage] | None = None,
     summary_kwargs: dict[str, Any] | None = None,
@@ -506,7 +515,7 @@ def build_compact_transition(
     summary_msg_kwargs = summary_kwargs or {}
     tail_msgs: list[AnyMessage] = [
         HumanMessage(
-            content=compose_summary_message(summary),
+            content=compose_summary_message(summary, inputs=inputs),
             **summary_msg_kwargs,
         ),
     ]
@@ -591,6 +600,7 @@ def compact_reminder_update(
     state: AgentState,
     agent: AgentSlices,
     *,
+    inputs: TimestampPolicy,
     catalog: ModelCatalog,
     extensions: ExtensionRegistry,
     open_questions: Sequence[OpenQuestion],
@@ -613,6 +623,7 @@ def compact_reminder_update(
         tag=NoteTag.COMPACT_REMINDER,
         picked_up_at=now,
         created_at=now,
+        inputs=inputs,
     )
     return {
         "messages": [note],
@@ -648,6 +659,7 @@ class _CompactReminderHook(Hook):
             extensions=runtime.context.plugin_registry(),
             open_questions=await read_agent_open_questions(runtime.context, owner),
             now=runtime.context.require_clock().now(),
+            inputs=runtime.context.timestamp_policy(),
         )
 
 

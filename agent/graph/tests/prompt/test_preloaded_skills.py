@@ -24,6 +24,7 @@ from agent.graph.prompt.skill_selection import resolve_prompt_skills
 from agent.graph.tests.prompt.skill_support import skill_view, write_skill
 from base.agents.context import MeivaContext
 from base.agents.messages.kwargs import NoteTag
+from base.agents.messages.timestamp_policy import TimestampPolicy
 from base.api_contracts.agent_contract import Harness
 from base.clock import SYSTEM_TIMERS, Clock, ClockConfig
 from base.config.tests.configuration import defaults
@@ -135,7 +136,10 @@ def test_note_none_when_nothing_resolves(tmp_path: Path) -> None:
 
     assert (
         preloaded_note(
-            _skills(tmp_path, ["ghost"]), harness=Harness.MEIVA, created_at=_PICKED_UP_AT
+            _skills(tmp_path, ["ghost"]),
+            harness=Harness.MEIVA,
+            created_at=_PICKED_UP_AT,
+            inputs=TimestampPolicy.off(),
         )
         is None
     )
@@ -146,7 +150,10 @@ def test_note_carries_full_body_and_tag(tmp_path: Path) -> None:
     write_skill(tmp_path, "ultra_speed", "ultra_speed", "go fast", body=body)
 
     note = preloaded_note(
-        _skills(tmp_path, ["ultra_speed"]), harness=Harness.MEIVA, created_at=_PICKED_UP_AT
+        _skills(tmp_path, ["ultra_speed"]),
+        harness=Harness.MEIVA,
+        created_at=_PICKED_UP_AT,
+        inputs=TimestampPolicy.off(),
     )
 
     assert note is not None
@@ -166,7 +173,10 @@ def test_note_merges_multiple_skills_in_order(tmp_path: Path) -> None:
     write_skill(tmp_path, "second", "second", "2", body="BBB body")
 
     note = preloaded_note(
-        _skills(tmp_path, ["second", "first"]), harness=Harness.MEIVA, created_at=_PICKED_UP_AT
+        _skills(tmp_path, ["second", "first"]),
+        harness=Harness.MEIVA,
+        created_at=_PICKED_UP_AT,
+        inputs=TimestampPolicy.off(),
     )
 
     assert note is not None
@@ -193,6 +203,7 @@ def test_note_heading_uses_dotted_access_path(tmp_path: Path) -> None:
         _skills(tmp_path, ["meiva_memory.consolidation"]),
         harness=Harness.MEIVA,
         created_at=_PICKED_UP_AT,
+        inputs=TimestampPolicy.off(),
     )
 
     assert note is not None
@@ -205,7 +216,10 @@ def test_note_for_an_external_harness_points_at_its_native_file_tool(tmp_path: P
     write_skill(tmp_path, "ultra_speed", "ultra_speed", "go fast", body="body")
 
     note = preloaded_note(
-        _skills(tmp_path, ["ultra_speed"]), harness=Harness.CLAUDE_CODE, created_at=_PICKED_UP_AT
+        _skills(tmp_path, ["ultra_speed"]),
+        harness=Harness.CLAUDE_CODE,
+        created_at=_PICKED_UP_AT,
+        inputs=TimestampPolicy.off(),
     )
 
     assert note is not None
@@ -220,7 +234,9 @@ def test_note_skips_a_skill_whose_body_cannot_be_read(tmp_path: Path) -> None:
     skills = _skills(tmp_path, ["gone", "kept"])
     (tmp_path / "gone" / "SKILL.md").unlink()
 
-    note = preloaded_note(skills, harness=Harness.MEIVA, created_at=_PICKED_UP_AT)
+    note = preloaded_note(
+        skills, harness=Harness.MEIVA, created_at=_PICKED_UP_AT, inputs=TimestampPolicy.off()
+    )
 
     assert note is not None
     text = _text(note)
@@ -286,7 +302,12 @@ def test_fork_tail_note_grafts_the_named_installed_skills() -> None:
     _install_skill("extra", "the extra skill", "EXTRA body")
 
     note = fork_tail_skills_note(
-        ["extra"], [], home=meiva_home(), created_at=_PICKED_UP_AT, environ=ENVIRON
+        ["extra"],
+        [],
+        home=meiva_home(),
+        created_at=_PICKED_UP_AT,
+        environ=ENVIRON,
+        inputs=TimestampPolicy.off(),
     )
 
     assert note is not None
@@ -302,7 +323,12 @@ def test_fork_tail_note_is_empty_when_the_skills_surface_is_disabled() -> None:
 
     assert (
         fork_tail_skills_note(
-            ["extra"], ["skills"], home=meiva_home(), created_at=_PICKED_UP_AT, environ=ENVIRON
+            ["extra"],
+            ["skills"],
+            home=meiva_home(),
+            created_at=_PICKED_UP_AT,
+            environ=ENVIRON,
+            inputs=TimestampPolicy.off(),
         )
         is None
     )

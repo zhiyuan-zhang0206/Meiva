@@ -35,7 +35,7 @@ def load_meiva_code_plugin(
 ) -> Iterator[None]:
     """Install meiva_code's declared SDK surface (cwd namespace, wraps, skill source) for each
     test and uninstall it after."""
-    install_code_surface(model_catalog, config_authority)
+    install_code_surface(model_catalog, authority_with(config_authority, message_timestamps=False))
 
     yield
 
@@ -232,10 +232,21 @@ def make_git_repo(root: Path) -> None:
     subprocess.run(["git", "init", "-q"], cwd=root, check=True)
 
 
-def test_read_wrap_injects_agents_md(tmp_path: Path, default_home: Path):
+@pytest.mark.parametrize("timestamps_enabled", [False, True])
+def test_read_wrap_injects_agents_md(
+    tmp_path: Path,
+    default_home: Path,
+    model_catalog: ModelCatalog,
+    config_authority: ConfigAuthority,
+    timestamps_enabled: bool,
+):
     """meiva.files.read("foo.py") walks up cwd path looking for AGENTS.md and
     appends its content as a CONTEXT system note to the exec's messages delta
     (in-memory — no side-channel file)."""
+    install.uninstall()
+    install_code_surface(
+        model_catalog, authority_with(config_authority, message_timestamps=timestamps_enabled)
+    )
     repo = tmp_path / "repo"
     repo.mkdir()
     make_git_repo(repo)
@@ -254,7 +265,15 @@ def test_read_wrap_injects_agents_md(tmp_path: Path, default_home: Path):
         assert len(notes) == 1
         assert "PROJECT CONVENTIONS" in notes[0]["content"]
         agents_path = str((repo / "AGENTS.md").resolve())
-        assert f"Project AGENTS.md from {agents_path}:" == notes[0]["prefix"]
+        from datetime import datetime
+        from typing import cast
+
+        from meiva.sdk_surface import settings as sdk_settings
+
+        message = cast(list[Any], meiva.state_update["messages"])[0]
+        created = datetime.fromisoformat(str(message.additional_kwargs["meiva_created_at"]))
+        stamp = sdk_settings.clock().format_timestamp(created) + " " if timestamps_enabled else ""
+        assert f"{stamp}Project AGENTS.md from {agents_path}:" == notes[0]["prefix"]
         # injected_paths adds this AGENTS.md
         assert agents_path in meiva.state_update["meiva_code__injected_paths"]
     finally:

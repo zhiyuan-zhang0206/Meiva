@@ -33,14 +33,23 @@ async def test_async_calls_record_inputs_in_order_and_filter_by_agent() -> None:
     second = RecordingModel(agent_id=23, script=(exec_call(2, "x = 1"),))
     prompt = HumanMessage(
         content=[{"type": "text", "text": "one"}, {"type": "text", "text": "two"}],
-        additional_kwargs={"meiva_note_tag": "summary"},
+        additional_kwargs={
+            "meiva_note_tag": "summary",
+            "meiva_created_at": "2026-11-14T08:05:51+00:00",
+        },
     )
     assert _reply_body(await first.ainvoke([prompt])) == "reply"
     chunks = [chunk async for chunk in second.astream([exec_call(1, "x = 0")])]
     assert chunks[0].tool_calls[0]["args"] == {"code": "x = 1"}
     assert first.cursor == second.cursor == 1
     expected: list[dict[str, Any]] = [
-        {"type": "human", "text": "one\ntwo", "tag": "summary", "tool_calls": []}
+        {
+            "type": "human",
+            "text": "one\ntwo",
+            "tag": "summary",
+            "note_at": "2026-11-14T08:05:51+00:00",
+            "tool_calls": [],
+        }
     ]
     assert model_inputs(17) == [expected]
     assert model_inputs(23)[0][0]["tool_calls"] == ["execute_code"]
@@ -134,3 +143,32 @@ def test_script_helpers_preserve_tool_identity_and_usage() -> None:
         == reply.usage_metadata
         == {"input_tokens": 10, "output_tokens": 5, "total_tokens": 15}
     )
+
+
+@pytest.mark.parametrize("enabled", [False, True])
+@pytest.mark.parametrize("weekday", [False, True])
+def test_context_recording_consumer_uses_the_recorded_instant_and_explicit_policy(
+    enabled: bool, weekday: bool
+) -> None:
+    from datetime import UTC, datetime
+
+    from base.agents.messages.timestamp_policy import TimestampPolicy
+    from tests.e2e.fakes.scenario_recording import note_bodies
+
+    at = datetime(2026, 11, 14, 8, 5, 51, tzinfo=UTC)
+    inputs = TimestampPolicy(enabled, "UTC", weekday, at)
+    stamp = "[2026-11-14 Sat 08:05:51] " if weekday else "[2026-11-14 08:05:51] "
+    prefix = stamp if enabled else ""
+    record = {
+        "type": "human",
+        "tag": "context",
+        "note_at": at.isoformat(),
+        "text": f"<system_note>\n{prefix}Project AGENTS.md from /tmp/own/AGENTS.md:\n\n[2026-11-14 Sat 08:05:51] literal file content\n</system_note>",
+    }
+    assert note_bodies([record], "context", inputs=inputs) == [
+        "Project AGENTS.md from /tmp/own/AGENTS.md:\n\n[2026-11-14 Sat 08:05:51] literal file content"
+    ]
+    if enabled:
+        record["text"] = record["text"].replace(prefix, "", 1)
+        with pytest.raises(AssertionError, match="recorded prefix"):
+            note_bodies([record], "context", inputs=inputs)

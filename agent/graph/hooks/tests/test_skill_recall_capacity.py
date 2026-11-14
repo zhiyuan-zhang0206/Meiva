@@ -11,6 +11,7 @@ import pytest
 from agent.graph.prompt.capabilities import RecallCandidate
 from agent.graph.recall.skill_recall import recall_skills
 from agent.messages import InboundTimes, inbound_message
+from base.agents.messages.timestamp_policy import TimestampPolicy
 from base.config.tests.configuration import defaults
 from base.host.env.agent_slices import AgentSlices
 from base.lm.provider_api import DecisionBinding, DecisionBuildContext
@@ -63,6 +64,7 @@ async def test_default_provider_question_capacity_safely_skips_recall_without_ht
         keys=inert_keys(catalog),
         agent_id=1,
         created_at=datetime(2026, 11, 12, tzinfo=UTC),
+        inputs=TimestampPolicy.off(),
     )
     assert result is None
     assert builds == (["gemini-decision-1"] if count else [])

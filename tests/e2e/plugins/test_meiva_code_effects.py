@@ -9,6 +9,8 @@ from typing import Any
 import psycopg
 import pytest
 
+from base.agents.messages.timestamp_policy import TimestampPolicy
+from base.clock import Clock
 from base.config import settings
 from base.db import Database
 from base.paths import resolve_meiva_home, workspace_dir
@@ -21,6 +23,7 @@ from tests.e2e._db import (
     wait_for_status,
 )
 from tests.e2e._ports import GATEWAY_URL
+from tests.e2e.fakes.scenario_recording import note_bodies
 from tests.e2e.fakes.scenarios import meiva_code as world
 
 Call = list[dict[str, Any]]
@@ -49,11 +52,17 @@ def _notes(call: Call, tag: str) -> list[str]:
     return [m["text"] for m in call if m["tag"] == tag]
 
 
-def _context_headers(call: Call) -> list[str]:
+def _timestamp_inputs() -> TimestampPolicy:
+    return TimestampPolicy.from_clock(
+        Clock.from_settings(), timestamps_enabled=settings.general.message_timestamps
+    )
+
+
+def _context_headers(call: Call, *, inputs: TimestampPolicy) -> list[str]:
     return [
-        text.removeprefix("<system_note>\n").split("\n", 1)[0].removesuffix(":")
-        for text in _notes(call, "context")
-        if text.startswith("<system_note>\nProject ")
+        body.split("\n", 1)[0].removesuffix(":")
+        for body in note_bodies(call, "context", inputs=inputs)
+        if body.startswith("Project ")
     ]
 
 
@@ -74,7 +83,7 @@ def _checkpoint(agent_id: int, ready: Callable[[Values], bool]) -> Values:
 
 
 def _assert_oversized_note_is_head_and_tail(call: Call, already: list[str]) -> None:
-    headers = _context_headers(call)
+    headers = _context_headers(call, inputs=_timestamp_inputs())
     assert headers[:2] == already and len(headers) == 3, headers
     note = next(t for t in _notes(call, "context") if world.BIG_HEAD in t)
     assert world.BIG_TAIL in note
@@ -97,24 +106,24 @@ def test_reading_a_file_injects_agents_and_claude_md_once(
     root_agents = f"Project AGENTS.md from {proj / 'AGENTS.md'}"
     sub_claude = f"Project CLAUDE.md from {proj / 'sub' / 'CLAUDE.md'}"
 
-    assert _context_headers(calls[0]) == []
+    assert _context_headers(calls[0], inputs=_timestamp_inputs()) == []
 
     first = calls[1]
-    assert _context_headers(first) == [root_agents, sub_claude], (
-        f"context files not injected on read; saw {_context_headers(first)}; "
+    assert _context_headers(first, inputs=_timestamp_inputs()) == [root_agents, sub_claude], (
+        f"context files not injected on read; saw {_context_headers(first, inputs=_timestamp_inputs())}; "
         f"tool output: {_tool_outputs(first)!r}"
     )
     bodies = "\n".join(_notes(first, "context"))
     assert world.ROOT_RULES in bodies and world.SUB_CLAUDE in bodies
 
-    assert _context_headers(calls[2]) == [root_agents, sub_claude]
+    assert _context_headers(calls[2], inputs=_timestamp_inputs()) == [root_agents, sub_claude]
 
     assert world.PRIMARY_PATH_RULES in _tool_outputs(calls[3])
-    assert _context_headers(calls[3]) == [root_agents, sub_claude]
-    assert _context_headers(calls[4]) == [root_agents, sub_claude]
+    assert _context_headers(calls[3], inputs=_timestamp_inputs()) == [root_agents, sub_claude]
+    assert _context_headers(calls[4], inputs=_timestamp_inputs()) == [root_agents, sub_claude]
     assert not any(world.PRIMARY_PATH_RULES in m["text"] for m in calls[4] if m["tag"])
 
-    assert _context_headers(calls[5]) == [root_agents, sub_claude]
+    assert _context_headers(calls[5], inputs=_timestamp_inputs()) == [root_agents, sub_claude]
 
     _assert_oversized_note_is_head_and_tail(calls[6], [root_agents, sub_claude])
 
@@ -251,7 +260,7 @@ def test_compaction_resurfaces_context_files(
         f"Project AGENTS.md from {proj / 'AGENTS.md'}",
         f"Project CLAUDE.md from {proj / 'sub' / 'CLAUDE.md'}",
     ]
-    assert _context_headers(before) == expected
-    assert _context_headers(after) == expected, (
-        f"context files not re-surfaced after compact; saw {_context_headers(after)}"
+    assert _context_headers(before, inputs=_timestamp_inputs()) == expected
+    assert _context_headers(after, inputs=_timestamp_inputs()) == expected, (
+        f"context files not re-surfaced after compact; saw {_context_headers(after, inputs=_timestamp_inputs())}"
     )

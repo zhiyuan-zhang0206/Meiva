@@ -4,7 +4,7 @@
 # `wrap_inbound` is the "message boundary" contract for the agent SYSTEM_PROMPT — if
 # the format changes, SYSTEM_PROMPT must change in sync. Pin the format for each
 # source type:
-# - `system` / `system:<subtype>` → the system-note envelope, no timestamp
+# - `system` / `system:<subtype>` → the system-note envelope with the configured timestamp
 # - `agent:N` → "Agent N [timestamp]:" prefix
 # - `user` → bare "[timestamp]" header (no label)
 # - `watcher:N` → "Watcher (id N) [ts]:" prefix
@@ -92,14 +92,14 @@ class TestSystemSource:
     def test_system_wrapped_in_note_tags(self) -> None:
         assert wrap_inbound(
             "\u8bf7\u68b3\u7406\u5e76\u8c03 meiva.compact", "system", inputs=_ENVELOPE_INPUTS
-        ) == _note("\u8bf7\u68b3\u7406\u5e76\u8c03 meiva.compact")
+        ) == _note(f"{_TS} " + "\u8bf7\u68b3\u7406\u5e76\u8c03 meiva.compact")
 
     @pytest.mark.parametrize(
         "source",
         ["system:rollback", "system:restart", "system:compact", "system:health_check"],
     )
     def test_system_subtype_wrapped_in_note_tags(self, source: str) -> None:
-        assert wrap_inbound("raw msg", source, inputs=_ENVELOPE_INPUTS) == _note("raw msg")
+        assert wrap_inbound("raw msg", source, inputs=_ENVELOPE_INPUTS) == _note(f"{_TS} raw msg")
 
     def test_head_and_tail_pair(self) -> None:
         # meiva:note
@@ -107,7 +107,7 @@ class TestSystemSource:
         # source.
         # meiva:link agent/messages/docs/message-format.md
         head = inbound_head("system:upload", inputs=_ENVELOPE_INPUTS)
-        assert head == "<system_note>\n"
+        assert head == f"<system_note>\n{_TS} "
         assert inbound_tail("system:upload") == "\n</system_note>"
         assert inbound_tail("user") == ""
         assert inbound_tail("agent:5") == ""
@@ -316,16 +316,17 @@ class TestCreatedAtParameter:
         out = wrap_inbound("hi", "user", inputs=_ENVELOPE_INPUTS)
         assert _TIMESTAMP in out  # frozen by fixture
 
-    def test_system_ignores_created_at(self) -> None:
+    def test_system_uses_created_at(self) -> None:
         from datetime import datetime
 
         created = datetime(2026, 1, 1, tzinfo=UTC)
+        expected = f"[{_local_ts(created)}] raw"
         assert wrap_inbound("raw", "system", created_at=created, inputs=_ENVELOPE_INPUTS) == _note(
-            "raw"
+            expected
         )
         assert wrap_inbound(
             "raw", "system:rollback", created_at=created, inputs=_ENVELOPE_INPUTS
-        ) == _note("raw")
+        ) == _note(expected)
 
     def test_watcher_with_created_at(self) -> None:
         from datetime import datetime

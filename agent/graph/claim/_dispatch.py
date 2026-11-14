@@ -71,16 +71,6 @@ class BatchState:
     quiet_notes: int = 0
 
 
-def _ts_prefix(ctx: MeivaContext) -> str:
-    """Leading `[ts] ` for lifecycle markers, or `` when agent-facing message
-    timestamps are off (`settings.general.message_timestamps`)."""
-    return (
-        f"{ctx.require_clock().now_timestamp()} "
-        if ctx.require_agent().read("general", "message_timestamps")
-        else ""
-    )
-
-
 # meiva:note
 # Ordinary claim and foreground steering share inbound message construction across chat, system
 # notes, and heartbeats.
@@ -102,11 +92,12 @@ def prepare_system_note_inbound(ctx: MeivaContext, item: ClaimedInbound) -> list
     now = ctx.require_clock().now()
     return [
         system_note_message(
-            content=f"{_ts_prefix(ctx)}{item.content}",
+            content=item.content,
             tag=_system_note_tag(item.payload),
             task_id=task_id,
             picked_up_at=now,
             created_at=item.created_at,
+            inputs=ctx.timestamp_policy(),
         )
     ]
 
@@ -115,10 +106,11 @@ def prepare_heartbeat_inbound(ctx: MeivaContext, item: ClaimedInbound) -> list[B
     now = ctx.require_clock().now()
     return [
         system_note_message(
-            content=f"{_ts_prefix(ctx)}{item.content}",
+            content=item.content,
             tag=NoteTag.HEARTBEAT,
             picked_up_at=now,
             created_at=now,
+            inputs=ctx.timestamp_policy(),
         )
     ]
 
@@ -270,6 +262,7 @@ async def _handle_compact_request(
                 state.messages,
                 ctx.llm,
                 ctx.require_agent(),
+                inputs=ctx.timestamp_policy(),
                 agent_id=agent_id,
                 catalog=ctx.require_catalog(),
                 now=ctx.require_clock().now,
@@ -384,10 +377,11 @@ async def _handle_terminate(
     now = ctx.require_clock().now()
     st.new_msgs.append(
         system_note_message(
-            content=f"{_ts_prefix(ctx)}Termination was accepted from {by_who(item.source)}",
+            content=f"Termination was accepted from {by_who(item.source)}",
             tag=NoteTag.LIFECYCLE_TERMINATE,
             picked_up_at=now,
             created_at=now,
+            inputs=ctx.timestamp_policy(),
         )
     )
     st.next_goto = END
@@ -421,10 +415,11 @@ async def handle_restart(
         now = ctx.require_clock().now()
         st.new_msgs.append(
             system_note_message(
-                content=f"{_ts_prefix(ctx)}{restart_accepted_text(item.source, item.content or None)}",
+                content=f"{restart_accepted_text(item.source, item.content or None)}",
                 tag=NoteTag.LIFECYCLE_RESTART,
                 picked_up_at=now,
                 created_at=now,
+                inputs=ctx.timestamp_policy(),
             )
         )
 
@@ -467,10 +462,11 @@ async def _handle_resurrect(
     now = ctx.require_clock().now()
     st.new_msgs.append(
         system_note_message(
-            content=f"{_ts_prefix(ctx)}You have been resurrected by {by_who(item.source)}",
+            content=f"You have been resurrected by {by_who(item.source)}",
             tag=NoteTag.LIFECYCLE_RESURRECT,
             picked_up_at=now,
             created_at=now,
+            inputs=ctx.timestamp_policy(),
         )
     )
 
@@ -512,10 +508,11 @@ async def _handle_fork(
     )
     st.new_msgs.append(
         system_note_message(
-            content=fork_marker_text(_ts_prefix(ctx), item.source, agent_id, workspace),
+            content=fork_marker_text("", item.source, agent_id, workspace),
             tag=NoteTag.LIFECYCLE_FORK,
             picked_up_at=now,
             created_at=now,
+            inputs=ctx.timestamp_policy(),
         )
     )
     st.new_msgs.extend(context_notes.fork_notes(extensions, ctx))
@@ -538,6 +535,7 @@ async def _handle_fork(
             home=ctx.require_meiva_home(),
             environ=ctx.require_environ(),
             created_at=now,
+            inputs=ctx.timestamp_policy(),
         )
         if note is not None:
             st.new_msgs.append(note)

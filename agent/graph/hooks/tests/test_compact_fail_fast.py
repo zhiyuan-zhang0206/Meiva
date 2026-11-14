@@ -9,6 +9,7 @@ from langchain_core.messages import AIMessage, AnyMessage, HumanMessage
 
 from agent.graph.hooks import compact
 from agent.graph.hooks.tests.scripted_model import ScriptedModel
+from base.agents.messages.timestamp_policy import TimestampPolicy
 from base.config.tests.configuration import defaults
 from base.host.env.agent_slices import AgentSlices
 from base.lm.catalog import ModelCatalog
@@ -43,6 +44,7 @@ async def test_compaction_programming_error_stops_once_without_history_change(
             agent_id=228,
             catalog=model_catalog,
             now=lambda: datetime(2026, 8, 17, tzinfo=UTC),
+            inputs=TimestampPolicy.off(),
         )
 
     assert raised.value is error
@@ -69,6 +71,7 @@ async def test_compaction_keeps_explicit_empty_and_short_summary_recovery(
         agent_id=228,
         catalog=build_model_catalog(home=meiva_home()),
         now=lambda: datetime(2026, 8, 17, tzinfo=UTC),
+        inputs=TimestampPolicy.off(),
     )
 
     assert result == expected

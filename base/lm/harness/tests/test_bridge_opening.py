@@ -90,6 +90,7 @@ async def test_a_session_that_cannot_start_hands_nothing_over() -> None:
         clock=system_clock(),
         handle_rng=SecureRandom(random.SystemRandom()),
         controller_pid=os.getpid(),
+        timestamp_prefix=lambda: "",
     )
 
     with pytest.raises(HarnessNotDeliveredError):

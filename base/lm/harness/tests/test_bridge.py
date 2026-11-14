@@ -161,6 +161,7 @@ def make_bridge(
     session: FakeSession,
     *,
     handoff: Handoff | None = None,
+    stamp: str = "",
     registrations: RegistrationStore | None = None,
 ) -> HarnessBridge:
     return HarnessBridge(
@@ -174,6 +175,7 @@ def make_bridge(
         clock=system_clock(),
         handle_rng=SecureRandom(random.SystemRandom()),
         controller_pid=os.getpid(),
+        timestamp_prefix=lambda: stamp,
     )
 
 
@@ -226,6 +228,7 @@ async def test_a_faulted_turn_retires_its_session_and_the_next_one_starts_fresh(
         clock=system_clock(),
         handle_rng=SecureRandom(random.SystemRandom()),
         controller_pid=os.getpid(),
+        timestamp_prefix=lambda: "",
     )
 
     with pytest.raises(HarnessTurnFaultedError, match="cli died"):
@@ -320,6 +323,7 @@ async def test_a_rebuilt_unresumed_session_after_fault_accepts_a_new_handoff_onc
         clock=system_clock(),
         handle_rng=SecureRandom(random.SystemRandom()),
         controller_pid=os.getpid(),
+        timestamp_prefix=lambda: "",
     )
 
     with pytest.raises(HarnessTurnFaultedError, match="cli died"):
@@ -356,6 +360,7 @@ async def test_a_session_that_cannot_start_fails_the_turn_as_a_setup_error() -> 
         clock=system_clock(),
         handle_rng=SecureRandom(random.SystemRandom()),
         controller_pid=os.getpid(),
+        timestamp_prefix=lambda: "",
     )
 
     with pytest.raises(HarnessSetupError, match="could not start"):
@@ -373,6 +378,7 @@ async def test_a_refused_submission_fails_the_turn_and_retires_the_session() -> 
         clock=system_clock(),
         handle_rng=SecureRandom(random.SystemRandom()),
         controller_pid=os.getpid(),
+        timestamp_prefix=lambda: "",
     )
 
     with pytest.raises(HarnessSetupError, match="refused the input"):
@@ -561,6 +567,7 @@ def test_a_session_registers_its_handle_digest_and_retires_the_line(tmp_path: Pa
         clock=system_clock(),
         handle_rng=SecureRandom(random.SystemRandom()),
         controller_pid=os.getpid(),
+        timestamp_prefix=lambda: "",
     )
 
     asyncio.run(run_turn(bridge, "hello", key="inbound-1"))
@@ -596,6 +603,7 @@ def test_the_registration_carries_the_injected_clock_pid_and_handle_generator(
         clock=clock_at(datetime(2031, 5, 17, 9, 30, tzinfo=UTC)),
         handle_rng=SecureRandom(seeded_rng(7)),
         controller_pid=424242,
+        timestamp_prefix=lambda: "",
     )
 
     asyncio.run(run_turn(bridge, "hello", key="inbound-1"))

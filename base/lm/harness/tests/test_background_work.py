@@ -120,15 +120,16 @@ def test_a_record_keeps_its_background(tmp_path: Path) -> None:
     assert registry.load(6984, harness=HARNESS) == with_work
 
 
-async def test_the_first_input_after_a_restart_carries_the_lost_note_once() -> None:
+@pytest.mark.parametrize("stamp", ["", "[2026-11-14 Sat 16:05:51] "])
+async def test_the_first_input_after_a_restart_carries_the_lost_note_once(stamp: str) -> None:
     session = WorkingSession(lost=(_item(BackgroundKind.COMMAND, "sleep 100; echo BGDONE"),))
-    bridge = make_bridge(session)
+    bridge = make_bridge(session, stamp=stamp)
 
     _ = await run_turn(bridge, "hello", key="inbound-1")
     _ = await run_turn(bridge, "again", key="inbound-2")
 
     first, second = (text for text, _, _ in session.submitted)
-    assert first.startswith("System note: the claude_code CLI process")
+    assert first.startswith(f"{stamp}System note: the claude_code CLI process")
     assert "sleep 100; echo BGDONE" in first
     assert first.endswith("\n\nhello")
     assert second == "again"

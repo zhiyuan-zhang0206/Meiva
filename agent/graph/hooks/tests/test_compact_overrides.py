@@ -8,6 +8,7 @@ from langchain_core.messages import AnyMessage, HumanMessage, SystemMessage
 
 from agent.graph.hooks.compact import auto_compact_will_fire, compact_reminder_update
 from agent.state import AgentState, CompactState
+from base.agents.messages.timestamp_policy import TimestampPolicy
 from base.config.tests.configuration import defaults
 from base.host.env.agent_slices import AgentSlices
 from base.packages.plugin_providers import build_model_catalog
@@ -46,6 +47,7 @@ def test_an_unpinned_agent_is_below_its_models_thresholds() -> None:
             extensions=EMPTY,
             open_questions=[],
             now=_NOW,
+            inputs=TimestampPolicy.off(),
         )
         is None
     )
@@ -79,6 +81,7 @@ def test_an_agent_reminder_threshold_below_the_conversation_injects_the_reminder
         extensions=EMPTY,
         open_questions=[],
         now=_NOW,
+        inputs=TimestampPolicy.off(),
     )
     assert update is not None
     compact: CompactState = update["compact"]

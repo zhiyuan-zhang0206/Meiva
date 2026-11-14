@@ -48,6 +48,7 @@ from agent.messages import NoteTag, system_note_message
 from agent.state import AgentState
 from agent.tests.scripted_model import ScriptedChatModel
 from base.agents.context import MeivaContext
+from base.agents.messages.timestamp_policy import TimestampPolicy
 from base.agents.tests.units import spawn_agent
 from base.clock import SYSTEM_TIMERS, Clock
 from base.clock.tests.seeded_rng import seeded_rng
@@ -155,6 +156,7 @@ def _sample_messages() -> list[AnyMessage]:
             tag=NoteTag.COMPACT_REMINDER,
             created_at=datetime.now(UTC),
             picked_up_at=_PICKED_UP_AT,
+            inputs=TimestampPolicy.off(),
         ),
     ]
 
@@ -178,7 +180,12 @@ _LONG_SUMMARY = "## Requests\nfollow the template. " * 60
 
 
 def _runtime_with_llm(
-    llm: Any, database_gate: ProcessDbGate, *, home: Path, enabled: bool = True
+    llm: Any,
+    database_gate: ProcessDbGate,
+    *,
+    home: Path,
+    enabled: bool = True,
+    timestamps_enabled: bool | None = None,
 ) -> Runtime[MeivaContext]:
     return Runtime(
         context=MeivaContext(
@@ -194,7 +201,11 @@ def _runtime_with_llm(
                     "auto_compact_fraction": 1e-6,
                     "compact_reminder_fraction": 1e-6,
                 },
-                default_reader=defaults(),
+                default_reader=(
+                    defaults()
+                    if timestamps_enabled is None
+                    else defaults(general__message_timestamps=timestamps_enabled)
+                ),
             ),
             db=Database.from_settings(gate=database_gate),
             bus=EventBus.from_settings(rng=seeded_rng(), timers=SYSTEM_TIMERS),
@@ -225,6 +236,7 @@ def _make_runtime(
     database_gate: ProcessDbGate,
     home: Path,
     enabled: bool = True,
+    timestamps_enabled: bool | None = None,
 ) -> Runtime[MeivaContext]:
     ctx = MeivaContext(
         meiva_home=home,
@@ -234,7 +246,11 @@ def _make_runtime(
         event_publisher=MagicMock(),
         agent=AgentSlices.resolve(
             {"history_dump_enabled": enabled, "history_dump_keep": 5},
-            default_reader=defaults(),
+            default_reader=(
+                defaults()
+                if timestamps_enabled is None
+                else defaults(general__message_timestamps=timestamps_enabled)
+            ),
         ),
         db=Database.from_settings(gate=database_gate),
         bus=EventBus.from_settings(rng=seeded_rng(), timers=SYSTEM_TIMERS),
@@ -409,7 +425,10 @@ async def test_auto_compact_injects_dump_note_after_summary(
     result = await auto_compact_for_llm(
         state,
         _runtime_with_llm(
-            _fake_llm(_LONG_SUMMARY), database_gate=database_gate, home=meiva_test_home
+            _fake_llm(_LONG_SUMMARY),
+            database_gate=database_gate,
+            home=meiva_test_home,
+            timestamps_enabled=False,
         ),
         _fake_config(),
     )
@@ -417,7 +436,7 @@ async def test_auto_compact_injects_dump_note_after_summary(
 
     tail = _compact_tail(result)
     assert len(tail) == 2
-    assert tail[0].content == compose_summary_message(_LONG_SUMMARY)
+    assert tail[0].content == compose_summary_message(_LONG_SUMMARY, inputs=TimestampPolicy.off())
     note = tail[1]
     assert note.additional_kwargs["meiva_msg_type"] == "system_note"
     assert note.additional_kwargs["meiva_note_tag"] == "history_dump"
@@ -442,12 +461,15 @@ async def test_auto_compact_no_note_when_disabled(
             database_gate=database_gate,
             home=meiva_test_home,
             enabled=False,
+            timestamps_enabled=False,
         ),
         _fake_config(),
     )
     assert result is not None
     tail = _compact_tail(result)
-    assert [m.content for m in tail] == [compose_summary_message(_LONG_SUMMARY)]
+    assert [m.content for m in tail] == [
+        compose_summary_message(_LONG_SUMMARY, inputs=TimestampPolicy.off())
+    ]
     assert not (agent_workspace / "message-history").exists()
 
 
@@ -463,13 +485,18 @@ async def test_auto_compact_proceeds_when_dump_fails(
     result = await auto_compact_for_llm(
         state,
         _runtime_with_llm(
-            _fake_llm(_LONG_SUMMARY), database_gate=database_gate, home=meiva_test_home
+            _fake_llm(_LONG_SUMMARY),
+            database_gate=database_gate,
+            home=meiva_test_home,
+            timestamps_enabled=False,
         ),
         _fake_config(),
     )
     assert result is not None
     tail = _compact_tail(result)
-    assert [m.content for m in tail] == [compose_summary_message(_LONG_SUMMARY)]
+    assert [m.content for m in tail] == [
+        compose_summary_message(_LONG_SUMMARY, inputs=TimestampPolicy.off())
+    ]
 
 
 # ── claim path (agent-/user-triggered compact): note injection position ──
@@ -513,12 +540,15 @@ async def test_claim_compact_summary_parks_dump_note_after_summary(
             ops_pool=aops_pool,
             llm=_fake_llm("LLM should not be called"),
             database_gate=database_gate,
+            timestamps_enabled=False,
         ),
         _config(tid),
     )
 
     tail = _compact_tail(cmd.update)
-    assert tail[0].content == compose_summary_message("agent-written summary")
+    assert tail[0].content == compose_summary_message(
+        "agent-written summary", inputs=TimestampPolicy.off()
+    )
     assert len(tail) == 2  # summary + dump note, nothing else
     note = tail[-1]
     assert note.additional_kwargs["meiva_msg_type"] == "system_note"
@@ -562,9 +592,12 @@ async def test_claim_compact_summary_no_note_when_disabled(
             llm=_fake_llm("LLM should not be called"),
             database_gate=database_gate,
             enabled=False,
+            timestamps_enabled=False,
         ),
         _config(tid),
     )
 
     tail = _compact_tail(cmd.update)
-    assert [m.content for m in tail] == [compose_summary_message("agent-written summary")]
+    assert [m.content for m in tail] == [
+        compose_summary_message("agent-written summary", inputs=TimestampPolicy.off())
+    ]

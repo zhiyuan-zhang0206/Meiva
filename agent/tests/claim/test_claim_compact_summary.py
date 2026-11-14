@@ -9,6 +9,7 @@ from agent.graph.claim.tests.claim_support import insert_inbound_kind, make_runt
 from agent.graph.hooks.compact import compose_summary_message
 from agent.state import AgentState
 from agent.tests.claim.claim_status_support import committed_publishes, compact_tail
+from base.agents.messages.timestamp_policy import TimestampPolicy
 from base.agents.tests.units import spawn_agent
 from base.cluster.machine import MachineIdentityReader
 from base.cluster.machine.tests.identity import machine_identity as machine_identity
@@ -82,7 +83,7 @@ async def test_claim_compact_summary_with_no_existing_system_message(
 
     cmd = await claim_node(
         AgentState(),  # messages empty
-        make_runtime(ops_pool=aops_pool, database_gate=database_gate),
+        make_runtime(ops_pool=aops_pool, database_gate=database_gate, timestamps_enabled=False),
         thread_config(
             tid,
         ),
@@ -91,7 +92,9 @@ async def test_claim_compact_summary_with_no_existing_system_message(
     tail = compact_tail(cmd.update)
     assert not any(isinstance(m, SystemMessage) for m in cmd.update["messages"])  # type: ignore[index]
     assert not any(isinstance(m, SystemMessage) for m in tail)
-    assert [m.content for m in tail] == [compose_summary_message(summary_text)]  # pyright: ignore[reportUnknownMemberType]
+    assert [m.content for m in tail] == [
+        compose_summary_message(summary_text, inputs=TimestampPolicy.off())
+    ]  # pyright: ignore[reportUnknownMemberType]
 
 
 async def test_claim_compact_summary_returns_before_llm_with_halted_false(
@@ -131,3 +134,26 @@ async def test_claim_compact_summary_returns_before_llm_with_halted_false(
     assert cmd.update["halted"] is False  # type: ignore[index]
     # update dict key is the literal 'halted', cannot be 'HALTED' / 'XXhaltedXX'
     assert "halted" in cmd.update  # type: ignore[operator]
+
+
+def test_replacement_summary_keeps_its_classifier_with_both_timestamp_states() -> None:
+    from datetime import UTC, datetime
+
+    from agent.graph.claim.node import CLAIM
+    from agent.graph.hooks.compact import build_compact_transition
+    from agent.messages import COMPACT_SUMMARY_HEADER
+    from base.agents.messages.kwargs import is_compact_summary_text
+
+    at = datetime(2026, 11, 14, 8, 5, 51, tzinfo=UTC)
+    for enabled in (False, True):
+        policy = TimestampPolicy(enabled, "Asia/Shanghai", True, at)
+        transition = build_compact_transition(
+            "Remember the whole body.", resume=CLAIM, inputs=policy
+        )
+        message = transition["context_reset"].tail[0]
+        prefix = "[2026-11-14 Sat 16:05:51] " if enabled else ""
+        assert (
+            message.content
+            == f"<system_note>\n{COMPACT_SUMMARY_HEADER}\n\n{prefix}Remember the whole body.\n</system_note>"
+        )
+        assert is_compact_summary_text(message.content)

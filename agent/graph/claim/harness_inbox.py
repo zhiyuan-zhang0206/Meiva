@@ -570,7 +570,7 @@ async def harness_reply_correction(
     note = await delivery_end_reminder(ctx, agent_id, baseline, correcting=correcting)
     if not invalid and note is None:
         return None
-    note = note or reply_visibility_note(ctx.require_clock().now())
+    note = note or reply_visibility_note(ctx.require_clock().now(), inputs=ctx.timestamp_policy())
     if correcting:
         await append_turn_timeline(ctx, agent_id, [note])
         return None

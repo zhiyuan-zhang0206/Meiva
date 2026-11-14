@@ -296,7 +296,13 @@ async def _open_questions_note(
         return []
     now = ctx.require_clock().now()
     return [
-        system_note_message(content=text, tag=NoteTag.CONTEXT, picked_up_at=now, created_at=now)
+        system_note_message(
+            content=text,
+            tag=NoteTag.CONTEXT,
+            picked_up_at=now,
+            created_at=now,
+            inputs=ctx.timestamp_policy(),
+        )
     ]
 
 

@@ -14,8 +14,8 @@ from typing import TypeGuard
 
 from psycopg_pool import AsyncConnectionPool
 
+from base.agents.messages.timestamp_policy import TimestampPolicy
 from base.api_contracts.agent_contract import reads_timeline_from_record
-from base.clock import Clock
 
 _log = logging.getLogger(__name__)
 
@@ -32,7 +32,7 @@ def _is_pool(value: object) -> TypeGuard[AsyncConnectionPool]:
 class SwitchHistory:
     graph: object | None
     pool: object | None
-    clock: Clock
+    timestamps: TimestampPolicy
 
 
 # meiva:note
@@ -53,15 +53,17 @@ async def record_switch_note(
     if old_harness == new_harness:
         return
     SNAPSHOT_CURSOR.pop(agent_id, None)
-    now = history.clock.now()
-    ts_prefix = f"[{now.strftime('%Y-%m-%d %H:%M:%S UTC')}] "
+    now = history.timestamps.require_now()
     note_content = (
-        f"{ts_prefix}Harness switched from '{old_harness}' to '{new_harness}' "
-        f"by {by_who(source)}: {message}"
+        f"Harness switched from '{old_harness}' to '{new_harness}' by {by_who(source)}: {message}"
     )
     if old_harness == "meiva" and history.graph is not None:
         note = system_note_message(
-            content=note_content, tag=NoteTag.LIFECYCLE_RESTART, picked_up_at=now, created_at=now
+            inputs=history.timestamps,
+            content=note_content,
+            tag=NoteTag.LIFECYCLE_RESTART,
+            picked_up_at=now,
+            created_at=now,
         )
         try:
             await history.graph.aupdate_state(  # pyright: ignore[reportAttributeAccessIssue, reportUnknownMemberType]

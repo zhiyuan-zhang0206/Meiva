@@ -203,6 +203,7 @@ class BridgeRootValues:
     controller_pid: int
     handle_rng: SecureRandom
     own_turn: Callable[[int], None]
+    timestamp_prefix: Callable[[], str]
 
 
 # meiva:note
@@ -268,4 +269,5 @@ def bridge_for(
         handle_rng=root.handle_rng,
         controller_pid=root.controller_pid,
         own_turn=lambda: root.own_turn(agent_id),
+        timestamp_prefix=root.timestamp_prefix,
     )

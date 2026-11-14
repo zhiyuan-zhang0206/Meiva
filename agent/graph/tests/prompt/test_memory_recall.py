@@ -200,8 +200,9 @@ def _content(result: recall.PassiveRecall) -> str:
 # ── rendering ──
 
 
+@pytest.mark.parametrize("timestamps_enabled", [False, True])
 async def test_renders_path_score_description_and_matched_passage(
-    memory_root: Path, context: MeivaContext, search: _MemoryGateway
+    memory_root: Path, context: MeivaContext, search: _MemoryGateway, timestamps_enabled: bool
 ) -> None:
     _write_note(memory_root, "a.md", "note a")
     _write_note(memory_root, "sub/b.md", "note b")
@@ -218,10 +219,16 @@ async def test_renders_path_score_description_and_matched_passage(
         ],
     )
 
-    result = await _recall(context, memory_root)
+    assert context.agent is None
+    result = await _recall(context, memory_root, general__message_timestamps=timestamps_enabled)
 
     assert result is not None
     content = _content(result)
+    created = datetime.fromisoformat(str(result.note.additional_kwargs["meiva_created_at"]))
+    stamp = _clock().format_timestamp(created) + " " if timestamps_enabled else ""
+    assert content.startswith(f"<system_note>\n{stamp}")
+    if not timestamps_enabled:
+        assert not content.startswith("<system_note>\n[")
     assert "- a.md (score 0.83): deploy runbook\n  > restart the gateway" in content
     assert "- sub/b.md (score 0.81): gateway ports\n  > line one\n  >\n  > line three" in content
     assert content.index("a.md") < content.index("sub/b.md")

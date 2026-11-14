@@ -36,6 +36,7 @@ from base.agents.history.context_breakdown import (
     section_breakdown,
 )
 from base.agents.history.message_tokens import MessageTokens
+from base.agents.messages.timestamp_policy import TimestampPolicy
 from base.agents.messages.token_estimate import estimate_message_tokens
 from base.db import create_agent
 from gateway.tests.auth.gateway_config import gateway_test_client
@@ -58,7 +59,11 @@ def _find(nodes: list[SectionNode], name: str) -> SectionNode:
 
 def _note(content: str, tag: NoteTag) -> HumanMessage:
     return system_note_message(
-        content=content, tag=tag, created_at=datetime.now(UTC), picked_up_at=_PICKED_UP_AT
+        content=content,
+        tag=tag,
+        created_at=datetime.now(UTC),
+        picked_up_at=_PICKED_UP_AT,
+        inputs=TimestampPolicy.off(),
     )
 
 
@@ -98,7 +103,9 @@ def _sample_messages() -> list[BaseMessage]:
             usage_metadata={"input_tokens": 1000, "output_tokens": 40, "total_tokens": 1040},
         ),
         ToolMessage(content="tool output", tool_call_id="c1"),
-        HumanMessage(content=compose_summary_message("a compact summary body")),
+        HumanMessage(
+            content=compose_summary_message("a compact summary body", inputs=TimestampPolicy.off())
+        ),
     ]
 
 

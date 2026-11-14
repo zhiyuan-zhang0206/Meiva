@@ -152,7 +152,7 @@ def inbound_head(
     callers / system messages), the current time is used as before.
     """
     if _system_source(source):
-        return SYSTEM_NOTE_LEAD
+        return f"{SYSTEM_NOTE_LEAD}{inputs.prefix(created_at)}"
     formatted, ts = _timestamp(created_at, inputs)
     if is_caller_source(source):
         caller = CallerIdentity.from_source(source)
