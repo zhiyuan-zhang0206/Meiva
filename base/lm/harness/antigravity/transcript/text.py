@@ -1,27 +1,6 @@
 from __future__ import annotations
 
 import re
-from datetime import UTC, datetime
-
-from base.lm.harness.antigravity.transcript.errors import MissingError
-
-
-# meiva:note
-# `created_at` is the step's creation time with second precision: it is shown (`Entry.at`) and never
-# used to order anything. A value that is not a timezone-aware ISO-8601 stamp is a malformed row.
-def valid_stamp(created_at: str) -> str:
-    try:
-        stamp = datetime.fromisoformat(created_at)
-    except ValueError:
-        raise MissingError("created_at") from None
-    if stamp.tzinfo is None:
-        raise MissingError("created_at")
-    return created_at
-
-
-def iso_of(clock_ms: int) -> str:
-    return datetime.fromtimestamp(clock_ms // 1000, UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
-
 
 # meiva:note
 # AGY does not escape request tags inside user text. Only remove the outside

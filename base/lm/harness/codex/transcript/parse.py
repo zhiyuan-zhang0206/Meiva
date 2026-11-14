@@ -40,8 +40,7 @@ __all__ = [
 # sub-agent notification. `Order.seq` is the item's position in the page or thread parsed (the
 # rollout ordinal for a rollout line) and `Order.sub` numbers the entries one item yields; a command
 # that completes late arrives as its own call and result pair carrying its original turn id, and is
-# appended when it arrives. A child thread is parsed with `record=<child thread id>`; the link from the
-# parent's `spawnAgent` call names that id. Every function is pure and returns anomalies instead of
+# appended when it arrives. Every function is pure and returns anomalies instead of
 # raising: an item type the parser does not read is an `Anomaly(UNKNOWN_TYPE)` named by its type, a
 # known one lacking a field the projection needs an `Anomaly(MISSING_FIELD)`; rows the parser knows to
 # be bookkeeping give nothing.

@@ -847,66 +847,6 @@ CREATE TRIGGER agents_meta_born_spawner_append_only
     FOR EACH ROW
     EXECUTE FUNCTION reject_agents_meta_born_spawner_update();
 
--- ─────────────── agent_harness_messages ───────────────
--- Dedicated UI display table for external harnesses. Live activity items can
--- advance in place by revision. Native meiva continues using LangGraph checkpoints
--- as both execution truth and UI store; external harnesses write rendered TimelineItems
--- here so LangGraph checkpoints remain decoupled from external harness execution.
-CREATE TABLE agent_harness_messages (
-    id BIGSERIAL PRIMARY KEY,
-    agent_id BIGINT NOT NULL REFERENCES agents(id) ON DELETE CASCADE,
-    seq INT NOT NULL CHECK (seq >= 0),
-    harness TEXT NOT NULL,
-    item JSONB NOT NULL,
-    inbound_id BIGINT,
-    created_at TIMESTAMPTZ NOT NULL DEFAULT clock_timestamp(),
-    source_key TEXT,
-    projection_version INTEGER,
-    call_id TEXT,
-    UNIQUE (agent_id, seq)
-);
-
-CREATE INDEX idx_agent_harness_messages_agent_seq ON agent_harness_messages (agent_id, seq DESC);
-CREATE UNIQUE INDEX idx_agent_harness_messages_source_key
-    ON agent_harness_messages (agent_id, source_key) WHERE source_key IS NOT NULL;
--- The timeline item of a CLI tool call is found by the CLI's own id (a sub-agent's output nests under its call).
--- The id is a column, not an expression over `item`, so in-place revisions of `item` stay heap-only updates.
-CREATE INDEX IF NOT EXISTS idx_agent_harness_messages_call_id
-    ON agent_harness_messages (agent_id, call_id) WHERE call_id IS NOT NULL;
-
-COMMENT ON TABLE agent_harness_messages IS
-    'Timeline item store for external harnesses, with in-place revisions for live activity.';
-COMMENT ON COLUMN agent_harness_messages.agent_id IS
-    'Owning agent id.';
-COMMENT ON COLUMN agent_harness_messages.seq IS
-    'Contiguous zero-based display sequence number per agent.';
-COMMENT ON COLUMN agent_harness_messages.harness IS
-    'The external harness that produced or owns this timeline item.';
-COMMENT ON COLUMN agent_harness_messages.item IS
-    'Rendered TimelineItem JSON payload for UI consumption.';
-COMMENT ON COLUMN agent_harness_messages.inbound_id IS
-    'Optional inbound message id if this item was produced from a specific inbound trigger.';
-COMMENT ON COLUMN agent_harness_messages.created_at IS
-    'Timestamp when the item was inserted.';
-COMMENT ON COLUMN agent_harness_messages.projection_version IS
-    'Version of the projection rules that produced this row; NULL for rows written before it existed.';
-COMMENT ON COLUMN agent_harness_messages.call_id IS
-    'The CLI''s id of the tool call an agent_code item recorded (the item''s tool_use_id); NULL for every other item. Indexed, so a sub-agent''s output finds the item it nests under; never changed by an in-place revision, so those stay heap-only updates.';
-COMMENT ON COLUMN agent_harness_messages.source_key IS
-    'Stable key of the transcript entry this row was projected from; NULL for rows the graph writes itself. Unique per agent.';
-
-DO $$ BEGIN
-    IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'meiva_runner') THEN
-        GRANT SELECT, INSERT ON agent_harness_messages TO meiva_runner;
-        GRANT UPDATE (item) ON agent_harness_messages TO meiva_runner;
-        GRANT USAGE, SELECT ON SEQUENCE agent_harness_messages_id_seq TO meiva_runner;
-    END IF;
-    IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'meiva_gateway') THEN
-        GRANT SELECT, INSERT, UPDATE, DELETE ON agent_harness_messages TO meiva_gateway;
-        GRANT USAGE, SELECT ON SEQUENCE agent_harness_messages_id_seq TO meiva_gateway;
-    END IF;
-END $$;
-
 -- ─────────────── events archive (DROPPED — Loki archive stream) ───────────────
 -- The frozen PG `events` archive was dropped with the task #1281/#1823 cleanup
 -- Every pre-cutover event row
@@ -1964,6 +1904,13 @@ INSERT INTO schema_migrations (name) VALUES ('20261111T144830_drop-agent-notices
 -- The rename and tightening of the question and publication tables is already in the definitions
 -- above (new names, narrowed constraints); a fresh database has nothing to rename.
 INSERT INTO schema_migrations (name) VALUES ('20261111T193000_split-questions-and-publications');
+-- The external harness timeline table and the stored-transcript tables are dropped from this
+-- baseline; a fresh database has none of them, so it must not replay the migrations that altered
+-- or dropped them.
+INSERT INTO schema_migrations (name) VALUES ('20261112T101810_harness-timeline-source-key');
+INSERT INTO schema_migrations (name) VALUES ('20261112T124500_harness-call-item-index');
+INSERT INTO schema_migrations (name) VALUES ('20261112T192342_drop-harness-transcript-tables');
+INSERT INTO schema_migrations (name) VALUES ('20261114T165000_drop-agent-harness-messages');
 
 -- Keyed-operation receipts never expire into fresh effects (questions, publications' seen cursor,
 -- reply-suggestion feedback).

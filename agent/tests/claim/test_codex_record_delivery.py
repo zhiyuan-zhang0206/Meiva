@@ -33,7 +33,6 @@ from agent.graph.llm_errors import FatalLLMStreamError
 from agent.ownership.tests.ownership_support import agent_row
 from agent.state import AgentState
 from base.agents.context import HostedTurnResources, MeivaContext
-from base.agents.history.harness_messages import aload_harness_timeline_items
 from base.api_contracts.agent_contract import Harness
 from base.clock import SYSTEM_TIMERS
 from base.clock.tests.seeded_rng import seeded_rng
@@ -179,8 +178,6 @@ async def test_a_codex_turn_reaches_the_page_the_user_and_the_inbox_through_the_
 
     assert command.goto == "claim"
     assert row_status(db_conn, row) == "done", "the input is settled without a timeline write"
-    async with aops_pool.connection() as conn:
-        assert await aload_harness_timeline_items(conn, agent_id) == [], "no stored rows"
     _assert_page_saw_the_message(
         [json.loads(payload) for payload in await live_events.payloads()], row
     )
@@ -335,8 +332,6 @@ async def test_antigravity_content_matching_and_conversation_publications_are_id
     _assert_page_saw_the_message([json.loads(p) for p in await live_events.payloads()], row_id)
     await harness_turn_node(AgentState(), rt(_engine()), config(agent_id))
     assert _publications(db_conn, agent_id) == first
-    async with aops_pool.connection() as conn:
-        assert await aload_harness_timeline_items(conn, agent_id) == []
 
 
 @pytest.mark.parametrize("harness", [Harness.CODEX, Harness.ANTIGRAVITY])

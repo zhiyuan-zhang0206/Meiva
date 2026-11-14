@@ -25,7 +25,6 @@ GATEWAY_APPEND_ONLY_TABLES = ("audit_events", "telemetry_events")
 
 _RUNNER_TABLE_GRANTS: tuple[tuple[LiteralString, tuple[str, ...]], ...] = (
     ("SELECT, UPDATE", ("inbound_messages", "agents_meta")),
-    ("SELECT, INSERT", ("agent_harness_messages",)),
     ("INSERT", ("agent_publications",)),
     ("INSERT, UPDATE", ("upload_delivery_copies",)),
     ("INSERT", ("inbound_messages",)),
@@ -131,7 +130,6 @@ def _grant_runner(conn: Conn, owner: str, runner: str) -> None:
     # meiva:link base/cluster/authority/docs/group-grants.md
     _grant(conn, "REVOKE UPDATE ON {} FROM {}", "notification_events", runner)
     _grant(conn, "GRANT UPDATE (announced_at) ON {} TO {}", "notification_events", runner)
-    _grant(conn, "GRANT UPDATE (item) ON {} TO {}", "agent_harness_messages", runner)
     _grant(conn, "GRANT USAGE, SELECT ON SEQUENCE agent_shell_ttl_renewals_id_seq TO {}", runner)
 
     _grant(

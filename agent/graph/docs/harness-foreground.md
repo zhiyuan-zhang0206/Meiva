@@ -13,16 +13,13 @@ are returned to the queue to wait.
 
 One wake's batch is one input, one harness turn, made of blocks: a text block for each synthetic input first (a
 restart or resume note, a context reset, a continuation), then a text block for each row in queue order with the row's
-images right behind it, then a text block for each pre-turn hook note, under the key of the first row that is not passive; the other rows are `Handed.carried`, keep their own
-timeline entries and settle, are returned or are lost together with the one acknowledgement; the synthetic inputs ride in it with their
-timeline entries, and a refused or lost input is handed over again with them (a delivery the session could not
+images right behind it, then a text block for each pre-turn hook note, under the key of the first row that is not passive; the other rows are `Handed.carried` and settle, are returned or are lost together with the one acknowledgement; the synthetic inputs ride in it, and a refused or lost input is handed over again with them (a delivery the session could not
 take leaves them in the checkpoint's `harness_inputs`, so the next invocation carries them too). Handing them over
 one by one made the first input open the turn alone (a passive note, a hook note) and the person's message run as
 a turn of its own about a second later. A wake with no row text (a restart note and a hook note, say) is one
 input the same way: its synthetic inputs are merged in the same order under the first one's key, and a refused or lost one
 is handed back whole. The images of the merged input are bounded together (15 MB), not per row; one that does not fit is
-left out and a text block after the last row says so. The timeline is only a projection: each row still writes its own
-entry, whatever shape the input took on the way to the harness. A batch of several rows marks them with `harness_input_key` in their
+left out and a text block after the last row says so. When the CLI's record is read back for the timeline, the sent input expands back into the original inbound rows it carried. A batch of several rows marks them with `harness_input_key` in their
 payload before it is handed over, so a later run rebuilds the group and asks the harness's record about that one
 key (a requeue clears the mark). An interrupt request still pending when
 an invocation starts was aimed at a turn that has ended; the invocation settles it before it subscribes, so it
@@ -30,8 +27,8 @@ cannot cut short the turn that answers the interrupt's message.
 
 A row has two states in front of the user, and only two. `claimed` is the pending strip: the harness was handed
 the message and has not shown it to the model. When the harness reports it in the model's context (ACK 2,
-`InputInContext`), the row becomes done and its timeline entries are written in the same transaction; the
-frontend event for it follows the commit. The first acknowledgement (`InputReceived`) is a backend fact and
+`InputInContext`), the row becomes done (`commit_handed`); the message appears on the timeline when the CLI's
+record is read, and `ReadTimelineSink` publishes `InboundCommitted` with it. The first acknowledgement (`InputReceived`) is a backend fact and
 changes nothing visible. A turn ending settles nothing: only ACK 2, a refusal (`InputRejected`) or a loss
 (`InputLost`) does. A refused or lost row returns to `pending` with no claim time, so it keeps its original
 position and is handed over again before anything newer, with the same key and in the same order; the retry
@@ -58,13 +55,13 @@ per-CLI delivery are in [harness delivery](../../../base/lm/harness/docs/deliver
 
 Inputs without an inbox row (a restart or resurrect note, a fork marker, a continuation after a context
 reset, pre-turn hook notes, a visibility or delivery correction) are synthetic inputs in `harness_inputs`.
-Each has a stable key, goes through the same `deliver()`, and writes its timeline entries at ACK 2. A fork's
+Each has a stable key and goes through the same `deliver()`. A fork's
 first input is appended to the inherited conversation and never repeats the handoff.
 
 A batch the session could not take at all (it failed to start, so nothing was handed over) goes back to the queue
 untouched. A control row only blocks the rows queued behind it, by the same (created_at, id) order the claim uses,
 so a message followed by a stop is delivered first and the stop is taken when it is out of the way. Any other
-failure of the invocation first gives every input handed over an explicit outcome (reconciled, or the marker, as below)
+failure of the invocation first gives every input handed over an explicit outcome (reconciled, or consumed as unconfirmed, as below)
 and then raises.
 
 An interrupt targets the foreground. The graph continues reading activity until the
@@ -83,14 +80,14 @@ nothing is guessed when the record cannot tell. `bridge.reconcile(keys)` reads t
 input, `IN_CONTEXT`, `PERSISTED_UNDELIVERED`, `NOT_FOUND` or `UNKNOWN`; `plan_reconciliation` (pure, in
 `claim/harness_foreground.py`) turns the answers into one decision per input:
 
-| Record says | The row | Timeline |
-|---|---|---|
-| `IN_CONTEXT` | `done`, like an ACK 2 | its entries are written |
-| `NOT_FOUND` | back to `pending` at its original position, delivered again in order | nothing yet |
-| `PERSISTED_UNDELIVERED` (Antigravity's queue holds it) | stays `claimed`; the session adopts it and the harness's later facts settle it | nothing yet |
-| `UNKNOWN` (Antigravity: no queue file for it) | consumed with the uncertainty marker, never sent again | marker |
-| no record exists (no session record, file gone) | consumed with the marker (event `harness_reconcile_failed`) | marker |
-| a record exists but could not be read (I/O, an interface change) | stays `claimed` and the error propagates; the next wake reconciles again | nothing |
+| Record says | The row |
+|---|---|
+| `IN_CONTEXT` | `done`, like an ACK 2 (`commit_reconciled`) |
+| `NOT_FOUND` | back to `pending` at its original position, delivered again in order |
+| `PERSISTED_UNDELIVERED` (Antigravity's queue holds it) | stays `claimed`; the session adopts it and the harness's later facts settle it |
+| `UNKNOWN` (Antigravity: no queue file for it) | consumed as unconfirmed, never sent again |
+| no record exists (no session record, file gone) | consumed as unconfirmed (event `harness_reconcile_failed`) |
+| a record exists but could not be read (I/O, an interface change) | stays `claimed` and the error propagates; the next wake reconciles again |
 
 Antigravity's queue only holds inputs steered into a running turn. An input sent while the conversation was idle
 starts a turn on stdin, carries no id and leaves no file (observed on a live agy: no queue directory at all after
@@ -102,8 +99,8 @@ There are two entry points, both in `ForegroundRun`:
 
 - **A run that fails or is interrupted** (`retire_unconfirmed`). It retires the session first, so a CLI that
   still held an input in a queue of its own cannot take it later and "not found" is final; then it reconciles
-  the inputs it had handed over. When the session cannot be retired the record is not asked and the marker is
-  written. It returns the rows it consumed with the marker, and only those are named by the lost-turn note.
+  the inputs it had handed over. When the session cannot be retired the record is not asked and the inputs are
+  consumed as unconfirmed.
 - **The start of a run** (`_adopt_claimed`). After the session is up (resumed, with a higher generation), every
   claimed deliverable row that this run did not hand over is an orphan of an earlier process (a crash, an abort,
   a host restart) and is reconciled before anything new is delivered. The claim also enters the turn for such
@@ -146,12 +143,10 @@ is not detected; the facts above are the whole protection, and no process regist
 
 Parent: [Harness turn](harness-turn.md).
 
-## Record-read agents (Claude Code, Codex)
+## Timeline visibility
 
-A Claude Code or Codex agent's inputs are decided as above, by the stream's acknowledgements and, after a failure, by reading the
-CLI's record (`bridge.reconcile`); what differs is only that nothing is written to a timeline when a row settles: the row
-is set `done` (`commit_handed`, `commit_reconciled`) and the record is what the page shows
-([harness turn](harness-turn.md#record-read-timeline-claude-code-codex)). The lost-turn note, the unconfirmed-input entry, the
-stop note and the visibility-correction note are not shown for these agents (the correction is still sent to the CLI).
-A message of ours the record does not account for does not exist as a row, so a person's input that no inbox row names
-(a context reset, a recovery note) is not shown.
+All external harnesses read their timelines directly from the CLI's record
+([harness turn](harness-turn.md#record-read-timeline-external-harnesses)). Settling an inbox row only updates
+`inbound_messages` (`commit_handed`, `commit_reconciled`); no database timeline rows are written. Synthetic
+inputs that no inbox row names (a context reset, a recovery note, a visibility correction) are sent to the CLI
+without appearing as standalone user rows on the timeline.

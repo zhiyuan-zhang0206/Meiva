@@ -1,13 +1,13 @@
 # Reading a harness CLI's record into timeline drafts
 
-The shared layer in `base/lm/harness/session/transcript/` and the three parsers
-(`claude/transcript/`, `codex/transcript/`, `antigravity/transcript/`) read a CLI's own conversation record
-into one vocabulary and project it into timeline item drafts. An external agent's timeline is read from its
+The shared layer in `base/lm/harness/session/transcript/`, the `claude/transcript/` and `codex/transcript/`
+parsers, and the `antigravity/transcript/window.py` reader project a CLI's own conversation record
+into timeline item drafts. An external agent's timeline is read from its
 record when it is asked for and stored nowhere ([the decision](../../../../docs/decisions/agents/graph/2026-11-13-timeline-read-from-the-record.md),
-which keeps the vocabulary and the one projection of
-[the transcript decision](../../../../docs/decisions/agents/graph/2026-11-12-transcript-is-the-timeline-source.md) and replaces its stored
-copy). The stored transcript pipeline has been removed. Antigravity now uses the same record-read path; the older adapter-event projector and display table remain until its authorized stable rollout, in
-[the plan](../../../../future/agent/transcript-timeline-source.md).
+which keeps the vocabulary and the projection of
+[the transcript decision](../../../../docs/decisions/agents/graph/2026-11-12-transcript-is-the-timeline-source.md) and replaces both the stored
+copy and the earlier adapter-event database table; see
+[the plan](../../../../future/agent/transcript-timeline-source.md)).
 
 ## The read-time path
 
@@ -42,18 +42,16 @@ Antigravity reads the main full transcript in file order, with the same bounded 
 ## The two pieces
 
 - **Entries** (`entries.py`): `HumanInput`, `AgentText`, `Reasoning`, `ToolCall`, `ToolResult`,
-  `SubagentLink`, `Notice`, `Interrupt`, `Compaction`, `TokenUsage`, `TurnEnd`, `Failure`, `Anomaly`. Each has
-  a stable `key` (idempotency), an `Order(seq, sub)` that gives the entry's place inside its own record (the timeline itself is
-  appended in arrival order, so no clock and no cross-record order), a `record` (`main` or a sub-agent's record id) and an optional `turn`. A kind is in the
-  vocabulary only if two of the three CLIs have a counterpart.
-- **The projection** (`projection.py`, `Projector`): the only place that pairs a call with its output
-  (whichever arrives first), nests a sub-agent record under the call that started it (whichever record
-  arrives first), recognises an input we sent (by the id the CLI kept, else by text in send order) and expands
-  it into the original inbound messages it carried, opens and closes turns, and reports each model message's usage once (`Projection.usage`: main or sub-agent record, the call that
-  started the sub-agent, the message's model) and tallies it per turn and per record. It does no I/O and reads no clock; an entry whose key was projected gives nothing a second time, and
-  `known_keys` lets a forked conversation skip history it already has. Its output is `TimelineDraft`s
-  (`drafts.py`) in the existing `TimelineItem` kind vocabulary, `Delivery` conclusions, turn observations and
-  closings, usage tallies and `Anomaly` reports.
+  `Notice`, `Interrupt`, `Compaction`, `TokenUsage`, `TurnEnd`, `Failure`, `Anomaly`. Each has
+  a stable `key` (idempotency), an `Order(seq, sub)` that gives the entry's place inside the record,
+  and an optional `turn`. A kind is in the vocabulary only if two of the three CLIs have a counterpart.
+- **The projection** (`projection.py`, `Projector`): pairs a call with its output (whichever arrives first),
+  recognises an input we sent (by the id the CLI kept, else by text in send order) and expands
+  it into the original inbound messages it carried, opens and closes turns, and reports each model message's
+  usage once (`Projection.usage`) and tallies it per turn. It does no I/O and reads no clock; an entry whose
+  key was projected gives nothing a second time. Its output is `TimelineDraft`s (`drafts.py`) in the
+  `TimelineItem` kind vocabulary, `Delivery` conclusions, turn observations and closings, usage tallies
+  and `Anomaly` reports.
 
 Reply visibility (`resolve_agent_reply`) and the rendering of a tool call's payload are not here: they live
 above `base/lm` (`base/agents`, `agent/graph/claim`), so whoever turns a draft into an item applies them.
@@ -83,7 +81,6 @@ surrogates) before it is parsed. Nothing is stored: the position of a read lives
 | `Reasoning` | `thinking` block, `thinkingDurationMs` | `reasoning` item, text empty (encrypted) | `PLANNER_RESPONSE.thinking`, high-thinking tier only |
 | `ToolCall` | `tool_use` block | `commandExecution`, `spawnAgent` and other items, completed state only | `PLANNER_RESPONSE.tool_calls[k]` (no id; identity is the row offset and call position) |
 | `ToolResult` | `tool_result` block of a `user` row (`toolDenialKind`, `toolUseResult.backgroundTaskId`) | the same item as its call | `GENERIC` rows following the call in file order; `RUNNING` means a completed background handoff |
-| `SubagentLink` | `toolUseResult.agentId` on the call's result; child rows `isSidechain` + `agentId` | `spawnAgent` receiver thread ids; child thread items | child id inside the spawn row; `subagents/<child>.json` |
 | `Notice` | `user` row with `origin.kind` (`<task-notification>`) | `<subagent_notification>` (pseudo turn id) | `SYSTEM_MESSAGE` (task notification, child message, timer) |
 | `Interrupt` | `user` row `[Request interrupted by user...]` | `turn_aborted` / turn status `interrupted` | none (a signal) |
 | `Compaction` | `system/compact_boundary` | `contextCompaction` / `compacted` | `CHECKPOINT` |
@@ -110,9 +107,9 @@ surrogates) before it is parsed. Nothing is stored: the position of a read lives
 The projector's memory has a bound for every structure that could grow with a conversation (see the note above
 `SEEN_LIMIT` in `projection.py`). Nothing is held for ever: a call still unanswered when its turn closes, or when the next
 turn on its record begins, is abandoned (it no longer keeps the record from a quiet point; its late result is still
-paired); a result whose call has not been read, and the output of a sub-agent whose link has not been read, are held for a
-bounded number of entries (`HOLD_ENTRIES`) and are then released as top-level
-items with an `ORPHAN_RELEASED` or `UNLINKED_RELEASED` anomaly each.
+paired); a result whose call has not been read is held for a
+bounded number of entries (`HOLD_ENTRIES`) and is then released as a top-level
+item with an `ORPHAN_RELEASED` anomaly.
 
 ## Origins
 

@@ -11,7 +11,7 @@
  * De-quarantined 2026-08-24.
  */
 import { describe, expect, it, vi } from "vitest";
-import { fireEvent, waitFor } from "@testing-library/react";
+import { fireEvent } from "@testing-library/react";
 import { render } from "@/lib/transport/tests/wall-clock-render";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 
@@ -78,23 +78,6 @@ describe("messageCardConfig", () => {
     expect(cfg!.title).toBe("System prompt");
     expect(cfg!.titleKey).toBe("timeline.systemPrompt");
     expect(cfg!.fixedDefault).toBe(false);
-  });
-
-  // meiva:note
-  // A CLI sub-agent's text is machinery the agent did not write for the user: a plain card, collapsed by default,
-  // titled with the sub-agent's own label when the CLI named one.
-  // meiva:link ui/web/src/docs/frontend-components/timeline-view/card-chrome.md
-  it("subagent_text → plain collapsed card titled with the sub-agent's label, no copy", () => {
-    const named = messageCardConfig(item("subagent_text", { source: "general-purpose" }))!;
-    expect(named.rich).toBeNull();
-    expect(named.title).toBe("Sub-agent · general-purpose");
-    expect(named.titleKey).toBe("timeline.subagentNamed");
-    expect(named.titleValues).toEqual({ name: "general-purpose" });
-    expect(named.fixedDefault).toBe(false);
-    expect(named.copy).toBe(false);
-    const anonymous = messageCardConfig(item("subagent_text"))!;
-    expect(anonymous.title).toBe("Sub-agent");
-    expect(anonymous.titleKey).toBe("timeline.subagent");
   });
 
   it("agent_reasoning → rich=reasoning, collapsed when a None-mode turn is opened", () => {
@@ -269,73 +252,6 @@ describe("CardHeader", () => {
     );
     expect(container.textContent).not.toContain(formatItemTime(event.created_at!, { showWeekday: true }));
     expect(getByTestId("card-toggle").classList.contains("flex-wrap")).toBe(true);
-  });
-
-  it("a sub-agent card names the sub-agent in its header", () => {
-    const spoken = item("subagent_text", { source: "general-purpose", payload: "ALPHA" });
-    const { container } = renderWithQuery(
-      <CardHeader item={spoken} config={messageCardConfig(spoken)!} expanded={false} onToggle={noop} />,
-    );
-    expect(container.textContent).toContain("Sub-agent · general-purpose");
-  });
-
-  // meiva:note
-  // A tool call a sub-agent made is an ordinary tool row marked by `parent_item_id`: a `Sub-agent` badge in its header and a nested row; the main agent's own tool row carries neither.
-  // meiva:link ui/web/src/docs/frontend-components/timeline-view/card-chrome.md
-  it("a sub-agent's tool header carries a Sub-agent badge, the main agent's does not", () => {
-    const sub = item("agent_code", { source: "Bash", payload: "echo hi", parent_item_id: "h3.0" });
-    const main = item("agent_code", { source: "Bash", payload: "echo hi" });
-    const marked = renderWithQuery(
-      <CardHeader item={sub} config={messageCardConfig(sub)!} expanded={false} onToggle={noop} />,
-    );
-    expect(marked.getByTestId("subagent-badge").textContent).toBe("Sub-agent");
-    marked.unmount();
-    const plain = renderWithQuery(
-      <CardHeader item={main} config={messageCardConfig(main)!} expanded={false} onToggle={noop} />,
-    );
-    expect(plain.queryByTestId("subagent-badge")).toBeNull();
-  });
-
-  it("a sub-agent's tool rows nest under the call that started them", () => {
-    const row = (it: BackendTimelineItem) => (
-      <TimelineRow
-        item={it}
-        config={messageCardConfig(it)}
-        streaming={false}
-        expanded={false}
-        copyable={false}
-        onToggle={noop}
-      />
-    );
-    const sub = renderWithQuery(row(item("code_output", { payload: "hi", parent_item_id: "h3.0" })));
-    const nested = sub.container.querySelector("[data-subagent-parent]");
-    expect(nested?.getAttribute("data-subagent-parent")).toBe("h3.0");
-    sub.unmount();
-    const main = renderWithQuery(row(item("code_output", { payload: "hi" })));
-    expect(main.container.querySelector("[data-subagent-parent]")).toBeNull();
-  });
-
-  it("an expanded sub-agent row shows its text as work detail, collapsed it shows only the header", async () => {
-    const spoken = item("subagent_text", { source: "general-purpose", payload: "ALPHA says **hi**" });
-    const row = (expanded: boolean) => (
-      <TimelineRow
-        item={spoken}
-        config={messageCardConfig(spoken)}
-        streaming={false}
-        expanded={expanded}
-        copyable={false}
-        onToggle={noop}
-      />
-    );
-    const collapsed = renderWithQuery(row(false));
-    expect(collapsed.container.textContent).toContain("Sub-agent · general-purpose");
-    expect(collapsed.container.textContent).not.toContain("ALPHA says");
-    collapsed.unmount();
-    const open = renderWithQuery(row(true));
-    await waitFor(() => {
-      expect(open.container.textContent).toContain("ALPHA says hi");
-      expect(open.container.querySelector("strong")?.textContent).toBe("hi");
-    });
   });
 
   it("a row of a kind this build does not know renders nothing, not an empty row", () => {

@@ -22,7 +22,6 @@ from base.lm.harness.session.transcript.entries import (
     Interrupt,
     Order,
     Reasoning,
-    SubagentLink,
     TokenUsage,
     ToolCall,
     ToolResult,
@@ -494,15 +493,6 @@ def _results(
                 duration_ms=None if started is None else max(row.ms - started, 0),
             )
         )
-        agent = result.get("agentId") if is_object_dict(result) else None
-        if isinstance(agent, str):
-            entries.append(
-                SubagentLink(
-                    **_entry_fields(row, index * 10 + 1, key=f"{key}:link"),
-                    call_id=call_id,
-                    child_record=agent,
-                )
-            )
     return ParseState(call_ms), tuple(entries)
 
 

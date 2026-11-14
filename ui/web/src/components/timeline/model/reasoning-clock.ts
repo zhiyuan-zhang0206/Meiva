@@ -21,19 +21,18 @@ import { useWallNow } from "@/lib/transport/transport-context";
 
 export function itemLiveStartedAt(item: BackendTimelineItem): number | undefined {
   if (item.kind === "agent_reasoning") {
-    if (item.reasoningStartedAt != null) return item.reasoningStartedAt;
-  } else if (item.kind === "agent_code") {
-    if (item.codeStartedAt != null) return item.codeStartedAt;
-  } else if (item.kind === "code_output") {
-    if (item.execStartedAt != null) return item.execStartedAt;
-  } else {
-    return undefined;
+    return item.reasoningStartedAt;
   }
-  if (item.activity_pending !== false && (item.activity_revision != null || item.activity_pending != null)) {
-    if (item.created_at != null) {
+  if (item.kind === "agent_code") {
+    if (item.codeStartedAt != null) return item.codeStartedAt;
+    if (item.activity_pending === true && item.created_at != null) {
       const parsed = Date.parse(item.created_at);
       if (!Number.isNaN(parsed)) return parsed;
     }
+    return undefined;
+  }
+  if (item.kind === "code_output") {
+    return item.execStartedAt;
   }
   return undefined;
 }

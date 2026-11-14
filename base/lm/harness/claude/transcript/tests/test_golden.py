@@ -16,7 +16,6 @@ from base.lm.harness.claude.transcript.tests.support import (
 )
 from base.lm.harness.events import HarnessCause, TurnOrigin
 from base.lm.harness.session.transcript.drafts import (
-    DraftKind,
     InboundPart,
     MatchBasis,
     TimelineDraft,
@@ -27,7 +26,6 @@ from base.lm.harness.session.transcript.entries import (
     Failure,
     HumanInput,
     Interrupt,
-    SubagentLink,
     TokenUsage,
     ToolCall,
     ToolResult,
@@ -230,42 +228,10 @@ def _subagent_entries() -> tuple[list[AnyEntry], list[AnyEntry], list[AnyEntry]]
     )
 
 
-def test_subagent_activity_nests_under_its_call_whatever_the_arrival_order() -> None:
-    main, sync_sub, async_sub = _subagent_entries()
-    links = {e.child_record: e.call_id for e in main if isinstance(e, SubagentLink)}
-    assert links == {SYNC_AGENT: SYNC_CALL, ASYNC_AGENT: ASYNC_CALL}
-    orders = {
-        "main_first": [*main, *sync_sub, *async_sub],
-        "subs_first": [*sync_sub, *async_sub, *main],
-        "interleaved": interleaved("subagents", (SYNC_AGENT, ASYNC_AGENT)),
-    }
-    outcomes: dict[str, dict[str, tuple[DraftKind, str | None, str | None]]] = {}
-    for name, entries in orders.items():
-        projector, projection = project(entries, [sent(SUBS, "k", "t")])
-        assert projector.unlinked_records() == () and projector.unanswered_calls() == ()
-        outcomes[name] = {d.key: (d.kind, d.parent_tool_use_id, d.turn) for d in projection.drafts}
-    assert outcomes["main_first"] == outcomes["subs_first"] == outcomes["interleaved"]
-    drafts = outcomes["main_first"]
-    nested = {k: v for k, v in drafts.items() if v[1] is not None}
-    assert {v[1] for v in nested.values()} == {SYNC_CALL, ASYNC_CALL}
-    assert {v[2] for v in nested.values()} <= {v[2] for v in drafts.values() if v[1] is None}
-    assert sorted(v[0].value for v in nested.values()) == [
-        "agent_code",
-        "agent_code",
-        "code_output",
-        "code_output",
-        "subagent_text",
-        "subagent_text",
-    ]
-
-
-def test_subagent_output_continues_after_the_parent_turn_and_its_usage_stays_apart() -> None:
+def test_subagent_usage_stays_apart_from_parent_turns() -> None:
     entries = interleaved("subagents", (SYNC_AGENT, ASYNC_AGENT))
     projector, projection = project(entries, [sent(SUBS, "k", "t")])
-    drafts = in_order(projection.drafts)
-    launched = next(i for i, d in enumerate(drafts) if d.payload == "launched")
-    late = [i for i, d in enumerate(drafts) if d.parent_tool_use_id == ASYNC_CALL]
-    assert len(late) == 3 and all(index > launched for index in late)
+    assert all(d.record == "main" for d in projection.drafts)
     by_turn = projector.usage_by_turn()
     assert set(by_turn) == {t.turn for t in projection.turns_observed}
     first_turn = projection.turns_observed[0].turn
@@ -446,27 +412,25 @@ def test_an_api_error_row_is_a_failure_that_fails_its_turn_and_costs_nothing() -
     assert projection.anomalies == () and projector.undelivered() == ()
 
 
-def test_subagent_tokens_are_reported_separately_with_their_call_and_model() -> None:
+def test_subagent_tokens_are_reported_separately_with_their_record_and_model() -> None:
     main, sync_sub, async_sub = _subagent_entries()
     projector, _ = project([], [sent(SUBS, "k", "t")])
     first = projector.feed(main)
     assert {u.record for u in first.usage} == {"main"}
-    assert all(u.parent_call_id is None for u in first.usage)
     second = projector.feed([*sync_sub, *async_sub])
-    spent: dict[str | None, int] = {}
+    spent: dict[str, int] = {}
     for spend in second.usage:
-        spent[spend.parent_call_id] = spent.get(spend.parent_call_id, 0) + spend.usage.output_tokens
-    assert spent == {SYNC_CALL: 252, ASYNC_CALL: 217}
+        spent[spend.record] = spent.get(spend.record, 0) + spend.usage.output_tokens
+    assert spent == {SYNC_AGENT: 252, ASYNC_AGENT: 217}
     assert {s.model for s in second.usage} == {"claude-haiku-5-5"}
     assert all(s.reliable for s in second.usage)
     first_turn = first.usage[0].turn
     assert sum(u.usage.output_tokens for u in first.usage if u.turn == first_turn) == 858
 
 
-def test_subagent_usage_waits_for_its_link_and_never_enters_a_main_turn_figure() -> None:
+def test_subagent_usage_never_enters_a_main_turn_figure() -> None:
     main, sync_sub, async_sub = _subagent_entries()
     projector, early = project([*sync_sub, *async_sub], [sent(SUBS, "k", "t")])
-    assert early.usage == ()
-    late = projector.feed(main)
-    assert {u.parent_call_id for u in late.usage if u.record != "main"} == {SYNC_CALL, ASYNC_CALL}
+    assert {u.record for u in early.usage} == {SYNC_AGENT, ASYNC_AGENT}
+    _ = projector.feed(main)
     assert sum(t.usage.output_tokens for t in projector.usage_by_turn().values()) == 1040

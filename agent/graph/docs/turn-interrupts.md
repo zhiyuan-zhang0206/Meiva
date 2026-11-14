@@ -38,13 +38,9 @@ on the timeline as soon as the interrupt has taken effect:
   (admission refuses a tripped breaker before the claim). It is the accepted cost of one extra
   invocation per stop.
 - **External harness.** A passive note alone is never handed to the harness (a delivery would start a turn
-  for it), so the control row is written ahead of the note, where claim takes it. When the foreground
-  confirms the interrupt (the harness's interrupted `TurnCompleted`), `announce_interrupt` writes the
-  pending passive notes' timeline entries and flags each row `timeline_written` in one transaction
-  (`write_interrupt_notes`). The row still waits for the next real input and rides in its text, which is
-  how the CLI's context learns of it; its entry is not written again (`timeline_items_of`). A crash before
-  that transaction leaves the row unflagged, so the entry is written when the row is delivered; a crash
-  after it leaves the entry written and the flag set. Either way the note appears once.
+  for it), so the control row is written ahead of the note, where claim takes it. The passive note stays
+  `pending` until the next real input and rides in that input's text, which is how the CLI's context
+  learns of the stop and how the note reaches the record-backed timeline once delivered.
 
 An interrupt request still pending when an invocation starts is stale (its turn ended on its own first)
 and is settled at once. An interrupt of an agent with no running turn writes no note and no control row:

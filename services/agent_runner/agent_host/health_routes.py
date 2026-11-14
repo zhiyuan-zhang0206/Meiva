@@ -70,10 +70,8 @@ def prepare_harness_switch_route(host: AgentHost, *, timestamps: TimestampSource
         if type(agent_id) is not int or agent_id <= 0:
             return 400, b'{"error":"positive agent_id required"}', "application/json"
 
-        control_pool = object_of(getattr, host, "_control_pool", None)
-        pool = control_pool if control_pool is not None else object_of(getattr, host, "_pool", None)
         await record_switch_note(
-            SwitchHistory(object_of(getattr, host, "_graph", None), pool, timestamps.policy()),
+            SwitchHistory(object_of(getattr, host, "_graph", None), timestamps.policy()),
             agent_id,
             old_harness=old_harness,
             new_harness=new_harness,

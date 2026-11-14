@@ -56,14 +56,7 @@ from agent.messages import has_conversation
 from agent.nodes import BEFORE_TURN, CLAIM, END
 from agent.ownership.inbound import RuntimeOwnershipLostError
 from base.agents.context import MeivaContext, agent_id_from_config
-from base.agents.history.harness_messages import (
-    aappend_harness_timeline_items,
-    aload_harness_message_count,
-)
-from base.agents.history.timeline import build_timeline_items
-from base.api_contracts.agent_contract import Harness, reads_timeline_from_record
-from base.db.transaction import async_write_transaction
-from base.events.live.projection import TimelineSnapshot
+from base.api_contracts.agent_contract import Harness
 
 from ._decide import decide
 from ._dispatch import (
@@ -212,11 +205,8 @@ async def _harness_delivery_entry(
 # meiva:note
 # What the control rows of a batch hand to an external harness (a restart or resurrect note, a fork
 # marker) has no inbox row of its own: it becomes one synthetic input with a stable key, delivered like
-# any row, and its timeline entries are written when the harness reports it in context. Messages that do
-# not enter a harness turn are written to the timeline directly.
-async def _settle_external_harness_batch(
-    ctx: MeivaContext,
-    agent_id: int,
+# any row.
+def _settle_external_harness_batch(
     st: BatchState,
     batch: list[ClaimedInbound],
     *,
@@ -224,8 +214,6 @@ async def _settle_external_harness_batch(
     update: dict[str, object],
 ) -> None:
     update.pop("messages", None)
-    shown = not reads_timeline_from_record(ctx.harness.value)
-    items = build_timeline_items(st.new_msgs, inputs=ctx.timestamp_policy())[0] if shown else []
     pending = [m for m in st.new_msgs if not isinstance(m, (AIMessage, ToolMessage))]
     prompt = render_messages(pending)
     if enters_harness_turn and prompt.strip():
@@ -233,23 +221,9 @@ async def _settle_external_harness_batch(
             {
                 "key": f"control-{max(item.id for item in batch)}",
                 "prompt": prompt,
-                "timeline_items": [item.model_dump(mode="json") for item in items],
             }
         ]
         update["harness_view"] = pending
-    elif items and ctx.ops_pool is not None:
-        async with async_write_transaction(ctx.ops_pool) as pool_conn:
-            persisted = await aappend_harness_timeline_items(
-                pool_conn, agent_id, ctx.harness.value, items
-            )
-            total_count = await aload_harness_message_count(pool_conn, agent_id)
-        if ctx.event_publisher is not None:
-            snap = TimelineSnapshot(
-                agent_id=agent_id,
-                items=[it.model_dump() for it in persisted],
-                msg_count=total_count,
-            )
-            ctx.event_publisher.emit(snap.model_dump_json())
 
 
 # meiva:note
@@ -296,9 +270,7 @@ async def settle_claimed_batch(
         update["interrupted_by_restart"] = False
 
     if ctx.harness is not Harness.MEIVA:
-        await _settle_external_harness_batch(
-            ctx,
-            agent_id,
+        _settle_external_harness_batch(
             st,
             batch,
             enters_harness_turn=outcome.command.goto == BEFORE_TURN,  # pyright: ignore[reportUnknownMemberType]

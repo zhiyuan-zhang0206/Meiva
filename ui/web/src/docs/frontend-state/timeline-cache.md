@@ -69,12 +69,11 @@ and resets the next older page to its base size. The compact transition buffer k
 release; trimming resumes afterward. A reader parked mid-history retains every
 loaded row, so deliberate deep-history reading can still grow memory and DOM.
 
-Timeline snapshots merge with provisional streaming items. Durable external
-harness activities carry a per-item `activity_revision`. The highest revision
-of a shared item ID wins across SSE and REST, so an older response that arrives
-late cannot overwrite newer progress. This ordering is local to each activity
-item. Native timeline snapshots still merge by checkpoint coordinates without
-a shared REST/SSE checkpoint revision.
+Timeline snapshots merge with provisional streaming items by `item_id` (checkpoint
+coordinates `<msg_idx>.<block_idx>` for native agents, byte-offset coordinates
+`h<offset>.<n>` for record-backed external harness agents). Unanswered external
+tool calls (`activity_pending: true`) are replaced in place when a later snapshot
+delivers the settled call, or dropped when a newer snapshot omits them.
 
 ## Relationship to Other Nodes
 

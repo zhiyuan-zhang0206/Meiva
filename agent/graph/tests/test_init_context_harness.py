@@ -30,7 +30,6 @@ from agent.state import AgentState, CapabilitiesState, ContextReset, SkillRecall
 from base import paths
 from base.agents.context import MeivaContext
 from base.agents.context.identity import AgentIdentity
-from base.agents.history.harness_messages import load_harness_timeline_items
 from base.agents.messages.timestamp_policy import TimestampPolicy
 from base.api_contracts.agent_contract import Harness
 from base.clock import SYSTEM_TIMERS, Clock
@@ -144,8 +143,6 @@ async def test_external_harness_cold_start_establishes_handoff_and_standing_note
     command = await init_context_node(AgentState(), runtime, _config(tid))
 
     assert command.update is not None and "messages" not in command.update
-    items = load_harness_timeline_items(db_conn, tid)
-    assert items == [], "the CLI record owns the timeline"
     assert len(handoffs) == 1
     head_text = handoffs[0].render()
     assert all(
@@ -182,7 +179,7 @@ async def test_external_harness_cold_start_establishes_handoff_and_standing_note
     )
     bridge.session_id = "warm-session-1"
     _ = await init_context_node(AgentState(), runtime, _config(tid))
-    assert len(handoffs) == 2 and load_harness_timeline_items(db_conn, tid) == []
+    assert len(handoffs) == 2
 
 
 @pytest.mark.parametrize("harness", [Harness.CLAUDE_CODE, Harness.CODEX])
@@ -545,7 +542,6 @@ async def test_a_harness_read_from_its_record_gets_its_handoff_and_stores_no_tim
 
     assert command.goto == "claim"
     assert len(handoffs) == 1, "a session that is not running yet is given the handoff"
-    assert load_harness_timeline_items(db_conn, tid) == [], "the record is the timeline"
     bridge.session_id = "warm-session-1"
     _ = await init_context_node(AgentState(), runtime, _config(tid))
     assert len(handoffs) == 1, "a running session already holds it"

@@ -11,7 +11,6 @@ from base.lm.harness.codex.transcript.parse import (
 from base.lm.harness.codex.transcript.tests.support import (
     CHILD_THREAD,
     LATE_COMMAND,
-    SPAWN_CALL,
     arrival,
     as_obj,
     kinds,
@@ -42,7 +41,6 @@ from base.lm.harness.session.transcript.entries import (
     Interrupt,
     Notice,
     Reasoning,
-    SubagentLink,
     TokenUsage,
     ToolCall,
     ToolResult,
@@ -277,47 +275,6 @@ def test_f_the_two_writes_of_one_message_are_read_once() -> None:
     _, projection = project(rollout, sent("cid-s2-a", "run"), sent("cid-s2-steer", "also"))
     assert [draft.key for draft in projection.drafts].count(answer) == 1
     assert len([draft for draft in projection.drafts if draft.kind.value == "agent_chat"]) == 1
-
-
-def test_g_a_sub_agent_nests_under_the_call_that_spawned_it() -> None:
-    parent = parse_thread_read(load_json("subagent/parent.json"))
-    child = parse_thread_read(load_json("subagent/child.json"), record=CHILD_THREAD)
-    (link,) = _of(parent, SubagentLink)
-    assert (link.call_id, link.child_record) == (SPAWN_CALL, CHILD_THREAD)
-    spawn = next(entry for entry in _of(parent, ToolCall) if entry.call_id == SPAWN_CALL)
-    assert spawn.name == "spawnAgent"
-    parent_first = project(parent + child, sent("cid-s5-a", "spawn"))
-    child_first = project(child + parent, sent("cid-s5-a", "spawn"))
-    for projector, projection in (parent_first, child_first):
-        nested = [draft for draft in arrival(projection) if draft.record == CHILD_THREAD]
-        assert {draft.parent_tool_use_id for draft in nested} == {SPAWN_CALL}
-        assert [draft.kind.value for draft in nested] == [
-            "subagent_text",
-            "agent_code",
-            "code_output",
-            "subagent_text",
-        ]
-        assert {draft.turn for draft in nested} == {PARENT_TURN}
-        assert not any(
-            draft.record == MAIN_RECORD and draft.parent_tool_use_id for draft in projection.drafts
-        )
-        assert projector.unlinked_records() == ()
-    assert _sorted_by_key(list(parent_first[1].drafts)) == _sorted_by_key(
-        list(child_first[1].drafts)
-    )
-
-
-def test_g_a_child_that_arrives_before_its_link_is_held_then_nested() -> None:
-    parent = parse_thread_read(load_json("subagent/parent.json"))
-    child = parse_thread_read(load_json("subagent/child.json"), record=CHILD_THREAD)
-    projector, first = project(child)
-    assert first.drafts == ()
-    assert projector.unlinked_records() == (CHILD_THREAD,)
-    second = projector.feed(parent)
-    assert projector.unlinked_records() == ()
-    assert {
-        draft.parent_tool_use_id for draft in second.drafts if draft.record == CHILD_THREAD
-    } == {SPAWN_CALL}
 
 
 def test_g_the_sub_agent_report_is_a_notice_and_its_spend_stays_apart() -> None:

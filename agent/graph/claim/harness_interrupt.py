@@ -10,8 +10,7 @@ from collections.abc import Awaitable, Callable, Coroutine
 from contextlib import suppress
 from typing import Any
 
-from agent.graph.claim.harness_activity import TurnSink
-from agent.graph.claim.harness_inbox import publish_inbound, write_interrupt_notes
+from agent.graph.claim.harness_read_sink import ReadTimelineSink
 from agent.graph.interrupt import interrupt_halt as interrupt_halt
 from agent.graph.interrupt import interruptible_model, subscribe_interrupt
 from base.agents.context import MeivaContext
@@ -31,7 +30,7 @@ async def await_foreground(
     ctx: MeivaContext,
     agent_id: int,
     bridge: TurnEngine,
-    projector: TurnSink,
+    projector: ReadTimelineSink,
     execute: Callable[[], Awaitable[None]],
 ) -> None:
     resources = ctx.hosted_resources
@@ -95,7 +94,7 @@ async def _ticking(
     mark: Callable[[int], None],
     agent_id: int,
     work: Awaitable[None],
-    projector: TurnSink,
+    projector: ReadTimelineSink,
 ) -> None:
     async def settle() -> BaseException | None:
         try:
@@ -124,22 +123,12 @@ async def _ticking(
 
 
 # meiva:note
-# A confirmed interrupt: a stop's note goes onto the timeline now (`write_interrupt_notes`), then the live
-# view is told the turn ended. Its committed activities remain visible and the durable interrupt stays
-# pending for the next claim pass. The note is display: a failure to write it is logged and the row is
-# delivered, with its entry, along with the next input.
+# A confirmed interrupt tells the live view the turn ended. Its committed activities remain visible,
+# the passive interrupt note waits in the inbox for the next real input, and the durable interrupt
+# stays pending for the next claim pass.
 # meiva:link agent/graph/docs/harness-turn.md
-async def announce_interrupt(ctx: MeivaContext, agent_id: int, *, write_notes: bool = True) -> None:
+def announce_interrupt(ctx: MeivaContext, agent_id: int) -> None:
     assert ctx.event_publisher is not None, "interrupted turn needs ctx.event_publisher"  # noqa: S101
-    try:
-        if write_notes:
-            publish_inbound(ctx, agent_id, await write_interrupt_notes(ctx, agent_id))
-    except Exception:
-        logger.opt(exception=True).warning(
-            "could not write the interrupt note to the timeline",
-            event="harness_interrupt_note_failed",
-            agent_id=agent_id,
-        )
     ctx.event_publisher.emit(Cancelled(agent_id=agent_id).model_dump_json())
 
 

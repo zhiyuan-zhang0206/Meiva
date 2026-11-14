@@ -3,21 +3,20 @@ from __future__ import annotations
 import asyncio
 from collections.abc import Sequence
 from dataclasses import replace
-from datetime import UTC, datetime
 from unittest.mock import MagicMock
 
 import psycopg
 import pytest
-from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, ToolMessage
+from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
 from langgraph.runtime import Runtime
 from psycopg.types.json import Jsonb
 from psycopg_pool import AsyncConnectionPool
 
-from agent.graph.claim.harness_activity import HarnessTurnProjector, log_turn_usage
+from agent.graph.claim.harness_activity import log_turn_usage
 from agent.graph.claim.harness_interrupt import interrupt_engine
 from agent.graph.claim.harness_render import pending_messages, render_messages
 from agent.graph.claim.harness_turn import harness_turn_node
-from agent.graph.claim.lost_turn import lost_turn_note, report_lost_turn
+from agent.graph.claim.lost_turn import report_lost_turn
 from agent.graph.claim.tests.harness_support import (
     FakeEngine,
     RuntimeFixture,
@@ -30,13 +29,10 @@ from agent.graph.claim.tests.harness_support import (
 )
 from agent.graph.claim.tests.harness_support import hosted_resources as hosted_resources
 from agent.graph.llm_errors import FatalLLMStreamError
-from agent.messages import NoteTag
 from agent.ownership.tests.ownership_support import agent_row
 from agent.state import AgentState
 from base.agents.history.timeline_item import TimelineItem
 from base.agents.history.transcript_timeline.items import format_tool_use
-from base.agents.messages.kwargs import read_meiva_kwargs
-from base.agents.messages.timestamp_policy import TimestampPolicy
 from base.agents.tests.units import spawn_agent
 from base.cluster.machine import MachineIdentityReader
 from base.config.service_read import ConfigAuthority
@@ -105,9 +101,7 @@ async def test_a_turn_submits_the_pending_messages_and_commits_the_reply(
 ) -> None:
     agent_id = agent_row(db_conn)
     engine = FakeEngine(reply="MEIVA_DISPLAY_TO_USER\ndone")
-    state = AgentState(
-        harness_inputs=[{"key": "inbound-7", "prompt": "do it", "timeline_items": []}]
-    )
+    state = AgentState(harness_inputs=[{"key": "inbound-7", "prompt": "do it"}])
     command = await harness_turn_node(
         state, harness_runtime(engine, agent_id=agent_id), config(agent_id)
     )
@@ -139,9 +133,7 @@ async def test_a_turn_logs_usage_under_the_harness(
 ) -> None:
     agent_id = agent_row(db_conn)
     engine = FakeEngine(usage=Usage(input_tokens=1200, output_tokens=34))
-    state = AgentState(
-        harness_inputs=[{"key": "inbound-7", "prompt": "do it", "timeline_items": []}]
-    )
+    state = AgentState(harness_inputs=[{"key": "inbound-7", "prompt": "do it"}])
     await harness_turn_node(state, harness_runtime(engine, agent_id=agent_id), config(agent_id))
     usage = loguru_records.events("llm_usage")
     assert len(usage) == 1
@@ -166,9 +158,7 @@ async def test_an_unpriceable_usage_keeps_the_reply_and_reports_the_gap(
         reply="MEIVA_DISPLAY_TO_USER\ndone",
         usage=Usage(input_tokens=8, output_tokens=3, cache_read_input_tokens=99),
     )
-    state = AgentState(
-        harness_inputs=[{"key": "inbound-7", "prompt": "do it", "timeline_items": []}]
-    )
+    state = AgentState(harness_inputs=[{"key": "inbound-7", "prompt": "do it"}])
     command = await harness_turn_node(
         state, harness_runtime(engine, agent_id=agent_id), config(agent_id)
     )
@@ -192,9 +182,7 @@ async def test_a_faulted_session_settles_the_turn_as_a_fatal_stream_abort(
         ) -> None:
             self.emit(TurnFaulted("t1", "cli died"))
 
-    state = AgentState(
-        harness_inputs=[{"key": "inbound-7", "prompt": "do it", "timeline_items": []}]
-    )
+    state = AgentState(harness_inputs=[{"key": "inbound-7", "prompt": "do it"}])
     with pytest.raises(FatalLLMStreamError, match="antigravity harness turn aborted: cli died"):
         await harness_turn_node(
             state, harness_runtime(FaultingEngine(), agent_id=agent_id), config(agent_id)
@@ -219,9 +207,7 @@ async def test_a_session_that_cannot_start_settles_the_turn_as_a_fatal_stream_ab
         ) -> None:
             raise HarnessSetupError("antigravity session could not start: no sdk")
 
-    state = AgentState(
-        harness_inputs=[{"key": "inbound-7", "prompt": "do it", "timeline_items": []}]
-    )
+    state = AgentState(harness_inputs=[{"key": "inbound-7", "prompt": "do it"}])
     with pytest.raises(FatalLLMStreamError, match="harness turn aborted"):
         await harness_turn_node(
             state, harness_runtime(UnstartableEngine(), agent_id=agent_id), config(agent_id)
@@ -291,7 +277,7 @@ async def test_a_completed_turn_stamps_the_reply_as_the_last_message(
     )
     engine = FakeEngine(reply="MEIVA_DISPLAY_TO_USER\nthe answer")
     await harness_turn_node(
-        AgentState(harness_inputs=[{"key": "inbound-7", "prompt": "do it", "timeline_items": []}]),
+        AgentState(harness_inputs=[{"key": "inbound-7", "prompt": "do it"}]),
         harness_runtime(engine, agent_id=agent_id),
         config(agent_id),
     )
@@ -331,9 +317,7 @@ async def test_tool_activity_is_visible_before_completion_and_survives_abort(
                 TurnFaulted("t1", "provider disconnected"),
             )
 
-    state = AgentState(
-        harness_inputs=[{"key": "inbound-7", "prompt": "list files", "timeline_items": []}]
-    )
+    state = AgentState(harness_inputs=[{"key": "inbound-7", "prompt": "list files"}])
     with pytest.raises(FatalLLMStreamError, match="provider disconnected"):
         await harness_turn_node(
             state, harness_runtime(FaultingEngine(), agent_id=agent_id), config(agent_id)
@@ -361,9 +345,7 @@ async def test_intra_turn_events_project_to_live_sse_and_committed_messages(
             TextDelta(turn_id="t1", text="MEIVA_DISPLAY_TO_USER\nall done"),
         ),
     )
-    state = AgentState(
-        harness_inputs=[{"key": "inbound-7", "prompt": "list files", "timeline_items": []}]
-    )
+    state = AgentState(harness_inputs=[{"key": "inbound-7", "prompt": "list files"}])
     command = await harness_turn_node(
         state,
         harness_runtime(engine, publisher=live_events.publisher, agent_id=agent_id),
@@ -400,9 +382,7 @@ async def test_consecutive_assistant_text_blocks_project_to_distinct_ai_messages
             AssistantText(turn_id="t1", text="MEIVA_DISPLAY_TO_USER\nSecond message"),
         ),
     )
-    state = AgentState(
-        harness_inputs=[{"key": "inbound-7", "prompt": "two steps", "timeline_items": []}]
-    )
+    state = AgentState(harness_inputs=[{"key": "inbound-7", "prompt": "two steps"}])
     command = await harness_turn_node(
         state,
         harness_runtime(engine, publisher=live_events.publisher, agent_id=agent_id),
@@ -484,9 +464,7 @@ async def test_harness_turn_projects_recorded_reasoning_tools_and_reply(
             AssistantText(turn_id="t1", text="MEIVA_DISPLAY_TO_USER\nFinal answer"),
         )
     )
-    state = AgentState(
-        harness_inputs=[{"key": "inbound-9", "prompt": "run it", "timeline_items": []}]
-    )
+    state = AgentState(harness_inputs=[{"key": "inbound-9", "prompt": "run it"}])
     command = await harness_turn_node(
         state,
         harness_runtime(engine, publisher=live_events.publisher, agent_id=agent_id),
@@ -528,11 +506,7 @@ async def test_terminate_interrupt_preserves_projected_tool_call_messages(
             raise ModelInterruptedError(InterruptReason.SYSTEM)
 
     engine = SelfTerminatingEngine()
-    state = AgentState(
-        harness_inputs=[
-            {"key": "window-4", "prompt": "[Heartbeat]: check in", "timeline_items": []}
-        ]
-    )
+    state = AgentState(harness_inputs=[{"key": "window-4", "prompt": "[Heartbeat]: check in"}])
     command = await harness_turn_node(
         state, harness_runtime(engine, agent_id=agent_id), config(agent_id)
     )
@@ -543,68 +517,17 @@ async def test_terminate_interrupt_preserves_projected_tool_call_messages(
     assert command.update == {"halted": True, "harness_inputs": [], "harness_view": []}
 
 
-# meiva:note
-# The note a lost turn leaves behind has to say three things and no fourth: that the message was not
-# answered, which rows were consumed, and that they will not come back. It is a system note, not a
-# reply, so a reader cannot mistake it for the agent having answered (#6150).
-def test_the_lost_turn_note_says_it_is_not_a_reply_and_never_returns() -> None:
-    now = datetime(2026, 11, 4, 2, 11, tzinfo=UTC)
-
-    note = lost_turn_note(
-        [7379],
-        "turn-1",
-        "HarnessTurnFaultedError: antigravity turn turn-1 failed (API 400): boom",
-        now=now,
-        inputs=TimestampPolicy.off(),
-    )
-    kwargs = read_meiva_kwargs(note)
-    content = str(note.content)
-
-    assert kwargs.get("meiva_msg_type") == "system_note"
-    assert kwargs.get("meiva_note_tag") == NoteTag.TURN_LOST.value
-    assert "was not answered" in content
-    assert "7379" in content
-    assert "will not deliver it again" in content
-    assert "API 400" in content
-
-
-async def test_the_projector_reports_whether_the_turn_produced_activity() -> None:
-    async def checkpoint(item: TimelineItem, msg_count: int) -> None:
-        pass
-
-    clock = MagicMock()
-    clock.now.return_value = datetime(2026, 11, 6, tzinfo=UTC)
-    projector = HarnessTurnProjector(checkpoint=checkpoint, base_idx=0, clock=clock)
-    assert projector.has_activity is False
-    await projector.on_event(AssistantText(turn_id="t1", text="hello"))
-    assert projector.has_activity is True
-
-
-# meiva:note
-# The record has to exist, not merely be attempted: this asserts the note reached the append path
-# and that a turn which produced text appends nothing.
-async def test_a_lost_turn_appends_one_note_and_a_quiet_turn_appends_none() -> None:
-    now = datetime(2026, 11, 4, 2, 11, tzinfo=UTC)
+def test_report_lost_turn_logs_turn_fault_lost_inbound(loguru_records: LogRecords) -> None:
     ctx = MagicMock()
-    ctx.require_clock.return_value.now.return_value = now
     ctx.harness.value = "antigravity"
-    appended: list[list[BaseMessage]] = []
 
-    async def append(_ctx: object, _agent_id: int, messages: Sequence[BaseMessage]) -> None:
-        appended.append(list(messages))
+    report_lost_turn(ctx, 7, [7379], "turn-1", RuntimeError("boom"))
 
-    await report_lost_turn(
-        ctx,
-        7,
-        [7379],
-        "turn-1",
-        RuntimeError("boom"),
-        append=append,
-    )
-
-    assert len(appended) == 1
-    assert read_meiva_kwargs(appended[0][0]).get("meiva_note_tag") == NoteTag.TURN_LOST.value
-    assert "7379" in str(appended[0][0].content)
+    [extra] = [e["extra"] for e in loguru_records.events("turn_fault_lost_inbound")]
+    assert extra["inbound_ids"] == [7379]
+    assert extra["turn_key"] == "turn-1"
+    assert extra["harness"] == "antigravity"
+    assert extra["reason"] == "RuntimeError: boom"
 
 
 # meiva:note
@@ -671,9 +594,7 @@ async def test_after_the_cli_compacted_the_next_input_carries_the_open_questions
     ).fetchone()
     assert question is not None
     db_conn.commit()
-    state = AgentState(
-        harness_inputs=[{"key": "inbound-7", "prompt": "do it", "timeline_items": []}]
-    )
+    state = AgentState(harness_inputs=[{"key": "inbound-7", "prompt": "do it"}])
 
     async def notes(compacted: bool) -> list[str]:
         engine = FakeEngine(reply="MEIVA_DISPLAY_TO_USER\ndone")
@@ -731,7 +652,6 @@ async def test_a_wake_after_a_compaction_carries_the_questions_and_the_hook_note
     note: dict[str, object] = {
         "key": f"hook-notes-{row}",
         "prompt": _HOOK_NOTE,
-        "timeline_items": [],
     }
     base = harness_runtime(engine, agent_id=agent)
     context = replace(base.context, db=Database.from_settings(gate=database_gate), bus=event_bus)

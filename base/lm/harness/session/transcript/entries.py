@@ -31,10 +31,8 @@ class InputRow:
 # Where an entry sits inside its own record, stated by the parser: `seq` is the record's own position
 # (a line, an ordinal, a step index; holes are allowed) and `sub` orders the several entries one raw
 # row yields (a planner step that thinks and calls two tools). It says nothing about records against
-# each other and nothing about wall-clock time: the timeline is appended in the order entries arrive
-# at the writer, so a command that finishes late is appended when it finishes, and a sub-agent's rows
-# when they are read. An entry may arrive after one that sorts later in its own record (a result before
-# its call), and the projection copes.
+# each other and nothing about wall-clock time: an entry may arrive after one that sorts later in its
+# own record (a result before its call), and the projection copes.
 @dataclass(frozen=True, slots=True, order=True)
 class Order:
     seq: int
@@ -129,17 +127,6 @@ class ToolResult(Entry):
 
 
 # meiva:note
-# The record says which child record a call started. Entries of the child record carry
-# `record=<child_record>`; the projection nests them under the call as soon as it knows the link, in
-# whichever order the two records arrive.
-@dataclass(frozen=True, slots=True, kw_only=True)
-class SubagentLink(Entry):
-    call_id: str
-    child_record: str
-    label: str | None = None
-
-
-# meiva:note
 # Something the CLI told the conversation by itself: a finished background task, a sub-agent's report,
 # a timer. It opens a turn the CLI began on its own unless `opens_turn` is False (a sub-agent's report
 # that the record files under a pseudo turn); `call_id` names the call whose work it reports when the
@@ -198,7 +185,6 @@ class AnomalyKind(StrEnum):
     MISSING_FIELD = "missing_field"
     BAD_ROW = "bad_row"
     ORPHAN_RELEASED = "orphan_released"
-    UNLINKED_RELEASED = "unlinked_released"
 
 
 # meiva:note
@@ -206,9 +192,8 @@ class AnomalyKind(StrEnum):
 # that lacks a field the projection needs is skipped and reported as an exception, and a row the reader
 # could not decode (not JSON, not an object, invalid text, nested too deep, too large) is skipped and
 # reported with the reason. None of them puts anything on the timeline. `detail` is the type name, the
-# missing field or the reason. `ORPHAN_RELEASED` and `UNLINKED_RELEASED` are the projection's own: an item it held
-# too long (a result whose call was never read, the output of a sub-agent whose link was never read) and then put on
-# the timeline top-level; `detail` is the call id or the record.
+# missing field or the reason. `ORPHAN_RELEASED` is the projection's own: a result whose call was never
+# read that it held past its bound and then put on the timeline; `detail` is the call id.
 @dataclass(frozen=True, slots=True, kw_only=True)
 class Anomaly(Entry):
     anomaly: AnomalyKind
@@ -221,7 +206,6 @@ AnyEntry = (
     | Reasoning
     | ToolCall
     | ToolResult
-    | SubagentLink
     | Notice
     | Interrupt
     | Compaction

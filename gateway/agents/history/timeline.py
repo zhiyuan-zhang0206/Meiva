@@ -27,13 +27,8 @@ from base.agents.history.checkpoint import (
     load_checkpoint_messages,
     load_checkpoint_messages_segment,
 )
-from base.agents.history.harness_messages import (
-    has_harness_messages,
-    load_harness_timeline_items,
-)
 from base.agents.history.timeline import TimelineItem, build_timeline_items, tail_window
 from base.agents.messages.timestamp_policy import TimestampPolicy
-from base.api_contracts.agent_contract import reads_timeline_from_record
 from base.db import Database, agent_exists
 from gateway.agents.eval_guard import deny_isolated_result_read
 from gateway.agents.history.configuration import request_timeline_read
@@ -230,44 +225,6 @@ def load_current_messages(db: Database, agent_id: int) -> list[BaseMessage]:
         raise _read_unavailable(agent_id, exc) from exc
 
 
-def _compact_cutoff(checkpoint_items: Sequence[TimelineItem]) -> str | None:
-    for it in checkpoint_items:
-        if it.kind == "inbound_compact_summary" and it.created_at:
-            return it.created_at
-    return None
-
-
-def _merge_cross_harness_items(
-    checkpoint_items: Sequence[TimelineItem],
-    harness_items: list[TimelineItem],
-) -> list[TimelineItem]:
-    if not checkpoint_items:
-        return list(harness_items)
-    if not harness_items:
-        return list(checkpoint_items)
-
-    compact_ts = _compact_cutoff(checkpoint_items)
-    if compact_ts is not None:
-        harness_items = [
-            it for it in harness_items if it.created_at and it.created_at >= compact_ts
-        ]
-        if not harness_items:
-            return list(checkpoint_items)
-
-    prompt_item = (
-        checkpoint_items[0]
-        if checkpoint_items and checkpoint_items[0].kind == "system_prompt"
-        else None
-    )
-    rest_checkpoint = checkpoint_items[1:] if prompt_item is not None else checkpoint_items
-    merged_rest = list(rest_checkpoint) + list(harness_items)
-    merged_rest.sort(key=lambda it: it.created_at or "")
-
-    if prompt_item is not None:
-        return [prompt_item, *merged_rest]
-    return merged_rest
-
-
 def load_current_timeline_items(
     db: Database,
     agent_id: int,
@@ -277,27 +234,11 @@ def load_current_timeline_items(
 ) -> list[TimelineItem]:
     with db.connect() as conn:
         harness = agent_harness(conn, agent_id)
-        if harness != "meiva":
-            from_record = reads_timeline_from_record(harness)
-            harness_items = (
-                list(record_items) if from_record else load_harness_timeline_items(conn, agent_id)
-            )
-            if not from_record and not has_harness_messages(conn, agent_id):
-                return harness_items
-            if from_record:
-                return harness_items
-            messages = load_current_messages(db, agent_id)
-            if not messages:
-                return harness_items
-            items, _ = build_timeline_items(messages, inputs=inputs)
-            return _merge_cross_harness_items(items, harness_items)
-        messages = load_current_messages(db, agent_id)
-        items, _ = build_timeline_items(messages, inputs=inputs)
-        compact_ts = _compact_cutoff(items)
-        if not has_harness_messages(conn, agent_id, since=compact_ts):
-            return items
-        harness_items = load_harness_timeline_items(conn, agent_id, since=compact_ts)
-        return _merge_cross_harness_items(items, harness_items)
+    if harness != "meiva":
+        return list(record_items)
+    messages = load_current_messages(db, agent_id)
+    items, _ = build_timeline_items(messages, inputs=inputs)
+    return items
 
 
 def _get_agent_harness(request: Request, agent_id: int) -> str:
@@ -329,7 +270,7 @@ def _current_items(
 
 
 def _is_work_item(item: TimelineItem) -> bool:
-    return item.kind in {"agent_reasoning", "agent_code", "code_output", "subagent_text"} or (
+    return item.kind in {"agent_reasoning", "agent_code", "code_output"} or (
         item.kind == "agent_chat" and item.user_facing is False
     )
 
@@ -400,9 +341,7 @@ def head_timeline(
     limit = read.default_limit
     harness = _get_agent_harness(request, agent_id)
     if harness != "meiva":
-        return _external_harness_response(
-            request, agent_id, limit, None, None, read=read, preloaded_messages=messages or None
-        )
+        return _external_harness_response(request, agent_id, harness, limit, None, None)
     return _meiva_harness_response(
         request, agent_id, limit, None, None, read=read, preloaded_messages=messages or None
     )
@@ -466,169 +405,18 @@ def _historical_response(
     return None
 
 
-def _external_harness_page_before(
-    request: Request,
-    agent_id: int,
-    limit: int,
-    before: str,
-    cursor: TimelineCursor | None,
-    harness_items: list[TimelineItem],
-    harness_count: int,
-    *,
-    read: TimelineRead,
-    preloaded_messages: Sequence[BaseMessage] | None = None,
-    record_more: bool | None = None,
-) -> TimelineResponse:
-    if cursor is None:
-        return TimelineResponse(items=[], msg_count=harness_count, has_more=False)
-
-    db: Database = gateway_state(request).db
-    depth = read.compact_history
-
-    if cursor.checkpoint_id is not None:
-        boundary_ids = _load_boundary_ids(db, agent_id, depth)
-        early = _historical_response(db, agent_id, before, cursor, limit, boundary_ids, read=read)
-        if early is not None:
-            return early
-        return TimelineResponse(items=[], msg_count=harness_count, has_more=False)
-
-    cp_count = _load_current_message_count(db, agent_id)
-    if cp_count == 0:
-        if not cursor.is_harness:
-            return TimelineResponse(items=[], msg_count=harness_count, has_more=False)
-        if record_more is not None:
-            return TimelineResponse(
-                items=harness_items, msg_count=harness_count, has_more=record_more
-            )
-        window = window_before(_rows(harness_items), cursor.item_id(), limit)
-        return TimelineResponse(
-            items=_picked(harness_items, window),
-            msg_count=harness_count,
-            has_more=window.has_more,
-        )
-
-    messages = (
-        preloaded_messages
-        if preloaded_messages is not None
-        else load_current_messages(db, agent_id)
-    )
-    items_cp, msg_count = _current_items(request, agent_id, messages, limit, before, read=read)
-    boundary_ids = _load_boundary_ids(db, agent_id, depth)
-    merged = _merge_cross_harness_items(items_cp, harness_items)
-    total_msg_count = harness_count + msg_count
-    if record_more is not None and cursor.is_harness:
-        picked, more = tail_window(merged, limit)
-        return TimelineResponse(
-            items=picked, msg_count=total_msg_count, has_more=more or record_more
-        )
-    paged = _current_page_before(merged, cursor, limit, depth, boundary_ids, total_msg_count)
-    if isinstance(paged, TimelineResponse):
-        return paged
-    del messages, items_cp, merged
-    older_window, has_more = _load_history_tail(
-        db, agent_id, boundary_ids, 1, limit, depth, read=read
-    )
-    return TimelineResponse(
-        items=[*paged, *older_window], msg_count=total_msg_count, has_more=has_more
-    )
-
-
-def _external_harness_head(
-    request: Request,
-    agent_id: int,
-    limit: int,
-    harness_items: list[TimelineItem],
-    harness_count: int,
-    *,
-    read: TimelineRead,
-    preloaded_messages: Sequence[BaseMessage] | None = None,
-    record_more: bool | None = None,
-) -> TimelineResponse:
-    db: Database = gateway_state(request).db
-    cp_count = _load_current_message_count(db, agent_id)
-    if cp_count == 0 and record_more is not None:
-        return TimelineResponse(items=harness_items, msg_count=harness_count, has_more=record_more)
-    if cp_count == 0:
-        tail, tail_has_more = tail_window(harness_items, limit)
-        window = initial_window(
-            _rows(harness_items),
-            tail_size=len(tail),
-            tail_has_more=tail_has_more,
-            limit=limit,
-            historical_segments_available=False,
-        )
-        return TimelineResponse(
-            items=_picked(harness_items, window), msg_count=harness_count, has_more=window.has_more
-        )
-
-    messages = (
-        preloaded_messages
-        if preloaded_messages is not None
-        else load_current_messages(db, agent_id)
-    )
-    items_cp, msg_count = _current_items(request, agent_id, messages, limit, None, read=read)
-    boundary_ids = _load_boundary_ids(db, agent_id, read.compact_history)
-    merged = _merge_cross_harness_items(items_cp, harness_items)
-    tail, tail_has_more = tail_window(merged, limit)
-    window = initial_window(
-        _rows(merged),
-        tail_size=len(tail),
-        tail_has_more=tail_has_more,
-        limit=limit,
-        historical_segments_available=bool(boundary_ids),
-    )
-    return TimelineResponse(
-        items=_picked(merged, window),
-        msg_count=harness_count + msg_count,
-        has_more=window.has_more or bool(record_more),
-    )
-
-
 def _external_harness_response(
     request: Request,
     agent_id: int,
+    harness: str,
     limit: int,
     before: str | None,
     cursor: TimelineCursor | None,
-    *,
-    read: TimelineRead,
-    preloaded_messages: Sequence[BaseMessage] | None = None,
 ) -> TimelineResponse:
-    harness = _get_agent_harness(request, agent_id)
-    record_more: bool | None = None
-    if reads_timeline_from_record(harness):
-        harness_items, harness_count, record_more = record_window_for(
-            request, agent_id, harness, limit, before, cursor
-        )
-        return TimelineResponse(items=harness_items, msg_count=harness_count, has_more=record_more)
-    with gateway_state(request).db_pool.connection() as conn:
-        harness_items = load_harness_timeline_items(conn, agent_id)
-        harness_count = len(harness_items)
-
-    if before is not None:
-        return _external_harness_page_before(
-            request,
-            agent_id,
-            limit,
-            before,
-            cursor,
-            harness_items,
-            harness_count,
-            read=read,
-            preloaded_messages=preloaded_messages,
-            record_more=record_more,
-        )
-
-    return _external_harness_head(
-        request,
-        agent_id,
-        limit,
-        harness_items,
-        harness_count,
-        read=read,
-        preloaded_messages=preloaded_messages,
-        record_more=record_more,
+    harness_items, harness_count, record_more = record_window_for(
+        request, agent_id, harness, limit, before, cursor
     )
+    return TimelineResponse(items=harness_items, msg_count=harness_count, has_more=record_more)
 
 
 def _meiva_harness_response(
@@ -654,58 +442,17 @@ def _meiva_harness_response(
         if preloaded_messages is not None
         else load_current_messages(db, agent_id)
     )
-    items_cp, msg_count = _current_items(request, agent_id, messages, limit, before, read=read)
-    compact_ts = _compact_cutoff(items_cp)
-
-    with gateway_state(request).db_pool.connection() as conn:
-        has_harness = has_harness_messages(conn, agent_id, since=compact_ts)
-
-    if not has_harness:
-        if before is None:
-            return _head_response(request, agent_id, messages, limit, boundary_ids, read=read)
-        paged = _current_page_before(items_cp, cursor, limit, depth, boundary_ids, msg_count)
-        if isinstance(paged, TimelineResponse):
-            return paged
-        del messages, items_cp
-        older_window, has_more = _load_history_tail(
-            db, agent_id, boundary_ids, 1, limit, depth, read=read
-        )
-        return TimelineResponse(
-            items=[*paged, *older_window], msg_count=msg_count, has_more=has_more
-        )
-
-    with gateway_state(request).db_pool.connection() as conn:
-        items_harness = load_harness_timeline_items(conn, agent_id, since=compact_ts)
-    merged = _merge_cross_harness_items(items_cp, items_harness)
-
     if before is None:
-        tail, tail_has_more = tail_window(merged, limit)
-        window = initial_window(
-            _rows(merged),
-            tail_size=len(tail),
-            tail_has_more=tail_has_more,
-            limit=limit,
-            historical_segments_available=bool(boundary_ids),
-        )
-        return TimelineResponse(
-            items=_picked(merged, window), msg_count=msg_count, has_more=window.has_more
-        )
-
-    rows = _rows(merged)
-    older_available = bool(boundary_ids) and depth_allows(1, depth)
-    page = window_or_cross(
-        rows, cursor.item_id() if cursor else "", limit, older_available=older_available
-    )
-    head = _picked(merged, page)
-    if not page.crossed:
-        return TimelineResponse(items=head, msg_count=msg_count, has_more=page.has_more)
-    if not older_available:
-        return TimelineResponse(items=head, msg_count=msg_count, has_more=False)
-    del messages, items_cp, items_harness, merged
+        return _head_response(request, agent_id, messages, limit, boundary_ids, read=read)
+    items_cp, msg_count = _current_items(request, agent_id, messages, limit, before, read=read)
+    paged = _current_page_before(items_cp, cursor, limit, depth, boundary_ids, msg_count)
+    if isinstance(paged, TimelineResponse):
+        return paged
+    del messages, items_cp
     older_window, has_more = _load_history_tail(
         db, agent_id, boundary_ids, 1, limit, depth, read=read
     )
-    return TimelineResponse(items=[*head, *older_window], msg_count=msg_count, has_more=has_more)
+    return TimelineResponse(items=[*paged, *older_window], msg_count=msg_count, has_more=has_more)
 
 
 @router.get("/api/agents/{agent_id}/timeline", dependencies=[Depends(deny_isolated_result_read)])
@@ -738,7 +485,7 @@ def get_timeline(
     _require_agent(request, agent_id)
     harness = _get_agent_harness(request, agent_id)
     if harness != "meiva":
-        return _external_harness_response(request, agent_id, limit, before, cursor, read=read)
+        return _external_harness_response(request, agent_id, harness, limit, before, cursor)
     return _meiva_harness_response(request, agent_id, limit, before, cursor, read=read)
 
 

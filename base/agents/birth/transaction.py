@@ -14,7 +14,6 @@ from base import telemetry
 from base.agents.birth.creation_identity import record_creation_snapshot, recover_birth
 from base.agents.birth.harness import resolve_birth_harness
 from base.agents.history.checkpoint_copy import copy_checkpoint_chain
-from base.agents.history.harness_messages import copy_harness_timeline
 from base.agents.inbox.insert import insert_spawn_prompt_in_transaction
 from base.agents.labels import spawn_prompt_with_label
 from base.agents.model.birth_config import (
@@ -27,7 +26,6 @@ from base.api_contracts.agent_contract import (
     InvalidModelConfig,
     is_spawner_agent_id_malformed,
     parse_spawner_agent_id,
-    reads_timeline_from_record,
 )
 from base.config.service_read import ConfigAuthority
 from base.db import fetch_one
@@ -349,11 +347,9 @@ def _insert_fork_history(
         # An external harness agent's conversation is its CLI session, which the new
         # agent clones on its first start. The graph checkpoints of the source hold no
         # conversation (and may sit mid-turn, with a pending input), so they are not
-        # copied: the fork starts a fresh graph and the display rows below are what the
-        # UI shows as its inherited history.
+        # copied: the fork starts a fresh graph and reads its timeline from the cloned
+        # CLI record once started.
         # meiva:link base/lm/harness/docs/fork.md
-        elif not reads_timeline_from_record(harness.value):
-            copy_harness_timeline(cur, fork_from, new_id)
         # The copied history reads as the source agent's identity to the new
         # process. INSERT a kind='fork' lifecycle inbound in THIS transaction
         # (committed before launch) so the new agent's first claim appends an

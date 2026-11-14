@@ -32,7 +32,6 @@ from base.lm.harness.session.transcript.entries import (
     Notice,
     Order,
     Reasoning,
-    SubagentLink,
     TokenUsage,
     ToolCall,
     ToolResult,
@@ -110,21 +109,18 @@ class RecentMap[K, V]:
 # meiva:note
 # What the projector remembers, and for how long. Everything that grows with the conversation is bounded, so the
 # projector's memory does not depend on its length: the keys of projected entries (a safety net against reading the
-# same entry twice; the reader never repeats a row), the open and recent calls, the turns seen and closed, the
-# sub-agent links, the per-message usage and the reported anomalies are each the latest N, the oldest forgotten first.
+# same entry twice; the reader never repeats a row), the open and recent calls, the turns seen and closed,
+# the per-message usage and the reported anomalies are each the latest N, the oldest forgotten first.
 # What a forgotten item meant is stated where it matters: a result whose call was forgotten waits like any other
-# result whose call has not arrived. Nothing is held for long. A result whose call has not been read and the
-# drafts and usage of a sub-agent record whose link has not been read are held for at most
-# `HOLD_ENTRIES` further entries (or until the writer says its time bound passed: `feed(release_held=True)`);
-# then they are put on the timeline as top-level items, one `ORPHAN_RELEASED` / `UNLINKED_RELEASED` anomaly each,
-# and a record released once shows its later drafts top-level at once. A call still unanswered when its turn
+# result whose call has not arrived. Nothing is held for long. A result whose call has not been read is held for
+# at most `HOLD_ENTRIES` further entries (or until `feed(release_held=True)`); then it is put on the timeline
+# with one `ORPHAN_RELEASED` anomaly. A call still unanswered when its turn
 # closes, or when the next turn on the record begins, is abandoned: it no longer keeps the record from being
 # quiet, and a result that arrives later is still paired with it.
 # meiva:link base/lm/harness/docs/transcript-projection.md
 SEEN_LIMIT = 20_000
 CALLS_LIMIT = 4_096
 TURNS_LIMIT = 1_024
-LINKS_LIMIT = 4_096
 USAGE_LIMIT = 8_192
 REPORTED_LIMIT = 1_024
 HOLD_ENTRIES = 2_000
@@ -148,22 +144,14 @@ class _Orphaned:
     results: list[ToolResult]
 
 
-@dataclass(frozen=True, slots=True)
-class _Held:
-    born: int
-    drafts: list[TimelineDraft]
-    usage: list[MessageUsage]
-
-
 # meiva:note
 # The one projection: entries in, timeline drafts and delivery conclusions out. It is the only place
-# that decides how a call is paired with its output, how a sub-agent's activity nests under the call
-# that started it, how an input we sent is recognised in the record and what a turn's spend is. It does
-# no I/O and reads no clock; its only state is what the entries so far established, so the same entries
-# in the same order give the same projection, and an entry whose key was already projected gives
-# nothing. Entries may arrive out of conversation order (a sub-agent record before the link to it, a
-# command result before its call): pairing and nesting wait for the missing half, and the drafts carry
-# their `order` so the writer places them.
+# that decides how a call is paired with its output, how an input we sent is recognised in the record
+# and what a turn's spend is. Non-main records contribute only anomalies and separate usage tallies.
+# It does no I/O and reads no clock; its only state is what the entries so far established, so the same
+# entries in the same order give the same projection, and an entry whose key was already projected gives
+# nothing. A command result that arrives before its call waits for the call, and the drafts carry their
+# `order` so the caller places them.
 # meiva:link base/lm/harness/docs/transcript-projection.md
 class Projector:
     def __init__(self, *, known_keys: Iterable[str] = ()) -> None:
@@ -179,9 +167,6 @@ class Projector:
         self._inferred: RecentSet[str] = RecentSet(TURNS_LIMIT)
         self._closed: RecentSet[str] = RecentSet(TURNS_LIMIT)
         self._orphans: dict[str, _Orphaned] = {}
-        self._links: RecentMap[str, str] = RecentMap(LINKS_LIMIT)
-        self._held: dict[str, _Held] = {}
-        self._released: RecentSet[str] = RecentSet(LINKS_LIMIT)
         self._usage: RecentMap[tuple[str, str], TokenUsage] = RecentMap(USAGE_LIMIT)
         self._unreliable: RecentSet[tuple[str, str]] = RecentSet(USAGE_LIMIT)
         self._reported: RecentSet[tuple[str, str]] = RecentSet(REPORTED_LIMIT)
@@ -213,10 +198,6 @@ class Projector:
             if everything or self._fed - orphaned.born >= HOLD_ENTRIES:
                 del self._orphans[call_id]
                 self._release_results(call_id, orphaned.results)
-        for record, held in list(self._held.items()):
-            if everything or self._fed - held.born >= HOLD_ENTRIES:
-                del self._held[record]
-                self._release_record(record, held)
 
     def _release_results(self, call_id: str, results: list[ToolResult]) -> None:
         for result in results:
@@ -234,13 +215,6 @@ class Projector:
                 ),
             )
 
-    def _release_record(self, record: str, held: _Held) -> None:
-        self._released.add(record)
-        key = held.drafts[0].key if held.drafts else record
-        self._out.anomalies.append(AnomalyReport(AnomalyKind.UNLINKED_RELEASED, record, key))
-        self._out.drafts.extend(held.drafts)
-        self._out.usage.extend(held.usage)
-
     def usage_by_turn(self) -> dict[str, UsageTally]:
         return self._tally(lambda record: record == MAIN_RECORD, by_turn=True)
 
@@ -255,10 +229,8 @@ class Projector:
             "calls": len(self._calls),
             "turns": len(self._turns_seen),
             "closed": len(self._closed),
-            "links": len(self._links),
             "usage": len(self._usage),
             "orphans": len(self._orphans),
-            "held": len(self._held),
             "reported": len(self._reported),
         }
 
@@ -275,9 +247,6 @@ class Projector:
     def undelivered(self) -> tuple[SentInput, ...]:
         return tuple(self._unsettled)
 
-    def unlinked_records(self) -> tuple[str, ...]:
-        return tuple(self._held)
-
     def _tally(self, keep: Callable[[str], bool], *, by_turn: bool) -> dict[str, UsageTally]:
         tallies: dict[str, UsageTally] = {}
         for (record, ref), entry in self._usage.items():
@@ -293,11 +262,11 @@ class Projector:
         return tallies
 
     def _dispatch(self, entry: AnyEntry) -> None:
+        if entry.record != MAIN_RECORD and not isinstance(entry, (Anomaly, TokenUsage)):
+            return
         match entry:
             case Anomaly():
                 self._on_anomaly(entry)
-            case SubagentLink():
-                self._on_link(entry)
             case TokenUsage():
                 self._on_usage(entry)
             case ToolCall():
@@ -314,8 +283,6 @@ class Projector:
                 self._on_marker(entry)
 
     def _turn(self, entry: Entry, *, opens: bool = False) -> str:
-        if entry.record != MAIN_RECORD:
-            return self._sub_turn(entry)
         name = entry.turn or (f"{entry.record}:{entry.key}" if opens else self._current)
         if name is None:
             return _IMPLICIT_TURN
@@ -332,13 +299,6 @@ class Projector:
             self._observe(name, entry)
         return name
 
-    def _sub_turn(self, entry: Entry) -> str:
-        call = self._links.get(entry.record)
-        known = None if call is None else self._calls.get(call)
-        if known is not None:
-            return known.turn
-        return entry.turn or _IMPLICIT_TURN
-
     def _observe(self, name: str, entry: Entry) -> None:
         if isinstance(entry, HumanInput):
             self._out.observed.append(TurnObserved(name, TurnOrigin.INPUT, None))
@@ -347,21 +307,7 @@ class Projector:
             self._out.observed.append(TurnObserved(name, TurnOrigin.HARNESS, cause))
 
     def _emit(self, draft: TimelineDraft) -> None:
-        if (
-            draft.record != MAIN_RECORD
-            and draft.record not in self._links
-            and draft.record not in self._released
-        ):
-            self._holding(draft.record).drafts.append(draft)
-            return
-        parent = self._links.get(draft.record)
-        self._out.drafts.append(replace(draft, parent_tool_use_id=parent) if parent else draft)
-
-    def _holding(self, record: str) -> _Held:
-        held = self._held.get(record)
-        if held is None:
-            held = self._held[record] = _Held(self._fed, [], [])
-        return held
+        self._out.drafts.append(draft)
 
     def _draft(
         self, entry: Entry, kind: DraftKind, payload: str, extra: _Extra | None = None
@@ -394,68 +340,42 @@ class Projector:
         self._reported.add(mark)
         self._out.anomalies.append(AnomalyReport(entry.anomaly, entry.detail, entry.key))
 
-    def _on_link(self, entry: SubagentLink) -> None:
-        self._links[entry.child_record] = entry.call_id
-        call = self._calls.get(entry.call_id)
-        held = self._held.pop(entry.child_record, None)
-        if held is None:
-            return
-        for draft in held.drafts:
-            self._emit(replace(draft, turn=call.turn) if call else draft)
-        for spend in held.usage:
-            self._out.usage.append(self._attributed(spend))
-
     def _on_usage(self, entry: TokenUsage) -> None:
         ident = (entry.record, entry.message_ref)
         if ident in self._usage:
             if not entry.reliable:
                 self._unreliable.add(ident)
             return
-        stored = entry if entry.turn else replace(entry, turn=self._turn(entry))
+        turn = (
+            entry.turn or _IMPLICIT_TURN
+            if entry.record != MAIN_RECORD
+            else (entry.turn or self._turn(entry))
+        )
+        stored = entry if entry.turn == turn else replace(entry, turn=turn)
         self._usage[ident] = stored
         if not entry.reliable:
             self._unreliable.add(ident)
-        self._report_usage(
+        self._out.usage.append(
             MessageUsage(
                 record=entry.record,
                 message_ref=entry.message_ref,
                 turn=stored.turn,
-                parent_call_id=None,
                 usage=entry.usage,
                 model=entry.model,
                 reliable=entry.reliable,
             )
         )
 
-    def _report_usage(self, spend: MessageUsage) -> None:
-        if spend.record == MAIN_RECORD:
-            self._out.usage.append(spend)
-        elif spend.record in self._links:
-            self._out.usage.append(self._attributed(spend))
-        elif spend.record in self._released:
-            self._out.usage.append(spend)
-        else:
-            self._holding(spend.record).usage.append(spend)
-
-    def _attributed(self, spend: MessageUsage) -> MessageUsage:
-        call = self._links[spend.record]
-        known = self._calls.get(call)
-        return replace(spend, parent_call_id=call, turn=known.turn if known else spend.turn)
-
     def _on_text(self, entry: AgentText | Reasoning) -> None:
         if not entry.text.strip():
             return
-        sub = entry.record != MAIN_RECORD
         if isinstance(entry, Reasoning):
-            if not sub:
-                self._draft(
-                    entry,
-                    DraftKind.AGENT_REASONING,
-                    entry.text,
-                    _Extra(reasoning_ms=entry.duration_ms),
-                )
-        elif sub:
-            self._draft(entry, DraftKind.SUBAGENT_TEXT, entry.text)
+            self._draft(
+                entry,
+                DraftKind.AGENT_REASONING,
+                entry.text,
+                _Extra(reasoning_ms=entry.duration_ms),
+            )
         else:
             self._draft(entry, DraftKind.AGENT_CHAT, entry.text, _Extra(complete=entry.complete))
 
@@ -493,12 +413,8 @@ class Projector:
     # our own inputs with an origin we have never seen, and an input that is not settled is sent again); (2) its origin
     # is one the vocabulary knows (a finished task, a timer): a notice; (3) it names no origin, or `human`: an input
     # we did not send (unmatched), shown as such; (4) any other origin: an anomaly, reported and not shown, because
-    # nothing can say what it is. A sub-agent's record carries no inputs of ours, only the notices the CLI files in it.
+    # nothing can say what it is.
     def _on_human(self, entry: HumanInput) -> None:
-        if entry.record != MAIN_RECORD:
-            if entry.origin is not None:
-                self._on_origin(entry, entry.origin)
-            return
         sent, basis = self._recognise(entry)
         if sent is None and entry.origin is not None:
             self._on_origin(entry, entry.origin)
@@ -574,9 +490,6 @@ class Projector:
         return basis
 
     def _on_notice(self, entry: Notice) -> None:
-        if entry.record != MAIN_RECORD:
-            self._draft(entry, DraftKind.SUBAGENT_TEXT, entry.text)
-            return
         if entry.opens_turn:
             _ = self._turn(entry, opens=True)
         self._draft(

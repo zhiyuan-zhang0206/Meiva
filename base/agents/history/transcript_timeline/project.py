@@ -25,14 +25,13 @@ from base.lm.harness.session.transcript.projection import Projector
 # the timeline item of each inbox row they carried), and a row of the record whose id is one of theirs shows
 # those items, one per message. A person's input no one registered is an input of the host's own (a context
 # reset, a recovery note): it is not shown.
-# A tool call with no result yet is shown as running (`activity_pending`, revision 1) while the projection says
+# A tool call with no result yet is shown as running (`activity_pending`) while the projection says
 # it is still open: no later turn has begun and the record has not ended the turn. When its result arrives the
 # same item is projected again without the flag. `RecordProjector` keeps what a read-after-read needs (the
 # open turn, the unanswered calls) in memory only; a new one over the same rows gives the same items.
 # meiva:link base/lm/harness/docs/transcript-projection.md
 
 UNMATCHED = "unmatched"
-RUNNING_REVISION = 1
 
 
 @dataclass(frozen=True, slots=True)
@@ -155,7 +154,7 @@ class RecordProjector:
         if item.created_at:
             update["created_at"] = _normalized(item.created_at)
         if is_call and draft.tool_use_id in unanswered:
-            update.update(activity_pending=True, activity_revision=RUNNING_REVISION)
+            update["activity_pending"] = True
         return ProjectedItem(
             key=draft.key,
             offset=draft.order.seq,
@@ -170,7 +169,7 @@ def _settled(held: ProjectedItem) -> ProjectedItem:
     return ProjectedItem(
         key=held.key,
         offset=held.offset,
-        item=held.item.model_copy(update={"activity_pending": None, "activity_revision": None}),
+        item=held.item.model_copy(update={"activity_pending": None}),
         turn=held.turn,
         call_id=held.call_id,
         is_call=True,

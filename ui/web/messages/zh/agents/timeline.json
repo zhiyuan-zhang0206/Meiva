@@ -36,8 +36,6 @@
   "scrollDown": "向下滚动",
   "streamingSuffix": "（流式中…）",
   "compactSummary": "压缩摘要",
-  "subagent": "子代理",
-  "subagentNamed": "子代理 · {name}",
   "compactRequest": "压缩请求",
   "compacting": "Compacting",
   "compacted": "压缩完成",

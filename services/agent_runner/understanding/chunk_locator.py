@@ -15,7 +15,6 @@ from base.agents.history.checkpoint_segment import (
     CheckpointSegmentReader,
     SegmentMessages,
     open_segment_reader,
-    read_harness_segment,
 )
 from base.agents.history.hierarchy.chunks import (
     Chunk,
@@ -161,13 +160,5 @@ def locate_job_chunk(db: Database, job: ChunkJob) -> LocatedChunk:
             return _locate_closing(reader, job, job.boundary_checkpoint_id)
         latest = reader.read_latest()
         if latest is None:
-            full_history = read_harness_segment(db, job.agent_id)
-            if full_history.messages:
-                last_id = full_history.messages[-1].id or ""
-                seg_messages = SegmentMessages.from_messages(
-                    checkpoint_id=last_id,
-                    messages=full_history.messages,
-                )
-                return _locate_uncompacted(seg_messages, job)
             raise _drift_error(job)
         return _locate_live(reader, job, latest)

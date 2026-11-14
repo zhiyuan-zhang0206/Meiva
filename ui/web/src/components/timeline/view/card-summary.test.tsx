@@ -279,29 +279,10 @@ describe("CardHeader rich summaries", () => {
     expect(container.textContent).toContain("Running for");
   });
 
-  it("external harness in-progress items render live timing headers", () => {
-    const rItem = item("agent_reasoning", {
-      payload: "planning...",
-      created_at: new Date(Date.now() - 3000).toISOString(),
-      activity_revision: 1,
-    });
-    const { container: rContainer } = renderWithQuery(
-      <CardHeader item={rItem} config={messageCardConfig(rItem)!} expanded={false} onToggle={noop} />,
-    );
-    expect(rContainer.textContent).toContain("Thinking for");
-
-    const oItem = item("code_output", {
-      payload: "running...",
-      created_at: new Date(Date.now() - 2000).toISOString(),
-      activity_revision: 1,
-    });
-    const { container: oContainer } = renderWithQuery(
-      <CardHeader item={oItem} config={messageCardConfig(oItem)!} expanded={false} onToggle={noop} />,
-    );
-    expect(oContainer.textContent).toContain("Running for");
-
+  it("external harness unanswered tool calls render live timing headers", () => {
     const cItem = item("agent_code", {
-      payload: "x = 1",
+      source: "Bash",
+      payload: "echo hi",
       created_at: new Date(Date.now() - 1500).toISOString(),
       activity_pending: true,
     });

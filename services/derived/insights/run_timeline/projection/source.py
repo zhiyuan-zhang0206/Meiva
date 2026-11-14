@@ -4,7 +4,6 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import NamedTuple
 
-from base.api_contracts.agent_contract import reads_timeline_from_record
 from base.db.protocols import SyncConnection
 from services.derived.insights.run_timeline.projection.model import VERSION, Segment
 from services.derived.insights.run_timeline.projection.rows import rows_as
@@ -61,28 +60,8 @@ def capture_source(conn: SyncConnection, agent_id: int) -> Source:
         row = cur.fetchone()
     if row is None:
         raise RuntimeError("timeline source query returned no aggregate row")
-    if row.head is None and not _read_from_record(conn, agent_id):
-        with conn.cursor() as cur:
-            cur.execute(
-                "SELECT max(seq) AS seq FROM agent_harness_messages WHERE agent_id = %s",
-                (agent_id,),
-            )
-            h_row = cur.fetchone()
-            if h_row and h_row[0] is not None:
-                return Source(f"h{h_row[0]}", None, 0, None)
     previous = Segment.model_validate(row.segment) if row.segment else None
     return Source(row.head, row.boundary, row.length, previous)
-
-
-# meiva:note
-# An agent whose timeline is read from its CLI's record has no stored harness rows to project: the run
-# timeline does not support it (the page says so) and never reads the rows an earlier scheme left behind.
-# meiva:link docs/decisions/agents/graph/2026-11-13-timeline-read-from-the-record.md
-def _read_from_record(conn: SyncConnection, agent_id: int) -> bool:
-    with conn.cursor() as cur:
-        cur.execute("SELECT harness FROM agents_meta WHERE id = %s", (agent_id,))
-        found = cur.fetchone()
-    return found is not None and reads_timeline_from_record(str(found[0]))
 
 
 def next_boundary(conn: SyncConnection, agent_id: int, previous: Segment | None) -> str | None:

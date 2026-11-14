@@ -17,10 +17,8 @@ start**, in the runner that hosts it:
 1. Birth (gateway, one transaction) writes the child's `agents_meta` row with
    `fork_source_agent_id` and inserts the `kind='fork'` inbound (as for a native fork).
    External forks copy no graph checkpoints (the source's graph state holds no conversation
-   and may sit mid-turn) or `agent_publications` (so no unread). All current external harnesses
-   read their timelines from CLI records, so birth copies no `agent_harness_messages` rows.
-   The conditional `copy_harness_timeline` path remains for a stored-timeline harness; it does
-   not enable Antigravity forks, which are refused before birth (see Refusals below).
+   and may sit mid-turn) or `agent_publications` (so no unread). External harnesses read their timelines directly from CLI records, so birth copies no database
+   timeline rows (Antigravity forks remain refused before birth; see Refusals below).
    A Claude Code child's timeline is its CLI's record
    ([the decision](../../../../docs/decisions/agents/graph/2026-11-13-timeline-read-from-the-record.md)),
    which is empty until the first start clones the source's session, and then shows the inherited conversation (the clone keeps the

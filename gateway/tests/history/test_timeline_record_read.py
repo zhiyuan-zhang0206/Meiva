@@ -2,7 +2,7 @@
 # The timeline of an agent whose CLI keeps its own record, as the page asks for it: the gateway asks the machine
 # the agent lives on for a window of the record and serves what comes back. The test provides the one collaborator
 # the route asks (the cluster client) and leaves the route itself untouched. A machine that cannot be reached is a
-# 503, a session with no record yet is an empty timeline, and the rows an earlier scheme stored are never read.
+# 503, and a session with no record yet is an empty timeline.
 # meiva:link docs/decisions/agents/graph/2026-11-13-timeline-read-from-the-record.md
 
 from __future__ import annotations
@@ -13,9 +13,7 @@ from typing import Any, Literal
 import psycopg
 import pytest
 
-from base.agents.history.harness_messages import append_harness_timeline_items
 from base.agents.history.timeline_item import TimelineItem
-from base.api_contracts.agent_contract import Harness
 from base.db import create_agent
 from gateway.tests.auth.gateway_config import GatewayTestClient, gateway_test_client
 from ops.cluster.rpc import ClusterOpUnreachable
@@ -128,19 +126,12 @@ def test_an_unreachable_machine_is_a_503_and_not_an_empty_history(
     assert response.status_code == 503
 
 
-def test_a_session_with_no_record_is_an_empty_timeline_and_old_rows_are_never_read(
+def test_a_session_with_no_record_is_an_empty_timeline(
     client: GatewayTestClient,
     db_conn: psycopg.Connection,
     record_harness: str,
 ) -> None:
     agent = _record_agent(db_conn, record_harness)
-    append_harness_timeline_items(
-        db_conn,
-        agent,
-        Harness(record_harness).value,
-        [TimelineItem(item_id="0.0", kind="agent_chat", payload="stale row from the old scheme")],
-    )
-    db_conn.commit()
     client.app.state.rpc = ScriptedRunner({"items": [], "has_more": False, "size": 0})
 
     response = client.get(f"/api/agents/{agent}/timeline")

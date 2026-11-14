@@ -7,7 +7,6 @@ from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
 from langgraph.checkpoint.base import empty_checkpoint
 from langgraph.checkpoint.postgres import PostgresSaver
 
-from base.agents.history.harness_messages import append_harness_timeline_items
 from base.agents.history.timeline import TimelineItem
 from base.config import settings
 from base.db import create_agent
@@ -67,87 +66,9 @@ def test_pure_meiva_agent_timeline(
     assert [it["item_id"] for it in data["items"]] == ["0.0", "1.0", "2.0"]
 
 
-def test_switched_agent_meiva_external_meiva_chronological(
-    db_conn: psycopg.Connection,
-    test_client: TestClient,
-) -> None:
-    tid = create_agent(db_conn)
-    messages = [
-        SystemMessage(content="System prompt"),
-        HumanMessage(
-            content="First meiva turn",
-            additional_kwargs={"meiva_created_at": "2026-05-01T08:00:00+00:00"},
-        ),
-        AIMessage(
-            content="Meiva reply after external",
-            additional_kwargs={"meiva_created_at": "2026-05-01T10:00:00+00:00"},
-        ),
-    ]
-    _put_checkpoint(tid, messages)
-
-    harness_items = [
-        TimelineItem(
-            item_id="h0.0",
-            kind="inbound_chat",
-            payload="Harness middle turn",
-            created_at="2026-05-01T09:00:00+00:00",
-        ),
-    ]
-    append_harness_timeline_items(db_conn, tid, "claude_code", harness_items)
-    db_conn.commit()
-
-    _set_harness(db_conn, tid, "meiva")
-
-    resp = test_client.get(f"/api/agents/{tid}/timeline?limit=10")
-    assert resp.status_code == 200
-    data = resp.json()
-    assert len(data["items"]) == 4
-    assert [it["item_id"] for it in data["items"]] == ["0.0", "1.0", "h0.0", "2.0"]
-
-
-def test_compact_excludes_pre_compact_harness_items(
-    db_conn: psycopg.Connection,
-    test_client: TestClient,
-) -> None:
-    tid = create_agent(db_conn)
-    pre_compact_harness = [
-        TimelineItem(
-            item_id="h0.0",
-            kind="system_marker",
-            payload="error: Harness execution stopped: antigravity turn failed",
-            created_at="2026-05-01T08:00:00+00:00",
-        ),
-    ]
-    append_harness_timeline_items(db_conn, tid, "antigravity", pre_compact_harness)
-    db_conn.commit()
-
-    messages = [
-        SystemMessage(content="System prompt"),
-        HumanMessage(
-            content="Compact summary [2026-05-01]: context compacted",
-            additional_kwargs={
-                "meiva_msg_type": "compact_summary",
-                "meiva_created_at": "2026-05-01T12:00:00+00:00",
-            },
-        ),
-        AIMessage(
-            content="Active post-compact assistant turn",
-            additional_kwargs={"meiva_created_at": "2026-05-01T12:05:00+00:00"},
-        ),
-    ]
-    _put_checkpoint(tid, messages)
-    _set_harness(db_conn, tid, "meiva")
-
-    resp = test_client.get(f"/api/agents/{tid}/timeline?limit=10")
-    assert resp.status_code == 200
-    data = resp.json()
-    assert len(data["items"]) == 3
-    assert [it["item_id"] for it in data["items"]] == ["0.0", "1.0", "2.0"]
-    assert all(it["item_id"] != "h0.0" for it in data["items"])
-
-
 # meiva:note
-# The current record owns both pages, even when older stored histories exceed the limit.
+# The current CLI record owns both initial and `before=` pages of an external harness agent,
+# even when checkpoints from an earlier native session exist on the same agent id.
 @pytest.mark.parametrize("checkpoint_count", [0, 3, 25])
 @pytest.mark.parametrize("limit", [2, 10])
 def test_current_antigravity_session_excludes_previous_harness_history(
@@ -162,15 +83,6 @@ def test_current_antigravity_session_excludes_previous_harness_history(
                 *[AIMessage(content=f"old checkpoint {i}") for i in range(checkpoint_count)],
             ],
         )
-    append_harness_timeline_items(
-        db_conn,
-        agent,
-        "antigravity",
-        [
-            TimelineItem(item_id=f"h{i}.0", kind="agent_chat", payload=f"old stored row {i}")
-            for i in range(25)
-        ],
-    )
     _set_harness(db_conn, agent, "antigravity")
     db_conn.execute("UPDATE agents_meta SET machine='macmini' WHERE id=%s", (agent,))
     db_conn.commit()

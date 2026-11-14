@@ -172,7 +172,7 @@ _EXTERNAL_MODELS = {"claude_code": "claude-sonnet-5-5", "codex": "gpt-6.1-sol"}
 
 
 @pytest.mark.parametrize("external_harness", ["claude_code", "codex"])
-def test_fork_of_a_same_machine_external_source_keeps_its_harness_and_copies_its_timeline(
+def test_fork_of_a_same_machine_external_source_keeps_its_harness_without_copying_checkpoints(
     external_harness: str,
     redis_url: str,
     db_conn: psycopg.Connection,
@@ -191,13 +191,6 @@ def test_fork_of_a_same_machine_external_source_keeps_its_harness_and_copies_its
         local_machine=machine_identity,
     )
     insert_checkpoint(db_conn, source, "ckpt-1")
-    with db_conn.cursor() as cur:
-        for seq in range(3):
-            cur.execute(
-                "INSERT INTO agent_harness_messages (agent_id, seq, harness, item, inbound_id) "
-                "VALUES (%s, %s, %s, %s::jsonb, %s)",
-                (source, seq, external_harness, f'{{"id": "{seq}.0"}}', 100 + seq),
-            )
     db_conn.commit()
 
     fork = spawn_agent(
@@ -211,13 +204,6 @@ def test_fork_of_a_same_machine_external_source_keeps_its_harness_and_copies_its
 
     assert _harness(db_conn, fork) == external_harness
     with db_conn.cursor() as cur:
-        cur.execute(
-            "SELECT seq, harness, item->>'id', inbound_id FROM agent_harness_messages "
-            "WHERE agent_id = %s ORDER BY seq",
-            (fork,),
-        )
-        copied = [(seq, external_harness, f"{seq}.0", None) for seq in range(3)]
-        assert cur.fetchall() == ([] if external_harness in ("claude_code", "codex") else copied)
         cur.execute("SELECT count(*) FROM agent_publications WHERE agent_id = %s", (fork,))
         assert cur.fetchone() == (0,)
         cur.execute("SELECT count(*) FROM checkpoints WHERE thread_id = %s", (str(fork),))

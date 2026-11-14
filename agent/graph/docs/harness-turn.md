@@ -32,43 +32,14 @@ and start another big turn.
 
 See [foreground input and cancellation](harness-foreground.md) for the execution contract.
 
-## External timeline
-
-The provider session owns execution state and continuation. Inbound timeline entries are
-written when the harness reports the input in the model's context (ACK 2), in the transaction that completes its
-inbox row (see [foreground input and cancellation](harness-foreground.md)). Native Meiva keeps its timeline in LangGraph
-checkpoints. The external activity projector writes to
-`agent_harness_messages` as events arrive.
-
-A CLI sub-agent's text (`SubagentText`) is written as a capped, non-user-facing `subagent_text` item beside the
-call that started it, and the tool calls it made are written as ordinary tool items tied to the same call
-([sub-agent text](../../../base/lm/harness/docs/subagent-text.md)).
-
-The first text or reasoning fragment, complete blocks, and tool start and
-result checkpoints are written while the big turn is active. Additional
-fragments are coalesced within a short checkpoint interval. Each item has a
-stable flat `<seq>.0` ID and a monotonic revision. A tool result revises its
-pending output in place, even if other tools or text appear in the meantime.
-The hosted runtime incarnation fences writes. After each commit the same
-checkpoint is published to the live timeline, and reloads read it from storage.
-Incomplete text remains visible in the work history; only completed chat
-blocks count as replies.
-
-Cancellation and failure preserve committed work. Terminal handling flushes
-pending text (a reply cut off mid-stream is sealed as it stood, so it is
-delivered and recorded like a completed one), marks tools whose result is unavailable, and records a failure
-reason when the harness faults. A host custody tick keeps the invocation
-owned while the provider is quiet. It produces no timeline activity.
-
 ## Record-read timeline (external harnesses)
 
-An external agent's timeline is not written by anyone: it is read from the CLI's record when asked for
-([the decision](../../../docs/decisions/agents/graph/2026-11-13-timeline-read-from-the-record.md); the gateway's side is the
+An external agent's timeline is not written to a database table: it is read from the CLI's record when asked for
+([the decision](../../../docs/decisions/agents/graph/2026-11-13-timeline-read-from-the-record.md); the runner's side is the
 `harness_timeline_read` operation, the projection is in [reading a record](../../../base/lm/harness/docs/transcript-projection.md)).
-`reads_timeline_from_record` (`base/api_contracts/agent_contract.py`) decides which harnesses are such. What this node
-does for them, and nothing else changes:
+`reads_timeline_from_record` (`base/api_contracts/agent_contract.py`) covers all external harnesses (`claude_code`, `codex`, `antigravity`):
 
-- The projector is `ReadTimelineSink` (`harness_read_sink.py`). The adapter's events are signals: any of them marks the
+- The live sink is `ReadTimelineSink` (`harness_read_sink.py`). The adapter's events are signals: any of them marks the
   sink dirty, and after half a second it reads the bytes the CLI appended since its last read, projects them with the
   cold read's function and publishes a `TimelineSnapshot` (ids are row offsets, so the page merges by id; the snapshot
   carries the item published before it and every call still running). A turn's end waits, for at most two seconds, until
@@ -77,22 +48,21 @@ does for them, and nothing else changes:
   no record file to show for it fails like a harness setup failure (a live `Error` event naming the session and where it
   was looked for); a failed turn is not shown after a refresh, as for a built-in agent. A reply the sink could not
   deliver is not retried: the next invocation reads the last turn again and delivers it by key.
-- An input is settled as on the event path (the echo's `InputInContext`, or the reading of the record after a failure), but
-  only the inbound row is set `done` (`commit_handed`): no timeline entry is written, and no rows are written for a
-  stop's passive note, an unconfirmed input, a lost turn, a restart, a harness switch, a fork or the handoff seed
-  (`stores_timeline`). A message appears on the page when the read of the record shows its row, and the page's pending
+- An input is settled by the stream's acknowledgement (`InputInContext`) or by reading the record after a failure, and
+  only the inbound row is set `done` (`commit_handed`, `commit_reconciled`): no database timeline rows are written for
+  delivered inputs, a stop's passive note, an unconfirmed input, a lost turn, a restart, a harness switch, a fork or
+  the handoff seed. A message appears on the page when the read of the record shows its row, and the page's pending
   strip clears on the item's `inbound_id` and on the `InboundCommitted` event the sink publishes with it.
-- The reply to the user is delivered from the projected items, once each, under `harness:claude:<row uuid>`
+- The reply to the user is delivered from the projected items, once each, under the harness record's stable key
   (`capture_keyed_items`). The reply-visibility check of a finished reply, and with it the correction input, is made on the
   `AssistantText` event, so it does not depend on the record being found.
-- Usage is logged from the turn's result frame, as on the event path (`log_turn_usage`); the sub-agents' tokens are in
+- Usage is logged from the turn's result frame (`log_turn_usage`); the sub-agents' tokens are in
   that figure only as the CLI reports them.
 - The CLI finds its login through `USER` and `LOGNAME` besides `HOME`; the session's child environment carries all three
   (`HOST_PASSTHROUGH_KEYS` in `base/host/env/agent_env.py`), and the record is under that `HOME`
-  (`<home>/.claude/projects/<workspace slug>/<session id>.jsonl`).
+  (`<home>/.claude/projects/<workspace slug>/<session id>.jsonl` for Claude Code).
 
-Codex and Antigravity use the same record-read path. The adapter-event projector and its table remain until the authorized
-Antigravity rollout has proved stable ([the plan](../../../future/agent/transcript-timeline-source.md)).
+Codex and Antigravity use the same record-read path ([the plan](../../../future/agent/transcript-timeline-source.md)).
 
 ## The bridge
 
@@ -141,16 +111,13 @@ continuation. The shared deadlines and shutdown fallback are owned by
 [Agent-host graceful exit](../../../services/agent_runner/agent_host/lifecycle/docs/graceful-exit.md).
 
 An explicit external harness restart or a harness switch delivers its restart
-message as a lifecycle system note. The note starts execution on the selected
-harness and appears as a system marker in the timeline. External harnesses
-share one display store, so an external-to-external switch writes this marker
-once. A switch across the native checkpoint and external display stores also
-records a handoff in the outgoing history.
+message as a lifecycle system note on the selected harness. Switching away from
+the native checkpoint runtime also records a handoff marker in the outgoing
+checkpoint history; external harnesses read their timelines directly from the
+active CLI session's record, so switching away from an external harness writes
+no outgoing database timeline marker.
 
 ## Cost and usage
-
-This section describes the adapter-event path (setting off); a transcript-sourced agent logs usage per model
-message from the record, see above.
 
 Each non-replayed terminal result with observed usage logs the same `llm_usage` row the built-in loop logs, with
 `usage_kind="agent"` and `source` set to the harness name, so the two runtimes

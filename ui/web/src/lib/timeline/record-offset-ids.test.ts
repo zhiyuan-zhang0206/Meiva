@@ -53,9 +53,9 @@ describe("items named by byte offsets", () => {
   });
 
   it("a live snapshot merges by id, and the call that was running is replaced in place", () => {
-    const running = item("h4358.0", { kind: "agent_code", activity_pending: true, activity_revision: 1 });
+    const running = item("h4358.0", { kind: "agent_code", activity_pending: true });
     const state = { items: [HELD[0], HELD[1], running], streamingIds: new Set<string>() } as unknown as ThreadTimelineState;
-    const settled = item("h4358.0", { kind: "agent_code", activity_pending: null, activity_revision: null });
+    const settled = item("h4358.0", { kind: "agent_code", activity_pending: null });
     const result = foldEvent(state, {
       role: "timeline_snapshot",
       agent_id: 1,
@@ -67,7 +67,7 @@ describe("items named by byte offsets", () => {
   });
 
   it("a running call a snapshot does not mention is dropped, so a snapshot carries every running call", () => {
-    const running = item("h4358.0", { kind: "agent_code", activity_pending: true, activity_revision: 1 });
+    const running = item("h4358.0", { kind: "agent_code", activity_pending: true });
     const state = { items: [HELD[0], running], streamingIds: new Set<string>() } as unknown as ThreadTimelineState;
     const result = foldEvent(state, {
       role: "timeline_snapshot",

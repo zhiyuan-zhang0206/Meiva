@@ -19,7 +19,6 @@ from base.lm.harness.session.transcript.projection import Projector
 FIXTURES = Path(__file__).parent / "fixtures"
 
 CHILD_THREAD = "01a1cefe-574e-79f2-a985-5e66bedfa3a6"
-SPAWN_CALL = "exec-19f89067-c493-4f06-a970-a5a4cb660f7f"
 LATE_COMMAND = "exec-0b106fcd-871d-47a6-98d7-9f43278b35b5"
 
 type Obj = dict[str, object]

@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-from datetime import UTC, datetime, timedelta
 from typing import cast
 
 import psycopg
@@ -11,24 +10,22 @@ from psycopg_pool import AsyncConnectionPool
 from agent.db import ClaimedInbound
 from agent.graph.claim._dispatch import BatchState, resolve_non_human_wake
 from agent.graph.claim._routing import Routing
-from agent.graph.claim.harness_activity import HarnessTurnProjector
 from agent.graph.claim.node import claim_node_impl, settle_claimed_batch
 from agent.graph.claim.tests.claim_support import make_runtime, thread_config
 from agent.graph.claim.turn_stamp import persist_last_active
 from agent.messages import NoteTag
 from agent.state import AgentState
-from base.agents.history.timeline_item import TimelineItem
+from base.agents.history.transcript_timeline.items import ReplyPolicy
+from base.agents.history.transcript_timeline.project import RecordProjector
 from base.agents.messages.kwargs import read_meiva_kwargs
 from base.agents.tests.units import spawn_agent
-from base.clock import SYSTEM_TIMERS, Clock, ClockConfig
 from base.cluster.machine import MachineIdentityReader
 from base.cluster.machine.tests.identity import machine_identity as machine_identity
 from base.config.service_read import ConfigAuthority
 from base.db.code_version_gate import ProcessDbGate
 from base.lm.catalog import ModelCatalog
-from base.lm.harness import AssistantText, TextDelta, ToolUse
-
-START = datetime(2026, 10, 25, 1, 2, 3, tzinfo=UTC)
+from base.lm.harness import HarnessCause
+from base.lm.harness.session.transcript.entries import AgentText, Notice, Order
 
 
 def _routing() -> Routing:
@@ -329,28 +326,35 @@ async def test_external_harness_non_human_wake_names_its_synthetic_input_after_t
     assert restart_pending["prompt"].endswith("Continue after restart.\n</system_note>")
 
 
-async def test_harness_projector_propagates_non_human_wake() -> None:
-    moments = iter(START + timedelta(seconds=n) for n in range(6))
-    clock = Clock(ClockConfig("UTC", "UTC", False), timers=SYSTEM_TIMERS, now=moments.__next__)
-    items: dict[str, TimelineItem] = {}
-
-    async def checkpoint(item: TimelineItem, msg_count: int) -> None:
-        items[item.item_id] = item
-
-    projector = HarnessTurnProjector(
-        checkpoint=checkpoint, base_idx=2, clock=clock, non_human_wake=True
+def test_record_projector_propagates_non_human_wake() -> None:
+    projector = RecordProjector(
+        policy=ReplyPolicy(explicit_visibility=False, delivery_mode=None),
+        render_tool=lambda name, _inp: name,
+        wire_id=str,
     )
-    await projector.on_event(TextDelta(turn_id="t1", text="Checking worker..."))
-    assert items["h2.0"].user_facing is False
-    await projector.on_event(AssistantText(turn_id="t1", text="Checking worker..."))
-    await projector.on_event(
-        ToolUse(turn_id="t1", tool_use_id="c1", name="Bash", tool_input={"command": "ls"})
+    projected = projector.feed(
+        [
+            Notice(
+                key="n1",
+                order=Order(1),
+                turn="t1",
+                text="timer",
+                cause=HarnessCause.SCHEDULED_WAKE,
+            ),
+            AgentText(key="m1", order=Order(2), turn="t1", text="Checking worker..."),
+            AgentText(
+                key="m2",
+                order=Order(3),
+                turn="t1",
+                text="Meiva agent to user: All green.",
+            ),
+        ],
+        tail=True,
+        release_held=False,
     )
-    await projector.on_event(AssistantText(turn_id="t1", text="Meiva agent to user: All green."))
-    await projector.finish()
 
     assert [
-        (item.payload, item.user_facing) for item in items.values() if item.kind == "agent_chat"
+        (p.item.payload, p.item.user_facing) for p in projected.items if p.item.kind == "agent_chat"
     ] == [("Checking worker...", False), ("All green.", True)]
 
 

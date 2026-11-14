@@ -110,7 +110,7 @@ class TestSettlementReconciles:
         assert settled_update["halted"] is True
 
         initial_state = AgentState(
-            harness_inputs=[{"key": "inbound-1", "prompt": "work", "timeline_items": []}],
+            harness_inputs=[{"key": "inbound-1", "prompt": "work"}],
             halted=False,
         )
         assert claim_will_idle(initial_state, harness=Harness.CLAUDE_CODE) is False

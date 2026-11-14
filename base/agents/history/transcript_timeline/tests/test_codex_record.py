@@ -170,9 +170,6 @@ def test_a_file_change_a_web_search_an_image_view_and_a_sub_agent_are_calls_with
     report = spawn[-1].item
     assert (report.kind, report.source) == ("system_marker", "background_task")
     assert report.payload.startswith("status:"), "a page shows a notice only as a status line"
-    assert all(p.item.kind != "subagent_text" for p in spawn), (
-        "the sub-agent's own record is not read"
-    )
 
 
 def test_a_fork_shows_only_its_own_rows(tmp_path: Path) -> None:

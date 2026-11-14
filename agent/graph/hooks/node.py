@@ -80,7 +80,6 @@ def _fold_external_hook_messages(
     note: dict[str, object] = {
         "key": f"{HOOK_NOTES_KEY}-{first}" if first is not None else HOOK_NOTES_KEY,
         "prompt": pre_text,
-        "timeline_items": [],
     }
     cmd_update["harness_inputs"] = [note, *state.harness_inputs]
 
