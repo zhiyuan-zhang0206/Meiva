@@ -648,3 +648,36 @@ describe("AgentRow single-line truncation and hover peek card", () => {
     expect(screen.queryByTestId("agent-hover-card")).toBeNull();
   });
 });
+
+
+describe("AgentRow rename IME", () => {
+  it.each([{ isComposing: true }, { isComposing: false, keyCode: 229 }])(
+    "keeps editing during composition %j and commits on ordinary Enter",
+    (ime) => {
+      const onRename = vi.fn();
+      render(<AgentRow {...baseProps} onRename={onRename} agent={ag(1)} label="Focus" depth={0} ancestorsIsLast={[]} />);
+      fireEvent.doubleClick(screen.getByText("#1 · Focus"));
+      const input = screen.getByLabelText("Rename agent 1");
+      fireEvent.change(input, { target: { value: "New label" } });
+      expect(fireEvent.keyDown(input, { key: "Enter", ...ime })).toBe(true);
+      expect(onRename).not.toHaveBeenCalled();
+      expect(screen.getByLabelText("Rename agent 1")).toBe(input);
+      expect(fireEvent.keyDown(input, { key: "Enter" })).toBe(false);
+      expect(onRename).toHaveBeenCalledOnce();
+    },
+  );
+});
+
+
+it.each(["blur", "Escape", "Shift+Enter"])("rename retains %s behavior", (action) => {
+  const onRename = vi.fn();
+  render(<AgentRow {...baseProps} onRename={onRename} agent={ag(1)} label="Focus" depth={0} ancestorsIsLast={[]} />);
+  fireEvent.doubleClick(screen.getByText("#1 · Focus"));
+  const input = screen.getByLabelText("Rename agent 1");
+  fireEvent.change(input, { target: { value: "New label" } });
+  if (action === "blur") fireEvent.blur(input);
+  else fireEvent.keyDown(input, { key: action === "Escape" ? "Escape" : "Enter", shiftKey: true });
+  expect(screen.queryByLabelText("Rename agent 1")).toBeNull();
+  if (action === "Escape") expect(onRename).not.toHaveBeenCalled();
+  else expect(onRename).toHaveBeenCalledWith("New label");
+});

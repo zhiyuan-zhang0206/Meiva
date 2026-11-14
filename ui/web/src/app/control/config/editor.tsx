@@ -42,6 +42,7 @@ import { InlineError } from "@/components/ui/inline-error";
 import { FLEX } from "@/lib/layout/layout";
 import { cn } from "@/lib/format/utils";
 import { useApi } from "@/lib/transport/transport-context";
+import { isImeComposition } from "@/lib/input/enter-to-send";
 
 const COMMON_FIELDS = new Set([
   "MEIVA_AGENT_COMMUNICATION_STYLE", "MEIVA_REASONING_EFFORT",
@@ -422,6 +423,7 @@ export default function ConfigEditor({ mode }: { mode: "general" | "advanced" | 
                       onEditValueChange={setEditValue}
                       onCommitEdit={() => commitEdit(field)}
                       onEditKeyDown={(e) => {
+                        if (isImeComposition(e)) return;
                         if (e.key === "Enter") commitEdit(field);
                         else if (e.key === "Escape") cancelEdit();
                       }}

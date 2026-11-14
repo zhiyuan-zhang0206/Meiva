@@ -19,6 +19,7 @@ import { useStore } from "@/lib/state/store";
 import { FLEX } from "@/lib/layout/layout";
 import { cn } from "@/lib/format/utils";
 import { useApi } from "@/lib/transport/transport-context";
+import { isImeComposition } from "@/lib/input/enter-to-send";
 
 // meiva:note
 // This route is the guide page's composition root: it reads the router and hands the shell a
@@ -69,7 +70,7 @@ export function GuidePageView({ navigate }: GuidePageViewProps) {
           value={nl}
           onChange={(e) => setNl(e.target.value)}
           onKeyDown={(e) => {
-            if (e.key === "Enter") submit();
+            if (e.key === "Enter" && !isImeComposition(e)) submit();
           }}
         />
         <Button type="button" size="sm" disabled={!nl.trim() || draftMutation.isPending} onClick={submit}>

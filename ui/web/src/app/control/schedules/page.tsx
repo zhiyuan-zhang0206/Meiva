@@ -41,6 +41,7 @@ import { FLEX } from "@/lib/layout/layout";
 import { cn } from "@/lib/format/utils";
 import { ScheduleForm, ScheduleRow } from "./_schedule_components";
 import { useApi } from "@/lib/transport/transport-context";
+import { isImeComposition } from "@/lib/input/enter-to-send";
 
 const SCHEDULES_QUERY_KEY = ["schedules"] as const;
 
@@ -192,7 +193,7 @@ export function SchedulesPageView({ navigate }: SchedulesPageViewProps) {
           value={nl}
           onChange={(e) => setNl(e.target.value)}
           onKeyDown={(e) => {
-            if (e.key === "Enter" && nl.trim() && !draftMutation.isPending) draftMutation.mutate(nl.trim());
+            if (e.key === "Enter" && !isImeComposition(e) && nl.trim() && !draftMutation.isPending) draftMutation.mutate(nl.trim());
           }}
         />
         <Button

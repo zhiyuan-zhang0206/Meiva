@@ -356,3 +356,22 @@ describe("Schedule status meaning", () => {
     expect(screen.queryByText("Stopped")).toBeNull();
   });
 });
+
+
+describe("IME confirmation", () => {
+  it.each([{ isComposing: true }, { isComposing: false, keyCode: 229 }])(
+    "keeps the draft during composition %j and accepts a subsequent Shift+Enter",
+    async (ime) => {
+      transport.listSchedules.mockResolvedValue([]);
+      const draft = transport.draftSchedule.mockReturnValue(new Promise(() => undefined));
+      wrap(<SchedulesPageView navigate={pushSpy} />);
+      const input = await screen.findByPlaceholderText(/Describe a scheduled task/);
+      fireEvent.change(input, { target: { value: "draft request" } });
+      expect(fireEvent.keyDown(input, { key: "Enter", ...ime })).toBe(true);
+      expect(draft).not.toHaveBeenCalled();
+      expect((input as HTMLInputElement).value).toBe("draft request");
+      fireEvent.keyDown(input, { key: "Enter", shiftKey: true });
+      await waitFor(() => expect(draft).toHaveBeenCalledOnce());
+    },
+  );
+});

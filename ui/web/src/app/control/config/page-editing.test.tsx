@@ -463,3 +463,23 @@ describe("ConfigPage without a model catalog", () => {
     await waitFor(() => expect(put).toHaveBeenCalledWith({ log_level: "DEBUG" }, undefined));
   });
 });
+
+
+describe("Config text IME", () => {
+  it.each([{ isComposing: true }, { isComposing: false, keyCode: 229 }])(
+    "keeps editing during composition %j and saves on ordinary Enter",
+    async (ime) => {
+      transport.getConfig.mockResolvedValue(VIEW);
+      const putSpy = transport.putConfig.mockResolvedValue(OK_RESULT(["log_level"]));
+      wrap(<ConfigEditor mode="advanced" />);
+      fireEvent.click(await screen.findByTestId("edit-log_level"));
+      const input = screen.getByTestId("input-log_level");
+      fireEvent.change(input, { target: { value: "DEBUG" } });
+      expect(fireEvent.keyDown(input, { key: "Enter", ...ime })).toBe(true);
+      expect(putSpy).not.toHaveBeenCalled();
+      expect(screen.getByTestId("input-log_level")).toBe(input);
+      fireEvent.keyDown(input, { key: "Enter" });
+      await waitFor(() => expect(putSpy).toHaveBeenCalledWith({ log_level: "DEBUG" }, undefined));
+    },
+  );
+});

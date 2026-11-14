@@ -26,6 +26,7 @@ import { FLEX } from "@/lib/layout/layout";
 import { useNavigation } from "@/lib/browser/navigation/navigation-provider";
 import { cn } from "@/lib/format/utils";
 import { useApi } from "@/lib/transport/transport-context";
+import { isImeComposition } from "@/lib/input/enter-to-send";
 
 // All three entries can be mounted at once (the Control page stacks every
 // section), so placeholder + accessible name are distinct per kind.
@@ -76,7 +77,7 @@ export function PackageDraftEntry({ kind }: { kind: PackageKind }) {
         value={nl}
         onChange={(e) => setNl(e.target.value)}
         onKeyDown={(e) => {
-          if (e.key === "Enter") submit();
+          if (e.key === "Enter" && !isImeComposition(e)) submit();
         }}
       />
       <Button

@@ -12,6 +12,8 @@
 // plain items fire immediately with no prompt. The destructive Kill
 // (SIGKILL) sits behind a confirm so it can't be hit by accident.
 
+import { isImeComposition } from "@/lib/input/enter-to-send";
+
 import * as Popover from "@radix-ui/react-popover";
 import { CircleQuestionMark, GitFork, Pencil, PowerOff, RotateCw, Shrink, X } from "lucide-react";
 import dynamic from "next/dynamic";
@@ -326,6 +328,7 @@ export function AgentRow({
                     onClick={(e) => e.stopPropagation()}
                     onBlur={submit}
                     onKeyDown={(e) => {
+                      if (isImeComposition(e)) return;
                       if (e.key === "Enter") {
                         e.preventDefault();
                         submit();
