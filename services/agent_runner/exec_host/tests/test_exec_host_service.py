@@ -160,6 +160,25 @@ async def _read_frames(reader: asyncio.StreamReader) -> list[dict[str, Any]]:
 
 
 # meiva:note
+# A completed group signal and leader reap do not synchronize descendant exit.
+# Wait for the same ESRCH observation, without accepting a still-visible PID.
+async def _wait_for_process_exit(pid: int, timeout_s: float = 5.0) -> None:
+    async with asyncio.timeout(timeout_s):
+        while True:
+            try:
+                os.kill(pid, 0)
+            except ProcessLookupError:
+                return
+            await asyncio.sleep(0.01)
+
+
+async def test_process_exit_wait_rejects_a_live_process_at_its_deadline() -> None:
+    with pytest.raises(TimeoutError):
+        await _wait_for_process_exit(os.getpid(), timeout_s=0)
+    os.kill(os.getpid(), 0)
+
+
+# meiva:note
 # The caller names the interpreter. A default would let a caller that forgets the argument
 # run the child on whatever interpreter this process happens to be, silently.
 def test_service_takes_the_interpreter_from_its_caller() -> None:
@@ -317,6 +336,7 @@ async def test_cancel_mid_run_kills_process_group(tmp_path: Path) -> None:
         assert final["ok"] is True
         assert final["data"]["cancelled"] is True
         assert final["data"]["timed_out"] is False
+        await _wait_for_process_exit(bg_pid)
         with pytest.raises(ProcessLookupError):
             os.kill(bg_pid, 0)
 
@@ -378,6 +398,7 @@ async def test_timeout_kills_process_group(tmp_path: Path, startup_delay: float)
         assert final["ok"] is True
         assert final["data"]["cancelled"] is False
         assert final["data"]["timed_out"] is True
+        await _wait_for_process_exit(bg_pid)
         with pytest.raises(ProcessLookupError):
             os.kill(bg_pid, 0)
 
@@ -426,13 +447,7 @@ async def test_client_disconnect_kills_process_group(tmp_path: Path) -> None:
         writer.close()
         await writer.wait_closed()
 
-        deadline = time.monotonic() + 5.0
-        while time.monotonic() < deadline:
-            try:
-                os.kill(bg_pid, 0)
-            except ProcessLookupError:
-                break
-            await asyncio.sleep(0.05)
+        await _wait_for_process_exit(bg_pid)
         with pytest.raises(ProcessLookupError):
             os.kill(bg_pid, 0)
 

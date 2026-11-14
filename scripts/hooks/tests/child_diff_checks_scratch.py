@@ -31,13 +31,21 @@ class DescendantAnchor(BaseModel):
     argv: list[str]
 
 
+# meiva:note
+# All readiness readers use existence; publish a complete PID in one rename.
+def _publish_pid(pid_file: Path, pid: int) -> None:
+    pending = pid_file.with_suffix(".pending")
+    _ = pending.write_text(str(pid))
+    _ = pending.replace(pid_file)
+
+
 def main(arguments: list[str]) -> int:
     mode, *values = arguments
     if mode == "exit":
         print("diagnostic")
         return int(values[0])
     if mode == "sleep":
-        _ = Path(values[0]).write_text(str(os.getpid()))
+        _publish_pid(Path(values[0]), os.getpid())
         time.sleep(30)
         return 0
     if mode == "cleanup-interrupt":
