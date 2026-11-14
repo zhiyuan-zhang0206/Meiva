@@ -35,6 +35,14 @@ it("loads exact zero and sums unread agents plus question rows", async () => {
   counts = { unread_agents: 1, open_questions: 0 };
   stream.deliver({ role: "agent_updated", agent_id: 1 });
   await waitFor(() => expect(result.current.count).toBe(1));
+  // meiva:note
+  // Termination and revival publish the same authoritative lifecycle hint.
+  counts = { unread_agents: 0, open_questions: 0 };
+  stream.deliver({ role: "agent_updated", agent_id: 1 });
+  await waitFor(() => expect(result.current.count).toBe(0));
+  counts = { unread_agents: 1, open_questions: 0 };
+  stream.deliver({ role: "agent_updated", agent_id: 1 });
+  await waitFor(() => expect(result.current.count).toBe(1));
   counts = { unread_agents: 0, open_questions: 4 };
   stream.open();
   await waitFor(() => expect(result.current.count).toBe(4));

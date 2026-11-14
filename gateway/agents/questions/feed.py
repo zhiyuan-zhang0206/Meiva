@@ -77,11 +77,11 @@ async def get_questions_feed(
 
 
 # meiva:note
-# Count unread agents once and unresolved question rows in one snapshot.
+# Match the live sidebar for unread agents; open questions survive owner termination.
 def attention_counts(pool: ConnectionPool) -> AttentionCounts:
     with pool.connection() as conn, conn.cursor(row_factory=class_row(AttentionCounts)) as cur:
         cur.execute(
-            "SELECT (SELECT COUNT(*) FROM agents a WHERE EXISTS ("
+            "SELECT (SELECT COUNT(*) FROM agents_meta a WHERE a.status <> 'terminated' AND EXISTS ("
             "SELECT 1 FROM agent_publications m WHERE m.agent_id = a.id "
             "AND m.content IS NOT NULL AND m.id > COALESCE(("
             "SELECT seen_id FROM agent_publication_seen WHERE agent_id = a.id), 0))) AS unread_agents, "
