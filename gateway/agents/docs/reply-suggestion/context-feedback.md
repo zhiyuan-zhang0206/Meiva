@@ -9,9 +9,10 @@ proof of approval. Agent candidates can be refined or declined by this service.
 
 An offer ID identifies the generated candidates. Keyed
 `POST /api/agents/{agent_id}/reply-suggestion/feedback` records an offered candidate
-as accepted or edited after successful send, or rejected on explicit dismissal.
-Merely ignoring or cycling a suggestion records no rejection. Feedback retains
-its original candidate, context and the sent text; retries do not duplicate it.
+as accepted or edited after a successful send from the composer. The API still
+accepts explicit rejection records from clients that send them. Ignoring or
+cycling a suggestion leaves feedback untouched. Feedback retains its original
+candidate, context and the sent text; retries do not duplicate it.
 
 Memory retrieval uses the existing gateway memory-search boundary, with its
 cluster index and access context. Unavailable indexing or timeout is recorded
