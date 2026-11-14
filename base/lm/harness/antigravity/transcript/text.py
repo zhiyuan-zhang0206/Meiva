@@ -23,16 +23,27 @@ def iso_of(clock_ms: int) -> str:
     return datetime.fromtimestamp(clock_ms // 1000, UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
-_USER_REQUEST = re.compile(r"<USER_REQUEST>\s*(.*?)\s*</USER_REQUEST>", re.DOTALL)
-
-
 # meiva:note
-# A user row's `content` wraps what the person typed in `<USER_REQUEST>`; `<ADDITIONAL_METADATA>` (the
-# local time, uploaded image paths) and `<USER_SETTINGS_CHANGE>` follow it and are the CLI's, not the
-# person's. A row without the wrapper is taken whole.
+# AGY does not escape request tags inside user text. Only remove the outside
+# frame; interior tags (including queued request separators) must remain intact
+# so an entire inbox message can still match as a contiguous substring.
+_REQUEST_OPEN = "<USER_REQUEST>"
+_REQUEST_CLOSE = "</USER_REQUEST>"
+_REQUEST_FOOTER = re.compile(
+    r"\s*(?:<ADDITIONAL_METADATA>.*</ADDITIONAL_METADATA>\s*)?"
+    r"(?:<USER_SETTINGS_CHANGE>.*</USER_SETTINGS_CHANGE>\s*)?",
+    re.DOTALL,
+)
+
+
 def user_text(content: str) -> str:
-    blocks = _USER_REQUEST.findall(content)
-    return "\n\n".join(blocks).strip() if blocks else content.strip()
+    text = content.strip()
+    if not text.startswith(_REQUEST_OPEN):
+        return text
+    body, closing, footer = text[len(_REQUEST_OPEN) :].rpartition(_REQUEST_CLOSE)
+    if not closing or _REQUEST_FOOTER.fullmatch(footer) is None:
+        return text
+    return body.strip()
 
 
 # meiva:note
