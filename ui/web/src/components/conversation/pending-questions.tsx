@@ -1,7 +1,7 @@
 "use client";
 
 import { useQueryClient } from "@tanstack/react-query";
-import { ChevronDown } from "lucide-react";
+import { ChevronDown, ChevronUp } from "lucide-react";
 import { useId, useState } from "react";
 import { useTranslations } from "next-intl";
 
@@ -12,7 +12,7 @@ import { FLEX } from "@/lib/layout/layout";
 import { dropOpenQuestions, replaceAgentQuestions } from "@/lib/notifications/use-questions";
 
 // meiva:note
-// The panel reserves a single header row above the composer so opening it can
+// The panel reserves a single row above the composer so opening it can
 // reveal the current question without resizing the timeline.
 // meiva:link ui/web/src/docs/frontend-state/shared-context/questions.md
 export function PendingQuestions({ questions, failed, maxWidthCss }: {
@@ -34,23 +34,10 @@ export function PendingQuestions({ questions, failed, maxWidthCss }: {
       style={maxWidthCss ? { maxWidth: maxWidthCss } : undefined}
     >
       <div className="absolute inset-x-4 bottom-1 rounded-xl border border-border/80 bg-background">
+        {failed && <p role="status" className="px-4 py-2.5 text-xs text-muted-foreground">{t("questionsUnavailable")}</p>}
         {questions.length > 0 && (
           <>
-            <button
-              type="button"
-              aria-expanded={expanded}
-              aria-controls={contentId}
-              onClick={() => setExpanded(!expanded)}
-              className={cn(
-                "h-[38px] w-full items-center justify-between gap-2 rounded-t-xl px-4 text-left text-xs font-medium text-muted-foreground hover:text-foreground focus-visible:outline-2 focus-visible:-outline-offset-2",
-                !expanded && "rounded-b-xl",
-                FLEX,
-              )}
-            >
-              {label}
-              <ChevronDown aria-hidden className={cn("size-3.5 shrink-0", !expanded && "-rotate-90")} />
-            </button>
-            <div id={contentId} hidden={!expanded} className="border-t border-border/60">
+            <div id={contentId} hidden={!expanded}>
               <QuestionsForm
                 agentId={questions[0].agent_id}
                 questions={questions}
@@ -58,9 +45,26 @@ export function PendingQuestions({ questions, failed, maxWidthCss }: {
                 onChanged={(open) => replaceAgentQuestions(cache, questions[0].agent_id, open)}
               />
             </div>
+            <button
+              type="button"
+              aria-label={label}
+              aria-expanded={expanded}
+              aria-controls={contentId}
+              onClick={() => setExpanded(!expanded)}
+              className={cn(
+                "items-center text-xs font-medium text-muted-foreground hover:text-foreground focus-visible:outline-2 focus-visible:-outline-offset-2",
+                expanded
+                  ? "absolute bottom-3 left-4 size-8 justify-center rounded-lg hover:bg-muted"
+                  : "h-[38px] w-full justify-between gap-2 rounded-xl px-4 text-left",
+                FLEX,
+              )}
+            >
+              {expanded ? <ChevronDown aria-hidden className="size-3.5" /> : (
+                <>{t("questions")}<ChevronUp aria-hidden className="size-3.5" /></>
+              )}
+            </button>
           </>
         )}
-        {failed && <p role="status" className="px-4 py-2.5 text-xs text-muted-foreground">{t("questionsUnavailable")}</p>}
       </div>
     </section>
   );

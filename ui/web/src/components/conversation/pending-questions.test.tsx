@@ -44,12 +44,14 @@ it("opens expanded by default above the composer and retains independent drafts 
   fireEvent.click(screen.getByRole("button", { name: "Next question" }));
   expect(input().value).toBe("");
   fireEvent.change(input(), { target: { value: "Second answer" } });
-  const viewport = region.querySelector('[data-slot="scroll-area-viewport"]')!;
+  expect(screen.queryByText("2 questions waiting")).toBeNull();
+  const viewport = input().closest('[data-slot="scroll-area-viewport"]')!;
   expect(viewport.className).toContain(QUESTION_REGION_MAX_HEIGHT_CLASS);
   expect(viewport.contains(screen.getByRole("button", { name: "Submit answers" }))).toBe(false);
   fireEvent.click(toggle);
   expect(toggle.getAttribute("aria-expanded")).toBe("false");
   expect(screen.queryByRole("textbox")).toBeNull();
+  expect(screen.getByText("Questions")).toBeTruthy();
   fireEvent.click(toggle);
   expect(toggle.getAttribute("aria-expanded")).toBe("true");
   expect(input().value).toBe("Second answer");

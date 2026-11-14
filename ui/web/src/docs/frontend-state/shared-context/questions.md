@@ -3,13 +3,13 @@
 `PendingQuestions` owns the selected agent's entire awaiting-response queue,
 including legacy unstructured questions. When questions are waiting, the queue
 opens expanded by default and shows one question at a time, ordered by question
-id. The left and right controls move between questions. A single outlined panel
-groups the queue header, current question, and footer. The header shows the count
-and toggles collapse. The panel reserves one row above the composer and expands
-upward without changing the timeline viewport height. The inner `ScrollArea`
-viewport is capped at 45% of the visual viewport, including the on-screen
-keyboard. Navigation and Submit stay below the scrolling question. `QuestionsForm`
-owns the single submission, its operation key and retries.
+id. Previous, next, question position, and Submit share the right side of the
+footer. The collapsed panel uses a compact Questions label. Each question is
+laid out in the same grid cell and only the selected one is visible and
+interactive. The tallest question sets the height within the 45% visual viewport
+cap, so switching leaves the footer in place. The panel reserves one row above
+the composer and expands upward without changing the timeline viewport height.
+`QuestionsForm` owns the single submission, its operation key and retries.
 Each question is answered or skipped (Skip is per question and can be undone, keeping
 the draft), and Submit is enabled only when every question is. The submission names the
 open set it was built from: when the server's set differs, nothing is settled, the latest

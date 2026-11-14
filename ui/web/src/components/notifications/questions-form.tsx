@@ -108,8 +108,7 @@ export function QuestionsForm({
   };
 
   const index = Math.max(0, ordered.findIndex((q) => q.id === selectedId));
-  const question = ordered.at(index);
-  if (!question) return null;
+  if (ordered.length === 0) return null;
   const ready = bodyFor() !== null;
 
   return (
@@ -120,19 +119,29 @@ export function QuestionsForm({
         void submit();
       }}
     >
-      <ScrollArea key={question.id} viewportClassName={cn(QUESTION_REGION_MAX_HEIGHT_CLASS, "overscroll-y-contain")}>
-        <QuestionRow
-          question={question}
-          draft={draftOf(question.id)}
-          pending={pending}
-          onDraftChange={(draft) => setQuestionDraft(agentId, question.id, draft)}
-          onEnter={(answer) => void submit({ id: question.id, answer })}
-        />
-      </ScrollArea>
+      <div className="grid">
+        {ordered.map((question, position) => (
+          <ScrollArea
+            key={question.id}
+            inert={position !== index}
+            aria-hidden={position !== index}
+            className={cn("col-start-1 row-start-1", MIN_W_0, position !== index && "invisible")}
+            viewportClassName={cn(QUESTION_REGION_MAX_HEIGHT_CLASS, "overscroll-y-contain")}
+          >
+            <QuestionRow
+              question={question}
+              draft={draftOf(question.id)}
+              pending={pending}
+              onDraftChange={(draft) => setQuestionDraft(agentId, question.id, draft)}
+              onEnter={(answer) => void submit({ id: question.id, answer })}
+            />
+          </ScrollArea>
+        ))}
+      </div>
       <div className="px-4 pb-3 pt-1">
         {changed && <p role="status" className="mb-2 text-xs text-muted-foreground">{t("questionsChanged")}</p>}
         {error && <p role="alert" className="mb-2 text-xs text-destructive">{error}</p>}
-        <div className={cn("items-center justify-between gap-2", FLEX)}>
+        <div className={cn("min-h-8 items-center justify-end gap-2 pl-8", FLEX)}>
           {ordered.length > 1 ? (
             <nav aria-label={t("questionNavigation")} className={cn("items-center gap-0.5", FLEX)}>
               <Button
@@ -157,7 +166,7 @@ export function QuestionsForm({
                 <ChevronRight aria-hidden="true" />
               </Button>
             </nav>
-          ) : <span />}
+          ) : null}
           <Button
             type="submit"
             size="sm"

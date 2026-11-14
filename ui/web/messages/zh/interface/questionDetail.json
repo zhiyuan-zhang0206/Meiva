@@ -5,6 +5,7 @@
   "openQuestion": "你的回答",
   "openPlaceholder": "写下你的回答…（回车发送）",
   "comment": "补充说明（可选）",
+  "questions": "问题",
   "pendingQuestions": "{count} 个待回答问题",
   "questionsUnavailable": "无法加载待回答问题。",
   "suggestionKeys": "按 Tab 或右箭头采纳建议。",
