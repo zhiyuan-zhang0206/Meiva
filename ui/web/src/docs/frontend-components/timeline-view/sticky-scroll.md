@@ -58,7 +58,8 @@ plus 12 px): it fills the pending restore, takes the hold, and lets the existing
 apply/settle/window-materialization path land it, so no second scroll path exists. Each
 new token is a new request, an item that is not loaded changes nothing, and the reader's
 own scrolling releases it like any bookmark. The home page uses it to show the first
-delivery past the reader's seen position on entry.
+delivery past the reader's seen position on entry. When the reader returns to saved
+history, that position takes priority over the automatic reveal.
 
 ## Non-sticky headers and natural-height TurnBlock bodies
 Human-message, agent-reply, `TurnBlock`, and nested detail-card headers all stay

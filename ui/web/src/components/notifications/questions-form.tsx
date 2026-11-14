@@ -10,7 +10,7 @@ import { ScrollArea } from "@/components/ui/scroll-area";
 import { errMsg } from "@/lib/contracts/errors";
 import type { AnswerQuestions, QuestionItem } from "@/lib/contracts/types";
 import { cn } from "@/lib/format/utils";
-import { FLEX, MIN_H_0, OVERFLOW_HIDDEN, QUESTION_REGION_MAX_HEIGHT_CLASS } from "@/lib/layout/layout";
+import { FLEX, QUESTION_REGION_MAX_HEIGHT_CLASS } from "@/lib/layout/layout";
 import { newOperationKey } from "@/lib/transport/operation-key";
 import { useApi } from "@/lib/transport/transport-context";
 
@@ -104,26 +104,17 @@ export function QuestionsForm({
 
   return (
     <div className={cn("text-[13px]", className)}>
-      <div
-        inert={!expanded}
-        aria-hidden={!expanded}
-        className={cn(
-          "grid motion-safe:transition-[grid-template-rows] motion-safe:duration-150 motion-safe:ease-out",
-          expanded ? "grid-rows-[1fr]" : "grid-rows-[0fr]",
-        )}
-      >
-        <div className={cn(MIN_H_0, OVERFLOW_HIDDEN)}>
-          <ScrollArea key={question.id} viewportClassName={cn(QUESTION_REGION_MAX_HEIGHT_CLASS, "overscroll-y-contain")}>
-            <QuestionRow
-              question={question}
-              draft={draft}
-              pending={pending}
-              onDraftChange={(nextDraft) => setQuestionDraft(agentId, question.id, nextDraft)}
-            />
-          </ScrollArea>
-          {changed && <p role="status" className="px-4 pb-2 text-xs text-muted-foreground">{t("questionsChanged")}</p>}
-          {error && <p role="alert" className="px-4 pb-2 text-xs text-destructive">{error}</p>}
-        </div>
+      <div hidden={!expanded}>
+        <ScrollArea key={question.id} viewportClassName={cn(QUESTION_REGION_MAX_HEIGHT_CLASS, "overscroll-y-contain")}>
+          <QuestionRow
+            question={question}
+            draft={draft}
+            pending={pending}
+            onDraftChange={(nextDraft) => setQuestionDraft(agentId, question.id, nextDraft)}
+          />
+        </ScrollArea>
+        {changed && <p role="status" className="px-4 pb-2 text-xs text-muted-foreground">{t("questionsChanged")}</p>}
+        {error && <p role="alert" className="px-4 pb-2 text-xs text-destructive">{error}</p>}
       </div>
       <div className="px-4 py-1">
         <div

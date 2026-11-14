@@ -521,6 +521,22 @@ it("captures the departing reading position before the native pull reserve is re
 // meiva:link ui/web/src/docs/frontend-components/timeline-view/sticky-scroll.md
 describe("revealing an item", () => {
   const upperPart = BAR_HEIGHT_PX + 12;
+  it("keeps the saved history position when an unseen delivery arrives after returning", () => {
+    const entry = "reveal-returning-reader";
+    useTimelineStore.getState().switchThread(42, items, false);
+    const { rerender } = renderWithBrowser(conversation(42, entry));
+    resize();
+    act(() => { viewport().scrollTop = 900; fireEvent.scroll(viewport()); });
+    rerender(conversation(43, "reveal-other-agent"));
+    rerender(conversation(42, entry));
+    resize();
+    expect(readingOffset("4.0")).toBe(0);
+
+    rerender(conversation(42, entry, { itemId: "8.0", token: 1 }));
+    resize();
+    expect(viewport().scrollTop).toBe(900);
+    expect(readingOffset("4.0")).toBe(0);
+  });
   it("brings the item to the upper part of the viewport instead of the bottom", () => {
     useTimelineStore.getState().switchThread(42, items, false);
     const { rerender } = renderWithBrowser(conversation(42, "reveal-entry"));
