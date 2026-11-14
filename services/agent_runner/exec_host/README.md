@@ -16,7 +16,11 @@
 The process-group timeout test advances the injected service clock only after
 observing a live tool child. A delayed-start case exceeds the 1.5-second budget
 in wall time before that observation, separating startup load from the timeout
-and preserving the assertion that the whole process group is gone.
+and preserving the assertion that the whole process group is gone. Signal delivery
+and leader reap do not synchronize a descendant's kernel-visible exit, so cleanup
+tests wait at most five seconds for the same process-not-found observation. A
+still-visible process fails at that deadline; timeout flags and service grace
+periods retain their existing assertions.
 
 ## Envelope ownership across startup
 
