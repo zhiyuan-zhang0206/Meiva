@@ -1,13 +1,14 @@
 from __future__ import annotations
 
 import contextlib
+import re
 import time
-from typing import Any
+from typing import Any, cast
 
 import httpx
 import psycopg
 import pytest
-from playwright.sync_api import Page, expect
+from playwright.sync_api import Page, Route, expect
 
 from base.api_contracts.agent_contract import AgentStatus
 from base.config import settings
@@ -70,7 +71,93 @@ def _wait_idle_intent(agent_id: int) -> None:
 
 
 def _sidebar_row(page: Page, agent_id: int):
-    return page.locator(f'button:has-text("#{agent_id}")').first
+    return page.locator("li.agent-row-item").get_by_role(
+        "button", name=re.compile(rf"^#{agent_id}\b")
+    )
+
+
+@pytest.mark.scenario("tests.e2e.fakes.scenarios.message_flow:build")
+def test_switch_back_at_bottom_stays_there_after_unread_refresh(e2e_env: E2EEnv) -> None:
+    page = e2e_env.page
+    agent = e2e_env.agent_id
+    gateway_url = e2e_env.gateway_url
+    resp = post_spawn(gateway_url, {"spawner": "user"}, timeout=30.0)
+    _ = resp.raise_for_status()
+    other = cast(dict[str, int], resp.json())["id"]
+    messages = [
+        {
+            "item_id": f"{index}.0",
+            "kind": "agent_chat",
+            "payload": f"Reply {index}",
+            "created_at": "2026-11-10T00:00:00Z",
+            "show_timestamp": False,
+            "source": None,
+            "inbound_id": None,
+        }
+        for index in range(101, 133)
+    ]
+    tail = {"items": messages, "msg_count": len(messages), "has_more": False}
+    delivery: dict[str, object] = {
+        "id": 1,
+        "agent_id": agent,
+        "mode": "prefix",
+        "source_key": "harness:101.0",
+        "content": "Reply 101",
+        "suggestions": [],
+        "created_at": "2026-11-10T00:00:00Z",
+        "seen": False,
+    }
+    feed: dict[str, object] = {"mode": "prefix", "seen_id": 0, "items": []}
+
+    def snapshot(route: Route) -> None:
+        response = route.fetch()
+        body = cast(dict[str, object], response.json())
+        body["timeline"] = tail
+        route.fulfill(response=response, json=body)
+
+    def mark_seen(route: Route) -> None:
+        feed["seen_id"] = 1
+        route.fulfill(json={"seen_id": 1, "advanced": True})
+
+    seen_url = f"**/api/keyed/v1/agents/{agent}/user-messages/seen"
+    _ = page.route(
+        re.compile(rf"/api/agents/{agent}/timeline(?:\?|$)"), lambda route: route.fulfill(json=tail)
+    )
+    _ = page.route(f"**/api/agents/{agent}/conversation-snapshot", snapshot)
+    _ = page.route(
+        re.compile(rf"/api/agents/{agent}/user-messages\?"), lambda route: route.fulfill(json=feed)
+    )
+    _ = page.route(seen_url, mark_seen)
+
+    try:
+        _ = page.goto(e2e_env.agent_url)
+        _ = page.wait_for_selector('[data-testid="sse-ready"]', state="attached", timeout=15_000)
+        expect(page.get_by_text("Reply 132", exact=True)).to_be_visible(timeout=15_000)
+        viewport = page.locator('[data-slot="scroll-area-viewport"]').filter(
+            has=page.get_by_role("log")
+        )
+        viewport.hover()
+        page.mouse.wheel(0, 10_000)
+        at_bottom = "v => v.scrollHeight > v.clientHeight && Math.abs(v.scrollHeight - v.clientHeight - v.scrollTop) <= 1"
+        expect(page.get_by_test_id("scroll-to-bottom")).to_have_count(0)
+        assert viewport.evaluate(at_bottom)
+
+        _sidebar_row(page, other).click()
+        page.wait_for_url(re.compile(rf"[?&]agent_id={other}\b"))
+        feed["items"] = [delivery]
+        with page.expect_response(seen_url):
+            _sidebar_row(page, agent).click()
+        page.wait_for_url(re.compile(rf"[?&]agent_id={agent}\b"))
+        _ = page.evaluate(
+            "() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)))"
+        )
+        assert viewport.evaluate(at_bottom), (
+            "the unread refresh moved the timeline away from the bottom"
+        )
+        expect(page.get_by_test_id("scroll-to-bottom")).to_have_count(0)
+    finally:
+        with contextlib.suppress(httpx.HTTPError):
+            _ = gateway_post(f"{gateway_url}/api/agents/{other}/terminate", timeout=5.0)
 
 
 @pytest.mark.scenario("tests.e2e.fakes.scenarios.parked_compact:build")
