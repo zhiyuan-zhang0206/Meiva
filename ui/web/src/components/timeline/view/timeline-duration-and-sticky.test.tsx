@@ -377,6 +377,41 @@ describe("TimelineView expanded work block height", () => {
     expect(screen.queryByTestId("turn-scroll-viewport")).toBeNull();
   });
 
+  it("preserves a collapsed tail header when the browser would clamp its position", () => {
+    const items = [makeItem({ item_id: "1.0", kind: "agent_code", payload: "code" })];
+    const { container } = render(<TimelineView items={items} />);
+    const viewport = screen.getByTestId("scroll-viewport");
+    const toggle = screen.getByTestId("turn-toggle");
+    fireEvent.click(toggle);
+    let top = 500;
+    const reserve = container.querySelector<HTMLElement>("[data-turn-collapse-reserve]")!;
+    const naturalHeight = () => toggle.getAttribute("aria-expanded") === "true" ? 1100 : 760;
+    const extra = () => Number.parseFloat(reserve.style.height) || 0;
+    const maximum = () => naturalHeight() + extra() - 600;
+    Object.defineProperties(viewport, {
+      clientHeight: { value: 600 },
+      scrollHeight: { get: () => naturalHeight() + extra() },
+      scrollTop: {
+        get: () => Math.min(top, maximum()),
+        set: (value: number) => { top = Math.min(value, maximum()); },
+      },
+    });
+    Object.defineProperty(reserve, "offsetHeight", { get: extra });
+    vi.spyOn(reserve, "getBoundingClientRect").mockImplementation(() =>
+      ({ top: naturalHeight() - viewport.scrollTop }) as DOMRect);
+    vi.spyOn(toggle, "getBoundingClientRect").mockImplementation(() =>
+      ({ top: 570 - viewport.scrollTop }) as DOMRect);
+
+    fireEvent.click(toggle);
+    expect(toggle.getAttribute("aria-expanded")).toBe("false");
+    expect(toggle.getBoundingClientRect().top).toBe(70);
+    expect(extra()).toBe(340);
+
+    act(() => { viewport.scrollTop = 120; fireEvent.scroll(viewport); });
+    expect(extra()).toBe(0);
+    expect(viewport.scrollTop).toBe(120);
+  });
+
   it("collapsing an expanded work block preserves outer viewport scroll position", () => {
     const items = [
       makeItem({ item_id: "1.0", kind: "agent_reasoning", payload: "thinking" }),

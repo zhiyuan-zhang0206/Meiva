@@ -332,14 +332,14 @@ describe("card hover footer", () => {
 });
 
 describe("agent_chat canvas prose and streaming indicators", () => {
-  it("plain agent_chat renders directly on canvas with no 'Meiva ▸' header and no i18n key leak (Task #816)", () => {
+  it("plain agent_chat renders directly on canvas with no 'Meiva' header and no i18n key leak (Task #816)", () => {
     render(
       <TimelineView
         items={[makeItem({ kind: "agent_chat", payload: "x" })]}
       />,
     );
     expect(screen.getByTestId("agent-message-prose")).toBeTruthy();
-    expect(screen.queryByText(/Meiva ▸/)).toBeNull();
+    expect(screen.queryByTestId("card-toggle")).toBeNull();
     expect(screen.queryByText(/timeline\.agentChat/)).toBeNull();
     expect(screen.queryByText(/\{suffix\}/)).toBeNull();
   });

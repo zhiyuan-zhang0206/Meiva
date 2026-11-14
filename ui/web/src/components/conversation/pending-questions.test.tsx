@@ -35,40 +35,47 @@ it("opens expanded by default above the composer and retains independent drafts 
   const toggle = screen.getByRole("button", { name: "2 questions waiting" });
   expect(toggle.getAttribute("aria-expanded")).toBe("true");
   const answerLayer = document.getElementById(toggle.getAttribute("aria-controls")!)!;
-  expect(answerLayer.className).toContain("absolute");
-  expect(answerLayer.className).toContain("bottom-full");
-  const first = within(screen.getByRole("article", { name: "Question 1" })).getByRole<HTMLTextAreaElement>("textbox");
-  const second = within(screen.getByRole("article", { name: "Question 2" })).getByRole<HTMLTextAreaElement>("textbox");
-  expect(first.value).toBe("");
-  expect(second.value).toBe("");
-  fireEvent.change(first, { target: { value: "First answer" } });
-  fireEvent.change(second, { target: { value: "Second answer" } });
-  const viewport = region.querySelector('[data-slot="scroll-area-viewport"]')!;
+  expect(answerLayer.parentElement?.className).toContain("absolute");
+  expect(answerLayer.parentElement?.className).toContain("bottom-1");
+  expect(answerLayer.parentElement).toBe(toggle.parentElement);
+  const input = () => screen.getByRole<HTMLTextAreaElement>("textbox");
+  expect(input().value).toBe("");
+  fireEvent.change(input(), { target: { value: "First answer" } });
+  fireEvent.click(screen.getByRole("button", { name: "Next question" }));
+  expect(input().value).toBe("");
+  fireEvent.change(input(), { target: { value: "Second answer" } });
+  expect(screen.queryByText("2 questions waiting")).toBeNull();
+  const viewport = input().closest('[data-slot="scroll-area-viewport"]')!;
   expect(viewport.className).toContain(QUESTION_REGION_MAX_HEIGHT_CLASS);
+  expect(viewport.contains(screen.getByRole("button", { name: "Submit" }))).toBe(false);
   fireEvent.click(toggle);
   expect(toggle.getAttribute("aria-expanded")).toBe("false");
   expect(screen.queryByRole("textbox")).toBeNull();
+  expect(screen.getByText("2 questions waiting")).toBeTruthy();
+  expect(screen.queryByRole("button", { name: "Submit" })).toBeNull();
   fireEvent.click(toggle);
   expect(toggle.getAttribute("aria-expanded")).toBe("true");
-  expect(first.value).toBe("First answer");
-  expect(second.value).toBe("Second answer");
-  expect(screen.getAllByRole("textbox")).toHaveLength(2);
+  expect(screen.queryByText("2 questions waiting")).toBeNull();
+  expect(input().value).toBe("Second answer");
+  fireEvent.click(screen.getByRole("button", { name: "Previous question" }));
+  expect(input().value).toBe("First answer");
+  expect(screen.getAllByRole("textbox")).toHaveLength(1);
 });
 
 it("settles every open question in one submission and drops them all from the shared queue", async () => {
   transport.answerQuestions.mockResolvedValue({ kind: "settled" });
   const { queryClient } = renderQuestions(<PendingQuestions questions={questions} failed={false} />);
   queryClient.setQueryData(QUESTIONS_QUERY_KEY, { awaiting: questions });
-  const submit = screen.getByRole<HTMLButtonElement>("button", { name: "Submit answers" });
+  const submit = screen.getByRole<HTMLButtonElement>("button", { name: "Submit" });
   expect(submit.disabled).toBe(true);
   fireEvent.change(within(screen.getByRole("article", { name: "Question 1" })).getByRole("textbox"), { target: { value: "First answer" } });
   expect(submit.disabled).toBe(true);
-  fireEvent.click(within(screen.getByRole("article", { name: "Question 2" })).getByRole("button", { name: "Skip" }));
+  fireEvent.click(screen.getByRole("button", { name: "Next question" }));
   expect(submit.disabled).toBe(false);
   fireEvent.click(submit);
   await waitFor(() => expect(transport.answerQuestions).toHaveBeenCalledWith(7, {
     expected_ids: [1, 2],
-    results: [{ id: 1, answer: { text: "First answer" }, skip: false }, { id: 2, skip: true }],
+    results: [{ id: 1, answer: { text: "First answer" } }, { id: 2 }],
   }, expect.any(String)));
   await waitFor(() => expect(queryClient.getQueryData<{ awaiting: QuestionItem[] }>(QUESTIONS_QUERY_KEY)?.awaiting).toEqual([]));
 });
@@ -78,10 +85,10 @@ it("retains drafts on a failed submission and retries it under the same operatio
   renderQuestions(<PendingQuestions questions={[questions[0]]} failed={false} />);
   const input = screen.getByRole<HTMLTextAreaElement>("textbox");
   fireEvent.change(input, { target: { value: "Keep this" } });
-  fireEvent.click(screen.getByRole("button", { name: "Submit answers" }));
+  fireEvent.click(screen.getByRole("button", { name: "Submit" }));
   expect(await screen.findByRole("alert")).toBeTruthy();
   expect(input.value).toBe("Keep this");
-  fireEvent.click(screen.getByRole("button", { name: "Submit answers" }));
+  fireEvent.click(screen.getByRole("button", { name: "Submit" }));
   await waitFor(() => expect(transport.answerQuestions).toHaveBeenCalledTimes(2));
   expect(transport.answerQuestions.mock.calls[1][2]).toBe(transport.answerQuestions.mock.calls[0][2]);
 });

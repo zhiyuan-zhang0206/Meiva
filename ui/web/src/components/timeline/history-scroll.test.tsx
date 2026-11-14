@@ -94,14 +94,20 @@ beforeEach(() => {
   });
   vi.spyOn(HTMLElement.prototype, "clientHeight", "get").mockReturnValue(600);
   vi.spyOn(HTMLElement.prototype, "scrollHeight", "get").mockImplementation(function (this: HTMLElement) {
-    return this.querySelectorAll(".timeline-item").length ? height : 600;
+    if (!this.querySelectorAll(".timeline-item").length) return 600;
+    return height + [...this.querySelectorAll<HTMLElement>("[data-send-reserve], [data-turn-collapse-reserve]")]
+      .reduce((total, node) => total + node.offsetHeight, 0);
+  });
+  vi.spyOn(HTMLElement.prototype, "offsetHeight", "get").mockImplementation(function (this: HTMLElement) {
+    return Number.parseFloat(this.style.height) || 0;
   });
   vi.spyOn(HTMLElement.prototype, "scrollTop", "get").mockImplementation(() => top);
   vi.spyOn(HTMLElement.prototype, "scrollTop", "set").mockImplementation(function (this: HTMLElement, value) {
     top = Math.max(0, Math.min(value, this.scrollHeight - this.clientHeight));
   });
   vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockImplementation(function (this: HTMLElement) {
-    const y = this.dataset.itemId ? (Number.parseInt(this.dataset.itemId) - 1) * 300 - top + aboveSettle : 0;
+    const y = this.hasAttribute("data-send-reserve") ? height - top
+      : this.dataset.itemId ? (Number.parseInt(this.dataset.itemId) - 1) * 300 - top + aboveSettle : 0;
     return { top: y, bottom: y + 300, height: 300, left: 0, right: 400, width: 400 } as DOMRect;
   });
 });
@@ -289,7 +295,7 @@ describe("history entry scroll ownership", () => {
 function AgentTabs({ agentId, entry }: { agentId: number; entry: string }) {
   const timeline = useTimeline(agentId, () => undefined);
   return <TimelineView key={agentId} items={timeline.items} threadKey={String(agentId)}
-    scrollMemoryKey={`${entry}:agent:${agentId}`} loadingNew={timeline.isFetching} />;
+    scrollMemoryKey={`${entry}:agent:${agentId}`} />;
 }
 function tabs(agentId: number, entry: string) {
   return (
@@ -313,6 +319,32 @@ describe("agent switch reading positions", () => {
     expect(viewport().scrollTop).toBe(700);
     rerender(tabs(43, "agent-tabs"));
     expect(viewport().scrollTop).toBe(1200);
+  });
+  it("restores a reader at the padded end without switching them to tail following", () => {
+    const rows = [...items, { ...items[0], item_id: "17.0", kind: "inbound_chat", source: "user", payload: "Latest question" }];
+    client.setQueryData(["timeline", 42], { ...response, items: rows });
+    const { rerender } = renderWithBrowser(tabs(42, "agent-padded-bottom"));
+    act(() => { viewport().scrollTop = 4744; fireEvent.scroll(viewport()); });
+    expect(readScrollMemory("agent-padded-bottom:agent:42")).toMatchObject({ scrollTop: 4744, followBottom: false });
+    rerender(tabs(43, "agent-padded-bottom"));
+    rerender(tabs(42, "agent-padded-bottom"));
+    resize();
+    expect(viewport().scrollTop).toBe(4744);
+    expect(readingOffset("17.0")).toBe(56);
+    expect(screen.queryByTestId("scroll-to-bottom")).toBeNull();
+  });
+
+  it("recreates the space needed for a bookmark beyond the shortened conversation", () => {
+    saveScrollMemory("agent-collapse-space:agent:42", {
+      contentKey: "42", scrollTop: 4600, followBottom: false, usedCollapseReserve: true,
+      anchor: { itemId: "16.0", rank: 0, viewportTop: -100 },
+    });
+    const { rerender } = renderWithBrowser(tabs(43, "agent-collapse-space"));
+    rerender(tabs(42, "agent-collapse-space"));
+    resize();
+    expect(viewport().scrollTop).toBe(4600);
+    expect(readingOffset("16.0")).toBe(-100);
+    expect(viewport().querySelector<HTMLElement>("[data-turn-collapse-reserve]")?.style.height).toBe("200px");
   });
   it("saves a reader on the tail as following the bottom", () => {
     renderWithBrowser(tabs(42, "agent-tail-save"));
@@ -399,46 +431,13 @@ describe("agent switch reading positions", () => {
     expect(screen.getByText("Previously loaded history")).toBeTruthy();
     expect(viewport().scrollTop).toBe(700);
   });
-  it("one loading ring at a time: an older-history load keeps the bottom button quiet", () => {
-    renderWithBrowser(<TimelineView items={items} threadKey="one-ring" loadingNew loadingOlder readerLoadingOlder />, {
+  it("keeps the down arrow visible during an older-history load", () => {
+    renderWithBrowser(<TimelineView items={items} threadKey="one-ring" loadingOlder readerLoadingOlder />, {
       wrapper: ({ children }) => <QueryClientProvider client={client}>{children}</QueryClientProvider>,
     });
-    // meiva:note
-    // A background refetch and an older-page fetch can overlap; two rings spun at
-    // once on the same screen (user report 2026-10-20). The pull strip owns the
-    // ring while older history loads.
-    // meiva:link ui/web/src/docs/frontend-components/timeline-view/sticky-scroll.md
     act(() => { viewport().scrollTop = 700; fireEvent.scroll(viewport()); });
-    const button = screen.getByTestId("scroll-to-bottom");
-    expect(button.getAttribute("aria-busy")).toBe("false");
-    expect(button.querySelector(".animate-spin")).toBeNull();
+    expect(screen.getByRole("button", { name: "Scroll down" }).querySelector(".animate-spin")).toBeNull();
     expect(screen.getByTestId("load-older-spinner").dataset.state).toBe("loading");
-  });
-  it("uses the bottom button's existing footprint for a refresh without moving content", () => {
-    const { rerender } = renderWithBrowser(<TimelineView items={items} threadKey="spinner" loadingNew />, {
-      wrapper: ({ children }) => <QueryClientProvider client={client}>{children}</QueryClientProvider>,
-    });
-    // meiva:note
-    // Presented only away from the bottom: at the bottom there is nothing to
-    // scroll to (user report 2026-10-30).
-    // meiva:link ui/web/src/docs/frontend-components/timeline-view/sticky-scroll.md
-    act(() => { viewport().scrollTop = 700; fireEvent.scroll(viewport()); });
-    const button = screen.getByTestId("scroll-to-bottom");
-    const position = viewport().scrollTop;
-    expect(button.getAttribute("aria-busy")).toBe("true");
-    expect(button.className).not.toContain("opacity-0");
-    expect(button.querySelector(".animate-spin")).not.toBeNull();
-    expect(screen.getByTestId("latest-loading-ring").className).toContain("group-hover:hidden");
-    const restingArrow = screen.getByTestId("scroll-to-bottom-arrow");
-    expect(restingArrow.className).toContain("hidden");
-    expect(restingArrow.className).toContain("group-hover:block");
-    expect(button.hasAttribute("disabled")).toBe(false);
-    expect(button.getAttribute("aria-label")).toBe("Scroll to bottom");
-    rerender(<TimelineView items={items} threadKey="spinner" />);
-    expect(screen.getByTestId("scroll-to-bottom")).toBe(button);
-    expect(button.querySelector(".animate-spin")).toBeNull();
-    expect(screen.getByTestId("scroll-to-bottom-arrow")).toBeTruthy();
-    expect(viewport().scrollTop).toBe(position);
   });
 });
 
@@ -489,22 +488,6 @@ it("captures the departing reading position before the native pull reserve is re
   rerender(tabs(43, "agent-native-reserve"));
   rerender(tabs(42, "agent-native-reserve"));
   expect(viewport().scrollTop).toBe(700);
-});
-// meiva:note
-// The ring still rests here while the newest page is read, and one click both
-// scrolls back and takes the control away — the reader is at the bottom again
-// (user report 2026-10-30: an arrow over a click that did nothing).
-// meiva:link ui/web/src/docs/frontend-components/timeline-view/sticky-scroll.md
-it("rests on the loading ring while new messages arrive, and the click takes it away", () => {
-  renderWithBrowser(<QueryClientProvider client={client}><TimelineView items={items} threadKey="ring-click" loadingNew /></QueryClientProvider>);
-  act(() => { viewport().scrollTop = 700; fireEvent.scroll(viewport()); });
-  const scrollTo = vi.spyOn(viewport(), "scrollTo");
-  const button = screen.getByRole("button", { name: "Scroll to bottom" });
-  expect(screen.getByTestId("latest-loading-ring").className).toContain("group-hover:hidden");
-  expect(screen.getByTestId("scroll-to-bottom-arrow").className).toContain("hidden");
-  fireEvent.click(button);
-  expect(scrollTo).toHaveBeenCalledWith({ top: 5000, behavior: "smooth" });
-  expect(screen.queryByTestId("scroll-to-bottom")).toBeNull();
 });
   it("keeps the reader on their row when the viewport width changes", () => {
     useTimelineStore.getState().switchThread(42, items, false);

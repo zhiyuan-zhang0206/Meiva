@@ -3,15 +3,15 @@
   "singleSelect": "请选择一项",
   "multiSelect": "请选择一项或多项",
   "openQuestion": "你的回答",
-  "openPlaceholder": "写下你的回答…（回车发送）",
+  "openPlaceholder": "写下你的回答…",
   "comment": "补充说明（可选）",
   "pendingQuestions": "{count} 个待回答问题",
   "questionsUnavailable": "无法加载待回答问题。",
   "suggestionKeys": "按 Tab 或右箭头采纳建议。",
-  "skip": "跳过",
-  "undoSkip": "撤销跳过",
-  "skipped": "已跳过",
-  "submitAnswers": "提交回答",
+  "submit": "提交",
   "questionsChanged": "问题已变化，请检查后重新提交。",
-  "answerAllHint": "回答或跳过每个问题后才能提交。"
+  "questionNavigation": "切换问题",
+  "previousQuestion": "上一题",
+  "nextQuestion": "下一题",
+  "questionPosition": "{current} / {total}"
 }

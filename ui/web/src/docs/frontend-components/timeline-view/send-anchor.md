@@ -1,37 +1,29 @@
-# The send anchor
+# Reading from the latest human message
 
-A send is its own arrival, not a pin. The page hands the timeline the inbound
-its delivery receipt named (`sendAnchor` in the timeline store), and
-`useSendAnchor` waits for that row to mount, parks it at the top of the viewport
-(`READING_TOP_PX`: the 44 px header bar plus a 12 px gap, the same place a reveal
-of the first unseen message lands) and reports `notifyAnchored`: following stops
-there, so every later chunk paints below the reader's place instead of moving it.
-The numbers are pure functions (`parkScrollTop` / `parkReserve` in `model/use-viewport-arrivals.ts`); the hook only measures and
-writes. The jump-to-latest control sits at the bottom right of the conversation and
-carries a pulsing dot while the agent is still responding. A reader
-parked mid-history is parked there too — they just wrote the message — and a
-send whose row never mounts moves nothing.
+A successful send parks its committed human message at the reading offset below
+the header (44 px plus a 12 px gap) when the reader is following the tail. A
+reader in history keeps their position. The request carries the receipt's
+inbound id so a later timeline update cannot park an unrelated reply. A scroll
+away while the row is arriving takes precedence over automatic positioning.
 
-Parking needs room the reply has not written yet: a bottom reserve
-(`[data-send-reserve]`, outside the content column so it carries no row
-spacing) fills exactly the height missing between the parked position and the
-current end, and gives back every pixel the reply grows, so `scrollHeight` —
-and with it the viewport — stays put until the reply fills the viewport and
-starts growing past it.
+The centered down arrow jumps to the latest visible human message when that
+message is below the reading offset. The window mounts that row first if it was
+virtualized. From the reading offset or farther down, the arrow jumps to the
+current content end and resumes following when the end is farther down. If the
+reader is already in the additional space below the content, the arrow uses
+the remaining scroll range. The arrow is hidden at the scrollable end,
+including when the last human message is aligned using that space. Manually
+opening a live work block goes to the tail. Automatic expansion follows the
+current reading mode.
 
-The reserve is also why the anchor owns the follow flag instead of merely
-scrolling. While it is there the viewport sits at the bottom of a padded
-document, so the position reads "at bottom" with nothing to follow, and the
-at-bottom reconciliation would re-stick the reader on the first layout pass and
-drag them down again. The controller ignores that reconciliation until it
-observes the viewport genuinely away from the bottom — the point where the
-reply has consumed the reserve — and from there the ordinary rules decide
-again: scrolling down to the bottom re-follows, so does the scroll-to-bottom
-control (it stays shown while the anchor holds, because it is the reader's only
-way back), and a thread change drops the reserve with the mount. A bookmark
-still settling is released at the moment the row is parked, not when the
-request arrives: until then the reader's saved place still owns the viewport.
+A reserve below the conversation gives the last human message enough room to
+reach the reading offset by wheel, drag, touch, or arrow, including after a send
+from history and after a short reply ends. Its height is the difference between
+the reachable reading position and the natural content height. Reply growth
+uses that space before extending the scrollable end. Tail-following measures the
+natural end without the reserve, and moving down into the reserve takes the
+reader back to a fixed reading position.
 
 ## Relationship to Other Nodes
 
-- [Timeline sticky scroll](sticky-scroll.md) — the follow flag and scroll ownership this node extends.
+- [Timeline sticky scroll](sticky-scroll.md) — the controller and the timeline's scrollport.

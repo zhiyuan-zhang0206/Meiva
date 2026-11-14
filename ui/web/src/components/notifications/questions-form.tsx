@@ -1,15 +1,16 @@
 "use client";
 
+import { ChevronLeft, ChevronRight, LoaderCircle } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useTranslations } from "next-intl";
 
 import { ChatMarkdown } from "@/components/content/markdown";
 import { Button } from "@/components/ui/button";
-import { SendButton } from "@/components/ui/send-button";
+import { ScrollArea } from "@/components/ui/scroll-area";
 import { errMsg } from "@/lib/contracts/errors";
-import type { AnswerQuestions, QuestionAnswer, QuestionItem } from "@/lib/contracts/types";
+import type { AnswerQuestions, QuestionItem } from "@/lib/contracts/types";
 import { cn } from "@/lib/format/utils";
-import { FLEX, MIN_W_0 } from "@/lib/layout/layout";
+import { FLEX, MIN_H_0, OVERFLOW_HIDDEN, QUESTION_REGION_MAX_HEIGHT_CLASS } from "@/lib/layout/layout";
 import { newOperationKey } from "@/lib/transport/operation-key";
 import { useApi } from "@/lib/transport/transport-context";
 
@@ -19,24 +20,22 @@ import { useStore } from "@/lib/state/store";
 import { QuestionForm, answerFromDraft } from "./question-form";
 
 // meiva:note
-// One reply for every open question of one agent, in question id order: each question is answered
-// or skipped, and nothing is sent until all of them are. The submission names the open set the
-// form was built from; when the server's set differs (a question was asked or closed meanwhile)
-// nothing is settled, the caller takes the latest set, and every draft and skip of a question that
-// is still open stays. Drafts and skips live in the UI store (memory only), so they also stay when the
-// user goes to another agent and comes back; they leave it when the question is answered or is no
-// longer open. Controls are only disabled while a submission is in flight, never after a failure, so a
-// retry reuses the same operation key for the same content.
+// Submit on the last page resolves the whole open set in question ID order.
+// Empty drafts are sent as ID-only results. If the set changes, the server
+// returns the latest questions and the caller keeps drafts that are still open.
+// A retry of the same batch reuses its operation key.
 // meiva:link meiva_builtins/plugins/meiva_fleet/docs/questions.md
 export function QuestionsForm({
   agentId,
   questions,
+  expanded = true,
   onSettled,
   onChanged,
   className,
 }: {
   agentId: number;
   questions: readonly QuestionItem[];
+  expanded?: boolean;
   onSettled: (ids: number[]) => void;
   onChanged: (open: QuestionItem[]) => void;
   className?: string;
@@ -48,6 +47,7 @@ export function QuestionsForm({
   const setQuestionDraft = useStore((st) => st.setQuestionDraft);
   const clearQuestionDrafts = useStore((st) => st.clearQuestionDrafts);
   const pruneQuestionDrafts = useStore((st) => st.pruneQuestionDrafts);
+  const [selectedId, setSelectedId] = useState<number | null>(null);
   const [pending, setPending] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [changed, setChanged] = useState(false);
@@ -62,24 +62,21 @@ export function QuestionsForm({
     pruneQuestionDrafts(agentId, openIds);
   }, [agentId, openIds, pruneQuestionDrafts]);
 
-  const bodyFor = (override?: { id: number; answer: QuestionAnswer }): AnswerQuestions | null => {
-    const results: AnswerQuestions["results"] = [];
-    for (const q of ordered) {
-      const draft = draftOf(q.id);
-      if (draft.skipped) {
-        results.push({ id: q.id, skip: true });
-        continue;
-      }
-      const answer = override?.id === q.id ? override.answer : answerFromDraft(q.question, draft);
-      if (!answer) return null;
-      results.push({ id: q.id, answer, skip: false });
-    }
-    return { expected_ids: ordered.map((q) => q.id), results };
-  };
+  const index = Math.max(0, ordered.findIndex((q) => q.id === selectedId));
+  const question = ordered.at(index);
+  if (!question) return null;
+  const nextQuestion = ordered.at(index + 1);
+  const draft = draftOf(question.id);
 
-  const submit = async (override?: { id: number; answer: QuestionAnswer }) => {
-    const body = bodyFor(override);
-    if (!body || pending || inFlight.current) return;
+  const submit = async () => {
+    if (nextQuestion || inFlight.current) return;
+    const body: AnswerQuestions = {
+      expected_ids: openIds,
+      results: ordered.map((q) => {
+        const answer = answerFromDraft(q.question, draftOf(q.id));
+        return answer ? { id: q.id, answer } : { id: q.id };
+      }),
+    };
     inFlight.current = true;
     setPending(true);
     setError(null);
@@ -98,50 +95,92 @@ export function QuestionsForm({
       onSettled(body.expected_ids);
       setPending(false);
     } catch (e: unknown) {
-      setError(t("failed", { verb: t("submitAnswers"), msg: errMsg(e) }));
+      setError(t("failed", { verb: t("submit"), msg: errMsg(e) }));
       setPending(false);
     } finally {
       inFlight.current = false;
     }
   };
 
-  const ready = ordered.length > 0 && bodyFor() !== null;
-
   return (
-    <form
-      className={cn("text-[13px]", className)}
-      onSubmit={(event) => {
-        event.preventDefault();
-        void submit();
-      }}
-    >
-      <div className="divide-y divide-border">
-        {ordered.map((q) => (
-          <QuestionRow
-            key={q.id}
-            question={q}
-            draft={draftOf(q.id)}
-            pending={pending}
-            onDraftChange={(draft) => setQuestionDraft(agentId, q.id, draft)}
-            onEnter={(answer) => void submit({ id: q.id, answer })}
-          />
-        ))}
-      </div>
-      <div className={cn("items-center justify-between gap-3 border-t border-border p-3", FLEX)}>
-        <div className={cn(MIN_W_0, "space-y-1")}>
-          {changed && <p role="status" className="text-[13px] text-muted-foreground">{t("questionsChanged")}</p>}
-          {error && <p role="alert" className="text-[13px] text-destructive">{error}</p>}
-          {!ready && !error && !changed && <p className="text-xs text-muted-foreground">{t("answerAllHint")}</p>}
+    <div className={cn("text-[13px]", className)}>
+      <div
+        inert={!expanded}
+        aria-hidden={!expanded}
+        className={cn(
+          "grid motion-safe:transition-[grid-template-rows] motion-safe:duration-150 motion-safe:ease-out",
+          expanded ? "grid-rows-[1fr]" : "grid-rows-[0fr]",
+        )}
+      >
+        <div className={cn(MIN_H_0, OVERFLOW_HIDDEN)}>
+          <ScrollArea key={question.id} viewportClassName={cn(QUESTION_REGION_MAX_HEIGHT_CLASS, "overscroll-y-contain")}>
+            <QuestionRow
+              question={question}
+              draft={draft}
+              pending={pending}
+              onDraftChange={(nextDraft) => setQuestionDraft(agentId, question.id, nextDraft)}
+            />
+          </ScrollArea>
+          {changed && <p role="status" className="px-4 pb-2 text-xs text-muted-foreground">{t("questionsChanged")}</p>}
+          {error && <p role="alert" className="px-4 pb-2 text-xs text-destructive">{error}</p>}
         </div>
-        <SendButton
-          type="submit"
-          state={pending ? "sending" : "send"}
-          disabled={pending || !ready}
-          aria-label={t("submitAnswers")}
-          title={t("submitAnswers")}
-        />
       </div>
-    </form>
+      <div className="px-4 py-1">
+        <div
+          inert={!expanded}
+          aria-hidden={!expanded}
+          className={cn(
+            "min-h-8 items-center justify-end gap-0.5 pl-8",
+            !expanded && "invisible",
+            FLEX,
+          )}
+        >
+          {ordered.length > 1 && (
+            <nav aria-label={t("questionNavigation")} className={cn("items-center", FLEX)}>
+              <Button
+                variant="ghost"
+                size="icon-xs"
+                aria-label={t("previousQuestion")}
+                disabled={pending || index === 0}
+                onClick={() => setSelectedId(ordered[index - 1].id)}
+              >
+                <ChevronLeft aria-hidden="true" />
+              </Button>
+              <span className="grid min-w-8 text-center text-xs tabular-nums text-muted-foreground">
+                <span
+                  aria-hidden="true"
+                  className="invisible col-start-1 row-start-1 before:content-[attr(data-width-label)]"
+                  data-width-label={t("questionPosition", { current: ordered.length, total: ordered.length })}
+                />
+                <span aria-live="polite" className="col-start-1 row-start-1">
+                  {t("questionPosition", { current: index + 1, total: ordered.length })}
+                </span>
+              </span>
+              <Button
+                variant="ghost"
+                size="icon-xs"
+                aria-label={t("nextQuestion")}
+                disabled={pending || !nextQuestion}
+                onClick={() => setSelectedId(nextQuestion?.id ?? question.id)}
+              >
+                <ChevronRight aria-hidden="true" />
+              </Button>
+            </nav>
+          )}
+          <Button
+            size="sm"
+            className="relative px-1.5 disabled:bg-muted disabled:text-muted-foreground disabled:opacity-100"
+            disabled={pending || Boolean(nextQuestion)}
+            aria-busy={pending}
+            aria-label={t("submit")}
+            onClick={() => void submit()}
+          >
+            <span className={pending ? "invisible" : undefined}>{t("submit")}</span>
+            {pending && <LoaderCircle aria-hidden="true" className="absolute size-3.5 animate-spin" />}
+          </Button>
+        </div>
+      </div>
+    </div>
   );
 }
 
@@ -150,51 +189,28 @@ function QuestionRow({
   draft,
   pending,
   onDraftChange,
-  onEnter,
 }: {
   question: QuestionItem;
   draft: QuestionDraft;
   pending: boolean;
   onDraftChange: (draft: QuestionDraft) => void;
-  onEnter: (answer: QuestionAnswer) => void;
 }) {
-  const t = useTranslations("questionDetail");
-  const skipped = draft.skipped;
   return (
-    <article aria-label={question.title} className="space-y-2 p-3">
-      <div className={cn("items-start justify-between gap-2", FLEX)}>
-        <div className={cn(MIN_W_0, "space-y-1.5")}>
-          <h4 className="text-[13px] font-semibold leading-snug break-words"><ChatMarkdown content={question.title} inline /></h4>
-          {question.content && (
-            <div className="text-[13px] break-words text-foreground/85">
-              <ChatMarkdown content={question.content} />
-            </div>
-          )}
-        </div>
-        <Button
-          type="button"
-          variant="ghost"
-          size="xs"
-          aria-pressed={skipped}
-          onClick={() => onDraftChange({ ...draft, skipped: !skipped })}
-          disabled={pending}
-          className="shrink-0 text-muted-foreground"
-        >
-          {skipped ? t("undoSkip") : t("skip")}
-        </Button>
+    <article aria-label={question.title} className="space-y-3 px-4 pb-3 pt-3.5">
+      <div className="space-y-1.5">
+        <h4 className="text-[15px] font-medium leading-snug break-words"><ChatMarkdown content={question.title} inline /></h4>
+        {question.content && (
+          <div className="text-[13px] break-words text-muted-foreground">
+            <ChatMarkdown content={question.content} />
+          </div>
+        )}
       </div>
-      {skipped && <p className="text-xs text-muted-foreground">{t("skipped")}</p>}
-      <div hidden={skipped}>
-        <QuestionForm
-          question={question.question}
-          pending={pending}
-          focusAnswer={false}
-          draft={draft}
-          onDraftChange={onDraftChange}
-          onSubmit={onEnter}
-          submitAction={null}
-        />
-      </div>
+      <QuestionForm
+        question={question.question}
+        pending={pending}
+        draft={draft}
+        onDraftChange={onDraftChange}
+      />
     </article>
   );
 }

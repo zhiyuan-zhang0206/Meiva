@@ -20,16 +20,14 @@ Full-screen supervision plane: judge 10-20 agents without opening any conversati
 
 ## Question interaction
 
-`QuestionsForm` renders one `QuestionForm` per open question, in one form, in the question bar above the composer.
+`QuestionsForm` shows one open question at a time above the composer. Left and right
+controls switch between questions. Submit sends the whole queue in one request.
 Questions have three types: text, single select and multi select. Ordered choices
 use native radio/checkbox rows, numbered by their immutable array position.
 Single and multi select both show an optional comment textarea at all times.
-Selection and comment are independent; a comment never replaces a required choice.
-There is no Other choice or Add note toggle. Text questions use a growing textarea
-and the comment box follows it; in both, Enter sends the answer and Shift+Enter
-adds a newline — the shared rule in
-[Enter sends](enter-to-send.md).
-The Submit button stays for a pointer and for touch, where Enter breaks the line.
+Selection and comment are independent. A comment alone is also a valid answer.
+Text answers and comments use growing textareas. Enter adds a line break, and
+Submit sends the batch.
 Failed submissions retain input and reuse the existing operation key; a 409
 disables the stale question. A question card shows no priority, blocking or expiry:
 every question is P2, never blocking and never expires.

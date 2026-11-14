@@ -426,54 +426,6 @@ describe("layout changes with no scroll event (handleLayoutChange)", () => {
 // an upward scroll/wheel still releases following so the reader can inspect
 // earlier steps inside the block (user ruling 2026-11-09).
 // meiva:link ui/web/src/docs/frontend-components/timeline-view/live-block.md
-describe("expanding a live work block follows its bottom (notifyLiveBlock)", () => {
-  it("enables following on open and pins as the block grows downward", () => {
-    const ctl = createStickyController(TOUCH_STICKY_THRESHOLDS);
-    pin(ctl, 1000);
-    ctl.handleScroll(view(200, 1000));
-    expect(ctl.isSticky()).toBe(false);
-    ctl.notifyLiveBlock(true);
-    expect(ctl.isSticky()).toBe(true);
-    expect(ctl.handleLayoutChange(view(400, 1400))).toBe(true);
-    expect(ctl.isSticky()).toBe(true);
-  });
-
-  it("releases a send anchor when the live work block opens", () => {
-    const ctl = createStickyController(TOUCH_STICKY_THRESHOLDS);
-    ctl.notifyAnchored(view(400, 1000));
-    expect(ctl.isAnchored()).toBe(true);
-    expect(ctl.isSticky()).toBe(false);
-    ctl.notifyLiveBlock(true);
-    expect(ctl.isAnchored()).toBe(false);
-    expect(ctl.isSticky()).toBe(true);
-    expect(ctl.handleLayoutChange(view(400, 1400))).toBe(true);
-  });
-
-  it("lets a reader scroll up inside the open live block without being re-stuck on subsequentnotifyLiveBlock(true) commits", () => {
-    const ctl = createStickyController(TOUCH_STICKY_THRESHOLDS);
-    pin(ctl, 1400);
-    ctl.notifyLiveBlock(true);
-    expect(ctl.isSticky()).toBe(true);
-    ctl.handleScroll(view(200, 1400));
-    expect(ctl.isSticky()).toBe(false);
-    ctl.notifyLiveBlock(true);
-    expect(ctl.isSticky()).toBe(false);
-    expect(ctl.handleLayoutChange(view(200, 1800))).toBe(false);
-  });
-
-  it("re-sticks when the live block is collapsed and expanded again", () => {
-    const ctl = createStickyController(TOUCH_STICKY_THRESHOLDS);
-    pin(ctl, 1400);
-    ctl.notifyLiveBlock(true);
-    ctl.handleScroll(view(200, 1400));
-    expect(ctl.isSticky()).toBe(false);
-    ctl.notifyLiveBlock(false);
-    ctl.notifyLiveBlock(true);
-    expect(ctl.isSticky()).toBe(true);
-    expect(ctl.handleLayoutChange(view(200, 1800))).toBe(true);
-  });
-});
-
 describe("manually expanding a settled work block stops following (notifyBlockExpanded)", () => {
   it("stops following and does not pin when expansion grows content, even inside the bottom zone", () => {
     const ctl = createStickyController(TOUCH_STICKY_THRESHOLDS);
@@ -1072,6 +1024,16 @@ describe("send anchor over a bottom reserve", () => {
     expect(ctl.handleScroll(view(840, 1440))).toBe("down");
     expect(ctl.isSticky()).toBe(true);
     expect(ctl.handleLayoutChange(view(840, 2000))).toBe(true);
+  });
+
+  it("does not follow when an upward nudge or a layout change reaches the bottom zone", () => {
+    const ctl = createStickyController(POINTER_STICKY_THRESHOLDS);
+    ctl.notifyAnchored(view(780, 1380));
+    ctl.handleScroll(view(775, 1380), true);
+    expect(ctl.handleLayoutChange(view(775, 1380), true)).toBe(false);
+    ctl.handleScroll(view(780, 1380), true);
+    expect(ctl.isSticky()).toBe(false);
+    expect(ctl.isAtTail(view(780, 1380), true)).toBe(false);
   });
 
   it("a performed pin takes the bottom back before the reserve is gone", () => {

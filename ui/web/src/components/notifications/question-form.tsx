@@ -1,10 +1,10 @@
 "use client";
 
-import { useEffect, useId, useRef, type KeyboardEvent, type ReactNode } from "react";
+import { useId, type KeyboardEvent } from "react";
 import { useTranslations } from "next-intl";
 
 import { ChatMarkdown } from "@/components/content/markdown";
-import { AutoExpandTextarea } from "@/components/ui/auto-expand-textarea";
+import { Textarea } from "@/components/ui/textarea";
 import type { QuestionAnswer, QuestionSpec } from "@/lib/contracts/types";
 import type { QuestionDraft } from "@/lib/state/question-drafts-plan";
 import { isImeComposition } from "@/lib/input/enter-to-send";
@@ -32,122 +32,96 @@ export function answerFromDraft(question: QuestionSpec, draft: QuestionDraft): Q
 
 // meiva:note
 // Numbered choices share their frozen order with server replies and history.
-// The draft is owned by the caller (it outlives this component) and changes through onDraftChange;
-// onSubmit sends an answer, and Enter in the active answer or Note field calls it with the answer built
-// from that draft.
-// meiva:link ui/web/src/docs/frontend-components/enter-to-send.md
+// Draft fields stay editable until the user activates the shared Submit button.
+// meiva:link ui/web/src/docs/frontend-state/shared-context/questions.md
 export function QuestionForm({
   question,
   pending,
-  focusAnswer,
   draft,
   onDraftChange,
-  onSubmit,
-  submitAction,
 }: {
-  submitAction: ReactNode;
   question: QuestionSpec;
   pending: boolean;
-  focusAnswer: boolean;
   draft: QuestionDraft;
   onDraftChange: (draft: QuestionDraft) => void;
-  onSubmit: (answer: QuestionAnswer) => void;
 }) {
   const t = useTranslations("questionDetail");
   const fieldId = useId();
-  const textRef = useRef<HTMLTextAreaElement>(null);
-  const setDraft = onDraftChange;
 
-  // meiva:note
-  // Enter sends whatever the draft already answers; an incomplete draft sends
-  // nothing, exactly like the disabled Submit button.
-  // meiva:link ui/web/src/docs/frontend-components/enter-to-send.md
-  const draftAnswer = answerFromDraft(question, draft);
-  const send = () => {
-    if (pending || !draftAnswer) return;
-    onSubmit(draftAnswer);
-  };
-
-  useEffect(() => {
-    if (focusAnswer) textRef.current?.focus();
-  }, [focusAnswer]);
-
-  const inputClass = cn("min-h-9 text-foreground placeholder:text-muted-foreground/60 resize-none py-2 font-mono text-[13px] leading-snug md:text-[13px] pointer-coarse:text-base md:pointer-coarse:text-base", FLEX_1);
+  const inputClass = cn("min-h-9 text-foreground placeholder:text-muted-foreground/60 resize-none py-2 text-[13px] leading-snug md:text-[13px] pointer-coarse:text-base md:pointer-coarse:text-base", FLEX_1);
   const single = question.type === "single_select";
   const choose = (id: string, checked: boolean) => {
-    setDraft({
+    onDraftChange({
       ...draft,
       optionIds: single
         ? (checked ? [id] : [])
         : checked ? [...draft.optionIds, id] : draft.optionIds.filter((v) => v !== id),
     });
   };
-  const optionClass = cn(FLEX, "-mx-2 cursor-pointer items-start gap-2 rounded px-2 py-1.5 text-[13px] leading-snug hover:bg-muted/40 has-[:focus-visible]:ring-2 has-[:focus-visible]:ring-ring");
+  const optionClass = cn(FLEX, "-mx-2 cursor-pointer items-start gap-2 rounded-md px-2 py-1.5 text-[13px] leading-snug hover:bg-muted/40 has-[:checked]:bg-muted/50 has-[:focus-visible]:ring-2 has-[:focus-visible]:ring-ring");
 
   const applySuggestion = (field: "text" | "comment", event: KeyboardEvent<HTMLTextAreaElement>) => {
     if (!draft[field] && question.note_suggestion && !pending && !isImeComposition(event)
       && !event.shiftKey && !event.ctrlKey && !event.altKey && !event.metaKey
       && (event.key === "Tab" || event.key === "ArrowRight")) {
       event.preventDefault();
-      setDraft({ ...draft, [field]: question.note_suggestion });
+      onDraftChange({ ...draft, [field]: question.note_suggestion });
     }
   };
 
+  if (question.type === "text") {
+    return (
+      <Textarea
+        id={fieldId} aria-label={t("openQuestion")} rows={1}
+        focusVisible={false} value={draft.text}
+        onChange={(e) => onDraftChange({ ...draft, text: e.target.value })}
+        onKeyDown={(event) => applySuggestion("text", event)}
+        aria-description={question.note_suggestion && !draft.text ? t("suggestionKeys") : undefined}
+        placeholder={question.note_suggestion ?? t("openPlaceholder")}
+        disabled={pending} className={inputClass}
+      />
+    );
+  }
+
   return (
     <div className="space-y-3">
-      {question.type === "text" ? <div className={cn("items-end gap-2", FLEX)}>
-        <AutoExpandTextarea
-          id={fieldId} aria-label={t("openQuestion")} ref={textRef} rows={1}
-          focusVisible={false} value={draft.text}
-          onChange={(e) => setDraft({ ...draft, text: e.target.value })}
-          onKeyDown={(event) => applySuggestion("text", event)}
-          aria-description={question.note_suggestion && !draft.text ? t("suggestionKeys") : undefined}
-          onSend={send} placeholder={question.note_suggestion ?? t("openPlaceholder")}
-          disabled={pending} className={inputClass}
-        />
-        {submitAction}
-      </div> : <>
-        <fieldset disabled={pending} className="disabled:opacity-60">
-          <legend className="sr-only">{single ? t("singleSelect") : t("multiSelect")}</legend>
-          {question.options.map((option, index) => {
-            const selected = draft.optionIds.includes(option.id);
-            return (
-              <label key={option.id} className={optionClass}>
-                <input
-                  type={single ? "radio" : "checkbox"}
-                  name={fieldId}
-                  checked={selected}
-                  onChange={(e) => choose(option.id, e.target.checked)}
-                  onClick={() => { if (single && selected) choose(option.id, false); }}
-                  onKeyDown={(e) => {
-                    if (single && selected && (e.key === " " || e.key === "Enter")) {
-                      e.preventDefault();
-                      choose(option.id, false);
-                    }
-                  }}
-                  className="mt-0.5 size-3.5 shrink-0 accent-primary"
-                />
-                <span className={cn("break-words", MIN_W_0)}>
-                  <span className={selected ? "font-medium" : undefined}><span className="text-muted-foreground">{index + 1}.</span> <ChatMarkdown content={option.label} inline /></span>
-                  {option.description && <span className="mt-0.5 block text-xs leading-snug text-muted-foreground"><ChatMarkdown content={option.description} inline /></span>}
-                </span>
-              </label>
-            );
-          })}
-        </fieldset>
-        <div className={cn("items-end gap-2", FLEX)}>
-          <AutoExpandTextarea
-            id={`${fieldId}-comment`} aria-label={t("comment")} rows={1} focusVisible={false}
-            value={draft.comment} onChange={(e) => setDraft({ ...draft, comment: e.target.value })}
-            onKeyDown={(event) => applySuggestion("comment", event)}
-            onSend={send} disabled={pending}
-            placeholder={question.note_suggestion ?? t("comment")}
-            aria-description={question.note_suggestion && !draft.comment ? t("suggestionKeys") : undefined}
-            className={inputClass}
-          />
-          {submitAction}
-        </div>
-      </>}
+      <fieldset disabled={pending} className="disabled:opacity-60">
+        <legend className="sr-only">{single ? t("singleSelect") : t("multiSelect")}</legend>
+        {question.options.map((option, index) => {
+          const selected = draft.optionIds.includes(option.id);
+          return (
+            <label key={option.id} className={optionClass}>
+              <input
+                type={single ? "radio" : "checkbox"}
+                name={fieldId}
+                checked={selected}
+                onChange={(e) => choose(option.id, e.target.checked)}
+                onClick={() => { if (single && selected) choose(option.id, false); }}
+                onKeyDown={(e) => {
+                  if (single && selected && (e.key === " " || e.key === "Enter")) {
+                    e.preventDefault();
+                    choose(option.id, false);
+                  }
+                }}
+                className="mt-0.5 size-3.5 shrink-0 accent-primary"
+              />
+              <span className={cn("break-words", MIN_W_0)}>
+                <span className={selected ? "font-medium" : undefined}><span className="text-muted-foreground">{index + 1}.</span> <ChatMarkdown content={option.label} inline /></span>
+                {option.description && <span className="mt-0.5 block text-xs leading-snug text-muted-foreground"><ChatMarkdown content={option.description} inline /></span>}
+              </span>
+            </label>
+          );
+        })}
+      </fieldset>
+      <Textarea
+        id={`${fieldId}-comment`} aria-label={t("comment")} rows={1} focusVisible={false}
+        value={draft.comment} onChange={(e) => onDraftChange({ ...draft, comment: e.target.value })}
+        onKeyDown={(event) => applySuggestion("comment", event)}
+        disabled={pending}
+        placeholder={question.note_suggestion ?? t("comment")}
+        aria-description={question.note_suggestion && !draft.comment ? t("suggestionKeys") : undefined}
+        className={inputClass}
+      />
     </div>
   );
 }

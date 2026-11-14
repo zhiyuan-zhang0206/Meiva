@@ -220,7 +220,7 @@ def test_parked_deep_history_mounts_a_bounded_window(e2e_env: E2EEnv, kind: str)
       return { top: viewport.scrollTop, distance: viewport.scrollHeight - viewport.clientHeight - viewport.scrollTop };
     }""")
     assert before_click["distance"] > 600, before_click
-    page.get_by_role("button", name="Scroll to bottom", exact=True).click()
+    page.get_by_role("button", name="Scroll down", exact=True).click()
     at_bottom = """() => {
       const viewport = document.querySelector('[role=log]').closest('[data-slot=scroll-area-viewport]');
       const tail = viewport.querySelector('.timeline-item[data-item-id="1200.0"]');

@@ -67,13 +67,13 @@ export const TimelineRow = memo(function TimelineRow({
   // config.copy to gate the inline Copy button on secondary message cards.
   // meiva:link ui/web/src/docs/frontend-components/timeline-view/card-chrome.md
   copyable: boolean;
-  onToggle: (id: string, kind: BackendTimelineItem["kind"]) => void;
+  onToggle: (id: string, currentlyExpanded: boolean) => void;
   timelineSource?: "buffer" | "canonical";
   displayRank?: number;
 }) {
   const handleToggle = useCallback(
-    () => onToggle(item.item_id, item.kind),
-    [onToggle, item.item_id, item.kind],
+    () => onToggle(item.item_id, expanded),
+    [onToggle, item.item_id, expanded],
   );
 
   // meiva:note
@@ -219,7 +219,7 @@ export const TimelineRow = memo(function TimelineRow({
       className={cn(
         "timeline-item",
         secondaryCopy ? "group/msgcard" : null,
-        isSubagentWork(item) ? "ml-3 border-l border-border/60 pl-1.5" : null,
+        isSubagentWork(item) ? "ml-3 pl-1.5" : null,
       )}
       onPointerDown={secondaryCopy ? revealForTouch : undefined}
     >

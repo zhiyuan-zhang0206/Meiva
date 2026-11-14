@@ -7,13 +7,14 @@ import type { StickyController } from "@/lib/layout/sticky";
 // meiva:link ui/web/src/docs/frontend-components/timeline-view/sticky-scroll.md
 export function rememberTimelinePosition(
   viewport: HTMLElement, entryKey: string, contentKey: string, controller: StickyController,
+  tailHeight = viewport.scrollHeight, collapseReserve = 0,
 ) {
   const position = {
     scrollTop: viewport.scrollTop,
-    scrollHeight: viewport.scrollHeight,
+    scrollHeight: tailHeight,
     clientHeight: viewport.clientHeight,
   };
-  if (controller.isAtTail(position)) {
+  if (controller.isAtTail(position, tailHeight < viewport.scrollHeight)) {
     saveScrollMemory(entryKey, { contentKey, scrollTop: position.scrollTop, followBottom: true });
     return;
   }
@@ -26,6 +27,8 @@ export function rememberTimelinePosition(
   });
   saveScrollMemory(entryKey, {
     contentKey, scrollTop: viewport.scrollTop, followBottom: false,
+    ...(collapseReserve > 0 && viewport.scrollTop + viewport.clientHeight > viewport.scrollHeight - collapseReserve + 1
+      ? { usedCollapseReserve: true as const } : {}),
     anchor: node?.dataset.itemId ? {
       itemId: node.dataset.itemId, rank: Number(node.dataset.displayRank ?? 0),
       viewportTop: node.getBoundingClientRect().top - rect.top,
@@ -34,7 +37,7 @@ export function rememberTimelinePosition(
 }
 
 interface ReadingExpansion {
-  items: ReadonlySet<string>;
+  items: ReadonlyMap<string, boolean>;
   turns: ReadonlyMap<string, boolean>;
 }
 // Only ephemeral view choices live here. Server rows stay in the QueryClient.

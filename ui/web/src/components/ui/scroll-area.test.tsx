@@ -184,6 +184,36 @@ describe("ScrollArea", () => {
     expect(getScrollbar().getAttribute("data-visible")).toBe("false");
   });
 
+  it("shows an input-driven scrollbar only after reader input and through subsequent scroll events", () => {
+    vi.useFakeTimers();
+    render(<ScrollArea scrollbarActivity="input" viewportTestId="timeline-viewport">content</ScrollArea>);
+    const viewport = screen.getByTestId("timeline-viewport");
+    const bar = getScrollbar();
+
+    fireEvent.scroll(viewport);
+    expect(bar.dataset.visible).toBe("false");
+    const pinch = new WheelEvent("wheel", { bubbles: true, deltaY: 50 });
+    Object.defineProperty(pinch, "ctrlKey", { value: true });
+    fireEvent(viewport, pinch);
+    expect(bar.dataset.visible).toBe("false");
+    fireEvent.wheel(viewport, { deltaY: 50 });
+    expect(bar.dataset.visible).toBe("true");
+
+    act(() => { vi.advanceTimersByTime(600); });
+    fireEvent.scroll(viewport);
+    act(() => { vi.advanceTimersByTime(600); });
+    expect(bar.dataset.visible).toBe("true");
+    act(() => { vi.advanceTimersByTime(200); });
+    fireEvent.scroll(viewport);
+    expect(bar.dataset.visible).toBe("false");
+
+    fireEvent.keyDown(viewport, { key: "PageDown" });
+    expect(bar.dataset.visible).toBe("true");
+    act(() => { vi.advanceTimersByTime(800); });
+    fireEvent.touchMove(viewport);
+    expect(bar.dataset.visible).toBe("true");
+  });
+
   it("keeps the scrollbar visible while its thumb has focus", () => {
     vi.useFakeTimers();
     const flushResizeObservers = mockScrollableGeometry();

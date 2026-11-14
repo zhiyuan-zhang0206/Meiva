@@ -283,9 +283,9 @@ export function TimelineGroupList({
   streamingCode: boolean;
   turnActive: boolean;
   lastEventAt?: number;
-  overrides: ReadonlySet<string>;
-  toggleExpanded: (id: string, kind: BackendTimelineItem["kind"]) => void;
-  toggleTurn: (id: string, currentlyExpanded: boolean) => void;
+  overrides: ReadonlyMap<string, boolean>;
+  toggleExpanded: (id: string, currentlyExpanded: boolean) => void;
+  toggleTurn: (id: string, currentlyExpanded: boolean, button: HTMLButtonElement) => void;
   groups: RankedTimelineGroup[];
   groupEntries: GroupEntry[];
   virtualEnabled: boolean;
@@ -297,7 +297,7 @@ export function TimelineGroupList({
     index: number,
     source: "buffer" | "canonical",
     rank: number,
-    forceExpand?: boolean,
+    forceExpand = false,
   ) => {
     const renderKey = source === "buffer"
       ? `buffer:${compactBuffer?.epoch}:${rank}:${item.item_id}`
@@ -322,8 +322,8 @@ export function TimelineGroupList({
     }
 
     const isPrimary = classifyItem(item) === "primary";
-    const defaultExpanded = isPrimary || forceExpand ? true : config.fixedDefault;
-    const expanded = overrides.has(item.item_id) ? !defaultExpanded : defaultExpanded;
+    const defaultExpanded = isPrimary || config.fixedDefault || (forceExpand && config.expandWhileWorking !== false);
+    const expanded = overrides.get(item.item_id) ?? defaultExpanded;
     const copyable = expanded && !item.partial;
 
     return (

@@ -58,7 +58,7 @@ describe("deep history DOM window", () => {
     // Away from the bottom the control is present and interactive; at the bottom
     // it is not rendered at all (user report 2026-10-30).
     // meiva:link ui/web/src/docs/frontend-components/timeline-view/sticky-scroll.md
-    expect(screen.getByLabelText("Scroll to bottom").className).not.toContain("opacity-0");
+    expect(screen.getByLabelText("Scroll down").className).not.toContain("opacity-0");
     if (count > 100) expect(viewport.querySelector("[data-timeline-spacer]")).not.toBeNull();
     const scrollTo = vi.spyOn(viewport, "scrollTo").mockImplementation((options?: ScrollToOptions | number) => {
       if (typeof options === "object") smoothTarget = options.top ?? null;
@@ -85,10 +85,10 @@ describe("deep history DOM window", () => {
 
   it.each([90, 300])("lets the bottom button finish its smooth scroll with %i tracked rows", (count) => {
     const history = trackedHistory(count);
-    fireEvent.click(screen.getByLabelText("Scroll to bottom"));
-    expect(history.scrollTo).toHaveBeenCalledWith({ top: history.height, behavior: "smooth" });
+    fireEvent.click(screen.getByLabelText("Scroll down"));
+    expect(history.scrollTo).toHaveBeenCalledWith({ top: history.height - 600, behavior: "smooth" });
     expect(history.writes).toEqual([]);
-    expect(history.smoothTarget()).toBe(history.height);
+    expect(history.smoothTarget()).toBe(history.height - 600);
     history.finishSmoothScroll();
     expect(history.viewport.scrollTop).toBe(history.height - 600);
     expect(history.viewport.querySelector(`.timeline-item[data-item-id="${count}.0"]`)).not.toBeNull();
@@ -104,7 +104,7 @@ describe("deep history DOM window", () => {
   it("releases a pending older-page anchor when the bottom button is clicked", () => {
     const history = trackedHistory(200);
     history.requestOlder();
-    fireEvent.click(screen.getByLabelText("Scroll to bottom"));
+    fireEvent.click(screen.getByLabelText("Scroll down"));
     history.finishSmoothScroll();
     expect(history.viewport.scrollTop).toBe(history.height - 600);
     expect(history.viewport.querySelector('.timeline-item[data-item-id="200.0"]')).not.toBeNull();
@@ -428,7 +428,7 @@ describe("deep history DOM window", () => {
     act(() => {
       rerender(<TimelineView items={items} threadKey="new-thread" />);
     });
-    expect(viewport.scrollTop).toBe(120_000);
+    expect(viewport.scrollTop).toBe(119_400);
     vi.restoreAllMocks();
   });
 

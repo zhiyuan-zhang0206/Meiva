@@ -3,15 +3,15 @@
   "singleSelect": "Choose one",
   "multiSelect": "Choose one or more",
   "openQuestion": "Your answer",
-  "openPlaceholder": "Write your answer… (Enter to send)",
+  "openPlaceholder": "Write your answer…",
   "comment": "Note (optional)",
   "pendingQuestions": "{count, plural, one {# question waiting} other {# questions waiting}}",
   "questionsUnavailable": "Could not load pending questions.",
   "suggestionKeys": "Press Tab or Right Arrow to apply the suggestion.",
-  "skip": "Skip",
-  "undoSkip": "Undo skip",
-  "skipped": "Skipped",
-  "submitAnswers": "Submit answers",
+  "submit": "Submit",
   "questionsChanged": "The questions changed. Review them and submit again.",
-  "answerAllHint": "Answer or skip every question to submit."
+  "questionNavigation": "Question navigation",
+  "previousQuestion": "Previous question",
+  "nextQuestion": "Next question",
+  "questionPosition": "{current} / {total}"
 }

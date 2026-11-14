@@ -36,17 +36,14 @@ function geometry(viewport: HTMLElement) {
 // re-decides it.
 // meiva:link ui/web/src/docs/frontend-components/timeline-view/sticky-scroll.md
 describe("scroll-to-bottom control presence", () => {
-  it("is absent at the bottom, including while a refresh is in flight", () => {
-    const { rerender } = render(<TimelineView items={items} />);
+  it("is absent at the bottom", () => {
+    render(<TimelineView items={items} />);
     const viewport = screen.getByTestId("scroll-viewport");
     geometry(viewport);
     viewport.scrollTop = 4400;
     act(() => { viewport.dispatchEvent(new Event("scroll")); });
     expect(screen.queryByTestId("scroll-to-bottom")).toBeNull();
 
-    rerender(<TimelineView items={items} loadingNew />);
-    expect(screen.queryByTestId("scroll-to-bottom")).toBeNull();
-    expect(screen.queryByTestId("latest-loading-ring")).toBeNull();
   });
 
   it("appears away from the bottom and is gone again once the click returns the reader", () => {
@@ -57,12 +54,12 @@ describe("scroll-to-bottom control presence", () => {
     viewport.scrollTop = 700;
     act(() => { viewport.dispatchEvent(new Event("scroll")); });
     const button = screen.getByTestId("scroll-to-bottom");
-    expect(button.getAttribute("aria-label")).toBe("Scroll to bottom");
+    expect(button.getAttribute("aria-label")).toBe("Scroll down");
     expect(button.className).not.toContain("opacity-0");
     expect(button.className).not.toContain("pointer-events-none");
 
     fireEvent.click(button);
-    expect(scrollTo).toHaveBeenCalledWith({ top: 5000, behavior: "smooth" });
+    expect(scrollTo).toHaveBeenCalledWith({ top: 4400, behavior: "smooth" });
     expect(screen.queryByTestId("scroll-to-bottom")).toBeNull();
   });
 

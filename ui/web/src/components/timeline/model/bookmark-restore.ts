@@ -30,6 +30,8 @@ interface ApplyArgs {
   compactBuffer: CompactTransitionBuffer | null;
   canonicalItems: readonly BackendTimelineItem[];
   controller: StickyController;
+  tailHeight: (viewport: HTMLElement) => number;
+  collapseReserve: HTMLElement | null;
 }
 
 const snapshot = (viewport: HTMLElement) => ({
@@ -39,7 +41,7 @@ const snapshot = (viewport: HTMLElement) => ({
 });
 
 export function applyBookmarkRestore({
-  state, viewport, initialPass, threadKey, compactBuffer, canonicalItems, controller,
+  state, viewport, initialPass, threadKey, compactBuffer, canonicalItems, controller, tailHeight, collapseReserve,
 }: ApplyArgs): void {
   const saved = state.pending.current;
   if (initialPass || !saved || !viewport) return;
@@ -49,7 +51,8 @@ export function applyBookmarkRestore({
     state.hold.current = false;
     return;
   }
-  if (!applySavedTimelineScroll(viewport, saved, compactBuffer, canonicalItems)) {
+  const naturalHeight = tailHeight(viewport);
+  if (!applySavedTimelineScroll(viewport, saved, compactBuffer, canonicalItems, naturalHeight, collapseReserve)) {
     const max = Math.max(0, viewport.scrollHeight - viewport.clientHeight);
     const probe = state.probe.current;
     if (probe.passes >= 2 && probe.height === viewport.scrollHeight && saved.scrollTop > max) {
@@ -66,7 +69,13 @@ export function applyBookmarkRestore({
     controller.notifyRestored(snapshot(viewport));
     return;
   }
-  controller.notifyRestored(snapshot(viewport));
+  if (saved.followBottom) {
+    controller.notifyPinnedToBottom({ ...snapshot(viewport), scrollHeight: naturalHeight }, true);
+  } else if (saved.usedCollapseReserve || naturalHeight < viewport.scrollHeight) {
+    controller.notifyAnchored(snapshot(viewport));
+  } else {
+    controller.notifyRestored(snapshot(viewport));
+  }
   state.pending.current = null;
   state.settled.current = saved.anchor ? saved : null;
   if (!saved.anchor) state.hold.current = false;

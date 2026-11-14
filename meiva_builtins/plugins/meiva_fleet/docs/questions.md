@@ -42,12 +42,13 @@ applies it to the draft, which the user can edit or clear. Suggestions are never
 submitted implicitly. Selecting options preserves a choice question's Note.
 There is no Other option or Add note button. A single choice is cleared by
 choosing it again. Nothing is preselected and selecting an option never submits.
-The Web shows all of an agent's open questions in one form in question ID order, each
-with its controls and a Skip; one Submit settles them all and is enabled only when every
-question is answered or skipped.
+The Web shows one open question at a time in question ID order. Submit is
+available on the last question and settles the whole batch. Blank drafts become
+skips at submission.
 
 `POST /api/keyed/v1/agents/{agent_id}/questions/answers` takes `expected_ids` (the open set the
-user saw) and one result per id: `answer`, a numbered text `reply`, or `skip`. It is one keyed
+user saw) and one result per id: `answer`, a numbered text `reply`, or an ID-only result for a
+blank answer. Legacy `skip: true` results normalize to the same outcome. It is one keyed
 operation: it settles every open question in one transaction and delivers one inbound. A result
 set that does not match `expected_ids` is a 422; when the agent's open set differs from
 `expected_ids` (a question was asked or closed meanwhile) nothing is settled and the response is a

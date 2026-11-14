@@ -20,16 +20,14 @@ survives resize, tail repair and trim until the reader scrolls or explicitly
 requests the bottom; a tail bookmark follows the end as the thread grows.
 Sending still jumps to the latest message; a first visit starts at the bottom.
 
-The existing bottom button keeps one fixed footprint and its downward arrow.
-A thin rotating ring runs along its edge while the latest read is queued/running,
-including the composed re-attach read. The button stays enabled: clicking during
-refresh jumps to the current bottom and resumes following incoming messages.
-Finishing removes only the ring, without moving messages. The position is saved before the pull hook's cleanup removes its native reserve. Older paging retains its separate top pull circle. Cold views
-without retained rows keep the existing initial-load UI.
+The centered down arrow takes the reader to the last human message or the
+current tail according to the [reading position](send-anchor.md). Older paging
+presents its top pull circle, and cold views without retained rows show the
+initial-load ring.
 
 ## Scroll ownership and one scrollport
 
-While following the tail, content growth pins the viewport down in the same pre-paint tick, and the follow flag has a single owner (`lib/layout/sticky.ts:createStickyController`) fed by DOM events, with every performed scroll reported back so a pin's echo is a no-op. Work and detail headers stay in normal document flow without `position: sticky` (user ruling 2026-11-01), and the timeline has exactly one scrollport: an expanded `TurnBlock` renders its body at its natural height instead of wrapping it in a capped `ScrollArea`, so a finished block is as tall as the work really was and the reader scrolls the timeline itself. The ongoing block keeps its top edge instead — growth extends it downward and never pins — which the controller owns through `notifyLiveBlock` (user ruling 2026-11-09). The pull reserve, the wheel and touch zones, and the scroll-anchoring opt-out live in [Timeline sticky scroll](sticky-scroll.md).
+While following the tail, content growth pins the viewport down in the same pre-paint tick, and the follow flag has a single owner (`lib/layout/sticky.ts:createStickyController`) fed by DOM events, with every performed scroll reported back so a pin's echo is a no-op. Work and detail headers stay in normal document flow without `position: sticky` (user ruling 2026-11-01), and the timeline has exactly one scrollport: an expanded `TurnBlock` renders its body at its natural height instead of wrapping it in a capped `ScrollArea`, so a finished block is as tall as the work really was and the reader scrolls the timeline itself. An automatically expanded live block grows in the current reading mode. Manually opening it jumps to the tail and starts following. The pull reserve, the wheel and touch zones, and the scroll-anchoring opt-out live in [Timeline sticky scroll](sticky-scroll.md).
 
 ## Continuous segments
 

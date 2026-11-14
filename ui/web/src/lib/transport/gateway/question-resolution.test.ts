@@ -28,8 +28,8 @@ afterEach(async () => {
 const body = {
   expected_ids: [11, 12],
   results: [
-    { id: 11, answer: { text: "yes" }, skip: false },
-    { id: 12, skip: true },
+    { id: 11, answer: { text: "yes" } },
+    { id: 12 },
   ],
 };
 

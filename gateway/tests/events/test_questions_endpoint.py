@@ -257,29 +257,6 @@ def test_answer_marks_and_delivers_inbound(
     assert snap.questions_awaiting_response == []
 
 
-def test_answer_without_reply_422(
-    db_conn: psycopg.Connection, *, model_catalog: ModelCatalog
-) -> None:
-    a = seed_agent(db_conn)
-    nid = insert_question(db_conn, a, "q?")
-    with gateway_test_client() as client:
-        resp = client.post(
-            answers_path(a),
-            json={"expected_ids": [nid], "results": [{"id": nid}]},
-            headers={"Idempotency-Key": str(uuid4()), "Idempotency-Scope": "principal-v1"},
-        )
-    assert resp.status_code == 422
-    snap = select_one(
-        db_conn,
-        a,
-        catalog=model_catalog,
-        default_model=settings.lm.llm_model,
-    )
-    assert snap is not None
-    assert [n.id for n in snap.questions_awaiting_response] == [nid]
-    assert pending_rows(db_conn, a) == []
-
-
 def test_answer_empty_reply_422(
     db_conn: psycopg.Connection, *, model_catalog: ModelCatalog
 ) -> None:

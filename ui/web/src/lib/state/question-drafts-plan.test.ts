@@ -6,9 +6,9 @@ const typed = { ...EMPTY_DRAFT, text: "x" };
 
 describe("question drafts", () => {
   it("keeps one agent's drafts apart from another's", () => {
-    const all = withDraft(withDraft({}, 7, 1, typed), 9, 2, { ...EMPTY_DRAFT, skipped: true });
+    const all = withDraft(withDraft({}, 7, 1, typed), 9, 2, { ...EMPTY_DRAFT, comment: "note" });
     expect(all[7]?.[1]).toBe(typed);
-    expect(all[9]?.[2]?.skipped).toBe(true);
+    expect(all[9]?.[2]?.comment).toBe("note");
   });
 
   it("clears answered questions and drops an agent left with none", () => {

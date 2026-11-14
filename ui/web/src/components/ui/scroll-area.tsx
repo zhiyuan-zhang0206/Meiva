@@ -8,12 +8,14 @@ import { FLEX, FLEX_1, OVERFLOW_HIDDEN } from "@/lib/layout/layout";
 import { useNonce } from "@/lib/auth/nonce-context";
 
 const SCROLLBAR_IDLE_DELAY_MS = 800
+const SCROLL_KEYS = new Set(["ArrowUp", "ArrowDown", "PageUp", "PageDown", "Home", "End", " "])
 
 function ScrollArea({
   className,
   viewportClassName,
   viewportRef: externalViewportRef,
   viewportTestId,
+  scrollbarActivity = "scroll",
   children,
   onScrollCapture,
   ...props
@@ -23,6 +25,7 @@ function ScrollArea({
   viewportClassName?: string;
   viewportRef?: React.RefObject<HTMLDivElement | null>;
   viewportTestId?: string;
+  scrollbarActivity?: "scroll" | "input";
 }) {
   const [isScrollActive, setIsScrollActive] = React.useState(false)
   const [isDraggingScrollbar, setIsDraggingScrollbar] = React.useState(false)
@@ -131,9 +134,8 @@ function ScrollArea({
       {...props}
       onScrollCapture={(event) => {
         onScrollCapture?.(event)
-        if (event.target === event.currentTarget || event.target === viewportRef.current) {
-          showScrollbarUntilIdle()
-        }
+        if (event.target !== event.currentTarget && event.target !== viewportRef.current) return
+        if (scrollbarActivity === "scroll" || idleTimerRef.current !== null) showScrollbarUntilIdle()
       }}
     >
       <ScrollAreaPrimitive.Viewport
@@ -141,6 +143,26 @@ function ScrollArea({
         nonce={nonce}
         data-slot="scroll-area-viewport"
         data-testid={viewportTestId}
+        onWheel={scrollbarActivity === "input" ? (event) => {
+          if (!event.ctrlKey && event.deltaY !== 0 && Math.abs(event.deltaY) >= Math.abs(event.deltaX) &&
+              event.target instanceof Element && event.target.closest('[data-slot="scroll-area-viewport"]') === event.currentTarget) {
+            showScrollbarUntilIdle()
+          }
+        } : undefined}
+        onTouchMove={scrollbarActivity === "input" ? (event) => {
+          if (event.target instanceof Element && event.target.closest('[data-slot="scroll-area-viewport"]') === event.currentTarget) {
+            showScrollbarUntilIdle()
+          }
+        } : undefined}
+        onKeyDown={scrollbarActivity === "input" ? (event) => {
+          const target = event.target
+          if (!event.defaultPrevented && SCROLL_KEYS.has(event.key) && target instanceof Element &&
+              target.closest('[data-slot="scroll-area-viewport"]') === event.currentTarget &&
+              !target.closest('input, textarea, select, [contenteditable]') &&
+              !(event.key === " " && target.closest('button, [role="button"]'))) {
+            showScrollbarUntilIdle()
+          }
+        } : undefined}
         className={cn(
           "size-full rounded-[inherit] transition-[color,box-shadow] outline-none focus-visible:ring-[3px] focus-visible:ring-ring/50 focus-visible:outline-1",
           viewportClassName,

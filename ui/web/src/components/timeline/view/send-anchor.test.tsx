@@ -31,6 +31,8 @@ describe("send park decisions", () => {
 
 let top = 0;
 let content = 0;
+let humanTop = 0;
+let viewportHeight = 0;
 let resizeCallbacks: Set<() => void>;
 
 const viewport = () => screen.getByTestId("scroll-viewport");
@@ -41,6 +43,8 @@ function resize() { act(() => { resizeCallbacks.forEach((deliver) => deliver());
 beforeEach(() => {
   top = 0;
   content = 1000;
+  humanTop = 1300;
+  viewportHeight = 600;
   resizeCallbacks = new Set();
   vi.stubGlobal("ResizeObserver", class {
     private readonly deliver: () => void;
@@ -53,7 +57,7 @@ beforeEach(() => {
     disconnect() { resizeCallbacks.delete(this.deliver); }
     unobserve() { resizeCallbacks.delete(this.deliver); }
   });
-  vi.spyOn(HTMLElement.prototype, "clientHeight", "get").mockReturnValue(600);
+  vi.spyOn(HTMLElement.prototype, "clientHeight", "get").mockImplementation(() => viewportHeight);
   vi.spyOn(HTMLElement.prototype, "scrollHeight", "get").mockImplementation(function (this: HTMLElement) {
     return this.getAttribute("data-slot") === "scroll-area-viewport" ? content + reservePx() : 0;
   });
@@ -65,7 +69,9 @@ beforeEach(() => {
     top = Math.max(0, Math.min(value, this.scrollHeight - this.clientHeight));
   });
   vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockImplementation(function (this: HTMLElement) {
-    const y = this.dataset.itemId === "2.0" ? 900 : 0;
+    const y = this.hasAttribute("data-send-reserve") ? content - top
+      : this.dataset.itemId === "2.0" ? humanTop - top
+      : this.dataset.itemId === "1.0" ? 56 - top : 0;
     return { top: y, bottom: y + 120, height: 120, left: 0, right: 400, width: 400 } as DOMRect;
   });
 });
@@ -92,11 +98,7 @@ describe("send anchor", () => {
     // meiva:link ui/web/src/docs/frontend-components/timeline-view/send-anchor.md
     expect(top).toBe(1244);
     expect(reservePx()).toBe(444);
-    // meiva:note
-    // The viewport is at the bottom of a padded document here, so the control is
-    // the reader's only way back into following and stays shown.
-    // meiva:link ui/web/src/docs/frontend-components/timeline-view/send-anchor.md
-    expect(screen.getByTestId("scroll-to-bottom")).toBeTruthy();
+    expect(screen.queryByTestId("scroll-to-bottom")).toBeNull();
 
     content = 1700;
     resize();
@@ -114,17 +116,101 @@ describe("send anchor", () => {
     expect(top).toBe(1244);
   });
 
-  it("parks the message even when the reader had scrolled up before sending", () => {
+  it("keeps the sent row aligned when the composer clears and grows the viewport", () => {
+    const view = render(<TimelineView items={[earlier]} />);
+    act(() => { useTimelineStore.getState().requestSendAnchor(7); });
+    content = 1400;
+    view.rerender(<TimelineView items={[earlier, sent]} />);
+    expect(top).toBe(1244);
+
+    viewportHeight = 634;
+    viewport().scrollTop = top;
+    expect(top).toBe(1210);
+    resize();
+    expect(top).toBe(1244);
+    expect(reservePx()).toBe(478);
+  });
+
+  it("keeps a clicked question aligned through a layout scroll before ResizeObserver", () => {
+    const view = render(<TimelineView items={[earlier]} />);
+    act(() => { top = 100; viewport().dispatchEvent(new Event("scroll")); });
+    content = 1400;
+    view.rerender(<TimelineView items={[earlier, sent]} />);
+    act(() => { screen.getByTestId("scroll-to-bottom").click(); });
+    expect(top).toBe(1244);
+
+    humanTop += 350;
+    content = 2800;
+    act(() => { viewport().dispatchEvent(new Event("scroll")); });
+    expect(top).toBe(1594);
+
+    const scrollTo = vi.spyOn(viewport(), "scrollTo");
+    act(() => { screen.getByTestId("scroll-to-bottom").click(); });
+    expect(scrollTo).toHaveBeenCalledWith({ top: 2200, behavior: "smooth" });
+  });
+
+  it("keeps history in place on send and uses the current position for each arrow click", () => {
+    const view = render(<TimelineView items={[earlier]} />);
+    act(() => { top = 100; viewport().dispatchEvent(new Event("scroll")); });
+    act(() => { useTimelineStore.getState().requestSendAnchor(7); });
+    content = 2600;
+    const peer = makeItem({ item_id: "3.0", kind: "inbound_chat", payload: "envelope:peer", source: "agent:9" });
+    view.rerender(<TimelineView items={[earlier, sent, peer]} />);
+    expect(top).toBe(100);
+
+    const arrow = screen.getByRole("button", { name: "Scroll down" });
+    act(() => { arrow.click(); });
+    expect(top).toBe(1244);
+    content = 2800;
+    resize();
+    expect(top).toBe(1244);
+
+    act(() => { top = 1500; viewport().dispatchEvent(new Event("scroll")); });
+    const scrollTo = vi.spyOn(viewport(), "scrollTo");
+    act(() => { arrow.click(); });
+    expect(scrollTo).toHaveBeenCalledWith({ top: 2200, behavior: "smooth" });
+  });
+
+  it("makes room to align the latest human message manually, even after a send from history", () => {
     const view = render(<TimelineView items={[earlier]} />);
     act(() => { top = 100; viewport().dispatchEvent(new Event("scroll")); });
     act(() => { useTimelineStore.getState().requestSendAnchor(7); });
     content = 1400;
     view.rerender(<TimelineView items={[earlier, sent]} />);
-    // meiva:note
-    // The stub keeps the row 900px under the viewport top, so at scrollTop 100 it
-    // sits at document 1000: the park is relative to the row, not to the old place.
-    // meiva:link ui/web/src/docs/frontend-components/timeline-view/send-anchor.md
-    expect(top).toBe(944);
+    expect(top).toBe(100);
+    expect(reservePx()).toBe(444);
+
+    act(() => { viewport().scrollTop = viewport().scrollHeight; viewport().dispatchEvent(new Event("scroll")); });
+    expect(top).toBe(1244);
+    expect(screen.queryByTestId("scroll-to-bottom")).toBeNull();
+    content = 1500;
+    resize();
+    expect(top).toBe(1244);
+    expect(reservePx()).toBe(344);
+  });
+
+  it("moves down through the remaining reserve when the content end is above the reader", () => {
+    const view = render(<TimelineView items={[earlier]} />);
+    act(() => { top = 100; viewport().dispatchEvent(new Event("scroll")); });
+    content = 1400;
+    view.rerender(<TimelineView items={[earlier, sent]} />);
+    act(() => { top = 1000; viewport().dispatchEvent(new Event("scroll")); });
+    const button = screen.getByTestId("scroll-to-bottom");
+
+    act(() => { button.click(); });
+
+    expect(top).toBe(1244);
+    expect(screen.queryByTestId("scroll-to-bottom")).toBeNull();
+  });
+
+  it("allows an upward wheel to leave a followed tail before the next output arrives", () => {
+    render(<TimelineView items={[earlier]} />);
+    expect(top).toBe(400);
+    act(() => { viewport().dispatchEvent(new WheelEvent("wheel", { deltaY: -8, bubbles: true })); });
+    act(() => { top = 392; viewport().dispatchEvent(new Event("scroll")); });
+    content = 1200;
+    resize();
+    expect(top).toBe(392);
   });
 
   it("follows again once the reader scrolls to the bottom", () => {
@@ -136,33 +222,43 @@ describe("send anchor", () => {
     resize();
     expect(top).toBe(1244);
 
-    act(() => { top = 1300; viewport().dispatchEvent(new Event("scroll")); });
+    act(() => {
+      viewport().dispatchEvent(new WheelEvent("wheel", { deltaY: 80, bubbles: true }));
+      top = 1300;
+      viewport().dispatchEvent(new Event("scroll"));
+    });
     content = 2400;
     resize();
     expect(top).toBe(1800);
   });
 
-  it("follows again when the jump-to-latest control is clicked", () => {
+  it("hides the arrow at the padded end and shows it when the response extends past the viewport", () => {
     const view = render(<TimelineView items={[earlier]} />);
     act(() => { useTimelineStore.getState().requestSendAnchor(7); });
     content = 1400;
     view.rerender(<TimelineView items={[earlier, sent]} />);
     expect(top).toBe(1244);
-    act(() => { screen.getByTestId("scroll-to-bottom").click(); });
+    expect(reservePx()).toBe(444);
+    expect(screen.queryByTestId("scroll-to-bottom")).toBeNull();
+
     content = 2400;
     resize();
-    expect(top).toBe(1800);
+    expect(top).toBe(1244);
+    expect(screen.getByTestId("scroll-to-bottom")).toBeTruthy();
   });
 
-  it("marks the jump control while the agent is still responding", () => {
+  it("keeps the centered arrow when a work block starts and leaves the sent message in place", () => {
     const view = render(<TimelineView items={[earlier]} turnActive />);
     act(() => { useTimelineStore.getState().requestSendAnchor(7); });
     content = 1400;
     view.rerender(<TimelineView items={[earlier, sent]} turnActive />);
-    expect(screen.getByTestId("scroll-to-bottom").dataset.working).toBe("true");
-    expect(screen.getByTestId("scroll-to-bottom-working")).toBeTruthy();
-    view.rerender(<TimelineView items={[earlier, sent]} turnActive={false} />);
-    expect(screen.getByTestId("scroll-to-bottom").dataset.working).toBeUndefined();
+    const work = makeItem({ item_id: "3.0", kind: "agent_code", payload: "print(1)" });
+    content = 2600;
+    view.rerender(<TimelineView items={[earlier, sent, work]} turnActive />);
+    resize();
+    expect(top).toBe(1244);
+    expect(screen.getByRole("button", { name: "Scroll down" }).className).toContain("left-1/2");
+    expect(screen.getByTestId("scroll-to-bottom-arrow")).toBeTruthy();
     expect(screen.queryByTestId("scroll-to-bottom-working")).toBeNull();
   });
 });

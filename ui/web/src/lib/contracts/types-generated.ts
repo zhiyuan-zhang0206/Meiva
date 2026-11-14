@@ -3432,7 +3432,7 @@ export interface components {
             id: number;
             answer?: components["schemas"]["QuestionAnswer"] | null;
             reply?: string | null;
-            skip: boolean;
+            skip?: boolean;
         };
         QuestionsFeed: {
             awaiting: components["schemas"]["QuestionItem"][];

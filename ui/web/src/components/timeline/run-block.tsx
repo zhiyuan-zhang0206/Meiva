@@ -25,7 +25,7 @@ import {
   OVERFLOW_HIDDEN,
 } from "@/lib/layout/layout";
 
-import { CallBadge } from "./view/card-summary";
+import { CallBadge, DisclosureChevron, DISCLOSURE_TITLE_CLS } from "./view/card-summary";
 import { useNow } from "./model/reasoning-clock";
 import { formatTurnSummary, turnSummaryEqual, type TurnSummary } from "./model/runs";
 
@@ -37,7 +37,7 @@ interface TurnBlockProps {
   memberSources?: readonly string[];
   summary: TurnSummary;
   expanded: boolean;
-  onToggle: (id: string, currentlyExpanded: boolean) => void;
+  onToggle: (id: string, currentlyExpanded: boolean, button: HTMLButtonElement) => void;
   turnActive?: boolean;
   liveWindow?: boolean;
   children?: ReactNode;
@@ -162,29 +162,23 @@ export const TurnBlock = memo(function TurnBlock({
     >
       <button
         type="button"
-        onClick={() => onToggle(toggleKey ?? id, expanded)}
+        onClick={(event) => onToggle(toggleKey ?? id, expanded, event.currentTarget)}
         className={cn(
-          "w-[calc(100%+0.5rem)] -ml-2 px-2 py-0.5 items-start gap-1.5 text-left select-none transition-colors",
-          expanded
-            ? "sticky z-20 bg-background rounded-md text-muted-foreground hover:text-foreground hover:bg-muted"
-            : "rounded-lg text-muted-foreground/75 hover:text-foreground hover:bg-muted/50",
+          "group/disclosure w-[calc(100%+0.5rem)] -ml-2 px-2 py-0.5 items-start gap-1.5 rounded-md bg-background text-left text-muted-foreground select-none",
           FLEX,
-          expanded && BAR_STICKY_TOP_CLASS,
+          expanded && cn("sticky z-20", BAR_STICKY_TOP_CLASS),
         )}
         aria-expanded={expanded}
         data-testid="turn-toggle"
         data-expanded={expanded}
       >
-        <ChevronRight
-          className={cn(
-            "size-3.5 shrink-0 opacity-60 mt-0.5 transition-transform duration-200 motion-reduce:transition-none",
-            expanded && "rotate-90",
-          )}
-        />
         <span className={cn("gap-0.5", FLEX, FLEX_COL, MIN_W_0, FLEX_1)}>
           <span className={cn("items-center gap-1.5 text-[13px] leading-snug", FLEX, MIN_W_0)}>
             <Layers className="size-3.5 shrink-0 opacity-70" />
-            <span className="truncate whitespace-nowrap tabular-nums">{workedLabel}</span>
+            <span className={cn(DISCLOSURE_TITLE_CLS, "whitespace-nowrap tabular-nums")}>
+              {workedLabel}
+            </span>
+            <DisclosureChevron expanded={expanded} />
           </span>
           {actionSummary && (
             <span className="pl-5 text-xs leading-snug">{actionSummary}</span>
@@ -200,7 +194,7 @@ export const TurnBlock = memo(function TurnBlock({
       >
         <div className={cn(OVERFLOW_HIDDEN, MIN_H_0, MIN_W_0)}>
           {expanded ? (
-            <div className="mt-1.5 ml-1.5 pl-2 pr-2 border-l border-border/60 space-y-1">
+            <div className="mt-1.5 ml-1.5 pl-2 pr-2 space-y-1">
               {children}
             </div>
           ) : null}
@@ -229,10 +223,10 @@ export const PendingLiveActivityWindow = memo(function PendingLiveActivityWindow
           FLEX,
         )}
       >
-        <ChevronRight className="size-3.5 shrink-0 opacity-60 mt-0.5" />
-        <span className={cn("items-center gap-1.5 text-[13px] leading-snug", FLEX, MIN_W_0)}>
+        <span className={cn("items-center gap-1.5 text-[13px] leading-snug", FLEX, FLEX_1, MIN_W_0)}>
           <Layers className="size-3.5 shrink-0 opacity-70" />
           <span className="truncate whitespace-nowrap tabular-nums">{t("working")}</span>
+          <ChevronRight aria-hidden="true" className="size-3.5 shrink-0 opacity-60" />
         </span>
       </div>
     </div>

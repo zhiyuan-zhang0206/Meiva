@@ -11,7 +11,7 @@
  * De-quarantined 2026-08-24.
  */
 import { describe, expect, it, vi } from "vitest";
-import { fireEvent } from "@testing-library/react";
+import { fireEvent, waitFor } from "@testing-library/react";
 import { render } from "@/lib/transport/tests/wall-clock-render";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 
@@ -123,10 +123,10 @@ describe("messageCardConfig", () => {
     expect(cfg!.rich).toBe("output");
   });
 
-  it("agent_chat → no rich, title='Meiva ▸', expanded by default in both primary and secondary contexts", () => {
+  it("agent_chat → no rich, title='Meiva', expanded by default in both primary and secondary contexts", () => {
     const cfg = messageCardConfig(item("agent_chat"));
     expect(cfg!.rich).toBeNull();
-    expect(cfg!.title).toBe("Meiva ▸");
+    expect(cfg!.title).toBe("Meiva");
     expect(cfg!.fixedDefault).toBe(true);
     expect(cfg!.copy).toBe(true);
 
@@ -153,11 +153,14 @@ describe("messageCardConfig", () => {
   it("inbound_chat source=agent:42 → Agent 42", () => {
     const cfg = messageCardConfig(item("inbound_chat", { source: "agent:42" }));
     expect(cfg!.title).toBe("Agent 42");
-    // meiva:note
-    // Another agent's message is content this agent read, so opening the work
-    // block shows it instead of a collapsed header (user ruling 2026-11-09).
-    // meiva:link ui/web/src/docs/frontend-components/timeline-view/deep-collapse.md
-    expect(cfg!.fixedDefault).toBe(true);
+    expect(cfg!.fixedDefault).toBe(false);
+    expect(cfg!.expandWhileWorking).toBe(false);
+  });
+
+  it("keeps external agent messages collapsed in settled and live work", () => {
+    const cfg = messageCardConfig(item("inbound_chat", { source: "external_agent:codex" }));
+    expect(cfg?.fixedDefault).toBe(false);
+    expect(cfg?.expandWhileWorking).toBe(false);
   });
 
   it("inbound_chat unknown source → System", () => {
@@ -312,7 +315,7 @@ describe("CardHeader", () => {
     expect(main.container.querySelector("[data-subagent-parent]")).toBeNull();
   });
 
-  it("an expanded sub-agent row shows its text as work detail, collapsed it shows only the header", () => {
+  it("an expanded sub-agent row shows its text as work detail, collapsed it shows only the header", async () => {
     const spoken = item("subagent_text", { source: "general-purpose", payload: "ALPHA says **hi**" });
     const row = (expanded: boolean) => (
       <TimelineRow
@@ -329,8 +332,10 @@ describe("CardHeader", () => {
     expect(collapsed.container.textContent).not.toContain("ALPHA says");
     collapsed.unmount();
     const open = renderWithQuery(row(true));
-    expect(open.container.textContent).toContain("ALPHA says hi");
-    expect(open.container.querySelector("strong")?.textContent).toBe("hi");
+    await waitFor(() => {
+      expect(open.container.textContent).toContain("ALPHA says hi");
+      expect(open.container.querySelector("strong")?.textContent).toBe("hi");
+    });
   });
 
   it("a row of a kind this build does not know renders nothing, not an empty row", () => {
@@ -363,7 +368,8 @@ describe("CardHeader", () => {
     const { container } = renderWithQuery(
       <CardHeader item={baseItem} config={cfg} expanded={true} onToggle={noop} />,
     );
-    expect(container.textContent).toContain("Meiva ▸");
+    expect(container.textContent).toBe("Meiva");
+    expect(container.querySelectorAll("svg.lucide-chevron-right")).toHaveLength(1);
   });
 
   it("collapsed state → aria-expanded=false, data-expanded=false, no title (no hover tooltip)", () => {

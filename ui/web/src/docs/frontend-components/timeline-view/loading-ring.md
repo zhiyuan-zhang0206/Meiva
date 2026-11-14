@@ -1,15 +1,9 @@
 # The loading ring
 
-`components/timeline/overlays.tsx` draws one ring for every loading state of the
-conversation: the pull-to-load strip, the scroll-to-bottom button while the
-newest page is read (that button exists only away from the bottom), and the cold
-load of a thread with nothing on screen yet.
-One geometry, so the three cannot drift — an arc of the same circle, the track at
-15% opacity, r=8 in a 24-unit box, at `size-5`. An arc fraction of 1 is a whole
-circle; the pull strip's grows with the pull, the button's is fixed. The button
-draws the ring rather than a circle of its own because a circle drawn to the
-button's edges, r=16.5 in a 36-unit box, read as a dial rather than a loader
-(user report 2026-10-20).
+`components/timeline/overlays.tsx` shares one ring between the pull-to-load
+strip and the cold load of a thread with nothing on screen yet. Each draws an
+arc of the same circle, with a 15% opacity track and an 8-unit radius in a
+24-unit box. The pull strip varies the arc with pull progress.
 
 The ring turns while the load is in flight. The pull strip's ring scales with the
 revealed pull space, so the first pixels of a pull show a small whole circle

@@ -29,19 +29,25 @@ class AskResult(BaseModel):
 
 
 # meiva:note
-# The user's outcome for one open question: an answer, a numbered text reply, or a skip.
+# An empty result and a legacy explicit skip share the same normalized receipt payload.
+# meiva:link gateway/agents/docs/operation-receipts.md
 class QuestionResult(BaseModel):
     model_config = ConfigDict(extra="forbid")
     id: int = Field(ge=1)
     answer: QuestionAnswer | None = None
     reply: NonBlank | None = None
-    skip: bool = False
+    skip: bool = Field(
+        default_factory=bool,
+        description="Legacy explicit skip. An ID-only result also skips the question.",
+    )
 
     @model_validator(mode="after")
-    def exactly_one_outcome(self) -> Self:
+    def normalize_outcome(self) -> Self:
         given = [self.answer is not None, self.reply is not None, self.skip]
-        if sum(given) != 1:
-            raise ValueError("a question result is exactly one of answer, reply or skip")
+        if sum(given) > 1:
+            raise ValueError("a question result accepts at most one of answer, reply or skip")
+        if not any(given):
+            self.skip = True
         return self
 
 

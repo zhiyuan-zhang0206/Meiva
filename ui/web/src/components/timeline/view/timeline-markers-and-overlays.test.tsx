@@ -4,7 +4,7 @@ import { ChatMarkdownMock, ScrollAreaMock, cleanupTimelineTest, makeItem, render
 vi.mock("@/components/content/markdown", () => ({ ChatMarkdown: ChatMarkdownMock }));
 vi.mock("@/components/ui/scroll-area", () => ({ ScrollArea: ScrollAreaMock }));
 import { TimelineView } from "..";
-import { LoadOlderSpinner, ScrollToBottomButton } from "../overlays";
+import { LoadOlderSpinner } from "../overlays";
 afterEach(cleanupTimelineTest);
 describe("ItemView: system_marker → LifecycleChip", () => {
   it("source='lifecycle_terminate' → Terminated chip", () => {
@@ -365,7 +365,7 @@ describe("Scroll-to-bottom button + multi-item render order", () => {
   // meiva:link ui/web/src/docs/frontend-components/timeline-view/sticky-scroll.md
   it("Scroll-to-bottom control is absent while the reader is at the bottom", () => {
     render(<TimelineView items={[]} />);
-    expect(screen.queryByLabelText("Scroll to bottom")).toBeNull();
+    expect(screen.queryByLabelText("Scroll down")).toBeNull();
   });
 });
 
@@ -414,10 +414,7 @@ describe("loading ring motion (cold load, pull strip, scroll-to-bottom)", () => 
     render(<LoadOlderSpinner loadingOlder />);
     expectRingMoves(screen.getByTestId("load-older-spinner").querySelector("svg"));
   });
-  it("scroll-to-bottom: the ring turns while the newest page loads", () => {
-    render(<ScrollToBottomButton atBottom={false} refreshing onClick={vi.fn()} />);
-    expectRingMoves(screen.getByTestId("latest-loading-ring"));
-  });
+
 });
 
 describe("load-older circle (revealed above the messages)", () => {

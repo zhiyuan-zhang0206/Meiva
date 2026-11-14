@@ -71,6 +71,8 @@ export function applySavedTimelineScroll(
   saved: SavedScroll,
   compactBuffer: CompactTransitionBuffer | null,
   canonicalItems: readonly BackendTimelineItem[],
+  tailHeight = viewport.scrollHeight,
+  collapseReserve?: HTMLElement | null,
 ): boolean {
   if (viewport.scrollHeight <= viewport.clientHeight) return false;
   const target = saved.followBottom || !saved.anchor ? null
@@ -78,10 +80,13 @@ export function applySavedTimelineScroll(
   if (target?.present && !target.node) return false;
   if (target?.node) materializeBeforeAnchor(viewport, target.node);
   const max = viewport.scrollHeight - viewport.clientHeight;
-  const top = saved.followBottom ? max : target?.node
+  const top = saved.followBottom ? tailHeight - viewport.clientHeight : target?.node
     ? viewport.scrollTop + target.node.getBoundingClientRect().top - viewport.getBoundingClientRect().top - target.viewportTop
     : saved.scrollTop;
-  if (top > max) return false;
+  if (top > max) {
+    if (!saved.usedCollapseReserve || !collapseReserve || !target?.node) return false;
+    collapseReserve.style.height = `${Math.ceil(top - max + collapseReserve.offsetHeight)}px`;
+  }
   viewport.scrollTop = Math.max(0, top);
   return true;
 }

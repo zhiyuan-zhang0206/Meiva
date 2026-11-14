@@ -120,7 +120,7 @@ def test_one_submission_settles_every_open_question_with_one_inbound_in_id_order
         [third, first, second],
         [
             {"id": first, "answer": {"option_ids": ["desktop"], "comment": "Use 1 later."}},
-            {"id": second, "skip": True},
+            {"id": second},
             {"id": third, "reply": "keep it small"},
         ],
     )
@@ -148,13 +148,17 @@ def test_one_submission_settles_every_open_question_with_one_inbound_in_id_order
     assert client.get("/api/questions").json()["awaiting"] == []
 
 
-def test_skipping_everything_is_one_dismissal_inbound(
+def test_blank_batch_is_one_dismissal_and_replays_with_the_legacy_skip_payload(
     client: TestClient, db_conn: psycopg.Connection
 ) -> None:
     agent = seed_agent(db_conn)
     ids = ask(client, agent, ("A?", TEXT), ("B?", TEXT))
-    done = submit(client, agent, ids, [{"id": i, "skip": True} for i in ids])
+    key = str(uuid4())
+    done = submit(client, agent, ids, [{"id": i} for i in ids], key)
     assert done.status_code == 201, done.text
+    replay = submit(client, agent, ids, [{"id": i, "skip": True} for i in ids], key)
+    assert replay.status_code == 201, replay.text
+    assert replay.json()["inbound_id"] == done.json()["inbound_id"]
     assert (
         db_conn.execute(
             "SELECT resolution, reply, answer FROM agent_questions WHERE agent_id=%s ORDER BY id",
@@ -200,7 +204,6 @@ def test_results_that_do_not_match_the_expected_ids_are_refused(
         ([first, second], [{"id": first, "reply": "x"}, {"id": first, "reply": "y"}]),
         ([first, first], [{"id": first, "reply": "x"}, {"id": first, "reply": "y"}]),
         ([first], [{"id": first, "reply": "x", "skip": True}]),
-        ([first], [{"id": first}]),
     ):
         assert submit(client, agent, expected, results).status_code == 422
     assert inbound(db_conn, agent) == []
