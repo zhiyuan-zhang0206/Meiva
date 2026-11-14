@@ -2,6 +2,7 @@
 # Inspect generated assistant text and build model-only visibility feedback.
 # meiva:link base/agents/messages/docs/metadata-contracts.md
 
+
 from datetime import datetime
 
 from langchain_core.messages import AIMessage, HumanMessage
@@ -9,6 +10,7 @@ from langchain_core.messages import AIMessage, HumanMessage
 from agent.messages import system_note_message
 from base.agents.messages.kwargs import NoteTag, read_meiva_kwargs
 from base.agents.messages.reply_intent import REPLY_VISIBILITY_CORRECTION, parse_reply_visibility
+from base.agents.messages.timestamp_policy import TimestampPolicy
 from base.host.boundary.json_values import is_object_dict
 from base.lm.content import message_content
 from base.lm.reasoning import to_canonical_reasoning
@@ -30,8 +32,9 @@ def has_invalid_reply_visibility(message: AIMessage) -> bool:
     )
 
 
-def reply_visibility_note(now: datetime) -> HumanMessage:
+def reply_visibility_note(now: datetime, *, inputs: TimestampPolicy) -> HumanMessage:
     return system_note_message(
+        inputs=inputs,
         content=REPLY_VISIBILITY_CORRECTION,
         tag=NoteTag.REPLY_VISIBILITY,
         picked_up_at=now,

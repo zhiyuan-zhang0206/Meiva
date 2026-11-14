@@ -60,6 +60,7 @@ def memory_index_note(ctx: MeivaContext) -> HumanMessage | None:
         tag=NoteTag.MEMORY,
         picked_up_at=now,
         created_at=now,
+        inputs=ctx.timestamp_policy(),
     )
 
 
@@ -144,4 +145,5 @@ def per_agent_memory_note(ctx: MeivaContext) -> HumanMessage | None:
         tag=NoteTag.AGENT_MEMORY,
         picked_up_at=now,
         created_at=now,
+        inputs=ctx.timestamp_policy(),
     )

@@ -11,6 +11,7 @@ from langgraph.checkpoint.serde.jsonplus import JsonPlusSerializer
 
 from agent.messages import InboundTimes, exec_output_message, inbound_message, system_note_message
 from base.agents.messages.kwargs import ExecStatus, MeivaMsgType, NoteTag, read_meiva_kwargs
+from base.agents.messages.timestamp_policy import TimestampPolicy
 
 _PICKED_UP_AT = datetime(2026, 1, 1, tzinfo=UTC)
 
@@ -25,7 +26,9 @@ def test_stored_discriminator_is_plain_str() -> None:
         body_start=0,
         times=InboundTimes(arrived_at=None, picked_up_at=_PICKED_UP_AT),
     )
-    note = system_note_message(content="n", tag=NoteTag.MEMORY, picked_up_at=_PICKED_UP_AT)
+    note = system_note_message(
+        content="n", tag=NoteTag.MEMORY, picked_up_at=_PICKED_UP_AT, inputs=TimestampPolicy.off()
+    )
     exec_out = exec_output_message(
         content="ok",
         tool_call_id="t1",
@@ -46,7 +49,9 @@ def test_checkpoint_roundtrip_no_custom_type() -> None:
     """A tagged message round-trips through the LangGraph checkpoint serializer
     with the discriminator staying a plain `str` (no Enum custom-type path)."""
     serde = JsonPlusSerializer()
-    note = system_note_message(content="n", tag=NoteTag.SECURITY, picked_up_at=_PICKED_UP_AT)
+    note = system_note_message(
+        content="n", tag=NoteTag.SECURITY, picked_up_at=_PICKED_UP_AT, inputs=TimestampPolicy.off()
+    )
     restored = serde.loads_typed(serde.dumps_typed(note))
     tag = restored.additional_kwargs["meiva_note_tag"]
     assert type(tag) is str

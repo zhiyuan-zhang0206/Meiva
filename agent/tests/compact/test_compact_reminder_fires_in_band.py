@@ -36,6 +36,7 @@ from agent.tests.test_compact import (
 )
 from agent.tests.test_compact import meiva_compact_loaded as meiva_compact_loaded
 from base.agents.context import MeivaContext
+from base.agents.messages.timestamp_policy import TimestampPolicy
 from base.agents.tests.units import spawn_agent
 from base.clock import SYSTEM_TIMERS, Clock
 from base.clock.tests.seeded_rng import seeded_rng
@@ -67,7 +68,9 @@ async def test_compact_reminder_fires_in_band(
     from agent.graph.hooks import compact as _p
 
     state_cls, wrap_fn = meiva_compact_loaded
-    slices = compact_slices(compact_reminder_tokens=1, auto_compact_tokens=1_000_000)
+    slices = compact_slices(
+        compact_reminder_tokens=1, auto_compact_tokens=1_000_000, timestamps_enabled=False
+    )
     result = await wrap_fn(
         reminder_state(state_cls),
         runtime_with_llm(make_fake_llm(), database_gate=database_gate, slices=slices),
@@ -235,6 +238,7 @@ async def test_compact_contract_reaches_request_without_resident_self(
         agent_id=228,
         catalog=build_model_catalog(home=meiva_home()),
         now=Clock.from_settings().now,
+        inputs=TimestampPolicy.off(),
     )
     [request] = llm.requests
     assert request[0] is head
@@ -309,11 +313,15 @@ async def test_compact_summary_replaces_whole_history_no_tail(
 
     insert_compact_summary(db_conn, tid, "the whole memory")
     cmd = await claim_node(
-        state, make_runtime(aops_pool, database_gate=database_gate), make_config(tid)
+        state,
+        make_runtime(aops_pool, database_gate=database_gate, timestamps_enabled=False),
+        make_config(tid),
     )
 
     tail = compact_tail(cmd.update)
-    assert [m.content for m in tail] == [compose_summary_message("the whole memory")]
+    assert [m.content for m in tail] == [
+        compose_summary_message("the whole memory", inputs=TimestampPolicy.off())
+    ]
     assert cmd.goto == "init_context"
 
 
@@ -409,18 +417,26 @@ async def test_consecutive_compacts_both_processed(
     state = AgentState(messages=initial_msgs)
 
     cmd1 = await claim_node(
-        state, make_runtime(aops_pool, database_gate=database_gate), make_config(tid)
+        state,
+        make_runtime(aops_pool, database_gate=database_gate, timestamps_enabled=False),
+        make_config(tid),
     )
     tail1 = compact_tail(cmd1.update)
-    assert tail1[0].content == compose_summary_message("first compact summary")
+    assert tail1[0].content == compose_summary_message(
+        "first compact summary", inputs=TimestampPolicy.off()
+    )
 
     compacted_state = AgentState(messages=[sys_msg, HumanMessage(content="first compact summary")])
     insert_compact_summary(db_conn, tid, "second compact summary")
     cmd2 = await claim_node(
-        compacted_state, make_runtime(aops_pool, database_gate=database_gate), make_config(tid)
+        compacted_state,
+        make_runtime(aops_pool, database_gate=database_gate, timestamps_enabled=False),
+        make_config(tid),
     )
     tail2 = compact_tail(cmd2.update)
-    assert [m.content for m in tail2] == [compose_summary_message("second compact summary")]
+    assert [m.content for m in tail2] == [
+        compose_summary_message("second compact summary", inputs=TimestampPolicy.off())
+    ]
     assert cmd2.update is not None
     reset = cmd2.update["context_reset"]
     assert isinstance(reset, ContextReset)
@@ -448,11 +464,15 @@ async def test_compact_with_empty_state_injects_system_message_and_summary(
     state = AgentState()
 
     cmd = await claim_node(
-        state, make_runtime(aops_pool, database_gate=database_gate), make_config(tid)
+        state,
+        make_runtime(aops_pool, database_gate=database_gate, timestamps_enabled=False),
+        make_config(tid),
     )
 
     tail = compact_tail(cmd.update)
-    assert [m.content for m in tail] == [compose_summary_message("compact before any chat")]
+    assert [m.content for m in tail] == [
+        compose_summary_message("compact before any chat", inputs=TimestampPolicy.off())
+    ]
     assert cmd.goto == "init_context"
 
 
@@ -483,12 +503,16 @@ async def test_compact_with_super_long_summary_in_claim(
 
     insert_compact_summary(db_conn, tid, long_summary)
     cmd = await claim_node(
-        state, make_runtime(aops_pool, database_gate=database_gate), make_config(tid)
+        state,
+        make_runtime(aops_pool, database_gate=database_gate, timestamps_enabled=False),
+        make_config(tid),
     )
 
     tail = compact_tail(cmd.update)
-    assert tail[0].content == compose_summary_message(long_summary)
-    assert len(tail[0].content) == len(compose_summary_message(long_summary))
+    assert tail[0].content == compose_summary_message(long_summary, inputs=TimestampPolicy.off())
+    assert len(tail[0].content) == len(
+        compose_summary_message(long_summary, inputs=TimestampPolicy.off())
+    )
     assert long_summary in tail[0].content
 
 
@@ -570,7 +594,9 @@ async def test_compact_in_same_batch_as_restart(
         state,
         Runtime(
             context=replace(
-                make_runtime(aops_pool, database_gate=database_gate).context,
+                make_runtime(
+                    aops_pool, database_gate=database_gate, timestamps_enabled=False
+                ).context,
                 original_incarnation=old,
                 hosted_resources=None,
             )
@@ -598,7 +624,9 @@ async def test_compact_in_same_batch_as_restart(
         state,
         Runtime(
             context=replace(
-                make_runtime(aops_pool, database_gate=database_gate).context,
+                make_runtime(
+                    aops_pool, database_gate=database_gate, timestamps_enabled=False
+                ).context,
                 original_incarnation=successor,
                 hosted_resources=None,
             )
@@ -606,7 +634,7 @@ async def test_compact_in_same_batch_as_restart(
         make_config(tid),
     )
     tail = compact_tail(resumed.update)
-    assert tail[0].content == compose_summary_message(summary_text)
+    assert tail[0].content == compose_summary_message(summary_text, inputs=TimestampPolicy.off())
     assert resumed.goto == "init_context"
     assert db_conn.execute(
         "SELECT status FROM inbound_messages WHERE id=%s", (summary_id,)

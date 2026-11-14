@@ -10,6 +10,7 @@ from agent.messages import (
     system_note_message,
 )
 from base.agents.messages.kwargs import ExecStatus
+from base.agents.messages.timestamp_policy import TimestampPolicy
 
 _PICKED_UP_AT = datetime(2026, 1, 1, tzinfo=UTC)
 
@@ -109,7 +110,11 @@ class TestMessageCreatedAtStamp:
 
         dt = datetime(2026, 6, 19, 15, 30, tzinfo=UTC)
         msg = system_note_message(
-            content="note", tag=NoteTag.MEMORY, created_at=dt, picked_up_at=_PICKED_UP_AT
+            content="note",
+            tag=NoteTag.MEMORY,
+            created_at=dt,
+            picked_up_at=_PICKED_UP_AT,
+            inputs=TimestampPolicy.off(),
         )
         assert msg.additional_kwargs["meiva_created_at"] == "2026-06-19T15:30:00+00:00"
 
@@ -118,7 +123,10 @@ def test_a_system_note_carries_both_tags() -> None:
     from agent.messages import NoteTag, system_note_message
 
     msg = system_note_message(
-        content="line one\nline two", tag=NoteTag.MEMORY, picked_up_at=_PICKED_UP_AT
+        content="line one\nline two",
+        tag=NoteTag.MEMORY,
+        picked_up_at=_PICKED_UP_AT,
+        inputs=TimestampPolicy.off(),
     )
 
     assert msg.content == "<system_note>\nline one\nline two\n</system_note>"
@@ -131,10 +139,23 @@ def test_has_conversation_false_for_a_freshly_established_window() -> None:
 
     head: list[AnyMessage] = [
         SystemMessage(content="<prompt>"),
-        system_note_message(content="your id", tag=NoteTag.AGENT_ID, picked_up_at=_PICKED_UP_AT),
-        system_note_message(content="the index", tag=NoteTag.MEMORY, picked_up_at=_PICKED_UP_AT),
         system_note_message(
-            content="your memory", tag=NoteTag.AGENT_MEMORY, picked_up_at=_PICKED_UP_AT
+            content="your id",
+            tag=NoteTag.AGENT_ID,
+            picked_up_at=_PICKED_UP_AT,
+            inputs=TimestampPolicy.off(),
+        ),
+        system_note_message(
+            content="the index",
+            tag=NoteTag.MEMORY,
+            picked_up_at=_PICKED_UP_AT,
+            inputs=TimestampPolicy.off(),
+        ),
+        system_note_message(
+            content="your memory",
+            tag=NoteTag.AGENT_MEMORY,
+            picked_up_at=_PICKED_UP_AT,
+            inputs=TimestampPolicy.off(),
         ),
     ]
     assert has_conversation(head) is False
@@ -159,7 +180,12 @@ def test_has_conversation_true_once_an_inbound_lands() -> None:
 
     msgs: list[AnyMessage] = [
         SystemMessage(content="<prompt>"),
-        system_note_message(content="your id", tag=NoteTag.AGENT_ID, picked_up_at=_PICKED_UP_AT),
+        system_note_message(
+            content="your id",
+            tag=NoteTag.AGENT_ID,
+            picked_up_at=_PICKED_UP_AT,
+            inputs=TimestampPolicy.off(),
+        ),
         inbound_message(
             content="hello",
             source="user",
@@ -178,7 +204,12 @@ def test_has_conversation_true_for_an_agent_reply() -> None:
 
     msgs: list[AnyMessage] = [
         SystemMessage(content="<prompt>"),
-        system_note_message(content="your id", tag=NoteTag.AGENT_ID, picked_up_at=_PICKED_UP_AT),
+        system_note_message(
+            content="your id",
+            tag=NoteTag.AGENT_ID,
+            picked_up_at=_PICKED_UP_AT,
+            inputs=TimestampPolicy.off(),
+        ),
         AIMessage(content="on it"),
     ]
     assert has_conversation(msgs) is True
@@ -191,7 +222,12 @@ def test_has_conversation_true_for_a_post_compact_summary() -> None:
 
     msgs: list[AnyMessage] = [
         SystemMessage(content="<prompt>"),
-        system_note_message(content="your id", tag=NoteTag.AGENT_ID, picked_up_at=_PICKED_UP_AT),
+        system_note_message(
+            content="your id",
+            tag=NoteTag.AGENT_ID,
+            picked_up_at=_PICKED_UP_AT,
+            inputs=TimestampPolicy.off(),
+        ),
         HumanMessage(content="<system_note>\nYour context was just compacted. ...\n</system_note>"),
     ]
     assert has_conversation(msgs) is True
@@ -223,7 +259,11 @@ class TestPickedUpAtStamp:
         attach_at = datetime(2026, 6, 19, 15, 32, tzinfo=UTC)
         inbound_at = datetime(2026, 6, 19, 15, 33, tzinfo=UTC)
         note = system_note_message(
-            content="n", tag=NoteTag.MEMORY, created_at=attach_at, picked_up_at=note_at
+            content="n",
+            tag=NoteTag.MEMORY,
+            created_at=attach_at,
+            picked_up_at=note_at,
+            inputs=TimestampPolicy.off(),
         )
         attach = attach_message(blocks=[], text="a", created_at=attach_at)
         inbound = inbound_message(
@@ -252,3 +292,31 @@ class TestPickedUpAtStamp:
             body_start=0,
         )
         assert "meiva_picked_up_at" not in msg.additional_kwargs
+
+
+def test_system_note_writer_stamps_the_original_creation_instant_only_when_enabled() -> None:
+    from datetime import UTC, datetime
+
+    from base.agents.messages.timestamp_policy import TimestampPolicy
+
+    created = datetime(2026, 11, 14, 8, 5, 51, tzinfo=UTC)
+    picked = datetime(2026, 11, 14, 8, 9, 0, tzinfo=UTC)
+    content = "A literal [2026-11-14 Sat 16:05:51] belongs to the body."
+    enabled = TimestampPolicy(True, "Asia/Shanghai", True, picked)
+    message = system_note_message(
+        content=content,
+        tag=NoteTag.CONTEXT,
+        picked_up_at=picked,
+        created_at=created,
+        inputs=enabled,
+    )
+    assert message.content == f"<system_note>\n[2026-11-14 Sat 16:05:51] {content}\n</system_note>"
+    disabled = system_note_message(
+        content=content,
+        tag=NoteTag.CONTEXT,
+        picked_up_at=picked,
+        created_at=created,
+        inputs=TimestampPolicy.off(),
+    )
+    assert disabled.content == f"<system_note>\n{content}\n</system_note>"
+    assert disabled.additional_kwargs == message.additional_kwargs

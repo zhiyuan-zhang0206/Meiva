@@ -12,6 +12,7 @@ from agent.messages import NoteTag, system_note_message
 from base.agents.context import MeivaContext
 from base.agents.messages.delivery.retry_io import retryable_database_error
 from base.agents.messages.reply_intent import delivery_disabled_entries
+from base.agents.messages.timestamp_policy import TimestampPolicy
 from base.agents.to_user import ToUserLimits, read_document, to_user_limits_from_agent
 from base.api_contracts.agent_contract import Harness
 from base.log import logger
@@ -107,6 +108,7 @@ def exec_timeout_note(ctx: MeivaContext) -> HumanMessage | None:
         tag=NoteTag.EXEC_TIMEOUT,
         picked_up_at=now,
         created_at=now,
+        inputs=ctx.timestamp_policy(),
     )
 
 
@@ -121,6 +123,7 @@ def timezone_note(ctx: MeivaContext) -> HumanMessage | None:
         tag=NoteTag.TIMEZONE,
         picked_up_at=now,
         created_at=now,
+        inputs=ctx.timestamp_policy(),
     )
 
 
@@ -175,6 +178,7 @@ def sdk_expand_note(ctx: MeivaContext) -> HumanMessage | None:
         tag=NoteTag.SDK_EXPAND,
         picked_up_at=now,
         created_at=now,
+        inputs=ctx.timestamp_policy(),
     )
 
 
@@ -240,6 +244,7 @@ def agent_id_note(ctx: MeivaContext) -> HumanMessage | None:
         tag=NoteTag.AGENT_ID,
         picked_up_at=now,
         created_at=now,
+        inputs=ctx.timestamp_policy(),
     )
 
 
@@ -286,6 +291,7 @@ def _render_skill_bodies(
 def _skill_bodies_note(
     skills: Sequence[Skill],
     *,
+    inputs: TimestampPolicy,
     framing: str,
     label: str,
     created_at: datetime,
@@ -299,12 +305,14 @@ def _skill_bodies_note(
         tag=NoteTag.PRELOADED_SKILLS,
         picked_up_at=created_at,
         created_at=created_at,
+        inputs=inputs,
     )
 
 
 def preloaded_note(
     skills: Sequence[Skill],
     *,
+    inputs: TimestampPolicy,
     harness: Harness,
     created_at: datetime,
 ) -> HumanMessage | None:
@@ -316,7 +324,7 @@ def preloaded_note(
             "your native file-reading tool.",
         )
     return _skill_bodies_note(
-        skills, framing=framing, label="preloaded-skills", created_at=created_at
+        skills, framing=framing, label="preloaded-skills", created_at=created_at, inputs=inputs
     )
 
 
@@ -335,7 +343,10 @@ def preloaded_skills_note(ctx: MeivaContext) -> HumanMessage | None:
     if not selection.skills:
         return None
     return preloaded_note(
-        selection.skills, harness=ctx.harness, created_at=ctx.require_clock().now()
+        selection.skills,
+        harness=ctx.harness,
+        created_at=ctx.require_clock().now(),
+        inputs=ctx.timestamp_policy(),
     )
 
 
@@ -343,6 +354,7 @@ def fork_tail_skills_note(
     names: list[str],
     sdk_disable: Sequence[str],
     *,
+    inputs: TimestampPolicy,
     home: Path,
     environ: Mapping[str, str],
     created_at: datetime,
@@ -360,6 +372,7 @@ def fork_tail_skills_note(
         framing=_FORK_TAIL_SKILLS_FRAMING,
         label="fork-tail-skills",
         created_at=created_at,
+        inputs=inputs,
     )
 
 

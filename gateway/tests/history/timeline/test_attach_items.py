@@ -448,6 +448,7 @@ class TestTimelineDispatch:
                 content="<system_note>\nYou have been restarted\n</system_note>",
                 tag=NoteTag.LIFECYCLE_RESTART,
                 picked_up_at=_PICKED_UP_AT,
+                inputs=TimestampPolicy.off(),
             ),
             AIMessage(content="after restart, hello"),  # 2 — must render
         ]

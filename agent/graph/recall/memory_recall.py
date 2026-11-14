@@ -184,5 +184,6 @@ async def passive_memory_recall(
         tag=NoteTag.MEMORY,
         picked_up_at=now,
         created_at=now,
+        inputs=context.timestamp_policy(),
     )
     return PassiveRecall(note=note, paths={item.path for item in picked})

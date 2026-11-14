@@ -649,7 +649,7 @@ async def run(
                     ("GET", "/stats"): stats_route(host, scheduler, pid=os.getpid(), home=home),
                     ("POST", "/cancel-turn"): cancel_turn_route(scheduler),
                     ("POST", "/prepare-harness-switch"): prepare_harness_switch_route(
-                        host, clock=stamping.clock
+                        host, timestamps=stamping
                     ),
                 },
             ),

@@ -31,6 +31,7 @@ from base import paths
 from base.agents.context import MeivaContext
 from base.agents.context.identity import AgentIdentity
 from base.agents.history.harness_messages import load_harness_timeline_items
+from base.agents.messages.timestamp_policy import TimestampPolicy
 from base.api_contracts.agent_contract import Harness
 from base.clock import SYSTEM_TIMERS, Clock
 from base.clock.tests.seeded_rng import seeded_rng
@@ -112,7 +113,10 @@ async def test_external_harness_cold_start_establishes_handoff_and_standing_note
 
     def custom_note(_ctx: MeivaContext) -> HumanMessage:
         return system_note_message(
-            content="Custom plugin standing note.", tag=NoteTag.MEMORY, picked_up_at=_PICKED_UP_AT
+            content="Custom plugin standing note.",
+            tag=NoteTag.MEMORY,
+            picked_up_at=_PICKED_UP_AT,
+            inputs=TimestampPolicy.off(),
         )
 
     registry = ExtensionRegistry(

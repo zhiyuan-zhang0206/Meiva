@@ -41,6 +41,7 @@ from pathlib import Path
 from langchain_core.messages import AnyMessage, HumanMessage
 
 from agent.messages import NoteTag, system_note_message
+from base.agents.messages.timestamp_policy import TimestampPolicy
 from base.host.env.agent_slices import HistoryDump
 from base.log import logger
 
@@ -118,7 +119,7 @@ def _rotate(d: Path, keep: int) -> None:
         )
 
 
-def history_dump_note(path: Path, *, created_at: datetime) -> HumanMessage:
+def history_dump_note(path: Path, *, inputs: TimestampPolicy, created_at: datetime) -> HumanMessage:
     """The system note telling the fresh post-compact context where the dump is.
 
     Only ever injected when the dump actually succeeded, and only into the new
@@ -126,6 +127,7 @@ def history_dump_note(path: Path, *, created_at: datetime) -> HumanMessage:
     channel — see the module docstring for the adjacency rationale.
     """
     return system_note_message(
+        inputs=inputs,
         content=(
             f"Your pre-compact conversation history was dumped to {path} "
             f"(JSONL, one message per line). Grep it to recover details the "

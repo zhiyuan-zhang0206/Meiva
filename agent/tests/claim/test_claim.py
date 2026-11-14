@@ -15,6 +15,7 @@
 # Not tested:
 # - Redis pub/sub wake integration for ops_db AsyncConnection (tested in test_db.py)
 # - auto-compact behavior (now a before_llm hook, tests in agent/tests/test_compact.py)
+
 from collections.abc import Callable
 from dataclasses import replace
 from datetime import UTC, datetime
@@ -40,6 +41,7 @@ from agent.state import AgentState
 from agent.tests.claim.claim_status_support import compact_tail
 from agent.tests.claim.claim_status_support import running_agent as running_agent
 from base.agents.context import MeivaContext
+from base.agents.messages.timestamp_policy import TimestampPolicy
 from base.agents.tests.units import spawn_agent
 from base.cluster.machine import MachineIdentityReader
 from base.cluster.machine.tests.identity import machine_identity as machine_identity
@@ -255,7 +257,9 @@ async def test_claim_auto_resurrect_compact_request_batch_compacts_and_wakes(
     fake_llm = make_fake_llm("LLM-generated summary")
     cmd = await claim_node(
         state,
-        make_runtime(ops_pool=aops_pool, llm=fake_llm, database_gate=database_gate),
+        make_runtime(
+            ops_pool=aops_pool, llm=fake_llm, database_gate=database_gate, timestamps_enabled=False
+        ),
         thread_config(
             tid,
         ),
@@ -264,7 +268,9 @@ async def test_claim_auto_resurrect_compact_request_batch_compacts_and_wakes(
     assert cmd.goto == "init_context"
     assert cmd.update["context_reset"].resume == "before_turn"  # type: ignore[index]
     msgs = compact_tail(cmd.update)
-    assert msgs[0].content == compose_summary_message("LLM-generated summary")
+    assert msgs[0].content == compose_summary_message(
+        "LLM-generated summary", inputs=TimestampPolicy.off()
+    )
     # resurrect marker appended after the summary — the revive still wakes the agent
     contents = [m.content for m in msgs if isinstance(m.content, str)]
     assert any("You have been resurrected by user" in c for c in contents)
@@ -272,13 +278,19 @@ async def test_claim_auto_resurrect_compact_request_batch_compacts_and_wakes(
 
 def _agent_id_note(_ctx: MeivaContext) -> HumanMessage:
     return system_note_message(
-        content="Your Agent ID is N.", tag=NoteTag.AGENT_ID, picked_up_at=_PICKED_UP_AT
+        content="Your Agent ID is N.",
+        tag=NoteTag.AGENT_ID,
+        picked_up_at=_PICKED_UP_AT,
+        inputs=TimestampPolicy.off(),
     )
 
 
 def _agent_memory_note(_ctx: MeivaContext) -> HumanMessage:
     return system_note_message(
-        content="the new agent's memory", tag=NoteTag.AGENT_MEMORY, picked_up_at=_PICKED_UP_AT
+        content="the new agent's memory",
+        tag=NoteTag.AGENT_MEMORY,
+        picked_up_at=_PICKED_UP_AT,
+        inputs=TimestampPolicy.off(),
     )
 
 

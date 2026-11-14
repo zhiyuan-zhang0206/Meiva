@@ -6,6 +6,7 @@ from langchain_core.messages import AIMessage, HumanMessage
 
 from agent.graph.hooks.compact import generate_summary
 from agent.graph.hooks.tests.scripted_model import ScriptedModel
+from base.agents.messages.timestamp_policy import TimestampPolicy
 from base.config.tests.configuration import defaults
 from base.host.env.agent_slices import AgentSlices
 from base.log.tests.log_records import LogRecords
@@ -29,6 +30,7 @@ async def test_compaction_preserves_fast_accounting_id(loguru_records: LogRecord
         agent_id=228,
         catalog=build_model_catalog(home=meiva_home()),
         now=lambda: datetime(2026, 8, 17, tzinfo=UTC),
+        inputs=TimestampPolicy.off(),
     )
 
     assert summary == "summary"

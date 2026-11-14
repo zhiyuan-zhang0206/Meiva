@@ -30,6 +30,7 @@ from agent.tests.claim.claim_status_support import (
 from agent.tests.claim.claim_status_support import running_agent as running_agent
 from agent.tests.scripted_model import ScriptedChatModel
 from base.agents.inbox.insert import insert_inbound_message
+from base.agents.messages.timestamp_policy import TimestampPolicy
 from base.agents.tests.units import spawn_agent
 from base.cluster.machine import MachineIdentityReader
 from base.cluster.machine.tests.identity import machine_identity as machine_identity
@@ -120,7 +121,9 @@ async def test_claim_compact_summary_replaces_messages_with_remove_sentinel(
     fake_llm = scripted_llm("LLM should not be called")
     cmd = await claim_node(
         state,
-        make_runtime(ops_pool=aops_pool, llm=fake_llm, database_gate=database_gate),
+        make_runtime(
+            ops_pool=aops_pool, llm=fake_llm, database_gate=database_gate, timestamps_enabled=False
+        ),
         thread_config(
             tid,
         ),
@@ -129,7 +132,7 @@ async def test_claim_compact_summary_replaces_messages_with_remove_sentinel(
     assert fake_llm.requests == []
     tail = compact_tail(cmd.update)
     assert isinstance(tail[0], HumanMessage)
-    assert tail[0].content == compose_summary_message(summary_text)  # pyright: ignore[reportUnknownMemberType]
+    assert tail[0].content == compose_summary_message(summary_text, inputs=TimestampPolicy.off())  # pyright: ignore[reportUnknownMemberType]
 
 
 async def test_claim_compact_summary_bumps_compact_version(
@@ -204,14 +207,18 @@ async def test_claim_compact_request_calls_backend_llm(
     fake_llm = scripted_llm("LLM-generated summary")
     cmd = await claim_node(
         state,
-        make_runtime(ops_pool=aops_pool, llm=fake_llm, database_gate=database_gate),
+        make_runtime(
+            ops_pool=aops_pool, llm=fake_llm, database_gate=database_gate, timestamps_enabled=False
+        ),
         thread_config(
             tid,
         ),
     )
 
     tail = compact_tail(cmd.update)
-    assert tail[0].content == compose_summary_message("LLM-generated summary")  # pyright: ignore[reportUnknownMemberType]
+    assert tail[0].content == compose_summary_message(
+        "LLM-generated summary", inputs=TimestampPolicy.off()
+    )  # pyright: ignore[reportUnknownMemberType]
 
 
 async def test_claim_compact_request_emits_live_run_pair_with_durable_anchor(
@@ -302,6 +309,7 @@ async def test_claim_two_compact_requests_second_replaces_first(
             llm=llm,
             event_publisher=live_events.publisher,
             database_gate=database_gate,
+            timestamps_enabled=False,
         ),
         thread_config(tid),
     )
@@ -310,7 +318,9 @@ async def test_claim_two_compact_requests_second_replaces_first(
     assert [p[1]["status"] for p in pairs] == ["replaced", "success"]
     assert len(llm.requests) == 2
     tail = compact_tail(cmd.update)
-    assert tail[0].content == compose_summary_message("second summary")  # pyright: ignore[reportUnknownMemberType]
+    assert tail[0].content == compose_summary_message(
+        "second summary", inputs=TimestampPolicy.off()
+    )  # pyright: ignore[reportUnknownMemberType]
     assert tail[0].additional_kwargs["meiva_compact_id"] == pairs[1][0]["compact_id"]  # pyright: ignore[reportUnknownMemberType]
 
 
@@ -353,6 +363,7 @@ async def test_claim_compact_summary_supersedes_pending_request_and_closes_it_re
             llm=llm,
             event_publisher=live_events.publisher,
             database_gate=database_gate,
+            timestamps_enabled=False,
         ),
         thread_config(tid),
     )
@@ -362,7 +373,9 @@ async def test_claim_compact_summary_supersedes_pending_request_and_closes_it_re
     assert finished["status"] == "replaced"
     assert len(llm.requests) == 1
     tail = compact_tail(cmd.update)
-    assert tail[0].content == compose_summary_message("agent-authored summary")  # pyright: ignore[reportUnknownMemberType]
+    assert tail[0].content == compose_summary_message(
+        "agent-authored summary", inputs=TimestampPolicy.off()
+    )  # pyright: ignore[reportUnknownMemberType]
     assert "meiva_compact_id" not in tail[0].additional_kwargs  # pyright: ignore[reportUnknownMemberType]
 
 
@@ -485,7 +498,9 @@ async def test_claim_compact_request_retries_then_succeeds(
 
     cmd = await claim_node(
         state,
-        make_runtime(ops_pool=aops_pool, llm=llm, database_gate=database_gate),
+        make_runtime(
+            ops_pool=aops_pool, llm=llm, database_gate=database_gate, timestamps_enabled=False
+        ),
         thread_config(
             tid,
         ),
@@ -493,7 +508,9 @@ async def test_claim_compact_request_retries_then_succeeds(
 
     assert len(llm.requests) == 2
     tail = compact_tail(cmd.update)
-    assert tail[0].content == compose_summary_message("retried summary")  # pyright: ignore[reportUnknownMemberType]
+    assert tail[0].content == compose_summary_message(
+        "retried summary", inputs=TimestampPolicy.off()
+    )  # pyright: ignore[reportUnknownMemberType]
 
 
 async def test_claim_compact_summary_with_chat_in_same_batch_defers_chat(
@@ -535,7 +552,7 @@ async def test_claim_compact_summary_with_chat_in_same_batch_defers_chat(
 
     cmd = await claim_node(
         state,
-        make_runtime(ops_pool=aops_pool, database_gate=database_gate),
+        make_runtime(ops_pool=aops_pool, database_gate=database_gate, timestamps_enabled=False),
         thread_config(
             tid,
         ),
@@ -544,7 +561,7 @@ async def test_claim_compact_summary_with_chat_in_same_batch_defers_chat(
     # The compact is a clean wipe: the parked tail is the summary alone.
     tail = compact_tail(cmd.update)
     assert len(tail) == 1  # pyright: ignore[reportUnknownArgumentType]
-    assert tail[0].content == compose_summary_message(summary_text)  # pyright: ignore[reportUnknownMemberType]
+    assert tail[0].content == compose_summary_message(summary_text, inputs=TimestampPolicy.off())  # pyright: ignore[reportUnknownMemberType]
     assert cmd.goto == "init_context"
     # The co-batched chat is deferred, not dropped: back to pending so the
     # next claim delivers it in the fresh context.
@@ -598,7 +615,7 @@ async def test_claim_compact_summary_finalizes_claimed_history(
 
     cmd = await claim_node(
         state,
-        make_runtime(ops_pool=aops_pool, database_gate=database_gate),
+        make_runtime(ops_pool=aops_pool, database_gate=database_gate, timestamps_enabled=False),
         thread_config(
             tid,
         ),
@@ -607,7 +624,7 @@ async def test_claim_compact_summary_finalizes_claimed_history(
     # Compact still a clean wipe: the parked tail is the summary alone.
     tail = compact_tail(cmd.update)
     assert len(tail) == 1  # pyright: ignore[reportUnknownArgumentType]
-    assert tail[0].content == compose_summary_message("agent summary")  # pyright: ignore[reportUnknownMemberType]
+    assert tail[0].content == compose_summary_message("agent summary", inputs=TimestampPolicy.off())  # pyright: ignore[reportUnknownMemberType]
     # ...and the claimed history is finalized: a post-compact restart must not
     # re-deliver them (reconcile only resets 'claimed' rows).
     with db_conn.cursor() as cur:

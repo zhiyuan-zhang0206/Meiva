@@ -182,6 +182,7 @@ class TestAiMessageItems:
             content="use meiva.agents.send_message",
             tag=NoteTag.AGENT_REPLY,
             picked_up_at=_PICKED_UP_AT,
+            inputs=TimestampPolicy.off(),
         )
         items, _ = build_timeline_items([msg], inputs=_TIMELINE_INPUTS)
         assert len(items) == 1
@@ -235,13 +236,27 @@ class TestAiMessageItems:
 
         for tag in shown:
             items, _ = build_timeline_items(
-                [system_note_message(content="x", tag=tag, picked_up_at=_PICKED_UP_AT)],
+                [
+                    system_note_message(
+                        content="x",
+                        tag=tag,
+                        picked_up_at=_PICKED_UP_AT,
+                        inputs=TimestampPolicy.off(),
+                    )
+                ],
                 inputs=_TIMELINE_INPUTS,
             )
             assert items[0].show_timestamp is True, tag
         for tag in hidden:
             items, _ = build_timeline_items(
-                [system_note_message(content="x", tag=tag, picked_up_at=_PICKED_UP_AT)],
+                [
+                    system_note_message(
+                        content="x",
+                        tag=tag,
+                        picked_up_at=_PICKED_UP_AT,
+                        inputs=TimestampPolicy.off(),
+                    )
+                ],
                 inputs=_TIMELINE_INPUTS,
             )
             assert items[0].show_timestamp is False, tag
