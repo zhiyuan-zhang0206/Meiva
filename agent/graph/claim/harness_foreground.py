@@ -13,7 +13,6 @@ from dataclasses import dataclass, replace
 from types import MappingProxyType
 
 from agent.graph.claim.harness_render import fit_input_images, skipped_images_note
-from base.agents.history.timeline_item import TimelineItem
 from base.lm.harness import (
     BridgeEvent,
     HarnessInput,
@@ -47,14 +46,11 @@ __all__ = [
 # input (a continuation note, a fork marker, a visibility correction) has no row and `None` there.
 # One wake's batch is one input: `inbound_id` is the row that names it (the first that is not passive)
 # and `carried` the other rows that ride in its text, settled with it by the one acknowledgement.
-# `items` are the timeline entries of all its rows, written when the input enters the context, never
-# before.
 # meiva:link agent/graph/docs/harness-turn.md
 @dataclass(frozen=True, slots=True)
 class Handed:
     key: str
     inbound_id: int | None
-    items: tuple[TimelineItem, ...]
     human: bool = False
     carried: tuple[int, ...] = ()
 
@@ -65,14 +61,12 @@ class Handed:
 
 # meiva:note
 # The rows of one wake's batch as one input: the first row that is not passive names it (a batch of
-# passive rows alone is never handed over), the others ride in its text and settle with it. Their
-# timeline entries stay in queue order.
+# passive rows alone is never handed over), the others ride in its text and settle with it.
 def merge_handed(parts: Sequence[tuple[Handed, bool]]) -> Handed:
     primary = next((h for h, passive in parts if not passive), parts[0][0])
     return Handed(
         primary.key,
         primary.inbound_id,
-        tuple(item for h, _ in parts for item in h.items),
         any(h.human for h, _ in parts),
         tuple(i for h, _ in parts for i in h.row_ids if i != primary.inbound_id),
     )
@@ -217,17 +211,17 @@ def plan_reconciliation(
 # carries the same messages in one call). Handing them over one by one made the first input open the
 # turn alone and every other one run as a turn of its own about a second later (Claude Code), or reach
 # the model only after its first request had gone out (Codex, Antigravity): the agent first answered a
-# passive note or a hook note and only then the person. The rows keep their own timeline entries and
-# settle together with the one acknowledgement.
+# passive note or a hook note and only then the person. The rows settle together with the one
+# acknowledgement.
 #
 # What one reservation hands the harness: always one input. The synthetic inputs' text comes first (a
 # restart or resume note, a context reset, a continuation: system hints the model needs before the
 # messages), then each row in queue order, then the hook note (a native request carries hook messages
-# after the messages), each its own text block with a row's images right behind its text. The synthetic inputs ride in it with their timeline
-# entries and settle with it. A row with no text settles at once. A wake with row text is named by its
+# after the messages), each its own text block with a row's images right behind its text. The synthetic
+# inputs ride in it and settle with it. A row with no text settles at once. A wake with row text is named by its
 # first row that is not passive, and `folded` is what to hand back if the input is refused, lost or not
 # taken. A wake with no row text is named by its first synthetic input and is itself a synthetic input
-# (no row names it), so a refusal hands it back whole, text and timeline entries, and `folded` is
+# (no row names it), so a refusal hands it back whole, text and all, and `folded` is
 # empty; `prompts` is the text each synthetic input is handed back under. `group` is the merged input
 # when it carries several rows, which is what must be marked so a crash can rebuild it. The images of
 # the input are bounded together, not per row. Passive rows alone are never handed over (they wait for the

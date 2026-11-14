@@ -248,14 +248,13 @@ BEGIN
 END $$;
 SQL
 
-echo "-> harness switch & external messages smoke: mutable harness + agent_harness_messages insert/select"
+echo "-> harness switch smoke: mutable harness on agents_meta"
 psql -d "$TEST_DB" -v ON_ERROR_STOP=1 <<'SQL'
--- `harness` can now be switched on restart. Verify mutable harness and agent_harness_messages round-trip.
+-- `harness` can be switched on restart, and `agent_harness_messages` stays dropped.
 INSERT INTO agents (id, label) VALUES (993001, 'harness-smoke');
 INSERT INTO agents_meta (id, status, harness) VALUES (993001, 'idling', 'codex');
 DO $$
 DECLARE stored TEXT;
-        msg_count INT;
 BEGIN
     IF (SELECT harness FROM agents_meta WHERE id = 993001) <> 'codex' THEN
         RAISE EXCEPTION 'the explicit harness was not stored';
@@ -265,13 +264,8 @@ BEGIN
     IF stored <> 'meiva' THEN
         RAISE EXCEPTION 'harness update did not succeed — stored=%', stored;
     END IF;
-
-    INSERT INTO agent_harness_messages (agent_id, seq, harness, item)
-    VALUES (993001, 0, 'codex', '{"kind": "human", "text": "hello"}'::jsonb);
-
-    SELECT count(*) INTO msg_count FROM agent_harness_messages WHERE agent_id = 993001;
-    IF msg_count <> 1 THEN
-        RAISE EXCEPTION 'agent_harness_messages insert failed — msg_count=%', msg_count;
+    IF to_regclass('public.agent_harness_messages') IS NOT NULL THEN
+        RAISE EXCEPTION 'agent_harness_messages should be dropped';
     END IF;
 END $$;
 SQL

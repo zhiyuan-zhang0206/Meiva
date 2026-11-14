@@ -13,12 +13,8 @@ from base.lm.harness.session.transcript.drafts import DraftKind, TimelineDraft
 # meiva:note
 # What one timeline draft of a harness record becomes as a `TimelineItem`: reply visibility
 # (`resolve_agent_reply`, which lives above `base/lm`) and the rendering of a tool call are applied here, once,
-# so the projection stays free of both. No item id is decided here: the caller numbers the items. A sub-agent's
-# text and tool output are cut at `SUBAGENT_ITEM_CHARS`, as they are on the event path today.
+# so the projection stays free of both. No item id is decided here: the caller numbers the items.
 # meiva:link base/lm/harness/docs/transcript-projection.md
-
-SUBAGENT_ITEM_CHARS = 8_000
-SUBAGENT_CUT = "\n[... sub-agent text cut]"
 
 
 @dataclass(frozen=True, slots=True)
@@ -55,19 +51,10 @@ def item_of(
                 "agent_code",
                 render_tool(name, draft.tool_input or {}),
                 source=name if name != "execute_code" else None,
-                tool_use_id=draft.tool_use_id,
                 sdk_calls=[SdkCall(method=name, count=1)],
             )
         case DraftKind.CODE_OUTPUT:
-            return _base(draft, "code_output", _cut(draft, draft.payload), exec_ms=draft.exec_ms)
-        case DraftKind.SUBAGENT_TEXT:
-            return _base(
-                draft,
-                "subagent_text",
-                _cut(draft, draft.payload),
-                source=draft.source,
-                user_facing=False,
-            )
+            return _base(draft, "code_output", draft.payload, exec_ms=draft.exec_ms)
         case DraftKind.SYSTEM_MARKER:
             return _base(draft, "system_marker", _marker_line(draft), source=draft.source)
 
@@ -88,12 +75,6 @@ def _inbound(draft: TimelineDraft, sent_items: Mapping[str, TimelineItem]) -> Ti
     if prebuilt is not None:
         return prebuilt
     return _base(draft, "inbound_chat", draft.payload, source=draft.source)
-
-
-def _cut(draft: TimelineDraft, text: str) -> str:
-    if draft.parent_tool_use_id is None or len(text) <= SUBAGENT_ITEM_CHARS:
-        return text
-    return text[:SUBAGENT_ITEM_CHARS] + SUBAGENT_CUT
 
 
 def _base(draft: TimelineDraft, kind: str, payload: str, **fields: object) -> TimelineItem:

@@ -96,10 +96,10 @@ def test_a_call_without_a_result_is_running_until_its_result_is_in_the_record(
     call_at = next(i for i, line in enumerate(lines) if '"type":"tool_use"' in line)
     partial = write(tmp_path / "partial.jsonl", "".join(lines[: call_at + 1]))
     call = next(p.item for p in window(partial).items if p.item.kind == "agent_code")
-    assert (call.activity_pending, call.activity_revision) == (True, 1)
+    assert call.activity_pending is True
     done = write(tmp_path / "done.jsonl", "".join(lines))
     settled = next(p.item for p in window(done).items if p.item.kind == "agent_code")
-    assert (settled.activity_pending, settled.activity_revision) == (None, None)
+    assert settled.activity_pending is None
     assert settled.item_id == call.item_id, "the same item, updated in place"
 
 

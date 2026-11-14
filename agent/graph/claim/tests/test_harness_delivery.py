@@ -243,15 +243,7 @@ async def test_synthetic_inputs_are_accepted_without_inventing_record_markers(
     db_conn: psycopg.Connection, aops_pool: AsyncConnectionPool, harness_runtime: RuntimeFixture
 ) -> None:
     agent_id = agent_row(db_conn)
-    marker = {
-        "item_id": "0.0",
-        "kind": "system_marker",
-        "payload": "restart accepted",
-        "created_at": "2026-11-11T00:00:00+00:00",
-    }
-    state = AgentState(
-        harness_inputs=[{"key": "control-9", "prompt": "continue", "timeline_items": [marker]}]
-    )
+    state = AgentState(harness_inputs=[{"key": "control-9", "prompt": "continue"}])
     engine = silent_engine()
     rt = harness_runtime(engine, agent_id=agent_id)
     async with asyncio.timeout(20), asyncio.TaskGroup() as tasks:

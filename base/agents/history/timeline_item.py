@@ -10,7 +10,7 @@ from __future__ import annotations
 
 from typing import Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel
 
 from base.agents.messages.inbound_images import TimelineUploadFile
 from base.agents.sdk.tally import SdkCall
@@ -42,7 +42,6 @@ class TimelineItem(BaseModel):
     """
 
     item_id: str
-    activity_revision: int | None = Field(default=None, ge=0, strict=True)
     activity_pending: bool | None = None
     kind: Literal[
         "inbound_chat",
@@ -53,24 +52,10 @@ class TimelineItem(BaseModel):
         "agent_code",
         "agent_reasoning",
         "code_output",
-        "subagent_text",
         "system_prompt",
         "system_marker",
     ]
     source: str | None = None
-    # meiva:note
-    # A CLI sub-agent's activity (`subagent_text`, and the `agent_code` / `code_output` pair of a tool
-    # call the sub-agent made): the `agent_code` item of the call that started the sub-agent, when it
-    # can be found (the same invocation, or an earlier one through `tool_use_id`). None for the main
-    # agent's own items. On `subagent_text`, `source` carries the CLI's own label for the sub-agent.
-    # meiva:link base/lm/harness/docs/subagent-text.md
-    parent_item_id: str | None = None
-    # meiva:note
-    # `agent_code` of an external harness only: the CLI's id of the tool call. It is what ties a
-    # sub-agent's activity to the call that started it when the activity arrives after the graph
-    # invocation that wrote the call has ended.
-    # meiva:link base/lm/harness/docs/subagent-text.md
-    tool_use_id: str | None = None
     payload: str  # rendered content
     created_at: str | None = None  # ISO-8601
     inbound_id: int | None = None

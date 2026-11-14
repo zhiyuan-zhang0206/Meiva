@@ -86,7 +86,6 @@ async def test_a_passive_note_a_message_and_a_hook_note_open_one_turn_that_holds
     note: dict[str, object] = {
         "key": f"hook-notes-{chat}",
         "prompt": _HOOK_NOTE,
-        "timeline_items": [],
     }
     rt = runtime(
         engine,
@@ -165,8 +164,8 @@ def _payload_keys(db: psycopg.Connection, rows: Sequence[int]) -> list[object]:
 def _hint_and_note(chat: int) -> AgentState:
     return AgentState(
         harness_inputs=[
-            {"key": f"hook-notes-{chat}", "prompt": _HOOK_NOTE, "timeline_items": []},
-            {"key": "reconciled-resume-1", "prompt": "You were restarted.", "timeline_items": []},
+            {"key": f"hook-notes-{chat}", "prompt": _HOOK_NOTE},
+            {"key": "reconciled-resume-1", "prompt": "You were restarted."},
         ]
     )
 
@@ -334,9 +333,9 @@ async def test_a_wakes_rows_reconcile_as_one_input_the_harness_stored_or_cannot_
 def _hints_only() -> AgentState:
     return AgentState(
         harness_inputs=[
-            {"key": "hook-notes-9", "prompt": _HOOK_NOTE, "timeline_items": []},
-            {"key": "reconciled-resume-1", "prompt": "You were restarted.", "timeline_items": []},
-            {"key": "context-reset-2", "prompt": "Context was reset.", "timeline_items": []},
+            {"key": "hook-notes-9", "prompt": _HOOK_NOTE},
+            {"key": "reconciled-resume-1", "prompt": "You were restarted."},
+            {"key": "context-reset-2", "prompt": "Context was reset."},
         ]
     )
 
@@ -412,8 +411,8 @@ async def test_a_refused_synthetic_only_wake_is_handed_over_again_as_the_same_on
 def test_plan_wake_merges_synthetic_inputs_and_keeps_a_single_one_as_it_was() -> None:
     from agent.graph.claim.harness_foreground import Handed, plan_wake
 
-    one = (Handed("control-1", None, ()), "restarted")
-    two = (Handed("hook-notes-1", None, ()), "note")
+    one = (Handed("control-1", None), "restarted")
+    two = (Handed("hook-notes-1", None), "note")
 
     single = plan_wake([one], [], {}, hook_notes_key="hook-notes-")
     merged = plan_wake([two, one], [], {}, hook_notes_key="hook-notes-")
@@ -434,7 +433,7 @@ def test_plan_wake_bounds_the_images_of_the_merged_input_not_of_each_row() -> No
 
     data = base64.b64encode(b"x" * MAX_IMAGE_BYTES).decode("ascii")
     block = ImageBlock(mime_type="image/png", data_base64=data)
-    rows = [(Handed(f"inbound-{i}", i, ()), f"message {i}", False) for i in range(1, 5)]
+    rows = [(Handed(f"inbound-{i}", i), f"message {i}", False) for i in range(1, 5)]
     images = {f"inbound-{i}": (block,) for i in range(1, 5)}
 
     [wake] = plan_wake([], rows, images, hook_notes_key="hook-notes-").inputs
@@ -449,12 +448,12 @@ def test_plan_wake_makes_a_block_per_message_with_its_images_behind_it() -> None
 
     image = ImageBlock(mime_type="image/png", data_base64="aGk=")
     rows = [
-        (Handed("inbound-1", 1, ()), "first message", False),
-        (Handed("inbound-2", 2, ()), "second message", False),
+        (Handed("inbound-1", 1), "first message", False),
+        (Handed("inbound-2", 2), "second message", False),
     ]
     synthetic = [
-        (Handed("hook-notes-2", None, ()), "a note"),
-        (Handed("control-1", None, ()), "a hint"),
+        (Handed("hook-notes-2", None), "a note"),
+        (Handed("control-1", None), "a hint"),
     ]
 
     plan = plan_wake(
@@ -559,9 +558,9 @@ def test_the_note_about_left_out_images_follows_the_last_message_before_the_hook
 
     data = base64.b64encode(b"x" * MAX_IMAGE_BYTES).decode("ascii")
     image = ImageBlock(mime_type="image/png", data_base64=data)
-    rows = [(Handed(f"inbound-{i}", i, ()), f"message {i}", False) for i in range(1, 5)]
+    rows = [(Handed(f"inbound-{i}", i), f"message {i}", False) for i in range(1, 5)]
     images = {f"inbound-{i}": (image,) for i in range(1, 5)}
-    note = (Handed("hook-notes-4", None, ()), "a hook note")
+    note = (Handed("hook-notes-4", None), "a hook note")
 
     [wake] = plan_wake([note], rows, images, hook_notes_key="hook-notes-").inputs
 
@@ -581,9 +580,9 @@ def test_the_note_about_left_out_images_follows_the_last_message_before_the_hook
 def test_passive_rows_alone_are_held_and_never_become_the_wake() -> None:
     from agent.graph.claim.harness_foreground import Handed, plan_wake
 
-    passive = (Handed("inbound-2", 2, ()), "interrupted", True)
-    blank = (Handed("inbound-1", 1, ()), "  ", False)
-    hint = (Handed("control-1", None, ()), "restarted")
+    passive = (Handed("inbound-2", 2), "interrupted", True)
+    blank = (Handed("inbound-1", 1), "  ", False)
+    hint = (Handed("control-1", None), "restarted")
 
     with_hint = plan_wake([hint], [blank, passive], {}, hook_notes_key="hook-notes-")
     alone = plan_wake([], [blank, passive], {}, hook_notes_key="hook-notes-")
@@ -603,9 +602,7 @@ async def test_a_synthetic_input_with_no_text_fails_before_any_row_is_reserved(
 ) -> None:
     agent_id = agent_row(db_conn)
     chat = insert_row(db_conn, agent_id, "chat", "user", "carry on")
-    state = AgentState(
-        harness_inputs=[{"key": "hook-notes-1", "prompt": "  \n", "timeline_items": []}]
-    )
+    state = AgentState(harness_inputs=[{"key": "hook-notes-1", "prompt": "  \n"}])
     engine = FakeEngine()
     rt = runtime(
         engine,

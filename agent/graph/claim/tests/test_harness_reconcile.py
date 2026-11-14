@@ -273,9 +273,7 @@ async def test_the_recovery_note_is_delivered_before_the_messages_that_queued_up
     agent_id = agent_row(db_conn)
     lost = h_insert(db_conn, agent_id, "claimed before the restart", claimed=True)
     _ = h_insert(db_conn, agent_id, "queued during the restart")
-    state = AgentState(
-        harness_inputs=[{"key": "control-9", "prompt": "you were restarted", "timeline_items": []}]
-    )
+    state = AgentState(harness_inputs=[{"key": "control-9", "prompt": "you were restarted"}])
     engine = FakeEngine()
     engine.records = {}
     rt = harness_runtime(engine, agent_id=agent_id)
@@ -402,7 +400,7 @@ async def test_the_claim_enters_the_turn_for_an_orphaned_claim_even_with_nothing
 
 
 def _handed(key: str, inbound: int | None = 1) -> Handed:
-    return Handed(key, inbound, ())
+    return Handed(key, inbound)
 
 
 def test_the_plan_splits_inputs_by_what_the_record_says_and_keeps_their_order() -> None:
@@ -491,7 +489,7 @@ async def test_a_failed_run_whose_record_cannot_be_read_keeps_its_rows_and_its_o
     [({}, False), (None, True)],
     ids=["returned to the queue", "consumed with the marker"],
 )
-async def test_the_lost_turn_note_names_only_what_was_consumed_with_the_marker(
+async def test_turn_fault_lost_inbound_names_only_unconfirmed_rows(
     records: dict[str, Reconciliation] | None,
     named: bool,
     db_conn: psycopg.Connection,

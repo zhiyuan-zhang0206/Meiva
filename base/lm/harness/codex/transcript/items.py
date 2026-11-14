@@ -28,7 +28,6 @@ from base.lm.harness.session.transcript.entries import (
     Notice,
     Order,
     Reasoning,
-    SubagentLink,
     ToolCall,
     ToolResult,
     ToolStatus,
@@ -40,11 +39,10 @@ from base.lm.harness.session.transcript.entries import (
 # The rollout's `event_msg/item_completed` is converted to this shape first (`rollout.py`), so a
 # history item and its rollout twin take the same path and get the same keys: the key of a row is its
 # kind and the item id, never its position. `Order.seq` is the caller's position and `Order.sub` numbers
-# the several entries one item produces (a call, its link, its result).
+# the several entries one item produces (a call and its result).
 # meiva:link base/lm/harness/docs/transcript-projection.md
 
 COMMAND_TOOL = "command"
-SPAWN_TOOL = "spawnAgent"
 
 
 class _Common(TypedDict):
@@ -275,24 +273,13 @@ def _collab(item: Obj, place: _Place) -> list[AnyEntry]:
     entries: list[AnyEntry] = [
         ToolCall(**place.common("call"), call_id=place.id, name=tool, tool_input=tool_input)
     ]
-    if tool == SPAWN_TOOL:
-        labels = _nicknames(item)
-        entries.extend(
-            SubagentLink(
-                **place.common(f"link:{child}", 1),
-                call_id=place.id,
-                child_record=child,
-                label=labels.get(child),
-            )
-            for child in receivers
-        )
     if status == "inProgress":
         return entries
     if status not in _COLLAB_STATUS:
         raise UnknownValueError(f"collabAgentToolCall.status={status}")
     entries.append(
         ToolResult(
-            **place.common("result", 2, at_ms=place.completed_ms),
+            **place.common("result", 1, at_ms=place.completed_ms),
             call_id=place.id,
             content=", ".join(receivers),
             status=_COLLAB_STATUS[status],
@@ -300,15 +287,6 @@ def _collab(item: Obj, place: _Place) -> list[AnyEntry]:
         )
     )
     return entries
-
-
-def _nicknames(item: Obj) -> dict[str, str]:
-    labels: dict[str, str] = {}
-    for agent in opt_objects(item, "receiverAgents"):
-        thread, nickname = opt_text(agent, "threadId"), opt_text(agent, "agentNickname")
-        if thread is not None and nickname is not None:
-            labels[thread] = nickname
-    return labels
 
 
 # meiva:note

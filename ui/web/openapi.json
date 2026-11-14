@@ -19448,18 +19448,6 @@
             "type": "string",
             "title": "Item Id"
           },
-          "activity_revision": {
-            "anyOf": [
-              {
-                "type": "integer",
-                "minimum": 0.0
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Activity Revision"
-          },
           "activity_pending": {
             "anyOf": [
               {
@@ -19482,7 +19470,6 @@
               "agent_code",
               "agent_reasoning",
               "code_output",
-              "subagent_text",
               "system_prompt",
               "system_marker"
             ],
@@ -19498,28 +19485,6 @@
               }
             ],
             "title": "Source"
-          },
-          "parent_item_id": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Parent Item Id"
-          },
-          "tool_use_id": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Tool Use Id"
           },
           "payload": {
             "type": "string",

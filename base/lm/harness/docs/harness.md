@@ -140,8 +140,9 @@ provider dependency, which is the point of the split.
 
 ## Sub-agent text
 
-Text a CLI's own sub-agent writes is a `SubagentText` event, shown on the timeline as work detail and
-never as the agent's reply. See [sub-agent text](subagent-text.md).
+Text a CLI's own sub-agent writes on the live session stream is mapped to `SubagentText` rather than
+`AssistantText`, so it is never treated as the main agent's reply or visibility-checked, while still
+marking the live record reader dirty. See [sub-agent text](subagent-text.md).
 
 ## Background work and the idle cache
 

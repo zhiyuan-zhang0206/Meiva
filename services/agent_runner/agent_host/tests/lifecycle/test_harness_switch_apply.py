@@ -17,12 +17,10 @@ from psycopg_pool import AsyncConnectionPool
 from agent.db import claim_inbound_batch
 from agent.ownership.tests.ownership_support import BusTap, admit_owner, agent_row
 from base import paths
-from base.agents.history.harness_messages import aload_harness_timeline_items
 from base.agents.incarnation.restart_transition import RestartTransition
 from base.agents.messages.timestamp_policy import TimestampPolicy
 from base.clock import SYSTEM_TIMERS, Clock, ClockConfig
 from base.db.code_version_gate import ProcessDbGate
-from base.db.transaction import async_write_transaction
 from base.events.live.bus import EventBus
 from base.lm.harness.registry import FileSessionRegistry, SessionRecord
 from base.native_process.runtime_incarnation import RuntimeIncarnation
@@ -198,7 +196,6 @@ async def test_leaving_a_record_backed_harness_applies_the_switch_without_a_stor
     )
     history = SwitchHistory(
         graph=None,
-        pool=aops_pool,
         timestamps=TimestampPolicy.from_clock(
             Clock(ClockConfig("UTC", "UTC", False), timers=SYSTEM_TIMERS), timestamps_enabled=True
         ),
@@ -210,5 +207,3 @@ async def test_leaving_a_record_backed_harness_applies_the_switch_without_a_stor
 
     assert kind == "restart"
     assert _stored_harness(db_conn, owner.agent_id) == "meiva"
-    async with async_write_transaction(aops_pool) as conn:
-        assert await aload_harness_timeline_items(conn, owner.agent_id) == []

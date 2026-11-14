@@ -5,7 +5,6 @@ from collections.abc import Awaitable, Callable, Sequence
 
 from agent.graph.hooks.user_delivery import capture_keyed_items
 from base.agents.context import MeivaContext
-from base.agents.history.timeline_item import TimelineItem
 from base.agents.history.transcript_timeline.items import ReplyPolicy, format_tool_use
 from base.agents.history.transcript_timeline.project import (
     Projected,
@@ -147,17 +146,17 @@ class ReadTimelineSink:
             error=error,
         )
 
-    async def append_inbound(
+    async def append_inbound[T](
         self,
-        commit: Callable[[], Awaitable[list[TimelineItem]]],
+        commit: Callable[[], Awaitable[T]],
         *,
         human_input: bool = False,
-    ) -> list[TimelineItem]:
-        items = await commit()
+    ) -> T:
+        result = await commit()
         if human_input:
             self.mark_human()
         self._dirty.set()
-        return items
+        return result
 
     async def flush_text(self) -> None:
         while True:

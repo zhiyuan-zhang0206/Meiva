@@ -31,15 +31,6 @@ strips valid markers, preserves malformed text in Details, and keeps block
 indices stable. Older checkpoints without that flag use their wake-based
 projection. Reply suggestions use only user-facing chat.
 
-## Sub-agent text (`subagent_text`)
-
-An external harness's own sub-agent text is a `subagent_text` item: `payload` the text, `source` the CLI's label for
-the sub-agent, `parent_item_id` the `agent_code` item of the call that started it (when known), `user_facing` false.
-The `agent_code` / `code_output` items of a tool call the sub-agent made carry the same `parent_item_id`; an
-`agent_code` item also stores the CLI's `tool_use_id`, which is how a later invocation finds the call.
-It exists only in `agent_harness_messages`, is always work detail (Details, collapsed), and is never a delivery,
-an unread or a push. See [sub-agent text](../../../../lm/harness/docs/subagent-text.md).
-
 ## Reasoning timing
 
 Each thinking block carries its own per-block duration (meiva_reasoning_ms_by_block, keyed by block_idx); the turn-level reasoning tokens attach to the FIRST thinking item only; historical messages keep None rather than an invented value. Provider-native reasoning is folded to canonical thinking blocks on a copy — the stored message stays native.
@@ -52,16 +43,14 @@ Each image's caption is the text block immediately before it (modern interleaved
 
 Tagged framework HumanMessages take explicit branches; anything left — pre-tag history, retired marker types like the old LLM-cancel — renders as a system_marker with source=None, which the frontend flags as the red UnknownMarkerChip. Fail-loud is deliberate: a red chip on rare historical rows beats a silent mis-render; an untagged system note is the same case.
 
-## External harness activity checkpoints
+## External harness record projection (`activity_pending`)
 
-External harness activity keeps a flat `<seq>.0` item ID and a non-negative
-`activity_revision`. The history writer appends a new item at the next sequence
-and updates the same row as its revision advances, under the agent metadata row
-lock. A repeat of an identical revision is idempotent. A stale runtime owner,
-legacy row, or conflicting revision cannot replace the stored activity. Native
-and historical items carry no activity revision. `activity_pending` marks a text
-checkpoint that can still change. The reply-suggestion excerpt
-consumes only complete text blocks.
+External harness timelines are projected on demand from each CLI's session record
+(`base/agents/history/transcript_timeline/`, ids `h<offset>.<n>`; see
+[reading a record](../../../../lm/harness/docs/transcript-projection.md)). An unanswered
+tool call in an open turn carries `activity_pending=True` on its `agent_code` item until
+its result lands in the record (`activity_pending=None`). The reply-suggestion excerpt
+consumes only completed user-facing chat blocks.
 
 ## Window unit and readers
 

@@ -14,7 +14,6 @@ import {
   CARD_FOOTER_CLS,
   type CardConfig,
   CardHeader,
-  isSubagentWork,
   MessageCard,
   messageCardConfig,
 } from "./card";
@@ -215,11 +214,9 @@ export const TimelineRow = memo(function TimelineRow({
       data-timeline-source={timelineSource}
       data-display-rank={displayRank}
       aria-live="off"
-      data-subagent-parent={isSubagentWork(item) ? item.parent_item_id : undefined}
       className={cn(
         "timeline-item",
         secondaryCopy ? "group/msgcard" : null,
-        isSubagentWork(item) ? "ml-3 pl-1.5" : null,
       )}
       onPointerDown={secondaryCopy ? revealForTouch : undefined}
     >

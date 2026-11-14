@@ -3,8 +3,9 @@
 A harness CLI can start sub-agents of its own (Claude Code's Agent/Task tool, Codex's `spawnAgent`).
 They are not cluster agents: no id, no lineage, no inbox (see the
 [external harness decision](../../../../docs/decisions/agents/graph/2026-10-19-external-harness.md)).
-Their work used to be invisible to a person, who saw one tool call and its final result. The text they
-write and the tool calls they make now reach the timeline as work detail, tied to the call that started them.
+On the live adapter stream, their text and tool events are kept distinct from the main agent's own
+`AssistantText` so sub-agent output never impersonates the main agent's reply while still waking the
+live record reader.
 
 ## The event
 
@@ -66,7 +67,7 @@ What the CLIs send, recorded on Claude Code (claude-agent-sdk 0.2.168) and Codex
     `role`, and its tool calls carry that id as `parent_tool_use_id`.
   - Timing (live runs on agy 1.5.5, a child doing `sleep 5` steps with a sentence after each). agy
     appends every row to the child's transcript as the step finishes, while the parent turn is still open,
-    so a child's text and calls reach the timeline during the run: the lag between a row appearing on disk
+    so a child's text and calls reach the live event stream during the run: the lag between a row appearing on disk
     and its event was 0.1 to 0.5 s, one poll interval, not "at the end of the turn". The parent's turn
     does not end while a child is alive: a child that was told not to message back and to run 25 s still
     held the parent's `result` until it finished, so a child writing after its parent's turn closed was
@@ -77,25 +78,13 @@ What the CLIs send, recorded on Claude Code (claude-agent-sdk 0.2.168) and Codex
   - A descriptor or transcript that is not the recorded shape is skipped and logged once
     (`agy_subagent_descriptor_unreadable`): this is display only and never fails a turn.
 
-## On the timeline
+## Timeline boundary
 
-The projector writes a `subagent_text` item per event: `payload` is the text, `source` the label,
-`parent_item_id` the `agent_code` item of the spawning call, `user_facing=False`. It is secondary work: it folds into Details beside
-the tool call, writes no `agent_publications` row, moves no unread cursor and sends no push.
-
-A tool call a sub-agent made is the usual `agent_code` / `code_output` pair with the same
-`parent_item_id`; the main agent's own pair has none. The Details view nests the sub-agent's rows under a left
-rule and badges its tool headers `Sub-agent`.
-
-Finding the spawning call: the projector knows the calls it wrote itself. A background sub-agent can speak or
-act after the graph invocation that wrote its call ended, in a later invocation whose projector never saw it.
-Every `agent_code` item of an external harness therefore stores the CLI's call id (`tool_use_id`), and the
-projector looks the call up by that id once per call id and invocation
-(`aget_harness_call_item_id`). A call found nowhere (the CLI's id was never written to this agent's timeline,
-for example a forked history that predates the field) leaves `parent_item_id` empty and the item unmarked.
-
-Volume: one message, one tool call input and one tool output are each cut at `SUBAGENT_ITEM_CHARS` (8,000),
-with `SUBAGENT_CUT` appended. Every item is written; there is no total per graph invocation. The main agent's own
-text and tool output are not cut; the cut exists because nobody asked the agent to produce this text.
+External harness timelines are read from the main CLI session record
+([reading a record](transcript-projection.md)): a CLI sub-agent appears on the timeline as the
+spawning tool call (`agent_code`) and its result (`code_output`) in the main record, without
+separate sub-agent text rows or nested child tool rows. On the live stream, `SubagentText` and child
+`ToolUse` / `ToolResult` events keep sub-agent output separate from `AssistantText` and mark
+`ReadTimelineSink` dirty while the sub-agent works.
 
 Parent: [harness](harness.md).

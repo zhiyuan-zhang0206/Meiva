@@ -1,85 +1,31 @@
 # meiva:note
-# What a turn leaves behind when it dies before its first word.
+# What a turn records when it dies before its first word.
 #
-# A claimed inbound whose fate cannot be established is consumed with an uncertainty marker and never
-# redelivered, so without this a turn that faulted before producing any text is indistinguishable
-# from the user never having said anything. Only rows that were actually consumed that way are named:
-# one the harness's record showed in the context, or that went back to the queue to be delivered
-# again, is not lost, and the note would contradict what happens next. The loss
-# is recorded twice: a system note in the conversation, worded so it cannot be read as a reply, and
-# a registered event so the count is queryable instead of living in someone's memory. Only a turn
-# that produced nothing is recorded -- one that already streamed text showed the reader something.
+# A claimed inbound whose fate cannot be established is consumed rather than redelivered, so a turn
+# that faulted before producing any text records a registered event naming only the rows actually
+# retired that way: one the harness's record showed in the context, or that went back to the queue
+# to be delivered again, is not lost. Only a turn that produced nothing is recorded -- one that
+# already streamed text showed the reader something.
 # meiva:link agent/graph/docs/harness-turn.md
 
 from __future__ import annotations
 
-from collections.abc import Awaitable, Callable, Sequence
-from datetime import datetime
+from collections.abc import Sequence
 
-from langchain_core.messages import BaseMessage
-
-from agent.messages import NoteTag, system_note_message
 from base.agents.context import MeivaContext
-from base.agents.messages.timestamp_policy import TimestampPolicy
 from base.log import logger
 
-__all__ = ["lost_turn_note", "report_lost_turn"]
+__all__ = ["report_lost_turn"]
 
 
-# meiva:note
-# The note says three things and no fourth: the message was not answered, which rows were consumed
-# (the caller passes only those), and that they will not come back.
-def lost_turn_note(
-    inbound_ids: Sequence[int],
-    turn_key: str,
-    reason: str,
-    *,
-    inputs: TimestampPolicy,
-    now: datetime,
-) -> BaseMessage:
-    labelled = ", ".join(str(value) for value in inbound_ids) or "none recorded"
-    return system_note_message(
-        content=(
-            "This message was not answered: the turn failed before producing any output. "
-            "The queue has already consumed it and will not deliver it again.\n\n"
-            f"turn: {turn_key}\n"
-            f"inbound: {labelled}\n"
-            f"failure: {reason}"
-        ),
-        tag=NoteTag.TURN_LOST,
-        picked_up_at=now,
-        created_at=now,
-        inputs=inputs,
-    )
-
-
-async def report_lost_turn(
+def report_lost_turn(
     ctx: MeivaContext,
     agent_id: int,
     inbound_ids: Sequence[int],
     turn_key: str,
     error: BaseException,
-    *,
-    append: Callable[[MeivaContext, int, Sequence[BaseMessage]], Awaitable[None]],
 ) -> None:
     reason = f"{type(error).__name__}: {error}"
-    now = ctx.require_clock().now()
-    try:
-        await append(
-            ctx,
-            agent_id,
-            [lost_turn_note(inbound_ids, turn_key, reason, now=now, inputs=ctx.timestamp_policy())],
-        )
-    except Exception:
-        # meiva:note
-        # Recording the loss must not become a second failure: the caller raises the original fault
-        # next, and it has to arrive intact.
-        logger.opt(exception=True).warning(
-            "could not record the lost turn's note",
-            event="turn_fault_note_failed",
-            agent_id=agent_id,
-            turn_key=turn_key,
-        )
     logger.warning(
         "harness turn faulted before producing output",
         event="turn_fault_lost_inbound",

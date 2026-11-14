@@ -7,15 +7,11 @@ from dataclasses import replace
 from typing import Literal
 
 from psycopg_pool import PoolTimeout
-from pydantic import TypeAdapter
 
 from agent import state as _state
 from agent.db import ClaimedInbound
 from agent.graph.claim._dispatch import is_human_wake_item, prepare_steered_inbound
-from agent.graph.claim.harness_activity import (
-    TurnSink,
-    log_turn_usage,
-)
+from agent.graph.claim.harness_activity import log_turn_usage
 from agent.graph.claim.harness_foreground import (
     Commit,
     Foreground,
@@ -38,13 +34,12 @@ from agent.graph.claim.harness_inbox import (
     is_passive,
     mark_input_group,
     mark_unconfirmed,
-    publish_inbound,
     reconcile_handed,
     recovery_notes_first,
     requeue_handed,
     reserve_head_batch,
-    timeline_items_of,
 )
+from agent.graph.claim.harness_read_sink import ReadTimelineSink
 from agent.graph.claim.harness_render import (
     native_images,
     render_messages,
@@ -57,7 +52,6 @@ from agent.graph.interrupt import (
     ModelInterruptedError,
 )
 from base.agents.context import MeivaContext
-from base.agents.history.timeline_item import TimelineItem
 from base.agents.questions.render import reinjection_text
 from base.events.live.projection import LLMDone
 from base.events.live.publisher import AgentEventPublisher
@@ -84,7 +78,6 @@ from base.lm.harness.engine import TurnEngine
 from base.log import logger
 
 HarnessGoto = Literal["claim"]
-_TIMELINE_ITEMS = TypeAdapter(list[TimelineItem])
 
 # meiva:note
 # Delivery is woken by the host's inbound wake, so the queue is not polled while a turn runs. The
@@ -119,7 +112,7 @@ class ForegroundRun:
         ctx: MeivaContext,
         agent_id: int,
         bridge: TurnEngine,
-        projector: TurnSink,
+        projector: ReadTimelineSink,
         state: _state.AgentState,
         publisher: AgentEventPublisher,
     ) -> None:
@@ -138,8 +131,7 @@ class ForegroundRun:
             key, prompt = str(raw["key"]), str(raw["prompt"])
             if not prompt.strip():
                 raise ValueError(f"synthetic input {key!r} has no text")
-            items = _TIMELINE_ITEMS.validate_python(raw.get("timeline_items", []))
-            self._synthetic.append((Handed(key, None, tuple(items)), prompt))
+            self._synthetic.append((Handed(key, None), prompt))
         self.last_key = f"inbound-turn-{agent_id}"
         self.interrupted = False
         self._correcting = False
@@ -266,9 +258,7 @@ class ForegroundRun:
         if not settled or self._synthetic:
             return
         newest = max((i for h in settled for i in h.row_ids), default=0)
-        self._synthetic.append(
-            (Handed(f"reconciled-resume-{newest}", None, ()), RESUME_AFTER_RESTART)
-        )
+        self._synthetic.append((Handed(f"reconciled-resume-{newest}", None), RESUME_AFTER_RESTART))
 
     async def _recheck_kept(self) -> None:
         kept = tuple(h for h in self.fg.handed if h.key in self._kept)
@@ -384,11 +374,10 @@ class ForegroundRun:
     async def _settle(self, settlement: Settlement) -> None:
         match settlement:
             case Commit(handed=handed):
-                items = await self._projector.append_inbound(
+                await self._projector.append_inbound(
                     lambda: commit_handed(self._ctx, self._agent_id, [handed]),
                     human_input=handed.human,
                 )
-                publish_inbound(self._ctx, self._agent_id, items)
             case Requeue(handed=handed, reason=reason):
                 logger.info(
                     "harness input returned to the queue",
@@ -485,7 +474,7 @@ class ForegroundRun:
 
     async def _give_back(self, rows: Sequence[ClaimedInbound]) -> None:
         await requeue_handed(
-            self._ctx, self._agent_id, [Handed(f"inbound-{r.id}", r.id, ()) for r in rows]
+            self._ctx, self._agent_id, [Handed(f"inbound-{r.id}", r.id) for r in rows]
         )
 
     def _handed_of(self, item: ClaimedInbound) -> tuple[Handed, str]:
@@ -494,8 +483,7 @@ class ForegroundRun:
         images, skipped = native_images(messages)
         if skipped:
             text = f"{text}\n\n{skipped_images_note(skipped)}"
-        items = timeline_items_of(item, messages, self._ctx)
-        entry = Handed(f"inbound-{item.id}", item.id, tuple(items), human=is_human_wake_item(item))
+        entry = Handed(f"inbound-{item.id}", item.id, human=is_human_wake_item(item))
         self._images[entry.key] = images
         return entry, text
 
@@ -549,10 +537,9 @@ class ForegroundRun:
         if not handed and not settled_now:
             return False
         if settled_now:
-            items = await self._projector.append_inbound(
+            await self._projector.append_inbound(
                 lambda: commit_handed(self._ctx, self._agent_id, settled_now)
             )
-            publish_inbound(self._ctx, self._agent_id, items)
         await requeue_handed(self._ctx, self._agent_id, plan.held)
         if not handed:
             return True

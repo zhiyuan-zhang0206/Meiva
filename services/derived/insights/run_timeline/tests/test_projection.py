@@ -374,97 +374,15 @@ def test_failed_segment_keeps_the_committed_prefix_and_retries(world: World) -> 
         assert capture_source(conn, AGENT).ready
 
 
-def test_retained_external_messages_of_a_native_agent_project_into_run_timeline(
-    world: World,
-) -> None:
-    from base.agents.history.timeline_item import TimelineItem
-
-    harness_agent = 9999
-    items = [
-        TimelineItem(
-            item_id="h0.0",
-            kind="inbound_chat",
-            payload="hello from user",
-            created_at=(T0 + timedelta(minutes=1)).isoformat(),
-        ),
-        TimelineItem(
-            item_id="h1.0",
-            kind="agent_reasoning",
-            payload="thinking about the task",
-            created_at=(T0 + timedelta(minutes=2)).isoformat(),
-            reasoning_ms=1000,
-        ),
-        TimelineItem(
-            item_id="h2.0",
-            kind="agent_code",
-            payload="ls",
-            created_at=(T0 + timedelta(minutes=3)).isoformat(),
-            code_elapsed_ms=500,
-        ),
-        TimelineItem(
-            item_id="h3.0",
-            kind="code_output",
-            payload="output.txt",
-            created_at=(T0 + timedelta(minutes=4)).isoformat(),
-            exec_ms=200,
-        ),
-        TimelineItem(
-            item_id="h4.0",
-            kind="agent_chat",
-            payload="finished",
-            created_at=(T0 + timedelta(minutes=5)).isoformat(),
-        ),
-    ]
-    with world.pool.connection() as conn:
-        conn.execute(
-            "INSERT INTO agents (id, label, created_at) VALUES (%s, 'test-external', now())"
-            " ON CONFLICT (id) DO NOTHING",
-            (harness_agent,),
-        )
-        conn.execute(
-            "INSERT INTO agents_meta (id, harness, status) VALUES (%s, 'meiva', 'running')"
-            " ON CONFLICT (id) DO NOTHING",
-            (harness_agent,),
-        )
-        for seq, item in enumerate(items):
-            conn.execute(
-                "INSERT INTO agent_harness_messages (agent_id, seq, harness, item, created_at)"
-                " VALUES (%s, %s, 'antigravity', %s::jsonb, %s::timestamptz)",
-                (harness_agent, seq, item.model_dump_json(), item.created_at),
-            )
-        conn.commit()
-        source = capture_source(conn, harness_agent)
-    assert source.head == "h4"
-    assert source.ready is True
-
-    snapshot = world.reader.get(harness_agent)
-    assert snapshot.head == "h4"
-    assert snapshot.lifetime is not None
-
-    _nodes, units, omitted = world.reader.window(
-        snapshot,
-        T0,
-        T0 + timedelta(minutes=10),
-        max_units=100,
-    )
-    assert omitted == 0
-    kinds = [u.kind for u in units]
-    assert "inbound" in kinds
-    assert "thinking" in kinds
-    assert "call" in kinds
-    assert "output" in kinds
-    assert "text" in kinds
-
-
 @pytest.mark.parametrize(
     ("harness", "agent"), [("claude_code", 9998), ("codex", 9997), ("antigravity", 9996)]
 )
-def test_a_harness_read_from_its_record_has_no_run_timeline_and_its_old_rows_are_not_read(
+def test_an_external_harness_agent_without_checkpoints_has_no_run_timeline(
     world: World, harness: str, agent: int
 ) -> None:
     with world.pool.connection() as conn:
         conn.execute(
-            "INSERT INTO agents (id, label, created_at) VALUES (%s, 'test-claude', now())"
+            "INSERT INTO agents (id, label, created_at) VALUES (%s, 'test-external', now())"
             " ON CONFLICT (id) DO NOTHING",
             (agent,),
         )
@@ -472,11 +390,6 @@ def test_a_harness_read_from_its_record_has_no_run_timeline_and_its_old_rows_are
             "INSERT INTO agents_meta (id, harness, status) VALUES (%s, %s, 'running')"
             " ON CONFLICT (id) DO NOTHING",
             (agent, harness),
-        )
-        conn.execute(
-            "INSERT INTO agent_harness_messages (agent_id, seq, harness, item, created_at)"
-            " VALUES (%s, 0, %s, %s::jsonb, now())",
-            (agent, harness, '{"item_id": "h0.0", "kind": "agent_chat", "payload": "stale"}'),
         )
         conn.commit()
         source = capture_source(conn, agent)

@@ -60,7 +60,6 @@ const RENDERED_KINDS: Record<BackendTimelineItem["kind"], true> = {
   agent_code: true,
   agent_reasoning: true,
   code_output: true,
-  subagent_text: true,
   system_prompt: true,
   system_marker: true,
 };
@@ -105,7 +104,6 @@ export function classifyItem(item: BackendTimelineItem): ItemClass {
     case "agent_reasoning":
     case "agent_code":
     case "code_output":
-    case "subagent_text":
     case "inbound_compact_summary":
     case "inbound_compact_request":
     case "system_prompt":

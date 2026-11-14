@@ -339,6 +339,10 @@ def test_current_reset_converges_when_the_missing_names_still_have_files(
                 "CREATE TABLE IF NOT EXISTS agent_impersonations "
                 "(id bigint, capabilities jsonb, capability_declared_by text)"
             )
+            c.execute(
+                "CREATE TABLE IF NOT EXISTS agent_harness_messages "
+                "(id bigserial primary key, agent_id bigint, item jsonb)"
+            )
             c.execute("DELETE FROM schema_migrations")
             for name in sorted(before):
                 c.execute("INSERT INTO schema_migrations (name) VALUES (%s)", (name,))
@@ -421,14 +425,14 @@ def test_current_reset_converges_the_shape_the_deleted_files_left_behind(
             assert conn.execute(
                 "SELECT to_regclass('public.upload_staged_files'),"
                 "       to_regclass('public.agent_harness_messages')"
-            ).fetchone() == ("upload_staged_files", "agent_harness_messages")
+            ).fetchone() == ("upload_staged_files", None)
             after = applied_migration_names(conn)
             assert (set(PRE_RESET_SET) - file_backed) & after == set()
 
 
 # meiva:note
 # The stamp is what keeps a restored file from replaying: the three re-issued deltas are not
-# idempotent (`CREATE TABLE agent_harness_messages` has no `IF NOT EXISTS`), so a second apply on
+# idempotent (for example `CREATE TABLE upload_staged_files` has no `IF NOT EXISTS`), so a second apply on
 # the converged tree must apply nothing and leave the stamp set exactly as the first left it. A
 # guard that converged by re-running the files would fail here instead of on the next boot.
 def test_reapplying_the_converged_tree_after_the_reset_is_a_no_op(

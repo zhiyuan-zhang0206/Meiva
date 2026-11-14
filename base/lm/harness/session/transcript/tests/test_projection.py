@@ -15,7 +15,6 @@ from base.lm.harness.session.transcript.entries import (
     Notice,
     Order,
     Reasoning,
-    SubagentLink,
     TokenUsage,
     ToolCall,
     ToolResult,
@@ -123,21 +122,6 @@ def test_a_notice_that_opens_no_turn_leaves_the_current_turn_alone() -> None:
     assert {d.turn for d in projection.drafts} == {"t1"}
 
 
-def test_a_child_records_notice_becomes_nested_sub_agent_text_in_the_calls_turn() -> None:
-    projector = Projector()
-    entries = [
-        Notice(key="n", order=_order(5), record="child", text="task finished"),
-        ToolCall(key="c", order=_order(1), turn="t1", call_id="call", name="Agent", tool_input={}),
-        SubagentLink(key="l", order=_order(2), turn="t1", call_id="call", child_record="child"),
-    ]
-    projection = projector.feed(entries)
-    nested = [d for d in projection.drafts if d.record == "child"]
-    assert [(d.kind, d.parent_tool_use_id, d.turn) for d in nested] == [
-        (DraftKind.SUBAGENT_TEXT, "call", "t1")
-    ]
-    assert projector.unlinked_records() == ()
-
-
 def test_reasoning_without_text_shows_nothing() -> None:
     projection = Projector().feed([Reasoning(key="r", order=_order(1), text="", duration_ms=5)])
     assert projection.drafts == ()
@@ -145,9 +129,9 @@ def test_reasoning_without_text_shows_nothing() -> None:
 
 # meiva:note
 # Nothing is held for ever and nothing grows without bound: a call whose turn closed is abandoned and no longer keeps
-# the record from being quiet (its late result is still paired); a result whose call never comes, and the output of a
-# sub-agent whose link never comes, are released top-level with an anomaly each, after a number of entries or when the
-# writer says so; what the projector remembers has a fixed size however long the conversation.
+# the record from being quiet (its late result is still paired); a result whose call never comes is released with an
+# anomaly after a number of entries or when the caller says so; what the projector remembers has a fixed size however
+# long the conversation.
 def _call(key: str, call_id: str, seq: int) -> ToolCall:
     return ToolCall(key=key, order=_order(seq), call_id=call_id, name="Bash", tool_input={})
 
@@ -205,26 +189,6 @@ def test_a_result_whose_call_never_comes_is_released_top_level_after_the_bound()
     assert [(a.anomaly, a.detail) for a in released.anomalies] == [
         (AnomalyKind.ORPHAN_RELEASED, "gone")
     ]
-
-
-def test_the_output_of_a_sub_agent_that_is_never_linked_is_released_and_later_output_follows() -> (
-    None
-):
-    projector = Projector()
-    held = projector.feed(
-        [AgentText(key="s1", order=_order(0), record="sub", text="one", message_ref="m1")]
-    )
-    assert held.drafts == () and projector.unlinked_records() == ("sub",)
-    released = projector.feed([], release_held=True)
-    assert [d.payload for d in released.drafts] == ["one"]
-    assert [(a.anomaly, a.detail) for a in released.anomalies] == [
-        (AnomalyKind.UNLINKED_RELEASED, "sub")
-    ]
-    later = projector.feed(
-        [AgentText(key="s2", order=_order(1), record="sub", text="two", message_ref="m2")]
-    )
-    assert [(d.payload, d.parent_tool_use_id) for d in later.drafts] == [("two", None)]
-    assert projector.unlinked_records() == ()
 
 
 def test_what_the_projector_remembers_does_not_grow_with_the_conversation() -> None:

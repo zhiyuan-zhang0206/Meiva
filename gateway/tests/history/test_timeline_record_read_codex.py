@@ -1,8 +1,7 @@
 # meiva:note
 # The timeline of a Codex agent, as the page asks for it: the same window of the rollout read on the agent's machine
 # that a Claude agent gets (`test_timeline_record_read.py` states the rules; here only what is Codex's): the operation
-# names the harness, an unreachable machine is a 503, a thread with no rollout yet is an empty timeline, and the rows an
-# earlier scheme stored are never read.
+# names the harness, an unreachable machine is a 503, and a thread with no rollout yet is an empty timeline.
 # meiva:link docs/decisions/agents/graph/2026-11-13-timeline-read-from-the-record.md
 
 from __future__ import annotations
@@ -12,7 +11,6 @@ from collections.abc import Iterator
 import psycopg
 import pytest
 
-from base.agents.history.harness_messages import append_harness_timeline_items
 from base.agents.history.timeline_item import TimelineItem
 from base.db import create_agent
 from gateway.tests.auth.gateway_config import GatewayTestClient, gateway_test_client
@@ -65,17 +63,10 @@ def test_an_unreachable_machine_is_a_503_and_not_an_empty_history(
     assert client.get(f"/api/agents/{agent}/timeline").status_code == 503
 
 
-def test_a_thread_with_no_rollout_is_an_empty_timeline_and_old_rows_are_never_read(
+def test_a_thread_with_no_rollout_is_an_empty_timeline(
     client: GatewayTestClient, db_conn: psycopg.Connection
 ) -> None:
     agent = _codex_agent(db_conn)
-    append_harness_timeline_items(
-        db_conn,
-        agent,
-        "codex",
-        [TimelineItem(item_id="0.0", kind="agent_chat", payload="stale row from the old scheme")],
-    )
-    db_conn.commit()
     client.app.state.rpc = ScriptedRunner({"items": [], "has_more": False, "size": 0})
 
     response = client.get(f"/api/agents/{agent}/timeline")

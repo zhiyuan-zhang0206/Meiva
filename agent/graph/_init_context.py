@@ -17,16 +17,10 @@ from agent.messages import NoteTag, system_note_message
 from agent.nodes import INIT_CONTEXT, NodeName
 from agent.state import CapabilitiesState, ContextReset
 from base.agents.context import MeivaContext, agent_id_from_config
-from base.agents.history.harness_messages import (
-    aappend_harness_timeline_items,
-    aload_harness_message_count,
-)
-from base.agents.history.timeline import build_timeline_items
 from base.agents.messages.delivery.retry_io import retryable_database_error
 from base.agents.messages.kwargs import read_meiva_kwargs
 from base.agents.questions.render import reinjection_text
-from base.api_contracts.agent_contract import Harness, reads_timeline_from_record
-from base.db.transaction import async_write_transaction
+from base.api_contracts.agent_contract import Harness
 from base.host.atomic_io import write_text_atomic
 from base.lm.harness.handoff import ClusterFact, Handoff, instructions_path
 from base.lm.harness.wiring import HANDOFF_INSTRUCTION, handoff_for
@@ -98,7 +92,7 @@ def _load_context_notes(ctx: MeivaContext) -> Sequence[BaseMessage]:
     return () if ctx.ops_pool is None else context_notes(ctx.plugin_registry(), ctx)
 
 
-async def _seed_harness_timeline(
+def _seed_harness_timeline(
     ctx: MeivaContext,
     *,
     agent_id: int,
@@ -107,36 +101,18 @@ async def _seed_harness_timeline(
 ) -> tuple[Handoff | None, Sequence[BaseMessage]]:
     if ctx.ops_pool is None:
         return _build_grounded_handoff(ctx, agent_id=agent_id), ()
-    if reads_timeline_from_record(ctx.harness.value):
-        needs_context = not warm_session or bool(tail)
-        return (
-            _build_grounded_handoff(ctx, agent_id=agent_id) if needs_context else None,
-            _load_context_notes(ctx) if needs_context else (),
-        )
-    async with async_write_transaction(ctx.ops_pool) as pool_conn:
-        count = await aload_harness_message_count(pool_conn, agent_id)
-        notes: Sequence[BaseMessage] = _load_context_notes(ctx) if (count == 0 or tail) else ()
-        handoff = (
-            _build_grounded_handoff(ctx, agent_id=agent_id)
-            if count == 0 or tail or not warm_session
-            else None
-        )
-        to_append: list[BaseMessage] = (
-            [SystemMessage(content=handoff.render()), *notes, *tail]
-            if count == 0 and handoff is not None
-            else list(tail)
-        )
-        if to_append:
-            items, _ = build_timeline_items(to_append, inputs=ctx.timestamp_policy())
-            await aappend_harness_timeline_items(pool_conn, agent_id, ctx.harness.value, items)
-        return handoff, notes
+    needs_context = not warm_session or bool(tail)
+    return (
+        _build_grounded_handoff(ctx, agent_id=agent_id) if needs_context else None,
+        _load_context_notes(ctx) if needs_context else (),
+    )
 
 
 # meiva:note
 # The input that carries a context reset into the harness, and the tail as the hooks see it.
 #
 # The reset has no inbox row: it is one input of its own whose key names the newest inbound it
-# carries. Its timeline entries were written when the context was seeded.
+# carries.
 def _reset_inputs(
     handoff: Handoff,
     notes: Sequence[BaseMessage],
@@ -159,7 +135,7 @@ def _reset_inputs(
         default=None,
     )
     key = "context-reset" if newest is None else f"context-reset-{newest}"
-    return [{"key": key, "prompt": render_messages(pending), "timeline_items": []}], tail_msgs
+    return [{"key": key, "prompt": render_messages(pending)}], tail_msgs
 
 
 async def _establish_external_harness_context(
@@ -171,7 +147,7 @@ async def _establish_external_harness_context(
     cwd_update: dict[str, object] | None = None,
 ) -> Command[NodeName]:
     warm_session = getattr(ctx.harness_bridge, "session_id", None) is not None
-    handoff, notes = await _seed_harness_timeline(
+    handoff, notes = _seed_harness_timeline(
         ctx,
         agent_id=agent_id,
         tail=reset.tail,

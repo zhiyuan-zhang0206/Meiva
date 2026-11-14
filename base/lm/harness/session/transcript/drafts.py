@@ -26,7 +26,6 @@ class DraftKind(StrEnum):
     AGENT_REASONING = "agent_reasoning"
     AGENT_CODE = "agent_code"
     CODE_OUTPUT = "code_output"
-    SUBAGENT_TEXT = "subagent_text"
     SYSTEM_MARKER = "system_marker"
 
 
@@ -35,7 +34,7 @@ class DraftKind(StrEnum):
 # orders the several drafts one entry produces; the writer appends drafts in the order they arrive, so neither
 # is a global position. For `agent_code` the payload is empty and
 # `tool_name` / `tool_input` carry the call, for the writer to render; `tool_use_id` ties a call to its
-# output. `parent_tool_use_id` is set on everything a sub-agent did. `part_ref` names the original
+# output. `part_ref` names the original
 # inbound message an `inbound_chat` draft shows. `complete` is False for text the model did not finish.
 @dataclass(frozen=True, slots=True, kw_only=True)
 class TimelineDraft:
@@ -52,7 +51,6 @@ class TimelineDraft:
     tool_name: str | None = None
     tool_input: Mapping[str, object] | None = None
     tool_status: ToolStatus | None = None
-    parent_tool_use_id: str | None = None
     part_ref: str | None = None
     images: tuple[str, ...] = ()
     reasoning_ms: int | None = None
@@ -120,16 +118,13 @@ class UsageTally:
 
 # meiva:note
 # One model message's spend, reported once, when the projection first reads it: `record` says whose it is (the
-# main record or a sub-agent's) and `parent_call_id` the call that started that sub-agent, so a sub-agent's
-# tokens are attributed to the same agent and never merged into the main figure. `turn` is the turn the call
-# belongs to; a background sub-agent's message read after that turn was settled is still reported when read
-# and never back-filled into the settled turn. `reliable` is False for a message cut short.
+# main record or a sub-agent's), so a sub-agent's tokens stay apart from the main turn figure. `reliable` is
+# False for a message cut short.
 @dataclass(frozen=True, slots=True)
 class MessageUsage:
     record: str
     message_ref: str
     turn: str | None
-    parent_call_id: str | None
     usage: Usage
     model: str | None
     reliable: bool

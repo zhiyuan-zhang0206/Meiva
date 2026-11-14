@@ -3,19 +3,15 @@ exports = ["window.py"]
 [uses]
 "__init__.py" = []
 "errors.py" = []
-"fields.py" = ["errors.py"]
-"parse.py" = ["errors.py", "fields.py", "system_message.py", "text.py"]
 "system_message.py" = ["errors.py"]
-"text.py" = ["errors.py"]
+"text.py" = []
 "window.py" = ["errors.py", "system_message.py", "text.py"]
-"tests" = ["parse.py", "text.py"]
+"tests" = ["text.py"]
 
 [purity]
 "." = "strict"
 "__init__.py" = "strict"
 "errors.py" = "strict"
-"fields.py" = "strict"
-"parse.py" = "strict"
 "system_message.py" = "strict"
 "text.py" = "strict"
 

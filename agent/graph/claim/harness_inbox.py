@@ -1,37 +1,30 @@
 # meiva:note
 # The inbox side of external-harness delivery: reserve the head batch, settle it, give it back. One
 # state expresses "handed to the harness, not settled": `status='claimed'`, for every deliverable kind.
-# A row leaves it only through the harness's own facts: in the context (done, with its timeline entries
-# in the same transaction), or refused or lost (back to `pending` at its original queue position).
+# A row leaves it only through the harness's own facts: in the context (done), or refused or lost (back
+# to `pending` at its original queue position).
 # meiva:link agent/graph/docs/harness-turn.md
 
 from __future__ import annotations
 
 from collections.abc import Sequence
 from functools import partial
-from typing import LiteralString, Protocol
+from typing import LiteralString
 
-from langchain_core.messages import BaseMessage
 from psycopg import sql
 
 from agent.db import CLAIM_ACQUIRE_TIMEOUT_CAP_S, ClaimedInbound
-from agent.graph.claim._dispatch import prepare_steered_inbound
-from agent.graph.claim.harness_activity import TurnSink
 from agent.graph.claim.harness_foreground import Handed, Reconciled, plan_reconciliation
+from agent.graph.claim.harness_read_sink import ReadTimelineSink
 from agent.graph.claim.harness_render import render_message
 from agent.graph.hooks.user_delivery import delivery_end_reminder
 from agent.messages.reply_visibility import reply_visibility_note
 from agent.ownership.inbound import lock_inbound_owner
 from base.agents.context import MeivaContext
-from base.agents.history.harness_messages import aappend_harness_timeline_items
-from base.agents.history.timeline import build_timeline_items
-from base.agents.history.timeline_item import TimelineItem
 from base.agents.messages.inbound import PASSIVE_INBOUND_KEY, InboundKind, not_passive_inbound
 from base.agents.messages.kwargs import NoteTag
-from base.api_contracts.agent_contract import reads_timeline_from_record
 from base.db.rows import IdRow, aquery_all
 from base.db.transaction import async_write_transaction
-from base.events.live.projection import InboundCommitted, TimelineSnapshot
 from base.lm.harness import ReconciliationUnavailableError
 from base.lm.harness.engine import TurnEngine
 from base.log import logger
@@ -98,90 +91,6 @@ async def settle_stale_interrupts(ctx: MeivaContext, agent_id: int) -> None:
             "WHERE agent_id=%s AND kind=%s AND status='pending'",
             (agent_id, InboundKind.INTERRUPT.value),
         )
-
-
-# meiva:note
-# The payload flag of a passive note whose timeline entry was written ahead of its delivery. The row is
-# still pending and rides in the harness's next input as text, but its entry is not written a second time.
-TIMELINE_WRITTEN_KEY = "timeline_written"
-
-
-# meiva:note
-# Whether the agent's timeline is rows the runtime writes (every harness but the ones read from their own record: for
-# those the record shows what happened, and nothing here writes an entry for it).
-# meiva:link docs/decisions/agents/graph/2026-11-13-timeline-read-from-the-record.md
-def stores_timeline(ctx: MeivaContext) -> bool:
-    return not reads_timeline_from_record(ctx.harness.value)
-
-
-# meiva:note
-# A turn that fails before its first activity leaves a system note in harness history (none for a harness whose
-# timeline is its record).
-# meiva:link agent/graph/docs/harness-turn.md
-async def append_turn_timeline(
-    ctx: MeivaContext, agent_id: int, messages: Sequence[BaseMessage]
-) -> None:
-    if not messages or ctx.ops_pool is None or not stores_timeline(ctx):
-        return
-    items, _ = build_timeline_items(messages, inputs=ctx.timestamp_policy())
-    async with async_write_transaction(ctx.ops_pool) as pool_conn:
-        await aappend_harness_timeline_items(pool_conn, agent_id, ctx.harness.value, items)
-
-
-# meiva:note
-# The passive interrupt notes of a stop that are not yet on the timeline, flagged as they are taken.
-_UNWRITTEN_INTERRUPT_NOTES: LiteralString = (
-    "UPDATE inbound_messages SET payload = payload || jsonb_build_object(%(written)s::text, true) "  # noqa: S608
-    "WHERE agent_id=%(agent)s AND status='pending' AND kind=%(kind)s "
-    "  AND payload->>'note_tag'=%(tag)s AND payload->'passive'='true'::jsonb "
-    "  AND NOT COALESCE(payload->%(written)s::text='true'::jsonb, false) "
-    f"RETURNING {_COLUMNS}"
-)
-
-
-# meiva:note
-# A confirmed stop is on the timeline at once. Its passive note is no input of the harness's (a
-# delivery would start a turn), so it waits in the inbox for the next real input; here its entry is
-# written and the row flagged in one transaction, and `timeline_items_of` drops the entry when the row is
-# finally delivered, so the note appears once: a crash before this transaction leaves the row to be
-# delivered with its entry, one after it leaves the entry already written. A row an input already
-# reserved is not touched: that input writes the entry when it settles.
-async def write_interrupt_notes(ctx: MeivaContext, agent_id: int) -> list[TimelineItem]:
-    pool = ctx.ops_pool
-    if pool is None:
-        return []
-    async with async_write_transaction(pool) as conn:
-        await lock_inbound_owner(conn, agent_id, incarnation=ctx.original_incarnation)
-        cursor = await conn.execute(
-            sql.SQL(_UNWRITTEN_INTERRUPT_NOTES),
-            {
-                "agent": agent_id,
-                "kind": InboundKind.SYSTEM_NOTE.value,
-                "tag": NoteTag.LIFECYCLE_INTERRUPT.value,
-                "written": TIMELINE_WRITTEN_KEY,
-            },
-        )
-        rows = sorted(
-            (ClaimedInbound.from_row(row) for row in await cursor.fetchall()),
-            key=lambda row: (row.created_at, row.id),
-        )
-        messages = [msg for row in rows for msg in prepare_steered_inbound(ctx, row)]
-        items, _ = build_timeline_items(messages, inputs=ctx.timestamp_policy())
-        return await aappend_harness_timeline_items(conn, agent_id, ctx.harness.value, items)
-
-
-# meiva:note
-# The timeline entries of a row about to be handed to the harness: none for a note already written, and none when
-# the timeline is the CLI's own record.
-def timeline_items_of(
-    row: ClaimedInbound, messages: Sequence[BaseMessage], ctx: MeivaContext
-) -> list[TimelineItem]:
-    if not stores_timeline(ctx):
-        return []
-    if row.payload is not None and row.payload.get(TIMELINE_WRITTEN_KEY) is True:
-        return []
-    items, _ = build_timeline_items(messages, inputs=ctx.timestamp_policy())
-    return items
 
 
 async def peek_head_batch(ctx: MeivaContext, agent_id: int) -> list[ClaimedInbound]:
@@ -255,71 +164,45 @@ async def reserve_head_batch(ctx: MeivaContext, agent_id: int) -> list[ClaimedIn
 
 
 # meiva:note
-# ACK 2: the rows become done and their timeline entries are written in one transaction, so the pending
-# strip and the timeline never disagree. The caller publishes only after the commit.
-async def commit_handed(
-    ctx: MeivaContext, agent_id: int, handed: Sequence[Handed]
-) -> list[TimelineItem]:
+# ACK 2: the rows become done once the harness reports the input in its context.
+async def commit_handed(ctx: MeivaContext, agent_id: int, handed: Sequence[Handed]) -> None:
     pool = ctx.ops_pool
-    if pool is None:
-        return []
     ids = [i for h in handed for i in h.row_ids]
-    items = [item for h in handed for item in h.items]
-    stored = stores_timeline(ctx)
+    if pool is None or not ids:
+        return
     async with async_write_transaction(pool) as conn:
         await lock_inbound_owner(conn, agent_id, incarnation=ctx.original_incarnation)
-        if ids:
-            rows = await aquery_all(
-                conn,
-                IdRow,
-                "UPDATE inbound_messages SET status='done' "
-                "WHERE agent_id=%s AND id=ANY(%s) AND kind=ANY(%s) AND status='claimed' "
-                "RETURNING id",
-                (agent_id, ids, list(DELIVERABLE_INBOUND_KINDS)),
-            )
-            if len(rows) != len(ids):
-                raise RuntimeError(f"harness delivery claim changed for agent {agent_id}: {ids}")
-        if not stored:
-            return []
-        return await aappend_harness_timeline_items(conn, agent_id, ctx.harness.value, items)
+        rows = await aquery_all(
+            conn,
+            IdRow,
+            "UPDATE inbound_messages SET status='done' "
+            "WHERE agent_id=%s AND id=ANY(%s) AND kind=ANY(%s) AND status='claimed' "
+            "RETURNING id",
+            (agent_id, ids, list(DELIVERABLE_INBOUND_KINDS)),
+        )
+        if len(rows) != len(ids):
+            raise RuntimeError(f"harness delivery claim changed for agent {agent_id}: {ids}")
 
 
 # meiva:note
 # The harness's own record puts the input in the model's context, so it settles like an
 # acknowledgement. The row may already have been settled by the run that was failing (a write that
-# finished as the failure struck), so only a row still claimed gets its timeline entries and nothing is
-# written twice.
-async def commit_reconciled(
-    ctx: MeivaContext, agent_id: int, handed: Sequence[Handed]
-) -> list[TimelineItem]:
+# finished as the failure struck), so only a row still claimed is updated.
+async def commit_reconciled(ctx: MeivaContext, agent_id: int, handed: Sequence[Handed]) -> None:
     pool = ctx.ops_pool
-    if pool is None or not handed:
-        return []
     ids = [i for h in handed for i in h.row_ids]
+    if pool is None or not ids:
+        return
     async with async_write_transaction(pool) as conn:
         await lock_inbound_owner(conn, agent_id, incarnation=ctx.original_incarnation)
-        rows = (
-            await aquery_all(
-                conn,
-                IdRow,
-                "UPDATE inbound_messages SET status='done' "
-                "WHERE agent_id=%s AND id=ANY(%s) AND kind=ANY(%s) AND status='claimed' "
-                "RETURNING id",
-                (agent_id, ids, list(DELIVERABLE_INBOUND_KINDS)),
-            )
-            if ids
-            else []
+        _ = await aquery_all(
+            conn,
+            IdRow,
+            "UPDATE inbound_messages SET status='done' "
+            "WHERE agent_id=%s AND id=ANY(%s) AND kind=ANY(%s) AND status='claimed' "
+            "RETURNING id",
+            (agent_id, ids, list(DELIVERABLE_INBOUND_KINDS)),
         )
-        if not stores_timeline(ctx):
-            return []
-        settled = {row.id for row in rows}
-        items = [
-            item
-            for h in handed
-            if not h.row_ids or settled.intersection(h.row_ids)
-            for item in h.items
-        ]
-        return await aappend_harness_timeline_items(conn, agent_id, ctx.harness.value, items)
 
 
 # meiva:note
@@ -364,7 +247,7 @@ async def mark_input_group(
 # meiva:link agent/graph/docs/harness-turn.md
 async def retire_unconfirmed(
     ctx: MeivaContext, agent_id: int, handed: Sequence[Handed]
-) -> list[TimelineItem]:
+) -> list[int]:
     pool = ctx.ops_pool
     ids = [i for h in handed for i in h.row_ids]
     if pool is None or not ids:
@@ -378,29 +261,7 @@ async def retire_unconfirmed(
             "WHERE agent_id=%s AND id=ANY(%s) AND kind=ANY(%s) AND status='claimed' RETURNING id",
             (agent_id, ids, list(DELIVERABLE_INBOUND_KINDS)),
         )
-        if not rows:
-            return []
-        items = unconfirmed_input_items(
-            sorted(row.id for row in rows), created_at=ctx.require_clock().now().isoformat()
-        )
-        if not stores_timeline(ctx):
-            return items
-        return await aappend_harness_timeline_items(conn, agent_id, ctx.harness.value, items)
-
-
-def unconfirmed_input_items(inbound_ids: Sequence[int], *, created_at: str) -> list[TimelineItem]:
-    return [
-        TimelineItem(
-            item_id="0.0",
-            kind="system_marker",
-            source=NoteTag.TURN_LOST.value,
-            payload=f"Delivery of message {inbound_id} to the harness could not be "
-            "confirmed. It was retired from the queue to avoid sending it twice.",
-            created_at=created_at,
-            inbound_id=inbound_id,
-        )
-        for inbound_id in inbound_ids
-    ]
+        return sorted(row.id for row in rows)
 
 
 # meiva:note
@@ -445,29 +306,24 @@ async def reconcile_handed(
 
 
 # meiva:note
-# Consume the inputs with the uncertainty marker and say so in the timeline; returns the inbox rows it
-# marked, which are the only ones a "turn lost" note may name.
+# Consume the inputs whose fate cannot be established and return the inbox rows retired.
 async def mark_unconfirmed(
-    ctx: MeivaContext, agent_id: int, projector: TurnSink, handed: Sequence[Handed]
+    ctx: MeivaContext, agent_id: int, projector: ReadTimelineSink, handed: Sequence[Handed]
 ) -> list[int]:
-    items = await projector.append_inbound(partial(retire_unconfirmed, ctx, agent_id, handed))
-    if stores_timeline(ctx):
-        publish_inbound(ctx, agent_id, items)
-    return [item.inbound_id for item in items if item.inbound_id is not None]
+    return await projector.append_inbound(partial(retire_unconfirmed, ctx, agent_id, handed))
 
 
 # meiva:note
 # Write what a reconciliation decided: inputs in the context settle like an acknowledgement, absent ones go
-# back to the queue (the caller wakes the delivery loop), inputs the record cannot tell about are consumed
-# with the marker. Inputs the harness stored itself are left alone. Returns the rows marked.
+# back to the queue (the caller wakes the delivery loop), inputs the record cannot tell about are retired.
+# Inputs the harness stored itself are left alone. Returns the rows retired.
 async def apply_reconciled(
-    ctx: MeivaContext, agent_id: int, projector: TurnSink, plan: Reconciled
+    ctx: MeivaContext, agent_id: int, projector: ReadTimelineSink, plan: Reconciled
 ) -> list[int]:
     for entry in plan.commit:
-        items = await projector.append_inbound(
+        await projector.append_inbound(
             partial(commit_reconciled, ctx, agent_id, [entry]), human_input=entry.human
         )
-        publish_inbound(ctx, agent_id, items)
     if plan.requeue:
         await requeue_handed(ctx, agent_id, plan.requeue)
     if plan.unknown:
@@ -522,42 +378,11 @@ def is_deferred(row: ClaimedInbound) -> bool:
     return bool(row.payload and row.payload.get("harness_reconcile_deferred") is True)
 
 
-class Emits(Protocol):
-    def emit(self, payload: str) -> None: ...
-
-
-def publish_inbound(ctx: MeivaContext, agent_id: int, items: list[TimelineItem]) -> None:
-    publisher = ctx.event_publisher
-    if publisher is None:
-        return
-    publish_items(publisher, agent_id, items)
-
-
-# meiva:note
-# The live view's snapshot of written timeline items, and the inbound-committed event of each inbound item, on a
-# given publisher: the invocation's own (`publish_inbound`), or the runtime-scoped one the transcript timeline
-# writer publishes on, which does not stop when an invocation ends.
-def publish_items(publisher: Emits, agent_id: int, items: list[TimelineItem]) -> None:
-    if not items:
-        return
-    count = int(items[-1].item_id.split(".")[0].removeprefix("h")) + 1
-    publisher.emit(
-        TimelineSnapshot(
-            agent_id=agent_id, items=[item.model_dump() for item in items], msg_count=count
-        ).model_dump_json()
-    )
-    for item in items:
-        if item.kind == "inbound_chat" and item.inbound_id is not None:
-            publisher.emit(
-                InboundCommitted(agent_id=agent_id, inbound_id=item.inbound_id).model_dump_json()
-            )
-
-
 # meiva:note
 # The correction input for a reply that broke the delivery contract, or None.
 #
-# The correction is a synthetic input like any other: its note reaches the timeline when the harness
-# reports it in context. Asking twice would loop, so a second violation is only recorded.
+# The correction is a synthetic input like any other. Asking twice would loop, so a second violation is
+# only recorded.
 async def harness_reply_correction(
     ctx: MeivaContext,
     agent_id: int,
@@ -570,10 +395,7 @@ async def harness_reply_correction(
     note = await delivery_end_reminder(ctx, agent_id, baseline, correcting=correcting)
     if not invalid and note is None:
         return None
-    note = note or reply_visibility_note(ctx.require_clock().now(), inputs=ctx.timestamp_policy())
     if correcting:
-        await append_turn_timeline(ctx, agent_id, [note])
         return None
-    items, _ = build_timeline_items([note], inputs=ctx.timestamp_policy())
-    entry = Handed(f"{key}:visibility-correction", None, tuple(items))
-    return entry, render_message(note)
+    note = note or reply_visibility_note(ctx.require_clock().now(), inputs=ctx.timestamp_policy())
+    return Handed(f"{key}:visibility-correction", None), render_message(note)

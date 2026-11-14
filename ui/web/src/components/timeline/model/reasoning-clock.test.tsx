@@ -111,19 +111,19 @@ describe("itemLiveStartedAt & harness items", () => {
   it("prioritizes frontend *StartedAt stamps", () => {
     const item: BackendTimelineItem = {
       item_id: "1.0",
-      kind: "agent_reasoning",
-      source: null,
-      payload: "thinking",
+      kind: "agent_code",
+      source: "Bash",
+      payload: "echo hi",
       created_at: harnessTime,
       inbound_id: null,
       show_timestamp: true,
-      reasoningStartedAt: 500_000,
-      activity_revision: 1,
+      codeStartedAt: 500_000,
+      activity_pending: true,
     };
     expect(itemLiveStartedAt(item)).toBe(500_000);
   });
 
-  it("falls back to parsed created_at for external harness activity items", () => {
+  it("falls back to parsed created_at only for unanswered external harness tool calls", () => {
     const reasoning: BackendTimelineItem = {
       item_id: "1.0",
       kind: "agent_reasoning",
@@ -132,28 +132,26 @@ describe("itemLiveStartedAt & harness items", () => {
       created_at: harnessTime,
       inbound_id: null,
       show_timestamp: true,
-      activity_revision: 1,
     };
-    expect(itemLiveStartedAt(reasoning)).toBe(harnessEpoch);
-    expect(isLiveReasoning(reasoning)).toBe(true);
+    expect(itemLiveStartedAt(reasoning)).toBeUndefined();
+    expect(isLiveReasoning(reasoning)).toBe(false);
 
     const exec: BackendTimelineItem = {
       item_id: "2.0",
       kind: "code_output",
       source: null,
-      payload: "running",
+      payload: "done",
       created_at: harnessTime,
       inbound_id: null,
       show_timestamp: true,
-      activity_revision: 1,
     };
-    expect(itemLiveStartedAt(exec)).toBe(harnessEpoch);
-    expect(isLiveExecution(exec)).toBe(true);
+    expect(itemLiveStartedAt(exec)).toBeUndefined();
+    expect(isLiveExecution(exec)).toBe(false);
 
     const code: BackendTimelineItem = {
       item_id: "3.0",
       kind: "agent_code",
-      source: null,
+      source: "Bash",
       payload: "print(1)",
       created_at: harnessTime,
       inbound_id: null,
@@ -164,54 +162,26 @@ describe("itemLiveStartedAt & harness items", () => {
     expect(isLiveCode(code)).toBe(true);
   });
 
-  it("stops when duration is committed or interrupted", () => {
-    const reasoning: BackendTimelineItem = {
-      item_id: "1.0",
-      kind: "agent_reasoning",
-      source: null,
-      payload: "thought",
-      created_at: harnessTime,
-      inbound_id: null,
-      show_timestamp: true,
-      activity_revision: 2,
-      reasoning_ms: 3_000,
-    };
-    expect(isLiveReasoning(reasoning)).toBe(false);
-
-    const interrupted: BackendTimelineItem = {
-      ...reasoning,
-      reasoning_ms: null,
-      interrupted: true,
-    };
-    expect(isLiveReasoning(interrupted)).toBe(false);
-
-    const exec: BackendTimelineItem = {
-      item_id: "2.0",
-      kind: "code_output",
-      source: null,
-      payload: "done",
-      created_at: harnessTime,
-      inbound_id: null,
-      show_timestamp: true,
-      activity_revision: 2,
-      exec_ms: 1_500,
-    };
-    expect(isLiveExecution(exec)).toBe(false);
-
-    const settledPendingFalse: BackendTimelineItem = {
+  it("stops when unanswered tool call settles, commits duration, or is interrupted", () => {
+    const pendingCode: BackendTimelineItem = {
       item_id: "3.0",
-      kind: "code_output",
-      source: null,
-      payload: "Tool result unavailable",
+      kind: "agent_code",
+      source: "Bash",
+      payload: "echo 1",
       created_at: harnessTime,
       inbound_id: null,
       show_timestamp: true,
-      activity_revision: 1,
-      activity_pending: false,
-      exec_ms: null,
+      activity_pending: true,
     };
-    expect(itemLiveStartedAt(settledPendingFalse)).toBeUndefined();
-    expect(isLiveExecution(settledPendingFalse)).toBe(false);
+    expect(isLiveCode({ ...pendingCode, code_elapsed_ms: 1_500 })).toBe(false);
+    expect(isLiveCode({ ...pendingCode, interrupted: true })).toBe(false);
+
+    const settled: BackendTimelineItem = {
+      ...pendingCode,
+      activity_pending: null,
+    };
+    expect(itemLiveStartedAt(settled)).toBeUndefined();
+    expect(isLiveCode(settled)).toBe(false);
   });
 
   it("returns undefined for non-work items", () => {
@@ -223,7 +193,6 @@ describe("itemLiveStartedAt & harness items", () => {
       created_at: harnessTime,
       inbound_id: null,
       show_timestamp: true,
-      activity_revision: 1,
     };
     expect(itemLiveStartedAt(chat)).toBeUndefined();
   });

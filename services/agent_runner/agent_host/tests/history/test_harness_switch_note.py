@@ -1,30 +1,38 @@
 import json
 import logging
 from types import SimpleNamespace
-from typing import Any
+from typing import Any, cast
 
 import pytest
-from psycopg_pool import AsyncConnectionPool
 
-from base.agents.history.harness_messages import aappend_harness_timeline_items
-from base.agents.history.timeline_item import TimelineItem
 from base.agents.messages.timestamp_policy import TimestampSource
 from base.clock import SYSTEM_TIMERS, Clock, ClockConfig
-from base.db.transaction import async_write_transaction
-from services.agent_runner.agent_host import health_routes
 from services.agent_runner.agent_host.health_routes import prepare_harness_switch_route
+from services.agent_runner.agent_host.lifecycle import switch_note
 
 # meiva:note
-# A record-backed outgoing history writes no switch marker, with either pool or no pool.
-# Existing stored rows remain untouched and the switch still succeeds.
+# Leaving the native `meiva` runtime appends a lifecycle restart note to the outgoing checkpoint
+# (logging and continuing on failure); leaving any external harness writes nothing because its CLI
+# record owns outgoing history and the destination receives the arrival switch note.
 
 
-def _drop_agent(_agent_id: int) -> None:
-    pass
+class _RecordingGraph:
+    def __init__(self, *, fail: Exception | None = None) -> None:
+        self.calls: list[tuple[dict[str, object], dict[str, object]]] = []
+        self._fail = fail
+
+    async def aupdate_state(self, config: dict[str, object], values: dict[str, object]) -> None:
+        self.calls.append((config, values))
+        if self._fail is not None:
+            raise self._fail
 
 
-def _host(**attributes: object) -> Any:
-    return SimpleNamespace(drop_agent=_drop_agent, **attributes)
+def _host(*, graph: object | None = None, dropped: list[int] | None = None) -> Any:
+    def _drop_agent(agent_id: int) -> None:
+        if dropped is not None:
+            dropped.append(agent_id)
+
+    return SimpleNamespace(drop_agent=_drop_agent, _graph=graph)
 
 
 def _route(host: Any) -> Any:
@@ -37,149 +45,90 @@ def _route(host: Any) -> Any:
     )
 
 
-def _payload(
-    agent_id: int, *, new_harness: str = "meiva", old_harness: str = "antigravity"
-) -> bytes:
+def _payload(agent_id: int, *, old_harness: str = "meiva", new_harness: str = "codex") -> bytes:
     return json.dumps(
         {
             "agent_id": agent_id,
             "old_harness": old_harness,
             "new_harness": new_harness,
             "source": "operator",
-            "message": "back to the native runtime",
+            "message": "switch runtime",
         }
     ).encode("utf-8")
 
 
-async def _setup_agent(pool: AsyncConnectionPool[Any], agent_id: int) -> None:
-    async with pool.connection() as conn, conn.transaction():
-        await conn.execute(
-            "INSERT INTO agents (id) VALUES (%s) ON CONFLICT DO NOTHING", (agent_id,)
-        )
-        await conn.execute(
-            "INSERT INTO agents_meta (id, status, harness) VALUES (%s, 'idling', 'antigravity') "
-            "ON CONFLICT (id) DO UPDATE SET "
-            "  status = EXCLUDED.status, "
-            "  harness = EXCLUDED.harness",
-            (agent_id,),
-        )
+async def test_leaving_meiva_appends_switch_note_to_checkpoint_and_drops_agent() -> None:
+    graph = _RecordingGraph()
+    dropped: list[int] = []
+    host = _host(graph=graph, dropped=dropped)
 
-
-async def _seed_known_row(pool: AsyncConnectionPool[Any], agent_id: int) -> None:
-    async with async_write_transaction(pool) as conn:
-        await aappend_harness_timeline_items(
-            conn,
-            agent_id,
-            "antigravity",
-            [
-                TimelineItem(
-                    item_id="0.0",
-                    kind="system_marker",
-                    source="lifecycle_restart",
-                    payload="known row",
-                    created_at="2026-11-01T00:00:00+00:00",
-                )
-            ],
-        )
-
-
-async def _harness_rows(
-    pool: AsyncConnectionPool[Any], agent_id: int
-) -> list[tuple[str, str, str]]:
-    async with pool.connection() as conn:
-        cur = await conn.execute(
-            "SELECT harness, item->>'kind', item->>'payload' FROM agent_harness_messages "
-            "WHERE agent_id = %s ORDER BY seq ASC",
-            (agent_id,),
-        )
-        rows = await cur.fetchall()
-    return [(str(row[0]), str(row[1]), str(row[2])) for row in rows]
-
-
-async def test_control_pool_does_not_append_to_a_record_backed_history(
-    aops_pool: AsyncConnectionPool[Any],
-) -> None:
-    agent_id = 9211
-    await _setup_agent(aops_pool, agent_id)
-    host = _host(_control_pool=aops_pool)
-
-    status_code, body, _content_type = await _route(host)(_payload(agent_id))
+    status_code, body, _content_type = await _route(host)(
+        _payload(9211, old_harness="meiva", new_harness="claude_code")
+    )
 
     assert status_code == 200
     assert b'"ok":true' in body
-    assert await _harness_rows(aops_pool, agent_id) == []
+    assert dropped == [9211]
+    assert len(graph.calls) == 1
+    config, values = graph.calls[0]
+    assert config == {"configurable": {"thread_id": "9211"}}
+    raw_messages = values["messages"]
+    assert isinstance(raw_messages, list)
+    messages = cast(list[object], raw_messages)
+    assert len(messages) == 1
+    assert "Harness switched from 'meiva' to 'claude_code'" in str(
+        getattr(messages[0], "content", "")
+    )
 
 
-async def test_pool_fallback_does_not_append_to_a_record_backed_history(
-    aops_pool: AsyncConnectionPool[Any],
-) -> None:
-    agent_id = 9212
-    await _setup_agent(aops_pool, agent_id)
-    host = _host(_control_pool=None, _pool=aops_pool)
-
-    status_code, body, _content_type = await _route(host)(_payload(agent_id))
-
-    assert status_code == 200
-    assert b'"ok":true' in body
-    assert await _harness_rows(aops_pool, agent_id) == []
-
-
-async def test_switch_between_external_harnesses_leaves_the_note_to_the_destination(
-    aops_pool: AsyncConnectionPool[Any],
-) -> None:
-    agent_id = 9214
-    await _setup_agent(aops_pool, agent_id)
-    host = _host(_control_pool=aops_pool)
-
-    status_code, _, _ = await _route(host)(_payload(agent_id, new_harness="antigravity"))
-
-    assert status_code == 200
-    assert await _harness_rows(aops_pool, agent_id) == []
-
-
-async def test_no_pool_skips_the_write_and_still_answers_ok(
-    aops_pool: AsyncConnectionPool[Any],
+async def test_checkpoint_failure_logs_warning_and_still_drops_agent(
     caplog: pytest.LogCaptureFixture,
 ) -> None:
-    agent_id = 9213
-    await _setup_agent(aops_pool, agent_id)
+    graph = _RecordingGraph(fail=RuntimeError("checkpoint unavailable"))
+    dropped: list[int] = []
+    host = _host(graph=graph, dropped=dropped)
 
-    # meiva:note
-    # Positive control: seed one known row through the writer this branch would use, so the
-    # "no new row" assertion below observes the route's behaviour rather than a query that
-    # cannot see rows at all.
-    await _seed_known_row(aops_pool, agent_id)
-    assert await _harness_rows(aops_pool, agent_id) == [
-        ("antigravity", "system_marker", "known row")
-    ]
-
-    host = _host(_control_pool=None, _pool=None)
-
-    with caplog.at_level(logging.WARNING, logger=health_routes.__name__):
-        status_code, body, _content_type = await _route(host)(_payload(agent_id))
+    with caplog.at_level(logging.WARNING, logger=switch_note.__name__):
+        status_code, body, _content_type = await _route(host)(
+            _payload(9212, old_harness="meiva", new_harness="antigravity")
+        )
 
     assert status_code == 200
     assert b'"ok":true' in body
-    assert await _harness_rows(aops_pool, agent_id) == [
-        ("antigravity", "system_marker", "known row")
-    ]
-    # meiva:note
-    # The guard skips the write before attempting one, so this path stays quiet. A warning
-    # here means the branch reached the writer with no pool and survived only because the
-    # write is wrapped in try/except — which is not the silent skip this case claims.
-    assert [record for record in caplog.records if record.name == health_routes.__name__] == []
+    assert dropped == [9212]
+    assert any("failed to record harness switch note" in r.message for r in caplog.records)
 
 
-@pytest.mark.parametrize(
-    ("old", "agent_id"), [("claude_code", 9214), ("codex", 9215), ("antigravity", 9216)]
-)
-async def test_leaving_a_harness_read_from_its_record_writes_no_note(
-    aops_pool: AsyncConnectionPool[Any], old: str, agent_id: int
+@pytest.mark.parametrize("old_harness", ["claude_code", "codex", "antigravity"])
+async def test_leaving_external_harness_writes_nothing_and_drops_agent(
+    old_harness: str, caplog: pytest.LogCaptureFixture
 ) -> None:
-    await _setup_agent(aops_pool, agent_id)
-    host = _host(_control_pool=aops_pool)
+    graph = _RecordingGraph()
+    dropped: list[int] = []
+    host = _host(graph=graph, dropped=dropped)
 
-    status_code, body, _content_type = await _route(host)(_payload(agent_id, old_harness=old))
+    with caplog.at_level(logging.WARNING, logger=switch_note.__name__):
+        status_code, body, _content_type = await _route(host)(
+            _payload(9214, old_harness=old_harness, new_harness="meiva")
+        )
 
-    assert status_code == 200 and b'"ok":true' in body
-    assert await _harness_rows(aops_pool, agent_id) == [], "the record shows what happened"
+    assert status_code == 200
+    assert b'"ok":true' in body
+    assert dropped == [9214]
+    assert graph.calls == []
+    assert [r for r in caplog.records if r.name == switch_note.__name__] == []
+
+
+async def test_same_harness_is_a_noop_and_still_drops_agent() -> None:
+    graph = _RecordingGraph()
+    dropped: list[int] = []
+    host = _host(graph=graph, dropped=dropped)
+
+    status_code, body, _content_type = await _route(host)(
+        _payload(9215, old_harness="meiva", new_harness="meiva")
+    )
+
+    assert status_code == 200
+    assert b'"ok":true' in body
+    assert dropped == [9215]
+    assert graph.calls == []

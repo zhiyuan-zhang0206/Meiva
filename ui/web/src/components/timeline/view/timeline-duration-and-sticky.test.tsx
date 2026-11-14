@@ -124,7 +124,6 @@ describe("detail-block duration display", () => {
             item_id: "2.0",
             kind: "agent_reasoning",
             payload: "quick thought",
-            activity_revision: 1,
             created_at: new Date(Date.now() - 112_000).toISOString(),
           }),
           makeItem({ item_id: "3.0", kind: "agent_chat", payload: "done" }),

@@ -1,6 +1,4 @@
-exports = ["support.py"]
+exports = []
 
 [uses]
-"support.py" = []
-"test_golden.py" = ["support.py"]
 "test_user_text.py" = []
