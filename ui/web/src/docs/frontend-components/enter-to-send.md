@@ -45,6 +45,16 @@ also use Enter for line breaks. The Questions panel submits through its Submit
 button. They are listed here so the
 split is a decision, not an omission.
 
+## Single-line commit fields
+
+Natural-language Guide, Schedule and package draft entries, agent rename, and
+inline configuration text edits share `isImeComposition` from the same module.
+They leave composition keydowns untouched, including Safari's confirming Enter
+with key code 229 after `isComposing` becomes false. These fields retain their
+own commit shortcuts: Enter (including Shift+Enter) commits on desktop and touch
+keyboards. Explicit draft buttons, rename blur, and configuration Save remain
+available. The chat pointer and newline policy applies only to send-type fields.
+
 ## Why the touch keyboard differs
 
 A coarse pointer means an on-screen keyboard, which has no Shift key to reach
