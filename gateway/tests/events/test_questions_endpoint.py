@@ -345,9 +345,9 @@ def test_attention_counts_deduplicate_publications_and_follow_seen_and_answers(
                 (agent_id, key, content),
             )
         db_conn.commit()
-        question_id = insert_question(db_conn, a, "answer me")
+        question_id = insert_question(db_conn, b, "answer me")
         assert client.get("/api/attention/counts").json() == {
-            "unread_agents": 2,
+            "unread_agents": 1,
             "open_questions": 1,
         }
         db_conn.execute(
@@ -361,9 +361,17 @@ def test_attention_counts_deduplicate_publications_and_follow_seen_and_answers(
         )
         db_conn.commit()
         assert client.get("/api/attention/counts").json() == {
-            "unread_agents": 1,
+            "unread_agents": 0,
             "open_questions": 0,
         }
+        # meiva:note
+        # Revival restores the archived unread publication without changing its cursor.
+        db_conn.execute("UPDATE agents_meta SET status='idling' WHERE id=%s", (b,))
+        db_conn.commit()
+        assert client.get("/api/attention/counts").json()["unread_agents"] == 1
+        db_conn.execute("UPDATE agents_meta SET status='terminated' WHERE id=%s", (b,))
+        db_conn.commit()
+        assert client.get("/api/attention/counts").json()["unread_agents"] == 0
 
 
 def test_attention_counts_are_not_capped_by_the_question_feed_limit(

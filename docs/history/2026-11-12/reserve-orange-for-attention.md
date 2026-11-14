@@ -47,3 +47,7 @@ local to the new numeric badge.
 
 Update 2026-11-14: the user corrected the phone badge color; see
 [Mobile sidebar attention scope and theme color](../2026-11-14/mobile-sidebar-attention-scope.md).
+
+Update 2026-11-14: unread eligibility now follows the live sidebar roster, while
+questions remain independent of owner status; see
+[Mobile sidebar attention scope and theme color](../2026-11-14/mobile-sidebar-attention-scope.md).

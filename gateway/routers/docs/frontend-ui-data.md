@@ -28,9 +28,12 @@ and the frontend learns of it through `question_resolved`.
 ## Mobile attention total
 
 The phone's closed sidebar needs a precise count while its underlying lists may
-be capped or omit non-live agents. Its read-only attention snapshot counts an
-agent once when a visible publication lies past that agent's seen cursor, and
-counts each unanswered question separately. It uses the same cluster visibility
-as those shared read models. There is no persisted aggregate; question and
-publication-state hints, plus reconnect, prompt a new read. This total is not an
+be capped. Its read-only attention snapshot counts each live agent
+(`status <> terminated`, matching the sidebar roster) once when a visible
+publication lies past its seen cursor, and counts each unanswered question
+separately, including questions whose owner is terminated. Archived publications
+and seen cursors remain intact; revival makes an unread agent eligible again.
+The counts are independent of list display limits. There is no persisted
+aggregate; lifecycle, question and publication-state hints, plus reconnect,
+prompt a new read. This total is not an
 Inbox or a desktop navigation surface.
