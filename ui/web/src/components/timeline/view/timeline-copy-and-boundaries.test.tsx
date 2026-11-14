@@ -33,7 +33,7 @@ describe("CopyButton feedback state machine", () => {
       timeout: 1500,
     });
   });
-  it("copies human inbound_chat raw body stripped of its envelope header", async () => {
+  it("copies the display-ready human inbound body unchanged", async () => {
     const { browser } = render(
       <TimelineView
         items={[

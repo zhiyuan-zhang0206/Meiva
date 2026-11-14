@@ -391,8 +391,8 @@ describe("ItemView: Markdown-authored inbound bodies", () => {
   });
 });
 
-describe("ItemView: inbound_chat envelope split", () => {
-  it("source='user' strips '<header>\\n\\n' envelope so only the human body renders", () => {
+describe("ItemView: display-ready inbound_chat", () => {
+  it("source='user' renders its display-ready body", () => {
     render(
       <TimelineView
         items={[
@@ -404,7 +404,6 @@ describe("ItemView: inbound_chat envelope split", () => {
         ]}
       />,
     );
-    expect(screen.queryByText(/2026-05-15 12:00:00/)).toBeNull();
     expect(screen.getByText("hello world")).toBeTruthy();
   });
   it("non-user inbound_chat renders full payload without splitting a separate header", () => {
