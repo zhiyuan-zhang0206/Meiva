@@ -1,176 +1,59 @@
-import { flushTelemetry, track } from "./telemetry";
-import {
-  buildFinalWebVitalsMetrics,
-  consumeLayoutShiftAndEventEntries,
-  consumeLcpEntries,
-  consumePaintEntries,
-  createWebVitalsMetricsState,
-  resetWebVitalsMetricsState,
-} from "./web-vitals-plan";
+import { onCLS, onFCP, onINP, onLCP } from "web-vitals";
 
-export interface PerformanceObserverConstructorLike {
-  new (callback: PerformanceObserverCallback): PerformanceObserver;
-  supportedEntryTypes: readonly string[];
-}
+import { flushTelemetry, track } from "./telemetry";
+
+interface MetricValue { value: number }
 
 export interface WebVitalsRuntime {
-  observerConstructor?: PerformanceObserverConstructorLike;
   hasWindow?: boolean;
+  onCLS: (report: (metric: MetricValue) => void) => void;
+  onFCP: (report: (metric: MetricValue) => void) => void;
+  onINP: (report: (metric: MetricValue) => void) => void;
+  onLCP: (report: (metric: MetricValue) => void) => void;
 }
 
-interface MetricObserver {
-  observer: PerformanceObserver;
-  consume: (entries: PerformanceEntry[], observer: PerformanceObserver) => void;
-}
+const nativeRuntime: WebVitalsRuntime = { onCLS, onFCP, onINP, onLCP };
+let initialized = false;
+let generation = 0;
+let testRuntime: WebVitalsRuntime | null = null;
 
-const state: {
-  initialized: boolean;
-  finalized: boolean;
-  observers: MetricObserver[];
-  metrics: ReturnType<typeof createWebVitalsMetricsState>;
-  cleanupFinalizers: (() => void) | null;
-  testRuntime: WebVitalsRuntime | null;
-} = {
-  initialized: false,
-  finalized: false,
-  observers: [],
-  metrics: createWebVitalsMetricsState(),
-  cleanupFinalizers: null,
-  testRuntime: null,
-};
-
-function reportMetric(key: "fcp" | "lcp" | "cls" | "inp", value: number | string): void {
-  track("web-vitals", { key, value, dedupe: false });
-}
-
-function observe(
-  type: string,
-  consume: MetricObserver["consume"],
-  options: { durationThreshold?: number } = {},
-  observerCtor?: PerformanceObserverConstructorLike,
-): PerformanceObserver | undefined {
-  const ObserverCtor =
-    observerCtor ??
-    state.testRuntime?.observerConstructor ??
-    (typeof PerformanceObserver === "undefined" ? undefined : PerformanceObserver);
-  if (!ObserverCtor?.supportedEntryTypes.includes(type)) {
-    return undefined;
-  }
-  const observer = new ObserverCtor((list, currentObserver) => {
-    consume(list.getEntries(), currentObserver);
-  });
-  try {
-    observer.observe({ type, buffered: true, ...options });
-  } catch {
-    observer.disconnect();
-    return undefined;
-  }
-  state.observers.push({ observer, consume });
-  return observer;
-}
-
-function stopObservers(): void {
-  for (const { observer } of state.observers) observer.disconnect();
-}
-
-function drainObservers(): void {
-  for (const { observer, consume } of state.observers) {
-    const pending = observer.takeRecords();
-    if (pending.length > 0) consume(pending, observer);
-  }
-}
-
-function detachFinalizers(): void {
-  state.cleanupFinalizers?.();
-  state.cleanupFinalizers = null;
-}
-
-function reportFinalMetrics(): void {
-  if (state.finalized) return;
-  state.finalized = true;
-  drainObservers();
-  for (const metric of buildFinalWebVitalsMetrics(state.metrics)) {
-    reportMetric(metric.key, metric.value);
-  }
-  stopObservers();
-  detachFinalizers();
-  flushTelemetry();
-}
-
-/** Start one-shot native Web Vitals observers for the current page load. */
-export function initWebVitals(runtime?: WebVitalsRuntime): void {
-  const effectiveRuntime = runtime ?? state.testRuntime ?? undefined;
-  const hasWindow = effectiveRuntime?.hasWindow ?? typeof window !== "undefined";
-  const observerCtor = effectiveRuntime?.observerConstructor;
-  if (
-    state.initialized ||
-    !hasWindow ||
-    (observerCtor === undefined && typeof PerformanceObserver === "undefined")
-  ) {
-    return;
-  }
-  state.initialized = true;
-
-  observe(
-    "paint",
-    (entries, observer) => {
-      const fcp = consumePaintEntries(state.metrics, entries);
-      if (fcp === null) return;
-      reportMetric("fcp", fcp);
-      observer.disconnect();
-    },
-    {},
-    observerCtor,
-  );
-
-  observe(
-    "largest-contentful-paint",
-    (entries) => {
-      consumeLcpEntries(state.metrics, entries);
-    },
-    {},
-    observerCtor,
-  );
-
-  state.metrics.collectingLayoutShift =
-    observe(
-      "layout-shift",
-      (entries) => {
-        consumeLayoutShiftAndEventEntries(state.metrics, "layout-shift", entries);
-      },
-      {},
-      observerCtor,
-    ) !== undefined;
-
-  observe(
-    "event",
-    (entries) => {
-      consumeLayoutShiftAndEventEntries(state.metrics, "event", entries);
-    },
-    { durationThreshold: 40 },
-    observerCtor,
-  );
-
-  const onVisibilityChange = () => {
-    if (document.visibilityState === "hidden") reportFinalMetrics();
+// meiva:note
+// Register once per document, including React remounts and client routing.
+// The library owns session windows, interaction ranking, visibility resumption
+// and bfcache resets. Its observers live for the document lifetime; unmounting
+// the authenticated route must not stop them or register another set.
+export function initWebVitals(runtime = testRuntime ?? nativeRuntime): void {
+  if (initialized || !(runtime.hasWindow ?? typeof window !== "undefined")) return;
+  initialized = true;
+  const currentGeneration = generation;
+  const report = (key: "fcp" | "lcp" | "cls" | "inp") => (metric: MetricValue) => {
+    if (currentGeneration !== generation) return;
+    const value = key === "cls"
+      ? String(Math.round(metric.value * 10_000) / 10_000)
+      : Math.round(metric.value);
+    // meiva:note
+    // Only the scalar crosses the boundary: never forward entries, targets,
+    // navigation URLs or attribution. Preserve the shared buffer/rate limits.
+    track("web-vitals", { key, value, dedupe: false });
+    // meiva:note
+    // Hidden callbacks can run after telemetry's own flush listener, and INP
+    // can finish in a queued task. Flush at the actual reporting boundary.
+    flushTelemetry();
   };
-  window.addEventListener("pagehide", reportFinalMetrics);
-  document.addEventListener("visibilitychange", onVisibilityChange);
-  state.cleanupFinalizers = () => {
-    window.removeEventListener("pagehide", reportFinalMetrics);
-    document.removeEventListener("visibilitychange", onVisibilityChange);
-  };
+  runtime.onFCP(report("fcp"));
+  runtime.onLCP(report("lcp"));
+  runtime.onCLS(report("cls"));
+  runtime.onINP(report("inp"));
 }
 
 export function webVitalsSetRuntimeForTest(runtime: WebVitalsRuntime | null): void {
-  state.testRuntime = runtime;
+  testRuntime = runtime;
 }
 
+// meiva:note
+// Invalidate test callbacks; upstream has no observer disposal API.
+// Tests using the native library need their own document/module environment.
 export function webVitalsResetForTest(): void {
-  stopObservers();
-  detachFinalizers();
-  state.initialized = false;
-  state.finalized = false;
-  state.observers = [];
-  resetWebVitalsMetricsState(state.metrics);
+  generation++;
+  initialized = false;
 }

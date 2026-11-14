@@ -9,29 +9,15 @@ import { TelemetryPageView } from "./telemetry-page-view";
 import {
   webVitalsResetForTest,
   webVitalsSetRuntimeForTest,
-  type PerformanceObserverConstructorLike,
 } from "./web-vitals";
 
-const observedTypes: string[] = [];
-
-class CountingObserver {
-  static supportedEntryTypes = ["paint"] as const;
-  observe(options: PerformanceObserverInit): void {
-    if (options.type) observedTypes.push(options.type);
-  }
-  disconnect(): void {
-    return;
-  }
-  takeRecords(): PerformanceEntryList {
-    return [];
-  }
-}
+const register = vi.fn();
 
 beforeEach(() => {
-  observedTypes.length = 0;
+  register.mockReset();
   webVitalsResetForTest();
   webVitalsSetRuntimeForTest({
-    observerConstructor: CountingObserver as unknown as PerformanceObserverConstructorLike,
+    onFCP: register, onLCP: register, onCLS: register, onINP: register,
   });
   telemetryTestControl.intercept({
     onTrack: () => undefined,
@@ -51,5 +37,5 @@ it("initializes Web Vitals once across authenticated route changes", () => {
   const view = render(<TelemetryPageView pathname="/" />);
   view.rerender(<TelemetryPageView pathname="/fleet" />);
 
-  expect(observedTypes).toEqual(["paint"]);
+  expect(register).toHaveBeenCalledTimes(4);
 });

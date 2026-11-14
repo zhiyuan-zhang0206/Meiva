@@ -7,11 +7,11 @@ exports = ["nav-timing.ts", "telemetry-page-view.tsx", "telemetry.ts"]
 "telemetry-page-view.tsx" = ["telemetry.ts", "web-vitals.ts"]
 "telemetry.test.ts" = ["telemetry.ts"]
 "telemetry.ts" = ["telemetry-plan.ts"]
+"web-vitals-native.test.ts" = ["telemetry.ts", "web-vitals.ts"]
 "web-vitals-integration.test.ts" = ["telemetry.ts", "web-vitals.ts"]
 "web-vitals.test.ts" = ["telemetry.ts", "web-vitals.ts"]
-"web-vitals.ts" = ["telemetry.ts", "web-vitals-plan.ts"]
+"web-vitals.ts" = ["telemetry.ts"]
 
 [purity]
 "nav-timing-plan.ts" = "strict"
 "telemetry-plan.ts" = "strict"
-"web-vitals-plan.ts" = "strict"
