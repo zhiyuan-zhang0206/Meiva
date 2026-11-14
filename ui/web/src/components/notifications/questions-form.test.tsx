@@ -32,7 +32,7 @@ function renderForm(questions: QuestionItem[], handlers: { onSettled?: (ids: num
 
 const next = () => fireEvent.click(screen.getByRole("button", { name: "Next question" }));
 const previous = () => fireEvent.click(screen.getByRole("button", { name: "Previous question" }));
-const submit = () => screen.getByRole<HTMLButtonElement>("button", { name: "Submit answers" });
+const submit = () => screen.getByRole<HTMLButtonElement>("button", { name: "Submit" });
 const article = (n: number) => within(screen.getByRole("article", { name: `Question ${n}` }));
 
 beforeEach(() => {
@@ -125,15 +125,18 @@ describe("QuestionsForm", () => {
     expect(transport.answerQuestions).not.toHaveBeenCalled();
   });
 
-  it("sends from Enter in an answer field only when the whole form is complete", async () => {
+  it("keeps Enter in a completed answer as a line break and submits explicitly", async () => {
     transport.answerQuestions.mockResolvedValue({ kind: "settled" });
     renderForm([q(1), q(2)]);
     fireEvent.change(article(1).getByRole("textbox"), { target: { value: "one" } });
-    pressEnter(article(1).getByRole("textbox"));
-    expect(transport.answerQuestions).not.toHaveBeenCalled();
     next();
-    fireEvent.change(article(2).getByRole("textbox"), { target: { value: "two" } });
-    pressEnter(article(2).getByRole("textbox"));
+    const answer = article(2).getByRole<HTMLTextAreaElement>("textbox");
+    fireEvent.change(answer, { target: { value: "two" } });
+    answer.setSelectionRange(3, 3);
+    pressEnter(answer);
+    expect(answer.value).toBe("two\n");
+    expect(transport.answerQuestions).not.toHaveBeenCalled();
+    fireEvent.click(submit());
     await waitFor(() => expect(transport.answerQuestions).toHaveBeenCalledTimes(1));
   });
 
@@ -152,7 +155,7 @@ describe("QuestionsForm", () => {
     renderForm([q(1)]);
     fireEvent.change(article(1).getByRole("textbox"), { target: { value: "x" } });
     fireEvent.click(submit());
-    expect((await screen.findByRole("alert")).textContent).toContain("Submit answers failed");
+    expect((await screen.findByRole("alert")).textContent).toContain("Submit failed");
     expect(article(1).getByRole<HTMLTextAreaElement>("textbox").value).toBe("x");
     fireEvent.click(submit());
     await waitFor(() => expect(transport.answerQuestions).toHaveBeenCalledTimes(2));

@@ -3,12 +3,11 @@
 `PendingQuestions` owns the selected agent's entire awaiting-response queue,
 including legacy unstructured questions. When questions are waiting, the queue
 opens expanded by default and shows one question at a time, ordered by question
-id. Previous, next, and the question position sit in the top-right toolbar,
-with Skip at its right edge. Submit stays in the bottom-right footer. The collapsed panel uses a compact Questions label. Each question is
-laid out in the same grid cell and only the selected one is visible and
-interactive. The tallest question sets the height within the 45% visual viewport
-cap, so switching leaves the footer in place. The panel reserves one row above
-the composer and expands upward without changing the timeline viewport height.
+id. Previous, next, the page count, Skip, and Submit share one bottom row.
+The question grows upward to its natural height, capped at 45% of the visible
+viewport. The panel reserves one row above the composer so changes in question
+height leave the controls, timeline viewport, and composer in place. The
+collapsed panel uses a compact Questions label.
 `QuestionsForm` owns the single submission, its operation key and retries.
 Skip marks the current question and advances one page when a next question exists.
 On the last question it stays on that page. Undo skip restores the draft in place.
@@ -32,7 +31,7 @@ message and scroll-to-bottom control.
 Open text questions have one answer box and no separate Note. Choice questions
 keep numbered options and one optional Note. `note_suggestion` is a light
 placeholder in the corresponding answer or Note box, not an initial draft.
-Tab or Right Arrow applies it as ordinary foreground text without submitting;
-Enter sends only when the whole form is complete. Modified shortcuts, IME composition and
-existing drafts keep their normal keyboard behavior. This same Tab/Right
+Tab or Right Arrow applies it as ordinary foreground text. Enter inserts a line
+break in either field. Activate Submit to send the batch. Modified shortcuts, IME
+composition and existing drafts keep their normal keyboard behavior. This same Tab/Right
 acceptance applies to conversation reply suggestions.

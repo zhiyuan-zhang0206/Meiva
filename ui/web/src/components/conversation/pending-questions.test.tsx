@@ -47,7 +47,7 @@ it("opens expanded by default above the composer and retains independent drafts 
   expect(screen.queryByText("2 questions waiting")).toBeNull();
   const viewport = input().closest('[data-slot="scroll-area-viewport"]')!;
   expect(viewport.className).toContain(QUESTION_REGION_MAX_HEIGHT_CLASS);
-  expect(viewport.contains(screen.getByRole("button", { name: "Submit answers" }))).toBe(false);
+  expect(viewport.contains(screen.getByRole("button", { name: "Submit" }))).toBe(false);
   fireEvent.click(toggle);
   expect(toggle.getAttribute("aria-expanded")).toBe("false");
   expect(screen.queryByRole("textbox")).toBeNull();
@@ -64,7 +64,7 @@ it("settles every open question in one submission and drops them all from the sh
   transport.answerQuestions.mockResolvedValue({ kind: "settled" });
   const { queryClient } = renderQuestions(<PendingQuestions questions={questions} failed={false} />);
   queryClient.setQueryData(QUESTIONS_QUERY_KEY, { awaiting: questions });
-  const submit = screen.getByRole<HTMLButtonElement>("button", { name: "Submit answers" });
+  const submit = screen.getByRole<HTMLButtonElement>("button", { name: "Submit" });
   expect(submit.disabled).toBe(true);
   fireEvent.change(within(screen.getByRole("article", { name: "Question 1" })).getByRole("textbox"), { target: { value: "First answer" } });
   expect(submit.disabled).toBe(true);
@@ -84,10 +84,10 @@ it("retains drafts on a failed submission and retries it under the same operatio
   renderQuestions(<PendingQuestions questions={[questions[0]]} failed={false} />);
   const input = screen.getByRole<HTMLTextAreaElement>("textbox");
   fireEvent.change(input, { target: { value: "Keep this" } });
-  fireEvent.click(screen.getByRole("button", { name: "Submit answers" }));
+  fireEvent.click(screen.getByRole("button", { name: "Submit" }));
   expect(await screen.findByRole("alert")).toBeTruthy();
   expect(input.value).toBe("Keep this");
-  fireEvent.click(screen.getByRole("button", { name: "Submit answers" }));
+  fireEvent.click(screen.getByRole("button", { name: "Submit" }));
   await waitFor(() => expect(transport.answerQuestions).toHaveBeenCalledTimes(2));
   expect(transport.answerQuestions.mock.calls[1][2]).toBe(transport.answerQuestions.mock.calls[0][2]);
 });

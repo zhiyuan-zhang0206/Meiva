@@ -8,9 +8,9 @@ import { ChatMarkdown } from "@/components/content/markdown";
 import { Button } from "@/components/ui/button";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { errMsg } from "@/lib/contracts/errors";
-import type { AnswerQuestions, QuestionAnswer, QuestionItem } from "@/lib/contracts/types";
+import type { AnswerQuestions, QuestionItem } from "@/lib/contracts/types";
 import { cn } from "@/lib/format/utils";
-import { FLEX, MIN_W_0, QUESTION_REGION_MAX_HEIGHT_CLASS } from "@/lib/layout/layout";
+import { FLEX, QUESTION_REGION_MAX_HEIGHT_CLASS } from "@/lib/layout/layout";
 import { newOperationKey } from "@/lib/transport/operation-key";
 import { useApi } from "@/lib/transport/transport-context";
 
@@ -64,7 +64,7 @@ export function QuestionsForm({
     pruneQuestionDrafts(agentId, openIds);
   }, [agentId, openIds, pruneQuestionDrafts]);
 
-  const bodyFor = (override?: { id: number; answer: QuestionAnswer }): AnswerQuestions | null => {
+  const bodyFor = (): AnswerQuestions | null => {
     const results: AnswerQuestions["results"] = [];
     for (const q of ordered) {
       const draft = draftOf(q.id);
@@ -72,15 +72,15 @@ export function QuestionsForm({
         results.push({ id: q.id, skip: true });
         continue;
       }
-      const answer = override?.id === q.id ? override.answer : answerFromDraft(q.question, draft);
+      const answer = answerFromDraft(q.question, draft);
       if (!answer) return null;
       results.push({ id: q.id, answer, skip: false });
     }
     return { expected_ids: ordered.map((q) => q.id), results };
   };
 
-  const submit = async (override?: { id: number; answer: QuestionAnswer }) => {
-    const body = bodyFor(override);
+  const submit = async () => {
+    const body = bodyFor();
     if (!body || pending || inFlight.current) return;
     inFlight.current = true;
     setPending(true);
@@ -100,7 +100,7 @@ export function QuestionsForm({
       onSettled(body.expected_ids);
       setPending(false);
     } catch (e: unknown) {
-      setError(t("failed", { verb: t("submitAnswers"), msg: errMsg(e) }));
+      setError(t("failed", { verb: t("submit"), msg: errMsg(e) }));
       setPending(false);
     } finally {
       inFlight.current = false;
@@ -115,90 +115,86 @@ export function QuestionsForm({
   const ready = bodyFor() !== null;
 
   return (
-    <form
-      className={cn("text-[13px]", className)}
-      onSubmit={(event) => {
-        event.preventDefault();
-        void submit();
-      }}
-    >
-      <div className={cn("items-center justify-end gap-2 px-4 pt-2", FLEX)}>
-        {ordered.length > 1 ? (
-          <nav aria-label={t("questionNavigation")} className={cn("items-center gap-0.5", FLEX)}>
-            <Button
-              variant="ghost"
-              size="icon"
-              aria-label={t("previousQuestion")}
-              disabled={pending || index === 0}
-              onClick={() => setSelectedId(ordered[index - 1].id)}
-            >
-              <ChevronLeft aria-hidden="true" />
-            </Button>
-            <span aria-live="polite" className="min-w-9 text-center text-xs tabular-nums text-muted-foreground">
-              {t("questionPosition", { current: index + 1, total: ordered.length })}
-            </span>
-            <Button
-              variant="ghost"
-              size="icon"
-              aria-label={t("nextQuestion")}
-              disabled={pending || !nextQuestion}
-              onClick={() => setSelectedId(nextQuestion?.id ?? question.id)}
-            >
-              <ChevronRight aria-hidden="true" />
-            </Button>
-          </nav>
-        ) : null}
-        <Button
-          variant="ghost"
-          size="sm"
-          aria-pressed={draft.skipped}
-          onClick={() => {
-            setQuestionDraft(agentId, question.id, { ...draft, skipped: !draft.skipped });
-            if (!draft.skipped && nextQuestion) setSelectedId(nextQuestion.id);
-          }}
-          disabled={pending}
-          className="min-w-20 text-muted-foreground"
-        >
-          {draft.skipped ? t("undoSkip") : t("skip")}
-        </Button>
-      </div>
-      <div className="grid">
-        {ordered.map((question, position) => (
-          <ScrollArea
-            key={question.id}
-            inert={position !== index}
-            aria-hidden={position !== index}
-            className={cn("col-start-1 row-start-1", MIN_W_0, position !== index && "invisible")}
-            viewportClassName={cn(QUESTION_REGION_MAX_HEIGHT_CLASS, "overscroll-y-contain")}
-          >
-            <QuestionRow
-              question={question}
-              draft={draftOf(question.id)}
-              pending={pending}
-              onDraftChange={(draft) => setQuestionDraft(agentId, question.id, draft)}
-              onEnter={(answer) => void submit({ id: question.id, answer })}
-            />
-          </ScrollArea>
-        ))}
-      </div>
+    <div className={cn("text-[13px]", className)}>
+      <ScrollArea key={question.id} viewportClassName={cn(QUESTION_REGION_MAX_HEIGHT_CLASS, "overscroll-y-contain")}>
+        <QuestionRow
+          question={question}
+          draft={draft}
+          pending={pending}
+          onDraftChange={(nextDraft) => setQuestionDraft(agentId, question.id, nextDraft)}
+        />
+      </ScrollArea>
       <div className="px-4 pb-3 pt-1">
         {changed && <p role="status" className="mb-2 text-xs text-muted-foreground">{t("questionsChanged")}</p>}
         {error && <p role="alert" className="mb-2 text-xs text-destructive">{error}</p>}
-        <div className={cn("min-h-8 items-center justify-end pl-8", FLEX)}>
+        <div className={cn("min-h-8 items-center justify-end gap-1 pl-8", FLEX)}>
+          {ordered.length > 1 && (
+            <nav aria-label={t("questionNavigation")} className={cn("items-center", FLEX)}>
+              <Button
+                variant="ghost"
+                size="icon-xs"
+                aria-label={t("previousQuestion")}
+                disabled={pending || index === 0}
+                onClick={() => setSelectedId(ordered[index - 1].id)}
+              >
+                <ChevronLeft aria-hidden="true" />
+              </Button>
+              <span className="grid min-w-9 text-center text-xs tabular-nums text-muted-foreground">
+                <span
+                  aria-hidden="true"
+                  className="invisible col-start-1 row-start-1 before:content-[attr(data-width-label)]"
+                  data-width-label={t("questionPosition", { current: ordered.length, total: ordered.length })}
+                />
+                <span aria-live="polite" className="col-start-1 row-start-1">
+                  {t("questionPosition", { current: index + 1, total: ordered.length })}
+                </span>
+              </span>
+              <Button
+                variant="ghost"
+                size="icon-xs"
+                aria-label={t("nextQuestion")}
+                disabled={pending || !nextQuestion}
+                onClick={() => setSelectedId(nextQuestion?.id ?? question.id)}
+              >
+                <ChevronRight aria-hidden="true" />
+              </Button>
+            </nav>
+          )}
           <Button
-            type="submit"
+            variant="ghost"
             size="sm"
-            className="disabled:bg-muted disabled:text-muted-foreground disabled:opacity-100"
+            aria-pressed={draft.skipped}
+            onClick={() => {
+              setQuestionDraft(agentId, question.id, { ...draft, skipped: !draft.skipped });
+              if (!draft.skipped && nextQuestion) setSelectedId(nextQuestion.id);
+            }}
+            disabled={pending}
+            className="text-muted-foreground"
+          >
+            <span className="grid place-items-center">
+              <span
+                aria-hidden="true"
+                className="invisible col-start-1 row-start-1 before:content-[attr(data-width-label)]"
+                data-width-label={t("undoSkip")}
+              />
+              <span className="col-start-1 row-start-1">{draft.skipped ? t("undoSkip") : t("skip")}</span>
+            </span>
+          </Button>
+          <Button
+            size="sm"
+            className="relative disabled:bg-muted disabled:text-muted-foreground disabled:opacity-100"
             disabled={pending || !ready}
             title={ready ? undefined : t("answerAllHint")}
             aria-busy={pending}
+            aria-label={t("submit")}
+            onClick={() => void submit()}
           >
-            {pending && <LoaderCircle aria-hidden="true" className="size-3.5 animate-spin" />}
-            {t("submitAnswers")}
+            <span className={pending ? "invisible" : undefined}>{t("submit")}</span>
+            {pending && <LoaderCircle aria-hidden="true" className="absolute size-3.5 animate-spin" />}
           </Button>
         </div>
       </div>
-    </form>
+    </div>
   );
 }
 
@@ -207,18 +203,16 @@ function QuestionRow({
   draft,
   pending,
   onDraftChange,
-  onEnter,
 }: {
   question: QuestionItem;
   draft: QuestionDraft;
   pending: boolean;
   onDraftChange: (draft: QuestionDraft) => void;
-  onEnter: (answer: QuestionAnswer) => void;
 }) {
   const t = useTranslations("questionDetail");
   const skipped = draft.skipped;
   return (
-    <article aria-label={question.title} className="space-y-3 px-4 pb-3 pt-1.5">
+    <article aria-label={question.title} className="space-y-3 px-4 pb-3 pt-3.5">
       <div className="space-y-1.5">
         <h4 className="text-[15px] font-medium leading-snug break-words"><ChatMarkdown content={question.title} inline /></h4>
         {question.content && (
@@ -227,24 +221,16 @@ function QuestionRow({
           </div>
         )}
       </div>
-      <div className="grid">
-        {skipped && <p className="col-start-1 row-start-1 text-xs text-muted-foreground">{t("skipped")}</p>}
-        <div
-          inert={skipped}
-          aria-hidden={skipped}
-          className={cn("col-start-1 row-start-1", MIN_W_0, skipped && "invisible")}
-        >
-          <QuestionForm
-            question={question.question}
-            pending={pending}
-            focusAnswer={false}
-            draft={draft}
-            onDraftChange={onDraftChange}
-            onSubmit={onEnter}
-            submitAction={null}
-          />
-        </div>
-      </div>
+      {skipped ? (
+        <p className="text-xs text-muted-foreground">{t("skipped")}</p>
+      ) : (
+        <QuestionForm
+          question={question.question}
+          pending={pending}
+          draft={draft}
+          onDraftChange={onDraftChange}
+        />
+      )}
     </article>
   );
 }
