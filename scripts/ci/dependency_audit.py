@@ -119,20 +119,25 @@ def _required_token(record: Mapping[str, object], key: str) -> str:
     return value
 
 
+_ATX_HEADING_RE = re.compile(r"^ {0,3}#{1,6}(?:\s+(.*))?$")
+
+
 # meiva:note
-# Collapses multi-line advisory prose and skips leading Markdown section headings (such as `### Summary` or `### Impact`) so fallback summaries carry actual finding text.
+# Collapses multi-line advisory prose and skips leading ATX Markdown headings (1-6 `#` followed by whitespace or end-of-line, such as `### Summary`) while preserving non-heading `#` prefixes like `#123` or `#######`.
 def _prose_line(raw: str | None) -> str | None:
     if raw is None:
         return None
-    non_empty = [" ".join(line.split()) for line in raw.splitlines()]
-    non_empty = [line for line in non_empty if line]
-    for line in non_empty:
-        if not line.startswith("#"):
-            return line
-    for line in non_empty:
-        if stripped := line.lstrip("#").strip():
-            return stripped
-    return None
+    heading_bodies: list[str] = []
+    for raw_line in raw.splitlines():
+        collapsed = " ".join(raw_line.split())
+        if not collapsed:
+            continue
+        match = _ATX_HEADING_RE.match(raw_line)
+        if match is None:
+            return collapsed
+        if body := " ".join((match.group(1) or "").split()):
+            heading_bodies.append(body)
+    return heading_bodies[0] if heading_bodies else None
 
 
 def _osv_record_prose(record: Mapping[str, object]) -> tuple[str | None, str | None]:

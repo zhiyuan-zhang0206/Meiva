@@ -409,12 +409,42 @@ def test_github_failure_preserves_command_error_before_report_or_http(tmp_path: 
         (
             {
                 "summary": None,
-                "description": "### Heading Only\n",
+                "description": "### #123 Heading Only\n",
             },
             {"database_specific": {"severity": "MODERATE"}},
             "PYSEC-2026-4330",
             "13.0.0",
-            "Heading Only",
+            "#123 Heading Only",
+        ),
+        (
+            {
+                "summary": None,
+                "description": "#\n###### Six-Hash Heading\nActual prose after headings",
+            },
+            {"database_specific": {"severity": "LOW"}},
+            "PYSEC-2026-4330",
+            "13.0.0",
+            "Actual prose after headings",
+        ),
+        (
+            {
+                "summary": None,
+                "description": "#123 vulnerable decoder\nRemediation details",
+            },
+            {"database_specific": {"severity": "HIGH"}},
+            "PYSEC-2026-4330",
+            "13.0.0",
+            "#123 vulnerable decoder",
+        ),
+        (
+            {
+                "summary": None,
+                "description": "####### seven hashes are prose\nSecond line",
+            },
+            {"database_specific": {"severity": "HIGH"}},
+            "PYSEC-2026-4330",
+            "13.0.0",
+            "####### seven hashes are prose",
         ),
         (
             {
@@ -473,7 +503,10 @@ def test_github_failure_preserves_command_error_before_report_or_http(tmp_path: 
     ids=[
         "null-summary-uses-description-skipping-heading",
         "blank-summary-uses-details",
-        "heading-only-prose",
+        "heading-only-strips-marker-not-inner-hash",
+        "empty-and-six-hash-atx-headings-skipped",
+        "issue-ref-hash-prefix-preserved",
+        "seven-hashes-not-atx-heading-preserved",
         "osv-summary-fallback",
         "osv-details-fallback",
         "link-fallback-when-osv-unreachable",
