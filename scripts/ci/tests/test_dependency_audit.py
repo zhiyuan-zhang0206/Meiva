@@ -379,3 +379,280 @@ def test_github_failure_preserves_command_error_before_report_or_http(tmp_path: 
     assert commands.calls[-1].timeout == 60
     assert not output.exists()
     assert opener.calls == []
+
+
+@pytest.mark.parametrize(
+    ("entry_overrides", "osv_record", "expected_advisory", "expected_fix", "expected_summary"),
+    [
+        (
+            {
+                "summary": None,
+                "description": "### Summary\r\n\r\nPillow\xa0heap\toverflow in decoder.\r\nSecond line.",
+                "link": "https://github.com/python-pillow/Pillow/releases/tag/13.0.0",
+            },
+            {"database_specific": {"severity": "CRITICAL"}},
+            "PYSEC-2026-4330",
+            "13.0.0",
+            "Pillow heap overflow in decoder.",
+        ),
+        (
+            {
+                "summary": "   ",
+                "description": None,
+                "details": "## Impact\nFirst details line",
+            },
+            {"database_specific": {"severity": "HIGH"}},
+            "PYSEC-2026-4330",
+            "13.0.0",
+            "First details line",
+        ),
+        (
+            {
+                "summary": None,
+                "description": "### Heading Only\n",
+            },
+            {"database_specific": {"severity": "MODERATE"}},
+            "PYSEC-2026-4330",
+            "13.0.0",
+            "Heading Only",
+        ),
+        (
+            {
+                "summary": None,
+                "description": None,
+                "details": None,
+                "link": "https://example.invalid/advisory",
+            },
+            {
+                "summary": "OSV fallback summary",
+                "database_specific": {"severity": "HIGH"},
+            },
+            "PYSEC-2026-4330",
+            "13.0.0",
+            "OSV fallback summary",
+        ),
+        (
+            {
+                "summary": None,
+                "description": None,
+                "details": None,
+                "link": "https://example.invalid/advisory",
+            },
+            {"details": "### Details\nOSV prose fallback"},
+            "PYSEC-2026-4330",
+            "13.0.0",
+            "OSV prose fallback",
+        ),
+        (
+            {
+                "summary": None,
+                "description": None,
+                "details": None,
+                "link": "https://example.invalid/advisory",
+            },
+            None,
+            "PYSEC-2026-4330",
+            "13.0.0",
+            "https://example.invalid/advisory",
+        ),
+        (
+            {
+                "display_id": None,
+                "aliases": None,
+                "fix_versions": None,
+                "summary": None,
+                "description": None,
+                "link": None,
+            },
+            None,
+            "PYSEC-2026-4326",
+            "none",
+            "PYSEC-2026-4326",
+        ),
+    ],
+    ids=[
+        "null-summary-uses-description-skipping-heading",
+        "blank-summary-uses-details",
+        "heading-only-prose",
+        "osv-summary-fallback",
+        "osv-details-fallback",
+        "link-fallback-when-osv-unreachable",
+        "advisory-id-fallback-with-null-optionals",
+    ],
+)
+def test_python_summary_and_optional_fields_degrade_cleanly(
+    entry_overrides: dict[str, object],
+    osv_record: dict[str, object] | None,
+    expected_advisory: str,
+    expected_fix: str,
+    expected_summary: str,
+) -> None:
+    base_entry: dict[str, object] = {
+        "dependency": {"name": "pillow", "version": "12.3.0"},
+        "id": "PYSEC-2026-4326",
+        "display_id": "PYSEC-2026-4330",
+        "aliases": ["GHSA-test"],
+        "summary": "present",
+        "fix_versions": ["13.0.0", " ", None],
+    }
+    base_entry.update(entry_overrides)
+
+    def fetch(_url: str) -> object:
+        if osv_record is None:
+            raise urllib.error.URLError("offline")
+        return osv_record
+
+    (found,) = audit.python_vulnerabilities({"vulnerabilities": [base_entry]}, fetch)
+    assert found.advisory == expected_advisory
+    assert found.fix == expected_fix
+    assert found.summary == expected_summary
+
+
+def test_osv_lookup_tolerates_malformed_payloads_and_caches_duplicate_ids() -> None:
+    seen: list[str] = []
+
+    def fetch(url: str) -> object:
+        seen.append(url)
+        if url.endswith("PYSEC-bad"):
+            raise ValueError("truncated JSON")
+        return {"database_specific": {"severity": " HIGH "}}
+
+    entry = {
+        "dependency": {"name": "pkg", "version": "1.0.0"},
+        "id": "PYSEC-bad",
+        "display_id": "PYSEC-bad",
+        "aliases": ["GHSA-ok", "GHSA-ok"],
+        "summary": "ok",
+        "fix_versions": [],
+    }
+    first, second = audit.python_vulnerabilities({"vulnerabilities": [entry, entry]}, fetch)
+    assert first.severity == second.severity == "high"
+    assert seen == [
+        "https://api.osv.dev/v1/vulns/PYSEC-bad",
+        "https://api.osv.dev/v1/vulns/GHSA-ok",
+    ]
+
+
+@pytest.mark.parametrize(
+    ("payload", "expected_exc"),
+    [
+        ({}, TypeError),
+        ({"vulnerabilities": ["bad"]}, TypeError),
+        ({"vulnerabilities": [{"id": "GHSA-1"}]}, TypeError),
+        (
+            {
+                "vulnerabilities": [
+                    {"dependency": {"name": " ", "version": "1"}, "id": "GHSA-1", "summary": "x"}
+                ]
+            },
+            ValueError,
+        ),
+        (
+            {
+                "vulnerabilities": [
+                    {"dependency": {"name": "p", "version": "1"}, "id": "GHSA-1", "summary": 123}
+                ]
+            },
+            TypeError,
+        ),
+        (
+            {
+                "vulnerabilities": [
+                    {
+                        "dependency": {"name": "p", "version": "1"},
+                        "id": "GHSA-1",
+                        "summary": "ok",
+                        "link": ["not-a-str"],
+                    }
+                ]
+            },
+            TypeError,
+        ),
+        (
+            {
+                "vulnerabilities": [
+                    {
+                        "dependency": {"name": "p", "version": "1"},
+                        "id": "GHSA-1",
+                        "summary": "ok",
+                        "fix_versions": [99],
+                    }
+                ]
+            },
+            TypeError,
+        ),
+        (
+            {
+                "vulnerabilities": [
+                    {
+                        "dependency": {"name": "p", "version": "1"},
+                        "id": "GHSA-1",
+                        "summary": "ok",
+                        "aliases": [99],
+                    }
+                ]
+            },
+            TypeError,
+        ),
+    ],
+)
+def test_python_vulnerabilities_rejects_corrupt_types(
+    payload: dict[str, object], expected_exc: type[Exception]
+) -> None:
+    with pytest.raises(expected_exc):
+        _ = audit.python_vulnerabilities(payload, _osv("HIGH"))
+
+
+def test_pnpm_vulnerabilities_handles_nullable_fields_and_escapes_table_pipes() -> None:
+    pnpm_json: dict[str, object] = {
+        "advisories": {
+            "1099": {
+                "id": 1099,
+                "module_name": "qs",
+                "severity": None,
+                "github_advisory_id": None,
+                "title": None,
+                "overview": "### Overview\r\nPrototype | pollution\tin merge\r\nDetails",
+                "url": None,
+                "vulnerable_versions": "<2.0.5",
+                "patched_versions": ">=1.2.3 <2.0.0 || >=2.0.5",
+                "findings": None,
+            }
+        }
+    }
+    (found,) = audit.pnpm_vulnerabilities(pnpm_json)
+    assert (found.advisory, found.severity, found.version) == ("1099", "unknown", "<2.0.5")
+    assert found.fix == ">=1.2.3 <2.0.0 || >=2.0.5"
+    assert found.summary == "Prototype | pollution in merge"
+    rendered = audit.render([found], [])
+    assert ">=1.2.3 <2.0.0 \\|\\| >=2.0.5" in rendered
+    assert "Prototype \\| pollution in merge" in rendered
+
+
+@pytest.mark.parametrize(
+    ("advisory_override", "expected_exc"),
+    [
+        ({"module_name": None}, TypeError),
+        ({"module_name": "   "}, ValueError),
+        ({"title": 42}, TypeError),
+        ({"id": True}, TypeError),
+        ({"findings": "bad"}, TypeError),
+        ({"findings": [{"version": 99}]}, TypeError),
+    ],
+)
+def test_pnpm_vulnerabilities_rejects_corrupt_field_types(
+    advisory_override: dict[str, object], expected_exc: type[Exception]
+) -> None:
+    entry: dict[str, object] = {
+        "id": 1001,
+        "module_name": "next",
+        "severity": "high",
+        "github_advisory_id": "GHSA-next",
+        "title": "ok",
+        "vulnerable_versions": "<1.0.0",
+        "patched_versions": ">=1.0.0",
+        "findings": [],
+    }
+    entry.update(advisory_override)
+    with pytest.raises(expected_exc):
+        _ = audit.pnpm_vulnerabilities({"advisories": {"1001": entry}})
