@@ -9,6 +9,7 @@ import { Button } from "@/components/ui/button";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { errMsg } from "@/lib/contracts/errors";
 import type { AnswerQuestions, QuestionItem } from "@/lib/contracts/types";
+import { useTimeFormat } from "@/lib/format/use-time-format";
 import { cn } from "@/lib/format/utils";
 import { FLEX, QUESTION_REGION_MAX_HEIGHT_CLASS } from "@/lib/layout/layout";
 import { newOperationKey } from "@/lib/transport/operation-key";
@@ -42,6 +43,7 @@ export function QuestionsForm({
 }) {
   const client = useApi();
   const t = useTranslations("questionDetail");
+  const { formatAbsolute, formatShort } = useTimeFormat();
   const ordered = useMemo(() => [...questions].sort((a, b) => a.id - b.id), [questions]);
   const drafts = useStore((st) => st.questionDrafts[agentId]);
   const setQuestionDraft = useStore((st) => st.setQuestionDraft);
@@ -67,6 +69,7 @@ export function QuestionsForm({
   if (!question) return null;
   const nextQuestion = ordered.at(index + 1);
   const draft = draftOf(question.id);
+  const askedAt = t("askedAt", { time: formatAbsolute(question.created_at) });
 
   const submit = async () => {
     if (nextQuestion || inFlight.current) return;
@@ -116,16 +119,16 @@ export function QuestionsForm({
         {changed && <p role="status" className="px-4 pb-2 text-xs text-muted-foreground">{t("questionsChanged")}</p>}
         {error && <p role="alert" className="px-4 pb-2 text-xs text-destructive">{error}</p>}
       </div>
-      <div className="px-4 py-1">
-        <div
-          inert={!expanded}
-          aria-hidden={!expanded}
-          className={cn(
-            "min-h-8 items-center justify-end gap-0.5 pl-8",
-            !expanded && "opacity-0",
-            FLEX,
-          )}
+      <div className={cn("min-h-10 items-center gap-2 px-4 py-1", expanded ? "pl-12" : "justify-end", FLEX)}>
+        <time
+          dateTime={question.created_at}
+          title={askedAt}
+          className="whitespace-nowrap text-xs tabular-nums text-muted-foreground"
         >
+          <span className="sr-only">{askedAt}</span>
+          <span aria-hidden="true">{formatShort(question.created_at)}</span>
+        </time>
+        <div hidden={!expanded} className={cn("ml-auto items-center gap-0.5", expanded && FLEX)}>
           {ordered.length > 1 && (
             <nav aria-label={t("questionNavigation")} className={cn("items-center", FLEX)}>
               <Button

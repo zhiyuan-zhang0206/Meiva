@@ -8,7 +8,10 @@ for the lifetime of the tab's application. Previous, next, the page count, and
 Submit share one bottom row.
 The question grows upward to its natural height, capped at 45% of the visible
 viewport. The panel reserves one row above the composer so changes in question
-height leave the controls, timeline viewport, and composer in place. The collapsed row shows the pending count next to the same disclosure control.
+height leave the controls, timeline viewport, and composer in place. The footer
+shows when the current question was asked, in the viewer's local time. The
+collapsed row keeps that timestamp and shows the pending count beside the
+disclosure control.
 The question area, footer controls, and disclosure icon update in the same
 frame when the panel is toggled.
 `QuestionsForm` owns the single submission, its operation key and retries.
