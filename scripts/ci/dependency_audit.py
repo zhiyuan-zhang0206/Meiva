@@ -25,7 +25,6 @@ if str(_REPO_ROOT) not in sys.path:
 # root comes first on sys.path for `base.host.boundary` (standard library only).
 from base.host.boundary.fields import (  # noqa: E402
     optional_object_field,
-    optional_str_field,
     str_field,
     typed_optional_list_field,
     typed_optional_object_field,
@@ -142,8 +141,8 @@ def _prose_line(raw: str | None) -> str | None:
 
 def _osv_record_prose(record: Mapping[str, object]) -> tuple[str | None, str | None]:
     return (
-        _prose_line(optional_str_field(record, "summary")),
-        _prose_line(optional_str_field(record, "details")),
+        _prose_line(typed_optional_str_field(record, "summary")),
+        _prose_line(typed_optional_str_field(record, "details")),
     )
 
 

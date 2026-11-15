@@ -689,3 +689,51 @@ def test_pnpm_vulnerabilities_rejects_corrupt_field_types(
     entry.update(advisory_override)
     with pytest.raises(expected_exc):
         _ = audit.pnpm_vulnerabilities({"advisories": {"1001": entry}})
+
+
+@pytest.mark.parametrize(
+    "osv_record",
+    [
+        {"summary": None, "details": None, "database_specific": {"severity": "LOW"}},
+        {"database_specific": None},
+    ],
+    ids=["explicit-null-prose", "missing-prose-null-db-specific"],
+)
+def test_osv_prose_accepts_null_and_missing_fields(osv_record: dict[str, object]) -> None:
+    entry: dict[str, object] = {
+        "dependency": {"name": "pillow", "version": "12.3.0"},
+        "id": "PYSEC-2026-4326",
+        "display_id": "PYSEC-2026-4326",
+        "aliases": [],
+        "summary": None,
+        "description": None,
+        "link": "https://example.invalid/pillow",
+        "fix_versions": ["13.0.0"],
+    }
+    (found,) = audit.python_vulnerabilities({"vulnerabilities": [entry]}, lambda _url: osv_record)
+    assert found.summary == "https://example.invalid/pillow"
+
+
+@pytest.mark.parametrize(
+    ("osv_record", "field_name"),
+    [
+        ({"summary": 123, "database_specific": {"severity": "HIGH"}}, "summary"),
+        ({"summary": "valid", "details": [], "database_specific": {"severity": "HIGH"}}, "details"),
+    ],
+    ids=["osv-summary-int", "osv-details-list"],
+)
+def test_osv_prose_rejects_non_null_wrong_types(
+    osv_record: dict[str, object], field_name: str
+) -> None:
+    entry: dict[str, object] = {
+        "dependency": {"name": "pillow", "version": "12.3.0"},
+        "id": "GHSA-test",
+        "display_id": "GHSA-test",
+        "aliases": [],
+        "summary": None,
+        "fix_versions": [],
+    }
+    with pytest.raises(TypeError, match=field_name):
+        _ = audit.osv_severity(["GHSA-test"], lambda _url: osv_record)
+    with pytest.raises(TypeError, match=field_name):
+        _ = audit.python_vulnerabilities({"vulnerabilities": [entry]}, lambda _url: osv_record)
