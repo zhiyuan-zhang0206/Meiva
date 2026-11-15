@@ -63,7 +63,10 @@ around it; the promoted node carries the `data` shape `mdast-util-math` uses,
 because `mdast-util-to-hast` has no handler for `math` and a bare node renders as
 its raw TeX text. The sanitizer keeps `language-math` on the `code` element so
 `rehype-katex` can replace the wrapping `pre` — without it a display formula
-keeps code-block chrome. A display formula wider than the column scrolls
+keeps code-block chrome. The KaTeX stylesheet and the renderer resolved by
+`rehype-katex` use the same KaTeX release. The renderer's generated classes
+and the stylesheet's line boxes have to agree so superscripts and tall
+formulas fit inside the scroll container. A display formula wider than the column scrolls
 sideways (`.katex-display` overflow), and `.chat-md .katex` resets the
 container's `overflow-wrap:anywhere`, which otherwise breaks a formula
 mid-expression.
