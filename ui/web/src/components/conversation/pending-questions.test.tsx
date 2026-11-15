@@ -12,7 +12,7 @@ import { PendingQuestions } from "./pending-questions";
 
 const questions: QuestionItem[] = [1, 2].map((id) => ({
   id, agent_id: 7, agent_label: null, title: `Question ${id}`, content: null,
-  created_at: "2026-11-07T00:00:00Z", resolved_at: null,
+  created_at: new Date(2026, 10, 7, 13, id * 5).toISOString(), resolved_at: null,
   question: { type: "text", note_suggestion: `Suggested answer ${id}` },
 }));
 
@@ -38,11 +38,16 @@ it("opens expanded by default above the composer and retains independent drafts 
   expect(answerLayer.parentElement?.className).toContain("absolute");
   expect(answerLayer.parentElement?.className).toContain("bottom-1");
   expect(answerLayer.parentElement).toBe(toggle.parentElement);
+  const stamp = screen.getByText("11/7 13:05").closest("time");
+  expect(stamp?.getAttribute("datetime")).toBe(questions[0].created_at);
+  expect(stamp?.title).toBe("Asked 2026-11-07 13:05:00");
   const input = () => screen.getByRole<HTMLTextAreaElement>("textbox");
   expect(input().value).toBe("");
   fireEvent.change(input(), { target: { value: "First answer" } });
   fireEvent.click(screen.getByRole("button", { name: "Next question" }));
   expect(input().value).toBe("");
+  expect(stamp?.textContent).toContain("11/7 13:10");
+  expect(stamp?.getAttribute("datetime")).toBe(questions[1].created_at);
   fireEvent.change(input(), { target: { value: "Second answer" } });
   expect(screen.queryByText("2 questions waiting")).toBeNull();
   const viewport = input().closest('[data-slot="scroll-area-viewport"]')!;
@@ -52,6 +57,7 @@ it("opens expanded by default above the composer and retains independent drafts 
   expect(toggle.getAttribute("aria-expanded")).toBe("false");
   expect(screen.queryByRole("textbox")).toBeNull();
   expect(screen.getByText("2 questions waiting")).toBeTruthy();
+  expect(screen.getByText("11/7 13:10").closest("time")).toBe(stamp);
   expect(screen.queryByRole("button", { name: "Submit" })).toBeNull();
   fireEvent.click(toggle);
   expect(toggle.getAttribute("aria-expanded")).toBe("true");

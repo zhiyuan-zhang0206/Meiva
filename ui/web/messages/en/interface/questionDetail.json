@@ -6,6 +6,7 @@
   "openPlaceholder": "Write your answer…",
   "comment": "Note (optional)",
   "pendingQuestions": "{count, plural, one {# question waiting} other {# questions waiting}}",
+  "askedAt": "Asked {time}",
   "questionsUnavailable": "Could not load pending questions.",
   "suggestionKeys": "Press Tab or Right Arrow to apply the suggestion.",
   "submit": "Submit",
