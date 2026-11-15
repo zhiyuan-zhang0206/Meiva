@@ -24,10 +24,11 @@ if str(_REPO_ROOT) not in sys.path:
 # The weekly workflow runs this file as a script with the interpreter CI provides, so the checkout
 # root comes first on sys.path for `base.host.boundary` (standard library only).
 from base.host.boundary.fields import (  # noqa: E402
-    optional_list_field,
     optional_object_field,
-    optional_str_field,
     str_field,
+    typed_optional_list_field,
+    typed_optional_object_field,
+    typed_optional_str_field,
 )
 from base.host.boundary.json_values import is_object_dict, is_object_list  # noqa: E402
 from base.host.boundary.options import options  # noqa: E402
@@ -110,51 +111,137 @@ def _gh_api(path: str, *, run: AuditProcess) -> object:
     return object_of(json.loads, _gh(["api", path], run=run))
 
 
+def _required_token(record: Mapping[str, object], key: str) -> str:
+    value = str_field(record, key).strip()
+    if not value:
+        raise ValueError(f"{key} is empty")
+    return value
+
+
+_ATX_HEADING_RE = re.compile(r"^ {0,3}#{1,6}(?:\s+(.*))?$")
+
+
+# meiva:note
+# Collapses multi-line advisory prose and skips leading ATX Markdown headings (1-6 `#` followed by whitespace or end-of-line, such as `### Summary`) while preserving non-heading `#` prefixes like `#123` or `#######`.
+def _prose_line(raw: str | None) -> str | None:
+    if raw is None:
+        return None
+    heading_bodies: list[str] = []
+    for raw_line in raw.splitlines():
+        collapsed = " ".join(raw_line.split())
+        if not collapsed:
+            continue
+        match = _ATX_HEADING_RE.match(raw_line)
+        if match is None:
+            return collapsed
+        if body := " ".join((match.group(1) or "").split()):
+            heading_bodies.append(body)
+    return heading_bodies[0] if heading_bodies else None
+
+
+def _osv_record_prose(record: Mapping[str, object]) -> tuple[str | None, str | None]:
+    return (
+        _prose_line(typed_optional_str_field(record, "summary")),
+        _prose_line(typed_optional_str_field(record, "details")),
+    )
+
+
+def _osv_lookup(advisory_ids: Sequence[str], fetch: Fetch) -> tuple[str, str | None]:
+    summary: str | None = None
+    details: str | None = None
+    for advisory_id in dict.fromkeys(advisory_ids):
+        try:
+            record: object = fetch(f"https://api.osv.dev/v1/vulns/{advisory_id}")
+        except (OSError, ValueError):
+            continue
+        if not is_object_dict(record):
+            continue
+        rec_summary, rec_details = _osv_record_prose(record)
+        summary = summary or rec_summary
+        details = details or rec_details
+        specific = optional_object_field(record, "database_specific") or {}
+        severity = specific.get("severity")
+        if isinstance(severity, str) and severity.strip().lower() in _SEVERITY_RANK:
+            return severity.strip().lower(), summary or details
+    return "unknown", summary or details
+
+
 # meiva:note
 # uv audit JSON carries no severity; each advisory id is graded through OSV's reviewed severity, and an advisory OSV cannot grade is unknown and counts as actionable.
 # meiva:link scripts/ci/docs/dependency-audit.md
 def osv_severity(advisory_ids: list[str], fetch: Fetch) -> str:
-    for advisory_id in advisory_ids:
-        try:
-            record: object = fetch(f"https://api.osv.dev/v1/vulns/{advisory_id}")
-        except OSError:
-            continue
-        if not is_object_dict(record):
-            continue
-        specific = optional_object_field(record, "database_specific") or {}
-        severity = specific.get("severity")
-        if isinstance(severity, str) and severity.lower() in _SEVERITY_RANK:
-            return severity.lower()
-    return "unknown"
+    severity, _ = _osv_lookup(advisory_ids, fetch)
+    return severity
 
 
 def _aliases(entry: Mapping[str, object]) -> list[str]:
-    aliases = optional_list_field(entry, "aliases") or []
-    return [alias for alias in aliases if isinstance(alias, str) and alias.startswith("GHSA-")]
+    raw_aliases = typed_optional_list_field(entry, "aliases") or []
+    ghsa: list[str] = []
+    for item in raw_aliases:
+        if item is None:
+            continue
+        if not isinstance(item, str):
+            raise TypeError(f"aliases entry is {type(item).__name__}, not str")
+        if (cleaned := item.strip()).startswith("GHSA-"):
+            ghsa.append(cleaned)
+    return ghsa
+
+
+def _fix_versions(entry: Mapping[str, object]) -> str:
+    raw_fixes = typed_optional_list_field(entry, "fix_versions") or []
+    cleaned: list[str] = []
+    for item in raw_fixes:
+        if item is None:
+            continue
+        if not isinstance(item, str):
+            raise TypeError(f"fix_versions entry is {type(item).__name__}, not str")
+        if stripped := item.strip():
+            cleaned.append(stripped)
+    return ", ".join(cleaned) or "none"
+
+
+# meiva:note
+# OSV and PyPA advisories returned by `uv audit` allow `summary` to be null; fall back through `description`, `details`, OSV prose, `link`, and the advisory id while still rejecting non-string corruption.
+# meiva:link scripts/ci/docs/dependency-audit.md
+def _python_summary(entry: Mapping[str, object], osv_fallback: str | None, advisory: str) -> str:
+    prose_fields = [
+        _prose_line(typed_optional_str_field(entry, key))
+        for key in ("summary", "description", "details")
+    ]
+    link = _prose_line(typed_optional_str_field(entry, "link"))
+    for candidate in (*prose_fields, osv_fallback, link):
+        if candidate:
+            return candidate
+    return advisory
 
 
 def python_vulnerabilities(audit_json: Mapping[str, object], fetch: Fetch) -> list[Vulnerability]:
-    entries = audit_json["vulnerabilities"]
+    entries = audit_json.get("vulnerabilities")
     if not is_object_list(entries):
         raise TypeError("uv audit JSON vulnerabilities is not a list")
     found: list[Vulnerability] = []
+    osv_cache: dict[tuple[str, ...], tuple[str, str | None]] = {}
     for entry in entries:
         if not is_object_dict(entry):
             raise TypeError("uv audit JSON vulnerability is not an object")
-        dependency = optional_object_field(entry, "dependency")
+        dependency = typed_optional_object_field(entry, "dependency")
         if dependency is None:
             raise TypeError("uv audit JSON vulnerability lacks its dependency")
-        ids = [str_field(entry, "id"), *_aliases(entry)]
-        fix_versions = optional_list_field(entry, "fix_versions") or []
+        advisory_id = _required_token(entry, "id")
+        advisory = _prose_line(typed_optional_str_field(entry, "display_id")) or advisory_id
+        ids = tuple(dict.fromkeys([advisory_id, *_aliases(entry)]))
+        if ids not in osv_cache:
+            osv_cache[ids] = _osv_lookup(ids, fetch)
+        severity, osv_fallback = osv_cache[ids]
         found.append(
             Vulnerability(
                 ecosystem="python",
-                package=str_field(dependency, "name"),
-                version=str_field(dependency, "version"),
-                advisory=str_field(entry, "display_id"),
-                severity=osv_severity(ids, fetch),
-                fix=", ".join(str(version) for version in fix_versions) or "none",
-                summary=str_field(entry, "summary"),
+                package=_required_token(dependency, "name"),
+                version=_required_token(dependency, "version"),
+                advisory=advisory,
+                severity=severity,
+                fix=_fix_versions(entry),
+                summary=_python_summary(entry, osv_fallback, advisory),
             )
         )
     return found
@@ -256,35 +343,60 @@ def _no_forward_fix(patched: str, versions: list[str]) -> bool:
 
 
 def _advisory_versions(findings: list[object]) -> list[str]:
-    return sorted(
-        {
-            version
-            for finding in findings
-            if is_object_dict(finding)
-            and (version := optional_str_field(finding, "version")) is not None
-        }
-    )
+    versions: set[str] = set()
+    for finding in findings:
+        if not is_object_dict(finding):
+            raise TypeError("pnpm advisory finding is not an object")
+        if version := _prose_line(typed_optional_str_field(finding, "version")):
+            versions.add(version)
+    return sorted(versions)
+
+
+def _pnpm_advisory_id(key: str, entry: Mapping[str, object]) -> str:
+    ghsa = _prose_line(typed_optional_str_field(entry, "github_advisory_id"))
+    raw_id = entry.get("id")
+    if raw_id is None:
+        fallback_id: str | None = None
+    elif isinstance(raw_id, int) and not isinstance(raw_id, bool):
+        fallback_id = str(raw_id)
+    elif isinstance(raw_id, str):
+        fallback_id = _prose_line(raw_id)
+    else:
+        raise TypeError(f"id is {type(raw_id).__name__}, not int | str")
+    return ghsa or fallback_id or key
+
+
+def _pnpm_summary(entry: Mapping[str, object], advisory: str) -> str:
+    candidates = [
+        _prose_line(typed_optional_str_field(entry, key)) for key in ("title", "overview", "url")
+    ]
+    for candidate in candidates:
+        if candidate:
+            return candidate
+    return advisory
 
 
 def _advisory_vulnerability(
     key: str, entry: Mapping[str, object], dev_only_roots: frozenset[str] | None
 ) -> Vulnerability:
-    raw_findings: object = entry.get("findings")
-    findings: list[object] = raw_findings if is_object_list(raw_findings) else []
+    findings = typed_optional_list_field(entry, "findings") or []
     versions = _advisory_versions(findings)
-    patched = str(entry.get("patched_versions") or "").strip()
-    raw_severity = str(entry.get("severity") or "").lower()
+    patched = (typed_optional_str_field(entry, "patched_versions") or "").strip()
+    raw_severity = (typed_optional_str_field(entry, "severity") or "").strip().lower()
     severity = raw_severity if raw_severity in _SEVERITY_RANK else "unknown"
-    advisory = str(entry.get("github_advisory_id") or entry.get("id") or key)
+    advisory = _pnpm_advisory_id(key, entry)
     exempt = _findings_dev_only(findings, dev_only_roots) and _no_forward_fix(patched, versions)
+    fallback_version = (
+        _prose_line(typed_optional_str_field(entry, "vulnerable_versions")) or "unknown"
+    )
     return Vulnerability(
         ecosystem="pnpm",
-        package=str(entry["module_name"]),
-        version=", ".join(versions) or str(entry.get("vulnerable_versions") or "unknown"),
+        package=_required_token(entry, "module_name"),
+        version=", ".join(versions) or fallback_version,
         advisory=advisory,
         severity=severity,
         fix="none" if (not patched or patched == "<0.0.0") else patched,
-        summary=str(entry.get("title") or entry.get("url") or advisory),
+        summary=_pnpm_summary(entry, advisory),
         dev_only_no_fix=exempt,
     )
 
@@ -365,7 +477,7 @@ def latest_binaries(
         data = gh_api(f"repos/{repo}/releases/latest")
         if not is_object_dict(data):
             raise TypeError(f"{repo} latest release is not an object")
-        return str_field(data, "tag_name")
+        return _required_token(data, "tag_name")
 
     tags = gh_api("repos/pgvector/pgvector/tags?per_page=100")
     if not is_object_list(tags):
@@ -452,7 +564,7 @@ def _ecosystem_section(
             "|---|---|---|---|---|---|",
         ]
         lines += [
-            f"| {v.severity} | {v.package} | {v.version} | {v.advisory} | {v.fix} | {_cell(v.summary)} |"
+            f"| {v.severity} | {_cell(v.package)} | {_cell(v.version)} | {_cell(v.advisory)} | {_cell(v.fix)} | {_cell(v.summary)} |"
             for v in rows
         ]
         lines.append("")
@@ -466,7 +578,7 @@ def _ecosystem_section(
 
 
 def _cell(text: str) -> str:
-    return text.replace("|", "\\|").replace("\n", " ")[:200]
+    return text.replace("|", "\\|").replace("\r", " ").replace("\n", " ")[:200]
 
 
 def _gh(argv: list[str], *, run: AuditProcess) -> str:

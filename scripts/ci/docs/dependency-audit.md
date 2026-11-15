@@ -43,6 +43,8 @@ GitHub commands 60 seconds and HTTP requests 30 seconds. A nonzero GitHub comman
 raises with its captured output; audit commands retain their distinct complete
 findings policy. HTTP adaptation passes the timeout by keyword to `urlopen`.
 
+Optional prose and metadata fields in `uv audit`, `pnpm audit` and OSV responses may be absent, `null` or blank. Python finding summaries fall back from `summary` through the first non-heading prose line of `description` or `details`, OSV `summary` or `details`, `link` and finally the advisory identifier; `pnpm` finding summaries fall back through `title`, `overview`, `url` and the advisory identifier. Required structural fields and non-null values of the wrong type across `uv`, `pnpm` and OSV prose fields raise `TypeError` or `ValueError` rather than degrading silently, while OSV `database_specific` retains the existing best-effort grading tolerance where an ungradable record maps to `unknown`.
+
 Each pinned-binary row reads its version constant from its owning file by an exact regex; a renamed, moved or ambiguous constant raises instead of silently dropping the row.
 
 Parent: [Scripts](../../docs/scripts.md).
