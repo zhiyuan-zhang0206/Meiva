@@ -511,3 +511,121 @@ def test_secret_scan_widens_to_full_history_when_gitleaks_policy_changes(tmp_pat
         if expect_widen:
             assert "v0.1.0" in _git_out(clone, "tag", "-l")
             assert "origin/side-branch" in _git_out(clone, "branch", "-r")
+
+
+# meiva:note
+# Seeds main-branch dispatch fixtures covering root policy, >50-commit aged policy, in-window touch-then-revert, and in-window policy merges.
+def _seed_main_window_cases(base_dir: Path) -> tuple[tuple[str, Path, bool], ...]:
+    root_origin = base_dir / "origin-root"
+    root_origin.mkdir()
+    _git_out(root_origin, "init", "-b", "main")
+    _git_out(root_origin, "config", "user.email", "test@example.com")
+    _git_out(root_origin, "config", "user.name", "Test")
+    (root_origin / ".gitleaks.toml").write_text('title = "root"\n', encoding="utf-8")
+    _git_out(root_origin, "add", ".gitleaks.toml")
+    _git_out(root_origin, "commit", "-m", "root policy")
+
+    aged_origin = base_dir / "origin-aged"
+    aged_origin.mkdir()
+    _git_out(aged_origin, "init", "-b", "main")
+    _git_out(aged_origin, "config", "user.email", "test@example.com")
+    _git_out(aged_origin, "config", "user.name", "Test")
+    (aged_origin / ".gitleaks.toml").write_text('title = "v1"\n', encoding="utf-8")
+    _git_out(aged_origin, "add", ".gitleaks.toml")
+    _git_out(aged_origin, "commit", "-m", "old policy")
+    early_base = _git_out(aged_origin, "rev-parse", "HEAD")
+    blob = _git_out(aged_origin, "hash-object", "-w", "--stdin", stdin="x\n")
+    policy_blob = _git_out(aged_origin, "rev-parse", "HEAD:.gitleaks.toml")
+    tip = early_base
+    for idx in range(60):
+        entries = f"100644 blob {policy_blob}\t.gitleaks.toml\n100644 blob {blob}\tn{idx}.txt\n"
+        tree = _git_out(aged_origin, "mktree", stdin=entries)
+        tip = _git_out(aged_origin, "commit-tree", tree, "-p", tip, "-m", f"main {idx}")
+    _git_out(aged_origin, "reset", "--hard", tip)
+
+    revert_origin = base_dir / "origin-revert"
+    _git_out(base_dir, "clone", "--quiet", str(aged_origin), str(revert_origin))
+    _git_out(revert_origin, "config", "user.email", "test@example.com")
+    _git_out(revert_origin, "config", "user.name", "Test")
+    (revert_origin / ".gitleaks.toml").write_text('title = "transient"\n', encoding="utf-8")
+    _git_out(revert_origin, "add", ".gitleaks.toml")
+    _git_out(revert_origin, "commit", "-m", "touch policy in window")
+    (revert_origin / ".gitleaks.toml").write_text('title = "v1"\n', encoding="utf-8")
+    _git_out(revert_origin, "add", ".gitleaks.toml")
+    _git_out(revert_origin, "commit", "-m", "revert policy in window")
+
+    merge_origin = base_dir / "origin-merge"
+    _git_out(base_dir, "clone", "--quiet", str(aged_origin), str(merge_origin))
+    _git_out(merge_origin, "config", "user.email", "test@example.com")
+    _git_out(merge_origin, "config", "user.name", "Test")
+    old_policy_blob = _git_out(
+        merge_origin, "hash-object", "-w", "--stdin", stdin='title = "merged"\n'
+    )
+    branch_tree = _git_out(
+        merge_origin, "mktree", stdin=f"100644 blob {old_policy_blob}\t.gitleaks.toml\n"
+    )
+    old_env = os.environ | {
+        "GIT_AUTHOR_DATE": "2020-01-01T00:00:00Z",
+        "GIT_COMMITTER_DATE": "2020-01-01T00:00:00Z",
+    }
+    branch_commit = subprocess.run(  # noqa: S603
+        ["git", "commit-tree", branch_tree, "-p", early_base, "-m", "old dated policy branch"],
+        cwd=merge_origin,
+        env=old_env,
+        capture_output=True,
+        text=True,
+        check=True,
+    ).stdout.strip()
+    _git_out(merge_origin, "merge", "--no-ff", "-m", "merge policy branch", branch_commit)
+    return (
+        ("root-policy", root_origin, True),
+        ("aged-policy-gt50", aged_origin, False),
+        ("window-touch-revert", revert_origin, True),
+        ("window-merge-policy", merge_origin, True),
+    )
+
+
+# meiva:note
+# Verifies workflow_dispatch on main bounds policy checks to the 50-commit window, covering root, >50 aged policy, touch-then-revert, and merges.
+def test_secret_scan_main_dispatch_bounds_policy_check_to_recent_50_commits(
+    tmp_path: Path,
+) -> None:
+    scan_script = _load_yaml(_WORKFLOW)["jobs"]["secret-scan"]["steps"][2]["run"]
+    cases = _seed_main_window_cases(tmp_path)
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    runner_temp = tmp_path / "runner-temp"
+    runner_temp.mkdir()
+    gitleaks_log = tmp_path / "gitleaks.log"
+    gitleaks_bin = bin_dir / "gitleaks"
+    gitleaks_bin.write_text(f'#!/bin/sh\necho "$@" >> "{gitleaks_log}"\n', encoding="utf-8")
+    gitleaks_bin.chmod(0o755)
+    env_base = os.environ | {
+        "PATH": f"{bin_dir}{os.pathsep}{os.environ['PATH']}",
+        "RUNNER_TEMP": str(runner_temp),
+        "EVENT": "workflow_dispatch",
+        "BASE_SHA": "",
+    }
+
+    for name, origin, expect_widen in cases:
+        clone = tmp_path / f"clone-{name}"
+        clone.mkdir()
+        _git_out(clone, "init")
+        _git_out(clone, "remote", "add", "origin", f"file://{origin}")
+        _git_out(clone, "fetch", "--depth=1", "origin", "main")
+        _git_out(clone, "checkout", "--detach", "FETCH_HEAD")
+        gitleaks_log.unlink(missing_ok=True)
+        res = subprocess.run(  # noqa: S603
+            ["bash", "-eo", "pipefail", "-c", scan_script],
+            cwd=clone,
+            env=env_base,
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        assert res.returncode == 0, (name, res.stdout, res.stderr)
+        logged = gitleaks_log.read_text(encoding="utf-8").strip()
+        if expect_widen:
+            assert "--log-opts=" not in logged, (name, logged)
+        else:
+            assert "--log-opts=-n 50" in logged, (name, logged)

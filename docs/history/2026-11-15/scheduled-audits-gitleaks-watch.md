@@ -26,7 +26,9 @@ Three changes close each escape:
    change touches `.gitleaks.toml` (added, modified, or deleted), `ci.yml`
    fetches all remote heads and tags, unshallows when needed, and runs a
    full-history scan (`timeout-minutes: 35`); ordinary pull requests keep their
-   incremental commit-range scan.
+   incremental commit-range scan, and manual dispatches on `main` widen only
+   when `.gitleaks.toml` changed within the fixed 50-commit window
+   (`git rev-list -n 50 HEAD`, covering root and merge commits).
 3. **`main-red-watch` coverage for `scheduled-audits.yml`**: the watch reads
    `scheduled-audits.yml` alongside its liveness stream (`NIGHTLY_STALE_AFTER`)
    outside `_FULL_SUITE_WORKFLOWS`. Deterministic audit steps

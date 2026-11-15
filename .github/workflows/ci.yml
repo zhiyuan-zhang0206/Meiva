@@ -503,15 +503,21 @@ jobs:
             fi
             rm -f "$RUNNER_TEMP/gitleaks.json"
           }
+          commits_touch_policy() {
+            [ -n "$(git diff-tree --stdin -m --root --no-commit-id --name-only -r -- .gitleaks.toml)" ]
+          }
           policy_touched() {
             local range_base="$1"
             if [ -n "$(git diff --name-only "$range_base" HEAD -- .gitleaks.toml)" ]; then
               return 0
             fi
-            if [ -n "$(git log -n 1 --format=%H "${range_base}..HEAD" -- .gitleaks.toml)" ]; then
+            if git rev-list "${range_base}..HEAD" | commits_touch_policy; then
               return 0
             fi
             return 1
+          }
+          recent_window_policy_touched() {
+            git rev-list -n 50 HEAD | commits_touch_policy
           }
           scan_full_history() {
             echo ".gitleaks.toml touched; fetching all refs and scanning full history"
@@ -590,7 +596,7 @@ jobs:
               echo "scanning ${merge_base}..HEAD"
               run_gitleaks --config .gitleaks.toml --log-opts="${merge_base}..HEAD"
             fi
-          elif [ -n "$(git log -n 50 --format=%H HEAD -- .gitleaks.toml)" ]; then
+          elif recent_window_policy_touched; then
             scan_full_history
           else
             echo "merge-base equals HEAD; scanning bounded recent window (-n 50)"
