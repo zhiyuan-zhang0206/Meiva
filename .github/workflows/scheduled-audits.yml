@@ -87,4 +87,53 @@ jobs:
           echo "$GOBIN" >> "$GITHUB_PATH"
 
       - name: Scan every ref's history
-        run: gitleaks git --config .gitleaks.toml --redact --no-banner .
+        run: |
+          : "${RUNNER_TEMP:=${TMPDIR:-/tmp}}"
+          rm -f "$RUNNER_TEMP/gitleaks.json"
+          rc=0
+          gitleaks git --config .gitleaks.toml --redact --no-banner --report-format json --report-path "$RUNNER_TEMP/gitleaks.json" . || rc=$?
+          if [ "$rc" -ne 0 ]; then
+            python3 - "$RUNNER_TEMP/gitleaks.json" "${GITHUB_STEP_SUMMARY:-}" <<'PY' || true
+          import json
+          import pathlib
+          import sys
+
+          report_path = pathlib.Path(sys.argv[1])
+          summary_path = sys.argv[2]
+          if not report_path.is_file():
+              sys.exit(0)
+          raw = json.loads(report_path.read_text(encoding="utf-8"))
+          if not isinstance(raw, list) or not raw:
+              sys.exit(0)
+          lines = [
+              f"Gitleaks reported {len(raw)} redacted finding(s) (location metadata only):",
+              "",
+              "| RuleID | Commit | Date | File | Lines | Fingerprint |",
+              "| --- | --- | --- | --- | --- | --- |",
+          ]
+          for item in raw:
+              if not isinstance(item, dict):
+                  continue
+              rule_id = str(item.get("RuleID", ""))
+              commit = str(item.get("Commit", ""))
+              date = str(item.get("Date", ""))
+              file_path = str(item.get("File", ""))
+              start_line = item.get("StartLine", "")
+              end_line = item.get("EndLine", "")
+              span = f"{start_line}-{end_line}" if start_line != "" or end_line != "" else ""
+              fingerprint = str(item.get("Fingerprint", ""))
+              clean = lambda value: value.replace("\r", " ").replace("\n", " ").replace("|", "\\|")
+              lines.append(
+                  f"| `{clean(rule_id)}` | `{clean(commit)}` | `{clean(date)}` "
+                  f"| `{clean(file_path)}` | `{clean(span)}` | `{clean(fingerprint)}` |"
+              )
+          output = "\n".join(lines) + "\n"
+          sys.stdout.write(output)
+          if summary_path:
+              with open(summary_path, "a", encoding="utf-8") as handle:
+                  handle.write(output)
+          PY
+            rm -f "$RUNNER_TEMP/gitleaks.json"
+            exit "$rc"
+          fi
+          rm -f "$RUNNER_TEMP/gitleaks.json"

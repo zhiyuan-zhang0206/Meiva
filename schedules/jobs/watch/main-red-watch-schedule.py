@@ -51,6 +51,7 @@ from schedules.plans.watch.main_red import (
     JunitEvidence,
     parse_failures,
     STALE_WATCH_TITLE,
+    AUDIT_CHECK_STEPS,
     Card,
     Failure,
     GATE_CHECK_STEPS,
@@ -76,6 +77,7 @@ _RELEASE_GATE = "release-gate.yml"
 _NIGHTLY = "refresh-test-durations.yml"
 _CI_NIGHTLY = "ci.yml"
 _MAIN_PUSH = "main-push.yml"
+_SCHEDULED_AUDITS = "scheduled-audits.yml"
 # meiva:note
 # The jobs inside a workflow that run part of the tree rather than the population. A failure they
 # report is not full-suite evidence even though the run it arrived in is: `ci.yml`'s nightly verdict
@@ -137,7 +139,7 @@ def _api(path: str, run_process: RunProcess) -> str:
 # meiva:note
 # The steps of a job that reported `failure`. The watch names the one that failed when it is a
 # check of the push gate, so a red says which check, not only which job.
-def _failed_step_names(job: Mapping[object, object]) -> tuple[str, ...]:
+def _failed_step_names(job: Mapping[str, object]) -> tuple[str, ...]:
     steps = job.get("steps")
     if not is_object_list(steps):
         return ()
@@ -192,7 +194,7 @@ def _workflow_text(workflow: str, sha: str, run_process: RunProcess) -> str:
 # unzip: a log that already said `FAILED path::case` has told the whole story. Both routes spell a
 # case the same way, so the fingerprint a red gets does not depend on which one answered.
 def _job_failures(
-    job: Mapping[object, object],
+    job: Mapping[str, object],
     *,
     run_id: int,
     attempt: int,
@@ -344,15 +346,23 @@ def fetch_runs(
         failures: tuple[Failure, ...] = ()
         job_names: tuple[str, ...] = ()
         downstream: tuple[str, ...] = ()
+        green_jobs: tuple[str, ...] | None = None
+        raw_jobs = json.loads(
+            _api(f"repos/{_REPO}/actions/runs/{item['id']}/jobs?per_page=100", run_process)
+        ).get("jobs")
+        jobs = [job for job in raw_jobs if is_object_dict(job)] if is_object_list(raw_jobs) else []
+        if conclusion == "success":
+            green_jobs = RunFacts.green_job_names(jobs)
         if conclusion == "failure":
-            jobs = json.loads(
-                _api(f"repos/{_REPO}/actions/runs/{item['id']}/jobs?per_page=100", run_process)
-            ).get("jobs", [])
             failed = [job for job in jobs if job.get("conclusion") == "failure"]
-            job_names = tuple(job.get("name", "") for job in failed)
+            job_names = tuple(name for job in failed if isinstance(name := job.get("name"), str))
             parsed: list[Failure] = []
-            check_steps: frozenset[str] = (
-                GATE_CHECK_STEPS if workflow == _MAIN_PUSH else frozenset()
+            check_steps = (
+                GATE_CHECK_STEPS
+                if workflow == _MAIN_PUSH
+                else AUDIT_CHECK_STEPS
+                if workflow == _SCHEDULED_AUDITS
+                else frozenset[str]()
             )
             for job in failed:
                 name = job.get("name", "")
@@ -390,6 +400,7 @@ def fetch_runs(
                 covers_full_suite=workflow in _FULL_SUITE_WORKFLOWS,
                 run_id=int(item.get("id") or 0),
                 attempt=listing_attempt(item),
+                green_jobs=green_jobs,
                 head_title=_commit_subject(item.get("head_sha", ""), run_process)
                 if conclusion == "failure"
                 else "",
@@ -636,7 +647,7 @@ def watch_round(
             image=inputs.image,
             home=inputs.home,
         ),
-        workflows=(_RELEASE_GATE, _NIGHTLY, _CI_NIGHTLY, _MAIN_PUSH),
+        workflows=(_RELEASE_GATE, _NIGHTLY, _CI_NIGHTLY, _MAIN_PUSH, _SCHEDULED_AUDITS),
         compare=partial(compare_commits, run_process=run_process),
         attempt_of=partial(latest_attempt_jobs, run_process=run_process),
         blind_min_streams=settings.daemon.main_red_watch_blind_streams,
@@ -652,6 +663,7 @@ def watch_round(
                     "to fifteen minutes)."
                 ),
             ),
+            LivenessStream("scheduled-audits", _SCHEDULED_AUDITS, NIGHTLY_STALE_AFTER),
         ),
     )
     uncertified, channel_latest = _uncertified_commits(run_process)
