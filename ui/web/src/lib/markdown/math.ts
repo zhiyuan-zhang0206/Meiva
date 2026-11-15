@@ -3,7 +3,8 @@
 // so `$$...$$` and `mdast-util-math` remain upstream while `remarkLatexMath`
 // enforces Pandoc and prose boundaries on `$...$` at tokenize time and adds
 // `\(...\)` / `\[...\]`; `remarkDisplayMathRecovery` promotes single-paragraph
-// `$$...$$` and `\[...\]` spans into display blocks.
+// `$$...$$` and `\[...\]` spans into display blocks. Keep the KaTeX
+// stylesheet on the release that rehype-katex uses to generate its markup.
 // meiva:link ui/web/src/docs/frontend-components/markdown-safe-content.md
 import type { PluggableList } from "unified";
 
