@@ -436,7 +436,7 @@ jobs:
   secret-scan:
     name: secret scan (Gitleaks)
     runs-on: ubuntu-24.04
-    timeout-minutes: 20
+    timeout-minutes: 35
     if: ${{ github.event_name != 'pull_request' || github.event.pull_request.draft == false }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -452,6 +452,86 @@ jobs:
           EVENT: ${{ github.event_name }}
           BASE_SHA: ${{ github.event.pull_request.base.sha }}
         run: |
+          : "${RUNNER_TEMP:=${TMPDIR:-/tmp}}"
+          run_gitleaks() {
+            rm -f "$RUNNER_TEMP/gitleaks.json"
+            local rc=0
+            gitleaks git "$@" --redact --no-banner --report-format json --report-path "$RUNNER_TEMP/gitleaks.json" . || rc=$?
+            if [ "$rc" -ne 0 ]; then
+              python3 - "$RUNNER_TEMP/gitleaks.json" "${GITHUB_STEP_SUMMARY:-}" <<'PY' || true
+          import json
+          import pathlib
+          import sys
+
+          report_path = pathlib.Path(sys.argv[1])
+          summary_path = sys.argv[2]
+          if not report_path.is_file():
+              sys.exit(0)
+          raw = json.loads(report_path.read_text(encoding="utf-8"))
+          if not isinstance(raw, list) or not raw:
+              sys.exit(0)
+          lines = [
+              f"Gitleaks reported {len(raw)} redacted finding(s) (location metadata only):",
+              "",
+              "| RuleID | Commit | Date | File | Lines | Fingerprint |",
+              "| --- | --- | --- | --- | --- | --- |",
+          ]
+          for item in raw:
+              if not isinstance(item, dict):
+                  continue
+              rule_id = str(item.get("RuleID", ""))
+              commit = str(item.get("Commit", ""))
+              date = str(item.get("Date", ""))
+              file_path = str(item.get("File", ""))
+              start_line = item.get("StartLine", "")
+              end_line = item.get("EndLine", "")
+              span = f"{start_line}-{end_line}" if start_line != "" or end_line != "" else ""
+              fingerprint = str(item.get("Fingerprint", ""))
+              clean = lambda value: value.replace("\r", " ").replace("\n", " ").replace("|", "\\|")
+              lines.append(
+                  f"| `{clean(rule_id)}` | `{clean(commit)}` | `{clean(date)}` "
+                  f"| `{clean(file_path)}` | `{clean(span)}` | `{clean(fingerprint)}` |"
+              )
+          output = "\n".join(lines) + "\n"
+          sys.stdout.write(output)
+          if summary_path:
+              with open(summary_path, "a", encoding="utf-8") as handle:
+                  handle.write(output)
+          PY
+              rm -f "$RUNNER_TEMP/gitleaks.json"
+              exit "$rc"
+            fi
+            rm -f "$RUNNER_TEMP/gitleaks.json"
+          }
+          commits_touch_policy() {
+            [ -n "$(git diff-tree --stdin -m --root --no-commit-id --name-only -r -- .gitleaks.toml)" ]
+          }
+          policy_touched() {
+            local range_base="$1"
+            if [ -n "$(git diff --name-only "$range_base" HEAD -- .gitleaks.toml)" ]; then
+              return 0
+            fi
+            if git rev-list "${range_base}..HEAD" | commits_touch_policy; then
+              return 0
+            fi
+            return 1
+          }
+          recent_window_policy_touched() {
+            git rev-list -n 50 HEAD | commits_touch_policy
+          }
+          scan_full_history() {
+            echo ".gitleaks.toml touched; fetching all refs and scanning full history"
+            if [ "$(git rev-parse --is-shallow-repository 2>/dev/null)" = "true" ]; then
+              git fetch --prune --unshallow origin "$(git rev-parse HEAD)" "+refs/heads/*:refs/remotes/origin/*" "+refs/tags/*:refs/tags/*"
+            else
+              git fetch --prune origin "$(git rev-parse HEAD)" "+refs/heads/*:refs/remotes/origin/*" "+refs/tags/*:refs/tags/*"
+            fi
+            if [ -f .gitleaks.toml ]; then
+              run_gitleaks --config .gitleaks.toml
+            else
+              run_gitleaks
+            fi
+          }
           if [ "$EVENT" = "pull_request" ]; then
             resolve_pr_base() {
               if git rev-parse --verify --quiet HEAD^2 >/dev/null; then
@@ -490,8 +570,12 @@ jobs:
               base="$(resolve_pr_base)"
             fi
             : "${base:?unable to resolve base commit for pull request}"
-            echo "scanning ${base}..HEAD"
-            gitleaks git --config .gitleaks.toml --redact --no-banner --log-opts="${base}..HEAD" .
+            if policy_touched "$base"; then
+              scan_full_history
+            else
+              echo "scanning ${base}..HEAD"
+              run_gitleaks --config .gitleaks.toml --log-opts="${base}..HEAD"
+            fi
             exit 0
           fi
 
@@ -506,11 +590,17 @@ jobs:
           : "${merge_base:?unable to resolve merge-base with origin/main}"
 
           if [ "$merge_base" != "$head_sha" ]; then
-            echo "scanning ${merge_base}..HEAD"
-            gitleaks git --config .gitleaks.toml --redact --no-banner --log-opts="${merge_base}..HEAD" .
+            if policy_touched "$merge_base"; then
+              scan_full_history
+            else
+              echo "scanning ${merge_base}..HEAD"
+              run_gitleaks --config .gitleaks.toml --log-opts="${merge_base}..HEAD"
+            fi
+          elif recent_window_policy_touched; then
+            scan_full_history
           else
             echo "merge-base equals HEAD; scanning bounded recent window (-n 50)"
-            gitleaks git --config .gitleaks.toml --redact --no-banner --log-opts="-n 50" .
+            run_gitleaks --config .gitleaks.toml --log-opts="-n 50"
           fi
 
   dependency-audit:

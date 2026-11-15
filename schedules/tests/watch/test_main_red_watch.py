@@ -34,6 +34,7 @@ from schedules.jobs.watch.main_red_watch import (
     watch_once,
 )
 from schedules.plans.watch.main_red import (
+    FAILURE_CHECK,
     FAILURE_TEST,
     FAILURE_UNNAMED,
     NIGHTLY_STALE_AFTER,
@@ -1591,3 +1592,100 @@ def test_the_first_suspect_is_announced_once(tmp_path: Path) -> None:
         now=when + timedelta(hours=1),
     )
     assert len(said) == 1, "a suspect already present announces nothing"
+
+
+# meiva:link docs/history/2026-11-15/scheduled-audits-gitleaks-watch.md
+def test_scheduled_audits_opens_on_first_red_ignores_skipped_cron_and_closes_on_own_green(
+    tmp_path: Path,
+) -> None:
+    audits = "scheduled-audits.yml"
+    secret_job = "secret scan (Gitleaks, full history)"
+    dep_job = "weekly dependency audit"
+    t0 = datetime(2026, 11, 15, 20, 30, tzinfo=UTC)
+    opened: list[int] = []
+    closed: list[tuple[int, str]] = []
+
+    def open_card(_card: Card) -> int:
+        card_id = 800 + len(opened)
+        opened.append(card_id)
+        return card_id
+
+    def close_card(task_id: int, reason: str) -> None:
+        closed.append((task_id, reason))
+
+    def run_round(runs: tuple[RunFacts, ...], *, now: datetime) -> str:
+        return watch_once(
+            state_path=tmp_path / STATE_FILE,
+            now=now,
+            fetch=lambda _workflow, _seen_at, _seen_attempt: runs,
+            last_start=lambda _workflow: now - timedelta(hours=1),
+            open_card=open_card,
+            close_card=close_card,
+            emit=lambda _payload: None,
+            workflows=(audits,),
+            liveness=(LivenessStream("scheduled-audits", audits, NIGHTLY_STALE_AFTER),),
+            notify=None,
+        )
+
+    line_1 = run_round(
+        (
+            RunFacts(
+                workflow=audits,
+                head_sha="64e0090bdb",
+                created_at=t0,
+                conclusion="failure",
+                failures=(
+                    Failure(
+                        f"{secret_job} / Scan every ref's history",
+                        FAILURE_CHECK,
+                        job=secret_job,
+                    ),
+                ),
+                job_names=(secret_job,),
+                covers_full_suite=False,
+                run_id=101,
+            ),
+        ),
+        now=t0 + timedelta(minutes=5),
+    )
+    assert opened == [800]
+    assert closed == []
+    assert "confirmed=1" in line_1 and "unnamed=0" in line_1
+
+    line_2 = run_round(
+        (
+            RunFacts(
+                workflow=audits,
+                head_sha="64e0090bdb",
+                created_at=t0 + timedelta(hours=6),
+                conclusion="success",
+                failures=(),
+                covers_full_suite=False,
+                run_id=102,
+                green_jobs=(dep_job,),
+            ),
+        ),
+        now=t0 + timedelta(hours=6, minutes=5),
+    )
+    assert opened == [800]
+    assert closed == []
+    assert "fingerprints=1" in line_2
+
+    line_3 = run_round(
+        (
+            RunFacts(
+                workflow=audits,
+                head_sha="9999999999",
+                created_at=t0 + timedelta(hours=24),
+                conclusion="success",
+                failures=(),
+                covers_full_suite=False,
+                run_id=103,
+                green_jobs=(secret_job,),
+            ),
+        ),
+        now=t0 + timedelta(hours=24, minutes=5),
+    )
+    assert opened == [800]
+    assert len(closed) == 1 and closed[0][0] == 800
+    assert "fingerprints=0" in line_3

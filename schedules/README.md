@@ -66,10 +66,12 @@ is new evidence even on the same commit — and a green run that exercises it
 closes it. A review card is reused if that case later confirms; its next exact
 case green can close it even inside an otherwise failed workflow. The latest
 round event and Grafana table show the bounded suspect list, age at the snapshot,
-opportunities and re-check evidence. A red the
-watch cannot name is the exception to that two-run rule: when the log carries no
-failing case and the failing step is no workflow's declared check, the run is
-reported on its **first** sighting, because the doubt two runs answer — is this
+opportunities and re-check evidence. Two classes skip that two-run wait and open a
+card on the **first** sighting: deterministic audit steps in `scheduled-audits.yml`
+(`AUDIT_CHECK_STEPS`, recorded as `FAILURE_CHECK` without incrementing `unnamed`,
+since a daily or weekly audit has no flaky test case to re-run), and a red the
+watch cannot name at all — when the log carries no failing case and the failing
+step is no workflow's declared check, the run is reported at once, because the doubt two runs answer — is this
 case flaky? — does not exist when the doubt is whether the watch can read the log
 at all. Its fingerprint is the job plus the step names, so one unreadable shape is
 one card, and the step name it carries is the entry a mapping would have to gain.
@@ -105,15 +107,18 @@ covered`, never as covered. One window is one card however many streams join it,
 and a single stream failing once stays a note, so a flaky API never becomes
 furniture on the board.
 
-Two things it reads run part of the tree rather than the population: the narrow
-`main-push.yml` gate (two checks) and the `data plane (macOS)` job inside the
-nightly `ci.yml` verdict (two test directories, on a hosted Mac). Their reds are
+Three things it reads run narrow checks rather than the test population: the
+`main-push.yml` gate (two checks), `scheduled-audits.yml` (the weekly dependency
+audit and nightly full-history secret scan, also watched for liveness under
+`NIGHTLY_STALE_AFTER`), and the `data plane (macOS)` job inside the nightly
+`ci.yml` verdict (two test directories, on a hosted Mac). Their reds are
 cards like any other, but they retire only on evidence that exercises them: a run
-that never collected the test is not evidence that it passes, and without that split
+that never collected the check is not evidence that it passes, and without that split
 the next Linux nightly — which runs the whole population without ever touching
-macOS — would retire the macOS card while the red stood. The failure and the entry
-carry that fact (`covers_full_suite`), so `apply_run` asks the record itself which
-greens exercise the red.
+macOS or historical secret scans — would retire the card while the red stood. The failure and the entry
+carry that fact (`covers_full_suite`), and non-full-suite green runs also check
+`RunFacts.green_jobs` against `entry.job` so a multi-cron workflow run where one
+audit job succeeded while the other was `skipped` never closes the skipped job's card.
 
 - **product** schedules (adversarial evaluation, self-evolution, memory, model
   tracking, debt clearing, CI observability, trace shipping, harness CLI convergence) are Meiva's own

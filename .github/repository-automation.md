@@ -99,9 +99,15 @@ The `secret-scan-history` job, on a nightly schedule (plus manual dispatch, main
 every fetched ref's whole history with the same `.gitleaks.toml` as the PR
 check. The required `secret scan (Gitleaks)` check in `ci.yml` scans only a
 change's own commits (or a bounded recent window of 50 commits on manual
-dispatch on `main`), so this loop is what catches a secret that reached a ref
-without passing that check. A finding keeps the run red; there is no marker
-issue.
+dispatch on `main`) unless `.gitleaks.toml` itself changed, in which case
+`ci.yml` fetches all remote branches and tags, unshallows the checkout, and
+runs the full-history scan before merge (`timeout-minutes: 35`). On a non-zero
+Gitleaks exit, both workflows project only redacted location metadata
+(`RuleID`, `Commit`, `Date`, `File`, `StartLine`-`EndLine`, `Fingerprint` —
+never `Secret`, `Match`, or `Message`) from the temporary JSON report to stdout
+and `$GITHUB_STEP_SUMMARY`, delete the temporary file, and exit with Gitleaks'
+status code. `main-red-watch` watches `scheduled-audits.yml` on `main` and
+opens a card on the first red audit run; there is no GitHub marker issue.
 
 ## `workflows/audit-branch-protection.yml`
 

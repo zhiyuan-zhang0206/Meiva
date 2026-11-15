@@ -49,3 +49,23 @@ regexTarget = "line"
 regexes = [
     '''^\s*"key": "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAm5LCtfMl0qNO8m7HLqZdf1lD7Yfa\+LS9FWI8uytYcja\+mH8\+lq6gzGXDQIK8bdCabt9AJiIKSvDB/7/fnk613ahJCJanaO0XQJYg\+jcY8tCM2ww3UCzWSn2u8y2mvI8G/b8IlUrP0OfrJQNI49X1o9py9rGhdr7tMwCwIPW1zBTpv4/HDWwsy\+V/lMRUxuQceepNdDnWjaX2MUIx0keSg7UMSHJMHMaO89DL70X7Hfa0Ds2Nqh5OQE8hERQQeeaIXgE68AbVTy195g2CYPGp/1ilKVK8KxL/G3\+ZjCuljsGuA1VUt6UYip5xQBrofiVQ6vVMdt/zf6ClPv\+z/jE6CQIDAQAB",\s*$''',
 ]
+
+# Empty `AVA_TELEGRAM_BOT_TOKEN=` / `MEIVA_TELEGRAM_BOT_TOKEN=` placeholders in
+# historical `.env.example` revisions before `#8889` retired Telegram config:
+# `generic-api-key` spanned the newline onto `*_TELEGRAM_OWNER_ID=0`. Scoped to
+# the two historical commits, `.env.example`, and the exact empty placeholder
+# match so any real token in those commits or any new placeholder elsewhere fails.
+[[allowlists]]
+description = "Historical empty Telegram bot-token placeholder in .env.example"
+condition = "AND"
+commits = [
+    "40a3e60c3cea5994c402634bde54a5898debe62e",
+    "ded34bf876d97fb6c6538bf4c903554ad7e1bb04",
+]
+paths = [
+    '''^\.env\.example$''',
+]
+regexTarget = "match"
+regexes = [
+    '''(?s)[A-Z]{3,5}_TELEGRAM_BOT_TOKEN=\n[A-Z]{3,5}_TELEGRAM_OWNER_ID=0''',
+]

@@ -16,6 +16,7 @@
 from __future__ import annotations
 
 import re
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, replace
 from datetime import datetime, timedelta
 
@@ -23,9 +24,12 @@ from schedules.plans.watch.junit_cases import CaseOutcome
 
 
 __all__ = [
+    "AUDIT_CHECK_STEPS",
+    "FAILURE_CHECK",
     "FAILURE_INFRA",
     "FAILURE_TEST",
     "FAILURE_UNNAMED",
+    "GATE_CHECK_STEPS",
     "NIGHTLY_STALE_AFTER",
     "STATE_CONFIRMED",
     "STATE_INFRA",
@@ -34,6 +38,7 @@ __all__ = [
     "Card",
     "Entry",
     "Failure",
+    "JunitEvidence",
     "Plan",
     "RunFacts",
     "apply_run",
@@ -45,6 +50,8 @@ __all__ = [
 ]
 
 FAILURE_TEST = "test"
+# meiva:link docs/history/2026-11-15/scheduled-audits-gitleaks-watch.md
+FAILURE_CHECK = "check"
 FAILURE_INFRA = "infra"
 # meiva:note
 # A red run whose log named nothing the watch could read is neither a flake nor the runner: the run
@@ -189,6 +196,19 @@ class RunFacts:
     # it (task #6488). `attempt=1` is what every record written before this field means.
     run_id: int = 0
     attempt: int = 1
+    # meiva:link docs/history/2026-11-15/scheduled-audits-gitleaks-watch.md
+    green_jobs: tuple[str, ...] | None = None
+
+    # meiva:link docs/history/2026-11-15/scheduled-audits-gitleaks-watch.md
+    @staticmethod
+    def green_job_names(jobs: Sequence[Mapping[str, object]]) -> tuple[str, ...]:
+        names: list[str] = []
+        for job in jobs:
+            if job.get("conclusion") == "success":
+                name = job.get("name")
+                if isinstance(name, str) and name:
+                    names.append(name)
+        return tuple(names)
 
 
 # meiva:note
@@ -358,6 +378,14 @@ GATE_CHECK_STEPS = frozenset(
     }
 )
 
+# meiva:link docs/history/2026-11-15/scheduled-audits-gitleaks-watch.md
+AUDIT_CHECK_STEPS = frozenset(
+    {
+        "Audit dependencies and pinned binaries",
+        "Scan every ref's history",
+    }
+)
+
 
 def parse_failures(
     log_text: str,
@@ -380,9 +408,11 @@ def parse_failures(
         return found
     # meiva:note
     # A named check step failing is a red of that check, not of the runner.
+    # meiva:link docs/history/2026-11-15/scheduled-audits-gitleaks-watch.md
     for step in failed_steps:
         if step in check_steps:
-            return (Failure(f"{job_name} / {step}", FAILURE_TEST, job_name),)
+            kind = FAILURE_CHECK if step in AUDIT_CHECK_STEPS else FAILURE_TEST
+            return (Failure(f"{job_name} / {step}", kind, job_name),)
     # meiva:note
     # The run's own JUnit artifact, when the log named nothing (task #6487). The id is built the way
     # the log builds it -- `file::name` -- so one test keeps one fingerprint whichever route named
@@ -441,10 +471,15 @@ def _unique(failures: tuple[Failure, ...]) -> tuple[Failure, ...]:
 # collected the test says nothing about it. The two facts are on the records themselves
 # (`covers_full_suite` on the run and on the entry), so a reader can check the card's sentence
 # against the same numbers.
+# meiva:link docs/history/2026-11-15/scheduled-audits-gitleaks-watch.md
 def _green_ran_the_red(run: RunFacts, entry: Entry) -> bool:
-    if run.workflow == entry.fingerprint.partition(_SEPARATOR)[0]:
+    if run.covers_full_suite and entry.covers_full_suite:
         return True
-    return run.covers_full_suite and entry.covers_full_suite
+    if run.workflow != entry.fingerprint.partition(_SEPARATOR)[0]:
+        return False
+    if run.green_jobs is not None and entry.job:
+        return entry.job in run.green_jobs
+    return True
 
 
 def _resolve_green(
@@ -497,7 +532,11 @@ def apply_run(entries: dict[str, Entry], run: RunFacts, *, preserve_suspects: bo
             # second time, because the doubt two strikes answer -- "is this case flaky?" -- does not
             # exist when the doubt is "can the watch read this log at all". Every other class keeps
             # the second sighting, which is what stops one bad runner from opening a card.
-            state = STATE_CONFIRMED if failure.kind == FAILURE_UNNAMED else STATE_SUSPECTED
+            state = (
+                STATE_CONFIRMED
+                if failure.kind in {FAILURE_UNNAMED, FAILURE_CHECK}
+                else STATE_SUSPECTED
+            )
             created = Entry(
                 fingerprint=name,
                 state=state,

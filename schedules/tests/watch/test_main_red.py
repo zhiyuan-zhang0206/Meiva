@@ -10,6 +10,8 @@ from datetime import UTC, datetime, timedelta
 
 from schedules.plans.watch.workflow_graph import downstream_failing_jobs
 from schedules.plans.watch.main_red import (
+    AUDIT_CHECK_STEPS,
+    FAILURE_CHECK,
     JunitEvidence,
     FAILURE_INFRA,
     GATE_CHECK_STEPS,
@@ -782,3 +784,173 @@ def test_a_card_named_by_shard_says_the_match_was_heuristic() -> None:
         "Artifacts: test-results-e2e-shard-3 (matched by shard: the job name gives no upload name)"
         in body
     )
+
+
+# meiva:link docs/history/2026-11-15/scheduled-audits-gitleaks-watch.md
+def test_the_audit_step_names_exist_in_the_workflow() -> None:
+    from pathlib import Path
+
+    import yaml
+
+    root = Path(__file__).resolve().parents[3]
+    workflow = yaml.safe_load((root / ".github" / "workflows" / "scheduled-audits.yml").read_text())
+    names = {step.get("name") for job in workflow["jobs"].values() for step in job.get("steps", [])}
+
+    assert names >= AUDIT_CHECK_STEPS, AUDIT_CHECK_STEPS - names
+
+
+# meiva:link docs/history/2026-11-15/scheduled-audits-gitleaks-watch.md
+def test_an_audit_check_step_confirms_on_its_first_red_run() -> None:
+    job_name = "secret scan (Gitleaks, full history)"
+    step_name = "Scan every ref's history"
+    failures = parse_failures(
+        "Gitleaks reported 2 redacted finding(s) (location metadata only)\n",
+        job_name=job_name,
+        suite_step_failed=True,
+        failed_steps=(step_name,),
+        check_steps=AUDIT_CHECK_STEPS,
+    )
+    assert [(failure.test_id, failure.kind, failure.job) for failure in failures] == [
+        (f"{job_name} / {step_name}", FAILURE_CHECK, job_name)
+    ]
+
+    infra = parse_failures(
+        "An action could not be found at the URI 'https://codeload.github.com/...'",
+        job_name=job_name,
+        suite_step_failed=True,
+        failed_steps=(step_name,),
+        check_steps=AUDIT_CHECK_STEPS,
+    )
+    assert [failure.kind for failure in infra] == [FAILURE_INFRA]
+
+    plan = apply_run(
+        {},
+        RunFacts(
+            workflow="scheduled-audits.yml",
+            head_sha="64e0090bdb",
+            created_at=datetime(2026, 11, 14, 20, 30, tzinfo=UTC),
+            conclusion="failure",
+            failures=failures,
+            covers_full_suite=False,
+        ),
+    )
+    assert len(plan.confirmed) == 1
+    (entry,) = dict(plan.entries).values()
+    assert entry.state == STATE_CONFIRMED
+    assert entry.kind == FAILURE_CHECK
+    assert entry.red_count == 1
+    assert entry.covers_full_suite is False
+    assert entry.job == job_name
+
+
+# meiva:link docs/history/2026-11-15/scheduled-audits-gitleaks-watch.md
+def test_a_skipped_audit_job_in_a_green_run_does_not_close_the_red_card() -> None:
+    audits = "scheduled-audits.yml"
+    secret_job = "secret scan (Gitleaks, full history)"
+    dep_job = "weekly dependency audit"
+    failures = parse_failures(
+        "Gitleaks reported 2 redacted finding(s)\n",
+        job_name=secret_job,
+        suite_step_failed=True,
+        failed_steps=("Scan every ref's history",),
+        check_steps=AUDIT_CHECK_STEPS,
+    )
+    sunday_red = apply_run(
+        {},
+        RunFacts(
+            workflow=audits,
+            head_sha="sha_sun",
+            created_at=datetime(2026, 11, 15, 20, 30, tzinfo=UTC),
+            conclusion="failure",
+            failures=failures,
+            covers_full_suite=False,
+        ),
+    )
+    (key, opened_entry) = sunday_red.entries[0]
+    entries = {key: replace(opened_entry, task_id=7005)}
+
+    monday_dep_jobs = RunFacts.green_job_names(
+        (
+            {"name": dep_job, "conclusion": "success"},
+            {"name": secret_job, "conclusion": "skipped"},
+        )
+    )
+    assert monday_dep_jobs == (dep_job,)
+
+    monday_green = apply_run(
+        entries,
+        RunFacts(
+            workflow=audits,
+            head_sha="sha_mon",
+            created_at=datetime(2026, 11, 16, 2, 42, tzinfo=UTC),
+            conclusion="success",
+            failures=(),
+            covers_full_suite=False,
+            green_jobs=monday_dep_jobs,
+        ),
+    )
+    assert monday_green.closes == ()
+    assert dict(monday_green.entries) == entries
+
+    full_suite_green = apply_run(
+        entries,
+        RunFacts(
+            workflow=_GATE,
+            head_sha="sha_gate",
+            created_at=datetime(2026, 11, 16, 6, 0, tzinfo=UTC),
+            conclusion="success",
+            failures=(),
+            covers_full_suite=True,
+            green_jobs=("Backend full suite (1/8)",),
+        ),
+    )
+    assert full_suite_green.closes == ()
+    assert dict(full_suite_green.entries) == entries
+
+    nightly_secret_jobs = RunFacts.green_job_names(
+        (
+            {"name": dep_job, "conclusion": "skipped"},
+            {"name": secret_job, "conclusion": "success"},
+        )
+    )
+    assert nightly_secret_jobs == (secret_job,)
+
+    true_green = apply_run(
+        entries,
+        RunFacts(
+            workflow=audits,
+            head_sha="sha_fix",
+            created_at=datetime(2026, 11, 16, 20, 30, tzinfo=UTC),
+            conclusion="success",
+            failures=(),
+            covers_full_suite=False,
+            green_jobs=nightly_secret_jobs,
+        ),
+    )
+    assert true_green.closes == (7005,)
+    assert true_green.entries == ()
+
+    sharded_red = apply_run(
+        {},
+        RunFacts(
+            workflow=_MACOS,
+            head_sha="sha_a",
+            created_at=datetime(2026, 11, 16, 1, 0, tzinfo=UTC),
+            conclusion="failure",
+            failures=(Failure(_SEMAPHORE, FAILURE_TEST, job="backend shard (8/8)"),),
+            covers_full_suite=True,
+        ),
+    )
+    sharded_green = apply_run(
+        dict(sharded_red.entries),
+        RunFacts(
+            workflow=_MACOS,
+            head_sha="sha_b",
+            created_at=datetime(2026, 11, 16, 2, 0, tzinfo=UTC),
+            conclusion="success",
+            failures=(),
+            covers_full_suite=True,
+            green_jobs=("backend shard (1/7)",),
+        ),
+    )
+    assert dict(sharded_green.entries) == {}

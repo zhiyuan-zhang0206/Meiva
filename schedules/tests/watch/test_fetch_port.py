@@ -108,3 +108,45 @@ def test_slot_entry_reads_only_verified_scheduled_history() -> None:
         k.arg == "branch" and isinstance(k.value, ast.Constant) and k.value.value == "main"
         for k in calls[0].keywords
     )
+
+
+# meiva:link docs/history/2026-11-15/scheduled-audits-gitleaks-watch.md
+def test_scheduled_audits_is_watched_with_liveness_and_per_job_greens() -> None:
+    module = ast.parse(_ENTRY.read_text())
+    constants = {
+        target.id: ast.literal_eval(node.value)
+        for node in module.body
+        if isinstance(node, ast.Assign)
+        for target in node.targets
+        if isinstance(target, ast.Name) and isinstance(node.value, ast.Constant)
+    }
+    assert constants["_SCHEDULED_AUDITS"] == "scheduled-audits.yml"
+
+    full_suite_assign = next(
+        node.value
+        for node in module.body
+        if isinstance(node, ast.Assign)
+        and any(isinstance(t, ast.Name) and t.id == "_FULL_SUITE_WORKFLOWS" for t in node.targets)
+    )
+    assert "_SCHEDULED_AUDITS" not in ast.unparse(full_suite_assign)
+
+    watch_calls = [
+        node
+        for node in ast.walk(_function(_ENTRY, "watch_round"))
+        if isinstance(node, ast.Call)
+        and isinstance(node.func, ast.Name)
+        and node.func.id == "watch_once"
+    ]
+    assert len(watch_calls) == 1
+    workflows_kw = next(kw.value for kw in watch_calls[0].keywords if kw.arg == "workflows")
+    liveness_kw = next(kw.value for kw in watch_calls[0].keywords if kw.arg == "liveness")
+    assert "_SCHEDULED_AUDITS" in ast.unparse(workflows_kw)
+    assert (
+        "LivenessStream('scheduled-audits', _SCHEDULED_AUDITS, NIGHTLY_STALE_AFTER)"
+        in ast.unparse(liveness_kw)
+    )
+
+    fetch_body = ast.unparse(_function(_ENTRY, "fetch_runs"))
+    assert "AUDIT_CHECK_STEPS" in fetch_body
+    assert "RunFacts.green_job_names" in fetch_body
+    assert "green_jobs=green_jobs" in fetch_body
