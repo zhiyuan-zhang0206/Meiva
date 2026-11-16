@@ -1,11 +1,17 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { act, fireEvent, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, fireEvent, screen, waitFor } from "@testing-library/react";
 import { renderWithBrowser } from "@/test-support/render";
-import { WallClockProvider } from "@/lib/transport/transport-context";
+import { ApiProvider, StreamHubProvider, WallClockProvider } from "@/lib/transport/transport-context";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { cleanupHomePageTest, gatewayWrapper, HomePageBound as HomePage, hooksState, makeAgent, resetHomePageTestState, wrap } from "./page-test-mock";
+import { cleanupHomePageTest, gatewayWrapper, HomePageView, homePageProps, HomePageBound as HomePage, hooksState, makeAgent, resetHomePageTestState, wrap } from "./page-test-mock";
 
-import { transport } from "@/test-support/fake-api";
+import { resetTransport, transport } from "@/test-support/fake-api";
+import { TimelineView } from "@/components/timeline";
+import { USER_SETTING_DEFAULTS, type BackendTimelineItem, type TimelineResponse } from "@/lib/contracts/types";
+import { useTimeline } from "@/lib/timeline/use-timeline";
+import { useTimelineStore } from "@/lib/timeline/timeline-store";
+import { fakeStreamHub, TestStreamProvider } from "@/test-support/fake-stream";
+
 afterEach(cleanupHomePageTest);
 beforeEach(resetHomePageTestState);
 
@@ -224,4 +230,99 @@ describe("multi-command dispatch", () => {
     await act(() => Promise.resolve());
     expect(hooksState.requestSendAnchor).not.toHaveBeenCalled();
   });
+});
+
+// meiva:note
+// Keep the actual home consumer in the request-to-ring path: connecting the hook
+// directly to TimelineView would bypass HomeContent's prop forwarding.
+// meiva:link ui/web/src/docs/frontend-components/timeline-view/history-paging.md
+describe("home older-history request presentation", () => {
+const items: BackendTimelineItem[] = Array.from({ length: 16 }, (_, i) => ({
+  item_id: `${i + 1}.0`, kind: "agent_chat", payload: `Reply ${i + 1}`,
+  source: null, created_at: null, inbound_id: null, show_timestamp: false,
+}));
+const { hub } = fakeStreamHub();
+let client: QueryClient;
+let top = 0;
+let visit = 0;
+
+function HomeReader() {
+  const timeline = useTimeline(42, () => undefined);
+  return <><button type="button" onClick={() => timeline.loadOlder("background")}>Background fixture read</button>
+    <HomePageView {...homePageProps()} timeline={timeline} TimelineView={TimelineView} /></>;
+}
+
+beforeEach(() => {
+  resetTransport();
+  transport.getConfig.mockResolvedValue({ fields: [] });
+  transport.getPendingMessages.mockResolvedValue([]);
+  transport.getUserMessages.mockResolvedValue({ mode: "prefix", seen_id: 0, items: [] });
+  transport.getAgentQuestions.mockResolvedValue([]);
+  hooksState.bfcacheId = `home-paging-${++visit}`;
+  hooksState.activeId = 42;
+  hooksState.agents = [makeAgent({ agent_id: 42, status: "idling" })];
+  hooksState.settings = { ...USER_SETTING_DEFAULTS, "behavior.replySuggestions": false };
+  client = new QueryClient({ defaultOptions: { queries: { retry: false, staleTime: Infinity } } });
+  client.setQueryData(["timeline", 42], { items, msg_count: 17, has_more: true });
+  client.setQueryData(["user-settings"], hooksState.settings);
+  client.setQueryData(["config", null], { fields: [] });
+  useTimelineStore.getState().switchThread(null, null, false);
+  top = 0;
+});
+afterEach(() => { cleanup(); client.clear(); });
+
+  it.each(["reader", "background"])("presents %s reads through the home consumer and shows a reader retry after failure", async (origin) => {
+    let fail: (reason: Error) => void = () => undefined;
+    transport.getTimeline.mockImplementation(() => new Promise<TimelineResponse>((_, reject) => { fail = reject; }));
+    renderWithBrowser(<QueryClientProvider client={client}>
+      <ApiProvider api={transport}><StreamHubProvider hub={hub}><WallClockProvider wallNow={Date.now}>
+        <TestStreamProvider><HomeReader /></TestStreamProvider>
+      </WallClockProvider></StreamHubProvider></ApiProvider>
+    </QueryClientProvider>);
+    const viewport = document.querySelector<HTMLElement>('[data-slot="scroll-area-viewport"]')!;
+    Object.defineProperties(viewport, {
+      clientHeight: { configurable: true, get: () => 600 },
+      scrollHeight: { configurable: true, get: () => 5000 },
+      scrollTop: { configurable: true, get: () => top,
+        set: (value: number) => { top = Math.max(0, Math.min(4400, value)); } },
+    });
+    for (const element of [viewport, ...viewport.querySelectorAll<HTMLElement>("[data-item-id]")]) {
+      Object.defineProperty(element, "getBoundingClientRect", {
+        configurable: true,
+        value: () => {
+          const y = element.dataset.itemId ? (Number.parseInt(element.dataset.itemId) - 1) * 300 - top : 0;
+          return { top: y, bottom: y + 300, height: 300, left: 0, right: 400, width: 400 } as DOMRect;
+        },
+      });
+    }
+    act(() => { viewport.scrollTop = 4400; fireEvent.resize(window); fireEvent.scroll(viewport); });
+    const wheel = (at: number) => {
+      const event = new WheelEvent("wheel", { deltaY: -80, bubbles: true, cancelable: true });
+      Object.defineProperty(event, "timeStamp", { value: at });
+      fireEvent(viewport, event);
+    };
+    wheel(1000);
+    act(() => { viewport.scrollTop = 0; fireEvent.scroll(viewport); });
+    wheel(1040);
+    expect(transport.getTimeline).not.toHaveBeenCalled();
+    if (origin === "reader") wheel(1500);
+    else fireEvent.click(screen.getByRole("button", { name: "Background fixture read" }));
+    await waitFor(() => expect(transport.getTimeline).toHaveBeenCalledOnce());
+    expect(transport.getTimeline).toHaveBeenCalledWith(42, expect.objectContaining({ before: "1.0" }));
+    expect(useTimelineStore.getState().loadingOlder).toBe(true);
+    const strip = screen.getByTestId("load-older-spinner");
+    expect(strip.dataset.state).toBe(origin === "reader" ? "loading" : "idle");
+    const ring = strip.querySelector(".animate-spin");
+    if (origin === "reader") expect(ring).not.toBeNull();
+    else expect(ring).toBeNull();
+    wheel(1800);
+    expect(transport.getTimeline).toHaveBeenCalledOnce();
+    expect(strip.querySelector(".animate-spin")).toBe(ring);
+    await act(async () => { fail(new Error("fixture page failure")); await Promise.resolve(); });
+    expect(strip.dataset.state).toBe("idle");
+    wheel(2200);
+    await waitFor(() => expect(transport.getTimeline).toHaveBeenCalledTimes(2));
+    expect(strip.dataset.state).toBe("loading");
+  });
+
 });
