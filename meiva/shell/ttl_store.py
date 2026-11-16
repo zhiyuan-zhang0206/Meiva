@@ -67,14 +67,14 @@ def next_session_index(database: DatabaseHandle, agent_id: int) -> int:
 # commits its counter advance before releasing the lock, so a stale numeric handle
 # is never reused. Retry only failures before an id is allocated: after that an
 # external session may exist, and a retry could create two PTYs for one request.
-def create_ttl_fenced(
+def create_ttl_fenced[T](
     database: DatabaseHandle,
     agent_id: int,
     ttl: float,
     *,
-    start: Callable[[int], None],
-    dispose: Callable[[], None],
-) -> int:
+    start: Callable[[int], T],
+    dispose: Callable[[T], None],
+) -> tuple[int, T]:
     for attempt in range(1, _TTL_QUERY_ATTEMPTS + 1):
         allocated = False
         try:
@@ -89,7 +89,7 @@ def create_ttl_fenced(
                 session_id = _allocated_session_id(row, agent_id)
                 allocated = True
                 try:
-                    start(session_id)
+                    resource = start(session_id)
                 except Exception:
                     conn.commit()
                     raise
@@ -101,15 +101,15 @@ def create_ttl_fenced(
                             (agent_id, session_id, ttl),
                         )
                 except Exception as exc:
-                    dispose()
+                    dispose(resource)
                     conn.commit()
                     raise RuntimeError(f"failed to track TTL for session {session_id}") from exc
                 try:
                     conn.commit()
                 except Exception:
-                    dispose()
+                    dispose(resource)
                     raise
-                return session_id
+                return session_id, resource
         except Exception as exc:
             if allocated:
                 raise

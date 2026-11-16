@@ -88,25 +88,23 @@ def _terminal_transition_after_fenced_creation(
     terminal_failures: list[BaseException] = []
     terminal_started = Event()
     terminal_finished = Event()
-    full: str | None = None
 
-    def start(session_id: int) -> None:
-        nonlocal full
+    def start(session_id: int) -> str:
         full = session_plan.session_full_name(shell.shell_prefix(), session_id, "fenced")
         creation_entered.set()
         if not release_creation.wait(timeout=5.0):
             raise TimeoutError("test did not release the fenced session creation")
         assert shell.backend.new_session(full, "", tmp_path, env={"MEIVA_HOME": str(unit_home)})
+        return full
 
-    def dispose() -> None:
-        if full is not None:
-            shell.backend.kill_session(full, graceful=False)
+    def dispose(full: str) -> None:
+        shell.backend.kill_session(full, graceful=False)
 
     creator, failures = _captured_thread(
         lambda: created.append(
             ttl_store.create_ttl_fenced(
                 database, shell.agent_id, 120.0, start=start, dispose=dispose
-            )
+            )[0]
         )
     )
     terminal: Thread | None = None

@@ -80,17 +80,14 @@ class ShellSessions:
             agent_id=self._agent_id,
             overrides=env_overrides,
         )
-        full: str | None = None
 
-        def start(session_id: int) -> None:
-            nonlocal full
+        def start(session_id: int) -> str:
             full = session_plan.session_full_name(self.shell_prefix(), session_id, name)
             if not self._backend.new_session(full, "", cwd, env=env):
                 raise RuntimeError(f"failed to create session {full!r}")
+            return full
 
-        def dispose() -> None:
-            if full is None:
-                return
+        def dispose(full: str) -> None:
             try:
                 self._backend.kill_session(full, graceful=False)
             except Exception:
@@ -100,12 +97,9 @@ class ShellSessions:
                     full,
                 )
 
-        session_id = ttl_store.create_ttl_fenced(
+        return ttl_store.create_ttl_fenced(
             self._database, self._agent_id, ttl, start=start, dispose=dispose
         )
-        if full is None:
-            raise AssertionError("a successful shell creation must have a session name")
-        return session_id, full
 
     # meiva:note
     # Text and Enter go in separate writes: a combined write races TUI programs (Claude Code, Codex) that are still processing the typed text when Enter arrives.
