@@ -27,8 +27,8 @@ Overview of the Agent subsystem.
     correcting "who I am".
   - **terminate / force** — graceful exit (deliver `kind='terminate'`, graph goes to END, process exits naturally)
     or request interruption of the active hosted turn when stuck (`force=true`, not available on `meiva.self.terminate()`);
-    `enqueued` confirms acceptance, not exit or completion of owned work. With `kill_all_shell_sessions`
-    every shell session the agent owns on its home machine (watchers included) is killed too, silently — right
+    `enqueued` confirms acceptance, not exit or completion of owned work. Every shell session the agent owns on
+    its home machine (watchers included) is killed silently — right
     before a graceful termination applies, or at once for force (swept again when the host observes the force
     quiescent) / an already-terminated agent — so none of them can wake it again; the response's
     `shell_sessions` reports it.

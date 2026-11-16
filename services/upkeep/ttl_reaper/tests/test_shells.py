@@ -38,7 +38,6 @@ from ops.rpc_schemas import ShellInfo, ShellKillResult, ShellProbeResult
 from ops.tests.rpc_support import rpc_client
 from services.upkeep.ttl_reaper import shells
 from services.upkeep.ttl_reaper.config import TtlReaperConfig
-from services.upkeep.ttl_reaper.remote import remote_round
 from services.upkeep.ttl_reaper.shells import (
     claim_shell_row_still_expired,
     delete_stale_row,
@@ -97,13 +96,14 @@ def reaper_pool(db_url: str, *, database_gate: ProcessDbGate) -> Iterator[Connec
     pool.close()
 
 
-def _running_agent(conn: psycopg.Connection, *, machine: str = "unknown") -> int:
+def _running_agent(
+    conn: psycopg.Connection, *, machine: str = "unknown", status: str = "running"
+) -> int:
     aid = create_agent(conn)
     with conn.cursor() as cur:
         cur.execute(
-            "INSERT INTO agents_meta (id, spawner, status, machine) "
-            "VALUES (%s, 'user', 'running', %s)",
-            (aid, machine),
+            "INSERT INTO agents_meta (id, spawner, status, machine) VALUES (%s, 'user', %s, %s)",
+            (aid, status, machine),
         )
     conn.commit()
     return aid
@@ -614,7 +614,7 @@ async def test_stale_sweep_ignores_a_row_younger_than_the_grace(
         aid,
         1,
         expires_at=_tracked(),
-        created_at=datetime.now(UTC) - timedelta(hours=1),
+        created_at=datetime.now(UTC) - timedelta(minutes=1),
     )
 
     with runner(db_conn, "macmini", lambda _call: _probed()) as wire:
@@ -662,7 +662,7 @@ async def test_stale_sweep_keeps_rows_of_a_machine_missing_from_the_registry_but
 ) -> None:
     aid = _running_agent(db_conn, machine="ghost")
     _insert_shell_row(db_conn, aid, 1, expires_at=_tracked(), created_at=_past_the_grace())
-    _probe_record(db_conn, "ghost", at=datetime.now(UTC) - timedelta(minutes=10))
+    _probe_record(db_conn, "ghost", at=datetime.now(UTC) - timedelta(minutes=1))
 
     dropped = await _sweep(reaper_pool, database_gate=database_gate)
 
@@ -672,59 +672,6 @@ async def test_stale_sweep_keeps_rows_of_a_machine_missing_from_the_registry_but
     # meiva:note
     # A registry gap, not a dead machine: it is logged as such and the rows wait.
     assert "missing from the registry but was probed" in caplog.text
-
-
-async def test_a_remote_round_kills_the_expired_row_and_sweeps_the_dead_sessions_row(
-    db_conn: psycopg.Connection,
-    reaper_pool: ConnectionPool,
-    event_bus: EventBus,
-    *,
-    database_gate: ProcessDbGate,
-) -> None:
-    aid = _running_agent(db_conn, machine="macmini")
-    _insert_shell_row(db_conn, aid, 5, expires_at=_expired())
-    _insert_shell_row(db_conn, aid, 6, expires_at=_tracked(), created_at=_past_the_grace())
-
-    def answer(call: dict[str, Any]) -> Reply:
-        return _killed(interrupted=False) if call["kind"] == "shell_kill" else _probed()
-
-    with runner(db_conn, "macmini", answer) as wire:
-        await remote_round(
-            reaper_pool,
-            Database.from_settings(gate=database_gate),
-            event_bus,
-            _progress(),
-            reaper_config(),
-            rpc_client()[0],
-        )
-
-    assert [call["kind"] for call in wire.calls] == ["shell_kill", "shell_probe"]
-    assert _rows(db_conn, aid) == []
-
-
-async def test_a_remote_round_without_its_sweep_leaves_the_rows_alone(
-    db_conn: psycopg.Connection,
-    reaper_pool: ConnectionPool,
-    event_bus: EventBus,
-    *,
-    database_gate: ProcessDbGate,
-) -> None:
-    aid = _running_agent(db_conn, machine="macmini")
-    _insert_shell_row(db_conn, aid, 1, expires_at=_tracked(), created_at=_past_the_grace())
-
-    with runner(db_conn, "macmini", lambda _call: _probed()) as wire:
-        await remote_round(
-            reaper_pool,
-            Database.from_settings(gate=database_gate),
-            event_bus,
-            _progress(),
-            reaper_config(),
-            rpc_client()[0],
-            sweep=False,
-        )
-
-    assert wire.calls == []
-    assert _rows(db_conn, aid) == [1]
 
 
 def test_delete_stale_row_leaves_a_row_rewritten_since_the_select(

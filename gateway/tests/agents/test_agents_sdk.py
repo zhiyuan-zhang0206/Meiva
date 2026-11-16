@@ -443,8 +443,9 @@ class TestTerminate:
         assert result == TerminateResult.ALREADY_TERMINATED
         assert result.status is TerminateResult.ALREADY_TERMINATED
         assert result.open_tasks is None
-        # No kill was requested (and an older runner reports none): None.
-        assert result.shell_sessions is None
+        assert result.shell_sessions is not None
+        assert result.shell_sessions.when == "now"
+        assert result.shell_sessions.killed == []
 
     # meiva:note
     # The home runner's report of the kill (`now`, with the killed ids) comes back verbatim.

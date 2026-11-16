@@ -15,7 +15,7 @@ orphan-guard parent; the shared launch-line reasoning lives in
 
 If the line cannot be sent, the session is killed and the launch file removed: a
 session whose launch command never arrived is not a watcher, and leaving it would
-sit under the watcher's name (up to the TTL's 7 days for a default cron) with
+sit under the watcher's name (up to the TTL's 72 hours for a default cron) with
 nothing to run.
 
 The launch is split into decisions over values and a shell that executes them.

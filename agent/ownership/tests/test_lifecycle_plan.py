@@ -42,14 +42,8 @@ def test_a_restart_of_an_idle_agent_queues_no_note() -> None:
     assert resume_note("user", resume_turn=False, message="ignored when idle") is None
 
 
-@pytest.mark.parametrize(
-    ("kill_flags", "expected"),
-    [([], None), ([False, False], None), ([False, True], 7), ([True], 7)],
-)
-def test_the_shell_cutoff_exists_only_when_a_closed_terminate_asked_for_the_kill(
-    kill_flags: list[bool], expected: int | None
-) -> None:
-    assert shell_cutoff(kill_flags, 7) == expected
+def test_every_termination_captures_the_shell_cutoff() -> None:
+    assert shell_cutoff(7) == 7
 
 
 @pytest.mark.parametrize(

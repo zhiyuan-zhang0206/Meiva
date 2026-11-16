@@ -26,14 +26,14 @@ def _run_with_transient_retry[T](operation: Callable[[], T]) -> T:
 
 
 # meiva:note
-# Atomically increments agents_meta.session_index and returns the id to use (shared by shells and watchers); `UPDATE ... RETURNING` keeps it safe under concurrency. There is no fallback: an unavailable database, or an agent that is not in agents_meta, raises. The connect cap of `Database.connect` keeps a black-holing database from hanging `meiva.shell.sessions.new()` on the OS TCP-retransmit timeout.
+# Atomically increments agents_meta.session_index and returns the id to use (shared by shells and watchers); `UPDATE ... RETURNING` keeps it safe under concurrency. A terminal agent cannot allocate: the status condition serializes with the termination row lock, so a concurrent allocation is either captured below its shell cutoff or refused after the terminal commit. The connect cap of `Database.connect` keeps a black-holing database from hanging `meiva.shell.sessions.new()` on the OS TCP-retransmit timeout.
 def next_session_index(database: DatabaseHandle, agent_id: int) -> int:
     def _allocate() -> tuple[int, ...] | None:
         with database.connect() as conn, conn.cursor() as cur:
             cur.execute("SET TRANSACTION READ WRITE")
             cur.execute(
                 "UPDATE agents_meta SET session_index = session_index + 1 "
-                "WHERE id = %s RETURNING session_index",
+                "WHERE id = %s AND status <> 'terminated' RETURNING session_index",
                 (agent_id,),
             )
             row = cur.fetchone()
@@ -43,7 +43,7 @@ def next_session_index(database: DatabaseHandle, agent_id: int) -> int:
     row = _run_with_transient_retry(_allocate)
     if row is None:
         raise RuntimeError(
-            f"agent {agent_id} not in agents_meta table — cannot allocate session_index"
+            f"agent {agent_id} is missing or terminated — cannot allocate session_index"
         )
     return int(row[0]) - 1
 

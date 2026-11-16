@@ -65,8 +65,8 @@ class SpawnDeps:
 # session open as the post-mortem site.
 #
 # The session's shell TTL IS this watcher's target deadline (user ruling 2026-09-14, task #3411),
-# derived once, in `plans.py`, and carried by the request. Written as the system-side TRUE value:
-# a 7-day standing cron is a normal watcher, exempt from the 24h user-session cap.
+# derived once, in `plans.py`, and carried by the request. System-side watchers may outlive
+# the 24-hour user cap but never the absolute 72-hour persistent-shell cap.
 # `meiva.shell.sessions.renew` can move this same deadline later, exactly like any other
 # session's TTL - but only the session's reclamation, never the generated script's own end, and a
 # renewal call is itself capped at 24h.

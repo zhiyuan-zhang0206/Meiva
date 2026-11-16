@@ -338,6 +338,9 @@ def get_agent(agent_id: int) -> dict[str, object]:
     return _transport.json_object(_run(Request("GET", f"/api/agents/{agent_id}"), _ctx(None)))
 
 
+# meiva:note
+# The SDK client only plans and transports termination; the agent home owns the
+# lifecycle transition and its mandatory persistent-shell cleanup.
 def terminate(
     agent_id: int,
     *,
@@ -346,24 +349,6 @@ def terminate(
     force: bool = False,
     kill_all_shell_sessions: bool = False,
 ) -> dict[str, object]:
-    """POST /api/agents/{id}/terminate → response dict.
-
-    `status` is "enqueued" / "already_terminated"; `open_tasks` carries what
-    the agent still owned as it went down, if anything; `shell_sessions`
-    carries what a requested shell-session kill did.
-
-    An omitted source requires the established actor identity. Callers without
-    an agent or system identity must supply an explicit source.
-
-    force=True requests interruption. Hosted force returns "enqueued" while
-    the original host drains actual work; acceptance is not observed exit.
-
-    message, when present, is retained for the agent's next resurrection while
-    termination proceeds without waiting for another response.
-
-    kill_all_shell_sessions=True also kills every shell session the agent owns
-    on its home machine. Sent only when set.
-    """
     plan = agent_plans.terminate_request(
         agent_id,
         source=_actor_or(source),

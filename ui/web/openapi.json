@@ -849,7 +849,7 @@
     "/api/agents/{agent_id}/terminate": {
       "post": {
         "summary": "Post Agent Terminate",
-        "description": "Terminate through the home runner's durable native control path.\n\nClaim returns to END and the host flushes before applying normal termination.\nAn optional message is committed as pending work before the command, retained\nfor later resurrection without causing another model turn. Force returns\nenqueued while the exact original host settles its task and execution\nresources; acceptance and metadata status are not proof of completed exit.\n\nBoth paths forward to the home runner. A missing agent returns 404; an\nalready-terminated identity is a no-op for graceful termination.\n\n`kill_all_shell_sessions` also kills the agent's shell sessions on its home\nmachine, silently; `shell_sessions` in the response says whether that\nalready happened (`now`, with the killed ids) or happens right before a\ngraceful termination applies (`at_exit`).\n\nOn success the response additionally carries `open_tasks` — the tasks the\nagent still owns (in_progress; at most five, most recently\nupdated first) as it goes down. The hint is advisory: a failed read leaves\nit null and never changes the termination result.\n\n`attached` reports the harness registration the agent's home machine held when the request was handled: the row the harness attachment proves against, carrying the controller pid and that row's expiry, or null when there is none or it could not be read. Also advisory — a controller still driving the agent never blocks the terminate, and the caller decides what the fact means.",
+        "description": "Terminate through the home runner's durable native control path.\n\nClaim returns to END and the host flushes before applying normal termination.\nAn optional message is committed as pending work before the command, retained\nfor later resurrection without causing another model turn. Force returns\nenqueued while the exact original host settles its task and execution\nresources; acceptance and metadata status are not proof of completed exit.\n\nBoth paths forward to the home runner. A missing agent returns 404. Every\ntermination closes the agent's shell sessions on its home machine, silently;\n`shell_sessions` says whether that already happened (`now`, with the killed\nids) or happens right before a graceful termination applies (`at_exit`).\n\nOn success the response additionally carries `open_tasks` — the tasks the\nagent still owns (in_progress; at most five, most recently\nupdated first) as it goes down. The hint is advisory: a failed read leaves\nit null and never changes the termination result.\n\n`attached` reports the harness registration the agent's home machine held when the request was handled: the row the harness attachment proves against, carrying the controller pid and that row's expiry, or null when there is none or it could not be read. Also advisory — a controller still driving the agent never blocks the terminate, and the caller decides what the fact means.",
         "operationId": "post_agent_terminate_api_agents__agent_id__terminate_post",
         "parameters": [
           {
@@ -18409,8 +18409,7 @@
         "required": [
           "when"
         ],
-        "title": "ShellSessionsKill",
-        "description": "What `kill_all_shell_sessions` did for one terminate request.\n\n`when=\"now\"`: the kill already ran on the agent's home machine — a force\n    terminate, or an agent that was already terminated. `killed` lists the\n    selected session ids confirmed gone, ascending; empty means no eligible\n    sessions were listed below the captured cutoff. A force's original host\n    attempts one fresh cutoff after quiescence; it is not in this response.\n`when=\"at_exit\"`: a graceful terminate of a live agent. The request is\n    durable on its terminate command; after committing termination the home\n    runtime attempts listed sessions below the cutoff captured at exit.\n    `killed` is empty; cleanup errors are logged, not returned in this response."
+        "title": "ShellSessionsKill"
       },
       "SkillEnableUpdate": {
         "properties": {
@@ -19841,8 +19840,7 @@
         "required": [
           "status"
         ],
-        "title": "TerminateAgentResponse",
-        "description": "POST /api/agents/{id}/terminate response.\n\n`enqueued`: termination accepted, including hosted force. Actual work may\n    still be draining; this result does not prove exit.\n`already_terminated`: agent was already dead. Graceful termination is a\n    no-op beyond a requested shell-session kill. Hosted force instead\n    returns enqueued until its exact original host can prove quiescence;\n    metadata status alone is not exit evidence.\n\n`open_tasks`: the still-open tasks the agent owned as it went down — an\n    advisory hint, null when it owned none or the hint read failed.\n\n`shell_sessions`: what the shell-session kill did — set when\n    `kill_all_shell_sessions` was requested, None otherwise. A requested\n    kill answered with None means the home runner predates the option\n    (version skew): nothing was killed."
+        "title": "TerminateAgentResponse"
       },
       "TerminateResult": {
         "type": "string",

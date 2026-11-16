@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import time
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 import pytest
@@ -80,21 +81,69 @@ def test_a_refused_name_or_ttl_takes_no_session_id(
     assert _create(live_shell, live_host, "first", cwd=tmp_path) == 0
 
 
-def test_a_system_session_may_outlive_the_user_cap(
+def test_a_system_session_may_outlive_the_user_cap_but_not_the_absolute_cap(
     live_shell: ShellSessions, live_host: SessionHost, database: Database, tmp_path: Path
 ) -> None:
     session_id, _full = live_shell.create(
-        "watcher", cwd=tmp_path, ttl=7 * 86400.0, system=True, host=live_host
+        "watcher", cwd=tmp_path, ttl=72 * 3600.0, system=True, host=live_host
     )
 
     with database.connect() as conn, conn.cursor() as cur:
         cur.execute(
-            "SELECT expires_at > now() + interval '6 days' FROM agent_shell_ttls "
+            "SELECT expires_at > now() + interval '71 hours' FROM agent_shell_ttls "
             "WHERE agent_id = %s AND session_id = %s",
             (live_shell.agent_id, session_id),
         )
         row = cur.fetchone()
     assert row == (True,)
+
+    with pytest.raises(ValueError, match="at most 259200 seconds"):
+        live_shell.create(
+            "too-long", cwd=tmp_path, ttl=72 * 3600.0 + 1, system=True, host=live_host
+        )
+
+    # meiva:note
+    # ShellSessions is usable directly by internal callers, so its renewal
+    # boundary must enforce the cap independently of the public SDK wrapper.
+    with pytest.raises(ValueError, match="at most 86400 seconds"):
+        live_shell.renew(session_id, 24 * 3600.0 + 1)
+
+
+def test_a_terminated_agent_cannot_create_a_late_shell(
+    live_shell: ShellSessions, live_host: SessionHost, database: Database, tmp_path: Path
+) -> None:
+    with database.connect() as conn, conn.cursor() as cur:
+        cur.execute(
+            "UPDATE agents_meta SET status = 'terminated' WHERE id = %s", (live_shell.agent_id,)
+        )
+        conn.commit()
+
+    with pytest.raises(RuntimeError, match="missing or terminated"):
+        live_shell.create("late", cwd=tmp_path, ttl=120.0, host=live_host)
+
+    assert live_shell.list() == {}
+
+
+def test_renew_reads_a_legacy_long_deadline_then_replaces_it_with_a_valid_deadline(
+    live_shell: ShellSessions, live_host: SessionHost, database: Database, tmp_path: Path
+) -> None:
+    from meiva.shell import ttl_store
+
+    session_id = _create(live_shell, live_host, "legacy", cwd=tmp_path)
+    with database.connect() as conn, conn.cursor() as cur:
+        cur.execute(
+            "UPDATE agent_shell_ttls SET expires_at = now() + interval '395 days' "
+            "WHERE agent_id = %s AND session_id = %s",
+            (live_shell.agent_id, session_id),
+        )
+        conn.commit()
+
+    legacy_expiry = ttl_store.read_expiry(database, live_shell.agent_id, session_id)
+    assert legacy_expiry is not None
+    assert legacy_expiry > datetime.now(UTC) + timedelta(days=394)
+
+    renewed = live_shell.renew(session_id, 120.0)
+    assert renewed < legacy_expiry
 
 
 def test_a_session_without_a_deadline_row_is_disposed_of(

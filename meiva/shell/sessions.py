@@ -131,6 +131,7 @@ class ShellSessions:
         from base import telemetry
         from meiva.shell import ttl_store
 
+        ttl = validate_ttl(ttl)
         self.resolve(session_id)
         prev_expires = ttl_store.read_expiry(self._database, self._agent_id, session_id)
         if prev_expires is None:

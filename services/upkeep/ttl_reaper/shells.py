@@ -72,22 +72,17 @@ _SHELL_OP_TIMEOUT_S = 5.0
 _MACHINE_CONCURRENCY = 8
 
 # meiva:note
-# How many remote rounds pass between two stale sweeps.
-#
-# A candidate row is any unexpired row older than `STALE_ROW_GRACE`, so a healthy cluster always
-# has some — every long-lived session contributes one — and one probe per (machine, agent) every
-# round would spend a runner's session listing once a minute on a table that changes rarely (24
-# pairs on 3 machines at the 2026-10-27 reading). One sweep per ten rounds keeps the post-backlog
-# drain at ten minutes per batch of `PASS_BATCH` rows and costs a fortieth of that.
-SWEEP_EVERY_ROUNDS = 10
+# Every remote round reconciles tracked rows with the PTY backend. The query is
+# grouped by (machine, agent), so it makes one bounded probe per owner instead of
+# one probe per shell row.
+SWEEP_EVERY_ROUNDS = 1
 
 # meiva:note
 # How long a tracking row is exempt from the stale sweep after its own creation. The probe answer
 # is a listing read at one instant, and a session's row may exist a moment before the host's
-# backend can list the session name, so a young row is never evidence of a dead session. Six hours
-# is far longer than any such gap: a session that dies now is swept within six hours of its row's
-# birth, and any older row is swept on the first round after its session is gone.
-STALE_ROW_GRACE = timedelta(hours=6)
+# backend can list the session name, so a young row is never evidence of a dead session. Five
+# minutes covers that startup window while keeping missing-session rows short-lived.
+STALE_ROW_GRACE = timedelta(minutes=5)
 
 
 # meiva:note
@@ -114,6 +109,23 @@ def expired_shell_rows_blocking(pool: ConnectionPool) -> list[ShellRow]:
             "SELECT t.agent_id, t.session_id, t.expires_at, t.created_at, m.machine "
             "FROM agent_shell_ttls t LEFT JOIN agents_meta m ON m.id = t.agent_id "
             "WHERE t.expires_at <= clock_timestamp() "
+            "ORDER BY t.agent_id, t.session_id LIMIT %s",
+            (PASS_BATCH,),
+        )
+
+
+# meiva:note
+# Rows owned by a terminal agent, including unexpired rows. A status transition
+# makes every shell below its captured cutoff ineligible to survive; this periodic
+# path catches direct DB transitions and home-machine cleanup failures.
+def terminated_shell_rows_blocking(pool: ConnectionPool) -> list[ShellRow]:
+    with pool.connection() as conn:
+        return query_all(
+            conn,
+            ShellRow,
+            "SELECT t.agent_id, t.session_id, t.expires_at, t.created_at, m.machine "
+            "FROM agent_shell_ttls t JOIN agents_meta m ON m.id = t.agent_id "
+            "WHERE m.status = 'terminated' "
             "ORDER BY t.agent_id, t.session_id LIMIT %s",
             (PASS_BATCH,),
         )
@@ -330,6 +342,67 @@ async def reap_expired_shells(
     async def reclaim_machine(batch: shell_plan.MachineBatch) -> None:
         for shell in batch.shells:
             settled = await reclaim_row(pool, db, bus, batch.machine, shell, config, rpc)
+            if settled is not None:
+                reaped.append(settled)
+            progress.beat()
+
+    await round_loop.fan_out(
+        [functools.partial(reclaim_machine, batch) for batch in plan.batches],
+        concurrency=_MACHINE_CONCURRENCY,
+        progress=progress,
+    )
+    return reaped
+
+
+# meiva:note
+# A terminal owner uses the same definitive kill verdict as expiry reclamation,
+# but is eligible immediately regardless of its recorded deadline.
+async def reclaim_terminated_row(
+    pool: ConnectionPool,
+    db: Database,
+    machine: str,
+    shell: ShellRow,
+    config: TtlReaperConfig,
+    rpc: cluster_rpc.RpcClient,
+) -> tuple[int, int] | None:
+    settlement = await dispatch_shell_kill(
+        rpc,
+        db,
+        machine,
+        shell.agent_id,
+        shell.session_id,
+        deadline_s=config.shell_kill_deadline_s,
+    )
+    if settlement is None:
+        return None
+    if not await asyncio.to_thread(delete_stale_row, pool, shell):
+        return None
+    emit_stale_dropped(shell, machine=machine, evidence="owner_terminated")
+    return shell.agent_id, shell.session_id
+
+
+# meiva:note
+# Group terminal-owner work by home machine so an unavailable host defers just
+# its rows and a healthy host's shell closes remain ordered.
+async def reap_terminated_shells(
+    pool: ConnectionPool,
+    db: Database,
+    progress: LoopProgress,
+    config: TtlReaperConfig,
+    rpc: cluster_rpc.RpcClient,
+) -> list[tuple[int, int]]:
+    plan = shell_plan.plan_round(await asyncio.to_thread(terminated_shell_rows_blocking, pool))
+    for shell in plan.unplaced:
+        _log.warning(
+            "[ttl-reaper] terminated agent %s shell %s has unknown machine — deferring",
+            shell.agent_id,
+            shell.session_id,
+        )
+    reaped: list[tuple[int, int]] = []
+
+    async def reclaim_machine(batch: shell_plan.MachineBatch) -> None:
+        for shell in batch.shells:
+            settled = await reclaim_terminated_row(pool, db, batch.machine, shell, config, rpc)
             if settled is not None:
                 reaped.append(settled)
             progress.beat()

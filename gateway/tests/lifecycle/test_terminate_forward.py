@@ -337,7 +337,10 @@ class TestTerminateOpenTasksHint:
             _set_agent_machine(db_conn, agent_id, gateway_local_runner.name)
             resp = client.post(f"/api/agents/{agent_id}/terminate")
         assert resp.status_code == 200
-        assert resp.json() == _ENQUEUED
+        assert resp.json() == {
+            **_ENQUEUED,
+            "shell_sessions": {"when": "at_exit", "killed": []},
+        }
 
     def test_open_tasks_reported_newest_first(
         self,

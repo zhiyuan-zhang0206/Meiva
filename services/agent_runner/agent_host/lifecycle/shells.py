@@ -1,6 +1,6 @@
 # meiva:note
 # The lifecycle apply and the cleanup that follows a committed termination: the change hint,
-# the browser release and the requested shell cleanup, which only this layer can reach.
+# browser release and mandatory shell cleanup, which only this layer can reach.
 
 import asyncio
 from pathlib import Path
@@ -12,6 +12,7 @@ from agent.ownership.hosted import (
 )
 from base.agents.lifecycle import release_browser_pages
 from base.db.protocols import AsyncPool
+from base.db.transaction import async_write_transaction
 from base.events.live.announce import publish_agent_updated
 from base.events.live.bus import EventBus
 from base.log import logger
@@ -27,11 +28,10 @@ from services.agent_runner.agent_host.lifecycle.switch_note import SwitchHistory
 # meiva:note
 # Attempt older shell sessions after the termination transaction commits.
 #
-#     The at-exit half of `kill_all_shell_sessions`, run by
-#     `apply_lifecycle_command` (after a graceful termination commits). Never
-#     raises: a failed kill must not turn a termination into a crashed turn, so it
-#     is logged at ERROR and the termination still applies.
-def kill_terminating_agent_shells(agent_id: int, cutoff: int, *, home: Path) -> None:
+#     The mandatory at-exit shell close, run by `apply_lifecycle_command` after a
+#     graceful termination commits. A failed close is logged without reopening the
+#     terminal transition; the periodic reaper retries it from its retained TTL row.
+def kill_terminating_agent_shells(agent_id: int, cutoff: int, *, home: Path) -> list[int] | None:
     from ops.cluster_status import kill_agent_shells
 
     try:
@@ -39,11 +39,11 @@ def kill_terminating_agent_shells(agent_id: int, cutoff: int, *, home: Path) -> 
     except Exception:
         logger.opt(exception=True).error(
             "terminate could not kill shell sessions below {cutoff} of agent {agent_id}; "
-            "termination remains committed",
+            "termination remains committed and the TTL reaper will retry",
             agent_id=agent_id,
             cutoff=cutoff,
         )
-        return
+        return None
     logger.info(
         "terminate killed {count} shell session(s) below {cutoff} of agent {agent_id}: {killed}",
         agent_id=agent_id,
@@ -51,15 +51,33 @@ def kill_terminating_agent_shells(agent_id: int, cutoff: int, *, home: Path) -> 
         count=len(killed),
         killed=killed,
     )
+    return killed
+
+
+# meiva:note
+# The host removes TTL rows only after its local PTY backend made a definitive
+# close/absence observation; failure leaves evidence for the remote reaper.
+async def close_terminated_agent_shells(
+    pool: AsyncPool, agent_id: int, cutoff: int, *, home: Path
+) -> list[int] | None:
+    killed = await asyncio.to_thread(kill_terminating_agent_shells, agent_id, cutoff, home=home)
+    if killed is None:
+        return None
+    async with async_write_transaction(pool) as conn:
+        await conn.execute(
+            "DELETE FROM agent_shell_ttls WHERE agent_id = %s AND session_id < %s",
+            (agent_id, cutoff),
+        )
+    return killed
 
 
 # meiva:note
 # Attempt every effect a committed termination owes, whatever an earlier one did: the change
-# hint, the browser release and, when it asked, the shell cleanup below its cutoff. The first
+# hint, browser release and mandatory shell cleanup below its cutoff. The first
 # failure (a cancellation included) is raised after all attempts; each later one is attached to
 # it as a note and logged at ERROR.
 async def finish_termination(
-    bus: EventBus, agent_id: int, shell_cutoff: int | None, *, home: Path
+    pool: AsyncPool, bus: EventBus, agent_id: int, shell_cutoff: int | None, *, home: Path
 ) -> None:
     failures: list[CleanupFailure] = []
     try:
@@ -72,9 +90,7 @@ async def finish_termination(
         failures.append(CleanupFailure("browser", error))
     if shell_cutoff is not None:
         try:
-            await asyncio.to_thread(
-                kill_terminating_agent_shells, agent_id, shell_cutoff, home=home
-            )
+            await close_terminated_agent_shells(pool, agent_id, shell_cutoff, home=home)
         except BaseException as error:
             failures.append(CleanupFailure("shell", error))
     summary = summarize(failures)
@@ -109,7 +125,7 @@ async def apply_lifecycle_command(
     if applied is None:
         return None
     if applied.kind == "terminate":
-        await finish_termination(bus, applied.agent_id, applied.shell_cutoff, home=home)
+        await finish_termination(pool, bus, applied.agent_id, applied.shell_cutoff, home=home)
     elif applied.switch is not None:
         if history is not None:
             await record_switch_note(
@@ -132,9 +148,9 @@ async def apply_lifecycle_command(
 
 
 # meiva:note
-# Terminate this machine's crash corpses whose grace has elapsed, then refresh mounted frontends and
-# release each one's browser pages. The durable flip already committed, so a failed hint is logged and
-# the next corpse still gets its pages released.
+# Terminate this machine's crash corpses whose grace has elapsed, then refresh mounted frontends,
+# release each one's browser pages and close its shells. The durable flip already committed, so a
+# failed cleanup is logged and the next corpse still gets its own cleanup attempts.
 async def reap_and_announce_corpses(
     pool: AsyncPool, machine: str, *, bus: EventBus, home: Path
 ) -> list[ReapedCorpse]:
@@ -148,5 +164,23 @@ async def reap_and_announce_corpses(
                 event="corpse_reaper_publish_failed",
                 agent_id=corpse.agent_id,
             )
-        await release_browser_pages(corpse.agent_id, home=home)
+        try:
+            await release_browser_pages(corpse.agent_id, home=home)
+        except Exception:
+            logger.exception(
+                "corpse reap browser release failed",
+                event="corpse_reaper_browser_release_failed",
+                agent_id=corpse.agent_id,
+            )
+        try:
+            await close_terminated_agent_shells(
+                pool, corpse.agent_id, corpse.shell_cutoff, home=home
+            )
+        except Exception:
+            logger.exception(
+                "corpse reap shell cleanup failed",
+                event="corpse_reaper_shell_cleanup_failed",
+                agent_id=corpse.agent_id,
+                cutoff=corpse.shell_cutoff,
+            )
     return reaped

@@ -109,7 +109,7 @@ async def test_apply_terminate_ends_the_agent_and_closes_every_open_terminate(
     chat = insert(db_conn, agent_id)
     await claim_inbound_batch(aops_pool, agent_id, incarnation=owner)
     assert await apply_hosted_lifecycle(aops_pool, owner, resume_turn=False) == AppliedLifecycle(
-        kind="terminate", agent_id=agent_id, shell_cutoff=None
+        kind="terminate", agent_id=agent_id, shell_cutoff=0
     )
     assert db_conn.execute(
         "SELECT status,termination_source,runtime_generation FROM agents_meta WHERE id=%s",
@@ -123,7 +123,7 @@ async def test_apply_terminate_ends_the_agent_and_closes_every_open_terminate(
     ]
 
 
-async def test_terminate_with_a_shell_kill_request_on_any_open_terminate_names_the_shell_cutoff(
+async def test_every_terminate_names_the_shell_cutoff(
     db_conn: psycopg.Connection, aops_pool: AsyncConnectionPool, *, database_gate: ProcessDbGate
 ) -> None:
     agent_id = agent_row(db_conn)
@@ -202,7 +202,7 @@ async def test_a_cancelled_apply_leaves_neither_half_behind(
         "SELECT status FROM agents_meta WHERE id=%s", (agent_id,)
     ).fetchone() == ("running",)
     assert await apply_hosted_lifecycle(aops_pool, owner, resume_turn=False) == AppliedLifecycle(
-        kind="terminate", agent_id=agent_id, shell_cutoff=None
+        kind="terminate", agent_id=agent_id, shell_cutoff=0
     )
 
 
@@ -280,7 +280,7 @@ async def test_apply_terminate_queues_no_continuation_even_when_the_turn_was_unf
     insert_lifecycle_command(db_conn, agent_id, "terminate")
     await claim_inbound_batch(aops_pool, agent_id, incarnation=owner)
     assert await apply_hosted_lifecycle(aops_pool, owner, resume_turn=True) == AppliedLifecycle(
-        kind="terminate", agent_id=agent_id, shell_cutoff=None
+        kind="terminate", agent_id=agent_id, shell_cutoff=0
     )
     assert _notes(db_conn, agent_id) == []
 

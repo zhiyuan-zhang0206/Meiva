@@ -103,14 +103,11 @@ _log = logging.getLogger(__name__)
 # meiva:note
 # Local-target graceful or force terminate. Caller handles cross-machine.
 #
-#     `body.kill_all_shell_sessions` also kills the agent's shell sessions on
-#     this, its home machine (docs/decisions/agents/lifecycle/2026-09-27-terminate-has-no-closed-state.md).
-#     A force terminate kills them right after its row commits, and so does a
-#     terminate that finds the agent already terminated. A graceful terminate of
-#     a live agent only records the request on its terminate command: the home
-#     runtime attempts older sessions after the termination commits, after the
-#     agent's last step (`agent.ownership.hosted.apply_hosted_lifecycle`). The
-#     response's `shell_sessions` reports which of the two happened.
+#     Every terminal transition closes the agent's shells on its home machine.
+#     A force terminate closes them right after its row commits, and so does a
+#     terminate that finds the agent already terminated. A graceful terminate
+#     closes them after its last step commits (`agent.ownership.hosted.apply_hosted_lifecycle`).
+#     The response's `shell_sessions` reports which of the two happened.
 #
 #     A force terminate cancels the running turn through `host`, releases the agent's
 #     browser pages and kills shells through the real local session backend. Each of
@@ -141,18 +138,10 @@ async def terminate_agent_op(
             status=TerminateResult.ENQUEUED,
             shell_sessions=await _kill_shell_sessions_now(
                 agent_id,
-                cutoff=cutoff if body.kill_all_shell_sessions else None,
+                cutoff=cutoff,
+                db_pool=db_pool,
                 home=host.home,
             ),
-            attached=attached,
-        )
-
-    if (
-        not body.kill_all_shell_sessions
-        and (await asyncio.to_thread(get_agent_status, db, agent_id)) is AgentStatus.TERMINATED
-    ):
-        return TerminateAgentResponse(
-            status=TerminateResult.ALREADY_TERMINATED,
             attached=attached,
         )
 
@@ -163,32 +152,33 @@ async def terminate_agent_op(
         # The kill-requesting enqueue found the row terminated under its lock.
         return TerminateAgentResponse(
             status=TerminateResult.ALREADY_TERMINATED,
-            shell_sessions=await _kill_shell_sessions_now(agent_id, cutoff=cutoff, home=host.home),
+            shell_sessions=await _kill_shell_sessions_now(
+                agent_id, cutoff=cutoff, db_pool=db_pool, home=host.home
+            ),
             attached=attached,
         )
     await publish_inbound_arrived(bus, agent_id, iid, "terminate", body.source, "")
     return TerminateAgentResponse(
         status=TerminateResult.ENQUEUED,
-        shell_sessions=ShellSessionsKill(when=ShellSessionKillTiming.AT_EXIT)
-        if body.kill_all_shell_sessions
-        else None,
+        shell_sessions=ShellSessionsKill(when=ShellSessionKillTiming.AT_EXIT),
         attached=attached,
     )
 
 
 # meiva:note
-# Attempt this host's older shells when a cutoff was captured, and report them.
+# Attempt this host's older shells when a cutoff was captured, drop their TTL rows and report them.
 #
 # A failed kill propagates: the termination itself is already durable, so the caller sees
 # the failure and a repeat request retries the kill.
 async def _kill_shell_sessions_now(
-    agent_id: int, *, cutoff: int | None, home: Path
+    agent_id: int, *, cutoff: int | None, db_pool: ConnectionPool, home: Path
 ) -> ShellSessionsKill | None:
     if cutoff is None:
         return None
     killed = await asyncio.to_thread(
         kill_agent_shells, agent_id, before_session_index=cutoff, home=home
     )
+    await asyncio.to_thread(termination.drop_shell_ttls_before_cutoff, db_pool, agent_id, cutoff)
     _log.info(
         "[gateway] agent %s terminate killed %d shell session(s): %s",
         agent_id,
@@ -572,7 +562,7 @@ async def _execute_harness_transition(
         host=host,
     )
     if status != "terminated":
-        _old_status, _cmd_id, _cutoff = await asyncio.to_thread(
+        _old_status, _cmd_id, cutoff = await asyncio.to_thread(
             force_terminate_transaction,
             agent_id,
             db_pool,
@@ -580,6 +570,7 @@ async def _execute_harness_transition(
             kill_all_shell_sessions=False,
         )
         await release_browser_pages(agent_id, home=host.home)
+        await _kill_shell_sessions_now(agent_id, cutoff=cutoff, db_pool=db_pool, home=host.home)
 
     await asyncio.to_thread(
         _update_harness_transition_meta_blocking,

@@ -31,9 +31,9 @@ class HarnessSwitch:
 
 
 # meiva:note
-# What a committed lifecycle command leaves to do after the commit. `shell_cutoff` is the
-# exclusive shell-ID bound of the terminate's requested shell cleanup, or None when no
-# closed terminate asked for it. `switch` is set when a restart stored a new harness.
+# What a committed lifecycle command leaves to do after the commit. A terminate's
+# `shell_cutoff` is the exclusive shell-ID bound for its mandatory shell cleanup;
+# a restart leaves it unset. `switch` is set when a restart stored a new harness.
 @dataclass(frozen=True)
 class AppliedLifecycle:
     kind: LifecycleKind
@@ -46,6 +46,7 @@ class AppliedLifecycle:
 # One committed termination; no recovery input is created.
 class ReapedCorpse(NamedTuple):
     agent_id: int
+    shell_cutoff: int
 
 
 # meiva:note
@@ -172,11 +173,11 @@ def restart_apply(
 
 
 # meiva:note
-# The exclusive shell-ID cutoff for the post-commit cleanup, or None when no closed
-# terminate asked for the agent's shell sessions to go with it. `session_index` is the
-# next shell ID read under the agent row lock.
-def shell_cutoff(kill_flags: Sequence[bool], session_index: int) -> int | None:
-    return session_index if any(kill_flags) else None
+# The exclusive shell-ID cutoff for mandatory post-commit termination cleanup.
+# `session_index` is the next shell ID read under the agent row lock, so all older
+# sessions existed before the durable transition to `terminated`.
+def shell_cutoff(session_index: int) -> int:
+    return session_index
 
 
 # meiva:note

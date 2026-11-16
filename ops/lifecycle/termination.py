@@ -26,11 +26,9 @@ from ops.rpc_schemas.terminate import HarnessAttachment
 
 
 # meiva:note
-# Insert an optional pending chat followed by its terminate command.
-#
-#     `kill_all_shell_sessions` rides the command's payload
-#     (`base.agents.incarnation.lifecycle_commands.KILL_ALL_SHELL_SESSIONS`), so the request is
-#     durable in the same statement as the termination it accompanies.
+# Insert an optional pending chat followed by its terminate command. The optional
+# `kill_all_shell_sessions` payload remains an audit compatibility field; every
+# termination closes the agent's persistent shells.
 def insert_termination_pair(
     conn: psycopg.Connection,
     agent_id: int,
@@ -142,6 +140,9 @@ def _insert_termination_inbounds(
     return message_id, terminate_id
 
 
+# meiva:note
+# Audit records retain the legacy request marker without making shell cleanup
+# optional, so historical request facts remain interpretable.
 def _stage_termination_event(
     conn: psycopg.Connection,
     *,
@@ -150,11 +151,6 @@ def _stage_termination_event(
     inbound_id: int,
     kill_all_shell_sessions: bool,
 ) -> telemetry.Event:
-    """Register a terminate audit fact before its operation commits.
-
-    A requested shell-session kill is named in the payload next to the command
-    it accompanies.
-    """
     payload: dict[str, object] = {"inbound_id": inbound_id}
     if kill_all_shell_sessions:
         payload[KILL_ALL_SHELL_SESSIONS] = True
@@ -164,6 +160,9 @@ def _stage_termination_event(
     return record_audit(conn, event)
 
 
+# meiva:note
+# The graceful path owns the row lock that fences shell allocation from the
+# eventual terminal transition and supplies its cleanup cutoff.
 def enqueue_termination_inbounds(
     db: Database,
     bus: EventBus,
@@ -174,26 +173,14 @@ def enqueue_termination_inbounds(
     message: str | None,
     kill_all_shell_sessions: bool = False,
 ) -> tuple[int | None, int | None]:
-    """Persist graceful termination and publish its audit/wake effects.
-
-    With `kill_all_shell_sessions` the agent row is locked first and the
-    request rides the terminate command, so it serializes against the home
-    runtime's apply (which locks the same row): either the apply sees the
-    request and attempts older sessions after the termination commits, or this
-    transaction sees the row already terminated and returns its shell cutoff
-    with no command ID. The caller then attempts those older sessions instead
-    of queueing a request no apply will ever read. Without the option the
-    persistence path is unchanged and the returned cutoff is None.
-    """
     with write_transaction(db_pool) as conn:
-        if kill_all_shell_sessions:
-            row = conn.execute(
-                "SELECT status,session_index FROM agents_meta WHERE id = %s FOR UPDATE", (agent_id,)
-            ).fetchone()
-            if row is None:
-                raise AgentNotFound(f"agent {agent_id} does not exist")
-            if AgentStatus(row[0]) is AgentStatus.TERMINATED:
-                return None, row[1]
+        row = conn.execute(
+            "SELECT status,session_index FROM agents_meta WHERE id = %s FOR UPDATE", (agent_id,)
+        ).fetchone()
+        if row is None:
+            raise AgentNotFound(f"agent {agent_id} does not exist")
+        if AgentStatus(row[0]) is AgentStatus.TERMINATED:
+            return None, row[1]
         _, terminate_id = _insert_termination_inbounds(
             conn,
             agent_id,
@@ -217,11 +204,9 @@ def enqueue_termination_inbounds(
 # Lock the agent, write its termination and close every open lifecycle command.
 #
 #     Force writes `terminated` itself, in this one transaction; the caller then
-#     asks the home host to cancel the running turn. `kill_all_shell_sessions` is
-#     recorded on the force command and in its audit event; the returned shell
-#     cutoff is captured under this row lock, and after commit the caller attempts
-#     older sessions. A force kills sessions only when asked itself, so any open
-#     graceful terminate, with its own shell-session request, is closed unserved.
+#     asks the home host to cancel the running turn. The returned shell cutoff is
+#     captured under this row lock, and after commit the caller closes every older
+#     shell and drops its TTL rows.
 #
 #     The force's own terminate command fences automatic resurrection: input that
 #     was queued before the latest explicit force carries a smaller inbound id and
@@ -315,6 +300,17 @@ def force_mark_terminated(
         message=message,
     )
     publish_force_terminate_inbound(db, bus, agent_id, inbound_id, source)
+
+
+# meiva:note
+# A local lifecycle cleanup deletes only rows in the cutoff it conclusively
+# closed; newer or concurrently rewritten rows remain for their owner/reaper.
+def drop_shell_ttls_before_cutoff(db_pool: ConnectionPool, agent_id: int, cutoff: int) -> None:
+    with write_transaction(db_pool) as conn:
+        conn.execute(
+            "DELETE FROM agent_shell_ttls WHERE agent_id = %s AND session_id < %s",
+            (agent_id, cutoff),
+        )
 
 
 # meiva:note

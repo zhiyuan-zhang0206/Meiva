@@ -65,8 +65,8 @@ def cron(
 ) -> SessionHandle:
     """Runs until `end_time`, or until you kill its session.
 
-    `end_time` defaults to now + 7 days; pass an explicit one for a longer
-    schedule. Calling `cron()` again with the same expression + timezone does
+    `end_time` defaults to now + 72 hours and must stay within that lifetime.
+    Calling `cron()` again with the same expression + timezone does
     NOT replace anything — it starts another, independent session; if you
     want to renew or replace a schedule, kill the old session yourself
     (`meiva.shell.sessions.kill`) before or after registering the new one.

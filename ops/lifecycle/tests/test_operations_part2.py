@@ -51,7 +51,9 @@ async def test_force_terminate_hosted_commits_before_cancelling_turn(
             host=served.host,
         )
     assert resp.status == "enqueued"
-    assert resp.shell_sessions is None
+    assert resp.shell_sessions is not None
+    assert resp.shell_sessions.when == "now"
+    assert resp.shell_sessions.killed == []
     assert served.cancel_requests == [lifecycle_agent_id]
     assert statuses_seen_by_the_host == [("terminated",)]
     assert db_conn.execute(

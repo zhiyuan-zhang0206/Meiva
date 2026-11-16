@@ -442,7 +442,7 @@ async def _run_terminating_turn(
 
 
 @pytest.mark.parametrize("requested", [True, False])
-async def test_hosted_terminate_kills_requested_shell_sessions_after_commit(
+async def test_hosted_terminate_kills_shell_sessions_after_commit(
     redis_url: str,
     db_conn: psycopg.Connection,
     aops_pool: AsyncConnectionPool,
@@ -463,7 +463,7 @@ async def test_hosted_terminate_kills_requested_shell_sessions_after_commit(
             model_catalog=model_catalog,
             database_gate=database_gate,
         )
-    assert kills == ([(agent_id, "terminated")] if requested else [])
+    assert kills == [(agent_id, "terminated")]
     assert db_conn.execute(
         "SELECT status FROM agents_meta WHERE id=%s", (agent_id,)
     ).fetchone() == ("terminated",)

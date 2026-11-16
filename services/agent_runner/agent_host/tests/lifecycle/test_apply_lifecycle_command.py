@@ -58,14 +58,18 @@ async def _claimed_terminate(
 
 
 def _shell_cleanup_attempts(records: LogRecords, agent_id: int) -> list[str]:
-    return [m for m in records.messages() if f"below 7 of agent {agent_id}" in m]
+    return [
+        message
+        for message in records.messages()
+        if "shell session(s) below" in message and f"of agent {agent_id}" in message
+    ]
 
 
 def _browser_release_attempts(records: LogRecords, agent_id: int) -> list[str]:
     return [m for m in records.messages("DEBUG") if f"agent {agent_id} browser-page release" in m]
 
 
-async def test_a_terminate_that_asked_for_shells_cleans_below_its_cutoff_after_the_commit(
+async def test_a_terminate_cleans_below_its_cutoff_after_the_commit(
     db_conn: psycopg.Connection,
     aops_pool: AsyncConnectionPool,
     event_bus: EventBus,
@@ -87,7 +91,7 @@ async def test_a_terminate_that_asked_for_shells_cleans_below_its_cutoff_after_t
     assert len(_shell_cleanup_attempts(loguru_records, owner.agent_id)) == 1
 
 
-async def test_a_terminate_that_did_not_ask_for_shells_leaves_them_alone(
+async def test_a_terminate_without_the_legacy_flag_still_cleans_its_shells(
     db_conn: psycopg.Connection,
     aops_pool: AsyncConnectionPool,
     event_bus: EventBus,
@@ -96,6 +100,12 @@ async def test_a_terminate_that_did_not_ask_for_shells_leaves_them_alone(
     database_gate: ProcessDbGate,
 ) -> None:
     owner = await _claimed_terminate(db_conn, aops_pool, database_gate, kill_shells=False)
+    db_conn.execute(
+        "INSERT INTO agent_shell_ttls (agent_id, session_id, expires_at) "
+        "VALUES (%s, 3, now() + interval '1 hour')",
+        (owner.agent_id,),
+    )
+    db_conn.commit()
 
     kind = await apply_lifecycle_command(
         aops_pool, owner, bus=event_bus, resume_turn=False, home=meiva_home()
@@ -103,7 +113,10 @@ async def test_a_terminate_that_did_not_ask_for_shells_leaves_them_alone(
 
     assert kind == "terminate"
     assert len(_browser_release_attempts(loguru_records, owner.agent_id)) == 1
-    assert _shell_cleanup_attempts(loguru_records, owner.agent_id) == []
+    assert len(_shell_cleanup_attempts(loguru_records, owner.agent_id)) == 1
+    assert db_conn.execute(
+        "SELECT count(*) FROM agent_shell_ttls WHERE agent_id = %s", (owner.agent_id,)
+    ).fetchone() == (0,)
 
 
 async def test_a_restart_owes_no_cleanup(
@@ -317,7 +330,7 @@ async def test_a_cancelled_browser_release_still_cleans_shells_and_raises_the_fi
         assert [m for m in loguru_records.messages("ERROR") if "browser cleanup also failed" in m]
 
 
-async def test_a_reaped_corpse_is_announced_and_its_pages_released(
+async def test_a_reaped_corpse_is_announced_and_its_pages_released_and_shell_ttls_dropped(
     db_conn: psycopg.Connection,
     aops_pool: AsyncConnectionPool,
     event_bus: EventBus,
@@ -330,7 +343,12 @@ async def test_a_reaped_corpse_is_announced_and_its_pages_released(
     owner = await admit_owner(aops_pool, agent_id, database_gate=database_gate)
     db_conn.execute(
         "UPDATE agents_meta SET status='idling', runtime_generation=NULL, runtime_owner=NULL, "
-        "last_turn_fatal_at = now() - interval '1 hour' WHERE id=%s",
+        "last_turn_fatal_at = now() - interval '1 hour', session_index=1 WHERE id=%s",
+        (owner.agent_id,),
+    )
+    db_conn.execute(
+        "INSERT INTO agent_shell_ttls (agent_id, session_id, expires_at) "
+        "VALUES (%s, 0, now() + interval '1 hour')",
         (owner.agent_id,),
     )
     db_conn.commit()
@@ -343,6 +361,10 @@ async def test_a_reaped_corpse_is_announced_and_its_pages_released(
     assert [corpse.agent_id for corpse in reaped] == [agent_id]
     assert await bus_tap.agent_updated_ids() == [agent_id]
     assert len(_browser_release_attempts(loguru_records, agent_id)) == 1
+    assert len(_shell_cleanup_attempts(loguru_records, agent_id)) == 1
+    assert db_conn.execute(
+        "SELECT count(*) FROM agent_shell_ttls WHERE agent_id = %s", (agent_id,)
+    ).fetchone() == (0,)
 
 
 async def test_a_publication_defect_does_not_stop_the_next_corpse_from_being_released(

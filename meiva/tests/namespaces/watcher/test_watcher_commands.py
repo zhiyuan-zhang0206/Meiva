@@ -47,7 +47,7 @@ def test_parse_timeout_rejects_nonpositive_and_bool() -> None:
 
 
 _NOW = datetime.datetime(2026, 1, 1, 0, 0, 30, tzinfo=datetime.UTC)
-_FAR = "2099-01-01T00:00:00Z"
+_FAR = "2026-01-03T00:00:00Z"
 
 
 def test_at_announcement_uses_cluster_zone_when_authoritative() -> None:
@@ -144,7 +144,7 @@ def test_cron_future_end_time_ok() -> None:
 
 def test_at_future_time_ok() -> None:
     far = plans.plan_at(
-        "2099-01-01T00:00:00Z",
+        _FAR,
         "far future",
         name="test-future",
         notify=None,
@@ -172,7 +172,7 @@ def test_at_and_cron_plan_without_watchdog() -> None:
     # meiva:note
     # at/cron scripts self-terminate, so they plan with no watchdog (None).
     now = _FIXED_NOW
-    when = (now + datetime.timedelta(days=365)).strftime("%Y-%m-%dT%H:%M:%SZ")
+    when = (now + datetime.timedelta(days=2)).strftime("%Y-%m-%dT%H:%M:%SZ")
     at = plans.plan_at(
         when, "ping later", name="test-at", notify=None, now=now, announce_timezone=None
     )
@@ -194,8 +194,9 @@ def test_at_and_cron_plan_without_watchdog() -> None:
 
 def test_the_session_lifetime_is_each_watchers_target_deadline() -> None:
     # meiva:note
-    # Task #3411: launch = created + timeout, cron = its end (default: the current minute + 7
-    # days), at = its fire moment + the grace that lets the wake delivery finish.
+    # A watcher TTL is its true deadline, bounded by the 72-hour persistent-shell cap:
+    # launch = created + timeout, cron = its end (default: the current minute + 72 hours),
+    # at = its fire moment + the grace that lets the wake delivery finish.
     from base.daemon.schedules.watcher import AT_SESSION_TTL_GRACE_SECONDS
 
     now = _FIXED_NOW
@@ -231,7 +232,7 @@ def test_the_session_lifetime_is_each_watchers_target_deadline() -> None:
 
     assert launch.ttl_seconds == 1800.0
     assert launch.watchdog_secs == 1800.0
-    assert cron.ttl_seconds == datetime.timedelta(days=7).total_seconds() - 7.5
+    assert cron.ttl_seconds == datetime.timedelta(days=3).total_seconds() - 7.5
     assert explicit.ttl_seconds == datetime.timedelta(hours=30).total_seconds()
     assert at.ttl_seconds == 7200.0 + AT_SESSION_TTL_GRACE_SECONDS
 
@@ -251,7 +252,7 @@ def test_a_watcher_whose_deadline_has_passed_is_refused() -> None:
 
 def test_watcher_plans_forward_failure_notify() -> None:
     now = datetime.datetime.now(datetime.UTC)
-    when = (now + datetime.timedelta(days=365)).strftime("%Y-%m-%dT%H:%M:%SZ")
+    when = (now + datetime.timedelta(days=2)).strftime("%Y-%m-%dT%H:%M:%SZ")
     requests = [
         plans.plan_launch("pass", "1h", "test-launch-notify", "always", now),
         plans.plan_at(
@@ -278,7 +279,7 @@ def test_watcher_plans_forward_failure_notify() -> None:
 
 def test_watcher_plans_refuse_an_unknown_notify_before_anything_starts() -> None:
     now = datetime.datetime.now(datetime.UTC)
-    when = (now + datetime.timedelta(days=365)).strftime("%Y-%m-%dT%H:%M:%SZ")
+    when = (now + datetime.timedelta(days=2)).strftime("%Y-%m-%dT%H:%M:%SZ")
     refused = "notify must be one of"
 
     with pytest.raises(ValueError, match=refused):
@@ -392,3 +393,41 @@ def test_zero_relative_at_is_immediate_and_zero_relative_cron_has_no_lifetime() 
             now=_FIXED_NOW,
             default_timezone="UTC",
         )
+
+
+@pytest.mark.parametrize(
+    ("kind", "plan"),
+    [
+        (
+            "launch",
+            lambda: plans.plan_launch("pass", "73h", "too-long-launch", None, _FIXED_NOW),
+        ),
+        (
+            "cron",
+            lambda: plans.plan_cron(
+                "0 * * * *",
+                "too long",
+                timezone="UTC",
+                end_time=_FIXED_NOW + datetime.timedelta(hours=73),
+                name="too-long-cron",
+                notify=None,
+                now=_FIXED_NOW,
+                default_timezone="UTC",
+            ),
+        ),
+        (
+            "at",
+            lambda: plans.plan_at(
+                _FIXED_NOW + datetime.timedelta(hours=72),
+                "too long with delivery grace",
+                name="too-long-at",
+                notify=None,
+                now=_FIXED_NOW,
+                announce_timezone=None,
+            ),
+        ),
+    ],
+)
+def test_watcher_deadlines_cannot_exceed_the_72_hour_shell_cap(kind: str, plan: Any) -> None:
+    with pytest.raises(ValueError, match="exceeds 259200 seconds"):
+        plan()
