@@ -26,10 +26,10 @@ from gateway.tests.support.runner_ops.ops_stub import (
 )
 from ops.rpc_schemas import TerminateAgentRequest
 
-_ACCEPTED = {
+_ACCEPTED: dict[str, object] = {
     "status": "enqueued",
     "open_tasks": None,
-    "shell_sessions": None,
+    "shell_sessions": {"when": "at_exit", "killed": []},
     "attached": None,
 }
 
@@ -63,7 +63,14 @@ async def test_a_missing_task_table_never_changes_an_accepted_termination(
         runner_ops(
             db_conn,
             "hint-runner",
-            {"lifecycle": expecting(forwarded, completed({"status": "enqueued"}))},
+            {
+                "lifecycle": expecting(
+                    forwarded,
+                    completed(
+                        {"status": "enqueued", "shell_sessions": _ACCEPTED["shell_sessions"]}
+                    ),
+                )
+            },
         ),
         database.pool(max_size=2) as pool,
         missing_table(db_conn, "agent_tasks"),
@@ -89,7 +96,7 @@ async def test_a_pool_with_no_connection_left_never_changes_an_accepted_terminat
 
         def accept_and_keep_the_connection(call: OpsCall) -> OpsReply:
             held.append(pool.getconn())
-            return completed({"status": "enqueued"})
+            return completed({"status": "enqueued", "shell_sessions": _ACCEPTED["shell_sessions"]})
 
         with runner_ops(db_conn, "hint-runner", {"lifecycle": accept_and_keep_the_connection}):
             response = await lifecycle.terminate_agent_with_open_tasks(

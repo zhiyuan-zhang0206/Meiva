@@ -46,11 +46,16 @@ def local_machine(
     return set_machine_identity(role="agent-runner")
 
 
-_ENQUEUED = {
+_ENQUEUED: dict[str, object] = {
     "status": "enqueued",
     "open_tasks": None,
-    "shell_sessions": None,
+    "shell_sessions": {"when": "at_exit", "killed": []},
     "attached": None,
+}
+
+_ENQUEUED_NOW: dict[str, object] = {
+    **_ENQUEUED,
+    "shell_sessions": {"when": "now", "killed": []},
 }
 
 
@@ -117,9 +122,15 @@ class TestTerminateRouting:
     ) -> None:
         """machine != local + force=false → forward, local does not INSERT inbound."""
         with (
-            runner_ops(db_conn, "remote-mac", {"lifecycle": completed({"status": "enqueued"})}) as (
-                runner
-            ),
+            runner_ops(
+                db_conn,
+                "remote-mac",
+                {
+                    "lifecycle": completed(
+                        {"status": "enqueued", "shell_sessions": _ENQUEUED["shell_sessions"]}
+                    )
+                },
+            ) as (runner),
             gateway_test_client(machine=local_machine) as client,
         ):
             agent_id = spawn_via_http(client, {}).json()["id"]
@@ -144,9 +155,15 @@ class TestTerminateRouting:
     ) -> None:
         """machine != local + force=true → forward, local does not touch sessions / pid."""
         with (
-            runner_ops(db_conn, "remote-mac", {"lifecycle": completed({"status": "enqueued"})}) as (
-                runner
-            ),
+            runner_ops(
+                db_conn,
+                "remote-mac",
+                {
+                    "lifecycle": completed(
+                        {"status": "enqueued", "shell_sessions": {"when": "now", "killed": []}}
+                    )
+                },
+            ) as (runner),
             gateway_test_client(machine=local_machine) as client,
         ):
             agent_id = spawn_via_http(client, {}).json()["id"]
@@ -156,7 +173,7 @@ class TestTerminateRouting:
                 json={"force": True, "source": "user"},
             )
         assert resp.status_code == 200
-        assert resp.json() == _ENQUEUED
+        assert resp.json() == _ENQUEUED_NOW
         (body,) = [payload["body"] for payload in runner.payloads("lifecycle")]
         assert body["force"] is True
         assert body["source"] == "user"
@@ -223,7 +240,15 @@ def test_remote_home_machine_is_forwarded(
     server — there is no deployment gate on the lifecycle path. Single box is
     just the special case where the ops server lives at localhost."""
     with (
-        runner_ops(db_conn, "stale-runner", {"lifecycle": completed({"status": "enqueued"})}),
+        runner_ops(
+            db_conn,
+            "stale-runner",
+            {
+                "lifecycle": completed(
+                    {"status": "enqueued", "shell_sessions": _ENQUEUED["shell_sessions"]}
+                )
+            },
+        ),
         gateway_test_client(machine=local_machine) as client,
     ):
         agent_id = spawn_via_http(client, {}).json()["id"]

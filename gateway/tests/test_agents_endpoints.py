@@ -17,10 +17,24 @@ from gateway.tests.support.runner_ops.ops_stub import OpsReply, RunnerOps, runne
 
 pytestmark = pytest.mark.usefixtures("gateway_local_runner")
 
-_ENQUEUED = {
+_ENQUEUED_AT_EXIT: dict[str, object] = {
     "status": "enqueued",
     "open_tasks": None,
-    "shell_sessions": None,
+    "shell_sessions": {"when": "at_exit", "killed": []},
+    "attached": None,
+}
+
+_ENQUEUED_NOW: dict[str, object] = {
+    "status": "enqueued",
+    "open_tasks": None,
+    "shell_sessions": {"when": "now", "killed": []},
+    "attached": None,
+}
+
+_ALREADY_TERMINATED_NOW: dict[str, object] = {
+    "status": "already_terminated",
+    "open_tasks": None,
+    "shell_sessions": {"when": "now", "killed": []},
     "attached": None,
 }
 
@@ -395,7 +409,7 @@ class TestTerminate:
             ]
             resp = client.post(f"/api/agents/{agent_id}/terminate")
         assert resp.status_code == 200
-        assert resp.json() == _ENQUEUED
+        assert resp.json() == _ENQUEUED_AT_EXIT
         assert inbound_rows(db_conn, agent_id) == [("", "terminate", "user")]
 
     def test_terminate_already_terminated_is_noop(self, db_conn: psycopg.Connection) -> None:
@@ -410,12 +424,7 @@ class TestTerminate:
             db_conn.commit()
             resp = client.post(f"/api/agents/{agent_id}/terminate")
         assert resp.status_code == 200
-        assert resp.json() == {
-            "status": "already_terminated",
-            "open_tasks": None,
-            "shell_sessions": None,
-            "attached": None,
-        }
+        assert resp.json() == _ALREADY_TERMINATED_NOW
         assert inbound_rows(db_conn, agent_id) == []
 
     def test_terminate_nonexistent_404(
@@ -436,7 +445,7 @@ class TestTerminate:
             ]
             resp = client.post(f"/api/agents/{agent_id}/terminate", json={"force": True})
         assert resp.status_code == 200
-        assert resp.json() == _ENQUEUED
+        assert resp.json() == _ENQUEUED_NOW
 
         row = _agent_row(db_conn, agent_id)
         assert row is not None and row[4] == "terminated"
@@ -454,7 +463,7 @@ class TestTerminate:
                 f"/api/agents/{agent_id}/terminate",
                 json={"force": True, "source": "agent:42"},
             )
-        assert resp.json() == _ENQUEUED
+        assert resp.json() == _ENQUEUED_NOW
 
         rows = inbound_rows(db_conn, agent_id)
         assert rows == [("", "terminate", "agent:42")]
@@ -479,7 +488,7 @@ class TestTerminate:
                 )
                 before = cur.fetchone()
             resp = client.post(f"/api/agents/{agent_id}/terminate", json={"force": True})
-        assert resp.json() == _ENQUEUED
+        assert resp.json() == _ENQUEUED_NOW
         with db_conn.cursor() as cur:
             cur.execute(
                 "SELECT status_changed_at FROM agents_meta WHERE id = %s",

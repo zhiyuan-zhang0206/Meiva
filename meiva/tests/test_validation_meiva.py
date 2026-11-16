@@ -85,7 +85,7 @@ class TestWatcherEntries:
         from meiva.watcher import plans
 
         request = plans.plan_at(
-            ("2030-01-01T00:00:00+08:00",),  # pyright: ignore[reportArgumentType]
+            ("2029-01-03T00:00:00+08:00",),  # pyright: ignore[reportArgumentType]
             ("stand up",),  # pyright: ignore[reportArgumentType]
             name=("standup",),  # pyright: ignore[reportArgumentType]
             notify=None,
