@@ -33,7 +33,7 @@ export interface SavedScroll {
   usedCollapseReserve?: true;
   keepSendReserve?: true;
   // meiva:note
-  // Whether the container was following the bottom on return, so new output keeps pulling it down. Terminal panes retain following; a timeline bookmark keeps it for a reader who was watching the tail and preserves the last read item otherwise.
+  // Whether an explicit bookmark requests bottom following. Terminal panes retain following; conversation switches always save the visible timeline item and offset with this flag false.
   // meiva:link ui/web/src/docs/frontend-components/timeline-view/sticky-scroll.md
   followBottom: boolean;
 }

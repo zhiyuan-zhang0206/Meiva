@@ -172,7 +172,7 @@ describe("history entry scroll ownership", () => {
     act(() => { height = 6000; resizeCallbacks.forEach((deliver) => deliver()); });
     expect(viewport().scrollTop).toBe(5400);
   });
-  it("a send releases a settled bookmark at the tail, so the stream pins again", () => {
+  it("a send keeps a returned reading bookmark at the tail in place", () => {
     useTimelineStore.getState().switchThread(42, items, false);
     saveScrollMemory("history-tail-send", {
       contentKey: "42", scrollTop: 4400, followBottom: false,
@@ -182,7 +182,7 @@ describe("history entry scroll ownership", () => {
     expect(viewport().scrollTop).toBe(4400);
     act(() => { useTimelineStore.getState().requestSendAnchor(null); });
     act(() => { height = 6000; resizeCallbacks.forEach((deliver) => deliver()); });
-    expect(viewport().scrollTop).toBe(5400);
+    expect(viewport().scrollTop).toBe(4400);
   });
   it("remembers a restored reader's later position across an agent switch", () => {
     useTimelineStore.getState().switchThread(42, items, false);
@@ -204,7 +204,7 @@ describe("history entry scroll ownership", () => {
     resize();
     expect(viewport().scrollTop).toBe(300);
     act(() => { height = 5000; resizeCallbacks.forEach((deliver) => deliver()); });
-    expect(viewport().scrollTop).toBe(4400);
+    expect(viewport().scrollTop).toBe(300);
   });
   it("lets a reader replace an unreachable saved position by scrolling", () => {
     height = 900;
@@ -255,7 +255,7 @@ describe("history entry scroll ownership", () => {
     act(() => { height = 6000; resizeCallbacks.forEach((deliver) => deliver()); });
     expect(viewport().scrollTop).toBe(5400);
   });
-  it("returns a saved follower to messages that arrived while away", () => {
+  it("honors an explicitly supplied follow-bottom bookmark after growth", () => {
     height = 6000;
     saveScrollMemory("history-away-growth", { contentKey: "42", scrollTop: 4400, followBottom: true });
     renderWithBrowser(conversation(42, "history-away-growth"));
@@ -335,6 +335,29 @@ describe("agent switch reading positions", () => {
     expect(screen.queryByTestId("scroll-to-bottom")).toBeNull();
   });
 
+  it.each([false, true])("preserves the departure bookmark and reserve availability across active return (keep: %s)", (keep) => {
+    const entry = `combined-reserve-${keep}`;
+    const rows = [...items, { ...items[0], item_id: "17.0", kind: "inbound_chat", source: "user", payload: "Question" }];
+    client.setQueryData(["timeline", 42], { ...response, items: rows });
+    const { rerender } = renderWithBrowser(tabs(42, entry, true));
+    act(() => { viewport().scrollTop = 4744; fireEvent.scroll(viewport()); });
+    if (!keep) act(() => {
+      fireEvent.wheel(viewport(), { deltaY: -344 });
+      viewport().scrollTop = 4400;
+      fireEvent.scroll(viewport());
+    });
+    const expected = top;
+    rerender(tabs(43, entry));
+    act(() => { height = 6000; });
+    rerender(tabs(42, entry, true));
+    resize();
+    expect(top).toBe(expected);
+    expect(readScrollMemory(`${entry}:agent:42`)?.keepSendReserve === true).toBe(keep);
+    expect(readingOffset(keep ? "17.0" : "15.0")).toBe(keep ? 56 : -200);
+    act(() => { height = 7000; resizeCallbacks.forEach((deliver) => deliver()); });
+    expect(top).toBe(expected);
+  });
+
   it("recreates the space needed for a bookmark beyond the shortened conversation", () => {
     saveScrollMemory("agent-collapse-space:agent:42", {
       contentKey: "42", scrollTop: 4600, followBottom: false, usedCollapseReserve: true,
@@ -347,29 +370,37 @@ describe("agent switch reading positions", () => {
     expect(readingOffset("16.0")).toBe(-100);
     expect(viewport().querySelector<HTMLElement>("[data-turn-collapse-reserve]")?.style.height).toBe("200px");
   });
-  it("saves a reader on the tail as following the bottom", () => {
+  it("saves the visible item and offset even at the tail", () => {
     renderWithBrowser(tabs(42, "agent-tail-save"));
     act(() => { viewport().scrollTop = 4400; fireEvent.scroll(viewport()); });
     expect(readScrollMemory("agent-tail-save:agent:42")).toEqual({
-      contentKey: "42", scrollTop: 4400, followBottom: true,
+      contentKey: "42", scrollTop: 4400, followBottom: false,
+      anchor: { itemId: "15.0", rank: 0, viewportTop: -200 },
     });
   });
-  it("returns a bottom follower to the newest message after messages arrived while away", () => {
+  it("returns a former bottom follower to the same item after messages arrived while away", () => {
     const { rerender } = renderWithBrowser(tabs(42, "agent-new-tail"));
     act(() => { viewport().scrollTop = 4400; fireEvent.scroll(viewport()); });
     rerender(tabs(43, "agent-new-tail"));
     act(() => { height = 6000; });
     rerender(tabs(42, "agent-new-tail"));
-    expect(viewport().scrollTop).toBe(5400);
+    expect(viewport().scrollTop).toBe(4400);
     resize();
-    expect(viewport().scrollTop).toBe(5400);
-    // meiva:note
-    // A reader at the bottom has nothing to scroll to, so the control is not in
-    // the DOM at all (user report 2026-10-30).
-    // meiva:link ui/web/src/docs/frontend-components/timeline-view/sticky-scroll.md
-    expect(screen.queryByTestId("scroll-to-bottom")).toBeNull();
+    expect(viewport().scrollTop).toBe(4400);
+    expect(readingOffset("15.0")).toBe(-200);
+    expect(screen.queryByTestId("scroll-to-bottom")).not.toBeNull();
   });
-  it("keeps following a returned bottom follower as the thread grows", () => {
+  it("returns without following even when no content arrived while away", () => {
+    const { rerender } = renderWithBrowser(tabs(42, "agent-tail-no-growth"));
+    rerender(tabs(43, "agent-tail-no-growth"));
+    rerender(tabs(42, "agent-tail-no-growth"));
+    resize();
+    expect(top).toBe(4400);
+    act(() => { height = 6000; resizeCallbacks.forEach((deliver) => deliver()); });
+    expect(top).toBe(4400);
+    expect(readingOffset("15.0")).toBe(-200);
+  });
+  it("holds a returned bottom bookmark as the thread grows", () => {
     const { rerender } = renderWithBrowser(tabs(42, "agent-new-tail-growth"));
     act(() => { viewport().scrollTop = 4400; fireEvent.scroll(viewport()); });
     rerender(tabs(43, "agent-new-tail-growth"));
@@ -377,21 +408,22 @@ describe("agent switch reading positions", () => {
     rerender(tabs(42, "agent-new-tail-growth"));
     resize();
     act(() => { height = 7000; resizeCallbacks.forEach((deliver) => deliver()); });
-    expect(viewport().scrollTop).toBe(6400);
+    expect(viewport().scrollTop).toBe(4400);
   });
-  it("keeps following when the switch lands between a chunk and its pin", () => {
+  it("keeps the visible bookmark when the switch lands between a chunk and its pin", () => {
     const { rerender } = renderWithBrowser(tabs(42, "agent-chunk-frame"));
     act(() => { viewport().scrollTop = 4400; fireEvent.scroll(viewport()); });
     act(() => { height = 6000; });
     rerender(tabs(43, "agent-chunk-frame"));
     expect(readScrollMemory("agent-chunk-frame:agent:42")).toEqual({
-      contentKey: "42", scrollTop: 4400, followBottom: true,
+      contentKey: "42", scrollTop: 4400, followBottom: false,
+      anchor: { itemId: "15.0", rank: 0, viewportTop: -200 },
     });
     rerender(tabs(42, "agent-chunk-frame"));
     resize();
-    expect(viewport().scrollTop).toBe(5400);
+    expect(viewport().scrollTop).toBe(4400);
   });
-  it("reads the wider touch bottom zone as the tail", () => {
+  it("bookmarks the visible row inside the wider touch bottom zone", () => {
     vi.spyOn(window, "matchMedia").mockImplementation((query: string) => ({
       matches: query === "(pointer: coarse)", media: query, onchange: null,
       addEventListener: vi.fn(), removeEventListener: vi.fn(),
@@ -400,7 +432,8 @@ describe("agent switch reading positions", () => {
     renderWithBrowser(tabs(42, "agent-touch-zone"));
     act(() => { viewport().scrollTop = 4300; fireEvent.scroll(viewport()); });
     expect(readScrollMemory("agent-touch-zone:agent:42")).toEqual({
-      contentKey: "42", scrollTop: 4300, followBottom: true,
+      contentKey: "42", scrollTop: 4300, followBottom: false,
+      anchor: { itemId: "15.0", rank: 0, viewportTop: -100 },
     });
   });
   it("returns a parked reader to their item after messages arrived while away", () => {

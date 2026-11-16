@@ -340,8 +340,8 @@ export const TimelineView = memo(function TimelineView({
   useLayoutEffect(() => () => {
     const mem = scrollMemoryRef.current;
     const viewport = viewportRef.current;
-    if (mem && viewport && !restoreInFlight()) rememberTimelinePosition(viewport, mem.entryKey, mem.contentKey, controller, tailHeight(viewport), collapseReserveHeight(), sendReserveEnabled());
-  }, [restoreInFlight, controller, tailHeight, collapseReserveHeight, sendReserveEnabled]);
+    if (mem && viewport && !restoreInFlight()) rememberTimelinePosition(viewport, mem.entryKey, mem.contentKey, collapseReserveHeight(), sendReserveEnabled());
+  }, [restoreInFlight, collapseReserveHeight, sendReserveEnabled]);
 
   const compactPin = useCompactTransitionAnchor({
     controller,
