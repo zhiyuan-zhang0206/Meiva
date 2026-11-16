@@ -41,8 +41,11 @@ unsupported speed claims, accounts for verification and human attention, and
 feeds decisions in Align, Define Goal, Plan, and Evaluate. Reuse current evidence;
 investigate again when a consequential assumption or bottleneck changes.
 
-`define-goal` makes outcomes and stopping conditions explicit, including
-anchored qualitative judgments and learning outcomes. Evaluate owns the methods
+`define-goal` makes outcomes and stopping conditions explicit — rejecting pure
+activity phrasing, pairing quantitative targets with non-regression guardrails,
+partitioning epistemic support when missing inputs rule out exact verification,
+anchoring qualitative judgments and learning outcomes, and keeping constraints
+intact across persistence or handoff. Evaluate owns the methods
 for checking the evidence. `plan` makes dependencies and checkpoints explicit
 when useful, including small serial work; estimates need a requested or explicit
 scheduling decision and an evidential basis, not a mandatory template field.
