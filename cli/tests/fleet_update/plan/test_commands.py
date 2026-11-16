@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import os
 import shlex
+import shutil
 import subprocess
 from dataclasses import dataclass
 from pathlib import Path
@@ -277,13 +278,14 @@ def _build_prestage_rig(tmp_path: Path) -> _PrestageRig:
     )
 
 
-@pytest.mark.parametrize("shell", ["/bin/sh", "/bin/zsh"])
+@pytest.mark.parametrize(
+    "shell",
+    tuple(dict.fromkeys(s for s in ("/bin/sh", shutil.which("zsh", path="/bin:/usr/bin")) if s)),
+)
 @pytest.mark.parametrize("optional_paths", [False, True])
 def test_prestage_preserves_path_and_cleans_archive_in_host_shell(
     tmp_path: Path, shell: str, optional_paths: bool
 ) -> None:
-    if not Path(shell).exists():
-        pytest.skip(f"{shell} is not installed")
     rig = _build_prestage_rig(tmp_path)
     _git_in(rig.repo, "checkout", "-q", rig.pnpm_sha)
     if optional_paths:
