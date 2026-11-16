@@ -32,13 +32,13 @@ ships carry.
 
 | module | records | test files that write it | why it is a double |
 |---|---:|---|---|
-| `ui/web/src/components/agent-sidebar/sidebar-test-mock.tsx` | 140 | `agent-sidebar.test.tsx` (34), `sidebar-status-cards.test.tsx` (48), `sidebar-tree-and-search.test.tsx` (51) | the rail's scenario object: the props the page hands it, and the settings, stats and plugin declarations it reads |
+| `ui/web/src/components/agent-sidebar/sidebar-test-mock.tsx` | 135 | `agent-sidebar.test.tsx` (34), `sidebar-status-cards.test.tsx` (50), `sidebar-tree-and-search.test.tsx` (51) | the rail's scenario object: the props the page hands it, and the settings, stats and plugin declarations it reads |
 | `ui/web/src/app/page-test-mock.tsx` | 101 | `page.test.tsx` (61), `page-dispatch.test.tsx` (40) | the home page's `hooksState` and its provider wrapper |
-| `ui/web/src/components/inspector/inspector-test-mock.tsx` | 4 | `inspector-panel-chrome.test.tsx` (3), `inspector-panel-notices.test.tsx` (1) | the inspector's `inspectorMockState` |
+| `ui/web/src/components/inspector/inspector-test-mock.tsx` | 4 | `inspector-panel-chrome.test.tsx` (3), `inspector-panel-state.test.tsx` (1) | the inspector's `inspectorMockState` |
 
-238 records, every one of them a write into a state object the double exports: no `vi.mock`, and no patch
+240 records, every one of them a write into a state object the double exports: no `vi.mock`, and no patch
 of a module the suite renders. `python -m meizel debt sites --code first-party-patch --json` lists every
-site (241 today, 238 at `1d6710493`); 238 name one of these modules, 2 sit in `[approved-patches.files]`,
+site (243 today, 238 at `1d6710493`); 240 name one of these modules, 2 sit in `[approved-patches.files]`,
 and 1 is recorded. A repayment lowers these numbers and a new site raises them, and
 `meizel/tests/languages/test_test_code_accounting.py` fails until this table and the tree agree; the same
 test injects a production import of each double into the run's fact graph and asserts every record comes
