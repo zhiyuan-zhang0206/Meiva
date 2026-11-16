@@ -26,7 +26,7 @@ Questions have three types: text, single select and multi select. Ordered choice
 use native radio/checkbox rows, numbered by their immutable array position.
 Single and multi select both show an optional comment textarea at all times.
 Selection and comment are independent. A comment alone is also a valid answer.
-Text answers and comments use growing textareas. Enter adds a line break, and
+Text answers and comments use growing textareas. Enter activates the shared Submit action, Shift+Enter adds a line break, and
 Submit sends the batch.
 Failed submissions retain input and reuse the existing operation key; a 409
 disables the stale question. A question card shows no priority, blocking or expiry:

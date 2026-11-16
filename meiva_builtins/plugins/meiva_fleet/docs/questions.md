@@ -71,3 +71,8 @@ A skip delivers `Skipped by the user.`, never authorization.
 Legacy `allow_other` and `other_text` fields remain readable so historical answers
 retain their original meaning. New questions cannot enable Other and new answers
 cannot submit it. Historical stored data is not rewritten.
+
+In the Web answer and Note fields, Enter activates the shared Submit action with
+the same last-question and pending gates on every pointer type. Shift+Enter adds
+a line break. IME confirmation stays with the input method, and held Enter does
+not submit repeatedly. Suggestions remain placeholders until accepted explicitly.

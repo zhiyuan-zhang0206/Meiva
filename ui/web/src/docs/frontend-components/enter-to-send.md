@@ -40,10 +40,14 @@ interact with Enter, and receives the same value.
 
 Long-text editors are not messages: the schedules script editor and cron form,
 the config JSON editor, the shell line-count field, and single-line inputs keep
-Enter as a line break or as their own field commit. Question answers and comments
-also use Enter for line breaks. The Questions panel submits through its Submit
-button. They are listed here so the
-split is a decision, not an omission.
+Enter as a line break or as their own field commit.
+
+## Question answers and Notes
+
+Enter activates the Questions panel's shared Submit action on every pointer type.
+Shift+Enter inserts a line break. The panel retains its last-question and pending
+gates, protects IME confirmation with `isImeComposition`, and ignores held Enter.
+Tab and Right Arrow still accept a suggestion without submitting it.
 
 ## Single-line commit fields
 
@@ -66,4 +70,4 @@ on Enter without a reload.
 ## Relationship to Other Nodes
 
 - [Frontend Components](frontend-components.md) — the catalog this node hangs from; the Composer bullet describes its states, drafts and submissions.
-- [Fleet View](fleet-view.md) — the composer question queue renders `QuestionsForm`, which sends the batch from its Submit button.
+- [Fleet View](fleet-view.md) — the composer question queue renders `QuestionsForm`, which sends the batch from Submit or Enter in an answer or Note.

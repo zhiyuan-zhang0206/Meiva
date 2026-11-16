@@ -1,6 +1,7 @@
 // meiva:note
-// One rule for every send-type text field: the conversation composer, a question
-// reply, a question's answer and comment, and the fork/resurrect prompt.
+// The send-type fields share this rule: the conversation composer and the
+// fork/resurrect prompt. Question answers and Notes share only the IME guard;
+// their Enter submits the batch on every pointer type (Shift+Enter edits).
 // Enter sends. Shift+Enter breaks the line. A keystroke an input method is
 // consuming is left to that input method — committing a CJK candidate with Enter
 // must neither send nor be swallowed — and a touch keyboard keeps Enter as a line
