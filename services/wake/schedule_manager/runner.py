@@ -36,11 +36,13 @@ from base.db.config import db_config_from_boot
 from base.host.atomic_io import write_text_atomic
 from base.host.exit_codes import hard_exit
 from base.native_process.code_version import CodeVersion
+from base.native_process.process_control import SYSTEM_PROCESS_CONTROL
 from base.paths import meiva_home, prod_service_checkout_error
 from base.telemetry import process_name
 from meiva.boot import clients_over
 from meiva.sdk_surface import process_context
 from services.wake.schedule_manager import engine
+from services.wake.schedule_manager.run_custody import register_run_member
 from services.wake.schedule_manager.stall_policy import StallPolicy
 
 
@@ -77,6 +79,11 @@ def _await_launch_gate(gate_fd: int) -> bool:
         os.close(gate_fd)
 
 
+def _release_payload_gate(gate_fd: int) -> None:
+    if os.write(gate_fd, b"\x01") != 1:
+        raise RuntimeError("payload launch gate accepted no byte")
+
+
 # meiva:note
 # Run ``run.py`` once through the SDK bootstrap and leave a restart-adoptable outcome. The child
 # command uses the fixed interpreter/module and a payload path rooted in the schedule workspace.
@@ -90,7 +97,7 @@ def run_single_round(
     *,
     home: Path,
 ) -> int:
-    del schedule_id, run_id, home
+    del home
     if not _await_launch_gate(gate_fd):
         return 125
     script_path = Path.cwd() / "run.py"
@@ -113,18 +120,39 @@ def run_single_round(
         # meiva:note
         # The payload stays in this supervisor's dedicated process group. If the supervisor is
         # SIGKILLed, its durable run claim still owns every surviving payload process by PGID.
-        child = subprocess.Popen(  # noqa: S603
-            [
-                sys.executable,
-                "-m",
-                "services.wake.schedule_manager.runner",
-                "--payload",
-                str(script_path),
-            ],
-            cwd=Path.cwd(),
-            env=os.environ.copy(),
-            stdin=subprocess.DEVNULL,
-        )
+        payload_read_fd, payload_write_fd = os.pipe()
+        try:
+            child = subprocess.Popen(  # noqa: S603
+                [
+                    sys.executable,
+                    "-m",
+                    "services.wake.schedule_manager.runner",
+                    "--payload",
+                    str(script_path),
+                    str(payload_read_fd),
+                ],
+                cwd=Path.cwd(),
+                env=os.environ.copy(),
+                stdin=subprocess.DEVNULL,
+                pass_fds=(payload_read_fd,),
+            )
+            os.close(payload_read_fd)
+            payload_read_fd = -1
+            register_run_member(
+                Path.cwd(),
+                schedule_id,
+                run_id,
+                child.pid,
+                process_control=SYSTEM_PROCESS_CONTROL,
+            )
+            _release_payload_gate(payload_write_fd)
+        except Exception:
+            logger.exception("single-round payload custody failed")
+            _hard_kill_own_group(125)
+        finally:
+            if payload_read_fd >= 0:
+                os.close(payload_read_fd)
+            os.close(payload_write_fd)
         try:
             returncode = child.wait(timeout=max(0.0, deadline_epoch - time.time()))
         except subprocess.TimeoutExpired:
@@ -288,14 +316,19 @@ def _single_round_arguments(argv: Sequence[str]) -> tuple[int, int, int, float, 
 
 
 def main(argv: Sequence[str]) -> None:
+    payload_path: Path | None = None
+    if len(argv) == 3 and argv[0] == "--payload":
+        payload_path = Path(argv[1])
+        if not _await_launch_gate(int(argv[2])):
+            raise SystemExit(125)
     boot = ConfigBoot()
     boot.boot()
     refusal = prod_service_checkout_error(Path(__file__).resolve().parents[3], home=meiva_home())
     if refusal is not None:
         logger.error("schedule runner refused: {}", refusal)
         raise SystemExit(3)
-    if len(argv) == 2 and argv[0] == "--payload":
-        engine.run_single_round_payload(Path(argv[1]))
+    if payload_path is not None:
+        engine.run_single_round_payload(payload_path)
         raise SystemExit(0)
     if len(argv) >= 1 and argv[0] == "--single-round":
         schedule_id, run_id, timeout_seconds, deadline_epoch, outcome_path, gate_fd = (

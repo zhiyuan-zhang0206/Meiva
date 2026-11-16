@@ -68,3 +68,17 @@ outcome therefore does not release single-flight: reconciliation first kills any
 group members and proves the group empty, then settles the run. Timeout and cancellation use
 the same order. An unreadable process identity or group probe keeps the run open because an
 unknown ownership result cannot certify absence.
+
+## Update: generation-bound payload custody
+
+The durable claim now records the payload's native birth before a second launch gate lets
+`run.py` execute. This member identity preserves custody when the supervisor is gone. Before
+signalling the numeric process group, reconciliation stops one exact recorded birth, verifies
+that it still belongs to the claimed group, and then sends the group kill. The stopped member
+keeps the PGID reserved across that final check, preventing a later process generation from
+receiving the signal.
+
+When every recorded birth is gone but the same numeric PGID exists, custody remains unknown:
+the group may belong to a later generation observed after an outage. Reconciliation neither
+kills that group nor closes the run. This conservative state preserves single-flight until
+ownership or absence becomes provable.

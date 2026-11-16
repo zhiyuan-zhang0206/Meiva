@@ -62,6 +62,8 @@ class SourceGraph:
                 result.update(self.import_bindings(module, node))
             elif isinstance(node, (ast.ClassDef, ast.FunctionDef, ast.AsyncFunctionDef)):
                 result[node.name] = ("node", node)
+            elif isinstance(node, ast.TypeAlias) and isinstance(node.name, ast.Name):
+                result[node.name.id] = ("node", node)
             elif isinstance(node, (ast.Assign, ast.AnnAssign)):
                 targets = node.targets if isinstance(node, ast.Assign) else [node.target]
                 for target in targets:
@@ -139,6 +141,9 @@ class SourceGraph:
             for field in node.body:
                 if isinstance(field, ast.AnnAssign):
                     self.expression(module, field.annotation)
+        elif isinstance(node, ast.TypeAlias):
+            self.classes.add(key)
+            self.expression(module, node.value)
         elif isinstance(node, (ast.Assign, ast.AnnAssign)) and node.value:
             self.expression(module, node.value)
 

@@ -6,11 +6,11 @@ from __future__ import annotations
 import json
 import math
 import signal
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import UTC, datetime
 from enum import StrEnum
 from pathlib import Path
-from typing import TypeGuard
+from typing import Protocol, TypeGuard
 
 import psutil
 
@@ -39,6 +39,23 @@ class GroupLiveness(StrEnum):
     UNKNOWN = "unknown"
 
 
+class ProcessIdentityControl(Protocol):
+    def read_live(self, identity: OwnedProcess) -> LiveReading | None: ...
+
+    def signal_pinned(self, identity: OwnedProcess, signum: int) -> bool: ...
+
+
+class _SystemProcessIdentityControl:
+    def read_live(self, identity: OwnedProcess) -> LiveReading | None:
+        return identity.read_live()
+
+    def signal_pinned(self, identity: OwnedProcess, signum: int) -> bool:
+        return identity.signal_pinned(signum)
+
+
+SYSTEM_PROCESS_IDENTITY_CONTROL: ProcessIdentityControl = _SystemProcessIdentityControl()
+
+
 @dataclass(frozen=True)
 class RunClaim:
     schedule_id: int
@@ -46,12 +63,15 @@ class RunClaim:
     leader: OwnedProcess
     pgid: int
     deadline: datetime
+    member: OwnedProcess | None = None
 
     def __post_init__(self) -> None:
         if self.schedule_id < 1 or self.run_id < 1:
             raise ValueError("schedule and run ids must be positive")
         if self.pgid != self.leader.pid:
             raise ValueError("a declarative run must own a dedicated leader process group")
+        if self.member is not None and self.member.pid == self.leader.pid:
+            raise ValueError("a declarative run member must differ from its group leader")
         if self.deadline.tzinfo is None:
             raise ValueError("a declarative run deadline must be timezone-aware")
 
@@ -96,9 +116,43 @@ def write_run_claim(work_dir: Path, claim: RunClaim) -> Path:
         "starttime": claim.leader.starttime,
         "pgid": claim.pgid,
         "deadline_epoch": claim.deadline.timestamp(),
+        "member": (
+            None
+            if claim.member is None
+            else {
+                "pid": claim.member.pid,
+                "birth": claim.member.birth,
+                "starttime": claim.member.starttime,
+            }
+        ),
     }
     write_text_atomic(path, json.dumps(payload, sort_keys=True) + "\n", sync_file=False)
     return path
+
+
+# meiva:note
+# The payload waits on its own gate until this native identity is in the durable claim.
+def register_run_member(
+    work_dir: Path,
+    schedule_id: int,
+    run_id: int,
+    pid: int,
+    *,
+    process_control: ProcessControl,
+) -> OwnedProcess:
+    reading = read_run_claim(work_dir, schedule_id, run_id)
+    if reading.state is not ClaimReadState.PRESENT or reading.claim is None:
+        raise RuntimeError(f"cannot register payload for run {run_id}: {reading.detail}")
+    member = OwnedProcess.capture(psutil.Process(pid))
+    pgid = process_control.getpgid(pid)
+    if pgid != reading.claim.pgid:
+        raise RuntimeError(
+            f"payload {pid} joined process group {pgid}, expected {reading.claim.pgid}"
+        )
+    if not member.live():
+        raise psutil.NoSuchProcess(pid, msg="declarative payload exited during capture")
+    write_run_claim(work_dir, replace(reading.claim, member=member))
+    return member
 
 
 def read_run_claim(work_dir: Path, schedule_id: int, run_id: int) -> ClaimReading:
@@ -128,8 +182,18 @@ def clear_run_claim(work_dir: Path, run_id: int) -> None:
     claim_path(work_dir, run_id).unlink(missing_ok=True)
 
 
-def observe_run_group(claim: RunClaim, *, process_control: ProcessControl) -> GroupObservation:
-    leader, detail = _leader_liveness(claim.leader)
+def observe_run_group(
+    claim: RunClaim,
+    *,
+    process_control: ProcessControl,
+    identity_control: ProcessIdentityControl,
+) -> GroupObservation:
+    leader, leader_is_anchor, detail = _identity_group_anchor(
+        claim.leader,
+        claim.pgid,
+        process_control=process_control,
+        identity_control=identity_control,
+    )
     if leader is LeaderLiveness.UNKNOWN:
         return GroupObservation(leader, GroupLiveness.UNKNOWN, detail)
     if leader is LeaderLiveness.FOREIGN:
@@ -137,76 +201,156 @@ def observe_run_group(claim: RunClaim, *, process_control: ProcessControl) -> Gr
         # POSIX reserves a numeric PGID while any member remains. Reuse of the leader PID
         # therefore proves the original group emptied before the foreign birth appeared.
         return GroupObservation(leader, GroupLiveness.EMPTY, detail)
-    if leader is LeaderLiveness.ALIVE:
-        try:
-            pgid = process_control.getpgid(claim.leader.pid)
-            second, second_detail = _leader_liveness(claim.leader)
-        except (OSError, psutil.Error, RuntimeError) as exc:
-            return GroupObservation(LeaderLiveness.UNKNOWN, GroupLiveness.UNKNOWN, str(exc))
-        if second is LeaderLiveness.ALIVE and pgid == claim.pgid:
-            return GroupObservation(second, GroupLiveness.PRESENT, second_detail)
-        if second is LeaderLiveness.UNKNOWN or pgid != claim.pgid:
-            return GroupObservation(
-                LeaderLiveness.UNKNOWN,
-                GroupLiveness.UNKNOWN,
-                f"run leader group identity changed ({pgid} != {claim.pgid})",
-            )
-        leader, detail = second, second_detail
-        if leader is LeaderLiveness.FOREIGN:
-            return GroupObservation(leader, GroupLiveness.EMPTY, detail)
+    if leader_is_anchor:
+        return GroupObservation(leader, GroupLiveness.PRESENT, detail)
+    member_detail = "no captured payload member"
+    if claim.member is not None:
+        member, member_is_anchor, member_detail = _identity_group_anchor(
+            claim.member,
+            claim.pgid,
+            process_control=process_control,
+            identity_control=identity_control,
+        )
+        if member is LeaderLiveness.UNKNOWN:
+            return GroupObservation(leader, GroupLiveness.UNKNOWN, member_detail)
+        if member_is_anchor:
+            return GroupObservation(leader, GroupLiveness.PRESENT, member_detail)
     group, group_detail = _probe_group(claim.pgid, process_control=process_control)
-    return GroupObservation(leader, group, f"{detail}; {group_detail}")
+    if group is GroupLiveness.PRESENT:
+        group = GroupLiveness.UNKNOWN
+        group_detail = "numeric group exists without a live captured run member"
+    return GroupObservation(leader, group, f"{detail}; {member_detail}; {group_detail}")
 
 
 # meiva:note
 # SIGKILL the claimed group only while its original numeric custody is provable.
-def kill_run_group(claim: RunClaim, *, process_control: ProcessControl) -> GroupObservation:
-    observed = observe_run_group(claim, process_control=process_control)
+def kill_run_group(
+    claim: RunClaim,
+    *,
+    process_control: ProcessControl,
+    identity_control: ProcessIdentityControl,
+) -> GroupObservation:
+    observed = observe_run_group(
+        claim,
+        process_control=process_control,
+        identity_control=identity_control,
+    )
     if observed.group is not GroupLiveness.PRESENT:
         return observed
     # meiva:note
-    # Recheck PID reuse immediately before the group signal. If the leader is gone, any
-    # surviving original member keeps its numeric PGID reserved during this check.
-    leader, detail = _leader_liveness(claim.leader)
-    if leader is LeaderLiveness.UNKNOWN:
-        return GroupObservation(leader, GroupLiveness.UNKNOWN, detail)
-    if leader is LeaderLiveness.FOREIGN:
-        return GroupObservation(leader, GroupLiveness.EMPTY, detail)
-    if leader is LeaderLiveness.ALIVE:
-        try:
-            pgid = process_control.getpgid(claim.leader.pid)
-            confirmed, confirmed_detail = _leader_liveness(claim.leader)
-            if confirmed is LeaderLiveness.FOREIGN:
-                return GroupObservation(confirmed, GroupLiveness.EMPTY, confirmed_detail)
-            if confirmed is not LeaderLiveness.ALIVE or pgid != claim.pgid:
-                return GroupObservation(
-                    LeaderLiveness.UNKNOWN,
-                    GroupLiveness.UNKNOWN,
-                    "run leader no longer owns its claimed process group",
-                )
-        except OSError as exc:
-            return GroupObservation(LeaderLiveness.UNKNOWN, GroupLiveness.UNKNOWN, str(exc))
+    # Stop one exact captured birth before signalling the numeric group. The stopped member
+    # reserves its PGID across the final check and kill, so another generation cannot take it.
+    anchor, detail = _live_claim_anchor(
+        claim,
+        process_control=process_control,
+        identity_control=identity_control,
+    )
+    if anchor is None:
+        return GroupObservation(observed.leader, GroupLiveness.UNKNOWN, detail)
+    try:
+        pinned = identity_control.signal_pinned(anchor, signal.SIGSTOP)
+    except (OSError, psutil.Error, RuntimeError, ValueError) as exc:
+        return GroupObservation(
+            observed.leader, GroupLiveness.UNKNOWN, f"run member pin failed: {exc}"
+        )
+    if not pinned:
+        return GroupObservation(
+            observed.leader, GroupLiveness.UNKNOWN, "captured run member exited before pin"
+        )
+    state, still_anchor, detail = _identity_group_anchor(
+        anchor,
+        claim.pgid,
+        process_control=process_control,
+        identity_control=identity_control,
+    )
+    if state is not LeaderLiveness.ALIVE or not still_anchor:
+        return GroupObservation(observed.leader, GroupLiveness.UNKNOWN, detail)
     try:
         process_control.killpg(claim.pgid, signal.SIGKILL)
     except ProcessLookupError:
-        return GroupObservation(leader, GroupLiveness.EMPTY, "run process group is empty")
+        return GroupObservation(observed.leader, GroupLiveness.EMPTY, "run process group is empty")
     except OSError as exc:
-        return GroupObservation(leader, GroupLiveness.UNKNOWN, f"group kill failed: {exc}")
-    return observe_run_group(claim, process_control=process_control)
+        try:
+            resumed = identity_control.signal_pinned(anchor, signal.SIGCONT)
+        except (OSError, psutil.Error, RuntimeError, ValueError) as resume_exc:
+            return GroupObservation(
+                observed.leader,
+                GroupLiveness.UNKNOWN,
+                f"group kill failed: {exc}; run member resume failed: {resume_exc}",
+            )
+        detail = f"group kill failed: {exc}"
+        if not resumed:
+            detail += "; captured run member exited before resume"
+        return GroupObservation(observed.leader, GroupLiveness.UNKNOWN, detail)
+    return observe_run_group(
+        claim,
+        process_control=process_control,
+        identity_control=identity_control,
+    )
 
 
-def _leader_liveness(identity: OwnedProcess) -> tuple[LeaderLiveness, str]:
+def _leader_liveness(
+    identity: OwnedProcess, *, identity_control: ProcessIdentityControl
+) -> tuple[LeaderLiveness, str]:
     try:
-        reading = identity.read_live()
+        reading = identity_control.read_live(identity)
         if reading is None:
-            return LeaderLiveness.DEAD, f"run leader {identity.pid} is gone"
+            return LeaderLiveness.DEAD, f"captured process {identity.pid} is gone"
         if identity.judge_live(reading):
-            return LeaderLiveness.ALIVE, f"run leader {identity.pid} is alive"
+            return LeaderLiveness.ALIVE, f"captured process {identity.pid} is alive"
         if _same_birth(identity, reading):
-            return LeaderLiveness.DEAD, f"run leader {identity.pid} is dead"
+            return LeaderLiveness.DEAD, f"captured process {identity.pid} is dead"
         return LeaderLiveness.FOREIGN, f"pid {identity.pid} belongs to a different process"
     except (OSError, psutil.Error, RuntimeError, ValueError) as exc:
-        return LeaderLiveness.UNKNOWN, f"run leader identity is unprovable: {exc}"
+        return LeaderLiveness.UNKNOWN, f"captured process identity is unprovable: {exc}"
+
+
+def _identity_group_anchor(
+    identity: OwnedProcess,
+    pgid: int,
+    *,
+    process_control: ProcessControl,
+    identity_control: ProcessIdentityControl,
+) -> tuple[LeaderLiveness, bool, str]:
+    state, detail = _leader_liveness(identity, identity_control=identity_control)
+    if state is not LeaderLiveness.ALIVE:
+        return state, False, detail
+    try:
+        observed_pgid = process_control.getpgid(identity.pid)
+        confirmed, confirmed_detail = _leader_liveness(identity, identity_control=identity_control)
+    except (OSError, psutil.Error, RuntimeError, ValueError) as exc:
+        return LeaderLiveness.UNKNOWN, False, f"run member group is unprovable: {exc}"
+    if confirmed is not LeaderLiveness.ALIVE:
+        return confirmed, False, confirmed_detail
+    if observed_pgid != pgid:
+        return (
+            LeaderLiveness.UNKNOWN,
+            False,
+            f"captured run member moved to process group {observed_pgid}, expected {pgid}",
+        )
+    return confirmed, True, confirmed_detail
+
+
+def _live_claim_anchor(
+    claim: RunClaim,
+    *,
+    process_control: ProcessControl,
+    identity_control: ProcessIdentityControl,
+) -> tuple[OwnedProcess | None, str]:
+    for identity in (claim.leader, claim.member):
+        if identity is None:
+            continue
+        state, is_anchor, detail = _identity_group_anchor(
+            identity,
+            claim.pgid,
+            process_control=process_control,
+            identity_control=identity_control,
+        )
+        if state is LeaderLiveness.UNKNOWN:
+            return None, detail
+        if is_anchor:
+            return identity, detail
+    return None, "no live captured run member owns the claimed process group"
 
 
 def _same_birth(identity: OwnedProcess, reading: LiveReading) -> bool:
@@ -237,6 +381,7 @@ def _claim_from_payload(raw: dict[str, object]) -> RunClaim:
     starttime = raw.get("starttime")
     pgid = raw.get("pgid")
     deadline_epoch = raw.get("deadline_epoch")
+    member_raw = raw.get("member")
     if not (_is_int(schedule_id) and _is_int(run_id) and _is_int(pid) and _is_int(pgid)):
         raise ValueError("schedule_id, run_id, pid, and pgid must be integers")
     if not _is_number(birth) or not _is_number(deadline_epoch):
@@ -245,13 +390,32 @@ def _claim_from_payload(raw: dict[str, object]) -> RunClaim:
         raise ValueError("starttime must be an integer or null")
     if not math.isfinite(float(birth)) or not math.isfinite(float(deadline_epoch)):
         raise ValueError("birth and deadline_epoch must be finite numbers")
+    member = _member_from_payload(member_raw)
     return RunClaim(
         schedule_id=schedule_id,
         run_id=run_id,
         leader=OwnedProcess(pid, float(birth), starttime),
         pgid=pgid,
         deadline=datetime.fromtimestamp(float(deadline_epoch), UTC),
+        member=member,
     )
+
+
+def _member_from_payload(raw: object) -> OwnedProcess | None:
+    if raw is None:
+        return None
+    if not _is_dict(raw):
+        raise ValueError("member must be an object or null")
+    pid = raw.get("pid")
+    birth = raw.get("birth")
+    starttime = raw.get("starttime")
+    if not _is_int(pid) or not _is_number(birth):
+        raise ValueError("member pid and birth must be numbers")
+    if starttime is not None and not _is_int(starttime):
+        raise ValueError("member starttime must be an integer or null")
+    if not math.isfinite(float(birth)):
+        raise ValueError("member birth must be finite")
+    return OwnedProcess(pid, float(birth), starttime)
 
 
 def _is_int(value: object) -> TypeGuard[int]:

@@ -1,20 +1,25 @@
 -- Declarative, run-to-completion schedules. Existing resident schedules stay
 -- on the daemon bridge until the later migration wave converts each payload.
 ALTER TABLE schedules
-    ADD COLUMN trigger_kind TEXT NOT NULL DEFAULT 'daemon',
-    ADD COLUMN run_at TIMESTAMPTZ,
-    ADD COLUMN cron_expr TEXT,
-    ADD COLUMN interval_seconds INTEGER,
-    ADD COLUMN timezone TEXT NOT NULL DEFAULT 'UTC',
-    ADD COLUMN timeout_seconds INTEGER NOT NULL DEFAULT 600,
-    ADD COLUMN on_owner_terminate TEXT NOT NULL DEFAULT 'cancel';
+    ADD COLUMN IF NOT EXISTS trigger_kind TEXT NOT NULL DEFAULT 'daemon',
+    ADD COLUMN IF NOT EXISTS run_at TIMESTAMPTZ,
+    ADD COLUMN IF NOT EXISTS cron_expr TEXT,
+    ADD COLUMN IF NOT EXISTS interval_seconds INTEGER,
+    ADD COLUMN IF NOT EXISTS timezone TEXT NOT NULL DEFAULT 'UTC',
+    ADD COLUMN IF NOT EXISTS timeout_seconds INTEGER NOT NULL DEFAULT 600,
+    ADD COLUMN IF NOT EXISTS on_owner_terminate TEXT NOT NULL DEFAULT 'cancel';
 
 UPDATE schedules
 SET on_owner_terminate = 'cancel'
 WHERE owner_agent_id IS NOT NULL;
 
 ALTER TABLE schedules
-    DROP CONSTRAINT schedules_status_check,
+    DROP CONSTRAINT IF EXISTS schedules_status_check,
+    DROP CONSTRAINT IF EXISTS schedules_trigger_kind_check,
+    DROP CONSTRAINT IF EXISTS schedules_interval_seconds_check,
+    DROP CONSTRAINT IF EXISTS schedules_timeout_seconds_check,
+    DROP CONSTRAINT IF EXISTS schedules_owner_terminate_check,
+    DROP CONSTRAINT IF EXISTS schedules_trigger_payload_check,
     ADD CONSTRAINT schedules_status_check
         CHECK (status IN ('scheduled', 'running', 'stopped', 'error', 'completed', 'cancelled')),
     ADD CONSTRAINT schedules_trigger_kind_check
@@ -33,12 +38,12 @@ ALTER TABLE schedules
             OR (trigger_kind = 'every' AND run_at IS NULL AND cron_expr IS NULL AND interval_seconds IS NOT NULL)
         );
 
-CREATE INDEX schedules_declarative_due_idx
+CREATE INDEX IF NOT EXISTS schedules_declarative_due_idx
     ON schedules (machine, next_launch_at)
     WHERE enabled AND trigger_kind <> 'daemon';
 
 ALTER TABLE schedule_runs
-    ADD COLUMN scheduled_for TIMESTAMPTZ;
+    ADD COLUMN IF NOT EXISTS scheduled_for TIMESTAMPTZ;
 
 CREATE OR REPLACE FUNCTION cancel_agent_schedules_on_termination()
 RETURNS TRIGGER AS $$
@@ -56,6 +61,8 @@ BEGIN
     RETURN NEW;
 END;
 $$ LANGUAGE plpgsql;
+
+DROP TRIGGER IF EXISTS agents_meta_cancel_schedules ON agents_meta;
 
 CREATE TRIGGER agents_meta_cancel_schedules
     AFTER UPDATE OF status ON agents_meta

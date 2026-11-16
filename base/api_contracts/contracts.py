@@ -287,6 +287,18 @@ ROUTE_CONTRACTS: dict[tuple[str, str], RouteContract] = {
         Idempotency.NON_IDEMPOTENT,
         note="schedule control enqueues a fresh sync; no durable command receipt",
     ),
+    ("POST", "/api/schedules/{schedule_id}/cancel"): RouteContract(
+        note="cancel unfinished declarative work — repeats preserve the terminal state"
+    ),
+    ("POST", "/api/schedules/{schedule_id}/disable"): RouteContract(
+        note="disable declarative fires — repeats preserve the disabled state"
+    ),
+    ("POST", "/api/schedules/{schedule_id}/enable"): RouteContract(
+        note="enable declarative fires — repeats preserve one calculated next slot"
+    ),
+    ("POST", "/api/schedules/{schedule_id}/run-now"): RouteContract(
+        note="make one declarative fire immediately eligible — repeats preserve one due slot"
+    ),
     ("PUT", "/api/schedules/{schedule_id}"): RouteContract(
         Idempotency.NON_IDEMPOTENT, note="script edits append versions and can restart the process"
     ),

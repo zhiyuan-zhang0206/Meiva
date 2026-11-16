@@ -28,6 +28,7 @@ from services.wake.schedule_manager.run_custody import (
     ClaimReadState,
     GroupLiveness,
     LeaderLiveness,
+    ProcessIdentityControl,
     RunClaim,
     capture_run_leader,
     clear_run_claim,
@@ -160,6 +161,7 @@ class DeclarativeScheduleEngine:
         launch_env: Mapping[str, str],
         clock: Clock,
         process_control: ProcessControl,
+        identity_control: ProcessIdentityControl,
         secret_env_resolver: Callable[[int, tuple[str, ...]], Mapping[str, str]] | None,
     ) -> None:
         self._pool = pool
@@ -169,6 +171,7 @@ class DeclarativeScheduleEngine:
         self._launch_env = launch_env
         self._clock = clock
         self._process_control = process_control
+        self._identity_control = identity_control
         self._secret_env_resolver = secret_env_resolver
         self._children: list[subprocess.Popen[bytes]] = []
 
@@ -248,7 +251,11 @@ class DeclarativeScheduleEngine:
         work_dir: Path,
         now: datetime,
     ) -> None:
-        observed = observe_run_group(claim, process_control=self._process_control)
+        observed = observe_run_group(
+            claim,
+            process_control=self._process_control,
+            identity_control=self._identity_control,
+        )
         if observed.group is GroupLiveness.UNKNOWN:
             _log.warning(
                 "schedule %s run %s process group is unprovable: %s",
@@ -262,7 +269,11 @@ class DeclarativeScheduleEngine:
         leader_lost = observed.leader is not LeaderLiveness.ALIVE
         if observed.group is GroupLiveness.PRESENT:
             if cancelled or timed_out or leader_lost:
-                killed = kill_run_group(claim, process_control=self._process_control)
+                killed = kill_run_group(
+                    claim,
+                    process_control=self._process_control,
+                    identity_control=self._identity_control,
+                )
                 if killed.group is GroupLiveness.UNKNOWN:
                     _log.warning(
                         "schedule %s run %s process group kill is unprovable: %s",

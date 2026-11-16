@@ -18,6 +18,7 @@ from base.clock.tests.fakes import clock_at
 from base.config import settings
 from base.db import create_agent
 from base.host.boundary.untyped import object_of
+from base.native_process.ownership import LiveReading, OwnedProcess
 from base.native_process.process_control import SYSTEM_PROCESS_CONTROL, ProcessControl
 from base.native_process.tests.fake_process_control import FakeProcessControl
 from services.wake.schedule_manager.declarative import (
@@ -25,6 +26,14 @@ from services.wake.schedule_manager.declarative import (
     schedule_directory,
 )
 from services.wake.schedule_manager.manager import REPO_ROOT
+from services.wake.schedule_manager.run_custody import (
+    SYSTEM_PROCESS_IDENTITY_CONTROL,
+    GroupLiveness,
+    ProcessIdentityControl,
+    RunClaim,
+    kill_run_group,
+    read_run_claim,
+)
 
 
 @pytest.fixture
@@ -93,6 +102,7 @@ def _engine(
     now: datetime,
     *,
     process_control: ProcessControl = SYSTEM_PROCESS_CONTROL,
+    identity_control: ProcessIdentityControl = SYSTEM_PROCESS_IDENTITY_CONTROL,
 ) -> DeclarativeScheduleEngine:
     launch_env = dict(os.environ)
     launch_env["PYTHONPATH"] = str(REPO_ROOT)
@@ -104,8 +114,22 @@ def _engine(
         launch_env=launch_env,
         clock=clock_at(now),
         process_control=process_control,
+        identity_control=identity_control,
         secret_env_resolver=None,
     )
+
+
+class _IdentityControl:
+    def __init__(self, readings: dict[OwnedProcess, LiveReading | None]) -> None:
+        self._readings = readings
+        self.signals: list[tuple[OwnedProcess, int]] = []
+
+    def read_live(self, identity: OwnedProcess) -> LiveReading | None:
+        return self._readings.get(identity)
+
+    def signal_pinned(self, identity: OwnedProcess, signum: int) -> bool:
+        self.signals.append((identity, signum))
+        return self._readings.get(identity) is not None
 
 
 def _wait_for_status(
@@ -154,6 +178,11 @@ def _wait_for_pid_exit(pid: int) -> None:
             return
         time.sleep(0.02)
     raise AssertionError(f"process {pid} did not exit")
+
+
+def _kill_if_live(pid: int) -> None:
+    if _pid_live(pid):
+        os.kill(pid, signal.SIGKILL)
 
 
 def _is_object_dict(value: object) -> TypeGuard[dict[str, object]]:
@@ -339,6 +368,14 @@ def test_supervisor_sigkill_keeps_run_open_until_its_payload_group_is_gone(
     _wait_for_file(marker)
     payload_pid, supervisor_pid = _read_process_ids(marker)
     assert payload_pid != supervisor_pid
+    run_id_row = db_conn.execute(
+        "SELECT id FROM schedule_runs WHERE schedule_id = %s", (sid,)
+    ).fetchone()
+    assert run_id_row is not None
+    claim_reading = read_run_claim(work_dir, sid, run_id_row[0])
+    assert claim_reading.claim is not None
+    assert claim_reading.claim.member is not None
+    assert claim_reading.claim.member.pid == payload_pid
 
     os.kill(supervisor_pid, signal.SIGKILL)
     try:
@@ -354,30 +391,51 @@ def test_supervisor_sigkill_keeps_run_open_until_its_payload_group_is_gone(
         assert db_conn.execute(
             "SELECT ok FROM schedule_runs WHERE schedule_id = %s", (sid,)
         ).fetchone() == (None,)
-        assert any(
-            sent.kind == "killpg" and sent.target == supervisor_pid and sent.signum == 0
-            for sent in unreadable_control.signals
-        )
+        sent = {(item.kind, item.target, item.signum) for item in unreadable_control.signals}
+        assert ("killpg", supervisor_pid, signal.SIGKILL) in sent
         assert _pid_live(payload_pid)
 
-        deadline = time.monotonic() + 10
-        run = None
-        while time.monotonic() < deadline:
-            engine.reconcile()
-            run = db_conn.execute(
-                "SELECT ok, note FROM schedule_runs WHERE schedule_id = %s", (sid,)
-            ).fetchone()
-            if run is not None and run[0] is not None:
-                break
-            time.sleep(0.02)
-        assert run is not None and run[0] is False
+        _wait_for_status(engine, db_conn, sid, "error")
+        run = db_conn.execute(
+            "SELECT ok, note FROM schedule_runs WHERE schedule_id = %s", (sid,)
+        ).fetchone()
+        assert run is not None
+        assert run[0] is False
         assert not _pid_live(payload_pid)
         assert db_conn.execute(
             "SELECT count(*) FROM schedule_runs WHERE schedule_id = %s", (sid,)
         ).fetchone() == (1,)
     finally:
-        if _pid_live(payload_pid):
-            os.kill(payload_pid, signal.SIGKILL)
+        _kill_if_live(payload_pid)
+
+
+def test_a_reused_numeric_group_without_a_live_captured_member_is_never_killed() -> None:
+    leader = OwnedProcess(pid=4100, birth=1.0, starttime=10)
+    member = OwnedProcess(pid=4101, birth=2.0, starttime=11)
+    claim = RunClaim(
+        schedule_id=1,
+        run_id=2,
+        leader=leader,
+        pgid=leader.pid,
+        deadline=datetime.now(UTC) + timedelta(minutes=1),
+        member=member,
+    )
+    identities = _IdentityControl({leader: None, member: None})
+    # meiva:note
+    # A later generation reused the numeric PGID and its own leader already exited; only its
+    # foreign members remain, so the current observations are two absent births plus a group.
+    processes = FakeProcessControl()
+
+    observed = kill_run_group(
+        claim,
+        process_control=processes,
+        identity_control=identities,
+    )
+
+    assert observed.group is GroupLiveness.UNKNOWN
+    assert "without a live captured run member" in observed.detail
+    assert identities.signals == []
+    assert [(sent.target, sent.signum) for sent in processes.signals] == [(leader.pid, 0)]
 
 
 def test_open_run_prevents_overlapping_admission(

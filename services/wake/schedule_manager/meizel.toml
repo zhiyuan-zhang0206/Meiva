@@ -5,11 +5,11 @@ exports = ["blocked_streak.py", "daemon.py", "declarative.py", "engine.py", "hos
 "engine.py" = ["guard_admission.py", "script_outcome.py", "stall_policy.py"]
 "guard_admission.py" = ["script_outcome.py"]
 "declarative.py" = ["run_custody.py"]
-"manager.py" = ["blocked_streak.py", "convergence.py", "declarative.py", "host_restart.py", "launch_events.py", "recovery_gate.py", "revisions.py", "round_progress.py"]
+"manager.py" = ["blocked_streak.py", "convergence.py", "declarative.py", "host_restart.py", "launch_events.py", "recovery_gate.py", "revisions.py", "round_progress.py", "run_custody.py"]
 "requests.py" = ["manager.py"]
 "revisions.py" = ["convergence.py"]
-"runner.py" = ["engine.py", "stall_policy.py"]
-"tests" = ["blocked_streak.py", "convergence.py", "daemon.py", "declarative.py", "engine.py", "guard_admission.py", "manager.py", "recovery_gate.py", "requests.py", "round_progress.py", "runner.py", "script_outcome.py", "stall_policy.py"]
+"runner.py" = ["engine.py", "run_custody.py", "stall_policy.py"]
+"tests" = ["blocked_streak.py", "convergence.py", "daemon.py", "declarative.py", "engine.py", "guard_admission.py", "manager.py", "recovery_gate.py", "requests.py", "round_progress.py", "run_custody.py", "runner.py", "script_outcome.py", "stall_policy.py"]
 
 [external]
 "engine.py" = "runs schedule scripts (the one materialized from the database under $MEIVA_HOME/schedules, and the built-in templates in schedules/); run content, not a dependency"

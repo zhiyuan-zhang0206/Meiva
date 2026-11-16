@@ -59,6 +59,7 @@ from services.wake.schedule_manager.round_progress import (
     report_late_rounds,
     report_stalled,
 )
+from services.wake.schedule_manager.run_custody import SYSTEM_PROCESS_IDENTITY_CONTROL
 
 _log = logging.getLogger(__name__)
 
@@ -119,6 +120,7 @@ class ScheduleManager:
             launch_env=launch_env,
             clock=clock,
             process_control=process_control,
+            identity_control=SYSTEM_PROCESS_IDENTITY_CONTROL,
             secret_env_resolver=secret_env_resolver,
         )
         # meiva:note
