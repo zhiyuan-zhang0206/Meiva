@@ -35,7 +35,8 @@ message and scroll-to-bottom control.
 Open text questions have one answer box and no separate Note. Choice questions
 keep numbered options and one optional Note. `note_suggestion` is a light
 placeholder in the corresponding answer or Note box, not an initial draft.
-Tab or Right Arrow applies it as ordinary foreground text. Enter inserts a line
-break in either field. Activate Submit to send the batch. Modified shortcuts, IME
-composition and existing drafts keep their normal keyboard behavior. This same Tab/Right
+Tab or Right Arrow applies it as ordinary foreground text. Enter in either field activates Submit under the same last-question and pending
+gates, on all pointer types. Shift+Enter inserts a line break. IME confirmation
+(`isComposing`, `Process`, or key code 229) stays with the input method; held Enter
+does not submit repeatedly. A failed submission keeps drafts and its retry key. This same Tab/Right
 acceptance applies to conversation reply suggestions.

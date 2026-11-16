@@ -113,6 +113,7 @@ export function QuestionsForm({
             question={question}
             draft={draft}
             pending={pending}
+            onSubmit={() => void submit()}
             onDraftChange={(nextDraft) => setQuestionDraft(agentId, question.id, nextDraft)}
           />
         </ScrollArea>
@@ -183,11 +184,13 @@ function QuestionRow({
   draft,
   pending,
   onDraftChange,
+  onSubmit,
 }: {
   question: QuestionItem;
   draft: QuestionDraft;
   pending: boolean;
   onDraftChange: (draft: QuestionDraft) => void;
+  onSubmit: () => void;
 }) {
   return (
     <article aria-label={question.title} className="space-y-3 px-4 pb-3 pt-3.5">
@@ -204,6 +207,7 @@ function QuestionRow({
         pending={pending}
         draft={draft}
         onDraftChange={onDraftChange}
+        onSubmit={onSubmit}
       />
     </article>
   );

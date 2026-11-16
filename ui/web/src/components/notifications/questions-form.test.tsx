@@ -116,7 +116,7 @@ describe("QuestionsForm", () => {
     }, expect.any(String)));
   });
 
-  it("keeps Enter in a completed answer as a line break and submits explicitly", async () => {
+  it("submits the completed batch with Enter and preserves Shift+Enter editing", async () => {
     transport.answerQuestions.mockResolvedValue({ kind: "settled" });
     renderForm([q(1), q(2)]);
     fireEvent.change(article(1).getByRole("textbox"), { target: { value: "one" } });
@@ -124,19 +124,75 @@ describe("QuestionsForm", () => {
     const answer = article(2).getByRole<HTMLTextAreaElement>("textbox");
     fireEvent.change(answer, { target: { value: "two" } });
     answer.setSelectionRange(3, 3);
-    pressEnter(answer);
+    pressEnter(answer, { shiftKey: true });
     expect(answer.value).toBe("two\n");
     expect(transport.answerQuestions).not.toHaveBeenCalled();
-    fireEvent.click(submit());
+    pressEnter(answer);
     await waitFor(() => expect(transport.answerQuestions).toHaveBeenCalledTimes(1));
+  });
+
+  it.each(["single_select", "multi_select"] as const)("submits a %s Note with Enter", async (type) => {
+    transport.answerQuestions.mockResolvedValue({ kind: "settled" });
+    renderForm([q(1, { question: choice(type) })]);
+    const note = article(1).getByRole<HTMLTextAreaElement>("textbox");
+    fireEvent.change(note, { target: { value: "my note" } });
+    pressEnter(note);
+    await waitFor(() => expect(transport.answerQuestions).toHaveBeenCalledWith(7, {
+      expected_ids: [1], results: [{ id: 1, answer: { option_ids: [], comment: "my note" } }],
+    }, expect.any(String)));
+  });
+
+  it("leaves IME confirmation and Shift+Enter to the editor and suppresses held Enter", () => {
+    renderForm([q(1)]);
+    const answer = article(1).getByRole<HTMLTextAreaElement>("textbox");
+    for (const init of [{ isComposing: true }, { keyCode: 229 }, { shiftKey: true }]) {
+      expect(fireEvent.keyDown(answer, { key: "Enter", ...init })).toBe(true);
+    }
+    expect(fireEvent.keyDown(answer, { key: "Process" })).toBe(true);
+    expect(fireEvent.keyDown(answer, { key: "Enter", repeat: true })).toBe(false);
+    expect(transport.answerQuestions).not.toHaveBeenCalled();
+  });
+
+  it("does not submit or navigate from an earlier question with Enter", () => {
+    renderForm([q(1), q(2)]);
+    const answer = article(1).getByRole<HTMLTextAreaElement>("textbox");
+    fireEvent.change(answer, { target: { value: "one" } });
+    pressEnter(answer);
+    expect(answer.value).toBe("one");
+    expect(screen.getByText("1 / 2")).toBeTruthy();
+    expect(submit().disabled).toBe(true);
+    expect(transport.answerQuestions).not.toHaveBeenCalled();
+  });
+
+  it.each(["text", "single_select"] as const)("accepts %s suggestions only with Tab or Right Arrow", async (type) => {
+    transport.answerQuestions.mockResolvedValue({ kind: "settled" });
+    const question = type === "text" ? { type } as const : choice(type);
+    renderForm([q(1, { question: { ...question, note_suggestion: "suggested" } })]);
+    const answer = article(1).getByRole<HTMLTextAreaElement>("textbox");
+    expect(answer.value).toBe("");
+    fireEvent.keyDown(answer, { key: "Tab", shiftKey: true });
+    expect(answer.value).toBe("");
+    fireEvent.keyDown(answer, { key: "Tab" });
+    expect(answer.value).toBe("suggested");
+    expect(transport.answerQuestions).not.toHaveBeenCalled();
+    fireEvent.change(answer, { target: { value: "" } });
+    fireEvent.keyDown(answer, { key: "ArrowRight" });
+    expect(answer.value).toBe("suggested");
+    fireEvent.change(answer, { target: { value: "" } });
+    pressEnter(answer);
+    await waitFor(() => expect(transport.answerQuestions).toHaveBeenCalledWith(7, {
+      expected_ids: [1], results: [{ id: 1 }],
+    }, expect.any(String)));
   });
 
   it("disables the controls only while a submission is in flight", async () => {
     transport.answerQuestions.mockImplementation(() => new Promise<never>(() => undefined));
     renderForm([q(1)]);
     fireEvent.change(article(1).getByRole("textbox"), { target: { value: "x" } });
-    fireEvent.click(submit());
-    await waitFor(() => expect(article(1).getByRole<HTMLTextAreaElement>("textbox").disabled).toBe(true));
+    const answer = article(1).getByRole<HTMLTextAreaElement>("textbox");
+    pressEnter(answer);
+    fireEvent.keyDown(answer, { key: "Enter" });
+    await waitFor(() => expect(answer.disabled).toBe(true));
     fireEvent.click(submit());
     expect(transport.answerQuestions).toHaveBeenCalledTimes(1);
   });
@@ -145,10 +201,10 @@ describe("QuestionsForm", () => {
     transport.answerQuestions.mockRejectedValueOnce(new TypeError("response lost")).mockResolvedValue({ kind: "settled" });
     renderForm([q(1)]);
     fireEvent.change(article(1).getByRole("textbox"), { target: { value: "x" } });
-    fireEvent.click(submit());
+    pressEnter(article(1).getByRole<HTMLTextAreaElement>("textbox"));
     expect((await screen.findByRole("alert")).textContent).toContain("Submit failed");
     expect(article(1).getByRole<HTMLTextAreaElement>("textbox").value).toBe("x");
-    fireEvent.click(submit());
+    pressEnter(article(1).getByRole<HTMLTextAreaElement>("textbox"));
     await waitFor(() => expect(transport.answerQuestions).toHaveBeenCalledTimes(2));
     expect(transport.answerQuestions.mock.calls[1]).toEqual(transport.answerQuestions.mock.calls[0]);
   });

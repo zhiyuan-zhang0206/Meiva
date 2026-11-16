@@ -18,8 +18,8 @@ export function answerFromDraft(question: QuestionSpec, draft: QuestionDraft): Q
   }
   // meiva:note
   // Choosing nothing is allowed in both kinds: a comment alone is a whole answer
-  // (user ruling 2026-10-21). Submitting still needs one of the two, which is
-  // what the disabled button expresses.
+  // (user ruling 2026-10-21). A blank draft becomes a skipped result when the
+  // shared Submit action resolves the batch.
   // meiva:link meiva_builtins/plugins/meiva_fleet/docs/questions.md
   const count = draft.optionIds.length;
   if (count > 1 && question.type === "single_select") return null;
@@ -32,18 +32,20 @@ export function answerFromDraft(question: QuestionSpec, draft: QuestionDraft): Q
 
 // meiva:note
 // Numbered choices share their frozen order with server replies and history.
-// Draft fields stay editable until the user activates the shared Submit button.
+// Enter in an answer or Note activates the shared Submit action; Shift+Enter edits.
 // meiva:link ui/web/src/docs/frontend-state/shared-context/questions.md
 export function QuestionForm({
   question,
   pending,
   draft,
   onDraftChange,
+  onSubmit,
 }: {
   question: QuestionSpec;
   pending: boolean;
   draft: QuestionDraft;
   onDraftChange: (draft: QuestionDraft) => void;
+  onSubmit: () => void;
 }) {
   const t = useTranslations("questionDetail");
   const fieldId = useId();
@@ -69,13 +71,21 @@ export function QuestionForm({
     }
   };
 
+  const handleKeyDown = (field: "text" | "comment", event: KeyboardEvent<HTMLTextAreaElement>) => {
+    applySuggestion(field, event);
+    if (event.key === "Enter" && !event.shiftKey && !isImeComposition(event)) {
+      event.preventDefault();
+      if (!pending && !event.repeat) onSubmit();
+    }
+  };
+
   if (question.type === "text") {
     return (
       <Textarea
         id={fieldId} aria-label={t("openQuestion")} rows={1}
         focusVisible={false} value={draft.text}
         onChange={(e) => onDraftChange({ ...draft, text: e.target.value })}
-        onKeyDown={(event) => applySuggestion("text", event)}
+        onKeyDown={(event) => handleKeyDown("text", event)}
         aria-description={question.note_suggestion && !draft.text ? t("suggestionKeys") : undefined}
         placeholder={question.note_suggestion ?? t("openPlaceholder")}
         disabled={pending} className={inputClass}
@@ -116,7 +126,7 @@ export function QuestionForm({
       <Textarea
         id={`${fieldId}-comment`} aria-label={t("comment")} rows={1} focusVisible={false}
         value={draft.comment} onChange={(e) => onDraftChange({ ...draft, comment: e.target.value })}
-        onKeyDown={(event) => applySuggestion("comment", event)}
+        onKeyDown={(event) => handleKeyDown("comment", event)}
         disabled={pending}
         placeholder={question.note_suggestion ?? t("comment")}
         aria-description={question.note_suggestion && !draft.comment ? t("suggestionKeys") : undefined}
