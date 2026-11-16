@@ -4,16 +4,18 @@
 
 from __future__ import annotations
 
-import contextlib
 import json
+import math
 import os
 import random
 import signal
 import subprocess
 import sys
 import threading
+import time
 from collections.abc import Callable, Sequence
 from pathlib import Path
+from typing import Never
 
 from loguru import logger
 
@@ -54,9 +56,25 @@ def _write_single_round_outcome(
     write_text_atomic(path, json.dumps(payload, sort_keys=True) + "\n", sync_file=False)
 
 
-def _kill_process_group(pid: int, signum: int) -> None:
-    with contextlib.suppress(ProcessLookupError):
-        os.killpg(pid, signum)
+def _hard_kill_own_group(exit_code: int) -> Never:
+    try:
+        os.killpg(os.getpgrp(), signal.SIGKILL)
+    finally:
+        # meiva:note
+        # SIGKILL normally wins before this executes. The fallback preserves the bound if the
+        # group signal was refused after this process lost its session custody.
+        os._exit(exit_code)
+
+
+def _await_launch_gate(gate_fd: int) -> bool:
+    try:
+        while True:
+            try:
+                return os.read(gate_fd, 1) == b"\x01"
+            except InterruptedError:
+                continue
+    finally:
+        os.close(gate_fd)
 
 
 # meiva:note
@@ -66,61 +84,61 @@ def run_single_round(
     schedule_id: int,
     run_id: int,
     timeout_seconds: int,
+    deadline_epoch: float,
     outcome_path: Path,
+    gate_fd: int,
     *,
     home: Path,
 ) -> int:
-    del run_id
-    _ = write_claim(home, schedule_id, pid=os.getpid())
+    del schedule_id, run_id, home
+    if not _await_launch_gate(gate_fd):
+        return 125
     script_path = Path.cwd() / "run.py"
-    child = subprocess.Popen(  # noqa: S603
-        [
-            sys.executable,
-            "-m",
-            "services.wake.schedule_manager.runner",
-            "--payload",
-            str(script_path),
-        ],
-        cwd=Path.cwd(),
-        env=os.environ.copy(),
-        stdin=subprocess.DEVNULL,
-        start_new_session=True,
-    )
 
     def interrupted(signum: int, _frame: object) -> None:
-        _kill_process_group(child.pid, signal.SIGTERM)
         try:
-            child.wait(timeout=2)
-        except subprocess.TimeoutExpired:
-            _kill_process_group(child.pid, signal.SIGKILL)
-            child.wait()
-        _write_single_round_outcome(
-            outcome_path,
-            ok=False,
-            returncode=128 + signum,
-            timed_out=False,
-            note="cancelled",
-        )
-        clear_claim(home, schedule_id)
-        raise SystemExit(128 + signum)
+            _write_single_round_outcome(
+                outcome_path,
+                ok=False,
+                returncode=128 + signum,
+                timed_out=False,
+                note="cancelled",
+            )
+        finally:
+            _hard_kill_own_group(128 + signum)
 
     previous_term = signal.signal(signal.SIGTERM, interrupted)
     previous_int = signal.signal(signal.SIGINT, interrupted)
     try:
+        # meiva:note
+        # The payload stays in this supervisor's dedicated process group. If the supervisor is
+        # SIGKILLed, its durable run claim still owns every surviving payload process by PGID.
+        child = subprocess.Popen(  # noqa: S603
+            [
+                sys.executable,
+                "-m",
+                "services.wake.schedule_manager.runner",
+                "--payload",
+                str(script_path),
+            ],
+            cwd=Path.cwd(),
+            env=os.environ.copy(),
+            stdin=subprocess.DEVNULL,
+        )
         try:
-            returncode = child.wait(timeout=timeout_seconds)
+            returncode = child.wait(timeout=max(0.0, deadline_epoch - time.time()))
         except subprocess.TimeoutExpired:
-            _kill_process_group(child.pid, signal.SIGKILL)
-            child.wait()
             note = f"timed out after {timeout_seconds}s"
-            _write_single_round_outcome(
-                outcome_path,
-                ok=False,
-                returncode=124,
-                timed_out=True,
-                note=note,
-            )
-            return 124
+            try:
+                _write_single_round_outcome(
+                    outcome_path,
+                    ok=False,
+                    returncode=124,
+                    timed_out=True,
+                    note=note,
+                )
+            finally:
+                _hard_kill_own_group(124)
         _write_single_round_outcome(
             outcome_path,
             ok=returncode == 0,
@@ -130,9 +148,8 @@ def run_single_round(
         )
         return returncode
     finally:
-        signal.signal(signal.SIGTERM, previous_term)
-        signal.signal(signal.SIGINT, previous_int)
-        clear_claim(home, schedule_id)
+        _ = signal.signal(signal.SIGTERM, previous_term)
+        _ = signal.signal(signal.SIGINT, previous_int)
 
 
 def _bind_schedule_actor(
@@ -250,6 +267,26 @@ def run(schedule_id: int, revision: int | None = None, *, config: ConfigBoot | N
         clear_claim(home, schedule_id)
 
 
+def _single_round_arguments(argv: Sequence[str]) -> tuple[int, int, int, float, Path, int]:
+    if len(argv) != 7:
+        raise SystemExit(2)
+    schedule_id = int(argv[1])
+    run_id = int(argv[2])
+    timeout_seconds = int(argv[3])
+    deadline_epoch = float(argv[4])
+    gate_fd = int(argv[6])
+    if (
+        schedule_id < 1
+        or run_id < 1
+        or timeout_seconds < 1
+        or not math.isfinite(deadline_epoch)
+        or deadline_epoch <= 0
+        or gate_fd < 0
+    ):
+        raise SystemExit(2)
+    return schedule_id, run_id, timeout_seconds, deadline_epoch, Path(argv[5]), gate_fd
+
+
 def main(argv: Sequence[str]) -> None:
     boot = ConfigBoot()
     boot.boot()
@@ -260,18 +297,18 @@ def main(argv: Sequence[str]) -> None:
     if len(argv) == 2 and argv[0] == "--payload":
         engine.run_single_round_payload(Path(argv[1]))
         raise SystemExit(0)
-    if len(argv) == 5 and argv[0] == "--single-round":
-        schedule_id = int(argv[1])
-        run_id = int(argv[2])
-        timeout_seconds = int(argv[3])
-        if schedule_id < 1 or run_id < 1 or timeout_seconds < 1:
-            raise SystemExit(2)
+    if len(argv) >= 1 and argv[0] == "--single-round":
+        schedule_id, run_id, timeout_seconds, deadline_epoch, outcome_path, gate_fd = (
+            _single_round_arguments(argv)
+        )
         raise SystemExit(
             run_single_round(
                 schedule_id,
                 run_id,
                 timeout_seconds,
-                Path(argv[4]),
+                deadline_epoch,
+                outcome_path,
+                gate_fd,
                 home=meiva_home(),
             )
         )

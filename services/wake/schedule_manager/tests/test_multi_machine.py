@@ -11,6 +11,7 @@ from base.clock.tests.seeded_rng import seeded_rng
 from base.deploy.lifecycle import start_serving
 from base.deploy.lifecycle.tests.serving_root import observe
 from base.deploy.lifecycle.tests.serving_root import serving_root as serving_root
+from base.native_process.process_control import SYSTEM_PROCESS_CONTROL
 from base.paths.tests.homes import unit_home as unit_home
 from base.sessions.protocol import SessionBackend
 from services.wake.schedule_manager import requests
@@ -111,6 +112,7 @@ def test_independent_managers_partition_schedules_and_requests_by_machine(
             policy=POLICY,
             launch_env={},
             machine_name="machine-a",
+            process_control=SYSTEM_PROCESS_CONTROL,
             observe=observe,
             clock=Clock.from_settings(),
         )
@@ -122,6 +124,7 @@ def test_independent_managers_partition_schedules_and_requests_by_machine(
             policy=POLICY,
             launch_env={},
             machine_name="machine-b",
+            process_control=SYSTEM_PROCESS_CONTROL,
             observe=observe,
             clock=Clock.from_settings(),
         )
@@ -200,6 +203,7 @@ def test_colocated_split_unit_tie_breaker(
             policy=POLICY,
             launch_env={},
             machine_name="shared-host",
+            process_control=SYSTEM_PROCESS_CONTROL,
             observe=observe,
             clock=Clock.from_settings(),
         )
@@ -211,6 +215,7 @@ def test_colocated_split_unit_tie_breaker(
             policy=POLICY,
             launch_env={},
             machine_name="shared-host",
+            process_control=SYSTEM_PROCESS_CONTROL,
             observe=observe,
             clock=Clock.from_settings(),
         )

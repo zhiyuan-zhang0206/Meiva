@@ -50,6 +50,7 @@ from base.host.net.auth import bearer_header
 from base.host.net.http_dial import get as dial_get
 from base.native_process.code_version import CodeVersion
 from base.native_process.loaded_commit import LoadedCommit
+from base.native_process.process_control import SYSTEM_PROCESS_CONTROL
 from base.paths import meiva_home, prod_service_checkout_error
 from base.sessions.backend import get_shell_backend
 from base.sessions.env_forwarding import forward_env_dict
@@ -257,6 +258,7 @@ async def run(
             policy=manager_policy(process_config),
             launch_env=forward_env_dict(process_config.process_environment()),
             machine_name=machine.name(),
+            process_control=SYSTEM_PROCESS_CONTROL,
             secret_env_resolver=_build_secret_env_resolver(process_config, runtime),
             clock=Clock(clock_config_from_boot(process_config), timers=SYSTEM_TIMERS),
         )

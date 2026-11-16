@@ -1,11 +1,15 @@
 from __future__ import annotations
 
+import json
 import os
+import signal
 import time
 from collections.abc import Iterator
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
+from typing import TypeGuard
 
+import psutil
 import psycopg
 import pytest
 from psycopg_pool import ConnectionPool
@@ -13,6 +17,9 @@ from psycopg_pool import ConnectionPool
 from base.clock.tests.fakes import clock_at
 from base.config import settings
 from base.db import create_agent
+from base.host.boundary.untyped import object_of
+from base.native_process.process_control import SYSTEM_PROCESS_CONTROL, ProcessControl
+from base.native_process.tests.fake_process_control import FakeProcessControl
 from services.wake.schedule_manager.declarative import (
     DeclarativeScheduleEngine,
     schedule_directory,
@@ -81,7 +88,11 @@ def _schedule(
 
 
 def _engine(
-    pool: ConnectionPool[psycopg.Connection], unit_home: Path, now: datetime
+    pool: ConnectionPool[psycopg.Connection],
+    unit_home: Path,
+    now: datetime,
+    *,
+    process_control: ProcessControl = SYSTEM_PROCESS_CONTROL,
 ) -> DeclarativeScheduleEngine:
     launch_env = dict(os.environ)
     launch_env["PYTHONPATH"] = str(REPO_ROOT)
@@ -92,6 +103,7 @@ def _engine(
         machine_name="gateway",
         launch_env=launch_env,
         clock=clock_at(now),
+        process_control=process_control,
         secret_env_resolver=None,
     )
 
@@ -113,6 +125,50 @@ def _wait_for_status(
             return row
         time.sleep(0.02)
     raise AssertionError(f"schedule {schedule_id} did not reach {wanted}")
+
+
+def _wait_for_file(path: Path) -> None:
+    deadline = time.monotonic() + 10
+    while time.monotonic() < deadline:
+        if path.exists():
+            return
+        time.sleep(0.02)
+    raise AssertionError(f"{path} was not created")
+
+
+def _pid_live(pid: int) -> bool:
+    try:
+        process = psutil.Process(pid)
+        return process.is_running() and process.status() not in (
+            psutil.STATUS_DEAD,
+            psutil.STATUS_ZOMBIE,
+        )
+    except psutil.Error:
+        return False
+
+
+def _wait_for_pid_exit(pid: int) -> None:
+    deadline = time.monotonic() + 10
+    while time.monotonic() < deadline:
+        if not _pid_live(pid):
+            return
+        time.sleep(0.02)
+    raise AssertionError(f"process {pid} did not exit")
+
+
+def _is_object_dict(value: object) -> TypeGuard[dict[str, object]]:
+    return isinstance(value, dict)
+
+
+def _read_process_ids(path: Path) -> tuple[int, int]:
+    raw = object_of(json.loads, path.read_text(encoding="utf-8"))
+    if not _is_object_dict(raw):
+        raise AssertionError(f"{path} did not contain a process object")
+    payload = raw.get("payload")
+    supervisor = raw.get("supervisor")
+    if type(payload) is not int or type(supervisor) is not int:
+        raise AssertionError(f"{path} did not contain integer process ids")
+    return payload, supervisor
 
 
 def test_at_runs_once_in_owner_workspace_and_completes(
@@ -254,6 +310,74 @@ def test_timeout_kills_payload_and_records_error(
     assert run is not None
     assert run[0] is False
     assert "timed out after 1s" in run[1]
+
+
+def test_supervisor_sigkill_keeps_run_open_until_its_payload_group_is_gone(
+    db_conn: psycopg.Connection,
+    pool: ConnectionPool[psycopg.Connection],
+    unit_home: Path,
+) -> None:
+    now = datetime.now(UTC)
+    sid = _schedule(
+        db_conn,
+        name="supervisor-killed",
+        now=now,
+        trigger_kind="every",
+        timeout_seconds=20,
+        script=(
+            "import json, os, time\n"
+            "from pathlib import Path\n"
+            "Path('processes.json').write_text(json.dumps("
+            "{'payload': os.getpid(), 'supervisor': os.getppid()}))\n"
+            "time.sleep(30)\n"
+        ),
+    )
+    engine = _engine(pool, unit_home, now)
+    engine.reconcile()
+    work_dir = schedule_directory(unit_home, None, sid)
+    marker = work_dir / "processes.json"
+    _wait_for_file(marker)
+    payload_pid, supervisor_pid = _read_process_ids(marker)
+    assert payload_pid != supervisor_pid
+
+    os.kill(supervisor_pid, signal.SIGKILL)
+    try:
+        _wait_for_pid_exit(supervisor_pid)
+        unreadable_control = FakeProcessControl(forward_to=SYSTEM_PROCESS_CONTROL)
+        unreadable_control.refuse(supervisor_pid, PermissionError("process table denied"))
+        _engine(
+            pool,
+            unit_home,
+            now,
+            process_control=unreadable_control,
+        ).reconcile()
+        assert db_conn.execute(
+            "SELECT ok FROM schedule_runs WHERE schedule_id = %s", (sid,)
+        ).fetchone() == (None,)
+        assert any(
+            sent.kind == "killpg" and sent.target == supervisor_pid and sent.signum == 0
+            for sent in unreadable_control.signals
+        )
+        assert _pid_live(payload_pid)
+
+        deadline = time.monotonic() + 10
+        run = None
+        while time.monotonic() < deadline:
+            engine.reconcile()
+            run = db_conn.execute(
+                "SELECT ok, note FROM schedule_runs WHERE schedule_id = %s", (sid,)
+            ).fetchone()
+            if run is not None and run[0] is not None:
+                break
+            time.sleep(0.02)
+        assert run is not None and run[0] is False
+        assert not _pid_live(payload_pid)
+        assert db_conn.execute(
+            "SELECT count(*) FROM schedule_runs WHERE schedule_id = %s", (sid,)
+        ).fetchone() == (1,)
+    finally:
+        if _pid_live(payload_pid):
+            os.kill(payload_pid, signal.SIGKILL)
 
 
 def test_open_run_prevents_overlapping_admission(

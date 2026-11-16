@@ -52,3 +52,19 @@ workspace locality, and attribution; it does not grant additional authority.
 
 Later migration phases convert the compatibility `daemon` rows and retire their resident
 session path after each installed payload has a run-to-completion equivalent.
+
+## Update: restart-safe process custody
+
+The earlier statement that an in-flight process stays bound to its launching manager is
+superseded. A run stays bound to its machine and workspace, while its OS custody survives a
+manager restart. Before `run.py` can execute, the manager records a run-specific claim with the
+dedicated process-group leader's native birth, PGID, and deadline, then releases a one-byte
+launch gate. Loss of the manager before that release closes the gate without starting the
+payload; loss after release leaves enough durable evidence for the replacement manager to adopt
+or stop the exact group.
+
+The payload shares the supervisor's dedicated process group. A supervisor killed without an
+outcome therefore does not release single-flight: reconciliation first kills any surviving
+group members and proves the group empty, then settles the run. Timeout and cancellation use
+the same order. An unreadable process identity or group probe keeps the run open because an
+unknown ownership result cannot certify absence.

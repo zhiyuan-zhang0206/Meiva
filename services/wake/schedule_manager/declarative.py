@@ -6,7 +6,6 @@ from __future__ import annotations
 import json
 import logging
 import os
-import signal
 import subprocess
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
@@ -18,13 +17,25 @@ from psycopg import Connection
 from psycopg_pool import ConnectionPool
 
 from base.clock import Clock
-from base.daemon.schedules.claim import RunnerLiveness, read_runner_liveness
 from base.daemon.schedules.watcher import next_fire
 from base.db.rows import query_all, query_one
 from base.db.transaction import write_transaction
 from base.deploy.schedule_timing import SCHEDULE_LAUNCH_GRACE_S
 from base.host.atomic_io import write_text_atomic
 from base.host.boundary.untyped import object_of
+from base.native_process.process_control import ProcessControl
+from services.wake.schedule_manager.run_custody import (
+    ClaimReadState,
+    GroupLiveness,
+    LeaderLiveness,
+    RunClaim,
+    capture_run_leader,
+    clear_run_claim,
+    kill_run_group,
+    observe_run_group,
+    read_run_claim,
+    write_run_claim,
+)
 
 _log = logging.getLogger(__name__)
 
@@ -123,6 +134,11 @@ def _outcome_path(work_dir: Path, run_id: int) -> Path:
     return work_dir / f"{_OUTCOME_PREFIX}{run_id}.json"
 
 
+def _release_launch_gate(write_fd: int) -> None:
+    if os.write(write_fd, b"\x01") != 1:
+        raise RuntimeError("single-round launch gate accepted no byte")
+
+
 def _is_int(value: object) -> TypeGuard[int]:
     return isinstance(value, int) and not isinstance(value, bool)
 
@@ -143,6 +159,7 @@ class DeclarativeScheduleEngine:
         machine_name: str,
         launch_env: Mapping[str, str],
         clock: Clock,
+        process_control: ProcessControl,
         secret_env_resolver: Callable[[int, tuple[str, ...]], Mapping[str, str]] | None,
     ) -> None:
         self._pool = pool
@@ -151,6 +168,7 @@ class DeclarativeScheduleEngine:
         self._machine_name = machine_name
         self._launch_env = launch_env
         self._clock = clock
+        self._process_control = process_control
         self._secret_env_resolver = secret_env_resolver
         self._children: list[subprocess.Popen[bytes]] = []
 
@@ -183,45 +201,118 @@ class DeclarativeScheduleEngine:
         work_dir = schedule_directory(self._home, run.owner_agent_id, run.schedule_id)
         outcome_path = _outcome_path(work_dir, run.run_id)
         outcome = _Outcome.read(outcome_path)
-        if outcome is not None:
-            self._settle(run, outcome, now)
-            outcome_path.unlink(missing_ok=True)
+        claim_reading = read_run_claim(work_dir, run.schedule_id, run.run_id)
+        if claim_reading.state is not ClaimReadState.PRESENT:
+            self._observe_claimless_run(
+                run,
+                outcome,
+                claim_reading.state,
+                claim_reading.detail,
+                now,
+            )
             return
+        claim = claim_reading.claim
+        if claim is None:
+            raise RuntimeError("present run claim has no parsed value")
+        self._observe_claimed_run(run, claim, outcome, outcome_path, work_dir, now)
 
-        reading = read_runner_liveness(self._home, run.schedule_id)
-        if not run.enabled or run.status == "cancelled":
-            if reading.liveness is RunnerLiveness.ALIVE and reading.claim is not None:
-                try:
-                    os.killpg(reading.claim.pid, signal.SIGTERM)
-                except ProcessLookupError:
-                    _log.debug("schedule %s runner already exited", run.schedule_id)
-                except OSError as exc:
+    def _observe_claimless_run(
+        self,
+        run: _OpenRunRow,
+        outcome: _Outcome | None,
+        claim_state: ClaimReadState,
+        detail: str,
+        now: datetime,
+    ) -> None:
+        if claim_state is ClaimReadState.UNREADABLE:
+            _log.warning(
+                "schedule %s run %s custody is unprovable: %s",
+                run.schedule_id,
+                run.run_id,
+                detail,
+            )
+            return
+        if (now - run.ran_at).total_seconds() <= SCHEDULE_LAUNCH_GRACE_S:
+            return
+        self._settle_claimless_run(run, outcome, now)
+        work_dir = schedule_directory(self._home, run.owner_agent_id, run.schedule_id)
+        outcome_path = _outcome_path(work_dir, run.run_id)
+        self._remove_run_files(work_dir, run.run_id, outcome_path)
+
+    def _observe_claimed_run(
+        self,
+        run: _OpenRunRow,
+        claim: RunClaim,
+        outcome: _Outcome | None,
+        outcome_path: Path,
+        work_dir: Path,
+        now: datetime,
+    ) -> None:
+        observed = observe_run_group(claim, process_control=self._process_control)
+        if observed.group is GroupLiveness.UNKNOWN:
+            _log.warning(
+                "schedule %s run %s process group is unprovable: %s",
+                run.schedule_id,
+                run.run_id,
+                observed.detail,
+            )
+            return
+        cancelled = not run.enabled or run.status == "cancelled"
+        timed_out = outcome is None and now >= claim.deadline
+        leader_lost = observed.leader is not LeaderLiveness.ALIVE
+        if observed.group is GroupLiveness.PRESENT:
+            if cancelled or timed_out or leader_lost:
+                killed = kill_run_group(claim, process_control=self._process_control)
+                if killed.group is GroupLiveness.UNKNOWN:
                     _log.warning(
-                        "schedule %s could not stop cancelled run %s: %s",
+                        "schedule %s run %s process group kill is unprovable: %s",
                         run.schedule_id,
                         run.run_id,
-                        exc,
+                        killed.detail,
                     )
-                return
+            return
+        if cancelled:
             self._close_cancelled_run(run.run_id)
-            return
-        if reading.liveness is RunnerLiveness.ALIVE:
-            return
-        if (
-            reading.liveness is RunnerLiveness.UNKNOWN
-            and (now - run.ran_at).total_seconds() <= SCHEDULE_LAUNCH_GRACE_S
-        ):
-            return
-        self._settle(
-            run,
-            _Outcome(
-                ok=False,
-                returncode=1,
-                timed_out=False,
-                note="single-round process ended without an outcome",
-            ),
-            now,
+        elif outcome is not None:
+            self._settle(run, outcome, now)
+        elif now >= claim.deadline:
+            self._settle(run, self._timeout_outcome(run.timeout_seconds), now)
+        else:
+            self._settle(run, self._missing_outcome(), now)
+        self._remove_run_files(work_dir, run.run_id, outcome_path)
+
+    def _settle_claimless_run(
+        self, run: _OpenRunRow, outcome: _Outcome | None, finished_at: datetime
+    ) -> None:
+        if not run.enabled or run.status == "cancelled":
+            self._close_cancelled_run(run.run_id)
+        elif outcome is not None:
+            self._settle(run, outcome, finished_at)
+        else:
+            self._settle(run, self._missing_outcome(), finished_at)
+
+    @staticmethod
+    def _missing_outcome() -> _Outcome:
+        return _Outcome(
+            ok=False,
+            returncode=1,
+            timed_out=False,
+            note="single-round process ended without an outcome",
         )
+
+    @staticmethod
+    def _timeout_outcome(timeout_seconds: int) -> _Outcome:
+        return _Outcome(
+            ok=False,
+            returncode=124,
+            timed_out=True,
+            note=f"timed out after {timeout_seconds}s",
+        )
+
+    @staticmethod
+    def _remove_run_files(work_dir: Path, run_id: int, outcome_path: Path) -> None:
+        outcome_path.unlink(missing_ok=True)
+        clear_run_claim(work_dir, run_id)
 
     def _claim_due(self, now: datetime) -> _ClaimedFire | None:
         with write_transaction(self._pool) as conn:
@@ -271,6 +362,8 @@ class DeclarativeScheduleEngine:
             env["MEIVA_AGENT_ID"] = str(schedule.owner_agent_id)
         self._merge_secrets(env, schedule.id, tuple(schedule.secret_env_vars))
 
+        deadline = now + timedelta(seconds=schedule.timeout_seconds)
+        read_fd, write_fd = os.pipe()
         command = [
             str(self._repo_root / ".venv" / "bin" / "python"),
             "-m",
@@ -279,12 +372,17 @@ class DeclarativeScheduleEngine:
             str(schedule.id),
             str(claimed.run_id),
             str(schedule.timeout_seconds),
+            str(deadline.timestamp()),
             str(outcome_path),
+            str(read_fd),
         ]
+        child: subprocess.Popen[bytes] | None = None
+        released = False
         try:
             with (work_dir / "latest.log").open("wb") as output:
                 # meiva:note
-                # The fixed repository module receives only IDs and paths materialized by this engine.
+                # The child cannot execute run.py until this parent durably records its native
+                # process-group custody and releases the one-byte launch gate.
                 child = subprocess.Popen(  # noqa: S603
                     command,
                     cwd=work_dir,
@@ -293,22 +391,44 @@ class DeclarativeScheduleEngine:
                     stdout=output,
                     stderr=subprocess.STDOUT,
                     start_new_session=True,
+                    pass_fds=(read_fd,),
                 )
+            os.close(read_fd)
+            read_fd = -1
+            leader = capture_run_leader(child.pid, process_control=self._process_control)
+            _ = write_run_claim(
+                work_dir,
+                RunClaim(schedule.id, claimed.run_id, leader, leader.pid, deadline),
+            )
+            _release_launch_gate(write_fd)
+            released = True
         except Exception as exc:
             _log.exception("schedule %s single-round launch failed", schedule.id)
-            open_run = self._open_run(claimed.run_id)
-            if open_run is not None:
-                self._settle(
-                    open_run,
-                    _Outcome(
-                        ok=False,
-                        returncode=1,
-                        timed_out=False,
-                        note=f"launch failed: {type(exc).__name__}: {exc}",
-                    ),
-                    now,
+            stopped = child is None or self._stop_gated_child(child)
+            failure = _Outcome(
+                ok=False,
+                returncode=1,
+                timed_out=False,
+                note=f"launch failed: {type(exc).__name__}: {exc}",
+            )
+            if stopped:
+                clear_run_claim(work_dir, claimed.run_id)
+                open_run = self._open_run(claimed.run_id)
+                if open_run is not None:
+                    self._settle(open_run, failure, now)
+            else:
+                write_text_atomic(
+                    outcome_path,
+                    json.dumps(failure.__dict__, sort_keys=True) + "\n",
+                    sync_file=False,
                 )
             return
+        finally:
+            if read_fd >= 0:
+                os.close(read_fd)
+            os.close(write_fd)
+        if not released:
+            raise RuntimeError("single-round launch returned without releasing its child")
         self._children.append(child)
         _log.info(
             "schedule %s launched run %s without PTY (pid=%s)",
@@ -316,6 +436,17 @@ class DeclarativeScheduleEngine:
             claimed.run_id,
             child.pid,
         )
+
+    @staticmethod
+    def _stop_gated_child(child: subprocess.Popen[bytes]) -> bool:
+        try:
+            _ = child.kill()
+            _ = child.wait(timeout=2)
+        except ProcessLookupError:
+            return child.poll() is not None
+        except subprocess.TimeoutExpired:
+            return False
+        return True
 
     def _merge_secrets(self, env: dict[str, str], schedule_id: int, names: tuple[str, ...]) -> None:
         if not names or self._secret_env_resolver is None:

@@ -23,6 +23,7 @@ from base.daemon.schedules.claim import RunnerLiveness
 from base.daemon.schedules.heartbeat import clear_beat
 from base.db.transaction import write_transaction
 from base.deploy.lifecycle import start_serving
+from base.native_process.process_control import ProcessControl
 from base.sessions.protocol import SessionBackend
 from services.wake.schedule_manager import host_restart, revisions
 from services.wake.schedule_manager.blocked_streak import (
@@ -93,6 +94,7 @@ class ScheduleManager:
         policy: ManagerPolicy,
         launch_env: Mapping[str, str],
         machine_name: str,
+        process_control: ProcessControl,
         secret_env_resolver: Callable[[int, tuple[str, ...]], Mapping[str, str]] | None = None,
         observe: Callable[[Path], start_serving.RootBirth] = start_serving.observe_root,
         clock: Clock,
@@ -116,6 +118,7 @@ class ScheduleManager:
             machine_name=machine_name,
             launch_env=launch_env,
             clock=clock,
+            process_control=process_control,
             secret_env_resolver=secret_env_resolver,
         )
         # meiva:note

@@ -15,6 +15,7 @@ from psycopg_pool import ConnectionPool
 
 from base.clock import Clock
 from base.deploy.lifecycle.tests.serving_root import observe
+from base.native_process.process_control import SYSTEM_PROCESS_CONTROL
 from base.paths import meiva_home
 from base.sessions.protocol import SessionBackend
 from services.wake.schedule_manager.declarative import ManagerPolicy
@@ -58,6 +59,7 @@ def schedule_manager(
         policy=policy,
         launch_env=launch_env,
         machine_name=machine_name,
+        process_control=SYSTEM_PROCESS_CONTROL,
         secret_env_resolver=secret_env_resolver,
         observe=observe,
         clock=wall_clock(),
