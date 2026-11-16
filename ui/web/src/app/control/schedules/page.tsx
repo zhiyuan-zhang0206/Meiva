@@ -1,13 +1,12 @@
 "use client";
 
 // meiva:note
-// /control/schedules — schedule management: list, status, logs, run history,
-// create (natural-language via a writer agent, or a raw script), edit, and
-// start/stop/restart/delete.
+// /control/schedules — declarative schedule management: trigger timing, scope,
+// status, logs, run history, create/edit, and lifecycle controls.
 //
 // Backed by /api/schedules (gateway/schedules/router.py). The gateway's
-// ScheduleManager supervises one session per enabled schedule; this page is
-// the management surface.
+// ScheduleManager launches one non-PTY process per declarative fire while the
+// daemon compatibility bridge keeps its older session controls.
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
@@ -44,10 +43,21 @@ import { useApi } from "@/lib/transport/transport-context";
 import { isImeComposition } from "@/lib/input/enter-to-send";
 
 const SCHEDULES_QUERY_KEY = ["schedules"] as const;
+type ScheduleFilter = "all" | "system" | "agent" | "completed";
+
+function scheduleFilter(value: string): ScheduleFilter | null {
+  if (value === "all" || value === "system" || value === "agent" || value === "completed") {
+    return value;
+  }
+  return null;
+}
 
 const EMPTY_FORM: ScheduleCreate = {
   name: "",
+  trigger_kind: "every",
   script: "",
+  interval_seconds: 3600,
+  timeout_seconds: 600,
   command: "python schedule.py",
   description: null,
   enabled: true,
@@ -142,6 +152,7 @@ export function SchedulesPageView({ navigate }: SchedulesPageViewProps) {
   });
 
   const [expandedId, setExpandedId] = useState<number | null>(null);
+  const [filter, setFilter] = useState<ScheduleFilter>("all");
 
   if (isLoading) {
     return (
@@ -163,6 +174,12 @@ export function SchedulesPageView({ navigate }: SchedulesPageViewProps) {
   }
 
   const list = schedules ?? [];
+  const shown = list.filter((schedule) => {
+    if (filter === "system") return schedule.owner_agent_id == null;
+    if (filter === "agent") return schedule.owner_agent_id != null;
+    if (filter === "completed") return schedule.status === "completed";
+    return true;
+  });
 
   // meiva:note
   // The body warms the syntax-highlighter chunk once idle, ahead of a script actually being
@@ -176,9 +193,21 @@ export function SchedulesPageView({ navigate }: SchedulesPageViewProps) {
         <div className={cn("items-center gap-2", FLEX)}>
           <CalendarClock className="size-4" />
           <h3 className="text-sm font-semibold">{t("pageTitle")}</h3>
-          <span className="text-xs text-muted-foreground">
-            ({list.length} schedule{list.length !== 1 ? "s" : ""})
-          </span>
+          <span className="text-xs text-muted-foreground">({shown.length}/{list.length})</span>
+          <select
+            aria-label="Schedule scope"
+            className="h-8 rounded-md border border-border bg-background px-2 text-xs"
+            value={filter}
+            onChange={(event) => {
+              const nextFilter = scheduleFilter(event.target.value);
+              if (nextFilter !== null) setFilter(nextFilter);
+            }}
+          >
+            <option value="all">All</option>
+            <option value="system">System</option>
+            <option value="agent">Agent-owned</option>
+            <option value="completed">Completed</option>
+          </select>
         </div>
         <Button type="button" size="sm" variant="outline" onClick={() => setShowForm((v) => !v)}>
           <Plus className="size-3.5 mr-1" />
@@ -224,7 +253,7 @@ export function SchedulesPageView({ navigate }: SchedulesPageViewProps) {
         />
       )}
 
-      {list.length === 0 ? (
+      {shown.length === 0 ? (
         <p className="text-xs text-muted-foreground py-4 text-center">{t("noSchedules")}</p>
       ) : (
         <div className="border border-border rounded-md overflow-x-auto">
@@ -234,13 +263,15 @@ export function SchedulesPageView({ navigate }: SchedulesPageViewProps) {
                 <TableHead className="w-6" />
                 <TableHead className="w-16">{t("status")}</TableHead>
                 <TableHead>{t("name")}</TableHead>
+                <TableHead>Trigger</TableHead>
+                <TableHead>Next fire</TableHead>
                 <TableHead>{t("description")}</TableHead>
                 <TableHead>{t("updated")}</TableHead>
                 <TableHead className="w-28" />
               </TableRow>
             </TableHeader>
             <TableBody>
-              {list.map((s) => (
+              {shown.map((s) => (
                 <ScheduleRow
                   key={s.id}
                   schedule={s}

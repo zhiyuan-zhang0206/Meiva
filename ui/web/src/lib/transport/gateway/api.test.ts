@@ -320,7 +320,7 @@ describe("operation identities", () => {
   });
 
   it("keeps a supplied creation key and body stable across resubmission", async () => {
-    const body = { name: "daily", script: "pass", command: "python schedule.py", enabled: true };
+    const body = { name: "daily", trigger_kind: "every" as const, interval_seconds: 60, script: "pass", command: "python schedule.py", timeout_seconds: 600, enabled: true };
     await api().createSchedule(body, "create-once");
     await api().createSchedule(body, "create-once");
     expect(requests()[0].body).toBe(requests()[1].body);
@@ -344,7 +344,7 @@ describe("operation identities", () => {
   it("submits distinct business operations on private HTTP without randomUUID", async () => {
     rig = rigWith(keysWithoutRandomUUID());
     await api().spawnAgent();
-    await api().createSchedule({ name: "daily", script: "pass", command: "python schedule.py", enabled: true });
+    await api().createSchedule({ name: "daily", trigger_kind: "every", interval_seconds: 60, script: "pass", command: "python schedule.py", timeout_seconds: 600, enabled: true });
     await api().updateSchedule(17, { enabled: false });
     await api().startSchedule(17);
     await api().stopSchedule(17);

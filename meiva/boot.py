@@ -277,7 +277,8 @@ def launch_agent_id(env: Mapping[str, str]) -> int | None:
 def launched_context(*, env: Mapping[str, str], config: ConfigBoot) -> MeivaContext | None:
     guard_default_logging()
     agent_id = launch_agent_id(env)
-    if agent_id is None:
+    schedule_id = env.get("MEIVA_SCHEDULE_ID")
+    if agent_id is None and schedule_id is None:
         return None
     if not config.prepared:
         config.read_process_environment()
@@ -288,7 +289,11 @@ def launched_context(*, env: Mapping[str, str], config: ConfigBoot) -> MeivaCont
     harness = Harness(raw_harness) if raw_harness in set(Harness) else Harness.MEIVA
     rng = _new_rng()
     return MeivaContext(
-        identity=AgentIdentity(agent_id=agent_id, owns_loop=False),
+        identity=AgentIdentity(
+            agent_id=agent_id,
+            owns_loop=False,
+            actor=None if schedule_id is None else f"schedule:{int(schedule_id)}",
+        ),
         harness=harness,
         clients=derived_clients(config, machine),
         machine=machine,
@@ -310,7 +315,9 @@ def _identity_facts(context: MeivaContext | None) -> IdentityFacts | None:
     if identity is None:
         return None
     return IdentityFacts(
-        has_agent_id=identity.agent_id is not None, owns_loop=bool(identity.owns_loop)
+        has_agent_id=identity.agent_id is not None,
+        owns_loop=bool(identity.owns_loop),
+        has_actor=identity.actor is not None,
     )
 
 
@@ -320,6 +327,7 @@ def _launch_facts(context: MeivaContext | None, env: Mapping[str, str]) -> Launc
         context_bound=context is not None,
         identity=_identity_facts(context),
         env_has_agent_id=AGENT_ID_ENV in env,
+        env_has_schedule_id="MEIVA_SCHEDULE_ID" in env,
     )
 
 
@@ -708,8 +716,6 @@ def maybe_load_plugins_for_missing(name: str) -> bool:
 def bind_launched_context() -> MeivaContext | None:
     guard_default_logging()
     env = os.environ
-    if launch_agent_id(env) is None:
-        return None
     config = ConfigBoot()
     launched = launched_context(env=env, config=config)
     if launched is None:

@@ -1,5 +1,9 @@
 # Schedule liveness
 
+This process/session distinction applies to compatibility `daemon` schedules.
+Declarative fires use the same runner identity only while one open run exists;
+the manager adopts an atomic outcome or records a disappeared process as an error.
+
 A schedule's session is an interactive login shell running the runner command, and the
 shell outliving its runner is normal: a runner killed with SIGKILL leaves the shell and
 its session record in place. "A session exists" is therefore not "the schedule is

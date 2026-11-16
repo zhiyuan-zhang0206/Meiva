@@ -1,20 +1,9 @@
-"""Admit one schedule session per explicit desired revision.
-
-The manager adopts matching live PTYs, reaps obsolete sessions through the
-identity-checked backend and consumes schedule_sync_requests. It commits a
-one-attempt launch latch before creating the process. Lost or ambiguous starts
-are errors requiring explicit start/restart; no crash retry or breaker remains.
-The latch and the two-hour absence alert clock survive service restart.
-Run-history rows left open by a dead process are closed when the manager next
-launches or reaps that schedule's session, not by a periodic sweep.
-
-Convergence that keeps failing is bounded: a reap that survives, or a live
-session whose launch provenance cannot be read, is retried for at most
-``BLOCKED_GIVE_UP_AFTER_S`` of one failure streak. The manager then stops,
-records the schedule as an error, emits ``schedule_convergence_abandoned`` and
-leaves the process alone until an explicit new revision (start, stop, restart,
-edit, delete) authorizes another attempt.
-"""
+# meiva:note
+# Run due declarative schedules and converge compatibility daemon sessions.
+#
+# Each declarative fire is a single no-PTY process claimed by a durable run row.
+# The compatibility path preserves revision latches, PTY adoption, bounded failed
+# convergence, and explicit restart after ambiguous launches.
 
 from __future__ import annotations
 
@@ -55,12 +44,12 @@ from services.wake.schedule_manager.convergence import (
     prepare_verdict,
     reclaim_verdict,
 )
+from services.wake.schedule_manager.declarative import DeclarativeScheduleEngine, ManagerPolicy
 from services.wake.schedule_manager.launch_events import (
     emit_gate_held,
     emit_launch_refused,
     emit_process_lost,
 )
-from services.wake.schedule_manager.manager_policy import ManagerPolicy
 from services.wake.schedule_manager.recovery_gate import GateState, observe_gate, refuse
 from services.wake.schedule_manager.round_progress import (
     alive_sessions,
@@ -72,9 +61,6 @@ from services.wake.schedule_manager.round_progress import (
 
 _log = logging.getLogger(__name__)
 
-# Reconcile cadence. Snappier than cron (a schedule is a resident process, not a
-# wall-clock fire) — a few seconds of detection
-# lag on a crash is fine and keeps the polling cheap.
 POLL_INTERVAL_S = 5.0
 
 # meiva:link services/wake/schedule_manager/docs/host-replacement.md
@@ -123,6 +109,15 @@ class ScheduleManager:
         # The wall clock, for the one comparison that pairs a runner record's birth with the
         # session's own start: both are host epoch seconds, and the loop's `now` is monotonic.
         self._clock = clock
+        self._declarative = DeclarativeScheduleEngine(
+            db_pool,
+            home=home,
+            repo_root=repo_root,
+            machine_name=machine_name,
+            launch_env=launch_env,
+            clock=clock,
+            secret_env_resolver=secret_env_resolver,
+        )
         # meiva:note
         # How this manager sees the running root: `observe_root` unless the caller names another.
         self._observe = observe
@@ -163,8 +158,6 @@ class ScheduleManager:
 
     def is_active_unit(self) -> bool:
         return revisions.is_active_unit(self._pool, self._machine_name, self._home)
-
-    # ── control (the sync-request consumer calls this) ──────────────────────
 
     # meiva:note
     # Converge the current durable desired revision, preserving an applied run.
@@ -275,8 +268,6 @@ class ScheduleManager:
         if first:
             emit_launch_refused(schedule_id, reason)
 
-    # ── reconcile (blocking: session backend + DB, run via asyncio.to_thread) ──
-
     def reconcile(self, *, now: float) -> None:
         if not self.is_active_unit():
             return
@@ -284,6 +275,7 @@ class ScheduleManager:
             self._reconcile_locked(now)
 
     def _reconcile_locked(self, now: float) -> None:
+        self._declarative.reconcile()
         self._host_generation = self._read_host_generation()
         if self._host_generation is None:
             self._note_host_generation_unknown(now)

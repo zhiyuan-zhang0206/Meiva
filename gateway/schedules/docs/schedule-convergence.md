@@ -1,5 +1,9 @@
 # Schedule mutation receipts and revision convergence
 
+This document owns the compatibility `daemon` process-convergence protocol.
+Declarative schedules reuse mutation receipts but change timing state directly;
+they have no PTY revision to converge.
+
 `PUT /api/schedules/{id}` and `POST .../start`, `.../stop`, `.../restart`
 accept an optional `Idempotency-Key` (1–128 characters). The required
 `Idempotency-Scope: principal-v1` binds a key to the verified credential and

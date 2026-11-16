@@ -8,19 +8,23 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import datetime
-from typing import NamedTuple
+from typing import Literal, NamedTuple
 
 __all__ = [
     "ControlRow",
     "DeletedRow",
     "InsertedId",
     "LaunchEnvRow",
+    "OwnerMachineRow",
     "OwnerRow",
     "PlacementRow",
     "ScheduleFullRow",
     "ScheduleStoreRow",
     "ScheduleSummaryRow",
 ]
+
+type TriggerKind = Literal["at", "cron", "every", "daemon"]
+type OwnerTermination = Literal["cancel", "keep"]
 
 
 # meiva:note
@@ -59,6 +63,14 @@ class ScheduleSummaryRow:
     online: bool | None
     consecutive_failures: int | None
     owner_agent_id: int | None
+    trigger_kind: TriggerKind
+    run_at: datetime | None
+    cron_expr: str | None
+    interval_seconds: int | None
+    timezone: str
+    timeout_seconds: int
+    on_owner_terminate: OwnerTermination
+    next_launch_at: datetime | None
 
 
 # meiva:note
@@ -88,6 +100,14 @@ class ScheduleFullRow(NamedTuple):
     online: bool | None
     consecutive_failures: int | None
     owner_agent_id: int | None
+    trigger_kind: TriggerKind
+    run_at: datetime | None
+    cron_expr: str | None
+    interval_seconds: int | None
+    timezone: str
+    timeout_seconds: int
+    on_owner_terminate: OwnerTermination
+    next_launch_at: datetime | None
 
 
 # meiva:note
@@ -107,6 +127,14 @@ class ScheduleStoreRow:
     owner_plugin: str | None
     script: str
     owner_agent_id: int | None
+    trigger_kind: TriggerKind
+    run_at: datetime | None
+    cron_expr: str | None
+    interval_seconds: int | None
+    timezone: str
+    timeout_seconds: int
+    on_owner_terminate: OwnerTermination
+    next_launch_at: datetime | None
 
 
 # meiva:note
@@ -121,6 +149,12 @@ class InsertedId:
 @dataclass(frozen=True)
 class OwnerRow:
     owner_plugin: str | None
+    trigger_kind: TriggerKind
+
+
+@dataclass(frozen=True)
+class OwnerMachineRow:
+    machine: str | None
 
 
 # meiva:note
@@ -128,6 +162,8 @@ class OwnerRow:
 @dataclass(frozen=True)
 class DeletedRow:
     machine: str
+    owner_agent_id: int | None
+    trigger_kind: TriggerKind
 
 
 # meiva:note
@@ -137,6 +173,11 @@ class ControlRow:
     enabled: bool
     status: str
     machine: str
+    trigger_kind: TriggerKind
+    run_at: datetime | None
+    cron_expr: str | None
+    interval_seconds: int | None
+    timezone: str
 
 
 # meiva:note

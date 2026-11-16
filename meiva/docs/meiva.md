@@ -10,6 +10,7 @@ Overview of the Meiva subsystem.
 - [Agents](../agents/docs/agents.md)
 - [Files](files.md)
 - [Mcps](../../docs/mcps/mcps.md)
+- [Schedules](../../gateway/schedules/docs/schedules.md)
 - [Sdk Surface](sdk-surface/sdk-surface.md)
 - [Self](../self/README.md)
 - [Shell](../shell/docs/shell.md)

@@ -1375,6 +1375,38 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/keyed/v1/schedules/draft": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: operations["guarded_draft_schedule_api_keyed_v1_schedules_draft_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/schedules/{schedule_id}/launch-env": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["get_schedule_launch_env_api_schedules__schedule_id__launch_env_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/schedules": {
         parameters: {
             query?: never;
@@ -1455,6 +1487,70 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/schedules/{schedule_id}/enable": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: operations["enable_schedule_api_schedules__schedule_id__enable_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/schedules/{schedule_id}/disable": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: operations["disable_schedule_api_schedules__schedule_id__disable_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/schedules/{schedule_id}/cancel": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: operations["cancel_schedule_api_schedules__schedule_id__cancel_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/schedules/{schedule_id}/run-now": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: operations["run_schedule_now_api_schedules__schedule_id__run_now_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/schedules/{schedule_id}/logs": {
         parameters: {
             query?: never;
@@ -1479,38 +1575,6 @@ export interface paths {
             cookie?: never;
         };
         get: operations["get_schedule_runs_api_schedules__schedule_id__runs_get"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/keyed/v1/schedules/draft": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        post: operations["guarded_draft_schedule_api_keyed_v1_schedules_draft_post"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/schedules/{schedule_id}/launch-env": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get: operations["get_schedule_launch_env_api_schedules__schedule_id__launch_env_get"];
         put?: never;
         post?: never;
         delete?: never;
@@ -2814,6 +2878,7 @@ export interface components {
             output_tokens: number;
             cost_usd: number | null;
         };
+        DeclarativeTriggerKind: "at" | "cron" | "every";
         DeliveryStatus: {
             batch_id: string;
             state: "pending" | "accepted" | "hold";
@@ -3657,7 +3722,16 @@ export interface components {
         };
         ScheduleCreate: {
             name: string;
-            script: string;
+            trigger_kind: components["schemas"]["DeclarativeTriggerKind"];
+            script?: string | null;
+            message?: string | null;
+            target_agent_id?: number | null;
+            run_at?: string | null;
+            cron_expr?: string | null;
+            interval_seconds?: number | null;
+            timezone?: string | null;
+            timeout_seconds: number;
+            on_owner_terminate?: ("cancel" | "keep") | null;
             command: string;
             description?: string | null;
             enabled: boolean;
@@ -3680,6 +3754,7 @@ export interface components {
             ok: boolean | null;
             agent_id: number | null;
             note: string | null;
+            scheduled_for?: string | null;
         };
         ScheduleSummary: {
             id: number;
@@ -3694,6 +3769,14 @@ export interface components {
             machine: string;
             owner_plugin?: string | null;
             owner_agent_id?: number | null;
+            trigger_kind: components["schemas"]["TriggerKind"];
+            run_at?: string | null;
+            cron_expr?: string | null;
+            interval_seconds?: number | null;
+            timezone: string;
+            timeout_seconds: number;
+            on_owner_terminate: "cancel" | "keep";
+            next_launch_at?: string | null;
             placement_status: "ok" | "unregistered" | "paused" | "stopped" | "offline";
             placement_reason?: string | null;
         };
@@ -3705,6 +3788,8 @@ export interface components {
             enabled?: boolean | null;
             machine?: string | null;
             owner_agent_id?: number | null;
+            timeout_seconds?: number | null;
+            on_owner_terminate?: ("cancel" | "keep") | null;
         };
         ScheduleView: {
             id: number;
@@ -3719,6 +3804,14 @@ export interface components {
             machine: string;
             owner_plugin?: string | null;
             owner_agent_id?: number | null;
+            trigger_kind: components["schemas"]["TriggerKind"];
+            run_at?: string | null;
+            cron_expr?: string | null;
+            interval_seconds?: number | null;
+            timezone: string;
+            timeout_seconds: number;
+            on_owner_terminate: "cancel" | "keep";
+            next_launch_at?: string | null;
             placement_status: "ok" | "unregistered" | "paused" | "stopped" | "offline";
             placement_reason?: string | null;
             script: string;
@@ -4098,6 +4191,7 @@ export interface components {
             killed_shell_sessions?: number[];
             harnesses_not_transferred?: string[];
         };
+        TriggerKind: "at" | "cron" | "every" | "daemon";
         UiContributionsResponse: {
             themes: components["schemas"]["UiThemeContribution"][];
             nav: components["schemas"]["UiNavContribution"][];
@@ -6840,6 +6934,73 @@ export interface operations {
             };
         };
     };
+    guarded_draft_schedule_api_keyed_v1_schedules_draft_post: {
+        parameters: {
+            query?: never;
+            header: {
+                "Idempotency-Key": string;
+                "Idempotency-Scope"?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ScheduleDraftRequest"];
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ScheduleDraftResponse"];
+                };
+            };
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_schedule_launch_env_api_schedules__schedule_id__launch_env_get: {
+        parameters: {
+            query?: never;
+            header?: {
+                authorization?: string | null;
+            };
+            path: {
+                schedule_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: string;
+                    };
+                };
+            };
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     list_schedules_api_schedules_get: {
         parameters: {
             query?: never;
@@ -7070,6 +7231,122 @@ export interface operations {
             };
         };
     };
+    enable_schedule_api_schedules__schedule_id__enable_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                schedule_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ScheduleView"];
+                };
+            };
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    disable_schedule_api_schedules__schedule_id__disable_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                schedule_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ScheduleView"];
+                };
+            };
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    cancel_schedule_api_schedules__schedule_id__cancel_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                schedule_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ScheduleView"];
+                };
+            };
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    run_schedule_now_api_schedules__schedule_id__run_now_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                schedule_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ScheduleView"];
+                };
+            };
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     get_schedule_logs_api_schedules__schedule_id__logs_get: {
         parameters: {
             query?: {
@@ -7120,73 +7397,6 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ScheduleRunView"][];
-                };
-            };
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    guarded_draft_schedule_api_keyed_v1_schedules_draft_post: {
-        parameters: {
-            query?: never;
-            header: {
-                "Idempotency-Key": string;
-                "Idempotency-Scope"?: string | null;
-            };
-            path?: never;
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["ScheduleDraftRequest"];
-            };
-        };
-        responses: {
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ScheduleDraftResponse"];
-                };
-            };
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    get_schedule_launch_env_api_schedules__schedule_id__launch_env_get: {
-        parameters: {
-            query?: never;
-            header?: {
-                authorization?: string | null;
-            };
-            path: {
-                schedule_id: number;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": {
-                        [key: string]: string;
-                    };
                 };
             };
             422: {

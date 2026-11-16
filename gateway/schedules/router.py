@@ -2,10 +2,11 @@ from __future__ import annotations
 
 import asyncio
 import shutil
+from datetime import UTC, datetime
 from pathlib import Path
 
 import psycopg
-from fastapi import APIRouter, Depends, Header, HTTPException, Request
+from fastapi import APIRouter, HTTPException, Request
 from psycopg import sql
 from psycopg.rows import class_row
 from psycopg_pool import ConnectionPool
@@ -15,141 +16,63 @@ from base.db.rows import query_all, query_one
 from base.db.transaction import write_transaction
 from base.sessions.protocol import SessionBackend
 from base.telemetry.alerts import resolve_schedule_alerts
-from gateway.agents.creation import create_and_launch_agent, guarded_draft_key
-from gateway.http.auth.request_principal import cluster_credential
 from gateway.http.config import (
     GatewayConfig,
     gateway_clock,
     gateway_config,
-    gateway_ensure_harnesses,
     gateway_rpc,
     gateway_state,
 )
-from gateway.http.model_catalog import require_model_catalog
 from gateway.routers.receipts import creation as creation_receipts
-from gateway.schedules import plans, receipts, session_control
+from gateway.schedules import plans, receipts, session_control, triggers
+from gateway.schedules.auxiliary_routes import router as auxiliary_router
 from gateway.schedules.contracts import (
     DEFAULT_COMMAND,
     ScheduleCreate,
-    ScheduleDraftRequest,
-    ScheduleDraftResponse,
     ScheduleLogsView,
     ScheduleRunView,
     ScheduleSummary,
     ScheduleUpdate,
     ScheduleView,
 )
-from gateway.schedules.placement import MachineSnapshot, judge_placement
+from gateway.schedules.repository import (
+    FULL_QUERY as _FULL_QUERY,
+)
+from gateway.schedules.repository import (
+    MACHINE_PLACEMENT_QUERY as _MACHINE_PLACEMENT_QUERY,
+)
+from gateway.schedules.repository import (
+    SCHEDULE_STORE_COLS as _SCHEDULE_STORE_COLS,
+)
+from gateway.schedules.repository import (
+    fetch_full_blocking,
+    refuse_active_relocation,
+)
+from gateway.schedules.repository import (
+    list_blocking as _list_blocking,
+)
+from gateway.schedules.repository import (
+    view as _view,
+)
 from gateway.schedules.rows import (
     ControlRow,
     DeletedRow,
     InsertedId,
-    LaunchEnvRow,
+    OwnerMachineRow,
     OwnerRow,
     PlacementRow,
     ScheduleFullRow,
     ScheduleStoreRow,
-    ScheduleSummaryRow,
 )
 from ops.cluster import rpc as cluster_rpc
-from ops.rpc_schemas import ScheduleCaptureResult, SpawnAgentRequest
+from ops.rpc_schemas import ScheduleCaptureResult
 
 router = APIRouter()
+router.include_router(auxiliary_router)
 
 _CAPTURE_TIMEOUT_S = 10.0
 
-_SCHEDULE_BASE_COLS = (
-    "s.id, s.name, s.description, s.command, s.enabled, s.status, s.last_error, "
-    "s.created_at, s.updated_at, s.machine, s.owner_plugin"
-)
-# meiva:note
-# Appended last in every query that returns it, never in the middle: `ScheduleFullRow` is a
-# NamedTuple the operator repair script (`scripts/host_ops/update_schedule_script.py`) indexes
-# positionally against whichever gateway source is installed, so a column inserted before
-# `script` would silently shift every field after it.
-_OWNER_COL = "s.owner_agent_id"
-_PLACEMENT_COLS = (
-    "m.name IS NOT NULL AS machine_registered, m.paused_at, m.pause_reason, "
-    "m.stopped_at, m.maintenance_reason, mp.online, mp.consecutive_failures"
-)
-_JOIN_CLAUSE = (
-    "FROM schedules s "
-    "LEFT JOIN machines m ON m.name = s.machine "
-    "LEFT JOIN machine_probe mp ON mp.machine_name = s.machine"
-)
-
-_SUMMARY_QUERY = (
-    f"SELECT {_SCHEDULE_BASE_COLS}, {_PLACEMENT_COLS}, {_OWNER_COL} "
-    f"{_JOIN_CLAUSE} ORDER BY s.id DESC"
-)
-_FULL_QUERY = (
-    f"SELECT {_SCHEDULE_BASE_COLS}, s.script, {_PLACEMENT_COLS}, {_OWNER_COL} "
-    f"{_JOIN_CLAUSE} WHERE s.id = %s"
-)
-_MACHINE_PLACEMENT_QUERY = sql.SQL(
-    "SELECT {} FROM (SELECT %s::text AS target) t "
-    "LEFT JOIN machines m ON m.name = t.target "
-    "LEFT JOIN machine_probe mp ON mp.machine_name = t.target"
-).format(sql.SQL(_PLACEMENT_COLS))
-_SCHEDULE_STORE_COLS = (
-    "id, name, description, command, enabled, status, last_error, created_at, updated_at, "
-    "machine, owner_plugin, script, owner_agent_id"
-)
-
 _DEFAULT_COMMAND = DEFAULT_COMMAND
-
-
-def _snapshot(r: ScheduleSummaryRow | ScheduleFullRow) -> MachineSnapshot:
-    return MachineSnapshot(
-        registered=r.machine_registered,
-        paused_at=r.paused_at,
-        pause_reason=r.pause_reason,
-        stopped_at=r.stopped_at,
-        maintenance_reason=r.maintenance_reason,
-        online=r.online,
-        consecutive_failures=r.consecutive_failures or 0,
-    )
-
-
-def _summary(r: ScheduleSummaryRow) -> ScheduleSummary:
-    placement = judge_placement(machine=r.machine, snapshot=_snapshot(r))
-    return ScheduleSummary(
-        id=r.id,
-        name=r.name,
-        description=r.description,
-        command=r.command,
-        enabled=r.enabled,
-        status=r.status,
-        last_error=r.last_error,
-        created_at=r.created_at,
-        updated_at=r.updated_at,
-        machine=r.machine,
-        owner_plugin=r.owner_plugin,
-        owner_agent_id=r.owner_agent_id,
-        placement_status=placement.status,
-        placement_reason=placement.reason,
-    )
-
-
-def _view(r: ScheduleFullRow) -> ScheduleView:
-    placement = judge_placement(machine=r.machine, snapshot=_snapshot(r))
-    return ScheduleView(
-        id=r.id,
-        name=r.name,
-        description=r.description,
-        command=r.command,
-        enabled=r.enabled,
-        status=r.status,
-        last_error=r.last_error,
-        created_at=r.created_at,
-        updated_at=r.updated_at,
-        machine=r.machine,
-        owner_plugin=r.owner_plugin,
-        owner_agent_id=r.owner_agent_id,
-        placement_status=placement.status,
-        placement_reason=placement.reason,
-        script=r.script,
-    )
 
 
 def _validate_script(script: str) -> None:
@@ -161,12 +84,14 @@ def _validate_script(script: str) -> None:
         ) from exc
 
 
-def _edit_assignments(changed: dict[str, object], *, code_changed: bool) -> list[sql.Composable]:
+def _edit_assignments(
+    changed: dict[str, object], *, code_changed: bool, trigger_kind: str
+) -> list[sql.Composable]:
     assignments: list[sql.Composable] = [
         sql.SQL("{} = %s").format(sql.Identifier(col)) for col in changed
     ]
     assignments.append(sql.SQL("updated_at = now()"))
-    if code_changed or "enabled" in changed or "machine" in changed:
+    if trigger_kind == "daemon" and (code_changed or "enabled" in changed or "machine" in changed):
         assignments.extend(
             [
                 sql.SQL("desired_revision = desired_revision + 1"),
@@ -196,16 +121,39 @@ def _apply_schedule_update(
     previous: ScheduleStoreRow,
     changed: dict[str, object],
     fields: dict[str, object],
+    now: datetime,
 ) -> None:
     code_changed = "script" in changed or "command" in changed
-    assignments = _edit_assignments(changed, code_changed=code_changed)
+    if previous.trigger_kind != "daemon" and "enabled" in changed:
+        enabled = bool(changed["enabled"])
+        changed["status"] = "scheduled" if enabled else "stopped"
+        changed["next_launch_at"] = (
+            triggers.enabled_next_launch(
+                ControlRow(
+                    enabled=previous.enabled,
+                    status=previous.status,
+                    machine=previous.machine,
+                    trigger_kind=previous.trigger_kind,
+                    run_at=previous.run_at,
+                    cron_expr=previous.cron_expr,
+                    interval_seconds=previous.interval_seconds,
+                    timezone=previous.timezone,
+                ),
+                now,
+            )
+            if enabled
+            else None
+        )
+    assignments = _edit_assignments(
+        changed, code_changed=code_changed, trigger_kind=previous.trigger_kind
+    )
     cur.execute(
         sql.SQL("UPDATE schedules SET {} WHERE id = %s").format(sql.SQL(", ").join(assignments)),
         (*changed.values(), schedule_id),
     )
     effective_enabled = changed.get("enabled", previous.enabled)
     effective_status = changed.get("status", previous.status)
-    if not effective_enabled or effective_status in ("stopped", "completed"):
+    if not effective_enabled or effective_status in ("stopped", "completed", "cancelled"):
         resolve_schedule_alerts(cur.connection, schedule_id)
     if code_changed:
         cur.execute(
@@ -226,6 +174,8 @@ def _sync_schedule_mutation(
     previous: ScheduleStoreRow,
     changed: dict[str, object],
 ) -> bool:
+    if previous.trigger_kind != "daemon":
+        return False
     old_machine: str = previous.machine if previous.machine else "gateway"
     new_val = changed.get("machine")
     new_machine: str = str(new_val) if new_val else old_machine
@@ -246,7 +196,8 @@ def update_blocking(
     pool: ConnectionPool,
     schedule_id: int,
     fields: dict[str, object],
-    key: str | None = None,
+    key: str | None,
+    now: datetime,
 ) -> tuple[ScheduleFullRow, bool]:
 
     if "script" in fields:
@@ -272,13 +223,15 @@ def update_blocking(
                 raise HTTPException(status_code=404, detail=f"schedule {schedule_id} not found")
             changed = plans.changed_fields(previous, fields)
             _refuse_plugin_mutation(previous.owner_plugin, changed)
+            if previous.trigger_kind != "daemon" and "machine" in changed:
+                refuse_active_relocation(conn, schedule_id)
             if not changed:
                 full_row = query_one(conn, ScheduleFullRow, _FULL_QUERY, (schedule_id,))
                 if full_row is None:
                     raise HTTPException(status_code=404, detail=f"schedule {schedule_id} not found")
                 receipts.finish(conn, key, full_row)
                 return full_row, False
-            _apply_schedule_update(cur, schedule_id, previous, changed, fields)
+            _apply_schedule_update(cur, schedule_id, previous, changed, fields, now)
             needs_sync = _sync_schedule_mutation(conn, schedule_id, previous, changed)
             row = query_one(conn, ScheduleFullRow, _FULL_QUERY, (schedule_id,))
             if row is None:
@@ -288,16 +241,13 @@ def update_blocking(
         raise HTTPException(
             status_code=409, detail=f"schedule named {fields['name']!r} already exists"
         ) from exc
+    except psycopg.errors.ForeignKeyViolation as exc:
+        raise HTTPException(status_code=400, detail="owner_agent_id does not exist") from exc
     return row, needs_sync
 
 
 # meiva:note
 # The interpolated column list is a module constant; the values it filters on stay parameterized.
-def _list_blocking(pool: ConnectionPool) -> list[ScheduleSummary]:
-    with pool.connection() as conn:
-        return [_summary(r) for r in query_all(conn, ScheduleSummaryRow, _SUMMARY_QUERY)]
-
-
 @router.get(
     "/api/schedules",
     description="List all schedules (enabled and disabled), newest first. Omits `script`.",
@@ -311,7 +261,9 @@ def _reconstruct_created_row(
     created: creation_receipts.Creation,
     body: ScheduleCreate,
     machine: str,
+    cluster_timezone: str,
 ) -> ScheduleFullRow:
+    prepared = triggers.prepare(body, cluster_timezone=cluster_timezone, now=created.created_at)
     placement = query_one(conn, PlacementRow, _MACHINE_PLACEMENT_QUERY, (machine,))
     if placement is None:
         raise RuntimeError("LEFT JOIN against scalar target returned no row")
@@ -321,13 +273,13 @@ def _reconstruct_created_row(
         description=body.description,
         command=body.command,
         enabled=body.enabled,
-        status="stopped",
+        status="scheduled" if body.enabled else "stopped",
         last_error=None,
         created_at=created.created_at,
         updated_at=created.updated_at,
         machine=machine,
         owner_plugin=None,
-        script=body.script,
+        script=prepared.script,
         machine_registered=placement.machine_registered,
         paused_at=placement.paused_at,
         pause_reason=placement.pause_reason,
@@ -335,7 +287,15 @@ def _reconstruct_created_row(
         maintenance_reason=placement.maintenance_reason,
         online=placement.online,
         consecutive_failures=placement.consecutive_failures,
-        owner_agent_id=None,
+        owner_agent_id=body.owner_agent_id,
+        trigger_kind=body.trigger_kind,
+        run_at=body.run_at,
+        cron_expr=body.cron_expr,
+        interval_seconds=body.interval_seconds,
+        timezone=prepared.timezone,
+        timeout_seconds=body.timeout_seconds,
+        on_owner_terminate=prepared.on_owner_terminate,
+        next_launch_at=prepared.next_launch_at,
     )
 
 
@@ -344,9 +304,13 @@ def create_blocking(
     pool: ConnectionPool,
     body: ScheduleCreate,
     machine: str,
+    cluster_timezone: str,
+    now: datetime,
     key: str | None = None,
 ) -> ScheduleFullRow:
-    _validate_script(body.script)
+    now = now.astimezone(UTC)
+    prepared = triggers.prepare(body, cluster_timezone=cluster_timezone, now=now)
+    _validate_script(prepared.script)
     try:
         with (
             write_transaction(pool) as conn,
@@ -356,18 +320,34 @@ def create_blocking(
                 conn, key, {"resource": "schedule", "body": body.model_dump(), "machine": machine}
             )
             if created is not None:
-                return _reconstruct_created_row(conn, created, body, machine)
+                return _reconstruct_created_row(conn, created, body, machine, cluster_timezone)
             cur.execute(
                 "INSERT INTO schedules "
-                "(name, description, script, command, enabled, machine) "
-                "VALUES (%s, %s, %s, %s, %s, %s) RETURNING id",
+                "(name, description, script, command, enabled, status, machine, owner_agent_id, "
+                "trigger_kind, run_at, cron_expr, interval_seconds, timezone, timeout_seconds, "
+                "on_owner_terminate, next_launch_at, created_at, updated_at) "
+                "VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, "
+                "%s, %s) "
+                "RETURNING id",
                 (
                     body.name,
                     body.description,
-                    body.script,
+                    prepared.script,
                     body.command,
                     body.enabled,
+                    "scheduled" if body.enabled else "stopped",
                     machine,
+                    body.owner_agent_id,
+                    body.trigger_kind,
+                    body.run_at,
+                    body.cron_expr,
+                    body.interval_seconds,
+                    prepared.timezone,
+                    body.timeout_seconds,
+                    prepared.on_owner_terminate,
+                    prepared.next_launch_at,
+                    now,
+                    now,
                 ),
             )
             inserted = cur.fetchone()
@@ -376,7 +356,7 @@ def create_blocking(
             cur.execute(
                 "INSERT INTO schedule_versions (schedule_id, script, command, note) "
                 "VALUES (%s, %s, %s, %s)",
-                (schedule_id, body.script, body.command, "initial"),
+                (schedule_id, prepared.script, body.command, "initial"),
             )
             row = query_one(conn, ScheduleFullRow, _FULL_QUERY, (schedule_id,))
             assert row is not None  # noqa: S101
@@ -387,7 +367,25 @@ def create_blocking(
         raise HTTPException(
             status_code=409, detail=f"schedule named {body.name!r} already exists"
         ) from exc
+    except psycopg.errors.ForeignKeyViolation as exc:
+        raise HTTPException(status_code=400, detail="owner_agent_id does not exist") from exc
     return row
+
+
+def _owner_machine_blocking(pool: ConnectionPool, owner_agent_id: int) -> str:
+    with pool.connection() as conn:
+        row = query_one(
+            conn,
+            OwnerMachineRow,
+            "SELECT machine FROM agents_meta WHERE id = %s",
+            (owner_agent_id,),
+        )
+    if row is None:
+        raise HTTPException(status_code=400, detail=f"owner agent {owner_agent_id} not found")
+    machine = row.machine
+    if not machine:
+        raise HTTPException(status_code=409, detail=f"owner agent {owner_agent_id} has no machine")
+    return machine
 
 
 @router.post(
@@ -396,9 +394,14 @@ def create_blocking(
     description="Create a schedule. 400 on a script syntax error, 409 on a name clash.",
 )
 async def create_schedule(request: Request, body: ScheduleCreate) -> ScheduleView:
-    machine = (
-        gateway_state(request).machine.name() if body.machine is None else body.machine.strip()
-    )
+    if body.machine is not None:
+        machine = body.machine.strip()
+    elif body.owner_agent_id is not None:
+        machine = await asyncio.to_thread(
+            _owner_machine_blocking, gateway_state(request).db_pool, body.owner_agent_id
+        )
+    else:
+        machine = gateway_state(request).machine.name()
     if not machine:
         raise HTTPException(status_code=400, detail="machine cannot be empty")
     row = await asyncio.to_thread(
@@ -406,6 +409,8 @@ async def create_schedule(request: Request, body: ScheduleCreate) -> ScheduleVie
         gateway_state(request).db_pool,
         body,
         machine,
+        gateway_config(request).clock.timezone,
+        gateway_clock(request).now(),
         creation_receipts.operation_key(request),
     )
     return _view(row)
@@ -422,33 +427,48 @@ async def get_schedule(request: Request, schedule_id: int) -> ScheduleView:
 
 @router.put(
     "/api/schedules/{schedule_id}",
-    description="Partial-update a schedule — only the fields present in the body change. A\nscript/command change is snapshotted into schedule_versions and, if the\nschedule is enabled, applied immediately (the session is relaunched on the new\nscript). An enabled-flag value change also converges immediately, so disable\nreaps the session and enable creates it; a same-value update leaves the\nsession intact. 400 on a script syntax error, 404 if missing, 409 on a name\nclash.",
+    description="Partial-update a schedule. Script/command changes are versioned. Declarative "
+    "schedules apply changes on their next fire; daemon schedules converge their PTY session. "
+    "400 on invalid input, 404 if missing, 409 on a name clash.",
 )
 async def update_schedule(request: Request, schedule_id: int, body: ScheduleUpdate) -> ScheduleView:
     fields: dict[str, object] = body.model_dump(exclude_unset=True)
     if not fields:
         raise HTTPException(status_code=400, detail="no fields to update")
+    owner_agent_id = fields.get("owner_agent_id")
     if "machine" in fields:
         machine = fields["machine"]
         if not isinstance(machine, str) or not machine.strip():
             raise HTTPException(status_code=400, detail="machine cannot be empty")
         fields["machine"] = machine.strip()
+    if "machine" not in fields and isinstance(owner_agent_id, int):
+        fields["machine"] = await asyncio.to_thread(
+            _owner_machine_blocking,
+            gateway_state(request).db_pool,
+            owner_agent_id,
+        )
+    if isinstance(owner_agent_id, int) and "on_owner_terminate" not in fields:
+        fields["on_owner_terminate"] = "cancel"
     row, needs_sync = await asyncio.to_thread(
         update_blocking,
         gateway_state(request).db_pool,
         schedule_id,
         fields,
         receipts.operation_key(request),
+        gateway_clock(request).now(),
     )
     if needs_sync:
         await _wait_consumed(request, schedule_id)
     return _view(row)
 
 
-def delete_blocking(pool: ConnectionPool, schedule_id: int) -> str:
+def delete_blocking(pool: ConnectionPool, schedule_id: int) -> DeletedRow:
     with write_transaction(pool) as conn:
         row = query_one(
-            conn, OwnerRow, "SELECT owner_plugin FROM schedules WHERE id = %s", (schedule_id,)
+            conn,
+            OwnerRow,
+            "SELECT owner_plugin, trigger_kind FROM schedules WHERE id = %s FOR UPDATE",
+            (schedule_id,),
         )
         if row is None:
             raise HTTPException(status_code=404, detail=f"schedule {schedule_id} not found")
@@ -457,17 +477,20 @@ def delete_blocking(pool: ConnectionPool, schedule_id: int) -> str:
                 status_code=409,
                 detail=f"cannot delete schedule: owned by plugin '{row.owner_plugin}'",
             )
+        if row.trigger_kind != "daemon":
+            refuse_active_relocation(conn, schedule_id)
         deleted = query_one(
             conn,
             DeletedRow,
-            "DELETE FROM schedules WHERE id = %s RETURNING machine",
+            "DELETE FROM schedules WHERE id = %s RETURNING machine, owner_agent_id, trigger_kind",
             (schedule_id,),
         )
         if deleted is None:
             raise HTTPException(status_code=404, detail=f"schedule {schedule_id} not found")
         resolve_schedule_alerts(conn, schedule_id)
-        session_control.enqueue_in_transaction(conn, schedule_id, deleted.machine)
-        return deleted.machine
+        if deleted.trigger_kind == "daemon":
+            session_control.enqueue_in_transaction(conn, schedule_id, deleted.machine)
+        return deleted
 
 
 async def _wait_consumed(request: Request, schedule_id: int, machine: str | None = None) -> None:
@@ -482,27 +505,37 @@ async def _wait_consumed(request: Request, schedule_id: int, machine: str | None
     )
 
 
-def _remove_schedule_dir(home: Path, schedule_id: int) -> None:
-    shutil.rmtree(home / "schedules" / str(schedule_id), ignore_errors=True)
+def _remove_schedule_dir(home: Path, owner_agent_id: int | None, schedule_id: int) -> None:
+    if owner_agent_id is None:
+        root = home / "schedules" / str(schedule_id)
+    else:
+        root = home / "workspaces" / str(owner_agent_id) / "schedules" / str(schedule_id)
+    shutil.rmtree(root, ignore_errors=True)
 
 
 @router.delete(
     "/api/schedules/{schedule_id}",
-    description="Delete a schedule. 404 if missing. The reconcile loop kills its (now\norphaned) session; its work dir is removed.",
+    description="Delete a schedule and remove its local work directory. 404 if missing. "
+    "A legacy daemon session is reaped by reconciliation.",
 )
 async def delete_schedule(request: Request, schedule_id: int) -> dict[str, str]:
     pool = gateway_state(request).db_pool
-    machine = await asyncio.to_thread(delete_blocking, pool, schedule_id)
-    await _wait_consumed(request, schedule_id, machine=machine)
-    await asyncio.to_thread(
-        _remove_schedule_dir, gateway_state(request).gateway_process.home, schedule_id
-    )
+    deleted = await asyncio.to_thread(delete_blocking, pool, schedule_id)
+    if deleted.trigger_kind == "daemon":
+        await _wait_consumed(request, schedule_id, machine=deleted.machine)
+    if deleted.machine == gateway_state(request).machine.name():
+        await asyncio.to_thread(
+            _remove_schedule_dir,
+            gateway_state(request).gateway_process.home,
+            deleted.owner_agent_id,
+            schedule_id,
+        )
     return {"status": "deleted"}
 
 
 @router.post(
     "/api/schedules/{schedule_id}/start",
-    description="Enable + launch the schedule now. 404 if missing.",
+    description="Enable the schedule. Declarative schedules compute their next fire; daemon schedules launch now. 404 if missing.",
 )
 async def start_schedule(request: Request, schedule_id: int) -> ScheduleView:
     return await _control_and_sync(request, schedule_id, action="start")
@@ -510,7 +543,7 @@ async def start_schedule(request: Request, schedule_id: int) -> ScheduleView:
 
 @router.post(
     "/api/schedules/{schedule_id}/stop",
-    description="Disable + kill the schedule's session now. 404 if missing.",
+    description="Disable future fires and stop a compatibility daemon session. 404 if missing.",
 )
 async def stop_schedule(request: Request, schedule_id: int) -> ScheduleView:
     return await _control_and_sync(request, schedule_id, action="stop")
@@ -518,10 +551,30 @@ async def stop_schedule(request: Request, schedule_id: int) -> ScheduleView:
 
 @router.post(
     "/api/schedules/{schedule_id}/restart",
-    description="Relaunch the schedule's session now (reloading its script), clearing crash\nbackoff. 404 if missing, 409 if the schedule is disabled.",
+    description="Run a declarative schedule now or relaunch a compatibility daemon. 404 if missing, 409 if disabled.",
 )
 async def restart_schedule(request: Request, schedule_id: int) -> ScheduleView:
     return await _control_and_sync(request, schedule_id, action="restart")
+
+
+@router.post("/api/schedules/{schedule_id}/enable")
+async def enable_schedule(request: Request, schedule_id: int) -> ScheduleView:
+    return await _control_and_sync(request, schedule_id, action="enable")
+
+
+@router.post("/api/schedules/{schedule_id}/disable")
+async def disable_schedule(request: Request, schedule_id: int) -> ScheduleView:
+    return await _control_and_sync(request, schedule_id, action="disable")
+
+
+@router.post("/api/schedules/{schedule_id}/cancel")
+async def cancel_schedule(request: Request, schedule_id: int) -> ScheduleView:
+    return await _control_and_sync(request, schedule_id, action="cancel")
+
+
+@router.post("/api/schedules/{schedule_id}/run-now")
+async def run_schedule_now(request: Request, schedule_id: int) -> ScheduleView:
+    return await _control_and_sync(request, schedule_id, action="run_now")
 
 
 def _read_transcript_blocking(
@@ -537,9 +590,29 @@ def _read_transcript_blocking(
     return text.splitlines()[-lines:]
 
 
+def _read_declarative_log(
+    home: Path, schedule_id: int, owner_agent_id: int | None, lines: int
+) -> list[str] | None:
+    if owner_agent_id is None:
+        path = home / "schedules" / str(schedule_id) / "latest.log"
+    else:
+        path = (
+            home
+            / "workspaces"
+            / str(owner_agent_id)
+            / "schedules"
+            / str(schedule_id)
+            / "latest.log"
+        )
+    try:
+        return path.read_text(encoding="utf-8", errors="replace").splitlines()[-lines:]
+    except OSError:
+        return None
+
+
 @router.get(
     "/api/schedules/{schedule_id}/logs",
-    description="Recent output of the schedule. Live session -> its capture; a dead\nsession -> its PTY transcript file; otherwise the last crash traceback\n(`last_error`). 404 if the schedule is missing.",
+    description="Recent output: declarative latest.log, daemon live/transcript capture, or last_error. 404 if missing.",
 )
 async def get_schedule_logs(
     request: Request, schedule_id: int, lines: int = 200
@@ -550,7 +623,17 @@ async def get_schedule_logs(
     local_machine = gateway_state(request).machine.name()
     window = plans.capture_window(lines)
 
-    if target_machine == local_machine:
+    declarative = row.trigger_kind != "daemon"
+    if target_machine == local_machine and declarative:
+        captured = None
+        transcript = await asyncio.to_thread(
+            _read_declarative_log,
+            gateway_state(request).gateway_process.home,
+            schedule_id,
+            row.owner_agent_id,
+            window,
+        )
+    elif target_machine == local_machine:
         backend: SessionBackend = gateway_state(request).shell_backend
         captured = await session_control.capture(backend, schedule_id, window)
         transcript = (
@@ -566,7 +649,12 @@ async def get_schedule_logs(
                 gateway_state(request).db,
                 target_machine,
                 "schedule_capture",
-                {"schedule_id": schedule_id, "lines": window},
+                {
+                    "schedule_id": schedule_id,
+                    "lines": window,
+                    "owner_agent_id": row.owner_agent_id,
+                    "trigger_kind": row.trigger_kind,
+                },
                 timeout_s=_CAPTURE_TIMEOUT_S,
             )
             res_obj = ScheduleCaptureResult.model_validate(result)
@@ -584,6 +672,8 @@ async def get_schedule_logs(
     source, shown = plans.logs_view(
         lines, captured=captured, transcript=transcript, last_error=row.last_error
     )
+    if declarative and source == "transcript":
+        source = "latest"
     return ScheduleLogsView(source=source, lines=shown)
 
 
@@ -593,7 +683,7 @@ def _runs_blocking(pool: ConnectionPool, schedule_id: int, limit: int) -> list[S
         return query_all(
             conn,
             ScheduleRunView,
-            "SELECT id, ran_at, ok, agent_id, note FROM schedule_runs "
+            "SELECT id, ran_at, ok, agent_id, note, scheduled_for FROM schedule_runs "
             "WHERE schedule_id = %s ORDER BY ran_at DESC, id DESC LIMIT %s",
             (schedule_id, limit),
         )
@@ -614,58 +704,47 @@ async def get_schedule_runs(
     return await asyncio.to_thread(_runs_blocking, pool, schedule_id, limit)
 
 
-@router.post(
-    "/api/keyed/v1/schedules/draft",
-    description="Hand a natural-language request to an meiva-schedule-writer agent. Spawns the\nagent (which loads meiva-guide.schedules, clarifies, writes the script,\nand POSTs it back) and returns its id so the UI can open the conversation.\nReplays one raw draft intent and its original birth.",
-)
-async def guarded_draft_schedule(
-    body: ScheduleDraftRequest, request: Request, key: str = Depends(guarded_draft_key)
-) -> ScheduleDraftResponse:
-
-    prompt = (
-        "You are a schedule writer. Read and follow meiva.skills.meiva_guide.schedules to turn this "
-        "request into a gateway-hosted schedule: clarify the trigger / skip / error-handling, "
-        "write the script, and create it via POST /api/schedules. Request:\n\n" + body.nl
+def _apply_declarative_control(
+    conn: psycopg.Connection,
+    schedule_id: int,
+    action: plans.ControlAction,
+    row: ControlRow,
+    now: datetime,
+) -> None:
+    if action in ("restart", "run_now"):
+        if (
+            conn.execute(
+                "SELECT 1 FROM schedule_runs WHERE schedule_id = %s AND ok IS NULL", (schedule_id,)
+            ).fetchone()
+            is not None
+        ):
+            raise HTTPException(status_code=409, detail="schedule is already running")
+        enabled, status, next_launch = True, "scheduled", now
+    elif action in ("start", "enable"):
+        enabled, status = True, "scheduled"
+        next_launch = triggers.enabled_next_launch(row, now)
+    elif action in ("stop", "disable"):
+        enabled, status, next_launch = False, "stopped", None
+    else:
+        enabled, status, next_launch = False, "cancelled", None
+    conn.execute(
+        "UPDATE schedules SET enabled = %s, status = %s, next_launch_at = %s, "
+        "last_error = NULL, updated_at = %s WHERE id = %s",
+        (enabled, status, next_launch, now, schedule_id),
     )
-    body_obj = SpawnAgentRequest(
-        spawner="user",
-        prompt=prompt,
-        prompt_source="user",
-        label="meiva-schedule-writer",
-        config={"llm_model": "deepseek-flash"},
-    )
-    spawned = await create_and_launch_agent(
-        body_obj,
-        gateway_state(request).machine.name(),
-        gateway_state(request).db_pool,
-        gateway_state(request).db,
-        gateway_state(request).bus,
-        catalog=require_model_catalog(request),
-        authority=gateway_state(request).config_authority,
-        creation_key=key,
-        clock=gateway_clock(request),
-        rpc=gateway_rpc(request),
-        creation_identity=body.model_dump(mode="json"),
-        ensure_harnesses=gateway_ensure_harnesses(request),
-        environ=gateway_state(request).gateway_process.config.process_environment(),
-    )
-    return ScheduleDraftResponse(agent_id=spawned.id)
-
-
-# meiva:link gateway/schedules/docs/router-contracts.md
-def fetch_full_blocking(pool: ConnectionPool, schedule_id: int) -> ScheduleFullRow:
-
-    with pool.connection() as conn:
-        row = query_one(conn, ScheduleFullRow, _FULL_QUERY, (schedule_id,))
-    if row is None:
-        raise HTTPException(status_code=404, detail=f"schedule {schedule_id} not found")
-    return row
+    if not enabled:
+        resolve_schedule_alerts(conn, schedule_id)
 
 
 # meiva:link gateway/schedules/docs/router-contracts.md
 def control_blocking(
-    pool: ConnectionPool, schedule_id: int, action: plans.ControlAction, key: str | None
+    pool: ConnectionPool,
+    schedule_id: int,
+    action: plans.ControlAction,
+    key: str | None,
+    now: datetime,
 ) -> tuple[ScheduleFullRow, bool]:
+    now = now.astimezone(UTC)
     with write_transaction(pool) as conn:
         replay = receipts.begin(conn, key, {"schedule_id": schedule_id, "action": action})
         if replay is not None:
@@ -673,16 +752,19 @@ def control_blocking(
         row = query_one(
             conn,
             ControlRow,
-            "SELECT enabled, status, machine FROM schedules WHERE id = %s FOR UPDATE",
+            "SELECT enabled, status, machine, trigger_kind, run_at, cron_expr, "
+            "interval_seconds, timezone FROM schedules WHERE id = %s FOR UPDATE",
             (schedule_id,),
         )
         if row is None:
             raise HTTPException(status_code=404, detail=f"schedule {schedule_id} not found")
         machine = row.machine
-        plan = plans.control_plan(action, enabled=row.enabled, status=row.status)
+        plan = plans.control_plan(
+            action, enabled=row.enabled, status=row.status, daemon=row.trigger_kind == "daemon"
+        )
         if plan.refusal is not None:
             raise HTTPException(status_code=409, detail=plan.refusal)
-        if plan.needs_sync:
+        if row.trigger_kind == "daemon" and plan.needs_sync:
             conn.execute(
                 "UPDATE schedules SET enabled = %s, desired_revision = desired_revision + 1, "
                 "launch_count = 0, next_launch_at = NULL, updated_at = now() WHERE id = %s",
@@ -691,6 +773,8 @@ def control_blocking(
             session_control.enqueue_in_transaction(conn, schedule_id, machine)
             if not plan.enabled:
                 resolve_schedule_alerts(conn, schedule_id)
+        elif row.trigger_kind != "daemon" and plan.needs_sync:
+            _apply_declarative_control(conn, schedule_id, action, row, now)
         full_row = query_one(conn, ScheduleFullRow, _FULL_QUERY, (schedule_id,))
         assert full_row is not None  # noqa: S101
         receipts.finish(conn, key, full_row)
@@ -702,63 +786,13 @@ async def _control_and_sync(
 ) -> ScheduleView:
     pool = gateway_state(request).db_pool
     row, needs_sync = await asyncio.to_thread(
-        control_blocking, pool, schedule_id, action, receipts.operation_key(request)
+        control_blocking,
+        pool,
+        schedule_id,
+        action,
+        receipts.operation_key(request),
+        gateway_clock(request).now(),
     )
     if needs_sync:
         await _wait_consumed(request, schedule_id)
     return _view(row)
-
-
-def _launch_env_blocking(pool: ConnectionPool, schedule_id: int) -> tuple[bool, tuple[str, ...]]:
-    with pool.connection() as conn:
-        row = query_one(
-            conn,
-            LaunchEnvRow,
-            "SELECT enabled, secret_env_vars FROM schedules WHERE id = %s",
-            (schedule_id,),
-        )
-    if row is None:
-        raise HTTPException(status_code=404, detail=f"schedule {schedule_id} not found")
-    return row.enabled, tuple(row.secret_env_vars)
-
-
-async def _read_gateway_secret_sources(
-    request: Request,
-) -> tuple[dict[str, str], dict[str, str]]:
-    state = gateway_state(request)
-    try:
-        aliases = await asyncio.to_thread(state.config_authority.read_env_aliases)
-    except OSError:
-        aliases = {}
-    process_env = state.gateway_process.config.process_environment()
-    return dict(aliases), dict(process_env)
-
-
-@router.get(
-    "/api/schedules/{schedule_id}/launch-env",
-    description="Deliver process-scoped secret environment variables for a schedule session.",
-)
-async def get_schedule_launch_env(
-    request: Request,
-    schedule_id: int,
-    authorization: str | None = Header(default=None),
-) -> dict[str, str]:
-    secret = gateway_state(request).gateway_config.cluster_secret
-    if (
-        cluster_credential(
-            authorization,
-            secret,
-            home=gateway_state(request).gateway_process.home,
-            cache=gateway_state(request).machine_token_acceptance,
-        )
-        is None
-    ):
-        raise HTTPException(status_code=401, detail="machine API token required")
-
-    pool = gateway_state(request).db_pool
-    enabled, secret_env_vars = await asyncio.to_thread(_launch_env_blocking, pool, schedule_id)
-    if not enabled or not secret_env_vars:
-        return {}
-
-    aliases, process_env = await _read_gateway_secret_sources(request)
-    return plans.select_declared_secrets(secret_env_vars, aliases, process_env)

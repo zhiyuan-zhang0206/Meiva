@@ -24,6 +24,7 @@ class LoadStep(Enum):
 class IdentityFacts:
     has_agent_id: bool
     owns_loop: bool
+    has_actor: bool = False
 
 
 @dataclass(frozen=True, slots=True)
@@ -32,6 +33,7 @@ class LaunchFacts:
     context_bound: bool
     identity: IdentityFacts | None
     env_has_agent_id: bool
+    env_has_schedule_id: bool = False
 
 
 @dataclass(frozen=True, slots=True)
@@ -57,8 +59,12 @@ def launched_process(facts: LaunchFacts) -> bool:
         return False
     if facts.context_bound:
         identity = facts.identity
-        return identity is not None and identity.has_agent_id and not identity.owns_loop
-    return facts.env_has_agent_id
+        return bool(
+            identity is not None
+            and (identity.has_agent_id or identity.has_actor)
+            and not identity.owns_loop
+        )
+    return facts.env_has_agent_id or facts.env_has_schedule_id
 
 
 def plan_load(facts: LoadFacts) -> LoadPlan:

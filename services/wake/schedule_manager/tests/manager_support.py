@@ -17,8 +17,8 @@ from base.clock import Clock
 from base.deploy.lifecycle.tests.serving_root import observe
 from base.paths import meiva_home
 from base.sessions.protocol import SessionBackend
+from services.wake.schedule_manager.declarative import ManagerPolicy
 from services.wake.schedule_manager.manager import REPO_ROOT, ScheduleManager
-from services.wake.schedule_manager.manager_policy import ManagerPolicy
 
 POLICY = ManagerPolicy(
     auto_restart_max_per_window=5,

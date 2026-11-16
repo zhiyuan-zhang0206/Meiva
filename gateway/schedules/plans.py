@@ -26,7 +26,17 @@ __all__ = [
     "select_declared_secrets",
 ]
 
-UPDATABLE = ("name", "description", "script", "command", "enabled", "machine")
+UPDATABLE = (
+    "name",
+    "description",
+    "script",
+    "command",
+    "enabled",
+    "machine",
+    "owner_agent_id",
+    "timeout_seconds",
+    "on_owner_terminate",
+)
 
 # meiva:note
 # A logs request always asks the session for at least this many lines, so a small window still
@@ -34,7 +44,15 @@ UPDATABLE = ("name", "description", "script", "command", "enabled", "machine")
 _MIN_CAPTURE_LINES = 200
 
 LogsSource = Literal["live", "transcript", "last_error", "none"]
-ControlAction = Literal["start", "stop", "restart"]
+ControlAction = Literal[
+    "start",
+    "stop",
+    "restart",
+    "enable",
+    "disable",
+    "cancel",
+    "run_now",
+]
 
 
 # meiva:note
@@ -52,8 +70,7 @@ class ControlPlan:
 
 # meiva:note
 # The requested fields that differ from the stored row (name, description, script, command,
-# enabled, machine). `owner_agent_id` is absent on purpose: it is assigned by provisioning
-# (`scripts/host_ops/set_schedule_owner.py`), never by an edit.
+# enabled, placement, and lifecycle fields).
 def changed_fields(previous: ScheduleStoreRow, fields: Mapping[str, object]) -> dict[str, object]:
     current: dict[str, object] = {
         "name": previous.name,
@@ -62,6 +79,9 @@ def changed_fields(previous: ScheduleStoreRow, fields: Mapping[str, object]) -> 
         "command": previous.command,
         "enabled": previous.enabled,
         "machine": previous.machine,
+        "owner_agent_id": previous.owner_agent_id,
+        "timeout_seconds": previous.timeout_seconds,
+        "on_owner_terminate": previous.on_owner_terminate,
     }
     return {col: fields[col] for col in UPDATABLE if col in fields and fields[col] != current[col]}
 
@@ -77,11 +97,23 @@ def edit_needs_sync(changed: Mapping[str, object], *, enabled: bool) -> bool:
 # meiva:note
 # What `action` does to a schedule in its current state. The three actions are the whole type: a
 # value outside them fails at once instead of being read as a start.
-def control_plan(action: ControlAction, *, enabled: bool, status: str) -> ControlPlan:
+def control_plan(
+    action: ControlAction, *, enabled: bool, status: str, daemon: bool = False
+) -> ControlPlan:
+    if daemon:
+        match action:
+            case "enable":
+                action = "start"
+            case "disable" | "cancel":
+                action = "stop"
+            case "run_now":
+                action = "restart"
+            case _:
+                pass
     match action:
-        case "start":
+        case "start" | "enable" | "run_now":
             wanted = True
-        case "stop":
+        case "stop" | "disable" | "cancel":
             wanted = False
         case "restart":
             if not enabled:
@@ -94,7 +126,9 @@ def control_plan(action: ControlAction, *, enabled: bool, status: str) -> Contro
         case _:
             assert_never(action)
     needs_sync = (
-        action == "restart" or enabled != wanted or (wanted and status in ("completed", "error"))
+        action in ("restart", "run_now", "cancel")
+        or enabled != wanted
+        or (wanted and status in ("completed", "error", "cancelled"))
     )
     return ControlPlan(refusal=None, enabled=wanted, needs_sync=needs_sync)
 

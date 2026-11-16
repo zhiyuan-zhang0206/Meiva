@@ -19,6 +19,11 @@ overrides the lifecycle projection to `impersonated`. The selected-agent detail
 read and the fleet graph carry no lease field, so they never produce it — an
 impersonated agent there still reads as its underlying `running`/`idling`.
 
+The schedules control page presents trigger kind and next fire, creates declarative
+triggers, and filters system, agent-owned, and completed rows. Declarative output is
+read from the schedule's `latest.log`; compatibility daemon rows retain their
+session-backed controls and log source.
+
 **Role assignment**: gateway side (pure agent-runner does not run it)—Next.js server is a `frontend` session from `build_services` (not in `_AGENT_RUNNER_ONLY_SESSIONS`), roster derived by `services/supervision/roster/spec.py:services_for_capabilities` by capability; callers import its actual definition owner.
 
 ## Browser security boundary

@@ -213,10 +213,12 @@ def test_the_load_step_follows_the_slot_and_the_request(facts: LoadFacts, plan: 
     [
         (LaunchFacts(True, False, None, True), False),
         (LaunchFacts(False, True, IdentityFacts(True, False), False), True),
+        (LaunchFacts(False, True, IdentityFacts(False, False, True), False), True),
         (LaunchFacts(False, True, IdentityFacts(True, True), True), False),
         (LaunchFacts(False, True, IdentityFacts(False, False), True), False),
         (LaunchFacts(False, True, None, True), False),
         (LaunchFacts(False, False, None, True), True),
+        (LaunchFacts(False, False, None, False, True), True),
         (LaunchFacts(False, False, None, False), False),
     ],
 )

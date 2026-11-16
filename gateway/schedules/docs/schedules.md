@@ -1,64 +1,89 @@
 # Schedule Manager & Runner
 
-A **schedule** is a resident process supervised by a host-local `schedule-manager` service (`services/wake/schedule_manager/daemon.py`, running on both gateway and agent-runner hosts). Its script controls timing, typically with a resumable loop; the `schedules` table has no time fields. Each schedule is pinned to a target `machine`. ScheduleManager on each host admits one launch per desired revision for its owned schedules (`machine = self._machine_name`), adopts live sessions and alerts on prolonged absence. Clean completion is terminal.
+A schedule is a durable trigger and an ordinary Python payload pinned to one
+machine. The host-local `schedule-manager` service runs on gateway and agent-runner
+hosts and owns two execution models during the migration:
 
-## Two Components
+- `at`, `cron`, and `every` are declarative, run-to-completion schedules. Waiting
+  consumes no process or PTY. A due slot starts one no-PTY subprocess.
+- `daemon` is the compatibility model for installed resident schedules. Its script
+  owns its timing loop and runs in a supervised PTY session.
 
-### ScheduleManager (`services/wake/schedule_manager/manager.py`)
-- **Built-in seeding**: gateway startup lifespan calls `provision_builtin_schedules(conn, machine=local_machine)` when `MEIVA_PROVISION_BUILTIN_SCHEDULES=1` (default). Setting it to `0` keeps a fresh cluster unseeded; existing schedules still run and explicit `meiva schedules provision [--machine M]` still works. It also resyncs an existing built-in row whose script or command differs from the template (new `schedule_versions` row, sync request queued; `enabled` and description untouched); agent-created schedules are never read. Built-in provisioning runs in the gateway or CLI (as operator/admin), never inside `schedule-manager` (which runs under `meiva_runner` permissions).
-- **Machine Partitioning & Reconcile Loop**: every 5 seconds, compares the database `schedules` table for owned schedules (`WHERE machine = self._machine_name`) against actual sessions. Each missing enabled session launch holds the local `base.deploy.lifecycle.start_serving` generation lock and proceeds only while serving; cleanup (disabled/deleted session reaping, which closes the reaped process's run rows) remains active before that boundary. When a schedule is moved from machine A to B, manager A reaps its local session and manager B launches the new session.
-- **Split-Unit Tie-Breaker**: when multiple co-located units share `machine_name`, `machine_units` elects the serving gateway (or lowest home) unit; un-elected units yield reconcile and requests consumption to avoid duplicate launch races.
-- **Edit acceptance**: same-value edits add no versions or sync work. Real changes commit with their queue entry; keyed retries and revision recovery are documented in [Schedule mutation receipts and revision convergence](schedule-convergence.md).
-- **API requests**: start / stop / restart / script edit / delete do not call the service; the router upserts a row in `schedule_sync_requests` partitioned by `(schedule_id, machine)` (`gateway/schedules/session_control.py`) and waits up to 8 s for it to be consumed. On a machine move, requests are queued for both old and new machines. The service's `requests` loop (every second) converges the latest desired revision, adopting matching PTYs and deletes the row only if it is unchanged; a row blocked by a surviving session or unreadable launch provenance stays queued only for a bounded window, after which the manager gives up (see [Schedule mutation receipts and revision convergence](schedule-convergence.md)). Log capture reads the session straight from the shell backend if local, or dispatches a `schedule_capture` RPC to the remote `agent_ops` server if on another machine.
-- **Starts missing** sessions, **kills excess** sessions (when a schedule is disabled/deleted). Every explicit stop and enabled-state value change synchronously invokes the identity-checked PTY backend; `stopped` is written only after that backend confirms the session is gone, while a failed reap is retried through the identity-checked backend for at most ten minutes, then the schedule becomes an error with a `schedule_convergence_abandoned` alert.
-- **Generation boundary**: exact old-session records support cleanup only. Loss of a started PTY does not authorize another launch for the same revision.
-- **Liveness identity**: the session name `meiva-schedule-<id>` is the schedule's stable identity—it encodes no cluster/machine name (path-only cluster identity, #629/#633); the PTY session namespace itself is host-local + per-home (the service socket `$MEIVA_HOME/run/pty-sessions.sock`), and home already isolates sessions adequately
-- **Service restart**: re-identifies live sessions and retains the persisted one-attempt latch and stall clock. Missing started sessions become errors, without script replay.
-- **Terminal execution**: a disappeared session with `status=completed` remains completed. Otherwise the manager records an error requiring explicit start/restart. Neither case relaunches automatically.
-- **Alerts on prolonged silence**: an enabled schedule with nothing running it for more than two hours emits one WARNING plus one `schedule_stalled` telemetry event, whose `evidence` says which shape it saw (no session, or a shell whose runner is gone). The first observation (`not_live_since`) and the alert (`stall_alerted_at`) are columns of the row, so one outage alerts once across restarts. Seeing the schedule live again clears both and rearms a later outage; completed and disabled schedules are excluded.
+New public creation surfaces admit only declarative triggers. Existing rows were
+backfilled as `daemon`, allowing payload conversion to happen separately from the
+engine rollout.
 
-### ScheduleRunner (`services/wake/schedule_manager/engine.py`)
-- The in-session entrypoint `.venv/bin/python -m services.wake.schedule_manager.runner <id>`; its script execution, stall guard, hard-exit cleanup and exit semantics are in [Schedule Runner — the in-session entrypoint](schedule-runner.md).
+## Declarative execution
 
-The built-in cron slot mechanism — at-most-once claims per `(schedule_id, slot_fire_at)` — is owned by [Cron slot claims](cron-slot-claims.md).
+The schedule row stores the next eligible UTC instant. Reconcile claims a due row
+and inserts its `schedule_runs` row in one transaction; the open row is the
+single-flight guard. The process runs with stdin closed, output redirected to
+`latest.log`, a new process session, and a finite timeout. Its exit outcome closes
+the same run row.
 
-## State Machine (`schedules.status`)
+An `at` row catches up once when its instant passed during downtime. Success becomes
+`completed`; failure becomes `error`; both disable the row. Recurring rows compute
+their next fire after the later of the claimed slot and current time, avoiding both
+overlap and replay storms after downtime.
 
-| status | meaning | reconcile behavior |
+The execution directory is a locality contract:
+
+- agent-owned: `$MEIVA_HOME/workspaces/<agent>/schedules/<schedule>/`
+- system-level: `$MEIVA_HOME/schedules/<schedule>/`
+
+`run.py` and `latest.log` live there. Payload state is an ordinary file in the same
+working directory; there is no scheduler-specific state or completion API.
+
+`owner_agent_id` also defaults placement to that agent's current machine and stamps
+run attribution. An owner lifecycle policy of `cancel` disables unfinished work when
+the agent terminates; `keep` leaves it independent. The owner changes attribution and
+locality, not authority. Details are in
+[schedule identity](../../../services/wake/schedule_manager/docs/schedule-identity.md).
+Machine moves and deletion are accepted once an open run closes, so an in-flight
+process cannot be detached from the manager and workspace that launched it.
+
+## Compatibility daemon execution
+
+Daemon rows retain revision convergence, the named `meiva-schedule-<id>` PTY, runner
+liveness, and explicit start/stop/restart behavior. Their request receipts and
+recovery rules remain in [schedule convergence](schedule-convergence.md), liveness in
+[schedule liveness](schedule-liveness.md), and payload process behavior in
+[schedule runner](schedule-runner.md).
+
+The built-in slot-claim helper remains inside compatibility payloads while they are
+resident. It is documented in [cron slot claims](cron-slot-claims.md).
+
+## Schedule manager responsibilities
+
+- Partition rows by `machine`, with `machine_units` electing one active co-located
+  unit so two homes do not launch the same work.
+- Reconcile declarative due slots from Postgres before converging daemon sessions.
+- Recover an open declarative run by adopting its outcome or live runner identity;
+  a process that disappears without an outcome settles as an error.
+- Resolve per-fire secret environment names at launch rather than persisting values.
+- Consume daemon `schedule_sync_requests`; declarative lifecycle mutations update
+  durable timing state directly and need no PTY convergence request.
+- Read declarative `latest.log` locally or through the target machine's ops RPC;
+  daemon logs retain live-capture and saved-transcript fallbacks.
+
+## State vocabulary
+
+| status | declarative meaning | daemon compatibility meaning |
 |---|---|---|
-| `running` | manager's last recorded launch (bookkeeping, not liveness) | maintain |
-| `completed` | script exited cleanly with rc=0 (**terminal**) | **no restart**; `start`/`restart` can rerun |
-| `error` | failed, lost or unknown launch/execution outcome | no auto restart; explicit start/restart creates a new revision; the silence alert still applies |
-| `stopped` | disabled / killed by manager | don't restart |
+| `scheduled` | enabled and waiting for `next_launch_at` | unused |
+| `running` | one open run owns the current fire | manager's recorded resident launch |
+| `completed` | a one-shot exited successfully | resident script exited successfully |
+| `error` | the latest execution failed | launch or resident execution failed |
+| `stopped` | disabled, eligible to be enabled later | disabled and session reaped |
+| `cancelled` | lifecycle cancellation; no future fire | lifecycle cancellation; session reaped |
 
-## Liveness
+## Entry points
 
-A session is a shell; the runner inside it can be gone ([Schedule liveness](schedule-liveness.md)).
-Three records answer three questions: the session name (is a shell there), the runner's own
-record under `run/schedules/` (is that process still alive), and a resident schedule's
-heartbeat (has it iterated since).
+- `gateway/schedules/router.py` — HTTP mutations, lifecycle controls, logs and runs
+- `meiva/schedules/__init__.py` — first-class SDK surface
+- `services/wake/schedule_manager/manager.py` — host-local reconciliation
+- `services/wake/schedule_manager/declarative.py` — due-slot admission and settlement
+- `services/wake/schedule_manager/runner.py` — declarative and daemon process entry
 
-## One launch attempt per revision
-
-The manager conditionally commits `launch_count=1` and an unknown-outcome error
-before asking the PTY backend to create the session. It marks a confirmed live
-session running. A failed response or process disappearance is not replayed.
-The latch survives manager restart; only an explicit new revision resets it.
-The legacy `next_launch_at` column is ignored. A crash between admission and
-actual process birth can lose work; this is accepted to prevent duplicate starts.
-
-## Key Dependencies
-
-- [Database Layer](../../../agent/db/docs/db.md) — reads/writes the `schedules` and `schedule_fire_log` tables
-- `base.cluster.session_name()` — generates the session name `meiva-schedule-<id>`
-- [Agent Lifecycle](../../../agent/docs/lifecycle.md) — agent lifecycle is independent of persistent schedule sessions
-
-## Entry Points
-
-- `services/wake/schedule_manager/daemon.py` — `.venv/bin/python -m services.wake.schedule_manager.daemon`: the service, its two loops and the checkout guard
-- `services/wake/schedule_manager/manager.py:ScheduleManager` — reconcile logic
-- `services/wake/schedule_manager/runner.py:main(argv)` — the process entrypoint; calls `services/wake/schedule_manager/engine.py:run()` with explicit SDK inputs
-
-## Router contracts
-
-The router's script checks, projections, log reads and its SQL invariant are owned by [Schedule router contracts](router-contracts.md).
+The API's projections and mutation boundaries are in
+[router contracts](router-contracts.md).

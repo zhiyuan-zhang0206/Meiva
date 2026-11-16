@@ -23,7 +23,7 @@ connections under a finite budget and ends its SSE streams at once.
 - **Runtime observability**: CPU/RSS/FD, loop lag/slow ticks and SSE metrics use OTLP. Lifespan joins its telemetry flushers before pool closure; emit failures stay best effort.
 - **Alert truth reconciliation**: the events-maintenance service's startup + five-minute reads of Grafana's active Alertmanager instances repair stored alert resolutions whose one-shot webhook was lost
 - **Failure feedback delivery**: authenticated CI, QA, and merge failure events are deduplicated durably, then delivered to the author through chat auto-resurrection, the nearest live birth ancestor, or a task-registry alert
-- **Schedule keep-alive**: built-in ScheduleManager, keeping schedule resident processes alive in their own sessions (not a timer trigger — timing logic is inside the script, the manager only ensures stay-up)
+- **Durable schedules**: `at`, `cron`, and `every` timing declarations launch bounded no-PTY payloads; the temporary `daemon` compatibility trigger retains resident-session supervision
 - **Cluster ops API**: cluster, config, inventory, metrics, system and other management endpoints
 - **MCP control plane**: default-off `/mcp` authenticates like the API and forwards each tool to an API route
 - **Per-agent command views**: `GET /api/commands?agent_id=` resolves the agent's runner then asks its `agent_skill_view` op for the command catalog that runner discovers from its own converged load dir plus the agent's persisted cwd; an unavailable, unknown, or version-skewed runner falls back to the gateway-local catalog
@@ -36,11 +36,11 @@ connections under a finite budget and ends its SSE streams at once.
 Browser (frontend:3000) ──HTTP──▶ Gateway (:8000) ──▶ Postgres / Redis
                                       │
        agents ─────────────────────┐ │ ┌───────────────── schedules
-   Gateway ──POST /ops──▶ agent-ops  │   Gateway ──▶ session backend (direct)
-   daemon ──▶ detached process (runner) │   ScheduleManager._launch
+   Gateway ──POST /ops──▶ agent-ops  │   Gateway ──▶ durable timing rows
+   daemon ──▶ detached process (runner) │   ScheduleManager ──▶ no-PTY fire / daemon PTY
 ```
 - **agents**: spawn / lifecycle uniformly goes through `forward_to_home_machine` → `cluster_rpc` POST `/ops` to the agent-ops daemon, the runner commits durable work and publishes a wake to its agent host — **even if the target is the local machine, there is no in-process shortcut** (`gateway/agents/launch/forward.py:forward_to_home_machine()`)
-- **schedules**: the gateway only queues sync requests and reads log captures (`gateway/schedules/session_control.py`); the `schedule-manager` service launches schedule sessions
+- **schedules**: the gateway accepts trigger/lifecycle mutations and reads local or remote logs; the host-local `schedule-manager` claims declarative fires and converges compatibility daemon sessions
 
 - Gateway connects to Postgres via one `base.db.pool()` per process, borrowing one connection per request. Going through the factory rather than constructing a `ConnectionPool` is what gives the borrows `prepare_threshold=None` (never prepare; transaction-pooling-safe under PgBouncer) and `PG_KEEPALIVE_KWARGS` (a request-serving pool outlives host sleeps; without keepalives a borrow on a half-dead socket stalls on the OS TCP-retransmit timeout). Rule 5 (`postgres-dial`) enforces it
 - Event publishing uses a process-level shared `aredis.Redis` instance

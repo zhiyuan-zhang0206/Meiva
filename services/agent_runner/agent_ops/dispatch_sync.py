@@ -199,9 +199,13 @@ def _agent_arm(
             from ops.rpc_schemas import ScheduleCapturePayload
 
             scp = ScheduleCapturePayload.model_validate(payload)
-            return cluster.schedule_capture_op(scp.schedule_id, scp.lines, home=home).model_dump(
-                mode="json"
-            )
+            return cluster.schedule_capture_op(
+                scp.schedule_id,
+                scp.lines,
+                home=home,
+                owner_agent_id=scp.owner_agent_id,
+                trigger_kind=scp.trigger_kind,
+            ).model_dump(mode="json")
         case _:
             raise ValueError(f"not an agent arm: {kind!r}")
 

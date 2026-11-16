@@ -24,6 +24,10 @@ def test_every_schedules_verb_is_registered() -> None:
         "start",
         "stop",
         "restart",
+        "enable",
+        "disable",
+        "cancel",
+        "run-now",
         "logs",
         "runs",
     }
@@ -39,7 +43,20 @@ def test_verify_flags_parse() -> None:
 def test_script_flags_are_mutually_exclusive() -> None:
     p = build_parser()
     with pytest.raises(SystemExit):
-        p.parse_args(["schedules", "create", "--name", "n", "--script", "x", "--script-file", "f"])
+        p.parse_args(
+            [
+                "schedules",
+                "create",
+                "--name",
+                "n",
+                "--script",
+                "x",
+                "--script-file",
+                "f",
+                "--every",
+                "60",
+            ]
+        )
 
 
 def test_enable_and_disable_are_mutually_exclusive() -> None:
@@ -53,9 +70,20 @@ def test_create_requires_a_script_source_at_parse_time(
 ) -> None:
     p = build_parser()
     with pytest.raises(SystemExit) as raised:
-        p.parse_args(["schedules", "create", "--name", "n"])
+        p.parse_args(["schedules", "create", "--name", "n", "--every", "60"])
     assert raised.value.code == 2
-    assert "one of the arguments --script --script-file is required" in capsys.readouterr().err
+    assert (
+        "one of the arguments --script --script-file --message is required"
+        in capsys.readouterr().err
+    )
+
+
+def test_create_requires_one_trigger_at_parse_time(capsys: pytest.CaptureFixture[str]) -> None:
+    p = build_parser()
+    with pytest.raises(SystemExit) as raised:
+        p.parse_args(["schedules", "create", "--name", "n", "--script", "pass"])
+    assert raised.value.code == 2
+    assert "one of the arguments --at --cron --every is required" in capsys.readouterr().err
 
 
 def test_update_requires_at_least_one_field_at_parse_time(

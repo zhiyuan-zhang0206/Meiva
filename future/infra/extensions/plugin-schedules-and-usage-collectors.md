@@ -1,7 +1,7 @@
 # Plugin-declared machine-placed schedules and the `meiva_usage` collector plugin
 
 > **Status: active implementation plan.** Covers three slices:
-> (S1) machine-placed schedules with one `schedule-manager` per machine,
+> (S1, completed) machine-placed schedules with one `schedule-manager` per machine,
 > (S2) declarative plugin schedule and config-derived status-card extension points
 > with process-scoped secret delivery, and
 > (S3) consolidating the four external usage/balance plugins into the builtin
@@ -136,10 +136,10 @@ privileges (mirrored in `db/schema.sql` and `base/cluster/authority/groups.py`):
 
 ### API, CLI, explicit placement status, and remote logs
 
-- `/api/schedules` (`ScheduleSummary`, `ScheduleView`, `ScheduleCreate`,
-  `ScheduleUpdate`) and `meiva schedules` (`ls`, `get`, `create --machine`,
-  `update --machine`) carry `machine` and `owner_plugin`. `ScheduleCreate.machine`
-  defaults to the gateway's own machine name when omitted.
+- `/api/schedules` and `meiva schedules` carry machine placement. Declarative
+  owner placement now defaults to the owner's machine; a system schedule defaults
+  to the gateway when no machine is explicit. Plugin-created compatibility rows
+  continue naming placement during provisioning.
 - **Explicit unrunnable state**: `GET /api/schedules` joins `machines` and
   `machine_probe` to return `placement_status` (`"ok"`, `"unregistered"`,
   `"paused"`, `"stopped"`, `"offline"`) and `placement_reason: str | None`,

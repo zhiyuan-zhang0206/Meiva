@@ -35,6 +35,10 @@ Verbs that act on the cluster rather than on this host's services, on the home
 Agent lifecycle, context reads, local operations, and package-management command
 groups are enumerated in [CLI Operator Surfaces](operator-surfaces/operator-surfaces.md).
 
+`meiva schedules` creates declarative `at`, `cron`, and `every` triggers from a
+Python payload or wake message, exposes lifecycle controls and run/log reads, and
+keeps provisioning/verification commands for compatibility daemon migration.
+
 Ordinary `meiva start` marks the home serving after readiness. Durable
 agent identity and work survive both stop and restart; live shell sessions survive
 either only with `--keep-shell-sessions`. See [operator procedure](../../docs/conventions/operations/graceful-maintenance.md).

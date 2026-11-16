@@ -30,11 +30,39 @@ def direct(mode: str) -> int:
 
     if mode == "schedules-xor-none":
         return schedules.cmd_schedules_create(
-            _access(), "n", None, None, None, None, idempotency_key="key"
+            _access(),
+            "n",
+            None,
+            None,
+            None,
+            run_at=None,
+            cron_expr=None,
+            interval_seconds=60,
+            message=None,
+            target_agent_id=None,
+            owner_agent_id=None,
+            timezone=None,
+            timeout_seconds=600,
+            on_owner_terminate=None,
+            idempotency_key="key",
         )
     if mode == "schedules-xor-both":
         return schedules.cmd_schedules_create(
-            _access(), "n", "print(1)", "s.py", None, None, idempotency_key="key"
+            _access(),
+            "n",
+            "print(1)",
+            "s.py",
+            None,
+            run_at=None,
+            cron_expr=None,
+            interval_seconds=60,
+            message=None,
+            target_agent_id=None,
+            owner_agent_id=None,
+            timezone=None,
+            timeout_seconds=600,
+            on_owner_terminate=None,
+            idempotency_key="key",
         )
     if mode == "schedules-update-empty":
         return schedules.cmd_schedules_update(

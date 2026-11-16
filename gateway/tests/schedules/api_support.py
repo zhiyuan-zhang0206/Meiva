@@ -1,10 +1,9 @@
 # meiva:note
 # Clients and a consumer for the schedule API's tests.
 #
-# A start / stop / restart / edit / delete queues a sync request and waits for the schedule-manager
-# service to consume it. `schedule_client` shortens that wait, so a test with no service answers
-# fast; `converging` is the service itself (the real request loop over a fake session backend),
-# for a test that wants the converged outcome.
+# A daemon start / stop / restart / edit / delete queues a sync request and waits for the
+# schedule-manager service to consume it. `schedule_client` shortens that wait, so a test with no
+# service answers fast; `converging` runs the real request loop over a fake session backend.
 
 from __future__ import annotations
 

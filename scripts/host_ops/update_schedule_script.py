@@ -108,7 +108,9 @@ def replace_script(
         raise RuntimeError(
             f"schedule {schedule_id}: expected old script {expected_sha256}, found {actual}"
         )
-    row, _needs_sync = update_blocking(pool, schedule_id, {"script": script})
+    row, _needs_sync = update_blocking(
+        pool, schedule_id, {"script": script}, None, datetime.now(UTC)
+    )
     if row[:8] != previous[:8] or row[9:11] != previous[9:11] or row[11] != script:
         raise RuntimeError(f"schedule {schedule_id}: installed writer changed protected fields")
     return "updated"

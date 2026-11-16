@@ -1,11 +1,20 @@
 # Schedule runner composition
 
-The runner composes SDK policy inputs from one ConfigBoot and binds the schedule actor to that process's clients. Its checkout anchors launched scripts; admission rejects a development checkout against a production home before reading or executing a script. The submitted revision remains the execution authority rather than whichever script happens to be current when a stale runner wakes.
+The runner composes SDK policy inputs from one ConfigBoot and binds the schedule actor to that process's clients. Its checkout anchors launched scripts; admission rejects a development checkout against a production home before reading or executing a script.
+
+Declarative admission materializes `run.py` in the schedule's owner-local workspace
+and starts the static runner module. The single-round wrapper owns timeout and signal
+propagation; its payload child boots from the launch environment and executes the
+file once. The manager, rather than user code, owns the durable run and timing
+transition.
+
+Compatibility daemon admission retains submitted revision authority rather than
+executing whichever script happens to be current when a stale runner wakes.
 
 The manager receives its shell `SessionBackend`, launch checkout, home, session
 environment and `ManagerPolicy` as required constructor inputs; its daemon reads
 them once (`get_shell_backend(home=...)`, its repository root, `forward_env_dict()` and
-the gateway configuration) and never reads settings or the environment again. The
+the gateway configuration). The
 clock is a value: the loop passes a monotonic reading as `now` to `reconcile` and
 `sync_one`. Liveness follows the same shape as a round beat: a file under the manager's
 home (`base.daemon.schedules.claim`) rather than a constructor input, so a test writes a

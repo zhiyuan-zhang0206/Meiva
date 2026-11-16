@@ -1,29 +1,14 @@
-"""Schedule manager daemon — keeps one resident session alive per enabled schedule.
-
-Two resident sequential loops under one `TaskGroup` (`run_loops`):
-
-- `reconcile` (`ScheduleManager.reconcile`): every few seconds, desired (enabled
-  `schedules` rows) against actual (live `meiva-schedule-<id>` sessions) — launch
-  the missing ones once per explicit revision, reap the unwanted, alert on a
-  schedule sessionless for two hours.
-- `requests` (`services.wake.schedule_manager.requests`): every second, converge the
-  schedules the API asked for (start / stop / restart / edit / delete).
-
-The launch latch and the stall-alert clock are columns of the schedule row, so a
-restart of this service resumes them. A loop that raises
-cancels its sibling and the exception leaves `run`: the process exits and the
-supervisor restarts it; the schedule sessions themselves survive the service.
-An unreachable database skips a round. Each loop reports its own progress to
-`/healthz`.
-
-Runs on the gateway, one per cluster, from the home's own checkout: a checkout
-that does not own the home refuses to supervise schedules, because the sessions
-run that checkout's code (issue #194). Kept alive by the root supervisor's health
-monitor through the roster's `/healthz` identity probe (`services/supervision/roster/healthz.py`).
-
-Usage:
-    .venv/bin/python -m services.wake.schedule_manager.daemon
-"""
+# meiva:note
+# Schedule manager daemon for declarative fires and compatibility sessions.
+#
+# Two resident sequential loops run under one `TaskGroup`: `reconcile` claims due
+# declarative fires and converges compatibility sessions, while `requests` consumes
+# explicit daemon convergence requests. A loop failure cancels its sibling so the
+# supervisor can restart the service; compatibility sessions survive that restart.
+#
+# Runs on each schedule-capable machine from the home's own checkout. A checkout
+# that does not own the home refuses supervision because its children run that
+# checkout's code. Each loop reports its own progress to `/healthz`.
 
 import asyncio
 import logging
@@ -72,8 +57,8 @@ from base.telemetry.pipeline_build import build_pipeline
 from base.telemetry.process_logging import init_gateway_process
 from services.pidfile import acquire_pidfile, pidfile_holds_daemon, remove_pidfile
 from services.wake.schedule_manager import requests
+from services.wake.schedule_manager.declarative import ManagerPolicy
 from services.wake.schedule_manager.manager import POLL_INTERVAL_S, REPO_ROOT, ScheduleManager
-from services.wake.schedule_manager.manager_policy import ManagerPolicy
 
 _log = logging.getLogger("services.wake.schedule_manager.daemon")
 

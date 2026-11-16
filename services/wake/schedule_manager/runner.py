@@ -4,8 +4,12 @@
 
 from __future__ import annotations
 
+import contextlib
+import json
 import os
 import random
+import signal
+import subprocess
 import sys
 import threading
 from collections.abc import Callable, Sequence
@@ -27,6 +31,7 @@ from base.daemon.schedules.inputs import ScheduleInputs
 from base.db import Database
 from base.db.code_version_gate import ProcessDbGate
 from base.db.config import db_config_from_boot
+from base.host.atomic_io import write_text_atomic
 from base.host.exit_codes import hard_exit
 from base.native_process.code_version import CodeVersion
 from base.paths import meiva_home, prod_service_checkout_error
@@ -35,6 +40,99 @@ from meiva.boot import clients_over
 from meiva.sdk_surface import process_context
 from services.wake.schedule_manager import engine
 from services.wake.schedule_manager.stall_policy import StallPolicy
+
+
+def _write_single_round_outcome(
+    path: Path, *, ok: bool, returncode: int, timed_out: bool, note: str | None
+) -> None:
+    payload = {
+        "ok": ok,
+        "returncode": returncode,
+        "timed_out": timed_out,
+        "note": note,
+    }
+    write_text_atomic(path, json.dumps(payload, sort_keys=True) + "\n", sync_file=False)
+
+
+def _kill_process_group(pid: int, signum: int) -> None:
+    with contextlib.suppress(ProcessLookupError):
+        os.killpg(pid, signum)
+
+
+# meiva:note
+# Run ``run.py`` once through the SDK bootstrap and leave a restart-adoptable outcome. The child
+# command uses the fixed interpreter/module and a payload path rooted in the schedule workspace.
+def run_single_round(
+    schedule_id: int,
+    run_id: int,
+    timeout_seconds: int,
+    outcome_path: Path,
+    *,
+    home: Path,
+) -> int:
+    del run_id
+    _ = write_claim(home, schedule_id, pid=os.getpid())
+    script_path = Path.cwd() / "run.py"
+    child = subprocess.Popen(  # noqa: S603
+        [
+            sys.executable,
+            "-m",
+            "services.wake.schedule_manager.runner",
+            "--payload",
+            str(script_path),
+        ],
+        cwd=Path.cwd(),
+        env=os.environ.copy(),
+        stdin=subprocess.DEVNULL,
+        start_new_session=True,
+    )
+
+    def interrupted(signum: int, _frame: object) -> None:
+        _kill_process_group(child.pid, signal.SIGTERM)
+        try:
+            child.wait(timeout=2)
+        except subprocess.TimeoutExpired:
+            _kill_process_group(child.pid, signal.SIGKILL)
+            child.wait()
+        _write_single_round_outcome(
+            outcome_path,
+            ok=False,
+            returncode=128 + signum,
+            timed_out=False,
+            note="cancelled",
+        )
+        clear_claim(home, schedule_id)
+        raise SystemExit(128 + signum)
+
+    previous_term = signal.signal(signal.SIGTERM, interrupted)
+    previous_int = signal.signal(signal.SIGINT, interrupted)
+    try:
+        try:
+            returncode = child.wait(timeout=timeout_seconds)
+        except subprocess.TimeoutExpired:
+            _kill_process_group(child.pid, signal.SIGKILL)
+            child.wait()
+            note = f"timed out after {timeout_seconds}s"
+            _write_single_round_outcome(
+                outcome_path,
+                ok=False,
+                returncode=124,
+                timed_out=True,
+                note=note,
+            )
+            return 124
+        _write_single_round_outcome(
+            outcome_path,
+            ok=returncode == 0,
+            returncode=returncode,
+            timed_out=False,
+            note=None if returncode == 0 else f"process exited {returncode}",
+        )
+        return returncode
+    finally:
+        signal.signal(signal.SIGTERM, previous_term)
+        signal.signal(signal.SIGINT, previous_int)
+        clear_claim(home, schedule_id)
 
 
 def _bind_schedule_actor(
@@ -155,16 +253,34 @@ def run(schedule_id: int, revision: int | None = None, *, config: ConfigBoot | N
 def main(argv: Sequence[str]) -> None:
     boot = ConfigBoot()
     boot.boot()
+    refusal = prod_service_checkout_error(Path(__file__).resolve().parents[3], home=meiva_home())
+    if refusal is not None:
+        logger.error("schedule runner refused: {}", refusal)
+        raise SystemExit(3)
+    if len(argv) == 2 and argv[0] == "--payload":
+        engine.run_single_round_payload(Path(argv[1]))
+        raise SystemExit(0)
+    if len(argv) == 5 and argv[0] == "--single-round":
+        schedule_id = int(argv[1])
+        run_id = int(argv[2])
+        timeout_seconds = int(argv[3])
+        if schedule_id < 1 or run_id < 1 or timeout_seconds < 1:
+            raise SystemExit(2)
+        raise SystemExit(
+            run_single_round(
+                schedule_id,
+                run_id,
+                timeout_seconds,
+                Path(argv[4]),
+                home=meiva_home(),
+            )
+        )
     if len(argv) not in (1, 2):
         logger.error(
             "Usage: python -m services.wake.schedule_manager.runner <schedule_id> [revision]"
         )
         raise SystemExit(2)
 
-    refusal = prod_service_checkout_error(Path(__file__).resolve().parents[3], home=meiva_home())
-    if refusal is not None:
-        logger.error("schedule runner refused: {}", refusal)
-        raise SystemExit(3)
     revision = int(argv[1]) if len(argv) == 2 else None
     if revision is not None and revision < 0:
         raise SystemExit(2)

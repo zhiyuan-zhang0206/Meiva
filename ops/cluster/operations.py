@@ -334,7 +334,32 @@ def shell_capture_op(
     )
 
 
-def schedule_capture_op(schedule_id: int, lines: int = 200, *, home: Path) -> ScheduleCaptureResult:
+def schedule_capture_op(
+    schedule_id: int,
+    lines: int = 200,
+    *,
+    home: Path,
+    owner_agent_id: int | None = None,
+    trigger_kind: str = "daemon",
+) -> ScheduleCaptureResult:
+    if trigger_kind != "daemon":
+        if owner_agent_id is None:
+            log_path = home / "schedules" / str(schedule_id) / "latest.log"
+        else:
+            log_path = (
+                home
+                / "workspaces"
+                / str(owner_agent_id)
+                / "schedules"
+                / str(schedule_id)
+                / "latest.log"
+            )
+        try:
+            text = log_path.read_text(encoding="utf-8", errors="replace")
+        except OSError:
+            return ScheduleCaptureResult()
+        return ScheduleCaptureResult(transcript=text.splitlines()[-lines:])
+
     from base.cluster import session_name
     from base.sessions.backend import get_shell_backend
 
