@@ -161,7 +161,9 @@ class _PrestageRig:
     uv_sha: str
     pnpm_sha: str
 
-    def run(self, target: str, **extra_env: str) -> subprocess.CompletedProcess[str]:
+    def run(
+        self, target: str, *, shell: str = "bash", **extra_env: str
+    ) -> subprocess.CompletedProcess[str]:
         env = {
             **os.environ,
             "HOME": str(self.user_home),
@@ -171,7 +173,7 @@ class _PrestageRig:
             **extra_env,
         }
         env.pop("UV_HTTP_TIMEOUT", None)
-        return run_host_shell(["bash", "-c", prestage_command(target)], env=env)
+        return run_host_shell([shell, "-c", prestage_command(target)], env=env)
 
 
 def _git_in(repo: Path, *args: str) -> str:
@@ -273,6 +275,44 @@ def _build_prestage_rig(tmp_path: Path) -> _PrestageRig:
         uv_sha=uv_sha,
         pnpm_sha=pnpm_sha,
     )
+
+
+@pytest.mark.parametrize("shell", ["/bin/sh", "/bin/zsh"])
+@pytest.mark.parametrize("optional_paths", [False, True])
+def test_prestage_preserves_path_and_cleans_archive_in_host_shell(
+    tmp_path: Path, shell: str, optional_paths: bool
+) -> None:
+    if not Path(shell).exists():
+        pytest.skip(f"{shell} is not installed")
+    rig = _build_prestage_rig(tmp_path)
+    _git_in(rig.repo, "checkout", "-q", rig.pnpm_sha)
+    if optional_paths:
+        web = rig.repo / "ui/web"
+        (web / "scripts/patches").mkdir(parents=True)
+        (web / "pnpm-workspace.yaml").write_text("packages: []\n")
+        (web / "scripts/patches/fixture.patch").write_text("target-patch\n")
+        _git_in(rig.repo, "add", "ui/web")
+        _git_in(rig.repo, "commit", "-qm", "optional prestage inputs")
+    target = _git_in(rig.repo, "rev-parse", "HEAD")
+    _git_in(rig.repo, "checkout", "-q", rig.pnpm_sha)
+    expected_path = f"{rig.bin_dir}:{os.environ['PATH']}"
+    optional_check = "-f" if optional_paths else "! -e"
+    write_executable(
+        rig.source_py,
+        "#!/bin/sh\n"
+        f'[ "$PATH" = {shlex.quote(expected_path)} ] || exit 81\n'
+        '[ -f "$PYTHONPATH/pyproject.toml" ] || exit 82\n'
+        f'[ {optional_check} "$PYTHONPATH/ui/web/pnpm-workspace.yaml" ] || exit 83\n'
+        f'[ {optional_check} "$PYTHONPATH/ui/web/scripts/patches/fixture.patch" ] || exit 84\n'
+        'printf "path-preserved\\n"\n',
+    )
+    result = rig.run(target, shell=shell)
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert result.stdout == "path-preserved\n"
+    assert result.stderr == ""
+    assert rig.source_sentinel.read_text() == "immutable\n"
+    assert _git_in(rig.repo, "rev-parse", "HEAD") == rig.pnpm_sha
+    assert list(tmp_path.glob("meiva-prestage.*")) == []
 
 
 def test_prestage_shell_skips_uv_on_pyproject_only_diff_and_fails_fast_on_sync_error(
