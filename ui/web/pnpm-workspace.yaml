@@ -22,3 +22,6 @@ strictPeerDependencies: false
 allowBuilds:
   '@parcel/watcher': false
   '@swc/core': false
+
+patchedDependencies:
+  mermaid@12.3.0: scripts/patches/mermaid@12.3.0.patch

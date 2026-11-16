@@ -1,0 +1,12 @@
+diff --git a/dist/mermaid.core.mjs b/dist/mermaid.core.mjs
+index 8300b21412e721435ff78a935f8da41ca2d64c7a..f8822ad14d236d0ab6791a529e1ff88e5b0a3cd1 100644
+--- a/dist/mermaid.core.mjs
++++ b/dist/mermaid.core.mjs
+@@ -1359,6 +1359,7 @@ var renderDiagram = /* @__PURE__ */ __name(async function(id38, text, svgContain
+   const diagramClassDefs = diag.renderer.getClasses?.(text, diag);
+   const rules = createUserStyles(config, diagramType, diagramClassDefs, idSelector);
+   const style1 = document.createElement("style");
++  style1.nonce = svgContainingElement?.nonce ?? "";
+   style1.innerHTML = rules;
+   svg.insertBefore(style1, firstChild);
+   try {
