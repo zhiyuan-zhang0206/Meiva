@@ -72,12 +72,12 @@ def test_tracker_script_exists() -> None:
 
 def test_fake_ip_range_boundaries(tracker: Any) -> None:
 
-    assert tracker._is_fake_ip("198.18.0.0")
-    assert tracker._is_fake_ip("198.19.255.255")
-    assert not tracker._is_fake_ip("198.17.255.255")
-    assert not tracker._is_fake_ip("198.20.0.0")
-    assert not tracker._is_fake_ip("104.18.6.192")
-    assert not tracker._is_fake_ip("not-an-ip")
+    assert tracker.is_fake_ip("198.18.0.0")
+    assert tracker.is_fake_ip("198.19.255.255")
+    assert not tracker.is_fake_ip("198.17.255.255")
+    assert not tracker.is_fake_ip("198.20.0.0")
+    assert not tracker.is_fake_ip("104.18.6.192")
+    assert not tracker.is_fake_ip("not-an-ip")
 
 
 def test_doh_real_ip_falls_back_to_second_endpoint(tracker: Any) -> None:
@@ -95,12 +95,12 @@ def test_doh_real_ip_falls_back_to_second_endpoint(tracker: Any) -> None:
         assert params == {"name": host, "type": "A"}
         assert timeout == 10
         calls.append(url)
-        if url == tracker._DOH_ENDPOINTS[0]:
+        if url == tracker.DOH_ENDPOINTS[0]:
             raise tracker.requests.exceptions.ConnectionError("primary unavailable")
         return _JSONResponse({"Answer": [{"name": host, "type": 1, "data": "104.18.1.2"}]})
 
-    assert tracker._doh_real_ip(host, http_get=get) == "104.18.1.2"
-    assert calls == list(tracker._DOH_ENDPOINTS)
+    assert tracker.doh_real_ip(host, http_get=get) == "104.18.1.2"
+    assert calls == list(tracker.DOH_ENDPOINTS)
 
 
 def test_doh_real_ip_skips_fake_ip_answers(tracker: Any) -> None:
@@ -119,8 +119,8 @@ def test_doh_real_ip_skips_fake_ip_answers(tracker: Any) -> None:
         calls.append(url)
         return _JSONResponse({"Answer": [{"name": host, "type": 1, "data": next(addresses)}]})
 
-    assert tracker._doh_real_ip(host, http_get=get) == "104.18.1.2"
-    assert calls == list(tracker._DOH_ENDPOINTS)
+    assert tracker.doh_real_ip(host, http_get=get) == "104.18.1.2"
+    assert calls == list(tracker.DOH_ENDPOINTS)
 
 
 def test_doh_real_ip_raises_when_all_endpoints_fail(tracker: Any) -> None:
@@ -131,8 +131,8 @@ def test_doh_real_ip_raises_when_all_endpoints_fail(tracker: Any) -> None:
         raise tracker.requests.exceptions.ConnectionError("unavailable")
 
     with pytest.raises(ConnectionError, match="DoH"):
-        tracker._doh_real_ip("api.example.com", http_get=get)
-    assert calls == list(tracker._DOH_ENDPOINTS)
+        tracker.doh_real_ip("api.example.com", http_get=get)
+    assert calls == list(tracker.DOH_ENDPOINTS)
 
 
 def test_doh_real_ip_is_cached(tracker: Any) -> None:
@@ -143,9 +143,9 @@ def test_doh_real_ip_is_cached(tracker: Any) -> None:
         calls.append(url)
         return _JSONResponse({"Answer": [{"name": host, "type": 1, "data": "104.18.1.2"}]})
 
-    assert tracker._doh_real_ip(host, http_get=get) == "104.18.1.2"
-    assert tracker._doh_real_ip(host, http_get=get) == "104.18.1.2"
-    assert calls == [tracker._DOH_ENDPOINTS[0]]
+    assert tracker.doh_real_ip(host, http_get=get) == "104.18.1.2"
+    assert tracker.doh_real_ip(host, http_get=get) == "104.18.1.2"
+    assert calls == [tracker.DOH_ENDPOINTS[0]]
 
 
 def test_session_for_host_healthy_resolution_returns_none(tracker: Any) -> None:
@@ -160,7 +160,7 @@ def test_session_for_host_healthy_resolution_returns_none(tracker: Any) -> None:
     def no_doh(_host: str) -> str:
         pytest.fail("healthy DNS must not use DoH")
 
-    assert tracker._session_for_host(host, addrinfo=getaddrinfo, doh_resolver=no_doh) is None
+    assert tracker.session_for_host(host, addrinfo=getaddrinfo, doh_resolver=no_doh) is None
 
 
 def test_session_for_host_fake_ip_returns_pinned_session(tracker: Any) -> None:
@@ -176,7 +176,7 @@ def test_session_for_host_fake_ip_returns_pinned_session(tracker: Any) -> None:
     def doh_real_ip(_host: str) -> str:
         return pinned_ip
 
-    session = tracker._session_for_host(host, addrinfo=getaddrinfo, doh_resolver=doh_real_ip)
+    session = tracker.session_for_host(host, addrinfo=getaddrinfo, doh_resolver=doh_real_ip)
 
     assert isinstance(session, tracker.requests.Session)
     adapter = session.get_adapter(f"https://{host}/")
@@ -721,3 +721,52 @@ def test_the_state_file_is_under_the_home_when_no_directory_is_named(
     )
     assert code == 2
     assert (meiva_home() / "model-tracker" / "state.json").is_file()
+
+
+def test_claude_source_sends_anthropic_workspace_id_header_when_configured(
+    tracker: Any,
+) -> None:
+    source = tracker.SOURCES["claude"]
+    seen_headers: list[dict[str, str]] = []
+
+    def fetcher(
+        url: str, *, headers: dict[str, str], params: dict[str, str | int]
+    ) -> dict[str, object]:
+        assert url == source.base_url + source.models_path
+        assert params == {}
+        seen_headers.append(dict(headers))
+        return {"data": [{"id": "claude-fable-5-2"}], "has_more": False}
+
+    extra = tracker.source_extra_headers(
+        source,
+        {"ANTHROPIC_WORKSPACE_ID": "  wrkspc_01Test  "},
+        env_lookup=missing_environment_value,
+    )
+    assert extra == {"anthropic-workspace-id": "wrkspc_01Test"}
+    assert tracker.fetch_provider_models(
+        source, "sk-ant-test", fetcher=fetcher, extra_headers=extra
+    ) == ["claude-fable-5-2"]
+    assert seen_headers == [
+        {
+            "x-api-key": "sk-ant-test",
+            "anthropic-version": "2023-06-01",
+            "anthropic-workspace-id": "wrkspc_01Test",
+        }
+    ]
+
+    seen_headers.clear()
+    empty_extra = tracker.source_extra_headers(
+        source,
+        {"ANTHROPIC_WORKSPACE_ID": "   "},
+        env_lookup=missing_environment_value,
+    )
+    assert empty_extra == {}
+    assert tracker.fetch_provider_models(
+        source, "sk-ant-test", fetcher=fetcher, extra_headers=empty_extra
+    ) == ["claude-fable-5-2"]
+    assert seen_headers == [
+        {
+            "x-api-key": "sk-ant-test",
+            "anthropic-version": "2023-06-01",
+        }
+    ]

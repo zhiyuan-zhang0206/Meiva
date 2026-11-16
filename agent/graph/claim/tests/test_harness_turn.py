@@ -447,6 +447,62 @@ async def test_multi_step_turn_logs_each_step_usage_and_calls(
     assert all("unpriced" not in row["extra"] for row in rows)
 
 
+@pytest.mark.parametrize(
+    ("raw_model", "expected_model"),
+    (
+        ("gemini-4-hydrogen-xhigh", "gemini-4-hydrogen"),
+        ("gemini-4-carbon-high", "gemini-4-carbon"),
+        ("claude-fable-5-2[1m]", "claude-fable-5-2"),
+    ),
+)
+async def test_harness_turn_prices_gemini_4_and_fable_5_2_cli_selectors(
+    raw_model: str, expected_model: str, loguru_records: LogRecords
+) -> None:
+    ctx = runtime(FakeEngine()).context
+    turn = HarnessTurn(
+        turn_id="t1",
+        text="done",
+        usage=Usage(input_tokens=1000, output_tokens=100),
+        cost_usd=None,
+        subtype="completed",
+        is_error=False,
+        interrupted=False,
+        num_turns=1,
+    )
+    log_turn_usage(ctx, 7684, raw_model, turn)
+    [row] = loguru_records.events("llm_usage")
+    assert row["extra"]["model"] == expected_model
+    assert "unpriced" not in row["extra"]
+    assert row["extra"]["cost_usd"] > 0
+
+
+async def test_unpriced_multi_step_turn_warns_once_while_recording_every_step(
+    loguru_records: LogRecords,
+) -> None:
+    ctx = runtime(FakeEngine()).context
+    turn = HarnessTurn(
+        turn_id="t1",
+        text="done",
+        usage=Usage(input_tokens=600, output_tokens=60),
+        cost_usd=None,
+        subtype="completed",
+        is_error=False,
+        interrupted=False,
+        num_turns=3,
+        steps=(
+            Usage(input_tokens=100, output_tokens=10),
+            Usage(input_tokens=200, output_tokens=20),
+            Usage(input_tokens=300, output_tokens=30),
+        ),
+    )
+    log_turn_usage(ctx, 7684, "gpt-oss-120b-medium", turn)
+    rows = loguru_records.events("llm_usage")
+    assert [row["extra"]["in_total"] for row in rows] == [100, 200, 300]
+    assert [row["extra"]["unpriced"] for row in rows] == [1, 1, 1]
+    warnings = [msg for msg in loguru_records.messages("WARNING") if "is unpriced" in msg]
+    assert len(warnings) == 1
+
+
 async def test_harness_turn_projects_recorded_reasoning_tools_and_reply(
     live_events: LiveEvents, db_conn: psycopg.Connection, harness_runtime: RuntimeFixture
 ) -> None:

@@ -167,6 +167,7 @@ MODELS = {
     "claude-fable-5-1": ModelSpec(
         provider="claude",
         spawnable=True,
+        superseded_by="claude-fable-5-2",
         context_window=1_000_000,
         max_output_tokens=128_000,
         knowledge_cutoff="2026-06",
@@ -193,6 +194,31 @@ MODELS = {
             # That same silence is what TTFT measures: while the SDK retries a
             # 429 internally the socket produces no event at all, so a throttled
             # (but healthy) request looks identical to a hung one at 30s.
+            llm_stream_ttft_timeout_seconds=120.0,
+        ),
+        media_types=frozenset({"image", "pdf"}),
+    ),
+    "claude-fable-5-2": ModelSpec(
+        provider="claude",
+        spawnable=True,
+        context_window=1_000_000,
+        max_output_tokens=128_000,
+        knowledge_cutoff="2026-06",
+        effort_levels=ADAPTIVE_EFFORT,
+        # meiva:note
+        # Verified via Anthropic `/v1/models` (2026-11-16): `thinking.types.disabled.supported` is false.
+        thinking_always_on=True,
+        tuning=ModelTuning(
+            # meiva:note
+            # Anthropic documents `high` as Fable 5.2's default reasoning effort.
+            reasoning_effort="high",
+            # meiva:note
+            # User decision (2026-09-03): Claude family defaults this section off.
+            prompt_user_tone_enabled=False,
+            # meiva:note
+            # Fable 5.x shares the constrained Fable rate pool and runs the longest turns,
+            # so silent SDK 429 retries need the same retry and TTFT headroom as Fable 5.1.
+            llm_retry_max_attempts=10,
             llm_stream_ttft_timeout_seconds=120.0,
         ),
         media_types=frozenset({"image", "pdf"}),

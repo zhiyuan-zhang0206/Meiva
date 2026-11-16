@@ -98,3 +98,40 @@ def test_overlay_withdrawal_resolves_without_reading_default(
         )
     assert result.max_input_tokens == 200_000
     assert result.total_input_tokens == 0
+
+
+def test_external_harness_overlay_resolves_catalog_model_and_window(
+    model_catalog: ModelCatalog, db_conn: psycopg.Connection
+) -> None:
+    cases = (
+        (101, "claude_code", "claude-fable-5-2[1m]", "claude-fable-5-2", 1_000_000),
+        (102, "antigravity", "gemini-4-carbon-high", "gemini-4-carbon", 1_048_576),
+        (103, "meiva", "claude-fable-5-2[1m]", "claude-fable-5-2[1m]", 0),
+    )
+    for agent_id, harness, raw_model, _, _ in cases:
+        db_conn.execute(
+            "INSERT INTO agents (id, label) VALUES (%s, %s)", (agent_id, f"Agent {agent_id}")
+        )
+        db_conn.execute(
+            "INSERT INTO agents_meta (id, spawner, status, harness, config_overlay) "
+            "VALUES (%s, 'user', 'idling', %s, jsonb_build_object('llm_model', %s::text))",
+            (agent_id, harness, raw_model),
+        )
+    db_conn.commit()
+
+    with ConnectionPool(db_conn.info.dsn, min_size=1, max_size=2) as pool:
+        for agent_id, _, _, expected_model, expected_window in cases:
+            assert (
+                resolve_agent_model(
+                    pool, agent_id, catalog=model_catalog, default_model="claude-sonnet-5"
+                )
+                == expected_model
+            )
+            breakdown = context_breakdown_response(
+                pool,
+                agent_id,
+                compute_breakdown([], []),
+                catalog=model_catalog,
+                default_model="claude-sonnet-5",
+            )
+            assert breakdown.max_input_tokens == expected_window

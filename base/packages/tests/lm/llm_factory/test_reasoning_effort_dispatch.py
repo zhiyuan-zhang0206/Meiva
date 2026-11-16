@@ -185,6 +185,7 @@ class TestReasoningEffortDispatch:
             "claude-opus-5-5",
             "claude-fable-5",
             "claude-fable-5-1",
+            "claude-fable-5-2",
         ):
             llm = build_chat_model(
                 model,

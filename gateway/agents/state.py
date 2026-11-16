@@ -25,6 +25,7 @@ from base.agents.inbox.rows import list_pending_inbounds
 from base.agents.messages.envelope import sender_class
 from base.agents.messages.inbound import InboundKind
 from base.agents.messages.inbound_images import inbound_image_urls, inbound_upload_files
+from base.agents.model.harness_models import resolve_harness_catalog_model
 from base.agents.model.model_overrides import agent_overrides
 from base.config.service_read import ConfigAuthority
 from base.daemon.schedules.completion_notices import (
@@ -66,9 +67,10 @@ def _message_content_size_bytes(content: str) -> int:
 
 
 # meiva:note
-# The two stored config maps of an agent, both `jsonb` and either may be NULL.
+# The harness and stored config maps of an agent; `harness` is NULL on rows born before the column existed.
 @dataclass(frozen=True)
 class _AgentConfigRow:
+    harness: str | None
     config_overlay: object
     birth_config: object
 
@@ -452,39 +454,42 @@ def _pinned_model(config_overlay: dict[str, object] | None) -> str | None:
     return pinned
 
 
-def token_usage_response(
-    agent_id: int, request: Request, messages: Sequence[BaseMessage]
-) -> TokenUsageResponse:
-
+def _token_usage_thresholds(agent_id: int, request: Request) -> tuple[int, int, int]:
     from base.lm.context_budget import UnknownModelWindowError, resolve_context_budget
 
-    max_input_tokens = soft_compact_tokens = hard_compact_tokens = 0
     catalog = require_model_catalog(request)
     try:
         with gateway_state(request).db_pool.connection() as conn:
             row = query_one(
                 conn,
                 _AgentConfigRow,
-                "SELECT config_overlay, birth_config FROM agents_meta WHERE id = %s",
+                "SELECT harness, config_overlay, birth_config FROM agents_meta WHERE id = %s",
                 (agent_id,),
             )
-        config_overlay = (
-            row.config_overlay if row is not None and is_object_dict(row.config_overlay) else None
+        overlay = row.config_overlay if row and is_object_dict(row.config_overlay) else None
+        birth = row.birth_config if row and is_object_dict(row.birth_config) else None
+        model = _pinned_model(overlay) or gateway_config(request).models.llm_model
+        if model and row is not None and (row.harness or "meiva") != "meiva":
+            model = resolve_harness_catalog_model(model, catalog.models)
+        if not model:
+            return 0, 0, 0
+        budget = resolve_context_budget(
+            model, catalog=catalog, overrides=agent_overrides(overlay or None, birth)
         )
-        birth_config = (
-            row.birth_config if row is not None and is_object_dict(row.birth_config) else None
-        )
-        overrides = agent_overrides(config_overlay or None, birth_config)
-        model = _pinned_model(config_overlay) or gateway_config(request).models.llm_model
-        if model:
-            budget = resolve_context_budget(model, catalog=catalog, overrides=overrides)
-            max_input_tokens = budget.max_context_tokens
-            soft_compact_tokens = budget.soft_compact_tokens
-            hard_compact_tokens = budget.hard_compact_tokens
+        return budget.max_context_tokens, budget.soft_compact_tokens, budget.hard_compact_tokens
     except UnknownModelWindowError as exc:
         _log.warning("token-usage: %s", exc)
     except Exception as exc:
         _log.warning("token-usage: config_overlay read failed for agent %s: %r", agent_id, exc)
+    return 0, 0, 0
+
+
+def token_usage_response(
+    agent_id: int, request: Request, messages: Sequence[BaseMessage]
+) -> TokenUsageResponse:
+    max_input_tokens, soft_compact_tokens, hard_compact_tokens = _token_usage_thresholds(
+        agent_id, request
+    )
 
     for msg in reversed(messages):
         if isinstance(msg, AIMessage):

@@ -48,6 +48,7 @@ _REPO_PROVIDER_PLUGINS = {
 _REPO_MODEL_VENDORS = {
     "claude-fable-5": "anthropic",
     "claude-fable-5-1": "anthropic",
+    "claude-fable-5-2": "anthropic",
     "claude-haiku-4-5-20251001": "anthropic",
     "claude-haiku-5-5": "anthropic",
     "claude-opus-5": "anthropic",
@@ -62,6 +63,8 @@ _REPO_MODEL_VENDORS = {
     "gemini-3.7-flash": "google",
     "gemini-3.8-flash": "google",
     "gemini-4-argon": "google",
+    "gemini-4-carbon": "google",
+    "gemini-4-hydrogen": "google",
     "gemini-flash-lite-latest": "google",
     "gemini-decision-1": "google",
     "glm-5.2": "zhipu",
@@ -221,6 +224,8 @@ def test_repo_google_provider_is_enabled_and_registers_complete_contract() -> No
 
     gemini_models = {
         "gemini-4-argon",
+        "gemini-4-carbon",
+        "gemini-4-hydrogen",
         "gemini-3.8-flash",
         "gemini-3.7-flash",
         "gemini-3.5-flash",
@@ -230,6 +235,8 @@ def test_repo_google_provider_is_enabled_and_registers_complete_contract() -> No
     assert gemini_models <= catalog.models.keys()
     assert set(catalog.supported_models["gemini"]) == {
         "gemini-4-argon",
+        "gemini-4-carbon",
+        "gemini-4-hydrogen",
         "gemini-3.8-flash",
         "gemini-3.7-flash",
         "gemini-3.5-flash",

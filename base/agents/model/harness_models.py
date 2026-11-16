@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import re
-from collections.abc import Mapping, Sequence
+from collections.abc import Container, Mapping, Sequence
 from typing import NamedTuple, TypeGuard
 
 from base.api_contracts.agent_contract import (
@@ -216,6 +216,21 @@ def _split_agy_effort_suffix(cli_id: str) -> tuple[str, str | None]:
         if cli_id.endswith(suffix) and len(cli_id) > len(suffix):
             return cli_id[: -len(suffix)], level
     return cli_id, None
+
+
+# meiva:note
+# Maps external CLI selectors (`[1m]` and Antigravity `-<effort>`) back onto an existing catalog stem.
+# meiva:link base/agents/docs/harness/harness-models.md
+def resolve_harness_catalog_model(raw_model: str, known_ids: Container[str]) -> str:
+    if raw_model in known_ids:
+        return raw_model
+    candidate = raw_model[:-4] if raw_model.lower().endswith("[1m]") else raw_model
+    if candidate in known_ids:
+        return candidate
+    stem, matched_effort = _split_agy_effort_suffix(candidate)
+    if matched_effort is not None and stem in known_ids:
+        return stem
+    return raw_model
 
 
 def _build_agy_model(base_id: str, raw_efforts: set[str]) -> ProbedHarnessModel:

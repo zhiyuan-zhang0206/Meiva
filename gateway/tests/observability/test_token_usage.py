@@ -235,3 +235,35 @@ def test_checkpoint_read_failure_returns_zero(
         "soft_compact_tokens": expected_soft,
         "hard_compact_tokens": expected_hard,
     }
+
+
+@pytest.mark.parametrize(
+    ("harness", "llm_model", "expected_window"),
+    (
+        ("claude_code", "claude-fable-5-2[1m]", 1_000_000),
+        ("antigravity", "gemini-4-hydrogen", 1_048_576),
+        ("antigravity", "gemini-4-carbon-high", 1_048_576),
+        ("meiva", "claude-fable-5-2[1m]", 0),
+    ),
+)
+def test_external_harness_selector_resolves_catalog_window_only_outside_native_runtime(
+    db_conn: psycopg.Connection,
+    test_client: GatewayTestClient,
+    harness: str,
+    llm_model: str,
+    expected_window: int,
+) -> None:
+    tid = create_agent(db_conn)
+    with db_conn.cursor() as cur:
+        cur.execute(
+            "INSERT INTO agents_meta (id, status, harness, config_overlay) "
+            "VALUES (%s, 'running', %s, jsonb_build_object('llm_model', %s::text)) "
+            "ON CONFLICT (id) DO UPDATE SET harness = EXCLUDED.harness, "
+            "config_overlay = EXCLUDED.config_overlay",
+            (tid, harness, llm_model),
+        )
+    db_conn.commit()
+
+    resp = test_client.get(f"/api/agents/{tid}/token-usage")
+    assert resp.status_code == 200
+    assert resp.json()["max_input_tokens"] == expected_window

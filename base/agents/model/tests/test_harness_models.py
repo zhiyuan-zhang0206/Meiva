@@ -6,6 +6,7 @@ from base.agents.model.harness_models import (
     parse_antigravity_models,
     parse_claude_initialize,
     parse_codex_model_list,
+    resolve_harness_catalog_model,
     resolve_probed_harness_selection,
 )
 from base.api_contracts.agent_contract import (
@@ -203,3 +204,20 @@ def test_resolve_probed_harness_selection_enforces_live_models_and_efforts() -> 
             requested_model="gpt-oss-120b",
             requested_effort="high",
         )
+
+
+def test_resolve_harness_catalog_model_strips_cli_suffixes_without_clobbering_exact_ids() -> None:
+    known = {
+        "gemini-4-hydrogen",
+        "gemini-4-carbon",
+        "claude-fable-5-2",
+        "qwen3.8",
+        "qwen3.8-max",
+    }
+    assert resolve_harness_catalog_model("gemini-4-hydrogen-high", known) == "gemini-4-hydrogen"
+    assert resolve_harness_catalog_model("gemini-4-hydrogen-xhigh", known) == "gemini-4-hydrogen"
+    assert resolve_harness_catalog_model("gemini-4-carbon-high", known) == "gemini-4-carbon"
+    assert resolve_harness_catalog_model("claude-fable-5-2[1m]", known) == "claude-fable-5-2"
+    assert resolve_harness_catalog_model("claude-fable-5-2[1M]", known) == "claude-fable-5-2"
+    assert resolve_harness_catalog_model("qwen3.8-max", known) == "qwen3.8-max"
+    assert resolve_harness_catalog_model("gpt-oss-120b-medium", known) == "gpt-oss-120b-medium"

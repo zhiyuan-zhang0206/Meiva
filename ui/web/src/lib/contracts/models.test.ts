@@ -47,7 +47,10 @@ describe("providerLabel", () => {
 describe("readable execution labels", () => {
   it.each([
     ["gemini-4-argon", "Gemini 4 Argon"],
+    ["gemini-4-carbon", "Gemini 4 Carbon"],
+    ["gemini-4-hydrogen", "Gemini 4 Hydrogen"],
     ["claude-fable-5-1", "Claude Fable 5.1"],
+    ["claude-fable-5-2", "Claude Fable 5.2"],
     ["gpt-6.1-sol", "GPT 6.1 Sol"],
     ["gpt-6.1-sol-fast", "GPT 6.1 Sol Fast"],
     ["claude-haiku-4-5-20251001", "Claude Haiku 4.5 20251001"],
