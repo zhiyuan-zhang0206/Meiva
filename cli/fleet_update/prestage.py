@@ -17,6 +17,8 @@ _PRESTAGE_PATHS = (
 # Fetch warms a disposable virtual store with the isolated linker: pnpm cannot apply the
 # target patches reliably while fetching into an empty hoisted tree. Application install
 # still uses the target workspace configuration.
+# meiva:note
+# Avoid zsh special parameters: assigning to its path array also replaces PATH.
 _PRESTAGE_OPTIONAL_PATHS = "ui/web/pnpm-workspace.yaml ui/web/scripts/patches"
 _PRESTAGE_HARNESS_SCRIPT = """import os, subprocess
 from datetime import UTC, datetime
@@ -60,8 +62,8 @@ def prestage_command(new: str) -> str:
         'tmp=$(mktemp -d "${TMPDIR:-/tmp}/meiva-prestage.XXXXXX")\n'
         "trap 'rm -rf \"$tmp\"' EXIT\n"
         f"set -- {_PRESTAGE_PATHS}\n"
-        f"for path in {_PRESTAGE_OPTIONAL_PATHS}; do\n"
-        f'  if git -C "$S" cat-file -e {quoted}:"$path" 2>/dev/null; then set -- "$@" "$path"; fi\n'
+        f"for opt_path in {_PRESTAGE_OPTIONAL_PATHS}; do\n"
+        f'  if git -C "$S" cat-file -e {quoted}:"$opt_path" 2>/dev/null; then set -- "$@" "$opt_path"; fi\n'
         "done\n"
         f'git -C "$S" archive -o "$tmp/target.tar" {quoted} -- "$@" || exit 1\n'
         'tar -xf "$tmp/target.tar" -C "$tmp" || exit 1\n'
