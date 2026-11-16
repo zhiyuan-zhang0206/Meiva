@@ -1,11 +1,11 @@
 {
   "answers": {
-    "blue": {
+    "q0": {
       "confidence": 0.9510290585106047,
       "noul": 0.9510290585106047,
       "type": "noul"
     },
-    "clean": {
+    "q2": {
       "confidence": 0.8983109298408255,
       "score": 0.8983109298408255,
       "probabilities": {
@@ -18,7 +18,7 @@
       },
       "type": "score"
     },
-    "color": {
+    "q1": {
       "confidence": 0.9947556111364078,
       "choice": "blue",
       "probabilities": {

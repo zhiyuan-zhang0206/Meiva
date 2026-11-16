@@ -66,8 +66,9 @@ decisions = await decide(
 p = decisions["injection"].probability("true")
 ```
 
-`decide()` returns one `Decision` per question id. It never truncates or chunks; callers
-own that, because they know which part of a document matters.
+`decide()` returns one `Decision` per question id. Question ids may be any non-empty string;
+providers with wire-key syntax or length limits translate them internally. It never truncates or
+chunks; callers own that, because they know which part of a document matters.
 
 ## Fail-fast rules
 
@@ -115,4 +116,4 @@ criteria for Jev and `levels` for OpenAI.
 
 The default skill recall, memory rerank and reply-suggestion gate now use Gemini Decision 1. Explicit per-agent or environment model overrides remain authoritative. This changes decision calls only; chat models and harness selections are separate. Existing thresholds retain their previous calibration and have not been retuned for Gemini. Production activation follows the normal rollout boundary; changing source defaults does not migrate stored pins or running processes.
 
-Gemini uses `x-goog-api-key`, `input` content blocks and a keyed question map. Its `noul` criteria use `true_description`/`false_description`; score probabilities use numeric indices translated back to caller labels. Billed input comes from `usage.total_input_tokens`, including invalid billed answers. The common text-only decide entry does not send media although the provider supports it.
+Gemini uses `x-goog-api-key`, `input` content blocks and a keyed question map. Because `v1beta/decisions` restricts wire question IDs to `^[A-Za-z0-9_-]{1,64}$` while `decide()` accepts arbitrary non-empty caller keys (such as colon-delimited sub-skill identifiers or keys over 64 characters), `lm_google` bijectively maps caller keys to sequential wire IDs (`q0`, `q1`, ...) on request and restores the caller keys after verifying answer-key completeness on response. Its `noul` criteria use `true_description`/`false_description`; score probabilities use numeric indices translated back to caller labels. Billed input comes from `usage.total_input_tokens`, including invalid billed answers. The common text-only decide entry does not send media although the provider supports it.
