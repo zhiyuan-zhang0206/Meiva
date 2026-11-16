@@ -19,6 +19,7 @@ import time
 from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
+from typing import TypeGuard
 
 from base.host.boundary.fields import (
     int_field,
@@ -221,6 +222,12 @@ def _survivor_pids(data: Mapping[str, object]) -> tuple[int, ...]:
     return tuple(_pid(pid) for pid in survivors)
 
 
+def _is_int_list(value: object) -> TypeGuard[list[int]]:
+    return is_object_list(value) and all(
+        not isinstance(item, bool) and isinstance(item, int) for item in value
+    )
+
+
 def _pid(value: object) -> int:
     if not isinstance(value, int):
         raise TypeError(f"survivor pid is {type(value).__name__}, not int")
@@ -310,6 +317,27 @@ def create_session(
             "created"
         ]
     )
+
+
+# meiva:note
+# A terminal lifecycle transition records this fence before it forgets the owner's TTL rows.
+# The pty service retains the cutoff for its own lifetime, so a `new` request whose client lost
+# its response cannot create an old numeric shell after the owner has resurrected. A down service
+# has no live PTY or request executor, making its fence acknowledgement an empty successful close.
+def fence_agent_shells(agent_id: int, before_session_index: int, *, socket_path: Path) -> list[int]:
+    try:
+        data = request(
+            "fence_agent_shells",
+            socket_path=socket_path,
+            agent_id=agent_id,
+            before_session_index=before_session_index,
+        )
+    except ServiceDownError:
+        return []
+    killed = data.get("killed")
+    if not _is_int_list(killed):
+        raise TypeError("fence_agent_shells killed is missing or not a list of integers")
+    return killed
 
 
 def send(name: str, data: bytes, *, socket_path: Path) -> None:

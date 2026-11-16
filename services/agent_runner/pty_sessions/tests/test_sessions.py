@@ -48,6 +48,18 @@ def test_new_is_idempotent_for_a_live_session(unit_home: Path) -> None:
     output_until(name, "still-one-shell")
 
 
+def test_a_terminal_fence_refuses_an_old_agent_shell_created_after_its_ack(
+    unit_home: Path,
+) -> None:
+    assert client.fence_agent_shells(7, 1, socket_path=service_socket()) == []
+
+    with pytest.raises(client.ServiceError, match=r"below terminal cutoff 1"):
+        new("meiva-agent-7-shell-0-late", unit_home)
+    assert not client.has_session("meiva-agent-7-shell-0-late", socket_path=service_socket())
+
+    assert new("meiva-agent-7-shell-1-resurrected", unit_home) is True
+
+
 def test_the_initial_command_runs_once_the_shell_is_ready(unit_home: Path) -> None:
     new("meiva-test-cmd-1", unit_home, cmd="echo initial-command-ran")
     output_until("meiva-test-cmd-1", "initial-command-ran")

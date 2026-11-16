@@ -139,6 +139,13 @@ class PtySessionBackend(SessionBackend):
             return False
         return True
 
+    # meiva:note
+    # The terminal lifecycle path asks the PTY service to retain an agent-local cutoff before it
+    # deletes TTL rows. Unlike a list followed by individual kills, this acknowledgement also
+    # fences a delayed `new` whose client already timed out.
+    def fence_agent_shells(self, agent_id: int, before_session_index: int) -> list[int]:
+        return client.fence_agent_shells(agent_id, before_session_index, socket_path=self._socket)
+
     def service_available(self) -> bool:
         # meiva:note
         # The generation probe is the one question an absent service answers differently: `list` and `has` report an absent service as "no sessions", so a caller that read those would admit nothing and still call the service healthy. A live service always reports a generation.

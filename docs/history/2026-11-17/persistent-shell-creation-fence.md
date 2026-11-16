@@ -22,3 +22,7 @@ TTL row are removed, and the next session receives the later id.
 
 Verified merge base for this branch was `ae93a9fb7d462926b080b79b194ed8acbe4521fb`.
 This change does not alter Mermaid assets.
+
+Forward: [lost-ACK terminal fencing](persistent-shell-lost-ack-fence.md)
+records the later finding that the database fence alone cannot cover a PTY
+request whose client timed out after sending it to the service.

@@ -2,6 +2,8 @@
 # One agent's shell sessions over a real pty-sessions service and the throwaway database.
 from __future__ import annotations
 
+import contextlib
+import socket
 import time
 from collections.abc import Callable
 from datetime import UTC, datetime, timedelta
@@ -14,6 +16,8 @@ import pytest
 from base.db import Database
 from base.host.runtime_interpreter import runtime_venv
 from base.paths import meiva_home, workspace_dir
+from base.sessions.pty import client, protocol
+from base.sessions.pty.tests.pty_service import service_socket
 from meiva.shell.session_env import SessionHost
 from meiva.shell.sessions import ShellSessions
 
@@ -46,6 +50,54 @@ def _captured_thread(operation: Callable[[], None]) -> tuple[Thread, list[BaseEx
     thread = Thread(target=run)
     thread.start()
     return thread, failures
+
+
+# meiva:note
+# A one-request proxy that accepts `new`, lets its caller time out, then forwards the exact request
+# to the real pty service on command. It makes the lost-ack boundary deterministic without adding a
+# production-only delay hook to the daemon.
+class _DelayedNewProxy:
+    def __init__(self, path: Path, upstream: Path) -> None:
+        path.unlink(missing_ok=True)
+        self._path = path
+        self._upstream = upstream
+        self._listener = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+        self._listener.bind(str(path))
+        self._listener.listen(1)
+        self.accepted = Event()
+        self.release = Event()
+        self.completed = Event()
+        self.error: BaseException | None = None
+        self.response: dict[str, object] | None = None
+        self._thread = Thread(target=self._serve, daemon=True)
+        self._thread.start()
+
+    def _serve(self) -> None:
+        try:
+            conn, _address = self._listener.accept()
+            with conn:
+                line = protocol.read_line(conn)
+                assert line is not None
+                self.accepted.set()
+                assert self.release.wait(timeout=5.0), "test did not release delayed PTY request"
+                with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as upstream:
+                    upstream.connect(str(self._upstream))
+                    upstream.sendall(line + b"\n")
+                    response = protocol.read_line(upstream)
+                assert response is not None
+                self.response = protocol.decode_object(response)
+                with contextlib.suppress(OSError):
+                    conn.sendall(protocol.encode(self.response))
+        except BaseException as exc:
+            self.error = exc
+        finally:
+            self.completed.set()
+
+    def close(self) -> None:
+        self.release.set()
+        self._listener.close()
+        self._thread.join(timeout=5.0)
+        self._path.unlink(missing_ok=True)
 
 
 def _terminal_transition(
@@ -274,6 +326,88 @@ def test_terminal_transition_cannot_pass_a_half_created_session(
     replacement = _create(live_shell, live_host, "replacement", cwd=tmp_path)
     assert replacement == 1
     live_shell.kill(replacement)
+
+
+# meiva:note
+# The server-side cutoff is needed in addition to the database row lock: a client can time out
+# after sending `new`, allowing the creation transaction to release its lock while the request is
+# still in the service's admission queue. A terminal transition and a later resurrection can both
+# commit before that delayed request is admitted. The termination fence's acknowledgement must
+# therefore reject or close the old request independently of the agent's current DB status.
+def test_terminal_fence_reclaims_a_delayed_lost_ack_creation_after_resurrection(
+    live_shell: ShellSessions,
+    live_host: SessionHost,
+    database: Database,
+    tmp_path: Path,
+    unit_home: Path,
+) -> None:
+    from meiva.shell import session_plan, ttl_store
+
+    upstream = service_socket()
+    delayed_path = upstream.with_name(f"{upstream.stem}-delayed.sock")
+    proxy = _DelayedNewProxy(delayed_path, upstream)
+    full = session_plan.session_full_name(live_shell.shell_prefix(), 0, "lost-ack")
+
+    def start_lost_ack(_session_id: int) -> str:
+        client.request(
+            "new",
+            socket_path=delayed_path,
+            timeout=0.05,
+            name=full,
+            cwd=str(tmp_path),
+            env={"MEIVA_HOME": str(unit_home)},
+        )
+        raise AssertionError("the delayed request unexpectedly returned an acknowledgement")
+
+    def create_lost_ack_shell() -> None:
+        ttl_store.create_ttl_fenced(
+            database,
+            live_shell.agent_id,
+            120.0,
+            start=start_lost_ack,
+            dispose=lambda _full: None,
+        )
+
+    try:
+        creator, failures = _captured_thread(create_lost_ack_shell)
+        assert proxy.accepted.wait(timeout=5.0)
+        creator.join(timeout=5.0)
+        assert not creator.is_alive()
+        assert len(failures) == 1
+        assert isinstance(failures[0], client.ServiceUnavailableError)
+
+        # meiva:note
+        # The timeout committed the spent id without a TTL row. Model the terminal
+        # transition and resurrection that used to make this old request invisible.
+        cutoff = _terminal_transition(live_shell.agent_id, database, Event(), Event())
+        assert cutoff == 1
+        with database.connect() as conn, conn.cursor() as cur:
+            cur.execute(
+                "UPDATE agents_meta SET status = 'idling' WHERE id = %s",
+                (live_shell.agent_id,),
+            )
+            conn.commit()
+
+        # meiva:note
+        # The terminal path receives this acknowledgement before it deletes TTL rows.
+        assert client.fence_agent_shells(live_shell.agent_id, cutoff, socket_path=upstream) == []
+        proxy.release.set()
+        assert proxy.completed.wait(timeout=5.0)
+        assert proxy.error is None
+        assert proxy.response is not None and proxy.response["ok"] is False
+        assert live_shell.list() == {}
+        with database.connect() as conn, conn.cursor() as cur:
+            cur.execute(
+                "SELECT session_id FROM agent_shell_ttls WHERE agent_id = %s",
+                (live_shell.agent_id,),
+            )
+            assert cur.fetchall() == []
+
+        replacement = _create(live_shell, live_host, "replacement", cwd=tmp_path)
+        assert replacement == 1
+        live_shell.kill(replacement)
+    finally:
+        proxy.close()
 
 
 def test_renew_reads_a_legacy_long_deadline_then_replaces_it_with_a_valid_deadline(
