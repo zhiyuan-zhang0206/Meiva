@@ -4,6 +4,9 @@ settings:
   autoInstallPeers: true
   excludeLinksFromLockfile: false
 
+patchedDependencies:
+  mermaid@12.3.0: c684b66f07575f60a929191f2113a930265596e509af0658cb99bb735c6ec5a8
+
 importers:
 
   .:
@@ -55,7 +58,7 @@ importers:
         version: 1.45.0(react@19.3.0)
       mermaid:
         specifier: ^12.3.0
-        version: 12.3.0
+        version: 12.3.0(patch_hash=c684b66f07575f60a929191f2113a930265596e509af0658cb99bb735c6ec5a8)
       next:
         specifier: 16.3.8
         version: 16.3.8(@babel/core@7.29.7)(@types/node@22.20.2)(react-dom@19.3.0(react@19.3.0))(react@19.3.0)
@@ -8538,7 +8541,7 @@ snapshots:
 
   merge2@1.4.1: {}
 
-  mermaid@12.3.0:
+  mermaid@12.3.0(patch_hash=c684b66f07575f60a929191f2113a930265596e509af0658cb99bb735c6ec5a8):
     dependencies:
       '@braintree/sanitize-url': 7.1.2
       '@iconify/utils': 3.1.7

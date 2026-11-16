@@ -2,6 +2,7 @@ import { ThemeProvider, useTheme } from "next-themes";
 import { cleanup, fireEvent, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeAll, expect, it } from "vitest";
 import { renderWithBrowser } from "@/test-support/render";
+import { NonceProvider } from "@/lib/auth/nonce-context";
 import { createLazyChunk } from "./lazy-chunk";
 import { ChatMarkdown, preloadChatMarkdown } from "./markdown";
 import { MermaidRendererProvider, type MermaidRenderer } from "./mermaid-code";
@@ -95,4 +96,21 @@ it("rerenders diagrams when the resolved theme changes", async () => {
   fireEvent.click(screen.getByText("Dark theme"));
   await waitFor(() => expect(container.querySelector('svg[data-theme="dark"]')).not.toBeNull());
   expect(themes).toEqual([false, true]);
+});
+
+it("passes the trusted response nonce to the renderer", async () => {
+  let received: string | undefined;
+  const renderer = chunk(() => Promise.resolve((_id, _code, _dark, nonce) => {
+    received = nonce;
+    return Promise.resolve('<svg aria-label="nonce diagram"/>');
+  }));
+  const { container, rerender } = renderWithBrowser(<NonceProvider value="test-response-nonce">
+    <MermaidRendererProvider value={renderer}><ChatMarkdown content={fence(source)} /></MermaidRendererProvider>
+  </NonceProvider>);
+  await waitFor(() => expect(container.querySelector("svg")).not.toBeNull());
+  expect(received).toBe("test-response-nonce");
+  rerender(<NonceProvider value="next-response-nonce">
+    <MermaidRendererProvider value={renderer}><ChatMarkdown content={fence(source)} /></MermaidRendererProvider>
+  </NonceProvider>);
+  await waitFor(() => expect(received).toBe("next-response-nonce"));
 });

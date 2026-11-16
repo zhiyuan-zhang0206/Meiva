@@ -42,3 +42,15 @@ light/dark theme. Loading and invalid or incomplete streaming diagrams show copy
 source. Completed diagrams show horizontally scrollable SVG with source-copy controls.
 Inline code remains literal. Tests inject a lazy renderer through
 `MermaidRendererProvider` without requiring SVG layout in happy-dom.
+
+Production diagrams use the trusted response nonce for both measurement and the
+returned SVG's generated root stylesheet. Mermaid 12.3.0 has no nonce option, so
+its pinned pnpm patch reads the caller-owned measurement host's nonce before
+inserting that stylesheet. The renderer reapplies the nonce to the sanitized
+root stylesheet because serialization hides it on connected elements. Labels
+and other source-authored elements never receive the response nonce. Keep the
+patch until an upstream nonce API covers measurement as well as returned SVG;
+a dependency update must verify both under the production policy. The library's
+internal sanitizer can still report a transient style rejection while parsing
+its serialized stylesheet; final diagram styles are authorized. Strict security
+and the production CSP remain required.
