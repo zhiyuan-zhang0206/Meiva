@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from base.agents.context import MeivaContext
+from base.agents.model.harness_models import resolve_harness_catalog_model
 from base.lm.catalog import ModelCatalog
 from base.lm.harness.engine import HarnessTurn
 from base.lm.usage import UsageFields, log_usage_fields
@@ -14,11 +15,7 @@ from base.log import logger
 # as a provider that said nothing.
 # meiva:link agent/graph/docs/harness-turn.md
 def resolve_pricing_model(raw_model: str, catalog: ModelCatalog) -> str:
-    candidate = raw_model.removesuffix("[1m]")
-    for suffix in ("", "-high", "-medium", "-low", "-minimal"):
-        if candidate.endswith(suffix) and (s := candidate.removesuffix(suffix)) in catalog.prices:
-            return raw_model if not suffix and raw_model in catalog.prices else s
-    return raw_model
+    return resolve_harness_catalog_model(raw_model, catalog.prices)
 
 
 def log_turn_usage(ctx: MeivaContext, agent_id: int, model: str | None, turn: HarnessTurn) -> None:
@@ -33,7 +30,7 @@ def log_turn_usage(ctx: MeivaContext, agent_id: int, model: str | None, turn: Ha
         else [(usage, max(turn.num_turns, 1))]
     )
     try:
-        for step_usage, calls in entries:
+        for index, (step_usage, calls) in enumerate(entries):
             fields = UsageFields(
                 tok_in=step_usage.input_tokens,
                 tok_out=step_usage.output_tokens,
@@ -42,6 +39,7 @@ def log_turn_usage(ctx: MeivaContext, agent_id: int, model: str | None, turn: Ha
                 source=ctx.harness.value,
                 for_agent_id=agent_id,
                 calls=calls,
+                unpriced_already_reported=index > 0,
             )
             log_usage_fields(
                 pricing_model,

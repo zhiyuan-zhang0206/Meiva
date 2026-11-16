@@ -6,7 +6,6 @@
 from __future__ import annotations
 
 import argparse
-import ipaddress
 import json
 import os
 import random
@@ -17,15 +16,11 @@ from collections.abc import Callable, Mapping
 from dataclasses import asdict, dataclass
 from functools import partial
 from pathlib import Path
-from typing import Literal, Protocol, override
+from typing import Literal, Protocol
 from urllib.parse import urlparse
 
 import requests
 from dotenv import dotenv_values
-from requests.adapters import HTTPAdapter
-from urllib3 import _base_connection
-from urllib3.connection import HTTPSConnection
-from urllib3.connectionpool import HTTPConnectionPool, HTTPSConnectionPool
 
 from base.host.boundary.fields import optional_str_field
 from base.host.boundary.json_values import is_object_dict, is_object_list
@@ -41,8 +36,28 @@ from base.host.net.resilience import (
 from base.lm.registry import ModelSpec
 from base.packages.plugin_providers import build_model_catalog
 from base.paths import meiva_home
+from scripts.model_registry.doh_session import (
+    DOH_ENDPOINTS as DOH_ENDPOINTS,
+)
+from scripts.model_registry.doh_session import (
+    PinnedIPHTTPSAdapter as PinnedIPHTTPSAdapter,
+)
+from scripts.model_registry.doh_session import (
+    doh_cache as doh_cache,
+)
+from scripts.model_registry.doh_session import (
+    doh_real_ip as doh_real_ip,
+)
+from scripts.model_registry.doh_session import (
+    is_fake_ip as is_fake_ip,
+)
+from scripts.model_registry.doh_session import (
+    response_object,
+)
+from scripts.model_registry.doh_session import (
+    session_for_host as session_for_host,
+)
 from scripts.model_registry.fetch_ports import (
-    Addrinfo,
     HttpGet,
     JsonFetcher,
     SessionForHost,
@@ -52,10 +67,6 @@ from scripts.model_registry.tracker_state import load_state, save_state
 
 _USER_AGENT = "Meiva model-update tracker"
 _TIMEOUT_SECONDS, _QWEN_PAGE_SIZE = 30, 100
-_DOH_TIMEOUT_SECONDS = 10
-_DOH_ENDPOINTS = ("https://cloudflare-dns.com/dns-query", "https://dns.google/resolve")
-_FAKE_IP_NETWORK = ipaddress.ip_network("198.18.0.0/15")
-doh_cache: dict[str, str] = {}
 _DATED_SNAPSHOT_SUFFIX = re.compile(r"-\d{4}(?:-\d{2}(?:-\d{2})?)?$|-\d{8}$")
 
 
@@ -81,6 +92,7 @@ class SourceDescriptor:
     series_pattern: re.Pattern[str]
     version_pattern: re.Pattern[str]
     headers: tuple[tuple[str, str], ...] = ()
+    extra_header_envs: tuple[tuple[str, str], ...] = ()
 
 
 # fmt: off
@@ -89,21 +101,14 @@ SOURCES: dict[str, SourceDescriptor] = {
     "deepseek": SourceDescriptor("deepseek", "https://api.deepseek.com", "/models", "Authorization", "DEEPSEEK_API_KEY", "openai", re.compile(r"^deepseek-v\d+-(flash|pro)$"), re.compile(r"^deepseek-v\d+-(?P<series>flash|pro)$"), re.compile(r"^deepseek-v(?P<version>\d+)-(flash|pro)$")),
     # Official docs: OpenAI Models API.
     "gpt": SourceDescriptor("gpt", "https://api.openai.com", "/v1/models", "Authorization", "OPENAI_API_KEY", "openai", re.compile(r"^gpt-(?:5\.\d+|6(?:\.\d+)?)(?:-(?:sol|terra|luna|astra))?$"), re.compile(r"^gpt-(?:5\.\d+|6(?:\.\d+)?)(?:-(?P<series>sol|terra|luna|astra))?$"), re.compile(r"^gpt-(?P<version>5\.\d+|6(?:\.\d+)?)(?:-(?:sol|terra|luna|astra))?$")),
-    # Official docs: Anthropic Models API.
-    "claude": SourceDescriptor("claude", "https://api.anthropic.com", "/v1/models", "x-api-key", "ANTHROPIC_API_KEY", "anthropic", re.compile(r"^claude-(opus|sonnet|haiku|fable)-\d"), re.compile(r"^claude-(?P<series>opus|sonnet|haiku|fable)-\d"), re.compile(r"^claude-(opus|sonnet|haiku|fable)-(?P<version>\d+(?:-\d+)?)"), (("anthropic-version", "2023-06-01"),)),
-    # Official docs: Gemini Models API. `flash(-lite)?` keeps the numbered Flash-Lite
-    # line in the family: upstream publishes `gemini-<version>-flash-lite` ids beside
-    # the pro/flash ones, and without `-lite` they fell through to other_ids and never
-    # reached the report. `argon` does the same for Gemini 4's flagship line, whose id
-    # is `gemini-<version>-argon` rather than `-pro`/`-flash`: with `pro|flash` alone,
-    # `gemini-4-argon` fell through to other_ids, so the line was untracked and the
-    # model's own registration was never announced as a candidate. The registered
-    # `gemini-flash-lite-latest` alias deliberately
-    # stays outside the numbered pattern — it carries no version, so nothing here can
-    # detect when upstream re-resolves it (it tracked 3.5 at registration, checked
-    # 2026-09-10); a newly numbered flash-lite id surfacing as a candidate is the cue
-    # to re-verify the alias facts by hand.
-    "gemini": SourceDescriptor("gemini", "https://generativelanguage.googleapis.com", "/v1beta/models", None, "GEMINI_API_KEY", "gemini", re.compile(r"^gemini-\d+(\.\d+)?-(pro|flash(-lite)?|argon)(-preview)?$"), re.compile(r"^gemini-\d+(?:\.\d+)?-(?P<series>pro|flash(-lite)?|argon)(?P<preview>-preview)?$"), re.compile(r"^gemini-(?P<version>\d+(?:\.\d+)?)-(pro|flash(-lite)?|argon)(-preview)?$")),
+    # meiva:note
+    # Anthropic org-level keys require `anthropic-workspace-id` alongside `x-api-key` on `/v1/models`.
+    "claude": SourceDescriptor("claude", "https://api.anthropic.com", "/v1/models", "x-api-key", "ANTHROPIC_API_KEY", "anthropic", re.compile(r"^claude-(opus|sonnet|haiku|fable)-\d"), re.compile(r"^claude-(?P<series>opus|sonnet|haiku|fable)-\d"), re.compile(r"^claude-(opus|sonnet|haiku|fable)-(?P<version>\d+(?:-\d+)?)"), (("anthropic-version", "2023-06-01"),), (("anthropic-workspace-id", "ANTHROPIC_WORKSPACE_ID"),)),
+    # meiva:note
+    # `flash(-lite)?` keeps numbered Flash-Lite ids in the family, and `argon|carbon|hydrogen` tracks
+    # Gemini 4's element-named lines alongside `pro|flash`. The unversioned `gemini-flash-lite-latest`
+    # alias stays outside the numbered pattern so a new numbered Flash-Lite cues a manual alias re-check.
+    "gemini": SourceDescriptor("gemini", "https://generativelanguage.googleapis.com", "/v1beta/models", None, "GEMINI_API_KEY", "gemini", re.compile(r"^gemini-\d+(\.\d+)?-(pro|flash(-lite)?|argon|carbon|hydrogen)(-preview)?$"), re.compile(r"^gemini-\d+(?:\.\d+)?-(?P<series>pro|flash(-lite)?|argon|carbon|hydrogen)(?P<preview>-preview)?$"), re.compile(r"^gemini-(?P<version>\d+(?:\.\d+)?)-(pro|flash(-lite)?|argon|carbon|hydrogen)(-preview)?$")),
     # Official docs: xAI Models API.
     "grok": SourceDescriptor("grok", "https://api.x.ai", "/v1/models", "Authorization", "XAI_API_KEY", "openai", re.compile(r"^grok-\d+\.\d+$"), re.compile(r"^(?P<series>grok)-\d+\.\d+$"), re.compile(r"^grok-(?P<version>\d+\.\d+)$")),
     # Official docs: Moonshot Models API.
@@ -141,131 +146,6 @@ def _environment_value(alias: str) -> str | None:
     if alias in os.environ:
         return os.environ[alias]
     return None
-
-
-def _response_object(value: object, name: str) -> dict[str, object]:
-    if not is_object_dict(value):
-        raise TypeError(f"{name} response must be a JSON object")
-    return value
-
-
-def _is_fake_ip(address: str) -> bool:
-    try:
-        return ipaddress.ip_address(address) in _FAKE_IP_NETWORK
-    except ValueError:
-        return False
-
-
-class _PinnedIPHTTPSConnection(HTTPSConnection):
-    """Keep the origin host independent from urllib3's DNS target."""
-
-    _origin_host: str
-
-    @property
-    def host(self) -> str:
-        return self._origin_host.rstrip(".")
-
-    @host.setter
-    def host(self, value: str) -> None:
-        self._origin_host = value
-        self._dns_host = value
-
-
-def _pin_connection(connection: object, pinned_ip: str) -> None:
-    if not isinstance(connection, HTTPSConnection):
-        raise TypeError(f"Expected HTTPSConnection, got {type(connection).__name__}")
-    origin_host = connection.host
-    connection.__class__ = _PinnedIPHTTPSConnection
-    if not isinstance(connection, _PinnedIPHTTPSConnection):
-        raise TypeError(f"Expected _PinnedIPHTTPSConnection, got {type(connection).__name__}")
-    connection._origin_host = origin_host
-    connection._dns_host = pinned_ip
-
-
-class _PinnedIPConnectionPool(HTTPSConnectionPool):
-    """Create connections that dial a pinned IP while retaining the origin host."""
-
-    pinned_ip = ""
-
-    @override
-    def _new_conn(self) -> _base_connection.BaseHTTPSConnection:
-        connection = super()._new_conn()
-        _pin_connection(connection, self.pinned_ip)
-        return connection
-
-
-class PinnedIPHTTPSAdapter(HTTPAdapter):
-    """Dial the pinned IP while SNI, Host, and certificate checks use the real hostname."""
-
-    def __init__(self, pinned_ip: str) -> None:
-        self._pinned_ip = pinned_ip
-        super().__init__()
-        pinned_pool = type(
-            "_PinnedIPConnectionPool", (_PinnedIPConnectionPool,), {"pinned_ip": self._pinned_ip}
-        )
-        self.poolmanager.pool_classes_by_scheme = {
-            "http": HTTPConnectionPool,
-            "https": pinned_pool,
-        }
-
-
-def _first_real_doh_address(value: object, endpoint: str, host: str) -> str:
-    payload = _response_object(value, endpoint)
-    answers = payload["Answer"]
-    if not is_object_list(answers):
-        raise TypeError(f"{endpoint} Answer must be a list")
-    for answer in answers:
-        if not is_object_dict(answer):
-            raise TypeError(f"{endpoint} Answer entries must be objects")
-        address = answer.get("data")
-        if answer.get("type") in (1, "1") and isinstance(address, str) and not _is_fake_ip(address):
-            return address
-    raise ValueError(f"{endpoint} returned no usable A answer for {host}")
-
-
-def _doh_real_ip(host: str, *, http_get: HttpGet) -> str:
-    if host in doh_cache:
-        return doh_cache[host]
-    last_error: Exception | None = None
-    for endpoint in _DOH_ENDPOINTS:
-        try:
-            response = http_get(
-                endpoint,
-                headers={"accept": "application/dns-json"},
-                params={"name": host, "type": "A"},
-                timeout=_DOH_TIMEOUT_SECONDS,
-            )
-            response.raise_for_status()
-            address = _first_real_doh_address(response.json(), endpoint, host)
-            doh_cache[host] = address
-            return address
-        except Exception as exc:
-            last_error = exc
-    raise ConnectionError(f"DoH resolution failed for {host}") from last_error
-
-
-def _session_for_host(
-    host: str,
-    *,
-    addrinfo: Addrinfo,
-    doh_resolver: Callable[[str], str],
-) -> requests.Session | None:
-    try:
-        address_rows = addrinfo(host, 443, type=socket.SOCK_STREAM)
-    except socket.gaierror:
-        return None
-    ipv4_addresses = [
-        socket_address[0]
-        for family, _st, _proto, _canon, socket_address in address_rows
-        if family == socket.AF_INET and isinstance(socket_address[0], str)
-    ]
-    if not any(_is_fake_ip(address) for address in ipv4_addresses):
-        return None
-    # A detected fake IP must not fall back to the hijacked resolver if DoH fails.
-    pinned_ip = doh_resolver(host)
-    session = requests.Session()
-    session.mount(f"https://{host}/", PinnedIPHTTPSAdapter(pinned_ip))
-    return session
 
 
 def _id_rows(value: object, field: str, source: str) -> list[str]:
@@ -343,13 +223,17 @@ def fetch_json(
             timeout=_TIMEOUT_SECONDS,
         )
         response.raise_for_status()
-        return _response_object(response.json(), url)
+        return response_object(response.json(), url)
 
     return retry_jittered(_FETCH_POLICY, rng=rng, sleep=sleep)(_attempt)
 
 
-def _headers(source: SourceDescriptor, api_key: str) -> dict[str, str]:
+def _headers(
+    source: SourceDescriptor, api_key: str, extra_headers: Mapping[str, str] | None = None
+) -> dict[str, str]:
     headers = dict(source.headers)
+    if extra_headers:
+        headers.update(extra_headers)
     if source.auth_header is None:
         return headers
     headers[source.auth_header] = (
@@ -358,23 +242,36 @@ def _headers(source: SourceDescriptor, api_key: str) -> dict[str, str]:
     return headers
 
 
-def _openai_models(source: SourceDescriptor, api_key: str, *, fetcher: JsonFetcher) -> list[str]:
+def _openai_models(
+    source: SourceDescriptor,
+    api_key: str,
+    *,
+    fetcher: JsonFetcher,
+    extra_headers: Mapping[str, str] | None = None,
+) -> list[str]:
     payload = fetcher(
-        source.base_url + source.models_path, headers=_headers(source, api_key), params={}
+        source.base_url + source.models_path,
+        headers=_headers(source, api_key, extra_headers),
+        params={},
     )
     if "data" not in payload:
         raise ValueError(f"{source.provider} response is missing data")
     return _id_rows(payload["data"], "id", source.provider)
 
 
-def _anthropic_models(source: SourceDescriptor, api_key: str, *, fetcher: JsonFetcher) -> list[str]:
+def _anthropic_models(
+    source: SourceDescriptor,
+    api_key: str,
+    *,
+    fetcher: JsonFetcher,
+    extra_headers: Mapping[str, str] | None = None,
+) -> list[str]:
     ids: list[str] = []
     after_id: str | None = None
+    headers = _headers(source, api_key, extra_headers)
     while True:
         params: dict[str, str | int] = {"after_id": after_id} if after_id is not None else {}
-        payload = fetcher(
-            source.base_url + source.models_path, headers=_headers(source, api_key), params=params
-        )
+        payload = fetcher(source.base_url + source.models_path, headers=headers, params=params)
         if "data" not in payload or "has_more" not in payload:
             raise ValueError("claude response is missing data or has_more")
         page_ids = _id_rows(payload["data"], "id", "claude")
@@ -428,7 +325,7 @@ def _dashscope_models(source: SourceDescriptor, api_key: str, *, fetcher: JsonFe
         )
         if "output" not in payload:
             raise ValueError("qwen response is missing output")
-        output = _response_object(payload["output"], "qwen output")
+        output = response_object(payload["output"], "qwen output")
         if "models" not in output or "total" not in output:
             raise ValueError("qwen output is missing models or total")
         page_ids = _id_rows(output["models"], "model", "qwen")
@@ -455,11 +352,12 @@ def fetch_provider_models(
     api_key: str,
     *,
     fetcher: JsonFetcher,
+    extra_headers: Mapping[str, str] | None = None,
 ) -> list[str]:
     if source.response_kind == "openai":
-        return _openai_models(source, api_key, fetcher=fetcher)
+        return _openai_models(source, api_key, fetcher=fetcher, extra_headers=extra_headers)
     if source.response_kind == "anthropic":
-        return _anthropic_models(source, api_key, fetcher=fetcher)
+        return _anthropic_models(source, api_key, fetcher=fetcher, extra_headers=extra_headers)
     if source.response_kind == "gemini":
         return _gemini_models(source, api_key, fetcher=fetcher)
     if source.response_kind == "dashscope":
@@ -527,17 +425,40 @@ def _read_env_file(path: Path | None) -> dict[str, str]:
     return {key: value for key, value in dotenv_values(path).items() if value is not None}
 
 
+def _env_alias_value(
+    alias: str,
+    file_aliases: Mapping[str, str],
+    *,
+    env_lookup: Callable[[str], str | None] | None = None,
+) -> str | None:
+    value = (_environment_value if env_lookup is None else env_lookup)(alias)
+    if value is not None and value.strip():
+        return value.strip()
+    file_val = file_aliases.get(alias, "")
+    return file_val.strip() if file_val.strip() else None
+
+
 def _api_key(
     source: SourceDescriptor,
     file_aliases: Mapping[str, str],
     *,
     env_lookup: Callable[[str], str | None] | None = None,
 ) -> str | None:
-    value = (_environment_value if env_lookup is None else env_lookup)(source.key_alias)
-    if value is not None and value.strip():
-        return value
-    file_val = file_aliases.get(source.key_alias, "")
-    return file_val if file_val.strip() else None
+    return _env_alias_value(source.key_alias, file_aliases, env_lookup=env_lookup)
+
+
+def source_extra_headers(
+    source: SourceDescriptor,
+    file_aliases: Mapping[str, str],
+    *,
+    env_lookup: Callable[[str], str | None] | None = None,
+) -> dict[str, str]:
+    headers: dict[str, str] = {}
+    for header_name, alias in source.extra_header_envs:
+        value = _env_alias_value(alias, file_aliases, env_lookup=env_lookup)
+        if value is not None:
+            headers[header_name] = value
+    return headers
 
 
 def _state_path(state_dir: Path | None, *, home: Path) -> Path:
@@ -707,6 +628,37 @@ class Options:
     write_report: Path | None
 
 
+def _default_model_fetcher(
+    file_aliases: Mapping[str, str],
+    *,
+    rng: random.Random,
+    env_lookup: Callable[[str], str | None] | None = None,
+) -> Callable[[SourceDescriptor, str], list[str]]:
+    session = partial(
+        session_for_host,
+        addrinfo=socket.getaddrinfo,
+        doh_resolver=partial(doh_real_ip, http_get=requests.get),
+    )
+
+    def fetcher(
+        url: str, *, headers: Mapping[str, str], params: Mapping[str, str | int]
+    ) -> dict[str, object]:
+        return fetch_json(
+            url,
+            headers=headers,
+            params=params,
+            session_for_host=session,
+            http_get=requests.get,
+            rng=rng,
+        )
+
+    def fetch_source(source: SourceDescriptor, api_key: str) -> list[str]:
+        extra = source_extra_headers(source, file_aliases, env_lookup=env_lookup)
+        return fetch_provider_models(source, api_key, fetcher=fetcher, extra_headers=extra)
+
+    return fetch_source
+
+
 def main(
     argv: list[str],
     *,
@@ -715,26 +667,6 @@ def main(
     model_fetcher: Callable[[SourceDescriptor, str], list[str]] | None = None,
     models: Mapping[str, ModelSpec] | None = None,
 ) -> int:
-    if model_fetcher is None:
-        session = partial(
-            _session_for_host,
-            addrinfo=socket.getaddrinfo,
-            doh_resolver=partial(_doh_real_ip, http_get=requests.get),
-        )
-
-        def fetcher(
-            url: str, *, headers: Mapping[str, str], params: Mapping[str, str | int]
-        ) -> dict[str, object]:
-            return fetch_json(
-                url,
-                headers=headers,
-                params=params,
-                session_for_host=session,
-                http_get=requests.get,
-                rng=rng,
-            )
-
-        model_fetcher = partial(fetch_provider_models, fetcher=fetcher)
     parser = argparse.ArgumentParser(
         description="Check official provider model lists for Meiva updates."
     )
@@ -748,13 +680,19 @@ def main(
     home = meiva_home()
     state_path = _state_path(args.state_dir, home=home)
     try:
+        file_aliases = _read_env_file(args.env_file)
+        effective_fetcher = (
+            _default_model_fetcher(file_aliases, rng=rng, env_lookup=env_lookup)
+            if model_fetcher is None
+            else model_fetcher
+        )
         state = load_state(state_path)
         reports = check_sources(
-            _read_env_file(args.env_file),
+            file_aliases,
             state,
             models=build_model_catalog(home=home).models if models is None else models,
             env_lookup=env_lookup,
-            model_fetcher=model_fetcher,
+            model_fetcher=effective_fetcher,
         )
         save_state(state_path, state)
     except Exception as exc:

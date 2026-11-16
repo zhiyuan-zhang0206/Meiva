@@ -23,6 +23,7 @@ from base.agents.history.context_breakdown import (
 from base.agents.history.context_breakdown import (
     RequestBreakdown,
 )
+from base.agents.model.harness_models import resolve_harness_catalog_model
 from base.agents.model.model_overrides import read_agent_overrides
 from base.db.protocols import SyncPool
 from base.host.boundary.json_values import is_object_dict
@@ -32,8 +33,9 @@ from base.lm.registry import resolve_available_model
 
 
 # meiva:note
-# The `config_overlay` column of an agent's `agents_meta` row, validated from the selected tuple.
+# The `harness` and `config_overlay` columns of an agent's `agents_meta` row, validated from the selected tuple.
 class _OverlayRow(NamedTuple):
+    harness: str | None
     config_overlay: object
 
 
@@ -53,12 +55,15 @@ def resolve_agent_model(
     configured one."""
     with pool.connection() as conn:
         row = conn.execute(
-            "SELECT config_overlay FROM agents_meta WHERE id = %s", (agent_id,)
+            "SELECT harness, config_overlay FROM agents_meta WHERE id = %s", (agent_id,)
         ).fetchone()
-    overlay = None if row is None else _OVERLAY_ROW.validate_python(row).config_overlay
+    parsed = None if row is None else _OVERLAY_ROW.validate_python(row)
+    overlay = None if parsed is None else parsed.config_overlay
     model = overlay.get("llm_model") if is_object_dict(overlay) else None
     if model is not None and not isinstance(model, str):
         raise TypeError(f"config_overlay.llm_model of agent {agent_id} is not a string")
+    if model is not None and parsed is not None and (parsed.harness or "meiva") != "meiva":
+        model = resolve_harness_catalog_model(model, catalog.models)
     return resolve_available_model(model or default_model, models=catalog.models)
 
 

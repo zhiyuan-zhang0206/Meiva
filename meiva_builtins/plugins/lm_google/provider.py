@@ -203,6 +203,34 @@ PROVIDER = ProviderContribution(
             ),
             media_types=frozenset({"image", "pdf", "audio", "video"}),
         ),
+        "gemini-4-carbon": ModelSpec(
+            provider="gemini",
+            spawnable=True,
+            context_window=1_048_576,
+            knowledge_cutoff="2026-03",
+            effort_levels=("low", "medium", "high"),
+            tuning=ModelTuning(
+                reasoning_effort="medium",
+                llm_stream_ttft_timeout_seconds=90.0,
+            ),
+            media_types=frozenset({"image", "pdf", "audio", "video"}),
+        ),
+        "gemini-4-hydrogen": ModelSpec(
+            provider="gemini",
+            spawnable=True,
+            context_window=1_048_576,
+            knowledge_cutoff="2026-03",
+            # meiva:note
+            # Google documents an `xhigh` rung for Hydrogen on the Interactions API and `agy`,
+            # while `ChatGoogleGenerativeAI.thinking_level` validates `minimal|low|medium|high`
+            # only; native sessions cap at `high` and Antigravity probes `xhigh` from `agy models`.
+            effort_levels=("low", "medium", "high"),
+            tuning=ModelTuning(
+                reasoning_effort="high",
+                llm_stream_ttft_timeout_seconds=90.0,
+            ),
+            media_types=frozenset({"image", "pdf", "audio", "video"}),
+        ),
     },
     pricing={
         "gemini-3.8-flash": PriceRates(
@@ -358,6 +386,50 @@ PROVIDER = ProviderContribution(
                     ),
                 ),
             ),
+        ),
+        "gemini-4-carbon": PriceRates(
+            cache_miss=2.0,
+            cache_hit=0.10,
+            output=10.0,
+            source_url="https://ai.google.dev/gemini-api/docs/pricing",
+            source_checked_at="2026-11-16",
+            vendor="google",
+            periods=(
+                PricePeriod(
+                    effective_from=None,
+                    effective_until="2026-11-30T10:00:00Z",
+                    tiers=(
+                        PriceTier(
+                            input_tokens_min=0,
+                            input_tokens_max=None,
+                            cache_miss="2.0",
+                            cache_hit="0.10",
+                            output="10.0",
+                        ),
+                    ),
+                ),
+                PricePeriod(
+                    effective_from="2026-11-30T10:00:00Z",
+                    effective_until=None,
+                    tiers=(
+                        PriceTier(
+                            input_tokens_min=0,
+                            input_tokens_max=None,
+                            cache_miss="4.0",
+                            cache_hit="0.20",
+                            output="20.0",
+                        ),
+                    ),
+                ),
+            ),
+        ),
+        "gemini-4-hydrogen": PriceRates(
+            cache_miss=1.50,
+            cache_hit=0.075,
+            output=7.50,
+            source_url="https://ai.google.dev/gemini-api/docs/pricing",
+            source_checked_at="2026-11-16",
+            vendor="google",
         ),
     },
 )

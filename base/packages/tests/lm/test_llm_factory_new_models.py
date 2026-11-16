@@ -161,7 +161,12 @@ class TestClaudeAlwaysOnBuilds:
 
     @pytest.mark.parametrize(
         "model,effort",
-        (("claude-opus-5-5", "medium"), ("claude-fable-5", "high"), ("claude-fable-5-1", "high")),
+        (
+            ("claude-opus-5-5", "medium"),
+            ("claude-fable-5", "high"),
+            ("claude-fable-5-1", "high"),
+            ("claude-fable-5-2", "high"),
+        ),
     )
     def test_claude_always_on_ignores_disabled_thinking(
         self,

@@ -27,6 +27,7 @@ def test_repo_anthropic_provider_is_enabled_and_registers_complete_contract(
         "claude-opus-5-5",
         "claude-fable-5",
         "claude-fable-5-1",
+        "claude-fable-5-2",
     }
     assert claude_models <= model_catalog.models.keys()
     assert set(model_catalog.supported_models["claude"]) == {
@@ -40,6 +41,7 @@ def test_repo_anthropic_provider_is_enabled_and_registers_complete_contract(
         "claude-opus-5-5-fast",
         "claude-fable-5",
         "claude-fable-5-1",
+        "claude-fable-5-2",
     }
     assert pricing.model_vendor("claude-sonnet-5", prices=model_catalog.prices) == "anthropic"
 
@@ -70,10 +72,25 @@ def test_claude_successors_and_thinking_contract(*, model_catalog: ModelCatalog)
     assert opus.media_types == frozenset({"image", "pdf"})
     assert model_catalog.models["claude-opus-5"].superseded_by == "claude-opus-5-5"
     assert model_catalog.models["claude-opus-5"].spawnable
-    for model in ("claude-opus-5-5", "claude-fable-5", "claude-fable-5-1"):
+    for model in ("claude-opus-5-5", "claude-fable-5", "claude-fable-5-1", "claude-fable-5-2"):
         assert model_catalog.models[model].thinking_always_on, model
     for model in ("claude-sonnet-5", "claude-opus-5"):
         assert not model_catalog.models[model].thinking_always_on, model
+
+
+def test_claude_fable_5_2_capabilities_and_display_successor(
+    *, model_catalog: ModelCatalog
+) -> None:
+    fable_5_2 = model_catalog.models["claude-fable-5-2"]
+    assert fable_5_2.spawnable
+    assert fable_5_2.context_window == 1_000_000
+    assert fable_5_2.max_output_tokens == 128_000
+    assert fable_5_2.knowledge_cutoff == "2026-06"
+    assert fable_5_2.effort_levels == ("low", "medium", "high", "xhigh", "max")
+    assert fable_5_2.tuning.reasoning_effort == "high"
+    assert fable_5_2.media_types == frozenset({"image", "pdf"})
+    assert model_catalog.models["claude-fable-5-1"].superseded_by == "claude-fable-5-2"
+    assert model_catalog.models["claude-fable-5-1"].spawnable
 
 
 def test_claude_sonnet_5_5_capabilities_and_display_successor(

@@ -93,9 +93,9 @@ class UsageFields:
     calls: int = 1
     parent_call_id: str | None = None
     # meiva:note
-    # True when the caller has already said once that this model is unpriced (the transcript-sourced timeline logs one
-    # message at a time and would otherwise say it for every message of a session). The usage event and the billing
-    # span are the same; only the warning line is left out.
+    # True when a multi-step batch caller (`log_turn_usage`) has already warned once for this turn's unpriced model so
+    # an external turn with hundreds of steps emits one warning while still recording every step's unpriced usage event
+    # and billing span.
     unpriced_already_reported: bool = False
 
 

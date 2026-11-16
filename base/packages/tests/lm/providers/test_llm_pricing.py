@@ -118,6 +118,8 @@ def test_gemini_chat_catalog_entries_are_in_the_archive() -> None:
     archive_models = _pricing_catalog_models(_pricing_catalog_raw())
     expected = {
         "gemini-4-argon",
+        "gemini-4-carbon",
+        "gemini-4-hydrogen",
         "gemini-3.8-flash",
         "gemini-3.7-flash",
         "gemini-3.5-flash",
@@ -137,6 +139,7 @@ def test_anthropic_catalog_entries_are_in_the_archive() -> None:
         "claude-opus-5",
         "claude-fable-5",
         "claude-fable-5-1",
+        "claude-fable-5-2",
     }
 
     assert expected <= archive_models.keys()
@@ -352,6 +355,7 @@ def test_cost_usd_unknown_model_is_none(prices: pricing.PriceBook) -> None:
 @pytest.mark.parametrize(
     ("model", "expected"),
     [
+        ("claude-fable-5-2", Rates(8.0, 0.20, 40.0, cache_write_5m=10.0, cache_write_1h=16)),
         ("claude-fable-5-1", Rates(10.0, 0.25, 50.0, cache_write_5m=12.5, cache_write_1h=20)),
         ("claude-fable-5", Rates(10.0, 1.0, 50.0, cache_write_5m=12.5, cache_write_1h=20)),
     ],
@@ -468,12 +472,13 @@ def test_gemini_4_argon_intro_price_uses_earliest_global_boundary(
     before = datetime(2026, 11, 30, 9, 59, 59, 999999, tzinfo=UTC)
     after = datetime(2026, 11, 30, 10, 0, tzinfo=UTC)
 
-    assert rates_at("gemini-4-argon", before, _M, prices=gemini_archive_catalog) == Rates(
-        2.0, 0.10, 10.0
-    )
-    assert rates_at("gemini-4-argon", after, _M, prices=gemini_archive_catalog) == Rates(
-        4.0, 0.20, 20.0
-    )
+    for model in ("gemini-4-argon", "gemini-4-carbon"):
+        assert rates_at(model, before, _M, prices=gemini_archive_catalog) == Rates(2.0, 0.10, 10.0)
+        assert rates_at(model, after, _M, prices=gemini_archive_catalog) == Rates(4.0, 0.20, 20.0)
+    for instant in (before, after):
+        assert rates_at("gemini-4-hydrogen", instant, _M, prices=gemini_archive_catalog) == Rates(
+            1.5, 0.075, 7.5
+        )
 
 
 def test_quote_returns_cost_and_the_exact_selected_rates(
@@ -524,6 +529,8 @@ def test_gemini_plugin_prices_equal_archive_current_base_tier(
     model_catalog: ModelCatalog, prices: pricing.PriceBook
 ) -> None:
     model_ids = (
+        "gemini-4-carbon",
+        "gemini-4-hydrogen",
         "gemini-3.8-flash",
         "gemini-3.7-flash",
         "gemini-3.5-flash",
@@ -557,6 +564,7 @@ def test_anthropic_plugin_prices_equal_archive_current_base_tier(
         "claude-opus-5",
         "claude-fable-5",
         "claude-fable-5-1",
+        "claude-fable-5-2",
     )
     current_instant = datetime(2026, 9, 5, tzinfo=UTC)
     plugin_rates = {

@@ -61,3 +61,9 @@ with the probed default `llm_model` and `reasoning_effort` when not overridden.
 Only version `1` opts those pins into CLI execution; older rows without the
 stamp retain the adapter/CLI's original defaults on resume, and unknown
 selection versions fail explicitly.
+
+For usage billing and non-`meiva` context-window reads (`token-usage`,
+`context-breakdown`), `resolve_harness_catalog_model` strips a trailing `[1m]`
+or Antigravity `-<effort>` suffix only when the resulting stem exists in the
+target catalog (`catalog.prices` or `catalog.models`) and the raw selector is
+not already an exact catalog entry.

@@ -1,7 +1,8 @@
 exports = ["check_model_updates.py", "check_plugin_price_drift.py", "update_model_pricing.py"]
 
 [uses]
-"check_model_updates.py" = ["fetch_ports.py", "json_guards.py", "tracker_state.py"]
+"check_model_updates.py" = ["doh_session.py", "fetch_ports.py", "json_guards.py", "tracker_state.py"]
+"doh_session.py" = ["fetch_ports.py"]
 "check_plugin_price_drift.py" = ["plugin_price_sync.py"]
 "plugin_price_source.py" = ["plugin_price_rates.py"]
 "plugin_price_sync.py" = ["plugin_price_rates.py", "plugin_price_source.py"]

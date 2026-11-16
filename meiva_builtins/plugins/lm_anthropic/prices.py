@@ -116,4 +116,14 @@ PRICES = {
         source_checked_at="2026-10-08",
         vendor="anthropic",
     ),
+    "claude-fable-5-2": PriceRates(
+        cache_miss=8.0,
+        cache_hit=0.20,
+        output=40.0,
+        cache_write_5m=10.000,
+        cache_write_1h=16.0,
+        source_url="https://www.anthropic.com/pricing",
+        source_checked_at="2026-11-16",
+        vendor="anthropic",
+    ),
 }
