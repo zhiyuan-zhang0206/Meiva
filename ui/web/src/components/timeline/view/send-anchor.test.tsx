@@ -1,4 +1,4 @@
-import { act, screen } from "@testing-library/react";
+import { act, fireEvent, screen } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { ChatMarkdownMock, ScrollAreaMock, cleanupTimelineTest, makeItem, render } from "./timeline-test-mock";
 vi.mock("@/components/content/markdown", () => ({ ChatMarkdown: ChatMarkdownMock }));
@@ -203,7 +203,7 @@ describe("send anchor", () => {
     expect(screen.queryByTestId("scroll-to-bottom")).toBeNull();
   });
 
-  it("holds working space through completion and releases it only after scrolling up past the natural end", () => {
+  it.each([false, true])("consumes working space at the natural end (still working: %s)", (working) => {
     const items = [earlier, sent];
     content = 1400;
     const view = render(<TimelineView items={items} turnActive threadKey="42" scrollMemoryKey="finished-reserve" />);
@@ -216,12 +216,12 @@ describe("send anchor", () => {
     };
 
     move(1244, 1000);
-    move(750, -494);
+    move(1000, -244);
     expect(reservePx()).toBe(444);
     move(3000, 1000);
     expect(top).toBe(1244);
 
-    view.rerender(<TimelineView items={items} threadKey="42" scrollMemoryKey="finished-reserve" />);
+    view.rerender(<TimelineView items={items} turnActive={working} threadKey="42" scrollMemoryKey="finished-reserve" />);
     expect(top).toBe(1244);
     expect(reservePx()).toBe(444);
     move(1000, -244);
@@ -241,12 +241,55 @@ describe("send anchor", () => {
     expect(top).toBe(800);
     expect(reservePx()).toBe(0);
     view.rerender(<TimelineView key="43" items={[]} threadKey="43" />);
-    view.rerender(<TimelineView key="42" items={items} threadKey="42" scrollMemoryKey="finished-reserve" />);
+    view.rerender(<TimelineView key="42" items={items} turnActive={working} threadKey="42" scrollMemoryKey="finished-reserve" />);
     expect(top).toBe(800);
     expect(reservePx()).toBe(0);
 
     view.rerender(<TimelineView key="42" items={items} turnActive threadKey="42" scrollMemoryKey="finished-reserve" />);
+    expect(reservePx()).toBe(0);
+    act(() => { useTimelineStore.getState().requestSendAnchor(7); });
+    view.rerender(<TimelineView key="42" items={items} turnActive threadKey="42" scrollMemoryKey="finished-reserve" />);
     expect(reservePx()).toBe(444);
+  });
+
+  it("a new send from history renews released space without moving the reader", () => {
+    content = 1400;
+    const view = render(<TimelineView turnActive items={[earlier, sent]} />);
+    act(() => {
+      viewport().scrollTop = 1244;
+      viewport().dispatchEvent(new Event("scroll"));
+      viewport().dispatchEvent(new WheelEvent("wheel", { deltaY: -600 }));
+      viewport().scrollTop = 700;
+      viewport().dispatchEvent(new Event("scroll"));
+    });
+    expect(reservePx()).toBe(0);
+    expect(top).toBe(700);
+    act(() => { useTimelineStore.getState().requestSendAnchor(7); });
+    view.rerender(<TimelineView turnActive items={[earlier, sent]} />);
+    expect(top).toBe(700);
+    expect(reservePx()).toBe(444);
+  });
+
+  it("releases a short conversation at zero after touch inertia, while layout alone keeps space", () => {
+    content = 300;
+    humanTop = 200;
+    render(<TimelineView turnActive items={[sent]} />);
+    expect(reservePx()).toBe(444);
+    resize();
+    act(() => { viewport().dispatchEvent(new Event("scroll")); });
+    expect(reservePx()).toBe(444);
+    act(() => {
+      viewport().scrollTop = 144;
+      viewport().dispatchEvent(new Event("scroll"));
+      fireEvent.touchStart(viewport(), { touches: [{ clientY: 100 }] });
+      fireEvent.touchEnd(viewport(), { touches: [] });
+      viewport().scrollTop = 0;
+      viewport().dispatchEvent(new Event("scroll"));
+    });
+    expect(reservePx()).toBe(0);
+    content = 350;
+    resize();
+    expect(reservePx()).toBe(0);
   });
 
   it("allows an upward wheel to leave a followed tail before the next output arrives", () => {

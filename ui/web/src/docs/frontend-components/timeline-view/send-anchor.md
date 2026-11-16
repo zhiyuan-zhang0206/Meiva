@@ -21,13 +21,20 @@ lets the reader align the last human message, including after sending from
 history. As the reply grows it uses that space before extending the scrollable
 end. Tail-following measures the natural end separately from the reserve.
 
-When a turn completes, its remaining reserve keeps the current layout. Once
-the reader scrolls upward to or past the natural end, the timeline removes the
-reserve below the viewport in place. The reader can go down to the natural end
-by scrolling or using the arrow. A new send or working turn can provide space
-again. Agent switches remember both the reading position and whether the
-reserve is still available. Opening an idle conversation for the first time
-uses the natural end.
+Remaining reserve keeps the current layout through streaming and completion.
+Once the reader actively scrolls upward to or past the natural end, the timeline
+removes that reserve in place, including while the agent is working. The boundary
+is the natural content height minus the viewport height, clamped to zero for a
+short conversation. Upward movement inside the reserve keeps it available;
+layout changes alone do not spend it.
+
+The reader can then go down to the natural end by scrolling or using the arrow.
+Only a new successful send renews released space. Sending from history renews
+that space while keeping the reading position. Stream growth, working-state
+changes and agent switches preserve the released state. Agent switches remember
+both the reading position and whether reserve is still available. A first visit
+to a working conversation can provide space; a saved released position takes
+precedence. Opening an idle conversation for the first time uses the natural end.
 
 ## Relationship to Other Nodes
 

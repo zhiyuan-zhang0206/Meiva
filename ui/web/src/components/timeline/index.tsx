@@ -332,7 +332,7 @@ export const TimelineView = memo(function TimelineView({
     isFollowing,
     topOffset: READING_TOP_PX,
     turnActive,
-    savedSendReserve: hasSavedPosition && savedPosition.keepSendReserve === true,
+    savedSendReserve: hasSavedPosition ? savedPosition.keepSendReserve === true : undefined,
     measureAtBottom,
     cancelBookmark,
   });
