@@ -1,15 +1,20 @@
 from __future__ import annotations
 
 import json
+from datetime import UTC, datetime
 from pathlib import Path
+from typing import cast
 
 import pytest
 
+from base.clock.recurring import RecurringTrigger, RecurringTriggerKind
 from base.daemon.schedules.builtin_schedules import ManifestError, load_manifest
 
 
 def _manifest(tmp_path: Path, entries: list[dict[str, object]]) -> Path:
     for e in entries:
+        e.setdefault("trigger_kind", "every")
+        e.setdefault("interval_seconds", 60)
         script = e["script"]
         assert isinstance(script, str)
         (tmp_path / script).write_text("print('ok')\n")
@@ -124,6 +129,8 @@ class TestLoadManifest:
                             "default_enabled": True,
                             "script": "nope.py",
                             "command": "python nope.py",
+                            "trigger_kind": "every",
+                            "interval_seconds": 60,
                         }
                     ]
                 }
@@ -131,6 +138,30 @@ class TestLoadManifest:
         )
         with pytest.raises(ManifestError, match="does not exist"):
             load_manifest(path)
+
+
+class TestRecurringTrigger:
+    def test_every_advances_from_now(self) -> None:
+        now = datetime(2026, 11, 17, 3, 0, tzinfo=UTC)
+        trigger = RecurringTrigger(kind="every", interval_seconds=90)
+
+        assert trigger.next_launch(now=now, cluster_timezone="Asia/Shanghai") == datetime(
+            2026, 11, 17, 3, 1, 30, tzinfo=UTC
+        )
+
+    def test_cron_uses_the_resolved_cluster_timezone(self) -> None:
+        now = datetime(2026, 11, 16, 22, 30, tzinfo=UTC)
+        trigger = RecurringTrigger(kind="cron", cron_expr="0 7 * * *")
+
+        assert trigger.next_launch(now=now, cluster_timezone="Asia/Shanghai") == datetime(
+            2026, 11, 16, 23, 0, tzinfo=UTC
+        )
+
+    def test_rejects_an_unknown_runtime_kind(self) -> None:
+        trigger = RecurringTrigger(kind=cast(RecurringTriggerKind, "daemon"), interval_seconds=60)
+
+        with pytest.raises(ValueError, match="trigger kind"):
+            trigger.validate()
 
 
 # meiva:note

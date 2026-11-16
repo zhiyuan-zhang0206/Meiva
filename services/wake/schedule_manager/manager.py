@@ -751,6 +751,7 @@ class ScheduleManager:
         ):
             return False
         try:
+            session_was_live = self._backend.has_session(name)
             reaped, mode = self._backend.kill_session(name)
         except Exception as exc:
             self._log_reap_failure(schedule_id, name, "raised", now, exc=exc)
@@ -769,14 +770,18 @@ class ScheduleManager:
         self._reap_retries.discard(schedule_id)
         self._reap_failure_logs.pop(schedule_id, None)
         self._blocked.pop(schedule_id, None)
+        # meiva:note
+        # The PTY manager only owns compatibility daemon status. A row upgraded
+        # in place to a declarative trigger already carries its next scheduled
+        # status, which the legacy-session cleanup must preserve.
         self._set_status(schedule_id, "stopped")
+        # meiva:note
         # The killed process can never close its own run rows (the kill chain
         # is SIGKILL — no handler runs); close them now so a stop/restart/
         # edited-script save does not leave an in-progress "…" row behind (QA
         # P2-2). A kill that does not route through here leaves its row open
         # until the manager next launches or reaps this schedule.
-        wanted = revisions.desired(self._pool, schedule_id, machine=self._machine_name)
-        if wanted is not None:
+        if session_was_live:
             self._close_null_runs(schedule_id)
         _log.info("schedule %s: PTY session %s reaped (%s)", schedule_id, name, mode)
         return True

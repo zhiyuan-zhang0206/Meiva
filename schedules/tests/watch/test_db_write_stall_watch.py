@@ -187,6 +187,43 @@ def test_a_restart_inside_the_cooldown_does_not_page_again(
     assert again.last_alert == saved_alert
 
 
+def test_declarative_upgrade_recovers_the_legacy_window_from_history(
+    sdk_environment: MeivaContext, tmp_path: Path
+) -> None:
+    watch = _watch(tmp_path)
+    watch.state.parent.mkdir(parents=True, exist_ok=True)
+    watch.state.write_text(
+        json.dumps(
+            {
+                "last_alert": 0.0,
+                "last_sample": "2026-10-24 11:02:03.456",
+            }
+        )
+    )
+    watch.history.parent.mkdir(parents=True, exist_ok=True)
+    watch.history.write_text(
+        "\n".join(
+            json.dumps(
+                {
+                    "stamp": sample.stamp,
+                    "xacts_per_s": sample.xacts_per_s,
+                    "queries_per_s": sample.queries_per_s,
+                    "query_us": sample.query_us,
+                }
+            )
+            for sample in (_sample(1, *_STALLED), _sample(2, *_STALLED))
+        )
+        + "\n"
+    )
+    watch.log.write_text("\n".join(_line(m, *_STALLED) for m in (1, 2, 3)) + "\n")
+
+    with serve_gateway() as gateway, gateway.client() as client, use_client(client):
+        state = poll_once(watch, initial_state(watch), now=4000.0)
+
+    assert state.alerted
+    assert len(gateway.requests) == 2
+
+
 def test_a_missing_log_is_an_empty_poll(tmp_path: Path) -> None:
     watch = _watch(tmp_path, agents=())
 

@@ -10,6 +10,7 @@ from pathlib import Path
 from base.host.exit_codes import hard_exit
 from base.agents.context import MeivaContext, deferred_event_bus
 from base.agents.context.clients import ClientSet
+from base.agents.context.identity import AgentIdentity
 from base.clock import SYSTEM_TIMERS, Clock
 from base.clock.configuration import clock_config_from_boot
 from base.cluster.dataplane.direct_url import ClusterDirectUrl
@@ -44,12 +45,17 @@ def cluster_timezone() -> str:
 # of them from the checkout it happens to sit in.
 @contextmanager
 def fresh_schedule_entry(
-    *, image: LoadedCommit, process: str, home: Path
+    *,
+    image: LoadedCommit,
+    process: str,
+    home: Path,
+    environment: dict[str, str] | None = None,
 ) -> Generator[ScheduleInputs]:
     import meiva
 
-    config = ConfigBoot()
+    config = ConfigBoot(environment=environment)
     config.boot()
+    process_env = config.process_environment()
     machine = ConfiguredMachineIdentity(config)
     gate = ProcessDbGate(process=process, version=CodeVersion(image).get, end_process=hard_exit)
 
@@ -74,14 +80,26 @@ def fresh_schedule_entry(
             rng=rng,
         ),
     )
+    schedule_raw = process_env.get("MEIVA_SCHEDULE_ID")
+    owner_raw = process_env.get("MEIVA_AGENT_ID")
+    identity = None
+    if schedule_raw is not None:
+        schedule_id = int(schedule_raw)
+        owner_agent_id = int(owner_raw) if owner_raw is not None else None
+        identity = AgentIdentity(
+            agent_id=owner_agent_id,
+            owns_loop=owner_agent_id is None,
+            actor=f"schedule:{schedule_id}",
+        )
     process_context.bind_context(
         MeivaContext(
+            identity=identity,
             clients=clients,
             machine=machine,
             clock_factory=lambda: Clock(clock_config_from_boot(config), timers=SYSTEM_TIMERS),
             meiva_home=home,
             user_home=Path.home(),
-            environ=config.process_environment(),
+            environ=process_env,
             rng=rng,
             bus_factory=deferred_event_bus(config, rng=rng, timers=SYSTEM_TIMERS),
         )

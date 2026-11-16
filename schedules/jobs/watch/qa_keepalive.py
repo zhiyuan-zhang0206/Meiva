@@ -50,6 +50,7 @@ __all__ = [
     "probe_process",
     "round_once",
     "run_keepalive",
+    "run_keepalive_once",
     "save_state",
 ]
 
@@ -323,3 +324,20 @@ def _round(
         )
         meiva.agents.send_message(settings.report_agent, plan.wake)
     return state
+
+
+def run_keepalive_once(keepalive: Keepalive, clock: Callable[[], datetime]) -> None:
+    instant = clock()
+    try:
+        settings = Settings.from_environ(keepalive.env)
+    except RuntimeError as exc:
+        print(f"{_stamp(instant, keepalive.zone)} not configured: {exc}", flush=True)
+        return
+    state = load_state(keepalive, instant=instant)
+    try:
+        _round(keepalive, settings, state, instant)
+    except Exception as exc:
+        print(
+            f"{_stamp(instant, keepalive.zone)} round failed: {type(exc).__name__}: {exc}",
+            flush=True,
+        )

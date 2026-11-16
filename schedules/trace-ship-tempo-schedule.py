@@ -15,22 +15,20 @@
 from __future__ import annotations
 
 import os
-from datetime import UTC, datetime
+from datetime import datetime
 
 import meiva
 from base.paths.home import resolve_meiva_home
-from schedules.jobs.entry import cluster_timezone, open_schedule_entry
-from schedules.jobs.loop import CronSchedule, Trigger, run_loop
-from schedules.plans.loop_plan import LoopTiming
-from schedules.plans.schedule_identity import parse_schedule_id
+from schedules.jobs.entry import open_schedule_entry
+from schedules.plans.schedule_identity import parse_scheduled_for
 
 CRON = "*/5 * * * *"
 SHIP_TIMEOUT_SECONDS = 600
 
 
 # meiva:note
-# One slot's worth of shipping. Every failure stays inside this function: the run loop reads an
-# exception from a fire as the schedule's outcome, and a viewer that cannot be reached is not a
+# One slot's worth of shipping. Every failure stays inside this function: an unreachable viewer
+# remains a completed round rather than a failed schedule, and is not a
 # reason to stop reporting the next slot.
 def ship_traces(_slot: datetime, _payload: str | None) -> None:
     try:
@@ -43,12 +41,5 @@ def ship_traces(_slot: datetime, _payload: str | None) -> None:
 if __name__ == "__main__":
     home = resolve_meiva_home()
     with open_schedule_entry(globals().get("MEIVA_SCHEDULE_INPUTS"), home=home) as inputs:
-        run_loop(
-            inputs.database(),
-            CronSchedule((Trigger(CRON),), timezone=cluster_timezone(), timing=LoopTiming()),
-            ship_traces,
-            schedule_id=parse_schedule_id(os.environ.get("MEIVA_SCHEDULE_ID")),
-            home=inputs.home,
-            started_at=datetime.now(UTC),
-            clock=lambda: datetime.now(UTC),
-        )
+        del inputs
+        ship_traces(parse_scheduled_for(os.environ.get("MEIVA_SCHEDULED_FOR")), None)

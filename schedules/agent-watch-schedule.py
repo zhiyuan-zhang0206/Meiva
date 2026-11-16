@@ -16,6 +16,7 @@
 # meiva:link schedules/README.md
 
 import os
+import shutil
 import sys
 from collections.abc import Mapping
 from datetime import UTC, datetime
@@ -28,14 +29,21 @@ from base.daemon.schedules.inputs import ScheduleInputs
 from base.paths.home import resolve_meiva_home
 from schedules.jobs.watch.agent_watch import EmitTally, SendMessage, run_round
 from schedules.jobs.entry import cluster_timezone, open_schedule_entry
-from schedules.jobs.loop import CronSchedule, Trigger, run_loop
-from schedules.plans.schedule_identity import parse_schedule_id
+from schedules.plans.schedule_identity import parse_scheduled_for
 
 CRON = "*/10 * * * *"
 _PROCESS_NAME = "agent-watch"
 _REPORT_AGENT = 405
 _ENV_REPORT_AGENT = "MEIVA_AGENT_WATCH_REPORT_AGENT"
 _STATE_FILE = "agent-watch.json"
+
+
+def _state_path(home: Path) -> Path:
+    current = Path("state.json")
+    legacy = home / "run" / _STATE_FILE
+    if not current.exists() and legacy.is_file():
+        shutil.copy2(legacy, current)
+    return current
 
 
 # meiva:note
@@ -91,19 +99,13 @@ if __name__ == "__main__":
             inputs=inputs,
             report_agent=report_agent_from_environ(os.environ),
             home=home,
-            state_path=home / "run" / _STATE_FILE,
+            state_path=_state_path(home),
             tally=EmitTally(),
             send=meiva.agents.send_message,
         )
-        if "--once" in sys.argv:
-            watch(datetime.now(UTC), None)
-            raise SystemExit(0)
-        run_loop(
-            inputs.database(),
-            CronSchedule((Trigger(CRON),), timezone=cluster_timezone()),
-            watch,
-            schedule_id=parse_schedule_id(os.environ.get("MEIVA_SCHEDULE_ID")),
-            home=inputs.home,
-            started_at=datetime.now(UTC),
-            clock=lambda: datetime.now(UTC),
+        slot = (
+            datetime.now(UTC)
+            if "--once" in sys.argv
+            else parse_scheduled_for(os.environ.get("MEIVA_SCHEDULED_FOR"))
         )
+        watch(slot, None)

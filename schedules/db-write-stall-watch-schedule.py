@@ -7,29 +7,37 @@
 # agent-host crash wave is the consequence of.
 # meiva:link schedules/README.md
 
-import os
+import shutil
 import time
+from pathlib import Path
 from zoneinfo import ZoneInfo
 
 from base.paths.home import resolve_meiva_home
-from schedules.jobs.entry import cluster_timezone
-from schedules.jobs.watch.stall_watch import StallWatch, run_watch
-from schedules.plans.schedule_identity import parse_schedule_id
+from schedules.jobs.entry import cluster_timezone, open_schedule_entry
+from schedules.jobs.watch.stall_watch import StallWatch, run_watch_once
 
 REPORT_AGENTS = (1818, 405)
 
 
+def _state_path(home: Path) -> Path:
+    current = Path("state.json")
+    legacy = home / "run" / "db-write-stall-watch.json"
+    if not current.exists() and legacy.is_file():
+        shutil.copy2(legacy, current)
+    return current
+
+
 if __name__ == "__main__":
     home = resolve_meiva_home()
-    run_watch(
-        StallWatch(
-            log=home / "pgbouncer" / "pgbouncer.log",
-            state=home / "run" / "db-write-stall-watch.json",
-            history=home / "state" / "db-write-stall-history.jsonl",
-            zone=ZoneInfo(cluster_timezone()),
-            report_agents=REPORT_AGENTS,
-            home=home,
-            schedule_id=parse_schedule_id(os.environ.get("MEIVA_SCHEDULE_ID")),
-        ),
-        clock=time.time,
-    )
+    with open_schedule_entry(globals().get("MEIVA_SCHEDULE_INPUTS"), home=home):
+        run_watch_once(
+            StallWatch(
+                log=home / "pgbouncer" / "pgbouncer.log",
+                state=_state_path(home),
+                history=home / "state" / "db-write-stall-history.jsonl",
+                zone=ZoneInfo(cluster_timezone()),
+                report_agents=REPORT_AGENTS,
+                home=home,
+            ),
+            clock=time.time,
+        )

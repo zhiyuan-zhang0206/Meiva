@@ -552,6 +552,8 @@ async def _put_plugin(
     plan: ConfigPatchPlan,
     metas: dict[str, ConfigFieldMeta],
     *,
+    cluster_timezone: str,
+    now: datetime,
     db_pool: ConnectionPool | None = None,
     home: Path | None = None,
 ) -> ConfigWriteResult:
@@ -571,7 +573,12 @@ async def _put_plugin(
 
         def _reconcile() -> None:
             with db_pool.connection() as conn:
-                reconcile_plugin_schedules(conn, home=home)
+                reconcile_plugin_schedules(
+                    conn,
+                    home=home,
+                    cluster_timezone=cluster_timezone,
+                    now=now,
+                )
 
         try:
             await asyncio.to_thread(_reconcile)
@@ -627,6 +634,8 @@ async def put_config(
             metas,
             db_pool=gateway_state(request).db_pool,
             home=gateway_state(request).gateway_process.home,
+            cluster_timezone=gateway_state(request).clock.timezone,
+            now=gateway_state(request).clock.now(),
         )
     has_cluster_patch = bool(plan.cluster_writes or plan.cluster_removals)
     if has_cluster_patch:

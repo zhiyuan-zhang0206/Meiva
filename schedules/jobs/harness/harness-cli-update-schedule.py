@@ -12,10 +12,9 @@ from pathlib import Path
 
 from base.cluster.derive import production_identity
 from base.paths.home import resolve_meiva_home
-from schedules.jobs.entry import cluster_timezone, open_schedule_entry
+from schedules.jobs.entry import open_schedule_entry
 from schedules.jobs.harness.harness_cli_update import default_shell_runner, execute_round
-from schedules.jobs.loop import CronSchedule, Trigger, run_loop
-from schedules.plans.schedule_identity import parse_schedule_id
+from schedules.plans.schedule_identity import parse_scheduled_for
 
 CRON = "30 4 * * *"
 
@@ -34,15 +33,9 @@ if __name__ == "__main__":
             is_production=is_prod,
             run_shell=default_shell_runner,
         )
-        if "--once" in sys.argv:
-            round_once(datetime.now(UTC), None)
-            raise SystemExit(0)
-        run_loop(
-            inputs.database(),
-            CronSchedule((Trigger(CRON),), timezone=cluster_timezone()),
-            round_once,
-            schedule_id=parse_schedule_id(os.environ.get("MEIVA_SCHEDULE_ID")),
-            home=inputs.home,
-            started_at=datetime.now(UTC),
-            clock=lambda: datetime.now(UTC),
+        slot = (
+            datetime.now(UTC)
+            if "--once" in sys.argv
+            else parse_scheduled_for(os.environ.get("MEIVA_SCHEDULED_FOR"))
         )
+        round_once(slot, None)

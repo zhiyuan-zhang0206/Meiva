@@ -9,11 +9,11 @@
 # pinned to one machine. A missing tool is a tool error (rc=2) and is reported, never a silent
 # green: "nothing to check" and "could not check" must not look alike.
 #
-# Contract: cron `0 10 15 * *`, at-most-once slots (a slot missed while the schedule is down is
-# skipped, not caught up); one `RESULT` line plus the sweep's tail goes to
+# Contract: cron `0 10 15 * *`; recovery runs one overdue slot and never replays a backlog. One
+# `RESULT` line plus the sweep's tail goes to
 # `$MEIVA_HOME/logs/log-cred-mask-monthly.log`; the operator is woken only on rc != 0 (residual
-# post>0 => 1, tool error => 2) and a green run stays silent. Modes: (default) resident; `--once`
-# runs one sweep now; `--no-notify` silences the red path for self-tests.
+# post>0 => 1, tool error => 2) and a green run stays silent. A declarative cron runs one sweep;
+# `--once` runs one sweep now and `--no-notify` silences the red path for self-tests.
 #
 # This file is the repository template; `meiva schedules provision` writes its text into the stored
 # row, and the runner materializes that copy into the schedule's own directory.
@@ -24,19 +24,15 @@ from __future__ import annotations
 import os
 import subprocess
 import sys
-from datetime import UTC, datetime
-from functools import partial
+from datetime import datetime
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
 import meiva
-from base.daemon.schedules.watcher import next_fire
 from base.paths import logs_dir
 from base.paths.home import resolve_meiva_home
 from schedules.jobs.entry import cluster_timezone, open_schedule_entry
-from schedules.jobs.loop import CronSchedule, Trigger, run_loop
-from schedules.plans.loop_plan import LoopTiming
-from schedules.plans.schedule_identity import parse_schedule_id
+from schedules.plans.schedule_identity import parse_scheduled_for
 
 TARGET_AGENT = 1818
 
@@ -176,32 +172,10 @@ def _fire(_slot: datetime, message: str | None, *, home: Path) -> None:
         print("[log-cred-mask-monthly] " + ln)
 
 
-# meiva:note
-# The next-fire line is an observation point, not decoration: `run_loop` never prints when it will
-# fire next, this schedule is monthly and silent when green, so without the line there is no way to
-# tell "computed correctly and waiting" from "computed wrongly and will never fire".
 def main(home: Path) -> None:
-    with open_schedule_entry(globals().get("MEIVA_SCHEDULE_INPUTS"), home=home) as inputs:
-        print(
-            "[log-cred-mask-monthly] next fire %s (cron %s)"
-            % (
-                next_fire(CRON, after=datetime.now(UTC), timezone=cluster_timezone()).isoformat(),
-                CRON,
-            )
-        )
-        run_loop(
-            inputs.database(),
-            CronSchedule(
-                tuple(Trigger(expr, payload) for expr, payload in TRIGGERS),
-                timezone=cluster_timezone(),
-                timing=LoopTiming(),
-            ),
-            partial(_fire, home=home),
-            schedule_id=parse_schedule_id(os.environ.get("MEIVA_SCHEDULE_ID")),
-            home=inputs.home,
-            started_at=datetime.now(UTC),
-            clock=lambda: datetime.now(UTC),
-        )
+    with open_schedule_entry(globals().get("MEIVA_SCHEDULE_INPUTS"), home=home):
+        slot = parse_scheduled_for(os.environ.get("MEIVA_SCHEDULED_FOR"))
+        _fire(slot, TRIGGERS[0][1], home=home)
 
 
 if __name__ == "__main__":

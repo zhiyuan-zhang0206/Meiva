@@ -18,6 +18,7 @@ from meiva_builtins.plugins.meiva_usage.probes import HttpJsonRequest
 from meiva_builtins.plugins.meiva_usage.runner import (
     refresh_collector_once,
     run_collector_cycles,
+    run_declarative_cycle,
 )
 from meiva_builtins.plugins.meiva_usage.types import CardReading
 
@@ -348,6 +349,8 @@ def test_schedules_face_filtering_and_fingerprint() -> None:
     specs1 = contribute(cfg1)
     assert len(specs1) == 1
     assert specs1[0].name == "meiva_usage:coll-active"
+    assert specs1[0].trigger_kind == "every"
+    assert specs1[0].interval_seconds == 300
     script1 = specs1[0].script
     assert "# collector_spec:" in script1
     assert '"interval_minutes":5' in script1
@@ -364,9 +367,87 @@ def test_schedules_face_filtering_and_fingerprint() -> None:
     cfg2 = UsageConfig(collectors=(c_active_bumped,))
     specs2 = contribute(cfg2)
     assert len(specs2) == 1
+    assert specs2[0].trigger_kind == "every"
+    assert specs2[0].interval_seconds == 900
     script2 = specs2[0].script
     assert '"interval_minutes":15' in script2
     assert script1 != script2
+
+
+def test_declarative_cycle_persists_rate_limit_backoff(
+    db_conn: psycopg.Connection[Any], tmp_path: Path
+) -> None:
+    collector = CollectorConfig(
+        id="paced",
+        label="Paced",
+        provider="deepseek",
+        machine="gateway",
+        key_env="DEEPSEEK_API_KEY",
+        interval_minutes=1,
+    )
+    cfg_dir = tmp_path / "configs" / "meiva_usage"
+    cfg_dir.mkdir(parents=True)
+    (cfg_dir / "config.json").write_text(
+        UsageConfig(collectors=(collector,)).model_dump_json(indent=2)
+    )
+
+    class FakeMachine:
+        def name(self) -> str:
+            return "gateway"
+
+    inputs = ScheduleInputs(
+        database=cast(Any, lambda: FakeDatabase(db_conn)),
+        producer=cast(Any, lambda: None),
+        image=LoadedCommit(source_root=tmp_path, sha="test-sha"),
+        machine=cast(Any, FakeMachine()),
+        home=tmp_path,
+    )
+    state_path = tmp_path / "schedule-workspace" / "state.json"
+    first = datetime(2026, 11, 17, 0, 0, tzinfo=UTC)
+    calls: list[bool] = []
+
+    def limited(*_args: Any, **_kwargs: Any) -> dict[str, CardReading]:
+        calls.append(True)
+        return {
+            "paced": CardReading(
+                value="—", detail="provider limited", status="warn", rate_limited=True
+            )
+        }
+
+    common: dict[str, Any] = {
+        "borrowed": inputs,
+        "collector_id": "paced",
+        "state_path": state_path,
+        "environ": {"DEEPSEEK_API_KEY": "test"},
+        "user_home": tmp_path,
+        "platform": "darwin",
+    }
+    run_declarative_cycle(**common, clock=lambda: first, refresh=limited)
+    state = json.loads(state_path.read_text())
+    assert state == {
+        "consecutive_rate_limits": 1,
+        "not_before": "2026-11-17T00:02:00+00:00",
+    }
+
+    run_declarative_cycle(
+        **common,
+        clock=lambda: first + timedelta(seconds=60),
+        refresh=limited,
+    )
+    assert calls == [True]
+
+    def recovered(*_args: Any, **_kwargs: Any) -> dict[str, CardReading]:
+        calls.append(False)
+        return {"paced": CardReading(value="$1", detail="fresh", status="ok")}
+
+    recovered_at = first + timedelta(seconds=121)
+    run_declarative_cycle(**common, clock=lambda: recovered_at, refresh=recovered)
+    state = json.loads(state_path.read_text())
+    assert calls == [True, False]
+    assert state == {
+        "consecutive_rate_limits": 0,
+        "not_before": "2026-11-17T00:03:01+00:00",
+    }
 
 
 def test_refresh_collector_once_openai(db_conn: psycopg.Connection[Any], tmp_path: Path) -> None:

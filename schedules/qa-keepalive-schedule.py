@@ -12,13 +12,14 @@
 # meiva:link schedules/README.md
 
 import os
+import shutil
 from datetime import UTC, datetime
+from pathlib import Path
 from zoneinfo import ZoneInfo
 
 from base.paths.home import resolve_meiva_home
-from schedules.jobs.entry import cluster_timezone
-from schedules.jobs.watch.qa_keepalive import Keepalive, run_keepalive
-from schedules.plans.schedule_identity import parse_schedule_id
+from schedules.jobs.entry import cluster_timezone, open_schedule_entry
+from schedules.jobs.watch.qa_keepalive import Keepalive, run_keepalive_once
 
 HINT = (
     "Recovery: 1) reopen the page and check /health; 2) relaunch the inbound watcher; "
@@ -30,17 +31,25 @@ BLIND_HINT = (
 )
 
 
+def _state_path(home: Path) -> Path:
+    current = Path("state.json")
+    legacy = home / "run" / "qa-keepalive.json"
+    if not current.exists() and legacy.is_file():
+        shutil.copy2(legacy, current)
+    return current
+
+
 if __name__ == "__main__":
     home = resolve_meiva_home()
-    run_keepalive(
-        Keepalive(
-            env=os.environ,
-            state=home / "run" / "qa-keepalive.json",
-            zone=ZoneInfo(cluster_timezone()),
-            hint=HINT,
-            blind_hint=BLIND_HINT,
-            home=home,
-            schedule_id=parse_schedule_id(os.environ.get("MEIVA_SCHEDULE_ID")),
-        ),
-        clock=lambda: datetime.now(UTC),
-    )
+    with open_schedule_entry(globals().get("MEIVA_SCHEDULE_INPUTS"), home=home):
+        run_keepalive_once(
+            Keepalive(
+                env=os.environ,
+                state=_state_path(home),
+                zone=ZoneInfo(cluster_timezone()),
+                hint=HINT,
+                blind_hint=BLIND_HINT,
+                home=home,
+            ),
+            clock=lambda: datetime.now(UTC),
+        )

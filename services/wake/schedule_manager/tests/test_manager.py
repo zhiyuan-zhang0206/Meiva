@@ -474,6 +474,36 @@ def test_sync_launches_enabled_and_kills_disabled(
     assert launched == [sid]
 
 
+def test_sync_reaps_legacy_pty_after_declarative_upgrade_without_clobbering_status(
+    db_conn: psycopg.Connection,
+    pool: ConnectionPool,
+    fake_session: tuple[_FakeBackend, list[int]],
+) -> None:
+    backend, launched = fake_session
+    sid = _insert(db_conn, "upgraded-in-place", enabled=True)
+    name = session_name(f"schedule-{sid}")
+    manager = schedule_manager(pool, backend)
+    manager.sync_one(sid, now=NOW)
+    run_id = _insert_null_run(db_conn, sid)
+    assert name in backend.live
+
+    db_conn.execute(
+        "UPDATE schedules SET trigger_kind = 'every', interval_seconds = 60, timezone = 'UTC', "
+        "status = 'scheduled', next_launch_at = now() + interval '60 seconds', "
+        "desired_revision = desired_revision + 1 WHERE id = %s",
+        (sid,),
+    )
+    db_conn.commit()
+
+    assert manager.sync_one(sid, now=NOW)
+
+    assert name in backend.killed
+    assert name not in backend.live
+    assert launched == [sid]
+    assert _status(db_conn, sid) == "scheduled"
+    assert _run_row(db_conn, run_id) == (False, "interrupted")
+
+
 def test_stop_reaps_then_start_rebuilds_without_reviving_after_gateway_restart(
     db_conn: psycopg.Connection, pool: ConnectionPool, fake_session: tuple[_FakeBackend, list[int]]
 ) -> None:

@@ -10,19 +10,13 @@
 
 from __future__ import annotations
 
+import ast
 import json
-import os
 import shutil
-import subprocess
 import sys
-import time
-from datetime import UTC, datetime
 from pathlib import Path
 
-import psycopg
-
 from base.host.proc import run_bounded
-from schedules.tests.support.schedule_support import insert_schedule
 
 _SCHEDULES = Path(__file__).resolve().parents[1]
 _CHILD = Path(__file__).parent / "children" / "run_scripts.py"
@@ -72,37 +66,22 @@ def test_every_builtin_script_imports_from_a_materialized_copy(tmp_path: Path) -
     }
 
 
-def test_every_script_run_as_main_reaches_its_loop(
-    db_conn: psycopg.Connection, tmp_path: Path
-) -> None:
-    created_at = datetime.now(UTC)
-    workers: list[tuple[str, subprocess.Popen[bytes]]] = []
+def test_every_builtin_entry_is_single_round() -> None:
+    resident_drivers = {"run_loop", "run_weekly", "run_watch", "run_keepalive"}
+    violations: dict[str, list[str]] = {}
     for script in _SCRIPTS:
-        schedule_id = insert_schedule(db_conn, name=f"entry-{script.name}", created_at=created_at)
-        workers.append(
-            (
-                script.name,
-                subprocess.Popen(
-                    [sys.executable, "-I", str(_CHILD), "main", str(script)],
-                    cwd=tmp_path,
-                    env={**os.environ, "MEIVA_SCHEDULE_ID": str(schedule_id)},
-                    stderr=subprocess.PIPE,
-                ),
-            )
-        )
-    try:
-        deadline = time.monotonic() + 10
-        while all(worker.poll() is None for _, worker in workers) and time.monotonic() < deadline:
-            time.sleep(0.1)
-        exited = {name: worker for name, worker in workers if worker.poll() is not None}
-        errors = {
-            name: (worker.stderr.read().decode()[-600:] if worker.stderr else "")
-            for name, worker in exited.items()
-        }
-    finally:
-        for _, worker in workers:
-            worker.kill()
-        for _, worker in workers:
-            worker.wait(timeout=10)
+        tree = ast.parse(script.read_text(encoding="utf-8"))
+        found: list[str] = []
+        for node in ast.walk(tree):
+            if (
+                isinstance(node, ast.Call)
+                and isinstance(node.func, ast.Name)
+                and node.func.id in resident_drivers
+            ):
+                found.append(node.func.id)
+            if isinstance(node, ast.ImportFrom):
+                found.extend(alias.name for alias in node.names if alias.name in resident_drivers)
+        if found:
+            violations[str(script.relative_to(_SCHEDULES))] = sorted(set(found))
 
-    assert errors == {}
+    assert violations == {}

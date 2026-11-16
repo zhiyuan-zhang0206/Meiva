@@ -334,6 +334,8 @@ class DeclarativeScheduleEngine:
                 "s.owner_agent_id, s.secret_env_vars FROM schedules s "
                 "WHERE s.machine = %s AND s.enabled AND s.trigger_kind <> 'daemon' "
                 "AND s.next_launch_at <= %s "
+                "AND NOT EXISTS (SELECT 1 FROM schedule_sync_requests q "
+                "                WHERE q.schedule_id = s.id) "
                 "AND NOT EXISTS (SELECT 1 FROM schedule_runs r "
                 "                WHERE r.schedule_id = s.id AND r.ok IS NULL) "
                 "ORDER BY s.next_launch_at, s.id FOR UPDATE OF s SKIP LOCKED LIMIT 1",
@@ -369,6 +371,7 @@ class DeclarativeScheduleEngine:
         env = dict(self._launch_env)
         env["MEIVA_HOME"] = str(self._home)
         env["MEIVA_SCHEDULE_ID"] = str(schedule.id)
+        env["MEIVA_SCHEDULED_FOR"] = schedule.next_launch_at.isoformat()
         if schedule.owner_agent_id is not None:
             env["MEIVA_AGENT_ID"] = str(schedule.owner_agent_id)
         self._merge_secrets(env, schedule.id, tuple(schedule.secret_env_vars))

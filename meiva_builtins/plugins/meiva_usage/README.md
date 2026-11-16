@@ -40,21 +40,24 @@ via `CollectorConfig`. Through declarative contribution faces, the plugin provis
 
 - **Schedules face (`schedules.py`)**:
   Contributes `tuple[ScheduleSpec, ...]` for active collectors (`enabled=True`). Each schedule
-  embeds a canonical `# collector_spec: {...}` JSON comment in its script. When an operator
-  modifies collector intervals or parameters, the script changes deterministically, prompting
-  `reconcile_plugin_schedules` to bump `desired_revision` and converge the running session.
+  is a declarative `every` trigger using `interval_minutes * 60`, and embeds a canonical
+  `# collector_spec: {...}` JSON comment in its script. When an operator modifies collector
+  intervals or parameters, reconciliation updates the same row in place while preserving its
+  enabled state.
 
 ### 3. Schedule runner & probe execution (`runner.py`)
 
 The schedule script executes `run_from_schedule(MEIVA_SCHEDULE_INPUTS, collector_id=...)`:
+- **Single round**: One no-PTY process performs at most one provider probe and exits. The
+  schedule manager owns cadence, timeout, run history, and single-flight admission.
 - **Config resolution**: Resolves configuration through `read_plugin_config`, supporting local
   gateway checkouts as well as split agent-runners that receive `MEIVA_PLUGIN_CLUSTER_CONFIG`
   via `GET /api/bootstrap`.
 - **Machine attribution**: Passes the current machine identity to `refresh_collector_once`.
-- **Telemetry binding**: Binds the runner's event pipeline once per process
+- **Telemetry binding**: Binds the runner's event pipeline for the round
   (`init_gateway_process`, process name `schedule-runner`) and stamps `schedule_id` from
-  `MEIVA_SCHEDULE_ID` on every cycle event; a bind that fails is reported once, and the loop
-  keeps collecting.
+  `MEIVA_SCHEDULE_ID` on its cycle event; a bind failure is reported without preventing the
+  probe.
 - **Error hysteresis (`should_write_failure`)**: Transient network or probe errors within the
   freshness window do not flap cards to error immediately, preserving previous good readings.
 - **Rate limits (`UsageRateLimitedError`)**: A probe that sees HTTP 429 raises `UsageRateLimitedError` (a
@@ -65,19 +68,22 @@ The schedule script executes `run_from_schedule(MEIVA_SCHEDULE_INPUTS, collector
   `updated_at` is left alone (`stats.upsert(refresh_stamp=False)`) so the panel's age is the age of
   the data. A card that never held a reading gets a `—` / `warn` placeholder. Rate limits bypass
   the error hysteresis because the reading is known to be old.
-- **Backoff (`backoff.py`)**: `run_collector_cycles` doubles the sleep after each consecutive
-  rate-limited cycle (`next_interval_s`, pure), capped at 120 minutes, and returns to
-  `interval_minutes` after the first cycle that is not rate limited. The `plugin_collector_cycle`
+- **Backoff (`backoff.py`)**: The round persists consecutive-rate-limit count and `not_before`
+  in the schedule workspace's `state.json`. Fixed `every` fires before `not_before` exit without
+  probing; each rate limit doubles the provider interval (`next_interval_s`, pure), capped at
+  120 minutes, and the first non-rate-limited cycle resets it to `interval_minutes`. The
+  `plugin_collector_cycle`
   event reports such a cycle as `outcome="rate_limited"`, `reason="rate_limited"`. Other probe
   failures are still written as error cards and the cycle event stays `ok`. A cycle whose refresh
-  raised was not rate limited either, so it also returns the next sleep to `interval_minutes`.
+  raised was not rate limited either, so its next allowed probe returns to `interval_minutes`.
 - **Claude token expiry**: `probe_claude` does not call the usage API with an access token whose
   `expiresAt` has passed (an unknown expiry is still tried). It reports `Claude access token
   expired; waiting for Claude Code to refresh it`: Claude Code refreshes its own token the next
   time it runs. The `claude-auth-keepalive` schedule (see `schedules/README.md`) runs the CLI once
   every six hours so the login does not lapse through disuse. There is no official figure for how
   long an access token lives, so on an idle machine the card can still briefly show "waiting for
-  Claude Code to refresh it" between two keepalive runs, and a missed run is not made up. This
+  Claude Code to refresh it" between two keepalive runs. Manager recovery runs one overdue slot,
+  without replaying every missed six-hour window. This
   plugin never refreshes the token itself, because the refresh token is single-use and a second
   refresher would race the CLI for it. A real 401/403 keeps the `sign in again` message.
 - **Single writer (`stats.upsert`)**: Writes readings through `base.packages.plugins.surface.stats.upsert`,
@@ -87,11 +93,11 @@ The schedule script executes `run_from_schedule(MEIVA_SCHEDULE_INPUTS, collector
 
 Collectors declare sensitive environment variable names via `secret_env_vars()` (e.g. `key_env`).
 These names are stored in `schedules.secret_env_vars`. When the `ScheduleManager` launches a
-resident session:
+single-round process:
 - The daemon resolves secret values from the local `.env` and process environment.
 - On split remote runners, the daemon dials the gateway's `GET /api/schedules/{id}/launch-env`
   using the machine's bearer token.
-- The resolved secrets are merged directly into the child session's execution environment (`env`),
+- The resolved secrets are merged directly into the child process environment (`env`),
   keeping process command-line arguments and database schedule rows clean of credentials.
 
 ### 5. Organization admin cost probes (`openai`, `anthropic`)

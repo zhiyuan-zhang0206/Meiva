@@ -15,14 +15,14 @@ from __future__ import annotations
 import datetime as _dt
 import re as _re
 import textwrap as _tw
-from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
-from croniter import croniter
-
-
-class CronExprError(Exception):
-    """Invalid cron expression."""
-
+from base.clock.recurring import (
+    CronExprError,
+    next_fire,
+    previous_fire,
+    validate_cron,
+    validate_timezone,
+)
 
 __all__ = [
     "AT_SESSION_TTL_GRACE_SECONDS",
@@ -56,89 +56,6 @@ DEFAULT_STANDING_CRON_MAX_SECONDS = 7 * 24 * 3600
 # itself is never extended: an at watcher still wakes at `fires_at` or not
 # at all.
 AT_SESSION_TTL_GRACE_SECONDS = 300
-
-
-# Cron
-
-
-def validate_timezone(tz: str) -> None:
-    """Validate an IANA timezone string (e.g. ``"America/Los_Angeles"``).
-
-    Raises ValueError when the timezone name is not recognized.
-    """
-    try:
-        ZoneInfo(tz)
-    except (ZoneInfoNotFoundError, KeyError) as exc:
-        raise ValueError(f"invalid IANA timezone: {tz!r}") from exc
-
-
-def validate_cron(expr: str, *, now: _dt.datetime) -> None:
-    """Validate a 5-field cron expression; raises CronExprError on invalid."""
-    try:
-        croniter(expr, now)
-    except (ValueError, KeyError) as exc:
-        raise CronExprError(f"invalid cron expression: {expr!r}") from exc
-
-
-# meiva:note
-# Computes the next UTC fire time after `after` in `timezone` (defaulting to UTC so the
-# primitive never picks up OS wall time), backing up `after` by `tolerance` when resuming
-# a sleep loop so a wake slightly past the fire minute does not skip a full period.
-def next_fire(
-    expr: str,
-    after: _dt.datetime,
-    timezone: str | None = None,
-    tolerance: _dt.timedelta | None = None,
-) -> _dt.datetime:
-    base = after
-    if base.tzinfo is None:
-        base = base.replace(tzinfo=_dt.UTC)
-    if tolerance is not None:
-        base = base - tolerance
-
-    compute_tz = ZoneInfo(timezone) if timezone else _dt.UTC
-    base_in_tz = base.astimezone(compute_tz)
-
-    try:
-        it = croniter(expr, base_in_tz)
-    except (ValueError, KeyError) as exc:
-        raise CronExprError(f"invalid cron expression: {expr!r}") from exc
-    nxt: _dt.datetime = it.get_next(_dt.datetime)
-    if nxt.tzinfo is None:
-        nxt = nxt.replace(tzinfo=compute_tz)
-    return nxt.astimezone(_dt.UTC)
-
-
-def previous_fire(
-    expr: str,
-    before: _dt.datetime,
-    timezone: str | None = None,
-) -> _dt.datetime:
-    """Return the cron boundary strictly before ``before`` in UTC.
-
-    ``timezone`` has the same meaning as in :func:`next_fire`: croniter
-    interprets the expression in that IANA wall clock, while callers receive
-    one timezone-aware UTC instant. A naive ``before`` is interpreted as UTC,
-    matching ``next_fire``'s existing compatibility behavior.
-
-    Raises:
-        CronExprError: invalid cron expression.
-    """
-    base = before
-    if base.tzinfo is None:
-        base = base.replace(tzinfo=_dt.UTC)
-
-    compute_tz = ZoneInfo(timezone) if timezone else _dt.UTC
-    base_in_tz = base.astimezone(compute_tz)
-
-    try:
-        it = croniter(expr, base_in_tz)
-    except (ValueError, KeyError) as exc:
-        raise CronExprError(f"invalid cron expression: {expr!r}") from exc
-    previous: _dt.datetime = it.get_prev(_dt.datetime)
-    if previous.tzinfo is None:
-        previous = previous.replace(tzinfo=compute_tz)
-    return previous.astimezone(_dt.UTC)
 
 
 # `when` normalization

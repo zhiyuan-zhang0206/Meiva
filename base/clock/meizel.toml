@@ -1,4 +1,4 @@
-exports = ["configuration.py", "ids.py", "tests"]
+exports = ["configuration.py", "ids.py", "recurring.py", "tests"]
 
 [dynamic-attrs]
 "configuration.py" = "_DynamicView is the structural type of the configuration view, which answers any domain name by forwarding to the live settings (base/config/_lite.py); a declaration with no body"
@@ -11,6 +11,7 @@ exports = ["configuration.py", "ids.py", "tests"]
 [uses]
 "configuration.py" = ["__init__.py"]
 "ids.py" = []
+"recurring.py" = []
 "tests" = ["__init__.py", "configuration.py", "ids.py"]
 
 [roots]
