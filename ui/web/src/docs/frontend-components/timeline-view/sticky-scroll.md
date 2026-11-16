@@ -40,8 +40,8 @@ restore and any movement the controller classifies both release the hold, so a
 reader who scrolls after returning is no longer read as "none" (that silence
 used to switch following off for good and skipped the position save on the next
 agent switch — user report 2026-10-19). A bookmark past the end of a page
-that has stopped growing is unreachable: it lands on the end and hands the
-viewport back instead of holding the reader at the top forever. The composer's pending strip lives outside the scroll
+that has stopped growing is unreachable: it lands on the reachable end and
+remains anchored until reader navigation. The composer's pending strip lives outside the scroll
 area, so the echo arrives as ordinary growth and a following reader stays on the
 tail either way. Only a following reader releases the oldest rows (the 250-row
 retention rule in the paging doc).

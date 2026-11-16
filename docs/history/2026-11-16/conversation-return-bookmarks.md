@@ -11,7 +11,8 @@ send-reserve change.
 Use the existing reading-position owner to save an item bookmark on every
 departure. Restore ordinary reading bookmarks as anchored, including when they
 happen to land at the current tail; otherwise the next chunk would silently
-resume following. Keep first visits, reader navigation to the bottom, explicit
+resume following. An unreachable bookmark on a shortened, settled page lands at the
+reachable end and remains anchored as later content grows. Keep first visits, reader navigation to the bottom, explicit
 follow-bottom records and terminal following intact. Timeline saves use the same
 rule for agent switching and a remount at an existing bfcache entry; no separate
 bfcache-only follow policy was found.

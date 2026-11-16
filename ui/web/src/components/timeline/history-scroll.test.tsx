@@ -204,7 +204,7 @@ describe("history entry scroll ownership", () => {
     resize();
     expect(viewport().scrollTop).toBe(300);
     act(() => { height = 5000; resizeCallbacks.forEach((deliver) => deliver()); });
-    expect(viewport().scrollTop).toBe(4400);
+    expect(viewport().scrollTop).toBe(300);
   });
   it("lets a reader replace an unreachable saved position by scrolling", () => {
     height = 900;

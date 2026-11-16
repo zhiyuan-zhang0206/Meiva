@@ -60,7 +60,8 @@ export function applyBookmarkRestore({
       // Older rows were trimmed while away: the bookmark lies past the end of a page that stopped growing. Waiting cannot reach it - land on the end and hand the viewport back, or the hold silences following and every later send for good.
       // meiva:link ui/web/src/docs/frontend-components/timeline-view/sticky-scroll.md
       viewport.scrollTop = max;
-      controller.notifyRestored(snapshot(viewport));
+      if (saved.followBottom) controller.notifyRestored(snapshot(viewport));
+      else controller.notifyAnchored(snapshot(viewport));
       state.pending.current = null;
       state.settled.current = null;
       state.hold.current = false;
