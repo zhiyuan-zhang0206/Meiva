@@ -13,6 +13,11 @@ from .plan.host_commands import HOME
 _PRESTAGE_PATHS = (
     "pyproject.toml uv.lock .python-version base cli ui/web/package.json ui/web/pnpm-lock.yaml"
 )
+# meiva:note
+# Fetch warms a disposable virtual store with the isolated linker: pnpm cannot apply the
+# target patches reliably while fetching into an empty hoisted tree. Application install
+# still uses the target workspace configuration.
+_PRESTAGE_OPTIONAL_PATHS = "ui/web/pnpm-workspace.yaml ui/web/scripts/patches"
 _PRESTAGE_HARNESS_SCRIPT = """import os, subprocess
 from datetime import UTC, datetime
 from pathlib import Path
@@ -54,7 +59,12 @@ def prestage_command(new: str) -> str:
         f"{HOME}\n"
         'tmp=$(mktemp -d "${TMPDIR:-/tmp}/meiva-prestage.XXXXXX")\n'
         "trap 'rm -rf \"$tmp\"' EXIT\n"
-        f'git -C "$S" archive {quoted} -- {_PRESTAGE_PATHS} | tar -x -C "$tmp"\n'
+        f"set -- {_PRESTAGE_PATHS}\n"
+        f"for path in {_PRESTAGE_OPTIONAL_PATHS}; do\n"
+        f'  if git -C "$S" cat-file -e {quoted}:"$path" 2>/dev/null; then set -- "$@" "$path"; fi\n'
+        "done\n"
+        f'git -C "$S" archive -o "$tmp/target.tar" {quoted} -- "$@" || exit 1\n'
+        'tar -xf "$tmp/target.tar" -C "$tmp" || exit 1\n'
         f'if ! git -C "$S" diff --quiet HEAD {quoted} -- uv.lock .python-version; then\n'
         '  if [ "$(uname -s)" = Darwin ] && [ -d "$S/.venv" ]; then '
         'cp -Rc "$S/.venv" "$tmp/.venv" 2>/dev/null || rm -rf "$tmp/.venv"; fi\n'
@@ -63,9 +73,11 @@ def prestage_command(new: str) -> str:
         "uv sync -q --frozen --no-install-project --no-build-package meiva) || exit 1\n"
         "fi\n"
         'if [ -d "$S/ui/web/node_modules" ] && [ -f "$tmp/ui/web/pnpm-lock.yaml" ] '
-        f'&& ! git -C "$S" diff --quiet HEAD {quoted} -- ui/web/pnpm-lock.yaml '
+        f'&& ! git -C "$S" diff --quiet HEAD {quoted} -- ui/web/pnpm-lock.yaml {_PRESTAGE_OPTIONAL_PATHS} '
         "&& command -v pnpm >/dev/null 2>&1; then\n"
-        '  (cd "$tmp/ui/web" && CI=true pnpm fetch --frozen-lockfile >/dev/null) || exit 1\n'
+        '  if ! (cd "$tmp/ui/web" && CI=true pnpm fetch --frozen-lockfile --config.node-linker=isolated) >"$tmp/pnpm-fetch.log" 2>&1; then\n'
+        '    cat "$tmp/pnpm-fetch.log" >&2; exit 1\n'
+        "  fi\n"
         "fi\n"
         'if [ -f "$tmp/base/host/env/harness/convergence.py" ]; then\n'
         '  py="$S/.venv/bin/python"\n'

@@ -33,7 +33,12 @@ before any SSH. The flags, their modes and the forwarded stop and start choices 
 4. Pre-stage NEW across every host in parallel while the cluster is still serving:
    warm changed Python wheels (`uv.lock` or `.python-version`, seeded from `$S/.venv`
    via APFS CoW clone on macOS, with `UV_HTTP_TIMEOUT` defaulted to 120s) and `pnpm`
-   store entries (`ui/web/pnpm-lock.yaml`) in a temporary directory — failing fast if
+   store entries (lockfile, workspace configuration or patch changes) in a temporary
+   directory from NEW’s Git objects, including optional workspace configuration and
+   patches when NEW contains them. Archive/extraction errors abort preparation;
+   pnpm fetch uses an isolated linker only in this temporary cache directory
+   (the application retains its configured linker), succeeds silently and prints
+   captured stdout/stderr on failure — failing fast if
    either cache warm exits non-zero — and converge external agent harness CLIs
    (`claude`, `codex`, `agy`, `dsh`) on `agent-runner` hosts so neither `switch` nor
    `meiva start` spends the outage downloading packages or harness binaries.
