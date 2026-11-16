@@ -335,6 +335,29 @@ describe("agent switch reading positions", () => {
     expect(screen.queryByTestId("scroll-to-bottom")).toBeNull();
   });
 
+  it.each([false, true])("preserves the departure bookmark and reserve availability across active return (keep: %s)", (keep) => {
+    const entry = `combined-reserve-${keep}`;
+    const rows = [...items, { ...items[0], item_id: "17.0", kind: "inbound_chat", source: "user", payload: "Question" }];
+    client.setQueryData(["timeline", 42], { ...response, items: rows });
+    const { rerender } = renderWithBrowser(tabs(42, entry, true));
+    act(() => { viewport().scrollTop = 4744; fireEvent.scroll(viewport()); });
+    if (!keep) act(() => {
+      fireEvent.wheel(viewport(), { deltaY: -344 });
+      viewport().scrollTop = 4400;
+      fireEvent.scroll(viewport());
+    });
+    const expected = top;
+    rerender(tabs(43, entry));
+    act(() => { height = 6000; });
+    rerender(tabs(42, entry, true));
+    resize();
+    expect(top).toBe(expected);
+    expect(readScrollMemory(`${entry}:agent:42`)?.keepSendReserve === true).toBe(keep);
+    expect(readingOffset(keep ? "17.0" : "15.0")).toBe(keep ? 56 : -200);
+    act(() => { height = 7000; resizeCallbacks.forEach((deliver) => deliver()); });
+    expect(top).toBe(expected);
+  });
+
   it("recreates the space needed for a bookmark beyond the shortened conversation", () => {
     saveScrollMemory("agent-collapse-space:agent:42", {
       contentKey: "42", scrollTop: 4600, followBottom: false, usedCollapseReserve: true,

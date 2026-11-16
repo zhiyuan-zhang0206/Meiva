@@ -21,3 +21,10 @@ The current owner documents previously described two kinds of timeline departure
 bookmark. That description is superseded here and updated with this repair.
 The prior implementation is preserved in git history (including #8947 / #8964).
 No separate historical decision file describing that two-kind rule was found.
+
+## Integration follow-up
+
+After #8972 landed as 3217b6f0e758, merge that main baseline into this repair and
+retain both active-return composition cases as permanent history-scroll tests.
+They cover preserved and consumed send-reserve availability while output grows
+both away and after return, with the departure message offset held in place.
