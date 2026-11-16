@@ -6,6 +6,7 @@
 # home's real socket (`FakePtyService`), so the manager reads provenance the way it does in
 # production. A test that needs provenance to be unreadable simply leaves that service down.
 from collections.abc import Generator
+from datetime import UTC, datetime
 from pathlib import Path
 
 import psycopg
@@ -299,7 +300,7 @@ def test_newer_edit_during_launch_is_not_acknowledged_as_applied(
     with base.db.pool(max_size=4, gate=database_gate) as pool:
 
         def edit_during_launch() -> None:
-            router.update_blocking(pool, sid, {"script": "print(2)"})
+            router.update_blocking(pool, sid, {"script": "print(2)"}, None, datetime.now(UTC))
 
         backend.during_launch = edit_during_launch
         assert not schedule_manager(pool, backend).sync_one(sid, now=NOW)

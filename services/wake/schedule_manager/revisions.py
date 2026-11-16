@@ -73,7 +73,8 @@ def desired(
                 conn,
                 _DesiredRow,
                 "SELECT enabled, status, desired_revision, applied_revision, launch_generation, "
-                "secret_env_vars, owner_agent_id FROM schedules WHERE id = %s AND machine = %s",
+                "secret_env_vars, owner_agent_id FROM schedules WHERE id = %s AND machine = %s "
+                "AND trigger_kind = 'daemon'",
                 (schedule_id, machine),
             )
         else:
@@ -81,7 +82,8 @@ def desired(
                 conn,
                 _DesiredRow,
                 "SELECT enabled, status, desired_revision, applied_revision, launch_generation, "
-                "secret_env_vars, owner_agent_id FROM schedules WHERE id = %s",
+                "secret_env_vars, owner_agent_id FROM schedules WHERE id = %s "
+                "AND trigger_kind = 'daemon'",
                 (schedule_id,),
             )
     if row is None:
@@ -200,7 +202,8 @@ def load_enabled(pool: ConnectionPool, machine_name: str) -> dict[int, str]:
         rows = query_all(
             conn,
             _StatusRow,
-            "SELECT id, status FROM schedules WHERE enabled AND machine = %s",
+            "SELECT id, status FROM schedules WHERE enabled AND machine = %s "
+            "AND trigger_kind = 'daemon'",
             (machine_name,),
         )
     return {row.id: row.status for row in rows}

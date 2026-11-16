@@ -29,10 +29,19 @@ import { useStore } from "@/lib/state/store";
 import { useSectionVisible } from "../visibility";
 import { useApi } from "@/lib/transport/transport-context";
 
+type DeclarativeTrigger = "at" | "cron" | "every";
+
+function declarativeTrigger(value: string): DeclarativeTrigger | null {
+  if (value === "at" || value === "cron" || value === "every") return value;
+  return null;
+}
+
 function schedulePresentation(schedule: ScheduleSummary) {
   if (schedule.placement_status !== "ok") return { label: "needsAttention", tone: "bg-destructive/10 text-destructive" } as const;
   if (schedule.status === "error") return { label: "needsAttention", tone: "bg-destructive/10 text-destructive" } as const;
   if (schedule.status === "completed") return { label: "completedState", tone: "bg-muted text-muted-foreground" } as const;
+  if (schedule.status === "cancelled") return { label: "stoppedState", tone: "bg-muted text-muted-foreground" } as const;
+  if (schedule.enabled && schedule.status === "scheduled") return { label: "enabledState", tone: "bg-blue-500/10 text-blue-700 dark:text-blue-300" } as const;
   if (!schedule.enabled && schedule.status === "running") return { label: "stopUnconfirmed", tone: "bg-muted text-muted-foreground" } as const;
   if (!schedule.enabled && schedule.status === "stopped") return { label: "stoppedState", tone: "bg-muted text-muted-foreground" } as const;
   if (schedule.enabled && schedule.status === "running") return { label: "enabledState", tone: "bg-blue-500/10 text-blue-700 dark:text-blue-300" } as const;
@@ -90,6 +99,10 @@ export function ScheduleRow({
         <TableCell className="text-sm font-medium">
           {schedule.name}
         </TableCell>
+        <TableCell className="text-xs text-muted-foreground">{schedule.trigger_kind}</TableCell>
+        <TableCell className="whitespace-nowrap text-xs text-muted-foreground">
+          {schedule.next_launch_at ? formatRelative(schedule.next_launch_at, now, { capitalize: true }) : "—"}
+        </TableCell>
         <TableCell
           className="text-xs max-w-[280px] truncate text-muted-foreground"
           title={schedule.description ?? undefined}
@@ -129,7 +142,7 @@ export function ScheduleRow({
       </TableRow>
       {expanded && (
         <TableRow>
-          <TableCell colSpan={6} className="bg-muted/30">
+          <TableCell colSpan={8} className="bg-muted/30">
             <ScheduleDetail
               id={schedule.id}
               editing={editing}
@@ -313,6 +326,7 @@ export function ScheduleForm({
   onCancel: () => void;
 }) {
   const t = useTranslations("schedules");
+  const now = useWallDate();
   return (
     <div className="rounded-md border border-border p-4 space-y-3">
       <h4 className="text-xs font-medium text-muted-foreground">{title}</h4>
@@ -330,17 +344,44 @@ export function ScheduleForm({
           />
         </label>
         <label className="text-xs">
-          {t("command")}
-          <Input
-            autoCorrect="off"
-            autoCapitalize="none"
-            spellCheck={false}
-            className="mt-1 h-8 text-xs font-mono"
-            placeholder="python schedule.py"
-            value={value.command}
-            onChange={(e) => onChange({ ...value, command: e.target.value })}
-          />
+          Trigger
+          <select
+            className="mt-1 h-8 w-full rounded-md border border-border bg-background px-2 text-xs"
+            value={value.trigger_kind}
+            onChange={(event) => {
+              const trigger = declarativeTrigger(event.target.value);
+              if (trigger === null) return;
+              onChange({
+                ...value,
+                trigger_kind: trigger,
+                run_at:
+                  trigger === "at" ? new Date(now.getTime() + 3_600_000).toISOString() : null,
+                cron_expr: trigger === "cron" ? "0 9 * * *" : null,
+                interval_seconds: trigger === "every" ? 3600 : null,
+              });
+            }}
+          >
+            <option value="at">At</option>
+            <option value="cron">Cron</option>
+            <option value="every">Every</option>
+          </select>
         </label>
+        {value.trigger_kind === "at" ? (
+          <label htmlFor="schedule-create-run-at" className="text-xs sm:col-span-2">
+            Run at (ISO 8601)
+            <Input id="schedule-create-run-at" className="mt-1 h-8 font-mono text-xs" value={value.run_at ?? ""} onChange={(e) => onChange({ ...value, run_at: e.target.value })} />
+          </label>
+        ) : value.trigger_kind === "cron" ? (
+          <label htmlFor="schedule-create-cron" className="text-xs sm:col-span-2">
+            Cron expression
+            <Input id="schedule-create-cron" className="mt-1 h-8 font-mono text-xs" value={value.cron_expr ?? ""} onChange={(e) => onChange({ ...value, cron_expr: e.target.value })} />
+          </label>
+        ) : (
+          <label htmlFor="schedule-create-interval" className="text-xs sm:col-span-2">
+            Interval seconds (minimum 30)
+            <Input id="schedule-create-interval" type="number" min={30} className="mt-1 h-8 font-mono text-xs" value={value.interval_seconds ?? 30} onChange={(e) => onChange({ ...value, interval_seconds: Number(e.target.value) })} />
+          </label>
+        )}
         <label className="text-xs sm:col-span-2">
           {t("description")}
           <Input
@@ -362,8 +403,8 @@ export function ScheduleForm({
             data-lpignore="true"
             className="mt-1 w-full rounded border border-border bg-background p-2 font-mono text-xs pointer-coarse:text-base"
             rows={12}
-            placeholder={"import time\nwhile True:\n    ...\n    time.sleep(60)"}
-            value={value.script}
+            placeholder={"import meiva\nmeiva.agents.send_message(123, content='wake', source='schedule:1')"}
+            value={value.script ?? ""}
             onChange={(e) => onChange({ ...value, script: e.target.value })}
           />
         </label>

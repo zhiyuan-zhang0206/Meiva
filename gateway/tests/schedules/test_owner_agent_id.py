@@ -1,68 +1,90 @@
-# meiva:note
-# A schedule's owner is a provisioning fact, not an API field.
-#
-# Whoever a schedule speaks as decides whose name its unattended writes carry, and the gateway
-# cannot tell its callers apart (one shared administrator credential, caller labels deliberately
-# absent). An API-exposed owner field therefore lets any caller hand a schedule another agent's
-# name. Both request shapes refuse the field with the sentence that names the operator path; a
-# created schedule starts NULL; the read view still carries what provisioning set; and the operator
-# tool writes the row and its audit entry together.
+from __future__ import annotations
 
-import httpx2
 import psycopg
 from fastapi.testclient import TestClient
 
 from base.db import create_agent
 from gateway.tests.schedules.api_support import schedule_client
 
-_REFUSAL = "owner is assigned through provisioning, not the API"
-_SCRIPT = "print(1)\n"
+
+def _owner(db_conn: psycopg.Connection, machine: str = "owner-machine") -> int:
+    owner = create_agent(db_conn)
+    db_conn.execute(
+        "INSERT INTO agents_meta (id, status, machine) VALUES (%s, 'idling', %s)",
+        (owner, machine),
+    )
+    db_conn.commit()
+    return owner
 
 
-def _post(client: TestClient, name: str, **extra: object) -> httpx2.Response:
+def _post(client: TestClient, name: str, **extra: object):
     return client.post(
         "/api/schedules",
-        json={"name": name, "script": _SCRIPT, "command": "python schedule.py", **extra},
+        json={
+            "name": name,
+            "trigger_kind": "every",
+            "interval_seconds": 60,
+            "script": "print(1)\n",
+            **extra,
+        },
     )
 
 
-def _create(client: TestClient, name: str) -> int:
-    response = _post(client, name)
+def test_create_accepts_owner_and_defaults_to_its_machine(
+    db_conn: psycopg.Connection,
+) -> None:
+    owner = _owner(db_conn)
+    with schedule_client() as client:
+        response = _post(client, "owned", owner_agent_id=owner)
+
     assert response.status_code == 201, response.text
-    return response.json()["id"]
+    assert response.json()["owner_agent_id"] == owner
+    assert response.json()["machine"] == "owner-machine"
+    assert response.json()["on_owner_terminate"] == "cancel"
 
 
-# meiva:note
-# Any supplied value is refused, an explicit null included: "clear the owner" is exactly as much an
-# assignment as naming one, and the operator path is the only place either happens.
-def test_create_refuses_an_owner_however_it_is_written(db_conn: psycopg.Connection) -> None:
-    owner = create_agent(db_conn)
-    db_conn.commit()
-
+def test_system_schedule_defaults_to_keep(db_conn: psycopg.Connection) -> None:
     with schedule_client() as client:
-        for supplied in (owner, None):
-            response = _post(client, f"refused-{supplied}", owner_agent_id=supplied)
-            assert response.status_code == 422, response.text
-            assert _REFUSAL in response.text
+        response = _post(client, "system")
+
+    assert response.status_code == 201, response.text
+    assert response.json()["owner_agent_id"] is None
+    assert response.json()["on_owner_terminate"] == "keep"
 
 
-def test_update_refuses_the_field(db_conn: psycopg.Connection) -> None:
-    owner = create_agent(db_conn)
-    db_conn.commit()
-
+def test_update_owner_moves_schedule_to_owner_machine(db_conn: psycopg.Connection) -> None:
+    owner = _owner(db_conn, "new-owner-machine")
     with schedule_client() as client:
-        sid = _create(client, "unowned-schedule")
-        for supplied in (owner, None):
-            response = client.put(f"/api/schedules/{sid}", json={"owner_agent_id": supplied})
-            assert response.status_code == 422, response.text
-            assert _REFUSAL in response.text
+        sid = _post(client, "adopted").json()["id"]
+        response = client.put(f"/api/schedules/{sid}", json={"owner_agent_id": owner})
+
+    assert response.status_code == 200, response.text
+    assert response.json()["owner_agent_id"] == owner
+    assert response.json()["machine"] == "new-owner-machine"
+    assert response.json()["on_owner_terminate"] == "cancel"
 
 
-def test_a_created_schedule_starts_without_an_owner(db_conn: psycopg.Connection) -> None:
+def test_missing_owner_is_rejected(db_conn: psycopg.Connection) -> None:
     with schedule_client() as client:
-        sid = _create(client, "plain-schedule")
-        assert client.get(f"/api/schedules/{sid}").json()["owner_agent_id"] is None
+        response = _post(client, "missing-owner", owner_agent_id=999_999)
 
-    assert db_conn.execute(
-        "SELECT owner_agent_id FROM schedules WHERE id = %s", (sid,)
-    ).fetchone() == (None,)
+    assert response.status_code == 400
+    assert "not found" in response.json()["detail"]
+
+
+def test_message_payload_targets_owner(db_conn: psycopg.Connection) -> None:
+    owner = _owner(db_conn)
+    with schedule_client() as client:
+        response = client.post(
+            "/api/schedules",
+            json={
+                "name": "wake-owner",
+                "trigger_kind": "every",
+                "interval_seconds": 60,
+                "message": "wake up",
+                "owner_agent_id": owner,
+            },
+        )
+
+    assert response.status_code == 201, response.text
+    assert f"meiva.agents.send_message({owner}, 'wake up')" in response.json()["script"]

@@ -5,21 +5,18 @@ from pathlib import Path
 import psycopg
 from fastapi.testclient import TestClient
 
-import base.db
-from base.cluster import session_name
-from base.db.code_version_gate import ProcessDbGate
-from base.host.env.registry import process_environment
-from base.sessions.env_forwarding import forward_env_dict
-from base.sessions.pty.tests.pty_service import PtyServiceProcess
 from base.sessions.pty.tests.pty_service import pty_service as pty_service
-from base.sessions.pty.tests.pty_shells import wait_for
-from gateway.tests.auth.gateway_config import gateway_test_client
-from gateway.tests.schedules.api_support import converging, schedule_client
-from services.wake.schedule_manager.tests.session_fakes import Backend
+from gateway.tests.schedules.api_support import schedule_client
 
 
 def _create(client: TestClient, **kw: object):
-    body = {"name": "s", "script": "print(1)\n", **kw}
+    body = {
+        "name": "s",
+        "trigger_kind": "every",
+        "interval_seconds": 60,
+        "script": "print(1)\n",
+        **kw,
+    }
     return client.post("/api/schedules", json=body)
 
 
@@ -43,8 +40,11 @@ class TestCreate:
         body = r.json()
         assert body["name"] == "daily"
         assert body["enabled"] is True
-        assert body["status"] == "stopped"
+        assert body["status"] == "scheduled"
         assert body["command"] == "python schedule.py"
+        assert body["trigger_kind"] == "every"
+        assert body["interval_seconds"] == 60
+        assert body["next_launch_at"] is not None
         assert body["script"] == "print(1)\n"
         assert body["description"] == "hi"
         assert _versions(db_conn, "daily") == ["initial"]
@@ -97,34 +97,18 @@ class TestReadUpdateDelete:
         assert r.json()["script"] == "print(2)\n"
         assert _versions(db_conn, "e") == ["initial", "edit"]
 
-    def test_put_enabled_change_is_converged_before_the_response(
-        self, db_conn: psycopg.Connection, *, database_gate: ProcessDbGate
+    def test_put_enabled_change_stops_without_a_pty_sync_request(
+        self, db_conn: psycopg.Connection
     ) -> None:
-        backend = Backend()
-        with (
-            base.db.pool(gate=database_gate) as pool,
-            gateway_test_client() as client,
-            converging(pool, backend),
-        ):
-            sid = _create(client, name="e").json()["id"]
-            backend.hold(session_name(f"schedule-{sid}"), "running")
-            stopped = client.put(f"/api/schedules/{sid}", json={"enabled": False})
-
-        assert stopped.status_code == 200
-        assert stopped.json()["enabled"] is False
-        assert backend.killed == [session_name(f"schedule-{sid}")]
-        assert db_conn.execute("SELECT schedule_id FROM schedule_sync_requests").fetchall() == []
-
-    def test_put_enabled_change_queues_a_sync_request(self, db_conn: psycopg.Connection) -> None:
         with schedule_client() as client:
             sid = _create(client, name="e").json()["id"]
             stopped = client.put(f"/api/schedules/{sid}", json={"enabled": False})
 
         assert stopped.status_code == 200
         assert stopped.json()["enabled"] is False
-        assert db_conn.execute("SELECT schedule_id FROM schedule_sync_requests").fetchall() == [
-            (sid,)
-        ]
+        assert stopped.json()["status"] == "stopped"
+        assert stopped.json()["next_launch_at"] is None
+        assert db_conn.execute("SELECT schedule_id FROM schedule_sync_requests").fetchall() == []
 
     def test_put_same_enabled_value_does_not_sync(self, db_conn: psycopg.Connection) -> None:
         with schedule_client() as client:
@@ -147,50 +131,50 @@ class TestReadUpdateDelete:
             assert client.get(f"/api/schedules/{sid}").status_code == 404
             assert client.delete(f"/api/schedules/{sid}").status_code == 404
 
+    def test_delete_waits_for_active_run(self, db_conn: psycopg.Connection) -> None:
+        with schedule_client() as client:
+            sid = _create(client, name="running-delete").json()["id"]
+            db_conn.execute("INSERT INTO schedule_runs (schedule_id) VALUES (%s)", (sid,))
+            db_conn.commit()
+
+            response = client.delete(f"/api/schedules/{sid}")
+
+        assert response.status_code == 409
+        assert response.json()["detail"] == "schedule is running; wait for it to finish"
+        assert db_conn.execute("SELECT 1 FROM schedules WHERE id = %s", (sid,)).fetchone()
+
 
 class TestSyncRequests:
-    def test_control_writes_one_queued_request_per_schedule(
-        self, db_conn: psycopg.Connection
-    ) -> None:
+    def test_control_never_writes_a_pty_sync_request(self, db_conn: psycopg.Connection) -> None:
         with schedule_client() as client:
             sid = _create(client, name="q", enabled=False).json()["id"]
             client.post(f"/api/schedules/{sid}/start")
             client.post(f"/api/schedules/{sid}/stop")
-            assert db_conn.execute("SELECT schedule_id FROM schedule_sync_requests").fetchall() == [
-                (sid,)
-            ]
-            db_conn.execute("DELETE FROM schedule_sync_requests")
-            db_conn.commit()
+            assert (
+                db_conn.execute("SELECT schedule_id FROM schedule_sync_requests").fetchall() == []
+            )
             assert client.delete(f"/api/schedules/{sid}").status_code == 200
-            assert db_conn.execute("SELECT schedule_id FROM schedule_sync_requests").fetchall() == [
-                (sid,)
-            ]
+            assert (
+                db_conn.execute("SELECT schedule_id FROM schedule_sync_requests").fetchall() == []
+            )
 
 
 class TestControl:
-    def test_start_toggles_enabled_and_queues_a_sync(self, db_conn: psycopg.Connection) -> None:
+    def test_start_toggles_enabled_and_sets_next_launch(self, db_conn: psycopg.Connection) -> None:
         with schedule_client() as client:
             sid = _create(client, name="c", enabled=False).json()["id"]
             started = client.post(f"/api/schedules/{sid}/start").json()
         assert started["enabled"] is True
-        assert db_conn.execute("SELECT schedule_id FROM schedule_sync_requests").fetchall() == [
-            (sid,)
-        ]
+        assert started["status"] == "scheduled"
+        assert started["next_launch_at"] is not None
+        assert db_conn.execute("SELECT schedule_id FROM schedule_sync_requests").fetchall() == []
 
-    def test_stop_is_converged_before_the_response(
-        self, db_conn: psycopg.Connection, *, database_gate: ProcessDbGate
-    ) -> None:
-        backend = Backend()
-        with (
-            base.db.pool(gate=database_gate) as pool,
-            gateway_test_client() as client,
-            converging(pool, backend),
-        ):
+    def test_stop_sets_stopped_without_pty_convergence(self, db_conn: psycopg.Connection) -> None:
+        with schedule_client() as client:
             sid = _create(client, name="c").json()["id"]
-            backend.hold(session_name(f"schedule-{sid}"), "running")
             stopped = client.post(f"/api/schedules/{sid}/stop").json()
         assert stopped["enabled"] is False
-        assert backend.killed == [session_name(f"schedule-{sid}")]
+        assert stopped["status"] == "stopped"
         assert db_conn.execute("SELECT schedule_id FROM schedule_sync_requests").fetchall() == []
 
     def test_restart_disabled_409(self, db_conn: psycopg.Connection) -> None:
@@ -218,29 +202,19 @@ class TestLogsRuns:
         assert body["source"] == "last_error"
         assert body["lines"] == ["boom", "trace"]
 
-    def test_logs_live_session_shows_its_output_without_the_blank_screen_rows(
+    def test_logs_reads_latest_declarative_output(
         self,
         db_conn: psycopg.Connection,
-        pty_service: PtyServiceProcess,
-        tmp_path: Path,
         unit_home: Path,
     ) -> None:
-        from base.sessions.backend import get_shell_backend
-
         with schedule_client() as client:
             sid = _create(client, name="l").json()["id"]
-            get_shell_backend(home=unit_home).new_session(
-                session_name(f"schedule-{sid}"),
-                "echo line one; echo line two; sleep 30",
-                tmp_path,
-                env=forward_env_dict(process_environment()),
-            )
-
-            def shown() -> bool:
-                body = client.get(f"/api/schedules/{sid}/logs?lines=3").json()
-                return body["source"] == "live" and body["lines"][-2:] == ["line one", "line two"]
-
-            assert wait_for(shown)
+            log = unit_home / "schedules" / str(sid) / "latest.log"
+            log.parent.mkdir(parents=True, exist_ok=True)
+            log.write_text("line one\nline two\n")
+            body = client.get(f"/api/schedules/{sid}/logs?lines=3").json()
+        assert body["source"] == "latest"
+        assert body["lines"] == ["line one", "line two"]
 
     def test_logs_none_when_no_output(self, db_conn: psycopg.Connection) -> None:
         with schedule_client() as client:
@@ -248,24 +222,6 @@ class TestLogsRuns:
             body = client.get(f"/api/schedules/{sid}/logs").json()
         assert body["source"] == "none"
         assert body["lines"] == []
-
-    def test_logs_reads_pty_transcript_for_dead_session(
-        self, db_conn: psycopg.Connection, unit_home: Path
-    ) -> None:
-        from base.cluster import session_name
-        from base.sessions.backend import get_shell_backend
-
-        with schedule_client() as client:
-            sid = _create(client, name="l").json()["id"]
-            log_path = get_shell_backend(home=unit_home).session_log_path(
-                session_name(f"schedule-{sid}")
-            )
-            assert log_path is not None
-            log_path.parent.mkdir(parents=True, exist_ok=True)
-            log_path.write_text("line one\nline two\n")
-            body = client.get(f"/api/schedules/{sid}/logs").json()
-        assert body["source"] == "transcript"
-        assert body["lines"] == ["line one", "line two"]
 
     def test_runs_empty(self, db_conn: psycopg.Connection) -> None:
         with schedule_client() as client:

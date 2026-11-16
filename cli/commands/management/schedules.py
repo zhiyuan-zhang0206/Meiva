@@ -1,23 +1,6 @@
 # meiva:note
-# `meiva schedules` — manage gateway-supervised schedules (thin client over the gateway).
-#
-# A schedule is a persistent session (a `script` + the `command` that runs it) the
-# gateway's ScheduleManager keeps alive in a pty session. This is the
-# shell-level management surface: list / get / create / update / delete plus the control verbs
-# (start / stop / restart), the two read-only observation verbs (logs / runs), and the local
-# `verify` dry-import sweep.
-#
-# Most verbs forward to an existing route under `/api/schedules` and render the
-# result — the gateway owns the effect (script syntax check, version snapshot,
-# session reconcile), the CLI adds only arg parsing + rendering. This is the
-# operator/agent primitive form: `POST /api/keyed/v1/schedules/draft` (hand a natural-
-# language request to a schedule_writer agent) is deliberately NOT exposed here —
-# the CLI writes a script it already has, it does not run a conversation. Two
-# verbs are local: `provision` (restores the built-ins; never touches the gateway, so it
-# works while the gateway is down) and `verify` (reads the in-store scripts through the
-# gateway, then dry-imports them against this checkout).
-#
-# Every verb that names a schedule accepts a name or a numeric id.
+# `meiva schedules` is the thin CLI over the declarative schedule API. Provision and verify
+# remain local compatibility operations for the resident built-in schedule migration bridge.
 
 from __future__ import annotations
 
@@ -65,6 +48,9 @@ class ScheduleRow(BaseModel):
     placement_reason: str | None = None
     last_error: str | None = None
     script: str | None = None
+    trigger_kind: str = "daemon"
+    next_launch_at: str | None = None
+    owner_agent_id: int | None = None
 
 
 # meiva:note
@@ -132,18 +118,18 @@ def cmd_schedules_ls(access: GatewayAccess) -> int:
     id_w = max(len("id"), *(len(str(r.id)) for r in rows))
     status_w = max(len("status"), *(len(r.status) for r in rows))
     machine_w = max(len("machine"), *(len(r.machine or "") for r in rows))
-    placement_w = max(len("placement"), *(len(r.placement_status or "") for r in rows))
+    trigger_w = max(len("trigger"), *(len(r.trigger_kind) for r in rows))
     print(
         f"{'id'.rjust(id_w)}  {'on':<3}  {'status'.ljust(status_w)}  "
-        f"{'machine'.ljust(machine_w)}  {'placement'.ljust(placement_w)}  name"
+        f"{'trigger'.ljust(trigger_w)}  {'machine'.ljust(machine_w)}  next  name"
     )
     for r in rows:
         on = "yes" if r.enabled else "no"
         m_str = r.machine or ""
-        p_str = r.placement_status or ""
+        next_at = r.next_launch_at or "-"
         print(
             f"{str(r.id).rjust(id_w)}  {on:<3}  {r.status.ljust(status_w)}  "
-            f"{m_str.ljust(machine_w)}  {p_str.ljust(placement_w)}  {r.name}"
+            f"{r.trigger_kind.ljust(trigger_w)}  {m_str.ljust(machine_w)}  {next_at}  {r.name}"
         )
     return 0
 
@@ -163,34 +149,59 @@ def cmd_schedules_get(access: GatewayAccess, identifier: str) -> int:
 # ── create ──
 
 
+# meiva:note
+# Create one at, cron, or every schedule from a script or wake message.
+#
+# ``--script-file -`` reads stdin. The gateway validates the trigger and
+# compiles scripts before accepting them. Enabled schedules become eligible at
+# their declared next fire; ``at`` catches up once after downtime.
 def cmd_schedules_create(
     access: GatewayAccess,
     name: str,
     script: str | None,
     script_file: str | None,
-    command: str | None,
     description: str | None,
     *,
+    run_at: str | None,
+    cron_expr: str | None,
+    interval_seconds: int | None,
+    message: str | None,
+    target_agent_id: int | None,
+    owner_agent_id: int | None,
+    timezone: str | None,
+    timeout_seconds: int,
+    on_owner_terminate: str | None,
     machine: str | None = None,
     disabled: bool = False,
     idempotency_key: str,
 ) -> int:
-    """`meiva schedules create --name N (--script S | --script-file F) [...]`.
-
-    Exactly one of --script / --script-file supplies the body (`--script-file -`
-    reads stdin, the natural form for a heredoc). The gateway `compile()`-checks
-    the script and rejects a SyntaxError with 400, so a broken script never
-    reaches the runner. Created enabled unless --disabled; an enabled schedule is
-    launched by the reconcile loop within a poll interval."""
     from base.host.net.http_dial import post as dial_post
 
-    source = _read_script(script, script_file)
-    if source is None:
+    source = None if message is not None else _read_script(script, script_file)
+    if message is None and source is None:
         return 1
-
-    body: dict[str, object] = {"name": name, "script": source, "enabled": not disabled}
-    if command is not None:
-        body["command"] = command
+    trigger_kind = "at" if run_at is not None else ("cron" if cron_expr is not None else "every")
+    body: dict[str, object] = {
+        "name": name,
+        "trigger_kind": trigger_kind,
+        "enabled": not disabled,
+        "timeout_seconds": timeout_seconds,
+    }
+    if source is not None:
+        body["script"] = source
+    if message is not None:
+        body["message"] = message
+    for key, value in (
+        ("run_at", run_at),
+        ("cron_expr", cron_expr),
+        ("interval_seconds", interval_seconds),
+        ("target_agent_id", target_agent_id),
+        ("owner_agent_id", owner_agent_id),
+        ("timezone", timezone),
+        ("on_owner_terminate", on_owner_terminate),
+    ):
+        if value is not None:
+            body[key] = value
     if description is not None:
         body["description"] = description
     if machine is not None:
@@ -218,6 +229,10 @@ def cmd_schedules_create(
 # ── update ──
 
 
+# meiva:note
+# Partial update: only the flags passed change. Script and command changes are
+# versioned; declarative schedules apply them on their next fire, while enabled
+# daemon schedules relaunch after convergence.
 def cmd_schedules_update(
     access: GatewayAccess,
     identifier: str,
@@ -231,14 +246,6 @@ def cmd_schedules_update(
     enabled: bool | None,
     idempotency_key: str,
 ) -> int:
-    """`meiva schedules update <name-or-id> [--name N] [--script S | --script-file F] ...`.
-
-    Partial update — only the flags passed change (PUT with an exclude-unset
-    body). A script/command change is snapshotted into `schedule_versions` and,
-    when the schedule is enabled, the session is relaunched onto the new script
-    immediately. --enable / --disable converge when they change desired state:
-    the same field `start`/`stop` flip is paired with session reaping or
-    creation before the command returns, while a same-value update is a no-op."""
     from base.host.net.http_dial import put as dial_put
 
     schedule_id = _resolve_id(access, identifier)
@@ -289,11 +296,10 @@ def cmd_schedules_update(
 # ── delete ──
 
 
+# meiva:note
+# Delete prompts unless forced. The gateway removes the schedule workspace after an active
+# declarative run finishes; a compatibility daemon session is reaped during convergence.
 def cmd_schedules_delete(access: GatewayAccess, identifier: str, *, force: bool = False) -> int:
-    """`meiva schedules delete <name-or-id> [--force]`.
-
-    Prompts unless --force. The gateway kills the now-orphaned session and
-    removes the schedule's work dir; its run history goes with the row."""
     from base.host.net.http_dial import delete as dial_delete
 
     schedule_id = _resolve_id(access, identifier)
@@ -322,8 +328,9 @@ def cmd_schedules_delete(access: GatewayAccess, identifier: str, *, force: bool 
 # ── control ──
 
 
+# meiva:note
+# Every lifecycle POST returns the same schedule projection.
 def _control(access: GatewayAccess, identifier: str, verb: str, idempotency_key: str) -> int:
-    """Shared POST for start / stop / restart — same shape, different sub-path."""
     from base.host.net.http_dial import post as dial_post
 
     schedule_id = _resolve_id(access, identifier)
@@ -345,30 +352,24 @@ def _control(access: GatewayAccess, identifier: str, verb: str, idempotency_key:
 
 
 def cmd_schedules_start(access: GatewayAccess, identifier: str, *, idempotency_key: str) -> int:
-    """`meiva schedules start <name-or-id>` — enable + launch the session now."""
     return _control(access, identifier, "start", idempotency_key)
 
 
 def cmd_schedules_stop(access: GatewayAccess, identifier: str, *, idempotency_key: str) -> int:
-    """`meiva schedules stop <name-or-id>` — disable + kill the session now."""
     return _control(access, identifier, "stop", idempotency_key)
 
 
 def cmd_schedules_restart(access: GatewayAccess, identifier: str, *, idempotency_key: str) -> int:
-    """`meiva schedules restart <name-or-id>` — relaunch on the current script,
-    clearing crash backoff. 409 if the schedule is disabled (use `start`)."""
     return _control(access, identifier, "restart", idempotency_key)
 
 
 # ── observation ──
 
 
+# meiva:note
+# Declarative log reads use ``latest.log``; compatibility daemon reads use live capture or
+# the PTY transcript. Both fall back to ``last_error``.
 def cmd_schedules_logs(access: GatewayAccess, identifier: str, lines: int) -> int:
-    """`meiva schedules logs <name-or-id> [--lines N]` — recent output.
-
-    Source is the live session capture when a session is up, the session's
-    PTY transcript file when it is gone (a finished/crashed runner's output
-    survives there), `last_error` (the last crash traceback), or `none`."""
     from base.host.net.http_dial import get as dial_get
 
     schedule_id = _resolve_id(access, identifier)
@@ -387,7 +388,7 @@ def cmd_schedules_logs(access: GatewayAccess, identifier: str, lines: int) -> in
     resp.raise_for_status()
     view = _LogsView.model_validate_json(resp.content)
     if view.source == "none":
-        print("(no output yet — no live session and no recorded error)")
+        print("(no output yet — no completed fire, live session, or recorded error)")
         return 0
     print(f"── source: {view.source} ──")
     for line in view.lines:
@@ -566,6 +567,9 @@ def print_schedule(row: ScheduleRow, *, with_script: bool) -> None:
     print(f"  status:      {row.status}  ({_STATUS_NOTE})")
     if row.last_error:
         print(f"  last_error:  {row.last_error.splitlines()[-1]}")
+    print(f"  trigger:     {row.trigger_kind}")
+    if row.next_launch_at:
+        print(f"  next:        {row.next_launch_at}")
     if row.machine:
         print(f"  machine:     {row.machine}")
     if row.owner_plugin:
@@ -590,14 +594,28 @@ class _Identifier:
 
 
 @dataclass(frozen=True)
+class _ControlOptions:
+    identifier: str
+    control_verb: str
+
+
+@dataclass(frozen=True)
 class _CreateOptions:
     name: str
     script: str | None
     script_file: str | None
-    command: str | None
     description: str | None
     machine: str | None
     disabled: bool
+    run_at: str | None
+    cron_expr: str | None
+    interval_seconds: int | None
+    message: str | None
+    target_agent_id: int | None
+    owner_agent_id: int | None
+    timezone: str | None
+    timeout_seconds: int
+    on_owner_terminate: str | None
 
 
 @dataclass(frozen=True)
@@ -657,8 +675,16 @@ def h_schedules_create(args: argparse.Namespace) -> int:
         opts.name,
         opts.script,
         opts.script_file,
-        opts.command,
         opts.description,
+        run_at=opts.run_at,
+        cron_expr=opts.cron_expr,
+        interval_seconds=opts.interval_seconds,
+        message=opts.message,
+        target_agent_id=opts.target_agent_id,
+        owner_agent_id=opts.owner_agent_id,
+        timezone=opts.timezone,
+        timeout_seconds=opts.timeout_seconds,
+        on_owner_terminate=opts.on_owner_terminate,
         machine=opts.machine,
         disabled=opts.disabled,
         idempotency_key=runtime_of(args).new_id(),
@@ -710,6 +736,11 @@ def h_schedules_restart(args: argparse.Namespace) -> int:
         options(args, _Identifier).identifier,
         idempotency_key=runtime_of(args).new_id(),
     )
+
+
+def h_schedules_control(args: argparse.Namespace) -> int:
+    opts = options(args, _ControlOptions)
+    return _control(_access(args), opts.identifier, opts.control_verb, runtime_of(args).new_id())
 
 
 def h_schedules_logs(args: argparse.Namespace) -> int:

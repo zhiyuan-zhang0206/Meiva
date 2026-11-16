@@ -1,6 +1,24 @@
-# Schedule Runner — the in-session entrypoint
+# Schedule runner process entries
 
-Launched by the `schedule-manager` service ([Schedule Manager & Runner](schedules.md)) inside the session `meiva-schedule-<id>`.
+The schedule manager uses one static module entry for both execution models.
+
+## Declarative single-round entry
+
+Each due fire launches `runner --single-round` without a PTY. That wrapper writes
+the runner identity, starts `runner --payload run.py` in its own process group,
+waits for the schedule's finite timeout, and leaves an atomic outcome file for
+manager recovery. TERM/INT cancellation propagates to the payload; timeout escalates
+to process-group KILL. The payload entry boots the ordinary SDK context from
+`MEIVA_SCHEDULE_ID` and optional `MEIVA_AGENT_ID`, then executes `run.py` once.
+
+The manager owns the run-history row, output file, and schedule-state transition.
+The payload owns only its Python process and ordinary files in the current working
+directory.
+
+## Compatibility daemon entry
+
+Daemon schedules are launched inside the session `meiva-schedule-<id>` and retain
+the resident behavior below.
 
 - **In-session entrypoint**: `.venv/bin/python -m services.wake.schedule_manager.runner <id>`, which first records itself (pid + native birth) under `run/schedules/<id>.runner.json` and drops that record on a deliberate exit — the manager's only proof that a live session still has its runner ([Schedule liveness](schedule-liveness.md))
 - Loads the schedule's script + command from the DB

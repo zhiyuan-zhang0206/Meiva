@@ -1,11 +1,14 @@
 exports = ["receipts.py", "router.py", "session_control.py", "tests"]
 
 [uses]
+"auxiliary_routes.py" = ["contracts.py", "plans.py", "rows.py"]
 "contracts.py" = ["placement.py"]
 "plans.py" = ["rows.py"]
 "receipts.py" = ["rows.py"]
-"router.py" = ["contracts.py", "placement.py", "plans.py", "receipts.py", "rows.py", "session_control.py"]
-"tests" = ["placement.py", "plans.py", "router.py", "rows.py", "session_control.py"]
+"repository.py" = ["contracts.py", "placement.py", "rows.py"]
+"router.py" = ["auxiliary_routes.py", "contracts.py", "plans.py", "receipts.py", "repository.py", "rows.py", "session_control.py", "triggers.py"]
+"tests" = ["contracts.py", "placement.py", "plans.py", "router.py", "rows.py", "session_control.py", "triggers.py"]
+"triggers.py" = ["contracts.py", "rows.py"]
 
 [external]
 "router.py" = "compiles a user-written schedule script to reject syntax errors"

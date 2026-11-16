@@ -1,5 +1,5 @@
-import time
 from concurrent.futures import ThreadPoolExecutor
+from datetime import UTC, datetime
 
 import psycopg
 import pytest
@@ -15,7 +15,15 @@ from gateway.tests.schedules.api_support import schedule_client
 
 
 def _create(client: TestClient) -> int:
-    response = client.post("/api/schedules", json={"name": "delivery", "script": "print(1)\n"})
+    response = client.post(
+        "/api/schedules",
+        json={
+            "name": "delivery",
+            "trigger_kind": "every",
+            "interval_seconds": 60,
+            "script": "print(1)\n",
+        },
+    )
     assert response.status_code == 201
     return response.json()["id"]
 
@@ -67,14 +75,16 @@ def test_concurrent_identical_edits_append_one_version(
     ):
 
         def edit(_worker: int) -> tuple[tuple[object, ...], bool]:
-            return router.update_blocking(pool, sid, {"script": "print(2)\n"})
+            return router.update_blocking(
+                pool, sid, {"script": "print(2)\n"}, None, datetime.now(UTC)
+            )
 
         results = list(workers.map(edit, range(4)))
-    assert sum(needs_sync for _, needs_sync in results) == 1
+    assert not any(needs_sync for _, needs_sync in results)
     assert db_conn.execute(
         "SELECT note FROM schedule_versions WHERE schedule_id = %s ORDER BY id", (sid,)
     ).fetchall() == [("initial",), ("edit",)]
-    assert db_conn.execute("SELECT schedule_id FROM schedule_sync_requests").fetchall() == [(sid,)]
+    assert db_conn.execute("SELECT schedule_id FROM schedule_sync_requests").fetchall() == []
 
 
 def test_enqueue_failure_rolls_back_config_and_version(
@@ -88,11 +98,11 @@ def test_enqueue_failure_rolls_back_config_and_version(
         sid = _create(client)
 
     with (
-        failing_write(db_conn, table="schedule_sync_requests", events="INSERT OR UPDATE"),
+        failing_write(db_conn, table="schedule_versions", events="INSERT"),
         base.db.pool(gate=database_gate) as pool,
         pytest.raises(psycopg.errors.RaiseException, match="injected fault"),
     ):
-        router.update_blocking(pool, sid, {"script": "print(2)\n"})
+        router.update_blocking(pool, sid, {"script": "print(2)\n"}, None, datetime.now(UTC))
     assert db_conn.execute("SELECT script FROM schedules WHERE id = %s", (sid,)).fetchone() == (
         "print(1)\n",
     )
@@ -101,7 +111,7 @@ def test_enqueue_failure_rolls_back_config_and_version(
     ).fetchall() == [("initial",)]
 
 
-def test_convergence_work_is_committed_before_the_response_waits_for_it(
+def test_declarative_edit_commits_without_waiting_for_pty_convergence(
     gateway_data_plane: None,
     db_conn: psycopg.Connection,
     *,
@@ -115,19 +125,8 @@ def test_convergence_work_is_committed_before_the_response_waits_for_it(
         response = workers.submit(
             client.put, f"/api/schedules/{sid}", json={"script": "print(2)\n"}
         )
-        deadline = time.monotonic() + 5
-        while not db_conn.execute("SELECT 1 FROM schedule_sync_requests").fetchall():
-            db_conn.rollback()
-            assert time.monotonic() < deadline, "the sync request was never queued"
-            time.sleep(0.02)
-        # meiva:note
-        # The request is still waiting for a manager that does not exist, yet its work is durable.
-        assert not response.done()
-        assert db_conn.execute("SELECT script FROM schedules WHERE id = %s", (sid,)).fetchone() == (
-            "print(2)\n",
-        )
         assert response.result(timeout=10).status_code == 200
-    assert db_conn.execute("SELECT schedule_id FROM schedule_sync_requests").fetchall() == [(sid,)]
+    assert db_conn.execute("SELECT schedule_id FROM schedule_sync_requests").fetchall() == []
     assert db_conn.execute(
         "SELECT note FROM schedule_versions WHERE schedule_id = %s ORDER BY id", (sid,)
     ).fetchall() == [("initial",), ("edit",)]
@@ -144,7 +143,14 @@ def test_repeated_enabled_choice_does_not_enqueue(
 ) -> None:
     with schedule_client(machine=machine_identity) as client:
         sid = client.post(
-            "/api/schedules", json={"name": "choice", "script": "pass", "enabled": enabled}
+            "/api/schedules",
+            json={
+                "name": "choice",
+                "trigger_kind": "every",
+                "interval_seconds": 60,
+                "script": "pass",
+                "enabled": enabled,
+            },
         ).json()["id"]
         assert client.post(f"/api/schedules/{sid}/{action}").status_code == 200
         assert client.post(f"/api/schedules/{sid}/{action}").status_code == 200
@@ -164,4 +170,4 @@ def test_explicit_start_preserves_terminal_rerun(
         db_conn.execute("UPDATE schedules SET status = %s WHERE id = %s", (status, sid))
         db_conn.commit()
         assert client.post(f"/api/schedules/{sid}/start").status_code == 200
-    assert db_conn.execute("SELECT schedule_id FROM schedule_sync_requests").fetchall() == [(sid,)]
+    assert db_conn.execute("SELECT schedule_id FROM schedule_sync_requests").fetchall() == []

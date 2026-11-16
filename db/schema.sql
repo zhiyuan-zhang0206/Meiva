@@ -1082,11 +1082,9 @@ CREATE TABLE cluster_defaults (
 INSERT INTO cluster_defaults (id, llm_model) VALUES (1, 'deepseek-flash');
 
 -- ─────────────── schedules ───────────────
--- Gateway-hosted schedules: persistent supervised sessions (a `script` + a
--- `command` to run it). The ScheduleManager writes the script under
--- $MEIVA_HOME/schedules/<id>/, runs it in a named session, and restarts it on
--- crash. The script is arbitrary agent-written code and holds no scheduler state
--- — reuse is label-keyed against the agents table. Supersedes cron_jobs.
+-- Gateway-hosted schedules. Declarative at/cron/every rows run one ordinary
+-- script process per fire; daemon rows retain the resident-session bridge while
+-- existing schedules are migrated.
 CREATE TABLE schedules (
     id          BIGSERIAL PRIMARY KEY,
     name        TEXT NOT NULL UNIQUE,
@@ -1095,12 +1093,12 @@ CREATE TABLE schedules (
     command     TEXT NOT NULL,
     enabled     BOOLEAN NOT NULL DEFAULT true,
     status      TEXT NOT NULL DEFAULT 'stopped'
-                CHECK (status IN ('running', 'stopped', 'error', 'completed')),  -- completed = clean exit (rc=0), a terminal state
+                CHECK (status IN ('scheduled', 'running', 'stopped', 'error', 'completed', 'cancelled')),
     last_error  TEXT,
     created_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
     updated_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
     launch_count     INT NOT NULL DEFAULT 0,  -- crash-backoff launch counter (schedule-manager)
-    next_launch_at   TIMESTAMPTZ,             -- no relaunch before this
+    next_launch_at   TIMESTAMPTZ,
     not_live_since   TIMESTAMPTZ,             -- first sessionless observation of the current outage
     stall_alerted_at TIMESTAMPTZ,             -- the two-hour no-session alert fired for this outage
     desired_revision BIGINT NOT NULL DEFAULT 0,
@@ -1109,7 +1107,22 @@ CREATE TABLE schedules (
     machine               TEXT NOT NULL CONSTRAINT schedules_machine_nonempty CHECK (btrim(machine) <> ''),
     owner_plugin          TEXT CONSTRAINT schedules_owner_plugin_nonempty CHECK (owner_plugin IS NULL OR btrim(owner_plugin) <> ''),
     owner_agent_id        BIGINT REFERENCES agents(id),  -- the agent this schedule speaks as; NULL = command-only (task #6102)
-    secret_env_vars       TEXT[] NOT NULL DEFAULT '{}'
+    secret_env_vars       TEXT[] NOT NULL DEFAULT '{}',
+    trigger_kind          TEXT NOT NULL DEFAULT 'daemon'
+                          CHECK (trigger_kind IN ('at', 'cron', 'every', 'daemon')),
+    run_at                TIMESTAMPTZ,
+    cron_expr             TEXT,
+    interval_seconds      INTEGER CHECK (interval_seconds IS NULL OR interval_seconds >= 30),
+    timezone              TEXT NOT NULL DEFAULT 'UTC',
+    timeout_seconds       INTEGER NOT NULL DEFAULT 600 CHECK (timeout_seconds > 0),
+    on_owner_terminate    TEXT NOT NULL DEFAULT 'cancel'
+                          CHECK (on_owner_terminate IN ('cancel', 'keep')),
+    CHECK (
+        (trigger_kind = 'daemon' AND run_at IS NULL AND cron_expr IS NULL AND interval_seconds IS NULL)
+        OR (trigger_kind = 'at' AND run_at IS NOT NULL AND cron_expr IS NULL AND interval_seconds IS NULL)
+        OR (trigger_kind = 'cron' AND run_at IS NULL AND cron_expr IS NOT NULL AND interval_seconds IS NULL)
+        OR (trigger_kind = 'every' AND run_at IS NULL AND cron_expr IS NULL AND interval_seconds IS NOT NULL)
+    )
 );
 COMMENT ON COLUMN schedules.launch_generation IS
     'Session-host generation (the pty-sessions service epoch) the current execution attempt was launched into; NULL when the attempt predates this column or the host could not name itself. A live epoch that differs from this value means the host was replaced and the attempt died with it, which authorizes one automatic relaunch (services/wake/schedule_manager/docs/host-replacement.meiva.okf.md#host-replacement-restart).';
@@ -1118,12 +1131,20 @@ COMMENT ON COLUMN schedules.machine IS
 COMMENT ON COLUMN schedules.owner_plugin IS
     'Plugin directory name that owns and declared this schedule; NULL for operator-created and core builtin schedules.';
 COMMENT ON COLUMN schedules.owner_agent_id IS
-    'Agent this schedule speaks as; NULL for an operator-created schedule that only runs a command. Assigned only through provisioning (scripts/host_ops/set_schedule_owner.py), never through the API. Written into the launched session''s MEIVA_AGENT_ID and into the runner''s bound AgentIdentity, and stamped on schedule_runs.agent_id. Not a privilege boundary: the session token is the cluster agent token either way, and the owner grants no authority a shell session lacks; it decides only who the schedule speaks as.';
+    'Agent this schedule speaks as and whose workspace contains its declarative run files; NULL means a system-level schedule. The SDK/API may assign it and default placement to that agent''s machine. Written into MEIVA_AGENT_ID and schedule_runs.agent_id; it controls attribution and locality, not additional authority.';
 COMMENT ON COLUMN schedules.secret_env_vars IS
     'Environment variable names injected into this schedule''s session at launch.';
+COMMENT ON COLUMN schedules.trigger_kind IS
+    'Execution model: at/cron/every are declarative single-round triggers; daemon is the temporary resident-session compatibility bridge.';
+COMMENT ON COLUMN schedules.next_launch_at IS
+    'The next declarative slot eligible to launch; NULL for completed/cancelled/disabled schedules and resident daemon schedules.';
+COMMENT ON COLUMN schedules.on_owner_terminate IS
+    'cancel disables unfinished work when its owner agent terminates; keep leaves it independent of owner lifecycle.';
 CREATE INDEX ON schedules (enabled);
 CREATE INDEX schedules_machine_enabled_idx ON schedules (machine, enabled);
 CREATE INDEX schedules_owner_plugin_idx ON schedules (owner_plugin) WHERE owner_plugin IS NOT NULL;
+CREATE INDEX schedules_declarative_due_idx ON schedules (machine, next_launch_at)
+    WHERE enabled AND trigger_kind <> 'daemon';
 
 CREATE TABLE resource_creation_receipts (
     operation_key TEXT PRIMARY KEY,
@@ -1192,9 +1213,34 @@ CREATE TABLE schedule_runs (
     ran_at      TIMESTAMPTZ NOT NULL DEFAULT now(),
     ok          BOOLEAN,
     agent_id    BIGINT REFERENCES agents(id),  -- reserved: a future script self-report could set it; the runner never does, so NULL today (FK since 20260810T224356)
-    note        TEXT
+    note        TEXT,
+    scheduled_for TIMESTAMPTZ
 );
 CREATE INDEX ON schedule_runs (schedule_id, ran_at DESC);
+COMMENT ON COLUMN schedule_runs.scheduled_for IS
+    'Declarative slot claimed by this run; NULL for legacy resident-process runs.';
+
+CREATE OR REPLACE FUNCTION cancel_agent_schedules_on_termination()
+RETURNS TRIGGER AS $$
+BEGIN
+    IF NEW.status = 'terminated' AND OLD.status IS DISTINCT FROM 'terminated' THEN
+        UPDATE schedules
+        SET enabled = FALSE,
+            status = 'cancelled',
+            next_launch_at = NULL,
+            updated_at = now()
+        WHERE owner_agent_id = NEW.id
+          AND on_owner_terminate = 'cancel'
+          AND status NOT IN ('completed', 'cancelled');
+    END IF;
+    RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+CREATE TRIGGER agents_meta_cancel_schedules
+    AFTER UPDATE OF status ON agents_meta
+    FOR EACH ROW
+    EXECUTE FUNCTION cancel_agent_schedules_on_termination();
 
 -- Per-cron-slot at-most-once claims for resident schedules. Both startup
 -- catch-up and normal online fires claim through this table before invoking a
@@ -1911,6 +1957,11 @@ INSERT INTO schema_migrations (name) VALUES ('20261112T101810_harness-timeline-s
 INSERT INTO schema_migrations (name) VALUES ('20261112T124500_harness-call-item-index');
 INSERT INTO schema_migrations (name) VALUES ('20261112T192342_drop-harness-transcript-tables');
 INSERT INTO schema_migrations (name) VALUES ('20261114T165000_drop-agent-harness-messages');
+-- The declarative schedule baseline supersedes the provisioning-only owner comment; its table
+-- and append-only protections are already defined above, so a fresh database skips that delta.
+INSERT INTO schema_migrations (name) VALUES ('20261103T105346_schedule-owner-agent');
+INSERT INTO schema_migrations (name) VALUES ('20261103T142200_schedule-owner-provisioning');
+INSERT INTO schema_migrations (name) VALUES ('20261116T190521_declarative-schedules');
 
 -- Keyed-operation receipts never expire into fresh effects (questions, publications' seen cursor,
 -- reply-suggestion feedback).

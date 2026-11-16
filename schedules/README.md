@@ -1,11 +1,12 @@
 # Schedules
 
-Machine-placed schedules for cluster agents: a schedule is a persistent,
-supervised session (a `script` + the `command` that runs it) owned by the
-`schedule-manager` service's ScheduleManager on the schedule's assigned machine —
-see `services/wake/schedule_manager/manager.py`. Manage them via
-`meiva schedules ...` (thin client over `/api/schedules`) or the
-`/control/schedules` page.
+This directory owns the installed compatibility payloads and their policy. New
+`at`, `cron`, and `every` schedules are declarative, run-to-completion programs;
+the installed templates remain resident `daemon` schedules until their migration
+phase. Both are machine-placed and reconciled by the host-local
+`schedule-manager`. Manage them through `meiva.schedules`, `meiva schedules`, or
+the `/control/schedules` page. The engine boundary is documented in
+[`gateway/schedules/docs/schedules.md`](../gateway/schedules/docs/schedules.md).
 
 ## Where an entry script lives
 
@@ -258,24 +259,26 @@ template into a running cluster without a restart of the manager, run
 
 ## Machine placement & Multi-machine operation
 
-Every schedule row records a target `machine` (defaulting to the gateway machine if omitted) and an optional `owner_plugin`.
+Every schedule row records a target `machine`, an optional `owner_plugin`, and an
+optional owner agent. Declarative owner placement defaults to the agent's machine;
+system and compatibility rows default to the gateway when no machine is explicit.
 
 - **Per-machine schedule manager**: `schedule-manager` runs on all cluster nodes (`capabilities=Capabilities.BOTH`, `requires_db=True`, `db_access="runner"`). Each instance reconciles only rows where `machine = self._machine_name`.
 - **Split-unit tie-breaker**: On hosts with multiple units sharing a machine name (such as preview environments), `is_active_unit()` inspects `machine_units` and activates the instance on the serving gateway unit (or the lowest lexical home path). Inactive units yield reconcile and sync loops.
-- **Session reaping across moves and deletes**: When a schedule is deleted or reassigned to another machine, the old machine reaps its running PTY session without overwriting status or error on the database row.
-- **Machine migration**: Moving a schedule via `meiva schedules update <name> --machine <target>` resets `launch_generation = NULL, launch_count = 0, next_launch_at = NULL` and enqueues sync requests for both the old machine (to terminate the existing session) and the new machine (to launch it).
+- **Session reaping across moves and deletes**: Compatibility daemon moves and deletes reap the old PTY without overwriting the row's error outcome.
+- **Machine migration**: Moving a daemon schedule enqueues old/new machine convergence. An idle declarative schedule keeps its durable next-fire state and launches on the newly assigned manager; machine moves and deletion wait until an active run finishes.
 - **Placement status API**: The gateway evaluates placement health via `judge_placement()`:
   - `healthy`: machine is registered and reachable.
   - `unplaced`: schedule row has no machine assigned (`NULL`).
   - `unregistered`: assigned machine does not exist in the `machines` table.
   - `unreachable`: assigned machine has no active heartbeats or units.
   - `stalled`: machine is unreachable and the schedule is currently active or enabled.
-- **Cross-machine log capture RPC**: When reading logs (`GET /api/schedules/{id}/logs` or `meiva schedules logs <name>`), if the schedule is placed on a remote machine, the gateway routes a `schedule_capture` cluster operation via RPC to `agent_ops` on that machine to fetch live PTY output.
+- **Cross-machine log capture RPC**: Remote reads dispatch `schedule_capture` to `agent_ops`; declarative rows read owner-local `latest.log`, while daemon rows read live or saved PTY output.
 
 ## Deployment notes
 
-- **The DB is authoritative.** The gateway materializes each schedule's script
-  from the `schedules` table to `~/.meiva/schedules/<id>/` on launch; editing
+- **The DB is authoritative.** The manager materializes each schedule's script
+  from the `schedules` table to its system or owner-local schedule directory; editing
   only the on-disk copy is overwritten at the next launch/restart. Change a
   schedule through `meiva schedules update` / the API, never by editing the
   materialized file.
@@ -407,15 +410,15 @@ Every schedule row records a target `machine` (defaulting to the gateway machine
   JSON dump of the table (`[[id, name, script], ...]`) with no database access and
   no signal; a non-clean sweep of the live table emits one `schedule_verify_failed`
   event for the Grafana rule to read (`--no-notify` suppresses that for a dry run).
-- Deploy a one-off schedule with:
+- Deploy a one-off system schedule with:
 
 ```bash
-meiva schedules create <name> --script-file <script.py> [--description "..."]
-meiva schedules start <name>
+meiva schedules create --name <name> --at <iso-instant> \
+  --script-file <script.py> [--description "..."]
 ```
 
-The running copy on each host lives in `~/.meiva/schedules/<id>/`; this directory
-is the version-controlled source of truth — never edit only the running copy.
+The materialized copy lives under the schedule's system or agent workspace. The
+database remains authoritative; never edit only the running copy.
 
 ## Script repair while the agent host is stopped
 

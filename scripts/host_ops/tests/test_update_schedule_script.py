@@ -24,11 +24,40 @@ from base.native_process.root_control.instance_lock import (
 )
 from base.paths import run_dir
 from gateway.schedules import router
+from gateway.schedules.router import ScheduleFullRow
 from scripts.host_ops import update_schedule_script as repair
 
 # meiva:note
 # The instant the test says each lock was taken; the sidecar records it unchanged.
 _NOW = datetime(2026, 1, 1, tzinfo=UTC)
+
+
+def _create_daemon(
+    database: Database,
+    *,
+    name: str,
+    script: str,
+    machine: str = "local",
+    description: str | None = None,
+    command: str = "python schedule.py",
+    enabled: bool = True,
+) -> ScheduleFullRow:
+    with database.pool() as pool:
+        with pool.connection() as conn, conn.transaction():
+            row = conn.execute(
+                "INSERT INTO schedules "
+                "(name, description, script, command, enabled, status, machine) "
+                "VALUES (%s, %s, %s, %s, %s, 'stopped', %s) RETURNING id",
+                (name, description, script, command, enabled, machine),
+            ).fetchone()
+            assert row is not None
+            schedule_id = row[0]
+            conn.execute(
+                "INSERT INTO schedule_versions (schedule_id, script, command, note) "
+                "VALUES (%s, %s, %s, 'initial')",
+                (schedule_id, script, command),
+            )
+        return router.fetch_full_blocking(pool, schedule_id)
 
 
 # meiva:note
@@ -175,18 +204,15 @@ def test_launcher_delivery_cannot_be_transplanted(key: str, profile: str, tmp_pa
 def test_versioned_edit_preserves_fields_and_defers_session_work(
     enabled: bool, db_conn: psycopg.Connection, database: Database
 ) -> None:
+    row = _create_daemon(
+        database,
+        name="maintenance-edit",
+        description="keep description",
+        script="print(1)\n",
+        command="python custom.py",
+        enabled=enabled,
+    )
     with database.pool() as pool:
-        row = router.create_blocking(
-            pool,
-            router.ScheduleCreate(
-                name="maintenance-edit",
-                description="keep description",
-                script="print(1)\n",
-                command="python custom.py",
-                enabled=enabled,
-            ),
-            "local",
-        )
         sid = row[0]
         assert (
             repair.replace_script(pool, sid, "print(2)\n", repair.script_sha256(row[11]))
@@ -218,12 +244,8 @@ def test_versioned_edit_preserves_fields_and_defers_session_work(
 def test_stale_hash_and_syntax_errors_do_not_write(
     db_conn: psycopg.Connection, database: Database
 ) -> None:
+    row = _create_daemon(database, name="stale", script="pass\n")
     with database.pool() as pool:
-        row = router.create_blocking(
-            pool,
-            router.ScheduleCreate(name="stale", script="pass\n"),
-            "local",
-        )
         with pytest.raises(RuntimeError, match="expected old script"):
             repair.replace_script(pool, row[0], "print(2)\n", "0" * 64)
         with pytest.raises(Exception, match="syntax error"):
@@ -274,12 +296,13 @@ def test_external_file_uses_installed_runtime_and_real_writer(
         f"MEIVA_DB_URL={db_url}\nMEIVA_SERVE_GATEWAY=true\n"
         "MEIVA_SERVE_AGENT_RUNNER=false\nMEIVA_MACHINE_NAME=external-script-test\n"
     )
-    with database.pool() as pool:
-        row = router.create_blocking(
-            pool,
-            router.ScheduleCreate(name="external", script="pass\n", enabled=True),
-            "external-script-test",
-        )
+    row = _create_daemon(
+        database,
+        name="external",
+        script="pass\n",
+        enabled=True,
+        machine="external-script-test",
+    )
     external = tmp_path / "operator-tool.py"
     external.write_bytes(Path(repair.__file__).read_bytes())
     script_file = tmp_path / "prepared.py"

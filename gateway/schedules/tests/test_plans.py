@@ -41,6 +41,14 @@ def _row(
         owner_plugin=owner_plugin,
         script=script,
         owner_agent_id=owner_agent_id,
+        trigger_kind="daemon",
+        run_at=None,
+        cron_expr=None,
+        interval_seconds=None,
+        timezone="UTC",
+        timeout_seconds=600,
+        on_owner_terminate="keep",
+        next_launch_at=None,
     )
 
 
@@ -114,6 +122,18 @@ def test_restart_of_a_disabled_schedule_is_refused() -> None:
 
     assert plan.refusal is not None and "start it instead" in plan.refusal
     assert not plan.needs_sync
+
+
+def test_daemon_cancel_uses_stop_idempotence() -> None:
+    plan = control_plan("cancel", enabled=False, status="stopped", daemon=True)
+
+    assert (plan.enabled, plan.needs_sync) == (False, False)
+
+
+def test_daemon_run_now_uses_restart_refusal() -> None:
+    plan = control_plan("run_now", enabled=False, status="stopped", daemon=True)
+
+    assert plan.refusal is not None
 
 
 def test_an_action_outside_the_three_is_not_read_as_a_start() -> None:

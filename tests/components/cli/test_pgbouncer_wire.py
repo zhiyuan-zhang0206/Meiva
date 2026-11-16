@@ -5,6 +5,7 @@ import contextlib
 import time
 from collections.abc import Callable, Generator
 from dataclasses import replace
+from datetime import UTC, datetime
 
 import psycopg
 import pytest
@@ -501,7 +502,9 @@ def test_message_insert_and_schedule_stop_survive_a_poisoned_backend(
                     publish_wake=publish_wake,
                 )
                 assert receipt.inserted
-            row, _enabled_changed = update_blocking(pool, schedule_id, {"enabled": False})
+            row, _enabled_changed = update_blocking(
+                pool, schedule_id, {"enabled": False}, None, datetime.now(UTC)
+            )
             assert row[4] is False
         finally:
             pool.close()

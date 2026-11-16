@@ -41,7 +41,11 @@ def _bound(context: MeivaContext | None = None) -> AgentIdentity | None:
 # the read builds its context when the environment carries the agent id.
 def is_launched_child() -> bool:
     identity = _bound()
-    return bool(identity is not None and identity.agent_id is not None and not identity.owns_loop)
+    return bool(
+        identity is not None
+        and not identity.owns_loop
+        and (identity.agent_id is not None or identity.actor is not None)
+    )
 
 
 # meiva:note

@@ -45,6 +45,14 @@ const FULL: ScheduleView = {
   script: "print('hi')",
   machine: "gateway",
   placement_status: "ok",
+  trigger_kind: "every",
+  interval_seconds: 3600,
+  run_at: null,
+  cron_expr: null,
+  timezone: "UTC",
+  timeout_seconds: 600,
+  on_owner_terminate: "keep",
+  next_launch_at: "2026-06-29T10:00:00Z",
 };
 
 const pushSpy = vi.fn();
@@ -91,6 +99,14 @@ const SCHEDULE: ScheduleSummary = {
   updated_at: "2026-06-29T09:00:00Z",
   machine: "gateway",
   placement_status: "ok",
+  trigger_kind: "every",
+  interval_seconds: 3600,
+  run_at: null,
+  cron_expr: null,
+  timezone: "UTC",
+  timeout_seconds: 600,
+  on_owner_terminate: "keep",
+  next_launch_at: "2026-06-29T10:00:00Z",
 };
 
 describe("SchedulesPage", () => {
@@ -147,6 +163,31 @@ describe("SchedulesPage", () => {
     wrap(<SchedulesPageView navigate={pushSpy} />);
     await waitFor(() => expect(screen.getByText("memory-arbiter")).toBeTruthy());
     expect(screen.getByText("Enabled")).toBeTruthy();
+    expect(screen.getByText("every")).toBeTruthy();
+  });
+
+  it("filters system, agent-owned, and completed schedules", async () => {
+    const agentOwned = { ...SCHEDULE, id: 2, name: "agent-job", owner_agent_id: 42 };
+    const completed = {
+      ...SCHEDULE,
+      id: 3,
+      name: "finished-job",
+      enabled: false,
+      status: "completed",
+    };
+    transport.listSchedules.mockResolvedValue([SCHEDULE, agentOwned, completed]);
+    wrap(<SchedulesPageView navigate={pushSpy} />);
+    await screen.findByText("agent-job");
+
+    fireEvent.change(screen.getByLabelText("Schedule scope"), { target: { value: "agent" } });
+    expect(screen.getByText("agent-job")).toBeTruthy();
+    expect(screen.queryByText("memory-arbiter")).toBeNull();
+
+    fireEvent.change(screen.getByLabelText("Schedule scope"), {
+      target: { value: "completed" },
+    });
+    expect(screen.getByText("finished-job")).toBeTruthy();
+    expect(screen.queryByText("agent-job")).toBeNull();
   });
 
   it("description cell carries a title attribute for the truncated full text", async () => {

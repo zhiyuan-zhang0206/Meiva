@@ -1,3 +1,5 @@
+from datetime import UTC, datetime
+
 import psycopg
 import pytest
 
@@ -10,6 +12,12 @@ from gateway.schedules import router
 from gateway.schedules.tests.db_faults import failing_write
 from gateway.tests.schedules.api_support import schedule_client
 
+_BODY = {
+    "trigger_kind": "every",
+    "interval_seconds": 60,
+    "script": "pass",
+}
+
 
 def test_failed_receipt_commit_rolls_back_restart_revision_and_queue(
     gateway_data_plane: None,
@@ -19,19 +27,17 @@ def test_failed_receipt_commit_rolls_back_restart_revision_and_queue(
     machine_identity: MachineIdentityReader,
 ) -> None:
     with schedule_client(machine=machine_identity) as client:
-        sid = client.post("/api/schedules", json={"name": "rollback", "script": "pass"}).json()[
-            "id"
-        ]
+        sid = client.post("/api/schedules", json={"name": "rollback", **_BODY}).json()["id"]
 
     with (
         failing_write(db_conn, table="schedule_operation_receipts", events="UPDATE"),
         base.db.pool(gate=database_gate) as pool,
         pytest.raises(psycopg.errors.RaiseException, match="injected fault"),
     ):
-        router.control_blocking(pool, sid, "restart", "restart")
-    assert db_conn.execute(
-        "SELECT desired_revision FROM schedules WHERE id = %s", (sid,)
-    ).fetchone() == (0,)
+        router.control_blocking(pool, sid, "run_now", "run-now", datetime(2026, 11, 17, tzinfo=UTC))
+    assert db_conn.execute("SELECT status FROM schedules WHERE id = %s", (sid,)).fetchone() == (
+        "scheduled",
+    )
     assert db_conn.execute("SELECT count(*) FROM schedule_operation_receipts").fetchone() == (0,)
     assert db_conn.execute("SELECT count(*) FROM schedule_sync_requests").fetchone() == (0,)
 
@@ -43,8 +49,8 @@ def test_receipt_replays_after_schedule_deletion(
     machine_identity: MachineIdentityReader,
 ) -> None:
     with schedule_client(machine=machine_identity) as client:
-        sid = client.post("/api/schedules", json={"name": "deleted", "script": "pass"}).json()["id"]
-        path = f"/api/schedules/{sid}/restart"
+        sid = client.post("/api/schedules", json={"name": "deleted", **_BODY}).json()["id"]
+        path = f"/api/schedules/{sid}/run-now"
         headers = keyed_headers("before-delete")
         original = client.post(path, headers=headers)
         assert client.delete(f"/api/schedules/{sid}").status_code == 200
@@ -61,12 +67,10 @@ def test_delete_cleanup_enqueue_failure_preserves_schedule(
     machine_identity: MachineIdentityReader,
 ) -> None:
     with schedule_client(machine=machine_identity) as client:
-        sid = client.post(
-            "/api/schedules", json={"name": "delete-rollback", "script": "pass"}
-        ).json()["id"]
+        sid = client.post("/api/schedules", json={"name": "delete-rollback", **_BODY}).json()["id"]
 
     with (
-        failing_write(db_conn, table="schedule_sync_requests", events="INSERT OR UPDATE"),
+        failing_write(db_conn, table="schedules", events="DELETE"),
         base.db.pool(gate=database_gate) as pool,
         pytest.raises(psycopg.errors.RaiseException, match="injected fault"),
     ):

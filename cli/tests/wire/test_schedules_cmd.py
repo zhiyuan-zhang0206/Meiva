@@ -34,6 +34,8 @@ def _row(
         "created_at": "2026-07-01T00:00:00Z",
         "updated_at": "2026-07-01T00:00:00Z",
         "script": "print('hi')\n",
+        "trigger_kind": "every",
+        "next_launch_at": "2026-07-01T00:01:00Z",
     }
 
 
@@ -101,6 +103,8 @@ def test_create_posts_script_from_file(
         str(script),
         "--description",
         "digest",
+        "--cron",
+        "0 2 * * *",
     )
     assert rc == 0
     assert seen["url"] == f"{wire.url}/api/schedules"
@@ -109,6 +113,8 @@ def test_create_posts_script_from_file(
     assert body["script"] == "print('from file')\n"
     assert body["name"] == "nightly"
     assert body["enabled"] is True
+    assert body["trigger_kind"] == "cron"
+    assert body["cron_expr"] == "0 2 * * *"
     assert "command" not in body
 
 
@@ -121,15 +127,16 @@ def test_create_disabled_flag(wire: PublicGateway) -> None:
         "nightly",
         "--script",
         "print(1)",
-        "--command",
-        "uv run x.py",
+        "--every",
+        "60",
         "--disabled",
     )
     assert rc == 0
     body = seen["json"]
     assert isinstance(body, dict)
     assert body["enabled"] is False
-    assert body["command"] == "uv run x.py"
+    assert body["trigger_kind"] == "every"
+    assert body["interval_seconds"] == 60
 
 
 def test_create_requires_exactly_one_script_source(
@@ -148,7 +155,7 @@ def test_create_surfaces_syntax_error_detail(
     wire.respond(
         "post", {"detail": "script has a syntax error (line 3): invalid syntax"}, status=400
     )
-    assert wire.run("schedules", "create", "--name", "n", "--script", "def (") == 1
+    assert wire.run("schedules", "create", "--name", "n", "--script", "def (", "--every", "60") == 1
     assert "syntax error (line 3)" in capsys.readouterr().err
 
 
@@ -164,6 +171,8 @@ def test_unclassified_error_prints_the_body_before_raising(
             "n",
             "--script",
             "print(1)",
+            "--every",
+            "60",
             expect="http",
             status=422,
             path="/api/schedules",
@@ -175,7 +184,19 @@ def test_unclassified_error_prints_the_body_before_raising(
 
 def test_create_name_clash(wire: PublicGateway, capsys: pytest.CaptureFixture[str]) -> None:
     wire.respond("post", {"detail": "exists"}, status=409)
-    assert wire.run("schedules", "create", "--name", "nightly", "--script", "print(1)") == 1
+    assert (
+        wire.run(
+            "schedules",
+            "create",
+            "--name",
+            "nightly",
+            "--script",
+            "print(1)",
+            "--every",
+            "60",
+        )
+        == 1
+    )
     assert "already exists" in capsys.readouterr().err
 
 
@@ -213,7 +234,9 @@ def test_update_reads_script_from_stdin(
     assert seen["json"] == {"script": "print('piped')\n"}
 
 
-@pytest.mark.parametrize("verb", ["start", "stop", "restart"])
+@pytest.mark.parametrize(
+    "verb", ["start", "stop", "restart", "enable", "disable", "cancel", "run-now"]
+)
 def test_control_verbs_hit_their_subpath(
     wire: PublicGateway, capsys: pytest.CaptureFixture[str], verb: str
 ) -> None:
@@ -223,6 +246,34 @@ def test_control_verbs_hit_their_subpath(
     assert seen["json"] is None
     assert wire.requests[-1]["body"] == b""
     assert verb in capsys.readouterr().out
+
+
+def test_create_message_payload_with_owner(wire: PublicGateway) -> None:
+    seen = wire.respond("post", _row(7), status=201)
+    assert (
+        wire.run(
+            "schedules",
+            "create",
+            "--name",
+            "wake-owner",
+            "--message",
+            "check in",
+            "--owner-agent-id",
+            "42",
+            "--at",
+            "2026-11-17T12:00:00+08:00",
+        )
+        == 0
+    )
+    assert seen["json"] == {
+        "name": "wake-owner",
+        "trigger_kind": "at",
+        "enabled": True,
+        "timeout_seconds": 600,
+        "message": "check in",
+        "run_at": "2026-11-17T12:00:00+08:00",
+        "owner_agent_id": 42,
+    }
 
 
 def test_restart_of_a_disabled_schedule_surfaces_the_409(

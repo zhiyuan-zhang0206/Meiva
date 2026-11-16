@@ -277,6 +277,7 @@ from . import agents as agents
 from . import boot as boot
 from . import files as files
 from . import mcps as mcps
+from . import schedules as schedules
 from . import self as self
 from . import shell as shell
 from . import skills as skills
@@ -314,6 +315,7 @@ __all_for_meiva__ = [
     "files",
     "help",
     "mcps",
+    "schedules",
     "self",
     "shell",
     "skills",

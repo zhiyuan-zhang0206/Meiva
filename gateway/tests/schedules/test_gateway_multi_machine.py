@@ -22,6 +22,8 @@ def test_schedule_placement_in_api(db_conn: psycopg.Connection) -> None:
             "/api/schedules",
             json={
                 "name": "placed-task",
+                "trigger_kind": "every",
+                "interval_seconds": 60,
                 "script": "print('ok')\n",
                 "command": "python schedule.py",
                 "machine": "test-box",
@@ -37,6 +39,8 @@ def test_schedule_placement_in_api(db_conn: psycopg.Connection) -> None:
             "/api/schedules",
             json={
                 "name": "unplaced-task",
+                "trigger_kind": "every",
+                "interval_seconds": 60,
                 "script": "print('ok')\n",
                 "command": "python schedule.py",
                 "machine": "missing-box",
@@ -49,12 +53,16 @@ def test_schedule_placement_in_api(db_conn: psycopg.Connection) -> None:
         assert "not registered" in data2["placement_reason"]
 
 
-def test_schedule_machine_move_sync_requests(db_conn: psycopg.Connection) -> None:
+def test_declarative_schedule_machine_move_avoids_pty_sync_requests(
+    db_conn: psycopg.Connection,
+) -> None:
     with schedule_client() as client:
         created = client.post(
             "/api/schedules",
             json={
                 "name": "moving-task",
+                "trigger_kind": "every",
+                "interval_seconds": 60,
                 "script": "print('move')\n",
                 "command": "python schedule.py",
                 "machine": "box-a",
@@ -85,7 +93,33 @@ def test_schedule_machine_move_sync_requests(db_conn: psycopg.Connection) -> Non
                 (sid,),
             )
             queued_machines = [r[0] for r in cur.fetchall()]
-        assert queued_machines == ["box-a", "box-b"]
+        assert queued_machines == []
+
+
+def test_declarative_schedule_machine_move_waits_for_active_run(
+    db_conn: psycopg.Connection,
+) -> None:
+    with schedule_client() as client:
+        sid = client.post(
+            "/api/schedules",
+            json={
+                "name": "running-move",
+                "trigger_kind": "every",
+                "interval_seconds": 60,
+                "script": "print('busy')\n",
+                "machine": "box-a",
+            },
+        ).json()["id"]
+        db_conn.execute("INSERT INTO schedule_runs (schedule_id) VALUES (%s)", (sid,))
+        db_conn.commit()
+
+        response = client.put(f"/api/schedules/{sid}", json={"machine": "box-b"})
+
+    assert response.status_code == 409
+    assert response.json()["detail"] == "schedule is running; wait for it to finish"
+    assert db_conn.execute("SELECT machine FROM schedules WHERE id = %s", (sid,)).fetchone() == (
+        "box-a",
+    )
 
 
 def test_cross_machine_logs_rpc_dispatch(db_conn: psycopg.Connection) -> None:
@@ -94,6 +128,8 @@ def test_cross_machine_logs_rpc_dispatch(db_conn: psycopg.Connection) -> None:
             "/api/schedules",
             json={
                 "name": "remote-task",
+                "trigger_kind": "every",
+                "interval_seconds": 60,
                 "script": "print('remote')\n",
                 "command": "python schedule.py",
                 "machine": "remote-machine-unreachable",

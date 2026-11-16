@@ -116,6 +116,12 @@ def _h_schedules_restart(args: argparse.Namespace) -> int:
     return h_schedules_restart(args)
 
 
+def _h_schedules_control(args: argparse.Namespace) -> int:
+    from cli.commands.management.schedules import h_schedules_control
+
+    return h_schedules_control(args)
+
+
 def _h_schedules_logs(args: argparse.Namespace) -> int:
     from cli.commands.management.schedules import h_schedules_logs
 
@@ -184,15 +190,24 @@ def add_config_parser(sub: argparse._SubParsersAction[argparse.ArgumentParser]) 
 
 
 def _add_create_parser(sub: argparse._SubParsersAction[argparse.ArgumentParser]) -> None:
-    parser = sub.add_parser("create", help="create a schedule")
+    parser = sub.add_parser("create", help="create an at, cron, or every schedule")
     parser.add_argument("--name", required=True, help="unique schedule name")
-    _add_script_args(parser, required=True)
-    parser.add_argument(
-        "--command", default=None, help="command that runs the script (default: python schedule.py)"
-    )
+    payload = parser.add_mutually_exclusive_group(required=True)
+    payload.add_argument("--script", default=None, help="ordinary Python payload")
+    payload.add_argument("--script-file", default=None, help="read Python payload from PATH")
+    payload.add_argument("--message", default=None, help="wake text sent to the target agent")
+    trigger = parser.add_mutually_exclusive_group(required=True)
+    trigger.add_argument("--at", dest="run_at", default=None, help="timezone-aware ISO instant")
+    trigger.add_argument("--cron", dest="cron_expr", default=None, help="five-field cron")
+    trigger.add_argument("--every", dest="interval_seconds", type=int, default=None)
     parser.add_argument("--description", default=None, help="what this schedule does")
+    parser.add_argument("--owner-agent-id", type=int, default=None)
+    parser.add_argument("--target-agent-id", type=int, default=None)
+    parser.add_argument("--timezone", default=None, help="IANA timezone; defaults to cluster zone")
+    parser.add_argument("--timeout-seconds", type=int, default=600)
+    parser.add_argument("--on-owner-terminate", choices=("cancel", "keep"), default=None)
     parser.add_argument(
-        "--machine", default=None, help="host machine to run schedule on (default: gateway machine)"
+        "--machine", default=None, help="host machine (default: owner machine, else gateway)"
     )
     parser.add_argument(
         "--disabled",
@@ -209,7 +224,7 @@ def add_schedules_parser(sub: argparse._SubParsersAction[argparse.ArgumentParser
         "schedules",
         help="manage gateway-supervised schedules "
         "(ls / get / create / update / delete / provision / verify / start / stop / restart / "
-        "logs / runs)",
+        "enable / disable / cancel / run-now / logs / runs)",
     )
     schedules_sub = schedules_p.add_subparsers(dest="schedules_cmd", required=True)
 
@@ -286,17 +301,21 @@ def add_schedules_parser(sub: argparse._SubParsersAction[argparse.ArgumentParser
     )
     schedules_delete_p.set_defaults(func=_h_schedules_delete)
 
-    for verb, helptext, handler in (
-        ("start", "enable + launch the schedule now", _h_schedules_start),
-        ("stop", "disable + kill the schedule's session now", _h_schedules_stop),
-        ("restart", "relaunch the session on the current script", _h_schedules_restart),
+    for verb, helptext in (
+        ("start", "enable the next fire or daemon session"),
+        ("stop", "disable future fires or the daemon session"),
+        ("restart", "run now or relaunch the daemon session"),
+        ("enable", "enable and calculate the next fire"),
+        ("disable", "disable future fires"),
+        ("cancel", "cancel unfinished work"),
+        ("run-now", "make one fire immediately eligible"),
     ):
         control_p = schedules_sub.add_parser(verb, help=helptext)
         control_p.add_argument("identifier", help="schedule name or numeric id")
-        control_p.set_defaults(func=handler)
+        control_p.set_defaults(func=_h_schedules_control, control_verb=verb)
 
     schedules_logs_p = schedules_sub.add_parser(
-        "logs", help="recent output (live session scrollback, else the last crash traceback)"
+        "logs", help="recent latest.log, daemon output, or last error"
     )
     schedules_logs_p.add_argument("identifier", help="schedule name or numeric id")
     # task #4092 cli-default inventory: presentation bound — the capture window

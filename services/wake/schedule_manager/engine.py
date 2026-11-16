@@ -1,6 +1,9 @@
 # meiva:note
 # Schedule execution engine, composed by ``services.wake.schedule_manager.runner``.
 #
+# The declarative manager invokes ``run_single_round_payload`` in a fresh process
+# for each fire. Compatibility daemon schedules use the resident lifecycle below.
+#
 # Loads schedule ``<id>`` from the DB, materializes its script under
 # ``$MEIVA_HOME/schedules/<id>/``, binds a ``schedule:<id>`` actor identity (so the
 # script's ``meiva.agents.*`` calls attribute to the schedule instead of failing for
@@ -13,7 +16,7 @@
 # Version-controlled schedule templates (manifest + scripts) live in
 # ``schedules/`` — provisioned via ``base/daemon/schedules/builtin_schedules.py``.
 #
-# Every process execution appends one row to ``schedule_runs`` (the run-history
+# Every compatibility process execution appends one row to ``schedule_runs`` (the run-history
 # drawer's data source): opened with ``ok = NULL`` (in-progress) when the runner
 # starts, closed with the outcome when it exits. This is process-level history —
 # one row per process lifetime, not per fire — and it is severable observability:
@@ -516,6 +519,10 @@ def run_python_script(
                 # meiva:note
                 # the bounded join.
                 os._exit(1)
+
+
+def run_single_round_payload(script_path: Path) -> None:
+    runpy.run_path(str(script_path), run_name="__main__")
 
 
 def _record_script_exit(

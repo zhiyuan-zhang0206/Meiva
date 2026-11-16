@@ -19,6 +19,10 @@ native ownership of the responding listener.
 
 Code lives in domain groups under `services/<group>/<service>/` (no `__init__.py` on a group): `supervision` (root supervisor, its wiring, protocol probes), `agent_runner` (agent host, ops server, pty sessions), `desktop` (browser, computer-use, permissions helper), `entrypoints` (Gate), `wake` (heartbeat, delivery watchdog, schedule manager), `upkeep` (TTL reaper, events maintenance), `derived` (memory index and search, labeler) and `backup` (scheduler, artifact handling, the dump itself). `redis_bridge` and `pidfile.py` stay at the top. The capability split documented below cuts across these groups.
 
+The wake schedule manager is host-local: it keeps no process while declarative
+`at`/`cron`/`every` rows wait, starts one bounded no-PTY payload per due fire, and
+retains PTY supervision only for the temporary `daemon` compatibility rows.
+
 Agent shells, watchers, and other persistent interactive sessions are subordinate
 runtime work, rather than a second service lifecycle. On macOS the installed
 permissions helper is root's permission-carrying ancestor; changing that ancestor

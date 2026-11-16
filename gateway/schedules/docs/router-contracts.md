@@ -1,23 +1,45 @@
 # Schedule router contracts
 
-The HTTP router syntax-checks scripts before writing them. Its list projection
-omits script bodies; full reads retain them. Newly enabled rows are picked up by
-reconciliation without a separate launch call. Log reads remove trailing blank
-PTY screen padding before selecting the requested content tail. The saved PTY
-transcript preserves output after a session is reaped; if neither live capture nor
-transcript is available, the stored crash error remains a distinct fallback.
-Only the agent-backed natural-language draft operation requires a model catalog;
-ordinary schedule management keeps its existing independent requirements.
+The HTTP creation boundary accepts `at`, `cron`, and `every` triggers. A caller
+supplies either an ordinary Python script or a wake message with a target. Message
+creation stores the minimal Python delivery program, so every execution follows the
+same process contract. The router syntax-checks the resulting script before writing.
 
-What an edit, a start / stop / restart and a logs request decide from a row (what changed, whether the
-session must converge now, which source answers the logs) is a pure function in `plans.py`; the
-router reads the row and performs the write. A start / stop / restart / edit / delete commits its
-sync request with the desired state, then waits `schedule_consume_wait_seconds` (a `GatewayConfig`
-value) for the manager to consume it. Tests make a write fail with a database trigger, and give
-the client a short wait.
+Trigger payloads are closed forms: one `run_at`, one cron expression, or one interval
+of at least 30 seconds. Cron validation uses the same timezone-aware implementation
+as the runtime. Cluster timezone and a 600-second timeout are defaults at acceptance,
+making retries reconstruct the same response from the receipt's original timestamp.
 
-Schedule values remain bound SQL parameters; interpolated projection columns are the module-owned fixed column list. Inserts and updates use RETURNING after creating or locking their target, so non-null row assertions express database postconditions rather than validating user input. Full reads keep a separate missing-row 404.
+`owner_agent_id` is accepted on create and update. Unless a machine is explicit, an
+owned schedule follows the agent's recorded machine; a system schedule stays on the
+accepting gateway machine. Owned schedules default to cancellation when the owner
+terminates. Foreign keys and missing machine placement surface as request errors.
 
-## Relationship to Other Nodes
+List projections omit script bodies; full reads retain them. Script or command edits
+remain versioned. Declarative edits apply on the next fire, while daemon edits retain
+their revision/session convergence path. A declarative machine move or deletion is
+accepted only while no run is open, preserving one manager and one workspace as the
+owner of an in-flight process.
 
-- [Schedule Manager & Runner](schedules.md) — the overview these route contracts belong to.
+Lifecycle verbs share durable, idempotent mutation receipts:
+
+- `enable`/`start` compute the next declarative fire or start a daemon;
+- `disable`/`stop` prevent future fires and ask reconciliation to stop active work;
+- `run-now`/`restart` make one declarative fire immediately eligible or relaunch a
+  daemon;
+- `cancel` records the terminal lifecycle intent.
+
+Declarative log reads return `latest.log` from the schedule's locality. Daemon reads
+retain live capture and saved PTY transcript fallbacks. Both use `last_error` only
+when no execution output is available. Remote reads dispatch to the target machine's
+ops service with the trigger and owner locality facts.
+
+Schedule values remain bound SQL parameters. Interpolated projections are fixed
+module constants, and every mutation locks or creates its target before relying on a
+non-null returned row.
+
+## Relationship to other nodes
+
+- [Schedule Manager & Runner](schedules.md) — execution and recovery semantics.
+- [Schedule mutation receipts and revision convergence](schedule-convergence.md) —
+  the daemon compatibility receipt protocol.

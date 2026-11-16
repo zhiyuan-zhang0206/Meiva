@@ -1,0 +1,4 @@
+exports = ["__init__.py", "tests"]
+
+[uses]
+"tests" = ["__init__.py"]

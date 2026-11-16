@@ -4519,6 +4519,132 @@
         }
       }
     },
+    "/api/keyed/v1/schedules/draft": {
+      "post": {
+        "summary": "Guarded Draft Schedule",
+        "operationId": "guarded_draft_schedule_api_keyed_v1_schedules_draft_post",
+        "parameters": [
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128,
+              "title": "Idempotency-Key"
+            }
+          },
+          {
+            "name": "Idempotency-Scope",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Idempotency-Scope"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ScheduleDraftRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ScheduleDraftResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/schedules/{schedule_id}/launch-env": {
+      "get": {
+        "summary": "Get Schedule Launch Env",
+        "operationId": "get_schedule_launch_env_api_schedules__schedule_id__launch_env_get",
+        "parameters": [
+          {
+            "name": "schedule_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "title": "Schedule Id"
+            }
+          },
+          {
+            "name": "authorization",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": {
+                    "type": "string"
+                  },
+                  "title": "Response Get Schedule Launch Env Api Schedules  Schedule Id  Launch Env Get"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/schedules": {
       "get": {
         "summary": "List Schedules",
@@ -4620,7 +4746,7 @@
       },
       "put": {
         "summary": "Update Schedule",
-        "description": "Partial-update a schedule — only the fields present in the body change. A\nscript/command change is snapshotted into schedule_versions and, if the\nschedule is enabled, applied immediately (the session is relaunched on the new\nscript). An enabled-flag value change also converges immediately, so disable\nreaps the session and enable creates it; a same-value update leaves the\nsession intact. 400 on a script syntax error, 404 if missing, 409 on a name\nclash.",
+        "description": "Partial-update a schedule. Script/command changes are versioned. Declarative schedules apply changes on their next fire; daemon schedules converge their PTY session. 400 on invalid input, 404 if missing, 409 on a name clash.",
         "operationId": "update_schedule_api_schedules__schedule_id__put",
         "parameters": [
           {
@@ -4668,7 +4794,7 @@
       },
       "delete": {
         "summary": "Delete Schedule",
-        "description": "Delete a schedule. 404 if missing. The reconcile loop kills its (now\norphaned) session; its work dir is removed.",
+        "description": "Delete a schedule and remove its local work directory. 404 if missing. A legacy daemon session is reaped by reconciliation.",
         "operationId": "delete_schedule_api_schedules__schedule_id__delete",
         "parameters": [
           {
@@ -4712,7 +4838,7 @@
     "/api/schedules/{schedule_id}/start": {
       "post": {
         "summary": "Start Schedule",
-        "description": "Enable + launch the schedule now. 404 if missing.",
+        "description": "Enable the schedule. Declarative schedules compute their next fire; daemon schedules launch now. 404 if missing.",
         "operationId": "start_schedule_api_schedules__schedule_id__start_post",
         "parameters": [
           {
@@ -4752,7 +4878,7 @@
     "/api/schedules/{schedule_id}/stop": {
       "post": {
         "summary": "Stop Schedule",
-        "description": "Disable + kill the schedule's session now. 404 if missing.",
+        "description": "Disable future fires and stop a compatibility daemon session. 404 if missing.",
         "operationId": "stop_schedule_api_schedules__schedule_id__stop_post",
         "parameters": [
           {
@@ -4792,8 +4918,164 @@
     "/api/schedules/{schedule_id}/restart": {
       "post": {
         "summary": "Restart Schedule",
-        "description": "Relaunch the schedule's session now (reloading its script), clearing crash\nbackoff. 404 if missing, 409 if the schedule is disabled.",
+        "description": "Run a declarative schedule now or relaunch a compatibility daemon. 404 if missing, 409 if disabled.",
         "operationId": "restart_schedule_api_schedules__schedule_id__restart_post",
+        "parameters": [
+          {
+            "name": "schedule_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "title": "Schedule Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ScheduleView"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/schedules/{schedule_id}/enable": {
+      "post": {
+        "summary": "Enable Schedule",
+        "operationId": "enable_schedule_api_schedules__schedule_id__enable_post",
+        "parameters": [
+          {
+            "name": "schedule_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "title": "Schedule Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ScheduleView"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/schedules/{schedule_id}/disable": {
+      "post": {
+        "summary": "Disable Schedule",
+        "operationId": "disable_schedule_api_schedules__schedule_id__disable_post",
+        "parameters": [
+          {
+            "name": "schedule_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "title": "Schedule Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ScheduleView"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/schedules/{schedule_id}/cancel": {
+      "post": {
+        "summary": "Cancel Schedule",
+        "operationId": "cancel_schedule_api_schedules__schedule_id__cancel_post",
+        "parameters": [
+          {
+            "name": "schedule_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "title": "Schedule Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ScheduleView"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/schedules/{schedule_id}/run-now": {
+      "post": {
+        "summary": "Run Schedule Now",
+        "operationId": "run_schedule_now_api_schedules__schedule_id__run_now_post",
         "parameters": [
           {
             "name": "schedule_id",
@@ -4832,7 +5114,7 @@
     "/api/schedules/{schedule_id}/logs": {
       "get": {
         "summary": "Get Schedule Logs",
-        "description": "Recent output of the schedule. Live session -> its capture; a dead\nsession -> its PTY transcript file; otherwise the last crash traceback\n(`last_error`). 404 if the schedule is missing.",
+        "description": "Recent output: declarative latest.log, daemon live/transcript capture, or last_error. 404 if missing.",
         "operationId": "get_schedule_logs_api_schedules__schedule_id__logs_get",
         "parameters": [
           {
@@ -4922,134 +5204,6 @@
                     "$ref": "#/components/schemas/ScheduleRunView"
                   },
                   "title": "Response Get Schedule Runs Api Schedules  Schedule Id  Runs Get"
-                }
-              }
-            }
-          },
-          "422": {
-            "description": "Validation Error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/api/keyed/v1/schedules/draft": {
-      "post": {
-        "summary": "Guarded Draft Schedule",
-        "description": "Hand a natural-language request to an meiva-schedule-writer agent. Spawns the\nagent (which loads meiva-guide.schedules, clarifies, writes the script,\nand POSTs it back) and returns its id so the UI can open the conversation.\nReplays one raw draft intent and its original birth.",
-        "operationId": "guarded_draft_schedule_api_keyed_v1_schedules_draft_post",
-        "parameters": [
-          {
-            "name": "Idempotency-Key",
-            "in": "header",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "minLength": 1,
-              "maxLength": 128,
-              "title": "Idempotency-Key"
-            }
-          },
-          {
-            "name": "Idempotency-Scope",
-            "in": "header",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Idempotency-Scope"
-            }
-          }
-        ],
-        "requestBody": {
-          "required": true,
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/ScheduleDraftRequest"
-              }
-            }
-          }
-        },
-        "responses": {
-          "200": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ScheduleDraftResponse"
-                }
-              }
-            }
-          },
-          "422": {
-            "description": "Validation Error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/api/schedules/{schedule_id}/launch-env": {
-      "get": {
-        "summary": "Get Schedule Launch Env",
-        "description": "Deliver process-scoped secret environment variables for a schedule session.",
-        "operationId": "get_schedule_launch_env_api_schedules__schedule_id__launch_env_get",
-        "parameters": [
-          {
-            "name": "schedule_id",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "integer",
-              "title": "Schedule Id"
-            }
-          },
-          {
-            "name": "authorization",
-            "in": "header",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Authorization"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object",
-                  "additionalProperties": {
-                    "type": "string"
-                  },
-                  "title": "Response Get Schedule Launch Env Api Schedules  Schedule Id  Launch Env Get"
                 }
               }
             }
@@ -11646,6 +11800,14 @@
         "title": "CostEstimateOut",
         "description": "The cold-cache price of building what a session (or a request) still lacks.\n\n`cost_usd` is None when the agent's model has no price. See `cost_basis` of the response."
       },
+      "DeclarativeTriggerKind": {
+        "type": "string",
+        "enum": [
+          "at",
+          "cron",
+          "every"
+        ]
+      },
       "DeliveryStatus": {
         "properties": {
           "batch_id": {
@@ -16983,9 +17145,108 @@
             "type": "string",
             "title": "Name"
           },
+          "trigger_kind": {
+            "$ref": "#/components/schemas/DeclarativeTriggerKind"
+          },
           "script": {
-            "type": "string",
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
             "title": "Script"
+          },
+          "message": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Message"
+          },
+          "target_agent_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Target Agent Id"
+          },
+          "run_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Run At"
+          },
+          "cron_expr": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Cron Expr"
+          },
+          "interval_seconds": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "minimum": 30.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Interval Seconds"
+          },
+          "timezone": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Timezone"
+          },
+          "timeout_seconds": {
+            "type": "integer",
+            "exclusiveMinimum": 0.0,
+            "title": "Timeout Seconds",
+            "default": 600
+          },
+          "on_owner_terminate": {
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "cancel",
+                  "keep"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "On Owner Terminate"
           },
           "command": {
             "type": "string",
@@ -17034,7 +17295,7 @@
         "type": "object",
         "required": [
           "name",
-          "script"
+          "trigger_kind"
         ],
         "title": "ScheduleCreate"
       },
@@ -17129,6 +17390,18 @@
               }
             ],
             "title": "Note"
+          },
+          "scheduled_for": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Scheduled For"
           }
         },
         "type": "object",
@@ -17221,6 +17494,71 @@
             ],
             "title": "Owner Agent Id"
           },
+          "trigger_kind": {
+            "$ref": "#/components/schemas/TriggerKind"
+          },
+          "run_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Run At"
+          },
+          "cron_expr": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Cron Expr"
+          },
+          "interval_seconds": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Interval Seconds"
+          },
+          "timezone": {
+            "type": "string",
+            "title": "Timezone"
+          },
+          "timeout_seconds": {
+            "type": "integer",
+            "title": "Timeout Seconds"
+          },
+          "on_owner_terminate": {
+            "type": "string",
+            "enum": [
+              "cancel",
+              "keep"
+            ],
+            "title": "On Owner Terminate"
+          },
+          "next_launch_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Next Launch At"
+          },
           "placement_status": {
             "type": "string",
             "enum": [
@@ -17256,6 +17594,10 @@
           "created_at",
           "updated_at",
           "machine",
+          "trigger_kind",
+          "timezone",
+          "timeout_seconds",
+          "on_owner_terminate",
           "placement_status"
         ],
         "title": "ScheduleSummary"
@@ -17338,6 +17680,33 @@
               }
             ],
             "title": "Owner Agent Id"
+          },
+          "timeout_seconds": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "exclusiveMinimum": 0.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Timeout Seconds"
+          },
+          "on_owner_terminate": {
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "cancel",
+                  "keep"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "On Owner Terminate"
           }
         },
         "type": "object",
@@ -17423,6 +17792,71 @@
             ],
             "title": "Owner Agent Id"
           },
+          "trigger_kind": {
+            "$ref": "#/components/schemas/TriggerKind"
+          },
+          "run_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Run At"
+          },
+          "cron_expr": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Cron Expr"
+          },
+          "interval_seconds": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Interval Seconds"
+          },
+          "timezone": {
+            "type": "string",
+            "title": "Timezone"
+          },
+          "timeout_seconds": {
+            "type": "integer",
+            "title": "Timeout Seconds"
+          },
+          "on_owner_terminate": {
+            "type": "string",
+            "enum": [
+              "cancel",
+              "keep"
+            ],
+            "title": "On Owner Terminate"
+          },
+          "next_launch_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Next Launch At"
+          },
           "placement_status": {
             "type": "string",
             "enum": [
@@ -17462,6 +17896,10 @@
           "created_at",
           "updated_at",
           "machine",
+          "trigger_kind",
+          "timezone",
+          "timeout_seconds",
+          "on_owner_terminate",
           "placement_status",
           "script"
         ],
@@ -20015,6 +20453,15 @@
           "bytes_transferred"
         ],
         "title": "TransferAgentResponse"
+      },
+      "TriggerKind": {
+        "type": "string",
+        "enum": [
+          "at",
+          "cron",
+          "every",
+          "daemon"
+        ]
       },
       "UiContributionsResponse": {
         "properties": {

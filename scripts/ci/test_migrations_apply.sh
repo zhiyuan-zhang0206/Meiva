@@ -187,6 +187,18 @@ psql -d "$TEST_DB" -v ON_ERROR_STOP=1 <<'SQL'
 INSERT INTO agents (label) VALUES ('smoke-agent');
 INSERT INTO agents_meta (id, status, machine)
     VALUES ((SELECT max(id) FROM agents), 'running', 'smoke-machine');
+INSERT INTO schedules (
+    name, script, command, machine, owner_agent_id, trigger_kind, run_at,
+    next_launch_at, on_owner_terminate, status
+) VALUES (
+    'cancel-on-owner-termination', 'pass', 'python run.py', 'smoke-machine',
+    (SELECT max(id) FROM agents), 'at', now() + interval '1 hour',
+    now() + interval '1 hour', 'cancel', 'scheduled'
+), (
+    'keep-on-owner-termination', 'pass', 'python run.py', 'smoke-machine',
+    (SELECT max(id) FROM agents), 'at', now() + interval '1 hour',
+    now() + interval '1 hour', 'keep', 'scheduled'
+);
 UPDATE agents_meta SET status = 'terminated'
     WHERE id = (SELECT max(id) FROM agents);
 
@@ -198,6 +210,20 @@ BEGIN
         WHERE agent_id = (SELECT max(id) FROM agents) AND ended_at >= started_at
     ) THEN
         RAISE EXCEPTION 'termination did not close the lifecycle interval';
+    END IF;
+    IF NOT EXISTS (
+        SELECT 1 FROM schedules
+        WHERE name = 'cancel-on-owner-termination'
+          AND enabled = FALSE AND status = 'cancelled' AND next_launch_at IS NULL
+    ) THEN
+        RAISE EXCEPTION 'termination did not cancel the owner-coupled schedule';
+    END IF;
+    IF NOT EXISTS (
+        SELECT 1 FROM schedules
+        WHERE name = 'keep-on-owner-termination'
+          AND enabled = TRUE AND status = 'scheduled' AND next_launch_at IS NOT NULL
+    ) THEN
+        RAISE EXCEPTION 'termination changed the owner-independent schedule';
     END IF;
 END $$;
 

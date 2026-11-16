@@ -1,4 +1,5 @@
 from concurrent.futures import ThreadPoolExecutor
+from datetime import UTC, datetime
 from typing import Any
 
 import psycopg
@@ -12,7 +13,19 @@ from gateway.schedules import router as schedules
 from gateway.schedules.tests.db_faults import failing_write
 from gateway.tests.auth.gateway_config import gateway_test_client
 
-_SCHEDULE_BODY = {"name": "receipt", "script": "pass"}
+_NOW = datetime(2026, 11, 17, tzinfo=UTC)
+_SCHEDULE_BODY = {
+    "name": "receipt",
+    "trigger_kind": "every",
+    "interval_seconds": 60,
+    "script": "pass",
+}
+
+
+def _schedule(name: str) -> schedules.ScheduleCreate:
+    return schedules.ScheduleCreate(
+        name=name, trigger_kind="every", interval_seconds=60, script="pass"
+    )
 
 
 def test_lost_response_retry_replays_original_created_resource(
@@ -71,8 +84,10 @@ def test_concurrent_creation_commits_one_resource_and_receipt(
         def create(_worker: int) -> tuple[Any, ...]:
             return schedules.create_blocking(
                 pool,
-                schedules.ScheduleCreate(name="concurrent", script="pass"),
+                _schedule("concurrent"),
                 "local",
+                "UTC",
+                _NOW,
                 "create",
             )
 
@@ -88,7 +103,12 @@ def test_receipt_contains_no_raw_script_request(db_conn: psycopg.Connection) -> 
         assert (
             client.post(
                 "/api/schedules",
-                json={"name": "opaque", "script": f"x = {value_marker!r}"},
+                json={
+                    "name": "opaque",
+                    "trigger_kind": "every",
+                    "interval_seconds": 60,
+                    "script": f"x = {value_marker!r}",
+                },
                 headers=keyed_headers("opaque-create"),
             ).status_code
             == 201
@@ -110,8 +130,10 @@ def test_receipt_failure_rolls_back_created_resource_and_version(
     ):
         schedules.create_blocking(
             pool,
-            schedules.ScheduleCreate(name="rollback", script="pass"),
+            _schedule("rollback"),
             "local",
+            "UTC",
+            _NOW,
             "rollback",
         )
     assert db_conn.execute("SELECT count(*) FROM schedules").fetchone() == (0,)
@@ -141,14 +163,18 @@ def test_creation_identity_is_bound_to_verified_principal(
     with base.db.pool(gate=database_gate) as pool:
         first = schedules.create_blocking(
             pool,
-            schedules.ScheduleCreate(name="one", script="pass"),
+            _schedule("one"),
             "local",
+            "UTC",
+            _NOW,
             scoped_key("one"),
         )
         second = schedules.create_blocking(
             pool,
-            schedules.ScheduleCreate(name="two", script="pass"),
+            _schedule("two"),
             "local",
+            "UTC",
+            _NOW,
             scoped_key("two"),
         )
     assert first[0] != second[0]
@@ -169,10 +195,7 @@ def test_invalid_creation_identity_cannot_reserve_resource(
 ) -> None:
     with gateway_test_client() as client:
         assert (
-            client.post(
-                "/api/schedules", json={"name": "invalid", "script": "pass"}, headers=headers
-            ).status_code
-            == 400
+            client.post("/api/schedules", json=_SCHEDULE_BODY, headers=headers).status_code == 400
         )
     assert db_conn.execute("SELECT count(*) FROM schedules").fetchone() == (0,)
     assert db_conn.execute("SELECT count(*) FROM resource_creation_receipts").fetchone() == (0,)

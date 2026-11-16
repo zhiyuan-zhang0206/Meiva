@@ -119,6 +119,31 @@ def get(
 
 
 # meiva:note
+# Schedule SDK calls use the bound gateway context and keyed mutation transport.
+def schedule_create(body: Mapping[str, object]) -> dict[str, object]:
+    plan = Request("POST", "/api/schedules", body=body, idempotency_key=str(uuid.uuid4()))
+    return _transport.json_object(_run(plan, _ctx(None)))
+
+
+def schedule_list() -> list[dict[str, object]]:
+    return _transport.json_rows(_run(Request("GET", "/api/schedules"), _ctx(None)))
+
+
+def schedule_get(schedule_id: int) -> dict[str, object]:
+    plan = Request("GET", f"/api/schedules/{schedule_id}")
+    return _transport.json_object(_run(plan, _ctx(None)))
+
+
+def schedule_action(schedule_id: int, action: str) -> dict[str, object]:
+    plan = Request(
+        "POST",
+        f"/api/schedules/{schedule_id}/{action}",
+        idempotency_key=str(uuid.uuid4()),
+    )
+    return _transport.json_object(_run(plan, _ctx(None)))
+
+
+# meiva:note
 # `use_client` accepts any HTTP client test double or `httpx.Client` and returns it unchanged so
 # callers keep the concrete type of the client they passed into the context manager.
 # meiva:link meiva/agents/docs/agents.md
