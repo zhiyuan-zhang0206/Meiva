@@ -10,15 +10,13 @@ Memoization, clock ownership and announcements:
 ## Returning to an agent
 
 The page keys each mounted timeline by agent and scopes its in-memory bookmark
-by page-entry plus agent. A bookmark has one of two kinds: inside the bottom
-zone the reader was watching the tail, so it says "follow the bottom" and the
-return lands on the newest message however much arrived meanwhile; above it the
-reader keeps the visible message coordinate and viewport offset, and returning
-materializes the prefix before restoring that anchor. Work/detail expansion
-choices are retained under the same identity. An item bookmark
-survives resize, tail repair and trim until the reader scrolls or explicitly
-requests the bottom; a tail bookmark follows the end as the thread grows.
-Sending still jumps to the latest message; a first visit starts at the bottom.
+by page-entry plus agent. Every departure saves the visible message coordinate
+and viewport offset, including a reader watching the tail. Returning
+materializes the prefix before restoring that anchor and remains at the reading
+position as new output arrives. Work/detail expansion choices are retained
+under the same identity. The bookmark survives resize, tail repair and trim
+until the reader scrolls or explicitly requests the bottom. A first visit starts
+at the bottom. Sending follows the [send-anchor contract](send-anchor.md).
 
 The centered down arrow takes the reader to the last human message or the
 current tail according to the [reading position](send-anchor.md). Older paging

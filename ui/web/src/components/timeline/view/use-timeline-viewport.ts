@@ -322,7 +322,7 @@ export function useTimelineViewport({
       trimFollowing();
       const mem = scrollMemoryRef.current;
       if (mem && !restoreInFlight()) {
-        rememberTimelinePosition(viewport, mem.entryKey, mem.contentKey, controller, tailHeight(viewport), collapseReserveHeight(), sendReserveEnabled());
+        rememberTimelinePosition(viewport, mem.entryKey, mem.contentKey, collapseReserveHeight(), sendReserveEnabled());
       }
     };
     viewport.addEventListener("scroll", onScroll, { passive: true });

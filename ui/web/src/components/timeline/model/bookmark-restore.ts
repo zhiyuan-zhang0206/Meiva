@@ -71,10 +71,8 @@ export function applyBookmarkRestore({
   }
   if (saved.followBottom) {
     controller.notifyPinnedToBottom({ ...snapshot(viewport), scrollHeight: naturalHeight }, true);
-  } else if (saved.usedCollapseReserve || naturalHeight < viewport.scrollHeight) {
-    controller.notifyAnchored(snapshot(viewport));
   } else {
-    controller.notifyRestored(snapshot(viewport));
+    controller.notifyAnchored(snapshot(viewport));
   }
   state.pending.current = null;
   state.settled.current = saved.anchor ? saved : null;

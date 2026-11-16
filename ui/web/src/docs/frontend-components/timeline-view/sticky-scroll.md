@@ -23,10 +23,11 @@ carries the grown height and an upward move and the height test alone reads a
 departure (#5678: a 254 px clamp from estimates replaced by measurements
 released a follower for good; #5680: 69 px read as growth against a commit-only
 baseline stranded one 107 px short).
-A pending bookmark restore lands before the pin. A follower returns to the
-natural end of the conversation, including messages that arrived while away.
-A reader at the end of the additional scroll space returns to their saved row
-and offset. When collapsing a work block created that space, the restore
+A pending bookmark restore lands before the pin. Returning to a conversation
+restores the visible message and viewport offset saved on departure, including
+when leaving the tail. The restored reader remains anchored as output grows;
+reader navigation to the bottom resumes following. A reader at the end of the
+additional scroll space also returns to their saved row and offset. When collapsing a work block created that space, the restore
 recreates as much of it as the saved offset needs. Wheel, touch, keyboard
 scrolling and track interaction reveal the timeline scrollbar. Position restores
 and layout updates keep an idle scrollbar hidden.

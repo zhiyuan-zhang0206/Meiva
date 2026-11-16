@@ -12,11 +12,18 @@ use-router docs), independent of `cacheComponents` — so a restore happens
 only on a return to a kept entry; a first visit keeps its own default, and a
 search-param-only switch (e.g. `?agent_id=`) shares the previous home
 visit's slot. The record carries a content key (agent / agent+session): a
-mismatch drops the position instead of restoring it onto other content, and
-the sticky flag rides along so a follower returns following. Restores land in
-a layout effect on the first commit that can hold them (before paint), report
-through
-`notifyRestored` (following resumes exactly at an at-bottom restore), and the
-mount force-pin defers to a pending restore.
+mismatch drops the position instead of restoring it onto other content.
+Conversation switches always save the visible message and viewport offset,
+including when leaving the tail. Returning restores that reading position and
+keeps it anchored through subsequent output. First visits keep their default
+bottom placement. Scrolling or explicitly navigating to the bottom resumes
+following.
+
+The shared record still supports explicit `followBottom` bookmarks and terminal
+following. The timeline save path writes false for both agent switches and
+history-entry remounts; bfcache identity chooses the bookmark, not a separate
+following policy. Restores land in a layout effect on the first commit that can
+hold them (before paint), and the mount force-pin defers to a pending restore.
+
 
 Parent: [Frontend State Management](frontend-state.md).
