@@ -99,6 +99,7 @@ type TimelineViewState = Pick<
   | "turnActive"
   | "hasMoreOlder"
   | "loadingOlder"
+  | "readerLoadingOlder"
   | "loadOlder"
   | "isLoading"
   | "retainedItemsMax"
@@ -383,6 +384,7 @@ function HomeContent({
     turnActive,
     hasMoreOlder,
     loadingOlder,
+    readerLoadingOlder,
     loadOlder,
     isLoading,
     retainedItemsMax,
@@ -502,6 +504,7 @@ function HomeContent({
             lastEventAt={timelineStore.liveAnchorAt}
             hasMoreOlder={hasMoreOlder}
             loadingOlder={loadingOlder}
+            readerLoadingOlder={readerLoadingOlder}
             onLoadOlder={loadOlder}
             retainedItemsMax={retainedItemsMax}
             loading={isLoading || (agentsLoading && activeId === null)}

@@ -236,6 +236,7 @@ export function homePageProps(): HomePageProps {
       turnActive: state.turnActive,
       hasMoreOlder: false,
       loadingOlder: false,
+      readerLoadingOlder: false,
       loadOlder: state.loadOlder,
       isLoading: false,
       retainedItemsMax: 0,
