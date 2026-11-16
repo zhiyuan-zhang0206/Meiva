@@ -50,10 +50,14 @@ observed invocation result.
 
 For capability promotion, cases 5-7 check output-level decisions: outdated
 capability assumptions, verification/review bottlenecks, a small serial plan,
-qualitative completion, and evidence reuse. Their scope assertions concern what
-the response proposes or claims, not proof of the absence of tool activity.
-Record any unavailable execution audit separately. These explicit-load cases
-do not measure implicit discovery or prove that promotion changes invocation.
+qualitative completion, and evidence reuse. For the `define-goal` contract
+refinement, case 8 (development) checks activity-phrasing rejection, metric
+non-regression guardrails, and intact tail-constraint handoff, while case 9
+(reserved) checks epistemic partitioning when missing upstream inputs preclude
+exact replay. Their scope assertions concern what the response proposes or
+claims, not proof of the absence of tool activity. Record any unavailable
+execution audit separately. These explicit-load cases do not measure implicit
+discovery or prove that promotion changes invocation.
 
 ## Follow-up with the human
 
