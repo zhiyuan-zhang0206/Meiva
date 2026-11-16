@@ -27,18 +27,44 @@ supervision example composes existing messaging and background-wait capabilities
 
 ## Completion and continuity
 
-- Keep a definition-of-done checklist derived from the goal. Verify artifacts
-  through appropriate checks, code inspection, or UI use. Reports guide what to
-  inspect; they are not acceptance evidence. Name remaining defects with a
-  concrete reproduction or other actionable evidence. Claim completion only
-  when every required item verifiably passes.
-- Keep progress and evidence in durable notes. Re-read the goal, latest progress,
-  and handoff after context loss or restart; preserve completed work and peer IDs.
-- A budget reminder calls for reassessment, not automatic termination. If you
-  pause, save artifacts and record the incomplete goal, verified checks, remaining
-  work, relevant peer and watcher session IDs, and the condition for resuming.
-  Tell collaborating peers where to read the handoff. Do not continue or re-arm
-  supervision while deliberately paused; late notices do not authorize resuming.
+- **Preserve full scope.** Pursue the requested end state rather than
+  substituting a narrower, safer, or easier-to-test subset to finish a turn.
+  Keep constraints, non-regression checks, and stop boundaries intact across
+  rounds; never trim the tail of a goal contract when persisting or forwarding it.
+- **Audit against authoritative state before claiming completion.** Keep a
+  definition-of-done checklist derived from the goal. Treat completion as
+  unproven until re-checked against the saved goal record (not memory) and
+  current files, command output, or UI state. Reports guide what to inspect;
+  they are not acceptance evidence. Treat missing, indirect, or unverified
+  checks as not met, name remaining defects with a concrete reproduction or
+  other actionable evidence, and claim completion only when every required item
+  and non-regression constraint verifiably passes. When executing directly on
+  high-consequence or qualitative work without deterministic checks, consider
+  having a fresh-context peer verify the artifacts given only the goal checklist
+  and artifact paths — omitting your working rationale so confirmation bias does
+  not carry over.
+- **Distinguish stop boundaries from technical obstacles.** Stop and ask
+  immediately when hitting an explicit permission, budget, or irreversible-action
+  boundary. For technical or diagnostic obstacles within scope, do not report
+  `blocked` on the first failed attempt while viable in-scope paths remain; try
+  distinct approaches and declare `blocked` only at a genuine impasse, recording
+  the paths attempted, observed evidence, the specific blocker, and what external
+  input or state change would unlock progress.
+- **Require real progress per round and converge cleanly.** Each round must
+  change authoritative state, confirm a live external wait (polling an active
+  process, job, or watcher handle rather than trusting stale logs or lock files;
+  an observation timeout calls for checking current target status, not blind
+  restart), or yield diagnostic evidence that changes the next experiment. Do
+  not repeat equivalent actions that produce no new evidence, and stop
+  re-polishing once an audit finds zero substantive defects against the checklist.
+- **Maintain durable progress and pause cleanly.** Keep progress and evidence in
+  durable notes. Re-read the goal, latest progress, and handoff after context
+  loss or restart; preserve completed work and peer IDs. A budget reminder calls
+  for reassessment, not automatic termination. If you pause, save artifacts and
+  record the incomplete goal, verified checks, remaining work, relevant peer and
+  watcher session IDs, and the condition for resuming. Tell collaborating peers
+  where to read the handoff. Do not continue or re-arm supervision while
+  deliberately paused; late notices do not authorize resuming.
 
 Use this method for work that can finish. Idle is a review point, not proof of
 failure or permission to keep pushing. Respect deliberate pauses. Perpetual,

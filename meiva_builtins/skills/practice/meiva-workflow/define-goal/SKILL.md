@@ -20,9 +20,20 @@ A usable goal states:
 
 Inspect available context first. Repair wording within settled intent; ask one
 concise question with a recommendation when a missing validator or boundary
-would change the outcome. Use honest observable criteria rather than decorative
-numbers. For research, name the decision it must enable and the evidence standard;
-for a bug, name the reproduction and failing-then-passing check.
+would change the outcome. Reject pure activity descriptions (`keep investigating`,
+`make progress`, `improve X`) unless restated as an observable end state or
+explicit learning outcome. Use honest observable criteria rather than decorative
+numbers. When optimizing a quantitative metric (such as latency, pass rate, or
+output volume), pair the target with a non-regression check or utilization
+guardrail so gaming the number by narrowing behavior or degrading unmeasured
+paths fails the goal.
+
+For research, name the decision it must enable and the evidence standard; for a
+bug, name the reproduction and failing-then-passing check. When missing upstream
+inputs, random seeds, or external access may prevent exact verification, make an
+epistemic partition the completion contract: separate what is verified directly,
+what has approximate or proxy support, what is blocked by missing inputs, and
+what remains uncertain.
 
 For exploratory or creative work, define the decision, insight, or artifact the
 work should enable and how it can be inspected. Qualitative criteria need
@@ -45,7 +56,10 @@ payment operation."
 ## Hand Off or Continue
 
 Keep the result concise; use durable working notes or an existing work record when persistence
-is needed. Choose execution, supervision, collaboration, and evaluation through
+is needed. Preserve constraints, non-regression checks, and stop conditions
+intact alongside the outcome whenever persisting or delegating a goal — never
+drop or summarize away the tail of a goal contract, where restrictions and stop
+boundaries live. Choose execution, supervision, collaboration, and evaluation through
 [Workflow](../SKILL.md) independently. A goal definition neither starts a
 supervisor nor authorizes new spending. If supervision is selected, load its
 skill and give the peer the objective, evidence, boundaries, and stopping rules.

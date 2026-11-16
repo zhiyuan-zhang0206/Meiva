@@ -6,10 +6,15 @@ does not assign the agent a watcher or worker role. An agent can execute directl
 delegate, review peers, or combine these responsibilities using existing
 capabilities; no special framework support is required.
 
-The skill owns the working procedure: acceptance evidence determines completion,
-progress notes preserve continuity, and deliberate pauses carry a handoff and a
-resume condition. Its optional supervision example uses messaging and a one-shot
-idle watcher to review another peer's progress. The bundled `scripts/watch_idle.py`
+The skill owns the working procedure: full scope and constraints stay intact
+across rounds, completion requires an authoritative-state audit against every
+required check (optionally via a fresh-context peer given only the checklist and
+artifact paths), technical obstacles try viable in-scope alternatives before
+reporting `blocked` while permission/irreversible boundaries stop immediately,
+and non-progressing or defect-free rounds converge rather than spinning. Progress
+notes preserve continuity, and deliberate pauses carry a handoff and a resume
+condition. Its optional supervision example uses messaging and a one-shot idle
+watcher to review another peer's progress. The bundled `scripts/watch_idle.py`
 implements that temporary wait; it is not required for direct execution.
 
 ## Boundaries

@@ -115,6 +115,34 @@
         "Uses the three-example review budget for a concrete informative comparison and proposes independent verification evidence before scaling.",
         "States a conditional automation boundary and a proposed next action without unsupported durations or claims of execution."
       ]
+    },
+    {
+      "id": 8,
+      "name": "metric-guardrail-and-intact-handoff",
+      "split": "development",
+      "prompt": "Turn this into a usable goal I can hand to a peer: \"Keep investigating checkout latency and make it under 150ms; only touch server/checkout/, keep the existing checkout correctness suite green, and stop to ask before changing any database schema or live traffic config.\" Do not start the optimization or spawn any peer.",
+      "files": [],
+      "expected_output": "A concise outcome-based goal contract that replaces 'keep investigating' with a concrete latency target verified by a benchmark/check, pairs the latency metric with the correctness-suite non-regression guardrail, and preserves the server/checkout/ scope and schema/live-config stop conditions intact for handoff.",
+      "assertions": [
+        "Replaces the pure activity phrasing ('keep investigating') with a verifiable latency outcome.",
+        "Pairs the <150ms metric target with the checkout correctness suite non-regression guardrail so narrowing or breaking behavior cannot pass.",
+        "Preserves the server/checkout/ path boundary and the schema/live-traffic stop conditions intact without summarizing away the tail restrictions.",
+        "Does not launch a supervisor, spawn a peer, or start editing code."
+      ]
+    },
+    {
+      "id": 9,
+      "name": "epistemic-partition-under-missing-inputs",
+      "split": "reserved",
+      "prompt": "Help me define a goal for reproducing the three headline results in a published trading paper using our local environment. The paper's appendix provides the pricing equations and synthetic parameters, but omits the authors' random seeds, proprietary tick feed, and trained model checkpoints. Give me the goal definition only; do not run experiments or invent a numeric pass percentage.",
+      "files": [],
+      "expected_output": "A goal contract whose completion standard is an evidence-partitioned reproduction report separating directly reproduced mechanics, approximate/synthetic replacements, claims blocked by unavailable proprietary inputs/checkpoints, and remaining uncertainty, with explicit stop conditions.",
+      "assertions": [
+        "Defines completion around an honest epistemic partition (verified mechanics, approximate/proxy results, blocked exact replay due to missing seeds/feed/checkpoints, and remaining uncertainty) rather than claiming exact full replay or inventing an arbitrary numeric score.",
+        "Names the concrete deliverables and verification checks for the locally testable mechanics.",
+        "Includes a stop or check-in condition rather than open-ended grinding on unavailable proprietary data.",
+        "Delivers only the goal definition without running experiments."
+      ]
     }
   ]
 }
