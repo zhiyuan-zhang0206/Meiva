@@ -74,7 +74,7 @@ export interface SendAnchorArgs {
   isFollowing: () => boolean;
   topOffset: number;
   turnActive: boolean;
-  savedSendReserve: boolean;
+  savedSendReserve: boolean | undefined;
   measureAtBottom: () => void;
   cancelBookmark: () => void;
 }
@@ -197,27 +197,26 @@ export function useSendAnchor({
     setPendingJump(null);
   }, []);
 
+  const initializedThread = useRef<{ key: string | undefined } | null>(null);
   useLayoutEffect(() => {
+    if (initializedThread.current !== null && initializedThread.current.key === threadKey) return;
+    initializedThread.current = { key: threadKey };
     pendingSend.current = undefined;
     reserveTarget.current = null;
     parkedTarget.current = null;
-    keepReserve.current = savedSendReserve;
-  }, [threadKey, savedSendReserve]);
-
-  useLayoutEffect(() => {
-    if (turnActive) keepReserve.current = true;
-  }, [threadKey, turnActive]);
+    keepReserve.current = savedSendReserve ?? turnActive;
+  }, [threadKey, savedSendReserve, turnActive]);
 
   // meiva:note
-  // Completing a turn keeps its layout. Once the reader moves back through
+  // A send keeps its layout until the reader moves back through
   // the natural end, removing space below the viewport leaves the row in place.
   // meiva:link ui/web/src/docs/frontend-components/timeline-view/send-anchor.md
   const releaseReserve = useCallback((viewport: HTMLElement, naturalEnd: number) => {
-    if (turnActive || !keepReserve.current || viewport.scrollTop > naturalEnd) return;
+    if (!keepReserve.current || viewport.scrollTop > Math.max(0, naturalEnd)) return;
     keepReserve.current = false;
     parkedTarget.current = null;
     writeReserve(viewport, null);
-  }, [turnActive, writeReserve]);
+  }, [writeReserve]);
 
   // meiva:note
   // A virtual row must mount before the alignment is measured. The layout
@@ -230,6 +229,7 @@ export function useSendAnchor({
 
     if (request.seq !== consumedSeq.current) {
       consumedSeq.current = request.seq;
+      keepReserve.current = true;
       pendingSend.current = isFollowing() ? request.inboundId : undefined;
     }
 

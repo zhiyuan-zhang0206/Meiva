@@ -1,4 +1,4 @@
-import { fireEvent, screen } from "@testing-library/react";
+import { act, fireEvent, screen } from "@testing-library/react";
 import { useState } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
@@ -31,6 +31,47 @@ describe("the older-page strip presents the reader's own request only", () => {
     expect(strip().dataset.state).toBe("idle");
     expect(strip().querySelector(".animate-spin")).toBeNull();
     expect(strip().getAttribute("aria-hidden")).toBe("true");
+  });
+
+  it.each(["wheel", "touch"])("keeps a delayed %s request visible and allows retry after no rows land", (input) => {
+    const requested: OlderLoadOrigin[] = [];
+    let finish: () => void = () => undefined;
+    function Surface() {
+      const [inFlight, setInFlight] = useState(false);
+      finish = () => setInFlight(false);
+      return <TimelineView items={items} hasMoreOlder loadingOlder={inFlight} readerLoadingOlder={inFlight}
+        onLoadOlder={(origin) => { requested.push(origin); setInFlight(true); }} />;
+    }
+    render(<Surface />);
+    const viewport = screen.getByTestId("scroll-viewport");
+    let stamp = 1000;
+    const pull = () => {
+      if (input === "wheel") {
+        const event = new WheelEvent("wheel", { deltaY: -80, bubbles: true, cancelable: true });
+        Object.defineProperty(event, "timeStamp", { value: stamp });
+        stamp += 200;
+        fireEvent(viewport, event);
+      } else {
+        fireEvent.touchStart(viewport, { touches: [{ clientY: 100 }] });
+        fireEvent.touchMove(viewport, { touches: [{ clientY: 180 }] });
+        fireEvent.touchEnd(viewport, { touches: [] });
+      }
+    };
+    pull();
+    expect(requested).toEqual(["reader"]);
+    const ring = strip().querySelector(".animate-spin");
+    expect(ring).not.toBeNull();
+    pull();
+    expect(requested).toHaveLength(1);
+    expect(strip().querySelector(".animate-spin")).toBe(ring);
+    // meiva:note
+    // Failure and an empty page both settle loading without changing rows.
+    // meiva:link ui/web/src/docs/frontend-components/timeline-view/history-paging.md
+    act(finish);
+    expect(strip().dataset.state).toBe("idle");
+    pull();
+    expect(requested).toEqual(["reader", "reader"]);
+    expect(strip().dataset.state).toBe("loading");
   });
 
   // meiva:note
