@@ -26,3 +26,8 @@ ordinary shell sessions retain their stricter 24-hour cap. The cap applies at
 creation and renewal boundaries. Stored rows with historical longer expiries
 remain readable and can be renewed to a permitted new deadline, allowing the
 later data migration to proceed without a read-path outage.
+
+Update (2026-11-17): the allocation predicate described above did not by itself
+cover the interval between committing a session id and completing PTY creation.
+The corrected creation-atomicity decision is recorded in
+[Persistent shell creation fence](persistent-shell-creation-fence.md).

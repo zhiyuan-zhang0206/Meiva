@@ -3,9 +3,12 @@
 from __future__ import annotations
 
 import time
+from collections.abc import Callable
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
+from threading import Event, Thread
 
+import psycopg
 import pytest
 
 from base.db import Database
@@ -29,6 +32,114 @@ def _screen_has(shell: ShellSessions, session_id: int, needle: str, seconds: flo
             return True
         time.sleep(0.1)
     return False
+
+
+def _captured_thread(operation: Callable[[], None]) -> tuple[Thread, list[BaseException]]:
+    failures: list[BaseException] = []
+
+    def run() -> None:
+        try:
+            operation()
+        except BaseException as exc:
+            failures.append(exc)
+
+    thread = Thread(target=run)
+    thread.start()
+    return thread, failures
+
+
+def _terminal_transition(
+    agent_id: int,
+    database: Database,
+    started: Event,
+    finished: Event,
+) -> int:
+    started.set()
+    try:
+        with database.connect() as conn, conn.cursor() as cur:
+            cur.execute(
+                "SELECT session_index FROM agents_meta WHERE id = %s FOR UPDATE", (agent_id,)
+            )
+            row = cur.fetchone()
+            assert row is not None
+            cur.execute(
+                "UPDATE agents_meta SET status = 'terminated', termination_source = 'user' "
+                "WHERE id = %s",
+                (agent_id,),
+            )
+            conn.commit()
+            return int(row[0])
+    finally:
+        finished.set()
+
+
+def _terminal_transition_after_fenced_creation(
+    shell: ShellSessions,
+    database: Database,
+    tmp_path: Path,
+    unit_home: Path,
+) -> int:
+    from meiva.shell import session_plan, ttl_store
+
+    creation_entered = Event()
+    release_creation = Event()
+    created: list[int] = []
+    terminal_cutoffs: list[int] = []
+    terminal_failures: list[BaseException] = []
+    terminal_started = Event()
+    terminal_finished = Event()
+    full: str | None = None
+
+    def start(session_id: int) -> None:
+        nonlocal full
+        full = session_plan.session_full_name(shell.shell_prefix(), session_id, "fenced")
+        creation_entered.set()
+        if not release_creation.wait(timeout=5.0):
+            raise TimeoutError("test did not release the fenced session creation")
+        assert shell.backend.new_session(full, "", tmp_path, env={"MEIVA_HOME": str(unit_home)})
+
+    def dispose() -> None:
+        if full is not None:
+            shell.backend.kill_session(full, graceful=False)
+
+    creator, failures = _captured_thread(
+        lambda: created.append(
+            ttl_store.create_ttl_fenced(
+                database, shell.agent_id, 120.0, start=start, dispose=dispose
+            )
+        )
+    )
+    terminal: Thread | None = None
+    try:
+        assert creation_entered.wait(timeout=5.0)
+        terminal, terminal_failures = _captured_thread(
+            lambda: terminal_cutoffs.append(
+                _terminal_transition(shell.agent_id, database, terminal_started, terminal_finished)
+            )
+        )
+        assert terminal_started.wait(timeout=5.0)
+        with database.connect() as conn, conn.cursor() as cur:
+            with pytest.raises(psycopg.errors.LockNotAvailable):
+                cur.execute(
+                    "SELECT 1 FROM agents_meta WHERE id = %s FOR UPDATE NOWAIT",
+                    (shell.agent_id,),
+                )
+            conn.rollback()
+        assert not terminal_finished.wait(timeout=0.1)
+    finally:
+        release_creation.set()
+        creator.join(timeout=5.0)
+        if terminal is not None:
+            terminal.join(timeout=5.0)
+
+    assert not creator.is_alive()
+    assert terminal is not None
+    assert not terminal.is_alive()
+    assert failures == []
+    assert terminal_failures == []
+    assert created == [0]
+    assert terminal_cutoffs == [1]
+    return terminal_cutoffs[0]
 
 
 def test_a_created_session_carries_its_owners_identity(
@@ -124,6 +235,49 @@ def test_a_terminated_agent_cannot_create_a_late_shell(
     assert live_shell.list() == {}
 
 
+# meiva:note
+# The creator holds the agents_meta row lock after taking its id but before the
+# PTY service answers. A terminal transition uses that exact row lock to capture
+# its cutoff, so NOWAIT must lose here. Once the creation commits, termination captures
+# it below the cutoff; even a resurrection before post-commit cleanup cannot keep
+# that pre-terminal session or its TTL row alive.
+def test_terminal_transition_cannot_pass_a_half_created_session(
+    live_shell: ShellSessions,
+    live_host: SessionHost,
+    database: Database,
+    tmp_path: Path,
+    unit_home: Path,
+) -> None:
+    cutoff = _terminal_transition_after_fenced_creation(live_shell, database, tmp_path, unit_home)
+
+    with database.connect() as conn, conn.cursor() as cur:
+        cur.execute(
+            "UPDATE agents_meta SET status = 'idling' WHERE id = %s",
+            (live_shell.agent_id,),
+        )
+        conn.commit()
+
+    live_shell.kill(0)
+    with database.connect() as conn, conn.cursor() as cur:
+        cur.execute(
+            "DELETE FROM agent_shell_ttls WHERE agent_id = %s AND session_id < %s",
+            (live_shell.agent_id, cutoff),
+        )
+        conn.commit()
+
+    assert live_shell.list() == {}
+    with database.connect() as conn, conn.cursor() as cur:
+        cur.execute(
+            "SELECT session_id FROM agent_shell_ttls WHERE agent_id = %s",
+            (live_shell.agent_id,),
+        )
+        assert cur.fetchall() == []
+
+    replacement = _create(live_shell, live_host, "replacement", cwd=tmp_path)
+    assert replacement == 1
+    live_shell.kill(replacement)
+
+
 def test_renew_reads_a_legacy_long_deadline_then_replaces_it_with_a_valid_deadline(
     live_shell: ShellSessions, live_host: SessionHost, database: Database, tmp_path: Path
 ) -> None:
@@ -163,6 +317,9 @@ def test_a_session_without_a_deadline_row_is_disposed_of(
         _create(live_shell, live_host, "orphan", cwd=tmp_path)
 
     assert live_shell.list() == {}
+    recovered = _create(live_shell, live_host, "recovered", cwd=tmp_path)
+    assert recovered == 1
+    live_shell.kill(recovered)
 
 
 def test_a_session_that_cannot_start_is_refused(
@@ -172,6 +329,9 @@ def test_a_session_that_cannot_start_is_refused(
         _create(live_shell, live_host, "broken", cwd=tmp_path / "does-not-exist")
 
     assert live_shell.list() == {}
+    recovered = _create(live_shell, live_host, "recovered", cwd=tmp_path)
+    assert recovered == 1
+    live_shell.kill(recovered)
 
 
 def test_kill_removes_the_session_and_its_id_stays_stale(
