@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import math
 from collections.abc import Mapping
+from dataclasses import dataclass
 from typing import TypeGuard
 
 from base.lm.catalog.decide.types import (
@@ -16,6 +17,30 @@ from base.lm.catalog.decide.types import (
     Score,
     YesNo,
 )
+
+
+@dataclass(frozen=True)
+class WireQuestions:
+    payload: dict[str, dict[str, object]]
+    by_wire_id: dict[str, tuple[str, Question]]
+
+
+# meiva:note
+# Google's CreateDecisionRequest.questions keys must match ^[A-Za-z0-9_-]{1,64}$, whereas
+# callers key questions by domain identifiers such as colon-delimited sub-skill names or
+# paths over 64 characters. Assign sequential wire IDs q0..q{n-1} in iteration order so
+# every caller key set maps bijectively onto valid wire keys without collisions.
+# meiva:link base/lm/docs/decision-models.md
+def encode_questions(questions: Mapping[str, Question]) -> WireQuestions:
+    payload: dict[str, dict[str, object]] = {}
+    by_wire_id: dict[str, tuple[str, Question]] = {}
+    for index, (caller_id, question) in enumerate(questions.items()):
+        if not caller_id.strip():
+            raise ValueError("Gemini Decisions question ids must be non-empty strings")
+        wire_id = f"q{index}"
+        payload[wire_id] = wire_question(question)
+        by_wire_id[wire_id] = (caller_id, question)
+    return WireQuestions(payload=payload, by_wire_id=by_wire_id)
 
 
 def wire_question(question: Question) -> dict[str, object]:
@@ -82,54 +107,65 @@ def _number(value: object, what: str) -> float:
     return number
 
 
-def parse_answers(
-    body: Mapping[str, object], questions: Mapping[str, Question]
-) -> dict[str, Decision]:
+def parse_answers(body: Mapping[str, object], encoded: WireQuestions) -> dict[str, Decision]:
     answers = _object(body.get("answers"), "answers")
+    missing = [
+        f"{caller_id!r} (wire {wire_id!r})"
+        for wire_id, (caller_id, _) in encoded.by_wire_id.items()
+        if wire_id not in answers
+    ]
+    unknown = sorted(answers.keys() - encoded.by_wire_id.keys())
+    if missing or unknown:
+        raise DecisionResponseError(
+            "Gemini Decisions answer keys do not match wire questions: "
+            f"missing [{', '.join(missing)}], unknown {unknown}"
+        )
     decisions: dict[str, Decision] = {}
-    for qid, answer in answers.items():
-        question = questions.get(qid)
-        if question is None:
-            raise DecisionResponseError(f"Gemini Decisions answered unknown question {qid!r}")
-        decisions[qid] = _parse_answer(qid, question, _object(answer, f"answer {qid!r}"))
+    for wire_id, (caller_id, question) in encoded.by_wire_id.items():
+        label = f"{caller_id!r} (wire {wire_id!r})"
+        decisions[caller_id] = _parse_answer(
+            label, question, _object(answers[wire_id], f"answer for {label}")
+        )
     return decisions
 
 
-def _parse_answer(qid: str, question: Question, answer: Mapping[str, object]) -> Decision:
+def _parse_answer(label: str, question: Question, answer: Mapping[str, object]) -> Decision:
     expected = {YesNo: "noul", Choice: "choice", Score: "score"}[type(question)]
     if answer.get("type") != expected:
         raise DecisionResponseError(
-            f"Gemini Decisions answer {qid!r} has type {answer.get('type')!r}, expected {expected!r}"
+            f"Gemini Decisions answer for {label} has type {answer.get('type')!r}, "
+            f"expected {expected!r}"
         )
     if isinstance(question, YesNo):
-        p_true = _number(answer.get("noul"), f"{qid}.noul")
+        p_true = _number(answer.get("noul"), f"{label}.noul")
         return Decision(
             top=TRUE if p_true >= 0.5 else FALSE,
             probabilities={TRUE: p_true, FALSE: 1.0 - p_true},
         )
-    raw = _object(answer.get("probabilities"), f"{qid}.probabilities")
-    confidence = _number(answer.get("confidence"), f"{qid}.confidence")
+    raw = _object(answer.get("probabilities"), f"{label}.probabilities")
+    confidence = _number(answer.get("confidence"), f"{label}.confidence")
     if isinstance(question, Choice):
         top = answer.get("choice")
         if not isinstance(top, str):
-            raise DecisionResponseError(f"Gemini Decisions answer {qid!r} carries no choice")
-        probabilities = {str(k): _number(v, f"{qid}.probabilities[{k}]") for k, v in raw.items()}
+            raise DecisionResponseError(f"Gemini Decisions answer for {label} carries no choice")
+        probabilities = {str(k): _number(v, f"{label}.probabilities[{k}]") for k, v in raw.items()}
         return Decision(top=top, probabilities=probabilities, confidence=confidence)
     by_label: dict[str, float] = {}
     for key, value in raw.items():
         if key not in {str(i) for i in range(len(question.scale))}:
             raise DecisionResponseError(
-                f"Gemini Decisions answer {qid!r} has level key {key!r} outside the {len(question.scale)} levels"
+                f"Gemini Decisions answer for {label} has level key {key!r} "
+                f"outside the {len(question.scale)} levels"
             )
-        label = question.scale[int(key)]
-        by_label[label] = _number(value, f"{qid}.probabilities[{key}]")
+        scale_label = question.scale[int(key)]
+        by_label[scale_label] = _number(value, f"{label}.probabilities[{key}]")
     if not by_label:
         raise DecisionResponseError(
-            f"Gemini Decisions answer {qid!r} carries no score probabilities"
+            f"Gemini Decisions answer for {label} carries no score probabilities"
         )
     return Decision(
-        top=max(by_label, key=lambda label: by_label[label]),
+        top=max(by_label, key=lambda item: by_label[item]),
         probabilities=by_label,
         confidence=confidence,
-        score=_number(answer.get("score"), f"{qid}.score"),
+        score=_number(answer.get("score"), f"{label}.score"),
     )

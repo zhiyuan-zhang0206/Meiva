@@ -5,6 +5,7 @@
 from __future__ import annotations
 
 import json
+import re
 import socket
 from contextlib import suppress
 from dataclasses import dataclass
@@ -19,6 +20,7 @@ import httpx
 from pydantic import TypeAdapter
 
 from base.host.boundary.json_values import is_object_dict
+from base.host.boundary.untyped import object_of
 
 
 class _Receipt(TypedDict):
@@ -108,13 +110,31 @@ class ProviderWire:
 
             def do_POST(self) -> None:
                 body = self.rfile.read(int(self.headers["Content-Length"]))
+                parsed = as_object(object_of(json.loads, body))
                 ordinal = wire._ordinal
                 wire._ordinal += 1
                 (directory / f"{ordinal}.json").write_text(
-                    json.dumps({"path": self.path, "body": json.loads(body)})
+                    json.dumps({"path": self.path, "body": parsed})
                 )
                 if self.path in ("/v1/systemone", "/v1beta/decisions"):
                     gemini = self.path == "/v1beta/decisions"
+                    questions = as_object(parsed["questions"])
+                    if gemini and any(
+                        not re.fullmatch(r"^[A-Za-z0-9_-]{1,64}$", qid) for qid in questions
+                    ):
+                        self.answer(
+                            400,
+                            json.dumps(
+                                {
+                                    "error": {
+                                        "code": 400,
+                                        "message": "question IDs must be 1-64 characters matching [A-Za-z0-9_-]+",
+                                        "status": "INVALID_ARGUMENT",
+                                    }
+                                }
+                            ),
+                        )
+                        return
                     replies = wire.gate_receipts()
                     reply = gate[min(len(replies) - 1, len(gate) - 1)]
                     data = (
@@ -124,11 +144,12 @@ class ProviderWire:
                             {
                                 "model": "gemini-decision-1" if gemini else "jev-1.13.0",
                                 "answers": {
-                                    "useful_reply": {
+                                    qid: {
                                         "type": "noul",
                                         "noul": reply.probability,
                                         "confidence": max(reply.probability, 1 - reply.probability),
                                     }
+                                    for qid in questions
                                 },
                                 "usage": (
                                     {"total_input_tokens": 80, "total_output_tokens": 0}

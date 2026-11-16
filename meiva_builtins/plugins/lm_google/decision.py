@@ -40,6 +40,7 @@ class GeminiDecisionBinding:
             raise DecisionInputTooLargeError(
                 "Gemini Decisions supports at most 1000 questions per request"
             )
+        encoded = decision_protocol.encode_questions(questions)
         body = await post_json(
             self._ctx,
             url=ENDPOINT,
@@ -48,14 +49,12 @@ class GeminiDecisionBinding:
             payload={
                 "model": MODEL,
                 "input": [{"type": "text", "text": state}],
-                "questions": {
-                    qid: decision_protocol.wire_question(q) for qid, q in questions.items()
-                },
+                "questions": encoded.payload,
             },
         )
         tokens = decision_protocol.input_tokens(body)
         try:
-            return DecisionResult(decision_protocol.parse_answers(body, questions), tokens)
+            return DecisionResult(decision_protocol.parse_answers(body, encoded), tokens)
         except DecisionResponseError as exc:
             raise DecisionResponseError(str(exc), input_tokens=tokens) from exc
 

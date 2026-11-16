@@ -19,7 +19,12 @@ from base.lm.catalog.provider_contract import BuildContext
 from base.log.tests.log_records import LogRecords
 from base.log.tests.log_records import loguru_records as loguru_records
 from base.packages.tests.model_catalog import inert_keys
-from gateway.agents.reply_suggestion.tests.provider_wire import DraftReply, GateReply, ProviderWire
+from gateway.agents.reply_suggestion.tests.provider_wire import (
+    DraftReply,
+    GateReply,
+    ProviderWire,
+    as_object,
+)
 from gateway.agents.reply_suggestion.tests.support import Harness
 from gateway.tests.auth.gateway_config import gateway_test_client
 
@@ -168,3 +173,5 @@ def test_explicit_decision_model_overrides_reach_the_native_adapter(
     receipt = harness.wire.gate_receipts()
     assert len(receipt) == 1
     assert receipt[0]["model"] == model
+    expected_keys = ["q0"] if model == "gemini-decision-1" else ["useful_reply"]
+    assert list(as_object(receipt[0]["questions"])) == expected_keys
