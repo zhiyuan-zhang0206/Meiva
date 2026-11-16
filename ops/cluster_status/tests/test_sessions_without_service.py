@@ -21,7 +21,7 @@ import pytest
 from base.api_contracts.agent_contract import ShellKillMode
 from base.clock import SYSTEM_TIMERS
 from base.sessions.backend import PosixProcSessionBackend, get_shell_backend
-from base.sessions.pty import client
+from base.sessions.pty import client, terminal_fence
 from base.sessions.pty.tests.pty_service import service_socket
 from ops.cluster_status import (
     ShellNotFoundError,
@@ -79,9 +79,15 @@ def test_a_host_with_no_service_has_no_sessions(unit_home: Path) -> None:
 
 def test_the_operations_on_a_shell_of_a_host_with_no_service_find_nothing(unit_home: Path) -> None:
     assert kill_shell(7, 3, home=unit_home) == (ShellKillMode.ABSENT, False, None)
-    assert kill_agent_shells(7, before_session_index=10, home=unit_home) == []
     with pytest.raises(ShellNotFoundError):
         capture_shell(7, 3, now=_now(), home=unit_home)
+
+
+def test_an_unavailable_terminal_fence_retains_cutoff_evidence(unit_home: Path) -> None:
+    with pytest.raises(client.ServiceDownError):
+        kill_agent_shells(7, before_session_index=10, home=unit_home)
+
+    assert terminal_fence.read(unit_home).cutoffs == {7: 10}
 
 
 # meiva:note

@@ -64,9 +64,11 @@ ownership probe, which times out at three seconds, never queues behind them.
 `fence_agent_shells` is the terminal-lifecycle acknowledgement for one agent:
 it records an exclusive session-index cutoff, closes all currently visible
 shells below it, and refuses any delayed old `new` thereafter. Its state lasts
-for the serving process generation; service shutdown closes all PTYs and ends
-all pending executors, so no fence survives into a process that could retain
-the earlier request.
+in `$MEIVA_HOME/run/pty-terminal-fences.json`, which the service restores
+before accepting allocations. The lifecycle backend persists it before it dials
+the service; an unavailable socket is therefore an unknown closure, never a
+successful empty acknowledgement. A malformed fence file refuses agent-shell
+allocation until an operator repairs the evidence.
 
 The native concurrency regression forks forty new shells from eight callers
 while twenty sessions stream output, five through live screen models. Each new

@@ -2,8 +2,6 @@
 # One agent's shell sessions over a real pty-sessions service and the throwaway database.
 from __future__ import annotations
 
-import contextlib
-import socket
 import time
 from collections.abc import Callable
 from datetime import UTC, datetime, timedelta
@@ -16,8 +14,8 @@ import pytest
 from base.db import Database
 from base.host.runtime_interpreter import runtime_venv
 from base.paths import meiva_home, workspace_dir
-from base.sessions.pty import client, protocol
-from base.sessions.pty.tests.pty_service import service_socket
+from base.sessions.pty import client
+from base.sessions.pty.tests.pty_service import DelayedNewProxy, service_socket
 from meiva.shell.session_env import SessionHost
 from meiva.shell.sessions import ShellSessions
 
@@ -50,54 +48,6 @@ def _captured_thread(operation: Callable[[], None]) -> tuple[Thread, list[BaseEx
     thread = Thread(target=run)
     thread.start()
     return thread, failures
-
-
-# meiva:note
-# A one-request proxy that accepts `new`, lets its caller time out, then forwards the exact request
-# to the real pty service on command. It makes the lost-ack boundary deterministic without adding a
-# production-only delay hook to the daemon.
-class _DelayedNewProxy:
-    def __init__(self, path: Path, upstream: Path) -> None:
-        path.unlink(missing_ok=True)
-        self._path = path
-        self._upstream = upstream
-        self._listener = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
-        self._listener.bind(str(path))
-        self._listener.listen(1)
-        self.accepted = Event()
-        self.release = Event()
-        self.completed = Event()
-        self.error: BaseException | None = None
-        self.response: dict[str, object] | None = None
-        self._thread = Thread(target=self._serve, daemon=True)
-        self._thread.start()
-
-    def _serve(self) -> None:
-        try:
-            conn, _address = self._listener.accept()
-            with conn:
-                line = protocol.read_line(conn)
-                assert line is not None
-                self.accepted.set()
-                assert self.release.wait(timeout=5.0), "test did not release delayed PTY request"
-                with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as upstream:
-                    upstream.connect(str(self._upstream))
-                    upstream.sendall(line + b"\n")
-                    response = protocol.read_line(upstream)
-                assert response is not None
-                self.response = protocol.decode_object(response)
-                with contextlib.suppress(OSError):
-                    conn.sendall(protocol.encode(self.response))
-        except BaseException as exc:
-            self.error = exc
-        finally:
-            self.completed.set()
-
-    def close(self) -> None:
-        self.release.set()
-        self._listener.close()
-        self._thread.join(timeout=5.0)
-        self._path.unlink(missing_ok=True)
 
 
 def _terminal_transition(
@@ -345,7 +295,7 @@ def test_terminal_fence_reclaims_a_delayed_lost_ack_creation_after_resurrection(
 
     upstream = service_socket()
     delayed_path = upstream.with_name(f"{upstream.stem}-delayed.sock")
-    proxy = _DelayedNewProxy(delayed_path, upstream)
+    proxy = DelayedNewProxy(delayed_path, upstream)
     full = session_plan.session_full_name(live_shell.shell_prefix(), 0, "lost-ack")
 
     def start_lost_ack(_session_id: int) -> str:

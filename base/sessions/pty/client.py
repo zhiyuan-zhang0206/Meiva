@@ -320,20 +320,17 @@ def create_session(
 
 
 # meiva:note
-# A terminal lifecycle transition records this fence before it forgets the owner's TTL rows.
-# The pty service retains the cutoff for its own lifetime, so a `new` request whose client lost
-# its response cannot create an old numeric shell after the owner has resurrected. A down service
-# has no live PTY or request executor, making its fence acknowledgement an empty successful close.
+# The terminal lifecycle writes its durable cutoff before it asks the service to
+# close PTYs. This call is the closure acknowledgement: unavailable transport is
+# unknown closure, so it propagates and the caller retains the TTL evidence for a
+# later retry rather than treating a missing socket as proof of absence.
 def fence_agent_shells(agent_id: int, before_session_index: int, *, socket_path: Path) -> list[int]:
-    try:
-        data = request(
-            "fence_agent_shells",
-            socket_path=socket_path,
-            agent_id=agent_id,
-            before_session_index=before_session_index,
-        )
-    except ServiceDownError:
-        return []
+    data = request(
+        "fence_agent_shells",
+        socket_path=socket_path,
+        agent_id=agent_id,
+        before_session_index=before_session_index,
+    )
     killed = data.get("killed")
     if not _is_int_list(killed):
         raise TypeError("fence_agent_shells killed is missing or not a list of integers")

@@ -14,7 +14,6 @@ import signal
 import socket
 import subprocess
 import sys
-import tempfile
 import threading
 import time
 from collections.abc import Callable, Iterator
@@ -348,83 +347,6 @@ def test_closure_error_releases_the_allocation_fence(live_session: MakeSession) 
         refusing.close_everything(grace_s=0, kill_s=0)
 
     assert refusing._closing is False
-
-
-# meiva:note
-# A client can abandon its socket after the service executor accepted `new`. The terminal fence
-# must wait for that admitted request, select the session it eventually registers, and retain the
-# cutoff so an old retry cannot create another PTY after resurrection.
-def test_terminal_fence_serializes_an_accepted_but_unacknowledged_new(tmp_path: Path) -> None:
-    entered = threading.Event()
-    release = threading.Event()
-
-    def pause_before_spawn() -> None:
-        entered.set()
-        assert release.wait(timeout=5.0), "test did not release delayed new"
-
-    async def exercise() -> None:
-        with tempfile.TemporaryDirectory(prefix="meiva-fence-", dir="/tmp") as directory:
-            socket_path = Path(directory) / "pty.sock"
-            service = PtyService(
-                home=tmp_path,
-                base_environ=dict(os.environ),
-                process_control=SYSTEM_PROCESS_CONTROL,
-                now=time.time,
-                timers=SYSTEM_TIMERS,
-                pid=os.getpid(),
-                before_spawn=pause_before_spawn,
-            )
-            service._loop = asyncio.get_running_loop()
-            async with asyncio.TaskGroup() as tasks:
-                service._tasks = tasks
-                server = await asyncio.start_unix_server(service._connection, path=str(socket_path))
-                name = "meiva-agent-41-shell-0-lost-ack"
-                try:
-                    lost_ack = asyncio.create_task(
-                        asyncio.to_thread(
-                            client.request,
-                            "new",
-                            socket_path=socket_path,
-                            timeout=0.05,
-                            name=name,
-                            cwd=str(tmp_path),
-                            env={},
-                        )
-                    )
-                    assert await asyncio.to_thread(entered.wait, 5.0)
-                    with pytest.raises(client.ServiceUnavailableError):
-                        await lost_ack
-
-                    fenced = asyncio.create_task(
-                        asyncio.to_thread(
-                            client.fence_agent_shells,
-                            41,
-                            1,
-                            socket_path=socket_path,
-                        )
-                    )
-                    release.set()
-                    assert await fenced == [0]
-                    assert (
-                        await asyncio.to_thread(client.list_sessions, socket_path=socket_path) == []
-                    )
-                    with pytest.raises(client.ServiceError, match=r"below terminal cutoff 1"):
-                        await asyncio.to_thread(
-                            client.request,
-                            "new",
-                            socket_path=socket_path,
-                            name=name,
-                            cwd=str(tmp_path),
-                            env={},
-                        )
-                finally:
-                    release.set()
-                    server.close()
-                    await server.wait_closed()
-                    await asyncio.to_thread(service.close_everything, grace_s=0, kill_s=0)
-                    socket_path.unlink(missing_ok=True)
-
-    asyncio.run(exercise())
 
 
 # meiva:note

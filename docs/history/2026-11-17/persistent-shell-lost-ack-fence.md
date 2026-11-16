@@ -21,3 +21,7 @@ The regression starts a real PTY service request, forces a client-side lost
 acknowledgement, commits terminal then resurrection state, and only then lets
 the old server request create. It verifies the fence closes that old PTY, leaves
 no TTL row, and admits the next higher-id session.
+
+Forward: [durable terminal fence state](persistent-shell-durable-terminal-fences.md)
+records the correction that a client-held request can cross a PTY daemon restart,
+so the cutoff cannot remain only in the daemon's memory.

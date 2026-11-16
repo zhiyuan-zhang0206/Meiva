@@ -15,7 +15,7 @@ from base.sessions.helperproc import (
     helper_spawn_configured,
 )
 from base.sessions.protocol import SessionBackend
-from base.sessions.pty import client
+from base.sessions.pty import client, terminal_fence
 from base.sessions.pty.keys import keys_to_bytes
 from base.sessions.pty.paths import service_socket_path
 from base.sessions.record import SessionRecord
@@ -144,6 +144,7 @@ class PtySessionBackend(SessionBackend):
     # deletes TTL rows. Unlike a list followed by individual kills, this acknowledgement also
     # fences a delayed `new` whose client already timed out.
     def fence_agent_shells(self, agent_id: int, before_session_index: int) -> list[int]:
+        _ = terminal_fence.record(self._home, agent_id, before_session_index)
         return client.fence_agent_shells(agent_id, before_session_index, socket_path=self._socket)
 
     def service_available(self) -> bool:

@@ -44,7 +44,7 @@ from base.native_process.os_platform import is_macos
 from base.native_process.ownership import stable_create_time
 from base.native_process.process_control import ProcessControl
 from base.paths import logs_dir, run_dir
-from base.sessions.pty import closure, process_groups, protocol
+from base.sessions.pty import closure, process_groups, protocol, terminal_fence
 from base.sessions.pty.allocation_freeze import PtyAllocationFreeze, state_path
 from base.sessions.pty.paths import (
     CAPTURE_MAX_LINES,
@@ -169,7 +169,6 @@ class PtyService:
         pid: int,
         host_generation: str = "",
         rng: random.Random | None = None,
-        before_spawn: Callable[[], None] | None = None,
     ) -> None:
         self._home = home
         self._base_environ = base_environ
@@ -185,18 +184,12 @@ class PtyService:
         self._freeze_lock = threading.Lock()
         # meiva:note
         # An agent terminal transition owns a monotonically increasing session-index
-        # cutoff. The service must retain it until it stops: an already accepted
-        # `new` can outlive a client's response timeout, and an agent may resurrect
-        # before that request reaches this executor. Service shutdown closes every
-        # PTY and ends its executor work, so its process lifetime is the fence's
-        # durable boundary.
-        self._agent_shell_cutoffs: dict[int, int] = {}
+        # cutoff. It is restored before this service accepts allocations: a request
+        # held outside the old daemon can arrive after this generation starts.
+        terminal_fences = terminal_fence.read(home)
+        self._agent_shell_cutoffs = terminal_fences.cutoffs
+        self._terminal_fence_error = terminal_fences.error
         self._rng = rng
-        # meiva:note
-        # The allocation seam is exercised with a real service and PTY in the
-        # admission-vs-terminal-fence race test.  It deliberately runs while
-        # `_freeze_lock` is held, just before the irreversible fork.
-        self._before_spawn = before_spawn
         # Set once `serve` runs: the loop and its task group, and the stop request.
         self._loop: asyncio.AbstractEventLoop | None = None
         self._tasks: asyncio.TaskGroup | None = None
@@ -343,18 +336,26 @@ class PtyService:
         return int(match.group(2))
 
     # meiva:note
-    # The terminal cutoff belongs to the PTY service rather than the database
-    # transaction: a lost acknowledgement can let the owner resurrect before
-    # this executor reaches its allocation check. Callers hold `_freeze_lock`.
+    # The terminal cutoff is durable rather than transaction-local: a lost
+    # acknowledgement can let the owner resurrect before a delayed request
+    # reaches a later PTY service generation. Callers hold `_freeze_lock`.
     def _assert_above_terminal_cutoffs(self, name: str) -> None:
-        for agent_id, cutoff in self._agent_shell_cutoffs.items():
-            session_id = self._agent_shell_id(name, agent_id)
-            if session_id is not None and session_id < cutoff:
-                raise RequestError(
-                    protocol.ERROR,
-                    "pty allocation refused: agent shell "
-                    f"{agent_id}/{session_id} is below terminal cutoff {cutoff}",
-                )
+        match = _AGENT_SHELL_RE.fullmatch(name)
+        if match is None:
+            return
+        if self._terminal_fence_error is not None:
+            raise RequestError(
+                protocol.ERROR,
+                f"pty allocation refused: {self._terminal_fence_error}",
+            )
+        agent_id, session_id = (int(value) for value in match.group(1, 2))
+        cutoff = self._agent_shell_cutoffs.get(agent_id, 0)
+        if session_id < cutoff:
+            raise RequestError(
+                protocol.ERROR,
+                "pty allocation refused: agent shell "
+                f"{agent_id}/{session_id} is below terminal cutoff {cutoff}",
+            )
 
     # meiva:note
     # A malformed persisted allocation-freeze marker overrides the in-memory
@@ -376,8 +377,12 @@ class PtyService:
         agent_id = _count(req, "agent_id", 0, low=1, high=(1 << 63) - 1)
         cutoff = _count(req, "before_session_index", 0, low=0, high=(1 << 63) - 1)
         with self._freeze_lock:
-            active_cutoff = max(cutoff, self._agent_shell_cutoffs.get(agent_id, 0))
+            try:
+                active_cutoff = terminal_fence.record(self._home, agent_id, cutoff)
+            except terminal_fence.TerminalFenceStateError as exc:
+                raise RequestError(protocol.ERROR, str(exc)) from exc
             self._agent_shell_cutoffs[agent_id] = active_cutoff
+            self._terminal_fence_error = None
             with self._lock:
                 targets = sorted(
                     (session_id, name)
@@ -444,8 +449,6 @@ class PtyService:
                     f"pty allocation refused: host freeze marker is invalid "
                     f"({freeze.error}); repair it before allocating new sessions",
                 )
-            if self._before_spawn is not None:
-                self._before_spawn()
             created = self._spawn(name, cwd, env, cmd, freeze.generation)
         return {"pid": created.pid, "created": True}
 

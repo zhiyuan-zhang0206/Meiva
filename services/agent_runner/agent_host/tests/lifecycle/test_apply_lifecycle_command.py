@@ -57,11 +57,12 @@ async def _claimed_terminate(
     return owner
 
 
-def _shell_cleanup_attempts(records: LogRecords, agent_id: int) -> list[str]:
+def _unavailable_shell_cleanup_failures(records: LogRecords, agent_id: int) -> list[str]:
     return [
         message
         for message in records.messages()
-        if "shell session(s) below" in message and f"of agent {agent_id}" in message
+        if "terminate could not kill shell sessions below" in message
+        and f"of agent {agent_id}" in message
     ]
 
 
@@ -69,7 +70,7 @@ def _browser_release_attempts(records: LogRecords, agent_id: int) -> list[str]:
     return [m for m in records.messages("DEBUG") if f"agent {agent_id} browser-page release" in m]
 
 
-async def test_a_terminate_cleans_below_its_cutoff_after_the_commit(
+async def test_a_terminate_retains_shell_recovery_evidence_when_the_service_is_unavailable(
     db_conn: psycopg.Connection,
     aops_pool: AsyncConnectionPool,
     event_bus: EventBus,
@@ -88,10 +89,10 @@ async def test_a_terminate_cleans_below_its_cutoff_after_the_commit(
     assert kind == "terminate"
     assert await bus_tap.agent_updated_ids() == [owner.agent_id]
     assert len(_browser_release_attempts(loguru_records, owner.agent_id)) == 1
-    assert len(_shell_cleanup_attempts(loguru_records, owner.agent_id)) == 1
+    assert len(_unavailable_shell_cleanup_failures(loguru_records, owner.agent_id)) == 1
 
 
-async def test_a_terminate_without_the_legacy_flag_still_cleans_its_shells(
+async def test_a_terminate_without_the_legacy_flag_retains_unconfirmed_shell_ttls(
     db_conn: psycopg.Connection,
     aops_pool: AsyncConnectionPool,
     event_bus: EventBus,
@@ -113,10 +114,10 @@ async def test_a_terminate_without_the_legacy_flag_still_cleans_its_shells(
 
     assert kind == "terminate"
     assert len(_browser_release_attempts(loguru_records, owner.agent_id)) == 1
-    assert len(_shell_cleanup_attempts(loguru_records, owner.agent_id)) == 1
+    assert len(_unavailable_shell_cleanup_failures(loguru_records, owner.agent_id)) == 1
     assert db_conn.execute(
         "SELECT count(*) FROM agent_shell_ttls WHERE agent_id = %s", (owner.agent_id,)
-    ).fetchone() == (0,)
+    ).fetchone() == (1,)
 
 
 async def test_a_restart_owes_no_cleanup(
@@ -165,7 +166,7 @@ async def test_nothing_claimed_applies_and_cleans_nothing(
     [RuntimeError("unknown event bus defect"), asyncio.CancelledError("publication cancelled")],
     ids=["error", "cancelled"],
 )
-async def test_a_publication_failure_still_releases_pages_and_cleans_shells_and_is_raised(
+async def test_a_publication_failure_still_releases_pages_and_attempts_shell_recovery_and_is_raised(
     db_conn: psycopg.Connection,
     aops_pool: AsyncConnectionPool,
     loguru_records: LogRecords,
@@ -186,7 +187,7 @@ async def test_a_publication_failure_still_releases_pages_and_cleans_shells_and_
 
     assert caught.value is failure
     assert len(_browser_release_attempts(loguru_records, owner.agent_id)) == 1
-    assert len(_shell_cleanup_attempts(loguru_records, owner.agent_id)) == 1
+    assert len(_unavailable_shell_cleanup_failures(loguru_records, owner.agent_id)) == 1
     assert db_conn.execute(
         "SELECT status FROM agents_meta WHERE id=%s", (owner.agent_id,)
     ).fetchone() == ("terminated",)
@@ -233,7 +234,7 @@ async def hung_redis_publication() -> AsyncGenerator[tuple[EventBus, asyncio.Eve
         await server.wait_closed()
 
 
-async def test_a_cancelled_publication_still_releases_pages_and_cleans_shells(
+async def test_a_cancelled_publication_still_releases_pages_and_attempts_shell_recovery(
     db_conn: psycopg.Connection,
     aops_pool: AsyncConnectionPool,
     event_bus: EventBus,
@@ -252,7 +253,7 @@ async def test_a_cancelled_publication_still_releases_pages_and_cleans_shells(
         with pytest.raises(asyncio.CancelledError) as caught:
             await asyncio.wait_for(task, 5)
 
-    assert len(_shell_cleanup_attempts(loguru_records, owner.agent_id)) == 1
+    assert len(_unavailable_shell_cleanup_failures(loguru_records, owner.agent_id)) == 1
     assert [m for m in loguru_records.messages() if "browser-page release" in m]
     assert getattr(caught.value, "__notes__", []) == []
 
@@ -297,7 +298,7 @@ async def hung_browser_service(home: Path) -> AsyncGenerator[asyncio.Event]:
     [None, RuntimeError("publication failed"), asyncio.CancelledError("publication cancelled")],
     ids=["published", "error", "cancelled"],
 )
-async def test_a_cancelled_browser_release_still_cleans_shells_and_raises_the_first_failure(
+async def test_a_cancelled_browser_release_still_attempts_shell_recovery_and_raises_the_first_failure(
     db_conn: psycopg.Connection,
     aops_pool: AsyncConnectionPool,
     event_bus: EventBus,
@@ -320,7 +321,7 @@ async def test_a_cancelled_browser_release_still_cleans_shells_and_raises_the_fi
         with pytest.raises(expected) as caught:
             await asyncio.wait_for(task, 5)
 
-    assert len(_shell_cleanup_attempts(loguru_records, owner.agent_id)) == 1
+    assert len(_unavailable_shell_cleanup_failures(loguru_records, owner.agent_id)) == 1
     notes = getattr(caught.value, "__notes__", [])
     if publication is None:
         assert notes == []
@@ -330,7 +331,7 @@ async def test_a_cancelled_browser_release_still_cleans_shells_and_raises_the_fi
         assert [m for m in loguru_records.messages("ERROR") if "browser cleanup also failed" in m]
 
 
-async def test_a_reaped_corpse_is_announced_and_its_pages_released_and_shell_ttls_dropped(
+async def test_a_reaped_corpse_is_announced_and_its_pages_released_with_shell_ttls_retained(
     db_conn: psycopg.Connection,
     aops_pool: AsyncConnectionPool,
     event_bus: EventBus,
@@ -361,10 +362,10 @@ async def test_a_reaped_corpse_is_announced_and_its_pages_released_and_shell_ttl
     assert [corpse.agent_id for corpse in reaped] == [agent_id]
     assert await bus_tap.agent_updated_ids() == [agent_id]
     assert len(_browser_release_attempts(loguru_records, agent_id)) == 1
-    assert len(_shell_cleanup_attempts(loguru_records, agent_id)) == 1
+    assert len(_unavailable_shell_cleanup_failures(loguru_records, agent_id)) == 1
     assert db_conn.execute(
         "SELECT count(*) FROM agent_shell_ttls WHERE agent_id = %s", (agent_id,)
-    ).fetchone() == (0,)
+    ).fetchone() == (1,)
 
 
 async def test_a_publication_defect_does_not_stop_the_next_corpse_from_being_released(
