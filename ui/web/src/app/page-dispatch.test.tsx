@@ -268,16 +268,8 @@ beforeEach(() => {
   client.setQueryData(["config", null], { fields: [] });
   useTimelineStore.getState().switchThread(null, null, false);
   top = 0;
-  vi.spyOn(HTMLElement.prototype, "clientHeight", "get").mockReturnValue(600);
-  vi.spyOn(HTMLElement.prototype, "scrollHeight", "get").mockReturnValue(5000);
-  vi.spyOn(HTMLElement.prototype, "scrollTop", "get").mockImplementation(() => top);
-  vi.spyOn(HTMLElement.prototype, "scrollTop", "set").mockImplementation((value) => { top = Math.max(0, Math.min(4400, value)); });
-  vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockImplementation(function (this: HTMLElement) {
-    const y = this.dataset.itemId ? (Number.parseInt(this.dataset.itemId) - 1) * 300 - top : 0;
-    return { top: y, bottom: y + 300, height: 300, left: 0, right: 400, width: 400 } as DOMRect;
-  });
 });
-afterEach(() => { cleanup(); client.clear(); vi.restoreAllMocks(); });
+afterEach(() => { cleanup(); client.clear(); });
 
   it.each(["reader", "background"])("presents %s reads through the home consumer and shows a reader retry after failure", async (origin) => {
     let fail: (reason: Error) => void = () => undefined;
@@ -288,6 +280,22 @@ afterEach(() => { cleanup(); client.clear(); vi.restoreAllMocks(); });
       </WallClockProvider></StreamHubProvider></ApiProvider>
     </QueryClientProvider>);
     const viewport = document.querySelector<HTMLElement>('[data-slot="scroll-area-viewport"]')!;
+    Object.defineProperties(viewport, {
+      clientHeight: { configurable: true, get: () => 600 },
+      scrollHeight: { configurable: true, get: () => 5000 },
+      scrollTop: { configurable: true, get: () => top,
+        set: (value: number) => { top = Math.max(0, Math.min(4400, value)); } },
+    });
+    for (const element of [viewport, ...viewport.querySelectorAll<HTMLElement>("[data-item-id]")]) {
+      Object.defineProperty(element, "getBoundingClientRect", {
+        configurable: true,
+        value: () => {
+          const y = element.dataset.itemId ? (Number.parseInt(element.dataset.itemId) - 1) * 300 - top : 0;
+          return { top: y, bottom: y + 300, height: 300, left: 0, right: 400, width: 400 } as DOMRect;
+        },
+      });
+    }
+    act(() => { viewport.scrollTop = 4400; fireEvent.resize(window); fireEvent.scroll(viewport); });
     const wheel = (at: number) => {
       const event = new WheelEvent("wheel", { deltaY: -80, bubbles: true, cancelable: true });
       Object.defineProperty(event, "timeStamp", { value: at });

@@ -20,3 +20,9 @@ lose partial progress toward 64 px. This change preserves that gesture contract;
 the evidence and possible cumulative-intent follow-up remain with task #7070's
 coordinator. A no-progress page claiming has_more is exhausted by the existing
 store guard and is not equivalent to a failed request that can be retried.
+
+Update: the regression now installs geometry on its own viewport and rendered
+item instances, then samples the starting bottom position explicitly. This
+removes five standard-library prototype spies without changing the real home
+consumer or its gesture assertions. The exact home-double ledger moves from
+97 to 101 records for the four scenario writes added by this regression.
