@@ -135,7 +135,7 @@ def test_prestage_warms_dependencies_and_harnesses_from_target_objects_without_m
 ):
     command = prestage_command(_NEW)
     assert "meiva-prestage" in command
-    assert f'git -C "$S" archive {_NEW} -- pyproject.toml uv.lock .python-version' in command
+    assert f'git -C "$S" archive -o "$tmp/target.tar" {_NEW} -- "$@" || exit 1' in command
     assert f'git -C "$S" diff --quiet HEAD {_NEW} -- uv.lock .python-version' in command
     assert f"diff --quiet HEAD {_NEW} -- pyproject.toml" not in command
     assert 'cp -Rc "$S/.venv" "$tmp/.venv"' in command
@@ -143,7 +143,6 @@ def test_prestage_warms_dependencies_and_harnesses_from_target_objects_without_m
     assert 'UV_PROJECT_ENVIRONMENT="$tmp/.venv"' in command
     assert 'UV_HTTP_TIMEOUT="${UV_HTTP_TIMEOUT:-120}"' in command
     assert "uv sync -q --frozen --no-install-project --no-build-package meiva) || exit 1" in command
-    assert "pnpm fetch --frozen-lockfile >/dev/null) || exit 1" in command
     assert "converge_local_harness_clis" in command
     assert "git checkout" not in command
 
@@ -209,13 +208,18 @@ def _build_prestage_rig(tmp_path: Path) -> _PrestageRig:
         f'echo "uv:timeout=$UV_HTTP_TIMEOUT:pyproject=$([ -f pyproject.toml ] && echo yes || echo no)" >> "{log_file}"\n'
         'mkdir -p "$UV_PROJECT_ENVIRONMENT/bin"\n'
         'rm -f "$UV_PROJECT_ENVIRONMENT/bin/python"\n'
-        'printf "#!/bin/sh\\nexit 99\\n" > "$UV_PROJECT_ENVIRONMENT/bin/python"\n'
+        'printf "#!/bin/sh\\nexit 0\\n" > "$UV_PROJECT_ENVIRONMENT/bin/python"\n'
         'chmod +x "$UV_PROJECT_ENVIRONMENT/bin/python"\n'
         'exit "${FAKE_UV_RC:-0}"\n',
     )
     write_executable(
         bin_dir / "pnpm",
-        f'#!/bin/sh\necho "pnpm:$*" >> "{log_file}"\nexit "${{FAKE_PNPM_RC:-0}}"\n',
+        f'#!/bin/sh\necho "pnpm:$*" >> "{log_file}"\n'
+        "echo fetch-stdout\necho fetch-stderr >&2\n"
+        'if [ "${CHECK_PATCH:-0}" = 1 ]; then\n'
+        '  grep -q "fixture@1: scripts/patches/fixture.patch" pnpm-workspace.yaml || exit 41\n'
+        "  grep -q target-patch scripts/patches/fixture.patch || exit 42\n"
+        'fi\nexit "${FAKE_PNPM_RC:-0}"\n',
     )
 
     _git_in(repo, "init", "-q")
@@ -305,6 +309,75 @@ def test_prestage_shell_skips_uv_on_pyproject_only_diff_and_fails_fast_on_sync_e
     assert "uv:timeout=120:pyproject=yes" in calls
     assert any(line.startswith("pnpm:fetch") for line in calls)
     assert not any(line.startswith("python:") for line in calls)
+
+
+@pytest.mark.parametrize("fetch_rc", ["0", "23"])
+def test_prestage_fetch_output_is_quiet_on_success_and_preserved_on_failure(
+    tmp_path: Path,
+    fetch_rc: str,
+) -> None:
+    rig = _build_prestage_rig(tmp_path)
+    (rig.repo / "ui/web/node_modules").mkdir()
+    result = rig.run(rig.pnpm_sha, FAKE_PNPM_RC=fetch_rc)
+    assert result.returncode == (0 if fetch_rc == "0" else 1)
+    if fetch_rc == "0":
+        assert result.stdout == result.stderr == ""
+    else:
+        assert "fetch-stdout" in result.stdout + result.stderr
+        assert "fetch-stderr" in result.stdout + result.stderr
+    assert rig.source_sentinel.read_text() == "immutable\n"
+    assert list(tmp_path.glob("meiva-prestage.*")) == []
+
+
+@pytest.mark.parametrize(
+    "changed_input", ["pnpm-lock.yaml", "pnpm-workspace.yaml", "scripts/patches/fixture.patch"]
+)
+def test_prestage_archives_target_patches_and_config_and_fetches_for_each_input(
+    tmp_path: Path,
+    changed_input: str,
+) -> None:
+    rig = _build_prestage_rig(tmp_path)
+    web = rig.repo / "ui/web"
+    (web / "node_modules").mkdir()
+    (web / "scripts/patches").mkdir(parents=True)
+    (web / "pnpm-workspace.yaml").write_text(
+        "patchedDependencies:\n  fixture@1: scripts/patches/fixture.patch\n"
+    )
+    (web / "scripts/patches/fixture.patch").write_text("target-patch\n")
+    _git_in(rig.repo, "add", "ui/web")
+    _git_in(rig.repo, "commit", "-qm", "patch inputs")
+    (web / changed_input).write_text((web / changed_input).read_text() + "\n")
+    _git_in(rig.repo, "add", "ui/web")
+    _git_in(rig.repo, "commit", "-qm", "change fetch input")
+    target = _git_in(rig.repo, "rev-parse", "HEAD")
+    _git_in(rig.repo, "checkout", "-q", "HEAD^")
+    (web / "scripts/patches/fixture.patch").write_text("checkout-poison\n")
+    result = rig.run(target, CHECK_PATCH="1")
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert "pnpm:fetch --frozen-lockfile --config.node-linker=isolated" in rig.log_file.read_text()
+    assert (web / "scripts/patches/fixture.patch").read_text() == "checkout-poison\n"
+
+
+def test_prestage_accepts_old_target_without_optional_paths(tmp_path: Path) -> None:
+    rig = _build_prestage_rig(tmp_path)
+    (rig.repo / "ui/web/node_modules").mkdir()
+    _git_in(rig.repo, "checkout", "-q", rig.pnpm_sha)
+    result = rig.run(rig.pyproject_sha)
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert "pnpm:fetch" in rig.log_file.read_text()
+    assert _git_in(rig.repo, "rev-parse", "HEAD") == rig.pnpm_sha
+
+
+def test_prestage_archive_failure_aborts_before_any_consumer(tmp_path: Path) -> None:
+    rig = _build_prestage_rig(tmp_path)
+    _git_in(rig.repo, "rm", "ui/web/package.json")
+    _git_in(rig.repo, "commit", "-qm", "missing required input")
+    target = _git_in(rig.repo, "rev-parse", "HEAD")
+    result = rig.run(target)
+    assert result.returncode != 0
+    assert "pathspec" in result.stderr
+    assert not rig.log_file.exists()
+    assert list(tmp_path.glob("meiva-prestage.*")) == []
 
 
 def test_the_gateway_programs_are_asked_by_verb() -> None:
