@@ -18,6 +18,7 @@ const baseSummary: TurnSummary = {
   memories: 0,
   agentMessages: 0,
   systemNotes: 0,
+  missingTiming: false,
   workedMs: 6000,
   thinkingMs: 6000,
   codeMs: 0,
@@ -72,5 +73,28 @@ describe("TurnBlock expanded body", () => {
       </TurnBlock>,
     );
     expect(screen.queryByTestId("turn-row")).toBeNull();
+  });
+});
+
+describe("TurnBlock missing timing", () => {
+  it.each([0, 100])("shows Worked and an accessible warning for missing timing with subtotal %i", (workedMs) => {
+    render(<TurnBlock id="partial" memberIds={["1"]} expanded={false} onToggle={vi.fn()}
+      summary={{ ...baseSummary, missingTiming: true, workedMs }} />);
+    expect(screen.getByTestId("turn-toggle").textContent).toBe("Worked");
+    const warning = screen.getByRole("img", { name: /timing was not fully recorded/ });
+    expect(warning.getAttribute("title")).toContain("Total duration is unavailable");
+  });
+
+  it("keeps a live partial block Working with a warning and no numeric total", () => {
+    render(<TurnBlock id="live" memberIds={["1"]} expanded={false} onToggle={vi.fn()}
+      turnActive lastEventAt={1} summary={{ ...baseSummary, missingTiming: true }} />);
+    expect(screen.getByTestId("turn-toggle").textContent).toBe("Working…");
+    expect(screen.getByRole("img", { name: /timing was not fully recorded/ })).toBeTruthy();
+  });
+
+  it("retains the duration without warning when timing is complete", () => {
+    render(<TurnBlock id="complete" memberIds={["1"]} expanded={false} onToggle={vi.fn()} summary={baseSummary} />);
+    expect(screen.getByTestId("turn-toggle").textContent).toBe("Worked for 6s");
+    expect(screen.queryByRole("img")).toBeNull();
   });
 });

@@ -424,3 +424,51 @@ describe("summarizeTurn — external harness items", () => {
     expect(s.lastLiveStartedAt).toBe(0);
   });
 });
+
+describe("work timing coverage", () => {
+  it("distinguishes absent measurements from real zero across work kinds", () => {
+    const kinds = ["agent_reasoning", "agent_code", "code_output"] as const;
+    for (const kind of kinds) {
+      const missing = summarizeTurn([item(kind)]);
+      expect(missing.missingTiming).toBe(true);
+      const zero = summarizeTurn([item(kind, null, "zero", {
+        reasoning_ms: 0, code_elapsed_ms: 0, exec_ms: 0,
+      })]);
+      expect(zero.missingTiming).toBe(false);
+      expect(zero.workedMs).toBe(0);
+    }
+  });
+
+  it("retains only recorded durations in mixed work across restart idle", () => {
+    const summary = summarizeTurn([
+      item("agent_reasoning", null, "r", { reasoning_ms: 10 }),
+      item("agent_reasoning"),
+      item("agent_code", null, "c", { code_elapsed_ms: 20 }),
+      item("agent_code"),
+      item("code_output", null, "o", { exec_ms: 70 }),
+      item("system_marker", "restart", "idle", { created_at: "2026-11-17T00:00:00Z" }),
+      item("code_output"),
+    ]);
+    expect(summary.workedMs).toBe(100);
+    expect(summary.missingTiming).toBe(true);
+  });
+
+  it("tracks live, frozen, committed and reloaded missing measurements", () => {
+    for (const [kind, start, elapsed, committed] of [
+      ["agent_reasoning", "reasoningStartedAt", "reasoningElapsedMs", "reasoning_ms"],
+      ["agent_code", "codeStartedAt", "codeElapsedMs", "code_elapsed_ms"],
+      ["code_output", "execStartedAt", "execElapsedMs", "exec_ms"],
+    ] as const) {
+      expect(summarizeTurn([item(kind, null, "live", { [start]: 1000 })]).missingTiming).toBe(false);
+      const frozen = summarizeTurn([item(kind, null, "frozen", { [elapsed]: 100 })]);
+      expect(frozen.workedMs).toBe(100);
+      expect(frozen.missingTiming).toBe(false);
+      const saved = summarizeTurn([item(kind, null, "saved", { [committed]: 100 })]);
+      expect(saved.workedMs).toBe(100);
+      expect(saved.missingTiming).toBe(false);
+      const reload = summarizeTurn([item(kind)]);
+      expect(reload.workedMs).toBe(0);
+      expect(reload.missingTiming).toBe(true);
+    }
+  });
+});
