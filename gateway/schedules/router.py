@@ -317,7 +317,9 @@ def create_blocking(
             conn.cursor(row_factory=class_row(InsertedId)) as cur,
         ):
             created = creation_receipts.begin(
-                conn, key, {"resource": "schedule", "body": body.model_dump(), "machine": machine}
+                conn,
+                key,
+                {"resource": "schedule", "body": body.model_dump(mode="json"), "machine": machine},
             )
             if created is not None:
                 return _reconstruct_created_row(conn, created, body, machine, cluster_timezone)

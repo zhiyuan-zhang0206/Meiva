@@ -195,7 +195,8 @@ class DeclarativeScheduleEngine:
                 "s.trigger_kind, s.cron_expr, s.interval_seconds, s.timezone, "
                 "s.timeout_seconds, s.enabled, s.status, r.agent_id AS owner_agent_id "
                 "FROM schedule_runs r JOIN schedules s ON s.id = r.schedule_id "
-                "WHERE r.ok IS NULL AND s.trigger_kind <> 'daemon' AND s.machine = %s "
+                "WHERE r.ok IS NULL AND r.scheduled_for IS NOT NULL "
+                "AND s.trigger_kind <> 'daemon' AND s.machine = %s "
                 "ORDER BY r.id",
                 (self._machine_name,),
             )

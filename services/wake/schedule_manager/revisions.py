@@ -166,7 +166,8 @@ def is_active_unit(pool: ConnectionPool, machine_name: str, home: Path) -> bool:
 def close_null_runs(pool: ConnectionPool, schedule_id: int, *, note: str = "interrupted") -> None:
     with write_transaction(pool) as conn:
         conn.execute(
-            "UPDATE schedule_runs SET ok = false, note = %s WHERE schedule_id = %s AND ok IS NULL",
+            "UPDATE schedule_runs SET ok = false, note = %s WHERE schedule_id = %s AND ok IS NULL "
+            "AND scheduled_for IS NULL",
             (note, schedule_id),
         )
 
