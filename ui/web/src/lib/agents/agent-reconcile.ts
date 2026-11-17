@@ -46,6 +46,7 @@ const RETRY_MS = 200;
 interface Reconcile {
   /** Conversation readers attached for this agent. */
   subscribers: number;
+  readRevision: number;
   running: boolean;
   /** A request arrived during a run — another read is owed afterwards. */
   dirty: boolean;
@@ -57,6 +58,7 @@ export interface AgentReconcile {
   /** Observe the existing coordinator's queued/running lifecycle. */
   watch: (listener: () => void) => () => void;
   isRefreshing(agentId: number | null): boolean;
+  readRevision(agentId: number | null): number;
   /** Attach one conversation reader for `agentId`; returns its detach.
    *  Detaching the last reader abandons in-flight and queued work. */
   subscribe(agentId: number): () => void;
@@ -70,6 +72,7 @@ export interface AgentReconcile {
 
 export function createAgentReconcile(client: QueryClient, api: Pick<Api, "getConversationSnapshot">): AgentReconcile {
   const entries = new Map<number, Reconcile>();
+  let readRevision = 0;
   const watchers = new Set<() => void>();
   const publish = () => { for (const listener of watchers) listener(); };
 
@@ -125,6 +128,11 @@ export function createAgentReconcile(client: QueryClient, api: Pick<Api, "getCon
       client.setQueryData(["timeline", agentId], snapshot.timeline);
       client.setQueryData(["token-usage", agentId], snapshot.token_usage);
       client.setQueryData(["pending", agentId], snapshot.pending);
+      // meiva:note
+      // Acceptance is observable even when structural sharing keeps the data
+      // object unchanged. Aborted or superseded reads never reach this handoff.
+      // meiva:link ui/web/src/docs/frontend-state/timeline-cache.md
+      entry.readRevision = ++readRevision;
     } catch {
       if (controller.signal.aborted) return; // ownership was lost; nothing to repair
       for (const key of keysFor(agentId)) {
@@ -143,6 +151,7 @@ export function createAgentReconcile(client: QueryClient, api: Pick<Api, "getCon
 
   return {
     watch(listener) { watchers.add(listener); return () => { watchers.delete(listener); }; },
+    readRevision(agentId) { return agentId === null ? 0 : entries.get(agentId)?.readRevision ?? 0; },
     isRefreshing(agentId) {
       const entry = agentId === null ? undefined : entries.get(agentId);
       return !!entry && (entry.timer !== null || entry.controller !== null);
@@ -150,7 +159,7 @@ export function createAgentReconcile(client: QueryClient, api: Pick<Api, "getCon
     subscribe(agentId: number): () => void {
       let entry = entries.get(agentId);
       if (entry === undefined) {
-        entry = { subscribers: 0, running: false, dirty: false, timer: null, controller: null };
+        entry = { subscribers: 0, readRevision: 0, running: false, dirty: false, timer: null, controller: null };
         entries.set(agentId, entry);
       }
       entry.subscribers += 1;
@@ -217,12 +226,15 @@ export function useAgentReconcile(agentId: number | null): {
   requestReconcile: () => void;
   abortReconcile: () => void;
   isReconciling: boolean;
+  readRevision: number;
 } {
   const api = useApi();
   const client = useQueryClient();
   const isVisible = useDocumentVisible();
   const coordinator = coordinatorFor(client, api);
   const refreshing = useCallback(() => coordinator.isRefreshing(agentId), [coordinator, agentId]);
+  const acceptedRevision = useCallback(() => coordinator.readRevision(agentId), [coordinator, agentId]);
+  const readRevision = useSyncExternalStore(coordinator.watch, acceptedRevision, () => 0);
   const isReconciling = useSyncExternalStore(coordinator.watch, refreshing, () => false);
 
   useEffect(() => {
@@ -240,5 +252,5 @@ export function useAgentReconcile(agentId: number | null): {
     coordinator.abort(agentId);
   }, [coordinator, agentId]);
 
-  return { requestReconcile, abortReconcile, isReconciling };
+  return { requestReconcile, abortReconcile, isReconciling, readRevision };
 }

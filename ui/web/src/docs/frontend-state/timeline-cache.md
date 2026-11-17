@@ -22,6 +22,23 @@ selection loss even when a transport ignores cancellation. Older-page requests h
 a late response after A-to-B-to-A cannot append to the new A view, and cancellation
 does not produce an error toast or clear the new view's loading state.
 
+Retained rows provide layout immediately. Each selection still waits for its own
+accepted authority read before `sourceReady` releases bookmark restoration.
+The head query carries a selection/compact-epoch receipt; the composed coordinator
+publishes an accepted-read revision even when structural sharing preserves an
+unchanged query object. Aborted or superseded reads publish no receipt. The
+selected store's `reloadSnapshot` returns whether it actually applied the read:
+a pre-compact response dropped during `resetPending` cannot qualify the entry.
+Leaving and returning creates a new selection owner, so a late A1 read cannot
+qualify B or A2. Initial loading includes this handoff for cached and cold entry;
+an authority error settles the loading ring while restoration remains pending
+until a successful retry. Once qualified, ordinary background reads keep their
+fetching state without restarting the initial ring.
+
+This readiness records a completed request and store application. Snapshot merge
+still retains committed rows absent from a response, including an empty one;
+readiness establishes no durable session membership or cache-eviction guarantee.
+
 A compact replacement preserves the upstream retention edge: `compactReplaceSeq`
 and `compactReplaceAgent` trigger reattachment through the same cancellable
 history-page read, walking every available older page serially (`unlimited`

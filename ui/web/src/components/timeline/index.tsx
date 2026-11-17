@@ -54,6 +54,7 @@ interface Props {
   compactBuffer?: CompactTransitionBuffer | null;
   threadKey?: string;
   scrollMemoryKey?: string;
+  restoreReady?: boolean;
   viewportObserverFactory?: (callback: ResizeObserverCallback) => ResizeObserver;
 
   streamingCode?: boolean;
@@ -94,6 +95,7 @@ export const TimelineView = memo(function TimelineView({
   compactBuffer = null,
   threadKey,
   scrollMemoryKey,
+  restoreReady = true,
   viewportObserverFactory,
   streamingCode = false,
   turnActive = false,
@@ -424,7 +426,7 @@ export const TimelineView = memo(function TimelineView({
       state: bookmarkState,
       viewport,
       initialPass: initialRestorePassRef.current,
-      loading,
+      loading: loading || !restoreReady,
       threadKey,
       compactBuffer,
       canonicalItems: canonicalItemsRef.current,
@@ -432,7 +434,7 @@ export const TimelineView = memo(function TimelineView({
       tailHeight,
       collapseReserve: collapseReserveRef.current,
     }),
-    [bookmarkState, compactBuffer, controller, tailHeight, threadKey, loading],
+    [bookmarkState, compactBuffer, controller, tailHeight, threadKey, loading, restoreReady],
   );
 
   const settleRestoredPosition = useCallback(

@@ -24,8 +24,12 @@ departure (#5678: a 254 px clamp from estimates replaced by measurements
 released a follower for good; #5680: 69 px read as growth against a commit-only
 baseline stranded one 107 px short).
 A pending bookmark restore lands before the pin. Loading layouts retain the
-bookmark until the authoritative snapshot has entered the readable timeline
-window. Repeated equal heights during loading cannot declare it unreachable. Returning to a conversation
+bookmark until this selection's authority read has entered the readable timeline
+window, including when cached rows already provide layout. Home passes
+`sourceReady` through the view's independent `restoreReady` gate. An authority
+error settles the loading ring and presents retry while that gate keeps the
+bookmark pending; reader navigation still releases it. Repeated equal heights
+before readiness cannot declare it unreachable. Returning to a conversation
 restores the visible message and viewport offset saved on departure, including
 when leaving the tail. The restored reader remains anchored as output grows;
 reader navigation to the bottom resumes following. A reader at the end of the

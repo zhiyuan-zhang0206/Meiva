@@ -180,6 +180,7 @@ export const useTimelineStore = create<TimelineState>()((set, get) => ({
   },
 
   reloadSnapshot: (snapshot, msg_count, hasMoreOlder) => {
+    let applied = false;
     set((s) => {
       // A compact changes item coordinates. During the reset window only
       // a snapshot showing that rewrite can replace the old view.
@@ -187,6 +188,7 @@ export const useTimelineStore = create<TimelineState>()((set, get) => ({
       if (s.resetPending && !crossedCompact) {
         return { hasMoreOlder };
       }
+      applied = true;
       const snapshotIds = new Set(snapshot.map((it) => it.item_id));
       const disjointGap = !crossedCompact && hasDisjointSnapshotGap(s.items, snapshot, hasMoreOlder);
       const localBase = crossedCompact
@@ -228,6 +230,7 @@ export const useTimelineStore = create<TimelineState>()((set, get) => ({
         liveCompact: retireLiveCompact(s.liveCompact, merged),
       };
     });
+    return applied;
   },
 
   switchThread: (agentId, cached, hasMoreOlder, buffer = null) => {

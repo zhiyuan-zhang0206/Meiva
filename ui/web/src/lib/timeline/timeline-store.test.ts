@@ -598,11 +598,25 @@ describe("readable snapshot readiness", () => {
     const store = useTimelineStore.getState();
     store.switchThread(42, null, false);
     expect(useTimelineStore.getState().snapshotReady).toBe(false);
-    store.reloadSnapshot([], 0, false);
+    expect(store.reloadSnapshot([], 0, false)).toBe(true);
     expect(useTimelineStore.getState().snapshotReady).toBe(true);
     store.switchThread(43, null, false);
     expect(useTimelineStore.getState().snapshotReady).toBe(false);
     store.switchThread(42, [], false);
     expect(useTimelineStore.getState().snapshotReady).toBe(true);
+  });
+
+  it("reports a dropped pre-compact read and accepts the post-compact replacement", () => {
+    const store = useTimelineStore.getState();
+    const cached = [item({ item_id: "90.0", payload: "old reply" })];
+    store.switchThread(42, cached, true);
+    store.processSseEvent({ role: "compact_done", agent_id: 42 });
+    expect(store.reloadSnapshot(cached, 91, true)).toBe(false);
+    expect(useTimelineStore.getState().resetPending).toBe(true);
+    expect(useTimelineStore.getState().items).toBe(cached);
+    const fresh = [item({ item_id: "1.0", kind: "inbound_compact_request" })];
+    expect(store.reloadSnapshot(fresh, 2, false)).toBe(true);
+    expect(useTimelineStore.getState().resetPending).toBe(false);
+    expect(useTimelineStore.getState().items.map((row) => row.item_id)).toEqual(["1.0"]);
   });
 });

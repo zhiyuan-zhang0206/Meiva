@@ -33,12 +33,12 @@ ships carry.
 | module | records | test files that write it | why it is a double |
 |---|---:|---|---|
 | `ui/web/src/components/agent-sidebar/sidebar-test-mock.tsx` | 141 | `agent-sidebar.test.tsx` (34), `sidebar-status-cards.test.tsx` (56), `sidebar-tree-and-search.test.tsx` (51) | the rail's scenario object: the props the page hands it, and the settings, stats and plugin declarations it reads |
-| `ui/web/src/app/page-test-mock.tsx` | 107 | `page.test.tsx` (61), `page-dispatch.test.tsx` (46) | the home page's `hooksState` and its provider wrapper |
+| `ui/web/src/app/page-test-mock.tsx` | 111 | `page.test.tsx` (61), `page-dispatch.test.tsx` (50) | the home page's `hooksState` and its provider wrapper |
 | `ui/web/src/components/inspector/inspector-test-mock.tsx` | 4 | `inspector-panel-chrome.test.tsx` (3), `inspector-panel-state.test.tsx` (1) | the inspector's `inspectorMockState` |
 
-252 records, every one of them a write into a state object the double exports: no `vi.mock`, and no patch
+256 records, every one of them a write into a state object the double exports: no `vi.mock`, and no patch
 of a module the suite renders. `python -m meizel debt sites --code first-party-patch --json` lists every
-site (255 today, 238 at `1d6710493`); 252 name one of these modules, 2 sit in `[approved-patches.files]`,
+site (259 today, 238 at `1d6710493`); 256 name one of these modules, 2 sit in `[approved-patches.files]`,
 and 1 is recorded. A repayment lowers these numbers and a new site raises them, and
 `meizel/tests/languages/test_test_code_accounting.py` fails until this table and the tree agree; the same
 test injects a production import of each double into the run's fact graph and asserts every record comes
@@ -95,3 +95,11 @@ counts, with the historical measurements above retained. The conditional
 exemption and production-import control are unchanged. Changes that add writes
 to these doubles must scan the raw sites and run the exact-accounting test;
 a green dependency graph does not establish that these published counts agree.
+
+The per-selection authority regression adds four writes in `page-dispatch.test.tsx`:
+selected agent, roster, page-entry identity and settings configure cached Home
+entry with unchanged, replaced, empty, failed/retried and unsaved-position reads.
+The dispatch file moves from 46 to 50 sites, the Home double from 107 to 111,
+and the three documented doubles from 252 to 256 records (259 raw first-party
+patch sites). These source scan counts preserve the historical measurements
+above; the exemption rule and production-import control are unchanged.

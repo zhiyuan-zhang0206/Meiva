@@ -102,6 +102,13 @@ describe("composed conversation reconcile", () => {
     await vi.waitFor(() => expect(client.getQueryData<PendingInbound[]>(["pending", 42])?.[0].content).toBe("fresh"));
     expect(client.getQueryData(["token-usage", 42])).toMatchObject({ input_tokens: 1 });
     expect(client.getQueryData(["timeline", 42])).toMatchObject({ msg_count: 0 });
+    const firstRevision = reconcile.readRevision(42);
+    expect(firstRevision).toBeGreaterThan(0);
+    const unchanged = client.getQueryData(["timeline", 42]);
+    reconcile.request(42);
+    await vi.advanceTimersByTimeAsync(0);
+    await vi.waitFor(() => expect(reconcile.readRevision(42)).toBeGreaterThan(firstRevision));
+    expect(client.getQueryData(["timeline", 42])).toBe(unchanged);
 
     for (const unsubscribe of unsubscribes) unsubscribe();
   });
@@ -147,6 +154,7 @@ describe("composed conversation reconcile", () => {
     reconcile.request(42);
     await vi.advanceTimersByTimeAsync(0);
     await vi.waitFor(() => expect(reads).toHaveLength(1));
+    expect(reconcile.readRevision(42)).toBe(0);
     // A newer snapshot lands while the composed read is in flight.
     client.setQueryData(["pending", 42], [pendingRow(1), pendingRow(2)]);
     first.resolve(resolves(snapshot("fresh")));
@@ -189,6 +197,7 @@ describe("composed conversation reconcile", () => {
     await vi.advanceTimersByTimeAsync(400);
     expect(client.getQueryData(["timeline", 42])).toBeUndefined();
     expect(client.getQueryData(["pending", 42])).toBeUndefined();
+    expect(reconcile.readRevision(42)).toBe(0);
   });
 
   it("requests without a live reader are no-ops", async () => {
@@ -239,6 +248,7 @@ describe("reconcile activity for the latest-messages indicator", () => {
     fault.respond(snapshot("old"));
     await vi.advanceTimersByTimeAsync(0);
     expect(reconcile.isRefreshing(42)).toBe(false);
+    expect(reconcile.readRevision(42)).toBe(0);
     if (mode === "abort") detach();
   });
 });
