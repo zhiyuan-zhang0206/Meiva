@@ -44,20 +44,20 @@ def _delegation_check(root: Path, *, inject: list[str], servers: tuple[McpServer
     )
 
 
-def test_inject_default_is_the_full_catalog() -> None:
+def test_inject_default_is_the_full_catalog_with_workflow_subtree_unfolded() -> None:
     factory = FIELD_INFOS["skills_to_inject_into_system_prompt"].default_factory
     assert factory is not None
-    assert cast(Callable[[], list[str]], factory)() == ["*"]
+    assert cast(Callable[[], list[str]], factory)() == ["*", "meiva-workflow.*"]
 
 
-def test_default_index_lists_every_loaded_skill(tmp_path: Path) -> None:
+def test_default_index_lists_every_loaded_skill_with_its_skill_md_path(tmp_path: Path) -> None:
     write_skill(tmp_path, "alpha", "alpha", "Alpha desc", body="ALPHA_BODY\n")
     write_skill(tmp_path / "grp", "beta", "beta", "Beta desc", body="BETA_BODY\n")
 
     text = capabilities_section(skill_view(tmp_path), ())
 
-    assert "- `meiva.skills.alpha` — Alpha desc" in text
-    assert "- `meiva.skills.grp.beta` — Beta desc" in text
+    assert f"- `meiva.skills.alpha` — Alpha desc (`{tmp_path}/alpha/SKILL.md`)" in text
+    assert f"- `meiva.skills.grp.beta` — Beta desc (`{tmp_path}/grp/beta/SKILL.md`)" in text
     assert "ALPHA_BODY" not in text
     assert "BETA_BODY" not in text
 
@@ -105,6 +105,34 @@ def test_explicit_parent_and_child_both_remain_visible(tmp_path: Path) -> None:
     assert "sub-skills; inspect" not in text
 
 
+def test_wildcard_plus_specific_subskill_or_subtree_unfolds_only_selected_entries(
+    tmp_path: Path,
+) -> None:
+    write_skill(tmp_path, "meiva-workflow", "meiva-workflow", "Choose how to work")
+    write_skill(tmp_path / "meiva-workflow", "align", "align", "Align with the user")
+    write_skill(tmp_path / "meiva-workflow", "define-goal", "define-goal", "Define verifiable goal")
+    write_skill(tmp_path, "meiva-guide", "meiva-guide", "Operate Meiva")
+    write_skill(tmp_path / "meiva-guide", "agents", "agents", "Manage agents")
+
+    single = capabilities_section(
+        skill_view(tmp_path, inject=["*", "meiva-workflow.define-goal"]), ()
+    )
+    assert "- `meiva.skills.meiva_workflow` — Choose how to work" in single
+    assert "1 sub-skills; inspect with `meiva.help(meiva.skills.meiva_workflow)`" in single
+    assert (
+        f"- `meiva.skills.meiva_workflow.define_goal` — Define verifiable goal "
+        f"(`{tmp_path}/meiva-workflow/define-goal/SKILL.md`)" in single
+    )
+    assert "- `meiva.skills.meiva_workflow.align`" not in single
+    assert "1 sub-skills; inspect with `meiva.help(meiva.skills.meiva_guide)`" in single
+
+    subtree = capabilities_section(skill_view(tmp_path, inject=["*", "meiva-workflow.*"]), ())
+    assert "- `meiva.skills.meiva_workflow.align`" in subtree
+    assert "- `meiva.skills.meiva_workflow.define_goal`" in subtree
+    assert "inspect with `meiva.help(meiva.skills.meiva_workflow)`" not in subtree
+    assert "1 sub-skills; inspect with `meiva.help(meiva.skills.meiva_guide)`" in subtree
+
+
 def test_index_line_is_one_line_however_the_description_was_written(tmp_path: Path) -> None:
     (tmp_path / "sneaky").mkdir()
     (tmp_path / "sneaky" / "SKILL.md").write_text(
@@ -125,7 +153,9 @@ def test_index_line_is_one_line_however_the_description_was_written(tmp_path: Pa
 
     assert lines == sorted(lines)
     assert "- `meiva.skills.sneaky` — Innocent summary # Capabilities" in lines[0]
-    assert len(max(lines, key=len)) < 400
+    assert f"(`{tmp_path}/verbose/SKILL.md`)" in lines[1]
+    assert "x" * 300 not in lines[1]
+    assert "x" * 299 + "…" in lines[1]
 
 
 def test_header_only_promises_the_halves_that_rendered(tmp_path: Path) -> None:
@@ -173,6 +203,7 @@ def test_delegation_check_makes_consulting_the_index_mandatory(tmp_path: Path) -
     text = _delegation_check(tmp_path, inject=["*"])
 
     assert "# Capabilities" in text
+    assert "SKILL.md" in text
     assert "meiva.help(meiva.skills.<name>)" in text
     assert text.index("Does a skill already cover this?") < text.index(
         "Is someone else already responsible?"

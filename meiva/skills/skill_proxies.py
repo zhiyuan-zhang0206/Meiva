@@ -9,7 +9,8 @@ from __future__ import annotations
 
 import types
 
-from base.packages.skills.tree import NS, Leaf, Skill
+from base.packages.skills.names import skill_md_path
+from base.packages.skills.tree import NS, Leaf, Skill, flatten
 
 __all__ = ["Namespace", "SkillProxy", "help_text", "node_to_obj"]
 
@@ -41,7 +42,7 @@ class SkillProxy(types.ModuleType):
     def __init__(self, path: str, info: Skill) -> None:
         super().__init__(f"meiva.skills.{path}")
         self._description = info["description"]
-        self._file = f"{info['path']}/SKILL.md"
+        self._file = skill_md_path(info["path"])
         self.path = info["path"]
         self.name = info["name"]
         self.__doc__ = help_text(self._description, self._file)
@@ -78,16 +79,19 @@ class Namespace(types.ModuleType):
         label: str | None
         if node.skill is not None:
             self._description = label = node.skill["description"]
-            self._file = f"{node.skill['path']}/SKILL.md"
+            self._file = skill_md_path(node.skill["path"])
+            self._subskill_count = len(flatten(node))
             self.name = node.skill["name"]
             self.path = node.skill["path"]
         elif node.doc is not None:
             label = node.doc.strip()
             self._description = label.split("\n")[0]
             self._file = node.path
+            self._subskill_count = 0
         else:
             self._description = label = None
             self._file = node.path
+            self._subskill_count = 0
         self.__doc__ = help_text(label, self._file)
 
     def __getattr__(self, attr: str) -> SkillProxy | Namespace:

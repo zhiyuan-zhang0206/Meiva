@@ -14,8 +14,12 @@ appropriate evidence.
 The user supplies intent, preferences, and authority. Both human and agent
 factual beliefs need calibration against evidence. Agents investigate and
 choose routine methods, asking about unresolved material trade-offs in terms of
-outcome, cost, speed, verification, or autonomy. Users can specify methods or
-leave selection to the agent. Existing consent is not reopened at phase boundaries.
+outcome, cost, speed, verification, or autonomy. For multi-step, cross-surface,
+visual/UI, or deliverable-ambiguous work, agents proactively propose a compact
+goal contract (`define-goal`) and close with independent environment
+verification (`meiva-goal`) while keeping atomic commands and open-ended
+reflective discussions direct. Users can specify methods or leave selection to
+the agent. Existing consent is not reopened at phase boundaries.
 
 ## Guides and composition
 

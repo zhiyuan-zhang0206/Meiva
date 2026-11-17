@@ -82,18 +82,20 @@ class AgentPromptSettings(EnvSettings):
 
     skills_to_inject_into_system_prompt: Annotated[list[str], NoDecode] = Field(
         title="Skills included in the system prompt index",
-        default_factory=lambda: ["*"],
+        default_factory=lambda: ["*", "meiva-workflow.*"],
         alias="MEIVA_SKILLS_TO_INJECT_INTO_SYSTEM_PROMPT",
         description=(
-            "Comma-separated skill names whose name + one-line description are "
-            "injected into the system prompt as an always-on index; the agent loads "
-            "the full body on demand. Each entry resolves by `.`-identifier "
-            "(`meiva-memory.consolidation`) then bare frontmatter name, dash and underscore "
-            "spellings alike; `*` (the default) selects every loaded skill and "
-            "groups descendants under their entry skills for on-demand discovery. "
-            "Unresolved names are skipped. Set an explicit list per agent to "
-            "NARROW the index below the full catalog. Empty injects no "
-            "index."
+            "Comma-separated skill names or `<namespace>.*` patterns whose name, "
+            "one-line description, and SKILL.md path are injected into the system "
+            "prompt as an always-on index; the agent reads the full body on demand. "
+            "Each entry resolves by `.`/`:`-identifier (`meiva-workflow.define-goal`), "
+            "subtree wildcard (`meiva-workflow.*`), or bare frontmatter name, dash "
+            "and underscore spellings alike. `*` selects every loaded skill and "
+            "folds unmentioned descendants under their entry skills; combine `*` "
+            "with explicit sub-skill paths or `<namespace>.*` entries (default "
+            "`*,meiva-workflow.*`) to unfold specific sub-skills in place. Set an "
+            "explicit list without `*` per agent to NARROW the index below the full "
+            "catalog. Unresolved names are skipped. Empty injects no index."
         ),
         json_schema_extra={
             "restart_required": "agent",

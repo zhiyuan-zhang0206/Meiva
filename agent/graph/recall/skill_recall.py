@@ -72,8 +72,8 @@ FALSE_IF = (
 # because the lines below it are the same index lines.
 _FRAMING = (
     "Skills that match the current conversation, offered automatically. The descriptions "
-    "are summaries; `meiva.help(meiva.skills.<path>)` shows a skill's SKILL.md path, and that "
-    "file holds its full instructions. Read it before using the skill."
+    "are summaries; read a skill's `SKILL.md` file at the path shown (or inspect sub-skills "
+    "with `meiva.help(meiva.skills.<path>)`) before using the skill."
 )
 
 
@@ -118,7 +118,7 @@ def render_note(
     created_at: datetime,
 ) -> HumanMessage:
     """The system-styled note naming `candidates`, one index line each."""
-    lines = [index_entry(c.target, c.description) for c in candidates]
+    lines = [index_entry(c.target, c.description, skill_md=c.skill_md or None) for c in candidates]
     return system_note_message(
         content=f"{_FRAMING}\n\n" + "\n".join(lines),
         tag=NoteTag.SKILL_RECALL,

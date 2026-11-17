@@ -51,6 +51,10 @@ def display_name(name: str) -> str:
     return name.replace("_", "-")
 
 
+def skill_md_path(skill_dir: str) -> str:
+    return skill_dir if skill_dir.endswith("/SKILL.md") else f"{skill_dir}/SKILL.md"
+
+
 def find(name: str, candidates: Iterable[str]) -> str | None:
     """Return the candidate `name` refers to, or None when nothing matches.
 

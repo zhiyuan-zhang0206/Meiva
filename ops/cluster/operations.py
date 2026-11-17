@@ -257,11 +257,18 @@ def _narrow_commands(
 
     by_ident = {match_key(identifier(skill)): skill for skill in loaded}
     by_name = {match_key(skill["name"]): skill for skill in loaded}
-    selected_targets = {
-        target(skill)
-        for name in wanted
-        if (skill := by_ident.get(match_key(name)) or by_name.get(match_key(name))) is not None
-    }
+    selected_targets: set[str] = set()
+    for name in wanted:
+        if name.endswith((".*", ":*")):
+            prefix = match_key(name[:-2])
+            if prefix:
+                selected_targets.update(
+                    target(skill)
+                    for key, skill in by_ident.items()
+                    if key == prefix or key.startswith(prefix + ".")
+                )
+        elif (skill := by_ident.get(match_key(name)) or by_name.get(match_key(name))) is not None:
+            selected_targets.add(target(skill))
     return [
         command
         for command in commands

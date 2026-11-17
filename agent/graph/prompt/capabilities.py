@@ -1,16 +1,22 @@
 # meiva:note
-# The `# Capabilities` section is the system prompt's single index of available skills and live MCP servers, rendering only non-empty halves and omitting the section when both are empty. It directs the agent to match every task against the index before starting so established playbooks and domain capabilities are not skipped or rebuilt. Skill resolution shares one resolver across the index and preloaded skills (`skill_selection.py`), folding descendants under selected ancestor entry skills on wildcard selection while preserving full catalog membership for drift tracking and preloading. Skill descriptions are flattened and truncated to one 300-character line; recall candidates exclude preloaded skills. Disable checks honor the configured entries and the runtime removals folded into `SkillView.disabled`, so a disabled surface renders nothing. Every function here is a function of its `SkillView` and server list; the live reads that fill them are in `live.py`. Index drift diffs live membership in one scan and caps additions at 20 lines while advancing the snapshot over full membership. Prompt assembly records no skill attribution and requests no capability report in final output.
+# The `# Capabilities` section is the system prompt's single index of available skills and live MCP servers, rendering only non-empty halves and omitting the section when both are empty. It directs the agent to match every task against the index before starting so established playbooks and domain capabilities are not skipped or rebuilt. Skill resolution shares one resolver across the index and preloaded skills (`skill_selection.py`), folding unexpanded descendants under their nearest visible ancestor skill on wildcard selection while unfolding explicitly configured subtrees or sub-skills and preserving full catalog membership for drift tracking and preloading. Each skill entry carries its flattened 300-character description and `SKILL.md` file path (`base.packages.skills.names:skill_md_path`, matching `meiva.help`); recall candidates exclude preloaded skills. Disable checks honor the configured entries and the runtime removals folded into `SkillView.disabled`, so a disabled surface renders nothing. Every function here is a function of its `SkillView` and server list; the live reads that fill them are in `live.py`. Index drift diffs live membership in one scan and caps additions at 20 lines while advancing the snapshot over full membership. Prompt assembly records no skill attribution and requests no capability report in final output.
 from __future__ import annotations
 
 from collections.abc import Sequence
 from dataclasses import dataclass
 from typing import NamedTuple
 
-from base.packages.skills.names import match_key
+from base.packages.skills.names import match_key, skill_md_path
 from base.packages.skills.tree import Skill, identifier, target
 
 from .sdk_scope import disabled_by_sdk_config
-from .skill_selection import SkillView, indexed_skills, resolve_prompt_skills, skill_identifiers
+from .skill_selection import (
+    SkillView,
+    indexed_skills,
+    resolve_prompt_skills,
+    skill_identifiers,
+    unfolded_skill_keys,
+)
 
 _DESC_MAX_CHARS = 300
 
@@ -25,6 +31,7 @@ class RecallCandidate(NamedTuple):
     identifier: str
     description: str
     target: str
+    skill_md: str = ""
 
 
 def _one_line(description: str) -> str:
@@ -32,12 +39,15 @@ def _one_line(description: str) -> str:
     return flat if len(flat) <= _DESC_MAX_CHARS else flat[: _DESC_MAX_CHARS - 1] + "…"
 
 
-def index_entry(path: str, description: str) -> str:
-    return f"- `meiva.skills.{path}` — {description}"
+def index_entry(path: str, description: str, *, skill_md: str | None = None) -> str:
+    loc = f" (`{skill_md}`)" if skill_md else ""
+    return f"- `meiva.skills.{path}` — {description}{loc}"
 
 
 def _index_line(skill: Skill) -> str:
-    return index_entry(target(skill), _one_line(skill["description"]))
+    return index_entry(
+        target(skill), _one_line(skill["description"]), skill_md=skill_md_path(skill["path"])
+    )
 
 
 def recall_candidates(view: SkillView) -> list[RecallCandidate]:
@@ -47,25 +57,43 @@ def recall_candidates(view: SkillView) -> list[RecallCandidate]:
         ident = identifier(skill)
         if ident in preloaded:
             continue
-        candidates.append(RecallCandidate(ident, _one_line(skill["description"]), target(skill)))
+        candidates.append(
+            RecallCandidate(
+                ident,
+                _one_line(skill["description"]),
+                target(skill),
+                skill_md_path(skill["path"]),
+            )
+        )
     return candidates
 
 
 def _skill_index_lines(view: SkillView) -> list[str]:
     skills = indexed_skills(view)
-    if "*" not in view.inject:
-        return [_index_line(s) for s in skills]
+    if not skills:
+        return []
     by_path = {match_key(identifier(s)): s for s in skills}
-    descendants: dict[str, int] = {}
+    unfolded = unfolded_skill_keys(view)
+    visible: list[str] = []
+    folded_counts: dict[str, int] = {}
     for path in by_path:
         segments = path.split(".")
-        ancestors = (".".join(segments[:i]) for i in range(1, len(segments)))
-        entry = next((parent for parent in ancestors if parent in by_path), path)
-        descendants[entry] = descendants.get(entry, 0) + (entry != path)
+        ancestors = [".".join(segments[:i]) for i in range(1, len(segments))]
+        present_ancestors = [parent for parent in ancestors if parent in by_path]
+        if path in unfolded or not present_ancestors:
+            visible.append(path)
+            folded_counts.setdefault(path, 0)
+            continue
+        holder = next(
+            (parent for parent in reversed(present_ancestors) if parent in folded_counts),
+            present_ancestors[0],
+        )
+        folded_counts[holder] = folded_counts.get(holder, 0) + 1
     lines: list[str] = []
-    for path, count in descendants.items():
+    for path in visible:
         skill = by_path[path]
         line = _index_line(skill)
+        count = folded_counts.get(path, 0)
         if count:
             line += (
                 f" ({count} sub-skills; inspect with `meiva.help(meiva.skills.{target(skill)})`)"
@@ -76,8 +104,8 @@ def _skill_index_lines(view: SkillView) -> list[str]:
 
 _NEW_SKILLS_FRAMING = (
     "Additional skills are now available beyond those listed in `# Capabilities`. "
-    "The descriptions below are summaries; `meiva.help(meiva.skills.<path>)` shows a "
-    "skill's SKILL.md path, and that file holds its full instructions. Read it before using the skill."
+    "The descriptions below are summaries; read a skill's `SKILL.md` file at the path shown "
+    "before using it (`meiva.help(meiva.skills.<path>)` also inspects an entry and its sub-skills)."
 )
 
 
@@ -110,13 +138,12 @@ _WHAT_SKILLS = "reusable skills (playbooks)"
 _WHAT_MCPS = "live MCP tool servers"
 
 _SKILLS_HOWTO = (
-    "Before using a skill, run `meiva.help(meiva.skills.<path>)` with a path exactly as "
-    "the skill list gives it, e.g. `meiva.skills.web_sources.youtube`: it shows the skill's "
-    "name, description and the path of its SKILL.md. Read that file for the instructions; "
-    "the skill's other files live beside it. "
-    "This listing may be a subset of what is installed — "
+    "Before using a skill, read its `SKILL.md` file at the path shown on its entry "
+    "(the skill's other files live beside it). For folded sub-skills or unlisted skills, "
+    "run `meiva.help(meiva.skills.<path>)` to see an entry's description, `SKILL.md` path, "
+    "and children. This listing may be a subset of what is installed — "
     "`meiva.help(meiva.skills)` enumerates the full catalog, and an unlisted skill "
-    "is still reachable by name. Entry skills group their sub-skills: inspect "
+    "is still reachable by name. Entry skills group their unexpanded sub-skills: inspect "
     "the matching entry to discover specialized playbooks before choosing one."
 )
 

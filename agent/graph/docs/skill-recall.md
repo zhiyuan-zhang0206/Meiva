@@ -18,7 +18,7 @@ The current `skill_recall_model` default is `gemini-decision-1`. The prompt and 
 
 ## From scores to a note
 
-Skills whose probability of "yes" reaches the threshold are ranked best first, with the identifier breaking ties (the model's probabilities are coarse, so ties are common), and the top `skill_recall_max` (2) are named in one note in the index's own line shape, with the framing "load with `meiva.help(meiva.skills.<path>)`".
+Skills whose probability of "yes" reaches the threshold are ranked best first, with the identifier breaking ties (the model's probabilities are coarse, so ties are common), and the top `skill_recall_max` are named in one note in the index's own line shape (including each skill's `SKILL.md` path).
 
 ## The per-window record
 

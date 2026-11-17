@@ -501,6 +501,10 @@ def test_root_skill_help_renders_entry_then_children(
         in out
     )
 
+    meiva.help(meiva.skills)
+    top = capsys.readouterr().out
+    assert "Sub-skills: 1 (inspect with meiva.help(meiva.skills.sources))" in top
+
 
 # meiva:note
 # A folder's INDEX.md authors its namespace description; the entry also names the folder.
