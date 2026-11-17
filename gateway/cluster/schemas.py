@@ -30,6 +30,7 @@ from pydantic import (
 )
 
 from base.api_contracts.status import MachineStatus
+from base.packages.plugins.surface.stats_types import StatReset
 from gateway.schemas.models import (
     HarnessAvailability as HarnessAvailability,
 )
@@ -224,6 +225,7 @@ class PluginStat(BaseModel):
     status: PluginStatStatus
     updated_at: datetime
     updated_by: str | None
+    resets: list[StatReset] = Field(default_factory=list)
 
 
 # meiva:note

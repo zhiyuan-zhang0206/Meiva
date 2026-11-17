@@ -55,6 +55,7 @@ describe("buildPluginStatCards", () => {
         status: null,
         detail: null,
         updatedAt: null,
+        resets: [],
         stale: false,
       },
     ]);

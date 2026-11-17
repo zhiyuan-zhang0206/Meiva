@@ -22,6 +22,7 @@ import pytest
 
 from base.db import Database
 from base.packages.plugins.surface import stats
+from base.packages.plugins.surface.stats_types import StatReset
 from base.paths import meiva_home
 from base.telemetry.observability import cluster_label
 from gateway.schemas.stats import StatsWindowHours, window_delta
@@ -596,6 +597,7 @@ def test_dashboard_carries_plugin_stat_values_unwindowed(database: Database) -> 
         plugin="codex_usage",
         id="codex-zhang0206",
         value="6%",
+        resets=(StatReset.model_validate({"label": "7d", "resets_at": "2027-01-01T00:00:00Z"}),),
         detail="94% used - weekly",
         status="warn",
         updated_by="macmini",
@@ -621,6 +623,8 @@ def test_dashboard_carries_plugin_stat_values_unwindowed(database: Database) -> 
         ("codex_usage", "codex-zhang0206", "6%", "94% used - weekly", "warn", "macmini"),
     ]
     assert all(r["updated_at"] for r in rows)
+    assert rows[0]["resets"] == []
+    assert rows[1]["resets"] == [{"label": "7d", "resets_at": "2027-01-01T00:00:00Z"}]
 
 
 def test_dashboard_plugin_stats_is_empty_without_writers() -> None:

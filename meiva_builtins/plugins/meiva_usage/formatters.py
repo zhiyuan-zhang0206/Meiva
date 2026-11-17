@@ -9,6 +9,7 @@ from datetime import UTC, date, datetime, timedelta, tzinfo
 from decimal import Decimal
 from typing import Literal, TypeGuard
 
+from base.packages.plugins.surface.stats_types import StatReset
 from meiva_builtins.plugins.meiva_usage.types import (
     CardReading,
     RateWindow,
@@ -31,14 +32,12 @@ def _ensure_utc(dt: datetime) -> datetime:
     return dt
 
 
-def _find_dual_window_reset(windows: list[tuple[str, RateWindow, float]]) -> datetime | None:
-    tightest_window = min(windows, key=lambda item: item[2])[1]
-    if tightest_window.resets_at is not None:
-        return tightest_window.resets_at
-    for _, window, _ in windows:
-        if window.resets_at is not None:
-            return window.resets_at
-    return None
+def _resets(windows: list[tuple[str, RateWindow]], display_tz: tzinfo) -> tuple[StatReset, ...]:
+    return tuple(
+        StatReset(label=label, resets_at=_ensure_utc(window.resets_at).astimezone(display_tz))
+        for label, window in windows
+        if window.resets_at is not None
+    )
 
 
 def format_dual_window_card(
@@ -63,14 +62,14 @@ def format_dual_window_card(
 
     parts: list[str] = [f"{label} {rem:.0f}% left" for label, _, rem in windows]
 
-    reset_dt = _find_dual_window_reset(windows)
-    if reset_dt is not None:
-        aware_dt = _ensure_utc(reset_dt).astimezone(display_tz)
-        parts.append(f"resets {aware_dt:%m-%d %H:%M}")
-
     detail = " · ".join(parts)
     status = "warn" if tightest_rem <= 10.0 else "ok"
-    return CardReading(value=value, detail=detail, status=status)
+    return CardReading(
+        value=value,
+        detail=detail,
+        status=status,
+        resets=_resets([(label, window) for label, window, _ in windows], display_tz),
+    )
 
 
 def _format_antigravity_dual_window(
@@ -82,16 +81,14 @@ def _format_antigravity_dual_window(
     weekly_rem = max(0.0, min(100.0, 100.0 - weekly.used_percent))
     session_rem = max(0.0, min(100.0, 100.0 - session.used_percent))
     value = f"7d {weekly_rem:.0f}% · 5h {session_rem:.0f}% left"
-    reset_parts: list[str] = []
-    if weekly.resets_at is not None:
-        reset_parts.append(f"7d {_ensure_utc(weekly.resets_at).astimezone(display_tz):%m-%d %H:%M}")
-    if session.resets_at is not None:
-        reset_parts.append(
-            f"5h {_ensure_utc(session.resets_at).astimezone(display_tz):%m-%d %H:%M}"
-        )
-    detail = f"resets {' · '.join(reset_parts)}" if reset_parts else "7d & 5h windows"
+    detail = "7d & 5h windows"
     status: Literal["ok", "warn"] = "warn" if min(weekly_rem, session_rem) <= 10.0 else "ok"
-    return CardReading(value=value, detail=detail, status=status)
+    return CardReading(
+        value=value,
+        detail=detail,
+        status=status,
+        resets=_resets([("7d", weekly), ("5h", session)], display_tz),
+    )
 
 
 def _format_antigravity_single_window(
@@ -103,11 +100,14 @@ def _format_antigravity_single_window(
     rem = max(0.0, min(100.0, 100.0 - window.used_percent))
     value = f"{rem:.0f}% left"
     parts = ["7d window" if is_weekly else "5h window"]
-    if window.resets_at is not None:
-        parts.append(f"resets {_ensure_utc(window.resets_at).astimezone(display_tz):%m-%d %H:%M}")
     detail = " · ".join(parts)
     status: Literal["ok", "warn"] = "warn" if rem <= 10.0 else "ok"
-    return CardReading(value=value, detail=detail, status=status)
+    return CardReading(
+        value=value,
+        detail=detail,
+        status=status,
+        resets=_resets([("7d" if is_weekly else "5h", window)], display_tz),
+    )
 
 
 def format_antigravity_group_card(
@@ -148,6 +148,7 @@ def format_codex_window_card(
 
     parts: list[str] = [f"used {window.used_percent:.0f}%"]
 
+    window_label = "Quota window"
     minutes = window.window_minutes
     if minutes is not None:
         if minutes == 10080:
@@ -162,13 +163,17 @@ def format_codex_window_card(
             window_label = f"{minutes}m window"
         parts.append(window_label)
 
-    if window.resets_at is not None:
-        aware_dt = _ensure_utc(window.resets_at).astimezone(display_tz)
-        parts.append(f"resets {aware_dt:%m-%d %H:%M}")
-
     detail = " · ".join(parts)
     status = "warn" if remaining <= 10.0 else "ok"
-    return CardReading(value=value, detail=detail, status=status)
+    return CardReading(
+        value=value,
+        detail=detail,
+        status=status,
+        resets=_resets(
+            [(window_label.removesuffix(" window"), window)],
+            display_tz,
+        ),
+    )
 
 
 def _select_deepseek_balance_entry(

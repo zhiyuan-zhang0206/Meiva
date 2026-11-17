@@ -1349,7 +1349,8 @@ CREATE TABLE plugin_stats (
                             CHECK (status IN ('ok', 'warn', 'error')),
     updated_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
     updated_by  TEXT,
-    PRIMARY KEY (plugin, id)
+    PRIMARY KEY (plugin, id),
+    resets JSONB NOT NULL DEFAULT '[]'::jsonb
 );
 
 COMMENT ON TABLE plugin_stats IS

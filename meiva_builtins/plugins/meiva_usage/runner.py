@@ -23,6 +23,7 @@ from base.log import logger
 from base.packages.plugins.config_view import disk_image_path, read_plugin_config
 from base.packages.plugins.plugin_errors import InvalidConfigData, SchemaDriftError
 from base.packages.plugins.surface import stats
+from base.packages.plugins.surface.stats_types import StatReset
 from meiva_builtins.plugins.meiva_usage.backoff import judge_cycle, next_interval_s
 from meiva_builtins.plugins.meiva_usage.default_config import CollectorConfig, UsageConfig
 from meiva_builtins.plugins.meiva_usage.probes import (
@@ -99,6 +100,7 @@ class _CachedCard:
     status: str
     updated_at: datetime
     value: str
+    resets: list[dict[str, str]]
 
 
 def _resolve_error_hysteresis(
@@ -111,7 +113,7 @@ def _resolve_error_hysteresis(
         cached = query_one(
             conn,
             _CachedCard,
-            "SELECT status, updated_at, value FROM plugin_stats WHERE plugin = %s AND id = %s",
+            "SELECT status, updated_at, value, resets FROM plugin_stats WHERE plugin = %s AND id = %s",
             ("meiva_usage", card_id),
         )
     existing_status = None if cached is None else cached.status
@@ -124,12 +126,18 @@ def _resolve_error_hysteresis(
             CardReading(
                 value=existing_value or "—",
                 detail="probe error suppressed (cached reading fresh)",
+                resets=tuple(StatReset.model_validate(r) for r in cached.resets) if cached else (),
                 status=status,
             ),
             False,
         )
     if existing_value:
-        return CardReading(value=existing_value, detail=reading.detail, status="error"), True
+        return CardReading(
+            value=existing_value,
+            detail=reading.detail,
+            status="error",
+            resets=tuple(StatReset.model_validate(r) for r in cached.resets) if cached else (),
+        ), True
     return reading, True
 
 
@@ -147,7 +155,7 @@ def _rate_limited_reading(
         cached = query_one(
             conn,
             _CachedCard,
-            "SELECT status, updated_at, value FROM plugin_stats WHERE plugin = %s AND id = %s",
+            "SELECT status, updated_at, value, resets FROM plugin_stats WHERE plugin = %s AND id = %s",
             ("meiva_usage", card_id),
         )
     if cached is None or not cached.value or cached.value == _NO_READING:
@@ -159,6 +167,7 @@ def _rate_limited_reading(
             detail=f"Rate limited by the provider (HTTP 429); showing the reading from {as_of}",
             status="warn",
             rate_limited=True,
+            resets=tuple(StatReset.model_validate(r) for r in cached.resets),
         ),
         True,
     )
@@ -190,6 +199,7 @@ def _upsert_card_reading(
         updated_by=machine_name,
         detail_cap=500,
         refresh_stamp=not keep_stamp,
+        resets=reading.resets,
     )
     return reading
 

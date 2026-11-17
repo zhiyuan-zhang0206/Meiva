@@ -87,7 +87,12 @@ The schedule script executes `run_from_schedule(MEIVA_SCHEDULE_INPUTS, collector
   plugin never refreshes the token itself, because the refresh token is single-use and a second
   refresher would race the CLI for it. A real 401/403 keeps the `sign in again` message.
 - **Single writer (`stats.upsert`)**: Writes readings through `base.packages.plugins.surface.stats.upsert`,
-  stamping `updated_by` with the machine name.
+  stamping `updated_by` with the machine name. Quota deadlines travel as labelled,
+  timezone-aware instants alongside the reading. The sidebar counts down each window
+  on the viewer's clock, exposes full local time in its tooltip, and shows awaiting
+  refresh after a deadline. Passing a deadline does not prove quota has refreshed.
+  Existing stored rows gain an empty deadline list until their next successful probe.
+  Rate-limited and retained error readings keep their cached deadlines.
 
 ### 4. Process-scoped secret delivery
 

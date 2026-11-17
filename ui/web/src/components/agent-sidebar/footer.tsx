@@ -41,7 +41,9 @@ import { cn } from "@/lib/format/utils";
 
 import { useBrowser } from "@/lib/browser/browser-provider";
 import { useNavigation } from "@/lib/browser/navigation/navigation-provider";
-import { useWallDate } from "@/lib/format/now/use-wall-date";
+import { useNow } from "@/lib/format/now/use-now";
+import { useWallNow } from "@/lib/transport/transport-context";
+import { useTimeFormat } from "@/lib/format/use-time-format";
 import { markNavIntent } from "@/lib/telemetry/nav-timing";
 
 import { fleetHref } from "./links";
@@ -73,7 +75,8 @@ export function StatusCards({
   onRetry: () => void;
 }) {
   const t = useTranslations("sidebar");
-  const now = useWallDate();
+  const wallNow = useWallNow();
+  const now = useNow(1000, wallNow);
   const pluginCards = usePluginStatCards(stats?.plugin_stats, now);
   const errMsg = error ? formatErrMsg(error) : null;
   const failedWithoutData = errMsg !== null && stats === undefined;
@@ -235,7 +238,7 @@ export function StatusCards({
         {pluginCards.length > 0 ? (
           <div className="mt-2 divide-y divide-border/60 border-t border-border/60">
             {pluginCards.map((card) => (
-              <PluginStatCard key={card.key} card={card} />
+              <PluginStatCard key={card.key} card={card} now={now} />
             ))}
           </div>
         ) : null}
@@ -312,9 +315,9 @@ export function StatusCards({
 // whose last write is old, so a stopped refresh cannot pass for a fresh one —
 // the age itself rides the tooltip.
 // meiva:link ui/web/src/docs/frontend-components/agent-sidebar.md
-function PluginStatCard({ card }: { card: PluginStatCardModel }) {
+function PluginStatCard({ card, now }: { card: PluginStatCardModel; now: Date }) {
   const t = useTranslations("sidebar");
-  const now = useWallDate();
+  const { formatAbsolute } = useTimeFormat();
   const age = card.updatedAt !== null ? formatRelativeTime(card.updatedAt, now) : null;
   const title =
     card.value === null
@@ -349,6 +352,19 @@ function PluginStatCard({ card }: { card: PluginStatCardModel }) {
           {card.detail}
         </span>
       ) : null}
+      {card.resets.map((reset) => {
+        const remainingMs = Date.parse(reset.resets_at) - now.getTime();
+        const text = remainingMs <= 0
+          ? t("pluginStatAwaitingRefresh")
+          : remainingMs < 60_000
+            ? t("pluginStatResetSoon")
+            : t("pluginStatResetIn", { time: formatRelativeTime(reset.resets_at, now) });
+        return (
+          <span key={reset.label} title={formatAbsolute(reset.resets_at)} className="text-xs leading-5 text-muted-foreground">
+            {reset.label} · {text}
+          </span>
+        );
+      })}
     </div>
   );
 }
