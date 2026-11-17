@@ -22,6 +22,7 @@ from pathlib import Path
 import psutil
 import psycopg
 import pytest
+from psycopg.types.json import Jsonb
 
 from base import paths
 from base.cluster.machine import MachineFacts
@@ -430,6 +431,11 @@ def test_transfer_reports_an_external_session_whose_transcript_cannot_move(
     db_conn: psycopg.Connection,
 ) -> None:
     codex_id = _seed_native_agent(db_conn, machine="runner-a", status="idling", harness="codex")
+    db_conn.execute(
+        "UPDATE agents_meta SET birth_config = %s WHERE id = %s",
+        (Jsonb({"llm_model": "gpt-6.1-sol"}), codex_id),
+    )
+    db_conn.commit()
     ws_a = paths.workspace_path(two_runners.home_a, codex_id)
     ws_a.mkdir(parents=True)
     (ws_a / "solution.py").write_text("print('codex transferred')", encoding="utf-8")
@@ -594,3 +600,31 @@ def test_transfer_refuses_an_over_budget_workspace_and_reports_both_axes(
         "SELECT machine, status FROM agents_meta WHERE id = %s", (agent_id,)
     ).fetchone()
     assert meta_row == ("runner-a", "terminated")
+
+
+@pytest.mark.parametrize("status", ["running", "idling", "terminated"])
+def test_self_transfer_appointment_has_no_submission_wake(
+    two_runners: TwoRunnerCluster,
+    db_conn: psycopg.Connection,
+    status: str,
+) -> None:
+    agent_id = _seed_native_agent(db_conn, machine="runner-a", status=status)
+    before = db_conn.execute(
+        "SELECT count(*) FROM inbound_messages WHERE agent_id=%s", (agent_id,)
+    ).fetchone()
+    answer = two_runners.client.post(
+        f"/api/agents/{agent_id}/transfer",
+        params={"at": "+60s"},
+        json={"source": f"agent:{agent_id}", "to_machine": "runner-b", "message": "moving"},
+    )
+    assert answer.status_code == 200, answer.text
+    db_conn.commit()
+    assert (
+        db_conn.execute(
+            "SELECT count(*) FROM inbound_messages WHERE agent_id=%s", (agent_id,)
+        ).fetchone()
+        == before
+    )
+    assert db_conn.execute(
+        "SELECT machine,status FROM agents_meta WHERE id=%s", (agent_id,)
+    ).fetchone() == ("runner-a", status)

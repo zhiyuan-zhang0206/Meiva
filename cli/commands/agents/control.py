@@ -337,6 +337,11 @@ def cmd_agents_interrupt(
 # The agent exits after its current turn and a fresh process is respawned attached to the
 # same agent_id (history preserved). `--config` merges a per-agent overlay before the
 # restart. A dead agent returns `already_terminated` — use `resurrect` instead.
+def _require_appointment_source(at: str | None, source: str | None) -> None:
+    if at is not None and source is None:
+        raise ProvenanceError("--at requires explicit --source")
+
+
 def cmd_agents_restart(
     access: GatewayAccess,
     agent_id: int,
@@ -344,11 +349,16 @@ def cmd_agents_restart(
     *,
     source: str | None = None,
     message: str | None = None,
+    at: str | None = None,
+    scheduled_attempt: bool = False,
 ) -> int:
+    _require_appointment_source(at, source)
     if not message or not message.strip():
         print("restart requires a non-blank --message", file=sys.stderr)
         return 1
-    url = _api(access, f"agents/{agent_id}/restart")
+    url = _api(
+        access, f"agents/{agent_id}/restart" + ("/scheduled-attempt" if scheduled_attempt else "")
+    )
     payload: dict[str, object] = {**_explicit_caller(source), "message": message}
     if config_json is not None:
         try:
@@ -362,6 +372,7 @@ def cmd_agents_restart(
         payload["config_overlay"] = config_overlay
     resp = http_dial.post(
         url,
+        params={"at": at} if at is not None else None,
         json=payload or None,
         timeout=_TIMEOUT_S,
         headers=gateway_auth_headers(access),
@@ -378,6 +389,14 @@ def cmd_agents_restart(
         )
         return 1
     resp.raise_for_status()
+    if at is not None:
+        answer = response_object(resp)
+        print(
+            f"schedule_id={answer['schedule_id']} run_at={answer['run_at']}; "
+            f"cancel: meiva schedules cancel {answer['schedule_id']}"
+        )
+        return 0
+
     print(f"  ✓ agent {agent_id} restart: {response_object(resp).get('status')}")
     return 0
 
@@ -556,7 +575,10 @@ def cmd_agents_transfer(
     to_machine: str,
     source: str | None = None,
     message: str | None = None,
+    at: str | None = None,
+    scheduled_attempt: bool = False,
 ) -> int:
+    _require_appointment_source(at, source)
     cleaned_machine = to_machine.strip()
     if not cleaned_machine:
         raise ValueError("to_machine cannot be empty")
@@ -566,7 +588,11 @@ def cmd_agents_transfer(
         **({"message": message} if message is not None else {}),
     }
     resp = http_dial.post(
-        _api(access, f"agents/{agent_id}/transfer"),
+        _api(
+            access,
+            f"agents/{agent_id}/transfer" + ("/scheduled-attempt" if scheduled_attempt else ""),
+        ),
+        params={"at": at} if at is not None else None,
         json=payload,
         timeout=_TRANSFER_TIMEOUT_S,
         headers=gateway_auth_headers(access),
@@ -574,6 +600,14 @@ def cmd_agents_transfer(
     if resp.status_code >= 400:
         print(resp.text, file=sys.stderr)
     resp.raise_for_status()
+    if at is not None:
+        answer = response_object(resp)
+        print(
+            f"schedule_id={answer['schedule_id']} run_at={answer['run_at']}; "
+            f"cancel: meiva schedules cancel {answer['schedule_id']}"
+        )
+        return 0
+
     ans = TransferAgentResponse.model_validate(resp.json())
     extras: list[str] = []
     if ans.killed_shell_sessions:

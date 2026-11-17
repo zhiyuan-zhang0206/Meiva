@@ -124,6 +124,8 @@ class _RestartOptions:
     config: str | None
     source: str | None
     message: str | None
+    at: str | None
+    scheduled_attempt: bool
 
 
 @dataclass(frozen=True)
@@ -147,6 +149,8 @@ class _TransferOptions:
     to_machine: str
     source: str | None
     message: str | None
+    at: str | None
+    scheduled_attempt: bool
 
 
 @dataclass(frozen=True)
@@ -291,6 +295,8 @@ def _h_agents_restart(args: argparse.Namespace) -> int:
             opts.config,
             source=opts.source,
             message=opts.message,
+            at=opts.at,
+            scheduled_attempt=opts.scheduled_attempt,
         )
     except ProvenanceError as exc:
         print(f"meiva: {exc}", file=sys.stderr)
@@ -368,6 +374,8 @@ def _h_agents_transfer(args: argparse.Namespace) -> int:
             to_machine=opts.to_machine,
             source=opts.source,
             message=opts.message,
+            at=opts.at,
+            scheduled_attempt=opts.scheduled_attempt,
         )
     except ProvenanceError as exc:
         print(f"meiva: {exc}", file=sys.stderr)
@@ -622,6 +630,12 @@ def add_agents_parser(sub: argparse._SubParsersAction[argparse.ArgumentParser]) 
         metavar="TEXT",
         help="natural-language explanation delivered to the agent (required on restart)",
     )
+    agents_restart_p.add_argument(
+        "--at", help="one-shot future attempt: +60s, +10m or ISO timestamp"
+    )
+    agents_restart_p.add_argument(
+        "--scheduled-attempt", action="store_true", help=argparse.SUPPRESS
+    )
     agents_restart_p.set_defaults(func=_h_agents_restart)
 
     agents_resurrect_p = agents_sub.add_parser(
@@ -654,6 +668,12 @@ def add_agents_parser(sub: argparse._SubParsersAction[argparse.ArgumentParser]) 
         type=_nonblank_machine,
         metavar="MACHINE",
         help="target machine name",
+    )
+    agents_transfer_p.add_argument(
+        "--at", help="one-shot future attempt: +60s, +10m or ISO timestamp"
+    )
+    agents_transfer_p.add_argument(
+        "--scheduled-attempt", action="store_true", help=argparse.SUPPRESS
     )
     agents_transfer_p.set_defaults(func=_h_agents_transfer)
 

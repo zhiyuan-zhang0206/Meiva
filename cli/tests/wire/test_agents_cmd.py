@@ -569,3 +569,35 @@ def test_agents_transfer_parser_requires_target_and_message_choice(
     err = capsys.readouterr().err
     assert "--to" in err
     assert "one of the arguments --message --no-message is required" in err
+
+
+@pytest.mark.parametrize("action", ["transfer", "restart"])
+def test_scheduled_lifecycle_wire(
+    wire: PublicGateway, capsys: pytest.CaptureFixture[str], action: str
+) -> None:
+    seen = wire.respond("post", {"schedule_id": 123, "run_at": "2026-11-18T00:00:00+00:00"})
+    extra = ["--to", "runner-b"] if action == "transfer" else []
+    assert (
+        wire.run(
+            "agents",
+            action,
+            "42",
+            "--at",
+            "+60s",
+            "--source",
+            "agent:42",
+            "--message",
+            "wrap up",
+            *extra,
+        )
+        == 0
+    )
+    assert seen["params"] == {"at": "+60s"}
+    assert seen["json"]["source"] == "agent:42"
+    assert "schedule_id=123" in capsys.readouterr().out
+
+
+@pytest.mark.parametrize("action", ["transfer", "restart"])
+def test_scheduled_lifecycle_needs_explicit_source(wire: PublicGateway, action: str) -> None:
+    extra = ["--to", "runner-b"] if action == "transfer" else []
+    assert wire.run("agents", action, "42", "--at", "+60s", "--message", "wrap up", *extra) == 2

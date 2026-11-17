@@ -9,7 +9,8 @@ from pathlib import Path
 from typing import Literal
 
 import psycopg
-from fastapi import APIRouter, Body, HTTPException, Request
+from fastapi import APIRouter, Body, HTTPException, Query, Request
+from fastapi.responses import JSONResponse
 from psycopg_pool import ConnectionPool, PoolTimeout
 
 from base.agents.birth.harness import coerce_harness
@@ -273,6 +274,7 @@ def _prepare_restart_validation_blocking(
     *,
     catalog: ModelCatalog,
     home: Path,
+    allow_running: bool = False,
 ) -> tuple[Harness, Harness, str]:
     with pool.connection() as conn:
         row = query_one(
@@ -297,7 +299,7 @@ def _prepare_restart_validation_blocking(
         _verify_restart_preconditions(
             conn,
             agent_id,
-            status,
+            "idling" if allow_running and status == "running" else status,
             current_harness,
             target_harness,
             at_turn_end=body.at_turn_end,
@@ -327,11 +329,8 @@ async def _resolve_restart_harness_probe(
     machine: str,
     overlay: Mapping[str, object] | None,
 ) -> tuple[ProbedHarnessModel, ...] | None:
-    if target_harness is Harness.MEIVA or not {
-        "llm_model",
-        "reasoning_effort",
-        "harness",
-    }.intersection(overlay or {}):
+    _ = overlay
+    if target_harness is Harness.MEIVA:
         return None
     rows: Sequence[HarnessAvailability] = await gateway_ensure_harnesses(request)(machine)
     row = next((item for item in rows if item.harness is target_harness), None)
@@ -363,7 +362,11 @@ def _validate_restart_model_blocking(
         resolved = validate_restart_model_config(
             cur,
             agent_id,
-            body.config_overlay or {},
+            (
+                {"harness": target_harness.value, **(body.config_overlay or {})}
+                if target_harness is not Harness.MEIVA
+                else body.config_overlay or {}
+            ),
             catalog=catalog,
             default_model=default_model,
             target=RestartHarnessTarget(
@@ -387,13 +390,15 @@ def _validate_restart_model_blocking(
 
 @router.post(
     "/api/agents/{agent_id}/restart",
+    response_model=RestartAgentResponse,
     description="Enqueue restart or harness switch on the agent's home runner.\n\nRestart requires a non-empty message. For native meiva agents while alive,\nthe current turn reaches claim, returns normally and flushes its checkpoint.\nFor harness switching, external harnesses, or terminated agents, an exact\n4-step transition sequence settles, drops, updates harness, and resurrects.\n\nWith `at_turn_end` (the agent's own restart, `source` must be `agent:<id>`), the\nsame validation runs and the restart is recorded as a pending command that the\nhost applies when the running turn ends, on any harness, so a running agent is\naccepted.",
 )
 async def post_agent_restart(
     agent_id: int,
     request: Request,
     body: RestartAgentRequest,
-) -> RestartAgentResponse:
+    at: str | None = Query(default=None, include_in_schema=False),
+) -> RestartAgentResponse | JSONResponse:
     if not body.message or not body.message.strip():
         raise HTTPException(status_code=422, detail="Restart requires a non-empty message")
     if body.at_turn_end and body.source != f"agent:{agent_id}":
@@ -412,6 +417,7 @@ async def post_agent_restart(
         body,
         catalog=catalog,
         home=state.gateway_process.home,
+        allow_running=at is not None,
     )
     probed_models = await _resolve_restart_harness_probe(
         request, target_harness, machine, body.config_overlay
@@ -427,6 +433,44 @@ async def post_agent_restart(
         target_harness=target_harness,
         probed_models=probed_models,
     )
+
+    if at is not None:
+        if "source" not in await request.json():
+            raise HTTPException(422, "--at requires explicit source")
+        from json import dumps
+
+        from gateway.agents.launch.scheduled_lifecycle import (
+            arm_appointment,
+            validate_appointment_machine_blocking,
+        )
+
+        if body.at_turn_end:
+            raise HTTPException(422, "at_turn_end cannot be combined with --at")
+        await asyncio.to_thread(validate_appointment_machine_blocking, request, agent_id)
+
+        command = [
+            "meiva",
+            "agents",
+            "restart",
+            str(agent_id),
+            "--source",
+            body.source,
+            "--message",
+            body.message,
+            "--scheduled-attempt",
+        ]
+        if body.config_overlay is not None:
+            command.extend(["--config", dumps(body.config_overlay)])
+        receipt = await arm_appointment(
+            request,
+            agent_id,
+            action="restart",
+            at=at,
+            source=body.source,
+            message=body.message,
+            command=command,
+        )
+        return JSONResponse(receipt)
 
     forwarded = await forward_to_home_machine(
         agent_id,
@@ -516,3 +560,17 @@ def _request_compaction_blocking(
             raise HTTPException(status_code=409, detail=f"agent {agent_id} is terminated")
         inbound_id = insert_compact_request_inbound(conn, agent_id, database=db, bus=bus)
     return CompactAgentResponse(inbound_id=inbound_id)
+
+
+@router.post("/api/agents/{agent_id}/restart/scheduled-attempt", include_in_schema=False)
+async def scheduled_restart_attempt(
+    agent_id: int, request: Request, body: RestartAgentRequest
+) -> object:
+    from gateway.agents.launch.scheduled_lifecycle import single_attempt
+
+    async def execute() -> object:
+        return await post_agent_restart(agent_id, request, body, at=None)
+
+    return await single_attempt(
+        request, agent_id, action="restart", source=body.source, execute=execute
+    )

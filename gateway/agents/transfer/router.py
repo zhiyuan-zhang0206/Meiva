@@ -13,26 +13,25 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import logging
-import random
-from dataclasses import dataclass
+from dataclasses import replace
 from typing import Annotated, Literal
 
 import httpx
 import psycopg
-from fastapi import APIRouter, HTTPException, Path, Request
-from fastapi.responses import Response
+from fastapi import APIRouter, HTTPException, Path, Query, Request
+from fastapi.responses import JSONResponse, Response
 from psycopg_pool import ConnectionPool
 
 from base import telemetry
+from base.api_contracts.agent_contract import Harness
 from base.clock.ids import new_uuid
-from base.cluster.machine import GatewayAccess, gateway_auth_headers
-from base.db import Database
+from base.cluster.machine import gateway_auth_headers
 from base.db.rows import query_one
 from base.db.transaction import write_transaction
 from base.events.live.announce import publish_agent_updated
-from base.events.live.bus import EventBus
 from base.telemetry.audit_events import prepare_event_log, record_audit
-from gateway.agents.transfer.bundle_store import TransferBundleStore
+from gateway.agents.transfer.dependencies import TransferDeps, transfer_deps
+from gateway.agents.transfer.harness_precheck import validate_agent_transfer_harness
 from gateway.agents.transfer.rows import (
     AgentMetaRow,
     LifecycleRow,
@@ -55,7 +54,6 @@ from gateway.agents.transfer.transfer_plan import (
     evaluate_precheck,
     verify_cutover_cas,
 )
-from gateway.http.config import GatewayAppState, gateway_rpc, state_as
 from ops.agent_transfer import (
     WorkspaceTransferCorruptError,
     WorkspaceTransferLimits,
@@ -63,8 +61,7 @@ from ops.agent_transfer import (
     check_bundle_stream_size,
     decode_bundle,
 )
-from ops.agent_transfer.limits import workspace_transfer_limits_from_read_model
-from ops.cluster.rpc import ClusterOpFailed, ClusterOpUnreachable, RpcClient
+from ops.cluster.rpc import ClusterOpFailed, ClusterOpUnreachable
 from ops.rpc_schemas import (
     ResurrectAgentRequest,
     TerminateAgentRequest,
@@ -87,42 +84,6 @@ _PREPARE_TIMEOUT_S = 15.0
 _FINALIZE_TIMEOUT_S = 15.0
 _EXPORT_TIMEOUT_S = 90.0
 _IMPORT_TIMEOUT_S = 90.0
-
-
-@dataclass(frozen=True)
-class TransferDeps:
-    db_pool: ConnectionPool
-    db: Database
-    rpc: RpcClient
-    bus: EventBus
-    bundles: TransferBundleStore
-    access: GatewayAccess
-    rng: random.Random
-    # meiva:note
-    # The ceilings the runners enforce, read from the same cluster-pinned pair so the gateway refuses
-    # exactly what the source was configured to send and the target is configured to accept.
-    limits: WorkspaceTransferLimits
-
-
-# meiva:note
-# The staging store the app root builds for in-flight transfer bundles; this directory's route
-# serves from it, so the directory declares it.
-class TransferAppState(GatewayAppState):
-    agent_transfer_bundles: TransferBundleStore
-
-
-def _deps_from_request(request: Request) -> TransferDeps:
-    state = state_as(request, TransferAppState)
-    return TransferDeps(
-        db_pool=state.db_pool,
-        db=state.db,
-        rpc=gateway_rpc(request),
-        bus=state.bus,
-        bundles=state.agent_transfer_bundles,
-        access=state.gateway_access,
-        rng=state.gateway_config.rng,
-        limits=workspace_transfer_limits_from_read_model(state.config_authority),
-    )
 
 
 def _query_agent_facts(
@@ -185,7 +146,7 @@ def _query_machine_facts(conn: psycopg.Connection, name: str) -> MachineFacts | 
 
 
 def _precheck_blocking(
-    pool: ConnectionPool, agent_id: int, to_machine: str
+    pool: ConnectionPool, agent_id: int, to_machine: str, *, allow_running: bool = False
 ) -> TransferPlan | TransferRefusal:
     with pool.connection() as conn:
         agent = _query_agent_facts(conn, agent_id, for_update=False)
@@ -193,6 +154,8 @@ def _precheck_blocking(
             return evaluate_precheck(
                 TransferPrecheckFacts(agent=None, agent_id=agent_id, to_machine=to_machine)
             )
+        if allow_running and agent.status == "running":
+            agent = replace(agent, status="idling")
         pending_lc, pending_up = _query_blocking_facts(conn, agent_id)
         return evaluate_precheck(
             TransferPrecheckFacts(
@@ -537,6 +500,34 @@ async def _terminate_source_if_idling(
 
 
 # meiva:note
+# Submission may ignore a running turn; execution always retains the ordinary settled-state gate.
+async def precheck_agent_transfer(
+    deps: TransferDeps,
+    *,
+    agent_id: int,
+    body: TransferAgentRequest,
+    allow_running: bool = False,
+) -> TransferPlan:
+    decision = await asyncio.to_thread(
+        _precheck_blocking,
+        deps.db_pool,
+        agent_id,
+        body.to_machine,
+        allow_running=allow_running,
+    )
+    if isinstance(decision, TransferRefusal):
+        raise HTTPException(decision.status_code, decision.detail)
+    await validate_agent_transfer_harness(
+        deps.db_pool,
+        deps.ensure_harnesses,
+        agent_id,
+        Harness(decision.snapshot.harness),
+        body.to_machine,
+    )
+    return decision
+
+
+# meiva:note
 # Run the complete cross-machine agent transfer over explicit typed `TransferDeps` collaborators.
 async def execute_agent_transfer(
     deps: TransferDeps,
@@ -544,14 +535,7 @@ async def execute_agent_transfer(
     agent_id: int,
     body: TransferAgentRequest,
 ) -> TransferAgentResponse:
-    decision = await asyncio.to_thread(
-        _precheck_blocking,
-        deps.db_pool,
-        agent_id,
-        body.to_machine,
-    )
-    if isinstance(decision, TransferRefusal):
-        raise HTTPException(decision.status_code, decision.detail)
+    decision = await precheck_agent_transfer(deps, agent_id=agent_id, body=body)
 
     snapshot = decision.snapshot
     transfer_id = new_uuid(deps.rng).hex
@@ -711,7 +695,7 @@ async def get_staged_transfer_bundle(
     transfer_id: Annotated[str, Path(pattern=r"^[0-9a-f]{32}$")],
     request: Request,
 ) -> Response:
-    bundles = state_as(request, TransferAppState).agent_transfer_bundles
+    bundles = transfer_deps(request).bundles
     content = bundles.get(transfer_id)
     if content is None:
         raise HTTPException(404, "staged transfer bundle not found")
@@ -732,5 +716,50 @@ async def post_agent_transfer(
     agent_id: Annotated[int, Path(gt=0, lt=2**63)],
     body: TransferAgentRequest,
     request: Request,
-) -> TransferAgentResponse:
-    return await execute_agent_transfer(_deps_from_request(request), agent_id=agent_id, body=body)
+    at: str | None = Query(default=None, include_in_schema=False),
+) -> TransferAgentResponse | JSONResponse:
+    deps = transfer_deps(request)
+    if at is not None:
+        from gateway.agents.launch.scheduled_lifecycle import arm_appointment
+
+        if "source" not in await request.json():
+            raise HTTPException(422, "--at requires explicit source")
+        await precheck_agent_transfer(deps, agent_id=agent_id, body=body, allow_running=True)
+        command = [
+            "meiva",
+            "agents",
+            "transfer",
+            str(agent_id),
+            "--to",
+            body.to_machine,
+            "--source",
+            body.source,
+            "--scheduled-attempt",
+        ]
+        if body.message is not None:
+            command.extend(["--message", body.message])
+        receipt = await arm_appointment(
+            request,
+            agent_id,
+            action="transfer",
+            at=at,
+            source=body.source,
+            message=body.message,
+            command=command,
+        )
+        return JSONResponse(receipt)
+    return await execute_agent_transfer(deps, agent_id=agent_id, body=body)
+
+
+@router.post("/api/agents/{agent_id}/transfer/scheduled-attempt", include_in_schema=False)
+async def scheduled_transfer_attempt(
+    agent_id: int, request: Request, body: TransferAgentRequest
+) -> object:
+    from gateway.agents.launch.scheduled_lifecycle import single_attempt
+
+    async def execute() -> object:
+        return await execute_agent_transfer(transfer_deps(request), agent_id=agent_id, body=body)
+
+    return await single_attempt(
+        request, agent_id, action="transfer", source=body.source, execute=execute
+    )
