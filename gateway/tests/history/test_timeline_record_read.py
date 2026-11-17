@@ -211,3 +211,33 @@ def test_quote_post_requires_the_exact_record_offset(
     ).fetchone()
     assert row is not None
     assert row[0] == (1 if expected_status == 201 else 0)
+
+
+@pytest.mark.parametrize("harness", ["claude_code", "codex", "antigravity"])
+@pytest.mark.parametrize("status", ["running", "idling", "terminated"])
+def test_pending_record_activity_requires_a_running_agent(
+    client: GatewayTestClient,
+    db_conn: psycopg.Connection,
+    harness: str,
+    status: str,
+) -> None:
+    agent = _record_agent(db_conn, harness)
+    db_conn.execute("UPDATE agents_meta SET status = %s WHERE id = %s", (status, agent))
+    db_conn.commit()
+    item = TimelineItem(
+        item_id="h413.0",
+        kind="agent_code",
+        payload="Bash: interrupted command",
+        created_at="2026-11-12T08:56:00+00:00",
+        activity_pending=True,
+    ).model_dump(mode="json")
+    client.app.state.rpc = ScriptedRunner({"items": [item], "has_more": True, "size": 9800})
+
+    response = client.get(f"/api/agents/{agent}/timeline")
+
+    assert response.status_code == 200
+    body = response.json()
+    [shown] = body["items"]
+    assert shown["activity_pending"] is (True if status == "running" else None)
+    assert (shown["item_id"], shown["payload"]) == (item["item_id"], item["payload"])
+    assert (body["has_more"], body["msg_count"]) == (True, 9800)

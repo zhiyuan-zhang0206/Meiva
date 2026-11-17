@@ -26,6 +26,7 @@ class BridgeConfig:
     auth: AuthConfig = field(default_factory=AuthConfig)
     cancel_settle_seconds: float = 5.0
     max_buffered_events: int = 256
+    max_buffer_size: int = 64 * 1024 * 1024
     # meiva:note
     # The zone the CLI process interprets a cron expression in: its own `TZ` when the launcher gives it
     # one, else the host process's local zone, which the CLI inherits. The launcher knows it and hands

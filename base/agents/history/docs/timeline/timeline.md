@@ -49,7 +49,11 @@ External harness timelines are projected on demand from each CLI's session recor
 (`base/agents/history/transcript_timeline/`, ids `h<offset>.<n>`; see
 [reading a record](../../../../lm/harness/docs/transcript-projection.md)). An unanswered
 tool call in an open turn carries `activity_pending=True` on its `agent_code` item until
-its result lands in the record (`activity_pending=None`). The reply-suggestion excerpt
+its result lands in the record (`activity_pending=None`). The gateway clears
+`activity_pending` when the agent status is `idling` or
+`terminated`: an aborted transcript can end with an unmatched tool call forever.
+Running agents retain the record's live activity flags across Claude Code,
+Codex and Antigravity. The reply-suggestion excerpt
 consumes only completed user-facing chat blocks.
 
 ## Window unit and readers

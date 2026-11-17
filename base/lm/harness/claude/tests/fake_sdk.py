@@ -142,6 +142,7 @@ class ClaudeAgentOptions:
     tools: list[str] | None = None
     permission_mode: str | None = None
     max_turns: int | None = None
+    max_buffer_size: int | None = None
     setting_sources: list[str] | None = None
     strict_mcp_config: bool = False
     include_partial_messages: bool = False
