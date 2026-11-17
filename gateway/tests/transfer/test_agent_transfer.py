@@ -15,6 +15,7 @@ import sys
 import tempfile
 import uuid
 from collections.abc import Generator
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, replace
 from datetime import UTC, datetime
 from pathlib import Path
@@ -22,8 +23,10 @@ from pathlib import Path
 import psutil
 import psycopg
 import pytest
+from psycopg.types.json import Jsonb
 
 from base import paths
+from base.api_contracts.agent_contract import Harness, HarnessBilling
 from base.cluster.machine import MachineFacts
 from base.config.service_read import ConfigAuthority
 from base.db import Database, create_agent
@@ -39,6 +42,7 @@ from base.sessions.tests.poll_until import poll_until
 from gateway.agents.transfer.router import CutoverConflictError, commit_cutover_blocking
 from gateway.agents.transfer.transfer_plan import AgentTransferSnapshot
 from gateway.cluster.process_boot import LOADED_IMAGE
+from gateway.schemas.models import HarnessAvailability, HarnessModelOption
 from gateway.tests.auth.gateway_config import (
     GatewayTestClient,
     gateway_test_client,
@@ -429,7 +433,25 @@ def test_transfer_reports_an_external_session_whose_transcript_cannot_move(
     two_runners: TwoRunnerCluster,
     db_conn: psycopg.Connection,
 ) -> None:
+    two_runners.client.app.state.harness_cache.store(
+        "runner-b",
+        [
+            HarnessAvailability(
+                harness=Harness.CODEX,
+                status="available",
+                reason="test destination probe",
+                launchable=True,
+                billing=HarnessBilling.SUBSCRIPTION,
+                models=[HarnessModelOption(id="gpt-6.1-sol")],
+            )
+        ],
+    )
     codex_id = _seed_native_agent(db_conn, machine="runner-a", status="idling", harness="codex")
+    db_conn.execute(
+        "UPDATE agents_meta SET birth_config = %s WHERE id = %s",
+        (Jsonb({"llm_model": "gpt-6.1-sol"}), codex_id),
+    )
+    db_conn.commit()
     ws_a = paths.workspace_path(two_runners.home_a, codex_id)
     ws_a.mkdir(parents=True)
     (ws_a / "solution.py").write_text("print('codex transferred')", encoding="utf-8")
@@ -594,3 +616,109 @@ def test_transfer_refuses_an_over_budget_workspace_and_reports_both_axes(
         "SELECT machine, status FROM agents_meta WHERE id = %s", (agent_id,)
     ).fetchone()
     assert meta_row == ("runner-a", "terminated")
+
+
+@pytest.mark.parametrize("status", ["running", "idling", "terminated"])
+def test_self_transfer_appointment_has_no_submission_wake(
+    two_runners: TwoRunnerCluster,
+    db_conn: psycopg.Connection,
+    status: str,
+) -> None:
+    agent_id = _seed_native_agent(db_conn, machine="runner-a", status=status)
+    before = db_conn.execute(
+        "SELECT count(*) FROM inbound_messages WHERE agent_id=%s", (agent_id,)
+    ).fetchone()
+    answer = two_runners.client.post(
+        f"/api/agents/{agent_id}/transfer",
+        params={"at": "+60s"},
+        json={"source": f"agent:{agent_id}", "to_machine": "runner-b", "message": "moving"},
+    )
+    assert answer.status_code == 200, answer.text
+    db_conn.commit()
+    assert (
+        db_conn.execute(
+            "SELECT count(*) FROM inbound_messages WHERE agent_id=%s", (agent_id,)
+        ).fetchone()
+        == before
+    )
+    assert db_conn.execute(
+        "SELECT machine,status FROM agents_meta WHERE id=%s", (agent_id,)
+    ).fetchone() == ("runner-a", status)
+
+
+@pytest.mark.parametrize("status", ["idling", "terminated"])
+def test_scheduled_restart_fire_wakes_target_with_restart_note(
+    two_runners: TwoRunnerCluster,
+    db_conn: psycopg.Connection,
+    status: str,
+) -> None:
+    agent_id = _seed_native_agent(db_conn, machine="runner-a", status=status)
+    answer = two_runners.client.post(
+        f"/api/agents/{agent_id}/restart/scheduled-attempt",
+        json={
+            "source": f"agent:{agent_id}",
+            "message": "scheduled restart wake",
+            "config_overlay": {"llm_model": "deepseek-flash"},
+        },
+    )
+    assert answer.status_code == 200, answer.text
+    assert answer.json()["status"] == "enqueued"
+    db_conn.commit()
+    assert db_conn.execute(
+        "SELECT status FROM agents_meta WHERE id=%s", (agent_id,)
+    ).fetchone() == ("idling",)
+    assert db_conn.execute(
+        "SELECT content FROM inbound_messages WHERE agent_id=%s AND kind='system_note' AND payload->>'note_tag'='lifecycle_restart'",
+        (agent_id,),
+    ).fetchall() == [("scheduled restart wake",)]
+
+
+def test_scheduled_native_restart_claim_during_validation_notifies_both_actors(
+    two_runners: TwoRunnerCluster,
+    db_conn: psycopg.Connection,
+) -> None:
+    target = _seed_native_agent(db_conn, machine="runner-a", status="idling")
+    caller = _seed_native_agent(db_conn, machine="runner-a", status="idling")
+    db_conn.execute("UPDATE agents_meta SET status='running' WHERE id=%s", (target,))
+
+    def blocked_validation() -> bool:
+        db_conn.execute("SELECT pg_stat_clear_snapshot()")
+        row = db_conn.execute(
+            "SELECT EXISTS (SELECT 1 FROM pg_stat_activity WHERE datname=current_database() "
+            "AND wait_event_type='Lock' AND query LIKE 'SELECT config_overlay,birth_config,harness%FOR UPDATE%')"
+        ).fetchone()
+        assert row is not None
+        return bool(row[0])
+
+    with ThreadPoolExecutor(max_workers=1) as executor:
+        future = executor.submit(
+            two_runners.client.post,
+            f"/api/agents/{target}/restart/scheduled-attempt",
+            json={
+                "source": f"agent:{caller}",
+                "message": "race attempt",
+                "config_overlay": {"llm_model": "deepseek-flash"},
+            },
+        )
+        try:
+            poll_until(blocked_validation, timeout=5, what="gateway model validation row lock")
+        finally:
+            db_conn.commit()
+        answer = future.result(timeout=15)
+    assert answer.status_code >= 400, answer.text
+    assert "running" in answer.text
+    db_conn.commit()
+    assert db_conn.execute("SELECT status FROM agents_meta WHERE id=%s", (target,)).fetchone() == (
+        "running",
+    )
+    assert (
+        db_conn.execute(
+            "SELECT kind FROM inbound_messages WHERE agent_id=%s AND kind IN ('restart','terminate')",
+            (target,),
+        ).fetchall()
+        == []
+    )
+    assert db_conn.execute(
+        "SELECT agent_id FROM inbound_messages WHERE agent_id=ANY(%s) AND kind='chat' AND content LIKE 'Scheduled restart%%failed:%%' ORDER BY agent_id",
+        ([target, caller],),
+    ).fetchall() == [(target,), (caller,)]

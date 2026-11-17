@@ -1,8 +1,10 @@
-exports = ["bundle_store.py", "router.py", "transfer_plan.py"]
+exports = ["bundle_store.py", "dependencies.py", "harness_precheck.py", "router.py", "transfer_plan.py"]
 
 [uses]
-"router.py" = ["bundle_store.py", "rows.py", "transfer_plan.py"]
-"tests" = ["bundle_store.py", "transfer_plan.py"]
+"harness_precheck.py" = ["rows.py"]
+"dependencies.py" = ["bundle_store.py"]
+"router.py" = ["dependencies.py", "harness_precheck.py", "rows.py", "transfer_plan.py"]
+"tests" = ["bundle_store.py", "harness_precheck.py", "transfer_plan.py"]
 
 [purity]
 "__init__.py" = "strict"

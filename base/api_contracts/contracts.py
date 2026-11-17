@@ -200,6 +200,11 @@ ROUTE_CONTRACTS: dict[tuple[str, str], RouteContract] = {
         Idempotency.NON_IDEMPOTENT,
         note="a repeat dispatches another restart; HTTP intent has no durable receipt",
     ),
+    ("POST", "/api/agents/{agent_id}/restart/scheduled-attempt"): RouteContract(
+        Idempotency.NON_IDEMPOTENT,
+        note="one strict scheduled restart attempt; a repeat checks current status and can "
+        "dispatch another restart and coordination notice",
+    ),
     ("POST", "/api/agents/{agent_id}/interrupt"): RouteContract(
         Idempotency.NON_IDEMPOTENT,
         note="a repeat interrupts whatever turn is running then and queues its message again; the HTTP intent names no turn",
@@ -402,6 +407,11 @@ ROUTE_CONTRACTS: dict[tuple[str, str], RouteContract] = {
     ("GET", "/api/internal/agent-transfers/{transfer_id}/bundle"): RouteContract(
         note="read-only: the bytes staged for one in-flight transfer — a repeat re-reads the same "
         "bundle, and 404 once the import scope that staged it ends",
+    ),
+    ("POST", "/api/agents/{agent_id}/transfer/scheduled-attempt"): RouteContract(
+        Idempotency.NON_IDEMPOTENT,
+        note="one strict scheduled transfer attempt; a repeat checks current placement and "
+        "can transfer again after another move and deliver coordination notices again",
     ),
     ("POST", "/api/agents/{agent_id}/transfer"): RouteContract(
         Idempotency.NON_IDEMPOTENT,

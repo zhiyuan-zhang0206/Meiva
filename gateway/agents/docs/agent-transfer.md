@@ -28,3 +28,43 @@ Runners do not dial each other directly; the gateway orchestrates a clean three-
    - **Atomic Postgres cutover** (`gateway/agents/transfer/router.py:commit_cutover_blocking`): locks `agents_meta FOR UPDATE`, verifies CAS placement and `status == 'terminated'`, updates `machine = to_machine` while clearing runtime ownership, deletes stale `agent_shell_ttls`, and records the `"transfer"` audit event (`base/events/declarations/audit.py`). If the CAS check or any pre-cutover step fails, `workspace_transfer_abort` rolls back target staging and `<from_home>/workspaces/<id>` remains intact.
 3. **Step 3 — Insert message & wake (`resurrect-explicit`) on `to_machine`**:
    Once cutover commits and `<to_home>/workspaces/<id>` is active, the gateway composes a transfer completion wake message (`gateway/agents/transfer/transfer_plan.py:compose_transfer_wake_message`) describing the completed transfer, active workspace, closed shells/pages, and caller message. The gateway dispatches `POST /api/agents/{id}/resurrect-explicit` to `to_machine` with `ResurrectAgentRequest(resurrected_by=source, prompt=wake_message)`, resurrecting the agent into `'idling'` with both the `'resurrect'` lifecycle marker and the `'chat'` completion prompt queued on `to_machine`. Source and target workspace cleanups finalize best-effort (`workspace_transfer_finalize`), which removes from `from_machine` only the harness session records that were carried. A record whose transcript could not be carried (no collector for its harness, or no transcript on disk) stays on the source and is named in the response (`harnesses_not_transferred`, printed by `meiva agents transfer`).
+
+## Scheduled lifecycle attempts
+
+`meiva agents transfer ID --to MACHINE --at +60s --source agent:ID` and
+`meiva agents restart ID --at +10m --source agent:ID --message TEXT` submit
+one system-owned `at` schedule. ISO timestamps must include a timezone. The
+receipt includes `schedule_id` and `run_at`; cancel through
+`meiva schedules cancel SCHEDULE_ID` before it fires.
+
+Submission validates placement, configuration and destination harness/model
+availability immediately. A running target is accepted for a future attempt.
+Only a different caller operating on a running target sends a wrap-up notice
+at submission. Self appointments and appointments for sleeping targets send
+no submission message, so an agent can terminate while awaiting its move.
+
+At the deadline the operation makes one attempt, requiring an idling or
+terminated target, including for native restarts. A running turn receives a
+refusal notice without interruption. Success uses the ordinary destination
+wake/restart note and sends an agent caller a completion receipt. A failed
+self appointment messages the target, resurrecting it if needed. A peer's
+failed appointment messages its agent caller; it additionally messages the
+target only when that target was running at the attempt. A sleeping peer stays
+asleep on an environment failure. There is no polling, inbox lock or automatic
+harness rollback.
+
+External harness transfer prechecks probe the destination runner and validate
+its effective birth/overlay model and reasoning effort before stopping the
+source. External restarts probe launchability even without a model or harness
+overlay edit. Workspace export still enforces transfer byte and file ceilings
+before packing; its runtime refusal follows the same outcome routing.
+
+
+Scheduled restart uses a dedicated internal runner action. Its row-locked
+quiescence guard runs before host settlement; a claim that wins during gateway
+validation therefore rejects the attempt without stopping that running turn.
+An accepted scheduled restart follows the existing transition/resurrection path
+for both idling and terminated agents, including a same-harness restart, and
+queues the restart note with the wake. Ordinary synchronous restart retains its
+already-terminated response. Failure routing re-reads status so a claim-race
+refusal reaches the now-running target as well as an agent caller.
