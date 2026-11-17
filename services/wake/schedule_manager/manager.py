@@ -778,12 +778,12 @@ class ScheduleManager:
         # status, which the legacy-session cleanup must preserve.
         self._set_status(schedule_id, "stopped")
         # meiva:note
-        # The killed process can never close its own run rows (the kill chain
-        # is SIGKILL — no handler runs); close them now so a stop/restart/
-        # edited-script save does not leave an in-progress "…" row behind (QA
-        # P2-2). A kill that does not route through here leaves its row open
-        # until the manager next launches or reaps this schedule.
-        if session_was_live:
+        # SIGKILL cannot settle daemon runs; upgrades also need cleanup after a prior PTY exit
+        # so their declarative single-flight gate can open.
+        if (
+            session_was_live
+            or revisions.desired(self._pool, schedule_id, machine=self._machine_name) is None
+        ):
             self._close_null_runs(schedule_id)
         _log.info("schedule %s: PTY session %s reaped (%s)", schedule_id, name, mode)
         return True

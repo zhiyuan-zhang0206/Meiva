@@ -76,3 +76,26 @@ def test_delete_cleanup_enqueue_failure_preserves_schedule(
     ):
         router.delete_blocking(pool, sid)
     assert db_conn.execute("SELECT id FROM schedules WHERE id = %s", (sid,)).fetchone() == (sid,)
+
+
+def test_at_creation_receipt_replays_and_rejects_mismatch(
+    gateway_data_plane: None,
+    machine_identity: MachineIdentityReader,
+) -> None:
+    body = {
+        "name": "idempotent-at",
+        "trigger_kind": "at",
+        "run_at": "2030-01-01T00:00:00Z",
+        "script": "pass",
+    }
+    headers = keyed_headers("create-at")
+    with schedule_client(machine=machine_identity) as client:
+        original = client.post("/api/schedules", json=body, headers=headers)
+        assert original.status_code == 201
+        replay = client.post("/api/schedules", json=body, headers=headers)
+        assert replay.status_code == 201
+        assert replay.json()["id"] == original.json()["id"]
+        mismatch = client.post(
+            "/api/schedules", json={**body, "run_at": "2030-01-02T00:00:00Z"}, headers=headers
+        )
+        assert mismatch.status_code == 409
