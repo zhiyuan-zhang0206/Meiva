@@ -108,6 +108,14 @@ def prepare_submit(
 ) -> None:
     if inputs is None or new is None:
         raise RefusedError("scheduled submission requires CLI entry inputs")
+    home = inputs.env.get("HOME")
+    if home is not None:
+        serving = (Path(home) / ".meiva" / "source").resolve()
+        operator = Path(__file__).resolve().parents[3]
+        if operator == serving or Path(inputs.python).is_relative_to(serving):
+            raise RefusedError(
+                "schedule from an independent operator checkout and interpreter; this serving checkout is switched by the update"
+            )
     try:
         prepare(s, args, new)
         submit(s, args, inputs, new)

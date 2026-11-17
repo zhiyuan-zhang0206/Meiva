@@ -124,6 +124,8 @@ pinned target and outcome. The command prints its path. Inspect or cancel it wit
 `meiva update status RECORD` / `meiva update cancel RECORD`. Cancellation refuses
 an executing job. Retain the operator checkout, interpreter and records until the
 operation finishes; they must live outside the serving checkouts being switched.
+Submission refuses the local serving `~/.meiva/source` checkout/interpreter; invoke
+the command with the independent operator checkout's own `.venv/bin/meiva`.
 The host user manager / macOS GUI login must remain available for execution.
 
 At the deadline the job rechecks preparation and queries every directory page
