@@ -127,3 +127,21 @@ this, and that the bookkeeping rows of such a session are ignored and not report
 
 Antigravity supplements the vendor record with verified native reasoning timing facts, because its
 transcript omits durations present in the trajectory. The [adapter contract](../antigravity/docs/antigravity.md#native-reasoning-measurements) describes the separate atomic sidecar and its unknown-data behavior. Timeline items and deliveries are still read-time projections.
+
+
+## Bidirectional parked record windows
+
+The opt-in reading selector uses `RecordFile.prepare_reading`, the same
+`row_at` parser and projector, and bounded backward call/turn context. A plain
+reading request counts all bytes actually read, including boundary checks,
+forward probes, repeated reads and the committed-tail scan, against 16 MiB.
+An over-budget row or context returns an explicit budget refusal.
+
+Compressed records make one archive streaming pass per request. The reader first
+retains the complete target row, then shares the remaining 16 MiB retained region
+between older and newer context. It tracks physical compressed bytes, decoded
+bytes, stream passes and retained bytes separately. The retained-region cap is
+not a total decompression-work or process-RSS bound; the archive is still consumed
+to determine the real complete-record tail. A row larger than the retained cap
+is refused. A clipped buffer edge never proves source exhaustion, and a partial
+final line never becomes a qualified target.

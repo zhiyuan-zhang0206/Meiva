@@ -92,7 +92,7 @@ async def _record_items(
             gateway_state(request).db,
             target_machine=machine,
             kind="harness_timeline_read",
-            payload=read.model_dump(),
+            payload=read.wire_payload(),
             timeout_s=3.0,
             retries=0,
         )

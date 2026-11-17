@@ -359,6 +359,9 @@ ROUTE_CONTRACTS: dict[tuple[str, str], RouteContract] = {
         note="task patch requires a key; immutable result shares the notification transaction",
     ),
     ("GET", "/api/agents/{agent_id}/timeline"): RouteContract(),
+    ("GET", "/api/agents/{agent_id}/timeline/window"): RouteContract(
+        note="source-owned reading window with verified anchor or directional cursor"
+    ),
     ("GET", "/api/agents/{agent_id}/timeline/retained"): RouteContract(
         note="read-only retained boundary window, independent of the live checkpoint head"
     ),

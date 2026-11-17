@@ -10,11 +10,15 @@ from __future__ import annotations
 
 from typing import Literal
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from base.agents.messages.inbound_images import TimelineUploadFile
 from base.agents.messages.quote import Quote
 from base.agents.sdk.tally import SdkCall
+
+
+def _missing_reading_locator(value: object) -> bool:
+    return value is None
 
 
 class TimelineItem(BaseModel):
@@ -43,6 +47,7 @@ class TimelineItem(BaseModel):
     """
 
     item_id: str
+    reading_locator: str | None = Field(default=None, exclude_if=_missing_reading_locator)
     quote: Quote | None = None
     activity_pending: bool | None = None
     kind: Literal[
@@ -117,3 +122,11 @@ class TimelineItem(BaseModel):
     # elsewhere). Read from the AIMessage's meiva_code_ms_by_block (keyed by code
     # block_idx). Drives the detail-block chip "Wrote code for Xs".
     code_elapsed_ms: int | None = None
+
+
+class ReadingWindow(BaseModel):
+    items: list[TimelineItem]
+    reading_source: str | None = None
+    anchor_item_id: str | None = None
+    older_cursor: str | None = None
+    newer_cursor: str | None = None

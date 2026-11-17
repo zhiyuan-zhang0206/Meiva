@@ -767,6 +767,22 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/agents/{agent_id}/timeline/window": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["get_reading_window_api_agents__agent_id__timeline_window_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/agents/{agent_id}/reply-suggestion": {
         parameters: {
             query?: never;
@@ -3521,6 +3537,13 @@ export interface components {
             created_at?: string | null;
             text: string;
         };
+        ReadingWindow: {
+            items: components["schemas"]["TimelineItem"][];
+            reading_source?: string | null;
+            anchor_item_id?: string | null;
+            older_cursor?: string | null;
+            newer_cursor?: string | null;
+        };
         RebuildProgressOut: {
             id: number;
             status: "pending" | "running" | "done" | "failed";
@@ -4134,6 +4157,7 @@ export interface components {
         };
         TimelineItem: {
             item_id: string;
+            reading_locator?: string | null;
             quote?: components["schemas"]["Quote"] | null;
             activity_pending?: boolean | null;
             kind: "inbound_chat" | "inbound_compact_summary" | "inbound_compact_request" | "attach" | "agent_chat" | "agent_code" | "agent_reasoning" | "code_output" | "system_prompt" | "system_marker";
@@ -4160,6 +4184,7 @@ export interface components {
             items: components["schemas"]["TimelineItem"][];
             msg_count: number;
             has_more: boolean;
+            reading_source?: string | null;
         };
         TimelineUploadFile: {
             name: string;
@@ -5785,6 +5810,40 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["RetainedTimelineResponse"];
+                };
+            };
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_reading_window_api_agents__agent_id__timeline_window_get: {
+        parameters: {
+            query?: {
+                anchor?: string | null;
+                before?: string | null;
+                after?: string | null;
+                limit?: number | null;
+            };
+            header?: never;
+            path: {
+                agent_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ReadingWindow"];
                 };
             };
             422: {

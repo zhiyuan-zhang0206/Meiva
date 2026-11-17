@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from collections.abc import Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -42,11 +42,20 @@ class Block:
     rows: tuple[FileRow, ...]
 
 
+class RecordReadBudgetError(ValueError):
+    pass
+
+
 class RecordFile:
     def __init__(self, path: Path) -> None:
         self._path = path
         self.bytes_read = 0
         self._floor = 0
+        self._read_budget: int | None = None
+
+    def prepare_reading(self, offset: int) -> None:
+        self._read_budget = self.bytes_read + MAX_BLOCK_BYTES
+        self.prepare_anchor(offset)
 
     # meiva:note
     # Gets the file ready for a window that ends before the row at `before` (None: at the end). A plain file needs nothing.
@@ -80,6 +89,8 @@ class RecordFile:
             chunks.append(data)
             at += len(data)
             remaining -= len(data)
+        if self._read_budget is not None:
+            raise RecordReadBudgetError("The target row exceeds the record reading budget")
         return None
 
     def revision(self) -> int:
@@ -96,17 +107,14 @@ class RecordFile:
     # meiva:note
     # The end of the last complete line: a row the CLI is still writing is not read.
     def complete_end(self) -> int:
-        with self._path.open("rb") as handle:
-            position = handle.seek(0, 2)
-            while position > 0:
-                low = max(0, position - _CHUNK_BYTES)
-                _ = handle.seek(low)
-                data = handle.read(position - low)
-                self.bytes_read += len(data)
-                cut = data.rfind(b"\n")
-                if cut >= 0:
-                    return low + cut + 1
-                position = low
+        position = self.size()
+        while position > 0:
+            low = max(0, position - _CHUNK_BYTES)
+            data = self._read(low, position)
+            cut = data.rfind(b"\n")
+            if cut >= 0:
+                return low + cut + 1
+            position = low
         return 0
 
     # meiva:note
@@ -134,11 +142,28 @@ class RecordFile:
         return Block(start, end, _file_rows(start, data))
 
     def _read(self, low: int, end: int) -> bytes:
+        if self._read_budget is not None and self.bytes_read + end - low > self._read_budget:
+            raise RecordReadBudgetError("The record reading window exceeds its byte budget")
         with self._path.open("rb") as handle:
             _ = handle.seek(low)
             data = handle.read(end - low)
         self.bytes_read += len(data)
         return data
+
+    # meiva:note
+    # A bounded forward block starts at a verified row end. A clipped final
+    # line stays outside the projection and is not an end-of-source claim.
+    # meiva:link base/lm/harness/docs/transcript-projection.md
+    def rows_forward(self, start: int, want: int = BLOCK_BYTES) -> Block:
+        end = min(self.size(), start + want)
+        if end <= start:
+            return Block(start, start, ())
+        data = self._read(start, end)
+        cut = data.rfind(b"\n")
+        if cut < 0:
+            return Block(start, start, ())
+        data = data[: cut + 1]
+        return Block(start, start + len(data), _file_rows(start, data))
 
     def rows_after(self, start: int) -> Block:
         end = self.complete_end()
@@ -211,6 +236,8 @@ class ZstdRecordFile(RecordFile):
         self._tail = b""
         self._total = 0
         self._complete_record_end = 0
+        self.compressed_bytes_read = 0
+        self.stream_passes = 0
 
     def prepare(self, before: int | None) -> None:
         self._prepare(before, inclusive=False)
@@ -218,11 +245,32 @@ class ZstdRecordFile(RecordFile):
     def prepare_anchor(self, offset: int) -> None:
         self._prepare(offset, inclusive=True)
 
+    # meiva:note
+    # Retain the complete target before allocating its remaining 16MiB region
+    # to older/newer rows. The archive still takes one complete streaming pass.
+    # meiva:link base/lm/harness/docs/transcript-projection.md
+    def prepare_reading(self, offset: int) -> None:
+        retained = _ReadingBytes(offset)
+        position, complete = 0, 0
+        with self._path.open("rb") as handle:
+            self.stream_passes += 1
+            reader = zstandard.ZstdDecompressor().stream_reader(handle, read_across_frames=True)
+            while chunk := reader.read(_STREAM_CHUNK_BYTES):
+                self.bytes_read += len(chunk)
+                position += len(chunk)
+                newline = chunk.rfind(b"\n")
+                if newline >= 0:
+                    complete = position - len(chunk) + newline + 1
+                retained.feed(chunk, position)
+            self.compressed_bytes_read += handle.tell()
+        self._install_tail(retained.data, retained.start + len(retained.data), position, complete)
+
     def _prepare(self, before: int | None, *, inclusive: bool) -> None:
         ring = bytearray()
         position, kept_end = 0, None
         complete_record_end = 0
         with self._path.open("rb") as handle:
+            self.stream_passes += 1
             reader = zstandard.ZstdDecompressor().stream_reader(handle, read_across_frames=True)
             while chunk := reader.read(_STREAM_CHUNK_BYTES):
                 self.bytes_read += len(chunk)
@@ -233,7 +281,11 @@ class ZstdRecordFile(RecordFile):
                 if kept_end is not None:
                     continue
                 kept_end = _retain_anchor_chunk(ring, chunk, position, before, inclusive=inclusive)
+            self.compressed_bytes_read += handle.tell()
         end = position if kept_end is None else kept_end
+        self._install_tail(ring, end, position, complete_record_end)
+
+    def _install_tail(self, ring: bytearray, end: int, total: int, complete: int) -> None:
         start = end - len(ring)
         first = bytes(ring).find(b"\n") if start > 0 else -1
         if start > 0:
@@ -242,8 +294,8 @@ class ZstdRecordFile(RecordFile):
         else:
             self._tail = bytes(ring)
             self._floor = 0
-        self._total = position
-        self._complete_record_end = complete_record_end
+        self._total = total
+        self._complete_record_end = complete
 
     @property
     def held_bytes(self) -> int:
@@ -263,6 +315,9 @@ class ZstdRecordFile(RecordFile):
         known = (b"\n" if self._floor > 0 else b"") + self._tail
         origin = max(self._floor - 1, 0)
         return known[low - origin : end - origin]
+
+    def rows_forward(self, start: int, want: int = BLOCK_BYTES) -> Block:
+        return super().rows_forward(start, min(want, max(0, self.complete_end() - start)))
 
     def rows_after(self, start: int) -> Block:
         raise NotImplementedError("a compressed record is read as a window, never followed")
@@ -285,3 +340,41 @@ def _retain_anchor_chunk(
     if len(ring) > MAX_BLOCK_BYTES:
         del ring[: len(ring) - MAX_BLOCK_BYTES]
     return kept_end
+
+
+@dataclass
+class _ReadingBytes:
+    offset: int
+    data: bytearray = field(default_factory=bytearray)
+    start: int = 0
+    stop: int | None = None
+
+    def feed(self, chunk: bytes, position: int) -> None:
+        if self.stop is not None:
+            low = max(position - len(chunk), self.start + len(self.data))
+            high = min(position, self.stop)
+            if high > low:
+                self.data += chunk[low - (position - len(chunk)) : high - (position - len(chunk))]
+            return
+        self.data += chunk
+        origin = position - len(self.data)
+        newline = (
+            self.data.find(b"\n", max(0, self.offset - origin)) if position > self.offset else -1
+        )
+        if newline >= 0:
+            self._anchor_complete(origin, origin + newline + 1)
+            return
+        if position - self.offset > MAX_BLOCK_BYTES:
+            raise RecordReadBudgetError("The target row exceeds the retained byte budget")
+        if len(self.data) > MAX_BLOCK_BYTES:
+            del self.data[: len(self.data) - MAX_BLOCK_BYTES]
+        self.start = position - len(self.data)
+
+    def _anchor_complete(self, origin: int, end: int) -> None:
+        slack = MAX_BLOCK_BYTES - (end - self.offset)
+        if slack < 0 or self.offset < origin:
+            raise RecordReadBudgetError("The target row exceeds the retained byte budget")
+        self.start = max(origin, self.offset - slack // 2)
+        self.stop = end + slack - (self.offset - self.start)
+        del self.data[self.stop - origin :]
+        del self.data[: self.start - origin]

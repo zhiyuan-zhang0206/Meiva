@@ -57,6 +57,14 @@ from base.agents.history.closing_request import (
     single_segment_history,
 )
 from base.agents.history.delta_read_compat import as_messages, reconstruct_delta_messages
+from base.api_contracts.reading import (
+    NativeReadingSource,
+    ReadingDirection,
+    ReadingSourceUnavailableError,
+    ReadingUnavailableReason,
+    native_reading_checkpoint,
+    native_reading_epoch,
+)
 from base.db import Database
 from base.db.rows import query_all, query_one
 from base.db.transaction import async_write_transaction
@@ -182,6 +190,135 @@ def load_checkpoint_messages(db: Database, agent_id: int) -> list[BaseMessage]:
     # (that happens when the first super-step commits). Absence there is a valid
     # "no messages yet" state, not schema drift, so fall back to [].
     return _stored_messages(ckpt)
+
+
+@dataclass(frozen=True, slots=True)
+class CheckpointTimelineSource:
+    messages: tuple[BaseMessage, ...]
+    boundaries: tuple[str, ...]
+    checkpoint_id: str | None
+    epoch: str
+    current: bool
+
+
+# meiva:note
+# Optional reading metadata and its bodies share one repeatable-read view.
+# This is a history-reader operation; live node publication reads no database
+# to mint locators. Retained selection is identity-qualified after projection.
+# meiva:link base/agents/history/docs/timeline/timeline.md
+def load_checkpoint_timeline_source(
+    db: Database,
+    agent_id: int,
+    depth: int,
+    *,
+    locator: NativeReadingSource | None = None,
+    checkpoint_id: str | None = None,
+    advance: ReadingDirection | None = None,
+) -> CheckpointTimelineSource:
+    from base.agents.history.checkpoint_postgres_walks import HistoryPostgresSaver as PostgresSaver
+    from base.agents.history.checkpoint_serializer import CheckpointSerializer
+
+    if locator is not None and checkpoint_id is not None:
+        raise ValueError("A checkpoint source requires one selector")
+    serde = CheckpointSerializer(allowed_msgpack_modules=STATIC_CHECKPOINT_MSGPACK_TYPES)
+    try:
+        with _checkpoint_saver_connection(db) as conn, conn.transaction():
+            _ = conn.execute("SET TRANSACTION ISOLATION LEVEL REPEATABLE READ, READ ONLY")
+            query = "SELECT checkpoint_id FROM checkpoints WHERE thread_id = %s AND checkpoint_ns = '' AND metadata->>'compact_boundary' = 'true' ORDER BY checkpoint_id DESC"
+            rows = (
+                query_all(conn, _CheckpointIdRow, query, (str(agent_id),))
+                if depth < 0
+                else query_all(
+                    conn, _CheckpointIdRow, query + " LIMIT %s", (str(agent_id), depth + 1)
+                )
+            )
+            boundaries = tuple(row.checkpoint_id for row in rows)
+            latest = query_one(
+                conn,
+                _LatestRow,
+                "SELECT max(checkpoint_id) AS latest FROM checkpoints WHERE thread_id = %s AND checkpoint_ns = ''",
+                (str(agent_id),),
+            )
+            source_depth = _active_reading_depth(depth, boundaries, latest)
+            checkpoint_id = _selected_reading_checkpoint(
+                locator, checkpoint_id, boundaries, source_depth, advance
+            )
+            current = checkpoint_id is None
+            config: RunnableConfig = {"configurable": {"thread_id": str(agent_id)}}
+            if checkpoint_id is not None:
+                config["configurable"]["checkpoint_id"] = checkpoint_id
+            saver = PostgresSaver(conn=conn, serde=serde)
+            value = saver.get_tuple(config)
+            if value is not None:
+                _ = reconstruct_delta_messages(saver, value)
+                messages = _stored_messages(value.checkpoint)
+                if current and str(value.checkpoint["id"]) in boundaries:
+                    checkpoint_id = str(value.checkpoint["id"])
+            else:
+                messages = []
+    except (ReadingSourceUnavailableError, CheckpointReadError):
+        raise
+    except Exception as exc:
+        raise CheckpointReadError(f"reading source failed for agent {agent_id}") from exc
+    if not current:
+        if not messages or not isinstance(messages[0], SystemMessage):
+            raise ReadingSourceUnavailableError(
+                ReadingUnavailableReason.SOURCE, "The retained segment is unavailable"
+            )
+        messages = messages[1:]
+    return CheckpointTimelineSource(
+        tuple(messages),
+        boundaries,
+        checkpoint_id,
+        native_reading_epoch(checkpoint_id, boundaries),
+        current,
+    )
+
+
+def _active_reading_depth(
+    depth: int, boundaries: tuple[str, ...], latest: _LatestRow | None
+) -> int:
+    active_boundary = bool(boundaries) and latest is not None and latest.latest == boundaries[0]
+    return max(depth, 1) if depth >= 0 and active_boundary else depth
+
+
+def _selected_reading_checkpoint(
+    locator: NativeReadingSource | None,
+    checkpoint: str | None,
+    boundaries: tuple[str, ...],
+    depth: int,
+    advance: ReadingDirection | None,
+) -> str | None:
+    if locator is not None:
+        checkpoint = native_reading_checkpoint(locator, boundaries, depth)
+    if advance is not None:
+        checkpoint = _adjacent_reading_checkpoint(checkpoint, boundaries, advance)
+    _require_reading_checkpoint(checkpoint, boundaries, depth)
+    return checkpoint
+
+
+def _require_reading_checkpoint(
+    checkpoint: str | None, boundaries: tuple[str, ...], depth: int
+) -> None:
+    if checkpoint is not None and (
+        checkpoint not in boundaries or (depth >= 0 and boundaries.index(checkpoint) + 1 > depth)
+    ):
+        raise ReadingSourceUnavailableError(
+            ReadingUnavailableReason.SOURCE, "The retained segment is outside history depth"
+        )
+
+
+def _adjacent_reading_checkpoint(
+    checkpoint: str | None, boundaries: tuple[str, ...], direction: ReadingDirection
+) -> str | None:
+    rank = 0 if checkpoint is None else boundaries.index(checkpoint) + 1
+    if direction is ReadingDirection.BEFORE and rank < len(boundaries):
+        return boundaries[rank]
+    if direction is ReadingDirection.AFTER and rank > 0:
+        return None if rank == 1 else boundaries[rank - 2]
+    raise ReadingSourceUnavailableError(
+        ReadingUnavailableReason.SOURCE, "There is no adjacent source segment"
+    )
 
 
 def list_compact_boundary_checkpoint_ids(

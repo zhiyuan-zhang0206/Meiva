@@ -2,3 +2,4 @@ exports = []
 
 [uses]
 "test_projection.py" = []
+"test_reading_file.py" = []
