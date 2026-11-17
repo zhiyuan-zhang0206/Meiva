@@ -82,6 +82,13 @@ card can commit first. It reads the latest bookmark at that frame; subsequent
 navigation, following, an active send/restore hold, or a thread unmount takes
 precedence. Multiple image events within a frame share one reapplication.
 
+A source-qualified reading locator restores the actual message node and its
+original viewport offset. A collapsed work strip cannot complete that restore.
+The existing expansion owner opens the target's turn and detail card once per
+restore token; virtualization materializes that same target through the existing
+pending anchor. Later manual collapse remains authoritative. Legacy ephemeral
+bookmarks without a source locator retain their collapsed-strip behavior.
+
 ## Non-sticky headers and natural-height TurnBlock bodies
 Human-message, agent-reply, `TurnBlock`, and nested detail-card headers all stay
 in normal document flow without `position: sticky` (user ruling 2026-11-01,

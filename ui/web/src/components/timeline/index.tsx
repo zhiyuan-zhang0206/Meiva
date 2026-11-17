@@ -9,6 +9,7 @@ import { QuoteNavigation, QuoteSelection, QuoteTarget } from "./view/quote/quote
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { parseItemIdParts } from "@/lib/timeline/timeline";
 import type { OlderLoadOrigin } from "@/lib/timeline/use-timeline";
+import type { TimelinePositionControl } from "@/lib/timeline/reading/position-control";
 import {
   type StickyController,
   createStickyController,
@@ -25,7 +26,7 @@ import { ConnectionNotice } from "@/components/notifications/connection-notice";
 import { TimelineGroupList, useTimelineGroupWindow } from "./view/group-list";
 import { CompactingBlock } from "./model/compacting-block";
 import { applyBookmarkRestore, settleRestoredPosition as settleRestoredPositionImpl, type BookmarkState } from "./model/bookmark-restore";
-import { rememberTimelinePosition } from "./model/reading-position";
+import { rememberTimelinePosition, useReadingPositionControl, notifyReadingRestore } from "./model/reading-position";
 import { useCompactTransitionAnchor } from "./model/use-compact-transition-anchor";
 import { useOlderHistoryPull } from "./model/use-older-history-pull";
 import { useSendAnchor, useThreadPin } from "./model/use-viewport-arrivals";
@@ -55,6 +56,7 @@ interface Props {
   threadKey?: string;
   scrollMemoryKey?: string;
   restoreReady?: boolean;
+  readingPosition?: TimelinePositionControl;
   viewportObserverFactory?: (callback: ResizeObserverCallback) => ResizeObserver;
 
   streamingCode?: boolean;
@@ -96,6 +98,7 @@ export const TimelineView = memo(function TimelineView({
   threadKey,
   scrollMemoryKey,
   restoreReady = true,
+  readingPosition,
   viewportObserverFactory,
   streamingCode = false,
   turnActive = false,
@@ -149,7 +152,7 @@ export const TimelineView = memo(function TimelineView({
   const sendReserveRef = useRef<HTMLDivElement>(null);
   const collapseReserveRef = useRef<HTMLDivElement>(null);
 
-  const [savedPosition] = useState(() => scrollMemoryKey ? readScrollMemory(scrollMemoryKey) : null);
+  const [savedPosition] = useState(() => readingPosition ? readingPosition.position : scrollMemoryKey ? readScrollMemory(scrollMemoryKey) : null);
   const pendingRestoreRef = useRef(savedPosition);
   const hasSavedPosition = savedPosition !== null && savedPosition.contentKey === threadKey;
 
@@ -159,6 +162,9 @@ export const TimelineView = memo(function TimelineView({
   // Consecutive layout passes at the same content height. A bookmark beyond the reachable end is only unreachable once the content has stopped growing - before that, the height is still arriving and waiting is correct.
   // meiva:link ui/web/src/docs/frontend-components/timeline-view/sticky-scroll.md
   const restoreProbeRef = useRef<{ height: number; passes: number }>({ height: -1, passes: 0 });
+  const bookmarkState = useRef<BookmarkState>({ pending: pendingRestoreRef, settled: settledRestoreRef,
+    hold: holdRestoredPositionRef, probe: restoreProbeRef }).current;
+  const readingControlRef = useReadingPositionControl(readingPosition, bookmarkState);
   const restoreInFlight = useCallback(() => pendingRestoreRef.current !== null || (settledRestoreRef.current !== null && holdRestoredPositionRef.current), []);
   const initialRestorePassRef = useRef(true);
 
@@ -193,6 +199,7 @@ export const TimelineView = memo(function TimelineView({
     toggleTurn,
     overrides,
     toggleExpanded,
+    revealReadingTarget,
   } = useTimelineExpansion({
     scrollMemoryKey,
     threadKey,
@@ -203,10 +210,6 @@ export const TimelineView = memo(function TimelineView({
   const [controller] = useState<StickyController>(() =>
     createStickyController(stickyThresholds),
   );
-  useReanchorOnWidthChange({
-    wrapperRef, entriesRef: scrollMemoryRef, holdRef: holdRestoredPositionRef,
-    controller, compactBuffer, canonicalItems,
-  });
 
   const collapseReserveHeight = useCallback(() => collapseReserveRef.current?.offsetHeight ?? 0, []);
   const readingReserve = useCallback(() =>
@@ -326,12 +329,13 @@ export const TimelineView = memo(function TimelineView({
   // asked for the message they just wrote, so the saved row no longer owns it.
   // meiva:link ui/web/src/docs/frontend-components/timeline-view/sticky-scroll.md
   const cancelBookmark = useCallback(() => {
+    readingControlRef.current?.navigated();
     cancelScrollToBottomRide(scrollToBottomRideRef.current);
     pendingAnchorRef.current = null;
     pendingRestoreRef.current = null;
     settledRestoreRef.current = null;
     holdRestoredPositionRef.current = false;
-  }, [pendingAnchorRef]);
+  }, [pendingAnchorRef, readingControlRef]);
 
   const { latestTarget, pendingTarget, jumpToLatestHuman, cancelPendingJump, maintain: maintainSendAnchor,
     releaseReserve: releaseSendReserve, reserveEnabled: sendReserveEnabled } = useSendAnchor({
@@ -353,8 +357,8 @@ export const TimelineView = memo(function TimelineView({
   useLayoutEffect(() => () => {
     const mem = scrollMemoryRef.current;
     const viewport = viewportRef.current;
-    if (mem && viewport && !restoreInFlight()) rememberTimelinePosition(viewport, mem.entryKey, mem.contentKey, collapseReserveHeight(), sendReserveEnabled());
-  }, [restoreInFlight, collapseReserveHeight, sendReserveEnabled]);
+    if (mem && viewport && !restoreInFlight()) rememberTimelinePosition(viewport, mem.entryKey, mem.contentKey, collapseReserveHeight(), sendReserveEnabled(), readingControlRef.current ? { reading: readingControlRef.current, items: itemsRef.current } : undefined);
+  }, [restoreInFlight, collapseReserveHeight, sendReserveEnabled, readingControlRef]);
 
   const compactPin = useCompactTransitionAnchor({
     controller,
@@ -415,18 +419,13 @@ export const TimelineView = memo(function TimelineView({
     }
   }, [loadOneOlderPage]);
 
-  const bookmarkState = useRef<BookmarkState>({
-    pending: pendingRestoreRef,
-    settled: settledRestoreRef,
-    hold: holdRestoredPositionRef,
-    probe: restoreProbeRef,
-  }).current;
   const applyPendingRestore = useCallback(
     (viewport: HTMLElement | null) => applyBookmarkRestore({
       state: bookmarkState,
       viewport,
       initialPass: initialRestorePassRef.current,
-      loading: loading || !restoreReady,
+      loading: readingControlRef.current ? !readingControlRef.current.ready : loading || !restoreReady,
+      requiredAnchor: readingControlRef.current !== undefined,
       threadKey,
       compactBuffer,
       canonicalItems: canonicalItemsRef.current,
@@ -434,22 +433,36 @@ export const TimelineView = memo(function TimelineView({
       tailHeight,
       collapseReserve: collapseReserveRef.current,
     }),
-    [bookmarkState, compactBuffer, controller, tailHeight, threadKey, loading, restoreReady],
+    [bookmarkState, compactBuffer, controller, tailHeight, threadKey, loading, restoreReady, readingControlRef],
   );
 
   const settleRestoredPosition = useCallback(
-    (viewport: HTMLElement | null, layoutChanged: boolean) => settleRestoredPositionImpl({
-      state: bookmarkState,
-      viewport,
-      layoutChanged,
-      threadKey,
-      compactBuffer,
-      canonicalItems: canonicalItemsRef.current,
-    }),
-    [bookmarkState, compactBuffer, threadKey],
+    (viewport: HTMLElement | null, layoutChanged: boolean) => {
+      settleRestoredPositionImpl({ state: bookmarkState, viewport, layoutChanged, threadKey,
+        compactBuffer, canonicalItems: canonicalItemsRef.current,
+        requiredAnchor: readingControlRef.current !== undefined });
+      notifyReadingRestore(readingControlRef, bookmarkState, viewport, canonicalItemsRef.current);
+    },
+    [bookmarkState, compactBuffer, threadKey, readingControlRef],
   );
 
+  useReanchorOnWidthChange({
+    wrapperRef, entriesRef: scrollMemoryRef, holdRef: holdRestoredPositionRef,
+    controller, compactBuffer, canonicalItems,
+    maintainReading: (viewport) => {
+      const control = readingControlRef.current;
+      if (!control) return false;
+      if (control.ready && holdRestoredPositionRef.current) {
+        applyPendingRestore(viewport);
+        settleRestoredPosition(viewport, true);
+      }
+      return holdRestoredPositionRef.current || !control.ready || !control.writable;
+    },
+  });
+
   useTimelineViewport({
+    readingControlRef,
+    itemsRef,
     viewportObserverFactory,
     wrapperRef,
     viewportRef,
@@ -525,6 +538,10 @@ export const TimelineView = memo(function TimelineView({
     initialRestorePassRef.current = false;
     applyPendingRestore(viewport);
     settleRestoredPosition(viewport, false);
+    const mem = scrollMemoryRef.current;
+    if (readingControlRef.current && viewport && mem && !restoreInFlight() && pendingAnchorRef.current === null) {
+      rememberTimelinePosition(viewport, mem.entryKey, mem.contentKey, collapseReserveHeight(), sendReserveEnabled(), { reading: readingControlRef.current, items: itemsRef.current });
+    }
   });
 
   const prevLoadingOlderReleaseRef = useRef(loadingOlder);
@@ -552,6 +569,22 @@ export const TimelineView = memo(function TimelineView({
         : null),
     restoreTop: pendingRestoreRef.current?.scrollTop ?? null,
   });
+
+  // meiva:note
+  // A source-qualified child owns its exact offset through a reload. Materialize
+  // it through the existing expansion owner once; later manual collapse wins.
+  // meiva:link ui/web/src/docs/frontend-components/timeline-view/sticky-scroll.md
+  useLayoutEffect(() => {
+    const anchor = readingPosition?.position?.anchor;
+    if (!readingPosition?.ready || !anchor?.readingLocator) return;
+    const entry = groupEntries.find(({ group }) => {
+      const members = group.kind === "single" ? [group.member] : group.members;
+      return members.some(({ item, rank }) => item.item_id === anchor.itemId &&
+        rank === anchor.rank && item.reading_locator === anchor.readingLocator);
+    });
+    if (entry) revealReadingTarget(readingPosition.token, anchor.itemId,
+      entry.group.kind === "turn" ? entry.groupKey : null);
+  }, [groupEntries, readingPosition, revealReadingTarget]);
 
   // meiva:note
   // Manual expansion preserves the clicked header and releases tail following,

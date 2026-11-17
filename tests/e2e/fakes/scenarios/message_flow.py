@@ -12,6 +12,16 @@ UNMARKED_REPLY = "UNMARKED-TEXT-BEFORE-THE-CORRECTION"
 HIDDEN_REPLY = "HIDDEN-WORKING-NOTE"
 MARKED_REPLY = "MARKED-ANSWER-AFTER-THE-CORRECTION"
 
+READING_REPLIES = tuple(
+    "\n\n".join(
+        f"Reading reply {number} paragraph {paragraph}. "
+        + "This deterministic paragraph keeps a measurable reading position inside the message. "
+        * 3
+        for paragraph in range(1, 13)
+    )
+    for number in range(1, 4)
+)
+
 MESSAGE_FLOW_SCRIPT: tuple[AIMessage, ...] = (
     AIMessage(
         content=[
@@ -41,6 +51,31 @@ MESSAGE_FLOW_SCRIPT: tuple[AIMessage, ...] = (
 
 def build(model: str, *, agent_id: int | None) -> ScriptedFakeChatModel:
     return ScriptedFakeChatModel(script=MESSAGE_FLOW_SCRIPT)
+
+
+def build_reading_reload(model: str, *, agent_id: int | None) -> ScriptedFakeChatModel:
+    # meiva:note
+    # Three native replies produce 108 primary rows, crossing the unchanged
+    # 100-row window threshold. The final block is tall enough to read inside;
+    # its stable message identity and block index reach the real Saver/HTTP path.
+    # meiva:link ui/web/src/docs/frontend-state/timeline-cache.md
+    return ScriptedFakeChatModel(
+        script=tuple(
+            AIMessage(
+                content=[
+                    {
+                        "type": "text",
+                        "text": user_facing(f"Reading context {number}, block {block}."),
+                        "index": block,
+                    }
+                    for block in range(35)
+                ]
+                + [{"type": "text", "text": user_facing(reply), "index": 35}],
+                usage_metadata=_USAGE,
+            )
+            for number, reply in enumerate(READING_REPLIES, start=1)
+        )
+    )
 
 
 # meiva:note

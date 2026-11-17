@@ -1,5 +1,11 @@
+import { useLayoutEffect, useRef, type RefObject } from "react";
+
+import type { BackendTimelineItem } from "@/lib/contracts/types";
 import { BAR_HEIGHT_PX } from "@/lib/layout/layout";
-import { saveScrollMemory } from "@/lib/layout/scroll-memory";
+import { saveScrollMemory, type SavedScroll } from "@/lib/layout/scroll-memory";
+import type { TimelinePositionControl } from "@/lib/timeline/reading/position-control";
+import type { BookmarkState } from "./bookmark-restore";
+import { resolveSavedTimelineAnchor } from "./use-timeline-window";
 
 // meiva:note
 // Leaving a conversation always saves the visible item and offset, including
@@ -9,16 +15,19 @@ import { saveScrollMemory } from "@/lib/layout/scroll-memory";
 export function rememberTimelinePosition(
   viewport: HTMLElement, entryKey: string, contentKey: string,
   collapseReserve = 0, keepSendReserve = false,
+  control?: { reading: TimelinePositionControl; items: readonly BackendTimelineItem[] },
 ) {
+  if (control && !control.reading.writable) return;
   const reserveMemory = keepSendReserve ? { keepSendReserve: true as const } : {};
   const rect = viewport.getBoundingClientRect();
   const node = [...viewport.querySelectorAll<HTMLElement>(
     ".timeline-item[data-item-id], [data-turn-expanded='false'][data-item-id]",
   )].find((item) => {
+    if (control && control.items.find((value) => value.item_id === item.dataset.itemId)?.kind === "system_prompt") return false;
     const box = item.getBoundingClientRect();
     return box.bottom > rect.top + BAR_HEIGHT_PX && box.top < rect.bottom;
   });
-  saveScrollMemory(entryKey, {
+  const position: SavedScroll = {
     contentKey, scrollTop: viewport.scrollTop, followBottom: false, ...reserveMemory,
     ...(collapseReserve > 0 && viewport.scrollTop + viewport.clientHeight > viewport.scrollHeight - collapseReserve + 1
       ? { usedCollapseReserve: true as const } : {}),
@@ -26,7 +35,41 @@ export function rememberTimelinePosition(
       itemId: node.dataset.itemId, rank: Number(node.dataset.displayRank ?? 0),
       viewportTop: node.getBoundingClientRect().top - rect.top,
     } : undefined,
-  });
+  };
+  if (control) {
+    const item = control.items.find((value) => value.item_id === position.anchor?.itemId) ?? null;
+    control.reading.remember(position, item);
+  } else saveScrollMemory(entryKey, position);
+}
+
+export function useReadingPositionControl(control: TimelinePositionControl | undefined, { pending: pendingRef, settled: settledRef, hold: holdRef, probe: probeRef }: BookmarkState) {
+  const current = useRef(control);
+  const token = control?.token;
+  useLayoutEffect(() => { current.current = control; });
+  useLayoutEffect(() => {
+    const value = current.current;
+    if (!value) return;
+    pendingRef.current = value.position;
+    settledRef.current = null;
+    holdRef.current = value.position !== null;
+    probeRef.current = { height: -1, passes: 0 };
+  }, [token, pendingRef, settledRef, holdRef, probeRef]);
+  return current;
+}
+
+export function notifyReadingRestore(
+  control: RefObject<TimelinePositionControl | undefined>,
+  state: BookmarkState,
+  viewport: HTMLElement | null,
+  items: readonly BackendTimelineItem[],
+) {
+  const saved = state.settled.current ?? state.pending.current;
+  if (!control.current?.ready || !saved?.anchor || !viewport) return;
+  const item = items.find((value) => value.item_id === saved.anchor?.itemId);
+  if (!item?.reading_locator || item.reading_locator !== saved.anchor.readingLocator) return;
+  const target = resolveSavedTimelineAnchor(viewport, saved.anchor, null, items);
+  if (target.node && Math.abs(target.node.getBoundingClientRect().top -
+    viewport.getBoundingClientRect().top - target.viewportTop) <= 1) control.current.restored();
 }
 
 interface ReadingExpansion {

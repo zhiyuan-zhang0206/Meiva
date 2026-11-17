@@ -1,0 +1,17 @@
+exports = ["position-control.ts", "testing.ts", "use-reading-window.ts"]
+
+[uses]
+"testing.ts" = ["bookmarks.ts"]
+"bookmarks.test.ts" = ["bookmarks.ts"]
+"plan.test.ts" = ["identity.ts", "plan.ts"]
+"plan.ts" = ["identity.ts"]
+"requests.test.ts" = ["requests.ts"]
+"requests.ts" = ["identity.ts", "plan.ts"]
+"use-reading-window.test.tsx" = ["bookmarks.ts", "use-reading-window.ts"]
+"use-reading-saver.ts" = ["bookmarks.ts", "identity.ts", "plan.ts", "requests.ts"]
+"use-reading-window.ts" = ["bookmarks.ts", "plan.ts", "position-control.ts", "requests.ts", "use-reading-saver.ts"]
+
+[purity]
+"identity.ts" = "strict"
+"plan.ts" = "strict"
+"position-control.ts" = "strict"

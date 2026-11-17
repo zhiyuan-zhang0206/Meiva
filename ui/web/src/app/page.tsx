@@ -22,6 +22,7 @@ import { useAlerts } from "@/lib/notifications/use-alerts";
 import { useStore } from "@/lib/state/store";
 import { useUserSettings } from "@/lib/state/use-user-settings";
 import { useTimeline } from "@/lib/timeline/use-timeline";
+import { useReadingWindow } from "@/lib/timeline/reading/use-reading-window";
 import { useTimelineStore } from "@/lib/timeline/timeline-store";
 import { HomePageView } from "./home-view";
 
@@ -62,7 +63,8 @@ function HomePageWiring() {
   const settings = useUserSettings();
   const [contextPanelOpen, setContextPanelOpen] = useContextPanelOpen();
   const alerts = useAlerts();
-  const timeline = useTimeline(agents.activeId, showError, agents.activeAgent?.status);
+  const liveTimeline = useTimeline(agents.activeId, showError, agents.activeAgent?.status);
+  const timeline = useReadingWindow(agents.activeId, `${bfcacheId}:agent:${agents.activeId ?? "unselected"}`, liveTimeline);
   // meiva:note
   // Populates `useTimelineStore` token-usage fields read by InspectorPanel's Context section.
   // meiva:link ui/web/src/docs/frontend-components/inspector/section-details/section-details.md

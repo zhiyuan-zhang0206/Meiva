@@ -6,7 +6,7 @@ import { act, cleanup, fireEvent, screen, waitFor } from "@testing-library/react
 import { renderWithBrowser } from "@/test-support/render";
 import { ApiProvider, StreamHubProvider, WallClockProvider } from "@/lib/transport/transport-context";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { cleanupHomePageTest, gatewayWrapper, HomePageView, homePageProps, HomePageBound as HomePage, hooksState, makeAgent, resetHomePageTestState, wrap } from "./page-test-mock";
+import { cleanupHomePageTest, gatewayWrapper, HomePageView, homePageProps, HomePageBound as HomePage, hooksState, makeAgent, resetHomePageTestState, wrap } from "../page-test-mock";
 
 import { resetTransport, transport } from "@/test-support/fake-api";
 import { TimelineView } from "@/components/timeline";

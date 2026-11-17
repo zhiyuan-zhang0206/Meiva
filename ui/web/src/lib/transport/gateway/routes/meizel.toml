@@ -1,11 +1,13 @@
-exports = ["agent-routes.ts", "config-routes.ts", "control-routes.ts", "timeline-routes.ts"]
+exports = ["index.ts"]
 
 purity = "strict"
 
 [uses]
+"index.ts" = ["agent-routes.ts", "config-routes.ts", "control-routes.ts", "reading-routes.ts", "timeline-routes.ts"]
 "agent-routes.test.ts" = ["agent-routes.ts"]
 "agent-routes.ts" = ["route-query.ts"]
 "control-routes.test.ts" = ["config-routes.ts", "control-routes.ts"]
 "control-routes.ts" = ["route-query.ts"]
 "timeline-routes.test.ts" = ["timeline-routes.ts"]
 "timeline-routes.ts" = ["route-query.ts"]
+"reading-routes.ts" = ["route-query.ts"]
