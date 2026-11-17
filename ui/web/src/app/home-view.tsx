@@ -1,5 +1,7 @@
 "use client";
 
+import type { Quote } from "@/lib/contracts/types";
+
 import { useSeenPosition } from "@/lib/context/use-seen-position";
 import { useUserMessages, withUserMessages } from "@/lib/context/use-user-messages";
 import { useTranslations } from "next-intl";
@@ -361,6 +363,9 @@ function HomeContent({
     ? undefined
     : timelineMaxWidthCss(userSettings["display.timeline_width_px"]);
 
+  const [quoteSelection, setQuoteSelection] = useState<{ quote: Quote; revision: number } | null>(null);
+  const acceptQuote = useCallback((quote: Quote) => setQuoteSelection((previous) => ({ quote, revision: (previous?.revision ?? 0) + 1 })), []);
+
   const stageSeqRef = useRef(0);
   const [stageQueue, setStageQueue] = useState<StageQueueBatch | null>(null);
   const [deliveringBatch, setDeliveringBatch] = useState<DeliveredUploadStatus | null>(null);
@@ -403,10 +408,11 @@ function HomeContent({
       content: string,
       _fileIds: string[],
       clientMessageId: string,
+      quote?: Quote,
     ): Promise<boolean> => {
       if (activeId == null) return false;
       try {
-        const receipt = await client.sendMessage(activeId, content, clientMessageId);
+        const receipt = await client.sendMessage(activeId, content, clientMessageId, quote);
         timelineStore.requestSendAnchor(receipt.inbound_id ?? null);
         return true;
       } catch (e: unknown) {
@@ -510,6 +516,7 @@ function HomeContent({
             loading={isLoading || (agentsLoading && activeId === null)}
             maxWidthCss={contentColumnMaxWidth}
             reveal={reveal}
+            onQuote={acceptQuote}
           />
           <HeaderBar
             label={activeLabel}
@@ -546,6 +553,7 @@ function HomeContent({
               {activeId !== null && <PendingQuestions key={activeId} agentId={activeId} questions={pendingQuestions} failed={questions.error} maxWidthCss={composerMaxWidth} />}
               <Composer
                 diagnostics={diagnostics}
+                quoteSelection={quoteSelection}
                 maxWidthCss={composerMaxWidth}
                 mode={composerMode}
                 onSend={handleSend}

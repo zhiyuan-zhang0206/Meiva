@@ -51,8 +51,6 @@ and it lands on the measured sum when the next block commits.
 
 - [Timeline View](timeline-view.md) — the renderer whose turn grouping and expansion this node owns.
 
-A work header with missing timing shows "Worked" ("Working…" while active) and a
-visible warning icon. Its tooltip and accessible label explain that timing was
-not fully recorded. The numeric subtotal remains internal. Browser-frozen
+A work header with missing timing shows plain "Worked" ("Working…" while active). The numeric subtotal remains internal. Browser-frozen
 durations count until the canonical snapshot replaces them; a reload without
 provider durations exposes the missing timing. A true zero is a measurement.

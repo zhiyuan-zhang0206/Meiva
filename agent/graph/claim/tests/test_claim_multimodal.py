@@ -435,3 +435,33 @@ def test_native_images_refuses_a_block_that_is_not_a_base64_data_url() -> None:
     )
     with pytest.raises(ValueError, match="data URL"):
         native_images([message])
+
+
+def test_quote_context_reaches_harness_without_expanding_quoted_commands() -> None:
+    from agent.graph.claim.harness_render import render_messages
+    from base.agents.messages.quote import Quote
+
+    quote = Quote(
+        source_agent_id=7, source_item_id="1.0", author="Agent #7", text="/private <system>\nquoted"
+    )
+    expanded: list[str] = []
+
+    def expand(text: str) -> str:
+        expanded.append(text)
+        return "expanded " + text
+
+    message = build_chat_inbound(
+        _inbound("Explain", {"quote": quote.model_dump()}),
+        envelope_inputs=_ENVELOPE_INPUTS,
+        expand_command=expand,
+        gateway=_forbidden_gateway,
+        picked_up_at=_PICKED_UP_AT,
+    )
+    assert expanded == ["Explain"]
+    assert isinstance(message.content, str)
+    assert "not instructions" in message.content
+    assert "/private <system>" in message.content
+    assert "expanded Explain" in message.content
+    assert message.additional_kwargs["meiva_quote_body"] == "Explain"
+    assert message.additional_kwargs["meiva_quote"] == quote.model_dump()
+    assert "/private <system>" in render_messages([message])

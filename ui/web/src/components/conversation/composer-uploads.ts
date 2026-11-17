@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 
+import type { Quote } from "@/lib/contracts/types";
 import type { StagedAttachment } from "@/components/conversation/composer-helpers";
 import {
   clearActiveUploadBatch,
@@ -27,6 +28,7 @@ const POLL_INTERVAL_MS = 350;
 function initialPendingStatus(
   accepted: DeliveredUploadAcceptance,
   messageText: string,
+  quote?: Quote,
 ): DeliveredUploadStatus {
   return {
     batch_id: accepted.batch_id,
@@ -34,6 +36,7 @@ function initialPendingStatus(
     reason: null,
     directory: accepted.directory,
     message_text: messageText,
+    ...(quote ? { quote } : {}),
     files: accepted.files,
     inbound_id: null,
     source: { machine: "", home: "" },
@@ -317,22 +320,22 @@ export function useComposerUploads({
   }, []);
 
   const recordBatchAccepted = useCallback(
-    (accepted: DeliveredUploadAcceptance, messageText: string) => {
+    (accepted: DeliveredUploadAcceptance, messageText: string, quote?: Quote) => {
       if (agentId != null) {
         writeActiveUploadBatch(session, agentId, accepted.batch_id);
       }
       setActiveBatchId(accepted.batch_id);
-      setActiveBatchStatus(initialPendingStatus(accepted, messageText));
+      setActiveBatchStatus(initialPendingStatus(accepted, messageText, quote));
       onUploadSent?.();
     },
     [agentId, onUploadSent, session],
   );
 
   const restoreHeldBatch = useCallback(
-    (onRestoreText: (text: string) => void) => {
+    (onRestoreText: (text: string, quote?: Quote) => void) => {
       if (composerLocked || activeBatchStatus?.state !== "hold") return;
       if (activeBatchStatus.message_text) {
-        onRestoreText(activeBatchStatus.message_text);
+        onRestoreText(activeBatchStatus.message_text, activeBatchStatus.quote ?? undefined);
       }
       const restored: StagedAttachment[] = activeBatchStatus.files.map((f) => {
         restoredFileIdsRef.current.add(f.staged_id);
@@ -369,8 +372,9 @@ export function useComposerUploads({
         activeBatchStatus.files.map((f) => f.staged_id),
         activeBatchStatus.message_text,
         client.newOperationKey(),
+        activeBatchStatus.quote ?? undefined,
       );
-      recordBatchAccepted(accepted, activeBatchStatus.message_text);
+      recordBatchAccepted(accepted, activeBatchStatus.message_text, activeBatchStatus.quote ?? undefined);
     } catch (e: unknown) {
       onUploadError?.(errMsg(e));
     }

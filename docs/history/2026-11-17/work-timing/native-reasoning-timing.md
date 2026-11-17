@@ -7,3 +7,5 @@ Preserve the vendor record and its stable byte-offset IDs. Supplement it with an
 Reuse existing trajectory reads to avoid another network poll. The cost is that the most recent completed work may remain unmeasured until a subsequent snapshot. The UI's Worked-with-warning rule therefore remains necessary. A readonly scan of the existing 18,883,483-byte record found 2,011 reasoning fingerprints in 58.2 milliseconds on macmini; page reads never perform that whole-record scan. Unchanged native facts and record size skip rescanning. A changed raw record invalidates the reader's timing facts until uniqueness is checked again.
 
 Update: capture the supplemental-facts baseline before the first row read. Initializing it after delivery could mistake a newly arrived sidecar for the revision already projected and suppress the first update; a deterministic real-sink/publisher regression covers this ordering and preexisting-cache control.
+
+Update: [Timing diagnostics belong in cluster events](timing-cluster-diagnostics.md) replaces the Worked-with-warning presentation with plain Worked and cluster diagnostics.

@@ -8,6 +8,7 @@ from dataclasses import dataclass
 
 __all__ = [
     "AgentMetaRow",
+    "AgentPinsRow",
     "LifecycleRow",
     "MachineRow",
     "TargetGateRow",
@@ -57,3 +58,11 @@ class TargetGateRow:
     paused: bool
     stopped: bool
     runs_agents: bool
+
+
+# meiva:note
+# Birth pins overridden by the stored overlay determine the external CLI selection after moving.
+@dataclass(frozen=True)
+class AgentPinsRow:
+    config_overlay: dict[str, object] | None
+    birth_config: dict[str, object] | None

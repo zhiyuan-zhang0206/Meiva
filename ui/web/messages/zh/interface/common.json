@@ -35,5 +35,7 @@
   "closeImage": "关闭大图",
   "liveUpdatesReconnecting": "实时更新重连中……",
   "liveUpdatesDisconnected": "实时更新已断开，正在自动重连。你也可以点击重试。",
-  "retry": "重试"
+  "retry": "重试",
+  "quote": "引用",
+  "removeQuote": "移除引用"
 }

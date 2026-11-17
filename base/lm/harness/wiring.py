@@ -161,6 +161,8 @@ def handoff_for(
     machine: str,
     workspace: Path,
     home: Path,
+    model: str | None = None,
+    reasoning_effort: str | None = None,
     instruction: str = HANDOFF_INSTRUCTION,
     label: str | None = None,
     cluster: Iterable[ClusterFact] = (),
@@ -186,6 +188,7 @@ def handoff_for(
             label=label,
             cluster=tuple(cluster),
         )
+    base = replace(base, harness=harness, model=model, reasoning_effort=reasoning_effort)
     return base.with_contributions((_CODEX_COMPUTER_USE, *contributions), harness=harness)
 
 
@@ -240,6 +243,8 @@ def bridge_for(
         workspace=workspace,
         home=home,
         contributions=contributions,
+        model=model,
+        reasoning_effort=reasoning_effort,
     )
 
     def factory(handle: str) -> HarnessSession:

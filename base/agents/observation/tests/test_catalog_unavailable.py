@@ -50,6 +50,8 @@ def test_unavailable_capabilities_preserve_ancestors_and_keyset_history(
     assert second.next_cursor is None
     detail = select_one(existing_agents, 1, catalog=None, default_model=DEFAULT_MODEL)
     assert detail is not None and detail.supports_vision is None and detail.status == "terminated"
+    assert detail.llm_model is None and detail.reasoning_effort is None
+    assert detail.config_overlay is None
     assert select_one(existing_agents, 99, catalog=None, default_model=DEFAULT_MODEL) is None
 
 
@@ -127,3 +129,19 @@ def test_healthy_catalog_preserves_unknown_model_capability_policy(
         )
     detail = select_one(existing_agents, 2, catalog=model_catalog, default_model=DEFAULT_MODEL)
     assert detail is not None and detail.supports_vision is expected
+
+
+def test_detail_exposes_effective_selection_and_stored_overlay(
+    existing_agents: psycopg.Connection,
+    model_catalog: ModelCatalog,
+) -> None:
+    overlay = {"reasoning_effort": "high"}
+    existing_agents.execute(
+        "UPDATE agents_meta SET config_overlay=%s, birth_config=%s WHERE id=2",
+        (Jsonb(overlay), Jsonb({"llm_model": "deepseek-v4-pro", "reasoning_effort": "low"})),
+    )
+    detail = select_one(existing_agents, 2, catalog=model_catalog, default_model=DEFAULT_MODEL)
+    assert detail is not None
+    assert (detail.llm_model, detail.reasoning_effort) == ("deepseek-v4-pro", "high")
+    assert detail.config_overlay == overlay
+    assert detail.model_dump()["config_overlay"] == overlay

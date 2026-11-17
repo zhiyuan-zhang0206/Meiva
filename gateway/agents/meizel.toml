@@ -2,6 +2,7 @@ exports = ["creation.py", "eval_guard.py", "history", "inbound_provenance.py", "
 
 [uses]
 "creation.py" = ["launch"]
+"launch" = ["state.py"]
 "history" = ["eval_guard.py", "schemas.py", "state.py"]
 "lifecycle.py" = ["inbound_provenance.py", "launch"]
 "questions" = ["inbound_provenance.py", "keyed_operations.py", "schemas.py"]
@@ -10,6 +11,7 @@ exports = ["creation.py", "eval_guard.py", "history", "inbound_provenance.py", "
 "state.py" = ["eval_guard.py", "inbound_provenance.py", "schemas.py", "system_note.py"]
 "task_assignment" = ["creation.py"]
 "tests" = ["launch", "schemas.py", "state.py"]
+"transfer" = ["launch"]
 "to_user" = ["eval_guard.py", "keyed_operations.py"]
 
 [purity]

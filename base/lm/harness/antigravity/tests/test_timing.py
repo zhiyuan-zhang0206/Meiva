@@ -12,6 +12,9 @@ from base.lm.harness.antigravity.transcript.file import AntigravityRecordFile
 from base.lm.harness.antigravity.transcript.window import EntryParser
 from base.lm.harness.session.transcript.entries import Reasoning
 from base.log import logger
+from base.log.tests.log_records import LogRecords, loguru_records
+
+__all__ = ["loguru_records"]
 
 STAMP = "2026-11-17T05:30:00Z"
 
@@ -251,3 +254,65 @@ def test_corrupt_sidecar_diagnostic_is_bounded_per_source_revision(tmp_path: Pat
     finally:
         logger.remove(sink)
     assert len(messages) == 1
+
+
+def test_missing_and_null_native_duration_are_silent(
+    tmp_path: Path, loguru_records: LogRecords
+) -> None:
+    path = tmp_path / "transcript_full.jsonl"
+    transcript(path)
+    for _ in range(3):
+        store_timings(path, snapshot(None))
+        assert measured(path) == [None]
+    assert not loguru_records.extras(level="WARNING")
+
+
+def test_invalid_present_duration_warns_once_without_native_content(
+    tmp_path: Path, loguru_records: LogRecords
+) -> None:
+    path = tmp_path / "transcript_full.jsonl"
+    transcript(path)
+    for value in ["private invalid duration", -1, True, "NaNs"]:
+        store_timings(path, snapshot(value))
+        assert measured(path) == [None]
+    events = loguru_records.events("harness_timing_collection_failed")
+    assert len(events) == 1
+    assert events[0]["exception"] is None
+    assert events[0]["extra"] == {"event": "harness_timing_collection_failed"}
+    assert "private" not in events[0]["message"]
+    assert str(path) not in events[0]["message"]
+
+
+def test_absent_duration_and_invalid_live_duration_remain_unknown() -> None:
+    absent = parse_trajectory(
+        {
+            "status": "CASCADE_RUN_STATUS_IDLE",
+            "numTotalSteps": 1,
+            "trajectory": {
+                "steps": [
+                    {
+                        "type": "CORTEX_STEP_TYPE_PLANNER_RESPONSE",
+                        "status": "CORTEX_STEP_STATUS_DONE",
+                    }
+                ]
+            },
+        }
+    )
+    for step in [absent.steps[0], snapshot("invalid", status="GENERATING").steps[0]]:
+        assert step.thinking_ms is None
+        assert not step.invalid_thinking_duration
+
+
+def test_invalid_duration_change_gate_and_recovery(
+    tmp_path: Path, loguru_records: LogRecords
+) -> None:
+    path = tmp_path / "transcript_full.jsonl"
+    transcript(path)
+    store_timings(path, snapshot(None))
+    store_timings(path, snapshot("bad"))
+    store_timings(path, snapshot("bad"))
+    assert len(loguru_records.events("harness_timing_collection_failed")) == 1
+    store_timings(path, snapshot("1s"))
+    assert measured(path) == [1000]
+    store_timings(path, snapshot("bad"))
+    assert len(loguru_records.events("harness_timing_collection_failed")) == 2

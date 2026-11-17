@@ -244,7 +244,7 @@ describe("Composer slash commands", () => {
     fireEvent.change(ta, { target: { value: "/recap just the PRs" } });
     fireEvent.keyDown(ta, { key: "Enter" });
     await waitFor(() =>
-      expect(onSend).toHaveBeenCalledWith("/recap just the PRs", [], expect.any(String)),
+      expect(onSend).toHaveBeenCalledWith("/recap just the PRs", [], expect.any(String), undefined),
     );
   });
 
@@ -257,7 +257,7 @@ describe("Composer slash commands", () => {
     expect(screen.queryByTestId("slash-option-recap")).toBeNull();
     fireEvent.keyDown(ta, { key: "Enter" });
     await waitFor(() =>
-      expect(onSend).toHaveBeenCalledWith("/recap just the PRs", [], expect.any(String)),
+      expect(onSend).toHaveBeenCalledWith("/recap just the PRs", [], expect.any(String), undefined),
     );
   });
 
@@ -284,7 +284,7 @@ describe("Composer slash commands", () => {
     await waitFor(() => expect(screen.queryByTestId("slash-option-recap")).toBeNull());
     fireEvent.keyDown(ta, { key: "Enter" });
     await waitFor(() =>
-      expect(onSend).toHaveBeenCalledWith("/recap", [], expect.any(String)),
+      expect(onSend).toHaveBeenCalledWith("/recap", [], expect.any(String), undefined),
     );
   });
 
@@ -298,7 +298,7 @@ describe("Composer slash commands", () => {
     expect(screen.queryByTestId("slash-option-recap")).toBeNull();
     fireEvent.keyDown(ta, { key: "Enter" });
     await waitFor(() =>
-      expect(onSend).toHaveBeenCalledWith("/nope", [], expect.any(String)),
+      expect(onSend).toHaveBeenCalledWith("/nope", [], expect.any(String), undefined),
     );
   });
 
@@ -314,7 +314,7 @@ describe("Composer slash commands", () => {
     expect(screen.queryByTestId("slash-option-compact")).toBeNull();
     fireEvent.keyDown(ta, { key: "Enter" });
     await waitFor(() =>
-      expect(onSend).toHaveBeenCalledWith("/compact /update", [], expect.any(String)),
+      expect(onSend).toHaveBeenCalledWith("/compact /update", [], expect.any(String), undefined),
     );
   });
 
@@ -328,7 +328,7 @@ describe("Composer slash commands", () => {
     expect(screen.queryByTestId("slash-option-compact")).toBeNull();
     fireEvent.keyDown(ta, { key: "Enter" });
     await waitFor(() =>
-      expect(onSend).toHaveBeenCalledWith("hello /compact", [], expect.any(String)),
+      expect(onSend).toHaveBeenCalledWith("hello /compact", [], expect.any(String), undefined),
     );
   });
 
@@ -385,7 +385,7 @@ describe("Composer slash commands", () => {
     expect(screen.queryByTestId("slash-option-recap")).toBeNull();
     fireEvent.keyDown(ta, { key: "Enter" });
     await waitFor(() =>
-      expect(onSend).toHaveBeenCalledWith("/compact ping /rec", [], expect.any(String)),
+      expect(onSend).toHaveBeenCalledWith("/compact ping /rec", [], expect.any(String), undefined),
     );
   });
 
@@ -422,7 +422,7 @@ describe("Composer slash commands", () => {
     expect(screen.queryByTestId("slash-option-recap")).toBeNull();
     fireEvent.keyDown(ta, { key: "Enter" });
     await waitFor(() =>
-      expect(onSend).toHaveBeenCalledWith("read /etc/hosts", [], expect.any(String)),
+      expect(onSend).toHaveBeenCalledWith("read /etc/hosts", [], expect.any(String), undefined),
     );
   });
 });

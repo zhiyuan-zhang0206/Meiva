@@ -13,9 +13,9 @@ from base.api_contracts.agent_contract import reads_timeline_from_record
 from base.api_contracts.user_delivery import UserDeliveryMode
 from base.db.rows import query_one
 from gateway.agents.history.configuration import request_timeline_read
-from gateway.agents.history.cursor import TimelineCursor
-from gateway.agents.state import agent_harness
 from gateway.http.config import gateway_config, gateway_rpc, gateway_state
+from gateway.message_admission.cursor import TimelineCursor
+from gateway.message_admission.harness import agent_harness
 from ops.cluster.rpc import ClusterOpFailed, ClusterOpUnreachable
 from ops.rpc_schemas import HarnessTimelineReadRequest, HarnessTimelineWindow
 

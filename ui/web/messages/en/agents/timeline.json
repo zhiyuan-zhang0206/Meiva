@@ -13,7 +13,6 @@
   "workingFor": "Working for {duration}",
   "workActivity": "Context",
   "worked": "Worked",
-  "timingIncompleteWarning": "Work timing was not fully recorded. Total duration is unavailable.",
   "workedFor": "Worked for {duration}",
   "ranFor": "Ran for {duration}",
   "compactSummaries": "{count} {unit}",
@@ -59,5 +58,9 @@
   "turnPlural": "turns",
   "agentResponding": "Agent is responding.",
   "agentResponseComplete": "Agent response complete.",
-  "copied": "Copied"
+  "copied": "Copied",
+  "quoteSelection": "Quote selection",
+  "quoteTooLong": "Select up to 4,000 characters.",
+  "quoteSource": "Quoted · {author}",
+  "quoteUnavailable": "Original message is currently unavailable."
 }

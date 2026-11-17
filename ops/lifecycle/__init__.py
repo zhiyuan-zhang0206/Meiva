@@ -65,7 +65,10 @@ from ops.lifecycle.hosted_turn import (
 from ops.lifecycle.launch import (
     launch_agent_op as launch_agent_op,
 )
-from ops.lifecycle.restart_row import read_restart_status_and_harness_blocking
+from ops.lifecycle.restart_row import (
+    read_restart_status_and_harness_blocking,
+    update_harness_transition_meta_blocking,
+)
 
 # Re-exported (explicit-alias form) from `resurrect_gates` so the
 # module-qualified callers — tests — keep their call sites.
@@ -518,36 +521,6 @@ def restart_blocking(
         )
 
 
-def _update_harness_transition_meta_blocking(
-    db_pool: ConnectionPool,
-    agent_id: int,
-    target_harness: str,
-    config_overlay: dict[str, object] | None,
-    catalog: ModelCatalog,
-) -> None:
-    overlay_without_harness = split_overlay_columns(config_overlay).fields
-    with write_transaction(db_pool) as conn:
-        if overlay_without_harness:
-            if target_harness == "meiva":
-                normalize_overlay_llm_model(overlay_without_harness, models=catalog.models)
-            conn.execute(
-                "UPDATE agents_meta SET harness = %s, harness_configured_at = clock_timestamp(), "
-                "config_overlay = COALESCE(config_overlay, '{}'::jsonb) || %s::jsonb WHERE id = %s",
-                (target_harness, json.dumps(overlay_without_harness), agent_id),
-            )
-        else:
-            conn.execute(
-                "UPDATE agents_meta SET harness = %s, harness_configured_at = clock_timestamp() "
-                "WHERE id = %s",
-                (target_harness, agent_id),
-            )
-        if target_harness != "meiva":
-            conn.execute(
-                "UPDATE agents_meta SET birth_config = COALESCE(birth_config, '{}'::jsonb) || '{\"harness_model_selection\": 1}'::jsonb WHERE id = %s",
-                (agent_id,),
-            )
-
-
 async def _execute_harness_transition(
     db: Database,
     bus: EventBus,
@@ -561,10 +534,23 @@ async def _execute_harness_transition(
     is_switch: bool,
     host: LocalAgentHost,
     catalog: ModelCatalog,
+    require_quiescent: bool = False,
 ) -> RestartAgentResponse:
     if status not in ("idling", "terminated"):
         raise ValueError(f"Cannot restart agent in status {status!r}; must be idling or terminated")
 
+    cutoff: int | None = None
+    if require_quiescent:
+        # meiva:note
+        # Linearize the strict attempt with claim under the agent row lock before any host stop.
+        _old_status, _cmd_id, cutoff = await asyncio.to_thread(
+            force_terminate_transaction,
+            agent_id,
+            db_pool,
+            source=body.source,
+            kill_all_shell_sessions=False,
+            require_quiescent=True,
+        )
     await prepare_harness_switch(
         agent_id,
         old_harness=old_harness,
@@ -573,7 +559,7 @@ async def _execute_harness_transition(
         message=body.message,
         host=host,
     )
-    if status != "terminated":
+    if status != "terminated" and not require_quiescent:
         _old_status, _cmd_id, cutoff = await asyncio.to_thread(
             force_terminate_transaction,
             agent_id,
@@ -581,11 +567,12 @@ async def _execute_harness_transition(
             source=body.source,
             kill_all_shell_sessions=False,
         )
+    if cutoff is not None:
         await release_browser_pages(agent_id, home=host.home)
         await _kill_shell_sessions_now(agent_id, cutoff=cutoff, db_pool=db_pool, home=host.home)
 
     await asyncio.to_thread(
-        _update_harness_transition_meta_blocking,
+        update_harness_transition_meta_blocking,
         db_pool,
         agent_id,
         target_harness,
@@ -619,7 +606,10 @@ async def restart_agent_op(
     catalog: ModelCatalog,
     default_model: str,
     home: Path,
+    require_quiescent: bool = False,
 ) -> RestartAgentResponse:
+    if require_quiescent and body.at_turn_end:
+        raise ValueError("scheduled attempts cannot use at_turn_end")
     if body.at_turn_end:
         iid = await asyncio.to_thread(
             defer_restart_blocking, db, bus, agent_id, body, db_pool, catalog=catalog
@@ -634,6 +624,21 @@ async def restart_agent_op(
     target_harness = old_harness if requested_harness is None else requested_harness.value
 
     is_switch = target_harness != old_harness
+    if require_quiescent:
+        return await _execute_harness_transition(
+            db,
+            bus,
+            agent_id,
+            body,
+            db_pool,
+            status=status,
+            old_harness=old_harness,
+            target_harness=target_harness,
+            is_switch=is_switch,
+            host=host,
+            catalog=catalog,
+            require_quiescent=True,
+        )
     if not is_switch and status == "terminated":
         return RestartAgentResponse(status=RestartResult.ALREADY_TERMINATED)
 
@@ -674,7 +679,7 @@ async def restart_agent_op(
 _LIFECYCLE_PATH = re.compile(
     r"^/api/agents/(?P<id>\d+)/"
     r"(?P<action>terminate|resurrect-explicit|"
-    r"resurrect-if-pending-work|restart|interrupt)$"
+    r"resurrect-if-pending-work|restart|restart-scheduled|interrupt)$"
 )
 
 
@@ -748,7 +753,7 @@ async def lifecycle_op(
             trigger_inbound_id=trigger_inbound_id,
             trigger_inbound_kind=trigger_inbound_kind,
         )
-    if action == "restart":
+    if action in ("restart", "restart-scheduled"):
         return await restart_agent_op(
             db,
             bus,
@@ -759,6 +764,7 @@ async def lifecycle_op(
             catalog=catalog,
             default_model=settings.lm.llm_model,
             home=home,
+            require_quiescent=action == "restart-scheduled",
         )
     raise AssertionError(f"unreachable: action={action!r}")
 

@@ -219,6 +219,7 @@ def force_terminate_transaction(
     source: str,
     message: str | None = None,
     kill_all_shell_sessions: bool = False,
+    require_quiescent: bool = False,
 ) -> tuple[AgentStatus, int, int]:
     with db_pool.connection() as conn, conn.cursor() as cur:
         conn.execute("SET TRANSACTION READ WRITE")
@@ -230,6 +231,9 @@ def force_terminate_transaction(
         if row is None:
             raise AgentNotFound(f"agent {agent_id} does not exist")
         old_status = AgentStatus(row[0])
+        if require_quiescent and old_status not in (AgentStatus.IDLING, AgentStatus.TERMINATED):
+            raise ValueError(f"Scheduled restart refused: agent {agent_id} is {old_status.value}")
+
         _, terminate_inbound_id = _insert_termination_inbounds(
             conn,
             agent_id,

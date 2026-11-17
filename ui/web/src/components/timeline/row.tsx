@@ -1,12 +1,16 @@
 "use client";
 
 
-import { memo, useCallback, useEffect, useRef, useState, type PointerEvent as ReactPointerEvent } from "react";
+import { memo, useContext, useCallback, useEffect, useRef, useState, type PointerEvent as ReactPointerEvent } from "react";
 
 import { cn } from "@/lib/format/utils";
 import { FLEX, MIN_W_0 } from "@/lib/layout/layout";
 
 import type { BackendTimelineItem } from "@/lib/contracts/types";
+
+import { useBrowser } from "@/lib/browser/browser-provider";
+import { QuoteCard, QuoteTarget } from "./view/quote/quote";
+import { isQuote } from "@/lib/contracts/types";
 
 import { CopyButton } from "./buttons";
 import { ItemTimestamp } from "./timestamp";
@@ -70,6 +74,12 @@ export const TimelineRow = memo(function TimelineRow({
   timelineSource?: "buffer" | "canonical";
   displayRank?: number;
 }) {
+  const browser = useBrowser();
+  const quoteTarget = useContext(QuoteTarget);
+  const rowRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (quoteTarget?.itemId === item.item_id && rowRef.current) browser.view.highlight(rowRef.current);
+  }, [quoteTarget, item.item_id, browser]);
   const handleToggle = useCallback(
     () => onToggle(item.item_id, expanded),
     [onToggle, item.item_id, expanded],
@@ -105,7 +115,7 @@ export const TimelineRow = memo(function TimelineRow({
 
   if (config === null) {
     return (
-      <div data-item-id={item.item_id} data-timeline-source={timelineSource} data-display-rank={displayRank} aria-live="off" className="timeline-item">
+      <div ref={rowRef} data-item-id={item.item_id} data-timeline-source={timelineSource} data-display-rank={displayRank} aria-live="off" className="timeline-item">
         <ItemErrorBoundary resetKey={item.payload}>
           <ItemView item={item} streaming={streaming} />
         </ItemErrorBoundary>
@@ -132,12 +142,14 @@ export const TimelineRow = memo(function TimelineRow({
       <ItemTimestamp iso={item.created_at} />
     ) : null;
   const canCopy = (isPrimaryMessage ? !item.partial : copyable) && config.copy;
+  const quote = "quote" in item && isQuote(item.quote) ? item.quote : null;
   const copy = canCopy ? <CopyButton text={copyPayloadFor(item)} compact /> : null;
   const primaryFooter = isPrimaryMessage && (stamp ?? copy) ? <>{stamp}{copy}</> : null;
 
   if (isHumanBubble) {
     return (
       <div
+        ref={rowRef}
         data-item-id={item.item_id}
         data-timeline-source={timelineSource}
         data-display-rank={displayRank}
@@ -157,7 +169,8 @@ export const TimelineRow = memo(function TimelineRow({
                 MIN_W_0,
               )}
             >
-              <ItemView item={item} streaming={streaming} />
+              {quote ? <QuoteCard quote={quote} /> : null}
+              <div data-quote-body={!item.partial && !streaming ? "" : undefined}><ItemView item={item} streaming={streaming} /></div>
             </div>
           </div>
         </ItemErrorBoundary>
@@ -176,6 +189,7 @@ export const TimelineRow = memo(function TimelineRow({
   if (isAgentProse) {
     return (
       <div
+        ref={rowRef}
         data-item-id={item.item_id}
         data-timeline-source={timelineSource}
         data-display-rank={displayRank}
@@ -189,7 +203,7 @@ export const TimelineRow = memo(function TimelineRow({
             data-testid="agent-message-prose"
             className={cn("text-[15px] leading-[25px] text-foreground/92 dark:text-[#e2dfd9]", MIN_W_0)}
           >
-            <ItemView item={item} streaming={streaming} />
+            <div data-quote-body={!item.partial && !streaming ? "" : undefined}><ItemView item={item} streaming={streaming} /></div>
           </div>
         </ItemErrorBoundary>
         {primaryFooter ? (
@@ -210,6 +224,7 @@ export const TimelineRow = memo(function TimelineRow({
 
   return (
     <div
+      ref={rowRef}
       data-item-id={item.item_id}
       data-timeline-source={timelineSource}
       data-display-rank={displayRank}
@@ -229,7 +244,7 @@ export const TimelineRow = memo(function TimelineRow({
             onToggle={handleToggle}
           />
           {showExpandedBody ? (
-            <div className="relative px-1 pt-0.5 pb-1.5">
+            <div data-quote-body={!item.partial && !streaming ? "" : undefined} className="relative px-1 pt-0.5 pb-1.5">
               <ItemView item={item} streaming={streaming} />
               {secondaryCopy ? (
                 <div

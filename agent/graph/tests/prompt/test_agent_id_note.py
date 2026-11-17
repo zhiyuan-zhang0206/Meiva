@@ -17,6 +17,7 @@ from agent.graph.prompt.context_notes import (
     workspace_facts,
 )
 from agent.graph.prompt.note_text import (
+    RuntimeSelection,
     Workspace,
     agent_id_text,
     label_from_row,
@@ -200,7 +201,10 @@ def test_note_states_the_stored_label_and_the_machine(clients: ClientSet) -> Non
 
     note = agent_id_note(context)
 
-    assert _content(note) == "Your Agent ID is 29 (label: memory steward, machine: runner-a)."
+    assert (
+        _content(note)
+        == f"Your Agent ID is 29 (label: memory steward, machine: runner-a, harness: meiva, model: {settings.lm.llm_model})."
+    )
 
 
 @pytest.mark.usefixtures("labelled_agent")
@@ -214,7 +218,9 @@ def test_note_states_the_workspace_when_the_section_is_on(
 
     content = _content(agent_id_note(context))
 
-    assert content.startswith("Your Agent ID is 29 (label: memory steward). Your workspace is ")
+    assert content.startswith(
+        f"Your Agent ID is 29 (label: memory steward, harness: meiva, model: {settings.lm.llm_model}). Your workspace is "
+    )
     assert content.endswith("beside your messages:\nWaiting on a decision")
 
 
@@ -245,14 +251,19 @@ def test_note_leaves_the_workspace_out_when_the_section_is_off(
 ) -> None:
     context = _context(clients, workspace=False)
 
-    assert _content(agent_id_note(context)) == "Your Agent ID is 29 (label: memory steward)."
+    assert (
+        _content(agent_id_note(context))
+        == f"Your Agent ID is 29 (label: memory steward, harness: meiva, model: {settings.lm.llm_model})."
+    )
     assert not (unit_home / "workspaces").exists()
 
 
 def test_note_renders_under_a_hosted_turn_identity(clients: ClientSet) -> None:
     note = agent_id_note(_context(clients, agent_id=31))
 
-    assert _content(note) == "Your Agent ID is 31."
+    assert (
+        _content(note) == f"Your Agent ID is 31 (harness: meiva, model: {settings.lm.llm_model})."
+    )
 
 
 def test_note_opts_out_without_any_identity() -> None:
@@ -470,4 +481,21 @@ def test_identity_note_uses_the_configured_timestamp_policy(
     clock = Clock(ClockConfig("UTC", "UTC", weekday), timers=timers, now=timers.now)
     context = replace(_context(clients, timestamps_enabled=enabled), clock_factory=lambda: clock)
     stamp = "[2026-11-14 Sat 08:05:51] " if weekday else "[2026-11-14 08:05:51] "
-    assert _content(agent_id_note(context)) == (stamp if enabled else "") + "Your Agent ID is 29."
+    assert (
+        _content(agent_id_note(context))
+        == (stamp if enabled else "")
+        + f"Your Agent ID is 29 (harness: meiva, model: {settings.lm.llm_model})."
+    )
+
+
+def test_identity_formats_the_effective_runtime_selection() -> None:
+    text = agent_id_text(
+        29,
+        label=None,
+        machine=None,
+        workspace=None,
+        runtime=RuntimeSelection("codex", "gpt-example", "high"),
+    )
+    assert (
+        text == "Your Agent ID is 29 (harness: codex, model: gpt-example (reasoning_effort: high))."
+    )

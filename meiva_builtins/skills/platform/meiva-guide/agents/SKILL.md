@@ -30,9 +30,8 @@ An **agent** is a running AI process — you are one. The lifecycle verbs:
   intact (must include a `prompt` telling it why it was woken).
 - `transfer` (CLI only: `meiva agents transfer <id> --to <machine> --message "..."`
   or `--no-message`) — move an `idling` or `terminated` native agent and its
-  workspace directory to another machine. Running agents are refused (`409`);
-  to relocate yourself, ask a peer or operator to transfer you after calling
-  `meiva.self.terminate()`.
+  workspace directory to another machine. Immediate transfers require a quiescent
+  target; use `--at` below to schedule a future attempt, including for yourself.
 
 State machine: `idling (unclaimed) → running ⇄ idling → terminated`.
 
@@ -78,7 +77,7 @@ harness the same way: `meiva.agents.spawn(..., config_overlay={"harness": "codex
 - **CLI**: `meiva agents restart <agent_id> -m "Switching to Codex" --overlay harness=codex`
 - **Gateway REST API**: `POST /api/agents/{agent_id}/restart` with body `{"message": "...", "config_overlay": {"harness": "..."}}`
 - **From the agent itself** (on any harness): `print(meiva.self.restart("Switching to Codex", config_overlay={"harness": "codex", "llm_model": "<model>"}))`.
-  It is the only road that works while the agent is running: the request is validated
+  The request is validated
   like any restart (a refusal raises at once), recorded, and applied when the current turn
   ends, never during it. On the native harness the call ends your execution; on an external
   harness it returns a receipt and you end the turn yourself. Your message arrives as the
@@ -87,7 +86,8 @@ harness the same way: `meiva.agents.spawn(..., config_overlay={"harness": "codex
 ### Preconditions, Invariants & Handoff Process
 1. **Agent State**: The agent must be in `idling` or `terminated` status. A running
    agent will be rejected with `409 Conflict` (the agent's own `meiva.self.restart`
-   waits for its turn to end instead).
+   waits for its turn to end instead). Scheduled `--at` submissions accept running
+   targets and check for quiescence once when the schedule fires.
 2. **Mandatory Message**: `message` is mandatory across all restart calls (minimum
    1 non-whitespace character).
 3. **Model Compatibility**: If changing harness, ensure the target harness supports
@@ -109,6 +109,51 @@ When switching harnesses on restart:
 2. The agent is dropped from active runner cache, and the harness session records (`$MEIVA_HOME/harness/sessions/{agent_id}.{harness}.json`) are kept, so switching back to a harness resumes the conversation it had there.
 3. If `idling`, the agent is cleanly terminated.
 4. `agents_meta.harness` is updated in the database, and the agent is resurrected on its new harness with a wake prompt referencing the restart message.
+
+## Introspection
+
+Read your effective runtime selection and stored overrides through the CLI:
+
+```bash
+meiva agents get <id>
+meiva agents get <id> --json
+meiva agents inbox <id> --full
+meiva schedules ls
+meiva schedules cancel <schedule_id>
+```
+
+`get` reports `harness`, effective `llm_model`, `reasoning_effort`, and the stored
+`config_overlay`. Effective model and effort include birth pins and model defaults;
+the overlay is the explicit override map. Model projections can be unknown when
+the catalog is unavailable. The startup identity header carries the current harness,
+model and non-empty reasoning effort too. No new Python SDK query is needed.
+Use `inbox` to read lifecycle notices and `schedules ls` to inspect pending attempts;
+keep the returned schedule ID so you can cancel an attempt before it fires.
+
+### Scheduled transfer and restart
+
+**Availability:** These `--at` examples require deployment of the companion
+scheduled agent lifecycle implementation (PR B). Check the deployed
+`meiva agents transfer --help` and `meiva agents restart --help` for `--at`
+before using them.
+
+```bash
+meiva agents transfer <id> --to <machine> --message "Move after this turn" --at +60s --source agent:<caller_id>
+meiva agents restart <id> -m "Switch after this turn; handoff: <path>" --overlay harness=codex --overlay llm_model=<model> --at +60s --source agent:<caller_id>
+```
+
+`--at` accepts relative times such as `+60s` / `+10m` or an ISO-8601 timestamp,
+and requires explicit `--source`. Immediate calls retain their existing behavior.
+Submission validates non-status prerequisites and returns `schedule_id` and `run_at`.
+At that time, the operation makes one attempt and requires `idling` or `terminated`;
+a still-running target causes failure and an outcome notice so the actors can coordinate.
+
+For yourself, write the handoff, submit with `--source agent:<your_id>`, and finish
+your turn before `run_at`. Submission sends no waking message to yourself. For a
+peer, a running target receives a heads-up to wrap up; sleeping targets stay asleep
+until a successful operation. Agent callers receive the outcome; running targets
+also receive a refusal notice if they were still busy. Inspect or cancel the
+schedule using the commands above when plans change.
 
 ## Command (user-level command)
 

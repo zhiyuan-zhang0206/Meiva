@@ -1,4 +1,4 @@
-import { cleanup, fireEvent, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, fireEvent, screen, waitFor } from "@testing-library/react";
 import { renderWithProviders } from "@/test-support/render";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { MessageDeliveryUnknownError } from "@/lib/transport/api";
@@ -6,6 +6,7 @@ import { interactionTimingResetForTest, noteTurnStart } from "@/lib/format/inter
 import { fakeBrowser } from "@/lib/browser/testing";
 import { telemetryTestControl } from "@/lib/telemetry/telemetry";
 import { Composer } from "./composer";
+import type { Quote } from "@/lib/contracts/types";
 
 import { resetTransport, transport } from "@/test-support/fake-api";
 beforeEach(() => {
@@ -333,5 +334,74 @@ describe("Composer input lifecycle", () => {
     fireEvent.keyDown(ta, { key: "Enter" });
     await Promise.resolve();
     expect(onSend).not.toHaveBeenCalled();
+  });
+});
+
+
+describe("selected quote draft", () => {
+  const quote = { source_agent_id: 42, source_item_id: "9.0", author: "Agent #42", created_at: "2026-11-17T09:00:00Z", text: "selected\ncontext" };
+  it("keeps a quote and draft through reload, reuses retry identity, and changes identity for a new selection", async () => {
+    const browser = fakeBrowser();
+    const onSend = vi.fn<(content: string, files: string[], id: string, quote?: Quote) => Promise<boolean>>().mockResolvedValue(false);
+    const view = renderWithProviders(<Composer {...baseProps} agentId={42} mode="idle" onSend={onSend} quoteSelection={{quote, revision: 1}} />, { browser, wallNow: () => 0 });
+    const input = screen.getByTestId("composer-input");
+    fireEvent.change(input, { target: { value: "explain" } });
+    fireEvent.click(screen.getByTestId("composer-send"));
+    await waitFor(() => expect(onSend).toHaveBeenCalledTimes(1));
+    const firstId = onSend.mock.calls[0][2];
+    expect(onSend.mock.calls[0][3]).toEqual(quote);
+    view.unmount();
+    const next = renderWithProviders(<Composer {...baseProps} agentId={42} mode="idle" onSend={onSend} />, { browser, wallNow: () => 0 });
+    expect(screen.getByTestId("composer-quote").textContent).toContain("selected");
+    expect(screen.getByTestId<HTMLTextAreaElement>("composer-input").value).toBe("explain");
+    fireEvent.click(screen.getByTestId("composer-send"));
+    await waitFor(() => expect(onSend).toHaveBeenCalledTimes(2));
+    expect(onSend.mock.calls[1][2]).toBe(firstId);
+    next.rerender(<Composer {...baseProps} agentId={42} mode="idle" onSend={onSend} quoteSelection={{quote: {...quote,text:"different"}, revision: 2}} />);
+    fireEvent.click(screen.getByTestId("composer-send"));
+    await waitFor(() => expect(onSend).toHaveBeenCalledTimes(3));
+    expect(onSend.mock.calls[2][2]).not.toBe(firstId);
+  });
+  it("preserves a pre-quote release's stored retry identity for an ordinary draft", async () => {
+    const browser = fakeBrowser();
+    browser.session.write("composer-draft-43", "ordinary retry");
+    browser.session.write("composer-send-attempt-43", JSON.stringify({signature:JSON.stringify([43,"ordinary retry",[]]),clientMessageId:"existing-key",agentId:43,content:"ordinary retry",fileIds:[]}));
+    const onSend = vi.fn<(_content: string, _files: string[], _id: string, _quote?: Quote) => Promise<boolean>>().mockResolvedValue(false);
+    renderWithProviders(<Composer {...baseProps} agentId={43} mode="idle" onSend={onSend} />, {browser,wallNow:()=>0});
+    fireEvent.click(screen.getByTestId("composer-send"));
+    await waitFor(() => expect(onSend).toHaveBeenCalledTimes(1));
+    expect(onSend.mock.calls[0][2]).toBe("existing-key");
+  });
+  it.each([false, true])("settling A's send after switching to B clears only the submitted quote (replacement=%s)", async (replacement) => {
+    const agentId = replacement ? 54 : 55;
+    const browser = fakeBrowser();
+    const first = {...quote,source_agent_id:agentId,text:"first selection"};
+    const second = {...first,text:"new selection while sending"};
+    const deferred: {resolve: (value: boolean) => void} = {resolve: () => undefined};
+    const onSend = vi.fn(() => new Promise<boolean>((resolve) => {deferred.resolve = resolve;}));
+    const view = renderWithProviders(<Composer {...baseProps} mode="idle" agentId={agentId} onSend={onSend} quoteSelection={{quote:first,revision:1}} />, {browser,wallNow:()=>0});
+    fireEvent.change(screen.getByTestId("composer-input"), {target:{value:"explain"}});
+    fireEvent.click(screen.getByTestId("composer-send"));
+    await waitFor(() => expect(onSend).toHaveBeenCalledTimes(1));
+    const selection = replacement ? {quote:second,revision:2} : {quote:first,revision:1};
+    if (replacement) view.rerender(<Composer {...baseProps} mode="idle" agentId={agentId} onSend={onSend} quoteSelection={selection} />);
+    view.rerender(<Composer {...baseProps} mode="idle" agentId={agentId + 100} onSend={onSend} quoteSelection={selection} />);
+    await act(async () => {deferred.resolve(true); await Promise.resolve();});
+    const stored = browser.session.read(`composer-quote-${agentId}`);
+    expect(stored.state).toBe(replacement ? "found" : "absent");
+    if (stored.state === "found") expect(JSON.parse(stored.value)).toEqual(second);
+    view.rerender(<Composer {...baseProps} mode="idle" agentId={agentId} onSend={onSend} quoteSelection={selection} />);
+    if (replacement) expect(screen.getByTestId("composer-quote").textContent).toContain(second.text);
+    else expect(screen.queryByTestId("composer-quote")).toBeNull();
+  });
+  it("requires supplemental text and removes only the quote", () => {
+    renderWithProviders(<Composer {...baseProps} agentId={42} mode="idle" quoteSelection={{quote,revision: 1}} />, { browser: fakeBrowser(), wallNow: () => 0 });
+    const input = screen.getByTestId("composer-input");
+    fireEvent.change(input, { target: { value: "" } });
+    expect(screen.getByTestId<HTMLButtonElement>("composer-send").disabled).toBe(true);
+    fireEvent.change(input, { target: { value: "my draft" } });
+    fireEvent.click(screen.getByRole("button", {name:"Remove quote"}));
+    expect(screen.queryByTestId("composer-quote")).toBeNull();
+    expect(screen.getByTestId<HTMLTextAreaElement>("composer-input").value).toBe("my draft");
   });
 });

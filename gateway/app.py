@@ -3,12 +3,13 @@ import logging
 import secrets
 from collections.abc import AsyncGenerator, Callable
 from contextlib import AsyncExitStack, asynccontextmanager, nullcontext
+from datetime import datetime
 from functools import partial
 from pathlib import Path
 from typing import Literal
 
 import psutil
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import TypeAdapter
@@ -42,6 +43,7 @@ from gateway.agents.history import conversation as conversation_router
 from gateway.agents.history import inbound as inbound_router
 from gateway.agents.history import timeline as timeline_router
 from gateway.agents.history import understanding as agents_understanding_router
+from gateway.agents.launch.scheduled_lifecycle import AppointmentAppState
 from gateway.agents.questions import asks as asks_router
 from gateway.agents.questions import feed as questions_feed_router
 from gateway.agents.questions import router as guarded_questions_router
@@ -54,6 +56,7 @@ from gateway.agents.to_user import document as to_user_router
 from gateway.agents.to_user import publications as publications_router
 from gateway.agents.transfer import router as agents_transfer_router
 from gateway.agents.transfer.bundle_store import TransferBundleStore
+from gateway.agents.transfer.dependencies import TransferAppState
 from gateway.alerts import router as alerts_router
 from gateway.cluster import bootstrap as bootstrap_router
 from gateway.cluster import machine_pause as machine_pause_router
@@ -169,7 +172,8 @@ class GatewayServerState(
     upload_delivery_router.UploadAppState,
     status_router.StatusAppState,
     reply_suggestion_router.ReplySuggestionAppState,
-    agents_transfer_router.TransferAppState,
+    TransferAppState,
+    AppointmentAppState,
     auth_router.AuthAppState,
 ):
     pass
@@ -482,6 +486,7 @@ def create_app(
     machine_token_acceptance: AcceptanceCache = {}
     state.machine_token_acceptance = machine_token_acceptance
     state.agent_transfer_bundles = TransferBundleStore()
+    state.lifecycle_schedule_creator = _create_lifecycle_schedule
     app.middleware("http")(cluster_auth_middleware)
 
     app.middleware("http")(latency.latency_middleware)
@@ -687,3 +692,26 @@ def main() -> None:
     config.boot()
     config.ensure_eager()
     _run_gateway(home=paths.meiva_home(), config=config, build_app=_borrowed_app)
+
+
+async def _create_lifecycle_schedule(
+    request: Request,
+    name: str,
+    run_at: datetime,
+    script: str,
+    description: str,
+) -> int:
+    schedule = await schedules_router.create_schedule(
+        request,
+        schedules_router.ScheduleCreate(
+            name=name,
+            trigger_kind="at",
+            run_at=run_at,
+            script=script,
+            owner_agent_id=None,
+            description=description,
+            command="python schedule.py",
+            timeout_seconds=600,
+        ),
+    )
+    return schedule.id

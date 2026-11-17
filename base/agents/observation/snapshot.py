@@ -139,6 +139,9 @@ class AgentSnapshot(BaseModel):
     label: str | None
     machine: str
     supports_vision: bool | None
+    llm_model: str | None = None
+    reasoning_effort: str | None = None
+    config_overlay: dict[str, object] | None = None
     # Gateway-owned liveness projection (Task #1174): 'online' = the machine is
     # meiva:note
     # reachable; 'offline' = machine unreachable (2 consecutive failed
@@ -316,6 +319,9 @@ def _row_to_snapshot(
     supports_vision = agent_supports_vision(
         row.config_overlay, row.birth_config, catalog=catalog, default_model=default_model
     )
+    model, effort = agent_model_and_effort(
+        row.config_overlay, row.birth_config, catalog=catalog, default_model=default_model
+    )
     return AgentSnapshot.model_validate(
         {
             "agent_id": row.id,
@@ -336,6 +342,9 @@ def _row_to_snapshot(
             "questions_awaiting_response": row.questions_awaiting_response,
             "has_unread_user_messages": row.has_unread_user_messages,
             "supports_vision": supports_vision,
+            "llm_model": model,
+            "reasoning_effort": effort,
+            "config_overlay": _config_map(row.config_overlay, "config_overlay"),
             "observation": observation(row.machine_probe_at),
             "availability": availability(
                 status=row.status,

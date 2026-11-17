@@ -45,6 +45,7 @@ class TrajectoryStep:
     client_message_id: str | None
     timing_key: str | None = None
     thinking_ms: int | None = None
+    invalid_thinking_duration: bool = False
 
 
 @dataclass(frozen=True, slots=True)
@@ -105,6 +106,10 @@ def _step(index: int, entry: object) -> TrajectoryStep:
         client_message_id=client_id if isinstance(client_id, str) and client_id else None,
         timing_key=timing_key(index, meta.get("createdAt"), measured.get("thinking")),
         thinking_ms=duration_ms(measured.get("thinkingDuration")),
+        invalid_thinking_duration=(
+            measured.get("thinkingDuration") is not None
+            and duration_ms(measured.get("thinkingDuration")) is None
+        ),
     )
 
 
