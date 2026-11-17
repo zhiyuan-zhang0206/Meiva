@@ -22,6 +22,7 @@ from base.config.service_read import ConfigAuthority
 from base.db import Database, create_agent
 from base.host.system.tests.fake_commands import fake_host
 from base.lm.catalog import ModelCatalog
+from base.sessions.pty import terminal_fence
 from gateway.agents.transfer.router import CutoverConflictError, commit_cutover_blocking
 from gateway.agents.transfer.transfer_plan import AgentTransferSnapshot
 from gateway.cluster.process_boot import LOADED_IMAGE
@@ -184,6 +185,12 @@ def _assert_transferred_db_records(
     ) == ("runner-a", "runner-b")
 
 
+def _assert_terminal_fence(home: Path, agent_id: int, cutoff: int) -> None:
+    fence = terminal_fence.read(home)
+    assert fence.error is None
+    assert fence.cutoffs[agent_id] == cutoff
+
+
 def test_transfer_idling_agent_moves_workspace_and_resurrects_on_target(
     two_runners: TwoRunnerCluster,
     db_conn: psycopg.Connection,
@@ -247,6 +254,9 @@ def test_transfer_terminated_agent_without_workspace_resurrects_on_target(
     assert resp.status_code == 200, resp.text
     assert resp.json()["agent_status"] == "idling"
     assert resp.json()["files_transferred"] == 0
+    assert resp.json()["killed_shell_sessions"] == []
+
+    _assert_terminal_fence(two_runners.home_a, agent_id, 2)
 
     meta_row = db_conn.execute(
         "SELECT machine, status, runtime_owner FROM agents_meta WHERE id = %s",

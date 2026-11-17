@@ -31,3 +31,9 @@ Update (2026-11-17): the allocation predicate described above did not by itself
 cover the interval between committing a session id and completing PTY creation.
 The corrected creation-atomicity decision is recorded in
 [Persistent shell creation fence](persistent-shell-creation-fence.md).
+
+Update (2026-11-17): legacy `meiva.watcher` sessions follow the same terminal
+lifecycle as every other persistent shell. Owner termination closes them before
+a later `at` or `cron` fire can deliver `watcher:<id>` and resurrect the owner.
+Triggers that intentionally survive owner termination use `meiva.schedules`
+with `on_owner_terminate="keep"`.

@@ -2,9 +2,6 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from langchain_core.messages import AIMessage, BaseMessage
-from pydantic import PrivateAttr
-
 from tests.e2e.fakes.scenario_recording import RecordingModel, exec_call, say, scratch_root
 
 
@@ -144,42 +141,19 @@ print("timeout-watcher", wid)
     )
 
 
-class WatcherResurrectionModel(RecordingModel):
-    _wake_seen: bool = PrivateAttr(default=False)
-    _completion_seen: bool = PrivateAttr(default=False)
-    _response: AIMessage | None = PrivateAttr(default=None)
-
-    def _record(self, messages: list[BaseMessage]) -> None:
-        super()._record(messages)
-        human = "\n".join(str(message.content) for message in messages if message.type == "human")
-        wake = "RESURRECT-WAKE-MARK" in human and not self._wake_seen
-        completion = "Watcher 'e2e-resurrect' finished." in human and not self._completion_seen
-        if not wake and not completion:
-            raise RuntimeError("watcher resurrection model received no new watcher notice")
-        self._wake_seen |= wake
-        self._completion_seen |= completion
-        notices = [label for seen, label in ((wake, "wake"), (completion, "completion")) if seen]
-        self._response = say("processed watcher " + " and ".join(notices))
-
-    def _next_message(self) -> AIMessage:
-        if self._response is None:
-            raise RuntimeError("watcher resurrection model has no recorded notice to process")
-        response, self._response = self._response, None
-        return response
-
-
-def build_watcher_resurrection(model: str, *, agent_id: int | None) -> RecordingModel:
+def build_watcher_termination(model: str, *, agent_id: int | None) -> RecordingModel:
     root = sandbox()
-    if (root / "resurrection-id").exists():
-        return WatcherResurrectionModel(agent_id=agent_id, script=())
     code = f"""
 import meiva
 import datetime
 from pathlib import Path
-wid = meiva.watcher.at(datetime.timedelta(seconds=15), "RESURRECT-WAKE-MARK",
-    name="e2e-resurrect", notify="always")
-Path({str(root / "resurrection-id")!r}).write_text(str(wid.session_id))
-print("resurrection-watcher", wid)
+fire_at = datetime.datetime.now(datetime.UTC) + datetime.timedelta(seconds=30)
+wid = meiva.watcher.at(fire_at, "TERMINATED-WATCHER-MUST-NOT-FIRE",
+    name="e2e-terminate", notify="always")
+Path({str(root / "termination-watcher")!r}).write_text(
+    f"{{wid.session_id}}\n{{fire_at.timestamp()}}\n"
+)
+print("termination-watcher", wid)
 """
     return RecordingModel(agent_id=agent_id, script=(exec_call(1, code), say("watcher armed")))
 

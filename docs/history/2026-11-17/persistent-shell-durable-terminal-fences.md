@@ -19,3 +19,9 @@ transition.
 The regression sends `new`, loses the client acknowledgement, records and
 acknowledges the fence, restarts the PTY daemon, then releases the old request.
 It must be refused, while the next higher session index remains allocatable.
+
+Update (2026-11-17): workspace export records this durable cutoff before it
+dials `pty-sessions`. If that service is unavailable, transfer may still package
+the workspace with no confirmed killed-session ids; the cutoff protects the
+next daemon generation. The exception is limited to `ServiceDownError`, so an
+invalid fence state or any other cleanup failure still aborts the export.

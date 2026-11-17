@@ -4,6 +4,7 @@ import os
 import shlex
 import signal
 import sys
+import tempfile
 from pathlib import Path
 
 import psutil
@@ -65,35 +66,37 @@ def test_a_terminal_fence_survives_service_restart_before_a_lost_ack_arrives(
     unit_home: Path, pty_service: PtyServiceProcess
 ) -> None:
     upstream = service_socket()
-    delayed_path = upstream.with_name(f"{upstream.stem}-restart-delayed.sock")
-    proxy = DelayedNewProxy(delayed_path, upstream)
-    old_name = "meiva-agent-7-shell-0-lost-ack"
-    try:
-        with pytest.raises(client.ServiceUnavailableError):
-            client.request(
-                "new",
-                socket_path=delayed_path,
-                timeout=0.05,
-                name=old_name,
-                cwd=str(unit_home),
-                env={},
-            )
-        assert proxy.accepted.wait(timeout=5.0)
+    with tempfile.TemporaryDirectory(prefix="pty-") as socket_dir:
+        delayed_path = Path(socket_dir) / "d.sock"
+        assert len(str(delayed_path)) < 90
+        proxy = DelayedNewProxy(delayed_path, upstream)
+        old_name = "meiva-agent-7-shell-0-lost-ack"
+        try:
+            with pytest.raises(client.ServiceUnavailableError):
+                client.request(
+                    "new",
+                    socket_path=delayed_path,
+                    timeout=0.05,
+                    name=old_name,
+                    cwd=str(unit_home),
+                    env={},
+                )
+            assert proxy.accepted.wait(timeout=5.0)
 
-        backend = get_shell_backend(home=unit_home)
-        assert isinstance(backend, PtySessionBackend)
-        assert backend.fence_agent_shells(7, 1) == []
-        pty_service.stop()
-        pty_service.start()
+            backend = get_shell_backend(home=unit_home)
+            assert isinstance(backend, PtySessionBackend)
+            assert backend.fence_agent_shells(7, 1) == []
+            pty_service.stop()
+            pty_service.start()
 
-        proxy.release.set()
-        assert proxy.completed.wait(timeout=5.0)
-        assert proxy.error is None
-        assert proxy.response is not None and proxy.response["ok"] is False
-        assert not client.has_session(old_name, socket_path=service_socket())
-        assert new("meiva-agent-7-shell-1-resurrected", unit_home) is True
-    finally:
-        proxy.close()
+            proxy.release.set()
+            assert proxy.completed.wait(timeout=5.0)
+            assert proxy.error is None
+            assert proxy.response is not None and proxy.response["ok"] is False
+            assert not client.has_session(old_name, socket_path=service_socket())
+            assert new("meiva-agent-7-shell-1-resurrected", unit_home) is True
+        finally:
+            proxy.close()
 
 
 def test_an_unreadable_terminal_fence_state_refuses_agent_allocation(
