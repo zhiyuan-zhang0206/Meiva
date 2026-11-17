@@ -6,17 +6,24 @@ import json
 import psycopg
 import pytest
 
+from base.lm.catalog import ModelCatalog
 from cli.commands.agents.observe import cmd_agents_get
 from cli.commands.cluster.tests.gateway_server import Reply, access_to, serving
+from gateway.app import create_app
 
 
 def test_get_json_preserves_the_real_agent_detail_contract(
     db_conn: psycopg.Connection,
+    model_catalog: ModelCatalog,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
     from psycopg.types.json import Jsonb
 
-    from gateway.tests.auth.gateway_config import gateway_test_client
+    from gateway.tests.auth.gateway_config import (
+        gateway_config_of,
+        gateway_test_client,
+        gateway_test_process,
+    )
 
     overlay = {"reasoning_effort": "high"}
     db_conn.execute("INSERT INTO agents (id) VALUES (7)")
@@ -26,8 +33,15 @@ def test_get_json_preserves_the_real_agent_detail_contract(
         (Jsonb(overlay), Jsonb({"llm_model": "deepseek-v4-pro", "reasoning_effort": "low"})),
     )
     db_conn.commit()
-    with gateway_test_client() as client:
-        response = client.get("/api/agents/7")
+    with gateway_test_process() as process:
+        app = create_app(
+            gateway_config_of(process.config),
+            process=process,
+            process_ownership="borrowed",
+            catalog=model_catalog,
+        )
+        with gateway_test_client(app) as client:
+            response = client.get("/api/agents/7")
     assert response.status_code == 200
     body = response.json()
     assert body["llm_model"] == "deepseek-v4-pro"
