@@ -38,3 +38,15 @@ The repair preserves the cold-return failure signal and retained-return positive
 control. Review includes the full affected TypeScript dependency graph as well as
 scoped consumer tests and the normal hooks. No cycle allowance, exports exemption
 or new patch debt is introduced.
+
+
+## Follow-up: exact test-double accounting
+
+CI exposed a second direct consumer of the relocated Home regression: the
+checker accounts for every assignment into its test-only mock. The six Home
+scenario writes changed the Home double from 101 to 107 records, the dispatch
+file from 40 to 46, and the three documented doubles from 246 to 252. A raw
+first-party-patch scan found 255 sites total. The exact-accounting test and
+current checker table now reflect those measurements; historical counts remain.
+No exemption rule, ratchet or debt baseline changed. Future mock-writing changes
+include this exact-accounting consumer as well as the dependency graph.
