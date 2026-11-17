@@ -1,18 +1,24 @@
 # meiva:note
 # End-to-end integration tests for `POST /api/agents/{agent_id}/transfer` across two real
-# `local_runner` `agent-ops` daemons with isolated homes, real Postgres, and a dialable loopback
-# gateway bundle endpoint. Zero monkeypatching.
+# `local_runner` `agent-ops` daemons and `pty-sessions` daemons with isolated homes, real Postgres,
+# and a dialable loopback gateway bundle endpoint. Zero monkeypatching.
 # meiva:link gateway/agents/docs/agent-transfer.md
 
 from __future__ import annotations
 
+import contextlib
 import json
+import os
+import shlex
+import signal
+import sys
 import uuid
 from collections.abc import Generator
 from dataclasses import dataclass, replace
 from datetime import UTC, datetime
 from pathlib import Path
 
+import psutil
 import psycopg
 import pytest
 
@@ -22,7 +28,13 @@ from base.config.service_read import ConfigAuthority
 from base.db import Database, create_agent
 from base.host.system.tests.fake_commands import fake_host
 from base.lm.catalog import ModelCatalog
+from base.paths import run_dir
+from base.sessions.pty import client as pty_client
 from base.sessions.pty import terminal_fence
+from base.sessions.pty.client import PtyClientConfig
+from base.sessions.pty.paths import service_socket_path
+from base.sessions.pty.tests.pty_service import PtyServiceProcess
+from base.sessions.tests.poll_until import poll_until
 from gateway.agents.transfer.router import CutoverConflictError, commit_cutover_blocking
 from gateway.agents.transfer.transfer_plan import AgentTransferSnapshot
 from gateway.cluster.process_boot import LOADED_IMAGE
@@ -45,12 +57,15 @@ from ops.agent_transfer.budget import (
 from ops.agent_transfer.limits import workspace_transfer_limits_from_read_model
 from ops.rpc_schemas import TransferAgentRequest
 
+_WORKSPACE_WRITER = Path(__file__).with_name("child_workspace_writer.py")
+
 
 @dataclass(frozen=True)
 class TwoRunnerCluster:
     client: GatewayTestClient
     home_a: Path
     home_b: Path
+    source_pty: PtyServiceProcess
 
 
 @pytest.fixture
@@ -65,6 +80,7 @@ def two_runners(
     home_b = tmp_path / "home-runner-b"
     home_a.mkdir()
     home_b.mkdir()
+    pty_services: list[PtyServiceProcess] = []
 
     machine_a = MachineFacts.of(
         name="runner-a",
@@ -79,40 +95,54 @@ def two_runners(
         description="Target runner",
     )
 
-    with (
-        gateway_test_client(
-            config=gateway_test_config(upload_recovery_enabled=False),
-            raise_server_exceptions=False,
-        ) as client,
-        serving_gateway(client, client.app.state.db_pool) as loopback_gateway_url,
-    ):
-        access = replace(client.app.state.gateway_access, gateway_url=loopback_gateway_url)
-        client.app.state.gateway_access = access
+    try:
+        for home in (home_a, home_b):
+            service = PtyServiceProcess(home)
+            service.start()
+            pty_services.append(service)
         with (
-            local_runner(
-                db_conn,
-                database=database,
-                authority=config_authority,
-                catalog=model_catalog,
-                machine=machine_a,
-                host=fake_host(),
-                image=LOADED_IMAGE,
-                unit_home=home_a,
-                gateway_access=access,
-            ),
-            local_runner(
-                db_conn,
-                database=database,
-                authority=config_authority,
-                catalog=model_catalog,
-                machine=machine_b,
-                host=fake_host(),
-                image=LOADED_IMAGE,
-                unit_home=home_b,
-                gateway_access=access,
-            ),
+            gateway_test_client(
+                config=gateway_test_config(upload_recovery_enabled=False),
+                raise_server_exceptions=False,
+            ) as client,
+            serving_gateway(client, client.app.state.db_pool) as loopback_gateway_url,
         ):
-            yield TwoRunnerCluster(client=client, home_a=home_a, home_b=home_b)
+            access = replace(client.app.state.gateway_access, gateway_url=loopback_gateway_url)
+            client.app.state.gateway_access = access
+            with (
+                local_runner(
+                    db_conn,
+                    database=database,
+                    authority=config_authority,
+                    catalog=model_catalog,
+                    machine=machine_a,
+                    host=fake_host(),
+                    image=LOADED_IMAGE,
+                    unit_home=home_a,
+                    gateway_access=access,
+                ),
+                local_runner(
+                    db_conn,
+                    database=database,
+                    authority=config_authority,
+                    catalog=model_catalog,
+                    machine=machine_b,
+                    host=fake_host(),
+                    image=LOADED_IMAGE,
+                    unit_home=home_b,
+                    gateway_access=access,
+                ),
+            ):
+                yield TwoRunnerCluster(
+                    client=client,
+                    home_a=home_a,
+                    home_b=home_b,
+                    source_pty=pty_services[0],
+                )
+    finally:
+        for service in reversed(pty_services):
+            service.stop()
+            service_socket_path(run_dir(service.home)).unlink(missing_ok=True)
 
 
 def _seed_native_agent(
@@ -189,6 +219,56 @@ def _assert_terminal_fence(home: Path, agent_id: int, cutoff: int) -> None:
     fence = terminal_fence.read(home)
     assert fence.error is None
     assert fence.cutoffs[agent_id] == cutoff
+
+
+def _start_workspace_writer(cluster: TwoRunnerCluster, agent_id: int) -> tuple[Path, int]:
+    workspace = paths.workspace_path(cluster.home_a, agent_id)
+    workspace.mkdir(parents=True)
+    counter = workspace / "live-writes"
+    pidfile = cluster.home_a / "transfer-writer.pid"
+    command = shlex.join([sys.executable, "-u", str(_WORKSPACE_WRITER), str(counter), str(pidfile)])
+    socket_path = service_socket_path(run_dir(cluster.home_a))
+    assert pty_client.create_session(
+        f"meiva-agent-{agent_id}-shell-0-transfer-writer",
+        str(workspace),
+        {},
+        command,
+        config=PtyClientConfig(connect_wait_s=0.2, socket_path=socket_path),
+    )
+    poll_until(
+        lambda: (pidfile.exists() and counter.exists(), {"pid": pidfile, "counter": counter}),
+        what="the workspace-writing PTY payload to start",
+    )
+    pid = int(pidfile.read_text(encoding="utf-8"))
+    baseline = int(counter.read_text(encoding="utf-8"))
+    poll_until(
+        lambda: (int(counter.read_text(encoding="utf-8")) >= baseline + 3, counter.read_text()),
+        what="the PTY payload to keep writing",
+    )
+    return counter, pid
+
+
+def _kill_process(pid: int) -> None:
+    with contextlib.suppress(ProcessLookupError):
+        os.kill(pid, signal.SIGKILL)
+    with contextlib.suppress(psutil.NoSuchProcess, psutil.TimeoutExpired):
+        psutil.Process(pid).wait(timeout=10)
+
+
+def _assert_source_did_not_cut_over(
+    conn: psycopg.Connection, cluster: TwoRunnerCluster, agent_id: int
+) -> None:
+    meta = conn.execute(
+        "SELECT machine, status FROM agents_meta WHERE id = %s", (agent_id,)
+    ).fetchone()
+    assert meta == ("runner-a", "terminated")
+    ttls = conn.execute(
+        "SELECT session_id FROM agent_shell_ttls WHERE agent_id = %s ORDER BY session_id",
+        (agent_id,),
+    ).fetchall()
+    assert ttls == [(0,)]
+    assert paths.workspace_path(cluster.home_a, agent_id).is_dir()
+    assert not paths.workspace_path(cluster.home_b, agent_id).exists()
 
 
 def test_transfer_idling_agent_moves_workspace_and_resurrects_on_target(
@@ -274,6 +354,51 @@ def test_transfer_terminated_agent_without_workspace_resurrects_on_target(
     assert "chat" in kinds
     chat_inbound = [row for row in inbounds if row[0] == "chat"][-1]
     assert "Cross-machine transfer from 'runner-a' to 'runner-b'" in chat_inbound[2]
+
+
+def test_transfer_fails_closed_when_a_live_pty_outlives_an_unreachable_service(
+    two_runners: TwoRunnerCluster,
+    db_conn: psycopg.Connection,
+) -> None:
+    agent_id = _seed_native_agent(db_conn, machine="runner-a", status="idling")
+    counter, writer_pid = _start_workspace_writer(two_runners, agent_id)
+    db_conn.execute(
+        "INSERT INTO agent_shell_ttls (agent_id, session_id, expires_at) "
+        "VALUES (%s, 0, now() + interval '1 hour')",
+        (agent_id,),
+    )
+    db_conn.commit()
+
+    try:
+        before_crash = int(counter.read_text(encoding="utf-8"))
+        two_runners.source_pty.signal(signal.SIGKILL)
+        assert two_runners.source_pty.wait() < 0
+        poll_until(
+            lambda: (
+                int(counter.read_text(encoding="utf-8")) >= before_crash + 3,
+                counter.read_text(),
+            ),
+            what="the payload to outlive the crashed PTY service",
+        )
+
+        before_export = int(counter.read_text(encoding="utf-8"))
+        response = two_runners.client.post(
+            f"/api/agents/{agent_id}/transfer",
+            json={"to_machine": "runner-b"},
+        )
+
+        assert response.status_code == 503, response.text
+        assert "ServiceDownError" in response.text
+        poll_until(
+            lambda: (
+                int(counter.read_text(encoding="utf-8")) >= before_export + 3,
+                counter.read_text(),
+            ),
+            what="the live payload to keep writing after export was refused",
+        )
+        _assert_source_did_not_cut_over(db_conn, two_runners, agent_id)
+    finally:
+        _kill_process(writer_pid)
 
 
 def test_transfer_refuses_running_agents(

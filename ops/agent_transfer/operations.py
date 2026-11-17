@@ -24,7 +24,6 @@ from base.cluster.machine import GatewayAccess, gateway_api_base, gateway_auth_h
 from base.db.rows import query_one
 from base.host.net.http_dial import get as http_get
 from base.lm.harness.registry import FileSessionRegistry
-from base.sessions.pty.client import ServiceDownError
 from ops.agent_transfer.archive_io import (
     abort_target_workspace,
     finalize_workspace,
@@ -109,10 +108,11 @@ def _verify_export_fence(
 # Verify the source fence is 'terminated', measure the workspace against the transfer ceilings,
 # fence local persistent shells, pack the workspace into a `MEIVA_WS_V1` bundle, and re-verify it.
 #
-# The measurement comes before the kill: a workspace over either ceiling is refused while the
+# The measurement comes before the fence: a workspace over either ceiling is refused while the
 # agent's shells are still alive and before a byte of it is read, so a refused export leaves the
-# source exactly as it was. A missing PTY service still leaves the cutoff durable and packages no
-# confirmed kill ids; failures other than that exact transport absence abort the export.
+# source exactly as it was. Export requires the PTY service's acknowledgement: the durable cutoff
+# protects a future daemon generation, but service unavailability does not prove that an old payload
+# stopped mutating the workspace, so every fence failure aborts before packing.
 def export_workspace_bundle(
     pool: ConnectionPool,
     request: WorkspaceExportRequest,
@@ -123,24 +123,11 @@ def export_workspace_bundle(
 ) -> bytes:
     session_index = _verify_export_fence(pool, request, local_machine=local_machine)
     preflight_workspace_budget(paths.workspace_path(home, request.agent_id), limits=limits)
-    try:
-        killed = kill_agent_shells(
-            request.agent_id,
-            before_session_index=session_index,
-            home=home,
-        )
-    except ServiceDownError:
-        # meiva:note
-        # The PTY backend persisted the terminal cutoff before dialing the unavailable service.
-        # Transfer can therefore preserve the fence while reporting no confirmed kills in the
-        # bundle; every other failure still aborts the export.
-        _log.warning(
-            "workspace export for agent %d recorded terminal cutoff %d, but "
-            "pty-sessions is unavailable; packing with no confirmed killed sessions",
-            request.agent_id,
-            session_index,
-        )
-        killed = []
+    killed = kill_agent_shells(
+        request.agent_id,
+        before_session_index=session_index,
+        home=home,
+    )
     harness_transfers, not_transferred = collect_harness_transfers(
         home=home, agent_id=request.agent_id
     )

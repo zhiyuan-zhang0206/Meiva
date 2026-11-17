@@ -25,3 +25,10 @@ dials `pty-sessions`. If that service is unavailable, transfer may still package
 the workspace with no confirmed killed-session ids; the cutoff protects the
 next daemon generation. The exception is limited to `ServiceDownError`, so an
 invalid fence state or any other cleanup failure still aborts the export.
+
+Correction (2026-11-17): incremental review rejected that export fallback. A
+durable cutoff constrains the next daemon generation, but a payload created by
+the unreachable generation can still be alive and mutating the source workspace.
+Workspace export therefore requires a successful fence acknowledgement and
+fails closed on `ServiceDownError`; only ordinary termination may defer cleanup
+while retaining TTL rows for later convergence.
