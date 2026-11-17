@@ -4,18 +4,21 @@
 
 from __future__ import annotations
 
+import json
 import os
 import sys
 import time
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
-from datetime import UTC, datetime, tzinfo
+from datetime import UTC, datetime, timedelta, tzinfo
 from pathlib import Path
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from base.daemon.schedules.inputs import ScheduleInputs
 from base.db import Database
 from base.db.rows import query_one
+from base.host.boundary.json_values import is_object_dict
+from base.host.boundary.untyped import object_of
 from base.log import logger
 from base.packages.plugins.config_view import disk_image_path, read_plugin_config
 from base.packages.plugins.plugin_errors import InvalidConfigData, SchemaDriftError
@@ -38,6 +41,54 @@ _log = logger
 # meiva:note
 # The value a card shows when it has never held a reading.
 _NO_READING = "—"
+
+
+@dataclass(frozen=True)
+class _PacingState:
+    consecutive_rate_limits: int = 0
+    not_before: datetime | None = None
+
+
+def _load_pacing_state(path: Path) -> _PacingState:
+    try:
+        payload = object_of(json.loads, path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return _PacingState()
+    if not is_object_dict(payload):
+        return _PacingState()
+    raw_count = payload.get("consecutive_rate_limits")
+    raw_not_before = payload.get("not_before")
+    count = raw_count if type(raw_count) is int and raw_count >= 0 else 0
+    if not isinstance(raw_not_before, str):
+        return _PacingState(consecutive_rate_limits=count)
+    try:
+        not_before = datetime.fromisoformat(raw_not_before.replace("Z", "+00:00"))
+    except ValueError:
+        return _PacingState(consecutive_rate_limits=count)
+    if not_before.tzinfo is None:
+        return _PacingState(consecutive_rate_limits=count)
+    return _PacingState(count, not_before.astimezone(UTC))
+
+
+def _save_pacing_state(path: Path, state: _PacingState) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    temporary = path.with_suffix(f"{path.suffix}.tmp")
+    temporary.write_text(
+        json.dumps(
+            {
+                "consecutive_rate_limits": state.consecutive_rate_limits,
+                "not_before": (
+                    state.not_before.astimezone(UTC).isoformat()
+                    if state.not_before is not None
+                    else None
+                ),
+            },
+            sort_keys=True,
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    temporary.replace(path)
 
 
 # meiva:note
@@ -339,6 +390,7 @@ def run_collector_cycles(
     sleep: Callable[[float], None],
     collector_id: str,
     stop_after_cycles: int | None = None,
+    initial_rate_limited_cycles: int = 0,
     environ: Mapping[str, str] | None = None,
     user_home: Path | None = None,
     platform: str | None = None,
@@ -346,7 +398,7 @@ def run_collector_cycles(
     http_fetch: HttpJsonFetcher | None = None,
     keychain_reader: Callable[[str], str | None] | None = None,
     codex_rpc_runner: CodexRpcRunner | None = None,
-) -> None:
+) -> int | None:
     if borrowed is None:
         raise ValueError("run_from_schedule requires ScheduleInputs (MEIVA_SCHEDULE_INPUTS)")
     _bind_schedule_telemetry(borrowed, collector_id)
@@ -360,7 +412,9 @@ def run_collector_cycles(
     effective_tz = _resolve_display_tz(display_tz, effective_environ)
 
     cycles = 0
-    rate_limited_cycles = 0
+    if initial_rate_limited_cycles < 0:
+        raise ValueError("initial_rate_limited_cycles must not be negative")
+    rate_limited_cycles = initial_rate_limited_cycles
     # meiva:note
     # A process with no bound event pipeline drops every event it is asked to emit, and until
     # 2026-11-06 it dropped them without a word: a schedule process never binds the pipeline
@@ -372,7 +426,7 @@ def run_collector_cycles(
     while True:
         collector = _load_collector_config(collector_id, home, effective_environ)
         if collector is None:
-            return
+            return None
 
         now = datetime.now(tz=UTC)
         try:
@@ -408,20 +462,77 @@ def run_collector_cycles(
             )
 
         cycles += 1
-        if stop_after_cycles is not None and cycles >= stop_after_cycles:
-            return
-
         base_interval_s = float(collector.interval_minutes * 60)
         interval_s = next_interval_s(base_interval_s, rate_limited_cycles)
         _report_backoff(collector_id, rate_limited_cycles, interval_s)
+        if stop_after_cycles is not None and cycles >= stop_after_cycles:
+            return rate_limited_cycles
+
         sleep(interval_s)
 
 
 def run_from_schedule(borrowed: ScheduleInputs | None, *, collector_id: str) -> None:
-    # meiva:note
-    # The entry a generated schedule script calls. It supplies the loop's two effects; a test that
-    # needs to control them calls `run_collector_cycles` with its own, which is why they are
-    # required parameters there instead of defaults here.
-    run_collector_cycles(
-        borrowed, refresh=refresh_collector_once, sleep=time.sleep, collector_id=collector_id
+    run_declarative_cycle(
+        borrowed,
+        collector_id=collector_id,
+        state_path=Path("state.json"),
+        clock=lambda: datetime.now(tz=UTC),
+    )
+
+
+def run_declarative_cycle(
+    borrowed: ScheduleInputs | None,
+    *,
+    collector_id: str,
+    state_path: Path,
+    clock: Callable[[], datetime],
+    refresh: Callable[..., Mapping[str, CardReading]] = refresh_collector_once,
+    environ: Mapping[str, str] | None = None,
+    user_home: Path | None = None,
+    platform: str | None = None,
+    display_tz: tzinfo | None = None,
+    http_fetch: HttpJsonFetcher | None = None,
+    keychain_reader: Callable[[str], str | None] | None = None,
+    codex_rpc_runner: CodexRpcRunner | None = None,
+) -> None:
+    if borrowed is None:
+        raise ValueError("run_from_schedule requires ScheduleInputs (MEIVA_SCHEDULE_INPUTS)")
+    effective_environ = os.environ if environ is None else environ
+    collector = _load_collector_config(collector_id, borrowed.home, effective_environ)
+    if collector is None:
+        return
+    state = _load_pacing_state(state_path)
+    now = clock().astimezone(UTC)
+    if state.not_before is not None and now < state.not_before:
+        _log.info(
+            "collector {} rate-limit backoff holds this declarative fire until {}",
+            collector_id,
+            state.not_before.isoformat(),
+        )
+        return
+
+    consecutive = run_collector_cycles(
+        borrowed,
+        refresh=refresh,
+        sleep=time.sleep,
+        collector_id=collector_id,
+        stop_after_cycles=1,
+        initial_rate_limited_cycles=state.consecutive_rate_limits,
+        environ=effective_environ,
+        user_home=user_home,
+        platform=platform,
+        display_tz=display_tz,
+        http_fetch=http_fetch,
+        keychain_reader=keychain_reader,
+        codex_rpc_runner=codex_rpc_runner,
+    )
+    if consecutive is None:
+        return
+    interval_s = next_interval_s(float(collector.interval_minutes * 60), consecutive)
+    _save_pacing_state(
+        state_path,
+        _PacingState(
+            consecutive_rate_limits=consecutive,
+            not_before=clock().astimezone(UTC) + timedelta(seconds=interval_s),
+        ),
     )

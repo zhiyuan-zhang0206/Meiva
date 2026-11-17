@@ -1,11 +1,10 @@
 # Plugin-declared machine-placed schedules and the `meiva_usage` collector plugin
 
-> **Status: active implementation plan.** Covers three slices:
-> (S1, completed) machine-placed schedules with one `schedule-manager` per machine,
-> (S2) declarative plugin schedule and config-derived status-card extension points
-> with process-scoped secret delivery, and
-> (S3) consolidating the four external usage/balance plugins into the builtin
-> `meiva_usage` plugin.
+> **Status: completed.** S1 delivered machine placement, S2 delivered plugin
+> schedule/status-card faces and process-scoped secrets, and S3 consolidated the
+> collectors into `meiva_usage`. Phase 2 subsequently moved those contributed
+> schedules from compatibility daemons to declarative single-round `every`
+> triggers.
 
 ## Context and problem
 
@@ -170,6 +169,9 @@ privileges (mirrored in `db/schema.sql` and `base/cluster/authority/groups.py`):
   - `secret_env_vars: tuple[str, ...] = ()` (validated `[A-Z][A-Z0-9_]*`,
     forbidding `MEIVA_*` authority/identity overrides)
   - `default_enabled: bool = True`
+  - `trigger_kind: Literal["cron", "every", "daemon"] = "daemon"`
+  - `cron_expr`, `interval_seconds`, optional `timezone`, and
+    `timeout_seconds`; new recurring faces use `cron` or `every`
 - `schedules.py` exports `contribute(config: C) -> tuple[ScheduleSpec, ...]`.
 - `ui_stats.py` exports `contribute(config: C) -> tuple[StatCardSpec, ...]`
   (`StatCardSpec(id: str, label: str)`). `GET /api/ui/contributions` merges
@@ -188,9 +190,10 @@ privileges (mirrored in `db/schema.sql` and `base/cluster/authority/groups.py`):
   - Missing declared row -> `INSERT` with `owner_plugin = plugin`, initial
     `schedule_versions` entry, and `(id, spec.machine)` sync request.
   - Existing row with `owner_plugin == plugin` -> preserves `enabled`; if
-    `(machine, description, script, command, secret_env_vars)` changed, updates
+    `(machine, description, script, command, secret_env_vars, trigger policy)` changed, updates
     the row, increments `desired_revision`, records `schedule_versions`, and
-    enqueues sync requests for both old and new `machine`.
+    enqueues sync requests for the affected machines. A daemon-to-declarative
+    update waits for those requests to reap the old PTY before its first fire.
   - Existing row with `owner_plugin != plugin` -> reports a plugin load error and
     refuses to overwrite another owner's schedule.
   - Rows in `schedules` with `owner_plugin IS NOT NULL` that are no longer
@@ -237,14 +240,14 @@ Consolidates the four external collectors into `meiva_builtins/plugins/meiva_usa
 - **Faces**:
   - `plugin.py`: empty SDK surface (`PluginContributions()`), so agent and exec
     processes carry zero overhead.
-  - `schedules.py`: maps each `CollectorConfig` to one `ScheduleSpec` running
-    `.venv/bin/python -m meiva_builtins.plugins.meiva_usage.runner <id>` on
-    `collector.machine`, declaring `secret_env_vars` from `key_env` /
-    `oauth_client_*_env`.
+  - `schedules.py`: maps each `CollectorConfig` to one declarative `every`
+    `ScheduleSpec` on `collector.machine`, declaring `secret_env_vars` from
+    `key_env` / `oauth_client_*_env`.
   - `ui_stats.py`: maps each `CollectorConfig` to `StatCardSpec(id=c.id, label=c.label)`.
 - **Execution (`runner.py` + pure core + provider probes)**:
-  - Uses `open_schedule_entry` for gated `Database`, `Clock`, and machine name,
-    running an interval loop that writes `plugin_stats` via `stats.upsert`.
+  - Uses `open_schedule_entry` for gated `Database`, `Clock`, and machine name.
+    One no-PTY process performs one probe and writes `plugin_stats` via
+    `stats.upsert`; rate-limit pacing persists in workspace `state.json`.
   - Pure strict modules (`"strict"` in `meizel.toml`) own window parsing,
     percentage math, English card formatting, and error-clobber decisions; thin
     effect shells receive `user_home`, `environ`, `now`, HTTP/subprocess runners,

@@ -315,6 +315,7 @@ async def lifespan(
             await sync_startup_schedules(
                 db_pool,
                 home=process.home,
+                clock=state.clock,
                 resolve_machine=process.machine.name,
                 provision_builtins=config.view.gateway.provision_builtin_schedules,
             )
@@ -405,6 +406,7 @@ async def _background_lifetime(
                 run_plugin_schedules_reconciler(
                     state.db_pool,
                     state.gateway_process.home,
+                    clock=state.clock,
                     resolve_machine=state.gateway_process.machine.name,
                     provision_builtins=state.gateway_process.config.view.gateway.provision_builtin_schedules,
                 ),

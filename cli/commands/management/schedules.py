@@ -451,14 +451,26 @@ def cmd_schedules_provision(
     the same provision at every start). Idempotent — `enabled` and `description` of an
     existing schedule are never modified, and a schedule that is not in the manifest
     (an agent-created one) is never read."""
+    from base.clock import Clock
     from base.daemon.schedules.builtin_schedules import provision_builtin_schedules
     from base.daemon.schedules.plugin_schedules import reconcile_plugin_schedules
     from base.paths import meiva_home
 
     resolved_home = home if home is not None else meiva_home()
+    clock = Clock.from_settings()
     with database_factory().write_transaction() as conn:
-        result = provision_builtin_schedules(conn, machine=machine)
-        plugin_result = reconcile_plugin_schedules(conn, home=resolved_home)
+        result = provision_builtin_schedules(
+            conn,
+            machine=machine,
+            cluster_timezone=clock.timezone,
+            now=clock.now(),
+        )
+        plugin_result = reconcile_plugin_schedules(
+            conn,
+            home=resolved_home,
+            cluster_timezone=clock.timezone,
+            now=clock.now(),
+        )
     if result.created:
         print(f"provisioned built-in schedules: {', '.join(result.created)}")
     if result.resynced:

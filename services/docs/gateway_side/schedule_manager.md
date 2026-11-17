@@ -8,6 +8,10 @@ Two resident sequential loops under one `TaskGroup` (`services/wake/schedule_man
 
 - **`reconcile`** (`manager.py`) — every 5 s.
 - **`requests`** (`requests.py`) — every second, converges each queued `schedule_sync_requests` row to its latest desired revision (adopt a matching live execution; officially reap a predecessor before replacement), then deletes it only if unchanged. A failed reap or uncertain live provenance leaves work queued, for a bounded window (ten minutes of one failure streak), then the manager records the schedule as an error, emits `schedule_convergence_abandoned` and consumes the request. A consumed launch attempt is terminal for that revision, even if its outcome is unknown. See [Schedule mutation receipts and revision convergence](../../../gateway/schedules/docs/schedule-convergence.md) for transactional receipts and advisory ownership.
+- **`requests` migration exception** — an in-place daemon-to-declarative
+  conversion keeps its request after the alert because the row also fences
+  declarative launch. Only a definitive legacy PTY reap or absence
+  acknowledgement releases that barrier.
 
 ## What `schedules.status` answers
 It answers *what the launch/exit path last recorded*, never *whether the process runs*. The manager

@@ -10,6 +10,7 @@ from __future__ import annotations
 import subprocess
 import sys
 import threading
+from datetime import UTC, datetime
 from pathlib import Path
 
 import pytest
@@ -26,6 +27,7 @@ from base.native_process.loaded_commit import LoadedCommit
 from base.telemetry.tests.capture.event_capture import EmittedEvents
 from base.telemetry.tests.capture.event_capture import emitted_events as emitted_events
 from schedules.jobs.entry import cluster_timezone, fresh_schedule_entry, schedule_entry
+from schedules.plans.schedule_identity import parse_scheduled_for
 
 
 def _git(repo: Path, *args: str) -> str:
@@ -71,6 +73,27 @@ def test_a_fresh_entry_binds_a_context_whose_event_bus_is_built_on_first_read(
         bus = context.require_bus()
         assert isinstance(bus, EventBus)
         assert context.require_bus() is bus
+
+
+def test_a_declarative_payload_entry_binds_schedule_provenance(tmp_path: Path) -> None:
+    image = _repo_with_commits(tmp_path, 1)
+    environment = {
+        **data_plane_environment(),
+        "MEIVA_SCHEDULE_ID": "41",
+        "MEIVA_AGENT_ID": "17",
+    }
+
+    with fresh_schedule_entry(
+        image=image,
+        process="schedule-probe",
+        home=tmp_path / "home",
+        environment=environment,
+    ):
+        identity = meiva.context.identity
+        assert identity is not None
+        assert identity.agent_id == 17
+        assert identity.actor == "schedule:41"
+        assert identity.owns_loop is False
 
 
 def test_schedule_closes_constructed_writer_and_preserves_loop_error(tmp_path: Path) -> None:
@@ -160,6 +183,16 @@ def test_runner_inputs_are_borrowed_without_rebuilding_or_closing(
 
 def test_cluster_timezone_is_the_cluster_setting() -> None:
     assert cluster_timezone() == settings.general.timezone
+
+
+def test_scheduled_slot_requires_an_aware_iso_datetime() -> None:
+    assert parse_scheduled_for("2026-11-17T08:30:00+08:00") == datetime(
+        2026, 11, 17, 0, 30, tzinfo=UTC
+    )
+    with pytest.raises(ValueError, match="is not set"):
+        parse_scheduled_for(None)
+    with pytest.raises(ValueError, match="carry a timezone"):
+        parse_scheduled_for("2026-11-17T08:30:00")
 
 
 if __name__ == "__main__":

@@ -1,13 +1,36 @@
 from __future__ import annotations
 
 import json
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 import psycopg
 
-from base.daemon.schedules.plugin_schedules import reconcile_plugin_schedules
+from base.daemon.schedules.plugin_schedules import (
+    PluginScheduleSyncSummary,
+)
+from base.daemon.schedules.plugin_schedules import (
+    reconcile_plugin_schedules as _reconcile_plugin_schedules,
+)
 from base.packages.plugins.enable_config import write_local
 from gateway.tests.schedules.api_support import schedule_client
+
+_NOW = datetime(2026, 11, 17, 0, 0, tzinfo=UTC)
+
+
+def reconcile_plugin_schedules(
+    conn: psycopg.Connection,
+    *,
+    home: Path,
+    cluster_timezone: str = "UTC",
+    now: datetime = _NOW,
+) -> PluginScheduleSyncSummary:
+    return _reconcile_plugin_schedules(
+        conn,
+        home=home,
+        cluster_timezone=cluster_timezone,
+        now=now,
+    )
 
 
 def _make_plugin(
@@ -180,6 +203,61 @@ def test_reconcile_preserves_operator_enabled_state(
         row = cur.fetchone()
         assert row is not None
         assert row[0] is False
+
+
+def test_reconcile_upgrades_daemon_to_declarative_in_place(
+    db_conn: psycopg.Connection, unit_home: Path
+) -> None:
+    daemon_code = (
+        "from base.packages.plugins.surface.schedules import ScheduleSpec\n\n"
+        "def contribute(config):\n"
+        "    return (ScheduleSpec(name='my_plug:task', machine='gateway', "
+        "description='Task', script='print(1)\\n'),)\n"
+    )
+    pdir = _make_plugin(unit_home, "my_plug", schedules_code=daemon_code)
+    reconcile_plugin_schedules(db_conn, home=unit_home)
+    db_conn.commit()
+    old = db_conn.execute(
+        "SELECT id, enabled FROM schedules WHERE name = 'my_plug:task'"
+    ).fetchone()
+    assert old is not None
+
+    declarative_code = (
+        "from base.packages.plugins.surface.schedules import ScheduleSpec\n\n"
+        "def contribute(config):\n"
+        "    return (ScheduleSpec(name='my_plug:task', machine='gateway', "
+        "description='Task', script='print(2)\\n', trigger_kind='every', "
+        "interval_seconds=300, timeout_seconds=45),)\n"
+    )
+    (pdir / "schedules.py").write_text(declarative_code)
+    now = datetime(2026, 11, 17, 0, 0, tzinfo=UTC)
+
+    summary = reconcile_plugin_schedules(
+        db_conn,
+        home=unit_home,
+        cluster_timezone="Asia/Shanghai",
+        now=now,
+    )
+    db_conn.commit()
+
+    assert summary.updated == ("my_plug:task",)
+    stored = db_conn.execute(
+        "SELECT id, enabled, status, trigger_kind, interval_seconds, timezone, timeout_seconds, "
+        "next_launch_at FROM schedules WHERE name = 'my_plug:task'"
+    ).fetchone()
+    assert stored == (
+        old[0],
+        old[1],
+        "scheduled",
+        "every",
+        300,
+        "Asia/Shanghai",
+        45,
+        now + timedelta(seconds=300),
+    )
+    assert db_conn.execute(
+        "SELECT machine FROM schedule_sync_requests WHERE schedule_id = %s", (old[0],)
+    ).fetchall() == [("gateway",)]
 
 
 def test_reconcile_removes_orphans_on_disable(db_conn: psycopg.Connection, unit_home: Path) -> None:

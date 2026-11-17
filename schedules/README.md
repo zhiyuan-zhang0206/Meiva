@@ -1,9 +1,9 @@
 # Schedules
 
-This directory owns the installed compatibility payloads and their policy. New
-`at`, `cron`, and `every` schedules are declarative, run-to-completion programs;
-the installed templates remain resident `daemon` schedules until their migration
-phase. Both are machine-placed and reconciled by the host-local
+This directory owns the installed schedule payloads and their policy. Every
+built-in is a declarative `cron` or `every` run-to-completion program. Stored
+third-party `daemon` rows remain supported during their compatibility migration.
+Both forms are machine-placed and reconciled by the host-local
 `schedule-manager`. Manage them through `meiva.schedules`, `meiva schedules`, or
 the `/control/schedules` page. The engine boundary is documented in
 [`gateway/schedules/docs/schedules.md`](../gateway/schedules/docs/schedules.md).
@@ -26,24 +26,25 @@ Meiva ships a set of built-in schedules, declared in
 directory. The manifest is the single expression of the built-in policy
 (user ruling 2026-08-11, pre-open-source):
 
-| Schedule | Script | Class | Default |
-|----------|--------|-------|---------|
-| `c9-daily-report` | `c9-daily-report-schedule.py` | product | **enabled** |
-| `debt-sweep-daily` | `debt-sweep-daily-schedule.py` | product | **enabled** |
-| `dev-ci-metrics` | `dev-ci-metrics-schedule.py` | product | **enabled** |
-| `main-red-watch` | `main-red-watch-schedule.py` | product | **enabled** |
-| `adversarial-eval-weekly` | `adversarial-eval-weekly-schedule.py` | product | **enabled** |
-| `memory-arbiter` | `memory-steward-schedule.py` | product | **enabled** |
-| `self-evolution-daily` | `self-evolution-daily-schedule.py` | product | **enabled** |
-| `self-evolution-weekly` | `self-evolution-weekly-schedule.py` | product | **enabled** |
-| `model-update-tracker` | `model-update-tracker-schedule.py` | product | **enabled** |
-| `trace-ship-tempo` | `trace-ship-tempo-schedule.py` | product | **enabled** |
-| `harness-cli-update` | `harness-cli-update-schedule.py` | product | **enabled** |
-| `claude-auth-keepalive` | `claude-auth-keepalive-schedule.py` | product | **enabled** |
-| `db-write-stall-watch` | `db-write-stall-watch-schedule.py` | operator | disabled |
-| `sched-dry-import-weekly` | `sched-dry-import-weekly-schedule.py` | operator | disabled |
-| `log-cred-mask-monthly` | `log-cred-mask-monthly-schedule.py` | operator | disabled |
-| `agent-watch` | `agent-watch-schedule.py` | operator | disabled |
+| Schedule | Trigger | Class | Default |
+|----------|---------|-------|---------|
+| `c9-daily-report` | cron `0 5 * * *` | product | **enabled** |
+| `debt-sweep-daily` | cron `30 6 * * *` | product | **enabled** |
+| `dev-ci-metrics` | cron `20 6 * * *` | product | **enabled** |
+| `main-red-watch` | cron `0,5,30,35 * * * *` | product | **enabled** |
+| `adversarial-eval-weekly` | cron `0 4 * * 3` | product | **enabled** |
+| `memory-arbiter` | cron `0 4,7 * * *` | product | **enabled** |
+| `self-evolution-daily` | cron `0 0 * * *` | product | **enabled** |
+| `self-evolution-weekly` | cron `0 0 * * 2,5` | product | **enabled** |
+| `model-update-tracker` | cron `0 6 * * *` | product | **enabled** |
+| `trace-ship-tempo` | cron `*/5 * * * *` | product | **enabled** |
+| `harness-cli-update` | cron `30 4 * * *` per machine | product | **enabled** |
+| `claude-auth-keepalive` | cron `10 0,6,12,18 * * *` per machine | product | **enabled** |
+| `db-write-stall-watch` | every 60 s | operator | disabled |
+| `sched-dry-import-weekly` | cron `0 9 * * 1` | operator | disabled |
+| `log-cred-mask-monthly` | cron `0 10 15 * *` | operator | disabled |
+| `qa-keepalive` | every 600 s | operator | disabled |
+| `agent-watch` | cron `*/10 * * * *` | operator | disabled |
 
 `dev-ci-metrics` also watches the timed workflows a pull request never blocks: it
 messages the P0 lead when one of them fails two runs in a row (`_SCHEDULED_WORKFLOWS`), because a red nightly is otherwise silent.
@@ -143,7 +144,7 @@ audit job succeeded while the other was `skipped` never closes the skipped job's
   raises: a missing executable (`claude_not_found`), a logged-out machine (`not_logged_in`), a
   non-zero exit (`nonzero_exit`) or a timeout (`timeout`) is printed to the schedule log with the
   exit code and the last lines of stderr (credential-shaped text masked) and emitted as
-  `claude_auth_keepalive_round` with `status="failed"`; the loop is not asked to retry, because every
+  `claude_auth_keepalive_round` with `status="failed"`; the round does not retry, because every
   retry would be another model call for a condition that does not change in minutes. A non-production
   identity skips, as `harness-cli-update` does.
 - **operator** schedules (cluster-operator tooling) ship with the product but
@@ -180,7 +181,7 @@ strict modules under `schedules/plans/` and their effects in shells under
 
 ### How built-ins get created
 
-`provision_builtin_schedules(conn, machine=...)` (`base/daemon/schedules/builtin_schedules.py`) creates every
+Built-in provisioning (`base/daemon/schedules/builtin_schedules.py`) creates every
 manifest schedule missing from the `schedules` table, with `enabled` taken
 from the manifest's `default_enabled`. Schedules with `placement: "gateway"` (the default) are assigned
 to the gateway machine. Schedules with `placement: "per_machine"` (such as `harness-cli-update`) are provisioned
@@ -192,13 +193,15 @@ for each machine in `machines` carrying the `agent-runner` role as `<name>:<mach
    gateway is down.
 
 Provisioning is **idempotent**. A missing row is created. An existing row whose
-`script` or `command` differs from the template is **resynced** to it: the DB copy
+script, command, trigger, timezone, or timeout differs from the template is
+**resynced** to it: the DB copy
 of a built-in is a snapshot made when the row was created, and a snapshot goes
 stale the moment a library function the script calls changes shape (2026-10-03:
 `catch_up()` gained a required `db`, 13 stored copies crash-looped). The resync
 writes a `schedule_versions` row (`builtin-resync <hash>`, so the replaced text stays
-recoverable) and queues the sync request that relaunches a live session onto the
-new code. `enabled` and `description` of an existing row are never touched, so
+recoverable) and queues a sync request. When the old row is a `daemon`, that
+request reaps `meiva-schedule-<id>` before the declarative engine may admit a
+round. `enabled` and `description` of an existing row are never touched, so
 `meiva schedules stop <name>` (or disable in the UI) keeps a built-in around without
 running. Delete a built-in and the next provision brings it back with its manifest
 default. The checkout is the source of truth for a built-in's code: a hand edit of
@@ -210,23 +213,18 @@ written by provisioning. Rationale and rejected alternatives:
 ### Adding or changing a built-in
 
 Edit the script template and the manifest entry (name, class, default_enabled,
-description), PR it, and deploy: the next `schedule-manager` start syncs it into
-existing clusters.
+description, trigger and timeout), PR it, and deploy: the next gateway startup
+syncs it into existing clusters.
 
 Four places change together; each one left out fails a directory-wide gate
 rather than a review:
 
 1. **The template.** `tests/components/base/test_schedule_timezone.py` sweeps
-   every `*-schedule.py`: at least one timezone argument must be present and
-   every one of them must be `cluster_timezone()` (a `timezone=` keyword, a
-   `ZoneInfo(...)` argument). A resident sentinel with no cron slot is no
-   exception — stamp its own output with `ZoneInfo(cluster_timezone())`. A
-   hard-coded IANA name, or a template reading `settings.general.timezone`
-   itself, fails the same test. A cron slot passes it as the loop's
-   `CronSchedule(..., timezone=cluster_timezone())`; the cron literal stays in the
-   template, where the same test reads it.
+   every `*-schedule.py`. Timezone-sensitive work reads `cluster_timezone()`;
+   the cron expression and canonical timezone policy live in the manifest.
+   Jobs that branch by slot read `MEIVA_SCHEDULED_FOR`, not the host clock.
 2. **`meizel.toml`'s `[uses]`.** An import of a sibling directory (a template
-   imports `schedules/jobs` for the loop, the entry and the agent calls, and
+   imports `schedules/jobs` for the entry and agent calls, and
    `schedules/plans` for the decisions) needs its declared edge, or
    `meizel check` fails the locality gate.
 3. **The manifest entry and this table** — name, class, `default_enabled`,
@@ -236,11 +234,11 @@ rather than a review:
    start by default. A new entry cannot pass by carrying the right class and the
    wrong default.
 
-A template is thin: its `__main__` block reads the schedule id, the timezone, the
-operator's report-recipient variable and the start time once, builds the values its
-job needs and calls `run_loop`. What a schedule decides lives in a strict pure module
+A template is thin: its `__main__` block reads the scheduled slot, timezone, and
+operator inputs once, builds the values its job needs, performs one round, and exits.
+What a schedule decides lives in a strict pure module
 under `schedules/plans/`, and what it does lives in a shell under `schedules/jobs/`;
-[the loop and the agent directory](docs/loop-and-directory.md) say how. The
+[declarative rounds and the agent directory](docs/loop-and-directory.md) say how. The
 C9 job imports its accounting dependency through `scripts.ci.pull_requests.accounting`
 where it runs. Materialization changes the script directory, not the installed module
 roots (`schedules/tests/test_scripts_entry.py` runs every template from a copy). Tests
@@ -251,8 +249,8 @@ A `.py` template is executed in-process by the runner, which hands it a clean
 runner's own argv (`python -m services.wake.schedule_manager.runner <id>`) never reaches the
 script, so a template's CLI takes its own flags only (keep them usable for
 manual runs). On deploy, new manifest entries are
-provisioned and changed templates are resynced at the next `schedule-manager`
-start; changed `default_enabled` / description only apply to rows that do not
+provisioned and changed templates are resynced at the next gateway startup;
+changed `default_enabled` / description only apply to rows that do not
 exist yet — an existing cluster's rows keep their operator-set state. To push a
 template into a running cluster without a restart of the manager, run
 `meiva schedules provision`.
@@ -282,14 +280,11 @@ system and compatibility rows default to the gateway when no machine is explicit
   only the on-disk copy is overwritten at the next launch/restart. Change a
   schedule through `meiva schedules update` / the API, never by editing the
   materialized file.
-- **Cron expressions are cluster wall clock.** The built-in scripts read
-  `settings.general.timezone` once, through `cluster_timezone()` (`MEIVA_TIMEZONE`, scope
-  `cluster-pinned`), and hand it to the loop that computes each slot with `next_fire`,
-  so `0 4 * * *` means 04:00 cluster time on every host in the fleet — the host's OS
-  timezone never enters. `MEIVA_TIMEZONE` is read once
-  at process start, so a changed value needs `meiva schedules restart <id>`.
-  A one-off schedule you write yourself should do the same rather than
-  hard-coding an IANA name; `next_fire(expr, timezone=None)` computes in UTC.
+- **Cron expressions are cluster wall clock.** Provisioning resolves an omitted
+  manifest timezone to `MEIVA_TIMEZONE`, so `0 4 * * *` means 04:00 cluster
+  time on every host. The manager persists the resolved timezone and exports
+  the selected UTC slot as `MEIVA_SCHEDULED_FOR`; the host OS timezone never
+  enters the decision.
 - **Report recipients are operator knobs.** A daily report resolves its
   recipient from its own `MEIVA_*_REPORT_AGENT` variable when set — a numeric
   agent id, and a malformed value stops the schedule at its start instead of falling
@@ -298,40 +293,21 @@ system and compatibility rows default to the gateway when no machine is explicit
   `MEIVA_SELF_EVOLUTION_DAILY_REPORT_AGENT` defaults to agent 228, and an
   explicit empty value skips that report. The debt-clearing worker label comes
   from `MEIVA_DEBT_SWEEP_AGENT_LABEL`.
-- **Built-in cron slots are durably claimed.** Templates run
-  `schedules.jobs.loop.run_loop()`, which claims each due slot through
-  `schedules.jobs.catchup.fire_slot_once()` for online fires. Startup skips missed
-  slots; there is no catch-up helper. The `(schedule_id, slot_fire_at)` claim
-  commits before the callback, so concurrent runners cannot execute a slot
-  twice. A crash after claiming may lose that slot. Callbacks receive the
-  claimed UTC slot and payload for report windows.
-- **A resident loop writes the round heartbeat its supervisor reads.**
-  `run_loop()` writes `state/schedules/<id>.heartbeat.json` before its first
-  round and again after each one, promising the next beat by `now + sleep + the
-  slowest round it has measured` (starting from
-  `SCHEDULE_FIRST_ROUND_BUDGET_S`, five minutes). The schedule manager turns a
-  passed `alive_by` into `schedule_not_progressing` within its 60-second skew, so
-  a loop whose process died is named inside the hour instead of waiting for the
-  two-hour sessionless clock. The file also carries `round_budget_s`, the term
-  the promise currently adds: the budget only grows, so a single slow round
-  widens every later deadline, and the number behind a late alert is readable
-  there rather than in the loop's logs. A schedule script does not have to write the file
-  itself; it only has to pass `home=` to `run_loop`. The argument defaults to
-  `None` for a stored copy written before it existed — `meiva schedules
-  provision` (or the next manager start) refreshes those from these templates.
-- **A round that raises no longer ends the loop.** `run_loop()` and `run_weekly()` both end in
-  `run_rounds()`, which catches `Exception` around each round and retries after a pause that
-  doubles per consecutive failure (`FailurePolicy`: 60 s, 120 s, 240 s, then 300 s a round; a
-  schedule overrides it with `CronSchedule.failure`). Every failed round logs a warning; the
-  third in a row (default `report_after`) logs an error with the traceback and writes
-  `schedules.last_error` — the column `meiva schedules ls` shows — once per episode, and the
-  first round that succeeds logs `recovered after N failed rounds` and clears it. A failure
-  after the claim still costs one extra round, because the slot stays claimed. A failed round is
-  never charged to the round budget, so a slow failure cannot widen `alive_by` and blunt
-  `schedule_not_progressing`. Signals are not caught: stopping a schedule works as before.
-  **Two resident loops keep their own driver and this policy does not reach them**:
-  `jobs/watch/stall_watch.py:150 run_watch` and `jobs/watch/qa_keepalive.py:273 run_keepalive`
-  already catch and print per round — no backoff, no `last_error`.
+- **Each built-in slot has one run row and one process.** Admission commits a
+  `schedule_runs` row before launch and refuses another open run for the same
+  schedule. The process has no PTY, reads no stdin, writes `latest.log`, and is
+  killed as a process group at its declared timeout. A failure records
+  `last_error` and one failed run; recurring triggers advance once and do not
+  retry the same historical slot in a storm.
+- **Recovery catches up once, then resumes cadence.** An overdue recurring
+  schedule fires its current `next_launch_at` once after manager recovery.
+  `cron` and `every` then advance from `max(slot, now)`, skipping older history.
+  Stateful watches keep their window in workspace `state.json`, so a process
+  boundary does not reset alert streaks.
+- **Compatibility loops remain for existing third-party daemon rows.** Their
+  heartbeat and failure-backoff contracts remain in
+  [`docs/loop-and-directory.md`](docs/loop-and-directory.md); shipped built-ins
+  no longer allocate those resident PTYs.
 - **A cron that stops arriving is its own card, and the card publishes nothing.**
   `release-gate.yml` is the only post-merge run that certifies the whole
   population on a fixed cadence, and this repository's GitHub crons do not keep
@@ -376,11 +352,12 @@ system and compatibility rows default to the gateway when no machine is explicit
   the stream carries `make_up=` in `schedules/jobs/watch/main-red-watch-schedule.py`.
   A stream whose dispatch cost nobody has timed carries no `make_up` and reports
   the silence alone, rather than naming a command with an invented price.
-- **A template change reaches a running cluster at the next `schedule-manager`
-  start** (see "How built-ins get created"), or at once through
-  `meiva schedules provision`. A resynced **enabled** schedule is relaunched onto the
-  new script by the manager's sync request; a disabled one picks it up when it is
-  next started. `meiva schedules get <name>` shows which script the row holds. A
+- **A template change reaches a running cluster at the next gateway startup**
+  (see "How built-ins get created"), or at once through
+  `meiva schedules provision`. A resynced declarative schedule uses the new
+  script on its next fire; the sync request first removes any legacy PTY. A
+  disabled row keeps its operator-selected state. `meiva schedules get <name>`
+  shows which script the row holds. A
   one-off change to a single schedule that is not in the manifest still goes
   through `meiva schedules update <name> --script-file <file>`.
 - **Verify in-store scripts when repo code moves.** `meiva schedules verify`
@@ -392,7 +369,7 @@ system and compatibility rows default to the gateway when no machine is explicit
   rename leftover the imports alone cannot see; conservative: any binding
   counts, annotations are not read, `from x import *` disables it), and an
   `inspect.signature().bind` of every call the script makes into repo code
-  (`schedules.jobs.loop.run_loop(...)`, `inputs.database()`;
+  (`inputs.database()`, job entry calls;
   the argument shape only, so a call it cannot bind statically — `*args`, an
   instance method, a rebound name, the plugin-wrapped `meiva.*` SDK — is skipped,
   never guessed). Nothing is started, stopped, or written. The drift classes that
@@ -468,7 +445,8 @@ only the outer call. Do not start the agent host or launch old schedule code aft
 installing scripts that require the new callback contract. Finish the normal
 whole-cluster update to the approved target before the cluster starts again.
 
-Runner-hosted templates receive immutable `ScheduleInputs` through `runpy.init_globals`:
+Compatibility daemon templates receive immutable `ScheduleInputs` through
+`runpy.init_globals`:
 one loaded image, the entry's database/pipeline builders and its `MachineIdentity`.
 A template's `__main__` hands the injected inputs (or `None` when run by hand) to
 `open_schedule_entry(inputs, home=...)`: injected inputs are borrowed without closing them or changing
@@ -476,6 +454,8 @@ the shared SDK context, and a hand run owns a fresh entry built by
 `fresh_schedule_entry(image=..., process=..., home=...)` for the commit it loaded and the home the
 script's entry resolved, with its lazy
 machine, SDK context, gate and cold writer. Exit restores the prior SDK context and
-closes constructed clients within two seconds while preserving an original loop failure.
-C9 and the debt sweep open process logging and the event writer only when they report
+closes constructed clients within two seconds while preserving the original failure.
+Declarative entries open the same context from their process environment; this
+binds `schedule:<id>` and an optional owner agent for SDK attribution. C9 and
+the debt sweep open process logging and the event writer only when they report
 (`schedules/jobs/telemetry_event.py`); debt dry runs assemble no root.

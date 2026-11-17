@@ -2,16 +2,13 @@
 
 import os
 import sys
-from datetime import UTC, datetime
-from functools import partial
 
 from base.paths import repo_root
 from base.paths.home import resolve_meiva_home
-from schedules.jobs.entry import cluster_timezone, open_schedule_entry
-from schedules.jobs.loop import CronSchedule, Trigger, run_loop
+from schedules.jobs.entry import open_schedule_entry
 from schedules.jobs.model_tracker import ModelTracker, run_tracker
 from schedules.plans.directory_plan import report_recipient
-from schedules.plans.schedule_identity import parse_schedule_id
+from schedules.plans.schedule_identity import parse_scheduled_for
 
 CRON = "0 6 * * *"
 _REPORT_LABEL = "Meiva \u8d1f\u8d23\u4eba"
@@ -42,12 +39,8 @@ if __name__ == "__main__":
                 os.environ.get(_REPORT_AGENT_ENV),
             ),
         )
-        run_loop(
-            inputs.database(),
-            CronSchedule((Trigger(CRON),), timezone=cluster_timezone()),
-            partial(run_tracker, tracker=tracker),
-            schedule_id=parse_schedule_id(os.environ.get("MEIVA_SCHEDULE_ID")),
-            home=inputs.home,
-            started_at=datetime.now(UTC),
-            clock=lambda: datetime.now(UTC),
+        run_tracker(
+            parse_scheduled_for(os.environ.get("MEIVA_SCHEDULED_FOR")),
+            None,
+            tracker=tracker,
         )

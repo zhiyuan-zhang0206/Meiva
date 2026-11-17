@@ -1,8 +1,7 @@
-"""Schedule management through the real gateway and the installed ``meiva`` CLI.
-
-The e2e stack has no schedule-manager. Control requests therefore leave durable
-sync rows for its later consumer; session execution belongs to SC2/SC3.
-"""
+# meiva:note
+# Declarative schedule management through the real gateway and installed CLI. The e2e stack has
+# no schedule-manager: declarative control changes are stored directly and never queue legacy
+# daemon PTY convergence; execution belongs to SC2/SC3.
 
 from __future__ import annotations
 
@@ -13,14 +12,14 @@ import httpx
 import psycopg
 import pytest
 
-from base.cluster import session_name
 from base.config import settings
 from base.paths import meiva_home
-from base.sessions.backend import get_shell_backend
 from base.sessions.tests.poll_until import poll_until
 from tests.e2e._credentials import gateway_client, gateway_post
 from tests.e2e._ports import GATEWAY_URL
 from tests.e2e.fakes.scenario_recording import model_inputs, reset_record
+
+_EVERY_MINUTE = {"trigger_kind": "every", "interval_seconds": 60}
 
 
 def _cli(*args: str) -> str:
@@ -38,7 +37,12 @@ def _cli(*args: str) -> str:
 def _create_and_check_listed(client: httpx.Client) -> int:
     created = client.post(
         "/api/schedules",
-        json={"name": "e2e-rest", "script": "print('first')\n", "enabled": False},
+        json={
+            "name": "e2e-rest",
+            "script": "print('first')\n",
+            "enabled": False,
+            **_EVERY_MINUTE,
+        },
     )
     assert created.status_code == 201, created.text
     schedule_id = int(created.json()["id"])
@@ -71,7 +75,8 @@ def test_rest_create_list_get_update_delete_and_version_snapshot(
         assert client.get(f"/api/schedules/{schedule_id}").json()["name"] == "e2e-renamed"
         assert (
             client.post(
-                "/api/schedules", json={"name": "e2e-renamed", "script": "pass\n"}
+                "/api/schedules",
+                json={"name": "e2e-renamed", "script": "pass\n", **_EVERY_MINUTE},
             ).status_code
             == 409
         )
@@ -88,9 +93,7 @@ def test_rest_create_list_get_update_delete_and_version_snapshot(
         assert client.get(f"/api/schedules/{schedule_id}").status_code == 404
         assert client.get("/api/schedules").json() == []
         with psycopg.connect(settings.data_plane.db_url) as conn:
-            assert conn.execute("SELECT schedule_id FROM schedule_sync_requests").fetchall() == [
-                (schedule_id,)
-            ]
+            assert conn.execute("SELECT schedule_id FROM schedule_sync_requests").fetchall() == []
 
 
 @pytest.mark.scenario("tests.e2e.fakes.scenarios.schedules:build")
@@ -99,7 +102,13 @@ def test_rest_start_stop_restart_queue_sync_and_change_enabled(
 ) -> None:
     with gateway_client(base_url=GATEWAY_URL, timeout=30.0) as client:
         created = client.post(
-            "/api/schedules", json={"name": "e2e-control", "script": "pass\n", "enabled": False}
+            "/api/schedules",
+            json={
+                "name": "e2e-control",
+                "script": "pass\n",
+                "enabled": False,
+                **_EVERY_MINUTE,
+            },
         )
         created.raise_for_status()
         schedule_id = created.json()["id"]
@@ -116,9 +125,7 @@ def test_rest_start_stop_restart_queue_sync_and_change_enabled(
         assert stopped.json()["enabled"] is False
         assert client.get(base).json()["enabled"] is False
         with psycopg.connect(settings.data_plane.db_url) as conn:
-            assert conn.execute("SELECT schedule_id FROM schedule_sync_requests").fetchall() == [
-                (schedule_id,)
-            ]
+            assert conn.execute("SELECT schedule_id FROM schedule_sync_requests").fetchall() == []
 
 
 @pytest.mark.scenario("tests.e2e.fakes.scenarios.schedules:build")
@@ -127,7 +134,13 @@ def test_rest_runs_and_logs_read_persisted_history_and_transcript(
 ) -> None:
     with gateway_client(base_url=GATEWAY_URL, timeout=30.0) as client:
         created = client.post(
-            "/api/schedules", json={"name": "e2e-history", "script": "pass\n", "enabled": False}
+            "/api/schedules",
+            json={
+                "name": "e2e-history",
+                "script": "pass\n",
+                "enabled": False,
+                **_EVERY_MINUTE,
+            },
         )
         created.raise_for_status()
         schedule_id = created.json()["id"]
@@ -155,15 +168,12 @@ def test_rest_runs_and_logs_read_persisted_history_and_transcript(
         ]
         assert [row["id"] for row in client.get(f"{base}/runs").json()] == [new_id[0], old_id[0]]
 
-        transcript = get_shell_backend(home=meiva_home()).session_log_path(
-            session_name(f"schedule-{schedule_id}")
-        )
-        assert transcript is not None
-        transcript.parent.mkdir(parents=True, exist_ok=True)
-        transcript.write_text("first line\nsecond line\n")
+        latest = meiva_home() / "schedules" / str(schedule_id) / "latest.log"
+        latest.parent.mkdir(parents=True, exist_ok=True)
+        latest.write_text("first line\nsecond line\n")
         logs = client.get(f"{base}/logs?lines=1")
         logs.raise_for_status()
-        assert logs.json() == {"source": "transcript", "lines": ["second line"]}
+        assert logs.json() == {"source": "latest", "lines": ["second line"]}
         assert client.get("/api/schedules/999999999/runs").status_code == 404
 
 
@@ -204,7 +214,14 @@ def test_cli_schedules_manage_the_same_gateway_rows(
     gateway_proc: str, truncated_db: None, pty_sessions_proc: None
 ) -> None:
     assert "created schedule" in _cli(
-        "create", "--name", "e2e-cli", "--script", "print('cli')", "--disabled"
+        "create",
+        "--name",
+        "e2e-cli",
+        "--script",
+        "print('cli')",
+        "--every",
+        "60",
+        "--disabled",
     )
     assert "e2e-cli" in _cli("ls")
     assert "print('cli')" in _cli("get", "e2e-cli")

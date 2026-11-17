@@ -14,13 +14,20 @@ import re
 from collections.abc import Sequence
 from dataclasses import dataclass
 
-__all__ = ["PollPlan", "StallSample", "WatchState", "parse_stats", "plan_poll"]
+__all__ = [
+    "WATCH_MEMORY",
+    "PollPlan",
+    "StallSample",
+    "WatchState",
+    "parse_stats",
+    "plan_poll",
+]
 
 _WINDOW = 3
 _MIN_XACTS = 20
 _MAX_QUERY_US = 300_000
 _COOLDOWN_SECONDS = 1800.0
-_MEMORY = 12
+WATCH_MEMORY = 12
 _STATS = (
     r"^(\d{4}-\d\d-\d\d \d\d:\d\d:\d\d\.\d+) CST \[\d+\] LOG stats: "
     r"(\d+) xacts/s, (\d+) queries/s,.*?, xact \d+ us, query (\d+) us, wait (\d+) us"
@@ -109,7 +116,7 @@ def plan_poll(state: WatchState, fresh: Sequence[StallSample], now: float) -> Po
         advanced = True
         accepted.append(sample)
         seen = sample.stamp
-        window = [*window, sample][-_MEMORY:]
+        window = [*window, sample][-WATCH_MEMORY:]
         if _stalled(sample):
             log_lines.append(f"stalled: {_describe([sample])}")
         if _confirmed(window):

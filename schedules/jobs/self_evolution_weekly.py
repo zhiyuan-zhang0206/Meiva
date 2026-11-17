@@ -5,8 +5,8 @@
 # The count carries `with_total=1`: since the 2026-08-18 contract change `meta.total` is opt-in,
 # and without the flag the gateway returns no total, which crashed the trigger on `int(None)`
 # while a silent 0 would have skipped the week's deep run. A reply without a total raises.
-# The follow-up slot is armed by the main check, in this process only: a restart between the
-# two forgets it, as it always has.
+# The resident compatibility loop carries the follow-up arm in memory. The declarative entry
+# persists the same flag in its schedule workspace between its Tuesday and Friday processes.
 # meiva:link schedules/docs/self-evolution.md
 
 from __future__ import annotations

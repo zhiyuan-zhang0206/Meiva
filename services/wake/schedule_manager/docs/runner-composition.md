@@ -32,9 +32,11 @@ logged again), `recovery_gate` (when a refused relaunch is reported). The tests
 of those modules pass numbers and assert the returned plan; the manager's own
 tests run the real database and request consumer over a fake `SessionBackend` and
 advance `now`, including both a surviving predecessor and unreadable launch
-provenance; neither case can keep a request queued beyond the documented bounded
-convergence window. PTY consumers pass their own launch checkout instead of
-changing a module constant.
+provenance. Ordinary daemon convergence cannot keep a request queued beyond the
+documented bounded window. An in-place migration keeps its request as a launch
+barrier after the alert and retries legacy PTY cleanup until the backend gives a
+definitive acknowledgement. PTY consumers pass their own launch checkout instead
+of changing a module constant.
 
 The runpy input-sharing test uses the actual SDK bootstrap with the runner's
 configuration owner and isolated unit home. It retains the script's assertions that

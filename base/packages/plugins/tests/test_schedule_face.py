@@ -11,6 +11,7 @@ from base.packages.plugins.loading.schedule_face import (
     load_enabled_plugin_schedules,
     load_plugin_ui_stats_safe,
 )
+from base.packages.plugins.surface.schedules import ScheduleSpec
 
 
 def _make_plugin(
@@ -70,6 +71,42 @@ def test_declared_schedules_valid(tmp_path: Path) -> None:
     assert specs[0].name == "my_plugin:worker"
     assert specs[0].machine == "gateway"
     assert specs[0].secret_env_vars == ("API_KEY",)
+
+
+def test_schedule_spec_validates_declarative_trigger() -> None:
+    spec = ScheduleSpec(
+        name="my_plugin:worker",
+        machine="gateway",
+        description="Sample worker",
+        script="print('ok')\n",
+        trigger_kind="cron",
+        cron_expr="15 * * * *",
+        timezone="Asia/Shanghai",
+        timeout_seconds=90,
+    )
+    assert spec.trigger_kind == "cron"
+    assert spec.cron_expr == "15 * * * *"
+
+    with pytest.raises(ValueError, match="at least 30"):
+        ScheduleSpec(
+            name="my_plugin:fast",
+            machine="gateway",
+            description="Too fast",
+            script="print('fast')\n",
+            trigger_kind="every",
+            interval_seconds=29,
+        )
+
+    with pytest.raises(ValueError, match="cron trigger requires cron_expr only"):
+        ScheduleSpec(
+            name="my_plugin:ambiguous",
+            machine="gateway",
+            description="Ambiguous",
+            script="print('bad')\n",
+            trigger_kind="cron",
+            cron_expr="0 * * * *",
+            interval_seconds=60,
+        )
 
 
 def test_declared_schedules_dash_prefix(tmp_path: Path) -> None:

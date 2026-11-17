@@ -21,9 +21,17 @@ from zoneinfo import ZoneInfo
 import meiva
 from base.daemon.schedules.heartbeat import write_round_beat
 from base.deploy.schedule_timing import SCHEDULE_FIRST_ROUND_BUDGET_S
-from schedules.plans.watch.stall_rule import StallSample, WatchState, parse_stats, plan_poll
+from base.host.boundary.json_values import is_object_dict, is_object_list
+from base.host.boundary.untyped import object_of
+from schedules.plans.watch.stall_rule import (
+    WATCH_MEMORY,
+    StallSample,
+    WatchState,
+    parse_stats,
+    plan_poll,
+)
 
-__all__ = ["StallWatch", "initial_state", "poll_once", "run_watch"]
+__all__ = ["StallWatch", "initial_state", "poll_once", "run_watch", "run_watch_once"]
 
 _TAIL_LINES = 40
 # meiva:note
@@ -59,22 +67,83 @@ def _stamp(now: float, zone: ZoneInfo) -> str:
     return f"[{datetime.fromtimestamp(now, zone):%Y-%m-%d %H:%M:%S %Z}]"
 
 
-def _read_last_alert(path: Path) -> float:
+def _sample_from_payload(payload: object) -> StallSample | None:
+    if not is_object_dict(payload):
+        return None
+    stamp = payload.get("stamp")
+    xacts = payload.get("xacts_per_s")
+    queries = payload.get("queries_per_s")
+    query_us = payload.get("query_us")
+    if (
+        isinstance(stamp, str)
+        and isinstance(xacts, int)
+        and isinstance(queries, int)
+        and isinstance(query_us, int)
+    ):
+        return StallSample(stamp, xacts, queries, query_us)
+    return None
+
+
+def _read_history_window(path: Path, *, through: str | None) -> tuple[StallSample, ...]:
     try:
-        payload = json.loads(path.read_text(encoding="utf-8"))
+        lines = path.read_text(encoding="utf-8").splitlines()
+    except OSError:
+        return ()
+    samples: list[StallSample] = []
+    for line in lines:
+        try:
+            sample = _sample_from_payload(object_of(json.loads, line))
+        except ValueError:
+            continue
+        if sample is not None and (through is None or sample.stamp <= through):
+            samples.append(sample)
+    return tuple(samples[-WATCH_MEMORY:])
+
+
+def _read_state(path: Path, *, history: Path) -> WatchState:
+    try:
+        payload = object_of(json.loads, path.read_text(encoding="utf-8"))
     except (OSError, ValueError):
-        return 0.0
-    value = payload.get("last_alert")
-    return float(value) if isinstance(value, (int, float)) else 0.0
+        return WatchState(seen=None, window=(), last_alert=0.0, alerted=False)
+    if not is_object_dict(payload):
+        return WatchState(seen=None, window=(), last_alert=0.0, alerted=False)
+    raw_window = payload.get("window")
+    window: list[StallSample] = []
+    if is_object_list(raw_window):
+        for raw in raw_window:
+            sample = _sample_from_payload(raw)
+            if sample is not None:
+                window.append(sample)
+    last_alert = payload.get("last_alert")
+    seen = payload.get("last_sample")
+    normalized_seen = seen if isinstance(seen, str) else None
+    if not is_object_list(raw_window):
+        window.extend(_read_history_window(history, through=normalized_seen))
+    return WatchState(
+        seen=normalized_seen,
+        window=tuple(window[-WATCH_MEMORY:]),
+        last_alert=float(last_alert) if isinstance(last_alert, (int, float)) else 0.0,
+        alerted=payload.get("alerted") is True,
+    )
 
 
-def _write_state(path: Path, *, last_alert: float, last_sample: str | None, now: float) -> None:
+def _write_state(path: Path, *, state: WatchState, now: float) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(
         json.dumps(
             {
-                "last_alert": last_alert,
-                "last_sample": last_sample,
+                "last_alert": state.last_alert,
+                "last_sample": state.seen,
+                "alerted": state.alerted,
+                "window": [
+                    {
+                        "stamp": sample.stamp,
+                        "xacts_per_s": sample.xacts_per_s,
+                        "queries_per_s": sample.queries_per_s,
+                        "query_us": sample.query_us,
+                    }
+                    for sample in state.window
+                ],
                 "updated": datetime.fromtimestamp(now, UTC).isoformat(timespec="seconds"),
             }
         ),
@@ -117,7 +186,7 @@ def _append_history(path: Path, samples: tuple[StallSample, ...], *, alerted: bo
 
 
 def initial_state(watch: StallWatch) -> WatchState:
-    return WatchState(seen=None, window=(), last_alert=_read_last_alert(watch.state), alerted=False)
+    return _read_state(watch.state, history=watch.history)
 
 
 def poll_once(watch: StallWatch, state: WatchState, now: float) -> WatchState:
@@ -129,9 +198,7 @@ def poll_once(watch: StallWatch, state: WatchState, now: float) -> WatchState:
     for line in plan.log_lines:
         print(f"{_stamp(now, watch.zone)} {line}", flush=True)
     if plan.advanced:
-        _write_state(
-            watch.state, last_alert=plan.state.last_alert, last_sample=plan.state.seen, now=now
-        )
+        _write_state(watch.state, state=plan.state, now=now)
     _append_history(watch.history, plan.new_samples, alerted=plan.alert is not None)
     if plan.alert is not None:
         for agent in watch.report_agents:
@@ -140,6 +207,14 @@ def poll_once(watch: StallWatch, state: WatchState, now: float) -> WatchState:
             except Exception as exc:
                 print(f"db-write-stall-watch could not notify {agent}: {exc}", flush=True)
     return plan.state
+
+
+def run_watch_once(watch: StallWatch, clock: Callable[[], float]) -> None:
+    began = clock()
+    try:
+        poll_once(watch, initial_state(watch), began)
+    except Exception as exc:
+        print(f"{_stamp(began, watch.zone)} probe failed: {type(exc).__name__}: {exc}", flush=True)
 
 
 # meiva:note

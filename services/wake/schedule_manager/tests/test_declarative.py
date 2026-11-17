@@ -216,6 +216,7 @@ def test_at_runs_once_in_owner_workspace_and_completes(
             "import os\n"
             "from pathlib import Path\n"
             "Path('state.json').write_text(os.getcwd())\n"
+            "Path('scheduled.txt').write_text(os.environ['MEIVA_SCHEDULED_FOR'])\n"
             "print('done')\n"
         ),
     )
@@ -234,6 +235,41 @@ def test_at_runs_once_in_owner_workspace_and_completes(
     assert len(runs) == 1
     assert runs[0][0:2] == (True, owner)
     assert runs[0][2] is not None
+    assert (work_dir / "scheduled.txt").read_text() == runs[0][2].isoformat()
+
+
+def test_pending_legacy_sync_blocks_declarative_launch(
+    db_conn: psycopg.Connection,
+    pool: ConnectionPool[psycopg.Connection],
+    unit_home: Path,
+) -> None:
+    now = datetime.now(UTC)
+    sid = _schedule(
+        db_conn,
+        name="await-legacy-reap",
+        now=now,
+        trigger_kind="every",
+        script="from pathlib import Path\nPath('fired').write_text('yes')\n",
+    )
+    db_conn.execute(
+        "INSERT INTO schedule_sync_requests (schedule_id, machine) VALUES (%s, 'gateway')",
+        (sid,),
+    )
+    db_conn.commit()
+    engine = _engine(pool, unit_home, now)
+    work_dir = unit_home / "schedules" / str(sid)
+
+    engine.reconcile()
+
+    assert not (work_dir / "fired").exists()
+    assert db_conn.execute(
+        "SELECT count(*) FROM schedule_runs WHERE schedule_id = %s", (sid,)
+    ).fetchone() == (0,)
+
+    db_conn.execute("DELETE FROM schedule_sync_requests WHERE schedule_id = %s", (sid,))
+    db_conn.commit()
+    engine.reconcile()
+    _wait_for_file(work_dir / "fired")
 
 
 def test_at_failure_is_terminal_without_retry(

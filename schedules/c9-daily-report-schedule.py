@@ -1,16 +1,13 @@
 # meiva:link schedules/docs/c9-daily-report.md
 
 import os
-from datetime import UTC, datetime
-from functools import partial
 
 from base.host.system.hostport import Host
 from base.paths.home import resolve_meiva_home
 from schedules.jobs.c9_report import C9Report, report_day
 from schedules.jobs.entry import cluster_timezone, open_schedule_entry
-from schedules.jobs.loop import CronSchedule, Trigger, run_loop
 from schedules.plans.directory_plan import report_recipient
-from schedules.plans.schedule_identity import parse_schedule_id
+from schedules.plans.schedule_identity import parse_scheduled_for
 
 CRON = "0 5 * * *"
 _REPORT_AGENT_ENV = "MEIVA_CI_USAGE_REPORT_AGENT"
@@ -22,9 +19,8 @@ if __name__ == "__main__":
     with open_schedule_entry(globals().get("MEIVA_SCHEDULE_INPUTS"), home=home) as inputs:
         from scripts.ci.pull_requests import accounting
 
-        schedule = CronSchedule((Trigger(CRON),), timezone=cluster_timezone())
         job = C9Report(
-            tz=schedule.timezone,
+            tz=cluster_timezone(),
             recipient=report_recipient(
                 "c9-daily-report",
                 _REPORT_AGENT_ENV,
@@ -35,12 +31,9 @@ if __name__ == "__main__":
             ledger=accounting.DEFAULT_LEDGER,
             host=Host.system(environ=os.environ),
         )
-        run_loop(
-            inputs.database(),
-            schedule,
-            partial(report_day, job=job, inputs=inputs),
-            schedule_id=parse_schedule_id(os.environ.get("MEIVA_SCHEDULE_ID")),
-            home=inputs.home,
-            started_at=datetime.now(UTC),
-            clock=lambda: datetime.now(UTC),
+        report_day(
+            parse_scheduled_for(os.environ.get("MEIVA_SCHEDULED_FOR")),
+            None,
+            job=job,
+            inputs=inputs,
         )

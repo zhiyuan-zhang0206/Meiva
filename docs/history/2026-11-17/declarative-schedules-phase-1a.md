@@ -82,3 +82,9 @@ When every recorded birth is gone but the same numeric PGID exists, custody rema
 the group may belong to a later generation observed after an outage. Reconciliation neither
 kills that group nor closes the run. This conservative state preserves single-flight until
 ownership or absence becomes provable.
+
+## Update: installed-payload migration
+
+The built-in and `meiva_usage` migration described as later work is completed in
+[Phase 2](declarative-schedules-phase-2.md). Compatibility `daemon` execution remains for
+stored external rows.

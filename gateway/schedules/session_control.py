@@ -22,7 +22,7 @@ from psycopg import Connection
 from psycopg.rows import class_row
 from psycopg_pool import ConnectionPool
 
-from base.clock import Timers
+from base.clock import Clock, Timers
 from base.cluster import session_name
 from base.db.transaction import write_transaction
 from base.sessions.protocol import SessionBackend
@@ -144,6 +144,7 @@ async def sync_startup_schedules(
     db_pool: ConnectionPool,
     *,
     home: Path,
+    clock: Clock,
     resolve_machine: Callable[[], str],
     provision_builtins: bool,
 ) -> None:
@@ -155,7 +156,12 @@ async def sync_startup_schedules(
             await asyncio.to_thread(
                 _run_with_conn,
                 db_pool,
-                lambda conn: provision_builtin_schedules(conn, machine=machine),
+                lambda conn: provision_builtin_schedules(
+                    conn,
+                    machine=machine,
+                    cluster_timezone=clock.timezone,
+                    now=clock.now(),
+                ),
             )
         except Exception:
             _log.warning("gateway built-in schedule provisioning failed", exc_info=True)
@@ -164,7 +170,14 @@ async def sync_startup_schedules(
 
     try:
         await asyncio.to_thread(
-            _run_with_conn, db_pool, lambda conn: reconcile_plugin_schedules(conn, home=home)
+            _run_with_conn,
+            db_pool,
+            lambda conn: reconcile_plugin_schedules(
+                conn,
+                home=home,
+                cluster_timezone=clock.timezone,
+                now=clock.now(),
+            ),
         )
     except Exception:
         _log.warning("gateway plugin schedule reconciliation failed", exc_info=True)
@@ -186,6 +199,7 @@ async def run_plugin_schedules_reconciler(
     pool: ConnectionPool,
     home: Path,
     *,
+    clock: Clock,
     interval_seconds: float = 5.0,
     resolve_machine: Callable[[], str] | None = None,
     provision_builtins: bool = False,
@@ -208,7 +222,14 @@ async def run_plugin_schedules_reconciler(
             if current_digest != last_digest:
                 last_digest = current_digest
                 await asyncio.to_thread(
-                    _run_with_conn, pool, lambda conn: reconcile_plugin_schedules(conn, home=home)
+                    _run_with_conn,
+                    pool,
+                    lambda conn: reconcile_plugin_schedules(
+                        conn,
+                        home=home,
+                        cluster_timezone=clock.timezone,
+                        now=clock.now(),
+                    ),
                 )
         except asyncio.CancelledError:
             raise
@@ -226,7 +247,12 @@ async def run_plugin_schedules_reconciler(
                     await asyncio.to_thread(
                         _run_with_conn,
                         pool,
-                        lambda conn, m=machine: provision_builtin_schedules(conn, machine=m),
+                        lambda conn, m=machine: provision_builtin_schedules(
+                            conn,
+                            machine=m,
+                            cluster_timezone=clock.timezone,
+                            now=clock.now(),
+                        ),
                     )
             except asyncio.CancelledError:
                 raise

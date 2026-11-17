@@ -172,6 +172,14 @@ it for the only copy of critical state. See
 | `config.schema` / `config.perAgentFields` | Pointer to the config schema (the Pydantic model, or a declarative schema) + which fields per-agent overlays may override | PR-E; pre-install config validation without importing plugin code |
 | `lifecycle.*` | See the lifecycle section | dispose contract (C9/C10) |
 
+`ScheduleSpec` carries code and placement (`name`, `machine`, `description`,
+`script`, `command`, `secret_env_vars`, `default_enabled`) plus execution policy:
+`trigger_kind` (`cron`, `every`, or compatibility `daemon`), `cron_expr`,
+`interval_seconds`, optional `timezone`, and `timeout_seconds`. New recurring
+faces use `cron` or `every`; every intervals are at least 30 seconds. Reconciliation
+preserves the operator's enabled state, updates trigger policy in place, and
+queues cleanup before a migrated daemon row can launch declaratively.
+
 ### Console surfaces — two lanes, deliberately not one mechanism
 
 | Lane | Mechanism | For |

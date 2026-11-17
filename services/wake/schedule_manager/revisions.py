@@ -213,7 +213,8 @@ def set_status(pool: ConnectionPool, schedule_id: int, status: str, machine_name
     with write_transaction(pool) as conn:
         return (
             conn.execute(
-                "UPDATE schedules SET status=%s, updated_at=now() WHERE id=%s AND machine=%s",
+                "UPDATE schedules SET status=%s, updated_at=now() "
+                "WHERE id=%s AND machine=%s AND trigger_kind = 'daemon'",
                 (status, schedule_id, machine_name),
             ).rowcount
             > 0

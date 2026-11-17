@@ -13,6 +13,7 @@
 # meiva:link schedules/README.md
 
 import os
+import shutil
 import subprocess
 import sys
 import zipfile
@@ -21,6 +22,7 @@ from dataclasses import replace
 from datetime import UTC, datetime
 from functools import partial
 from pathlib import Path
+from zoneinfo import ZoneInfo
 
 import meiva
 from meiva_builtins.plugins.meiva_fleet import task_registry
@@ -30,7 +32,6 @@ from base.host.boundary.json_values import is_object_dict, is_object_list
 from base.config import settings
 from base.paths.home import resolve_meiva_home
 from schedules.jobs.entry import cluster_timezone, open_schedule_entry
-from schedules.jobs.loop import CronSchedule, Trigger, run_loop
 from schedules.jobs.watch.api_read import read_api
 from schedules.jobs.watch.main_red_slot import slot_round
 from schedules.jobs.watch.release_gate_reads import read_scheduled_starts
@@ -44,7 +45,7 @@ from schedules.jobs.watch.main_red_watch import (
     watch_once,
 )
 from schedules.jobs.telemetry_event import emit_system_event
-from schedules.plans.schedule_identity import parse_schedule_id
+from schedules.plans.schedule_identity import parse_scheduled_for
 from schedules.jobs.watch.main_red_liveness import liveness_once
 from schedules.plans.watch.main_red import (
     FAILURE_UNNAMED,
@@ -101,6 +102,18 @@ _REPO = "zhiyuan-zhang0206/Meiva"
 # a red pull-request run is that pull request's business, and reading it here would open cards
 # against `main` for a branch nobody merged.
 _PR_RUNNING_WORKFLOWS = frozenset({_CI_NIGHTLY})
+
+
+def _state_path(home: Path) -> Path:
+    current = Path("state.json")
+    legacy = home / "run" / STATE_FILE
+    if not current.exists() and legacy.is_file():
+        shutil.copy2(legacy, current)
+    return current
+
+
+def _artifacts_path() -> Path:
+    return Path("artifacts")
 
 
 def _runs_path(workflow: str, page: int) -> str:
@@ -619,19 +632,17 @@ def _close_card(task_id: int, reason: str) -> None:
 def watch_round(
     slot: datetime, _payload: object, *, inputs: ScheduleInputs, home: Path, report_agent: int
 ) -> None:
-    state_path = home / "run" / STATE_FILE
+    state_path = _state_path(home)
     run_process = subprocess.run
     case_reader = JunitReader(
-        home / "run" / "main-red-artifacts",
+        _artifacts_path(),
         run_process,
         budget=partial(Deadline.after, SYSTEM_TIMERS, 120),
     )
     line = watch_once(
         state_path=state_path,
         now=datetime.now(UTC),
-        fetch=partial(
-            fetch_runs, run_process=run_process, scratch=home / "run" / "main-red-artifacts"
-        ),
+        fetch=partial(fetch_runs, run_process=run_process, scratch=_artifacts_path()),
         read_case=case_reader,
         review_history=case_reader.history,
         last_start=partial(_last_run_start, run_process=run_process),
@@ -712,18 +723,11 @@ if __name__ == "__main__":
             home=home,
             report_agent=report_agent_from_environ(os.environ),
         )
-        if "--once" in sys.argv:
-            round_once(datetime.now(UTC), None)
-            raise SystemExit(0)
-        run_loop(
-            inputs.database(),
-            CronSchedule(
-                (Trigger(CRON), Trigger(LIVENESS_CRON, _LIVENESS_PAYLOAD)),
-                timezone=cluster_timezone(),
-            ),
-            round_once,
-            schedule_id=parse_schedule_id(os.environ.get("MEIVA_SCHEDULE_ID")),
-            home=inputs.home,
-            started_at=datetime.now(UTC),
-            clock=lambda: datetime.now(UTC),
+        slot = (
+            datetime.now(UTC)
+            if "--once" in sys.argv
+            else parse_scheduled_for(os.environ.get("MEIVA_SCHEDULED_FOR"))
         )
+        minute = slot.astimezone(ZoneInfo(cluster_timezone())).minute
+        payload = _LIVENESS_PAYLOAD if minute % 30 == 5 else None
+        round_once(slot, payload)

@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "policy": "Built-in schedules ship with Meiva. Product schedules (adversarial evaluation, self-evolution, memory) are created enabled by default; cluster-operator schedules are created but disabled. provision_builtin_schedules() (schedule-manager start + `meiva schedules provision`) creates missing built-ins keyed by name and resyncs the script/command of existing ones to the template here; their enabled state and description are never modified.",
+  "policy": "Built-in schedules ship with Meiva as declarative single-round cron/every programs. Product schedules are created enabled by default; cluster-operator schedules are created but disabled. provision_builtin_schedules() (schedule-manager start + `meiva schedules provision`) creates missing built-ins keyed by name and resyncs code plus trigger policy from this manifest. Existing enabled state and description remain operator-owned; a daemon-to-declarative upgrade queues the legacy PTY for reaping before the first declarative launch.",
   "builtin_schedules": [
     {
       "name": "c9-daily-report",
@@ -8,7 +8,10 @@
       "default_enabled": true,
       "description": "Daily CI-minute reconciliation at 05:00 cluster time — appends the trailing 24h of CI runs to the attribution ledger (idempotent by run id) and emits the ci_usage_daily event; failures wake the Meiva P0 lead.",
       "script": "c9-daily-report-schedule.py",
-      "command": "python c9-daily-report-schedule.py"
+      "command": "python c9-daily-report-schedule.py",
+      "trigger_kind": "cron",
+      "cron_expr": "0 5 * * *",
+      "timeout_seconds": 1800
     },
     {
       "name": "debt-sweep-daily",
@@ -16,7 +19,10 @@
       "default_enabled": true,
       "description": "Daily 06:30 cluster-time mechanical scan plus one debt-clearing pass landing as the sweeper's chore(sweeper) PR; failures wake the P0 lead.",
       "script": "debt-sweep-daily-schedule.py",
-      "command": "python debt-sweep-daily-schedule.py"
+      "command": "python debt-sweep-daily-schedule.py",
+      "trigger_kind": "cron",
+      "cron_expr": "30 6 * * *",
+      "timeout_seconds": 7200
     },
     {
       "name": "adversarial-eval-weekly",
@@ -24,7 +30,10 @@
       "default_enabled": true,
       "description": "Weekly adversarial probe batch — rotates 5 of 9 behavior-probe cases through fresh eval-isolated agents every Wednesday 04:00 cluster time; quiet on success, wakes an owner agent for human review on any 0-score.",
       "script": "adversarial-eval-weekly-schedule.py",
-      "command": "python adversarial-eval-weekly-schedule.py"
+      "command": "python adversarial-eval-weekly-schedule.py",
+      "trigger_kind": "cron",
+      "cron_expr": "0 4 * * 3",
+      "timeout_seconds": 7200
     },
     {
       "name": "memory-arbiter",
@@ -32,7 +41,9 @@
       "default_enabled": true,
       "description": "Memory pool daily maintenance — 4AM consolidation (commit + push + PR merge) and 7AM health check (OKF, size, dedup, stale).",
       "script": "memory-steward-schedule.py",
-      "command": "python memory-steward-schedule.py"
+      "command": "python memory-steward-schedule.py",
+      "trigger_kind": "cron",
+      "cron_expr": "0 4,7 * * *"
     },
     {
       "name": "self-evolution-daily",
@@ -40,7 +51,10 @@
       "default_enabled": true,
       "description": "Daily incremental self-evolution scan — runs daily_scan.py at 00:00 (embedded timezone), wakes the self-evolution agent on ALERT (exit 2) or timeout.",
       "script": "self-evolution-daily-schedule.py",
-      "command": "python self-evolution-daily-schedule.py"
+      "command": "python self-evolution-daily-schedule.py",
+      "trigger_kind": "cron",
+      "cron_expr": "0 0 * * *",
+      "timeout_seconds": 11400
     },
     {
       "name": "self-evolution-weekly",
@@ -48,7 +62,9 @@
       "default_enabled": true,
       "description": "Weekly self-evolution — fires the self-evolution agent when the past week's event volume clears a minimum threshold (dynamic; busy weeks get a mid-week follow-up).",
       "script": "self-evolution-weekly-schedule.py",
-      "command": "python self-evolution-weekly-schedule.py"
+      "command": "python self-evolution-weekly-schedule.py",
+      "trigger_kind": "cron",
+      "cron_expr": "0 0 * * 2,5"
     },
     {
       "name": "model-update-tracker",
@@ -56,7 +72,9 @@
       "default_enabled": true,
       "description": "Daily upstream model detection — pulls each provider's official model list, diffs the registry, and wakes the P0 lead agent on new candidates (06:00 Asia/Shanghai).",
       "script": "model-update-tracker-schedule.py",
-      "command": "python model-update-tracker-schedule.py"
+      "command": "python model-update-tracker-schedule.py",
+      "trigger_kind": "cron",
+      "cron_expr": "0 6 * * *"
     },
     {
       "name": "main-red-watch",
@@ -64,7 +82,10 @@
       "default_enabled": true,
       "description": "Every thirty minutes, read the newest post-merge runs of main (release-gate every six hours, the nightly verdict once a day) and open one task for the P0 lead per red that no green run of the same commit explains; infrastructure failures are recorded and never become a card. Emits main_red_watch_round as its heartbeat.",
       "script": "jobs/watch/main-red-watch-schedule.py",
-      "command": "python jobs/watch/main-red-watch-schedule.py"
+      "command": "python jobs/watch/main-red-watch-schedule.py",
+      "trigger_kind": "cron",
+      "cron_expr": "0,5,30,35 * * * *",
+      "timeout_seconds": 1200
     },
     {
       "name": "dev-ci-metrics",
@@ -72,7 +93,10 @@
       "default_enabled": true,
       "description": "Daily GitHub Actions run-observability collection at 06:20 cluster time — publishes absolute Dev/CI workflow, failure, per-PR, and white-run gauges; failures wake the Meiva P0 lead.",
       "script": "dev-ci-metrics-schedule.py",
-      "command": "python dev-ci-metrics-schedule.py"
+      "command": "python dev-ci-metrics-schedule.py",
+      "trigger_kind": "cron",
+      "cron_expr": "20 6 * * *",
+      "timeout_seconds": 1200
     },
     {
       "name": "trace-ship-tempo",
@@ -80,7 +104,10 @@
       "default_enabled": true,
       "description": "Every five minutes, ship the local OTel trace mirror to the local Tempo viewer: incremental by a per-file watermark so a run sends only new lines, idempotent by span id so a missed window is caught up on the next run, and best-effort so an unreachable viewer never ends the schedule.",
       "script": "trace-ship-tempo-schedule.py",
-      "command": "python trace-ship-tempo-schedule.py"
+      "command": "python trace-ship-tempo-schedule.py",
+      "trigger_kind": "cron",
+      "cron_expr": "*/5 * * * *",
+      "timeout_seconds": 660
     },
     {
       "name": "harness-cli-update",
@@ -89,6 +116,9 @@
       "description": "Per-machine daily update of installed external harness CLIs at 04:30 cluster time.",
       "script": "jobs/harness/harness-cli-update-schedule.py",
       "command": "python jobs/harness/harness-cli-update-schedule.py",
+      "trigger_kind": "cron",
+      "cron_expr": "30 4 * * *",
+      "timeout_seconds": 1800,
       "placement": "per_machine"
     },
     {
@@ -98,6 +128,8 @@
       "description": "Per-machine Claude Code login keepalive every six hours (00:10, 06:10, 12:10 and 18:10 cluster time, outside the 09:00-12:00 and 14:00-18:00 workday peaks): one minimal `claude -p` on the cheapest model so the CLI refreshes its own login. It never calls the OAuth refresh endpoint or touches credentials, and a missing CLI or logged-out machine is recorded as a failed round without retrying.",
       "script": "jobs/harness/claude-auth-keepalive-schedule.py",
       "command": "python jobs/harness/claude-auth-keepalive-schedule.py",
+      "trigger_kind": "cron",
+      "cron_expr": "10 0,6,12,18 * * *",
       "placement": "per_machine"
     },
     {
@@ -106,7 +138,9 @@
       "default_enabled": false,
       "description": "Operator sentinel for a stalled database write path (#5310): reads pgBouncer's per-minute stats line from $MEIVA_HOME/pgbouncer/pgbouncer.log and wakes the cluster operator after three consecutive minutes under 20 xacts/s with an average query time above 300 ms. Thresholds come from 29 days of history (40,375 minutes), where the rule marked only the two real incidents; an agent-host crash wave is the consequence it precedes, not the signal.",
       "script": "db-write-stall-watch-schedule.py",
-      "command": "python db-write-stall-watch-schedule.py"
+      "command": "python db-write-stall-watch-schedule.py",
+      "trigger_kind": "every",
+      "interval_seconds": 60
     },
     {
       "name": "sched-dry-import-weekly",
@@ -114,7 +148,10 @@
       "default_enabled": false,
       "description": "Operator sentinel for the schedules themselves: every Monday 09:00 cluster time it syntax-checks and imports-only executes every stored schedule script in the runner's venv, stopped rows included, then wakes the cluster operator with the exact module or syntax error of each red. It catches the drift class that broke seven in-store scripts in one wave (2026-10-25): the repository moves a module and the database-embedded copies do not roll. `--once` runs a sweep now; `--check-file` is the falsification control.",
       "script": "sched-dry-import-weekly-schedule.py",
-      "command": "python sched-dry-import-weekly-schedule.py"
+      "command": "python sched-dry-import-weekly-schedule.py",
+      "trigger_kind": "cron",
+      "cron_expr": "0 9 * * 1",
+      "timeout_seconds": 7200
     },
     {
       "name": "log-cred-mask-monthly",
@@ -122,7 +159,10 @@
       "default_enabled": false,
       "description": "Operator sweep for credentials left in logs: on the 15th at 10:00 cluster time it runs the host-local log-credential scanner (fresh strict scan, same-length masking, strict recount, final dry run) and wakes the cluster operator only when the sweep exits nonzero. The scanner is an operator tool that lives under the runtime home of the machine that owns the schedule manager; on a host without it the run reports rc=2 naming the missing path instead of retrying silently.",
       "script": "log-cred-mask-monthly-schedule.py",
-      "command": "python log-cred-mask-monthly-schedule.py"
+      "command": "python log-cred-mask-monthly-schedule.py",
+      "trigger_kind": "cron",
+      "cron_expr": "0 10 15 * *",
+      "timeout_seconds": 4200
     },
     {
       "name": "qa-keepalive",
@@ -130,7 +170,9 @@
       "default_enabled": false,
       "description": "Operator sentinel for one agent's page and inbound watcher on a remote host: the gateway-hosted runner probes an HTTP health URL and a remote process every ten minutes, wakes the owning agent only after two consecutive failed rounds (one bad round is a rollout), then holds a one-hour cool-down and clears the streak on the first healthy round. Ships disabled: the health URL, the probed hosts and the owner are site values in the template.",
       "script": "qa-keepalive-schedule.py",
-      "command": "python qa-keepalive-schedule.py"
+      "command": "python qa-keepalive-schedule.py",
+      "trigger_kind": "every",
+      "interval_seconds": 600
     },
     {
       "name": "agent-watch",
@@ -138,7 +180,10 @@
       "default_enabled": false,
       "description": "Operator sentinel for duties that stop taking their rounds (#5594): every ten minutes it reads, for each agent with a watching duty, the live session count, the age of the last real turn, and whether a schedule that agent owns still fires on its own cadence, then wakes the agent, tells the lead, or escalates to the user along one ladder -- for an hourly duty: detect at 90 minutes, report to the lead at 180, escalate at 240, with every rung moving out with a longer cadence and the interval between repeats widening as the silence outlasts each rung. A declared heartbeat pause is not silence, and only the turn-age condition treats it as rest: a fleet of dead sessions is still a loss. A signal the host cannot read is reported as blind and never counted as healthy, and a terminated agent is finished rather than silent, so the sentinel never resurrects a duty the user ended.",
       "script": "agent-watch-schedule.py",
-      "command": "python agent-watch-schedule.py"
+      "command": "python agent-watch-schedule.py",
+      "trigger_kind": "cron",
+      "cron_expr": "*/10 * * * *",
+      "timeout_seconds": 1200
     }
   ]
 }

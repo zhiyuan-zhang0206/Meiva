@@ -2,17 +2,14 @@
 
 import os
 import subprocess
-from datetime import UTC, datetime
-from functools import partial
 
 from base.clock import SYSTEM_TIMERS
 from base.paths.home import resolve_meiva_home
 from schedules.jobs.watch.ci_metrics import CiMetrics, collect_ci_metrics
 from schedules.jobs.entry import cluster_timezone, open_schedule_entry
-from schedules.jobs.loop import CronSchedule, Trigger, run_loop
 from schedules.plans.ci_workflows import WatchedWorkflow
 from schedules.plans.directory_plan import report_recipient
-from schedules.plans.schedule_identity import parse_schedule_id
+from schedules.plans.schedule_identity import parse_scheduled_for
 
 CRON = "20 6 * * *"
 _REPORT_AGENT_ENV = "MEIVA_CI_METRICS_REPORT_AGENT"
@@ -37,9 +34,8 @@ _SCHEDULED_WORKFLOWS = (
 if __name__ == "__main__":
     home = resolve_meiva_home()
     with open_schedule_entry(globals().get("MEIVA_SCHEDULE_INPUTS"), home=home) as inputs:
-        schedule = CronSchedule((Trigger(CRON),), timezone=cluster_timezone())
         job = CiMetrics(
-            tz=schedule.timezone,
+            tz=cluster_timezone(),
             recipient=report_recipient(
                 "dev-ci-metrics",
                 _REPORT_AGENT_ENV,
@@ -51,12 +47,9 @@ if __name__ == "__main__":
             run_process=subprocess.run,
             timers=SYSTEM_TIMERS,
         )
-        run_loop(
-            inputs.database(),
-            schedule,
-            partial(collect_ci_metrics, job=job, inputs=inputs),
-            schedule_id=parse_schedule_id(os.environ.get("MEIVA_SCHEDULE_ID")),
-            home=inputs.home,
-            started_at=datetime.now(UTC),
-            clock=lambda: datetime.now(UTC),
+        collect_ci_metrics(
+            parse_scheduled_for(os.environ.get("MEIVA_SCHEDULED_FOR")),
+            None,
+            job=job,
+            inputs=inputs,
         )

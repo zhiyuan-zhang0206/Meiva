@@ -1,6 +1,6 @@
 # Self-evolution schedules
 
-Both loops wake the `self-evolution` agent by label and run no work of their own. What each
+Both schedules wake the `self-evolution` agent by label and run no work of their own. What each
 outcome does is decided in `schedules/plans/scan_outcome.py` and
 `schedules/plans/weekly_trigger.py`; `schedules/jobs/self_evolution_scan.py` and
 `schedules/jobs/self_evolution_weekly.py` run the scan, count the events and wake the agent.
@@ -41,15 +41,12 @@ The count comes from the live `/api/events` stream with `with_total=1`: the
 gateway returns no total — which crashed the trigger on `int(None)`, while a
 silent 0 would have skipped the week's deep run.
 
-Both loops run the shared driver (`schedules/jobs/loop.py`): `run_weekly` hands one round to
-`run_rounds`, the same one `run_loop` uses, so the weekly schedule takes a round beat, the failure
-backoff and the `schedules.last_error` write the daily loop takes. The next slot is searched
-from the later of the loop's floor and `now - 2 minutes`. Cron expressions are
-strictly greater than their base, so a sleep that lands a fraction of a second past
-the hour would otherwise jump to the next day — the deterministic miss observed on
-2026-08-06. The daily loop claims a slot up to 60 seconds early and the weekly loop
-up to 90; the weekly follow-up slot is searched only after a main fire armed it, and
-that flag lives in the running process alone.
+The daily and weekly entries each execute one declarative slot and exit. The
+schedule manager owns cron timing, single-flight admission, timeout, run history,
+and `last_error`. The weekly entry persists the Tuesday result in its workspace
+`state.json`; Friday performs the follow-up only when that ordinary state file says
+Tuesday armed it. A manager restart therefore preserves the arm without retaining
+a sleeping Python process.
 
 The shared claim semantics and the report-recipient variables are in
 `schedules/README.md`.

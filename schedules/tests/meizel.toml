@@ -8,6 +8,6 @@
 "test_loop.py" = ["support"]
 "test_memory_steward.py" = ["support"]
 "test_model_update_tracker.py" = ["children", "support"]
-"test_scripts_entry.py" = ["children", "support"]
+"test_scripts_entry.py" = ["children"]
 "test_self_evolution.py" = ["children", "support"]
 "test_telemetry_event.py" = ["children"]

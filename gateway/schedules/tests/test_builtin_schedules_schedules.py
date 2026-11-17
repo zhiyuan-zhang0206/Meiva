@@ -3,14 +3,20 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import json
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
+from typing import cast
 
 import psycopg
+import pytest
 from psycopg_pool import ConnectionPool
 
+from base.clock import SYSTEM_TIMERS, Clock, ClockConfig
 from base.daemon.schedules.builtin_schedules import (
     ProvisionResult,
-    provision_builtin_schedules,
+)
+from base.daemon.schedules.builtin_schedules import (
+    provision_builtin_schedules as _provision_builtin_schedules,
 )
 from gateway.schedules.session_control import run_plugin_schedules_reconciler
 
@@ -22,10 +28,39 @@ _ENTRY: dict[str, object] = {
     "command": "python a.py",
     "description": "A",
 }
+_NOW = datetime(2026, 11, 17, 0, 0, tzinfo=UTC)
+_CLOCK = Clock(
+    ClockConfig(
+        timezone="UTC",
+        authoritative_timezone="UTC",
+        message_timestamp_weekday=False,
+    ),
+    timers=SYSTEM_TIMERS,
+    now=lambda: _NOW,
+)
+
+
+def provision_builtin_schedules(
+    conn: psycopg.Connection,
+    *,
+    machine: str,
+    path: Path,
+    cluster_timezone: str = "UTC",
+    now: datetime = _NOW,
+) -> ProvisionResult:
+    return _provision_builtin_schedules(
+        conn,
+        machine=machine,
+        path=path,
+        cluster_timezone=cluster_timezone,
+        now=now,
+    )
 
 
 def _manifest(tmp_path: Path, entries: list[dict[str, object]]) -> Path:
     for e in entries:
+        e.setdefault("trigger_kind", "every")
+        e.setdefault("interval_seconds", 60)
         script = e["script"]
         assert isinstance(script, str)
         (tmp_path / script).write_text("print('ok')\n")
@@ -156,6 +191,52 @@ class TestProvision:
         db_conn.commit()
         assert len(_versions(db_conn, "prod-a")) == 2
 
+    @pytest.mark.parametrize("enabled", [False, True])
+    def test_upgrades_daemon_in_place_and_preserves_enabled(
+        self, db_conn: psycopg.Connection, tmp_path: Path, enabled: bool
+    ) -> None:
+        path = _manifest(tmp_path, [_ENTRY])
+        row = db_conn.execute(
+            "INSERT INTO schedules "
+            "(name, description, script, command, enabled, status, machine, trigger_kind) "
+            "VALUES ('prod-a', 'operator tuned', 'old loop', 'python old.py', %s, 'running', "
+            "'gateway', 'daemon') RETURNING id",
+            (enabled,),
+        ).fetchone()
+        db_conn.commit()
+        assert row is not None
+        schedule_id = cast(int, row[0])
+        now = datetime(2026, 11, 17, 0, 0, tzinfo=UTC)
+
+        result = provision_builtin_schedules(
+            db_conn,
+            machine="gateway",
+            path=path,
+            cluster_timezone="Asia/Shanghai",
+            now=now,
+        )
+        db_conn.commit()
+
+        assert result == ProvisionResult(created=[], resynced=["prod-a"])
+        stored = db_conn.execute(
+            "SELECT id, description, enabled, status, trigger_kind, interval_seconds, timezone, "
+            "next_launch_at FROM schedules WHERE name = 'prod-a'"
+        ).fetchone()
+        assert stored == (
+            schedule_id,
+            "operator tuned",
+            enabled,
+            "scheduled" if enabled else "stopped",
+            "every",
+            60,
+            "Asia/Shanghai",
+            now + timedelta(seconds=60) if enabled else None,
+        )
+        assert db_conn.execute(
+            "SELECT machine FROM schedule_sync_requests WHERE schedule_id = %s",
+            (schedule_id,),
+        ).fetchall() == [("gateway",)]
+
     def test_a_schedule_outside_the_manifest_is_never_touched(
         self, db_conn: psycopg.Connection, tmp_path: Path
     ) -> None:
@@ -268,6 +349,7 @@ class TestProvision:
                 run_plugin_schedules_reconciler(
                     pool,
                     tmp_path,
+                    clock=_CLOCK,
                     interval_seconds=0.02,
                     resolve_machine=lambda: "gateway",
                     provision_builtins=True,

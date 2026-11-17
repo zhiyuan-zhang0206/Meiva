@@ -14,8 +14,8 @@
 # be confused with "did not run"). Reds and tool errors are reported to the cluster operator,
 # best-effort, as the schedule actor. Exit codes: 0 green, 1 red, 2 tool error.
 #
-# Modes: (default) resident loop on cron `0 9 * * 1`, skipping slots missed while down, never
-# exiting on a sweep error; `--once` runs one sweep now; `--no-notify` silences the red path;
+# Modes: a declarative cron runs one sweep and exits; `--once` runs one sweep now;
+# `--no-notify` silences the red path;
 # `--check-file PATH` checks one script file without the database, which is the falsification
 # control for the sweep itself.
 #
@@ -28,20 +28,16 @@ from __future__ import annotations
 import os
 import subprocess
 import sys
-from datetime import UTC, datetime
-from functools import partial
+from datetime import datetime
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
 import base
 import meiva
-from base.daemon.schedules.watcher import next_fire
 from base.paths import logs_dir
 from base.paths.home import resolve_meiva_home
 from schedules.jobs.entry import cluster_timezone, open_schedule_entry
-from schedules.jobs.loop import CronSchedule, Trigger, run_loop
-from schedules.plans.loop_plan import LoopTiming
-from schedules.plans.schedule_identity import parse_schedule_id
+from schedules.plans.schedule_identity import parse_scheduled_for
 
 TARGET_AGENT = 1818
 
@@ -95,7 +91,7 @@ def _cli_source() -> str | None:
 # meiva:note
 # Report reds (or a tool error) to the operator: the SDK first, the `meiva` CLI as the fallback, and
 # a loud stderr line when both fail -- an unreported red is the one outcome this schedule must not
-# have. Never fatal: the loop has to keep sweeping.
+# have. Never fatal: a reporting failure does not change the sweep outcome.
 def _notify(
     checked: int,
     reds: list[tuple[int, str, str]],
@@ -196,8 +192,8 @@ def check_script(script: str) -> str | None:
 
 # meiva:note
 # Read every row, stopped ones included: a disabled schedule is exactly the one that crashes when
-# somebody re-enables it, so it cannot be skipped. The resident entry's inputs are reused when a
-# sweep runs inside the schedule; `--once` builds a fresh one.
+# somebody re-enables it, so it cannot be skipped. A managed or manual sweep opens the same
+# schedule entry contract.
 def _fetch_rows(home: Path) -> list[tuple[int, str, str]]:
     with (
         open_schedule_entry(globals().get("MEIVA_SCHEDULE_INPUTS"), home=home) as inputs,
@@ -260,32 +256,10 @@ def _fire(_slot: datetime, message: str | None, *, home: Path) -> None:
         print("[sched-dry-import] RED id=%s name=%s missing=%s" % (sid, name, missing))
 
 
-# meiva:note
-# The next-fire line is an observation point, not decoration: `run_loop` never prints when it will
-# fire next, this schedule is weekly and silent when green, so without the line there is no way to
-# tell "computed correctly and waiting" from "computed wrongly and will never fire".
 def main(home: Path) -> None:
-    with open_schedule_entry(globals().get("MEIVA_SCHEDULE_INPUTS"), home=home) as inputs:
-        print(
-            "[sched-dry-import] next fire %s (cron %s)"
-            % (
-                next_fire(CRON, after=datetime.now(UTC), timezone=cluster_timezone()).isoformat(),
-                CRON,
-            )
-        )
-        run_loop(
-            inputs.database(),
-            CronSchedule(
-                tuple(Trigger(expr, payload) for expr, payload in TRIGGERS),
-                timezone=cluster_timezone(),
-                timing=LoopTiming(),
-            ),
-            partial(_fire, home=home),
-            schedule_id=parse_schedule_id(os.environ.get("MEIVA_SCHEDULE_ID")),
-            home=inputs.home,
-            started_at=datetime.now(UTC),
-            clock=lambda: datetime.now(UTC),
-        )
+    with open_schedule_entry(globals().get("MEIVA_SCHEDULE_INPUTS"), home=home):
+        slot = parse_scheduled_for(os.environ.get("MEIVA_SCHEDULED_FOR"))
+        _fire(slot, TRIGGERS[0][1], home=home)
 
 
 if __name__ == "__main__":
