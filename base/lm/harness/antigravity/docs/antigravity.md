@@ -47,12 +47,20 @@ an unexpected shape or an unknown run status raises `AgyInterfaceError`; it is n
 `deliver()` asks `GetCascadeTrajectory` (`status` RUNNING / IDLE, `numTotalSteps`, `trajectory.steps`)
 before each input (`trajectory.route`): RUNNING is steered with our id; IDLE with no turn of ours
 starts a turn on stdin; IDLE while our own turn's result is unread is refused (`InputRejected`) so the
-input is handed over again. Once the old turn has reached ACK 2, that IDLE state also proves its provider
-work is finished: the adapter closes the old ticket from the output already streamed, marks its result
-metadata and per-turn usage as unmeasured, retires the process, and ignores any late frame from it. The
-next delivery respawns with `--conversation`; the rejected input starts there exactly once. A ticket that
-has not reached ACK 2 is left alone because IDLE can still mean stdin has not begun. An input sent through
-RPC to an idle conversation would run a **phantom
+input is handed over again. Top-level IDLE is not sufficient evidence that provider work finished. A live
+agy 1.5.9 background-command trajectory became IDLE for 5.3 seconds while one trajectory step remained
+`CORTEX_STEP_STATUS_RUNNING`, then the same turn returned to RUNNING and completed; the compact recorded
+snapshots are in `tests/fixtures/background_idle_trajectory.json`.
+
+The missing-result recovery is therefore narrower. Immediately before the trajectory request, the
+adapter captures ACK 2 as the pair `(active ticket, minimum observed step count)` on that transport. An
+IDLE reply is eligible only when it covers that count and every listed step has a terminal status; the
+same parsed snapshot must remain unchanged for another 0.5-second poll, with the same ticket, ACK and
+transport. A pre-ACK snapshot returned after ACK cannot satisfy the causal check, and IDLE with any live
+step remains open. A confirmed settled trajectory closes the old ticket from output already streamed,
+marks result metadata and per-turn usage as unmeasured, retires the process, and ignores late frames. The
+next delivery respawns with `--conversation`; the rejected input starts there exactly once. An input sent
+through RPC to an idle conversation would run a **phantom
 turn**: agy runs it, stdout shows nothing (130 s observed), and at the next stdin input its steps are
 printed again and its answer is folded into that turn's `result`.
 

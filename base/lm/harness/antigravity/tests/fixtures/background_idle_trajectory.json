@@ -1,0 +1,59 @@
+{
+  "provenance": {
+    "recorded_at": "2026-11-17",
+    "agy_version": "1.5.9",
+    "binary_sha256": "fad3628ad91fe8613a72f074a1c5fde7cd816517788a5b9be96703f7d256741a",
+    "sampling_interval_ms": 100,
+    "prompt": "Run sleep 8 as background work, wait for it, then reply PROBE-BG-DONE",
+    "note": "Identifiers, content and configuration were omitted; step types and statuses are verbatim GetCascadeTrajectory fields."
+  },
+  "events": {
+    "tool_active_ms": 5999,
+    "tool_done_ms": 14131,
+    "turn_result_ms": 16003
+  },
+  "snapshots": {
+    "background_wait_idle": {
+      "elapsed_ms": 8901,
+      "status": "CASCADE_RUN_STATUS_IDLE",
+      "numTotalSteps": 4,
+      "trajectory": {
+        "steps": [
+          {"type": "CORTEX_STEP_TYPE_USER_INPUT", "status": "CORTEX_STEP_STATUS_DONE"},
+          {"type": "CORTEX_STEP_TYPE_PLANNER_RESPONSE", "status": "CORTEX_STEP_STATUS_DONE"},
+          {"type": "CORTEX_STEP_TYPE_GENERIC", "status": "CORTEX_STEP_STATUS_RUNNING"},
+          {"type": "CORTEX_STEP_TYPE_PLANNER_RESPONSE", "status": "CORTEX_STEP_STATUS_DONE"}
+        ]
+      }
+    },
+    "background_finished_and_turn_resumed": {
+      "elapsed_ms": 14210,
+      "status": "CASCADE_RUN_STATUS_RUNNING",
+      "numTotalSteps": 5,
+      "trajectory": {
+        "steps": [
+          {"type": "CORTEX_STEP_TYPE_USER_INPUT", "status": "CORTEX_STEP_STATUS_DONE"},
+          {"type": "CORTEX_STEP_TYPE_PLANNER_RESPONSE", "status": "CORTEX_STEP_STATUS_DONE"},
+          {"type": "CORTEX_STEP_TYPE_RUN_COMMAND", "status": "CORTEX_STEP_STATUS_DONE"},
+          {"type": "CORTEX_STEP_TYPE_PLANNER_RESPONSE", "status": "CORTEX_STEP_STATUS_DONE"},
+          {"type": "CORTEX_STEP_TYPE_SYSTEM_MESSAGE", "status": "CORTEX_STEP_STATUS_DONE"}
+        ]
+      }
+    },
+    "final_response_running": {
+      "elapsed_ms": 15970,
+      "status": "CASCADE_RUN_STATUS_RUNNING",
+      "numTotalSteps": 6,
+      "trajectory": {
+        "steps": [
+          {"type": "CORTEX_STEP_TYPE_USER_INPUT", "status": "CORTEX_STEP_STATUS_DONE"},
+          {"type": "CORTEX_STEP_TYPE_PLANNER_RESPONSE", "status": "CORTEX_STEP_STATUS_DONE"},
+          {"type": "CORTEX_STEP_TYPE_RUN_COMMAND", "status": "CORTEX_STEP_STATUS_DONE"},
+          {"type": "CORTEX_STEP_TYPE_PLANNER_RESPONSE", "status": "CORTEX_STEP_STATUS_DONE"},
+          {"type": "CORTEX_STEP_TYPE_SYSTEM_MESSAGE", "status": "CORTEX_STEP_STATUS_DONE"},
+          {"type": "CORTEX_STEP_TYPE_PLANNER_RESPONSE", "status": "CORTEX_STEP_STATUS_GENERATING"}
+        ]
+      }
+    }
+  }
+}

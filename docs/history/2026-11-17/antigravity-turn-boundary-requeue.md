@@ -35,3 +35,21 @@ prevents a late uncorrelated frame from being attributed to the next ticket.
 
 The resulting rule is one delivery attempt per run after a refusal, and one active process generation per
 Antigravity ticket.
+
+## Update: IDLE is necessary but not sufficient
+
+Review found that the ACK-2 rule above did not establish the sampling order: an IDLE reply could be
+sampled before ACK 2, block in transit, and return after stdout had already acknowledged and started the
+turn. ACK evidence is now captured before the trajectory request and tied to the same ticket, minimum
+observed step count and transport.
+
+A live agy 1.5.9 probe then disproved the stronger premise that ACK 2 followed by top-level IDLE always
+means the turn ended. During a background `sleep 8`, the trajectory was IDLE from 8,901 ms while step 2
+remained RUNNING; at 14,210 ms that same turn resumed RUNNING, and its result arrived at 16,003 ms. The
+sanitized provider snapshots are preserved in
+`base/lm/harness/antigravity/tests/fixtures/background_idle_trajectory.json`.
+
+The recovery rule was narrowed again: all trajectory steps must be terminal, the snapshot must cover the
+pre-request ACK count, and an unchanged second poll after 0.5 seconds must still belong to the same ticket,
+ACK and transport. The earlier statements that ACK 2 plus one IDLE observation is terminal are superseded
+by this measured rule; the durable inbox remains the sole owner of the rejected input's later retry.

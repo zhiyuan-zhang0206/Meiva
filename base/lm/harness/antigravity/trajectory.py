@@ -29,11 +29,24 @@ _STATUS = {
     "CASCADE_RUN_STATUS_IDLE": RunStatus.IDLE,
 }
 
+_TERMINAL_STEP_STATUSES = frozenset(
+    {
+        "CORTEX_STEP_STATUS_DONE",
+        "CORTEX_STEP_STATUS_INVALID",
+        "CORTEX_STEP_STATUS_CLEARED",
+        "CORTEX_STEP_STATUS_CANCELED",
+        "CORTEX_STEP_STATUS_ERROR",
+        "CORTEX_STEP_STATUS_INTERRUPTED",
+        "CORTEX_STEP_STATUS_HALTED",
+    }
+)
+
 
 @dataclass(frozen=True, slots=True)
 class TrajectoryStep:
     index: int
     kind: str
+    status: str
     client_message_id: str | None
 
 
@@ -45,6 +58,14 @@ class Trajectory:
 
     def client_message_ids(self) -> tuple[str, ...]:
         return tuple(step.client_message_id for step in self.steps if step.client_message_id)
+
+    def is_settled(self, *, minimum_steps: int) -> bool:
+        return (
+            self.status is RunStatus.IDLE
+            and self.num_steps >= minimum_steps > 0
+            and len(self.steps) == self.num_steps
+            and all(step.status in _TERMINAL_STEP_STATUSES for step in self.steps)
+        )
 
 
 def parse_trajectory(payload: Mapping[str, object]) -> Trajectory:
@@ -77,11 +98,13 @@ def _step(index: int, entry: object) -> TrajectoryStep:
     if not is_object_dict(entry):
         raise AgyInterfaceError(f"trajectory step {index} is not an object")
     kind = entry.get("type")
+    status = entry.get("status")
     user_input = entry.get("userInput")
     client_id = user_input.get("clientMessageId") if is_object_dict(user_input) else None
     return TrajectoryStep(
         index=index,
         kind=kind if isinstance(kind, str) else "",
+        status=status if isinstance(status, str) else "",
         client_message_id=client_id if isinstance(client_id, str) and client_id else None,
     )
 

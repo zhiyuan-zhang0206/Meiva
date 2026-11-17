@@ -68,8 +68,8 @@ TRAJECTORY_POLL_SECONDS = 0.5
 # One `agy` conversation as a turn engine. Same three boundaries as the Claude bridge — ordered
 # inbound, one outbound stream, an assertable cancel — with one harness difference that shapes the
 # whole file: an interrupt kills the `agy` process. `interrupt()` therefore retires the transport,
-# as does an acknowledged turn whose trajectory is IDLE before stdout reports its result. The next
-# turn respawns with `--conversation`, so the transcript survives even though the process does not.
+# as does an acknowledged turn whose trajectory is confirmed settled before stdout reports its result.
+# The next turn respawns with `--conversation`, so the transcript survives even though the process does not.
 # meiva:link base/lm/harness/antigravity/docs/antigravity.md
 class AgySession(BaseHarnessSession[AntigravityConfig]):
     harness = "antigravity"
@@ -111,7 +111,12 @@ class AgySession(BaseHarnessSession[AntigravityConfig]):
         self._consumed = 0
         self._floor = 0
         self._phantom: PhantomTurn | None = None
-        self._acked_start = False
+        # meiva:note
+        # ACK2 belongs to one ticket and names the minimum trajectory size that already reached
+        # stdout. Keeping both facts together makes the evidence safe to compare across awaits and
+        # across the task that begins the next turn.
+        # meiva:link base/lm/harness/antigravity/docs/antigravity.md
+        self._start_ack: tuple[ActiveTurn, int] | None = None
         self._last_turn: str | None = None
         self._schedules = Schedules()
         self._subagents = SubagentReader(home)
@@ -172,9 +177,10 @@ class AgySession(BaseHarnessSession[AntigravityConfig]):
     # (`GetCascadeTrajectory`): a running one takes the input through `SendUserCascadeMessage`
     # carrying our `clientMessageId`; an idle one must not be sent to that way, because agy answers 200
     # and runs a turn that stdout never reports, so the input starts a turn on stdin instead, or waits
-    # (a rejection, so the caller hands it over again) when our own acknowledged turn has finished but
-    # its result is not yet read. In that last state the trajectory is the terminal authority: the old
-    # ticket is completed from its streamed output and its process is retired before another run retries.
+    # (a rejection, so the caller hands it over again) when our own acknowledged turn may have finished
+    # but its result is not yet read. In that last state a causally newer, fully terminal trajectory that
+    # remains unchanged for a second poll is the recovery authority: the old ticket is completed from its
+    # streamed output and its process is retired before another run retries.
     # HTTP 200 and a stdin write are weak receipts;
     # the second acknowledgement is the user-input step: the trajectory step that carries our
     # `clientMessageId`, or for a turn started on stdin the first user-input frame on stdout. The
@@ -191,6 +197,15 @@ class AgySession(BaseHarnessSession[AntigravityConfig]):
 
     async def _deliver_one(self, entry: HarnessInput) -> None:
         transport = await self._ensure_transport()
+        ticket_at_request = self._active
+        start_ack = self._start_ack
+        acknowledged_steps = (
+            start_ack[1]
+            if ticket_at_request is not None
+            and start_ack is not None
+            and start_ack[0] is ticket_at_request
+            else None
+        )
         snapshot_ = await transport.trajectory() if self._session_id else None
         ticket = self._active
         decided = route(
@@ -203,11 +218,23 @@ class AgySession(BaseHarnessSession[AntigravityConfig]):
         if decided is Route.QUEUE:
             self._apply(
                 self._ledger.rejected(
-                    entry.key, "the running turn has finished; hand the input over again"
+                    entry.key, "the active turn is not accepting input; hand the input over again"
                 )
             )
-            if ticket is not None and self._acked_start:
-                await self._retire_finished_turn(transport, ticket)
+            if (
+                ticket_at_request is not None
+                and acknowledged_steps is not None
+                and ticket is ticket_at_request
+                and snapshot_ is not None
+                and snapshot_.is_settled(minimum_steps=acknowledged_steps)
+            ):
+                await self._retire_if_still_settled(
+                    transport,
+                    ticket_at_request,
+                    start_ack,
+                    snapshot_,
+                    acknowledged_steps,
+                )
             return
         if entry.images:
             self._start_with_images(entry)
@@ -215,13 +242,38 @@ class AgySession(BaseHarnessSession[AntigravityConfig]):
         _ = self._start_input_turn(entry)
 
     # meiva:note
-    # An IDLE trajectory after this ticket entered the conversation is the provider's terminal fact.
-    # Usually stdout's `result` follows and closes the ticket. If a new input observes the gap, keeping
-    # the old process lets a missing result own `_active` forever; every caller then rejects and retries
-    # against that dead turn. Detach first so late frames cannot acquire the next ticket, finish from the
-    # output already streamed, and retire the process. The rejected input remains the next run's work.
-    # A ticket that has not reached ACK2 is deliberately excluded: IDLE may then mean stdin has not begun.
+    # Top-level IDLE alone is not a terminal fact: agy 1.5.9 reports it while a background command's
+    # trajectory step is still RUNNING, then resumes the same turn. Retirement therefore needs one
+    # unchanged confirmation whose every step is terminal, covers the ACK2 step count, and still belongs
+    # to the same ticket, acknowledgement and transport. Usually stdout's `result` wins that grace period.
+    # If it is missing, detach first so late frames cannot acquire the next ticket, finish from the output
+    # already streamed, and retire the process. The rejected input remains the next run's work.
     # meiva:link base/lm/harness/antigravity/docs/antigravity.md
+    async def _retire_if_still_settled(
+        self,
+        transport: AgyTransport,
+        ticket: ActiveTurn,
+        start_ack: tuple[ActiveTurn, int] | None,
+        snapshot_: Trajectory,
+        acknowledged_steps: int,
+    ) -> None:
+        await self._clock.asleep(TRAJECTORY_POLL_SECONDS)
+        if (
+            self._transport is not transport
+            or self._active is not ticket
+            or self._start_ack is not start_ack
+        ):
+            return
+        confirmation = await transport.trajectory()
+        if (
+            self._transport is transport
+            and self._active is ticket
+            and self._start_ack is start_ack
+            and confirmation == snapshot_
+            and confirmation.is_settled(minimum_steps=acknowledged_steps)
+        ):
+            await self._retire_finished_turn(transport, ticket)
+
     async def _retire_finished_turn(self, transport: AgyTransport, ticket: ActiveTurn) -> None:
         if self._transport is not transport or self._active is not ticket:
             return
@@ -231,7 +283,7 @@ class AgySession(BaseHarnessSession[AntigravityConfig]):
         self._lose_schedules()
         self._finish_from_trajectory(ticket)
         logger.warning(
-            "agent {agent_id}: agy was idle before the active turn's result; retired generation "
+            "agent {agent_id}: agy trajectory settled before the active turn's result; retired generation "
             "{generation}",
             event="harness_turn_finished_without_result",
             agent_id=self.agent_id,
@@ -259,7 +311,7 @@ class AgySession(BaseHarnessSession[AntigravityConfig]):
                 subtype="unknown",
                 is_error=False,
                 interrupted=False,
-                stop_reason="trajectory idle before result",
+                stop_reason="trajectory settled before result",
                 num_turns=max(len(steps), 1),
                 duration_ms=duration_ms,
                 usage=usage,
@@ -394,7 +446,7 @@ class AgySession(BaseHarnessSession[AntigravityConfig]):
         ticket.started_at = self._monotonic()
         self._step_text = {}
         self._turn_steps = []
-        self._acked_start = False
+        self._start_ack = None
         self._last_turn = ticket.turn_id
         key = ticket.input_key
         if self._ledger.phase(key) in (None, InputPhase.REJECTED, InputPhase.LOST):
@@ -637,9 +689,9 @@ class AgySession(BaseHarnessSession[AntigravityConfig]):
     # the write is ours; a CLI that prints no user-input frame is acknowledged by the first activity of
     # the turn instead.
     def _ack_start(self, ticket: ActiveTurn) -> None:
-        if self._acked_start:
+        if self._start_ack is not None and self._start_ack[0] is ticket:
             return
-        self._acked_start = True
+        self._start_ack = (ticket, self._consumed)
         self._apply(self._ledger.in_context(ticket.input_key, ticket.turn_id))
 
     def _accumulate(self, update: dict[str, object]) -> None:
@@ -686,9 +738,7 @@ class AgySession(BaseHarnessSession[AntigravityConfig]):
         self._unsolicited(UnsolicitedOutput(source="result", text=fields.text.strip()))
 
     def _handle_result(self, payload: object, ticket: ActiveTurn) -> None:
-        if not self._acked_start:
-            self._acked_start = True
-            self._apply(self._ledger.in_context(ticket.input_key, ticket.turn_id))
+        self._ack_start(ticket)
         fields = parse_result(payload if is_object_dict(payload) else {}, home=self._home)
         self._show_subagents(ticket.turn_id)
         text = "\n".join(ticket.parts).strip() or self._flush_step_text() or fields.text.strip()
