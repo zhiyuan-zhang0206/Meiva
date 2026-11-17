@@ -2508,6 +2508,11 @@ export interface components {
             label: string | null;
             machine: string;
             supports_vision: boolean | null;
+            llm_model?: string | null;
+            reasoning_effort?: string | null;
+            config_overlay?: {
+                [key: string]: unknown;
+            } | null;
             liveness_state: components["schemas"]["LivenessState"];
             last_probe_at: string | null;
             last_launch_attempt_id?: string | null;
