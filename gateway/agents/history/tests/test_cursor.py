@@ -3,7 +3,7 @@
 
 import pytest
 
-from gateway.agents.history.cursor import (
+from gateway.message_admission.cursor import (
     MAX_CURSOR_LENGTH,
     TimelineCursor,
     item_sort_key,

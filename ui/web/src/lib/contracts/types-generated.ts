@@ -2345,6 +2345,7 @@ export interface components {
             directory: string;
             files: components["schemas"]["Object"][];
             status_url: string;
+            quote?: components["schemas"]["Quote"] | null;
         };
         AgentActivity: {
             active_seconds: number;
@@ -2458,6 +2459,7 @@ export interface components {
             content: string;
             source: string;
             completion_notice: boolean;
+            quote?: components["schemas"]["Quote"] | null;
         };
         AgentMessagesResponse: {
             messages: {
@@ -2890,6 +2892,7 @@ export interface components {
             reason: string | null;
             directory: string;
             message_text: string;
+            quote?: components["schemas"]["Quote"] | null;
             files: components["schemas"]["Object"][];
             inbound_id: number | null;
             source: components["schemas"]["UnitIdentity"];
@@ -3508,6 +3511,16 @@ export interface components {
         QuestionsFeed: {
             awaiting: components["schemas"]["QuestionItem"][];
         };
+        Quote: {
+            source_agent_id: number;
+            source_item_id: string;
+            source_message_id?: string | null;
+            source_inbound_id?: number | null;
+            source_block_idx?: number | null;
+            author: string;
+            created_at?: string | null;
+            text: string;
+        };
         RebuildProgressOut: {
             id: number;
             status: "pending" | "running" | "done" | "failed";
@@ -4121,6 +4134,7 @@ export interface components {
         };
         TimelineItem: {
             item_id: string;
+            quote?: components["schemas"]["Quote"] | null;
             activity_pending?: boolean | null;
             kind: "inbound_chat" | "inbound_compact_summary" | "inbound_compact_request" | "attach" | "agent_chat" | "agent_code" | "agent_reasoning" | "code_output" | "system_prompt" | "system_marker";
             source?: string | null;
@@ -4236,6 +4250,7 @@ export interface components {
         UploadSendRequest: {
             file_ids: string[];
             text: string;
+            quote?: components["schemas"]["Quote"] | null;
         };
         UserDeliveryMode: "naive" | "prefix" | "sdk";
         UserMessage: {

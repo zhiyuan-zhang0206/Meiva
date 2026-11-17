@@ -22,6 +22,7 @@ from base.agents.messages.kwargs import (
     kwargs_read_time,
     read_meiva_kwargs,
 )
+from base.agents.messages.quote import Quote
 from base.agents.messages.reply_intent import resolve_agent_reply
 from base.agents.messages.timestamp_policy import TimestampPolicy
 from base.agents.sdk.tally import SdkCall, sdk_calls_by_tool_call_id
@@ -227,7 +228,8 @@ def _inbound_item(
         # A system source's body sits inside the envelope's note tags; the card shows the
         # text, not the framing (the source metadata classifies it).
         # meiva:link agent/messages/docs/message-format.md
-        payload=_inbound_payload(raw_content, kwargs),
+        payload=kwargs.get("meiva_quote_body", _inbound_payload(raw_content, kwargs)),
+        quote=Quote.model_validate(kwargs["meiva_quote"]) if "meiva_quote" in kwargs else None,
         created_at=kwargs_read_time(kwargs),
         inbound_id=embedded_id,
         images=images if images else None,

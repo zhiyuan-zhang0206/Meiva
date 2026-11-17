@@ -25,6 +25,7 @@ from base.agents.messages.inbound_images import (
     inbound_upload_files,
     parse_upload_url,
 )
+from base.agents.messages.quote import payload_quote, quoted_context
 from base.agents.messages.timestamp_policy import TimestampPolicy
 from base.agents.upload_delivery.paths import UploadClient, fetch_upload_b64
 from base.log import logger
@@ -182,7 +183,7 @@ def _build_chat_inbound_with_uploads(
 #     deployment where the upload lives on the gateway not this runner) degrades to
 #     a "[image unavailable]" text note rather than crashing the claim — the miss
 #     is logged, the rest of the message still delivers.
-def build_chat_inbound(
+def _build_chat_inbound(
     item: ClaimedInbound,
     *,
     picked_up_at: datetime,
@@ -241,6 +242,7 @@ def build_chat_inbound(
             )
             content.append({"type": "text", "text": f"[image {name} unavailable]"})
             continue
+        # meiva:note
         # Use standard image_url format (data URI) so the block is
         # decodable by Claude, Gemini, and GPT providers alike.
         # Anthropic-native {"type":"image","source":{...}} only works
@@ -257,3 +259,27 @@ def build_chat_inbound(
         times=InboundTimes(arrived_at=item.created_at, picked_up_at=picked_up_at),
         image_urls=image_urls,
     )
+
+
+def build_chat_inbound(
+    item: ClaimedInbound,
+    *,
+    picked_up_at: datetime,
+    envelope_inputs: TimestampPolicy,
+    expand_command: Callable[[str], str],
+    gateway: Callable[[], UploadClient],
+) -> HumanMessage:
+    # meiva:note
+    # Render quote context after command expansion so quoted commands stay inert.
+    quote = payload_quote(item.payload)
+    message = _build_chat_inbound(
+        item,
+        picked_up_at=picked_up_at,
+        envelope_inputs=envelope_inputs,
+        expand_command=lambda text: quoted_context(expand_command(text), quote),
+        gateway=gateway,
+    )
+    if quote is not None:
+        message.additional_kwargs["meiva_quote"] = quote.model_dump()
+        message.additional_kwargs["meiva_quote_body"] = item.content
+    return message

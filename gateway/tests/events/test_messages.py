@@ -286,3 +286,242 @@ class TestMessageContentContract:
         content, payload = _payload_row(db_conn, tid)
         assert content == "hi"
         assert payload is None
+
+
+def test_quote_send_persists_snapshot_and_reconciles_after_source_changes(
+    db_conn: psycopg.Connection, *, machine_identity: MachineIdentityReader
+) -> None:
+    from langchain_core.messages import AIMessage
+
+    from base.config import settings
+    from gateway.tests.support.checkpoints.stored import put_checkpoint
+
+    tid = _seed_agent(db_conn, local_machine=machine_identity)
+    put_checkpoint(
+        settings.data_plane.db_url,
+        tid,
+        [AIMessage(id="quote-source", content="**rendered** `code`")],
+        version="1",
+    )
+    quote_body: dict[str, object] = {
+        "source_agent_id": tid,
+        "source_item_id": "0.0",
+        "source_message_id": "quote-source",
+        "author": "Agent",
+        "text": "rendered code",
+    }
+    body: dict[str, object] = {"content": "Explain this", "source": "user", "quote": quote_body}
+    headers = keyed_headers("quote-context-test")
+    with gateway_test_client(machine=machine_identity) as client:
+        response = client.post(f"/api/agents/{tid}/messages", json=body, headers=headers)
+        assert response.status_code == 201, response.text
+        inbound = response.json()["inbound_id"]
+        row = db_conn.execute(
+            "SELECT content, payload FROM inbound_messages WHERE id=%s", (inbound,)
+        ).fetchone()
+        assert row is not None
+        assert row[0] == body["content"]
+        assert row[1]["quote"]["text"] == "rendered code"
+        put_checkpoint(
+            settings.data_plane.db_url,
+            tid,
+            [AIMessage(id="replacement", content="replacement")],
+            version="2",
+        )
+        replay = client.post(f"/api/agents/{tid}/messages/reconcile", json=body, headers=headers)
+        assert replay.status_code == 200, replay.text
+        assert replay.json()["inbound_id"] == inbound
+        changed = {**body, "quote": {**quote_body, "text": "different selection"}}
+        conflict = client.post(
+            f"/api/agents/{tid}/messages/reconcile", json=changed, headers=headers
+        )
+        assert conflict.status_code == 409
+        missing = client.post(f"/api/agents/{tid}/messages", json=body)
+        assert missing.status_code == 422
+        foreign = {**body, "quote": {**quote_body, "source_agent_id": tid + 1}}
+        denied = client.post(f"/api/agents/{tid}/messages", json=foreign)
+        assert denied.status_code == 422
+
+
+def test_quote_accepts_exact_retained_native_segment(
+    db_conn: psycopg.Connection, *, machine_identity: MachineIdentityReader
+) -> None:
+    from langchain_core.messages import AIMessage, SystemMessage
+
+    from base.config import settings
+    from gateway.tests.support.checkpoints.stored import put_checkpoint
+
+    tid = _seed_agent(db_conn, local_machine=machine_identity)
+    boundary = put_checkpoint(
+        settings.data_plane.db_url,
+        tid,
+        [SystemMessage(content="system"), AIMessage(id="retained-source", content="old **text**")],
+        version="1",
+        boundary=True,
+    )
+    put_checkpoint(
+        settings.data_plane.db_url, tid, [AIMessage(id="current", content="current")], version="2"
+    )
+    with gateway_test_client(machine=machine_identity) as client:
+        response = client.post(
+            f"/api/agents/{tid}/messages",
+            json={
+                "content": "Explain old text",
+                "source": "user",
+                "quote": {
+                    "source_agent_id": tid,
+                    "source_item_id": f"s1.{boundary}.0.0",
+                    "source_message_id": "retained-source",
+                    "author": "Agent",
+                    "text": "old text",
+                },
+            },
+        )
+    assert response.status_code == 201, response.text
+
+
+def test_quote_accepts_readable_marker_with_exact_stable_identity(
+    db_conn: psycopg.Connection, *, machine_identity: MachineIdentityReader
+) -> None:
+    from langchain_core.messages import HumanMessage
+
+    from base.config import settings
+    from gateway.tests.support.checkpoints.stored import put_checkpoint
+
+    tid = _seed_agent(db_conn, local_machine=machine_identity)
+    _ = put_checkpoint(
+        settings.data_plane.db_url,
+        tid,
+        [
+            HumanMessage(
+                id="notification-source",
+                content="<system_note>Connection failed: retry pending.</system_note>",
+                additional_kwargs={"meiva_msg_type": "system_note", "meiva_note_tag": "task"},
+            )
+        ],
+        version="1",
+    )
+    quote: dict[str, object] = {
+        "source_agent_id": tid,
+        "source_item_id": "0.0",
+        "source_message_id": "notification-source",
+        "source_block_idx": 0,
+        "author": "Notification",
+        "text": "retry pending.",
+    }
+    with gateway_test_client(machine=machine_identity) as client:
+        timeline = client.get(f"/api/agents/{tid}/timeline").json()["items"]
+        marker = next(item for item in timeline if item["item_id"] == "0.0")
+        assert marker["kind"] == "system_marker"
+        assert marker["source_message_id"] == quote["source_message_id"]
+        response = client.post(
+            f"/api/agents/{tid}/messages",
+            json={"content": "Explain retry", "source": "user", "quote": quote},
+        )
+        assert response.status_code == 201, response.text
+        forged = {**quote, "source_message_id": "another-notification"}
+        denied = client.post(
+            f"/api/agents/{tid}/messages",
+            json={"content": "Explain retry", "source": "user", "quote": forged},
+        )
+        assert denied.status_code == 422
+        _ = put_checkpoint(
+            settings.data_plane.db_url,
+            tid,
+            [
+                HumanMessage(
+                    content="A legacy marker without a durable identity",
+                    additional_kwargs={"meiva_msg_type": "system_note", "meiva_note_tag": "task"},
+                )
+            ],
+            version="2",
+        )
+        anonymous = {**quote, "source_message_id": None, "source_block_idx": None}
+        unavailable = client.post(
+            f"/api/agents/{tid}/messages",
+            json={"content": "Explain retry", "source": "user", "quote": anonymous},
+        )
+        assert unavailable.status_code == 422
+
+
+def test_new_quote_post_rejects_eval_isolated_result_reader(
+    db_conn: psycopg.Connection, *, machine_identity: MachineIdentityReader
+) -> None:
+    tid = _seed_agent(db_conn, local_machine=machine_identity)
+    caller = _seed_agent(db_conn, local_machine=machine_identity)
+    _ = db_conn.execute(
+        "UPDATE agents_meta SET config_overlay = %s::jsonb WHERE id = %s",
+        ('{"eval_isolation": true}', caller),
+    )
+    db_conn.commit()
+    with gateway_test_client(machine=machine_identity) as client:
+        response = client.post(
+            f"/api/agents/{tid}/messages",
+            params={"caller": f"agent:{caller}"},
+            json={
+                "content": "Explain",
+                "source": "user",
+                "quote": {
+                    "source_agent_id": tid,
+                    "source_item_id": "0.0",
+                    "author": "Agent",
+                    "text": "selection",
+                },
+            },
+        )
+    assert response.status_code == 403, response.text
+    assert "eval-isolated" in response.json()["detail"]
+    assert _pending_rows(db_conn, tid) == []
+
+
+def test_quote_post_rejects_unretained_and_out_of_depth_checkpoints(
+    db_conn: psycopg.Connection, *, machine_identity: MachineIdentityReader
+) -> None:
+    from langchain_core.messages import AIMessage, SystemMessage
+
+    from base.config import settings
+    from gateway.tests.auth.gateway_config import reconfigure
+    from gateway.tests.support.checkpoints.stored import put_checkpoint
+
+    tid = _seed_agent(db_conn, local_machine=machine_identity)
+    older = put_checkpoint(
+        settings.data_plane.db_url,
+        tid,
+        [SystemMessage(content="system"), AIMessage(id="old-source", content="old")],
+        version="1",
+        boundary=True,
+    )
+    _ = put_checkpoint(
+        settings.data_plane.db_url,
+        tid,
+        [SystemMessage(content="system"), AIMessage(id="newer-source", content="newer")],
+        version="2",
+        boundary=True,
+    )
+    live = put_checkpoint(
+        settings.data_plane.db_url, tid, [AIMessage(id="live-source", content="live")], version="3"
+    )
+    with gateway_test_client(machine=machine_identity) as client:
+        _ = reconfigure(client, timeline_compact_history=1)
+        for source_item_id, source_message_id in [
+            (f"s2.{older}.0.0", "old-source"),
+            (f"s1.{live}.0.0", "live-source"),
+            ("s1.nonexistent-checkpoint.0.0", "missing"),
+        ]:
+            response = client.post(
+                f"/api/agents/{tid}/messages",
+                json={
+                    "content": "Explain",
+                    "source": "user",
+                    "quote": {
+                        "source_agent_id": tid,
+                        "source_item_id": source_item_id,
+                        "source_message_id": source_message_id,
+                        "author": "Agent",
+                        "text": "selection",
+                    },
+                },
+            )
+            assert response.status_code == 422, response.text
+            assert "Retained quote source is no longer available" in response.json()["detail"]
+    assert _pending_rows(db_conn, tid) == []

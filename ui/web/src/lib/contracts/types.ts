@@ -474,3 +474,5 @@ export type {
 
 export type ClusterPluginsView = Schemas["ClusterPluginsView"];
 export type ClusterPluginSaved = Schemas["ClusterPluginSaved"];
+
+export { type Quote, isQuote } from "./types-quote";

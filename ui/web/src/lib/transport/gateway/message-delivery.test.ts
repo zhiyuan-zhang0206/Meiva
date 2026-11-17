@@ -147,3 +147,17 @@ describe("sendMessage", () => {
     expect(gateway.requests.filter((request) => !isReconcile(request))).toHaveLength(1);
   });
 });
+
+
+it("reconciles the exact selected quote snapshot with the same key", async () => {
+  const quote = {source_agent_id:3, source_item_id:"7.0", author:"Agent #3", created_at:"2026-11-17T09:00:00Z", text:"selected context"};
+  answer = (request) => isReconcile(request) ? RECEIPT : {kind:"hang"};
+  const delivery = rig.api.sendMessage(3,"question","quote-key",quote);
+  await vi.waitFor(() => expect(gateway.requests).toHaveLength(1));
+  await vi.advanceTimersByTimeAsync(10_000);
+  await expect(delivery).resolves.toEqual({status:"running",inbound_id:77});
+  expect(gateway.requests).toHaveLength(2);
+  expect(gateway.requests[0].body).toBe(gateway.requests[1].body);
+  const payload: unknown = JSON.parse(gateway.requests[0].body);
+  expect(payload).toMatchObject({quote});
+});

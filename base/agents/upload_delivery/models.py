@@ -8,6 +8,7 @@ from typing import Literal, Self
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
+from base.agents.messages.quote import Quote
 from base.agents.upload_delivery.naming import (
     MAX_NAME_BYTES,
     SEND_DIRECTORY_PATTERN,
@@ -88,6 +89,7 @@ class Manifest(Record):
 
 
 class FrozenMessage(Record):
+    quote: Quote | None = None
     text: str = Field(max_length=1_048_576)
     source: Literal["user"]
 
@@ -136,6 +138,7 @@ class Acceptance(Record):
     directory: str
     files: list[Object]
     status_url: str
+    quote: Quote | None = None
 
 
 class DeliveryStatus(Record):
@@ -144,6 +147,7 @@ class DeliveryStatus(Record):
     reason: str | None
     directory: str
     message_text: str
+    quote: Quote | None = None
     files: list[Object]
     inbound_id: int | None
     source: UnitIdentity
@@ -160,9 +164,15 @@ def current_unit(
     return UnitIdentity(machine=local_machine, home=str(home.resolve()))
 
 
-def request_hash(agent_id: int, file_ids: list[str], text: str) -> str:
+def request_hash(agent_id: int, file_ids: list[str], text: str, quote: Quote | None = None) -> str:
     return hashlib.sha256(
-        json.dumps([agent_id, file_ids, text], ensure_ascii=True, separators=(",", ":")).encode()
+        json.dumps(
+            [agent_id, file_ids, text]
+            if quote is None
+            else [agent_id, file_ids, text, quote.model_dump()],
+            ensure_ascii=True,
+            separators=(",", ":"),
+        ).encode()
     ).hexdigest()
 
 

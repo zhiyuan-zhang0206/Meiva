@@ -22,12 +22,17 @@ afterEach(() => {
 describe("marker data-testid hooks (Task #1018)", () => {
   it("unrecognized alarm renders data-testid=marker-unrecognized", () => {
     render(<EphemeralSystemMarker source={null} payload="future_kind_not_adapted" />);
-    expect(screen.getByTestId("marker-unrecognized")).toBeTruthy();
+    const marker = screen.getByTestId("marker-unrecognized");
+    expect(marker).toBeTruthy();
+    expect(marker.hasAttribute("data-quote-body")).toBe(false);
+    expect(marker.querySelector("[data-quote-body]")?.tagName).toBe("PRE");
+    expect(marker.querySelector("[data-quote-body]")?.textContent).toBe("future_kind_not_adapted");
+    expect(screen.getByText("source = null").closest("[data-quote-body]")).toBeNull();
   });
 
   it("error marker renders data-testid=marker-error", () => {
     render(<EphemeralSystemMarker source={null} payload="error:redis disconnected" />);
-    expect(screen.getByTestId("marker-error")).toBeTruthy();
+    expect(screen.getByTestId("marker-error").hasAttribute("data-quote-body")).toBe(true);
     expect(screen.queryByTestId("marker-unrecognized")).toBeNull();
   });
 

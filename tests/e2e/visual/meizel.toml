@@ -1,4 +1,5 @@
 [uses]
 "test_layout_invariants.py" = ["stubbed_home.py"]
+"test_quote_selection.py" = ["stubbed_home.py"]
 "test_work_block_chrome.py" = ["stubbed_home.py"]
 "test_markdown_math_layout.py" = ["stubbed_home.py"]

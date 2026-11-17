@@ -3,6 +3,9 @@
 import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useReducer, useRef, useState } from "react";
 import { useTranslations } from "next-intl";
 
+import type { Quote } from "@/lib/contracts/types";
+import { QuoteNavigation, QuoteSelection, QuoteTarget } from "./view/quote/quote";
+
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { parseItemIdParts } from "@/lib/timeline/timeline";
 import type { OlderLoadOrigin } from "@/lib/timeline/use-timeline";
@@ -46,6 +49,7 @@ const REVEAL_TOP_GAP_PX = 12;
 const READING_TOP_PX = BAR_HEIGHT_PX + REVEAL_TOP_GAP_PX;
 
 interface Props {
+  onQuote?: (quote: Quote) => void;
   items: BackendTimelineItem[];
   compactBuffer?: CompactTransitionBuffer | null;
   threadKey?: string;
@@ -100,8 +104,13 @@ export const TimelineView = memo(function TimelineView({
   loading = false,
   maxWidthCss,
   reveal = null,
+  onQuote,
 }: Props) {
   const t = useTranslations("timeline");
+  const [quoteRequest, setQuoteRequest] = useState<{ quote: Quote; pages: number } | null>(null);
+  const [quoteStatus, setQuoteStatus] = useState<string | null>(null);
+  const [quoteReveal, setQuoteReveal] = useState<{ itemId: string; token: number } | null>(null);
+  const effectiveReveal = quoteReveal ?? reveal;
   const bufferedItems = useMemo(
     () => compactBuffer?.rows.map((row) => row.item) ?? [],
     [compactBuffer],
@@ -472,8 +481,8 @@ export const TimelineView = memo(function TimelineView({
 
   const [, applyReveal] = useReducer((count: number) => count + 1, 0);
   useLayoutEffect(() => {
-    if (reveal === null || threadKey === undefined || hasSavedPosition) return;
-    const item = canonicalItemsRef.current.find((candidate) => candidate.item_id === reveal.itemId);
+    if (effectiveReveal === null || threadKey === undefined || (hasSavedPosition && quoteReveal === null)) return;
+    const item = canonicalItemsRef.current.find((candidate) => candidate.item_id === effectiveReveal.itemId);
     if (item === undefined) return;
     cancelBookmark();
     pendingRestoreRef.current = {
@@ -489,7 +498,7 @@ export const TimelineView = memo(function TimelineView({
     holdRestoredPositionRef.current = true;
     restoreProbeRef.current = { height: -1, passes: 0 };
     applyReveal();
-  }, [reveal, threadKey, hasSavedPosition, cancelBookmark, restoreProbeRef]);
+  }, [effectiveReveal, quoteReveal, threadKey, hasSavedPosition, cancelBookmark, restoreProbeRef]);
 
   useThreadPin({
     threadKey,
@@ -610,8 +619,43 @@ export const TimelineView = memo(function TimelineView({
     });
   }, [cancelBookmark, cancelPendingJump, controller, groupEntries, jumpToLatestHuman, latestTarget, maintainSendAnchor, measureAtBottom, pinToBottom, tailHeight, trimFollowing, virtualRange.end]);
 
+  const navigateQuote = useCallback((quote: Quote) => {
+    if (!quote.source_message_id && quote.source_inbound_id == null) {
+      setQuoteStatus(t("quoteUnavailable"));
+      return;
+    }
+    setQuoteStatus(null);
+    setQuoteRequest({ quote, pages: 0 });
+  }, [t]);
+  useEffect(() => {
+    if (!quoteRequest) return;
+    const { quote, pages } = quoteRequest;
+    const item = canonicalItems.find((candidate) =>
+      quote.source_agent_id === Number(threadKey) &&
+      (quote.source_message_id ? candidate.source_message_id === quote.source_message_id :
+        quote.source_inbound_id != null && (candidate.source_inbound_id ?? candidate.inbound_id) === quote.source_inbound_id) &&
+      (quote.source_block_idx == null || candidate.source_block_idx === quote.source_block_idx));
+    if (item) {
+      const entry = groupEntries.find(({ group }) => group.kind === "single" ? group.member.item === item : group.members.some((member) => member.item === item));
+      if (entry && !entry.runExpanded) toggleTurn(entry.groupKey, false);
+      toggleExpanded(item.item_id, false);
+      setQuoteReveal((previous) => ({ itemId: item.item_id, token: (previous?.token ?? 0) + 1 }));
+      setQuoteRequest(null);
+    } else if (!loadingOlder && hasMoreOlder && onLoadOlder && pages < 3) {
+      setQuoteRequest({ quote, pages: pages + 1 });
+      onLoadOlder("reader");
+    } else if (!loadingOlder) {
+      setQuoteStatus(t("quoteUnavailable"));
+      setQuoteRequest(null);
+    }
+  }, [quoteRequest, canonicalItems, threadKey, groupEntries, toggleTurn, toggleExpanded, loadingOlder, hasMoreOlder, onLoadOlder, t]);
+
   return (
+    <QuoteNavigation.Provider value={navigateQuote}>
+    <QuoteTarget.Provider value={quoteReveal}>
     <div ref={wrapperRef} className={cn("relative", FLEX_1, MIN_H_0, OVERFLOW_HIDDEN)}>
+      <QuoteSelection scope={wrapperRef} items={items} agentId={Number(threadKey)} onQuote={onQuote} />
+      {quoteStatus ? <div role="status" className="absolute bottom-12 left-4 z-40 rounded border border-border bg-background px-3 py-2 text-sm">{quoteStatus}</div> : null}
       <LoadOlderSpinner loadingOlder={readerLoadingOlder} />
       {hasMoreOlder && onLoadOlder ? <LoadOlderKeyboardButton loading={loadingOlder} onClick={pullOlderPage} /> : null}
       <ColdLoadSpinner show={loading && items.length === 0} />
@@ -664,5 +708,7 @@ export const TimelineView = memo(function TimelineView({
       </ScrollArea>
       <ScrollToBottomButton atBottom={atBottom} onClick={handleScrollToBottom} />
     </div>
+    </QuoteTarget.Provider>
+    </QuoteNavigation.Provider>
   );
 });

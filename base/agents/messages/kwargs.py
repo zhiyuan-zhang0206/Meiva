@@ -95,6 +95,8 @@ class MeivaUsage(TypedDict, total=False):
 class MeivaMessageKwargs(TypedDict, total=False):
     meiva_ephemeral_message_id: bool
     meiva_msg_type: str
+    meiva_quote: dict[str, object]
+    meiva_quote_body: str
     meiva_source: str
     meiva_inbound_id: int
     meiva_inbound_body_start: int

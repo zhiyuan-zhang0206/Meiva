@@ -126,7 +126,7 @@ describe("send hands the timeline its own message", () => {
     wrap(<HomePage />);
     fireEvent.click(screen.getByTestId("composer-send"));
     await waitFor(() =>
-      expect(transport.sendMessage).toHaveBeenCalledWith(5, "hi", expect.any(String)),
+      expect(transport.sendMessage).toHaveBeenCalledWith(5, "hi", expect.any(String), undefined),
     );
     await act(() => Promise.resolve());
     expect(hooksState.requestSendAnchor).toHaveBeenCalledWith(11);
@@ -192,6 +192,7 @@ describe("multi-command dispatch", () => {
       5,
       "/compact /update",
       expect.any(String),
+      undefined,
     );
     await act(() => Promise.resolve());
     expect(hooksState.requestSendAnchor).toHaveBeenCalledTimes(1);
@@ -206,6 +207,7 @@ describe("multi-command dispatch", () => {
       5,
       "/search hello world /compact",
       expect.any(String),
+      undefined,
     );
   });
   it("sends a single message for plain text (no slash prefix)", async () => {
@@ -218,6 +220,7 @@ describe("multi-command dispatch", () => {
       5,
       "plain text",
       expect.any(String),
+      undefined,
     );
   });
   it("does not ask for the tail when the send fails", async () => {

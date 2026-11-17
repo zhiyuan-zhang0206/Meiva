@@ -79,7 +79,7 @@ function UnknownMarkerChip({ source, payload }: { source: string | null; payload
       <div className="text-[11px] font-mono opacity-70 mb-1">
         source = {source === null ? "null" : JSON.stringify(source)}
       </div>
-      <pre className="whitespace-pre-wrap [overflow-wrap:anywhere] font-mono text-[12px] leading-relaxed m-0">{payload}</pre>
+      <pre data-quote-body className="whitespace-pre-wrap [overflow-wrap:anywhere] font-mono text-[12px] leading-relaxed m-0">{payload}</pre>
     </div>
   );
 }
@@ -87,6 +87,7 @@ function UnknownMarkerChip({ source, payload }: { source: string | null; payload
 function EphemeralMarker({ label, isError = false }: { label: string; isError?: boolean }) {
   return (
     <div
+      data-quote-body
       data-testid={isError ? "marker-error" : undefined}
       className={cn("font-mono text-xs", isError ? "text-destructive" : "text-muted-foreground")}
     >
