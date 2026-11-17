@@ -1,8 +1,7 @@
-# Schedule mutation receipts and revision convergence
+# Schedule mutation receipts
 
-This document owns the compatibility `daemon` process-convergence protocol.
-Declarative schedules reuse mutation receipts but change timing state directly;
-they have no PTY revision to converge.
+Declarative mutations update durable timing and lifecycle state directly. The
+manager observes that state on its next reconcile.
 
 `PUT /api/schedules/{id}` and `POST .../start`, `.../stop`, `.../restart`
 accept an optional `Idempotency-Key` (1–128 characters). The required
@@ -15,80 +14,18 @@ client outbox is involved.
 
 ## Acceptance transaction
 
-The schedule owner reserves/locks a row in `schedule_operation_receipts`, compares
-the immutable target/body, locks the schedule, changes desired state, queues
-`schedule_sync_requests`, and saves the original response in one transaction.
-Concurrent same-key requests return that response; changed payloads return 409.
-Replay is checked before current enabled state or existence, so an old restart
-receipt cannot re-enable a schedule subsequently stopped or deleted. Receipts
-have no automatic expiry: no prune can turn a delayed retry into a new restart.
-The receipt reports durable acceptance, not script completion.
+The schedule owner reserves or locks a row in `schedule_operation_receipts`,
+compares the immutable target and body, locks the schedule, changes its durable
+state, and saves the original response in one transaction. Concurrent same-key
+requests return that response; changed payloads return 409. Replay is checked
+before current enabled state or existence, so an old restart receipt cannot
+re-enable a schedule subsequently stopped or deleted. Receipts have no automatic
+expiry. They report durable acceptance, independently of script completion.
 
-Same-value edits add no version/revision/sync. A real config/enabled change,
-built-in config resync, or explicit restart increments `desired_revision`.
-Start on a completed/error schedule also creates a new deliberate revision;
-start on an enabled nonterminal schedule and stop on a disabled row are no-ops.
-A new revision resets launch admission once, in its mutation transaction.
-Repeated consumer attempts cannot launch an already-consumed revision again.
+Same-value edits add no version. A real script or command change writes a version
+snapshot and takes effect on the next fire. Placement changes and deletion wait
+until an open run closes. Legacy queued sync requests are drained by the elected
+manager; they perform no resident-session actions.
 
-## Convergence recovery
-
-The runner command carries schedule ID and revision. The PTY owner's allocation
-metadata proves the live execution revision; its allocation generation remains a
-separate release identity checked through the existing exact-session cleanup.
-A PostgreSQL advisory transaction gives one manager ownership of a schedule's process effects, including across manager processes; conditional revision
-writes prevent it acknowledging a later desired revision. A matching live revision is adopted and marked `applied_revision`; a predecessor
-is officially reaped before replacement. Missing provenance for a versioned
-live session leaves the request queued, as does a failed reap. Compatibility
-daemon convergence has a bounded window: after ten minutes of one failure streak
-the manager records the schedule as an error, emits
-`schedule_convergence_abandoned`, consumes the request and leaves the process
-alone until a new desired revision (start, stop, restart, edit, delete)
-authorizes another attempt; the give-up is in memory, so a restarted service
-starts one new bounded streak. An in-place daemon-to-declarative migration keeps
-its sync request after the alert and continues cleanup attempts: that durable row
-is the declarative launch barrier until the old PTY gives a definitive reap or
-absence acknowledgement. Before creating a process, the manager commits
-`launch_count=1`, `applied_revision=desired_revision`, and an inspectable unknown-outcome
-error. A failed or uncertain launch consumes that revision; it is acknowledged
-without automatic replay. One failed schedule does not
-block consumption of unrelated requests.
-
-Runner admission conditionally marks the revision applied and reads its script
-only if the row remains enabled at that desired revision. A delayed obsolete
-launch executes no script. Admission occurs before user code, so a quickly
-completed process remains applied even if its manager died before recording the
-launch. Retrying an unacknowledged applied completed/error revision does not
-rerun it. A missing started process is relaunched only when its launch belonged to a
-replaced generation of the session host; any other silent death is marked error
-and is not automatically recreated, including after a manager restart. Losing a launch before script execution is an accepted cost of
-this admission rule. Explicit start/restart creates a new revision and can
-intentionally execute the script again.
-
-Reconcile also discovers pending revisions. It always reads current desired
-state rather than replaying an old request's enabled/config payload. Maintenance
-holds defer execution; stops/deletes retain exact PTY cleanup and close the
-in-progress run rows of the process they reaped (as does a launch), with no
-periodic orphan-run sweep. Deletion enqueues cleanup in the deletion transaction. The existing
-`schedules/jobs/catchup.py` at-most-once cron slot claims and accepted callback-loss
-window are unchanged.
-
-The initial-command metadata survives schedule-manager restarts while its PTY
-owner remains alive. PTY daemon restart is a process-loss boundary: it does not
-re-adopt shell sessions, and its durable exact-birth ledger sweeps old identities.
-A live versioned session with unavailable metadata remains uncertain/queued;
-verified process loss does not authorize script replay. An operator must
-explicitly request a new revision to execute again.
-The optional list metadata is opt-in, preserving the old client's response
-shape. An older PTY service cannot supply this evidence and must be upgraded
-before a pending versioned live session can be safely adopted.
-
-Schedule resource creation has separate fingerprint-only receipts; see
-[Schedule creation acceptance identities](../../routers/docs/resource-creation.md).
-
-## Host replacement
-
-A launch belongs to the generation of the session host that served it; a
-replacement host gives an enabled running schedule one relaunch without a new
-desired revision, and a silent death inside one generation stays an error. See
-[host replacement](../../../services/wake/schedule_manager/docs/host-replacement.md).
+See [router contracts](router-contracts.md) for lifecycle verbs and
+[Schedule Manager & Runner](schedules.md) for execution semantics.

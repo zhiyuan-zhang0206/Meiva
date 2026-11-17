@@ -9,6 +9,7 @@ def _row(**overrides: object) -> ScheduleRow:
     fields: dict[str, object] = {
         "id": 2,
         "name": "memory-arbiter",
+        "trigger_kind": "every",
         "command": "python schedule.py",
         "enabled": True,
         "status": "running",

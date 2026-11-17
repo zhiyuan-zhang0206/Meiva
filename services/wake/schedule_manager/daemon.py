@@ -1,10 +1,9 @@
 # meiva:note
-# Schedule manager daemon for declarative fires and compatibility sessions.
+# Schedule manager service for declarative single-round fires.
 #
 # Two resident sequential loops run under one `TaskGroup`: `reconcile` claims due
-# declarative fires and converges compatibility sessions, while `requests` consumes
-# explicit daemon convergence requests. A loop failure cancels its sibling so the
-# supervisor can restart the service; compatibility sessions survive that restart.
+# declarative fires, while `requests` acknowledges queued state changes. A loop failure cancels its sibling so the
+# supervisor can restart the service; durable run claims survive that restart.
 #
 # Runs on each schedule-capable machine from the home's own checkout. A checkout
 # that does not own the home refuses supervision because its children run that
@@ -16,7 +15,6 @@ import os
 import random
 import signal
 import sys
-import time
 from collections.abc import Callable, Mapping
 from pathlib import Path
 from typing import TypeGuard
@@ -52,13 +50,11 @@ from base.native_process.code_version import CodeVersion
 from base.native_process.loaded_commit import LoadedCommit
 from base.native_process.process_control import SYSTEM_PROCESS_CONTROL
 from base.paths import meiva_home, prod_service_checkout_error
-from base.sessions.backend import get_shell_backend
 from base.sessions.env_forwarding import forward_env_dict
 from base.telemetry.pipeline_build import build_pipeline
 from base.telemetry.process_logging import init_gateway_process
 from services.pidfile import acquire_pidfile, pidfile_holds_daemon, remove_pidfile
 from services.wake.schedule_manager import requests
-from services.wake.schedule_manager.declarative import ManagerPolicy
 from services.wake.schedule_manager.manager import POLL_INTERVAL_S, REPO_ROOT, ScheduleManager
 
 _log = logging.getLogger("services.wake.schedule_manager.daemon")
@@ -95,16 +91,6 @@ def _is_running(config: ConfigBoot, *, runtime: Path) -> bool:
     )
 
 
-def manager_policy(config: ConfigBoot) -> ManagerPolicy:
-    gateway = config.view.gateway
-    return ManagerPolicy(
-        auto_restart_max_per_window=gateway.schedule_auto_restart_max_per_window,
-        auto_restart_window_seconds=gateway.schedule_auto_restart_window_seconds,
-        recovery_gate_alert_seconds=gateway.schedule_recovery_gate_alert_seconds,
-        timezone=config.view.general.timezone,
-    )
-
-
 async def run_loops(
     pool: ConnectionPool, manager: ScheduleManager, liveness: LivenessGroup
 ) -> None:
@@ -113,12 +99,10 @@ async def run_loops(
     requests_progress = liveness.register("requests", _LIVENESS_TIMEOUT_S)
 
     async def reconcile_round() -> None:
-        await asyncio.to_thread(lambda: manager.reconcile(now=time.monotonic()))
+        await asyncio.to_thread(manager.reconcile)
 
     async def requests_round() -> None:
-        await asyncio.to_thread(
-            lambda: requests.consume_requests(pool, manager, now=time.monotonic())
-        )
+        await asyncio.to_thread(lambda: requests.consume_requests(pool, manager))
 
     async with asyncio.TaskGroup() as loops:
         loops.create_task(
@@ -252,10 +236,8 @@ async def run(
         machine = ConfiguredMachineIdentity(process_config)
         manager = ScheduleManager(
             pool,
-            backend=get_shell_backend(home=runtime.parent),
             repo_root=REPO_ROOT,
             home=runtime.parent,
-            policy=manager_policy(process_config),
             launch_env=forward_env_dict(process_config.process_environment()),
             machine_name=machine.name(),
             process_control=SYSTEM_PROCESS_CONTROL,

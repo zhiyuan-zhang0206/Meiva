@@ -1,23 +1,8 @@
 # meiva:note
-# Consume the API's sync requests.
+# Acknowledge queued schedule updates after the elected manager observes them.
 #
-# `PUT /api/schedules/{id}` (edited script / enabled flag), start, stop, restart
-# and delete all need the schedule's session converged now, not at the next
-# reconcile. The gateway does not reach into this process: it upserts a row in
-# `schedule_sync_requests` (`gateway/schedules/session_control.py`) and waits a
-# bounded time for it to disappear. This module is the consumer.
-#
-# A request is deleted only after its sync ran, and only if it is still the row
-# that was read (a newer request for the same schedule survives), so a crash
-# between the sync and the delete runs convergence again: matching persisted
-# revision/session provenance is adopted instead of kill/relaunch. A compatibility daemon request
-# that stays blocked (a session that survives its reap, unreadable launch provenance) is retried
-# for a bounded window; when the manager gives up it reports success, so the request is consumed
-# (the schedule is then an error with an alert, see ``manager.py``). A daemon-to-declarative
-# migration request is also the declarative launch barrier, so it stays queued and retryable after
-# the alert until the old PTY gives a definitive reap acknowledgement.
-#
-# Synchronous psycopg; the loop calls it through `asyncio.to_thread`.
+# Declarative launches read durable schedule state directly on each reconcile.
+# Requests left by earlier gateways can therefore be drained without PTY actions.
 
 from __future__ import annotations
 
@@ -47,8 +32,8 @@ class _QueuedRow:
 # meiva:note
 # Run the sync of every queued request, oldest first; return how many ran.
 #
-# ``now`` is the loop's monotonic reading for this pass, the clock of the manager's streak decisions.
-def consume_requests(pool: ConnectionPool, manager: ScheduleManager, *, now: float) -> int:
+# The elected manager drains requests; durable schedule state is read by reconcile.
+def consume_requests(pool: ConnectionPool, manager: ScheduleManager) -> int:
     if not manager.is_active_unit():
         return 0
     with pool.connection() as conn:
@@ -62,8 +47,6 @@ def consume_requests(pool: ConnectionPool, manager: ScheduleManager, *, now: flo
         )
     handled = 0
     for request in queued:
-        if not manager.sync_one(request.schedule_id, now=now):
-            continue  # leave held/uncertain work queued without blocking other schedules
         with write_transaction(pool) as conn:
             conn.execute(
                 "DELETE FROM schedule_sync_requests WHERE schedule_id = %s AND machine = %s AND requested_at = %s",

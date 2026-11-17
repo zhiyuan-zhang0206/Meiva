@@ -5,8 +5,7 @@
 // status, logs, run history, create/edit, and lifecycle controls.
 //
 // Backed by /api/schedules (gateway/schedules/router.py). The gateway's
-// ScheduleManager launches one non-PTY process per declarative fire while the
-// daemon compatibility bridge keeps its older session controls.
+// ScheduleManager launches one non-PTY process per declarative fire.
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {

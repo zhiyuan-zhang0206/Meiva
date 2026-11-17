@@ -1,30 +1,19 @@
 # meiva:note
-# Clients and a consumer for the schedule API's tests.
-#
-# A daemon start / stop / restart / edit / delete queues a sync request and waits for the
-# schedule-manager service to consume it. `schedule_client` shortens that wait, so a test with no
-# service answers fast; `converging` runs the real request loop over a fake session backend.
+# Gateway clients for schedule API tests.
 
 from __future__ import annotations
 
-import threading
-import time
 from collections.abc import Generator, Mapping
 from contextlib import contextmanager
 from typing import Any
-
-from psycopg_pool import ConnectionPool
 
 from gateway.tests.auth.gateway_config import (
     GatewayTestClient,
     gateway_test_client,
     gateway_test_config,
 )
-from services.wake.schedule_manager import requests
-from services.wake.schedule_manager.tests.manager_support import schedule_manager
-from services.wake.schedule_manager.tests.session_fakes import Backend
 
-__all__ = ["converging", "schedule_client"]
+__all__ = ["schedule_client"]
 
 
 # meiva:note
@@ -38,29 +27,3 @@ def schedule_client(
     )
     with gateway_test_client(config=config, **kwargs) as client:
         yield client
-
-
-# meiva:note
-# The manager's request loop, consuming requests while the test runs.
-@contextmanager
-def converging(
-    pool: ConnectionPool[Any], backend: Backend, machine: str | None = None
-) -> Generator[None]:
-    if machine is None:
-        import os
-
-        machine = os.environ.get("MEIVA_MACHINE_NAME", "gateway")
-    manager = schedule_manager(pool, backend, machine_name=machine)
-    stop = threading.Event()
-
-    def loop() -> None:
-        while not stop.wait(0.02):
-            requests.consume_requests(pool, manager, now=time.monotonic())
-
-    worker = threading.Thread(target=loop, name="converging-schedule-manager")
-    worker.start()
-    try:
-        yield
-    finally:
-        stop.set()
-        worker.join()

@@ -1,55 +1,41 @@
-# Schedule Manager — resident schedule sessions
+# Schedule Manager — declarative single-round execution
 
-## What is it
-The service that supervises the `schedules` table: one session `meiva-schedule-<id>` per enabled row, running `services.wake.schedule_manager.runner`. It runs once per cluster on the gateway side (`ServiceSpec.capabilities=GATEWAY`, health port slot `schedule_manager` = 8122) as its own root unit. Stopping or restarting it never touches the HTTP gateway, and the schedule sessions survive it: the next start re-adopts the live ones. The full behavior (state machine, launch admission, runner) is in [Schedule Manager & Runner](../../../gateway/schedules/docs/schedules.md).
+The host-local `schedule-manager` supervises schedules assigned to its machine on
+both gateway and agent-runner hosts (`ServiceSpec.capabilities=BOTH`, health
+port slot `schedule_manager` = 8122). Co-located split units elect one manager
+through `machine_units`, preferring the serving gateway unit and then the lowest
+home path. This election applies to every reconcile and request pass.
 
 ## Loops
-Two resident sequential loops under one `TaskGroup` (`services/wake/schedule_manager/daemon.py`, on `base/daemon/round_loop.py`). A loop that raises cancels its sibling and ends the process; the supervisor restarts it. Each loop reports its own progress to `/healthz`.
 
-- **`reconcile`** (`manager.py`) — every 5 s.
-- **`requests`** (`requests.py`) — every second, converges each queued `schedule_sync_requests` row to its latest desired revision (adopt a matching live execution; officially reap a predecessor before replacement), then deletes it only if unchanged. A failed reap or uncertain live provenance leaves work queued, for a bounded window (ten minutes of one failure streak), then the manager records the schedule as an error, emits `schedule_convergence_abandoned` and consumes the request. A consumed launch attempt is terminal for that revision, even if its outcome is unknown. See [Schedule mutation receipts and revision convergence](../../../gateway/schedules/docs/schedule-convergence.md) for transactional receipts and advisory ownership.
-- **`requests` migration exception** — an in-place daemon-to-declarative
-  conversion keeps its request after the alert because the row also fences
-  declarative launch. Only a definitive legacy PTY reap or absence
-  acknowledgement releases that barrier.
+Two sequential loops run under one `TaskGroup` in
+`services/wake/schedule_manager/daemon.py`. A loop that raises cancels its sibling
+and ends the service; root supervision restarts it. Each loop reports progress
+to `/healthz`.
 
-## What `schedules.status` answers
-It answers *what the launch/exit path last recorded*, never *whether the process runs*. The manager
-writes it on a launch or a lost session, and the runner writes it when it starts or finishes cleanly;
-but a runner that dies inside its live session records only `last_error` (`engine.record_error`)
-without touching `status`. So `status='running'` beside a non-empty `last_error` is the designed
-shape of "the process died inside a live session", not a contradiction, and no read path may treat
-`status` as a liveness check — the round beats above are the only observable liveness fact.
+- `reconcile` runs every five seconds, admits due `at`/`cron`/`every` slots, and
+  settles or recovers open runs. A waiting schedule consumes no process.
+- `requests` runs every second and drains legacy machine-scoped
+  `schedule_sync_requests` after observing durable state. Mutations update timing
+  directly and require no resident-session convergence.
 
-## What the two silence reports say
-`report_late_rounds` (`round_progress.py`) answers *the session is live -- is the loop still
-iterating*: it compares the schedule's own heartbeat deadline with the database clock.
-`report_stalled` answers *the session is gone -- for how long*: it alerts once per outage after
-two hours of absence and measures the silence from the last round the schedule finished, not
-from the moment the manager noticed, so a late detection does not shorten the reported outage.
-Without a beat the only observable fact is the sessionless observation and `silent_seconds`
-falls back to it. A launch clears the previous attempt's beat, so a beat on disk always
-describes the attempt running now.
+The manager launches one ordinary subprocess per fire with a finite timeout and
+an open `schedule_runs` row as its single-flight guard. On service restart it
+adopts a verified live runner or its atomic outcome; a vanished runner without an
+outcome settles as an error. `latest.log` remains in the schedule workspace.
 
-## State that moved from memory to the row
-| was (gateway, in memory) | now |
-|---|---|
-| launch admission | `schedules.launch_count` is a one-attempt latch reset by an explicit new revision; the retired `next_launch_at` column is ignored |
-| `_not_live_since`, `_stall_alerted` | `schedules.not_live_since`, `schedules.stall_alerted_at` |
-| the call `ScheduleManager.sync(id)` from the router | a row in `schedule_sync_requests`, consumed by the `requests` loop |
+The payload executes once with only its script path in `sys.argv`. Its state is
+an ordinary workspace file, and its schedule and owner identity come from the
+launch environment. The state transitions and locality contract are documented in
+[Schedule Manager & Runner](../../../gateway/schedules/docs/schedules.md).
 
-Still in memory, deliberately: the set of schedules whose stale same-name survivor resisted a reap, and the reap-failure log throttle. A restarted service meets the same survivor again.
+## Entry points
 
-## Key Dependencies
-- `base.sessions.backend` — the host's PTY session backend; the service must run on the gateway host.
-- `base.deploy.lifecycle.start_serving` — launches proceed only while the home is serving.
-- `gateway/schedules/session_control.py` — the API side of the request queue and the log capture.
-
-## Entry Points
-- `services/wake/schedule_manager/runner.py` — `.venv/bin/python -m services.wake.schedule_manager.runner <id> [revision]`, the independent process that composes the SDK before calling the gateway schedule execution engine
-- `services/wake/schedule_manager/daemon.py` — `.venv/bin/python -m services.wake.schedule_manager.daemon`
-- The application root supervises it through the roster's `/healthz` identity probe (`services/supervision/roster/healthz.py`).
-
+- `services/wake/schedule_manager/daemon.py` — supervised service composition.
+- `services/wake/schedule_manager/runner.py --single-round` — per-fire custody.
+- `services/wake/schedule_manager/runner.py --payload` — single Python payload.
+- The application root supervises the service through the roster's `/healthz`
+  identity probe (`services/supervision/roster/healthz.py`).
 
 ## Process composition
 

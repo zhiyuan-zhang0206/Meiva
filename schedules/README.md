@@ -1,9 +1,9 @@
 # Schedules
 
 This directory owns the installed schedule payloads and their policy. Every
-built-in is a declarative `cron` or `every` run-to-completion program. Stored
-third-party `daemon` rows remain supported during their compatibility migration.
-Both forms are machine-placed and reconciled by the host-local
+built-in is a declarative `cron` or `every` run-to-completion program. Public
+schedules also support one-shot `at` triggers. Schedules are machine-placed and
+reconciled by the host-local
 `schedule-manager`. Manage them through `meiva.schedules`, `meiva schedules`, or
 the `/control/schedules` page. The engine boundary is documented in
 [`gateway/schedules/docs/schedules.md`](../gateway/schedules/docs/schedules.md).
@@ -199,9 +199,7 @@ of a built-in is a snapshot made when the row was created, and a snapshot goes
 stale the moment a library function the script calls changes shape (2026-10-03:
 `catch_up()` gained a required `db`, 13 stored copies crash-looped). The resync
 writes a `schedule_versions` row (`builtin-resync <hash>`, so the replaced text stays
-recoverable) and queues a sync request. When the old row is a `daemon`, that
-request reaps `meiva-schedule-<id>` before the declarative engine may admit a
-round. `enabled` and `description` of an existing row are never touched, so
+recoverable). The updated script is used on its next fire. `enabled` and `description` of an existing row are never touched, so
 `meiva schedules stop <name>` (or disable in the UI) keeps a built-in around without
 running. Delete a built-in and the next provision brings it back with its manifest
 default. The checkout is the source of truth for a built-in's code: a hand edit of
@@ -259,19 +257,18 @@ template into a running cluster without a restart of the manager, run
 
 Every schedule row records a target `machine`, an optional `owner_plugin`, and an
 optional owner agent. Declarative owner placement defaults to the agent's machine;
-system and compatibility rows default to the gateway when no machine is explicit.
+system rows default to the gateway when no machine is explicit.
 
 - **Per-machine schedule manager**: `schedule-manager` runs on all cluster nodes (`capabilities=Capabilities.BOTH`, `requires_db=True`, `db_access="runner"`). Each instance reconciles only rows where `machine = self._machine_name`.
-- **Split-unit tie-breaker**: On hosts with multiple units sharing a machine name (such as preview environments), `is_active_unit()` inspects `machine_units` and activates the instance on the serving gateway unit (or the lowest lexical home path). Inactive units yield reconcile and sync loops.
-- **Session reaping across moves and deletes**: Compatibility daemon moves and deletes reap the old PTY without overwriting the row's error outcome.
-- **Machine migration**: Moving a daemon schedule enqueues old/new machine convergence. An idle declarative schedule keeps its durable next-fire state and launches on the newly assigned manager; machine moves and deletion wait until an active run finishes.
+- **Split-unit tie-breaker**: On hosts with multiple units sharing a machine name (such as preview environments), `is_active_unit()` inspects `machine_units` and activates the instance on the serving gateway unit (or the lowest lexical home path). Inactive units yield reconcile and request loops.
+- **Machine migration**: An idle schedule keeps its durable next-fire state and launches on the newly assigned manager; machine moves and deletion wait until an active run finishes.
 - **Placement status API**: The gateway evaluates placement health via `judge_placement()`:
   - `healthy`: machine is registered and reachable.
   - `unplaced`: schedule row has no machine assigned (`NULL`).
   - `unregistered`: assigned machine does not exist in the `machines` table.
   - `unreachable`: assigned machine has no active heartbeats or units.
   - `stalled`: machine is unreachable and the schedule is currently active or enabled.
-- **Cross-machine log capture RPC**: Remote reads dispatch `schedule_capture` to `agent_ops`; declarative rows read owner-local `latest.log`, while daemon rows read live or saved PTY output.
+- **Cross-machine log capture RPC**: Remote reads dispatch `schedule_capture` to `agent_ops`; schedules read owner-local `latest.log`.
 
 ## Deployment notes
 
@@ -304,10 +301,6 @@ system and compatibility rows default to the gateway when no machine is explicit
   `cron` and `every` then advance from `max(slot, now)`, skipping older history.
   Stateful watches keep their window in workspace `state.json`, so a process
   boundary does not reset alert streaks.
-- **Compatibility loops remain for existing third-party daemon rows.** Their
-  heartbeat and failure-backoff contracts remain in
-  [`docs/loop-and-directory.md`](docs/loop-and-directory.md); shipped built-ins
-  no longer allocate those resident PTYs.
 - **A cron that stops arriving is its own card, and the card publishes nothing.**
   `release-gate.yml` is the only post-merge run that certifies the whole
   population on a fixed cadence, and this repository's GitHub crons do not keep
@@ -355,7 +348,7 @@ system and compatibility rows default to the gateway when no machine is explicit
 - **A template change reaches a running cluster at the next gateway startup**
   (see "How built-ins get created"), or at once through
   `meiva schedules provision`. A resynced declarative schedule uses the new
-  script on its next fire; the sync request first removes any legacy PTY. A
+  script on its next fire. A
   disabled row keeps its operator-selected state. `meiva schedules get <name>`
   shows which script the row holds. A
   one-off change to a single schedule that is not in the manifest still goes
@@ -445,17 +438,10 @@ only the outer call. Do not start the agent host or launch old schedule code aft
 installing scripts that require the new callback contract. Finish the normal
 whole-cluster update to the approved target before the cluster starts again.
 
-Compatibility daemon templates receive immutable `ScheduleInputs` through
-`runpy.init_globals`:
-one loaded image, the entry's database/pipeline builders and its `MachineIdentity`.
-A template's `__main__` hands the injected inputs (or `None` when run by hand) to
-`open_schedule_entry(inputs, home=...)`: injected inputs are borrowed without closing them or changing
-the shared SDK context, and a hand run owns a fresh entry built by
-`fresh_schedule_entry(image=..., process=..., home=...)` for the commit it loaded and the home the
-script's entry resolved, with its lazy
-machine, SDK context, gate and cold writer. Exit restores the prior SDK context and
-closes constructed clients within two seconds while preserving the original failure.
-Declarative entries open the same context from their process environment; this
-binds `schedule:<id>` and an optional owner agent for SDK attribution. C9 and
-the debt sweep open process logging and the event writer only when they report
-(`schedules/jobs/telemetry_event.py`); debt dry runs assemble no root.
+Declarative entries open the ordinary SDK context from their process environment;
+this binds `schedule:<id>` and an optional owner agent for SDK attribution. Each
+entry executes once and closes its owned clients. A hand-run entry constructs its
+own `ScheduleInputs` through `open_schedule_entry`, preserving the loaded commit's
+code-version gate. C9 and the debt sweep open process logging and the event writer
+only when they report (`schedules/jobs/telemetry_event.py`); debt dry runs assemble
+no root.

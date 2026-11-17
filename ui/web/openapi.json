@@ -4854,7 +4854,7 @@
       },
       "put": {
         "summary": "Update Schedule",
-        "description": "Partial-update a schedule. Script/command changes are versioned. Declarative schedules apply changes on their next fire; daemon schedules converge their PTY session. 400 on invalid input, 404 if missing, 409 on a name clash.",
+        "description": "Partial-update a schedule. Script/command changes are versioned. Declarative schedules apply changes on their next fire. 400 on invalid input, 404 if missing, 409 on a name clash.",
         "operationId": "update_schedule_api_schedules__schedule_id__put",
         "parameters": [
           {
@@ -4902,7 +4902,7 @@
       },
       "delete": {
         "summary": "Delete Schedule",
-        "description": "Delete a schedule and remove its local work directory. 404 if missing. A legacy daemon session is reaped by reconciliation.",
+        "description": "Delete a schedule and remove its local work directory. 404 if missing.",
         "operationId": "delete_schedule_api_schedules__schedule_id__delete",
         "parameters": [
           {
@@ -4946,7 +4946,7 @@
     "/api/schedules/{schedule_id}/start": {
       "post": {
         "summary": "Start Schedule",
-        "description": "Enable the schedule. Declarative schedules compute their next fire; daemon schedules launch now. 404 if missing.",
+        "description": "Enable the schedule and compute its next fire. 404 if missing.",
         "operationId": "start_schedule_api_schedules__schedule_id__start_post",
         "parameters": [
           {
@@ -4986,7 +4986,7 @@
     "/api/schedules/{schedule_id}/stop": {
       "post": {
         "summary": "Stop Schedule",
-        "description": "Disable future fires and stop a compatibility daemon session. 404 if missing.",
+        "description": "Disable future fires. 404 if missing.",
         "operationId": "stop_schedule_api_schedules__schedule_id__stop_post",
         "parameters": [
           {
@@ -5026,7 +5026,7 @@
     "/api/schedules/{schedule_id}/restart": {
       "post": {
         "summary": "Restart Schedule",
-        "description": "Run a declarative schedule now or relaunch a compatibility daemon. 404 if missing, 409 if disabled.",
+        "description": "Run a schedule now. 404 if missing, 409 if disabled.",
         "operationId": "restart_schedule_api_schedules__schedule_id__restart_post",
         "parameters": [
           {
@@ -5222,7 +5222,7 @@
     "/api/schedules/{schedule_id}/logs": {
       "get": {
         "summary": "Get Schedule Logs",
-        "description": "Recent output: declarative latest.log, daemon live/transcript capture, or last_error. 404 if missing.",
+        "description": "Recent output from latest.log or last_error. 404 if missing.",
         "operationId": "get_schedule_logs_api_schedules__schedule_id__logs_get",
         "parameters": [
           {
@@ -20834,8 +20834,7 @@
         "enum": [
           "at",
           "cron",
-          "every",
-          "daemon"
+          "every"
         ]
       },
       "UiContributionsResponse": {

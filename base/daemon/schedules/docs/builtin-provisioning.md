@@ -11,12 +11,11 @@ row per entry:
 - placement policy determines target machines: `placement: "gateway"` (the default) assigns
   the row to the gateway machine, while `placement: "per_machine"` (such as `harness-cli-update` and `claude-auth-keepalive`)
   creates a row `<name>:<machine>` for every machine in the cluster with the `agent-runner` role,
-  queueing sync requests to start or update them;
+  using the declared trigger for their next fire;
 - a row whose script, command, trigger, timezone, or timeout differs from the
   template is resynced to it,
-  writing a `schedule_versions` row (`builtin-resync <hash>`) and queueing a
-  `schedule_sync_requests` row. A legacy `daemon` row is upgraded in place; the
-  request reaps its old PTY before declarative admission is allowed;
+  writing a `schedule_versions` row (`builtin-resync <hash>`); the updated payload
+  is used on the next fire;
 - operator-owned values stay: `enabled` and `description`, so
   `meiva schedules stop <name>` keeps a built-in stopped and a deleted built-in
   returns with the manifest default. Provisioning derives status and

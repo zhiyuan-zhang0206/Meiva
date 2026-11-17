@@ -60,6 +60,7 @@ def test_message_payload_is_minimal_plain_python() -> None:
 @pytest.mark.parametrize(
     "kwargs",
     [
+        {"trigger_kind": "daemon", "script": "pass"},
         {"trigger_kind": "every", "interval_seconds": 29, "script": "pass"},
         {"trigger_kind": "every", "interval_seconds": 60, "script": "pass", "message": "x"},
         {"trigger_kind": "cron", "cron_expr": "0 * * * *", "script": None, "message": "x"},

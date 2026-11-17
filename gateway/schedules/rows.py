@@ -23,7 +23,7 @@ __all__ = [
     "ScheduleSummaryRow",
 ]
 
-type TriggerKind = Literal["at", "cron", "every", "daemon"]
+type TriggerKind = Literal["at", "cron", "every"]
 type OwnerTermination = Literal["cancel", "keep"]
 
 

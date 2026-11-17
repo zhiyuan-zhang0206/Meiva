@@ -542,7 +542,6 @@ class ScheduleCapturePayload(BaseModel):
     schedule_id: int
     lines: int = 200
     owner_agent_id: int | None = None
-    trigger_kind: str = "daemon"
 
 
 class ScheduleCaptureResult(BaseModel):

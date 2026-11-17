@@ -1084,8 +1084,7 @@ INSERT INTO cluster_defaults (id, llm_model) VALUES (1, 'deepseek-flash');
 
 -- ─────────────── schedules ───────────────
 -- Gateway-hosted schedules. Declarative at/cron/every rows run one ordinary
--- script process per fire; daemon rows retain the resident-session bridge while
--- existing schedules are migrated.
+-- script process per fire.
 CREATE TABLE schedules (
     id          BIGSERIAL PRIMARY KEY,
     name        TEXT NOT NULL UNIQUE,
@@ -1109,8 +1108,8 @@ CREATE TABLE schedules (
     owner_plugin          TEXT CONSTRAINT schedules_owner_plugin_nonempty CHECK (owner_plugin IS NULL OR btrim(owner_plugin) <> ''),
     owner_agent_id        BIGINT REFERENCES agents(id),  -- the agent this schedule speaks as; NULL = command-only (task #6102)
     secret_env_vars       TEXT[] NOT NULL DEFAULT '{}',
-    trigger_kind          TEXT NOT NULL DEFAULT 'daemon'
-                          CHECK (trigger_kind IN ('at', 'cron', 'every', 'daemon')),
+    trigger_kind          TEXT NOT NULL
+                          CHECK (trigger_kind IN ('at', 'cron', 'every')),
     run_at                TIMESTAMPTZ,
     cron_expr             TEXT,
     interval_seconds      INTEGER CHECK (interval_seconds IS NULL OR interval_seconds >= 30),
@@ -1118,9 +1117,8 @@ CREATE TABLE schedules (
     timeout_seconds       INTEGER NOT NULL DEFAULT 600 CHECK (timeout_seconds > 0),
     on_owner_terminate    TEXT NOT NULL DEFAULT 'cancel'
                           CHECK (on_owner_terminate IN ('cancel', 'keep')),
-    CHECK (
-        (trigger_kind = 'daemon' AND run_at IS NULL AND cron_expr IS NULL AND interval_seconds IS NULL)
-        OR (trigger_kind = 'at' AND run_at IS NOT NULL AND cron_expr IS NULL AND interval_seconds IS NULL)
+    CONSTRAINT schedules_trigger_payload_check CHECK (
+        (trigger_kind = 'at' AND run_at IS NOT NULL AND cron_expr IS NULL AND interval_seconds IS NULL)
         OR (trigger_kind = 'cron' AND run_at IS NULL AND cron_expr IS NOT NULL AND interval_seconds IS NULL)
         OR (trigger_kind = 'every' AND run_at IS NULL AND cron_expr IS NULL AND interval_seconds IS NOT NULL)
     )
@@ -1136,16 +1134,16 @@ COMMENT ON COLUMN schedules.owner_agent_id IS
 COMMENT ON COLUMN schedules.secret_env_vars IS
     'Environment variable names injected into this schedule''s session at launch.';
 COMMENT ON COLUMN schedules.trigger_kind IS
-    'Execution model: at/cron/every are declarative single-round triggers; daemon is the temporary resident-session compatibility bridge.';
+    'Execution model: at/cron/every are declarative single-round triggers.';
 COMMENT ON COLUMN schedules.next_launch_at IS
-    'The next declarative slot eligible to launch; NULL for completed/cancelled/disabled schedules and resident daemon schedules.';
+    'The next declarative slot eligible to launch; NULL for completed/cancelled/disabled schedules.';
 COMMENT ON COLUMN schedules.on_owner_terminate IS
     'cancel disables unfinished work when its owner agent terminates; keep leaves it independent of owner lifecycle.';
 CREATE INDEX ON schedules (enabled);
 CREATE INDEX schedules_machine_enabled_idx ON schedules (machine, enabled);
 CREATE INDEX schedules_owner_plugin_idx ON schedules (owner_plugin) WHERE owner_plugin IS NOT NULL;
 CREATE INDEX schedules_declarative_due_idx ON schedules (machine, next_launch_at)
-    WHERE enabled AND trigger_kind <> 'daemon';
+    WHERE enabled;
 
 CREATE TABLE resource_creation_receipts (
     operation_key TEXT PRIMARY KEY,
@@ -1964,6 +1962,7 @@ INSERT INTO schema_migrations (name) VALUES ('20261114T165000_drop-agent-harness
 INSERT INTO schema_migrations (name) VALUES ('20261103T105346_schedule-owner-agent');
 INSERT INTO schema_migrations (name) VALUES ('20261103T142200_schedule-owner-provisioning');
 INSERT INTO schema_migrations (name) VALUES ('20261116T190521_declarative-schedules');
+INSERT INTO schema_migrations (name) VALUES ('20261117T100900_drop-schedule-daemon-trigger');
 
 -- Keyed-operation receipts never expire into fresh effects (questions, publications' seen cursor,
 -- reply-suggestion feedback).

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+from typing import Literal, cast
 
 import pytest
 
@@ -50,6 +51,7 @@ def test_declared_schedules_valid(tmp_path: Path) -> None:
         "def contribute(config):\n"
         "    return (\n"
         "        ScheduleSpec(\n"
+        "            trigger_kind='every', interval_seconds=60,\n"
         "            name='my_plugin:worker',\n"
         "            machine='gateway',\n"
         "            description='Sample worker',\n"
@@ -109,12 +111,24 @@ def test_schedule_spec_validates_declarative_trigger() -> None:
         )
 
 
+def test_schedule_spec_rejects_retired_daemon_trigger() -> None:
+    with pytest.raises(ValueError, match="trigger_kind must be 'cron' or 'every'"):
+        ScheduleSpec(
+            name="my_plugin:worker",
+            machine="gateway",
+            description="Retired resident trigger",
+            script="pass",
+            trigger_kind=cast(Literal["cron", "every"], "daemon"),
+        )
+
+
 def test_declared_schedules_dash_prefix(tmp_path: Path) -> None:
     code = (
         "from base.packages.plugins.surface.schedules import ScheduleSpec\n\n"
         "def contribute(config):\n"
         "    return (\n"
         "        ScheduleSpec(\n"
+        "            trigger_kind='every', interval_seconds=60,\n"
         "            name='my_plugin-worker',\n"
         "            machine='gateway',\n"
         "            description='Sample worker',\n"
@@ -140,6 +154,7 @@ def test_declared_schedules_invalid_prefix_rejected(tmp_path: Path) -> None:
         "def contribute(config):\n"
         "    return (\n"
         "        ScheduleSpec(\n"
+        "            trigger_kind='every', interval_seconds=60,\n"
         "            name='other_plugin:worker',\n"
         "            machine='gateway',\n"
         "            description='Sample worker',\n"
@@ -164,6 +179,7 @@ def test_declared_schedules_duplicate_name_rejected(tmp_path: Path) -> None:
         "def contribute(config):\n"
         "    return (\n"
         "        ScheduleSpec(\n"
+        "            trigger_kind='every', interval_seconds=60,\n"
         "            name='my_plugin:one',\n"
         "            machine='gateway',\n"
         "            description='First',\n"
@@ -171,6 +187,7 @@ def test_declared_schedules_duplicate_name_rejected(tmp_path: Path) -> None:
         "            command='python script.py',\n"
         "        ),\n"
         "        ScheduleSpec(\n"
+        "            trigger_kind='every', interval_seconds=60,\n"
         "            name='my_plugin:one',\n"
         "            machine='worker',\n"
         "            description='Duplicate',\n"
@@ -195,6 +212,7 @@ def test_declared_schedules_script_syntax_error(tmp_path: Path) -> None:
         "def contribute(config):\n"
         "    return (\n"
         "        ScheduleSpec(\n"
+        "            trigger_kind='every', interval_seconds=60,\n"
         "            name='my_plugin:broken',\n"
         "            machine='gateway',\n"
         "            description='Broken',\n"
@@ -259,6 +277,7 @@ def test_load_enabled_plugin_schedules(tmp_path: Path) -> None:
         "def contribute(config):\n"
         "    return (\n"
         "        ScheduleSpec(\n"
+        "            trigger_kind='every', interval_seconds=60,\n"
         "            name='plug_a:worker',\n"
         "            machine='gateway',\n"
         "            description='Worker A',\n"

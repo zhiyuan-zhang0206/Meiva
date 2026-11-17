@@ -15,9 +15,8 @@ A system schedule uses `$MEIVA_HOME/schedules/<schedule>/`. The same value is st
 on `schedule_runs.agent_id` when the fire is claimed, so later owner edits cannot
 rewrite the attribution or locality of an already-open run.
 
-Operator provisioning remains available for compatibility daemon schedules and
-records its reason in `schedule_owner_changes`. API mutations rely on the ordinary
-operation receipt and audit surfaces.
+Owner changes are recorded in `schedule_owner_changes`. API mutations rely on the
+ordinary operation receipt and audit surfaces.
 
 ## Process identity
 

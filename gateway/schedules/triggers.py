@@ -71,4 +71,4 @@ def enabled_next_launch(row: ControlRow, now: datetime) -> datetime:
         if row.interval_seconds is None:
             raise ValueError("every schedule has no interval_seconds")
         return normalized_now + timedelta(seconds=row.interval_seconds)
-    raise ValueError("daemon schedules use session control")
+    raise ValueError(f"unsupported schedule trigger: {row.trigger_kind!r}")

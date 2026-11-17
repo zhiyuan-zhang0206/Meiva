@@ -29,7 +29,7 @@ __all__ = [
 ]
 
 DEFAULT_COMMAND = "python schedule.py"
-type TriggerKind = Literal["at", "cron", "every", "daemon"]
+type TriggerKind = Literal["at", "cron", "every"]
 type DeclarativeTriggerKind = Literal["at", "cron", "every"]
 
 

@@ -52,18 +52,9 @@ def _validate_schedule_shape(spec: ScheduleSpec) -> None:
         )
 
 
-def _validate_daemon_trigger(spec: ScheduleSpec) -> None:
-    if any((spec.cron_expr is not None, spec.interval_seconds is not None)):
-        raise ValueError("daemon ScheduleSpec cannot declare recurring trigger fields")
-    if spec.timezone is not None:
-        raise ValueError("daemon ScheduleSpec cannot declare a timezone")
-    if spec.timeout_seconds != 600:
-        raise ValueError("daemon ScheduleSpec cannot declare a single-round timeout")
-
-
 def _validate_recurring_trigger(spec: ScheduleSpec) -> None:
     if spec.trigger_kind not in ("cron", "every"):
-        raise ValueError("trigger_kind must be 'cron', 'every', or 'daemon'")
+        raise ValueError("trigger_kind must be 'cron' or 'every'")
     if spec.timeout_seconds <= 0:
         raise ValueError("timeout_seconds must be positive")
     if spec.timezone is not None:
@@ -87,10 +78,10 @@ class ScheduleSpec:
     machine: str
     description: str
     script: str
+    trigger_kind: Literal["cron", "every"]
     command: str = "python schedule.py"
     secret_env_vars: tuple[str, ...] = ()
     default_enabled: bool = True
-    trigger_kind: Literal["cron", "every", "daemon"] = "daemon"
     cron_expr: str | None = None
     interval_seconds: int | None = None
     timezone: str | None = None
@@ -98,9 +89,6 @@ class ScheduleSpec:
 
     def __post_init__(self) -> None:
         _validate_schedule_shape(self)
-        if self.trigger_kind == "daemon":
-            _validate_daemon_trigger(self)
-            return
         _validate_recurring_trigger(self)
 
 

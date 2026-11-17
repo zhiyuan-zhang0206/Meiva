@@ -192,15 +192,15 @@ class TestProvision:
         assert len(_versions(db_conn, "prod-a")) == 2
 
     @pytest.mark.parametrize("enabled", [False, True])
-    def test_upgrades_daemon_in_place_and_preserves_enabled(
+    def test_updates_trigger_in_place_and_preserves_enabled(
         self, db_conn: psycopg.Connection, tmp_path: Path, enabled: bool
     ) -> None:
         path = _manifest(tmp_path, [_ENTRY])
         row = db_conn.execute(
             "INSERT INTO schedules "
-            "(name, description, script, command, enabled, status, machine, trigger_kind) "
+            "(name, description, script, command, enabled, status, machine, trigger_kind, cron_expr) "
             "VALUES ('prod-a', 'operator tuned', 'old loop', 'python old.py', %s, 'running', "
-            "'gateway', 'daemon') RETURNING id",
+            "'gateway', 'cron', '0 * * * *') RETURNING id",
             (enabled,),
         ).fetchone()
         db_conn.commit()
@@ -243,8 +243,9 @@ class TestProvision:
         path = _manifest(tmp_path, [_ENTRY])
         with db_conn.cursor() as cur:
             cur.execute(
-                "INSERT INTO schedules (name, description, script, command, enabled, machine) "
-                "VALUES ('agent-made', 'x', 'print(1)\n', 'python x.py', true, 'gateway')"
+                "INSERT INTO schedules (name, description, script, command, enabled, machine, "
+                "trigger_kind, interval_seconds) "
+                "VALUES ('agent-made', 'x', 'print(1)\n', 'python x.py', true, 'gateway', 'every', 60)"
             )
         db_conn.commit()
         assert provision_builtin_schedules(db_conn, machine="gateway", path=path).created == [

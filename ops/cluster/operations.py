@@ -357,39 +357,20 @@ def schedule_capture_op(
     *,
     home: Path,
     owner_agent_id: int | None = None,
-    trigger_kind: str = "daemon",
 ) -> ScheduleCaptureResult:
-    if trigger_kind != "daemon":
-        if owner_agent_id is None:
-            log_path = home / "schedules" / str(schedule_id) / "latest.log"
-        else:
-            log_path = (
-                home
-                / "workspaces"
-                / str(owner_agent_id)
-                / "schedules"
-                / str(schedule_id)
-                / "latest.log"
-            )
-        try:
-            text = log_path.read_text(encoding="utf-8", errors="replace")
-        except OSError:
-            return ScheduleCaptureResult()
-        return ScheduleCaptureResult(transcript=text.splitlines()[-lines:])
-
-    from base.cluster import session_name
-    from base.sessions.backend import get_shell_backend
-
-    backend = get_shell_backend(home=home)
-    name = session_name(f"schedule-{schedule_id}")
-    captured: str | None = backend.capture_pane(name, lines) if backend.has_session(name) else None
-    transcript: list[str] | None = None
-    if captured is None:
-        log_path = backend.session_log_path(name)
-        if log_path is not None and log_path.exists():
-            try:
-                text = log_path.read_text(encoding="utf-8", errors="replace")
-                transcript = text.splitlines()[-lines:]
-            except OSError:
-                transcript = None
-    return ScheduleCaptureResult(captured=captured, transcript=transcript)
+    if owner_agent_id is None:
+        log_path = home / "schedules" / str(schedule_id) / "latest.log"
+    else:
+        log_path = (
+            home
+            / "workspaces"
+            / str(owner_agent_id)
+            / "schedules"
+            / str(schedule_id)
+            / "latest.log"
+        )
+    try:
+        text = log_path.read_text(encoding="utf-8", errors="replace")
+    except OSError:
+        return ScheduleCaptureResult()
+    return ScheduleCaptureResult(transcript=text.splitlines()[-lines:])
