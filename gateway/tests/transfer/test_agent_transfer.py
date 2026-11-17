@@ -37,7 +37,8 @@ from base.sessions.pty import client as pty_client
 from base.sessions.pty import terminal_fence
 from base.sessions.pty.client import PtyClientConfig
 from base.sessions.pty.paths import service_socket_path
-from base.sessions.pty.tests.pty_service import PtyServiceProcess
+from base.sessions.pty.tests.legacy_service import legacy_fence_proxy
+from base.sessions.pty.tests.pty_service import DelayedNewProxy, PtyServiceProcess
 from base.sessions.tests.poll_until import poll_until
 from gateway.agents.transfer.router import CutoverConflictError, commit_cutover_blocking
 from gateway.agents.transfer.transfer_plan import AgentTransferSnapshot
@@ -722,3 +723,65 @@ def test_scheduled_native_restart_claim_during_validation_notifies_both_actors(
         "SELECT agent_id FROM inbound_messages WHERE agent_id=ANY(%s) AND kind='chat' AND content LIKE 'Scheduled restart%%failed:%%' ORDER BY agent_id",
         ([target, caller],),
     ).fetchall() == [(target,), (caller,)]
+
+
+def test_legacy_export_refuses_cutover_before_a_delayed_allocation(
+    two_runners: TwoRunnerCluster, db_conn: psycopg.Connection
+) -> None:
+    agent_id = _seed_native_agent(db_conn, machine="runner-a", status="terminated")
+    workspace = paths.workspace_path(two_runners.home_a, agent_id)
+    workspace.mkdir(parents=True)
+    counter, pidfile = workspace / "live-writes", workspace / "writer.pid"
+    command = shlex.join([sys.executable, "-u", str(_WORKSPACE_WRITER), str(counter), str(pidfile)])
+    db_conn.execute(
+        "INSERT INTO agent_shell_ttls (agent_id,session_id,expires_at) "
+        "VALUES (%s,0,now()+interval '1 hour')",
+        (agent_id,),
+    )
+    db_conn.commit()
+    two_runners.source_pty.stop()
+    source_socket = service_socket_path(run_dir(two_runners.home_a))
+    source_socket.unlink(missing_ok=True)
+    with tempfile.TemporaryDirectory(prefix="legacy-") as temp:
+        legacy = PtyServiceProcess(Path(temp) / "old")
+        legacy.home.mkdir()
+        legacy.start()
+        try:
+            with legacy_fence_proxy(
+                source_socket, service_socket_path(run_dir(legacy.home))
+            ) as calls:
+                delayed = DelayedNewProxy(Path(temp) / "delayed.sock", source_socket)
+                try:
+                    with pytest.raises(pty_client.ServiceUnavailableError):
+                        pty_client.request(
+                            "new",
+                            socket_path=Path(temp) / "delayed.sock",
+                            timeout=0.05,
+                            name=f"meiva-agent-{agent_id}-shell-0-delayed",
+                            cwd=str(workspace),
+                            env={},
+                            cmd=command,
+                        )
+                    assert delayed.accepted.wait(timeout=5)
+                    response = two_runners.client.post(
+                        f"/api/agents/{agent_id}/transfer", json={"to_machine": "runner-b"}
+                    )
+                    assert response.status_code == 409, response.text
+                    assert "atomic shell fence" in response.text
+                    assert "fence_agent_shells" in calls and "list" in calls
+                    assert not counter.exists()
+                    _assert_source_did_not_cut_over(db_conn, two_runners, agent_id)
+                    delayed.release.set()
+                    assert delayed.completed.wait(timeout=5)
+                    assert delayed.error is None
+                    assert delayed.response is not None and delayed.response["ok"] is True
+                    poll_until(
+                        lambda: (counter.exists() and int(counter.read_text()) >= 3, counter),
+                        what="a legacy delayed allocation to keep writing on the retained source",
+                    )
+                    _assert_terminal_fence(two_runners.home_a, agent_id, 2)
+                    _assert_source_did_not_cut_over(db_conn, two_runners, agent_id)
+                finally:
+                    delayed.close()
+        finally:
+            legacy.stop()

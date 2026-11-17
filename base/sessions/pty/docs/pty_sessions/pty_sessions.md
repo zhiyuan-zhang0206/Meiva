@@ -70,6 +70,14 @@ the service; an unavailable socket is therefore an unknown closure, never a
 successful empty acknowledgement. A malformed fence file refuses agent-shell
 allocation until an operator repairs the evidence.
 
+During `update run --keep-shell-sessions`, a pre-fence daemon can answer
+`unknown_method: fence_agent_shells`. The backend still persists the local cutoff,
+then falls back to enumerating and killing the owner's shells below it. Cleanup
+reports `fenced=False`: lifecycle callers retain TTL rows for the reaper, because
+that daemon can still accept a delayed allocation. Other service errors propagate.
+A subsequent daemon generation loads the durable cutoff. This compatibility window
+provides enumeration cleanup rather than the new daemon's atomic allocation fence.
+
 The native concurrency regression forks forty new shells from eight callers
 while twenty sessions stream output, five through live screen models. Each new
 shell must execute a command and produce its own output under the same load;

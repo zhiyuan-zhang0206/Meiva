@@ -271,4 +271,4 @@ def test_restart_rejects_external_harness_while_running_and_accepts_while_idling
     assert db_conn.execute(
         "SELECT session_id FROM agent_shell_ttls WHERE agent_id=%s", (agent_id,)
     ).fetchall() == [(0,)]
-    assert terminal_fence.read(unit_home).cutoffs[agent_id] == 1
+    assert agent_id not in terminal_fence.read(unit_home).cutoffs

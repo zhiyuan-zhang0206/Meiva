@@ -17,6 +17,7 @@ from base.events.live.announce import publish_agent_updated
 from base.events.live.bus import EventBus
 from base.log import logger
 from base.native_process.runtime_incarnation import RuntimeIncarnation
+from ops.cluster_status import ShellCleanup
 from services.agent_runner.agent_host.lifecycle.cleanup_failures import (
     CleanupFailure,
     note_for,
@@ -31,7 +32,7 @@ from services.agent_runner.agent_host.lifecycle.switch_note import SwitchHistory
 #     The mandatory at-exit shell close, run by `apply_lifecycle_command` after a
 #     graceful termination commits. A failed close is logged without reopening the
 #     terminal transition; the periodic reaper retries it from its retained TTL row.
-def kill_terminating_agent_shells(agent_id: int, cutoff: int, *, home: Path) -> list[int] | None:
+def kill_terminating_agent_shells(agent_id: int, cutoff: int, *, home: Path) -> ShellCleanup | None:
     from ops.cluster_status import kill_agent_shells
 
     try:
@@ -48,8 +49,8 @@ def kill_terminating_agent_shells(agent_id: int, cutoff: int, *, home: Path) -> 
         "terminate killed {count} shell session(s) below {cutoff} of agent {agent_id}: {killed}",
         agent_id=agent_id,
         cutoff=cutoff,
-        count=len(killed),
-        killed=killed,
+        count=len(killed.killed),
+        killed=killed.killed,
     )
     return killed
 
@@ -63,12 +64,14 @@ async def close_terminated_agent_shells(
     killed = await asyncio.to_thread(kill_terminating_agent_shells, agent_id, cutoff, home=home)
     if killed is None:
         return None
+    if not killed.fenced:
+        return killed.killed
     async with async_write_transaction(pool) as conn:
         await conn.execute(
             "DELETE FROM agent_shell_ttls WHERE agent_id = %s AND session_id < %s",
             (agent_id, cutoff),
         )
-    return killed
+    return killed.killed
 
 
 # meiva:note

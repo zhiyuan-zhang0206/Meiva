@@ -206,7 +206,9 @@ def enqueue_termination_inbounds(
 #     Force writes `terminated` itself, in this one transaction; the caller then
 #     asks the home host to cancel the running turn. The returned shell cutoff is
 #     captured under this row lock, and after commit the caller closes every older
-#     shell and drops its TTL rows.
+#     shell and drops its TTL rows after an atomic fence acknowledgement. A same-agent
+#     restart passes preserve_shells=True and receives no cleanup cutoff; the legacy
+#     kill_all_shell_sessions audit marker does not control preservation.
 #
 #     The force's own terminate command fences automatic resurrection: input that
 #     was queued before the latest explicit force carries a smaller inbound id and
@@ -220,7 +222,8 @@ def force_terminate_transaction(
     message: str | None = None,
     kill_all_shell_sessions: bool = False,
     require_quiescent: bool = False,
-) -> tuple[AgentStatus, int, int]:
+    preserve_shells: bool = False,
+) -> tuple[AgentStatus, int, int | None]:
     with db_pool.connection() as conn, conn.cursor() as cur:
         conn.execute("SET TRANSACTION READ WRITE")
         cur.execute(
@@ -275,7 +278,7 @@ def force_terminate_transaction(
             kill_all_shell_sessions=kill_all_shell_sessions,
         )
     telemetry.emit_prepared(prepared_event)
-    return old_status, terminate_inbound_id, row[1]
+    return old_status, terminate_inbound_id, None if preserve_shells else row[1]
 
 
 # meiva:note
