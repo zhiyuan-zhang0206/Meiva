@@ -77,7 +77,7 @@ describe("groupIntoTurns", () => {
     ]);
   });
 
-  it("bare markers break turns and pass through as singles", () => {
+  it("untagged markers remain inside the adjacent work", () => {
     const items = [
       item("agent_reasoning"),
       item("agent_code"),
@@ -86,7 +86,7 @@ describe("groupIntoTurns", () => {
       item("code_output"),
     ];
     const groups = groupIntoTurns(items, { collapseTurns: true, liveIndex: null });
-    expect(kinds(groups)).toEqual(["turn(2@0)", "single(system_marker@2)", "turn(2@3)"]);
+    expect(kinds(groups)).toEqual(["turn(5@0)"]);
   });
 
   it("human inbound breaks a turn", () => {

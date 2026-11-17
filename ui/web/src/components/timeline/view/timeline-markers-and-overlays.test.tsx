@@ -36,6 +36,7 @@ describe("ItemView: system_marker → LifecycleChip", () => {
   });
   it("source='lifecycle_unknown' → UnknownMarkerChip red alarm asking for a reload", () => {
     render(<TimelineView items={[makeItem({ kind: "system_marker", source: "lifecycle_future", payload: "x" })]} />);
+    revealCollapsedCards();
     expect(screen.getByText(/Unrecognized system_marker/)).toBeTruthy();
     expect(screen.getByTestId("marker-unrecognized-reload").textContent).toMatch(/Reload/);
   });
@@ -48,6 +49,7 @@ describe("ItemView: system_marker → ephemeral by payload", () => {
         items={[makeItem({ kind: "system_marker", payload: "exec_start" })]}
       />,
     );
+    revealCollapsedCards();
     expect(screen.getByText(/Unrecognized system_marker/)).toBeTruthy();
     expect(screen.queryByTestId("marker-unrecognized-reload")).toBeNull();
   });
@@ -99,6 +101,7 @@ describe("ItemView: system_marker → ephemeral by payload", () => {
         ]}
       />,
     );
+    revealCollapsedCards();
     expect(screen.getByText(/error.*redis disconnected/)).toBeTruthy();
   });
   it("unrecognized payload goes to UnknownMarkerChip red alarm", () => {
@@ -109,6 +112,7 @@ describe("ItemView: system_marker → ephemeral by payload", () => {
         ]}
       />,
     );
+    revealCollapsedCards();
     expect(screen.getByText(/Unrecognized system_marker/)).toBeTruthy();
   });
 });

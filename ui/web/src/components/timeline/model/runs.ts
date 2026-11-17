@@ -1,8 +1,8 @@
 // meiva:note
 // Pure turn-collapse classification, summary aggregation, and grouping for the
 // conversation timeline. classifyItem splits primary user-readable messages from
-// secondary work/context items (including pre-token llmWaiting thinking items)
-// and bare ephemeral markers; groupIntoTurns folds maximal runs of adjacent
+// secondary work/context items (including pre-token llmWaiting thinking items
+// and system markers); groupIntoTurns folds maximal runs of adjacent
 // secondary items into collapsible TurnBlocks.
 // meiva:link ui/web/src/docs/frontend-components/timeline-view/deep-collapse.md
 
@@ -107,9 +107,8 @@ export function classifyItem(item: BackendTimelineItem): ItemClass {
     case "inbound_compact_summary":
     case "inbound_compact_request":
     case "system_prompt":
-      return "secondary";
     case "system_marker":
-      return classifyMarker(item.source).kind === "ephemeral" ? "bare" : "secondary";
+      return "secondary";
   }
   const _exhaustive: never = item.kind;
   console.warn("[timeline] classifyItem: unknown item kind", _exhaustive);
