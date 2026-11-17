@@ -37,3 +37,10 @@ lifecycle as every other persistent shell. Owner termination closes them before
 a later `at` or `cron` fire can deliver `watcher:<id>` and resurrect the owner.
 Triggers that intentionally survive owner termination use `meiva.schedules`
 with `on_owner_terminate="keep"`.
+
+Update (2026-11-17): the first real-role watcher E2E reached definitive PTY
+closure but could not remove its TTL row because the `meiva_runner` capability
+group granted only INSERT and UPDATE on `agent_shell_ttls`. Terminal cleanup is
+a runner-owned write path, so convergence now grants table-scoped DELETE as
+well. The real runner-role matrix exercises insert, renewal, and deletion to
+keep that authority aligned with the lifecycle contract.

@@ -12,6 +12,10 @@ table-wide UPDATE a cluster installed before that narrowing.
 Projection tables permit SELECT, INSERT and DELETE.
 Runner capture of visible assistant replies can append `agent_publications` and
 read retry receipts. Updating read state and deleting publications remain gateway operations.
+The runner owns the complete `agent_shell_ttls` row lifecycle: it inserts at
+persistent-shell creation, updates on renewal, and deletes after a definitive
+local close during terminal agent cleanup. That DELETE is table-scoped; the
+runner still has no blanket deletion authority.
 
 Default privileges cover future owner-created objects; rerunning convergence
 covers existing objects. Missing matrix tables fail loudly. Group validation
