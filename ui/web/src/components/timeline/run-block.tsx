@@ -119,13 +119,24 @@ export const TurnBlock = memo(function TurnBlock({
   const hasWork = summary.thinking > 0 || summary.code > 0 || summary.output > 0;
   const hasLiveTimer =
     (summary.lastLiveKind !== null && summary.lastLiveStartedAt > 0) || liveAnchor > 0;
-  const workedLabel = turnActive
+  const measuredLabel = turnActive
     ? totalWorkedMs > 0 || hasWork || hasLiveTimer
       ? t("workingFor", { duration: formatDuration(totalWorkedMs) })
       : t("working")
     : hasWork
       ? t("workedFor", { duration: formatDuration(summary.workedMs) })
       : t("workActivity");
+
+  const recordedDuration = summary.workedMs === 0 ? "0s" : formatDuration(summary.workedMs);
+  const workedLabel = hasWork && summary.missingTiming
+    ? turnActive
+      ? summary.timedWorkItems > 0
+        ? t("workingPartial", { duration: recordedDuration })
+        : t("workingTimingUnavailable")
+      : summary.timedWorkItems > 0
+        ? t("workedPartial", { duration: recordedDuration })
+        : t("workedTimingUnavailable")
+    : measuredLabel;
 
   const actionSummary = expanded ? formatTurnSummary(summary, (key, values) =>
     t(key as Parameters<typeof t>[0], values),

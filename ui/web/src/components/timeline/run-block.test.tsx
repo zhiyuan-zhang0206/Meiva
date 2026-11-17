@@ -18,6 +18,8 @@ const baseSummary: TurnSummary = {
   memories: 0,
   agentMessages: 0,
   systemNotes: 0,
+  missingTiming: false,
+  timedWorkItems: 3,
   workedMs: 6000,
   thinkingMs: 6000,
   codeMs: 0,
@@ -72,5 +74,21 @@ describe("TurnBlock expanded body", () => {
       </TurnBlock>,
     );
     expect(screen.queryByTestId("turn-row")).toBeNull();
+  });
+});
+
+describe("TurnBlock missing timing", () => {
+  it("labels the known subtotal as incomplete, then missing on reload", () => {
+    const props = { id: "partial", memberIds: ["1"], expanded: false, onToggle: vi.fn() };
+    const { rerender } = render(<TurnBlock {...props} summary={{ ...baseSummary, missingTiming: true, workedMs: 100 }} />);
+    expect(screen.getByText("Timing incomplete · 0.1s recorded")).toBeTruthy();
+    rerender(<TurnBlock {...props} summary={{ ...baseSummary, missingTiming: true, timedWorkItems: 0, workedMs: 0 }} />);
+    expect(screen.getByText("Timing not recorded")).toBeTruthy();
+  });
+
+  it("keeps recorded zero visible and does not add idle wall time to a partial subtotal", () => {
+    render(<TurnBlock id="zero" memberIds={["1"]} expanded={false} onToggle={vi.fn()}
+      turnActive lastEventAt={1} summary={{ ...baseSummary, missingTiming: true, workedMs: 0, timedWorkItems: 1 }} />);
+    expect(screen.getByText("Working · timing incomplete (0s recorded)")).toBeTruthy();
   });
 });

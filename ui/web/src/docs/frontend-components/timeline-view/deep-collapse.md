@@ -50,3 +50,9 @@ and it lands on the measured sum when the next block commits.
 ## Relationship to Other Nodes
 
 - [Timeline View](timeline-view.md) — the renderer whose turn grouping and expansion this node owns.
+
+A work header reports missing timing explicitly. With some measurements it shows
+"Timing incomplete" and the recorded subtotal; with none it shows "Timing not
+recorded". Browser-frozen durations count until the canonical snapshot replaces
+them. Reloading a provider record without durations therefore shows missing
+timing rather than an exact total. A true zero remains a recorded measurement.

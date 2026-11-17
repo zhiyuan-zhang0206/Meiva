@@ -136,25 +136,29 @@ export interface TurnSummary {
   // "Working for X" (plus live delta) and settled "Worked for X".
   // meiva:link ui/web/src/docs/frontend-components/timeline-view/timeline-view.md
   readonly workedMs: number;
+  readonly missingTiming: boolean;
+  readonly timedWorkItems: number;
   readonly lastLiveKind: "reasoning" | "code" | "output" | null;
   readonly lastLiveStartedAt: number;
   readonly sdkCalls: readonly SdkCall[];
 }
 
-function itemOwnMs(it: BackendTimelineItem): number {
+function itemOwnMs(it: BackendTimelineItem): number | null {
   switch (it.kind) {
     case "agent_reasoning":
-      return it.reasoning_ms ?? it.reasoningElapsedMs ?? 0;
+      return it.reasoning_ms ?? it.reasoningElapsedMs ?? null;
     case "agent_code":
-      return it.code_elapsed_ms ?? it.codeElapsedMs ?? 0;
+      return it.code_elapsed_ms ?? it.codeElapsedMs ?? null;
     case "code_output":
-      return it.exec_ms ?? it.execElapsedMs ?? 0;
+      return it.exec_ms ?? it.execElapsedMs ?? null;
     default:
       return 0;
   }
 }
 
 export function summarizeTurn(items: readonly BackendTimelineItem[]): TurnSummary {
+  let missingTiming = false;
+  let timedWorkItems = 0;
   let thinking = 0;
   let code = 0;
   let output = 0;
@@ -169,12 +173,23 @@ export function summarizeTurn(items: readonly BackendTimelineItem[]): TurnSummar
   const sdkCounts = new Map<string, number>();
   for (const it of items) {
     if (it.llmWaiting) continue;
+    // meiva:note
+    // A missing provider measurement is unknown, including after a reload drops
+    // browser-only clocks. Never infer work from timestamps across idle gaps.
+    // meiva:link ui/web/src/docs/frontend-components/timeline-view/deep-collapse.md
+    if (["agent_reasoning", "agent_code", "code_output"].includes(it.kind) && itemOwnMs(it) !== null) {
+      timedWorkItems += 1;
+    }
+    if (itemOwnMs(it) === null &&
+        !isLiveReasoning(it) && !isLiveCode(it) && !isLiveExecution(it)) {
+      missingTiming = true;
+    }
     if (it.kind === "agent_reasoning") {
       thinking += 1;
-      thinkingMs += itemOwnMs(it);
+      thinkingMs += itemOwnMs(it) ?? 0;
     } else if (it.kind === "agent_code") {
       code += 1;
-      codeMs += itemOwnMs(it);
+      codeMs += itemOwnMs(it) ?? 0;
       if (it.sdk_calls) {
         for (const c of it.sdk_calls) {
           sdkCounts.set(c.method, (sdkCounts.get(c.method) ?? 0) + c.count);
@@ -182,7 +197,7 @@ export function summarizeTurn(items: readonly BackendTimelineItem[]): TurnSummar
       }
     } else if (it.kind === "code_output") {
       output += 1;
-      execMs += itemOwnMs(it);
+      execMs += itemOwnMs(it) ?? 0;
     } else if (it.kind === "system_prompt") {
       systemPrompts += 1;
     } else if (it.kind === "inbound_compact_summary" || it.kind === "inbound_compact_request") {
@@ -242,6 +257,8 @@ export function summarizeTurn(items: readonly BackendTimelineItem[]): TurnSummar
     execMs,
     sdkCalls,
     workedMs,
+    missingTiming,
+    timedWorkItems,
     lastLiveKind,
     lastLiveStartedAt,
   };
