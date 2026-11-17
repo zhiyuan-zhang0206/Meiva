@@ -12,6 +12,7 @@ import os
 import shlex
 import signal
 import sys
+import tempfile
 import uuid
 from collections.abc import Generator
 from dataclasses import dataclass, replace
@@ -70,14 +71,15 @@ class TwoRunnerCluster:
 
 @pytest.fixture
 def two_runners(
-    tmp_path: Path,
     db_conn: psycopg.Connection,
     database: Database,
     config_authority: ConfigAuthority,
     model_catalog: ModelCatalog,
 ) -> Generator[TwoRunnerCluster]:
-    home_a = tmp_path / "home-runner-a"
-    home_b = tmp_path / "home-runner-b"
+    temp_root = tempfile.TemporaryDirectory(prefix="pty-")
+    root = Path(temp_root.name)
+    home_a = root / "a"
+    home_b = root / "b"
     home_a.mkdir()
     home_b.mkdir()
     pty_services: list[PtyServiceProcess] = []
@@ -97,6 +99,7 @@ def two_runners(
 
     try:
         for home in (home_a, home_b):
+            assert len(str(service_socket_path(run_dir(home)))) < 90
             service = PtyServiceProcess(home)
             service.start()
             pty_services.append(service)
@@ -143,6 +146,7 @@ def two_runners(
         for service in reversed(pty_services):
             service.stop()
             service_socket_path(run_dir(service.home)).unlink(missing_ok=True)
+        temp_root.cleanup()
 
 
 def _seed_native_agent(
@@ -396,6 +400,7 @@ def test_transfer_fails_closed_when_a_live_pty_outlives_an_unreachable_service(
             ),
             what="the live payload to keep writing after export was refused",
         )
+        _assert_terminal_fence(two_runners.home_a, agent_id, 2)
         _assert_source_did_not_cut_over(db_conn, two_runners, agent_id)
     finally:
         _kill_process(writer_pid)
