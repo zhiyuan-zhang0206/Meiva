@@ -41,6 +41,7 @@ from gateway.agents import router as agents_router
 from gateway.agents import state as agents_state_router
 from gateway.agents.history import conversation as conversation_router
 from gateway.agents.history import inbound as inbound_router
+from gateway.agents.history import reading_api as reading_window_router
 from gateway.agents.history import timeline as timeline_router
 from gateway.agents.history import understanding as agents_understanding_router
 from gateway.agents.launch.scheduled_lifecycle import AppointmentAppState
@@ -522,6 +523,7 @@ def create_app(
         inspect_router.router,
         shell_router.router,
         timeline_router.router,
+        reading_window_router.router,
         reply_suggestion_router.router,
         publications_router.router,
         asks_router.router,

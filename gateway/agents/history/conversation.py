@@ -17,7 +17,7 @@ from gateway.agents.eval_guard import deny_isolated_result_read
 from gateway.agents.history.timeline import (
     TimelineResponse,
     head_timeline,
-    load_current_messages,
+    load_current_source,
 )
 from gateway.agents.schemas import PendingInbound, TokenUsageResponse
 from gateway.agents.state import get_pending_messages, token_usage_response
@@ -54,11 +54,10 @@ def get_conversation_snapshot(agent_id: int, request: Request) -> ConversationSn
     """
     with gateway_state(request).db_pool.connection() as conn:
         harness = agent_harness(conn, agent_id)
-    messages = (
-        [] if harness != "meiva" else load_current_messages(gateway_state(request).db, agent_id)
-    )
+    source = None if harness != "meiva" else load_current_source(request, agent_id)
+    messages = () if source is None else source.messages
     return ConversationSnapshotResponse(
-        timeline=head_timeline(agent_id, request, messages),
+        timeline=head_timeline(agent_id, request, source),
         token_usage=token_usage_response(agent_id, request, messages),
         pending=get_pending_messages(agent_id, request),
     )

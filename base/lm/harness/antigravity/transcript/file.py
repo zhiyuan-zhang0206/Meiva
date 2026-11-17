@@ -49,6 +49,9 @@ class AntigravityRecordFile(RecordFile):
     def rows_after(self, start: int) -> Block:
         return self._enrich(super().rows_after(start))
 
+    def rows_forward(self, start: int, want: int = BLOCK_BYTES) -> Block:
+        return self._enrich(super().rows_forward(start, want))
+
     def _enrich(self, block: Block) -> Block:
         data = self._load()
         rows: list[FileRow] = []

@@ -7,6 +7,7 @@ from pathlib import Path
 import zstandard
 from psycopg_pool import ConnectionPool
 
+from base.agents.history.timeline import reading_target, reading_window
 from base.agents.history.timeline_item import TimelineItem
 from base.agents.history.transcript_timeline.items import ReplyPolicy, format_tool_use
 from base.agents.history.transcript_timeline.record.harness import (
@@ -16,9 +17,22 @@ from base.agents.history.transcript_timeline.record.harness import (
     unreadable_file,
     wire_id,
 )
-from base.agents.history.transcript_timeline.record.read import read_window
+from base.agents.history.transcript_timeline.record.read import (
+    LoadSent,
+    read_reading_window,
+    read_window,
+)
 from base.agents.history.transcript_timeline.sent import load_sent_rows, sent_inputs
 from base.api_contracts.agent_contract import reads_timeline_from_record
+from base.api_contracts.reading import (
+    ReadingSourceUnavailableError,
+    ReadingUnavailableReason,
+    RecordReadingLocator,
+    RecordReadingSource,
+    decode_reading_locator,
+    encode_reading_locator,
+    encode_reading_source,
+)
 from base.lm.harness.registry import FileSessionRegistry
 from base.lm.harness.session.transcript.entries import InputRow
 from base.lm.harness.session.transcript.record_file import RecordFile, ZstdRecordFile
@@ -72,6 +86,8 @@ def read_harness_timeline(
         return sent_inputs(rows.rows)
 
     try:
+        if request.reading_locator is not None:
+            return _reading_window(request, file, record.session_id, load_sent)
         window = read_window(
             file,
             harness=request.harness,
@@ -87,9 +103,11 @@ def read_harness_timeline(
     except FileNotFoundError:
         return _empty(request)
     except zstandard.ZstdError as error:
+        if request.reading_locator is not None:
+            raise
         _report_unreadable(request, environ, record.session_id, reason=str(error))
         return _empty(request)
-    items = window.timeline_items
+    items = _with_record_locators(window.timeline_items, request, record.session_id)
     verified = (
         request.anchor_item_id
         if any(item.item_id == request.anchor_item_id for item in items)
@@ -110,6 +128,104 @@ def _empty(request: HarnessTimelineReadRequest) -> HarnessTimelineWindow:
         has_more=False,
         size=0,
         anchor_applied=request.anchor_item_id is not None,
+        reading_applied=request.reading_locator is not None,
+        reading_unavailable=ReadingUnavailableReason.SOURCE
+        if request.reading_locator is not None
+        else None,
+    )
+
+
+def _record_source(request: HarnessTimelineReadRequest, session: str) -> RecordReadingSource:
+    return RecordReadingSource.model_validate(
+        {
+            "agent_id": request.agent_id,
+            "harness": request.harness,
+            "session_id": session,
+        }
+    )
+
+
+def _with_record_locators(
+    items: list[TimelineItem], request: HarnessTimelineReadRequest, session: str
+) -> list[TimelineItem]:
+    source = _record_source(request, session)
+    bound: list[TimelineItem] = []
+    for item in items:
+        offset, block = item.item_id.split(".")
+        locator = RecordReadingLocator(
+            agent_id=source.agent_id,
+            harness=source.harness,
+            session_id=source.session_id,
+            offset=int(offset[1:]),
+            block=int(block),
+        )
+        bound.append(item.model_copy(update={"reading_locator": encode_reading_locator(locator)}))
+    return bound
+
+
+def _reading_window(
+    request: HarnessTimelineReadRequest, file: RecordFile, session: str, load_sent: LoadSent
+) -> HarnessTimelineWindow:
+    if request.reading_locator is None or request.reading_direction is None:
+        raise ValueError("A source reading selector is required")
+    locator = decode_reading_locator(request.reading_locator)
+    source = _record_source(request, session)
+    if not isinstance(locator, RecordReadingLocator) or (
+        locator.agent_id,
+        locator.harness,
+        locator.session_id,
+    ) != (request.agent_id, request.harness, session):
+        return _reading_unavailable(file, source, ReadingUnavailableReason.SOURCE)
+    try:
+        window = read_reading_window(
+            file,
+            harness=request.harness,
+            offset=locator.offset,
+            policy=ReplyPolicy(request.explicit_visibility, request.delivery_mode),
+            render_tool=format_tool_use,
+            load_sent=load_sent,
+        )
+        items = _with_record_locators(window.timeline_items, request, session)
+        target = reading_target(items, locator)
+        selected = reading_window(
+            items,
+            target,
+            request.reading_direction,
+            request.limit,
+            older_available=window.has_more,
+            newer_available=window.has_newer,
+        )
+        contextual = window.with_call_context(selected.items)
+        selected_items = _with_record_locators(contextual, request, session)
+        return HarnessTimelineWindow(
+            items=selected_items,
+            has_more=selected.older_cursor is not None,
+            size=window.size,
+            anchor_item_id=selected.anchor_item_id,
+            reading_applied=True,
+            reading_source=encode_reading_source(source),
+            older_cursor=selected.older_cursor,
+            newer_cursor=selected.newer_cursor,
+        )
+    except ReadingSourceUnavailableError as exc:
+        reason = (
+            ReadingUnavailableReason.BUDGET
+            if exc.reason is ReadingUnavailableReason.SOURCE
+            else exc.reason
+        )
+        return _reading_unavailable(file, source, reason)
+
+
+def _reading_unavailable(
+    file: RecordFile, source: RecordReadingSource, reason: ReadingUnavailableReason
+) -> HarnessTimelineWindow:
+    return HarnessTimelineWindow(
+        items=[],
+        has_more=False,
+        size=file.size(),
+        reading_applied=True,
+        reading_source=encode_reading_source(source),
+        reading_unavailable=reason,
     )
 
 

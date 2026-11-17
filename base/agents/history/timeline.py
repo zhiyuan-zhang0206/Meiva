@@ -12,6 +12,7 @@ from langchain_core.messages import (
     ToolCall,
 )
 
+from base.agents.history.timeline_item import ReadingWindow
 from base.agents.history.timeline_item import TimelineItem as TimelineItem
 from base.agents.messages.envelope import inbound_body
 from base.agents.messages.inbound_images import kwargs_upload_files
@@ -26,12 +27,22 @@ from base.agents.messages.quote import Quote
 from base.agents.messages.reply_intent import resolve_agent_reply
 from base.agents.messages.timestamp_policy import TimestampPolicy
 from base.agents.sdk.tally import SdkCall, sdk_calls_by_tool_call_id
+from base.api_contracts.reading import (
+    NativeReadingLocator,
+    ReadingDirection,
+    ReadingLocator,
+    ReadingSourceUnavailableError,
+    ReadingUnavailableReason,
+    RecordReadingLocator,
+)
 from base.host.boundary.json_values import is_object_dict
 from base.lm.content import message_addl_kwargs, message_content
 from base.lm.system_note import unwrap_system_note
 
 __all__ = [
     "build_timeline_items",
+    "reading_target",
+    "reading_window",
     "tail_window",
     "timeline_default_limit",
 ]
@@ -387,6 +398,119 @@ def tail_window(items: list[TimelineItem], limit: int) -> tuple[list[TimelineIte
     if limit <= 0 or len(items) <= limit:
         return items, False
     return items[-limit:], True
+
+
+# meiva:note
+# Source readers have already verified the target and bound each stable item's
+# locator. Directional pages exclude its whole source row; an anchor keeps that
+# row intact. Only selected edge rows can issue continuation cursors.
+# meiva:link base/agents/history/docs/timeline/timeline.md
+def reading_window(
+    items: Sequence[TimelineItem],
+    target: int,
+    direction: ReadingDirection,
+    limit: int,
+    *,
+    older_available: bool,
+    newer_available: bool,
+) -> ReadingWindow:
+    if not 1 <= limit <= 1000:
+        raise ValueError("Reading window limit must be between 1 and 1000")
+    if not 0 <= target < len(items):
+        raise ReadingSourceUnavailableError(
+            ReadingUnavailableReason.IDENTITY, "Reading target is unavailable"
+        )
+    start, end = _reading_bounds(items, target, direction, limit)
+    if start == end:
+        crossing = older_available if direction is ReadingDirection.BEFORE else newer_available
+        if crossing:
+            raise ReadingSourceUnavailableError(
+                ReadingUnavailableReason.SOURCE, "The next source segment is required"
+            )
+        return ReadingWindow(items=[])
+    selected = list(items[start:end])
+    return ReadingWindow(
+        items=selected,
+        anchor_item_id=items[target].item_id if direction is ReadingDirection.ANCHOR else None,
+        older_cursor=_reading_edge_cursor(selected) if start > 0 or older_available else None,
+        newer_cursor=_reading_edge_cursor(selected[::-1])
+        if end < len(items) or newer_available
+        else None,
+    )
+
+
+def _reading_row_span(items: Sequence[TimelineItem], index: int) -> tuple[int, int]:
+    first, last = index, index + 1
+    row = items[index].item_id.rsplit(".", 1)[0]
+    while first > 0 and items[first - 1].item_id.rsplit(".", 1)[0] == row:
+        first -= 1
+    while last < len(items) and items[last].item_id.rsplit(".", 1)[0] == row:
+        last += 1
+    return first, last
+
+
+def _reading_bounds(
+    items: Sequence[TimelineItem], target: int, direction: ReadingDirection, limit: int
+) -> tuple[int, int]:
+    first, last = _reading_row_span(items, target)
+    match direction:
+        case ReadingDirection.ANCHOR:
+            start = max(0, target - limit // 2)
+            end = min(len(items), start + limit)
+            start = max(0, end - limit)
+        case ReadingDirection.BEFORE:
+            start, end = max(0, first - limit), first
+        case ReadingDirection.AFTER:
+            start, end = last, min(len(items), last + limit)
+        case _:
+            assert_never(direction)
+    if start == end:
+        return start, end
+    start, _ = _reading_row_span(items, start)
+    _, end = _reading_row_span(items, end - 1)
+    return start, end
+
+
+def _reading_edge_cursor(items: Sequence[TimelineItem]) -> str:
+    row = items[0].item_id.rsplit(".", 1)[0]
+    for item in items:
+        if item.item_id.rsplit(".", 1)[0] != row:
+            break
+        if item.reading_locator is not None:
+            return item.reading_locator
+    raise ReadingSourceUnavailableError(
+        ReadingUnavailableReason.IDENTITY, "The window edge has no stable identity"
+    )
+
+
+# meiva:note
+# The source domain is selected before matching. Local display coordinates
+# cannot identify a native message after compaction; all supplied stable
+# identities and the block must agree on exactly one rendered item.
+# meiva:link base/agents/history/docs/timeline/timeline.md
+def reading_target(items: Sequence[TimelineItem], locator: ReadingLocator) -> int:
+    if isinstance(locator, RecordReadingLocator):
+        found = [i for i, item in enumerate(items) if item.item_id == locator.item_id()]
+    elif isinstance(locator, NativeReadingLocator):
+        found = [
+            i for i, item in enumerate(items) if _native_reading_identity_matches(item, locator)
+        ]
+    else:
+        assert_never(locator)
+    if len(found) != 1:
+        raise ReadingSourceUnavailableError(
+            ReadingUnavailableReason.IDENTITY,
+            "The source cannot uniquely match this reading identity",
+        )
+    return found[0]
+
+
+def _native_reading_identity_matches(item: TimelineItem, locator: NativeReadingLocator) -> bool:
+    return (
+        item.source_block_idx == locator.block
+        and (locator.message_id is None or item.source_message_id == locator.message_id)
+        and (locator.inbound_id is None or item.source_inbound_id == locator.inbound_id)
+    )
 
 
 def _fold_addl_reasoning_into_content(

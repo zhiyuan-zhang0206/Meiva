@@ -11,3 +11,13 @@ ending at the last complete record row retains pending activity just like the ne
 window, including when partial bytes follow that row; a historical window with newer rows remains settled. A partial JSONL
 line or non-DONE Antigravity planner response cannot become a Quote source by
 settling activity.
+
+
+Source-qualified reading windows use the same request-owned rendering, history
+depth, visibility and placement inputs. `reading_api.py` authenticates and checks
+evaluation isolation before reading, dispatches record selectors through
+`fetch_record_window`, and validates capability, source identity and exact anchor
+membership in the actual response. `native_reading_window.py` projects the single
+consistent checkpoint source view and obtains adjacent segments from the same
+source owner. The [timeline contract](../../../../base/agents/history/docs/timeline/timeline.md#source-qualified-reading-windows)
+describes stable identities, directional cursors and refusal reasons.

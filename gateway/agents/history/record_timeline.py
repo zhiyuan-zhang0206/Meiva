@@ -10,6 +10,7 @@ from pydantic import BaseModel
 from base.agents.history.timeline_item import TimelineItem
 from base.agents.to_user.delivery.store import delivery_mode
 from base.api_contracts.agent_contract import reads_timeline_from_record
+from base.api_contracts.reading import ReadingDirection
 from base.api_contracts.user_delivery import UserDeliveryMode
 from base.db.rows import query_one
 from gateway.agents.history.configuration import request_timeline_read
@@ -49,7 +50,14 @@ def _placement(request: Request, agent_id: int) -> tuple[str, UserDeliveryMode]:
 
 
 async def fetch_record_window(
-    request: Request, agent_id: int, harness: str, *, limit: int, before: int | None
+    request: Request,
+    agent_id: int,
+    harness: str,
+    *,
+    limit: int,
+    before: int | None,
+    reading_locator: str | None = None,
+    reading_direction: ReadingDirection | None = None,
 ) -> HarnessTimelineWindow:
     state = gateway_state(request)
     machine, mode = await asyncio.to_thread(_placement, request, agent_id)
@@ -60,13 +68,15 @@ async def fetch_record_window(
         before=before,
         explicit_visibility=mode.value == "prefix",
         delivery_mode=mode.value,
+        reading_locator=reading_locator,
+        reading_direction=reading_direction,
     )
     try:
         result = await gateway_rpc(request).dispatch_to_machine(
             state.db,
             target_machine=machine,
             kind="harness_timeline_read",
-            payload=payload.model_dump(exclude={"anchor_item_id"}),
+            payload=payload.wire_payload(),
             timeout_s=READ_TIMEOUT_SECONDS,
             retries=0,
         )

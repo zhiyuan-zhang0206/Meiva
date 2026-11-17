@@ -25,6 +25,11 @@ from langchain_core.messages import BaseMessage, HumanMessage
 
 from base.agents.history.timeline import TimelineItem, build_timeline_items
 from base.agents.messages.timestamp_policy import TimestampPolicy
+from base.api_contracts.reading import (
+    INITIAL_READING_EPOCH,
+    NativeReadingSource,
+    encode_reading_source,
+)
 from base.clock import Clock
 from base.config import settings
 from base.db import create_agent
@@ -55,7 +60,14 @@ def test_timeline_empty_for_new_agent(db_conn: psycopg.Connection, test_client: 
     tid = create_agent(db_conn)
     resp = test_client.get(f"/api/agents/{tid}/timeline")
     assert resp.status_code == 200
-    assert resp.json() == {"items": [], "msg_count": 0, "has_more": False}
+    assert resp.json() == {
+        "items": [],
+        "msg_count": 0,
+        "has_more": False,
+        "reading_source": encode_reading_source(
+            NativeReadingSource(agent_id=tid, epoch=INITIAL_READING_EPOCH)
+        ),
+    }
 
 
 class TestSdkCallsProjection:

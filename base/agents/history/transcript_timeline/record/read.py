@@ -17,12 +17,15 @@ from base.agents.history.transcript_timeline.record.harness import (
     wire_id,
 )
 from base.agents.history.transcript_timeline.record.match import CLAIM_SLACK
+from base.api_contracts.reading import ReadingSourceUnavailableError, ReadingUnavailableReason
 from base.lm.harness.session.transcript.entries import AgentText, InputRow, Reasoning
 from base.lm.harness.session.transcript.record_file import (
     BLOCK_BYTES,
     MAX_BLOCK_BYTES,
+    Block,
     FileRow,
     RecordFile,
+    RecordReadBudgetError,
     stamp_of,
 )
 
@@ -53,13 +56,102 @@ class Window:
     has_more: bool
     size: int
     turn_start: int | None
+    has_newer: bool = False
 
     @property
     def timeline_items(self) -> list[TimelineItem]:
         return [projected.item for projected in self.items]
 
+    def with_call_context(self, selected: Sequence[TimelineItem]) -> list[TimelineItem]:
+        if not selected:
+            return []
+        first = next(
+            i for i, item in enumerate(self.items) if item.item.item_id == selected[0].item_id
+        )
+        last = (
+            next(
+                i for i, item in enumerate(self.items) if item.item.item_id == selected[-1].item_id
+            )
+            + 1
+        )
+        cut = _cut(Projected(self.items[:last], (), 0, frozenset(), self.turn_start), last - first)
+        return [item.item for item in self.items[cut:last]]
+
 
 LoadSent = Callable[[datetime, Mapping[str, InputRow]], Mapping[str, Sequence[TimelineItem]]]
+
+
+# meiva:note
+# An opt-in parked read shares the committed-row parser and projector. Forward
+# rows and turn/call context stay inside the plain request or compressed held
+# region; inability to prove the requested source is explicit unavailability.
+# meiva:link base/lm/harness/docs/transcript-projection.md
+def read_reading_window(
+    file: RecordFile,
+    *,
+    harness: str,
+    offset: int,
+    policy: ReplyPolicy,
+    render_tool: Callable[[str, Mapping[str, object]], str],
+    load_sent: LoadSent,
+) -> Window:
+    try:
+        file.prepare_reading(offset)
+        row = file.row_at(offset)
+        if row is None:
+            raise ReadingSourceUnavailableError(
+                ReadingUnavailableReason.IDENTITY, "The complete target row is unavailable"
+            )
+        terminal = file.complete_record_end()
+        forward = _forward_reading_rows(file, row.end, terminal)
+        rows = [row, *forward.rows]
+        start, want = row.offset, BLOCK_BYTES
+        while True:
+            block = file.rows_before(start, want)
+            rows = [*block.rows, *rows]
+            grown, start = start - block.start, block.start
+            projected = _items_of(
+                rows,
+                harness=harness,
+                tail=forward.end == terminal,
+                complete_only=True,
+                policy=policy,
+                render_tool=render_tool,
+                load_sent=load_sent,
+            )
+            if (
+                start == 0
+                or not projected.items
+                or (_whole(projected, 0) and _input_context_complete(rows, projected, 0, harness))
+            ):
+                return Window(
+                    projected.items,
+                    start > 0,
+                    file.size(),
+                    projected.turn_start,
+                    forward.end < terminal,
+                )
+            if grown == 0:
+                raise ReadingSourceUnavailableError(
+                    ReadingUnavailableReason.BUDGET,
+                    "The source context exceeds the retained window",
+                )
+            want = min(want * 2, MAX_REQUEST_BYTES)
+    except RecordReadBudgetError as exc:
+        raise ReadingSourceUnavailableError(ReadingUnavailableReason.BUDGET, str(exc)) from exc
+
+
+def _forward_reading_rows(file: RecordFile, start: int, terminal: int) -> Block:
+    want = BLOCK_BYTES
+    while True:
+        block = file.rows_forward(start, want)
+        if block.rows or start >= terminal:
+            return block
+        if want >= MAX_REQUEST_BYTES:
+            raise ReadingSourceUnavailableError(
+                ReadingUnavailableReason.BUDGET, "The next row exceeds the source window"
+            )
+        want = min(want * 2, MAX_REQUEST_BYTES)
 
 
 def read_window(

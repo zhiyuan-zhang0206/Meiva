@@ -18,20 +18,23 @@ from collections.abc import Sequence
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from langchain_core.messages import BaseMessage
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from base.agents.history.checkpoint import (
     CheckpointReadError,
+    CheckpointTimelineSource,
     list_compact_boundary_checkpoint_ids,
     load_checkpoint_message_count,
     load_checkpoint_messages,
-    load_checkpoint_messages_segment,
+    load_checkpoint_timeline_source,
 )
 from base.agents.history.timeline import TimelineItem, build_timeline_items, tail_window
 from base.agents.messages.timestamp_policy import TimestampPolicy
+from base.api_contracts.reading import ReadingSourceUnavailableError, encode_reading_source
 from base.db import Database, agent_exists
 from gateway.agents.eval_guard import deny_isolated_result_read
 from gateway.agents.history.configuration import request_timeline_read
+from gateway.agents.history.native_reading_window import native_source_identity, native_source_items
 from gateway.agents.history.paging import (
     STANDING_HEAD_NOTE_TAGS,
     Row,
@@ -49,13 +52,16 @@ from gateway.http.config import gateway_state
 from gateway.message_admission.cursor import (
     MAX_CURSOR_LENGTH,
     TimelineCursor,
-    item_sort_key,
     parse_cursor,
 )
 from gateway.message_admission.harness import agent_harness
 
 router = APIRouter()
 _log = logging.getLogger(__name__)
+
+
+def _missing_reading_metadata(value: object) -> bool:
+    return value is None or value is False
 
 
 class TimelineResponse(BaseModel):
@@ -75,6 +81,7 @@ class TimelineResponse(BaseModel):
     items: list[TimelineItem]
     msg_count: int
     has_more: bool
+    reading_source: str | None = Field(default=None, exclude_if=_missing_reading_metadata)
 
 
 class RetainedTimelineResponse(BaseModel):
@@ -139,14 +146,17 @@ def _load_history_segment(
     if limit is None:
         limit = read.default_limit
     try:
-        messages = load_checkpoint_messages_segment(db, agent_id, checkpoint_id)
+        source = load_checkpoint_timeline_source(
+            db, agent_id, read.compact_history, checkpoint_id=checkpoint_id
+        )
+    except ReadingSourceUnavailableError:
+        return None
     except CheckpointReadError as exc:
         raise _read_unavailable(agent_id, exc) from exc
-    if not messages:
+    if not source.messages:
         return None
     prefix = f"s{rank}.{checkpoint_id}"
-    items, _ = build_timeline_items(messages, inputs=read.rendering, segment_prefix=prefix)
-    return items
+    return native_source_items(source, agent_id, read.rendering, segment_prefix=prefix)
 
 
 def _load_boundary_ids(db: Database, agent_id: int, depth: int) -> list[str]:
@@ -225,6 +235,15 @@ def load_current_messages(db: Database, agent_id: int) -> list[BaseMessage]:
         raise _read_unavailable(agent_id, exc) from exc
 
 
+def load_current_source(request: Request, agent_id: int) -> CheckpointTimelineSource:
+    try:
+        return load_checkpoint_timeline_source(
+            gateway_state(request).db, agent_id, request_timeline_read(request).compact_history
+        )
+    except CheckpointReadError as exc:
+        raise _read_unavailable(agent_id, exc) from exc
+
+
 def load_current_timeline_items(
     db: Database,
     agent_id: int,
@@ -251,22 +270,6 @@ def _require_agent(request: Request, agent_id: int) -> None:
     with gateway_state(request).db_pool.connection() as conn:
         if not agent_exists(conn, agent_id):
             raise HTTPException(status_code=404, detail=f"agent {agent_id} not found")
-
-
-def _current_items(
-    request: Request,
-    agent_id: int,
-    messages: Sequence[BaseMessage],
-    limit: int,
-    before: str | None,
-    *,
-    read: TimelineRead,
-) -> tuple[list[TimelineItem], int]:
-    """The current segment's rendered, hydrated items in item-id order + msg_count."""
-    _ = (request, agent_id, limit, before)
-    items, msg_count = build_timeline_items(messages, inputs=read.rendering)
-    items.sort(key=lambda it: item_sort_key(it.item_id))
-    return items, msg_count
 
 
 def _is_work_item(item: TimelineItem) -> bool:
@@ -305,16 +308,16 @@ def _picked(items: Sequence[TimelineItem], selection: Selection) -> list[Timelin
 
 
 def _head_response(
-    request: Request,
     agent_id: int,
-    messages: Sequence[BaseMessage],
+    source: CheckpointTimelineSource,
     limit: int,
     boundary_ids: list[str],
     *,
     read: TimelineRead,
 ) -> TimelineResponse:
     """The head window (no cursor) of the current segment."""
-    items, msg_count = _current_items(request, agent_id, messages, limit, None, read=read)
+    items = native_source_items(source, agent_id, read.rendering)
+    msg_count = len(source.messages)
     tail, tail_has_more = tail_window(items, limit)
     window = initial_window(
         _rows(items),
@@ -324,18 +327,19 @@ def _head_response(
         historical_segments_available=bool(boundary_ids),
     )
     return TimelineResponse(
-        items=_picked(items, window), msg_count=msg_count, has_more=window.has_more
+        items=_picked(items, window),
+        msg_count=msg_count,
+        has_more=window.has_more,
+        reading_source=encode_reading_source(native_source_identity(source, agent_id)),
     )
 
 
+# meiva:note
+# A composed read reuses its consistent checkpoint view for the default head.
+# meiva:link base/agents/history/docs/timeline/timeline.md
 def head_timeline(
-    agent_id: int, request: Request, messages: Sequence[BaseMessage]
+    agent_id: int, request: Request, source: CheckpointTimelineSource | None
 ) -> TimelineResponse:
-    """The default head window ``GET .../timeline`` serves, from loaded messages.
-
-    For a composed read that already holds the live checkpoint's messages
-    (``load_current_messages``) so it deserializes the checkpoint once.
-    """
     _require_agent(request, agent_id)
     read = request_timeline_read(request)
     limit = read.default_limit
@@ -343,7 +347,7 @@ def head_timeline(
     if harness != "meiva":
         return _external_harness_response(request, agent_id, harness, limit, None, None)
     return _meiva_harness_response(
-        request, agent_id, limit, None, None, read=read, preloaded_messages=messages or None
+        request, agent_id, limit, None, None, read=read, preloaded_source=source
     )
 
 
@@ -427,28 +431,28 @@ def _meiva_harness_response(
     cursor: TimelineCursor | None,
     *,
     read: TimelineRead,
-    preloaded_messages: Sequence[BaseMessage] | None = None,
+    preloaded_source: CheckpointTimelineSource | None = None,
 ) -> TimelineResponse:
     depth = read.compact_history
     db: Database = gateway_state(request).db
-    boundary_ids = _load_boundary_ids(db, agent_id, depth)
+    if before is not None and (cursor is None or cursor.checkpoint_id is not None):
+        boundary_ids = _load_boundary_ids(db, agent_id, depth)
+        early = _historical_response(db, agent_id, before, cursor, limit, boundary_ids, read=read)
+        if early is not None:
+            return early
 
-    early = _historical_response(db, agent_id, before, cursor, limit, boundary_ids, read=read)
-    if early is not None:
-        return early
-
-    messages = (
-        preloaded_messages
-        if preloaded_messages is not None
-        else load_current_messages(db, agent_id)
+    source = (
+        preloaded_source if preloaded_source is not None else load_current_source(request, agent_id)
     )
+    boundary_ids = list(source.boundaries if depth < 0 else source.boundaries[:depth])
     if before is None:
-        return _head_response(request, agent_id, messages, limit, boundary_ids, read=read)
-    items_cp, msg_count = _current_items(request, agent_id, messages, limit, before, read=read)
+        return _head_response(agent_id, source, limit, boundary_ids, read=read)
+    items_cp = native_source_items(source, agent_id, read.rendering)
+    msg_count = len(source.messages)
     paged = _current_page_before(items_cp, cursor, limit, depth, boundary_ids, msg_count)
     if isinstance(paged, TimelineResponse):
         return paged
-    del messages, items_cp
+    del source, items_cp
     older_window, has_more = _load_history_tail(
         db, agent_id, boundary_ids, 1, limit, depth, read=read
     )

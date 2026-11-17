@@ -59,3 +59,48 @@ consumes only completed user-facing chat blocks.
 ## Window unit and readers
 
 display.timeline_default_limit (MEIVA_TIMELINE_DEFAULT_LIMIT, default 50) counts timeline ITEMS and is read per call through timeline_default_limit() — both the gateway and the agent import this module, so consumers must not capture the value at import. tail_window returns the newest limit items plus has_more; limit <= 0 or a list no longer than the limit returns everything with has_more=False.
+
+
+## Source-qualified reading windows
+
+Cold readers attach an optional `reading_locator` to items whose source can be
+verified. Live node projection does no additional database read to create this
+metadata. A locator is an opaque, versioned transport coordinate; authorization,
+source availability and exact membership are checked again when it is used.
+
+`GET /api/agents/{id}/timeline/window` requires exactly one `anchor`, `before`
+or `after` token and accepts `limit` from 1 through 1000. Anchor success contains
+the exact canonical target. Pages contain complete source rows, so a multi-block
+row can exceed the item limit. Source-issued `older_cursor` and `newer_cursor`
+advance by rows, and a proven end returns a null continuation. The navigation
+window excludes the standing system prompt; ordinary head rendering keeps it.
+The response's `reading_source` identifies the source view, including a verified
+empty view, without asserting that a browser cache is empty or current.
+
+Native readers obtain messages, compact boundaries and source domain from one
+read-only repeatable-read checkpoint view. The epoch selects a current or retained
+domain; message identity or embedded inbound identity plus block then matches
+exactly one item. Local display indices never establish native membership.
+A just-sealed boundary that is still the latest committed checkpoint remains the
+active readable source until the next current checkpoint commits. Other retained
+segments obey the configured history depth. Delta channels use the existing saver
+reconstruction. Adjacent pages load one neighboring segment and return explicit
+unavailability if an intermediate segment cannot provide a stable edge.
+
+Record readers bind the agent's current registry, harness, session, committed row
+and block. They share the existing parser, projector, complete-row anchor and
+call context with ordinary and Quote reads. The gateway awaits the record RPC,
+then calls the single `settle_record_activity` owner; an inactive process settles
+activity without completing partial source text.
+
+Malformed selectors return 422. A verified unavailable identity, source domain
+or read budget returns 410 with code `reading_source_unavailable` and a
+`reading_reason` extension (`identity`, `source`, or `budget`). Transport and
+source failures keep the existing 503/502 behavior. Record dispatch is bounded
+to three seconds with no retry. A reader without selector support cannot report
+its head as a successful anchored response. Ordinary requests omit unused new
+selector fields, and ordinary RPC replies omit unused new envelope fields.
+
+Browser restoration is a separate consumer stage. A failed or cancelled read,
+budget refusal or unavailable source is not evidence that a saved bookmark was
+deleted and must not cause a fallback viewport to overwrite it.
