@@ -110,9 +110,9 @@ def _verify_export_fence(
 #
 # The measurement comes before the fence: a workspace over either ceiling is refused while the
 # agent's shells are still alive and before a byte of it is read, so a refused export leaves the
-# source exactly as it was. Export requires confirmed local cleanup: a new daemon acknowledges
-# its atomic fence, while a retained legacy daemon enumerates and kills below the durable cutoff.
-# The legacy window cannot reject delayed allocations; other fence failures abort before packing.
+# source exactly as it was. Export requires an acknowledged atomic allocation fence. A legacy
+# daemon can accept delayed allocations after enumeration; retained TTL rows support eventual
+# cleanup, so neither enumeration nor TTL retention proves the workspace is safe to copy.
 def export_workspace_bundle(
     pool: ConnectionPool,
     request: WorkspaceExportRequest,
@@ -123,11 +123,16 @@ def export_workspace_bundle(
 ) -> bytes:
     session_index = _verify_export_fence(pool, request, local_machine=local_machine)
     preflight_workspace_budget(paths.workspace_path(home, request.agent_id), limits=limits)
-    killed = kill_agent_shells(
+    cleanup = kill_agent_shells(
         request.agent_id,
         before_session_index=session_index,
         home=home,
     )
+    if not cleanup.fenced:
+        raise WorkspaceTransferConflictError(
+            "Workspace export requires an atomic shell fence; "
+            "the retained PTY daemon does not support it"
+        )
     harness_transfers, not_transferred = collect_harness_transfers(
         home=home, agent_id=request.agent_id
     )
@@ -136,7 +141,7 @@ def export_workspace_bundle(
         agent_id=request.agent_id,
         transfer_id=request.transfer_id,
         source_machine=local_machine,
-        killed_shell_sessions=killed.killed,
+        killed_shell_sessions=cleanup.killed,
         limits=limits,
         harness_transfers=harness_transfers,
         harnesses_not_transferred=not_transferred,

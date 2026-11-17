@@ -4,6 +4,7 @@ import socket
 import threading
 from collections.abc import Generator
 from contextlib import contextmanager
+from pathlib import Path
 
 from base.sessions.pty import protocol
 from base.sessions.pty.tests.pty_service import service_socket
@@ -62,6 +63,55 @@ def legacy_service(error: str) -> Generator[list[str]]:
                     else:
                         raise AssertionError(method)
                     conn.sendall(protocol.encode(reply))
+
+        thread = threading.Thread(target=serve)
+        thread.start()
+        try:
+            yield calls
+        finally:
+            stop.set()
+            thread.join(timeout=5)
+            path.unlink(missing_ok=True)
+
+
+@contextmanager
+def legacy_fence_proxy(path: Path, upstream: Path) -> Generator[list[str]]:
+    """Forward to an unfenced daemon, refusing only the newer fence RPC."""
+    calls: list[str] = []
+    stop = threading.Event()
+    with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as listener:
+        listener.bind(str(path))
+        listener.listen()
+        listener.settimeout(0.1)
+
+        def serve() -> None:
+            while not stop.is_set():
+                try:
+                    conn, _ = listener.accept()
+                except TimeoutError:
+                    continue
+                with conn:
+                    line = protocol.read_line(conn)
+                    assert line is not None
+                    req = protocol.decode_object(line)
+                    method = str(req["method"])
+                    calls.append(method)
+                    if method == "fence_agent_shells":
+                        reply = protocol.encode(
+                            protocol.err(
+                                req["id"],
+                                protocol.BAD_REQUEST,
+                                "unknown_method: fence_agent_shells",
+                            )
+                        )
+                    else:
+                        with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as target:
+                            target.connect(str(upstream))
+                            target.sendall(line + b"\n")
+                            response = protocol.read_line(target)
+                        assert response is not None
+                        reply = response + b"\n"
+                    conn.sendall(reply)
 
         thread = threading.Thread(target=serve)
         thread.start()
