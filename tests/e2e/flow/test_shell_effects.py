@@ -244,7 +244,7 @@ def test_session_survives_agent_host_and_gateway_restarts(
 
 @pytest.mark.scenario("tests.e2e.fakes.scenarios.shell_effects:build_watchers")
 def test_background_and_schedules_wake_owner_with_their_sources(
-    spawned_agent: int, clean_shell_world: None
+    spawned_agent: int, clean_shell_world: None, schedule_manager_proc: None
 ) -> None:
     chat_and_wait(spawned_agent, "start watchers")
     launch, at, cron = map(int, (world.sandbox() / "watcher-ids").read_text().split())
@@ -281,7 +281,9 @@ def test_background_and_schedules_wake_owner_with_their_sources(
 
 
 @pytest.mark.scenario("tests.e2e.fakes.scenarios.shell_effects:build_watcher_timeout")
-def test_background_ttl_expiry_notifies_owner(spawned_agent: int, clean_shell_world: None) -> None:
+def test_background_ttl_expiry_notifies_owner(
+    spawned_agent: int, clean_shell_world: None, ttl_reaper_proc: None
+) -> None:
     chat_and_wait(spawned_agent, "start bounded watcher")
     wid = int((world.sandbox() / "timeout-id").read_text())
 
@@ -311,7 +313,7 @@ def test_background_ttl_expiry_notifies_owner(spawned_agent: int, clean_shell_wo
 
 @pytest.mark.scenario("tests.e2e.fakes.scenarios.shell_effects:build_watcher_termination")
 def test_owner_termination_cancels_at_schedule_before_it_can_fire(
-    spawned_agent: int, clean_shell_world: None
+    spawned_agent: int, clean_shell_world: None, schedule_manager_proc: None
 ) -> None:
     agent = spawned_agent
     chat_and_wait(agent, "arm a schedule before termination")
@@ -361,7 +363,7 @@ def test_owner_termination_cancels_at_schedule_before_it_can_fire(
 
 
 @pytest.mark.scenario("tests.e2e.fakes.scenarios.shell_effects:build_watcher_orphan")
-def test_background_child_exits_when_its_session_shell_is_killed(
+def test_background_child_exits_when_its_session_is_killed(
     spawned_agent: int, clean_shell_world: None
 ) -> None:
     chat_and_wait(spawned_agent, "start a long watcher")
@@ -386,12 +388,17 @@ def test_background_child_exits_when_its_session_shell_is_killed(
         return state == psutil.STATUS_ZOMBIE, state
 
     try:
-        os.kill(shell.pid, signal.SIGKILL)
+        sid = int((world.sandbox() / "orphan-session").read_text())
+        backend = PtySessionBackend(
+            config=PtyClientConfig(socket_path=service_socket()), home=meiva_home()
+        )
+        killed, _mode = backend.kill_session(f"meiva-agent-{spawned_agent}-shell-{sid}-e2e-orphan")
+        assert killed
         poll_until(
             child_dead,
             timeout=20.0,
             interval=0.2,
-            what="orphan guard ends watcher child",
+            what="session kill ends background child",
         )
     finally:
         if not child_dead()[0]:

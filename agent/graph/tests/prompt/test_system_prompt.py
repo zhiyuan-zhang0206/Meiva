@@ -46,7 +46,7 @@ FRAMEWORK_NAMESPACES = {
     "self",
     "shell",
     "ui",
-    "watcher",
+    "schedules",
     "web",
 }
 
@@ -71,6 +71,7 @@ def test_wildcard_expands_all_public_namespaces() -> None:
     discovery would not surface."""
     result = _expand(["*"])
 
+    assert "watcher" not in result
     assert set(result) >= FRAMEWORK_NAMESPACES
     assert "shell.sessions" in result  # nested namespace discovered recursively
     assert result == discover_all_namespaces(())
@@ -160,9 +161,9 @@ def test_member_of_a_capability_surface_is_refused(
 def test_wildcard_respects_sdk_disable() -> None:
     """A namespace listed in MEIVA_SDK_DISABLE is dropped from the wildcard set —
     a disabled namespace must never be expanded back into the prompt."""
-    result = _expand(["*"], disabled=("watcher",))
+    result = _expand(["*"], disabled=("schedules",))
 
-    assert "watcher" not in result
+    assert "schedules" not in result
     assert "files" in result and "self" in result
 
 
@@ -179,6 +180,7 @@ def test_wildcard_merges_with_explicit_nested_path() -> None:
     result = _expand(["*", "shell.sessions"])
 
     assert "shell.sessions" in result
+    assert "watcher" not in result
     assert set(result) >= FRAMEWORK_NAMESPACES
     assert result.index("shell") < result.index("shell.sessions")
 
@@ -233,6 +235,7 @@ def test_plugin_expansions_lead_the_wildcard() -> None:
     result = effective_sdk_expand(["*"], disabled=(), plugin_expansions=("cwd",))
 
     assert result[0] == "cwd"
+    assert "watcher" not in result
     assert set(result) >= FRAMEWORK_NAMESPACES
 
 
@@ -245,6 +248,7 @@ def test_section_renders_all_wildcard_namespaces(model_catalog: ModelCatalog) ->
     for ns in FRAMEWORK_NAMESPACES:
         assert f"## meiva.{ns}" in text
     assert "## meiva.understand" not in text
+    assert "## meiva.watcher" not in text
     assert "## meiva.help" not in text
     assert "## meiva.shell.sessions" in text  # nested namespace rendered
 

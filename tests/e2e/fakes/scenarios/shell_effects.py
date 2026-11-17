@@ -173,10 +173,11 @@ def build_watcher_orphan(model: str, *, agent_id: int | None) -> RecordingModel:
         "while True: time.sleep(60)\n"
     )
     code = (
-        "import meiva, shlex\nfrom pathlib import Path\n"
+        "import meiva, shlex, sys\nfrom pathlib import Path\n"
         f"script = Path({str(root / 'e2e-orphan.py')!r})\n"
         f"meiva.files.write(str(script), {watcher_code!r})\n"
-        "wid = meiva.shell.run_background('\"$MEIVA_PYTHON\" ' + shlex.quote(str(script)), ttl=60, name='e2e-orphan')\n"
+        "wid = meiva.shell.run_background(shlex.join([sys.executable, str(script)]), ttl=60, name='e2e-orphan')\n"
+        "(script.parent / 'orphan-session').write_text(str(wid.session_id))\n"
         "print('orphan-watcher', wid)"
     )
     return RecordingModel(agent_id=agent_id, script=(exec_call(1, code), say("orphan guard armed")))

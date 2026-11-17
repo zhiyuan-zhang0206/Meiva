@@ -1,31 +1,32 @@
-"""tests/e2e/ pytest fixtures — cross-process happy path orchestration.
+# meiva:note
+# tests/e2e/ pytest fixtures — cross-process happy path orchestration.
+#
+# Fixture dependency:
+# - e2e_env (function): depends on spawned_agent + playwright_page + frontend_proc
+# - spawned_agent (function): depends on gateway_proc + truncated_db
+# - gateway_proc (function): depends on scenario_env (env must be set first)
+# - package-scoped: e2e_process_env / e2e_db / playwright_runtime / playwright_browser —
+#   package, not session, because `e2e_process_env` mutates process-global env and its
+#   restore must fire when pytest leaves this directory rather than at end-of-session,
+#   and playwright_runtime's main-thread asyncio loop must close the same way (see their
+#   docstrings)
+# - session-scoped: frontend_proc
+#
+# env injection chain:
+#     pytest sets os.environ → gateway subprocess inherits → gateway internally spawns
+#     agent subprocess inherits → agent build_chat_model reads MEIVA_LLM_OVERRIDE.
+#     gateway must be function-scoped——session-scoped start once then env is fixed,
+#     subsequent setenv cannot get into agent subprocess.
+#
+# Concurrency isolation: DB/Redis reuses the throwaway Postgres + Redis started per worker in the top-level conftest
+# (`provisioned_db` / `provisioned_redis`, URLs already in settings + env). This conftest
+# adds another layer of per-session suffix `<PID>_<TS>` to isolate remaining process-level resources:
+# - Redis channel `meiva:events:e2e:<suffix>`
+# - MEIVA_HOME `/tmp/m-e2e-<suffix>` (transcripts/plugins)
+# - gateway/frontend ports (kernel-assigned, see `_ports.py`)
+# - agents_id_seq PID offset (session names don't collide across workers)
+# ensuring multiple local e2e sessions (dev agents + CI runner) truly run concurrently without interference.
 
-Fixture dependency:
-- e2e_env (function): depends on spawned_agent + playwright_page + frontend_proc
-- spawned_agent (function): depends on gateway_proc + truncated_db
-- gateway_proc (function): depends on scenario_env (env must be set first)
-- package-scoped: e2e_process_env / e2e_db / playwright_runtime / playwright_browser —
-  package, not session, because `e2e_process_env` mutates process-global env and its
-  restore must fire when pytest leaves this directory rather than at end-of-session,
-  and playwright_runtime's main-thread asyncio loop must close the same way (see their
-  docstrings)
-- session-scoped: frontend_proc
-
-env injection chain:
-    pytest sets os.environ → gateway subprocess inherits → gateway internally spawns
-    agent subprocess inherits → agent build_chat_model reads MEIVA_LLM_OVERRIDE.
-    gateway must be function-scoped——session-scoped start once then env is fixed,
-    subsequent setenv cannot get into agent subprocess.
-
-Concurrency isolation: DB/Redis reuses the throwaway Postgres + Redis started per worker in the top-level conftest
-(`provisioned_db` / `provisioned_redis`, URLs already in settings + env). This conftest
-adds another layer of per-session suffix `<PID>_<TS>` to isolate remaining process-level resources:
-- Redis channel `meiva:events:e2e:<suffix>`
-- MEIVA_HOME `tmp/meiva_e2e_home_<suffix>` (transcripts/plugins)
-- gateway/frontend ports (kernel-assigned, see `_ports.py`)
-- agents_id_seq PID offset (session names don't collide across workers)
-ensuring multiple local e2e sessions (dev agents + CI runner) truly run concurrently without interference.
-"""
 
 from __future__ import annotations
 
@@ -130,7 +131,9 @@ def pytest_collection_modifyitems(
 # concurrent e2e workers don't collide.
 _E2E_SUFFIX = f"{os.getpid()}_{int(time.time() * 1_000_000)}"
 
-_MEIVA_HOME = _REPO_ROOT / "tmp" / f"meiva_e2e_home_{_E2E_SUFFIX}"
+# meiva:note
+# Keep root-control and PTY socket addresses below AF_UNIX limits even in deep worktrees.
+_MEIVA_HOME = (Path("/tmp") / f"m-e2e-{_E2E_SUFFIX}").resolve()  # noqa: S108
 
 
 # ---- session fixtures ---------------------------------------------------
@@ -179,6 +182,7 @@ def e2e_process_env(provisioned_db: str, provisioned_redis: str) -> Iterator[Non
         "MEIVA_MACHINE_SERVE_AGENT_RUNNER",
         "MEIVA_MACHINE_NAME",
         "MEIVA_NODE_STALL_DUMP_SECONDS",
+        "MEIVA_TTL_REAPER_POLL_INTERVAL_SECONDS",
     )
     previous = (
         settings.data_plane.events_channel,
@@ -201,6 +205,7 @@ def e2e_process_env(provisioned_db: str, provisioned_redis: str) -> Iterator[Non
     # inherit the var and dump every thread's stack to stderr (captured as the
     # agent-*.log artifact), naming the blocked frame.
     os.environ["MEIVA_NODE_STALL_DUMP_SECONDS"] = "15"
+    os.environ["MEIVA_TTL_REAPER_POLL_INTERVAL_SECONDS"] = "1"
     # No MEIVA_LAUNCH_CONFIRM_TIMEOUT_SECONDS override (and so no `_env_keys` entry
     # for it): this fixture used to widen the 10s prod default to 25s because a CI
     # runner's parallel load ran the agent's boot — self-fetching config from the

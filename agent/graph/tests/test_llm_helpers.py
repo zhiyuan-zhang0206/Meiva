@@ -81,9 +81,10 @@ def test_capture_meiva_overview_returns_non_empty_string() -> None:
 
 
 def test_capture_meiva_overview_surfaces_public_sdk_index() -> None:
+    # meiva:note
     # The overview = `# meiva` H1 + one entry per public top-level namespace as
     # `from . import X` + that module's docstring. This is the SDK index, so the
-    # agent discovers the gateway primitives (agents / watcher / self) without
+    # agent discovers the gateway primitives (agents / schedules / self) without
     # spelunking; full per-namespace detail stays on demand via meiva.help(meiva.X).
     # The root docstring was deliberately removed (sysprompt verbosity audit,
     # PR #840) — the `# meiva` heading stands alone.
@@ -96,10 +97,11 @@ def test_capture_meiva_overview_surfaces_public_sdk_index() -> None:
         f"removed root docstring still rendered: {overview[:200]!r}"
     )
     # gateway primitives surfaced as index entries
-    for name in ("agents", "watcher", "self", "shell"):
+    for name in ("agents", "schedules", "self", "shell"):
         assert f"from . import {name}" in overview, (
             f"surface primitive {name!r} should appear in overview: {overview[:600]!r}"
         )
+    assert "from . import watcher" not in overview
     # only `# meiva` heading; children render as `from . import` import stubs, not headings
     heading_lines = [
         line
