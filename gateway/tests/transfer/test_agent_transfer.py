@@ -25,6 +25,7 @@ import pytest
 from psycopg.types.json import Jsonb
 
 from base import paths
+from base.api_contracts.agent_contract import Harness, HarnessBilling
 from base.cluster.machine import MachineFacts
 from base.config.service_read import ConfigAuthority
 from base.db import Database, create_agent
@@ -40,6 +41,7 @@ from base.sessions.tests.poll_until import poll_until
 from gateway.agents.transfer.router import CutoverConflictError, commit_cutover_blocking
 from gateway.agents.transfer.transfer_plan import AgentTransferSnapshot
 from gateway.cluster.process_boot import LOADED_IMAGE
+from gateway.schemas.models import HarnessAvailability, HarnessModelOption
 from gateway.tests.auth.gateway_config import (
     GatewayTestClient,
     gateway_test_client,
@@ -430,6 +432,19 @@ def test_transfer_reports_an_external_session_whose_transcript_cannot_move(
     two_runners: TwoRunnerCluster,
     db_conn: psycopg.Connection,
 ) -> None:
+    two_runners.client.app.state.harness_cache.store(
+        "runner-b",
+        [
+            HarnessAvailability(
+                harness=Harness.CODEX,
+                status="available",
+                reason="test destination probe",
+                launchable=True,
+                billing=HarnessBilling.SUBSCRIPTION,
+                models=[HarnessModelOption(id="gpt-6.1-sol")],
+            )
+        ],
+    )
     codex_id = _seed_native_agent(db_conn, machine="runner-a", status="idling", harness="codex")
     db_conn.execute(
         "UPDATE agents_meta SET birth_config = %s WHERE id = %s",
