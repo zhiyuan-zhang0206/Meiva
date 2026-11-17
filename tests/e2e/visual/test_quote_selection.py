@@ -23,6 +23,11 @@ def test_selected_quote_preserves_draft_and_native_selection(
     width: int,
     tmp_path: Path,
 ) -> None:
+    sent_text = (
+        "First paragraph of the saved quote.\n\n"
+        + "LongUnbrokenText" * 100
+        + "\n\nFinal paragraph remains visible by default."
+    )
     items = [
         {
             "item_id": "1.0",
@@ -50,7 +55,7 @@ def test_selected_quote_preserves_draft_and_native_selection(
                 "source_message_id": "durable-quote-source",
                 "source_block_idx": 0,
                 "author": "Agent #1",
-                "text": "An exact selected phrase",
+                "text": sent_text,
                 "created_at": "2026-11-17T00:00:00Z",
             },
         },
@@ -75,13 +80,7 @@ def test_selected_quote_preserves_draft_and_native_selection(
             context, quote_frontend, "/?agent_id=1", stub_api=True, timeline_items=items
         )
         wait_layout_settled(page)
-        page.get_by_role("button", name="Quoted · Agent #1").click()
-        assert (
-            page.locator('.timeline-item[data-item-id="1.0"]').evaluate(
-                "node => node.getAnimations().length"
-            )
-            > 0
-        )
+        _check_sent_quote(page, sent_text, width, tmp_path)
         composer = page.locator("textarea").last
         composer.fill("Why did this happen?")
         expect(page.get_by_role("button", name="Quote selection", exact=True)).to_have_count(0)
@@ -205,3 +204,34 @@ def test_error_marker_body_can_be_quoted(
         expect(composer).to_have_value("Why did this timeout happen?")
     finally:
         context.close()
+
+
+def _check_sent_quote(page: Page, text: str, width: int, tmp_path: Path) -> None:
+    card = page.locator('[data-item-id="2.0"] [data-quote-exclude]')
+    body = card.locator("p")
+    expect(body).to_have_text(text)
+    expect(card.locator("details, summary")).to_have_count(0)
+    body.scroll_into_view_if_needed()
+    geometry = body.evaluate("""node => {
+        const style = getComputedStyle(node);
+        const rect = node.getBoundingClientRect();
+        return {whiteSpace: style.whiteSpace, clamp: style.webkitLineClamp,
+                height: rect.height, lineHeight: parseFloat(style.lineHeight),
+                width: node.clientWidth, scrollWidth: node.scrollWidth,
+                clientHeight: node.clientHeight, scrollHeight: node.scrollHeight};
+    }""")
+    assert geometry["whiteSpace"] == "pre-wrap"
+    assert geometry["clamp"] == "none"
+    assert geometry["height"] > geometry["lineHeight"] * 5
+    assert geometry["scrollHeight"] <= geometry["clientHeight"] + 1
+    assert geometry["scrollWidth"] <= geometry["width"] + 1
+    assert page.evaluate("document.documentElement.scrollWidth <= innerWidth")
+    expect(card.get_by_role("button", name="Quoted · Agent #1")).to_be_visible()
+    _ = page.screenshot(path=str(tmp_path / f"quote-sent-full-{width}.png"))
+    card.get_by_role("button", name="Quoted · Agent #1").click()
+    assert (
+        page.locator('.timeline-item[data-item-id="1.0"]').evaluate(
+            "node => node.getAnimations().length"
+        )
+        > 0
+    )

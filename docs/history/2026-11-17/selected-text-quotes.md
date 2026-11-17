@@ -13,3 +13,5 @@ Implementation review update: the delegator required already-loaded retained nat
 Review update: expanded work details include readable error and notification bodies. Their selected fragments use the system marker's existing stable message identity; marker headers and controls stay outside the selection body. Sources without stable marker identity are refused explicitly, retaining the draft snapshot for correction.
 
 Async-send review update: a successful quote send clears its persisted draft reference only when that reference still matches the submitted snapshot. This preserves a replacement quote selected during an in-flight send even if the user switches conversations before completion. Direct asynchronous Composer controls cover replacement retention and unchanged-quote cleanup. External quote POST controls also exercise exact record offset arithmetic and routing for each supported external harness, including adjacent/deleted sources with zero writes.
+
+Follow-up: the user requested full default display of sent quote snapshots; see [sent quote full display](sent-quote-full-display.md).

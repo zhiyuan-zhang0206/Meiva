@@ -16,7 +16,7 @@ export function QuoteCard({ quote }: { quote: Quote }) {
   return (
     <div data-quote-exclude className="mb-2 rounded-md border border-border bg-muted/40 px-3 py-2 text-sm text-muted-foreground">
       <button type="button" className="text-left text-xs underline-offset-2 hover:underline" onClick={() => navigate?.(quote)}>{t("quoteSource", { author: quote.author })}</button>
-      <details><summary className="line-clamp-2 cursor-pointer whitespace-pre-wrap">{quote.text}</summary><p className="whitespace-pre-wrap">{quote.text}</p></details>
+      <p className="whitespace-pre-wrap [overflow-wrap:anywhere]">{quote.text}</p>
     </div>
   );
 }
