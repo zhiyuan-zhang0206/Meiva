@@ -98,7 +98,7 @@ describe("Composer reply suggestion", () => {
     expect(input().selectionStart).toBe("Use D.".length);
     expect(input().selectionEnd).toBe("Use D.".length);
     fireEvent.keyDown(input(), { key: "Enter" });
-    await waitFor(() => expect(onSend).toHaveBeenCalledWith("Use D.", [], expect.any(String)));
+    await waitFor(() => expect(onSend).toHaveBeenCalledWith("Use D.", [], expect.any(String), undefined));
     await waitFor(() => expect(input().value).toBe(""));
     expect(input().placeholder).toBe("Send a message");
     expect(fireEvent.keyDown(input(), { key: "ArrowRight" })).toBe(true);
@@ -210,7 +210,7 @@ describe("Composer reply suggestion", () => {
     });
     fireEvent.keyDown(input(), { key: "Enter" });
     await waitFor(() => {
-      expect(onSend).toHaveBeenCalledWith(SUGGESTION, [], expect.any(String));
+      expect(onSend).toHaveBeenCalledWith(SUGGESTION, [], expect.any(String), undefined);
     });
   });
   it("typing hides it, and emptying the input brings it back", () => {
@@ -340,7 +340,7 @@ describe("Composer button mode dispatch", () => {
     fireEvent.click(screen.getByRole("button", { name: "Send message" }));
     await Promise.resolve();
     await Promise.resolve();
-    expect(onSend).toHaveBeenCalledWith("hello", [], expect.any(String));
+    expect(onSend).toHaveBeenCalledWith("hello", [], expect.any(String), undefined);
     expect(onStop).not.toHaveBeenCalled();
   });
   it("marks send latency at submit time before message delivery starts", () => {
@@ -368,7 +368,7 @@ describe("Composer button mode dispatch", () => {
     fireEvent.click(screen.getByRole("button", { name: "Send message" }));
     await Promise.resolve();
     await Promise.resolve();
-    expect(onSend).toHaveBeenCalledWith("draft", [], expect.any(String));
+    expect(onSend).toHaveBeenCalledWith("draft", [], expect.any(String), undefined);
     expect(onStop).not.toHaveBeenCalled();
   });
   it("mode='busy' + empty input → click triggers onStop (cancel path)", () => {
@@ -424,7 +424,7 @@ describe("Composer Enter / IME / Shift+Enter", () => {
     fireEvent.keyDown(ta, { key: "Enter" });
     await Promise.resolve();
     await Promise.resolve();
-    expect(onSend).toHaveBeenCalledWith("msg", [], expect.any(String));
+    expect(onSend).toHaveBeenCalledWith("msg", [], expect.any(String), undefined);
   });
   it("Enter in mode='busy' goes to onSend, not onStop (stop is click-only)", async () => {
     const onSend = vi.fn(() => Promise.resolve(true));
@@ -435,7 +435,7 @@ describe("Composer Enter / IME / Shift+Enter", () => {
     fireEvent.keyDown(ta, { key: "Enter" });
     await Promise.resolve();
     await Promise.resolve();
-    expect(onSend).toHaveBeenCalledWith("draft", [], expect.any(String));
+    expect(onSend).toHaveBeenCalledWith("draft", [], expect.any(String), undefined);
     expect(onStop).not.toHaveBeenCalled();
   });
   it("mode='busy' + empty input → Enter no-op (nothing to send, also not stop)", async () => {
@@ -520,6 +520,6 @@ it("lets the user send their own reply without dismissing the suggestion", async
   fireEvent.change(input, { target: { value: "Hold the release" } });
   fireEvent.click(screen.getByTestId("composer-send"));
   await waitFor(() => expect(input.value).toBe(""));
-  expect(onSend).toHaveBeenCalledWith("Hold the release", [], expect.any(String));
+  expect(onSend).toHaveBeenCalledWith("Hold the release", [], expect.any(String), undefined);
   expect(transport.recordSuggestionFeedback).not.toHaveBeenCalled();
 });

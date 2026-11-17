@@ -58,5 +58,9 @@
   "turnPlural": "轮",
   "agentResponding": "Agent 正在回复。",
   "agentResponseComplete": "Agent 回复已完成。",
-  "copied": "已复制"
+  "copied": "已复制",
+  "quoteSelection": "引用选中文字",
+  "quoteTooLong": "请选择不超过 4000 个字符。",
+  "quoteSource": "引用 · {author}",
+  "quoteUnavailable": "原消息暂不可定位。"
 }

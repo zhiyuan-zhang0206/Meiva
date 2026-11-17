@@ -25,7 +25,7 @@ import {
   OVERFLOW_HIDDEN,
 } from "@/lib/layout/layout";
 
-import { CallBadge, DisclosureChevron, DISCLOSURE_TITLE_CLS } from "./view/card-summary";
+import { CallBadge, DisclosureChevron, DISCLOSURE_TITLE_CLS } from "./view/card-summary/card-summary";
 import { useNow } from "./model/reasoning-clock";
 import { formatTurnSummary, turnSummaryEqual, type TurnSummary } from "./model/runs";
 

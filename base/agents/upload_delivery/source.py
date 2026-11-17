@@ -11,6 +11,7 @@ from pydantic import BaseModel, ConfigDict, TypeAdapter
 from base.agents.inbox.chat_delivery import insert_chat_inbound_in_transaction
 from base.agents.messages.inbound_images import image_mime_for
 from base.agents.messages.inbound_provenance import InboundProvenance
+from base.agents.messages.quote import Quote
 from base.agents.upload_delivery.models import (
     PROTOCOL,
     STATE,
@@ -124,6 +125,21 @@ def _taken_directories(conn: psycopg.Connection, agent_id: int, prefix: str) -> 
     return {row.send_directory for row in rows if row.send_directory is not None}
 
 
+def reconcile_send(
+    pool: ConnectionSource,
+    key: str,
+    agent_id: int,
+    *,
+    file_ids: list[str],
+    text: str,
+    quote: Quote | None = None,
+) -> Acceptance | None:
+    # meiva:note
+    # Replay durable acceptance before checking an original quote's current availability.
+    with pool.connection() as conn:
+        return _lookup(conn, key, request_hash(agent_id, file_ids, text, quote))
+
+
 def send(
     pool: ConnectionSource,
     key: str,
@@ -131,6 +147,7 @@ def send(
     *,
     file_ids: list[str],
     text: str,
+    quote: Quote | None = None,
     provenance: InboundProvenance,
     sent_at: datetime,
     batch_id: str,
@@ -138,8 +155,8 @@ def send(
     home: Path,
     upload_root: Path,
 ) -> Acceptance:
-    frozen_message = FrozenMessage(text=text, source="user")
-    fingerprint = request_hash(agent_id, file_ids, frozen_message.text)
+    frozen_message = FrozenMessage(text=text, source="user", quote=quote)
+    fingerprint = request_hash(agent_id, file_ids, frozen_message.text, quote)
     source = current_unit(local_machine=local_machine, home=home)
     directory = agent_upload_dir(agent_id, create=False, root=upload_root).resolve()
     with write_transaction(pool) as conn:
@@ -176,6 +193,7 @@ def send(
             directory=manifest.directory,
             files=manifest.objects,
             status_url=f"/api/keyed/v1/agents/{agent_id}/uploads/{manifest.batch_id}",
+            quote=quote,
         )
         conn.execute(
             "INSERT INTO upload_delivery_batches "
@@ -250,6 +268,7 @@ def status(pool: ConnectionSource, agent_id: int, batch_id: str) -> DeliveryStat
         reason=row.reason,
         directory=row.send_directory,
         message_text=frozen.text,
+        quote=frozen.quote,
         files=manifest.objects,
         inbound_id=row.inbound_id,
         source=UnitIdentity.model_validate(row.source_unit),
@@ -535,7 +554,13 @@ def complete(pool: ConnectionSource, request: ReceiveRequest, proof: CopyProof) 
             agent_id=manifest.agent_id,
             content=user_content,
             source=frozen.source,
-            payload={"image_uploads": image_uploads} if image_uploads else None,
+            payload=(
+                {
+                    **({"image_uploads": image_uploads} if image_uploads else {}),
+                    **({"quote": frozen.quote.model_dump()} if frozen.quote is not None else {}),
+                }
+                or None
+            ),
             client_message_id=f"upload-delivery-v2:{manifest.batch_id}:message",
             provenance=provenance,
         )

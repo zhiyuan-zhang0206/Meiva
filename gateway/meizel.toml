@@ -2,7 +2,7 @@ exports = ["agents", "alerts", "app.py", "cluster", "events", "http", "mcp_serve
 
 [uses]
 "__main__.py" = ["app.py"]
-"agents" = ["http", "inspect", "schemas"]
+"agents" = ["http", "inspect", "message_admission", "schemas"]
 "alerts" = ["events", "http"]
 "app.py" = ["agents", "alerts", "cluster", "events", "extensions", "http", "inspect", "lgtm", "mcp_server", "routers", "schedules", "schemas", "upload_delivery"]
 "cluster" = ["agents", "events", "http", "schemas"]
@@ -11,10 +11,11 @@ exports = ["agents", "alerts", "app.py", "cluster", "events", "http", "mcp_serve
 "http" = ["schemas"]
 "inspect" = ["http", "lgtm", "schemas"]
 "mcp_server" = ["http"]
+"message_admission" = ["http"]
 "routers" = ["agents", "http", "lgtm", "schemas"]
 "schedules" = ["agents", "http", "routers"]
 "tests" = ["agents", "app.py", "cluster", "events", "extensions", "http", "lgtm", "routers", "schedules", "schemas", "upload_delivery"]
-"upload_delivery" = ["agents", "http"]
+"upload_delivery" = ["agents", "http", "message_admission"]
 
 [purity]
 "__init__.py" = "strict"

@@ -72,6 +72,7 @@ export interface BrowserDialogs {
 }
 
 export interface BrowserView {
+  highlight(target: Element): void;
   scrollIntoView(target: Element, block: ScrollLogicalPosition): void;
 }
 
@@ -136,7 +137,13 @@ export interface BrowserIdle {
   schedule(work: () => void, timing: IdleTiming): () => void;
 }
 
+export interface BrowserSelection {
+  read(scope: Element): Range | null;
+  subscribe(scope: Element, onChange: () => void): () => void;
+}
+
 export interface Browser {
+  readonly selection: BrowserSelection;
   readonly navigation: BrowserNavigation;
   readonly local: BrowserStorage;
   readonly session: BrowserStorage;

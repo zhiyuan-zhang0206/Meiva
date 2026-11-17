@@ -8483,6 +8483,16 @@
           "status_url": {
             "type": "string",
             "title": "Status Url"
+          },
+          "quote": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Quote"
+              },
+              {
+                "type": "null"
+              }
+            ]
           }
         },
         "additionalProperties": false,
@@ -9220,6 +9230,16 @@
             "type": "boolean",
             "title": "Completion Notice",
             "default": false
+          },
+          "quote": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Quote"
+              },
+              {
+                "type": "null"
+              }
+            ]
           }
         },
         "type": "object",
@@ -11875,6 +11895,16 @@
           "message_text": {
             "type": "string",
             "title": "Message Text"
+          },
+          "quote": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Quote"
+              },
+              {
+                "type": "null"
+              }
+            ]
           },
           "files": {
             "items": {
@@ -15776,6 +15806,90 @@
           "awaiting"
         ],
         "title": "QuestionsFeed"
+      },
+      "Quote": {
+        "properties": {
+          "source_agent_id": {
+            "type": "integer",
+            "exclusiveMinimum": 0.0,
+            "title": "Source Agent Id"
+          },
+          "source_item_id": {
+            "type": "string",
+            "maxLength": 512,
+            "minLength": 1,
+            "title": "Source Item Id"
+          },
+          "source_message_id": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 512
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Source Message Id"
+          },
+          "source_inbound_id": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "exclusiveMinimum": 0.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Source Inbound Id"
+          },
+          "source_block_idx": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "minimum": 0.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Source Block Idx"
+          },
+          "author": {
+            "type": "string",
+            "maxLength": 128,
+            "minLength": 1,
+            "title": "Author"
+          },
+          "created_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 64
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Created At"
+          },
+          "text": {
+            "type": "string",
+            "maxLength": 4000,
+            "minLength": 1,
+            "title": "Text"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "source_agent_id",
+          "source_item_id",
+          "author",
+          "text"
+        ],
+        "title": "Quote"
       },
       "RebuildProgressOut": {
         "properties": {
@@ -19947,6 +20061,16 @@
             "type": "string",
             "title": "Item Id"
           },
+          "quote": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Quote"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "activity_pending": {
             "anyOf": [
               {
@@ -20698,6 +20822,16 @@
             "maxLength": 1048576,
             "title": "Text",
             "default": ""
+          },
+          "quote": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Quote"
+              },
+              {
+                "type": "null"
+              }
+            ]
           }
         },
         "additionalProperties": false,

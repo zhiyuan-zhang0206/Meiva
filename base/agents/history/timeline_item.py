@@ -13,6 +13,7 @@ from typing import Literal
 from pydantic import BaseModel
 
 from base.agents.messages.inbound_images import TimelineUploadFile
+from base.agents.messages.quote import Quote
 from base.agents.sdk.tally import SdkCall
 
 
@@ -42,6 +43,7 @@ class TimelineItem(BaseModel):
     """
 
     item_id: str
+    quote: Quote | None = None
     activity_pending: bool | None = None
     kind: Literal[
         "inbound_chat",

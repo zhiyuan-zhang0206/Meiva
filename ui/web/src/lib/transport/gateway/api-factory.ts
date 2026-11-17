@@ -1,3 +1,4 @@
+import type { Quote } from "@/lib/contracts/types";
 import type {
   QuestionsFeed,
   AttentionCounts,
@@ -194,8 +195,9 @@ export function createApi(http: Http) {
       agentId: number,
       content: string,
       clientMessageId: string,
+      quote?: Quote,
     ): Promise<AgentMessageEnqueued> => {
-      return sendMessageWithReconciliation(http, agentId, content, clientMessageId);
+      return sendMessageWithReconciliation(http, agentId, content, clientMessageId, quote);
     },
 
     // meiva:note
@@ -247,8 +249,9 @@ export function createApi(http: Http) {
       fileIds: readonly string[],
       text: string,
       operationKey: string,
+      quote?: Quote,
     ): Promise<DeliveredUploadAcceptance> =>
-      submitUploadedFiles(http, agentId, fileIds, text, operationKey),
+      submitUploadedFiles(http, agentId, fileIds, text, operationKey, quote),
 
     getUploadDeliveryStatus: (
       agentId: number,

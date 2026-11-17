@@ -1,3 +1,4 @@
+import type { Quote } from "@/lib/contracts/types";
 import type {
   DeliveredUploadAcceptance,
   DeliveredUploadStatus,
@@ -106,8 +107,9 @@ export function submitUploadedFiles(
   fileIds: readonly string[],
   text: string,
   operationKey: string,
+  quote?: Quote,
 ): Promise<DeliveredUploadAcceptance> {
-  const plan = planUploadBatch(agentId, fileIds, text, operationKey);
+  const plan = planUploadBatch(agentId, fileIds, text, operationKey, quote);
   return http
     .send(plan.path, {
       method: "POST",

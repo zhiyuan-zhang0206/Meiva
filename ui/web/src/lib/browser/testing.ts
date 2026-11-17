@@ -247,6 +247,7 @@ export function fakeBrowser(options: FakeBrowserOptions = {}): FakeBrowser {
   };
 
   const fake: FakeBrowser = {
+    selection: { read: () => null, subscribe: () => () => undefined },
     navigation: {
       location: (): PageLocation => pageLocation(href),
       state: () => historyState,
@@ -316,6 +317,7 @@ export function fakeBrowser(options: FakeBrowserOptions = {}): FakeBrowser {
       },
     },
     view: {
+      highlight: () => undefined,
       scrollIntoView(target, block) {
         actions.scrolled.push({ target, block });
       },

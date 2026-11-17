@@ -155,3 +155,59 @@ def test_a_cursor_that_is_not_an_offset_id_is_answered_like_any_harness_and_asks
 
     assert response.status_code == 200 and response.json()["items"] == []
     assert runner.calls == []
+
+
+@pytest.mark.parametrize("record_harness", ["codex", "claude_code", "antigravity"])
+@pytest.mark.parametrize(
+    ("returned_offset", "expected_status"), [(413, 201), (414, 422), (None, 422)]
+)
+def test_quote_post_requires_the_exact_record_offset(
+    client: GatewayTestClient,
+    db_conn: psycopg.Connection,
+    record_harness: str,
+    returned_offset: int | None,
+    expected_status: int,
+) -> None:
+    agent = _record_agent(db_conn, record_harness)
+    items = (
+        []
+        if returned_offset is None
+        else [
+            TimelineItem(
+                item_id=f"h{returned_offset}.0",
+                kind="agent_chat",
+                payload="rendered selected text",
+                source_message_id="record-message",
+                source_block_idx=0,
+            ).model_dump(mode="json")
+        ]
+    )
+    runner = ScriptedRunner({"items": items, "has_more": False, "size": 9800})
+    client.app.state.rpc = runner
+    response = client.post(
+        f"/api/agents/{agent}/messages",
+        json={
+            "content": "Explain this",
+            "source": "user",
+            "quote": {
+                "source_agent_id": agent,
+                "source_item_id": "h413.0",
+                "source_message_id": "record-message",
+                "source_block_idx": 0,
+                "author": "Agent",
+                "text": "selected text",
+            },
+        },
+    )
+    assert response.status_code == expected_status, response.text
+    [(machine, kind, payload)] = runner.calls
+    assert (machine, kind) == ("macmini", "harness_timeline_read")
+    assert payload["agent_id"] == agent
+    assert payload["harness"] == record_harness
+    assert payload["before"] == 414
+    assert payload["limit"] == 2
+    row = db_conn.execute(
+        "SELECT count(*) FROM inbound_messages WHERE agent_id = %s", (agent,)
+    ).fetchone()
+    assert row is not None
+    assert row[0] == (1 if expected_status == 201 else 0)

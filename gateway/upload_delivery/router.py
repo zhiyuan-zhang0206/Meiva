@@ -1,5 +1,6 @@
-# meiva:link gateway/upload_delivery/docs/delivered-uploads/delivered-uploads.md
+import asyncio
 
+# meiva:link gateway/upload_delivery/docs/delivered-uploads/delivered-uploads.md
 from typing import Annotated
 from uuid import UUID
 
@@ -17,6 +18,7 @@ from fastapi import (
 from fastapi.responses import FileResponse
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
+from base.agents.messages.quote import Quote
 from base.agents.upload_delivery import source, staging
 from base.agents.upload_delivery.models import (
     BATCH_ID_PATTERN,
@@ -28,6 +30,7 @@ from base.agents.upload_delivery.models import (
     UploadQuotaExceededError,
 )
 from base.agents.upload_delivery.paths import render_safe_headers
+from gateway.agents.eval_guard import deny_isolated_result_read
 from gateway.agents.inbound_provenance import request_inbound_provenance
 from gateway.http.auth.request_principal import (
     PRINCIPAL_SCOPE,
@@ -42,6 +45,7 @@ from gateway.http.config import (
     gateway_state,
     state_as,
 )
+from gateway.message_admission.quote_source import validate_quote_source
 from gateway.upload_delivery.receipt import StagedUploadRoute
 from gateway.upload_delivery.worker import UploadRecovery
 
@@ -68,6 +72,7 @@ class UploadSendRequest(BaseModel):
         min_length=1, max_length=1000
     )
     text: str = Field(default="", max_length=1_048_576)
+    quote: Quote | None = None
 
 
 def operation_key(
@@ -151,6 +156,27 @@ async def upload(
     request: Request,
     key: Annotated[str, Depends(operation_key)],
 ) -> Acceptance:
+    if body.quote is not None and not body.text.strip():
+        raise HTTPException(422, "Add a message to send with the quote")
+    if body.quote is not None:
+        try:
+            accepted = await _recovery(request).native(
+                source.reconcile_send,
+                gateway_state(request).db_pool,
+                key,
+                agent_id,
+                file_ids=body.file_ids,
+                text=body.text,
+                quote=body.quote,
+            )
+        except UploadDeliveryConflictError as exc:
+            raise HTTPException(409, str(exc)) from exc
+        if accepted is not None:
+            _recovery(request).nudge()
+            return accepted
+    if body.quote is not None:
+        await asyncio.to_thread(deny_isolated_result_read, request)
+    await validate_quote_source(request, agent_id, body.quote)
     config = gateway_config(request)
     batch_id = UUID(int=config.rng.getrandbits(128), version=4).hex
     sent_at = gateway_clock(request).now()
@@ -162,6 +188,7 @@ async def upload(
             agent_id,
             file_ids=body.file_ids,
             text=body.text,
+            quote=body.quote,
             provenance=request_inbound_provenance(request),
             sent_at=sent_at,
             batch_id=batch_id,

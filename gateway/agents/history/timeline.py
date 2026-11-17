@@ -32,12 +32,6 @@ from base.agents.messages.timestamp_policy import TimestampPolicy
 from base.db import Database, agent_exists
 from gateway.agents.eval_guard import deny_isolated_result_read
 from gateway.agents.history.configuration import request_timeline_read
-from gateway.agents.history.cursor import (
-    MAX_CURSOR_LENGTH,
-    TimelineCursor,
-    item_sort_key,
-    parse_cursor,
-)
 from gateway.agents.history.paging import (
     STANDING_HEAD_NOTE_TAGS,
     Row,
@@ -51,8 +45,14 @@ from gateway.agents.history.paging import (
 )
 from gateway.agents.history.read_inputs import TimelineRead
 from gateway.agents.history.record_timeline import record_window_for
-from gateway.agents.state import agent_harness
 from gateway.http.config import gateway_state
+from gateway.message_admission.cursor import (
+    MAX_CURSOR_LENGTH,
+    TimelineCursor,
+    item_sort_key,
+    parse_cursor,
+)
+from gateway.message_admission.harness import agent_harness
 
 router = APIRouter()
 _log = logging.getLogger(__name__)
