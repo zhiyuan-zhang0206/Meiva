@@ -13,6 +13,7 @@ from pydantic import (
 )
 
 from base.agents.messages.envelope import validate_source
+from base.agents.messages.quote import Quote
 
 _MessageContent = Annotated[str, StringConstraints(strip_whitespace=True, min_length=1)]
 
@@ -40,6 +41,7 @@ class AgentMessageIn(BaseModel):
     content: _MessageContent
     source: str = Field(min_length=1, max_length=64)
     completion_notice: bool = False
+    quote: Quote | None = None
 
     @field_validator("source")
     @classmethod

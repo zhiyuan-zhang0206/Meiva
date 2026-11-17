@@ -5,7 +5,7 @@ import { describe, expect, it, vi } from "vitest";
 
 import type { BackendTimelineItem } from "@/lib/contracts/types";
 
-import { CardHeader, messageCardConfig } from "../card";
+import { CardHeader, messageCardConfig } from "../../card";
 
 function item(
   kind: BackendTimelineItem["kind"],

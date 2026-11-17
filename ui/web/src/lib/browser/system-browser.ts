@@ -18,6 +18,7 @@ import type {
   BrowserNavigation,
   BrowserObjectUrls,
   BrowserSize,
+  BrowserSelection,
   BrowserStorage,
   BrowserViewport,
   MediaQuery,
@@ -30,6 +31,9 @@ export interface LiveNavigator {
 }
 
 export interface LiveDocument {
+  getSelection?(): Selection | null;
+  addEventListener?(type: "selectionchange", listener: () => void): void;
+  removeEventListener?(type: "selectionchange", listener: () => void): void;
   createElement(tag: "textarea"): HTMLTextAreaElement;
   readonly body: { appendChild(node: Node): unknown; removeChild(node: Node): unknown };
   execCommand(command: "copy"): boolean;
@@ -249,6 +253,9 @@ export function beaconOver(navigator: LiveNavigator | null): BrowserBeacon {
 // scrolled where without a DOM spy.
 export function viewOver(page: LivePage | null): Browser["view"] {
   return {
+    highlight(target) {
+      target.animate([{ outline: "2px solid currentColor", outlineOffset: "4px" }, { outline: "2px solid transparent", outlineOffset: "4px" }], { duration: 1600, easing: page?.matchMedia("(prefers-reduced-motion: reduce)").matches ? "steps(1, end)" : "ease-out" });
+    },
     scrollIntoView(target, block) {
       if (page === null) throw new Error("a server render has no view to scroll");
       target.scrollIntoView({ block });
@@ -376,10 +383,29 @@ export function objectUrlsOver(page: LivePage | null): BrowserObjectUrls {
   };
 }
 
+// meiva:note
+// A quote reader receives only a range whose endpoints belong to its own content scope.
+export function selectionOver(doc: LiveDocument | null): BrowserSelection {
+  return {
+    read(scope) {
+      const selection = doc?.getSelection?.();
+      if (!selection || selection.isCollapsed || selection.rangeCount !== 1) return null;
+      const range = selection.getRangeAt(0);
+      if (!scope.contains(range.startContainer) || !scope.contains(range.endContainer)) return null;
+      return range.cloneRange();
+    },
+    subscribe(_scope, onChange) {
+      doc?.addEventListener?.("selectionchange", onChange);
+      return () => doc?.removeEventListener?.("selectionchange", onChange);
+    },
+  };
+}
+
 const warnToConsole = (message: string): void => console.warn(message);
 
 export function browserOver(page: LivePage | null, warn: (message: string) => void): Browser {
   return {
+    selection: selectionOver(page?.document ?? null),
     navigation: navigationOver(page),
     local: storageOver(() => (page === null ? null : page.localStorage()), "local", warn),
     session: storageOver(() => (page === null ? null : page.sessionStorage()), "session", warn),

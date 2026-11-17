@@ -1,3 +1,5 @@
+import type { Quote } from "@/lib/contracts/types";
+import { isQuote } from "@/lib/contracts/types";
 // meiva:note
 // One session owner retains the composer's drafts, submit identity, and active upload
 // batch: the page's session storage when it has it, and this page view's memory when
@@ -6,6 +8,15 @@
 // meiva:link ui/web/src/docs/frontend-components/frontend-components.md
 
 import type { BrowserStorage } from "@/lib/browser/browser";
+
+export const quoteKey = (id: number) => `composer-quote-${id}`;
+
+export function readQuote(session: BrowserStorage, agentId: number): Quote | null {
+  try {
+    const value: unknown = JSON.parse(readSession(session, quoteKey(agentId)) ?? "null");
+    return isQuote(value) ? value : null;
+  } catch { return null; }
+}
 
 export const draftKey = (id: number) => `composer-draft-${id}`;
 export const sendAttemptKey = (id: number) => `composer-send-attempt-${id}`;
@@ -17,6 +28,7 @@ export interface SendAttempt {
   agentId: number | null;
   content: string;
   fileIds: string[];
+  quote?: Quote;
 }
 
 export function isAttempt(attempt: SendAttempt | null, clientMessageId: string): boolean {
@@ -91,7 +103,8 @@ function isSendAttempt(value: unknown): value is SendAttempt {
     typeof value.content === "string" &&
     "fileIds" in value &&
     Array.isArray(value.fileIds) &&
-    value.fileIds.every((id) => typeof id === "string")
+    value.fileIds.every((id) => typeof id === "string") &&
+    (!("quote" in value) || value.quote === undefined || isQuote(value.quote))
   );
 }
 
@@ -115,8 +128,9 @@ export function resolveSendAttempt(
   content: string,
   fileIds: string[],
   mintClientMessageId: () => string,
+  quote?: Quote,
 ): SendAttempt {
-  const signature = JSON.stringify([sendingAgentId, content, fileIds]);
+  const signature = JSON.stringify(quote ? [sendingAgentId, content, fileIds, quote] : [sendingAgentId, content, fileIds]);
   let candidate = current;
   if (candidate?.signature !== signature && sendingAgentId != null) {
     const persisted = readSendAttempt(session, sendingAgentId);
@@ -130,5 +144,6 @@ export function resolveSendAttempt(
         agentId: sendingAgentId,
         content,
         fileIds: [...fileIds],
+        ...(quote ? { quote } : {}),
       };
 }

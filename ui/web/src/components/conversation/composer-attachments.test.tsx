@@ -294,6 +294,7 @@ describe("Composer unified staged attachments & batch delivery", () => {
         [stagedId1],
         "review notes",
         expect.any(String),
+        undefined,
       ),
     );
     await waitFor(() => expect(ta.value).toBe(""));
@@ -322,6 +323,7 @@ describe("Composer unified staged attachments & batch delivery", () => {
   });
 
   it("surfaces a held batch with Restore to draft and Retry delivery actions", async () => {
+    const quote = {source_agent_id:7,source_item_id:"1.0",author:"Agent #7",created_at:null,text:"held selected context"};
     sessionStorage.setItem("composer-upload-batch-7", batchId1);
     transport.getUploadDeliveryStatus.mockResolvedValueOnce({
       batch_id: batchId1,
@@ -329,6 +331,7 @@ describe("Composer unified staged attachments & batch delivery", () => {
       reason: "disk full",
       directory: `/tmp/uploads/${batchId1}`,
       message_text: "held text",
+      quote,
       files: [
         {
           ordinal: 0,
@@ -351,6 +354,8 @@ describe("Composer unified staged attachments & batch delivery", () => {
     fireEvent.click(screen.getByTestId("composer-held-restore"));
     const ta = screen.getByTestId<HTMLTextAreaElement>("composer-input");
     expect(ta.value).toBe("held text");
+    expect(screen.getByTestId("composer-quote").textContent).toContain(quote.text);
+    expect(JSON.parse(sessionStorage.getItem("composer-quote-7") ?? "null")).toEqual(quote);
     expect(screen.getByText("notes.txt")).toBeTruthy();
     expect(screen.queryByTestId("composer-held-batch")).toBeNull();
   });

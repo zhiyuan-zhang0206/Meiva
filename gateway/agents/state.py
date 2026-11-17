@@ -5,7 +5,6 @@ import logging
 from collections.abc import Sequence
 from dataclasses import dataclass
 
-import psycopg
 from fastapi import APIRouter, Depends, Header, HTTPException, Query, Request
 from langchain_core.messages import AIMessage, BaseMessage
 from psycopg_pool import ConnectionPool
@@ -50,6 +49,8 @@ from gateway.agents.schemas import (
 from gateway.agents.system_note import system_note_blocking as system_note_blocking
 from gateway.http.config import gateway_config, gateway_rpc, gateway_state
 from gateway.http.model_catalog import request_default_model, require_model_catalog
+from gateway.message_admission.harness import agent_harness
+from gateway.message_admission.quote_source import validate_quote_source
 from ops import lifecycle as _ops
 from ops.agents import get_agent_status
 from ops.lifecycle.delivery import deliver_chat_inbound, reconcile_chat_delivery
@@ -73,18 +74,6 @@ class _AgentConfigRow:
     harness: str | None
     config_overlay: object
     birth_config: object
-
-
-# meiva:note
-# The harness an agent runs on; "meiva" when the column is NULL (a row born before it existed).
-@dataclass(frozen=True)
-class _HarnessRow:
-    harness: str | None
-
-
-def agent_harness(conn: psycopg.Connection, agent_id: int) -> str:
-    row = query_one(conn, _HarnessRow, "SELECT harness FROM agents_meta WHERE id = %s", (agent_id,))
-    return row.harness if row is not None and row.harness is not None else "meiva"
 
 
 def scoped_message_key(request: Request, key: str) -> str:
@@ -155,7 +144,7 @@ async def post_agent_message(
                 client_message_id=idempotency_key,
                 content=body.content,
                 source=body.source,
-                payload=None,
+                payload={"quote": body.quote.model_dump()} if body.quote is not None else None,
                 local_machine=gateway_state(request).machine.name(),
                 rpc=gateway_rpc(request),
             )
@@ -165,6 +154,9 @@ async def post_agent_message(
             return AgentMessageEnqueued(
                 status=existing.status, inbound_id=existing.inbound_id, duplicate=True
             )
+    if body.quote is not None:
+        await asyncio.to_thread(deny_isolated_result_read, request)
+    await validate_quote_source(request, agent_id, body.quote)
     if body.completion_notice:
         notice = CompletionNotice(source=body.source, content=body.content)
         if not await asyncio.to_thread(
@@ -188,7 +180,7 @@ async def post_agent_message(
             agent_id,
             prepare=lambda _conn: body.content,
             source=body.source,
-            payload=None,
+            payload={"quote": body.quote.model_dump()} if body.quote is not None else None,
             client_message_id=idempotency_key,
             provenance=provenance,
             local_machine=gateway_state(request).machine.name(),
@@ -295,7 +287,7 @@ async def reconcile_agent_message(
             client_message_id=idempotency_key,
             content=body.content,
             source=body.source,
-            payload=None,
+            payload={"quote": body.quote.model_dump()} if body.quote is not None else None,
             local_machine=gateway_state(request).machine.name(),
             rpc=gateway_rpc(request),
         )

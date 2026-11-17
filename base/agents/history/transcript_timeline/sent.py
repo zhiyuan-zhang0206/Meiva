@@ -11,6 +11,7 @@ from base.agents.history.transcript_timeline.record.match import CLAIM_SLACK, as
 from base.agents.messages.inbound import InboundKind
 from base.agents.messages.inbound_images import inbound_upload_files
 from base.agents.messages.kwargs import NoteTag
+from base.agents.messages.quote import payload_quote
 from base.host.boundary.json_values import is_object_dict, is_object_list
 from base.lm.harness.session.transcript.entries import InputRow
 from base.log import logger
@@ -209,6 +210,7 @@ def row_item(row: SentRow) -> TimelineItem | None:
             kind="inbound_chat",
             source=row.source,
             payload=row.content,
+            quote=payload_quote(row.payload),
             created_at=created,
             inbound_id=row.id,
             images=images or None,

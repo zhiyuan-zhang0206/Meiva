@@ -1,3 +1,4 @@
+import type { Quote } from "@/lib/contracts/types";
 import type { AgentMessageEnqueued } from "../../contracts/types";
 import {
   messageInit,
@@ -12,9 +13,10 @@ export function sendMessageWithReconciliation(
   agentId: number,
   content: string,
   clientMessageId: string,
+  quote?: Quote,
 ): Promise<AgentMessageEnqueued> {
   const path = `/api/agents/${agentId}/messages`;
-  const init = messageInit(content, clientMessageId);
+  const init = messageInit(content, clientMessageId, quote);
   const runStep = (step: DeliveryStep): Promise<AgentMessageEnqueued> => {
     const { action } = step;
     switch (action.kind) {

@@ -1,3 +1,4 @@
+import type { Quote } from "@/lib/contracts/types";
 import type { DeliveredUploadAcceptance, StagedFile } from "../../../contracts/types";
 import { keyedHeaders } from "./key-plan";
 
@@ -43,6 +44,7 @@ export function planUploadBatch(
   fileIds: readonly string[],
   text: string,
   operationKey: string,
+  quote?: Quote,
 ): UploadBatchPlan {
   if (!Number.isSafeInteger(agentId) || agentId <= 0) throw new Error("invalid upload agent ID");
   const headers = keyedHeaders(operationKey);
@@ -53,7 +55,7 @@ export function planUploadBatch(
   return {
     path: `/api/keyed/v1/agents/${agentId}/uploads`,
     headers: { "content-type": "application/json", ...headers },
-    body: JSON.stringify({ file_ids: [...fileIds], text }),
+    body: JSON.stringify({ file_ids: [...fileIds], text, ...(quote ? { quote } : {}) }),
     fileIds: [...fileIds],
   };
 }

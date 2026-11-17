@@ -32,7 +32,7 @@ import { inboundKind } from "./model/runs";
 import { externalAgentName } from "@/lib/format/inbound-source";
 import { isLiveCode, isLiveExecution, isLiveReasoning, LiveClockGate, useNow } from "./model/reasoning-clock";
 import { FLEX, MIN_W_0 } from "@/lib/layout/layout";
-import { agentChatTitle, DisclosureChevron, DISCLOSURE_TITLE_CLS, Summary, toolCallIcon } from "./view/card-summary";
+import { agentChatTitle, DisclosureChevron, DISCLOSURE_TITLE_CLS, Summary, toolCallIcon } from "./view/card-summary/card-summary";
 
 export type SummaryKind = "reasoning" | "code" | "output";
 

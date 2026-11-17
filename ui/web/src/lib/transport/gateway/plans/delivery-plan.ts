@@ -1,3 +1,4 @@
+import type { Quote } from "@/lib/contracts/types";
 import { keyedHeaders } from "./key-plan";
 import { hasHttpStatus, isAmbiguousDeliveryError } from "./response-plan";
 
@@ -19,11 +20,11 @@ export class MessageDeliveryUnknownError extends Error {
   }
 }
 
-export function messageInit(content: string, clientMessageId: string): RequestInit {
+export function messageInit(content: string, clientMessageId: string, quote?: Quote): RequestInit {
   return {
     method: "POST",
     headers: { "content-type": "application/json", ...keyedHeaders(clientMessageId) },
-    body: JSON.stringify({ content, source: "user" }),
+    body: JSON.stringify({ content, source: "user", ...(quote ? { quote } : {}) }),
   };
 }
 

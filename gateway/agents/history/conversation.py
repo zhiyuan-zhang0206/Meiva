@@ -20,8 +20,9 @@ from gateway.agents.history.timeline import (
     load_current_messages,
 )
 from gateway.agents.schemas import PendingInbound, TokenUsageResponse
-from gateway.agents.state import agent_harness, get_pending_messages, token_usage_response
+from gateway.agents.state import get_pending_messages, token_usage_response
 from gateway.http.config import gateway_state
+from gateway.message_admission.harness import agent_harness
 
 router = APIRouter()
 

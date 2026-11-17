@@ -23,7 +23,7 @@ import {
 } from "@/lib/format/item-summary";
 import { cn } from "@/lib/format/utils";
 
-import { isLiveCode, isLiveExecution, itemLiveStartedAt } from "../model/reasoning-clock";
+import { isLiveCode, isLiveExecution, itemLiveStartedAt } from "../../model/reasoning-clock";
 
 export const DISCLOSURE_TITLE_CLS =
   "truncate group-hover/disclosure:text-foreground group-focus-visible/disclosure:text-foreground";
