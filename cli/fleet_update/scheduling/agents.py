@@ -1,4 +1,6 @@
-"""Use the serving gateway's CLI for paginated observation and explicit message provenance."""
+# meiva:note
+# Use the serving gateway's CLI for paginated observation and explicit message provenance.
+
 
 from __future__ import annotations
 

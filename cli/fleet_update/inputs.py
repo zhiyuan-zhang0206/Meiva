@@ -1,4 +1,6 @@
-"""Ambient inputs captured by the CLI entry for one update window."""
+# meiva:note
+# Ambient inputs captured by the CLI entry for one update window.
+
 
 from __future__ import annotations
 

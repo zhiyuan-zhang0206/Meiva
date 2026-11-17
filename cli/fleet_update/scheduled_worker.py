@@ -1,4 +1,6 @@
-"""OS-owned entry: wait outside Meiva, claim once, then perform a strict update attempt."""
+# meiva:note
+# OS-owned entry: wait outside Meiva, claim once, then perform a strict update attempt.
+
 
 from __future__ import annotations
 

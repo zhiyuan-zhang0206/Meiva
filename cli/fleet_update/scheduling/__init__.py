@@ -1,4 +1,6 @@
-"""Schedule only a prepared full update, with one strict quiescence check before down."""
+# meiva:note
+# Schedule only a prepared full update, with one strict quiescence check before down.
+
 
 from __future__ import annotations
 

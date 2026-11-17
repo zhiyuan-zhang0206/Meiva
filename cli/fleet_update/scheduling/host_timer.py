@@ -1,4 +1,6 @@
-"""Persist and arm a host-owned timer; never replace or unload the executing job."""
+# meiva:note
+# Persist and arm a host-owned timer; never replace or unload the executing job.
+
 
 from __future__ import annotations
 

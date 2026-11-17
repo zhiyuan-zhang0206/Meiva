@@ -1,4 +1,6 @@
-"""Host timer arguments and agent-directory parsing for a strict scheduled attempt."""
+# meiva:note
+# Host timer arguments and agent-directory parsing for a strict scheduled attempt.
+
 
 from __future__ import annotations
 

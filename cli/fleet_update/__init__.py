@@ -22,6 +22,32 @@ from .session import FailedError, Pacing, RefusedError, Session, Timers
 from .up import up
 
 
+def _halves(half: str) -> tuple[str, ...]:
+    return ("down", "up") if half == "run" else (half,)
+
+
+def _identity(args: choices.FleetArgs, operation_id: str, initiator: str) -> OperationIdentity:
+    request = args.target_request
+    if request is None:
+        return OperationIdentity(
+            operation_id, initiator, "overridden", "up-only:no target decision in this half"
+        )
+    gate, reason = gate_for(request.target_mode, branch=request.branch)
+    return OperationIdentity(operation_id, initiator, gate, reason)
+
+
+def _new_target(s: Session, args: choices.FleetArgs, pinned: str | None) -> str | None:
+    if args.half == "up":
+        return None
+    if args.target_request is None:
+        raise RefusedError("refused: no target to resolve")
+    if pinned is not None:
+        return pinned
+    resolved = resolve_target(s.repo, args.target_request)
+    s.say(resolved.notice)
+    return resolved.sha
+
+
 # meiva:note
 # One window, from validated `FleetArgs` to exit code. Every ambient fact arrives as a value, read
 # once by the entry point: the repository the NEW commit is resolved in, the environment (the PATH
@@ -68,22 +94,7 @@ def run_window(
             print(f"refused: {problem}")
             return 2
         initiator = str(args.source)
-    target_request = args.target_request
-    if target_request is None:
-        operation = OperationIdentity(
-            operation_id=operation_id,
-            initiator=initiator,
-            gate="overridden",
-            gate_reason="up-only:no target decision in this half",
-        )
-    else:
-        gate, gate_reason = gate_for(target_request.target_mode, branch=target_request.branch)
-        operation = OperationIdentity(
-            operation_id=operation_id,
-            initiator=initiator,
-            gate=gate,
-            gate_reason=gate_reason,
-        )
+    operation = _identity(args, operation_id, initiator)
     s = Session(
         log_dir=args.log_dir,
         half=args.half,
@@ -98,19 +109,7 @@ def run_window(
     phase = "down" if args.half == "run" else args.half
     resolved_new: str | None = None
     try:
-        if args.half != "up":
-            if target_request is None:
-                # meiva:note
-                # `choices.parse` refuses a half that needs a target and was given none, so this
-                # arm is unreachable in a real window; it refuses rather than letting a `None`
-                # reach the resolver, where the failure would name a type instead of the choice.
-                raise FailedError("refused: no target to resolve")
-            if pinned_new is not None:
-                resolved_new = pinned_new
-            else:
-                resolved = resolve_target(repo, target_request)
-                resolved_new = resolved.sha
-                s.say(resolved.notice)
+        resolved_new = _new_target(s, args, pinned_new)
         hosts = [args.gateway, *args.runner]
         unames = s.run_all(hosts, lambda host: s.run(host, "uname -s", effect=False).split()[-1])
         s.os = dict(zip(hosts, unames, strict=True))
@@ -119,7 +118,7 @@ def run_window(
 
             prepare_submit(s, args, schedule_inputs, resolved_new)
             return 0
-        for phase in ("down", "up") if args.half == "run" else (args.half,):
+        for phase in _halves(args.half):
             s.say(f"phase: {phase}")
             if phase == "down":
                 from .scheduling.agents import require_quiescent
