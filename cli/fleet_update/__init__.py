@@ -69,6 +69,7 @@ def run_window(
     schedule_inputs: UpdateWindowInputs | None = None,
     pinned_new: str | None = None,
     strict: bool = False,
+    delivered_to: set[int] | None = None,
 ) -> int:
     # meiva:note
     # The agent-shell marker is spelled out here; its owner is
@@ -128,7 +129,9 @@ def run_window(
                     args,
                     resolved_new,
                     before_stop=(
-                        lambda: require_quiescent(s, args.gateway, initiator, operation_id)
+                        lambda: require_quiescent(
+                            s, args.gateway, initiator, operation_id, delivered_to=delivered_to
+                        )
                     )
                     if strict
                     else None,

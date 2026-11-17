@@ -39,15 +39,32 @@ def running_agents(s: HostCommands, gateway: str) -> list[int]:
         seen.add(cursor)
 
 
-def notify(s: HostCommands, gateway: str, targets: list[int], source: str, message: str) -> None:
+def notify(
+    s: HostCommands,
+    gateway: str,
+    targets: list[int],
+    source: str,
+    message: str,
+    *,
+    delivered_to: set[int] | None = None,
+) -> None:
     for target in sorted(set(targets)):
         s.run(
             gateway,
             f"{HOME}; {MEIVA} agents send {target} {shlex.quote(message)} --source {shlex.quote(source)}",
         )
+        if delivered_to is not None:
+            delivered_to.add(target)
 
 
-def require_quiescent(s: HostCommands, gateway: str, source: str, operation_id: str) -> None:
+def require_quiescent(
+    s: HostCommands,
+    gateway: str,
+    source: str,
+    operation_id: str,
+    *,
+    delivered_to: set[int] | None = None,
+) -> None:
     running = running_agents(s, gateway)
     if running:
         own = initiator_id(source)
@@ -55,5 +72,12 @@ def require_quiescent(s: HostCommands, gateway: str, source: str, operation_id: 
             f"Scheduled cluster update {operation_id} by {source} aborted before stop: "
             f"running agents {running}; coordinate another attempt."
         )
-        notify(s, gateway, running + ([own] if own is not None else []), source, message)
+        notify(
+            s,
+            gateway,
+            running + ([own] if own is not None else []),
+            source,
+            message,
+            delivered_to=delivered_to,
+        )
         raise RefusedError(message)

@@ -14,3 +14,11 @@ it cannot unload the supervisor of an in-flight update.
 This follows the failure boundaries recorded in postmortems 0005 and 0012.
 The OS scheduler integration is verified with executable boundary doubles; live
 production updates remain a separately authorized operator action.
+
+## Receipt correction after source review
+
+Non-busy preflight refusals share exit 2 with busy aborts. Source review found that
+using that code to suppress a receipt hid the former. The worker now deduplicates
+against successfully notified recipients, so every refusal reaches the initiator
+and a busy abort keeps its single detailed notice. Real worker-to-window tests
+cover refusal, busy, user and success controls without replacing either function.

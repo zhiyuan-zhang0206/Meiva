@@ -132,7 +132,10 @@ At the deadline the job rechecks preparation and queries every directory page
 immediately before stop. If any agent is running, it stops no service and sends
 the busy list to the recorded agent initiator and those running agents. Otherwise
 it performs the ordinary down/switch/up chain and sends the recorded agent
-initiator the result after up and its verification. A `user` initiator reads the
+initiator the result after up and its verification. A non-busy preflight refusal
+also receives a failure receipt. The worker suppresses its final receipt only
+when the busy gate already delivered a notice to that initiator; exit 2 alone
+does not establish delivery. A `user` initiator reads the
 record and logs. Failed message delivery leaves the durable record and log for
 recovery. This is one strict attempt: agent activity can change after the check,
 and there is no inbox lock or automatic retry. Direct synchronous run/down keep

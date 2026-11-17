@@ -55,6 +55,7 @@ def execute(path: Path) -> int:
         environment.pop("MEIVA_AGENT_ID", None)
         now = datetime.now(UTC)
         rc = 1
+        delivered_to: set[int] = set()
         try:
             rc = run_window(
                 args,
@@ -67,6 +68,7 @@ def execute(path: Path) -> int:
                 initiator=record.initiator,
                 pinned_new=record.new,
                 strict=True,
+                delivered_to=delivered_to,
             )
         except (OSError, ValueError) as exc:
             record.error = str(exc)
@@ -75,7 +77,10 @@ def execute(path: Path) -> int:
             record.state = "complete" if rc == 0 else "failed"
             save(path, record.model_dump(mode="json"))
         own = initiator_id(record.initiator)
-        if own is not None and rc != 2:
+        # meiva:note
+        # Refusal codes do not prove a receipt was sent. Only a successful busy-gate
+        # notification to this initiator suppresses the worker's final receipt.
+        if own is not None and own not in delivered_to:
             s = Session(
                 log_dir=args.log_dir,
                 half="receipt",
