@@ -142,10 +142,18 @@ class PtySessionBackend(SessionBackend):
     # meiva:note
     # The terminal lifecycle path asks the PTY service to retain an agent-local cutoff before it
     # deletes TTL rows. Unlike a list followed by individual kills, this acknowledgement also
-    # fences a delayed `new` whose client already timed out.
-    def fence_agent_shells(self, agent_id: int, before_session_index: int) -> list[int]:
+    # fences a delayed `new` whose client already timed out. None identifies the exact legacy
+    # unknown-method response; the durable local cutoff survives and callers enumerate instead.
+    def fence_agent_shells(self, agent_id: int, before_session_index: int) -> list[int] | None:
         _ = terminal_fence.record(self._home, agent_id, before_session_index)
-        return client.fence_agent_shells(agent_id, before_session_index, socket_path=self._socket)
+        try:
+            return client.fence_agent_shells(
+                agent_id, before_session_index, socket_path=self._socket
+            )
+        except client.ServiceError as exc:
+            if str(exc) != "unknown_method: fence_agent_shells":
+                raise
+            return None
 
     def service_available(self) -> bool:
         # meiva:note

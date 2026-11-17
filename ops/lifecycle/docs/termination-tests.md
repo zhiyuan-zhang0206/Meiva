@@ -43,3 +43,12 @@ controller pid and expiry it holds. A missing row, a row that is not JSON, and a
 required field all answer None while the terminate result stays what it was — the hint is
 advisory, so no read of it may change what the call did. The unit cases and the op-level case
 share the mutation: forcing the read to None turns exactly the two "carries it" assertions red.
+
+Same-agent external restart (including a harness switch) preserves persistent shells,
+watchers and browser ownership. Its intermediate force transition requests no cleanup
+cutoff, so shell/browser cleanup cannot interrupt overlay persistence and resurrection.
+The restart regression verifies live shell PIDs, the resulting status and overlay.
+`ops/cluster_status/tests/test_legacy_fence.py` exercises the old daemon's exact
+unknown-method wire reply and enumeration fallback; unrelated failures still raise.
+The cleanup result carries atomic fence acknowledgement separately from killed IDs.
+Both immediate and at-exit lifecycle cleanup retain TTL rows after a legacy fallback.

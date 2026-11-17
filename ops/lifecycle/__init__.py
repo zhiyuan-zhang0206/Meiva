@@ -182,7 +182,7 @@ async def _kill_shell_sessions_now(
     if cutoff is None:
         return None
     try:
-        killed = await asyncio.to_thread(
+        cleanup = await asyncio.to_thread(
             kill_agent_shells, agent_id, before_session_index=cutoff, home=home
         )
     except ServiceDownError:
@@ -193,7 +193,11 @@ async def _kill_shell_sessions_now(
             cutoff,
         )
         return None
-    await asyncio.to_thread(termination.drop_shell_ttls_before_cutoff, db_pool, agent_id, cutoff)
+    if cleanup.fenced:
+        await asyncio.to_thread(
+            termination.drop_shell_ttls_before_cutoff, db_pool, agent_id, cutoff
+        )
+    killed = cleanup.killed
     _log.info(
         "[gateway] agent %s terminate killed %d shell session(s): %s",
         agent_id,
@@ -222,7 +226,7 @@ def terminate_force_blocking(
     agent_id: int,
     body: TerminateAgentRequest,
     db_pool: ConnectionPool,
-) -> tuple[AgentStatus, int, int]:
+) -> tuple[AgentStatus, int, int | None]:
     """Commit the force fence before publishing its wake and lifecycle hint."""
     old_status, inbound_id, cutoff = force_terminate_transaction(
         agent_id,
@@ -539,16 +543,15 @@ async def _execute_harness_transition(
     if status not in ("idling", "terminated"):
         raise ValueError(f"Cannot restart agent in status {status!r}; must be idling or terminated")
 
-    cutoff: int | None = None
     if require_quiescent:
         # meiva:note
         # Linearize the strict attempt with claim under the agent row lock before any host stop.
-        _old_status, _cmd_id, cutoff = await asyncio.to_thread(
+        _old_status, _cmd_id, _cutoff = await asyncio.to_thread(
             force_terminate_transaction,
             agent_id,
             db_pool,
             source=body.source,
-            kill_all_shell_sessions=False,
+            preserve_shells=True,
             require_quiescent=True,
         )
     await prepare_harness_switch(
@@ -560,16 +563,13 @@ async def _execute_harness_transition(
         host=host,
     )
     if status != "terminated" and not require_quiescent:
-        _old_status, _cmd_id, cutoff = await asyncio.to_thread(
+        _old_status, _cmd_id, _cutoff = await asyncio.to_thread(
             force_terminate_transaction,
             agent_id,
             db_pool,
             source=body.source,
-            kill_all_shell_sessions=False,
+            preserve_shells=True,
         )
-    if cutoff is not None:
-        await release_browser_pages(agent_id, home=host.home)
-        await _kill_shell_sessions_now(agent_id, cutoff=cutoff, db_pool=db_pool, home=host.home)
 
     await asyncio.to_thread(
         update_harness_transition_meta_blocking,

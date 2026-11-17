@@ -110,9 +110,9 @@ def _verify_export_fence(
 #
 # The measurement comes before the fence: a workspace over either ceiling is refused while the
 # agent's shells are still alive and before a byte of it is read, so a refused export leaves the
-# source exactly as it was. Export requires the PTY service's acknowledgement: the durable cutoff
-# protects a future daemon generation, but service unavailability does not prove that an old payload
-# stopped mutating the workspace, so every fence failure aborts before packing.
+# source exactly as it was. Export requires confirmed local cleanup: a new daemon acknowledges
+# its atomic fence, while a retained legacy daemon enumerates and kills below the durable cutoff.
+# The legacy window cannot reject delayed allocations; other fence failures abort before packing.
 def export_workspace_bundle(
     pool: ConnectionPool,
     request: WorkspaceExportRequest,
@@ -136,7 +136,7 @@ def export_workspace_bundle(
         agent_id=request.agent_id,
         transfer_id=request.transfer_id,
         source_machine=local_machine,
-        killed_shell_sessions=killed,
+        killed_shell_sessions=killed.killed,
         limits=limits,
         harness_transfers=harness_transfers,
         harnesses_not_transferred=not_transferred,
