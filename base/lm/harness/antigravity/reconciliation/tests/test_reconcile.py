@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import base64
+import json
 import shutil
 from pathlib import Path
 
@@ -65,3 +66,39 @@ def test_a_truncated_protobuf_is_refused() -> None:
     with pytest.raises(AgyInterfaceError, match="truncated"):
         _ = client_message_id(truncated)
     assert client_message_id(base64.b64encode(bytes([0x08, 0x0E])).decode()) is None
+
+
+def test_internal_hub_notices_do_not_affect_input_reconciliation(tmp_path: Path) -> None:
+    home = home_with_queue(tmp_path)
+    directory = queue_dir(home, "conversation-1")
+    for index, sender in enumerate(["system", "conversation-1/task-7301", "subagent-conversation"]):
+        notice = directory / f"33333333-cccc-4ccc-8ccc-{index:012d}.json"
+        _ = notice.write_text(json.dumps({"sender": sender, "content": "Internal notice"}))
+    assert reconcile_inputs(home, "conversation-1", ["k-delivered", "k-waiting", "k-lost"]) == {
+        "k-delivered": Reconciliation.IN_CONTEXT,
+        "k-waiting": Reconciliation.PERSISTED_UNDELIVERED,
+        "k-lost": Reconciliation.UNKNOWN,
+    }
+
+
+@pytest.mark.parametrize(
+    "entry",
+    [
+        {"sender": "user", "content": "hi"},
+        {},
+        {"stepPayload": None},
+        {"sender": "system", "content": 123},
+        {"sender": "", "content": "hi"},
+        {"content": "hi"},
+        {"sender": 123, "content": "hi"},
+        {"sender": "system"},
+        {"sender": "system", "content": "hi", "stepPayload": None},
+        [],
+    ],
+)
+def test_malformed_queue_entries_are_refused(tmp_path: Path, entry: object) -> None:
+    home = home_with_queue(tmp_path)
+    broken = queue_dir(home, "conversation-1") / "33333333-cccc-4ccc-8ccc-333333333333.json"
+    _ = broken.write_text(json.dumps(entry))
+    with pytest.raises(AgyInterfaceError, match="a queued message has no stepPayload"):
+        _ = reconcile_inputs(home, "conversation-1", ["k-delivered"])
