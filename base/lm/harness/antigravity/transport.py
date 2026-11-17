@@ -20,7 +20,9 @@ from base.lm.harness.antigravity.rpc import (
     get_cascade_trajectory,
     send_user_cascade_message,
 )
+from base.lm.harness.antigravity.timing_store import store_timings
 from base.lm.harness.antigravity.trajectory import Trajectory, parse_trajectory
+from base.lm.harness.antigravity.transcript.window import session_file
 from base.lm.harness.cancel import (
     CancelReport,
     Sweep,
@@ -29,6 +31,7 @@ from base.lm.harness.cancel import (
     unobserved_cancel,
 )
 from base.lm.harness.process import ChildProbe, PsutilChildProbe, WaitClock, snapshot, wait_gone
+from base.log import logger
 
 READ_CHUNK_BYTES = 65536
 
@@ -262,7 +265,21 @@ class AgyTransport:
         payload = await asyncio.to_thread(
             get_cascade_trajectory, target_conversation, server=server
         )
-        return parse_trajectory(payload)
+        trajectory = parse_trajectory(payload)
+        try:
+            record = (
+                session_file(self._environ, target_conversation)
+                if self._environ is not None and self._environ.get("HOME")
+                else None
+            )
+            if record is not None:
+                await asyncio.to_thread(store_timings, record, trajectory)
+        except OSError:
+            logger.opt(exception=True).warning(
+                "native timing record could not be located; provider execution is unchanged",
+                event="harness_timing_record_unavailable",
+            )
+        return trajectory
 
     async def _rpc_target(self, conversation_id: str | None) -> tuple[AntigravityServer, str]:
         process = self._require_process()

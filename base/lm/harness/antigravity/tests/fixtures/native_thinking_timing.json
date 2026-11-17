@@ -1,0 +1,19 @@
+{
+  "source": {
+    "interface": "Antigravity GetCascadeTrajectory",
+    "observed": "2026-11-17, agent 405 on macmini, agy 1.5.9",
+    "sanitization": "Only one completed planner's timing shape retained. Thinking replaced with synthetic text; all configuration, credentials, messages, tool input and identifiers omitted."
+  },
+  "reply": {
+    "status": "CASCADE_RUN_STATUS_IDLE",
+    "numTotalSteps": 1,
+    "trajectory": {
+      "steps": [{
+        "type": "CORTEX_STEP_TYPE_PLANNER_RESPONSE",
+        "status": "CORTEX_STEP_STATUS_DONE",
+        "metadata": {"createdAt": "2026-11-17T05:30:00.123456789Z"},
+        "plannerResponse": {"thinking": "synthetic thought", "thinkingDuration": "30.265829s"}
+      }]
+    }
+  }
+}

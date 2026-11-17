@@ -1,0 +1,7 @@
+# Native reasoning timing
+
+The observed Antigravity full transcript lacks reasoning durations. Existing GetCascadeTrajectory snapshots contain completed plannerResponse.thinkingDuration, while GENERATING-to-DONE intervals differ substantially (19.106214 seconds versus 7.147385 seconds in one recorded sample). Use the explicit native duration only; keep tool spans and unobserved timings unknown.
+
+Preserve the vendor record and its stable byte-offset IDs. Supplement it with an atomic timing-only sidecar rather than copying a second transcript or inferring work from wall-clock gaps. A collector checks uniqueness across raw rows and binds offset plus a digest of index, creation second and stripped thinking. Repeated indices and second precision alone cannot establish identity. Corruption or missing timing must leave the original conversation readable. A publication-only reasoning refresh avoids repeating inputs, assistant replies, tools or user delivery when measurements arrive later.
+
+Reuse existing trajectory reads to avoid another network poll. The cost is that the most recent completed work may remain unmeasured until a subsequent snapshot. The UI's Worked-with-warning rule therefore remains necessary. A readonly scan of the existing 18,883,483-byte record found 2,011 reasoning fingerprints in 58.2 milliseconds on macmini; page reads never perform that whole-record scan. Unchanged native facts and record size skip rescanning. A changed raw record invalidates the reader's timing facts until uniqueness is checked again.

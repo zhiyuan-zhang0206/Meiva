@@ -12,4 +12,4 @@ exports = ["__init__.py", "harness_activity.py", "harness_inbox.py", "harness_re
 "harness_turn.py" = ["harness_activity.py", "harness_inbox.py", "harness_interrupt.py", "harness_read_sink.py", "harness_run.py", "lost_turn.py"]
 "lost_turn.py" = []
 "node.py" = ["_decide.py", "_dispatch.py", "_present.py", "_routing.py", "harness_inbox.py", "harness_render.py", "turn_end.py"]
-"tests" = ["_chat_inbound.py", "_dispatch.py", "_routing.py", "harness_activity.py", "harness_foreground.py", "harness_inbox.py", "harness_interrupt.py", "harness_render.py", "harness_turn.py", "lost_turn.py", "node.py", "turn_end.py", "turn_stamp.py"]
+"tests" = ["_chat_inbound.py", "_dispatch.py", "_routing.py", "harness_activity.py", "harness_foreground.py", "harness_inbox.py", "harness_interrupt.py", "harness_read_sink.py", "harness_render.py", "harness_turn.py", "lost_turn.py", "node.py", "turn_end.py", "turn_stamp.py"]

@@ -1,21 +1,24 @@
-exports = ["mapping.py", "rpc.py", "session.py", "tests", "transcript", "transport.py"]
+exports = ["mapping.py", "rpc.py", "session.py", "tests", "timing_store.py", "trajectory.py", "transcript", "transport.py"]
 
 [uses]
 "__init__.py" = ["config.py", "handoff_rules.py", "mapping.py", "rpc.py", "session.py", "transport.py"]
 "handoff_rules.py" = []
 "mapping.py" = ["subagents.py"]
 "reconciliation" = ["trajectory.py"]
-"transcript" = ["reconciliation"]
+"transcript" = ["reconciliation", "timing.py", "timing_store.py"]
 "schedules.py" = []
 "session.py" = ["config.py", "mapping.py", "reconciliation", "schedules.py", "subagent_files.py", "trajectory.py", "transport.py"]
 "subagent_files.py" = ["mapping.py", "subagents.py"]
 "subagents.py" = []
-"trajectory.py" = []
-"transport.py" = ["config.py", "rpc.py", "trajectory.py"]
-"tests" = ["config.py", "mapping.py", "schedules.py", "session.py", "subagent_files.py", "subagents.py", "trajectory.py", "transport.py"]
+"trajectory.py" = ["timing.py"]
+"timing.py" = []
+"timing_store.py" = ["timing.py", "trajectory.py"]
+"transport.py" = ["config.py", "rpc.py", "trajectory.py", "timing_store.py", "transcript"]
+"tests" = ["config.py", "mapping.py", "schedules.py", "session.py", "subagent_files.py", "subagents.py", "timing.py", "timing_store.py", "trajectory.py", "transcript", "transport.py"]
 
 [purity]
 "config.py" = "strict"
 "schedules.py" = "strict"
 "subagents.py" = "strict"
 "trajectory.py" = "strict"
+"timing.py" = "strict"

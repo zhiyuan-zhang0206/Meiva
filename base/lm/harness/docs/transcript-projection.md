@@ -124,3 +124,6 @@ anomaly (`origin/<kind>`) that is reported and puts nothing on the timeline, bec
 anomaly is reported once per (type, detail) within the latest `REPORTED_LIMIT` ones the projector remembers, so a restart
 reports it again. The sample of a long real session (`claude/transcript/tests/fixtures/long_session`, sanitized to structure) pins
 this, and that the bookkeeping rows of such a session are ignored and not reported.
+
+Antigravity supplements the vendor record with verified native reasoning timing facts, because its
+transcript omits durations present in the trajectory. The [adapter contract](../antigravity/docs/antigravity.md#native-reasoning-measurements) describes the separate atomic sidecar and its unknown-data behavior. Timeline items and deliveries are still read-time projections.

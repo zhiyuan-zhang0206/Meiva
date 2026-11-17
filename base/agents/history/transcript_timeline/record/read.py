@@ -17,7 +17,7 @@ from base.agents.history.transcript_timeline.record.harness import (
     wire_id,
 )
 from base.agents.history.transcript_timeline.record.match import CLAIM_SLACK
-from base.lm.harness.session.transcript.entries import InputRow
+from base.lm.harness.session.transcript.entries import InputRow, Reasoning
 from base.lm.harness.session.transcript.record_file import (
     BLOCK_BYTES,
     MAX_BLOCK_BYTES,
@@ -184,3 +184,24 @@ def _input_context_complete(
         return True
     stamp = stamp_of(projected.items[cut].item.created_at)
     return stamp is not None and min(row.stamp for row in wanted.values()) <= stamp - CLAIM_SLACK
+
+
+# meiva:note
+# Native timing changes revise only reasoning items at their original row IDs. Filtering before
+# projection keeps inputs, assistant text, tools, receipts and delivery outside the replay.
+# meiva:link base/lm/harness/antigravity/docs/antigravity.md
+def reasoning_refresh(
+    file: RecordFile,
+    *,
+    harness: str,
+    start: int,
+    policy: ReplyPolicy,
+    render_tool: Callable[[str, Mapping[str, object]], str],
+) -> Projected:
+    entries = entry_reader(harness).entries(file.rows_after(start).rows)
+    projector = RecordProjector(
+        policy=policy, render_tool=render_tool, wire_id=lambda key: wire_id(harness, key)
+    )
+    return projector.feed(
+        (entry for entry in entries if isinstance(entry, Reasoning)), tail=False, release_held=True
+    )

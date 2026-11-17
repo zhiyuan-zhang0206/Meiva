@@ -53,6 +53,9 @@ class RecordFile:
     def prepare(self, before: int | None) -> None:
         del before
 
+    def revision(self) -> int:
+        return 0
+
     def size(self) -> int:
         return self._path.stat().st_size
 
