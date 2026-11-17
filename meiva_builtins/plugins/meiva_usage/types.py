@@ -14,6 +14,7 @@ from pathlib import Path
 from typing import Literal, TypeGuard
 
 from base.host.boundary.untyped import object_of
+from base.packages.plugins.surface.stats_types import StatReset
 
 ERROR_STALE_AFTER_S: float = 30.0 * 60.0
 
@@ -66,6 +67,7 @@ class CardReading:
     # The probe was rate limited (`UsageRateLimitedError`). The writer keeps the card's previous value
     # and age instead of storing this reading's placeholder value, and the cycle loop backs off.
     rate_limited: bool = False
+    resets: tuple[StatReset, ...] = ()
 
 
 @dataclass(frozen=True)

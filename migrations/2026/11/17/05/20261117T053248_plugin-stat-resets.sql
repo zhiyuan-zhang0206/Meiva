@@ -1,0 +1,1 @@
+ALTER TABLE plugin_stats ADD COLUMN IF NOT EXISTS resets JSONB NOT NULL DEFAULT '[]'::jsonb;

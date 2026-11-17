@@ -35,7 +35,7 @@ def test_format_dual_window_card_both_windows() -> None:
     assert reading.value == "40% left"
     assert "5h 80% left" in reading.detail
     assert "7d 40% left" in reading.detail
-    assert "resets 11-07 00:00" in reading.detail
+    assert reading.resets[1].resets_at == weekly.resets_at
     assert reading.status == "ok"
 
 
@@ -55,7 +55,7 @@ def test_format_dual_window_card_timezone_conversion() -> None:
     tz_shanghai = ZoneInfo("Asia/Shanghai")
     reading = format_dual_window_card(session, None, display_tz=tz_shanghai)
     assert reading.value == "50% left"
-    assert "resets 11-01 20:00" in reading.detail
+    assert reading.resets[0].resets_at.isoformat() == "2026-11-01T20:00:00+08:00"
 
 
 def test_format_dual_window_card_both_none_raises() -> None:
@@ -76,7 +76,8 @@ def test_format_antigravity_group_card_both_windows_healthy() -> None:
     )
     reading = format_antigravity_group_card(WindowPair(session=session, weekly=weekly))
     assert reading.value == "7d 82% · 5h 76% left"
-    assert reading.detail == "resets 7d 11-07 00:00 · 5h 11-01 18:00"
+    assert reading.detail == "7d & 5h windows"
+    assert reading.resets[0].resets_at == weekly.resets_at
     assert reading.status == "ok"
 
 
@@ -91,7 +92,7 @@ def test_format_antigravity_group_card_warn_threshold() -> None:
     )
     reading = format_antigravity_group_card(WindowPair(session=session, weekly=weekly))
     assert reading.value == "7d 1% · 5h 6% left"
-    assert reading.detail == "resets 7d 11-08 00:00 · 5h 11-01 17:00"
+    assert reading.resets[0].resets_at == weekly.resets_at
     assert reading.status == "warn"
 
     r_weekly_low = format_antigravity_group_card(
@@ -133,7 +134,8 @@ def test_format_antigravity_group_card_single_window_fallback() -> None:
         )
     )
     assert weekly_only.value == "75% left"
-    assert weekly_only.detail == "7d window · resets 11-07 00:00"
+    assert weekly_only.detail == "7d window"
+    assert weekly_only.resets[0].label == "7d"
     assert weekly_only.status == "ok"
 
     session_only = format_antigravity_group_card(
@@ -162,7 +164,10 @@ def test_format_antigravity_group_card_timezone_conversion() -> None:
     tz_shanghai = ZoneInfo("Asia/Shanghai")
     reading = format_antigravity_group_card(pair, display_tz=tz_shanghai)
     assert reading.value == "7d 80% · 5h 80% left"
-    assert reading.detail == "resets 7d 11-01 20:00 · 5h 11-01 14:00"
+    assert [r.resets_at.isoformat() for r in reading.resets] == [
+        "2026-11-01T20:00:00+08:00",
+        "2026-11-01T14:00:00+08:00",
+    ]
 
 
 def test_format_antigravity_group_card_empty_raises() -> None:
@@ -188,7 +193,7 @@ def test_format_codex_window_card_labels() -> None:
         reading = format_codex_window_card(win)
         assert reading.value == "65% left"
         assert "used 35%" in reading.detail
-        assert "resets 11-01 10:00" in reading.detail
+        assert reading.resets[0].resets_at == win.resets_at
         if expected_label:
             assert expected_label in reading.detail
         assert reading.status == "ok"
@@ -352,3 +357,19 @@ def test_format_admin_cost_card_validation_errors() -> None:
 
     with pytest.raises(ValueError, match="must be configured together"):
         format_admin_cost_card({}, today_utc=today, known_balance_usd=None, balance_as_of=today)
+
+
+def test_all_quota_resets_are_structured_instants() -> None:
+    session = RateWindow(20, datetime(2027, 1, 1, 0, 0, tzinfo=UTC), 300)
+    weekly = RateWindow(40, datetime(2027, 1, 7, 0, 0, tzinfo=UTC), 10080)
+    for reading in (
+        format_dual_window_card(session, weekly),
+        format_antigravity_group_card(WindowPair(session, weekly)),
+    ):
+        assert {r.label: r.resets_at for r in reading.resets} == {
+            "5h": session.resets_at,
+            "7d": weekly.resets_at,
+        }
+        assert "01-01" not in reading.detail
+    assert format_codex_window_card(session).resets[0].resets_at == session.resets_at
+    assert format_codex_window_card(RateWindow(20)).resets == ()

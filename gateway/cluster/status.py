@@ -240,6 +240,7 @@ def _plugin_stat_rows(pool: ConnectionPool) -> list[PluginStat]:
             status=row.status,  # pyright: ignore[reportArgumentType]
             updated_at=row.updated_at,
             updated_by=row.updated_by,
+            resets=[stats.StatReset.model_validate(r) for r in row.resets],
         )
         for row in stats.read_all(pool)
     ]

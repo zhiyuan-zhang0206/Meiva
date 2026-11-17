@@ -32,13 +32,13 @@ ships carry.
 
 | module | records | test files that write it | why it is a double |
 |---|---:|---|---|
-| `ui/web/src/components/agent-sidebar/sidebar-test-mock.tsx` | 135 | `agent-sidebar.test.tsx` (34), `sidebar-status-cards.test.tsx` (50), `sidebar-tree-and-search.test.tsx` (51) | the rail's scenario object: the props the page hands it, and the settings, stats and plugin declarations it reads |
+| `ui/web/src/components/agent-sidebar/sidebar-test-mock.tsx` | 141 | `agent-sidebar.test.tsx` (34), `sidebar-status-cards.test.tsx` (56), `sidebar-tree-and-search.test.tsx` (51) | the rail's scenario object: the props the page hands it, and the settings, stats and plugin declarations it reads |
 | `ui/web/src/app/page-test-mock.tsx` | 101 | `page.test.tsx` (61), `page-dispatch.test.tsx` (40) | the home page's `hooksState` and its provider wrapper |
 | `ui/web/src/components/inspector/inspector-test-mock.tsx` | 4 | `inspector-panel-chrome.test.tsx` (3), `inspector-panel-state.test.tsx` (1) | the inspector's `inspectorMockState` |
 
-240 records, every one of them a write into a state object the double exports: no `vi.mock`, and no patch
+246 records, every one of them a write into a state object the double exports: no `vi.mock`, and no patch
 of a module the suite renders. `python -m meizel debt sites --code first-party-patch --json` lists every
-site (243 today, 238 at `1d6710493`); 240 name one of these modules, 2 sit in `[approved-patches.files]`,
+site (249 today, 238 at `1d6710493`); 246 name one of these modules, 2 sit in `[approved-patches.files]`,
 and 1 is recorded. A repayment lowers these numbers and a new site raises them, and
 `meizel/tests/languages/test_test_code_accounting.py` fails until this table and the tree agree; the same
 test injects a production import of each double into the run's fact graph and asserts every record comes
@@ -75,3 +75,12 @@ conditional test-only exemption are unchanged.
 The home reader-loading regression adds four writes in `page-dispatch.test.tsx`
 to configure the real timeline consumer and its home-page scenario. The home
 double therefore moves from 97 to 101 records; the exemption rule is unchanged.
+
+The structured quota reset regressions add six writes in
+`sidebar-status-cards.test.tsx`: each of the two scenarios sets the agent roster,
+plugin declaration and stats response on the existing sidebar double. They
+exercise countdown transitions and retained-error observation age through the
+real sidebar consumer and its clock/provider ports. The status-card file moves
+from 50 to 56 sites, the sidebar double from 135 to 141, and the three doubles
+from 240 to 246 records (249 raw first-party patch sites). The conditional
+test-only exemption and the production-import control are unchanged.

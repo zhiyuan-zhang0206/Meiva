@@ -21,15 +21,18 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from collections.abc import Sequence
+from dataclasses import dataclass, field
 from datetime import datetime
 
 from psycopg import Connection
 from psycopg.rows import TupleRow, class_row
+from psycopg.types.json import Jsonb
 from psycopg_pool import ConnectionPool
 
 from base.db import Database
 from base.packages.plugins.flags import read_declared_flag
+from base.packages.plugins.surface.stats_types import StatReset
 
 # The status vocabulary. There is deliberately no "empty": a card with no row
 # IS the empty state, and a second spelling of it would be a second fact.
@@ -48,12 +51,14 @@ MAX_ID_CHARS = 64
 MAX_VALUE_CHARS = 120
 MAX_UPDATED_BY_CHARS = 64
 
+
 _UPSERT = """
-INSERT INTO plugin_stats (plugin, id, value, detail, status, updated_at, updated_by)
-VALUES (%s, %s, %s, %s, %s, now(), %s)
+INSERT INTO plugin_stats (plugin, id, value, detail, status, updated_at, updated_by, resets)
+VALUES (%s, %s, %s, %s, %s, now(), %s, %s)
 ON CONFLICT (plugin, id) DO UPDATE SET
     value = EXCLUDED.value,
     detail = EXCLUDED.detail,
+    resets = EXCLUDED.resets,
     status = EXCLUDED.status,
     updated_at = now(),
     updated_by = EXCLUDED.updated_by
@@ -62,17 +67,18 @@ ON CONFLICT (plugin, id) DO UPDATE SET
 # meiva:note
 # The same write that leaves an existing row's `updated_at` alone: a new row still takes `now()`.
 _UPSERT_KEEP_STAMP = """
-INSERT INTO plugin_stats (plugin, id, value, detail, status, updated_at, updated_by)
-VALUES (%s, %s, %s, %s, %s, now(), %s)
+INSERT INTO plugin_stats (plugin, id, value, detail, status, updated_at, updated_by, resets)
+VALUES (%s, %s, %s, %s, %s, now(), %s, %s)
 ON CONFLICT (plugin, id) DO UPDATE SET
     value = EXCLUDED.value,
     detail = EXCLUDED.detail,
+    resets = EXCLUDED.resets,
     status = EXCLUDED.status,
     updated_by = EXCLUDED.updated_by
 """
 
 _SELECT_ALL = (
-    "SELECT plugin, id, value, detail, status, updated_at, updated_by "
+    "SELECT plugin, id, value, detail, status, updated_at, updated_by, resets "
     "FROM plugin_stats ORDER BY plugin, id"
 )
 
@@ -92,6 +98,7 @@ class PluginStatRow:
     status: str
     updated_at: datetime
     updated_by: str | None
+    resets: list[dict[str, str]] = field(default_factory=list)
 
 
 def _text(value: object, what: str, *, limit: int) -> str:
@@ -119,6 +126,7 @@ def upsert(
     updated_by: str | None = None,
     detail_cap: int | None = None,
     refresh_stamp: bool = True,
+    resets: Sequence[StatReset] = (),
 ) -> None:
     """Write (or refresh) one card's value — last write wins.
 
@@ -151,7 +159,18 @@ def upsert(
 
     with db.write_transaction() as conn:
         sql = _UPSERT if refresh_stamp else _UPSERT_KEEP_STAMP
-        conn.execute(sql, (name, card, shown, detail, status, updated_by))
+        conn.execute(
+            sql,
+            (
+                name,
+                card,
+                shown,
+                detail,
+                status,
+                updated_by,
+                Jsonb([reset.model_dump(mode="json") for reset in resets]),
+            ),
+        )
 
 
 def read_all(pool: ConnectionPool[Connection[TupleRow]]) -> list[PluginStatRow]:

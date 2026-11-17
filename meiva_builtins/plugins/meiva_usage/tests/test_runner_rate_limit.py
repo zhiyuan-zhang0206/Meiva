@@ -288,3 +288,58 @@ def test_a_failed_refresh_after_a_rate_limit_returns_to_the_base_interval(
     )
 
     assert sleeps == [1200.0, 2400.0, 600.0]
+
+
+def test_cached_reset_snapshot_survives_rate_limit_and_failure(
+    db_conn: psycopg.Connection[Any], tmp_path: Path
+) -> None:
+    collector = _deepseek_collector("reset-cache")
+    _seed_card(db_conn, "reset-cache", value="40% left", updated_at=_GOOD_AT)
+    db_conn.execute(
+        "UPDATE plugin_stats SET resets = %s::jsonb WHERE id = 'reset-cache'",
+        ('[{"label":"5h","resets_at":"2027-01-01T08:00:00+08:00"}]',),
+    )
+    db_conn.commit()
+    reading = _refresh_429(db_conn, tmp_path, collector, _NOW)["reset-cache"]
+    assert reading.resets[0].resets_at == datetime(2027, 1, 1, tzinfo=UTC)
+    assert _card_row(db_conn, "reset-cache")[3] == _GOOD_AT
+    refresh_collector_once(
+        collector,
+        db=cast(Any, FakeDatabase(db_conn)),
+        user_home=tmp_path,
+        environ={"DEEPSEEK_API_KEY": "k"},
+        now=_NOW + timedelta(hours=1),
+        platform="darwin",
+        http_fetch=_http_500,
+    )
+    row = db_conn.execute(
+        "SELECT value, resets FROM plugin_stats WHERE id = 'reset-cache'"
+    ).fetchone()
+    assert row is not None
+    assert row[0] == "40% left"
+    assert row[1][0]["resets_at"] == "2027-01-01T08:00:00+08:00"
+
+
+# meiva:note
+# Without a cached measurement an error is a new observation, so its normal write still stamps it.
+def test_uncached_errors_keep_normal_write_stamps(
+    db_conn: psycopg.Connection[Any], tmp_path: Path
+) -> None:
+    collector = _deepseek_collector("uncached-error")
+    for _attempt in range(2):
+        _ = refresh_collector_once(
+            collector,
+            db=cast(Any, FakeDatabase(db_conn)),
+            user_home=tmp_path,
+            environ={"DEEPSEEK_API_KEY": "k"},
+            now=_NOW,
+            platform="darwin",
+            http_fetch=_http_500,
+        )
+        value, _detail, status, stamp = _card_row(db_conn, "uncached-error")
+        assert (value, status) == ("—", "error")
+        assert stamp > _GOOD_AT
+        _ = db_conn.execute(
+            "UPDATE plugin_stats SET updated_at = %s WHERE id = 'uncached-error'", (_GOOD_AT,)
+        )
+        db_conn.commit()

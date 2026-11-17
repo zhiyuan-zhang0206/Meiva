@@ -38,6 +38,7 @@ export interface PluginStatCard {
   status: PluginStatStatus | null;
   detail: string | null;
   updatedAt: string | null;
+  resets: NonNullable<PluginStat["resets"]>;
   stale: boolean;
 }
 
@@ -59,6 +60,7 @@ export function buildPluginStatCardsAt(
       status: value?.status ?? null,
       detail: value?.detail ?? null,
       updatedAt: value?.updated_at ?? null,
+      resets: value?.resets ?? [],
       stale:
         value !== undefined &&
         Number.isFinite(updatedMs) &&

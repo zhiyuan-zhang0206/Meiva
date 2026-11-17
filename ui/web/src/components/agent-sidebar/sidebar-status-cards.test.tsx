@@ -1,10 +1,11 @@
-import { cleanup, fireEvent, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, fireEvent, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { StatsDashboard } from "@/lib/contracts/types";
 import { transport } from "@/test-support/fake-api";
 import { handlers, makeAgent, resetSidebarTestState, SCENARIO_NOW, state, wrap } from "./sidebar-test-mock";
+import { WallClockProvider } from "@/lib/transport/transport-context";
 import { AgentSidebar } from "./index";
-afterEach(cleanup);
+afterEach(() => { cleanup(); vi.useRealTimers(); });
 beforeEach(resetSidebarTestState);
 
 function openStatus() {
@@ -281,6 +282,54 @@ describe("plugin status cards", () => {
       plugin_stats: pluginStats,
     };
   }
+  it("renders every structured deadline with relative text and full-time tooltip", async () => {
+    state.agents = [makeAgent({ agent_id: 1 })];
+    state.pluginStatDeclarations = [{ plugin: "meiva_usage", id: "quota", label: "Quota" }];
+    state.stats = statsWith([{
+      plugin: "meiva_usage", id: "quota", value: "40% left", detail: "5h 80% left · 7d 40% left",
+      status: "ok", updated_at: new Date(SCENARIO_NOW).toISOString(), updated_by: "macmini",
+      resets: [
+        { label: "5h", resets_at: "2026-05-20T08:02:00+08:00" },
+        { label: "7d", resets_at: new Date(SCENARIO_NOW + 86400_000 * 2).toISOString() },
+        { label: "expired", resets_at: new Date(SCENARIO_NOW).toISOString() },
+        { label: "soon", resets_at: new Date(SCENARIO_NOW + 30_000).toISOString() },
+      ],
+    }]);
+    vi.useFakeTimers({ toFake: ["setInterval", "clearInterval"] });
+    let clock = SCENARIO_NOW;
+    wrap(<WallClockProvider wallNow={() => clock}><AgentSidebar {...handlers} /></WallClockProvider>);
+    openStatus();
+    expect(await screen.findByText("5h · resets in 2m")).toBeTruthy();
+    expect(await screen.findByText("7d · resets in 2d")).toBeTruthy();
+    expect(await screen.findByText("expired · awaiting refresh")).toBeTruthy();
+    expect(await screen.findByText("soon · resets soon")).toBeTruthy();
+    expect(screen.getByText("5h · resets in 2m").getAttribute("title")).toMatch(/2026-05-20/);
+    try {
+      clock += 120_000;
+      act(() => { vi.advanceTimersByTime(1000); });
+      expect(screen.getByText("5h · awaiting refresh")).toBeTruthy();
+    } finally { vi.useRealTimers(); }
+  });
+  it.each([true, false])("keeps retained-error age and deadlines coherent (stale=%s)", async (stale) => {
+    state.agents = [makeAgent({ agent_id: 1 })];
+    state.pluginStatDeclarations = [{ plugin: "meiva_usage", id: "snapshot", label: "Snapshot" }];
+    state.stats = statsWith([{
+      plugin: "meiva_usage", id: "snapshot", value: "40% left", detail: stale ? "network down" : "healthy",
+      status: stale ? "error" : "ok", updated_at: new Date(SCENARIO_NOW - (stale ? 3600_000 : 0)).toISOString(),
+      updated_by: "macmini", resets: [
+        { label: "5h", resets_at: new Date(SCENARIO_NOW + 120_000).toISOString() },
+        { label: "7d", resets_at: new Date(SCENARIO_NOW - 120_000).toISOString() },
+      ],
+    }]);
+    wrap(<AgentSidebar {...handlers} />);
+    openStatus();
+    const value = await screen.findByText("40% left");
+    expect(value.parentElement?.className.includes("opacity-60")).toBe(stale);
+    expect(value.className.includes("text-destructive")).toBe(stale);
+    expect(await screen.findByTitle(stale ? "Updated 1h ago" : "Updated just now")).toBeTruthy();
+    expect(await screen.findByText("5h · resets in 2m")).toBeTruthy();
+    expect(await screen.findByText("7d · awaiting refresh")).toBeTruthy();
+  });
   it("a declared card renders the plugin's value and detail in the unwindowed section above Usage", async () => {
     state.agents = [makeAgent({ agent_id: 1 })];
     state.pluginStatDeclarations = [{ plugin: "codex_usage", id: "codex-a", label: "Codex A" }];

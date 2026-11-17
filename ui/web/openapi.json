@@ -15409,6 +15409,13 @@
               }
             ],
             "title": "Updated By"
+          },
+          "resets": {
+            "items": {
+              "$ref": "#/components/schemas/StatReset"
+            },
+            "type": "array",
+            "title": "Resets"
           }
         },
         "type": "object",
@@ -18771,6 +18778,28 @@
           "sha256"
         ],
         "title": "StagedFile"
+      },
+      "StatReset": {
+        "properties": {
+          "label": {
+            "type": "string",
+            "maxLength": 64,
+            "minLength": 1,
+            "title": "Label"
+          },
+          "resets_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Resets At"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "label",
+          "resets_at"
+        ],
+        "title": "StatReset"
       },
       "StatsDashboard": {
         "properties": {

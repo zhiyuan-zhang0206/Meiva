@@ -17,6 +17,7 @@ from base.config import settings
 from base.db import Database, pool
 from base.db.code_version_gate import ProcessDbGate
 from base.packages.plugins.surface import stats
+from base.packages.plugins.surface.stats_types import StatReset
 
 
 @pytest.fixture
@@ -149,3 +150,27 @@ def test_the_default_detail_cap_is_the_configured_one(
     stats.upsert(database, plugin="p", id="c", value="ok", detail="y" * cap)
     with pytest.raises(ValueError, match="exceeds"):
         stats.upsert(database, plugin="p", id="c", value="ok", detail="y" * (cap + 1))
+
+
+def test_reset_instants_round_trip_and_clear(stat_pool: ConnectionPool, database: Database) -> None:
+    reset = StatReset(label="5h", resets_at=datetime(2027, 1, 1, tzinfo=UTC))
+    stats.upsert(database, plugin="p", id="reset", value="20%", resets=(reset,))
+    (row,) = stats.read_all(stat_pool)
+    assert StatReset.model_validate(row.resets[0]) == reset
+    stats.upsert(database, plugin="p", id="reset", value="30%")
+    (row,) = stats.read_all(stat_pool)
+    assert row.resets == []
+
+
+@pytest.mark.parametrize(
+    "payload",
+    [
+        {"label": "", "resets_at": "2027-01-01T00:00:00Z"},
+        {"label": "x" * 65, "resets_at": "2027-01-01T00:00:00Z"},
+        {"label": "5h", "resets_at": "2027-01-01T00:00:00"},
+        {"label": "5h", "resets_at": "bad"},
+    ],
+)
+def test_reset_boundary_rejects_invalid_labels_and_instants(payload: dict[str, str]) -> None:
+    with pytest.raises(ValueError):
+        StatReset.model_validate(payload)

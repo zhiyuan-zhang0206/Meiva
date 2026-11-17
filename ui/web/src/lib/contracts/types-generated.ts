@@ -3462,6 +3462,7 @@ export interface components {
             status: "ok" | "warn" | "error";
             updated_at: string;
             updated_by: string | null;
+            resets?: components["schemas"]["StatReset"][];
         };
         Priority: "P0" | "P1" | "P2" | "P3";
         PublishMessage: {
@@ -3951,6 +3952,10 @@ export interface components {
             size: number;
             content_type: string;
             sha256: string;
+        };
+        StatReset: {
+            label: string;
+            resets_at: string;
         };
         StatsDashboard: {
             live_count: number;
