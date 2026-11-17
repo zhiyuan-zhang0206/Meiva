@@ -13,6 +13,7 @@ from pathlib import Path
 
 import psycopg
 import pytest
+import zstandard
 from psycopg_pool import ConnectionPool
 
 from base.agents.history.timeline_item import TimelineItem
@@ -214,7 +215,11 @@ def test_quote_http_reads_the_actual_complete_record_row(
         ("running", "idling"),
     ],
 )
-@pytest.mark.parametrize("partial", ["none", "line", "text"])
+@pytest.mark.parametrize(
+    "record_kind, partial",
+    [("claude_code", p) for p in ["none", "line", "text", "next_line"]]
+    + [("codex", "next_line"), ("codex_zstd", "next_line")],
+)
 def test_quote_record_activity_parity(
     client: GatewayTestClient,
     db_conn: psycopg.Connection,
@@ -223,16 +228,18 @@ def test_quote_record_activity_parity(
     initial: str,
     final: str,
     partial: str,
+    record_kind: str,
 ) -> None:
+    harness = "codex" if record_kind.startswith("codex") else "claude_code"
     agent = _codex_agent(db_conn)
-    db_conn.execute("UPDATE agents_meta SET harness='claude_code' WHERE id=%s", (agent,))
+    db_conn.execute("UPDATE agents_meta SET harness=%s WHERE id=%s", (harness, agent))
     db_conn.commit()
     session = "parity-session"
     home = tmp_path / "home"
     FileSessionRegistry(harness_sessions_dir(home=home)).save(
         SessionRecord(
             agent_id=agent,
-            harness="claude_code",
+            harness=harness,
             session_id=session,
             cwd=str(tmp_path),
             model="m",
@@ -242,6 +249,10 @@ def test_quote_record_activity_parity(
         )
     )
     record = tmp_path / ".claude/projects/test" / f"{session}.jsonl"
+    if harness == "codex":
+        record = tmp_path / "codex/sessions/2026/11/18" / f"rollout-test-{session}.jsonl"
+        if record_kind == "codex_zstd":
+            record = record.with_suffix(".jsonl.zst")
     record.parent.mkdir(parents=True)
     raw = json.dumps(
         {
@@ -263,7 +274,27 @@ def test_quote_record_activity_parity(
             },
         }
     ).encode()
-    _ = record.write_bytes(raw + (b"" if partial == "line" else b"\n"))
+    if harness == "codex":
+        fixture = (
+            Path(__file__).parents[3]
+            / "base/lm/harness/codex/transcript/tests/fixtures/rollout/session.jsonl"
+        )
+        row = next(
+            json.loads(line)
+            for line in fixture.read_text().splitlines()
+            if '"CommandExecution"' in line
+        )
+        row["payload"]["item"]["status"] = "inProgress"
+        raw = json.dumps(row).encode()
+    content = (
+        raw
+        + (b"" if partial == "line" else b"\n")
+        + (b'{"type":"assistant"' if partial == "next_line" else b"")
+    )
+
+    _ = record.write_bytes(
+        zstandard.ZstdCompressor().compress(content) if record_kind == "codex_zstd" else content
+    )
 
     def status(value: str) -> None:
         db_conn.execute("UPDATE agents_meta SET status=%s WHERE id=%s", (value, agent))
@@ -273,12 +304,12 @@ def test_quote_record_activity_parity(
     pool: ConnectionPool = ConnectionPool(db_url, min_size=1, max_size=1)
     with pool:
         runner = RecordOperationRunner(
-            home, {"HOME": str(tmp_path), "CLAUDE_CONFIG_DIR": str(tmp_path / "claude")}, pool
+            home, {"HOME": str(tmp_path), "CODEX_HOME": str(tmp_path / "codex")}, pool
         )
         client.app.state.rpc = runner
         timeline = client.get(f"/api/agents/{agent}/timeline")
         assert timeline.status_code == 200, timeline.text
-        if partial == "none":
+        if partial in {"none", "next_line"}:
             assert runner.raw_pending
             assert timeline.json()["items"][0]["activity_pending"] is (
                 True if final == "running" else None
@@ -298,7 +329,7 @@ def test_quote_record_activity_parity(
                 },
             },
         )
-        accepted = partial == "none" and final != "running"
+        accepted = partial in {"none", "next_line"} and final != "running"
         assert response.status_code == (201 if accepted else 422), response.text
     row = db_conn.execute(
         "SELECT count(*) FROM inbound_messages WHERE agent_id=%s", (agent,)

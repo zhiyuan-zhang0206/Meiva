@@ -245,14 +245,18 @@ def test_inclusive_anchor_refuses_an_unfinished_or_over_budget_row(tmp_path: Pat
 
 @pytest.mark.parametrize("newer", [False, True])
 @pytest.mark.parametrize("compressed", [False, True])
+@pytest.mark.parametrize("partial_next", [False, True])
 def test_anchored_tool_activity_depends_on_reaching_record_tail(
-    tmp_path: Path, newer: bool, compressed: bool
+    tmp_path: Path, newer: bool, compressed: bool, partial_next: bool
 ) -> None:
     lines = fixture_text("basic").splitlines(keepends=True)
     call_at = next(i for i, line in enumerate(lines) if '"type":"tool_use"' in line)
     prefix = "".join(lines[: call_at + 1])
     file = write(
-        tmp_path / "anchor-tail.jsonl", prefix + ("".join(lines[call_at + 1 :]) if newer else "")
+        tmp_path / "anchor-tail.jsonl",
+        prefix
+        + ("".join(lines[call_at + 1 :]) if newer else "")
+        + ('{"type":"assistant"' if partial_next else ""),
     )
     if compressed:
         packed = tmp_path / "anchor-tail.jsonl.zst"
@@ -261,6 +265,8 @@ def test_anchored_tool_activity_depends_on_reaching_record_tail(
         )
         file = ZstdRecordFile(packed)
     offset = len("".join(lines[:call_at]).encode())
+    head_call = next(p.item for p in window(file).items if p.item.kind == "agent_code")
+    assert head_call.activity_pending is (None if newer else True)
     call = next(p.item for p in window(file, anchor=offset).items if p.item.kind == "agent_code")
     assert call.activity_pending is (None if newer else True)
 

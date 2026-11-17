@@ -7,7 +7,7 @@ Record-backed timeline reads and Quote admission call
 awaiting the record RPC. This shared gateway owner re-reads canonical agent status:
 `running` preserves pending tool activity; `idling` and `terminated` settle it.
 The record reader owns completeness and anchor validation. An inclusive window
-ending at record EOF retains pending activity just like the newest timeline
-window; a historical window with newer rows remains settled. A partial JSONL
+ending at the last complete record row retains pending activity just like the newest timeline
+window, including when partial bytes follow that row; a historical window with newer rows remains settled. A partial JSONL
 line or non-DONE Antigravity planner response cannot become a Quote source by
 settling activity.

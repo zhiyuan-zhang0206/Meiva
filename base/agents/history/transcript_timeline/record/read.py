@@ -75,9 +75,11 @@ def read_window(
 ) -> Window:
     rows, start, read, size = _prepare_window(file, before, anchor)
     # meiva:note
-    # An inclusive source at EOF is still live. Older anchored windows exclude newer rows
-    # and must remain settled; size is the whole record size even for compressed reads.
-    at_tail = before is None and (anchor is None or (bool(rows) and rows[-1].end == size))
+    # An inclusive source at the last complete row is still live, even with partial bytes after it.
+    # The full-record boundary is independent of the older buffer retained by a compressed anchor read.
+    at_tail = before is None and (
+        anchor is None or (bool(rows) and rows[-1].end == file.complete_record_end())
+    )
     spent, want = 0, BLOCK_BYTES
     while True:
         block = file.rows_before(start, min(want, MAX_REQUEST_BYTES - read))
