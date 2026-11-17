@@ -9,12 +9,7 @@ kill a PTY, but reconcilers apply the boundary on their next pass:
 - ScheduleManager reaps every earlier-generation schedule PTY on its next tick
   and records an open schedule run as `interrupted`. An enabled schedule remains
   current desired state and can later be rebuilt under the new generation.
-- A watcher (`meiva.watcher.at/cron/launch`) is NOT one of these reconcilers any
-  more — it has no desired-state record and nothing rebuilds one
-  (docs/decisions/runtime/updates/recovery/2026-09-27-watchers-are-never-restarted.md). A watcher session
-  from an earlier generation simply keeps running (or not) exactly as it
-  would without the freeze, subject only to its own TTL deadline, an
-  explicit kill, or `meiva stop`.
+- Ordinary shell sessions keep their TTL and explicit lifecycle controls.
 
 An inspection freeze has the same boundary semantics. Fence reconcilers before
 freezing when an operation requires selective cleanup rather than this complete

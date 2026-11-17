@@ -72,6 +72,9 @@ UNSAFE_PREFIXES = (
     "meiva.ui.",
     "meiva.self.",
     "meiva.shell.",
+    "meiva.schedules.",
+    # meiva:note
+    # Historical traces still require the scheduling side-effect guard.
     "meiva.watcher.",
     "meiva.files.edit",
     "meiva.files.write",

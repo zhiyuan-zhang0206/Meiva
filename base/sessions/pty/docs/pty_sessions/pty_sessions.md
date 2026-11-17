@@ -4,12 +4,12 @@
 
 [Liveness](../liveness.md) excludes matching but unreaped zombie PIDs.
 
-Every agent interactive shell and watcher runs in the machine's `pty-sessions`
+Every agent interactive shell and background job runs in the machine's `pty-sessions`
 service (`services/agent_runner/pty_sessions/`), an ordinary roster process (both the
 gateway and the agent-runner capability, no database, gated out only where
 there are no Unix sockets). It holds each session's pty master and an in-memory
 session table; `base/sessions/backend.PtySessionBackend` is its client, and the
-SDK keeps its named-session surface (`meiva.shell.sessions`, watchers,
+SDK keeps its named-session surface (`meiva.shell.sessions`, background jobs,
 schedules) unchanged. Decision:
 [2026-10-03-pty-sessions-service](../../../../../docs/decisions/runtime/processes/sessions/2026-10-03-pty-sessions-service.md).
 
@@ -117,7 +117,7 @@ untouched for operator inspection.
 ## Consumers
 
 `base/sessions/backend.PtySessionBackend` (`get_shell_backend(home=...)` on POSIX).
-Above it: `meiva.shell.sessions`, `meiva.watcher`, the gateway ScheduleManager, the
+Above it: `meiva.shell.sessions`, the gateway ScheduleManager, the
 `ops.cluster_status`
 capture/kill, the worktree-removal guard (`base/deploy/git/worktree_guard.py`,
 read-only: it never creates a home) and `meiva stop`'s shell-session closure
@@ -137,8 +137,7 @@ allocation lock.
 - A session carries the generation under which it was admitted. A desired-state
   owner may rebuild a missing session only when its persisted desired generation
   is current; superseded exact sessions are reaped instead. A reboot ends every
-  session; the ScheduleManager rebuilds its own, and a watcher — no desired-state record — rebuilds nothing
-  (docs/decisions/runtime/updates/recovery/2026-09-27-watchers-are-never-restarted.md).
+  session; the ScheduleManager resumes enabled schedules from durable trigger state.
 
 Initial command metadata is opt-in; see [Initial PTY command provenance](initial-command.md).
 

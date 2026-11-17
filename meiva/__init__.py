@@ -167,7 +167,7 @@ _init_complete = False
 
 # meiva:note
 # Idempotently load plugin namespaces (`meiva.tasks` etc.) into *this* process. The entry
-# point for a process an agent launched: a watcher / schedule bootstrap calls it explicitly
+# point for a process an agent launched: a schedule bootstrap calls it explicitly
 # before running agent code. A persistent-shell child completes the same composition before its
 # first parent import returns; `__getattr__` remains the backstop for a deferred plugin load.
 # `surface=True` (the default) loads the plugin *surfaces* only, the child contract (task
@@ -282,7 +282,6 @@ from . import self as self
 from . import shell as shell
 from . import skills as skills
 from . import ui as ui
-from . import watcher as watcher
 from . import web as web
 from .files import cwd as cwd
 from .sdk_surface import attachment_transport as attachment_transport
@@ -321,7 +320,6 @@ __all_for_meiva__ = [
     "skills",
     "ui",
     "understand",
-    "watcher",
     "web",
 ]
 

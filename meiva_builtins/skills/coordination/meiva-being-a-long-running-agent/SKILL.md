@@ -64,9 +64,9 @@ notice if it needs the user, or message a peer if they can resolve it. An agent
 that is stuck and an agent that is working look identical from the outside —
 the only difference is whether you speak up.
 
-## Wait with watchers, never with loops
+## Wait with event delivery and bounded helpers
 
-Use a watcher or existing event delivery for a wait. Before choosing heartbeat
+Use existing event delivery, a bounded background wait, or a declarative schedule. Before choosing heartbeat
 pauses, backoff, mechanical monitors, or peer wait coordination, read
 [waiting](references/waiting.md). Wake only on actionable changes; stop owned
 one-off monitors when done, and terminate when the finite task is complete.

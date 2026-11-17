@@ -29,4 +29,4 @@ recurring agent to continue.
 
 ## Key dependencies
 - [Skills index](../../README.md) — full skills catalog
-- [Watcher SDK](../../../../meiva/watcher/docs/watcher.md) — temporary waits used by the optional supervision pattern
+- [Shell SDK](../../../../meiva/shell/docs/shell.md) — temporary waits used by the optional supervision pattern

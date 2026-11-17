@@ -1,10 +1,10 @@
-"""Argument validation of the `meiva.files`, `meiva.ui`, `meiva.watcher`, `meiva.web`, `meiva.understand` and `meiva.self` entry points."""
+# meiva:note
+# Argument validation of the `meiva.files`, `meiva.ui`, `meiva.web`, `meiva.understand` and `meiva.self` entry points.
 
 from __future__ import annotations
 
-import datetime
 from pathlib import Path
-from typing import Any, cast
+from typing import Any
 
 import psycopg
 import pytest
@@ -18,7 +18,6 @@ from base.db.code_version_gate import ProcessDbGate
 from base.events.live.bus import EventBus
 from base.lm.catalog import ModelCatalog
 from meiva import files as _files
-from meiva import watcher as _watcher
 from meiva.tests.fixtures.pin_agent import pin_agent
 
 
@@ -76,66 +75,6 @@ class TestFilesEntries:
     ) -> None:
         p = tmp_path / "z.txt"
         _files.write(str(p), "x")  # ensure the read anchor exists
-        with pytest.raises(TypeError, match=match):
-            call()
-
-
-class TestWatcherEntries:
-    def test_at_unwraps_when_message_name(self) -> None:
-        from meiva.watcher import plans
-
-        request = plans.plan_at(
-            ("2029-01-03T00:00:00+08:00",),  # pyright: ignore[reportArgumentType]
-            ("stand up",),  # pyright: ignore[reportArgumentType]
-            name=("standup",),  # pyright: ignore[reportArgumentType]
-            notify=None,
-            now=datetime.datetime(2029, 1, 1, tzinfo=datetime.UTC),
-            announce_timezone=None,
-        )
-        assert request.name == "standup"
-        # `message` is no longer passed to the spawn as its own field - it is
-        # baked into the generated script by `build_at_script` instead.
-        assert "stand up" in request.code
-
-    def test_launch_unwraps_timeout(self) -> None:
-        from meiva.watcher import plans
-
-        request = plans.plan_launch(
-            cast(Any, ("print(1)",)),
-            cast(Any, ("30m",)),
-            cast(Any, ("x",)),
-            None,
-            datetime.datetime(2029, 1, 1, tzinfo=datetime.UTC),
-        )
-        assert request.watchdog_secs == 1800.0
-        assert request.name == "x"
-
-    @pytest.mark.parametrize(
-        ("call", "match"),
-        [
-            pytest.param(
-                lambda: _watcher.at(("a", "b"), "m", name="n"),  # pyright: ignore[reportArgumentType]
-                "when must be a string",
-                id="when-multi",
-            ),  # pyright: ignore[reportArgumentType]
-            pytest.param(
-                lambda: _watcher.at("2030-01-01T00:00:00+08:00", ("a", "b"), name="n"),  # pyright: ignore[reportArgumentType]
-                "message must be a string",
-                id="message-multi",
-            ),  # pyright: ignore[reportArgumentType]
-            pytest.param(
-                lambda: _watcher.cron(("a", "b"), "m", name="n"),  # pyright: ignore[reportArgumentType]
-                "expr must be a string",
-                id="expr-multi",
-            ),  # pyright: ignore[reportArgumentType]
-            pytest.param(
-                lambda: _watcher.launch("code", ("30m", "1h"), name="n"),  # pyright: ignore[reportArgumentType]
-                "timeout must be a string",
-                id="timeout-multi",
-            ),  # pyright: ignore[reportArgumentType]
-        ],
-    )
-    def test_multi_element_type_errors(self, call: Any, match: str) -> None:
         with pytest.raises(TypeError, match=match):
             call()
 

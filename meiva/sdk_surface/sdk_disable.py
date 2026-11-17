@@ -53,7 +53,7 @@ def raise_load_failure() -> None:
 #     (`self.terminate`) it's just deleted; `meiva.<module>.<attr>` then raises
 #     AttributeError. Either way help() stops listing it.
 # Used to scope the SDK to a context — e.g. a benchmark runner that owns the
-# agent lifecycle disables watcher / self / agents / shell.sessions.
+# agent lifecycle disables schedules / self / agents / shell.sessions.
 # The entries `MEIVA_SDK_DISABLE` names in `env`, parsed.
 #
 # Applied by `meiva.sdk_surface.install` as it builds an installation — after its submodule

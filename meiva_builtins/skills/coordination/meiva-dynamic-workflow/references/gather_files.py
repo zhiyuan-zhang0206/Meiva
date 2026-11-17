@@ -1,41 +1,42 @@
-"""Reference watcher: wake the orchestrator at one checkpoint.
-
-Workers finish silently — each writes its result file, and none
-of them messages the orchestrator.  A checkpoint is a place the ORCHESTRATOR
-script picked to be woken: this watcher polls `HANDOFF_DIR` until the
-checkpoint condition holds, then delivers one wake message.  One-shot — it
-exits after messaging.
-
-The wake is sent once; the SDK's own bounded retries are the only retry. If
-the send still fails the watcher logs the error and exits 2, so the launcher
-gets an exit notice and re-launches; a wake that lands in a gateway / agent
-restart window is not redelivered.
-
-The condition comes from the placeholders below:
-
-- `EXPECTED_FILES` + `REQUIRED_COUNT = 0` — wake when every named file exists
-  (the whole wave gates the checkpoint).
-- `EXPECTED_FILES` + `REQUIRED_COUNT = K` — wake when any K of the named files
-  exist (K-of-N: the rest of the fan-out keeps running while you reduce).
-- `MATCH_GLOB` + `REQUIRED_COUNT = K` — wake at K files matching the glob, for
-  when the result names are not all known at the time the checkpoint is armed.
-
-Listing only SOME of the running workers in `EXPECTED_FILES` is the
-designated-reporter pattern: ten workers run, the two whose output the next
-step actually needs are named here, the other eight just end.
-
-Usage:
-1. Read this file with meiva.files.read(...)
-2. Replace HANDOFF_DIR, EXPECTED_FILES (or MATCH_GLOB), REQUIRED_COUNT,
-   ORCHESTRATOR_ID
-3. Launch with meiva.watcher.launch(code, timeout="10m", name="gather-<checkpoint>")
-4. The watcher's message wakes you
-
-Use a distinct run or input-version directory and preserve valid results on
-re-entry. Existence is only a readiness hint: validate contents after waking.
-Files remain observable when the watcher starts after successful dispatch;
-there is no lost event to prevent by launching before an uncertain spawn.
-"""
+# meiva:note
+# Reference watcher: wake the orchestrator at one checkpoint.
+#
+# Workers finish silently — each writes its result file, and none
+# of them messages the orchestrator.  A checkpoint is a place the ORCHESTRATOR
+# script picked to be woken: this watcher polls `HANDOFF_DIR` until the
+# checkpoint condition holds, then delivers one wake message.  One-shot — it
+# exits after messaging.
+#
+# The wake is sent once; the SDK's own bounded retries are the only retry. If
+# the send still fails the watcher logs the error and exits 2, so the launcher
+# gets an exit notice and re-launches; a wake that lands in a gateway / agent
+# restart window is not redelivered.
+#
+# The condition comes from the placeholders below:
+#
+# - `EXPECTED_FILES` + `REQUIRED_COUNT = 0` — wake when every named file exists
+#   (the whole wave gates the checkpoint).
+# - `EXPECTED_FILES` + `REQUIRED_COUNT = K` — wake when any K of the named files
+#   exist (K-of-N: the rest of the fan-out keeps running while you reduce).
+# - `MATCH_GLOB` + `REQUIRED_COUNT = K` — wake at K files matching the glob, for
+#   when the result names are not all known at the time the checkpoint is armed.
+#
+# Listing only SOME of the running workers in `EXPECTED_FILES` is the
+# designated-reporter pattern: ten workers run, the two whose output the next
+# step actually needs are named here, the other eight just end.
+#
+# Usage:
+# 1. Read this file with meiva.files.read(...)
+# 2. Replace HANDOFF_DIR, EXPECTED_FILES (or MATCH_GLOB), REQUIRED_COUNT,
+#    ORCHESTRATOR_ID
+# 3. Write the substituted code to a script file and launch it with
+#    meiva.shell.run_background(command, ttl=600, name="gather-<checkpoint>")
+# 4. The watcher's message wakes you
+#
+# Use a distinct run or input-version directory and preserve valid results on
+# re-entry. Existence is only a readiness hint: validate contents after waking.
+# Files remain observable when the watcher starts after successful dispatch;
+# there is no lost event to prevent by launching before an uncertain spawn.
 
 import time
 from dataclasses import dataclass

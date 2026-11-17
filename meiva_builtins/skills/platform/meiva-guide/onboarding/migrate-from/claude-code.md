@@ -17,7 +17,7 @@ subagents, hooks, slash commands, and MCP servers.
 | Auto memory (`~/.claude/projects/<project>/memory/`, `/memory`) | Shared memory pool (`~/.meiva/vault/memory`, `meiva memory` CLI) + per-agent `memory/` workspace | Notes are markdown with frontmatter and semantic search; agents write them deliberately instead of Claude Code's automatic MEMORY.md upkeep. |
 | Skills (`.claude/skills/`, `~/.claude/skills/`) | Same Agent Skills `SKILL.md` standard — `meiva skill install <git-url-or-path>` | Verified: unmodified Claude Code skill folders install as-is. The fields Meiva does not act on are `allowed-tools` / `disallowed-tools` and `context: fork` — its single tool is `execute_code`. |
 | Subagents (`.claude/agents/*.md` with tools/model/permissionMode/maxTurns frontmatter) | Peer agents — `meiva.agents.spawn`, role-card skills (`be-a-<role>`) | Meiva agents are full peers with their own workspace, memory and tools, not scoped subprocesses. Boundaries are set in the spawn prompt and recorded as the role kind memory — there is no per-agent tool allowlist. |
-| Hooks (`settings.json` → PreToolUse, PostToolUse, Stop, SessionStart, …) | No hook system. Policy rules → AGENTS.md + memory notes; conditions/notifications → `meiva.watcher`; format/lint/test on change → repo CI | A hook that enforced policy (e.g. blocking `rm -rf`) must become a written rule, not an executable hook. |
+| Hooks (`settings.json` → PreToolUse, PostToolUse, Stop, SessionStart, …) | No hook system. Policy rules → AGENTS.md + memory notes; conditions/notifications → `meiva.schedules`; format/lint/test on change → repo CI | A hook that enforced policy (e.g. blocking `rm -rf`) must become a written rule, not an executable hook. |
 | Slash commands (`.claude/commands/`, built-ins `/init`, `/compact`, `/review`) | Skills (same idea: a named instruction pack the agent reads) + the `meiva` CLI for operations | No interactive slash-command bar. |
 | Permission prompts & modes (default / acceptEdits / plan / `--dangerously-skip-permissions`) | No per-tool approval UI. Agents decide what to run; the user's standing gates are recorded in memory at onboarding, and irreversible / outward-facing actions raise `meiva.ui.ask(...)` | The biggest behavioral difference — see pitfalls. |
 | MCP (`claude mcp add`, settings.json) | Same MCP standard; `meiva mcp` add/list/remove/enable/disable | Per machine: a server is registered on the machine whose tools it wraps. |
@@ -44,11 +44,11 @@ token setup: `docs/conventions/extensions/mcp-client-access.md`).
    role-card skill (`be-a-<role>`; see `skill-creator`), loaded through the
    spawn's `skills_to_expand_at_start`. The spawn prompt carries the mission;
    record the role's boundary as the role kind memory.
-4. **Recreate hooks as rules and watchers.** Policy hooks become AGENTS.md /
-   memory rules; notification and condition hooks become `meiva.watcher`
-   watchers; format/lint hooks belong in repo CI.
-5. **Recreate scheduled work** as `meiva schedules` (gateway-supervised cron) or
-   `meiva.watcher.cron`.
+4. **Recreate hooks as rules and schedules.** Policy hooks become AGENTS.md /
+   memory rules; notification and condition hooks become `meiva.schedules`
+   checks; format/lint hooks belong in repo CI.
+5. **Recreate scheduled work** as `meiva schedules` (declarative triggers) or
+   `meiva.schedules.cron`.
 6. **State your gates once.** There is no permission-mode switch: tell the
    onboarding agent what must never happen without your OK. It writes the
    rules to the pool, and every later agent reads them.

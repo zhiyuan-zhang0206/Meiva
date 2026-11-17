@@ -15,7 +15,7 @@ This is the agent's "view" at runtime — from the LLM's perspective, what the a
 - [MCP Server System](../mcps/docs/mcps.md) — MCP tool servers
 - [meiva.web — Web Access](../web/docs/web.md) — network access
 - [meiva.understand — Multimodal Understanding Primitive](../understand/README.md) — multimodal understanding primitives
-- [watcher](../watcher/docs/watcher.md) — background watchers
+- [schedules](../schedules/__init__.py) — declarative scheduled work
 - [self](../self/README.md) — agent self
 - [meiva.ui — User Interface](ui.md) — user interface
 - [meiva.memory — Long-term Memory Pool (Plugin Provided)](../../meiva_builtins/plugins/meiva_memory/docs/memory-api.md) — long-term memory pool

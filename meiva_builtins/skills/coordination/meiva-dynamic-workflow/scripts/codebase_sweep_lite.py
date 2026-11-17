@@ -10,6 +10,7 @@ Contrast with codebase_sweep_orchestrator.py (7 waves, ~28 agents).
 """
 
 import json
+import shlex
 from datetime import datetime
 from pathlib import Path
 from typing import TypedDict
@@ -26,7 +27,7 @@ from base.host.boundary.json_values import is_object_dict
 from base.host.boundary.untyped import object_of
 
 ORCH = meiva.self.AGENT_ID
-HD = meiva.files.resolve("codebase_sweep_lite")
+HD = Path("codebase_sweep_lite").resolve()
 HD.mkdir(parents=True, exist_ok=True)
 PF = HD / "progress.md"
 SF = HD / "orchestrator_state.json"
@@ -109,7 +110,7 @@ def write_state(state: _State) -> None:
 def launch_checkpoint(
     expected_files: list[str],
     wave_name: str,
-    timeout: str = "10m",
+    timeout: float = 600,
     required_count: int = 0,
 ) -> None:
     """Arm this wave's checkpoint. Patches the skill's gather_files.py reference.
@@ -125,7 +126,11 @@ def launch_checkpoint(
     )
     code = code.replace("REQUIRED_COUNT = 0", f"REQUIRED_COUNT = {required_count}")
     code = code.replace("ORCHESTRATOR_ID = 0", f"ORCHESTRATOR_ID = {ORCH}")
-    meiva.watcher.launch(code, timeout=timeout, name=f"gather-{wave_name}")
+    script = Path(f"gather-{wave_name}.py").resolve()
+    meiva.files.write(str(script), code)
+    meiva.shell.run_background(
+        '"$MEIVA_PYTHON" ' + shlex.quote(str(script)), ttl=timeout, name=f"gather-{wave_name}"
+    )
 
 
 # ══════════════════════════════════════════════════════════════════

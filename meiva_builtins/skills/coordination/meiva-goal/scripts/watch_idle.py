@@ -1,30 +1,30 @@
-"""Reference watcher body for the meiva-goal skill.
-
-Launch this in the background with `meiva.watcher.launch(code=..., timeout=..., name="...")` after
-substituting TARGET_AGENT_ID. It waits until the agent you are watching finishes
-a turn and goes idle, then delivers one wake message (`meiva.agents.send_message`) so you wake
-up and judge that agent's progress against the goal.
-
-The wake is sent once; the SDK's own bounded retries are the only retry. If
-the send still fails the watcher logs the error and exits 2, so the launcher
-gets an exit notice and re-launches; a wake that lands in a gateway / agent
-restart window is not redelivered.
-
-Runtime notes:
-- This program runs under the same Python environment, configuration, and
-  machine credentials as the agent that launched it.
-- `meiva.agents.send_message(meiva.self.AGENT_ID, content)` delivers `content` back to you (the launching agent)
-  as a new incoming message.
-- Connection settings are read from the launching agent's own configuration, so
-  the watcher always listens on the same event stream the watched agent reports
-  to.
-- `socket_timeout=None` is mandatory: redis-py 8 defaults it to 5s, which kills
-  pubsub.listen()'s long blocking read the moment the event stream goes quiet
-  for a few seconds (observed 2026-08-13: the watcher died mid-watch and would
-  have missed the target's idle). If the stream still dies (redis restart,
-  connection loss), the watcher falls back to polling the target's status so
-  the goal loop never stalls.
-"""
+# meiva:note
+# Reference watcher body for the meiva-goal skill.
+#
+# After substituting TARGET_AGENT_ID, write this code to a script file and launch
+# it with `meiva.shell.run_background(command, ttl=21600, name="goal-idle")`. It waits until the agent you are watching finishes
+# a turn and goes idle, then delivers one wake message (`meiva.agents.send_message`) so you wake
+# up and judge that agent's progress against the goal.
+#
+# The wake is sent once; the SDK's own bounded retries are the only retry. If
+# the send still fails the watcher logs the error and exits 2, so the launcher
+# gets an exit notice and re-launches; a wake that lands in a gateway / agent
+# restart window is not redelivered.
+#
+# Runtime notes:
+# - This program runs under the same Python environment, configuration, and
+#   machine credentials as the agent that launched it.
+# - `meiva.agents.send_message(meiva.self.AGENT_ID, content)` delivers `content` back to you (the launching agent)
+#   as a new incoming message.
+# - Connection settings are read from the launching agent's own configuration, so
+#   the watcher always listens on the same event stream the watched agent reports
+#   to.
+# - `socket_timeout=None` is mandatory: redis-py 8 defaults it to 5s, which kills
+#   pubsub.listen()'s long blocking read the moment the event stream goes quiet
+#   for a few seconds (observed 2026-08-13: the watcher died mid-watch and would
+#   have missed the target's idle). If the stream still dies (redis restart,
+#   connection loss), the watcher falls back to polling the target's status so
+#   the goal loop never stalls.
 
 import json
 import time
@@ -86,15 +86,16 @@ def _notify(target_id: int) -> None:
 
 
 def _watch_via_poll(target_id: int, interval_s: float = 5.0) -> None:
-    """Fallback: poll the target's status until it idles, then remind once.
-
-    Used when the event stream is unavailable, when the target may ALREADY be
-    idle before the watcher starts, or when a pubsub read died mid-watch. It
-    reads the same authoritative status as the event path. A transient read
-    error only skips one round; the 6h `meiva.watcher.launch` timeout remains the
-    outer safety bound, so a persistently failing read also wakes the launching
-    agent eventually (via the watcher's own exit).
-    """
+    # meiva:note
+    # Fallback: poll the target's status until it idles, then remind once.
+    #
+    #     Used when the event stream is unavailable, when the target may ALREADY be
+    #     idle before the watcher starts, or when a pubsub read died mid-watch. It
+    #     reads the same authoritative status as the event path. A transient read
+    #     error only skips one round; the 6h background shell TTL remains the
+    #     outer safety bound, so a persistently failing read also wakes the launching
+    #     agent eventually (via the watcher's own exit).
+    #
     failing = False
     while True:
         try:

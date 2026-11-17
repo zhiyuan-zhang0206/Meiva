@@ -23,7 +23,7 @@ provider, Mixture-of-Agents presets, and fallback chains.
 | Channels (CLI, Telegram, Discord, Slack, WhatsApp, Signal, Email, SMS, …) | Platform dialog + `meiva.ui.ask` | Meiva has no messaging channels. |
 | Command approval (`hermes approvals`) | Memory gates + `meiva.ui.ask(...)` | No approval-history ledger. |
 | Terminal backends (local, Docker, SSH, Daytona, Modal) | Multi-machine agents (`meiva.agents.spawn(machine=...)`), `meiva.shell.sessions`, containers via shell | Daytona/Modal serverless hibernation has no Meiva equivalent. |
-| `hermes cron` | `meiva schedules` + `meiva.watcher` | |
+| `hermes cron` | `meiva schedules` | |
 | MCP (`hermes mcp`) | `meiva mcp` | |
 | Model flexibility (`hermes model`, `hermes moa`, `hermes fallback`) | `config_overlay` picks one model per agent | No Mixture-of-Agents, no provider failover chain. The workaround is delegation: different agents on different models. |
 | `hermes import-agent` (imports a `~/.claude` or `~/.codex` setup) | This page set — same job, done by hand | |
@@ -39,7 +39,7 @@ provider, Mixture-of-Agents presets, and fallback chains.
 3. **Seed the memory pool.** Hermes's learned user model does not transfer;
    let onboarding write the user kind and the feedback kind notes from the
    interview — the pool is the replacement for Honcho-style user modeling.
-4. **Recreate schedules** (`hermes cron` → `meiva schedules` / `meiva.watcher`).
+4. **Recreate schedules** (`hermes cron` → `meiva schedules`).
 5. **Choose models per role.** `hermes model` / MoA presets → one model per
    agent via `config_overlay`; no multi-model aggregation.
 6. **Move channel habits.** Pick the platform dialog as the primary surface;

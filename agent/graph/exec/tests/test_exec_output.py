@@ -262,7 +262,7 @@ def test_wrap_code_output_timed_out_carries_strategy_hint(
         elapsed_seconds=1.0,
     ).text
     assert "run_background" in out
-    assert "meiva.watcher.launch" in out
+    assert "Python scripts with the same helper" in out
     assert (
         "run_background"
         not in wrap_code_output(

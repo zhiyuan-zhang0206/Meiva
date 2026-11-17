@@ -1,11 +1,11 @@
-"""MEIVA_SDK_DISABLE removes pieces of the agent-facing SDK as it installs.
-
-Each subprocess test runs a scenario of `child_sdk_disable.py`, which imports meiva and
-installs the SDK surface under a controlled env, so the disable machinery (the first step
-of the install) sees the right state. In-process re-import is fragile because the install mutates sys.modules +
-globals and the slot holds one value; subprocess isolation is the only honest way
-to verify "agent never sees X".
-"""
+# meiva:note
+# MEIVA_SDK_DISABLE removes pieces of the agent-facing SDK as it installs.
+#
+# Each subprocess test runs a scenario of `child_sdk_disable.py`, which imports meiva and
+# installs the SDK surface under a controlled env, so the disable machinery (the first step
+# of the install) sees the right state. In-process re-import is fragile because the install mutates sys.modules +
+# globals and the slot holds one value; subprocess isolation is the only honest way
+# to verify "agent never sees X".
 
 from __future__ import annotations
 
@@ -17,11 +17,10 @@ _CHILD = Path(__file__).with_name("child_sdk_disable.py")
 
 
 def _write_isolated_home(home: Path) -> None:
-    """An `$MEIVA_HOME` whose plugins.json disables every repo builtin plugin.
+    # meiva:note
+    # The disable tests need no plugin surface; an empty package store keeps each
+    # subprocess hermetic without loading DB-backed builtins.
 
-    The disable machinery under test needs no plugin surface; this keeps the real
-    load light (no DB-touching builtins) and hermetic. Mirrors
-    `meiva/tests/namespaces/watcher/test_watcher_plugin_load.py`'s recipe."""
     import json
 
     from base import paths
@@ -76,12 +75,12 @@ def test_default_no_disable_full_surface() -> None:
     code, out, err = _run("full_surface")
     assert code == 0, err
     names = out.strip().split(",")
-    for required in ("agents", "watcher", "self", "files", "shell"):
+    for required in ("agents", "schedules", "self", "files", "shell"):
         assert required in names, (required, names)
 
 
 def test_disable_module_hides_from_parent_and_raises_legibly_on_use() -> None:
-    code, out, err = _run("module_hides_from_parent", env_disable="watcher")
+    code, out, err = _run("module_hides_from_parent", env_disable="schedules")
     assert code == 0, err
     assert out.strip() == "ok"
 
@@ -104,7 +103,7 @@ def test_disable_nested_module_swaps_sentinel_and_keeps_siblings() -> None:
 
 
 def test_multiple_disables_in_one_env() -> None:
-    code, out, err = _run("multiple_disables", env_disable="watcher,agents,self.terminate")
+    code, out, err = _run("multiple_disables", env_disable="schedules,agents,self.terminate")
     assert code == 0, err
     assert out.strip() == "ok"
 
@@ -119,7 +118,7 @@ def test_disabled_module_absent_from_help_overview() -> None:
 
 
 def test_whitespace_in_disable_list_is_tolerated() -> None:
-    code, out, err = _run("watcher_and_agents_gone", env_disable=" watcher , agents ")
+    code, out, err = _run("schedules_and_agents_gone", env_disable=" schedules , agents ")
     assert code == 0, err
     assert out.strip() == "ok"
 
@@ -129,14 +128,14 @@ def test_whitespace_in_disable_list_is_tolerated() -> None:
 
 def test_apply_sdk_disable_is_idempotent() -> None:
     """Calling apply_sdk_disable twice with the same entries is a no-op."""
-    code, out, err = _run("apply_is_idempotent", env_disable="watcher")
+    code, out, err = _run("apply_is_idempotent", env_disable="schedules")
     assert code == 0, err
     assert out.strip() == "ok"
 
 
 def test_apply_sdk_disable_is_cumulative() -> None:
     """New entries not in the env list are applied on top."""
-    code, out, err = _run("apply_is_cumulative", env_disable="watcher")
+    code, out, err = _run("apply_is_cumulative", env_disable="schedules")
     assert code == 0, err
     assert out.strip() == "ok"
 
@@ -150,7 +149,7 @@ def test_apply_sdk_disable_dotted_cumulative() -> None:
 
 def test_apply_sdk_disable_applied_entries_tracked() -> None:
     """The installation records both env and manual entries."""
-    code, out, err = _run("applied_entries_tracked", env_disable="watcher")
+    code, out, err = _run("applied_entries_tracked", env_disable="schedules")
     assert code == 0, err
     assert out.strip() == "ok"
 

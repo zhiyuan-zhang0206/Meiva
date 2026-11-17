@@ -28,6 +28,7 @@ Total: ~28 agents / 7 waves
 """
 
 import json
+import shlex
 from datetime import datetime
 from pathlib import Path
 
@@ -38,7 +39,7 @@ import meiva
 # ═══════════════════════════════════════════════════════════════════════════════
 ORCHESTRATOR = meiva.self.AGENT_ID
 TASK = "codebase_sweep"
-HANDOFF = meiva.files.resolve(TASK)
+HANDOFF = Path(TASK).resolve()
 HANDOFF.mkdir(parents=True, exist_ok=True)
 PROGRESS_FILE = HANDOFF / "progress.md"
 STATE_FILE = HANDOFF / "orchestrator_state.json"
@@ -86,7 +87,7 @@ def write_state(state: dict) -> None:
 def launch_checkpoint(
     expected_files: list[str],
     wave_name: str,
-    timeout: str = "15m",
+    timeout: float = 900,
     required_count: int = 0,
     match_glob: str = "",
 ) -> None:
@@ -106,7 +107,11 @@ def launch_checkpoint(
     code = code.replace('MATCH_GLOB = ""', f'MATCH_GLOB = "{match_glob}"')
     code = code.replace("REQUIRED_COUNT = 0", f"REQUIRED_COUNT = {required_count}")
     code = code.replace("ORCHESTRATOR_ID = 0", f"ORCHESTRATOR_ID = {ORCHESTRATOR}")
-    meiva.watcher.launch(code, timeout=timeout, name=f"gather-{wave_name}")
+    script = Path(f"gather-{wave_name}.py").resolve()
+    meiva.files.write(str(script), code)
+    meiva.shell.run_background(
+        '"$MEIVA_PYTHON" ' + shlex.quote(str(script)), ttl=timeout, name=f"gather-{wave_name}"
+    )
 
 
 def show_progress(wave: int, done: int, total: int, stage: str) -> None:

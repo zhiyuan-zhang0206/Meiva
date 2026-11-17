@@ -38,4 +38,4 @@ conditions and scope survive late results and script re-entry.
 
 - [Skill](SKILL.md) owns method selection and orchestration guidance.
 - [Agents](../../../../meiva/agents/docs/agents.md) owns peer lifecycle and communication.
-- [Watcher SDK](../../../../meiva/watcher/docs/watcher.md) owns checkpoint execution.
+- [Shell SDK](../../../../meiva/shell/docs/shell.md) owns bounded background checkpoint execution.

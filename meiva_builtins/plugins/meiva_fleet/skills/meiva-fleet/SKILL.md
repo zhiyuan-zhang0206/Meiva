@@ -125,7 +125,7 @@ only for information that passes that test; completion and standing responsibili
 do not create an independent reason to publish. Keep other results in working records.
 For communication with the user, follow `reduce-context-switch-for-human`.
 For mechanical monitoring and waiting, use `meiva-being-a-long-running-agent`
-and `meiva.help(meiva.watcher)`; generated watchers and schedules follow the same fleet contract.
+and `meiva.help(meiva.schedules)`; bounded background waits and schedules follow the same fleet contract.
 
 ## Two Dials: Effort and Autonomy
 

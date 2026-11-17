@@ -48,7 +48,7 @@ class ShellSessions:
         return self._backend
 
     # meiva:note
-    # Every shell session of this agent, watchers included, is named `meiva-agent-<agent_id>-shell-<session_id>[-<name>]`; kill_all and `list` filter on this prefix.
+    # Every shell session of this agent, background jobs included, is named `meiva-agent-<agent_id>-shell-<session_id>[-<name>]`; kill_all and `list` filter on this prefix.
     def shell_prefix(self) -> str:
         return f"{session_name(f'agent-{self._agent_id}')}-shell-"
 
@@ -59,7 +59,7 @@ class ShellSessions:
         return session_plan.match_session(self._names(), self.shell_prefix(), session_id)
 
     # meiva:note
-    # `ttl` is required: user ruling 2026-08-27 made shell TTL mandatory (the idle-shell-reminder daemon is gone and TTL is the only reclamation mechanism). Every caller, shells and watchers alike, records its deadline in `agent_shell_ttls`; for a watcher that deadline IS the watcher's target (launch timeout, cron end, at moment plus grace; user ruling 2026-09-14, task #3411). The cap is applied here, at the write point, so every caller is bound by it. PTY creation and its TTL insert run behind one `agents_meta` row lock: a terminal transition waits for both or rejects the allocation. The counter still advances when a PTY start or TTL write fails, so stale numeric handles never name a later session; a post-start TTL error also disposes of the otherwise-unreapable PTY.
+    # `ttl` is required: user ruling 2026-08-27 made shell TTL mandatory (the idle-shell-reminder daemon is gone and TTL is the only reclamation mechanism). Every caller records its deadline in `agent_shell_ttls`. The cap is applied here, at the write point, so every caller is bound by it. PTY creation and its TTL insert run behind one `agents_meta` row lock: a terminal transition waits for both or rejects the allocation. The counter still advances when a PTY start or TTL write fails, so stale numeric handles never name a later session; a post-start TTL error also disposes of the otherwise-unreapable PTY.
     def create(
         self,
         name: str | None,
@@ -218,7 +218,7 @@ def shell_sessions() -> ShellSessions:
 
 
 # meiva:note
-# Allocate the next session id and create the shell session. Internal: `new()` (shell), `meiva.watcher.spawn.run` (named "watcher") and the background runs use it. `cwd` defaults to the agent's workspace, the same base `meiva.shell.run` uses.
+# Allocate the next session id and create the shell session. Internal: `new()` and the background runs use it. `cwd` defaults to the agent's workspace, the same base `meiva.shell.run` uses.
 def create_session(
     name: str | None = None,
     *,
@@ -246,7 +246,7 @@ def new(name: str, *, ttl: float) -> int:
     Args:
         ttl: same semantics as `run_background` — required hard lifetime in
             seconds from creation; a deadline-bound task belongs in
-            `meiva.watcher` instead. Extend the deadline later, before it
+            `meiva.schedules` instead. Extend the deadline later, before it
             passes, with `renew(id, ttl=)`."""
     name = coerce_str(name, "name")
     ttl = coerce_typed(ttl, "ttl", (int, float))
@@ -303,12 +303,8 @@ def capture(id: int | SessionHandle, lines: int | None = None, *, scrollback: bo
 
 
 def _session_id(id: object) -> int:
-    """Accept a session id or the handle `run_background`/`watcher.*` returned.
-
-    A watcher and a background command both come back as `SessionHandle`; passing
-    that value straight to `sessions` must keep working, so the handle's id wins
-    over the strict int check.
-    """
+    # meiva:note
+    # Background commands return SessionHandle; accept its id before the strict int check.
     if isinstance(id, SessionHandle):
         return id.session_id
     return coerce_typed(id, "id", int)
@@ -331,9 +327,8 @@ def renew(id: int | SessionHandle, *, ttl: float) -> datetime:
     """Move a live session's expiry to now + `ttl` seconds.
 
     Each renewal accepts at most 24 hours and replaces, rather than extends, the
-    existing deadline. Only your own unexpired sessions can be renewed, including
-    watcher sessions. Renewal does not change a watcher's scheduled end or timeout;
-    renewing a longer-lived session can shorten its expiry.
+    existing deadline. Only your own unexpired sessions can be renewed.
+    Renewing a longer-lived session can shorten its expiry.
 
     Returns:
         The new expiry time."""
