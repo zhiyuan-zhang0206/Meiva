@@ -52,15 +52,15 @@ class AgentSkillRecallSettings(EnvSettings):
 
     skill_recall_threshold: float = Field(
         title="Minimum relevance for skill suggestions",
-        default=0.60,
+        default=0.35,
         gt=0,
         le=1,
         alias="MEIVA_SKILL_RECALL_THRESHOLD",
         description=(
-            "Lowest probability of 'yes' at which a skill is offered. The model's probabilities "
-            "are coarse, so this is a cut between 'clearly helps' and everything else rather "
-            "than a fine ranking. Calibrated 2026-10-11 with jev-1.13.0 and the current "
-            "question wording."
+            "Lowest probability of 'yes' at which a skill is offered on person- or "
+            "schedule-woken turns. Calibrated 2026-11-18 on gemini-decision-1 for recall-first "
+            "coverage: an extra one-line suggestion costs ~35 tokens and can be ignored, whereas "
+            "missing an applicable workflow, goal, or verification skill causes rework."
         ),
         json_schema_extra={
             "restart_required": "agent",
@@ -74,22 +74,18 @@ class AgentSkillRecallSettings(EnvSettings):
 
     skill_recall_peer_threshold: float = Field(
         title="Minimum relevance for peer-message skill suggestions",
-        default=0.70,
+        default=0.45,
         gt=0,
         le=1,
         alias="MEIVA_SKILL_RECALL_PEER_THRESHOLD",
         description=(
             "Lowest probability of 'yes' at which a skill is offered on a turn woken by "
-            "another agent's message, instead of skill_recall_threshold. Peer traffic is a "
-            "different distribution from person and schedule messages -- most of it is status, "
-            "acknowledgement and watcher notices -- so it carries its own cut. Calibrated on "
-            "999 real peer messages (2026-10-18 replay): against 'this message asks for work', "
-            "0.60 offers on 65% of turns at 58% precision, 0.70 on 40% at 69%, 0.75 on 26% at "
-            "75% and 0.85 on 5% at 94%. Precision is one rater panel's estimate; an independent "
-            "reader on 50 messages put 0.70 at 56%, so quote 56-69%. The band the cut adds over 0.75 is 57% "
-            "work on this sample, the weakest one. 0.70 is the default because a missed dispatch "
-            "costs a redo while an extra offer costs one line. Only used when "
-            "skill_recall_peer_messages is on."
+            "another agent's message, instead of skill_recall_threshold. Peer traffic carries "
+            "more coordination noise than direct user turns, so its cut stays stricter than "
+            "skill_recall_threshold while favoring recall-first coverage (re-thresholding the "
+            "historical 999-message peer_recall_replay.json score fixture from 0.70 to 0.45 "
+            "raises coverage across its 428 work dispatches from 63.3% to 98.6%). Only used "
+            "when skill_recall_peer_messages is on."
         ),
         json_schema_extra={
             "restart_required": "agent",
@@ -103,13 +99,15 @@ class AgentSkillRecallSettings(EnvSettings):
 
     skill_recall_max: int = Field(
         title="Maximum suggested skills per turn",
-        default=2,
+        default=5,
         ge=0,
         alias="MEIVA_SKILL_RECALL_MAX",
         description=(
-            "The most skills one recall note offers. Kept small: an offered skill is a "
-            "suggestion to spend context on loading its instructions. Ties on the score are "
-            "broken by skill identifier, so the choice is deterministic. 0 offers nothing."
+            "The most skills one recall note offers. Set to 5 so domain implementation skills "
+            "and tie-breaking do not crowd out general workflow, goal-contract, or verification "
+            "skills under recall-first scoring, while bounding prompt overhead to at most five "
+            "summary lines (~180 tokens). Ties on the score are broken by skill identifier, so "
+            "the choice is deterministic. 0 offers nothing."
         ),
         json_schema_extra={
             "restart_required": "agent",
@@ -149,9 +147,9 @@ class AgentSkillRecallSettings(EnvSettings):
         description=(
             "Also consider turns woken by another agent's message, not only by a person or a "
             "schedule. A peer message is scored only when the peer gate passes: one cheap "
-            "decision request checks that the message asks for work and does not already state "
-            "how to do it. Off keeps the 2026-10-11 behaviour exactly; the peer gate exists "
-            "because most inbound messages are peer traffic that the original trigger excluded."
+            "decision request checks whether the message asks for concrete work rather than "
+            "reporting status or acknowledging receipt. Off keeps the 2026-10-11 behaviour "
+            "exactly; the peer gate exists because most inbound messages are peer traffic."
         ),
         json_schema_extra={
             "restart_required": "agent",
@@ -172,36 +170,12 @@ class AgentSkillRecallSettings(EnvSettings):
         description=(
             "Peer gate: skip a peer message when the probability that it asks the recipient to "
             "do work is at or below this floor, i.e. when it is clearly a status report, "
-            "acknowledgement or notification. Messages between this floor and the method "
-            "ceiling pass: an uncertain message is scored rather than dropped, because a missed "
-            "offer costs a redo while an extra offer costs one line in the prompt."
+            "acknowledgement or notification. Uncertain messages above this floor pass and are "
+            "scored rather than dropped (96% recall on the 999-message peer benchmark), because "
+            "a missed offer costs a redo while an extra offer costs one line in the prompt."
         ),
         json_schema_extra={
             "help_text": "Skip messages whose probability of requesting work is at or below this threshold.",
-            "restart_required": "agent",
-            "writable": True,
-            "sensitive": False,
-            "scope": "cluster-pinned",
-            "per_agent": True,
-            "lifecycle": "live",
-        },
-    )
-
-    skill_recall_peer_gate_method_ceiling: float = Field(
-        title="Peer message instruction threshold",
-        default=0.70,
-        gt=0,
-        le=1,
-        alias="MEIVA_SKILL_RECALL_PEER_GATE_METHOD_CEILING",
-        description=(
-            "Peer gate: skip a peer message when the probability that it already states how to "
-            "do the work (steps, criteria, commands, acceptance checks) is at or above this "
-            "ceiling. A brief that carries its own method does not need a playbook offered on "
-            "top of it; the same split made the batch-review episodes score 'not applicable' in "
-            "the 2026-10-17 evaluation."
-        ),
-        json_schema_extra={
-            "help_text": "Skip messages whose probability of already providing a method is at or above this threshold.",
             "restart_required": "agent",
             "writable": True,
             "sensitive": False,
@@ -234,13 +208,13 @@ class AgentSkillRecallSettings(EnvSettings):
 
     skill_recall_peer_gate_deadline_seconds: float = Field(
         title="Peer message screening timeout (seconds)",
-        default=1.5,
+        default=3.0,
         gt=0,
         alias="MEIVA_SKILL_RECALL_PEER_GATE_DEADLINE_SECONDS",
         description=(
-            "Wall-clock budget (seconds) for the peer gate. It runs before the recall pass, so "
-            "a peer-woken turn can spend this budget plus skill_recall_deadline_seconds when "
-            "both calls are slow; the gate reads one message (p50 about 0.6s)."
+            "Wall-clock budget (seconds) for the peer gate. Matched to "
+            "skill_recall_deadline_seconds (3.0s) so transient provider tail latency does not "
+            "drop peer skill recall before scoring."
         ),
         json_schema_extra={
             "restart_required": "agent",

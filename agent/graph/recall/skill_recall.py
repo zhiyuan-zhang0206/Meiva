@@ -1,11 +1,15 @@
 # meiva:note
-# Skill recall: offer the skills that clearly fit the conversation's latest request.
+# Skill recall: offer the skills that could plausibly help with the conversation's latest request.
 #
 # The standing `# Capabilities` index asks the agent to match every task against it by hand, and an
-# index of hundreds of skills is easy to skim past. Before a turn woken by a person's message or a
-# schedule, one decision-model request scores every candidate skill against the recent conversation
-# and the best matches are named in a system note, so a fitting playbook is in front of the agent
-# without it having to find the line.
+# index of dozens of skills is easy to skim past. Before a turn woken by a person's message, a
+# schedule, or a work-bearing peer message, one decision-model request scores every candidate skill
+# against the recent conversation and the top matches are named in a system note.
+#
+# Recall-first policy (2026-11-18): an extra offered skill costs one summary line (~35 tokens) and
+# the agent simply ignores an unhelpful match, whereas missing a relevant workflow, goal-contract,
+# or verification playbook causes silent quality and process regressions. Both the question wording
+# and the thresholds therefore favor recall over stingy filtering.
 #
 # One request, one question per skill. The conversation is sent once as the state and every skill
 # adds only its own yes/no question (about 150 tokens each), so the request grows with the catalog.
@@ -13,10 +17,6 @@
 # that is logged and nothing is offered. The state is never truncated and the catalog is never
 # chunked here: a partial score over some of the skills would offer the best of an arbitrary subset,
 # and a request split by chunks would multiply the cost of every inbound turn.
-#
-# The wording and threshold were calibrated with Jev by the 2026-10-11 benchmark. The
-# Gemini default preserves that threshold; protocol verification does not transfer the historical
-# calibration to a different model. Threshold recalibration is a separate evaluation.
 #
 # A removable layer, like passive memory recall: a decision failure of any kind returns `None`
 # and the turn goes on without the note.
@@ -49,22 +49,23 @@ STATE_PREAMBLE = (
     "request or trigger):\n\n"
 )
 
-# The calibrated question, asked once per skill. `{identifier}` and `{description}` are the
-# skill's display identifier and its index-line description. The wording and the display
-# spelling are what the question was calibrated on; the note the agent reads spells the
-# loadable path instead (`render_note`).
+# meiva:note
+# The recall-first question, asked once per skill. `{identifier}` and `{description}` are the
+# skill's display identifier and its index-line description; the note the agent reads spells the
+# loadable path and `SKILL.md` file path instead (`render_note`).
 QUESTION_TEMPLATE = (
     "Skill `meiva.skills.{identifier}` -- {description}\n\n"
-    "If the agent loads this skill now and follows it, will that clearly help it handle "
-    "the latest request in the conversation?"
+    "Could loading this skill help the agent handle, scope, execute, or verify the "
+    "latest request in the conversation?"
 )
 TRUE_IF = (
-    "Yes: the skill's playbook directly applies to what the agent has to do next and "
-    "would clearly improve how it does it."
+    "Yes: the skill's domain playbook, workflow, goal-contract guidance, or verification "
+    "method is plausibly relevant to scoping, executing, or checking this request (prefer "
+    "recalling a potentially helpful skill over missing it)."
 )
 FALSE_IF = (
-    "No: the skill is unrelated, only loosely related, or the agent can handle the latest "
-    "request just as well without it."
+    "No: the skill is clearly unrelated to the request's domain and work shape (for example "
+    "a pure status acknowledgement, casual chat, or an unrelated integration)."
 )
 
 # Agent-visible framing. Observational, no implementation detail (obeys the SDK docstring
@@ -209,10 +210,12 @@ async def recall_skills(
 
 
 # meiva:note
-# A peer-woken turn is scored only when this two-question gate passes: the message must ask
-# for work and must not already carry the method. Uncertain answers pass, because a missed
-# offer costs a redo while an extra offer costs one line. The gate reads one message, never
-# the conversation: measured 2026-10-18 at $0.000036 per call against $0.0006 per recall pass.
+# A peer-woken turn is scored only when this single-question gate passes: the message must ask
+# for work rather than merely reporting status or acknowledging receipt. Uncertain answers pass,
+# because a missed offer costs a redo while an extra offer costs one line. Delegated briefs that
+# include steps or acceptance criteria still pass so workers receive workflow and verification
+# skills (the former second question `method_given` cut recall from 96% to 78.3% on the 999-message
+# benchmark and was removed). The gate reads one message, never the conversation.
 # meiva:link agent/graph/docs/skill-recall.md
 PEER_GATE_PREAMBLE = "One message another agent sent to this agent:\n\n"
 
@@ -225,21 +228,11 @@ PEER_GATE_WORK = YesNo(
     false_if="No: the message only reports status, acknowledges, confirms, notifies or chats.",
 )
 
-PEER_GATE_METHOD = YesNo(
-    question=(
-        "Does this message already state how to do that work -- steps, criteria, commands or "
-        "acceptance checks -- so the recipient can act without looking anything up?"
-    ),
-    true_if="Yes: the message itself gives the method or the criteria.",
-    false_if="No: the message says what is wanted, not how to do it.",
-)
-
 
 # meiva:note
-# `True` when the message may ask for work and does not already carry the method; `False` for
-# a clear status/acknowledgement message, a brief that states the method, or a failed decision
-# call. A gate failure falls back to the behaviour before peer messages were considered, so a
-# broken gate never changes what an agent sees.
+# `True` when the message may ask for work; `False` for a clear status/acknowledgement message
+# or a failed decision call. A gate failure falls back to the behaviour before peer messages
+# were considered, so a broken gate never changes what an agent sees.
 # meiva:link agent/graph/docs/skill-recall.md
 async def peer_gate_passes(
     text: str,
@@ -258,7 +251,7 @@ async def peer_gate_passes(
         decisions = await decide(
             settings.skill_recall_model,
             PEER_GATE_PREAMBLE + stripped[: settings.skill_recall_peer_gate_max_chars],
-            {"work": PEER_GATE_WORK, "method_given": PEER_GATE_METHOD},
+            {"work": PEER_GATE_WORK},
             catalog=catalog,
             keys=keys,
             usage_kind="skill_recall_peer_gate",
@@ -275,15 +268,11 @@ async def peer_gate_passes(
         )
         return False
     work = decisions["work"].probability("true")
-    method = decisions["method_given"].probability("true")
-    passed = (
-        work > settings.skill_recall_peer_gate_work_floor
-        and method < settings.skill_recall_peer_gate_method_ceiling
-    )
+    passed = work > settings.skill_recall_peer_gate_work_floor
     logger.info(
         "[{label}] {body}",
         label=_LABEL,
-        body=f"peer gate {'passes' if passed else 'skips'} (work={work:.2f}, method={method:.2f})",
+        body=f"peer gate {'passes' if passed else 'skips'} (work={work:.2f})",
         event="skill_recall",
     )
     return passed
