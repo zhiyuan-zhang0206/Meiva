@@ -337,7 +337,10 @@ describe("scroll-to-bottom control presence", () => {
     expect(screen.getByTestId("scroll-to-bottom")).toBeTruthy();
   });
 
-  it("jumps directly to the bottom when expanding a working TurnBlock and follows streaming growth, while keeping a settled TurnBlock at its top", () => {
+  it.each([
+    [true, true, false], [true, false, false], [false, true, false],
+    [false, false, false], [true, false, true], [false, false, true],
+  ])("keeps the clicked header in place on expansion (live=%s, following=%s, ride=%s)", (turnActive, following, ride) => {
     const observers: ResizeObserverCallback[] = [];
     vi.stubGlobal("ResizeObserver", class {
       constructor(cb: ResizeObserverCallback) { observers.push(cb); }
@@ -345,44 +348,63 @@ describe("scroll-to-bottom control presence", () => {
       unobserve = vi.fn();
       disconnect = vi.fn();
     });
-
+    const frames: FrameRequestCallback[] = [];
+    vi.stubGlobal("requestAnimationFrame", (cb: FrameRequestCallback) => { frames.push(cb); return frames.length; });
+    vi.stubGlobal("cancelAnimationFrame", vi.fn());
+    displayLimits.set("MEIVA_TIMELINE_WINDOW_ACTIVATION_ROWS", 20);
+    displayLimits.set("MEIVA_TIMELINE_WINDOW_TURN_ROWS", 20);
     const workItems = [
-      makeItem({ item_id: "1.0", kind: "inbound_chat", source: "user", payload: "Check progress" }),
-      ...Array.from({ length: 20 }, (_, i) =>
-        makeItem({ item_id: `2.${i}`, kind: "agent_reasoning", payload: `Step ${i + 1}` }),
-      ),
+      makeItem({ item_id: "1.0", kind: "agent_chat", payload: "Progress" }),
+      ...Array.from({ length: 40 }, (_, i) =>
+        makeItem({ item_id: `2.${i}`, kind: "agent_reasoning", payload: `Step ${i + 1}` })),
     ];
-    const { rerender } = render(<TimelineView items={workItems} threadKey="expand-live-vs-settled" turnActive />);
+    const { rerender } = render(<TimelineView items={workItems} turnActive={turnActive} />);
     const viewport = screen.getByTestId("scroll-viewport");
+    const button = screen.getByTestId("turn-toggle");
     let height = 1000;
     let top = 400;
+    const smoothScroll = vi.fn();
+    const box = (y: number) => ({ top: y, bottom: y + 40, height: 40 } as DOMRect);
     Object.defineProperties(viewport, {
       clientHeight: { value: 600, configurable: true },
-      scrollHeight: { configurable: true, get: () => height },
+      scrollHeight: { configurable: true, get: () => button.getAttribute("aria-expanded") === "true" ? height + 2600 : height },
       scrollTop: {
         configurable: true,
         get: () => top,
-        set: (v: number) => { top = Math.max(0, Math.min(v, height - 600)); },
+        set: (v: number) => { top = Math.max(0, Math.min(v, viewport.scrollHeight - 600)); },
       },
+      getBoundingClientRect: { configurable: true, value: () => box(0) },
+      scrollTo: { configurable: true, value: smoothScroll },
     });
+    Object.defineProperty(button, "getBoundingClientRect", { value: () => box(700 - top) });
+    const reserve = viewport.querySelector<HTMLElement>("[data-turn-collapse-reserve]")!;
+    Object.defineProperty(reserve, "getBoundingClientRect", { value: () => box(viewport.scrollHeight - top) });
+    act(() => { fireEvent.scroll(viewport); });
+    if (!following) act(() => {
+      fireEvent.wheel(viewport, { deltaY: -100 });
+      top = 200;
+      fireEvent.scroll(viewport);
+    });
+    if (ride) {
+      fireEvent.click(screen.getByTestId("scroll-to-bottom"));
+      expect(smoothScroll).toHaveBeenCalledWith(expect.objectContaining({ behavior: "smooth" }));
+    }
+    const clickedTop = button.getBoundingClientRect().top;
+    const initialTop = top;
+    fireEvent.click(button);
+    expect(button.getAttribute("aria-expanded")).toBe("true");
+    expect(button.getBoundingClientRect().top).toBe(clickedTop);
+    expect(top).toBe(initialTop);
+    expect(screen.getByTestId("scroll-to-bottom")).toBeTruthy();
 
-    height = 3600;
-    fireEvent.click(screen.getByTestId("turn-toggle"));
-    expect(screen.getByTestId("turn-toggle").getAttribute("aria-expanded")).toBe("true");
-    expect(top).toBe(3000);
-    expect(screen.queryByTestId("scroll-to-bottom")).toBeNull();
-
-    height = 4400;
-    act(() => { for (const cb of observers) cb([], {} as ResizeObserver); });
-    expect(top).toBe(3800);
-
-    fireEvent.click(screen.getByTestId("turn-toggle"));
-    height = 1000;
-    top = 400;
-    rerender(<TimelineView items={workItems} threadKey="expand-live-vs-settled" turnActive={false} />);
-    height = 3600;
-    fireEvent.click(screen.getByTestId("turn-toggle"));
-    expect(screen.getByTestId("turn-toggle").getAttribute("aria-expanded")).toBe("true");
-    expect(top).toBe(400);
+    height += 800;
+    rerender(<TimelineView items={[...workItems, makeItem({ item_id: "2.40", kind: "agent_reasoning", payload: "New step" })]} turnActive={turnActive} />);
+    act(() => {
+      for (const cb of observers) cb([], {} as ResizeObserver);
+      for (const cb of frames.splice(0)) cb(performance.now());
+      fireEvent.scroll(viewport);
+    });
+    expect(top).toBe(initialTop);
+    expect(button.getBoundingClientRect().top).toBe(clickedTop);
   });
 });

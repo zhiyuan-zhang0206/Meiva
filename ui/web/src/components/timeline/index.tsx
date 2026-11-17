@@ -539,14 +539,9 @@ export const TimelineView = memo(function TimelineView({
   });
 
   // meiva:note
-  // Expanding an active working block jumps directly to its bottom and follows
-  // the tail so the reader sees the latest in-progress step as it streams
-  // (user ruling 2026-11-09). Expanding a settled block calls
-  // `notifyBlockExpanded` instead so the viewport stays where the reader clicked.
+  // Manual expansion preserves the clicked header and releases tail following,
+  // including for active work (user ruling 2026-11-17).
   // meiva:link ui/web/src/docs/frontend-components/timeline-view/live-block.md
-  const lastGroup = groupEntries.at(-1);
-  const liveBlockExpanded = lastGroup !== undefined && lastGroup.isLiveTurn && lastGroup.runExpanded;
-  const pendingLiveExpandPinRef = useRef(false);
   const toggledHeaderRef = useRef<{ button: HTMLButtonElement; top: number } | null>(null);
   useLayoutEffect(() => {
     const anchor = toggledHeaderRef.current;
@@ -566,48 +561,15 @@ export const TimelineView = memo(function TimelineView({
     controller.notifyAnchored({ scrollTop: viewport.scrollTop, scrollHeight: viewport.scrollHeight, clientHeight: viewport.clientHeight });
     measureAtBottom();
   }, [controller, measureAtBottom, turnOverrides]);
-  useLayoutEffect(() => {
-    if (liveBlockExpanded && pendingLiveExpandPinRef.current) {
-      pendingLiveExpandPinRef.current = false;
-      const viewport =
-        viewportRef.current ??
-        wrapperRef.current?.querySelector<HTMLElement>('[data-slot="scroll-area-viewport"]') ??
-        null;
-      if (viewport) {
-        maintainSendAnchor(viewport);
-        pinToBottom(viewport, true);
-        setAtBottom(true);
-        startScrollToBottomRide({
-          ride: scrollToBottomRideRef.current,
-          viewport,
-          controller,
-          tailHeight,
-          pinToBottom,
-          measureAtBottom,
-          trimFollowing,
-        });
-      }
-    }
-  }, [controller, liveBlockExpanded, maintainSendAnchor, measureAtBottom, pinToBottom, tailHeight, trimFollowing]);
-
   const handleToggleTurn = useCallback(
     (id: string, currentlyExpanded: boolean, button: HTMLButtonElement) => {
-      const opensLiveBlock = !currentlyExpanded && lastGroup?.isLiveTurn &&
-        (lastGroup.groupKey === id ||
-          (lastGroup.group.kind === "turn" && lastGroup.group.members[0]?.item.item_id === id));
       cancelPendingJump();
       cancelBookmark();
-      if (opensLiveBlock) {
-        controller.requestStick();
-        setAtBottom(true);
-        pendingLiveExpandPinRef.current = true;
-      } else {
-        controller.notifyBlockExpanded();
-        toggledHeaderRef.current = { button, top: button.getBoundingClientRect().top };
-      }
+      controller.notifyBlockExpanded();
+      toggledHeaderRef.current = { button, top: button.getBoundingClientRect().top };
       toggleTurn(id, currentlyExpanded);
     },
-    [cancelBookmark, cancelPendingJump, controller, lastGroup, toggleTurn],
+    [cancelBookmark, cancelPendingJump, controller, toggleTurn],
   );
 
   const handleScrollToBottom = useCallback(() => {
