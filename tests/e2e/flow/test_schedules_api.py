@@ -12,10 +12,8 @@ import httpx
 import psycopg
 import pytest
 
-from base.cluster import session_name
 from base.config import settings
 from base.paths import meiva_home
-from base.sessions.backend import get_shell_backend
 from base.sessions.tests.poll_until import poll_until
 from tests.e2e._credentials import gateway_client, gateway_post
 from tests.e2e._ports import GATEWAY_URL
@@ -170,15 +168,12 @@ def test_rest_runs_and_logs_read_persisted_history_and_transcript(
         ]
         assert [row["id"] for row in client.get(f"{base}/runs").json()] == [new_id[0], old_id[0]]
 
-        transcript = get_shell_backend(home=meiva_home()).session_log_path(
-            session_name(f"schedule-{schedule_id}")
-        )
-        assert transcript is not None
-        transcript.parent.mkdir(parents=True, exist_ok=True)
-        transcript.write_text("first line\nsecond line\n")
+        latest = meiva_home() / "schedules" / str(schedule_id) / "latest.log"
+        latest.parent.mkdir(parents=True, exist_ok=True)
+        latest.write_text("first line\nsecond line\n")
         logs = client.get(f"{base}/logs?lines=1")
         logs.raise_for_status()
-        assert logs.json() == {"source": "transcript", "lines": ["second line"]}
+        assert logs.json() == {"source": "latest", "lines": ["second line"]}
         assert client.get("/api/schedules/999999999/runs").status_code == 404
 
 
