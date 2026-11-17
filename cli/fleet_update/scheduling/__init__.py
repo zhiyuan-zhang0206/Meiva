@@ -98,7 +98,7 @@ def validate(args: FleetArgs, now: datetime) -> str | None:
             raise ValueError("--at requires run --execute and explicit --source user|agent:<id>")
         initiator_id(args.source)
         run_at(args.at, now)
-    except ValueError as exc:
+    except (ValueError, OverflowError) as exc:
         return str(exc)
     return None
 

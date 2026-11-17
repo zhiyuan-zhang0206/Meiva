@@ -138,10 +138,11 @@ def test_linux_timer_and_execution_cannot_be_cancelled(tmp_path: Path) -> None:
 
 
 def test_persisted_choices_roundtrip_and_completed_job_never_replays(tmp_path: Path) -> None:
-    from dataclasses import asdict
+    from dataclasses import asdict, replace
 
     from cli.fleet_update.choices import DownChoices, FleetArgs
     from cli.fleet_update.scheduled_worker import Record, execute
+    from cli.fleet_update.scheduling import validate
     from cli.fleet_update.scheduling.host_timer import save
 
     args = FleetArgs(
@@ -171,6 +172,10 @@ def test_persisted_choices_roundtrip_and_completed_job_never_replays(tmp_path: P
         ),
         at="+60s",
         source="agent:9876",
+    )
+    assert (
+        validate(replace(args, at="+999999999999999999999d"), datetime(2030, 1, 1, tzinfo=UTC))
+        is not None
     )
     path = tmp_path / "operation.json"
     save(
