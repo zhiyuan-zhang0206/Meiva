@@ -35,3 +35,12 @@ The `daemon` execution path remains for stored external schedules. Its removal
 is a separate compatibility decision after those rows have migrated. This
 implements the installed-payload follow-up recorded in
 [Phase 1A](declarative-schedules-phase-1a.md).
+
+## Update: migration barrier survives cleanup alerts
+
+The bounded give-up policy for ordinary compatibility daemon convergence does
+not acknowledge an in-place daemon-to-declarative migration. Its sync request
+remains durable and retryable after `schedule_convergence_abandoned`, so the
+declarative engine stays fenced until the old PTY reports a definitive reap or
+absence result. The alert bounds one failure streak; it does not turn uncertain
+legacy-process custody into successful cleanup.

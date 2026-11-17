@@ -61,8 +61,10 @@ resident. It is documented in [cron slot claims](cron-slot-claims.md).
 - Recover an open declarative run by adopting its outcome or live runner identity;
   a process that disappears without an outcome settles as an error.
 - Resolve per-fire secret environment names at launch rather than persisting values.
-- Consume daemon `schedule_sync_requests`; declarative lifecycle mutations update
-  durable timing state directly and need no PTY convergence request.
+- Consume compatibility daemon `schedule_sync_requests`, including the durable
+  legacy-PTY cleanup barrier created by an in-place migration; ordinary
+  declarative lifecycle mutations update timing state directly and need no PTY
+  convergence request.
 - Read declarative `latest.log` locally or through the target machine's ops RPC;
   daemon logs retain live-capture and saved-transcript fallbacks.
 

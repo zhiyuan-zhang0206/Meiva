@@ -144,10 +144,10 @@ class ScheduleManager:
         # meiva:note
         # The current streak of failed convergence attempts of each schedule.
         self._blocked: dict[int, Streak] = {}
-        # schedule id -> desired revision at the moment the manager gave up. The
-        # process is left alone until the desired revision changes (an explicit
-        # start, stop, restart, edit or delete); in memory, so a restarted service
-        # starts one new bounded streak.
+        # meiva:note
+        # Compatibility daemon convergence after its retry window: schedule id -> revision.
+        # An in-place migration is excluded: its durable launch barrier retries until PTY reap ACK.
+        # In memory, so a restarted service gives abandoned daemon work one new bounded streak.
         self._abandoned: dict[int, int | None] = {}
         # Serializes the reconcile tick against the sync requests, which run on
         # separate threads and both touch the backend and launch-admission columns.
@@ -167,10 +167,11 @@ class ScheduleManager:
     # meiva:note
     # Converge the current durable desired revision, preserving an applied run.
     #
-    # Return False while the attempt is blocked (a surviving
-    # session, missing safe session provenance); the durable request stays
-    # queued for the next try. A blocked streak is bounded: once the manager
-    # gives up it returns True, so the request is consumed and not retried.
+    # Return False while the attempt is blocked (a surviving session, missing safe session
+    # provenance); the durable request stays queued for the next try. A compatibility daemon's
+    # blocked streak is bounded: once the manager gives up it returns True, so its request is
+    # consumed. A daemon-to-declarative migration keeps returning False until the old PTY gives a
+    # definitive reap acknowledgement, because that request is also the new runner's launch gate.
     def sync_one(self, schedule_id: int, *, now: float) -> bool:
         if not self.is_active_unit():
             return False
@@ -658,18 +659,19 @@ class ScheduleManager:
             self._give_up(schedule_id, why, blocked_s)
 
     def _give_up(self, schedule_id: int, why: str, blocked_s: float) -> None:
-        """Stop retrying: record the schedule as an error, alert, leave the process alone."""
         wanted = revisions.desired(self._pool, schedule_id, machine=self._machine_name)
-        self._abandoned[schedule_id] = None if wanted is None else wanted.revision
         self._reap_retries.discard(schedule_id)
         self._blocked.pop(schedule_id, None)
         message = give_up_message(why, blocked_s)
         with write_transaction(self._pool) as conn:
-            conn.execute(
+            row = conn.execute(
                 "UPDATE schedules SET status = 'error', last_error = %s, updated_at = now() "
-                "WHERE id = %s AND machine = %s",
+                "WHERE id = %s AND machine = %s RETURNING trigger_kind",
                 (message, schedule_id, self._machine_name),
-            )
+            ).fetchone()
+        migration_barrier = row is not None and row[0] != "daemon"
+        if not migration_barrier:
+            self._abandoned[schedule_id] = None if wanted is None else wanted.revision
         _log.error("schedule %s: %s", schedule_id, message)
         telemetry.emit(
             "telemetry",

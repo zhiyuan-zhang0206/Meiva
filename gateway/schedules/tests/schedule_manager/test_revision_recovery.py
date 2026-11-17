@@ -5,6 +5,8 @@
 # (the command a session was started with) comes from a pty-sessions service answering on the
 # home's real socket (`FakePtyService`), so the manager reads provenance the way it does in
 # production. A test that needs provenance to be unreadable simply leaves that service down.
+import os
+import time
 from collections.abc import Generator
 from datetime import UTC, datetime
 from pathlib import Path
@@ -29,6 +31,7 @@ from gateway.schedules import session_control
 from gateway.schedules.rows import InsertedId
 from services.wake.schedule_manager import requests
 from services.wake.schedule_manager.blocked_streak import BLOCKED_GIVE_UP_AFTER_S
+from services.wake.schedule_manager.manager import REPO_ROOT, ScheduleManager
 from services.wake.schedule_manager.tests.manager_support import NOW, schedule_manager
 from services.wake.schedule_manager.tests.session_fakes import Backend
 
@@ -71,6 +74,20 @@ def _insert(conn: psycopg.Connection, machine: str = "gateway") -> int:
 
 def _runner_command(sid: int, revision: int) -> str:
     return f".venv/bin/python -m services.wake.schedule_manager.runner {sid} {revision}; exit $?"
+
+
+def _reconcile_until_status(
+    manager: ScheduleManager, conn: psycopg.Connection, schedule_id: int, now: float
+) -> None:
+    deadline = time.monotonic() + 10
+    while time.monotonic() < deadline:
+        manager.reconcile(now=now)
+        if conn.execute("SELECT status FROM schedules WHERE id=%s", (schedule_id,)).fetchone() == (
+            "scheduled",
+        ):
+            return
+        time.sleep(0.02)
+    raise AssertionError("declarative schedule did not run after legacy reap ACK")
 
 
 def test_acknowledgement_loss_adopts_session_across_manager_restart(
@@ -236,6 +253,80 @@ def test_a_blocked_request_is_retried_for_a_bounded_window_then_consumed_with_an
     assert backend.killed == killed
     assert backend.launches == 0
     assert name in backend.commands
+
+
+def test_declarative_migration_barrier_survives_give_up_until_legacy_reap_ack(
+    db_conn: psycopg.Connection,
+    backend: Backend,
+    emitted_events: EmittedEvents,
+    unit_home: Path,
+    *,
+    database_gate: ProcessDbGate,
+) -> None:
+    sid = _insert(db_conn)
+    name = session_name(f"schedule-{sid}")
+    backend.hold(name, _runner_command(sid, 1))
+    _ = db_conn.execute(
+        "UPDATE schedules SET trigger_kind='every', interval_seconds=60, timezone='UTC', "
+        "next_launch_at=now() - interval '1 second', status='scheduled', script='pass' "
+        "WHERE id=%s",
+        (sid,),
+    )
+    db_conn.commit()
+
+    def unavailable_reap(_name: str) -> None:
+        raise RuntimeError("pty service unavailable")
+
+    backend.during_kill = unavailable_reap
+    emitted_events.clear()
+    launch_env = dict(os.environ)
+    launch_env["PYTHONPATH"] = str(REPO_ROOT)
+    with base.db.pool(gate=database_gate) as pool:
+        mgr = schedule_manager(
+            pool,
+            backend,
+            home=unit_home,
+            launch_env=launch_env,
+        )
+        session_control.enqueue_blocking(pool, sid)
+        now = NOW
+        while now < NOW + BLOCKED_GIVE_UP_AFTER_S:
+            assert requests.consume_requests(pool, mgr, now=now) == 0
+            now += 30
+
+        # meiva:note
+        # Crossing the alert threshold must not acknowledge the in-place migration. There is no
+        # open run row to provide a second admission fence, so the durable sync request is the
+        # only proof that the legacy PTY still owns execution.
+        assert requests.consume_requests(pool, mgr, now=now) == 0
+        assert db_conn.execute(
+            "SELECT schedule_id FROM schedule_sync_requests WHERE schedule_id=%s", (sid,)
+        ).fetchall() == [(sid,)]
+        assert db_conn.execute(
+            "SELECT count(*) FROM schedule_runs WHERE schedule_id=%s", (sid,)
+        ).fetchone() == (0,)
+        assert emitted_events.names() == ["schedule_convergence_abandoned"]
+
+        mgr.reconcile(now=now + 1)
+        assert db_conn.execute(
+            "SELECT count(*) FROM schedule_runs WHERE schedule_id=%s", (sid,)
+        ).fetchone() == (0,)
+
+        backend.during_kill = None
+        assert requests.consume_requests(pool, mgr, now=now + 2) == 1
+        assert name not in backend.commands
+        assert (
+            db_conn.execute(
+                "SELECT schedule_id FROM schedule_sync_requests WHERE schedule_id=%s", (sid,)
+            ).fetchall()
+            == []
+        )
+
+        _reconcile_until_status(mgr, db_conn, sid, now + 3)
+
+    assert db_conn.execute(
+        "SELECT count(*) FROM schedule_runs WHERE schedule_id=%s", (sid,)
+    ).fetchone() == (1,)
 
 
 def test_a_failed_schedule_does_not_block_other_queued_revisions(
