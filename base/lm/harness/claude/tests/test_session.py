@@ -10,7 +10,7 @@ from base.lm.harness.claude.config import DEFAULT_MODEL
 from base.lm.harness.claude.session import SessionClosedError
 from base.lm.harness.claude.tests import fake_sdk as fake
 from base.lm.harness.claude.tests.fake_sdk import Emit, Say
-from base.lm.harness.claude.tests.support import start
+from base.lm.harness.claude.tests.support import config, start
 from base.lm.harness.delivery.tests.sent import send
 from base.lm.harness.events import (
     RateLimitObserved,
@@ -30,6 +30,7 @@ async def test_options_carry_the_boundary_invariants(tmp_path: Path) -> None:
         assert options.setting_sources is None
         assert options.strict_mcp_config is False
         assert options.include_partial_messages is True
+        assert options.max_buffer_size == 64 * 1024 * 1024
         assert options.tools is None
         assert options.env.get("ANTHROPIC_API_KEY") == ""
         assert options.permission_mode == "bypassPermissions"
@@ -207,3 +208,17 @@ def test_the_shared_package_does_not_reach_into_an_adapter() -> None:
 
     source = Path(shared.__file__).read_text()
     assert "claude" not in source
+
+
+async def test_session_passes_the_configured_json_buffer_limit(tmp_path: Path) -> None:
+    harness = await start(tmp_path, max_buffer_size=128 * 1024 * 1024)
+    try:
+        assert harness.client.options.max_buffer_size == 128 * 1024 * 1024
+    finally:
+        await harness.stop()
+
+
+@pytest.mark.parametrize("limit", [0, -1, True, False, 1.5, "1024", None])
+def test_json_buffer_limit_must_be_a_positive_integer(tmp_path: Path, limit: object) -> None:
+    with pytest.raises(ValueError, match="max_buffer_size must be a positive integer"):
+        config(tmp_path, max_buffer_size=limit)

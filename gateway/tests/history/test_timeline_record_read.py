@@ -7,21 +7,30 @@
 
 from __future__ import annotations
 
-from collections.abc import Iterator
+import asyncio
+from collections.abc import Callable, Iterator
 from typing import Any, Literal
 
 import psycopg
 import pytest
+from starlette.requests import Request
 
 from base.agents.history.timeline_item import TimelineItem
 from base.db import create_agent
+from gateway.agents.history.record_timeline import record_items_of
 from gateway.tests.auth.gateway_config import GatewayTestClient, gateway_test_client
 from ops.cluster.rpc import ClusterOpUnreachable
 
 
 class ScriptedRunner:
-    def __init__(self, answer: dict[str, object] | Exception) -> None:
+    def __init__(
+        self,
+        answer: dict[str, object] | Exception,
+        *,
+        on_dispatch: Callable[[], None] | None = None,
+    ) -> None:
         self.answer = answer
+        self.on_dispatch = on_dispatch
         self.calls: list[tuple[str, str, dict[str, object]]] = []
 
     async def dispatch_to_machine(
@@ -37,6 +46,8 @@ class ScriptedRunner:
     ) -> dict[str, object]:
         self.calls.append((target_machine, kind, payload))
         assert (timeout_s, retries) == (3.0, 0), "a short read, never retried"
+        if self.on_dispatch is not None:
+            self.on_dispatch()
         if isinstance(self.answer, Exception):
             raise self.answer
         return self.answer
@@ -222,6 +233,93 @@ def test_quote_post_requires_the_exact_record_offset(
     assert row[0] == (1 if expected_status == 201 else 0)
 
 
+@pytest.mark.parametrize("harness", ["claude_code", "codex", "antigravity"])
+@pytest.mark.parametrize("status", ["running", "idling", "terminated"])
+def test_pending_record_activity_requires_a_running_agent(
+    client: GatewayTestClient,
+    db_conn: psycopg.Connection,
+    harness: str,
+    status: str,
+) -> None:
+    agent = _record_agent(db_conn, harness)
+    db_conn.execute("UPDATE agents_meta SET status = %s WHERE id = %s", (status, agent))
+    db_conn.commit()
+    item = TimelineItem(
+        item_id="h413.0",
+        kind="agent_code",
+        payload="Bash: interrupted command",
+        created_at="2026-11-12T08:56:00+00:00",
+        activity_pending=True,
+    ).model_dump(mode="json")
+    client.app.state.rpc = ScriptedRunner({"items": [item], "has_more": True, "size": 9800})
+
+    response = client.get(f"/api/agents/{agent}/timeline")
+
+    assert response.status_code == 200
+    body = response.json()
+    [shown] = body["items"]
+    assert shown["activity_pending"] is (True if status == "running" else None)
+    assert (shown["item_id"], shown["payload"]) == (item["item_id"], item["payload"])
+    assert (body["has_more"], body["msg_count"]) == (True, 9800)
+
+
+@pytest.mark.parametrize("harness", ["claude_code", "codex", "antigravity"])
+@pytest.mark.parametrize("initial, current", [("idling", "running"), ("running", "idling")])
+@pytest.mark.parametrize("consumer", ["head", "older", "snapshot", "items"])
+def test_record_activity_uses_status_after_the_rpc_returns(
+    client: GatewayTestClient,
+    db_conn: psycopg.Connection,
+    harness: str,
+    initial: str,
+    current: str,
+    consumer: str,
+) -> None:
+    agent = _record_agent(db_conn, harness)
+    db_conn.execute("UPDATE agents_meta SET status = %s WHERE id = %s", (initial, agent))
+    db_conn.commit()
+
+    def transition_during_rpc() -> None:
+        db_conn.execute("UPDATE agents_meta SET status = %s WHERE id = %s", (current, agent))
+        db_conn.commit()
+
+    item = TimelineItem(
+        item_id="h100.0",
+        kind="agent_code",
+        payload="Bash: observed tool call",
+        created_at="2026-11-12T08:56:00+00:00",
+        activity_pending=True,
+    ).model_dump(mode="json")
+    runner = ScriptedRunner(
+        {"items": [item], "has_more": True, "size": 9800}, on_dispatch=transition_during_rpc
+    )
+    client.app.state.rpc = runner
+
+    if consumer == "items":
+        request = Request({"type": "http", "app": client.app})
+        [projected] = asyncio.run(record_items_of(request, agent))
+        shown = projected.model_dump(mode="json")
+    else:
+        path = {
+            "head": "timeline",
+            "older": "timeline?before=h413.0&limit=7",
+            "snapshot": "conversation-snapshot",
+        }[consumer]
+        response = client.get(f"/api/agents/{agent}/{path}")
+        assert response.status_code == 200
+        body = response.json()
+        if consumer == "snapshot":
+            body = body["timeline"]
+        [shown] = body["items"]
+        assert (body["has_more"], body["msg_count"]) == (True, 9800)
+    assert shown["activity_pending"] is (True if current == "running" else None)
+    assert (shown["item_id"], shown["payload"]) == (item["item_id"], item["payload"])
+    [(_, kind, payload)] = runner.calls
+    assert kind == "harness_timeline_read"
+    assert payload["before"] == (413 if consumer == "older" else None)
+    if consumer == "older":
+        assert payload["limit"] == 7
+
+
 def test_quote_requires_a_reader_that_confirms_the_anchor_selector(
     client: GatewayTestClient,
     db_conn: psycopg.Connection,
@@ -298,5 +396,55 @@ def test_quote_anchor_echo_does_not_replace_stable_source_identity(
     assert "identity changed" in response.json()["detail"]
     row = db_conn.execute(
         "SELECT count(*) FROM inbound_messages WHERE agent_id=%s", (agent,)
+    ).fetchone()
+    assert row is not None and row[0] == 0
+
+
+@pytest.mark.parametrize("status", ["running", "idling", "terminated"])
+def test_inclusive_quote_keeps_pending_source_completion_check(
+    client: GatewayTestClient,
+    db_conn: psycopg.Connection,
+    status: str,
+) -> None:
+    agent = _record_agent(db_conn, "codex")
+    db_conn.execute("UPDATE agents_meta SET status = %s WHERE id = %s", (status, agent))
+    db_conn.commit()
+    item = TimelineItem(
+        item_id="h413.0",
+        kind="agent_code",
+        payload="Bash: interrupted command",
+        activity_pending=True,
+    )
+    runner = ScriptedRunner(
+        {
+            "items": [item.model_dump(mode="json")],
+            "has_more": False,
+            "size": 9800,
+            "anchor_applied": True,
+            "anchor_item_id": "h413.0",
+        }
+    )
+    client.app.state.rpc = runner
+
+    response = client.post(
+        f"/api/agents/{agent}/messages",
+        json={
+            "content": "Explain",
+            "source": "user",
+            "quote": {
+                "source_agent_id": agent,
+                "source_item_id": "h413.0",
+                "author": "Agent",
+                "text": "interrupted command",
+            },
+        },
+    )
+
+    assert response.status_code == 422, response.text
+    [(_, _, payload)] = runner.calls
+    assert payload["anchor_item_id"] == "h413.0"
+    assert payload["before"] is None
+    row = db_conn.execute(
+        "SELECT count(*) FROM inbound_messages WHERE agent_id = %s", (agent,)
     ).fetchone()
     assert row is not None and row[0] == 0

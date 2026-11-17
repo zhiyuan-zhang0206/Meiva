@@ -26,9 +26,18 @@ class BridgeConfig:
     auth: AuthConfig = field(default_factory=AuthConfig)
     cancel_settle_seconds: float = 5.0
     max_buffered_events: int = 256
+    max_buffer_size: int = 64 * 1024 * 1024
     # meiva:note
     # The zone the CLI process interprets a cron expression in: its own `TZ` when the launcher gives it
     # one, else the host process's local zone, which the CLI inherits. The launcher knows it and hands
     # it down as a value; None means unknown, and a one-shot cron is then not dated from its expression.
     # meiva:link base/lm/harness/claude/docs/background-tasks.md
     cron_timezone: tzinfo | None = None
+
+    def __post_init__(self) -> None:
+        if (
+            isinstance(self.max_buffer_size, bool)
+            or not isinstance(self.max_buffer_size, int)
+            or self.max_buffer_size <= 0
+        ):
+            raise ValueError("max_buffer_size must be a positive integer")
