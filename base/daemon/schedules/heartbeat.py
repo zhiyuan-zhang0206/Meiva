@@ -1,19 +1,11 @@
 # meiva:note
-# Round heartbeats for resident schedules.
+# Round heartbeats retained for long-running job-loop consumers.
 #
-# A resident schedule runs one long-lived loop (`while True` plus its own `next_fire`)
-# instead of being launched per cron slot. Nothing about it reaches `schedule_fire_log`,
-# and `launch_count` stays at 1 for its whole life, so a loop that stopped iterating
-# looks exactly like one with nothing to do.
-#
-# The heartbeat closes that gap from the inside: each round writes down the instant by
-# which the next round must have started (`alive_by`). The writer knows its own cadence
-# -- including how long one round may legitimately take -- so no reader needs a
-# per-schedule configuration. The schedule manager turns a passed `alive_by` into
-# `schedule_not_progressing` (services/wake/schedule_manager/round_progress.py).
-#
-# The file is deliberately plain JSON under a stable path so that a reader outside the
-# manager, including an OS-level check, can read it without this module.
+# Each round writes the instant by which another round should start (`alive_by`).
+# The writer knows its own cadence, including how long a round may take. The file
+# remains plain JSON under a stable path so diagnostic consumers can read it.
+# Declarative schedule management uses durable run custody and process deadlines;
+# it does not consume these files or emit the former resident-loop stall alerts.
 
 from __future__ import annotations
 
