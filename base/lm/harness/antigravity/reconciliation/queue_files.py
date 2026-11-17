@@ -15,10 +15,12 @@ from base.lm.harness.delivery import Reconciliation, home_in
 # meiva:note
 # The read half of Antigravity reconciliation. The queue lives under the injected home at
 # `.gemini/antigravity-cli/brain/<conversation>/.system_generated/messages/`: one `<uuid>.json` per
-# message (`id`, `recipient`, `sender`, `timestamp`, `stepPayload`), `read.json` mapping the ids that
-# were delivered, and `undelivered/` holding an entry per message still waiting. The layout was
-# observed on agy 1.5.5 and is not a published interface; a file that is not the expected shape is an
-# `AgyInterfaceError`, not a skipped message. A conversation with no queue directory answers None.
+# message, `read.json` mapping delivered ids, and `undelivered/` holding messages still waiting.
+# SendUserCascadeMessage entries carry a base64 protobuf `stepPayload` with our `clientMessageId`.
+# Internal messages.Hub notices instead carry string `content` and a nonempty string `sender` other
+# than `user` (system, background task or peer conversation). Skip those only when `stepPayload` is
+# absent: they cannot carry our input id. Malformed entries still raise `AgyInterfaceError`.
+# The layout was observed on agy 1.5.5 and is unpublished. A missing queue directory answers None.
 # meiva:link base/lm/harness/antigravity/docs/antigravity.md
 def agy_home(home: Path | None, environ: Mapping[str, str] | None) -> Path:
     if home is not None:
@@ -47,7 +49,18 @@ def read_queue(home: Path, conversation_id: str) -> list[QueuedMessage] | None:
     messages: list[QueuedMessage] = []
     for path in sorted(directory.glob("*-*.json")):
         parsed = object_of(json.loads, path.read_text())
-        payload = parsed.get("stepPayload") if is_object_dict(parsed) else None
+        if not is_object_dict(parsed):
+            raise AgyInterfaceError(f"{path}: a queued message has no stepPayload")
+        if "stepPayload" not in parsed:
+            sender = parsed.get("sender")
+            if (
+                isinstance(parsed.get("content"), str)
+                and isinstance(sender, str)
+                and sender
+                and sender != "user"
+            ):
+                continue
+        payload = parsed.get("stepPayload")
         if not isinstance(payload, str):
             raise AgyInterfaceError(f"{path}: a queued message has no stepPayload")
         message_id = path.stem

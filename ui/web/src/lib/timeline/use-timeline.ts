@@ -81,9 +81,10 @@ export interface UseTimelineResult {
    *  still shows send; accept this delay in exchange for "the message
    *  renders as a single envelope-wrap" cleanness. */
   turnActive: boolean;
-  /** Whether the initial snapshot is loading — true on cold cache
-   *   (thread never loaded) until fetch completes. Always false on hot
-   *   cache hit (data instantly available). */
+  // meiva:note
+  // Cold reads remain loading until the fetched snapshot enters the readable
+  // store, including an empty response. A retained window is readable at once.
+  // meiva:link ui/web/src/docs/frontend-components/timeline-view/sticky-scroll.md
   isLoading: boolean;
   /** Background refresh in flight — during stale-while-revalidate;
    *   data is already displayed at this point. */
@@ -164,6 +165,7 @@ export function useTimeline(
   // -- Subscribe to timeline state from the Zustand store --
   const activeThreadId = useTimelineStore((s) => s.activeThreadId);
   const items = useTimelineStore((s) => s.items);
+  const snapshotReady = useTimelineStore((s) => s.snapshotReady);
   const compactBuffer = useTimelineStore((s) => s.compactBuffer);
   const compactEpoch = useTimelineStore((s) => s.compactEpoch);
   const streamingCode = useTimelineStore((s) => s.streamingCode);
@@ -248,6 +250,7 @@ export function useTimeline(
         compactPending.current = true;
         olderRequest.current?.abort();
         void queryClient.cancelQueries({ queryKey: ["timeline", agentId], exact: true });
+        // meiva:note
         // Same reason the timeline query's own fetch is cancelled above: a
         // composed reconcile read started before the compact must not land
         // its pre-compact snapshot after the post-compact window.
@@ -277,6 +280,7 @@ export function useTimeline(
   // event in the same frame is delayed by at most one transition commit).
   const onSystemEvent = useCallback(
     (ev: SystemEvent) => {
+      // meiva:note
       // token_usage is owned solely by useTokenUsage (its own processSseEvent
       // call on the same shared AgentEventStreamProvider). The timeline slice
       // must not also forward it — otherwise every token_usage event writes the
@@ -304,6 +308,7 @@ export function useTimeline(
   // one into a render/layout pass on the home page.
   const onSystemEventBatch = useCallback(
     (events: SystemEvent[]) => {
+      // meiva:note
       // token_usage belongs to useTokenUsage's own per-event subscriber.
       const filtered = events.filter((ev) => ev.role !== "token_usage");
       if (filtered.length === 0) return;
@@ -334,11 +339,13 @@ export function useTimeline(
             useTimelineStore.setState({ loadingOlder: false });
           }
           seenParseErrors.current.clear();
+          // meiva:note
           // Opening during an initial/ongoing read cannot trust that read
           // to cover the subscription gap; require a trailing read — the
           // shared composed reconcile joins in-flight reads, then refreshes
           // all three conversation models with one request.
           requestReconcile();
+          // meiva:note
           // A compact whose post-compact snapshot was lost in the gap is now
           // covered by the reconnect reconcile — drop any pending marker so a
           // later snapshot does not double-invalidate.
@@ -385,6 +392,7 @@ export function useTimeline(
     if (!st.hasMoreOlder || st.loadingOlder) return "unready";
     const oldest = findOldestTimelineCursor(st.items);
     if (oldest === undefined) return "unready";
+    // meiva:note
     // Exponential growth: first fetch N, second 2N, third 4N, … capped at 1000
     // (the endpoint's protective le — a constant, not config).
     const limit = computeOlderPageLimit(olderBaseLimit, st.olderFetchCount);
@@ -394,6 +402,7 @@ export function useTimeline(
     beginLoadOlder();
     try {
       const page = await api.getTimeline(agentId, { before: oldest.item_id, limit, signal: controller.signal });
+      // meiva:note
       // Agent switch mid-flight: drop the result so it can't contaminate
       // the now-active thread (switchThread already cleared loadingOlder).
       if (
@@ -402,7 +411,6 @@ export function useTimeline(
         useTimelineStore.getState().compactEpoch !== ownerEpoch
       ) return "aborted";
       prependOlder(page.items, page.has_more);
-      // Bump the counter so the next scroll-up doubles the window.
       useTimelineStore.getState().incrementOlderFetchCount();
       return useTimelineStore.getState().hasMoreOlder ? "loaded" : "exhausted";
     } catch (e: unknown) {
@@ -466,7 +474,7 @@ export function useTimeline(
     streamingCode: selected && streamingCode,
     connectionState,
     turnActive: selected && turnActive,
-    isLoading: timelineQuery.isLoading,
+    isLoading: timelineQuery.isLoading || (selected && timelineQuery.data !== undefined && !snapshotReady),
     isRefetching: timelineQuery.isRefetching || isReconciling,
     error: timelineQuery.error,
     isFetching: timelineQuery.isFetching || isReconciling,
