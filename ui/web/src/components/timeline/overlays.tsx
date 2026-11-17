@@ -40,7 +40,7 @@ export function LoadOlderSpinner({ loadingOlder }: { loadingOlder: boolean }) {
       data-testid="load-older-spinner"
       data-state={loadingOlder ? "loading" : "idle"}
       className={cn(
-        "absolute right-5 top-14 z-20 h-8 w-8 rounded-full bg-background pointer-events-none",
+        "absolute left-1/2 -translate-x-1/2 top-14 z-20 h-8 w-8 rounded-full bg-background pointer-events-none",
         "items-center justify-center text-muted-foreground",
         loadingOlder ? "opacity-100" : "opacity-0",
         FLEX,

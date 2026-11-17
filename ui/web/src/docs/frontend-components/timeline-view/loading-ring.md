@@ -4,7 +4,11 @@
 older-page request and the cold load of a thread with nothing on screen yet.
 Each draws an arc with a 15% opacity track and an 8-unit radius in a 24-unit
 box. The older-page ring overlays the top of the viewport without changing
-the message layout.
+the message layout. Both top loaders are horizontally centered in the
+conversation pane (`TimelineView`'s relative wrapper), independent of the
+message column width. The reader-request overlay keeps its top offset below
+the floating header, using the same center anchor as the scroll-to-bottom
+control.
 
 A reader who asked for `prefers-reduced-motion: reduce` gets the same ring
 breathing (opacity only, `animate-pulse`) instead of a frozen frame: a still ring
