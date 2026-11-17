@@ -252,3 +252,51 @@ def test_quote_requires_a_reader_that_confirms_the_anchor_selector(
         "SELECT count(*) FROM inbound_messages WHERE agent_id=%s", (agent,)
     ).fetchone()
     assert row is not None and row[0] == 0
+
+
+@pytest.mark.parametrize("mismatch", ["message", "inbound"])
+def test_quote_anchor_echo_does_not_replace_stable_source_identity(
+    client: GatewayTestClient,
+    db_conn: psycopg.Connection,
+    mismatch: str,
+) -> None:
+    agent = _record_agent(db_conn, "codex")
+    item = TimelineItem(
+        item_id="h413.0",
+        kind="agent_chat",
+        payload="source",
+        source_message_id="wrong" if mismatch == "message" else "expected",
+        source_inbound_id=12 if mismatch == "inbound" else 11,
+        source_block_idx=0,
+    )
+    client.app.state.rpc = ScriptedRunner(
+        {
+            "items": [item.model_dump(mode="json")],
+            "has_more": False,
+            "size": 9800,
+            "anchor_applied": True,
+            "anchor_item_id": "h413.0",
+        }
+    )
+    response = client.post(
+        f"/api/agents/{agent}/messages",
+        json={
+            "content": "Explain",
+            "source": "user",
+            "quote": {
+                "source_agent_id": agent,
+                "source_item_id": "h413.0",
+                "author": "Agent",
+                "text": "source",
+                "source_message_id": "expected",
+                "source_inbound_id": 11,
+                "source_block_idx": 0,
+            },
+        },
+    )
+    assert response.status_code == 422, response.text
+    assert "identity changed" in response.json()["detail"]
+    row = db_conn.execute(
+        "SELECT count(*) FROM inbound_messages WHERE agent_id=%s", (agent,)
+    ).fetchone()
+    assert row is not None and row[0] == 0

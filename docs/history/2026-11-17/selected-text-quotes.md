@@ -47,3 +47,13 @@ Validation includes real Quote HTTP admission through an RPC adapter that invoke
 the actual record operation and RecordFile against a committed sanitized rollout,
 plus a half-line rejection control with no additional inbound write. Native
 current/retained quote identity, permissions and depth checks retain their owners.
+
+
+Identity-boundary clarification: a confirmed anchor is proof of an inclusive
+lookup in the current registered source, not a session identity token. When a
+stable message or inbound identity is supplied, its exact check still rejects
+a mismatched source even if the anchor ID is echoed. Legacy record Quote
+payloads omit a session identity, so an offset collision in a replacement session
+without stable identity remains outside this patch's guarantee. Regression
+controls cover stable-identity mismatches and a replaced registry session whose
+old complete record remains on disk but is no longer the selected source.

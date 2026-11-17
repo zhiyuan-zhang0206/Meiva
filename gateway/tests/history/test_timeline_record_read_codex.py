@@ -166,6 +166,22 @@ def test_quote_http_reads_the_actual_complete_record_row(
         quote["source_item_id"] = f"h{offset + 1}.0"
         rejected = client.post(f"/api/agents/{agent}/messages", json=body)
         assert rejected.status_code == 422, rejected.text
+        quote["source_item_id"] = target.item_id
+        FileSessionRegistry(harness_sessions_dir(home=home)).save(
+            SessionRecord(
+                agent_id=agent,
+                harness="codex",
+                session_id="replacement-session",
+                cwd=str(tmp_path),
+                model="m",
+                created_at="2026-11-12T00:00:00Z",
+                updated_at="2026-11-12T00:01:00Z",
+                generation=2,
+            )
+        )
+        assert record.exists()
+        replaced = client.post(f"/api/agents/{agent}/messages", json=body)
+        assert replaced.status_code == 422, replaced.text
     row = db_conn.execute(
         "SELECT count(*) FROM inbound_messages WHERE agent_id=%s", (agent,)
     ).fetchone()
