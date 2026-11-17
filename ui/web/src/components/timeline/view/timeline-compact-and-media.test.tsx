@@ -339,6 +339,17 @@ describe("ItemView: inbound_chat images", () => {
     const img = screen.getByAltText("attached image");
     expect(img.getAttribute("src")).toContain("/api/agents/7/uploads/shot.png");
   });
+  it("places human image thumbnails before the message body in the user bubble", () => {
+    render(<TimelineView items={[makeItem({ kind: "inbound_chat", source: "user",
+      payload: "Describe these pictures", images: ["/wide.png", "/tall.png"],
+    })]} />);
+    const body = screen.getByText("Describe these pictures");
+    const images = screen.getAllByTestId("attach-thumbnail");
+    expect(images).toHaveLength(2);
+    for (const image of images) {
+      expect(image.compareDocumentPosition(body) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    }
+  });
   it("attach item renders data-URI images raw (no API_BASE prefix)", () => {
     render(
       <TimelineView
@@ -552,27 +563,17 @@ describe("ItemView: attach interleaving + lightbox (user 2026-08-27)", () => {
     expect(img?.className).toContain("max-w-[80vw]");
     expect(img?.className).toContain("object-contain");
   });
-  it("reserves the thumbnail's max box so lazy img load never shifts layout (QA review-955)", () => {
-    renderAttach(
-      makeItem({
-        kind: "attach",
-        payload,
-        images: [IMG1],
-        image_captions: [LINE1],
-      }),
-    );
+  it("fits the thumbnail button to an in-flow image constrained by the pane", () => {
+    renderAttach(makeItem({ kind: "attach", payload, images: [IMG1], image_captions: [LINE1] }));
     const thumb = screen.getByTestId("attach-thumbnail");
-    expect(thumb.className).toContain("relative");
-    expect(thumb.className).toContain("h-48");
-    expect(thumb.className).toContain("w-64");
-    const img = thumb.querySelector("img");
-    expect(img).not.toBeNull();
-    expect(img!.className).toContain("absolute");
-    expect(img!.className).toContain("inset-0");
-    expect(img!.className).toContain("m-auto");
-    expect(img!.className).toContain("max-h-48");
-    expect(img!.className).toContain("max-w-[16rem]");
-    expect(img!.className).toContain("object-contain");
+    expect(thumb.className).toContain("w-fit");
+    expect(thumb.className).toContain("max-w-[min(16rem,100%)]");
+    expect(thumb.className).not.toContain("h-48");
+    const img = thumb.querySelector("img")!;
+    expect(img.className).not.toContain("absolute");
+    expect(img.className).toContain("block");
+    expect(img.className).toContain("max-h-48");
+    expect(img.className).toContain("max-w-full");
   });
   it("legacy attach (images without image_captions) still renders thumbnails without navigation", () => {
     renderAttach(

@@ -62,6 +62,13 @@ own scrolling releases it like any bookmark. The home page uses it to show the f
 delivery past the reader's seen position on entry. A saved position takes priority
 over the automatic reveal, including when the reader returns to the bottom.
 
+Images also reapply the current reading bookmark after load or error, including
+short histories below the row-measurement threshold. The viewport captures only
+image events and waits until the next animation frame so a failed upload's file
+card can commit first. It reads the latest bookmark at that frame; subsequent
+navigation, following, an active send/restore hold, or a thread unmount takes
+precedence. Multiple image events within a frame share one reapplication.
+
 ## Non-sticky headers and natural-height TurnBlock bodies
 Human-message, agent-reply, `TurnBlock`, and nested detail-card headers all stay
 in normal document flow without `position: sticky` (user ruling 2026-11-01,

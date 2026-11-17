@@ -64,6 +64,17 @@ bottom viewport edge by its own band's `pb-6`, and shares the same column
 cap with one `undefined`-means-full-width convention on narrow viewports.
 
 
+## Uploaded images
+
+Human message thumbnails precede the message body. Attach captions keep their
+per-image pairing, and upload notices retain their file-card order. Thumbnails
+use their natural aspect ratio within the pane and a 256 × 192 px cap; small
+images keep their natural size. This avoids the empty vertical space a fixed
+4:3 trigger reserved around wide images. The current upload references carry no
+reliable dimensions before decode, so initial image layout can change. The
+existing reading bookmark compensates parked readers on image load or failure;
+following readers retain the resize-driven tail pin.
+
 ## Relationship to Other Nodes
 
 - [Frontend Components](../frontend-components.md) — the catalog this node was split out of; the sidebar, composer, and inspector live there.
