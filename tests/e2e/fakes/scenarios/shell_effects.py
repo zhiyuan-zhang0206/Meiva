@@ -151,7 +151,7 @@ fire_at = datetime.datetime.now(datetime.UTC) + datetime.timedelta(seconds=30)
 wid = meiva.watcher.at(fire_at, "TERMINATED-WATCHER-MUST-NOT-FIRE",
     name="e2e-terminate", notify="always")
 Path({str(root / "termination-watcher")!r}).write_text(
-    f"{{wid.session_id}}\n{{fire_at.timestamp()}}\n"
+    f"{{wid.session_id}}\\n{{fire_at.timestamp()}}\\n"
 )
 print("termination-watcher", wid)
 """

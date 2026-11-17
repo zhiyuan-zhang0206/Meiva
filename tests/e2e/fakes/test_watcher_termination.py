@@ -1,3 +1,4 @@
+import ast
 from pathlib import Path
 from typing import cast
 
@@ -19,6 +20,7 @@ async def test_termination_scenario_arms_one_future_at_watcher(
 
     assert len(reply.tool_calls) == 1
     code = cast(str, reply.tool_calls[0]["args"]["code"])
+    _ = ast.parse(code, filename="<scenario>", mode="exec")
     assert "meiva.watcher.at" in code
     assert "datetime.timedelta(seconds=30)" in code
     assert "TERMINATED-WATCHER-MUST-NOT-FIRE" in code
