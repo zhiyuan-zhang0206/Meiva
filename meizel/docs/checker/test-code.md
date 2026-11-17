@@ -33,12 +33,12 @@ ships carry.
 | module | records | test files that write it | why it is a double |
 |---|---:|---|---|
 | `ui/web/src/components/agent-sidebar/sidebar-test-mock.tsx` | 141 | `agent-sidebar.test.tsx` (34), `sidebar-status-cards.test.tsx` (56), `sidebar-tree-and-search.test.tsx` (51) | the rail's scenario object: the props the page hands it, and the settings, stats and plugin declarations it reads |
-| `ui/web/src/app/page-test-mock.tsx` | 101 | `page.test.tsx` (61), `page-dispatch.test.tsx` (40) | the home page's `hooksState` and its provider wrapper |
+| `ui/web/src/app/page-test-mock.tsx` | 107 | `page.test.tsx` (61), `page-dispatch.test.tsx` (46) | the home page's `hooksState` and its provider wrapper |
 | `ui/web/src/components/inspector/inspector-test-mock.tsx` | 4 | `inspector-panel-chrome.test.tsx` (3), `inspector-panel-state.test.tsx` (1) | the inspector's `inspectorMockState` |
 
-246 records, every one of them a write into a state object the double exports: no `vi.mock`, and no patch
+252 records, every one of them a write into a state object the double exports: no `vi.mock`, and no patch
 of a module the suite renders. `python -m meizel debt sites --code first-party-patch --json` lists every
-site (249 today, 238 at `1d6710493`); 246 name one of these modules, 2 sit in `[approved-patches.files]`,
+site (255 today, 238 at `1d6710493`); 252 name one of these modules, 2 sit in `[approved-patches.files]`,
 and 1 is recorded. A repayment lowers these numbers and a new site raises them, and
 `meizel/tests/languages/test_test_code_accounting.py` fails until this table and the tree agree; the same
 test injects a production import of each double into the run's fact graph and asserts every record comes
@@ -84,3 +84,14 @@ real sidebar consumer and its clock/provider ports. The status-card file moves
 from 50 to 56 sites, the sidebar double from 135 to 141, and the three doubles
 from 240 to 246 records (249 raw first-party patch sites). The conditional
 test-only exemption and the production-import control are unchanged.
+
+
+The Home bookmark return regression adds six writes in `page-dispatch.test.tsx`:
+three selections drive A → B → A, while the roster, page-entry identity and
+settings establish the real Home consumer. The dispatch file moves from 40 to
+46 sites, the Home double from 101 to 107, and the three documented doubles from
+246 to 252 records (255 raw first-party patch sites). These are exact consumer
+counts, with the historical measurements above retained. The conditional
+exemption and production-import control are unchanged. Changes that add writes
+to these doubles must scan the raw sites and run the exact-accounting test;
+a green dependency graph does not establish that these published counts agree.

@@ -192,6 +192,7 @@ export function startScrollToBottomRide({
 }
 
 export function useTimelineViewport({
+  viewportObserverFactory,
   wrapperRef,
   viewportRef,
   contentRef,
@@ -225,6 +226,7 @@ export function useTimelineViewport({
   tailHeight,
   cancelPendingJump,
 }: {
+  viewportObserverFactory?: (callback: ResizeObserverCallback) => ResizeObserver;
   wrapperRef: RefObject<HTMLDivElement | null>;
   viewportRef: RefObject<HTMLElement | null>;
   contentRef: RefObject<HTMLDivElement | null>;
@@ -402,7 +404,7 @@ export function useTimelineViewport({
     viewport.addEventListener("touchend", onTouchEnd, { passive: true });
     viewport.addEventListener("touchcancel", onTouchCancel, { passive: true });
 
-    const ro = new ResizeObserver(() => {
+    const onResize = () => {
       maintainSendAnchor(viewport);
       const probe = restoreProbeRef.current;
       if (probe.height === viewport.scrollHeight) probe.passes += 1;
@@ -433,7 +435,8 @@ export function useTimelineViewport({
       measureAtBottom();
       maybeColdFill();
       trimFollowing();
-    });
+    };
+    const ro = viewportObserverFactory ? viewportObserverFactory(onResize) : new ResizeObserver(onResize);
     ro.observe(viewport);
     if (contentRef.current) ro.observe(contentRef.current);
 
@@ -449,6 +452,7 @@ export function useTimelineViewport({
       ro.disconnect();
     };
   }, [
+    viewportObserverFactory,
     wrapperRef,
     viewportRef,
     contentRef,

@@ -19,3 +19,34 @@ Validation uses the actual HomePageView → useTimeline → TimelineView consume
 with controlled DOM geometry and resize delivery. A cold return fails at 0px on
 the baseline and restores the departed 700px bookmark after the fix; the retained
 window return is a positive control. No production data was used.
+
+## Follow-up: Home test ownership
+
+The Home return regression added in PR9003 crossed from components into the app
+test owner. A full TypeScript dependency-graph check during the refresh follow-up
+found the not-exported import and components-to-app cycle. The frontend-only
+commit/push hooks had not run that graph check, so the earlier no-debt statement
+exceeded the evidence available then.
+
+The regression now belongs to app alongside the Home test fixtures. Its geometry
+fixture belongs to test-support and acts on the mounted DOM instances. Timeline's
+viewport observer factory is injectable at the view boundary, so controlled
+resize delivery exercises the actual Home, hook, Timeline and ScrollArea without
+adding global patches. The default factory still uses the browser's observer.
+
+The repair preserves the cold-return failure signal and retained-return positive
+control. Review includes the full affected TypeScript dependency graph as well as
+scoped consumer tests and the normal hooks. No cycle allowance, exports exemption
+or new patch debt is introduced.
+
+
+## Follow-up: exact test-double accounting
+
+CI exposed a second direct consumer of the relocated Home regression: the
+checker accounts for every assignment into its test-only mock. The six Home
+scenario writes changed the Home double from 101 to 107 records, the dispatch
+file from 40 to 46, and the three documented doubles from 246 to 252. A raw
+first-party-patch scan found 255 sites total. The exact-accounting test and
+current checker table now reflect those measurements; historical counts remain.
+No exemption rule, ratchet or debt baseline changed. Future mock-writing changes
+include this exact-accounting consumer as well as the dependency graph.
