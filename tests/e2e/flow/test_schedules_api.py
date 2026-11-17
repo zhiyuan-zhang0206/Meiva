@@ -22,6 +22,8 @@ from tests.e2e._credentials import gateway_client, gateway_post
 from tests.e2e._ports import GATEWAY_URL
 from tests.e2e.fakes.scenario_recording import model_inputs, reset_record
 
+_EVERY_MINUTE = {"trigger_kind": "every", "interval_seconds": 60}
+
 
 def _cli(*args: str) -> str:
     result = subprocess.run(  # noqa: S603 -- fixed Python executable and CLI module
@@ -38,7 +40,12 @@ def _cli(*args: str) -> str:
 def _create_and_check_listed(client: httpx.Client) -> int:
     created = client.post(
         "/api/schedules",
-        json={"name": "e2e-rest", "script": "print('first')\n", "enabled": False},
+        json={
+            "name": "e2e-rest",
+            "script": "print('first')\n",
+            "enabled": False,
+            **_EVERY_MINUTE,
+        },
     )
     assert created.status_code == 201, created.text
     schedule_id = int(created.json()["id"])
@@ -71,7 +78,8 @@ def test_rest_create_list_get_update_delete_and_version_snapshot(
         assert client.get(f"/api/schedules/{schedule_id}").json()["name"] == "e2e-renamed"
         assert (
             client.post(
-                "/api/schedules", json={"name": "e2e-renamed", "script": "pass\n"}
+                "/api/schedules",
+                json={"name": "e2e-renamed", "script": "pass\n", **_EVERY_MINUTE},
             ).status_code
             == 409
         )
@@ -99,7 +107,13 @@ def test_rest_start_stop_restart_queue_sync_and_change_enabled(
 ) -> None:
     with gateway_client(base_url=GATEWAY_URL, timeout=30.0) as client:
         created = client.post(
-            "/api/schedules", json={"name": "e2e-control", "script": "pass\n", "enabled": False}
+            "/api/schedules",
+            json={
+                "name": "e2e-control",
+                "script": "pass\n",
+                "enabled": False,
+                **_EVERY_MINUTE,
+            },
         )
         created.raise_for_status()
         schedule_id = created.json()["id"]
@@ -127,7 +141,13 @@ def test_rest_runs_and_logs_read_persisted_history_and_transcript(
 ) -> None:
     with gateway_client(base_url=GATEWAY_URL, timeout=30.0) as client:
         created = client.post(
-            "/api/schedules", json={"name": "e2e-history", "script": "pass\n", "enabled": False}
+            "/api/schedules",
+            json={
+                "name": "e2e-history",
+                "script": "pass\n",
+                "enabled": False,
+                **_EVERY_MINUTE,
+            },
         )
         created.raise_for_status()
         schedule_id = created.json()["id"]

@@ -1,100 +1,62 @@
 from __future__ import annotations
 
 import ast
-import re
 from datetime import UTC, datetime
 from pathlib import Path
 from zoneinfo import ZoneInfo, available_timezones
 
 import pytest
+from croniter import croniter
 
-from base.daemon.schedules.watcher import next_fire
+from base.clock.recurring import next_fire
+from base.daemon.schedules.builtin_schedules import BuiltinSchedule, load_manifest
 
 _SCHEDULES = Path(__file__).resolve().parents[3] / "schedules"
-_CLUSTER_CLOCK_TEMPLATES = {
-    "debt-sweep-daily-schedule.py": "TZ",
-    "dev-ci-metrics-schedule.py": "TZ",
-    "jobs/harness/claude-auth-keepalive-schedule.py": "TZ",
-    "jobs/harness/harness-cli-update-schedule.py": "TZ",
-    "memory-steward-schedule.py": "TIMEZONE",
-    "model-update-tracker-schedule.py": "TZ",
-    "self-evolution-daily-schedule.py": "TZ",
-    "self-evolution-weekly-schedule.py": "TIMEZONE",
-}
-_CRON_RE = re.compile(r"^[\d*/,\-]+(?: [\d*/,\-]+){4}$")
+_BUILTINS = load_manifest(_SCHEDULES / "manifest.json")
+_CRON_BUILTINS = [entry for entry in _BUILTINS if entry.trigger_kind == "cron"]
 _IANA = available_timezones()
 assert "Asia/Shanghai" in _IANA, "no tz database available; the zone-name check cannot run"
 
 
-def _cron_literals(tree: ast.Module) -> list[str]:
-    return [
-        node.value
-        for node in ast.walk(tree)
-        if isinstance(node, ast.Constant)
-        and isinstance(node.value, str)
-        and _CRON_RE.match(node.value)
-    ]
-
-
-def _tree(filename: str) -> ast.Module:
-    return ast.parse((_SCHEDULES / filename).read_text(encoding="utf-8"))
-
-
-def _timezone_arguments(tree: ast.Module) -> list[str]:
-    found: list[str] = []
-    for node in ast.walk(tree):
-        if not isinstance(node, ast.Call):
-            continue
-        found += [ast.unparse(kw.value) for kw in node.keywords if kw.arg == "timezone"]
-        callee = ast.unparse(node.func)
-        if callee == "ZoneInfo" and node.args:
-            found.append(ast.unparse(node.args[0]))
-        if callee == "run_daily_loop" and len(node.args) > 2:
-            found.append(ast.unparse(node.args[2]))
-    return found
+def _tree(entry: BuiltinSchedule) -> ast.Module:
+    return ast.parse((_SCHEDULES / entry.script).read_text(encoding="utf-8"))
 
 
 @pytest.mark.parametrize(
-    "path",
-    sorted(_SCHEDULES.glob("*-schedule.py")),
-    ids=lambda p: p.name,
+    "entry",
+    _BUILTINS,
+    ids=lambda entry: entry.name,
 )
-def test_template_timezone_is_the_cluster_setting(path: Path) -> None:
-    tree = _tree(path.name)
-    arguments = _timezone_arguments(tree)
-    assert arguments, f"{path.name} passes no timezone"
-    assert set(arguments) == {"cluster_timezone()"}, arguments
-    assert not any(
-        isinstance(node, ast.Attribute) and ast.unparse(node) == "settings.general.timezone"
-        for node in ast.walk(tree)
-    ), f"{path.name} reads settings itself"
+def test_builtin_manifest_declares_cluster_clock_trigger(entry: BuiltinSchedule) -> None:
+    assert entry.timezone is None, f"{entry.name} overrides the cluster timezone"
+    if entry.trigger_kind == "cron":
+        assert entry.cron_expr is not None
+        assert entry.interval_seconds is None
+    else:
+        assert entry.trigger_kind == "every"
+        assert entry.cron_expr is None
+        assert entry.interval_seconds is not None
 
 
-@pytest.mark.parametrize("path", sorted(_SCHEDULES.glob("*-schedule.py")), ids=lambda p: p.name)
-def test_no_template_hardcodes_an_iana_timezone(path: Path) -> None:
+@pytest.mark.parametrize("entry", _BUILTINS, ids=lambda entry: entry.name)
+def test_no_template_hardcodes_an_iana_timezone(entry: BuiltinSchedule) -> None:
     literals = [
         node.value
-        for node in ast.walk(ast.parse(path.read_text(encoding="utf-8")))
+        for node in ast.walk(_tree(entry))
         if isinstance(node, ast.Constant) and isinstance(node.value, str)
     ]
     named = [v for v in literals if "/" in v and v in _IANA]
-    assert named == [], f"{path.name} hard-codes {named}"
+    assert named == [], f"{entry.script} hard-codes {named}"
 
 
 @pytest.mark.parametrize("tz", ["Asia/Shanghai", "America/Los_Angeles", "Asia/Kathmandu"])
-@pytest.mark.parametrize("filename", sorted(_CLUSTER_CLOCK_TEMPLATES))
-def test_template_crons_fire_on_cluster_wall_clock(filename: str, tz: str) -> None:
-    tree = _tree(filename)
-    crons = _cron_literals(tree)
-    assert crons, f"{filename} carries no cron literal"
+@pytest.mark.parametrize("entry", _CRON_BUILTINS, ids=lambda entry: entry.name)
+def test_manifest_crons_fire_on_cluster_wall_clock(entry: BuiltinSchedule, tz: str) -> None:
+    assert entry.cron_expr is not None
     base = datetime(2026, 6, 9, tzinfo=UTC)
-    for expr in crons:
-        minute, hour = expr.split()[:2]
-        hours = {int(h) for h in hour.split(",")}
-        fire = next_fire(expr, after=base, timezone=tz)
-        local = fire.astimezone(ZoneInfo(tz))
-        assert local.hour in hours, f"{filename}: {expr}"
-        assert local.minute == int(minute), f"{filename}: {expr}"
+    fire = next_fire(entry.cron_expr, after=base, timezone=tz)
+    local = fire.astimezone(ZoneInfo(tz))
+    assert croniter.match(entry.cron_expr, local), f"{entry.name}: {entry.cron_expr}"
 
 
 def test_same_cron_yields_different_instants_per_cluster_timezone() -> None:
