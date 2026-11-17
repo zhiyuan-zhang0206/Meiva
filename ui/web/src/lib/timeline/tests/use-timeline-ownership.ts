@@ -291,7 +291,8 @@ describe("latest-message refresh lifecycle", () => {
     let finish!: (snapshot: ReturnType<typeof composedSnapshot>) => void;
     snapshot.always(new Promise<ConversationSnapshotResponse>((resolve) => { finish = resolve; }).then(resolves));
     const { result } = renderHook(() => useTimeline(7, vi.fn()), { wrapper });
-    expect(result.current.isFetching).toBe(false);
+    expect(result.current.isFetching).toBe(true);
+    expect(result.current.isLoading).toBe(true);
     pushConnectionEvent({ type: "open" });
     await waitFor(() => expect(snapshotReads).toHaveLength(1));
     expect(result.current.isFetching).toBe(true);

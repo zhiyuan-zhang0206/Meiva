@@ -1,5 +1,5 @@
 import { useLayoutEffect, useRef, type ComponentProps } from "react";
-import { readScrollMemory } from "@/lib/layout/scroll-memory";
+import { readScrollMemory, saveScrollMemory } from "@/lib/layout/scroll-memory";
 import { timelineGeometry } from "@/test-support/timeline-geometry";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { act, cleanup, fireEvent, screen, waitFor } from "@testing-library/react";
@@ -10,11 +10,16 @@ import { cleanupHomePageTest, gatewayWrapper, HomePageView, homePageProps, HomeP
 
 import { resetTransport, transport } from "@/test-support/fake-api";
 import { TimelineView } from "@/components/timeline";
-import { USER_SETTING_DEFAULTS, type BackendTimelineItem, type TimelineResponse } from "@/lib/contracts/types";
+import { USER_SETTING_DEFAULTS, type BackendTimelineItem, type TimelineResponse, type ConversationSnapshotResponse } from "@/lib/contracts/types";
 import { useTimeline } from "@/lib/timeline/use-timeline";
 import { useTimelineStore } from "@/lib/timeline/timeline-store";
 import { fakeStreamHub, TestStreamProvider } from "@/test-support/fake-stream";
 import { deferred } from "@/test-support/deferred";
+
+function composed(timeline: TimelineResponse): ConversationSnapshotResponse {
+  return { timeline, pending: [], token_usage: { input_tokens: 0, output_tokens: 0,
+    reasoning_tokens: 0, max_input_tokens: 0, soft_compact_tokens: 0, hard_compact_tokens: 0 } };
+}
 
 afterEach(cleanupHomePageTest);
 beforeEach(resetHomePageTestState);
@@ -117,7 +122,9 @@ describe("home loading presentation through the selected timeline reader", () =>
     client.setQueryData(["timeline", 42], response([human], true));
     const read = deferred<TimelineResponse>();
     transport.getTimeline.mockReturnValue(read.promise);
+    transport.getConversationSnapshot.mockResolvedValue(composed(response([human], true)));
     const view = renderWithBrowser(surface(<Reader />));
+    await waitFor(() => expect(screen.queryByTestId("cold-load-spinner")).toBeNull());
     expect(screen.getByTestId("pending-live-activity-window").querySelector(".animate-spin")).toBeTruthy();
     fireEvent.click(screen.getByRole("button", { name: "Load earlier messages" }));
     await waitFor(() => expect(transport.getTimeline).toHaveBeenCalledOnce());
@@ -136,7 +143,7 @@ describe("home loading presentation through the selected timeline reader", () =>
     const selectedRead = deferred<TimelineResponse>();
     transport.getTimeline.mockImplementation((id) => id === 43 ? oldRead.promise : selectedRead.promise);
     const view = renderWithBrowser(surface(<Reader />));
-    expect(screen.queryByTestId("cold-load-spinner")).toBeNull();
+    expect(screen.getByTestId("cold-load-ring")).toBeTruthy();
     expect(screen.getByText("Selected prompt")).toBeTruthy();
     view.rerender(surface(<Reader id={43} />));
     expect(screen.getByTestId("cold-load-ring")).toBeTruthy();
@@ -151,6 +158,30 @@ describe("home loading presentation through the selected timeline reader", () =>
     fireEvent.click(screen.getByTestId("turn-toggle"));
     expect(screen.getByTestId("turn-toggle").getAttribute("aria-expanded")).toBe("true");
     expect(screen.queryByTestId("pending-live-activity-window")).toBeNull();
+  });
+
+  it.each(["cached", "cold"])("keeps %s A2 unqualified when abandoned A1 finishes after A→B→A", async (source) => {
+    if (source === "cached") client.setQueryData(["timeline", 42], response([human]));
+    const first = deferred<TimelineResponse>();
+    const second = deferred<TimelineResponse>();
+    const other = deferred<TimelineResponse>();
+    let reads = 0;
+    transport.getTimeline.mockImplementation((id) => id !== 42 ? other.promise : ++reads === 1 ? first.promise : second.promise);
+    let snapshots = 0;
+    transport.getConversationSnapshot.mockImplementation(() =>
+      (++snapshots === 1 ? first.promise : second.promise).then(composed));
+    const view = renderWithBrowser(surface(<Reader running={false} />));
+    const calls = () => source === "cached" ? transport.getConversationSnapshot.mock.calls : transport.getTimeline.mock.calls.filter(([id]) => id === 42);
+    await waitFor(() => expect(calls()).toHaveLength(1));
+    view.rerender(surface(<Reader id={43} running={false} />));
+    view.rerender(surface(<Reader running={false} />));
+    await waitFor(() => expect(calls()).toHaveLength(2));
+    await act(() => { first.resolve(response([{ ...human, payload: "Abandoned A1" }])); return first.promise; });
+    expect(screen.queryByText("Abandoned A1")).toBeNull();
+    expect(screen.getByTestId("cold-load-ring")).toBeTruthy();
+    await act(() => { second.resolve(response([human])); return second.promise; });
+    await waitFor(() => expect(screen.queryByTestId("cold-load-spinner")).toBeNull());
+    expect(screen.getByText("Selected prompt")).toBeTruthy();
   });
 
   it("a failed cold read releases the ring and exposes the existing retry action", async () => {
@@ -383,6 +414,7 @@ beforeEach(() => {
   hooksState.settings = { ...USER_SETTING_DEFAULTS, "behavior.replySuggestions": false };
   client = new QueryClient({ defaultOptions: { queries: { retry: false, staleTime: Infinity } } });
   client.setQueryData(["timeline", 42], { items, msg_count: 17, has_more: true });
+  transport.getConversationSnapshot.mockResolvedValue(composed({ items, msg_count: 17, has_more: true }));
   client.setQueryData(["user-settings"], hooksState.settings);
   client.setQueryData(["config", null], { fields: [] });
   useTimelineStore.getState().switchThread(null, null, false);
@@ -398,6 +430,7 @@ afterEach(() => { cleanup(); client.clear(); });
         <TestStreamProvider><HomeReader /></TestStreamProvider>
       </WallClockProvider></StreamHubProvider></ApiProvider>
     </QueryClientProvider>);
+    await waitFor(() => expect(screen.queryByTestId("cold-load-spinner")).toBeNull());
     const viewport = document.querySelector<HTMLElement>('[data-slot="scroll-area-viewport"]')!;
     Object.defineProperties(viewport, {
       clientHeight: { configurable: true, get: () => 600 },
@@ -471,6 +504,7 @@ beforeEach(() => {
   client = new QueryClient({ defaultOptions: { queries: { retry: false, staleTime: Infinity } } });
   client.setQueryData(["timeline", 42], response);
   client.setQueryData(["timeline", 43], response);
+  transport.getConversationSnapshot.mockResolvedValue(composed(response));
   client.setQueryData(["config", null], { fields: [] });
   client.setQueryData(["user-settings"], { ...USER_SETTING_DEFAULTS });
   useTimelineStore.getState().switchThread(null, null, false);
@@ -510,6 +544,7 @@ function MeasuredTimeline(props: ComponentProps<typeof TimelineView>) {
       </ApiProvider></WallClockProvider>
     </QueryClientProvider>;
     const view = renderWithBrowser(home());
+    await waitFor(() => expect(screen.queryByTestId("cold-load-spinner")).toBeNull());
     act(() => { viewport().scrollTop = 700; fireEvent.scroll(viewport()); });
     hooksState.activeId = 43;
     view.rerender(home());
@@ -528,8 +563,71 @@ function MeasuredTimeline(props: ComponentProps<typeof TimelineView>) {
       await act(async () => { deliver(response); await Promise.resolve(); });
     }
     await waitFor(() => expect(viewport().querySelectorAll(".timeline-item")).toHaveLength(16));
+    await waitFor(() => expect(screen.queryByTestId("cold-load-spinner")).toBeNull());
     resize();
     expect(viewport().scrollTop).toBe(700);
     expect(readingOffset("3.0")).toBe(-100);
   });
+  it.each(["unchanged", "new", "empty", "error", "no-saved"])("qualifies cached Home only after this entry's %s authority settles", async (outcome) => {
+    hooksState.activeId = 42;
+    hooksState.agents = [makeAgent({ agent_id: 42, status: "idling" })];
+    hooksState.bfcacheId = `authority-${outcome}`;
+    hooksState.settings = { ...USER_SETTING_DEFAULTS, "behavior.replySuggestions": false };
+    transport.getPendingMessages.mockResolvedValue([]);
+    transport.getUserMessages.mockResolvedValue({ mode: "prefix", seen_id: 0, items: [] });
+    transport.getAgentQuestions.mockResolvedValue([]);
+    const entryKey = `authority-${outcome}:agent:42`;
+    if (outcome !== "no-saved") saveScrollMemory(entryKey, {
+      contentKey: "42", scrollTop: 700, followBottom: false,
+      anchor: { itemId: "3.0", rank: 0, viewportTop: -100 },
+    });
+    let deliver: (value: ConversationSnapshotResponse) => void = () => undefined;
+    let fail: (reason: Error) => void = () => undefined;
+    transport.getConversationSnapshot.mockImplementation(() => new Promise<ConversationSnapshotResponse>((resolve, reject) => { deliver = resolve; fail = reject; }));
+    transport.getTimeline.mockRejectedValue(new Error("fixture authority unavailable"));
+    let current: ReturnType<typeof useTimeline> | undefined;
+    const { hub } = fakeStreamHub();
+    function HomeReader() {
+      const timeline = useTimeline(42, () => undefined);
+      current = timeline;
+      return <HomePageView {...homePageProps()} timeline={timeline} TimelineView={MeasuredTimeline} />;
+    }
+    renderWithBrowser(<QueryClientProvider client={client}>
+      <WallClockProvider wallNow={wallNow}><ApiProvider api={gateway}>
+        <StreamHubProvider hub={hub}><TestStreamProvider><HomeReader /></TestStreamProvider></StreamHubProvider>
+      </ApiProvider></WallClockProvider>
+    </QueryClientProvider>);
+    expect(current?.isLoading).toBe(true);
+    resize(); resize(); resize();
+    if (outcome !== "no-saved") expect(top).toBe(0);
+    await waitFor(() => expect(transport.getConversationSnapshot).toHaveBeenCalledOnce());
+    const fresh = outcome === "empty" ? { items: [], msg_count: 0, has_more: false } : outcome === "new" ? {
+      items: items.map((item, index) => ({ ...item, item_id: `${100 + index}.0`, payload: `Fresh ${index}` })), msg_count: 116, has_more: true,
+    } : response;
+    if (outcome === "error") {
+      act(() => { fail(new Error("fixture composed unavailable")); });
+      await waitFor(() => expect(current?.error).toBeInstanceOf(Error));
+      await waitFor(() => expect(screen.getByRole("button", { name: "Retry" })).toBeTruthy());
+      expect(current?.isLoading).toBe(false);
+      resize(); resize(); resize();
+      expect(top).toBe(0);
+      expect(readScrollMemory(entryKey)?.scrollTop).toBe(700);
+      transport.getTimeline.mockResolvedValue(response);
+      fireEvent.click(screen.getByRole("button", { name: "Retry" }));
+    } else act(() => { deliver({
+      timeline: fresh, pending: [],
+      token_usage: { input_tokens: 0, output_tokens: 0, reasoning_tokens: 0,
+        max_input_tokens: 0, soft_compact_tokens: 0, hard_compact_tokens: 0 },
+    }); });
+    await waitFor(() => expect(current?.isLoading).toBe(false));
+    resize();
+    if (outcome === "unchanged" || outcome === "error") expect(top).toBe(700);
+    if (outcome === "new") expect(current?.items.some((item) => item.payload === "Fresh 0")).toBe(true);
+    const background = new Promise<TimelineResponse>(() => undefined);
+    transport.getTimeline.mockReturnValue(background);
+    act(() => { void client.invalidateQueries({ queryKey: ["timeline", 42] }); });
+    await waitFor(() => expect(current?.isFetching).toBe(true));
+    expect(current?.isLoading).toBe(false);
+  });
+
 });

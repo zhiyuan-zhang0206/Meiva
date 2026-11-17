@@ -91,7 +91,7 @@ export interface TimelineState {
 
   processConnectionEvent: (ev: { type: ConnectionState }) => void;
 
-  reloadSnapshot: (snapshot: BackendTimelineItem[], msg_count: number, hasMoreOlder: boolean) => void;
+  reloadSnapshot: (snapshot: BackendTimelineItem[], msg_count: number, hasMoreOlder: boolean) => boolean;
 
   switchThread: (agentId: number | null, cached: BackendTimelineItem[] | null, hasMoreOlder: boolean, buffer?: CompactTransitionBuffer | null) => void;
 

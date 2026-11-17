@@ -82,10 +82,11 @@ export interface UseTimelineResult {
    *  renders as a single envelope-wrap" cleanness. */
   turnActive: boolean;
   // meiva:note
-  // Cold reads remain loading until the fetched snapshot enters the readable
-  // store, including an empty response. A retained window is readable at once.
+  // Cached rows can paint immediately. Initial loading and restoration await
+  // this selection's accepted authoritative read, including an empty response.
   // meiva:link ui/web/src/docs/frontend-components/timeline-view/sticky-scroll.md
   isLoading: boolean;
+  sourceReady: boolean;
   /** Background refresh in flight — during stale-while-revalidate;
    *   data is already displayed at this point. */
   isRefetching: boolean;
@@ -124,7 +125,18 @@ export function useTimeline(
   const queryClient = useQueryClient();
 
   const { isVisible } = useAgentReadRepair("timeline", agentId);
-  const { requestReconcile, abortReconcile, isReconciling } = useAgentReconcile(agentId);
+  const { requestReconcile, abortReconcile, isReconciling, readRevision } = useAgentReconcile(agentId);
+  // meiva:note
+  // A retained layout has no authority for a new selection. Each visit owns
+  // its head request and the accepted composed-read handoff independently.
+  // meiva:link ui/web/src/docs/frontend-state/timeline-cache.md
+  const [selection, setSelection] = useState(() => ({ agentId, baseline: readRevision }));
+  if (selection.agentId !== agentId) setSelection({ agentId, baseline: readRevision });
+  const owner = useRef<typeof selection | null>(selection);
+  const [headReceipt, setHeadReceipt] = useState<{ selection: typeof selection; data: TimelineResponse; epoch: number } | null>(null);
+  const [qualified, setQualified] = useState<typeof selection | null>(null);
+  const appliedReceipt = useRef<typeof headReceipt>(null);
+  useLayoutEffect(() => { owner.current = selection; return () => { owner.current = null; }; }, [selection]);
   const olderRequest = useRef<AbortController | null>(null);
   // meiva:note
   // Whether the older-page read now in flight is the reader's own. Recorded
@@ -138,9 +150,12 @@ export function useTimeline(
   const [readerOrigin, setReaderOrigin] = useState(false);
   const timelineQuery = useQuery({
     queryKey: ["timeline", agentId] as const,
-    queryFn: ({ signal }) => {
+    queryFn: async ({ signal }) => {
       if (agentId === null) throw new Error("A timeline read requires an agent");
-      return api.getTimeline(agentId, { signal });
+      const epoch = useTimelineStore.getState().compactEpoch;
+      const data = await api.getTimeline(agentId, { signal });
+      if (!signal.aborted && owner.current === selection) setHeadReceipt({ selection, data, epoch });
+      return data;
     },
     enabled: agentId !== null && isVisible,
     // A retained window is also fresh (task #3900 batch 2): switching back
@@ -214,18 +229,31 @@ export function useTimeline(
     };
   }, [agentId, queryClient, switchThread]);
 
+  useEffect(() => {
+    if (agentId === null) return;
+    // meiva:note
+    // The passive coordinator subscription exists before this cached-entry
+    // request joins the normal open burst. Cold reads keep their query owner.
+    // meiva:link ui/web/src/docs/frontend-state/timeline-cache.md
+    if (queryClient.getQueryData(["timeline", agentId]) !== undefined) requestReconcile();
+  }, [agentId, queryClient, requestReconcile]);
+
   // Apply each distinct authoritative response once.
   useEffect(() => {
     if (!timelineQuery.data || agentId == null) return;
-    if (timelineQuery.data === lastAppliedDataRef.current) return;
-    lastAppliedDataRef.current = timelineQuery.data;
-
-    reloadSnapshot(
-      timelineQuery.data.items,
-      timelineQuery.data.msg_count,
-      timelineQuery.data.has_more,
-    );
-  }, [timelineQuery.data, agentId, reloadSnapshot]);
+    const receipt = headReceipt?.selection === selection && headReceipt !== appliedReceipt.current &&
+      headReceipt.epoch === useTimelineStore.getState().compactEpoch ? headReceipt : null;
+    const data = receipt?.data ?? timelineQuery.data;
+    const completion = receipt !== null || (readRevision > selection.baseline && qualified !== selection);
+    if (completion || data !== lastAppliedDataRef.current) {
+      const applied = reloadSnapshot(data.items, data.msg_count, data.has_more);
+      if (applied) {
+        lastAppliedDataRef.current = data;
+        if (receipt) appliedReceipt.current = receipt;
+        if (completion) setQualified(selection);
+      }
+    }
+  }, [timelineQuery.data, agentId, reloadSnapshot, headReceipt, readRevision, selection, qualified]);
 
   // -- React Query error → toast + clear partial flags --
   useEffect(() => {
@@ -474,7 +502,8 @@ export function useTimeline(
     streamingCode: selected && streamingCode,
     connectionState,
     turnActive: selected && turnActive,
-    isLoading: timelineQuery.isLoading || (selected && timelineQuery.data !== undefined && !snapshotReady),
+    sourceReady: selected && qualified === selection && snapshotReady,
+    isLoading: timelineQuery.isLoading || (agentId !== null && !timelineQuery.error && (qualified !== selection || !snapshotReady)),
     isRefetching: timelineQuery.isRefetching || isReconciling,
     error: timelineQuery.error,
     isFetching: timelineQuery.isFetching || isReconciling,

@@ -104,6 +104,7 @@ type TimelineViewState = Pick<
   | "readerLoadingOlder"
   | "loadOlder"
   | "isLoading"
+  | "sourceReady"
   | "retainedItemsMax"
   | "error"
   | "isFetching"
@@ -392,6 +393,7 @@ function HomeContent({
     readerLoadingOlder,
     loadOlder,
     isLoading,
+    sourceReady,
     retainedItemsMax,
     error: timelineError,
     isFetching,
@@ -487,7 +489,7 @@ function HomeContent({
     <section className={cn("relative", FLEX, MIN_H_0, FLEX_1, MIN_W_0, OVERFLOW_HIDDEN)}>
       <ErrorBoundary diagnostics={diagnostics}>
         <div data-testid="timeline-surface" className={cn("relative", FLEX, FLEX_COL, FLEX_1, MIN_H_0, MIN_W_0)}>
-          {timelineError && items.length === 0 && (
+          {timelineError && (!sourceReady || items.length === 0) && (
             <div className="mx-4 mt-14 mb-2">
               <InlineError
                 onRetry={retryTimeline}
@@ -505,6 +507,7 @@ function HomeContent({
             compactBuffer={compactBuffer}
             threadKey={activeId != null ? String(activeId) : undefined}
             scrollMemoryKey={`${bfcacheId}:agent:${activeId ?? "unselected"}`}
+            restoreReady={sourceReady}
             streamingCode={streamingCode}
             turnActive={agentBusy}
             lastEventAt={timelineStore.liveAnchorAt}

@@ -239,6 +239,7 @@ export function homePageProps(): HomePageProps {
       readerLoadingOlder: false,
       loadOlder: state.loadOlder,
       isLoading: false,
+      sourceReady: true,
       retainedItemsMax: 0,
       error: state.timelineError,
       isFetching: state.timelineFetching,
