@@ -33,6 +33,7 @@ import { cn, formatFileSize, isRasterImageType } from "@/lib/format/utils";
 
 import { EphemeralSystemMarker, MarkerBody } from "./markers";
 import { classifyMarker } from "./model/marker-classify";
+import { inboundKind } from "./model/runs";
 import { isLiveReasoning } from "./model/reasoning-clock";
 import { FLEX } from "@/lib/layout/layout";
 
@@ -117,12 +118,10 @@ function Thumbnail({
       trigger?.focus();
     };
   }, [open]);
-  // Layout-shift guard (QA review-955): the button is the fixed-size layout node
-  // (16rem × 12rem — exactly the max-h-48 / max-w-[16rem] cap of the content
-  // below), so the row height is reserved from the first paint. The lazy <img> is
-  // absolutely centered inside it, so its own size growth (2×2px while unloaded →
-  // capped content size once decoded) never moves the flow — zero CLS on the
-  // scroll path. Keep the button size in sync with the img caps.
+  // meiva:note
+  // Uploads carry no reliable dimensions before decode. Let the image size the
+  // trigger at its natural ratio, capped by the pane and thumbnail bounds. Late
+  // media growth is observed by the timeline's existing resize tracking.
   return (
     <>
       <button
@@ -131,7 +130,7 @@ function Thumbnail({
         onClick={() => setOpen(true)}
         aria-label={alt}
         data-testid="attach-thumbnail"
-        className="relative block h-48 w-64 cursor-zoom-in rounded border-0 bg-transparent p-0"
+        className="block w-fit max-w-[min(16rem,100%)] self-start cursor-zoom-in rounded border-0 bg-transparent p-0"
       >
         {/* eslint-disable-next-line @next/next/no-img-element -- user upload / attach media, not a static asset */}
         <img
@@ -140,7 +139,7 @@ function Thumbnail({
           crossOrigin="use-credentials"
           loading="lazy"
           onError={onError}
-          className="absolute inset-0 m-auto max-h-48 max-w-[16rem] rounded border border-border object-contain"
+          className="block h-auto max-h-48 max-w-full rounded border border-border object-contain"
         />
       </button>
       {open
@@ -241,7 +240,7 @@ function AttachContent({
     <div className="space-y-1.5">
       {rows}
       {trailing.length ? (
-        <div className={cn("flex-wrap gap-2", FLEX)}>
+        <div className={cn("items-start flex-wrap gap-2", FLEX)}>
           {trailing.map((src) => (
             <Thumbnail key={src} src={src} alt={t("attachedImage")} />
           ))}
@@ -294,10 +293,11 @@ function EnvelopeContent({
   codeSurface = false,
   markdown = false,
   imageCaptions = null,
+  imagesFirst = false,
 }: {
   payload: string;
-  // Image reference urls on a multimodal inbound — rendered as thumbnails below
-  // the text. Gateway-relative, so each is resolved through assetUrl.
+  // meiva:note
+  // Gateway-relative multimodal images resolve through assetUrl.
   images?: string[] | null;
   files?: TimelineUploadFile[] | null;
   source?: string | null;
@@ -308,6 +308,7 @@ function EnvelopeContent({
   markdown?: boolean;
   /** Backend caption line per image (1:1 with `images`) — attach items only. */
   imageCaptions?: string[] | null;
+  imagesFirst?: boolean;
 }) {
   const t = useTranslations("timeline");
   const body = payload;
@@ -331,11 +332,21 @@ function EnvelopeContent({
       />
     );
   }
+  const imageRow = images?.length ? (
+    <div className={cn(!imagesFirst && showBody && "mt-2", "items-start flex-wrap gap-2", FLEX)}>
+      {images.map((src) => (
+        <Thumbnail key={src} src={resolveImageSrc(src)} alt={t("attachedImage")} />
+      ))}
+    </div>
+  ) : null;
   return (
     <>
+      {imagesFirst ? imageRow : null}
       {showBody ? (
         markdown ? (
-          <ChatMarkdown content={body} />
+          <div className={cn(imagesFirst && images?.length && "mt-2")}>
+            <ChatMarkdown content={body} />
+          </div>
         ) : (
           <pre
             className={cn(
@@ -348,19 +359,13 @@ function EnvelopeContent({
         )
       ) : null}
       {files?.length ? (
-        <div className={cn("flex-wrap gap-2", showBody && "mt-2", FLEX)}>
+        <div className={cn("items-start flex-wrap gap-2", showBody && "mt-2", FLEX)}>
           {files.map((file, idx) => (
             <UploadedFileCard key={`${idx}:${file.url}`} file={file} />
           ))}
         </div>
       ) : null}
-      {images?.length ? (
-        <div className={cn(showBody && "mt-2", "flex-wrap gap-2", FLEX)}>
-          {images.map((src) => (
-            <Thumbnail key={src} src={resolveImageSrc(src)} alt={t("attachedImage")} />
-          ))}
-        </div>
-      ) : null}
+      {!imagesFirst ? imageRow : null}
     </>
   );
 }
@@ -403,6 +408,7 @@ export const ItemView = memo(function ItemView({
           images={item.images}
           files={item.files}
           source={item.source}
+          imagesFirst={inboundKind(item.source) === "human"}
           markdown
         />
       );

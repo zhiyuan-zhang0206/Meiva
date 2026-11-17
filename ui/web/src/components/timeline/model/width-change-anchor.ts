@@ -42,18 +42,39 @@ export function useReanchorOnWidthChange({
     const viewport = wrapperRef.current?.querySelector<HTMLElement>('[data-slot="scroll-area-viewport"]');
     if (!viewport) return;
     let width = viewport.clientWidth;
-    const observer = new ResizeObserver(() => {
-      const next = viewport.clientWidth;
-      if (next === width) return;
-      width = next;
+    const reapplyBookmark = (requireAnchor = false) => {
       const current = latest.current;
       const mem = current.entriesRef.current;
       if (!mem || current.holdRef.current || current.controller.isSticky()) return;
       const saved = readScrollMemory(mem.entryKey);
-      if (!saved || saved.followBottom || saved.contentKey !== mem.contentKey) return;
+      if (!saved || saved.followBottom || saved.contentKey !== mem.contentKey || (requireAnchor && !saved.anchor)) return;
       applySavedTimelineScroll(viewport, saved, current.compactBuffer, current.canonicalItems);
+    };
+    const observer = new ResizeObserver(() => {
+      const next = viewport.clientWidth;
+      if (next === width) return;
+      width = next;
+      reapplyBookmark();
     });
+    // meiva:note
+    // Short histories do not activate row measurement. Decode can still move the
+    // reader's row. Reuse their latest bookmark after the image and any failure
+    // fallback commit; reader navigation updates that bookmark while waiting.
+    // meiva:link ui/web/src/docs/frontend-components/timeline-view/sticky-scroll.md
+    let mediaFrame = 0;
+    const onMedia = (event: Event) => {
+      if (!(event.target instanceof HTMLImageElement)) return;
+      cancelAnimationFrame(mediaFrame);
+      mediaFrame = requestAnimationFrame(() => reapplyBookmark(true));
+    };
+    viewport.addEventListener("load", onMedia, true);
+    viewport.addEventListener("error", onMedia, true);
     observer.observe(viewport);
-    return () => observer.disconnect();
+    return () => {
+      observer.disconnect();
+      cancelAnimationFrame(mediaFrame);
+      viewport.removeEventListener("load", onMedia, true);
+      viewport.removeEventListener("error", onMedia, true);
+    };
   }, [wrapperRef]);
 }

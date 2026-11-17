@@ -511,6 +511,47 @@ describe("restored position settles", () => {
     expect(readingOffset("3.0")).toBe(-100);
   });
 });
+  it.each(["load", "error"])("keeps a parked reader on their row after image %s in short history", async (event) => {
+    const withImage = items.map<BackendTimelineItem>((item, index) => index === 0
+      ? { ...item, kind: "inbound_chat", source: "user", images: ["/picture.png"] } : item);
+    client.setQueryData(["timeline", 42], { ...response, items: withImage });
+    useTimelineStore.getState().switchThread(42, withImage, false);
+    renderWithBrowser(conversation(42, `history-media-${event}`));
+    resize();
+    act(() => { viewport().scrollTop = 900; fireEvent.scroll(viewport()); });
+    expect(readingOffset("4.0")).toBe(0);
+    act(() => {
+      aboveSettle = event === "load" ? 120 : -20;
+      fireEvent(screen.getByAltText("attached image"), new Event(event));
+    });
+    await act(() => new Promise<void>((resolve) => requestAnimationFrame(() => resolve())));
+    expect(readingOffset("4.0")).toBe(0);
+    expect(viewport().scrollTop).toBe(event === "load" ? 1020 : 880);
+  });
+  it("uses the reader's latest row when navigation precedes a queued image decode", async () => {
+    const withImage = items.map<BackendTimelineItem>((item, index) => index === 0
+      ? { ...item, kind: "inbound_chat", source: "user", images: ["/picture.png"] } : item);
+    client.setQueryData(["timeline", 42], { ...response, items: withImage });
+    renderWithBrowser(conversation(42, "history-media-navigation"));
+    resize();
+    act(() => { viewport().scrollTop = 900; fireEvent.scroll(viewport()); });
+    act(() => {
+      fireEvent.load(screen.getByAltText("attached image"));
+      viewport().scrollTop = 1200;
+      fireEvent.scroll(viewport());
+      aboveSettle = 120;
+    });
+    await act(() => new Promise<void>((resolve) => requestAnimationFrame(() => resolve())));
+    expect(readingOffset("5.0")).toBe(0);
+    expect(viewport().scrollTop).toBe(1320);
+    act(() => { aboveSettle = 240; fireEvent.load(screen.getByAltText("attached image")); });
+    await act(() => new Promise<void>((resolve) => requestAnimationFrame(() => resolve())));
+    expect(readingOffset("5.0")).toBe(0);
+    act(() => { viewport().scrollTop = 4400; fireEvent.scroll(viewport()); });
+    act(() => { aboveSettle = 360; fireEvent.load(screen.getByAltText("attached image")); });
+    await act(() => new Promise<void>((resolve) => requestAnimationFrame(() => resolve())));
+    expect(viewport().scrollTop).toBe(4400);
+  });
   it("keeps the reader on their row when the viewport width changes", () => {
     useTimelineStore.getState().switchThread(42, items, false);
     renderWithBrowser(conversation(42, "history-width-change"));
