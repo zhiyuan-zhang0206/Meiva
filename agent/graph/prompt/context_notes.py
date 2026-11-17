@@ -243,14 +243,15 @@ def agent_id_note(ctx: MeivaContext) -> HumanMessage | None:
     from base.lm.registry import resolve_setting
 
     slices = ctx.require_agent()
+    catalog = ctx.catalog
     effort = (
         resolve_setting(
             "reasoning_effort",
             model=slices.brain.llm_model,
-            models=ctx.require_catalog().models,
+            models=catalog.models,
             explicit=slices.overrides.reasoning_effort,
         )
-        if ctx.catalog is not None
+        if catalog is not None
         else slices.overrides.reasoning_effort
     )
     now = ctx.require_clock().now()
