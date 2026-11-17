@@ -24,7 +24,7 @@ from base.host.boundary.json_values import is_object_dict
 from base.host.boundary.untyped import object_of
 
 ORCH = meiva.self.AGENT_ID
-HD = Path("deep_research_lite").resolve()
+HD = meiva.files.resolve("deep_research_lite")
 HD.mkdir(parents=True, exist_ok=True)
 PF = HD / "progress.md"
 SF = HD / "orchestrator_state.json"

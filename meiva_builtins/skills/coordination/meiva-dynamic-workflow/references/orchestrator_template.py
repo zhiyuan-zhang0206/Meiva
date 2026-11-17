@@ -49,7 +49,7 @@ CHECKPOINT_COUNT = 0
 # ═══════════════════════════════════════════════════════════════════════════════
 
 orchestrator_id = meiva.self.AGENT_ID
-handoff = Path("task_handoff").resolve()
+handoff = meiva.files.resolve("task_handoff")
 handoff.mkdir(parents=True, exist_ok=True)
 
 worker_ids: dict[str, int] = {}

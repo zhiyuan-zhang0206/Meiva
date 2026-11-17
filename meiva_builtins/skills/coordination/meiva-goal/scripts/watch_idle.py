@@ -29,6 +29,7 @@
 import json
 import time
 from collections.abc import Iterator
+from contextlib import closing
 from typing import Protocol, Self, TypeGuard
 
 import redis
@@ -51,6 +52,8 @@ class _PubSub(Protocol):
     def subscribe(self, channel: str) -> None: ...
 
     def listen(self) -> Iterator[dict[str, object]]: ...
+
+    def close(self) -> None: ...
 
 
 class _RedisClient(Protocol):
@@ -115,51 +118,53 @@ def _watch_via_poll(target_id: int, interval_s: float = 5.0) -> None:
         time.sleep(interval_s)
 
 
-def watch(target_id: int) -> None:
+def watch(target_id: int, *, redis_cls: object = redis.Redis) -> None:
     """Block until `target_id` next goes idle, remind once, then return.
 
     One-shot by design: after it reminds you, this watcher exits. If the target
-    is not done yet, launch a fresh watcher to wait for its next idle. Launch
-    the watcher BEFORE the target starts working -- an idle transition that
-    happens before the subscription is established is missed (the poll fallback
-    covers the already-idle case).
+    is not done yet, launch a fresh watcher to wait for its next idle. After
+    subscribing, read the authoritative status before waiting for events so a
+    target that already idled wakes the launcher immediately.
     """
-    redis_cls: object = redis.Redis
     if not _is_redis_client_cls(redis_cls):
         raise TypeError("redis.Redis is not a class")
-    client = redis_cls.from_url(
-        settings.data_plane.redis_url,
-        decode_responses=True,
-        # redis-py 8 defaults to 5s, which kills a quiet pubsub.listen() read.
-        # Observed 2026-08-13: the watcher died mid-watch before target idle.
-        socket_timeout=None,
-    )
-    pubsub = client.pubsub()
-    pubsub.subscribe(settings.data_plane.events_channel)
     try:
-        for message in pubsub.listen():
-            if message["type"] != "message":
-                continue  # skip the subscribe-confirmation control frame
-            payload = message["data"]
-            if not isinstance(payload, str):
-                continue  # every published event is a JSON string
-            event = object_of(json.loads, payload)
-            if not is_object_dict(event):
-                continue
-            if _is_target_idle(event, target_id):
-                _notify(target_id)
-                return
+        client = redis_cls.from_url(
+            settings.data_plane.redis_url,
+            decode_responses=True,
+            # A quiet subscription must survive beyond redis-py's default timeout.
+            socket_timeout=None,
+        )
+        with closing(client.pubsub()) as pubsub:
+            pubsub.subscribe(settings.data_plane.events_channel)
+            if meiva.agents.get_status(target_id) != IDLE_STATUS:
+                for message in pubsub.listen():
+                    if message["type"] != "message":
+                        continue  # skip the subscribe-confirmation control frame
+                    payload = message["data"]
+                    if not isinstance(payload, str):
+                        continue  # every published event is a JSON string
+                    event = object_of(json.loads, payload)
+                    if not is_object_dict(event):
+                        continue
+                    if _is_target_idle(event, target_id):
+                        break
+                else:
+                    return
     except (
         redis.TimeoutError,
+        redis.ConnectionError,
         TimeoutError,
         ConnectionError,
         OSError,
         meiva.agents.GatewayUnavailable,
     ):
-        # The stream died mid-watch (redis restart, socket timeout, ...). The
+        # The stream could not connect or died mid-watch. The
         # target may idle -- or already have -- while we are blind: poll the
         # table so the launching agent does not stall silently.
         _watch_via_poll(target_id)
+        return
+    _notify(target_id)
 
 
 if __name__ == "__main__":

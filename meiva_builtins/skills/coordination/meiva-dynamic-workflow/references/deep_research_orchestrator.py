@@ -39,7 +39,7 @@ import meiva
 # ═══════════════════════════════════════════════════════════════════════════════
 ORCHESTRATOR = meiva.self.AGENT_ID
 TASK = "deep-research"
-HANDOFF = Path(TASK).resolve()
+HANDOFF = meiva.files.resolve(TASK)
 HANDOFF.mkdir(parents=True, exist_ok=True)
 PROGRESS_FILE = HANDOFF / "progress.md"
 
