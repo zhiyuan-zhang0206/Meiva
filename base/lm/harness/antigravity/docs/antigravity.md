@@ -90,10 +90,17 @@ Sub-agents. `invoke_subagent` creates a sibling conversation that the stream-jso
 session reports them as sub-agent text and tool calls ([sub-agent text](../../docs/subagent-text.md)).
 
 Reconciliation (`reconciliation/`): the durable queue is
-`brain/<conversation>/.system_generated/messages/` (not the transcript). A message listed in
+`brain/<conversation>/.system_generated/messages/` (not the transcript). Its `<uuid>.json` files have
+two observed shapes: `SendUserCascadeMessage` entries carry a base64 protobuf `stepPayload`, while
+internal `messages.Hub` notices carry string `content` and a nonempty string `sender` other than
+`user` (system notices, background task completions/timers, or peer messages). Reconciliation skips
+hub notices only when `stepPayload` is absent, since they carry no Meiva `clientMessageId`.
+Non-object entries, missing payloads without that hub shape, and non-string payloads raise
+`AgyInterfaceError`, including user entries with only text. An input message listed in
 `read.json` is delivered (IN_CONTEXT); a stored one, listed in `undelivered/` or not, will be delivered
 by the CLI before the next stdin input and must not be sent again (PERSISTED_UNDELIVERED); no file with
-the id means NOT_FOUND. Only the two protobuf levels that hold the id are parsed.
+the clientMessageId means UNKNOWN (stdin inputs leave no queue file). Only the two protobuf levels
+that hold the id are parsed.
 
 There are no request ids on stdin/stdout, so **a cancel cannot be a
 request**: the adapter sends `SIGINT`, and the CLI answers with a final `result`
