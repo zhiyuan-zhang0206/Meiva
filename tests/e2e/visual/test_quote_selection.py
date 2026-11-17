@@ -212,6 +212,7 @@ def _check_sent_quote(page: Page, text: str, width: int, tmp_path: Path) -> None
     expect(body).to_have_text(text)
     expect(card.locator("details, summary")).to_have_count(0)
     body.scroll_into_view_if_needed()
+    wait_layout_settled(page)
     geometry = body.evaluate("""node => {
         const style = getComputedStyle(node);
         const rect = node.getBoundingClientRect();
