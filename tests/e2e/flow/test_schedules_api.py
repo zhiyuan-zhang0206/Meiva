@@ -1,8 +1,7 @@
-"""Schedule management through the real gateway and the installed ``meiva`` CLI.
-
-The e2e stack has no schedule-manager. Control requests therefore leave durable
-sync rows for its later consumer; session execution belongs to SC2/SC3.
-"""
+# meiva:note
+# Declarative schedule management through the real gateway and installed CLI. The e2e stack has
+# no schedule-manager: declarative control changes are stored directly and never queue legacy
+# daemon PTY convergence; execution belongs to SC2/SC3.
 
 from __future__ import annotations
 
@@ -96,9 +95,7 @@ def test_rest_create_list_get_update_delete_and_version_snapshot(
         assert client.get(f"/api/schedules/{schedule_id}").status_code == 404
         assert client.get("/api/schedules").json() == []
         with psycopg.connect(settings.data_plane.db_url) as conn:
-            assert conn.execute("SELECT schedule_id FROM schedule_sync_requests").fetchall() == [
-                (schedule_id,)
-            ]
+            assert conn.execute("SELECT schedule_id FROM schedule_sync_requests").fetchall() == []
 
 
 @pytest.mark.scenario("tests.e2e.fakes.scenarios.schedules:build")
@@ -130,9 +127,7 @@ def test_rest_start_stop_restart_queue_sync_and_change_enabled(
         assert stopped.json()["enabled"] is False
         assert client.get(base).json()["enabled"] is False
         with psycopg.connect(settings.data_plane.db_url) as conn:
-            assert conn.execute("SELECT schedule_id FROM schedule_sync_requests").fetchall() == [
-                (schedule_id,)
-            ]
+            assert conn.execute("SELECT schedule_id FROM schedule_sync_requests").fetchall() == []
 
 
 @pytest.mark.scenario("tests.e2e.fakes.scenarios.schedules:build")
@@ -224,7 +219,14 @@ def test_cli_schedules_manage_the_same_gateway_rows(
     gateway_proc: str, truncated_db: None, pty_sessions_proc: None
 ) -> None:
     assert "created schedule" in _cli(
-        "create", "--name", "e2e-cli", "--script", "print('cli')", "--disabled"
+        "create",
+        "--name",
+        "e2e-cli",
+        "--script",
+        "print('cli')",
+        "--every",
+        "60",
+        "--disabled",
     )
     assert "e2e-cli" in _cli("ls")
     assert "print('cli')" in _cli("get", "e2e-cli")
