@@ -248,53 +248,7 @@ def test_quote_record_activity_parity(
             generation=1,
         )
     )
-    record = tmp_path / ".claude/projects/test" / f"{session}.jsonl"
-    if harness == "codex":
-        record = tmp_path / "codex/sessions/2026/11/18" / f"rollout-test-{session}.jsonl"
-        if record_kind == "codex_zstd":
-            record = record.with_suffix(".jsonl.zst")
-    record.parent.mkdir(parents=True)
-    raw = json.dumps(
-        {
-            "timestamp": "2026-11-18T00:00:00Z",
-            "type": "assistant",
-            "uuid": "parity-message",
-            "isAbortedMidStream": partial == "text",
-            "message": {
-                "id": "parity-message",
-                "content": [
-                    {
-                        "type": "text" if partial == "text" else "tool_use",
-                        "text": "unfinished text",
-                        "id": "call-parity",
-                        "name": "Bash",
-                        "input": {"command": "echo complete"},
-                    }
-                ],
-            },
-        }
-    ).encode()
-    if harness == "codex":
-        fixture = (
-            Path(__file__).parents[3]
-            / "base/lm/harness/codex/transcript/tests/fixtures/rollout/session.jsonl"
-        )
-        row = next(
-            json.loads(line)
-            for line in fixture.read_text().splitlines()
-            if '"CommandExecution"' in line
-        )
-        row["payload"]["item"]["status"] = "inProgress"
-        raw = json.dumps(row).encode()
-    content = (
-        raw
-        + (b"" if partial == "line" else b"\n")
-        + (b'{"type":"assistant"' if partial == "next_line" else b"")
-    )
-
-    _ = record.write_bytes(
-        zstandard.ZstdCompressor().compress(content) if record_kind == "codex_zstd" else content
-    )
+    _write_parity_record(tmp_path, harness, session, partial, record_kind)
 
     def status(value: str) -> None:
         db_conn.execute("UPDATE agents_meta SET status=%s WHERE id=%s", (value, agent))
@@ -403,3 +357,55 @@ def test_quote_rejects_incomplete_antigravity_planner_text(
         "SELECT count(*) FROM inbound_messages WHERE agent_id=%s", (agent,)
     ).fetchone()
     assert row is not None and row[0] == int(step_status == "DONE")
+
+
+def _write_parity_record(
+    tmp_path: Path, harness: str, session: str, partial: str, record_kind: str
+) -> None:
+    record = tmp_path / ".claude/projects/test" / f"{session}.jsonl"
+    if harness == "codex":
+        record = tmp_path / "codex/sessions/2026/11/18" / f"rollout-test-{session}.jsonl"
+        if record_kind == "codex_zstd":
+            record = record.with_suffix(".jsonl.zst")
+    record.parent.mkdir(parents=True)
+    raw = json.dumps(
+        {
+            "timestamp": "2026-11-18T00:00:00Z",
+            "type": "assistant",
+            "uuid": "parity-message",
+            "isAbortedMidStream": partial == "text",
+            "message": {
+                "id": "parity-message",
+                "content": [
+                    {
+                        "type": "text" if partial == "text" else "tool_use",
+                        "text": "unfinished text",
+                        "id": "call-parity",
+                        "name": "Bash",
+                        "input": {"command": "echo complete"},
+                    }
+                ],
+            },
+        }
+    ).encode()
+    if harness == "codex":
+        fixture = (
+            Path(__file__).parents[3]
+            / "base/lm/harness/codex/transcript/tests/fixtures/rollout/session.jsonl"
+        )
+        row = next(
+            json.loads(line)
+            for line in fixture.read_text().splitlines()
+            if '"CommandExecution"' in line
+        )
+        row["payload"]["item"]["status"] = "inProgress"
+        raw = json.dumps(row).encode()
+    content = (
+        raw
+        + (b"" if partial == "line" else b"\n")
+        + (b'{"type":"assistant"' if partial == "next_line" else b"")
+    )
+
+    _ = record.write_bytes(
+        zstandard.ZstdCompressor().compress(content) if record_kind == "codex_zstd" else content
+    )
