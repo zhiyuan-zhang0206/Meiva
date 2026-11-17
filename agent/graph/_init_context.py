@@ -202,8 +202,18 @@ def _build_grounded_handoff(ctx: MeivaContext, *, agent_id: int) -> Handoff:
         own_label(ctx, agent_id) if ctx.ops_pool is not None and ctx.identity is not None else None
     )
     cluster = cluster_facts(ctx)
+    from base.lm.registry import resolve_setting
+
     handoff = handoff_for(
         ctx.harness,
+        model=slices.brain.llm_model,
+        reasoning_effort=resolve_setting(
+            "reasoning_effort",
+            model=slices.brain.llm_model,
+            models=catalog.models,
+            explicit=slices.overrides.reasoning_effort,
+        )
+        or None,
         agent_id=agent_id,
         machine=machine_clause(ctx) or "",
         workspace=workspace_dir(agent_id, home=ctx.require_meiva_home()),

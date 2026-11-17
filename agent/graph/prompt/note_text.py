@@ -68,14 +68,32 @@ def workspace_display(workspace: Path, home: Path) -> str:
         return str(workspace)
 
 
+@dataclass(frozen=True)
+class RuntimeSelection:
+    harness: str
+    model: str
+    reasoning_effort: str | None = None
+
+
 def agent_id_text(
-    agent_id: int, *, label: str | None, machine: str | None, workspace: Workspace | None
+    agent_id: int,
+    *,
+    label: str | None,
+    machine: str | None,
+    workspace: Workspace | None,
+    runtime: RuntimeSelection | None = None,
 ) -> str:
     clauses: list[str] = []
     if label:
         clauses.append(f"label: {label}")
     if machine:
         clauses.append(f"machine: {machine}")
+    if runtime is not None:
+        clauses.append(f"harness: {runtime.harness}")
+        selection = runtime.model + (
+            f" (reasoning_effort: {runtime.reasoning_effort})" if runtime.reasoning_effort else ""
+        )
+        clauses.append(f"model: {selection}")
     detail = f" ({', '.join(clauses)})" if clauses else ""
     tail = ""
     if workspace is not None:

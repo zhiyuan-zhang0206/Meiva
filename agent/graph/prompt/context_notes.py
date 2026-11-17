@@ -30,6 +30,7 @@ from .live import (
     warn_unresolved,
 )
 from .note_text import (
+    RuntimeSelection,
     Workspace,
     agent_id_text,
     exec_timeout_text,
@@ -239,9 +240,28 @@ def agent_id_note(ctx: MeivaContext) -> HumanMessage | None:
         if ctx.require_agent().read("agent", "workspace_in_system_prompt")
         else None
     )
+    from base.lm.registry import resolve_setting
+
+    slices = ctx.require_agent()
+    effort = (
+        resolve_setting(
+            "reasoning_effort",
+            model=slices.brain.llm_model,
+            models=ctx.require_catalog().models,
+            explicit=slices.overrides.reasoning_effort,
+        )
+        if ctx.catalog is not None
+        else slices.overrides.reasoning_effort
+    )
     now = ctx.require_clock().now()
     return system_note_message(
-        content=agent_id_text(aid, label=label, machine=machine, workspace=workspace),
+        content=agent_id_text(
+            aid,
+            label=label,
+            machine=machine,
+            workspace=workspace,
+            runtime=RuntimeSelection(ctx.harness.value, slices.brain.llm_model, effort or None),
+        ),
         tag=NoteTag.AGENT_ID,
         picked_up_at=now,
         created_at=now,
