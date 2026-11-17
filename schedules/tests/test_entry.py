@@ -16,6 +16,7 @@ from pathlib import Path
 import pytest
 
 import meiva
+from base.agents.context.gateway_client.transport import GatewayTransportInputs
 from base.cluster.machine import MachineIdentityReader
 from base.config import settings
 from base.config.tests.configuration import data_plane_environment
@@ -28,6 +29,7 @@ from base.telemetry.tests.capture.event_capture import EmittedEvents
 from base.telemetry.tests.capture.event_capture import emitted_events as emitted_events
 from schedules.jobs.entry import cluster_timezone, fresh_schedule_entry, schedule_entry
 from schedules.plans.schedule_identity import parse_scheduled_for
+from schedules.tests.support.gateway_directory import AgentRowSpec, DirectoryPage, serve_gateway
 
 
 def _git(repo: Path, *args: str) -> str:
@@ -60,6 +62,61 @@ def test_quiet_schedule_exit_never_builds_a_writer(tmp_path: Path) -> None:
         assert callable(inputs.producer)
         assert meiva.context.require_machine() is inputs.machine
         assert _writer_threads() == before
+
+
+def test_fresh_entry_resolves_configured_gateway_transport_readers(tmp_path: Path) -> None:
+    image = _repo_with_commits(tmp_path, 1)
+    environment = {
+        **data_plane_environment(),
+        "MEIVA_HOME": str(tmp_path / "home"),
+        "MEIVA_GATEWAY_MAX_RETRIES": "7",
+        "MEIVA_GATEWAY_RETRY_DELAY_SECONDS": "0.25",
+        "MEIVA_MEMORY_SEARCH_DEADLINE_SECONDS": "23",
+    }
+    home = tmp_path / "home"
+    home.mkdir()
+    (home / ".env").write_text(
+        "MEIVA_GATEWAY_MAX_RETRIES=7\n"
+        "MEIVA_GATEWAY_RETRY_DELAY_SECONDS=0.25\n"
+        "MEIVA_MEMORY_SEARCH_DEADLINE_SECONDS=23\n"
+    )
+    with fresh_schedule_entry(
+        image=image, process="schedule-probe", home=tmp_path / "home", environment=environment
+    ):
+        inputs = meiva.context.clients.get(GatewayTransportInputs)
+        assert inputs.max_retries_reader() == 7
+        assert inputs.retry_delay_reader() == 0.25
+        assert inputs.memory_deadline_reader() == 23
+
+
+def test_fresh_entry_calls_gateway_sdk_with_its_configured_client(tmp_path: Path) -> None:
+    image = _repo_with_commits(tmp_path, 1)
+    pages = (DirectoryPage("schedule-probe", None, (AgentRowSpec(55, "schedule-probe"),), None),)
+    before = _writer_threads()
+    secret = "a" * 32
+    with serve_gateway(pages) as gateway:
+        environment = {
+            **data_plane_environment(),
+            "MEIVA_HOME": str(tmp_path / "home"),
+            "MEIVA_GATEWAY_URL": gateway.url,
+            "MEIVA_CLUSTER_SECRET": secret,
+        }
+        home = tmp_path / "home"
+        home.mkdir()
+        (home / ".env").write_text(f"MEIVA_CLUSTER_SECRET={secret}\n")
+        with fresh_schedule_entry(
+            image=image, process="schedule-probe", home=tmp_path / "home", environment=environment
+        ):
+            page = meiva.agents.list_agents(query="schedule-probe", limit=1)
+            assert [agent.agent_id for agent in page.agents] == [55]
+            assert page.next_cursor is None
+            client = meiva.context.gateway
+            assert _writer_threads() == before
+        assert client.is_closed
+        (request,) = gateway.requests
+        assert request.path == "/api/agents"
+        assert request.query == {"scope": "live", "query": "schedule-probe", "limit": "1"}
+        assert request.headers["authorization"] == f"Bearer {secret}"
 
 
 def test_a_fresh_entry_binds_a_context_whose_event_bus_is_built_on_first_read(

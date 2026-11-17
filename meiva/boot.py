@@ -185,6 +185,8 @@ def process_clients(
     machine: MachineIdentityReader,
     database: DatabaseFactory,
     gateway_url: str | Callable[[], str],
+    home: Path | None = None,
+    rng: random.SystemRandom | None = None,
 ) -> ClientSet:
     def pipeline() -> EventPipeline:
         from base.paths.home import resolve_meiva_home
@@ -193,11 +195,11 @@ def process_clients(
         return build_pipeline(
             database=database,
             machine=machine,
-            home=resolve_meiva_home(),
+            home=home if home is not None else resolve_meiva_home(),
             now=Clock(clock_config_from_boot(config), timers=SYSTEM_TIMERS).now,
             otlp_enabled=lambda: config.view.observability.telemetry_otlp_enabled,
             otlp_endpoint=lambda: config.view.observability.telemetry_otlp_endpoint,
-            rng=_new_rng(),
+            rng=rng if rng is not None else _new_rng(),
         )
 
     # meiva:note
@@ -207,7 +209,9 @@ def process_clients(
         from base.paths.home import resolve_meiva_home
 
         timeout_s = config.view.sandbox.mcp_connect_timeout_seconds
-        socket_path = Path(mcp_daemon_shared_socket(resolve_meiva_home()))
+        socket_path = Path(
+            mcp_daemon_shared_socket(home if home is not None else resolve_meiva_home())
+        )
         return McpClients(socket_path, timeout_s, timers=SYSTEM_TIMERS)
 
     return ClientSet(
@@ -231,10 +235,20 @@ def process_clients(
 # The clients of a root that holds its own database factory: the gateway endpoint derives from the
 # configuration.
 def clients_over(
-    config: ConfigBoot, machine: MachineIdentityReader, database: DatabaseFactory
+    config: ConfigBoot,
+    machine: MachineIdentityReader,
+    database: DatabaseFactory,
+    *,
+    home: Path | None = None,
+    rng: random.SystemRandom | None = None,
 ) -> ClientSet:
     return process_clients(
-        config=config, machine=machine, database=database, gateway_url=gateway_endpoint(config)
+        config=config,
+        machine=machine,
+        database=database,
+        gateway_url=gateway_endpoint(config),
+        home=home,
+        rng=rng,
     )
 
 
