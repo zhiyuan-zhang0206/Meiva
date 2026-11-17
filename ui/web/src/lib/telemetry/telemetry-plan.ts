@@ -19,13 +19,32 @@ export type TelemetryElement =
   | "sse-transport"
   | "spawn"
   | "terminate"
-  | "web-vitals";
+  | "web-vitals"
+  | "viewport-anomaly";
+
+export interface ViewportGeometry {
+  incident: 1 | 2 | 3;
+  phase: "anomaly" | "recovered" | "timeout";
+  reason: "mount" | "viewport-change" | "box-change" | "visible" | "deadline";
+  elapsed_ms: number;
+  layout_height: number;
+  visual_height: number | null;
+  visual_scale: number | null;
+  html_inline_height: number | null;
+  html_height: number;
+  body_height: number;
+  shell_height: number;
+  shell_bottom: number;
+  composer_height: number | null;
+  composer_bottom: number | null;
+}
 
 export interface TrackOptions {
   page?: string;
   key?: string;
   value?: unknown;
   dedupe?: boolean;
+  geometry?: ViewportGeometry;
 }
 
 export interface PendingEvent {
@@ -34,6 +53,7 @@ export interface PendingEvent {
   key?: string;
   value?: string;
   ts: number;
+  geometry?: ViewportGeometry;
 }
 
 export interface TelemetryBufferState {
@@ -99,6 +119,7 @@ export function recordTrackEvent(
   if (state.sentAt.length + state.buffer.length >= RATE_LIMIT) return false;
   const value = sanitizeValue(opts.value);
   const ev: PendingEvent = { page, element, ts: nowMs };
+  if (element === "viewport-anomaly" && opts.geometry !== undefined) ev.geometry = opts.geometry;
   if (key !== undefined) ev.key = key;
   if (value !== undefined) ev.value = value;
   if (state.buffer.length >= BUFFER_CAP) state.buffer.shift();

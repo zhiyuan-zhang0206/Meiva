@@ -14,12 +14,16 @@ writes asynchronously). The PG `events` copy was retired at the LGTM cutover
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
+from typing import Any
 
 import pytest
+from pydantic import ValidationError
 
 from base import telemetry
 from gateway.routers import frontend_telemetry as ft_router
+from gateway.schemas import FrontendTelemetryBatch
 from gateway.tests.auth.gateway_config import gateway_test_client
 
 # One valid interaction as the browser sends it.
@@ -206,3 +210,119 @@ class TestFrontendTelemetryIngest:
         assert r2.status_code == 204
         assert len(_rows(unit_home, session)) == ft_router.MAX_EVENTS_PER_MINUTE
         assert len(_rows(unit_home, other)) == 3
+
+
+def _viewport_wire_batch() -> dict[str, Any]:
+    return json.loads("""{
+  "session_id": "123e4567-e89b-12d3-a456-426614174000",
+  "events": [
+    {
+      "page": "home",
+      "element": "viewport-anomaly",
+      "ts": 1794889580247,
+      "geometry": {
+        "layout_height": 1000,
+        "visual_height": 1000,
+        "visual_scale": 1,
+        "html_inline_height": 807,
+        "html_height": 807,
+        "body_height": 807,
+        "shell_height": 807,
+        "shell_bottom": 807,
+        "composer_height": 50,
+        "composer_bottom": 807,
+        "incident": 1,
+        "phase": "anomaly",
+        "reason": "box-change",
+        "elapsed_ms": 0.09999990463256836
+      }
+    },
+    {
+      "page": "home",
+      "element": "viewport-anomaly",
+      "ts": 1794889580513,
+      "geometry": {
+        "layout_height": 1000,
+        "visual_height": 1000,
+        "visual_scale": 1,
+        "html_inline_height": null,
+        "html_height": 1000,
+        "body_height": 1000,
+        "shell_height": 1000,
+        "shell_bottom": 1000,
+        "composer_height": 50,
+        "composer_bottom": 1000,
+        "incident": 1,
+        "phase": "recovered",
+        "reason": "box-change",
+        "elapsed_ms": 266.19999980926514
+      }
+    }
+  ]
+}""")
+
+
+def test_browser_batch_lands_complete_geometry(unit_home: Path) -> None:
+    batch = _viewport_wire_batch()
+    session = _session()
+    batch["session_id"] = session
+    with gateway_test_client() as client:
+        response = client.post("/api/frontend-telemetry", json=batch)
+    assert response.status_code == 204
+    rows = _rows(unit_home, session)
+    assert len(rows) == 2
+    for row, event in zip(rows, batch["events"], strict=True):
+        assert row[4] == {
+            "page": "home",
+            "element": "viewport-anomaly",
+            "session_id": session,
+            **{f"geometry_{key}": value for key, value in event["geometry"].items()},
+        }
+    assert rows[0][4]["geometry_html_inline_height"] == 807
+    assert rows[1][4]["geometry_phase"] == "recovered"
+
+
+@pytest.mark.parametrize(
+    "field,value",
+    [
+        ("incident", 4),
+        ("incident", True),
+        ("phase", "arbitrary"),
+        ("reason", "https://private"),
+        ("layout_height", "1000"),
+        ("layout_height", float("inf")),
+        ("html_height", -1),
+        ("shell_bottom", -100_001),
+        ("visual_scale", 0),
+        ("elapsed_ms", 86_400_001),
+        ("extra", "private text"),
+    ],
+)
+def test_invalid_geometry_rejected(field: str, value: object) -> None:
+    batch = _viewport_wire_batch()
+    batch["events"][0]["geometry"][field] = value
+    with pytest.raises(ValidationError):
+        FrontendTelemetryBatch.model_validate(batch)
+
+
+@pytest.mark.parametrize(
+    "change",
+    ["wrong-event", "wrong-page", "missing-geometry", "scalar", "unknown-field", "too-many"],
+)
+def test_geometry_restricted_to_fixed_event(change: str) -> None:
+    batch = _viewport_wire_batch()
+    event = batch["events"][0]
+    if change == "wrong-event":
+        event["element"] = "page-view"
+    elif change == "wrong-page":
+        event["page"] = "fleet"
+    elif change == "missing-geometry":
+        del event["geometry"]
+    elif change == "scalar":
+        event["value"] = "private"
+    elif change == "unknown-field":
+        event["text"] = "private"
+    else:
+        batch["events"] = [event] * 201
+    with pytest.raises(ValidationError):
+        FrontendTelemetryBatch.model_validate(batch)

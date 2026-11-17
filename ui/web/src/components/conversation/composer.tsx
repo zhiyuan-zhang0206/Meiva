@@ -405,6 +405,7 @@ export function Composer({
 
   return (
     <div
+      data-viewport-composer=""
       data-testid="composer"
       onDrop={handleDrop}
       onDragOver={handleDragOver}

@@ -95,6 +95,9 @@ def _emit_one(batch: FrontendTelemetryBatch, ev: FrontendInteractionIn) -> None:
         attributes["key"] = ev.key
     if ev.value is not None:
         attributes["value"] = ev.value
+    if ev.geometry is not None:
+        geometry: dict[str, object] = ev.geometry.model_dump()
+        attributes.update({f"geometry_{key}": value for key, value in geometry.items()})
     telemetry.emit(
         "telemetry",
         "frontend_interaction",

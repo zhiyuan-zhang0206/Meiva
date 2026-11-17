@@ -1,4 +1,4 @@
-exports = ["context-panel-toggle.tsx", "header-bar.tsx", "home-layout.tsx", "page-header.tsx", "providers.tsx", "visual-viewport-height-sync.tsx"]
+exports = ["viewport-anomaly-diagnostic.tsx", "context-panel-toggle.tsx", "header-bar.tsx", "home-layout.tsx", "page-header.tsx", "providers.tsx", "visual-viewport-height-sync.tsx"]
 
 [uses]
 "header-bar.test.tsx" = ["header-bar.tsx"]

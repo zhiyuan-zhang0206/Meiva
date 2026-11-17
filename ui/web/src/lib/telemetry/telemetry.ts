@@ -32,7 +32,7 @@ import {
   type TrackOptions,
 } from "./telemetry-plan";
 
-export { normalizePage, type TelemetryElement, type TrackOptions } from "./telemetry-plan";
+export { normalizePage, type TelemetryElement, type TrackOptions, type ViewportGeometry } from "./telemetry-plan";
 
 // Flush cadence while the tab is visible.
 const FLUSH_INTERVAL_MS = 15_000;
