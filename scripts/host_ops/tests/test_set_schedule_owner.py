@@ -17,8 +17,9 @@ from scripts.host_ops import set_schedule_owner
 
 def _schedule(db_conn: psycopg.Connection, name: str) -> int:
     row = db_conn.execute(
-        "INSERT INTO schedules (name, description, script, command, enabled, machine) "
-        "VALUES (%s, NULL, 'print(1)', 'python schedule.py', false, 'macmini') RETURNING id",
+        "INSERT INTO schedules "
+        "(name, description, script, command, enabled, machine, trigger_kind, interval_seconds) "
+        "VALUES (%s, NULL, 'print(1)', 'python schedule.py', false, 'macmini', 'every', 60) RETURNING id",
         (name,),
     ).fetchone()
     assert row is not None

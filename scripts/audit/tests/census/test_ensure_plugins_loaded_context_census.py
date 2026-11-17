@@ -89,4 +89,4 @@ def test_the_repository_has_no_load_site_without_a_context() -> None:
     sites = census.census(REPOSITORY)
 
     assert [site.path for site in sites if site.unbound] == []
-    assert len(sites) == 30
+    assert len(sites) == 28

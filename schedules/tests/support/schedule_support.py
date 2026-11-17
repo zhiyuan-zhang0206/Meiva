@@ -27,8 +27,9 @@ def insert_schedule(
 ) -> int:
     with conn.cursor() as cur:
         cur.execute(
-            "INSERT INTO schedules (name, script, command, enabled, status, created_at, machine) "
-            "VALUES (%s, 'x', 'python schedule.py', true, 'stopped', %s, %s) RETURNING id",
+            "INSERT INTO schedules "
+            "(name, script, command, enabled, status, created_at, machine, trigger_kind, interval_seconds) "
+            "VALUES (%s, 'x', 'python schedule.py', true, 'stopped', %s, %s, 'every', 60) RETURNING id",
             (name, created_at, machine),
         )
         row = cur.fetchone()

@@ -32,7 +32,7 @@ from scripts.host_ops import update_schedule_script as repair
 _NOW = datetime(2026, 1, 1, tzinfo=UTC)
 
 
-def _create_daemon(
+def _create_schedule(
     database: Database,
     *,
     name: str,
@@ -46,8 +46,9 @@ def _create_daemon(
         with pool.connection() as conn, conn.transaction():
             row = conn.execute(
                 "INSERT INTO schedules "
-                "(name, description, script, command, enabled, status, machine) "
-                "VALUES (%s, %s, %s, %s, %s, 'stopped', %s) RETURNING id",
+                "(name, description, script, command, enabled, status, machine, "
+                "trigger_kind, interval_seconds) "
+                "VALUES (%s, %s, %s, %s, %s, 'stopped', %s, 'every', 60) RETURNING id",
                 (name, description, script, command, enabled, machine),
             ).fetchone()
             assert row is not None
@@ -201,10 +202,10 @@ def test_launcher_delivery_cannot_be_transplanted(key: str, profile: str, tmp_pa
 
 
 @pytest.mark.parametrize("enabled", [False, True])
-def test_versioned_edit_preserves_fields_and_defers_session_work(
+def test_versioned_edit_preserves_fields_without_session_work(
     enabled: bool, db_conn: psycopg.Connection, database: Database
 ) -> None:
-    row = _create_daemon(
+    row = _create_schedule(
         database,
         name="maintenance-edit",
         description="keep description",
@@ -233,18 +234,16 @@ def test_versioned_edit_preserves_fields_and_defers_session_work(
         ("print(1)\n", "python custom.py", "initial"),
         ("print(2)\n", "python custom.py", "edit"),
     ]
-    assert db_conn.execute("SELECT schedule_id FROM schedule_sync_requests").fetchall() == (
-        [(sid,)] if enabled else []
-    )
+    assert db_conn.execute("SELECT schedule_id FROM schedule_sync_requests").fetchall() == []
     assert db_conn.execute(
         "SELECT desired_revision, launch_count FROM schedules WHERE id=%s", (sid,)
-    ).fetchone() == (1, 0)
+    ).fetchone() == (0, 0)
 
 
 def test_stale_hash_and_syntax_errors_do_not_write(
     db_conn: psycopg.Connection, database: Database
 ) -> None:
-    row = _create_daemon(database, name="stale", script="pass\n")
+    row = _create_schedule(database, name="stale", script="pass\n")
     with database.pool() as pool:
         with pytest.raises(RuntimeError, match="expected old script"):
             repair.replace_script(pool, row[0], "print(2)\n", "0" * 64)
@@ -296,7 +295,7 @@ def test_external_file_uses_installed_runtime_and_real_writer(
         f"MEIVA_DB_URL={db_url}\nMEIVA_SERVE_GATEWAY=true\n"
         "MEIVA_SERVE_AGENT_RUNNER=false\nMEIVA_MACHINE_NAME=external-script-test\n"
     )
-    row = _create_daemon(
+    row = _create_schedule(
         database,
         name="external",
         script="pass\n",
@@ -337,9 +336,7 @@ def test_external_file_uses_installed_runtime_and_real_writer(
     assert db_conn.execute(
         "SELECT note FROM schedule_versions WHERE schedule_id=%s ORDER BY id", (row[0],)
     ).fetchall() == [("initial",), ("edit",)]
-    assert db_conn.execute("SELECT schedule_id FROM schedule_sync_requests").fetchall() == [
-        (row[0],)
-    ]
+    assert db_conn.execute("SELECT schedule_id FROM schedule_sync_requests").fetchall() == []
 
 
 def test_main_preserves_unknown_failure_traceback(tmp_path: Path) -> None:
