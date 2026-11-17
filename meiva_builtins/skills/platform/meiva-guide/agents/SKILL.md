@@ -132,6 +132,11 @@ keep the returned schedule ID so you can cancel an attempt before it fires.
 
 ### Scheduled transfer and restart
 
+**Availability:** These `--at` examples require deployment of the companion
+scheduled agent lifecycle implementation (PR B). Check the deployed
+`meiva agents transfer --help` and `meiva agents restart --help` for `--at`
+before using them.
+
 ```bash
 meiva agents transfer <id> --to <machine> --message "Move after this turn" --at +60s --source agent:<caller_id>
 meiva agents restart <id> -m "Switch after this turn; handoff: <path>" --overlay harness=codex --overlay llm_model=<model> --at +60s --source agent:<caller_id>
@@ -173,9 +178,10 @@ conversation"), distinct from the `meiva` CLI (ops-level, runs in shell, operate
 the deployment itself).
 ## Schedules (time-based / condition-triggered persistent tasks)
 
-The gateway hosts **schedules**: scripts written by agents, run persistently in
-a session, auto-restarted on crash (time-triggered, event/threshold-triggered, or
-both). Managed via REST API (`/api/schedules`) or the frontend
+The gateway hosts declarative **schedules**: `at`, `cron`, and `every` triggers
+launch one bounded script invocation per occurrence, without a persistent PTY
+session. `daemon` remains a compatibility mode for existing persistent scripts.
+Manage schedules via REST API (`/api/schedules`) or the frontend
 `/control/schedules` page.
 
 To turn a natural-language scheduling need into a schedule, load

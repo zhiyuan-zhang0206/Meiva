@@ -106,6 +106,10 @@ with `meiva agents inbox <id> --full`; inspect and cancel pending attempts with
 `meiva schedules ls` and `meiva schedules cancel <schedule_id>`.
 See [agent introspection and scheduled operations](../agents/SKILL.md#introspection).
 
+The `--at` examples below require the companion scheduled agent lifecycle
+implementation (PR B) to be deployed; check the deployed commands' `--help`
+for flag availability.
+
 To switch yourself after a turn, use `meiva.self.restart` and end the turn after
 its receipt, or schedule `meiva agents restart <id> -m "<reason and handoff path>"
 --overlay harness=codex --overlay llm_model=<model> --at +60s --source agent:<your_id>`.
