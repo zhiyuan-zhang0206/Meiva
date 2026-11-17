@@ -375,6 +375,8 @@ describe("cold-load spinner", () => {
     const spinner = screen.getByTestId("cold-load-spinner");
     expect(spinner.className).toContain("top-11");
     expect(spinner.className).toContain("py-12");
+    expect(spinner.className).toContain("inset-x-0");
+    expect(spinner.className).toContain("justify-center");
     expect(spinner.querySelector('[data-testid="cold-load-ring"]')).not.toBeNull();
     expect(screen.getByText(/Loading conversation…/).className).toContain("sr-only");
   });
@@ -433,6 +435,11 @@ describe("load-older circle (revealed above the messages)", () => {
     const label = screen.getByText(/Loading earlier messages/);
     const overlay = label.closest("div");
     expect(overlay?.className).toContain("opacity-100");
+    expect(overlay?.classList.contains("left-1/2")).toBe(true);
+    expect(overlay?.classList.contains("-translate-x-1/2")).toBe(true);
+    expect(overlay?.classList.contains("top-14")).toBe(true);
+    expect(overlay?.classList.contains("right-5")).toBe(false);
+    expect(overlay?.parentElement?.classList.contains("relative")).toBe(true);
     expect(overlay?.className).not.toContain("opacity-0");
     expect(overlay?.getAttribute("aria-hidden")).toBe("false");
     expect(overlay?.querySelector(".animate-spin")).not.toBeNull();
