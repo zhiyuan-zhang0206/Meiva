@@ -9,7 +9,7 @@
 // downward from a fixed top edge while the reader scrolls the timeline itself.
 // meiva:link ui/web/src/docs/frontend-components/timeline-view/timeline-view.md
 
-import { AlertTriangle, ChevronRight, Layers } from "lucide-react";
+import { ChevronRight, Layers } from "lucide-react";
 import { useTranslations } from "next-intl";
 import { memo, type ReactNode } from "react";
 
@@ -183,11 +183,6 @@ export const TurnBlock = memo(function TurnBlock({
             <span className={cn(DISCLOSURE_TITLE_CLS, "whitespace-nowrap tabular-nums")}>
               {workedLabel}
             </span>
-            {timingIncomplete && (
-              <span role="img" aria-label={t("timingIncompleteWarning")} title={t("timingIncompleteWarning")}>
-                <AlertTriangle className="size-3.5 shrink-0 text-destructive" aria-hidden />
-              </span>
-            )}
             <DisclosureChevron expanded={expanded} />
           </span>
           {actionSummary && (

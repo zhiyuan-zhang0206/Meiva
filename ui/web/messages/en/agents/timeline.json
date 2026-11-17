@@ -13,7 +13,6 @@
   "workingFor": "Working for {duration}",
   "workActivity": "Context",
   "worked": "Worked",
-  "timingIncompleteWarning": "Work timing was not fully recorded. Total duration is unavailable.",
   "workedFor": "Worked for {duration}",
   "ranFor": "Ran for {duration}",
   "compactSummaries": "{count} {unit}",
