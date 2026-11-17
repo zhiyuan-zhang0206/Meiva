@@ -302,6 +302,7 @@ describe("UnknownMarkerChip source render", () => {
           ]}
         />,
       );
+      revealCollapsedCards();
       expect(screen.getByText(/source = null$/)).toBeTruthy();
     } finally {
       warnSpy.mockRestore();
@@ -321,6 +322,7 @@ describe("UnknownMarkerChip source render", () => {
           ]}
         />,
       );
+      revealCollapsedCards();
       expect(screen.getByText(/source = "future:kind"/)).toBeTruthy();
     } finally {
       warnSpy.mockRestore();
@@ -400,6 +402,7 @@ describe("system_marker error prefix boundary", () => {
     render(
       <TimelineView items={[makeItem({ kind: "system_marker", payload: "error:" })]} />,
     );
+    revealCollapsedCards();
     expect(screen.getByText(/error/)).toBeTruthy();
   });
   it("payload contains 'error' but no colon → skips error branch, goes to UnknownMarkerChip", () => {
@@ -410,6 +413,7 @@ describe("system_marker error prefix boundary", () => {
           items={[makeItem({ kind: "system_marker", payload: "error_no_colon" })]}
         />,
       );
+      revealCollapsedCards();
       expect(screen.getByText(/Unrecognized system_marker/)).toBeTruthy();
     } finally {
       warnSpy.mockRestore();
@@ -446,6 +450,7 @@ describe("EphemeralMarker isError path", () => {
     const { container } = render(
       <TimelineView items={[makeItem({ kind: "system_marker", payload: "error:failed" })]} />,
     );
+    revealCollapsedCards();
     const errEl = container.querySelector(".text-destructive");
     if (!errEl) throw new Error("no destructive el");
     expect(errEl.textContent).toMatch(/error.*failed/);
@@ -454,6 +459,7 @@ describe("EphemeralMarker isError path", () => {
     const { container } = render(
       <TimelineView items={[makeItem({ kind: "system_marker", payload: "exec_start" })]} />,
     );
+    revealCollapsedCards();
     const errEl = container.querySelector(".text-destructive");
     expect(errEl).toBeTruthy();
   });

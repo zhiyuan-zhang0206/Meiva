@@ -187,6 +187,7 @@ describe("UnknownMarkerChip console.warn", () => {
           ]}
         />,
       );
+      revealCollapsedCards();
       expect(warnSpy).toHaveBeenCalled();
       const lastCall = warnSpy.mock.calls.at(-1);
       if (!lastCall) throw new Error("no warn call");
