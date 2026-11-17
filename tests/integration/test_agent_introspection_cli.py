@@ -1,4 +1,5 @@
-"""Pin the published agent detail read through the CLI JSON consumer."""
+# meiva:note
+# Pin the published agent detail read through the CLI JSON consumer.
 
 import json
 
