@@ -15,3 +15,35 @@ Review update: expanded work details include readable error and notification bod
 Async-send review update: a successful quote send clears its persisted draft reference only when that reference still matches the submitted snapshot. This preserves a replacement quote selected during an in-flight send even if the user switches conversations before completion. Direct asynchronous Composer controls cover replacement retention and unchanged-quote cleanup. External quote POST controls also exercise exact record offset arithmetic and routing for each supported external harness, including adjacent/deleted sources with zero writes.
 
 Follow-up: the user requested full default display of sent quote snapshots; see [sent quote full display](sent-quote-full-display.md).
+
+
+## Complete record-row source lookup
+
+A real record-operation probe found that the quote validator's `offset + 1`
+request stopped inside a JSONL row: the fixture source `h5591.0` starts at byte
+5591 and its complete line ends at byte6098. An exclusive `before5592` read
+therefore omitted the selected source. The public Quote payload remains a
+selected snapshot plus provenance; this finding changes how the source reader
+verifies that provenance, not its authenticity contract.
+
+The record source now accepts an explicit inclusive item selector. Its file
+owner reads the complete target row and supplies it to the existing projection,
+tool-pair and turn-context look-back, under the existing window budget. The
+operation confirms the exact rendered item ID; quote admission requires that
+confirmation and retains all readable-kind, completion and stable-identity checks.
+An unsupported old reader cannot substitute a successful head window. Default
+head/exclusive requests omit the new selector field and retain their old wire
+contract. Compressed records keep their one full-archive streaming pass and
+bounded held-memory limitation.
+
+This read is scoped to the agent's current registered harness session and its
+existing placement/visibility contract. Current quote payloads carry record item
+coordinates, not durable cross-session locators; this patch does not claim that
+a quote from a retired session can be resolved in a replacement session. The
+separately planned refresh locator/window work remains dependent work. No unused
+window route, new cache, database schema or frontend restoration state is added.
+
+Validation includes real Quote HTTP admission through an RPC adapter that invokes
+the actual record operation and RecordFile against a committed sanitized rollout,
+plus a half-line rejection control with no additional inbound write. Native
+current/retained quote identity, permissions and depth checks retain their owners.

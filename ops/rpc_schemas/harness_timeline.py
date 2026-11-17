@@ -1,4 +1,6 @@
-from pydantic import BaseModel, ConfigDict, Field
+from typing import Self
+
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from base.agents.history.timeline_item import TimelineItem
 
@@ -16,8 +18,15 @@ class HarnessTimelineReadRequest(BaseModel):
     harness: str
     limit: int = Field(ge=1, le=1000)
     before: int | None = Field(default=None, ge=0)
+    anchor_item_id: str | None = Field(default=None, pattern=r"^h[0-9]{1,20}\.[0-9]{1,20}$")
     explicit_visibility: bool
     delivery_mode: str | None
+
+    @model_validator(mode="after")
+    def validate_selector(self) -> Self:
+        if self.before is not None and self.anchor_item_id is not None:
+            raise ValueError("A record window requires one exclusive or inclusive selector")
+        return self
 
 
 # meiva:note
@@ -29,3 +38,5 @@ class HarnessTimelineWindow(BaseModel):
     items: list[TimelineItem]
     has_more: bool
     size: int = Field(ge=0)
+    anchor_item_id: str | None = None
+    anchor_applied: bool = False

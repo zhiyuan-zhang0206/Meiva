@@ -182,7 +182,15 @@ def test_quote_post_requires_the_exact_record_offset(
             ).model_dump(mode="json")
         ]
     )
-    runner = ScriptedRunner({"items": items, "has_more": False, "size": 9800})
+    runner = ScriptedRunner(
+        {
+            "items": items,
+            "has_more": False,
+            "size": 9800,
+            "anchor_applied": True,
+            "anchor_item_id": f"h{returned_offset}.0" if returned_offset is not None else None,
+        }
+    )
     client.app.state.rpc = runner
     response = client.post(
         f"/api/agents/{agent}/messages",
@@ -204,10 +212,43 @@ def test_quote_post_requires_the_exact_record_offset(
     assert (machine, kind) == ("macmini", "harness_timeline_read")
     assert payload["agent_id"] == agent
     assert payload["harness"] == record_harness
-    assert payload["before"] == 414
+    assert payload["before"] is None
+    assert payload["anchor_item_id"] == "h413.0"
     assert payload["limit"] == 2
     row = db_conn.execute(
         "SELECT count(*) FROM inbound_messages WHERE agent_id = %s", (agent,)
     ).fetchone()
     assert row is not None
     assert row[0] == (1 if expected_status == 201 else 0)
+
+
+def test_quote_requires_a_reader_that_confirms_the_anchor_selector(
+    client: GatewayTestClient,
+    db_conn: psycopg.Connection,
+) -> None:
+    agent = _record_agent(db_conn, "codex")
+    client.app.state.rpc = ScriptedRunner(
+        {
+            "items": [_item("h413.0", "agent_chat", "source")],
+            "has_more": False,
+            "size": 9800,
+        }
+    )
+    response = client.post(
+        f"/api/agents/{agent}/messages",
+        json={
+            "content": "Explain",
+            "source": "user",
+            "quote": {
+                "source_agent_id": agent,
+                "source_item_id": "h413.0",
+                "author": "Agent",
+                "text": "source",
+            },
+        },
+    )
+    assert response.status_code == 503, response.text
+    row = db_conn.execute(
+        "SELECT count(*) FROM inbound_messages WHERE agent_id=%s", (agent,)
+    ).fetchone()
+    assert row is not None and row[0] == 0

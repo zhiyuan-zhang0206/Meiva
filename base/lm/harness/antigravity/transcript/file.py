@@ -39,6 +39,10 @@ class AntigravityRecordFile(RecordFile):
             self._loaded = True
         return self._data
 
+    def row_at(self, offset: int) -> FileRow | None:
+        row = super().row_at(offset)
+        return self._enrich(Block(row.offset, row.end, (row,))).rows[0] if row else None
+
     def rows_before(self, end: int, want: int = BLOCK_BYTES) -> Block:
         return self._enrich(super().rows_before(end, want))
 

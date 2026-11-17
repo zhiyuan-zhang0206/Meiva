@@ -214,3 +214,28 @@ def test_a_row_the_reader_does_not_know_is_skipped_and_reported_once(tmp_path: P
         logger.remove(sink)
     assert kinds == [k for k in BASIC_KINDS if k != "inbound_chat"]
     assert len([m for m in messages if "mystery-row" in m]) == 1
+
+
+def test_inclusive_anchor_keeps_every_block_of_the_complete_source_row(tmp_path: Path) -> None:
+    text = with_wire_ids(fixture_text("basic"), {"3c3d2de5-c479-52b7-91a6-fce4e4d26db9": "group"})
+    file = write(tmp_path / "group-anchor.jsonl", text)
+    sent = {"group": [inbound(7, "first"), inbound(8, "second")]}
+    rows = window(file, sent=sent).items
+    target = next(item for item in rows if item.item.inbound_id == 8)
+    inclusive = window(file, sent=sent, anchor=target.offset, limit=1)
+    assert [item.item.inbound_id for item in inclusive.items if item.offset == target.offset] == [
+        7,
+        8,
+    ]
+    half_row = window(file, sent=sent, anchor=target.offset + 1, limit=1)
+    assert half_row.items == ()
+
+
+def test_inclusive_anchor_refuses_an_unfinished_or_over_budget_row(tmp_path: Path) -> None:
+    partial = write(tmp_path / "partial-anchor.jsonl", '{"type":"assistant"')
+    assert window(partial, anchor=0).items == ()
+    oversized = write(
+        tmp_path / "oversized-anchor.jsonl", '{"text":"' + "x" * MAX_REQUEST_BYTES + '"}\n'
+    )
+    assert window(oversized, anchor=0).items == ()
+    assert oversized.bytes_read <= MAX_REQUEST_BYTES
