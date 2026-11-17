@@ -3,12 +3,15 @@
 
 from __future__ import annotations
 
+from pathlib import Path
+
 import psycopg
 import pytest
 
 from base.api_contracts.agent_contract import Harness, HarnessBilling
 from base.cluster.machine import MachineIdentityReader
 from base.cluster.machine.tests.identity import MachineIdentitySetter
+from base.sessions.pty import terminal_fence
 from gateway.schemas.models import HarnessAvailability, HarnessModelOption
 from gateway.tests.auth.gateway_config import GatewayTestClient, gateway_test_client, spawn_via_http
 from gateway.tests.support.runner_ops.ops_stub import RunnerOps
@@ -236,6 +239,7 @@ def test_restart_rejects_external_harness_while_running_and_accepts_while_idling
     _local_machine: MachineIdentityReader,
     gateway_local_runner: RunnerOps,
     db_conn: psycopg.Connection,
+    unit_home: Path,
 ) -> None:
     with gateway_test_client(machine=_local_machine) as client:
         _seed_harnesses(client, gateway_local_runner.name)
@@ -249,9 +253,22 @@ def test_restart_rejects_external_harness_while_running_and_accepts_while_idling
         assert running_resp.status_code == 409
         assert "Cannot restart agent in status 'running'" in running_resp.json()["detail"]
 
-        _set_agent(db_conn, agent_id, machine=gateway_local_runner.name, status="idling")
+        _ = db_conn.execute(
+            "UPDATE agents_meta SET machine=%s, status='idling', session_index=1 WHERE id=%s",
+            (gateway_local_runner.name, agent_id),
+        )
+        _ = db_conn.execute(
+            "INSERT INTO agent_shell_ttls (agent_id,session_id,expires_at) "
+            "VALUES (%s,0,now() + interval '1 hour')",
+            (agent_id,),
+        )
+        db_conn.commit()
         idling_resp = client.post(
             f"/api/agents/{agent_id}/restart", json={"message": "restarting codex"}
         )
         assert idling_resp.status_code == 200
         assert idling_resp.json() == {"status": "enqueued"}
+    assert db_conn.execute(
+        "SELECT session_id FROM agent_shell_ttls WHERE agent_id=%s", (agent_id,)
+    ).fetchall() == [(0,)]
+    assert terminal_fence.read(unit_home).cutoffs[agent_id] == 1

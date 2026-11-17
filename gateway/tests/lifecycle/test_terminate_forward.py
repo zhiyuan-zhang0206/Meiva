@@ -24,6 +24,7 @@ import pytest
 
 from base.cluster.machine import MachineIdentityReader
 from base.cluster.machine.tests.identity import MachineIdentitySetter
+from base.sessions.pty import terminal_fence
 from gateway.tests.auth.gateway_config import gateway_test_client, spawn_via_http
 from gateway.tests.support.runner_ops.local_runner import executed_ops
 from gateway.tests.support.runner_ops.ops_stub import (
@@ -105,17 +106,26 @@ class TestTerminateRouting:
         local_machine: MachineIdentityReader,
         gateway_local_runner: RunnerOps,
         db_conn: psycopg.Connection,
+        unit_home: Path,
     ) -> None:
         """A local force request is accepted by the same home-runner path."""
         with gateway_test_client(machine=local_machine) as client:
             agent_id = spawn_via_http(client, {}).json()["id"]
             _set_agent_machine(db_conn, agent_id, gateway_local_runner.name)
+            _ = db_conn.execute(
+                "UPDATE agents_meta SET session_index=1 WHERE id=%s",
+                (agent_id,),
+            )
+            _seed_shell_ttls(db_conn, agent_id, [0])
             resp = client.post(
                 f"/api/agents/{agent_id}/terminate",
                 json={"force": True, "source": "user"},
             )
         assert resp.status_code == 200
         assert resp.json()["status"] == "enqueued"
+        assert resp.json()["shell_sessions"] is None
+        assert _shell_ttl_ids(db_conn, agent_id) == [0]
+        assert terminal_fence.read(unit_home).cutoffs[agent_id] == 1
 
     def test_remote_graceful_forwards(
         self, local_machine: MachineIdentityReader, db_conn: psycopg.Connection

@@ -34,6 +34,7 @@ from base.events.live.announce import publish_agent_updated_sync
 from base.events.live.bus import EventBus
 from base.lm.catalog import ModelCatalog
 from base.lm.registry import normalize_overlay_llm_model
+from base.sessions.pty.client import ServiceDownError
 from ops.agents import (
     get_agent_machine,
     get_agent_status,
@@ -168,16 +169,27 @@ async def terminate_agent_op(
 # meiva:note
 # Attempt this host's older shells when a cutoff was captured, drop their TTL rows and report them.
 #
-# A failed kill propagates: the termination itself is already durable, so the caller sees
-# the failure and a repeat request retries the kill.
+# The PTY backend durably records the cutoff before dialing its service. When that service is
+# absent, leave every TTL row in place for the cluster reaper and let the already-committed
+# lifecycle operation finish. Other failures still propagate because they do not prove that the
+# service is simply down. TTL rows are dropped only after a definitive fence acknowledgement.
 async def _kill_shell_sessions_now(
     agent_id: int, *, cutoff: int | None, db_pool: ConnectionPool, home: Path
 ) -> ShellSessionsKill | None:
     if cutoff is None:
         return None
-    killed = await asyncio.to_thread(
-        kill_agent_shells, agent_id, before_session_index=cutoff, home=home
-    )
+    try:
+        killed = await asyncio.to_thread(
+            kill_agent_shells, agent_id, before_session_index=cutoff, home=home
+        )
+    except ServiceDownError:
+        _log.warning(
+            "[gateway] agent %s shell cleanup deferred at cutoff %s: "
+            "pty-sessions is unavailable; retaining TTL rows for the reaper",
+            agent_id,
+            cutoff,
+        )
+        return None
     await asyncio.to_thread(termination.drop_shell_ttls_before_cutoff, db_pool, agent_id, cutoff)
     _log.info(
         "[gateway] agent %s terminate killed %d shell session(s): %s",

@@ -353,9 +353,10 @@ async def test_terminate_agent_op_terminated_short_circuits(
         host=agent_host.host,
     )
     assert resp.status == "already_terminated"
-    assert resp.shell_sessions is not None
-    assert resp.shell_sessions.when == "now"
-    assert resp.shell_sessions.killed == []
+    # meiva:note
+    # This test has no PTY service. The response keeps the close unconfirmed so a later reaper
+    # pass can settle it from the retained lifecycle evidence.
+    assert resp.shell_sessions is None
     assert agent_host.cancel_requests == []
     assert db_conn.execute(
         "SELECT count(*) FROM inbound_messages WHERE agent_id=%s", (lifecycle_agent_id,)
