@@ -15,6 +15,14 @@ from base.db.protocols import RestoreAbandonedError
 _TTL_QUERY_ATTEMPTS = 3
 
 
+def _allocated_session_id(row: tuple[int, ...] | None, agent_id: int) -> int:
+    if row is None:
+        raise RuntimeError(
+            f"agent {agent_id} is missing or terminated — cannot allocate session_index"
+        )
+    return int(row[0]) - 1
+
+
 def _run_with_transient_retry[T](operation: Callable[[], T]) -> T:
     for attempt in range(1, _TTL_QUERY_ATTEMPTS + 1):
         try:
@@ -26,14 +34,19 @@ def _run_with_transient_retry[T](operation: Callable[[], T]) -> T:
 
 
 # meiva:note
-# Atomically increments agents_meta.session_index and returns the id to use (shared by shells and watchers); `UPDATE ... RETURNING` keeps it safe under concurrency. There is no fallback: an unavailable database, or an agent that is not in agents_meta, raises. The connect cap of `Database.connect` keeps a black-holing database from hanging `meiva.shell.sessions.new()` on the OS TCP-retransmit timeout.
+# Increment the per-agent session counter and return its prior value. This low-level
+# primitive commits the allocation immediately for callers that need only an id;
+# persistent PTY creation uses `create_ttl_fenced` instead, keeping the row lock
+# through the external creation and TTL insert so termination cannot pass between
+# those three steps. The connect cap of `Database.connect` keeps a black-holing
+# database from hanging `meiva.shell.sessions.new()` on the OS TCP-retransmit timeout.
 def next_session_index(database: DatabaseHandle, agent_id: int) -> int:
     def _allocate() -> tuple[int, ...] | None:
         with database.connect() as conn, conn.cursor() as cur:
             cur.execute("SET TRANSACTION READ WRITE")
             cur.execute(
                 "UPDATE agents_meta SET session_index = session_index + 1 "
-                "WHERE id = %s RETURNING session_index",
+                "WHERE id = %s AND status <> 'terminated' RETURNING session_index",
                 (agent_id,),
             )
             row = cur.fetchone()
@@ -41,11 +54,68 @@ def next_session_index(database: DatabaseHandle, agent_id: int) -> int:
             return row
 
     row = _run_with_transient_retry(_allocate)
-    if row is None:
-        raise RuntimeError(
-            f"agent {agent_id} not in agents_meta table — cannot allocate session_index"
-        )
-    return int(row[0]) - 1
+    return _allocated_session_id(row, agent_id)
+
+
+# meiva:note
+# Run the irreversible PTY creation behind the same uncommitted `agents_meta` write
+# that allocates its id, then record its TTL before releasing that row lock. Every
+# terminal transition takes that row lock before capturing its cutoff, so it either
+# waits for this session to become visible and closes it below the cutoff, or wins
+# first and makes this allocation refuse. A resurrection cannot reopen the row in
+# between because it needs the same lock. A refused or disposed attempt still
+# commits its counter advance before releasing the lock, so a stale numeric handle
+# is never reused. Retry only failures before an id is allocated: after that an
+# external session may exist, and a retry could create two PTYs for one request.
+def create_ttl_fenced[T](
+    database: DatabaseHandle,
+    agent_id: int,
+    ttl: float,
+    *,
+    start: Callable[[int], T],
+    dispose: Callable[[T], None],
+) -> tuple[int, T]:
+    for attempt in range(1, _TTL_QUERY_ATTEMPTS + 1):
+        allocated = False
+        try:
+            with database.connect() as conn, conn.cursor() as cur:
+                cur.execute("SET TRANSACTION READ WRITE")
+                cur.execute(
+                    "UPDATE agents_meta SET session_index = session_index + 1 "
+                    "WHERE id = %s AND status <> 'terminated' RETURNING session_index",
+                    (agent_id,),
+                )
+                row = cur.fetchone()
+                session_id = _allocated_session_id(row, agent_id)
+                allocated = True
+                try:
+                    resource = start(session_id)
+                except Exception:
+                    conn.commit()
+                    raise
+                try:
+                    with conn.transaction():
+                        cur.execute(
+                            "INSERT INTO agent_shell_ttls (agent_id, session_id, expires_at) "
+                            "VALUES (%s, %s, now() + make_interval(secs => %s))",
+                            (agent_id, session_id, ttl),
+                        )
+                except Exception as exc:
+                    dispose(resource)
+                    conn.commit()
+                    raise RuntimeError(f"failed to track TTL for session {session_id}") from exc
+                try:
+                    conn.commit()
+                except Exception:
+                    dispose(resource)
+                    raise
+                return session_id, resource
+        except Exception as exc:
+            if allocated:
+                raise
+            if attempt >= _TTL_QUERY_ATTEMPTS or not retryable_database_error(exc):
+                raise
+    raise AssertionError("unreachable")
 
 
 # meiva:note

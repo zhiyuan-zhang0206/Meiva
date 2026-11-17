@@ -15,6 +15,15 @@
   dying session), then reaps the child and closes the master.
 - **kill** — closes the known shell session with bounded known-group
   signaling ([session kill](../session-kill.md)).
+- **agent terminal fence** — a terminal lifecycle cleanup records its agent's
+  exclusive `session_index` cutoff in `$MEIVA_HOME/run/pty-terminal-fences.json`
+  before it deletes any TTL rows. The service restores that file before it
+  accepts allocations. Its acknowledgement closes every currently visible older
+  shell and refuses a delayed `new` below the cutoff even after a daemon
+  restart; a resurrection may allocate only later session indices. An
+  unavailable service is an unknown closure, so the caller preserves TTL rows
+  for retry. A malformed cutoff file refuses agent-shell allocation until it is
+  repaired.
 - **signals** — a stray signal at the shell's tree cannot take the service
   down; the service handles SIGTERM and SIGINT by closing what is alive and
   exiting.

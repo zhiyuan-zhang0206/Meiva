@@ -53,12 +53,22 @@ it exceeds the two declared waits. It does not measure total shutdown latency.
 
 `ping`, `has`, `list` (every live session with pid, birth identity, cwd,
 start time and allocation generation), `new`, `send`, `capture`, `resize`,
-`kill` and `close_all`. `new` carries the cwd, the caller's env and the optional
+`kill`, `close_all` and `fence_agent_shells`. `new` carries the cwd, the
+caller's env and the optional
 initial command in the request body of a 0600 socket (values never reach an
 argv, #974). The service's event loop reads every master and does only I/O;
 every request that can block (a fork, a bounded kill, a
 capture render) runs on the executor, and `ping` is answered on the loop so the
 ownership probe, which times out at three seconds, never queues behind them.
+
+`fence_agent_shells` is the terminal-lifecycle acknowledgement for one agent:
+it records an exclusive session-index cutoff, closes all currently visible
+shells below it, and refuses any delayed old `new` thereafter. Its state lasts
+in `$MEIVA_HOME/run/pty-terminal-fences.json`, which the service restores
+before accepting allocations. The lifecycle backend persists it before it dials
+the service; an unavailable socket is therefore an unknown closure, never a
+successful empty acknowledgement. A malformed fence file refuses agent-shell
+allocation until an operator repairs the evidence.
 
 The native concurrency regression forks forty new shells from eight callers
 while twenty sessions stream output, five through live screen models. Each new

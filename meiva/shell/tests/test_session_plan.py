@@ -8,6 +8,7 @@ import pytest
 
 from meiva.shell.session_env import SessionHost, session_environment
 from meiva.shell.session_plan import (
+    MAX_SYSTEM_TTL_SECONDS,
     MAX_TTL_SECONDS,
     match_session,
     own_names,
@@ -34,10 +35,12 @@ def test_validate_ttl_refuses_a_deadline_that_is_not_in_the_future(ttl: float) -
         validate_ttl(ttl, system=True)
 
 
-def test_a_system_session_is_exempt_from_the_user_cap() -> None:
-    assert validate_ttl(7 * 86400.0, system=True) == 7 * 86400.0
+def test_a_system_session_uses_the_absolute_72_hour_cap() -> None:
+    assert validate_ttl(float(MAX_SYSTEM_TTL_SECONDS), system=True) == float(MAX_SYSTEM_TTL_SECONDS)
+    with pytest.raises(ValueError, match="at most 259200 seconds"):
+        validate_ttl(float(MAX_SYSTEM_TTL_SECONDS) + 0.001, system=True)
     with pytest.raises(ValueError, match="at most 86400 seconds"):
-        validate_ttl(7 * 86400.0)
+        validate_ttl(float(MAX_SYSTEM_TTL_SECONDS))
 
 
 @pytest.mark.parametrize("name", ["Dev Server", "1abc", "-x", "a_b", ""])

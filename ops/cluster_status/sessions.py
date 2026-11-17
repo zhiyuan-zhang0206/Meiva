@@ -25,7 +25,7 @@ from pathlib import Path
 
 from base.api_contracts.agent_contract import ShellKillMode
 from base.cluster import session_name
-from base.sessions.backend import get_shell_backend
+from base.sessions.backend import PtySessionBackend, get_shell_backend
 from base.sessions.protocol import SessionBackend
 from ops.cluster_status.listing import SessionStart, session_rows
 from ops.cluster_status.model import trim_captured_lines
@@ -202,13 +202,19 @@ def kill_shell(
 # go, while another agent's sessions and the agent's own process session are never touched.
 # The backend's kill is idempotent, so a session that
 # ended between the listing and its kill still counts as killed. No notice is produced here (an
-# owner-level kill is silent) and nothing is written to the database: removing `agent_shell_ttls`
-# rows is the gateway's part. IDs at or above the exclusive cutoff are never targeted.
-# Enumeration happens once; late creation and crash leftovers require operator cleanup. Every
+# owner-level kill is silent) and nothing is written to the database: the lifecycle caller removes
+# `agent_shell_ttls` rows after this succeeds. IDs at or above the exclusive cutoff are never targeted.
+# Enumeration happens once; late creation and crash leftovers are reconciled by the TTL reaper. Every
 # selected session is attempted; a kill the backend could not confirm raises one RuntimeError
 # naming those ids after the others ran.
 def kill_agent_shells(agent_id: int, *, before_session_index: int, home: Path) -> list[int]:
     backend = get_shell_backend(home=home)
+    if isinstance(backend, PtySessionBackend):
+        # meiva:note
+        # The service's acknowledgement is a stronger lifecycle boundary than a
+        # list followed by independent kills: a `new` request whose client has
+        # already timed out cannot allocate an old shell after this returns.
+        return backend.fence_agent_shells(agent_id, before_session_index)
     listed = _agent_shells(backend, agent_id, _EPOCH)
     targets = kill_all_targets(listed, before_session_index)
     if not targets:

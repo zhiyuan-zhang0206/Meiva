@@ -59,7 +59,7 @@ class ShellSessions:
         return session_plan.match_session(self._names(), self.shell_prefix(), session_id)
 
     # meiva:note
-    # `ttl` is required: user ruling 2026-08-27 made shell TTL mandatory (the idle-shell-reminder daemon is gone and TTL is the only reclamation mechanism). Every caller, shells and watchers alike, records its deadline in `agent_shell_ttls`; for a watcher that deadline IS the watcher's target (launch timeout, cron end, at moment plus grace; user ruling 2026-09-14, task #3411). The cap is applied here, at the write point, so every caller is bound by it. The id is allocated before the host-level PTY admission gate: during an operator freeze a refused attempt leaves a harmless gap in this monotonic per-agent sequence, which is never rolled back or reused, so an old numeric handle stays stale instead of naming a later session. A session whose deadline row cannot be written is disposed of, because the reaper could never see it.
+    # `ttl` is required: user ruling 2026-08-27 made shell TTL mandatory (the idle-shell-reminder daemon is gone and TTL is the only reclamation mechanism). Every caller, shells and watchers alike, records its deadline in `agent_shell_ttls`; for a watcher that deadline IS the watcher's target (launch timeout, cron end, at moment plus grace; user ruling 2026-09-14, task #3411). The cap is applied here, at the write point, so every caller is bound by it. PTY creation and its TTL insert run behind one `agents_meta` row lock: a terminal transition waits for both or rejects the allocation. The counter still advances when a PTY start or TTL write fails, so stale numeric handles never name a later session; a post-start TTL error also disposes of the otherwise-unreapable PTY.
     def create(
         self,
         name: str | None,
@@ -74,19 +74,20 @@ class ShellSessions:
 
         session_plan.validate_name(name)
         ttl = validate_ttl(ttl, system=system)
-        session_id = ttl_store.next_session_index(self._database, self._agent_id)
-        full = session_plan.session_full_name(self.shell_prefix(), session_id, name)
         env = session_env.session_environment(
             host,
             activate_venv=cwd_is_inside_checkout(cwd, host.checkout),
             agent_id=self._agent_id,
             overrides=env_overrides,
         )
-        if not self._backend.new_session(full, "", cwd, env=env):
-            raise RuntimeError(f"failed to create session {full!r}")
-        try:
-            ttl_store.record_ttl(self._database, self._agent_id, session_id, ttl)
-        except RuntimeError:
+
+        def start(session_id: int) -> str:
+            full = session_plan.session_full_name(self.shell_prefix(), session_id, name)
+            if not self._backend.new_session(full, "", cwd, env=env):
+                raise RuntimeError(f"failed to create session {full!r}")
+            return full
+
+        def dispose(full: str) -> None:
             try:
                 self._backend.kill_session(full, graceful=False)
             except Exception:
@@ -95,8 +96,10 @@ class ShellSessions:
                     "the session stays live",
                     full,
                 )
-            raise
-        return session_id, full
+
+        return ttl_store.create_ttl_fenced(
+            self._database, self._agent_id, ttl, start=start, dispose=dispose
+        )
 
     # meiva:note
     # Text and Enter go in separate writes: a combined write races TUI programs (Claude Code, Codex) that are still processing the typed text when Enter arrives.
@@ -131,6 +134,7 @@ class ShellSessions:
         from base import telemetry
         from meiva.shell import ttl_store
 
+        ttl = validate_ttl(ttl)
         self.resolve(session_id)
         prev_expires = ttl_store.read_expiry(self._database, self._agent_id, session_id)
         if prev_expires is None:

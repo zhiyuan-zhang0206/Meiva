@@ -24,6 +24,7 @@ import pytest
 
 from base.cluster.machine import MachineIdentityReader
 from base.cluster.machine.tests.identity import MachineIdentitySetter
+from base.sessions.pty import terminal_fence
 from gateway.tests.auth.gateway_config import gateway_test_client, spawn_via_http
 from gateway.tests.support.runner_ops.local_runner import executed_ops
 from gateway.tests.support.runner_ops.ops_stub import (
@@ -46,11 +47,16 @@ def local_machine(
     return set_machine_identity(role="agent-runner")
 
 
-_ENQUEUED = {
+_ENQUEUED: dict[str, object] = {
     "status": "enqueued",
     "open_tasks": None,
-    "shell_sessions": None,
+    "shell_sessions": {"when": "at_exit", "killed": []},
     "attached": None,
+}
+
+_ENQUEUED_NOW: dict[str, object] = {
+    **_ENQUEUED,
+    "shell_sessions": {"when": "now", "killed": []},
 }
 
 
@@ -100,26 +106,41 @@ class TestTerminateRouting:
         local_machine: MachineIdentityReader,
         gateway_local_runner: RunnerOps,
         db_conn: psycopg.Connection,
+        unit_home: Path,
     ) -> None:
         """A local force request is accepted by the same home-runner path."""
         with gateway_test_client(machine=local_machine) as client:
             agent_id = spawn_via_http(client, {}).json()["id"]
             _set_agent_machine(db_conn, agent_id, gateway_local_runner.name)
+            _ = db_conn.execute(
+                "UPDATE agents_meta SET session_index=1 WHERE id=%s",
+                (agent_id,),
+            )
+            _seed_shell_ttls(db_conn, agent_id, [0])
             resp = client.post(
                 f"/api/agents/{agent_id}/terminate",
                 json={"force": True, "source": "user"},
             )
         assert resp.status_code == 200
         assert resp.json()["status"] == "enqueued"
+        assert resp.json()["shell_sessions"] is None
+        assert _shell_ttl_ids(db_conn, agent_id) == [0]
+        assert terminal_fence.read(unit_home).cutoffs[agent_id] == 1
 
     def test_remote_graceful_forwards(
         self, local_machine: MachineIdentityReader, db_conn: psycopg.Connection
     ) -> None:
         """machine != local + force=false → forward, local does not INSERT inbound."""
         with (
-            runner_ops(db_conn, "remote-mac", {"lifecycle": completed({"status": "enqueued"})}) as (
-                runner
-            ),
+            runner_ops(
+                db_conn,
+                "remote-mac",
+                {
+                    "lifecycle": completed(
+                        {"status": "enqueued", "shell_sessions": _ENQUEUED["shell_sessions"]}
+                    )
+                },
+            ) as (runner),
             gateway_test_client(machine=local_machine) as client,
         ):
             agent_id = spawn_via_http(client, {}).json()["id"]
@@ -144,9 +165,15 @@ class TestTerminateRouting:
     ) -> None:
         """machine != local + force=true → forward, local does not touch sessions / pid."""
         with (
-            runner_ops(db_conn, "remote-mac", {"lifecycle": completed({"status": "enqueued"})}) as (
-                runner
-            ),
+            runner_ops(
+                db_conn,
+                "remote-mac",
+                {
+                    "lifecycle": completed(
+                        {"status": "enqueued", "shell_sessions": {"when": "now", "killed": []}}
+                    )
+                },
+            ) as (runner),
             gateway_test_client(machine=local_machine) as client,
         ):
             agent_id = spawn_via_http(client, {}).json()["id"]
@@ -156,7 +183,7 @@ class TestTerminateRouting:
                 json={"force": True, "source": "user"},
             )
         assert resp.status_code == 200
-        assert resp.json() == _ENQUEUED
+        assert resp.json() == _ENQUEUED_NOW
         (body,) = [payload["body"] for payload in runner.payloads("lifecycle")]
         assert body["force"] is True
         assert body["source"] == "user"
@@ -223,7 +250,15 @@ def test_remote_home_machine_is_forwarded(
     server — there is no deployment gate on the lifecycle path. Single box is
     just the special case where the ops server lives at localhost."""
     with (
-        runner_ops(db_conn, "stale-runner", {"lifecycle": completed({"status": "enqueued"})}),
+        runner_ops(
+            db_conn,
+            "stale-runner",
+            {
+                "lifecycle": completed(
+                    {"status": "enqueued", "shell_sessions": _ENQUEUED["shell_sessions"]}
+                )
+            },
+        ),
         gateway_test_client(machine=local_machine) as client,
     ):
         agent_id = spawn_via_http(client, {}).json()["id"]
@@ -337,7 +372,10 @@ class TestTerminateOpenTasksHint:
             _set_agent_machine(db_conn, agent_id, gateway_local_runner.name)
             resp = client.post(f"/api/agents/{agent_id}/terminate")
         assert resp.status_code == 200
-        assert resp.json() == _ENQUEUED
+        assert resp.json() == {
+            **_ENQUEUED,
+            "shell_sessions": {"when": "at_exit", "killed": []},
+        }
 
     def test_open_tasks_reported_newest_first(
         self,

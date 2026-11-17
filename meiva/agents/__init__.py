@@ -116,8 +116,8 @@ class TerminateOutcome(str):
     """What a terminate call returned: the acceptance status as a string —
     compare it directly ("enqueued" / "already_terminated") — plus `status` as
     the enum, `open_tasks`: the tasks the agent still owned as it went down, or
-    None, `shell_sessions`: what `kill_all_shell_sessions` did, or None when no
-    shell session was killed on request, and `attached`: the harness
+    None, `shell_sessions`: what mandatory shell cleanup did, or None when
+    older software did not report it, and `attached`: the harness
     registration its home machine held when the call ran, or None when there was
     none or it could not be read."""
 
@@ -420,9 +420,9 @@ def terminate(
 
     `message` is stored, without a reply, for when the agent is revived.
     `force=True` interrupts work; an `enqueued` result confirms acceptance, not
-    exit. A terminated agent wakes on any new message, including from its own
-    shell sessions or watchers; `kill_all_shell_sessions=True` also kills every
-    shell session it owns, watchers included, silently.
+    exit. A terminated agent wakes on any new message. Every termination closes
+    its shell sessions and watchers silently; `kill_all_shell_sessions=True`
+    remains a legacy audit marker.
 
     The result equals its status string and carries `open_tasks` (up to five
     tasks it still owns, most recently updated first, or None),

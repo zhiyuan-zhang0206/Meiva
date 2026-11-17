@@ -43,7 +43,7 @@ _RUNNER_TABLE_GRANTS: tuple[tuple[LiteralString, tuple[str, ...]], ...] = (
     ("SELECT, INSERT, UPDATE, DELETE", ("understanding_group_state",)),
     ("INSERT", ("understanding_group_calls",)),
     ("SELECT, UPDATE", ("understanding_rebuilds",)),
-    ("INSERT, UPDATE", ("agent_shell_ttls",)),
+    ("INSERT, UPDATE, DELETE", ("agent_shell_ttls",)),
     ("SELECT, INSERT", ("agent_shell_ttl_renewals",)),
     ("SELECT, INSERT", ("heartbeat_pause_log",)),
     ("SELECT, INSERT", ("notification_events",)),

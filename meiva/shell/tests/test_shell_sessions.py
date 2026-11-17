@@ -3,13 +3,19 @@
 from __future__ import annotations
 
 import time
+from collections.abc import Callable
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
+from threading import Event, Thread
 
+import psycopg
 import pytest
 
 from base.db import Database
 from base.host.runtime_interpreter import runtime_venv
 from base.paths import meiva_home, workspace_dir
+from base.sessions.pty import client
+from base.sessions.pty.tests.pty_service import DelayedNewProxy, service_socket
 from meiva.shell.session_env import SessionHost
 from meiva.shell.sessions import ShellSessions
 
@@ -28,6 +34,112 @@ def _screen_has(shell: ShellSessions, session_id: int, needle: str, seconds: flo
             return True
         time.sleep(0.1)
     return False
+
+
+def _captured_thread(operation: Callable[[], None]) -> tuple[Thread, list[BaseException]]:
+    failures: list[BaseException] = []
+
+    def run() -> None:
+        try:
+            operation()
+        except BaseException as exc:
+            failures.append(exc)
+
+    thread = Thread(target=run)
+    thread.start()
+    return thread, failures
+
+
+def _terminal_transition(
+    agent_id: int,
+    database: Database,
+    started: Event,
+    finished: Event,
+) -> int:
+    started.set()
+    try:
+        with database.connect() as conn, conn.cursor() as cur:
+            cur.execute(
+                "SELECT session_index FROM agents_meta WHERE id = %s FOR UPDATE", (agent_id,)
+            )
+            row = cur.fetchone()
+            assert row is not None
+            cur.execute(
+                "UPDATE agents_meta SET status = 'terminated', termination_source = 'user' "
+                "WHERE id = %s",
+                (agent_id,),
+            )
+            conn.commit()
+            return int(row[0])
+    finally:
+        finished.set()
+
+
+def _terminal_transition_after_fenced_creation(
+    shell: ShellSessions,
+    database: Database,
+    tmp_path: Path,
+    unit_home: Path,
+) -> int:
+    from meiva.shell import session_plan, ttl_store
+
+    creation_entered = Event()
+    release_creation = Event()
+    created: list[int] = []
+    terminal_cutoffs: list[int] = []
+    terminal_failures: list[BaseException] = []
+    terminal_started = Event()
+    terminal_finished = Event()
+
+    def start(session_id: int) -> str:
+        full = session_plan.session_full_name(shell.shell_prefix(), session_id, "fenced")
+        creation_entered.set()
+        if not release_creation.wait(timeout=5.0):
+            raise TimeoutError("test did not release the fenced session creation")
+        assert shell.backend.new_session(full, "", tmp_path, env={"MEIVA_HOME": str(unit_home)})
+        return full
+
+    def dispose(full: str) -> None:
+        shell.backend.kill_session(full, graceful=False)
+
+    creator, failures = _captured_thread(
+        lambda: created.append(
+            ttl_store.create_ttl_fenced(
+                database, shell.agent_id, 120.0, start=start, dispose=dispose
+            )[0]
+        )
+    )
+    terminal: Thread | None = None
+    try:
+        assert creation_entered.wait(timeout=5.0)
+        terminal, terminal_failures = _captured_thread(
+            lambda: terminal_cutoffs.append(
+                _terminal_transition(shell.agent_id, database, terminal_started, terminal_finished)
+            )
+        )
+        assert terminal_started.wait(timeout=5.0)
+        with database.connect() as conn, conn.cursor() as cur:
+            with pytest.raises(psycopg.errors.LockNotAvailable):
+                cur.execute(
+                    "SELECT 1 FROM agents_meta WHERE id = %s FOR UPDATE NOWAIT",
+                    (shell.agent_id,),
+                )
+            conn.rollback()
+        assert not terminal_finished.wait(timeout=0.1)
+    finally:
+        release_creation.set()
+        creator.join(timeout=5.0)
+        if terminal is not None:
+            terminal.join(timeout=5.0)
+
+    assert not creator.is_alive()
+    assert terminal is not None
+    assert not terminal.is_alive()
+    assert failures == []
+    assert terminal_failures == []
+    assert created == [0]
+    assert terminal_cutoffs == [1]
+    return terminal_cutoffs[0]
 
 
 def test_a_created_session_carries_its_owners_identity(
@@ -80,21 +192,194 @@ def test_a_refused_name_or_ttl_takes_no_session_id(
     assert _create(live_shell, live_host, "first", cwd=tmp_path) == 0
 
 
-def test_a_system_session_may_outlive_the_user_cap(
+def test_a_system_session_may_outlive_the_user_cap_but_not_the_absolute_cap(
     live_shell: ShellSessions, live_host: SessionHost, database: Database, tmp_path: Path
 ) -> None:
     session_id, _full = live_shell.create(
-        "watcher", cwd=tmp_path, ttl=7 * 86400.0, system=True, host=live_host
+        "watcher", cwd=tmp_path, ttl=72 * 3600.0, system=True, host=live_host
     )
 
     with database.connect() as conn, conn.cursor() as cur:
         cur.execute(
-            "SELECT expires_at > now() + interval '6 days' FROM agent_shell_ttls "
+            "SELECT expires_at > now() + interval '71 hours' FROM agent_shell_ttls "
             "WHERE agent_id = %s AND session_id = %s",
             (live_shell.agent_id, session_id),
         )
         row = cur.fetchone()
     assert row == (True,)
+
+    with pytest.raises(ValueError, match="at most 259200 seconds"):
+        live_shell.create(
+            "too-long", cwd=tmp_path, ttl=72 * 3600.0 + 1, system=True, host=live_host
+        )
+
+    # meiva:note
+    # ShellSessions is usable directly by internal callers, so its renewal
+    # boundary must enforce the cap independently of the public SDK wrapper.
+    with pytest.raises(ValueError, match="at most 86400 seconds"):
+        live_shell.renew(session_id, 24 * 3600.0 + 1)
+
+
+def test_a_terminated_agent_cannot_create_a_late_shell(
+    live_shell: ShellSessions, live_host: SessionHost, database: Database, tmp_path: Path
+) -> None:
+    with database.connect() as conn, conn.cursor() as cur:
+        cur.execute(
+            "UPDATE agents_meta SET status = 'terminated' WHERE id = %s", (live_shell.agent_id,)
+        )
+        conn.commit()
+
+    with pytest.raises(RuntimeError, match="missing or terminated"):
+        live_shell.create("late", cwd=tmp_path, ttl=120.0, host=live_host)
+
+    assert live_shell.list() == {}
+
+
+# meiva:note
+# The creator holds the agents_meta row lock after taking its id but before the
+# PTY service answers. A terminal transition uses that exact row lock to capture
+# its cutoff, so NOWAIT must lose here. Once the creation commits, termination captures
+# it below the cutoff; even a resurrection before post-commit cleanup cannot keep
+# that pre-terminal session or its TTL row alive.
+def test_terminal_transition_cannot_pass_a_half_created_session(
+    live_shell: ShellSessions,
+    live_host: SessionHost,
+    database: Database,
+    tmp_path: Path,
+    unit_home: Path,
+) -> None:
+    cutoff = _terminal_transition_after_fenced_creation(live_shell, database, tmp_path, unit_home)
+
+    with database.connect() as conn, conn.cursor() as cur:
+        cur.execute(
+            "UPDATE agents_meta SET status = 'idling' WHERE id = %s",
+            (live_shell.agent_id,),
+        )
+        conn.commit()
+
+    live_shell.kill(0)
+    with database.connect() as conn, conn.cursor() as cur:
+        cur.execute(
+            "DELETE FROM agent_shell_ttls WHERE agent_id = %s AND session_id < %s",
+            (live_shell.agent_id, cutoff),
+        )
+        conn.commit()
+
+    assert live_shell.list() == {}
+    with database.connect() as conn, conn.cursor() as cur:
+        cur.execute(
+            "SELECT session_id FROM agent_shell_ttls WHERE agent_id = %s",
+            (live_shell.agent_id,),
+        )
+        assert cur.fetchall() == []
+
+    replacement = _create(live_shell, live_host, "replacement", cwd=tmp_path)
+    assert replacement == 1
+    live_shell.kill(replacement)
+
+
+# meiva:note
+# The server-side cutoff is needed in addition to the database row lock: a client can time out
+# after sending `new`, allowing the creation transaction to release its lock while the request is
+# still in the service's admission queue. A terminal transition and a later resurrection can both
+# commit before that delayed request is admitted. The termination fence's acknowledgement must
+# therefore reject or close the old request independently of the agent's current DB status.
+def test_terminal_fence_reclaims_a_delayed_lost_ack_creation_after_resurrection(
+    live_shell: ShellSessions,
+    live_host: SessionHost,
+    database: Database,
+    tmp_path: Path,
+    unit_home: Path,
+) -> None:
+    from meiva.shell import session_plan, ttl_store
+
+    upstream = service_socket()
+    delayed_path = upstream.with_name(f"{upstream.stem}-delayed.sock")
+    proxy = DelayedNewProxy(delayed_path, upstream)
+    full = session_plan.session_full_name(live_shell.shell_prefix(), 0, "lost-ack")
+
+    def start_lost_ack(_session_id: int) -> str:
+        client.request(
+            "new",
+            socket_path=delayed_path,
+            timeout=0.05,
+            name=full,
+            cwd=str(tmp_path),
+            env={"MEIVA_HOME": str(unit_home)},
+        )
+        raise AssertionError("the delayed request unexpectedly returned an acknowledgement")
+
+    def create_lost_ack_shell() -> None:
+        ttl_store.create_ttl_fenced(
+            database,
+            live_shell.agent_id,
+            120.0,
+            start=start_lost_ack,
+            dispose=lambda _full: None,
+        )
+
+    try:
+        creator, failures = _captured_thread(create_lost_ack_shell)
+        assert proxy.accepted.wait(timeout=5.0)
+        creator.join(timeout=5.0)
+        assert not creator.is_alive()
+        assert len(failures) == 1
+        assert isinstance(failures[0], client.ServiceUnavailableError)
+
+        # meiva:note
+        # The timeout committed the spent id without a TTL row. Model the terminal
+        # transition and resurrection that used to make this old request invisible.
+        cutoff = _terminal_transition(live_shell.agent_id, database, Event(), Event())
+        assert cutoff == 1
+        with database.connect() as conn, conn.cursor() as cur:
+            cur.execute(
+                "UPDATE agents_meta SET status = 'idling' WHERE id = %s",
+                (live_shell.agent_id,),
+            )
+            conn.commit()
+
+        # meiva:note
+        # The terminal path receives this acknowledgement before it deletes TTL rows.
+        assert client.fence_agent_shells(live_shell.agent_id, cutoff, socket_path=upstream) == []
+        proxy.release.set()
+        assert proxy.completed.wait(timeout=5.0)
+        assert proxy.error is None
+        assert proxy.response is not None and proxy.response["ok"] is False
+        assert live_shell.list() == {}
+        with database.connect() as conn, conn.cursor() as cur:
+            cur.execute(
+                "SELECT session_id FROM agent_shell_ttls WHERE agent_id = %s",
+                (live_shell.agent_id,),
+            )
+            assert cur.fetchall() == []
+
+        replacement = _create(live_shell, live_host, "replacement", cwd=tmp_path)
+        assert replacement == 1
+        live_shell.kill(replacement)
+    finally:
+        proxy.close()
+
+
+def test_renew_reads_a_legacy_long_deadline_then_replaces_it_with_a_valid_deadline(
+    live_shell: ShellSessions, live_host: SessionHost, database: Database, tmp_path: Path
+) -> None:
+    from meiva.shell import ttl_store
+
+    session_id = _create(live_shell, live_host, "legacy", cwd=tmp_path)
+    with database.connect() as conn, conn.cursor() as cur:
+        cur.execute(
+            "UPDATE agent_shell_ttls SET expires_at = now() + interval '395 days' "
+            "WHERE agent_id = %s AND session_id = %s",
+            (live_shell.agent_id, session_id),
+        )
+        conn.commit()
+
+    legacy_expiry = ttl_store.read_expiry(database, live_shell.agent_id, session_id)
+    assert legacy_expiry is not None
+    assert legacy_expiry > datetime.now(UTC) + timedelta(days=394)
+
+    renewed = live_shell.renew(session_id, 120.0)
+    assert renewed < legacy_expiry
 
 
 def test_a_session_without_a_deadline_row_is_disposed_of(
@@ -114,6 +399,9 @@ def test_a_session_without_a_deadline_row_is_disposed_of(
         _create(live_shell, live_host, "orphan", cwd=tmp_path)
 
     assert live_shell.list() == {}
+    recovered = _create(live_shell, live_host, "recovered", cwd=tmp_path)
+    assert recovered == 1
+    live_shell.kill(recovered)
 
 
 def test_a_session_that_cannot_start_is_refused(
@@ -123,6 +411,9 @@ def test_a_session_that_cannot_start_is_refused(
         _create(live_shell, live_host, "broken", cwd=tmp_path / "does-not-exist")
 
     assert live_shell.list() == {}
+    recovered = _create(live_shell, live_host, "recovered", cwd=tmp_path)
+    assert recovered == 1
+    live_shell.kill(recovered)
 
 
 def test_kill_removes_the_session_and_its_id_stays_stale(

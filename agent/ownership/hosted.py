@@ -75,18 +75,6 @@ def _stored_harness(row: tuple[object, ...]) -> str:
 
 
 # meiva:note
-# Whether one closed terminate asked for the agent's shell sessions to go with it. Read one row per
-# closed command because one death serves them all, and the flag decides which sessions the caller
-# cuts after the commit.
-def _kill_requested(row: tuple[object, ...]) -> bool:
-    match row:
-        case (bool() as requested,):
-            return requested
-        case _:
-            raise TypeError("a closed terminate row carried no boolean kill flag")
-
-
-# meiva:note
 # The four columns of a claimed restart/terminate command, matched by type rather than trusted: a
 # row of another shape fails here, naming what it is, instead of carrying an unchecked value into
 # the lifecycle write. `content` is the message the command carried, empty for a bare terminate.
@@ -126,13 +114,11 @@ class _LifecycleCommand:
 #     the agent: the pending scan finds it on this host or the next. An idle agent
 #     gets no note, and neither does a terminate.
 #
-#     When a terminate asked to take the agent's shell sessions with it, the
-#     row lock captures the next shell ID as `shell_cutoff`. Nothing runs after the
-#     commit here: the caller executes the post-commit cleanup (the change hint, the
-#     browser pages and the shell sessions older than the cutoff), so the lifecycle
-#     lock is never held across it and the host reports cleanup failures without
-#     rolling back the durable death. A crash or a session created after this cutoff
-#     can leave live sessions for operators.
+#     Every terminate captures the next shell ID as `shell_cutoff`. Nothing runs
+#     after the commit here: the caller executes the post-commit cleanup (the
+#     change hint, browser pages and every older shell), so the lifecycle lock is
+#     never held across it and the host reports cleanup failures without rolling
+#     back the durable death. A periodic reaper closes any race leftovers.
 async def apply_hosted_lifecycle(
     pool: AsyncPool,
     incarnation: RuntimeIncarnation,
@@ -210,16 +196,12 @@ async def apply_hosted_lifecycle(
                         command.content,
                     )
             case "terminate":
-                closed = await conn.execute(
+                await conn.execute(
                     "UPDATE inbound_messages SET status='done' WHERE agent_id=%s AND kind='terminate' "
-                    "AND status IN ('pending','claimed') RETURNING "
-                    "COALESCE((payload -> 'kill_all_shell_sessions') = 'true'::jsonb, false)",
+                    "AND status IN ('pending','claimed')",
                     (incarnation.agent_id,),
                 )
-                closed_rows = await closed.fetchall()
-                cutoff = shell_cutoff(
-                    [_kill_requested(closed_row) for closed_row in closed_rows], session_index
-                )
+                cutoff = shell_cutoff(session_index)
                 await conn.execute(
                     "UPDATE agents_meta SET status='terminated',termination_source='user' WHERE id=%s",
                     (incarnation.agent_id,),

@@ -19,15 +19,12 @@ from ops.rpc_schemas.content import UserContent
 # `force` defaults to False for graceful termination. True directly kills the
 # detached process and force-updates status when the agent cannot reach claim.
 #
-# `kill_all_shell_sessions` also kills every shell session the agent owns on
-# its home machine (watchers included), with no per-session notice. A graceful terminate of a live
-# agent records the request on its terminate command and the home runtime
-# attempts older sessions after the termination commits and the agent's last
-# step ends. Force and already-terminated requests attempt older sessions
-# before the response; the original host also attempts one fresh cutoff after
-# force quiescence. Cleanup is best-effort: errors are visible, but crash or
-# late-session leftovers require operators. Without it, sessions are left alone.
-# A terminated agent is otherwise an ordinary terminated agent — any new
+# Every termination closes every shell session the agent owns on its home machine
+# (watchers included), with no per-session notice. A graceful termination does so
+# after its last step commits; force and already-terminated requests do so before
+# the response. The legacy `kill_all_shell_sessions` field remains as an audit
+# compatibility marker. A periodic reaper closes leftovers when a host is down
+# during the immediate cleanup. A terminated agent is otherwise an ordinary terminated agent — any new
 # message may resurrect it
 # (docs/decisions/agents/lifecycle/2026-09-27-terminate-has-no-closed-state.md).
 #
@@ -82,20 +79,10 @@ class OpenTasksHint(BaseModel):
     more: int
 
 
+# meiva:note
+# The response reports timing and confirmed IDs for mandatory cleanup without
+# promising that a graceful terminal host has already completed its final step.
 class ShellSessionsKill(BaseModel):
-    """What `kill_all_shell_sessions` did for one terminate request.
-
-    `when="now"`: the kill already ran on the agent's home machine — a force
-        terminate, or an agent that was already terminated. `killed` lists the
-        selected session ids confirmed gone, ascending; empty means no eligible
-        sessions were listed below the captured cutoff. A force's original host
-        attempts one fresh cutoff after quiescence; it is not in this response.
-    `when="at_exit"`: a graceful terminate of a live agent. The request is
-        durable on its terminate command; after committing termination the home
-        runtime attempts listed sessions below the cutoff captured at exit.
-        `killed` is empty; cleanup errors are logged, not returned in this response.
-    """
-
     when: ShellSessionKillTiming
     killed: list[int] = Field(default_factory=list[int])
 
@@ -121,25 +108,10 @@ class HarnessAttachment(BaseModel):
     expires_at: str | None = None
 
 
+# meiva:note
+# Terminal cleanup may be absent from a response only while a mixed-version home
+# runner still predates the lifecycle contract.
 class TerminateAgentResponse(BaseModel):
-    """POST /api/agents/{id}/terminate response.
-
-    `enqueued`: termination accepted, including hosted force. Actual work may
-        still be draining; this result does not prove exit.
-    `already_terminated`: agent was already dead. Graceful termination is a
-        no-op beyond a requested shell-session kill. Hosted force instead
-        returns enqueued until its exact original host can prove quiescence;
-        metadata status alone is not exit evidence.
-
-    `open_tasks`: the still-open tasks the agent owned as it went down — an
-        advisory hint, null when it owned none or the hint read failed.
-
-    `shell_sessions`: what the shell-session kill did — set when
-        `kill_all_shell_sessions` was requested, None otherwise. A requested
-        kill answered with None means the home runner predates the option
-        (version skew): nothing was killed.
-    """
-
     status: TerminateResult
     open_tasks: OpenTasksHint | None = None
     shell_sessions: ShellSessionsKill | None = None

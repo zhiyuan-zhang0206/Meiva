@@ -21,6 +21,7 @@ from base.daemon.schedules.watcher import (
     validate_timezone,
 )
 from meiva.sdk_surface.validation import coerce_str
+from meiva.shell import MAX_SYSTEM_TTL_SECONDS
 from meiva.shell.background_plan import notify_policy
 from meiva.watcher.launch_plan import SpawnRequest
 
@@ -43,7 +44,12 @@ def _ttl_seconds(kind: str, deadline: datetime.datetime | None, now: datetime.da
             f"watcher {kind!r} target deadline is not in the future ({deadline!r}) - "
             "refusing to spawn its session"
         )
-    return (deadline - now).total_seconds()
+    ttl = (deadline - now).total_seconds()
+    if ttl > MAX_SYSTEM_TTL_SECONDS:
+        raise ValueError(
+            f"watcher {kind!r} target deadline exceeds {MAX_SYSTEM_TTL_SECONDS} seconds (72 hours)"
+        )
+    return ttl
 
 
 def plan_launch(
@@ -70,6 +76,9 @@ def plan_launch(
     )
 
 
+# meiva:note
+# Cron planning owns the standing default and converts it into the exact shell
+# deadline; callers cannot create a watcher that outlives its persistent shell.
 def plan_cron(
     expr: str,
     message: str,
@@ -81,14 +90,6 @@ def plan_cron(
     now: datetime.datetime,
     default_timezone: str,
 ) -> SpawnRequest:
-    """A cron wake-up that runs until `end_time` (default: seven days from the current minute).
-
-    `default_timezone` is the cluster clock's zone, or this host's zone for a settings-lite
-    process; it applies when `timezone` is None.
-
-    Raises:
-        ValueError: the message is empty, or `end_time` is in the past.
-    """
     expr = coerce_str(expr, "expr")
     message = coerce_str(message, "message")
     timezone = coerce_str(timezone, "timezone", allow_none=True)
@@ -102,11 +103,12 @@ def plan_cron(
     tz = timezone if timezone is not None else default_timezone
     validate_timezone(tz)
     if end_time is None:
-        # Standing-cron cap (task #2617): no end_time means the DEFAULT
-        # window - 7 days, counted from the current minute - not forever. A
-        # longer schedule must pass an explicit end_time.
+        # meiva:note
+        # A standing cron is bounded by the persistent-shell lifetime. The
+        # deadline is counted from the current minute, leaving no unbounded
+        # watcher session behind if its agent disappears.
         et = now.replace(second=0, microsecond=0) + datetime.timedelta(
-            seconds=DEFAULT_STANDING_CRON_MAX_SECONDS
+            seconds=min(DEFAULT_STANDING_CRON_MAX_SECONDS, MAX_SYSTEM_TTL_SECONDS)
         )
     else:
         # normalize_when (not normalize_end_time): this branch excludes None,
@@ -124,8 +126,9 @@ def plan_cron(
         timezone=tz,
         end_time_iso=et.isoformat(),
     )
-    # The generated script self-terminates (it stops looping past end_time -
-    # which every registration now carries, the default being now + 7 days),
+    # meiva:note
+    # The generated script self-terminates (it stops looping past end_time —
+    # which every registration carries, defaulting to now + 72 hours),
     # so no watchdog.
     return SpawnRequest(
         code=code,

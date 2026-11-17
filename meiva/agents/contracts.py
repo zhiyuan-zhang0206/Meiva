@@ -109,7 +109,7 @@ class Neighbor:
 
 @dataclass(frozen=True)
 class ShellSessionsKill:
-    """What `kill_all_shell_sessions=True` did. `when` is "now" when the shell
+    """What mandatory termination cleanup did. `when` is "now" when the shell
     sessions are already gone — `killed` lists their ids, empty when the agent
     had none — or "at_exit" when they are killed right before the agent stops,
     after its last step (`killed` stays empty)."""

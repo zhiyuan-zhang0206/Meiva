@@ -1,9 +1,9 @@
 """Run temporary background waits that can wake you with a message.
 
-A watcher continues after you end a turn or terminate, and its next message can
-wake you again. Stop unwanted watchers before ending their task. Watchers are
-never restarted automatically after their execution stops; use a schedule for
-recurring work that must recover from interruptions.
+A watcher continues after you end a turn. Terminating its owner closes the
+watcher's persistent shell immediately, so work that must survive owner
+termination uses `meiva.schedules` with `on_owner_terminate="keep"`. Watchers
+are never restarted automatically after their execution stops.
 
 Completion reports follow the notification policy and are not liveness signals.
 An explicit cancellation sends no additional report; an abrupt machine failure
@@ -65,8 +65,8 @@ def cron(
 ) -> SessionHandle:
     """Runs until `end_time`, or until you kill its session.
 
-    `end_time` defaults to now + 7 days; pass an explicit one for a longer
-    schedule. Calling `cron()` again with the same expression + timezone does
+    `end_time` defaults to now + 72 hours and must stay within that lifetime.
+    Calling `cron()` again with the same expression + timezone does
     NOT replace anything — it starts another, independent session; if you
     want to renew or replace a schedule, kill the old session yourself
     (`meiva.shell.sessions.kill`) before or after registering the new one.

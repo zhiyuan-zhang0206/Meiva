@@ -14,6 +14,7 @@ from meiva.sdk_surface.validation import coerce_str, coerce_typed
 from . import background, background_plan, log_ring
 from . import sessions as sessions
 from .handle import SessionHandle as SessionHandle
+from .session_plan import MAX_SYSTEM_TTL_SECONDS as MAX_SYSTEM_TTL_SECONDS
 
 
 class ShellResult(str):

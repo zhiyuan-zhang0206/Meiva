@@ -3,6 +3,7 @@ from __future__ import annotations
 import os
 import shutil
 import signal
+import time
 from collections.abc import Generator, Iterator
 from contextlib import contextmanager
 from pathlib import Path
@@ -295,33 +296,51 @@ def test_watcher_timeout_notice_carries_the_log_tail(
     )
 
 
-@pytest.mark.scenario("tests.e2e.fakes.scenarios.shell_effects:build_watcher_resurrection")
-def test_at_watcher_revives_a_terminated_owner(spawned_agent: int, clean_shell_world: None) -> None:
+@pytest.mark.scenario("tests.e2e.fakes.scenarios.shell_effects:build_watcher_termination")
+def test_owner_termination_closes_an_at_watcher_before_it_can_fire(
+    spawned_agent: int, clean_shell_world: None
+) -> None:
     agent = spawned_agent
     chat_and_wait(agent, "arm a watcher before termination")
-    wid = int((world.sandbox() / "resurrection-id").read_text())
+    wid_text, fire_at_text = (world.sandbox() / "termination-watcher").read_text().splitlines()
+    wid, fire_at = int(wid_text), float(fire_at_text)
+    full_name = f"meiva-agent-{agent}-shell-{wid}-e2e-terminate"
+    backend = PtySessionBackend(
+        config=PtyClientConfig(socket_path=service_socket()), home=meiva_home()
+    )
+    assert backend.has_session(full_name), "the watcher must be live before termination"
+
     gateway_post(f"{GATEWAY_URL}/api/agents/{agent}/terminate", timeout=10.0).raise_for_status()
     wait_for_status(agent, "terminated")
 
-    def revived() -> tuple[bool, object]:
-        rows = _inbounds(agent, f"watcher:{wid}")
-        wake_done = any(
-            "RESURRECT-WAKE-MARK" in content and status == "done" for _, content, status in rows
-        )
-        completion_done = any(
-            "Watcher 'e2e-resurrect' finished." in content and status == "done"
-            for _, content, status in rows
-        )
-        return wake_done and completion_done, rows
+    def watcher_closed() -> tuple[bool, object]:
+        alive = backend.has_session(full_name)
+        with psycopg.connect(settings.data_plane.db_url) as conn:
+            ttl_row = conn.execute(
+                "SELECT count(*) FROM agent_shell_ttls WHERE agent_id = %s AND session_id = %s",
+                (agent, wid),
+            ).fetchone()
+        return not alive and ttl_row == (0,), {"alive": alive, "ttl_row": ttl_row}
 
-    poll_until(revived, timeout=60.0, interval=0.3, what="watcher wake and completion processed")
-    wait_for_status(agent, "idling")
     poll_until(
-        lambda: _human_witness(agent, "RESURRECT-WAKE-MARK", "Watcher 'e2e-resurrect' finished."),
-        timeout=60.0,
+        watcher_closed,
+        timeout=20.0,
         interval=0.3,
-        what="resurrected owner's wake in model input",
+        what="termination closes the watcher session and TTL row",
     )
+    poll_until(
+        lambda: (
+            time.time() >= fire_at + 2.0,
+            {"now": time.time(), "would_have_fired_at": fire_at},
+        ),
+        timeout=40.0,
+        interval=0.3,
+        what="the terminated watcher's original fire time passes",
+    )
+    assert _inbounds(agent, f"watcher:{wid}") == []
+    with psycopg.connect(settings.data_plane.db_url) as conn:
+        status = conn.execute("SELECT status FROM agents_meta WHERE id = %s", (agent,)).fetchone()
+    assert status == ("terminated",)
 
 
 @pytest.mark.scenario("tests.e2e.fakes.scenarios.shell_effects:build_watcher_orphan")

@@ -27,8 +27,9 @@
 --     (claiming and self-lifecycle); agents_meta and agents (process state and
 --     its own label); machine_units and machines (unit registration);
 --     api_idempotency (runner /ops dedupe);
---     agent_tasks and agent_shell_ttls (SDK
---     lifecycle); heartbeat_pause_log (pause history); and the LangGraph
+--     agent_tasks (task SDK lifecycle) and agent_shell_ttls (runner INSERT,
+--     UPDATE and DELETE for persistent-shell creation, renewal, and terminal
+--     cleanup); heartbeat_pause_log (pause history); and the LangGraph
 --     checkpoints, checkpoint_blobs, and checkpoint_writes (agent state).
 --   - `base.cluster.authority.groups.ensure_groups` is the sole grant list and
 --     re-affirms it after migrations. All other writes travel through

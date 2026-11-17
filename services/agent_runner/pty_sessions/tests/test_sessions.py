@@ -4,15 +4,17 @@ import os
 import shlex
 import signal
 import sys
+import tempfile
 from pathlib import Path
 
 import psutil
 import pytest
 
-from base.sessions.pty import client
+from base.sessions.backend import PtySessionBackend, get_shell_backend
+from base.sessions.pty import client, terminal_fence
 from base.sessions.pty.tests import pty_shells as support
 from base.sessions.pty.tests.job_wait import wait_for_foreground, wait_for_job
-from base.sessions.pty.tests.pty_service import PtyServiceProcess, service_socket
+from base.sessions.pty.tests.pty_service import DelayedNewProxy, PtyServiceProcess, service_socket
 from base.sessions.pty.tests.pty_service import pty_service as pty_service
 from base.sessions.pty.tests.pty_shells import (
     new,
@@ -46,6 +48,69 @@ def test_new_is_idempotent_for_a_live_session(unit_home: Path) -> None:
     assert second == first, "idempotent new must not relaunch"
     type_line(name, "echo still-one-shell")
     output_until(name, "still-one-shell")
+
+
+def test_a_terminal_fence_refuses_an_old_agent_shell_created_after_its_ack(
+    unit_home: Path,
+) -> None:
+    assert client.fence_agent_shells(7, 1, socket_path=service_socket()) == []
+
+    with pytest.raises(client.ServiceError, match=r"below terminal cutoff 1"):
+        new("meiva-agent-7-shell-0-late", unit_home)
+    assert not client.has_session("meiva-agent-7-shell-0-late", socket_path=service_socket())
+
+    assert new("meiva-agent-7-shell-1-resurrected", unit_home) is True
+
+
+def test_a_terminal_fence_survives_service_restart_before_a_lost_ack_arrives(
+    unit_home: Path, pty_service: PtyServiceProcess
+) -> None:
+    upstream = service_socket()
+    with tempfile.TemporaryDirectory(prefix="pty-") as socket_dir:
+        delayed_path = Path(socket_dir) / "d.sock"
+        assert len(str(delayed_path)) < 90
+        proxy = DelayedNewProxy(delayed_path, upstream)
+        old_name = "meiva-agent-7-shell-0-lost-ack"
+        try:
+            with pytest.raises(client.ServiceUnavailableError):
+                client.request(
+                    "new",
+                    socket_path=delayed_path,
+                    timeout=0.05,
+                    name=old_name,
+                    cwd=str(unit_home),
+                    env={},
+                )
+            assert proxy.accepted.wait(timeout=5.0)
+
+            backend = get_shell_backend(home=unit_home)
+            assert isinstance(backend, PtySessionBackend)
+            assert backend.fence_agent_shells(7, 1) == []
+            pty_service.stop()
+            pty_service.start()
+
+            proxy.release.set()
+            assert proxy.completed.wait(timeout=5.0)
+            assert proxy.error is None
+            assert proxy.response is not None and proxy.response["ok"] is False
+            assert not client.has_session(old_name, socket_path=service_socket())
+            assert new("meiva-agent-7-shell-1-resurrected", unit_home) is True
+        finally:
+            proxy.close()
+
+
+def test_an_unreadable_terminal_fence_state_refuses_agent_allocation(
+    unit_home: Path, pty_service: PtyServiceProcess
+) -> None:
+    pty_service.stop()
+    path = terminal_fence.state_path(unit_home)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text("not json")
+    pty_service.start()
+
+    with pytest.raises(client.ServiceError, match="terminal fence state is unreadable"):
+        new("meiva-agent-7-shell-0-state-error", unit_home)
+    assert new("meiva-test-unfenced-1", unit_home) is True
 
 
 def test_the_initial_command_runs_once_the_shell_is_ready(unit_home: Path) -> None:

@@ -146,6 +146,54 @@ class FakePtyService:
             self._path.unlink()
 
 
+# meiva:note
+# A one-request proxy keeps a client request outside the daemon until a test
+# explicitly releases it. It proves boundaries where a client loses the reply
+# or a daemon generation changes while the transport still owns a valid `new`.
+class DelayedNewProxy:
+    def __init__(self, path: Path, upstream: Path) -> None:
+        path.unlink(missing_ok=True)
+        self._path = path
+        self._upstream = upstream
+        self._listener = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+        self._listener.bind(str(path))
+        self._listener.listen(1)
+        self.accepted = threading.Event()
+        self.release = threading.Event()
+        self.completed = threading.Event()
+        self.error: BaseException | None = None
+        self.response: dict[str, object] | None = None
+        self._thread = threading.Thread(target=self._serve, daemon=True)
+        self._thread.start()
+
+    def _serve(self) -> None:
+        try:
+            conn, _address = self._listener.accept()
+            with conn:
+                line = protocol.read_line(conn)
+                assert line is not None
+                self.accepted.set()
+                assert self.release.wait(timeout=5.0), "test did not release delayed PTY request"
+                with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as upstream:
+                    upstream.connect(str(self._upstream))
+                    upstream.sendall(line + b"\n")
+                    response = protocol.read_line(upstream)
+                assert response is not None
+                self.response = protocol.decode_object(response)
+                with contextlib.suppress(OSError):
+                    conn.sendall(protocol.encode(self.response))
+        except BaseException as exc:
+            self.error = exc
+        finally:
+            self.completed.set()
+
+    def close(self) -> None:
+        self.release.set()
+        self._listener.close()
+        self._thread.join(timeout=5.0)
+        self._path.unlink(missing_ok=True)
+
+
 @pytest.fixture
 def pty_service(unit_home: Path) -> Iterator[PtyServiceProcess]:
     """A running pty-sessions service in this test's home; its sessions die with the test."""

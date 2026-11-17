@@ -14,8 +14,8 @@ timezone requirements.
 
 ## Cron lifetime
 
-`end_time` sets expiry; it **defaults to now + 7 days** (standing cap, task #2617) —
-a longer schedule passes an explicit `end_time`. Calling `cron()` again with the same
+`end_time` sets expiry; it **defaults to now + 72 hours** and cannot exceed the
+persistent-shell cap. Calling `cron()` again with the same
 expression + timezone does **not** replace or renew anything — it starts another,
 independent session; kill the old one yourself (`meiva.shell.sessions.kill`) if you
 don't want both running.

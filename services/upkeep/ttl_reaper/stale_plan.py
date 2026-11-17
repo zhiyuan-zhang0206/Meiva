@@ -110,6 +110,6 @@ def stale_rows(rows: Sequence[ShellRow], live: frozenset[int]) -> tuple[ShellRow
 # "unexpired rows" count a duty's health check reads drops with it — so absence alone is not
 # evidence. It becomes evidence only together with silence: nothing anywhere has recorded a probe of
 # that machine inside the same window a young row is exempt for. A machine that answers no probe for
-# six hours and is missing from the registry is gone, and its rows can never be dialed again.
+# five minutes and is missing from the registry is gone, and its rows can never be dialed again.
 def absence_is_terminal(last_probe_at: datetime | None, *, now: datetime, grace: timedelta) -> bool:
     return last_probe_at is None or last_probe_at < now - grace

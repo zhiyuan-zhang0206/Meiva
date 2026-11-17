@@ -104,30 +104,32 @@ def test_launch_registers_ttl_row_from_timeout(
         meiva.shell.sessions.kill(wid)
 
 
+# meiva:note
+# The session row records a cron's real end deadline, including the 72-hour
+# default, rather than a generic user-session lifetime.
 def test_cron_registers_ttl_folded_to_end_time(
     db_conn: psycopg.Connection, _agent_row: int
 ) -> None:
-    """Task #3411: a cron watcher's session TTL IS its deadline — the
-    registration's end_time (defaulted to now + 7 days, task #2617), folded
-    as `deadline - now` at mount time — never the old 24h placeholder."""
     before = datetime.datetime.now(datetime.UTC)
     wid = _cron("0 4 * * *", "wake", name="test-cron-ttl")
     try:
         deadline = _ttl_deadline(db_conn, _agent_row, wid)
         assert deadline is not None
         delta = deadline - before
-        # Default end = the registration minute + 7 days (minute-truncated).
-        assert datetime.timedelta(days=7) - datetime.timedelta(minutes=1) <= delta
-        assert delta <= datetime.timedelta(days=7, minutes=1)
+        # meiva:note
+        # Default end = the registration minute + 72 hours (minute-truncated).
+        assert datetime.timedelta(days=3) - datetime.timedelta(minutes=1) <= delta
+        assert delta <= datetime.timedelta(days=3, minutes=1)
         # The system-side true value is exempt from the 24h sessions.new cap.
-        assert deadline > datetime.datetime.now(datetime.UTC) + datetime.timedelta(days=6)
+        assert deadline > datetime.datetime.now(datetime.UTC) + datetime.timedelta(days=2)
     finally:
         meiva.shell.sessions.kill(wid)
 
 
+# meiva:note
+# A caller-selected watcher deadline may exceed the user cap while remaining
+# inside the absolute persistent-shell bound.
 def test_cron_registers_ttl_from_explicit_end(db_conn: psycopg.Connection, _agent_row: int) -> None:
-    """An explicit end_time beyond the user-session cap still folds exactly:
-    the watcher TTL is the stored deadline, uncapped (task #3411)."""
     end = datetime.datetime.now(datetime.UTC) + datetime.timedelta(hours=30)
     wid = _cron("0 4 * * *", "wake", end_time=end, name="test-cron-ttl-explicit")
     try:
@@ -277,7 +279,7 @@ def test_shell_kill_stops_watcher(_agent_row: int) -> None:
 
 # meiva:note
 # A session whose launch never sent must not linger as an idle login shell under the watcher's
-# name until its TTL (up to 7 days for a default cron): it is killed and the failure propagates.
+# name until its TTL (up to 72 hours for a default cron): it is killed and the failure propagates.
 # The failure is a real one: the path of one generated file is already taken by a directory.
 @pytest.mark.parametrize("generated", ["{}.py", "{}_boot.py", "{}_launch.sh"])
 def test_spawn_kills_session_when_the_launch_fails(

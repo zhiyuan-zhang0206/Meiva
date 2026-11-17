@@ -225,6 +225,16 @@ def _set_session_index(db_conn: psycopg.Connection, agent_id: int, session_index
     db_conn.commit()
 
 
+def _shell_ttl_ids(db_conn: psycopg.Connection, agent_id: int) -> list[int]:
+    return [
+        row[0]
+        for row in db_conn.execute(
+            "SELECT session_id FROM agent_shell_ttls WHERE agent_id = %s ORDER BY session_id",
+            (agent_id,),
+        ).fetchall()
+    ]
+
+
 class TestKillAllShellSessions:
     async def test_graceful_live_agent_defers_the_kill_to_exit(
         self,
@@ -263,7 +273,7 @@ class TestKillAllShellSessions:
             {"inbound_id": events[0].attributes["inbound_id"], "kill_all_shell_sessions": True}
         ]
 
-    async def test_without_the_option_nothing_is_recorded_or_killed(
+    async def test_without_the_legacy_option_every_terminal_path_still_closes_shells(
         self,
         db_conn: psycopg.Connection,
         db_pool: ConnectionPool,
@@ -275,7 +285,7 @@ class TestKillAllShellSessions:
     ) -> None:
         from ops import lifecycle
 
-        shell = shells.open(running_agent_id, 0).name
+        shells.open(running_agent_id, 0)
         _set_session_index(db_conn, running_agent_id, 1)
 
         graceful = await lifecycle.terminate_agent_op(
@@ -295,9 +305,17 @@ class TestKillAllShellSessions:
             host=agent_host.host,
         )
 
-        assert (graceful.status, graceful.shell_sessions) == ("enqueued", None)
-        assert (forced.status, forced.shell_sessions) == ("enqueued", None)
-        assert shells.alive() == {shell}
+        from ops.rpc_schemas.terminate import ShellSessionsKill
+
+        assert graceful.status == "enqueued"
+        assert graceful.shell_sessions == ShellSessionsKill(
+            when=ShellSessionKillTiming.AT_EXIT, killed=[]
+        )
+        assert forced.status == "enqueued"
+        assert forced.shell_sessions == ShellSessionsKill(
+            when=ShellSessionKillTiming.NOW, killed=[0]
+        )
+        assert shells.alive() == set()
         payloads = _terminate_payloads(db_conn, running_agent_id)
         assert len(payloads) == 2
         assert all(
@@ -321,12 +339,18 @@ class TestKillAllShellSessions:
         shells.open(running_agent_id, 0)
         shells.open(running_agent_id, 3)
         _set_session_index(db_conn, running_agent_id, 4)
+        db_conn.execute(
+            "INSERT INTO agent_shell_ttls (agent_id, session_id, expires_at) VALUES "
+            "(%s, 0, now() + interval '1 hour'), (%s, 3, now() + interval '1 hour')",
+            (running_agent_id, running_agent_id),
+        )
+        db_conn.commit()
 
         resp = await lifecycle.terminate_agent_op(
             database,
             event_bus,
             running_agent_id,
-            TerminateAgentRequest(force=True, kill_all_shell_sessions=True),
+            TerminateAgentRequest(force=True),
             db_pool,
             host=agent_host.host,
         )
@@ -336,8 +360,9 @@ class TestKillAllShellSessions:
             when=ShellSessionKillTiming.NOW, killed=[0, 3]
         )
         assert shells.alive() == set()
+        assert _shell_ttl_ids(db_conn, running_agent_id) == []
         assert agent_host.cancel_requests == [running_agent_id]
-        assert _terminate_payloads(db_conn, running_agent_id) == [{"kill_all_shell_sessions": True}]
+        assert _terminate_payloads(db_conn, running_agent_id) == [None]
 
     async def test_force_supersedes_a_graceful_kill_request_without_carrying_it(
         self,
@@ -351,7 +376,7 @@ class TestKillAllShellSessions:
     ) -> None:
         from ops import lifecycle
 
-        shell = shells.open(running_agent_id, 0).name
+        shells.open(running_agent_id, 0)
         _set_session_index(db_conn, running_agent_id, 1)
         await lifecycle.terminate_agent_op(
             database,
@@ -370,8 +395,10 @@ class TestKillAllShellSessions:
             host=agent_host.host,
         )
 
-        assert resp.shell_sessions is None
-        assert shells.alive() == {shell}
+        from ops.rpc_schemas.terminate import ShellSessionsKill
+
+        assert resp.shell_sessions == ShellSessionsKill(when=ShellSessionKillTiming.NOW, killed=[0])
+        assert shells.alive() == set()
 
     @pytest.mark.parametrize("became_terminated", ["inserted", "committed_before_the_request"])
     async def test_an_already_terminated_agent_is_killed_now(
@@ -403,7 +430,7 @@ class TestKillAllShellSessions:
             database,
             event_bus,
             agent_id,
-            TerminateAgentRequest(kill_all_shell_sessions=True),
+            TerminateAgentRequest(),
             db_pool,
             host=agent_host.host,
         )
@@ -538,7 +565,7 @@ async def test_kill_terminates_only_the_owners_real_shell_sessions(
         ("codex", {"harness": "meiva", "llm_model": "deepseek-flash"}),
     ],
 )
-async def test_harness_restart_preserves_shell_sessions(
+async def test_harness_restart_closes_shell_sessions_during_its_terminal_transition(
     db_conn: psycopg.Connection,
     db_pool: ConnectionPool,
     unit_home: Path,
@@ -568,7 +595,7 @@ async def test_harness_restart_preserves_shell_sessions(
         event_bus,
         agent_id,
         RestartAgentRequest(
-            source="user", message="restart without killing shells", config_overlay=overlay
+            source="user", message="restart closes prior shell sessions", config_overlay=overlay
         ),
         db_pool,
         host=agent_host.host,
@@ -578,8 +605,8 @@ async def test_harness_restart_preserves_shell_sessions(
     )
 
     assert resp.status == "enqueued"
-    assert shells.alive() == {shell.name, watcher.name}
-    assert _pid_alive(shell.pid, timeout=0.1) and _pid_alive(watcher.pid, timeout=0.1)
+    assert shells.alive() == set()
+    assert not _pid_alive(shell.pid) and not _pid_alive(watcher.pid)
     payloads = _terminate_payloads(db_conn, agent_id)
     assert all(
         not isinstance(payload, dict) or "kill_all_shell_sessions" not in payload

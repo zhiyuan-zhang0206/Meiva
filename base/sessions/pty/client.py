@@ -19,6 +19,7 @@ import time
 from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
+from typing import TypeGuard
 
 from base.host.boundary.fields import (
     int_field,
@@ -221,6 +222,12 @@ def _survivor_pids(data: Mapping[str, object]) -> tuple[int, ...]:
     return tuple(_pid(pid) for pid in survivors)
 
 
+def _is_int_list(value: object) -> TypeGuard[list[int]]:
+    return is_object_list(value) and all(
+        not isinstance(item, bool) and isinstance(item, int) for item in value
+    )
+
+
 def _pid(value: object) -> int:
     if not isinstance(value, int):
         raise TypeError(f"survivor pid is {type(value).__name__}, not int")
@@ -310,6 +317,24 @@ def create_session(
             "created"
         ]
     )
+
+
+# meiva:note
+# The terminal lifecycle writes its durable cutoff before it asks the service to
+# close PTYs. This call is the closure acknowledgement: unavailable transport is
+# unknown closure, so it propagates and the caller retains the TTL evidence for a
+# later retry rather than treating a missing socket as proof of absence.
+def fence_agent_shells(agent_id: int, before_session_index: int, *, socket_path: Path) -> list[int]:
+    data = request(
+        "fence_agent_shells",
+        socket_path=socket_path,
+        agent_id=agent_id,
+        before_session_index=before_session_index,
+    )
+    killed = data.get("killed")
+    if not _is_int_list(killed):
+        raise TypeError("fence_agent_shells killed is missing or not a list of integers")
+    return killed
 
 
 def send(name: str, data: bytes, *, socket_path: Path) -> None:

@@ -443,7 +443,6 @@ class TestTerminate:
         assert result == TerminateResult.ALREADY_TERMINATED
         assert result.status is TerminateResult.ALREADY_TERMINATED
         assert result.open_tasks is None
-        # No kill was requested (and an older runner reports none): None.
         assert result.shell_sessions is None
 
     # meiva:note

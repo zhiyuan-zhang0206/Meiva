@@ -1,0 +1,2 @@
+[uses]
+"test_agent_transfer.py" = ["child_workspace_writer.py"]

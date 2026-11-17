@@ -12,20 +12,25 @@ from collections.abc import Sequence
 _NAME_RE = re.compile(r"[a-z][a-z0-9-]*")
 
 # meiva:note
-# 24 hours: the cap on a user-facing session (ruling 2026-09-01). A system-side session, a watcher spawn, is exempt because its ttl is the watcher's true target deadline (ruling 2026-09-14, task #3411).
+# 24 hours: the cap on a user-facing session (ruling 2026-09-01).
 MAX_TTL_SECONDS = 86_400
+
+# meiva:note
+# 72 hours: the absolute cap for every new or renewed persistent shell, including
+# system-owned watcher sessions. Existing rows can carry an older, longer deadline;
+# readers intentionally accept those rows until their natural cleanup.
+MAX_SYSTEM_TTL_SECONDS = 259_200
 
 
 # meiva:note
-# A non-finite or non-positive ttl is refused on every path: a session whose deadline has already passed must never be created. The 24-hour cap protects user calls only; `system=True` marks a watcher spawn.
+# A non-finite or non-positive ttl is refused on every path: a session whose deadline has already passed must never be created. User sessions stay capped at 24 hours; `system=True` marks a watcher spawn, which may use up to the fleet-wide 72-hour absolute cap.
 def validate_ttl(ttl: float, *, system: bool = False) -> float:
     if not math.isfinite(ttl) or ttl <= 0:
         raise ValueError("ttl must be finite and greater than zero")
-    if not system and ttl > MAX_TTL_SECONDS:
-        raise ValueError(
-            f"ttl must be at most {MAX_TTL_SECONDS} seconds (24 hours) — "
-            "sessions live at most one day"
-        )
+    max_ttl = MAX_SYSTEM_TTL_SECONDS if system else MAX_TTL_SECONDS
+    if ttl > max_ttl:
+        hours = max_ttl // 3600
+        raise ValueError(f"ttl must be at most {max_ttl} seconds ({hours} hours)")
     return ttl
 
 

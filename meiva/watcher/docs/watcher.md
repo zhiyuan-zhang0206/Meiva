@@ -11,6 +11,9 @@ applies to an ordinary `meiva.shell.sessions` session applies to a watcher's
 session too: list it, capture its output, renew its TTL deadline, or kill it.
 Nothing ever restarts a watcher automatically — write watcher scripts
 assuming they may be cut off at any moment and will not be re-run for you.
+When the owner reaches `terminated`, lifecycle cleanup immediately closes the
+watcher's session. A trigger that must remain active across owner termination
+belongs in `meiva.schedules` with `on_owner_terminate="keep"`.
 
 ## Core API
 
@@ -23,7 +26,7 @@ Omitted `notify` marks the shell-level send as a plain platform completion (`mei
 ## What happens when a watcher's session ends
 
 Self-exit, your own kill, TTL reclaim, a stop that force-closes busy sessions, the
-accepted no-notice gaps, what happens to a watcher that outlives its owner, and the
+owner reaching `terminated`, the accepted no-notice gaps, and the
 orphan guard that kills one whose session is gone:
 [meiva.watcher — what happens when a watcher's session ends](lifecycle.md). None of them ever re-spawns a watcher.
 

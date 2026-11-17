@@ -16,7 +16,7 @@
 # them: the ownership probe times out at three seconds.
 #
 # Requests are `{"id", "method", ...}`. Methods: `ping`, `has`, `list`, `new`,
-# `send`, `capture`, `resize`, `kill`, `close_all`.
+# `send`, `capture`, `resize`, `kill`, `close_all`, `fence_agent_shells`.
 
 from __future__ import annotations
 
@@ -44,7 +44,7 @@ from base.native_process.os_platform import is_macos
 from base.native_process.ownership import stable_create_time
 from base.native_process.process_control import ProcessControl
 from base.paths import logs_dir, run_dir
-from base.sessions.pty import closure, process_groups, protocol
+from base.sessions.pty import closure, process_groups, protocol, terminal_fence
 from base.sessions.pty.allocation_freeze import PtyAllocationFreeze, state_path
 from base.sessions.pty.paths import (
     CAPTURE_MAX_LINES,
@@ -60,6 +60,7 @@ from services.agent_runner.pty_sessions import ledger, session
 # Session names ride the transcript filename; keep the conservative slug shape
 # meiva/shell/sessions.py enforces for its names.
 _NAME_RE = re.compile(r"[a-z][a-z0-9-]*")
+_AGENT_SHELL_RE = re.compile(r"meiva-agent-(\d+)-shell-(\d+)(?:-.+)?$")
 
 # Reading one request must not hold a connection forever.
 _REQUEST_READ_TIMEOUT_S = 30.0
@@ -181,6 +182,13 @@ class PtyService:
         self._host_generation = host_generation
         self._freeze: PtyAllocationFreeze = PtyAllocationFreeze(status="inactive")
         self._freeze_lock = threading.Lock()
+        # meiva:note
+        # An agent terminal transition owns a monotonically increasing session-index
+        # cutoff. It is restored before this service accepts allocations: a request
+        # held outside the old daemon can arrive after this generation starts.
+        terminal_fences = terminal_fence.read(home)
+        self._agent_shell_cutoffs = terminal_fences.cutoffs
+        self._terminal_fence_error = terminal_fences.error
         self._rng = rng
         # Set once `serve` runs: the loop and its task group, and the stop request.
         self._loop: asyncio.AbstractEventLoop | None = None
@@ -197,6 +205,7 @@ class PtyService:
             "resize": self._resize,
             "kill": self._kill,
             "close_all": self._close_all,
+            "fence_agent_shells": self._fence_agent_shells,
             "freeze": self._freeze_op,
             "resume": self._resume_op,
             "freeze_status": self._freeze_status,
@@ -319,6 +328,81 @@ class PtyService:
             )
             return {"resumed": True}
 
+    @staticmethod
+    def _agent_shell_id(name: str, agent_id: int) -> int | None:
+        match = _AGENT_SHELL_RE.fullmatch(name)
+        if match is None or int(match.group(1)) != agent_id:
+            return None
+        return int(match.group(2))
+
+    # meiva:note
+    # The terminal cutoff is durable rather than transaction-local: a lost
+    # acknowledgement can let the owner resurrect before a delayed request
+    # reaches a later PTY service generation. Callers hold `_freeze_lock`.
+    def _assert_above_terminal_cutoffs(self, name: str) -> None:
+        match = _AGENT_SHELL_RE.fullmatch(name)
+        if match is None:
+            return
+        if self._terminal_fence_error is not None:
+            raise RequestError(
+                protocol.ERROR,
+                f"pty allocation refused: {self._terminal_fence_error}",
+            )
+        agent_id, session_id = (int(value) for value in match.group(1, 2))
+        cutoff = self._agent_shell_cutoffs.get(agent_id, 0)
+        if session_id < cutoff:
+            raise RequestError(
+                protocol.ERROR,
+                "pty allocation refused: agent shell "
+                f"{agent_id}/{session_id} is below terminal cutoff {cutoff}",
+            )
+
+    # meiva:note
+    # A malformed persisted allocation-freeze marker overrides the in-memory
+    # state so operators must repair the durable evidence before a new fork.
+    def _effective_freeze(self) -> PtyAllocationFreeze:
+        freeze = self._freeze
+        if not state_path(self._home).exists():
+            return freeze
+        from base.sessions.pty import allocation_freeze
+
+        disk_freeze = allocation_freeze.read(home=self._home)
+        return disk_freeze if disk_freeze.status == "invalid" else freeze
+
+    # meiva:note
+    # `_new` and this method share `_freeze_lock`. Thus the acknowledgement
+    # means either an in-flight old allocation was registered and selected for
+    # closure, or every later old allocation will see the cutoff and be refused.
+    def _fence_agent_shells(self, req: dict[str, object]) -> dict[str, object]:
+        agent_id = _count(req, "agent_id", 0, low=1, high=(1 << 63) - 1)
+        cutoff = _count(req, "before_session_index", 0, low=0, high=(1 << 63) - 1)
+        with self._freeze_lock:
+            try:
+                active_cutoff = terminal_fence.record(self._home, agent_id, cutoff)
+            except terminal_fence.TerminalFenceStateError as exc:
+                raise RequestError(protocol.ERROR, str(exc)) from exc
+            self._agent_shell_cutoffs[agent_id] = active_cutoff
+            self._terminal_fence_error = None
+            with self._lock:
+                targets = sorted(
+                    (session_id, name)
+                    for name in self._sessions
+                    if (session_id := self._agent_shell_id(name, agent_id)) is not None
+                    and session_id < active_cutoff
+                )
+        failed: list[int] = []
+        for session_id, name in targets:
+            try:
+                self._kill({"name": name, "graceful": False})
+            except RequestError:
+                failed.append(session_id)
+        if failed:
+            raise RequestError(
+                protocol.ERROR,
+                f"failed to close fenced shell session(s) {failed} of agent {agent_id}",
+            )
+        return {"killed": [session_id for session_id, _name in targets]}
+
     def _new(self, req: dict[str, object]) -> dict[str, object]:
         name = _text(req, "name")
         if not _NAME_RE.fullmatch(name):
@@ -333,13 +417,8 @@ class PtyService:
             raise RequestError(protocol.BAD_REQUEST, "cmd must be a string")
         env = child_env(req.get("env", {}), base_environ=self._base_environ)
         with self._freeze_lock:
-            freeze = self._freeze
-            if state_path(self._home).exists():
-                from base.sessions.pty import allocation_freeze
-
-                disk_freeze = allocation_freeze.read(home=self._home)
-                if disk_freeze.status == "invalid":
-                    freeze = disk_freeze
+            self._assert_above_terminal_cutoffs(name)
+            freeze = self._effective_freeze()
             existing = self._live(name)
             if existing is not None:
                 if (

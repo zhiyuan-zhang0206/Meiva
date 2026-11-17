@@ -281,6 +281,18 @@ EVENTS: dict[str, EventSpec] = {
         "durable terminated flip already committed",
         tier="noise",
     ),
+    "corpse_reaper_browser_release_failed": telemetry_event(
+        "corpse_reaper_browser_release_failed",
+        "a reaped corpse's browser-page release failed after its durable terminal "
+        "transition; later lifecycle cleanup can retry it",
+        tier="anomaly",
+    ),
+    "corpse_reaper_shell_cleanup_failed": telemetry_event(
+        "corpse_reaper_shell_cleanup_failed",
+        "a reaped corpse's persistent-shell cleanup failed after its durable terminal "
+        "transition; the TTL reaper retains and retries its rows",
+        tier="anomaly",
+    ),
     "host_turn_stall_aborted": telemetry_event(
         "host_turn_stall_aborted",
         "a hosted turn task ended after its no-progress abort: the invocation "

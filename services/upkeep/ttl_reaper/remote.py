@@ -25,9 +25,9 @@ _log = logging.getLogger(__name__)
 
 
 # meiva:note
-# One pass: reclaim expired shells, then drop the tracking rows of sessions a machine no longer
-# lists. `sweep` is the caller's cadence decision — the loop below sweeps once every
-# `shells.SWEEP_EVERY_ROUNDS` rounds; a direct caller sweeps unless it says otherwise.
+# One pass: close shells whose owners are already terminal, reclaim expired shells,
+# then drop tracking rows of sessions a machine no longer lists. `sweep` is the
+# caller's cadence decision; the resident loop sweeps every round.
 async def remote_round(
     pool: ConnectionPool,
     db: Database,
@@ -38,6 +38,10 @@ async def remote_round(
     *,
     sweep: bool = True,
 ) -> None:
+    terminated = await shells.reap_terminated_shells(pool, db, progress, config, rpc)
+    progress.beat()
+    if terminated:
+        _log.info("[ttl-reaper] reclaimed %d terminal-owner shell(s)", len(terminated))
     reaped = await shells.reap_expired_shells(pool, db, bus, progress, config, rpc)
     progress.beat()
     if reaped:

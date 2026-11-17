@@ -82,6 +82,28 @@ def test_runner_grant_matrix(runner_db: str) -> None:  # noqa: PLR0915 -- one gr
         # added one DELETE surface, not a blanket delete on writable tables.
         with pytest.raises(psycopg.errors.InsufficientPrivilege):
             conn.execute("DELETE FROM agent_tasks WHERE title = 't1'")
+        # meiva:note
+        # Persistent-shell ownership stays with the runner through terminal
+        # cleanup: it creates and renews TTL rows, then deletes only rows whose
+        # local PTY close returned a definitive result.
+        # meiva:link docs/history/2026-11-17/persistent-shell-lifecycle.md
+        assert conn.execute(
+            "SELECT has_table_privilege(current_user, 'agent_shell_ttls', 'DELETE')"
+        ).fetchone() == (True,)
+        conn.execute(
+            "INSERT INTO agent_shell_ttls (agent_id, session_id, expires_at) "
+            "VALUES (%s, 7, now() + interval '1 hour')",
+            (agent_id,),
+        )
+        conn.execute(
+            "UPDATE agent_shell_ttls SET expires_at = now() + interval '2 hours' "
+            "WHERE agent_id = %s AND session_id = 7",
+            (agent_id,),
+        )
+        conn.execute(
+            "DELETE FROM agent_shell_ttls WHERE agent_id = %s AND session_id = 7",
+            (agent_id,),
+        )
         # meiva.self.pause_heartbeat: the pause trail (SELECT the previous
         # window + INSERT the new row — regression for task #1932, where the
         # table shipped without a runner grant and every pause_heartbeat

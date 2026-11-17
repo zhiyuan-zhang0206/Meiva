@@ -1,8 +1,8 @@
 # meiva:note
 # Runner-side operations for whole-agent cross-machine transfer:
 # - `export_workspace_bundle`: serves `POST /workspace/export` on the source runner after verifying
-#   Postgres placement and non-running fence state, killing local persistent shells below the
-#   snapshot `session_index`, and packing `<home>/workspaces/<agent_id>`.
+#   Postgres placement and non-running fence state, durably fencing local persistent shells below
+#   the snapshot `session_index`, and packing `<home>/workspaces/<agent_id>`.
 # - `prepare_target_op`, `import_workspace_op`, `finalize_transfer_op`, `abort_transfer_op`: serve
 #   the four `POST /ops` arms on target and source runners.
 # meiva:link gateway/agents/docs/agent-transfer.md
@@ -105,12 +105,14 @@ def _verify_export_fence(
 
 
 # meiva:note
-# Verify the source fence is 'terminated', measure the workspace against the transfer ceilings, kill
-# local persistent shells, pack the workspace into a `MEIVA_WS_V1` bundle, and re-verify the fence.
+# Verify the source fence is 'terminated', measure the workspace against the transfer ceilings,
+# fence local persistent shells, pack the workspace into a `MEIVA_WS_V1` bundle, and re-verify it.
 #
-# The measurement comes before the kill: a workspace over either ceiling is refused while the
+# The measurement comes before the fence: a workspace over either ceiling is refused while the
 # agent's shells are still alive and before a byte of it is read, so a refused export leaves the
-# source exactly as it was.
+# source exactly as it was. Export requires the PTY service's acknowledgement: the durable cutoff
+# protects a future daemon generation, but service unavailability does not prove that an old payload
+# stopped mutating the workspace, so every fence failure aborts before packing.
 def export_workspace_bundle(
     pool: ConnectionPool,
     request: WorkspaceExportRequest,

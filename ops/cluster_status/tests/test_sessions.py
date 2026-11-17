@@ -20,6 +20,7 @@ import pytest
 from base.api_contracts.agent_contract import ShellKillMode
 from base.clock import SYSTEM_TIMERS
 from base.sessions.backend import PosixProcSessionBackend, get_shell_backend
+from base.sessions.pty import client, terminal_fence
 from base.sessions.pty.tests.job_wait import wait_for_job
 from base.sessions.pty.tests.pty_shells import new, output_until, shell_process, type_line
 from ops.cluster_status import (
@@ -108,7 +109,13 @@ def test_the_listing_reads_the_service_of_the_home_it_is_given(
     assert kill_shell(7, 0, home=elsewhere) == (ShellKillMode.ABSENT, False, None)
     with pytest.raises(ShellNotFoundError):
         capture_shell(7, 0, now=_now(), home=elsewhere)
-    assert kill_agent_shells(7, before_session_index=9, home=elsewhere) == []
+    # meiva:note
+    # A missing socket cannot prove an old daemon has closed its PTYs. The
+    # terminal cutoff is durable before the operation reports that unknown
+    # state, so a later daemon rejects a delayed pre-terminal allocation.
+    with pytest.raises(client.ServiceDownError):
+        kill_agent_shells(7, before_session_index=9, home=elsewhere)
+    assert terminal_fence.read(elsewhere).cutoffs == {7: 9}
     assert get_shell_backend(home=unit_home).has_session("meiva-agent-7-shell-0")
 
 

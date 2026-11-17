@@ -16,18 +16,20 @@ from base.telemetry.audit_events import prepare_event_log, record_audit_async
 
 
 # meiva:note
-# The two columns the reap UPDATE returns: the corpse's id and whether it still owed a handoff
-# receipt. Matched by type rather than trusted, so a row of another shape fails here instead of
-# stamping a termination against an unchecked id.
+# The two columns the reap UPDATE returns: the corpse's id and the exclusive
+# persistent-shell cutoff captured by the status transition. Matched by type rather
+# than trusted, so a row of another shape fails here instead of stamping a termination
+# against an unchecked id.
 @dataclass(frozen=True)
 class _ReapedRow:
     agent_id: int
+    shell_cutoff: int
 
     @classmethod
     def from_row(cls, row: tuple[object, ...]) -> _ReapedRow:
         match row:
-            case (int() as agent_id,):
-                return cls(agent_id)
+            case (int() as agent_id, int() as shell_cutoff):
+                return cls(agent_id, shell_cutoff)
             case _:
                 raise TypeError("a reaped agents_meta row has columns of unexpected types")
 
@@ -62,7 +64,7 @@ async def reap_crash_corpses(
                 "WHERE machine = %s AND status = 'idling' "
                 "AND last_turn_fatal_at IS NOT NULL "
                 "AND last_turn_fatal_at <= now() - make_interval(secs => %s) "
-                "RETURNING id",
+                "RETURNING id, session_index",
                 (machine, CORPSE_REAP_GRACE_S),
             )
         ).fetchall()
@@ -80,6 +82,7 @@ async def reap_crash_corpses(
             reaped.append(
                 ReapedCorpse(
                     corpse.agent_id,
+                    corpse.shell_cutoff,
                 )
             )
     for event in recorded:
