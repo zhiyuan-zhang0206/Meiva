@@ -2,7 +2,7 @@
   "source": {
     "interface": "Antigravity GetCascadeTrajectory",
     "observed": "2026-11-17, agent 405 on macmini, agy 1.5.9",
-    "sanitization": "Only one completed planner's timing shape retained. Thinking replaced with synthetic text; all configuration, credentials, messages, tool input and identifiers omitted."
+    "sanitization": "Native field names and an observed duration are retained. Index, thinking and creation timestamp are synthetic; nanosecond precision exercises the parser. All configuration, credentials, messages, tool input and identifiers are omitted."
   },
   "reply": {
     "status": "CASCADE_RUN_STATUS_IDLE",
