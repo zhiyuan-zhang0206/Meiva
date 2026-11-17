@@ -140,7 +140,9 @@ describe("TurnBlock component", () => {
     render(<PendingLiveActivityWindow />);
     const pending = screen.getByTestId("pending-live-activity-window");
     expect(pending.className).not.toContain("rounded-xl");
-    expect(pending.textContent).toContain("Working…");
+    expect(pending.querySelector(".animate-spin")).toBeTruthy();
+    expect(pending.querySelector(".sr-only")?.textContent).toBe("Agent is responding.");
+    expect(pending.textContent).not.toContain("Working");
   });
 
   it("skips re-rendering when a regroup rebuilds equal member ids and summary", () => {

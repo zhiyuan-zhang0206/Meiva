@@ -9,7 +9,7 @@
 // downward from a fixed top edge while the reader scrolls the timeline itself.
 // meiva:link ui/web/src/docs/frontend-components/timeline-view/timeline-view.md
 
-import { ChevronRight, Layers } from "lucide-react";
+import { Layers } from "lucide-react";
 import { useTranslations } from "next-intl";
 import { memo, type ReactNode } from "react";
 
@@ -28,6 +28,7 @@ import {
 import { CallBadge, DisclosureChevron, DISCLOSURE_TITLE_CLS } from "./view/card-summary/card-summary";
 import { useNow } from "./model/reasoning-clock";
 import { formatTurnSummary, turnSummaryEqual, type TurnSummary } from "./model/runs";
+import { LoadingRing } from "./overlays";
 
 interface TurnBlockProps {
   id: string;
@@ -212,14 +213,15 @@ export const TurnBlock = memo(function TurnBlock({
 // meiva:note
 // Immediate inline activity row rendered right after human message submission
 // before the first reasoning or tool item arrives, matching TurnBlock's header geometry.
-// meiva:link ui/web/src/docs/frontend-components/timeline-view/timeline-view.md
+// meiva:link ui/web/src/docs/frontend-components/timeline-view/loading-ring.md
 export const PendingLiveActivityWindow = memo(function PendingLiveActivityWindow() {
   const t = useTranslations("timeline");
   return (
     <div
       data-live-activity-window="true"
       data-testid="pending-live-activity-window"
-      aria-live="off"
+      role="status"
+      aria-label={t("agentResponding")}
       className="relative"
     >
       <div
@@ -228,10 +230,9 @@ export const PendingLiveActivityWindow = memo(function PendingLiveActivityWindow
           FLEX,
         )}
       >
-        <span className={cn("items-center gap-1.5 text-[13px] leading-snug", FLEX, FLEX_1, MIN_W_0)}>
-          <Layers className="size-3.5 shrink-0 opacity-70" />
-          <span className="truncate whitespace-nowrap tabular-nums">{t("working")}</span>
-          <ChevronRight aria-hidden="true" className="size-3.5 shrink-0 opacity-60" />
+        <span className={cn("h-[1lh] items-center text-[13px] leading-snug", FLEX, FLEX_1, MIN_W_0)}>
+          <LoadingRing className="size-3.5" />
+          <span className="sr-only">{t("agentResponding")}</span>
         </span>
       </div>
     </div>
