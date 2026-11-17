@@ -120,3 +120,48 @@ describe("the older-page strip presents the reader's own request only", () => {
     }
   });
 });
+
+const human = makeItem({ kind: "inbound_chat", source: "user", payload: "Please continue" });
+
+describe("timeline loading presentation", () => {
+  it("cold loading wins over older loading and an active empty turn", () => {
+    const { container } = render(<TimelineView items={[]} loading readerLoadingOlder turnActive />);
+    expect(screen.getByTestId("cold-load-ring")).toBeTruthy();
+    expect(container.querySelectorAll(".animate-spin")).toHaveLength(1);
+    expect(screen.queryByTestId("pending-live-activity-window")).toBeNull();
+    expect(screen.getByTestId("load-older-spinner").getAttribute("aria-hidden")).toBe("true");
+  });
+
+  it("an older reader request owns the ring while a human prompt awaits its first step", () => {
+    const { container, rerender } = render(<TimelineView items={[human]} readerLoadingOlder turnActive />);
+    expect(container.querySelectorAll(".animate-spin")).toHaveLength(1);
+    expect(screen.queryByTestId("pending-live-activity-window")).toBeNull();
+    rerender(<TimelineView items={[human]} turnActive />);
+    const pending = screen.getByTestId("pending-live-activity-window");
+    expect(container.querySelectorAll(".animate-spin")).toHaveLength(1);
+    expect(pending.querySelector("svg")).toBeTruthy();
+    expect(pending.querySelector(".sr-only")?.textContent).toBe("Agent is responding.");
+    expect(pending.querySelector("button")).toBeNull();
+    expect(pending.textContent).not.toContain("Working");
+  });
+
+  it("a retained prompt stays readable under the initial source qualification ring", () => {
+    const { rerender, container } = render(<TimelineView items={[human]} loading turnActive />);
+    expect(screen.getByText("Please continue")).toBeTruthy();
+    expect(screen.getByTestId("cold-load-ring")).toBeTruthy();
+    expect(screen.queryByTestId("pending-live-activity-window")).toBeNull();
+    expect(container.querySelectorAll(".animate-spin")).toHaveLength(1);
+    rerender(<TimelineView items={[human]} />);
+    expect(container.querySelectorAll(".animate-spin")).toHaveLength(0);
+    expect(screen.queryByTestId("pending-live-activity-window")).toBeNull();
+  });
+
+  it("real work remains expandable while a reader load is in progress", () => {
+    render(<TimelineView items={[human, makeItem({ item_id: "2.0", kind: "agent_reasoning", payload: "Actual reasoning", reasoning_ms: 2000 })]} readerLoadingOlder turnActive />);
+    const header = screen.getByTestId("turn-toggle");
+    expect(header.textContent).toContain("Working for 2s");
+    fireEvent.click(header);
+    expect(header.getAttribute("aria-expanded")).toBe("true");
+    expect(screen.queryByTestId("pending-live-activity-window")).toBeNull();
+  });
+});

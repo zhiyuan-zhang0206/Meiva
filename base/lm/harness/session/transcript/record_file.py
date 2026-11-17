@@ -53,6 +53,35 @@ class RecordFile:
     def prepare(self, before: int | None) -> None:
         del before
 
+    def prepare_anchor(self, offset: int) -> None:
+        del offset
+        self.prepare(None)
+
+    # meiva:note
+    # Item IDs name row starts. An inclusive lookup must find the complete
+    # newline-terminated row here, where byte offsets have their meaning.
+    # meiva:link base/lm/harness/docs/transcript-projection.md
+    def row_at(self, offset: int) -> FileRow | None:
+        if offset < self._floor or offset < 0 or offset >= self.size():
+            return None
+        if offset > 0 and self._read(offset - 1, offset) != b"\n":
+            return None
+        chunks: list[bytes] = []
+        at, remaining = offset, MAX_BLOCK_BYTES
+        while remaining > 0:
+            data = self._read(at, min(self.size(), at + min(_CHUNK_BYTES, remaining)))
+            if not data:
+                return None
+            newline = data.find(b"\n")
+            if newline >= 0:
+                chunks.append(data[: newline + 1])
+                rows = _file_rows(offset, b"".join(chunks))
+                return rows[0] if len(rows) == 1 and rows[0].offset == offset else None
+            chunks.append(data)
+            at += len(data)
+            remaining -= len(data)
+        return None
+
     def revision(self) -> int:
         return 0
 
@@ -178,6 +207,12 @@ class ZstdRecordFile(RecordFile):
         self._total = 0
 
     def prepare(self, before: int | None) -> None:
+        self._prepare(before, inclusive=False)
+
+    def prepare_anchor(self, offset: int) -> None:
+        self._prepare(offset, inclusive=True)
+
+    def _prepare(self, before: int | None, *, inclusive: bool) -> None:
         ring = bytearray()
         position, kept_end = 0, None
         with self._path.open("rb") as handle:
@@ -189,8 +224,14 @@ class ZstdRecordFile(RecordFile):
                     continue
                 ring += chunk
                 if before is not None and position >= before:
-                    del ring[len(ring) - (position - before) :]
-                    kept_end = before
+                    boundary = before
+                    if inclusive:
+                        origin = position - len(ring)
+                        newline = ring.find(b"\n", max(0, before - origin))
+                        boundary = origin + newline + 1 if newline >= 0 else position + 1
+                    if boundary <= position:
+                        del ring[len(ring) - (position - boundary) :]
+                        kept_end = boundary
                 if len(ring) > MAX_BLOCK_BYTES:
                     del ring[: len(ring) - MAX_BLOCK_BYTES]
         end = position if kept_end is None else kept_end

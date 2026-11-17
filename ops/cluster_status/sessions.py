@@ -20,6 +20,7 @@ from __future__ import annotations
 
 import logging
 from concurrent.futures import ThreadPoolExecutor
+from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -193,8 +194,14 @@ def kill_shell(
     return kill_one_result(target, ok=ok, interrupted=interrupted)
 
 
+@dataclass(frozen=True)
+class ShellCleanup:
+    killed: list[int]
+    fenced: bool
+
+
 # meiva:note
-# Kill listed host-local shells below the owner's cutoff; return their ids.
+# Kill listed host-local shells below the owner's cutoff and report fence acknowledgement.
 #
 # The `kill_all_shell_sessions` primitive
 # (docs/decisions/agents/lifecycle/2026-09-27-terminate-has-no-closed-state.md). The enumeration is
@@ -203,22 +210,25 @@ def kill_shell(
 # The backend's kill is idempotent, so a session that
 # ended between the listing and its kill still counts as killed. No notice is produced here (an
 # owner-level kill is silent) and nothing is written to the database: the lifecycle caller removes
-# `agent_shell_ttls` rows after this succeeds. IDs at or above the exclusive cutoff are never targeted.
+# `agent_shell_ttls` rows only when fenced is True. A legacy daemon cannot reject delayed
+# allocations, so its TTL evidence remains for the reaper. IDs at or above the cutoff survive.
 # Enumeration happens once; late creation and crash leftovers are reconciled by the TTL reaper. Every
 # selected session is attempted; a kill the backend could not confirm raises one RuntimeError
 # naming those ids after the others ran.
-def kill_agent_shells(agent_id: int, *, before_session_index: int, home: Path) -> list[int]:
+def kill_agent_shells(agent_id: int, *, before_session_index: int, home: Path) -> ShellCleanup:
     backend = get_shell_backend(home=home)
     if isinstance(backend, PtySessionBackend):
         # meiva:note
         # The service's acknowledgement is a stronger lifecycle boundary than a
         # list followed by independent kills: a `new` request whose client has
         # already timed out cannot allocate an old shell after this returns.
-        return backend.fence_agent_shells(agent_id, before_session_index)
+        killed = backend.fence_agent_shells(agent_id, before_session_index)
+        if killed is not None:
+            return ShellCleanup(killed, fenced=True)
     listed = _agent_shells(backend, agent_id, _EPOCH)
     targets = kill_all_targets(listed, before_session_index)
     if not targets:
-        return []
+        return ShellCleanup([], fenced=False)
 
     def kill(target: ListedShell) -> bool:
         ok, _mode = backend.kill_session(target.session_name, graceful=False)
@@ -226,4 +236,4 @@ def kill_agent_shells(agent_id: int, *, before_session_index: int, home: Path) -
 
     with ThreadPoolExecutor(max_workers=min(len(targets), _KILL_ALL_WORKERS)) as pool:
         confirmed = list(pool.map(kill, targets))
-    return list(confirm_kill_all(agent_id, targets, confirmed))
+    return ShellCleanup(list(confirm_kill_all(agent_id, targets, confirmed)), fenced=False)

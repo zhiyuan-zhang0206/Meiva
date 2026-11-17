@@ -48,7 +48,7 @@ def read_harness_timeline(
         request.agent_id, harness=request.harness
     )
     if record is None:
-        return _EMPTY
+        return _empty(request)
     path = session_file(request.harness, environ, Path(record.cwd), record.session_id)
     file: RecordFile
     if path is not None:
@@ -57,7 +57,7 @@ def read_harness_timeline(
         packed = compressed_file(request.harness, environ, record.session_id)
         if packed is None:
             _report_unreadable(request, environ, record.session_id)
-            return _EMPTY
+            return _empty(request)
         file = ZstdRecordFile(packed)
 
     def load_sent(until: datetime, wanted: Mapping[str, InputRow]) -> dict[str, list[TimelineItem]]:
@@ -77,21 +77,40 @@ def read_harness_timeline(
             harness=request.harness,
             limit=request.limit,
             before=request.before,
+            anchor=int(request.anchor_item_id.split(".")[0][1:])
+            if request.anchor_item_id
+            else None,
             policy=ReplyPolicy(request.explicit_visibility, request.delivery_mode),
             render_tool=format_tool_use,
             load_sent=load_sent,
         )
     except FileNotFoundError:
-        return _EMPTY
+        return _empty(request)
     except zstandard.ZstdError as error:
         _report_unreadable(request, environ, record.session_id, reason=str(error))
-        return _EMPTY
+        return _empty(request)
+    items = window.timeline_items
+    verified = (
+        request.anchor_item_id
+        if any(item.item_id == request.anchor_item_id for item in items)
+        else None
+    )
     return HarnessTimelineWindow(
-        items=window.timeline_items, has_more=window.has_more, size=window.size
+        items=items,
+        has_more=window.has_more,
+        size=window.size,
+        anchor_item_id=verified,
+        anchor_applied=request.anchor_item_id is not None,
     )
 
 
-_EMPTY = HarnessTimelineWindow(items=[], has_more=False, size=0)
+def _empty(request: HarnessTimelineReadRequest) -> HarnessTimelineWindow:
+    return HarnessTimelineWindow(
+        items=[],
+        has_more=False,
+        size=0,
+        anchor_applied=request.anchor_item_id is not None,
+    )
 
 
 # meiva:note

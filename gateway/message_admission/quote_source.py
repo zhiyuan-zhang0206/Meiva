@@ -82,7 +82,7 @@ async def _record_items(
         agent_id=agent_id,
         harness=harness,
         limit=2,
-        before=cursor.msg_idx + 1,
+        anchor_item_id=cursor.item_id(),
         explicit_visibility=mode == UserDeliveryMode.PREFIX,
         delivery_mode=mode.value,
     )
@@ -99,7 +99,14 @@ async def _record_items(
         raise HTTPException(503, "Quote source machine is unavailable") from exc
     except ClusterOpFailed as exc:
         raise HTTPException(502, "Quote source timeline could not be read") from exc
-    return HarnessTimelineWindow.model_validate(result).items
+    window = HarnessTimelineWindow.model_validate(result)
+    if not window.anchor_applied:
+        raise HTTPException(503, "Quote source reader cannot confirm an inclusive lookup")
+    if window.anchor_item_id != cursor.item_id():
+        raise HTTPException(
+            422, "Quote source is unavailable; select readable, completed text again"
+        )
+    return window.items
 
 
 def _check_identity(quote: Quote, source: TimelineItem) -> None:

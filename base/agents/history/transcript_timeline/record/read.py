@@ -71,13 +71,10 @@ def read_window(
     policy: ReplyPolicy,
     render_tool: Callable[[str, Mapping[str, object]], str],
     load_sent: LoadSent,
+    anchor: int | None = None,
 ) -> Window:
-    file.prepare(before)
-    size = file.size()
-    tail_end = file.complete_end()
-    end = tail_end if before is None else min(before, tail_end)
-    rows: list[FileRow] = []
-    start, spent, read, want = end, 0, 0, BLOCK_BYTES
+    rows, start, read, size = _prepare_window(file, before, anchor)
+    spent, want = 0, BLOCK_BYTES
     while True:
         block = file.rows_before(start, min(want, MAX_REQUEST_BYTES - read))
         rows = [*block.rows, *rows]
@@ -86,7 +83,7 @@ def read_window(
         projected = _items_of(
             rows,
             harness=harness,
-            tail=before is None,
+            tail=before is None and anchor is None,
             policy=policy,
             render_tool=render_tool,
             load_sent=load_sent,
@@ -205,3 +202,28 @@ def reasoning_refresh(
     return projector.feed(
         (entry for entry in entries if isinstance(entry, Reasoning)), tail=False, release_held=True
     )
+
+
+def _prepare_window(
+    file: RecordFile,
+    before: int | None,
+    anchor: int | None,
+) -> tuple[list[FileRow], int, int, int]:
+    if before is not None and anchor is not None:
+        raise ValueError("A record window cannot use before and anchor together")
+    if anchor is None:
+        file.prepare(before)
+        size = file.size()
+        tail_end = file.complete_end()
+        end = tail_end if before is None else min(before, tail_end)
+        rows: list[FileRow] = []
+        start, read = end, 0
+    else:
+        file.prepare_anchor(anchor)
+        size = file.size()
+        row = file.row_at(anchor)
+        if row is None:
+            return [], 0, 0, size
+        rows = [row]
+        start, read = row.offset, row.end - row.offset
+    return rows, start, read, size

@@ -197,8 +197,8 @@ def test_a_kill_all_takes_the_owners_shells_below_the_cutoff_and_nothing_else(
     for name in (*doomed, *survivors):
         new(name, unit_home)
 
-    assert kill_agent_shells(7, before_session_index=6, home=unit_home) == [0, 2, 5]
+    assert kill_agent_shells(7, before_session_index=6, home=unit_home).killed == [0, 2, 5]
 
     remaining = get_shell_backend(home=unit_home).list_sessions()
     assert remaining == sorted(survivors)
-    assert kill_agent_shells(99, before_session_index=6, home=unit_home) == []
+    assert kill_agent_shells(99, before_session_index=6, home=unit_home).killed == []

@@ -59,12 +59,14 @@ def window(
     before: int | None = None,
     sent: Mapping[str, Sequence[TimelineItem]] | None = None,
     harness: str = "claude_code",
+    anchor: int | None = None,
 ) -> Window:
     return read_window(
         file,
         harness=harness,
         limit=limit,
         before=before,
+        anchor=anchor,
         policy=POLICY,
         render_tool=format_tool_use,
         load_sent=lambda _until, _wanted: dict(sent or {}),

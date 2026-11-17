@@ -54,6 +54,9 @@ from ops.cluster_status.report import (
 )
 from ops.cluster_status.schema_mismatch import status as schema_mismatch_status
 from ops.cluster_status.sessions import (
+    ShellCleanup as ShellCleanup,
+)
+from ops.cluster_status.sessions import (
     ShellNotFoundError as ShellNotFoundError,
 )
 from ops.cluster_status.sessions import (

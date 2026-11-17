@@ -20,6 +20,7 @@ from base.events.live.bus import EventBus
 from base.lm.catalog import ModelCatalog
 from base.sessions.backend import PtySessionBackend
 from base.sessions.pty.client import PtyClientConfig
+from base.sessions.pty.tests.legacy_service import legacy_service
 from base.sessions.pty.tests.pty_reaper import PtyReaper
 from base.sessions.pty.tests.pty_reaper import pty_reaper as pty_reaper
 from base.sessions.pty.tests.pty_service import pty_service as pty_service
@@ -565,7 +566,7 @@ async def test_kill_terminates_only_the_owners_real_shell_sessions(
         ("codex", {"harness": "meiva", "llm_model": "deepseek-flash"}),
     ],
 )
-async def test_harness_restart_closes_shell_sessions_during_its_terminal_transition(
+async def test_harness_restart_preserves_shell_sessions_during_its_terminal_transition(
     db_conn: psycopg.Connection,
     db_pool: ConnectionPool,
     unit_home: Path,
@@ -595,7 +596,7 @@ async def test_harness_restart_closes_shell_sessions_during_its_terminal_transit
         event_bus,
         agent_id,
         RestartAgentRequest(
-            source="user", message="restart closes prior shell sessions", config_overlay=overlay
+            source="user", message="restart preserves prior shell sessions", config_overlay=overlay
         ),
         db_pool,
         host=agent_host.host,
@@ -605,8 +606,15 @@ async def test_harness_restart_closes_shell_sessions_during_its_terminal_transit
     )
 
     assert resp.status == "enqueued"
-    assert shells.alive() == set()
-    assert not _pid_alive(shell.pid) and not _pid_alive(watcher.pid)
+    assert shells.alive() == {shell.name, watcher.name}
+    assert _pid_alive(shell.pid) and _pid_alive(watcher.pid)
+    row = db_conn.execute(
+        "SELECT status, config_overlay, harness FROM agents_meta WHERE id=%s", (agent_id,)
+    ).fetchone()
+    assert row is not None and row[0] != "terminated"
+    if overlay:
+        assert row[2] == overlay.get("harness", old_harness)
+        assert all(row[1][key] == value for key, value in overlay.items() if key != "harness")
     payloads = _terminate_payloads(db_conn, agent_id)
     assert all(
         not isinstance(payload, dict) or "kill_all_shell_sessions" not in payload
@@ -647,3 +655,35 @@ def _pid_alive(pid: int, timeout: float = 5.0) -> bool:
             return False
         time.sleep(0.05)
     return True
+
+
+async def test_legacy_cleanup_retains_ttl_evidence(
+    unit_home: Path,
+    db_conn: psycopg.Connection,
+    db_pool: ConnectionPool,
+    database: Database,
+    event_bus: EventBus,
+    agent_host: ServedAgentHost,
+) -> None:
+    from ops import lifecycle
+
+    agent_id = create_agent(db_conn)
+    db_conn.execute(
+        "INSERT INTO agents_meta (id,status,machine,session_index) "
+        "VALUES (%s,'terminated','test-machine',10)",
+        (agent_id,),
+    )
+    db_conn.execute(
+        "INSERT INTO agent_shell_ttls (agent_id,session_id,expires_at) "
+        "VALUES (%s,1,now()+interval '1 hour')",
+        (agent_id,),
+    )
+    db_conn.commit()
+    with legacy_service("unknown_method: fence_agent_shells"):
+        result = await lifecycle.terminate_agent_op(
+            database, event_bus, agent_id, TerminateAgentRequest(), db_pool, host=agent_host.host
+        )
+    assert result.status == "already_terminated"
+    assert db_conn.execute(
+        "SELECT session_id FROM agent_shell_ttls WHERE agent_id=%s", (agent_id,)
+    ).fetchall() == [(1,)]
