@@ -54,6 +54,7 @@ interface Props {
   compactBuffer?: CompactTransitionBuffer | null;
   threadKey?: string;
   scrollMemoryKey?: string;
+  viewportObserverFactory?: (callback: ResizeObserverCallback) => ResizeObserver;
 
   streamingCode?: boolean;
 
@@ -93,6 +94,7 @@ export const TimelineView = memo(function TimelineView({
   compactBuffer = null,
   threadKey,
   scrollMemoryKey,
+  viewportObserverFactory,
   streamingCode = false,
   turnActive = false,
   lastEventAt = 0,
@@ -446,6 +448,7 @@ export const TimelineView = memo(function TimelineView({
   );
 
   useTimelineViewport({
+    viewportObserverFactory,
     wrapperRef,
     viewportRef,
     contentRef,
