@@ -484,8 +484,9 @@ class DeclarativeScheduleEngine:
                 "s.trigger_kind, s.cron_expr, s.interval_seconds, s.timezone, "
                 "s.timeout_seconds, s.enabled, s.status, r.agent_id AS owner_agent_id "
                 "FROM schedule_runs r JOIN schedules s ON s.id = r.schedule_id "
-                "WHERE r.id = %s AND r.ok IS NULL",
-                (run_id,),
+                "WHERE r.id = %s AND r.ok IS NULL AND r.scheduled_for IS NOT NULL "
+                "AND s.trigger_kind <> 'daemon' AND s.machine = %s",
+                (run_id, self._machine_name),
             )
 
     def _settle(self, run: _OpenRunRow, outcome: _Outcome, finished_at: datetime) -> None:

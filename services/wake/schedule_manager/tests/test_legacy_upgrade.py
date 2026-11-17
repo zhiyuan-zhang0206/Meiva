@@ -12,7 +12,7 @@ from base.config import settings
 from base.native_process.process_control import SYSTEM_PROCESS_CONTROL
 from services.wake.schedule_manager import requests
 from services.wake.schedule_manager.declarative import DeclarativeScheduleEngine
-from services.wake.schedule_manager.manager import REPO_ROOT
+from services.wake.schedule_manager.manager import REPO_ROOT, ScheduleManager
 from services.wake.schedule_manager.run_custody import SYSTEM_PROCESS_IDENTITY_CONTROL
 from services.wake.schedule_manager.tests.manager_support import NOW, schedule_manager
 from services.wake.schedule_manager.tests.session_fakes import Backend
@@ -81,6 +81,7 @@ def test_upgrade_reconcile_before_sync_preserves_legacy_run_until_reap(
         process_control=SYSTEM_PROCESS_CONTROL,
         identity_control=SYSTEM_PROCESS_IDENTITY_CONTROL,
     )
+    assert engine._open_run(legacy[0]) is None
     engine.reconcile()
 
     assert db_conn.execute(
@@ -98,12 +99,25 @@ def test_upgrade_reconcile_before_sync_preserves_legacy_run_until_reap(
     assert db_conn.execute("SELECT status FROM schedules WHERE id = %s", (sid,)).fetchone() == (
         "scheduled",
     )
+    _assert_claim_survives_sync(engine, manager, db_conn, sid, now)
+
+
+def _assert_claim_survives_sync(
+    engine: DeclarativeScheduleEngine,
+    manager: ScheduleManager,
+    db_conn: psycopg.Connection,
+    sid: int,
+    now: datetime,
+) -> None:
     claimed = engine._claim_due(now)
     assert claimed is not None
     declarative = db_conn.execute(
         "SELECT id FROM schedule_runs WHERE schedule_id = %s AND scheduled_for IS NOT NULL", (sid,)
     ).fetchone()
     assert declarative is not None
+    opened = engine._open_run(declarative[0])
+    assert opened is not None
+    assert opened.run_id == declarative[0]
     assert manager.sync_one(sid, now=NOW)
     assert db_conn.execute(
         "SELECT ok FROM schedule_runs WHERE id = %s", (declarative[0],)
