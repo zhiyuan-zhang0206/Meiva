@@ -45,7 +45,7 @@ exports come from `base.lm.harness.claude.session`, so the door itself stays `st
 | `tools` | `None` | retain the complete native CLI tool set; an explicit tuple restricts it |
 | `permission_mode` | `bypassPermissions` | headless session with no approval layer: the CLI must not park on a prompt nobody can answer. The workspace is the boundary. |
 | `cancel_settle_seconds` | 5 | observed reaping is ~40ms; 5s tolerates load without hiding a leak |
-| `max_buffer_size` | 64 MiB | SDK NDJSON message bound; Bash results, file reads and screenshots can exceed the SDK's 1 MiB default. Configurable per bridge; the bound still prevents unbounded message accumulation. |
+| `max_buffer_size` | 64 MiB | SDK NDJSON message bound; Bash results, file reads and screenshots can exceed the SDK's 1 MiB default. A positive integer (booleans are rejected), configurable per bridge; the bound still prevents unbounded message accumulation. |
 | `max_buffered_events` | 256 | text deltas are droppable past this; control events are bounded by tool-call count |
 
 Native user, project and local settings remain enabled, including CLAUDE.md,

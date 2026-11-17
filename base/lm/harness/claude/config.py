@@ -33,3 +33,11 @@ class BridgeConfig:
     # it down as a value; None means unknown, and a one-shot cron is then not dated from its expression.
     # meiva:link base/lm/harness/claude/docs/background-tasks.md
     cron_timezone: tzinfo | None = None
+
+    def __post_init__(self) -> None:
+        if (
+            isinstance(self.max_buffer_size, bool)
+            or not isinstance(self.max_buffer_size, int)
+            or self.max_buffer_size <= 0
+        ):
+            raise ValueError("max_buffer_size must be a positive integer")

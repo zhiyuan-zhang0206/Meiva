@@ -50,7 +50,7 @@ External harness timelines are projected on demand from each CLI's session recor
 [reading a record](../../../../lm/harness/docs/transcript-projection.md)). An unanswered
 tool call in an open turn carries `activity_pending=True` on its `agent_code` item until
 its result lands in the record (`activity_pending=None`). The gateway clears
-`activity_pending` when the agent status is `idling` or
+`activity_pending` when the agent status, re-read after the record RPC returns, is `idling` or
 `terminated`: an aborted transcript can end with an unmatched tool call forever.
 Running agents retain the record's live activity flags across Claude Code,
 Codex and Antigravity. The reply-suggestion excerpt
