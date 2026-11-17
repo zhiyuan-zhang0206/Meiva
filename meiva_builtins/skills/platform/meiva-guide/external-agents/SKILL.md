@@ -97,6 +97,29 @@ question in the user's persistent queue. There is no public `meiva.attach` call.
   the preconditions and handoff file contract in
   [agents](../agents/SKILL.md#switching-harnesses--handoff-process).
 
+## Introspection
+
+Use `meiva agents get <id> [--json]` to read the effective `llm_model`,
+`reasoning_effort`, `harness`, and stored `config_overlay`. The startup identity
+header also states the current harness and model selection. Read lifecycle notices
+with `meiva agents inbox <id> --full`; inspect and cancel pending attempts with
+`meiva schedules ls` and `meiva schedules cancel <schedule_id>`.
+See [agent introspection and scheduled operations](../agents/SKILL.md#introspection).
+
+The `--at` examples below require the companion scheduled agent lifecycle
+implementation (PR B) to be deployed; check the deployed commands' `--help`
+for flag availability.
+
+To switch yourself after a turn, use `meiva.self.restart` and end the turn after
+its receipt, or schedule `meiva agents restart <id> -m "<reason and handoff path>"
+--overlay harness=codex --overlay llm_model=<model> --at +60s --source agent:<your_id>`.
+A scheduled cross-machine move uses `meiva agents transfer <id> --to <machine>
+--message "<reason>" --at +60s --source agent:<your_id>`. Finish the turn before
+the returned `run_at`: each schedule attempts once and refuses a running target.
+When coordinating a peer, use your own source identity; a running peer receives
+a heads-up and both actors receive busy-target failure notices. Keep the schedule
+ID for cancellation if plans change.
+
 ## External Sessions Messaging Meiva Agents
 
 When an external coding agent session running outside Meiva (or from a shell)

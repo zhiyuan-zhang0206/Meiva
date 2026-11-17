@@ -8,6 +8,7 @@
 
 from __future__ import annotations
 
+import json
 from dataclasses import dataclass
 from datetime import datetime
 
@@ -22,6 +23,9 @@ class _Agent(BaseModel):
     label: str | None
     status: str
     harness: str
+    llm_model: str | None
+    reasoning_effort: str | None
+    config_overlay: dict[str, object] | None
     machine: str
     liveness_state: str
     spawner: str
@@ -53,6 +57,9 @@ def cmd_agents_get(access: GatewayAccess, agent_id: int, *, as_json: bool) -> in
     print(f"status:            {agent.status}")
     print(f"machine:           {agent.machine} ({agent.liveness_state})")
     print(f"harness:           {agent.harness}")
+    print(f"llm_model:         {agent.llm_model or ''}")
+    print(f"reasoning_effort:  {agent.reasoning_effort or ''}")
+    print(f"config_overlay:    {json.dumps(agent.config_overlay, sort_keys=True)}")
     print(f"spawned by:        {agent.spawner}")
     print(f"spawned:           {_stamp(agent.spawned_at)}")
     print(f"last active:       {_stamp(agent.last_active_at)}")

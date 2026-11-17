@@ -223,6 +223,9 @@ PINNED_HANDOFF_FIELDS = (
     "machine",
     "workspace",
     "home",
+    "harness",
+    "model",
+    "reasoning_effort",
     "label",
     "cluster",
     "entries",
@@ -235,7 +238,7 @@ PINNED_HANDOFF_FIELDS = (
 
 def test_field_set_is_pinned_to_the_handoff_version() -> None:
     names = tuple(entry.name for entry in fields(Handoff))
-    assert HANDOFF_VERSION == 3, (
+    assert HANDOFF_VERSION == 4, (
         "HANDOFF_VERSION moved without PINNED_HANDOFF_FIELDS following it; the "
         "version pins the field set every adapter reads"
     )
@@ -243,3 +246,22 @@ def test_field_set_is_pinned_to_the_handoff_version() -> None:
         "Handoff fields changed: bump HANDOFF_VERSION and update "
         "PINNED_HANDOFF_FIELDS in the same commit"
     )
+
+
+@pytest.mark.parametrize("harness", [Harness.CODEX, Harness.CLAUDE_CODE, Harness.ANTIGRAVITY])
+def test_handoff_identity_uses_the_launch_selection(tmp_path: Path, harness: Harness) -> None:
+    from base.lm.harness.wiring import handoff_for
+
+    text = handoff_for(
+        harness,
+        agent_id=7,
+        machine="macmini",
+        workspace=tmp_path,
+        home=tmp_path,
+        model="selected-model",
+        reasoning_effort="high",
+    ).render()
+    assert f"- harness: {harness.value}" in text
+    assert "- model: selected-model (reasoning_effort: high)" in text
+    assert "meiva.self.restart" in text
+    assert "submitted from outside your session" not in text

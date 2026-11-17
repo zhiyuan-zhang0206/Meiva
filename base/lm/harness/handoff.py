@@ -12,7 +12,7 @@ from base.api_contracts.agent_contract import Harness
 # agent reads them on its first turn. Changing the dataclass fields or the section
 # order means bumping `HANDOFF_VERSION`, and the field-set test fails until you do.
 # meiva:link base/lm/harness/docs/harness.md
-HANDOFF_VERSION = 3
+HANDOFF_VERSION = 4
 
 # meiva:note
 # The file a handoff's text is also saved to, directly under the agent's workspace. An
@@ -119,6 +119,9 @@ class Handoff:
     machine: str
     workspace: Path
     home: Path
+    harness: Harness = Harness.MEIVA
+    model: str | None = None
+    reasoning_effort: str | None = None
     label: str | None = None
     cluster: tuple[ClusterFact, ...] = ()
     entries: tuple[EntryPoint, ...] = field(default_factory=lambda: DEFAULT_ENTRIES)
@@ -236,6 +239,9 @@ class Handoff:
             f"- label: {self.label or 'unassigned'}",
             f"- machine: {self.machine}",
             f"- workspace: {self.workspace}",
+            f"- harness: {self.harness.value}",
+            f"- model: {self.model or 'unspecified'}"
+            + (f" (reasoning_effort: {self.reasoning_effort})" if self.reasoning_effort else ""),
             "",
             "## Cluster Machines",
             "The Meiva Cluster registers the following machines and roles:",
@@ -258,8 +264,10 @@ class Handoff:
             "the live session with an explicit TTL. Meiva launches a managed shell with your "
             "agent identity. A process orphaned by your native command tool can keep the "
             "harness handle in its environment while losing the process ancestry required to "
-            "use it. If a task is to switch your own harness, save a handoff, finish the turn, "
-            "and have the switch submitted from outside your session once the agent is idle.",
+            "use it. To switch your own harness, save a handoff and call `meiva.self.restart` "
+            "with a compatible model overlay, then end your turn after its receipt. For a "
+            "scheduled switch, use `meiva agents restart <id> --at +60s --source agent:<id>` "
+            "with a reason and overlay, then finish your turn before the scheduled attempt.",
             "",
             "## Tool & Environment Boundaries",
             *_bullets(list(self.overlaps)),
