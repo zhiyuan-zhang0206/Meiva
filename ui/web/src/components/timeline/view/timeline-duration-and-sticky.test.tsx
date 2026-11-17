@@ -277,6 +277,7 @@ describe("Marker contract: every NoteTag renders without the red alarm", () => {
         ]}
       />,
     );
+    revealCollapsedCards();
     expect(screen.getByText(/Unrecognized system_marker/)).toBeTruthy();
   });
 });

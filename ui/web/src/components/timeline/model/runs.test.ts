@@ -91,14 +91,10 @@ describe("classifyItem", () => {
     }
   });
 
-  it("card-family system_marker is secondary; ephemeral is bare", () => {
-    // note / memory / lifecycle sources render as cards → fold like notes.
-    expect(classifyItem(item("system_marker", "heartbeat"))).toBe("secondary");
-    expect(classifyItem(item("system_marker", "memory"))).toBe("secondary");
-    expect(classifyItem(item("system_marker", "lifecycle_terminate"))).toBe("secondary");
-    // unknown / payload-identified marker has no card → bare.
-    expect(classifyItem(item("system_marker", null))).toBe("bare");
-    expect(classifyItem(item("system_marker", "cancelled"))).toBe("bare");
+  it("system markers stay secondary regardless of their renderer family", () => {
+    for (const source of ["heartbeat", "memory", "lifecycle_terminate", "background_task", "scheduled_wake", null, "future_source"]) {
+      expect(classifyItem(item("system_marker", source))).toBe("secondary");
+    }
   });
 });
 
