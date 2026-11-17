@@ -291,6 +291,8 @@ class ReadTimelineSink:
 
     # meiva:note
     # The new rows as a projection, and where they end; nothing when there is no file or nothing new.
+    # Sample supplemental facts before reading rows: a commit during later delivery must still
+    # differ from the revision that produced the first projection.
     def _project_new(self) -> tuple[Projected | None, int]:
         file = self._resolve()
         if file is None:
@@ -298,6 +300,8 @@ class ReadTimelineSink:
         start = self._from if self._from is not None else self._turn_start(file)
         if self._timing_start is None:
             self._timing_start = start
+        if self._timing_revision is None:
+            self._timing_revision = file.revision()
         block = file.rows_after(start)
         self._from = block.end
         if not block.rows:

@@ -11,6 +11,7 @@ from collections.abc import Sequence
 from pathlib import Path
 
 import psycopg
+import pytest
 from psycopg_pool import AsyncConnectionPool
 
 from agent.graph.claim.harness_read_sink import ReadTimelineSink
@@ -103,9 +104,11 @@ async def test_a_turn_boundary_rejection_hands_the_input_to_the_next_run_once(
     assert (await timeline_inbound_ids(aops_pool, agent_id)).count(second) == 1
 
 
+@pytest.mark.parametrize("preexisting_cache", [False, True])
 async def test_timing_revision_emits_only_same_id_reasoning_updates(
     tmp_path: Path,
     live_events: LiveEvents,
+    preexisting_cache: bool,
 ) -> None:
     session = "native-timing"
     path = (
@@ -129,21 +132,6 @@ async def test_timing_revision_emits_only_same_id_reasoning_updates(
         )
         + "\n"
     )
-    ctx = MeivaContext(
-        agent=AgentSlices.resolve(default_reader=defaults()),
-        harness=Harness.ANTIGRAVITY,
-        meiva_home=tmp_path,
-        environ={"HOME": str(tmp_path)},
-    )
-    sink = ReadTimelineSink(
-        ctx, 100, live_events.publisher, non_human_wake=False, session_id=lambda: session
-    )
-    initial, end = sink._project_new()
-    assert initial is not None
-    old = next(item.item for item in initial.items if item.item.kind == "agent_reasoning")
-    assert old.reasoning_ms is None
-    await sink._refresh_timing(end)
-    assert await live_events.events() == []
     native = parse_trajectory(
         {
             "status": "CASCADE_RUN_STATUS_IDLE",
@@ -163,15 +151,34 @@ async def test_timing_revision_emits_only_same_id_reasoning_updates(
             },
         }
     )
-    store_timings(path, native)
-    await sink._refresh_timing(end)
-    assert_reasoning_update(await live_events.typed(), old.item_id, 30265)
+    if preexisting_cache:
+        store_timings(path, native)
+    ctx = MeivaContext(
+        agent=AgentSlices.resolve(default_reader=defaults()),
+        harness=Harness.ANTIGRAVITY,
+        meiva_home=tmp_path,
+        environ={"HOME": str(tmp_path)},
+    )
+    sink = ReadTimelineSink(
+        ctx, 100, live_events.publisher, non_human_wake=False, session_id=lambda: session
+    )
+    initial, end = sink._project_new()
+    assert initial is not None
+    old = next(item.item for item in initial.items if item.item.kind == "agent_reasoning")
+    assert old.reasoning_ms == (30265 if preexisting_cache else None)
+    assert await live_events.events() == []
+    if not preexisting_cache:
+        store_timings(path, native)
+        await sink._refresh_timing(end)
+        assert_reasoning_update(await live_events.typed(), old.item_id, 30265)
     assert sink.has_activity is False
     await sink._refresh_timing(end)
     assert await live_events.events() == []
     timing_path(path).unlink()
     await sink._refresh_timing(end)
     assert_reasoning_update(await live_events.typed(), old.item_id, None)
+    await sink._refresh_timing(end)
+    assert await live_events.events() == []
 
 
 def assert_reasoning_update(events: Sequence[object], item_id: str, ms: int | None) -> None:
