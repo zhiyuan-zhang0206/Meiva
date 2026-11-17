@@ -5,6 +5,7 @@
 "test_agent_directory.py" = ["support"]
 "test_c9_daily_report.py" = ["support"]
 "test_catchup.py" = ["support"]
+"test_entry.py" = ["support"]
 "test_loop.py" = ["support"]
 "test_memory_steward.py" = ["support"]
 "test_model_update_tracker.py" = ["children", "support"]

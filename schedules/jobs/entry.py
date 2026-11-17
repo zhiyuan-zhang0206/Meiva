@@ -9,7 +9,6 @@ from pathlib import Path
 
 from base.host.exit_codes import hard_exit
 from base.agents.context import MeivaContext, deferred_event_bus
-from base.agents.context.clients import ClientSet
 from base.agents.context.identity import AgentIdentity
 from base.clock import SYSTEM_TIMERS, Clock
 from base.clock.configuration import clock_config_from_boot
@@ -23,7 +22,8 @@ from base.db.config import db_config_from_boot
 from base.log import prepare_process_logging
 from base.native_process.code_version import CodeVersion
 from base.native_process.loaded_commit import LoadedCommit
-from base.telemetry import build_pipeline, process_name
+from base.telemetry import process_name
+from meiva.boot import clients_over
 from meiva.sdk_surface import process_context
 
 __all__ = ["fresh_schedule_entry", "open_schedule_entry", "schedule_entry"]
@@ -68,18 +68,7 @@ def fresh_schedule_entry(
 
     prior = getattr(meiva, "context", None)
     rng = random.SystemRandom()
-    clients = ClientSet(
-        database=database,
-        pipeline_factory=lambda: build_pipeline(
-            database=database,
-            machine=machine,
-            home=home,
-            now=Clock(clock_config_from_boot(config), timers=SYSTEM_TIMERS).now,
-            otlp_enabled=lambda: config.view.observability.telemetry_otlp_enabled,
-            otlp_endpoint=lambda: config.view.observability.telemetry_otlp_endpoint,
-            rng=rng,
-        ),
-    )
+    clients = clients_over(config, machine, database, home=home, rng=rng)
     schedule_raw = process_env.get("MEIVA_SCHEDULE_ID")
     owner_raw = process_env.get("MEIVA_AGENT_ID")
     identity = None
