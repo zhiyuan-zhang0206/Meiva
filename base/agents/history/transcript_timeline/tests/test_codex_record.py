@@ -392,3 +392,22 @@ def test_a_compressed_rollout_that_cannot_be_decoded_raises_for_the_caller_to_re
     path.write_bytes(b"not zstd at all")
     with pytest.raises(zstandard.ZstdError):
         _ = window(ZstdRecordFile(path), harness=CODEX)
+
+
+@pytest.mark.parametrize("packed", [False, True])
+def test_inclusive_anchor_reads_one_complete_old_row_with_bounded_window(
+    tmp_path: Path, packed: bool
+) -> None:
+    text = _text("session")
+    plain = window(_read(tmp_path, text), harness=CODEX)
+    target = next(item for item in plain.items if item.item.kind == "agent_chat")
+    file = _packed(tmp_path, text, "inclusive") if packed else _read(tmp_path, text)
+    anchored = window(file, harness=CODEX, anchor=target.offset, limit=2)
+    assert any(item.item.item_id == target.item.item_id for item in anchored.items)
+    assert anchored.size == len(text.encode())
+    if packed:
+        assert isinstance(file, ZstdRecordFile)
+        assert file.bytes_read == len(text.encode())
+        assert file.held_bytes <= MAX_BLOCK_BYTES
+    else:
+        assert file.bytes_read <= MAX_BLOCK_BYTES + BLOCK_BYTES

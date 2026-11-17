@@ -65,7 +65,7 @@ async def fetch_record_window(
             state.db,
             target_machine=machine,
             kind="harness_timeline_read",
-            payload=payload.model_dump(),
+            payload=payload.model_dump(exclude={"anchor_item_id"}),
             timeout_s=READ_TIMEOUT_SECONDS,
             retries=0,
         )
