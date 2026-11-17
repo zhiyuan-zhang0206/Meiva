@@ -37,6 +37,13 @@ additional scroll space also returns to their saved row and offset. When collaps
 recreates as much of it as the saved offset needs. Wheel, touch, keyboard
 scrolling and track interaction reveal the timeline scrollbar. Position restores
 and layout updates keep an idle scrollbar hidden.
+
+The seen-cursor acknowledgement is independent of the selected conversation's
+source read. It may finish while `sourceReady` is still false and the bookmark
+is pending. A browser assertion about the returned viewport observes that
+agent's successful authority response and the initial loading ring settling
+before its layout frames and geometry assertion. The successful response is
+required: an authority error also settles the ring while preserving the bookmark.
 The down arrow sits at the bottom center of the conversation and uses the same
 icon while loading or generating. It takes the reader to the last human message
 or the tail according to the [reading position](send-anchor.md). A smooth ride

@@ -145,9 +145,25 @@ def test_switch_back_at_bottom_stays_there_after_unread_refresh(e2e_env: E2EEnv)
         _sidebar_row(page, other).click()
         page.wait_for_url(re.compile(rf"[?&]agent_id={other}\b"))
         feed["items"] = [delivery]
-        with page.expect_response(seen_url):
+        with (
+            page.expect_response(
+                lambda response: (
+                    response.url == f"{gateway_url}/api/agents/{agent}/conversation-snapshot"
+                    and response.request.method == "GET"
+                )
+            ) as source_read,
+            page.expect_response(
+                lambda response: (
+                    response.url == f"{gateway_url}/api/keyed/v1/agents/{agent}/user-messages/seen"
+                    and response.request.method == "POST"
+                )
+            ) as seen_write,
+        ):
             _sidebar_row(page, agent).click()
+        assert source_read.value.ok, "the selected conversation authority read failed"
+        assert seen_write.value.ok, "the selected conversation seen update failed"
         page.wait_for_url(re.compile(rf"[?&]agent_id={agent}\b"))
+        expect(page.get_by_test_id("cold-load-ring")).to_have_count(0)
         _ = page.evaluate(
             "() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)))"
         )

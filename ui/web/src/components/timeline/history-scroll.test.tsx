@@ -460,7 +460,7 @@ describe("agent switch reading positions", () => {
     rerender(tabs(42, "agent-old-window"));
     expect(screen.getByText("Previously loaded history")).toBeTruthy();
     expect(viewport().scrollTop).toBe(700);
-    act(() => useTimelineStore.getState().reloadSnapshot([...items, { ...items[0], item_id: "17.0", payload: "New reply" }], 18, false));
+    act(() => { useTimelineStore.getState().reloadSnapshot([...items, { ...items[0], item_id: "17.0", payload: "New reply" }], 18, false); });
     resize();
     expect(screen.getByText("Previously loaded history")).toBeTruthy();
     expect(viewport().scrollTop).toBe(700);
