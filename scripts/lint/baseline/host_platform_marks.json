@@ -4,5 +4,5 @@
   "platform constant": 2,
   "platform default": 3,
   "shutil.which(...)": 29,
-  "sys.platform": 26
+  "sys.platform": 25
 }
