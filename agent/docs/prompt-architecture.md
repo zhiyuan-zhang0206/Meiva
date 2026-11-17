@@ -112,12 +112,13 @@ Capabilities rather than standing as its own section.
   servers (`_mcp_index_lines`, keyed by `meiva.mcps.<server>`, descriptions from
   each server's optional `description` field in its `.mcp.json`). Both keys use
   the same form the expanded-SDK section uses.
-  `skills_to_inject_into_system_prompt` defaults to `*`: the selected catalog is
-  complete, but the prompt displays entry skills and folds descendants under
-  real ancestor skills, with a count and an inspection path. Namespace-only
-  folders keep their leaf entries visible. Bodies remain on demand. An
-  explicit list narrows one agent's index — hiding entries from this listing
-  only, which is why the header says so and points at `meiva.help(meiva.skills)`.
+  `skills_to_inject_into_system_prompt` defaults to `*,meiva-workflow.*`: the selected catalog is
+  complete, and each entry renders its one-line description and `SKILL.md` file path (matching
+  `meiva.help`), while unmentioned descendants fold under real ancestor skills with a count and
+  an inspection path. Explicit sub-skill paths or `<namespace>.*` entries alongside `*` unfold
+  those sub-skills in place; namespace-only folders keep their leaf entries visible. Bodies remain
+  on demand. An explicit list without `*` narrows one agent's index — hiding entries from this
+  listing only, which is why the header says so and points at `meiva.help(meiva.skills)`.
   The section tells the agent to match every task against the index before
   rebuilding something it already has. It does not ask for a skill-selection
   report in the final answer. The delegation check still makes consultation

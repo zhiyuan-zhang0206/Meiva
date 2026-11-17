@@ -554,9 +554,20 @@ def _format_skill_child(name: str, child: object) -> str:
     fqn = getattr(child, "__name__", None) or name
     heading = f"{'#' * _heading_depth(fqn)} {fqn}"
     path = getattr(child, "_file", None)
+    subskills = getattr(child, "_subskill_count", 0)
+    subskills_line = (
+        f"Sub-skills: {subskills} (inspect with meiva.help({fqn}))"
+        if isinstance(subskills, int) and subskills > 0
+        else None
+    )
     return "\n\n".join(
         part
-        for part in (heading, getattr(child, "_description", None), path and f"Path: {path}")
+        for part in (
+            heading,
+            getattr(child, "_description", None),
+            path and f"Path: {path}",
+            subskills_line,
+        )
         if part
     )
 

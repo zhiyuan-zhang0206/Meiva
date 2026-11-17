@@ -6,6 +6,7 @@ from base.packages.skills.names import (
     display_name,
     find,
     match_key,
+    skill_md_path,
 )
 
 
@@ -88,3 +89,8 @@ def test_identity_equality_and_hash_are_by_key() -> None:
     assert SkillIdentity.from_dir("meiva-code") == SkillIdentity.from_cli("meiva_code")
     assert len({SkillIdentity.from_dir("meiva-code"), SkillIdentity.from_cli("meiva_code")}) == 1
     assert SkillIdentity.from_dir("meiva-code") != SkillIdentity.from_dir("meiva-fleet")
+
+
+def test_skill_md_path_is_idempotent_on_directory_and_file() -> None:
+    assert skill_md_path("/skills/meiva-goal") == "/skills/meiva-goal/SKILL.md"
+    assert skill_md_path("/skills/meiva-goal/SKILL.md") == "/skills/meiva-goal/SKILL.md"

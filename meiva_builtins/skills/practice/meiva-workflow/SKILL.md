@@ -36,6 +36,16 @@ goal mode does not require an Align session or a dynamic workflow. A dynamic
 workflow is executable orchestration code, not merely several delegated tasks.
 Load the relevant detailed guide only when that capability is needed.
 
+For multi-step delivery, cross-surface releases, visual/UI changes, real-machine
+acceptance, or requests whose deliverable format or authority boundary is still
+implicit, lock a compact verifiable contract before building ([Define Goal](define-goal/SKILL.md):
+completion check, deliverable anchor such as raw screenshots/artifacts, and
+autonomy/permission scope) and close with independent environment verification
+(`meiva.skills.meiva_goal`) rather than relying on the user to catch visual,
+scope, or deployment gaps across follow-up turns. Keep single-step queries,
+atomic commands, and open-ended Socratic or reflective discussions out of goal
+contracts.
+
 Examples:
 - A clear bug fix: execute directly and reproduce the failing-then-passing case.
 - A clear outcome needing repeated work: use it as the goal and ask a normal peer
@@ -65,9 +75,13 @@ verified capabilities for routine work instead of repeatedly surveying tools.
 
 ## Recommend Before Asking
 
-Choose routine methods within the authorized scope. Tell the user the strategy
-briefly when it helps them steer; do not ask them to understand or select between
-internal names such as goal mode, Define Goal, or Dynamic Workflow. Ask only when
+Choose routine methods within the authorized scope. When a multi-step or
+under-specified delivery benefits from an explicit goal contract or sustained
+goal execution, propose the concrete completion criteria, deliverable anchors,
+and autonomy boundaries directly (or ask at most a few high-leverage questions
+via [Define Goal](define-goal/SKILL.md)) rather than waiting for the user to ask
+for a goal; phrase the proposal in plain task terms instead of making the user
+choose between internal framework labels. Ask only when
 an unsettled choice materially changes outcome, cost, speed, verification,
 autonomy, or authority. Give a recommendation and explain the concrete trade-off.
 For example: "I recommend parallel investigation followed by independent checks;

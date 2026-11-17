@@ -22,7 +22,7 @@
 - `agent_workspace_pointer` — Workspace description (id-free for fork safety; the concrete path is stated by the agent-ID context note). Pure text over the slices; the assembler touches no file (the host creates the workspace folder at boot and the agent-ID note resolves it).
 
 **Capabilities group** (lives in `capabilities.py`, registered by `system_prompt` so the render order stays the reading order):
-- `capabilities_section(view, servers)` — The skill + MCP index, a function of the `SkillView` and the configured servers the assembler read once. `*` selects the full catalog, but folds descendants under real entry skills with counts and inspection paths. Namespace-only folders retain leaves. Explicit lists render every selected entry; all skills stay reachable through `meiva.help(meiva.skills)`.
+- `capabilities_section(view, servers)` — The skill + MCP index, a function of the `SkillView` and the configured servers the assembler read once. Each skill entry carries its description and `SKILL.md` path (`base.packages.skills.names:skill_md_path`, matching `meiva.help`). `*` selects the full catalog, folding unmentioned descendants under real entry skills with counts and inspection paths while explicit sub-skill or `<namespace>.*` entries alongside `*` (default `*,meiva-workflow.*`) unfold in place. Namespace-only folders retain leaves. Explicit lists without `*` render every selected entry; all skills stay reachable through `meiva.help(meiva.skills)`.
 - Header prose names only the halves actually rendered.
 - Descriptions flatten to one line, capped at 300 characters. The initial index has no total cap.
 

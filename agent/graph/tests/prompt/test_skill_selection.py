@@ -86,18 +86,21 @@ def test_recall_candidates_leave_out_preloaded_and_flagged_skills(tmp_path: Path
     candidates = recall_candidates(skill_view(tmp_path, expand=["beta"]))
 
     assert candidates == [
-        RecallCandidate("alpha", "Alpha desc", "alpha"),
-        RecallCandidate("grp:gamma", "Gamma desc", "grp.gamma"),
+        RecallCandidate("alpha", "Alpha desc", "alpha", f"{tmp_path}/alpha/SKILL.md"),
+        RecallCandidate("grp:gamma", "Gamma desc", "grp.gamma", f"{tmp_path}/grp/gamma/SKILL.md"),
     ]
 
 
-def test_recall_candidates_follow_the_inject_list(tmp_path: Path) -> None:
+def test_recall_candidates_follow_the_inject_list_including_subtree_patterns(
+    tmp_path: Path,
+) -> None:
     write_skill(tmp_path, "alpha", "alpha", "Alpha desc")
     write_skill(tmp_path, "beta", "beta", "Beta desc")
+    write_skill(tmp_path / "beta", "sub", "sub", "Sub desc")
 
-    candidates = recall_candidates(skill_view(tmp_path, inject=["beta"]))
+    candidates = recall_candidates(skill_view(tmp_path, inject=["beta.*"]))
 
-    assert [c.identifier for c in candidates] == ["beta"]
+    assert [c.identifier for c in candidates] == ["beta", "beta:sub"]
 
 
 def test_drift_note_lists_new_skills_in_the_index_line_shape(tmp_path: Path) -> None:
@@ -107,7 +110,7 @@ def test_drift_note_lists_new_skills_in_the_index_line_shape(tmp_path: Path) -> 
     text = new_skills_note_text(added)
 
     assert text.startswith("Additional skills are now available beyond those listed")
-    assert text.endswith(index_entry("beta", "Beta desc"))
+    assert text.endswith(index_entry("beta", "Beta desc", skill_md=f"{tmp_path}/beta/SKILL.md"))
 
 
 def test_a_bulk_install_is_capped_with_a_counted_tail(tmp_path: Path) -> None:

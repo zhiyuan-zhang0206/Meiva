@@ -238,30 +238,47 @@ def _project_skill_roots(cwd: Path | None) -> list[Path]:
     return [] if cwd is None else project_skill_roots(cwd)
 
 
-# meiva:note
-# Keep explicit commands plus skill commands selected as prompt capabilities.
-#
-# This intentionally mirrors ``agent.graph.prompt.capabilities.resolve_prompt_skills``: ``*``
-# selects all loaded skills; otherwise a configured value matches the dotted identifier first and
-# then the bare frontmatter name under the common dash/underscore fold. Only skill-as-command
-# entries are narrowed; explicit command files remain available to every agent as they are not
-# capabilities.
-def _narrow_commands(
-    commands: list[Command], wanted: list[str] | None, loaded: list[Skill]
-) -> list[Command]:
-    if wanted is None or "*" in wanted:
-        return commands
+def _subtree_targets(prefix: str, by_ident: Mapping[str, Skill]) -> set[str]:
+    if not prefix:
+        return set()
+    from base.packages.skills.tree import target
 
+    return {
+        target(skill)
+        for key, skill in by_ident.items()
+        if key == prefix or key.startswith(prefix + ".")
+    }
+
+
+def _selected_skill_targets(wanted: list[str], loaded: list[Skill]) -> set[str]:
     from base.packages.skills.names import match_key
     from base.packages.skills.tree import identifier, target
 
     by_ident = {match_key(identifier(skill)): skill for skill in loaded}
     by_name = {match_key(skill["name"]): skill for skill in loaded}
-    selected_targets = {
-        target(skill)
-        for name in wanted
-        if (skill := by_ident.get(match_key(name)) or by_name.get(match_key(name))) is not None
-    }
+    selected: set[str] = set()
+    for name in wanted:
+        if name.endswith((".*", ":*")):
+            selected.update(_subtree_targets(match_key(name[:-2]), by_ident))
+        elif (skill := by_ident.get(match_key(name)) or by_name.get(match_key(name))) is not None:
+            selected.add(target(skill))
+    return selected
+
+
+# meiva:note
+# Keep explicit commands plus skill commands selected as prompt capabilities.
+#
+# This intentionally mirrors ``agent.graph.prompt.capabilities.resolve_prompt_skills``: ``*``
+# selects all loaded skills; otherwise a configured value matches the dotted identifier first,
+# `<namespace>.*` subtrees second, and the bare frontmatter name third under the common
+# dash/underscore fold. Only skill-as-command entries are narrowed; explicit command files remain
+# available to every agent as they are not capabilities.
+def _narrow_commands(
+    commands: list[Command], wanted: list[str] | None, loaded: list[Skill]
+) -> list[Command]:
+    if wanted is None or "*" in wanted:
+        return commands
+    selected_targets = _selected_skill_targets(wanted, loaded)
     return [
         command
         for command in commands
