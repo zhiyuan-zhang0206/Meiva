@@ -1,5 +1,5 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { act, cleanup, fireEvent, screen } from "@testing-library/react";
+import { act, cleanup, fireEvent, screen, waitFor } from "@testing-library/react";
 import { renderWithBrowser } from "@/test-support/render";
 import { StrictMode, type ReactNode } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -11,6 +11,9 @@ import { resetTransport, transport } from "@/test-support/fake-api";
 import { ApiProvider, WallClockProvider } from "@/lib/transport/transport-context";
 import { BAR_HEIGHT_PX } from "@/lib/layout/layout";
 import { TimelineView } from ".";
+import { HomePageView, homePageProps, hooksState, makeAgent, resetHomePageTestState, cleanupHomePageTest } from "@/app/page-test-mock";
+import { StreamHubProvider } from "@/lib/transport/transport-context";
+import { fakeStreamHub } from "@/test-support/fake-stream";
 import { TestStreamProvider } from "@/test-support/fake-stream";
 
 beforeEach(() => {
@@ -643,5 +646,52 @@ describe("revealing an item", () => {
     rerender(conversation(42, "reveal-missing", { itemId: "99.0", token: 1 }));
     resize();
     expect(viewport().scrollTop).toBe(4400);
+  });
+});
+
+
+describe("home return while the source window loads", () => {
+  afterEach(cleanupHomePageTest);
+  it.each(["cold", "retained"])("keeps the departed bookmark through %s source layouts", async (source) => {
+    await resetHomePageTestState();
+    hooksState.activeId = 42;
+    hooksState.agents = [makeAgent({ agent_id: 42 })];
+    hooksState.bfcacheId = `home-loading-return-${source}`;
+    hooksState.settings = { ...USER_SETTING_DEFAULTS, "behavior.replySuggestions": false };
+    transport.getPendingMessages.mockResolvedValue([]);
+    transport.getUserMessages.mockResolvedValue({ mode: "prefix", seen_id: 0, items: [] });
+    transport.getAgentQuestions.mockResolvedValue([]);
+    const { hub } = fakeStreamHub();
+    function HomeReader() {
+      const timeline = useTimeline(hooksState.activeId, () => undefined);
+      return <HomePageView {...homePageProps()} timeline={timeline} TimelineView={TimelineView} />;
+    }
+    const home = () => <QueryClientProvider client={client}>
+      <WallClockProvider wallNow={wallNow}><ApiProvider api={gateway}>
+        <StreamHubProvider hub={hub}><TestStreamProvider><HomeReader /></TestStreamProvider></StreamHubProvider>
+      </ApiProvider></WallClockProvider>
+    </QueryClientProvider>;
+    const view = renderWithBrowser(home());
+    act(() => { viewport().scrollTop = 700; fireEvent.scroll(viewport()); });
+    hooksState.activeId = 43;
+    view.rerender(home());
+    expect(readScrollMemory(`home-loading-return-${source}:agent:42`)?.scrollTop).toBe(700);
+    if (source === "cold") act(() => {
+      client.removeQueries({ queryKey: ["timeline", 42], exact: true });
+      client.removeQueries({ queryKey: ["timeline-reading-window", 42], exact: true });
+    });
+    let deliver: (value: TimelineResponse) => void = () => undefined;
+    transport.getTimeline.mockImplementation(() => new Promise<TimelineResponse>((resolve) => { deliver = resolve; }));
+    hooksState.activeId = 42;
+    view.rerender(home());
+    if (source === "cold") {
+      await waitFor(() => expect(transport.getTimeline).toHaveBeenCalled());
+      resize(); resize(); resize();
+      await act(async () => { deliver(response); await Promise.resolve(); });
+    }
+    await waitFor(() => expect(viewport().querySelectorAll(".timeline-item")).toHaveLength(16));
+    resize();
+    expect(viewport().scrollTop).toBe(700);
+    expect(readingOffset("3.0")).toBe(-100);
   });
 });

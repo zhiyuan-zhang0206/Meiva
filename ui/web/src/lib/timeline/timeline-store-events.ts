@@ -29,6 +29,7 @@ export interface LiveCompact {
 
 export interface TimelineState {
   items: BackendTimelineItem[];
+  snapshotReady: boolean;
 
   compactBuffer: CompactTransitionBuffer | null;
 

@@ -591,3 +591,18 @@ describe("trimOldestWhileFollowing", () => {
     ]);
   });
 });
+
+
+describe("readable snapshot readiness", () => {
+  it("distinguishes a cold source from a retained or authoritative empty window", () => {
+    const store = useTimelineStore.getState();
+    store.switchThread(42, null, false);
+    expect(useTimelineStore.getState().snapshotReady).toBe(false);
+    store.reloadSnapshot([], 0, false);
+    expect(useTimelineStore.getState().snapshotReady).toBe(true);
+    store.switchThread(43, null, false);
+    expect(useTimelineStore.getState().snapshotReady).toBe(false);
+    store.switchThread(42, [], false);
+    expect(useTimelineStore.getState().snapshotReady).toBe(true);
+  });
+});
