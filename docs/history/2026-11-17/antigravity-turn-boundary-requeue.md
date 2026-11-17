@@ -53,3 +53,23 @@ The recovery rule was narrowed again: all trajectory steps must be terminal, the
 pre-request ACK count, and an unchanged second poll after 0.5 seconds must still belong to the same ticket,
 ACK and transport. The earlier statements that ACK 2 plus one IDLE observation is terminal are superseded
 by this measured rule; the durable inbox remains the sole owner of the rejected input's later retry.
+
+## Update: reactive-IDLE is steerable; silent terminal inference removed
+
+The original incident trace established that the RUNNING child was the fact that mattered: the outer
+turn was waiting for either that background task or a new reactive wake. Live agy 1.5.9 probes then tested
+both input paths in that exact state. A stdin write at 9,132 ms was not read until the background command
+finished and the old result arrived at 28,614 ms. By contrast, `SendUserCascadeMessage` at 12,183 ms added
+a DONE user-input step carrying its `clientMessageId` at 12,297 ms, while the old background step remained
+RUNNING; its planner response completed at 14,621 ms and the one outer result later contained both replies.
+
+The adapter now steers IDLE only when its active ticket still has a `RUNNING` or `GENERATING` trajectory step. The
+trajectory client id supplies ACK 2 and ties that input to the same ticket; no second submission is made.
+IDLE without a live step continues to reject the new input until stdout supplies the outer result.
+
+The 0.5-second all-terminal rule above is also superseded. It was a silence heuristic rather than a
+provider terminal signal and could hold between planner steps. The adapter no longer synthesizes
+`TurnCompleted`, closes a process, or claims result metadata from trajectory silence. Only stdout
+`result` completes the outer ticket. The foreground graph's one-attempt-per-run boundary remains: a true
+rejection returns durable ownership to the inbox and ends that delivery run without the old three-second
+in-run loop.

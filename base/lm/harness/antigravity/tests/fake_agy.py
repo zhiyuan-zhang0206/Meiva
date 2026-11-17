@@ -46,7 +46,18 @@ class _State:
         with self.lock:
             while len(self.steps) <= index:
                 self.steps.append({"type": "CORTEX_STEP_TYPE_PLANNER_RESPONSE"})
-            self.steps[index] = {"type": kind, "status": status}
+            before = self.steps[index]
+            step: dict[str, Any] = {"type": kind, "status": status}
+            if "userInput" in before:
+                step["userInput"] = before["userInput"]
+            self.steps[index] = step
+
+    def reactive_idle(self) -> bool:
+        live = {"CORTEX_STEP_STATUS_RUNNING", "CORTEX_STEP_STATUS_GENERATING"}
+        with self.lock:
+            return self.status == "CASCADE_RUN_STATUS_IDLE" and any(
+                step.get("status") in live for step in self.steps
+            )
 
     def snapshot(self) -> dict[str, Any]:
         with self.lock:
@@ -252,11 +263,12 @@ def _accept_message(payload: dict[str, Any], received_path: str | None) -> None:
     text = _message_text(payload)
     _record(received_path, text)
     _record(os.environ.get("FAKE_AGY_RPC"), payload)
+    reactive_idle = _STATE.reactive_idle()
     client_id = payload.get("clientMessageId")
     index = _STATE.add_step(
         "CORTEX_STEP_TYPE_USER_INPUT", client_id if isinstance(client_id, str) else None
     )
-    if _STATE.status == "CASCADE_RUN_STATUS_IDLE":
+    if _STATE.status == "CASCADE_RUN_STATUS_IDLE" and not reactive_idle:
         _run_phantom(index, text)
 
 
@@ -379,6 +391,23 @@ def _wait_for_steer(turn: dict[str, Any], steered: queue.Queue[str]) -> None:
     _STATE.status = "CASCADE_RUN_STATUS_RUNNING"
 
 
+def _continue_turn_after_steer(
+    conversation: str,
+    turn: dict[str, Any],
+    steered: queue.Queue[str],
+    next_index: int,
+) -> None:
+    if turn.get("wait_for_steer"):
+        _wait_for_steer(turn, steered)
+    if turn.get("steered_steps"):
+        _ = _emit_steps(conversation, turn, key="steered_steps", start_index=next_index)
+    finish_after_steer = turn.get("finish_after_steer_path")
+    if isinstance(finish_after_steer, str):
+        _wait_for_path(finish_after_steer, "the steered turn was not released")
+    if turn.get("after_steer_steps"):
+        _ = _emit_steps(conversation, turn, key="after_steer_steps", start_index=next_index)
+
+
 def main() -> int:
     plan_path = os.environ.get("FAKE_AGY_PLAN")
     plan = cast(
@@ -422,10 +451,7 @@ def main() -> int:
             if turn.get("hang"):
                 _hang(conversation)
             next_index = _emit_steps(conversation, turn)
-            if turn.get("wait_for_steer"):
-                _wait_for_steer(turn, steered)
-            if turn.get("steered_steps"):
-                _ = _emit_steps(conversation, turn, key="steered_steps", start_index=next_index)
+            _continue_turn_after_steer(conversation, turn, steered, next_index)
             _STATE.status = "CASCADE_RUN_STATUS_IDLE"
             _STATE.turns_done += 1
             time.sleep(float(turn.get("idle_before_result", 0.0)))

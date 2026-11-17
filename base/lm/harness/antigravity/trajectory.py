@@ -10,10 +10,9 @@ from base.host.boundary.json_values import is_object_dict, is_object_list
 # meiva:note
 # What `GetCascadeTrajectory` says about a conversation, decoded and checked. The method is not a
 # public interface (agy 1.5.5): its answer is `{trajectory: {steps: [...]}, status, numTotalSteps}` with
-# `status` one of `CASCADE_RUN_STATUS_RUNNING` / `CASCADE_RUN_STATUS_IDLE`. It is the only live signal of
-# whether a turn runs, including a turn whose events never reach stdout. A reply of any other shape,
-# or a status this adapter does not know, is an `AgyInterfaceError` and never read as "idle": treating
-# an unreadable answer as idle is how an input would be sent into a turn nobody can see.
+# `status` one of `CASCADE_RUN_STATUS_RUNNING` / `CASCADE_RUN_STATUS_IDLE`. Agy 1.5.9 can report top-level
+# IDLE while a child step remains live, so both levels are preserved and IDLE is never treated as an
+# outer-turn terminal signal. A reply of any other shape, or an unknown status, is an `AgyInterfaceError`.
 # meiva:link base/lm/harness/antigravity/docs/antigravity.md
 class AgyInterfaceError(RuntimeError):
     pass
@@ -29,15 +28,10 @@ _STATUS = {
     "CASCADE_RUN_STATUS_IDLE": RunStatus.IDLE,
 }
 
-_TERMINAL_STEP_STATUSES = frozenset(
+_LIVE_STEP_STATUSES = frozenset(
     {
-        "CORTEX_STEP_STATUS_DONE",
-        "CORTEX_STEP_STATUS_INVALID",
-        "CORTEX_STEP_STATUS_CLEARED",
-        "CORTEX_STEP_STATUS_CANCELED",
-        "CORTEX_STEP_STATUS_ERROR",
-        "CORTEX_STEP_STATUS_INTERRUPTED",
-        "CORTEX_STEP_STATUS_HALTED",
+        "CORTEX_STEP_STATUS_RUNNING",
+        "CORTEX_STEP_STATUS_GENERATING",
     }
 )
 
@@ -59,13 +53,8 @@ class Trajectory:
     def client_message_ids(self) -> tuple[str, ...]:
         return tuple(step.client_message_id for step in self.steps if step.client_message_id)
 
-    def is_settled(self, *, minimum_steps: int) -> bool:
-        return (
-            self.status is RunStatus.IDLE
-            and self.num_steps >= minimum_steps > 0
-            and len(self.steps) == self.num_steps
-            and all(step.status in _TERMINAL_STEP_STATUSES for step in self.steps)
-        )
+    def has_live_steps(self) -> bool:
+        return any(step.status in _LIVE_STEP_STATUSES for step in self.steps)
 
 
 def parse_trajectory(payload: Mapping[str, object]) -> Trajectory:
@@ -110,18 +99,20 @@ def _step(index: int, entry: object) -> TrajectoryStep:
 
 
 # meiva:note
-# Where an input goes, decided before it is sent. A running conversation takes it through
-# `SendUserCascadeMessage`. An idle one must not: agy answers 200 and runs a turn nobody can see on
-# stdout (a phantom turn), so an input for an idle conversation starts a turn on stdin, and when our
-# own turn's result has not been read yet it waits behind that turn instead.
+# Where an input goes. RUNNING accepts RPC steer. Top-level IDLE also accepts it while our ticket is
+# active and a child step is still live: agy 1.5.9 uses that state for reactive wakeup while a
+# background command runs. IDLE with no live child cannot prove the outer turn ended, so the active
+# ticket keeps ownership and the input waits for another delivery run rather than entering a phantom.
 class Route(StrEnum):
     STEER = "steer"
     START = "start"
     QUEUE = "queue"
 
 
-def route(status: RunStatus | None, *, ticket_active: bool) -> Route:
-    if status is RunStatus.RUNNING:
+def route(snapshot: Trajectory | None, *, ticket_active: bool) -> Route:
+    if snapshot is not None and (
+        snapshot.status is RunStatus.RUNNING or (ticket_active and snapshot.has_live_steps())
+    ):
         return Route.STEER
     return Route.QUEUE if ticket_active else Route.START
 

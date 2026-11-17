@@ -226,13 +226,15 @@ class AgyTransport:
             raise TransportClosedError(f"agy stdin closed: {exc}") from exc
 
     # meiva:note
-    # `agy` printmode blocks stdin while `pollResponse` waits on `IsCascadeRunning`, so input for a
-    # running turn cannot ride on stdin. `agy` starts its in-process Connect JSON-RPC
+    # `agy` printmode blocks stdin while `pollResponse` waits on the outer turn, including its
+    # reactive-IDLE wait for a live background step, so mid-turn input cannot ride on stdin. `agy`
+    # starts its in-process Connect JSON-RPC
     # `LanguageServerService` on localhost and reads `ANTIGRAVITY_SERVER_CSRF_TOKEN` at startup;
     # `SendUserCascadeMessage` queues a `CORTEX_STEP_TYPE_USER_INPUT` step into the running executor
     # loop. The call carries our `clientMessageId` (and `media` for images); its HTTP 200 is only a
-    # weak receipt and is also returned for a conversation that is idle (see `trajectory`). The RPC
-    # interface is not public; premise: agy 1.5.5.
+    # weak receipt and is also returned for a fully idle conversation (see `trajectory`). Live agy
+    # 1.5.9 establishes that it wakes reactive-IDLE when a child step is still live. The RPC interface
+    # is not public; descriptor premise: agy 1.5.5, reactive-IDLE premise: agy 1.5.9.
     # meiva:link base/lm/harness/antigravity/docs/antigravity.md
     async def steer(
         self,
@@ -253,8 +255,8 @@ class AgyTransport:
         )
 
     # meiva:note
-    # The live state of the conversation: `GetCascadeTrajectory`, the only signal that says whether a
-    # turn runs when stdout is silent. An answer of an unexpected shape raises `AgyInterfaceError`.
+    # The live state of the conversation: `GetCascadeTrajectory` exposes both the top-level run status
+    # and child-step statuses while stdout is silent. An unexpected shape raises `AgyInterfaceError`.
     async def trajectory(self, *, conversation_id: str | None = None) -> Trajectory:
         server, target_conversation = await self._rpc_target(conversation_id)
         payload = await asyncio.to_thread(

@@ -68,8 +68,8 @@ TRAJECTORY_POLL_SECONDS = 0.5
 # One `agy` conversation as a turn engine. Same three boundaries as the Claude bridge — ordered
 # inbound, one outbound stream, an assertable cancel — with one harness difference that shapes the
 # whole file: an interrupt kills the `agy` process. `interrupt()` therefore retires the transport,
-# as does an acknowledged turn whose trajectory is confirmed settled before stdout reports its result.
-# The next turn respawns with `--conversation`, so the transcript survives even though the process does not.
+# and the next turn respawns with `--conversation`, so the transcript survives even though the process
+# does not.
 # meiva:link base/lm/harness/antigravity/docs/antigravity.md
 class AgySession(BaseHarnessSession[AntigravityConfig]):
     harness = "antigravity"
@@ -111,12 +111,7 @@ class AgySession(BaseHarnessSession[AntigravityConfig]):
         self._consumed = 0
         self._floor = 0
         self._phantom: PhantomTurn | None = None
-        # meiva:note
-        # ACK2 belongs to one ticket and names the minimum trajectory size that already reached
-        # stdout. Keeping both facts together makes the evidence safe to compare across awaits and
-        # across the task that begins the next turn.
-        # meiva:link base/lm/harness/antigravity/docs/antigravity.md
-        self._start_ack: tuple[ActiveTurn, int] | None = None
+        self._acked_start = False
         self._last_turn: str | None = None
         self._schedules = Schedules()
         self._subagents = SubagentReader(home)
@@ -177,10 +172,9 @@ class AgySession(BaseHarnessSession[AntigravityConfig]):
     # (`GetCascadeTrajectory`): a running one takes the input through `SendUserCascadeMessage`
     # carrying our `clientMessageId`; an idle one must not be sent to that way, because agy answers 200
     # and runs a turn that stdout never reports, so the input starts a turn on stdin instead, or waits
-    # (a rejection, so the caller hands it over again) when our own acknowledged turn may have finished
-    # but its result is not yet read. In that last state a causally newer, fully terminal trajectory that
-    # remains unchanged for a second poll is the recovery authority: the old ticket is completed from its
-    # streamed output and its process is retired before another run retries.
+    # (a rejection, so the caller hands it over again) when our own turn has no live work visible but its
+    # result is unread. A top-level IDLE trajectory with a live child step is agy's reactive-wakeup state;
+    # RPC steer wakes the same outer turn and retains its client-message acknowledgement.
     # HTTP 200 and a stdin write are weak receipts;
     # the second acknowledgement is the user-input step: the trajectory step that carries our
     # `clientMessageId`, or for a turn started on stdin the first user-input frame on stdout. The
@@ -197,21 +191,9 @@ class AgySession(BaseHarnessSession[AntigravityConfig]):
 
     async def _deliver_one(self, entry: HarnessInput) -> None:
         transport = await self._ensure_transport()
-        ticket_at_request = self._active
-        start_ack = self._start_ack
-        acknowledged_steps = (
-            start_ack[1]
-            if ticket_at_request is not None
-            and start_ack is not None
-            and start_ack[0] is ticket_at_request
-            else None
-        )
         snapshot_ = await transport.trajectory() if self._session_id else None
         ticket = self._active
-        decided = route(
-            snapshot_.status if snapshot_ is not None else None,
-            ticket_active=ticket is not None,
-        )
+        decided = route(snapshot_, ticket_active=ticket is not None)
         if decided is Route.STEER:
             await self._steer_input(transport, entry)
             return
@@ -221,108 +203,11 @@ class AgySession(BaseHarnessSession[AntigravityConfig]):
                     entry.key, "the active turn is not accepting input; hand the input over again"
                 )
             )
-            if (
-                ticket_at_request is not None
-                and acknowledged_steps is not None
-                and ticket is ticket_at_request
-                and snapshot_ is not None
-                and snapshot_.is_settled(minimum_steps=acknowledged_steps)
-            ):
-                await self._retire_if_still_settled(
-                    transport,
-                    ticket_at_request,
-                    start_ack,
-                    snapshot_,
-                    acknowledged_steps,
-                )
             return
         if entry.images:
             self._start_with_images(entry)
             return
         _ = self._start_input_turn(entry)
-
-    # meiva:note
-    # Top-level IDLE alone is not a terminal fact: agy 1.5.9 reports it while a background command's
-    # trajectory step is still RUNNING, then resumes the same turn. Retirement therefore needs one
-    # unchanged confirmation whose every step is terminal, covers the ACK2 step count, and still belongs
-    # to the same ticket, acknowledgement and transport. Usually stdout's `result` wins that grace period.
-    # If it is missing, detach first so late frames cannot acquire the next ticket, finish from the output
-    # already streamed, and retire the process. The rejected input remains the next run's work.
-    # meiva:link base/lm/harness/antigravity/docs/antigravity.md
-    async def _retire_if_still_settled(
-        self,
-        transport: AgyTransport,
-        ticket: ActiveTurn,
-        start_ack: tuple[ActiveTurn, int] | None,
-        snapshot_: Trajectory,
-        acknowledged_steps: int,
-    ) -> None:
-        await self._clock.asleep(TRAJECTORY_POLL_SECONDS)
-        if (
-            self._transport is not transport
-            or self._active is not ticket
-            or self._start_ack is not start_ack
-        ):
-            return
-        confirmation = await transport.trajectory()
-        if (
-            self._transport is transport
-            and self._active is ticket
-            and self._start_ack is start_ack
-            and confirmation == snapshot_
-            and confirmation.is_settled(minimum_steps=acknowledged_steps)
-        ):
-            await self._retire_finished_turn(transport, ticket)
-
-    async def _retire_finished_turn(self, transport: AgyTransport, ticket: ActiveTurn) -> None:
-        if self._transport is not transport or self._active is not ticket:
-            return
-        self._transport = None
-        self._retired = transport
-        self._sent_turn = None
-        self._lose_schedules()
-        self._finish_from_trajectory(ticket)
-        logger.warning(
-            "agent {agent_id}: agy trajectory settled before the active turn's result; retired generation "
-            "{generation}",
-            event="harness_turn_finished_without_result",
-            agent_id=self.agent_id,
-            generation=self.generation,
-            turn_id=ticket.turn_id,
-        )
-        await transport.close()
-
-    def _finish_from_trajectory(self, ticket: ActiveTurn) -> None:
-        self._ack_start(ticket)
-        self._show_subagents(ticket.turn_id)
-        text = "\n".join(ticket.parts).strip() or self._flush_step_text()
-        steps = tuple(self._turn_steps)
-        usage = Usage()
-        for step in steps:
-            usage += step
-        self._totals = self._totals.with_turn(usage, None, measured=False)
-        started = ticket.started_at
-        duration_ms = 0 if started is None else max(int((self._monotonic() - started) * 1000), 0)
-        self._emit(
-            TurnCompleted(
-                turn_id=ticket.turn_id,
-                session_id=self._session_id,
-                text=text,
-                subtype="unknown",
-                is_error=False,
-                interrupted=False,
-                stop_reason="trajectory settled before result",
-                num_turns=max(len(steps), 1),
-                duration_ms=duration_ms,
-                usage=usage,
-                cost_usd=None,
-                cumulative_cost_usd=self._totals.cost_usd,
-                permission_denials=(),
-                steps=steps,
-                generation=self.generation,
-            )
-        )
-        self._complete(ticket)
 
     # meiva:note
     # agy takes an image only through `SendUserCascadeMessage` on a running turn, never on stdin. An idle
@@ -446,7 +331,7 @@ class AgySession(BaseHarnessSession[AntigravityConfig]):
         ticket.started_at = self._monotonic()
         self._step_text = {}
         self._turn_steps = []
-        self._start_ack = None
+        self._acked_start = False
         self._last_turn = ticket.turn_id
         key = ticket.input_key
         if self._ledger.phase(key) in (None, InputPhase.REJECTED, InputPhase.LOST):
@@ -689,9 +574,9 @@ class AgySession(BaseHarnessSession[AntigravityConfig]):
     # the write is ours; a CLI that prints no user-input frame is acknowledged by the first activity of
     # the turn instead.
     def _ack_start(self, ticket: ActiveTurn) -> None:
-        if self._start_ack is not None and self._start_ack[0] is ticket:
+        if self._acked_start:
             return
-        self._start_ack = (ticket, self._consumed)
+        self._acked_start = True
         self._apply(self._ledger.in_context(ticket.input_key, ticket.turn_id))
 
     def _accumulate(self, update: dict[str, object]) -> None:

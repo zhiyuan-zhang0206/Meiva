@@ -45,22 +45,22 @@ ignored) and for a message sent when no turn runs, so an HTTP 200 is only a weak
 an unexpected shape or an unknown run status raises `AgyInterfaceError`; it is never read as "idle".
 
 `deliver()` asks `GetCascadeTrajectory` (`status` RUNNING / IDLE, `numTotalSteps`, `trajectory.steps`)
-before each input (`trajectory.route`): RUNNING is steered with our id; IDLE with no turn of ours
-starts a turn on stdin; IDLE while our own turn's result is unread is refused (`InputRejected`) so the
-input is handed over again. Top-level IDLE is not sufficient evidence that provider work finished. A live
-agy 1.5.9 background-command trajectory became IDLE for 5.3 seconds while one trajectory step remained
-`CORTEX_STEP_STATUS_RUNNING`, then the same turn returned to RUNNING and completed; the compact recorded
+before each input (`trajectory.route`). RUNNING is steered with our id. Top-level IDLE is not sufficient
+evidence that provider work finished: agy 1.5.9 enters reactive-IDLE while a background step remains
+live. That state is steerable through `SendUserCascadeMessage`, so IDLE plus an active ticket and a
+`RUNNING` or `GENERATING` trajectory step is also steered. IDLE with no turn of ours starts a turn on stdin; IDLE with
+an active ticket but no visible live step is refused (`InputRejected`) so the durable inbox owns the
+later retry while the adapter waits for the outer `result`.
+
+The routing rule is grounded in two live agy 1.5.9 probes. A background-command trajectory stayed IDLE
+for 5.3 seconds with one step RUNNING, then resumed the same turn. In a second run, RPC injection during
+that state added the input with its `clientMessageId` in 114 ms and completed its planner response while
+the background step was still RUNNING; both answers arrived in the same outer `result`. Writing the same
+input to stdin did not wake the CLI: it was read only after the old outer `result`. The compact background
 snapshots are in `tests/fixtures/background_idle_trajectory.json`.
 
-The missing-result recovery is therefore narrower. Immediately before the trajectory request, the
-adapter captures ACK 2 as the pair `(active ticket, minimum observed step count)` on that transport. An
-IDLE reply is eligible only when it covers that count and every listed step has a terminal status; the
-same parsed snapshot must remain unchanged for another 0.5-second poll, with the same ticket, ACK and
-transport. A pre-ACK snapshot returned after ACK cannot satisfy the causal check, and IDLE with any live
-step remains open. A confirmed settled trajectory closes the old ticket from output already streamed,
-marks result metadata and per-turn usage as unmeasured, retires the process, and ignores late frames. The
-next delivery respawns with `--conversation`; the rejected input starts there exactly once. An input sent
-through RPC to an idle conversation would run a **phantom
+Only stdout `result` is an outer-turn terminal signal. Neither one IDLE snapshot nor an unchanged silent
+window completes or closes a ticket. An input sent through RPC to a fully idle conversation would run a **phantom
 turn**: agy runs it, stdout shows nothing (130 s observed), and at the next stdin input its steps are
 printed again and its answer is folded into that turn's `result`.
 
@@ -141,9 +141,9 @@ end; anything else is the CLI's own work and becomes
 protocol level, so the reply is built from the turn's own streamed text — the parts
 already closed plus whatever the in-flight step streamed — and the frame's
 `response` only fills a gap. That is what keeps a foreign `result` from replacing
-the reply it interrupted. A transport detached after the trajectory established a
-finished turn no longer owns the session, so its late frames and stream errors cannot
-complete or fail a ticket opened by the replacement process.
+the reply it interrupted. The read loop also accepts frames only from the transport
+that still owns the session, so late frames from a replaced process cannot complete
+or fail a later ticket.
 
 A stream that ends names the turn it was serving when one was running
 (`TurnFaulted`) and the session when none was (`SessionFailed`).
