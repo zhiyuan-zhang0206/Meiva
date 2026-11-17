@@ -11,6 +11,7 @@ from base.lm.harness.antigravity.trajectory import parse_trajectory
 from base.lm.harness.antigravity.transcript.file import AntigravityRecordFile
 from base.lm.harness.antigravity.transcript.window import EntryParser
 from base.lm.harness.session.transcript.entries import Reasoning
+from base.log import logger
 
 STAMP = "2026-11-17T05:30:00Z"
 
@@ -234,3 +235,19 @@ def test_same_size_record_rewrite_invalidates_verified_offsets(tmp_path: Path) -
     transcript(path, thought="another thought")
     assert path.stat().st_size == len(before)
     assert measured(path) == [None]
+
+
+def test_corrupt_sidecar_diagnostic_is_bounded_per_source_revision(tmp_path: Path) -> None:
+    path = tmp_path / "transcript_full.jsonl"
+    transcript(path)
+    timing_path(path).write_text("broken")
+    file = AntigravityRecordFile(path)
+    messages: list[str] = []
+    sink = logger.add(lambda message: messages.append(str(message)), level="WARNING")
+    try:
+        for _ in range(4):
+            assert file.revision() == 0
+            assert file.rows_after(0).rows
+    finally:
+        logger.remove(sink)
+    assert len(messages) == 1

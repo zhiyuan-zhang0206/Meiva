@@ -3,7 +3,7 @@ from __future__ import annotations
 from pathlib import Path
 
 from base.lm.harness.antigravity.timing import timing_key
-from base.lm.harness.antigravity.timing_store import load_timings, timing_path
+from base.lm.harness.antigravity.timing_store import TimingRecord, load_timings, timing_path
 from base.lm.harness.session.transcript.record_file import BLOCK_BYTES, Block, FileRow, RecordFile
 
 
@@ -12,14 +12,32 @@ class AntigravityRecordFile(RecordFile):
         super().__init__(path)
         self._record = path
         self._timings = timing_path(path)
+        self._loaded = False
+        self._signature: tuple[int, ...] | None = None
+        self._data: TimingRecord | None = None
 
     def revision(self) -> int:
+        data = self._load()
+        return self._signature[0] if data is not None and self._signature is not None else 0
+
+    def _load(self) -> TimingRecord | None:
         try:
-            if load_timings(self._record) is None:
-                return 0
-            return self._timings.stat().st_mtime_ns
+            timing, raw = self._timings.stat(), self._record.stat()
+            signature = (
+                timing.st_mtime_ns,
+                timing.st_ino,
+                timing.st_size,
+                raw.st_mtime_ns,
+                raw.st_ino,
+                raw.st_size,
+            )
         except OSError:
-            return 0
+            signature = None
+        if not self._loaded or signature != self._signature:
+            self._signature = signature
+            self._data = load_timings(self._record)
+            self._loaded = True
+        return self._data
 
     def rows_before(self, end: int, want: int = BLOCK_BYTES) -> Block:
         return self._enrich(super().rows_before(end, want))
@@ -28,7 +46,7 @@ class AntigravityRecordFile(RecordFile):
         return self._enrich(super().rows_after(start))
 
     def _enrich(self, block: Block) -> Block:
-        data = load_timings(self._record)
+        data = self._load()
         rows: list[FileRow] = []
         for file in block.rows:
             row = file.row
