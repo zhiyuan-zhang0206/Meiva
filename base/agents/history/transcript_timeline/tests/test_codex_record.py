@@ -411,3 +411,16 @@ def test_inclusive_anchor_reads_one_complete_old_row_with_bounded_window(
         assert file.held_bytes <= MAX_BLOCK_BYTES
     else:
         assert file.bytes_read <= MAX_BLOCK_BYTES + BLOCK_BYTES
+
+
+def test_compressed_anchor_tracks_complete_record_end_past_its_buffer(tmp_path: Path) -> None:
+    first = b'{"first":true}\n'
+    complete = first + b'{"later":"' + b"x" * (2 * BLOCK_BYTES * 4) + b'"}\n'
+    path = tmp_path / "partial-tail.jsonl.zst"
+    _ = path.write_bytes(zstandard.ZstdCompressor().compress(complete + b'{"partial":'))
+    file = ZstdRecordFile(path)
+    file.prepare_anchor(0)
+    assert file.complete_end() == len(first)
+    assert file.complete_record_end() == len(complete)
+    assert file.held_bytes == len(first)
+    assert file.bytes_read == file.size() == len(complete) + len(b'{"partial":')

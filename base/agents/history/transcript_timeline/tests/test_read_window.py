@@ -4,6 +4,7 @@ import json
 from pathlib import Path
 
 import pytest
+import zstandard
 
 from base.agents.history.timeline_item import TimelineItem
 from base.agents.history.transcript_timeline.items import format_tool_use
@@ -20,6 +21,7 @@ from base.agents.history.transcript_timeline.tests.support import (
     with_wire_ids,
     write,
 )
+from base.lm.harness.session.transcript.record_file import ZstdRecordFile
 from base.log import logger
 
 BASIC_KINDS = [
@@ -239,3 +241,61 @@ def test_inclusive_anchor_refuses_an_unfinished_or_over_budget_row(tmp_path: Pat
     )
     assert window(oversized, anchor=0).items == ()
     assert oversized.bytes_read <= MAX_REQUEST_BYTES
+
+
+@pytest.mark.parametrize("newer", [False, True])
+@pytest.mark.parametrize("compressed", [False, True])
+@pytest.mark.parametrize("partial_next", [False, True])
+def test_anchored_tool_activity_depends_on_reaching_record_tail(
+    tmp_path: Path, newer: bool, compressed: bool, partial_next: bool
+) -> None:
+    lines = fixture_text("basic").splitlines(keepends=True)
+    call_at = next(i for i, line in enumerate(lines) if '"type":"tool_use"' in line)
+    prefix = "".join(lines[: call_at + 1])
+    file = write(
+        tmp_path / "anchor-tail.jsonl",
+        prefix
+        + ("".join(lines[call_at + 1 :]) if newer else "")
+        + ('{"type":"assistant"' if partial_next else ""),
+    )
+    if compressed:
+        packed = tmp_path / "anchor-tail.jsonl.zst"
+        _ = packed.write_bytes(
+            zstandard.ZstdCompressor().compress((tmp_path / "anchor-tail.jsonl").read_bytes())
+        )
+        file = ZstdRecordFile(packed)
+    offset = len("".join(lines[:call_at]).encode())
+    head_call = next(p.item for p in window(file).items if p.item.kind == "agent_code")
+    assert head_call.activity_pending is (None if newer else True)
+    call = next(p.item for p in window(file, anchor=offset).items if p.item.kind == "agent_code")
+    assert call.activity_pending is (None if newer else True)
+
+
+def test_incomplete_text_is_not_an_anchor_source_and_keeps_other_block_ids(tmp_path: Path) -> None:
+    row = {
+        "type": "assistant",
+        "uuid": "aborted",
+        "timestamp": "2026-11-18T00:00:00Z",
+        "isAbortedMidStream": True,
+        "message": {
+            "id": "aborted",
+            "content": [
+                {"type": "text", "text": "unfinished"},
+                {
+                    "type": "tool_use",
+                    "id": "complete-call",
+                    "name": "Bash",
+                    "input": {"command": "echo complete"},
+                },
+            ],
+        },
+    }
+    file = write(tmp_path / "aborted.jsonl", json.dumps(row) + "\n")
+    head = window(file)
+    assert [(p.item.item_id, p.item.kind) for p in head.items] == [
+        ("h0.0", "agent_chat"),
+        ("h0.1", "agent_code"),
+    ]
+    anchored = window(file, anchor=0)
+    assert [(p.item.item_id, p.item.kind) for p in anchored.items] == [("h0.1", "agent_code")]
+    assert anchored.items[0].item.activity_pending is True

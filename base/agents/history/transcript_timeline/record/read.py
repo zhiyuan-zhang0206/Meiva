@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from collections.abc import Callable, Mapping, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import datetime
 
 from base.agents.history.timeline_item import TimelineItem
@@ -17,7 +17,7 @@ from base.agents.history.transcript_timeline.record.harness import (
     wire_id,
 )
 from base.agents.history.transcript_timeline.record.match import CLAIM_SLACK
-from base.lm.harness.session.transcript.entries import InputRow, Reasoning
+from base.lm.harness.session.transcript.entries import AgentText, InputRow, Reasoning
 from base.lm.harness.session.transcript.record_file import (
     BLOCK_BYTES,
     MAX_BLOCK_BYTES,
@@ -74,6 +74,12 @@ def read_window(
     anchor: int | None = None,
 ) -> Window:
     rows, start, read, size = _prepare_window(file, before, anchor)
+    # meiva:note
+    # An inclusive source at the last complete row is still live, even with partial bytes after it.
+    # The full-record boundary is independent of the older buffer retained by a compressed anchor read.
+    at_tail = before is None and (
+        anchor is None or (bool(rows) and rows[-1].end == file.complete_record_end())
+    )
     spent, want = 0, BLOCK_BYTES
     while True:
         block = file.rows_before(start, min(want, MAX_REQUEST_BYTES - read))
@@ -83,7 +89,8 @@ def read_window(
         projected = _items_of(
             rows,
             harness=harness,
-            tail=before is None and anchor is None,
+            tail=at_tail,
+            complete_only=anchor is not None,
             policy=policy,
             render_tool=render_tool,
             load_sent=load_sent,
@@ -115,6 +122,7 @@ def _items_of(
     *,
     harness: str,
     tail: bool,
+    complete_only: bool,
     policy: ReplyPolicy,
     render_tool: Callable[[str, Mapping[str, object]], str],
     load_sent: LoadSent,
@@ -128,7 +136,15 @@ def _items_of(
             projector.register(key, items)
     reader = entry_reader(harness)
     entries = reader.entries(rows)
-    return projector.feed(entries, tail=tail and reader.pending_calls, release_held=True)
+    projected = projector.feed(entries, tail=tail and reader.pending_calls, release_held=True)
+    if not complete_only:
+        return projected
+    incomplete = {
+        entry.key for entry in entries if isinstance(entry, AgentText) and not entry.complete
+    }
+    return replace(
+        projected, items=tuple(item for item in projected.items if item.key not in incomplete)
+    )
 
 
 # meiva:note

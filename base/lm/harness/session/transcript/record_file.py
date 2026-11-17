@@ -89,6 +89,11 @@ class RecordFile:
         return self._path.stat().st_size
 
     # meiva:note
+    # The full record's last committed row boundary, even when an anchored reader retains only an older window.
+    def complete_record_end(self) -> int:
+        return self.complete_end()
+
+    # meiva:note
     # The end of the last complete line: a row the CLI is still writing is not read.
     def complete_end(self) -> int:
         with self._path.open("rb") as handle:
@@ -205,6 +210,7 @@ class ZstdRecordFile(RecordFile):
         super().__init__(path)
         self._tail = b""
         self._total = 0
+        self._complete_record_end = 0
 
     def prepare(self, before: int | None) -> None:
         self._prepare(before, inclusive=False)
@@ -215,25 +221,18 @@ class ZstdRecordFile(RecordFile):
     def _prepare(self, before: int | None, *, inclusive: bool) -> None:
         ring = bytearray()
         position, kept_end = 0, None
+        complete_record_end = 0
         with self._path.open("rb") as handle:
             reader = zstandard.ZstdDecompressor().stream_reader(handle, read_across_frames=True)
             while chunk := reader.read(_STREAM_CHUNK_BYTES):
                 self.bytes_read += len(chunk)
                 position += len(chunk)
+                newline = chunk.rfind(b"\n")
+                if newline >= 0:
+                    complete_record_end = position - len(chunk) + newline + 1
                 if kept_end is not None:
                     continue
-                ring += chunk
-                if before is not None and position >= before:
-                    boundary = before
-                    if inclusive:
-                        origin = position - len(ring)
-                        newline = ring.find(b"\n", max(0, before - origin))
-                        boundary = origin + newline + 1 if newline >= 0 else position + 1
-                    if boundary <= position:
-                        del ring[len(ring) - (position - boundary) :]
-                        kept_end = boundary
-                if len(ring) > MAX_BLOCK_BYTES:
-                    del ring[: len(ring) - MAX_BLOCK_BYTES]
+                kept_end = _retain_anchor_chunk(ring, chunk, position, before, inclusive=inclusive)
         end = position if kept_end is None else kept_end
         start = end - len(ring)
         first = bytes(ring).find(b"\n") if start > 0 else -1
@@ -244,6 +243,7 @@ class ZstdRecordFile(RecordFile):
             self._tail = bytes(ring)
             self._floor = 0
         self._total = position
+        self._complete_record_end = complete_record_end
 
     @property
     def held_bytes(self) -> int:
@@ -251,6 +251,9 @@ class ZstdRecordFile(RecordFile):
 
     def size(self) -> int:
         return self._total
+
+    def complete_record_end(self) -> int:
+        return self._complete_record_end
 
     def complete_end(self) -> int:
         cut = self._tail.rfind(b"\n")
@@ -263,3 +266,22 @@ class ZstdRecordFile(RecordFile):
 
     def rows_after(self, start: int) -> Block:
         raise NotImplementedError("a compressed record is read as a window, never followed")
+
+
+def _retain_anchor_chunk(
+    ring: bytearray, chunk: bytes, position: int, before: int | None, *, inclusive: bool
+) -> int | None:
+    kept_end = None
+    ring += chunk
+    if before is not None and position >= before:
+        boundary = before
+        if inclusive:
+            origin = position - len(ring)
+            newline = ring.find(b"\n", max(0, before - origin))
+            boundary = origin + newline + 1 if newline >= 0 else position + 1
+        if boundary <= position:
+            del ring[len(ring) - (position - boundary) :]
+            kept_end = boundary
+    if len(ring) > MAX_BLOCK_BYTES:
+        del ring[: len(ring) - MAX_BLOCK_BYTES]
+    return kept_end
