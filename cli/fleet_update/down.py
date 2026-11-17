@@ -7,6 +7,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import dataclass
 
 from .choices import DownChoices, FleetArgs, forwarded_flags, message_flag, start_flags
@@ -331,7 +332,7 @@ def _stop_wave(s: Session, args: FleetArgs, pre: _Preflight) -> None:
 
 
 # meiva:link cli/docs/fleet-update.md
-def down(s: Session, args: FleetArgs, resolved_new: str | None) -> None:
+def prepare(s: Session, args: FleetArgs, resolved_new: str | None) -> _Preflight:
     if resolved_new is not None:
         new = resolved_new
     elif args.target_request is not None:
@@ -345,6 +346,23 @@ def down(s: Session, args: FleetArgs, resolved_new: str | None) -> None:
     _stored_schedules(s, args, new)
     hosts = start_order(args.gateway, tuple(args.runner))
     s.run_all(hosts, lambda alias: s.run(alias, prestage_command(new)))
+    return pre
+
+
+def down(
+    s: Session,
+    args: FleetArgs,
+    resolved_new: str | None,
+    *,
+    before_stop: Callable[[], None] | None = None,
+) -> None:
+    pre = prepare(s, args, resolved_new)
+    if resolved_new is None:
+        raise RefusedError("no target to resolve")
+    new = resolved_new
+    hosts = start_order(args.gateway, tuple(args.runner))
+    if before_stop is not None:
+        before_stop()
     silence_note = f" ({args.message_text})" if args.message_text else ""
     run_silence(
         s,

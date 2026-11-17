@@ -1,0 +1,8 @@
+exports = ["__init__.py", "agents.py", "plan.py", "host_timer.py"]
+[uses]
+"__init__.py" = ["agents.py", "host_timer.py", "plan.py"]
+"agents.py" = ["plan.py"]
+[purity]
+"plan.py" = "strict"
+[roots]
+"__init__.py" = { kinds = ["platform", "pid", "clock"], why = "Host timer entry chooses the OS and GUI domain and refuses an elapsed deadline." }

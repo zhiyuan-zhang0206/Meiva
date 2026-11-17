@@ -105,12 +105,20 @@ def populate_update_parser(
     handler: Callable[[argparse.Namespace], int] | None,
 ) -> None:
     halves = parser.add_subparsers(dest="half", required=True)
+    for verb in ("status", "cancel"):
+        job = halves.add_parser(verb, help=f"{verb} a scheduled host OS update")
+        job.add_argument("record", type=Path)
+        if handler is not None:
+            job.set_defaults(func=handler)
     for half, help_text in (
         ("run", "complete the update: down, then up and verification"),
         ("down", "stop and switch every host; leave stopped for manual release steps"),
         ("up", "start and verify the cluster, including recovery after a failed up"),
     ):
         p = halves.add_parser(half, help=help_text)
+        if half == "run":
+            p.add_argument("--at", help="future +60s, +5m or aware ISO timestamp")
+            p.add_argument("--source", help="explicit initiator: user or agent:<id>")
         p.add_argument("--gateway", required=True, metavar="SSH_ALIAS")
         p.add_argument("--runner", action="append", default=None, metavar="SSH_ALIAS")
         p.add_argument("--no-runners", action="store_true", help="the cluster has no runner hosts")
@@ -349,6 +357,8 @@ class FleetArgs:
     message_text: str | None
     rebuild_extras: bool
     down: DownChoices | None
+    at: str | None = None
+    source: str | None = None
 
 
 def forwarded_flags(args: FleetArgs, chosen: str) -> list[str]:
@@ -426,6 +436,8 @@ def _fleet_args(args: argparse.Namespace) -> FleetArgs:
         target_request=target if isinstance(target, TargetRequest) else None,
         message_text=message if isinstance(message, str) else None,
         rebuild_extras=_attr(args, "rebuild_extras") is True,
+        at=str(_attr(args, "at")) if _attr(args, "at") is not None else None,
+        source=str(_attr(args, "source")) if _attr(args, "source") is not None else None,
         down=None if _text(args, "half") == "up" else _down_choices(args),
     )
 

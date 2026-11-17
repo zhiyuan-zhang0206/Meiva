@@ -147,11 +147,22 @@ recovery; each half is idempotent. See the runbook's "Updating a networked clust
 in source mode". A result from anywhere else does not replace CI, review or
 operator authorization for production.
 
-A Meiva agent acting as the authorized operator can submit the whole update
-from its own shell to a macOS launchd one-shot, then return so it can drain.
-Read [agent-initiated updates](references/agent-update.md) for the submission,
-logs and recovery procedure. The job runs outside the agent and PTY service;
-the fleet command still refuses direct execution inside an agent's shell.
+An authorized agent can schedule a complete update from its shell with
+`meiva update run --at +5m --source agent:<id>` plus every ordinary explicit
+update choice and `--message TEXT` or `--no-message`. Human initiators pass
+`--source user`. Submission validates and prestages while the cluster serves,
+warns currently running peers, and prints the durable operation record.
+`meiva update status RECORD` inspects it; `meiva update cancel RECORD` cancels
+its pending OS timer. Keep the operator checkout and interpreter outside the
+serving checkouts and retain them through completion.
+
+Linux systemd / macOS launchd owns the attempt outside the agent process tree.
+Finish the initiating turn before the deadline. At the deadline any running
+agent aborts the update before stop; the initiator and busy agents receive the
+busy list. A successful down/switch/up sends its result to the recorded agent
+initiator after gateway recovery and verification. User initiators inspect the
+record and log. There is no automatic retry. Direct synchronous updates still
+require a plain login shell or OS-owned job.
 
 Related local commands:
 

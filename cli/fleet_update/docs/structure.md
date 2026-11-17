@@ -4,7 +4,7 @@
 entry (`cli.main`): the repository the NEW commit is resolved in, the environment (the `PATH`
 that finds `ssh`, and the agent marker that refuses a run from inside an agent), the time the log
 and the one-shot job names are stamped with, the pacing of its waits, and the clock those waits
-are spent on. Nothing below reads the environment, the clock or `sys.argv`.
+are spent on. The synchronous window receives those facts as inputs. The separate scheduled worker is an OS-owned process entry and captures its own environment and clock.
 
 - `session.py` owns the connection to the hosts: the operator's own `ssh`, found on the `PATH` the
   process was started with, and the one redacted log. `FailedError` is a step that cannot
@@ -25,8 +25,14 @@ are spent on. Nothing below reads the environment, the clock or `sys.argv`.
   receives (`host_commands`, `gateway_commands`, `prestage`, `oneshot`). The shell reads facts,
   runs the commands and prints the lines these return.
 
+- `scheduling/` prepares a host-owned one-shot, stores its operation record and routes
+  warnings. Its entry selects the local OS timer and verifies that preparation did
+  not spend the deadline. The pure `scheduling/plan.py` parses deadlines and directory
+  replies. `scheduled_worker.py` claims the record under a file lock and runs one
+  pinned-target attempt; cancellation takes the same lock and refuses an executing job.
+
 ## Contract
 
-Nothing in cli.fleet_update reads the environment, the clock or sys.argv below the entry point: main receives the repository, the environment, the stamp time, the pacing and the clock as values, every host command goes through the ssh found on the PATH main was given, and each decision the window makes is a pure function in plan/ of the text a host printed.
+The synchronous update window receives its ambient facts from the CLI entry: main receives the repository, the environment, the stamp time, the pacing and the clock as values, every host command goes through the ssh found on the PATH main was given, and each decision the window makes is a pure function in plan/ of the text a host printed.
 
 Parent: [Fleet update over SSH](../../docs/fleet-update.md).
