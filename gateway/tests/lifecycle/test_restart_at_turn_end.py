@@ -307,3 +307,31 @@ def test_external_restart_without_overlay_probes_launchability(
         assert answer.status_code == 400, answer.text
         assert "login expired" in answer.text
         assert len(gateway_local_runner.calls) == before
+
+
+@pytest.mark.parametrize(
+    "at",
+    [
+        "+999999999999999999999d",
+        "+3650000d",
+        "9999-12-31T23:59:59.999999-23:59",
+    ],
+)
+def test_appointment_time_overflow_refuses_without_queueing(
+    _local_machine: MachineIdentityReader,
+    gateway_local_runner: RunnerOps,
+    db_conn: psycopg.Connection,
+    at: str,
+) -> None:
+    with gateway_test_client(machine=_local_machine) as client:
+        agent_id = spawn_via_http(client).json()["id"]
+        before = db_conn.execute("SELECT count(*) FROM schedules").fetchone()
+        answer = client.post(
+            f"/api/agents/{agent_id}/restart",
+            params={"at": at},
+            json={"source": f"agent:{agent_id}", "message": "invalid time"},
+        )
+        assert answer.status_code == 422, answer.text
+        db_conn.commit()
+        assert db_conn.execute("SELECT count(*) FROM schedules").fetchone() == before
+        assert _commands(db_conn, agent_id) == []

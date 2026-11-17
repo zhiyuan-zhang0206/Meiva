@@ -98,7 +98,7 @@ async def arm_appointment(
 ) -> dict[str, object]:
     try:
         run_at = parse_at(at, now=gateway_clock(request).now())
-    except (ValueError, TypeError) as exc:
+    except (ValueError, TypeError, OverflowError) as exc:
         raise HTTPException(422, str(exc)) from exc
     status = await asyncio.to_thread(target_status_blocking, request, agent_id)
     # meiva:note
