@@ -1,3 +1,6 @@
+import { useLayoutEffect, useRef, type ComponentProps } from "react";
+import { readScrollMemory } from "@/lib/layout/scroll-memory";
+import { timelineGeometry } from "@/test-support/timeline-geometry";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { act, cleanup, fireEvent, screen, waitFor } from "@testing-library/react";
 import { renderWithBrowser } from "@/test-support/render";
@@ -441,4 +444,92 @@ afterEach(() => { cleanup(); client.clear(); });
     expect(strip.dataset.state).toBe("loading");
   });
 
+});
+
+
+describe("home return while the source window loads", () => {
+const items: BackendTimelineItem[] = Array.from({ length: 16 }, (_, index) => ({
+  item_id: `${index + 1}.0`, kind: "agent_chat", payload: `Reply ${index + 1}`,
+  source: null, created_at: null, inbound_id: null, show_timestamp: false,
+}));
+const response: TimelineResponse = { items, msg_count: 17, has_more: false };
+const gateway = transport;
+const wallNow = () => Date.now();
+let client: QueryClient;
+let top = 0;
+let geometry: ReturnType<typeof timelineGeometry>;
+let resizeCallbacks: Set<() => void>;
+function viewport() { return document.querySelector<HTMLElement>('[data-slot="scroll-area-viewport"]')!; }
+function resize() { act(() => { resizeCallbacks.forEach((deliver) => deliver()); }); }
+function readingOffset(id: string) {
+  const node = viewport().querySelector(`.timeline-item[data-item-id="${id}"]`);
+  return node ? Math.round(node.getBoundingClientRect().top - viewport().getBoundingClientRect().top) : null;
+}
+beforeEach(() => {
+  resetTransport();
+  transport.getConfig.mockResolvedValue({ fields: [] });
+  client = new QueryClient({ defaultOptions: { queries: { retry: false, staleTime: Infinity } } });
+  client.setQueryData(["timeline", 42], response);
+  client.setQueryData(["timeline", 43], response);
+  client.setQueryData(["config", null], { fields: [] });
+  client.setQueryData(["user-settings"], { ...USER_SETTING_DEFAULTS });
+  useTimelineStore.getState().switchThread(null, null, false);
+  top = 0;
+  resizeCallbacks = new Set();
+  geometry = timelineGeometry({
+    top: () => top, setTop: (value) => { top = value; },
+    height: () => 5000, resizeCallbacks,
+  });
+});
+afterEach(() => {
+  cleanup(); client.clear();
+});
+
+function MeasuredTimeline(props: ComponentProps<typeof TimelineView>) {
+  const root = useRef<HTMLDivElement>(null);
+  useLayoutEffect(() => { if (root.current) geometry.prepare(root.current); });
+  return <div ref={root}><TimelineView {...props} viewportObserverFactory={geometry.observer} /></div>;
+}
+
+  it.each(["cold", "retained"])("keeps the departed bookmark through %s source layouts", async (source) => {
+    hooksState.activeId = 42;
+    hooksState.agents = [makeAgent({ agent_id: 42 })];
+    hooksState.bfcacheId = `home-loading-return-${source}`;
+    hooksState.settings = { ...USER_SETTING_DEFAULTS, "behavior.replySuggestions": false };
+    transport.getPendingMessages.mockResolvedValue([]);
+    transport.getUserMessages.mockResolvedValue({ mode: "prefix", seen_id: 0, items: [] });
+    transport.getAgentQuestions.mockResolvedValue([]);
+    const { hub } = fakeStreamHub();
+    function HomeReader() {
+      const timeline = useTimeline(hooksState.activeId, () => undefined);
+      return <HomePageView {...homePageProps()} timeline={timeline} TimelineView={MeasuredTimeline} />;
+    }
+    const home = () => <QueryClientProvider client={client}>
+      <WallClockProvider wallNow={wallNow}><ApiProvider api={gateway}>
+        <StreamHubProvider hub={hub}><TestStreamProvider><HomeReader /></TestStreamProvider></StreamHubProvider>
+      </ApiProvider></WallClockProvider>
+    </QueryClientProvider>;
+    const view = renderWithBrowser(home());
+    act(() => { viewport().scrollTop = 700; fireEvent.scroll(viewport()); });
+    hooksState.activeId = 43;
+    view.rerender(home());
+    expect(readScrollMemory(`home-loading-return-${source}:agent:42`)?.scrollTop).toBe(700);
+    if (source === "cold") act(() => {
+      client.removeQueries({ queryKey: ["timeline", 42], exact: true });
+      client.removeQueries({ queryKey: ["timeline-reading-window", 42], exact: true });
+    });
+    let deliver: (value: TimelineResponse) => void = () => undefined;
+    transport.getTimeline.mockImplementation(() => new Promise<TimelineResponse>((resolve) => { deliver = resolve; }));
+    hooksState.activeId = 42;
+    view.rerender(home());
+    if (source === "cold") {
+      await waitFor(() => expect(transport.getTimeline).toHaveBeenCalled());
+      resize(); resize(); resize();
+      await act(async () => { deliver(response); await Promise.resolve(); });
+    }
+    await waitFor(() => expect(viewport().querySelectorAll(".timeline-item")).toHaveLength(16));
+    resize();
+    expect(viewport().scrollTop).toBe(700);
+    expect(readingOffset("3.0")).toBe(-100);
+  });
 });
