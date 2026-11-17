@@ -1,10 +1,9 @@
 # meiva:note
-# The peer recall threshold reflects the 2026-11-18 recall-first policy over the 999-message
-# peer replay (`peer_recall_replay.json`): `PEER_GATE_WORK` screens out pure status and ACK
-# messages first (96% recall on work dispatches), and `skill_recall_peer_threshold` (0.45) keeps
-# 98.6% recall across the 428 work requests while remaining stricter than the person cut (0.35)
-# against residual peer coordination noise. The former 0.70 cut dropped recall to 63.3% (157 of
-# 428 work dispatches received no offer). Changing the default re-opens this test on purpose.
+# The peer recall threshold reflects the 2026-11-18 recall-first policy evaluated by
+# re-thresholding the historical 2026-10-18 `jev-1.13.0` 999-message peer score fixture
+# (`peer_recall_replay.json`): at 0.45, recall across the 428 work requests in that fixture is
+# 98.6% (vs 63.3% at the former 0.70 cut, which left 157 of 428 work dispatches with no offer),
+# while staying stricter than the person cut (0.35). Changing the default re-opens this test.
 
 from __future__ import annotations
 

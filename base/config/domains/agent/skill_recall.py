@@ -82,10 +82,10 @@ class AgentSkillRecallSettings(EnvSettings):
             "Lowest probability of 'yes' at which a skill is offered on a turn woken by "
             "another agent's message, instead of skill_recall_threshold. Peer traffic carries "
             "more coordination noise than direct user turns, so its cut stays stricter than "
-            "skill_recall_threshold while preserving recall-first coverage (98.6% recall across "
-            "the 428 work dispatches in peer_recall_replay.json after PEER_GATE_WORK screens "
-            "out status and acknowledgement messages). Only used when "
-            "skill_recall_peer_messages is on."
+            "skill_recall_threshold while favoring recall-first coverage (re-thresholding the "
+            "historical 999-message peer_recall_replay.json score fixture from 0.70 to 0.45 "
+            "raises coverage across its 428 work dispatches from 63.3% to 98.6%). Only used "
+            "when skill_recall_peer_messages is on."
         ),
         json_schema_extra={
             "restart_required": "agent",

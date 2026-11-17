@@ -43,6 +43,6 @@ A peer agent's message is scored only after one cheap single-question gate (`pee
 
 Replay of 999 peer messages (2026-10-18, jev-1.13.0): the single work question scores 71.5% precision at **96% recall** (the former second question checking whether the brief already stated a method dropped recall to 78.3% and precision to 69.9%, and was removed on 2026-11-18).
 
-A turn the gate lets through is scored against `skill_recall_peer_threshold` (0.45), stricter than the person cut (`0.35`) to account for residual peer coordination traffic while preserving 98.6% recall across the 428 work requests in `peer_recall_replay.json` (compared with 63.3% recall at the former 0.70 cut).
+A turn the gate lets through is scored against `skill_recall_peer_threshold` (0.45), stricter than the person cut (`0.35`) to account for residual peer coordination traffic. Re-thresholding the historical 2026-10-18 `jev-1.13.0` 999-message fixture (`peer_recall_replay.json`) from `0.70` to `0.45` raises work-request coverage on those recorded scores from 63.3% (`271/428`) to 98.6% (`422/428`).
 
 Parent: [Graph](graph.md).
