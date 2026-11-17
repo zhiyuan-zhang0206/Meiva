@@ -22,6 +22,7 @@ from base.db.rows import query_one
 from gateway.http.config import gateway_clock, gateway_config, gateway_rpc, gateway_state
 from gateway.message_admission.cursor import TimelineCursor, parse_cursor
 from gateway.message_admission.harness import agent_harness
+from gateway.record_activity import settle_record_activity
 from ops.cluster.rpc import ClusterOpFailed, ClusterOpUnreachable
 from ops.rpc_schemas import HarnessTimelineReadRequest, HarnessTimelineWindow
 
@@ -106,7 +107,7 @@ async def _record_items(
         raise HTTPException(
             422, "Quote source is unavailable; select readable, completed text again"
         )
-    return window.items
+    return (await settle_record_activity(request, agent_id, window)).items
 
 
 def _check_identity(quote: Quote, source: TimelineItem) -> None:

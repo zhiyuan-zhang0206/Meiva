@@ -9,13 +9,14 @@ from pydantic import BaseModel
 
 from base.agents.history.timeline_item import TimelineItem
 from base.agents.to_user.delivery.store import delivery_mode
-from base.api_contracts.agent_contract import AgentStatus, reads_timeline_from_record
+from base.api_contracts.agent_contract import reads_timeline_from_record
 from base.api_contracts.user_delivery import UserDeliveryMode
 from base.db.rows import query_one
 from gateway.agents.history.configuration import request_timeline_read
 from gateway.http.config import gateway_config, gateway_rpc, gateway_state
 from gateway.message_admission.cursor import TimelineCursor
 from gateway.message_admission.harness import agent_harness
+from gateway.record_activity import settle_record_activity
 from ops.cluster.rpc import ClusterOpFailed, ClusterOpUnreachable
 from ops.rpc_schemas import HarnessTimelineReadRequest, HarnessTimelineWindow
 
@@ -36,10 +37,6 @@ class _MachineRow(BaseModel):
     machine: str
 
 
-class _StatusRow(BaseModel):
-    status: AgentStatus
-
-
 def _placement(request: Request, agent_id: int) -> tuple[str, UserDeliveryMode]:
     with gateway_state(request).db_pool.connection() as conn:
         row = query_one(
@@ -49,16 +46,6 @@ def _placement(request: Request, agent_id: int) -> tuple[str, UserDeliveryMode]:
             raise HTTPException(404, "Agent not found")
         mode = delivery_mode(conn, agent_id, gateway_config(request).user_delivery_mode)
     return row.machine, mode
-
-
-def _status_of(request: Request, agent_id: int) -> AgentStatus:
-    with gateway_state(request).db_pool.connection() as conn:
-        row = query_one(
-            conn, _StatusRow, "SELECT status FROM agents_meta WHERE id = %s", (agent_id,)
-        )
-    if row is None:
-        raise HTTPException(404, "Agent not found")
-    return row.status
 
 
 async def fetch_record_window(
@@ -89,14 +76,7 @@ async def fetch_record_window(
         _log.warning("harness_timeline_read failed for agent %s: %s", agent_id, exc.result)
         raise HTTPException(502, "The agent's machine could not read the timeline") from exc
     window = HarnessTimelineWindow.model_validate(result)
-    status = await asyncio.to_thread(_status_of, request, agent_id)
-    if status is not AgentStatus.RUNNING:
-        items = [
-            item.model_copy(update={"activity_pending": None}) if item.activity_pending else item
-            for item in window.items
-        ]
-        return window.model_copy(update={"items": items})
-    return window
+    return await settle_record_activity(request, agent_id, window)
 
 
 def fetch_record_window_sync(

@@ -44,6 +44,9 @@ class ScriptedRunner:
         retries: int | None = None,
         idempotency_key: str | None = None,
     ) -> dict[str, object]:
+        if kind == "lifecycle":
+            assert str(payload["path"]).endswith("/resurrect-if-pending-work")
+            return {"status": "spawned"}
         self.calls.append((target_machine, kind, payload))
         assert (timeout_s, retries) == (3.0, 0), "a short read, never retried"
         if self.on_dispatch is not None:
@@ -401,13 +404,17 @@ def test_quote_anchor_echo_does_not_replace_stable_source_identity(
 
 
 @pytest.mark.parametrize("status", ["running", "idling", "terminated"])
-def test_inclusive_quote_keeps_pending_source_completion_check(
+@pytest.mark.parametrize("harness", ["claude_code", "codex", "antigravity"])
+@pytest.mark.parametrize("initial", ["running", "idling"])
+def test_inclusive_quote_uses_canonical_activity_status(
     client: GatewayTestClient,
     db_conn: psycopg.Connection,
     status: str,
+    harness: str,
+    initial: str,
 ) -> None:
-    agent = _record_agent(db_conn, "codex")
-    db_conn.execute("UPDATE agents_meta SET status = %s WHERE id = %s", (status, agent))
+    agent = _record_agent(db_conn, harness)
+    db_conn.execute("UPDATE agents_meta SET status = %s WHERE id = %s", (initial, agent))
     db_conn.commit()
     item = TimelineItem(
         item_id="h413.0",
@@ -415,6 +422,11 @@ def test_inclusive_quote_keeps_pending_source_completion_check(
         payload="Bash: interrupted command",
         activity_pending=True,
     )
+
+    def transition() -> None:
+        db_conn.execute("UPDATE agents_meta SET status=%s WHERE id=%s", (status, agent))
+        db_conn.commit()
+
     runner = ScriptedRunner(
         {
             "items": [item.model_dump(mode="json")],
@@ -422,7 +434,8 @@ def test_inclusive_quote_keeps_pending_source_completion_check(
             "size": 9800,
             "anchor_applied": True,
             "anchor_item_id": "h413.0",
-        }
+        },
+        on_dispatch=transition,
     )
     client.app.state.rpc = runner
 
@@ -440,11 +453,11 @@ def test_inclusive_quote_keeps_pending_source_completion_check(
         },
     )
 
-    assert response.status_code == 422, response.text
+    assert response.status_code == (422 if status == "running" else 201), response.text
     [(_, _, payload)] = runner.calls
     assert payload["anchor_item_id"] == "h413.0"
     assert payload["before"] is None
     row = db_conn.execute(
         "SELECT count(*) FROM inbound_messages WHERE agent_id = %s", (agent,)
     ).fetchone()
-    assert row is not None and row[0] == 0
+    assert row is not None and row[0] == (0 if status == "running" else 1)

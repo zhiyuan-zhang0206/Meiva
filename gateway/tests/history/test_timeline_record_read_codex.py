@@ -7,7 +7,8 @@
 from __future__ import annotations
 
 import asyncio
-from collections.abc import Iterator
+import json
+from collections.abc import Callable, Iterator
 from pathlib import Path
 
 import psycopg
@@ -84,8 +85,17 @@ def test_a_thread_with_no_rollout_is_an_empty_timeline(
 
 
 class RecordOperationRunner:
-    def __init__(self, home: Path, environ: dict[str, str], pool: ConnectionPool) -> None:
+    def __init__(
+        self,
+        home: Path,
+        environ: dict[str, str],
+        pool: ConnectionPool,
+        *,
+        on_dispatch: Callable[[], None] | None = None,
+    ) -> None:
         self.home, self.environ, self.pool = home, environ, pool
+        self.on_dispatch = on_dispatch
+        self.raw_pending = False
 
     async def dispatch_to_machine(
         self,
@@ -98,6 +108,9 @@ class RecordOperationRunner:
         retries: int | None = None,
         idempotency_key: str | None = None,
     ) -> dict[str, object]:
+        if kind == "lifecycle":
+            assert str(payload["path"]).endswith("/resurrect-if-pending-work")
+            return {"status": "spawned"}
         assert target_machine == "macmini" and kind == "harness_timeline_read"
         assert (timeout_s, retries) == (3.0, 0)
         result = await asyncio.to_thread(
@@ -107,6 +120,9 @@ class RecordOperationRunner:
             environ=self.environ,
             pool=self.pool,
         )
+        self.raw_pending = any(item.activity_pending for item in result.items)
+        if self.on_dispatch is not None:
+            self.on_dispatch()
         return result.model_dump(mode="json")
 
 
@@ -186,3 +202,173 @@ def test_quote_http_reads_the_actual_complete_record_row(
         "SELECT count(*) FROM inbound_messages WHERE agent_id=%s", (agent,)
     ).fetchone()
     assert row is not None and row[0] == 1
+
+
+@pytest.mark.parametrize(
+    "initial, final",
+    [
+        ("idling", "idling"),
+        ("terminated", "terminated"),
+        ("running", "running"),
+        ("idling", "running"),
+        ("running", "idling"),
+    ],
+)
+@pytest.mark.parametrize("partial", ["none", "line", "text"])
+def test_quote_record_activity_parity(
+    client: GatewayTestClient,
+    db_conn: psycopg.Connection,
+    db_url: str,
+    tmp_path: Path,
+    initial: str,
+    final: str,
+    partial: str,
+) -> None:
+    agent = _codex_agent(db_conn)
+    db_conn.execute("UPDATE agents_meta SET harness='claude_code' WHERE id=%s", (agent,))
+    db_conn.commit()
+    session = "parity-session"
+    home = tmp_path / "home"
+    FileSessionRegistry(harness_sessions_dir(home=home)).save(
+        SessionRecord(
+            agent_id=agent,
+            harness="claude_code",
+            session_id=session,
+            cwd=str(tmp_path),
+            model="m",
+            created_at="2026-11-18T00:00:00Z",
+            updated_at="2026-11-18T00:00:00Z",
+            generation=1,
+        )
+    )
+    record = tmp_path / ".claude/projects/test" / f"{session}.jsonl"
+    record.parent.mkdir(parents=True)
+    raw = json.dumps(
+        {
+            "timestamp": "2026-11-18T00:00:00Z",
+            "type": "assistant",
+            "uuid": "parity-message",
+            "isAbortedMidStream": partial == "text",
+            "message": {
+                "id": "parity-message",
+                "content": [
+                    {
+                        "type": "text" if partial == "text" else "tool_use",
+                        "text": "unfinished text",
+                        "id": "call-parity",
+                        "name": "Bash",
+                        "input": {"command": "echo complete"},
+                    }
+                ],
+            },
+        }
+    ).encode()
+    _ = record.write_bytes(raw + (b"" if partial == "line" else b"\n"))
+
+    def status(value: str) -> None:
+        db_conn.execute("UPDATE agents_meta SET status=%s WHERE id=%s", (value, agent))
+        db_conn.commit()
+
+    status(final)
+    pool: ConnectionPool = ConnectionPool(db_url, min_size=1, max_size=1)
+    with pool:
+        runner = RecordOperationRunner(
+            home, {"HOME": str(tmp_path), "CLAUDE_CONFIG_DIR": str(tmp_path / "claude")}, pool
+        )
+        client.app.state.rpc = runner
+        timeline = client.get(f"/api/agents/{agent}/timeline")
+        assert timeline.status_code == 200, timeline.text
+        if partial == "none":
+            assert runner.raw_pending
+            assert timeline.json()["items"][0]["activity_pending"] is (
+                True if final == "running" else None
+            )
+        status(initial)
+        runner.on_dispatch = lambda: status(final)
+        response = client.post(
+            f"/api/agents/{agent}/messages",
+            json={
+                "content": "Explain",
+                "source": "user",
+                "quote": {
+                    "source_agent_id": agent,
+                    "source_item_id": "h0.0",
+                    "author": "Agent",
+                    "text": "echo complete",
+                },
+            },
+        )
+        accepted = partial == "none" and final != "running"
+        assert response.status_code == (201 if accepted else 422), response.text
+    row = db_conn.execute(
+        "SELECT count(*) FROM inbound_messages WHERE agent_id=%s", (agent,)
+    ).fetchone()
+    assert row is not None and row[0] == int(accepted)
+
+
+@pytest.mark.parametrize("agent_status", ["idling", "terminated"])
+@pytest.mark.parametrize("step_status", ["GENERATING", "RUNNING", "DONE"])
+def test_quote_rejects_incomplete_antigravity_planner_text(
+    client: GatewayTestClient,
+    db_conn: psycopg.Connection,
+    db_url: str,
+    tmp_path: Path,
+    agent_status: str,
+    step_status: str,
+) -> None:
+    agent = _codex_agent(db_conn)
+    _ = db_conn.execute(
+        "UPDATE agents_meta SET harness='antigravity', status=%s WHERE id=%s", (agent_status, agent)
+    )
+    db_conn.commit()
+    home = tmp_path / "home"
+    FileSessionRegistry(harness_sessions_dir(home=home)).save(
+        SessionRecord(
+            agent_id=agent,
+            harness="antigravity",
+            session_id="planner",
+            cwd=str(tmp_path),
+            model="m",
+            created_at="2026-11-18T00:00:00Z",
+            updated_at="2026-11-18T00:00:00Z",
+            generation=1,
+        )
+    )
+    record = (
+        tmp_path
+        / ".gemini/antigravity-cli/brain/planner/.system_generated/logs/transcript_full.jsonl"
+    )
+    record.parent.mkdir(parents=True)
+    _ = record.write_text(
+        json.dumps(
+            {
+                "type": "PLANNER_RESPONSE",
+                "status": step_status,
+                "created_at": "2026-11-18T00:00:00Z",
+                "content": "planner text",
+                "tool_calls": [],
+            }
+        )
+        + "\n"
+    )
+    pool: ConnectionPool = ConnectionPool(db_url, min_size=1, max_size=1)
+    with pool:
+        client.app.state.rpc = RecordOperationRunner(home, {"HOME": str(tmp_path)}, pool)
+        response = client.post(
+            f"/api/agents/{agent}/messages",
+            json={
+                "content": "Explain",
+                "source": "user",
+                "quote": {
+                    "source_agent_id": agent,
+                    "source_item_id": "h0.0",
+                    "author": "Agent",
+                    "text": "planner text",
+                },
+            },
+        )
+        assert response.status_code == (201 if step_status == "DONE" else 422), response.text
+    row = db_conn.execute(
+        "SELECT count(*) FROM inbound_messages WHERE agent_id=%s", (agent,)
+    ).fetchone()
+    assert row is not None and row[0] == int(step_status == "DONE")
