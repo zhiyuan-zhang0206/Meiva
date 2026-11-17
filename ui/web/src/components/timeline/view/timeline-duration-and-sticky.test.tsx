@@ -41,7 +41,7 @@ describe("detail-block duration display", () => {
     );
     expect(container.querySelector('[data-live-activity-window="true"]')).not.toBeNull();
     expect(screen.queryByTestId("activity-scroll-viewport")).toBeNull();
-    expect(runToggle().textContent).toContain("Working for");
+    expect(runToggle().textContent).toContain("Working");
     expect(runToggle().textContent).toContain("1 turn");
   });
   it("folds llmWaiting keepalive into the active turn as Thinking without spawning an extra block", () => {
@@ -115,7 +115,7 @@ describe("detail-block duration display", () => {
     fireEvent.click(header);
     expect(screen.getByText("1 system note")).toBeTruthy();
   });
-  it("completed work turn with zero measured duration still shows 'Worked for' instead of Context", () => {
+  it("completed work turn with missing duration shows Worked with a warning", () => {
     render(
       <TimelineView
         items={[
@@ -131,7 +131,8 @@ describe("detail-block duration display", () => {
       />,
     );
     const header = runToggle();
-    expect(header.textContent).toBe("Worked for 0.1s");
+    expect(header.textContent).toBe("Worked");
+    expect(screen.getByRole("img", { name: /timing was not fully recorded/ })).toBeTruthy();
     fireEvent.click(header);
     expect(screen.getByTestId("card-toggle").textContent).toBe("Thinking");
     expect(screen.getByTestId("card-toggle").textContent).not.toContain("Thinking for");

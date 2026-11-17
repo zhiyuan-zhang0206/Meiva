@@ -137,7 +137,6 @@ export interface TurnSummary {
   // meiva:link ui/web/src/docs/frontend-components/timeline-view/timeline-view.md
   readonly workedMs: number;
   readonly missingTiming: boolean;
-  readonly timedWorkItems: number;
   readonly lastLiveKind: "reasoning" | "code" | "output" | null;
   readonly lastLiveStartedAt: number;
   readonly sdkCalls: readonly SdkCall[];
@@ -158,7 +157,6 @@ function itemOwnMs(it: BackendTimelineItem): number | null {
 
 export function summarizeTurn(items: readonly BackendTimelineItem[]): TurnSummary {
   let missingTiming = false;
-  let timedWorkItems = 0;
   let thinking = 0;
   let code = 0;
   let output = 0;
@@ -177,9 +175,6 @@ export function summarizeTurn(items: readonly BackendTimelineItem[]): TurnSummar
     // A missing provider measurement is unknown, including after a reload drops
     // browser-only clocks. Never infer work from timestamps across idle gaps.
     // meiva:link ui/web/src/docs/frontend-components/timeline-view/deep-collapse.md
-    if (["agent_reasoning", "agent_code", "code_output"].includes(it.kind) && itemOwnMs(it) !== null) {
-      timedWorkItems += 1;
-    }
     if (itemOwnMs(it) === null &&
         !isLiveReasoning(it) && !isLiveCode(it) && !isLiveExecution(it)) {
       missingTiming = true;
@@ -258,7 +253,6 @@ export function summarizeTurn(items: readonly BackendTimelineItem[]): TurnSummar
     sdkCalls,
     workedMs,
     missingTiming,
-    timedWorkItems,
     lastLiveKind,
     lastLiveStartedAt,
   };

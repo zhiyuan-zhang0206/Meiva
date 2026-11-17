@@ -435,12 +435,10 @@ describe("work timing coverage", () => {
     for (const kind of kinds) {
       const missing = summarizeTurn([item(kind)]);
       expect(missing.missingTiming).toBe(true);
-      expect(missing.timedWorkItems).toBe(0);
       const zero = summarizeTurn([item(kind, null, "zero", {
         reasoning_ms: 0, code_elapsed_ms: 0, exec_ms: 0,
       })]);
       expect(zero.missingTiming).toBe(false);
-      expect(zero.timedWorkItems).toBe(1);
       expect(zero.workedMs).toBe(0);
     }
   });
@@ -457,7 +455,6 @@ describe("work timing coverage", () => {
     ]);
     expect(summary.workedMs).toBe(100);
     expect(summary.missingTiming).toBe(true);
-    expect(summary.timedWorkItems).toBe(3);
   });
 
   it("tracks live, frozen, committed and reloaded missing measurements", () => {

@@ -19,7 +19,6 @@ const baseSummary: TurnSummary = {
   agentMessages: 0,
   systemNotes: 0,
   missingTiming: false,
-  timedWorkItems: 3,
   workedMs: 6000,
   thinkingMs: 6000,
   codeMs: 0,
@@ -78,17 +77,24 @@ describe("TurnBlock expanded body", () => {
 });
 
 describe("TurnBlock missing timing", () => {
-  it("labels the known subtotal as incomplete, then missing on reload", () => {
-    const props = { id: "partial", memberIds: ["1"], expanded: false, onToggle: vi.fn() };
-    const { rerender } = render(<TurnBlock {...props} summary={{ ...baseSummary, missingTiming: true, workedMs: 100 }} />);
-    expect(screen.getByText("Timing incomplete · 0.1s recorded")).toBeTruthy();
-    rerender(<TurnBlock {...props} summary={{ ...baseSummary, missingTiming: true, timedWorkItems: 0, workedMs: 0 }} />);
-    expect(screen.getByText("Timing not recorded")).toBeTruthy();
+  it.each([0, 100])("shows Worked and an accessible warning for missing timing with subtotal %i", (workedMs) => {
+    render(<TurnBlock id="partial" memberIds={["1"]} expanded={false} onToggle={vi.fn()}
+      summary={{ ...baseSummary, missingTiming: true, workedMs }} />);
+    expect(screen.getByTestId("turn-toggle").textContent).toBe("Worked");
+    const warning = screen.getByRole("img", { name: /timing was not fully recorded/ });
+    expect(warning.getAttribute("title")).toContain("Total duration is unavailable");
   });
 
-  it("keeps recorded zero visible and does not add idle wall time to a partial subtotal", () => {
-    render(<TurnBlock id="zero" memberIds={["1"]} expanded={false} onToggle={vi.fn()}
-      turnActive lastEventAt={1} summary={{ ...baseSummary, missingTiming: true, workedMs: 0, timedWorkItems: 1 }} />);
-    expect(screen.getByText("Working · timing incomplete (0s recorded)")).toBeTruthy();
+  it("keeps a live partial block Working with a warning and no numeric total", () => {
+    render(<TurnBlock id="live" memberIds={["1"]} expanded={false} onToggle={vi.fn()}
+      turnActive lastEventAt={1} summary={{ ...baseSummary, missingTiming: true }} />);
+    expect(screen.getByTestId("turn-toggle").textContent).toBe("Working…");
+    expect(screen.getByRole("img", { name: /timing was not fully recorded/ })).toBeTruthy();
+  });
+
+  it("retains the duration without warning when timing is complete", () => {
+    render(<TurnBlock id="complete" memberIds={["1"]} expanded={false} onToggle={vi.fn()} summary={baseSummary} />);
+    expect(screen.getByTestId("turn-toggle").textContent).toBe("Worked for 6s");
+    expect(screen.queryByRole("img")).toBeNull();
   });
 });

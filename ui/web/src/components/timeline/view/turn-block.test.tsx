@@ -19,7 +19,6 @@ const sampleSummary: TurnSummary = {
   agentMessages: 0,
   systemNotes: 0,
   missingTiming: false,
-  timedWorkItems: 3,
   workedMs: 12000,
   thinkingMs: 5000,
   codeMs: 4000,

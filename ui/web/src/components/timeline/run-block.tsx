@@ -9,7 +9,7 @@
 // downward from a fixed top edge while the reader scrolls the timeline itself.
 // meiva:link ui/web/src/docs/frontend-components/timeline-view/timeline-view.md
 
-import { ChevronRight, Layers } from "lucide-react";
+import { AlertTriangle, ChevronRight, Layers } from "lucide-react";
 import { useTranslations } from "next-intl";
 import { memo, type ReactNode } from "react";
 
@@ -127,15 +127,9 @@ export const TurnBlock = memo(function TurnBlock({
       ? t("workedFor", { duration: formatDuration(summary.workedMs) })
       : t("workActivity");
 
-  const recordedDuration = summary.workedMs === 0 ? "0s" : formatDuration(summary.workedMs);
-  const workedLabel = hasWork && summary.missingTiming
-    ? turnActive
-      ? summary.timedWorkItems > 0
-        ? t("workingPartial", { duration: recordedDuration })
-        : t("workingTimingUnavailable")
-      : summary.timedWorkItems > 0
-        ? t("workedPartial", { duration: recordedDuration })
-        : t("workedTimingUnavailable")
+  const timingIncomplete = hasWork && summary.missingTiming;
+  const workedLabel = timingIncomplete
+    ? turnActive ? t("working") : t("worked")
     : measuredLabel;
 
   const actionSummary = expanded ? formatTurnSummary(summary, (key, values) =>
@@ -189,6 +183,11 @@ export const TurnBlock = memo(function TurnBlock({
             <span className={cn(DISCLOSURE_TITLE_CLS, "whitespace-nowrap tabular-nums")}>
               {workedLabel}
             </span>
+            {timingIncomplete && (
+              <span role="img" aria-label={t("timingIncompleteWarning")} title={t("timingIncompleteWarning")}>
+                <AlertTriangle className="size-3.5 shrink-0 text-destructive" aria-hidden />
+              </span>
+            )}
             <DisclosureChevron expanded={expanded} />
           </span>
           {actionSummary && (
