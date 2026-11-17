@@ -14,6 +14,7 @@ from base.agents.history.transcript_timeline.project import (
 from base.agents.history.transcript_timeline.record.harness import (
     entry_reader,
     input_wire_ids,
+    record_file,
     record_location,
     reply_key,
     reply_key_prefix,
@@ -22,7 +23,7 @@ from base.agents.history.transcript_timeline.record.harness import (
     wire_id,
 )
 from base.agents.history.transcript_timeline.record.match import CLAIM_EARLY, CLAIM_SLACK
-from base.agents.history.transcript_timeline.record.read import read_window
+from base.agents.history.transcript_timeline.record.read import read_window, reasoning_refresh
 from base.agents.history.transcript_timeline.sent import load_sent_rows, sent_inputs
 from base.agents.messages.reply_intent import parse_reply_visibility
 from base.agents.to_user.delivery.store import has_keyed_publication
@@ -83,6 +84,8 @@ class ReadTimelineSink:
         self._harness = ctx.harness.value
         mode = ctx.require_agent().prompt.user_delivery_mode
         self._policy = ReplyPolicy(explicit_visibility=mode == "prefix", delivery_mode=mode)
+        self._timing_revision: int | None = None
+        self._timing_start: int | None = None
         self._replied = False
         self._warned = False
         self._projector = RecordProjector(
@@ -234,11 +237,47 @@ class ReadTimelineSink:
         async with self._busy:
             projected, end = await asyncio.to_thread(self._project_new)
             if projected is None:
+                await self._refresh_timing(end)
                 self._warn_unfound()
                 return
             self._closed_turns += projected.turns_closed
             self._publish(projected, end)
             await self._deliver(projected.items)
+            await self._refresh_timing(end)
+
+    # meiva:note
+    # Timing facts revise only reasoning items, with their existing row IDs. This projector gets
+    # no text, inputs, tools or delivery calls, so a revision cannot republish a user's reply.
+    # meiva:link base/lm/harness/antigravity/docs/antigravity.md
+    async def _refresh_timing(self, end: int) -> None:
+        file = self._file
+        if file is None or self._timing_start is None:
+            return
+        revision = await asyncio.to_thread(file.revision)
+        previous = self._timing_revision
+        if previous is None:
+            self._timing_revision = revision
+            return
+        if previous == revision:
+            return
+        updated = await asyncio.to_thread(
+            reasoning_refresh,
+            file,
+            harness=self._harness,
+            start=self._timing_start,
+            policy=self._policy,
+            render_tool=format_tool_use,
+        )
+        if updated.items:
+            self._publisher.emit(
+                TimelineSnapshot(
+                    agent_id=self._agent_id,
+                    items=[item.item.model_dump() for item in updated.items],
+                    msg_count=end,
+                ).model_dump_json()
+            )
+
+        self._timing_revision = revision
 
     def _warn_unfound(self) -> None:
         if self._file is None and not self._warned:
@@ -252,11 +291,17 @@ class ReadTimelineSink:
 
     # meiva:note
     # The new rows as a projection, and where they end; nothing when there is no file or nothing new.
+    # Sample supplemental facts before reading rows: a commit during later delivery must still
+    # differ from the revision that produced the first projection.
     def _project_new(self) -> tuple[Projected | None, int]:
         file = self._resolve()
         if file is None:
             return None, 0
         start = self._from if self._from is not None else self._turn_start(file)
+        if self._timing_start is None:
+            self._timing_start = start
+        if self._timing_revision is None:
+            self._timing_revision = file.revision()
         block = file.rows_after(start)
         self._from = block.end
         if not block.rows:
@@ -328,7 +373,7 @@ class ReadTimelineSink:
         )
         if path is None:
             return None
-        self._file = RecordFile(path)
+        self._file = record_file(self._harness, path)
         return self._file
 
     # meiva:note

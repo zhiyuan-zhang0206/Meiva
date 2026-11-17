@@ -6,7 +6,11 @@ from pathlib import Path
 
 from base.clock.tests.fakes import system_clock
 from base.lm.harness.antigravity.config import AntigravityConfig
+from base.lm.harness.antigravity.timing_store import timing_path
+from base.lm.harness.antigravity.transcript.file import AntigravityRecordFile
+from base.lm.harness.antigravity.transcript.window import EntryParser
 from base.lm.harness.antigravity.transport import AgyTransport
+from base.lm.harness.session.transcript.entries import Reasoning
 
 FAKE_CLI = Path(__file__).with_name("fake_agy.py")
 
@@ -89,5 +93,54 @@ async def test_pump_stdout_records_limit_error_when_frame_exceeds_max_frame_byte
         seen = [event async for event in transport.events()]
         assert [event["event"] for event in seen] == ["init"]
         assert "stdout line exceeded the reader limit" in transport.stderr_tail
+    finally:
+        await transport.close()
+
+
+async def test_existing_trajectory_rpc_collects_native_timing_without_another_rpc(
+    tmp_path: Path,
+) -> None:
+    plan = tmp_path / "plan.json"
+    plan.write_text(json.dumps({"conversation_id": "conv-timing", "turns": []}))
+    path = (
+        tmp_path
+        / ".gemini/antigravity-cli/brain/conv-timing/.system_generated/logs/transcript_full.jsonl"
+    )
+    path.parent.mkdir(parents=True)
+    raw = (
+        json.dumps(
+            {
+                "type": "PLANNER_RESPONSE",
+                "status": "DONE",
+                "step_index": 0,
+                "created_at": "2026-11-17T05:30:00Z",
+                "thinking": "synthetic thought",
+            }
+        )
+        + "\n"
+    )
+    path.write_text(raw)
+    calls = tmp_path / "calls.jsonl"
+    transport = AgyTransport(
+        AntigravityConfig(cwd=tmp_path, executable=(sys.executable, str(FAKE_CLI))),
+        environ={
+            "HOME": str(tmp_path),
+            "FAKE_AGY_PLAN": str(plan),
+            "FAKE_AGY_TRAJECTORY_CALLS": str(calls),
+            "FAKE_AGY_TRAJECTORY_FIXTURE": str(
+                Path(__file__).with_name("fixtures") / "native_thinking_timing.json"
+            ),
+        },
+        clock=system_clock(),
+    )
+    await transport.start(resume="conv-timing")
+    try:
+        measured = await transport.trajectory()
+        assert measured.steps[0].thinking_ms == 30265
+        assert timing_path(path).is_file()
+        assert len(calls.read_text().splitlines()) == 1
+        entries = EntryParser().entries(AntigravityRecordFile(path).rows_after(0).rows)
+        assert isinstance(entries[0], Reasoning) and entries[0].duration_ms == 30265
+        assert path.read_text() == raw
     finally:
         await transport.close()

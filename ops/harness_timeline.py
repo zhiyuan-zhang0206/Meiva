@@ -11,6 +11,7 @@ from base.agents.history.timeline_item import TimelineItem
 from base.agents.history.transcript_timeline.items import ReplyPolicy, format_tool_use
 from base.agents.history.transcript_timeline.record.harness import (
     compressed_file,
+    record_file,
     session_file,
     unreadable_file,
     wire_id,
@@ -51,7 +52,7 @@ def read_harness_timeline(
     path = session_file(request.harness, environ, Path(record.cwd), record.session_id)
     file: RecordFile
     if path is not None:
-        file = RecordFile(path)
+        file = record_file(request.harness, path)
     else:
         packed = compressed_file(request.harness, environ, record.session_id)
         if packed is None:

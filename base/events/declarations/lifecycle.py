@@ -27,6 +27,10 @@ class AgentSpawned(TypedDict):
     forked_from: int | None
 
 
+class HarnessTimingAmbiguous(TypedDict):
+    count: int
+
+
 class NodeExitEntry(TypedDict):
     """One node's exit inside an aggregated per-turn `node_exit` event."""
 
@@ -246,6 +250,27 @@ EVENTS: dict[str, EventSpec] = {
     "harness_record_row_unread": telemetry_event(
         "harness_record_row_unread",
         "a row of a harness CLI's record has a kind the reader does not know and is skipped; reported once for each kind",
+        tier="anomaly",
+    ),
+    "harness_timing_ambiguous": telemetry_event(
+        "harness_timing_ambiguous",
+        "native reasoning timing has ambiguous record identities; those measurements remain unknown",
+        payload=HarnessTimingAmbiguous,
+        tier="anomaly",
+    ),
+    "harness_timing_collection_failed": telemetry_event(
+        "harness_timing_collection_failed",
+        "native reasoning timing could not be collected; provider execution and the original record remain available",
+        tier="anomaly",
+    ),
+    "harness_timing_record_unavailable": telemetry_event(
+        "harness_timing_record_unavailable",
+        "the native timing record could not be located; provider execution is unchanged",
+        tier="anomaly",
+    ),
+    "harness_timing_unreadable": telemetry_event(
+        "harness_timing_unreadable",
+        "the native timing sidecar is unreadable; the original record remains readable with unknown timing",
         tier="anomaly",
     ),
     "harness_reply_key_conflict": telemetry_event(

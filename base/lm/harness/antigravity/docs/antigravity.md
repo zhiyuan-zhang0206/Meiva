@@ -214,3 +214,20 @@ arrives when it fires, so it adds nothing after the turn. A call without a durat
 one day. An interrupt kills `agy` and the schedules with it; the
 respawn hands them to the next turn's note as lost. See
 [background work](../../docs/background-work.md).
+
+## Native reasoning measurements
+
+The transcript omits `plannerResponse.thinkingDuration` even when the native trajectory supplies it.
+Existing trajectory reads collect only completed planner measurements; this adds no polling or RPC.
+A separate atomic `logs/meiva-thinking-timing.json` keeps verified offsets, identity digests and native
+milliseconds without rewriting the vendor transcript or storing thought text. Matching requires a
+unique index, creation second and thought digest. Duplicate identities remain unknown with a diagnostic.
+Tool status spans are not substituted for native reasoning duration: real observations show that
+`thinkingDuration` differs from GENERATING-to-DONE time.
+
+Timing is provisional until a later existing snapshot observes the completed step. A missing,
+corrupt or stale sidecar leaves the original conversation readable and its timing unknown. Appended
+record bytes invalidate the sidecar for readers until the collector rechecks uniqueness. A source
+revision refresh publishes only reasoning items at their original IDs; it never replays replies,
+inputs, tool execution or delivery. The UI consequently retains its incomplete-timing warning while
+any work measurement is absent. This slice does not claim complete work duration collection.

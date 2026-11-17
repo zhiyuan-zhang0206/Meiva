@@ -1,8 +1,9 @@
-exports = ["window.py"]
+exports = ["window.py", "file.py"]
 
 [uses]
 "__init__.py" = []
 "errors.py" = []
+"file.py" = []
 "system_message.py" = ["errors.py"]
 "text.py" = []
 "window.py" = ["errors.py", "system_message.py", "text.py"]
@@ -16,3 +17,5 @@ exports = ["window.py"]
 "text.py" = "strict"
 
 "window.py" = { mode = "none", why = "the Antigravity record boundary locates the file and reports unknown shapes; its entries follow file offsets and tool adjacency" }
+
+"file.py" = { mode = "none", why = "bounded native record rows enriched from independently validated atomic timing facts" }

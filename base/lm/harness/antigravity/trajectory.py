@@ -5,6 +5,7 @@ from dataclasses import dataclass
 from enum import StrEnum
 
 from base.host.boundary.json_values import is_object_dict, is_object_list
+from base.lm.harness.antigravity.timing import duration_ms, timing_key
 
 
 # meiva:note
@@ -42,6 +43,8 @@ class TrajectoryStep:
     kind: str
     status: str
     client_message_id: str | None
+    timing_key: str | None = None
+    thinking_ms: int | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -90,11 +93,18 @@ def _step(index: int, entry: object) -> TrajectoryStep:
     status = entry.get("status")
     user_input = entry.get("userInput")
     client_id = user_input.get("clientMessageId") if is_object_dict(user_input) else None
+    planner = entry.get("plannerResponse")
+    metadata = entry.get("metadata")
+    terminal = status == "CORTEX_STEP_STATUS_DONE" and kind == "CORTEX_STEP_TYPE_PLANNER_RESPONSE"
+    measured = planner if terminal and is_object_dict(planner) else {}
+    meta = metadata if is_object_dict(metadata) else {}
     return TrajectoryStep(
         index=index,
         kind=kind if isinstance(kind, str) else "",
         status=status if isinstance(status, str) else "",
         client_message_id=client_id if isinstance(client_id, str) and client_id else None,
+        timing_key=timing_key(index, meta.get("createdAt"), measured.get("thinking")),
+        thinking_ms=duration_ms(measured.get("thinkingDuration")),
     )
 
 

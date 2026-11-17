@@ -151,7 +151,13 @@ class EntryParser:
         thinking, text = row.get("thinking"), row.get("content")
         if isinstance(thinking, str) and thinking.strip():
             found.append(
-                Reasoning(key=f"{key}:thinking", order=Order(offset), at=at, text=thinking.strip())
+                Reasoning(
+                    key=f"{key}:thinking",
+                    order=Order(offset),
+                    at=at,
+                    text=thinking.strip(),
+                    duration_ms=_reasoning_ms(row),
+                )
             )
         if isinstance(text, str) and text.strip():
             found.append(AgentText(key=key, order=Order(offset, 1), at=at, text=text.strip()))
@@ -195,3 +201,8 @@ def input_wire_ids(rows: Sequence[FileRow]) -> dict[str, InputRow]:
         and isinstance((content := r.row.get("content")), str)
         and (stamp := stamp_of(r.row.get("created_at"))) is not None
     }
+
+
+def _reasoning_ms(row: Mapping[str, object]) -> int | None:
+    value = row.get("meiva_reasoning_ms")
+    return value if isinstance(value, int) and not isinstance(value, bool) and value >= 0 else None

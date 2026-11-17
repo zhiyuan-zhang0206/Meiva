@@ -6,10 +6,11 @@ from typing import Protocol
 
 from base.api_contracts.agent_contract import Harness
 from base.lm.harness.antigravity.transcript import window as antigravity
+from base.lm.harness.antigravity.transcript.file import AntigravityRecordFile
 from base.lm.harness.claude.transcript import window as claude
 from base.lm.harness.codex.transcript import window as codex
 from base.lm.harness.session.transcript.entries import AnyEntry, InputRow
-from base.lm.harness.session.transcript.record_file import FileRow
+from base.lm.harness.session.transcript.record_file import FileRow, RecordFile
 
 # meiva:note
 # What differs between the CLIs whose timeline is read from their own record, chosen by the harness: where the record
@@ -145,3 +146,9 @@ def reply_key(harness: str, entry_key: str, conversation_id: str | None = None) 
             return f"{reply_key_prefix(harness)}{conversation_id}:{entry_key.removeprefix('agy:')}"
         case other:
             raise ValueError(f"the timeline of harness {other.value!r} is not read from its record")
+
+
+def record_file(harness: str, path: Path) -> RecordFile:
+    return (
+        AntigravityRecordFile(path) if Harness(harness) is Harness.ANTIGRAVITY else RecordFile(path)
+    )

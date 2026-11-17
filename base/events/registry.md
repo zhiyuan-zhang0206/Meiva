@@ -239,6 +239,10 @@ above (or when its name is unregistered); otherwise it stays in the JSONL mirror
 | `harness_record_not_found` | a harness is running but its CLI record file was not found, so nothing of the turn reaches the timeline yet | anomaly | — | — | events | — |
 | `harness_record_unreadable` | a harness session's record file is there but in a form the reader does not read, so the timeline is empty | anomaly | — | — | events | — |
 | `harness_record_row_unread` | a row of a harness CLI's record has a kind the reader does not know and is skipped; reported once for each kind | anomaly | — | — | events | — |
+| `harness_timing_ambiguous` | native reasoning timing has ambiguous record identities; those measurements remain unknown | anomaly | count | — | events | — |
+| `harness_timing_collection_failed` | native reasoning timing could not be collected; provider execution and the original record remain available | anomaly | — | — | events | — |
+| `harness_timing_record_unavailable` | the native timing record could not be located; provider execution is unchanged | anomaly | — | — | events | — |
+| `harness_timing_unreadable` | the native timing sidecar is unreadable; the original record remains readable with unknown timing | anomaly | — | — | events | — |
 | `harness_reply_key_conflict` | a reply's publication key already names other content; the publication is left as it was | anomaly | — | — | events | — |
 | `harness_timeline_inputs_unmatched` | inputs in a harness's CLI record match no inbox row within the row cap the read scans; they are not shown | anomaly | — | — | events | — |
 | `harness_registration_renewal_failed` | an external harness session could not renew its registration | anomaly | — | — | events | — |

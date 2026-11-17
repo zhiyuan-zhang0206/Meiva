@@ -236,6 +236,10 @@ def _trajectory_reply() -> dict[str, Any]:
     if os.environ.get("FAKE_AGY_BAD_TRAJECTORY"):
         return {"unexpected": True}
     snap, call = _STATE.trajectory_snapshot()
+    _record(os.environ.get("FAKE_AGY_TRAJECTORY_CALLS"), {"call": call})
+    fixture = os.environ.get("FAKE_AGY_TRAJECTORY_FIXTURE")
+    if fixture:
+        snap = json.loads(Path(fixture).read_text())["reply"]
     blocked_call = int(os.environ.get("FAKE_AGY_BLOCK_TRAJECTORY_CALL") or 0)
     if blocked_call == call:
         _record(
