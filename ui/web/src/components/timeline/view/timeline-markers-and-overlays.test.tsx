@@ -384,8 +384,12 @@ describe("cold-load spinner", () => {
     expect(spinner.querySelector('[data-testid="cold-load-ring"]')).not.toBeNull();
     expect(screen.getByText(/Loading conversation…/).className).toContain("sr-only");
   });
-  it("loading + items present → no spinner (keep the content on screen)", () => {
-    render(<TimelineView items={[makeItem({ kind: "agent_chat", payload: "hi" })]} loading />);
+  it("retained content stays readable under the qualification ring until loading ends", () => {
+    const items = [makeItem({ kind: "agent_chat", payload: "hi" })];
+    const { rerender } = render(<TimelineView items={items} loading />);
+    expect(screen.getByTestId("cold-load-ring")).toBeTruthy();
+    expect(screen.getByTestId("chat-markdown").textContent).toBe("hi");
+    rerender(<TimelineView items={items} />);
     expect(screen.queryByTestId("cold-load-spinner")).toBeNull();
     expect(screen.getByTestId("chat-markdown").textContent).toBe("hi");
   });

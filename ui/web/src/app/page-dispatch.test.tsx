@@ -14,6 +14,7 @@ import { USER_SETTING_DEFAULTS, type BackendTimelineItem, type TimelineResponse 
 import { useTimeline } from "@/lib/timeline/use-timeline";
 import { useTimelineStore } from "@/lib/timeline/timeline-store";
 import { fakeStreamHub, TestStreamProvider } from "@/test-support/fake-stream";
+import { deferred } from "@/test-support/deferred";
 
 afterEach(cleanupHomePageTest);
 beforeEach(resetHomePageTestState);
@@ -49,6 +50,118 @@ describe("sidebar app-entry reset", () => {
       </WallClockProvider>,
     );
     expect(hooksState.setSetting).not.toHaveBeenCalled();
+  });
+});
+
+describe("home loading presentation through the selected timeline reader", () => {
+  const human: BackendTimelineItem = { item_id: "1.0", kind: "inbound_chat", source: "user", payload: "Selected prompt", created_at: null, inbound_id: 1, show_timestamp: false };
+  const { hub } = fakeStreamHub();
+  let client: QueryClient;
+  let visit = 0;
+  const response = (items: BackendTimelineItem[] = [], has_more = false): TimelineResponse => ({ items, msg_count: items.length, has_more });
+
+  function Reader({ id = 42, running = true }: { id?: number; running?: boolean }) {
+    const timeline = useTimeline(id, () => undefined, running ? "running" : "idling");
+    const props = homePageProps();
+    const agent = makeAgent({ agent_id: id, status: running ? "running" : "idling" });
+    return <HomePageView {...props} agents={{ ...props.agents, activeId: id, activeAgent: agent, agents: [agent] }}
+      timeline={timeline} TimelineView={TimelineView} bfcacheId={`home-loading-${visit}`} />;
+  }
+
+  function surface(ui: React.ReactNode) {
+    return <QueryClientProvider client={client}><ApiProvider api={transport}><StreamHubProvider hub={hub}>
+      <WallClockProvider wallNow={Date.now}><TestStreamProvider>{ui}</TestStreamProvider></WallClockProvider>
+    </StreamHubProvider></ApiProvider></QueryClientProvider>;
+  }
+
+  beforeEach(() => {
+    visit += 1;
+    client = new QueryClient({ defaultOptions: { queries: { retry: false, staleTime: Infinity } } });
+    client.setQueryData(["user-settings"], { ...USER_SETTING_DEFAULTS, "behavior.replySuggestions": false });
+    client.setQueryData(["config", null], { fields: [] });
+    transport.getConfig.mockResolvedValue({ fields: [] });
+    transport.getPendingMessages.mockResolvedValue([]);
+    transport.getAgentQuestions.mockResolvedValue([]);
+    useTimelineStore.getState().switchThread(null, null, false);
+  });
+  afterEach(() => { cleanup(); client.clear(); });
+
+  it("retained rows await initial qualification under one ring through the home prop boundary", () => {
+    const props = homePageProps();
+    const agent = makeAgent({ agent_id: 42, status: "running" });
+    const timeline = { ...props.timeline, items: [human], isLoading: true, loadingOlder: true, readerLoadingOlder: true };
+    const view = renderWithBrowser(surface(<HomePageView {...props} agents={{ ...props.agents, activeId: 42, activeAgent: agent }}
+      timeline={timeline} TimelineView={TimelineView} />));
+    expect(screen.getByText("Selected prompt")).toBeTruthy();
+    expect(screen.getByTestId("cold-load-ring")).toBeTruthy();
+    expect(view.container.querySelectorAll(".animate-spin")).toHaveLength(1);
+    expect(screen.queryByTestId("pending-live-activity-window")).toBeNull();
+  });
+
+  it("cold entry with a running roster shows one ring until the empty read settles", async () => {
+    const read = deferred<TimelineResponse>();
+    transport.getTimeline.mockReturnValue(read.promise);
+    const view = renderWithBrowser(surface(<Reader />));
+    expect(screen.getByTestId("cold-load-ring")).toBeTruthy();
+    expect(view.container.querySelectorAll(".animate-spin")).toHaveLength(1);
+    expect(screen.queryByTestId("pending-live-activity-window")).toBeNull();
+    expect(screen.queryByText("Working…")).toBeNull();
+    await act(() => { read.resolve(response()); return read.promise; });
+    await waitFor(() => expect(screen.queryByTestId("cold-load-spinner")).toBeNull());
+    expect(screen.getByTestId("pending-live-activity-window").querySelector(".animate-spin")).toBeTruthy();
+    view.rerender(surface(<Reader running={false} />));
+    expect(view.container.querySelectorAll(".animate-spin")).toHaveLength(0);
+  });
+
+  it("a reader request replaces the pending ring and returns to it after failure", async () => {
+    client.setQueryData(["timeline", 42], response([human], true));
+    const read = deferred<TimelineResponse>();
+    transport.getTimeline.mockReturnValue(read.promise);
+    const view = renderWithBrowser(surface(<Reader />));
+    expect(screen.getByTestId("pending-live-activity-window").querySelector(".animate-spin")).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Load earlier messages" }));
+    await waitFor(() => expect(transport.getTimeline).toHaveBeenCalledOnce());
+    expect(screen.getByTestId("load-older-spinner").dataset.state).toBe("loading");
+    expect(screen.queryByTestId("pending-live-activity-window")).toBeNull();
+    expect(view.container.querySelectorAll(".animate-spin")).toHaveLength(1);
+    await act(async () => { read.reject(new Error("Older fixture failed")); await Promise.resolve(); });
+    await waitFor(() => expect(screen.getByTestId("load-older-spinner").dataset.state).toBe("idle"));
+    expect(screen.getByTestId("pending-live-activity-window").querySelector(".animate-spin")).toBeTruthy();
+    expect(screen.getByText("Selected prompt")).toBeTruthy();
+  });
+
+  it("rapid switching ignores a late old read and renders the selected work block", async () => {
+    client.setQueryData(["timeline", 42], response([human]));
+    const oldRead = deferred<TimelineResponse>();
+    const selectedRead = deferred<TimelineResponse>();
+    transport.getTimeline.mockImplementation((id) => id === 43 ? oldRead.promise : selectedRead.promise);
+    const view = renderWithBrowser(surface(<Reader />));
+    expect(screen.queryByTestId("cold-load-spinner")).toBeNull();
+    expect(screen.getByText("Selected prompt")).toBeTruthy();
+    view.rerender(surface(<Reader id={43} />));
+    expect(screen.getByTestId("cold-load-ring")).toBeTruthy();
+    view.rerender(surface(<Reader id={44} />));
+    expect(view.container.querySelectorAll(".animate-spin")).toHaveLength(1);
+    await act(() => { oldRead.resolve(response([{ ...human, payload: "Old source" }])); return oldRead.promise; });
+    expect(screen.queryByText("Old source")).toBeNull();
+    expect(screen.getByTestId("cold-load-ring")).toBeTruthy();
+    await act(() => { selectedRead.resolve(response([human, { ...human, item_id: "2.0", kind: "agent_reasoning", source: null, payload: "Selected work", reasoning_ms: 2000 }])); return selectedRead.promise; });
+    await waitFor(() => expect(screen.queryByTestId("cold-load-spinner")).toBeNull());
+    expect(screen.getByTestId("turn-toggle").textContent).toContain("Working for 2s");
+    fireEvent.click(screen.getByTestId("turn-toggle"));
+    expect(screen.getByTestId("turn-toggle").getAttribute("aria-expanded")).toBe("true");
+    expect(screen.queryByTestId("pending-live-activity-window")).toBeNull();
+  });
+
+  it("a failed cold read releases the ring and exposes the existing retry action", async () => {
+    const read = deferred<TimelineResponse>();
+    transport.getTimeline.mockReturnValue(read.promise);
+    const view = renderWithBrowser(surface(<Reader running={false} />));
+    expect(screen.getByTestId("cold-load-ring")).toBeTruthy();
+    await act(async () => { read.reject(new Error("Selected source failed")); await Promise.resolve(); });
+    await waitFor(() => expect(screen.getByRole("button", { name: "Retry" })).toBeTruthy());
+    expect(view.container.querySelectorAll(".animate-spin")).toHaveLength(0);
+    expect(screen.queryByTestId("pending-live-activity-window")).toBeNull();
   });
 });
 

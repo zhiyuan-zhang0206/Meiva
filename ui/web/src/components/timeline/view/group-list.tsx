@@ -268,6 +268,7 @@ export function TimelineGroupList({
   compactBuffer,
   streamingCode,
   turnActive,
+  loading = false,
   lastEventAt = 0,
   overrides,
   toggleExpanded,
@@ -282,6 +283,7 @@ export function TimelineGroupList({
   compactBuffer: CompactTransitionBuffer | null;
   streamingCode: boolean;
   turnActive: boolean;
+  loading?: boolean;
   lastEventAt?: number;
   overrides: ReadonlyMap<string, boolean>;
   toggleExpanded: (id: string, currentlyExpanded: boolean) => void;
@@ -341,13 +343,12 @@ export function TimelineGroupList({
   };
 
   // meiva:note
-  // Immediately after a human user submits a message (before the first reasoning
-  // or tool item arrives), render the inline PendingLiveActivityWindow row so the
-  // user gets instant visual feedback with zero layout shift.
-  // meiva:link ui/web/src/docs/frontend-components/timeline-view/timeline-view.md
+  // Initial source reads and reader paging already present a ring. Only a qualified
+  // source without a competing reader ring can present the first-step wait inline.
+  // meiva:link ui/web/src/docs/frontend-components/timeline-view/loading-ring.md
   const lastGroup = groups.length > 0 ? groups[groups.length - 1] : null;
   const showPendingActivityWindow =
-    turnActive &&
+    !loading && turnActive &&
     (lastGroup === null ||
       (lastGroup.kind === "single" &&
         lastGroup.member.item.kind === "inbound_chat" &&

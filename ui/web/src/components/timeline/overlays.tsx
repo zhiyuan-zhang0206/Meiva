@@ -9,10 +9,11 @@ import { cn } from "@/lib/format/utils";
 import { FLEX } from "@/lib/layout/layout";
 
 // meiva:note
-// Two presentations, one ring: it turns while a load is in flight, and a
+// One ring for source reads, older pages, and the wait for a first work item. It turns while waiting; a
 // reader who asked for reduced motion gets the same ring breathing (opacity
 // only) instead of a frozen one.
-function LoadingRing({ testId, className }: {
+// meiva:link ui/web/src/docs/frontend-components/timeline-view/loading-ring.md
+export function LoadingRing({ testId, className }: {
   testId?: string; className?: string;
 }) {
   const circumference = 2 * Math.PI * 8;
@@ -70,12 +71,8 @@ export function LoadOlderKeyboardButton({ loading, onClick }: { loading: boolean
 }
 
 // meiva:note
-// Cold load draws the same ring as every other loading state in the timeline, at the
-// top of the pane, instead of its own spinner glyph plus a "Loading conversation…"
-// label: one loading vocabulary, and nothing to re-translate (user 2026-10-21). It
-// only appears when this thread has no items yet AND a fetch is in flight — a warm
-// switch or a background refetch keeps its items on screen and never shows this.
-// meiva:link ui/web/src/docs/frontend-components/timeline-view/sticky-scroll.md
+// Initial source qualification owns this ring even when retained rows are present.
+// meiva:link ui/web/src/docs/frontend-components/timeline-view/loading-ring.md
 export function ColdLoadSpinner({ show }: { show: boolean }) {
   const t = useTranslations("timeline");
   if (!show) return null;
