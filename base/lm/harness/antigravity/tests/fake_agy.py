@@ -32,6 +32,7 @@ class _State:
         # RPC starts a phantom turn.
         self.turns_done = 0
         self.stale_calls = int(os.environ.get("FAKE_AGY_STALE_CALLS") or 0)
+        self.trajectory_calls = 0
 
     def add_step(self, kind: str, client_id: str | None = None) -> int:
         with self.lock:
@@ -41,10 +42,22 @@ class _State:
             self.steps.append(step)
             return len(self.steps) - 1
 
-    def note_index(self, index: int) -> None:
+    def note_step(self, index: int, kind: str, status: str) -> None:
         with self.lock:
             while len(self.steps) <= index:
                 self.steps.append({"type": "CORTEX_STEP_TYPE_PLANNER_RESPONSE"})
+            before = self.steps[index]
+            step: dict[str, Any] = {"type": kind, "status": status}
+            if "userInput" in before:
+                step["userInput"] = before["userInput"]
+            self.steps[index] = step
+
+    def reactive_idle(self) -> bool:
+        live = {"CORTEX_STEP_STATUS_RUNNING", "CORTEX_STEP_STATUS_GENERATING"}
+        with self.lock:
+            return self.status == "CASCADE_RUN_STATUS_IDLE" and any(
+                step.get("status") in live for step in self.steps
+            )
 
     def snapshot(self) -> dict[str, Any]:
         with self.lock:
@@ -53,6 +66,18 @@ class _State:
                 "status": self.status,
                 "numTotalSteps": len(self.steps),
             }
+
+    def trajectory_snapshot(self) -> tuple[dict[str, Any], int]:
+        with self.lock:
+            self.trajectory_calls += 1
+            return (
+                {
+                    "trajectory": {"steps": list(self.steps)},
+                    "status": self.status,
+                    "numTotalSteps": len(self.steps),
+                },
+                self.trajectory_calls,
+            )
 
 
 _STATE = _State()
@@ -150,7 +175,20 @@ def _emit_steps(
                 },
             }
         )
-        _STATE.note_index(step_index)
+        raw_step_type = step.get("step_type")
+        step_type = raw_step_type if isinstance(raw_step_type, str) else ""
+        kind = {
+            "agent_response": "CORTEX_STEP_TYPE_PLANNER_RESPONSE",
+            "system_message": "CORTEX_STEP_TYPE_SYSTEM_MESSAGE",
+            "tool": "CORTEX_STEP_TYPE_RUN_COMMAND",
+            "user_input": "CORTEX_STEP_TYPE_USER_INPUT",
+        }.get(step_type, "CORTEX_STEP_TYPE_PLANNER_RESPONSE")
+        status = (
+            "CORTEX_STEP_STATUS_DONE"
+            if step.get("state") == "DONE"
+            else "CORTEX_STEP_STATUS_RUNNING"
+        )
+        _STATE.note_step(step_index, kind, status)
         time.sleep(float(turn.get("pace", 0.0)))
     return next_index
 
@@ -197,22 +235,40 @@ def _message_text(payload: dict[str, Any]) -> str:
 def _trajectory_reply() -> dict[str, Any]:
     if os.environ.get("FAKE_AGY_BAD_TRAJECTORY"):
         return {"unexpected": True}
-    snap = _STATE.snapshot()
+    snap, call = _STATE.trajectory_snapshot()
+    blocked_call = int(os.environ.get("FAKE_AGY_BLOCK_TRAJECTORY_CALL") or 0)
+    if blocked_call == call:
+        _record(
+            os.environ.get("FAKE_AGY_TRAJECTORY_SAMPLED"),
+            {"call": call, "status": snap["status"]},
+        )
+        release = os.environ.get("FAKE_AGY_TRAJECTORY_RELEASE")
+        if release:
+            _wait_for_path(release, "trajectory response was not released")
     if _STATE.turns_done > 0 and _STATE.stale_calls > 0:
         _STATE.stale_calls -= 1
         snap["status"] = "CASCADE_RUN_STATUS_RUNNING"
     return snap
 
 
+def _wait_for_path(path: str, failure: str) -> None:
+    deadline = time.monotonic() + 5.0
+    while not Path(path).exists():
+        if time.monotonic() >= deadline:
+            raise TimeoutError(failure)
+        time.sleep(0.005)
+
+
 def _accept_message(payload: dict[str, Any], received_path: str | None) -> None:
     text = _message_text(payload)
     _record(received_path, text)
     _record(os.environ.get("FAKE_AGY_RPC"), payload)
+    reactive_idle = _STATE.reactive_idle()
     client_id = payload.get("clientMessageId")
     index = _STATE.add_step(
         "CORTEX_STEP_TYPE_USER_INPUT", client_id if isinstance(client_id, str) else None
     )
-    if _STATE.status == "CASCADE_RUN_STATUS_IDLE":
+    if _STATE.status == "CASCADE_RUN_STATUS_IDLE" and not reactive_idle:
         _run_phantom(index, text)
 
 
@@ -317,6 +373,41 @@ def _serve_plan() -> int:
     return main()
 
 
+def _begin_stdin_turn(conversation: str) -> None:
+    sample = os.environ.get("FAKE_AGY_WAIT_STDIN_FOR_TRAJECTORY_SAMPLE")
+    if sample:
+        _wait_for_path(sample, "trajectory was not sampled before stdin started")
+    _emit_replay(conversation)
+    _STATE.status = "CASCADE_RUN_STATUS_RUNNING"
+    _record(os.environ.get("FAKE_AGY_RUNNING"), _STATE.snapshot())
+    _ = _STATE.add_step("CORTEX_STEP_TYPE_USER_INPUT")
+
+
+def _wait_for_steer(turn: dict[str, Any], steered: queue.Queue[str]) -> None:
+    if turn.get("idle_while_waiting_for_steer"):
+        _STATE.status = "CASCADE_RUN_STATUS_IDLE"
+        _record(os.environ.get("FAKE_AGY_IDLE_WITH_LIVE_STEP"), _STATE.snapshot())
+    _ = steered.get(timeout=float(turn.get("steer_timeout", 5.0)))
+    _STATE.status = "CASCADE_RUN_STATUS_RUNNING"
+
+
+def _continue_turn_after_steer(
+    conversation: str,
+    turn: dict[str, Any],
+    steered: queue.Queue[str],
+    next_index: int,
+) -> None:
+    if turn.get("wait_for_steer"):
+        _wait_for_steer(turn, steered)
+    if turn.get("steered_steps"):
+        _ = _emit_steps(conversation, turn, key="steered_steps", start_index=next_index)
+    finish_after_steer = turn.get("finish_after_steer_path")
+    if isinstance(finish_after_steer, str):
+        _wait_for_path(finish_after_steer, "the steered turn was not released")
+    if turn.get("after_steer_steps"):
+        _ = _emit_steps(conversation, turn, key="after_steer_steps", start_index=next_index)
+
+
 def main() -> int:
     plan_path = os.environ.get("FAKE_AGY_PLAN")
     plan = cast(
@@ -354,18 +445,13 @@ def main() -> int:
                 continue
             content = json.loads(text).get("message", {}).get("content", "")
             _record(received, content)
-            _emit_replay(conversation)
-            _STATE.status = "CASCADE_RUN_STATUS_RUNNING"
-            _ = _STATE.add_step("CORTEX_STEP_TYPE_USER_INPUT")
+            _begin_stdin_turn(conversation)
             turn = _turn_at(turns, cursor_path)
             child = _spawn_child(turn)
             if turn.get("hang"):
                 _hang(conversation)
             next_index = _emit_steps(conversation, turn)
-            if turn.get("wait_for_steer"):
-                _ = steered.get(timeout=float(turn.get("steer_timeout", 5.0)))
-            if turn.get("steered_steps"):
-                _ = _emit_steps(conversation, turn, key="steered_steps", start_index=next_index)
+            _continue_turn_after_steer(conversation, turn, steered, next_index)
             _STATE.status = "CASCADE_RUN_STATUS_IDLE"
             _STATE.turns_done += 1
             time.sleep(float(turn.get("idle_before_result", 0.0)))

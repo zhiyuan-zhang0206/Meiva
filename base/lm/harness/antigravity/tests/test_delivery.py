@@ -24,17 +24,35 @@ from base.lm.harness.events import (
     InputInContext,
     InputReceived,
     InputRejected,
+    ToolUse,
     TurnCompleted,
     TurnOrigin,
     TurnStarted,
 )
 
 FIXTURE = json.loads((Path(__file__).parent / "fixtures" / "phantom_turn.json").read_text())
+BACKGROUND_FIXTURE = json.loads(
+    (Path(__file__).parent / "fixtures" / "background_idle_trajectory.json").read_text()
+)
 
 
 async def seen(harness: Harness, kind: type, *, wait: float = 0.05) -> list[Any]:
     await asyncio.sleep(wait)
     return harness.of(kind)
+
+
+async def in_context(harness: Harness, key: str) -> InputInContext:
+    return await harness.wait_for(
+        lambda event: isinstance(event, InputInContext) and event.key == key
+    )
+
+
+def assert_acknowledged_once(harness: Harness, key: str) -> None:
+    assert [event.signal for event in harness.of(InputReceived) if event.key == key] == [
+        AckSignal.WEAK,
+        AckSignal.STRONG,
+    ]
+    assert [event.key for event in harness.of(InputInContext)].count(key) == 1
 
 
 def test_the_recorded_poll_sequence_opens_and_closes_the_phantom_turn() -> None:
@@ -77,6 +95,32 @@ def test_a_conversation_with_no_step_yet_is_idle_and_empty_not_a_wrong_shape() -
         _ = parse_trajectory(
             {"status": "CASCADE_RUN_STATUS_IDLE", "numTotalSteps": 2, "trajectory": {}}
         )
+
+
+def test_idle_with_a_live_step_is_reactive_without_claiming_the_outer_turn_ended() -> None:
+    recorded = parse_trajectory(BACKGROUND_FIXTURE["snapshots"]["background_wait_idle"])
+    assert recorded.status is RunStatus.IDLE
+    assert recorded.has_live_steps() is True
+
+    payload: dict[str, Any] = {
+        "status": "CASCADE_RUN_STATUS_IDLE",
+        "numTotalSteps": 1,
+        "trajectory": {
+            "steps": [
+                {
+                    "type": "CORTEX_STEP_TYPE_RUN_COMMAND",
+                    "status": "CORTEX_STEP_STATUS_RUNNING",
+                }
+            ]
+        },
+    }
+    live = parse_trajectory(payload)
+    assert live.has_live_steps() is True
+    payload["trajectory"]["steps"][0]["status"] = "CORTEX_STEP_STATUS_GENERATING"
+    assert parse_trajectory(payload).has_live_steps() is True
+    payload["trajectory"]["steps"][0]["status"] = "CORTEX_STEP_STATUS_DONE"
+    no_live_child = parse_trajectory(payload)
+    assert no_live_child.has_live_steps() is False
 
 
 async def test_an_input_for_a_running_turn_carries_its_id_and_enters_the_context(
@@ -141,9 +185,163 @@ async def test_an_input_that_finds_our_turn_just_finished_is_refused_not_sent_in
         await harness.session.deliver([HarnessInput.of("late", "next input")])
         assert harness.rpc_payloads() == []
         assert [e.key for e in await seen(harness, InputRejected)] == ["late"]
-        _ = await first.outcome()
+        outcome = await first.outcome()
+        assert (outcome.subtype, outcome.stop_reason) == ("success", "SUCCESS")
         assert harness.messages() == ["one"]
     finally:
+        await harness.stop()
+
+
+async def test_idle_with_only_terminal_steps_waits_for_the_outer_result(
+    tmp_path: Path,
+) -> None:
+    harness = await start(tmp_path, turns=[{**say("one"), "idle_before_result": 1.2}])
+    try:
+        first = await send(harness, "one", key="first")
+        await harness.wait_until(lambda: harness.messages() == ["one"])
+        await asyncio.sleep(0.2)
+
+        original_pid = harness.session.cli_pid
+        await harness.session.deliver([HarnessInput.of("late", "next input")])
+
+        [rejected] = await seen(harness, InputRejected)
+        assert rejected.key == "late"
+        await asyncio.sleep(0.65)
+        assert harness.session.active_turn_id == first.turn_id
+        assert harness.session.cli_pid == original_pid
+        assert harness.of(TurnCompleted) == [], (
+            "a stable terminal-looking trajectory is not an outer-turn terminal signal"
+        )
+
+        finished = await first.outcome()
+        assert (finished.subtype, finished.stop_reason, finished.text) == (
+            "success",
+            "SUCCESS",
+            "one",
+        )
+    finally:
+        await harness.stop()
+
+
+async def test_an_idle_snapshot_sampled_before_ack_cannot_retire_the_now_running_turn(
+    tmp_path: Path,
+) -> None:
+    sampled = tmp_path / "trajectory-sampled.jsonl"
+    release = tmp_path / "trajectory-release"
+    running_state = tmp_path / "trajectory-running.jsonl"
+    active_tool = {
+        "step_index": 1,
+        "state": "ACTIVE",
+        "step_type": "tool",
+        "tool_name": "run_command",
+        "tool_info": {"name": "run_command", "parameters": {"CommandLine": "sleep 30"}},
+    }
+    harness = await start(
+        tmp_path,
+        turns=[{"steps": [active_tool], "wait_for_steer": True}],
+        extra_environ={
+            "FAKE_AGY_BLOCK_TRAJECTORY_CALL": "2",
+            "FAKE_AGY_TRAJECTORY_SAMPLED": str(sampled),
+            "FAKE_AGY_TRAJECTORY_RELEASE": str(release),
+            "FAKE_AGY_WAIT_STDIN_FOR_TRAJECTORY_SAMPLE": str(sampled),
+            "FAKE_AGY_RUNNING": str(running_state),
+        },
+    )
+    try:
+        await harness.wait_until(lambda: harness.session.session_id is not None)
+        first = await send(harness, "work", key="first")
+        original_pid = harness.session.cli_pid
+        late_delivery = asyncio.create_task(
+            harness.session.deliver([HarnessInput.of("late", "next input")])
+        )
+
+        await harness.wait_until(sampled.exists)
+        [sample] = [json.loads(line) for line in sampled.read_text().splitlines()]
+        assert sample == {"call": 2, "status": "CASCADE_RUN_STATUS_IDLE"}
+        await in_context(harness, "first")
+        await harness.wait_for(lambda event: isinstance(event, ToolUse))
+        await harness.wait_until(running_state.exists)
+        [running] = [json.loads(line) for line in running_state.read_text().splitlines()]
+        assert running["status"] == "CASCADE_RUN_STATUS_RUNNING"
+
+        release.touch()
+        await late_delivery
+
+        assert harness.session.active_turn_id == first.turn_id
+        assert harness.session.cli_pid == original_pid
+        assert harness.of(TurnCompleted) == []
+        assert [event.key for event in harness.of(InputRejected)] == ["late"]
+    finally:
+        release.touch(exist_ok=True)
+        await harness.stop()
+
+
+async def test_reactive_idle_with_a_live_step_accepts_one_steer_on_the_old_turn(
+    tmp_path: Path,
+) -> None:
+    idle_state = tmp_path / "idle-with-live-step.jsonl"
+    finish = tmp_path / "finish-steered-turn"
+    active_tool = {
+        "step_index": 1,
+        "state": "ACTIVE",
+        "step_type": "tool",
+        "tool_name": "run_command",
+        "tool_info": {"name": "run_command", "parameters": {"CommandLine": "sleep 30"}},
+    }
+    harness = await start(
+        tmp_path,
+        turns=[
+            {
+                "steps": [active_tool],
+                "wait_for_steer": True,
+                "idle_while_waiting_for_steer": True,
+                "finish_after_steer_path": str(finish),
+                "after_steer_steps": [
+                    {"step_index": 2, "state": "DONE", "step_type": "user_input"},
+                    {
+                        "step_index": 3,
+                        "state": "DONE",
+                        "step_type": "agent_response",
+                        "text_delta": "SECOND-ACK",
+                    },
+                ],
+                "result": {"response": "SECOND-ACK"},
+            }
+        ],
+        extra_environ={"FAKE_AGY_IDLE_WITH_LIVE_STEP": str(idle_state)},
+    )
+    try:
+        first = await send(harness, "work", key="first")
+        await in_context(harness, "first")
+        await harness.wait_for(lambda event: isinstance(event, ToolUse))
+        await harness.wait_until(idle_state.exists)
+        [idle] = [json.loads(line) for line in idle_state.read_text().splitlines()]
+        assert idle["status"] == "CASCADE_RUN_STATUS_IDLE"
+        assert idle["trajectory"]["steps"][-1]["status"] == "CORTEX_STEP_STATUS_RUNNING"
+        original_pid = harness.session.cli_pid
+
+        await harness.session.deliver([HarnessInput.of("late", "next input")])
+        await in_context(harness, "late")
+
+        assert harness.session.active_turn_id == first.turn_id
+        assert harness.session.cli_pid == original_pid
+        assert harness.of(TurnCompleted) == []
+        assert harness.of(InputRejected) == []
+        assert_acknowledged_once(harness, "late")
+        [steered] = harness.rpc_payloads()
+        assert steered["clientMessageId"] == "late"
+        assert steered["items"] == [{"text": "next input"}]
+
+        await asyncio.sleep(0.6)
+        assert len(harness.rpc_payloads()) == 1, "the accepted input is not submitted again"
+        assert harness.of(TurnCompleted) == [], "reactive IDLE does not finish the outer turn"
+
+        finish.touch()
+        outcome = await first.outcome()
+        assert outcome.text == "SECOND-ACK"
+        assert len(harness.of(TurnCompleted)) == 1
+    finally:
+        finish.touch(exist_ok=True)
         await harness.stop()
 
 

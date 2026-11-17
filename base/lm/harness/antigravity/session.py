@@ -68,8 +68,8 @@ TRAJECTORY_POLL_SECONDS = 0.5
 # One `agy` conversation as a turn engine. Same three boundaries as the Claude bridge — ordered
 # inbound, one outbound stream, an assertable cancel — with one harness difference that shapes the
 # whole file: an interrupt kills the `agy` process. `interrupt()` therefore retires the transport,
-# and the next turn respawns it with `--conversation`, so the transcript survives even though the
-# process does not.
+# and the next turn respawns with `--conversation`, so the transcript survives even though the process
+# does not.
 # meiva:link base/lm/harness/antigravity/docs/antigravity.md
 class AgySession(BaseHarnessSession[AntigravityConfig]):
     harness = "antigravity"
@@ -172,8 +172,10 @@ class AgySession(BaseHarnessSession[AntigravityConfig]):
     # (`GetCascadeTrajectory`): a running one takes the input through `SendUserCascadeMessage`
     # carrying our `clientMessageId`; an idle one must not be sent to that way, because agy answers 200
     # and runs a turn that stdout never reports, so the input starts a turn on stdin instead, or waits
-    # (a rejection, so the caller hands it over again) when our own turn has finished but its result is
-    # not yet read. HTTP 200 and a stdin write are weak receipts;
+    # (a rejection, so the caller hands it over again) when our own turn has no live work visible but its
+    # result is unread. A top-level IDLE trajectory with a live child step is agy's reactive-wakeup state;
+    # RPC steer wakes the same outer turn and retains its client-message acknowledgement.
+    # HTTP 200 and a stdin write are weak receipts;
     # the second acknowledgement is the user-input step: the trajectory step that carries our
     # `clientMessageId`, or for a turn started on stdin the first user-input frame on stdout. The
     # trajectory is the one live signal, so a reply of an unexpected shape fails the delivery.
@@ -190,17 +192,15 @@ class AgySession(BaseHarnessSession[AntigravityConfig]):
     async def _deliver_one(self, entry: HarnessInput) -> None:
         transport = await self._ensure_transport()
         snapshot_ = await transport.trajectory() if self._session_id else None
-        decided = route(
-            snapshot_.status if snapshot_ is not None else None,
-            ticket_active=self._active is not None,
-        )
+        ticket = self._active
+        decided = route(snapshot_, ticket_active=ticket is not None)
         if decided is Route.STEER:
             await self._steer_input(transport, entry)
             return
         if decided is Route.QUEUE:
             self._apply(
                 self._ledger.rejected(
-                    entry.key, "the running turn has finished; hand the input over again"
+                    entry.key, "the active turn is not accepting input; hand the input over again"
                 )
             )
             return
@@ -352,13 +352,14 @@ class AgySession(BaseHarnessSession[AntigravityConfig]):
     async def _read_loop(self, transport: AgyTransport, generation: int) -> None:
         try:
             async for payload in transport.events():
-                if self._ledger.accepts(generation):
+                if self._transport is transport and self._ledger.accepts(generation):
                     self._handle(payload)
         except asyncio.CancelledError:
             raise
         except Exception as exc:
-            self._emit(SessionFailed(error=f"session stream failed: {exc}"))
-            self._fail_active(exc)
+            if self._transport is transport:
+                self._emit(SessionFailed(error=f"session stream failed: {exc}"))
+                self._fail_active(exc)
         finally:
             await self._on_stream_end(transport)
 
@@ -622,9 +623,7 @@ class AgySession(BaseHarnessSession[AntigravityConfig]):
         self._unsolicited(UnsolicitedOutput(source="result", text=fields.text.strip()))
 
     def _handle_result(self, payload: object, ticket: ActiveTurn) -> None:
-        if not self._acked_start:
-            self._acked_start = True
-            self._apply(self._ledger.in_context(ticket.input_key, ticket.turn_id))
+        self._ack_start(ticket)
         fields = parse_result(payload if is_object_dict(payload) else {}, home=self._home)
         self._show_subagents(ticket.turn_id)
         text = "\n".join(ticket.parts).strip() or self._flush_step_text() or fields.text.strip()

@@ -82,8 +82,8 @@ HarnessGoto = Literal["claim"]
 # meiva:note
 # Delivery is woken by the host's inbound wake, so the queue is not polled while a turn runs. The
 # fallback only bounds the cost of a lost wake. After a refusal (Antigravity refuses an input for a
-# conversation that is just starting or just ending) the same input is not sent again before the
-# backoff has passed: the next wake or fallback tick retries, never a loop.
+# conversation that is just starting or just ending) the same input is not sent again by this run.
+# The run waits for the foreground and a short backoff, then the next invocation owns the retry.
 # meiva:link agent/graph/docs/harness-turn.md
 DELIVERY_FALLBACK_SECONDS = 15.0
 REDELIVER_BACKOFF_SECONDS = 2.0
@@ -140,6 +140,7 @@ class ForegroundRun:
         self._turn_inputs: dict[str, list[str]] = {}
         self._changed = asyncio.Event()
         self._backoff_until = 0.0
+        self._handoff_after_requeue = False
         self._failure: Exception | None = None
         # meiva:note
         # Inputs the harness has settled whose settlement is not yet written. They are no longer in `fg`, but
@@ -154,6 +155,9 @@ class ForegroundRun:
 
     def _unsettled(self) -> tuple[Handed, ...]:
         return (*self.fg.handed, *self._settling)
+
+    def pending_inputs(self) -> list[dict[str, str]]:
+        return [{"key": handed.key, "prompt": prompt} for handed, prompt in self._synthetic]
 
     # meiva:note
     # The invocation failed or was interrupted with inputs handed over and unsettled. The session is
@@ -387,6 +391,7 @@ class ForegroundRun:
                     reason=reason,
                 )
                 self._backoff_until = asyncio.get_running_loop().time() + REDELIVER_BACKOFF_SECONDS
+                self._handoff_after_requeue = True
                 if handed.inbound_id is None:
                     self._synthetic.insert(0, (handed, self._prompts[handed.key]))
                 else:
@@ -396,6 +401,10 @@ class ForegroundRun:
     async def _deliver_until_quiet(self) -> None:
         while self._failure is None:
             self._changed.clear()
+            if self._handoff_after_requeue:
+                if await self._settle_before_handoff():
+                    return
+                continue
             try:
                 delivered = await self._deliver_ready()
             except PoolTimeout as exc:
@@ -425,7 +434,20 @@ class ForegroundRun:
                 continue
             timeout = backoff if backoff > 0 else DELIVERY_FALLBACK_SECONDS
             with suppress(TimeoutError):
-                await asyncio.wait_for(self._changed.wait(), timeout)
+                _ = await asyncio.wait_for(self._changed.wait(), timeout)
+
+    async def _settle_before_handoff(self) -> bool:
+        if self._ready_to_recheck():
+            await self._recheck_kept()
+            return False
+        backoff = self._backoff_until - asyncio.get_running_loop().time()
+        if self._foreground_quiet() and backoff <= 0:
+            _ = await self._queue_correction()
+            return True
+        timeout = backoff if backoff > 0 else DELIVERY_FALLBACK_SECONDS
+        with suppress(TimeoutError):
+            _ = await asyncio.wait_for(self._changed.wait(), timeout)
+        return False
 
     # meiva:note
     # The invocation may end only when nothing is in flight: no input handed over and unsettled, no turn
@@ -434,14 +456,11 @@ class ForegroundRun:
     # subscription, so an empty `fg` alone does not mean there is nothing to present.
     # meiva:link agent/graph/docs/harness-foreground.md
     def _nothing_left(self) -> bool:
+        return self._foreground_quiet() and not self._synthetic
+
+    def _foreground_quiet(self) -> bool:
         waiting = self._subscription is not None and self._subscription.unread
-        return (
-            self.fg.quiet
-            and not self._settling
-            and not self._synthetic
-            and not self._reading
-            and not waiting
-        )
+        return self.fg.quiet and not self._settling and not self._reading and not waiting
 
     # meiva:note
     # The session could not take the batch, so none of it was handed over: rows go back to the queue and

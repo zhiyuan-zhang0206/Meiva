@@ -45,9 +45,22 @@ ignored) and for a message sent when no turn runs, so an HTTP 200 is only a weak
 an unexpected shape or an unknown run status raises `AgyInterfaceError`; it is never read as "idle".
 
 `deliver()` asks `GetCascadeTrajectory` (`status` RUNNING / IDLE, `numTotalSteps`, `trajectory.steps`)
-before each input (`trajectory.route`): RUNNING is steered with our id; IDLE with no turn of ours
-starts a turn on stdin; IDLE while our own turn's result is unread is refused (`InputRejected`) so the
-input is handed over again. An input sent through RPC to an idle conversation would run a **phantom
+before each input (`trajectory.route`). RUNNING is steered with our id. Top-level IDLE is not sufficient
+evidence that provider work finished: agy 1.5.9 enters reactive-IDLE while a background step remains
+live. That state is steerable through `SendUserCascadeMessage`, so IDLE plus an active ticket and a
+`RUNNING` or `GENERATING` trajectory step is also steered. IDLE with no turn of ours starts a turn on stdin; IDLE with
+an active ticket but no visible live step is refused (`InputRejected`) so the durable inbox owns the
+later retry while the adapter waits for the outer `result`.
+
+The routing rule is grounded in two live agy 1.5.9 probes. A background-command trajectory stayed IDLE
+for 5.3 seconds with one step RUNNING, then resumed the same turn. In a second run, RPC injection during
+that state added the input with its `clientMessageId` in 114 ms and completed its planner response while
+the background step was still RUNNING; both answers arrived in the same outer `result`. Writing the same
+input to stdin did not wake the CLI: it was read only after the old outer `result`. The compact background
+snapshots are in `tests/fixtures/background_idle_trajectory.json`.
+
+Only stdout `result` is an outer-turn terminal signal. Neither one IDLE snapshot nor an unchanged silent
+window completes or closes a ticket. An input sent through RPC to a fully idle conversation would run a **phantom
 turn**: agy runs it, stdout shows nothing (130 s observed), and at the next stdin input its steps are
 printed again and its answer is folded into that turn's `result`.
 
@@ -128,7 +141,9 @@ end; anything else is the CLI's own work and becomes
 protocol level, so the reply is built from the turn's own streamed text — the parts
 already closed plus whatever the in-flight step streamed — and the frame's
 `response` only fills a gap. That is what keeps a foreign `result` from replacing
-the reply it interrupted.
+the reply it interrupted. The read loop also accepts frames only from the transport
+that still owns the session, so late frames from a replaced process cannot complete
+or fail a later ticket.
 
 A stream that ends names the turn it was serving when one was running
 (`TurnFaulted`) and the session when none was (`SessionFailed`).
