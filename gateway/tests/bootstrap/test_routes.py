@@ -15,6 +15,7 @@ import json
 import math
 import uuid
 from datetime import UTC, datetime, timedelta
+from pathlib import Path
 from typing import Any
 
 import psycopg
@@ -27,6 +28,8 @@ from base.paths import meiva_home
 from base.telemetry.observability import cluster_label
 from gateway.schemas.stats import StatsWindowHours, window_delta
 from gateway.tests.auth.gateway_config import gateway_test_client
+from meiva_builtins.plugins.meiva_usage.default_config import CollectorConfig
+from meiva_builtins.plugins.meiva_usage.runner import refresh_collector_once
 
 
 class _EventRows:
@@ -696,3 +699,61 @@ def test_dashboard_cache_rate_only_uses_metered_input(
     assert body["tokens"]["input"] == 6000
     assert body["cost_usd"] == 3
     assert body["tokens"]["cache_hit_pct"] == (None if cached is None else cached / 10)
+
+
+# meiva:note
+# Failed probes update the warning without making retained quota/deadlines look freshly read.
+def test_retained_error_snapshot_age_reaches_dashboard(
+    database: Database,
+    db_conn: psycopg.Connection,
+    tmp_path: Path,
+) -> None:
+    old = datetime(2026, 1, 1, tzinfo=UTC)
+    reset = StatReset(label="5h", resets_at=old + timedelta(hours=3))
+    stats.upsert(
+        database, plugin="meiva_usage", id="cached-quota", value="40% left", resets=(reset,)
+    )
+    _ = db_conn.execute("UPDATE plugin_stats SET updated_at = %s WHERE id = 'cached-quota'", (old,))
+    db_conn.commit()
+    collector = CollectorConfig(
+        id="cached-quota", label="Cached", provider="deepseek", machine="gateway", key_env="KEY"
+    )
+
+    def failed(_request: object) -> dict[str, object]:
+        raise RuntimeError("network down")
+
+    for elapsed_hours in (1, 2, 4):
+        _ = refresh_collector_once(
+            collector,
+            db=database,
+            user_home=tmp_path,
+            environ={"KEY": "test"},
+            now=old + timedelta(hours=elapsed_hours),
+            platform="darwin",
+            http_fetch=failed,
+        )
+        with gateway_test_client() as client:
+            (row,) = client.get("/api/stats/dashboard").json()["plugin_stats"]
+        assert datetime.fromisoformat(row["updated_at"]) == old
+        assert row["value"] == "40% left"
+        assert row["resets"] == [{"label": "5h", "resets_at": "2026-01-01T03:00:00Z"}]
+        assert row["status"] == "error"
+
+    def recovered(_request: object) -> dict[str, object]:
+        return {"balance_infos": [{"currency": "USD", "total_balance": "99.00"}]}
+
+    _ = refresh_collector_once(
+        collector,
+        db=database,
+        user_home=tmp_path,
+        environ={"KEY": "test"},
+        now=old + timedelta(hours=5),
+        platform="darwin",
+        http_fetch=recovered,
+    )
+    with gateway_test_client() as client:
+        (row,) = client.get("/api/stats/dashboard").json()["plugin_stats"]
+    assert datetime.fromisoformat(row["updated_at"]) > old
+    assert row["value"] == "USD 99.00"
+    assert row["resets"] == []
+    assert row["status"] == "ok"

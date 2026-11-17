@@ -1,4 +1,4 @@
-exports = ["runner.py"]
+exports = ["default_config.py", "runner.py"]
 
 [purity]
 "__init__.py" = "strict"

@@ -318,3 +318,28 @@ def test_cached_reset_snapshot_survives_rate_limit_and_failure(
     assert row is not None
     assert row[0] == "40% left"
     assert row[1][0]["resets_at"] == "2027-01-01T08:00:00+08:00"
+
+
+# meiva:note
+# Without a cached measurement an error is a new observation, so its normal write still stamps it.
+def test_uncached_errors_keep_normal_write_stamps(
+    db_conn: psycopg.Connection[Any], tmp_path: Path
+) -> None:
+    collector = _deepseek_collector("uncached-error")
+    for _attempt in range(2):
+        _ = refresh_collector_once(
+            collector,
+            db=cast(Any, FakeDatabase(db_conn)),
+            user_home=tmp_path,
+            environ={"DEEPSEEK_API_KEY": "k"},
+            now=_NOW,
+            platform="darwin",
+            http_fetch=_http_500,
+        )
+        value, _detail, status, stamp = _card_row(db_conn, "uncached-error")
+        assert (value, status) == ("—", "error")
+        assert stamp > _GOOD_AT
+        _ = db_conn.execute(
+            "UPDATE plugin_stats SET updated_at = %s WHERE id = 'uncached-error'", (_GOOD_AT,)
+        )
+        db_conn.commit()

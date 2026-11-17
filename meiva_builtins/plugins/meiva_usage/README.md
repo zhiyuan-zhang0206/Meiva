@@ -92,7 +92,8 @@ The schedule script executes `run_from_schedule(MEIVA_SCHEDULE_INPUTS, collector
   on the viewer's clock, exposes full local time in its tooltip, and shows awaiting
   refresh after a deadline. Passing a deadline does not prove quota has refreshed.
   Existing stored rows gain an empty deadline list until their next successful probe.
-  Rate-limited and retained error readings keep their cached deadlines.
+  Rate-limited and retained error readings keep their cached deadlines and reading
+  timestamp; only a successful probe refreshes an existing measurement's age.
 
 ### 4. Process-scoped secret delivery
 

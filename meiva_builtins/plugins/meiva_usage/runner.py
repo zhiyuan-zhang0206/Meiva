@@ -94,7 +94,7 @@ def _save_pacing_state(path: Path, state: _PacingState) -> None:
 
 # meiva:note
 # The cached card row, selected by its primary key. Every column is NOT NULL in `plugin_stats`, so
-# a found row always carries all three and only a missing row means "nothing cached".
+# a found row carries the reading snapshot; only a missing row means "nothing cached".
 @dataclass(frozen=True)
 class _CachedCard:
     status: str
@@ -108,7 +108,7 @@ def _resolve_error_hysteresis(
     card_id: str,
     reading: CardReading,
     now: datetime,
-) -> tuple[CardReading, bool]:
+) -> tuple[CardReading, bool, bool]:
     with db.write_transaction() as conn:
         cached = query_one(
             conn,
@@ -130,15 +130,20 @@ def _resolve_error_hysteresis(
                 status=status,
             ),
             False,
+            True,
         )
-    if existing_value:
-        return CardReading(
-            value=existing_value,
-            detail=reading.detail,
-            status="error",
-            resets=tuple(StatReset.model_validate(r) for r in cached.resets) if cached else (),
-        ), True
-    return reading, True
+    if existing_value and existing_value != _NO_READING:
+        return (
+            CardReading(
+                value=existing_value,
+                detail=reading.detail,
+                status="error",
+                resets=tuple(StatReset.model_validate(r) for r in cached.resets) if cached else (),
+            ),
+            True,
+            True,
+        )
+    return reading, True, False
 
 
 # meiva:note
@@ -185,7 +190,7 @@ def _upsert_card_reading(
     if reading.rate_limited:
         reading, keep_stamp = _rate_limited_reading(db, card_id, reading)
     elif reading.status == "error":
-        reading, should_upsert = _resolve_error_hysteresis(db, card_id, reading, now)
+        reading, should_upsert, keep_stamp = _resolve_error_hysteresis(db, card_id, reading, now)
         if not should_upsert:
             return reading
 

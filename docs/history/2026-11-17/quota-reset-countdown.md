@@ -11,3 +11,10 @@ say awaiting refresh because only a subsequent provider response confirms new qu
 Parsing detail text was rejected because presentation text cannot preserve the
 original timestamp contract. A new general card framework was unnecessary for this
 single additive field.
+
+
+Review update: retained ordinary errors must preserve the reading timestamp as well
+as cached quota and deadlines. Refreshing that timestamp on a failed probe made
+repeated failures appear fresh. The writer now carries the retained-snapshot
+choice through to the existing keep-stamp upsert, while errors without a cached
+measurement and successful recovery keep their normal write timestamps.

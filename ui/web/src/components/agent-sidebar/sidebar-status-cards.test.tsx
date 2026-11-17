@@ -310,6 +310,26 @@ describe("plugin status cards", () => {
       expect(screen.getByText("5h · awaiting refresh")).toBeTruthy();
     } finally { vi.useRealTimers(); }
   });
+  it.each([true, false])("keeps retained-error age and deadlines coherent (stale=%s)", async (stale) => {
+    state.agents = [makeAgent({ agent_id: 1 })];
+    state.pluginStatDeclarations = [{ plugin: "meiva_usage", id: "snapshot", label: "Snapshot" }];
+    state.stats = statsWith([{
+      plugin: "meiva_usage", id: "snapshot", value: "40% left", detail: stale ? "network down" : "healthy",
+      status: stale ? "error" : "ok", updated_at: new Date(SCENARIO_NOW - (stale ? 3600_000 : 0)).toISOString(),
+      updated_by: "macmini", resets: [
+        { label: "5h", resets_at: new Date(SCENARIO_NOW + 120_000).toISOString() },
+        { label: "7d", resets_at: new Date(SCENARIO_NOW - 120_000).toISOString() },
+      ],
+    }]);
+    wrap(<AgentSidebar {...handlers} />);
+    openStatus();
+    const value = await screen.findByText("40% left");
+    expect(value.parentElement?.className.includes("opacity-60")).toBe(stale);
+    expect(value.className.includes("text-destructive")).toBe(stale);
+    expect(await screen.findByTitle(stale ? "Updated 1h ago" : "Updated just now")).toBeTruthy();
+    expect(await screen.findByText("5h · resets in 2m")).toBeTruthy();
+    expect(await screen.findByText("7d · awaiting refresh")).toBeTruthy();
+  });
   it("a declared card renders the plugin's value and detail in the unwindowed section above Usage", async () => {
     state.agents = [makeAgent({ agent_id: 1 })];
     state.pluginStatDeclarations = [{ plugin: "codex_usage", id: "codex-a", label: "Codex A" }];
