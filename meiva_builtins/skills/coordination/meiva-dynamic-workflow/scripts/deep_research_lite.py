@@ -228,7 +228,7 @@ After writing, message no one — the file IS the handoff.
     )
     log(f"  [report-writer] spawned #{wid}")
 
-    launch_checkpoint(["w3_draft.json"], "w3-draft", "10m")
+    launch_checkpoint(["w3_draft.json"], "w3-draft", 600)
     write_state({"wave": 3, "next": 4, "spawned": 1})
     meiva.self.pause_heartbeat(600)
     log("Waiting for draft...")
