@@ -3,6 +3,8 @@
 import { useRouter } from "next/navigation";
 import { useCallback, useMemo } from "react";
 
+import { ViewportAnomalyDiagnostic } from "@/components/shell/viewport-anomaly-diagnostic";
+
 import { AgentSidebar } from "@/components/agent-sidebar";
 import { SharedContextPanel } from "@/components/context/shared-context-panel";
 import { Composer } from "@/components/conversation/composer";
@@ -33,6 +35,7 @@ import { HomePageView } from "./home-view";
 export default function HomePage() {
   return (
     <AgentEventStreamProvider>
+      <ViewportAnomalyDiagnostic />
       <HomePageWiring />
     </AgentEventStreamProvider>
   );

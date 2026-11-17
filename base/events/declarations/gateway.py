@@ -32,6 +32,22 @@ class FrontendInteraction(TypedDict):
     session_id: str
     key: str | None
     value: str | None
+    geometry_incident: NotRequired[int]
+    geometry_phase: NotRequired[Literal["anomaly", "recovered", "timeout"]]
+    geometry_reason: NotRequired[
+        Literal["mount", "viewport-change", "box-change", "visible", "deadline"]
+    ]
+    geometry_elapsed_ms: NotRequired[float]
+    geometry_layout_height: NotRequired[float]
+    geometry_visual_height: NotRequired[float | None]
+    geometry_visual_scale: NotRequired[float | None]
+    geometry_html_inline_height: NotRequired[float | None]
+    geometry_html_height: NotRequired[float]
+    geometry_body_height: NotRequired[float]
+    geometry_shell_height: NotRequired[float]
+    geometry_shell_bottom: NotRequired[float]
+    geometry_composer_height: NotRequired[float | None]
+    geometry_composer_bottom: NotRequired[float | None]
 
 
 class GatewayLatency(TypedDict):
