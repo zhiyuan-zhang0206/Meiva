@@ -60,6 +60,7 @@ function announceCompactDisplayChange(
 
 export const useTimelineStore = create<TimelineState>()((set, get) => ({
   items: [],
+  snapshotReady: false,
   compactBuffer: null,
   compactEpoch: 0,
   streamingCode: false,
@@ -214,6 +215,7 @@ export const useTimelineStore = create<TimelineState>()((set, get) => ({
         // committed ids drop out of streamingIds; still-streaming ones stay
         streamingIds: new Set([...s.streamingIds].filter((id) => !snapshotIds.has(id))),
         items: merged,
+        snapshotReady: true,
         compactEpoch: epoch,
         compactBuffer,
         hasMoreOlder,
@@ -232,6 +234,7 @@ export const useTimelineStore = create<TimelineState>()((set, get) => ({
     if (buffer && buffer.threadId !== agentId) throw new Error("A retained timeline buffer must belong to its selected agent");
     set((s) => ({
       activeThreadId: agentId,
+      snapshotReady: cached !== null,
       items: cached ?? [],
       compactBuffer: buffer ? { ...buffer, epoch: s.compactEpoch + 1 } : null,
       compactEpoch: s.compactEpoch + 1,

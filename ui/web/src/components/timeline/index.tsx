@@ -422,6 +422,7 @@ export const TimelineView = memo(function TimelineView({
       state: bookmarkState,
       viewport,
       initialPass: initialRestorePassRef.current,
+      loading,
       threadKey,
       compactBuffer,
       canonicalItems: canonicalItemsRef.current,
@@ -429,7 +430,7 @@ export const TimelineView = memo(function TimelineView({
       tailHeight,
       collapseReserve: collapseReserveRef.current,
     }),
-    [bookmarkState, compactBuffer, controller, tailHeight, threadKey],
+    [bookmarkState, compactBuffer, controller, tailHeight, threadKey, loading],
   );
 
   const settleRestoredPosition = useCallback(

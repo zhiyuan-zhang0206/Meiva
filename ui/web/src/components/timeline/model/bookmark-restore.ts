@@ -26,6 +26,7 @@ interface ApplyArgs {
   state: BookmarkState;
   viewport: HTMLElement | null;
   initialPass: boolean;
+  loading: boolean;
   threadKey: string | undefined;
   compactBuffer: CompactTransitionBuffer | null;
   canonicalItems: readonly BackendTimelineItem[];
@@ -41,10 +42,10 @@ const snapshot = (viewport: HTMLElement) => ({
 });
 
 export function applyBookmarkRestore({
-  state, viewport, initialPass, threadKey, compactBuffer, canonicalItems, controller, tailHeight, collapseReserve,
+  state, viewport, initialPass, loading, threadKey, compactBuffer, canonicalItems, controller, tailHeight, collapseReserve,
 }: ApplyArgs): void {
   const saved = state.pending.current;
-  if (initialPass || !saved || !viewport) return;
+  if (initialPass || loading || !saved || !viewport) return;
   if (threadKey === undefined) return;
   if (saved.contentKey !== threadKey) {
     state.pending.current = null;
