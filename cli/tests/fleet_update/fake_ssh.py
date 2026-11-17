@@ -42,6 +42,8 @@
 # - `effects`: list[[kind, alias]] — every effect accepted, in order; `run_started_at`: int — the
 #   index into `effects` where the current window started.
 # - `commands`: list[[alias, command]] — every invocation this double received, for order checks.
+# - `running_agents`: list[int] and `messages`: list[[int, str]] — the directory and
+#   delivered messages observed by a real scheduled worker.
 # - `names`: dict[alias -> str] — the machine name the host reports; `silent`, `hidden`:
 #   list[alias] — hosts the roster shows offline, and hosts it leaves out. `laptop`:
 #   `{"row": list[object]} | None` — one extra roster row of five values (online,
@@ -187,6 +189,8 @@ class Sim:
         host = self.s["hosts"][alias]
         emit.append(self.s["output"])
         programs = self.s["programs"]
+        if " agents " in command:
+            return self._agents(command, emit)
         if command == "uname -s":
             emit.append(str(host["os"]))
             return 0
@@ -213,6 +217,18 @@ class Sim:
         if "verify" in command:
             return self._verify(alias, command, emit)
         return self._effect_for(alias, host, command, emit)
+
+    def _agents(self, command: str, emit: list[str]) -> int:
+        emit[:] = [line for line in emit if line]
+        if " agents ls " in command:
+            emit.append("id status machine label")
+            emit.extend(f"{target} running gw worker" for target in self.s["running_agents"])
+            return 0
+        wrapped = shlex.split(command)
+        words = shlex.split(wrapped[-1] if wrapped[0] in {"bash", "zsh"} else command)
+        index = words.index("send")
+        self.s["messages"].append([int(words[index + 1]), words[index + 2]])
+        return 0
 
     def _evidence(self, alias: str, emit: list[str]) -> int:
         if rc := self._failure("evidence", alias):

@@ -181,6 +181,8 @@ class Cluster:
         self.laptop: dict[str, Any] | None = None
         self.effects: list[tuple[str, str]] = []
         self.commands: list[tuple[str, str]] = []
+        self.running_agents: list[int] = []
+        self.messages: list[tuple[int, str]] = []
         self.run_started_at = 0
         self.fail: dict[tuple[str, str], int] = {}
         self.output = ""
@@ -244,6 +246,8 @@ class Cluster:
             "laptop": self.laptop,
             "effects": self.effects,
             "commands": self.commands,
+            "running_agents": self.running_agents,
+            "messages": self.messages,
             "run_started_at": self.run_started_at,
             "fail": {f"{kind}|{alias}": rc for (kind, alias), rc in self.fail.items()},
             "output": self.output,
@@ -273,6 +277,7 @@ class Cluster:
         self.hosts = data["hosts"]
         self.effects = [(kind, alias) for kind, alias in data["effects"]]
         self.commands = [(alias, command) for alias, command in data["commands"]]
+        self.messages = [(target, text) for target, text in data["messages"]]
         self.roster_reads = data["roster_reads"]
         self.silence_open = data["silence_open"]
         self.silence_hours = data["silence_hours"]
@@ -309,3 +314,19 @@ class Cluster:
             self._adopt(json.loads(self.state_path.read_text()))
         assert not self.violations, self.violations
         return code
+
+    def invoke_worker(self, record: Path) -> tuple[int, str]:
+        self.state_path.write_text(json.dumps(self._state()))
+        try:
+            result = subprocess.run(
+                [sys.executable, "-m", "cli.fleet_update.scheduled_worker", str(record)],
+                cwd=fleet_update.choices.CODE_ROOT,
+                env=self.process_env(),
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+        finally:
+            self._adopt(json.loads(self.state_path.read_text()))
+        assert not self.violations, self.violations
+        return result.returncode, result.stdout + result.stderr

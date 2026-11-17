@@ -78,8 +78,8 @@ lifecycle audit row (`base/native_process/root_control/client.py`, written by
 
 - `MEIVA_OPERATION_ID` — one per window, minted at the entry, never derived from a time or a
   host, so a five-host restart is one operation rather than five unrelated stops.
-- `MEIVA_OPERATION_INITIATOR` — `user:<name>@<host>` here, because a window refuses to run
-  inside an agent's shell; the name of the machine that started it survives in the row's
+- `MEIVA_OPERATION_INITIATOR` — `user:<name>@<host>` for an immediate window, or the
+  explicit `user` / `agent:<id>` source for an OS-scheduled window; the name of the machine that started it survives in the row's
   `spawn.ssh_connection` even when this is empty.
 - `MEIVA_OPERATION_GATE` / `MEIVA_OPERATION_GATE_REASON` — `satisfied` when the target was
   resolved through the certified channel (`stable` or `latest`); `overridden` when the operator
@@ -101,3 +101,42 @@ tests = ["cli/tests/fleet_update/test_fleet_update.py::test_runners_stop_first_a
 The gateway stops after every runner and starts before any runner; NEW is fetched on every host before any stop; the switch follows the stops; the drift checks run last and every one runs, so a red never skips the refresh; the first failure ends the half with no rollback (refusals exit 2, failures exit 1).
 
 Parent: [CLI](cli.md).
+
+## Scheduled host-owned update
+
+`meiva update run --at +5m --source agent:123 ...` accepts the same explicit
+stop/start choices as `run`, including `--message TEXT` or `--no-message`.
+Use `--source user` for a human initiator. `--at` accepts positive relative
+seconds/minutes/hours/days (`+60s`, `+5m`) or a future ISO timestamp with timezone.
+It requires `--execute` and schedules the complete `run` window.
+
+Submission is safe from an agent shell: it resolves and pins the target SHA,
+performs the ordinary host preflight, fetch, root/schedule checks and prestage,
+then warns every currently running agent except the initiator. Sleeping agents
+receive no submission message. Preparation or timer registration failures exit
+2 without stopping any service. The submitting agent must finish its turn before
+the deadline, as it is included in the final running-agent check.
+
+The local operator host owns a systemd user timer on Linux or a launchd one-shot
+on macOS (the latter owns its deadline wait outside Meiva). The private record
+under `<log-dir>/scheduled/<operation_id>.json` holds `run_at`, `initiator`, the
+pinned target and outcome. The command prints its path. Inspect or cancel it with
+`meiva update status RECORD` / `meiva update cancel RECORD`. Cancellation refuses
+an executing job. Retain the operator checkout, interpreter and records until the
+operation finishes; they must live outside the serving checkouts being switched.
+Submission refuses the local serving `~/.meiva/source` checkout/interpreter; invoke
+the command with the independent operator checkout's own `.venv/bin/meiva`.
+The host user manager / macOS GUI login must remain available for execution.
+
+At the deadline the job rechecks preparation and queries every directory page
+immediately before stop. If any agent is running, it stops no service and sends
+the busy list to the recorded agent initiator and those running agents. Otherwise
+it performs the ordinary down/switch/up chain and sends the recorded agent
+initiator the result after up and its verification. A non-busy preflight refusal
+also receives a failure receipt. The worker suppresses its final receipt only
+when the busy gate already delivered a notice to that initiator; exit 2 alone
+does not establish delivery. A `user` initiator reads the
+record and logs. Failed message delivery leaves the durable record and log for
+recovery. This is one strict attempt: agent activity can change after the check,
+and there is no inbox lock or automatic retry. Direct synchronous run/down keep
+the existing agent-shell refusal.

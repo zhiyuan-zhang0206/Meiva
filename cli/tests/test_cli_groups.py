@@ -44,7 +44,7 @@ def test_core_verbs_exist() -> None:
 
 
 def test_update_group_has_run_down_and_up() -> None:
-    assert _update_choices() == {"run", "down", "up"}
+    assert _update_choices() == {"run", "down", "up", "status", "cancel"}
 
 
 def test_update_binds_window_inputs_without_touching_local_home(tmp_path: Path) -> None:

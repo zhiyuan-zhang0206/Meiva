@@ -12,3 +12,5 @@
 "test_fleet_update_helper_gate.py" = ["fleet_update_cluster.py"]
 "test_fleet_update_verify.py" = ["fleet_update_cluster.py"]
 "test_fleet_update_recovery.py" = ["fleet_update_cluster.py"]
+
+"test_scheduled_worker.py" = ["fleet_update_cluster.py"]
