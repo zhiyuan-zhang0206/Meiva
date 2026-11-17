@@ -68,8 +68,8 @@ TRAJECTORY_POLL_SECONDS = 0.5
 # One `agy` conversation as a turn engine. Same three boundaries as the Claude bridge — ordered
 # inbound, one outbound stream, an assertable cancel — with one harness difference that shapes the
 # whole file: an interrupt kills the `agy` process. `interrupt()` therefore retires the transport,
-# and the next turn respawns it with `--conversation`, so the transcript survives even though the
-# process does not.
+# as does an acknowledged turn whose trajectory is IDLE before stdout reports its result. The next
+# turn respawns with `--conversation`, so the transcript survives even though the process does not.
 # meiva:link base/lm/harness/antigravity/docs/antigravity.md
 class AgySession(BaseHarnessSession[AntigravityConfig]):
     harness = "antigravity"
@@ -172,8 +172,10 @@ class AgySession(BaseHarnessSession[AntigravityConfig]):
     # (`GetCascadeTrajectory`): a running one takes the input through `SendUserCascadeMessage`
     # carrying our `clientMessageId`; an idle one must not be sent to that way, because agy answers 200
     # and runs a turn that stdout never reports, so the input starts a turn on stdin instead, or waits
-    # (a rejection, so the caller hands it over again) when our own turn has finished but its result is
-    # not yet read. HTTP 200 and a stdin write are weak receipts;
+    # (a rejection, so the caller hands it over again) when our own acknowledged turn has finished but
+    # its result is not yet read. In that last state the trajectory is the terminal authority: the old
+    # ticket is completed from its streamed output and its process is retired before another run retries.
+    # HTTP 200 and a stdin write are weak receipts;
     # the second acknowledgement is the user-input step: the trajectory step that carries our
     # `clientMessageId`, or for a turn started on stdin the first user-input frame on stdout. The
     # trajectory is the one live signal, so a reply of an unexpected shape fails the delivery.
@@ -190,9 +192,10 @@ class AgySession(BaseHarnessSession[AntigravityConfig]):
     async def _deliver_one(self, entry: HarnessInput) -> None:
         transport = await self._ensure_transport()
         snapshot_ = await transport.trajectory() if self._session_id else None
+        ticket = self._active
         decided = route(
             snapshot_.status if snapshot_ is not None else None,
-            ticket_active=self._active is not None,
+            ticket_active=ticket is not None,
         )
         if decided is Route.STEER:
             await self._steer_input(transport, entry)
@@ -203,11 +206,71 @@ class AgySession(BaseHarnessSession[AntigravityConfig]):
                     entry.key, "the running turn has finished; hand the input over again"
                 )
             )
+            if ticket is not None and self._acked_start:
+                await self._retire_finished_turn(transport, ticket)
             return
         if entry.images:
             self._start_with_images(entry)
             return
         _ = self._start_input_turn(entry)
+
+    # meiva:note
+    # An IDLE trajectory after this ticket entered the conversation is the provider's terminal fact.
+    # Usually stdout's `result` follows and closes the ticket. If a new input observes the gap, keeping
+    # the old process lets a missing result own `_active` forever; every caller then rejects and retries
+    # against that dead turn. Detach first so late frames cannot acquire the next ticket, finish from the
+    # output already streamed, and retire the process. The rejected input remains the next run's work.
+    # A ticket that has not reached ACK2 is deliberately excluded: IDLE may then mean stdin has not begun.
+    # meiva:link base/lm/harness/antigravity/docs/antigravity.md
+    async def _retire_finished_turn(self, transport: AgyTransport, ticket: ActiveTurn) -> None:
+        if self._transport is not transport or self._active is not ticket:
+            return
+        self._transport = None
+        self._retired = transport
+        self._sent_turn = None
+        self._lose_schedules()
+        self._finish_from_trajectory(ticket)
+        logger.warning(
+            "agent {agent_id}: agy was idle before the active turn's result; retired generation "
+            "{generation}",
+            event="harness_turn_finished_without_result",
+            agent_id=self.agent_id,
+            generation=self.generation,
+            turn_id=ticket.turn_id,
+        )
+        await transport.close()
+
+    def _finish_from_trajectory(self, ticket: ActiveTurn) -> None:
+        self._ack_start(ticket)
+        self._show_subagents(ticket.turn_id)
+        text = "\n".join(ticket.parts).strip() or self._flush_step_text()
+        steps = tuple(self._turn_steps)
+        usage = Usage()
+        for step in steps:
+            usage += step
+        self._totals = self._totals.with_turn(usage, None, measured=False)
+        started = ticket.started_at
+        duration_ms = 0 if started is None else max(int((self._monotonic() - started) * 1000), 0)
+        self._emit(
+            TurnCompleted(
+                turn_id=ticket.turn_id,
+                session_id=self._session_id,
+                text=text,
+                subtype="unknown",
+                is_error=False,
+                interrupted=False,
+                stop_reason="trajectory idle before result",
+                num_turns=max(len(steps), 1),
+                duration_ms=duration_ms,
+                usage=usage,
+                cost_usd=None,
+                cumulative_cost_usd=self._totals.cost_usd,
+                permission_denials=(),
+                steps=steps,
+                generation=self.generation,
+            )
+        )
+        self._complete(ticket)
 
     # meiva:note
     # agy takes an image only through `SendUserCascadeMessage` on a running turn, never on stdin. An idle
@@ -352,13 +415,14 @@ class AgySession(BaseHarnessSession[AntigravityConfig]):
     async def _read_loop(self, transport: AgyTransport, generation: int) -> None:
         try:
             async for payload in transport.events():
-                if self._ledger.accepts(generation):
+                if self._transport is transport and self._ledger.accepts(generation):
                     self._handle(payload)
         except asyncio.CancelledError:
             raise
         except Exception as exc:
-            self._emit(SessionFailed(error=f"session stream failed: {exc}"))
-            self._fail_active(exc)
+            if self._transport is transport:
+                self._emit(SessionFailed(error=f"session stream failed: {exc}"))
+                self._fail_active(exc)
         finally:
             await self._on_stream_end(transport)
 

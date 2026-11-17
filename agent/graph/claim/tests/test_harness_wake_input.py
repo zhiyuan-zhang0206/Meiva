@@ -8,6 +8,7 @@ from __future__ import annotations
 import asyncio
 from collections.abc import Sequence
 from dataclasses import replace
+from typing import cast
 
 import psycopg
 import pytest
@@ -199,14 +200,14 @@ async def test_the_rows_are_marked_before_the_harness_is_handed_the_input_and_a_
         event_bus=event_bus,
     )
 
-    async with asyncio.timeout(20), asyncio.TaskGroup() as tasks:
-        node = tasks.create_task(harness_turn_node(AgentState(), rt, config(agent_id)))
-        await wait_until(lambda: len(seen) == 1, "the first delivery")
+    async with asyncio.timeout(20):
+        _ = await harness_turn_node(AgentState(), rt, config(agent_id))
         await wait_until(
             lambda: [row_status(db_conn, i) for i in rows] == ["pending"] * 2, "the requeue"
         )
         assert _payload_keys(db_conn, rows) == [None, None], "a requeue clears the mark"
-        await node
+        assert len(seen) == 1, "the refusing run makes one delivery attempt"
+        _ = await harness_turn_node(AgentState(), rt, config(agent_id))
 
     assert seen[0] == [input_key(rows[0])] * 2, "marked before the harness had the input"
     assert [i.key for batch in engine.delivered for i in batch] == [input_key(rows[0])] * 2
@@ -243,7 +244,10 @@ async def test_a_refused_wake_is_handed_over_again_with_its_hint_and_hook_note(
     )
 
     async with asyncio.timeout(20):
-        _ = await harness_turn_node(_hint_and_note(chat), rt, config(agent_id))
+        first_run = await harness_turn_node(_hint_and_note(chat), rt, config(agent_id))
+        assert first_run.update is not None
+        pending = cast(list[dict[str, object]], first_run.update["harness_inputs"])
+        _ = await harness_turn_node(AgentState(harness_inputs=pending), rt, config(agent_id))
 
     first, second = [batch[0].text for batch in engine.delivered]
     assert first == second, "the same one input, hint and hook note included"
@@ -400,7 +404,10 @@ async def test_a_refused_synthetic_only_wake_is_handed_over_again_as_the_same_on
     )
 
     async with asyncio.timeout(20):
-        _ = await harness_turn_node(_hints_only(), rt, config(agent_id))
+        first_run = await harness_turn_node(_hints_only(), rt, config(agent_id))
+        assert first_run.update is not None
+        pending = cast(list[dict[str, object]], first_run.update["harness_inputs"])
+        _ = await harness_turn_node(AgentState(harness_inputs=pending), rt, config(agent_id))
 
     first, second = engine.delivered
     assert len(first) == len(second) == 1, "one input each time, never one per synthetic input"
@@ -537,7 +544,10 @@ async def test_passive_rows_are_not_handed_over_when_the_only_row_that_is_not_pa
     )
 
     async with asyncio.timeout(20):
-        _ = await harness_turn_node(_hints_only(), rt, config(agent_id))
+        first_run = await harness_turn_node(_hints_only(), rt, config(agent_id))
+        assert first_run.update is not None
+        pending = cast(list[dict[str, object]], first_run.update["harness_inputs"])
+        _ = await harness_turn_node(AgentState(harness_inputs=pending), rt, config(agent_id))
 
     first, second = engine.delivered
     assert first[0].text == second[0].text, "the refused input is handed over again, once"

@@ -187,9 +187,11 @@ async def test_a_refused_batch_goes_back_in_order_and_is_delivered_again_after_t
     engine = FakeEngine(script=script)
     rt = harness_runtime(engine, agent_id=agent_id)
     async with asyncio.timeout(20):
-        await harness_turn_node(AgentState(), rt, config(agent_id))
+        _ = await harness_turn_node(AgentState(), rt, config(agent_id))
+        assert [row_status(db_conn, i) for i in rows] == ["pending"] * 3
+        _ = await harness_turn_node(AgentState(), rt, config(agent_id))
     keys = [[item.key for item in batch] for batch in engine.delivered]
-    assert keys == [[input_key(rows[0])]] * 2, "the one input, delivered twice"
+    assert keys == [[input_key(rows[0])]] * 2, "one attempt in each run"
     assert [row_status(db_conn, i) for i in rows] == ["done"] * 3
 
 
@@ -212,7 +214,9 @@ async def test_a_wakes_rows_are_one_input_that_settles_and_is_lost_together(
     engine = FakeEngine(script=script)
     rt = harness_runtime(engine, agent_id=agent_id)
     async with asyncio.timeout(20):
-        await harness_turn_node(AgentState(), rt, config(agent_id))
+        _ = await harness_turn_node(AgentState(), rt, config(agent_id))
+        assert [row_status(db_conn, i) for i in (first, second)] == ["pending", "pending"]
+        _ = await harness_turn_node(AgentState(), rt, config(agent_id))
     assert [[i.key for i in batch] for batch in engine.delivered] == [[input_key(first)]] * 2
     assert all("kept" in batch[0].text and "lost" in batch[0].text for batch in engine.delivered), (
         "both rows ride every delivery"
@@ -527,11 +531,17 @@ async def test_a_message_followed_by_a_stop_is_delivered_and_then_the_stop_is_ta
         assert entry.goto == "before_turn", "the message in front of the stop is delivery's"
         node_state = state.model_copy(update=entry.update or {})
         await harness_turn_node(node_state, rt, config(agent_id))
+        if refused_first:
+            retry = await claim_node(state, rt, config(agent_id))
+            assert retry.goto == "before_turn", "the next run takes the refused message"
+            retry_state = state.model_copy(update=retry.update or {})
+            await harness_turn_node(retry_state, rt, config(agent_id))
         stop = await claim_node(state, rt, config(agent_id))
 
     assert row_status(db_conn, message) == "done"
     if refused_first:
-        assert stop.goto == "claim" and dict[str, object](stop.update or {}).get("halted") is True
+        assert row_status(db_conn, stops[0]) == "done", "the handoff run takes the queued stop"
+        assert stop.goto == "__end__"
     else:
         assert row_status(db_conn, stops[0]) == "done"
 

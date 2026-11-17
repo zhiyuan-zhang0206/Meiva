@@ -31,9 +31,11 @@ the message and has not shown it to the model. When the harness reports it in th
 record is read, and `ReadTimelineSink` publishes `InboundCommitted` with it. The first acknowledgement (`InputReceived`) is a backend fact and
 changes nothing visible. A turn ending settles nothing: only ACK 2, a refusal (`InputRejected`) or a loss
 (`InputLost`) does. A refused or lost row returns to `pending` with no claim time, so it keeps its original
-position and is handed over again before anything newer, with the same key and in the same order; the retry
-waits for the next inbound wake or the fallback tick and never before a short backoff, so a harness that
-refuses input at a turn boundary is not asked in a loop. Settlement is per input (a wake's rows are one input): a delivery of several
+position and is handed over again before anything newer, with the same key and in the same order. That
+requeue is also a run boundary: the current invocation waits for its foreground turn to end and for a short
+backoff, then exits without reserving the row again. Its checkpoint retains synthetic inputs that rode with
+the row. The next `harness_turn` invocation makes the next delivery attempt, so a harness that refuses input
+at a turn boundary is asked once per run rather than in an in-process loop. Settlement is per input (a wake's rows are one input): a delivery of several
 inputs may be partly in context and partly returned.
 
 The graph invocation (`harness_turn`) stays for as long as there is something to settle: it ends only when no

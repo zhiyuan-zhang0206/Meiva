@@ -172,6 +172,7 @@ class FakeEngine:
         self.reconciled: list[list[str]] = []
         self.adopted: list[str] = []
         self.subscriptions: set[FakeSubscription] = set()
+        self.subscribe_count = 0
         self._inbound = asyncio.Event()
         # meiva:note
         # The events of a turn the CLI began while nothing was subscribed: the next subscription is primed
@@ -198,6 +199,7 @@ class FakeEngine:
         return bool(self.own_turn_events)
 
     async def subscribe(self) -> FakeSubscription:
+        self.subscribe_count += 1
         subscription = FakeSubscription(self)
         for event in self.own_turn_events:
             if self.record is not None:

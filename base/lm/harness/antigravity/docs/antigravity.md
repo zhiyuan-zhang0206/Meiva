@@ -47,7 +47,12 @@ an unexpected shape or an unknown run status raises `AgyInterfaceError`; it is n
 `deliver()` asks `GetCascadeTrajectory` (`status` RUNNING / IDLE, `numTotalSteps`, `trajectory.steps`)
 before each input (`trajectory.route`): RUNNING is steered with our id; IDLE with no turn of ours
 starts a turn on stdin; IDLE while our own turn's result is unread is refused (`InputRejected`) so the
-input is handed over again. An input sent through RPC to an idle conversation would run a **phantom
+input is handed over again. Once the old turn has reached ACK 2, that IDLE state also proves its provider
+work is finished: the adapter closes the old ticket from the output already streamed, marks its result
+metadata and per-turn usage as unmeasured, retires the process, and ignores any late frame from it. The
+next delivery respawns with `--conversation`; the rejected input starts there exactly once. A ticket that
+has not reached ACK 2 is left alone because IDLE can still mean stdin has not begun. An input sent through
+RPC to an idle conversation would run a **phantom
 turn**: agy runs it, stdout shows nothing (130 s observed), and at the next stdin input its steps are
 printed again and its answer is folded into that turn's `result`.
 
@@ -128,7 +133,9 @@ end; anything else is the CLI's own work and becomes
 protocol level, so the reply is built from the turn's own streamed text — the parts
 already closed plus whatever the in-flight step streamed — and the frame's
 `response` only fills a gap. That is what keeps a foreign `result` from replacing
-the reply it interrupted.
+the reply it interrupted. A transport detached after the trajectory established a
+finished turn no longer owns the session, so its late frames and stream errors cannot
+complete or fail a ticket opened by the replacement process.
 
 A stream that ends names the turn it was serving when one was running
 (`TurnFaulted`) and the session when none was (`SessionFailed`).

@@ -147,6 +147,43 @@ async def test_an_input_that_finds_our_turn_just_finished_is_refused_not_sent_in
         await harness.stop()
 
 
+async def test_a_finished_turn_with_no_result_retires_before_the_rejected_input_is_retried(
+    tmp_path: Path,
+) -> None:
+    harness = await start(tmp_path, turns=[{**say("one"), "idle_before_result": 30}, say("two")])
+    try:
+        first = await send(harness, "one", key="first")
+        await harness.wait_until(lambda: harness.messages() == ["one"])
+        await asyncio.sleep(0.2)
+
+        generation = harness.session.generation
+        await harness.session.deliver([HarnessInput.of("late", "next input")])
+
+        [rejected] = await seen(harness, InputRejected)
+        assert rejected.key == "late"
+        finished = await first.outcome()
+        assert (finished.subtype, finished.is_error, finished.stop_reason) == (
+            "unknown",
+            False,
+            "trajectory idle before result",
+        )
+        assert finished.text == "one", "streamed output remains the completed turn's reply"
+        assert harness.session.active_turn_id is None
+
+        second = await send(harness, "next input", key="late")
+        outcome = await second.outcome()
+        assert outcome.text == "two"
+        assert harness.session.generation == generation + 1
+        assert harness.messages() == ["one", "next input"], "the retried input runs exactly once"
+        assert [event.key for event in harness.of(InputInContext)].count("late") == 1
+        completed = harness.of(TurnCompleted)
+        assert len(completed) == 2 and len({event.turn_id for event in completed}) == 2, (
+            "the detached process's late result cannot close either turn again"
+        )
+    finally:
+        await harness.stop()
+
+
 async def test_a_phantom_turn_is_observed_and_its_answer_does_not_leak_into_the_next_turn(
     tmp_path: Path,
 ) -> None:

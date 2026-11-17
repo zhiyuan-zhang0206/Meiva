@@ -137,4 +137,12 @@ async def _run_harness_turn(
     _apply_wake_polarity(state, projector, extra_updates)
     if run.interrupted:
         announce_interrupt(ctx, agent_id)
-    return Command[HarnessGoto](update={**extra_updates, "halted": True, **_CLEARED}, goto=CLAIM)
+    return Command[HarnessGoto](
+        update={
+            **extra_updates,
+            "halted": True,
+            "harness_inputs": run.pending_inputs(),
+            "harness_view": [],
+        },
+        goto=CLAIM,
+    )
