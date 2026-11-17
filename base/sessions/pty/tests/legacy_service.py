@@ -74,9 +74,10 @@ def legacy_service(error: str) -> Generator[list[str]]:
             path.unlink(missing_ok=True)
 
 
+# meiva:note
+# Forward to an unfenced daemon generation, refusing only the newer fence RPC.
 @contextmanager
 def legacy_fence_proxy(path: Path, upstream: Path) -> Generator[list[str]]:
-    """Forward to an unfenced daemon, refusing only the newer fence RPC."""
     calls: list[str] = []
     stop = threading.Event()
     with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as listener:
