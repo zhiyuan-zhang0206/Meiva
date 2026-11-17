@@ -61,9 +61,10 @@ def load_timings(record: Path, *, allow_growth: bool = False) -> TimingRecord | 
         return data
     except FileNotFoundError:
         return None
-    except (OSError, ValueError, ValidationError):
-        logger.opt(exception=True).warning(
-            "native timing sidecar is unreadable; record timing remains unknown",
+    except (OSError, ValueError, ValidationError) as exc:
+        logger.warning(
+            "native timing sidecar is unreadable; record timing remains unknown ({})",
+            type(exc).__name__,
             event="harness_timing_unreadable",
         )
         return None
@@ -79,9 +80,10 @@ def store_timings(record: Path, trajectory: Trajectory) -> None:
         with timing_path(record).with_suffix(".lock").open("a") as lock:
             fcntl.flock(lock, fcntl.LOCK_EX)
             _store(record, trajectory)
-    except (OSError, ValueError):
-        logger.opt(exception=True).warning(
-            "native timing could not be collected; provider execution is unchanged",
+    except (OSError, ValueError) as exc:
+        logger.warning(
+            "native timing could not be collected; provider execution is unchanged ({})",
+            type(exc).__name__,
             event="harness_timing_collection_failed",
         )
 
@@ -89,11 +91,17 @@ def store_timings(record: Path, trajectory: Trajectory) -> None:
 def _store(record: Path, trajectory: Trajectory) -> None:
     old = load_timings(record, allow_growth=True)
     native = _native_facts(trajectory)
-    native_hash = hashlib.sha256(json.dumps(native, sort_keys=True).encode()).hexdigest()
+    invalid = [step.index for step in trajectory.steps if step.invalid_thinking_duration]
+    native_hash = hashlib.sha256(json.dumps([native, invalid], sort_keys=True).encode()).hexdigest()
     stat = record.stat()
     stale = old is not None and trajectory.num_steps < old.total
     if _unchanged(old, stat, native_hash, trajectory.num_steps):
         return
+    if invalid and not stale:
+        logger.warning(
+            "native timing collection: invalid terminal thinkingDuration",
+            event="harness_timing_collection_failed",
+        )
     if stale and old is not None:
         native = {}
         native_hash = old.native_hash

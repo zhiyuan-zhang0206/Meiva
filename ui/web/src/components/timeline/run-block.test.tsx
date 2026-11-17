@@ -77,24 +77,24 @@ describe("TurnBlock expanded body", () => {
 });
 
 describe("TurnBlock missing timing", () => {
-  it.each([0, 100])("shows Worked and an accessible warning for missing timing with subtotal %i", (workedMs) => {
+  it.each([0, 100])("shows only Worked for missing timing with subtotal %i", (workedMs) => {
     render(<TurnBlock id="partial" memberIds={["1"]} expanded={false} onToggle={vi.fn()}
       summary={{ ...baseSummary, missingTiming: true, workedMs }} />);
     expect(screen.getByTestId("turn-toggle").textContent).toBe("Worked");
-    const warning = screen.getByRole("img", { name: /timing was not fully recorded/ });
-    expect(warning.getAttribute("title")).toContain("Total duration is unavailable");
+    expect(screen.queryByRole("img")).toBeNull();
+    expect(screen.getByTestId("turn-toggle").querySelector("[title], [aria-label]")).toBeNull();
   });
 
-  it("keeps a live partial block Working with a warning and no numeric total", () => {
+  it("keeps a live partial block Working and no numeric total", () => {
     render(<TurnBlock id="live" memberIds={["1"]} expanded={false} onToggle={vi.fn()}
       turnActive lastEventAt={1} summary={{ ...baseSummary, missingTiming: true }} />);
     expect(screen.getByTestId("turn-toggle").textContent).toBe("Working…");
-    expect(screen.getByRole("img", { name: /timing was not fully recorded/ })).toBeTruthy();
+    expect(screen.queryByRole("img")).toBeNull();
   });
 
-  it("retains the duration without warning when timing is complete", () => {
-    render(<TurnBlock id="complete" memberIds={["1"]} expanded={false} onToggle={vi.fn()} summary={baseSummary} />);
-    expect(screen.getByTestId("turn-toggle").textContent).toBe("Worked for 6s");
+  it.each([0, 6000])("retains the complete duration %i", (workedMs) => {
+    render(<TurnBlock id="complete" memberIds={["1"]} expanded={false} onToggle={vi.fn()} summary={{ ...baseSummary, workedMs }} />);
+    expect(screen.getByTestId("turn-toggle").textContent).toBe(`Worked for ${workedMs === 0 ? "0.1s" : "6s"}`);
     expect(screen.queryByRole("img")).toBeNull();
   });
 });

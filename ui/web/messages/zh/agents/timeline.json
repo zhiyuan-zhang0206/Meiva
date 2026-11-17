@@ -13,7 +13,6 @@
   "workingFor": "工作中 {duration}",
   "workActivity": "上下文",
   "worked": "已工作",
-  "timingIncompleteWarning": "耗时记录不全，无法显示完整耗时。",
   "workedFor": "工作了 {duration}",
   "ranFor": "运行了 {duration}",
   "compactSummaries": "{count} {unit}",

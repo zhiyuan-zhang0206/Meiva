@@ -229,5 +229,8 @@ Timing is provisional until a later existing snapshot observes the completed ste
 corrupt or stale sidecar leaves the original conversation readable and its timing unknown. Appended
 record bytes invalidate the sidecar for readers until the collector rechecks uniqueness. A source
 revision refresh publishes only reasoning items at their original IDs; it never replays replies,
-inputs, tool execution or delivery. The UI consequently retains its incomplete-timing warning while
-any work measurement is absent. This slice does not claim complete work duration collection.
+inputs, tool execution or delivery. The UI shows plain Worked while any work measurement is absent.
+Invalid present terminal durations and corrupt sidecars use existing cluster warning events.
+Invalid duration diagnostics follow the collector's existing native-facts and record watermark
+change gate; historical sidecar parse diagnostics retain their reader revision gate.
+Missing or null durations remain silent. This slice does not claim complete work duration collection.

@@ -115,7 +115,7 @@ describe("detail-block duration display", () => {
     fireEvent.click(header);
     expect(screen.getByText("1 system note")).toBeTruthy();
   });
-  it("completed work turn with missing duration shows Worked with a warning", () => {
+  it("completed work turn with missing duration shows plain Worked", () => {
     render(
       <TimelineView
         items={[
@@ -132,7 +132,7 @@ describe("detail-block duration display", () => {
     );
     const header = runToggle();
     expect(header.textContent).toBe("Worked");
-    expect(screen.getByRole("img", { name: /timing was not fully recorded/ })).toBeTruthy();
+    expect(screen.queryByRole("img")).toBeNull();
     fireEvent.click(header);
     expect(screen.getByTestId("card-toggle").textContent).toBe("Thinking");
     expect(screen.getByTestId("card-toggle").textContent).not.toContain("Thinking for");
