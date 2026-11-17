@@ -1,4 +1,4 @@
-import { useLayoutEffect, useRef, type ComponentProps } from "react";
+import { useLayoutEffect, useMemo, useRef, type ComponentProps } from "react";
 import { readScrollMemory, saveScrollMemory } from "@/lib/layout/scroll-memory";
 import { timelineGeometry } from "@/test-support/timeline-geometry";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
@@ -15,6 +15,7 @@ import { useTimeline } from "@/lib/timeline/use-timeline";
 import { useTimelineStore } from "@/lib/timeline/timeline-store";
 import { fakeStreamHub, TestStreamProvider } from "@/test-support/fake-stream";
 import { deferred } from "@/test-support/deferred";
+import { httpRig, noUpload, sequentialKeys } from "@/lib/transport/tests/api/api-provider";
 
 function composed(timeline: TimelineResponse): ConversationSnapshotResponse {
   return { timeline, pending: [], token_usage: { input_tokens: 0, output_tokens: 0,
@@ -525,6 +526,17 @@ function MeasuredTimeline(props: ComponentProps<typeof TimelineView>) {
   return <div ref={root}><TimelineView {...props} viewportObserverFactory={geometry.observer} /></div>;
 }
 
+function FreshMeasuredTimeline(props: ComponentProps<typeof TimelineView>) {
+  const root = useRef<HTMLDivElement>(null);
+  const ownTop = useRef(0);
+  const measured = useMemo(() => timelineGeometry({
+    top: () => ownTop.current, setTop: (value) => { ownTop.current = value; },
+    height: () => 5000, resizeCallbacks,
+  }), []);
+  useLayoutEffect(() => { if (root.current) measured.prepare(root.current); });
+  return <div ref={root}><TimelineView {...props} viewportObserverFactory={measured.observer} /></div>;
+}
+
   it.each(["cold", "retained"])("keeps the departed bookmark through %s source layouts", async (source) => {
     hooksState.activeId = 42;
     hooksState.agents = [makeAgent({ agent_id: 42 })];
@@ -628,6 +640,77 @@ function MeasuredTimeline(props: ComponentProps<typeof TimelineView>) {
     act(() => { void client.invalidateQueries({ queryKey: ["timeline", 42] }); });
     await waitFor(() => expect(current?.isFetching).toBe(true));
     expect(current?.isLoading).toBe(false);
+  });
+
+  it("finishes seen before the cached source, then restores bottom after the actual source applies", async () => {
+    const authority = deferred<ConversationSnapshotResponse>();
+    const empty: TimelineResponse = { items: [], msg_count: 0, has_more: false };
+    let holdAuthority = false;
+    let unread = false;
+    let seen = 0;
+    let current: ReturnType<typeof useTimeline> | undefined;
+    const trace: { event: string; sourceReady: boolean; atBottom: boolean }[] = [];
+    const json = (body: unknown) => new Response(JSON.stringify(body), { headers: { "content-type": "application/json" } });
+    const delivery = { id: 1, agent_id: 42, mode: "prefix", source_key: "harness:1.0", content: "Reply 1",
+      suggestions: [], created_at: "2026-11-10T00:00:00Z", seen: false };
+    const rig = httpRig({ base: "http://home-readiness.test", keys: sequentialKeys(), now: () => 0, openUpload: noUpload,
+      fetch: (input) => {
+        const url = new URL(typeof input === "string" ? input : "url" in input ? input.url : input.href);
+        const path = url.pathname;
+        if (path.endsWith("/conversation-snapshot")) {
+          if (path.includes("/42/") && holdAuthority) return authority.promise.then(json);
+          return Promise.resolve(json(composed(path.includes("/42/") ? response : empty)));
+        }
+        if (path.endsWith("/timeline")) return Promise.resolve(json(path.includes("/42/") ? response : empty));
+        if (path.endsWith("/user-messages/seen")) { seen = 1; return Promise.resolve(json({ seen_id: 1, advanced: true })); }
+        if (path.endsWith("/user-messages")) return Promise.resolve(json({ mode: "prefix", seen_id: seen, items: unread && path.includes("/42/") ? [delivery] : [] }));
+        if (path.endsWith("/to-user")) return Promise.resolve(json({ content: null, version: null, modified_at: null, legacy_html: false }));
+        if (path.endsWith("/pending") || path.endsWith("/questions/open")) return Promise.resolve(json([]));
+        throw new Error(`Unexpected Home readiness request: ${path}`);
+      },
+    });
+    const { hub } = fakeStreamHub();
+    const entry = "seen-before-authority";
+    function Reader({ id }: { id: number }) {
+      const timeline = useTimeline(id, () => undefined);
+      current = timeline;
+      const props = homePageProps();
+      const agent = makeAgent({ agent_id: id, status: "idling" });
+      return <HomePageView {...props} bfcacheId={entry}
+        settings={{ settings: { ...USER_SETTING_DEFAULTS, "behavior.replySuggestions": false }, isLoading: false }}
+        agents={{ ...props.agents, activeId: id, activeAgent: agent, agents: [agent] }}
+        timeline={timeline} TimelineView={FreshMeasuredTimeline} />;
+    }
+    const surface = (id: number) => <QueryClientProvider client={client}>
+      <WallClockProvider wallNow={wallNow}><ApiProvider api={rig.api}>
+        <StreamHubProvider hub={hub}><TestStreamProvider><Reader id={id} /></TestStreamProvider></StreamHubProvider>
+      </ApiProvider></WallClockProvider>
+    </QueryClientProvider>;
+    const atBottom = () => Math.abs(viewport().scrollHeight - viewport().clientHeight - viewport().scrollTop) <= 1;
+    const view = renderWithBrowser(surface(42));
+    await waitFor(() => expect(current?.sourceReady).toBe(true));
+    resize();
+    act(() => { viewport().scrollTop = 4400; fireEvent.scroll(viewport()); });
+    expect(atBottom()).toBe(true);
+    view.rerender(surface(43));
+    await waitFor(() => expect(current?.sourceReady).toBe(true));
+    const saved = readScrollMemory(`${entry}:agent:42`);
+    expect(saved?.scrollTop).toBe(4400);
+    unread = true; holdAuthority = true;
+    view.rerender(surface(42));
+    await waitFor(() => expect(client.getQueryData<{ seen_id: number }>(["user-messages", 42])?.seen_id).toBe(1));
+    trace.push({ event: "seen-applied", sourceReady: current?.sourceReady === true, atBottom: atBottom() });
+    expect(screen.getByTestId("cold-load-ring")).toBeTruthy();
+    expect(readScrollMemory(`${entry}:agent:42`)).toEqual(saved);
+    act(() => { authority.resolve(composed(response)); });
+    await waitFor(() => expect(current?.sourceReady).toBe(true));
+    await waitFor(() => expect(screen.queryByTestId("cold-load-ring")).toBeNull());
+    resize();
+    trace.push({ event: "source-applied", sourceReady: current?.sourceReady === true, atBottom: atBottom() });
+    expect(trace).toEqual([
+      { event: "seen-applied", sourceReady: false, atBottom: false },
+      { event: "source-applied", sourceReady: true, atBottom: true },
+    ]);
   });
 
 });
