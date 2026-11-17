@@ -15,6 +15,7 @@ import sys
 import tempfile
 import uuid
 from collections.abc import Generator
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, replace
 from datetime import UTC, datetime
 from pathlib import Path
@@ -643,3 +644,81 @@ def test_self_transfer_appointment_has_no_submission_wake(
     assert db_conn.execute(
         "SELECT machine,status FROM agents_meta WHERE id=%s", (agent_id,)
     ).fetchone() == ("runner-a", status)
+
+
+@pytest.mark.parametrize("status", ["idling", "terminated"])
+def test_scheduled_restart_fire_wakes_target_with_restart_note(
+    two_runners: TwoRunnerCluster,
+    db_conn: psycopg.Connection,
+    status: str,
+) -> None:
+    agent_id = _seed_native_agent(db_conn, machine="runner-a", status=status)
+    answer = two_runners.client.post(
+        f"/api/agents/{agent_id}/restart/scheduled-attempt",
+        json={
+            "source": f"agent:{agent_id}",
+            "message": "scheduled restart wake",
+            "config_overlay": {"llm_model": "deepseek-flash"},
+        },
+    )
+    assert answer.status_code == 200, answer.text
+    assert answer.json()["status"] == "enqueued"
+    db_conn.commit()
+    assert db_conn.execute(
+        "SELECT status FROM agents_meta WHERE id=%s", (agent_id,)
+    ).fetchone() == ("idling",)
+    assert db_conn.execute(
+        "SELECT content FROM inbound_messages WHERE agent_id=%s AND kind='system_note' AND payload->>'note_tag'='lifecycle_restart'",
+        (agent_id,),
+    ).fetchall() == [("scheduled restart wake",)]
+
+
+def test_scheduled_native_restart_claim_during_validation_notifies_both_actors(
+    two_runners: TwoRunnerCluster,
+    db_conn: psycopg.Connection,
+) -> None:
+    target = _seed_native_agent(db_conn, machine="runner-a", status="idling")
+    caller = _seed_native_agent(db_conn, machine="runner-a", status="idling")
+    db_conn.execute("UPDATE agents_meta SET status='running' WHERE id=%s", (target,))
+
+    def blocked_validation() -> bool:
+        db_conn.execute("SELECT pg_stat_clear_snapshot()")
+        row = db_conn.execute(
+            "SELECT EXISTS (SELECT 1 FROM pg_stat_activity WHERE datname=current_database() "
+            "AND wait_event_type='Lock' AND query LIKE 'SELECT config_overlay,birth_config,harness%FOR UPDATE%')"
+        ).fetchone()
+        assert row is not None
+        return bool(row[0])
+
+    with ThreadPoolExecutor(max_workers=1) as executor:
+        future = executor.submit(
+            two_runners.client.post,
+            f"/api/agents/{target}/restart/scheduled-attempt",
+            json={
+                "source": f"agent:{caller}",
+                "message": "race attempt",
+                "config_overlay": {"llm_model": "deepseek-flash"},
+            },
+        )
+        try:
+            poll_until(blocked_validation, timeout=5, what="gateway model validation row lock")
+        finally:
+            db_conn.commit()
+        answer = future.result(timeout=15)
+    assert answer.status_code >= 400, answer.text
+    assert "running" in answer.text
+    db_conn.commit()
+    assert db_conn.execute("SELECT status FROM agents_meta WHERE id=%s", (target,)).fetchone() == (
+        "running",
+    )
+    assert (
+        db_conn.execute(
+            "SELECT kind FROM inbound_messages WHERE agent_id=%s AND kind IN ('restart','terminate')",
+            (target,),
+        ).fetchall()
+        == []
+    )
+    assert db_conn.execute(
+        "SELECT agent_id FROM inbound_messages WHERE agent_id=ANY(%s) AND kind='chat' AND content LIKE 'Scheduled restart%%failed:%%' ORDER BY agent_id",
+        ([target, caller],),
+    ).fetchall() == [(target,), (caller,)]

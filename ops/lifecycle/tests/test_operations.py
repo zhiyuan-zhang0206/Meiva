@@ -531,3 +531,63 @@ async def test_a_force_terminate_releases_the_pages_of_the_home_it_was_given(
         await server.wait_closed()
 
     assert received == [{"id": 1, "method": "release_agent_page", "agent_id": lifecycle_agent_id}]
+
+
+@pytest.mark.asyncio
+async def test_scheduled_native_restart_losing_claim_race_preserves_running_turn(
+    lifecycle_agent_id: int,
+    database: Database,
+    event_bus: EventBus,
+    db_conn: psycopg.Connection,
+    db_pool: ConnectionPool,
+    model_catalog: ModelCatalog,
+    agent_host: ServedAgentHost,
+) -> None:
+    from base.sessions.tests.poll_until import poll_until_async
+
+    db_conn.execute("UPDATE agents_meta SET status='idling' WHERE id=%s", (lifecycle_agent_id,))
+    db_conn.commit()
+    # meiva:note
+    # The uncommitted claim wins the lock while the restart reads its old idling snapshot.
+    db_conn.execute("UPDATE agents_meta SET status='running' WHERE id=%s", (lifecycle_agent_id,))
+    attempt = asyncio.create_task(
+        lifecycle.restart_agent_op(
+            database,
+            event_bus,
+            lifecycle_agent_id,
+            RestartAgentRequest(source="user", message="scheduled race"),
+            db_pool,
+            host=agent_host.host,
+            catalog=model_catalog,
+            default_model="deepseek-flash",
+            home=agent_host.host.home,
+            require_quiescent=True,
+        )
+    )
+
+    def waiting_for_claim_lock() -> bool:
+        db_conn.execute("SELECT pg_stat_clear_snapshot()")
+        row = db_conn.execute(
+            "SELECT EXISTS (SELECT 1 FROM pg_stat_activity WHERE datname=current_database() "
+            "AND wait_event_type='Lock' AND query LIKE 'SELECT status, session_index%FOR UPDATE%')"
+        ).fetchone()
+        assert row is not None
+        return bool(row[0])
+
+    try:
+        await poll_until_async(waiting_for_claim_lock, timeout=5, what="scheduled restart row lock")
+    finally:
+        db_conn.commit()
+    with pytest.raises(ValueError, match=r"Scheduled restart refused.*running"):
+        await attempt
+    assert agent_host.served.posted == []
+    assert db_conn.execute(
+        "SELECT status FROM agents_meta WHERE id=%s", (lifecycle_agent_id,)
+    ).fetchone() == ("running",)
+    assert (
+        db_conn.execute(
+            "SELECT kind FROM inbound_messages WHERE agent_id=%s AND kind IN ('restart','terminate')",
+            (lifecycle_agent_id,),
+        ).fetchall()
+        == []
+    )

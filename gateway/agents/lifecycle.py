@@ -399,6 +399,19 @@ async def post_agent_restart(
     body: RestartAgentRequest,
     at: str | None = Query(default=None, include_in_schema=False),
 ) -> RestartAgentResponse | JSONResponse:
+    return await _restart_request(agent_id, request, body, at=at, scheduled=False)
+
+
+async def _restart_request(
+    agent_id: int,
+    request: Request,
+    body: RestartAgentRequest,
+    *,
+    at: str | None,
+    scheduled: bool,
+) -> RestartAgentResponse | JSONResponse:
+    if scheduled and body.at_turn_end:
+        raise HTTPException(422, "scheduled attempts cannot use at_turn_end")
     if not body.message or not body.message.strip():
         raise HTTPException(status_code=422, detail="Restart requires a non-empty message")
     if body.at_turn_end and body.source != f"agent:{agent_id}":
@@ -474,7 +487,7 @@ async def post_agent_restart(
 
     forwarded = await forward_to_home_machine(
         agent_id,
-        f"/api/agents/{agent_id}/restart",
+        f"/api/agents/{agent_id}/" + ("restart-scheduled" if scheduled else "restart"),
         forwarded_payload,
         db=gateway_state(request).db,
         pool=gateway_state(request).db_pool,
@@ -569,7 +582,7 @@ async def scheduled_restart_attempt(
     from gateway.agents.launch.scheduled_lifecycle import single_attempt
 
     async def execute() -> object:
-        return await post_agent_restart(agent_id, request, body, at=None)
+        return await _restart_request(agent_id, request, body, at=None, scheduled=True)
 
     return await single_attempt(
         request, agent_id, action="restart", source=body.source, execute=execute

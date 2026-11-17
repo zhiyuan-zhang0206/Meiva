@@ -58,3 +58,13 @@ its effective birth/overlay model and reasoning effort before stopping the
 source. External restarts probe launchability even without a model or harness
 overlay edit. Workspace export still enforces transfer byte and file ceilings
 before packing; its runtime refusal follows the same outcome routing.
+
+
+Scheduled restart uses a dedicated internal runner action. Its row-locked
+quiescence guard runs before host settlement; a claim that wins during gateway
+validation therefore rejects the attempt without stopping that running turn.
+An accepted scheduled restart follows the existing transition/resurrection path
+for both idling and terminated agents, including a same-harness restart, and
+queues the restart note with the wake. Ordinary synchronous restart retains its
+already-terminated response. Failure routing re-reads status so a claim-race
+refusal reaches the now-running target as well as an agent caller.

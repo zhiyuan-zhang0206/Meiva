@@ -139,6 +139,7 @@ async def single_attempt(
         result = await execute()
     except Exception as exc:
         detail = exc.detail if isinstance(exc, HTTPException) else str(exc)
+        status = await asyncio.to_thread(target_status_blocking, request, agent_id)
         for recipient in outcome_recipients(
             agent_id, source, failed=True, running=status == "running"
         ):
