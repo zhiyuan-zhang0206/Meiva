@@ -1,7 +1,7 @@
 # meiva:note
 # Declarative schedule management through the real gateway and installed CLI. The e2e stack has
-# no schedule-manager: declarative control changes are stored directly and never queue legacy
-# daemon PTY convergence; execution belongs to SC2/SC3.
+# no schedule-manager: declarative control changes are stored directly; execution belongs
+# to SC2/SC3.
 
 from __future__ import annotations
 

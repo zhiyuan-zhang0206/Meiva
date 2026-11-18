@@ -302,9 +302,9 @@ def add_schedules_parser(sub: argparse._SubParsersAction[argparse.ArgumentParser
     schedules_delete_p.set_defaults(func=_h_schedules_delete)
 
     for verb, helptext in (
-        ("start", "enable the next fire or daemon session"),
-        ("stop", "disable future fires or the daemon session"),
-        ("restart", "run now or relaunch the daemon session"),
+        ("start", "enable the next fire"),
+        ("stop", "disable future fires"),
+        ("restart", "run now"),
         ("enable", "enable and calculate the next fire"),
         ("disable", "disable future fires"),
         ("cancel", "cancel unfinished work"),
@@ -314,9 +314,7 @@ def add_schedules_parser(sub: argparse._SubParsersAction[argparse.ArgumentParser
         control_p.add_argument("identifier", help="schedule name or numeric id")
         control_p.set_defaults(func=_h_schedules_control, control_verb=verb)
 
-    schedules_logs_p = schedules_sub.add_parser(
-        "logs", help="recent latest.log, daemon output, or last error"
-    )
+    schedules_logs_p = schedules_sub.add_parser("logs", help="recent latest.log or last error")
     schedules_logs_p.add_argument("identifier", help="schedule name or numeric id")
     # task #4092 cli-default inventory: presentation bound — the capture window
     # for a human reader; larger values only widen the output.

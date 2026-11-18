@@ -1,14 +1,9 @@
-"""Watcher shared helpers — cron validation / next-fire, `when` normalization,
-and watcher-script generation.
-
-Used by the `meiva.watcher` SDK. A time watcher is just a normal session running a
-generated Python script that sleeps until its target time(s) and delivers its
-message back to the launching agent (a `watcher:N`-tagged chat inbound via the
-gateway client); the builders here produce those scripts. The cron math
-(`validate_cron` / `next_fire`) and the `when` normalization were previously in
-`base/schedule.py` / `meiva/schedule.py`, relocated here when the central
-scheduler was removed.
-"""
+# meiva:note
+# Cron timing and retained script-building helpers.
+#
+# Declarative schedules consume the cron validation and next-fire functions.
+# Script builders remain available to existing internal consumers while resident
+# watcher sessions are retired.
 
 from __future__ import annotations
 
@@ -40,12 +35,11 @@ __all__ = [
 ]
 
 
+# meiva:note
 # Standing cron cap (user ruling 2026-09-09, task #2617): a cron registered
 # without an explicit end_time lives at most this long, counted from
-# registration — `meiva.watcher.cron` defaults `end_time` to now + this. A longer
-# schedule must pass an explicit end_time. Calling `cron()` again with the same
-# expression starts another, independent session (see meiva/watcher/__init__.py::cron) —
-# it does not renew or replace the earlier one.
+# registration. Retained script consumers can use this cap when assigning
+# an explicit end time.
 DEFAULT_STANDING_CRON_MAX_SECONDS = 7 * 24 * 3600
 
 # The one-shot (`at`) session's hard-deadline grace (user ruling 2026-09-14,

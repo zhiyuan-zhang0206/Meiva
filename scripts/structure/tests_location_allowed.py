@@ -48,7 +48,6 @@ BY_DESIGN: dict[str, str] = {
     "tests/factories/": "shared test-data factories",
     "tests/fixtures/": "shared fixture plugins loaded by the root conftest.py",
     "tests/integration/test_grafana_native_runtime.py": "real-process proof with its own CI wiring",
-    "tests/integration/test_schedule_runner_cleanup.py": "real-process proof with its own CI wiring",
     "tests/ui/": "tests of ui artifacts (Android overlay and update check, app CI and release workflows); ui/ is not a Python package",
 }
 

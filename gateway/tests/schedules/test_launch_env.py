@@ -8,8 +8,9 @@ from gateway.tests.schedules.api_support import schedule_client
 def test_launch_env_requires_cluster_credential(db_conn: psycopg.Connection) -> None:
     with db_conn.cursor() as cur:
         cur.execute(
-            "INSERT INTO schedules (name, script, command, enabled, machine, secret_env_vars) "
-            "VALUES ('sec-test-1', 'print(1)\\n', 'python script.py', true, 'gateway', ARRAY['SECRET_A']) "
+            "INSERT INTO schedules "
+            "(name, script, command, enabled, machine, trigger_kind, interval_seconds, secret_env_vars) "
+            "VALUES ('sec-test-1', 'print(1)\\n', 'python script.py', true, 'gateway', 'every', 60, ARRAY['SECRET_A']) "
             "RETURNING id"
         )
         row = cur.fetchone()
@@ -33,8 +34,9 @@ def test_launch_env_requires_cluster_credential(db_conn: psycopg.Connection) -> 
 def test_launch_env_serves_declared_secrets(db_conn: psycopg.Connection) -> None:
     with db_conn.cursor() as cur:
         cur.execute(
-            "INSERT INTO schedules (name, script, command, enabled, machine, secret_env_vars) "
-            "VALUES ('sec-test-2', 'print(1)\\n', 'python script.py', true, 'gateway', ARRAY['API_TOKEN', 'MEIVA_CLUSTER_SECRET', 'EMPTY_VAR']) "
+            "INSERT INTO schedules "
+            "(name, script, command, enabled, machine, trigger_kind, interval_seconds, secret_env_vars) "
+            "VALUES ('sec-test-2', 'print(1)\\n', 'python script.py', true, 'gateway', 'every', 60, ARRAY['API_TOKEN', 'MEIVA_CLUSTER_SECRET', 'EMPTY_VAR']) "
             "RETURNING id"
         )
         row = cur.fetchone()
@@ -67,8 +69,9 @@ def test_launch_env_serves_declared_secrets(db_conn: psycopg.Connection) -> None
 def test_launch_env_disabled_schedule_returns_empty(db_conn: psycopg.Connection) -> None:
     with db_conn.cursor() as cur:
         cur.execute(
-            "INSERT INTO schedules (name, script, command, enabled, machine, secret_env_vars) "
-            "VALUES ('sec-test-3', 'print(1)\\n', 'python script.py', false, 'gateway', ARRAY['API_TOKEN']) "
+            "INSERT INTO schedules "
+            "(name, script, command, enabled, machine, trigger_kind, interval_seconds, secret_env_vars) "
+            "VALUES ('sec-test-3', 'print(1)\\n', 'python script.py', false, 'gateway', 'every', 60, ARRAY['API_TOKEN']) "
             "RETURNING id"
         )
         row = cur.fetchone()

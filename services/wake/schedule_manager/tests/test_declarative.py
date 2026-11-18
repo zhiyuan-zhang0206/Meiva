@@ -238,7 +238,7 @@ def test_at_runs_once_in_owner_workspace_and_completes(
     assert (work_dir / "scheduled.txt").read_text() == runs[0][2].isoformat()
 
 
-def test_pending_legacy_sync_blocks_declarative_launch(
+def test_pending_legacy_sync_does_not_block_declarative_launch(
     db_conn: psycopg.Connection,
     pool: ConnectionPool[psycopg.Connection],
     unit_home: Path,
@@ -261,15 +261,10 @@ def test_pending_legacy_sync_blocks_declarative_launch(
 
     engine.reconcile()
 
-    assert not (work_dir / "fired").exists()
+    _wait_for_file(work_dir / "fired")
     assert db_conn.execute(
         "SELECT count(*) FROM schedule_runs WHERE schedule_id = %s", (sid,)
-    ).fetchone() == (0,)
-
-    db_conn.execute("DELETE FROM schedule_sync_requests WHERE schedule_id = %s", (sid,))
-    db_conn.commit()
-    engine.reconcile()
-    _wait_for_file(work_dir / "fired")
+    ).fetchone() == (1,)
 
 
 def test_at_failure_is_terminal_without_retry(
@@ -567,3 +562,28 @@ def test_owner_termination_stops_an_active_declarative_fire(
         "SELECT enabled, status, next_launch_at FROM schedules WHERE id = %s", (sid,)
     ).fetchone() == (False, "cancelled", None)
     assert run == (False, "cancelled")
+
+
+def test_argparse_payload_succeeds_without_runner_arguments(
+    db_conn: psycopg.Connection,
+    pool: ConnectionPool[psycopg.Connection],
+    unit_home: Path,
+) -> None:
+    now = datetime.now(UTC)
+    sid = _schedule(
+        db_conn,
+        name="argparse-at",
+        now=now,
+        script=(
+            "import argparse\n"
+            "from pathlib import Path\n"
+            "argparse.ArgumentParser().parse_args()\n"
+            "Path('parsed.txt').write_text('ok')\n"
+        ),
+    )
+    engine = _engine(pool, unit_home, now)
+    _wait_for_status(engine, db_conn, sid, "completed")
+    assert db_conn.execute(
+        "SELECT ok FROM schedule_runs WHERE schedule_id = %s", (sid,)
+    ).fetchall() == [(True,)]
+    assert (schedule_directory(unit_home, None, sid) / "parsed.txt").read_text() == "ok"

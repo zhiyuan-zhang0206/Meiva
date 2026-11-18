@@ -204,7 +204,6 @@ def _agent_arm(
                 scp.lines,
                 home=home,
                 owner_agent_id=scp.owner_agent_id,
-                trigger_kind=scp.trigger_kind,
             ).model_dump(mode="json")
         case _:
             raise ValueError(f"not an agent arm: {kind!r}")

@@ -64,6 +64,7 @@ def test_reconcile_creates_plugin_schedules(db_conn: psycopg.Connection, unit_ho
         "def contribute(config):\n"
         "    return (\n"
         "        ScheduleSpec(\n"
+        "            trigger_kind='every', interval_seconds=60,\n"
         "            name='my_plug:task1',\n"
         "            machine='gateway',\n"
         "            description='Task 1 V1',\n"
@@ -108,6 +109,7 @@ def test_reconcile_updates_and_moves_machine(db_conn: psycopg.Connection, unit_h
         "def contribute(config):\n"
         "    return (\n"
         "        ScheduleSpec(\n"
+        "            trigger_kind='every', interval_seconds=60,\n"
         "            name='my_plug:task1',\n"
         "            machine='gateway',\n"
         "            description='Task 1 V1',\n"
@@ -132,6 +134,7 @@ def test_reconcile_updates_and_moves_machine(db_conn: psycopg.Connection, unit_h
         "def contribute(config):\n"
         "    return (\n"
         "        ScheduleSpec(\n"
+        "            trigger_kind='every', interval_seconds=60,\n"
         "            name='my_plug:task1',\n"
         "            machine='worker-box',\n"
         "            description='Task 1 V2',\n"
@@ -177,6 +180,7 @@ def test_reconcile_preserves_operator_enabled_state(
         "def contribute(config):\n"
         "    return (\n"
         "        ScheduleSpec(\n"
+        "            trigger_kind='every', interval_seconds=60,\n"
         "            name='my_plug:task',\n"
         "            machine='gateway',\n"
         "            description='Task',\n"
@@ -205,16 +209,14 @@ def test_reconcile_preserves_operator_enabled_state(
         assert row[0] is False
 
 
-def test_reconcile_upgrades_daemon_to_declarative_in_place(
-    db_conn: psycopg.Connection, unit_home: Path
-) -> None:
-    daemon_code = (
+def test_reconcile_updates_trigger_in_place(db_conn: psycopg.Connection, unit_home: Path) -> None:
+    initial_code = (
         "from base.packages.plugins.surface.schedules import ScheduleSpec\n\n"
         "def contribute(config):\n"
         "    return (ScheduleSpec(name='my_plug:task', machine='gateway', "
-        "description='Task', script='print(1)\\n'),)\n"
+        "description='Task', script='print(1)\\n', trigger_kind='every', interval_seconds=60),)\n"
     )
-    pdir = _make_plugin(unit_home, "my_plug", schedules_code=daemon_code)
+    pdir = _make_plugin(unit_home, "my_plug", schedules_code=initial_code)
     reconcile_plugin_schedules(db_conn, home=unit_home)
     db_conn.commit()
     old = db_conn.execute(
@@ -266,6 +268,7 @@ def test_reconcile_removes_orphans_on_disable(db_conn: psycopg.Connection, unit_
         "def contribute(config):\n"
         "    return (\n"
         "        ScheduleSpec(\n"
+        "            trigger_kind='every', interval_seconds=60,\n"
         "            name='my_plug:temp',\n"
         "            machine='gateway',\n"
         "            description='Temp',\n"
@@ -297,6 +300,7 @@ def test_reconcile_failed_plugin_preserves_rows(
         "def contribute(config):\n"
         "    return (\n"
         "        ScheduleSpec(\n"
+        "            trigger_kind='every', interval_seconds=60,\n"
         "            name='my_plug:safe',\n"
         "            machine='gateway',\n"
         "            description='Safe',\n"
@@ -328,6 +332,7 @@ def test_api_guards_prevent_manual_delete_and_code_update(
         "def contribute(config):\n"
         "    return (\n"
         "        ScheduleSpec(\n"
+        "            trigger_kind='every', interval_seconds=60,\n"
         "            name='guard_plug:task',\n"
         "            machine='gateway',\n"
         "            description='Guarded Task',\n"

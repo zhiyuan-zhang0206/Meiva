@@ -2,7 +2,7 @@
 # What the schedule API decides from a row and a request: values in, decisions out.
 #
 # The router reads the row and performs the write; whether an edit changed anything, whether a
-# control action needs the manager to converge now, and which source answers a logs request are
+# control action changes durable execution intent, and which source answers a logs request are
 # decided here.
 
 from __future__ import annotations
@@ -21,7 +21,6 @@ __all__ = [
     "capture_window",
     "changed_fields",
     "control_plan",
-    "edit_needs_sync",
     "logs_view",
     "select_declared_secrets",
 ]
@@ -60,7 +59,7 @@ ControlAction = Literal[
 #
 # ``refusal`` is the reason it is refused (the request is a conflict); otherwise ``enabled``
 # is the value the row takes and ``needs_sync`` says whether the manager must converge the
-# session now.
+# durable schedule state changes.
 @dataclass(frozen=True)
 class ControlPlan:
     refusal: str | None
@@ -87,29 +86,9 @@ def changed_fields(previous: ScheduleStoreRow, fields: Mapping[str, object]) -> 
 
 
 # meiva:note
-# Whether an edit must converge the session now: new code on an enabled schedule, a
-# flipped enabled flag, or a reassigned machine.
-def edit_needs_sync(changed: Mapping[str, object], *, enabled: bool) -> bool:
-    code_changed = "script" in changed or "command" in changed
-    return (code_changed and enabled) or "enabled" in changed or "machine" in changed
-
-
-# meiva:note
 # What `action` does to a schedule in its current state. The three actions are the whole type: a
 # value outside them fails at once instead of being read as a start.
-def control_plan(
-    action: ControlAction, *, enabled: bool, status: str, daemon: bool = False
-) -> ControlPlan:
-    if daemon:
-        match action:
-            case "enable":
-                action = "start"
-            case "disable" | "cancel":
-                action = "stop"
-            case "run_now":
-                action = "restart"
-            case _:
-                pass
+def control_plan(action: ControlAction, *, enabled: bool, status: str) -> ControlPlan:
     match action:
         case "start" | "enable" | "run_now":
             wanted = True

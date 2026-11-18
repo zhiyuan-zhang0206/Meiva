@@ -1,6 +1,1 @@
-exports = ["db_faults.py", "runner_inputs.py"]
-
-[uses]
-"schedule_manager" = ["db_faults.py"]
-"test_runner_admission.py" = ["runner_inputs.py"]
-"test_runner_lifecycle.py" = ["runner_inputs.py"]
+exports = ["db_faults.py"]

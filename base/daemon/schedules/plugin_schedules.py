@@ -49,7 +49,7 @@ class _ScheduleRow:
 
 @dataclass(frozen=True)
 class _ScheduleUpdate:
-    trigger: RecurringTrigger | None
+    trigger: RecurringTrigger
     timezone: str
     machine_changed: bool
     code_changed: bool
@@ -57,9 +57,7 @@ class _ScheduleUpdate:
     changed: bool
 
 
-def _resolved_trigger(spec: ScheduleSpec, cluster_timezone: str) -> RecurringTrigger | None:
-    if spec.trigger_kind == "daemon":
-        return None
+def _resolved_trigger(spec: ScheduleSpec, cluster_timezone: str) -> RecurringTrigger:
     trigger = RecurringTrigger(
         kind=spec.trigger_kind,
         cron_expr=spec.cron_expr,
@@ -82,10 +80,10 @@ def _create_plugin_schedule(
     trigger = _resolved_trigger(spec, cluster_timezone)
     next_launch = (
         trigger.next_launch(now=now, cluster_timezone=cluster_timezone)
-        if trigger is not None and spec.default_enabled
+        if spec.default_enabled
         else None
     )
-    timezone = cluster_timezone if trigger is None else trigger.timezone
+    timezone = trigger.timezone
     inserted = query_one(
         conn,
         IdRow,
@@ -101,7 +99,7 @@ def _create_plugin_schedule(
             spec.script,
             spec.command,
             spec.default_enabled,
-            "scheduled" if trigger is not None and spec.default_enabled else "stopped",
+            "scheduled" if spec.default_enabled else "stopped",
             spec.machine,
             plugin,
             list(spec.secret_env_vars),
@@ -121,19 +119,13 @@ def _create_plugin_schedule(
         "VALUES (%s, %s, %s, 'plugin-initial')",
         (row_id, spec.script, spec.command),
     )
-    if spec.default_enabled and spec.trigger_kind == "daemon":
-        conn.execute(
-            "INSERT INTO schedule_sync_requests (schedule_id, machine) VALUES (%s, %s) "
-            "ON CONFLICT (schedule_id, machine) DO UPDATE SET requested_at = now()",
-            (row_id, spec.machine),
-        )
 
 
 def _schedule_update(
     row: _ScheduleRow, spec: ScheduleSpec, *, cluster_timezone: str
 ) -> _ScheduleUpdate:
     trigger = _resolved_trigger(spec, cluster_timezone)
-    timezone = cluster_timezone if trigger is None else (trigger.timezone or cluster_timezone)
+    timezone = trigger.timezone or cluster_timezone
     machine_changed = row.machine != spec.machine
     code_changed = any((row.script != spec.script, row.command != spec.command))
     trigger_changed = any(
@@ -173,7 +165,7 @@ def _runtime_after_update(
 ) -> tuple[datetime | None, str]:
     if not update.trigger_changed:
         return row.next_launch_at, row.status
-    if update.trigger is not None and row.enabled:
+    if row.enabled:
         return (
             update.trigger.next_launch(now=now, cluster_timezone=cluster_timezone),
             "scheduled",

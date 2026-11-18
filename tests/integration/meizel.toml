@@ -1,2 +1,1 @@
 [uses]
-"test_schedule_runner_cleanup.py" = ["child_schedule_runner.py"]

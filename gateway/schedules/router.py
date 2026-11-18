@@ -11,20 +11,17 @@ from psycopg import sql
 from psycopg.rows import class_row
 from psycopg_pool import ConnectionPool
 
-from base.cluster import session_name
 from base.db.rows import query_all, query_one
 from base.db.transaction import write_transaction
-from base.sessions.protocol import SessionBackend
 from base.telemetry.alerts import resolve_schedule_alerts
 from gateway.http.config import (
-    GatewayConfig,
     gateway_clock,
     gateway_config,
     gateway_rpc,
     gateway_state,
 )
 from gateway.routers.receipts import creation as creation_receipts
-from gateway.schedules import plans, receipts, session_control, triggers
+from gateway.schedules import plans, receipts, triggers
 from gateway.schedules.auxiliary_routes import router as auxiliary_router
 from gateway.schedules.contracts import (
     DEFAULT_COMMAND,
@@ -84,23 +81,11 @@ def _validate_script(script: str) -> None:
         ) from exc
 
 
-def _edit_assignments(
-    changed: dict[str, object], *, code_changed: bool, trigger_kind: str
-) -> list[sql.Composable]:
+def _edit_assignments(changed: dict[str, object]) -> list[sql.Composable]:
     assignments: list[sql.Composable] = [
         sql.SQL("{} = %s").format(sql.Identifier(col)) for col in changed
     ]
     assignments.append(sql.SQL("updated_at = now()"))
-    if trigger_kind == "daemon" and (code_changed or "enabled" in changed or "machine" in changed):
-        assignments.extend(
-            [
-                sql.SQL("desired_revision = desired_revision + 1"),
-                sql.SQL("launch_count = 0"),
-                sql.SQL("next_launch_at = NULL"),
-            ]
-        )
-    if "machine" in changed:
-        assignments.append(sql.SQL("launch_generation = NULL"))
     return assignments
 
 
@@ -124,7 +109,7 @@ def _apply_schedule_update(
     now: datetime,
 ) -> None:
     code_changed = "script" in changed or "command" in changed
-    if previous.trigger_kind != "daemon" and "enabled" in changed:
+    if "enabled" in changed:
         enabled = bool(changed["enabled"])
         changed["status"] = "scheduled" if enabled else "stopped"
         changed["next_launch_at"] = (
@@ -144,9 +129,7 @@ def _apply_schedule_update(
             if enabled
             else None
         )
-    assignments = _edit_assignments(
-        changed, code_changed=code_changed, trigger_kind=previous.trigger_kind
-    )
+    assignments = _edit_assignments(changed)
     cur.execute(
         sql.SQL("UPDATE schedules SET {} WHERE id = %s").format(sql.SQL(", ").join(assignments)),
         (*changed.values(), schedule_id),
@@ -166,29 +149,6 @@ def _apply_schedule_update(
                 "edit",
             ),
         )
-
-
-def _sync_schedule_mutation(
-    conn: psycopg.Connection,
-    schedule_id: int,
-    previous: ScheduleStoreRow,
-    changed: dict[str, object],
-) -> bool:
-    if previous.trigger_kind != "daemon":
-        return False
-    old_machine: str = previous.machine if previous.machine else "gateway"
-    new_val = changed.get("machine")
-    new_machine: str = str(new_val) if new_val else old_machine
-    machine_moved = "machine" in changed and changed["machine"] != previous.machine
-    effective_enabled = changed.get("enabled", previous.enabled)
-    needs_sync = plans.edit_needs_sync(changed, enabled=bool(effective_enabled))
-    if needs_sync:
-        if machine_moved:
-            session_control.enqueue_in_transaction(conn, schedule_id, old_machine)
-            session_control.enqueue_in_transaction(conn, schedule_id, new_machine)
-        else:
-            session_control.enqueue_in_transaction(conn, schedule_id, new_machine)
-    return needs_sync
 
 
 # meiva:link gateway/schedules/docs/router-contracts.md
@@ -223,7 +183,7 @@ def update_blocking(
                 raise HTTPException(status_code=404, detail=f"schedule {schedule_id} not found")
             changed = plans.changed_fields(previous, fields)
             _refuse_plugin_mutation(previous.owner_plugin, changed)
-            if previous.trigger_kind != "daemon" and "machine" in changed:
+            if "machine" in changed:
                 refuse_active_relocation(conn, schedule_id)
             if not changed:
                 full_row = query_one(conn, ScheduleFullRow, _FULL_QUERY, (schedule_id,))
@@ -232,7 +192,7 @@ def update_blocking(
                 receipts.finish(conn, key, full_row)
                 return full_row, False
             _apply_schedule_update(cur, schedule_id, previous, changed, fields, now)
-            needs_sync = _sync_schedule_mutation(conn, schedule_id, previous, changed)
+            needs_sync = False
             row = query_one(conn, ScheduleFullRow, _FULL_QUERY, (schedule_id,))
             if row is None:
                 raise HTTPException(status_code=404, detail=f"schedule {schedule_id} not found")
@@ -430,7 +390,7 @@ async def get_schedule(request: Request, schedule_id: int) -> ScheduleView:
 @router.put(
     "/api/schedules/{schedule_id}",
     description="Partial-update a schedule. Script/command changes are versioned. Declarative "
-    "schedules apply changes on their next fire; daemon schedules converge their PTY session. "
+    "schedules apply changes on their next fire. "
     "400 on invalid input, 404 if missing, 409 on a name clash.",
 )
 async def update_schedule(request: Request, schedule_id: int, body: ScheduleUpdate) -> ScheduleView:
@@ -451,7 +411,7 @@ async def update_schedule(request: Request, schedule_id: int, body: ScheduleUpda
         )
     if isinstance(owner_agent_id, int) and "on_owner_terminate" not in fields:
         fields["on_owner_terminate"] = "cancel"
-    row, needs_sync = await asyncio.to_thread(
+    row, _changed = await asyncio.to_thread(
         update_blocking,
         gateway_state(request).db_pool,
         schedule_id,
@@ -459,8 +419,6 @@ async def update_schedule(request: Request, schedule_id: int, body: ScheduleUpda
         receipts.operation_key(request),
         gateway_clock(request).now(),
     )
-    if needs_sync:
-        await _wait_consumed(request, schedule_id)
     return _view(row)
 
 
@@ -479,8 +437,7 @@ def delete_blocking(pool: ConnectionPool, schedule_id: int) -> DeletedRow:
                 status_code=409,
                 detail=f"cannot delete schedule: owned by plugin '{row.owner_plugin}'",
             )
-        if row.trigger_kind != "daemon":
-            refuse_active_relocation(conn, schedule_id)
+        refuse_active_relocation(conn, schedule_id)
         deleted = query_one(
             conn,
             DeletedRow,
@@ -490,21 +447,7 @@ def delete_blocking(pool: ConnectionPool, schedule_id: int) -> DeletedRow:
         if deleted is None:
             raise HTTPException(status_code=404, detail=f"schedule {schedule_id} not found")
         resolve_schedule_alerts(conn, schedule_id)
-        if deleted.trigger_kind == "daemon":
-            session_control.enqueue_in_transaction(conn, schedule_id, deleted.machine)
         return deleted
-
-
-async def _wait_consumed(request: Request, schedule_id: int, machine: str | None = None) -> None:
-    config: GatewayConfig = gateway_state(request).gateway_config
-    await session_control.wait_consumed(
-        gateway_state(request).db_pool,
-        schedule_id,
-        machine=machine,
-        wait_s=config.schedule_consume_wait_seconds,
-        poll_s=config.schedule_consume_poll_seconds,
-        timers=gateway_clock(request),
-    )
 
 
 def _remove_schedule_dir(home: Path, owner_agent_id: int | None, schedule_id: int) -> None:
@@ -517,14 +460,11 @@ def _remove_schedule_dir(home: Path, owner_agent_id: int | None, schedule_id: in
 
 @router.delete(
     "/api/schedules/{schedule_id}",
-    description="Delete a schedule and remove its local work directory. 404 if missing. "
-    "A legacy daemon session is reaped by reconciliation.",
+    description="Delete a schedule and remove its local work directory. 404 if missing.",
 )
 async def delete_schedule(request: Request, schedule_id: int) -> dict[str, str]:
     pool = gateway_state(request).db_pool
     deleted = await asyncio.to_thread(delete_blocking, pool, schedule_id)
-    if deleted.trigger_kind == "daemon":
-        await _wait_consumed(request, schedule_id, machine=deleted.machine)
     if deleted.machine == gateway_state(request).machine.name():
         await asyncio.to_thread(
             _remove_schedule_dir,
@@ -537,7 +477,7 @@ async def delete_schedule(request: Request, schedule_id: int) -> dict[str, str]:
 
 @router.post(
     "/api/schedules/{schedule_id}/start",
-    description="Enable the schedule. Declarative schedules compute their next fire; daemon schedules launch now. 404 if missing.",
+    description="Enable the schedule and compute its next fire. 404 if missing.",
 )
 async def start_schedule(request: Request, schedule_id: int) -> ScheduleView:
     return await _control_and_sync(request, schedule_id, action="start")
@@ -545,7 +485,7 @@ async def start_schedule(request: Request, schedule_id: int) -> ScheduleView:
 
 @router.post(
     "/api/schedules/{schedule_id}/stop",
-    description="Disable future fires and stop a compatibility daemon session. 404 if missing.",
+    description="Disable future fires. 404 if missing.",
 )
 async def stop_schedule(request: Request, schedule_id: int) -> ScheduleView:
     return await _control_and_sync(request, schedule_id, action="stop")
@@ -553,7 +493,7 @@ async def stop_schedule(request: Request, schedule_id: int) -> ScheduleView:
 
 @router.post(
     "/api/schedules/{schedule_id}/restart",
-    description="Run a declarative schedule now or relaunch a compatibility daemon. 404 if missing, 409 if disabled.",
+    description="Run a schedule now. 404 if missing, 409 if disabled.",
 )
 async def restart_schedule(request: Request, schedule_id: int) -> ScheduleView:
     return await _control_and_sync(request, schedule_id, action="restart")
@@ -579,19 +519,6 @@ async def run_schedule_now(request: Request, schedule_id: int) -> ScheduleView:
     return await _control_and_sync(request, schedule_id, action="run_now")
 
 
-def _read_transcript_blocking(
-    backend: SessionBackend, schedule_id: int, lines: int
-) -> list[str] | None:
-    log_path = backend.session_log_path(session_name(f"schedule-{schedule_id}"))
-    if log_path is None or not log_path.exists():
-        return None
-    try:
-        text = log_path.read_text(encoding="utf-8", errors="replace")
-    except OSError:
-        return None
-    return text.splitlines()[-lines:]
-
-
 def _read_declarative_log(
     home: Path, schedule_id: int, owner_agent_id: int | None, lines: int
 ) -> list[str] | None:
@@ -614,7 +541,7 @@ def _read_declarative_log(
 
 @router.get(
     "/api/schedules/{schedule_id}/logs",
-    description="Recent output: declarative latest.log, daemon live/transcript capture, or last_error. 404 if missing.",
+    description="Recent output from latest.log or last_error. 404 if missing.",
 )
 async def get_schedule_logs(
     request: Request, schedule_id: int, lines: int = 200
@@ -625,8 +552,7 @@ async def get_schedule_logs(
     local_machine = gateway_state(request).machine.name()
     window = plans.capture_window(lines)
 
-    declarative = row.trigger_kind != "daemon"
-    if target_machine == local_machine and declarative:
+    if target_machine == local_machine:
         captured = None
         transcript = await asyncio.to_thread(
             _read_declarative_log,
@@ -634,14 +560,6 @@ async def get_schedule_logs(
             schedule_id,
             row.owner_agent_id,
             window,
-        )
-    elif target_machine == local_machine:
-        backend: SessionBackend = gateway_state(request).shell_backend
-        captured = await session_control.capture(backend, schedule_id, window)
-        transcript = (
-            None
-            if captured is not None
-            else await asyncio.to_thread(_read_transcript_blocking, backend, schedule_id, window)
         )
     else:
         captured = None
@@ -655,7 +573,6 @@ async def get_schedule_logs(
                     "schedule_id": schedule_id,
                     "lines": window,
                     "owner_agent_id": row.owner_agent_id,
-                    "trigger_kind": row.trigger_kind,
                 },
                 timeout_s=_CAPTURE_TIMEOUT_S,
             )
@@ -674,7 +591,7 @@ async def get_schedule_logs(
     source, shown = plans.logs_view(
         lines, captured=captured, transcript=transcript, last_error=row.last_error
     )
-    if declarative and source == "transcript":
+    if source == "transcript":
         source = "latest"
     return ScheduleLogsView(source=source, lines=shown)
 
@@ -760,22 +677,10 @@ def control_blocking(
         )
         if row is None:
             raise HTTPException(status_code=404, detail=f"schedule {schedule_id} not found")
-        machine = row.machine
-        plan = plans.control_plan(
-            action, enabled=row.enabled, status=row.status, daemon=row.trigger_kind == "daemon"
-        )
+        plan = plans.control_plan(action, enabled=row.enabled, status=row.status)
         if plan.refusal is not None:
             raise HTTPException(status_code=409, detail=plan.refusal)
-        if row.trigger_kind == "daemon" and plan.needs_sync:
-            conn.execute(
-                "UPDATE schedules SET enabled = %s, desired_revision = desired_revision + 1, "
-                "launch_count = 0, next_launch_at = NULL, updated_at = now() WHERE id = %s",
-                (plan.enabled, schedule_id),
-            )
-            session_control.enqueue_in_transaction(conn, schedule_id, machine)
-            if not plan.enabled:
-                resolve_schedule_alerts(conn, schedule_id)
-        elif row.trigger_kind != "daemon" and plan.needs_sync:
+        if plan.needs_sync:
             _apply_declarative_control(conn, schedule_id, action, row, now)
         full_row = query_one(conn, ScheduleFullRow, _FULL_QUERY, (schedule_id,))
         assert full_row is not None  # noqa: S101
@@ -787,7 +692,7 @@ async def _control_and_sync(
     request: Request, schedule_id: int, *, action: plans.ControlAction
 ) -> ScheduleView:
     pool = gateway_state(request).db_pool
-    row, needs_sync = await asyncio.to_thread(
+    row, _changed = await asyncio.to_thread(
         control_blocking,
         pool,
         schedule_id,
@@ -795,6 +700,4 @@ async def _control_and_sync(
         receipts.operation_key(request),
         gateway_clock(request).now(),
     )
-    if needs_sync:
-        await _wait_consumed(request, schedule_id)
     return _view(row)

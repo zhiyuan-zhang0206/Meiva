@@ -2,16 +2,8 @@
 
 A schedule is a durable trigger and an ordinary Python payload pinned to one
 machine. The host-local `schedule-manager` service runs on gateway and agent-runner
-hosts and owns two execution models during the migration:
-
-- `at`, `cron`, and `every` are declarative, run-to-completion schedules. Waiting
-  consumes no process or PTY. A due slot starts one no-PTY subprocess.
-- `daemon` is the compatibility model for installed resident schedules. Its script
-  owns its timing loop and runs in a supervised PTY session.
-
-New public creation surfaces admit only declarative triggers. Existing rows were
-backfilled as `daemon`, allowing payload conversion to happen separately from the
-engine rollout.
+hosts. It admits `at`, `cron`, and `every` run-to-completion schedules. Waiting
+consumes no process or PTY; each due slot starts one subprocess.
 
 ## Declarative execution
 
@@ -42,42 +34,27 @@ locality, not authority. Details are in
 Machine moves and deletion are accepted once an open run closes, so an in-flight
 process cannot be detached from the manager and workspace that launched it.
 
-## Compatibility daemon execution
-
-Daemon rows retain revision convergence, the named `meiva-schedule-<id>` PTY, runner
-liveness, and explicit start/stop/restart behavior. Their request receipts and
-recovery rules remain in [schedule convergence](schedule-convergence.md), liveness in
-[schedule liveness](schedule-liveness.md), and payload process behavior in
-[schedule runner](schedule-runner.md).
-
-The built-in slot-claim helper remains inside compatibility payloads while they are
-resident. It is documented in [cron slot claims](cron-slot-claims.md).
-
 ## Schedule manager responsibilities
 
 - Partition rows by `machine`, with `machine_units` electing one active co-located
   unit so two homes do not launch the same work.
-- Reconcile declarative due slots from Postgres before converging daemon sessions.
-- Recover an open declarative run by adopting its outcome or live runner identity;
-  a process that disappears without an outcome settles as an error.
+- Reconcile due slots from Postgres.
+- Recover an open run by adopting its outcome or live runner identity; a process
+  that disappears without an outcome settles as an error.
 - Resolve per-fire secret environment names at launch rather than persisting values.
-- Consume compatibility daemon `schedule_sync_requests`, including the durable
-  legacy-PTY cleanup barrier created by an in-place migration; ordinary
-  declarative lifecycle mutations update timing state directly and need no PTY
-  convergence request.
-- Read declarative `latest.log` locally or through the target machine's ops RPC;
-  daemon logs retain live-capture and saved-transcript fallbacks.
+- Drain legacy `schedule_sync_requests` after observing their durable state.
+- Read `latest.log` locally or through the target machine's ops RPC.
 
 ## State vocabulary
 
-| status | declarative meaning | daemon compatibility meaning |
-|---|---|---|
-| `scheduled` | enabled and waiting for `next_launch_at` | unused |
-| `running` | one open run owns the current fire | manager's recorded resident launch |
-| `completed` | a one-shot exited successfully | resident script exited successfully |
-| `error` | the latest execution failed | launch or resident execution failed |
-| `stopped` | disabled, eligible to be enabled later | disabled and session reaped |
-| `cancelled` | lifecycle cancellation; no future fire | lifecycle cancellation; session reaped |
+| status | meaning |
+|---|---|
+| `scheduled` | enabled and waiting for `next_launch_at` |
+| `running` | one open run owns the current fire |
+| `completed` | a one-shot exited successfully |
+| `error` | the latest execution failed |
+| `stopped` | disabled, eligible to be enabled later |
+| `cancelled` | lifecycle cancellation; no future fire |
 
 ## Entry points
 
@@ -85,7 +62,7 @@ resident. It is documented in [cron slot claims](cron-slot-claims.md).
 - `meiva/schedules/__init__.py` — first-class SDK surface
 - `services/wake/schedule_manager/manager.py` — host-local reconciliation
 - `services/wake/schedule_manager/declarative.py` — due-slot admission and settlement
-- `services/wake/schedule_manager/runner.py` — declarative and daemon process entry
+- `services/wake/schedule_manager/runner.py` — single-round process entry
 
 The API's projections and mutation boundaries are in
 [router contracts](router-contracts.md).

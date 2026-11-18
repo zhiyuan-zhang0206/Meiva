@@ -4240,7 +4240,7 @@ export interface components {
             killed_shell_sessions?: number[];
             harnesses_not_transferred?: string[];
         };
-        TriggerKind: "at" | "cron" | "every" | "daemon";
+        TriggerKind: "at" | "cron" | "every";
         UiContributionsResponse: {
             themes: components["schemas"]["UiThemeContribution"][];
             nav: components["schemas"]["UiNavContribution"][];

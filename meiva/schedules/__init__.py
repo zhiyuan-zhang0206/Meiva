@@ -11,7 +11,7 @@ from pydantic import BaseModel, ConfigDict
 import meiva.sdk_surface.agent_identity
 from meiva import gateway_client
 
-type TriggerKind = Literal["at", "cron", "every", "daemon"]
+type TriggerKind = Literal["at", "cron", "every"]
 type Owner = int | Literal["self"] | None
 
 __all_for_meiva__ = [

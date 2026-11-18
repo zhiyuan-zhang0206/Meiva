@@ -88,10 +88,6 @@ BOUND_REASONS = {
         "runs inside the schedule runner, which binds the schedule actor context (with the "
         "config owner's environment) before the script"
     ),
-    "tests/integration/child_schedule_runner.py": (
-        "the preload runs before the caller binds; `engine.script_context` names the context the "
-        "engine then loads under"
-    ),
 }
 
 

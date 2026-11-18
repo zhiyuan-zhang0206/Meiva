@@ -84,7 +84,8 @@ def test_reap_expired_web_sessions_is_limited_to_one_pass_batch(
 def _new_schedule(conn: psycopg.Connection, name: str) -> int:
     with conn.cursor() as cur:
         cur.execute(
-            "INSERT INTO schedules (name, script, command, machine) VALUES (%s, 'x', 'x', 'gateway') RETURNING id",
+            "INSERT INTO schedules (name, script, command, machine, trigger_kind, interval_seconds) "
+            "VALUES (%s, 'x', 'x', 'gateway', 'every', 60) RETURNING id",
             (name,),
         )
         row = cur.fetchone()

@@ -16,21 +16,18 @@ accepting gateway machine. Owned schedules default to cancellation when the owne
 terminates. Foreign keys and missing machine placement surface as request errors.
 
 List projections omit script bodies; full reads retain them. Script or command edits
-remain versioned. Declarative edits apply on the next fire, while daemon edits retain
-their revision/session convergence path. A declarative machine move or deletion is
+remain versioned. Edits apply on the next fire. A machine move or deletion is
 accepted only while no run is open, preserving one manager and one workspace as the
 owner of an in-flight process.
 
 Lifecycle verbs share durable, idempotent mutation receipts:
 
-- `enable`/`start` compute the next declarative fire or start a daemon;
+- `enable`/`start` compute the next fire;
 - `disable`/`stop` prevent future fires and ask reconciliation to stop active work;
-- `run-now`/`restart` make one declarative fire immediately eligible or relaunch a
-  daemon;
+- `run-now`/`restart` make one fire immediately eligible;
 - `cancel` records the terminal lifecycle intent.
 
-Declarative log reads return `latest.log` from the schedule's locality. Daemon reads
-retain live capture and saved PTY transcript fallbacks. Both use `last_error` only
+Log reads return `latest.log` from the schedule's locality. They use `last_error` only
 when no execution output is available. Remote reads dispatch to the target machine's
 ops service with the trigger and owner locality facts.
 
@@ -41,5 +38,4 @@ non-null returned row.
 ## Relationship to other nodes
 
 - [Schedule Manager & Runner](schedules.md) — execution and recovery semantics.
-- [Schedule mutation receipts and revision convergence](schedule-convergence.md) —
-  the daemon compatibility receipt protocol.
+- [Schedule mutation receipts](schedule-convergence.md) — durable acceptance and retry semantics.

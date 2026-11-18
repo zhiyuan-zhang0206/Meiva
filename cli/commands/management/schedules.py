@@ -1,6 +1,6 @@
 # meiva:note
 # `meiva schedules` is the thin CLI over the declarative schedule API. Provision and verify
-# remain local compatibility operations for the resident built-in schedule migration bridge.
+# remain local operations for built-in and plugin schedule provisioning.
 
 from __future__ import annotations
 
@@ -9,6 +9,7 @@ import contextlib
 import sys
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Literal
 
 import httpx
 from pydantic import BaseModel, TypeAdapter
@@ -48,7 +49,7 @@ class ScheduleRow(BaseModel):
     placement_reason: str | None = None
     last_error: str | None = None
     script: str | None = None
-    trigger_kind: str = "daemon"
+    trigger_kind: Literal["at", "cron", "every"]
     next_launch_at: str | None = None
     owner_agent_id: int | None = None
 
@@ -231,8 +232,7 @@ def cmd_schedules_create(
 
 # meiva:note
 # Partial update: only the flags passed change. Script and command changes are
-# versioned; declarative schedules apply them on their next fire, while enabled
-# daemon schedules relaunch after convergence.
+# versioned and apply on the next fire. Each run uses a fresh single-round process.
 def cmd_schedules_update(
     access: GatewayAccess,
     identifier: str,
@@ -297,8 +297,8 @@ def cmd_schedules_update(
 
 
 # meiva:note
-# Delete prompts unless forced. The gateway removes the schedule workspace after an active
-# declarative run finishes; a compatibility daemon session is reaped during convergence.
+# Delete prompts unless forced. The gateway accepts deletion once the current run finishes
+# and removes the schedule workspace.
 def cmd_schedules_delete(access: GatewayAccess, identifier: str, *, force: bool = False) -> int:
     from base.host.net.http_dial import delete as dial_delete
 
@@ -367,8 +367,7 @@ def cmd_schedules_restart(access: GatewayAccess, identifier: str, *, idempotency
 
 
 # meiva:note
-# Declarative log reads use ``latest.log``; compatibility daemon reads use live capture or
-# the PTY transcript. Both fall back to ``last_error``.
+# Log reads use ``latest.log`` and fall back to ``last_error``.
 def cmd_schedules_logs(access: GatewayAccess, identifier: str, lines: int) -> int:
     from base.host.net.http_dial import get as dial_get
 

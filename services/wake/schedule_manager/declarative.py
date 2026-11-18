@@ -43,24 +43,6 @@ _log = logging.getLogger(__name__)
 _OUTCOME_PREFIX = ".run-"
 
 
-# meiva:note
-# Limits and cluster facts read once by the schedule-manager composition root.
-@dataclass(frozen=True)
-class ManagerPolicy:
-    auto_restart_max_per_window: int
-    auto_restart_window_seconds: float
-    recovery_gate_alert_seconds: float
-    timezone: str
-
-    def __post_init__(self) -> None:
-        if not (
-            self.auto_restart_max_per_window > 0
-            and self.auto_restart_window_seconds > 0
-            and self.recovery_gate_alert_seconds > 0
-        ):
-            raise ValueError("every schedule manager limit must be positive")
-
-
 @dataclass(frozen=True)
 class _DueRow:
     id: int
@@ -196,7 +178,7 @@ class DeclarativeScheduleEngine:
                 "s.timeout_seconds, s.enabled, s.status, r.agent_id AS owner_agent_id "
                 "FROM schedule_runs r JOIN schedules s ON s.id = r.schedule_id "
                 "WHERE r.ok IS NULL AND r.scheduled_for IS NOT NULL "
-                "AND s.trigger_kind <> 'daemon' AND s.machine = %s "
+                "AND s.machine = %s "
                 "ORDER BY r.id",
                 (self._machine_name,),
             )
@@ -333,10 +315,8 @@ class DeclarativeScheduleEngine:
                 _DueRow,
                 "SELECT s.id, s.script, s.trigger_kind, s.next_launch_at, s.timeout_seconds, "
                 "s.owner_agent_id, s.secret_env_vars FROM schedules s "
-                "WHERE s.machine = %s AND s.enabled AND s.trigger_kind <> 'daemon' "
+                "WHERE s.machine = %s AND s.enabled "
                 "AND s.next_launch_at <= %s "
-                "AND NOT EXISTS (SELECT 1 FROM schedule_sync_requests q "
-                "                WHERE q.schedule_id = s.id) "
                 "AND NOT EXISTS (SELECT 1 FROM schedule_runs r "
                 "                WHERE r.schedule_id = s.id AND r.ok IS NULL) "
                 "ORDER BY s.next_launch_at, s.id FOR UPDATE OF s SKIP LOCKED LIMIT 1",
@@ -485,7 +465,7 @@ class DeclarativeScheduleEngine:
                 "s.timeout_seconds, s.enabled, s.status, r.agent_id AS owner_agent_id "
                 "FROM schedule_runs r JOIN schedules s ON s.id = r.schedule_id "
                 "WHERE r.id = %s AND r.ok IS NULL AND r.scheduled_for IS NOT NULL "
-                "AND s.trigger_kind <> 'daemon' AND s.machine = %s",
+                "AND s.machine = %s",
                 (run_id, self._machine_name),
             )
 

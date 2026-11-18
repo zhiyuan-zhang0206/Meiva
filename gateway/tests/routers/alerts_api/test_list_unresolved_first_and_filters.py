@@ -315,8 +315,9 @@ def test_stopped_schedule_alerts_resolved_on_ingest(
     sched_row = query_one(
         db_conn,
         IdRow,
-        "INSERT INTO schedules (name, script, command, enabled, status, machine) "
-        "VALUES ('test-stopped', 'pass', 'python schedule.py', false, 'stopped', 'box') "
+        "INSERT INTO schedules "
+        "(name, script, command, enabled, status, machine, trigger_kind, interval_seconds) "
+        "VALUES ('test-stopped', 'pass', 'python schedule.py', false, 'stopped', 'box', 'every', 60) "
         "RETURNING id",
     )
     assert sched_row is not None

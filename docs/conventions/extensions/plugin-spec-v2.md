@@ -174,11 +174,11 @@ it for the only copy of critical state. See
 
 `ScheduleSpec` carries code and placement (`name`, `machine`, `description`,
 `script`, `command`, `secret_env_vars`, `default_enabled`) plus execution policy:
-`trigger_kind` (`cron`, `every`, or compatibility `daemon`), `cron_expr`,
+`trigger_kind` (required: `cron` or `every`), `cron_expr`,
 `interval_seconds`, optional `timezone`, and `timeout_seconds`. New recurring
 faces use `cron` or `every`; every intervals are at least 30 seconds. Reconciliation
 preserves the operator's enabled state, updates trigger policy in place, and
-queues cleanup before a migrated daemon row can launch declaratively.
+each fire runs one payload process.
 
 ### Console surfaces — two lanes, deliberately not one mechanism
 
