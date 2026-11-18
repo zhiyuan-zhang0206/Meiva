@@ -1,4 +1,4 @@
-import { cleanup, screen, waitFor } from "@testing-library/react";
+import { cleanup, fireEvent, screen, waitFor } from "@testing-library/react";
 import { renderWithBrowser } from "@/test-support/render";
 import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 
@@ -672,5 +672,139 @@ describe("line breaks (remark-breaks)", () => {
       expect(onOpenFile).toHaveBeenCalledTimes(1);
       expect(onOpenFile).toHaveBeenCalledWith("file:///Users/dev/workspace/src/foo.py", "42");
     });
+  });
+});
+
+describe("Markdown image hover zoom and lightbox", () => {
+  it("wraps default Markdown images in a valid phrasing span inside <p> with a hover zoom button", () => {
+    const { container } = renderMarkdown(
+      <ChatMarkdown content="![diagram](https://example.com/a.png)" />,
+    );
+
+    const paragraph = container.querySelector("p");
+    expect(paragraph).not.toBeNull();
+    expect(paragraph!.querySelector("div")).toBeNull();
+
+    const img = screen.getByRole("img", { name: "diagram" });
+    expect(img.getAttribute("src")).toBe("https://example.com/a.png");
+    expect(paragraph!.contains(img)).toBe(true);
+
+    const wrapper = img.parentElement;
+    expect(wrapper?.tagName).toBe("SPAN");
+    expect(wrapper?.className).toContain("group");
+    expect(wrapper?.className).toContain("inline-block");
+
+    const zoomBtn = screen.getByTestId("markdown-image-zoom");
+    expect(zoomBtn.tagName).toBe("BUTTON");
+    expect(zoomBtn.getAttribute("aria-label")).toBe("Open image");
+    expect(zoomBtn.className).toContain("opacity-0");
+    expect(zoomBtn.className).toContain("group-hover:opacity-100");
+    expect(zoomBtn.className).toContain("focus-visible:opacity-100");
+    expect(zoomBtn.className).toContain("pointer-coarse:opacity-80");
+    expect(wrapper?.contains(zoomBtn)).toBe(true);
+  });
+
+  it("opens the document.body lightbox only from the zoom button, and restores focus on Escape, backdrop, or close button", () => {
+    const { container } = renderMarkdown(
+      <ChatMarkdown content="![diagram](https://example.com/a.png)" />,
+    );
+
+    const img = screen.getByRole("img", { name: "diagram" });
+    fireEvent.click(img);
+    expect(screen.queryByTestId("image-lightbox")).toBeNull();
+
+    const zoomBtn = screen.getByTestId("markdown-image-zoom");
+    fireEvent.click(zoomBtn);
+
+    const lightbox = screen.getByTestId("image-lightbox");
+    expect(lightbox.parentElement).toBe(document.body);
+    expect(container.contains(lightbox)).toBe(false);
+    expect(lightbox.getAttribute("role")).toBe("dialog");
+    expect(lightbox.getAttribute("aria-modal")).toBe("true");
+    expect(document.body.style.overflow).toBe("hidden");
+    const enlargedImg = lightbox.querySelector("img");
+    expect(enlargedImg?.getAttribute("src")).toBe("https://example.com/a.png");
+    expect(enlargedImg?.getAttribute("alt")).toBe("diagram");
+
+    fireEvent.keyDown(window, { key: "Escape" });
+    expect(screen.queryByTestId("image-lightbox")).toBeNull();
+    expect(document.body.style.overflow).toBe("");
+    expect(document.activeElement).toBe(zoomBtn);
+
+    fireEvent.click(zoomBtn);
+    expect(screen.getByTestId("image-lightbox")).not.toBeNull();
+    fireEvent.click(screen.getByTestId("image-lightbox-backdrop"));
+    expect(screen.queryByTestId("image-lightbox")).toBeNull();
+    expect(document.activeElement).toBe(zoomBtn);
+
+    fireEvent.click(zoomBtn);
+    expect(screen.getByTestId("image-lightbox")).not.toBeNull();
+    fireEvent.click(screen.getByTestId("image-lightbox-close"));
+    expect(screen.queryByTestId("image-lightbox")).toBeNull();
+    expect(document.activeElement).toBe(zoomBtn);
+  });
+
+  it("opens the lightbox from the zoom button on a linked image without triggering link navigation", () => {
+    const onOpenFile = vi.fn();
+    renderMarkdown(
+      <ChatMarkdown
+        content={[
+          "[![diagram](https://example.com/a.png)](https://example.com)",
+          "",
+          "[![plot](https://example.com/plot.png)](src/foo.py#L10)",
+        ].join("\n")}
+        onOpenFile={onOpenFile}
+      />,
+    );
+
+    const links = screen.getAllByRole("link");
+    const externalLink = links[0];
+    expect(externalLink.getAttribute("href")).toBe("https://example.com");
+
+    const diagramImg = screen.getByRole("img", { name: "diagram" });
+    const imgClick = new MouseEvent("click", { bubbles: true, cancelable: true });
+    fireEvent(diagramImg, imgClick);
+    expect(imgClick.defaultPrevented).toBe(false);
+    expect(screen.queryByTestId("image-lightbox")).toBeNull();
+
+    const zoomButtons = screen.getAllByTestId("markdown-image-zoom");
+    const zoomClick = new MouseEvent("click", { bubbles: true, cancelable: true });
+    fireEvent(zoomButtons[0], zoomClick);
+    expect(zoomClick.defaultPrevented).toBe(true);
+    expect(screen.getByTestId("image-lightbox")).not.toBeNull();
+    fireEvent.click(screen.getByTestId("image-lightbox-close"));
+    expect(screen.queryByTestId("image-lightbox")).toBeNull();
+
+    fireEvent.click(zoomButtons[1]);
+    expect(onOpenFile).not.toHaveBeenCalled();
+    const plotLightbox = screen.getByTestId("image-lightbox");
+    fireEvent.click(plotLightbox.querySelector("img")!);
+    expect(onOpenFile).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByTestId("image-lightbox-close"));
+    expect(screen.queryByTestId("image-lightbox")).toBeNull();
+    expect(onOpenFile).not.toHaveBeenCalled();
+
+    const plotImg = screen.getByRole("img", { name: "plot" });
+    fireEvent.click(plotImg);
+    expect(onOpenFile).toHaveBeenCalledTimes(1);
+    expect(onOpenFile).toHaveBeenCalledWith("src/foo.py", "10");
+  });
+
+  it("omits the zoom button when image src is stripped and renders no image block in inline mode", () => {
+    const { container } = renderMarkdown(
+      <ChatMarkdown content={'<img src="data:image/svg+xml,boom" alt="stripped">'} />,
+    );
+    expect(container.querySelector("img")?.getAttribute("alt")).toBe("stripped");
+    expect(screen.queryByTestId("markdown-image-zoom")).toBeNull();
+
+    cleanup();
+
+    const inlineView = renderMarkdown(
+      <h4>
+        <ChatMarkdown inline content="Title ![diagram](https://example.com/a.png)" />
+      </h4>,
+    );
+    expect(inlineView.container.querySelector("img, button, div, p")).toBeNull();
+    expect(screen.queryByTestId("markdown-image-zoom")).toBeNull();
   });
 });
