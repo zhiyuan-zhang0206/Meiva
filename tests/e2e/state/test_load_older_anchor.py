@@ -32,6 +32,11 @@ _SAMPLER_JS = """
       const r = n.getBoundingClientRect();
       if (r.bottom >= vpRect.top && r.top <= vpRect.bottom) {
         tops[id] = r.top;
+        if (n.dataset.turnExpanded === 'false' && n.dataset.turnMemberIds) {
+          for (const memberId of n.dataset.turnMemberIds.split(' ')) {
+            if (memberId) tops[memberId] = r.top;
+          }
+        }
         if (id === '0.0') {
           if (fallbackId === null) { fallbackId = id; fallbackTop = r.top; }
           continue;
