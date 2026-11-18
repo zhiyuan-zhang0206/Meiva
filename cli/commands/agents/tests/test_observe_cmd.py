@@ -72,6 +72,28 @@ def test_get_json_is_the_response_unchanged(capsys: pytest.CaptureFixture[str]) 
     assert json.loads(capsys.readouterr().out) == _agent()
 
 
+def test_get_prints_fatal_turn_diagnostic_when_present(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    body = {
+        **_agent(),
+        "status": "terminated",
+        "harness": "claude_code",
+        "harness_exit_code": 1,
+        "last_turn_fatal_at": "2026-11-19T06:00:00+00:00",
+        "last_turn_fatal_reason": "FatalLLMStreamError: claude_code aborted\nproxy connection refused",
+    }
+    with serving({("GET", "/api/agents/7"): Reply(body=body)}) as gateway:
+        assert cmd_agents_get(access_to(gateway.url), 7, as_json=False) == 0
+    out = capsys.readouterr().out.splitlines()
+    assert "harness exit code: 1" in out
+    assert "last fatal at:     2026-11-19T06:00:00+00:00" in out
+    assert (
+        "last fatal reason: FatalLLMStreamError: claude_code aborted\\nproxy connection refused"
+        in out
+    )
+
+
 def test_get_of_a_missing_agent_prints_the_gateways_reason_and_exits_1(
     capsys: pytest.CaptureFixture[str],
 ) -> None:

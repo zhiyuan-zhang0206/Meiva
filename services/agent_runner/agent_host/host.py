@@ -54,7 +54,7 @@ from base.events.live.bus import EventBus
 from base.events.live.publisher import AgentEventPublisher
 from base.host.env.agent_slices import AgentSlices
 from base.lm.catalog import ModelCatalog
-from base.lm.harness import UnsolicitedOutput
+from base.lm.harness import HarnessBridge, UnsolicitedOutput, format_fatal_reason
 from base.lm.harness.registration import RegistrationStore
 from base.lm.harness.registry import FileSessionRegistry
 from base.lm.harness.wiring import BridgeRootValues
@@ -322,15 +322,27 @@ class AgentHost:
                 # startup reconcile. External cancellation is not a corpse.
                 self.drop_agent(agent_id)
                 raise
-            except Exception:
+            except Exception as exc:
                 # The scheduler logs and drops the task; dropping the runtime
                 # ensures the next admission re-runs startup reconciliation.
                 # An unclassified crash is a corpse too: settle it idling but
                 # mark it so the reaper terminates it once grace elapses.
                 self.drop_agent(agent_id)
-                outcome = TurnOutcome(exited=False, crashed=True)
+                outcome = TurnOutcome(
+                    exited=False,
+                    crashed=True,
+                    fatal_reason=format_fatal_reason(exc),
+                )
                 raise
             finally:
+                if outcome.crashed:
+                    runtime_now = self._runtimes.get(agent_id)
+                    if (
+                        runtime_now is not None
+                        and isinstance(runtime_now.harness_bridge, HarnessBridge)
+                        and not runtime_now.harness_bridge.session_active
+                    ):
+                        self.drop_agent(agent_id)
                 refresh_cached_runtime(self._runtimes, self._in_flight, agent_id, self._evict)
                 await close_hosted_turn(
                     self._pool,
@@ -702,9 +714,11 @@ class AgentHost:
     # Terminate this machine's crash corpses whose grace window has elapsed.
     async def reap_corpses(self) -> None:
         try:
-            await reap_and_announce_corpses(
+            reaped = await reap_and_announce_corpses(
                 self._control_pool, self._machine, bus=self._bus, home=self._home
             )
+            for corpse in reaped:
+                self.drop_agent(corpse.agent_id)
         except (psycopg.OperationalError, PoolTimeout):
             # meiva:note
             # The beat counts a database that stays unreachable and exits the host.

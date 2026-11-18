@@ -140,6 +140,7 @@ CREATE TABLE agents_meta (
     liveness_state             TEXT NOT NULL DEFAULT 'unknown' CHECK (liveness_state IN ('online', 'offline', 'unknown')),  -- gateway-owned derived liveness projection (Task #1174): 'online' = machine reachable; 'offline' = machine unreachable (2 consecutive failed status_probe); 'unknown' = not yet judged (fresh rows / unregistered machine). Written ONLY by the gateway heartbeat daemon's liveness pass — status stays lifecycle intent (R1 invariant #1); the frontend renders offline distinctly. 'terminated' rows are never judged.
     last_probe_at             TIMESTAMPTZ,              -- when the gateway liveness pass last judged this row (Task #1174).
     last_turn_fatal_at        TIMESTAMPTZ,              -- first fatal turn crash since the last completed LLM turn (the corpse marker: NULL = healthy, set = crash-dead). Stamped with COALESCE (never refreshed while dead) by the hosted runner at crash catch time (agent/hosted_ownership.stamp_turn_fatal); cleared by a completed LLM turn (_persist_last_active) and the resurrect transition. The agent_host beat's reaper terminates marked idling rows past CORPSE_REAP_GRACE_S with termination_source='reaper'.
+    last_turn_fatal_reason    TEXT,                     -- sanitized, bounded summary of the most recent fatal turn error since the last completed turn, normal self-termination, or resurrect. Written alongside last_turn_fatal_at by stamp_turn_fatal; cleared by persist_last_active, self-terminate, and resurrect. NULL = no active fatal turn error.
     permanent_reject_streak    INTEGER NOT NULL DEFAULT 0 CHECK (permanent_reject_streak >= 0),  -- consecutive PERMANENT-class provider rejections since the last completed LLM turn (the recovery circuit breaker, task #3617): +1 at each permanent fatal turn settlement (agent/runloop.py), reset to 0 by the same completed-turn UPDATE that clears last_turn_fatal_at (agent/graph/llm/node.py::_persist_last_active). >= 2 halts every automatic recovery path (event-path resurrect / watchdog re-dispatch+retry / the stalled crash-marked harvest op / the relaxed reaper-marked trigger) until a turn succeeds; a manual resurrect stays exempt. See base/agents/recovery/breaker.py.
     last_permanent_reject_reason TEXT,                   -- the CIRCUIT_REASON_* class (agent/state_channels) of the current consecutive permanent-reject streak: written in the SAME statement as the permanent_reject_streak +1 by base/agents/recovery_breaker.record_permanent_reject_turn, cleared with the streak by the completed-turn UPDATE. 'billing' + streak >= 2 is the billing batch-recovery whitelist (task #3919). NULL = no permanent rejection on the current streak (incl. pre-column rows — never guessed).
     runtime_generation UUID,
@@ -186,6 +187,12 @@ COMMENT ON COLUMN agents_meta.harness IS
     'The agent loop runtime this agent was born on (meiva / claude_code / codex / '
     'antigravity / kimi_code). Immutable: a trigger rejects any UPDATE that changes '
     'it, and a fork inherits its source''s value.';
+
+COMMENT ON COLUMN agents_meta.last_turn_fatal_reason IS
+    'Sanitized, bounded summary of the most recent fatal turn error since the last '
+    'completed turn, normal self-termination, or resurrect. Written alongside '
+    'last_turn_fatal_at by stamp_turn_fatal; cleared on turn completion, self-terminate, '
+    'and resurrect. NULL = no active fatal turn error.';
 
 COMMENT ON COLUMN agents_meta.last_permanent_reject_reason IS
     'The reason class of the current consecutive permanent-reject streak '

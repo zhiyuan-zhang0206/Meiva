@@ -454,3 +454,107 @@ async def test_apply_hosted_lifecycle_threads_restart_message_into_resume_note(
     assert note_row is not None
     assert note_row[1:] == ("system:restart", "pending")
     assert "Zhiyuan rolling out #9999" in note_row[0]
+
+
+async def test_stamp_turn_fatal_sanitizes_reason_and_survives_reap(
+    db_conn: psycopg.Connection,
+    aops_pool: AsyncConnectionPool,
+    database: Database,
+    event_bus: EventBus,
+) -> None:
+    agent_id = _agent(db_conn)
+    incarnation = await admit_hosted_runtime(aops_pool, agent_id, "host-test", uuid4(), db=database)
+    assert incarnation is not None
+
+    proxy_val = "fixture-proxypass"
+    bearer_val = "fixture-bearer-123"
+    secret_err = (
+        "connect failed "
+        + "https://"
+        + f"proxyuser:{proxy_val}@127.0.0.1:7890 "
+        + "Authorization: Bearer "
+        + f"{bearer_val} "
+        + ("a" * 1200)
+    )
+    assert (await stamp_turn_fatal(aops_pool, incarnation, reason=secret_err)).applied
+    first_at = _marker(db_conn, agent_id)
+    stored_reason = db_conn.execute(
+        "SELECT last_turn_fatal_reason FROM agents_meta WHERE id = %s", (agent_id,)
+    ).fetchone()
+    assert stored_reason is not None and stored_reason[0] is not None
+    assert isinstance(stored_reason[0], str)
+    assert proxy_val not in stored_reason[0]
+    assert bearer_val not in stored_reason[0]
+    assert "proxyuser:***@127.0.0.1:7890" in stored_reason[0]
+    assert len(stored_reason[0]) == 1000
+
+    assert (await stamp_turn_fatal(aops_pool, incarnation, reason="later fatal summary")).applied
+    assert _marker(db_conn, agent_id) == first_at
+    assert await settle_hosted_runtime(aops_pool, incarnation, bus=event_bus)
+    _set_marker(db_conn, agent_id, minutes_ago=16)
+    reaped = await reap_crash_corpses(aops_pool, "host-test")
+    assert [c.agent_id for c in reaped] == [agent_id]
+    assert db_conn.execute(
+        "SELECT status, termination_source, last_turn_fatal_reason FROM agents_meta WHERE id = %s",
+        (agent_id,),
+    ).fetchone() == ("terminated", "reaper", "later fatal summary")
+
+
+async def test_self_terminate_clears_fatal_reason_and_admit_clears_stale_exit(
+    db_conn: psycopg.Connection,
+    aops_pool: AsyncConnectionPool,
+    database: Database,
+) -> None:
+    from agent.ownership.hosted import apply_hosted_lifecycle
+
+    agent_id = _agent(db_conn)
+    db_conn.execute(
+        "UPDATE agents_meta SET harness_exit_code = 0, harness_exit_at = now() WHERE id = %s",
+        (agent_id,),
+    )
+    db_conn.commit()
+    incarnation = await admit_hosted_runtime(aops_pool, agent_id, "host-test", uuid4(), db=database)
+    assert incarnation is not None
+    assert db_conn.execute(
+        "SELECT harness_exit_code, harness_exit_at FROM agents_meta WHERE id = %s",
+        (agent_id,),
+    ).fetchone() == (None, None)
+
+    assert (await stamp_turn_fatal(aops_pool, incarnation, reason="old transient error")).applied
+    db_conn.execute(
+        "INSERT INTO inbound_messages (agent_id, content, kind, source, status) "
+        "VALUES (%s, '', 'terminate', 'self', 'claimed')",
+        (agent_id,),
+    )
+    db_conn.commit()
+    applied = await apply_hosted_lifecycle(aops_pool, incarnation, resume_turn=False)
+    assert applied is not None and applied.kind == "terminate"
+    assert db_conn.execute(
+        "SELECT status, termination_source, last_turn_fatal_reason FROM agents_meta WHERE id = %s",
+        (agent_id,),
+    ).fetchone() == ("terminated", "user", None)
+
+
+async def test_external_terminate_preserves_fatal_reason(
+    db_conn: psycopg.Connection,
+    aops_pool: AsyncConnectionPool,
+    database: Database,
+) -> None:
+    from agent.ownership.hosted import apply_hosted_lifecycle
+
+    agent_id = _agent(db_conn)
+    incarnation = await admit_hosted_runtime(aops_pool, agent_id, "host-test", uuid4(), db=database)
+    assert incarnation is not None
+    assert (await stamp_turn_fatal(aops_pool, incarnation, reason="fatal before kill")).applied
+    db_conn.execute(
+        "INSERT INTO inbound_messages (agent_id, content, kind, source, status) "
+        "VALUES (%s, '', 'terminate', 'user', 'claimed')",
+        (agent_id,),
+    )
+    db_conn.commit()
+    applied = await apply_hosted_lifecycle(aops_pool, incarnation, resume_turn=False)
+    assert applied is not None and applied.kind == "terminate"
+    assert db_conn.execute(
+        "SELECT status, termination_source, last_turn_fatal_reason FROM agents_meta WHERE id = %s",
+        (agent_id,),
+    ).fetchone() == ("terminated", "user", "fatal before kill")

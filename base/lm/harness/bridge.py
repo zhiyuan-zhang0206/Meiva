@@ -177,6 +177,12 @@ class HarnessBridge:
         return None if self._session is None else self._session.session_id
 
     # meiva:note
+    # Whether this bridge currently holds an unretired session.
+    @property
+    def session_active(self) -> bool:
+        return self._session is not None
+
+    # meiva:note
     # The generation of the process the bridge's session runs, 0 while there is none. It grows
     # across sessions (the registry record carries it), so a consumer can tell a fact of the current
     # process from a late one of an earlier process.

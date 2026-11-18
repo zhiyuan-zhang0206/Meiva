@@ -33,3 +33,23 @@ def test_agent_views_preserve_the_stored_harness(
         del payload["harness"]
         with pytest.raises(ValidationError):
             type(view).model_validate(payload)
+
+
+def test_snapshot_reports_harness_exit_and_last_turn_fatal_reason(
+    db_conn: psycopg.Connection,
+) -> None:
+    with db_conn.cursor() as cur:
+        cur.execute("INSERT INTO agents (id) VALUES (42)")
+        cur.execute(
+            "INSERT INTO agents_meta "
+            "(id, status, harness, harness_exit_code, harness_exit_at, "
+            "last_turn_fatal_at, last_turn_fatal_reason) "
+            "VALUES (42, 'terminated', 'claude_code', 1, now(), now(), "
+            "'FatalLLMStreamError: proxy connect refused')"
+        )
+    detail = select_one(db_conn, 42, catalog=None, default_model="deepseek-v4-flash")
+    assert detail is not None
+    assert detail.harness_exit_code == 1
+    assert detail.harness_exit_at is not None
+    assert detail.last_turn_fatal_at is not None
+    assert detail.last_turn_fatal_reason == "FatalLLMStreamError: proxy connect refused"

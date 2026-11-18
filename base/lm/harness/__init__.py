@@ -54,6 +54,7 @@ from base.lm.harness.events import (
     Usage,
     is_droppable,
 )
+from base.lm.harness.faults import format_fatal_reason, sanitize_error_text
 from base.lm.harness.handoff import ClusterFact, EntryPoint, Handoff, HarnessContribution
 from base.lm.harness.registration import (
     HANDLE_ENV,
@@ -131,6 +132,8 @@ __all__ = [
     "completed_turn",
     "encode_items",
     "fault_of_event",
+    "format_fatal_reason",
     "handle_digest",
     "is_droppable",
+    "sanitize_error_text",
 ]

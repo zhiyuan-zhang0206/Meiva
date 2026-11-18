@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import re
 from dataclasses import dataclass
 
 from base.host.boundary.json_values import is_object_dict, is_object_list
@@ -19,21 +18,9 @@ from base.lm.harness.events import (
     UnsolicitedOutput,
     Usage,
 )
+from base.lm.harness.faults import sanitize_error_text
 
 _SYNTHETIC_MODEL = "<synthetic>"
-_ERROR_SUMMARY_LIMIT = 1000
-_REDACTED = "***"
-_SK_SECRET = re.compile(r"sk-[A-Za-z0-9_\-]{8,}")
-_USERINFO_PASSWORD = re.compile(r"(://[^/\s@]*:)[^/\s@]*@")
-_SECRET_IN_TEXT = re.compile(
-    r'("(?:token|secret|password|authorization)"\s*:\s*)"(?:[^"\\]|\\.)*"', re.IGNORECASE
-)
-_AUTHORIZATION_BEARER = re.compile(
-    r"""(?i)\b(authorization["']?\s*[:=]\s*["']?bearer\s+)([^\s"',}]+)"""
-)
-_ENV_SECRET = re.compile(
-    r'\b([A-Z][A-Z0-9_]*(?:_TOKEN|_PASSWORD|_SECRET)\b\s*[:=]\s*)(["\']?)([^\s"\']+)\2'
-)
 
 # meiva:note
 # Dispatch is by class name rather than `isinstance`: the SDK is injected, and a
@@ -82,24 +69,6 @@ def map_message(message: object, *, turn_id: str | None) -> list[BridgeEvent]:
     if handler is None:
         return []
     return handler(message, turn_id)
-
-
-def sanitize_error_text(value: str) -> str:
-    text = value
-    if "sk-" in text:
-        text = _SK_SECRET.sub("sk-***", text)
-    if "://" in text:
-        text = _USERINFO_PASSWORD.sub(r"\1" + _REDACTED + "@", text)
-    if '"' in text:
-        text = _SECRET_IN_TEXT.sub(lambda m: m.group(1) + '"' + _REDACTED + '"', text)
-    if "Authorization" in text or "authorization" in text:
-        text = _AUTHORIZATION_BEARER.sub(lambda m: m.group(1) + _REDACTED, text)
-    if "_TOKEN" in text or "_PASSWORD" in text or "_SECRET" in text:
-        text = _ENV_SECRET.sub(lambda m: m.group(1) + m.group(2) + _REDACTED + m.group(2), text)
-    redacted = text.strip()
-    if len(redacted) > _ERROR_SUMMARY_LIMIT:
-        return redacted[: _ERROR_SUMMARY_LIMIT - 3].rstrip() + "..."
-    return redacted
 
 
 # meiva:note

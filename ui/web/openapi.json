@@ -9777,6 +9777,29 @@
               }
             ],
             "title": "Harness Exit At"
+          },
+          "last_turn_fatal_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Turn Fatal At"
+          },
+          "last_turn_fatal_reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Turn Fatal Reason"
           }
         },
         "type": "object",

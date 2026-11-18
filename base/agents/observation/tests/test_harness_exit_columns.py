@@ -43,14 +43,23 @@ def test_the_exit_status_pair_exists_and_its_writer_compiles(db_url: str) -> Non
                 conn.execute(
                     "SELECT column_name, is_nullable FROM information_schema.columns "
                     "WHERE table_name = 'agents_meta' "
-                    "AND column_name IN ('harness_exit_code', 'harness_exit_at')"
+                    "AND column_name IN ("
+                    "'harness_exit_code', 'harness_exit_at', "
+                    "'last_turn_fatal_at', 'last_turn_fatal_reason'"
+                    ")"
                 ).fetchall()
             )
-            assert columns == {"harness_exit_code": "YES", "harness_exit_at": "YES"}
+            assert columns == {
+                "harness_exit_code": "YES",
+                "harness_exit_at": "YES",
+                "last_turn_fatal_at": "YES",
+                "last_turn_fatal_reason": "YES",
+            }
             written = conn.execute(
-                "UPDATE agents_meta SET harness_exit_code = %s, harness_exit_at = now() "
+                "UPDATE agents_meta SET harness_exit_code = %s, harness_exit_at = now(), "
+                "last_turn_fatal_at = now(), last_turn_fatal_reason = %s "
                 "WHERE id = %s",
-                (7, -1),
+                (7, "boom", -1),
             )
             assert written.rowcount == 0
     finally:

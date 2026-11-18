@@ -66,7 +66,7 @@ _FULL_COLS = (
     ", a.config_overlay, mp.last_probe_at AS machine_probe_at, "
     "mp.agent_host_online, a.last_admission_at, "
     "a.last_launch_failure_reason, a.last_launch_failure_at, a.birth_config, a.last_launch_attempt_id, a.harness, "
-    "a.harness_exit_code, a.harness_exit_at"
+    "a.harness_exit_code, a.harness_exit_at, a.last_turn_fatal_at, a.last_turn_fatal_reason"
 )
 _FROM = (
     "FROM agents_meta a "
@@ -164,6 +164,11 @@ class AgentSnapshot(BaseModel):
     # 0 = the child exited normally; non-zero = it exited abnormally.
     harness_exit_code: int | None = None
     harness_exit_at: datetime | None = None
+    # meiva:note
+    # Most recent fatal turn timestamp and sanitized error summary since the last
+    # completed turn, normal self-termination, or resurrect; NULL when healthy.
+    last_turn_fatal_at: datetime | None = None
+    last_turn_fatal_reason: str | None = None
 
 
 def _is_config_map(value: object) -> TypeGuard[Mapping[str, object]]:
@@ -277,8 +282,7 @@ def db_now(conn: psycopg.Connection) -> datetime:
 
 # meiva:note
 # One `_FULL_COLS` row, a field per selected column. `questions_awaiting_response` is a json
-# array and the two configuration maps are jsonb; the reader validates all three. The harness
-# exit columns are selected but this snapshot does not report them.
+# array and the two configuration maps are jsonb; the reader validates all three.
 @dataclass(frozen=True)
 class _SnapshotRow:
     id: int
@@ -307,6 +311,8 @@ class _SnapshotRow:
     harness: str
     harness_exit_code: int | None
     harness_exit_at: datetime | None
+    last_turn_fatal_at: datetime | None
+    last_turn_fatal_reason: str | None
 
 
 def _row_to_snapshot(
@@ -345,6 +351,10 @@ def _row_to_snapshot(
             "llm_model": model,
             "reasoning_effort": effort,
             "config_overlay": _config_map(row.config_overlay, "config_overlay"),
+            "harness_exit_code": row.harness_exit_code,
+            "harness_exit_at": row.harness_exit_at,
+            "last_turn_fatal_at": row.last_turn_fatal_at,
+            "last_turn_fatal_reason": row.last_turn_fatal_reason,
             "observation": observation(row.machine_probe_at),
             "availability": availability(
                 status=row.status,

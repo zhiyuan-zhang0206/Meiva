@@ -34,6 +34,8 @@ class _Agent(BaseModel):
     last_inbound_at: datetime
     heartbeat_paused_until: datetime | None
     harness_exit_code: int | None
+    last_turn_fatal_at: datetime | None = None
+    last_turn_fatal_reason: str | None = None
     questions_awaiting_response: list[object]
 
 
@@ -66,6 +68,10 @@ def cmd_agents_get(access: GatewayAccess, agent_id: int, *, as_json: bool) -> in
     print(f"last inbound:      {_stamp(agent.last_inbound_at)}")
     print(f"heartbeat paused:  {_stamp(agent.heartbeat_paused_until)}")
     print(f"harness exit code: {exit_code}")
+    if agent.last_turn_fatal_at is not None:
+        print(f"last fatal at:     {_stamp(agent.last_turn_fatal_at)}")
+    if agent.last_turn_fatal_reason is not None:
+        print(f"last fatal reason: {_one_line(agent.last_turn_fatal_reason)}")
     print(f"open questions:    {len(agent.questions_awaiting_response)}")
     return 0
 

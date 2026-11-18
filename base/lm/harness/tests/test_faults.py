@@ -12,7 +12,12 @@ from __future__ import annotations
 
 from base.lm.harness.engine import HarnessTurn
 from base.lm.harness.events import Usage
-from base.lm.harness.faults import fault_message, requires_session_recycle, session_recycle_reason
+from base.lm.harness.faults import (
+    fault_message,
+    requires_session_recycle,
+    sanitize_error_text,
+    session_recycle_reason,
+)
 
 # meiva:note
 # The reply an `agy` turn streamed before it reported a failure: text the agent already read, and
@@ -227,3 +232,37 @@ def test_requires_session_recycle_positive_and_negative_controls() -> None:
         requires_session_recycle(turn(api_error_status=400, error_code="invalid_request")) is False
     )
     assert requires_session_recycle(turn(error_code="rate_limit")) is False
+
+
+def test_sanitize_error_text_redacts_secrets_and_truncates() -> None:
+    proxy_val = "fixture-proxypass"
+    bearer_val = "fixture-bearer-123"
+    header_val = "fixture-api-key"
+    json_val = "fixture-json-key"
+    env_val = "fixture-env-token"
+    sk_val = "sk-" + "fixture-secret-01"
+    raw = (
+        "  connect failed "
+        + "https://"
+        + f"proxyuser:{proxy_val}@127.0.0.1:7890 "
+        + "Authorization: Bearer "
+        + f"{bearer_val} "
+        + f'x-api-key: {header_val} {{"api_key": "{json_val}", "token_count": 3}} '
+        + f"MEIVA_API_TOKEN={env_val} rejected {sk_val} "
+    )
+    cleaned = sanitize_error_text(raw)
+    assert proxy_val not in cleaned
+    assert bearer_val not in cleaned
+    assert header_val not in cleaned
+    assert json_val not in cleaned
+    assert env_val not in cleaned
+    assert sk_val not in cleaned
+    assert "sk-***" in cleaned
+    assert "MEIVA_API_TOKEN=***" in cleaned
+    assert "proxyuser:***@127.0.0.1:7890" in cleaned
+    assert '"token_count": 3' in cleaned
+
+    long_error = "proxy connect timeout " + ("x" * 1200)
+    capped = sanitize_error_text(long_error)
+    assert len(capped) == 1000
+    assert capped.endswith("...")

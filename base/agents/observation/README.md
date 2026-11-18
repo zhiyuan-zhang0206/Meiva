@@ -64,6 +64,11 @@ it exited abnormally. `harness_exit_at` is when the host read it, after the chil
 reaped. Nothing here changes lifecycle state — a crashed CLI and a finished turn still
 look the same in `status` (task #5616).
 
+Snapshots (`AgentSnapshot`) also carry `last_turn_fatal_at` and `last_turn_fatal_reason`
+when a hosted turn crashes (`stamp_turn_fatal`), holding the sanitized, bounded summary of
+the most recent fatal turn error until a completed turn, normal self-termination, or
+resurrect clears it (task #7348).
+
 ## Agent capability projection
 
 Model projections take an explicit `default_model` value from their caller.
