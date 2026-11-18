@@ -156,8 +156,12 @@ def run_escalation_pass(
         due = due_escalations(conn, now=now, min_age_s=min_age_s, limit=limit)
     if not due:
         return 0
+    # meiva:note
+    # INFO, not WARNING: shadow mode pages nobody, and this line is the rehearsal's record. The log
+    # alert rules count WARNING and above, so a rehearsal at WARNING would be counted by the very
+    # spike it announces and feed itself a new escalation candidate.
     for candidate in due:
-        _log.warning(
+        _log.info(
             "[events-maintenance] escalation would page a person: alert=%s id=%s severity=%s "
             "open_for=%.0fs mode=%s",
             candidate.alertname,

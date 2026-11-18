@@ -10,6 +10,7 @@
 # has no untrusted command to flag.
 from __future__ import annotations
 
+import logging
 from datetime import UTC, datetime, timedelta
 
 import psycopg
@@ -101,6 +102,28 @@ def test_shadow_records_the_decision_without_claiming_a_delivery(
 
     assert decided == 1
     assert _ledger(db_conn, alert_id) == (0, 1, "shadow")
+
+
+def test_a_shadow_rehearsal_logs_below_warning(
+    db_conn: psycopg.Connection,
+    database_gate: ProcessDbGate,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    # meiva:note
+    # The alert rules count WARNING and above; a rehearsal logged there would raise the spike it
+    # reports on and be decided again as a new candidate.
+    _insert_alert(db_conn, starts_at=NOW - timedelta(minutes=15))
+    pool = base.db.pool(gate=database_gate)
+    try:
+        with caplog.at_level(logging.DEBUG):
+            run_escalation_pass(
+                pool, mode=EscalationMode.SHADOW, now=NOW, min_age_s=600, cooldown_s=1800
+            )
+    finally:
+        pool.close()
+
+    rehearsals = [r for r in caplog.records if "escalation would page a person" in r.message]
+    assert [r.levelno for r in rehearsals] == [logging.INFO]
 
 
 def test_the_cooldown_on_the_ledger_holds_across_restarts(

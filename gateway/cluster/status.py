@@ -43,6 +43,10 @@ from base.host.system.hostport import Host
 from base.lm.catalog import ModelCatalog
 from base.lm.usage import vendor_of_model
 from base.native_process.loaded_commit import LoadedCommit
+from base.packages.plugins.loading.ui_declarations import (
+    InvalidPluginManifestError,
+    declared_stat_cards,
+)
 from base.packages.plugins.surface import stats
 from gateway.cluster._health import get_health
 from gateway.cluster.monitor import stats_events
@@ -136,6 +140,12 @@ def get_stats_dashboard(
     hours: Annotated[StatsWindowHours, Query()] = StatsWindowHours.H24,
 ) -> StatsDashboard:
     try:
+        declared_cards = declared_stat_cards(
+            home=gateway_state(request).gateway_process.home, report=_note_unloaded_stats_face
+        )
+    except InvalidPluginManifestError as exc:
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+    try:
         return _compute_stats_dashboard(
             gateway_state(request).db_pool,
             hours,
@@ -143,9 +153,18 @@ def get_stats_dashboard(
             gateway_clock(request),
             cluster=gateway_cluster(request),
             catalog=catalog_for_observation(request_catalog(request)),
+            declared_cards=declared_cards,
         )
     except psycopg.errors.QueryCanceled as exc:
         raise HTTPException(status_code=503, detail="stats read timed out; retry") from exc
+
+
+# meiva:note
+# The dashboard asks for the declared cards on every poll, so a `statsFace` that fails to load is
+# a debug line here: `/api/ui/contributions`, which the console reads, reports the same failure
+# loudly. The face then declares nothing and its rows stay hidden.
+def _note_unloaded_stats_face(plugin: str, exc: BaseException) -> None:
+    _log.debug("plugin %s: statsFace not loaded for the dashboard: %r", plugin, exc)
 
 
 def _provider_api_costs(
@@ -175,6 +194,7 @@ def _compute_stats_dashboard(
     *,
     cluster: str,
     catalog: ModelCatalog | None,
+    declared_cards: frozenset[tuple[str, str]],
 ) -> StatsDashboard:
     """Assemble the payload from one pooled connection."""
 
@@ -220,17 +240,22 @@ def _compute_stats_dashboard(
         errors_resolved=classes.errors_resolved,
         alert_classes_active=classes.classes_unresolved,
         alert_classes_dismissed=classes.classes_resolved,
-        plugin_stats=_plugin_stat_rows(pool),
+        plugin_stats=_plugin_stat_rows(pool, declared_cards),
         as_of=clock.now(),
     )
 
 
 # meiva:note
-# The runtime values behind plugin-declared status cards, for the response.
-# Not windowed: a plugin value is a point in time (`PluginStat`), and the console
-# joins these rows against `contributions.ui.stats` declarations by `(plugin, id)`.
+# The runtime values behind plugin-declared status cards, for the response. Only the rows of a
+# card an enabled plugin declares now (`declared`: the `(plugin, id)` of its `contributions.ui.stats`
+# entries and `statsFace` cards). A row outlives its declaration when a plugin is disabled,
+# removed or splits a card, and `meiva stats` does not join against the declarations as the
+# console does, so an orphan row would be shown there as a live reading.
+# Not windowed: a plugin value is a point in time (`PluginStat`).
 # meiva:link gateway/cluster/docs/ops-surfaces.md
-def _plugin_stat_rows(pool: ConnectionPool) -> list[PluginStat]:
+def _plugin_stat_rows(
+    pool: ConnectionPool, declared: frozenset[tuple[str, str]]
+) -> list[PluginStat]:
     return [
         PluginStat(
             plugin=row.plugin,
@@ -243,6 +268,7 @@ def _plugin_stat_rows(pool: ConnectionPool) -> list[PluginStat]:
             resets=[stats.StatReset.model_validate(r) for r in row.resets],
         )
         for row in stats.read_all(pool)
+        if (row.plugin, row.id) in declared
     ]
 
 

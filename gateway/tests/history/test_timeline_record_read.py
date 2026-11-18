@@ -21,6 +21,13 @@ from gateway.agents.history.record_timeline import record_items_of
 from gateway.tests.auth.gateway_config import GatewayTestClient, gateway_test_client
 from ops.cluster.rpc import ClusterOpUnreachable
 
+# meiva:note
+# The shipped default of `GatewaySettings.timeline_read_timeout_seconds` (used by callers that share
+# `ScriptedRunner` without overriding the gateway config), and a distinct deadline that the tests in
+# this file configure so an assertion can only pass when the read reads the config value.
+DEFAULT_READ_TIMEOUT_S = 15.0
+READ_TIMEOUT_S = 7.5
+
 
 class ScriptedRunner:
     def __init__(
@@ -28,9 +35,11 @@ class ScriptedRunner:
         answer: dict[str, object] | Exception,
         *,
         on_dispatch: Callable[[], None] | None = None,
+        expected_timeout_s: float = DEFAULT_READ_TIMEOUT_S,
     ) -> None:
         self.answer = answer
         self.on_dispatch = on_dispatch
+        self.expected_timeout_s = expected_timeout_s
         self.calls: list[tuple[str, str, dict[str, object]]] = []
 
     async def dispatch_to_machine(
@@ -48,7 +57,10 @@ class ScriptedRunner:
             assert str(payload["path"]).endswith("/resurrect-if-pending-work")
             return {"status": "spawned"}
         self.calls.append((target_machine, kind, payload))
-        assert (timeout_s, retries) == (3.0, 0), "a short read, never retried"
+        assert (timeout_s, retries) == (
+            self.expected_timeout_s,
+            0,
+        ), "the configured deadline, never retried"
         if self.on_dispatch is not None:
             self.on_dispatch()
         if isinstance(self.answer, Exception):
@@ -63,7 +75,7 @@ def record_harness(request: pytest.FixtureRequest) -> str:
 
 @pytest.fixture
 def client(db_url: str) -> Iterator[GatewayTestClient]:
-    with gateway_test_client() as value:
+    with gateway_test_client(fields={"timeline_read_timeout_seconds": READ_TIMEOUT_S}) as value:
         yield value
 
 
@@ -96,7 +108,8 @@ def test_the_timeline_is_a_window_of_the_record_read_on_the_agents_machine(
             "items": [_item("h413.0", "inbound_chat", "hi"), _item("h2620.0", "agent_chat", "yes")],
             "has_more": True,
             "size": 9800,
-        }
+        },
+        expected_timeout_s=READ_TIMEOUT_S,
     )
     client.app.state.rpc = runner
 
@@ -117,7 +130,8 @@ def test_a_page_before_an_item_asks_for_the_window_that_ends_at_its_row(
 ) -> None:
     agent = _record_agent(db_conn, record_harness)
     runner = ScriptedRunner(
-        {"items": [_item("h100.0", "agent_chat", "old")], "has_more": False, "size": 9800}
+        {"items": [_item("h100.0", "agent_chat", "old")], "has_more": False, "size": 9800},
+        expected_timeout_s=READ_TIMEOUT_S,
     )
     client.app.state.rpc = runner
 
@@ -133,7 +147,9 @@ def test_an_unreachable_machine_is_a_503_and_not_an_empty_history(
     record_harness: str,
 ) -> None:
     agent = _record_agent(db_conn, record_harness)
-    client.app.state.rpc = ScriptedRunner(ClusterOpUnreachable("the machine is down"))
+    client.app.state.rpc = ScriptedRunner(
+        ClusterOpUnreachable("the machine is down"), expected_timeout_s=READ_TIMEOUT_S
+    )
 
     response = client.get(f"/api/agents/{agent}/timeline")
 
@@ -146,7 +162,9 @@ def test_a_session_with_no_record_is_an_empty_timeline(
     record_harness: str,
 ) -> None:
     agent = _record_agent(db_conn, record_harness)
-    client.app.state.rpc = ScriptedRunner({"items": [], "has_more": False, "size": 0})
+    client.app.state.rpc = ScriptedRunner(
+        {"items": [], "has_more": False, "size": 0}, expected_timeout_s=READ_TIMEOUT_S
+    )
 
     response = client.get(f"/api/agents/{agent}/timeline")
 
@@ -162,7 +180,9 @@ def test_a_cursor_that_is_not_an_offset_id_is_answered_like_any_harness_and_asks
     record_harness: str,
 ) -> None:
     agent = _record_agent(db_conn, record_harness)
-    runner = ScriptedRunner({"items": [], "has_more": False, "size": 0})
+    runner = ScriptedRunner(
+        {"items": [], "has_more": False, "size": 0}, expected_timeout_s=READ_TIMEOUT_S
+    )
     client.app.state.rpc = runner
 
     response = client.get(f"/api/agents/{agent}/timeline?before={before}")
@@ -203,7 +223,8 @@ def test_quote_post_requires_the_exact_record_offset(
             "size": 9800,
             "anchor_applied": True,
             "anchor_item_id": f"h{returned_offset}.0" if returned_offset is not None else None,
-        }
+        },
+        expected_timeout_s=READ_TIMEOUT_S,
     )
     client.app.state.rpc = runner
     response = client.post(
@@ -254,7 +275,9 @@ def test_pending_record_activity_requires_a_running_agent(
         created_at="2026-11-12T08:56:00+00:00",
         activity_pending=True,
     ).model_dump(mode="json")
-    client.app.state.rpc = ScriptedRunner({"items": [item], "has_more": True, "size": 9800})
+    client.app.state.rpc = ScriptedRunner(
+        {"items": [item], "has_more": True, "size": 9800}, expected_timeout_s=READ_TIMEOUT_S
+    )
 
     response = client.get(f"/api/agents/{agent}/timeline")
 
@@ -293,7 +316,9 @@ def test_record_activity_uses_status_after_the_rpc_returns(
         activity_pending=True,
     ).model_dump(mode="json")
     runner = ScriptedRunner(
-        {"items": [item], "has_more": True, "size": 9800}, on_dispatch=transition_during_rpc
+        {"items": [item], "has_more": True, "size": 9800},
+        on_dispatch=transition_during_rpc,
+        expected_timeout_s=READ_TIMEOUT_S,
     )
     client.app.state.rpc = runner
 
@@ -333,7 +358,8 @@ def test_quote_requires_a_reader_that_confirms_the_anchor_selector(
             "items": [_item("h413.0", "agent_chat", "source")],
             "has_more": False,
             "size": 9800,
-        }
+        },
+        expected_timeout_s=READ_TIMEOUT_S,
     )
     response = client.post(
         f"/api/agents/{agent}/messages",
@@ -377,7 +403,8 @@ def test_quote_anchor_echo_does_not_replace_stable_source_identity(
             "size": 9800,
             "anchor_applied": True,
             "anchor_item_id": "h413.0",
-        }
+        },
+        expected_timeout_s=READ_TIMEOUT_S,
     )
     response = client.post(
         f"/api/agents/{agent}/messages",
@@ -436,6 +463,7 @@ def test_inclusive_quote_uses_canonical_activity_status(
             "anchor_item_id": "h413.0",
         },
         on_dispatch=transition,
+        expected_timeout_s=READ_TIMEOUT_S,
     )
     client.app.state.rpc = runner
 

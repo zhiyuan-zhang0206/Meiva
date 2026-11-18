@@ -23,7 +23,11 @@ from base.lm.harness.session.transcript.record_file import UnreadRows
 from base.paths import harness_sessions_dir
 from gateway.agents.history.timeline import TimelineResponse
 from gateway.tests.auth.gateway_config import GatewayTestClient, gateway_test_client
-from gateway.tests.history.test_timeline_record_read import ScriptedRunner
+from gateway.tests.history.test_timeline_record_read import (
+    DEFAULT_READ_TIMEOUT_S,
+    READ_TIMEOUT_S,
+    ScriptedRunner,
+)
 from ops.cluster.rpc import ClusterOpUnreachable
 from ops.harness_timeline import read_harness_timeline
 from ops.rpc_schemas import HarnessTimelineReadRequest
@@ -31,7 +35,7 @@ from ops.rpc_schemas import HarnessTimelineReadRequest
 
 @pytest.fixture
 def client(db_url: str) -> Iterator[GatewayTestClient]:
-    with gateway_test_client() as value:
+    with gateway_test_client(fields={"timeline_read_timeout_seconds": READ_TIMEOUT_S}) as value:
         yield value
 
 
@@ -55,7 +59,9 @@ def test_the_window_is_read_on_the_agents_machine_under_the_codex_harness(
         payload="hi",
         created_at="2026-11-12T19:45:25+00:00",
     ).model_dump(mode="json")
-    runner = ScriptedRunner({"items": [item], "has_more": False, "size": 68233})
+    runner = ScriptedRunner(
+        {"items": [item], "has_more": False, "size": 68233}, expected_timeout_s=READ_TIMEOUT_S
+    )
     client.app.state.rpc = runner
 
     body = TimelineResponse.model_validate_json(client.get(f"/api/agents/{agent}/timeline").text)
@@ -69,7 +75,9 @@ def test_an_unreachable_machine_is_a_503_and_not_an_empty_history(
     client: GatewayTestClient, db_conn: psycopg.Connection
 ) -> None:
     agent = _codex_agent(db_conn)
-    client.app.state.rpc = ScriptedRunner(ClusterOpUnreachable("the machine is down"))
+    client.app.state.rpc = ScriptedRunner(
+        ClusterOpUnreachable("the machine is down"), expected_timeout_s=READ_TIMEOUT_S
+    )
 
     assert client.get(f"/api/agents/{agent}/timeline").status_code == 503
 
@@ -78,7 +86,9 @@ def test_a_thread_with_no_rollout_is_an_empty_timeline(
     client: GatewayTestClient, db_conn: psycopg.Connection
 ) -> None:
     agent = _codex_agent(db_conn)
-    client.app.state.rpc = ScriptedRunner({"items": [], "has_more": False, "size": 0})
+    client.app.state.rpc = ScriptedRunner(
+        {"items": [], "has_more": False, "size": 0}, expected_timeout_s=READ_TIMEOUT_S
+    )
 
     response = client.get(f"/api/agents/{agent}/timeline")
 
@@ -94,9 +104,11 @@ class RecordOperationRunner:
         pool: ConnectionPool,
         *,
         on_dispatch: Callable[[], None] | None = None,
+        expected_timeout_s: float = DEFAULT_READ_TIMEOUT_S,
     ) -> None:
         self.home, self.environ, self.pool = home, environ, pool
         self.on_dispatch = on_dispatch
+        self.expected_timeout_s = expected_timeout_s
         self.raw_pending = False
 
     async def dispatch_to_machine(
@@ -114,7 +126,7 @@ class RecordOperationRunner:
             assert str(payload["path"]).endswith("/resurrect-if-pending-work")
             return {"status": "spawned"}
         assert target_machine == "macmini" and kind == "harness_timeline_read"
-        assert (timeout_s, retries) == (3.0, 0)
+        assert (timeout_s, retries) == (self.expected_timeout_s, 0)
         result = await asyncio.to_thread(
             read_harness_timeline,
             HarnessTimelineReadRequest.model_validate(payload),
@@ -163,7 +175,10 @@ def test_quote_http_reads_the_actual_complete_record_row(
     pool: ConnectionPool = ConnectionPool(db_url, min_size=1, max_size=1)
     with pool:
         client.app.state.rpc = RecordOperationRunner(
-            home, {"HOME": str(tmp_path), "CODEX_HOME": str(tmp_path / "codex")}, pool
+            home,
+            {"HOME": str(tmp_path), "CODEX_HOME": str(tmp_path / "codex")},
+            pool,
+            expected_timeout_s=READ_TIMEOUT_S,
         )
         response = client.get(f"/api/agents/{agent}/timeline")
         assert response.status_code == 200, response.text
@@ -260,7 +275,10 @@ def test_quote_record_activity_parity(
     pool: ConnectionPool = ConnectionPool(db_url, min_size=1, max_size=1)
     with pool:
         runner = RecordOperationRunner(
-            home, {"HOME": str(tmp_path), "CODEX_HOME": str(tmp_path / "codex")}, pool
+            home,
+            {"HOME": str(tmp_path), "CODEX_HOME": str(tmp_path / "codex")},
+            pool,
+            expected_timeout_s=READ_TIMEOUT_S,
         )
         client.app.state.rpc = runner
         timeline = client.get(f"/api/agents/{agent}/timeline")
@@ -340,7 +358,9 @@ def test_quote_rejects_incomplete_antigravity_planner_text(
     )
     pool: ConnectionPool = ConnectionPool(db_url, min_size=1, max_size=1)
     with pool:
-        client.app.state.rpc = RecordOperationRunner(home, {"HOME": str(tmp_path)}, pool)
+        client.app.state.rpc = RecordOperationRunner(
+            home, {"HOME": str(tmp_path)}, pool, expected_timeout_s=READ_TIMEOUT_S
+        )
         response = client.post(
             f"/api/agents/{agent}/messages",
             json={

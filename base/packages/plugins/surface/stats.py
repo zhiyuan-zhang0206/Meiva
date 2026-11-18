@@ -173,13 +173,12 @@ def upsert(
         )
 
 
+# meiva:note
+# Every card value, ordered by `(plugin, id)` — a stable read order. Unfiltered on purpose: which
+# cards are declared is the caller's knowledge (the manifests), not this table's, so a row whose
+# card was never declared (or whose plugin is now gone) is for the caller to drop; the status
+# dashboard does, against the enabled plugins' declarations. `pool` is the caller's.
 def read_all(pool: ConnectionPool[Connection[TupleRow]]) -> list[PluginStatRow]:
-    """Every card value, ordered by `(plugin, id)` — a stable read order.
-
-    Unfiltered on purpose: declarations are the console's side of the join,
-    so a row whose card was never declared (or whose plugin is now gone) is
-    the console's to ignore, not this read's to guess about. `pool` is the caller's.
-    """
     with pool.connection() as conn, conn.cursor(row_factory=class_row(PluginStatRow)) as cur:
         cur.execute(_SELECT_ALL)
         return cur.fetchall()

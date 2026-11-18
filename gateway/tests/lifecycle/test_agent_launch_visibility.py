@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Generator
+from contextlib import contextmanager
 from typing import Any
 
 import psycopg
@@ -11,6 +12,7 @@ from fastapi.testclient import TestClient
 
 from base.cluster.machine import MachineIdentityReader
 from base.cluster.machine.tests.identity import machine_identity as machine_identity
+from base.log import logger
 from gateway.tests.auth.gateway_config import gateway_test_client, spawn_via_http
 from gateway.tests.support.db_faults.insert_fault import failing_insert
 from gateway.tests.support.db_faults.missing_table import vanishing_table
@@ -40,6 +42,23 @@ def _assert_failed_birth_visible(client: TestClient, body: dict[str, Any], agent
     )
 
 
+# meiva:note
+# The level of each "launch dispatch failed" line the gateway logs inside the `with` block.
+@contextmanager
+def _launch_failure_levels() -> Generator[list[str]]:
+    levels: list[str] = []
+
+    def record(message: Any) -> None:
+        if "launch dispatch failed" in message.record["message"]:
+            levels.append(message.record["level"].name)
+
+    sink = logger.add(record, level="DEBUG")
+    try:
+        yield levels
+    finally:
+        logger.remove(sink)
+
+
 @pytest.fixture
 def offline_runner(
     db_conn: psycopg.Connection, machine_identity: MachineIdentityReader
@@ -57,9 +76,10 @@ def offline_runner(
 def test_failed_plain_launch_persists_prompt_and_advertises_guarded_recovery(
     offline_runner: RunnerOps, db_conn: psycopg.Connection
 ) -> None:
-    with gateway_test_client() as client:
+    with _launch_failure_levels() as levels, gateway_test_client() as client:
         failed = spawn_via_http(client, {"prompt": "Do the task", "prompt_source": "user"})
         assert failed.status_code == 502
+        assert levels == ["WARNING"], "a launch that is not admitted is a real failure"
         body = failed.json()
         agent_id = body["agent_id"]
         _assert_failed_birth_visible(client, body, agent_id)
@@ -151,10 +171,12 @@ def test_admission_winning_dispatch_failure_returns_accepted_receipt(
             {"spawn-launch": admit_then_fail},
             roles=("gateway", "agent-runner"),
         ),
+        _launch_failure_levels() as levels,
         gateway_test_client() as client,
     ):
         response = spawn_via_http(client, {"prompt": "Stay", "prompt_source": "user"})
     assert response.status_code == 201
+    assert levels == ["INFO"], "a refused attempt of an agent that is admitted is not a failure"
     agent_id = response.json()["id"]
     with db_conn.cursor() as cur:
         cur.execute(
