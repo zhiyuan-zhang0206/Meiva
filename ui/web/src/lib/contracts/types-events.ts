@@ -36,12 +36,7 @@ export interface TimelineResponse {
   readonly items: BackendTimelineItem[];
   readonly msg_count: number;
   readonly has_more: boolean;
-  readonly reading_source?: string | null;
 }
-
-export type ReadingWindowResponse = Omit<Schemas["ReadingWindow"], "items"> & {
-  readonly items: BackendTimelineItem[];
-};
 
 export type ConnectionEvent =
   | { type: "open" }

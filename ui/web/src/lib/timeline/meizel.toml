@@ -1,7 +1,6 @@
-exports = ["reading", "timeline-store.ts", "timeline-width.ts", "timeline.ts", "use-throttled-streaming.ts", "use-timeline.ts"]
+exports = ["timeline-store.ts", "timeline-width.ts", "timeline.ts", "use-throttled-streaming.ts", "use-timeline.ts"]
 
 [uses]
-"reading" = ["timeline.ts", "use-timeline.ts"]
 "tests" = ["timeline-store.ts", "timeline.ts", "use-timeline.ts"]
 "record-offset-ids.test.ts" = ["timeline-store-events.ts"]
 "timeline-scenarios.test.ts" = ["timeline.ts"]

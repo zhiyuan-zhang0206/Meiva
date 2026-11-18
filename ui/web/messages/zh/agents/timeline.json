@@ -62,17 +62,5 @@
   "quoteSelection": "引用选中文字",
   "quoteTooLong": "请选择不超过 4000 个字符。",
   "quoteSource": "引用 · {author}",
-  "quoteUnavailable": "原消息暂不可定位。",
-  "readingRestoreFailed": "暂时无法恢复阅读位置",
-  "readingSourceChanged": "历史内容已更新，当前内容和书签已保留。点“重试”重新加载此处。",
-  "readingUnsaved": "最新阅读位置尚未保存",
-  "retryPosition": "重试保存",
-  "cancelReadingRestore": "取消恢复",
-  "loadNewer": "阅读更新的消息",
-  "continueLatest": "继续阅读最新消息",
-  "readingBudgetExceeded": "保存的位置超出当前读取限制，原书签已保留。",
-  "readingIdentityUnavailable": "暂时无法确认保存的消息，原书签已保留。",
-  "readingSourceUnavailable": "保存的历史暂时不可用，原书签已保留。",
-  "readingRestoreCancelled": "已取消恢复，原书签已保留。",
-  "readingRestoreTimedOut": "恢复等待超时，原书签已保留。"
+  "quoteUnavailable": "原消息暂不可定位。"
 }

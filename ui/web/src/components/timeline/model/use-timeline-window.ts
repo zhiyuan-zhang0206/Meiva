@@ -40,7 +40,7 @@ export function useTimelineWindowLimits() {
 }
 
 // meiva:note
-// Source locators require the actual item; legacy bookmarks may use a collapsed turn.
+// Locate a saved reading item, including a child whose turn is now collapsed.
 export function resolveSavedTimelineAnchor(
   viewport: HTMLElement,
   anchor: NonNullable<SavedScroll["anchor"]>,
@@ -51,9 +51,9 @@ export function resolveSavedTimelineAnchor(
   const rank = anchor.rank;
   const rankId = CSS.escape(`${rank}:${anchor.itemId}`);
   const exact = viewport.querySelector<HTMLElement>(
-    `.timeline-item[data-item-id="${id}"][data-display-rank="${rank}"]${anchor.readingLocator ? "" : `, [data-turn-expanded="false"][data-item-id="${id}"][data-display-rank="${rank}"]`}`,
+    `.timeline-item[data-item-id="${id}"][data-display-rank="${rank}"], [data-turn-expanded="false"][data-item-id="${id}"][data-display-rank="${rank}"]`,
   );
-  const collapsed = exact || anchor.readingLocator ? null : viewport.querySelector<HTMLElement>(
+  const collapsed = exact ? null : viewport.querySelector<HTMLElement>(
     `[data-turn-expanded="false"][data-turn-member-ranks~="${rankId}"], [data-turn-expanded="false"][data-turn-member-ids~="${id}"][data-display-rank="${rank}"]`,
   );
   const buffered = compactBuffer?.rows.some((row) => row.rank === rank && row.item.item_id === anchor.itemId) === true;

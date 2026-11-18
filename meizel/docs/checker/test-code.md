@@ -33,7 +33,7 @@ ships carry.
 | module | records | test files that write it | why it is a double |
 |---|---:|---|---|
 | `ui/web/src/components/agent-sidebar/sidebar-test-mock.tsx` | 141 | `agent-sidebar.test.tsx` (34), `sidebar-status-cards.test.tsx` (56), `sidebar-tree-and-search.test.tsx` (51) | the rail's scenario object: the props the page hands it, and the settings, stats and plugin declarations it reads |
-| `ui/web/src/app/page-test-mock.tsx` | 111 | `ui/web/src/app/page.test.tsx` (61), `ui/web/src/app/tests/page-dispatch.test.tsx` (50) | the home page's `hooksState` and its provider wrapper |
+| `ui/web/src/app/page-test-mock.tsx` | 111 | `page.test.tsx` (61), `page-dispatch.test.tsx` (50) | the home page's `hooksState` and its provider wrapper |
 | `ui/web/src/components/inspector/inspector-test-mock.tsx` | 4 | `inspector-panel-chrome.test.tsx` (3), `inspector-panel-state.test.tsx` (1) | the inspector's `inspectorMockState` |
 
 256 records, every one of them a write into a state object the double exports: no `vi.mock`, and no patch
@@ -103,11 +103,3 @@ The dispatch file moves from 46 to 50 sites, the Home double from 107 to 111,
 and the three documented doubles from 252 to 256 records (259 raw first-party
 patch sites). These source scan counts preserve the historical measurements
 above; the exemption rule and production-import control are unchanged.
-
-The Home reading test grouping moves the dispatch consumer into `ui/web/src/app/tests/`
-while retaining `ui/web/src/app/page-test-mock.tsx` as its double owner. Its 50 writes,
-the Home owner's 111 records, the other owners' 141 and 4 records, and all 259 raw
-sites stay unchanged. The timeline scroll consumers move together into the
-component's `reading/` test group; their relative mocks still target the same
-Markdown and scroll-area modules. This relocates consumers without changing the
-exemption rule or the production-import controls.

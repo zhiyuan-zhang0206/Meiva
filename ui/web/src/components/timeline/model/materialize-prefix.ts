@@ -1,18 +1,10 @@
 // meiva:note
-// Measure the target and its prefix to a fixpoint before restoring/prepending.
+// Measure a prefix to a fixpoint before restoring/prepending around its anchor.
 // Keep successful measurements materialized: returning to auto can restore
 // intrinsic estimates and move the reader after compensation. Bounded mounting
 // releases the measured nodes as the conversation scrolls.
 export function materializeBeforeAnchor(viewport: HTMLElement, anchor: HTMLElement) {
   const saved: { el: HTMLElement; cv: string }[] = [];
-  // meiva:note
-  // A long final row can still use its intrinsic estimate while outside the
-  // viewport. Measure that target too, so its real height supplies the range
-  // needed to restore a negative offset before scrolling it into view.
-  if (anchor.style.contentVisibility !== "visible") {
-    saved.push({ el: anchor, cv: anchor.style.contentVisibility });
-    anchor.style.contentVisibility = "visible";
-  }
   let anchorTop = anchor.getBoundingClientRect().top;
   for (;;) {
     let forcedAny = false;

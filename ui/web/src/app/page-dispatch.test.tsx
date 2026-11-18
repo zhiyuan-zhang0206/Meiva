@@ -6,13 +6,12 @@ import { act, cleanup, fireEvent, screen, waitFor } from "@testing-library/react
 import { renderWithBrowser } from "@/test-support/render";
 import { ApiProvider, StreamHubProvider, WallClockProvider } from "@/lib/transport/transport-context";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { cleanupHomePageTest, gatewayWrapper, HomePageView, homePageProps, HomePageBound as HomePage, hooksState, makeAgent, resetHomePageTestState, wrap } from "../page-test-mock";
+import { cleanupHomePageTest, gatewayWrapper, HomePageView, homePageProps, HomePageBound as HomePage, hooksState, makeAgent, resetHomePageTestState, wrap } from "./page-test-mock";
 
 import { resetTransport, transport } from "@/test-support/fake-api";
 import { TimelineView } from "@/components/timeline";
 import { USER_SETTING_DEFAULTS, type BackendTimelineItem, type TimelineResponse, type ConversationSnapshotResponse } from "@/lib/contracts/types";
 import { useTimeline } from "@/lib/timeline/use-timeline";
-import { useReadingWindow } from "@/lib/timeline/reading/use-reading-window";
 import { useTimelineStore } from "@/lib/timeline/timeline-store";
 import { fakeStreamHub, TestStreamProvider } from "@/test-support/fake-stream";
 import { deferred } from "@/test-support/deferred";
@@ -679,8 +678,7 @@ function FreshMeasuredTimeline(props: ComponentProps<typeof TimelineView>) {
     const { hub } = fakeStreamHub();
     const entry = "seen-before-authority";
     function Reader({ id }: { id: number }) {
-      const live = useTimeline(id, () => undefined);
-      const timeline = useReadingWindow(id, `${entry}:agent:${id}`, live);
+      const timeline = useTimeline(id, () => undefined);
       current = timeline;
       const props = homePageProps();
       const agent = makeAgent({ agent_id: id, status: "idling" });
@@ -698,9 +696,6 @@ function FreshMeasuredTimeline(props: ComponentProps<typeof TimelineView>) {
     const view = renderWithBrowser(surface(42));
     await waitFor(() => expect(current?.sourceReady).toBe(true));
     resize();
-    const retrySave = await screen.findByRole("button", { name: "Retry saving" });
-    expect(retrySave.parentElement?.classList.contains("pointer-events-none")).toBe(true);
-    expect(retrySave.classList.contains("pointer-events-auto")).toBe(true);
     act(() => { viewport().scrollTop = 4400; fireEvent.scroll(viewport()); });
     expect(atBottom()).toBe(true);
     view.rerender(surface(43));

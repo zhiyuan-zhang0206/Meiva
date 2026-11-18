@@ -16,7 +16,7 @@ exports = ["agents", "auth", "browser", "composer", "context", "contracts", "fle
 "plugins" = ["contracts", "transport"]
 "state" = ["contracts", "telemetry", "transport"]
 "telemetry" = ["browser", "transport"]
-"timeline" = ["agents", "browser", "contracts", "fold", "format", "layout", "transport"]
+"timeline" = ["agents", "contracts", "fold", "format", "layout", "transport"]
 "transport" = ["browser", "contracts", "fold"]
 
 [purity]

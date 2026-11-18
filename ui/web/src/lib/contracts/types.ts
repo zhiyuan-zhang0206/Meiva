@@ -44,7 +44,6 @@ export {
   type TaskCreatedEvent,
   type TaskUpdatedEvent,
   type TimelineResponse,
-  type ReadingWindowResponse,
   type TimelineSnapshotEvent,
   type ToUserChangedEvent,
   type TokenUsageEvent,

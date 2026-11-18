@@ -1,4 +1,4 @@
-import { useCallback, useLayoutEffect, useRef, useState } from "react";
+import { useCallback, useLayoutEffect, useState } from "react";
 
 import { readTimelineExpansion, rememberTimelineExpansion } from "../model/reading-position";
 
@@ -31,14 +31,6 @@ export function useTimelineExpansion({
     });
   }, []);
 
-  const revealedReadingToken = useRef<object | null>(null);
-  const revealReadingTarget = useCallback((token: object, itemId: string, turnKey: string | null) => {
-    if (revealedReadingToken.current === token) return;
-    revealedReadingToken.current = token;
-    setOverrides((prev) => new Map(prev).set(itemId, true));
-    if (turnKey !== null) setTurnOverrides((prev) => new Map(prev).set(turnKey, true));
-  }, []);
-
   const [prevThreadKey, setPrevThreadKey] = useState(threadKey);
   if (prevThreadKey !== threadKey) {
     setPrevThreadKey(threadKey);
@@ -58,6 +50,5 @@ export function useTimelineExpansion({
     toggleTurn,
     overrides,
     toggleExpanded,
-    revealReadingTarget,
   };
 }

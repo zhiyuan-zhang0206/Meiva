@@ -87,8 +87,6 @@ export interface UseTimelineResult {
   // meiva:link ui/web/src/docs/frontend-components/timeline-view/sticky-scroll.md
   isLoading: boolean;
   sourceReady: boolean;
-  sourceVersion: number;
-  readFreshHead: (signal: AbortSignal) => Promise<{ data: TimelineResponse; accepted: boolean }>;
   /** Background refresh in flight — during stale-while-revalidate;
    *   data is already displayed at this point. */
   isRefetching: boolean;
@@ -137,7 +135,6 @@ export function useTimeline(
   const owner = useRef<typeof selection | null>(selection);
   const [headReceipt, setHeadReceipt] = useState<{ selection: typeof selection; data: TimelineResponse; epoch: number } | null>(null);
   const [qualified, setQualified] = useState<typeof selection | null>(null);
-  const [sourceVersion, setSourceVersion] = useState(0);
   const appliedReceipt = useRef<typeof headReceipt>(null);
   useLayoutEffect(() => { owner.current = selection; return () => { owner.current = null; }; }, [selection]);
   const olderRequest = useRef<AbortController | null>(null);
@@ -209,21 +206,6 @@ export function useTimeline(
   const compactPending = useRef(false);
 
   const lastAppliedDataRef = useRef<TimelineResponse | null>(null);
-  const readFreshHead = useCallback(async (signal: AbortSignal) => {
-    if (agentId === null) throw new Error("A fresh head requires a selected agent");
-    const epoch = useTimelineStore.getState().compactEpoch;
-    const data = await api.getTimeline(agentId, { signal });
-    const current = useTimelineStore.getState();
-    if (signal.aborted || owner.current !== selection || current.activeThreadId !== agentId ||
-      current.compactEpoch !== epoch) return { data, accepted: false };
-    const accepted = reloadSnapshot(data.items, data.msg_count, data.has_more);
-    if (accepted) {
-      lastAppliedDataRef.current = data;
-      queryClient.setQueryData(["timeline", agentId], data);
-      setQualified(selection);
-    }
-    return { data, accepted };
-  }, [agentId, api, queryClient, reloadSnapshot, selection]);
   type ReadingWindow = Pick<ReturnType<typeof useTimelineStore.getState>, "items" | "compactBuffer" | "hasMoreOlder">;
 
   useLayoutEffect(() => {
@@ -268,10 +250,7 @@ export function useTimeline(
       if (applied) {
         lastAppliedDataRef.current = data;
         if (receipt) appliedReceipt.current = receipt;
-        if (completion) {
-          setQualified(selection);
-          setSourceVersion((version) => version + 1);
-        }
+        if (completion) setQualified(selection);
       }
     }
   }, [timelineQuery.data, agentId, reloadSnapshot, headReceipt, readRevision, selection, qualified]);
@@ -524,8 +503,6 @@ export function useTimeline(
     connectionState,
     turnActive: selected && turnActive,
     sourceReady: selected && qualified === selection && snapshotReady,
-    sourceVersion,
-    readFreshHead,
     isLoading: timelineQuery.isLoading || (agentId !== null && !timelineQuery.error && (qualified !== selection || !snapshotReady)),
     isRefetching: timelineQuery.isRefetching || isReconciling,
     error: timelineQuery.error,
