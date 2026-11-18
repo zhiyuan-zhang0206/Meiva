@@ -1,12 +1,24 @@
-import type { RefObject } from "react";
+import { useCallback, useEffect, useLayoutEffect, useRef, useState, type RefObject } from "react";
 
 import type { BackendTimelineItem } from "@/lib/contracts/types";
 import type { CompactTransitionBuffer } from "@/lib/layout/compact-transition";
 import type { SavedScroll } from "@/lib/layout/scroll-memory";
 import type { StickyController } from "@/lib/layout/sticky";
+import type { OlderLoadOrigin } from "@/lib/timeline/use-timeline";
 
-import { settleSavedTimelineScroll } from "@/components/timeline/model/restore-settle";
-import { applySavedTimelineScroll } from "@/components/timeline/model/use-timeline-window";
+import {
+  matchReloadBookmark,
+  oldestReloadCursorId,
+  readReloadBookmark,
+  RELOAD_RESTORE_MAX_OLDER_ITEMS,
+  RELOAD_RESTORE_MAX_OLDER_PAGES,
+  reloadBookmarkToSavedScroll,
+  removeReloadBookmark,
+  type ReloadReadingBookmark,
+  type ReloadRestoreConfig,
+} from "./reading-position";
+import { settleSavedTimelineScroll } from "./restore-settle";
+import { applySavedTimelineScroll } from "./use-timeline-window";
 
 // meiva:note
 // A bookmark restore owns the viewport until it lands (applyBookmarkRestore), keeps the layout from pinning meanwhile (the hold), and then verifies its own target on later layout passes (settleRestoredPosition). Two escapes keep a bookmark from owning the viewport forever: a bookmark past the end of a page that stopped growing lands on the end, and a settle that reaches its target releases the hold so following and the position save resume.
@@ -103,4 +115,390 @@ export function settleRestoredPosition({
     state.settled.current = null;
     state.hold.current = false;
   }
+}
+
+type ReloadPhase =
+  | { readonly kind: "idle"; readonly threadKey: string | undefined; readonly seq: number }
+  | { readonly kind: "waiting_settings"; readonly threadKey: string; readonly seq: number }
+  | {
+      readonly kind: "searching";
+      readonly threadKey: string;
+      readonly seq: number;
+      readonly bookmark: ReloadReadingBookmark;
+      readonly baselineCount: number | null;
+      readonly pagesLoaded: number;
+      readonly prependedItems: number;
+      readonly requestedBeforeId: string | null;
+      readonly itemsCountAtRequest: number;
+      readonly sawLoading: boolean;
+    }
+  | {
+      readonly kind: "matched";
+      readonly threadKey: string;
+      readonly seq: number;
+      readonly saved: SavedScroll;
+    }
+  | {
+      readonly kind: "abandoned";
+      readonly threadKey: string;
+      readonly seq: number;
+      readonly clearStoredBookmark: boolean;
+    };
+
+export interface InitialTimelineBookmark {
+  readonly inMemorySaved: SavedScroll | null;
+  readonly initialReloadBookmark: ReloadReadingBookmark | null;
+  readonly savedPosition: SavedScroll | null;
+}
+
+export function resolveInitialTimelineBookmark(
+  inMemorySaved: SavedScroll | null,
+  threadKey: string | undefined,
+  reloadRestore: ReloadRestoreConfig,
+): InitialTimelineBookmark {
+  if (inMemorySaved !== null) {
+    return {
+      inMemorySaved,
+      initialReloadBookmark: null,
+      savedPosition: inMemorySaved,
+    };
+  }
+  if (threadKey === undefined || reloadRestore.state === "disabled") {
+    return {
+      inMemorySaved: null,
+      initialReloadBookmark: null,
+      savedPosition: null,
+    };
+  }
+  if (reloadRestore.state === "loading") {
+    return {
+      inMemorySaved: null,
+      initialReloadBookmark: null,
+      savedPosition: { contentKey: threadKey, scrollTop: 0, followBottom: false },
+    };
+  }
+  const bookmark = readReloadBookmark(reloadRestore.session, threadKey, reloadRestore.now());
+  return {
+    inMemorySaved: null,
+    initialReloadBookmark: bookmark,
+    savedPosition: bookmark ? reloadBookmarkToSavedScroll(threadKey, bookmark) : null,
+  };
+}
+
+function initReloadPhase(
+  inMemorySaved: SavedScroll | null,
+  threadKey: string | undefined,
+  reloadRestore: ReloadRestoreConfig,
+  seq: number,
+  preloadedBookmark?: ReloadReadingBookmark | null,
+): ReloadPhase {
+  if (inMemorySaved !== null && inMemorySaved.contentKey === threadKey) {
+    return { kind: "idle", threadKey, seq };
+  }
+  if (threadKey === undefined || reloadRestore.state === "disabled") {
+    return { kind: "idle", threadKey, seq };
+  }
+  if (reloadRestore.state === "loading") {
+    return { kind: "waiting_settings", threadKey, seq };
+  }
+  const bookmark =
+    preloadedBookmark !== undefined
+      ? preloadedBookmark
+      : readReloadBookmark(reloadRestore.session, threadKey, reloadRestore.now());
+  if (bookmark === null) {
+    return { kind: "idle", threadKey, seq };
+  }
+  return {
+    kind: "searching",
+    threadKey,
+    seq,
+    bookmark,
+    baselineCount: null,
+    pagesLoaded: 0,
+    prependedItems: 0,
+    requestedBeforeId: null,
+    itemsCountAtRequest: 0,
+    sawLoading: false,
+  };
+}
+
+// meiva:note
+// Coordinate cross-reload bookmark resolution on the single live timeline:
+// in-memory scrollMemory wins within the open page; otherwise a sessionStorage
+// bookmark resolves against the initial tail window or up to 5 background older
+// pages under ColdLoadSpinner, falling back silently to the live tail if
+// unreachable or interrupted by reader navigation.
+// meiva:link ui/web/src/docs/frontend-components/timeline-view/sticky-scroll.md
+export function useReloadBookmarkRestore({
+  inMemorySaved,
+  initialReloadBookmark,
+  threadKey,
+  reloadRestore,
+  loading,
+  restoreReady,
+  canonicalItems,
+  compactBuffer,
+  hasMoreOlder,
+  loadingOlder,
+  onLoadOlder,
+  pendingRef,
+  settledRef,
+  holdRef,
+  probeRef,
+  pendingAnchorRef,
+  viewportRef,
+  wrapperRef,
+  pinToBottom,
+  trimFollowing,
+}: {
+  inMemorySaved: SavedScroll | null;
+  initialReloadBookmark: ReloadReadingBookmark | null;
+  threadKey: string | undefined;
+  reloadRestore: ReloadRestoreConfig;
+  loading: boolean;
+  restoreReady: boolean;
+  canonicalItems: readonly BackendTimelineItem[];
+  compactBuffer: CompactTransitionBuffer | null;
+  hasMoreOlder: boolean;
+  loadingOlder: boolean;
+  onLoadOlder?: (origin: OlderLoadOrigin) => void;
+  pendingRef: RefObject<SavedScroll | null>;
+  settledRef: RefObject<SavedScroll | null>;
+  holdRef: RefObject<boolean>;
+  probeRef: RefObject<{ height: number; passes: number }>;
+  pendingAnchorRef: RefObject<{ id: string; rank: number; frontId: string | null; docTop: number } | null>;
+  viewportRef: RefObject<HTMLElement | null>;
+  wrapperRef: RefObject<HTMLDivElement | null>;
+  pinToBottom: (viewport: HTMLElement, freshRun?: boolean) => void;
+  trimFollowing: (allowDuringRide?: boolean) => boolean;
+}) {
+  const [phase, setPhase] = useState<ReloadPhase>(() =>
+    initReloadPhase(inMemorySaved, threadKey, reloadRestore, 1, initialReloadBookmark),
+  );
+
+  if (phase.threadKey !== threadKey) {
+    setPhase(initReloadPhase(inMemorySaved, threadKey, reloadRestore, phase.seq + 1));
+  } else if (reloadRestore.state === "disabled") {
+    if (phase.kind === "waiting_settings" || phase.kind === "searching") {
+      setPhase({
+        kind: "abandoned",
+        threadKey: phase.threadKey,
+        seq: phase.seq + 1,
+        clearStoredBookmark: false,
+      });
+    }
+  } else if (phase.kind === "waiting_settings" && reloadRestore.state === "enabled") {
+    const bookmark = readReloadBookmark(
+      reloadRestore.session,
+      phase.threadKey,
+      reloadRestore.now(),
+    );
+    if (bookmark !== null) {
+      setPhase({
+        kind: "searching",
+        threadKey: phase.threadKey,
+        seq: phase.seq + 1,
+        bookmark,
+        baselineCount: null,
+        pagesLoaded: 0,
+        prependedItems: 0,
+        requestedBeforeId: null,
+        itemsCountAtRequest: 0,
+        sawLoading: false,
+      });
+    } else {
+      setPhase({
+        kind: "abandoned",
+        threadKey: phase.threadKey,
+        seq: phase.seq + 1,
+        clearStoredBookmark: false,
+      });
+    }
+  } else if (phase.kind === "searching" && !loading && restoreReady) {
+    const match = matchReloadBookmark(phase.bookmark, canonicalItems, compactBuffer);
+    if (match !== null) {
+      setPhase({
+        kind: "matched",
+        threadKey: phase.threadKey,
+        seq: phase.seq + 1,
+        saved: reloadBookmarkToSavedScroll(phase.threadKey, phase.bookmark, match),
+      });
+    } else {
+      const maxPages =
+        reloadRestore.state === "enabled"
+          ? (reloadRestore.maxOlderPages ?? RELOAD_RESTORE_MAX_OLDER_PAGES)
+          : RELOAD_RESTORE_MAX_OLDER_PAGES;
+      const maxItems =
+        reloadRestore.state === "enabled"
+          ? (reloadRestore.maxOlderItems ?? RELOAD_RESTORE_MAX_OLDER_ITEMS)
+          : RELOAD_RESTORE_MAX_OLDER_ITEMS;
+      const baselineCount = phase.baselineCount ?? canonicalItems.length;
+      const currentOldest = oldestReloadCursorId(canonicalItems);
+
+      if (phase.requestedBeforeId !== null) {
+        if (loadingOlder && !phase.sawLoading) {
+          setPhase({ ...phase, baselineCount, sawLoading: true });
+        } else if (
+          !loadingOlder &&
+          (phase.sawLoading ||
+            canonicalItems.length > phase.itemsCountAtRequest ||
+            currentOldest !== phase.requestedBeforeId)
+        ) {
+          const progressed =
+            canonicalItems.length > phase.itemsCountAtRequest ||
+            (currentOldest !== null && currentOldest !== phase.requestedBeforeId);
+          const pagesLoaded = phase.pagesLoaded + 1;
+          const prependedItems = Math.max(0, canonicalItems.length - baselineCount);
+          const canContinue =
+            progressed &&
+            hasMoreOlder &&
+            Boolean(onLoadOlder) &&
+            currentOldest !== null &&
+            pagesLoaded < maxPages &&
+            prependedItems < maxItems;
+          if (canContinue) {
+            setPhase({
+              ...phase,
+              seq: phase.seq + 1,
+              baselineCount,
+              pagesLoaded,
+              prependedItems,
+              requestedBeforeId: currentOldest,
+              itemsCountAtRequest: canonicalItems.length,
+              sawLoading: false,
+            });
+          } else {
+            setPhase({
+              kind: "abandoned",
+              threadKey: phase.threadKey,
+              seq: phase.seq + 1,
+              clearStoredBookmark: true,
+            });
+          }
+        }
+      } else {
+        const canStart =
+          canonicalItems.length > 0 &&
+          hasMoreOlder &&
+          Boolean(onLoadOlder) &&
+          currentOldest !== null &&
+          phase.pagesLoaded < maxPages &&
+          phase.prependedItems < maxItems;
+        if (canStart) {
+          setPhase({
+            ...phase,
+            seq: phase.seq + 1,
+            baselineCount,
+            requestedBeforeId: currentOldest,
+            itemsCountAtRequest: canonicalItems.length,
+            sawLoading: loadingOlder,
+          });
+        } else {
+          setPhase({
+            kind: "abandoned",
+            threadKey: phase.threadKey,
+            seq: phase.seq + 1,
+            clearStoredBookmark: true,
+          });
+        }
+      }
+    }
+  }
+
+  const cancelReloadSearch = useCallback(() => {
+    setPhase((prev) =>
+      prev.kind === "waiting_settings" || prev.kind === "searching"
+        ? { kind: "idle", threadKey: prev.threadKey, seq: prev.seq + 1 }
+        : prev,
+    );
+  }, []);
+
+  const appliedSeqRef = useRef(0);
+  useLayoutEffect(() => {
+    if (appliedSeqRef.current === phase.seq) return;
+    if (phase.kind === "searching") {
+      appliedSeqRef.current = phase.seq;
+      pendingRef.current = reloadBookmarkToSavedScroll(
+        phase.threadKey,
+        phase.bookmark,
+      );
+      holdRef.current = true;
+      return;
+    }
+    if (phase.kind === "matched") {
+      appliedSeqRef.current = phase.seq;
+      pendingRef.current = phase.saved;
+      settledRef.current = null;
+      holdRef.current = true;
+      probeRef.current = { height: -1, passes: 0 };
+      return;
+    }
+    if (phase.kind === "abandoned") {
+      appliedSeqRef.current = phase.seq;
+      pendingAnchorRef.current = null;
+      pendingRef.current = null;
+      settledRef.current = null;
+      holdRef.current = false;
+      if (phase.clearStoredBookmark && reloadRestore.state === "enabled") {
+        removeReloadBookmark(
+          reloadRestore.session,
+          phase.threadKey,
+          reloadRestore.now(),
+        );
+      }
+      const viewport =
+        viewportRef.current ??
+        wrapperRef.current?.querySelector<HTMLElement>('[data-slot="scroll-area-viewport"]') ??
+        null;
+      if (viewport) {
+        pinToBottom(viewport, true);
+        if (trimFollowing(true)) pinToBottom(viewport, true);
+      }
+    }
+  }, [
+    holdRef,
+    pendingAnchorRef,
+    pendingRef,
+    phase,
+    pinToBottom,
+    probeRef,
+    reloadRestore,
+    settledRef,
+    trimFollowing,
+    viewportRef,
+    wrapperRef,
+  ]);
+
+  const requestedBeforeId = phase.kind === "searching" ? phase.requestedBeforeId : null;
+  const requestSeq = phase.kind === "searching" ? phase.seq : 0;
+  useEffect(() => {
+    if (requestedBeforeId === null || loadingOlder) return;
+    onLoadOlder?.("background");
+  }, [requestedBeforeId, requestSeq, loadingOlder, onLoadOlder]);
+
+  const reloadBlocking =
+    phase.kind === "waiting_settings" || phase.kind === "searching";
+  const reloadSearchingOlder =
+    phase.kind === "searching" && !loading && restoreReady;
+  const hasSavedPosition =
+    (inMemorySaved !== null && inMemorySaved.contentKey === threadKey) ||
+    phase.kind === "waiting_settings" ||
+    phase.kind === "searching" ||
+    phase.kind === "matched";
+  const activeSavedScroll =
+    phase.kind === "matched"
+      ? phase.saved
+      : phase.kind === "searching"
+        ? reloadBookmarkToSavedScroll(phase.threadKey, phase.bookmark)
+        : inMemorySaved !== null && inMemorySaved.contentKey === threadKey
+          ? inMemorySaved
+          : null;
+
+  return {
+    reloadBlocking,
+    reloadSearchingOlder,
+    hasSavedPosition,
+    activeSavedScroll,
+    cancelReloadSearch,
+  };
 }

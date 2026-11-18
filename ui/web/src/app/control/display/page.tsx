@@ -8,6 +8,7 @@
 import {
   Activity,
   AlertTriangle,
+  Bookmark,
   Calendar,
   CalendarClock,
   CircleDot,
@@ -180,6 +181,13 @@ export default function DisplaySettingsPage({ mode = "all" }: { mode?: "general"
           description={t("markdownImageZoomDesc")}
           value={readStoredSetting(settings["feature.markdownImageZoom"], true)}
           onChange={(v) => setSetting("feature.markdownImageZoom", v)}
+        />
+        <ToggleRow
+          icon={Bookmark}
+          label={t("reloadReadingRestore")}
+          description={t("reloadReadingRestoreDesc")}
+          value={readStoredSetting(settings["feature.reloadReadingRestore"], true)}
+          onChange={(v) => setSetting("feature.reloadReadingRestore", v)}
         />
       </SettingsSection>
       )}

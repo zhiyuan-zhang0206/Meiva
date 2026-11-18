@@ -61,6 +61,7 @@ describe("DisplaySettingsPage", () => {
     expect(screen.queryByText("Features")).toBeNull();
     expect(screen.queryByText("Quote text selection")).toBeNull();
     expect(screen.queryByText("Markdown image zoom")).toBeNull();
+    expect(screen.queryByText("Restore reading position on reload")).toBeNull();
     expect(screen.queryByText("Clock format")).toBeNull();
     expect(screen.queryByText("Show weekday in timestamps")).toBeNull();
     expect(screen.queryByText("Single realtime connection")).toBeNull();
@@ -297,8 +298,10 @@ describe("DisplaySettingsPage", () => {
     expect(await screen.findByText("Features")).toBeTruthy();
     const quoteToggle = screen.getByRole("switch", { name: "Quote text selection" });
     const zoomToggle = screen.getByRole("switch", { name: "Markdown image zoom" });
+    const reloadToggle = screen.getByRole("switch", { name: "Restore reading position on reload" });
     expect(quoteToggle.getAttribute("aria-checked")).toBe("true");
     expect(zoomToggle.getAttribute("aria-checked")).toBe("true");
+    expect(reloadToggle.getAttribute("aria-checked")).toBe("true");
 
     fireEvent.click(quoteToggle);
     await waitFor(() => {
@@ -309,6 +312,11 @@ describe("DisplaySettingsPage", () => {
     await waitFor(() => {
       expect(transport.putSetting).toHaveBeenCalledWith("feature.markdownImageZoom", false);
     });
+
+    fireEvent.click(reloadToggle);
+    await waitFor(() => {
+      expect(transport.putSetting).toHaveBeenCalledWith("feature.reloadReadingRestore", false);
+    });
   });
 
   it("shows feature toggles off when stored as false and falls back to true when malformed", async () => {
@@ -316,14 +324,17 @@ describe("DisplaySettingsPage", () => {
       settings: [
         { key: "feature.quoteSelection", value: false, updated_at: "2026-11-18T00:00:00Z" },
         { key: "feature.markdownImageZoom", value: "invalid", updated_at: "2026-11-18T00:00:00Z" },
+        { key: "feature.reloadReadingRestore", value: false, updated_at: "2026-11-18T00:00:00Z" },
       ],
     });
     renderPage("advanced");
 
     const quoteToggle = await screen.findByRole("switch", { name: "Quote text selection" });
     const zoomToggle = screen.getByRole("switch", { name: "Markdown image zoom" });
+    const reloadToggle = screen.getByRole("switch", { name: "Restore reading position on reload" });
     expect(quoteToggle.getAttribute("aria-checked")).toBe("false");
     expect(zoomToggle.getAttribute("aria-checked")).toBe("true");
+    expect(reloadToggle.getAttribute("aria-checked")).toBe("false");
   });
 
   it("renders localized Chinese copy for the Features section when locale is zh", async () => {
@@ -339,5 +350,6 @@ describe("DisplaySettingsPage", () => {
     expect(await screen.findByText("\u529f\u80fd")).toBeTruthy();
     expect(screen.getByRole("switch", { name: "\u9009\u4e2d\u6587\u5b57\u5f15\u7528" })).toBeTruthy();
     expect(screen.getByRole("switch", { name: "Markdown \u56fe\u7247\u653e\u5927\u9884\u89c8" })).toBeTruthy();
+    expect(screen.getByRole("switch", { name: "\u5237\u65b0\u540e\u6062\u590d\u9605\u8bfb\u4f4d\u7f6e" })).toBeTruthy();
   });
 });

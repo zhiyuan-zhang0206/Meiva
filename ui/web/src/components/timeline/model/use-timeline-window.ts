@@ -8,7 +8,7 @@ import type { BackendTimelineItem } from "@/lib/contracts/types";
 import { useDisplayLimit } from "@/lib/format/display-limits";
 import { TIMELINE_TURN_ROW_GAP_PX } from "@/lib/layout/layout";
 
-import { materializeBeforeAnchor } from "./materialize-prefix";
+import { materializeBeforeAnchor, materializeFromAnchor } from "./materialize-prefix";
 
 // meiva:note
 // Matches space-y-3 between timeline groups; details use the shared work-row gap.
@@ -79,14 +79,24 @@ export function applySavedTimelineScroll(
   const target = saved.followBottom || !saved.anchor ? null
     : resolveSavedTimelineAnchor(viewport, saved.anchor, compactBuffer, canonicalItems);
   if (target?.present && !target.node) return false;
-  if (target?.node) materializeBeforeAnchor(viewport, target.node);
-  const max = viewport.scrollHeight - viewport.clientHeight;
-  const top = saved.followBottom ? tailHeight - viewport.clientHeight : target?.node
+  if (target?.node) {
+    materializeBeforeAnchor(viewport, target.node);
+    materializeFromAnchor(viewport, target.node);
+  }
+  let top = saved.followBottom ? tailHeight - viewport.clientHeight : target?.node
     ? viewport.scrollTop + target.node.getBoundingClientRect().top - viewport.getBoundingClientRect().top - target.viewportTop
     : saved.scrollTop;
+  if (target?.node && top > viewport.scrollHeight - viewport.clientHeight) {
+    materializeFromAnchor(viewport, target.node, top);
+  }
+  const max = viewport.scrollHeight - viewport.clientHeight;
   if (top > max) {
-    if (!saved.usedCollapseReserve || !collapseReserve || !target?.node) return false;
-    collapseReserve.style.height = `${Math.ceil(top - max + collapseReserve.offsetHeight)}px`;
+    if (target?.node && !saved.usedCollapseReserve && top <= max + 1.5) {
+      top = max;
+    } else {
+      if (!saved.usedCollapseReserve || !collapseReserve || !target?.node) return false;
+      collapseReserve.style.height = `${Math.ceil(top - max + collapseReserve.offsetHeight)}px`;
+    }
   }
   viewport.scrollTop = Math.max(0, top);
   return true;

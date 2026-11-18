@@ -356,6 +356,7 @@ export async function resetHomePageTestState() {
     markUserMessagesSeen: transport.markUserMessagesSeen,
   };
   vi.clearAllMocks();
+  window.sessionStorage.clear();
   inspectorMockState.shouldThrow = false;
   inspectorMockState.mounts = 0;
   hooksState.agents = [];

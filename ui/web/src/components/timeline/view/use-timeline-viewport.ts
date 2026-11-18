@@ -225,6 +225,9 @@ export function useTimelineViewport({
   readingReserve,
   tailHeight,
   cancelPendingJump,
+  reloadBlockingRef,
+  cancelReloadSearch,
+  saveReloadPosition,
 }: {
   viewportObserverFactory?: (callback: ResizeObserverCallback) => ResizeObserver;
   wrapperRef: RefObject<HTMLDivElement | null>;
@@ -265,6 +268,9 @@ export function useTimelineViewport({
   readingReserve: () => number;
   tailHeight: (viewport: HTMLElement) => number;
   cancelPendingJump: () => void;
+  reloadBlockingRef: RefObject<boolean>;
+  cancelReloadSearch: () => void;
+  saveReloadPosition: (viewport: HTMLElement) => void;
 }) {
   const readingInputTop = useRef<number | null>(null);
   useEffect(() => {
@@ -290,7 +296,7 @@ export function useTimelineViewport({
       // and reserve changes can dispatch scroll before the resize observer.
       // meiva:link ui/web/src/docs/frontend-components/timeline-view/send-anchor.md
       const parked = controller.isAnchored() && maintainSendAnchor(viewport);
-      const direction = parked || (holdRestoredPositionRef.current && !pendingRestoreRef.current)
+      const direction = parked || reloadBlockingRef.current || (holdRestoredPositionRef.current && !pendingRestoreRef.current)
         ? "none" : controller.handleScroll(snapshot(), padded);
       if (direction === "up" && !scrollToBottomRideRef.current.active) coldFillRef.current.open = false;
 
@@ -325,6 +331,7 @@ export function useTimelineViewport({
       const mem = scrollMemoryRef.current;
       if (mem && !restoreInFlight()) {
         rememberTimelinePosition(viewport, mem.entryKey, mem.contentKey, collapseReserveHeight(), sendReserveEnabled());
+        saveReloadPosition(viewport);
       }
     };
     viewport.addEventListener("scroll", onScroll, { passive: true });
@@ -354,14 +361,22 @@ export function useTimelineViewport({
         measureAtBottom();
       }
     };
+    const cancelPendingReloadRestore = () => {
+      if (!reloadBlockingRef.current) return;
+      reloadBlockingRef.current = false;
+      pendingRestoreRef.current = null;
+      cancelReloadSearch();
+    };
     const stopWatchingReadingInput = watchReadingNavigation(viewport, wrapperRef.current, () => {
       readingInputTop.current = viewport.scrollTop;
       interruptJump();
+      cancelPendingReloadRestore();
       holdRestoredPositionRef.current = false;
     });
 
     const onWheel = (e: WheelEvent) => {
       if (!e.ctrlKey && e.deltaY !== 0 && Math.abs(e.deltaY) >= Math.abs(e.deltaX)) {
+        cancelPendingReloadRestore();
         holdRestoredPositionRef.current = false;
         if (Math.abs(e.deltaY) > 2) cancelPendingJump();
         readingInputTop.current = e.deltaY < 0 ? viewport.scrollTop : null;
@@ -381,6 +396,7 @@ export function useTimelineViewport({
     const onTouchStart = (e: TouchEvent) => {
       readingInputTop.current = viewport.scrollTop;
       interruptJump();
+      cancelPendingReloadRestore();
       holdRestoredPositionRef.current = false;
       controller.handleTouchStart();
       pullTouchStart(e, viewport);
@@ -435,6 +451,9 @@ export function useTimelineViewport({
       measureAtBottom();
       maybeColdFill();
       trimFollowing();
+      if (!restoreInFlight()) {
+        saveReloadPosition(viewport);
+      }
     };
     const ro = viewportObserverFactory ? viewportObserverFactory(onResize) : new ResizeObserver(onResize);
     ro.observe(viewport);
@@ -485,5 +504,8 @@ export function useTimelineViewport({
     readingReserve,
     tailHeight,
     cancelPendingJump,
+    reloadBlockingRef,
+    cancelReloadSearch,
+    saveReloadPosition,
   ]);
 }

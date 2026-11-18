@@ -25,5 +25,16 @@ history-entry remounts; bfcache identity chooses the bookmark, not a separate
 following policy. Restores land in a layout effect on the first commit that can
 hold them (before paint), and the mount force-pin defers to a pending restore.
 
+When `feature.reloadReadingRestore` is enabled (default `true`), the home
+timeline also persists a bounded per-tab bookmark map in `Browser.session`
+(`meiva.timeline.reading-bookmarks.v1`, capped at 64 agents with a 7-day TTL).
+Each agent record stores `readingLocator` (when available), `itemId`, `rank`,
+`viewportTop`, `scrollTop`, reserve flags, and `savedAt`. Same-page switches
+prefer the in-memory `scrollMemory` entry; on a full page reload, the saved
+`Browser.session` bookmark feeds the same `bookmark-restore` pipeline on the
+single live timeline. Turning `feature.reloadReadingRestore` off bypasses all
+`Browser.session` bookmark reads and writes and falls back to in-memory
+`scroll-memory.ts` alone.
+
 
 Parent: [Frontend State Management](frontend-state.md).

@@ -75,6 +75,18 @@ own scrolling releases it like any bookmark. The home page uses it to show the f
 delivery past the reader's seen position on entry. A saved position takes priority
 over the automatic reveal, including when the reader returns to the bottom.
 
+Across a full tab reload (`feature.reloadReadingRestore`, default `true`), a
+per-agent `Browser.session` bookmark (`readingLocator` or stable `itemId` + `rank`
++ `viewportTop`) resolves onto the same single `live` `TimelineView` once
+`sourceReady` settles. If the target item is already in the initial tail window,
+`bookmark-restore` restores its exact pixel offset (`followBottom: false`) while
+live streaming and `Working` rows continue normally below. If the target item is
+older than the initial window, `TimelineView` requests up to 5 background older
+pages (`250` prepended items max) via `loadOlder("background")` while keeping only
+the existing centered `ColdLoadSpinner` visible. If the target remains unreachable,
+storage is unavailable, or the reader navigates during backfill, the bookmark is
+silently dropped and the view pins to the normal tail with zero extra chrome.
+
 Images also reapply the current reading bookmark after load or error, including
 short histories below the row-measurement threshold. The viewport captures only
 image events and waits until the next animation frame so a failed upload's file

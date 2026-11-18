@@ -47,5 +47,7 @@
   "quoteSelection": "选中文字引用",
   "quoteSelectionDesc": "选中消息文字时显示引用按钮，便于附带上下文回复；关闭后隐藏选区引用浮层，已发送的历史引用仍正常显示。",
   "markdownImageZoom": "Markdown 图片放大预览",
-  "markdownImageZoomDesc": "鼠标悬停或聚焦消息内 Markdown 图片时在右上角显示放大按钮并支持全屏查看；关闭后渲染为普通静态图片。"
+  "markdownImageZoomDesc": "鼠标悬停或聚焦消息内 Markdown 图片时在右上角显示放大按钮并支持全屏查看；关闭后渲染为普通静态图片。",
+  "reloadReadingRestore": "刷新后恢复阅读位置",
+  "reloadReadingRestoreDesc": "在当前标签页内记录每个 Agent 的可见消息与滚动偏移，刷新页面后自动回到离开处；关闭后仅在未刷新的同一页面内保留切换位置。"
 }

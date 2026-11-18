@@ -20,8 +20,9 @@ import type { SharedContextPanel as ContextPanelComponent } from "@/components/c
 import { ContextPanelToggle } from "@/components/shell/context-panel-toggle";
 import type { HeaderBar as HeaderBarComponent } from "@/components/shell/header-bar";
 import { HomeLayout } from "@/components/shell/home-layout";
-import type { TimelineView as TimelineViewComponent } from "@/components/timeline";
+import type { ReloadRestoreConfig, TimelineView as TimelineViewComponent } from "@/components/timeline";
 import { InlineError } from "@/components/ui/inline-error";
+import { useBrowser } from "@/lib/browser/browser-provider";
 import { usePendingMessages, withoutTimelineDuplicates } from "@/lib/agents/use-pending-messages";
 import type { useAgents } from "@/lib/agents/use-agents";
 import type { useSidebarCollapsed } from "@/lib/agents/sidebar";
@@ -42,7 +43,7 @@ import type { useUserSettings } from "@/lib/state/use-user-settings";
 import { timelineMaxWidthCss } from "@/lib/timeline/timeline-width";
 import type { UseTimelineResult } from "@/lib/timeline/use-timeline";
 import { MessageDeliveryUnknownError } from "@/lib/transport/api";
-import { useApi, useStreamHub } from "@/lib/transport/transport-context";
+import { useApi, useStreamHub, useWallNow } from "@/lib/transport/transport-context";
 
 // meiva:note
 // The home route splits in two: `page.tsx` is the composition root that reads every hook and
@@ -354,7 +355,9 @@ function HomeContent({
   UploadButton,
   sidebar,
 }: HomeContentProps) {
+  const browser = useBrowser();
   const client = useApi();
+  const wallNow = useWallNow();
   const diagnostics = useStreamHub().transport.diagnostics;
   const t = useTranslations("common");
   const timelineText = useTranslations("timeline");
@@ -368,6 +371,12 @@ function HomeContent({
     : timelineMaxWidthCss(userSettings["display.timeline_width_px"]);
 
   const quoteSelectionEnabled = userSettings["feature.quoteSelection"] !== false;
+  const reloadReadingRestoreEnabled = userSettings["feature.reloadReadingRestore"] !== false;
+  const reloadRestore = useMemo<ReloadRestoreConfig>(() => {
+    if (userSettingsLoading) return { state: "loading" };
+    if (!reloadReadingRestoreEnabled) return { state: "disabled" };
+    return { state: "enabled", session: browser.session, now: wallNow };
+  }, [browser.session, reloadReadingRestoreEnabled, userSettingsLoading, wallNow]);
   const [quoteSelection, setQuoteSelection] = useState<{ quote: Quote; revision: number } | null>(null);
   if (!quoteSelectionEnabled && quoteSelection !== null) {
     setQuoteSelection(null);
@@ -520,6 +529,7 @@ function HomeContent({
             threadKey={activeId != null ? String(activeId) : undefined}
             scrollMemoryKey={`${bfcacheId}:agent:${activeId ?? "unselected"}`}
             restoreReady={sourceReady}
+            reloadRestore={reloadRestore}
             streamingCode={streamingCode}
             turnActive={agentBusy}
             lastEventAt={timelineStore.liveAnchorAt}

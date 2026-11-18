@@ -77,6 +77,7 @@ export const USER_SETTING_DEFAULTS: Record<string, unknown> = {
   "behavior.spawn_reasoning_effort": null,
   "feature.quoteSelection": true,
   "feature.markdownImageZoom": true,
+  "feature.reloadReadingRestore": true,
   "web.sseSingleStream": false,
 
   "models.hidden": [],

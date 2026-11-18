@@ -24,8 +24,18 @@ import { cn } from "@/lib/format/utils";
 import { ConnectionNotice } from "@/components/notifications/connection-notice";
 import { TimelineGroupList, useTimelineGroupWindow } from "./view/group-list";
 import { CompactingBlock } from "./model/compacting-block";
-import { applyBookmarkRestore, settleRestoredPosition as settleRestoredPositionImpl, type BookmarkState } from "./model/bookmark-restore";
-import { rememberTimelinePosition } from "./model/reading-position";
+import {
+  applyBookmarkRestore,
+  resolveInitialTimelineBookmark,
+  settleRestoredPosition as settleRestoredPositionImpl,
+  useReloadBookmarkRestore,
+  type BookmarkState,
+} from "./model/bookmark-restore";
+import {
+  rememberTimelinePosition,
+  rememberTimelineReloadPosition,
+  type ReloadRestoreConfig,
+} from "./model/reading-position";
 import { useCompactTransitionAnchor } from "./model/use-compact-transition-anchor";
 import { useOlderHistoryPull } from "./model/use-older-history-pull";
 import { useSendAnchor, useThreadPin } from "./model/use-viewport-arrivals";
@@ -41,6 +51,8 @@ import { useReanchorOnWidthChange } from "./model/width-change-anchor";
 import { useStickyThresholds } from "./model/sticky-thresholds";
 import { LoadOlderSpinner, LoadOlderKeyboardButton, ColdLoadSpinner, ScrollToBottomButton } from "./overlays";
 
+export type { ReloadRestoreConfig } from "./model/reading-position";
+
 const REVEAL_TOP_GAP_PX = 12;
 // meiva:note
 // Where a row the reader is meant to start reading from sits: below the fixed
@@ -55,6 +67,7 @@ interface Props {
   threadKey?: string;
   scrollMemoryKey?: string;
   restoreReady?: boolean;
+  reloadRestore?: ReloadRestoreConfig;
   viewportObserverFactory?: (callback: ResizeObserverCallback) => ResizeObserver;
 
   streamingCode?: boolean;
@@ -90,12 +103,15 @@ interface Props {
   reveal?: { itemId: string; token: number } | null;
 }
 
+const DEFAULT_RELOAD_RESTORE: ReloadRestoreConfig = { state: "disabled" };
+
 export const TimelineView = memo(function TimelineView({
   items: canonicalItems,
   compactBuffer = null,
   threadKey,
   scrollMemoryKey,
   restoreReady = true,
+  reloadRestore = DEFAULT_RELOAD_RESTORE,
   viewportObserverFactory,
   streamingCode = false,
   turnActive = false,
@@ -149,9 +165,15 @@ export const TimelineView = memo(function TimelineView({
   const sendReserveRef = useRef<HTMLDivElement>(null);
   const collapseReserveRef = useRef<HTMLDivElement>(null);
 
-  const [savedPosition] = useState(() => scrollMemoryKey ? readScrollMemory(scrollMemoryKey) : null);
+  const [initialBookmark] = useState(() =>
+    resolveInitialTimelineBookmark(
+      scrollMemoryKey ? readScrollMemory(scrollMemoryKey) : null,
+      threadKey,
+      reloadRestore,
+    ),
+  );
+  const savedPosition = initialBookmark.savedPosition;
   const pendingRestoreRef = useRef(savedPosition);
-  const hasSavedPosition = savedPosition !== null && savedPosition.contentKey === threadKey;
 
   const holdRestoredPositionRef = useRef(!!pendingRestoreRef.current && !pendingRestoreRef.current.followBottom);
   const settledRestoreRef = useRef<SavedScroll | null>(null);
@@ -159,7 +181,20 @@ export const TimelineView = memo(function TimelineView({
   // Consecutive layout passes at the same content height. A bookmark beyond the reachable end is only unreachable once the content has stopped growing - before that, the height is still arriving and waiting is correct.
   // meiva:link ui/web/src/docs/frontend-components/timeline-view/sticky-scroll.md
   const restoreProbeRef = useRef<{ height: number; passes: number }>({ height: -1, passes: 0 });
-  const restoreInFlight = useCallback(() => pendingRestoreRef.current !== null || (settledRestoreRef.current !== null && holdRestoredPositionRef.current), []);
+  const bookmarkState = useRef<BookmarkState>({
+    pending: pendingRestoreRef,
+    settled: settledRestoreRef,
+    hold: holdRestoredPositionRef,
+    probe: restoreProbeRef,
+  }).current;
+  const reloadBlockingRef = useRef(false);
+  const restoreInFlight = useCallback(
+    () =>
+      reloadBlockingRef.current ||
+      pendingRestoreRef.current !== null ||
+      (settledRestoreRef.current !== null && holdRestoredPositionRef.current),
+    [],
+  );
   const initialRestorePassRef = useRef(true);
 
   useLayoutEffect(
@@ -170,6 +205,10 @@ export const TimelineView = memo(function TimelineView({
   );
 
   const scrollMemoryRef = useRef<{ entryKey: string; contentKey: string } | null>(null);
+  const threadKeyRef = useRef<string | undefined>(threadKey);
+  const compactBufferRef = useRef<CompactTransitionBuffer | null>(compactBuffer);
+  const reloadRestoreRef = useRef<ReloadRestoreConfig>(reloadRestore);
+  const reloadPersistBlockedRef = useRef(loading || !restoreReady);
 
   const loadOlderRef = useRef<((origin: OlderLoadOrigin) => void) | undefined>(onLoadOlder);
   const hasMoreOlderRef = useRef(hasMoreOlder);
@@ -180,6 +219,9 @@ export const TimelineView = memo(function TimelineView({
     hasMoreOlderRef.current = hasMoreOlder;
     loadingOlderRef.current = loadingOlder;
     itemsRef.current = items;
+    threadKeyRef.current = threadKey;
+    compactBufferRef.current = compactBuffer;
+    reloadRestoreRef.current = reloadRestore;
     scrollMemoryRef.current =
       scrollMemoryKey && threadKey !== undefined
         ? { entryKey: scrollMemoryKey, contentKey: threadKey }
@@ -321,17 +363,51 @@ export const TimelineView = memo(function TimelineView({
     scrollByDelta,
   });
 
+  const {
+    reloadBlocking,
+    reloadSearchingOlder,
+    hasSavedPosition,
+    activeSavedScroll,
+    cancelReloadSearch,
+  } = useReloadBookmarkRestore({
+    inMemorySaved: initialBookmark.inMemorySaved,
+    initialReloadBookmark: initialBookmark.initialReloadBookmark,
+    threadKey,
+    reloadRestore,
+    loading,
+    restoreReady,
+    canonicalItems,
+    compactBuffer,
+    hasMoreOlder,
+    loadingOlder,
+    onLoadOlder,
+    pendingRef: pendingRestoreRef,
+    settledRef: settledRestoreRef,
+    holdRef: holdRestoredPositionRef,
+    probeRef: restoreProbeRef,
+    pendingAnchorRef,
+    viewportRef,
+    wrapperRef,
+    pinToBottom,
+    trimFollowing,
+  });
+  useLayoutEffect(() => {
+    reloadBlockingRef.current = reloadBlocking;
+    reloadPersistBlockedRef.current = loading || !restoreReady || reloadBlocking;
+  });
+
   // meiva:note
   // A send takes the viewport from any bookmark it was settling: the reader
   // asked for the message they just wrote, so the saved row no longer owns it.
   // meiva:link ui/web/src/docs/frontend-components/timeline-view/sticky-scroll.md
   const cancelBookmark = useCallback(() => {
     cancelScrollToBottomRide(scrollToBottomRideRef.current);
+    cancelReloadSearch();
     pendingAnchorRef.current = null;
     pendingRestoreRef.current = null;
     settledRestoreRef.current = null;
     holdRestoredPositionRef.current = false;
-  }, [pendingAnchorRef]);
+  }, [cancelReloadSearch, pendingAnchorRef]);
 
   const { latestTarget, pendingTarget, jumpToLatestHuman, cancelPendingJump, maintain: maintainSendAnchor,
     releaseReserve: releaseSendReserve, reserveEnabled: sendReserveEnabled } = useSendAnchor({
@@ -345,16 +421,33 @@ export const TimelineView = memo(function TimelineView({
     isFollowing,
     topOffset: READING_TOP_PX,
     turnActive,
-    savedSendReserve: hasSavedPosition ? savedPosition.keepSendReserve === true : undefined,
+    savedSendReserve: hasSavedPosition ? savedPosition?.keepSendReserve === true : undefined,
     measureAtBottom,
     cancelBookmark,
   });
 
+  const saveReloadPosition = useCallback((viewport: HTMLElement) => {
+    const key = threadKeyRef.current;
+    if (key === undefined || reloadPersistBlockedRef.current || restoreInFlight()) return;
+    rememberTimelineReloadPosition(
+      viewport,
+      key,
+      canonicalItemsRef.current,
+      compactBufferRef.current,
+      reloadRestoreRef.current,
+      collapseReserveHeight(),
+      sendReserveEnabled(),
+    );
+  }, [collapseReserveHeight, restoreInFlight, sendReserveEnabled]);
+
   useLayoutEffect(() => () => {
     const mem = scrollMemoryRef.current;
     const viewport = viewportRef.current;
-    if (mem && viewport && !restoreInFlight()) rememberTimelinePosition(viewport, mem.entryKey, mem.contentKey, collapseReserveHeight(), sendReserveEnabled());
-  }, [restoreInFlight, collapseReserveHeight, sendReserveEnabled]);
+    if (viewport && !restoreInFlight()) {
+      if (mem) rememberTimelinePosition(viewport, mem.entryKey, mem.contentKey, collapseReserveHeight(), sendReserveEnabled());
+      saveReloadPosition(viewport);
+    }
+  }, [restoreInFlight, collapseReserveHeight, sendReserveEnabled, saveReloadPosition]);
 
   const compactPin = useCompactTransitionAnchor({
     controller,
@@ -401,6 +494,7 @@ export const TimelineView = memo(function TimelineView({
   } = useOlderHistoryPull(threadKey, canPullOlder, pullOlderPage, closeColdFill);
 
   const maybeColdFill = useCallback(() => {
+    if (reloadBlockingRef.current) return;
     const fill = coldFillRef.current;
     const viewport = viewportRef.current;
     if (!fill.open || !viewport || viewport.clientHeight <= 0 || itemsRef.current.length === 0) return;
@@ -415,18 +509,12 @@ export const TimelineView = memo(function TimelineView({
     }
   }, [loadOneOlderPage]);
 
-  const bookmarkState = useRef<BookmarkState>({
-    pending: pendingRestoreRef,
-    settled: settledRestoreRef,
-    hold: holdRestoredPositionRef,
-    probe: restoreProbeRef,
-  }).current;
   const applyPendingRestore = useCallback(
     (viewport: HTMLElement | null) => applyBookmarkRestore({
       state: bookmarkState,
       viewport,
       initialPass: initialRestorePassRef.current,
-      loading: loading || !restoreReady,
+      loading: loading || !restoreReady || reloadBlocking,
       threadKey,
       compactBuffer,
       canonicalItems: canonicalItemsRef.current,
@@ -434,7 +522,7 @@ export const TimelineView = memo(function TimelineView({
       tailHeight,
       collapseReserve: collapseReserveRef.current,
     }),
-    [bookmarkState, compactBuffer, controller, tailHeight, threadKey, loading, restoreReady],
+    [bookmarkState, compactBuffer, controller, tailHeight, threadKey, loading, restoreReady, reloadBlocking],
   );
 
   const settleRestoredPosition = useCallback(
@@ -483,6 +571,9 @@ export const TimelineView = memo(function TimelineView({
     readingReserve,
     tailHeight,
     cancelPendingJump,
+    reloadBlockingRef,
+    cancelReloadSearch,
+    saveReloadPosition,
   });
 
   const [, applyReveal] = useReducer((count: number) => count + 1, 0);
@@ -525,6 +616,9 @@ export const TimelineView = memo(function TimelineView({
     initialRestorePassRef.current = false;
     applyPendingRestore(viewport);
     settleRestoredPosition(viewport, false);
+    if (viewport && !restoreInFlight()) {
+      saveReloadPosition(viewport);
+    }
   });
 
   const prevLoadingOlderReleaseRef = useRef(loadingOlder);
@@ -533,6 +627,7 @@ export const TimelineView = memo(function TimelineView({
     prevLoadingOlderReleaseRef.current = loadingOlder;
   }, [loadingOlder, pendingAnchorRef]);
 
+  const restoreCandidate = pendingRestoreRef.current ?? activeSavedScroll;
   const { groups, groupEntries, virtualEnabled, virtualRange, rowRange } = useTimelineGroupWindow({
     canonicalItems,
     compactBuffer,
@@ -547,10 +642,10 @@ export const TimelineView = memo(function TimelineView({
     pendingAnchor: pendingAnchorRef.current,
     compactPin,
     restoreAnchor: pendingTarget ?? (
-      !pendingRestoreRef.current?.followBottom && pendingRestoreRef.current?.anchor
-        ? { id: pendingRestoreRef.current.anchor.itemId, rank: pendingRestoreRef.current.anchor.rank }
+      !restoreCandidate?.followBottom && restoreCandidate?.anchor
+        ? { id: restoreCandidate.anchor.itemId, rank: restoreCandidate.anchor.rank }
         : null),
-    restoreTop: pendingRestoreRef.current?.scrollTop ?? null,
+    restoreTop: restoreCandidate?.scrollTop ?? null,
   });
 
   // meiva:note
@@ -662,9 +757,9 @@ export const TimelineView = memo(function TimelineView({
     <div ref={wrapperRef} className={cn("relative", FLEX_1, MIN_H_0, OVERFLOW_HIDDEN)}>
       {onQuote ? <QuoteSelection scope={wrapperRef} items={items} agentId={Number(threadKey)} onQuote={onQuote} /> : null}
       {quoteStatus ? <div role="status" className="absolute bottom-12 left-4 z-40 rounded border border-border bg-background px-3 py-2 text-sm">{quoteStatus}</div> : null}
-      <LoadOlderSpinner loadingOlder={readerLoadingOlder && !loading} />
+      <LoadOlderSpinner loadingOlder={readerLoadingOlder && !loading && !reloadSearchingOlder} />
       {hasMoreOlder && onLoadOlder ? <LoadOlderKeyboardButton loading={loadingOlder} onClick={pullOlderPage} /> : null}
-      <ColdLoadSpinner show={loading} />
+      <ColdLoadSpinner show={loading || reloadSearchingOlder} />
       <ConnectionNotice />
       <ScrollArea
         className="h-full text-[13px] leading-relaxed"
@@ -696,7 +791,7 @@ export const TimelineView = memo(function TimelineView({
             compactBuffer={compactBuffer}
             streamingCode={streamingCode}
             turnActive={turnActive}
-            loading={loading || readerLoadingOlder}
+            loading={loading || reloadSearchingOlder || readerLoadingOlder}
             lastEventAt={lastEventAt}
             overrides={overrides}
             toggleExpanded={toggleExpanded}
@@ -713,7 +808,7 @@ export const TimelineView = memo(function TimelineView({
         <div ref={sendReserveRef} data-send-reserve aria-hidden="true" />
         <div ref={collapseReserveRef} data-turn-collapse-reserve aria-hidden="true" />
       </ScrollArea>
-      <ScrollToBottomButton atBottom={atBottom} onClick={handleScrollToBottom} />
+      <ScrollToBottomButton atBottom={atBottom || reloadSearchingOlder} onClick={handleScrollToBottom} />
     </div>
     </QuoteTarget.Provider>
     </QuoteNavigation.Provider>

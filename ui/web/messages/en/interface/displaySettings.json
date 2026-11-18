@@ -47,5 +47,7 @@
   "quoteSelection": "Quote text selection",
   "quoteSelectionDesc": "Show a quote button when selecting message text so you can reply with context. Turning this off hides the selection popover while keeping previously sent quotes visible.",
   "markdownImageZoom": "Markdown image zoom",
-  "markdownImageZoomDesc": "Show a zoom button in the top-right corner when hovering or focusing Markdown images in messages to view them full screen. Turning this off renders plain static images."
+  "markdownImageZoomDesc": "Show a zoom button in the top-right corner when hovering or focusing Markdown images in messages to view them full screen. Turning this off renders plain static images.",
+  "reloadReadingRestore": "Restore reading position on reload",
+  "reloadReadingRestoreDesc": "Remember each agent's visible message and scroll offset in this tab so reloading the page returns to where you left off. Turning this off only keeps positions while switching within the open page."
 }
