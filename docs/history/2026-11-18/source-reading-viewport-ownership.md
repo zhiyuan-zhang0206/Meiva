@@ -40,3 +40,24 @@ identity and the measured offset across a same-tab reload, records CSS-pixel
 error, and requires the newest reply to replace the prior saved locator. Changing
 bookkeeping timestamps is permitted. Other harness sources retain their own
 source-level acceptance rather than inheriting this native browser result.
+
+
+## Browser-driven corrections
+
+The first actual Linux browser run exposed assumptions that the direct fixture
+had not exercised. Keep entry-scoped visual continuity independent of durable
+source confirmation: lacking a source identity must not erase the existing
+same-page position, while durable writes still require the real source member.
+Measure a final long target itself before deciding that its offset exceeds the
+scroll range; measuring only its prefix can leave its intrinsic estimate in a
+restore dead end. Passive save feedback must not consume pointer input; only an
+explicit action receives it.
+
+Durable reload changes a paging test's initial condition. A reader who stayed at
+the original prompt correctly returns to the source head, where no older page
+exists. The paging consumer therefore performs real tail navigation, waits for
+a confirmed bookmark of a visible source member, and then reloads before testing
+source-issued backward paging. This preserves the original pull threshold,
+refusal and item/offset assertions without assuming that reload means tail.
+The original failed browser evidence is retained; direct controls do not replace
+the required rerun of those browser consumers.

@@ -140,3 +140,19 @@ remain distinct outcomes and preserve the old bookmark on failure.
 ## Relationship to Other Nodes
 
 - [Frontend State Management](frontend-state.md)
+
+
+Same-entry visual memory and durable source metadata have separate lifetimes. A
+qualified current view records its measured item/offset in the existing entry
+memory even while source confirmation or session storage is unavailable. On a
+same-entry return that geometry takes precedence over an older durable record;
+it remains gated by the selected live source read. It neither creates a source
+locator nor replaces the durable record. A reload can use only confirmed durable
+metadata, and an unfinished or failed strict restore never records fallback
+geometry. Pending background confirmation has no persistent status overlay;
+unsaved feedback lets pointer input through except for its explicit Retry action.
+
+Parked pages request the source-issued `before` cursor through `/timeline/window`.
+A refused page preserves the existing pages/bookmark and settles loading. A new
+explicit pull may retry that cursor; coordinate conflicts still require the
+explicit last-visible source reanchor before paging can continue.

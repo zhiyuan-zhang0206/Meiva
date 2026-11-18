@@ -425,7 +425,7 @@ export const TimelineView = memo(function TimelineView({
       viewport,
       initialPass: initialRestorePassRef.current,
       loading: readingControlRef.current ? !readingControlRef.current.ready : loading || !restoreReady,
-      requiredAnchor: readingControlRef.current !== undefined,
+      requiredAnchor: Boolean(readingControlRef.current?.position?.anchor?.readingLocator),
       threadKey,
       compactBuffer,
       canonicalItems: canonicalItemsRef.current,
@@ -440,7 +440,7 @@ export const TimelineView = memo(function TimelineView({
     (viewport: HTMLElement | null, layoutChanged: boolean) => {
       settleRestoredPositionImpl({ state: bookmarkState, viewport, layoutChanged, threadKey,
         compactBuffer, canonicalItems: canonicalItemsRef.current,
-        requiredAnchor: readingControlRef.current !== undefined });
+        requiredAnchor: Boolean(readingControlRef.current?.position?.anchor?.readingLocator) });
       notifyReadingRestore(readingControlRef, bookmarkState, viewport, canonicalItemsRef.current);
     },
     [bookmarkState, compactBuffer, threadKey, readingControlRef],

@@ -113,3 +113,10 @@ to omit timestamps according to their timeline item metadata.
 - [Timeline View](timeline-view.md) — the renderer whose one scroll surface this node owns.
 - [Timeline deep collapse](deep-collapse.md) — the turns whose natural-height bodies the live-block rule keeps in place.
 - [The send anchor](send-anchor.md) — how sends, the down arrow, and the reading reserve interact.
+
+
+An exact source restore measures its target as well as its prefix before judging
+scroll range. In particular, the final long row's `content-visibility: auto`
+intrinsic estimate must not make a negative saved offset look unreachable: the
+actual target supplies the remaining height. The existing viewport owner still
+verifies the real node and measured offset before reporting DOM completion.

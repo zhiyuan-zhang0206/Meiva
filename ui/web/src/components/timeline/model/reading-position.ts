@@ -36,10 +36,11 @@ export function rememberTimelinePosition(
       viewportTop: node.getBoundingClientRect().top - rect.top,
     } : undefined,
   };
+  saveScrollMemory(entryKey, position);
   if (control) {
     const item = control.items.find((value) => value.item_id === position.anchor?.itemId) ?? null;
     control.reading.remember(position, item);
-  } else saveScrollMemory(entryKey, position);
+  }
 }
 
 export function useReadingPositionControl(control: TimelinePositionControl | undefined, { pending: pendingRef, settled: settledRef, hold: holdRef, probe: probeRef }: BookmarkState) {

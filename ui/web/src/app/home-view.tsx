@@ -510,14 +510,14 @@ function HomeContent({
       <ErrorBoundary diagnostics={diagnostics}>
         <div data-testid="timeline-surface" className={cn("relative", FLEX, FLEX_COL, FLEX_1, MIN_H_0, MIN_W_0)}>
           {reading?.error && <div className="mx-4 mt-14 mb-2">
-            <InlineError onRetry={reading.retry} retryLabel={timelineText("retryLoad")}>
+            <InlineError onRetry={reading.retry} retryLabel={timelineText("retryLoad")} detail={errMsg(reading.error)}>
               {readingFailureText}
             </InlineError>
           </div>}
-          {reading && !reading.parked && reading.saveStatus !== "idle" && reading.saveStatus !== "saved" &&
-            <div role="status" className="absolute right-4 top-14 z-20 rounded bg-background px-2 py-1 text-xs text-muted-foreground">
+          {reading && !reading.parked && reading.saveStatus === "unsaved" &&
+            <div role="status" className="pointer-events-none absolute right-4 top-14 z-20 rounded bg-background px-2 py-1 text-xs text-muted-foreground">
               {timelineText("readingUnsaved")}
-              {reading.saveError && <button type="button" onClick={reading.retry} className="ml-2 underline">{timelineText("retryPosition")}</button>}
+              {reading.saveError && <button type="button" onClick={reading.retry} className="pointer-events-auto ml-2 underline">{timelineText("retryPosition")}</button>}
             </div>}
           {reading?.parked && <div className={cn(FLEX, "absolute bottom-3 left-1/2 z-30 -translate-x-1/2 items-center gap-2 rounded-md border bg-background px-3 py-2 text-xs")}>
             {isLoading ? <button type="button" onClick={reading.cancel}>{timelineText("cancelReadingRestore")}</button>

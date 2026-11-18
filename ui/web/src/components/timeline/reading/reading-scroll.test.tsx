@@ -81,6 +81,34 @@ describe("source-qualified DOM restoration", () => {
     expect(viewport.querySelector('.timeline-item[data-item-id="6.0"]')).toBeNull();
   });
 
+  it.each([16, 128])("materializes the final source item in %i rows before judging negative-offset range", (count) => {
+    const rows: BackendTimelineItem[] = Array.from({ length: count }, (_, index) => ({
+      item_id: `${index + 1}.0`, kind: "agent_chat", payload: `Primary row ${index + 1}`,
+      source: null, created_at: null, inbound_id: null, show_timestamp: false,
+      source_message_id: `message_${index}`, source_block_idx: 0, reading_locator: `tail_locator_${index}`,
+    }));
+    geometry = timelineGeometry({
+      top: () => top, setTop: (value) => { top = value; }, resizeCallbacks,
+      height: () => document.querySelector<HTMLElement>(`.timeline-item[data-item-id="${count}.0"]`)?.style.contentVisibility === "visible" ? count * 300 + 1400 : count * 300 + 200,
+    });
+    let completed = 0;
+    const control: TimelinePositionControl = {
+      token: {}, ready: true, writable: false,
+      position: { contentKey: "42", scrollTop: (count - 1) * 300 + 100, followBottom: false,
+        anchor: { itemId: `${count}.0`, rank: 0, viewportTop: -100, readingLocator: `tail_locator_${count - 1}` } },
+      remember: () => undefined, navigated: () => undefined, restored: () => { completed += 1; },
+    };
+    const view = renderWithProviders(<MeasuredTimeline items={rows} threadKey="42"
+      scrollMemoryKey={`source-intrinsic-tail-${count}`} readingPosition={control} />, { queryClient: client, wallNow: () => 1001 });
+    geometry.prepare(view.container);
+    act(() => { resizeCallbacks.forEach((deliver) => deliver()); });
+    const viewport = view.container.querySelector<HTMLElement>('[data-slot="scroll-area-viewport"]');
+    const target = viewport?.querySelector<HTMLElement>(`.timeline-item[data-item-id="${count}.0"]`);
+    if (!viewport || !target) throw new Error("The final canonical reading target did not mount");
+    expect(target.getBoundingClientRect().top - viewport.getBoundingClientRect().top).toBe(-100);
+    expect(completed).toBeGreaterThan(0);
+  });
+
   it.each(["load", "error"])("keeps the exact qualified item offset after a late image %s", async (event) => {
     const rows: BackendTimelineItem[] = Array.from({ length: 16 }, (_, index) => ({
       item_id: `${index + 1}.0`, kind: index === 2 ? "inbound_chat" : "agent_chat",

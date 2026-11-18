@@ -22,6 +22,7 @@ interface Visit {
   agentId: number | null;
   entryKey: string;
   bookmark: ReadingBookmark | null;
+  position: SavedScroll | null;
 }
 
 type ReadingWindowSelector = Parameters<Api["getReadingWindow"]>[1];
@@ -56,7 +57,7 @@ function initialView(visit: Visit, cached?: Layout): View {
     visit, mode: visit.bookmark ? "parked" : "live",
     pages: locator !== undefined && cached?.locator === locator ? cachedPages : [],
     qualified: false, domReady: !visit.bookmark, loading: visit.bookmark ? "anchor" : null,
-    readerOlder: false, error: null, position: visit.bookmark?.position ?? null, token: {},
+    readerOlder: false, error: null, position: visit.position, token: {},
     allowLiveWrite: visit.bookmark === null, continued: false,
   };
 }
@@ -77,10 +78,17 @@ export function useReadingWindow(agentId: number | null, entryKey: string, live:
   const wallNow = useWallNow();
   const client = useQueryClient();
   const readVisit = (): Visit => {
-    if (agentId === null) return { agentId, entryKey, bookmark: null };
+    if (agentId === null) return { agentId, entryKey, bookmark: null, position: null };
     const stored = readReadingBookmark(browser.session, agentId, wallNow());
-    return { agentId, entryKey, bookmark: memoryBookmark(agentId, entryKey, wallNow()) ??
-      (stored.state === "ready" ? stored.bookmark : null) };
+    const memory = readScrollMemory(entryKey);
+    const position = memory?.contentKey === String(agentId) ? memory : null;
+    // meiva:note
+    // Same-entry geometry remains useful before its visible row has a durable
+    // source locator. It wins within that entry without replacing the older
+    // durable record or claiming source qualification for a local coordinate.
+    const bookmark = position ? memoryBookmark(agentId, entryKey, wallNow())
+      : stored.state === "ready" ? stored.bookmark : null;
+    return { agentId, entryKey, bookmark, position: position ?? bookmark?.position ?? null };
   };
   const [visit, setVisit] = useState(readVisit);
   if (visit.agentId !== agentId || visit.entryKey !== entryKey) setVisit(readVisit());
@@ -224,7 +232,7 @@ export function useReadingWindow(agentId: number | null, entryKey: string, live:
   }, [load, saver, view.domReady, view.error, view.mode, view.position, view.readerOlder, visit]);
   const loadOlder = useCallback((origin: OlderLoadOrigin) => {
     if (view.mode === "live") { live.loadOlder(origin); return; }
-    if (!view.qualified || !view.domReady || view.error) return;
+    if (!view.qualified || !view.domReady || view.error instanceof ReadingCoordinatesChangedError) return;
     const cursor = view.pages[0]?.older_cursor;
     if (cursor) load({ before: cursor }, origin === "reader");
   }, [live, load, view.domReady, view.error, view.mode, view.pages, view.qualified]);

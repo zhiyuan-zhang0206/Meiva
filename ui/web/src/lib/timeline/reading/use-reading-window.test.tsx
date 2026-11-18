@@ -9,6 +9,7 @@ import type { BackendTimelineItem, ReadingWindowResponse, TimelineResponse } fro
 import { httpRig, noUpload, sequentialKeys } from "@/lib/transport/tests/api/api-provider";
 import { ApiProvider, WallClockProvider } from "@/lib/transport/transport-context";
 import type { UseTimelineResult } from "../use-timeline";
+import { saveScrollMemory } from "@/lib/layout/scroll-memory";
 import { readReadingBookmark, READING_BOOKMARKS_KEY, saveReadingBookmark } from "./bookmarks";
 import { ReadingCoordinatesChangedError, useReadingWindow } from "./use-reading-window";
 
@@ -65,6 +66,53 @@ const caches: QueryClient[] = [];
 afterEach(() => { cleanup(); for (const cache of caches) cache.clear(); caches.length = 0; });
 
 describe("parked reading visits", () => {
+  it("uses the source before cursor and retries a refused page only after another explicit pull", async () => {
+    let pulls = 0;
+    const initial = { ...page(), older_cursor: "older_edge" };
+    const context = setup((input) => {
+      const url = new URL(requestUrl(input));
+      if (!url.searchParams.has("before")) return json(initial);
+      pulls += 1;
+      expect(url.pathname).toBe("/api/agents/1/timeline/window");
+      expect(url.searchParams.get("before")).toBe("older_edge");
+      return pulls === 1 ? json({ detail: "Checkpoint history unavailable" }, 503)
+        : json({ ...page(item("1.0", "older")), anchor_item_id: null });
+    });
+    const durable = context.browser.sessionValues.get(READING_BOOKMARKS_KEY);
+    const view = renderHook(() => useReadingWindow(1, "explicit-older-retry", live()), { wrapper: context.wrapper });
+    await waitFor(() => expect(view.result.current.sourceReady).toBe(true));
+    act(() => view.result.current.reading.positionControl.restored());
+    act(() => view.result.current.loadOlder("reader"));
+    await waitFor(() => expect(view.result.current.reading.error).not.toBeNull());
+    expect(view.result.current.items.map((row) => row.item_id)).toEqual(["2.0"]);
+    expect(view.result.current.loadingOlder).toBe(false);
+    expect(context.browser.sessionValues.get(READING_BOOKMARKS_KEY)).toBe(durable);
+    expect(pulls).toBe(1);
+    act(() => view.result.current.loadOlder("reader"));
+    await waitFor(() => expect(view.result.current.items.map((row) => row.item_id)).toEqual(["1.0", "2.0"]));
+    expect(pulls).toBe(2);
+    expect(view.result.current.reading.error).toBeNull();
+    expect(context.browser.sessionValues.get(READING_BOOKMARKS_KEY)).toBe(durable);
+    view.unmount();
+  });
+
+  it("keeps newer same-entry geometry ahead of an older durable bookmark without qualifying cached source", () => {
+    const context = setup(() => json(page()));
+    const durable = context.browser.sessionValues.get(READING_BOOKMARKS_KEY);
+    const entry = "new-local-old-durable";
+    saveScrollMemory(entry, position("3.0", -100));
+    const source = live([item("3.0", null)]);
+    source.sourceReady = false;
+    const view = renderHook(() => useReadingWindow(1, entry, source), { wrapper: context.wrapper });
+    expect(view.result.current.reading.parked).toBe(false);
+    expect(view.result.current.reading.positionControl.position?.anchor?.itemId).toBe("3.0");
+    expect(view.result.current.reading.positionControl.ready).toBe(false);
+    expect(view.result.current.reading.positionControl.writable).toBe(false);
+    expect(context.browser.sessionValues.get(READING_BOOKMARKS_KEY)).toBe(durable);
+    expect(context.rig.sent).toHaveLength(0);
+    view.unmount();
+  });
+
   it("separates source qualification from actual viewport completion and does not save a fallback", async () => {
     const context = setup(() => json(page()));
     const original = context.browser.sessionValues.get(READING_BOOKMARKS_KEY);
