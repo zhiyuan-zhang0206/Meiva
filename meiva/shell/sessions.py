@@ -293,13 +293,12 @@ def capture(id: int | SessionHandle, lines: int | None = None, *, scrollback: bo
     from meiva.sdk_surface.settings import config_authority
 
     id = _session_id(id)
-    resolved_lines: int
-    if lines is None:
-        resolved_lines = config_authority().service_field_value("shell_capture_default_lines")
-    else:
-        resolved_lines = coerce_typed(lines, "lines", int)
+    resolved_lines = None if lines is None else coerce_typed(lines, "lines", int)
     scrollback = coerce_typed(scrollback, "scrollback", bool)
-    return shell_sessions().capture(id, resolved_lines, scrollback=scrollback)
+    sessions = shell_sessions()
+    if resolved_lines is None:
+        resolved_lines = config_authority().service_field_value("shell_capture_default_lines")
+    return sessions.capture(id, resolved_lines, scrollback=scrollback)
 
 
 def _session_id(id: object) -> int:
