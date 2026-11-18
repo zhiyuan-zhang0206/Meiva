@@ -24,7 +24,9 @@ from agent.graph.claim.tests.harness_support import (
     insert_row,
     runtime,
 )
-from agent.graph.claim.tests.harness_support import hosted_resources as hosted_resources
+from agent.graph.claim.tests.harness_support import (
+    hosted_resources as hosted_resources,
+)
 from agent.graph.llm_errors import FatalLLMStreamError
 from agent.ownership.tests.ownership_support import agent_row
 from agent.state import AgentState
@@ -40,6 +42,7 @@ from base.events.live.bus import EventBus
 from base.events.live.tests.live_capture import LiveEvents
 from base.events.live.tests.live_capture import live_events as live_events
 from base.host.env.agent_slices import AgentSlices
+from base.lm.harness import InputInContext, TurnCompleted, TurnOrigin, TurnStarted, Usage
 
 SESSION = "5914ebdf-bbec-47c8-bcd6-5a6da081f08a"
 
@@ -82,3 +85,83 @@ async def test_a_turn_with_no_record_file_names_the_session_and_where_it_looked_
     [content] = [e["content"] for e in errors]
     assert SESSION in content and str(tmp_path / ".claude/projects") in content
     assert re.search(r"was not found in .*projects", content)
+
+
+async def test_auth_failure_turn_completed_retires_bridge_and_preserves_error_detail(
+    db_conn: psycopg.Connection,
+    aops_pool: AsyncConnectionPool,
+    hosted_resources: HostedTurnResources,
+) -> None:
+    agent_id = agent_row(db_conn)
+    auth_text = (
+        "Failed to authenticate: this login reached its time limit and cannot be renewed. "
+        "Run `claude auth login` to sign in again."
+    )
+    engine = FakeEngine(
+        script=lambda inputs: [
+            TurnStarted("t1", TurnOrigin.INPUT, tuple(i.key for i in inputs), 1),
+            *(InputInContext(i.key, "t1", 1) for i in inputs),
+            TurnCompleted(
+                turn_id="t1",
+                session_id="sess-1",
+                text="",
+                subtype="success",
+                is_error=True,
+                interrupted=False,
+                stop_reason="stop_sequence",
+                num_turns=1,
+                duration_ms=10,
+                usage=Usage(input_tokens=1, output_tokens=1),
+                cost_usd=None,
+                cumulative_cost_usd=None,
+                permission_denials=(),
+                errors=(auth_text,),
+                error_code="authentication_failed",
+                generation=1,
+            ),
+        ]
+    )
+    rt = runtime(engine, ops_pool=aops_pool, hosted_resources=hosted_resources, agent_id=agent_id)
+    state = AgentState(harness_inputs=[{"key": "inbound-7", "prompt": "do it"}])
+    with pytest.raises(FatalLLMStreamError) as failed:
+        await harness_turn_node(state, rt, config(agent_id))
+
+    assert "authentication_failed" in str(failed.value)
+    assert auth_text in str(failed.value)
+    assert engine.retired == ["session authentication failed"]
+
+
+async def test_non_auth_turn_completed_failure_does_not_retire_bridge(
+    db_conn: psycopg.Connection,
+    aops_pool: AsyncConnectionPool,
+    hosted_resources: HostedTurnResources,
+) -> None:
+    agent_id = agent_row(db_conn)
+    engine = FakeEngine(
+        script=lambda inputs: [
+            TurnStarted("t1", TurnOrigin.INPUT, tuple(i.key for i in inputs), 1),
+            *(InputInContext(i.key, "t1", 1) for i in inputs),
+            TurnCompleted(
+                turn_id="t1",
+                session_id="sess-1",
+                text="",
+                subtype="error_during_execution",
+                is_error=True,
+                interrupted=False,
+                stop_reason="stop_sequence",
+                num_turns=1,
+                duration_ms=10,
+                usage=Usage(input_tokens=1, output_tokens=1),
+                cost_usd=None,
+                cumulative_cost_usd=None,
+                permission_denials=(),
+                generation=1,
+            ),
+        ]
+    )
+    rt = runtime(engine, ops_pool=aops_pool, hosted_resources=hosted_resources, agent_id=agent_id)
+    state = AgentState(harness_inputs=[{"key": "inbound-7", "prompt": "do it"}])
+    with pytest.raises(FatalLLMStreamError, match="error_during_execution"):
+        await harness_turn_node(state, rt, config(agent_id))
+
+    assert engine.retired == []

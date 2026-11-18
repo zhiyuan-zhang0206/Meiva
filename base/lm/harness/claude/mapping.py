@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass
 
 from base.host.boundary.json_values import is_object_dict, is_object_list
@@ -17,6 +18,21 @@ from base.lm.harness.events import (
     ToolUse,
     UnsolicitedOutput,
     Usage,
+)
+
+_SYNTHETIC_MODEL = "<synthetic>"
+_ERROR_SUMMARY_LIMIT = 1000
+_REDACTED = "***"
+_SK_SECRET = re.compile(r"sk-[A-Za-z0-9_\-]{8,}")
+_USERINFO_PASSWORD = re.compile(r"(://[^/\s@]*:)[^/\s@]*@")
+_SECRET_IN_TEXT = re.compile(
+    r'("(?:token|secret|password|authorization)"\s*:\s*)"(?:[^"\\]|\\.)*"', re.IGNORECASE
+)
+_AUTHORIZATION_BEARER = re.compile(
+    r"""(?i)\b(authorization["']?\s*[:=]\s*["']?bearer\s+)([^\s"',}]+)"""
+)
+_ENV_SECRET = re.compile(
+    r'\b([A-Z][A-Z0-9_]*(?:_TOKEN|_PASSWORD|_SECRET)\b\s*[:=]\s*)(["\']?)([^\s"\']+)\2'
 )
 
 # meiva:note
@@ -54,11 +70,88 @@ class ResultFields:
     interrupted: bool
 
 
+@dataclass(frozen=True, slots=True)
+class AssistantError:
+    error: str | None
+    text: str | None
+    api_error_status: int | None
+
+
 def map_message(message: object, *, turn_id: str | None) -> list[BridgeEvent]:
     handler = _HANDLERS.get(type(message).__name__)
     if handler is None:
         return []
     return handler(message, turn_id)
+
+
+def sanitize_error_text(value: str) -> str:
+    text = value
+    if "sk-" in text:
+        text = _SK_SECRET.sub("sk-***", text)
+    if "://" in text:
+        text = _USERINFO_PASSWORD.sub(r"\1" + _REDACTED + "@", text)
+    if '"' in text:
+        text = _SECRET_IN_TEXT.sub(lambda m: m.group(1) + '"' + _REDACTED + '"', text)
+    if "Authorization" in text or "authorization" in text:
+        text = _AUTHORIZATION_BEARER.sub(lambda m: m.group(1) + _REDACTED, text)
+    if "_TOKEN" in text or "_PASSWORD" in text or "_SECRET" in text:
+        text = _ENV_SECRET.sub(lambda m: m.group(1) + m.group(2) + _REDACTED + m.group(2), text)
+    redacted = text.strip()
+    if len(redacted) > _ERROR_SUMMARY_LIMIT:
+        return redacted[: _ERROR_SUMMARY_LIMIT - 3].rstrip() + "..."
+    return redacted
+
+
+# meiva:note
+# Claude CLI emits `<synthetic>` `AssistantMessage` frames with `error` (e.g. `authentication_failed`)
+# and `isApiErrorMessage=True` when an API/auth request fails permanently, while the trailing
+# `ResultMessage` often carries `errors=[]` and `subtype="success"`. `claude_agent_sdk` forwards
+# `error` (and `model`/`content`) on `AssistantMessage` while dropping `isApiErrorMessage`, so
+# either signal marks an error frame here; non-error `<synthetic>` rows such as "No response
+# requested." carry neither and are ignored.
+def parse_assistant_error(message: object) -> AssistantError | None:
+    if type(message).__name__ != "AssistantMessage":
+        return None
+    raw_error = _text(getattr(message, "error", None))
+    error = sanitize_error_text(raw_error) if raw_error is not None and raw_error.strip() else None
+    is_api_error = (
+        getattr(message, "isApiErrorMessage", None) is True
+        or getattr(message, "is_api_error_message", None) is True
+    )
+    if not is_api_error and error is None:
+        return None
+    return AssistantError(
+        error=error or None,
+        text=_assistant_error_text(message),
+        api_error_status=_assistant_api_status(message),
+    )
+
+
+def _assistant_error_text(message: object) -> str | None:
+    parts: list[str] = []
+    for block in _as_list(getattr(message, "content", None)):
+        text = _block_text(block)
+        if text:
+            parts.append(text)
+    if not parts:
+        return None
+    return sanitize_error_text("\n".join(parts)) or None
+
+
+def _block_text(block: object) -> str | None:
+    text: object = None
+    if type(block).__name__ == "TextBlock":
+        text = getattr(block, "text", None)
+    elif is_object_dict(block) and block.get("type") == "text":
+        text = block.get("text")
+    return text.strip() if isinstance(text, str) and text.strip() else None
+
+
+def _assistant_api_status(message: object) -> int | None:
+    status = _int_or_none(getattr(message, "api_error_status", None))
+    if status is not None:
+        return status
+    return _int_or_none(getattr(message, "apiErrorStatus", None))
 
 
 def parse_result(message: object) -> ResultFields:
@@ -93,7 +186,8 @@ def parse_result(message: object) -> ResultFields:
 def _api_error_sentence(api_error_status: int | None, result_text: str | None) -> tuple[str, ...]:
     if api_error_status is None or not result_text:
         return ()
-    return (result_text,)
+    sanitized = sanitize_error_text(result_text)
+    return (sanitized,) if sanitized else ()
 
 
 def _system(message: object, turn_id: str | None) -> list[BridgeEvent]:
@@ -137,6 +231,10 @@ def _stream(message: object, turn_id: str | None) -> list[BridgeEvent]:
 
 def _assistant(message: object, turn_id: str | None) -> list[BridgeEvent]:
     if turn_id is None:
+        return []
+    if parse_assistant_error(message) is not None:
+        return []
+    if _text(getattr(message, "model", None)) == _SYNTHETIC_MODEL:
         return []
     events: list[BridgeEvent] = []
     parent = _parent_tool_use_id(message)
@@ -295,7 +393,9 @@ def _denials(raw: object) -> tuple[str, ...]:
 
 
 def _messages(raw: object) -> tuple[str, ...]:
-    return tuple(str(item) for item in _as_list(raw) if str(item).strip())
+    return tuple(
+        sanitized for item in _as_list(raw) if (sanitized := sanitize_error_text(str(item)))
+    )
 
 
 def _render(content: object) -> str:

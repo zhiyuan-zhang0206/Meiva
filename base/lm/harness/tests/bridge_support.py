@@ -51,7 +51,7 @@ async def run_turn(
                 streamed.setdefault(event.turn_id, []).append(event.text)
             fault = fault_of_event(bridge.harness, event)
             if fault is not None:
-                if not isinstance(fault, HarnessTurnFaultedError) or fault.outcome is None:
+                if not isinstance(fault, HarnessTurnFaultedError) or fault.retire_session:
                     await bridge.retire("session unavailable")
                 raise fault
             if isinstance(event, TurnCompleted) and event.turn_id not in harness_turns:

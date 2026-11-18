@@ -3,6 +3,7 @@ from __future__ import annotations
 import uuid
 from dataclasses import dataclass, replace
 
+from base.lm.harness.claude.mapping import AssistantError
 from base.lm.harness.delivery import HarnessInput, TextBlock
 from base.lm.harness.events import HarnessCause
 
@@ -79,9 +80,21 @@ class OpenTurn:
     keys: tuple[str, ...] = ()
     parts: tuple[str, ...] = ()
     steps: int = 0
+    assistant_errors: tuple[AssistantError, ...] = ()
 
     def absorbing(self, key: str) -> OpenTurn:
         return replace(self, keys=(*self.keys, key))
 
-    def with_parts(self, texts: tuple[str, ...], *, stepped: bool) -> OpenTurn:
-        return replace(self, parts=(*self.parts, *texts), steps=self.steps + (1 if stepped else 0))
+    def with_parts(
+        self,
+        texts: tuple[str, ...],
+        *,
+        stepped: bool,
+        errors: tuple[AssistantError, ...] = (),
+    ) -> OpenTurn:
+        return replace(
+            self,
+            parts=(*self.parts, *texts),
+            steps=self.steps + (1 if stepped else 0),
+            assistant_errors=(*self.assistant_errors, *errors),
+        )

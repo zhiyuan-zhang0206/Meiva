@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from dataclasses import replace
 
-from base.lm.harness.claude.mapping import ResultFields
+from base.lm.harness.claude.mapping import AssistantError, ResultFields
 from base.lm.harness.claude.settle import (
     RunningTurn,
     settle_result,
@@ -40,8 +40,15 @@ def fields(**overrides: object) -> ResultFields:
     return replace(REPORTED, **overrides)
 
 
-def running(parts: tuple[str, ...] = ("one", "two"), *, steps: int = 1) -> RunningTurn:
-    return RunningTurn(turn_id="turn-7", parts=parts, steps=steps)
+def running(
+    parts: tuple[str, ...] = ("one", "two"),
+    *,
+    steps: int = 1,
+    assistant_errors: tuple[AssistantError, ...] = (),
+) -> RunningTurn:
+    return RunningTurn(
+        turn_id="turn-7", parts=parts, steps=steps, assistant_errors=assistant_errors
+    )
 
 
 def test_the_settled_text_is_what_the_turn_streamed() -> None:
@@ -122,3 +129,81 @@ def test_the_settled_turn_keeps_the_fields_the_result_reported() -> None:
     assert settlement.completed.permission_denials == ("Bash",)
     assert settlement.completed.duration_ms == 1200
     assert settlement.completed.usage == USAGE
+
+
+def test_failed_result_with_empty_errors_inherits_synthetic_assistant_error_detail() -> None:
+    auth_text = (
+        "Failed to authenticate: this login reached its time limit and cannot be renewed. "
+        "Run `claude auth login` to sign in again."
+    )
+    settlement = settle_result(
+        fields(
+            is_error=True,
+            subtype="success",
+            stop_reason="stop_sequence",
+            result_text=None,
+            errors=(),
+            api_error_status=None,
+        ),
+        turn=running(
+            parts=(),
+            steps=0,
+            assistant_errors=(
+                AssistantError(
+                    error="authentication_failed",
+                    text=auth_text,
+                    api_error_status=None,
+                ),
+            ),
+        ),
+        session_id="sess-init",
+        totals=SessionTotals(),
+    )
+
+    assert settlement.completed.is_error is True
+    assert settlement.completed.error_code == "authentication_failed"
+    assert settlement.completed.errors == (auth_text,)
+    assert settlement.completed.text == ""
+
+
+def test_assistant_error_promotes_non_error_result_unless_interrupted() -> None:
+    promoted = settle_result(
+        fields(is_error=False, errors=()),
+        turn=running(
+            parts=(),
+            steps=0,
+            assistant_errors=(
+                AssistantError(
+                    error="authentication_failed",
+                    text="Failed to authenticate: session expired",
+                    api_error_status=401,
+                ),
+            ),
+        ),
+        session_id="sess-init",
+        totals=SessionTotals(),
+    )
+    interrupted = settle_result(
+        fields(is_error=False, interrupted=True, errors=()),
+        turn=running(
+            parts=(),
+            steps=0,
+            assistant_errors=(
+                AssistantError(
+                    error="authentication_failed",
+                    text="Failed to authenticate: session expired",
+                    api_error_status=401,
+                ),
+            ),
+        ),
+        session_id="sess-init",
+        totals=SessionTotals(),
+    )
+
+    assert promoted.completed.is_error is True
+    assert promoted.completed.error_code == "authentication_failed"
+    assert promoted.completed.errors == ("Failed to authenticate: session expired",)
+    assert promoted.completed.api_error_status == 401
+    assert interrupted.completed.is_error is False
+    assert interrupted.completed.error_code is None
+    assert interrupted.completed.errors == ()

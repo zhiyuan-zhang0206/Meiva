@@ -12,17 +12,26 @@ import pytest
 from base.api_contracts.agent_contract import Harness
 from base.clock.tests.fakes import clock_over, system_clock
 from base.clock.tests.manual_timers import ManualTimers
-from base.lm.harness import Handoff, HarnessBridge, HarnessClosedError, HarnessTurnFaultedError
+from base.lm.harness import (
+    FileSessionRegistry,
+    Handoff,
+    HarnessBridge,
+    HarnessClosedError,
+    HarnessTurnFaultedError,
+)
 from base.lm.harness.base_session import SessionBinding
 from base.lm.harness.claude import BridgeConfig
 from base.lm.harness.claude.session import ClaudeSession
 from base.lm.harness.claude.tests.fake_sdk import (
+    AssistantMessage,
     Block,
     Emit,
     FakeSDK,
+    Finish,
     ResultMessage,
     Say,
     ScriptedProbe,
+    TextBlock,
 )
 from base.lm.harness.codex import CodexConfig
 from base.lm.harness.codex.session import CodexSession
@@ -351,4 +360,144 @@ async def test_claude_cancel_during_first_turn_keeps_the_handoff_and_the_session
     finally:
         task.cancel()
         await asyncio.gather(task, return_exceptions=True)
+        await bridge.close()
+
+
+async def test_claude_synthetic_auth_failure_retires_subprocess_and_next_turn_recovers(
+    tmp_path: Path,
+) -> None:
+    auth_text = (
+        "Failed to authenticate: this login reached its time limit and cannot be renewed. "
+        "Run `claude auth login` to sign in again..."
+    )
+    sdk = FakeSDK(
+        [
+            [
+                Emit(
+                    AssistantMessage(
+                        model="<synthetic>",
+                        error="authentication_failed",
+                        stop_reason="stop_sequence",
+                        isApiErrorMessage=True,
+                        content=[TextBlock(text=auth_text)],
+                    )
+                ),
+                Finish(
+                    ResultMessage(
+                        subtype="success",
+                        is_error=True,
+                        stop_reason="stop_sequence",
+                        errors=[],
+                    )
+                ),
+            ],
+            [Say("recovered after keychain refresh")],
+        ]
+    )
+    registry = FileSessionRegistry(tmp_path / "sessions")
+    store = RegistrationStore(tmp_path / "registrations")
+
+    def new_session(_handle: str) -> ClaudeSession:
+        return ClaudeSession(
+            BridgeConfig(cwd=tmp_path),
+            environ={},
+            sdk=sdk,
+            probe=ScriptedProbe(),
+            binding=SessionBinding(agent_id=7, registry=registry),
+            clock=system_clock(),
+        )
+
+    bridge = HarnessBridge(
+        Harness.CLAUDE_CODE,
+        7,
+        new_session,
+        handoff=handoff(tmp_path),
+        registrations=store,
+        registration_ttl_seconds=3600,
+        clock=system_clock(),
+        handle_rng=SecureRandom(random.SystemRandom()),
+        controller_pid=os.getpid(),
+        timestamp_prefix=lambda: "",
+    )
+    try:
+        with pytest.raises(HarnessTurnFaultedError) as raised:
+            await asyncio.wait_for(run_turn(bridge, "user work", key="inbound-1"), timeout=2)
+
+        assert raised.value.retire_session is True
+        message = str(raised.value)
+        assert "authentication_failed" in message
+        assert auth_text in message
+        assert "gave no error detail" not in message
+        assert sdk.clients[0].disconnected is True, (
+            "stale claude subprocess must be destroyed immediately on authentication_failed"
+        )
+        assert bridge.session_id is None
+        assert store.read(7) is None
+
+        recovered = await asyncio.wait_for(
+            run_turn(bridge, "after refresh", key="inbound-2"), timeout=2
+        )
+        assert recovered.text == "recovered after keychain refresh"
+        assert len(sdk.clients) == 2, "next wake must spawn a fresh claude subprocess"
+        assert sdk.clients[1].options.resume == "session-1"
+    finally:
+        await bridge.close()
+
+
+async def test_claude_synthetic_non_auth_error_keeps_session_reusable_with_detail(
+    tmp_path: Path,
+) -> None:
+    sdk = FakeSDK(
+        [
+            [
+                Emit(
+                    AssistantMessage(
+                        model="<synthetic>",
+                        error="rate_limit",
+                        stop_reason="stop_sequence",
+                        isApiErrorMessage=True,
+                        content=[TextBlock(text="Rate limit exceeded; retry shortly.")],
+                    )
+                ),
+                Finish(
+                    ResultMessage(
+                        subtype="success",
+                        is_error=True,
+                        stop_reason="stop_sequence",
+                        errors=[],
+                    )
+                ),
+            ],
+            [Say("next turn")],
+        ]
+    )
+    session = ClaudeSession(
+        BridgeConfig(cwd=tmp_path),
+        environ={},
+        sdk=sdk,
+        probe=ScriptedProbe(),
+        binding=SessionBinding(),
+        clock=system_clock(),
+    )
+    bridge = HarnessBridge(
+        Harness.CLAUDE_CODE,
+        7,
+        lambda _: session,
+        handoff=handoff(tmp_path),
+        registration_ttl_seconds=3600,
+        clock=system_clock(),
+        handle_rng=SecureRandom(random.SystemRandom()),
+        controller_pid=os.getpid(),
+        timestamp_prefix=lambda: "",
+    )
+    try:
+        with pytest.raises(HarnessTurnFaultedError, match="rate_limit") as raised:
+            await asyncio.wait_for(run_turn(bridge, "user work", key="inbound-1"), timeout=2)
+        assert raised.value.retire_session is False
+        assert "Rate limit exceeded; retry shortly." in str(raised.value)
+        assert sdk.clients[0].disconnected is False
+        followup = await asyncio.wait_for(run_turn(bridge, "follow up", key="inbound-2"), timeout=2)
+        assert followup.text == "next turn"
+        assert len(sdk.clients) == 1
+    finally:
         await bridge.close()
