@@ -64,7 +64,12 @@ def replay(client: Any, fixture: str, group: str, **keys: str) -> None:
             client.push(
                 fake.AssistantMessage(
                     content=_blocks(frame["blocks"]),
+                    model=frame.get("model", "claude-sonnet-5-5"),
                     parent_tool_use_id=frame.get("parent_tool_use_id"),
+                    error=frame.get("error"),
+                    stop_reason=frame.get("stop_reason"),
+                    isApiErrorMessage=frame.get("isApiErrorMessage"),
+                    api_error_status=frame.get("api_error_status"),
                 )
             )
         elif kind == "SystemMessage":

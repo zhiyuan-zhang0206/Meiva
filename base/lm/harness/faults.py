@@ -20,8 +20,9 @@
 from __future__ import annotations
 
 from base.lm.harness.engine import HarnessTurn
+from base.lm.harness.events import TurnCompleted
 
-__all__ = ["fault_message"]
+__all__ = ["fault_message", "requires_session_recycle", "session_recycle_reason"]
 
 # meiva:note
 # The sentence a failed turn gets when the CLI named no cause. It says what was observed -- a
@@ -30,19 +31,65 @@ __all__ = ["fault_message"]
 # that exists and is empty, or for a turn that failed with no error detail at all.
 NO_ERROR_DETAIL = "harness reported a failure but gave no error detail"
 
+_AUTH_RECYCLE_PHRASES = (
+    "authentication_failed",
+    "failed to authenticate",
+    "login reached its time limit",
+    "claude auth login",
+    "oauth token has expired",
+    "oauth token expired",
+)
+
 
 # meiva:note
 # The kind prefers the HTTP status, because that is the field that names an API failure; a subtype
-# that says "success" or "unknown" is not a kind at all.
+# that says "success" or "unknown" is not a kind at all, so a synthetic assistant `error_code`
+# (such as `authentication_failed`) takes over there rather than collapsing to generic `error`.
 def fault_message(harness: str, turn: HarnessTurn) -> str:
-    kind = f"API {turn.api_error_status}" if turn.api_error_status is not None else turn.subtype
-    if kind in {"success", "unknown"}:
+    if turn.api_error_status is not None:
+        kind = f"API {turn.api_error_status}"
+    elif turn.subtype not in {"success", "unknown"}:
+        kind = turn.subtype
+    elif turn.error_code:
+        kind = turn.error_code
+    else:
         kind = "error"
     reported = f"{harness} turn {turn.turn_id} failed ({kind}): "
     detail = _declared_error(turn, kind)
     if detail:
+        if (
+            turn.error_code
+            and turn.error_code.lower() not in kind.lower()
+            and turn.error_code.lower() not in detail.lower()
+        ):
+            detail = f"{turn.error_code}: {detail}"
         return reported + detail
+    if turn.error_code and turn.error_code.lower() not in kind.lower():
+        return reported + turn.error_code + _known_status(turn)
     return reported + NO_ERROR_DETAIL + _known_status(turn)
+
+
+# meiva:note
+# A long-lived CLI subprocess caches OAuth credentials in memory: when the host refreshes Keychain
+# credentials externally, that subprocess keeps rejecting turns with `authentication_failed` until
+# recycled. Only declared error fields (never assistant reply prose) can trigger retirement so a
+# turn that merely discusses auth errors is never mistaken for a broken session.
+def session_recycle_reason(turn: HarnessTurn | TurnCompleted) -> str | None:
+    if not turn.is_error or turn.interrupted:
+        return None
+    if turn.error_code is not None and turn.error_code.strip().lower() == "authentication_failed":
+        return "session authentication failed"
+    if turn.api_error_status == 401:
+        return "session authentication failed"
+    for candidate in turn.errors:
+        lowered = candidate.lower()
+        if any(phrase in lowered for phrase in _AUTH_RECYCLE_PHRASES):
+            return "session authentication failed"
+    return None
+
+
+def requires_session_recycle(turn: HarnessTurn | TurnCompleted) -> bool:
+    return session_recycle_reason(turn) is not None
 
 
 # meiva:note

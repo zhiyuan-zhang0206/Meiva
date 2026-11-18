@@ -222,3 +222,58 @@ async def test_session_passes_the_configured_json_buffer_limit(tmp_path: Path) -
 def test_json_buffer_limit_must_be_a_positive_integer(tmp_path: Path, limit: object) -> None:
     with pytest.raises(ValueError, match="max_buffer_size must be a positive integer"):
         config(tmp_path, max_buffer_size=limit)
+
+
+async def test_session_refuses_delivery_after_synthetic_authentication_failed(
+    tmp_path: Path,
+) -> None:
+    from claude_agent_sdk._internal.message_parser import parse_message
+
+    auth_text = (
+        "Failed to authenticate: this login reached its time limit and cannot be renewed. "
+        "Run `claude auth login` to sign in again..."
+    )
+    assistant_frame = parse_message(
+        {
+            "type": "assistant",
+            "message": {
+                "model": "<synthetic>",
+                "stop_reason": "stop_sequence",
+                "content": [{"type": "text", "text": auth_text}],
+            },
+            "error": "authentication_failed",
+            "isApiErrorMessage": True,
+        }
+    )
+    result_frame = parse_message(
+        {
+            "type": "result",
+            "subtype": "success",
+            "duration_ms": 120,
+            "duration_api_ms": 0,
+            "is_error": True,
+            "num_turns": 1,
+            "session_id": "session-1",
+            "stop_reason": "stop_sequence",
+            "errors": [],
+        }
+    )
+    assert assistant_frame is not None and result_frame is not None
+
+    harness = await start(tmp_path, passive=True)
+    try:
+        from base.lm.harness.claude.delivery import key_uuid
+
+        await send(harness, "hello", key="k1")
+        harness.client.push(fake.UserMessage(content="hello", uuid=key_uuid("k1")))
+        harness.client.push(assistant_frame)
+        harness.client.push(result_frame)
+        completed = await harness.wait_for(lambda event: isinstance(event, TurnCompleted))
+        assert completed.is_error is True
+        assert completed.error_code == "authentication_failed"
+        assert completed.errors == (auth_text,)
+        assert completed.stop_reason == "stop_sequence"
+        with pytest.raises(SessionClosedError, match="authentication failed"):
+            await send(harness, "reused", key="k2")
+    finally:
+        await harness.stop()

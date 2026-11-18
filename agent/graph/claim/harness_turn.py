@@ -107,8 +107,13 @@ async def _run_harness_turn(
     except (HarnessTurnFaultedError, HarnessClosedError, HarnessSetupError) as exc:
         if isinstance(exc, HarnessTurnFaultedError) and exc.outcome is not None:
             log_turn_usage(ctx, agent_id, bridge.model, exc.outcome)
-        if not isinstance(exc, HarnessTurnFaultedError) or exc.outcome is None:
-            await bridge.retire(reason="session unavailable")
+        if not isinstance(exc, HarnessTurnFaultedError) or exc.retire_session:
+            reason = (
+                exc.retire_reason
+                if isinstance(exc, HarnessTurnFaultedError) and exc.retire_reason
+                else "session unavailable"
+            )
+            await bridge.retire(reason=reason)
         produced_output = projector.has_activity
         marked = await run.retire_unconfirmed()
         if produced_output:

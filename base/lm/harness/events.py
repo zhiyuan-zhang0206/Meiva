@@ -157,6 +157,11 @@ class TurnCompleted:
     # The process generation the turn ended under (see `InputReceived`). 0 means the adapter
     # does not stamp generations yet.
     generation: int = 0
+    # meiva:note
+    # Error category from an API-error assistant frame (such as Claude's `<synthetic>`
+    # `authentication_failed` frame) when the trailing result carries `errors=[]` and
+    # `subtype="success"`.
+    error_code: str | None = None
 
 
 @dataclass(frozen=True, slots=True)

@@ -23,7 +23,7 @@ from base.lm.harness.events import (
     TurnCompleted,
     TurnFaulted,
 )
-from base.lm.harness.faults import fault_message
+from base.lm.harness.faults import fault_message, session_recycle_reason
 from base.lm.harness.handoff import Handoff, compaction_reminder
 from base.lm.harness.pump import EventPump, Subscription
 from base.lm.harness.registration import (
@@ -44,9 +44,26 @@ from base.log import logger
 
 
 class HarnessTurnFaultedError(RuntimeError):
-    def __init__(self, message: str, *, outcome: HarnessTurn | None = None) -> None:
+    def __init__(
+        self,
+        message: str,
+        *,
+        outcome: HarnessTurn | None = None,
+        retire_session: bool | None = None,
+        retire_reason: str | None = None,
+    ) -> None:
         super().__init__(message)
         self.outcome = outcome
+        self.retire_session = (
+            (outcome is None or retire_reason is not None)
+            if retire_session is None
+            else retire_session
+        )
+        self.retire_reason = (
+            retire_reason
+            if retire_reason is not None
+            else ("session unavailable" if self.retire_session else None)
+        )
 
 
 class HarnessClosedError(RuntimeError):
@@ -115,6 +132,8 @@ class HarnessBridge:
         self._created_at: str | None = None
         self._session: HarnessSession | None = None
         self._last_session: HarnessSession | None = None
+        self._poisoned_session: HarnessSession | None = None
+        self._poisoned_reason: str | None = None
         self._pump: EventPump | None = None
         self._pump_task: asyncio.Task[None] | None = None
         self._pump_group: asyncio.TaskGroup | None = None
@@ -181,7 +200,9 @@ class HarnessBridge:
                 "the previous harness session could not close"
             ) from self._close_error
         if self._session is not None:
-            return self._session
+            if self._session is not self._poisoned_session:
+                return self._session
+            await self._retire(self._session, self._poisoned_reason or "session requires recycle")
         if self._closed:
             raise HarnessClosedError("this harness bridge is closed")
         handle = base64.urlsafe_b64encode(self._handle_rng.randbytes(32)).rstrip(b"=").decode()
@@ -258,6 +279,9 @@ class HarnessBridge:
             self._lost = ()
         elif isinstance(event, (InputRejected, InputLost)) and event.key == self._opening_key:
             self._opening_key = None
+        elif isinstance(event, TurnCompleted) and (reason := session_recycle_reason(event)):
+            self._poisoned_session = self._session
+            self._poisoned_reason = reason
 
     # meiva:note
     # A session that cannot start is a setup failure, not a crash: the graph settles it as a reported
@@ -448,6 +472,9 @@ class HarnessBridge:
     # bridge stays open for that next turn, which is why the two are separate calls.
     # meiva:link base/lm/harness/docs/harness.md
     async def _retire(self, session: HarnessSession, reason: str) -> None:
+        if self._poisoned_session is session:
+            self._poisoned_session = None
+            self._poisoned_reason = None
         if self._session is session:
             self._session = None
             self._handoff_delivered = False
@@ -524,7 +551,13 @@ def fault_of_event(harness: Harness, event: BridgeEvent) -> Exception | None:
     if isinstance(event, TurnCompleted):
         if event.is_error and not event.interrupted:
             outcome = completed_turn(event, "")
-            return HarnessTurnFaultedError(fault_message(harness.value, outcome), outcome=outcome)
+            recycle_reason = session_recycle_reason(outcome)
+            return HarnessTurnFaultedError(
+                fault_message(harness.value, outcome),
+                outcome=outcome,
+                retire_session=recycle_reason is not None,
+                retire_reason=recycle_reason,
+            )
         return None
     if isinstance(event, TurnFaulted):
         return HarnessTurnFaultedError(event.error)

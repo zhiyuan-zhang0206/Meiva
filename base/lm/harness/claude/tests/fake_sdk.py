@@ -34,11 +34,18 @@ class ToolResultBlock:
     is_error: bool | None = False
 
 
+# meiva:note
+# `isApiErrorMessage` retains Claude CLI's camelCase JSON field name so test frames can exercise
+# raw-flag payloads alongside SDK-parsed `error` payloads.
 @dataclass
 class AssistantMessage:
     content: list[Any]
     model: str = "claude-sonnet-5-5"
     parent_tool_use_id: str | None = None
+    error: str | None = None
+    stop_reason: str | None = None
+    isApiErrorMessage: bool | None = None  # noqa: N815
+    api_error_status: int | None = None
 
 
 @dataclass
@@ -182,6 +189,11 @@ class Block:
 @dataclass(frozen=True)
 class Delay:
     seconds: float
+
+
+@dataclass(frozen=True)
+class Finish:
+    result: ResultMessage
 
 
 _END = object()
@@ -330,6 +342,10 @@ class FakeClaudeSDKClient:
                     self._absorb_waiting()
                 elif isinstance(step, Block):
                     await self._blocker.wait()
+                elif isinstance(step, Finish):
+                    self._finish(result=step.result)
+                    self._revive_waiting()
+                    return
                 else:
                     raise TypeError(f"unknown script step: {step!r}")
         except asyncio.CancelledError:

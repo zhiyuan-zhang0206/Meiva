@@ -12,7 +12,7 @@ from __future__ import annotations
 
 from base.lm.harness.engine import HarnessTurn
 from base.lm.harness.events import Usage
-from base.lm.harness.faults import fault_message
+from base.lm.harness.faults import fault_message, requires_session_recycle, session_recycle_reason
 
 # meiva:note
 # The reply an `agy` turn streamed before it reported a failure: text the agent already read, and
@@ -27,6 +27,9 @@ def turn(
     stop_reason: str | None = None,
     api_error_status: int | None = None,
     errors: tuple[str, ...] = (),
+    error_code: str | None = None,
+    is_error: bool = True,
+    interrupted: bool = False,
 ) -> HarnessTurn:
     return HarnessTurn(
         turn_id="turn-1",
@@ -34,11 +37,12 @@ def turn(
         usage=Usage(input_tokens=1, output_tokens=1),
         cost_usd=None,
         subtype=subtype,
-        is_error=True,
-        interrupted=False,
+        is_error=is_error,
+        interrupted=interrupted,
         stop_reason=stop_reason,
         api_error_status=api_error_status,
         errors=errors,
+        error_code=error_code,
     )
 
 
@@ -137,3 +141,89 @@ def test_antigravity_fault_message_prefers_cli_error_over_hidden_text() -> None:
     assert message == (
         "antigravity turn turn-1 failed (error): API error (attempt 1): 500 Internal Server Error"
     )
+
+
+def test_synthetic_error_code_names_the_kind_and_surfaces_detail() -> None:
+    detail = (
+        "Failed to authenticate: this login reached its time limit and cannot be renewed. "
+        "Run `claude auth login` to sign in again."
+    )
+    message = fault_message(
+        "claude_code",
+        turn(
+            subtype="success",
+            stop_reason="stop_sequence",
+            error_code="authentication_failed",
+            errors=(detail,),
+        ),
+    )
+
+    assert message == f"claude_code turn turn-1 failed (authentication_failed): {detail}"
+    assert "gave no error detail" not in message
+
+
+def test_error_code_survives_alongside_http_status_or_empty_errors() -> None:
+    with_status = fault_message(
+        "claude_code",
+        turn(
+            api_error_status=404,
+            error_code="model_not_found",
+            errors=("There's an issue with the selected model.",),
+        ),
+    )
+    without_errors = fault_message(
+        "claude_code",
+        turn(
+            subtype="success",
+            stop_reason="stop_sequence",
+            error_code="authentication_failed",
+        ),
+    )
+
+    assert with_status == (
+        "claude_code turn turn-1 failed (API 404): model_not_found: "
+        "There's an issue with the selected model."
+    )
+    assert without_errors == (
+        "claude_code turn turn-1 failed (authentication_failed): "
+        "harness reported a failure but gave no error detail (status/stop_reason: stop_sequence)"
+    )
+
+
+def test_requires_session_recycle_positive_and_negative_controls() -> None:
+    assert requires_session_recycle(turn(error_code="authentication_failed")) is True
+    assert session_recycle_reason(turn(error_code="authentication_failed")) == (
+        "session authentication failed"
+    )
+    assert requires_session_recycle(turn(api_error_status=401)) is True
+    assert (
+        requires_session_recycle(
+            turn(errors=("Failed to authenticate: this login reached its time limit",))
+        )
+        is True
+    )
+
+    assert (
+        requires_session_recycle(
+            turn(
+                is_error=False,
+                text="authentication_failed and claude auth login were discussed",
+                error_code="authentication_failed",
+            )
+        )
+        is False
+    )
+    assert (
+        requires_session_recycle(turn(interrupted=True, error_code="authentication_failed"))
+        is False
+    )
+    assert (
+        requires_session_recycle(
+            turn(subtype="error_during_execution", text="Failed to authenticate")
+        )
+        is False
+    )
+    assert (
+        requires_session_recycle(turn(api_error_status=400, error_code="invalid_request")) is False
+    )
+    assert requires_session_recycle(turn(error_code="rate_limit")) is False

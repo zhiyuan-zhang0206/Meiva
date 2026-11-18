@@ -44,6 +44,7 @@ from base.lm.harness.claude.inbound import (
 from base.lm.harness.claude.mapping import (
     is_subagent_message,
     map_message,
+    parse_assistant_error,
     parse_result,
     task_update_status,
 )
@@ -65,6 +66,7 @@ from base.lm.harness.events import (
     TurnStarted,
     UnsolicitedOutput,
 )
+from base.lm.harness.faults import requires_session_recycle
 from base.lm.harness.process import (
     ChildProbe,
     SdkClient,
@@ -188,6 +190,7 @@ class ClaudeSession(BaseHarnessSession[BridgeConfig]):
         self._pending_cause: HarnessCause | None = None
         self._answering: tuple[AwaitedAnswer, ...] = ()
         self._subagent_labels: dict[str, str] = {}
+        self._auth_invalidated = False
 
     async def start(self, *, resume: str | None = None) -> None:
         if self._client is not None:
@@ -266,6 +269,8 @@ class ClaudeSession(BaseHarnessSession[BridgeConfig]):
         batch = validated_batch(inputs)
         if self._closed:
             raise SessionClosedError("session is closed")
+        if self._auth_invalidated:
+            raise SessionClosedError("Claude session authentication failed; start a new session")
         _ = self._require_client()
         for entry in batch:
             await self._send(entry)
@@ -437,14 +442,17 @@ class ClaudeSession(BaseHarnessSession[BridgeConfig]):
             self._handle_echo(message)
             return
         subagent = is_subagent_message(message)
-        if subagent and not map_message(message, turn_id=""):
+        assistant_error = parse_assistant_error(message)
+        if subagent and assistant_error is None and not map_message(message, turn_id=""):
             return
         if subagent and self._open is None and self._pending_cause is None:
             self._pending_cause = HarnessCause.BACKGROUND_TASK
         turn = self._open or self._open_harness_turn(None)
         mapped = self._labelled(map_message(message, turn_id=turn.turn_id))
         self._open = turn.with_parts(
-            assistant_texts(mapped), stepped=counts_as_step(type(message).__name__, mapped)
+            assistant_texts(mapped),
+            stepped=counts_as_step(type(message).__name__, mapped),
+            errors=(assistant_error,) if assistant_error is not None else (),
         )
         for event in mapped:
             self._emit(event)
@@ -701,7 +709,12 @@ class ClaudeSession(BaseHarnessSession[BridgeConfig]):
         turn = self._open or self._open_harness_turn(fields.origin_kind)
         settlement = settle_result(
             fields,
-            turn=RunningTurn(turn_id=turn.turn_id, parts=turn.parts, steps=turn.steps),
+            turn=RunningTurn(
+                turn_id=turn.turn_id,
+                parts=turn.parts,
+                steps=turn.steps,
+                assistant_errors=turn.assistant_errors,
+            ),
             session_id=self._session_id,
             totals=self._totals,
         )
@@ -709,6 +722,8 @@ class ClaudeSession(BaseHarnessSession[BridgeConfig]):
         self._session_id = settlement.session_id
         completed = replace(settlement.completed, generation=self.generation)
         self._open = None
+        if requires_session_recycle(completed):
+            self._auth_invalidated = True
         self._emit(completed)
         if completed.interrupted:
             self._emit(InterruptConfirmed(turn.turn_id, self.generation))

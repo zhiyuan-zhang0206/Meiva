@@ -1,6 +1,11 @@
 from __future__ import annotations
 
-from base.lm.harness.claude.mapping import map_message, parse_result
+from base.lm.harness.claude.mapping import (
+    AssistantError,
+    map_message,
+    parse_assistant_error,
+    parse_result,
+)
 from base.lm.harness.claude.tests import fake_sdk as fake
 from base.lm.harness.events import (
     AssistantText,
@@ -275,3 +280,76 @@ def test_a_compact_boundary_system_message_maps_to_context_compacted() -> None:
     assert map_message(message, turn_id=None) == [ContextCompacted(turn_id=None)]
     status = fake.SystemMessage(subtype="status", data={"status": "compacting"})
     assert map_message(status, turn_id=None) == []
+
+
+def test_synthetic_auth_error_assistant_frame_is_extracted_and_excluded_from_assistant_text() -> (
+    None
+):
+    auth_text = (
+        "Failed to authenticate: this login reached its time limit and cannot be renewed. "
+        "Run `claude auth login` to sign in again..."
+    )
+    sdk_shape = fake.AssistantMessage(
+        model="<synthetic>",
+        error="authentication_failed",
+        stop_reason="stop_sequence",
+        content=[fake.TextBlock(text=auth_text)],
+    )
+    raw_shape = fake.AssistantMessage(
+        model="<synthetic>",
+        error="authentication_failed",
+        stop_reason="stop_sequence",
+        isApiErrorMessage=True,
+        api_error_status=401,
+        content=[fake.TextBlock(text=auth_text)],
+    )
+
+    assert parse_assistant_error(sdk_shape) == AssistantError(
+        error="authentication_failed",
+        text=auth_text,
+        api_error_status=None,
+    )
+    assert parse_assistant_error(raw_shape) == AssistantError(
+        error="authentication_failed",
+        text=auth_text,
+        api_error_status=401,
+    )
+    assert map_message(sdk_shape, turn_id="t1") == []
+    assert map_message(raw_shape, turn_id="t1") == []
+
+
+def test_non_error_synthetic_assistant_frame_is_ignored_without_error() -> None:
+    synthetic_ack = fake.AssistantMessage(
+        model="<synthetic>",
+        stop_reason="stop_sequence",
+        isApiErrorMessage=False,
+        content=[fake.TextBlock(text="No response requested.")],
+    )
+
+    assert parse_assistant_error(synthetic_ack) is None
+    assert map_message(synthetic_ack, turn_id="t1") == []
+
+
+def test_assistant_error_redacts_secrets_while_keeping_diagnostic_message() -> None:
+    leaked = (
+        "Failed to authenticate Authorization: Bearer tok_live_secret_123 "
+        "https://user:supersecret@api.anthropic.com "
+        "CLAUDE_CODE_OAUTH_TOKEN=fixture-secret-value "
+        "sk-ant-oat01-fixturesecret"
+    )
+    message = fake.AssistantMessage(
+        model="<synthetic>",
+        error="authentication_failed",
+        isApiErrorMessage=True,
+        content=[fake.TextBlock(text=leaked)],
+    )
+
+    parsed = parse_assistant_error(message)
+    assert parsed is not None
+    assert parsed.error == "authentication_failed"
+    assert parsed.text is not None
+    assert "supersecret" not in parsed.text
+    assert "fixture-secret-value" not in parsed.text
+    assert "sk-ant-oat01-fixturesecret" not in parsed.text
+    assert "tok_live_secret_123" not in parsed.text
+    assert "Failed to authenticate" in parsed.text
