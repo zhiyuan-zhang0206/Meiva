@@ -151,6 +151,10 @@ class TerminateOutcome(str):
         )
 
 
+# meiva:note
+# Omitting depth or limit resolves the configured display defaults via config_authority();
+# triggering process_context.current_context() first ensures a cold external-harness child
+# attaches and installs its ConfigAuthority before reading those defaults.
 def get_neighbors(
     agent_id: int, depth: int | None = None, limit: int | None = None
 ) -> list[Neighbor]:
@@ -164,16 +168,14 @@ def get_neighbors(
     from meiva.sdk_surface.settings import config_authority
 
     agent_id = coerce_typed(agent_id, "agent_id", int)
-    resolved_depth: int
-    if depth is None:
+    resolved_depth = None if depth is None else coerce_typed(depth, "depth", int)
+    resolved_limit = None if limit is None else coerce_typed(limit, "limit", int)
+    if resolved_depth is None or resolved_limit is None:
+        _ = process_context.current_context()
+    if resolved_depth is None:
         resolved_depth = config_authority().service_field_value("neighbors_default_depth")
-    else:
-        resolved_depth = coerce_typed(depth, "depth", int)
-    resolved_limit: int
-    if limit is None:
+    if resolved_limit is None:
         resolved_limit = config_authority().service_field_value("neighbors_default_limit")
-    else:
-        resolved_limit = coerce_typed(limit, "limit", int)
     rows = object_rows(
         gateway_client.get_neighbors(agent_id, depth=resolved_depth, limit=resolved_limit),
         "neighbors",
@@ -253,6 +255,7 @@ def harness_availability() -> list[HarnessAvailability]:
     from meiva.sdk_surface import process_context
     from meiva.sdk_surface import settings as sdk_settings
 
+    environ = process_context.current_context().require_environ()
     return [
         HarnessAvailability(
             harness=row.harness,
@@ -264,7 +267,7 @@ def harness_availability() -> list[HarnessAvailability]:
         )
         for row in probe_local_harnesses(
             now=sdk_settings.clock().now(),
-            environ=process_context.current_context().require_environ(),
+            environ=environ,
         )
     ]
 

@@ -64,6 +64,9 @@ def clock() -> Clock:
 # that is not one earns, live here with the code that does read through it.
 def config_authority() -> ConfigAuthority:
     installation = installed()
+    if installation is None:
+        _ = process_context.ambient_context()
+        installation = installed()
     carried = None if installation is None else installation.authority
     authority = carried if isinstance(carried, ConfigAuthority) else None
     if authority is None:
