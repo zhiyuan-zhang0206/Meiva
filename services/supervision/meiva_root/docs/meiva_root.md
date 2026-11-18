@@ -3,8 +3,9 @@
 `meiva-root` owns one home's application service tree. Ordinary start prepares a
 validated manifest, launches the root, and requires fresh ownership-bound
 protocol readiness. Repeated start reuses the same generation. Changed service
-membership, commands, per-service environment, or the exact root launch
-environment, or development source bytes requires an explicit prior stop; start cannot drain active work by
+membership, commands, per-service environment, or the root launch
+inputs (declared launch environment, authoritative on-disk configuration, or
+delivered write generation) requires an explicit prior stop; start cannot drain active work by
 silently replacing its supervisor. The public start intent lock serializes the
 whole preparation and readiness operation for that home. Admission runs before
 converge, schema mutation, or desired service publication. A live identical root
@@ -14,17 +15,22 @@ The manifest freezes command arguments, service environment, stop window, and
 `stop_tier`. Service startup and restart directly read latest configuration from disk.
 The private root
 `launch_digest` binds root's declared launch environment (`launch_input_keys`), the
-home's authoritative `.env` and plugin configuration files, and the development
-source snapshot (tracked plus nonignored untracked files) at start admission;
-root exposes that digest with its native birth in status, without exposing
-secrets. Ambient keys root still hands every unit (proxy, DISPLAY, HOME,
-USER/LOGNAME, TMPDIR and the other temp dirs) are outside
+home's authoritative on-disk configuration (`.env` and plugin configuration
+files via `configuration_digest`), and the delivered write generation
+(`write_generation`: its generation number and credential digest only, or `None`)
+at start admission; root exposes that digest with its native birth in status,
+without exposing secrets. Ambient keys root still hands every unit (proxy,
+DISPLAY, HOME, USER/LOGNAME, TMPDIR and the other temp dirs) are outside
 the digest: a start that differs only in them reuses the running generation,
 which keeps the values it started with, instead of refusing. The deployment
 glue selects services and supplies health and diagnostic participants: [Root deployment wiring](../../meiva_root_glue/docs/meiva_root_glue.md). The generic
 root does not know rollout publication authority or cluster installation.
-Development source remains mutable after admission; this check does not certify
-an immutable running release or seal ignored dependency directories.
+Working-tree source is not sealed into `launch_digest` at admission: each
+supervised unit is an OS subprocess that loads the checkout's current code when
+spawned, so a stop that preserves shell sessions (`--keep-shell-sessions`)
+followed by a checkout update and `meiva start` reuses the live root without
+refusing; operators must still stop affected units or root explicitly when
+running code must be replaced.
 
 ## Native ancestry and lifetime
 
