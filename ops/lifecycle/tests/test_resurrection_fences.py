@@ -515,3 +515,120 @@ class TestResurrectAgent:
                 trigger_inbound_kind=InboundKind.COMPACT_REQUEST,
             )
         assert agents_row(db_conn, agent_id)[2] == "terminated"  # type: ignore[index]
+
+    def test_guarded_resurrect_accepts_chat_queued_before_self_terminate(
+        self,
+        db_conn: psycopg.Connection,
+        database: Database,
+        event_bus: EventBus,
+        *,
+        config_authority: ConfigAuthority,
+        model_catalog: ModelCatalog,
+        database_gate: ProcessDbGate,
+        machine_identity: MachineIdentityReader,
+    ) -> None:
+        # meiva:note
+        # A chat queued before `meiva.self.terminate()` (`source='self'`) was never
+        # claimed by the dying incarnation and remains eligible to auto-wake.
+        agent_id = hosted_agent(
+            db_conn,
+            config_authority=config_authority,
+            model_catalog=model_catalog,
+            database_gate=database_gate,
+            local_machine=machine_identity,
+        )
+        trigger_id = insert_inbound_message(
+            db_conn,
+            agent_id,
+            "late chat before self terminate",
+            source="agent:1",
+            bus=event_bus,
+            database=database,
+        )
+        with db_conn.cursor() as cur:
+            cur.execute(
+                "INSERT INTO inbound_messages (agent_id, content, kind, source, status) "
+                "VALUES (%s, '', 'terminate', 'self', 'done')",
+                (agent_id,),
+            )
+            cur.execute(
+                "UPDATE agents_meta SET status = 'terminated', termination_source = 'user' "
+                "WHERE id = %s",
+                (agent_id,),
+            )
+            cur.execute(
+                "UPDATE inbound_messages "
+                "SET created_at = (SELECT status_changed_at FROM agents_meta WHERE id = %s) "
+                "                 - interval '1 second' "
+                "WHERE id = %s",
+                (agent_id, trigger_id),
+            )
+        db_conn.commit()
+
+        resurrect_agent(
+            database,
+            event_bus,
+            agent_id,
+            resurrected_by="system",
+            trigger_inbound_id=trigger_id,
+            trigger_inbound_kind=InboundKind.CHAT,
+        )
+
+        row = agents_row(db_conn, agent_id)
+        assert row is not None and row[2] == "idling"
+
+    def test_guarded_resurrect_rejects_chat_before_external_terminate_even_with_self_terminate(
+        self,
+        db_conn: psycopg.Connection,
+        database: Database,
+        event_bus: EventBus,
+        *,
+        config_authority: ConfigAuthority,
+        model_catalog: ModelCatalog,
+        database_gate: ProcessDbGate,
+        machine_identity: MachineIdentityReader,
+    ) -> None:
+        # meiva:note
+        # An external terminate (`source != 'self'`) still fences earlier pending chats,
+        # even when a `self` terminate also exists.
+        agent_id = hosted_agent(
+            db_conn,
+            config_authority=config_authority,
+            model_catalog=model_catalog,
+            database_gate=database_gate,
+            local_machine=machine_identity,
+        )
+        trigger_id = insert_inbound_message(
+            db_conn,
+            agent_id,
+            "chat before external terminate",
+            source="user",
+            bus=event_bus,
+            database=database,
+        )
+        with db_conn.cursor() as cur:
+            cur.execute(
+                "INSERT INTO inbound_messages (agent_id, content, kind, source, status) "
+                "VALUES (%s, '', 'terminate', 'user', 'done'), "
+                "       (%s, '', 'terminate', 'self', 'done')",
+                (agent_id, agent_id),
+            )
+            cur.execute(
+                "UPDATE agents_meta SET status = 'terminated', termination_source = 'user' "
+                "WHERE id = %s",
+                (agent_id,),
+            )
+        db_conn.commit()
+
+        with pytest.raises(ResurrectTriggerStaleError, match="trigger work no longer qualifies"):
+            resurrect_agent(
+                database,
+                event_bus,
+                agent_id,
+                resurrected_by="system",
+                trigger_inbound_id=trigger_id,
+                trigger_inbound_kind=InboundKind.CHAT,
+            )
+
+        row = agents_row(db_conn, agent_id)
+        assert row is not None and row[2] == "terminated"

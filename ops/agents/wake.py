@@ -52,10 +52,10 @@ RESURRECTION_ROW: LiteralString = (
 #
 # The row leaves unowned: the next admission mints a fresh runtime generation.
 # A trigger inbound must be pending and pass the shared kill-command fence
-# (`TRIGGER_AFTER_KILL_COMMAND`): newer than every terminate command of the owner,
-# and either newer than the death or belonging to a death a command ended. That
-# fence carries the case this CAS used to refuse — work that lands while the owner
-# is still shutting down.
+# (`TRIGGER_AFTER_KILL_COMMAND`): newer than every external terminate command of
+# the owner, and either newer than the death or belonging to a death a command ended.
+# That fence carries the case this CAS used to refuse — work that lands while the
+# owner is still shutting down (including before `meiva.self.terminate()`).
 def transition_terminated_to_unclaimed_idling(
     cur: psycopg.Cursor,
     agent_id: int,

@@ -29,9 +29,13 @@ def is_system_notice_source(source: str, payload: Mapping[str, object] | None) -
 # meiva:note
 # The wake-trigger fence of a terminated owner, as one SQL predicate.
 #
-# A trigger must be newer than every kill command the owner received, so work
-# queued before a kill cannot reverse it — including a repeated force on an
-# already terminated row, which changes no status but appends a command.
+# A trigger must be newer than every external kill command the owner received
+# (`t.source <> 'self'`), so work queued before an external kill cannot reverse it —
+# including a repeated force on an already terminated row, which changes no status
+# but appends a command. An agent's own `meiva.self.terminate()` (`t.source = 'self'`)
+# is excluded from that id fence: the agent calls it thinking its inbox is drained,
+# without seeing a message that landed after its last claim, so unseen pending work
+# that arrived before the death remains eligible to wake a successor.
 #
 # The second half decides whether work that arrived before the death may wake the
 # owner at all, and the death's own mark answers it: only a death a command ended
@@ -46,7 +50,8 @@ def is_system_notice_source(source: str, payload: Mapping[str, object] | None) -
 # meiva:link docs/decisions/agents/lifecycle/2026-07-21-crash-auto-resurrect.md
 TRIGGER_AFTER_KILL_COMMAND: LiteralString = (
     "m.id > COALESCE((SELECT max(t.id) FROM inbound_messages t "
-    "WHERE t.agent_id = agents_meta.id AND t.kind = 'terminate'), 0) "
+    "WHERE t.agent_id = agents_meta.id AND t.kind = 'terminate' "
+    "AND t.source <> 'self'), 0) "
     "AND (m.created_at > agents_meta.status_changed_at "
     "     OR agents_meta.termination_source = 'user')"
 )

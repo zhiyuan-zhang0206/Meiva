@@ -72,12 +72,12 @@ def _agent(
     return aid
 
 
-def _terminate_command(db: psycopg.Connection, agent_id: int) -> int:
+def _terminate_command(db: psycopg.Connection, agent_id: int, *, source: str = "agent:1") -> int:
     with db.cursor() as cur:
         cur.execute(
             "INSERT INTO inbound_messages (agent_id, content, kind, source) "
-            "VALUES (%s, '', 'terminate', 'agent:1') RETURNING id",
-            (agent_id,),
+            "VALUES (%s, '', 'terminate', %s) RETURNING id",
+            (agent_id, source),
         )
         row = cur.fetchone()
     db.commit()
@@ -461,6 +461,133 @@ class TestSelectStranded:
             cur.execute(
                 "UPDATE agents_meta SET wake_suppressed_until = now() + interval '5 minutes', "
                 "wake_suppress_reason = 'stranded_wake' WHERE id = %s",
+                (aid,),
+            )
+        db_conn.commit()
+        assert select_stranded(pool, _AGE_BOUND_S) == []
+
+    def test_selects_pending_chat_queued_before_self_terminate(
+        self,
+        db_conn: psycopg.Connection,
+        pool: ConnectionPool,
+        *,
+        model_catalog: ModelCatalog,
+        config_authority: ConfigAuthority,
+        database_gate: ProcessDbGate,
+        machine_identity: MachineIdentityReader,
+    ) -> None:
+        # meiva:note
+        # A chat that arrives after the agent's last claim and moments before
+        # `meiva.self.terminate()` (`source = 'self'`) was never seen by the dying
+        # incarnation and must still wake a successor.
+        aid = _agent(
+            db_conn,
+            model_catalog=model_catalog,
+            config_authority=config_authority,
+            database_gate=database_gate,
+            local_machine=machine_identity,
+            status="running",
+        )
+        trigger = _chat(db_conn, aid, database_gate=database_gate, source="agent:1")
+        _terminate_command(db_conn, aid, source="self")
+        with db_conn.cursor() as cur:
+            cur.execute(
+                "UPDATE agents_meta SET status = 'terminated', termination_source = 'user' "
+                "WHERE id = %s",
+                (aid,),
+            )
+        db_conn.commit()
+        assert select_stranded(pool, _AGE_BOUND_S) == [
+            StrandedOwner(aid, trigger, InboundKind.CHAT),
+        ]
+
+    def test_external_terminate_fences_older_chat_while_self_terminate_does_not(
+        self,
+        db_conn: psycopg.Connection,
+        pool: ConnectionPool,
+        *,
+        model_catalog: ModelCatalog,
+        config_authority: ConfigAuthority,
+        database_gate: ProcessDbGate,
+        machine_identity: MachineIdentityReader,
+    ) -> None:
+        aid = _agent(
+            db_conn,
+            model_catalog=model_catalog,
+            config_authority=config_authority,
+            database_gate=database_gate,
+            local_machine=machine_identity,
+            status="running",
+        )
+        _chat(db_conn, aid, database_gate=database_gate, source="agent:1")
+        _terminate_command(db_conn, aid, source="user")
+        newer = _chat(db_conn, aid, database_gate=database_gate, source="agent:1", age_s=0.5)
+        _terminate_command(db_conn, aid, source="self")
+        with db_conn.cursor() as cur:
+            cur.execute(
+                "UPDATE agents_meta SET status = 'terminated', termination_source = 'user' "
+                "WHERE id = %s",
+                (aid,),
+            )
+        db_conn.commit()
+        assert select_stranded(pool, _AGE_BOUND_S) == [
+            StrandedOwner(aid, newer, InboundKind.CHAT),
+        ]
+
+    def test_external_force_after_self_terminate_fences_earlier_pending_chat(
+        self,
+        db_conn: psycopg.Connection,
+        pool: ConnectionPool,
+        *,
+        model_catalog: ModelCatalog,
+        config_authority: ConfigAuthority,
+        database_gate: ProcessDbGate,
+        machine_identity: MachineIdentityReader,
+    ) -> None:
+        aid = _agent(
+            db_conn,
+            model_catalog=model_catalog,
+            config_authority=config_authority,
+            database_gate=database_gate,
+            local_machine=machine_identity,
+            status="running",
+        )
+        _chat(db_conn, aid, database_gate=database_gate, source="agent:1")
+        _terminate_command(db_conn, aid, source="self")
+        _terminate_command(db_conn, aid, source="user")
+        with db_conn.cursor() as cur:
+            cur.execute(
+                "UPDATE agents_meta SET status = 'terminated', termination_source = 'user' "
+                "WHERE id = %s",
+                (aid,),
+            )
+        db_conn.commit()
+        assert select_stranded(pool, _AGE_BOUND_S) == []
+
+    def test_ignores_leftover_before_involuntary_death_even_with_self_terminate(
+        self,
+        db_conn: psycopg.Connection,
+        pool: ConnectionPool,
+        *,
+        model_catalog: ModelCatalog,
+        config_authority: ConfigAuthority,
+        database_gate: ProcessDbGate,
+        machine_identity: MachineIdentityReader,
+    ) -> None:
+        aid = _agent(
+            db_conn,
+            model_catalog=model_catalog,
+            config_authority=config_authority,
+            database_gate=database_gate,
+            local_machine=machine_identity,
+            status="running",
+        )
+        _chat(db_conn, aid, database_gate=database_gate, age_s=600)
+        _terminate_command(db_conn, aid, source="self")
+        with db_conn.cursor() as cur:
+            cur.execute(
+                "UPDATE agents_meta SET status = 'terminated', termination_source = 'reaper' "
+                "WHERE id = %s",
                 (aid,),
             )
         db_conn.commit()
