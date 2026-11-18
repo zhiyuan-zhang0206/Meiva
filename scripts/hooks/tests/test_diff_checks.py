@@ -448,6 +448,24 @@ def test_the_app_tree_parser_reads_a_coloured_summary() -> None:
     assert values["vitest-app"] == "ok(331tests)(6s)"
 
 
+def test_vitest_output_without_summary_is_reported_as_unreadable() -> None:
+    def execute(argv: Sequence[str], root: Path) -> tuple[int, str, float]:
+        if "vitest" in str(argv):
+            return 0, "vitest finished without a summary line\n", 4.0
+        return 0, "0 errors, 0 warnings", 1.0
+
+    values, failed = check(
+        _change("ui/web/src/lib/browser/browser.ts"),
+        skip_tests=True,
+        execute=execute,
+        choose=_always(Selection("SELECTED", (), ())),
+        python=_PYTHON,
+    )
+
+    assert failed is False
+    assert values["vitest-app"] == "unreadable(no-summary)(4s)"
+
+
 # meiva:note
 # A judged child runs in the contract CI gives it, not in the operator's shell: a `MEIVA_*` the
 # launcher exported must not reach it (the suite drops those keys mid-session and then reds about

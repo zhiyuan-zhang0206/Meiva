@@ -241,12 +241,20 @@ _ANSI = re.compile(r"\x1b\[[0-9;]*m")
 _VITEST_TESTS = re.compile(r"^\s*Tests\s+(?:(\d+) failed \| )?(\d+) passed", re.MULTILINE)
 
 
-def _vitest_tests(output: str) -> int:
+def _vitest_tests(output: str) -> int | None:
     found = _VITEST_TESTS.search(_ANSI.sub("", output))
     if found is None:
-        return 0
+        return None
     failed = int(found.group(1)) if found.group(1) else 0
     return failed + int(found.group(2))
+
+
+def _vitest_field(code: int, output: str, seconds: float) -> str:
+    ran = _vitest_tests(output)
+    if ran is None:
+        return f"unreadable(no-summary)({spell_seconds(seconds)})"
+    verdict = "ok" if code == 0 else f"failed({code})"
+    return f"{verdict}({ran}tests)({spell_seconds(seconds)})"
 
 
 def fields_for(
@@ -257,9 +265,7 @@ def fields_for(
     if run.label == "meizel":
         return {"meizel": _meizel_field(code, output, seconds)}
     if run.label == "vitest-app":
-        ran = _vitest_tests(output)
-        verdict = "ok" if code == 0 else f"failed({code})"
-        return {"vitest-app": f"{verdict}({ran}tests)({spell_seconds(seconds)})"}
+        return {"vitest-app": _vitest_field(code, output, seconds)}
     if run.label == "debt":
         return {"debt": _debt_field(code, output, seconds)}
     if run.label == "docs-refs":

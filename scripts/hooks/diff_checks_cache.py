@@ -38,6 +38,7 @@ class CacheContext:
 class CachedRun:
     code: int
     output: str
+    fields: dict[str, str] | None = None
 
 
 @dataclass(frozen=True)
@@ -61,6 +62,10 @@ def is_str_object_dict(value: object) -> TypeGuard[dict[str, object]]:
 
 def _is_str_list(value: object) -> TypeGuard[list[str]]:
     return is_object_list(value) and all(isinstance(item, str) for item in value)
+
+
+def _is_str_str_dict(value: object) -> TypeGuard[dict[str, str]]:
+    return is_str_object_dict(value) and all(isinstance(item, str) for item in value.values())
 
 
 def python_tree_digest(ls_tree_z: str) -> str:
@@ -193,23 +198,38 @@ def lookup_run(context: CacheContext, key: str) -> CachedRun | None:
         return None
     code = entry.get("code")
     output = entry.get("output")
+    raw_fields = entry.get("fields")
+    if raw_fields is not None and not _is_str_str_dict(raw_fields):
+        return None
     if isinstance(code, int) and not isinstance(code, bool) and isinstance(output, str):
-        return CachedRun(code=code, output=output)
+        return CachedRun(code=code, output=output, fields=raw_fields)
     return None
 
 
+# meiva:note
+# Persist the already-parsed receipt `fields` (computed at 0s) beside the 32KB output tail: when a
+# runner prints >32KB after its summary line (or writes >32KB JUnit XML), tail truncation drops the
+# denominator from `output`, so re-parsing `output` on replay would print `0tests` or `unreadable`.
 def record_run(
     context: CacheContext,
     key: str,
     *,
     code: int,
     output: str,
+    fields: Mapping[str, str] | None = None,
     max_entries: int = MAX_CACHE_ENTRIES,
 ) -> None:
+    entry: dict[str, object] = {
+        "kind": "run",
+        "code": code,
+        "output": output[-_MAX_OUTPUT_CHARS:],
+    }
+    if fields is not None:
+        entry["fields"] = dict(fields)
     _store_entry(
         context.cache_path,
         key,
-        {"kind": "run", "code": code, "output": output[-_MAX_OUTPUT_CHARS:]},
+        entry,
         max_entries=max_entries,
     )
 
