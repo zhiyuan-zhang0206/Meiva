@@ -103,7 +103,7 @@ def pytest_argv(report: Path, tests: tuple[str, ...], *, python: str) -> tuple[s
     return (
         *pytest_command(tests, python=python),
         f"--junitxml={report}",
-        f"--basetemp={report.parent / 'pytest'}",
+        f"--basetemp={report.parent / 't'}",
     )
 
 
