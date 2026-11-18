@@ -124,11 +124,11 @@ A `provider.py` declares one `ProviderContribution(binding, models, pricing)` (r
   spawnable facts, current prices, effort defaults, and Anthropic-protocol
   output caps before the binding becomes available.
 
-The current Sonnet and Sol successors are `claude-sonnet-5-5` and
-`gpt-6.1-sol`. Their predecessors remain spawnable for existing agent
+The current Sonnet, Sol and Astra successors are `claude-sonnet-5-5`,
+`gpt-6.2-sol` and `gpt-6.2-astra`. Their predecessors remain spawnable for existing agent
 configurations and are hidden only from the spawn picker. Sonnet 5.5 rejects
 `thinking.type=disabled`, so the Claude builder ignores that request and uses
-adaptive thinking. GPT-6.1 Sol rejects explicit `none` effort. Graded effort
+adaptive thinking. GPT-6.1 Sol and both GPT-6.2 tiers reject explicit `none` effort. Graded effort
 must exactly match the selected model's declared options; unsupported grades
 fail at spawn and construction boundaries. Internal binary thinking-disable
 requests use the lowest supported GPT effort when disabling is unavailable.
@@ -190,7 +190,7 @@ adding a provider.
   the contract and an all-enabled default set, not fallback providers.
 - **Tests:** provider contract tests lock duplicate/nested-prefix rejection,
   immediate model visibility, the exact default plugin set, zero-provider
-  startup failure, all 51 model/vendor mappings, archive/plugin price
+  startup failure, all 55 model/vendor mappings, archive/plugin price
   equivalence, stop-vocabulary ownership, and gateway model views.
 
 ## Alternatives rejected

@@ -1,6 +1,6 @@
 {
   "schema_version": 2,
-  "catalog_version": "2026-11-16-gemini-4-and-fable-5-2",
+  "catalog_version": "2026-11-18-gpt-6.2-sol-and-astra",
   "currency": "USD",
   "unit_tokens": 1000000,
   "models": {
@@ -782,6 +782,76 @@
         }
       ]
     },
+    "gpt-6.2-sol": {
+      "vendor": "openai",
+      "source_url": "https://developers.openai.com/api/docs/models/gpt-6.2-sol",
+      "source_checked_at": "2026-11-18",
+      "periods": [
+        {
+          "effective_from": null,
+          "effective_until": null,
+          "tiers": [
+            {
+              "input_tokens_min": 0,
+              "input_tokens_max": 272000,
+              "rates": {
+                "input": "2.0",
+                "cache_read": "0.10",
+                "output": "10.0",
+                "cache_write_30m": "2.500"
+              },
+              "utc_daily_overrides": []
+            },
+            {
+              "input_tokens_min": 272001,
+              "input_tokens_max": null,
+              "rates": {
+                "input": "4.0",
+                "cache_read": "0.20",
+                "output": "15.0",
+                "cache_write_30m": "5.000"
+              },
+              "utc_daily_overrides": []
+            }
+          ]
+        }
+      ]
+    },
+    "gpt-6.2-astra": {
+      "vendor": "openai",
+      "source_url": "https://developers.openai.com/api/docs/models/gpt-6.2-astra",
+      "source_checked_at": "2026-11-18",
+      "periods": [
+        {
+          "effective_from": null,
+          "effective_until": null,
+          "tiers": [
+            {
+              "input_tokens_min": 0,
+              "input_tokens_max": 272000,
+              "rates": {
+                "input": "8.0",
+                "cache_read": "0.40",
+                "output": "40.0",
+                "cache_write_30m": "10.000"
+              },
+              "utc_daily_overrides": []
+            },
+            {
+              "input_tokens_min": 272001,
+              "input_tokens_max": null,
+              "rates": {
+                "input": "16.0",
+                "cache_read": "0.80",
+                "output": "60.0",
+                "cache_write_30m": "20.000"
+              },
+              "utc_daily_overrides": []
+            }
+          ]
+        }
+      ]
+    },
     "gpt-6.1-terra": {
       "vendor": "openai",
       "source_url": "https://developers.openai.com/api/docs/models/gpt-6.1-terra",
@@ -1360,6 +1430,76 @@
                 "cache_read": "0.4",
                 "output": "30",
                 "cache_write_30m": "10.00"
+              },
+              "utc_daily_overrides": []
+            }
+          ]
+        }
+      ]
+    },
+    "gpt-6.2-sol-fast": {
+      "vendor": "openai",
+      "source_url": "https://developers.openai.com/api/docs/pricing",
+      "source_checked_at": "2026-11-18",
+      "periods": [
+        {
+          "effective_from": null,
+          "effective_until": null,
+          "tiers": [
+            {
+              "input_tokens_min": 0,
+              "input_tokens_max": 272000,
+              "rates": {
+                "input": "4",
+                "cache_read": "0.2",
+                "output": "20",
+                "cache_write_30m": "5.00"
+              },
+              "utc_daily_overrides": []
+            },
+            {
+              "input_tokens_min": 272001,
+              "input_tokens_max": null,
+              "rates": {
+                "input": "8",
+                "cache_read": "0.4",
+                "output": "30",
+                "cache_write_30m": "10.00"
+              },
+              "utc_daily_overrides": []
+            }
+          ]
+        }
+      ]
+    },
+    "gpt-6.2-astra-fast": {
+      "vendor": "openai",
+      "source_url": "https://developers.openai.com/api/docs/pricing",
+      "source_checked_at": "2026-11-18",
+      "periods": [
+        {
+          "effective_from": null,
+          "effective_until": null,
+          "tiers": [
+            {
+              "input_tokens_min": 0,
+              "input_tokens_max": 272000,
+              "rates": {
+                "input": "16",
+                "cache_read": "0.8",
+                "output": "80",
+                "cache_write_30m": "20.00"
+              },
+              "utc_daily_overrides": []
+            },
+            {
+              "input_tokens_min": 272001,
+              "input_tokens_max": null,
+              "rates": {
+                "input": "32",
+                "cache_read": "1.6",
+                "output": "120",
+                "cache_write_30m": "40.00"
               },
               "utc_daily_overrides": []
             }

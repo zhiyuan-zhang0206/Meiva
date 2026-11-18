@@ -14,6 +14,7 @@ MODELS = {
     "gpt-6-astra": ModelSpec(
         provider="gpt",
         spawnable=True,
+        superseded_by="gpt-6.2-astra",
         context_window=1_050_000,
         knowledge_cutoff="2026-04",
         # meiva:note
@@ -85,10 +86,32 @@ MODELS = {
     "gpt-6.1-sol": ModelSpec(
         provider="gpt",
         spawnable=True,
+        superseded_by="gpt-6.2-sol",
         context_window=1_050_000,
         knowledge_cutoff="2026-04",
         # meiva:note
         # Live-checked 2026-09-30: none returns 400; low is accepted.
+        effort_levels=("low", "medium", "high", "xhigh", "max"),
+        tuning=ModelTuning(reasoning_effort="medium"),
+        media_types=frozenset({"image"}),
+    ),
+    "gpt-6.2-sol": ModelSpec(
+        provider="gpt",
+        spawnable=True,
+        context_window=1_050_000,
+        knowledge_cutoff="2026-06",
+        # meiva:note
+        # Live-checked 2026-11-18 for both GPT-6.2 tiers: none and minimal return 400
+        # naming low..max as the supported values.
+        effort_levels=("low", "medium", "high", "xhigh", "max"),
+        tuning=ModelTuning(reasoning_effort="medium"),
+        media_types=frozenset({"image"}),
+    ),
+    "gpt-6.2-astra": ModelSpec(
+        provider="gpt",
+        spawnable=True,
+        context_window=1_050_000,
+        knowledge_cutoff="2026-05",
         effort_levels=("low", "medium", "high", "xhigh", "max"),
         tuning=ModelTuning(reasoning_effort="medium"),
         media_types=frozenset({"image"}),

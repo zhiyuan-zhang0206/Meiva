@@ -140,6 +140,29 @@ def test_gpt6_1_sol_capabilities_and_display_successor(*, model_catalog: ModelCa
 
 
 # meiva:note
+# GPT-6.2 Sol and Astra are the same-series successors of GPT-6.1 Sol and GPT-6 Astra;
+# the older rows stay spawnable and only the picker hides them.
+# meiva:link base/lm/docs/pricing-model-rates.md
+def test_gpt6_2_capabilities_and_display_successors(*, model_catalog: ModelCatalog) -> None:
+    for model, cutoff in (("gpt-6.2-sol", "2026-06"), ("gpt-6.2-astra", "2026-05")):
+        spec = model_catalog.models[model]
+        assert spec.spawnable and spec.context_window == 1_050_000
+        assert spec.max_output_tokens is None
+        assert spec.knowledge_cutoff == cutoff
+        # meiva:note
+        # Live 400s for none and minimal name low..max as the supported values.
+        assert spec.effort_levels == ("low", "medium", "high", "xhigh", "max")
+        assert spec.tuning.reasoning_effort == "medium"
+        assert spec.media_types == frozenset({"image"})
+        assert spec.superseded_by is None
+        assert model_catalog.models[f"{model}-fast"].fast_of == model
+    for old, new in (("gpt-6.1-sol", "gpt-6.2-sol"), ("gpt-6-astra", "gpt-6.2-astra")):
+        assert model_catalog.models[old].spawnable
+        assert model_catalog.models[old].superseded_by == new
+        assert model_catalog.models[f"{old}-fast"].superseded_by == f"{new}-fast"
+
+
+# meiva:note
 # GPT-6.1 Terra is the same-series successor of GPT-5.6 Terra; the older row stays
 # spawnable and only the picker hides it.
 # meiva:link base/lm/docs/pricing-model-rates.md
@@ -173,6 +196,8 @@ def test_repo_openai_provider_is_enabled_and_registers_complete_contract(
         "gpt-6-sol",
         "gpt-6.1-sol",
         "gpt-6.1-terra",
+        "gpt-6.2-sol",
+        "gpt-6.2-astra",
         "gpt-6-luna",
     }
     assert gpt_models <= model_catalog.models.keys()
@@ -191,6 +216,10 @@ def test_repo_openai_provider_is_enabled_and_registers_complete_contract(
         "gpt-6.1-sol-fast",
         "gpt-6.1-terra",
         "gpt-6.1-terra-fast",
+        "gpt-6.2-sol",
+        "gpt-6.2-sol-fast",
+        "gpt-6.2-astra",
+        "gpt-6.2-astra-fast",
         "gpt-6-luna",
         "gpt-6-luna-fast",
     }
