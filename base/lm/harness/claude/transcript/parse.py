@@ -38,7 +38,9 @@ from base.lm.harness.session.transcript.entries import (
 #
 # Rows read: `user` (our inputs and the CLI's synthetic text, tool results), `assistant` (one content
 # block per row, a message's blocks sharing `message.id`), `system/compact_boundary`, and the
-# `attachment/queued_command` of an input absorbed mid-turn. Rows ignored on purpose: the bookkeeping types
+# `attachment/queued_command` of an input absorbed mid-turn, whose `prompt` is the text of the input or, for an input
+# of several blocks (two texts, a text and an image; seen on CLI 2.1.290 to 2.1.322), the list of its content blocks,
+# read like a user row's content. Rows ignored on purpose: the bookkeeping types
 # and context attachments listed below, the `isMeta` and compact-summary rows, the CLI's synthetic
 # `<synthetic>` assistant row ("No response requested.") and a sub-agent's prompt echo. A synthetic assistant row
 # with `isApiErrorMessage` is the CLI's record of an API error (`error`, `apiErrorStatus`): a `Failure`.
@@ -256,8 +258,8 @@ def _attachment(
     if isinstance(located, Anomaly):
         return state, (located,)
     row, state = located
-    source, prompt = attachment.get("source_uuid"), attachment.get("prompt")
-    if not isinstance(prompt, str):
+    source, prompt = attachment.get("source_uuid"), _text(attachment.get("prompt"))
+    if prompt is None:
         return state, (_missing(row, "attachment.prompt"),)
     origin = _origin(attachment.get("origin"), prompt)
     if origin is None and not isinstance(source, str):

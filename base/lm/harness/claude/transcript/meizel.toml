@@ -4,7 +4,7 @@ exports = ["window.py"]
 "__init__.py" = []
 "parse.py" = []
 "window.py" = ["parse.py"]
-"tests" = ["parse.py"]
+"tests" = ["parse.py", "window.py"]
 
 [purity]
 "." = "strict"

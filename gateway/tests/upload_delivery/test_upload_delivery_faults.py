@@ -26,6 +26,7 @@ from base.config.service_read import ConfigAuthority
 from base.daemon.endpoints import ServiceEndpoint, ServiceEndpoints
 from base.db.tests.lost_ack import LostAckPool
 from base.host.system.tests.fake_commands import fake_host
+from base.lm.harness.session.transcript.record_file import UnreadRows
 from base.paths import resolve_meiva_home, run_dir
 from gateway.http.auth.cluster_middleware import cluster_auth_middleware
 from gateway.http.auth.router import AuthAppState
@@ -225,6 +226,7 @@ def test_explicit_native_request_and_proof_versions_fail_fast(
             home=resolve_meiva_home(),
             receiver=receiver_for(client, request.target),
             agent_host=_agent_host(),
+            unread=UnreadRows(),
             now=datetime(2030, 1, 1, tzinfo=UTC),
         )
 
@@ -467,6 +469,7 @@ def test_receiver_changed_manifest_and_deleted_source_url_fail_without_false_rea
                 config, access=replace(client.app.state.gateway_access, gateway_url=source_url)
             ),
             agent_host=_agent_host(),
+            unread=UnreadRows(),
             now=datetime(2030, 1, 1, tzinfo=UTC),
         )
     assert status == OpStatus.FAILED and result["reason"] == "upload-source-unavailable-v1"

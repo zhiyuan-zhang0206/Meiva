@@ -28,6 +28,8 @@ from base.lm.harness.session.transcript.record_file import FileRow, UnreadRows, 
 # `clientUserMessageId`, so the wire id of an input is its key.
 # meiva:link base/lm/harness/codex/docs/codex.md
 
+CLI = "Codex"
+
 
 def wire_id(key: str) -> str:
     return key
@@ -70,13 +72,14 @@ def unreadable_file(
 # Rows read into entries, in file order, each entry named by its row's offset. The parser's only memory is the turns
 # whose first input it has read (a second input of a turn joined the running turn), so a parser given the rows of one
 # read after another and one given them all at once agree. A row the parser cannot use is skipped, and reported once
-# per kind of row for this parser (not an error: the file is the CLI's own and moves with its version).
+# per kind of row by the `UnreadRows` of the process that reads (not an error: the file is the CLI's own and moves with
+# its version).
 class EntryParser:
     pending_calls = True
 
-    def __init__(self) -> None:
+    def __init__(self, unread: UnreadRows) -> None:
         self._opened: set[str] = set()
-        self._unread = UnreadRows("Codex")
+        self._unread = unread
 
     def entries(self, rows: Sequence[FileRow]) -> tuple[AnyEntry, ...]:
         found: list[AnyEntry] = []
@@ -88,7 +91,7 @@ class EntryParser:
             )
             for entry in read:
                 if isinstance(entry, Anomaly):
-                    self._unread.report(entry)
+                    self._unread.report(CLI, entry)
                     continue
                 if isinstance(entry, HumanInput) and entry.turn is not None:
                     self._opened.add(entry.turn)

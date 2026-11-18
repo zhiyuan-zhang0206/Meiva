@@ -20,7 +20,7 @@ from base.lm.harness.session.transcript.entries import (
     ToolResult,
     ToolStatus,
 )
-from base.lm.harness.session.transcript.record_file import FileRow
+from base.lm.harness.session.transcript.record_file import FileRow, UnreadRows
 from base.log import logger
 
 STAMP = "2026-11-13T08:00:00Z"
@@ -50,8 +50,8 @@ def rows() -> list[dict[str, object]]:
 
 def test_offsets_pairing_and_append_reads_agree_with_duplicate_steps() -> None:
     source = [FileRow(i * 100, (i + 1) * 100, r) for i, r in enumerate(rows())]
-    whole = EntryParser().entries(source)
-    live = EntryParser()
+    whole = EntryParser(UnreadRows()).entries(source)
+    live = EntryParser(UnreadRows())
     assert whole == tuple(e for r in source for e in live.entries([r]))
     calls = [e for e in whole if isinstance(e, ToolCall)]
     results = [e for e in whole if isinstance(e, ToolResult)]
@@ -95,7 +95,9 @@ def test_notices_do_not_break_continuation_and_invalid_is_an_error() -> None:
         ),
         row("GENERIC", status="INVALID", content="failed", error="bad argument"),
     ]
-    entries = EntryParser().entries([FileRow(i, i + 1, r) for i, r in enumerate(records)])
+    entries = EntryParser(UnreadRows()).entries(
+        [FileRow(i, i + 1, r) for i, r in enumerate(records)]
+    )
     result = [e for e in entries if isinstance(e, ToolResult)]
     assert len(result) == 2
     assert result[0].call_id == result[1].call_id
@@ -161,7 +163,7 @@ def test_invalid_input_and_notice_report_shape_without_logging_body() -> None:
     messages: list[str] = []
     sink = logger.add(lambda message: messages.append(str(message)), level="WARNING")
     try:
-        assert EntryParser().entries(bad) == ()
+        assert EntryParser(UnreadRows()).entries(bad) == ()
     finally:
         logger.remove(sink)
     assert input_wire_ids(bad) == {}
@@ -191,8 +193,8 @@ def test_literal_request_tags_keep_the_whole_inbox_identity(body: str) -> None:
         assign_inputs([SentRow(2, 1, "chat", "user", "not present", None, stamp, stamp)], inputs)
         == {}
     )
-    whole = EntryParser().entries(records)
-    live = EntryParser()
+    whole = EntryParser(UnreadRows()).entries(records)
+    live = EntryParser(UnreadRows())
     assert whole == tuple(entry for record in records for entry in live.entries([record]))
     assert len(whole) == 1 and isinstance(whole[0], HumanInput)
     assert whole[0].text == body

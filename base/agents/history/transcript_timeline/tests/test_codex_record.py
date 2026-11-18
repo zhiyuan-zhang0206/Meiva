@@ -26,6 +26,7 @@ from base.lm.harness.session.transcript.record_file import (
     BLOCK_BYTES,
     MAX_BLOCK_BYTES,
     RecordFile,
+    UnreadRows,
     ZstdRecordFile,
 )
 from base.log import logger
@@ -248,7 +249,7 @@ def test_reading_the_file_as_it_grows_gives_the_items_a_cold_read_gives(tmp_path
     path.write_text("")
     file, at = RecordFile(path), 0
     shown: dict[str, ProjectedItem] = {}
-    parser = entry_reader(CODEX)
+    parser = entry_reader(CODEX, UnreadRows())
     projector = RecordProjector(
         policy=POLICY, render_tool=format_tool_use, wire_id=lambda key: wire_id(CODEX, key)
     )

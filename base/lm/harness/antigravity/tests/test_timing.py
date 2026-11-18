@@ -11,6 +11,7 @@ from base.lm.harness.antigravity.trajectory import parse_trajectory
 from base.lm.harness.antigravity.transcript.file import AntigravityRecordFile
 from base.lm.harness.antigravity.transcript.window import EntryParser
 from base.lm.harness.session.transcript.entries import Reasoning
+from base.lm.harness.session.transcript.record_file import UnreadRows
 from base.log import logger
 from base.log.tests.log_records import LogRecords, loguru_records
 
@@ -62,7 +63,9 @@ def transcript(path: Path, *, thought: str = "private thought", index: int = 0) 
 def measured(path: Path) -> list[int | None]:
     rows = AntigravityRecordFile(path).rows_after(0).rows
     return [
-        entry.duration_ms for entry in EntryParser().entries(rows) if isinstance(entry, Reasoning)
+        entry.duration_ms
+        for entry in EntryParser(UnreadRows()).entries(rows)
+        if isinstance(entry, Reasoning)
     ]
 
 

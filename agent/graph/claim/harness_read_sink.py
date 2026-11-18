@@ -33,7 +33,7 @@ from base.lm.harness import AssistantText, BridgeEvent, HarnessSetupError
 from base.lm.harness.engine import HarnessTurn
 from base.lm.harness.registry import FileSessionRegistry
 from base.lm.harness.session.transcript.entries import InputRow
-from base.lm.harness.session.transcript.record_file import FileRow, RecordFile
+from base.lm.harness.session.transcript.record_file import FileRow, RecordFile, UnreadRows
 from base.log import logger
 from base.paths import harness_sessions_dir, workspace_dir
 
@@ -58,7 +58,8 @@ from base.paths import harness_sessions_dir, workspace_dir
 # closing row, for at most
 # `END_WAIT_SECONDS`, and a turn that did something with no record to show for it fails. A reply the sink could not
 # deliver (a database error in `_deliver`) is not retried by the sink, the read position having moved on: the next
-# invocation reads the record's last turn again and delivers it by key.
+# invocation reads the record's last turn again and delivers it by key. A row of a kind the parser does not know is
+# said once per kind by this sink (its own `UnreadRows`), so once per turn at most.
 # meiva:link agent/graph/docs/harness-turn.md
 
 DEBOUNCE_SECONDS = 0.5
@@ -95,7 +96,8 @@ class ReadTimelineSink:
         )
         self._file: RecordFile | None = None
         self._from: int | None = None
-        self._parser = entry_reader(self._harness)
+        self._unread = UnreadRows()
+        self._parser = entry_reader(self._harness, self._unread)
         self._last: ProjectedItem | None = None
         self._announced: set[int] = set()
         self._input_context: dict[str, InputRow] = {}
@@ -267,6 +269,7 @@ class ReadTimelineSink:
             start=self._timing_start,
             policy=self._policy,
             render_tool=format_tool_use,
+            unread=self._unread,
         )
         if updated.items:
             self._publisher.emit(
@@ -321,6 +324,7 @@ class ReadTimelineSink:
             policy=ReplyPolicy(explicit_visibility=False, delivery_mode=None),
             render_tool=format_tool_use,
             load_sent=lambda _until, _wanted: {},
+            unread=self._unread,
         )
         return window.turn_start if window.turn_start is not None else 0
 

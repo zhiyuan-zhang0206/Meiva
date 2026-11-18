@@ -35,7 +35,7 @@ from base.api_contracts.reading import (
 )
 from base.lm.harness.registry import FileSessionRegistry
 from base.lm.harness.session.transcript.entries import InputRow
-from base.lm.harness.session.transcript.record_file import RecordFile, ZstdRecordFile
+from base.lm.harness.session.transcript.record_file import RecordFile, UnreadRows, ZstdRecordFile
 from base.log import logger
 from base.paths import harness_sessions_dir
 from ops.rpc_schemas import HarnessTimelineReadRequest, HarnessTimelineWindow
@@ -47,7 +47,8 @@ from ops.rpc_schemas import HarnessTimelineReadRequest, HarnessTimelineWindow
 # directory come from the agent's session record (`<home>/harness/sessions`, the machine's own file), the file from the
 # session's own home for the CLI's records (the Claude home, the Codex home), and what the window shows from the file and the inbox rows of the same time. An agent
 # with no session record yet, or whose file is not written yet, has an empty timeline, not an error. A harness this
-# operation does not read is refused.
+# operation does not read is refused. `unread` is the daemon's own: a row of a kind the parser does not know is said once
+# by the process, not once by every poll of the page that shows it.
 # meiva:link docs/decisions/agents/graph/2026-11-13-timeline-read-from-the-record.md
 def read_harness_timeline(
     request: HarnessTimelineReadRequest,
@@ -55,6 +56,7 @@ def read_harness_timeline(
     pool: ConnectionPool,
     home: Path,
     environ: Mapping[str, str],
+    unread: UnreadRows,
 ) -> HarnessTimelineWindow:
     if not reads_timeline_from_record(request.harness):
         raise ValueError(f"the timeline of harness {request.harness!r} is not read from its record")
@@ -87,7 +89,7 @@ def read_harness_timeline(
 
     try:
         if request.reading_locator is not None:
-            return _reading_window(request, file, record.session_id, load_sent)
+            return _reading_window(request, file, record.session_id, load_sent, unread)
         window = read_window(
             file,
             harness=request.harness,
@@ -99,6 +101,7 @@ def read_harness_timeline(
             policy=ReplyPolicy(request.explicit_visibility, request.delivery_mode),
             render_tool=format_tool_use,
             load_sent=load_sent,
+            unread=unread,
         )
     except FileNotFoundError:
         return _empty(request)
@@ -164,7 +167,11 @@ def _with_record_locators(
 
 
 def _reading_window(
-    request: HarnessTimelineReadRequest, file: RecordFile, session: str, load_sent: LoadSent
+    request: HarnessTimelineReadRequest,
+    file: RecordFile,
+    session: str,
+    load_sent: LoadSent,
+    unread: UnreadRows,
 ) -> HarnessTimelineWindow:
     if request.reading_locator is None or request.reading_direction is None:
         raise ValueError("A source reading selector is required")
@@ -184,6 +191,7 @@ def _reading_window(
             policy=ReplyPolicy(request.explicit_visibility, request.delivery_mode),
             render_tool=format_tool_use,
             load_sent=load_sent,
+            unread=unread,
         )
         items = _with_record_locators(window.timeline_items, request, session)
         target = reading_target(items, locator)

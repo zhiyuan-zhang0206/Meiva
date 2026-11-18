@@ -24,6 +24,7 @@ import psycopg
 from psycopg.rows import TupleRow
 from psycopg_pool import ConnectionPool
 
+from base.agents.upload_delivery.paths import MAX_AGENT_UPLOAD_BYTES, MAX_AGENT_UPLOAD_FILES
 from base.clock import Timers
 from base.cluster.machine import GatewayAccess, MachineIdentityReader, accepted_digests
 from base.cluster.port_preflight import serves_off_box
@@ -33,6 +34,8 @@ from base.daemon.endpoints import ServiceEndpoint, ServiceEndpoints
 from base.db import Database
 from base.events.live.bus import EventBus, EventBusConfig
 from base.host.db_authority.admission import admission_inputs
+from base.host.db_authority.unit import UnitIdentity
+from ops.upload_delivery import ReceiverConfig
 from services import pidfile as pidfile_operations
 
 __all__ = [
@@ -273,3 +276,20 @@ def shutdown_op_pool(executor: ThreadPoolExecutor) -> None:
     teardown, which is why the daemon also retains its existing hard exit.
     """
     executor.shutdown(wait=False)
+
+
+# meiva:note
+# What the upload receiver needs from its environment, read once by `main()`: this machine and home
+# as the unit identity (the delivered copy lands in the agent's workspace under that home), the
+# directory name the gateway names too, the gateway access `main()` built from this boot, and the
+# per-agent quota.
+def receiver_config(
+    *, machine: str, home: Path, access: GatewayAccess, upload_dir_name: str
+) -> ReceiverConfig:
+    return ReceiverConfig(
+        unit=UnitIdentity(machine=machine, home=str(home.resolve())),
+        upload_dir_name=upload_dir_name,
+        access=access,
+        quota_bytes=MAX_AGENT_UPLOAD_BYTES,
+        quota_files=MAX_AGENT_UPLOAD_FILES,
+    )

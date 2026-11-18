@@ -9,7 +9,7 @@ from pathlib import Path
 from typing import cast
 
 from base.cluster.machine import GatewayAccess
-from services.agent_runner.agent_ops.daemon import receiver_config
+from services.agent_runner.agent_ops.boot import receiver_config
 
 
 def test_the_receiver_takes_the_access_the_entry_built(tmp_path: Path) -> None:

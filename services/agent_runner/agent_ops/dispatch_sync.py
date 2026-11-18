@@ -16,6 +16,7 @@ from base.config.service_read import ConfigAuthority
 from base.daemon.endpoints import ServiceEndpoint
 from base.db import Database
 from base.host.system.hostport import Host
+from base.lm.harness.session.transcript.record_file import UnreadRows
 from base.native_process.loaded_commit import LoadedCommit
 from ops import host_config, inventory
 from ops.agent_transfer import WorkspaceTransferLimits
@@ -53,6 +54,7 @@ def dispatch_sync(
     home: Path,
     receiver: ReceiverConfig,
     agent_host: ServiceEndpoint,
+    unread: UnreadRows,
     now: datetime,
 ) -> tuple[OpStatus, dict[str, object]]:
 
@@ -135,7 +137,7 @@ def dispatch_sync(
             | "harness_timeline_read"
         ):
             return OpStatus.COMPLETED, _agent_arm(
-                kind, payload, pool, home=home, now=now, environ=host.environ
+                kind, payload, pool, home=home, now=now, environ=host.environ, unread=unread
             )
         case (
             "workspace_transfer_prepare"
@@ -163,6 +165,7 @@ def _agent_arm(
     home: Path,
     now: datetime,
     environ: Mapping[str, str],
+    unread: UnreadRows,
 ) -> dict[str, object]:
 
     match kind:
@@ -189,6 +192,7 @@ def _agent_arm(
                 pool=pool,
                 home=home,
                 environ=environ,
+                unread=unread,
             ).model_dump(mode="json")
         case "shell_capture":
             sc = ShellCapturePayload.model_validate(payload)

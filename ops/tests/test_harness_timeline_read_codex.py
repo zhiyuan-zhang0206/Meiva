@@ -18,6 +18,7 @@ from psycopg_pool import ConnectionPool
 
 from base.db import create_agent
 from base.lm.harness.registry import FileSessionRegistry, SessionRecord
+from base.lm.harness.session.transcript.record_file import UnreadRows
 from base.log.tests.log_records import LogRecords
 from base.log.tests.log_records import loguru_records as loguru_records
 from base.paths import harness_sessions_dir, workspace_dir
@@ -106,7 +107,7 @@ def test_a_real_rollout_is_projected_with_the_inbox_rows_that_sent_its_input(
     home = _thread(tmp_path, agent, file_name=ROLLOUT)
 
     window = read_harness_timeline(
-        _request(agent), pool=pool, home=home, environ=_environ(tmp_path)
+        _request(agent), pool=pool, home=home, unread=UnreadRows(), environ=_environ(tmp_path)
     )
 
     inbound = [item for item in window.items if item.kind == "inbound_chat"]
@@ -125,17 +126,21 @@ def test_a_thread_with_no_record_no_file_or_an_unreadable_file_has_an_empty_time
     agent = create_agent(db_conn)
     environ = _environ(tmp_path)
     none = read_harness_timeline(
-        _request(agent), pool=pool, home=tmp_path / "home", environ=environ
+        _request(agent), pool=pool, home=tmp_path / "home", unread=UnreadRows(), environ=environ
     )
     assert (none.items, none.has_more, none.size) == ([], False, 0)
     home = _thread(tmp_path, agent, file_name=None)
-    unwritten = read_harness_timeline(_request(agent), pool=pool, home=home, environ=environ)
+    unwritten = read_harness_timeline(
+        _request(agent), pool=pool, home=home, unread=UnreadRows(), environ=environ
+    )
     assert (unwritten.items, unwritten.size) == ([], 0)
     assert loguru_records.events("harness_record_unreadable") == []
     name = f"{ROLLOUT}.zst"
     (tmp_path / "codex/sessions/2026/11/13").mkdir(parents=True)
     (tmp_path / "codex/sessions/2026/11/13" / name).write_text("x")
-    packed = read_harness_timeline(_request(agent), pool=pool, home=home, environ=environ)
+    packed = read_harness_timeline(
+        _request(agent), pool=pool, home=home, unread=UnreadRows(), environ=environ
+    )
     assert (packed.items, packed.size) == ([], 0)
     (event,) = loguru_records.events("harness_record_unreadable")
     assert (event["extra"]["session_id"], event["extra"]["name"]) == (THREAD, name)
@@ -147,10 +152,16 @@ def test_a_page_before_an_item_ends_at_that_row(
     agent = create_agent(db_conn)
     home = _thread(tmp_path, agent, file_name=ROLLOUT)
     environ = _environ(tmp_path)
-    head = read_harness_timeline(_request(agent, limit=3), pool=pool, home=home, environ=environ)
+    head = read_harness_timeline(
+        _request(agent, limit=3), pool=pool, home=home, unread=UnreadRows(), environ=environ
+    )
     oldest = int(head.items[0].item_id.removeprefix("h").split(".")[0])
     page = read_harness_timeline(
-        _request(agent, limit=3, before=oldest), pool=pool, home=home, environ=environ
+        _request(agent, limit=3, before=oldest),
+        pool=pool,
+        home=home,
+        unread=UnreadRows(),
+        environ=environ,
     )
     assert head.has_more
     assert all(int(i.item_id.removeprefix("h").split(".")[0]) < oldest for i in page.items)
@@ -163,13 +174,17 @@ def test_a_compressed_rollout_is_read_when_the_plain_file_is_not_there(
     _ = [_claimed(db_conn, agent, key) for key in KEYS]
     plain_home = _thread(tmp_path, agent, file_name=ROLLOUT)
     environ = _environ(tmp_path)
-    expected = read_harness_timeline(_request(agent), pool=pool, home=plain_home, environ=environ)
+    expected = read_harness_timeline(
+        _request(agent), pool=pool, home=plain_home, unread=UnreadRows(), environ=environ
+    )
     day = tmp_path / "codex/sessions/2026/11/13"
     (day / ROLLOUT).unlink()
     (day / f"{ROLLOUT}.zst").write_bytes(
         zstandard.ZstdCompressor(level=3).compress(FIXTURE.read_bytes())
     )
 
-    window = read_harness_timeline(_request(agent), pool=pool, home=plain_home, environ=environ)
+    window = read_harness_timeline(
+        _request(agent), pool=pool, home=plain_home, unread=UnreadRows(), environ=environ
+    )
 
     assert window == expected and window.items

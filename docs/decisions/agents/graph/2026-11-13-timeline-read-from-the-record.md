@@ -46,8 +46,9 @@ works this way: the gateway reads the conversation archive and projects it with 
    the host's own and is not shown. The match is by id and by no window of time (a message may have waited days to
    be claimed): the agent's deliverable rows are read newest first, 200 at a time, until every id of the window is matched,
    given up on (the rows read were claimed before the input's row was written, and rows are claimed in creation order, so
-   it is the host's own: one batch at most) or 1000 rows are read, when the count unmatched is the event
-   `harness_timeline_inputs_unmatched`. No index on `claimed_at` is needed: the scan is the `(agent_id, created_at)` index
+   it is the host's own: one batch at most) or 1000 rows are read, when the count unmatched within the range read is the event
+   `harness_timeline_inputs_unmatched` (an input written before the oldest row read could claim it is past the range the cap
+   allows, and is not shown or reported). An input that carries text instead of an id (Antigravity) is settled by the row its text matched. No index on `claimed_at` is needed: the scan is the `(agent_id, created_at)` index
    with a limit. A message shows what the person typed: a `/command` is not expanded and no
    envelope is added.
 6. **The live view is the same projection, read incrementally.** The CLI's events say only that the record grew;

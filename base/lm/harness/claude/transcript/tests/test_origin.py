@@ -20,7 +20,7 @@ from base.lm.harness.session.transcript.drafts import (
     MatchBasis,
     SentInput,
 )
-from base.lm.harness.session.transcript.entries import AnomalyKind, HumanInput
+from base.lm.harness.session.transcript.entries import Anomaly, AnomalyKind, HumanInput
 from base.lm.harness.session.transcript.projection import Projector
 
 _TASK = "<task-notification><task-id>b1</task-id><status>completed</status></task-notification>"
@@ -124,3 +124,25 @@ def test_a_row_with_no_origin_or_human_that_is_not_ours_is_an_unmatched_input(
         projection = Projector().feed([_entry(build(origin, text="hello"))])
         assert [d.kind for d in projection.drafts] == [DraftKind.INBOUND_CHAT]
         assert len(projection.unmatched_inputs) == 1 and not projection.anomalies
+
+
+# meiva:note
+# A queued command of several blocks (CLI 2.1.290 to 2.1.322: two texts, or a text and an image) names them in a list: its
+# text is the texts of the list joined as a user row's are, and a prompt that is neither a string nor a list of blocks
+# is still a row of a kind the parser does not read.
+def test_a_queued_command_prompt_may_be_a_list_of_blocks() -> None:
+    raw = _queued(None)
+    attachment = raw["attachment"]
+    assert isinstance(attachment, dict)
+    attachment["prompt"] = [
+        {"type": "text", "text": "first"},
+        {"type": "image", "source": {"type": "base64", "media_type": "image/png", "data": ""}},
+        {"type": "text", "text": "second"},
+    ]
+    entry = _entry(raw)
+    assert (entry.text, entry.wire_id, entry.joined_running_turn) == ("first\nsecond", "s-1", True)
+
+    attachment["prompt"] = {"unexpected": 1}
+    _, (anomaly,) = parse_row(ParseState(), raw, line=3)
+    assert isinstance(anomaly, Anomaly)
+    assert (anomaly.anomaly, anomaly.detail) == (AnomalyKind.MISSING_FIELD, "attachment.prompt")

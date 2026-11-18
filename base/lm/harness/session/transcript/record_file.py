@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import threading
 from collections.abc import Mapping
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
@@ -9,6 +10,7 @@ import zstandard
 
 from base.lm.harness.session.transcript.entries import Anomaly
 from base.lm.harness.session.transcript.position import Position, rows_after
+from base.lm.harness.session.transcript.projection import REPORTED_LIMIT, RecentSet
 from base.lm.harness.session.transcript.scrub import scrub
 from base.log import logger
 
@@ -188,23 +190,30 @@ def _scrubbed(row: Mapping[str, object] | None) -> Mapping[str, object]:
 
 
 # meiva:note
-# The rows of a record that its parser could not use, said once for each kind by one reader. The record is the CLI's
-# own and moves with its version, so a row of a kind this code does not know is skipped, never guessed at; the report
-# is how a kind a newer CLI began to write is noticed instead of being silently absent from the timeline.
+# The rows of a record that its parser could not use, said once for each kind (the CLI, the anomaly and its detail)
+# by the process that reads records. The record is the CLI's own and moves with its version, so a row of a kind this
+# code does not know is skipped, never guessed at; the report is how a kind a newer CLI began to write is noticed
+# instead of being silently absent from the timeline. A parser lives for one read and a page is read again on every
+# poll, so the memory of what was said is not the parser's: one instance belongs to the process (the ops daemon for
+# every timeline it answers, a live sink for its turn) and is given to each parser it builds. What it remembers is
+# bounded like the projector's own reports (`REPORTED_LIMIT`, the latest kinds), and a restart says each kind again.
+# The ops daemon reads from several worker threads, hence the lock.
+# meiva:link base/lm/harness/docs/transcript-projection.md
 class UnreadRows:
-    def __init__(self, cli: str) -> None:
-        self._cli = cli
-        self._reported: set[tuple[str, str]] = set()
+    def __init__(self) -> None:
+        self._reported: RecentSet[tuple[str, str, str]] = RecentSet(REPORTED_LIMIT)
+        self._lock = threading.Lock()
 
-    def report(self, anomaly: Anomaly) -> None:
-        mark = (anomaly.anomaly.value, anomaly.detail)
-        if mark in self._reported:
-            return
-        self._reported.add(mark)
+    def report(self, cli: str, anomaly: Anomaly) -> None:
+        mark = (cli, anomaly.anomaly.value, anomaly.detail)
+        with self._lock:
+            if mark in self._reported:
+                return
+            self._reported.add(mark)
         logger.warning(
             "a row of the {cli} record is not read: {kind} {detail}",
             event="harness_record_row_unread",
-            cli=self._cli,
+            cli=cli,
             kind=anomaly.anomaly.value,
             detail=anomaly.detail,
         )

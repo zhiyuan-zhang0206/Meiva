@@ -7,7 +7,11 @@ from datetime import UTC, datetime
 from psycopg import Connection
 
 from base.agents.history.timeline_item import TimelineItem
-from base.agents.history.transcript_timeline.record.match import CLAIM_SLACK, assign_inputs
+from base.agents.history.transcript_timeline.record.match import (
+    CLAIM_EARLY,
+    CLAIM_SLACK,
+    assign_inputs,
+)
 from base.agents.messages.inbound import InboundKind
 from base.agents.messages.inbound_images import inbound_upload_files
 from base.agents.messages.kwargs import NoteTag
@@ -71,8 +75,11 @@ class SentRow:
 # whole inbox), and reading goes on while an id is unmatched. An id is given up on, with no further reading for it, when the rows
 # read have reached ones claimed more than `CLAIM_SLACK` before its row was written: rows are claimed in the order they were
 # created, so an older row cannot be the one, and the id is the host's own input (a context reset, a recovery note) that no
-# inbox row names; that costs one batch at most. An id still unmatched when `MAX_ROWS` are read is reported
-# (`harness_timeline_inputs_unmatched`, with the count) and not shown.
+# inbox row names; that costs one batch at most. When `MAX_ROWS` are read, an id whose row was written before the oldest
+# row read could claim it (more than `CLAIM_EARLY` earlier than that claim) is beyond this read's reach, the scan having
+# stopped at the cap: it is not shown and not reported, for it is the range that ended and not an input that no row names.
+# An id still unmatched within the range read is reported (`harness_timeline_inputs_unmatched`, with the count) and not
+# shown.
 @dataclass(frozen=True, slots=True)
 class Found:
     rows: list[SentRow]
@@ -81,7 +88,8 @@ class Found:
 
 # meiva:note
 # Antigravity supplies text-bearing InputRows instead of injected wire ids. The same bounded inbox scan
-# supplies candidates; assign_inputs applies content, claim time and file order, preserving the original payload.
+# supplies candidates; assign_inputs applies content, claim time and file order, preserving the original payload, and
+# settles in `_settle` the inputs it matched, as a wire id settles the ones of the other CLIs.
 def load_sent_rows(
     conn: Connection,
     agent_id: int,
@@ -97,9 +105,11 @@ def load_sent_rows(
         batch = _batch(conn, agent_id, until + CLAIM_SLACK, scanned)
         scanned += len(batch)
         found.extend(row for row, _claimed in batch)
-        _settle(pending, batch, wire_id)
+        _settle(pending, batch, wanted, wire_id)
         if len(batch) < BATCH_ROWS:
             break
+    if scanned >= MAX_ROWS:
+        _forget_beyond_reach(pending, found)
     if pending and scanned >= MAX_ROWS:
         logger.warning(
             "{count} inputs in the record match no inbox row within the newest {scanned} of the agent's rows; "
@@ -131,20 +141,43 @@ def _matched_rows(
 
 # meiva:note
 # What one batch settles of the ids still wanted: the ones its rows carry are matched, and the ones whose rows were written
-# long after the oldest claim in the batch are given up on (see `load_sent_rows`).
+# long after the oldest claim in the batch are given up on (see `load_sent_rows`). Text-bearing inputs are matched by
+# `assign_inputs` against all of `wanted`, not only the ones pending: a row belongs to the earliest input in file order
+# that holds it, and an input settled by an earlier batch must keep the rows it takes.
 def _settle(
     pending: dict[str, InputRow],
     batch: Sequence[tuple[SentRow, datetime | None]],
+    wanted: Mapping[str, InputRow],
     wire_id: Callable[[str], str],
 ) -> None:
-    for wire in {wire_id(row.input_key) for row, _claimed in batch} & pending.keys():
-        del pending[wire]
+    for key in _matched_keys([row for row, _claimed in batch], wanted, wire_id) & pending.keys():
+        del pending[key]
     oldest_claim = min((c for _row, c in batch if c is not None), default=None)
     if oldest_claim is None:
         return
     for wire, stamp in list(pending.items()):
         if oldest_claim < stamp.stamp - CLAIM_SLACK:
             del pending[wire]
+
+
+def _matched_keys(
+    rows: Sequence[SentRow], wanted: Mapping[str, InputRow], wire_id: Callable[[str], str]
+) -> set[str]:
+    if any(held.text is not None for held in wanted.values()):
+        return set(assign_inputs(rows, wanted))
+    return {wire_id(row.input_key) for row in rows}
+
+
+# meiva:note
+# The ids that were written before the oldest row read could claim them are dropped from what is wanted: they are not
+# in this read's range (see `load_sent_rows`).
+def _forget_beyond_reach(pending: dict[str, InputRow], found: Sequence[SentRow]) -> None:
+    oldest = min((row.claimed_at for row in found if row.claimed_at is not None), default=None)
+    if oldest is None:
+        return
+    for key, held in list(pending.items()):
+        if held.stamp < oldest - CLAIM_EARLY:
+            del pending[key]
 
 
 def _batch(

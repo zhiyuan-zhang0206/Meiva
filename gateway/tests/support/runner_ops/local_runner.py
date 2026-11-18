@@ -45,6 +45,7 @@ from base.db import Database
 from base.host.db_authority.unit import UnitIdentity
 from base.host.system.hostport import Host
 from base.lm.catalog import ModelCatalog
+from base.lm.harness.session.transcript.record_file import UnreadRows
 from base.native_process.loaded_commit import LoadedCommit
 from base.paths import meiva_home, resolve_meiva_home, run_dir
 from gateway.tests.support.runner_ops.ops_stub import OpsCall, RunnerOps, register_machine
@@ -177,6 +178,7 @@ async def _serve(
         home=home,
         receiver=receiver,
         agent_host=ServiceEndpoints.from_fields(get_field, runtime=run_dir(home)).of("agent_host"),
+        unread=UnreadRows(),
     )
     export_route = functools.partial(
         workspace_export_route,

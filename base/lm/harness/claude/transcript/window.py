@@ -21,6 +21,8 @@ from base.lm.harness.session.transcript.record_file import FileRow, UnreadRows, 
 # skipped: the file is the CLI's own and its rows are never repaired here. Sub-agent files are not read.
 # meiva:link base/lm/harness/docs/transcript-projection.md
 
+CLI = "Claude Code"
+
 
 def wire_id(key: str) -> str:
     return key_uuid(key)
@@ -64,13 +66,13 @@ def transcript_path(claude_home: Path, workspace: Path, session_id: str) -> Path
 # open tool call started, for the call's duration, so a parser that is given the rows of one read after another
 # (a live read) and one given them all at once (a cold read) agree. A row of another record (a sub-agent's row
 # that the main file should not hold) yields nothing. A row the parser cannot use is skipped and reported once for
-# each kind of row by this parser.
+# each kind of row by the `UnreadRows` of the process that reads.
 class EntryParser:
     pending_calls = True
 
-    def __init__(self) -> None:
+    def __init__(self, unread: UnreadRows) -> None:
         self._state = ParseState()
-        self._unread = UnreadRows("Claude Code")
+        self._unread = unread
 
     def entries(self, rows: Sequence[FileRow]) -> tuple[AnyEntry, ...]:
         found: list[AnyEntry] = []
@@ -78,7 +80,7 @@ class EntryParser:
             self._state, parsed = parse_row(self._state, file_row.row, line=file_row.offset)
             for entry in parsed:
                 if isinstance(entry, Anomaly):
-                    self._unread.report(entry)
+                    self._unread.report(CLI, entry)
                 elif entry.record == MAIN_RECORD:
                     found.append(entry)
         return tuple(found)
