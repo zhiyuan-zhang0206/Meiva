@@ -60,7 +60,7 @@ def _load_pacing_state(path: Path) -> _PacingState:
     raw_count = payload.get("consecutive_rate_limits")
     raw_not_before = payload.get("not_before")
     count = raw_count if type(raw_count) is int and raw_count >= 0 else 0
-    if not isinstance(raw_not_before, str):
+    if count == 0 or not isinstance(raw_not_before, str):
         return _PacingState(consecutive_rate_limits=count)
     try:
         not_before = datetime.fromisoformat(raw_not_before.replace("Z", "+00:00"))
@@ -518,7 +518,11 @@ def run_declarative_cycle(
         return
     state = _load_pacing_state(state_path)
     now = clock().astimezone(UTC)
-    if state.not_before is not None and now < state.not_before:
+    if (
+        state.consecutive_rate_limits > 0
+        and state.not_before is not None
+        and now < state.not_before
+    ):
         _log.info(
             "collector {} rate-limit backoff holds this declarative fire until {}",
             collector_id,
@@ -543,11 +547,20 @@ def run_declarative_cycle(
     )
     if consecutive is None:
         return
-    interval_s = next_interval_s(float(collector.interval_minutes * 60), consecutive)
+    # meiva:note
+    # Normal cadence belongs to the declarative `every` schedule; only real rate-limit backoff
+    # (`consecutive > 0`) writes `not_before`. Writing it on zero consecutive rate limits blocks
+    # manual `meiva schedules run-now` and early scheduler ticks for the full polling interval.
+    not_before = (
+        clock().astimezone(UTC)
+        + timedelta(seconds=next_interval_s(float(collector.interval_minutes * 60), consecutive))
+        if consecutive > 0
+        else None
+    )
     _save_pacing_state(
         state_path,
         _PacingState(
             consecutive_rate_limits=consecutive,
-            not_before=clock().astimezone(UTC) + timedelta(seconds=interval_s),
+            not_before=not_before,
         ),
     )

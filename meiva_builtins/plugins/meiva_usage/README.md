@@ -69,13 +69,15 @@ The schedule script executes `run_from_schedule(MEIVA_SCHEDULE_INPUTS, collector
   the data. A card that never held a reading gets a `—` / `warn` placeholder. Rate limits bypass
   the error hysteresis because the reading is known to be old.
 - **Backoff (`backoff.py`)**: The round persists consecutive-rate-limit count and `not_before`
-  in the schedule workspace's `state.json`. Fixed `every` fires before `not_before` exit without
-  probing; each rate limit doubles the provider interval (`next_interval_s`, pure), capped at
-  120 minutes, and the first non-rate-limited cycle resets it to `interval_minutes`. The
-  `plugin_collector_cycle`
+  in the schedule workspace's `state.json`. Only rate-limited cycles (`consecutive_rate_limits > 0`)
+  set `not_before`; normal and non-rate-limited error cycles leave `not_before` unset (`null`) so
+  the declarative `every` schedule owns normal cadence and `run-now` runs immediately. While backed
+  off, fires before `not_before` exit without probing; each rate limit doubles the provider interval
+  (`next_interval_s`, pure), capped at 120 minutes, and the first non-rate-limited cycle resets the
+  count to `0` and clears `not_before`. The `plugin_collector_cycle`
   event reports such a cycle as `outcome="rate_limited"`, `reason="rate_limited"`. Other probe
   failures are still written as error cards and the cycle event stays `ok`. A cycle whose refresh
-  raised was not rate limited either, so its next allowed probe returns to `interval_minutes`.
+  raised was not rate limited either, so its next allowed probe also clears `not_before`.
 - **Claude token expiry**: `probe_claude` does not call the usage API with an access token whose
   `expiresAt` has passed (an unknown expiry is still tried). It reports `Claude access token
   expired; waiting for Claude Code to refresh it`: Claude Code refreshes its own token the next
