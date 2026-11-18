@@ -139,12 +139,23 @@ def get_stats_dashboard(
     request: Request,
     hours: Annotated[StatsWindowHours, Query()] = StatsWindowHours.H24,
 ) -> StatsDashboard:
+    # meiva:note
+    # Read live per poll without a process-wide cache so config-image edits and manifest failures
+    # surface immediately (`enable_config.md`). Unlike `/api/ui/contributions`, an invalid plugin
+    # manifest cannot fail `/api/stats/dashboard` (or `meiva stats`) with a 500: one broken
+    # manifest on disk would otherwise take down the core agent, cost, and error panels too.
+    declared_cards: frozenset[tuple[str, str]]
     try:
         declared_cards = declared_stat_cards(
             home=gateway_state(request).gateway_process.home, report=_note_unloaded_stats_face
         )
     except InvalidPluginManifestError as exc:
-        raise HTTPException(status_code=500, detail=str(exc)) from exc
+        _log.warning(
+            "plugin %s: invalid meiva-plugin.json; omitting plugin_stats from dashboard: %s",
+            exc.plugin,
+            exc,
+        )
+        declared_cards = frozenset()
     try:
         return _compute_stats_dashboard(
             gateway_state(request).db_pool,

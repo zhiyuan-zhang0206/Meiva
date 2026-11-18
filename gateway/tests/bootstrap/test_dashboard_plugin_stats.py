@@ -7,10 +7,12 @@
 from __future__ import annotations
 
 import json
+import logging
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 import psycopg
+import pytest
 
 from base import paths
 from base.db import Database
@@ -131,15 +133,22 @@ def test_dashboard_drops_a_pre_split_card_row_no_declaration_claims(
     ]
 
 
-def test_dashboard_invalid_plugin_manifest_names_the_plugin(unit_home: Path) -> None:
+def test_dashboard_invalid_plugin_manifest_names_the_plugin(
+    database: Database, unit_home: Path, caplog: pytest.LogCaptureFixture
+) -> None:
     _declare_stat_cards(unit_home, "broken", {"a": "A"})
     (paths.plugins_dir(home=unit_home) / "broken" / "meiva-plugin.json").write_text("{", "utf-8")
+    stats.upsert(database, plugin="broken", id="a", value="1% left", status="warn")
 
-    with gateway_test_client() as client:
+    with caplog.at_level(logging.WARNING), gateway_test_client() as client:
         resp = client.get("/api/stats/dashboard")
 
-    assert resp.status_code == 500
-    assert "broken" in resp.text
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    assert body["plugin_stats"] == []
+    assert "live_count" in body and "tokens" in body
+    warnings = [r for r in caplog.records if r.levelno == logging.WARNING and "broken" in r.message]
+    assert len(warnings) == 1
 
 
 def test_dashboard_plugin_stats_is_empty_without_writers() -> None:
