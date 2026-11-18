@@ -28,6 +28,16 @@ export function LoadingRing({ testId, className }: {
   );
 }
 
+const FLOATING_DISC_SURFACE_CLASS = cn(
+  "size-9 rounded-full bg-background border border-border shadow-md items-center justify-center text-muted-foreground",
+  FLEX,
+);
+
+const TOP_TIMELINE_SPINNER_CLASS = cn(
+  "absolute left-1/2 -translate-x-1/2 top-14 z-20 pointer-events-none",
+  FLOATING_DISC_SURFACE_CLASS,
+);
+
 // meiva:note
 // The reader's request owns this overlay. Cold fill and compact-history
 // retention run in the background without presenting another ring.
@@ -41,10 +51,8 @@ export function LoadOlderSpinner({ loadingOlder }: { loadingOlder: boolean }) {
       data-testid="load-older-spinner"
       data-state={loadingOlder ? "loading" : "idle"}
       className={cn(
-        "absolute left-1/2 -translate-x-1/2 top-14 z-20 h-8 w-8 rounded-full bg-background pointer-events-none",
-        "items-center justify-center text-muted-foreground",
+        TOP_TIMELINE_SPINNER_CLASS,
         loadingOlder ? "opacity-100" : "opacity-0",
-        FLEX,
       )}
     >
       {loadingOlder ? <LoadingRing /> : null}
@@ -80,7 +88,7 @@ export function ColdLoadSpinner({ show }: { show: boolean }) {
     <div
       role="status"
       data-testid="cold-load-spinner"
-      className={cn("pointer-events-none absolute inset-x-0 top-11 z-10 justify-center py-12 text-muted-foreground", FLEX)}
+      className={TOP_TIMELINE_SPINNER_CLASS}
     >
       <LoadingRing testId="cold-load-ring" />
       <span className="sr-only">{t("loadingConversation")}</span>
@@ -102,13 +110,8 @@ export function ScrollToBottomButton({ atBottom, onClick }: { atBottom: boolean;
       data-testid="scroll-to-bottom"
       className={cn(
         "absolute bottom-4 left-1/2 -translate-x-1/2 z-30",
-        "size-9 rounded-full",
-        "bg-background border border-border",
-        "shadow-md hover:shadow-lg",
-        "items-center justify-center",
-        "text-muted-foreground hover:text-foreground",
-        "transition-colors duration-300 ease-out",
-        FLEX,
+        FLOATING_DISC_SURFACE_CLASS,
+        "hover:shadow-lg hover:text-foreground transition-colors duration-300 ease-out",
       )}
     >
       <ArrowDown aria-hidden="true" data-testid="scroll-to-bottom-arrow" className="size-4" />
