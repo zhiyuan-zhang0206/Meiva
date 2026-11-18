@@ -93,3 +93,49 @@ def test_group_observation_of_live_then_unreaped_child() -> None:
         finally:
             child.kill()
             child.wait(timeout=5)
+
+
+def _member(pid: int, status: str) -> types.SimpleNamespace:
+    return types.SimpleNamespace(pid=pid, status=lambda: status)
+
+
+def test_group_scan_counts_live_members_and_skips_zombies_and_other_groups() -> None:
+    control = FakeProcessControl(groups={1: 999, 2: 999, 3: 999, 4: 555})
+    # meiva:note
+    # SimpleNamespace stand-in supplies only pid and status() for the table walk.
+    processes = [
+        _member(1, psutil.STATUS_RUNNING),
+        _member(2, psutil.STATUS_ZOMBIE),
+        _member(3, psutil.STATUS_SLEEPING),
+        _member(4, psutil.STATUS_RUNNING),
+    ]
+    scan = posixproc.scan_process_group(
+        999,
+        process_control=control,
+        processes=processes,  # pyright: ignore[reportArgumentType]
+    )
+    assert scan == posixproc.GroupScan(live=2, unreadable=0)
+
+
+def test_group_scan_tells_an_uninspectable_process_from_an_exited_one() -> None:
+    def denied() -> str:
+        raise psutil.AccessDenied(pid=7)
+
+    def gone() -> str:
+        raise psutil.NoSuchProcess(pid=8)
+
+    control = FakeProcessControl(groups={7: 999, 8: 999})
+    # meiva:note
+    # SimpleNamespace stand-ins supply only pid and status(); pid 9 has no group on record so its
+    # read raises ProcessLookupError, as an exited pid does.
+    processes = [
+        types.SimpleNamespace(pid=7, status=denied),
+        types.SimpleNamespace(pid=8, status=gone),
+        types.SimpleNamespace(pid=9, status=lambda: psutil.STATUS_RUNNING),
+    ]
+    scan = posixproc.scan_process_group(
+        999,
+        process_control=control,
+        processes=processes,  # pyright: ignore[reportArgumentType]
+    )
+    assert scan == posixproc.GroupScan(live=0, unreadable=1)
