@@ -21,6 +21,7 @@ const detail: Required<WireAgentRow> = {
     heartbeat_paused_until: null,
   has_unread_user_messages: false,
   harness_exit_code: null, harness_exit_at: null,
+  last_turn_fatal_at: null, last_turn_fatal_reason: null,
 };
 const wireCard: Required<WireAgentCard> = {
   agent_id: 9, spawner: "user", harness: "meiva", fork_source_agent_id: null, status: "running",

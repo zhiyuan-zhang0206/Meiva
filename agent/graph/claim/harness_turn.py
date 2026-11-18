@@ -26,6 +26,8 @@ from base.lm.harness import (
     HarnessClosedError,
     HarnessSetupError,
     HarnessTurnFaultedError,
+    TurnEngine,
+    sanitize_error_text,
 )
 from base.log import logger
 
@@ -75,6 +77,31 @@ def _apply_wake_polarity(
 _CLEARED: dict[str, Any] = {"harness_inputs": [], "harness_view": []}
 
 
+async def _handle_harness_abort(
+    ctx: MeivaContext,
+    agent_id: int,
+    bridge: TurnEngine,
+    projector: ReadTimelineSink,
+    run: ForegroundRun,
+    exc: HarnessTurnFaultedError | HarnessClosedError | HarnessSetupError,
+) -> None:
+    if isinstance(exc, HarnessTurnFaultedError) and exc.outcome is not None:
+        log_turn_usage(ctx, agent_id, bridge.model, exc.outcome)
+    if not isinstance(exc, HarnessTurnFaultedError) or exc.retire_session:
+        reason = (
+            exc.retire_reason
+            if isinstance(exc, HarnessTurnFaultedError) and exc.retire_reason
+            else "session unavailable"
+        )
+        await bridge.retire(reason=reason)
+    produced_output = projector.has_activity
+    marked = await run.retire_unconfirmed()
+    if produced_output:
+        await projector.finish(error=str(exc))
+    elif marked:
+        report_lost_turn(ctx, agent_id, marked, run.last_key, exc)
+
+
 async def _run_harness_turn(
     state: _state.AgentState,
     ctx: MeivaContext,
@@ -105,22 +132,12 @@ async def _run_harness_turn(
             update={**extra_updates, **interrupt_halt(exc.reason), **_CLEARED}, goto=CLAIM
         )
     except (HarnessTurnFaultedError, HarnessClosedError, HarnessSetupError) as exc:
-        if isinstance(exc, HarnessTurnFaultedError) and exc.outcome is not None:
-            log_turn_usage(ctx, agent_id, bridge.model, exc.outcome)
-        if not isinstance(exc, HarnessTurnFaultedError) or exc.retire_session:
-            reason = (
-                exc.retire_reason
-                if isinstance(exc, HarnessTurnFaultedError) and exc.retire_reason
-                else "session unavailable"
-            )
-            await bridge.retire(reason=reason)
-        produced_output = projector.has_activity
-        marked = await run.retire_unconfirmed()
-        if produced_output:
-            await projector.finish(error=str(exc))
-        elif marked:
-            report_lost_turn(ctx, agent_id, marked, run.last_key, exc)
-        raise FatalLLMStreamError(f"{ctx.harness.value} harness turn aborted: {exc}") from exc
+        await _handle_harness_abort(ctx, agent_id, bridge, projector, run, exc)
+        detail = (
+            sanitize_error_text(f"{ctx.harness.value} harness turn aborted: {exc}")
+            or f"{ctx.harness.value} harness turn aborted"
+        )
+        raise FatalLLMStreamError(detail) from exc
     except Exception:
         # meiva:note
         # Whatever else goes wrong (a pool timeout past its retries, a failed commit), what was

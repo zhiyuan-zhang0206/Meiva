@@ -42,6 +42,7 @@ async def close_hosted_turn(
         bus=bus,
         exited=outcome.exited,
         crashed=outcome.crashed,
+        fatal_reason=outcome.fatal_reason,
     )
     if outcome.failure_report is not None:
         cut_off = (

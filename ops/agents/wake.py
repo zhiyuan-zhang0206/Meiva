@@ -72,7 +72,9 @@ def transition_terminated_to_unclaimed_idling(
             _StatusChange,
             sql.SQL(
                 "UPDATE agents_meta SET status = %s, termination_source = NULL, "
-                "last_turn_fatal_at = NULL, runtime_generation = NULL, runtime_owner = NULL "
+                "last_turn_fatal_at = NULL, last_turn_fatal_reason = NULL, "
+                "harness_exit_code = NULL, harness_exit_at = NULL, "
+                "runtime_generation = NULL, runtime_owner = NULL "
                 "WHERE id = %s AND status = %s "
                 "AND {} "
                 "AND EXISTS ("
@@ -98,7 +100,9 @@ def transition_terminated_to_unclaimed_idling(
             cur.connection,
             _StatusChange,
             "UPDATE agents_meta SET status = %s, termination_source = NULL, "
-            "last_turn_fatal_at = NULL, runtime_generation = NULL, runtime_owner = NULL "
+            "last_turn_fatal_at = NULL, last_turn_fatal_reason = NULL, "
+            "harness_exit_code = NULL, harness_exit_at = NULL, "
+            "runtime_generation = NULL, runtime_owner = NULL "
             "WHERE id = %s AND status = %s RETURNING status_changed_at",
             (AgentStatus.IDLING, agent_id, AgentStatus.TERMINATED),
         )

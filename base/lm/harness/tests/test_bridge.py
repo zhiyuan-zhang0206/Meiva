@@ -715,6 +715,34 @@ async def test_session_model_and_error_detail_surface_through_bridge() -> None:
     assert not session.closed
 
 
+async def test_session_active_tracks_ensure_and_retire() -> None:
+    session = FakeSession()
+    bridge = make_bridge(session)
+    assert not bridge.session_active
+
+    await bridge.ensure()
+    assert bridge.session_active
+
+    await bridge.retire("done")
+    assert not bridge.session_active
+
+
+async def test_session_active_remains_false_when_start_fails() -> None:
+    class StartFailSession(FakeSession):
+        def __init__(self) -> None:
+            super().__init__()
+            self.exit_code = 2
+
+        async def start(self, *, resume: str | None = None) -> None:
+            raise OSError("proxy connection refused")
+
+    bridge = make_bridge(StartFailSession())
+    with pytest.raises(OSError, match="proxy connection refused"):
+        await bridge.ensure()
+    assert not bridge.session_active
+    assert bridge.exit_code == 2
+
+
 def registration(
     agent_id: int = 6984,
     controller_pid: int = 1,

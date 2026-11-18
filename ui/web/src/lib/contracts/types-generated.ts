@@ -2541,6 +2541,8 @@ export interface components {
             heartbeat_paused_until: string | null;
             harness_exit_code?: number | null;
             harness_exit_at?: string | null;
+            last_turn_fatal_at?: string | null;
+            last_turn_fatal_reason?: string | null;
         };
         AgentStats: {
             turn_total: number;

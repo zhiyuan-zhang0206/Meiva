@@ -45,6 +45,7 @@ from base.db.rows import IdRow
 from base.db.transaction import async_write_transaction
 from base.events.live.announce import publish_agent_updated
 from base.events.live.bus import EventBus
+from base.lm.harness import sanitize_error_text
 from base.native_process.runtime_incarnation import RuntimeIncarnation
 from base.telemetry import Event, emit_prepared
 from base.telemetry.audit_events import prepare_event_log, record_audit_async
@@ -202,10 +203,18 @@ async def apply_hosted_lifecycle(
                     (incarnation.agent_id,),
                 )
                 cutoff = shell_cutoff(session_index)
-                await conn.execute(
-                    "UPDATE agents_meta SET status='terminated',termination_source='user' WHERE id=%s",
-                    (incarnation.agent_id,),
-                )
+                if command.source in ("self", f"agent:{incarnation.agent_id}"):
+                    await conn.execute(
+                        "UPDATE agents_meta SET status='terminated',termination_source='user',"
+                        "last_turn_fatal_reason=NULL WHERE id=%s",
+                        (incarnation.agent_id,),
+                    )
+                else:
+                    await conn.execute(
+                        "UPDATE agents_meta SET status='terminated',termination_source='user' "
+                        "WHERE id=%s",
+                        (incarnation.agent_id,),
+                    )
             case _:
                 assert_never(kind)
     return AppliedLifecycle(
@@ -288,7 +297,8 @@ async def admit_hosted_runtime(
                 "AND m.runtime_generation IS NOT NULL "
                 "THEN m.runtime_generation ELSE gen_random_uuid() END, "
                 "last_admission_at = clock_timestamp(), "
-                "last_launch_failure_reason = NULL, last_launch_failure_at = NULL "
+                "last_launch_failure_reason = NULL, last_launch_failure_at = NULL, "
+                "harness_exit_code = NULL, harness_exit_at = NULL "
                 "FROM (SELECT id, status FROM agents_meta WHERE id = %s AND machine = %s "
                 "AND status IN ('running','idling') FOR UPDATE) before "
                 "WHERE m.id = before.id RETURNING m.runtime_generation, before.status",
@@ -489,14 +499,21 @@ async def settle_hosted_runtime(
 # Best-effort and settle-independent: a settlement blocked by unsettled
 # resources must not lose the death evidence (the 5858 corpse settled 3m52s
 # after its last turn ended; the stamp landed regardless).
-async def stamp_turn_fatal(pool: AsyncPool, incarnation: RuntimeIncarnation) -> TurnFatalStamp:
+async def stamp_turn_fatal(
+    pool: AsyncPool,
+    incarnation: RuntimeIncarnation,
+    *,
+    reason: str | None = None,
+) -> TurnFatalStamp:
+    sanitized = (sanitize_error_text(reason) or None) if reason else None
     async with async_write_transaction(pool) as conn:
         cur = await conn.execute(
             "UPDATE agents_meta SET last_turn_fatal_at = "
-            "COALESCE(last_turn_fatal_at, clock_timestamp()) "
+            "COALESCE(last_turn_fatal_at, clock_timestamp()), "
+            "last_turn_fatal_reason = COALESCE(%s, last_turn_fatal_reason) "
             "WHERE id = %s AND status = 'running' "
             "AND runtime_generation = %s AND runtime_owner = %s RETURNING id",
-            (incarnation.agent_id, incarnation.generation, incarnation.owner),
+            (sanitized, incarnation.agent_id, incarnation.generation, incarnation.owner),
         )
         applied = await cur.fetchone() is not None
     if applied:
@@ -504,6 +521,7 @@ async def stamp_turn_fatal(pool: AsyncPool, incarnation: RuntimeIncarnation) -> 
             "hosted turn crashed — corpse marked for the reaper",
             event="host_turn_corpse_marked",
             agent_id=incarnation.agent_id,
+            reason=sanitized,
         )
     return TurnFatalStamp(applied=applied)
 
@@ -541,12 +559,13 @@ async def settle_and_stamp_turn(
     bus: EventBus,
     exited: bool,
     crashed: bool,
+    fatal_reason: str | None = None,
 ) -> TurnSettlement:
     close = turn_close(exited=exited, crashed=crashed)
     stamp: TurnFatalStamp | None = None
     if close.stamp_fatal:
         try:
-            stamp = await stamp_turn_fatal(pool, incarnation)
+            stamp = await stamp_turn_fatal(pool, incarnation, reason=fatal_reason)
         except Exception:
             logger.opt(exception=True).warning(
                 "corpse marker stamp failed — the row stays alive-"

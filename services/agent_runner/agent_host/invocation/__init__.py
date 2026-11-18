@@ -21,6 +21,7 @@ from base.agents.history.delta_read_compat import seed_latest_checkpoint_message
 from base.api_contracts.agent_contract import ReconstructionScope
 from base.db.protocols import AsyncPool
 from base.events.live.bus import EventBus
+from base.lm.harness import format_fatal_reason
 from services.agent_runner.agent_host import TurnOutcome
 from services.agent_runner.agent_host.db_recovery import database_phase
 from services.agent_runner.agent_host.invocation.completion_decisions import (
@@ -88,6 +89,7 @@ async def finish_pending_failure(
     async with database_phase():
         await settle_turn_failure(graph, checkpointer, config, ctx, agent_id, pending)
         await attach_trace_checkpoint_ref(graph, ctx, agent_id)
+    fatal_reason = format_fatal_reason(pending.error) if pending.marks_crash else None
     return TurnOutcome(
         exited=False,
         crashed=pending.marks_crash,
@@ -95,6 +97,7 @@ async def finish_pending_failure(
         failure_report=(
             partial(publish_turn_failure, pending, ctx.require_bus()) if pending.errors else None
         ),
+        fatal_reason=fatal_reason,
     )
 
 

@@ -19,10 +19,35 @@
 
 from __future__ import annotations
 
+import re
+
 from base.lm.harness.engine import HarnessTurn
 from base.lm.harness.events import TurnCompleted
 
-__all__ = ["fault_message", "requires_session_recycle", "session_recycle_reason"]
+__all__ = [
+    "ERROR_SUMMARY_LIMIT",
+    "fault_message",
+    "format_fatal_reason",
+    "requires_session_recycle",
+    "sanitize_error_text",
+    "session_recycle_reason",
+]
+
+ERROR_SUMMARY_LIMIT = 1000
+_REDACTED = "***"
+_SK_SECRET = re.compile(r"sk-[A-Za-z0-9_\-]{8,}")
+_USERINFO_PASSWORD = re.compile(r"(://[^/\s@]*:)[^/\s@]*@")
+_SECRET_IN_TEXT = re.compile(
+    r'("(?:token|secret|password|authorization|api_key|x-api-key)"\s*:\s*)"(?:[^"\\]|\\.)*"',
+    re.IGNORECASE,
+)
+_AUTHORIZATION_BEARER = re.compile(
+    r"""(?i)\b(authorization["']?\s*[:=]\s*["']?bearer\s+)([^\s"',}]+)"""
+)
+_API_KEY_HEADER = re.compile(r"""(?i)\b(x-api-key["']?\s*[:=]\s*["']?)([^\s"',}]+)""")
+_ENV_SECRET = re.compile(
+    r'\b([A-Z][A-Z0-9_]*(?:_TOKEN|_PASSWORD|_SECRET|_API_KEY)\b\s*[:=]\s*)(["\']?)([^\s"\']+)\2'
+)
 
 # meiva:note
 # The sentence a failed turn gets when the CLI named no cause. It says what was observed -- a
@@ -108,6 +133,37 @@ def _declared_error(turn: HarnessTurn, kind: str) -> str:
 # The fields a turn reports about how it ended, kept beside a missing detail so a reader still
 # sees the shape the CLI gave: `agy` puts its result status here, and it is where some CLIs put a
 # non-API failure such as "usage limit reached".
+# meiva:note
+# Redact credentials/tokens from an error summary and cap its length so persisted
+# diagnostics remain safe and bounded.
+def sanitize_error_text(value: str, *, limit: int = ERROR_SUMMARY_LIMIT) -> str:
+    text = value
+    if "sk-" in text:
+        text = _SK_SECRET.sub("sk-***", text)
+    if "://" in text:
+        text = _USERINFO_PASSWORD.sub(r"\1" + _REDACTED + "@", text)
+    if '"' in text:
+        text = _SECRET_IN_TEXT.sub(lambda m: m.group(1) + '"' + _REDACTED + '"', text)
+    if "authorization" in text.lower():
+        text = _AUTHORIZATION_BEARER.sub(lambda m: m.group(1) + _REDACTED, text)
+    if "x-api-key" in text.lower():
+        text = _API_KEY_HEADER.sub(lambda m: m.group(1) + _REDACTED, text)
+    if "_TOKEN" in text or "_PASSWORD" in text or "_SECRET" in text or "_API_KEY" in text:
+        text = _ENV_SECRET.sub(lambda m: m.group(1) + m.group(2) + _REDACTED + m.group(2), text)
+    redacted = text.strip()
+    if limit > 3 and len(redacted) > limit:
+        return redacted[: limit - 3].rstrip() + "..."
+    return redacted[:limit]
+
+
+# meiva:note
+# Format an exception into a sanitized, bounded fatal-turn summary.
+def format_fatal_reason(exc: BaseException, *, limit: int = ERROR_SUMMARY_LIMIT) -> str:
+    raw = str(exc).strip()
+    detail = f"{type(exc).__name__}: {raw}" if raw else type(exc).__name__
+    return sanitize_error_text(detail, limit=limit) or type(exc).__name__
+
+
 def _known_status(turn: HarnessTurn) -> str:
     status = (turn.stop_reason or "").strip()
     return f" (status/stop_reason: {status})" if status else ""

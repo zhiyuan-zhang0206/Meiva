@@ -30,12 +30,13 @@ async def persist_last_active(ctx: MeivaContext, agent_id: int, text: str) -> No
             if clean_text:
                 await cur.execute(
                     "UPDATE agents_meta SET last_active_at = now(), last_message_text = %s, "
-                    "last_turn_fatal_at = NULL WHERE id = %s",
+                    "last_turn_fatal_at = NULL, last_turn_fatal_reason = NULL WHERE id = %s",
                     (clean_text, agent_id),
                 )
             else:
                 await cur.execute(
-                    "UPDATE agents_meta SET last_active_at = now(), last_turn_fatal_at = NULL "
+                    "UPDATE agents_meta SET last_active_at = now(), "
+                    "last_turn_fatal_at = NULL, last_turn_fatal_reason = NULL "
                     "WHERE id = %s",
                     (agent_id,),
                 )
