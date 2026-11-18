@@ -20,9 +20,10 @@ Guards:
 
 import logging
 
+import ormsgpack
 import pytest
 from langchain_core.messages import AIMessage, HumanMessage
-from langgraph.checkpoint.serde.jsonplus import JsonPlusSerializer
+from langgraph.checkpoint.serde.jsonplus import EXT_PYDANTIC_V2, JsonPlusSerializer
 from pydantic import BaseModel
 
 from agent.state import (
@@ -36,6 +37,7 @@ from agent.state import (
     build_checkpoint_serde,
     checkpoint_msgpack_allowlist,
 )
+from base.agents.context.external_attachment import plugin_state_codec
 from base.agents.history.checkpoint_serializer import PreSplitCheckpointEnvelopeError
 
 _SERDE_LOGGER = "langgraph.checkpoint.serde.jsonplus"
@@ -218,6 +220,50 @@ def test_allowlist_blocks_unregistered_type_to_dict(caplog: pytest.LogCaptureFix
     # blocked → the raw kwargs dict, plus a "Blocked deserialization" warning
     assert restored == {"x": 5}
     assert any("Blocked deserialization" in m for m in _warning_messages(caplog))
+
+
+def test_build_checkpoint_serde_and_attachment_codec_skip_retired_native_work_target(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    import langgraph.checkpoint.serde.jsonplus as _jsonplus
+
+    _jsonplus._warned_blocked_types.clear()
+    retired_blob = ormsgpack.packb(
+        ormsgpack.Ext(
+            EXT_PYDANTIC_V2,
+            ormsgpack.packb(
+                (
+                    "base.agents.incarnation.native_work_models",
+                    "NativeWorkTarget",
+                    {"value": 1},
+                    "model_validate_json",
+                )
+            ),
+        )
+    )
+    unknown_blob = ormsgpack.packb(
+        ormsgpack.Ext(
+            EXT_PYDANTIC_V2,
+            ormsgpack.packb(
+                ("unregistered.module", "MissingType", {"x": 7}, "model_validate_json")
+            ),
+        )
+    )
+
+    for serde in (build_checkpoint_serde(), plugin_state_codec.serializer()):
+        caplog.clear()
+        with caplog.at_level(logging.WARNING, logger=_SERDE_LOGGER):
+            assert serde.loads_typed(("msgpack", retired_blob)) is None
+        assert _warning_messages(caplog) == []
+
+    serde = build_checkpoint_serde()
+    caplog.clear()
+    with caplog.at_level(logging.WARNING, logger=_SERDE_LOGGER):
+        assert serde.loads_typed(("msgpack", unknown_blob)) == {"x": 7}
+    assert any(
+        "Blocked deserialization of unregistered.module.MissingType" in m
+        for m in _warning_messages(caplog)
+    )
 
 
 # ── safe types are untouched by the allowlist ─────────────────────────────

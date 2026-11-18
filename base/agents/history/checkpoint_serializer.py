@@ -1,16 +1,21 @@
-"""The checkpoint serializer: the framework allowlist plus a loud refusal of pre-split envelopes.
-
-Checkpoints written before the channel models moved to ``agent.state_channels`` carry
-``("agent.state", "<Name>")`` ext envelopes. Those pairs are no longer allowlisted, and the
-stock serializer would hand back the raw dict for each, silently breaking the channel.
-``CheckpointSerializer`` raises on load instead, so the thread that holds one fails visibly.
-"""
+# meiva:note
+# The checkpoint serializer: the framework allowlist plus legacy-envelope handling.
+#
+# Checkpoints written before the channel models moved to `agent.state_channels` carry
+# `("agent.state", "<Name>")` ext envelopes. Those pairs are no longer allowlisted, and the
+# stock serializer would hand back the raw dict for each, silently breaking the channel.
+# `CheckpointSerializer` raises on load instead, so the thread that holds one fails visibly.
+#
+# Retired checkpoint root envelopes (registered in `RETIRED_CHECKPOINT_MSGPACK_TYPES`) are
+# dropped to `None` before `JsonPlusSerializer` decodes them, avoiding spurious
+# `Blocked deserialization` warnings when reading historical checkpoints.
 
 from __future__ import annotations
 
 import ormsgpack
 from langgraph.checkpoint.serde.jsonplus import JsonPlusSerializer
 
+from base.agents.history.checkpoint_serde import is_retired_checkpoint_value
 from base.host.boundary.json_values import is_object_dict
 from base.host.boundary.untyped import object_of
 
@@ -47,17 +52,20 @@ def _names_pre_split_type(blob: bytes) -> bool:
     return found
 
 
+# meiva:note
+# Refuses pre-split `agent.state` envelopes and skips retired checkpoint root envelopes.
 class CheckpointSerializer(JsonPlusSerializer):
-    """`JsonPlusSerializer` that refuses a blob holding a pre-split ``agent.state`` envelope."""
-
     def loads_typed(self, data: tuple[str, bytes]) -> object:
         tag, blob = data
-        if tag == "msgpack" and _PRE_SPLIT_PREFIX in blob and _names_pre_split_type(blob):
-            raise PreSplitCheckpointEnvelopeError(
-                "checkpoint holds a pre-split legacy ('agent.state', <Name>) envelope, which is "
-                "no longer readable; delete the checkpoint rows (checkpoints, checkpoint_blobs, "
-                "checkpoint_writes) of the thread that holds it"
-            )
+        if tag == "msgpack":
+            if _PRE_SPLIT_PREFIX in blob and _names_pre_split_type(blob):
+                raise PreSplitCheckpointEnvelopeError(
+                    "checkpoint holds a pre-split legacy ('agent.state', <Name>) envelope, which is "
+                    "no longer readable; delete the checkpoint rows (checkpoints, checkpoint_blobs, "
+                    "checkpoint_writes) of the thread that holds it"
+                )
+            if is_retired_checkpoint_value(blob):
+                return None
         result = object_of(super().loads_typed, data)
         if is_object_dict(result):
             channel_values = result.get("channel_values")
