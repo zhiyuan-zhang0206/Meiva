@@ -1,0 +1,2 @@
+[uses]
+"test_run_custody_group_probe.py" = ["group_probe_child.py"]

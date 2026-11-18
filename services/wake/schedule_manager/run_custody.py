@@ -18,6 +18,7 @@ from base.host.atomic_io import write_text_atomic
 from base.host.boundary.untyped import object_of
 from base.native_process.ownership import LiveReading, OwnedProcess
 from base.native_process.process_control import ProcessControl
+from base.sessions.posixproc import GroupScan, scan_process_group
 
 
 class ClaimReadState(StrEnum):
@@ -44,6 +45,8 @@ class ProcessIdentityControl(Protocol):
 
     def signal_pinned(self, identity: OwnedProcess, signum: int) -> bool: ...
 
+    def scan_group(self, pgid: int, *, process_control: ProcessControl) -> GroupScan: ...
+
 
 class _SystemProcessIdentityControl:
     def read_live(self, identity: OwnedProcess) -> LiveReading | None:
@@ -51,6 +54,9 @@ class _SystemProcessIdentityControl:
 
     def signal_pinned(self, identity: OwnedProcess, signum: int) -> bool:
         return identity.signal_pinned(signum)
+
+    def scan_group(self, pgid: int, *, process_control: ProcessControl) -> GroupScan:
+        return scan_process_group(pgid, process_control=process_control)
 
 
 SYSTEM_PROCESS_IDENTITY_CONTROL: ProcessIdentityControl = _SystemProcessIdentityControl()
@@ -215,7 +221,9 @@ def observe_run_group(
             return GroupObservation(leader, GroupLiveness.UNKNOWN, member_detail)
         if member_is_anchor:
             return GroupObservation(leader, GroupLiveness.PRESENT, member_detail)
-    group, group_detail = _probe_group(claim.pgid, process_control=process_control)
+    group, group_detail = _probe_group(
+        claim.pgid, process_control=process_control, identity_control=identity_control
+    )
     if group is GroupLiveness.PRESENT:
         group = GroupLiveness.UNKNOWN
         group_detail = "numeric group exists without a live captured run member"
@@ -363,11 +371,34 @@ def _same_birth(identity: OwnedProcess, reading: LiveReading) -> bool:
     return reading.identity is not None and identity.same_birth(reading.identity)
 
 
-def _probe_group(pgid: int, *, process_control: ProcessControl) -> tuple[GroupLiveness, str]:
+# meiva:note
+# `killpg(pgid, 0)` answers ESRCH for a group with no member, but Darwin answers EPERM both for a
+# group holding only unreaped zombies (the leader just exited and awaits its reaper) and for one
+# whose live members the caller may not signal (another UID's processes). Only the first is
+# empty, so EPERM is settled by walking the process table: a live member, or a process that
+# cannot be inspected, keeps the group unproven; only zombies and exited processes make it empty.
+def _probe_group(
+    pgid: int, *, process_control: ProcessControl, identity_control: ProcessIdentityControl
+) -> tuple[GroupLiveness, str]:
     try:
         process_control.killpg(pgid, 0)
     except ProcessLookupError:
         return GroupLiveness.EMPTY, f"run process group {pgid} is empty"
+    except PermissionError as exc:
+        scan = identity_control.scan_group(pgid, process_control=process_control)
+        if scan.live:
+            return (
+                GroupLiveness.UNKNOWN,
+                f"run process group {pgid} has {scan.live} live member(s) this process "
+                f"cannot signal: {exc}",
+            )
+        if scan.unreadable:
+            return (
+                GroupLiveness.UNKNOWN,
+                f"run process group {pgid} is unprovable: {exc}; "
+                f"{scan.unreadable} process(es) could not be inspected",
+            )
+        return GroupLiveness.EMPTY, f"run process group {pgid} holds only unreaped zombies"
     except OSError as exc:
         return GroupLiveness.UNKNOWN, f"run process group {pgid} is unprovable: {exc}"
     return GroupLiveness.PRESENT, f"run process group {pgid} still exists"

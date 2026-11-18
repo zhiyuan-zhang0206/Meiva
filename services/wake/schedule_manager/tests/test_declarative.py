@@ -21,6 +21,7 @@ from base.host.boundary.untyped import object_of
 from base.native_process.ownership import LiveReading, OwnedProcess
 from base.native_process.process_control import SYSTEM_PROCESS_CONTROL, ProcessControl
 from base.native_process.tests.fake_process_control import FakeProcessControl
+from base.sessions.posixproc import GroupScan, scan_process_group
 from services.wake.schedule_manager.declarative import (
     DeclarativeScheduleEngine,
     schedule_directory,
@@ -130,6 +131,9 @@ class _IdentityControl:
     def signal_pinned(self, identity: OwnedProcess, signum: int) -> bool:
         self.signals.append((identity, signum))
         return self._readings.get(identity) is not None
+
+    def scan_group(self, pgid: int, *, process_control: ProcessControl) -> GroupScan:
+        return scan_process_group(pgid, process_control=process_control)
 
 
 def _wait_for_status(

@@ -37,6 +37,7 @@ import signal
 import subprocess
 import sys
 from collections.abc import Iterable, Sequence
+from dataclasses import dataclass
 from pathlib import Path
 
 import psutil
@@ -51,6 +52,7 @@ from base.paths import logs_path, run_dir
 from base.sessions.record import SessionRecord
 
 __all__ = [
+    "GroupScan",
     "build_session_record",
     "graceful_signal",
     "has_session",
@@ -58,6 +60,7 @@ __all__ = [
     "list_sessions",
     "new_session",
     "process_group_has_live_members",
+    "scan_process_group",
     "session_log_path",
     "session_started_at",
 ]
@@ -378,24 +381,57 @@ def _signal_group(
         process_control.killpg(pgid, sig)
 
 
+# meiva:note
+# What one walk of the process table saw of a numeric process group. `live` counts non-zombie
+# processes whose group is the scanned one. `unreadable` counts processes whose group or state
+# could not be read for a reason other than having exited: each might belong to the group, so a
+# caller that needs absence rather than a best effort treats a nonzero value as "not proven".
+@dataclass(frozen=True)
+class GroupScan:
+    live: int
+    unreadable: int
+
+
+# meiva:note
+# Walk the process table once and report the occupants of numeric group `pgid`. Zombies await their
+# reaper and are not counted as live. A process that exits during the walk is skipped; one that
+# cannot be inspected (permission or timeout) is counted in `unreadable`. This is a momentary
+# observation, not process identity or signal authority.
+def scan_process_group(
+    pgid: int,
+    *,
+    process_control: ProcessControl = SYSTEM_PROCESS_CONTROL,
+    processes: Iterable[psutil.Process] | None = None,
+) -> GroupScan:
+    live = 0
+    unreadable = 0
+    candidates = psutil.process_iter() if processes is None else processes
+    for process in candidates:
+        try:
+            if process_control.getpgid(process.pid) != pgid:
+                continue
+            if process.status() != psutil.STATUS_ZOMBIE:
+                live += 1
+        except (psutil.NoSuchProcess, ProcessLookupError):
+            continue
+        except (psutil.Error, OSError):
+            unreadable += 1
+    return GroupScan(live=live, unreadable=unreadable)
+
+
+# meiva:note
+# Whether an observed non-zombie process belongs to numeric group `pgid`. None, a nonpositive
+# group ID, or a gone/zombie-only group returns False. A surviving group is scanned after the
+# zero-signal probe: macOS can reject that probe for a zombie-only group, and zombies await their
+# reaper without keeping the session alive. Members that disappear or cannot be inspected are
+# skipped; use `scan_process_group` when uninspectable processes must be told apart.
+# meiva:link base/sessions/docs/process-supervision.md
 def process_group_has_live_members(
     pgid: int | None,
     *,
     process_control: ProcessControl = SYSTEM_PROCESS_CONTROL,
     processes: Iterable[psutil.Process] | None = None,
 ) -> bool:
-    """Whether an observed non-zombie process belongs to numeric group `pgid`.
-
-    None, a nonpositive group ID, or a gone/zombie-only group returns False.
-    A surviving group is scanned after the zero-signal probe: macOS can reject
-    that probe for a zombie-only group, and zombies await their reaper without
-    keeping the session alive. Members that disappear or cannot be inspected
-    are skipped, as in the session supervisor's best-effort liveness check.
-
-    This is a momentary observation, not process identity, signal authority or
-    closure proof. Group IDs can be reused and members can change during the
-    scan; False does not certify absence when visibility is incomplete.
-    """
     if pgid is None or pgid <= 0:
         return False
     try:
@@ -404,17 +440,7 @@ def process_group_has_live_members(
         return False
     except OSError:  # noqa: S110 - macOS EPERM for a zombie-only group falls through to the member scan.
         pass
-    candidates = psutil.process_iter() if processes is None else processes
-    for process in candidates:
-        try:
-            if (
-                process_control.getpgid(process.pid) == pgid
-                and process.status() != psutil.STATUS_ZOMBIE
-            ):
-                return True
-        except (psutil.Error, ProcessLookupError):
-            continue
-    return False
+    return scan_process_group(pgid, process_control=process_control, processes=processes).live > 0
 
 
 def terminate_tree(
