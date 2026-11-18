@@ -3,10 +3,12 @@ from __future__ import annotations
 import re
 import time
 from typing import TypedDict, cast
+from urllib.parse import parse_qs, urlencode, urlsplit
 
 import pytest
-from playwright.sync_api import Page, Route
+from playwright.sync_api import Page, Route, expect
 
+from base.agents.history.timeline_item import ReadingWindow, TimelineItem
 from tests.e2e._credentials import gateway_get
 from tests.e2e.fixture_environment import E2EEnv
 
@@ -30,6 +32,11 @@ _SAMPLER_JS = """
       const r = n.getBoundingClientRect();
       if (r.bottom >= vpRect.top && r.top <= vpRect.bottom) {
         tops[id] = r.top;
+        if (n.dataset.turnExpanded === 'false' && n.dataset.turnMemberIds) {
+          for (const memberId of n.dataset.turnMemberIds.split(' ')) {
+            if (memberId) tops[memberId] = r.top;
+          }
+        }
         if (id === '0.0') {
           if (fallbackId === null) { fallbackId = id; fallbackTop = r.top; }
           continue;
@@ -193,10 +200,14 @@ def _run_rounds(
                 break
             page.wait_for_timeout(200)
         if n <= before_n:
-            rest = gateway_get(
-                f"{gateway_url}/api/agents/{agent_id}/timeline?limit=1000",
-                timeout=30.0,
-            ).json()["items"]
+            rest = [
+                it
+                for it in gateway_get(
+                    f"{gateway_url}/api/agents/{agent_id}/timeline?limit=1000",
+                    timeout=30.0,
+                ).json()["items"]
+                if it["kind"] != "system_prompt"
+            ]
             if before_n < len(rest):
                 raise AssertionError(
                     f"round {round_no}: a released pull did not load more history; "
@@ -244,7 +255,10 @@ def _reject_first_page(page: Page, before_requests: list[str], paused_routes: li
         json={"detail": "Checkpoint history unavailable"},
         content_type="application/json",
     )
-    page.get_by_text("Failed to load older messages: Checkpoint history unavailable").wait_for()
+    page.get_by_text("Checkpoint history unavailable", exact=True).wait_for()
+    expect(page.get_by_test_id("timeline-surface").get_by_role("alert")).to_contain_text(
+        "Could not restore your reading position"
+    )
     _ = page.evaluate(
         "() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)))"
     )
@@ -280,6 +294,87 @@ def _load_older_at_top(page: Page, before_requests: list[str], paused_routes: li
     paused_routes.pop().continue_()
 
 
+class _SavedReading(TypedDict):
+    locator: str
+    item_id: str
+    offset: float
+
+
+def _confirmed_anchor_item(window: ReadingWindow) -> TimelineItem:
+    matches = [row for row in window.items if row.item_id == window.anchor_item_id]
+    assert window.reading_source and len(matches) == 1
+    return matches[0]
+
+
+def _read_tail_then_reload(env: E2EEnv, tail: TimelineItem) -> None:
+    page = env.page
+    viewport = page.locator('[data-slot="scroll-area-viewport"]').filter(
+        has=page.get_by_role("log")
+    )
+    viewport.hover()
+    page.mouse.wheel(0, 100_000)
+    expect(page.locator(f'.timeline-item[data-item-id="{tail.item_id}"]')).to_be_in_viewport()
+    _ = page.wait_for_function(
+        """agent => {
+          const entry = JSON.parse(sessionStorage.getItem('timeline-bookmarks:v1') ?? 'null')?.entries.find(row => row.agentId === agent);
+          const vp = [...document.querySelectorAll('[data-slot="scroll-area-viewport"]')].find(node => node.querySelector('[role="log"]'));
+          if (!entry || !vp) return false;
+          const id = CSS.escape(entry.position.anchor.itemId);
+          const node = vp.querySelector(`.timeline-item[data-item-id="${id}"], [data-turn-expanded="false"][data-item-id="${id}"]`);
+          if (!node) return false;
+          const row = node.getBoundingClientRect(), box = vp.getBoundingClientRect();
+          return row.bottom > box.top + 44 && row.top < box.bottom && Math.abs(row.top - box.top - entry.position.anchor.viewportTop) <= 1;
+        }""",
+        arg=env.agent_id,
+    )
+    saved = cast(
+        _SavedReading,
+        page.evaluate(
+            """agent => {
+          const row = JSON.parse(sessionStorage.getItem('timeline-bookmarks:v1')).entries.find(value => value.agentId === agent);
+          return {locator: row.locator, item_id: row.position.anchor.itemId, offset: row.position.anchor.viewportTop};
+        }""",
+            env.agent_id,
+        ),
+    )
+    query = urlencode({"anchor": saved["locator"], "limit": 1})
+    bound = ReadingWindow.model_validate(
+        gateway_get(
+            f"{env.gateway_url}/api/agents/{env.agent_id}/timeline/window?{query}",
+            timeout=30.0,
+        ).json()
+    )
+    member = _confirmed_anchor_item(bound)
+    assert member.item_id == saved["item_id"] and member.reading_locator == saved["locator"]
+    assert member.source_message_id and member.source_block_idx is not None
+    with page.expect_response(
+        lambda response: (
+            response.request.method == "GET"
+            and urlsplit(response.url).path == f"/api/agents/{env.agent_id}/timeline/window"
+            and parse_qs(urlsplit(response.url).query).get("anchor") == [saved["locator"]]
+            and "limit" not in parse_qs(urlsplit(response.url).query)
+        )
+    ) as selected:
+        _ = page.reload()
+    assert selected.value.ok
+    restored = ReadingWindow.model_validate(selected.value.json())
+    actual = _confirmed_anchor_item(restored)
+    assert (actual.source_message_id, actual.source_block_idx) == (
+        member.source_message_id,
+        member.source_block_idx,
+    )
+    assert actual.reading_locator == saved["locator"] and restored.older_cursor
+    expect(page.get_by_test_id("cold-load-ring")).to_have_count(0)
+    selector = (
+        f'.timeline-item[data-item-id="{actual.item_id}"], '
+        f'[data-turn-expanded="false"][data-item-id="{actual.item_id}"]'
+    )
+    offset = page.locator(selector).evaluate(
+        "node => node.getBoundingClientRect().top - node.closest('[data-slot=scroll-area-viewport]').getBoundingClientRect().top"
+    )
+    assert abs(float(offset) - saved["offset"]) <= 1
+
+
 @pytest.mark.scenario("tests.e2e.fakes.scenarios.load_older:build")
 def test_load_older_preserves_reading_position(e2e_env: E2EEnv) -> None:
     page = e2e_env.page
@@ -295,7 +390,7 @@ def test_load_older_preserves_reading_position(e2e_env: E2EEnv) -> None:
         else:
             route.continue_()
 
-    page.route(re.compile(r"/api/agents/\d+/timeline\?.*before="), pause_first_page)
+    page.route(re.compile(r"/api/agents/\d+/timeline/window\?.*before="), pause_first_page)
 
     page.goto(e2e_env.agent_url)
     page.wait_for_selector('[data-testid="sse-ready"]', state="attached", timeout=10_000)
@@ -319,7 +414,13 @@ def test_load_older_preserves_reading_position(e2e_env: E2EEnv) -> None:
             break
         time.sleep(0.5)
 
-    page.reload()
+    tail = next(
+        TimelineItem.model_validate(item)
+        for item in items
+        if item["kind"] == "agent_chat"
+        and "\u5168\u90e8\u6267\u884c\u5b8c\u6bd5" in item["payload"]
+    )
+    _read_tail_then_reload(e2e_env, tail)
     page.wait_for_selector('[data-testid="sse-ready"]', state="attached", timeout=10_000)
 
     n = 0
@@ -328,7 +429,7 @@ def test_load_older_preserves_reading_position(e2e_env: E2EEnv) -> None:
         n = page.evaluate(
             "Number(document.querySelector('[role=log]')?.dataset.timelineItemCount ?? 0)"
         )
-        if n > 50:
+        if n >= 50:
             break
         page.wait_for_timeout(300)
     assert n >= 50, f"scenario timeline too short to page: {n} items"

@@ -62,5 +62,17 @@
   "quoteSelection": "Quote selection",
   "quoteTooLong": "Select up to 4,000 characters.",
   "quoteSource": "Quoted · {author}",
-  "quoteUnavailable": "Original message is currently unavailable."
+  "quoteUnavailable": "Original message is currently unavailable.",
+  "readingRestoreFailed": "Could not restore your reading position",
+  "readingSourceChanged": "History changed. Your current window and bookmark are preserved; retry to reopen this position.",
+  "readingUnsaved": "Latest reading position has not been saved yet",
+  "retryPosition": "Retry saving",
+  "cancelReadingRestore": "Cancel restoration",
+  "loadNewer": "Read newer messages",
+  "continueLatest": "Continue at latest messages",
+  "readingBudgetExceeded": "The saved position exceeds the current reading limit. Your bookmark is unchanged.",
+  "readingIdentityUnavailable": "The saved message could not be verified. Your bookmark is unchanged.",
+  "readingSourceUnavailable": "The saved history is unavailable. Your bookmark is unchanged.",
+  "readingRestoreCancelled": "Restoration cancelled. Your bookmark is unchanged.",
+  "readingRestoreTimedOut": "Restoration timed out. Your bookmark is unchanged."
 }

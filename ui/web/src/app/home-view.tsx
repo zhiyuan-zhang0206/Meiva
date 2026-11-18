@@ -34,13 +34,14 @@ import type { Harness } from "@/lib/harness/harness";
 import { useMobileAttention } from "@/lib/notifications/use-mobile-attention";
 import { useQuestions } from "@/lib/notifications/use-questions";
 import type { useInspectorOpen } from "@/lib/inspector/inspector-panel-store";
-import { FLEX, FLEX_1, FLEX_COL, MIN_H_0, MIN_W_0, OVERFLOW_HIDDEN } from "@/lib/layout/layout";
+import { BAR_CLEAR_TOP_OFFSET_CLASS, FLEX, FLEX_1, FLEX_COL, MIN_H_0, MIN_W_0, OVERFLOW_HIDDEN } from "@/lib/layout/layout";
 import type { useBreakpoint } from "@/lib/layout/breakpoint";
 import type { Store } from "@/lib/state/store";
 import type { useUserSettings } from "@/lib/state/use-user-settings";
 import { timelineMaxWidthCss } from "@/lib/timeline/timeline-width";
 import type { UseTimelineResult } from "@/lib/timeline/use-timeline";
-import { MessageDeliveryUnknownError } from "@/lib/transport/api";
+import { ReadingCoordinatesChangedError, type useReadingWindow } from "@/lib/timeline/reading/use-reading-window";
+import { ApiError, MessageDeliveryUnknownError } from "@/lib/transport/api";
 import { useApi, useStreamHub } from "@/lib/transport/transport-context";
 
 // meiva:note
@@ -109,7 +110,7 @@ type TimelineViewState = Pick<
   | "error"
   | "isFetching"
   | "retryTimeline"
->;
+> & { reading?: ReturnType<typeof useReadingWindow>["reading"] };
 
 // meiva:note
 // Every field is one source's value, read once by the route: a hook's result narrowed to what the
@@ -398,6 +399,7 @@ function HomeContent({
     error: timelineError,
     isFetching,
     retryTimeline,
+    reading,
   } = timeline;
   const pendingMessages = usePendingMessages(activeId, showError);
   const visiblePendingMessages = useMemo(
@@ -462,8 +464,18 @@ function HomeContent({
   const questions = useQuestions(activeId);
   const pendingQuestions = questions.awaiting;
   const mobileAttention = useMobileAttention(breakpoint.isNarrow);
-  const displayedItems = useMemo(() => withUserMessages(items, publications.data?.items ?? []), [items, publications.data]);
-  const loadOlderForReveal = useCallback(() => loadOlder("background"), [loadOlder]);
+  const displayedItems = useMemo(() => {
+    const decorated = withUserMessages(items, publications.data?.items ?? []);
+    if (!reading?.parked) return decorated;
+    const members = new Set(items.map((item) => item.item_id));
+    return decorated.filter((item) => members.has(item.item_id));
+  }, [items, publications.data, reading?.parked]);
+  const seenTimeline = reading?.live ?? timeline;
+  const seenItems = useMemo(() => reading?.parked
+    ? withUserMessages(seenTimeline.items, publications.data?.items ?? []) : displayedItems,
+  [displayedItems, publications.data, reading?.parked, seenTimeline.items]);
+  const loadSeenOlder = seenTimeline.loadOlder;
+  const loadOlderForReveal = useCallback(() => loadSeenOlder("background"), [loadSeenOlder]);
   const reveal = useSeenPosition({
     agentId: activeId,
     feed: {
@@ -471,10 +483,10 @@ function HomeContent({
       messages: publications.data?.items ?? NO_PUBLICATIONS,
       updatedAt: publications.dataUpdatedAt,
     },
-    items: displayedItems,
-    timelineLoading: isLoading,
-    hasMoreOlder,
-    loadingOlder,
+    items: seenItems,
+    timelineLoading: seenTimeline.isLoading,
+    hasMoreOlder: seenTimeline.hasMoreOlder,
+    loadingOlder: seenTimeline.loadingOlder,
     loadOlder: loadOlderForReveal,
   });
   const replySuggestion = useReplySuggestion({
@@ -484,12 +496,39 @@ function HomeContent({
     items: displayedItems,
     enabled: !userSettingsLoading && userSettings["behavior.replySuggestions"] === true,
   });
+  const readingReason = reading?.error instanceof ApiError ? reading.error.readingReason : undefined;
+  const readingFailureText = reading?.error instanceof ReadingCoordinatesChangedError ? timelineText("readingSourceChanged")
+    : readingReason === "budget" ? timelineText("readingBudgetExceeded")
+    : readingReason === "identity" ? timelineText("readingIdentityUnavailable")
+    : readingReason === "source" ? timelineText("readingSourceUnavailable")
+    : reading?.error?.name === "AbortError" ? timelineText("readingRestoreCancelled")
+    : reading?.error?.name === "TimeoutError" ? timelineText("readingRestoreTimedOut")
+    : timelineText("readingRestoreFailed");
 
   return (
     <section className={cn("relative", FLEX, MIN_H_0, FLEX_1, MIN_W_0, OVERFLOW_HIDDEN)}>
       <ErrorBoundary diagnostics={diagnostics}>
         <div data-testid="timeline-surface" className={cn("relative", FLEX, FLEX_COL, FLEX_1, MIN_H_0, MIN_W_0)}>
-          {timelineError && (!sourceReady || items.length === 0) && (
+          {reading?.error && (
+            <div className={cn("pointer-events-none absolute inset-x-0 z-30 justify-center px-3", BAR_CLEAR_TOP_OFFSET_CLASS, FLEX)}>
+              <div className="pointer-events-auto max-w-[min(100%,42rem)]">
+                <InlineError surface="floating" role="alert" onRetry={reading.retry} retryLabel={timelineText("retryLoad")} detail={errMsg(reading.error)}>
+                  {readingFailureText}
+                </InlineError>
+              </div>
+            </div>
+          )}
+          {reading && !reading.parked && reading.saveStatus === "unsaved" &&
+            <div role="status" className="pointer-events-none absolute right-4 top-14 z-20 rounded bg-background px-2 py-1 text-xs text-muted-foreground">
+              {timelineText("readingUnsaved")}
+              {reading.saveError && <button type="button" onClick={reading.retry} className="pointer-events-auto ml-2 underline">{timelineText("retryPosition")}</button>}
+            </div>}
+          {reading?.parked && <div className={cn(FLEX, "absolute bottom-3 left-1/2 z-30 -translate-x-1/2 items-center gap-2 rounded-md border bg-background px-3 py-2 text-xs")}>
+            {isLoading ? <button type="button" onClick={reading.cancel}>{timelineText("cancelReadingRestore")}</button>
+              : <button type="button" disabled={reading.loadingNewer || !reading.canPage} onClick={reading.loadNewer}>{timelineText("loadNewer")}</button>}
+            <button type="button" onClick={reading.continueHere}>{timelineText("continueLatest")}</button>
+          </div>}
+          {!reading?.parked && timelineError && (!sourceReady || items.length === 0) && (
             <div className="mx-4 mt-14 mb-2">
               <InlineError
                 onRetry={retryTimeline}
@@ -502,14 +541,15 @@ function HomeContent({
             </div>
           )}
           <TimelineView
-            key={activeId ?? "unselected"}
+            key={`${activeId ?? "unselected"}:${reading?.parked ? "parked" : "live"}`}
             items={displayedItems}
             compactBuffer={compactBuffer}
             threadKey={activeId != null ? String(activeId) : undefined}
             scrollMemoryKey={`${bfcacheId}:agent:${activeId ?? "unselected"}`}
             restoreReady={sourceReady}
+            readingPosition={reading?.positionControl}
             streamingCode={streamingCode}
-            turnActive={agentBusy}
+            turnActive={reading?.parked ? false : agentBusy}
             lastEventAt={timelineStore.liveAnchorAt}
             hasMoreOlder={hasMoreOlder}
             loadingOlder={loadingOlder}
@@ -518,7 +558,7 @@ function HomeContent({
             retainedItemsMax={retainedItemsMax}
             loading={isLoading || (agentsLoading && activeId === null)}
             maxWidthCss={contentColumnMaxWidth}
-            reveal={reveal}
+            reveal={reading?.parked ? null : reveal}
             onQuote={acceptQuote}
           />
           <HeaderBar

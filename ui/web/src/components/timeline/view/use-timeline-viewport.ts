@@ -1,6 +1,8 @@
 import { useEffect, useRef, type RefObject } from "react";
 
 import type { SavedScroll } from "@/lib/layout/scroll-memory";
+import type { BackendTimelineItem } from "@/lib/contracts/types";
+import type { TimelinePositionControl } from "@/lib/timeline/reading/position-control";
 import { isAtBottom, type StickyController, type StickyThresholds } from "@/lib/layout/sticky";
 
 import { rememberTimelinePosition, watchReadingNavigation } from "../model/reading-position";
@@ -192,6 +194,8 @@ export function startScrollToBottomRide({
 }
 
 export function useTimelineViewport({
+  readingControlRef,
+  itemsRef,
   viewportObserverFactory,
   wrapperRef,
   viewportRef,
@@ -226,6 +230,8 @@ export function useTimelineViewport({
   tailHeight,
   cancelPendingJump,
 }: {
+  readingControlRef?: RefObject<TimelinePositionControl | undefined>;
+  itemsRef?: RefObject<readonly BackendTimelineItem[]>;
   viewportObserverFactory?: (callback: ResizeObserverCallback) => ResizeObserver;
   wrapperRef: RefObject<HTMLDivElement | null>;
   viewportRef: RefObject<HTMLElement | null>;
@@ -290,7 +296,7 @@ export function useTimelineViewport({
       // and reserve changes can dispatch scroll before the resize observer.
       // meiva:link ui/web/src/docs/frontend-components/timeline-view/send-anchor.md
       const parked = controller.isAnchored() && maintainSendAnchor(viewport);
-      const direction = parked || (holdRestoredPositionRef.current && !pendingRestoreRef.current)
+      const direction = parked || (holdRestoredPositionRef.current && (readingControlRef?.current || !pendingRestoreRef.current))
         ? "none" : controller.handleScroll(snapshot(), padded);
       if (direction === "up" && !scrollToBottomRideRef.current.active) coldFillRef.current.open = false;
 
@@ -324,7 +330,8 @@ export function useTimelineViewport({
       trimFollowing();
       const mem = scrollMemoryRef.current;
       if (mem && !restoreInFlight()) {
-        rememberTimelinePosition(viewport, mem.entryKey, mem.contentKey, collapseReserveHeight(), sendReserveEnabled());
+        rememberTimelinePosition(viewport, mem.entryKey, mem.contentKey, collapseReserveHeight(), sendReserveEnabled(),
+          readingControlRef?.current && itemsRef ? { reading: readingControlRef.current, items: itemsRef.current } : undefined);
       }
     };
     viewport.addEventListener("scroll", onScroll, { passive: true });
@@ -355,6 +362,7 @@ export function useTimelineViewport({
       }
     };
     const stopWatchingReadingInput = watchReadingNavigation(viewport, wrapperRef.current, () => {
+      readingControlRef?.current?.navigated();
       readingInputTop.current = viewport.scrollTop;
       interruptJump();
       holdRestoredPositionRef.current = false;
@@ -362,6 +370,7 @@ export function useTimelineViewport({
 
     const onWheel = (e: WheelEvent) => {
       if (!e.ctrlKey && e.deltaY !== 0 && Math.abs(e.deltaY) >= Math.abs(e.deltaX)) {
+        readingControlRef?.current?.navigated();
         holdRestoredPositionRef.current = false;
         if (Math.abs(e.deltaY) > 2) cancelPendingJump();
         readingInputTop.current = e.deltaY < 0 ? viewport.scrollTop : null;
@@ -378,14 +387,21 @@ export function useTimelineViewport({
     };
     viewport.addEventListener("wheel", onWheel, { passive: false });
 
+    let readingTouchTop: number | null = null;
     const onTouchStart = (e: TouchEvent) => {
+      readingTouchTop = e.touches.length > 0 ? e.touches[0].clientY : null;
       readingInputTop.current = viewport.scrollTop;
       interruptJump();
-      holdRestoredPositionRef.current = false;
+      if (!readingControlRef?.current) holdRestoredPositionRef.current = false;
       controller.handleTouchStart();
       pullTouchStart(e, viewport);
     };
     const onTouchMove = (e: TouchEvent) => {
+      const top = e.touches.length > 0 ? e.touches[0].clientY : null;
+      if (readingTouchTop !== null && top !== null && Math.abs(top - readingTouchTop) > 2) {
+        readingControlRef?.current?.navigated();
+        holdRestoredPositionRef.current = false;
+      }
       pullTouchMove(e, viewport);
     };
 
@@ -435,6 +451,11 @@ export function useTimelineViewport({
       measureAtBottom();
       maybeColdFill();
       trimFollowing();
+      const mem = scrollMemoryRef.current;
+      if (readingControlRef?.current && itemsRef && mem && !restoreInFlight()) {
+        rememberTimelinePosition(viewport, mem.entryKey, mem.contentKey, collapseReserveHeight(), sendReserveEnabled(),
+          { reading: readingControlRef.current, items: itemsRef.current });
+      }
     };
     const ro = viewportObserverFactory ? viewportObserverFactory(onResize) : new ResizeObserver(onResize);
     ro.observe(viewport);
@@ -452,6 +473,8 @@ export function useTimelineViewport({
       ro.disconnect();
     };
   }, [
+    readingControlRef,
+    itemsRef,
     viewportObserverFactory,
     wrapperRef,
     viewportRef,

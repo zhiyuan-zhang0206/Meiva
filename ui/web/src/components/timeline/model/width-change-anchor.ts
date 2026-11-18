@@ -21,6 +21,7 @@ interface Args {
   controller: StickyController;
   compactBuffer: CompactTransitionBuffer | null;
   canonicalItems: readonly BackendTimelineItem[];
+  maintainReading?: (viewport: HTMLElement) => boolean;
 }
 
 // meiva:note
@@ -31,11 +32,11 @@ interface Args {
 // after the reflow, and leave a reader in the bottom zone to the pin.
 // meiva:link ui/web/src/docs/frontend-components/timeline-view/sticky-scroll.md
 export function useReanchorOnWidthChange({
-  wrapperRef, entriesRef, holdRef, controller, compactBuffer, canonicalItems,
+  wrapperRef, entriesRef, holdRef, controller, compactBuffer, canonicalItems, maintainReading,
 }: Args): void {
-  const latest = useRef({ entriesRef, holdRef, controller, compactBuffer, canonicalItems });
+  const latest = useRef({ entriesRef, holdRef, controller, compactBuffer, canonicalItems, maintainReading });
   useLayoutEffect(() => {
-    latest.current = { entriesRef, holdRef, controller, compactBuffer, canonicalItems };
+    latest.current = { entriesRef, holdRef, controller, compactBuffer, canonicalItems, maintainReading };
   });
 
   useEffect(() => {
@@ -44,6 +45,7 @@ export function useReanchorOnWidthChange({
     let width = viewport.clientWidth;
     const reapplyBookmark = (requireAnchor = false) => {
       const current = latest.current;
+      if (current.maintainReading?.(viewport) === true) return;
       const mem = current.entriesRef.current;
       if (!mem || current.holdRef.current || current.controller.isSticky()) return;
       const saved = readScrollMemory(mem.entryKey);

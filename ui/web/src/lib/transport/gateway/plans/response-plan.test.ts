@@ -9,6 +9,15 @@ import {
 } from "./response-plan";
 
 describe("server error surfacing", () => {
+  it("preserves a reading budget refusal as distinct from unavailable history", () => {
+    const error = errorFromResponse(410, JSON.stringify({
+      code: "reading_source_unavailable", detail: "The reading source could not be verified",
+      reading_reason: "budget", retryable: false,
+    }));
+    expect(error.code).toBe("reading_source_unavailable");
+    expect(error.readingReason).toBe("budget");
+    expect(error.status).toBe(410);
+  });
   it("joins a FastAPI validation list instead of printing raw JSON", () => {
     const error = errorFromResponse(422, JSON.stringify({
       detail: [{ loc: ["body", "harness"], msg: "unknown harness", type: "value_error" }, { msg: "second" }, "stray"],

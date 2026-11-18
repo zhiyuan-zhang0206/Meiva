@@ -34,6 +34,7 @@ export class ApiError extends Error {
   status: number;
   agentId?: number;
   code?: string;
+  readingReason?: string;
   retryable: boolean;
   launchState?: { status: string; availability?: { reason: string; evidence_at?: string | null } | null };
   retryLaunchPath?: string;
@@ -49,6 +50,7 @@ export class ApiError extends Error {
     } else if (typeof body?.code === "string") {
       this.code = body.code;
     }
+    if (typeof body?.reading_reason === "string") this.readingReason = body.reading_reason;
     if (body?.reason === "agent_launch_failed" && typeof body.agent_id === "number") {
       this.agentId = body.agent_id;
       if (typeof body.retry_launch_path === "string") this.retryLaunchPath = body.retry_launch_path;
