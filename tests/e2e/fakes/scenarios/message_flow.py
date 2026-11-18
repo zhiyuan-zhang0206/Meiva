@@ -62,15 +62,17 @@ def build_reading_reload(model: str, *, agent_id: int | None) -> ScriptedFakeCha
     return ScriptedFakeChatModel(
         script=tuple(
             AIMessage(
-                content=[
-                    {
-                        "type": "text",
-                        "text": user_facing(f"Reading context {number}, block {block}."),
-                        "index": block,
-                    }
-                    for block in range(35)
-                ]
-                + [{"type": "text", "text": user_facing(reply), "index": 35}],
+                content=list[str | dict[str, str | int]](
+                    [
+                        {
+                            "type": "text",
+                            "text": user_facing(f"Reading context {number}, block {block}."),
+                            "index": block,
+                        }
+                        for block in range(35)
+                    ]
+                    + [{"type": "text", "text": user_facing(reply), "index": 35}]
+                ),
                 usage_metadata=_USAGE,
             )
             for number, reply in enumerate(READING_REPLIES, start=1)
