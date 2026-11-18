@@ -771,6 +771,7 @@ async def test_resurrect_behind_passive_note_enters_and_settles_the_harness(
         node = tasks.create_task(harness_turn_node(turn_state, rt, config(agent_id)))
         await wait_until(lambda: bool(engine.delivered), "resurrect delivery")
         [[sent]] = engine.delivered
+        assert turn_state.harness_inputs[0]["prompt"] in sent.text
         _assert_resurrect_input(db_conn, note, control, chat, sent)
         engine.emit(*in_a_turn([sent.key], "MEIVA_DISPLAY_TO_USER\ncontinued"))
         await node
