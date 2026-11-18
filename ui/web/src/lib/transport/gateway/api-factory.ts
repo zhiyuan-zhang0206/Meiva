@@ -30,23 +30,17 @@ import type {
   RunTimelineResponse,
   ShellCapture,
   TimelineResponse,
-  ReadingWindowResponse,
   TokenUsageResponse,
   ReplySuggestionResponse,
 } from "../../contracts/types";
 import { projectAgentStatus } from "../../contracts/types";
+import { agentShellPath, commandsPath, inspectStatisticsPath, listAgentsPath, tasksPath } from "./routes/agent-routes";
 import { createControlApi } from "./api-control";
+import { agentQuestionsPath } from "./routes/control-routes";
 import type { Http } from "./http";
 import { sendMessageWithReconciliation } from "./message-delivery";
 import { INSPECT_REQUEST_TIMEOUT_MS } from "./plans";
 import {
-  agentQuestionsPath,
-  agentShellPath,
-  commandsPath,
-  inspectStatisticsPath,
-  listAgentsPath,
-  tasksPath,
-  readingWindowPath,
   runTimelineContextPath,
   runTimelineLinkContentPath,
   runTimelineLinksPath,
@@ -54,8 +48,7 @@ import {
   runTimelinePath,
   timelinePath,
   type RunTimelineWindow,
-  type ReadingWindowSelector,
-} from "./routes";
+} from "./routes/timeline-routes";
 import {
   deleteStagedUploadFile,
   getUploadDeliveryStatus,
@@ -84,12 +77,6 @@ export function createApi(http: Http) {
       opts?: { limit?: number; before?: string; signal?: AbortSignal },
     ): Promise<TimelineResponse> => {
       return f(timelinePath(agentId, opts), { signal: opts?.signal }).then(ok<TimelineResponse>);
-    },
-
-    getReadingWindow: (
-      agentId: number, selector: ReadingWindowSelector, signal: AbortSignal, limit?: number,
-    ): Promise<ReadingWindowResponse> => {
-      return f(readingWindowPath(agentId, selector, limit), { signal }).then(ok<ReadingWindowResponse>);
     },
 
     getTokenUsage: (agentId: number, signal?: AbortSignal): Promise<TokenUsageResponse> => {

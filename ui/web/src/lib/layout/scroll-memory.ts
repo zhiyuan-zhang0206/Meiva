@@ -29,7 +29,7 @@ export interface SavedScroll {
   /** Offset of the scrolling element. */
   scrollTop: number;
   /** The visible timeline item and its position inside the viewport. */
-  anchor?: { itemId: string; rank: number; viewportTop: number; readingLocator?: string };
+  anchor?: { itemId: string; rank: number; viewportTop: number };
   usedCollapseReserve?: true;
   keepSendReserve?: true;
   // meiva:note

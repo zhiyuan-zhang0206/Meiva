@@ -3,7 +3,6 @@ export function timelineGeometry(read: {
   setTop: (value: number) => void;
   height: () => number;
   resizeCallbacks: Set<() => void>;
-  itemTop?: (itemId: string) => number;
 }) {
   const prepare = (root: HTMLElement) => {
     for (const element of [root, ...root.querySelectorAll<HTMLElement>("*")]) {
@@ -15,8 +14,7 @@ export function timelineGeometry(read: {
           read.setTop(Math.max(0, Math.min(value, element.scrollHeight - element.clientHeight)));
         } },
         getBoundingClientRect: { configurable: true, value: () => {
-          const y = element.dataset.itemId
-            ? (read.itemTop?.(element.dataset.itemId) ?? (Number.parseInt(element.dataset.itemId) - 1) * 300) - read.top() : 0;
+          const y = element.dataset.itemId ? (Number.parseInt(element.dataset.itemId) - 1) * 300 - read.top() : 0;
           return { top: y, bottom: y + 300, height: 300, left: 0, right: 400, width: 400 } as DOMRect;
         } },
       });

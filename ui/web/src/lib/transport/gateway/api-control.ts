@@ -57,10 +57,9 @@ import type {
   WireFleetGraph,
   WorkspaceFileResponse,
 } from "../../contracts/types";
-import {
-  toUserPath, configPath, harnessAvailabilityPath, inventoryPath, resolvedConfigPath,
-  settingPath, alertClassSamplesPath, alertsPath, fleetGraphPath, memoryNotePath,
-} from "./routes";
+import { toUserPath } from "./routes/agent-routes";
+import { configPath, harnessAvailabilityPath, inventoryPath, resolvedConfigPath, settingPath } from "./routes/config-routes";
+import { alertClassSamplesPath, alertsPath, fleetGraphPath, memoryNotePath } from "./routes/control-routes";
 import type { Http } from "./http";
 import { keyedJson, keyedPost, patchJson, postInit, postJson, putJson } from "./plans";
 import { confirmDraftReceipt } from "./plans";

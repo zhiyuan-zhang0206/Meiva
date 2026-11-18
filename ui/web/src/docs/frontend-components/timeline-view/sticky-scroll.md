@@ -82,13 +82,6 @@ card can commit first. It reads the latest bookmark at that frame; subsequent
 navigation, following, an active send/restore hold, or a thread unmount takes
 precedence. Multiple image events within a frame share one reapplication.
 
-A source-qualified reading locator restores the actual message node and its
-original viewport offset. A collapsed work strip cannot complete that restore.
-The existing expansion owner opens the target's turn and detail card once per
-restore token; virtualization materializes that same target through the existing
-pending anchor. Later manual collapse remains authoritative. Legacy ephemeral
-bookmarks without a source locator retain their collapsed-strip behavior.
-
 ## Non-sticky headers and natural-height TurnBlock bodies
 Human-message, agent-reply, `TurnBlock`, and nested detail-card headers all stay
 in normal document flow without `position: sticky` (user ruling 2026-11-01,
@@ -113,10 +106,3 @@ to omit timestamps according to their timeline item metadata.
 - [Timeline View](timeline-view.md) — the renderer whose one scroll surface this node owns.
 - [Timeline deep collapse](deep-collapse.md) — the turns whose natural-height bodies the live-block rule keeps in place.
 - [The send anchor](send-anchor.md) — how sends, the down arrow, and the reading reserve interact.
-
-
-An exact source restore measures its target as well as its prefix before judging
-scroll range. In particular, the final long row's `content-visibility: auto`
-intrinsic estimate must not make a negative saved offset look unreachable: the
-actual target supplies the remaining height. The existing viewport owner still
-verifies the real node and measured offset before reporting DOM completion.

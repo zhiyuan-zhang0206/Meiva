@@ -10,15 +10,15 @@ import { useTimelineStore } from "@/lib/timeline/timeline-store";
 import { resetTransport, transport } from "@/test-support/fake-api";
 import { ApiProvider, WallClockProvider } from "@/lib/transport/transport-context";
 import { BAR_HEIGHT_PX } from "@/lib/layout/layout";
-import { TimelineView } from "..";
+import { TimelineView } from ".";
 import { TestStreamProvider } from "@/test-support/fake-stream";
 
 beforeEach(() => {
   resetTransport();
   transport.getConfig.mockResolvedValue({ fields: [] });
 });
-vi.mock("../../content/markdown", () => ({ ChatMarkdown: ({ content }: { content: string }) => <div>{content}</div> }));
-vi.mock("../../ui/scroll-area", () => ({
+vi.mock("../content/markdown", () => ({ ChatMarkdown: ({ content }: { content: string }) => <div>{content}</div> }));
+vi.mock("../ui/scroll-area", () => ({
   ScrollArea: ({
     children,
     ...rest

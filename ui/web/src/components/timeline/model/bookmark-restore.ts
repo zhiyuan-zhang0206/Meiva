@@ -33,7 +33,6 @@ interface ApplyArgs {
   controller: StickyController;
   tailHeight: (viewport: HTMLElement) => number;
   collapseReserve: HTMLElement | null;
-  requiredAnchor?: boolean;
 }
 
 const snapshot = (viewport: HTMLElement) => ({
@@ -43,7 +42,7 @@ const snapshot = (viewport: HTMLElement) => ({
 });
 
 export function applyBookmarkRestore({
-  state, viewport, initialPass, loading, threadKey, compactBuffer, canonicalItems, controller, tailHeight, collapseReserve, requiredAnchor = false,
+  state, viewport, initialPass, loading, threadKey, compactBuffer, canonicalItems, controller, tailHeight, collapseReserve,
 }: ApplyArgs): void {
   const saved = state.pending.current;
   if (initialPass || loading || !saved || !viewport) return;
@@ -57,7 +56,7 @@ export function applyBookmarkRestore({
   if (!applySavedTimelineScroll(viewport, saved, compactBuffer, canonicalItems, naturalHeight, collapseReserve)) {
     const max = Math.max(0, viewport.scrollHeight - viewport.clientHeight);
     const probe = state.probe.current;
-    if (!requiredAnchor && probe.passes >= 2 && probe.height === viewport.scrollHeight && saved.scrollTop > max) {
+    if (probe.passes >= 2 && probe.height === viewport.scrollHeight && saved.scrollTop > max) {
       // meiva:note
       // Older rows were trimmed while away: the bookmark lies past the end of a page that stopped growing. Waiting cannot reach it - land on the end and hand the viewport back, or the hold silences following and every later send for good.
       // meiva:link ui/web/src/docs/frontend-components/timeline-view/sticky-scroll.md
@@ -89,11 +88,10 @@ interface SettleArgs {
   threadKey: string | undefined;
   compactBuffer: CompactTransitionBuffer | null;
   canonicalItems: readonly BackendTimelineItem[];
-  requiredAnchor?: boolean;
 }
 
 export function settleRestoredPosition({
-  state, viewport, layoutChanged, threadKey, compactBuffer, canonicalItems, requiredAnchor = false,
+  state, viewport, layoutChanged, threadKey, compactBuffer, canonicalItems,
 }: SettleArgs): void {
   const saved = state.settled.current;
   if (!saved || !viewport) return;
@@ -101,7 +99,7 @@ export function settleRestoredPosition({
     state.settled.current = null;
     return;
   }
-  if (layoutChanged && settleSavedTimelineScroll(viewport, saved, compactBuffer, canonicalItems) && !requiredAnchor) {
+  if (layoutChanged && settleSavedTimelineScroll(viewport, saved, compactBuffer, canonicalItems)) {
     state.settled.current = null;
     state.hold.current = false;
   }
