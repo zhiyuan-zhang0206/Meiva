@@ -7,7 +7,7 @@ truncated comparison refuses the merge rather than passing it.
 
 | # | Condition | Why it exists |
 |---|---|---|
-| 1 | The body carries a passing `diff-checks/v1 @<headRefOid>` receipt | A `diff-checks/v1` receipt belongs to one commit; a stale, incomplete, or failing receipt proves nothing about this head |
+| 1 | The body carries a passing `diff-checks/v1 @<headRefOid>` receipt | A `diff-checks/v1` receipt belongs to one commit; it proves local static gates (`pyright`/`ruff`/`meizel`/`debt`/`docs-refs`) and absence of unbacked `BLIND(...)` selector gaps, while condition 2 enforces the full CI test matrix |
 | 2 | Every check run is green | Trunk queue rows are skipped (the queue is retired); one name keeps only its latest run by `started_at`, so an older cancelled duplicate cannot block a head a newer run passed |
 | 3 | The pull request and current main touch disjoint files | An empty intersection makes the merge trivially clean |
 | 4 | The body carries a where_used line and a behaviour section | Both are lane conventions the reviewer would otherwise check by hand |
@@ -107,6 +107,18 @@ A host installs them once:
    chosen module with its short HEAD sha on stderr. `MEIVA_GATE_MODULE` overrides both.
 
 `scripts/hooks/diff_checks.py` produces the `diff-checks/v1 @<headRefOid>` receipt that
-condition 1 checks (must include `base=`, `generated=scripts/hooks/diff_checks.py`, and no
-failing, broken, or unreadable check fields). The retired Trunk-era `preflight.sh` and
-`PREFLIGHT PASS: /trunk merge is allowed` literal are no longer accepted.
+condition 1 checks. Boundary with condition 2:
+
+- Condition 1 verifies the receipt format (`base=` and `generated=scripts/hooks/diff_checks.py`),
+  local static gates (`pyright`, `ruff`, `meizel`, `debt`, `docs-refs`, with no `failed(...)`,
+  `unreadable(...)`, `broken(...)`, `closure=unknown`, nonzero test failures/errors, or nonzero
+  `in-closure` / `err_in_this_diff` pyright counts), and that any selector blind spot
+  (`selector=BLIND(...)` or `blind=BLIND(...)`) ran a green fallback (`fallback=RAN(...)` with
+  `failed=0tests` and `errors=0tests`).
+- `tests=skipped(--skip-tests)` is accepted in condition 1 per
+  `docs/conventions/engineering/failure-output-carries-the-why.md` §6 when GitHub Actions CI
+  covers the test matrix; condition 2 (`check runs`) hard-gates that the full CI suite on the
+  current head is green.
+
+The retired Trunk-era `preflight.sh` and `PREFLIGHT PASS: /trunk merge is allowed` literal are
+no longer accepted.

@@ -306,6 +306,22 @@ def test_an_incomplete_receipt_without_base_or_generator_is_refused(
         {"err_in_this_diff": "1"},
         {"closure": "unknown"},
         {"pyright": "1err(1in-closure,0elsewhere:none)(1s)", "err_in_this_diff": "1"},
+        {
+            "selector": "BLIND(dyn.py)",
+            "blind": "BLIND(dyn.py)",
+            "fallback": "n/a(a-blind-selection-has-no-fallback-yet)",
+        },
+        {
+            "blind": "BLIND(dyn.py)",
+            "fallback": "n/a(a-blind-selection-has-no-fallback-yet)",
+        },
+        {
+            "selector": "BLIND(dyn.py)",
+            "blind": "BLIND(dyn.py)",
+            "fallback": "RAN(domain)",
+            "failed": "n/a(no-test-ran)",
+            "errors": "n/a(no-test-ran)",
+        },
     ],
 )
 def test_a_failing_or_broken_receipt_is_refused(
@@ -330,6 +346,13 @@ def test_a_failing_or_broken_receipt_is_refused(
                 "passed": "n/a(no-test-ran)",
                 "failed": "n/a(no-test-ran)",
                 "errors": "n/a(no-test-ran)",
+            }
+        ),
+        passing_receipt(
+            overrides={
+                "selector": "BLIND(dyn.py)",
+                "blind": "BLIND(dyn.py)",
+                "fallback": "RAN(domain)",
             }
         ),
     ],

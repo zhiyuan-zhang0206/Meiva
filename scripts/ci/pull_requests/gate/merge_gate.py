@@ -354,6 +354,21 @@ def receipt_failure(receipt: DiffChecksReceipt) -> str | None:
         reason = _field_failure(key, value)
         if reason is not None:
             return reason
+    fallback = fields.get("fallback", "")
+    for key in ("selector", "blind"):
+        value = fields.get(key, "")
+        if value.startswith("BLIND("):
+            if not fallback.startswith("RAN("):
+                return (
+                    "diff-checks/v1 receipt on current head has blind selection without fallback "
+                    f"({key}={value})"
+                )
+            if fields.get("failed") != "0tests" or fields.get("errors") != "0tests":
+                return (
+                    "diff-checks/v1 receipt on current head has blind fallback without clean test "
+                    f"counts (failed={fields.get('failed', 'missing')}, "
+                    f"errors={fields.get('errors', 'missing')})"
+                )
     return None
 
 
