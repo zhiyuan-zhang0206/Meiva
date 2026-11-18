@@ -62,7 +62,7 @@ first input is appended to the inherited conversation and never repeats the hand
 
 A batch the session could not take at all (it failed to start, so nothing was handed over) goes back to the queue
 untouched. A control row only blocks the rows queued behind it, by the same (created_at, id) order the claim uses,
-so a message followed by a stop is delivered first and the stop is taken when it is out of the way. Any other
+so a message followed by a stop is delivered first and the stop is taken when it is out of the way. Passive deliverable rows do not block control claims: they wait for the next non-passive input. A control behind only passive notes is taken first; a resurrect input can run alone while those notes stay pending. When a non-passive deliverable precedes control, its head batch carries the passive notes before control is claimed. Any other
 failure of the invocation first gives every input handed over an explicit outcome (reconciled, or consumed as unconfirmed, as below)
 and then raises.
 
