@@ -679,7 +679,7 @@ async def test_legacy_cleanup_retains_ttl_evidence(
         (agent_id,),
     )
     db_conn.commit()
-    with legacy_service("unknown_method: fence_agent_shells"):
+    with legacy_service("unknown method 'fence_agent_shells'"):
         result = await lifecycle.terminate_agent_op(
             database, event_bus, agent_id, TerminateAgentRequest(), db_pool, host=agent_host.host
         )

@@ -71,7 +71,8 @@ successful empty acknowledgement. A malformed fence file refuses agent-shell
 allocation until an operator repairs the evidence.
 
 During `update run --keep-shell-sessions`, a pre-fence daemon can answer
-`unknown_method: fence_agent_shells`. The backend still persists the local cutoff,
+`unknown method 'fence_agent_shells'` (code 2, the dispatcher's reply for any
+method it lacks). The backend still persists the local cutoff,
 then falls back to enumerating and killing the owner's shells below it. Cleanup
 reports `fenced=False`: lifecycle callers retain TTL rows for the reaper, because
 that daemon can still accept a delayed allocation. Other service errors propagate.

@@ -144,6 +144,10 @@ class PtySessionBackend(SessionBackend):
     # deletes TTL rows. Unlike a list followed by individual kills, this acknowledgement also
     # fences a delayed `new` whose client already timed out. None identifies the exact legacy
     # unknown-method response; the durable local cutoff survives and callers enumerate instead.
+    #
+    # A pre-fence daemon answers with the text its request dispatcher has always produced,
+    # `f"unknown method {method!r}"` (services/agent_runner/pty_sessions/service.py), so the
+    # comparison is that rendered text and nothing looser.
     def fence_agent_shells(self, agent_id: int, before_session_index: int) -> list[int] | None:
         _ = terminal_fence.record(self._home, agent_id, before_session_index)
         try:
@@ -151,7 +155,7 @@ class PtySessionBackend(SessionBackend):
                 agent_id, before_session_index, socket_path=self._socket
             )
         except client.ServiceError as exc:
-            if str(exc) != "unknown_method: fence_agent_shells":
+            if str(exc) != "unknown method 'fence_agent_shells'":
                 raise
             return None
 

@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import contextlib
 import inspect
+import re
 import socket
 import threading
 from collections.abc import Generator
@@ -33,9 +34,10 @@ from base.paths import meiva_home
 from base.sessions.backend import PosixProcSessionBackend, PtySessionBackend
 from base.sessions.env_forwarding import forward_env_dict
 from base.sessions.protocol import SessionBackend
-from base.sessions.pty import allocation_freeze, client
+from base.sessions.pty import allocation_freeze, client, terminal_fence
 from base.sessions.pty.client import PtyClientConfig
 from base.sessions.pty.tests.job_wait import wait_for_job
+from base.sessions.pty.tests.legacy_service import legacy_service
 from base.sessions.pty.tests.pty_service import PtyServiceProcess, service_socket
 from base.sessions.pty.tests.pty_service import pty_service as pty_service
 from base.sessions.pty.tests.pty_shells import (
@@ -441,6 +443,31 @@ def test_a_service_that_does_not_answer_fails_loudly_not_as_empty(
             backend.send(_NAME, "echo x")
         with pytest.raises(RuntimeError, match=rf"pty capture {_NAME!r} failed"):
             backend.capture_pane(_NAME)
+
+
+# meiva:note
+# A daemon older than the fence RPC answers with its dispatcher's unknown-method text; the
+# backend reads exactly that reply as "no atomic fence" (None) after persisting the cutoff, so
+# lifecycle cleanup falls back to enumeration instead of raising. The underscore-colon form no
+# daemon has ever sent stays an ordinary service error.
+def test_a_pre_fence_daemon_reply_reads_as_no_atomic_fence(unit_home: Path) -> None:
+    with legacy_service("unknown method 'fence_agent_shells'") as calls:
+        assert _backend(unit_home).fence_agent_shells(7, 10) is None
+    assert calls == ["fence_agent_shells"]
+    assert terminal_fence.read(unit_home).cutoffs == {7: 10}
+
+
+@pytest.mark.parametrize(
+    "error", ["unknown_method: fence_agent_shells", "unknown method 'kill'", "fence failed"]
+)
+def test_any_other_fence_refusal_propagates(unit_home: Path, error: str) -> None:
+    with (
+        legacy_service(error) as calls,
+        pytest.raises(client.ServiceError, match=re.escape(error)),
+    ):
+        _backend(unit_home).fence_agent_shells(7, 10)
+    assert calls == ["fence_agent_shells"]
+    assert terminal_fence.read(unit_home).cutoffs == {7: 10}
 
 
 # ---------------------------------------------------------------------------
