@@ -3,12 +3,14 @@
 `components/timeline/overlays.tsx` shares one ring between the reader's
 older-page request, initial source qualification, and the wait for a first work item.
 Each draws an arc with a 15% opacity track and an 8-unit radius in a 24-unit
-box. The older-page ring overlays the top of the viewport without changing
-the message layout. Both top loaders are horizontally centered in the
-conversation pane (`TimelineView`'s relative wrapper), independent of the
-message column width. The reader-request overlay keeps its top offset below
-the floating header, using the same center anchor as the scroll-to-bottom
-control.
+box. Both top loaders — the older-page overlay and the initial-qualification
+overlay — sit inside the same non-interactive floating disc surface as the
+scroll-to-bottom control (`size-9 rounded-full bg-background border
+border-border shadow-md pointer-events-none`), keeping a solid bordered boundary
+instead of floating bare over retained message text. Both overlay the top of the
+viewport without changing the message layout, horizontally centered below the
+floating header (`left-1/2 -translate-x-1/2 top-14 z-20`) in `TimelineView`'s
+relative wrapper, independent of the message column width.
 
 `TimelineView.loading` means the selected source has not completed its initial
 read or qualification handoff. It presents the initial-load ring even when retained

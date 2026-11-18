@@ -373,20 +373,47 @@ describe("Scroll-to-bottom button + multi-item render order", () => {
   });
 });
 
+function expectTopFloatingDisc(overlay: HTMLElement | null) {
+  expect(overlay).not.toBeNull();
+  for (const token of [
+    "absolute",
+    "left-1/2",
+    "-translate-x-1/2",
+    "top-14",
+    "z-20",
+    "pointer-events-none",
+    "flex",
+    "size-9",
+    "rounded-full",
+    "bg-background",
+    "border",
+    "border-border",
+    "shadow-md",
+    "items-center",
+    "justify-center",
+    "text-muted-foreground",
+  ]) {
+    expect(overlay?.classList.contains(token)).toBe(true);
+  }
+  for (const staleToken of ["inset-x-0", "top-11", "py-12", "h-8", "w-8", "right-5"]) {
+    expect(overlay?.classList.contains(staleToken)).toBe(false);
+  }
+  expect(overlay?.parentElement?.classList.contains("relative")).toBe(true);
+}
+
 describe("cold-load spinner", () => {
-  it("loading + no items → shows the shared ring below the floating header bar, not its own glyph and label", () => {
+  it("loading + no items → shows the shared ring inside the floating disc below the header bar, not its own glyph and label", () => {
     render(<TimelineView items={[]} loading />);
     const spinner = screen.getByTestId("cold-load-spinner");
-    expect(spinner.className).toContain("top-11");
-    expect(spinner.className).toContain("py-12");
-    expect(spinner.className).toContain("inset-x-0");
-    expect(spinner.className).toContain("justify-center");
+    expectTopFloatingDisc(spinner);
+    expect(spinner.getAttribute("role")).toBe("status");
     expect(spinner.querySelector('[data-testid="cold-load-ring"]')).not.toBeNull();
     expect(screen.getByText(/Loading conversation…/).className).toContain("sr-only");
   });
-  it("retained content stays readable under the qualification ring until loading ends", () => {
+  it("retained content stays readable under the qualification disc until loading ends", () => {
     const items = [makeItem({ kind: "agent_chat", payload: "hi" })];
     const { rerender } = render(<TimelineView items={items} loading />);
+    expectTopFloatingDisc(screen.getByTestId("cold-load-spinner"));
     expect(screen.getByTestId("cold-load-ring")).toBeTruthy();
     expect(screen.getByTestId("chat-markdown").textContent).toBe("hi");
     rerender(<TimelineView items={items} />);
@@ -428,26 +455,23 @@ describe("loading ring motion (cold load, pull strip, scroll-to-bottom)", () => 
 });
 
 describe("load-older circle (revealed above the messages)", () => {
-  it("loadingOlder=false → spinner present but hidden (opacity-0) and hidden from assistive tech", () => {
+  it("loadingOlder=false → spinner present in floating disc but hidden (opacity-0) and hidden from assistive tech", () => {
     render(<TimelineView items={[makeItem({ kind: "agent_chat", payload: "x" })]} />);
     const label = screen.getByText(/Loading earlier messages/);
     const overlay = label.closest("div");
+    expectTopFloatingDisc(overlay);
     expect(overlay?.className).toContain("opacity-0");
     expect(overlay?.className).not.toContain("opacity-100");
     expect(overlay?.getAttribute("aria-hidden")).toBe("true");
   });
-  it("readerLoadingOlder=true → spinner visible (opacity-100), stays mounted at the top, exposed to assistive tech", () => {
+  it("readerLoadingOlder=true → spinner visible (opacity-100) inside the floating disc, stays mounted at the top, exposed to assistive tech", () => {
     render(
       <TimelineView items={[makeItem({ kind: "agent_chat", payload: "x" })]} loadingOlder readerLoadingOlder />,
     );
     const label = screen.getByText(/Loading earlier messages/);
     const overlay = label.closest("div");
+    expectTopFloatingDisc(overlay);
     expect(overlay?.className).toContain("opacity-100");
-    expect(overlay?.classList.contains("left-1/2")).toBe(true);
-    expect(overlay?.classList.contains("-translate-x-1/2")).toBe(true);
-    expect(overlay?.classList.contains("top-14")).toBe(true);
-    expect(overlay?.classList.contains("right-5")).toBe(false);
-    expect(overlay?.parentElement?.classList.contains("relative")).toBe(true);
     expect(overlay?.className).not.toContain("opacity-0");
     expect(overlay?.getAttribute("aria-hidden")).toBe("false");
     expect(overlay?.querySelector(".animate-spin")).not.toBeNull();
