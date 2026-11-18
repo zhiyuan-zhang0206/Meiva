@@ -77,6 +77,7 @@ interface Props {
   children?: React.ReactNode;
   onSend: (content: string, fileIds: string[], clientMessageId: string, quote?: Quote) => Promise<boolean>;
   quoteSelection?: { quote: Quote; revision: number } | null;
+  quoteEnabled?: boolean;
   onStop: () => void;
   onUploadFiles?: (files: File[]) => void;
   stageQueue?: StageQueueBatch | null;
@@ -98,6 +99,7 @@ export function Composer({
   onSend,
   onStop,
   quoteSelection,
+  quoteEnabled = true,
   onUploadFiles,
   stageQueue = null,
   onDeliveringBatchChange,
@@ -124,9 +126,15 @@ export function Composer({
     if (agentId == null) return "";
     return readSession(session, draftKey(agentId)) ?? "";
   });
-  const [quote, setQuote] = useState<Quote | null>(() => agentId == null ? null : readQuote(session, agentId));
-  const quoteRef = useRef(quote);
-  useEffect(() => { quoteRef.current = quote; }, [quote]);
+  const [quote, setQuote] = useState<Quote | null>(() =>
+    !quoteEnabled || agentId == null ? null : readQuote(session, agentId),
+  );
+  if (!quoteEnabled && quote !== null) {
+    setQuote(null);
+  }
+  const activeQuote = quoteEnabled ? quote : null;
+  const quoteRef = useRef(activeQuote);
+  useEffect(() => { quoteRef.current = activeQuote; }, [activeQuote]);
   const [replySelection, setReplySelection] = useState<{
     options: readonly string[];
     agentId: number | null;
@@ -196,13 +204,17 @@ export function Composer({
   const taRef = useRef<HTMLTextAreaElement>(null);
   const consumedQuoteRevision = useRef<number | null>(null);
   useEffect(() => {
+    if (!quoteEnabled) {
+      if (agentId != null) removeSession(session, quoteKey(agentId));
+      return;
+    }
     if (!quoteSelection || quoteSelection.revision === consumedQuoteRevision.current || quoteSelection.quote.source_agent_id !== agentId) return;
     consumedQuoteRevision.current = quoteSelection.revision;
     const selected = quoteSelection.quote;
     setQuote(selected);
     writeSession(session, quoteKey(quoteSelection.quote.source_agent_id), JSON.stringify(selected));
     taRef.current?.focus({ preventScroll: true });
-  }, [quoteSelection, agentId, session]);
+  }, [quoteEnabled, quoteSelection, agentId, session]);
   const clearQuote = () => {
     setQuote(null);
     if (agentId != null) removeSession(session, quoteKey(agentId));
@@ -260,13 +272,13 @@ export function Composer({
     if (agentId != null && agentId !== prevId) {
       const draft = readSession(session, draftKey(agentId)) ?? "";
       setValue(draft);
-      setQuote(readQuote(session, agentId));
+      setQuote(quoteEnabled ? readQuote(session, agentId) : null);
       setCaret(draft.length);
       const attempt = readSendAttempt(session, agentId);
       sendAttemptRef.current = attempt;
     }
     prevAgentIdRef.current = agentId;
-  }, [agentId, session]);
+  }, [agentId, quoteEnabled, session]);
 
   useEffect(() => {
     if (agentId == null) return;
@@ -283,7 +295,7 @@ export function Composer({
     sendingRef.current = true;
     setSending(true);
     const sendingAgentId = agentId;
-    const sendingQuote = quote;
+    const sendingQuote = activeQuote;
     const accepted = acceptedCandidate.current;
     let activeAttempt: SendAttempt | null = null;
     try {
@@ -371,7 +383,7 @@ export function Composer({
   const submit = () => {
     if (composerLocked || hasPendingStage || deliveryInFlight) return;
     const content = value.trim();
-    if (quote && !content) return;
+    if (activeQuote && !content) return;
     if (!content && readyFileIds.length === 0) return;
     void send(content, readyFileIds);
   };
@@ -426,7 +438,7 @@ export function Composer({
   };
 
   const trimmed = value.trim();
-  const hasContent = !!trimmed || (!quote && readyFileIds.length > 0);
+  const hasContent = !!trimmed || (!activeQuote && readyFileIds.length > 0);
   const coarsePointer = useCoarsePointer();
   const showStop = mode === "busy" && !hasContent && !composerLocked;
   const buttonDisabled =
@@ -461,13 +473,13 @@ export function Composer({
         data-testid="composer-band"
         className={cn("gap-2", COMPOSER_BAND_CLASS, FLEX, FLEX_COL)}
       >
-        {quote && (
+        {activeQuote && (
           <div className="rounded border border-border bg-muted/40 px-3 py-2 text-sm" data-testid="composer-quote">
             <div className={cn(FLEX, "items-center justify-between gap-2 text-xs text-muted-foreground")}>
-              <span>{t("quote")} · {quote.author}</span>
+              <span>{t("quote")} · {activeQuote.author}</span>
               <button type="button" aria-label={t("removeQuote")} disabled={composerLocked} onClick={clearQuote}>×</button>
             </div>
-            <details><summary className="line-clamp-2 whitespace-pre-wrap cursor-pointer">{quote.text}</summary><p className="whitespace-pre-wrap">{quote.text}</p></details>
+            <details><summary className="line-clamp-2 whitespace-pre-wrap cursor-pointer">{activeQuote.text}</summary><p className="whitespace-pre-wrap">{activeQuote.text}</p></details>
           </div>
         )}
         <ComposerMetaRow commandHint={commandHint} />
@@ -485,7 +497,7 @@ export function Composer({
           composerLocked={composerLocked}
           onRestore={() =>
             restoreHeldBatch((restoredText, restoredQuote) => {
-              if (restoredQuote) {
+              if (quoteEnabled && restoredQuote) {
                 setQuote(restoredQuote);
                 if (agentId != null) writeSession(session, quoteKey(agentId), JSON.stringify(restoredQuote));
               }

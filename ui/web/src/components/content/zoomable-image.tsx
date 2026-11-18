@@ -2,13 +2,36 @@
 
 import { Maximize2, X } from "lucide-react";
 import { useTranslations } from "next-intl";
-import type { ComponentPropsWithoutRef, RefObject } from "react";
-import { useCallback, useEffect, useRef, useState } from "react";
+import type { ComponentPropsWithoutRef, ReactNode, RefObject } from "react";
+import { createContext, useCallback, useContext, useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 
 import { Button } from "@/components/ui/button";
+import { USER_SETTING_DEFAULTS } from "@/lib/contracts/types";
 import { cn } from "@/lib/format/utils";
 import { FLEX } from "@/lib/layout/layout";
+
+const MarkdownImageZoomContext = createContext<boolean>(
+  USER_SETTING_DEFAULTS["feature.markdownImageZoom"] === true,
+);
+
+export function MarkdownImageZoomProvider({
+  value,
+  children,
+}: {
+  value: boolean;
+  children: ReactNode;
+}) {
+  return (
+    <MarkdownImageZoomContext.Provider value={value}>
+      {children}
+    </MarkdownImageZoomContext.Provider>
+  );
+}
+
+export function useMarkdownImageZoomEnabled(): boolean {
+  return useContext(MarkdownImageZoomContext);
+}
 
 function ImageLightbox({
   open,
@@ -125,23 +148,37 @@ type MarkdownZoomableImageProps = Omit<ComponentPropsWithoutRef<"img">, "src"> &
 };
 
 // meiva:note
-// Default Markdown images sit inside <p> (and optionally <a>), so the wrapper stays a phrasing <span> and only the corner button opens the portalled lightbox while stopping link activation; browser <img> elements fetch authenticated workspace bytes directly.
+// Default Markdown images sit inside <p> (and optionally <a>), so the wrapper stays a phrasing <span> and only the corner button opens the portalled lightbox while stopping link activation; browser <img> elements fetch authenticated workspace bytes directly. When `feature.markdownImageZoom` is disabled, top-level rendering short-circuits to a plain <img> with zero wrapper DOM or portal listeners.
 // meiva:link ui/web/src/docs/frontend-components/markdown-surfaces.md
 export function MarkdownZoomableImage({ src, alt, ...props }: MarkdownZoomableImageProps) {
-  const t = useTranslations("common");
-  const [open, setOpen] = useState(false);
-  const close = useCallback(() => setOpen(false), []);
-  const buttonRef = useRef<HTMLButtonElement>(null);
+  const enabled = useMarkdownImageZoomEnabled();
 
   if (!src) {
     return <img {...props} src={undefined} alt={alt} />;
   }
 
   const resolvedAlt = alt ?? "";
+  if (!enabled) {
+    return <img {...props} src={src} alt={resolvedAlt} />;
+  }
+
+  return <EnabledMarkdownZoomableImage {...props} src={src} alt={resolvedAlt} />;
+}
+
+function EnabledMarkdownZoomableImage({
+  src,
+  alt,
+  ...props
+}: Omit<ComponentPropsWithoutRef<"img">, "src" | "alt"> & { src: string; alt: string }) {
+  const t = useTranslations("common");
+  const [open, setOpen] = useState(false);
+  const close = useCallback(() => setOpen(false), []);
+  const buttonRef = useRef<HTMLButtonElement>(null);
+
   return (
     <>
       <span className="group relative inline-block max-w-full align-middle">
-        <img {...props} src={src} alt={resolvedAlt} />
+        <img {...props} src={src} alt={alt} />
         <Button
           variant="ghost"
           size="icon-sm"
@@ -164,7 +201,7 @@ export function MarkdownZoomableImage({ src, alt, ...props }: MarkdownZoomableIm
           <Maximize2 className="size-3.5" />
         </Button>
       </span>
-      <ImageLightbox open={open} onClose={close} src={src} alt={resolvedAlt} triggerRef={buttonRef} />
+      <ImageLightbox open={open} onClose={close} src={src} alt={alt} triggerRef={buttonRef} />
     </>
   );
 }

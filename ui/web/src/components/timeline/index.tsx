@@ -660,7 +660,7 @@ export const TimelineView = memo(function TimelineView({
     <QuoteNavigation.Provider value={navigateQuote}>
     <QuoteTarget.Provider value={quoteReveal}>
     <div ref={wrapperRef} className={cn("relative", FLEX_1, MIN_H_0, OVERFLOW_HIDDEN)}>
-      <QuoteSelection scope={wrapperRef} items={items} agentId={Number(threadKey)} onQuote={onQuote} />
+      {onQuote ? <QuoteSelection scope={wrapperRef} items={items} agentId={Number(threadKey)} onQuote={onQuote} /> : null}
       {quoteStatus ? <div role="status" className="absolute bottom-12 left-4 z-40 rounded border border-border bg-background px-3 py-2 text-sm">{quoteStatus}</div> : null}
       <LoadOlderSpinner loadingOlder={readerLoadingOlder && !loading} />
       {hasMoreOlder && onLoadOlder ? <LoadOlderKeyboardButton loading={loadingOlder} onClick={pullOlderPage} /> : null}

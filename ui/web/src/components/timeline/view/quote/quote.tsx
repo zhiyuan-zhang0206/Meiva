@@ -68,11 +68,11 @@ export function QuoteSelection({ scope, items, agentId, onQuote }: {
     };
     return browser.selection.subscribe(root, changed);
   }, [browser, scope, items, agentId, onQuote]);
-  if (!candidate) return null;
+  if (!candidate || !onQuote) return null;
   const tooLong = Array.from(candidate.quote.text).length > 4000;
   return (
     <div className="absolute z-40 rounded-md border border-border bg-background px-3 py-2 text-sm shadow-md" style={{ top: candidate.top, left: candidate.left }}>
-      {tooLong ? <span role="status">{t("quoteTooLong")}</span> : <button type="button" onPointerDown={(event) => event.preventDefault()} onClick={() => { onQuote?.(candidate.quote); setCandidate(null); }}>{t("quoteSelection")}</button>}
+      {tooLong ? <span role="status">{t("quoteTooLong")}</span> : <button type="button" onPointerDown={(event) => event.preventDefault()} onClick={() => { onQuote(candidate.quote); setCandidate(null); }}>{t("quoteSelection")}</button>}
     </div>
   );
 }

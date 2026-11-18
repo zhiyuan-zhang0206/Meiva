@@ -42,5 +42,10 @@
   "themeLight": "亮色",
   "themeDark": "暗色",
   "themeDescription": "选择界面配色。",
-  "replySuggestionsSummary": "在 Agent 回复后提供建议回复。"
+  "replySuggestionsSummary": "在 Agent 回复后提供建议回复。",
+  "features": "功能",
+  "quoteSelection": "选中文字引用",
+  "quoteSelectionDesc": "选中消息文字时显示引用按钮，便于附带上下文回复；关闭后隐藏选区引用浮层，已发送的历史引用仍正常显示。",
+  "markdownImageZoom": "Markdown 图片放大预览",
+  "markdownImageZoomDesc": "鼠标悬停或聚焦消息内 Markdown 图片时在右上角显示放大按钮并支持全屏查看；关闭后渲染为普通静态图片。"
 }

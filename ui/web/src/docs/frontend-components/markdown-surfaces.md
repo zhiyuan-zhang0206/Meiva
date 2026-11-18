@@ -43,9 +43,15 @@ phrasing `<span>` preserves valid `<p>` HTML nesting, portalling to
 rows, and gating zoom on the corner button leaves clicks on the image itself
 free to follow any enclosing Markdown link (when `src` is empty or stripped by
 sanitization, the static fallback `<img>` renders without a zoom button; inline
-mode continues to omit `<img>` via the phrasing allowlist). The To user
+mode continues to omit `<img>` via the phrasing allowlist). Turning off the
+`feature.markdownImageZoom` user setting (fed through
+`MarkdownImageZoomProvider` in `Providers` and `HomePageView`, defaulting to
+`USER_SETTING_DEFAULTS["feature.markdownImageZoom"] === true`) short-circuits
+`MarkdownZoomableImage` at the top level to a plain static `<img>` with no
+wrapper `<span>`, hover button, or lightbox portal. The To user
 document and standalone workspace image viewer (`ZoomableImage`) open the same
-`document.body` lightbox when clicking the image directly.
+`document.body` lightbox when clicking the image directly and are unaffected by
+`feature.markdownImageZoom`.
 
 The renderer arrives through the same chunk seam as the code highlighter
 (`components/content/lazy-chunk.ts`): the boundary reads it from

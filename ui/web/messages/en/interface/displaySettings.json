@@ -42,5 +42,10 @@
   "themeLight": "Light",
   "themeDark": "Dark",
   "themeDescription": "Choose the interface color palette.",
-  "replySuggestionsSummary": "Suggest replies when an agent finishes a turn."
+  "replySuggestionsSummary": "Suggest replies when an agent finishes a turn.",
+  "features": "Features",
+  "quoteSelection": "Quote text selection",
+  "quoteSelectionDesc": "Show a quote button when selecting message text so you can reply with context. Turning this off hides the selection popover while keeping previously sent quotes visible.",
+  "markdownImageZoom": "Markdown image zoom",
+  "markdownImageZoomDesc": "Show a zoom button in the top-right corner when hovering or focusing Markdown images in messages to view them full screen. Turning this off renders plain static images."
 }

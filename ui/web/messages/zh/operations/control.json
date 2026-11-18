@@ -37,6 +37,7 @@
     "config-services": "服务",
     "config-health": "健康检查",
     "display": "显示",
+    "display-features": "功能",
     "display-agent-list": "Agent 列表显示",
     "display-timeline": "时间线",
     "display-notifications": "通知",

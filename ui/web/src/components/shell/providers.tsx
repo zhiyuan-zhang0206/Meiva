@@ -5,6 +5,7 @@ import { useCallback, useEffect, useState } from "react";
 
 import { AppUpdateBanner } from "@/components/app/app-settings";
 import { AppConnectionBanner } from "@/components/connection/app-connection-banner";
+import { MarkdownImageZoomProvider } from "@/components/content/zoomable-image";
 import { OpenTasksNoticeHost } from "@/components/notifications/open-tasks-notice";
 import { ThemePackTokens } from "@/components/plugins/theme-pack-tokens";
 import { ThemeColorSync } from "@/components/shell/theme-color-sync";
@@ -196,7 +197,7 @@ export function Providers({
                     <NavTimingReporter />
                     <AppConnectionBanner />
                     <AppUpdateBanner />
-                    {children}
+                    <FeatureFlagProviders>{children}</FeatureFlagProviders>
                     <ToastHost />
                     <OpenTasksNoticeHost />
                   </LanguageProvider>
@@ -233,6 +234,15 @@ function ThemedSlots({ theme }: { theme: ThemeRuntime }) {
       <ThemePackTokens resolvedTheme={resolvedTheme} />
       <ThemeColorSync resolvedTheme={resolvedTheme} />
     </>
+  );
+}
+
+function FeatureFlagProviders({ children }: { children: React.ReactNode }) {
+  const { settings } = useUserSettings();
+  return (
+    <MarkdownImageZoomProvider value={settings["feature.markdownImageZoom"] !== false}>
+      {children}
+    </MarkdownImageZoomProvider>
   );
 }
 

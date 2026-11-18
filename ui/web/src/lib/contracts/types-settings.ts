@@ -75,6 +75,8 @@ export const USER_SETTING_DEFAULTS: Record<string, unknown> = {
   "behavior.replySuggestions": true,
   "behavior.spawn_model": null,
   "behavior.spawn_reasoning_effort": null,
+  "feature.quoteSelection": true,
+  "feature.markdownImageZoom": true,
   "web.sseSingleStream": false,
 
   "models.hidden": [],

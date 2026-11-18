@@ -5,7 +5,9 @@ import { cleanup, fireEvent, screen, waitFor } from "@testing-library/react";
 import { renderWithBrowser } from "@/test-support/render";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
+import { NextIntlClientProvider } from "next-intl";
 import { SETTINGS_QUERY_KEY } from "@/lib/state/use-user-settings";
+import zh from "../../../../messages/zh";
 import DisplaySettingsPage from "./page";
 
 import { resetTransport, transport } from "@/test-support/fake-api";
@@ -56,6 +58,9 @@ describe("DisplaySettingsPage", () => {
   it("puts everyday preferences in General and leaves clock details in Advanced", async () => {
     renderPage("general");
     expect(await screen.findByLabelText("English")).toBeTruthy();
+    expect(screen.queryByText("Features")).toBeNull();
+    expect(screen.queryByText("Quote text selection")).toBeNull();
+    expect(screen.queryByText("Markdown image zoom")).toBeNull();
     expect(screen.queryByText("Clock format")).toBeNull();
     expect(screen.queryByText("Show weekday in timestamps")).toBeNull();
     expect(screen.queryByText("Single realtime connection")).toBeNull();
@@ -281,5 +286,58 @@ describe("DisplaySettingsPage", () => {
     await waitFor(() => {
       expect(transport.putSetting).toHaveBeenCalledWith("display.timeline_width_px", 960);
     });
+  });
+
+  it("renders Advanced feature toggles enabled by default and persists opt-outs", async () => {
+    transport.putSetting.mockImplementation((key: string, value: unknown) =>
+      Promise.resolve({ key, value, updated_at: "2026-11-18T00:00:00Z" }),
+    );
+    renderPage("advanced");
+
+    expect(await screen.findByText("Features")).toBeTruthy();
+    const quoteToggle = screen.getByRole("switch", { name: "Quote text selection" });
+    const zoomToggle = screen.getByRole("switch", { name: "Markdown image zoom" });
+    expect(quoteToggle.getAttribute("aria-checked")).toBe("true");
+    expect(zoomToggle.getAttribute("aria-checked")).toBe("true");
+
+    fireEvent.click(quoteToggle);
+    await waitFor(() => {
+      expect(transport.putSetting).toHaveBeenCalledWith("feature.quoteSelection", false);
+    });
+
+    fireEvent.click(zoomToggle);
+    await waitFor(() => {
+      expect(transport.putSetting).toHaveBeenCalledWith("feature.markdownImageZoom", false);
+    });
+  });
+
+  it("shows feature toggles off when stored as false and falls back to true when malformed", async () => {
+    transport.getSettings.mockResolvedValue({
+      settings: [
+        { key: "feature.quoteSelection", value: false, updated_at: "2026-11-18T00:00:00Z" },
+        { key: "feature.markdownImageZoom", value: "invalid", updated_at: "2026-11-18T00:00:00Z" },
+      ],
+    });
+    renderPage("advanced");
+
+    const quoteToggle = await screen.findByRole("switch", { name: "Quote text selection" });
+    const zoomToggle = screen.getByRole("switch", { name: "Markdown image zoom" });
+    expect(quoteToggle.getAttribute("aria-checked")).toBe("false");
+    expect(zoomToggle.getAttribute("aria-checked")).toBe("true");
+  });
+
+  it("renders localized Chinese copy for the Features section when locale is zh", async () => {
+    const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    renderWithBrowser(
+      <NextIntlClientProvider locale="zh" messages={zh}>
+        <QueryClientProvider client={qc}>
+          <DisplaySettingsPage mode="advanced" />
+        </QueryClientProvider>
+      </NextIntlClientProvider>,
+    );
+
+    expect(await screen.findByText("\u529f\u80fd")).toBeTruthy();
+    expect(screen.getByRole("switch", { name: "\u9009\u4e2d\u6587\u5b57\u5f15\u7528" })).toBeTruthy();
+    expect(screen.getByRole("switch", { name: "Markdown \u56fe\u7247\u653e\u5927\u9884\u89c8" })).toBeTruthy();
   });
 });

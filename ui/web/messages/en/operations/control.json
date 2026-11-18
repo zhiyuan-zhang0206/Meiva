@@ -37,6 +37,7 @@
     "config-services": "Services",
     "config-health": "Health probes",
     "display": "Display",
+    "display-features": "Features",
     "display-agent-list": "Agent list display",
     "display-timeline": "Timeline",
     "display-notifications": "Notifications",

@@ -5,6 +5,7 @@ import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 import { PythonCodeHighlighterProvider } from "./python-code";
 
 import { MarkdownMathProvider } from "@/components/content/markdown-renderer";
+import { MarkdownImageZoomProvider, ZoomableImage } from "@/components/content/zoomable-image";
 import { createLazyChunk } from "@/components/content/lazy-chunk";
 import { createMarkdownMath, type MarkdownMath } from "@/lib/markdown/math";
 import reportedMessage from "./fixtures/reported-message-20261019.json";
@@ -806,5 +807,70 @@ describe("Markdown image hover zoom and lightbox", () => {
     );
     expect(inlineView.container.querySelector("img, button, div, p")).toBeNull();
     expect(screen.queryByTestId("markdown-image-zoom")).toBeNull();
+  });
+
+  it("short-circuits Markdown images to plain static <img> when MarkdownImageZoomProvider is false while keeping ZoomableImage intact", () => {
+    const onOpenFile = vi.fn();
+    const view = renderMarkdown(
+      <MarkdownImageZoomProvider value={false}>
+        <ChatMarkdown
+          content={[
+            "![diagram](https://example.com/a.png)",
+            "",
+            "[![plot](https://example.com/plot.png)](src/foo.py#L10)",
+          ].join("\n")}
+          onOpenFile={onOpenFile}
+        />
+        <ZoomableImage src="https://example.com/doc.png" alt="doc" />
+      </MarkdownImageZoomProvider>,
+    );
+
+    const diagramImg = screen.getByRole("img", { name: "diagram" });
+    expect(diagramImg.parentElement?.tagName).toBe("P");
+    expect(screen.queryByTestId("markdown-image-zoom")).toBeNull();
+    fireEvent.click(diagramImg);
+    expect(screen.queryByTestId("image-lightbox")).toBeNull();
+
+    const plotImg = screen.getByRole("img", { name: "plot" });
+    expect(plotImg.parentElement?.tagName).toBe("A");
+    fireEvent.click(plotImg);
+    expect(onOpenFile).toHaveBeenCalledWith("src/foo.py", "10");
+
+    fireEvent.click(screen.getByTestId("zoomable-image"));
+    expect(screen.getByTestId("image-lightbox")).not.toBeNull();
+    fireEvent.click(screen.getByTestId("image-lightbox-close"));
+    expect(screen.queryByTestId("image-lightbox")).toBeNull();
+
+    view.rerender(
+      <PythonCodeHighlighterProvider value={pendingHighlighter}>
+        <MarkdownImageZoomProvider value={true}>
+          <ChatMarkdown content="![diagram](https://example.com/a.png)" />
+        </MarkdownImageZoomProvider>
+      </PythonCodeHighlighterProvider>,
+    );
+    fireEvent.click(screen.getByTestId("markdown-image-zoom"));
+    expect(screen.getByTestId("image-lightbox")).not.toBeNull();
+    expect(document.body.style.overflow).toBe("hidden");
+
+    view.rerender(
+      <PythonCodeHighlighterProvider value={pendingHighlighter}>
+        <MarkdownImageZoomProvider value={false}>
+          <ChatMarkdown content="![diagram](https://example.com/a.png)" />
+        </MarkdownImageZoomProvider>
+      </PythonCodeHighlighterProvider>,
+    );
+    expect(screen.queryByTestId("markdown-image-zoom")).toBeNull();
+    expect(screen.queryByTestId("image-lightbox")).toBeNull();
+    expect(document.body.style.overflow).toBe("");
+
+    view.rerender(
+      <PythonCodeHighlighterProvider value={pendingHighlighter}>
+        <MarkdownImageZoomProvider value={true}>
+          <ChatMarkdown content="![diagram](https://example.com/a.png)" />
+        </MarkdownImageZoomProvider>
+      </PythonCodeHighlighterProvider>,
+    );
+    expect(screen.getByTestId("markdown-image-zoom")).not.toBeNull();
+    expect(screen.queryByTestId("image-lightbox")).toBeNull();
   });
 });
