@@ -60,6 +60,27 @@ def test_skill_match_fields_are_unregistered() -> None:
         assert name not in FIELD_INFOS, f"{name} must not be a registered settings field"
 
 
+def test_retired_schedule_pty_recovery_knobs_are_unregistered(
+    authority: ConfigAuthority,
+) -> None:
+    from base.config import FIELD_INFOS, get_config_metadata
+    from base.config.domains.gateway import GatewaySettings
+    from base.host.env.config_lite_table import FIELD_ALIASES, FIELD_DOMAINS
+
+    retired = (
+        ("schedule_recovery_gate_alert_seconds", "MEIVA_SCHEDULE_RECOVERY_GATE_ALERT_SECONDS"),
+        ("schedule_auto_restart_max_per_window", "MEIVA_SCHEDULE_AUTO_RESTART_MAX_PER_WINDOW"),
+        ("schedule_auto_restart_window_seconds", "MEIVA_SCHEDULE_AUTO_RESTART_WINDOW_SECONDS"),
+    )
+    metadata_envs = {meta.env_var for meta in get_config_metadata(authority=authority)}
+    for name, env_var in retired:
+        assert name not in FIELD_INFOS
+        assert name not in GatewaySettings.model_fields
+        assert name not in FIELD_DOMAINS
+        assert name not in FIELD_ALIASES
+        assert env_var not in metadata_envs
+
+
 def test_every_field_declares_valid_scope() -> None:
     """Every Settings field must declare an ownership scope in json_schema_extra."""
     from base.config import FIELD_INFOS

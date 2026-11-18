@@ -300,41 +300,6 @@ class GatewaySettings(EnvSettings):
         json_schema_extra=_SCHEDULE_RESTART_METADATA,
     )
 
-    schedule_recovery_gate_alert_seconds: float = Field(
-        title="Schedule recovery gate alert delay (seconds)",
-        default=300.0,
-        alias="MEIVA_SCHEDULE_RECOVERY_GATE_ALERT_SECONDS",
-        description="How long the schedule manager may stay refused by the serving-receipt gate before it reports schedule_recovery_gated. The gate refuses relaunches whenever the published receipt does not name the live root (a helper-reseeded root publishes none); the alert names that condition instead of leaving dead schedules silent.",
-        json_schema_extra=_SCHEDULE_RESTART_METADATA,
-    )
-
-    schedule_auto_restart_max_per_window: int = Field(
-        title="Maximum automatic schedule restarts per window",
-        default=5,
-        alias="MEIVA_SCHEDULE_AUTO_RESTART_MAX_PER_WINDOW",
-        description=(
-            "How many automatic relaunches one schedule may receive inside one rolling window "
-            "after its session host was replaced (host reboot, deploy stop/start, a pty-sessions "
-            "crash-restart). One host generation authorizes exactly one relaunch by construction; "
-            "this cap only stops a host that keeps restarting from turning one incident into a "
-            "restart storm. Reaching it records the schedule as an error and emits "
-            "schedule_auto_restart_suppressed."
-        ),
-        json_schema_extra=_SCHEDULE_RESTART_METADATA,
-    )
-
-    schedule_auto_restart_window_seconds: float = Field(
-        title="Automatic schedule restart window (seconds)",
-        default=1800.0,
-        alias="MEIVA_SCHEDULE_AUTO_RESTART_WINDOW_SECONDS",
-        description=(
-            "The rolling window the automatic-relaunch cap counts in. One wave restarts the "
-            "session host once (stop, then start); half an hour lets a wave be re-run without "
-            "letting a crash-looping host relaunch schedules indefinitely."
-        ),
-        json_schema_extra=_SCHEDULE_RESTART_METADATA,
-    )
-
     gateway_reload: bool = Field(
         title="Reload gateway automatically during development",
         default=False,
