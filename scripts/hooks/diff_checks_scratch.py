@@ -103,7 +103,10 @@ def pytest_scratch(
         info = os.fstat(directory)
         if info.st_uid != os.geteuid() or info.st_mode & 0o077:
             raise PermissionError(f"pytest scratch parent must be private and owned: {parent}")
-        scratch = Path(tempfile.mkdtemp(prefix="diff-checks-", dir=parent))
+        # meiva:note
+        # Keep the scratch prefix compact (`dc-`) so `--basetemp` preserves AF_UNIX socket
+        # headroom under `tmp_path` while staying outside pytest's `pytest-` numbered cleanup.
+        scratch = Path(tempfile.mkdtemp(prefix="dc-", dir=parent))
         owned = os.open(
             scratch.name, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW, dir_fd=directory
         )

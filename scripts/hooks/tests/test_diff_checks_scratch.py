@@ -261,6 +261,8 @@ def test_run_scratch_is_outside_pytest_numbered_cleanup_candidates(tmp_path: Pat
 
     (tmp_path / "pytest-100").mkdir()
     with pytest_scratch(tmp_path) as scratch:
+        assert scratch.name.startswith("dc-")
+        assert len(scratch.name) <= 12
         assert scratch not in set(cleanup_candidates(tmp_path, prefix="pytest-", keep=3))
 
 

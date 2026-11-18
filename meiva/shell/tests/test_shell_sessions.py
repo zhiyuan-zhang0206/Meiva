@@ -2,8 +2,10 @@
 # One agent's shell sessions over a real pty-sessions service and the throwaway database.
 from __future__ import annotations
 
+import tempfile
 import time
-from collections.abc import Callable
+from collections.abc import Callable, Generator
+from contextlib import contextmanager
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from threading import Event, Thread
@@ -278,6 +280,18 @@ def test_terminal_transition_cannot_pass_a_half_created_session(
     live_shell.kill(replacement)
 
 
+@contextmanager
+def _delayed_new_proxy(upstream: Path) -> Generator[tuple[Path, DelayedNewProxy]]:
+    with tempfile.TemporaryDirectory(prefix="ms-", dir="/tmp") as socket_dir:
+        delayed_path = Path(socket_dir) / "d.sock"
+        assert len(str(delayed_path).encode()) < 100
+        proxy = DelayedNewProxy(delayed_path, upstream)
+        try:
+            yield delayed_path, proxy
+        finally:
+            proxy.close()
+
+
 # meiva:note
 # The server-side cutoff is needed in addition to the database row lock: a client can time out
 # after sending `new`, allowing the creation transaction to release its lock while the request is
@@ -294,31 +308,31 @@ def test_terminal_fence_reclaims_a_delayed_lost_ack_creation_after_resurrection(
     from meiva.shell import session_plan, ttl_store
 
     upstream = service_socket()
-    delayed_path = upstream.with_name(f"{upstream.stem}-delayed.sock")
-    proxy = DelayedNewProxy(delayed_path, upstream)
+    assert len(str(upstream).encode()) <= 100
     full = session_plan.session_full_name(live_shell.shell_prefix(), 0, "lost-ack")
 
-    def start_lost_ack(_session_id: int) -> str:
-        client.request(
-            "new",
-            socket_path=delayed_path,
-            timeout=0.05,
-            name=full,
-            cwd=str(tmp_path),
-            env={"MEIVA_HOME": str(unit_home)},
-        )
-        raise AssertionError("the delayed request unexpectedly returned an acknowledgement")
+    with _delayed_new_proxy(upstream) as (delayed_path, proxy):
 
-    def create_lost_ack_shell() -> None:
-        ttl_store.create_ttl_fenced(
-            database,
-            live_shell.agent_id,
-            120.0,
-            start=start_lost_ack,
-            dispose=lambda _full: None,
-        )
+        def start_lost_ack(_session_id: int) -> str:
+            client.request(
+                "new",
+                socket_path=delayed_path,
+                timeout=0.05,
+                name=full,
+                cwd=str(tmp_path),
+                env={"MEIVA_HOME": str(unit_home)},
+            )
+            raise AssertionError("the delayed request unexpectedly returned an acknowledgement")
 
-    try:
+        def create_lost_ack_shell() -> None:
+            ttl_store.create_ttl_fenced(
+                database,
+                live_shell.agent_id,
+                120.0,
+                start=start_lost_ack,
+                dispose=lambda _full: None,
+            )
+
         creator, failures = _captured_thread(create_lost_ack_shell)
         assert proxy.accepted.wait(timeout=5.0)
         creator.join(timeout=5.0)
@@ -356,8 +370,6 @@ def test_terminal_fence_reclaims_a_delayed_lost_ack_creation_after_resurrection(
         replacement = _create(live_shell, live_host, "replacement", cwd=tmp_path)
         assert replacement == 1
         live_shell.kill(replacement)
-    finally:
-        proxy.close()
 
 
 def test_renew_reads_a_legacy_long_deadline_then_replaces_it_with_a_valid_deadline(
