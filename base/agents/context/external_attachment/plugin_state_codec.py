@@ -24,7 +24,6 @@ from base.agents.context.external_attachment.state_schema import (
     BaseAgentState,
     plugin_state_schema,
 )
-from base.agents.history.checkpoint_serde import is_retired_checkpoint_value
 from base.agents.history.delta_read_compat import reconstruct_delta_messages
 from base.db import Database
 from base.host.boundary.json_values import is_object_dict, is_object_list
@@ -48,40 +47,11 @@ def _as_dict_row_conn(value: object) -> TypeGuard[Connection[DictRow]]:
 # meiva:note
 # A retired lifecycle channel can still be present in an old checkpoint or its pending
 # writes. Attachment projects onto the current state schema, which has no consumer for
-# those values. Drop exact retired root envelopes before the upstream decoder sees them.
-# Other values still go through the regular allowlist.
-# meiva:link base/agents/context/external_attachment/README.md
-class _AttachmentCheckpointSerializer(JsonPlusSerializer):
-    def loads_typed(self, data: tuple[str, bytes]) -> object:
-        encoding, blob = data
-        if encoding == "msgpack" and is_retired_checkpoint_value(blob):
-            return None
-        result = object_of(super().loads_typed, data)
-        if is_object_dict(result):
-            channel_values = result.get("channel_values")
-            if (
-                is_object_dict(channel_values)
-                and "cwd" not in channel_values
-                and "meiva_code__cwd" in channel_values
-            ):
-                channel_values["cwd"] = channel_values["meiva_code__cwd"]
-            channel_versions = result.get("channel_versions")
-            if (
-                is_object_dict(channel_versions)
-                and "cwd" not in channel_versions
-                and "meiva_code__cwd" in channel_versions
-            ):
-                channel_versions["cwd"] = channel_versions["meiva_code__cwd"]
-        return result
-
-
+# those values; `CheckpointSerializer` drops exact retired root envelopes before the
+# upstream decoder sees them while other values still go through the regular allowlist.
 # meiva:link base/agents/context/external_attachment/README.md
 def serializer() -> JsonPlusSerializer:
-    return _AttachmentCheckpointSerializer(
-        allowed_msgpack_modules=agent_state.checkpoint_msgpack_allowlist(
-            extensions_registry.loaded_state_classes()
-        )
-    )
+    return agent_state.build_checkpoint_serde(extensions_registry.loaded_state_classes())
 
 
 def _validate_messages_delta(delta: Mapping[str, object]) -> None:

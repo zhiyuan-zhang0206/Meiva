@@ -4,7 +4,10 @@
 
 from __future__ import annotations
 
+import logging
+
 import ormsgpack
+import pytest
 from langchain_core.messages import HumanMessage
 from langgraph.checkpoint.serde.jsonplus import (
     EXT_DELTA_SNAPSHOT,
@@ -21,6 +24,7 @@ from base.agents.history.checkpoint_serde import (
     observed_checkpoint_types,
     retired_type,
 )
+from base.agents.history.checkpoint_serializer import CheckpointSerializer
 
 
 def _envelope(module: str, name: str) -> ormsgpack.Ext:
@@ -117,3 +121,50 @@ def test_every_retirement_carries_the_commit_and_the_time_it_landed() -> None:
         assert len(entry.retired_in) >= 10
         assert entry.retired_at.tzinfo is not None
         assert entry.note
+
+
+def test_checkpoint_serializer_skips_retired_root_envelopes_without_warning(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    import langgraph.checkpoint.serde.jsonplus as _jsonplus
+
+    _jsonplus._warned_blocked_types.clear()
+    serde = CheckpointSerializer(allowed_msgpack_modules=STATIC_CHECKPOINT_MSGPACK_TYPES)
+    serde_logger = "langgraph.checkpoint.serde.jsonplus"
+
+    for entry in RETIRED_CHECKPOINT_MSGPACK_TYPES:
+        blob = ormsgpack.packb(_envelope(entry.module, entry.name))
+        with caplog.at_level(logging.WARNING, logger=serde_logger):
+            assert serde.loads_typed(("msgpack", blob)) is None
+        warnings = [
+            r.message
+            for r in caplog.get_records("call")
+            if r.name == serde_logger and r.levelno >= logging.WARNING
+        ]
+        assert warnings == []
+
+    # meiva:note
+    # Negative controls: unregistered unknown types and nested retired envelopes still go
+    # through the allowlist decoder and emit the blocked-deserialization warning.
+    unknown_blob = ormsgpack.packb(_envelope("unknown.module", "UnknownState"))
+    nested_blob = ormsgpack.packb(
+        {
+            "nested": _envelope(
+                "base.agents.incarnation.native_work_models",
+                "NativeWorkTarget",
+            )
+        }
+    )
+    caplog.clear()
+    with caplog.at_level(logging.WARNING, logger=serde_logger):
+        assert serde.loads_typed(("msgpack", unknown_blob)) == {"value": 1}
+        assert serde.loads_typed(("msgpack", nested_blob)) == {"nested": {"value": 1}}
+    blocked_warnings = [
+        r.message
+        for r in caplog.get_records("call")
+        if r.name == serde_logger and r.levelno >= logging.WARNING
+    ]
+    assert any(
+        "Blocked deserialization of unknown.module.UnknownState" in m for m in blocked_warnings
+    )
+    assert any("NativeWorkTarget" in m and "Blocked deserialization" in m for m in blocked_warnings)
