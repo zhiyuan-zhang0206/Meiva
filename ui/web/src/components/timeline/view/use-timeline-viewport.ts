@@ -226,7 +226,7 @@ export function useTimelineViewport({
   tailHeight,
   cancelPendingJump,
   reloadBlockingRef,
-  cancelReloadSearch,
+  cancelPendingReloadRestore,
   saveReloadPosition,
 }: {
   viewportObserverFactory?: (callback: ResizeObserverCallback) => ResizeObserver;
@@ -269,7 +269,7 @@ export function useTimelineViewport({
   tailHeight: (viewport: HTMLElement) => number;
   cancelPendingJump: () => void;
   reloadBlockingRef: RefObject<boolean>;
-  cancelReloadSearch: () => void;
+  cancelPendingReloadRestore: () => void;
   saveReloadPosition: (viewport: HTMLElement) => void;
 }) {
   const readingInputTop = useRef<number | null>(null);
@@ -329,8 +329,8 @@ export function useTimelineViewport({
       measureAtBottom();
       trimFollowing();
       const mem = scrollMemoryRef.current;
-      if (mem && !restoreInFlight()) {
-        rememberTimelinePosition(viewport, mem.entryKey, mem.contentKey, collapseReserveHeight(), sendReserveEnabled());
+      if (!restoreInFlight()) {
+        if (mem) rememberTimelinePosition(viewport, mem.entryKey, mem.contentKey, collapseReserveHeight(), sendReserveEnabled());
         saveReloadPosition(viewport);
       }
     };
@@ -360,12 +360,6 @@ export function useTimelineViewport({
         controller.notifyAnchored(snapshot());
         measureAtBottom();
       }
-    };
-    const cancelPendingReloadRestore = () => {
-      if (!reloadBlockingRef.current) return;
-      reloadBlockingRef.current = false;
-      pendingRestoreRef.current = null;
-      cancelReloadSearch();
     };
     const stopWatchingReadingInput = watchReadingNavigation(viewport, wrapperRef.current, () => {
       readingInputTop.current = viewport.scrollTop;
@@ -505,7 +499,7 @@ export function useTimelineViewport({
     tailHeight,
     cancelPendingJump,
     reloadBlockingRef,
-    cancelReloadSearch,
+    cancelPendingReloadRestore,
     saveReloadPosition,
   ]);
 }

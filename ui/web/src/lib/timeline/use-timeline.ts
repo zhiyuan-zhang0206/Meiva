@@ -112,6 +112,7 @@ export interface UseTimelineResult {
   // already loading or no older items remain.
   // meiva:link ui/web/src/docs/frontend-components/timeline-view/history-paging.md
   loadOlder: (origin: OlderLoadOrigin) => void;
+  cancelBackgroundOlderLoad: () => boolean;
   retainedItemsMax: number;
 }
 
@@ -137,7 +138,7 @@ export function useTimeline(
   const [qualified, setQualified] = useState<typeof selection | null>(null);
   const appliedReceipt = useRef<typeof headReceipt>(null);
   useLayoutEffect(() => { owner.current = selection; return () => { owner.current = null; }; }, [selection]);
-  const olderRequest = useRef<AbortController | null>(null);
+  const olderRequest = useRef<{ controller: AbortController; origin: OlderLoadOrigin } | null>(null);
   // meiva:note
   // Whether the older-page read now in flight is the reader's own. Recorded
   // where the request begins, because that is the only place that knows: every
@@ -170,11 +171,15 @@ export function useTimeline(
 
   useEffect(() => {
     if (!isVisible && agentId !== null) {
-      olderRequest.current?.abort();
+      olderRequest.current?.controller.abort();
+      olderRequest.current = null;
       useTimelineStore.setState({ loadingOlder: false });
       useTimelineStore.getState().invalidateCompactEpoch();
     }
-    return () => { olderRequest.current?.abort(); };
+    return () => {
+      olderRequest.current?.controller.abort();
+      olderRequest.current = null;
+    };
   }, [agentId, isVisible]);
 
   // -- Subscribe to timeline state from the Zustand store --
@@ -276,7 +281,8 @@ export function useTimeline(
         }
       } else if (ev.role === "compact_done") {
         compactPending.current = true;
-        olderRequest.current?.abort();
+        olderRequest.current?.controller.abort();
+        olderRequest.current = null;
         void queryClient.cancelQueries({ queryKey: ["timeline", agentId], exact: true });
         // meiva:note
         // Same reason the timeline query's own fetch is cancelled above: a
@@ -361,9 +367,10 @@ export function useTimeline(
     (ev: ConnectionEvent) => {
       switch (ev.type) {
         case "open":
-          if (useTimelineStore.getState().compactBuffer) olderRequest.current?.abort();
+          if (useTimelineStore.getState().compactBuffer) olderRequest.current?.controller.abort();
           processConnectionEvent({ type: "open" });
-          if (olderRequest.current?.signal.aborted) {
+          if (olderRequest.current?.controller.signal.aborted) {
+            olderRequest.current = null;
             useTimelineStore.setState({ loadingOlder: false });
           }
           seenParseErrors.current.clear();
@@ -425,11 +432,13 @@ export function useTimeline(
     // (the endpoint's protective le — a constant, not config).
     const limit = computeOlderPageLimit(olderBaseLimit, st.olderFetchCount);
     const controller = new AbortController();
-    olderRequest.current = controller;
+    const request = { controller, origin };
+    olderRequest.current = request;
     setReaderOrigin(origin === "reader");
     beginLoadOlder();
     try {
       const page = await api.getTimeline(agentId, { before: oldest.item_id, limit, signal: controller.signal });
+      if (olderRequest.current === request) olderRequest.current = null;
       // meiva:note
       // Agent switch mid-flight: drop the result so it can't contaminate
       // the now-active thread (switchThread already cleared loadingOlder).
@@ -442,6 +451,7 @@ export function useTimeline(
       useTimelineStore.getState().incrementOlderFetchCount();
       return useTimelineStore.getState().hasMoreOlder ? "loaded" : "exhausted";
     } catch (e: unknown) {
+      if (olderRequest.current === request) olderRequest.current = null;
       if (
         controller.signal.aborted ||
         useTimelineStore.getState().activeThreadId !== agentId ||
@@ -456,6 +466,14 @@ export function useTimeline(
     (origin: OlderLoadOrigin) => { void loadOlderSegment(origin); },
     [loadOlderSegment],
   );
+  const cancelBackgroundOlderLoad = useCallback((): boolean => {
+    const current = olderRequest.current;
+    if (current?.origin !== "background") return false;
+    olderRequest.current = null;
+    current.controller.abort();
+    useTimelineStore.setState({ loadingOlder: false });
+    return true;
+  }, []);
   const { refetch } = timelineQuery;
   const retryTimeline = useCallback(() => {
     void refetch();
@@ -513,6 +531,7 @@ export function useTimeline(
     loadingOlder: selected && loadingOlder,
     readerLoadingOlder: selected && loadingOlder && readerOrigin,
     loadOlder,
+    cancelBackgroundOlderLoad,
     retainedItemsMax,
   };
 }

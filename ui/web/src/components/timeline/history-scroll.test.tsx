@@ -791,20 +791,20 @@ describe("cross-reload reading position restore", () => {
     expect(screen.queryByRole("alert")).toBeNull();
 
     // meiva:note
-    // Tail reload keeps live Working row and streaming arrivals without yanking to bottom.
+    // Near-tail non-bottom reload keeps live Working row and streaming arrivals without yanking to bottom.
     act(() => {
-      viewport().scrollTop = 4400;
+      viewport().scrollTop = 4100;
       fireEvent.scroll(viewport());
     });
-    const savedTailOffset = readingOffset("15.0")!;
+    const savedNearTailOffset = readingOffset("14.0")!;
     midReload.unmount();
 
     top = 0;
     nowMs = 30_000;
-    const tailReload = renderWithBrowser(mountReloadView("tab-load-3", locatedItems, true), { browser });
+    const nearTailReload = renderWithBrowser(mountReloadView("tab-load-3", locatedItems, true), { browser });
     resize();
-    expect(viewport().scrollTop).toBe(4400);
-    expect(Math.abs((readingOffset("15.0") ?? 999) - savedTailOffset)).toBeLessThanOrEqual(1);
+    expect(viewport().scrollTop).toBe(4100);
+    expect(Math.abs((readingOffset("14.0") ?? 999) - savedNearTailOffset)).toBeLessThanOrEqual(1);
 
     const grownItems: BackendTimelineItem[] = [
       ...locatedItems,
@@ -830,14 +830,36 @@ describe("cross-reload reading position restore", () => {
     ];
     act(() => {
       height = 5600;
-      tailReload.rerender(mountReloadView("tab-load-3", grownItems, true));
+      nearTailReload.rerender(mountReloadView("tab-load-3", grownItems, true));
       resizeCallbacks.forEach((deliver) => deliver());
     });
-    expect(viewport().scrollTop).toBe(4400);
-    expect(Math.abs((readingOffset("15.0") ?? 999) - savedTailOffset)).toBeLessThanOrEqual(1);
+    expect(viewport().scrollTop).toBe(4100);
+    expect(Math.abs((readingOffset("14.0") ?? 999) - savedNearTailOffset)).toBeLessThanOrEqual(1);
     expect(screen.getByTestId("turn-toggle").textContent).toContain("Working");
     expect(screen.getByText("New live reply below restored tail")).toBeTruthy();
     expect(screen.getByTestId("scroll-to-bottom")).toBeTruthy();
+
+    // meiva:note
+    // Returning to the bottom clears the reload bookmark and resumes tail following across reload.
+    act(() => {
+      viewport().scrollTop = 5000;
+      fireEvent.scroll(viewport());
+    });
+    expect(readReloadBookmark(browser.session, "42", nowMs)).toBeNull();
+    nearTailReload.unmount();
+
+    top = 0;
+    nowMs = 40_000;
+    const bottomReload = renderWithBrowser(mountReloadView("tab-load-4", grownItems, true), { browser });
+    resize();
+    expect(viewport().scrollTop).toBe(5000);
+    act(() => {
+      height = 6000;
+      bottomReload.rerender(mountReloadView("tab-load-4", grownItems, true));
+      resizeCallbacks.forEach((deliver) => deliver());
+    });
+    expect(viewport().scrollTop).toBe(5400);
+    expect(screen.queryByTestId("scroll-to-bottom")).toBeNull();
   });
 
   it("silently backfills 3 older pages under ColdLoadSpinner and restores exact offset (<= 1px)", () => {
@@ -1377,5 +1399,281 @@ describe("cross-reload reading position restore", () => {
 
     expect(screen.queryByTestId("cold-load-spinner")).toBeNull();
     expect(Math.abs(readingOffset("8.0@1") ?? 999)).toBeLessThanOrEqual(1);
+  });
+
+  it("clears reload bookmark while following at bottom across >50 streaming items and triggers zero before= requests on reload", () => {
+    const browser = fakeBrowser({ session: {} });
+    saveReloadBookmark(
+      browser.session,
+      "42",
+      {
+        readingLocator: "loc-stale",
+        itemId: "2.0",
+        rank: 0,
+        viewportTop: 0,
+        scrollTop: 300,
+        savedAt: 5000,
+      },
+      5000,
+    );
+
+    const makeItems = (count: number): BackendTimelineItem[] =>
+      Array.from({ length: count }, (_, idx) => ({
+        item_id: `${idx + 1}.0`,
+        kind: "agent_chat",
+        payload: `Stream row ${idx + 1}`,
+        source: null,
+        created_at: null,
+        inbound_id: null,
+        show_timestamp: false,
+        reading_locator: `loc-${idx + 1}`,
+      }));
+
+    let currentItems = makeItems(16);
+    const renderView = (bfcacheId: string, list: BackendTimelineItem[], hasMoreOlder = false, onLoadOlder?: () => void) => (
+      <QueryClientProvider client={client}>
+        <WallClockProvider wallNow={() => 6000}>
+          <TimelineView
+            items={list}
+            threadKey="42"
+            scrollMemoryKey={`${bfcacheId}:agent:42`}
+            reloadRestore={{ state: "enabled", session: browser.session, now: () => 6000 }}
+            hasMoreOlder={hasMoreOlder}
+            onLoadOlder={onLoadOlder}
+          />
+        </WallClockProvider>
+      </QueryClientProvider>
+    );
+
+    const view = renderWithBrowser(renderView("tail-stream-1", currentItems), { browser });
+    resize();
+    act(() => {
+      viewport().scrollTop = 4400;
+      fireEvent.scroll(viewport());
+    });
+    expect(readReloadBookmark(browser.session, "42", 6000)).toBeNull();
+
+    currentItems = makeItems(60);
+    act(() => {
+      height = 18000;
+      view.rerender(renderView("tail-stream-1", currentItems));
+      resizeCallbacks.forEach((deliver) => deliver());
+    });
+    expect(viewport().scrollTop).toBe(17400);
+    expect(readReloadBookmark(browser.session, "42", 6000)).toBeNull();
+    view.unmount();
+
+    top = 0;
+    const onLoadOlder = vi.fn();
+    renderWithBrowser(renderView("tail-stream-2", currentItems.slice(10), true, onLoadOlder), { browser });
+    resize();
+    expect(onLoadOlder).not.toHaveBeenCalled();
+    expect(viewport().scrollTop).toBe(17400);
+  });
+
+  it("does not persist an automatic send-anchor park across reload, while manual scroll after send persists", () => {
+    const browser = fakeBrowser({ session: {} });
+    const makeThread = (count: number): BackendTimelineItem[] => [
+      {
+        item_id: "1.0",
+        kind: "inbound_chat",
+        payload: "Run all steps",
+        source: "human",
+        created_at: null,
+        inbound_id: 101,
+        show_timestamp: false,
+        reading_locator: "loc-human-1",
+      },
+      ...Array.from({ length: count }, (_, idx) => ({
+        item_id: `${idx + 2}.0`,
+        kind: "agent_chat" as const,
+        payload: `Step ${idx + 1}`,
+        source: null,
+        created_at: null,
+        inbound_id: null,
+        show_timestamp: false,
+        reading_locator: `loc-step-${idx + 1}`,
+      })),
+    ];
+
+    let currentItems: BackendTimelineItem[] = [];
+    height = 600;
+    const renderSendView = (bfcacheId: string, list: BackendTimelineItem[], hasMoreOlder = false, onLoadOlder?: () => void) => (
+      <QueryClientProvider client={client}>
+        <WallClockProvider wallNow={() => 6000}>
+          <TimelineView
+            items={list}
+            threadKey="42"
+            scrollMemoryKey={`${bfcacheId}:agent:42`}
+            reloadRestore={{ state: "enabled", session: browser.session, now: () => 6000 }}
+            turnActive
+            hasMoreOlder={hasMoreOlder}
+            onLoadOlder={onLoadOlder}
+          />
+        </WallClockProvider>
+      </QueryClientProvider>
+    );
+
+    const view = renderWithBrowser(renderSendView("send-park-1", currentItems), { browser });
+    act(() => {
+      useTimelineStore.getState().requestSendAnchor(101);
+      currentItems = makeThread(60);
+      height = 18000;
+      view.rerender(renderSendView("send-park-1", currentItems));
+      resizeCallbacks.forEach((deliver) => deliver());
+    });
+    expect(viewport().scrollTop).toBe(0);
+    expect(readReloadBookmark(browser.session, "42", 6000)).toBeNull();
+    view.unmount();
+
+    top = 0;
+    const onLoadOlder = vi.fn();
+    const afterReload = renderWithBrowser(
+      renderSendView("send-park-2", currentItems.slice(11), true, onLoadOlder),
+      { browser },
+    );
+    resize();
+    expect(onLoadOlder).not.toHaveBeenCalled();
+
+    act(() => {
+      fireEvent.wheel(viewport(), { deltaY: -120 });
+      viewport().scrollTop = 4500;
+      fireEvent.scroll(viewport());
+    });
+    expect(readReloadBookmark(browser.session, "42", 6000)?.scrollTop).toBe(4500);
+    afterReload.unmount();
+  });
+
+  it("aborts in-flight background reload backfill when reader pulls older history via wheel or keyboard", () => {
+    const browser = fakeBrowser({ session: {} });
+    saveReloadBookmark(
+      browser.session,
+      "42",
+      {
+        readingLocator: "loc-ancient",
+        itemId: "1.0",
+        rank: 0,
+        viewportTop: 0,
+        scrollTop: 300,
+        savedAt: 5000,
+      },
+      5000,
+    );
+    const tailItems: BackendTimelineItem[] = items.slice(8).map((it, idx) => ({
+      ...it,
+      reading_locator: `loc-tail-${idx}`,
+    }));
+    const origins: string[] = [];
+    let loadingOlder = false;
+    const onLoadOlder = vi.fn((origin: string) => {
+      origins.push(origin);
+      loadingOlder = true;
+    });
+    const onCancelBackgroundLoadOlder = vi.fn(() => {
+      if (!loadingOlder) return false;
+      loadingOlder = false;
+      return true;
+    });
+
+    renderWithBrowser(
+      <QueryClientProvider client={client}>
+        <WallClockProvider wallNow={() => 6000}>
+          <TimelineView
+            items={tailItems}
+            threadKey="42"
+            scrollMemoryKey="reload-abort-to-pull:agent:42"
+            reloadRestore={{ state: "enabled", session: browser.session, now: () => 6000 }}
+            hasMoreOlder
+            loadingOlder={loadingOlder}
+            onLoadOlder={onLoadOlder}
+            onCancelBackgroundLoadOlder={onCancelBackgroundLoadOlder}
+          />
+        </WallClockProvider>
+      </QueryClientProvider>,
+      { browser },
+    );
+    expect(origins).toEqual(["background"]);
+    expect(loadingOlder).toBe(true);
+
+    const keyboardBtn = screen.getByTestId("load-older-keyboard");
+    expect((keyboardBtn as HTMLButtonElement).disabled).toBe(false);
+    act(() => {
+      fireEvent.click(keyboardBtn);
+    });
+    expect(onCancelBackgroundLoadOlder).toHaveBeenCalledTimes(1);
+    expect(origins).toEqual(["background", "reader"]);
+  });
+
+  it("times out a stalled reload backfill, aborts the background load, and unblocks manual pull", async () => {
+    const browser = fakeBrowser({ session: {} });
+    saveReloadBookmark(
+      browser.session,
+      "42",
+      {
+        readingLocator: "loc-stalled",
+        itemId: "1.0",
+        rank: 0,
+        viewportTop: 0,
+        scrollTop: 300,
+        savedAt: 5000,
+      },
+      5000,
+    );
+    const tailItems: BackendTimelineItem[] = items.slice(8).map((it, idx) => ({
+      ...it,
+      reading_locator: `loc-tail-${idx}`,
+    }));
+    const origins: string[] = [];
+    let loadingOlder = false;
+    const onLoadOlder = vi.fn((origin: string) => {
+      origins.push(origin);
+      loadingOlder = true;
+    });
+    const onCancelBackgroundLoadOlder = vi.fn(() => {
+      if (!loadingOlder) return false;
+      loadingOlder = false;
+      return true;
+    });
+
+    const renderTimed = () => (
+      <QueryClientProvider client={client}>
+        <WallClockProvider wallNow={() => 6000}>
+          <TimelineView
+            items={tailItems}
+            threadKey="42"
+            scrollMemoryKey="reload-timeout:agent:42"
+            reloadRestore={{
+              state: "enabled",
+              session: browser.session,
+              now: () => 6000,
+              searchTimeoutMs: 25,
+            }}
+            hasMoreOlder
+            loadingOlder={loadingOlder}
+            onLoadOlder={onLoadOlder}
+            onCancelBackgroundLoadOlder={onCancelBackgroundLoadOlder}
+          />
+        </WallClockProvider>
+      </QueryClientProvider>
+    );
+
+    const view = renderWithBrowser(renderTimed(), { browser });
+    expect(origins).toEqual(["background"]);
+    expect(screen.getByTestId("cold-load-spinner")).toBeTruthy();
+
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 60));
+    });
+    view.rerender(renderTimed());
+
+    expect(onCancelBackgroundLoadOlder).toHaveBeenCalledTimes(1);
+    expect(screen.queryByTestId("cold-load-spinner")).toBeNull();
+    expect(viewport().scrollTop).toBe(4400);
+
+    act(() => {
+      viewport().scrollTop = 0;
+      fireEvent.wheel(viewport(), { deltaY: -100 });
+    });
+    expect(origins).toEqual(["background", "reader"]);
   });
 });
