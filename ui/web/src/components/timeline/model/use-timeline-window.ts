@@ -39,7 +39,8 @@ export function useTimelineWindowLimits() {
   return { activationRows, turnRows, measureRows };
 }
 
-/** Locate a saved reading item, including a child whose turn is now collapsed. */
+// meiva:note
+// Locate a saved reading item, including a child whose turn is now collapsed.
 export function resolveSavedTimelineAnchor(
   viewport: HTMLElement,
   anchor: NonNullable<SavedScroll["anchor"]>,

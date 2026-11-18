@@ -1,7 +1,8 @@
-/** Measure a prefix to a fixpoint before restoring/prepending around its anchor.
- * Keep successful measurements materialized: returning to auto can restore
- * intrinsic estimates and move the reader after compensation. Bounded mounting
- * releases the measured nodes as the conversation scrolls. */
+// meiva:note
+// Measure a prefix to a fixpoint before restoring/prepending around its anchor.
+// Keep successful measurements materialized: returning to auto can restore
+// intrinsic estimates and move the reader after compensation. Bounded mounting
+// releases the measured nodes as the conversation scrolls.
 export function materializeBeforeAnchor(viewport: HTMLElement, anchor: HTMLElement) {
   const saved: { el: HTMLElement; cv: string }[] = [];
   let anchorTop = anchor.getBoundingClientRect().top;
