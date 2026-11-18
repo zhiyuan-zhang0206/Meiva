@@ -287,12 +287,18 @@ def _execute_run(
             input_state_digest=input_digest_for_run(cache, change.root, run.label, run.argv),
         )
         cached = lookup_run(cache, key)
-        if cached is not None:
-            return fields_for(run, cached.code, cached.output, 0.0, change)
+        if cached is not None and cached.fields is not None:
+            return dict(cached.fields)
     code, output, seconds = execute(run.argv, change.root / run.cwd if run.cwd else change.root)
     fields = fields_for(run, code, output, seconds, change)
     if cache is not None and is_cacheable_run(code, fields):
-        record_run(cache, key, code=code, output=output)
+        record_run(
+            cache,
+            key,
+            code=code,
+            output=output,
+            fields=fields_for(run, code, output, 0.0, change),
+        )
     if code != 0:
         fields["_exit_nonzero"] = "1"
     return fields
@@ -342,22 +348,20 @@ def _run_pytest(
 ) -> tuple[PytestCounts, bool]:
     logical_argv = pytest_command(tests, python=python)
     key = ""
+    if cache is not None:
+        key = cache_key(
+            mode=mode,
+            label="pytest",
+            argv=logical_argv,
+            cwd="",
+            input_state_digest=input_digest_for_run(cache, change.root, "pytest", logical_argv),
+        )
+        cached = lookup_run(cache, key)
+        if cached is not None and cached.fields is not None:
+            return PytestCounts(dict(cached.fields), broken=False), False
     parent = pytest_scratch_parent(os.environ)
     with pytest_scratch(parent) as report_dir:
         report = report_dir / "pytest-report.xml"
-        if cache is not None:
-            key = cache_key(
-                mode=mode,
-                label="pytest",
-                argv=logical_argv,
-                cwd="",
-                input_state_digest=input_digest_for_run(cache, change.root, "pytest", logical_argv),
-            )
-            cached = lookup_run(cache, key)
-            if cached is not None:
-                report.write_text(cached.output, encoding="utf-8")
-                counts = pytest_counts(report, selected_files=len(tests), seconds=0.0)
-                return counts, counts.broken
         try:
             code, output, seconds = execute(pytest_argv(report, tests, python=python), change.root)
         except BaseException as error:
@@ -372,7 +376,14 @@ def _run_pytest(
             and counts.values.get("failed") == "0tests"
             and counts.values.get("errors") == "0tests"
         ):
-            record_run(cache, key, code=0, output=report.read_text(encoding="utf-8"))
+            cached_counts = pytest_counts(report, selected_files=len(tests), seconds=0.0)
+            record_run(
+                cache,
+                key,
+                code=0,
+                output=report.read_text(encoding="utf-8"),
+                fields=cached_counts.values,
+            )
         if code != 0 or counts.broken:
             pytest_failure_evidence(report, output)
         return counts, code != 0 or counts.broken

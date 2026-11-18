@@ -24,10 +24,13 @@ from scripts.hooks.diff_checks import (
 from scripts.hooks.diff_checks_cache import (
     CACHE_FILENAME,
     CacheContext,
+    cache_key,
+    input_digest_for_run,
     lookup_run,
     python_tree_digest,
     record_run,
 )
+from scripts.hooks.diff_checks_plan import schedule_groups
 
 # meiva:note
 # The interpreter the runner hands its children is the caller's value, so these tests name it here:
@@ -365,3 +368,202 @@ def test_full_mode_sweeps_every_layer_even_for_a_doc_only_change(tmp_path: Path)
     assert values["closure"] == "n/a(the-tree-was-green)"
     assert values["ruff"] == "ok(1s)"
     assert values["debt"] == "ok(ambient-read10->10,total20->20)(1s)"
+
+
+def _assert_cache_outputs_bounded(cache_path: Path) -> None:
+    raw_cache = object_of(json.loads, cache_path.read_text(encoding="utf-8"))
+    assert is_object_dict(raw_cache)
+    raw_entries = raw_cache["entries"]
+    assert is_object_dict(raw_entries)
+    for entry in raw_entries.values():
+        assert is_object_dict(entry)
+        if entry.get("kind") == "run":
+            raw_out = entry.get("output")
+            assert isinstance(raw_out, str) and len(raw_out) <= 32_768
+
+
+def _noisy_runner_response(argv: Sequence[str], trailing_noise: str) -> tuple[int, str, float]:
+    joined = " ".join(argv)
+    responses = (
+        (
+            "vitest",
+            " Test Files  34 passed (34)\n      Tests  373 passed (373)\n" + trailing_noise,
+            9.0,
+        ),
+        (
+            "meizel debt",
+            "code  origin/main  tree  change\nambient-read  10  10  +0\ntotal  20  20  +0\n"
+            + trailing_noise,
+            4.0,
+        ),
+        ("meizel check", "meizel: ok (12 fact edges, 3 manifests)\n" + trailing_noise, 5.0),
+        ("check_doc_references", "2 docs checked, 0 dangling references\n" + trailing_noise, 1.0),
+    )
+    for marker, text, seconds in responses:
+        if marker in joined:
+            return 0, text, seconds
+    if "pytest" in joined:
+        _write_junit(argv, passed=700)
+        return 0, "", 2.0
+    return 0, "0 errors, 0 warnings\n", 1.0
+
+
+def test_cache_replay_preserves_counts_when_output_exceeds_32kb_tail(tmp_path: Path) -> None:
+    (tmp_path / "ui/web/src/lib").mkdir(parents=True)
+    (tmp_path / "ui/web/src/lib/page.ts").write_text("export const x = 1;\n")
+    (tmp_path / "docs").mkdir()
+    (tmp_path / "docs/note.md").write_text("# Note\n")
+    (tmp_path / "meizel.toml").write_text("exports = []\n")
+    (tmp_path / "tests").mkdir()
+    (tmp_path / "tests/test_mod.py").write_text("def test_ok() -> None:\n    assert True\n")
+    _git(tmp_path, "init", "-q")
+    _git(tmp_path, "add", "-A")
+
+    cache = CacheContext(
+        cache_path=tmp_path / CACHE_FILENAME,
+        head_tree="tree-big-out",
+        base_sha="base-111",
+        python_digest="py-1",
+    )
+    trailing_noise = "stderr/stdout trailing line beyond 32KB\n" * 1_200
+    calls: list[str] = []
+
+    def execute(argv: Sequence[str], _root: Path) -> tuple[int, str, float]:
+        calls.append(" ".join(argv))
+        return _noisy_runner_response(argv, trailing_noise)
+
+    change = ChangeSet(
+        root=tmp_path,
+        base="origin/main",
+        files=("ui/web/src/lib/page.ts", "docs/note.md", "meizel.toml"),
+    )
+    first, failed_first = check(
+        change,
+        skip_tests=False,
+        execute=execute,
+        choose=lambda _c: Selection("SELECTED", ("tests/test_mod.py",), ()),
+        cache=cache,
+        python=_PYTHON,
+    )
+    assert failed_first is False
+    assert first["vitest-app"] == "ok(373tests)(9s)"
+    assert first["meizel"] == "ok(exit=0,3manifests,12edges)(5s)"
+    assert first["debt"] == "ok(ambient-read10->10,total20->20)(4s)"
+    assert first["docs-refs"] == "ok(2docs,0dangling)(1s)"
+    assert first["passed"] == "700tests(2s)"
+
+    _assert_cache_outputs_bounded(cache.cache_path)
+
+    calls.clear()
+    second, failed_second = check(
+        change,
+        skip_tests=False,
+        execute=execute,
+        choose=lambda _c: Selection("SELECTED", ("tests/test_mod.py",), ()),
+        cache=cache,
+        python=_PYTHON,
+    )
+    assert failed_second is False
+    assert calls == []
+    assert second["vitest-app"] == "ok(373tests)(0s)"
+    assert second["meizel"] == "ok(exit=0,3manifests,12edges)(0s)"
+    assert second["debt"] == "ok(ambient-read10->10,total20->20)(0s)"
+    assert second["docs-refs"] == "ok(2docs,0dangling)(0s)"
+    assert second["passed"] == "700tests(0s)"
+
+
+# meiva:note
+# Unreadable vitest output must never synthesize `0tests` or enter the cache, and a legacy
+# entry lacking structured `fields` must be treated as a cache miss rather than re-parsing a
+# truncated tail into `0tests`.
+def test_unreadable_vitest_and_legacy_entries_without_fields_never_replay_zero_tests(
+    tmp_path: Path,
+) -> None:
+    (tmp_path / "ui/web/src/lib").mkdir(parents=True)
+    (tmp_path / "ui/web/src/lib/page.ts").write_text("export const x = 1;\n")
+    _git(tmp_path, "init", "-q")
+    _git(tmp_path, "add", "-A")
+
+    cache = CacheContext(
+        cache_path=tmp_path / CACHE_FILENAME,
+        head_tree="tree-neg",
+        base_sha="base-111",
+        python_digest="py-1",
+    )
+    change = ChangeSet(root=tmp_path, base="origin/main", files=("ui/web/src/lib/page.ts",))
+
+    vitest_calls = 0
+
+    def unreadable_execute(argv: Sequence[str], _root: Path) -> tuple[int, str, float]:
+        nonlocal vitest_calls
+        if "vitest" in " ".join(argv):
+            vitest_calls += 1
+            return 0, "trailing noise without summary\n", 1.0
+        return 0, "meizel: ok (1 fact edges, 1 manifests)\n", 1.0
+
+    first_unreadable, _ = check(
+        change,
+        skip_tests=True,
+        execute=unreadable_execute,
+        choose=lambda _c: Selection("SELECTED", (), ()),
+        cache=cache,
+        python=_PYTHON,
+    )
+    second_unreadable, _ = check(
+        change,
+        skip_tests=True,
+        execute=unreadable_execute,
+        choose=lambda _c: Selection("SELECTED", (), ()),
+        cache=cache,
+        python=_PYTHON,
+    )
+    assert first_unreadable["vitest-app"] == "unreadable(no-summary)(1s)"
+    assert second_unreadable["vitest-app"] == "unreadable(no-summary)(1s)"
+    assert vitest_calls == 2
+
+    groups = schedule_groups(change, mode="incremental", cache=cache, python=_PYTHON)
+    vitest_run = next(run for group in groups for run in group.runs if run.label == "vitest-app")
+    vitest_key = cache_key(
+        mode="incremental",
+        label=vitest_run.label,
+        argv=vitest_run.argv,
+        cwd=vitest_run.cwd,
+        input_state_digest=input_digest_for_run(
+            cache, change.root, vitest_run.label, vitest_run.argv
+        ),
+    )
+    record_run(cache, vitest_key, code=0, output="truncated tail lacking Tests summary\n")
+
+    repaired_calls = 0
+
+    def healthy_execute(argv: Sequence[str], _root: Path) -> tuple[int, str, float]:
+        nonlocal repaired_calls
+        if "vitest" in " ".join(argv):
+            repaired_calls += 1
+            return (
+                0,
+                "      Tests  373 passed (373)\n" + ("noise\n" * 6_000),
+                9.0,
+            )
+        return 0, "meizel: ok (1 fact edges, 1 manifests)\n", 1.0
+
+    refreshed, failed_refreshed = check(
+        change,
+        skip_tests=True,
+        execute=healthy_execute,
+        choose=lambda _c: Selection("SELECTED", (), ()),
+        cache=cache,
+        python=_PYTHON,
+    )
+    replayed, failed_replayed = check(
+        change,
+        skip_tests=True,
+        execute=healthy_execute,
+        choose=lambda _c: Selection("SELECTED", (), ()),
+        cache=cache,
+        python=_PYTHON,
+    )
+    assert failed_refreshed is False and failed_replayed is False
+    assert repaired_calls == 1
+    assert refreshed["vitest-app"] == "ok(373tests)(9s)"
+    assert replayed["vitest-app"] == "ok(373tests)(0s)"
