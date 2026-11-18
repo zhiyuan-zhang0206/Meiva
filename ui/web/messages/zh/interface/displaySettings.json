@@ -42,5 +42,8 @@
   "themeLight": "亮色",
   "themeDark": "暗色",
   "themeDescription": "选择界面配色。",
-  "replySuggestionsSummary": "在 Agent 回复后提供建议回复。"
+  "replySuggestionsSummary": "在 Agent 回复后提供建议回复。",
+  "features": "功能",
+  "reloadReadingRestore": "刷新后恢复阅读位置",
+  "reloadReadingRestoreDesc": "在当前标签页内记录每个 Agent 的可见消息与滚动偏移，刷新页面后自动回到离开处；关闭后仅在未刷新的同一页面内保留切换位置。"
 }

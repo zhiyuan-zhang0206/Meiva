@@ -10,6 +10,7 @@ import { cleanupHomePageTest, gatewayWrapper, HomePageView, homePageProps, HomeP
 
 import { resetTransport, transport } from "@/test-support/fake-api";
 import { TimelineView } from "@/components/timeline";
+import { fakeBrowser } from "@/lib/browser/testing";
 import { USER_SETTING_DEFAULTS, type BackendTimelineItem, type TimelineResponse, type ConversationSnapshotResponse } from "@/lib/contracts/types";
 import { useTimeline } from "@/lib/timeline/use-timeline";
 import { useTimelineStore } from "@/lib/timeline/timeline-store";
@@ -719,4 +720,152 @@ function FreshMeasuredTimeline(props: ComponentProps<typeof TimelineView>) {
     ]);
   });
 
+});
+
+describe("feature.reloadReadingRestore on HomePageView", () => {
+  it("short-circuits all Browser.session reading-bookmark reads and writes when feature.reloadReadingRestore is false", async () => {
+    let localTop = 0;
+    const localCallbacks = new Set<() => void>();
+    const localGeometry = timelineGeometry({
+      top: () => localTop,
+      setTop: (value) => {
+        localTop = value;
+      },
+      height: () => 5000,
+      resizeCallbacks: localCallbacks,
+    });
+    function LocalMeasuredTimeline(props: ComponentProps<typeof TimelineView>) {
+      const root = useRef<HTMLDivElement>(null);
+      useLayoutEffect(() => {
+        if (root.current) localGeometry.prepare(root.current);
+      });
+      return (
+        <div ref={root}>
+          <TimelineView {...props} viewportObserverFactory={localGeometry.observer} />
+        </div>
+      );
+    }
+    const localViewport = () => document.querySelector<HTMLElement>('[data-slot="scroll-area-viewport"]')!;
+    const localResize = () => {
+      act(() => {
+        localCallbacks.forEach((deliver) => deliver());
+      });
+    };
+    const localReadingOffset = (id: string) => {
+      const node = localViewport().querySelector(`.timeline-item[data-item-id="${id}"]`);
+      return node
+        ? Math.round(node.getBoundingClientRect().top - localViewport().getBoundingClientRect().top)
+        : null;
+    };
+
+    const baseBrowser = fakeBrowser({ session: {} });
+    const bookmarkReads: string[] = [];
+    const bookmarkWrites: string[] = [];
+    const BOOKMARKS_KEY = "meiva.timeline.reading-bookmarks.v1";
+    baseBrowser.session.write(
+      BOOKMARKS_KEY,
+      JSON.stringify({
+        "42": {
+          readingLocator: "loc-3",
+          itemId: "3.0",
+          rank: 0,
+          viewportTop: -100,
+          scrollTop: 700,
+          savedAt: 1000,
+        },
+      }),
+    );
+    const browser = {
+      ...baseBrowser,
+      session: {
+        read(key: string) {
+          if (key === BOOKMARKS_KEY) bookmarkReads.push(key);
+          return baseBrowser.session.read(key);
+        },
+        write(key: string, value: string) {
+          if (key === BOOKMARKS_KEY) bookmarkWrites.push(key);
+          return baseBrowser.session.write(key, value);
+        },
+        remove(key: string) {
+          if (key === BOOKMARKS_KEY) bookmarkWrites.push(`remove:${key}`);
+          return baseBrowser.session.remove(key);
+        },
+      },
+    };
+
+    const agent = makeAgent({ agent_id: 42, status: "idling" });
+    const locatedItems: BackendTimelineItem[] = Array.from({ length: 16 }, (_, idx) => ({
+      item_id: `${idx + 1}.0`,
+      kind: "agent_chat",
+      payload: `Reply ${idx + 1}`,
+      source: null,
+      created_at: null,
+      inbound_id: null,
+      show_timestamp: false,
+      reading_locator: `loc-${idx + 1}`,
+    }));
+    transport.getPendingMessages.mockResolvedValue([]);
+    transport.getAgentQuestions.mockResolvedValue([]);
+
+    const qc = new QueryClient({
+      defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
+    });
+    const renderHome = (enabled: boolean, settingsLoading: boolean, bfcacheId: string) => {
+      const props = homePageProps();
+      return (
+        <WallClockProvider wallNow={() => 2000}>
+          <QueryClientProvider client={qc}>
+            <HomePageView
+              {...props}
+              bfcacheId={bfcacheId}
+              agents={{ ...props.agents, activeId: 42, activeAgent: agent, agents: [agent] }}
+              settings={{
+                settings: {
+                  ...USER_SETTING_DEFAULTS,
+                  "behavior.replySuggestions": false,
+                  "feature.reloadReadingRestore": enabled,
+                },
+                isLoading: settingsLoading,
+              }}
+              timeline={{ ...props.timeline, items: locatedItems, sourceReady: true, isLoading: false }}
+              TimelineView={LocalMeasuredTimeline}
+            />
+          </QueryClientProvider>
+        </WallClockProvider>
+      );
+    };
+
+    // meiva:note
+    // Cold reload where settings start loading=true, then resolve with feature.reloadReadingRestore=false.
+    const disabledView = renderWithBrowser(renderHome(false, true, "reload-disabled-1"), {
+      browser,
+      wrapper: gatewayWrapper,
+    });
+    expect(bookmarkReads).toEqual([]);
+    expect(bookmarkWrites).toEqual([]);
+
+    disabledView.rerender(renderHome(false, false, "reload-disabled-1"));
+    localResize();
+    expect(localViewport().scrollTop).toBe(4400);
+    act(() => {
+      localViewport().scrollTop = 900;
+      fireEvent.scroll(localViewport());
+    });
+    expect(bookmarkReads).toEqual([]);
+    expect(bookmarkWrites).toEqual([]);
+    expect(readScrollMemory("reload-disabled-1:agent:42")?.scrollTop).toBe(900);
+    disabledView.unmount();
+
+    // meiva:note
+    // Enabled reload reads the stored session bookmark and restores exact offset.
+    localTop = 0;
+    renderWithBrowser(renderHome(true, false, "reload-enabled-2"), {
+      browser,
+      wrapper: gatewayWrapper,
+    });
+    await waitFor(() => expect(bookmarkReads.length).toBeGreaterThan(0));
+    localResize();
+    expect(localViewport().scrollTop).toBe(700);
+    expect(localReadingOffset("3.0")).toBe(-100);
+  });
 });

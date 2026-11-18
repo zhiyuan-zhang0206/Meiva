@@ -19,8 +19,9 @@ import type { SharedContextPanel as ContextPanelComponent } from "@/components/c
 import { ContextPanelToggle } from "@/components/shell/context-panel-toggle";
 import type { HeaderBar as HeaderBarComponent } from "@/components/shell/header-bar";
 import { HomeLayout } from "@/components/shell/home-layout";
-import type { TimelineView as TimelineViewComponent } from "@/components/timeline";
+import type { ReloadRestoreConfig, TimelineView as TimelineViewComponent } from "@/components/timeline";
 import { InlineError } from "@/components/ui/inline-error";
+import { useBrowser } from "@/lib/browser/browser-provider";
 import { usePendingMessages, withoutTimelineDuplicates } from "@/lib/agents/use-pending-messages";
 import type { useAgents } from "@/lib/agents/use-agents";
 import type { useSidebarCollapsed } from "@/lib/agents/sidebar";
@@ -41,7 +42,7 @@ import type { useUserSettings } from "@/lib/state/use-user-settings";
 import { timelineMaxWidthCss } from "@/lib/timeline/timeline-width";
 import type { UseTimelineResult } from "@/lib/timeline/use-timeline";
 import { MessageDeliveryUnknownError } from "@/lib/transport/api";
-import { useApi, useStreamHub } from "@/lib/transport/transport-context";
+import { useApi, useStreamHub, useWallNow } from "@/lib/transport/transport-context";
 
 // meiva:note
 // The home route splits in two: `page.tsx` is the composition root that reads every hook and
@@ -283,10 +284,10 @@ export function HomePageView(props: HomePageProps) {
       </ErrorBoundary>
     ) : null;
 
+  // meiva:note
+  // Both wrapper layers carry FLEX explicitly: the outer one as `flex flex-col` and the inner one as `flex` (HomeLayout's narrow branch is a fragment whose children are flex items of it). A wrapper built from FLEX_COL alone is display:block and the chain collapses to content height -- measured 2026-10-17 at 320/390/768: the timeline surface grew to 4920px inside a 664px viewport, I6 failed, and the composer was pushed off screen.
+  // meiva:link ui/web/src/app/docs/layout-chain.md
   return (
-    // meiva:note
-    // Both wrapper layers carry FLEX explicitly: the outer one as `flex flex-col` and the inner one as `flex` (HomeLayout's narrow branch is a fragment whose children are flex items of it). A wrapper built from FLEX_COL alone is display:block and the chain collapses to content height -- measured 2026-10-17 at 320/390/768: the timeline surface grew to 4920px inside a 664px viewport, I6 failed, and the composer was pushed off screen.
-    // meiva:link ui/web/src/app/docs/layout-chain.md
     <main data-viewport-shell="" id="main-content" className={cn(FLEX, FLEX_1, MIN_H_0)}>
       <CodeHighlighterPreloader />
       <div className={cn(FLEX, FLEX_COL, FLEX_1, MIN_H_0, MIN_W_0)}>
@@ -351,7 +352,9 @@ function HomeContent({
   UploadButton,
   sidebar,
 }: HomeContentProps) {
+  const browser = useBrowser();
   const client = useApi();
+  const wallNow = useWallNow();
   const diagnostics = useStreamHub().transport.diagnostics;
   const t = useTranslations("common");
   const timelineText = useTranslations("timeline");
@@ -364,6 +367,12 @@ function HomeContent({
     ? undefined
     : timelineMaxWidthCss(userSettings["display.timeline_width_px"]);
 
+  const reloadReadingRestoreEnabled = userSettings["feature.reloadReadingRestore"] !== false;
+  const reloadRestore = useMemo<ReloadRestoreConfig>(() => {
+    if (userSettingsLoading) return { state: "loading" };
+    if (!reloadReadingRestoreEnabled) return { state: "disabled" };
+    return { state: "enabled", session: browser.session, now: wallNow };
+  }, [browser.session, reloadReadingRestoreEnabled, userSettingsLoading, wallNow]);
   const [quoteSelection, setQuoteSelection] = useState<{ quote: Quote; revision: number } | null>(null);
   const acceptQuote = useCallback((quote: Quote) => setQuoteSelection((previous) => ({ quote, revision: (previous?.revision ?? 0) + 1 })), []);
 
@@ -414,7 +423,12 @@ function HomeContent({
     ): Promise<boolean> => {
       if (activeId == null) return false;
       try {
-        const receipt = await client.sendMessage(activeId, content, clientMessageId, quote);
+        const receipt = await client.sendMessage(
+          activeId,
+          content,
+          clientMessageId,
+          quote,
+        );
         timelineStore.requestSendAnchor(receipt.inbound_id ?? null);
         return true;
       } catch (e: unknown) {
@@ -508,6 +522,7 @@ function HomeContent({
             threadKey={activeId != null ? String(activeId) : undefined}
             scrollMemoryKey={`${bfcacheId}:agent:${activeId ?? "unselected"}`}
             restoreReady={sourceReady}
+            reloadRestore={reloadRestore}
             streamingCode={streamingCode}
             turnActive={agentBusy}
             lastEventAt={timelineStore.liveAnchorAt}

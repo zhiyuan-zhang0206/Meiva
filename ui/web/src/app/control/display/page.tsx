@@ -8,6 +8,7 @@
 import {
   Activity,
   AlertTriangle,
+  Bookmark,
   Calendar,
   CalendarClock,
   CircleDot,
@@ -161,6 +162,18 @@ export default function DisplaySettingsPage({ mode = "all" }: { mode?: "general"
             />
           )}
         </SettingsSection>
+      )}
+
+      {advanced && (
+      <SettingsSection id="display-features" title={t("features")}>
+        <ToggleRow
+          icon={Bookmark}
+          label={t("reloadReadingRestore")}
+          description={t("reloadReadingRestoreDesc")}
+          value={readStoredSetting(settings["feature.reloadReadingRestore"], true)}
+          onChange={(v) => setSetting("feature.reloadReadingRestore", v)}
+        />
+      </SettingsSection>
       )}
 
       {advanced && (

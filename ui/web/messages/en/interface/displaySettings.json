@@ -42,5 +42,8 @@
   "themeLight": "Light",
   "themeDark": "Dark",
   "themeDescription": "Choose the interface color palette.",
-  "replySuggestionsSummary": "Suggest replies when an agent finishes a turn."
+  "replySuggestionsSummary": "Suggest replies when an agent finishes a turn.",
+  "features": "Features",
+  "reloadReadingRestore": "Restore reading position on reload",
+  "reloadReadingRestoreDesc": "Remember each agent's visible message and scroll offset in this tab so reloading the page returns to where you left off. Turning this off only keeps positions while switching within the open page."
 }

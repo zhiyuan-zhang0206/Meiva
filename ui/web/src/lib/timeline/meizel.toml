@@ -9,6 +9,7 @@ exports = ["timeline-store.ts", "timeline-width.ts", "timeline.ts", "use-throttl
 "timeline-store.ts" = ["timeline-store-events.ts"]
 "timeline-width.test.ts" = ["timeline-width.ts"]
 "timeline.test.ts" = ["timeline.ts"]
+"timeline.ts" = ["timeline-plan.ts"]
 "use-compact-history-retention.ts" = ["timeline-plan.ts", "timeline-store.ts"]
 "use-throttled-streaming.test.ts" = ["use-throttled-streaming.ts"]
 "use-timeline.test.ts" = ["tests", "timeline-store.ts", "timeline.ts", "use-timeline.ts"]

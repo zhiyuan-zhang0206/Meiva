@@ -5,7 +5,9 @@ import { cleanup, fireEvent, screen, waitFor } from "@testing-library/react";
 import { renderWithBrowser } from "@/test-support/render";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
+import { NextIntlClientProvider } from "next-intl";
 import { SETTINGS_QUERY_KEY } from "@/lib/state/use-user-settings";
+import zh from "../../../../messages/zh";
 import DisplaySettingsPage from "./page";
 
 import { resetTransport, transport } from "@/test-support/fake-api";
@@ -56,6 +58,8 @@ describe("DisplaySettingsPage", () => {
   it("puts everyday preferences in General and leaves clock details in Advanced", async () => {
     renderPage("general");
     expect(await screen.findByLabelText("English")).toBeTruthy();
+    expect(screen.queryByText("Features")).toBeNull();
+    expect(screen.queryByText("Restore reading position on reload")).toBeNull();
     expect(screen.queryByText("Clock format")).toBeNull();
     expect(screen.queryByText("Show weekday in timestamps")).toBeNull();
     expect(screen.queryByText("Single realtime connection")).toBeNull();
@@ -281,5 +285,58 @@ describe("DisplaySettingsPage", () => {
     await waitFor(() => {
       expect(transport.putSetting).toHaveBeenCalledWith("display.timeline_width_px", 960);
     });
+  });
+
+  it("renders only the reload reading restore toggle in Features enabled by default and persists opt-out", async () => {
+    transport.putSetting.mockImplementation((key: string, value: unknown) =>
+      Promise.resolve({ key, value, updated_at: "2026-11-18T00:00:00Z" }),
+    );
+    renderPage("advanced");
+
+    expect(await screen.findByText("Features")).toBeTruthy();
+    expect(screen.queryByRole("switch", { name: /quote|zoom/i })).toBeNull();
+    const reloadToggle = screen.getByRole("switch", { name: "Restore reading position on reload" });
+    expect(reloadToggle.getAttribute("aria-checked")).toBe("true");
+
+    fireEvent.click(reloadToggle);
+    await waitFor(() => {
+      expect(transport.putSetting).toHaveBeenCalledWith("feature.reloadReadingRestore", false);
+    });
+  });
+
+  it("shows reload reading restore off when stored as false and falls back to true when malformed", async () => {
+    transport.getSettings.mockResolvedValueOnce({
+      settings: [
+        { key: "feature.reloadReadingRestore", value: false, updated_at: "2026-11-18T00:00:00Z" },
+      ],
+    });
+    const offView = renderPage("advanced");
+    const offToggle = await screen.findByRole("switch", { name: "Restore reading position on reload" });
+    expect(offToggle.getAttribute("aria-checked")).toBe("false");
+    offView.unmount();
+
+    transport.getSettings.mockResolvedValueOnce({
+      settings: [
+        { key: "feature.reloadReadingRestore", value: "invalid", updated_at: "2026-11-18T00:00:00Z" },
+      ],
+    });
+    renderPage("advanced");
+    const fallbackToggle = await screen.findByRole("switch", { name: "Restore reading position on reload" });
+    expect(fallbackToggle.getAttribute("aria-checked")).toBe("true");
+  });
+
+  it("renders localized Chinese copy for the Features section when locale is zh", async () => {
+    const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    renderWithBrowser(
+      <NextIntlClientProvider locale="zh" messages={zh}>
+        <QueryClientProvider client={qc}>
+          <DisplaySettingsPage mode="advanced" />
+        </QueryClientProvider>
+      </NextIntlClientProvider>,
+    );
+
+    expect(await screen.findByText("\u529f\u80fd")).toBeTruthy();
+    expect(screen.queryByRole("switch", { name: /\u5f15\u7528|\u653e\u5927/ })).toBeNull();
+    expect(screen.getByRole("switch", { name: "\u5237\u65b0\u540e\u6062\u590d\u9605\u8bfb\u4f4d\u7f6e" })).toBeTruthy();
   });
 });

@@ -34,16 +34,17 @@ inside these labels.
 Queue-row titles render the same formatting but keep link labels inert inside
 the row-selection button; links remain active in the question detail.
 
-Default Markdown images wrap the browser `<img>` in an inline `<span>` group
-(`MarkdownZoomableImage`) with a top-right hover/focus/coarse-pointer zoom
-button (`data-testid="markdown-image-zoom"`) that opens the shared
-`document.body` lightbox portal (`data-testid="image-lightbox"`). Using a
-phrasing `<span>` preserves valid `<p>` HTML nesting, portalling to
-`document.body` escapes `content-visibility: auto` containment on timeline
-rows, and gating zoom on the corner button leaves clicks on the image itself
-free to follow any enclosing Markdown link (when `src` is empty or stripped by
-sanitization, the static fallback `<img>` renders without a zoom button; inline
-mode continues to omit `<img>` via the phrasing allowlist). The To user
+Default Markdown images render directly as a phrasing `<img>` inside `<p>`
+(`MarkdownZoomableImage`) with no wrapper `<span>` or corner hover button.
+Standalone images carry `cursor-zoom-in` and open the shared `document.body`
+lightbox portal (`data-testid="image-lightbox"`, dismissed via `Escape`, the
+close button, or clicking the `cursor-zoom-out` backdrop) when clicked directly;
+portalling to `document.body` escapes `content-visibility: auto` containment on
+timeline rows. Images nested inside a Markdown link (`[![alt](img)](url)`) take
+`[a_&]:cursor-pointer` and skip the lightbox on click so enclosing external or
+workspace file links activate normally (when `src` is empty or stripped by
+sanitization, the static fallback `<img>` renders without lightbox wiring;
+inline mode continues to omit `<img>` via the phrasing allowlist). The To user
 document and standalone workspace image viewer (`ZoomableImage`) open the same
 `document.body` lightbox when clicking the image directly.
 

@@ -1,12 +1,11 @@
 "use client";
 
-import { Maximize2, X } from "lucide-react";
+import { X } from "lucide-react";
 import { useTranslations } from "next-intl";
 import type { ComponentPropsWithoutRef, RefObject } from "react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 
-import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/format/utils";
 import { FLEX } from "@/lib/layout/layout";
 
@@ -21,7 +20,7 @@ function ImageLightbox({
   onClose: () => void;
   src: string;
   alt: string;
-  triggerRef: RefObject<HTMLButtonElement | null>;
+  triggerRef: RefObject<HTMLElement | null>;
 }) {
   const t = useTranslations("common");
   const dialogRef = useRef<HTMLDivElement>(null);
@@ -39,7 +38,9 @@ function ImageLightbox({
     return () => {
       window.removeEventListener("keydown", onKeyDown);
       document.body.style.overflow = previousOverflow;
-      trigger?.focus();
+      if (trigger && (trigger instanceof HTMLButtonElement || trigger.tabIndex >= 0)) {
+        trigger.focus();
+      }
     };
   }, [open, onClose, triggerRef]);
 
@@ -125,46 +126,47 @@ type MarkdownZoomableImageProps = Omit<ComponentPropsWithoutRef<"img">, "src"> &
 };
 
 // meiva:note
-// Default Markdown images sit inside <p> (and optionally <a>), so the wrapper stays a phrasing <span> and only the corner button opens the portalled lightbox while stopping link activation; browser <img> elements fetch authenticated workspace bytes directly.
+// Default Markdown images sit directly inside <p> (and optionally <a>), keeping valid inline HTML with no wrapper span or corner button: standalone images show `cursor-zoom-in` and open the portalled document.body lightbox on click, whereas images nested inside a Markdown link (`[a_&]:cursor-pointer`) leave link activation untouched; browser <img> elements fetch authenticated workspace bytes directly.
 // meiva:link ui/web/src/docs/frontend-components/markdown-surfaces.md
 export function MarkdownZoomableImage({ src, alt, ...props }: MarkdownZoomableImageProps) {
-  const t = useTranslations("common");
-  const [open, setOpen] = useState(false);
-  const close = useCallback(() => setOpen(false), []);
-  const buttonRef = useRef<HTMLButtonElement>(null);
-
   if (!src) {
     return <img {...props} src={undefined} alt={alt} />;
   }
+  return <ZoomableMarkdownImg {...props} src={src} alt={alt ?? ""} />;
+}
 
-  const resolvedAlt = alt ?? "";
+function ZoomableMarkdownImg({
+  src,
+  alt,
+  ...props
+}: Omit<ComponentPropsWithoutRef<"img">, "src" | "alt"> & { src: string; alt: string }) {
+  const [open, setOpen] = useState(false);
+  const close = useCallback(() => setOpen(false), [setOpen]);
+  const imgRef = useRef<HTMLImageElement>(null);
+
   return (
     <>
-      <span className="group relative inline-block max-w-full align-middle">
-        <img {...props} src={src} alt={resolvedAlt} />
-        <Button
-          variant="ghost"
-          size="icon-sm"
-          aria-label={t("openImage")}
-          data-testid="markdown-image-zoom"
-          onClick={(event) => {
+      <img
+        {...props}
+        ref={imgRef}
+        src={src}
+        alt={alt}
+        className={cn("cursor-zoom-in [a_&]:cursor-pointer", props.className)}
+        onClick={(event) => {
+          props.onClick?.(event);
+          if (event.defaultPrevented || event.currentTarget.closest("a")) return;
+          setOpen(true);
+        }}
+        onKeyDown={(event) => {
+          props.onKeyDown?.(event);
+          if (event.defaultPrevented || event.currentTarget.closest("a")) return;
+          if (event.key === "Enter" || event.key === " ") {
             event.preventDefault();
-            event.stopPropagation();
-            buttonRef.current = event.currentTarget;
             setOpen(true);
-          }}
-          className={cn(
-            "absolute right-1.5 top-1.5 z-10",
-            "bg-muted/80 hover:bg-muted text-muted-foreground hover:text-foreground",
-            "opacity-0 pointer-coarse:opacity-80 group-hover:opacity-100 transition-opacity",
-            "focus-visible:opacity-100",
-            "border border-border/50",
-          )}
-        >
-          <Maximize2 className="size-3.5" />
-        </Button>
-      </span>
-      <ImageLightbox open={open} onClose={close} src={src} alt={resolvedAlt} triggerRef={buttonRef} />
+          }
+        }}
+      />
+      <ImageLightbox open={open} onClose={close} src={src} alt={alt} triggerRef={imgRef} />
     </>
   );
 }
