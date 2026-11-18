@@ -1,4 +1,4 @@
-exports = ["code-highlighter-preloader.tsx", "copy-button.tsx", "file-path-utils.ts", "lazy-chunk.ts", "markdown.tsx", "python-code.tsx", "zoomable-image.tsx"]
+exports = ["code-highlighter-preloader.tsx", "copy-button.tsx", "file-path-utils.ts", "lazy-chunk.ts", "markdown-image-url.ts", "markdown.tsx", "python-code.tsx", "zoomable-image.tsx"]
 
 [uses]
 "code-highlighter-preloader.test.tsx" = ["code-highlighter-preloader.tsx", "lazy-chunk.ts", "python-code.tsx"]

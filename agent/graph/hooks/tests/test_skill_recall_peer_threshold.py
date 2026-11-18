@@ -1,13 +1,9 @@
 # meiva:note
-# The peer recall threshold is the cut the 2026-10-18 replay selects: 999 real peer messages,
-# each with the top skill's probability and whether the message asked the recipient to do work
-# (majority of three judges, 86% unanimous). At 0.70 the cut offers on 40% of turns, covers 63%
-# of the work requests and 69% of the offers land on one; 0.75 covers 45% at 75%, and 0.60 falls
-# to 58% precision. Precision is one rater panel's estimate: an independent reader on 50
-# stratified messages put 0.70 at 56%, so the figure to quote is 56-69%. The assertions therefore
-# lock the ordering and a floor that both readers clear, not a point estimate. A missed dispatch
-# costs a redo while an extra offer costs one line, so coverage wins the tie. Changing the
-# default re-opens this test on purpose: move the number together with the rows.
+# The peer recall threshold reflects the 2026-11-18 recall-first policy evaluated by
+# re-thresholding the historical 2026-10-18 `jev-1.13.0` 999-message peer score fixture
+# (`peer_recall_replay.json`): at 0.45, recall across the 428 work requests in that fixture is
+# 98.6% (vs 63.3% at the former 0.70 cut, which left 157 of 428 work dispatches with no offer),
+# while staying stricter than the person cut (0.35). Changing the default re-opens this test.
 
 from __future__ import annotations
 
@@ -39,26 +35,27 @@ def test_the_replay_fixture_holds_999_messages_and_428_work_requests() -> None:
     assert sum(work for _score, work in ROWS) == 428
 
 
-def test_the_shipped_default_keeps_coverage_without_collapsing_on_precision() -> None:
+def test_the_shipped_default_prioritizes_work_dispatch_recall() -> None:
     precision, recall = _precision_and_recall(settings.agent.skill_recall_peer_threshold)
 
-    assert recall >= 0.60, f"coverage fell to {recall:.0%}: most dispatches would get no offer"
-    assert precision >= 0.55, f"precision fell to {precision:.0%}: the note would mostly be noise"
+    assert recall >= 0.95, (
+        f"coverage fell to {recall:.0%}: recall-first policy must not drop dispatches"
+    )
+    assert precision >= 0.45, f"unscreened precision fell to {precision:.0%}"
 
 
-def test_the_person_cut_would_be_noisier_than_the_peer_cut() -> None:
-    # meiva:note
-    # 0.60 is pinned: this compares the two measured cuts, not whatever the person default becomes.
-    person_precision, _recall = _precision_and_recall(0.60)
+def test_the_person_cut_is_looser_than_the_peer_cut() -> None:
+    person_precision, _recall = _precision_and_recall(settings.agent.skill_recall_threshold)
     peer_precision, _recall = _precision_and_recall(settings.agent.skill_recall_peer_threshold)
 
-    assert person_precision < peer_precision - 0.05
+    assert settings.agent.skill_recall_threshold < settings.agent.skill_recall_peer_threshold
+    assert person_precision < peer_precision
 
 
-def test_a_higher_cut_costs_a_large_share_of_the_coverage() -> None:
+def test_the_former_strict_cut_cost_over_a_quarter_of_work_coverage() -> None:
     _precision, recall = _precision_and_recall(settings.agent.skill_recall_peer_threshold)
-    _precision_75, recall_75 = _precision_and_recall(0.75)
+    _precision_70, recall_70 = _precision_and_recall(0.70)
 
-    assert recall_75 < recall - 0.05, (
-        f"0.75 kept {recall_75:.0%} against {recall:.0%}: no trade-off"
+    assert recall - recall_70 > 0.25, (
+        f"0.70 kept {recall_70:.0%} against {recall:.0%}: expected large coverage loss"
     )

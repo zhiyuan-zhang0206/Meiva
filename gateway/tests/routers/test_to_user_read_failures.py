@@ -4,16 +4,28 @@
 # status, and only an unreachable machine says the same request may pass.
 # meiva:link gateway/agents/docs/to-user-read-failures.md
 
-from collections.abc import Iterator
+import json
+import threading
+from collections.abc import Generator, Iterator
+from contextlib import contextmanager
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
+from typing import override
 
 import psycopg
 import pytest
 
+from base.agents.to_user import WorkspaceFileRequest
+from base.config import settings
 from base.db import create_agent
 from base.paths import workspace_path
 from gateway.tests.auth.gateway_config import GatewayTestClient, gateway_test_client
 from ops.cluster.rpc import ClusterOpFailed, ClusterOpUnreachable
+from ops.to_user import (
+    WorkspaceFileError,
+    read_workspace_file_content,
+    read_workspace_file_raw,
+)
 
 
 # meiva:note
@@ -246,3 +258,170 @@ def test_get_workspace_file_too_large_413(
 def test_get_workspace_file_unknown_agent_404(client: GatewayTestClient) -> None:
     response = client.get("/api/agents/9999999/files/content?path=file.txt")
     assert response.status_code == 404
+
+
+@contextmanager
+def _remote_workspace_ops_server(remote_home: Path, expected_agent_id: int) -> Generator[str]:
+    class _Handler(BaseHTTPRequestHandler):
+        def do_POST(self) -> None:
+            if self.path != "/to-user/workspace-file":
+                self.send_response(404)
+                self.end_headers()
+                return
+            length = int(self.headers.get("Content-Length", "0"))
+            raw_body = self.rfile.read(length)
+            req = WorkspaceFileRequest.model_validate_json(raw_body)
+            if req.agent_id != expected_agent_id:
+                self.send_response(404)
+                self.end_headers()
+                _ = self.wfile.write(b"Wrong agent routed to remote machine")
+                return
+            try:
+                if req.mode == "content":
+                    payload = read_workspace_file_content(
+                        remote_home, req.agent_id, req.path, custom_cwd=req.custom_cwd
+                    )
+                    out = payload.model_dump_json().encode("utf-8")
+                    content_type = "application/json"
+                else:
+                    out = read_workspace_file_raw(
+                        remote_home,
+                        req.agent_id,
+                        req.path,
+                        custom_cwd=req.custom_cwd,
+                        max_bytes=settings.to_user.max_resource_bytes,
+                    )
+                    content_type = "application/octet-stream"
+            except WorkspaceFileError as exc:
+                self.send_response(exc.status_code)
+                self.send_header("Content-Type", "text/plain")
+                self.end_headers()
+                _ = self.wfile.write(exc.detail.encode("utf-8"))
+                return
+            self.send_response(200)
+            self.send_header("Content-Type", content_type)
+            self.end_headers()
+            _ = self.wfile.write(out)
+
+        @override
+        def log_message(self, format: str, *args: object) -> None:
+            return
+
+    server = ThreadingHTTPServer(("127.0.0.1", 0), _Handler)
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    try:
+        host, port = server.server_address[:2]
+        yield f"http://{host}:{port}"
+    finally:
+        server.shutdown()
+        server.server_close()
+        thread.join(timeout=5)
+
+
+def test_cross_agent_workspace_file_routes_same_machine_and_remote_machine(
+    client: GatewayTestClient, db_conn: psycopg.Connection, tmp_path: Path
+) -> None:
+    viewer_agent = _home_machine_agent(db_conn, "macmini")
+    same_host_owner = _home_machine_agent(db_conn, "macmini")
+    remote_owner = _home_machine_agent(db_conn, "company-mini")
+
+    ws_viewer = Path(workspace_path(client.app.state.gateway_process.home, viewer_agent))
+    ws_viewer.mkdir(parents=True, exist_ok=True)
+
+    ws_same = Path(workspace_path(client.app.state.gateway_process.home, same_host_owner))
+    (ws_same / "deliver").mkdir(parents=True, exist_ok=True)
+    _ = (ws_same / "deliver" / "report.md").write_text("# Local peer report\n", encoding="utf-8")
+    png_bytes = b"\x89PNG\r\n\x1a\ncross-agent-image"
+    _ = (ws_same / "deliver" / "chart.png").write_bytes(png_bytes)
+
+    same_content = client.get(
+        f"/api/agents/{viewer_agent}/files/content"
+        f"?path=/Users/zhiyuan-output/.meiva/workspaces/{same_host_owner}/deliver/report.md"
+    )
+    assert same_content.status_code == 200
+    assert same_content.json()["content"] == "# Local peer report\n"
+
+    same_raw = client.get(
+        f"/api/agents/{viewer_agent}/files/raw"
+        f"?path=/Users/zhiyuan-output/.meiva/workspaces/{same_host_owner}/deliver/chart.png"
+    )
+    assert same_raw.status_code == 200
+    assert same_raw.content == png_bytes
+
+    remote_home = tmp_path / "company-mini-home"
+    ws_remote = workspace_path(remote_home, remote_owner)
+    (ws_remote / "deliver").mkdir(parents=True, exist_ok=True)
+    _ = (ws_remote / "deliver" / "remote.md").write_text("# Remote peer report\n", encoding="utf-8")
+    _ = (ws_remote / "deliver" / "user-positions-before-after.png").write_bytes(png_bytes)
+
+    with _remote_workspace_ops_server(remote_home, remote_owner) as remote_ops_url:
+        _ = db_conn.execute(
+            "INSERT INTO machines (name, role, gateway_url) VALUES ('company-mini', %s, %s) "
+            "ON CONFLICT (name) DO UPDATE SET gateway_url = EXCLUDED.gateway_url",
+            (["agent-runner"], remote_ops_url),
+        )
+        db_conn.commit()
+
+        remote_content = client.get(
+            f"/api/agents/{viewer_agent}/files/content"
+            f"?path=/Users/zhiyuan-output/.meiva/workspaces/{remote_owner}/deliver/remote.md"
+        )
+        assert remote_content.status_code == 200
+        assert remote_content.json()["content"] == "# Remote peer report\n"
+
+        remote_raw = client.get(
+            f"/api/agents/{viewer_agent}/files/raw"
+            f"?path=file:///Users/zhiyuan-output/.meiva/workspaces/{remote_owner}/deliver/user-positions-before-after.png"
+        )
+        assert remote_raw.status_code == 200
+        assert remote_raw.content == png_bytes
+        assert remote_raw.headers["content-type"] == "image/png"
+
+
+def test_cross_agent_traversal_and_system_paths_return_403(
+    client: GatewayTestClient, db_conn: psycopg.Connection
+) -> None:
+    agent_a = _home_machine_agent(db_conn, "macmini")
+    agent_b = _home_machine_agent(db_conn, "macmini")
+    Path(workspace_path(client.app.state.gateway_process.home, agent_a)).mkdir(
+        parents=True, exist_ok=True
+    )
+    ws_b = Path(workspace_path(client.app.state.gateway_process.home, agent_b))
+    ws_b.mkdir(parents=True, exist_ok=True)
+    _ = (ws_b / "secret.txt").write_text("secret", encoding="utf-8")
+
+    for forbidden in (
+        f"/Users/other/.meiva/workspaces/{agent_a}/../{agent_b}/secret.txt",
+        f"/Users/other/.meiva/workspaces/{agent_b}/deliver/../../etc/passwd",
+        "/etc/passwd",
+        "/Users/other/secret.txt",
+    ):
+        resp_content = client.get(f"/api/agents/{agent_a}/files/content?path={forbidden}")
+        assert resp_content.status_code == 403
+        resp_raw = client.get(f"/api/agents/{agent_a}/files/raw?path={forbidden}")
+        assert resp_raw.status_code == 403
+
+
+def test_eval_isolated_caller_denied_on_cross_workspace_file_read(
+    client: GatewayTestClient, db_conn: psycopg.Connection
+) -> None:
+    viewer_agent = _home_machine_agent(db_conn, "macmini")
+    owner_agent = _home_machine_agent(db_conn, "macmini")
+    isolated_caller = _home_machine_agent(db_conn, "macmini")
+    _ = db_conn.execute(
+        "UPDATE agents_meta SET config_overlay = %s::jsonb WHERE id = %s",
+        (json.dumps({"eval_isolation": True}), isolated_caller),
+    )
+    db_conn.commit()
+    ws_owner = Path(workspace_path(client.app.state.gateway_process.home, owner_agent))
+    ws_owner.mkdir(parents=True, exist_ok=True)
+    _ = (ws_owner / "report.md").write_text("hello", encoding="utf-8")
+
+    resp = client.get(
+        f"/api/agents/{viewer_agent}/files/content"
+        f"?path=/Users/other/.meiva/workspaces/{owner_agent}/report.md"
+        f"&caller=agent:{isolated_caller}"
+    )
+    assert resp.status_code == 403
+    assert "eval-isolated" in resp.json()["detail"]

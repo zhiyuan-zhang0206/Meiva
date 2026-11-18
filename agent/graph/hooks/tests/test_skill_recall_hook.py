@@ -398,7 +398,7 @@ async def test_no_candidates_means_no_call(three_skills: Path, database: Databas
 async def test_only_scores_at_or_over_the_threshold_are_offered(
     three_skills: Path, database: Database
 ) -> None:
-    scorer = _Scorer({"alpha": 0.59, "beta": 0.60, "gamma": 0.10})
+    scorer = _Scorer({"alpha": 0.34, "beta": 0.35, "gamma": 0.10})
 
     update = await _run(database, _state(_tail("user")), scorer)
 
@@ -408,55 +408,45 @@ async def test_only_scores_at_or_over_the_threshold_are_offered(
 async def test_nothing_over_the_threshold_injects_nothing(
     three_skills: Path, database: Database
 ) -> None:
-    scorer = _Scorer({"alpha": 0.4, "beta": 0.3})
+    scorer = _Scorer({"alpha": 0.34, "beta": 0.20})
 
     assert await _run(database, _state(_tail("user")), scorer) is None
     assert len(scorer.calls) == 1
 
 
 async def test_at_most_max_skills_best_first_with_identifier_breaking_ties(
-    skills_dir: Path,
-    database: Database,
+    skills_dir: Path, database: Database
 ) -> None:
-    for name in ("delta", "alpha", "gamma", "beta"):
+    names = ("zeta", "alpha", "gamma", "beta", "delta", "epsilon")
+    for name in names:
         _install(skills_dir, name, skills=skills_dir)
-    scorer = _Scorer({"delta": 0.9, "alpha": 0.8, "gamma": 0.8, "beta": 0.8})
-
+    scorer = _Scorer({n: (0.9 if n == "zeta" else 0.8) for n in names})
     update = await _run(database, _state(_tail("user")), scorer)
-
-    # delta is the best; alpha, beta and gamma tie, and the identifier orders them.
-    assert _offered(update) == ["delta", "alpha"]
+    assert _offered(update) == ["zeta", "alpha", "beta", "delta", "epsilon"]
 
 
 async def test_the_cap_and_threshold_come_from_the_agents_own_config(
     three_skills: Path, database: Database
 ) -> None:
     scorer = _Scorer({"alpha": 0.9, "beta": 0.8, "gamma": 0.7})
-
     update = await _run(
         database, _state(_tail("user")), scorer, skill_recall_max=3, skill_recall_threshold=0.75
     )
-
     assert _offered(update) == ["alpha", "beta"]
 
 
 async def test_a_zero_cap_offers_nothing(three_skills: Path, database: Database) -> None:
-    scorer = _Scorer({"alpha": 0.9})
-
-    assert await _run(database, _state(_tail("user")), scorer, skill_recall_max=0) is None
-
-
-# ── the note ──
+    assert (
+        await _run(database, _state(_tail("user")), _Scorer({"alpha": 0.9}), skill_recall_max=0)
+        is None
+    )
 
 
 async def test_the_note_lists_each_skill_in_the_index_line_shape(
     skills_dir: Path, database: Database
 ) -> None:
     _install(skills_dir, "alpha", "Alpha does alpha things", skills=skills_dir)
-    scorer = _Scorer({"alpha": 0.9})
-
-    update = await _run(database, _state(_tail("user")), scorer)
-
+    update = await _run(database, _state(_tail("user")), _Scorer({"alpha": 0.9}))
     assert update is not None
     (note,) = update["messages"]
     assert "- `meiva.skills.alpha` — Alpha does alpha things" in note.content
@@ -464,33 +454,23 @@ async def test_the_note_lists_each_skill_in_the_index_line_shape(
 
 
 async def test_one_note_however_many_skills(three_skills: Path, database: Database) -> None:
-    scorer = _Scorer({"alpha": 0.9, "beta": 0.9})
-
-    update = await _run(database, _state(_tail("user")), scorer)
-
-    assert update is not None
-    assert len(update["messages"]) == 1
+    update = await _run(database, _state(_tail("user")), _Scorer({"alpha": 0.9, "beta": 0.9}))
+    assert update is not None and len(update["messages"]) == 1
     assert _offered(update) == ["alpha", "beta"]
-
-
-# ── the per-window record ──
 
 
 async def test_an_offered_skill_is_recorded_and_not_offered_again(
     three_skills: Path, database: Database
 ) -> None:
     scorer = _Scorer({"alpha": 0.9, "beta": 0.9, "gamma": 0.9})
-    first = await _run(database, _state(_tail("user")), scorer)
+    first = await _run(database, _state(_tail("user")), scorer, skill_recall_max=2)
     assert first is not None
-    assert first["skill_recall"].prompted == {"alpha", "beta"}
-    assert first["skill_recall"].window == 0
-
-    second = await _run(database, _state(_tail("user"), skill_recall=first["skill_recall"]), scorer)
-
+    assert first["skill_recall"] == SkillRecallState(prompted={"alpha", "beta"}, window=0)
+    next_state = _state(_tail("user"), skill_recall=first["skill_recall"])
+    second = await _run(database, next_state, scorer, skill_recall_max=2)
     assert set(scorer.calls[1][1]) == {"gamma"}
     assert _offered(second) == ["gamma"]
-    assert second is not None
-    assert second["skill_recall"].prompted == {"alpha", "beta", "gamma"}
+    assert second is not None and second["skill_recall"].prompted == {"alpha", "beta", "gamma"}
 
 
 async def test_a_compaction_resets_the_record_and_the_skills_come_back(
@@ -511,7 +491,7 @@ async def test_a_compaction_resets_the_record_and_the_skills_come_back(
     assert set(scorer.calls[0][1]) == {"alpha", "beta", "gamma"}
     assert isinstance(update["skill_reads"], Overwrite)
     assert update["skill_reads"].value == []
-    assert update["skill_recall"] == SkillRecallState(prompted={"alpha", "beta"}, window=1)
+    assert update["skill_recall"] == SkillRecallState(prompted={"alpha", "beta", "gamma"}, window=1)
 
 
 async def test_a_compaction_resets_the_record_even_when_nothing_is_offered(
@@ -684,27 +664,27 @@ async def test_reads_from_execs_exclude_skills_until_a_compaction_clears_them(
         {"alpha", "beta", "gamma"},
     ]
     assert final.skill_reads == []
-    assert final.skill_recall == SkillRecallState(prompted={"alpha", "beta"}, window=1)
+    assert final.skill_recall == SkillRecallState(prompted={"alpha", "beta", "gamma"}, window=1)
 
 
 async def test_a_peer_request_is_scored_when_the_gate_passes(
     three_skills: Path, database: Database
 ) -> None:
-    scorer = _Scorer({"work": 0.95, "method_given": 0.05, "beta": 0.9})
+    scorer = _Scorer({"work": 0.95, "beta": 0.9})
     update = await _run(
         database, _state(_tail("agent:402", "please review PR 1234 against the docs")), scorer
     )
 
     assert len(scorer.calls) == 2
     (gate_state, gate_questions), (_, recall_questions) = scorer.calls
-    assert set(gate_questions) == {"work", "method_given"}
+    assert set(gate_questions) == {"work"}
     assert gate_state == PEER_GATE_PREAMBLE + "please review PR 1234 against the docs"
     assert set(recall_questions) == {"alpha", "beta", "gamma"}
     assert _offered(update) == ["beta"]
 
 
 async def test_a_peer_status_message_is_not_scored(three_skills: Path, database: Database) -> None:
-    scorer = _Scorer({"work": 0.05, "method_given": 0.05, "beta": 0.9})
+    scorer = _Scorer({"work": 0.05, "beta": 0.9})
     update = await _run(
         database, _state(_tail("agent:402", "PR merged, nothing else to do")), scorer
     )
@@ -713,18 +693,24 @@ async def test_a_peer_status_message_is_not_scored(three_skills: Path, database:
     assert len(scorer.calls) == 1
 
 
-async def test_a_peer_brief_that_states_the_method_is_not_scored(
+async def test_a_peer_brief_with_steps_or_criteria_still_passes_the_work_gate(
     three_skills: Path, database: Database
 ) -> None:
-    scorer = _Scorer({"work": 0.95, "method_given": 0.95, "beta": 0.9})
-    update = await _run(database, _state(_tail("agent:402", "run these three steps: ...")), scorer)
+    scorer = _Scorer({"work": 0.95, "beta": 0.9})
+    update = await _run(
+        database,
+        _state(
+            _tail("agent:402", "implement dark mode; acceptance: screenshot has no white border")
+        ),
+        scorer,
+    )
 
-    assert update is None
-    assert len(scorer.calls) == 1
+    assert len(scorer.calls) == 2
+    assert _offered(update) == ["beta"]
 
 
 async def test_an_uncertain_peer_gate_still_scores(three_skills: Path, database: Database) -> None:
-    scorer = _Scorer({"work": 0.5, "method_given": 0.5, "beta": 0.9})
+    scorer = _Scorer({"work": 0.5, "beta": 0.9})
     update = await _run(database, _state(_tail("agent:402", "look at the failing suite")), scorer)
 
     assert len(scorer.calls) == 2
@@ -734,7 +720,7 @@ async def test_an_uncertain_peer_gate_still_scores(three_skills: Path, database:
 async def test_peer_messages_are_on_by_default_and_can_be_disabled(
     three_skills: Path, database: Database
 ) -> None:
-    scorer = _Scorer({"work": 0.95, "method_given": 0.05, "beta": 0.9})
+    scorer = _Scorer({"work": 0.95, "beta": 0.9})
     assert (
         await _run(database, _state(_tail("agent:402")), scorer, skill_recall_peer_messages=False)
         is None
@@ -746,19 +732,19 @@ async def test_peer_messages_are_on_by_default_and_can_be_disabled(
 async def test_first_turn_peer_dispatch_bypasses_peer_gate_and_subsequent_turns_run_it(
     three_skills: Path, database: Database
 ) -> None:
-    scorer = _Scorer({"work": 0.95, "method_given": 0.95, "beta": 0.9})
+    scorer = _Scorer({"work": 0.05, "beta": 0.9})
     first_in: list[AnyMessage] = [_inbound("run these three steps: ...", "agent:402", 1)]
     assert _offered(await _run(database, _state(first_in), scorer)) == ["beta"]
     assert [set(q) for _s, q in scorer.calls] == [{"alpha", "beta", "gamma"}]
 
     for state in (
-        _state(_tail("agent:402", "run these three steps: ...")),
+        _state(_tail("agent:402", "PR merged, status green")),
         _state(first_in, skill_recall=SkillRecallState(prompted={"alpha"})),
         _state(first_in, skill_reads=["alpha"]),
     ):
-        gate_scorer = _Scorer({"work": 0.95, "method_given": 0.95, "beta": 0.9})
+        gate_scorer = _Scorer({"work": 0.05, "beta": 0.9})
         assert await _run(database, state, gate_scorer) is None
-        assert [set(q) for _s, q in gate_scorer.calls] == [{"work", "method_given"}]
+        assert [set(q) for _s, q in gate_scorer.calls] == [{"work"}]
 
 
 async def test_a_failed_gate_keeps_the_behaviour_before_peer_messages(
@@ -772,7 +758,7 @@ async def test_a_failed_gate_keeps_the_behaviour_before_peer_messages(
 async def test_the_gate_reads_only_the_first_four_thousand_characters(
     three_skills: Path, database: Database
 ) -> None:
-    scorer = _Scorer({"work": 0.95, "method_given": 0.05, "beta": 0.9})
+    scorer = _Scorer({"work": 0.95, "beta": 0.9})
     await _run(database, _state(_tail("agent:402", "x" * 5000)), scorer)
 
     assert scorer.calls[0][0] == PEER_GATE_PREAMBLE + "x" * 4000
@@ -791,8 +777,8 @@ async def test_a_person_message_still_skips_the_gate(
 async def test_a_peer_turn_uses_the_peer_threshold_not_the_person_cut(
     three_skills: Path, database: Database
 ) -> None:
-    scorer = _Scorer({"work": 0.95, "method_given": 0.05, "gamma": 0.65})
+    scorer = _Scorer({"work": 0.95, "gamma": 0.40})
     state = _state(_tail("agent:402", "have a look at the staging alerts"))
     assert await _run(database, state, scorer) is None
-    update = await _run(database, state, scorer, skill_recall_peer_threshold=0.60)
-    assert _offered(update) == ["gamma"], "0.65 clears the person cut and misses the peer cut"
+    update = await _run(database, state, scorer, skill_recall_peer_threshold=0.35)
+    assert _offered(update) == ["gamma"], "0.40 clears the person cut and misses the peer cut"

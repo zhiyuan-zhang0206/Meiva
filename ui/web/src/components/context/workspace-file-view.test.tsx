@@ -1,8 +1,9 @@
 import { cleanup, fireEvent, screen, waitFor } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import type { ReactNode } from "react";
 
+import { preloadChatMarkdown } from "@/components/content/markdown";
 import { WorkspaceFileView } from "./workspace-file-view";
 import { useWorkspaceFileStore } from "@/lib/context/workspace-file-store";
 import { resetTransport, transport } from "@/test-support/fake-api";
@@ -23,6 +24,10 @@ function TestWrapper({ children }: { children: ReactNode }) {
 }
 
 describe("WorkspaceFileView", () => {
+  beforeAll(async () => {
+    await preloadChatMarkdown();
+  });
+
   beforeEach(() => {
     qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
     resetTransport();
@@ -199,5 +204,101 @@ describe("WorkspaceFileView", () => {
     const homeBtn = screen.getByTitle("Return to to_user.md");
     fireEvent.click(homeBtn);
     expect(useWorkspaceFileStore.getState().activeFile).toBeNull();
+  });
+
+  it("routes explicit cross-agent workspace paths to the owning agent for content and raw media", async () => {
+    transport.getWorkspaceFile.mockResolvedValue({
+      path: "deliver/user-positions-before-after.png",
+      name: "user-positions-before-after.png",
+      extension: ".png",
+      content: "",
+      size: 695326,
+      binary: true,
+      modified_at: "2026-11-18T03:08:00Z",
+    });
+
+    renderWithBrowser(
+      <WorkspaceFileView
+        agentId={7516}
+        target={{
+          agentId: 7516,
+          path: "/Users/zhiyuan-output/.meiva/workspaces/7765/deliver/user-positions-before-after.png",
+        }}
+        mobile={false}
+      />,
+      { wrapper: TestWrapper },
+    );
+
+    await waitFor(() => {
+      const img = screen.getByRole("img", { name: "user-positions-before-after.png" });
+      expect(img.getAttribute("src")).toContain(
+        "/api/agents/7765/files/raw?path=deliver%2Fuser-positions-before-after.png",
+      );
+    });
+    expect(transport.getWorkspaceFile).toHaveBeenCalledWith(
+      7765,
+      "deliver/user-positions-before-after.png",
+      expect.anything(),
+    );
+  });
+
+  it("resolves relative images and links inside a cross-agent subdirectory Markdown file against that owner and directory", async () => {
+    transport.getWorkspaceFile.mockResolvedValue({
+      path: "deliver/REPORT.md",
+      name: "REPORT.md",
+      extension: ".md",
+      content: [
+        "# Position Report",
+        "",
+        "![Comparison](user-positions-before-after.png)",
+        "",
+        "[Open chart](user-positions-before-after.png)",
+        "",
+        "[Parent notes](../notes.md#L12)",
+      ].join("\n"),
+      size: 128,
+      binary: false,
+      modified_at: "2026-11-18T03:08:00Z",
+    });
+
+    renderWithBrowser(
+      <WorkspaceFileView
+        agentId={7516}
+        target={{
+          agentId: 7516,
+          path: "/Users/zhiyuan-output/.meiva/workspaces/7765/deliver/REPORT.md",
+        }}
+        mobile={false}
+      />,
+      { wrapper: TestWrapper },
+    );
+
+    await waitFor(() => {
+      expect(screen.getByRole("heading", { name: "Position Report" })).toBeTruthy();
+    });
+    expect(transport.getWorkspaceFile).toHaveBeenCalledWith(
+      7765,
+      "deliver/REPORT.md",
+      expect.anything(),
+    );
+
+    const img = screen.getByRole("img", { name: "Comparison" });
+    expect(img.getAttribute("src")).toContain(
+      "/api/agents/7765/files/raw?path=deliver%2Fuser-positions-before-after.png",
+    );
+
+    fireEvent.click(screen.getByRole("link", { name: "Open chart" }));
+    expect(useWorkspaceFileStore.getState().activeFile).toEqual({
+      agentId: 7516,
+      path: "/Users/zhiyuan-output/.meiva/workspaces/7765/deliver/user-positions-before-after.png",
+      lineRange: undefined,
+    });
+
+    fireEvent.click(screen.getByRole("link", { name: "Parent notes" }));
+    expect(useWorkspaceFileStore.getState().activeFile).toEqual({
+      agentId: 7516,
+      path: "/Users/zhiyuan-output/.meiva/workspaces/7765/notes.md",
+      lineRange: "12",
+    });
   });
 });

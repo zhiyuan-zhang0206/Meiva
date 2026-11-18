@@ -65,7 +65,10 @@ document, 1024 local references and 16 linked-document hops by default. The
 response that serves those files returns HTML as an attachment under the passive
 CSP without script permission. The workspace viewer renders only Markdown, images
 and videos; HTML and HTM open as source code, and other binary files offer download.
-Normal Markdown links are directly clickable in conversation messages and `to_user.md`.
+Normal Markdown links are directly clickable in conversation messages and `to_user.md`;
+explicit `.meiva/workspaces/<id>/...` references keep the viewer attached to the
+active conversation's panel while routing content/raw reads and nested relative
+Markdown links or images to `<id>`'s workspace across machines.
 
 One shallow scanner per ops process polls numeric workspace roots and only their
 immediate `to_user.md` targets, on a worker thread. Creation, atomic replacement

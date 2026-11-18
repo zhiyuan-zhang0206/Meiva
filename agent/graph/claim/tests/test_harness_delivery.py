@@ -20,7 +20,6 @@ from psycopg import sql
 from psycopg.rows import TupleRow
 from psycopg_pool import AsyncConnectionPool, PoolTimeout
 
-from agent.db import claim_inbound_batch
 from agent.graph.claim.harness_turn import harness_turn_node
 from agent.graph.claim.node import claim_node
 from agent.graph.claim.tests.claim_support import make_runtime
@@ -45,7 +44,7 @@ from agent.graph.claim.tests.harness_support import (
 from agent.graph.claim.tests.test_harness_turn import config, runtime
 from agent.graph.claim.tests.test_harness_turn import hosted_resources as hosted_resources
 from agent.graph.llm_errors import FatalLLMStreamError
-from agent.ownership.tests.ownership_support import admit_owner, agent_row
+from agent.ownership.tests.ownership_support import agent_row
 from agent.state import AgentState
 from base.agents.context import MeivaContext
 from base.agents.inbox.rows import list_pending_inbounds
@@ -317,29 +316,6 @@ async def test_a_message_not_in_context_when_the_turn_is_interrupted_is_still_de
         await node
     assert row_status(db_conn, queued) == "done"
     assert await timeline_inbound_ids(aops_pool, agent_id) == [first, queued]
-
-
-async def test_the_claim_leaves_deliverable_rows_to_delivery_and_takes_leading_controls(
-    db_conn: psycopg.Connection,
-    aops_pool: AsyncConnectionPool,
-    database_gate: ProcessDbGate,
-) -> None:
-    agent_id = agent_row(db_conn)
-    control = insert_row(db_conn, agent_id, "resurrect", "system", "")
-    chat = insert_row(db_conn, agent_id, "chat", "user", "after the control")
-    later = insert_row(db_conn, agent_id, "interrupt", "user", "")
-    owner = await admit_owner(aops_pool, agent_id, database_gate=database_gate)
-
-    batch = await claim_inbound_batch(
-        aops_pool, agent_id, deliverable_by_harness=True, incarnation=owner
-    )
-
-    assert [item.id for item in batch] == [control], "stops before the first deliverable row"
-    assert [row_status(db_conn, i) for i in (chat, later)] == ["pending", "pending"]
-    again = await claim_inbound_batch(
-        aops_pool, agent_id, deliverable_by_harness=True, incarnation=owner
-    )
-    assert again == [], "the chat is next, and it is delivery's"
 
 
 class _ReserveTimeoutPool(AsyncConnectionPool):
@@ -758,3 +734,60 @@ async def test_an_interrupt_after_its_turn_ended_does_not_cut_the_answer_short(
         assert engine.interrupts == 0, "the answer to the message was interrupted"
         engine.emit(completed("t2", "MEIVA_DISPLAY_TO_USER\nhandled"))
         await node
+
+
+@pytest.mark.parametrize("with_chat", [False, True])
+async def test_resurrect_behind_passive_note_enters_and_settles_the_harness(
+    with_chat: bool,
+    redis_url: str,
+    db_conn: psycopg.Connection,
+    aops_pool: AsyncConnectionPool,
+    database_gate: ProcessDbGate,
+    hosted_resources: HostedTurnResources,
+) -> None:
+    agent_id = agent_row(db_conn)
+    note = insert_row(
+        db_conn,
+        agent_id,
+        "system_note",
+        "system",
+        "passive recovery note",
+        payload='{"passive": true, "note_tag": "lifecycle_restart"}',
+    )
+    control = insert_row(db_conn, agent_id, "resurrect", "system", "")
+    chat = insert_row(db_conn, agent_id, "chat", "user", "continue work") if with_chat else None
+    engine = silent_engine()
+    rt = Runtime(
+        context=_external_ctx(agent_id, aops_pool, database_gate, engine, hosted_resources)
+    )
+    state = AgentState(halted=True)
+    async with asyncio.timeout(30), asyncio.TaskGroup() as tasks:
+        entry = await claim_node(state, rt, config(agent_id))
+        assert entry.goto == "before_turn"
+        assert row_status(db_conn, control) == "done"
+        assert row_status(db_conn, note) == "pending"
+        turn_state = state.model_copy(update=entry.update or {})
+        assert [item["key"] for item in turn_state.harness_inputs] == [f"control-{control}"]
+        node = tasks.create_task(harness_turn_node(turn_state, rt, config(agent_id)))
+        await wait_until(lambda: bool(engine.delivered), "resurrect delivery")
+        [[sent]] = engine.delivered
+        assert str(turn_state.harness_inputs[0]["prompt"]) in sent.text
+        _assert_resurrect_input(db_conn, note, control, chat, sent)
+        engine.emit(*in_a_turn([sent.key], "MEIVA_DISPLAY_TO_USER\ncontinued"))
+        await node
+    assert len(engine.delivered) == 1
+    assert row_status(db_conn, note) == ("done" if with_chat else "pending")
+    if chat is not None:
+        assert row_status(db_conn, chat) == "done"
+
+
+def _assert_resurrect_input(
+    db_conn: psycopg.Connection, note: int, control: int, chat: int | None, sent: HarnessInput
+) -> None:
+    if chat is not None:
+        assert sent.key == input_key(chat)
+        assert sent.text.index("passive recovery note") < sent.text.index("continue work")
+        assert [row_status(db_conn, i) for i in (note, chat)] == ["claimed", "claimed"]
+    else:
+        assert sent.key == f"control-{control}"
+        assert row_status(db_conn, note) == "pending"

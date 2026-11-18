@@ -9,12 +9,13 @@ from typing import NamedTuple, TypeVar
 from weakref import WeakKeyDictionary
 
 import psycopg
+from psycopg import sql
 from psycopg.rows import class_row
 from psycopg_pool import AsyncConnectionPool, PoolTimeout
 
 from agent.ownership.inbound import lock_inbound_owner
 from base.agents.inbox.wake import publish_inbound_wake
-from base.agents.messages.inbound import InterruptReason, InterruptScope
+from base.agents.messages.inbound import InterruptReason, InterruptScope, not_passive_inbound
 from base.api_contracts.agent_contract import AgentStatus
 from base.db import Database
 from base.db.rows import IdRow, aquery_one
@@ -347,8 +348,9 @@ async def _refuse_unadmitted_lifecycle[RowT: tuple[object, ...]](
 #
 #     An external harness owns delivery of chat, system notes and heartbeats
 #     (`deliverable_by_harness`): the claim takes only the control rows in front
-#     of the first deliverable row, so control never overtakes queued input and
-#     queued input never overtakes control.
+#     of the first non-passive deliverable row. Passive rows wait to accompany
+#     a non-passive input and cannot block control; non-passive queued input
+#     and control retain their FIFO order.
 async def claim_inbound_batch(
     pool: AsyncConnectionPool,
     agent_id: int,
@@ -388,22 +390,25 @@ async def claim_inbound_batch(
         # the subquery's ORDER BY; Python-side sort by created_at re-imposes
         # FIFO.
         await cur.execute(
-            "UPDATE inbound_messages SET status = "
-            "CASE WHEN kind = 'chat' THEN 'claimed' ELSE 'done' END, "
-            "claimed_at = now() "
-            "WHERE id IN ("
-            "  SELECT id FROM inbound_messages "
-            "  WHERE status = 'pending' AND agent_id = %s "
-            "  AND claimed_at IS NULL "
-            "  AND (NOT %s OR kind NOT IN ('restart','terminate')) "
-            "  AND (NOT %s OR (kind NOT IN ('chat','system_note','heartbeat') AND NOT EXISTS ("
-            "    SELECT 1 FROM inbound_messages d WHERE d.agent_id = %s AND d.status = 'pending' "
-            "    AND d.kind IN ('chat','system_note','heartbeat') "
-            "    AND (d.created_at, d.id) < (inbound_messages.created_at, inbound_messages.id)"
-            "  ))) "
-            "  ORDER BY created_at ASC, id ASC "
-            "  FOR UPDATE SKIP LOCKED"
-            ") RETURNING id, agent_id, content, kind, source, payload, created_at, claimed_at",
+            sql.SQL(
+                "UPDATE inbound_messages SET status = "
+                "CASE WHEN kind = 'chat' THEN 'claimed' ELSE 'done' END, "
+                "claimed_at = now() "
+                "WHERE id IN ("
+                "  SELECT id FROM inbound_messages "
+                "  WHERE status = 'pending' AND agent_id = %s "
+                "  AND claimed_at IS NULL "
+                "  AND (NOT %s OR kind NOT IN ('restart','terminate')) "
+                "  AND (NOT %s OR (kind NOT IN ('chat','system_note','heartbeat') AND NOT EXISTS ("
+                "    SELECT 1 FROM inbound_messages d WHERE d.agent_id = %s AND d.status = 'pending' "
+                "    AND {not_passive} "
+                "    AND d.kind IN ('chat','system_note','heartbeat') "
+                "    AND (d.created_at, d.id) < (inbound_messages.created_at, inbound_messages.id)"
+                "  ))) "
+                "  ORDER BY created_at ASC, id ASC "
+                "  FOR UPDATE SKIP LOCKED"
+                ") RETURNING id, agent_id, content, kind, source, payload, created_at, claimed_at"
+            ).format(not_passive=sql.SQL(not_passive_inbound("d"))),
             (agent_id, runtime_owned, deliverable_by_harness, agent_id),
         )
         rows = await cur.fetchall()

@@ -136,13 +136,16 @@ describe("TurnBlock component", () => {
     expect(screen.getByText("live row")).toBeTruthy();
   });
 
-  it("renders PendingLiveActivityWindow as an inline unboxed header row", () => {
+  it("renders PendingLiveActivityWindow as an inline unboxed Working header row without a spinner", () => {
     render(<PendingLiveActivityWindow />);
     const pending = screen.getByTestId("pending-live-activity-window");
+    expect(pending.getAttribute("data-live-activity-window")).toBe("true");
+    expect(pending.getAttribute("role")).toBe("status");
     expect(pending.className).not.toContain("rounded-xl");
-    expect(pending.querySelector(".animate-spin")).toBeTruthy();
-    expect(pending.querySelector(".sr-only")?.textContent).toBe("Agent is responding.");
-    expect(pending.textContent).not.toContain("Working");
+    expect(pending.textContent).toBe("Working…");
+    expect(pending.querySelector("svg")).toBeTruthy();
+    expect(pending.querySelector(".animate-spin")).toBeNull();
+    expect(pending.querySelector("button")).toBeNull();
   });
 
   it("skips re-rendering when a regroup rebuilds equal member ids and summary", () => {
