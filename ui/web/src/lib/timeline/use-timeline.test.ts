@@ -513,6 +513,71 @@ describe("timeline ownership when a transport ignores abort", () => {
       fault.respond(tlResp([]));
     }
   });
+
+  it("cancelBackgroundOlderLoad aborts in-flight background requests without touching reader requests", async () => {
+    const bgFault = new UncancellableFetch();
+    const readerFault = new UncancellableFetch();
+    let beforeCall = 0;
+    standingTimelineAnswer = resolves(tlResp([snapshotItem({ item_id: "10.0", payload: "tail" })], true));
+    rig = httpRig({
+      base: gateway.origin,
+      fetch: (url, init) => {
+        if (typeof url !== "string") throw new Error("the gateway factory must send a URL string");
+        if (!new URL(url).searchParams.has("before")) return realNetwork.fetch(url, init);
+        beforeCall += 1;
+        return beforeCall === 1 ? bgFault.fetch(url, init) : readerFault.fetch(url, init);
+      },
+      now: () => performance.now(),
+      keys: systemKeySource(),
+      openUpload: noUpload,
+    });
+    const showError = vi.fn();
+    try {
+      const view = renderHook(() => useTimeline(1, showError), { wrapper });
+      await waitFor(() => expect(view.result.current.hasMoreOlder).toBe(true));
+
+      act(() => view.result.current.loadOlder("background"));
+      await waitFor(() =>
+        expect(rig.sent.filter((s) => new URL(s.url).searchParams.has("before"))).toHaveLength(1),
+      );
+      expect(view.result.current.loadingOlder).toBe(true);
+
+      let cancelled = false;
+      act(() => {
+        cancelled = view.result.current.cancelBackgroundOlderLoad();
+      });
+      expect(cancelled).toBe(true);
+      expect(view.result.current.loadingOlder).toBe(false);
+      expect(rig.sent.find((s) => new URL(s.url).searchParams.has("before"))?.init.signal?.aborted).toBe(true);
+
+      act(() => view.result.current.loadOlder("reader"));
+      await waitFor(() =>
+        expect(rig.sent.filter((s) => new URL(s.url).searchParams.has("before"))).toHaveLength(2),
+      );
+      expect(view.result.current.loadingOlder).toBe(true);
+
+      let cancelledReader = false;
+      act(() => {
+        cancelledReader = view.result.current.cancelBackgroundOlderLoad();
+      });
+      expect(cancelledReader).toBe(false);
+      expect(view.result.current.loadingOlder).toBe(true);
+      expect(rig.sent.filter((s) => new URL(s.url).searchParams.has("before"))[1]?.init.signal?.aborted).toBe(false);
+
+      await act(async () => {
+        bgFault.respond(tlResp([snapshotItem({ item_id: "1.0", payload: "stale bg" })]));
+        readerFault.respond(tlResp([snapshotItem({ item_id: "5.0", payload: "manual page" })], true));
+        await Promise.resolve();
+      });
+      await waitFor(() => expect(view.result.current.loadingOlder).toBe(false));
+      expect(view.result.current.items.some((item) => item.payload === "manual page")).toBe(true);
+      expect(view.result.current.items.some((item) => item.payload === "stale bg")).toBe(false);
+      expect(showError).not.toHaveBeenCalled();
+    } finally {
+      bgFault.respond(tlResp([]));
+      readerFault.respond(tlResp([]));
+    }
+  });
 });
 
 const testContext: UseTimelineTestContext = {

@@ -12,6 +12,7 @@ import {
   readReloadBookmark,
   RELOAD_RESTORE_MAX_OLDER_ITEMS,
   RELOAD_RESTORE_MAX_OLDER_PAGES,
+  RELOAD_RESTORE_SEARCH_TIMEOUT_MS,
   reloadBookmarkToSavedScroll,
   removeReloadBookmark,
   type ReloadReadingBookmark,
@@ -250,6 +251,7 @@ export function useReloadBookmarkRestore({
   hasMoreOlder,
   loadingOlder,
   onLoadOlder,
+  onCancelBackgroundLoadOlder,
   pendingRef,
   settledRef,
   holdRef,
@@ -271,6 +273,7 @@ export function useReloadBookmarkRestore({
   hasMoreOlder: boolean;
   loadingOlder: boolean;
   onLoadOlder?: (origin: OlderLoadOrigin) => void;
+  onCancelBackgroundLoadOlder?: () => boolean;
   pendingRef: RefObject<SavedScroll | null>;
   settledRef: RefObject<SavedScroll | null>;
   holdRef: RefObject<boolean>;
@@ -430,13 +433,69 @@ export function useReloadBookmarkRestore({
     }
   }
 
-  const cancelReloadSearch = useCallback(() => {
+  const activeSearchRequestRef = useRef(false);
+  useLayoutEffect(() => {
+    activeSearchRequestRef.current =
+      phase.kind === "searching" && phase.requestedBeforeId !== null;
+  }, [phase]);
+
+  const cancelReloadSearch = useCallback((): boolean => {
+    let abortedBackground = false;
+    if (activeSearchRequestRef.current) {
+      activeSearchRequestRef.current = false;
+      abortedBackground = onCancelBackgroundLoadOlder?.() === true;
+      pendingAnchorRef.current = null;
+    }
     setPhase((prev) =>
       prev.kind === "waiting_settings" || prev.kind === "searching"
         ? { kind: "idle", threadKey: prev.threadKey, seq: prev.seq + 1 }
         : prev,
     );
-  }, []);
+    return abortedBackground;
+  }, [onCancelBackgroundLoadOlder, pendingAnchorRef]);
+
+  const searchTimeoutMs =
+    reloadRestore.state === "enabled"
+      ? (reloadRestore.searchTimeoutMs ?? RELOAD_RESTORE_SEARCH_TIMEOUT_MS)
+      : RELOAD_RESTORE_SEARCH_TIMEOUT_MS;
+  const waitingOrSearching =
+    phase.kind === "waiting_settings" ||
+    (phase.kind === "searching" && !loading && restoreReady);
+  const phaseRequestedBeforeId =
+    phase.kind === "searching" ? phase.requestedBeforeId : null;
+  useEffect(() => {
+    if (!waitingOrSearching || searchTimeoutMs <= 0) return;
+    const timedSeq = phase.seq;
+    const hadRequest =
+      phase.kind === "searching" && phaseRequestedBeforeId !== null;
+    const timer = setTimeout(() => {
+      if (hadRequest) {
+        activeSearchRequestRef.current = false;
+        onCancelBackgroundLoadOlder?.();
+        pendingAnchorRef.current = null;
+      }
+      setPhase((prev) =>
+        (prev.kind === "waiting_settings" || prev.kind === "searching") &&
+        prev.seq === timedSeq
+          ? {
+              kind: "abandoned",
+              threadKey: prev.threadKey,
+              seq: prev.seq + 1,
+              clearStoredBookmark: false,
+            }
+          : prev,
+      );
+    }, searchTimeoutMs);
+    return () => clearTimeout(timer);
+  }, [
+    waitingOrSearching,
+    phase.kind,
+    phase.seq,
+    phaseRequestedBeforeId,
+    searchTimeoutMs,
+    onCancelBackgroundLoadOlder,
+    pendingAnchorRef,
+  ]);
 
   const appliedSeqRef = useRef(0);
   useLayoutEffect(() => {

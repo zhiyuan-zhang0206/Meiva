@@ -110,7 +110,7 @@ type TimelineViewState = Pick<
   | "error"
   | "isFetching"
   | "retryTimeline"
->;
+> & Partial<Pick<UseTimelineResult, "cancelBackgroundOlderLoad">>;
 
 // meiva:note
 // Every field is one source's value, read once by the route: a hook's result narrowed to what the
@@ -401,6 +401,7 @@ function HomeContent({
     loadingOlder,
     readerLoadingOlder,
     loadOlder,
+    cancelBackgroundOlderLoad,
     isLoading,
     sourceReady,
     retainedItemsMax,
@@ -530,6 +531,7 @@ function HomeContent({
             loadingOlder={loadingOlder}
             readerLoadingOlder={readerLoadingOlder}
             onLoadOlder={loadOlder}
+            onCancelBackgroundLoadOlder={cancelBackgroundOlderLoad}
             retainedItemsMax={retainedItemsMax}
             loading={isLoading || (agentsLoading && activeId === null)}
             maxWidthCss={contentColumnMaxWidth}

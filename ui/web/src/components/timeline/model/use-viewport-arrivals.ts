@@ -132,6 +132,8 @@ export function useSendAnchor({
   const keepReserve = useRef(false);
   const reserveEnabled = useCallback(() => keepReserve.current, []);
   const parkedTarget = useRef<ReadingTarget | null>(null);
+  const autoSendParkedRef = useRef(false);
+  const isSendAnchored = useCallback(() => autoSendParkedRef.current && controller.isAnchored(), [controller]);
 
   const writeReserve = useCallback((viewport: HTMLElement, node: HTMLElement | null) => {
     const reserve = reserveRef.current;
@@ -149,7 +151,10 @@ export function useSendAnchor({
     const row = latestTarget && rowFor(viewport, latestTarget);
     if (row || latestTarget !== reserveTarget.current || !keepReserve.current) writeReserve(viewport, row);
     reserveTarget.current = latestTarget;
-    if (!controller.isAnchored()) parkedTarget.current = null;
+    if (!controller.isAnchored()) {
+      parkedTarget.current = null;
+      autoSendParkedRef.current = false;
+    }
     const parked = parkedTarget.current !== null && parkedTarget.current === latestTarget;
     if (row && parked) {
       // meiva:note
@@ -165,13 +170,15 @@ export function useSendAnchor({
     return parked;
   }, [controller, latestTarget, topOffset, writeReserve]);
 
-  const park = useCallback((viewport: HTMLElement, row: HTMLElement) => {
+  const park = useCallback((viewport: HTMLElement, row: HTMLElement, automatic = false) => {
     cancelBookmark();
     materializeBeforeAnchor(viewport, row);
     writeReserve(viewport, row);
     viewport.scrollTop = parkScrollTop(viewport.scrollTop + offsetInViewport(viewport, row), topOffset);
     controller.notifyAnchored(snapshotOf(viewport));
-    parkedTarget.current = latestTarget && rowFor(viewport, latestTarget) === row ? latestTarget : null;
+    const parked = latestTarget && rowFor(viewport, latestTarget) === row ? latestTarget : null;
+    parkedTarget.current = parked;
+    autoSendParkedRef.current = automatic && parked !== null;
     measureAtBottom();
   }, [cancelBookmark, controller, latestTarget, measureAtBottom, topOffset, writeReserve]);
 
@@ -182,7 +189,7 @@ export function useSendAnchor({
       if (offsetInViewport(viewport, row) <= topOffset + 1) return false;
       if (!keepReserve.current && viewport.scrollTop + offsetInViewport(viewport, row) - topOffset >=
           viewport.scrollHeight - viewport.clientHeight) return false;
-      park(viewport, row);
+      park(viewport, row, false);
     } else {
       if (!latestRowBelowWindow) return false;
       cancelBookmark();
@@ -194,6 +201,7 @@ export function useSendAnchor({
   const cancelPendingJump = useCallback(() => {
     pendingSend.current = undefined;
     parkedTarget.current = null;
+    autoSendParkedRef.current = false;
     setPendingJump(null);
   }, []);
 
@@ -204,6 +212,7 @@ export function useSendAnchor({
     pendingSend.current = undefined;
     reserveTarget.current = null;
     parkedTarget.current = null;
+    autoSendParkedRef.current = false;
     keepReserve.current = savedSendReserve ?? turnActive;
   }, [threadKey, savedSendReserve, turnActive]);
 
@@ -215,6 +224,7 @@ export function useSendAnchor({
     if (!keepReserve.current || viewport.scrollTop > Math.max(0, naturalEnd)) return;
     keepReserve.current = false;
     parkedTarget.current = null;
+    autoSendParkedRef.current = false;
     writeReserve(viewport, null);
   }, [writeReserve]);
 
@@ -244,7 +254,7 @@ export function useSendAnchor({
           const rank = compactBuffer?.rows.find((row) => row.item === item)?.rank ?? parseItemIdParts(item.item_id)?.rank ?? 0;
           const target = { id: item.item_id, rank };
           const row = rowFor(viewport, target);
-          if (row) park(viewport, row);
+          if (row) park(viewport, row, true);
           else setPendingJump({ target, automatic: true, threadKey });
         }
       }
@@ -254,7 +264,7 @@ export function useSendAnchor({
       const row = rowFor(viewport, pendingJump.target);
       if (pendingJump.automatic && !isFollowing()) setPendingJump(null);
       else if (row) {
-        park(viewport, row);
+        park(viewport, row, pendingJump.automatic);
         setPendingJump(null);
       }
     }
@@ -267,5 +277,14 @@ export function useSendAnchor({
   });
 
   const pendingTarget = pendingJump?.threadKey === threadKey ? pendingJump?.target ?? null : null;
-  return { latestTarget, pendingTarget, jumpToLatestHuman, cancelPendingJump, maintain, releaseReserve, reserveEnabled };
+  return {
+    latestTarget,
+    pendingTarget,
+    jumpToLatestHuman,
+    cancelPendingJump,
+    maintain,
+    releaseReserve,
+    reserveEnabled,
+    isSendAnchored,
+  };
 }

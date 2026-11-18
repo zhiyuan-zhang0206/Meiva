@@ -144,28 +144,25 @@ function ZoomableMarkdownImg({
   const close = useCallback(() => setOpen(false), [setOpen]);
   const imgRef = useRef<HTMLImageElement>(null);
 
+  // meiva:note
+  // Standalone Markdown images remain phrasing <img> elements inside <p> with pointer click-to-zoom only.
+  // eslint-disable-next-line jsx-a11y/click-events-have-key-events, jsx-a11y/no-noninteractive-element-interactions
+  const img = <img
+    {...props}
+    ref={imgRef}
+    src={src}
+    alt={alt}
+    className={cn("cursor-zoom-in [a_&]:cursor-pointer", props.className)}
+    onClick={(event) => {
+      props.onClick?.(event);
+      if (event.defaultPrevented || event.currentTarget.closest("a")) return;
+      setOpen(true);
+    }}
+  />;
+
   return (
     <>
-      <img
-        {...props}
-        ref={imgRef}
-        src={src}
-        alt={alt}
-        className={cn("cursor-zoom-in [a_&]:cursor-pointer", props.className)}
-        onClick={(event) => {
-          props.onClick?.(event);
-          if (event.defaultPrevented || event.currentTarget.closest("a")) return;
-          setOpen(true);
-        }}
-        onKeyDown={(event) => {
-          props.onKeyDown?.(event);
-          if (event.defaultPrevented || event.currentTarget.closest("a")) return;
-          if (event.key === "Enter" || event.key === " ") {
-            event.preventDefault();
-            setOpen(true);
-          }
-        }}
-      />
+      {img}
       <ImageLightbox open={open} onClose={close} src={src} alt={alt} triggerRef={imgRef} />
     </>
   );

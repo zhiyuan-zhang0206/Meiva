@@ -26,6 +26,7 @@ export const RELOAD_BOOKMARK_TTL_MS = 7 * 24 * 60 * 60 * 1000;
 // meiva:link ui/web/src/docs/frontend-components/timeline-view/sticky-scroll.md
 export const RELOAD_RESTORE_MAX_OLDER_PAGES = 5;
 export const RELOAD_RESTORE_MAX_OLDER_ITEMS = 250;
+export const RELOAD_RESTORE_SEARCH_TIMEOUT_MS = 10_000;
 
 export interface ReloadReadingBookmark {
   readonly readingLocator?: string;
@@ -47,6 +48,7 @@ export type ReloadRestoreConfig =
       readonly now: () => number;
       readonly maxOlderPages?: number;
       readonly maxOlderItems?: number;
+      readonly searchTimeoutMs?: number;
     };
 
 function isReloadReadingBookmark(value: unknown): value is ReloadReadingBookmark {
@@ -128,6 +130,7 @@ export function readReloadBookmark(
 }
 
 const lastWrittenCache = new WeakMap<BrowserStorage, Map<string, ReloadReadingBookmark>>();
+const knownClearedCache = new WeakMap<BrowserStorage, Set<string>>();
 
 function sameBookmarkTarget(a: ReloadReadingBookmark, b: ReloadReadingBookmark): boolean {
   return (
@@ -149,6 +152,7 @@ export function saveReloadBookmark(
   now: number,
 ): void {
   if (!agentKey || !isReloadReadingBookmark(bookmark)) return;
+  knownClearedCache.get(session)?.delete(agentKey);
   let perSession = lastWrittenCache.get(session);
   if (!perSession) {
     perSession = new Map();
@@ -177,13 +181,31 @@ export function removeReloadBookmark(
   agentKey: string,
   now: number,
 ): void {
+  if (!agentKey) return;
+  let cleared = knownClearedCache.get(session);
+  if (cleared?.has(agentKey)) return;
   lastWrittenCache.get(session)?.delete(agentKey);
-  const remaining = readPrunedBookmarkEntries(session, now).filter(([key]) => key !== agentKey);
-  if (remaining.length === 0) {
-    session.remove(RELOAD_BOOKMARKS_STORAGE_KEY);
+  const entries = readPrunedBookmarkEntries(session, now);
+  if (!entries.some(([key]) => key === agentKey)) {
+    if (!cleared) {
+      cleared = new Set();
+      knownClearedCache.set(session, cleared);
+    }
+    cleared.add(agentKey);
     return;
   }
-  session.write(RELOAD_BOOKMARKS_STORAGE_KEY, JSON.stringify(Object.fromEntries(remaining)));
+  const remaining = entries.filter(([key]) => key !== agentKey);
+  const status =
+    remaining.length === 0
+      ? session.remove(RELOAD_BOOKMARKS_STORAGE_KEY)
+      : session.write(RELOAD_BOOKMARKS_STORAGE_KEY, JSON.stringify(Object.fromEntries(remaining)));
+  if (status === "stored" || status === "removed") {
+    if (!cleared) {
+      cleared = new Set();
+      knownClearedCache.set(session, cleared);
+    }
+    cleared.add(agentKey);
+  }
 }
 
 function findItemReadingLocator(
@@ -269,6 +291,19 @@ export function reloadBookmarkToSavedScroll(
 
 export function oldestReloadCursorId(items: readonly BackendTimelineItem[]): string | null {
   return findOldestTimelineCursor(items)?.item_id ?? null;
+}
+
+// meiva:note
+// Following the live tail or auto-parking on a new send clears any prior
+// cross-reload reading anchor so a subsequent reload loads the latest tail
+// page directly without triggering background `before=` backfill.
+// meiva:link ui/web/src/docs/frontend-state/scroll-memory.md
+export function clearTimelineReloadPosition(
+  contentKey: string,
+  reloadRestore: ReloadRestoreConfig,
+): void {
+  if (reloadRestore.state !== "enabled" || !contentKey) return;
+  removeReloadBookmark(reloadRestore.session, contentKey, reloadRestore.now());
 }
 
 // meiva:note

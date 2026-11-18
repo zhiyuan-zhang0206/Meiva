@@ -238,6 +238,7 @@ export function homePageProps(): HomePageProps {
       loadingOlder: false,
       readerLoadingOlder: false,
       loadOlder: state.loadOlder,
+      cancelBackgroundOlderLoad: () => false,
       isLoading: false,
       sourceReady: true,
       retainedItemsMax: 0,
