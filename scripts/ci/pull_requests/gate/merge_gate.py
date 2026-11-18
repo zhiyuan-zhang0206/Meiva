@@ -6,7 +6,7 @@
 # current directory, so a wrapper has to start inside a checkout. It prints the evidence per
 # condition and one verdict line; exit 0 = GO, 1 = NO-GO, and an unreadable check is NO-GO.
 #
-#   1 head    the PR body pins `Preflight on head <headRefOid>:` and carries `PREFLIGHT PASS`
+#   1 head    the PR body carries a passing `diff-checks/v1 @<headRefOid>` receipt
 #   2 checks  every check run is green (Trunk queue rows ignored; no check run at all = NO-GO)
 #   3 files   the files the PR touches and the files main moved since the PR's base are disjoint,
 #             except the owed-pyright list and the generated pyproject region (`SHARED_ALLOWED`);
@@ -291,23 +291,111 @@ def intersection_verdict(shared: Iterable[str], *, truncated: bool) -> str | Non
     return None
 
 
+class DiffChecksReceipt(NamedTuple):
+    # meiva:note
+    # One `diff-checks/v1` receipt line parsed from a pull-request body.
+
+    sha: str
+    tokens: tuple[str, ...]
+    raw_line: str
+
+
+_RECEIPT_RE = re.compile(r"diff-checks/v1 @([0-9a-fA-F]+)(?:\s+([^\n`]*))?")
+_PREFLIGHT_PIN_RE = re.compile(r"Preflight on head\s+`?([0-9a-fA-F]{7,40})`?")
+_NONZERO_TEST_RE = re.compile(r"^(\d+)tests$")
+_PYRIGHT_CLOSURE_RE = re.compile(r"\((\d+)in-closure,")
+_RETIRED_TRUNK_MARKER = "PREFLIGHT PASS: /trunk merge is allowed"
+_RECEIPT_GENERATOR = "scripts/hooks/diff_checks.py"
+
+
+def diff_checks_receipts(body: str) -> list[DiffChecksReceipt]:
+    receipts: list[DiffChecksReceipt] = []
+    for line in body.splitlines():
+        found = _RECEIPT_RE.search(line)
+        if found is None:
+            continue
+        rest = (found.group(2) or "").strip()
+        tokens = tuple(part for part in rest.split() if part)
+        receipts.append(DiffChecksReceipt(sha=found.group(1), tokens=tokens, raw_line=line))
+    return receipts
+
+
+def _field_failure(key: str, value: str) -> str | None:
+    if value.startswith(("failed(", "unreadable(", "broken(")) or value == "n/a(broken)":
+        return f"diff-checks/v1 receipt on current head is not green ({key}={value})"
+    if key in ("failed", "errors"):
+        match = _NONZERO_TEST_RE.match(value)
+        if match and int(match.group(1)) > 0:
+            return f"diff-checks/v1 receipt on current head reports {key}={value}"
+    if key == "err_in_this_diff" and value.isdigit() and int(value) > 0:
+        return f"diff-checks/v1 receipt on current head reports {key}={value}"
+    if key == "closure" and value == "unknown":
+        return "diff-checks/v1 receipt on current head has closure=unknown"
+    if key == "pyright":
+        closure_match = _PYRIGHT_CLOSURE_RE.search(value)
+        if closure_match and int(closure_match.group(1)) > 0:
+            return (
+                f"diff-checks/v1 receipt on current head reports pyright closure errors ({value})"
+            )
+    return None
+
+
+def receipt_failure(receipt: DiffChecksReceipt) -> str | None:
+    fields: dict[str, str] = {}
+    for token in receipt.tokens:
+        key, sep, value = token.partition("=")
+        if sep:
+            fields[key] = value
+    if not fields.get("base"):
+        return "diff-checks/v1 receipt on current head is missing base="
+    if fields.get("generated") != _RECEIPT_GENERATOR:
+        return f"diff-checks/v1 receipt on current head is missing generated={_RECEIPT_GENERATOR}"
+    for key, value in fields.items():
+        reason = _field_failure(key, value)
+        if reason is not None:
+            return reason
+    fallback = fields.get("fallback", "")
+    for key in ("selector", "blind"):
+        value = fields.get(key, "")
+        if value.startswith("BLIND("):
+            if not fallback.startswith("RAN("):
+                return (
+                    "diff-checks/v1 receipt on current head has blind selection without fallback "
+                    f"({key}={value})"
+                )
+            if fields.get("failed") != "0tests" or fields.get("errors") != "0tests":
+                return (
+                    "diff-checks/v1 receipt on current head has blind fallback without clean test "
+                    f"counts (failed={fields.get('failed', 'missing')}, "
+                    f"errors={fields.get('errors', 'missing')})"
+                )
+    return None
+
+
 # meiva:note
 # Conditions 1 and 4 read the pull-request body, which is where this repository records both the
-# preflight result and authorship: a squash merge keeps the body and drops the head commit
+# `diff-checks/v1` receipt and authorship: a squash merge keeps the body and drops the head commit
 # message. See `trailer_sets` for the authorship half.
 def preflight_verdict(body: str, head_sha: str, *, reviewer: bool) -> str | None:
     if reviewer:
         return None
-    if (
-        f"Preflight on head {head_sha}:" in body
-        and "PREFLIGHT PASS: /trunk merge is allowed" in body
-    ):
-        return None
-    stale = [line for line in body.splitlines() if line.startswith("Preflight on head")]
-    if not stale:
-        return "preflight PASS is not pinned to the current head"
-    pinned = stale[-1][len("Preflight on head ") :][:12]
-    return f"preflight PASS is not pinned to the current head (body pins {pinned}...)"
+    receipts = diff_checks_receipts(body)
+    current = [receipt for receipt in receipts if receipt.sha == head_sha]
+    if current:
+        return receipt_failure(current[-1])
+    if receipts:
+        pinned = receipts[-1].sha[:12]
+        return f"diff-checks/v1 receipt is not pinned to the current head (body pins {pinned}...)"
+    if _RETIRED_TRUNK_MARKER in body:
+        return (
+            "retired PREFLIGHT PASS is no longer accepted; "
+            "attach a diff-checks/v1 receipt for the current head"
+        )
+    stale_pins = [match.group(1) for match in _PREFLIGHT_PIN_RE.finditer(body)]
+    if stale_pins:
+        pinned = stale_pins[-1][:12]
+        return f"diff-checks/v1 receipt is not pinned to the current head (body pins {pinned}...)"
+    return "diff-checks/v1 receipt is not pinned to the current head"
 
 
 # meiva:note
@@ -473,16 +561,23 @@ def closed_verdict(pull: PullRequest) -> int | None:
 
 
 def report_preflight(pull: PullRequest, *, reviewer: bool) -> str | None:
-    print("\n[1] head-pinned preflight")
-    line_ok = f"Preflight on head {pull.head_sha}:" in pull.body
-    pass_ok = "PREFLIGHT PASS: /trunk merge is allowed" in pull.body
-    print(f"    head line present: {line_ok} | PASS line present: {pass_ok}")
-    printed = [line for line in pull.body.splitlines() if line.startswith("Preflight on head")]
+    print("\n[1] head-pinned diff-checks/v1 receipt")
+    verdict = preflight_verdict(pull.body, pull.head_sha, reviewer=False)
+    receipts = diff_checks_receipts(pull.body)
+    head_ok = any(receipt.sha == pull.head_sha for receipt in receipts)
+    receipt_ok = verdict is None
+    print(f"    head receipt present: {head_ok} | receipt valid: {receipt_ok}")
+    printed = [
+        line
+        for line in pull.body.splitlines()
+        if _RECEIPT_RE.search(line) is not None or line.startswith("Preflight on head")
+    ]
     for line in printed[-3:]:
         print(f"    body: {line}")
-    if reviewer and not (line_ok and pass_ok):
+    if reviewer and not receipt_ok:
         print("    WAIVED: no preflight convention outside the lanes -- reviewed by hand")
-    return preflight_verdict(pull.body, pull.head_sha, reviewer=reviewer)
+        return None
+    return verdict
 
 
 def report_checks(api: GhApi, full_name: str, head_sha: str) -> str | None:

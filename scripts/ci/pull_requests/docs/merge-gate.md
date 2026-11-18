@@ -7,7 +7,7 @@ truncated comparison refuses the merge rather than passing it.
 
 | # | Condition | Why it exists |
 |---|---|---|
-| 1 | The body pins `Preflight on head <headRefOid>:` and carries `PREFLIGHT PASS` | A preflight result belongs to one commit; a body that still pins an older head proves nothing about this one |
+| 1 | The body carries a passing `diff-checks/v1 @<headRefOid>` receipt | A `diff-checks/v1` receipt belongs to one commit; it proves local static gates (`pyright`/`ruff`/`meizel`/`debt`/`docs-refs`) and absence of unbacked `BLIND(...)` selector gaps, while condition 2 enforces the full CI test matrix |
 | 2 | Every check run is green | Trunk queue rows are skipped (the queue is retired); one name keeps only its latest run by `started_at`, so an older cancelled duplicate cannot block a head a newer run passed |
 | 3 | The pull request and current main touch disjoint files | An empty intersection makes the merge trivially clean |
 | 4 | The body carries a where_used line and a behaviour section | Both are lane conventions the reviewer would otherwise check by hand |
@@ -39,7 +39,7 @@ risk is a pull request opened by the user's own session on that same prefix.
 ## Two records the gate reads in the body
 
 A squash merge keeps the pull-request body and drops the head commit message, and
-this repository records authorship and the preflight result in the body. The
+this repository records authorship and the `diff-checks/v1` receipt in the body. The
 trailer scan therefore reads the commit messages and the body together: scanning
 commits alone reported "no trailer" for a pull request whose body ended with one.
 Widening what counts cannot refuse a lane the gate used to accept.
@@ -106,7 +106,19 @@ A host installs them once:
    (development): the shell resolves `merge_gate.py` from there, deployed first, and prints the
    chosen module with its short HEAD sha on stderr. `MEIVA_GATE_MODULE` overrides both.
 
-`preflight.sh` (the operator script that runs the lane's checks) is deliberately not in this
-repository yet: it is a hand-maintained list of gates that changes faster than this module, and
-moving it here would give it a stability the list does not have. Its own replacement is a
-separate decision.
+`scripts/hooks/diff_checks.py` produces the `diff-checks/v1 @<headRefOid>` receipt that
+condition 1 checks. Boundary with condition 2:
+
+- Condition 1 verifies the receipt format (`base=` and `generated=scripts/hooks/diff_checks.py`),
+  local static gates (`pyright`, `ruff`, `meizel`, `debt`, `docs-refs`, with no `failed(...)`,
+  `unreadable(...)`, `broken(...)`, `closure=unknown`, nonzero test failures/errors, or nonzero
+  `in-closure` / `err_in_this_diff` pyright counts), and that any selector blind spot
+  (`selector=BLIND(...)` or `blind=BLIND(...)`) ran a green fallback (`fallback=RAN(...)` with
+  `failed=0tests` and `errors=0tests`).
+- `tests=skipped(--skip-tests)` is accepted in condition 1 per
+  `docs/conventions/engineering/failure-output-carries-the-why.md` §6 when GitHub Actions CI
+  covers the test matrix; condition 2 (`check runs`) hard-gates that the full CI suite on the
+  current head is green.
+
+The retired Trunk-era `preflight.sh` and `PREFLIGHT PASS: /trunk merge is allowed` literal are
+no longer accepted.

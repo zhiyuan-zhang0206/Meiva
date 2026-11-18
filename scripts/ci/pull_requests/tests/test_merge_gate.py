@@ -69,9 +69,49 @@ def green_runs() -> dict[str, Any]:
     }
 
 
-def passing_body(trailer: str = "Co-authored-by: Meiva #7381") -> str:
+def passing_receipt(
+    head: str = HEAD,
+    *,
+    overrides: Mapping[str, str] | None = None,
+    include_base: bool = True,
+    include_generator: bool = True,
+) -> str:
+    fields: dict[str, str] = {
+        "scope": "python",
+        "pyright": "0err(0s)",
+        "err_in_this_diff": "0",
+        "closure": "n/a(the-tree-was-green)",
+        "ruff": "ok(0s)",
+        "selector": "SELECTED:1files",
+        "tests": "RAN(1files)",
+        "passed": "20tests(1s)",
+        "failed": "0tests",
+        "errors": "0tests",
+        "blind": "n/a(no-changed-file-was-invisible)",
+        "fallback": "n/a(the-selection-was-not-blind)",
+        "vitest-app": "n/a(no-web-tree-file)",
+        "next-build": "n/a(not-the-app-router)",
+        "meizel": "ok(exit=0,779manifests,1edges)(0s)",
+        "debt": "n/a(no-manifest-changed)",
+        "docs-refs": "n/a(no-doc-touched)",
+    }
+    if overrides:
+        fields.update(overrides)
+    parts = [f"diff-checks/v1 @{head}"]
+    if include_base:
+        parts.append(f"base={BASE}")
+    parts.extend(f"{key}={value}" for key, value in fields.items())
+    if include_generator:
+        parts.append("generated=scripts/hooks/diff_checks.py")
+    return " ".join(parts)
+
+
+def passing_body(
+    trailer: str = "Co-authored-by: Meiva #7381", *, receipt: str | None = None
+) -> str:
+    line = passing_receipt() if receipt is None else receipt
     return (
-        f"Preflight on head {HEAD}: PREFLIGHT PASS: /trunk merge is allowed\n"
+        f"{line}\n"
         "\nwhere_used: scripts/ci/pull_requests/gate/merge_gate.py\n"
         "\n## Behaviour\n\nthe gate refuses what it cannot read\n"
         f"\n{trailer}\n"
@@ -210,17 +250,122 @@ def test_a_truncated_compare_is_refused(tmp_path: Path) -> None:
 
 
 def test_a_preflight_pinned_to_another_head_is_refused(tmp_path: Path) -> None:
-    body = passing_body().replace(HEAD, "9" * 40, 1)
+    body = passing_body(receipt=passing_receipt(head="9" * 40))
     done = run_gate(tmp_path, world(pull=view(body=body)))
     assert done.returncode == 1
     assert "body pins 999999999999..." in done.stdout
 
 
-def test_a_body_without_the_lane_conventions_is_refused(tmp_path: Path) -> None:
+def test_a_missing_receipt_is_refused(tmp_path: Path) -> None:
     body = (
-        f"Preflight on head {HEAD}: PREFLIGHT PASS: /trunk merge is allowed\n"
+        "\nwhere_used: scripts/ci/pull_requests/gate/merge_gate.py\n"
+        "\n## Behaviour\n\nno receipt\n"
         "\nCo-authored-by: Meiva #7381\n"
     )
+    done = run_gate(tmp_path, world(pull=view(body=body)))
+    assert done.returncode == 1
+    assert "diff-checks/v1 receipt is not pinned to the current head" in done.stdout
+
+
+def test_the_retired_trunk_preflight_pass_literal_is_refused(tmp_path: Path) -> None:
+    body = passing_body(
+        receipt=f"Preflight on head {HEAD}: PREFLIGHT PASS: /trunk merge is allowed"
+    )
+    done = run_gate(tmp_path, world(pull=view(body=body)))
+    assert done.returncode == 1
+    assert "retired PREFLIGHT PASS is no longer accepted" in done.stdout
+
+
+@pytest.mark.parametrize(
+    ("include_base", "include_generator", "expected_fragment"),
+    [
+        (False, True, "missing base="),
+        (True, False, "missing generated=scripts/hooks/diff_checks.py"),
+    ],
+)
+def test_an_incomplete_receipt_without_base_or_generator_is_refused(
+    tmp_path: Path, include_base: bool, include_generator: bool, expected_fragment: str
+) -> None:
+    body = passing_body(
+        receipt=passing_receipt(include_base=include_base, include_generator=include_generator)
+    )
+    done = run_gate(tmp_path, world(pull=view(body=body)))
+    assert done.returncode == 1
+    assert expected_fragment in done.stdout
+
+
+@pytest.mark.parametrize(
+    "bad_fields",
+    [
+        {"ruff": "failed(1)(0s)"},
+        {"meizel": "failed(exit=1,779manifests,1edges)(0s)"},
+        {"debt": "unreadable(no-table)(1s)"},
+        {"tests": "broken(no-report)", "passed": "n/a(broken)", "failed": "n/a(broken)"},
+        {"failed": "2tests"},
+        {"errors": "1tests"},
+        {"err_in_this_diff": "1"},
+        {"closure": "unknown"},
+        {"pyright": "1err(1in-closure,0elsewhere:none)(1s)", "err_in_this_diff": "1"},
+        {
+            "selector": "BLIND(dyn.py)",
+            "blind": "BLIND(dyn.py)",
+            "fallback": "n/a(a-blind-selection-has-no-fallback-yet)",
+        },
+        {
+            "blind": "BLIND(dyn.py)",
+            "fallback": "n/a(a-blind-selection-has-no-fallback-yet)",
+        },
+        {
+            "selector": "BLIND(dyn.py)",
+            "blind": "BLIND(dyn.py)",
+            "fallback": "RAN(domain)",
+            "failed": "n/a(no-test-ran)",
+            "errors": "n/a(no-test-ran)",
+        },
+    ],
+)
+def test_a_failing_or_broken_receipt_is_refused(
+    tmp_path: Path, bad_fields: Mapping[str, str]
+) -> None:
+    body = passing_body(receipt=passing_receipt(overrides=bad_fields))
+    done = run_gate(tmp_path, world(pull=view(body=body)))
+    assert done.returncode == 1
+    assert "diff-checks/v1 receipt on current head" in done.stdout
+
+
+@pytest.mark.parametrize(
+    "receipt_line",
+    [
+        f"Preflight on head {HEAD}: `{passing_receipt()}`",
+        f"- `{passing_receipt()}`",
+        passing_receipt(
+            overrides={
+                "pyright": "9err(0in-closure,9elsewhere:other.py)(1s)",
+                "err_in_this_diff": "0",
+                "tests": "skipped(--skip-tests)",
+                "passed": "n/a(no-test-ran)",
+                "failed": "n/a(no-test-ran)",
+                "errors": "n/a(no-test-ran)",
+            }
+        ),
+        passing_receipt(
+            overrides={
+                "selector": "BLIND(dyn.py)",
+                "blind": "BLIND(dyn.py)",
+                "fallback": "RAN(domain)",
+            }
+        ),
+    ],
+)
+def test_supported_passing_receipt_formats_go(tmp_path: Path, receipt_line: str) -> None:
+    body = passing_body(receipt=receipt_line)
+    done = run_gate(tmp_path, world(pull=view(body=body)))
+    assert done.returncode == 0, done.stdout + done.stderr
+    assert f"GO: four conditions hold (head {HEAD[:12]}, main {MAIN[:12]})" in done.stdout
+
+
+def test_a_body_without_the_lane_conventions_is_refused(tmp_path: Path) -> None:
+    body = f"{passing_receipt()}\n\nCo-authored-by: Meiva #7381\n"
     done = run_gate(tmp_path, world(pull=view(body=body)))
     assert done.returncode == 1
     assert "body has no where_used" in done.stdout
