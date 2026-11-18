@@ -251,7 +251,9 @@ def _reject_first_page(page: Page, before_requests: list[str], paused_routes: li
         content_type="application/json",
     )
     page.get_by_text("Checkpoint history unavailable", exact=True).wait_for()
-    expect(page.get_by_role("alert")).to_contain_text("Could not restore your reading position")
+    expect(page.get_by_test_id("timeline-surface").get_by_role("alert")).to_contain_text(
+        "Could not restore your reading position"
+    )
     _ = page.evaluate(
         "() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)))"
     )
