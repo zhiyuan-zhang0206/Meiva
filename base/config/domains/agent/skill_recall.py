@@ -121,14 +121,20 @@ class AgentSkillRecallSettings(EnvSettings):
 
     skill_recall_deadline_seconds: float = Field(
         title="Skill suggestion timeout (seconds)",
-        default=3.0,
+        default=6.0,
         gt=0,
         alias="MEIVA_SKILL_RECALL_DEADLINE_SECONDS",
         description=(
             "Wall-clock budget (seconds) for one skill-recall pass. Recall runs before the LLM "
             "on every person- or schedule-woken turn, so a slow decision provider must not hold "
             "the turn: when the deadline expires the turn proceeds with no skill note and the "
-            "next one tries again. Independent of memory_recall_deadline_seconds."
+            "next one tries again. Independent of memory_recall_deadline_seconds. Set to 6.0 "
+            "(2026-11-18) because the default skill_recall_model, gemini-decision-1, has a long "
+            "tail: its completed recall calls over 24h (n=471) all finished under the old 3.0s "
+            "cut (max 2.98s, i.e. the slower ones were cut off), and its memory-rerank calls on "
+            "the same model (n=1722) ran p95 3.1s / p99 7.7s, with 5.6% over 3s and 2.2% over "
+            "6s. 6.0s keeps the bound on the turn's first LLM call while no longer dropping the "
+            "tail a 3.0s cut drops."
         ),
         json_schema_extra={
             "restart_required": "agent",
@@ -208,13 +214,18 @@ class AgentSkillRecallSettings(EnvSettings):
 
     skill_recall_peer_gate_deadline_seconds: float = Field(
         title="Peer message screening timeout (seconds)",
-        default=3.0,
+        default=6.0,
         gt=0,
         alias="MEIVA_SKILL_RECALL_PEER_GATE_DEADLINE_SECONDS",
         description=(
-            "Wall-clock budget (seconds) for the peer gate. Matched to "
-            "skill_recall_deadline_seconds (3.0s) so transient provider tail latency does not "
-            "drop peer skill recall before scoring."
+            "Timeout (seconds) of the peer gate's one decision request, applied by the HTTP "
+            "client to connecting and to each read; a timeout skips skill recall for that turn. "
+            "Set to 6.0 (2026-11-18): at 3.0s, 178 of 819 "
+            "gate attempts in 24h (21.7%, every machine between 17% and 26%) ended in a "
+            "ReadTimeout or ConnectTimeout on gemini-decision-1, although the completed calls "
+            "ran p95 1.67s; the misses were the model's tail (its memory-rerank calls run p99 "
+            "7.7s). Matched to skill_recall_deadline_seconds, the same model's budget for the "
+            "recall pass the gate guards."
         ),
         json_schema_extra={
             "restart_required": "agent",
