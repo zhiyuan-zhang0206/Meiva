@@ -42,6 +42,72 @@ FAST_PRICES = {
             ),
         ),
     ),
+    "gpt-6.2-sol": PriceRates(
+        cache_miss=4,
+        cache_hit=0.2,
+        output=20,
+        cache_write_30m=5.00,
+        source_url="https://developers.openai.com/api/docs/pricing",
+        source_checked_at="2026-11-18",
+        vendor="openai",
+        periods=(
+            PricePeriod(
+                effective_from=None,
+                effective_until=None,
+                tiers=(
+                    PriceTier(
+                        input_tokens_min=0,
+                        input_tokens_max=272000,
+                        cache_miss="4",
+                        cache_hit="0.2",
+                        output="20",
+                        cache_write_30m="5.00",
+                    ),
+                    PriceTier(
+                        input_tokens_min=272001,
+                        input_tokens_max=None,
+                        cache_miss="8",
+                        cache_hit="0.4",
+                        output="30",
+                        cache_write_30m="10.00",
+                    ),
+                ),
+            ),
+        ),
+    ),
+    "gpt-6.2-astra": PriceRates(
+        cache_miss=16,
+        cache_hit=0.8,
+        output=80,
+        cache_write_30m=20.00,
+        source_url="https://developers.openai.com/api/docs/pricing",
+        source_checked_at="2026-11-18",
+        vendor="openai",
+        periods=(
+            PricePeriod(
+                effective_from=None,
+                effective_until=None,
+                tiers=(
+                    PriceTier(
+                        input_tokens_min=0,
+                        input_tokens_max=272000,
+                        cache_miss="16",
+                        cache_hit="0.8",
+                        output="80",
+                        cache_write_30m="20.00",
+                    ),
+                    PriceTier(
+                        input_tokens_min=272001,
+                        input_tokens_max=None,
+                        cache_miss="32",
+                        cache_hit="1.6",
+                        output="120",
+                        cache_write_30m="40.00",
+                    ),
+                ),
+            ),
+        ),
+    ),
     "gpt-6.1-sol": PriceRates(
         cache_miss=4,
         cache_hit=0.2,

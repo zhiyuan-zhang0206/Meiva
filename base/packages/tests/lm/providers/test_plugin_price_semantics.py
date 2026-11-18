@@ -95,6 +95,16 @@ def test_new_model_rates_and_272k_boundary(model_catalog: ModelCatalog) -> None:
             Rates(2.0, 0.10, 7.5, cache_write_30m=2.5),
         ),
         (
+            "gpt-6.2-sol",
+            Rates(2.0, 0.10, 10.0, cache_write_30m=2.5),
+            Rates(4.0, 0.20, 15.0, cache_write_30m=5),
+        ),
+        (
+            "gpt-6.2-astra",
+            Rates(8.0, 0.40, 40.0, cache_write_30m=10),
+            Rates(16.0, 0.80, 60.0, cache_write_30m=20),
+        ),
+        (
             "gpt-6-luna",
             Rates(0.10, 0.01, 0.50, cache_write_30m=0.125),
             Rates(0.20, 0.02, 0.75, cache_write_30m=0.25),
