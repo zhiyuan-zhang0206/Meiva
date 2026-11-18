@@ -2,7 +2,7 @@
 
 import { QueryClientProvider, useQuery, useQueryClient, type QueryClient } from "@tanstack/react-query";
 import { act, cleanup, render, screen, waitFor } from "@testing-library/react";
-import { useEffect } from "react";
+import { createContext, useContext, useEffect, useState } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 
@@ -27,8 +27,9 @@ import { setSessionInvalidHandler, useAuth } from "@/lib/auth/auth-context";
 import { useNonce } from "@/lib/auth/nonce-context";
 import { useApi } from "@/lib/transport/transport-context";
 import { fakeNavigation } from "@/lib/browser/navigation/testing";
-import type { ThemeRuntime } from "@/lib/layout/theme-runtime";
-import { transport as fakeTransport } from "@/test-support/fake-api";
+import type { ThemeMode, ThemeRuntime } from "@/lib/layout/theme-runtime";
+import { SETTINGS_QUERY_KEY } from "@/lib/state/use-user-settings";
+import { resetTransport, transport as fakeTransport } from "@/test-support/fake-api";
 import { fakeStreamHub } from "@/test-support/fake-stream";
 
 import { createQueryClient, Providers } from "./providers";
@@ -41,7 +42,10 @@ const navigation = fakeNavigation();
 const clients = new Set<QueryClient>();
 const originalLang = document.documentElement.lang;
 
-beforeEach(() => { vi.clearAllMocks(); });
+beforeEach(() => {
+  vi.clearAllMocks();
+  resetTransport();
+});
 
 afterEach(() => {
   cleanup();
@@ -193,5 +197,85 @@ describe("Providers", () => {
     );
 
     expect(screen.getByTestId("nonce-probe").textContent).toBe("request-nonce");
+  });
+
+  it("does not reverse-overwrite setTheme on cross-tab storage sync and invalidates user-settings once", async () => {
+    let notifyExternalStorage: ((next: ThemeMode) => void) | null = null;
+    const setTheme = vi.fn<(next: ThemeMode) => void>();
+    const ThemeCtx = createContext<ThemeMode>("system");
+    const dynamicTheme: ThemeRuntime = {
+      Provider: ({ children }) => {
+        const [mode, setMode] = useState<ThemeMode>("system");
+        useEffect(() => {
+          setTheme.mockImplementation((next: ThemeMode) => setMode(next));
+          notifyExternalStorage = (next: ThemeMode) => setMode(next);
+          return () => {
+            notifyExternalStorage = null;
+          };
+        }, []);
+        return <ThemeCtx.Provider value={mode}>{children}</ThemeCtx.Provider>;
+      },
+      useResolvedTheme: () => (useContext(ThemeCtx) === "light" ? "light" : "dark"),
+      useThemeMode: () => ({ theme: useContext(ThemeCtx), setTheme }),
+    };
+
+    let serverTheme: ThemeMode = "system";
+    fakeTransport.getSettings.mockImplementation(() =>
+      Promise.resolve({
+        settings: [{ key: "display.theme", value: serverTheme, updated_at: "2026-11-18T00:00:00Z" }],
+      }),
+    );
+
+    let capturedClient: QueryClient | null = null;
+    function ClientCapture() {
+      const client = useQueryClient();
+      useEffect(() => {
+        clients.add(client);
+        capturedClient = client;
+      }, [client]);
+      return null;
+    }
+
+    const hub = fakeStreamHub().hub;
+    render(
+      <Providers client={fakeTransport} hub={hub} navigation={navigation} theme={dynamicTheme}>
+        <ClientCapture />
+      </Providers>,
+    );
+
+    await waitFor(() =>
+      expect(capturedClient?.getQueryState(SETTINGS_QUERY_KEY)?.status).toBe("success"),
+    );
+    expect(fakeTransport.getSettings).toHaveBeenCalledTimes(1);
+    expect(setTheme).not.toHaveBeenCalled();
+
+    // meiva:note
+    // Simulate another tab updating DB `display.theme` to `"light"` and broadcasting
+    // `localStorage.theme = "light"` via `storage` while this tab's query cache is still `"system"`.
+    // Repeated external updates before refetch settles must neither reverse-call `setTheme("system")` nor storm `getSettings`.
+    serverTheme = "light";
+    act(() => {
+      notifyExternalStorage?.("light");
+    });
+    act(() => {
+      notifyExternalStorage?.("light");
+    });
+
+    expect(setTheme).not.toHaveBeenCalled();
+    await waitFor(() => expect(fakeTransport.getSettings).toHaveBeenCalledTimes(2));
+    await waitFor(() =>
+      expect(
+        capturedClient?.getQueryData<Record<string, unknown>>(SETTINGS_QUERY_KEY)?.["display.theme"],
+      ).toBe("light"),
+    );
+    expect(setTheme).not.toHaveBeenCalled();
+
+    // meiva:note
+    // An explicit local `display.theme` change in this tab still calls `setTheme` immediately.
+    act(() => {
+      capturedClient?.setQueryData(SETTINGS_QUERY_KEY, { "display.theme": "dark" });
+    });
+    await waitFor(() => expect(setTheme).toHaveBeenCalledTimes(1));
+    expect(setTheme).toHaveBeenLastCalledWith("dark");
   });
 });
