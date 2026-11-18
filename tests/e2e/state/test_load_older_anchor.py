@@ -195,10 +195,14 @@ def _run_rounds(
                 break
             page.wait_for_timeout(200)
         if n <= before_n:
-            rest = gateway_get(
-                f"{gateway_url}/api/agents/{agent_id}/timeline?limit=1000",
-                timeout=30.0,
-            ).json()["items"]
+            rest = [
+                it
+                for it in gateway_get(
+                    f"{gateway_url}/api/agents/{agent_id}/timeline?limit=1000",
+                    timeout=30.0,
+                ).json()["items"]
+                if it["kind"] != "system_prompt"
+            ]
             if before_n < len(rest):
                 raise AssertionError(
                     f"round {round_no}: a released pull did not load more history; "
@@ -289,6 +293,12 @@ class _SavedReading(TypedDict):
     offset: float
 
 
+def _confirmed_anchor_item(window: ReadingWindow) -> TimelineItem:
+    matches = [row for row in window.items if row.item_id == window.anchor_item_id]
+    assert window.reading_source and len(matches) == 1
+    return matches[0]
+
+
 def _read_tail_then_reload(env: E2EEnv, tail: TimelineItem) -> None:
     page = env.page
     viewport = page.locator('[data-slot="scroll-area-viewport"]').filter(
@@ -327,8 +337,7 @@ def _read_tail_then_reload(env: E2EEnv, tail: TimelineItem) -> None:
             timeout=30.0,
         ).json()
     )
-    assert bound.reading_source and len(bound.items) == 1
-    member = bound.items[0]
+    member = _confirmed_anchor_item(bound)
     assert member.item_id == saved["item_id"] and member.reading_locator == saved["locator"]
     assert member.source_message_id and member.source_block_idx is not None
     with page.expect_response(
@@ -342,16 +351,18 @@ def _read_tail_then_reload(env: E2EEnv, tail: TimelineItem) -> None:
         _ = page.reload()
     assert selected.value.ok
     restored = ReadingWindow.model_validate(selected.value.json())
-    matches = [row for row in restored.items if row.item_id == restored.anchor_item_id]
-    assert restored.reading_source and len(matches) == 1
-    actual = matches[0]
+    actual = _confirmed_anchor_item(restored)
     assert (actual.source_message_id, actual.source_block_idx) == (
         member.source_message_id,
         member.source_block_idx,
     )
     assert actual.reading_locator == saved["locator"] and restored.older_cursor
     expect(page.get_by_test_id("cold-load-ring")).to_have_count(0)
-    offset = page.locator(f'.timeline-item[data-item-id="{actual.item_id}"]').evaluate(
+    selector = (
+        f'.timeline-item[data-item-id="{actual.item_id}"], '
+        f'[data-turn-expanded="false"][data-item-id="{actual.item_id}"]'
+    )
+    offset = page.locator(selector).evaluate(
         "node => node.getBoundingClientRect().top - node.closest('[data-slot=scroll-area-viewport]').getBoundingClientRect().top"
     )
     assert abs(float(offset) - saved["offset"]) <= 1
@@ -411,7 +422,7 @@ def test_load_older_preserves_reading_position(e2e_env: E2EEnv) -> None:
         n = page.evaluate(
             "Number(document.querySelector('[role=log]')?.dataset.timelineItemCount ?? 0)"
         )
-        if n > 50:
+        if n >= 50:
             break
         page.wait_for_timeout(300)
     assert n >= 50, f"scenario timeline too short to page: {n} items"

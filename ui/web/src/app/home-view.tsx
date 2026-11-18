@@ -34,7 +34,7 @@ import type { Harness } from "@/lib/harness/harness";
 import { useMobileAttention } from "@/lib/notifications/use-mobile-attention";
 import { useQuestions } from "@/lib/notifications/use-questions";
 import type { useInspectorOpen } from "@/lib/inspector/inspector-panel-store";
-import { FLEX, FLEX_1, FLEX_COL, MIN_H_0, MIN_W_0, OVERFLOW_HIDDEN } from "@/lib/layout/layout";
+import { BAR_CLEAR_TOP_OFFSET_CLASS, FLEX, FLEX_1, FLEX_COL, MIN_H_0, MIN_W_0, OVERFLOW_HIDDEN } from "@/lib/layout/layout";
 import type { useBreakpoint } from "@/lib/layout/breakpoint";
 import type { Store } from "@/lib/state/store";
 import type { useUserSettings } from "@/lib/state/use-user-settings";
@@ -509,11 +509,15 @@ function HomeContent({
     <section className={cn("relative", FLEX, MIN_H_0, FLEX_1, MIN_W_0, OVERFLOW_HIDDEN)}>
       <ErrorBoundary diagnostics={diagnostics}>
         <div data-testid="timeline-surface" className={cn("relative", FLEX, FLEX_COL, FLEX_1, MIN_H_0, MIN_W_0)}>
-          {reading?.error && <div className="mx-4 mt-14 mb-2">
-            <InlineError onRetry={reading.retry} retryLabel={timelineText("retryLoad")} detail={errMsg(reading.error)}>
-              {readingFailureText}
-            </InlineError>
-          </div>}
+          {reading?.error && (
+            <div className={cn("pointer-events-none absolute inset-x-0 z-30 justify-center px-3", BAR_CLEAR_TOP_OFFSET_CLASS, FLEX)}>
+              <div className="pointer-events-auto max-w-[min(100%,42rem)]">
+                <InlineError surface="floating" role="alert" onRetry={reading.retry} retryLabel={timelineText("retryLoad")} detail={errMsg(reading.error)}>
+                  {readingFailureText}
+                </InlineError>
+              </div>
+            </div>
+          )}
           {reading && !reading.parked && reading.saveStatus === "unsaved" &&
             <div role="status" className="pointer-events-none absolute right-4 top-14 z-20 rounded bg-background px-2 py-1 text-xs text-muted-foreground">
               {timelineText("readingUnsaved")}

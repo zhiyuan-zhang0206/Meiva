@@ -153,6 +153,8 @@ geometry. Pending background confirmation has no persistent status overlay;
 unsaved feedback lets pointer input through except for its explicit Retry action.
 
 Parked pages request the source-issued `before` cursor through `/timeline/window`.
-A refused page preserves the existing pages/bookmark and settles loading. A new
-explicit pull may retry that cursor; coordinate conflicts still require the
-explicit last-visible source reanchor before paging can continue.
+A refused page preserves the existing pages/bookmark, settles loading, and floats
+its retryable alert below the header bar without displacing the rendered timeline
+or intercepting surrounding clicks. A new explicit pull may retry that cursor;
+coordinate conflicts still require the explicit last-visible source reanchor
+before paging can continue.

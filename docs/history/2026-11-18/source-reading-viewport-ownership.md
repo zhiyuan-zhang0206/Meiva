@@ -61,3 +61,18 @@ source-issued backward paging. This preserves the original pull threshold,
 refusal and item/offset assertions without assuming that reload means tail.
 The original failed browser evidence is retained; direct controls do not replace
 the required rerun of those browser consumers.
+
+
+A second Linux browser pass confirmed eight of the ten failures resolved and
+isolated two remaining consumer boundaries plus an alert-overlay displacement:
+
+- An anchored `/timeline/window` request uses the 50-item default limit and
+  keeps complete source rows intact. Each native reload reply therefore emits
+  108 primary blocks so a single restored row crosses the 100-row virtualization
+  threshold after reload.
+- A `limit=1` anchor probe also keeps its multi-block source row intact and
+  identifies the exact block via `anchor_item_id`; paging assertions compare
+  non-prompt source counts because navigation windows omit `system_prompt`.
+- Home reading errors now float below the header bar with pointer passthrough
+  outside the alert card, so a refused older-page pull never pushes the
+  mounted timeline down.

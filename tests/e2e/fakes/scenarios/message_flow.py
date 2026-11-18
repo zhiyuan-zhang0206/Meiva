@@ -55,9 +55,10 @@ def build(model: str, *, agent_id: int | None) -> ScriptedFakeChatModel:
 
 def build_reading_reload(model: str, *, agent_id: int | None) -> ScriptedFakeChatModel:
     # meiva:note
-    # Three native replies produce 108 primary rows, crossing the unchanged
-    # 100-row window threshold. The final block is tall enough to read inside;
-    # its stable message identity and block index reach the real Saver/HTTP path.
+    # Each native reply produces 108 primary rows so one anchored 50-item source
+    # window keeps the whole row and crosses the 100-row window threshold. The
+    # final block is tall enough to read inside; its stable message identity and
+    # block index reach the real Saver/HTTP path.
     # meiva:link ui/web/src/docs/frontend-state/timeline-cache.md
     return ScriptedFakeChatModel(
         script=tuple(
@@ -69,9 +70,9 @@ def build_reading_reload(model: str, *, agent_id: int | None) -> ScriptedFakeCha
                             "text": user_facing(f"Reading context {number}, block {block}."),
                             "index": block,
                         }
-                        for block in range(35)
+                        for block in range(107)
                     ]
-                    + [{"type": "text", "text": user_facing(reply), "index": 35}]
+                    + [{"type": "text", "text": user_facing(reply), "index": 107}]
                 ),
                 usage_metadata=_USAGE,
             )

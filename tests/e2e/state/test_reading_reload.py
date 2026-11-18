@@ -66,9 +66,9 @@ def _read_inside_reply(page: Page, agent: int, item: dict[str, Any]) -> dict[str
     )
     viewport.hover()
     page.mouse.wheel(0, 100_000)
-    page.locator(f'.timeline-item[data-item-id="{item["item_id"]}"]').wait_for(
-        state="attached", timeout=15_000
-    )
+    target = page.locator(f'.timeline-item[data-item-id="{item["item_id"]}"]')
+    target.wait_for(state="attached", timeout=15_000)
+    target.scroll_into_view_if_needed()
     page.evaluate(
         """id => {
       const viewport = document.querySelector('[role=log]').closest('[data-slot=scroll-area-viewport]');
