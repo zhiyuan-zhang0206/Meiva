@@ -11,6 +11,7 @@ from base.lm.harness.antigravity.transcript.file import AntigravityRecordFile
 from base.lm.harness.antigravity.transcript.window import EntryParser
 from base.lm.harness.antigravity.transport import AgyTransport
 from base.lm.harness.session.transcript.entries import Reasoning
+from base.lm.harness.session.transcript.record_file import UnreadRows
 
 FAKE_CLI = Path(__file__).with_name("fake_agy.py")
 
@@ -139,7 +140,7 @@ async def test_existing_trajectory_rpc_collects_native_timing_without_another_rp
         assert measured.steps[0].thinking_ms == 30265
         assert timing_path(path).is_file()
         assert len(calls.read_text().splitlines()) == 1
-        entries = EntryParser().entries(AntigravityRecordFile(path).rows_after(0).rows)
+        entries = EntryParser(UnreadRows()).entries(AntigravityRecordFile(path).rows_after(0).rows)
         assert isinstance(entries[0], Reasoning) and entries[0].duration_ms == 30265
         assert path.read_text() == raw
     finally:

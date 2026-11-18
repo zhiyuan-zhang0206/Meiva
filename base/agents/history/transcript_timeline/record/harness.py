@@ -10,7 +10,7 @@ from base.lm.harness.antigravity.transcript.file import AntigravityRecordFile
 from base.lm.harness.claude.transcript import window as claude
 from base.lm.harness.codex.transcript import window as codex
 from base.lm.harness.session.transcript.entries import AnyEntry, InputRow
-from base.lm.harness.session.transcript.record_file import FileRow, RecordFile
+from base.lm.harness.session.transcript.record_file import FileRow, RecordFile, UnreadRows
 
 # meiva:note
 # What differs between the CLIs whose timeline is read from their own record, chosen by the harness: where the record
@@ -27,14 +27,14 @@ class EntryReader(Protocol):
     def entries(self, rows: Sequence[FileRow]) -> tuple[AnyEntry, ...]: ...
 
 
-def entry_reader(harness: str) -> EntryReader:
+def entry_reader(harness: str, unread: UnreadRows) -> EntryReader:
     match Harness(harness):
         case Harness.CLAUDE_CODE:
-            return claude.EntryParser()
+            return claude.EntryParser(unread)
         case Harness.CODEX:
-            return codex.EntryParser()
+            return codex.EntryParser(unread)
         case Harness.ANTIGRAVITY:
-            return antigravity.EntryParser()
+            return antigravity.EntryParser(unread)
         case other:
             raise ValueError(f"the timeline of harness {other.value!r} is not read from its record")
 

@@ -34,7 +34,6 @@ from pydantic import ValidationError
 from base import paths
 from base.agents.context.clients import ClientSet
 from base.agents.to_user.limits import to_user_limits_from_read_model
-from base.agents.upload_delivery.paths import MAX_AGENT_UPLOAD_BYTES, MAX_AGENT_UPLOAD_FILES
 from base.api_contracts.agent_contract import MeivaAgentError
 from base.api_contracts.launch_retry import LaunchReconcileRequest
 from base.cluster.dataplane.direct_url import ClusterDirectUrl
@@ -52,10 +51,10 @@ from base.db import Database
 from base.db.code_version_gate import ProcessDbGate
 from base.db.config import db_config_from_boot
 from base.db.transaction import write_transaction
-from base.host.db_authority.unit import UnitIdentity
 from base.host.exit_codes import hard_exit
 from base.host.system.hostport import Host
 from base.lm.catalog import ModelCatalog
+from base.lm.harness.session.transcript.record_file import UnreadRows
 from base.native_process.code_version import CodeVersion
 from base.native_process.loaded_commit import LoadedCommit
 from base.packages.plugin_providers import build_model_catalog
@@ -112,6 +111,7 @@ async def run_arm(
     home: Path,
     receiver: ReceiverConfig,
     agent_host: ServiceEndpoint,
+    unread: UnreadRows,
 ) -> tuple[OpStatus, dict[str, object]]:
 
     loop = asyncio.get_running_loop()
@@ -134,6 +134,7 @@ async def run_arm(
                 home=home,
                 receiver=receiver,
                 agent_host=agent_host,
+                unread=unread,
             ),
         )
         in_flight.track_worker(future, workers=workers)
@@ -157,6 +158,7 @@ def _dispatch_in_thread(
     home: Path,
     receiver: ReceiverConfig,
     agent_host: ServiceEndpoint,
+    unread: UnreadRows,
 ) -> tuple[OpStatus, dict[str, object]]:
 
     return dispatch_sync(
@@ -173,6 +175,7 @@ def _dispatch_in_thread(
         home=home,
         receiver=receiver,
         agent_host=agent_host,
+        unread=unread,
         now=cluster_now(),
     )
 
@@ -195,6 +198,7 @@ async def dispatch(
     home: Path,
     receiver: ReceiverConfig,
     agent_host: ServiceEndpoint,
+    unread: UnreadRows,
 ) -> tuple[OpStatus, dict[str, object]]:
 
     if not is_op_kind(kind):
@@ -267,6 +271,7 @@ async def dispatch(
                     home=home,
                     receiver=receiver,
                     agent_host=agent_host,
+                    unread=unread,
                 )
     except (
         MeivaAgentError,
@@ -297,6 +302,7 @@ async def dispatch_idempotent(
     home: Path,
     receiver: ReceiverConfig,
     agent_host: ServiceEndpoint,
+    unread: UnreadRows,
     dedup_wait_attempts: int = DEDUP_WAIT_ATTEMPTS,
     dedup_wait_step_s: float = DEDUP_WAIT_STEP_S,
     retry_backoff_s: float = DISPATCH_RETRY_BACKOFF_S,
@@ -325,6 +331,7 @@ async def dispatch_idempotent(
                 home=home,
                 receiver=receiver,
                 agent_host=agent_host,
+                unread=unread,
                 dedup_wait_attempts=dedup_wait_attempts,
                 dedup_wait_step_s=dedup_wait_step_s,
             )
@@ -359,6 +366,7 @@ async def dispatch_idempotent_pass(
     home: Path,
     receiver: ReceiverConfig,
     agent_host: ServiceEndpoint,
+    unread: UnreadRows,
     dedup_wait_attempts: int = DEDUP_WAIT_ATTEMPTS,
     dedup_wait_step_s: float = DEDUP_WAIT_STEP_S,
 ) -> tuple[OpStatus, dict[str, object]]:
@@ -390,6 +398,7 @@ async def dispatch_idempotent_pass(
             home=home,
             receiver=receiver,
             agent_host=agent_host,
+            unread=unread,
         )
         status = OpStatus(status)
         with write_transaction(pool) as conn, conn.cursor() as cur:
@@ -440,6 +449,7 @@ async def ops_route(
     home: Path,
     receiver: ReceiverConfig,
     agent_host: ServiceEndpoint,
+    unread: UnreadRows,
 ) -> tuple[int, bytes, str]:
 
     request = ops_plan.read_request(body)
@@ -472,6 +482,7 @@ async def ops_route(
                         home=home,
                         receiver=receiver,
                         agent_host=agent_host,
+                        unread=unread,
                     )
                 else:
                     status, result = await dispatch(
@@ -491,29 +502,13 @@ async def ops_route(
                         home=home,
                         receiver=receiver,
                         agent_host=agent_host,
+                        unread=unread,
                     )
             except Exception as exc:
                 _log.exception("dispatch refused or crashed for kind=%s", envelope.kind)
                 status, result = ops_plan.failure_result(exc)
     reply = ops_plan.op_reply(OpStatus(status), result)
     return reply.status_code, reply.body, reply.content_type
-
-
-# meiva:note
-# What the upload receiver needs from its environment, read once by `main()`: this machine and home
-# as the unit identity (the delivered copy lands in the agent's workspace under that home), the
-# directory name the gateway names too, the gateway access `main()` built from this boot, and the
-# per-agent quota.
-def receiver_config(
-    *, machine: str, home: Path, access: GatewayAccess, upload_dir_name: str
-) -> ReceiverConfig:
-    return ReceiverConfig(
-        unit=UnitIdentity(machine=machine, home=str(home.resolve())),
-        upload_dir_name=upload_dir_name,
-        access=access,
-        quota_bytes=MAX_AGENT_UPLOAD_BYTES,
-        quota_files=MAX_AGENT_UPLOAD_FILES,
-    )
 
 
 async def serve_ops_daemon(
@@ -600,6 +595,7 @@ async def serve_ops_daemon(
                     home=home,
                     receiver=receiver,
                     agent_host=boot.agent_host_row(config, runtime=runtime_dir),
+                    unread=UnreadRows(),
                 ),
                 ("POST", "/to-user/resource"): functools.partial(
                     resource_route,
@@ -748,7 +744,7 @@ def main(*, argv: list[str]) -> None:
                     host=Host.system(environ=config.process_environment()),
                     rng=_new_rng(),
                     home=home,
-                    receiver=receiver_config(
+                    receiver=boot.receiver_config(
                         machine=machine.name(),
                         home=home,
                         access=access,

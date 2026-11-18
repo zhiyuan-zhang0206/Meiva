@@ -9,6 +9,7 @@ from base.agents.history.transcript_timeline.record.read import reasoning_refres
 from base.agents.history.transcript_timeline.tests.support import POLICY, window
 from base.lm.harness.antigravity.timing_store import store_timings, timing_path
 from base.lm.harness.antigravity.trajectory import parse_trajectory
+from base.lm.harness.session.transcript.record_file import UnreadRows
 
 
 def test_native_duration_revises_only_same_reasoning_id_and_survives_cold_restart(
@@ -53,7 +54,12 @@ def test_native_duration_revises_only_same_reasoning_id_and_survives_cold_restar
     store_timings(path, native)
     assert file.revision() != revision
     refresh = reasoning_refresh(
-        file, harness="antigravity", start=0, policy=POLICY, render_tool=format_tool_use
+        file,
+        harness="antigravity",
+        start=0,
+        policy=POLICY,
+        render_tool=format_tool_use,
+        unread=UnreadRows(),
     )
     assert len(refresh.items) == 1
     item = refresh.items[0].item
@@ -66,7 +72,12 @@ def test_native_duration_revises_only_same_reasoning_id_and_survives_cold_restar
     ]
     timing_path(path).unlink()
     lost = reasoning_refresh(
-        file, harness="antigravity", start=0, policy=POLICY, render_tool=format_tool_use
+        file,
+        harness="antigravity",
+        start=0,
+        policy=POLICY,
+        render_tool=format_tool_use,
+        unread=UnreadRows(),
     )
     assert lost.items[0].item.item_id == reasoning.item_id
     assert lost.items[0].item.reasoning_ms is None

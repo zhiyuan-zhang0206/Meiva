@@ -19,6 +19,7 @@ from psycopg_pool import ConnectionPool
 from base.agents.history.timeline_item import TimelineItem
 from base.db import create_agent
 from base.lm.harness.registry import FileSessionRegistry, SessionRecord
+from base.lm.harness.session.transcript.record_file import UnreadRows
 from base.paths import harness_sessions_dir
 from gateway.agents.history.timeline import TimelineResponse
 from gateway.tests.auth.gateway_config import GatewayTestClient, gateway_test_client
@@ -120,6 +121,7 @@ class RecordOperationRunner:
             home=self.home,
             environ=self.environ,
             pool=self.pool,
+            unread=UnreadRows(),
         )
         self.raw_pending = any(item.activity_pending for item in result.items)
         if self.on_dispatch is not None:

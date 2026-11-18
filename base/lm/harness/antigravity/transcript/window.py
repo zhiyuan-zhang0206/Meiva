@@ -27,6 +27,8 @@ from base.lm.harness.session.transcript.entries import (
 )
 from base.lm.harness.session.transcript.record_file import FileRow, UnreadRows, stamp_of
 
+CLI = "Antigravity"
+
 
 def wire_id(key: str) -> str:
     return key
@@ -53,14 +55,15 @@ class Call:
 # meiva:note
 # File offsets are identities; step_index can repeat or go backwards. Results follow calls in file order,
 # including through intervening task notices. Further results belong to the last call, not to a guessed step id.
-# The old event writer is not a fallback for a row this reader cannot recognise.
+# The old event writer is not a fallback for a row this reader cannot recognise. A row it cannot use is reported once
+# per kind by the `UnreadRows` of the process that reads.
 class EntryParser:
     pending_calls = False
 
-    def __init__(self) -> None:
+    def __init__(self, unread: UnreadRows) -> None:
         self._calls: tuple[Call, ...] = ()
         self._result = 0
-        self._unread = UnreadRows("Antigravity")
+        self._unread = unread
 
     def entries(self, rows: Sequence[FileRow]) -> tuple[AnyEntry, ...]:
         found: list[AnyEntry] = []
@@ -68,7 +71,7 @@ class EntryParser:
             entries = self._row(row)
             for entry in entries:
                 if isinstance(entry, Anomaly):
-                    self._unread.report(entry)
+                    self._unread.report(CLI, entry)
                 else:
                     found.append(entry)
         return tuple(found)

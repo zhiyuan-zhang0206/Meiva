@@ -33,6 +33,7 @@ from base.events.live.bus import EventBus
 from base.host.env import dotenv_file
 from base.host.system.hostport import Host
 from base.lm.catalog import ModelCatalog
+from base.lm.harness.session.transcript.record_file import UnreadRows
 from base.native_process.loaded_commit import LoadedCommit
 from base.native_process.os_platform import file_lock
 from base.paths import meiva_home, run_dir
@@ -90,6 +91,7 @@ class Ops:
     active_ops: daemon.ActiveOps = field(default_factory=dict)
     workers: in_flight.WorkerFutures = field(default_factory=set)
     requests: in_flight.RequestTokens = field(default_factory=set)
+    unread: UnreadRows = field(default_factory=UnreadRows)
 
     async def dispatch(
         self, kind: str, payload: dict[str, Any]
@@ -111,6 +113,7 @@ class Ops:
             home=self.home,
             receiver=self.receiver,
             agent_host=self.agent_host,
+            unread=self.unread,
         )
 
     async def run_arm(
@@ -132,6 +135,7 @@ class Ops:
             home=self.home,
             receiver=self.receiver,
             agent_host=self.agent_host,
+            unread=self.unread,
         )
 
     async def idempotent(
@@ -170,6 +174,7 @@ class Ops:
             home=self.home,
             receiver=self.receiver,
             agent_host=self.agent_host,
+            unread=self.unread,
             **tunables,
         )
 
@@ -201,6 +206,7 @@ class Ops:
             home=self.home,
             receiver=self.receiver,
             agent_host=self.agent_host,
+            unread=self.unread,
         )
 
 

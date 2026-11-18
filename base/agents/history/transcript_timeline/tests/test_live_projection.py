@@ -12,7 +12,7 @@ from base.agents.history.transcript_timeline.tests.support import (
     window,
 )
 from base.lm.harness.claude.transcript.window import EntryParser, wire_id
-from base.lm.harness.session.transcript.record_file import RecordFile
+from base.lm.harness.session.transcript.record_file import RecordFile, UnreadRows
 
 
 # meiva:note
@@ -21,7 +21,7 @@ class Follower:
     def __init__(self, file: RecordFile) -> None:
         self.file = file
         self.at = 0
-        self.parser = EntryParser()
+        self.parser = EntryParser(UnreadRows())
         self.projector = RecordProjector(
             policy=POLICY, render_tool=format_tool_use, wire_id=wire_id
         )
@@ -118,7 +118,7 @@ def test_a_reply_has_one_publication_identity_however_it_is_read(tmp_path: Path)
     follower = Follower(RecordFile(path))
     follower.read()
     again = RecordProjector(policy=POLICY, render_tool=format_tool_use, wire_id=wire_id)
-    entries = EntryParser().entries(RecordFile(path).rows_after(0).rows)
+    entries = EntryParser(UnreadRows()).entries(RecordFile(path).rows_after(0).rows)
     replay = again.feed(entries, tail=True, release_held=False).items
 
     def keys(items: list[ProjectedItem] | tuple[ProjectedItem, ...]) -> list[str]:

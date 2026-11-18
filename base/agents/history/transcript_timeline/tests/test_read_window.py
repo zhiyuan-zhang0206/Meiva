@@ -21,7 +21,7 @@ from base.agents.history.transcript_timeline.tests.support import (
     with_wire_ids,
     write,
 )
-from base.lm.harness.session.transcript.record_file import ZstdRecordFile
+from base.lm.harness.session.transcript.record_file import UnreadRows, ZstdRecordFile
 from base.log import logger
 
 BASIC_KINDS = [
@@ -173,6 +173,7 @@ def test_the_inbox_is_asked_only_about_a_stretch_with_a_persons_input(tmp_path: 
             policy=POLICY,
             render_tool=format_tool_use,
             load_sent=ask,
+            unread=UnreadRows(),
         )
 
     read("".join(line for line in lines if '"role":"user"' not in line or "tool_result" in line))

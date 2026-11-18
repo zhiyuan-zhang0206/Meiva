@@ -9,7 +9,7 @@ from base.agents.history.timeline_item import TimelineItem
 from base.agents.history.transcript_timeline.items import ReplyPolicy, format_tool_use
 from base.agents.history.transcript_timeline.record.read import Window, read_window
 from base.lm.harness.claude.delivery import key_uuid
-from base.lm.harness.session.transcript.record_file import RecordFile
+from base.lm.harness.session.transcript.record_file import RecordFile, UnreadRows
 
 FIXTURES = Path(__file__).parents[4] / "lm/harness/claude/transcript/tests/fixtures"
 POLICY = ReplyPolicy(explicit_visibility=False, delivery_mode=None)
@@ -60,6 +60,7 @@ def window(
     sent: Mapping[str, Sequence[TimelineItem]] | None = None,
     harness: str = "claude_code",
     anchor: int | None = None,
+    unread: UnreadRows | None = None,
 ) -> Window:
     return read_window(
         file,
@@ -70,6 +71,7 @@ def window(
         policy=POLICY,
         render_tool=format_tool_use,
         load_sent=lambda _until, _wanted: dict(sent or {}),
+        unread=unread if unread is not None else UnreadRows(),
     )
 
 

@@ -51,7 +51,7 @@ from base.lm.harness import (
     Usage,
 )
 from base.lm.harness.session.transcript.entries import InputRow
-from base.lm.harness.session.transcript.record_file import RecordFile
+from base.lm.harness.session.transcript.record_file import RecordFile, UnreadRows
 from base.native_process.turn_identity import HostedServiceResources
 from base.packages.composer_commands import CommandCatalog
 from base.packages.plugin_providers import build_model_catalog
@@ -478,6 +478,7 @@ async def read_recorded_items(
             policy=policy if policy is not None else ReplyPolicy(True, "prefix"),
             render_tool=format_tool_use,
             load_sent=load,
+            unread=UnreadRows(),
         ).timeline_items
 
 

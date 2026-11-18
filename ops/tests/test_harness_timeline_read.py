@@ -25,6 +25,7 @@ from base.db import create_agent
 from base.lm.harness.claude.delivery import key_uuid
 from base.lm.harness.registry import FileSessionRegistry, SessionRecord
 from base.lm.harness.session.transcript.entries import InputRow
+from base.lm.harness.session.transcript.record_file import UnreadRows
 from base.log.tests.log_records import LogRecords
 from base.log.tests.log_records import loguru_records as loguru_records
 from base.paths import harness_sessions_dir, workspace_dir
@@ -105,7 +106,7 @@ def test_a_real_record_is_projected_with_the_inbox_rows_that_sent_its_input(
     home = _session(tmp_path, agent, write_file=True)
 
     window = read_harness_timeline(
-        _request(agent), pool=pool, home=home, environ={"HOME": str(tmp_path)}
+        _request(agent), pool=pool, home=home, unread=UnreadRows(), environ={"HOME": str(tmp_path)}
     )
 
     kinds = [item.kind for item in window.items]
@@ -128,11 +129,13 @@ def test_a_session_with_no_record_or_no_file_yet_has_an_empty_timeline(
     agent = create_agent(db_conn)
     environ = {"HOME": str(tmp_path)}
     none = read_harness_timeline(
-        _request(agent), pool=pool, home=tmp_path / "home", environ=environ
+        _request(agent), pool=pool, home=tmp_path / "home", unread=UnreadRows(), environ=environ
     )
     assert (none.items, none.has_more, none.size) == ([], False, 0)
     home = _session(tmp_path, agent, write_file=False)
-    unwritten = read_harness_timeline(_request(agent), pool=pool, home=home, environ=environ)
+    unwritten = read_harness_timeline(
+        _request(agent), pool=pool, home=home, unread=UnreadRows(), environ=environ
+    )
     assert (unwritten.items, unwritten.has_more, unwritten.size) == ([], False, 0)
 
 
@@ -142,10 +145,16 @@ def test_a_page_before_an_item_ends_at_that_row(
     agent = create_agent(db_conn)
     home = _session(tmp_path, agent, write_file=True)
     environ = {"HOME": str(tmp_path)}
-    head = read_harness_timeline(_request(agent, limit=2), pool=pool, home=home, environ=environ)
+    head = read_harness_timeline(
+        _request(agent, limit=2), pool=pool, home=home, unread=UnreadRows(), environ=environ
+    )
     oldest = int(head.items[0].item_id.removeprefix("h").split(".")[0])
     page = read_harness_timeline(
-        _request(agent, limit=2, before=oldest), pool=pool, home=home, environ=environ
+        _request(agent, limit=2, before=oldest),
+        pool=pool,
+        home=home,
+        unread=UnreadRows(),
+        environ=environ,
     )
     assert head.has_more
     assert all(int(i.item_id.removeprefix("h").split(".")[0]) < oldest for i in page.items)
@@ -157,7 +166,11 @@ def test_a_native_harness_is_refused_by_the_external_record_reader(
     agent = create_agent(db_conn)
     with pytest.raises(ValueError, match="not read from its record"):
         _ = read_harness_timeline(
-            _request(agent, harness="meiva"), pool=pool, home=tmp_path, environ={}
+            _request(agent, harness="meiva"),
+            pool=pool,
+            home=tmp_path,
+            unread=UnreadRows(),
+            environ={},
         )
 
 
@@ -168,7 +181,7 @@ def test_a_message_queued_for_days_before_it_was_claimed_is_still_matched(
     queued = _claimed(db_conn, agent, "sent days ago", "k1", created="2026-11-07T08:56:50Z")
     home = _session(tmp_path, agent, write_file=True)
     window = read_harness_timeline(
-        _request(agent), pool=pool, home=home, environ={"HOME": str(tmp_path)}
+        _request(agent), pool=pool, home=home, unread=UnreadRows(), environ={"HOME": str(tmp_path)}
     )
     assert window.items[0].inbound_id == queued, "the wait does not matter, only the id"
 
@@ -226,6 +239,58 @@ def test_the_hosts_own_input_with_fewer_rows_than_a_batch_raises_no_warning(
         db_conn, agent, until=at, wanted={"host-own": InputRow(at)}, wire_id=key_uuid
     )
     assert found.rows == [] and loguru_records.events("harness_timeline_inputs_unmatched") == []
+
+
+# meiva:note
+# A text-bearing input (Antigravity) is settled by the inbox row its text matched, as an id is by the row that carries it:
+# the scan ends at the batch that holds it and does not run to the row cap for an input that was found.
+def test_an_input_matched_by_its_text_ends_the_scan_at_its_batch(
+    db_conn: psycopg.Connection, loguru_records: LogRecords
+) -> None:
+    agent = create_agent(db_conn)
+    _rows(db_conn, agent, 2500, "2026-11-20T00:00:00Z")
+    said = _claimed(db_conn, agent, "hello there", "k1")
+    at = datetime(2026, 11, 12, 8, 57, tzinfo=UTC)
+    found = load_sent_rows(
+        db_conn,
+        agent,
+        until=at,
+        wanted={"agy:100": InputRow(at, "<USER_REQUEST>hello there</USER_REQUEST>")},
+        wire_id=lambda key: key,
+    )
+    assert [(row.id, row.input_key) for row in found.rows] == [(said, "agy:100")]
+    assert found.scanned == BATCH_ROWS
+    assert loguru_records.events("harness_timeline_inputs_unmatched") == []
+
+
+# meiva:note
+# An input older than the oldest row the scan reached is outside the range the cap allows and is not a fault; one inside
+# the range that no row names is reported.
+def test_an_input_beyond_the_scanned_range_is_not_reported_and_one_within_it_is(
+    db_conn: psycopg.Connection, loguru_records: LogRecords
+) -> None:
+    agent = create_agent(db_conn)
+    _rows(db_conn, agent, 2500, "2026-11-20T00:00:00Z")
+    newest = datetime(2026, 11, 20, tzinfo=UTC)  # time-bomb-ok: rows of a fixed-date fixture
+    old = newest - timedelta(days=60)
+    beyond = load_sent_rows(
+        db_conn,
+        agent,
+        until=newest,
+        wanted={"agy:old": InputRow(old, "<USER_REQUEST>nothing like it</USER_REQUEST>")},
+        wire_id=lambda key: key,
+    )
+    assert beyond.scanned == MAX_ROWS
+    assert loguru_records.events("harness_timeline_inputs_unmatched") == []
+    within = load_sent_rows(
+        db_conn,
+        agent,
+        until=newest,
+        wanted={"agy:new": InputRow(newest, "<USER_REQUEST>nothing like it</USER_REQUEST>")},
+        wire_id=lambda key: key,
+    )
+    assert within.scanned == MAX_ROWS
+    assert len(loguru_records.events("harness_timeline_inputs_unmatched")) == 1
 
 
 def test_agy_text_matching_preserves_uploads_notes_and_page_identity(
@@ -312,6 +377,7 @@ def test_agy_text_matching_preserves_uploads_notes_and_page_identity(
             _request(agent, harness="antigravity", before=before, limit=limit),
             pool=pool,
             home=home,
+            unread=UnreadRows(),
             environ={"HOME": str(tmp_path)},
         )
 

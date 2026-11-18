@@ -26,6 +26,7 @@ from base.lm.harness.session.transcript.record_file import (
     FileRow,
     RecordFile,
     RecordReadBudgetError,
+    UnreadRows,
     stamp_of,
 )
 
@@ -94,6 +95,7 @@ def read_reading_window(
     policy: ReplyPolicy,
     render_tool: Callable[[str, Mapping[str, object]], str],
     load_sent: LoadSent,
+    unread: UnreadRows,
 ) -> Window:
     try:
         file.prepare_reading(offset)
@@ -118,6 +120,7 @@ def read_reading_window(
                 policy=policy,
                 render_tool=render_tool,
                 load_sent=load_sent,
+                unread=unread,
             )
             if (
                 start == 0
@@ -163,6 +166,7 @@ def read_window(
     policy: ReplyPolicy,
     render_tool: Callable[[str, Mapping[str, object]], str],
     load_sent: LoadSent,
+    unread: UnreadRows,
     anchor: int | None = None,
 ) -> Window:
     rows, start, read, size = _prepare_window(file, before, anchor)
@@ -186,6 +190,7 @@ def read_window(
             policy=policy,
             render_tool=render_tool,
             load_sent=load_sent,
+            unread=unread,
         )
         cut = _cut(projected, limit)
         full = len(projected.items) - cut >= limit
@@ -218,6 +223,7 @@ def _items_of(
     policy: ReplyPolicy,
     render_tool: Callable[[str, Mapping[str, object]], str],
     load_sent: LoadSent,
+    unread: UnreadRows,
 ) -> Projected:
     projector = RecordProjector(
         policy=policy, render_tool=render_tool, wire_id=lambda key: wire_id(harness, key)
@@ -226,7 +232,7 @@ def _items_of(
     if wanted:
         for key, items in load_sent(max(row.stamp for row in wanted.values()), wanted).items():
             projector.register(key, items)
-    reader = entry_reader(harness)
+    reader = entry_reader(harness, unread)
     entries = reader.entries(rows)
     projected = projector.feed(entries, tail=tail and reader.pending_calls, release_held=True)
     if not complete_only:
@@ -302,8 +308,9 @@ def reasoning_refresh(
     start: int,
     policy: ReplyPolicy,
     render_tool: Callable[[str, Mapping[str, object]], str],
+    unread: UnreadRows,
 ) -> Projected:
-    entries = entry_reader(harness).entries(file.rows_after(start).rows)
+    entries = entry_reader(harness, unread).entries(file.rows_after(start).rows)
     projector = RecordProjector(
         policy=policy, render_tool=render_tool, wire_id=lambda key: wire_id(harness, key)
     )
