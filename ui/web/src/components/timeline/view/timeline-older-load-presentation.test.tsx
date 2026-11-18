@@ -138,11 +138,11 @@ describe("timeline loading presentation", () => {
     expect(screen.queryByTestId("pending-live-activity-window")).toBeNull();
     rerender(<TimelineView items={[human]} turnActive />);
     const pending = screen.getByTestId("pending-live-activity-window");
-    expect(container.querySelectorAll(".animate-spin")).toHaveLength(1);
+    expect(container.querySelectorAll(".animate-spin")).toHaveLength(0);
     expect(pending.querySelector("svg")).toBeTruthy();
-    expect(pending.querySelector(".sr-only")?.textContent).toBe("Agent is responding.");
+    expect(pending.querySelector(".animate-spin")).toBeNull();
     expect(pending.querySelector("button")).toBeNull();
-    expect(pending.textContent).not.toContain("Working");
+    expect(pending.textContent).toBe("Working…");
   });
 
   it("a retained prompt stays readable under the initial source qualification ring", () => {

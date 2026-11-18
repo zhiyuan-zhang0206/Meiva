@@ -220,8 +220,9 @@ describe("detail-block duration display", () => {
       />,
     );
     const pending = screen.getByTestId("pending-live-activity-window");
-    expect(pending.querySelector(".animate-spin")).toBeTruthy();
-    expect(pending.textContent).not.toContain("Working");
+    expect(pending.textContent).toBe("Working…");
+    expect(pending.querySelector("svg")).toBeTruthy();
+    expect(pending.querySelector(".animate-spin")).toBeNull();
   });
   it("active last turn stays expanded across streaming commits; collapses when a reply lands below", () => {
     setUserSettings({ "display.expand_working_block": true });

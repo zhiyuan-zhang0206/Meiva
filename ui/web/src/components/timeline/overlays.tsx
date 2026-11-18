@@ -9,11 +9,11 @@ import { cn } from "@/lib/format/utils";
 import { FLEX } from "@/lib/layout/layout";
 
 // meiva:note
-// One ring for source reads, older pages, and the wait for a first work item. It turns while waiting; a
+// One ring for initial source reads and older-page requests. It turns while waiting; a
 // reader who asked for reduced motion gets the same ring breathing (opacity
 // only) instead of a frozen one.
 // meiva:link ui/web/src/docs/frontend-components/timeline-view/loading-ring.md
-export function LoadingRing({ testId, className }: {
+function LoadingRing({ testId, className }: {
   testId?: string; className?: string;
 }) {
   const circumference = 2 * Math.PI * 8;

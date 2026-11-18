@@ -104,7 +104,7 @@ describe("home loading presentation through the selected timeline reader", () =>
     expect(screen.queryByTestId("pending-live-activity-window")).toBeNull();
   });
 
-  it("cold entry with a running roster shows one ring until the empty read settles", async () => {
+  it("cold entry with a running roster shows one ring until the empty read settles into Working", async () => {
     const read = deferred<TimelineResponse>();
     transport.getTimeline.mockReturnValue(read.promise);
     const view = renderWithBrowser(surface(<Reader />));
@@ -114,19 +114,23 @@ describe("home loading presentation through the selected timeline reader", () =>
     expect(screen.queryByText("Working…")).toBeNull();
     await act(() => { read.resolve(response()); return read.promise; });
     await waitFor(() => expect(screen.queryByTestId("cold-load-spinner")).toBeNull());
-    expect(screen.getByTestId("pending-live-activity-window").querySelector(".animate-spin")).toBeTruthy();
-    view.rerender(surface(<Reader running={false} />));
+    const pending = screen.getByTestId("pending-live-activity-window");
+    expect(pending.textContent).toBe("Working…");
+    expect(pending.querySelector("svg")).toBeTruthy();
     expect(view.container.querySelectorAll(".animate-spin")).toHaveLength(0);
+    view.rerender(surface(<Reader running={false} />));
+    expect(screen.queryByTestId("pending-live-activity-window")).toBeNull();
   });
 
-  it("a reader request replaces the pending ring and returns to it after failure", async () => {
+  it("a reader request suppresses the pending Working row and restores it after failure", async () => {
     client.setQueryData(["timeline", 42], response([human], true));
     const read = deferred<TimelineResponse>();
     transport.getTimeline.mockReturnValue(read.promise);
     transport.getConversationSnapshot.mockResolvedValue(composed(response([human], true)));
     const view = renderWithBrowser(surface(<Reader />));
     await waitFor(() => expect(screen.queryByTestId("cold-load-spinner")).toBeNull());
-    expect(screen.getByTestId("pending-live-activity-window").querySelector(".animate-spin")).toBeTruthy();
+    expect(screen.getByTestId("pending-live-activity-window").textContent).toBe("Working…");
+    expect(view.container.querySelectorAll(".animate-spin")).toHaveLength(0);
     fireEvent.click(screen.getByRole("button", { name: "Load earlier messages" }));
     await waitFor(() => expect(transport.getTimeline).toHaveBeenCalledOnce());
     expect(screen.getByTestId("load-older-spinner").dataset.state).toBe("loading");
@@ -134,7 +138,9 @@ describe("home loading presentation through the selected timeline reader", () =>
     expect(view.container.querySelectorAll(".animate-spin")).toHaveLength(1);
     await act(async () => { read.reject(new Error("Older fixture failed")); await Promise.resolve(); });
     await waitFor(() => expect(screen.getByTestId("load-older-spinner").dataset.state).toBe("idle"));
-    expect(screen.getByTestId("pending-live-activity-window").querySelector(".animate-spin")).toBeTruthy();
+    const pending = screen.getByTestId("pending-live-activity-window");
+    expect(pending.textContent).toBe("Working…");
+    expect(pending.querySelector(".animate-spin")).toBeNull();
     expect(screen.getByText("Selected prompt")).toBeTruthy();
   });
 

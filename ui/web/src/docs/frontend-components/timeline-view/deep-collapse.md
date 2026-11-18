@@ -26,7 +26,7 @@ right-aligned below the expanded body on copyable secondary messages — see
 
 ## Turn timer and single-line collapsed strip
 
-The collapsed turn strip shows a single status line. Expanded turns show the counts of turns, messages and other items on a separate line beneath the status, followed by SDK-call chips and the detail rows where present. While `turnActive` is true, the trailing `TurnBlock` is the live window (`data-live-activity-window="true"`, using the timeline as its scrollport). Before the first work item arrives, an active qualified source can show an unboxed inline `PendingLiveActivityWindow` ring after the human prompt. Its mutual exclusion with source and reader loading is owned by [the loading ring](loading-ring.md).
+The collapsed turn strip shows a single status line. Expanded turns show the counts of turns, messages and other items on a separate line beneath the status, followed by SDK-call chips and the detail rows where present. While `turnActive` is true, the trailing `TurnBlock` is the live window (`data-live-activity-window="true"`, using the timeline as its scrollport). Before the first work item arrives, an active qualified source shows an unboxed inline `PendingLiveActivityWindow` (`Working…` header row without a disclosure chevron) when the timeline is empty or ends on a human prompt. Its suppression during source and reader loading is owned by [the loading ring](loading-ring.md).
 
 The turn header's timer reads one basis — `summarizeTurn.workedMs`, the sum of
 the turn's block durations, which a turn that spans an idle gap (a restart, a

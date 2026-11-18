@@ -20,8 +20,9 @@ at the bottom. Sending follows the [send-anchor contract](send-anchor.md).
 
 The centered down arrow takes the reader to the last human message or the
 current tail according to the [reading position](send-anchor.md). Older paging
-presents its top pull circle. Initial source qualification and waiting for a
-first work item follow [the single-ring loading contract](loading-ring.md).
+presents its top pull circle, and initial source qualification — including gating
+the inline first-step `Working…` row until the source is ready — follows
+[the loading ring contract](loading-ring.md).
 
 ## Scroll ownership and one scrollport
 
