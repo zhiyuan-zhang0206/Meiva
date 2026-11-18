@@ -20,6 +20,7 @@ import { markdownImageUrl } from "./markdown-image-url";
 import { API_BASE } from "@/lib/transport/api-base";
 import { MermaidCode } from "./mermaid-code";
 import { PythonCode } from "@/components/content/python-code";
+import { MarkdownZoomableImage } from "./zoomable-image";
 import { useWorkspaceFileStore } from "@/lib/context/workspace-file-store";
 import { MIN_W_0 } from "@/lib/layout/layout";
 import {
@@ -132,10 +133,7 @@ const baseRehypePlugins = (resolve: UrlTransform, inline: boolean): PluggableLis
 
 const createDefaultComponents = (onOpenFile: (path: string, lineRange?: string) => void, imageUrl: (src: string) => string): Components => ({
   img: ({ node: _node, src, alt, ...props }) => (
-    // meiva:note
-    // Authenticated bytes must be fetched by the browser, not Next's image optimizer.
-    // eslint-disable-next-line @next/next/no-img-element
-    <img {...props} src={typeof src === "string" ? imageUrl(src) : undefined} alt={alt} />
+    <MarkdownZoomableImage {...props} src={typeof src === "string" ? imageUrl(src) : undefined} alt={alt} />
   ),
   pre: ({ node: _node, children }) => <>{children}</>,
   a: ({ node: _node, href, children, ...props }) => {
