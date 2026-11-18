@@ -12,7 +12,12 @@ import pytest
 from base.agents.to_user import DOCUMENT_FILENAME, to_user_limits
 from base.config import settings
 from base.db import Database, create_agent
-from ops.to_user import owned_workspace, read_to_user
+from ops.to_user import (
+    WorkspaceFileError,
+    owned_workspace,
+    read_to_user,
+    read_workspace_file_content,
+)
 
 # meiva:note
 # The read caps the door takes as a value, at the numbers the process is configured with.
@@ -79,3 +84,50 @@ def test_the_document_is_read_from_the_home_machines_workspace(
 
     assert document.content == "# Report\n\nDone.\n"
     assert document.version is not None
+
+
+def test_out_of_bounds_absolute_paths_raise_403_instead_of_404(tmp_path: Path) -> None:
+    served_home = tmp_path / "served-home"
+    workspace = served_home / "workspaces" / "10"
+    workspace.mkdir(parents=True)
+    _ = (workspace / "inside.txt").write_text("allowed", encoding="utf-8")
+
+    for forbidden in (
+        "/etc/passwd",
+        "/Users/other/secret.txt",
+        "/Users/other/.meiva/workspaces/20/a.png",
+    ):
+        with pytest.raises(WorkspaceFileError) as exc_info:
+            _ = read_workspace_file_content(served_home, 10, forbidden)
+        assert exc_info.value.status_code == 403
+
+
+def test_explicit_same_owner_workspace_path_resolves_across_host_prefixes_and_blocks_traversal(
+    tmp_path: Path,
+) -> None:
+    served_home = tmp_path / "served-home"
+    workspace = served_home / "workspaces" / "10"
+    deliver = workspace / "deliver"
+    deliver.mkdir(parents=True)
+    _ = (deliver / "report.md").write_text("from workspace", encoding="utf-8")
+
+    custom_cwd = tmp_path / "custom-cwd"
+    (custom_cwd / "deliver").mkdir(parents=True)
+    _ = (custom_cwd / "deliver" / "report.md").write_text("from cwd", encoding="utf-8")
+
+    result = read_workspace_file_content(
+        served_home,
+        10,
+        "file:///Users/zhiyuan-output/.meiva/workspaces/10/deliver/report.md#L1",
+        custom_cwd=str(custom_cwd),
+    )
+    assert result.content == "from workspace"
+    assert result.path == "deliver/report.md"
+
+    with pytest.raises(WorkspaceFileError) as exc_info:
+        _ = read_workspace_file_content(
+            served_home,
+            10,
+            "/Users/zhiyuan-output/.meiva/workspaces/10/deliver/../../20/secret.md",
+        )
+    assert exc_info.value.status_code == 403

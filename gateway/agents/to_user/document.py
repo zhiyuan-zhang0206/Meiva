@@ -31,6 +31,7 @@ from ops.cluster.rpc import ClusterOpFailed, ClusterOpUnreachable
 from ops.to_user import (
     WorkspaceFileError,
     clean_file_path,
+    parse_explicit_workspace_path,
     read_workspace_file_content,
     resolve_existing_workspace_file,
 )
@@ -262,16 +263,36 @@ def _query_agent_cwd(conn: psycopg.Connection, agent_id: int) -> str | None:
     return None
 
 
-def _lookup_agent_placement(request: Request, agent_id: int) -> tuple[str, str | None]:
+# meiva:note
+# Eval isolation is checked against the caller first; then an explicit
+# `.meiva/workspaces/<owner>/<subpath>` reference switches placement lookup to `<owner>`
+# with `custom_cwd=None` so cross-agent links resolve on `<owner>`'s machine regardless
+# of which agent's conversation opened the link.
+# meiva:link gateway/agents/docs/to-user-resources.md
+def _resolve_workspace_file_request(
+    request: Request, agent_id: int, raw_path: str
+) -> tuple[int, str, str, str, str | None]:
     deny_isolated_result_read(request)
+    home = gateway_state(request).gateway_process.home
+    try:
+        cleaned = clean_file_path(raw_path)
+        explicit = parse_explicit_workspace_path(raw_path, home=home)
+    except WorkspaceFileError as exc:
+        raise HTTPException(exc.status_code, exc.detail) from exc
+
+    target_agent_id = explicit[0] if explicit is not None else agent_id
+    target_path = explicit[1] if explicit is not None else raw_path
+    cleaned_name = Path(explicit[1] if explicit is not None else cleaned).name
+    include_cwd = explicit is None
+
     with gateway_state(request).db_pool.connection() as conn:
         row = query_one(
-            conn, _MachineRow, "SELECT machine FROM agents_meta WHERE id = %s", (agent_id,)
+            conn, _MachineRow, "SELECT machine FROM agents_meta WHERE id = %s", (target_agent_id,)
         )
         if row is None:
             raise HTTPException(404, "Agent not found")
-        custom_cwd = _query_agent_cwd(conn, agent_id)
-    return row.machine, custom_cwd
+        custom_cwd = _query_agent_cwd(conn, target_agent_id) if include_cwd else None
+    return target_agent_id, target_path, cleaned_name, row.machine, custom_cwd
 
 
 async def _resolve_agent_ops_url(
@@ -346,23 +367,25 @@ async def get_workspace_file_content(
         str, Query(description="Workspace or cwd relative path, absolute path, or file:// URL")
     ],
 ) -> WorkspaceFileResponse:
-    machine, custom_cwd = await asyncio.to_thread(_lookup_agent_placement, request, agent_id)
-    try:
-        _ = clean_file_path(path)
-    except WorkspaceFileError as exc:
-        raise HTTPException(exc.status_code, exc.detail) from exc
-    ops_url = await _resolve_agent_ops_url(request, agent_id, machine, custom_cwd)
+    target_agent_id, target_path, _, machine, custom_cwd = await asyncio.to_thread(
+        _resolve_workspace_file_request, request, agent_id, path
+    )
+    ops_url = await _resolve_agent_ops_url(request, target_agent_id, machine, custom_cwd)
     if ops_url is None:
         home = gateway_state(request).gateway_process.home
         try:
             return await asyncio.to_thread(
-                read_workspace_file_content, home, agent_id, path, custom_cwd=custom_cwd
+                read_workspace_file_content,
+                home,
+                target_agent_id,
+                target_path,
+                custom_cwd=custom_cwd,
             )
         except WorkspaceFileError as exc:
             raise HTTPException(exc.status_code, exc.detail) from exc
 
     query = WorkspaceFileRequest(
-        agent_id=agent_id, path=path, mode="content", custom_cwd=custom_cwd
+        agent_id=target_agent_id, path=target_path, mode="content", custom_cwd=custom_cwd
     )
     access = gateway_state(request).gateway_access
     try:
@@ -387,17 +410,19 @@ async def get_workspace_file_raw(
         str, Query(description="Workspace or cwd relative path, absolute path, or file:// URL")
     ],
 ) -> Response:
-    machine, custom_cwd = await asyncio.to_thread(_lookup_agent_placement, request, agent_id)
-    try:
-        cleaned = clean_file_path(path)
-    except WorkspaceFileError as exc:
-        raise HTTPException(exc.status_code, exc.detail) from exc
-    ops_url = await _resolve_agent_ops_url(request, agent_id, machine, custom_cwd)
+    target_agent_id, target_path, cleaned_name, machine, custom_cwd = await asyncio.to_thread(
+        _resolve_workspace_file_request, request, agent_id, path
+    )
+    ops_url = await _resolve_agent_ops_url(request, target_agent_id, machine, custom_cwd)
     if ops_url is None:
         home = gateway_state(request).gateway_process.home
         try:
             target, _ = await asyncio.to_thread(
-                resolve_existing_workspace_file, home, agent_id, path, custom_cwd=custom_cwd
+                resolve_existing_workspace_file,
+                home,
+                target_agent_id,
+                target_path,
+                custom_cwd=custom_cwd,
             )
         except WorkspaceFileError as exc:
             raise HTTPException(exc.status_code, exc.detail) from exc
@@ -418,7 +443,9 @@ async def get_workspace_file_raw(
             headers=headers,
         )
 
-    query = WorkspaceFileRequest(agent_id=agent_id, path=path, mode="raw", custom_cwd=custom_cwd)
+    query = WorkspaceFileRequest(
+        agent_id=target_agent_id, path=target_path, mode="raw", custom_cwd=custom_cwd
+    )
     access = gateway_state(request).gateway_access
     to_user = gateway_config(request).to_user
     try:
@@ -434,4 +461,4 @@ async def get_workspace_file_raw(
             )
     except httpx.HTTPError as exc:
         raise HTTPException(503, "The agent's machine is unavailable") from exc
-    return resource_response(content, Path(cleaned).name)
+    return resource_response(content, cleaned_name)

@@ -260,6 +260,7 @@ export interface ChatMarkdownProps {
   content: string;
   components?: Components;
   resolveUrl?: UrlTransform;
+  resolveImageUrl?: (src: string) => string;
   inline?: boolean;
   onOpenFile?: (path: string, lineRange?: string) => void;
 }
@@ -271,6 +272,7 @@ export const ChatMarkdownRenderer = memo(function ChatMarkdownRenderer({
   content,
   components: overrides,
   resolveUrl,
+  resolveImageUrl,
   inline = false,
   onOpenFile,
 }: ChatMarkdownProps) {
@@ -290,8 +292,12 @@ export const ChatMarkdownRenderer = memo(function ChatMarkdownRenderer({
   const effectiveOpenFile = onOpenFile ?? defaultOpenFile;
 
   const defaultComponents = useMemo(
-    () => createDefaultComponents(effectiveOpenFile, (src) => resolveUrl ? src : markdownImageUrl(src, activeId, API_BASE)),
-    [effectiveOpenFile, resolveUrl, activeId],
+    () =>
+      createDefaultComponents(effectiveOpenFile, (src) => {
+        if (resolveImageUrl) return resolveImageUrl(src);
+        return resolveUrl ? src : markdownImageUrl(src, activeId, API_BASE);
+      }),
+    [effectiveOpenFile, resolveImageUrl, resolveUrl, activeId],
   );
   const defaultInlineComponents = useMemo(
     () => createInlineComponents(effectiveOpenFile),

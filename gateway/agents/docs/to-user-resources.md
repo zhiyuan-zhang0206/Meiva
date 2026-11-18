@@ -29,6 +29,19 @@ Audio, PDFs and other binary files use the workspace download view. The raw reso
 endpoint continues to serve passive media, PDFs and inert text inline under the
 passive CSP.
 
+## Workspace file reads
+
+`GET /api/agents/{id}/files/content` and `GET /api/agents/{id}/files/raw` serve
+interactive file previews and raw media from an agent's workspace or custom
+working directory, either directly on the gateway host or through `POST
+/to-user/workspace-file` on the owning runner. After checking caller evaluation
+isolation, an explicit `.meiva/workspaces/<owner>/<subpath>` (or
+`<home>/workspaces/<owner>/<subpath>`) reference switches placement and file
+resolution to `<owner>`'s workspace (`custom_cwd=None`), resolving cross-agent
+references across machines and host usernames. Subpaths that traverse above the
+workspace root with `..`, as well as absolute filesystem paths outside the
+target agent's allowed roots, are refused with `403`.
+
 ## Durable user communication
 
 `to_user.md` is an editable overview. Unread display/publication messages and

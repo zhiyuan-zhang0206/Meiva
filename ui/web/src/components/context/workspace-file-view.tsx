@@ -13,6 +13,11 @@ import { useEffect, useMemo, useRef } from "react";
 import { CopyButton } from "@/components/content/copy-button";
 import { isImageExtension, isVideoExtension, parseLineRange } from "@/components/content/file-path-utils";
 import { ChatMarkdown } from "@/components/content/markdown";
+import {
+  markdownImageUrl,
+  resolveWorkspaceFile,
+  resolveWorkspaceReference,
+} from "@/components/content/markdown-image-url";
 import { ZoomableImage } from "@/components/content/zoomable-image";
 import { InlineError } from "@/components/ui/inline-error";
 import { Spinner } from "@/components/ui/spinner";
@@ -95,9 +100,14 @@ export function WorkspaceFileView({
   const client = useApi();
   const { history, closeFile, goBack, openFile } = useWorkspaceFileStore();
 
+  const { ownerAgentId, requestPath } = useMemo(
+    () => resolveWorkspaceFile(target.path, agentId),
+    [target.path, agentId],
+  );
+
   const { data, error, isLoading, refetch, isFetching } = useQuery({
-    queryKey: ["workspace-file", agentId, target.path],
-    queryFn: ({ signal }) => client.getWorkspaceFile(agentId, target.path, signal),
+    queryKey: ["workspace-file", ownerAgentId, requestPath],
+    queryFn: ({ signal }) => client.getWorkspaceFile(ownerAgentId, requestPath, signal),
   });
 
   const parsedRange = useMemo(() => parseLineRange(target.lineRange), [target.lineRange]);
@@ -109,11 +119,14 @@ export function WorkspaceFileView({
     }
   }, [parsedRange, data]);
 
-  const ext = data?.extension ?? target.path.slice(target.path.lastIndexOf(".")).toLowerCase();
+  const fallbackName = requestPath.split("/").pop() ?? requestPath;
+  const fallbackDot = fallbackName.lastIndexOf(".");
+  const ext =
+    data?.extension ?? (fallbackDot >= 0 ? fallbackName.slice(fallbackDot).toLowerCase() : "");
   const isMarkdown = ext === ".md" || ext === ".markdown";
   const isImage = isImageExtension(ext);
   const isVideo = isVideoExtension(ext);
-  const rawUrl = `${API_BASE}/api/agents/${agentId}/files/raw?path=${encodeURIComponent(data?.path ?? target.path)}`;
+  const rawUrl = `${API_BASE}/api/agents/${ownerAgentId}/files/raw?path=${encodeURIComponent(data?.path ?? requestPath)}`;
 
   const language = EXTENSION_LANGUAGE_MAP[ext] || "text";
 
@@ -239,8 +252,19 @@ export function WorkspaceFileView({
           <div className="px-5 py-3.5 text-[13px] leading-[21px] text-foreground/90 dark:text-[#dfdcd6] [&>.chat-md>:first-child]:mt-0">
             <ChatMarkdown
               content={data.content}
+              resolveImageUrl={(src) =>
+                markdownImageUrl(
+                  resolveWorkspaceReference(target.path, src),
+                  ownerAgentId,
+                  API_BASE,
+                )
+              }
               onOpenFile={(nextPath, nextLines) =>
-                openFile({ agentId, path: nextPath, lineRange: nextLines })
+                openFile({
+                  agentId,
+                  path: resolveWorkspaceReference(target.path, nextPath),
+                  lineRange: nextLines,
+                })
               }
             />
           </div>
