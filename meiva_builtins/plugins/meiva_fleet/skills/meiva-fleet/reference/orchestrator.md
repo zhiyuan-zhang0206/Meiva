@@ -160,7 +160,15 @@ Launch the watcher **before** the worker starts, so you do not miss its first id
 ```python
 watcher = meiva.files.read(f"{meiva.skills.meiva_goal.path}/scripts/watch_idle.py")
 watcher = watcher.replace("TARGET_AGENT_ID = 0", f"TARGET_AGENT_ID = {worker_id}")
-meiva.watcher.launch(watcher, timeout="6h", name="goal-watcher")
+from pathlib import Path
+import shlex
+
+path = Path("goal-watcher.py").resolve()
+path.write_text(watcher)
+meiva.shell.run_background(
+    f'"$MEIVA_PYTHON" {shlex.quote(str(path))}',
+    ttl=6 * 3600, name="goal-watcher",
+)
 ```
 
 The watcher is one-shot: it wakes you on the worker's next idle and exits. Each round, **judge conservatively** — the worker reporting "done" is not done (it carries the same "I hope this passes" optimism you would); judge the artifact, not the claim. If the goal is met, tell the worker so — it delivers and ends its own process (if it lingers idle afterwards, terminating it is your fallback, not your routine); if not, `send_message` exactly what is still missing and re-launch a fresh watcher for the next idle. One watcher per worker — launch many to supervise many at once.

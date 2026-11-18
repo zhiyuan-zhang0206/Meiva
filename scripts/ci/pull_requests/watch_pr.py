@@ -1,51 +1,64 @@
-"""Optional Meiva watcher: watch a PR's CI and wake the agent once it settles.
-
-This Meiva lifecycle wrapper is optional; contributors can poll scripts/ci/cli.py directly.
-One-shot — delivers exactly one wake message, then exits. Launch it from an
-agent-profile process carrying the runner DB and Redis URLs with
-`meiva.watcher.launch(code, timeout=..., name="ci-watch-<pr>")` right after
-pushing a PR; the wake message carries the verdict.
-
-The settled verdict is persisted first — `ci-verdict-<PR>.txt` in the
-launching agent's workspace — then sent once; the SDK's own bounded retries are
-the only retry. A wake that lands in a gateway / agent restart window is not
-redelivered: the watcher logs the cause and the absolute verdict path, then
-exits 2, so the launcher gets an exit notice and can read the persisted file.
-Exit codes: 0 the wake was sent, 1 the CI probe raised, 2 the send failed —
-the absolute verdict path and cause are in the log and exit notice, and the
-persisted file is the fallback record.
-
-Uses `scripts/ci/pull_requests/status.py:check_ci` — the repo-provided, correct CI polling
-logic.  Do NOT write ad-hoc `gh pr checks` + exit-code checks: `gh pr checks`
-exits non-zero when a check FAILS, so a `returncode == 0` condition silently
-drops the red case and the watcher only wakes on the timeout — exactly the bug
-this template exists to prevent.
-
-Pitfalls this template covers (all from ci_utils.check_ci's verdict, not from
-raw gh output):
-
-- **FAILED wakes the agent** — a red PR is a settled verdict, never a timeout.
-- **PENDING is never green** — only a non-PENDING verdict wakes the agent.
-- **NO_WORKFLOW_RUNS is NOT green** — Actions never scheduled; the agent gets
-  the verdict and must find out why the workflow did not run.
-- **NO_CHECKS is re-polled before it is reported** — the rollup is also empty
-  during the attach window right after a push (checks take a moment to appear,
-  and a run that has not registered yet is invisible to the runs-API probe
-  too), so the first NO_CHECKS is not yet evidence of "nothing scheduled". Up
-  to NO_CHECKS_RETRIES consecutive NO_CHECKS verdicts are retried before the
-  agent is woken (task #3158).
-- **MERGE_CONFLICT is NOT green** — the agent must rebase before CI can start.
-- **gh needs a git repo context** — watcher processes run from the agent
-  workspace, so the template `os.chdir`s into the repo before polling.
-
-Usage:
-1. Read this file with `meiva.files.read(...)`
-2. Replace the placeholders (REPO_ROOT / PR_NUMBER / CI_UTILS / WATCHER_ID)
-3. Launch from an agent-profile process with `meiva.watcher.launch(code,
-   timeout="3h", name="ci-watch-<pr>")`
-4. When no wake arrives, read `ci-verdict-<PR>.txt` in your workspace — it
-   was already persisted before the watcher tried to deliver.
-"""
+# meiva:note
+# Optional Meiva watcher: watch a PR's CI and wake the agent once it settles.
+#
+# This Meiva lifecycle wrapper is optional; contributors can poll scripts/ci/cli.py directly.
+# One-shot — delivers exactly one wake message, then exits. Launch it from an
+# agent-profile process carrying the runner DB and Redis URLs with
+# `meiva.shell.run_background(command, ttl=10800, name="ci-watch-<pr>")` right after
+# pushing a PR; the wake message carries the verdict.
+#
+# The settled verdict is persisted first — `ci-verdict-<PR>.txt` in the
+# launching agent's workspace — then sent once; the SDK's own bounded retries are
+# the only retry. A wake that lands in a gateway / agent restart window is not
+# redelivered: the watcher logs the cause and the absolute verdict path, then
+# exits 2, so the launcher gets an exit notice and can read the persisted file.
+# Exit codes: 0 the wake was sent, 1 the CI probe raised, 2 the send failed —
+# the absolute verdict path and cause are in the log and exit notice, and the
+# persisted file is the fallback record.
+#
+# Uses `scripts/ci/pull_requests/status.py:check_ci` — the repo-provided, correct CI polling
+# logic.  Do NOT write ad-hoc `gh pr checks` + exit-code checks: `gh pr checks`
+# exits non-zero when a check FAILS, so a `returncode == 0` condition silently
+# drops the red case and the watcher only wakes on the timeout — exactly the bug
+# this template exists to prevent.
+#
+# Pitfalls this template covers (all from ci_utils.check_ci's verdict, not from
+# raw gh output):
+#
+# - **FAILED wakes the agent** — a red PR is a settled verdict, never a timeout.
+# - **PENDING is never green** — only a non-PENDING verdict wakes the agent.
+# - **NO_WORKFLOW_RUNS is NOT green** — Actions never scheduled; the agent gets
+#   the verdict and must find out why the workflow did not run.
+# - **NO_CHECKS is re-polled before it is reported** — the rollup is also empty
+#   during the attach window right after a push (checks take a moment to appear,
+#   and a run that has not registered yet is invisible to the runs-API probe
+#   too), so the first NO_CHECKS is not yet evidence of "nothing scheduled". Up
+#   to NO_CHECKS_RETRIES consecutive NO_CHECKS verdicts are retried before the
+#   agent is woken (task #3158).
+# - **MERGE_CONFLICT is NOT green** — the agent must rebase before CI can start.
+# - **gh needs a git repo context** — watcher processes run from the agent
+#   workspace, so the template `os.chdir`s into the repo before polling.
+#
+# Usage:
+# 1. Read this file with `meiva.files.read(...)`
+# 2. Replace the placeholders (REPO_ROOT / PR_NUMBER / CI_UTILS / WATCHER_ID)
+# 3. Write the substituted code to an absolute script path. Launch from the
+#    agent-profile process (using its Python interpreter):
+#
+#        import shlex
+#        import sys
+#        from pathlib import Path
+#        script = Path("ci-watch.py").resolve()
+#        meiva.files.write(str(script), code)
+#        handle = meiva.shell.run_background(
+#            shlex.join([sys.executable, str(script)]), ttl=10800, name="ci-watch-<pr>"
+#        )
+#
+#    Retain handle.session_id and handle.output_path for cancellation and recovery.
+#    This bounded helper polls until a verdict or TIMEOUT_S, then exits; it is
+#    independent of the declarative schedules runner.
+# 4. When no wake arrives, read `ci-verdict-<PR>.txt` in your workspace — it
+#    was already persisted before the watcher tried to deliver.
 
 import atexit
 import os

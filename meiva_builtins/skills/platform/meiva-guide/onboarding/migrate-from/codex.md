@@ -23,7 +23,7 @@ one-shot `codex exec` runs, cloud tasks, and a GitHub Action. It reads
 | Skills (`SKILL.md`) | Same standard — `meiva skill install <git-url-or-path>` | |
 | Project trust (`[projects."<abs>"] trust_level`) | N/A — agents run under your platform account; no per-project trust prompts | |
 | Cloud tasks (`codex --cloud`) | Multi-machine cluster: `meiva.agents.spawn(..., machine="<name>")` | |
-| GitHub Action | No equivalent shipped — Meiva's automation path is gateway schedules + watchers; CI stays CI, agents do the agentic work | |
+| GitHub Action | No equivalent shipped — Meiva's automation path is declarative schedules; CI stays CI, agents do the agentic work | |
 | `codex login` | Platform auth — no per-agent ChatGPT/API login | |
 
 The bridge works in both directions: the gateway `/mcp` endpoint exposes the fleet as

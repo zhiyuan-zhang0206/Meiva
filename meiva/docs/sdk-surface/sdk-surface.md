@@ -48,7 +48,7 @@ The decisions of the surface are strict modules under `meiva/sdk_surface/pure/`:
 - [MCP Server System](../../mcps/docs/mcps.md) — MCP tool servers (determined by config; built-in chrome + servers installed via `meiva mcp install` beyond core)
 - [meiva.web — Web Access](../../web/docs/web.md) — Web access: search + fetch (concurrent)
 - [meiva.understand — Multimodal Understanding Primitive](../../understand/README.md) — Multimodal understanding primitive: understand(targets) → list[str], each target carrying prompt + text|paths
-- [watcher](../../watcher/docs/watcher.md) — Background listener: at / cron / launch (wake self = `meiva.agents.send_message`)
+- [schedules](../../schedules/__init__.py) — Declarative at / cron / every triggers with bounded payloads
 
 ### Context
 

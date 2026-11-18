@@ -212,7 +212,7 @@ def wrap_code_output(
         body += (
             "\n[hint: this budget is for quick work. Run a long shell command "
             "with meiva.shell.run_background (delivers a completion message), or "
-            "long Python code as meiva.watcher.launch; drive interactive programs "
+            "Python scripts with the same helper; drive interactive programs "
             "in meiva.shell.sessions.]\n"
         )
     head = header + "\n\n"

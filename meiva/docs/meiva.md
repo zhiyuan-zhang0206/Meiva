@@ -17,5 +17,5 @@ Overview of the Meiva subsystem.
 - [Skills](../../docs/skills/skills.md)
 - [Ui](ui.md)
 - [Understand](../understand/README.md)
-- [Watcher](../watcher/docs/watcher.md)
+- [Schedules](../schedules/__init__.py)
 - [Web](../web/docs/web.md)

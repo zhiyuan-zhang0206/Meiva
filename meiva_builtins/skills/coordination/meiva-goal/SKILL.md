@@ -69,9 +69,8 @@ supervision example composes existing messaging and background-wait capabilities
 Use this method for work that can finish. Idle is a review point, not proof of
 failure or permission to keep pushing. Respect deliberate pauses. Perpetual,
 trigger-driven roles (such as inbox polling or daily checks) belong in
-`meiva-guide.schedules`; temporary waits use `meiva.watcher`. Review one round of
-recurring work against that round's outcome without turning it into a perpetual
-completion loop.
+`meiva-guide.schedules`; temporary waits use bounded `meiva.shell.run_background`.
+Review recurring work against that round's outcome.
 
 ## Optional pattern: supervise a peer
 
@@ -95,15 +94,23 @@ below apply only when you choose this pattern.
    Its initial status check also covers a worker that has already gone idle.
 
    ```python
+   import shlex
+   import sys
+   from pathlib import Path
+
    watcher = meiva.files.read(f"{meiva.skills.meiva_goal.path}/scripts/watch_idle.py")
    watcher = watcher.replace("TARGET_AGENT_ID = 0", f"TARGET_AGENT_ID = {target_id}")
-   watcher_session_id = meiva.watcher.launch(watcher, timeout="6h", name="goal-idle")
+   watcher_path = Path(f"goal-idle-{target_id}.py").resolve()
+   meiva.files.write(str(watcher_path), watcher)
+   watcher_session_id = meiva.shell.run_background(
+       shlex.join([sys.executable, str(watcher_path)]), ttl=21600, name="goal-idle"
+   )
    ```
 
    Record the returned handle's `session_id` (and `output_path` for its log) with your run notes.
 
    The watcher subscribes to the target's lifecycle updates and, the moment the
-   target goes idle, sends you a reminder. Then it exits (one-shot). `timeout` is
+   target goes idle, sends you a reminder. Then it exits (one-shot). `ttl` is
    a safety bound: if the target somehow never idles within it, the watcher stops
    and pings you anyway, so you are never left waiting forever — re-arm if needed.
 
@@ -160,7 +167,11 @@ below apply only when you choose this pattern.
      )
      watcher = meiva.files.read(f"{meiva.skills.meiva_goal.path}/scripts/watch_idle.py")
      watcher = watcher.replace("TARGET_AGENT_ID = 0", f"TARGET_AGENT_ID = {target_id}")
-     watcher_session_id = meiva.watcher.launch(watcher, timeout="6h", name="goal-idle")
+     watcher_path = Path(f"goal-idle-{target_id}.py").resolve()
+     meiva.files.write(str(watcher_path), watcher)
+     watcher_session_id = meiva.shell.run_background(
+         shlex.join([sys.executable, str(watcher_path)]), ttl=21600, name="goal-idle"
+     )
      ```
 
    Categories: **[omitted]** — a required piece is absent; **[misunderstood]**

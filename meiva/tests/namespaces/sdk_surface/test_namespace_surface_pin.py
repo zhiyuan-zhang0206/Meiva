@@ -74,7 +74,6 @@ _SURFACE: dict[str, list[str]] = {
         "run_now",
     ],
     "ui": ["ask", "close_question", "publish"],
-    "watcher": ["at", "cron", "launch"],
     "web": ["ReasoningEffort", "SearchResult", "fetch", "search"],
     "skills": [],
     "files": ["append", "delete", "edit", "glob", "read", "write"],
@@ -94,7 +93,6 @@ _TOP_LEVEL = [
     "skills",
     "ui",
     "understand",
-    "watcher",
     "web",
 ]
 
@@ -106,7 +104,6 @@ def test_the_agent_visible_names_of_a_core_namespace_are_pinned(namespace: str) 
         "schedules": meiva.schedules,
         "self": meiva.self,
         "ui": meiva.ui,
-        "watcher": meiva.watcher,
         "web": meiva.web,
         "skills": meiva.skills,
         "files": meiva.files,

@@ -74,11 +74,11 @@ def test_p95_contracts_leave_rare_namespaces_on_demand(
 
     for module in ["shell", "files", "agents", "tasks"]:
         assert f"## meiva.{module}\n" in text
-    for module in ["memory", "self", "ui", "watcher", "web", "shell.sessions"]:
+    for module in ["memory", "self", "ui", "schedules", "web", "shell.sessions"]:
         assert f"## meiva.{module}\n" not in text
     import meiva
 
-    meiva.help(meiva.watcher)
-    assert "def launch(" in capsys.readouterr().out
+    meiva.help(meiva.schedules)
+    assert "def every(" in capsys.readouterr().out
     meiva.help(meiva.shell.sessions)
     assert "## meiva.shell.sessions" in capsys.readouterr().out

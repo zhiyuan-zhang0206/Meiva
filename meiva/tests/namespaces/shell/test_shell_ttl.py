@@ -224,14 +224,8 @@ def test_renew_rejects_unknown_session() -> None:
         meiva.shell.sessions.renew(999_999, ttl=120)
 
 
-def test_renew_accepts_watcher_session(db_conn: psycopg.Connection, _agent_row: int) -> None:
-    """A watcher's session renews exactly like any other session
-    (docs/decisions/runtime/updates/recovery/2026-09-27-watchers-are-never-restarted.md): a watcher is
-    nothing but a shell session, with no separate registry or deadline of
-    its own to desync from — deadline = now + ttl, same as any other renew."""
-    wid = meiva.watcher.launch(
-        "import time\ntime.sleep(60)\n", timeout="30s", name="test-renew-watcher"
-    )
+def test_renew_accepts_background_session(db_conn: psycopg.Connection, _agent_row: int) -> None:
+    wid = meiva.shell.run_background("sleep 60", ttl=30, name="test-renew-background")
     try:
         before = datetime.now(UTC)
         new_deadline = meiva.shell.sessions.renew(wid, ttl=120)

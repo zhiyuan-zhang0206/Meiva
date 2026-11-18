@@ -24,7 +24,7 @@ requires them. A finite task still terminates when complete.
 
 ## Key Dependencies
 - [Skills index](../../README.md) — full skills catalog
-- [Watcher SDK](../../../../meiva/watcher/docs/watcher.md) — the "use watchers" primitive
+- [Schedules guide](../../platform/meiva-guide/schedules/SKILL.md) — declarative timing and single-round checks
 - [meiva.self](../../../../meiva/self/README.md) — `pause_heartbeat` / `compact` / identity (AGENT_ID)
 
 ## Usage reminders

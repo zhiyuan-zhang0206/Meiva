@@ -1,4 +1,4 @@
-exports = ["background.py", "background_plan.py", "completion_recovery.py", "log_ring.py", "session_env.py", "sessions.py", "tests", "ttl_store.py"]
+exports = ["background.py", "completion_recovery.py", "session_env.py", "sessions.py", "tests", "ttl_store.py"]
 
 [uses]
 "background_plan.py" = ["completion_plan.py"]

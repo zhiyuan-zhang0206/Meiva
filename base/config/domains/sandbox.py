@@ -79,7 +79,7 @@ class SandboxSettings(EnvSettings):
         title="Execution timeout (seconds)",
         default=300.0,
         alias="MEIVA_EXEC_TIMEOUT_SECONDS",
-        description="Hard timeout (seconds) for a single execute_code. On timeout, the envelope hints the agent toward meiva.shell.run_background / meiva.watcher.launch for long-running work. Must be positive and less than exec_node_timeout_seconds (validated at startup and on per-agent overlay).",
+        description="Hard timeout (seconds) for a single execute_code. On timeout, the envelope hints the agent toward meiva.shell.run_background for long-running work. Must be positive and less than exec_node_timeout_seconds (validated at startup and on per-agent overlay).",
         json_schema_extra={
             "help_text": "Must be positive and shorter than the execution node timeout.",
             "restart_required": "agent",

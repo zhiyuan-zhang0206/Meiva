@@ -178,16 +178,14 @@ conversation"), distinct from the `meiva` CLI (ops-level, runs in shell, operate
 the deployment itself).
 ## Schedules (time-based / condition-triggered persistent tasks)
 
-The gateway hosts declarative **schedules**: `at`, `cron`, and `every` triggers
-launch one bounded script invocation per occurrence, without a persistent PTY
-session. `daemon` remains a compatibility mode for existing persistent scripts.
-Manage schedules via REST API (`/api/schedules`) or the frontend
-`/control/schedules` page.
+Schedules declare an `at`, `cron`, or `every` trigger and a single-round Python
+payload or agent wake message. The manager owns timing and recovery; payloads
+exit after each round. Create and control them through `meiva.schedules`, the
+`meiva schedules` CLI, or the frontend `/control/schedules` page.
 
-To turn a natural-language scheduling need into a schedule, load
-`meiva.skills.meiva_guide.schedules` and follow it (it clarifies trigger/skip/error
-handling, writes a resumable script, then `POST /api/schedules` to create).
-
+Load `meiva.skills.meiva_guide.schedules` for trigger selection, owner lifecycle,
+local state and verification. Agent-owned work cancels on owner termination by
+default; choose `on_owner_terminate="keep"` when it must continue independently.
 
 ## Config adjustment (modifying system configuration)
 

@@ -61,7 +61,9 @@ for product in products:
                f"write findings to out/{product}.md",
         label=f"research-{product}",
     )
-meiva.watcher.launch(gather_wave_1, timeout="30m", name="gather-w1")
+meiva.shell.run_background(
+    '"$MEIVA_PYTHON" gather_wave_1.py', ttl=30 * 60, name="gather-w1",
+)
 ```
 
 In a real production run, an agent decomposed a nine-product competitive
@@ -242,7 +244,7 @@ for the full surface.
 | `meiva cluster status/destroy` | multi-machine roster + decommission of this host's cluster |
 | `.venv/bin/meiva init --no-serve-gateway --serve-agent-runner --gateway-url <url> --db-capability <bundle>` | init of a split-deployment agent-runner joining a gateway, then `meiva start --all-services` (its checkout's CLI — `meiva` on PATH does not exist yet; with the bundle's `MEIVA_DB_CAPABILITY_KEY` exported) |
 | `meiva agents` | observe + control agents (ls / timeline / send / cancel / restart / terminate) |
-| `meiva schedules` | gateway-supervised schedules (cron jobs agents create and own) |
+| `meiva schedules` | declarative schedules (single-round timed jobs agents create and own) |
 | `meiva skill install <src>` | install Agent Skills from a git URL or local path |
 | `meiva plugins` / `meiva mcp` | manage plugins and MCP servers |
 | `meiva memory` | shared memory pool operations |

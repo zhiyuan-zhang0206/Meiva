@@ -124,7 +124,8 @@ and immediate feedback. A short command can be part of a long investigation.
 Use an agent owner for work needing judgment, follow-up, or interpretation.
 `meiva.agents.spawn` can assign a new worker; an existing suitable owner can
 continue. A self-contained mechanical operation can use
-`meiva.shell.run_background`, with `meiva.watcher` for temporary event waits.
+`meiva.shell.run_background(..., ttl=...)` for bounded event waits and
+`meiva.schedules` for timed or recurring single-round checks.
 Putting a command in the background only delegates its execution: if preparing,
 interpreting, or repairing it needs sustained attention, give that work an owner
 too. Rely on completion events rather than foreground polling. Pair brief live

@@ -40,7 +40,7 @@ def test_setup_env_keys_matches_the_real_fixtures_body() -> None:
         _E2E_CONFTEST.read_text(encoding="utf-8"), "e2e_process_env"
     )
     assert dynamic == frozenset()
-    assert len(literal) == 14
+    assert len(literal) == 15
     tree = ast.parse(_E2E_CONFTEST.read_text(encoding="utf-8"))
     declared = {
         e.value

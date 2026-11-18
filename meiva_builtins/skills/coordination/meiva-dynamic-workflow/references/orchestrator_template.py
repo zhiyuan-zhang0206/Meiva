@@ -13,6 +13,7 @@ and let the other workers end unwatched.
 """
 
 import json
+import shlex
 from pathlib import Path
 
 import meiva
@@ -86,7 +87,13 @@ watcher_code = watcher_code.replace(
 watcher_code = watcher_code.replace("REQUIRED_COUNT = 0", f"REQUIRED_COUNT = {CHECKPOINT_COUNT}")
 watcher_code = watcher_code.replace("ORCHESTRATOR_ID = 0", f"ORCHESTRATOR_ID = {orchestrator_id}")
 
-meiva.watcher.launch(watcher_code, timeout="10m", name="orchestrator-checkpoint")
+checkpoint_script = Path("orchestrator-checkpoint.py").resolve()
+meiva.files.write(str(checkpoint_script), watcher_code)
+meiva.shell.run_background(
+    '"$MEIVA_PYTHON" ' + shlex.quote(str(checkpoint_script)),
+    ttl=600,
+    name="orchestrator-checkpoint",
+)
 meiva.self.pause_heartbeat(600)
 
 print(f"Checkpoint armed on {len(gating_files)} result file(s).")

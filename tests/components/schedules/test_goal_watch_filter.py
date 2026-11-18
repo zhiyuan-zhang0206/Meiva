@@ -107,3 +107,88 @@ def test_poll_fallback_reads_status_until_idle(watcher_wire: GatewayStub) -> Non
         ("POST", "/api/agents/7/messages"),
     ]
     assert "target agent 42 idled" in watcher_wire.received[-1].body["content"]
+
+
+class _EventStream:
+    def __init__(self, *, fail_subscribe: bool = False) -> None:
+        self.fail_subscribe = fail_subscribe
+        self.subscribed = False
+        self.listened = False
+        self.closed = False
+
+    def subscribe(self, channel: str) -> None:
+        if self.fail_subscribe:
+            raise ConnectionError("subscription unavailable")
+        self.subscribed = True
+
+    def listen(self) -> Iterator[dict[str, object]]:
+        self.listened = True
+        yield {"type": "message", "data": json.dumps(_agent_updated_event(42))}
+        raise AssertionError("watcher must return after one wake")
+
+    def close(self) -> None:
+        self.closed = True
+
+
+def _redis_class(stream: _EventStream, *, fail_connect: bool = False) -> type:
+    class Client:
+        @classmethod
+        def from_url(cls, _url: str, **kwargs: object) -> Client:
+            if fail_connect:
+                import redis
+
+                raise redis.ConnectionError("Redis unavailable")
+            assert kwargs["socket_timeout"] is None
+            return cls()
+
+        def pubsub(self) -> _EventStream:
+            return stream
+
+    return Client
+
+
+def test_already_idle_wakes_before_listening(watcher_wire: GatewayStub) -> None:
+    stream = _EventStream()
+    watcher_wire.reply("GET", "/api/agents/42", {"status": "idling"})
+    watcher_wire.reply("POST", "/api/agents/7/messages", {"status": "accepted"})
+    vars(_load_snippet())["watch"](42, redis_cls=_redis_class(stream))
+    assert stream.subscribed and stream.closed and not stream.listened
+    assert [(r.method, r.path) for r in watcher_wire.received] == [
+        ("GET", "/api/agents/42"),
+        ("POST", "/api/agents/7/messages"),
+    ]
+
+
+@pytest.mark.parametrize("failure", ["connect", "subscribe"])
+def test_initial_redis_failure_polls_and_wakes_once(
+    watcher_wire: GatewayStub, failure: str
+) -> None:
+    stream = _EventStream(fail_subscribe=failure == "subscribe")
+    watcher_wire.reply("GET", "/api/agents/42", {"status": "idling"})
+    watcher_wire.reply("POST", "/api/agents/7/messages", {"status": "accepted"})
+    vars(_load_snippet())["watch"](
+        42, redis_cls=_redis_class(stream, fail_connect=failure == "connect")
+    )
+    assert not stream.listened
+    assert stream.closed is (failure == "subscribe")
+    assert [(r.method, r.path) for r in watcher_wire.received] == [
+        ("GET", "/api/agents/42"),
+        ("POST", "/api/agents/7/messages"),
+    ]
+
+
+def test_pubsub_event_wakes_once(watcher_wire: GatewayStub) -> None:
+    stream = _EventStream()
+    watcher_wire.reply_in_turn(
+        "GET",
+        "/api/agents/42",
+        [Reply(200, {"status": "running"}), Reply(200, {"status": "idling"})],
+    )
+    watcher_wire.reply("POST", "/api/agents/7/messages", {"status": "accepted"})
+    vars(_load_snippet())["watch"](42, redis_cls=_redis_class(stream))
+    assert stream.subscribed and stream.listened and stream.closed
+    assert [(r.method, r.path) for r in watcher_wire.received] == [
+        ("GET", "/api/agents/42"),
+        ("GET", "/api/agents/42"),
+        ("POST", "/api/agents/7/messages"),
+    ]

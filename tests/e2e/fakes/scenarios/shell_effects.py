@@ -109,17 +109,20 @@ import meiva
 import datetime
 from pathlib import Path
 root = Path({str(sandbox())!r})
-launch = meiva.watcher.launch(
-    "print('LAUNCH-OUTPUT-MARK')",
-    timeout="30s", name="e2e-launch", notify="always",
+launch = meiva.shell.run_background(
+    "echo LAUNCH-OUTPUT-MARK", ttl=30, name="e2e-launch", notify="always",
 )
-at = meiva.watcher.at(datetime.timedelta(seconds=4), "AT-WAKE-MARK", name="e2e-at", notify="always")
-cron = meiva.watcher.cron("* * * * *", "CRON-WAKE-MARK", timezone="UTC",
-    end_time=datetime.timedelta(seconds=90), name="e2e-cron", notify="always")
+at = meiva.schedules.at(
+    datetime.datetime.now(datetime.UTC) + datetime.timedelta(seconds=4),
+    message="AT-WAKE-MARK", name="e2e-at",
+)
+cron = meiva.schedules.cron(
+    "* * * * *", message="CRON-WAKE-MARK", timezone="UTC", name="e2e-cron",
+)
 (root / "watcher-ids").write_text(
-    f"{{launch.session_id}} {{at.session_id}} {{cron.session_id}}"
+    f"{{launch.session_id}} {{at.id}} {{cron.id}}"
 )
-print("watchers-created", launch.session_id, at.session_id, cron.session_id)
+print("watchers-created", launch.session_id, at.id, cron.id)
 """
     return RecordingModel(
         agent_id=agent_id, script=(exec_call(1, code), *(say("watcher wake") for _ in range(8)))
@@ -130,7 +133,7 @@ def build_watcher_timeout(model: str, *, agent_id: int | None) -> RecordingModel
     code = f"""
 import meiva
 from pathlib import Path
-wid = meiva.watcher.launch("import time; time.sleep(60)", timeout="2s",
+wid = meiva.shell.run_background("sleep 60", ttl=2,
     name="e2e-timeout", notify="always")
 Path({str(sandbox() / "timeout-id")!r}).write_text(str(wid.session_id))
 print("timeout-watcher", wid)
@@ -148,10 +151,12 @@ import meiva
 import datetime
 from pathlib import Path
 fire_at = datetime.datetime.now(datetime.UTC) + datetime.timedelta(seconds=30)
-wid = meiva.watcher.at(fire_at, "TERMINATED-WATCHER-MUST-NOT-FIRE",
-    name="e2e-terminate", notify="always")
+wid = meiva.schedules.at(
+    fire_at, message="TERMINATED-WATCHER-MUST-NOT-FIRE",
+    name="e2e-terminate", on_owner_terminate="cancel",
+)
 Path({str(root / "termination-watcher")!r}).write_text(
-    f"{{wid.session_id}}\\n{{fire_at.timestamp()}}\\n"
+    f"{{wid.id}}\\n{{fire_at.timestamp()}}\\n"
 )
 print("termination-watcher", wid)
 """
@@ -168,8 +173,11 @@ def build_watcher_orphan(model: str, *, agent_id: int | None) -> RecordingModel:
         "while True: time.sleep(60)\n"
     )
     code = (
-        "import meiva\n"
-        f"wid = meiva.watcher.launch({watcher_code!r}, timeout='60s', name='e2e-orphan')\n"
+        "import meiva, shlex, sys\nfrom pathlib import Path\n"
+        f"script = Path({str(root / 'e2e-orphan.py')!r})\n"
+        f"meiva.files.write(str(script), {watcher_code!r})\n"
+        "wid = meiva.shell.run_background(shlex.join([sys.executable, str(script)]), ttl=60, name='e2e-orphan')\n"
+        "(script.parent / 'orphan-session').write_text(str(wid.session_id))\n"
         "print('orphan-watcher', wid)"
     )
     return RecordingModel(agent_id=agent_id, script=(exec_call(1, code), say("orphan guard armed")))

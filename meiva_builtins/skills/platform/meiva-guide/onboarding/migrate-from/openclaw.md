@@ -19,7 +19,7 @@ control plane for sessions, tools, events and channel connections.
 | Sessions (per sender / workspace; DMs share the main session) | Agent dialogs + the task registry (`meiva.tasks`) | |
 | Agents (multi-agent routing) | Peer agent fleet (`meiva.agents.spawn`), delegation via messages and tasks | |
 | Skills / tools / plugins (ClawHub) | `meiva skill install` (Agent Skills standard), `meiva plugins`, MCP via `meiva mcp` | Skills already in SKILL.md form install directly; anything else needs porting to SKILL.md or an MCP server covering the same tool. |
-| Cron / webhooks | `meiva schedules` (gateway-supervised) + `meiva.watcher` | |
+| Cron / webhooks | `meiva schedules` (declarative triggers) | |
 | Config `~/.openclaw/openclaw.json` (JSON5: channels, messages, providers, security) | `meiva config get/set/unset` | |
 | Control UI (`openclaw dashboard`, :18789) | Platform fleet view; per-report files via `meiva.ui.publish` | |
 | Companion apps (voice, canvas, camera, screen sharing) | No equivalent — Meiva delivers reports and text (`meiva.ui.publish`) | |
@@ -33,7 +33,7 @@ control plane for sessions, tools, events and channel connections.
    WhatsApp/Slack/Discord channels do not port — say so before the user goes
    looking for the bot.
 2. **Recreate the automations.** Cron entries → `meiva schedules`; webhook
-   triggers → a small script behind a schedule, or a `meiva.watcher` condition.
+   triggers → a small script behind a schedule, or a single-round `meiva.schedules.every` condition check.
 3. **Port capabilities.** SKILL.md-format skills install directly; other
    OpenClaw skills/plugins need rewriting as Agent Skills, or finding an MCP
    server that covers the tool.

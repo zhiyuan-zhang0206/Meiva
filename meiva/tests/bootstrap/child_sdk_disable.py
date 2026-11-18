@@ -21,10 +21,10 @@ def full_surface() -> None:
 
 
 def module_hides_from_parent() -> None:
-    assert not hasattr(meiva, "watcher"), "watcher should be gone from meiva package"
-    assert "watcher" not in meiva.__all_for_meiva__
+    assert not hasattr(meiva, "schedules"), "schedules should be gone from meiva package"
+    assert "schedules" not in meiva.__all_for_meiva__
     # Import succeeds and returns the disabled sentinel.
-    import meiva.watcher as w
+    import meiva.schedules as w
 
     # meiva:note
     # The disabled sentinel module has no `anything` attribute, which is the point of the test.
@@ -33,7 +33,7 @@ def module_hides_from_parent() -> None:
     except AttributeError as e:
         msg = str(e)
         assert "disabled by MEIVA_SDK_DISABLE" in msg, msg
-        assert "'watcher'" in msg, msg
+        assert "'schedules'" in msg, msg
         print("ok")
     else:
         raise AssertionError("attribute access on disabled module did not raise")
@@ -67,7 +67,7 @@ def nested_module_sentinel() -> None:
 
 
 def multiple_disables() -> None:
-    assert not hasattr(meiva, "watcher")
+    assert not hasattr(meiva, "schedules")
     assert not hasattr(meiva, "agents")
     assert not hasattr(meiva.self, "terminate")
     assert hasattr(meiva, "shell"), "shell not in disable list, should remain"
@@ -84,8 +84,8 @@ def help_overview() -> None:
     print("ok")
 
 
-def watcher_and_agents_gone() -> None:
-    assert not hasattr(meiva, "watcher")
+def schedules_and_agents_gone() -> None:
+    assert not hasattr(meiva, "schedules")
     assert not hasattr(meiva, "agents")
     print("ok")
 
@@ -94,22 +94,23 @@ def apply_is_idempotent() -> None:
     from meiva.sdk_surface.sdk_disable import apply_sdk_disable
 
     # The install applied the env entries (the preamble loaded the surface).
-    assert not hasattr(meiva, "watcher")
+    assert not hasattr(meiva, "schedules")
     # A second call with the same entry is a no-op: no crash, no duplicate.
-    apply_sdk_disable(["watcher"])
-    assert not hasattr(meiva, "watcher")
+    apply_sdk_disable(["schedules"])
+    assert not hasattr(meiva, "schedules")
     print("ok")
 
 
 def apply_is_cumulative() -> None:
     from meiva.sdk_surface.sdk_disable import apply_sdk_disable
 
-    # The env baseline disabled watcher at install time.
-    assert not hasattr(meiva, "watcher")
+    # meiva:note
+    # The env baseline disabled schedules at install time.
+    assert not hasattr(meiva, "schedules")
     assert hasattr(meiva, "agents"), "agents still present before second call"
     apply_sdk_disable(["agents"])
     assert not hasattr(meiva, "agents"), "agents should be gone after second call"
-    assert not hasattr(meiva, "watcher"), "watcher should remain gone"
+    assert not hasattr(meiva, "schedules"), "schedules should remain gone"
     assert hasattr(meiva, "files"), "files should remain"
     print("ok")
 
@@ -136,10 +137,10 @@ def applied_entries_tracked() -> None:
         return installation.disabled
 
     # After the install: env entries are recorded on the installation.
-    assert "watcher" in disabled()  # pyright: ignore[reportOperatorIssue]
+    assert "schedules" in disabled()  # pyright: ignore[reportOperatorIssue]
     apply_sdk_disable(["agents"])
     assert "agents" in disabled()  # pyright: ignore[reportOperatorIssue]
-    assert "watcher" in disabled()  # pyright: ignore[reportOperatorIssue]
+    assert "schedules" in disabled()  # pyright: ignore[reportOperatorIssue]
     print("ok")
 
 
@@ -183,7 +184,7 @@ SCENARIOS: dict[str, Callable[[], None]] = {
     "nested_module_sentinel": nested_module_sentinel,
     "multiple_disables": multiple_disables,
     "help_overview": help_overview,
-    "watcher_and_agents_gone": watcher_and_agents_gone,
+    "schedules_and_agents_gone": schedules_and_agents_gone,
     "apply_is_idempotent": apply_is_idempotent,
     "apply_is_cumulative": apply_is_cumulative,
     "apply_dotted_cumulative": apply_dotted_cumulative,

@@ -1,206 +1,108 @@
 ---
 name: schedules
-description: "Creates resumable Meiva schedules from timing requirements. Use for recurring, time-triggered, or condition-triggered work."
+description: "Creates declarative Meiva schedules for one-shot, cron, or fixed-interval work."
 ---
 
-# Schedule Writer
+# Declarative Schedules
 
-A **schedule** is a persistent session the gateway supervises: a script it runs in
-a session and restarts if it crashes (with a circuit breaker). You turn a
-user's request into one — you clarify what they want, write the script, and create
-it through the API. The script is arbitrary Python: whatever `if` / `for` /
-threshold logic the trigger needs, you write it directly (there is no schedule
-DSL).
+Use `meiva.schedules` inside an agent and `meiva schedules` from a shell.
+A schedule runs a Python payload once per fire and records the outcome. The
+manager owns timing, recovery and process lifetime. Choose the trigger, skip
+condition, error policy, machine, owner and stopping condition from the request.
+Reuse existing schedules and event delivery before creating another monitor.
 
-## 0. Built-in schedules already exist
+## Choose a trigger and payload
 
-Meiva provisions a set of built-in schedules on every gateway boot from
-`schedules/manifest.json` (product schedules — self-evolution, memory — enabled;
-the manifest also supports cluster-operator schedules, which start disabled). Do
-not create a schedule whose name is in the manifest: the API refuses it (409).
-Extend the manifest + template instead if the need is a general Meiva capability;
-write a user-specific schedule (like quant-daily-check) via the normal flow.
-
-## 1. Clarify (ask before writing)
-
-Ask the user three things, then write to their answers:
-
-1. **Trigger** — time, event, or both?
-   - *time*: a wall-clock cadence ("every night at 3am", "weekdays at 9").
-   - *event/threshold*: a condition over cluster state ("when the memory pool grows
-     >500 lines in 2h", "when the repo burns >200k tokens in an hour").
-   - *both*: fire on either (a nightly safety net **or** a threshold — the common
-     shape for consolidation/meiva-self-evolution work).
-2. **Skip** — any fire it should skip? ("don't run if no new memory was written",
-   "skip weekends", "only during work hours").
-3. **On error** — if the work fails: **surface** it (let it raise — the runner
-   records the traceback to the schedule's `last_error`, shown on the manage
-   page), **retry** (catch, `print` the error so it lands in the schedule's logs,
-   and let the next loop try again), or **ignore** (catch and carry on)?
-
-## 2. Write the script (the rules that matter)
-
-**The script must be resumable.** The gateway can kill it at any instant (restart,
-your edit, a crash-relaunch). So structure it **compute-next → sleep → act →
-loop**, recomputing the next fire from the wall clock every iteration. **Never act
-on startup** and never rely on an in-memory counter — both re-fire on every
-restart. A resumable loop naturally skips a fire missed during downtime.
-
-**Time** — use `next_fire`, and pass the **cluster** timezone, not a literal zone
-name: a hard-coded zone pins one deployment's clock onto every cluster that ever
-runs the schedule (a 04:00 maintenance window becomes 13:00 mid-peak nine hours
-west, and a weekly cron lands on the wrong calendar day). `next_fire` with
-`timezone=None` computes in UTC, which is the right choice only for a pure
-period like `*/5 * * * *`.
+- `at(aware_datetime, ...)`: one fire; a missed instant catches up once.
+- `cron("0 3 * * *", ...)`: wall-clock cadence; `timezone` defaults to the
+  configured timezone. Missed slots are skipped and fires never overlap.
+- `every(60, ...)`: fixed interval of at least 30 seconds, measured after completion.
+- Supply exactly one of `script` or `message`. A message wakes `target_agent_id`,
+  defaulting to the owner; a system message schedule needs an explicit target.
 
 ```python
-from datetime import UTC, datetime
-from base.config import settings
-from base.daemon.schedules.watcher import next_fire
-nxt = next_fire("0 3 * * *", after=datetime.now(UTC), timezone=settings.general.timezone)
-```
-
-**Event / threshold** — read the cluster's own state. All events live in the
-unified event stream (Loki; schema: `ts / trace_id /
-agent_id / machine / cluster / process / category / event_name / level /
-source / target_agent_id / attributes`; `category` = audit | telemetry |
-log). Events are not in Postgres — do not query it for them:
-- tokens: `llm_usage` events — sum `in_total + out_total`.
-- agents spawned: count of `spawn` events (`category='audit'`).
-- memory growth: `meiva.shell.run("cd ~/.meiva/vault/memory && git diff --numstat | awk '{s+=$1+$2} END{print s+0}'")`.
-- Read events via the gateway's `/api/events` endpoint — works from a schedule, no agent
-  identity needed.
-
-**Compound** is just `if a or b:`. **Skip** is `if should_skip(): continue`.
-
-**Reuse an agent, don't re-spawn it.** If the task runs an agent (a consolidator, a
-monitor), reuse the one with its label — resurrect it if terminated, wake it if
-idle — and only spawn when none exists. State lives in the agents table (the label
-is the identity); the schedule keeps none:
-
-```python
-
+from datetime import datetime, timedelta, timezone
 import meiva
-from meiva.agents import AgentStatus as S
 
-def ensure_agent(label: str, prompt: str) -> int:
-    before_id = None
-    while True:
-        page = meiva.agents.list_agents(scope="all", query=label, before_id=before_id)
-        # Directory pages are newest first; substring search still needs an exact label match.
-        for agent in page.agents:
-            if agent.label != label:
-                continue
-            if agent.status == S.TERMINATED:
-                meiva.agents.resurrect(agent.agent_id, prompt)
-            else:
-                meiva.agents.send_message(agent.agent_id, prompt)
-            return agent.agent_id
-        if page.next_cursor is None:
-            break
-        before_id = page.next_cursor
-    return meiva.agents.spawn(prompt=prompt, label=label)
-
+reminder = meiva.schedules.at(
+    datetime.now(timezone.utc) + timedelta(hours=1),
+    name="review-result", message="Review the saved result and resume the task.",
+)
+check = meiva.schedules.every(
+    60, name="check-result",
+    script="from pathlib import Path\nprint(Path('state.json').exists())\n",
+    timeout_seconds=30,
+)
+nightly = meiva.schedules.cron(
+    "0 3 * * *", name="nightly-review", message="Review the nightly evidence.",
+    on_owner_terminate="keep",
+)
 ```
 
-**Actor caveat.** A schedule runs as `schedule:<id>`, not an agent. So
-`meiva.agents.*`, `meiva.shell`, and `meiva.memory` all work (for cluster data, see
-[cluster-data](../cluster-data/SKILL.md)), but the calls
-that need an agent identity — `meiva.self.*`, `meiva.watcher.*`, `meiva.ui.*` — do
-not. To surface something to the user, either let the schedule raise (recorded to
-`last_error`) or hand the work to an agent via `ensure_agent(...)` and let *it*
-notify.
+## Single-round contract and local state
 
-## 3. Full example — nightly-or-threshold, reuse-by-label
+Write one bounded round and exit 0 on success. Never put `while True`, sleeping
+until the next fire, `write_beat`, or a resident daemon inside a schedule. Raise
+on failure so the run and `last_error` capture the error. A skipped round can
+simply return. For event/threshold work, use an `every` trigger whose script checks
+once and sends a message only when action is needed. Short-lived event-stream
+waits belong in `meiva.shell.run_background(..., ttl=...)` instead.
+
+The payload runs on its selected machine in
+`$MEIVA_HOME/workspaces/<owner_agent_id>/schedules/<schedule_id>/`.
+System schedules use `$MEIVA_HOME/schedules/<schedule_id>/`.
+`run.py` is the materialized payload and `latest.log` contains its latest output.
+Ordinary local files such as `state.json` persist between fires: use them for
+baselines, debouncing and delivery receipts. Persist progress before a terminal
+notification, record successful delivery, then disable the schedule when finished:
 
 ```python
-
-# consolidate the memory pool nightly at 3am, or whenever it grows >500 lines in 2h
-import time
-from datetime import UTC, datetime
+import os
 import meiva
-from meiva.agents import AgentStatus as S
-from base.config import settings
-from base.daemon.schedules.watcher import next_fire
 
-def ensure_agent(label: str, prompt: str) -> int:
-    before_id = None
-    while True:
-        page = meiva.agents.list_agents(scope="all", query=label, before_id=before_id)
-        # Directory pages are newest first; substring search still needs an exact label match.
-        for agent in page.agents:
-            if agent.label != label:
-                continue
-            if agent.status == S.TERMINATED:
-                meiva.agents.resurrect(agent.agent_id, prompt)
-            else:
-                meiva.agents.send_message(agent.agent_id, prompt)
-            return agent.agent_id
-        if page.next_cursor is None:
-            break
-        before_id = page.next_cursor
-    return meiva.agents.spawn(prompt=prompt, label=label)
-
-
-def pool_growth():
-    out = meiva.shell.run("cd ~/.meiva/vault/memory && git diff --numstat | awk '{s+=$1+$2} END{print s+0}'")
-    return int((out or "0").strip() or 0)
-
-def consolidate(reason):
-    try:
-        ensure_agent("memory-arbiter",
-                     f"Consolidate the memory pool now ({reason}). Follow meiva.skills.meiva_memory.consolidation.")
-    except Exception as e:              # on-error: log it and carry on (per the user's choice)
-        print(f"consolidate failed ({reason}): {e}")   # lands in the schedule's logs
-
-while True:                             # resumable: recomputes from the clock each loop
-    nxt = next_fire("0 3 * * *", after=datetime.now(UTC), timezone=settings.general.timezone)
-    fired = False
-    while datetime.now(UTC) < nxt:
-        if pool_growth() >= 500:
-            consolidate("pool grew >=500 lines"); fired = True
-            time.sleep(2 * 3600)        # debounce the same growth
-            break
-        time.sleep(60)
-    if not fired:
-        consolidate("nightly 03:00")
+# After the terminal result and successful notification are durably recorded:
+meiva.schedules.disable(int(os.environ["MEIVA_SCHEDULE_ID"]))
 ```
 
-## 4. Create it (POST /api/schedules)
+Disable can terminate an active fire during reconciliation, so put it last.
+Local files belong to that machine; do not assume shared storage across hosts.
 
-Show the user the script and the readback ("I'll wake the memory-arbiter agent
-nightly at 3am PT or when the pool grows ≥500 lines in 2h — reusing the same agent,
-not spawning a new one"). On their confirmation, create it — the gateway starts
-supervising it immediately:
+## Ownership and lifecycle
 
-```python
-import os, httpx, pathlib
-base = os.environ.get("MEIVA_GATEWAY_URL", "http://localhost:8000")
-body = {
-    "name": "memory-arbiter",             # unique; also the schedule's handle
-    "description": "<the user's request, verbatim>",
-    "script": pathlib.Path("schedule.py").read_text(),
-    "command": "python schedule.py",      # default; how the runner runs the script
-}
-r = httpx.post(f"{base}/api/schedules", json=body,
-               headers={"Authorization": f"Bearer {os.environ.get('MEIVA_API_TOKEN', '')}"})
-print(r.status_code, r.text)             # 201 on success; 400 = script syntax error; 409 = name taken
+SDK creation defaults to `owner_agent_id="self"`. Pass an explicit agent id to
+place work with another owner, or `None` for a system schedule. Owner placement
+follows the owner's machine unless `machine` is supplied. Owned schedules default
+to `on_owner_terminate="cancel"`: owner termination cancels unfinished work and
+stops active fires. Choose `"keep"` explicitly when work must outlive that owner.
+An owned payload retains schedule provenance and owner identity; it does not
+own the agent's turn and cannot restart or terminate the owner through `meiva.self`.
+
+## Inspect and control
+
+`meiva.schedules.list()` and `get(id)` return durable schedule state.
+`enable(id)` calculates the next eligible fire; `disable(id)` stops future fires
+and any active fire; `cancel(id)` cancels unfinished work; `run_now(id)` enables
+an idle schedule and makes one fire immediately eligible. Inspect `last_error`,
+the run outcome and logs before claiming the work succeeded.
+
+## CLI
+
+`meiva schedules create NAME` takes exactly one trigger (`--at` with an aware
+ISO timestamp, `--cron` expression, or `--every` seconds) and exactly one payload
+(`--script` source, `--script-file` path or `-` for stdin, or `--message` text).
+Use `--owner-agent-id`, `--target-agent-id`, `--on-owner-terminate cancel|keep`,
+`--timeout-seconds`, `--machine`, and `--timezone` to make placement and lifetime
+explicit. CLI creation without an owner creates a system schedule.
+
+```bash
+meiva schedules create nightly-review --cron '0 3 * * *' \
+  --message 'Review the nightly evidence.' --owner-agent-id 42 \
+  --target-agent-id 42 --on-owner-terminate keep --timeout-seconds 60
+meiva schedules create check-result --every 60 --script-file check.py \
+  --owner-agent-id 42 --machine ubuntu --on-owner-terminate cancel
 ```
 
-The API `compile()`-checks the script (400 with the offending line) and refuses a
-duplicate name (409). After creating, tell the user it is live and how to manage it
-(the `/control/schedules` page: status, logs, edit, start/stop).
-
-## Editing later
-
-To change a schedule, `PUT /api/schedules/{id}` with the new `script` (or any
-field). The change is snapshotted for roll-back, and an enabled schedule reloads
-onto the new script at once. `start` / `stop` / `restart` are `POST
-/api/schedules/{id}/{action}`.
-
-Same surface from a shell, if that is where you already are — `meiva schedules`
-covers every route above (`ls` / `get` / `create` / `update` / `delete` /
-`start` / `stop` / `restart` / `logs` / `runs`), takes a name or an id, and reads
-the script from `--script-file` (`-` = stdin). Use it for inspection and
-one-off control; keep the httpx form above for the create step, where you are
-already holding the script in the same process.
+Use `meiva schedules ls`, `get`, `logs`, `runs`, `enable`, `disable`, `cancel`,
+and `run-now` to inspect and control a schedule. CLI help owns exact flag syntax.
+After creation, retain the id and read back its trigger, owner, machine and next
+fire. Apply the user's existing authorization; ask only for unsettled decisions.

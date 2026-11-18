@@ -69,8 +69,8 @@ The remaining top-level built-ins (such as `meiva-corp`,
 have no OKF node; their `SKILL.md` is the reference. Capability/timescale
 calibration belongs to `meiva-workflow`; deployment, incident operations,
 modification layers, installation, plugin development, schedules, and external
-agent execution and page composition belong to `meiva-guide`. Temporary waiting
-contracts belong to `meiva.watcher`; waiting and recovery methods belong to
+agent execution and page composition belong to `meiva-guide`. Timed and recurring trigger contracts belong to `meiva.schedules`; bounded waits
+use `meiva.shell.run_background`. Waiting and recovery methods belong to
 `meiva-being-a-long-running-agent`. Model speed and feedback settings belong to `meiva-guide`'s models skill.
 
 ## Key dependencies

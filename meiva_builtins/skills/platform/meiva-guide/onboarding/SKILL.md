@@ -133,7 +133,7 @@ Each page has the same shape: a concept-map table (their concept → its Meiva
 equivalent), migration steps, and the honest differences and pitfalls, with
 sources. Four facts cut across all four: skills port directly (same Agent
 Skills standard), instructions become memory (the feedback kind), automations
-become `meiva schedules` / `meiva.watcher`, and every tool's permission system
+become `meiva schedules`, and every tool's permission system
 becomes recorded gates plus `meiva.ui.ask` questions. Read the page for the
 tool they name, then walk it with them.
 

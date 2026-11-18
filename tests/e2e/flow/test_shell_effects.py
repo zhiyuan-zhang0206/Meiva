@@ -243,28 +243,34 @@ def test_session_survives_agent_host_and_gateway_restarts(
 
 
 @pytest.mark.scenario("tests.e2e.fakes.scenarios.shell_effects:build_watchers")
-def test_launch_at_and_cron_watchers_wake_owner_with_their_sources(
-    spawned_agent: int, clean_shell_world: None
+def test_background_and_schedules_wake_owner_with_their_sources(
+    spawned_agent: int, clean_shell_world: None, schedule_manager_proc: None
 ) -> None:
     chat_and_wait(spawned_agent, "start watchers")
     launch, at, cron = map(int, (world.sandbox() / "watcher-ids").read_text().split())
 
     def delivered() -> tuple[bool, object]:
-        rows = _inbounds(spawned_agent, "watcher:")
+        rows = _inbounds(spawned_agent, "shell:") + _inbounds(spawned_agent, "schedule:")
         sources = {source for source, _, _ in rows}
-        return {f"watcher:{launch}", f"watcher:{at}", f"watcher:{cron}"} <= sources, rows
+        return {f"shell:{launch}", f"schedule:{at}", f"schedule:{cron}"} <= sources, rows
 
-    poll_until(delivered, timeout=115.0, interval=0.5, what="launch, at and cron wakes")
-    rows = _inbounds(spawned_agent, "watcher:")
+    try:
+        poll_until(delivered, timeout=115.0, interval=0.5, what="background, at and cron wakes")
+    finally:
+        # meiva:note
+        # The recurring schedule outlives its first fire; cancel it before the
+        # fixture removes the sandbox and avoid a second wake in later tests.
+        gateway_post(f"{GATEWAY_URL}/api/schedules/{cron}/cancel", timeout=10.0).raise_for_status()
+    rows = _inbounds(spawned_agent, "shell:") + _inbounds(spawned_agent, "schedule:")
     assert any(
-        source == f"watcher:{launch}" and "LAUNCH-OUTPUT-MARK" in content
+        source == f"shell:{launch}" and "LAUNCH-OUTPUT-MARK" in content
         for source, content, _ in rows
     )
     assert any(
-        source == f"watcher:{at}" and "AT-WAKE-MARK" in content for source, content, _ in rows
+        source == f"schedule:{at}" and "AT-WAKE-MARK" in content for source, content, _ in rows
     )
     assert any(
-        source == f"watcher:{cron}" and "CRON-WAKE-MARK" in content for source, content, _ in rows
+        source == f"schedule:{cron}" and "CRON-WAKE-MARK" in content for source, content, _ in rows
     )
     poll_until(
         lambda: _human_witness(spawned_agent, "AT-WAKE-MARK", "CRON-WAKE-MARK"),
@@ -275,21 +281,30 @@ def test_launch_at_and_cron_watchers_wake_owner_with_their_sources(
 
 
 @pytest.mark.scenario("tests.e2e.fakes.scenarios.shell_effects:build_watcher_timeout")
-def test_watcher_timeout_notice_carries_the_log_tail(
-    spawned_agent: int, clean_shell_world: None
+def test_background_ttl_expiry_notifies_owner(
+    spawned_agent: int, clean_shell_world: None, ttl_reaper_proc: None
 ) -> None:
     chat_and_wait(spawned_agent, "start bounded watcher")
     wid = int((world.sandbox() / "timeout-id").read_text())
 
     def timed_out() -> tuple[bool, object]:
-        rows = _inbounds(spawned_agent, f"watcher:{wid}")
+        rows = [
+            row
+            for row in _inbounds(spawned_agent, "system")
+            if "e2e-timeout" in row[1] and "TTL expired" in row[1]
+        ]
         return bool(rows and rows[0][2] == "done"), rows
 
     poll_until(timed_out, timeout=60.0, interval=0.3, what="watcher timeout notice")
-    _, content, _ = _inbounds(spawned_agent, f"watcher:{wid}")[0]
-    assert "exited with code" not in content and "[watcher timed out]" in content
+    _, content, _ = next(
+        row
+        for row in _inbounds(spawned_agent, "system")
+        if "e2e-timeout" in row[1] and "TTL expired" in row[1]
+    )
+    assert f"id {wid}, agent {spawned_agent}" in content
+    assert "interrupting a running task" in content
     poll_until(
-        lambda: _human_witness(spawned_agent, "[watcher timed out]"),
+        lambda: _human_witness(spawned_agent, "TTL expired"),
         timeout=60.0,
         interval=0.3,
         what="watcher timeout in model input",
@@ -297,36 +312,37 @@ def test_watcher_timeout_notice_carries_the_log_tail(
 
 
 @pytest.mark.scenario("tests.e2e.fakes.scenarios.shell_effects:build_watcher_termination")
-def test_owner_termination_closes_an_at_watcher_before_it_can_fire(
-    spawned_agent: int, clean_shell_world: None
+def test_owner_termination_cancels_at_schedule_before_it_can_fire(
+    spawned_agent: int, clean_shell_world: None, schedule_manager_proc: None
 ) -> None:
     agent = spawned_agent
-    chat_and_wait(agent, "arm a watcher before termination")
-    wid_text, fire_at_text = (world.sandbox() / "termination-watcher").read_text().splitlines()
-    wid, fire_at = int(wid_text), float(fire_at_text)
-    full_name = f"meiva-agent-{agent}-shell-{wid}-e2e-terminate"
-    backend = PtySessionBackend(
-        config=PtyClientConfig(socket_path=service_socket()), home=meiva_home()
-    )
-    assert backend.has_session(full_name), "the watcher must be live before termination"
+    chat_and_wait(agent, "arm a schedule before termination")
+    sid_text, fire_at_text = (world.sandbox() / "termination-watcher").read_text().splitlines()
+    schedule_id, fire_at = int(sid_text), float(fire_at_text)
+    schedule = gateway_get(f"{GATEWAY_URL}/api/schedules/{schedule_id}", timeout=10.0)
+    schedule.raise_for_status()
+    before = schedule.json()
+    assert before["owner_agent_id"] == agent
+    assert before["trigger_kind"] == "at" and before["enabled"]
+    assert before["on_owner_terminate"] == "cancel"
 
     gateway_post(f"{GATEWAY_URL}/api/agents/{agent}/terminate", timeout=10.0).raise_for_status()
     wait_for_status(agent, "terminated")
 
-    def watcher_closed() -> tuple[bool, object]:
-        alive = backend.has_session(full_name)
-        with psycopg.connect(settings.data_plane.db_url) as conn:
-            ttl_row = conn.execute(
-                "SELECT count(*) FROM agent_shell_ttls WHERE agent_id = %s AND session_id = %s",
-                (agent, wid),
-            ).fetchone()
-        return not alive and ttl_row == (0,), {"alive": alive, "ttl_row": ttl_row}
+    def schedule_cancelled() -> tuple[bool, object]:
+        response = gateway_get(f"{GATEWAY_URL}/api/schedules/{schedule_id}", timeout=10.0)
+        response.raise_for_status()
+        row = response.json()
+        return (
+            row["status"] == "cancelled" and not row["enabled"] and row["next_launch_at"] is None,
+            row,
+        )
 
     poll_until(
-        watcher_closed,
+        schedule_cancelled,
         timeout=20.0,
         interval=0.3,
-        what="termination closes the watcher session and TTL row",
+        what="termination cancels the owner's schedule and clears its next launch",
     )
     poll_until(
         lambda: (
@@ -335,16 +351,19 @@ def test_owner_termination_closes_an_at_watcher_before_it_can_fire(
         ),
         timeout=40.0,
         interval=0.3,
-        what="the terminated watcher's original fire time passes",
+        what="the cancelled schedule's original fire time passes",
     )
-    assert _inbounds(agent, f"watcher:{wid}") == []
+    assert _inbounds(agent, f"schedule:{schedule_id}") == []
+    runs = gateway_get(f"{GATEWAY_URL}/api/schedules/{schedule_id}/runs", timeout=10.0)
+    runs.raise_for_status()
+    assert runs.json() == []
     with psycopg.connect(settings.data_plane.db_url) as conn:
         status = conn.execute("SELECT status FROM agents_meta WHERE id = %s", (agent,)).fetchone()
     assert status == ("terminated",)
 
 
 @pytest.mark.scenario("tests.e2e.fakes.scenarios.shell_effects:build_watcher_orphan")
-def test_watcher_child_exits_when_its_session_shell_is_killed(
+def test_background_child_exits_when_its_session_is_killed(
     spawned_agent: int, clean_shell_world: None
 ) -> None:
     chat_and_wait(spawned_agent, "start a long watcher")
@@ -369,12 +388,17 @@ def test_watcher_child_exits_when_its_session_shell_is_killed(
         return state == psutil.STATUS_ZOMBIE, state
 
     try:
-        os.kill(shell.pid, signal.SIGKILL)
+        sid = int((world.sandbox() / "orphan-session").read_text())
+        backend = PtySessionBackend(
+            config=PtyClientConfig(socket_path=service_socket()), home=meiva_home()
+        )
+        killed, _mode = backend.kill_session(f"meiva-agent-{spawned_agent}-shell-{sid}-e2e-orphan")
+        assert killed
         poll_until(
             child_dead,
             timeout=20.0,
             interval=0.2,
-            what="orphan guard ends watcher child",
+            what="session kill ends background child",
         )
     finally:
         if not child_dead()[0]:

@@ -62,7 +62,7 @@ def test_converged_namespaces_load_real_task_instructions(
         (guide.modification_layers, "L4"),
         (guide.packages.install, "Find candidates"),
         (guide.plugins.develop, "plugin.py"),
-        (guide.schedules, "resumable"),
+        (guide.schedules, "Single-round"),
         (guide.external_agents, "External Harness Agents"),
         (meiva.skills.meiva_workflow.capability_timescale, "Gather evidence"),
     )

@@ -89,7 +89,7 @@ def _type_names(expected: type | tuple[type, ...]) -> str:
 # different type — raises `TypeError` naming the parameter.
 #
 # `allow_types` admits a parameter's legitimate non-string forms by isinstance, without expansion
-# (e.g. `watcher.at`'s datetime/timedelta, `files`' os.PathLike). A sequence admitted through
+# (e.g. `schedules.at`'s datetime, `files`' os.PathLike). A sequence admitted through
 # `allow_types` must be a list of dicts — the multimodal content-block shape — because an
 # all-string array is exactly the shape the gateway rejects.
 def coerce_str[T](

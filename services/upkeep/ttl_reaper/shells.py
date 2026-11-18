@@ -1,38 +1,35 @@
-"""Reclaim TTL-expired persistent shell sessions on their home machines.
-
-The 2026-08-27 ruling makes a TTL mandatory for every persistent shell session
-created via ``meiva.shell.sessions.new(ttl=)`` / ``run_background(ttl=)``; the TTL
-is the only reclamation mechanism. Every session — a plain shell or a watcher
-(``meiva.watcher.at/cron/launch``), which is just a shell session running a
-generated script with no registry or deadline of its own
-(docs/decisions/runtime/updates/recovery/2026-09-27-watchers-are-never-restarted.md) — carries one
-``agent_shell_ttls`` row, and every expired row is reclaimed the same way: a
-``shell_kill`` op to the owning agent's machine, then the row is deleted.
-
-The row is deleted only on a definitive verdict (killed / absent /
-machine_absent); an unreachable machine or a version-skewed runner leaves it for
-the next round — deleting the row would orphan the live session. A machine
-absent from the machines registry is definitive too (nothing on it can be dialed
-again under that name — task #4143): the row terminalizes with the
-``machine_absent`` verdict instead of deferring forever.
-
-One round groups the expired rows by home machine: machines are reclaimed
-concurrently, the rows of one machine one after another, so a slow machine holds
-up only its own rows. Each dispatch runs under a deadline sized from the RPC
-client's own budget.
-
-The owner's ``meiva.shell.sessions.renew()`` extends a live session's deadline
-before it passes; each kill dispatch re-checks the row is still expired first
-(renewal's own ``expires_at > clock_timestamp()`` guard makes the pair airtight),
-so a renewed session is never killed.
-
-Owners are notified (inbound, source ``"system"``) only when the reap interrupted
-a running job (the runner reports whether the session carried live processes at
-kill time); an empty shell's reaping is silent, and an already-absent session
-never notifies. A watcher session always carries a running job, so reclaiming
-one notifies every time. An interruption notice states when the TTL expired and
-how long it was.
-"""
+# meiva:note
+# Reclaim TTL-expired persistent shell sessions on their home machines.
+#
+# The 2026-08-27 ruling makes a TTL mandatory for every persistent shell session
+# created via ``meiva.shell.sessions.new(ttl=)`` / ``run_background(ttl=)``; the TTL
+# is the only reclamation mechanism. Every shell session carries one
+# ``agent_shell_ttls`` row, and every expired row is reclaimed the same way: a
+# ``shell_kill`` op to the owning agent's machine, then the row is deleted.
+#
+# The row is deleted only on a definitive verdict (killed / absent /
+# machine_absent); an unreachable machine or a version-skewed runner leaves it for
+# the next round — deleting the row would orphan the live session. A machine
+# absent from the machines registry is definitive too (nothing on it can be dialed
+# again under that name — task #4143): the row terminalizes with the
+# ``machine_absent`` verdict instead of deferring forever.
+#
+# One round groups the expired rows by home machine: machines are reclaimed
+# concurrently, the rows of one machine one after another, so a slow machine holds
+# up only its own rows. Each dispatch runs under a deadline sized from the RPC
+# client's own budget.
+#
+# The owner's ``meiva.shell.sessions.renew()`` extends a live session's deadline
+# before it passes; each kill dispatch re-checks the row is still expired first
+# (renewal's own ``expires_at > clock_timestamp()`` guard makes the pair airtight),
+# so a renewed session is never killed.
+#
+# Owners are notified (inbound, source ``"system"``) only when the reap interrupted
+# a running job (the runner reports whether the session carried live processes at
+# kill time); an empty shell's reaping is silent, and an already-absent session
+# never notifies. A background session carries a running job, so reclaiming
+# one notifies every time. An interruption notice states when the TTL expired and
+# how long it was.
 
 from __future__ import annotations
 
@@ -170,7 +167,7 @@ def claim_shell_row_still_expired(pool: ConnectionPool, agent_id: int, session_i
 # Drop a reclaimed shell's tracking row and queue `notice` for its owner when there is one.
 #
 # The caller decides the text (`shell_plan.reclaim_notice`): an empty shell's reaping is silent,
-# a reaped watcher session reads like any other interrupted job. The owner is woken only after
+# a reaped background session reads like any other interrupted job. The owner is woken only after
 # the row is deleted and the transaction committed.
 def delete_shell_row(
     pool: ConnectionPool,

@@ -4,26 +4,28 @@ Read this reference only for the task or mode selected by the skill entrypoint.
 Run command examples from the original skill directory unless they specify
 another working directory.
 
-## Wait with watchers, never with loops
+## Wait with event delivery and bounded helpers
 
-When you are waiting on an external event, arm a watcher and idle. A few common
-cases:
+When waiting on an external event, arrange its delivery and idle. Common cases:
 
 - **Peer agent reply**: a message addressed to you wakes you — nothing to poll.
   `meiva.agents.get_last_message(target)` is not a reply signal: it returns the
   peer's last AI *turn text*, `None` when that turn had no text (e.g. the peer
   answered by `send_message`, task #3656). Poll it only when the signal you
   await genuinely is turn text; for liveness use `meiva.agents.get_status(target)`.
-- **Scheduled time**: `meiva.watcher.at(...)`.
-- **File to land**: poll `os.path.exists(...)` in a custom watcher.
-- **Temporary recurring model check**: `meiva.watcher.cron(...)`; durable recurring work belongs in a schedule.
+- **Scheduled time**: `meiva.schedules.at(aware_datetime, name=..., message=...)`.
+- **File to land**: use a single-round `meiva.schedules.every` condition check,
+  record delivery and disable the schedule when the file arrives.
+- **Recurring model check**: `meiva.schedules.cron(..., message=...)` or
+  `meiva.schedules.every(..., message=...)`; choose a stopping condition.
 
-Read `meiva.help(meiva.watcher)` for watcher contracts and
-`meiva.help(meiva.shell.sessions)` to inspect or stop the returned session.
-Use temporary watchers for a bounded wait you own. Use
-`meiva.skills.meiva_guide.schedules` for recurring work that must resume after an
-interruption. Peer messages already provide a wake path; do not add a watcher
-when the existing delivery meets the need.
+Read `meiva.help(meiva.schedules)` for trigger and lifecycle contracts. Use
+`meiva.shell.run_background(..., ttl=...)` for a bounded event-stream wait; inspect
+or stop its returned session through `meiva.shell.sessions`. Use
+`meiva.skills.meiva_guide.schedules` for timed and recurring work. Each scheduled
+payload checks once and exits; the manager owns its next fire. Agent-owned
+schedules cancel on owner termination by default; choose `keep` explicitly for
+independent work. Peer messages already provide a wake path; reuse that delivery.
 
 Record a baseline when arming a custom probe, along with its target and as-of
 time. Wake only when the awaited condition needs action, including if it already
@@ -76,12 +78,12 @@ own delivery and choose polling intervals to satisfy the response requirement.
 
 ### Monitoring without a model turn on every tick
 
-Use `meiva.watcher.cron` or a schedule when the recurring work itself needs model
-judgment. For mechanical CI, file, queue, or health checks, use a custom background
-watcher that checks the condition and sends a message only when you must act.
-Read `meiva.help(meiva.watcher)` for API semantics. Set the interval and lifetime from
-the response requirement, and reuse existing event delivery or a monitor when it
-already covers the wait.
+Use `meiva.schedules.cron` or `every` with a message when recurring work needs
+model judgment. For mechanical CI, file, queue or health checks, schedule one
+bounded round that sends a message only when action is needed. A bounded
+`meiva.shell.run_background` event listener fits short-lived stream waits. Choose
+the interval and lifetime from the response requirement, and reuse existing
+event delivery or a monitor when it already covers the wait.
 
 Compare the condition relevant to action, not raw readings: disk usage moving
 within a healthy range is not a wake trigger; reaching the intervention threshold
