@@ -70,10 +70,21 @@ def test_an_exemption_that_is_not_required_is_a_problem() -> None:
 # meiva:note
 # A path-filtered suite reports SKIPPED on the pull requests it does not apply to, so its own name can
 # never be a required check. These two gates are the always-reporting face of `frontend (eslint + tsc
-# + vitest)` and `e2e (Playwright happy path)`: they run unconditionally, pass when the suite passed or
-# was skipped, and fail when it failed. The assertions below pin the three properties that make that
-# true — it runs on every pull request, it looks at the suite it fronts, and it fails closed when
-# classification did not succeed.
+# + vitest)` and `e2e (Playwright happy path)`: on draft pull requests they skip alongside `classify`
+# until `ready_for_review`; on non-draft pull requests and non-PR runs they run unconditionally,
+# pass when the suite passed or was skipped, and fail when it failed or classification did not
+# succeed. The assertions below pin the properties that make that true.
+_EXPECTED_GATE_IF = "${{ always() && (github.event_name != 'pull_request' || github.event.pull_request.draft == false) }}"
+
+
+def _eval_gate_if(condition: str, *, event_name: str, draft: bool | None) -> bool:
+    assert condition == _EXPECTED_GATE_IF
+    always = True
+    is_non_pr = event_name != "pull_request"
+    is_ready_pr = draft is False
+    return always and (is_non_pr or is_ready_pr)
+
+
 def test_always_reporting_gates_front_the_path_filtered_suites() -> None:
     ci_path = _REPO_ROOT / ".github" / "workflows" / "ci.yml"
     document = yaml.safe_load(ci_path.read_text(encoding="utf-8"))
@@ -83,9 +94,23 @@ def test_always_reporting_gates_front_the_path_filtered_suites() -> None:
     for gate, suite in (("frontend-gate", "frontend"), ("e2e-gate", "e2e")):
         job = jobs[gate]
         assert job["name"] == gate.replace("-", " ")
-        assert job["if"] == "${{ always() }}"
+        assert job["if"] == _EXPECTED_GATE_IF
         assert set(cast("list[str]", job["needs"])) == {"classify", suite}
         steps = cast("list[dict[str, Any]]", job["steps"])
         env = cast("dict[str, str]", steps[0]["env"])
         assert env["CLASSIFY"] == "${{ needs.classify.result }}"
         assert env["SUITE"] == "${{ needs." + suite + ".result }}"
+
+        assert _eval_gate_if(str(job["if"]), event_name="pull_request", draft=True) is False
+        assert _eval_gate_if(str(job["if"]), event_name="pull_request", draft=False) is True
+        assert _eval_gate_if(str(job["if"]), event_name="workflow_dispatch", draft=None) is True
+        assert _eval_gate_if(str(job["if"]), event_name="schedule", draft=None) is True
+
+
+def test_ci_pull_request_trigger_includes_ready_for_review() -> None:
+    ci_path = _REPO_ROOT / ".github" / "workflows" / "ci.yml"
+    document = yaml.safe_load(ci_path.read_text(encoding="utf-8"))
+    assert isinstance(document, dict)
+    triggers = cast("dict[str, Any]", document["on" if "on" in document else True])
+    pr_trigger = cast("dict[str, Any]", triggers["pull_request"])
+    assert pr_trigger["types"] == ["opened", "synchronize", "reopened", "ready_for_review"]

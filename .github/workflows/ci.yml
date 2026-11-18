@@ -41,6 +41,7 @@ name: CI
 
 on:
   pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
   workflow_dispatch:
   schedule:
     # 02:00 +08 (18:00 UTC) — the nightly full run of `main`. Offset from the 04:00 consolidation
@@ -2657,8 +2658,10 @@ jobs:
 # `frontend (eslint + tsc + vitest)` and `e2e (Playwright happy path)` are path-filtered: on a pull
 # request that touches neither side they report SKIPPED, and a required status check that a pull
 # request never reports on blocks it forever. These two gates are the always-reporting face of those
-# suites: they run on every pull request, pass when the suite succeeded or was skipped, and fail when
-# it failed or the workflow was cancelled. `frontend gate` and `e2e gate` are the names to require.
+# suites: on a draft pull request they skip alongside `classify` until `ready_for_review`; on every
+# non-draft pull request (and non-PR run) they run unconditionally, pass when the suite succeeded or
+# was skipped, and fail when it failed, classification failed, or the workflow was cancelled.
+# `frontend gate` and `e2e gate` are the names to require.
 # meiva:note
 # The `classify` clause is what keeps the gates fail-closed: if classification itself did not
 # succeed, every suite below is skipped and a gate that only looked at its own dependency would
@@ -2668,7 +2671,7 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 5
     needs: [classify, frontend]
-    if: ${{ always() }}
+    if: ${{ always() && (github.event_name != 'pull_request' || github.event.pull_request.draft == false) }}
     steps:
       - name: Report the frontend suite outcome
         env:
@@ -2693,7 +2696,7 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     needs: [classify, e2e]
-    if: ${{ always() }}
+    if: ${{ always() && (github.event_name != 'pull_request' || github.event.pull_request.draft == false) }}
     permissions:
       contents: read
       actions: read
