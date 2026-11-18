@@ -159,16 +159,23 @@ class PassiveRecall(TypedDict, total=False):
     injected: int
 
 
-class SkillRecallScored(TypedDict, total=False):
-    """`skill_recall` payload — agent/graph/recall/skill_recall.py.
-
-    The scoring pass outcome (the success path): how many skills were scored and which
-    identifiers were offered. The defer / deadline / decision-failure emissions carry
-    neither key.
-    """
-
+# meiva:note
+# `skill_recall` payload — agent/graph/recall/skill_recall.py.
+#
+# The scoring pass's success line carries how many skills were scored and which identifiers
+# were offered. A peer-gate decision carries `stage="peer_gate"`, its `outcome` (`passed`,
+# `skipped` or `failed`) and `latency_ms`; a pass or skip adds the `work` probability, a failure
+# the `reason` (the innermost exception class). The defer / deadline / scoring-failure lines carry
+# none of these keys.
+# meiva:link agent/graph/docs/skill-recall.md
+class SkillRecallOutcome(TypedDict, total=False):
     candidates: int
     offered: list[str]
+    stage: str
+    outcome: str
+    latency_ms: float
+    work: float
+    reason: str
 
 
 class HookTiming(TypedDict):
@@ -359,7 +366,7 @@ EVENTS: dict[str, EventSpec] = {
     "skill_recall": telemetry_event(
         "skill_recall",
         "skill recall",
-        payload=SkillRecallScored,
+        payload=SkillRecallOutcome,
         tier="noise",
     ),
     "hook_timing": telemetry_event(

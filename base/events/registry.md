@@ -127,7 +127,7 @@ above (or when its name is unregistered); otherwise it stays in the JSONL mirror
 | `trace` | otel span export | noise | — | — | events | — |
 | `history_dump` | pre-compact history dumped to workspace | noise | — | — | events | — |
 | `passive_recall` | passive memory recall | noise | body, search_ms, injected | — | events | ✓ |
-| `skill_recall` | skill recall | noise | candidates, offered | — | events | — |
+| `skill_recall` | skill recall | noise | candidates, offered, stage, outcome, latency_ms, work, reason | — | events | — |
 | `hook_timing` | hook-runner pass — per-hook wall durations, attributing a slow before_llm / before_exec node to its hooks from events alone | noise | hook_ms | — | events | — |
 | `last_msg` | last-message check | noise | — | — | events | — |
 | `pty_transcript` | a pty session's transcript append failed (full disk, closed fd); the session keeps running with an incomplete transcript | anomaly | — | — | events | — |

@@ -233,6 +233,10 @@ PEER_GATE_WORK = YesNo(
 # `True` when the message may ask for work; `False` for a clear status/acknowledgement message
 # or a failed decision call. A gate failure falls back to the behaviour before peer messages
 # were considered, so a broken gate never changes what an agent sees.
+#
+# Every decided gate logs one `skill_recall` event with `stage="peer_gate"`, its `outcome`
+# (`passed` / `skipped` / `failed`) and `latency_ms`; a pass or skip adds the `work` probability,
+# a failure the `reason` (the innermost exception class, e.g. `ReadTimeout`) and stays at warning.
 # meiva:link agent/graph/docs/skill-recall.md
 async def peer_gate_passes(
     text: str,
@@ -247,6 +251,7 @@ async def peer_gate_passes(
     stripped = text.strip()
     if not stripped:
         return False
+    started = now()
     try:
         decisions = await decide(
             settings.skill_recall_model,
@@ -265,6 +270,10 @@ async def peer_gate_passes(
             label=_LABEL,
             body=f"peer gate failed, no skill note this turn ({type(exc).__name__}: {exc})",
             event="skill_recall",
+            stage="peer_gate",
+            outcome="failed",
+            latency_ms=_elapsed_ms(started, now()),
+            reason=type(exc.__cause__ or exc).__name__,
         )
         return False
     work = decisions["work"].probability("true")
@@ -274,5 +283,16 @@ async def peer_gate_passes(
         label=_LABEL,
         body=f"peer gate {'passes' if passed else 'skips'} (work={work:.2f})",
         event="skill_recall",
+        stage="peer_gate",
+        outcome="passed" if passed else "skipped",
+        latency_ms=_elapsed_ms(started, now()),
+        work=work,
     )
     return passed
+
+
+# meiva:note
+# Milliseconds between two readings of the caller's clock, as a float: a float payload field is
+# exported as an OTLP histogram (an int would be a counter), which is what a latency needs.
+def _elapsed_ms(started: datetime, ended: datetime) -> float:
+    return round((ended - started).total_seconds() * 1000, 1)
