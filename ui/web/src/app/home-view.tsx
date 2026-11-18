@@ -11,7 +11,6 @@ import type { ComponentProps, ComponentType } from "react";
 import type { AgentSidebar as AgentSidebarComponent } from "@/components/agent-sidebar";
 import { ErrorBoundary } from "@/components/connection/error-boundary";
 import { CodeHighlighterPreloader } from "@/components/content/code-highlighter-preloader";
-import { MarkdownImageZoomProvider } from "@/components/content/zoomable-image";
 import type { Composer as ComposerComponent, StageQueueBatch } from "@/components/conversation/composer";
 import { PendingQuestions } from "@/components/conversation/pending-questions";
 import { PendingStrip } from "@/components/conversation/pending-strip";
@@ -289,23 +288,21 @@ export function HomePageView(props: HomePageProps) {
   // Both wrapper layers carry FLEX explicitly: the outer one as `flex flex-col` and the inner one as `flex` (HomeLayout's narrow branch is a fragment whose children are flex items of it). A wrapper built from FLEX_COL alone is display:block and the chain collapses to content height -- measured 2026-10-17 at 320/390/768: the timeline surface grew to 4920px inside a 664px viewport, I6 failed, and the composer was pushed off screen.
   // meiva:link ui/web/src/app/docs/layout-chain.md
   return (
-    <MarkdownImageZoomProvider value={settings.settings["feature.markdownImageZoom"] !== false}>
-      <main data-viewport-shell="" id="main-content" className={cn(FLEX, FLEX_1, MIN_H_0)}>
-        <CodeHighlighterPreloader />
-        <div className={cn(FLEX, FLEX_COL, FLEX_1, MIN_H_0, MIN_W_0)}>
-          <div className={cn(FLEX, FLEX_1, MIN_H_0, MIN_W_0)}>
-            <HomeLayout
-              isNarrow={isNarrow}
-              isLarge={isLarge}
-              sidebarCollapsed={sidebar.collapsed}
-              sidebar={sidebarColumn}
-              main={mainColumn}
-              inspector={inspectorColumn}
-            />
-          </div>
+    <main data-viewport-shell="" id="main-content" className={cn(FLEX, FLEX_1, MIN_H_0)}>
+      <CodeHighlighterPreloader />
+      <div className={cn(FLEX, FLEX_COL, FLEX_1, MIN_H_0, MIN_W_0)}>
+        <div className={cn(FLEX, FLEX_1, MIN_H_0, MIN_W_0)}>
+          <HomeLayout
+            isNarrow={isNarrow}
+            isLarge={isLarge}
+            sidebarCollapsed={sidebar.collapsed}
+            sidebar={sidebarColumn}
+            main={mainColumn}
+            inspector={inspectorColumn}
+          />
         </div>
-      </main>
-    </MarkdownImageZoomProvider>
+      </div>
+    </main>
   );
 }
 
@@ -370,7 +367,6 @@ function HomeContent({
     ? undefined
     : timelineMaxWidthCss(userSettings["display.timeline_width_px"]);
 
-  const quoteSelectionEnabled = userSettings["feature.quoteSelection"] !== false;
   const reloadReadingRestoreEnabled = userSettings["feature.reloadReadingRestore"] !== false;
   const reloadRestore = useMemo<ReloadRestoreConfig>(() => {
     if (userSettingsLoading) return { state: "loading" };
@@ -378,9 +374,6 @@ function HomeContent({
     return { state: "enabled", session: browser.session, now: wallNow };
   }, [browser.session, reloadReadingRestoreEnabled, userSettingsLoading, wallNow]);
   const [quoteSelection, setQuoteSelection] = useState<{ quote: Quote; revision: number } | null>(null);
-  if (!quoteSelectionEnabled && quoteSelection !== null) {
-    setQuoteSelection(null);
-  }
   const acceptQuote = useCallback((quote: Quote) => setQuoteSelection((previous) => ({ quote, revision: (previous?.revision ?? 0) + 1 })), []);
 
   const stageSeqRef = useRef(0);
@@ -434,7 +427,7 @@ function HomeContent({
           activeId,
           content,
           clientMessageId,
-          quoteSelectionEnabled ? quote : undefined,
+          quote,
         );
         timelineStore.requestSendAnchor(receipt.inbound_id ?? null);
         return true;
@@ -447,7 +440,7 @@ function HomeContent({
         return false;
       }
     },
-    [activeId, client, quoteSelectionEnabled, showError, timelineStore, t],
+    [activeId, client, showError, timelineStore, t],
   );
 
   const handleUploadError = useCallback(
@@ -541,7 +534,7 @@ function HomeContent({
             loading={isLoading || (agentsLoading && activeId === null)}
             maxWidthCss={contentColumnMaxWidth}
             reveal={reveal}
-            onQuote={quoteSelectionEnabled ? acceptQuote : undefined}
+            onQuote={acceptQuote}
           />
           <HeaderBar
             label={activeLabel}
@@ -578,8 +571,7 @@ function HomeContent({
               {activeId !== null && <PendingQuestions key={activeId} agentId={activeId} questions={pendingQuestions} failed={questions.error} maxWidthCss={composerMaxWidth} />}
               <Composer
                 diagnostics={diagnostics}
-                quoteEnabled={quoteSelectionEnabled}
-                quoteSelection={quoteSelectionEnabled ? quoteSelection : null}
+                quoteSelection={quoteSelection}
                 maxWidthCss={composerMaxWidth}
                 mode={composerMode}
                 onSend={handleSend}

@@ -184,6 +184,7 @@ export default tseslint.config(
     files: ["src/components/content/zoomable-image.tsx"],
     rules: {
       "@next/next/no-img-element": "off",
+      "jsx-a11y/no-noninteractive-element-interactions": "off",
     },
   },
   {

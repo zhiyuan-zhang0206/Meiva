@@ -1,14 +1,16 @@
 "use client";
 
-import { createContext, useContext, useEffect, useState, type RefObject } from "react";
+import { createContext, useContext, useEffect, useLayoutEffect, useRef, useState, type RefObject } from "react";
 import { useTranslations } from "next-intl";
 import { messageCardConfig } from "../../card";
 import { useBrowser } from "@/lib/browser/browser-provider";
-import type { Quote } from "@/lib/contracts/types";
-import type { BackendTimelineItem } from "@/lib/contracts/types";
+import type { BackendTimelineItem, Quote } from "@/lib/contracts/types";
 
 export const QuoteTarget = createContext<{ itemId: string; token: number } | null>(null);
 export const QuoteNavigation = createContext<((quote: Quote) => void) | null>(null);
+
+export const QUOTE_POPOVER_ESTIMATED_WIDTH = 148;
+export const QUOTE_POPOVER_ESTIMATED_HEIGHT = 40;
 
 export function QuoteCard({ quote }: { quote: Quote }) {
   const navigate = useContext(QuoteNavigation);
@@ -48,13 +50,55 @@ export function quoteFromRange(range: Range, scope: Element, items: readonly Bac
   };
 }
 
+export type MeasurableRange = Pick<Range, "getBoundingClientRect"> &
+  Partial<Pick<Range, "getClientRects">>;
+
+// meiva:note
+// Uses the last non-empty client rect so both single-line and multi-line selections anchor at the bottom-right corner of the last selected character, falling back to getBoundingClientRect when client rects are unavailable.
+export function quoteAnchorRect(range: MeasurableRange): DOMRect {
+  const rects = range.getClientRects
+    ? Array.from(range.getClientRects()).filter((rect) => rect.width > 0 || rect.height > 0)
+    : [];
+  return rects.at(-1) ?? range.getBoundingClientRect();
+}
+
+export function clampQuotePopoverPosition({
+  anchorX,
+  anchorY,
+  outerWidth,
+  outerHeight,
+  popWidth = QUOTE_POPOVER_ESTIMATED_WIDTH,
+  popHeight = QUOTE_POPOVER_ESTIMATED_HEIGHT,
+}: {
+  anchorX: number;
+  anchorY: number;
+  outerWidth: number;
+  outerHeight: number;
+  popWidth?: number;
+  popHeight?: number;
+}): { left: number; top: number } {
+  return {
+    left: Math.max(8, Math.min(anchorX + 4, outerWidth - popWidth - 8)),
+    top: Math.max(4, Math.min(anchorY + 6, outerHeight - popHeight - 6)),
+  };
+}
+
+interface QuoteCandidate {
+  quote: Quote;
+  anchorX: number;
+  anchorY: number;
+  outerWidth: number;
+  outerHeight: number;
+}
+
 export function QuoteSelection({ scope, items, agentId, onQuote }: {
   scope: RefObject<HTMLDivElement | null>; items: readonly BackendTimelineItem[];
   agentId: number; onQuote?: (quote: Quote) => void;
 }) {
   const browser = useBrowser();
   const t = useTranslations("timeline");
-  const [candidate, setCandidate] = useState<{ quote: Quote; top: number; left: number } | null>(null);
+  const popoverRef = useRef<HTMLDivElement>(null);
+  const [candidate, setCandidate] = useState<QuoteCandidate | null>(null);
   useEffect(() => {
     const root = scope.current;
     if (!root || !onQuote) return;
@@ -62,16 +106,50 @@ export function QuoteSelection({ scope, items, agentId, onQuote }: {
       const range = browser.selection.read(root);
       const quote = range ? quoteFromRange(range, root, items, agentId) : null;
       if (!range || !quote) { setCandidate(null); return; }
-      const rect = range.getBoundingClientRect();
+      const endRect = quoteAnchorRect(range);
       const outer = root.getBoundingClientRect();
-      setCandidate({ quote, top: Math.max(4, Math.min(rect.bottom - outer.top + 8, outer.height - 48)), left: Math.max(8, Math.min(rect.left - outer.left, outer.width - 180)) });
+      setCandidate({
+        quote,
+        anchorX: endRect.right - outer.left,
+        anchorY: endRect.bottom - outer.top,
+        outerWidth: outer.width,
+        outerHeight: outer.height,
+      });
     };
     return browser.selection.subscribe(root, changed);
   }, [browser, scope, items, agentId, onQuote]);
+  useLayoutEffect(() => {
+    const popover = popoverRef.current;
+    const root = scope.current;
+    if (!candidate || !popover || !root) return;
+    if (popover.offsetWidth <= 0 && popover.offsetHeight <= 0) return;
+    const outer = root.getBoundingClientRect();
+    const clamped = clampQuotePopoverPosition({
+      anchorX: candidate.anchorX,
+      anchorY: candidate.anchorY,
+      outerWidth: outer.width > 0 ? outer.width : candidate.outerWidth,
+      outerHeight: outer.height > 0 ? outer.height : candidate.outerHeight,
+      popWidth: popover.offsetWidth > 0 ? popover.offsetWidth : QUOTE_POPOVER_ESTIMATED_WIDTH,
+      popHeight: popover.offsetHeight > 0 ? popover.offsetHeight : QUOTE_POPOVER_ESTIMATED_HEIGHT,
+    });
+    popover.style.left = `${clamped.left}px`;
+    popover.style.top = `${clamped.top}px`;
+  }, [candidate, scope]);
   if (!candidate || !onQuote) return null;
+  const initialPos = clampQuotePopoverPosition({
+    anchorX: candidate.anchorX,
+    anchorY: candidate.anchorY,
+    outerWidth: candidate.outerWidth,
+    outerHeight: candidate.outerHeight,
+  });
   const tooLong = Array.from(candidate.quote.text).length > 4000;
   return (
-    <div className="absolute z-40 rounded-md border border-border bg-background px-3 py-2 text-sm shadow-md" style={{ top: candidate.top, left: candidate.left }}>
+    <div
+      ref={popoverRef}
+      data-testid="quote-selection-popover"
+      className="absolute z-40 rounded-md border border-border bg-background px-3 py-2 text-sm shadow-md"
+      style={{ top: initialPos.top, left: initialPos.left }}
+    >
       {tooLong ? <span role="status">{t("quoteTooLong")}</span> : <button type="button" onPointerDown={(event) => event.preventDefault()} onClick={() => { onQuote(candidate.quote); setCandidate(null); }}>{t("quoteSelection")}</button>}
     </div>
   );

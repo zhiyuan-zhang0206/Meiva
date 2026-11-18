@@ -16,11 +16,9 @@ import {
   EyeOff,
   Languages,
   Layers,
-  Maximize2,
   MessageSquareText,
   MoveHorizontal,
   Palette,
-  Quote,
 } from "lucide-react";
 import { Spinner } from "@/components/ui/spinner";
 import { cn } from "@/lib/format/utils";
@@ -168,20 +166,6 @@ export default function DisplaySettingsPage({ mode = "all" }: { mode?: "general"
 
       {advanced && (
       <SettingsSection id="display-features" title={t("features")}>
-        <ToggleRow
-          icon={Quote}
-          label={t("quoteSelection")}
-          description={t("quoteSelectionDesc")}
-          value={readStoredSetting(settings["feature.quoteSelection"], true)}
-          onChange={(v) => setSetting("feature.quoteSelection", v)}
-        />
-        <ToggleRow
-          icon={Maximize2}
-          label={t("markdownImageZoom")}
-          description={t("markdownImageZoomDesc")}
-          value={readStoredSetting(settings["feature.markdownImageZoom"], true)}
-          onChange={(v) => setSetting("feature.markdownImageZoom", v)}
-        />
         <ToggleRow
           icon={Bookmark}
           label={t("reloadReadingRestore")}
