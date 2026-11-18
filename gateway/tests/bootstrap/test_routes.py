@@ -15,21 +15,15 @@ import json
 import math
 import uuid
 from datetime import UTC, datetime, timedelta
-from pathlib import Path
 from typing import Any
 
 import psycopg
 import pytest
 
-from base.db import Database
-from base.packages.plugins.surface import stats
-from base.packages.plugins.surface.stats_types import StatReset
 from base.paths import meiva_home
 from base.telemetry.observability import cluster_label
 from gateway.schemas.stats import StatsWindowHours, window_delta
 from gateway.tests.auth.gateway_config import gateway_test_client
-from meiva_builtins.plugins.meiva_usage.default_config import CollectorConfig
-from meiva_builtins.plugins.meiva_usage.runner import refresh_collector_once
 
 
 class _EventRows:
@@ -586,56 +580,6 @@ def test_dashboard_invalid_hours_422(db_conn: psycopg.Connection, bad: str) -> N
     assert resp.status_code == 422
 
 
-# ── plugin stat values (task #2911) ────────────────────────────────────
-
-
-def test_dashboard_carries_plugin_stat_values_unwindowed(database: Database) -> None:
-    """The runtime half of collected plugin cards rides this response: every
-    row, its status, and its freshness metadata. Not windowed — the plugin's
-    value is a point-in-time fact and the window selector must not pretend to
-    aggregate it. Declarations are joined by the console from
-    /api/ui/contributions on (plugin, id)."""
-    stats.upsert(
-        database,
-        plugin="codex_usage",
-        id="codex-zhang0206",
-        value="6%",
-        resets=(StatReset.model_validate({"label": "7d", "resets_at": "2027-01-01T00:00:00Z"}),),
-        detail="94% used - weekly",
-        status="warn",
-        updated_by="macmini",
-    )
-    stats.upsert(
-        database,
-        plugin="codex_usage",
-        id="codex-wuji",
-        value="!",
-        detail="token revoked",
-        status="error",
-        updated_by="macmini",
-    )
-
-    with gateway_test_client() as client:
-        body = client.get("/api/stats/dashboard", params={"hours": 6}).json()
-
-    rows = body["plugin_stats"]
-    assert [
-        (r["plugin"], r["id"], r["value"], r["detail"], r["status"], r["updated_by"]) for r in rows
-    ] == [
-        ("codex_usage", "codex-wuji", "!", "token revoked", "error", "macmini"),
-        ("codex_usage", "codex-zhang0206", "6%", "94% used - weekly", "warn", "macmini"),
-    ]
-    assert all(r["updated_at"] for r in rows)
-    assert rows[0]["resets"] == []
-    assert rows[1]["resets"] == [{"label": "7d", "resets_at": "2027-01-01T00:00:00Z"}]
-
-
-def test_dashboard_plugin_stats_is_empty_without_writers() -> None:
-    with gateway_test_client() as client:
-        body = client.get("/api/stats/dashboard").json()
-    assert body["plugin_stats"] == []
-
-
 def test_dashboard_week_window_reads_the_whole_week_without_a_retention_clamp(
     db_conn: psycopg.Connection, event_rows: _EventRows
 ) -> None:
@@ -699,61 +643,3 @@ def test_dashboard_cache_rate_only_uses_metered_input(
     assert body["tokens"]["input"] == 6000
     assert body["cost_usd"] == 3
     assert body["tokens"]["cache_hit_pct"] == (None if cached is None else cached / 10)
-
-
-# meiva:note
-# Failed probes update the warning without making retained quota/deadlines look freshly read.
-def test_retained_error_snapshot_age_reaches_dashboard(
-    database: Database,
-    db_conn: psycopg.Connection,
-    tmp_path: Path,
-) -> None:
-    old = datetime(2026, 1, 1, tzinfo=UTC)
-    reset = StatReset(label="5h", resets_at=old + timedelta(hours=3))
-    stats.upsert(
-        database, plugin="meiva_usage", id="cached-quota", value="40% left", resets=(reset,)
-    )
-    _ = db_conn.execute("UPDATE plugin_stats SET updated_at = %s WHERE id = 'cached-quota'", (old,))
-    db_conn.commit()
-    collector = CollectorConfig(
-        id="cached-quota", label="Cached", provider="deepseek", machine="gateway", key_env="KEY"
-    )
-
-    def failed(_request: object) -> dict[str, object]:
-        raise RuntimeError("network down")
-
-    for elapsed_hours in (1, 2, 4):
-        _ = refresh_collector_once(
-            collector,
-            db=database,
-            user_home=tmp_path,
-            environ={"KEY": "test"},
-            now=old + timedelta(hours=elapsed_hours),
-            platform="darwin",
-            http_fetch=failed,
-        )
-        with gateway_test_client() as client:
-            (row,) = client.get("/api/stats/dashboard").json()["plugin_stats"]
-        assert datetime.fromisoformat(row["updated_at"]) == old
-        assert row["value"] == "40% left"
-        assert row["resets"] == [{"label": "5h", "resets_at": "2026-01-01T03:00:00Z"}]
-        assert row["status"] == "error"
-
-    def recovered(_request: object) -> dict[str, object]:
-        return {"balance_infos": [{"currency": "USD", "total_balance": "99.00"}]}
-
-    _ = refresh_collector_once(
-        collector,
-        db=database,
-        user_home=tmp_path,
-        environ={"KEY": "test"},
-        now=old + timedelta(hours=5),
-        platform="darwin",
-        http_fetch=recovered,
-    )
-    with gateway_test_client() as client:
-        (row,) = client.get("/api/stats/dashboard").json()["plugin_stats"]
-    assert datetime.fromisoformat(row["updated_at"]) > old
-    assert row["value"] == "USD 99.00"
-    assert row["resets"] == []
-    assert row["status"] == "ok"

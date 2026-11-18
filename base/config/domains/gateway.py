@@ -278,6 +278,31 @@ class GatewaySettings(EnvSettings):
         },
     )
 
+    timeline_read_timeout_seconds: float = Field(
+        title="Timeline record read timeout (seconds)",
+        default=15.0,
+        gt=0,
+        alias="MEIVA_TIMELINE_READ_TIMEOUT_SECONDS",
+        description=(
+            "Deadline (seconds) for one gateway -> agent-runner harness_timeline_read op: the "
+            "timeline page of an agent whose CLI keeps its own JSONL record, and the quote-source "
+            "lookup in that record. The runner parses the record on the agent's own machine, so "
+            "the read grows with the record and with how many readers hit that machine at once. "
+            "Measured on the 2026-11-18 gateway log: 3151 completed reads, median 0.4s, p95 "
+            "2.4s, slowest 11.9s (company-mini during a burst of page loads), and 138 reads cut "
+            "off at the former 3.0s hardcode, each a 503 for the page plus a WARNING. 15s covers "
+            "the slowest completed read with margin; the read is never retried (the page asks "
+            "again), and an unreachable machine still refuses fast, so the wider budget only "
+            "delays the answer for a machine that accepts the connection and then stalls."
+        ),
+        json_schema_extra={
+            "restart_required": "gateway",
+            "writable": True,
+            "sensitive": False,
+            "scope": "cluster-pinned",
+        },
+    )
+
     cluster_rpc_max_retries: int = Field(
         title="Cluster operation retries",
         default=3,

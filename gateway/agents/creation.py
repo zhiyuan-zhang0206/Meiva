@@ -710,14 +710,6 @@ async def _dispatch_committed_launch(
     except Exception as exc:
         failure = launch_plan.launch_failure(exc)
         detail = failure.detail
-        logger.warning(
-            "agent {} launch dispatch failed on {} attempt {}: {} ({})",
-            launch.agent_id,
-            target,
-            attempt_id,
-            failure.reason.value,
-            detail,
-        )
         try:
             await asyncio.to_thread(
                 _mark_launch_failure, pool, bus, launch.agent_id, attempt_id, failure.reason
@@ -733,6 +725,20 @@ async def _dispatch_committed_launch(
             # The retry endpoint re-reads status/attempt once Postgres returns.
             state = launch_state.STORE_UNREADABLE
             detail += f"; launch-state persistence/read failed ({type(persistence_exc).__name__})"
+        # meiva:note
+        # An agent the row shows admitted was launched anyway (a newer attempt or an earlier one
+        # that answered after the gateway gave up): the spawner is told success, so the refused
+        # attempt is an INFO line. Every other failure stays a WARNING, and one whose state could
+        # not be read is not known to be admitted.
+        log = logger.info if state.admitted else logger.warning
+        log(
+            "agent {} launch dispatch failed on {} attempt {}: {} ({})",
+            launch.agent_id,
+            target,
+            attempt_id,
+            failure.reason.value,
+            detail,
+        )
         if state.admitted:
             return SpawnedAgent(id=launch.agent_id)
         raise launch_state.launch_failed_error(launch.agent_id, target, detail, state) from exc

@@ -21,14 +21,14 @@ manifest that fails here means the on-disk copy changed under the cluster.
 
 from __future__ import annotations
 
-from pathlib import Path
-
 from fastapi import APIRouter, HTTPException, Request
 
 from base.host.boundary.json_values import is_object_dict, is_object_list
-from base.packages.plugins import enable_config
-from base.packages.plugins.loading.schedule_face import load_plugin_ui_stats_safe
-from base.packages.plugins.manifest import ManifestError, load_manifest
+from base.packages.plugins.loading.ui_declarations import (
+    InvalidPluginManifestError,
+    enabled_plugin_ui,
+    stat_cards,
+)
 from gateway.extensions.schemas import (
     UiContributionsResponse,
     UiNavContribution,
@@ -48,29 +48,6 @@ def _str_dict(value: object) -> dict[str, str]:
     return {k: str(v) for k, v in value.items()} if is_object_dict(value) else {}
 
 
-def _enabled_ui_declarations(*, home: Path) -> list[tuple[str, Path, dict[str, object]]]:
-    installed = enable_config.installed_plugin_dirs(home=home)
-    config = enable_config.load_for_runtime(set(installed), home=home)
-    declarations: list[tuple[str, Path, dict[str, object]]] = []
-    for name in sorted(installed):
-        plugin_dir = installed[name]
-        entry = config.plugins.get(name)
-        if entry is None or not entry.enabled:
-            continue
-        try:
-            manifest = load_manifest(plugin_dir)
-        except ManifestError as e:
-            raise HTTPException(
-                status_code=500,
-                detail=f"plugin {name!r} has an invalid meiva-plugin.json: {e}",
-            ) from e
-        ui = manifest.contributions.get("ui")
-        if not is_object_dict(ui):
-            continue
-        declarations.append((name, plugin_dir, ui))
-    return declarations
-
-
 @router.get("/api/ui/contributions")
 def get_ui_contributions(request: Request) -> UiContributionsResponse:
     """Every console contribution the cluster's enabled plugins declare."""
@@ -78,7 +55,12 @@ def get_ui_contributions(request: Request) -> UiContributionsResponse:
     nav: list[UiNavContribution] = []
     stats: list[UiStatContribution] = []
     home = gateway_state(request).gateway_process.home
-    for plugin, plugin_dir, ui in _enabled_ui_declarations(home=home):
+    try:
+        declarations = enabled_plugin_ui(home=home)
+    except InvalidPluginManifestError as exc:
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+    for declaration in declarations:
+        plugin, ui = declaration.plugin, declaration.ui
         for theme in _dict_list(ui.get("themes", [])):
             # Absent darkTokens is carried as None, not as an empty map: the
             # picker distinguishes "pins both modes" from "has a dark half",
@@ -102,29 +84,8 @@ def get_ui_contributions(request: Request) -> UiContributionsResponse:
                     page=str(entry["page"]),
                 )
             )
-        seen_stat_ids: set[str] = set()
-        for card in _dict_list(ui.get("stats", [])):
-            # Declaration half only — the value half is the plugin_stats row
-            # the console joins by (plugin, id) (see plugin_stats.py).
-            card_id = str(card["id"])
-            seen_stat_ids.add(card_id)
-            stats.append(
-                UiStatContribution(
-                    plugin=plugin,
-                    id=card_id,
-                    label=str(card["label"]),
-                )
-            )
-        stats_face = ui.get("statsFace")
-        if isinstance(stats_face, str):
-            for spec in load_plugin_ui_stats_safe(plugin, plugin_dir, home=home):
-                if spec.id not in seen_stat_ids:
-                    seen_stat_ids.add(spec.id)
-                    stats.append(
-                        UiStatContribution(
-                            plugin=plugin,
-                            id=spec.id,
-                            label=spec.label,
-                        )
-                    )
+        stats.extend(
+            UiStatContribution(plugin=card.plugin, id=card.id, label=card.label)
+            for card in stat_cards(declaration, home=home)
+        )
     return UiContributionsResponse(themes=themes, nav=nav, stats=stats)

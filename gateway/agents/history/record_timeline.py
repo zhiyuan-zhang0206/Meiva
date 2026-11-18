@@ -25,13 +25,14 @@ _log = logging.getLogger(__name__)
 
 # meiva:note
 # The gateway's side of a timeline that is read from the agent's CLI record: one `harness_timeline_read` operation to
-# the machine the agent lives on, with a short timeout and no retry (a timeline read is asked again by the page).
+# the machine the agent lives on, with the `gateway.timeline_read_timeout_seconds` deadline and no retry (a timeline read is
+# asked again by the page).
 # A machine that cannot be reached is a 503, as for any read of the agent's machine: the record is on that machine and
 # nowhere else, so its history is not shown while it is offline. A failure of the operation itself is a 502. The
-# sync routes ask through the event loop that serves them, and the reply-suggestion route (async) asks directly.
+# sync routes ask through the event loop that serves them (`anyio.from_thread.run`), and the reply-suggestion route
+# (async) asks directly. Raising the default deadline from 3s to 15s keeps slow 3s-11.9s reads from 503ing, at the
+# tradeoff that a stalled read holds an anyio worker thread (default limiter: 40 threads) up to 15s on sync routes.
 # meiva:link docs/decisions/agents/graph/2026-11-13-timeline-read-from-the-record.md
-
-READ_TIMEOUT_SECONDS = 3.0
 
 
 class _MachineRow(BaseModel):
@@ -77,7 +78,7 @@ async def fetch_record_window(
             target_machine=machine,
             kind="harness_timeline_read",
             payload=payload.wire_payload(),
-            timeout_s=READ_TIMEOUT_SECONDS,
+            timeout_s=gateway_config(request).timeline_read_timeout_seconds,
             retries=0,
         )
     except ClusterOpUnreachable as exc:

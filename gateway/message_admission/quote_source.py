@@ -93,7 +93,7 @@ async def _record_items(
             target_machine=machine,
             kind="harness_timeline_read",
             payload=read.wire_payload(),
-            timeout_s=3.0,
+            timeout_s=gateway_config(request).timeline_read_timeout_seconds,
             retries=0,
         )
     except ClusterOpUnreachable as exc:
