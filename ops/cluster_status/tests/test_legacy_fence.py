@@ -1,3 +1,4 @@
+import re
 from pathlib import Path
 
 import pytest
@@ -8,7 +9,7 @@ from ops.cluster_status import kill_agent_shells
 
 
 def test_legacy_fence_falls_back_and_retains_cutoff(unit_home: Path) -> None:
-    with legacy_service("unknown_method: fence_agent_shells") as calls:
+    with legacy_service("unknown method 'fence_agent_shells'") as calls:
         cleanup = kill_agent_shells(7, before_session_index=10, home=unit_home)
     assert cleanup.killed == [1]
     assert not cleanup.fenced
@@ -16,8 +17,14 @@ def test_legacy_fence_falls_back_and_retains_cutoff(unit_home: Path) -> None:
     assert terminal_fence.read(unit_home).cutoffs == {7: 10}
 
 
-@pytest.mark.parametrize("error", ["fence failed", "unknown_method: kill"])
+@pytest.mark.parametrize(
+    "error",
+    ["fence failed", "unknown method 'kill'", "unknown_method: fence_agent_shells"],
+)
 def test_other_service_errors_propagate(unit_home: Path, error: str) -> None:
-    with legacy_service(error) as calls, pytest.raises(client.ServiceError, match=error):
+    with (
+        legacy_service(error) as calls,
+        pytest.raises(client.ServiceError, match=re.escape(error)),
+    ):
         kill_agent_shells(7, before_session_index=10, home=unit_home)
     assert calls == ["fence_agent_shells"]

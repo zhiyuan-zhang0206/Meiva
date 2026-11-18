@@ -72,6 +72,17 @@ def test_a_bad_request_is_answered_and_the_service_keeps_serving(
     assert client.request("ping", socket_path=service_socket())["pid"]
 
 
+# meiva:note
+# The exact text, not a substring: `PtySessionBackend.fence_agent_shells` recognizes a daemon that
+# predates a method by this rendered reply, so changing its wording breaks that compatibility.
+def test_an_unknown_method_is_refused_with_the_rendered_method_name() -> None:
+    response = _raw(b'{"id": 1, "method": "teleport"}\n')
+    assert (response["code"], response["error"]) == (
+        protocol.BAD_REQUEST,
+        "unknown method 'teleport'",
+    )
+
+
 def test_an_oversize_request_is_cut_off_without_wedging_the_service() -> None:
     with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as conn:
         conn.settimeout(10)

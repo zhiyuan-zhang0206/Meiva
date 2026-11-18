@@ -75,7 +75,8 @@ def legacy_service(error: str) -> Generator[list[str]]:
 
 
 # meiva:note
-# Forward to an unfenced daemon generation, refusing only the newer fence RPC.
+# Forward to an unfenced daemon generation, refusing only the newer fence RPC with the reply a
+# daemon that lacks the method gives (`services/agent_runner/pty_sessions/service.py` `handle`).
 @contextmanager
 def legacy_fence_proxy(path: Path, upstream: Path) -> Generator[list[str]]:
     calls: list[str] = []
@@ -102,7 +103,7 @@ def legacy_fence_proxy(path: Path, upstream: Path) -> Generator[list[str]]:
                             protocol.err(
                                 req["id"],
                                 protocol.BAD_REQUEST,
-                                "unknown_method: fence_agent_shells",
+                                f"unknown method {method!r}",
                             )
                         )
                     else:
