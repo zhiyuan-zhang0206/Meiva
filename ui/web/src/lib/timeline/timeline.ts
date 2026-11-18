@@ -18,3 +18,5 @@ export {
   sortByItemId,
   standingHeadNoteIds,
 } from "../fold";
+
+export { findOldestTimelineCursor } from "./timeline-plan";

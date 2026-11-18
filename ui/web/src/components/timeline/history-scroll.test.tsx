@@ -14,6 +14,7 @@ import { fakeBrowser } from "@/lib/browser/testing";
 import { TimelineView } from ".";
 import {
   matchReloadBookmark,
+  oldestReloadCursorId,
   readReloadBookmark,
   RELOAD_BOOKMARK_MAX_AGENTS,
   RELOAD_BOOKMARK_TTL_MS,
@@ -1103,5 +1104,278 @@ describe("cross-reload reading position restore", () => {
     const tailEl = viewport().querySelector<HTMLElement>('.timeline-item[data-item-id="16.0"]')!;
     expect(tailEl.style.contentVisibility).toBe("visible");
     expect(Math.abs(viewport().scrollTop - 6441.5)).toBeLessThanOrEqual(1);
+  });
+
+  it("ignores tail live SSE arrivals for page/item budgets during older-page backfill", () => {
+    const browser = fakeBrowser({ session: {} });
+    saveReloadBookmark(
+      browser.session,
+      "42",
+      {
+        readingLocator: "loc-older-target",
+        itemId: "2.0",
+        rank: 0,
+        viewportTop: 0,
+        scrollTop: 300,
+        savedAt: 5000,
+      },
+      5000,
+    );
+
+    const makeRow = (id: string, loc: string): BackendTimelineItem => ({
+      item_id: id,
+      kind: "agent_chat",
+      payload: `Row ${id}`,
+      source: null,
+      created_at: null,
+      inbound_id: null,
+      show_timestamp: false,
+      reading_locator: loc,
+    });
+
+    let currentItems: BackendTimelineItem[] = [
+      makeRow("10.0", "loc-10"),
+      makeRow("11.0", "loc-11"),
+    ];
+    let loadingOlder = false;
+    const onLoadOlder = vi.fn(() => {
+      loadingOlder = true;
+    });
+
+    const renderLiveBackfill = () => (
+      <QueryClientProvider client={client}>
+        <WallClockProvider wallNow={() => 6000}>
+          <TimelineView
+            items={currentItems}
+            threadKey="42"
+            scrollMemoryKey="reload-live-tail-sse:agent:42"
+            reloadRestore={{
+              state: "enabled",
+              session: browser.session,
+              now: () => 6000,
+              maxOlderPages: 2,
+              maxOlderItems: 6,
+            }}
+            turnActive
+            hasMoreOlder
+            loadingOlder={loadingOlder}
+            onLoadOlder={onLoadOlder}
+          />
+        </WallClockProvider>
+      </QueryClientProvider>
+    );
+
+    const view = renderWithBrowser(renderLiveBackfill(), { browser });
+    expect(onLoadOlder).toHaveBeenCalledTimes(1);
+
+    // meiva:note
+    // Tail SSE arrivals while loadingOlder is active must not consume maxOlderItems (6) or maxOlderPages (2).
+    act(() => {
+      const liveTail = Array.from({ length: 12 }, (_, idx) =>
+        makeRow(`${12 + idx}.0`, `loc-live-${12 + idx}`),
+      );
+      currentItems = [...currentItems, ...liveTail];
+      height = currentItems.length * 300;
+      view.rerender(renderLiveBackfill());
+    });
+    expect(onLoadOlder).toHaveBeenCalledTimes(1);
+    expect(screen.getByTestId("cold-load-spinner")).toBeTruthy();
+
+    // meiva:note
+    // Page 1 prepends 3 older items (still < maxOlderItems=6 despite 12 tail SSE items) and triggers page 2.
+    act(() => {
+      currentItems = [
+        makeRow("7.0", "loc-7"),
+        makeRow("8.0", "loc-8"),
+        makeRow("9.0", "loc-9"),
+        ...currentItems,
+      ];
+      loadingOlder = false;
+      height = currentItems.length * 300;
+      view.rerender(renderLiveBackfill());
+    });
+    expect(onLoadOlder).toHaveBeenCalledTimes(2);
+
+    // meiva:note
+    // Page 2 prepends the target bookmark row (`loc-older-target`) and lands <= 1px.
+    act(() => {
+      currentItems = [
+        makeRow("2.0", "loc-older-target"),
+        makeRow("6.0", "loc-6"),
+        ...currentItems,
+      ];
+      loadingOlder = false;
+      height = currentItems.length * 300;
+      view.rerender(renderLiveBackfill());
+    });
+    resize();
+    expect(onLoadOlder).toHaveBeenCalledTimes(2);
+    expect(screen.queryByTestId("cold-load-spinner")).toBeNull();
+    expect(Math.abs(readingOffset("2.0") ?? 999)).toBeLessThanOrEqual(1);
+  });
+
+  it("requests older history only once and falls back silently when onLoadOlder fails alongside tail live SSE", () => {
+    const browser = fakeBrowser({ session: {} });
+    saveReloadBookmark(
+      browser.session,
+      "42",
+      {
+        readingLocator: "loc-unreachable-on-503",
+        itemId: "2.0",
+        rank: 0,
+        viewportTop: 0,
+        scrollTop: 300,
+        savedAt: 5000,
+      },
+      5000,
+    );
+
+    const makeRow = (id: string, loc: string): BackendTimelineItem => ({
+      item_id: id,
+      kind: "agent_chat",
+      payload: `Row ${id}`,
+      source: null,
+      created_at: null,
+      inbound_id: null,
+      show_timestamp: false,
+      reading_locator: loc,
+    });
+
+    let currentItems: BackendTimelineItem[] = [
+      makeRow("10.0", "loc-10"),
+      makeRow("11.0", "loc-11"),
+    ];
+    let loadingOlder = false;
+    const onLoadOlder = vi.fn(() => {
+      loadingOlder = true;
+    });
+
+    const renderFailingBackfill = () => (
+      <QueryClientProvider client={client}>
+        <WallClockProvider wallNow={() => 6000}>
+          <TimelineView
+            items={currentItems}
+            threadKey="42"
+            scrollMemoryKey="reload-fail-with-sse:agent:42"
+            reloadRestore={{ state: "enabled", session: browser.session, now: () => 6000 }}
+            turnActive
+            hasMoreOlder
+            loadingOlder={loadingOlder}
+            onLoadOlder={onLoadOlder}
+          />
+        </WallClockProvider>
+      </QueryClientProvider>
+    );
+
+    const view = renderWithBrowser(renderFailingBackfill(), { browser });
+    expect(onLoadOlder).toHaveBeenCalledTimes(1);
+
+    // meiva:note
+    // Simulate in-flight loadingOlder transition followed by HTTP 503 failure (`loadingOlder -> false`)
+    // on the same commit a new live SSE item appends to the tail (`currentOldest` unchanged at `10.0`).
+    act(() => {
+      view.rerender(renderFailingBackfill());
+    });
+    act(() => {
+      loadingOlder = false;
+      currentItems = [...currentItems, makeRow("12.0", "loc-live-12")];
+      view.rerender(renderFailingBackfill());
+    });
+    resize();
+
+    expect(onLoadOlder).toHaveBeenCalledTimes(1);
+    expect(screen.queryByTestId("cold-load-spinner")).toBeNull();
+    expect(viewport().scrollTop).toBe(4400);
+    expect(readReloadBookmark(browser.session, "42", 6000)?.readingLocator).not.toBe(
+      "loc-unreachable-on-503",
+    );
+  });
+
+  it("reuses findOldestTimelineCursor across fresh post-compact windows containing only inbound_compact_summary", () => {
+    const postCompactHead: BackendTimelineItem[] = [
+      {
+        item_id: "0.0",
+        kind: "system_prompt",
+        payload: "System prompt",
+        source: null,
+        created_at: null,
+        inbound_id: null,
+        show_timestamp: false,
+      },
+      {
+        item_id: "1.0",
+        kind: "inbound_compact_summary",
+        payload: "Compacted summary",
+        source: "compact",
+        created_at: null,
+        inbound_id: 1,
+        show_timestamp: false,
+        reading_locator: "loc-compact-summary",
+      },
+    ];
+    expect(oldestReloadCursorId(postCompactHead)).toBe("1.0");
+
+    const browser = fakeBrowser({ session: {} });
+    saveReloadBookmark(
+      browser.session,
+      "42",
+      {
+        readingLocator: "loc-pre-compact-msg",
+        itemId: "8.0",
+        rank: 0,
+        viewportTop: 0,
+        scrollTop: 300,
+        savedAt: 5000,
+      },
+      5000,
+    );
+
+    let currentItems = postCompactHead;
+    let loadingOlder = false;
+    const onLoadOlder = vi.fn(() => {
+      loadingOlder = true;
+    });
+
+    const renderPostCompact = () => (
+      <QueryClientProvider client={client}>
+        <WallClockProvider wallNow={() => 6000}>
+          <TimelineView
+            items={currentItems}
+            threadKey="42"
+            scrollMemoryKey="reload-post-compact:agent:42"
+            reloadRestore={{ state: "enabled", session: browser.session, now: () => 6000 }}
+            hasMoreOlder
+            loadingOlder={loadingOlder}
+            onLoadOlder={onLoadOlder}
+          />
+        </WallClockProvider>
+      </QueryClientProvider>
+    );
+
+    const view = renderWithBrowser(renderPostCompact(), { browser });
+    expect(onLoadOlder).toHaveBeenCalledTimes(1);
+
+    act(() => {
+      currentItems = [
+        postCompactHead[0],
+        {
+          item_id: "8.0@1",
+          kind: "agent_chat",
+          payload: "Pre-compact paragraph",
+          source: null,
+          created_at: null,
+          inbound_id: null,
+          show_timestamp: false,
+          reading_locator: "loc-pre-compact-msg",
+        },
+        postCompactHead[1],
+      ];
+      loadingOlder = false;
+      view.rerender(renderPostCompact());
+    });
+    resize();
+
+    expect(screen.queryByTestId("cold-load-spinner")).toBeNull();
+    expect(Math.abs(readingOffset("8.0@1") ?? 999)).toBeLessThanOrEqual(1);
   });
 });

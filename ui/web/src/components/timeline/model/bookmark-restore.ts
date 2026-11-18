@@ -125,11 +125,11 @@ type ReloadPhase =
       readonly threadKey: string;
       readonly seq: number;
       readonly bookmark: ReloadReadingBookmark;
-      readonly baselineCount: number | null;
+      readonly baselineOldestId: string | null;
+      readonly baselinePrefixCount: number;
       readonly pagesLoaded: number;
       readonly prependedItems: number;
       readonly requestedBeforeId: string | null;
-      readonly itemsCountAtRequest: number;
       readonly sawLoading: boolean;
     }
   | {
@@ -144,6 +144,15 @@ type ReloadPhase =
       readonly seq: number;
       readonly clearStoredBookmark: boolean;
     };
+
+function countPrependedBeforeBaseline(
+  items: readonly BackendTimelineItem[],
+  baselineOldestId: string,
+  baselinePrefixCount: number,
+): number | null {
+  const idx = items.findIndex((item) => item.item_id === baselineOldestId);
+  return idx >= 0 ? Math.max(0, idx - baselinePrefixCount) : null;
+}
 
 export interface InitialTimelineBookmark {
   readonly inMemorySaved: SavedScroll | null;
@@ -213,11 +222,11 @@ function initReloadPhase(
     threadKey,
     seq,
     bookmark,
-    baselineCount: null,
+    baselineOldestId: null,
+    baselinePrefixCount: 0,
     pagesLoaded: 0,
     prependedItems: 0,
     requestedBeforeId: null,
-    itemsCountAtRequest: 0,
     sawLoading: false,
   };
 }
@@ -299,11 +308,11 @@ export function useReloadBookmarkRestore({
         threadKey: phase.threadKey,
         seq: phase.seq + 1,
         bookmark,
-        baselineCount: null,
+        baselineOldestId: null,
+        baselinePrefixCount: 0,
         pagesLoaded: 0,
         prependedItems: 0,
         requestedBeforeId: null,
-        itemsCountAtRequest: 0,
         sawLoading: false,
       });
     } else {
@@ -332,39 +341,55 @@ export function useReloadBookmarkRestore({
         reloadRestore.state === "enabled"
           ? (reloadRestore.maxOlderItems ?? RELOAD_RESTORE_MAX_OLDER_ITEMS)
           : RELOAD_RESTORE_MAX_OLDER_ITEMS;
-      const baselineCount = phase.baselineCount ?? canonicalItems.length;
       const currentOldest = oldestReloadCursorId(canonicalItems);
+      const baselineOldestId = phase.baselineOldestId ?? currentOldest;
+      const baselinePrefixCount =
+        phase.baselineOldestId !== null
+          ? phase.baselinePrefixCount
+          : baselineOldestId !== null
+            ? Math.max(0, canonicalItems.findIndex((item) => item.item_id === baselineOldestId))
+            : 0;
 
       if (phase.requestedBeforeId !== null) {
         if (loadingOlder && !phase.sawLoading) {
-          setPhase({ ...phase, baselineCount, sawLoading: true });
+          setPhase({
+            ...phase,
+            baselineOldestId,
+            baselinePrefixCount,
+            sawLoading: true,
+          });
         } else if (
           !loadingOlder &&
           (phase.sawLoading ||
-            canonicalItems.length > phase.itemsCountAtRequest ||
-            currentOldest !== phase.requestedBeforeId)
+            (currentOldest !== null && currentOldest !== phase.requestedBeforeId))
         ) {
           const progressed =
-            canonicalItems.length > phase.itemsCountAtRequest ||
-            (currentOldest !== null && currentOldest !== phase.requestedBeforeId);
+            currentOldest !== null && currentOldest !== phase.requestedBeforeId;
           const pagesLoaded = phase.pagesLoaded + 1;
-          const prependedItems = Math.max(0, canonicalItems.length - baselineCount);
+          const measuredPrepended =
+            baselineOldestId !== null
+              ? countPrependedBeforeBaseline(
+                  canonicalItems,
+                  baselineOldestId,
+                  baselinePrefixCount,
+                )
+              : null;
+          const prependedItems = measuredPrepended ?? phase.prependedItems;
           const canContinue =
             progressed &&
             hasMoreOlder &&
             Boolean(onLoadOlder) &&
-            currentOldest !== null &&
             pagesLoaded < maxPages &&
             prependedItems < maxItems;
           if (canContinue) {
             setPhase({
               ...phase,
               seq: phase.seq + 1,
-              baselineCount,
+              baselineOldestId,
+              baselinePrefixCount,
               pagesLoaded,
               prependedItems,
               requestedBeforeId: currentOldest,
-              itemsCountAtRequest: canonicalItems.length,
               sawLoading: false,
             });
           } else {
@@ -388,9 +413,9 @@ export function useReloadBookmarkRestore({
           setPhase({
             ...phase,
             seq: phase.seq + 1,
-            baselineCount,
+            baselineOldestId,
+            baselinePrefixCount,
             requestedBeforeId: currentOldest,
-            itemsCountAtRequest: canonicalItems.length,
             sawLoading: loadingOlder,
           });
         } else {

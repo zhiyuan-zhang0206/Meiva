@@ -4,9 +4,8 @@ import type { CompactTransitionBuffer } from "@/lib/layout/compact-transition";
 import { BAR_HEIGHT_PX } from "@/lib/layout/layout";
 import { saveScrollMemory, type SavedScroll } from "@/lib/layout/scroll-memory";
 import {
-  isReattachedTimelineContext,
+  findOldestTimelineCursor,
   parseItemIdParts,
-  standingHeadNoteIds,
 } from "@/lib/timeline/timeline";
 
 // meiva:note
@@ -269,15 +268,7 @@ export function reloadBookmarkToSavedScroll(
 }
 
 export function oldestReloadCursorId(items: readonly BackendTimelineItem[]): string | null {
-  const headNoteIds = standingHeadNoteIds(items);
-  return (
-    items.find(
-      (item) =>
-        !isReattachedTimelineContext(item) &&
-        !headNoteIds.has(item.item_id) &&
-        parseItemIdParts(item.item_id) !== null,
-    )?.item_id ?? null
-  );
+  return findOldestTimelineCursor(items)?.item_id ?? null;
 }
 
 // meiva:note
