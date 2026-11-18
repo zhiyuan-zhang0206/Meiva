@@ -27,11 +27,11 @@ def _agent(conn: psycopg.Connection) -> int:
     return agent_id
 
 
-def _command(conn: psycopg.Connection, agent_id: int, kind: str) -> int:
+def _command(conn: psycopg.Connection, agent_id: int, kind: str, *, source: str = "user") -> int:
     row = conn.execute(
         "INSERT INTO inbound_messages(agent_id,content,kind,source) "
-        "VALUES (%s,'',%s,'user') RETURNING id",
-        (agent_id, kind),
+        "VALUES (%s,'',%s,%s) RETURNING id",
+        (agent_id, kind, source),
     ).fetchone()
     conn.commit()
     assert row is not None
@@ -254,3 +254,105 @@ async def test_reclaiming_after_a_resurrect_preserves_command_history(
         "reason": "resurrect",
         "resurrect_inbound_id": epoch,
     }
+
+
+async def test_self_terminate_race_allows_chat_resurrect_and_consumes_without_loop(
+    db_conn: psycopg.Connection,
+    aops_pool: AsyncConnectionPool,
+    database: Database,
+    event_bus: EventBus,
+) -> None:
+    agent_id = _agent(db_conn)
+    owner1 = await _admit(aops_pool, agent_id, db=database)
+
+    chat_row = db_conn.execute(
+        "INSERT INTO inbound_messages(agent_id,content,kind,source) "
+        "VALUES (%s,'late peer chat','chat','agent:1') RETURNING id",
+        (agent_id,),
+    ).fetchone()
+    assert chat_row is not None
+    chat_id = int(chat_row[0])
+    db_conn.commit()
+
+    self_term = _command(db_conn, agent_id, "terminate", source="self")
+    claimed = await claim_inbound_batch(aops_pool, agent_id, incarnation=owner1)
+    assert [item.id for item in claimed] == [self_term]
+    applied = await apply_hosted_lifecycle(aops_pool, owner1, resume_turn=False)
+    assert applied is not None and applied.kind == "terminate"
+    assert db_conn.execute(
+        "SELECT status FROM inbound_messages WHERE id=%s", (chat_id,)
+    ).fetchone() == ("pending",)
+
+    resurrect_agent(
+        database,
+        event_bus,
+        agent_id,
+        resurrected_by="system",
+        trigger_inbound_id=chat_id,
+        trigger_inbound_kind=InboundKind.CHAT,
+    )
+    assert db_conn.execute(
+        "SELECT status FROM agents_meta WHERE id=%s", (agent_id,)
+    ).fetchone() == ("idling",)
+
+    owner2 = await _admit(aops_pool, agent_id, db=database)
+    batch2 = await claim_inbound_batch(aops_pool, agent_id, incarnation=owner2)
+    assert chat_id in [item.id for item in batch2]
+    assert db_conn.execute(
+        "SELECT status FROM inbound_messages WHERE id=%s", (chat_id,)
+    ).fetchone() == ("claimed",)
+
+    self_term2 = _command(db_conn, agent_id, "terminate", source="self")
+    assert [
+        item.id for item in await claim_inbound_batch(aops_pool, agent_id, incarnation=owner2)
+    ] == [self_term2]
+    applied2 = await apply_hosted_lifecycle(aops_pool, owner2, resume_turn=False)
+    assert applied2 is not None and applied2.kind == "terminate"
+
+    with pytest.raises(ResurrectTriggerStaleError):
+        resurrect_agent(
+            database,
+            event_bus,
+            agent_id,
+            resurrected_by="system",
+            trigger_inbound_id=chat_id,
+            trigger_inbound_kind=InboundKind.CHAT,
+        )
+
+
+async def test_external_terminate_with_pending_chat_still_rejects_resurrect(
+    db_conn: psycopg.Connection,
+    aops_pool: AsyncConnectionPool,
+    database: Database,
+    event_bus: EventBus,
+) -> None:
+    agent_id = _agent(db_conn)
+    owner = await _admit(aops_pool, agent_id, db=database)
+
+    chat_row = db_conn.execute(
+        "INSERT INTO inbound_messages(agent_id,content,kind,source) "
+        "VALUES (%s,'before external kill','chat','agent:1') RETURNING id",
+        (agent_id,),
+    ).fetchone()
+    assert chat_row is not None
+    chat_id = int(chat_row[0])
+    db_conn.commit()
+
+    ext_term = _command(db_conn, agent_id, "terminate", source="user")
+    claimed = await claim_inbound_batch(aops_pool, agent_id, incarnation=owner)
+    assert [item.id for item in claimed] == [ext_term]
+    applied = await apply_hosted_lifecycle(aops_pool, owner, resume_turn=False)
+    assert applied is not None and applied.kind == "terminate"
+
+    with pytest.raises(ResurrectTriggerStaleError):
+        resurrect_agent(
+            database,
+            event_bus,
+            agent_id,
+            resurrected_by="system",
+            trigger_inbound_id=chat_id,
+            trigger_inbound_kind=InboundKind.CHAT,
+        )
+    assert db_conn.execute(
+        "SELECT status FROM agents_meta WHERE id=%s", (agent_id,)
+    ).fetchone() == ("terminated",)

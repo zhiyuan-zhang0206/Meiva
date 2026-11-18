@@ -372,6 +372,41 @@ class TestSelectStalePending:
         db_conn.commit()
         assert select_stale_pending(pool, _THRESHOLD_S) == []
 
+    def test_terminated_owner_chat_before_self_terminate_is_a_stall(
+        self,
+        redis_url: str,
+        db_conn: psycopg.Connection,
+        pool: ConnectionPool,
+        *,
+        model_catalog: ModelCatalog,
+        config_authority: ConfigAuthority,
+        database_gate: ProcessDbGate,
+        machine_identity: MachineIdentityReader,
+    ) -> None:
+        aid = terminated_agent(
+            db_conn,
+            model_catalog=model_catalog,
+            config_authority=config_authority,
+            database_gate=database_gate,
+            local_machine=machine_identity,
+        )
+        iid = _insert_old_inbound(
+            db_conn,
+            aid,
+            age_s=_THRESHOLD_S + 5,
+            database_gate=database_gate,
+            source="agent:123",
+        )
+        with db_conn.cursor() as cur:
+            cur.execute(
+                "INSERT INTO inbound_messages (agent_id, content, kind, status, source, created_at) "
+                "VALUES (%s, '', 'terminate', 'done', 'self', "
+                "now() - make_interval(secs => %s))",
+                (aid, _THRESHOLD_S + 4),
+            )
+        db_conn.commit()
+        assert [row[0] for row in select_stale_pending(pool, _THRESHOLD_S)] == [iid]
+
     def test_terminated_owner_leftover_before_involuntary_death_is_not_a_stall(
         self,
         redis_url: str,
