@@ -376,3 +376,30 @@ async def test_finish_waits_for_a_record_written_after_the_cli_completed_signal(
         assert rows == [("harness:codex:msg_1", REPLY)]
     else:
         assert rows[0][0].startswith(f"harness:antigravity:{SESSION}:")
+
+
+async def test_codex_fork_publishes_child_first_turn_reply(
+    tmp_path: Path,
+    db_conn: psycopg.Connection,
+    aops_pool: AsyncConnectionPool,
+    database_gate: ProcessDbGate,
+    hosted_resources: HostedTurnResources,
+    live_events: LiveEvents,
+) -> None:
+    parent_id = _codex_agent(db_conn)
+    child_id = agent_row(db_conn)
+    db_conn.execute(
+        "UPDATE agents_meta SET harness='codex', fork_source_agent_id=%s, "
+        "fork_source_checkpoint_id='ckpt' WHERE id=%s",
+        (parent_id, child_id),
+    )
+    db_conn.commit()
+    row = insert_row(db_conn, child_id, "chat", "user", "hello from codex fork")
+    cli = RecordingCodex(tmp_path / "codex" / DAY / ROLLOUT)
+    rt = _wired(tmp_path, _engine(cli), aops_pool, hosted_resources, database_gate, live_events)
+
+    command = await harness_turn_node(AgentState(), rt, config(child_id))
+
+    assert command.goto == "claim"
+    assert row_status(db_conn, row) == "done"
+    assert _publications(db_conn, child_id) == [("harness:codex:msg_1", REPLY)]

@@ -22,7 +22,7 @@ start**, in the runner that hosts it:
    A Claude Code child's timeline is its CLI's record
    ([the decision](../../../../docs/decisions/agents/graph/2026-11-13-timeline-read-from-the-record.md)),
    which is empty until the first start clones the source's session, and then shows the inherited conversation (the clone keeps the
-   rows' `uuid`s; offsets are the clone's own). A Codex child copies nothing either, and its rollout does not carry the source's
+   rows' `uuid`s and stamps copied `user` rows with the child's first `promptId`; offsets are the clone's own). Because the child's `.jsonl` does not exist yet when `ReadTimelineSink` initializes on Turn 1 (`_history_end == 0`), `ReadTimelineSink` anchors and persists the child's fork delivery floor (`<agent_id>.<harness>.floor`) at the byte offset where the child's own rows start, keeping pre-fork parent replies readable on the timeline without publishing them to `agent_publications` on Turn 1 or after later interrupts. A Codex child copies nothing either, and its rollout does not carry the source's
    history: `thread/fork` starts a new file with the clone's own rows only (observed on 0.166), so the child's timeline is
    empty until its first turn and shows only what the clone itself does ([the rollout](../codex/docs/rollout.md)).
 2. The host reads `fork_source_agent_id` with the stored config and hands it to the bridge through

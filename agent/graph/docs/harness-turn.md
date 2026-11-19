@@ -54,7 +54,7 @@ An external agent's timeline is not written to a database table: it is read from
   the handoff seed. A message appears on the page when the read of the record shows its row, and the page's pending
   strip clears on the item's `inbound_id` and on the `InboundCommitted` event the sink publishes with it.
 - The reply to the user is delivered from the projected items, once each, under the harness record's stable key
-  (`capture_keyed_items`). The reply-visibility check of a finished reply, and with it the correction input, is made on the
+  (`capture_keyed_items`). For a forked Claude Code agent whose cloned `.jsonl` carries the parent's history (with copied `user` rows stamped with the child's first `promptId`), `ReadTimelineSink` anchors and persists a per-session fork delivery floor (`<agent_id>.<harness>.floor`) at the start of the child's own rows so pre-fork parent replies stay readable on the timeline without ever publishing into `agent_publications`. The reply-visibility check of a finished reply, and with it the correction input, is made on the
   `AssistantText` event, so it does not depend on the record being found.
 - Usage is logged from the turn's result frame (`log_turn_usage`); the sub-agents' tokens are in
   that figure only as the CLI reports them.
