@@ -558,3 +558,40 @@ async def test_external_terminate_preserves_fatal_reason(
         "SELECT status, termination_source, last_turn_fatal_reason FROM agents_meta WHERE id = %s",
         (agent_id,),
     ).fetchone() == ("terminated", "user", "fatal before kill")
+
+
+async def test_explain_admission_refusal_reports_quota_backoff_and_admits_after_expiry(
+    db_conn: psycopg.Connection,
+    aops_pool: AsyncConnectionPool,
+    database: Database,
+) -> None:
+    from base.agents.recovery.breaker import SUPPRESS_REASON_QUOTA_EXHAUSTED
+
+    agent_id = _agent(db_conn)
+    db_conn.execute(
+        "UPDATE agents_meta SET wake_suppress_reason = %s, "
+        "wake_suppressed_until = now() + interval '5 minutes' WHERE id = %s",
+        (SUPPRESS_REASON_QUOTA_EXHAUSTED, agent_id),
+    )
+    db_conn.commit()
+
+    refused = await explain_admission_refusal(aops_pool, agent_id, "host-test")
+    assert refused.reason is AdmissionRefusal.QUOTA_BACKOFF
+    assert refused.suppress_reason == SUPPRESS_REASON_QUOTA_EXHAUSTED
+    assert refused.suppressed_until is not None
+    assert "quota-exhaustion backoff" in refused.describe()
+    assert (
+        await admit_hosted_runtime(aops_pool, agent_id, "host-test", uuid4(), db=database) is None
+    )
+
+    db_conn.execute(
+        "UPDATE agents_meta SET wake_suppressed_until = now() - interval '1 second' WHERE id = %s",
+        (agent_id,),
+    )
+    db_conn.commit()
+
+    assert (await explain_admission_refusal(aops_pool, agent_id, "host-test")).reason is (
+        AdmissionRefusal.OTHER
+    )
+    incarnation = await admit_hosted_runtime(aops_pool, agent_id, "host-test", uuid4(), db=database)
+    assert incarnation is not None

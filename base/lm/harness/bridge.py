@@ -49,11 +49,13 @@ class HarnessTurnFaultedError(RuntimeError):
         message: str,
         *,
         outcome: HarnessTurn | None = None,
+        turn_id: str | None = None,
         retire_session: bool | None = None,
         retire_reason: str | None = None,
     ) -> None:
         super().__init__(message)
         self.outcome = outcome
+        self.turn_id = turn_id if turn_id is not None else (outcome.turn_id if outcome else None)
         self.retire_session = (
             (outcome is None or retire_reason is not None)
             if retire_session is None
@@ -566,7 +568,7 @@ def fault_of_event(harness: Harness, event: BridgeEvent) -> Exception | None:
             )
         return None
     if isinstance(event, TurnFaulted):
-        return HarnessTurnFaultedError(event.error)
+        return HarnessTurnFaultedError(event.error, turn_id=event.turn_id)
     if isinstance(event, SessionFailed):
         return HarnessClosedError(f"harness session failed: {event.error}")
     if isinstance(event, SessionClosed):

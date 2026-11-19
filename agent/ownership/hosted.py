@@ -355,6 +355,7 @@ class AdmissionRefusal(StrEnum):
     TERMINATED = "terminated"
     PLACED_ELSEWHERE = "placed_elsewhere"
     BREAKER = "breaker"
+    QUOTA_BACKOFF = "quota_backoff"
     OTHER = "other"
 
 
@@ -386,6 +387,14 @@ class AdmissionRefused:
                     f"wake_suppressed_until={until}): an operator restart or a fresh chat "
                     "admits the next turn"
                 )
+            case AdmissionRefusal.QUOTA_BACKOFF:
+                until = self.suppressed_until.isoformat() if self.suppressed_until else "no window"
+                return (
+                    "automatic wakes are suppressed during quota-exhaustion backoff "
+                    f"(wake_suppress_reason={self.suppress_reason}, "
+                    f"wake_suppressed_until={until}): waiting for reset window or an operator "
+                    "restart/terminate"
+                )
             case AdmissionRefusal.OTHER:
                 return f"the row changed under this read (row left {self.status})"
 
@@ -402,6 +411,7 @@ class _RefusalRow:
     streak: int
     suppress_reason: str | None
     suppressed_until: datetime | None
+    suppressed_active: bool
 
     @classmethod
     def from_row(cls, row: tuple[object, ...]) -> "_RefusalRow":
@@ -412,10 +422,11 @@ class _RefusalRow:
                 int() as streak,
                 object() as reason,
                 object() as until,
+                bool() as suppressed_active,
             ) if (reason is None or isinstance(reason, str)) and (
                 until is None or isinstance(until, datetime)
             ):
-                return cls(status, machine, streak, reason, until)
+                return cls(status, machine, streak, reason, until, suppressed_active)
             case _:
                 raise TypeError("an agents_meta refusal row has columns of unexpected types")
 
@@ -425,20 +436,25 @@ class _RefusalRow:
 # None, so it costs one extra SELECT on a path that is already idle.
 #
 # Order is the honest one: a terminated row is terminated whatever else is on it, then a row
-# owned elsewhere, then a tripped breaker. `other` is the leftover — the row changed between
-# the admission read and this one, or an idling row on this machine with a clear breaker was
-# refused for a reason none of these describe — and it must never borrow another reason's
-# wording.
+# owned elsewhere, then a tripped breaker or active quota-backoff suppression. `other` is the
+# leftover — the row changed between the admission read and this one, or an idling row on this
+# machine with a clear breaker was refused for a reason none of these describe — and it must never
+# borrow another reason's wording.
 async def explain_admission_refusal(
     pool: AsyncPool, agent_id: int, machine: str
 ) -> AdmissionRefused:
-    from base.agents.recovery.breaker import HALT_AFTER_CONSECUTIVE_PERMANENT_REJECTS
+    from base.agents.recovery.breaker import (
+        HALT_AFTER_CONSECUTIVE_PERMANENT_REJECTS,
+        SUPPRESS_REASON_QUOTA_EXHAUSTED,
+    )
 
     async with pool.connection() as conn:
         row = await (
             await conn.execute(
                 "SELECT status,machine,permanent_reject_streak,wake_suppress_reason,"
-                "wake_suppressed_until FROM agents_meta WHERE id=%s",
+                "wake_suppressed_until,"
+                "(wake_suppressed_until IS NOT NULL AND wake_suppressed_until > clock_timestamp()) "
+                "FROM agents_meta WHERE id=%s",
                 (agent_id,),
             )
         ).fetchone()
@@ -454,6 +470,13 @@ async def explain_admission_refusal(
             AdmissionRefusal.BREAKER,
             status=refusal.status,
             streak=refusal.streak,
+            suppress_reason=refusal.suppress_reason,
+            suppressed_until=refusal.suppressed_until,
+        )
+    if refusal.suppress_reason == SUPPRESS_REASON_QUOTA_EXHAUSTED and refusal.suppressed_active:
+        return AdmissionRefused(
+            AdmissionRefusal.QUOTA_BACKOFF,
+            status=refusal.status,
             suppress_reason=refusal.suppress_reason,
             suppressed_until=refusal.suppressed_until,
         )

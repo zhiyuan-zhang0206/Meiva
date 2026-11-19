@@ -9,6 +9,8 @@ from base.agents.recovery.breaker import (
     PERMANENT_REJECT_REASON_BILLING,
     RECOVERY_BREAKER_CLEAR,
     SUPPRESS_REASON_PERMANENT_REJECT,
+    SUPPRESS_REASON_QUOTA_EXHAUSTED,
+    admit_pending_wake,
     clear_permanent_reject_halt,
     halt_automatic_recovery,
     record_permanent_reject_turn,
@@ -168,3 +170,52 @@ async def test_clearing_the_halt_takes_the_breaker_window_and_leaves_the_cooldow
         "FROM agents_meta WHERE id = %s",
         (cooling,),
     ).fetchone() == (0, True, "stranded_wake")
+
+
+async def test_admit_pending_wake_defers_quota_cooldown_until_expiry_but_allows_restart(
+    redis_url: str,
+    db_conn: psycopg.Connection,
+    aops_pool: AsyncConnectionPool,
+    *,
+    model_catalog: ModelCatalog,
+    config_authority: ConfigAuthority,
+    database_gate: ProcessDbGate,
+    machine_identity: MachineIdentityReader,
+) -> None:
+    aid = spawn_agent(
+        spawner="user",
+        catalog=model_catalog,
+        authority=config_authority,
+        database_gate=database_gate,
+        machine=machine_identity,
+    )
+    db_conn.execute(
+        "UPDATE agents_meta SET wake_suppress_reason = %s, "
+        "wake_suppressed_until = now() + interval '5 minutes' WHERE id = %s",
+        (SUPPRESS_REASON_QUOTA_EXHAUSTED, aid),
+    )
+    db_conn.execute(
+        "INSERT INTO inbound_messages (agent_id, content, kind, source, status) "
+        "VALUES (%s, 'hello after quota', 'chat', 'user', 'pending')",
+        (aid,),
+    )
+    db_conn.commit()
+
+    assert await admit_pending_wake(aops_pool, aid) is False
+
+    restart_row = db_conn.execute(
+        "INSERT INTO inbound_messages (agent_id, content, kind, source, status) "
+        "VALUES (%s, 'operator restart', 'restart', 'user', 'pending') RETURNING id",
+        (aid,),
+    ).fetchone()
+    assert restart_row is not None
+    db_conn.commit()
+    assert await admit_pending_wake(aops_pool, aid) is True
+
+    db_conn.execute("DELETE FROM inbound_messages WHERE id = %s", (restart_row[0],))
+    db_conn.execute(
+        "UPDATE agents_meta SET wake_suppressed_until = now() - interval '1 second' WHERE id = %s",
+        (aid,),
+    )
+    db_conn.commit()
+    assert await admit_pending_wake(aops_pool, aid) is True

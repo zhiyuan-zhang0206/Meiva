@@ -224,6 +224,45 @@ class TestSelectStalePending:
         rows = select_stale_pending(pool, _THRESHOLD_S)
         assert [(r[0], r[2]) for r in rows] == [(old, f"#{aid}")] or [r[0] for r in rows] == [old]
 
+    def test_skips_pending_rows_during_quota_suppression_until_expiry(
+        self,
+        redis_url: str,
+        db_conn: psycopg.Connection,
+        pool: ConnectionPool,
+        *,
+        model_catalog: ModelCatalog,
+        config_authority: ConfigAuthority,
+        database_gate: ProcessDbGate,
+        machine_identity: MachineIdentityReader,
+    ) -> None:
+        from base.agents.recovery.breaker import SUPPRESS_REASON_QUOTA_EXHAUSTED
+
+        aid = idling_agent(
+            db_conn,
+            model_catalog=model_catalog,
+            config_authority=config_authority,
+            database_gate=database_gate,
+            local_machine=machine_identity,
+        )
+        old = _insert_old_inbound(db_conn, aid, age_s=_THRESHOLD_S + 5, database_gate=database_gate)
+        with db_conn.cursor() as cur:
+            cur.execute(
+                "UPDATE agents_meta SET wake_suppress_reason = %s, "
+                "wake_suppressed_until = now() + interval '5 minutes' WHERE id = %s",
+                (SUPPRESS_REASON_QUOTA_EXHAUSTED, aid),
+            )
+        db_conn.commit()
+        assert all(r[0] != old for r in select_stale_pending(pool, _THRESHOLD_S))
+
+        with db_conn.cursor() as cur:
+            cur.execute(
+                "UPDATE agents_meta SET wake_suppressed_until = now() - interval '1 second' "
+                "WHERE id = %s",
+                (aid,),
+            )
+        db_conn.commit()
+        assert any(r[0] == old for r in select_stale_pending(pool, _THRESHOLD_S))
+
     def test_claimed_or_done_rows_never_stale(
         self,
         redis_url: str,

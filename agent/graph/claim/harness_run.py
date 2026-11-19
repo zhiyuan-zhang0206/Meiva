@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import asyncio
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from contextlib import suppress
 from dataclasses import replace
 from typing import Literal
@@ -25,6 +25,7 @@ from agent.graph.claim.harness_foreground import (
 )
 from agent.graph.claim.harness_inbox import (
     INPUT_KEY_FIELD,
+    QuotaAbortSettlement,
     apply_reconciled,
     claimed_deliverable,
     commit_handed,
@@ -38,6 +39,7 @@ from agent.graph.claim.harness_inbox import (
     recovery_notes_first,
     requeue_handed,
     reserve_head_batch,
+    settle_quota_abort,
 )
 from agent.graph.claim.harness_read_sink import ReadTimelineSink
 from agent.graph.claim.harness_render import (
@@ -64,6 +66,7 @@ from base.lm.harness import (
     HarnessSetupError,
     ImageBlock,
     InputInContext,
+    RateLimitObserved,
     ReasoningDelta,
     ReasoningText,
     SubagentText,
@@ -138,6 +141,9 @@ class ForegroundRun:
         self._turn_ended = False
         self._streamed: dict[str, list[str]] = {}
         self._turn_inputs: dict[str, list[str]] = {}
+        self._committed_by_turn: dict[str, list[Handed]] = {}
+        self._taken_back_for_abort: tuple[Handed, ...] = ()
+        self._last_rate_limit: RateLimitObserved | None = None
         self._changed = asyncio.Event()
         self._backoff_until = 0.0
         self._handoff_after_requeue = False
@@ -158,6 +164,59 @@ class ForegroundRun:
 
     def pending_inputs(self) -> list[dict[str, str]]:
         return [{"key": handed.key, "prompt": prompt} for handed, prompt in self._synthetic]
+
+    @property
+    def last_rate_limit(self) -> RateLimitObserved | None:
+        return self._last_rate_limit
+
+    async def settle_quota_abort(
+        self,
+        *,
+        turn_id: str | None,
+        compute_backoff: Callable[[int], tuple[float, str]],
+    ) -> QuotaAbortSettlement:
+        if turn_id:
+            committed = [
+                *self._committed_by_turn.pop(turn_id, []),
+                *self._committed_by_turn.pop("", []),
+            ]
+        else:
+            committed = [h for items in self._committed_by_turn.values() for h in items]
+            self._committed_by_turn.clear()
+        taken_back = self._taken_back_for_abort
+        self._taken_back_for_abort = ()
+        unsettled = self._unsettled()
+        to_requeue: list[Handed] = [*committed, *taken_back]
+        if unsettled:
+            try:
+                plan = await self._reconcile_after_failure(unsettled)
+            except Exception:
+                logger.opt(exception=True).warning(
+                    "could not read the harness's record during quota abort; requeuing inputs",
+                    event="harness_reconcile_failed",
+                    agent_id=self._agent_id,
+                    keys=[h.key for h in unsettled],
+                    where="after_quota_abort",
+                )
+                to_requeue.extend(unsettled)
+            else:
+                if plan is None:
+                    to_requeue.extend(unsettled)
+                else:
+                    to_requeue.extend(plan.commit)
+                    to_requeue.extend(plan.requeue)
+                    to_requeue.extend(plan.unknown)
+        settlement = await settle_quota_abort(
+            self._ctx,
+            self._agent_id,
+            to_requeue,
+            compute_backoff=compute_backoff,
+        )
+        withdrawn_keys = frozenset(h.key for h in to_requeue)
+        if withdrawn_keys:
+            self.fg = self.fg.withdraw(withdrawn_keys)
+            self._settling = [h for h in self._settling if h.key not in withdrawn_keys]
+        return settlement
 
     # meiva:note
     # The invocation failed or was interrupted with inputs handed over and unsettled. The session is
@@ -349,6 +408,8 @@ class ForegroundRun:
                 await self._projector.on_event(event)
             case InputInContext(key=key, turn_id=turn_id):
                 self._turn_inputs.setdefault(turn_id, []).append(key)
+            case RateLimitObserved():
+                self._last_rate_limit = event
             case TurnCompleted():
                 await self._on_turn_completed(event)
             case _:
@@ -368,6 +429,11 @@ class ForegroundRun:
             interrupted=turn.interrupted,
             input_keys=self._turn_inputs.pop(event.turn_id, []),
         )
+        self._committed_by_turn.pop(event.turn_id, None)
+        self._last_rate_limit = None
+        if not turn.is_error:
+            self._projector.reset_turn_delivery()
+            self._taken_back_for_abort = ()
         self._turn_ended = True
         if turn.interrupted:
             self.interrupted = True
@@ -377,7 +443,8 @@ class ForegroundRun:
 
     async def _settle(self, settlement: Settlement) -> None:
         match settlement:
-            case Commit(handed=handed):
+            case Commit(handed=handed, turn_id=turn_id):
+                self._committed_by_turn.setdefault(turn_id, []).append(handed)
                 await self._projector.append_inbound(
                     lambda: commit_handed(self._ctx, self._agent_id, [handed]),
                     human_input=handed.human,
@@ -571,6 +638,7 @@ class ForegroundRun:
         try:
             await self._bridge.deliver(inputs, compaction_note=compaction_note)
         except HarnessNotDeliveredError:
+            self._taken_back_for_abort = (*self._taken_back_for_abort, *handed)
             await self._take_back(handed)
             raise
         except (HarnessClosedError, HarnessSetupError, ModelInterruptedError):

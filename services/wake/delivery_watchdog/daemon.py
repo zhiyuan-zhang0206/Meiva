@@ -19,6 +19,7 @@ from base.agents.incarnation.lifecycle_commands import (
     SYSTEM_NOTICE_SOURCE,
     TRIGGER_AFTER_KILL_COMMAND,
 )
+from base.agents.recovery.breaker import SUPPRESS_REASON_QUOTA_EXHAUSTED
 from base.clock import SYSTEM_TIMERS, Clock
 from base.clock.configuration import clock_config_from_boot
 from base.cluster.dataplane.direct_url import ClusterDirectUrl
@@ -146,9 +147,14 @@ def select_stale_pending(
             f"  AND (agents_meta.status = 'idling' "
             f"       OR (agents_meta.status = 'terminated' AND {TRIGGER_AFTER_KILL_COMMAND})) "
             "  AND m.created_at < now() - make_interval(secs => %s) "
+            "  AND ("
+            "    agents_meta.wake_suppress_reason IS DISTINCT FROM %s "
+            "    OR agents_meta.wake_suppressed_until IS NULL "
+            "    OR agents_meta.wake_suppressed_until <= clock_timestamp()"
+            "  ) "
             f"  AND NOT {SYSTEM_NOTICE_SOURCE} "
             "ORDER BY m.created_at ASC",
-            (threshold_s,),
+            (threshold_s, SUPPRESS_REASON_QUOTA_EXHAUSTED),
         )
     return [(r.id, r.agent_id, r.label, r.age_s) for r in rows]
 

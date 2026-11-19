@@ -12,6 +12,7 @@ from psycopg import sql as pgsql
 from psycopg_pool import ConnectionPool
 
 from base.agents.messages.inbound import not_passive_inbound
+from base.agents.recovery.breaker import SUPPRESS_REASON_QUOTA_EXHAUSTED
 from base.db.rows import query_all
 from base.deploy.progress_timeout import CORPSE_REAP_GRACE_S
 from services.wake.heartbeat import STALE_PENDING_S
@@ -110,6 +111,11 @@ def select_idle_agents_needing_heartbeat(
         "FROM agents_meta "
         "WHERE agents_meta.status = 'idling' "
         "  AND agents_meta.permanent_reject_streak = 0 "
+        "  AND ("
+        "    agents_meta.wake_suppress_reason IS DISTINCT FROM %s "
+        "    OR agents_meta.wake_suppressed_until IS NULL "
+        "    OR agents_meta.wake_suppressed_until <= clock_timestamp()"
+        "  ) "
         "  AND now() >= GREATEST("
         "    heartbeat_paused_until, "
         "    last_active_at "
@@ -126,6 +132,7 @@ def select_idle_agents_needing_heartbeat(
         "ORDER BY last_active_at ASC"
     ).format(not_passive=pgsql.SQL(not_passive_inbound("im")))
     params: list[object] = [
+        SUPPRESS_REASON_QUOTA_EXHAUSTED,
         idle_threshold_s,
         jitter_span_s,
         reminder_interval_s,

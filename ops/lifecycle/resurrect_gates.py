@@ -47,6 +47,24 @@ def recovery_halted(db: Database, agent_id: int) -> bool:
     return row[0] is True
 
 
+# meiva:note
+# Whether `agent_id` is inside an active quota-exhaustion wake suppression window.
+def quota_suppressed(db: Database, agent_id: int) -> bool:
+    from base.agents.recovery.breaker import SUPPRESS_REASON_QUOTA_EXHAUSTED
+
+    with db.connect() as conn:
+        row = conn.execute(
+            "SELECT wake_suppress_reason = %s "
+            "  AND wake_suppressed_until IS NOT NULL "
+            "  AND wake_suppressed_until > clock_timestamp() "
+            "FROM agents_meta WHERE id=%s",
+            (SUPPRESS_REASON_QUOTA_EXHAUSTED, agent_id),
+        ).fetchone()
+    if row is None:
+        raise AgentNotFound(f"agent {agent_id} does not exist")
+    return row[0] is True
+
+
 def system_notice_source_of_trigger(
     db: Database, agent_id: int, trigger_inbound_id: int
 ) -> str | None:

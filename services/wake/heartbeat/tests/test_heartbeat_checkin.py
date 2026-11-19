@@ -271,6 +271,60 @@ class TestSendHeartbeatCheckin:
             )
         )
 
+    def test_skips_agent_under_quota_exhaustion_suppression_until_expiry(
+        self,
+        redis_url: str,
+        pool: ConnectionPool,
+        db_conn: psycopg.Connection,
+        *,
+        model_catalog: ModelCatalog,
+        config_authority: ConfigAuthority,
+        database_gate: ProcessDbGate,
+        machine_identity: MachineIdentityReader,
+    ) -> None:
+        from base.agents.recovery.breaker import SUPPRESS_REASON_QUOTA_EXHAUSTED
+
+        aid = make_idle(
+            db_conn,
+            status_changed_s_ago=THRESHOLD_S + 60,
+            model_catalog=model_catalog,
+            config_authority=config_authority,
+            database_gate=database_gate,
+            local_machine=machine_identity,
+        )
+        with db_conn.cursor() as cur:
+            cur.execute(
+                "UPDATE agents_meta SET wake_suppress_reason = %s, "
+                "wake_suppressed_until = now() + interval '5 minutes' WHERE id = %s",
+                (SUPPRESS_REASON_QUOTA_EXHAUSTED, aid),
+            )
+        db_conn.commit()
+        assert aid not in _selected_ids(
+            select_idle_agents_needing_heartbeat(
+                pool,
+                THRESHOLD_S,
+                heartbeat_interval_s=15.0,
+                backoff_max_interval_s=BACKOFF_MAX_INTERVAL_S,
+                now=time.time(),
+            )
+        )
+        with db_conn.cursor() as cur:
+            cur.execute(
+                "UPDATE agents_meta SET wake_suppressed_until = now() - interval '1 second' "
+                "WHERE id = %s",
+                (aid,),
+            )
+        db_conn.commit()
+        assert aid in _selected_ids(
+            select_idle_agents_needing_heartbeat(
+                pool,
+                THRESHOLD_S,
+                heartbeat_interval_s=15.0,
+                backoff_max_interval_s=BACKOFF_MAX_INTERVAL_S,
+                now=time.time(),
+            )
+        )
+
     async def test_publishes_redis_wake_to_target(
         self,
         pool: ConnectionPool,

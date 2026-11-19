@@ -42,7 +42,15 @@ from base.events.live.projection import InboundCommitted, TimelineSnapshot
 from base.events.live.publisher import AgentEventPublisher
 from base.host.boundary.json_values import is_object_dict
 from base.host.boundary.untyped import object_of
-from base.lm.harness import AssistantText, BridgeEvent, HarnessSetupError
+from base.lm.harness import (
+    AssistantText,
+    BridgeEvent,
+    HarnessSetupError,
+    SubagentText,
+    TextDelta,
+    ToolResult,
+    ToolUse,
+)
 from base.lm.harness.engine import HarnessTurn
 from base.lm.harness.registry import FileSessionRegistry
 from base.lm.harness.session.transcript.entries import InputRow
@@ -122,6 +130,7 @@ class ReadTimelineSink:
         self._dirty = asyncio.Event()
         self._busy = asyncio.Lock()
         self._active = False
+        self._delivered_output = False
         self._closed_turns = 0
         self._invalid = False
         self._history_end = self._start_offset()
@@ -147,6 +156,13 @@ class ReadTimelineSink:
     def non_human_wake(self) -> bool:
         return self._non_human_wake
 
+    @property
+    def has_delivered_output(self) -> bool:
+        return self._delivered_output
+
+    def reset_turn_delivery(self) -> None:
+        self._delivered_output = False
+
     def take_invalid_reply(self) -> bool:
         invalid, self._invalid = self._invalid, False
         return invalid
@@ -159,6 +175,8 @@ class ReadTimelineSink:
     # visibility prefix the agent was told to write: the correction does not depend on the record being found.
     async def on_event(self, event: BridgeEvent) -> None:
         self._active = True
+        if isinstance(event, (AssistantText, TextDelta, SubagentText, ToolUse, ToolResult)):
+            self._delivered_output = True
         if isinstance(event, AssistantText):
             self._check_reply(event.text)
         self._dirty.set()

@@ -78,6 +78,19 @@ class HarnessCloseResidue(TypedDict):
     waited_ms: float
 
 
+# meiva:note
+# Telemetry payload emitted by agent/graph/claim/harness_turn.py on quota abort.
+class HarnessQuotaExhausted(TypedDict):
+    harness: str
+    model: str | None
+    retry_after_seconds: float
+    reset_source: str
+    suppressed_until: str | None
+    requeued_inbound_ids: list[int]
+    requeued_count: int
+    reason: str
+
+
 EVENTS: dict[str, EventSpec] = {
     # node / process lifecycle
     "node_enter": telemetry_event(
@@ -329,5 +342,12 @@ EVENTS: dict[str, EventSpec] = {
         "agy_subagent_descriptor_unreadable",
         "an Antigravity sub-agent descriptor file was not the recorded shape, so that sub-agent's "
         "text and tool calls are not shown on the timeline; the turn is unaffected",
+    ),
+    "harness_quota_exhausted": telemetry_event(
+        "harness_quota_exhausted",
+        "an external harness turn aborted on quota exhaustion or rate limit before delivering a reply; "
+        "triggering inbox messages were returned to pending and automatic wakes suppressed until reset/backoff",
+        payload=HarnessQuotaExhausted,
+        tier="anomaly",
     ),
 }

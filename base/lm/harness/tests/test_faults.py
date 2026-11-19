@@ -13,6 +13,11 @@ from __future__ import annotations
 from base.lm.harness.engine import HarnessTurn
 from base.lm.harness.events import Usage
 from base.lm.harness.faults import (
+    DEFAULT_QUOTA_BACKOFF_SECONDS,
+    MAX_QUOTA_BACKOFF_SECONDS,
+    MIN_QUOTA_BACKOFF_SECONDS,
+    QuotaFault,
+    classify_quota_fault,
     fault_message,
     requires_session_recycle,
     sanitize_error_text,
@@ -266,3 +271,63 @@ def test_sanitize_error_text_redacts_secrets_and_truncates() -> None:
     capped = sanitize_error_text(long_error)
     assert len(capped) == 1000
     assert capped.endswith("...")
+
+
+def test_quota_classification_parses_reset_durations() -> None:
+    agy_text = (
+        "Individual quota reached. Please upgrade your subscription to increase your limits. "
+        "Resets in 1h24m27s."
+    )
+    agy_fault = classify_quota_fault(outcome=turn(errors=(agy_text,)))
+    assert agy_fault == QuotaFault(parsed_reset_seconds=5067.0, reset_source="parsed_reset")
+    assert agy_fault is not None
+    assert agy_fault.backoff_seconds() == (5072.0, "parsed_reset")
+
+    claude_fault = classify_quota_fault(
+        outcome=turn(api_error_status=429, error_code="rate_limit"),
+        rate_limit_resets_at=1000,
+        now_timestamp=925.0,
+    )
+    assert claude_fault == QuotaFault(parsed_reset_seconds=75.0, reset_source="rate_limit_event")
+    assert claude_fault is not None
+    assert claude_fault.backoff_seconds() == (80.0, "rate_limit_event")
+
+    codex_fault = classify_quota_fault(
+        fallback_text="You've hit your usage limit. Try again in 2 hours 30 minutes."
+    )
+    assert codex_fault == QuotaFault(parsed_reset_seconds=9000.0, reset_source="parsed_reset")
+
+
+def test_quota_backoff_clamps_zero_and_grows_exponentially_when_unparseable() -> None:
+    zero_reset = classify_quota_fault(outcome=turn(errors=("Rate limit reached. Resets in 0s.",)))
+    assert zero_reset == QuotaFault(parsed_reset_seconds=0.0, reset_source="parsed_reset")
+    assert zero_reset is not None
+    clamped_delay, _ = zero_reset.backoff_seconds()
+    assert clamped_delay == MIN_QUOTA_BACKOFF_SECONDS
+    assert clamped_delay >= 30.0
+
+    unparseable = classify_quota_fault(outcome=turn(errors=("You've hit your usage limit",)))
+    assert unparseable == QuotaFault(parsed_reset_seconds=None, reset_source=None)
+    assert unparseable is not None
+    assert unparseable.backoff_seconds(streak=1) == (
+        DEFAULT_QUOTA_BACKOFF_SECONDS,
+        "bounded_backoff",
+    )
+    assert unparseable.backoff_seconds(streak=2) == (240.0, "bounded_backoff")
+    assert unparseable.backoff_seconds(streak=3) == (480.0, "bounded_backoff")
+    assert unparseable.backoff_seconds(streak=9) == (
+        MAX_QUOTA_BACKOFF_SECONDS,
+        "bounded_backoff",
+    )
+
+
+def test_quota_classification_ignores_non_quota_errors() -> None:
+    assert (
+        classify_quota_fault(outcome=turn(api_error_status=401, error_code="authentication_failed"))
+        is None
+    )
+    assert (
+        classify_quota_fault(outcome=turn(api_error_status=500, errors=("internal server error",)))
+        is None
+    )
+    assert classify_quota_fault(fallback_text="connection reset by peer") is None
