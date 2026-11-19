@@ -184,6 +184,7 @@ export const TimelineView = memo(function TimelineView({
   // Consecutive layout passes at the same content height. A bookmark beyond the reachable end is only unreachable once the content has stopped growing - before that, the height is still arriving and waiting is correct.
   // meiva:link ui/web/src/docs/frontend-components/timeline-view/sticky-scroll.md
   const restoreProbeRef = useRef<{ height: number; passes: number }>({ height: -1, passes: 0 });
+  const matchedAppliedSeqRef = useRef(0);
   const bookmarkState = useRef<BookmarkState>({
     pending: pendingRestoreRef,
     settled: settledRestoreRef,
@@ -371,6 +372,7 @@ export const TimelineView = memo(function TimelineView({
     reloadSearchingOlder,
     hasSavedPosition,
     activeSavedScroll,
+    matchedRestore,
     cancelReloadSearch,
   } = useReloadBookmarkRestore({
     inMemorySaved: initialBookmark.inMemorySaved,
@@ -389,6 +391,7 @@ export const TimelineView = memo(function TimelineView({
     settledRef: settledRestoreRef,
     holdRef: holdRestoredPositionRef,
     probeRef: restoreProbeRef,
+    matchedAppliedSeqRef,
     pendingAnchorRef,
     viewportRef,
     wrapperRef,
@@ -401,9 +404,11 @@ export const TimelineView = memo(function TimelineView({
   });
 
   const cancelPendingReloadRestore = useCallback(() => {
-    if (!reloadBlockingRef.current) return;
+    const wasBlocking = reloadBlockingRef.current;
     reloadBlockingRef.current = false;
-    pendingRestoreRef.current = null;
+    if (wasBlocking) {
+      pendingRestoreRef.current = null;
+    }
     if (cancelReloadSearch()) {
       loadingOlderRef.current = false;
     }
@@ -662,7 +667,15 @@ export const TimelineView = memo(function TimelineView({
     prevLoadingOlderReleaseRef.current = loadingOlder;
   }, [loadingOlder, pendingAnchorRef]);
 
-  const restoreCandidate = pendingRestoreRef.current ?? activeSavedScroll;
+  const unappliedMatchedRestore =
+    matchedRestore !== null && matchedAppliedSeqRef.current !== matchedRestore.seq
+      ? matchedRestore.saved
+      : null;
+  const restoreCandidate =
+    unappliedMatchedRestore ??
+    pendingRestoreRef.current ??
+    (holdRestoredPositionRef.current ? settledRestoreRef.current : null) ??
+    activeSavedScroll;
   const { groups, groupEntries, virtualEnabled, virtualRange, rowRange } = useTimelineGroupWindow({
     canonicalItems,
     compactBuffer,

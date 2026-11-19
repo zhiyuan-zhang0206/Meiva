@@ -1677,3 +1677,243 @@ describe("cross-reload reading position restore", () => {
     expect(origins).toEqual(["background", "reader"]);
   });
 });
+
+describe("virtualized tail preservation after bookmark restore", () => {
+  function setupVirtualizedLayout(tallItemId = "90.0", tallHeight = 1800) {
+    const observers: { callback: ResizeObserverCallback; targets: Set<Element> }[] = [];
+    vi.stubGlobal("ResizeObserver", class {
+      readonly record: (typeof observers)[number];
+      constructor(callback: ResizeObserverCallback) {
+        this.record = { callback, targets: new Set() };
+        observers.push(this.record);
+      }
+      observe(target: Element) { this.record.targets.add(target); }
+      unobserve(target: Element) { this.record.targets.delete(target); }
+      disconnect() { this.record.targets.clear(); }
+    });
+
+    const rowHeight = (group: Element) => {
+      const id = group.querySelector<HTMLElement>(".timeline-item")?.dataset.itemId;
+      return id === tallItemId ? tallHeight : 80;
+    };
+
+    const contentHeight = () => {
+      const vp = screen.queryByTestId("history-viewport");
+      const content = vp?.querySelector<HTMLElement>('[role="log"]');
+      if (!content) return 600;
+      let total = 52;
+      for (const child of content.children) {
+        if (child.hasAttribute("data-virtual-group")) total += rowHeight(child) + 12;
+        else if (child.hasAttribute("data-timeline-spacer")) {
+          total += Number.parseFloat((child as HTMLElement).style.height) + 12;
+        }
+      }
+      return Math.max(600, total);
+    };
+
+    vi.spyOn(HTMLElement.prototype, "scrollHeight", "get").mockImplementation(function (this: HTMLElement) {
+      if (!this.querySelectorAll(".timeline-item").length) return 600;
+      return contentHeight();
+    });
+
+    vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockImplementation(function (this: HTMLElement) {
+      const vp = screen.queryByTestId("history-viewport");
+      const content = vp?.querySelector<HTMLElement>('[role="log"]');
+      if (this === vp) return { top: 0, bottom: 600, height: 600, left: 0, right: 400, width: 400 } as DOMRect;
+      const group = this.matches("[data-virtual-group]") ? this : this.closest<HTMLElement>("[data-virtual-group]");
+      if (!group || !content) return { top: 0, bottom: 0, height: 0, left: 0, right: 400, width: 400 } as DOMRect;
+      let y = 52;
+      for (const sibling of content.children) {
+        if (sibling === group) break;
+        if (sibling.hasAttribute("data-virtual-group")) y += rowHeight(sibling) + 12;
+        else if (sibling.hasAttribute("data-timeline-spacer")) {
+          y += Number.parseFloat((sibling as HTMLElement).style.height) + 12;
+        }
+      }
+      const h = rowHeight(group);
+      return { top: y - top, bottom: y - top + h, height: h, left: 0, right: 400, width: 400 } as DOMRect;
+    });
+
+    const flushObservers = () => {
+      act(() => {
+        for (const { callback, targets } of observers) {
+          const entries = [...targets]
+            .filter((t) => t.isConnected)
+            .map((target) => ({
+              target,
+              borderBoxSize: [{ blockSize: target instanceof HTMLElement ? target.getBoundingClientRect().height : 0 }],
+            })) as unknown as ResizeObserverEntry[];
+          callback(entries, {} as ResizeObserver);
+        }
+      });
+    };
+
+    const virtualItems: BackendTimelineItem[] = Array.from({ length: 110 }, (_, idx) => ({
+      item_id: `${idx + 1}.0`,
+      kind: "agent_chat",
+      payload: idx + 1 === 90 ? "Very long message ".repeat(40) : `Virtual message ${idx + 1}`,
+      source: null,
+      created_at: null,
+      inbound_id: null,
+      show_timestamp: false,
+      reading_locator: `loc-virt-${idx + 1}`,
+    }));
+
+    return { virtualItems, flushObservers };
+  }
+
+  function scrollDownPastAnchorToBottom(flushObservers: () => void, withWheel: boolean) {
+    for (let step = 0; step < 12; step += 1) {
+      const maxTop = Math.max(0, viewport().scrollHeight - viewport().clientHeight);
+      if (top >= maxTop) break;
+      const nextTop = Math.min(maxTop, top + 450);
+      act(() => {
+        if (withWheel) fireEvent.wheel(viewport(), { deltaY: 450 });
+        viewport().scrollTop = nextTop;
+        fireEvent.scroll(viewport());
+      });
+      flushObservers();
+    }
+    const finalMax = Math.max(0, viewport().scrollHeight - viewport().clientHeight);
+    act(() => {
+      if (withWheel) fireEvent.wheel(viewport(), { deltaY: 450 });
+      viewport().scrollTop = finalMax;
+      fireEvent.scroll(viewport());
+    });
+    flushObservers();
+  }
+
+  it("keeps bottom messages mounted when scrolling down past >1 viewport from an inMemorySaved restore in virtualized mode", () => {
+    const { virtualItems, flushObservers } = setupVirtualizedLayout();
+    const anchorTop = 52 + 84 * 92;
+    saveScrollMemory("virt-inmemory-tail:agent:42", {
+      contentKey: "42",
+      scrollTop: anchorTop,
+      followBottom: false,
+      anchor: { itemId: "85.0", rank: 0, viewportTop: 0 },
+    });
+
+    const browser = fakeBrowser({ session: {} });
+    renderWithBrowser(
+      <QueryClientProvider client={client}>
+        <WallClockProvider wallNow={() => 6000}>
+          <TimelineView
+            items={virtualItems}
+            threadKey="42"
+            scrollMemoryKey="virt-inmemory-tail:agent:42"
+            reloadRestore={{ state: "disabled" }}
+          />
+        </WallClockProvider>
+      </QueryClientProvider>,
+      { browser },
+    );
+
+    const logEl = viewport().querySelector<HTMLElement>('[role="log"]')!;
+    expect(logEl.className).toContain("timeline-virtual");
+    flushObservers();
+    expect(Math.abs(readingOffset("85.0") ?? 999)).toBeLessThanOrEqual(1);
+
+    scrollDownPastAnchorToBottom(flushObservers, true);
+
+    expect(viewport().querySelector('[data-timeline-spacer="after"]')).toBeNull();
+    expect(viewport().querySelector('.timeline-item[data-item-id="108.0"]')).not.toBeNull();
+    expect(viewport().querySelector('.timeline-item[data-item-id="109.0"]')).not.toBeNull();
+    expect(viewport().querySelector('.timeline-item[data-item-id="110.0"]')).not.toBeNull();
+    expect(viewport().scrollHeight - viewport().clientHeight - viewport().scrollTop).toBeLessThanOrEqual(1);
+  });
+
+  it.each([true, false])(
+    "keeps bottom messages mounted when scrolling down past >1 viewport from a cross-reload matched bookmark (withWheel=%s)",
+    (withWheel) => {
+      const { virtualItems, flushObservers } = setupVirtualizedLayout();
+      const browser = fakeBrowser({ session: {} });
+      const anchorTop = 52 + 84 * 92;
+      saveReloadBookmark(
+        browser.session,
+        "42",
+        {
+          readingLocator: "loc-virt-85",
+          itemId: "85.0",
+          rank: 0,
+          viewportTop: 0,
+          scrollTop: anchorTop,
+          savedAt: 5000,
+        },
+        5000,
+      );
+
+      renderWithBrowser(
+        <QueryClientProvider client={client}>
+          <WallClockProvider wallNow={() => 6000}>
+            <TimelineView
+              items={virtualItems}
+              threadKey="42"
+              scrollMemoryKey={`virt-reload-tail-${String(withWheel)}:agent:42`}
+              reloadRestore={{ state: "enabled", session: browser.session, now: () => 6000 }}
+            />
+          </WallClockProvider>
+        </QueryClientProvider>,
+        { browser },
+      );
+
+      const logEl = viewport().querySelector<HTMLElement>('[role="log"]')!;
+      expect(logEl.className).toContain("timeline-virtual");
+      flushObservers();
+      expect(Math.abs(readingOffset("85.0") ?? 999)).toBeLessThanOrEqual(1);
+
+      scrollDownPastAnchorToBottom(flushObservers, withWheel);
+
+      expect(viewport().querySelector('[data-timeline-spacer="after"]')).toBeNull();
+      expect(viewport().querySelector('.timeline-item[data-item-id="108.0"]')).not.toBeNull();
+      expect(viewport().querySelector('.timeline-item[data-item-id="109.0"]')).not.toBeNull();
+      expect(viewport().querySelector('.timeline-item[data-item-id="110.0"]')).not.toBeNull();
+      expect(viewport().scrollHeight - viewport().clientHeight - viewport().scrollTop).toBeLessThanOrEqual(1);
+    },
+  );
+
+  it("releases a pending matched bookmark on End key navigation in virtualized mode", () => {
+    const { virtualItems, flushObservers } = setupVirtualizedLayout();
+    const browser = fakeBrowser({ session: {} });
+    const anchorTop = 52 + 84 * 92;
+    saveReloadBookmark(
+      browser.session,
+      "42",
+      {
+        readingLocator: "loc-virt-85",
+        itemId: "85.0",
+        rank: 0,
+        viewportTop: 0,
+        scrollTop: anchorTop,
+        savedAt: 5000,
+      },
+      5000,
+    );
+
+    renderWithBrowser(
+      <QueryClientProvider client={client}>
+        <WallClockProvider wallNow={() => 6000}>
+          <TimelineView
+            items={virtualItems}
+            threadKey="42"
+            scrollMemoryKey="virt-keydown-tail:agent:42"
+            reloadRestore={{ state: "enabled", session: browser.session, now: () => 6000 }}
+          />
+        </WallClockProvider>
+      </QueryClientProvider>,
+      { browser },
+    );
+
+    flushObservers();
+    expect(Math.abs(readingOffset("85.0") ?? 999)).toBeLessThanOrEqual(1);
+
+    act(() => {
+      fireEvent.keyDown(viewport(), { key: "End" });
+      viewport().scrollTop = Math.max(0, viewport().scrollHeight - viewport().clientHeight);
+      fireEvent.scroll(viewport());
+    });
+    flushObservers();
+
+    expect(viewport().querySelector('[data-timeline-spacer="after"]')).toBeNull();
+    expect(viewport().querySelector('.timeline-item[data-item-id="110.0"]')).not.toBeNull();
+  });
+});
