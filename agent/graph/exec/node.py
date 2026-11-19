@@ -136,6 +136,10 @@ async def exec_node(
         stall=StallConfig(runtime.context.require_agent().read("agent", "node_stall_dump_seconds")),
         timeline_inputs=runtime.context.timestamp_policy(),
         timeline_limit=runtime.context.require_agent().read("display", "timeline_default_limit"),
+        turn_timings=state.turn_timings,
+        active_turn_id=state.active_turn_id if state.turn_active else None,
+        active_turn_started_at=state.active_turn_started_at if state.turn_active else None,
+        active_turn_start_idx=state.active_turn_start_idx if state.turn_active else None,
     ):
         return await exec_node_impl(state, runtime, config, process=process)
 

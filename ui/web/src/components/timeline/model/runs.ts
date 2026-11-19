@@ -135,6 +135,8 @@ export interface TurnSummary {
   // "Working for X" (plus live delta) and settled "Worked for X".
   // meiva:link ui/web/src/docs/frontend-components/timeline-view/timeline-view.md
   readonly workedMs: number;
+  readonly closedTurnsWorkedMs?: number;
+  readonly closedTurnIds?: readonly string[];
   readonly missingTiming: boolean;
   readonly lastLiveKind: "reasoning" | "code" | "output" | null;
   readonly lastLiveStartedAt: number;
@@ -162,28 +164,60 @@ export function summarizeTurn(items: readonly BackendTimelineItem[]): TurnSummar
   let thinkingMs = 0;
   let codeMs = 0;
   let execMs = 0;
+  let unattributedOwnMs = 0;
   let systemPrompts = 0;
   let compactSummaries = 0;
   let memories = 0;
   let agentMessages = 0;
   let systemNotes = 0;
   const sdkCounts = new Map<string, number>();
+
+  const closedTurnDurations = new Map<string, number>();
   for (const it of items) {
     if (it.llmWaiting) continue;
+    if (
+      typeof it.turn_id === "string" &&
+      it.turn_id.length > 0 &&
+      typeof it.turn_duration_ms === "number" &&
+      Number.isFinite(it.turn_duration_ms) &&
+      !closedTurnDurations.has(it.turn_id)
+    ) {
+      closedTurnDurations.set(it.turn_id, Math.max(0, it.turn_duration_ms));
+    }
+  }
+  let closedTurnsWorkedMs = 0;
+  for (const durationMs of closedTurnDurations.values()) {
+    closedTurnsWorkedMs += durationMs;
+  }
+
+  for (const it of items) {
+    if (it.llmWaiting) continue;
+    const ownMs = itemOwnMs(it);
+    const hasClosedTurnDuration =
+      typeof it.turn_id === "string" && closedTurnDurations.has(it.turn_id);
     // meiva:note
-    // A missing provider measurement is unknown, including after a reload drops
-    // browser-only clocks. Never infer work from timestamps across idle gaps.
+    // A missing provider measurement is unknown ONLY when the enclosing Turn also
+    // carries no authoritative `turn_duration_ms` (e.g. legacy pre-Plan-B blocks or
+    // unsettled incomplete items). Never infer work across idle gaps.
     // meiva:link ui/web/src/docs/frontend-components/timeline-view/deep-collapse.md
-    if (itemOwnMs(it) === null &&
-        !isLiveReasoning(it) && !isLiveCode(it) && !isLiveExecution(it)) {
+    if (
+      !hasClosedTurnDuration &&
+      ownMs === null &&
+      !isLiveReasoning(it) &&
+      !isLiveCode(it) &&
+      !isLiveExecution(it)
+    ) {
       missingTiming = true;
+    }
+    if (!hasClosedTurnDuration && ownMs !== null) {
+      unattributedOwnMs += ownMs;
     }
     if (it.kind === "agent_reasoning") {
       thinking += 1;
-      thinkingMs += itemOwnMs(it) ?? 0;
+      thinkingMs += ownMs ?? 0;
     } else if (it.kind === "agent_code") {
       code += 1;
-      codeMs += itemOwnMs(it) ?? 0;
+      codeMs += ownMs ?? 0;
       if (it.sdk_calls) {
         for (const c of it.sdk_calls) {
           sdkCounts.set(c.method, (sdkCounts.get(c.method) ?? 0) + c.count);
@@ -191,7 +225,7 @@ export function summarizeTurn(items: readonly BackendTimelineItem[]): TurnSummar
       }
     } else if (it.kind === "code_output") {
       output += 1;
-      execMs += itemOwnMs(it) ?? 0;
+      execMs += ownMs ?? 0;
     } else if (it.kind === "system_prompt") {
       systemPrompts += 1;
     } else if (it.kind === "inbound_compact_summary" || it.kind === "inbound_compact_request") {
@@ -214,7 +248,8 @@ export function summarizeTurn(items: readonly BackendTimelineItem[]): TurnSummar
   const sdkCalls = orderSdkCalls(
     [...sdkCounts.entries()].map(([method, count]) => ({ method, count })),
   );
-  const workedMs = thinkingMs + codeMs + execMs;
+  const closedTurnIds = [...closedTurnDurations.keys()];
+  const workedMs = closedTurnsWorkedMs + unattributedOwnMs;
   let lastLiveKind: "reasoning" | "code" | "output" | null = null;
   let lastLiveStartedAt = 0;
   for (let i = items.length - 1; i >= 0; i--) {
@@ -251,6 +286,8 @@ export function summarizeTurn(items: readonly BackendTimelineItem[]): TurnSummar
     execMs,
     sdkCalls,
     workedMs,
+    closedTurnsWorkedMs,
+    closedTurnIds,
     missingTiming,
     lastLiveKind,
     lastLiveStartedAt,
@@ -260,7 +297,12 @@ export function summarizeTurn(items: readonly BackendTimelineItem[]): TurnSummar
 export function turnSummaryEqual(a: TurnSummary, b: TurnSummary): boolean {
   if (a === b) return true;
   for (const key of Object.keys(a) as (keyof TurnSummary)[]) {
-    if (key !== "sdkCalls" && a[key] !== b[key]) return false;
+    if (key !== "sdkCalls" && key !== "closedTurnIds" && a[key] !== b[key]) return false;
+  }
+  const aIds = a.closedTurnIds ?? [];
+  const bIds = b.closedTurnIds ?? [];
+  if (aIds.length !== bIds.length || aIds.some((id, index) => id !== bIds[index])) {
+    return false;
   }
   return (
     a.sdkCalls.length === b.sdkCalls.length &&

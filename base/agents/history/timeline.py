@@ -12,7 +12,13 @@ from langchain_core.messages import (
     ToolCall,
 )
 
-from base.agents.history.timeline_item import ReadingWindow
+from base.agents.history.timeline_item import (
+    ReadingWindow,
+    TurnTimingContext,
+    TurnTimingSpan,
+    apply_turn_timings,
+    parse_turn_timing_spans,
+)
 from base.agents.history.timeline_item import TimelineItem as TimelineItem
 from base.agents.messages.envelope import inbound_body
 from base.agents.messages.inbound_images import kwargs_upload_files
@@ -113,6 +119,7 @@ def build_timeline_items(
     inputs: TimestampPolicy,
     start: int = 0,
     segment_prefix: str = "",
+    timing: TurnTimingContext | None = None,
 ) -> tuple[list[TimelineItem], int]:
     items: list[TimelineItem] = []
     sdk_by_id = sdk_calls_by_tool_call_id(messages, start)
@@ -132,6 +139,8 @@ def build_timeline_items(
             items.append(_inbound_item(msg_idx, raw_content, kwargs))
         else:
             items.extend(_message_items(msg, msg_idx, kwargs, sdk_by_id, inputs))
+    if timing is not None:
+        _apply_native_turn_timings(items, timing)
     _add_source_coordinates(items, messages)
     for item in items:
         msg_idx, _ = (int(part.removeprefix("h")) for part in item.item_id.split("."))
@@ -144,6 +153,37 @@ def build_timeline_items(
             for item in items
         ]
     return items, msg_count
+
+
+def _apply_native_turn_timings(items: list[TimelineItem], timing: TurnTimingContext) -> None:
+    spans: list[TurnTimingSpan] = []
+    if timing.timings:
+        first = timing.timings[0]
+        if isinstance(first, TurnTimingSpan):
+            spans.extend(t for t in timing.timings if isinstance(t, TurnTimingSpan))
+        else:
+            spans.extend(
+                parse_turn_timing_spans(
+                    [entry for entry in timing.timings if isinstance(entry, Mapping)],
+                    index_shift=timing.index_shift,
+                )
+            )
+    if (
+        isinstance(timing.active_turn_id, str)
+        and timing.active_turn_id
+        and isinstance(timing.active_turn_start_idx, int)
+        and not isinstance(timing.active_turn_start_idx, bool)
+    ):
+        spans.append(
+            TurnTimingSpan(
+                turn_id=timing.active_turn_id,
+                start_pos=timing.active_turn_start_idx + timing.index_shift,
+                end_pos=None,
+                duration_ms=None,
+            )
+        )
+    if spans:
+        apply_turn_timings(items, spans)
 
 
 def _add_source_coordinates(items: list[TimelineItem], messages: Sequence[BaseMessage]) -> None:

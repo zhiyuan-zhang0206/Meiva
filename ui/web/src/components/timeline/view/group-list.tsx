@@ -270,6 +270,8 @@ export function TimelineGroupList({
   turnActive,
   loading = false,
   lastEventAt = 0,
+  activeTurnId = null,
+  activeTurnStartedAt = 0,
   overrides,
   toggleExpanded,
   toggleTurn,
@@ -285,6 +287,8 @@ export function TimelineGroupList({
   turnActive: boolean;
   loading?: boolean;
   lastEventAt?: number;
+  activeTurnId?: string | null;
+  activeTurnStartedAt?: number;
   overrides: ReadonlyMap<string, boolean>;
   toggleExpanded: (id: string, currentlyExpanded: boolean) => void;
   toggleTurn: (id: string, currentlyExpanded: boolean, button: HTMLButtonElement) => void;
@@ -383,6 +387,8 @@ export function TimelineGroupList({
                 onToggle={toggleTurn}
                 turnActive={turnActive && isLastTurn}
                 lastEventAt={lastEventAt}
+                activeTurnId={activeTurnId}
+                activeTurnStartedAt={activeTurnStartedAt}
                 liveWindow={isLiveTurn}
                 timelineSource={first.source}
                 displayRank={first.rank}
@@ -410,7 +416,7 @@ export function TimelineGroupList({
         })}
         {showPendingActivityWindow ? (
           <div className="py-1">
-            <PendingLiveActivityWindow />
+            <PendingLiveActivityWindow startedAt={activeTurnStartedAt} />
           </div>
         ) : null}
       </LiveClockGate>

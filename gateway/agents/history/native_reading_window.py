@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from base.agents.history.checkpoint import CheckpointTimelineSource, load_checkpoint_timeline_source
 from base.agents.history.timeline import build_timeline_items, reading_target, reading_window
-from base.agents.history.timeline_item import ReadingWindow, TimelineItem
+from base.agents.history.timeline_item import ReadingWindow, TimelineItem, TurnTimingContext
 from base.agents.messages.timestamp_policy import TimestampPolicy
 from base.api_contracts.reading import (
     NativeReadingLocator,
@@ -36,7 +36,14 @@ def native_source_items(
             else f"s{source.boundaries.index(source.checkpoint_id) + 1}.{source.checkpoint_id}"
         )
     items, _ = build_timeline_items(
-        source.messages, inputs=rendering, segment_prefix=segment_prefix
+        source.messages,
+        inputs=rendering,
+        segment_prefix=segment_prefix,
+        timing=TurnTimingContext(
+            timings=source.turn_timings,
+            active_turn_id=source.active_turn_id,
+            active_turn_start_idx=source.active_turn_start_idx,
+        ),
     )
     identity = native_source_identity(source, agent_id)
     for item in items:

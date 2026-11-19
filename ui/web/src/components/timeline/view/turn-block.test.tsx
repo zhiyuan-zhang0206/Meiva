@@ -3,7 +3,8 @@ import { act, cleanup, fireEvent, screen } from "@testing-library/react";
 import { render } from "@/lib/transport/tests/wall-clock-render";
 
 import { PendingLiveActivityWindow, TurnBlock } from "../run-block";
-import type { TurnSummary } from "../model/runs";
+import { summarizeTurn, type TurnSummary } from "../model/runs";
+import type { BackendTimelineItem } from "@/lib/contracts/types";
 
 afterEach(cleanup);
 
@@ -337,5 +338,158 @@ describe("TurnBlock component", () => {
     expect(grid).not.toBeNull();
     expect(clip?.className).toContain("overflow-hidden");
     expect(clip?.className).toContain("min-w-0");
+  });
+});
+
+function planBItem(
+  kind: BackendTimelineItem["kind"],
+  id: string,
+  extra: Partial<BackendTimelineItem> = {},
+): BackendTimelineItem {
+  return {
+    item_id: id,
+    kind,
+    source: null,
+    payload: "",
+    created_at: null,
+    inbound_id: null,
+    show_timestamp: false,
+    ...extra,
+  };
+}
+
+describe("Plan B Turn-level timing semantics", () => {
+  afterEach(() => {
+    cleanup();
+    vi.useRealTimers();
+  });
+
+  it("sums closed Turn durations once per turn_id and ignores missing child step timings", () => {
+    const items = [
+      planBItem("agent_reasoning", "1.0", { turn_id: "t1", turn_duration_ms: 4200 }),
+      planBItem("agent_code", "1.1", { turn_id: "t1", turn_duration_ms: 4200, code_elapsed_ms: null }),
+      planBItem("code_output", "2.0", { turn_id: "t1", turn_duration_ms: 4200, exec_ms: null }),
+      planBItem("agent_code", "3.0", { turn_id: "t2", turn_duration_ms: 8100 }),
+      planBItem("code_output", "4.0", { turn_id: "t2", turn_duration_ms: 8100 }),
+    ];
+    const summary = summarizeTurn(items);
+    expect(summary.closedTurnsWorkedMs).toBe(12_300);
+    expect(summary.workedMs).toBe(12_300);
+    expect(summary.closedTurnIds).toEqual(["t1", "t2"]);
+    expect(summary.missingTiming).toBe(false);
+  });
+
+  it("retains missingTiming=true on legacy items lacking both turn_duration_ms and item duration", () => {
+    const legacy = [planBItem("agent_code", "h0.0"), planBItem("code_output", "h1.0")];
+    const summary = summarizeTurn(legacy);
+    expect(summary.workedMs).toBe(0);
+    expect(summary.missingTiming).toBe(true);
+
+    render(
+      <TurnBlock
+        id="h0.0"
+        memberIds={["h0.0", "h1.0"]}
+        summary={summary}
+        expanded={false}
+        onToggle={vi.fn()}
+      />,
+    );
+    expect(screen.getByText("Worked")).toBeTruthy();
+  });
+
+  it("counts smoothly from PendingLiveActivityWindow through TurnBlock without jumping or regressing", () => {
+    vi.useFakeTimers();
+    const startMs = 1_700_000_000_000;
+    vi.setSystemTime(startMs + 5_000);
+
+    const { rerender } = render(<PendingLiveActivityWindow />);
+    expect(screen.getByText("Working…")).toBeTruthy();
+
+    rerender(<PendingLiveActivityWindow startedAt={startMs} />);
+    expect(screen.getByText("Working for 5s")).toBeTruthy();
+
+    act(() => {
+      vi.advanceTimersByTime(2_000);
+    });
+    expect(screen.getByText("Working for 7s")).toBeTruthy();
+
+    const inFlightItems = [
+      planBItem("agent_code", "h100.0", { turn_id: "t1", turn_duration_ms: null }),
+      planBItem("code_output", "h200.0", { turn_id: "t1", turn_duration_ms: null }),
+    ];
+    rerender(
+      <TurnBlock
+        id="h100.0"
+        memberIds={["h100.0", "h200.0"]}
+        summary={summarizeTurn(inFlightItems)}
+        expanded={false}
+        onToggle={vi.fn()}
+        turnActive={true}
+        activeTurnId="t1"
+        activeTurnStartedAt={startMs}
+      />,
+    );
+    expect(screen.getByText("Working for 7s")).toBeTruthy();
+
+    act(() => {
+      vi.advanceTimersByTime(2_000);
+    });
+    expect(screen.getByText("Working for 9s")).toBeTruthy();
+
+    const settledItems = inFlightItems.map((it) => ({ ...it, turn_duration_ms: 9_000 }));
+    rerender(
+      <TurnBlock
+        id="h100.0"
+        memberIds={["h100.0", "h200.0"]}
+        summary={summarizeTurn(settledItems)}
+        expanded={false}
+        onToggle={vi.fn()}
+        turnActive={false}
+      />,
+    );
+    expect(screen.getByText("Worked for 9s")).toBeTruthy();
+  });
+
+  it("accumulates prior closed Turn + active Turn in one Work Block while excluding sleep gaps", () => {
+    vi.useFakeTimers();
+    const t2StartMs = 1_700_001_800_000;
+    vi.setSystemTime(t2StartMs + 4_000);
+
+    const items = [
+      planBItem("agent_code", "h10.0", { turn_id: "t1", turn_duration_ms: 5_000 }),
+      planBItem("code_output", "h20.0", { turn_id: "t1", turn_duration_ms: 5_000 }),
+      planBItem("agent_code", "h30.0", { turn_id: "t2", turn_duration_ms: null }),
+    ];
+    const { rerender } = render(
+      <TurnBlock
+        id="h10.0"
+        memberIds={["h10.0", "h20.0", "h30.0"]}
+        summary={summarizeTurn(items)}
+        expanded={false}
+        onToggle={vi.fn()}
+        turnActive={true}
+        activeTurnId="t2"
+        activeTurnStartedAt={t2StartMs}
+      />,
+    );
+    expect(screen.getByText("Working for 9s")).toBeTruthy();
+
+    const settled = [
+      planBItem("agent_code", "h10.0", { turn_id: "t1", turn_duration_ms: 5_000 }),
+      planBItem("code_output", "h20.0", { turn_id: "t1", turn_duration_ms: 5_000 }),
+      planBItem("agent_code", "h30.0", { turn_id: "t2", turn_duration_ms: 4_000 }),
+      planBItem("code_output", "h40.0", { turn_id: "t2", turn_duration_ms: 4_000 }),
+    ];
+    rerender(
+      <TurnBlock
+        id="h10.0"
+        memberIds={["h10.0", "h20.0", "h30.0", "h40.0"]}
+        summary={summarizeTurn(settled)}
+        expanded={false}
+        onToggle={vi.fn()}
+        turnActive={false}
+      />,
+    );
+    expect(screen.getByText("Worked for 9s")).toBeTruthy();
   });
 });

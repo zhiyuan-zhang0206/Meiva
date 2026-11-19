@@ -29,8 +29,11 @@ from agent.turn.failure_decision import (
     provider_recovery,
 )
 from base.agents.context import MeivaContext
+from base.agents.history.timeline_item import close_turn_timing_update
+from base.api_contracts.agent_contract import Harness
 from base.events.live.bus import EventBus
 from base.events.live.projection import Error
+from base.host.boundary.json_values import is_object_dict, is_object_list
 from base.lm.errors import is_retryable_provider_error
 from base.log import logger
 from base.telemetry.audit_events import prepare_event_log, record_audit_reported_async
@@ -422,6 +425,47 @@ class PendingTurnFailure:
 # meiva:note
 # The breaker state in the checkpoint. A failed read is reported and treated as no state: the
 # breaker is then opened again, which is idempotent.
+async def _close_failed_turn_timing(
+    graph: CompiledStateGraph[BaseAgentState, MeivaContext, BaseAgentState, BaseAgentState],
+    config: RunnableConfig,
+    ctx: MeivaContext,
+) -> dict[str, object]:
+    if ctx.harness is not Harness.MEIVA:
+        return {}
+    try:
+        snapshot = await graph.aget_state(config)
+        values: object = snapshot.values
+    except Exception:
+        logger.opt(exception=True).warning(
+            "reading active turn state during failure settlement failed",
+            event="turn_failure_timing_read_failed",
+        )
+        return {}
+    if not is_object_dict(values):
+        return {}
+    active_id = values.get("active_turn_id")
+    if not isinstance(active_id, str) or not active_id:
+        return {}
+    started_at = values.get("active_turn_started_at")
+    start_idx = values.get("active_turn_start_idx")
+    raw_timings = values.get("turn_timings")
+    msgs = values.get("messages")
+    end_idx = len(msgs) if is_object_list(msgs) else 0
+    close_update = close_turn_timing_update(
+        active_turn_id=active_id,
+        active_turn_started_at=started_at if isinstance(started_at, str) else None,
+        active_turn_start_idx=start_idx if isinstance(start_idx, int) else None,
+        turn_timings=(
+            [e for e in raw_timings if is_object_dict(e)] if is_object_list(raw_timings) else ()
+        ),
+        end_idx=end_idx,
+        ended_at=ctx.require_clock().now(),
+    )
+    if close_update:
+        close_update["turn_active"] = False
+    return close_update
+
+
 async def _read_circuit(
     graph: CompiledStateGraph[BaseAgentState, MeivaContext, BaseAgentState, BaseAgentState],
     config: RunnableConfig,
@@ -486,6 +530,7 @@ async def settle_turn_failure(
                 emit_reports=emit_reports,
                 deferred=pending.errors,
             )
+        pending.prepared_update.update(await _close_failed_turn_timing(graph, config, ctx))
     # meiva:note
     # The failed attempt already reported its own ok=False record, so an aborted turn writes
     # no turn_end value: a declaration it carried is dropped here instead of being inherited

@@ -47,6 +47,7 @@ export {
   type TimelineSnapshotEvent,
   type ToUserChangedEvent,
   type TokenUsageEvent,
+  type TurnStartedEvent,
 } from "./types-events";
 
 export {

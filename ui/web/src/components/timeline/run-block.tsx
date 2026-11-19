@@ -48,6 +48,8 @@ interface TurnBlockProps {
   // in flight. 0 = unknown, and the clock falls back to the in-flight block alone.
   // meiva:link ui/web/src/docs/frontend-components/timeline-view/deep-collapse.md
   lastEventAt?: number;
+  activeTurnId?: string | null;
+  activeTurnStartedAt?: number;
 }
 
 function sameIds(a: readonly string[], b: readonly string[]): boolean {
@@ -68,6 +70,8 @@ function turnBlockPropsEqual(prev: TurnBlockProps, next: TurnBlockProps): boolea
     prev.onToggle === next.onToggle &&
     prev.turnActive === next.turnActive &&
     prev.lastEventAt === next.lastEventAt &&
+    prev.activeTurnId === next.activeTurnId &&
+    prev.activeTurnStartedAt === next.activeTurnStartedAt &&
     prev.liveWindow === next.liveWindow &&
     prev.children === next.children &&
     prev.timelineSource === next.timelineSource &&
@@ -94,27 +98,41 @@ export const TurnBlock = memo(function TurnBlock({
   timelineSource = "canonical",
   displayRank,
   lastEventAt = 0,
+  activeTurnId = null,
+  activeTurnStartedAt = 0,
 }: TurnBlockProps) {
   const t = useTranslations("timeline");
   const liveBlockStartedAt =
     turnActive && summary.lastLiveKind != null && summary.lastLiveStartedAt > 0
       ? summary.lastLiveStartedAt
       : 0;
+  const useAuthoritativeTurnClock = Boolean(turnActive) && activeTurnStartedAt > 0;
+  const activeAlreadyClosed =
+    activeTurnId != null && (summary.closedTurnIds?.includes(activeTurnId) ?? false);
   // meiva:note
-  // The live "Working for" anchor is the in-flight block's start while one runs, and the page's own
-  // time of the thread's last received event when none does — the tick then keeps counting the
-  // current stretch instead of standing on the measured total, which is what used to freeze the
-  // header between blocks (a tool result committed, the model thinking before its next token, a
-  // harness step transition: user report 2026-11-08, stuck at "Working for 1m 2s" with no event
-  // left to advance it). Anchoring on the last received event, not the turn's start, keeps a turn
-  // that spans an idle gap (a restart, a wake-up) from counting that gap as work.
+  // Anchoring on the active Turn's authoritative `started_at` keeps the live counter
+  // continuous from `PendingLiveActivityWindow` through every step (`Working for Xs`)
+  // and ensures prior Turns in the same Work Block only contribute their closed
+  // durations without idle/sleep gaps between Turns. When no Turn anchor exists (e.g.
+  // isolated unit renders), fall back to the block's live clock or `lastEventAt`.
   // meiva:link ui/web/src/docs/frontend-components/timeline-view/deep-collapse.md
-  const liveAnchor =
-    liveBlockStartedAt > 0 ? liveBlockStartedAt : turnActive ? lastEventAt : 0;
+  const liveAnchor = useAuthoritativeTurnClock
+    ? activeTurnStartedAt
+    : liveBlockStartedAt > 0
+      ? liveBlockStartedAt
+      : turnActive
+        ? lastEventAt
+        : 0;
   const liveNow = useNow(Boolean(turnActive) && liveAnchor > 0);
 
-  const liveDelta = turnActive && liveAnchor > 0 ? Math.max(liveNow - liveAnchor, 0) : 0;
-  const totalWorkedMs = summary.workedMs + liveDelta;
+  const liveDelta =
+    turnActive && liveAnchor > 0 && !(useAuthoritativeTurnClock && activeAlreadyClosed)
+      ? Math.max(liveNow - liveAnchor, 0)
+      : 0;
+  const baseWorkedMs = useAuthoritativeTurnClock
+    ? (summary.closedTurnsWorkedMs ?? summary.workedMs)
+    : summary.workedMs;
+  const totalWorkedMs = baseWorkedMs + liveDelta;
 
   const hasWork = summary.thinking > 0 || summary.code > 0 || summary.output > 0;
   const hasLiveTimer =
@@ -127,7 +145,7 @@ export const TurnBlock = memo(function TurnBlock({
       ? t("workedFor", { duration: formatDuration(summary.workedMs) })
       : t("workActivity");
 
-  const timingIncomplete = hasWork && summary.missingTiming;
+  const timingIncomplete = useAuthoritativeTurnClock ? false : hasWork && summary.missingTiming;
   const workedLabel = timingIncomplete
     ? turnActive ? t("working") : t("worked")
     : measuredLabel;
@@ -214,8 +232,17 @@ export const TurnBlock = memo(function TurnBlock({
 // before the first reasoning or tool item arrives, matching TurnBlock's header geometry.
 // meiva:link ui/web/src/docs/frontend-components/timeline-view/deep-collapse.md
 // meiva:link ui/web/src/docs/frontend-components/timeline-view/loading-ring.md
-export const PendingLiveActivityWindow = memo(function PendingLiveActivityWindow() {
+export const PendingLiveActivityWindow = memo(function PendingLiveActivityWindow({
+  startedAt = 0,
+}: {
+  startedAt?: number;
+}) {
   const t = useTranslations("timeline");
+  const hasAnchor = startedAt > 0;
+  const liveNow = useNow(hasAnchor);
+  const label = hasAnchor
+    ? t("workingFor", { duration: formatDuration(Math.max(liveNow - startedAt, 0)) })
+    : t("working");
   return (
     <div
       data-live-activity-window="true"
@@ -231,7 +258,7 @@ export const PendingLiveActivityWindow = memo(function PendingLiveActivityWindow
       >
         <span className={cn("items-center gap-1.5 text-[13px] leading-snug", FLEX, FLEX_1, MIN_W_0)}>
           <Layers className="size-3.5 shrink-0 opacity-70" />
-          <span className="truncate whitespace-nowrap tabular-nums">{t("working")}</span>
+          <span className="truncate whitespace-nowrap tabular-nums">{label}</span>
         </span>
       </div>
     </div>

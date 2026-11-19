@@ -93,6 +93,8 @@ interface TimelineStoreView {
   // between a committed block and the next one instead of freezing (user report 2026-11-08).
   // meiva:link ui/web/src/docs/frontend-components/timeline-view/deep-collapse.md
   liveAnchorAt: number;
+  activeTurnId?: string | null;
+  activeTurnStartedAt?: number;
 }
 type TimelineViewState = Pick<
   UseTimelineResult,
@@ -527,6 +529,8 @@ function HomeContent({
             streamingCode={streamingCode}
             turnActive={agentBusy}
             lastEventAt={timelineStore.liveAnchorAt}
+            activeTurnId={timelineStore.activeTurnId ?? null}
+            activeTurnStartedAt={timelineStore.activeTurnStartedAt ?? 0}
             hasMoreOlder={hasMoreOlder}
             loadingOlder={loadingOlder}
             readerLoadingOlder={readerLoadingOlder}

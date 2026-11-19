@@ -158,14 +158,17 @@ async def _handle_harness_abort(
         await bridge.retire(reason=reason)
     quota = _classify_quota_exhaustion(ctx, run, exc)
     if quota is not None and not projector.has_delivered_output:
+        projector.clear_open_turn()
         return await _settle_quota_exhaustion(ctx, agent_id, bridge, run, exc, quota)
 
     produced_output = projector.has_activity
     marked = await run.retire_unconfirmed()
     if produced_output:
         await projector.finish(error=str(exc))
-    elif marked:
-        report_lost_turn(ctx, agent_id, marked, run.last_key, exc)
+    else:
+        projector.clear_open_turn()
+        if marked:
+            report_lost_turn(ctx, agent_id, marked, run.last_key, exc)
     return None
 
 
@@ -186,6 +189,7 @@ async def _run_harness_turn(
         non_human_wake=state.non_human_wake,
         session_id=session_of(ctx, agent_id, ctx.harness.value),
     )
+    projector.clear_open_turn()
     run = ForegroundRun(ctx, agent_id, bridge, projector, state, event_publisher)
     await settle_stale_interrupts(ctx, agent_id)
 

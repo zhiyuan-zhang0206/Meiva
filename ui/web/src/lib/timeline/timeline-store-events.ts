@@ -27,6 +27,17 @@ export interface LiveCompact {
   finishedAt: string | null;
 }
 
+export function parseTurnStartMs(startedAt: string | null | undefined): number {
+  if (!startedAt) return 0;
+  const parsed = Date.parse(startedAt);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : 0;
+}
+
+export interface ActiveTurnAnchorInput {
+  readonly id?: string | null;
+  readonly startedAt?: string | null;
+}
+
 export interface TimelineState {
   items: BackendTimelineItem[];
   snapshotReady: boolean;
@@ -45,6 +56,8 @@ export interface TimelineState {
   // machine and the browser cannot move the number.
   // meiva:link ui/web/src/docs/frontend-components/timeline-view/deep-collapse.md
   liveAnchorAt: number;
+  activeTurnId: string | null;
+  activeTurnStartedAt: number;
   connectionState: ConnectionState;
   tokenUsage: number;
 
@@ -91,7 +104,12 @@ export interface TimelineState {
 
   processConnectionEvent: (ev: { type: ConnectionState }) => void;
 
-  reloadSnapshot: (snapshot: BackendTimelineItem[], msg_count: number, hasMoreOlder: boolean) => boolean;
+  reloadSnapshot: (
+    snapshot: BackendTimelineItem[],
+    msg_count: number,
+    hasMoreOlder: boolean,
+    activeTurn?: ActiveTurnAnchorInput | null,
+  ) => boolean;
 
   switchThread: (agentId: number | null, cached: BackendTimelineItem[] | null, hasMoreOlder: boolean, buffer?: CompactTransitionBuffer | null) => void;
 
@@ -329,6 +347,25 @@ export function applySseEvent(state: TimelineState, ev: SystemEvent, nowMs = 1):
         resetPending: true,
       };
     }
+    if (ev.role === "turn_started") {
+      const startedMs = parseTurnStartMs(ev.started_at);
+      return {
+        turnActive: true,
+        liveAnchorAt: nowMs,
+        activeTurnId: ev.turn_id,
+        activeTurnStartedAt: startedMs > 0 ? startedMs : nowMs,
+      };
+    }
+    const snapTurnPatch: Partial<TimelineState> =
+      ev.role === "timeline_snapshot" && ev.active_turn_started_at !== undefined
+        ? (() => {
+            const snapAnchorMs = parseTurnStartMs(ev.active_turn_started_at);
+            return {
+              activeTurnId: snapAnchorMs > 0 ? (ev.active_turn_id ?? null) : null,
+              activeTurnStartedAt: snapAnchorMs,
+            };
+          })()
+        : {};
     // The first nonempty compact snapshot replaces the selected segment.
     if (ev.role === "timeline_snapshot") {
       const snapItems = [...ev.items];
@@ -344,7 +381,7 @@ export function applySseEvent(state: TimelineState, ev: SystemEvent, nowMs = 1):
             (it.kind === "system_prompt" && parseItemIdParts(it.item_id)?.rank === 0),
         ) && crossedUnseenCompact(state.items, snapItems);
       if (state.resetPending || crossedCompact) {
-        if (snapItems.length === 0) return {};
+        if (snapItems.length === 0) return snapTurnPatch;
         const epoch = state.compactEpoch + 1;
         return {
           items: snapItems,
@@ -357,6 +394,7 @@ export function applySseEvent(state: TimelineState, ev: SystemEvent, nowMs = 1):
           compactReplaceAgent: ev.agent_id,
           hasMoreOlder: state.hasMoreOlder,
           liveCompact: retireLiveCompact(state.liveCompact, snapItems),
+          ...snapTurnPatch,
         };
       }
     }
@@ -404,6 +442,12 @@ export function applySseEvent(state: TimelineState, ev: SystemEvent, nowMs = 1):
         : preserveLiveAnchor
           ? state.liveAnchorAt
           : nowMs;
+    const turnPatch: Partial<TimelineState> =
+      ev.role === "timeline_snapshot"
+        ? snapTurnPatch
+        : !next.turnActive
+          ? { activeTurnId: null, activeTurnStartedAt: 0 }
+          : {};
     // Unchanged fields keep their references (foldEvent carries them via
     // ...t / no-op reducers), so per-field Zustand selectors short-circuit.
     return {
@@ -414,6 +458,7 @@ export function applySseEvent(state: TimelineState, ev: SystemEvent, nowMs = 1):
       liveAnchorAt: nextLiveAnchorAt,
       hasMoreOlder: next.hasMoreOlder,
       liveCompact: retireLiveCompact(state.liveCompact, next.items),
+      ...turnPatch,
     };
   }
 

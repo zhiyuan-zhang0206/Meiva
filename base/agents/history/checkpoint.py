@@ -50,6 +50,7 @@ from psycopg.rows import DictRow, dict_row
 from psycopg_pool import AsyncConnectionPool
 
 from base.agents.history.checkpoint_serde import STATIC_CHECKPOINT_MSGPACK_TYPES
+from base.agents.history.checkpoint_serializer import CheckpointSerializer
 from base.agents.history.closing_request import (
     METADATA_KEY,
     ClosingRequest,
@@ -57,6 +58,7 @@ from base.agents.history.closing_request import (
     single_segment_history,
 )
 from base.agents.history.delta_read_compat import as_messages, reconstruct_delta_messages
+from base.agents.history.timeline_item import TurnTimingSpan, extract_checkpoint_turn_timing
 from base.api_contracts.reading import (
     NativeReadingSource,
     ReadingDirection,
@@ -199,6 +201,10 @@ class CheckpointTimelineSource:
     checkpoint_id: str | None
     epoch: str
     current: bool
+    turn_timings: tuple[TurnTimingSpan, ...] = ()
+    active_turn_id: str | None = None
+    active_turn_started_at: str | None = None
+    active_turn_start_idx: int | None = None
 
 
 # meiva:note
@@ -215,9 +221,6 @@ def load_checkpoint_timeline_source(
     checkpoint_id: str | None = None,
     advance: ReadingDirection | None = None,
 ) -> CheckpointTimelineSource:
-    from base.agents.history.checkpoint_postgres_walks import HistoryPostgresSaver as PostgresSaver
-    from base.agents.history.checkpoint_serializer import CheckpointSerializer
-
     if locator is not None and checkpoint_id is not None:
         raise ValueError("A checkpoint source requires one selector")
     serde = CheckpointSerializer(allowed_msgpack_modules=STATIC_CHECKPOINT_MSGPACK_TYPES)
@@ -244,18 +247,9 @@ def load_checkpoint_timeline_source(
                 locator, checkpoint_id, boundaries, source_depth, advance
             )
             current = checkpoint_id is None
-            config: RunnableConfig = {"configurable": {"thread_id": str(agent_id)}}
-            if checkpoint_id is not None:
-                config["configurable"]["checkpoint_id"] = checkpoint_id
-            saver = PostgresSaver(conn=conn, serde=serde)
-            value = saver.get_tuple(config)
-            if value is not None:
-                _ = reconstruct_delta_messages(saver, value)
-                messages = _stored_messages(value.checkpoint)
-                if current and str(value.checkpoint["id"]) in boundaries:
-                    checkpoint_id = str(value.checkpoint["id"])
-            else:
-                messages = []
+            messages, channel_values, checkpoint_id = _read_checkpoint_tuple(
+                conn, agent_id, checkpoint_id, boundaries, serde, current=current
+            )
     except (ReadingSourceUnavailableError, CheckpointReadError):
         raise
     except Exception as exc:
@@ -266,12 +260,46 @@ def load_checkpoint_timeline_source(
                 ReadingUnavailableReason.SOURCE, "The retained segment is unavailable"
             )
         messages = messages[1:]
+    timing = extract_checkpoint_turn_timing(
+        channel_values, current=current, index_shift=0 if current else -1
+    )
     return CheckpointTimelineSource(
         tuple(messages),
         boundaries,
         checkpoint_id,
         native_reading_epoch(checkpoint_id, boundaries),
         current,
+        turn_timings=tuple(t for t in timing.timings if isinstance(t, TurnTimingSpan)),
+        active_turn_id=timing.active_turn_id,
+        active_turn_started_at=timing.active_turn_started_at,
+        active_turn_start_idx=timing.active_turn_start_idx,
+    )
+
+
+def _read_checkpoint_tuple(
+    conn: Connection[DictRow],
+    agent_id: int,
+    checkpoint_id: str | None,
+    boundaries: tuple[str, ...],
+    serde: CheckpointSerializer,
+    *,
+    current: bool,
+) -> tuple[list[BaseMessage], dict[str, object], str | None]:
+    from base.agents.history.checkpoint_postgres_walks import HistoryPostgresSaver as PostgresSaver
+
+    config: RunnableConfig = {"configurable": {"thread_id": str(agent_id)}}
+    if checkpoint_id is not None:
+        config["configurable"]["checkpoint_id"] = checkpoint_id
+    value = PostgresSaver(conn=conn, serde=serde).get_tuple(config)
+    if value is None:
+        return [], {}, checkpoint_id
+    _ = reconstruct_delta_messages(PostgresSaver(conn=conn, serde=serde), value)
+    channel_values = dict(object_mapping(value.checkpoint.get("channel_values") or {}))
+    cid = str(value.checkpoint["id"])
+    return (
+        _stored_messages(value.checkpoint),
+        channel_values,
+        cid if current and cid in boundaries else checkpoint_id,
     )
 
 

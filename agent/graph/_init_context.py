@@ -315,6 +315,10 @@ async def init_context_node(
         timeline_inputs=runtime.context.timestamp_policy(),
         timeline_limit=runtime.context.require_agent().read("display", "timeline_default_limit"),
         publish_timeline=runtime.context.harness is Harness.MEIVA,
+        turn_timings=state.turn_timings,
+        active_turn_id=state.active_turn_id if state.turn_active else None,
+        active_turn_started_at=state.active_turn_started_at if state.turn_active else None,
+        active_turn_start_idx=state.active_turn_start_idx if state.turn_active else None,
     ):
         cwd_update = await ValidateCwdAfterInitHook()(state, runtime, config)
         reset = state.context_reset

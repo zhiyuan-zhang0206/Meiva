@@ -36,6 +36,8 @@ export interface TimelineResponse {
   readonly items: BackendTimelineItem[];
   readonly msg_count: number;
   readonly has_more: boolean;
+  readonly active_turn_id?: string | null;
+  readonly active_turn_started_at?: string | null;
 }
 
 export type ConnectionEvent =
@@ -166,11 +168,19 @@ export interface ToUserChangedEvent extends BaseEvent {
   role: "to_user_changed";
 }
 
+export interface TurnStartedEvent extends BaseEvent {
+  readonly role: "turn_started";
+  readonly turn_id: string;
+  readonly started_at: string;
+}
+
 export interface TimelineSnapshotEvent extends BaseEvent {
   readonly role: "timeline_snapshot";
   readonly items: readonly BackendTimelineItem[];
 
   readonly msg_count: number;
+  readonly active_turn_id?: string | null;
+  readonly active_turn_started_at?: string | null;
 }
 
 export type AgentSnapshot = Schemas["AgentRow"];
@@ -232,6 +242,7 @@ export type SystemEvent =
   | TokenUsageEvent
   | LLMKeepaliveEvent
   | LLMDoneEvent
+  | TurnStartedEvent
   | TimelineSnapshotEvent
   | AgentSpawnedEvent
   | AgentUpdatedEvent

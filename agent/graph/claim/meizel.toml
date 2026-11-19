@@ -7,6 +7,7 @@ exports = ["__init__.py", "harness_activity.py", "harness_inbox.py", "harness_re
 "harness_foreground.py" = ["harness_render.py"]
 "harness_inbox.py" = ["harness_foreground.py", "harness_read_sink.py", "harness_render.py"]
 "harness_interrupt.py" = ["harness_read_sink.py"]
+"harness_read_sink.py" = ["harness_activity.py"]
 "harness_render.py" = []
 "harness_run.py" = ["_dispatch.py", "harness_activity.py", "harness_foreground.py", "harness_inbox.py", "harness_read_sink.py", "harness_render.py", "turn_stamp.py"]
 "harness_turn.py" = ["harness_activity.py", "harness_inbox.py", "harness_interrupt.py", "harness_read_sink.py", "harness_run.py", "lost_turn.py"]
