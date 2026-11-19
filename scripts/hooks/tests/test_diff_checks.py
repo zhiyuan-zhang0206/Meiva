@@ -89,14 +89,14 @@ def _run(values: dict[str, str], files: tuple[str, ...]) -> tuple[dict[str, str]
 def test_the_receipt_states_every_field_and_never_prints_a_bare_none() -> None:
 
     values, _ = _run({}, ("docs/readme.md",))
-    receipt = build_receipt(values, "abc123", "def456")
+    receipt = build_receipt(values, "abc123", "def456", failed=False)
 
-    assert receipt.startswith("diff-checks/v1 @abc123 base=def456 "), (
+    assert receipt.startswith("diff-checks/v1 @abc123 base=def456 verdict="), (
         "a receipt without its base cannot be replayed: `selector=` and `debt=` are both "
         "measurements against a baseline the reader would have to guess"
     )
     assert receipt.endswith(" generated=scripts/hooks/diff_checks.py")
-    fields = [part.split("=", 1)[0] for part in receipt.split()[3:-1]]
+    fields = [part.split("=", 1)[0] for part in receipt.split()[4:-1]]
     assert fields == list(FIELD_ORDER), (
         "the field order is the reading order; a new field appended anywhere else moves what a "
         "reviewer sees first"

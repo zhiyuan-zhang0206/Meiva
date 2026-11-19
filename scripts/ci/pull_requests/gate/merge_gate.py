@@ -6,7 +6,7 @@
 # current directory, so a wrapper has to start inside a checkout. It prints the evidence per
 # condition and one verdict line; exit 0 = GO, 1 = NO-GO, and an unreadable check is NO-GO.
 #
-#   1 head    the PR body carries a passing `diff-checks/v1 @<headRefOid>` receipt
+#   1 head    the PR body carries a `diff-checks/v1 @<headRefOid>` receipt stating `verdict=pass`
 #   2 checks  every check run is green (Trunk queue rows ignored; no check run at all = NO-GO)
 #   3 files   the files the PR touches and the files main moved since the PR's base are disjoint,
 #             except the owed-pyright list and the generated pyproject region (`SHARED_ALLOWED`);
@@ -302,8 +302,6 @@ class DiffChecksReceipt(NamedTuple):
 
 _RECEIPT_RE = re.compile(r"diff-checks/v1 @([0-9a-fA-F]+)(?:\s+([^\n`]*))?")
 _PREFLIGHT_PIN_RE = re.compile(r"Preflight on head\s+`?([0-9a-fA-F]{7,40})`?")
-_NONZERO_TEST_RE = re.compile(r"^(\d+)tests$")
-_PYRIGHT_CLOSURE_RE = re.compile(r"\((\d+)in-closure,")
 _RETIRED_TRUNK_MARKER = "PREFLIGHT PASS: /trunk merge is allowed"
 _RECEIPT_GENERATOR = "scripts/hooks/diff_checks.py"
 
@@ -320,55 +318,28 @@ def diff_checks_receipts(body: str) -> list[DiffChecksReceipt]:
     return receipts
 
 
-def _field_failure(key: str, value: str) -> str | None:
-    if value.startswith(("failed(", "unreadable(", "broken(")) or value == "n/a(broken)":
-        return f"diff-checks/v1 receipt on current head is not green ({key}={value})"
-    if key in ("failed", "errors"):
-        match = _NONZERO_TEST_RE.match(value)
-        if match and int(match.group(1)) > 0:
-            return f"diff-checks/v1 receipt on current head reports {key}={value}"
-    if key == "err_in_this_diff" and value.isdigit() and int(value) > 0:
-        return f"diff-checks/v1 receipt on current head reports {key}={value}"
-    if key == "closure" and value == "unknown":
-        return "diff-checks/v1 receipt on current head has closure=unknown"
-    if key == "pyright":
-        closure_match = _PYRIGHT_CLOSURE_RE.search(value)
-        if closure_match and int(closure_match.group(1)) > 0:
-            return (
-                f"diff-checks/v1 receipt on current head reports pyright closure errors ({value})"
-            )
-    return None
-
-
+# meiva:note
+# Condition 1 trusts one field. The producer (`scripts/hooks/diff_checks.py`) computes `verdict=`
+# from every field it prints (`pass`, `fail` or `incomplete`), so the gate does not read the
+# individual fields back: a spelling the producer starts to print can only change the verdict the
+# producer states, never slip past a list kept here. A receipt without `verdict=` comes from an
+# older `diff_checks.py`; it is refused like any other non-pass and asks for a re-run.
 def receipt_failure(receipt: DiffChecksReceipt) -> str | None:
     fields: dict[str, str] = {}
     for token in receipt.tokens:
         key, sep, value = token.partition("=")
         if sep:
             fields[key] = value
-    if not fields.get("base"):
-        return "diff-checks/v1 receipt on current head is missing base="
     if fields.get("generated") != _RECEIPT_GENERATOR:
         return f"diff-checks/v1 receipt on current head is missing generated={_RECEIPT_GENERATOR}"
-    for key, value in fields.items():
-        reason = _field_failure(key, value)
-        if reason is not None:
-            return reason
-    fallback = fields.get("fallback", "")
-    for key in ("selector", "blind"):
-        value = fields.get(key, "")
-        if value.startswith("BLIND("):
-            if not fallback.startswith("RAN("):
-                return (
-                    "diff-checks/v1 receipt on current head has blind selection without fallback "
-                    f"({key}={value})"
-                )
-            if fields.get("failed") != "0tests" or fields.get("errors") != "0tests":
-                return (
-                    "diff-checks/v1 receipt on current head has blind fallback without clean test "
-                    f"counts (failed={fields.get('failed', 'missing')}, "
-                    f"errors={fields.get('errors', 'missing')})"
-                )
+    verdict = fields.get("verdict")
+    if verdict is None:
+        return (
+            "diff-checks/v1 receipt on current head has no verdict= "
+            "(produced by an older diff_checks.py: rebase on main and re-run it)"
+        )
+    if verdict != "pass":
+        return f"diff-checks/v1 receipt on current head reports verdict={verdict}"
     return None
 
 
