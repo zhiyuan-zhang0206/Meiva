@@ -109,6 +109,7 @@ def test_dashboard_empty_db_returns_zeros(db_conn: psycopg.Connection) -> None:
     assert body["subscription_cost_usd"] == 0
     assert body["openai_cost_usd"] == 0
     assert body["anthropic_cost_usd"] == 0
+    assert body["google_cost_usd"] == 0
     assert "avg_turn_seconds" not in body
     assert body["warnings"] == 0
     assert body["errors"] == 0
@@ -320,6 +321,7 @@ def test_dashboard_cost_uses_usage_time_snapshots(
     assert body["cost_usd"] == pytest.approx(37.25)  # pyright: ignore[reportUnknownMemberType]
     assert math.isclose(body["openai_cost_usd"], 0.0)
     assert math.isclose(body["anthropic_cost_usd"], 30.0)
+    assert math.isclose(body["google_cost_usd"], 0.0)
 
 
 def test_dashboard_provider_api_costs_exclude_subscription_harnesses(
@@ -378,6 +380,35 @@ def test_dashboard_provider_api_costs_exclude_subscription_harnesses(
     event_rows.add(
         event="llm_usage",
         payload={
+            "model": "gemini-decision-1",
+            "source": "skill_recall",
+            "in_total": 800,
+            "out_total": 0,
+            "cost_usd": 1.15,
+        },
+    )
+    event_rows.add(
+        event="llm_usage",
+        payload={
+            "model": "gemini-embedding-2",
+            "in_total": 200,
+            "out_total": 0,
+            "cost_usd": 0.1,
+        },
+    )
+    event_rows.add(
+        event="llm_usage",
+        payload={
+            "model": "gemini-4-hydrogen",
+            "source": "antigravity",
+            "in_total": 4000,
+            "out_total": 1000,
+            "cost_usd": 11.0,
+        },
+    )
+    event_rows.add(
+        event="llm_usage",
+        payload={
             "model": "deepseek-flash",
             "in_total": 500,
             "out_total": 200,
@@ -387,16 +418,18 @@ def test_dashboard_provider_api_costs_exclude_subscription_harnesses(
     db_conn.commit()
     with gateway_test_client() as client:
         body = client.get("/api/stats/dashboard").json()
-    assert body["tokens"]["input"] == 8400
-    assert body["tokens"]["output"] == 3000
-    assert math.isclose(body["cost_usd"], 21.0)
+    assert body["tokens"]["input"] == 13400
+    assert body["tokens"]["output"] == 4000
+    assert math.isclose(body["cost_usd"], 22.25)
     # meiva:note
-    # codex 9.0 + claude_code 14.0: the same rows' subscription half, kept apart from the metered
-    # API sum and its vendor slices rather than folded into or dropped from them.
+    # codex 9.0 + claude_code 14.0 + antigravity 11.0: the same rows' subscription half, kept apart
+    # from the metered API sum and its vendor slices (including google_cost_usd) rather than folded
+    # into or dropped from them.
     # meiva:link gateway/cluster/docs/ops-surfaces.md
-    assert math.isclose(body["subscription_cost_usd"], 23.0)
+    assert math.isclose(body["subscription_cost_usd"], 34.0)
     assert math.isclose(body["openai_cost_usd"], 12.75)
     assert math.isclose(body["anthropic_cost_usd"], 6.75)
+    assert math.isclose(body["google_cost_usd"], 1.25)
 
 
 # meiva:note
@@ -507,6 +540,14 @@ def test_dashboard_audit_warning_not_counted(
     assert body["errors"] == 0
 
 
+def _assert_provider_costs(
+    body: dict[str, float], *, openai: float, anthropic: float, google: float
+) -> None:
+    assert math.isclose(body["openai_cost_usd"], openai)
+    assert math.isclose(body["anthropic_cost_usd"], anthropic)
+    assert math.isclose(body["google_cost_usd"], google)
+
+
 # meiva:note
 # The 3-hour-old warning below sits inside the 6-hour window and still reads resolved: the window
 # says where to look, the quiet rule says what still needs attention.
@@ -548,15 +589,13 @@ def test_dashboard_hours_param_selects_window(
     assert narrow["tokens"]["input"] == 10
     assert narrow["tokens"]["output"] == 5
     assert narrow["warnings"] == 0
-    assert math.isclose(narrow["openai_cost_usd"], 0.0)
-    assert math.isclose(narrow["anthropic_cost_usd"], 0.1)
+    _assert_provider_costs(narrow, openai=0.0, anthropic=0.1, google=0.0)
     assert wide["window_hours"] == 6
     assert wide["tokens"]["input"] == 110
     assert wide["tokens"]["output"] == 55
     assert wide["warnings"] == 0
     assert wide["warnings_resolved"] == 1
-    assert math.isclose(wide["openai_cost_usd"], 1.0)
-    assert math.isclose(wide["anthropic_cost_usd"], 0.1)
+    _assert_provider_costs(wide, openai=1.0, anthropic=0.1, google=0.0)
 
 
 def test_five_minute_window_delta() -> None:

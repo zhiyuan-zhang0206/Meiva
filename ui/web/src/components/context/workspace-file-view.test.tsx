@@ -1,4 +1,4 @@
-import { cleanup, fireEvent, screen, waitFor } from "@testing-library/react";
+import { cleanup, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { afterEach, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import type { ReactNode } from "react";
@@ -100,7 +100,26 @@ describe("WorkspaceFileView", () => {
     expect(screen.getByText("Important")).toBeTruthy();
   });
 
-  it("renders images through ZoomableImage using raw media url", async () => {
+  it("hides the top refresh button while loading and shows spinner only in content", () => {
+    transport.getWorkspaceFile.mockImplementation(() => new Promise<never>(() => undefined));
+
+    renderWithBrowser(
+      <WorkspaceFileView
+        agentId={1}
+        target={{ agentId: 1, path: "assets/logo.png" }}
+        mobile={false}
+      />,
+      { wrapper: TestWrapper },
+    );
+
+    const bar = screen.getByTestId("workspace-file-bar");
+    expect(within(bar).queryByRole("button", { name: "Refresh" })).toBeNull();
+    expect(bar.querySelector(".animate-spin")).toBeNull();
+    const spinner = screen.getByRole("status", { name: "Loading…" });
+    expect(bar.contains(spinner)).toBe(false);
+  });
+
+  it("renders images through ZoomableImage using raw media url without duplicate footer metadata or spinning refresh", async () => {
     transport.getWorkspaceFile.mockResolvedValue({
       path: "assets/logo.png",
       name: "logo.png",
@@ -124,9 +143,22 @@ describe("WorkspaceFileView", () => {
       const img = screen.getByRole("img", { name: "logo.png" });
       expect(img.getAttribute("src")).toContain("/api/agents/1/files/raw?path=assets%2Flogo.png");
     });
+
+    const bar = screen.getByTestId("workspace-file-bar");
+    expect(within(bar).getByText("logo.png")).toBeTruthy();
+    expect(within(bar).getByText("(100 B)")).toBeTruthy();
+    expect(screen.getAllByText(/logo\.png/)).toHaveLength(1);
+    expect(screen.queryByText("logo.png (100 B)")).toBeNull();
+
+    const refreshBtn = within(bar).getByRole<HTMLButtonElement>("button", { name: "Refresh" });
+    expect(refreshBtn.querySelector(".animate-spin")).toBeNull();
+    transport.getWorkspaceFile.mockImplementation(() => new Promise<never>(() => undefined));
+    fireEvent.click(refreshBtn);
+    await waitFor(() => expect(refreshBtn.disabled).toBe(true));
+    expect(refreshBtn.querySelector(".animate-spin")).toBeNull();
   });
 
-  it("renders video files using video player with raw media url", async () => {
+  it("renders video files using video player with raw media url without duplicate footer metadata", async () => {
     transport.getWorkspaceFile.mockResolvedValue({
       path: "media/demo.mp4",
       name: "demo.mp4",
@@ -150,6 +182,12 @@ describe("WorkspaceFileView", () => {
       const video = screen.getByTestId("workspace-video-player");
       expect(video.getAttribute("src")).toContain("/api/agents/1/files/raw?path=media%2Fdemo.mp4");
     });
+
+    const bar = screen.getByTestId("workspace-file-bar");
+    expect(within(bar).getByText("demo.mp4")).toBeTruthy();
+    expect(within(bar).getByText("(10.0 KB)")).toBeTruthy();
+    expect(screen.getAllByText(/demo\.mp4/)).toHaveLength(1);
+    expect(screen.queryByText("demo.mp4 (10.0 KB)")).toBeNull();
   });
 
   it.each([".html", ".htm"])("renders %s files as source code", async (extension) => {

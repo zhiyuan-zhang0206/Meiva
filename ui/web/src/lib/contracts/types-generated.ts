@@ -4009,6 +4009,7 @@ export interface components {
             subscription_cost_usd: number;
             openai_cost_usd?: number | null;
             anthropic_cost_usd?: number | null;
+            google_cost_usd?: number | null;
             warnings: number;
             errors: number;
             warnings_resolved: number;
