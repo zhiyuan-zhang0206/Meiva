@@ -3,6 +3,7 @@
 import { FileText, RotateCcw } from "lucide-react";
 import { useTranslations } from "next-intl";
 
+import { ZoomableImage } from "@/components/content/zoomable-image";
 import { type SlashAutocompleteHandle } from "@/components/conversation/slash-autocomplete";
 import type { DeliveredUploadStatus } from "@/lib/contracts/types";
 import { cn, formatFileSize } from "@/lib/format/utils";
@@ -113,17 +114,15 @@ export function ComposerAttachmentStrip({
           className="relative"
         >
           {att.previewUrl ? (
-            <picture>
-              <img
-                src={att.previewUrl}
-                alt={att.name}
-                className={cn(
-                  "h-14 w-14 rounded border border-border object-cover",
-                  att.status === "uploading" && "opacity-50",
-                  att.status === "error" && "ring-1 ring-destructive",
-                )}
-              />
-            </picture>
+            <ZoomableImage
+              src={att.previewUrl}
+              alt={att.name}
+              className={cn(
+                "h-14 w-14 rounded border border-border object-cover",
+                att.status === "uploading" && "opacity-50",
+                att.status === "error" && "ring-1 ring-destructive",
+              )}
+            />
           ) : (
             <div
               className={cn(
@@ -143,7 +142,7 @@ export function ComposerAttachmentStrip({
           {att.status !== "ready" ? (
             <span
               className={cn(
-                "absolute inset-0 items-center justify-center rounded bg-background/60 text-[10px] font-medium",
+                "pointer-events-none absolute inset-0 items-center justify-center rounded bg-background/60 text-[10px] font-medium",
                 att.status === "error" ? "text-destructive" : "text-muted-foreground",
                 FLEX,
               )}

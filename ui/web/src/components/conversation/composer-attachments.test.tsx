@@ -359,6 +359,49 @@ describe("Composer unified staged attachments & batch delivery", () => {
     expect(screen.getByText("notes.txt")).toBeTruthy();
     expect(screen.queryByTestId("composer-held-batch")).toBeNull();
   });
+
+  it("renders pasted images with ZoomableImage, opens/closes lightbox, and removes without opening lightbox", async () => {
+    let resolveUpload!: (file: StagedFile) => void;
+    transport.stageUploadFile.mockImplementation(
+      () => new Promise<StagedFile>((r) => { resolveUpload = r; }),
+    );
+    renderComposerTree(<Composer {...baseProps} mode="idle" agentId={7} />);
+    const ta = screen.getByTestId("composer-input");
+    fireEvent.paste(ta, { clipboardData: { files: [imageFile()], types: ["Files"] } });
+
+    const zoomTrigger = await screen.findByTestId("zoomable-image");
+    expect(zoomTrigger.className).toContain("cursor-zoom-in");
+    const overlay = screen.getByText("0%");
+    expect(overlay.className).toContain("pointer-events-none");
+
+    act(() => {
+      resolveUpload({
+        file_id: stagedId1,
+        name: "shot.png",
+        size: 3,
+        content_type: "image/png",
+        sha256: sha,
+      });
+    });
+    await waitFor(() =>
+      expect(screen.getByTestId("composer-attachment-card").getAttribute("data-status")).toBe("ready"),
+    );
+
+    fireEvent.click(zoomTrigger);
+    expect(screen.getByTestId("image-lightbox")).toBeTruthy();
+
+    fireEvent.keyDown(window, { key: "Escape" });
+    expect(screen.queryByTestId("image-lightbox")).toBeNull();
+
+    fireEvent.click(zoomTrigger);
+    expect(screen.getByTestId("image-lightbox")).toBeTruthy();
+    fireEvent.click(screen.getByTestId("image-lightbox-close"));
+    expect(screen.queryByTestId("image-lightbox")).toBeNull();
+
+    fireEvent.click(screen.getByRole("button", { name: "Remove shot.png" }));
+    await waitFor(() => expect(screen.queryByTestId("composer-attachment-card")).toBeNull());
+    expect(screen.queryByTestId("image-lightbox")).toBeNull();
+  });
 });
 
 describe("Composer sessionStorage draft persistence", () => {
