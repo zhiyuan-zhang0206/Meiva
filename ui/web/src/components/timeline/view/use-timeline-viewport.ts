@@ -366,6 +366,7 @@ export function useTimelineViewport({
       interruptJump();
       cancelPendingReloadRestore();
       holdRestoredPositionRef.current = false;
+      pendingRestoreRef.current = null;
     });
 
     const onWheel = (e: WheelEvent) => {

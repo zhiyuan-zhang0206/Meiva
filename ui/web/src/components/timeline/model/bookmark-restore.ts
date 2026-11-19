@@ -62,6 +62,7 @@ export function applyBookmarkRestore({
   if (threadKey === undefined) return;
   if (saved.contentKey !== threadKey) {
     state.pending.current = null;
+    state.settled.current = null;
     state.hold.current = false;
     return;
   }
@@ -89,9 +90,10 @@ export function applyBookmarkRestore({
   } else {
     controller.notifyAnchored(snapshot(viewport));
   }
+  const needsSettle = !saved.followBottom && Boolean(saved.anchor);
   state.pending.current = null;
-  state.settled.current = saved.anchor ? saved : null;
-  if (!saved.anchor) state.hold.current = false;
+  state.settled.current = needsSettle ? saved : null;
+  if (!needsSettle) state.hold.current = false;
 }
 
 interface SettleArgs {
@@ -108,8 +110,13 @@ export function settleRestoredPosition({
 }: SettleArgs): void {
   const saved = state.settled.current;
   if (!saved || !viewport) return;
-  if (state.pending.current !== null || !state.hold.current || threadKey === undefined || saved.contentKey !== threadKey) {
+  if (state.pending.current !== null || !state.hold.current) {
     state.settled.current = null;
+    return;
+  }
+  if (threadKey === undefined || saved.contentKey !== threadKey) {
+    state.settled.current = null;
+    state.hold.current = false;
     return;
   }
   if (layoutChanged && settleSavedTimelineScroll(viewport, saved, compactBuffer, canonicalItems)) {
@@ -256,6 +263,7 @@ export function useReloadBookmarkRestore({
   settledRef,
   holdRef,
   probeRef,
+  matchedAppliedSeqRef,
   pendingAnchorRef,
   viewportRef,
   wrapperRef,
@@ -278,6 +286,7 @@ export function useReloadBookmarkRestore({
   settledRef: RefObject<SavedScroll | null>;
   holdRef: RefObject<boolean>;
   probeRef: RefObject<{ height: number; passes: number }>;
+  matchedAppliedSeqRef: RefObject<number>;
   pendingAnchorRef: RefObject<{ id: string; rank: number; frontId: string | null; docTop: number } | null>;
   viewportRef: RefObject<HTMLElement | null>;
   wrapperRef: RefObject<HTMLDivElement | null>;
@@ -447,7 +456,7 @@ export function useReloadBookmarkRestore({
       pendingAnchorRef.current = null;
     }
     setPhase((prev) =>
-      prev.kind === "waiting_settings" || prev.kind === "searching"
+      prev.kind === "waiting_settings" || prev.kind === "searching" || prev.kind === "matched"
         ? { kind: "idle", threadKey: prev.threadKey, seq: prev.seq + 1 }
         : prev,
     );
@@ -511,6 +520,7 @@ export function useReloadBookmarkRestore({
     }
     if (phase.kind === "matched") {
       appliedSeqRef.current = phase.seq;
+      matchedAppliedSeqRef.current = phase.seq;
       pendingRef.current = phase.saved;
       settledRef.current = null;
       holdRef.current = true;
@@ -541,6 +551,7 @@ export function useReloadBookmarkRestore({
     }
   }, [
     holdRef,
+    matchedAppliedSeqRef,
     pendingAnchorRef,
     pendingRef,
     phase,
@@ -570,19 +581,20 @@ export function useReloadBookmarkRestore({
     phase.kind === "searching" ||
     phase.kind === "matched";
   const activeSavedScroll =
+    phase.kind === "searching"
+      ? reloadBookmarkToSavedScroll(phase.threadKey, phase.bookmark)
+      : null;
+  const matchedRestore =
     phase.kind === "matched"
-      ? phase.saved
-      : phase.kind === "searching"
-        ? reloadBookmarkToSavedScroll(phase.threadKey, phase.bookmark)
-        : inMemorySaved !== null && inMemorySaved.contentKey === threadKey
-          ? inMemorySaved
-          : null;
+      ? { seq: phase.seq, saved: phase.saved }
+      : null;
 
   return {
     reloadBlocking,
     reloadSearchingOlder,
     hasSavedPosition,
     activeSavedScroll,
+    matchedRestore,
     cancelReloadSearch,
   };
 }
