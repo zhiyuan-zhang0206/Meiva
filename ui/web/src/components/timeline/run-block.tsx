@@ -13,7 +13,7 @@ import { Layers } from "lucide-react";
 import { useTranslations } from "next-intl";
 import { memo, type ReactNode } from "react";
 
-import { formatDuration, type SdkCall } from "@/lib/format/item-summary";
+import { formatWholeSecondsDuration, type SdkCall } from "@/lib/format/item-summary";
 import { cn } from "@/lib/format/utils";
 import {
   BAR_STICKY_TOP_CLASS,
@@ -137,14 +137,17 @@ export const TurnBlock = memo(function TurnBlock({
   const totalWorkedMs = baseWorkedMs + liveDelta;
 
   const hasWork = summary.thinking > 0 || summary.code > 0 || summary.output > 0;
-  const hasLiveTimer =
-    (summary.lastLiveKind !== null && summary.lastLiveStartedAt > 0) || liveAnchor > 0;
+  const liveDuration = turnActive ? formatWholeSecondsDuration(totalWorkedMs) : null;
+  const settledDuration =
+    !turnActive && hasWork ? formatWholeSecondsDuration(summary.workedMs) : null;
   const measuredLabel = turnActive
-    ? totalWorkedMs > 0 || hasWork || hasLiveTimer
-      ? t("workingFor", { duration: formatDuration(totalWorkedMs, { wholeSeconds: true }) })
+    ? liveDuration !== null
+      ? t("workingFor", { duration: liveDuration })
       : t("working")
     : hasWork
-      ? t("workedFor", { duration: formatDuration(summary.workedMs) })
+      ? settledDuration !== null
+        ? t("workedFor", { duration: settledDuration })
+        : t("worked")
       : t("workActivity");
 
   const timingIncomplete = useAuthoritativeTurnClock ? false : hasWork && summary.missingTiming;
@@ -250,10 +253,11 @@ export const PendingLiveActivityWindow = memo(function PendingLiveActivityWindow
   const titleRef = useSyncedShimmer(true);
   const hasAnchor = startedAt > 0;
   const liveNow = useNow(hasAnchor);
-  const label = hasAnchor
-    ? t("workingFor", {
-        duration: formatDuration(Math.max(liveNow - startedAt, 0), { wholeSeconds: true }),
-      })
+  const liveDuration = hasAnchor
+    ? formatWholeSecondsDuration(Math.max(liveNow - startedAt, 0))
+    : null;
+  const label = liveDuration !== null
+    ? t("workingFor", { duration: liveDuration })
     : t("working");
   return (
     <div

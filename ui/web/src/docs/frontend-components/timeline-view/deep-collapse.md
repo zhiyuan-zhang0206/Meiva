@@ -32,12 +32,12 @@ The turn header's timer reads one basis — `summarizeTurn.workedMs`, the sum of
 the turn's block durations, which a turn that spans an idle gap (a restart, a
 wake-up the agent had not picked up yet) must not inflate — plus one live
 stretch. The active `TurnBlock` header ("Working for Xs" / "Working…") displays
-`totalWorkedMs` and settles into "Worked for Xs" when the turn completes. Active
-"Working for Xs" headers (`PendingLiveActivityWindow` with an active turn
-anchor and `turnActive` `TurnBlock`s) format elapsed time in whole seconds
-(`formatDuration(..., { wholeSeconds: true })`: `0s`, `1s`, ..., `1m 12s`),
-keeping sub-second precision only for settled `Worked for` / detail chips. Both
-`PendingLiveActivityWindow` and active (`turnActive`) `TurnBlock` title spans
+`totalWorkedMs` and settles into "Worked" / "Worked for Xs" when the turn
+completes. Both active ("Working…" / "Working for Xs") and settled
+("Worked" / "Worked for Xs") `TurnBlock` and `PendingLiveActivityWindow` headers
+omit durations below `1s` (`formatWholeSecondsDuration`: `null` below `1s`, then
+`1s`, `2s`, ..., `1m 12s`), keeping sub-second precision only for detail chips.
+Both `PendingLiveActivityWindow` and active (`turnActive`) `TurnBlock` title spans
 share the sidebar's Silver Glint sweep (`.timeline-title-working` sharing
 `.agent-title-working` / `agent-title-sweep` and locking `startTime = 0` via
 `useSyncedShimmer`), staying in phase across the handoff and settling back to

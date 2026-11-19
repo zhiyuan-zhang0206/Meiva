@@ -94,7 +94,7 @@ describe("TurnBlock missing timing", () => {
 
   it.each([0, 6000])("retains the complete duration %i", (workedMs) => {
     render(<TurnBlock id="complete" memberIds={["1"]} expanded={false} onToggle={vi.fn()} summary={{ ...baseSummary, workedMs }} />);
-    expect(screen.getByTestId("turn-toggle").textContent).toBe(`Worked for ${workedMs === 0 ? "0.1s" : "6s"}`);
+    expect(screen.getByTestId("turn-toggle").textContent).toBe(workedMs === 0 ? "Worked" : "Worked for 6s");
     expect(screen.queryByRole("img")).toBeNull();
   });
 });

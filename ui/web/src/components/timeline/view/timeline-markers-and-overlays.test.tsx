@@ -81,7 +81,7 @@ describe("ItemView: system_marker → ephemeral by payload", () => {
     );
     expect(screen.queryByText(/Cancellation requested/)).toBeNull();
     expect(screen.queryByTestId("marker-unrecognized")).toBeNull();
-    expect(screen.getAllByText(/Worked for/)).toHaveLength(1);
+    expect(screen.getAllByText(/^Worked$/)).toHaveLength(1);
   });
   it("payload='compact_request:<content>' → no visible marker (internal event)", () => {
     render(
