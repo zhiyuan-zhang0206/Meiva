@@ -214,3 +214,59 @@ async def test_external_harness_output_stages_and_replaces_the_unread_notificati
     assert db_conn.execute(
         "SELECT action, body FROM notification_events WHERE agent_id=%s ORDER BY id", (agent_id,)
     ).fetchall() == [("alert", "first"), ("replace", "second")]
+
+
+async def test_native_pre_tool_display_reply_streams_and_publishes_before_tool_exec(
+    db_conn: psycopg.Connection,
+    aops_pool: AsyncConnectionPool,
+    database_gate: ProcessDbGate,
+    hosted_resources: HostedTurnResources,
+    live_events: LiveEvents,
+) -> None:
+    agent_id = create_agent(db_conn)
+    model = ScriptedModel(
+        scripts=[
+            [
+                AIMessageChunk(
+                    content="MEIVA_DISPLAY_TO_USER\nChecking now.",
+                    response_metadata={"model_provider": "anthropic"},
+                ),
+                AIMessageChunk(
+                    content="",
+                    tool_call_chunks=[
+                        {
+                            "name": "execute_code",
+                            "args": '{"code": "print(1)"}',
+                            "id": "call_pre_1",
+                            "index": 0,
+                        }
+                    ],
+                    response_metadata={"model_provider": "anthropic", "stop_reason": "tool_use"},
+                    usage_metadata={"input_tokens": 1, "output_tokens": 2, "total_tokens": 3},
+                ),
+            ]
+        ]
+    )
+    runtime = make_runtime(
+        resources=hosted_resources,
+        llm=model,
+        event_publisher=live_events.publisher,
+        database_gate=database_gate,
+        pins={"user_delivery_mode": "prefix", "fast_acknowledgement": True},
+        ops_pool=aops_pool,
+    )
+    result = await llm_node(
+        AgentState(messages=[HumanMessage(content="Run a slow check")]),
+        runtime,
+        {"configurable": {"thread_id": str(agent_id)}},
+        rng=seeded_rng(),
+    )
+    assert result.goto == "exec"
+    roles = [event.get("role") for event in await live_events.events()]
+    assert "chat_start" in roles and "chat_delta" in roles and "llm_done" in roles
+    assert db_conn.execute(
+        "SELECT mode, content FROM agent_publications WHERE agent_id=%s", (agent_id,)
+    ).fetchall() == [("prefix", "Checking now.")]
+    assert db_conn.execute(
+        "SELECT action, tag, body FROM notification_events WHERE agent_id=%s", (agent_id,)
+    ).fetchall() == [("alert", f"unread:{agent_id}", "Checking now.")]

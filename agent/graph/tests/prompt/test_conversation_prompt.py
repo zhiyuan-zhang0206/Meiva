@@ -1,6 +1,4 @@
-import json
 import os
-from pathlib import Path
 from typing import Any, cast
 
 import pytest
@@ -37,10 +35,14 @@ def _inputs(slices: AgentSlices, *, harness: Harness | None = None) -> SectionIn
     )
 
 
+@pytest.mark.parametrize("fast_acknowledgement", [False, True])
 @pytest.mark.parametrize("style", ["off", "oriented", "concise", "silent"])
-def test_initial_human_response_is_present_without_plugins(style: str) -> None:
+def test_initial_human_response_is_present_without_plugins(
+    style: str, fast_acknowledgement: bool
+) -> None:
     slices = _slices(
-        agent__agent_communication_style=style, agent__prompt_opening_reply_enabled=True
+        agent__agent_communication_style=style,
+        agent__fast_acknowledgement=fast_acknowledgement,
     )
 
     prompt = build_system_prompt(
@@ -53,19 +55,18 @@ def test_initial_human_response_is_present_without_plugins(style: str) -> None:
     )
 
     assert prompt.count(user_reply_section(_inputs(slices))) == 1
-    assert (
-        "If you can answer directly, give the answer without calling "
-        "`execute_code`; no separate acknowledgment is needed. Whenever your first "
-        "turn on a human request calls `execute_code` — even for a single quick "
-        "check — include a brief, substantive 1-2 sentence reply in that same first "
-        "response before the first tool call"
-    ) in prompt
-    assert "Never emit a tool-only first turn with empty assistant text" in prompt
+    assert "no separate acknowledgment is needed. Do the work and deliver the result" in prompt
+    assert "## Fast acknowledgement" in prompt
     assert "deliver the result in that conversation" in prompt
     assert "Peer messages, watcher events, scheduled wakes and system notes" in prompt
     assert "do not require courtesy replies" in prompt
     if style == "silent":
-        assert "Work without narrating after the required initial reply" in prompt
+        expected = (
+            "Work without narrating after any opening confirmation"
+            if fast_acknowledgement
+            else "Work without narrating. While a task"
+        )
+        assert expected in prompt
         assert "Silence here costs the user nothing" not in prompt
     if style != "off":
         assert "Ordinary information creates no question or notification" in prompt
@@ -104,7 +105,6 @@ def communication_prompt(request: pytest.FixtureRequest) -> tuple[str, str]:
     slices = _slices(
         agent__agent_communication_style=style,
         agent__prompt_output_conciseness_enabled=output_shape,
-        agent__prompt_opening_reply_enabled=True,
     )
 
     return style, build_system_prompt(
@@ -150,7 +150,7 @@ def test_milestone_policy_preserves_results_and_questions(
 
     assert "meaningful milestones for the user: a usable result" in prompt
     assert "Completing an internal step or ending a turn is not itself a milestone" in prompt
-    assert "call `execute_code` with no accompanying assistant text on intermediate turns" in prompt
+    assert "Call `execute_code` with no accompanying assistant text on intermediate turns" in prompt
     assert "Do not narrate routine tool calls, retries, file reads, internal bookkeeping" in prompt
     assert "There is no fixed reporting cadence" in prompt
     assert "without a tool-call preamble or trailing introduction" in prompt
@@ -200,8 +200,7 @@ def test_naive_prompt_keeps_plain_assistant_delivery() -> None:
     assert DISPLAY_TO_USER not in text and HIDE_FROM_USER not in text
 
 
-_GOLDEN = json.loads((Path(__file__).parent / "opening_reply_golden.json").read_text())
-_OPENING_REPLY_PHRASES = (
+_RETIRED_OPENING_REPLY_PHRASES = (
     "Whenever your first",
     "Never emit a tool-only first turn",
     "Do not leave the user waiting silently",
@@ -215,9 +214,9 @@ _OPENING_REPLY_PHRASES = (
 )
 
 
-def _rendered(mode: str, *, opening_reply: bool) -> dict[str, str]:
+def _rendered(mode: str, *, fast_acknowledgement: bool) -> dict[str, str]:
     slices = _slices(
-        agent__user_delivery_mode=mode, agent__prompt_opening_reply_enabled=opening_reply
+        agent__user_delivery_mode=mode, agent__fast_acknowledgement=fast_acknowledgement
     )
     inputs = _inputs(slices)
     rendered = {
@@ -226,69 +225,69 @@ def _rendered(mode: str, *, opening_reply: bool) -> dict[str, str]:
     }
     for style in ("oriented", "concise", "silent"):
         rendered[f"style/{style}/{mode}"] = delivery_style_prompt(
-            mode, style, opening_reply=opening_reply
+            mode, style, fast_acknowledgement=fast_acknowledgement
         )
     return rendered
 
 
-@pytest.mark.parametrize("mode", ["prefix", "sdk", "naive"])
-def test_opening_reply_on_renders_reviewed_delivery_prompt(mode: str) -> None:
-    for key, text in _rendered(mode, opening_reply=True).items():
-        assert text == _GOLDEN[key], key
+@pytest.mark.parametrize("fast_acknowledgement", [False, True])
+@pytest.mark.parametrize("mode", ["prefix", "naive"])
+def test_retired_opening_reply_phrases_absent_in_text_modes(
+    mode: str, fast_acknowledgement: bool
+) -> None:
+    rendered = _rendered(mode, fast_acknowledgement=fast_acknowledgement)
+    for key, text in rendered.items():
+        assert not any(phrase in text for phrase in _RETIRED_OPENING_REPLY_PHRASES), key
+    native = rendered[f"native/{mode}"]
+    assert "no separate acknowledgment is needed. Do the work and deliver the result" in native
+    assert "Each mid-task progress update must stand alone" in native
+    assert "Call `execute_code` with no accompanying" in native
+    assert "Direct answers, necessary questions and complete final deliverables" in native
+    assert "respond promptly" in native
 
 
-@pytest.mark.parametrize("mode", ["prefix", "sdk", "naive"])
-def test_opening_reply_off_is_default_and_drops_only_that_rule(mode: str) -> None:
-    default = {
-        f"native/{mode}": user_reply_section(_inputs(_slices(agent__user_delivery_mode=mode))),
-        f"harness/{mode}": harness_user_reply_section(
-            _inputs(_slices(agent__user_delivery_mode=mode))
-        ),
-    }
-    off = _rendered(mode, opening_reply=False)
-    for key, text in default.items():
-        assert text == off[key]
-    for key, text in off.items():
-        assert not any(phrase in text for phrase in _OPENING_REPLY_PHRASES), key
-    if mode != "sdk":
-        native = off[f"native/{mode}"]
-        assert "no separate acknowledgment is needed. Do the work and deliver the result" in native
-        assert "Each mid-task progress update must stand alone" in native
-        assert "Call `execute_code` with no accompanying" in native
-        assert "Direct answers, necessary questions and complete final deliverables" in native
-        assert "respond promptly" in native
-        assert "Work without narrating. While a task" in off[f"style/silent/{mode}"]
-    else:
-        assert "Publish only information that passes the user-attention test" in off["native/sdk"]
+@pytest.mark.parametrize("fast_acknowledgement", [False, True])
+def test_retired_opening_reply_phrases_absent_in_sdk_mode(fast_acknowledgement: bool) -> None:
+    rendered = _rendered("sdk", fast_acknowledgement=fast_acknowledgement)
+    for key, text in rendered.items():
+        assert not any(phrase in text for phrase in _RETIRED_OPENING_REPLY_PHRASES), key
+    assert "Publish only information that passes the user-attention test" in rendered["native/sdk"]
 
 
-@pytest.mark.parametrize("opening_reply", [False, True])
-def test_attention_policy_is_shared_across_delivery_modes_and_callers(opening_reply: bool) -> None:
+@pytest.mark.parametrize("fast_acknowledgement", [False, True])
+def test_attention_policy_is_shared_across_delivery_modes_and_callers(
+    fast_acknowledgement: bool,
+) -> None:
     sections = [
         text.split("## User attention\n\n", 1)[1].split("\n\n#", 1)[0]
         for mode in ("prefix", "sdk", "naive")
-        for key, text in _rendered(mode, opening_reply=opening_reply).items()
+        for key, text in _rendered(mode, fast_acknowledgement=fast_acknowledgement).items()
         if key.startswith(("native/", "harness/"))
     ]
     assert len(sections) == 6
     assert all(section == sections[0] for section in sections)
-    for mode in ("prefix", "sdk", "naive"):
-        for key, text in _rendered(mode, opening_reply=opening_reply).items():
-            if key.startswith(("native/", "harness/")):
-                assert text.index("## User attention") > text.index(
-                    "## Output visibility"
-                    if mode == "prefix"
-                    else "# User delivery"
-                    if mode == "sdk"
-                    else "## Delivery mechanics"
-                )
+    headers = {
+        "prefix": "## Output visibility",
+        "sdk": "# User delivery",
+        "naive": "## Delivery mechanics",
+    }
+    for mode, header in headers.items():
+        rendered = _rendered(mode, fast_acknowledgement=fast_acknowledgement)
+        for prefix in ("native", "harness"):
+            text = rendered[f"{prefix}/{mode}"]
+            assert text.index("## User attention") > text.index(header)
 
 
-def test_claude_code_handoff_appends_visibility_why_only_in_prefix_mode() -> None:
+@pytest.mark.parametrize("fast_acknowledgement", [False, True])
+def test_claude_code_handoff_appends_visibility_why_only_in_prefix_mode(
+    fast_acknowledgement: bool,
+) -> None:
     prefix_slices = _slices(
-        agent__user_delivery_mode="prefix", agent__prompt_opening_reply_enabled=True
+        agent__user_delivery_mode="prefix", agent__fast_acknowledgement=fast_acknowledgement
     )
     claude_text = harness_user_reply_section(_inputs(prefix_slices, harness=Harness.CLAUDE_CODE))
+    baseline_harness = harness_user_reply_section(_inputs(prefix_slices))
+    baseline_native = user_reply_section(_inputs(prefix_slices))
     visibility_block = claude_text.split("## Output visibility\n\n", 1)[1].split(
         "\n\n## User attention", 1
     )[0]
@@ -302,27 +301,22 @@ def test_claude_code_handoff_appends_visibility_why_only_in_prefix_mode() -> Non
     assert "MEIVA_DISPLAY_TO_USER" in visibility_block
     assert (
         claude_text.split("## User attention\n\n", 1)[1]
-        == _GOLDEN["harness/prefix"].split("## User attention\n\n", 1)[1]
+        == baseline_harness.split("## User attention\n\n", 1)[1]
     )
 
     for other in (Harness.CODEX, Harness.ANTIGRAVITY, Harness.MEIVA, None):
-        assert (
-            harness_user_reply_section(_inputs(prefix_slices, harness=other))
-            == _GOLDEN["harness/prefix"]
-        )
+        assert harness_user_reply_section(_inputs(prefix_slices, harness=other)) == baseline_harness
     assert (
-        user_reply_section(_inputs(prefix_slices, harness=Harness.CLAUDE_CODE))
-        == _GOLDEN["native/prefix"]
+        user_reply_section(_inputs(prefix_slices, harness=Harness.CLAUDE_CODE)) == baseline_native
     )
 
     for mode in ("sdk", "naive"):
         mode_slices = _slices(
-            agent__user_delivery_mode=mode, agent__prompt_opening_reply_enabled=True
+            agent__user_delivery_mode=mode, agent__fast_acknowledgement=fast_acknowledgement
         )
-        assert (
-            harness_user_reply_section(_inputs(mode_slices, harness=Harness.CLAUDE_CODE))
-            == _GOLDEN[f"harness/{mode}"]
-        )
+        assert harness_user_reply_section(
+            _inputs(mode_slices, harness=Harness.CLAUDE_CODE)
+        ) == harness_user_reply_section(_inputs(mode_slices))
 
 
 def test_build_harness_system_prompt_leaves_non_claude_harnesses_unchanged() -> None:

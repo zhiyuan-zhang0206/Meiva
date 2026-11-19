@@ -89,7 +89,7 @@ def communication_style_section(inputs: SectionInputs) -> str:
     return delivery_style_prompt(
         inputs.slices.prompt.user_delivery_mode,
         style,
-        opening_reply=bool(_resolved("prompt_opening_reply_enabled", inputs)),
+        fast_acknowledgement=bool(inputs.slices.prompt.fast_acknowledgement),
     )
 
 

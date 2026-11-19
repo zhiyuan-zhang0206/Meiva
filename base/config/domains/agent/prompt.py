@@ -372,24 +372,6 @@ class AgentPromptSettings(EnvSettings):
         },
     )
 
-    prompt_opening_reply_enabled: bool | None = Field(
-        title="Require an opening reply before the first tool call",
-        default=None,
-        alias="MEIVA_SYSTEM_PROMPT_OPENING_REPLY",
-        description=(
-            "Require a brief substantive reply in the first response to a human "
-            "request before the first tool call, and render the sentences that "
-            "state that rule. Unset resolves the per-model default (shared "
-            "floor: off)."
-        ),
-        json_schema_extra={
-            "restart_required": "agent",
-            "writable": True,
-            "sensitive": False,
-            "scope": "cluster-pinned",
-        },
-    )
-
     prompt_user_tone_enabled: bool | None = Field(
         title="Include user communication guidance",
         default=None,

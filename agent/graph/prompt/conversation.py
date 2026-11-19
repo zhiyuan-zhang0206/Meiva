@@ -1,21 +1,10 @@
 # meiva:note
-# Core reply routing, explicit visibility, language, and milestone progress rules in `user_reply_section` remain active across every `COMMUNICATION_STYLE_SECTIONS` setting (`off`, `oriented`, `concise`, `silent`). When `prompt_opening_reply_enabled` resolves on (default off), the first turn on a human request that calls `execute_code` must include a brief substantive opening reply before the first tool call, and every sentence stating that rule is rendered; off drops those sentences. Intermediate turns call `execute_code` with no assistant text unless a milestone is reached. `COMMUNICATION_STYLE_SECTIONS` keys match the non-`off` `agent_communication_style` Literal members so an unknown style raises at render time.
+# Core reply routing, explicit visibility, language, and milestone progress rules in `user_reply_section` remain active across every `COMMUNICATION_STYLE_SECTIONS` setting (`off`, `oriented`, `concise`, `silent`). Pre-tool acknowledgement vs strict silent execution is controlled solely by `## Fast acknowledgement` (`fast_acknowledgement`, cluster default `False`, per-agent `config_overlay` override). Intermediate turns call `execute_code` with no assistant text unless a milestone is reached. `COMMUNICATION_STYLE_SECTIONS` keys match the non-`off` `agent_communication_style` Literal members so an unknown style raises at render time.
 from base.agents.messages.reply_intent import REPLY_VISIBILITY_RULE, SDK_DELIVERY_RULE
 from base.api_contracts.agent_contract import Harness
 from base.api_contracts.user_delivery import UserDeliveryMode
 
-from .live import SectionInputs, resolved_setting
-
-_NO_EMPTY_RECEIPT = (
-    "Do not claim checks have already happened or send an empty receipt acknowledgment "
-    "('Got it', 'On it') instead of stating what you will check. "
-)
-
-_INITIAL_RESPONSE_STYLE_NOTE = (
-    "This initial-response rule applies even when communication style is off "
-    "or silent; the style can further limit progress narration.\n\n"
-)
-
+from .live import SectionInputs
 
 _USER_ATTENTION_RULE = (
     "## User attention\n\n"
@@ -48,22 +37,6 @@ _USER_ATTENTION_RULE = (
 )
 
 
-def _opening_reply_rule(calls_tool_phrase: str) -> str:
-    return (
-        "Whenever your first "
-        f"turn on a human request {calls_tool_phrase} — even for a single quick "
-        "check — include a brief, substantive 1-2 sentence reply in that same first "
-        "response before the first tool call, stating what you will check or do. "
-        "Never emit a tool-only first turn with empty assistant text on a human "
-        "request, and do not defer your first reply until after a 'quick' check. "
-        "Do not leave the user waiting silently while you investigate. "
-    )
-
-
-def _intermediate_turns_sentence(clause: str, *, opening_reply: bool) -> str:
-    return f"After the opening reply, {clause}" if opening_reply else clause[0].upper() + clause[1:]
-
-
 # meiva:note
 # Standalone Claude Code ends every run with a summary addressed to a human at a terminal, so a
 # worker running under the `claude_code` preset tends to emit `MEIVA_DISPLAY_TO_USER` even when it
@@ -85,9 +58,7 @@ def _build_user_reply_section(
     *,
     feedback_sentence: str,
     without_tool_phrase: str,
-    calls_tool_phrase: str,
     intermediate_turns_clause: str,
-    opening_reply: bool,
     visibility_why: str = "",
 ) -> str:
     return (
@@ -115,16 +86,13 @@ def _build_user_reply_section(
         "On a new question or request from the human, respond promptly in the same "
         f"conversation. If you can answer directly, give the answer {without_tool_phrase}; "
         "no separate acknowledgment is needed. "
-        f"{_opening_reply_rule(calls_tool_phrase) if opening_reply else ''}"
-        f"{'Then do' if opening_reply else 'Do'} the work and deliver the result in that conversation. "
-        f"{_NO_EMPTY_RECEIPT if opening_reply else ''}"
+        "Do the work and deliver the result in that conversation. "
         "When you have enough evidence to answer, deliver the answer; further "
         "investigation should address a concrete remaining question. Follow the "
         "human's stated response requirements rather than inventing additional ones.\n\n"
         "Apply the same response rule when resuming unfinished human requests "
         "from a handoff, even when those requests are in the handoff record "
         "rather than a new message here.\n\n"
-        f"{_INITIAL_RESPONSE_STYLE_NOTE if opening_reply else ''}"
         "## Communication language\n\n"
         "Use the human's explicitly requested communication language for ordinary "
         "assistant text, including text alongside tool calls, progress updates "
@@ -147,15 +115,14 @@ def _build_user_reply_section(
         "An explicitly selected live-pairing style may add more frequent "
         "substantive updates, but every message must remain self-contained and "
         "useful to the user. Do not assume continuous attention to the session.\n\n"
-        f"{_intermediate_turns_sentence(intermediate_turns_clause, opening_reply=opening_reply)} "
+        f"{intermediate_turns_clause[0].upper() + intermediate_turns_clause[1:]} "
         "Do not narrate routine tool calls, retries, file reads, internal "
         "bookkeeping or unchanged status. Keep those details in tool feedback "
         "or working notes. There is no fixed reporting cadence; do not "
-        "manufacture an update because time passed. "
-        f"{'Apart from the required opening reply on the first turn of a human request, each' if opening_reply else 'Each'} "
+        "manufacture an update because time passed. Each "
         "mid-task progress update must stand alone, without a tool-call preamble or "
         "trailing introduction.\n\n"
-        f"{'Direct answers, necessary questions, the substantive opening reply to a human request and complete final deliverables remain valid.' if opening_reply else 'Direct answers, necessary questions and complete final deliverables remain valid.'} Keep "
+        "Direct answers, necessary questions and complete final deliverables remain valid. Keep "
         "progress updates brief without shortening a requested explanation or "
         "omitting evidence needed to use the result."
     )
@@ -238,27 +205,19 @@ def _fast_acknowledgement_section(*, enabled: bool, mode: UserDeliveryMode) -> s
 
 
 def user_reply_section(_inputs: SectionInputs) -> str:
-    opening_reply = _opening_reply_enabled(_inputs)
     fast_acknowledgement = _fast_acknowledgement_enabled(_inputs)
     return delivery_prompt(
         _inputs.slices.prompt.user_delivery_mode,
         _build_user_reply_section(
             feedback_sentence="`execute_code` output is tool feedback and does not replace a reply.",
             without_tool_phrase="without calling `execute_code`",
-            calls_tool_phrase="calls `execute_code`",
             intermediate_turns_clause=(
                 "call `execute_code` with no accompanying "
                 "assistant text on intermediate turns unless you reach a milestone."
             ),
-            opening_reply=opening_reply,
         ),
-        opening_reply=opening_reply,
         fast_acknowledgement=fast_acknowledgement,
     )
-
-
-def _opening_reply_enabled(inputs: SectionInputs) -> bool:
-    return bool(resolved_setting("prompt_opening_reply_enabled", inputs))
 
 
 _NOTIFICATION_GUIDANCE = (
@@ -300,7 +259,6 @@ _SILENT_BODY = (
 
 
 def harness_user_reply_section(_inputs: SectionInputs) -> str:
-    opening_reply = _opening_reply_enabled(_inputs)
     visibility_why = _CLAUDE_CODE_VISIBILITY_WHY if _inputs.harness is Harness.CLAUDE_CODE else ""
     fast_acknowledgement = _fast_acknowledgement_enabled(_inputs)
     return delivery_prompt(
@@ -308,15 +266,12 @@ def harness_user_reply_section(_inputs: SectionInputs) -> str:
         _build_user_reply_section(
             feedback_sentence="Tool output is feedback for you and does not replace a reply.",
             without_tool_phrase="without calling a tool",
-            calls_tool_phrase="calls a tool",
             intermediate_turns_clause=(
                 "run intermediate tool calls without accompanying "
                 "assistant text unless you reach a milestone."
             ),
-            opening_reply=opening_reply,
             visibility_why=visibility_why,
         ),
-        opening_reply=opening_reply,
         fast_acknowledgement=fast_acknowledgement,
     )
 
@@ -332,7 +287,6 @@ def delivery_prompt(
     mode_value: str,
     ordinary: str,
     *,
-    opening_reply: bool,
     fast_acknowledgement: bool = False,
 ) -> str:
     mode = UserDeliveryMode(mode_value)
@@ -346,11 +300,6 @@ def delivery_prompt(
             + "\n\n"
             + _USER_ATTENTION_RULE
             + "## Delivery mechanics\n\n"
-            + (
-                "Publish a short substantive opening when starting a human request. "
-                if opening_reply
-                else ""
-            )
             + "Publish only information that passes the user-attention test. "
             "Keep required process narration unpublished in Details. Work between publications. "
             "Do not publish routine internal steps or unchanged status. A natural-language final "
@@ -375,13 +324,17 @@ def delivery_prompt(
     return f"{naive}\n\n{fast_ack}"
 
 
-def delivery_style_prompt(mode: str, style: str, *, opening_reply: bool) -> str:
+def delivery_style_prompt(mode: str, style: str, *, fast_acknowledgement: bool = False) -> str:
     section = COMMUNICATION_STYLE_SECTIONS[style]
-    if not opening_reply:
-        section = section.replace(
-            "Work without narrating after the required initial reply to a human request.",
-            "Work without narrating.",
-        )
+    replacement = (
+        "Work without narrating after any opening confirmation."
+        if fast_acknowledgement
+        else "Work without narrating."
+    )
+    section = section.replace(
+        "Work without narrating after the required initial reply to a human request.",
+        replacement,
+    )
     if UserDeliveryMode(mode) is UserDeliveryMode.SDK:
         section = section.replace(
             _NOTIFICATION_GUIDANCE,
