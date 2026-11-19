@@ -52,6 +52,7 @@ from scripts.hooks.diff_checks_fields import (  # noqa: E402
     build_receipt,
     fields_for,
     not_run_fields,
+    receipt_verdict,
     reverse_closure,
     scope_of,
 )
@@ -96,6 +97,7 @@ __all__ = [
     "parse_args",
     "plan",
     "pytest_counts",
+    "receipt_verdict",
     "reverse_closure",
     "run_child",
     "select_tests",
@@ -527,7 +529,7 @@ def main(argv: Sequence[str]) -> int:
         cache=cache,
         python=python,
     )
-    print(build_receipt(values, sha, _git(root, "rev-parse", arguments.base)))
+    print(build_receipt(values, sha, _git(root, "rev-parse", arguments.base), failed=failed))
     return 1 if failed else 0
 
 

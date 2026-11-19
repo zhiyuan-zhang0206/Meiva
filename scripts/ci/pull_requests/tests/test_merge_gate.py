@@ -73,7 +73,7 @@ def passing_receipt(
     head: str = HEAD,
     *,
     overrides: Mapping[str, str] | None = None,
-    include_base: bool = True,
+    verdict: str | None = "pass",
     include_generator: bool = True,
 ) -> str:
     fields: dict[str, str] = {
@@ -97,9 +97,9 @@ def passing_receipt(
     }
     if overrides:
         fields.update(overrides)
-    parts = [f"diff-checks/v1 @{head}"]
-    if include_base:
-        parts.append(f"base={BASE}")
+    parts = [f"diff-checks/v1 @{head}", f"base={BASE}"]
+    if verdict is not None:
+        parts.append(f"verdict={verdict}")
     parts.extend(f"{key}={value}" for key, value in fields.items())
     if include_generator:
         parts.append("generated=scripts/hooks/diff_checks.py")
@@ -277,60 +277,30 @@ def test_the_retired_trunk_preflight_pass_literal_is_refused(tmp_path: Path) -> 
 
 
 @pytest.mark.parametrize(
-    ("include_base", "include_generator", "expected_fragment"),
+    ("verdict", "include_generator", "expected_fragment"),
     [
-        (False, True, "missing base="),
-        (True, False, "missing generated=scripts/hooks/diff_checks.py"),
+        ("pass", False, "missing generated=scripts/hooks/diff_checks.py"),
+        (None, True, "has no verdict="),
+        ("fail", True, "reports verdict=fail"),
+        ("incomplete", True, "reports verdict=incomplete"),
+        ("PASS", True, "reports verdict=PASS"),
     ],
 )
-def test_an_incomplete_receipt_without_base_or_generator_is_refused(
-    tmp_path: Path, include_base: bool, include_generator: bool, expected_fragment: str
+def test_only_a_generated_receipt_stating_verdict_pass_is_accepted(
+    tmp_path: Path, verdict: str | None, include_generator: bool, expected_fragment: str
 ) -> None:
     body = passing_body(
-        receipt=passing_receipt(include_base=include_base, include_generator=include_generator)
+        receipt=passing_receipt(verdict=verdict, include_generator=include_generator)
     )
     done = run_gate(tmp_path, world(pull=view(body=body)))
     assert done.returncode == 1
     assert expected_fragment in done.stdout
 
 
-@pytest.mark.parametrize(
-    "bad_fields",
-    [
-        {"ruff": "failed(1)(0s)"},
-        {"meizel": "failed(exit=1,779manifests,1edges)(0s)"},
-        {"debt": "unreadable(no-table)(1s)"},
-        {"tests": "broken(no-report)", "passed": "n/a(broken)", "failed": "n/a(broken)"},
-        {"failed": "2tests"},
-        {"errors": "1tests"},
-        {"err_in_this_diff": "1"},
-        {"closure": "unknown"},
-        {"pyright": "1err(1in-closure,0elsewhere:none)(1s)", "err_in_this_diff": "1"},
-        {
-            "selector": "BLIND(dyn.py)",
-            "blind": "BLIND(dyn.py)",
-            "fallback": "n/a(a-blind-selection-has-no-fallback-yet)",
-        },
-        {
-            "blind": "BLIND(dyn.py)",
-            "fallback": "n/a(a-blind-selection-has-no-fallback-yet)",
-        },
-        {
-            "selector": "BLIND(dyn.py)",
-            "blind": "BLIND(dyn.py)",
-            "fallback": "RAN(domain)",
-            "failed": "n/a(no-test-ran)",
-            "errors": "n/a(no-test-ran)",
-        },
-    ],
-)
-def test_a_failing_or_broken_receipt_is_refused(
-    tmp_path: Path, bad_fields: Mapping[str, str]
-) -> None:
-    body = passing_body(receipt=passing_receipt(overrides=bad_fields))
-    done = run_gate(tmp_path, world(pull=view(body=body)))
-    assert done.returncode == 1
-    assert "diff-checks/v1 receipt on current head" in done.stdout
+def test_the_gate_trusts_the_verdict_and_does_not_reread_the_fields(tmp_path: Path) -> None:
+    receipt = passing_receipt(overrides={"ruff": "failed(1)(0s)", "failed": "2tests"})
+    done = run_gate(tmp_path, world(pull=view(body=passing_body(receipt=receipt))))
+    assert done.returncode == 0, done.stdout + done.stderr
 
 
 @pytest.mark.parametrize(

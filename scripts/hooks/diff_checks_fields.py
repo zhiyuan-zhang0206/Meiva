@@ -298,12 +298,68 @@ def not_run_fields(change: ChangeSet, *, pyright_ran: bool) -> dict[str, str]:
     return unread
 
 
-def build_receipt(values: Mapping[str, str], sha: str, base: str) -> str:
+_NONZERO_TESTS = re.compile(r"^(\d+)tests$")
+_PYRIGHT_IN_CLOSURE = re.compile(r"\((\d+)in-closure,")
+_UNREAD_PREFIXES = ("unreadable(", "broken(")
+_UNREAD_VALUES = frozenset({"n/a(broken)", "n/a(unfilled)"})
+
+
+def _count(value: str, pattern: re.Pattern[str]) -> int:
+    found = pattern.search(value)
+    return int(found.group(1)) if found else 0
+
+
+# meiva:note
+# The receipt's one authoritative conclusion, computed here by the producer so no reader has to
+# re-derive it from the fields. `fail`: something ran and was red -- a run that exited non-zero, a
+# `failed(...)` field, failed or errored tests, an error in this diff or in the reverse closure of
+# it. `incomplete`: something could not be read or did not happen as asked -- `unreadable(...)`,
+# `broken(...)`, an unfilled field, `closure=unknown`, or a selector blind spot whose fallback did
+# not run green. Anything else is `pass`; `skipped(...)` and `n/a(...)` are reasons a layer was
+# not owed or is covered elsewhere (CI), not a verdict. `fail` outranks `incomplete`, which outranks
+# `pass`, so a new field spelling can only land in one of the first two by being named here.
+def receipt_verdict(values: Mapping[str, str], *, failed: bool) -> str:
+    fields = {label: values.get(label, "n/a(unfilled)") for label in FIELD_ORDER}
+    if failed or _is_red(fields):
+        return "fail"
+    if _is_unread(fields) or _blind_without_clean_fallback(fields):
+        return "incomplete"
+    return "pass"
+
+
+def _is_red(fields: Mapping[str, str]) -> bool:
+    return (
+        any(value.startswith("failed(") for value in fields.values())
+        or _count(fields["failed"], _NONZERO_TESTS) > 0
+        or _count(fields["errors"], _NONZERO_TESTS) > 0
+        or (fields["err_in_this_diff"].isdigit() and int(fields["err_in_this_diff"]) > 0)
+        or _count(fields["pyright"], _PYRIGHT_IN_CLOSURE) > 0
+    )
+
+
+def _is_unread(fields: Mapping[str, str]) -> bool:
+    return fields["closure"] == "unknown" or any(
+        value.startswith(_UNREAD_PREFIXES) or value in _UNREAD_VALUES for value in fields.values()
+    )
+
+
+def _blind_without_clean_fallback(fields: Mapping[str, str]) -> bool:
+    blind = any(fields[key].startswith("BLIND(") for key in ("selector", "blind"))
+    clean = (
+        fields["fallback"].startswith("RAN(")
+        and fields["failed"] == "0tests"
+        and fields["errors"] == "0tests"
+    )
+    return blind and not clean
+
+
+def build_receipt(values: Mapping[str, str], sha: str, base: str, *, failed: bool) -> str:
     fields = [f"{label}={values.get(label, 'n/a(unfilled)')}" for label in FIELD_ORDER]
     return " ".join(
         (
             f"{RECEIPT_VERSION} @{sha}",
             f"base={base}",
+            f"verdict={receipt_verdict(values, failed=failed)}",
             *fields,
             "generated=scripts/hooks/diff_checks.py",
         )
