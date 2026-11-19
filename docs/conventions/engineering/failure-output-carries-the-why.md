@@ -231,6 +231,13 @@ nothing and looked like a pass):
 | `BLIND(<files>)` | the selector admits it cannot map these changed files; the fallback must run |
 | `unreadable(<why>)` | the layer ran but its output could not be read — never a pass |
 
+**`verdict=pass|fail|incomplete` is the receipt's one conclusion, and the producer computes it from
+every field above** (`fail`: a layer ran and was red; `incomplete`: a layer could not be read or did
+not happen as asked, an unfilled field, or a blind selection whose fallback did not run green;
+`skipped(...)` and `n/a(...)` are not a verdict). The merge gate reads only the sha, `generated=` and
+`verdict=pass`. The runner's exit code reflects only its blocking runs, so a local reader decides
+"passed" by `verdict=`, not by the exit code.
+
 **There is no bare `none` in a receipt.** "Did not apply" and "ran, found nothing" are different
 claims, and a line that prints both the same way is a line a reviewer cannot use. Values carry no
 spaces either, so a reason joins its words with `-`.

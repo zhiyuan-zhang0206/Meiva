@@ -118,6 +118,7 @@ condition 1 checks. Boundary with condition 2:
   fallback is not `fallback=RAN(...)` with `failed=0tests` and `errors=0tests`). The gate does not
   re-derive any of this, so a new field spelling cannot slip past a list kept in the gate. A
   receipt with no `verdict=` was produced by an older `diff_checks.py`: rebase on main and re-run it.
+  `diff_checks.py`'s exit code reflects only its blocking runs; the verdict is what to read.
 - `tests=skipped(--skip-tests)` is accepted in condition 1 per
   `docs/conventions/engineering/failure-output-carries-the-why.md` §6 when GitHub Actions CI
   covers the test matrix; condition 2 (`check runs`) hard-gates that the full CI suite on the
