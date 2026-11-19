@@ -11,7 +11,7 @@
 
 import { Layers } from "lucide-react";
 import { useTranslations } from "next-intl";
-import { memo, useLayoutEffect, useRef, type ReactNode } from "react";
+import { memo, type ReactNode } from "react";
 
 import { formatDuration, type SdkCall } from "@/lib/format/item-summary";
 import { cn } from "@/lib/format/utils";
@@ -24,6 +24,7 @@ import {
   MIN_W_0,
   OVERFLOW_HIDDEN,
 } from "@/lib/layout/layout";
+import { useSyncedShimmer } from "@/components/ui/use-synced-shimmer";
 
 import { CallBadge, DisclosureChevron, DISCLOSURE_TITLE_CLS } from "./view/card-summary/card-summary";
 import { useNow } from "./model/reasoning-clock";
@@ -60,24 +61,6 @@ function sameOptionalIds(a?: readonly string[], b?: readonly string[]): boolean 
   if (a === b) return true;
   if (!a || !b) return false;
   return sameIds(a, b);
-}
-
-// meiva:note
-// Pin active timeline shimmer animations to document timeline origin (startTime = 0)
-// so the sweep stays in phase with the sidebar's working titles and across the
-// PendingLiveActivityWindow -> TurnBlock handoff without restarting mid-cycle.
-// meiva:link ui/web/src/docs/frontend-components/timeline-view/deep-collapse.md
-function useSyncedWorkingShimmer(active: boolean) {
-  const titleRef = useRef<HTMLSpanElement | null>(null);
-  useLayoutEffect(() => {
-    if (!active) return;
-    const el = titleRef.current;
-    if (!el || typeof el.getAnimations !== "function") return;
-    for (const anim of el.getAnimations()) {
-      anim.startTime = 0;
-    }
-  }, [active]);
-  return titleRef;
 }
 
 function turnBlockPropsEqual(prev: TurnBlockProps, next: TurnBlockProps): boolean {
@@ -120,7 +103,7 @@ export const TurnBlock = memo(function TurnBlock({
   activeTurnStartedAt = 0,
 }: TurnBlockProps) {
   const t = useTranslations("timeline");
-  const titleRef = useSyncedWorkingShimmer(Boolean(turnActive));
+  const titleRef = useSyncedShimmer(Boolean(turnActive));
   const liveBlockStartedAt =
     turnActive && summary.lastLiveKind != null && summary.lastLiveStartedAt > 0
       ? summary.lastLiveStartedAt
@@ -264,7 +247,7 @@ export const PendingLiveActivityWindow = memo(function PendingLiveActivityWindow
   startedAt?: number;
 }) {
   const t = useTranslations("timeline");
-  const titleRef = useSyncedWorkingShimmer(true);
+  const titleRef = useSyncedShimmer(true);
   const hasAnchor = startedAt > 0;
   const liveNow = useNow(hasAnchor);
   const label = hasAnchor

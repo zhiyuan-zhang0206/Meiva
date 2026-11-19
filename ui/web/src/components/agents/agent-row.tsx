@@ -36,6 +36,7 @@ import type { AgentRow } from "@/lib/contracts/types";
 import type { PendingAction } from "@/lib/agents/use-agents";
 import { cn } from "@/lib/format/utils";
 import { FLEX, FLEX_1, FLEX_COL, MIN_W_0 } from "@/lib/layout/layout";
+import { useSyncedShimmer } from "@/components/ui/use-synced-shimmer";
 import {
   AGENT_HOVER_OPEN_DELAY_MS,
   AGENT_HOVER_WARMUP_MS,
@@ -131,20 +132,6 @@ function TreeGuides({
   return <>{bars}</>;
 }
 
-function useSyncedTitleShimmer(working: boolean, editing: boolean, indentPx: number) {
-  const titleRef = useRef<HTMLSpanElement | null>(null);
-  useLayoutEffect(() => {
-    const el = titleRef.current;
-    if (!el || editing) return;
-    el.style.setProperty("--agent-indent-px", `${indentPx}px`);
-    if (!working || typeof el.getAnimations !== "function") return;
-    for (const anim of el.getAnimations()) {
-      anim.startTime = 0;
-    }
-  }, [working, editing, indentPx]);
-  return titleRef;
-}
-
 
 export function AgentRow({
   agent,
@@ -193,7 +180,12 @@ export function AgentRow({
   // #ID and label coexist, complementing each other: `#180 · screen-permission` or `#180` (when there's no label)
   const displayLabel = label ? `#${agent.agent_id} · ${label}` : `#${agent.agent_id}`;
   const indentPx = depth * INDENT;
-  const titleRef = useSyncedTitleShimmer(working, editing, indentPx);
+  const titleRef = useSyncedShimmer(working && !editing);
+  useLayoutEffect(() => {
+    const el = titleRef.current;
+    if (!el || editing) return;
+    el.style.setProperty("--agent-indent-px", `${indentPx}px`);
+  }, [titleRef, editing, indentPx]);
 
   const submit = () => {
     onRename(draft);
