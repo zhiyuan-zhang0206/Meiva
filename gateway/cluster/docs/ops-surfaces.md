@@ -52,7 +52,7 @@ are mounted. `hours` is the aggregation window, whitelisted to
 | Card data | Source |
 |---|---|
 | `live_count` | Postgres `agents_meta` (not windowed) |
-| windowed `tokens`, `cost_usd`, `subscription_cost_usd`, `openai_cost_usd`, `anthropic_cost_usd`, warning/error counts | `telemetry_events` (Postgres) |
+| windowed `tokens`, `cost_usd`, `subscription_cost_usd`, `openai_cost_usd`, `anthropic_cost_usd`, `google_cost_usd`, warning/error counts | `telemetry_events` (Postgres) |
 | warning/error event totals and `alert_classes_active` / `alert_classes_dismissed` | the window's classes (below) and the active `event_dismissals` rows (Postgres) that cancel them |
 | `plugin_stats` (plugin-declared cards) | `plugin_stats` rows (`base/packages/plugins/surface/stats.py`), only rows of cards an enabled plugin declares in `contributions.ui.stats` / `statsFace` (an orphan row is not served; the console still joins the rest by `(plugin, id)`); NOT windowed — a plugin value is a point in time |
 
@@ -62,7 +62,7 @@ statement timeout (a timeout is a retriable 503): one grouped scan of the window
 token sums, the metered API cost, the subscription-covered cost and per-model metered
 API cost slices, and one grouped count of the warning, error and
 critical rows (served by the partial index `telemetry_events_anomaly_ts`) gives
-the alert classes. `openai_cost_usd` and `anthropic_cost_usd` resolve each model's
+the alert classes. `openai_cost_usd`, `anthropic_cost_usd`, and `google_cost_usd` resolve each model's
 vendor through the gateway `ModelCatalog` (`None` only when catalog startup failed,
 preserving `200` for the rest of the dashboard). The window is the requested one
 (up to 30 days), so `applied_window_hours` equals `window_hours`. The `llm_usage.cost_usd`

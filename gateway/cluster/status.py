@@ -133,7 +133,7 @@ router.add_api_route("/api/health", get_health, methods=["GET"], response_model=
 
 @router.get(
     "/api/stats/dashboard",
-    description="Pull all data for the sidebar Status popover in one shot.\n\nData sources:\n- `live_count`: agents_meta table — all non-terminated agents (running/idling)\n- `tokens` / `cost_usd` / `subscription_cost_usd` / `openai_cost_usd` /\n  `anthropic_cost_usd`: the window's `llm_usage` rows in `telemetry_events` (cost is\n  each row's usage-time snapshot: `cost_usd` the metered API half, excluding\n  subscription harnesses, and `subscription_cost_usd` the list value those harnesses\n  covered; provider slices resolve through the model catalog)\n- warning/error event totals and class counts: the SELECTED window's warning, error and\n  critical `telemetry_events` rows grouped by class; a class is dismissed when an active\n  `event_dismissals` row cancels it (`gateway.cluster.monitor.alert_classes`)\n\n`?hours=` selects the aggregation window (0 = last 5m; 1/6/24/72/168/720 =\nhours), whitelisted by `StatsWindowHours` (anything else 422s); the served horizon is\n`applied_window_hours`, which is the requested window. Zero-data scenario: tokens all 0,\ncost_usd / subscription_cost_usd / openai_cost_usd / anthropic_cost_usd 0.0.\nThe window is computed on every request, in one connection, with an 8-second\nstatement timeout.",
+    description="Pull all data for the sidebar Status popover in one shot.\n\nData sources:\n- `live_count`: agents_meta table — all non-terminated agents (running/idling)\n- `tokens` / `cost_usd` / `subscription_cost_usd` / `openai_cost_usd` /\n  `anthropic_cost_usd` / `google_cost_usd`: the window's `llm_usage` rows in `telemetry_events` (cost is\n  each row's usage-time snapshot: `cost_usd` the metered API half, excluding\n  subscription harnesses, and `subscription_cost_usd` the list value those harnesses\n  covered; provider slices resolve through the model catalog)\n- warning/error event totals and class counts: the SELECTED window's warning, error and\n  critical `telemetry_events` rows grouped by class; a class is dismissed when an active\n  `event_dismissals` row cancels it (`gateway.cluster.monitor.alert_classes`)\n\n`?hours=` selects the aggregation window (0 = last 5m; 1/6/24/72/168/720 =\nhours), whitelisted by `StatsWindowHours` (anything else 422s); the served horizon is\n`applied_window_hours`, which is the requested window. Zero-data scenario: tokens all 0,\ncost_usd / subscription_cost_usd / openai_cost_usd / anthropic_cost_usd / google_cost_usd 0.0.\nThe window is computed on every request, in one connection, with an 8-second\nstatement timeout.",
 )
 def get_stats_dashboard(
     request: Request,
@@ -181,11 +181,12 @@ def _note_unloaded_stats_face(plugin: str, exc: BaseException) -> None:
 def _provider_api_costs(
     api_cost_by_model: Sequence[tuple[str, Decimal]],
     catalog: ModelCatalog | None,
-) -> tuple[float | None, float | None]:
+) -> tuple[float | None, float | None, float | None]:
     if catalog is None:
-        return None, None
+        return None, None, None
     openai = Decimal(0)
     anthropic = Decimal(0)
+    google = Decimal(0)
     for model, cost in api_cost_by_model:
         vendor = (
             vendor_of_model(model, catalog=catalog) or catalog.prices.vendor(model) or ""
@@ -194,7 +195,9 @@ def _provider_api_costs(
             openai += cost
         elif vendor == "anthropic":
             anthropic += cost
-    return float(openai), float(anthropic)
+        elif vendor == "google":
+            google += cost
+    return float(openai), float(anthropic), float(google)
 
 
 def _compute_stats_dashboard(
@@ -229,7 +232,9 @@ def _compute_stats_dashboard(
         if totals.cache_input
         else (None if totals.in_total else 0.0)
     )
-    openai_cost_usd, anthropic_cost_usd = _provider_api_costs(totals.api_cost_by_model, catalog)
+    openai_cost_usd, anthropic_cost_usd, google_cost_usd = _provider_api_costs(
+        totals.api_cost_by_model, catalog
+    )
     classes = alert_class_totals(alert_classes)
     return StatsDashboard(
         live_count=live_count,
@@ -245,6 +250,7 @@ def _compute_stats_dashboard(
         subscription_cost_usd=totals.subscription_cost_usd,
         openai_cost_usd=openai_cost_usd,
         anthropic_cost_usd=anthropic_cost_usd,
+        google_cost_usd=google_cost_usd,
         warnings=classes.warnings,
         errors=classes.errors,
         warnings_resolved=classes.warnings_resolved,

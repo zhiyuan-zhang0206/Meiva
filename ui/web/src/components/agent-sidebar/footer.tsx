@@ -157,34 +157,43 @@ export function StatusCards({
       kind: "warnings",
       title: windowedTitle ?? errMsg ?? t("warningsTitle", { win }),
     },
-    {
-      label: t("openaiCost"),
+    ...[
+      {
+        label: t("openaiCost"),
+        cost: stats?.openai_cost_usd,
+        title: t("openaiCostTitle", { win }),
+        detail:
+          stats?.openai_cost_usd != null
+            ? t("openaiCostTitleDetail", { win, amount: stats.openai_cost_usd.toFixed(2) })
+            : undefined,
+      },
+      {
+        label: t("anthropicCost"),
+        cost: stats?.anthropic_cost_usd,
+        title: t("anthropicCostTitle", { win }),
+        detail:
+          stats?.anthropic_cost_usd != null
+            ? t("anthropicCostTitleDetail", { win, amount: stats.anthropic_cost_usd.toFixed(2) })
+            : undefined,
+      },
+      {
+        label: t("googleCost"),
+        cost: stats?.google_cost_usd,
+        title: t("googleCostTitle", { win }),
+        detail:
+          stats?.google_cost_usd != null
+            ? t("googleCostTitleDetail", { win, amount: stats.google_cost_usd.toFixed(2) })
+            : undefined,
+      },
+    ].map(({ label, cost, title, detail }) => ({
+      label,
       value: windowMismatch
         ? windowedPlaceholder
-        : stats?.openai_cost_usd != null
-          ? `$${stats.openai_cost_usd.toFixed(2)}`
+        : cost != null
+          ? `$${cost.toFixed(2)}`
           : placeholder,
-      title:
-        windowedTitle ??
-        errMsg ??
-        (stats?.openai_cost_usd != null
-          ? t("openaiCostTitleDetail", { win, amount: stats.openai_cost_usd.toFixed(2) })
-          : t("openaiCostTitle", { win })),
-    },
-    {
-      label: t("anthropicCost"),
-      value: windowMismatch
-        ? windowedPlaceholder
-        : stats?.anthropic_cost_usd != null
-          ? `$${stats.anthropic_cost_usd.toFixed(2)}`
-          : placeholder,
-      title:
-        windowedTitle ??
-        errMsg ??
-        (stats?.anthropic_cost_usd != null
-          ? t("anthropicCostTitleDetail", { win, amount: stats.anthropic_cost_usd.toFixed(2) })
-          : t("anthropicCostTitle", { win })),
-    },
+      title: windowedTitle ?? errMsg ?? detail ?? title,
+    })),
   ];
   const valueClass = failedWithoutData
     ? "font-mono tabular-nums text-sm text-destructive"

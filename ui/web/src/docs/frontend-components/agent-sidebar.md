@@ -36,7 +36,7 @@ below:
 - **Windowed `Usage` section** (below the rule, headed by `Usage` and its own
   `WindowSelect` offering `5m` / `1h` / `6h` / `24h` / `3d` / `7d` / `30d`): a
   2-column grid of `Tokens`, `Cache hit`, `Cost (API)`, `Cost (subscription)`,
-  `Warnings / errors`, and metered `OpenAI API` and `Anthropic API` spend slices.
+  `Warnings / errors`, and metered `OpenAI API`, `Anthropic API`, and `Google API` spend slices.
   The two cost cards are the same disjoint split the Inspector shows, by the
   billing mode of the harness that ran each call: `Cost (API)` is the fee the
   account is billed (subscription harnesses excluded, so monthly API credit
