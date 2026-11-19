@@ -1,7 +1,8 @@
 # meiva:note
-# One permanent provider rejection stops background wakes. A fresh chat, an operator restart or
-# explicit operator resurrection may try again after a fix; successful model progress clears the
-# durable rejection. No billing batch recovery is provided.
+# One permanent provider rejection, or one external-harness quota exhaustion, stops background wakes.
+# A fresh chat, an operator restart or explicit operator resurrection may try again after a fix (a
+# quota reset, a top-up); successful model progress clears the durable halt. No reset time is read
+# from the provider and no timer resumes the agent. No billing batch recovery is provided.
 
 from __future__ import annotations
 
@@ -19,7 +20,6 @@ from base.db.transaction import async_write_transaction
 HALT_AFTER_CONSECUTIVE_PERMANENT_REJECTS = 1
 
 SUPPRESS_REASON_PERMANENT_REJECT = "permanent_provider_reject"
-SUPPRESS_REASON_QUOTA_EXHAUSTED = "quota_exhausted"
 
 # The tripped window is "until human" in practice: long enough that no
 # automatic path resumes on a mere timer, finite so the column stays
@@ -28,6 +28,23 @@ HALT_SUPPRESSION_WINDOW_S = 3650 * 24 * 3600.0
 
 # Stored reason for an HTTP 402 billing rejection, shared with the classifier.
 PERMANENT_REJECT_REASON_BILLING: Final = "billing"
+
+# meiva:note
+# Stored halt reason for an external harness turn that aborted on quota exhaustion / HTTP 429
+# before it delivered anything (`agent/graph/claim/harness_inbox.py::settle_quota_abort`).
+HALT_REASON_QUOTA_EXHAUSTED: Final = "quota_exhausted"
+
+# meiva:note
+# The inbound payload key counting the quota-aborted turns a row was handed to. A row that carries
+# it was already tried by the halted agent, so it is never the fresh input that resumes it: a turn
+# that failed on it again would otherwise re-arm the agent for the same row, forever.
+QUOTA_RETRY_COUNT_FIELD: Final = "harness_quota_retries"
+
+_COUNT_REJECTED_TURN: LiteralString = (
+    "UPDATE agents_meta SET permanent_reject_streak = permanent_reject_streak + 1, "
+    "last_permanent_reject_reason = %s "
+    "WHERE id = %s RETURNING permanent_reject_streak"
+)
 
 # Correlated against the unaliased agents_meta row. This is the SQL half of the
 # breaker the automatic-recovery gates embed; keep the literal
@@ -55,17 +72,23 @@ async def record_permanent_reject_turn(
     the original provider rejection.
     """
     async with async_write_transaction(pool) as conn:
-        row = await aquery_one(
-            conn,
-            _StreakRow,
-            "UPDATE agents_meta SET permanent_reject_streak = permanent_reject_streak + 1, "
-            "last_permanent_reject_reason = %s "
-            "WHERE id = %s RETURNING permanent_reject_streak",
-            (reason, agent_id),
-        )
+        row = await aquery_one(conn, _StreakRow, _COUNT_REJECTED_TURN, (reason, agent_id))
     if row is None:
         raise RuntimeError(f"agent {agent_id} disappeared while recording a permanent rejection")
     return row.permanent_reject_streak
+
+
+# meiva:note
+# Halt an agent whose harness ran out of quota, inside the caller's transaction (the one that
+# requeues the aborted turn's rows, so the rows are never pending on an agent that is not halted).
+# The same streak as a permanent rejection, and the same way out: a fresh chat or an operator
+# restart (`admit_pending_wake`), then a completed turn. No wake window is written.
+async def record_quota_halt(conn: psycopg.AsyncConnection, agent_id: int) -> None:
+    row = await aquery_one(
+        conn, _StreakRow, _COUNT_REJECTED_TURN, (HALT_REASON_QUOTA_EXHAUSTED, agent_id)
+    )
+    if row is None:
+        raise RuntimeError(f"agent {agent_id} disappeared while recording a quota halt")
 
 
 async def halt_automatic_recovery(pool: AsyncConnectionPool, agent_id: int) -> bool:
@@ -123,34 +146,19 @@ async def _operator_restart_waiting(conn: AsyncConnectionLike, agent_id: int) ->
     return row is not None and row[0] is True
 
 
-async def _operator_lifecycle_waiting(conn: AsyncConnectionLike, agent_id: int) -> bool:
-    row = await (
-        await conn.execute(
-            "SELECT EXISTS (SELECT 1 FROM inbound_messages WHERE agent_id=%s "
-            "AND kind IN ('restart','terminate') AND status IN ('pending','claimed') "
-            "AND source <> 'self' AND source NOT LIKE 'system%%')",
-            (agent_id,),
-        )
-    ).fetchone()
-    return row is not None and row[0] is True
-
-
 # meiva:note
-# The facts `admit_pending_wake` reads from the locked agent row: the permanent-reject streak,
-# whether an operator restart or terminate is already claimed, and whether automatic wakes are
-# suppressed for a quota-exhaustion cooldown window.
+# The two facts `admit_pending_wake` reads from the locked agent row: the permanent-reject streak, and
+# whether an operator restart or terminate is already claimed.
 @dataclass(frozen=True)
 class _HaltRow:
     permanent_reject_streak: int
     operator_restart_claimed: bool
-    quota_suppressed: bool
 
 
 # meiva:note
 # Keep background inputs halted; a fresh peer/user chat or an operator restart can retry.
-# When a quota-exhaustion cooldown is active (`SUPPRESS_REASON_QUOTA_EXHAUSTED`), even new
-# chat wakes stay deferred until the reset window elapses — only an operator restart or terminate
-# is admitted immediately.
+# Fresh means written after the halt and not yet tried: a row a quota abort put back in the queue
+# (`QUOTA_RETRY_COUNT_FIELD`) waits for the next fresh chat and is then delivered with it.
 #
 # The grant does not clear the streak: only a turn that actually makes progress does
 # (`agent/graph/claim/turn_stamp.py::persist_last_active`), so the breaker keeps its meaning —
@@ -159,20 +167,15 @@ async def admit_pending_wake(pool: AsyncPool, agent_id: int) -> bool:
     async with async_write_transaction(pool) as conn:
         async with conn.cursor(row_factory=class_row(_HaltRow)) as cur:
             await cur.execute(
-                "SELECT permanent_reject_streak,"
-                "EXISTS (SELECT 1 FROM inbound_messages "
+                "SELECT permanent_reject_streak,EXISTS (SELECT 1 FROM inbound_messages "
                 "WHERE agent_id=agents_meta.id AND kind IN ('restart','terminate') "
-                "AND status='claimed') AS operator_restart_claimed,"
-                "(wake_suppress_reason = %s AND wake_suppressed_until IS NOT NULL "
-                "AND wake_suppressed_until > clock_timestamp()) AS quota_suppressed "
+                "AND status='claimed') AS operator_restart_claimed "
                 "FROM agents_meta WHERE id=%s FOR UPDATE",
-                (SUPPRESS_REASON_QUOTA_EXHAUSTED, agent_id),
+                (agent_id,),
             )
             row = await cur.fetchone()
         if row is None:
             return False
-        if row.quota_suppressed and not row.operator_restart_claimed:
-            return await _operator_lifecycle_waiting(conn, agent_id)
         if (
             row.permanent_reject_streak < HALT_AFTER_CONSECUTIVE_PERMANENT_REJECTS
             or row.operator_restart_claimed
@@ -185,8 +188,9 @@ async def admit_pending_wake(pool: AsyncPool, agent_id: int) -> bool:
                 "SELECT 1 FROM inbound_messages i JOIN agents_meta m ON m.id=i.agent_id "
                 "WHERE i.agent_id=%s AND i.status='pending' AND i.kind='chat' "
                 "AND i.source<>'system' AND i.source NOT LIKE 'system:%%' "
-                "AND i.created_at>COALESCE(m.last_turn_fatal_at,m.status_changed_at) LIMIT 1",
-                (agent_id,),
+                "AND i.created_at>COALESCE(m.last_turn_fatal_at,m.status_changed_at) "
+                "AND NOT (COALESCE(i.payload,'{}'::jsonb) ? %s) LIMIT 1",
+                (agent_id, QUOTA_RETRY_COUNT_FIELD),
             )
         ).fetchone()
         if fresh is None:

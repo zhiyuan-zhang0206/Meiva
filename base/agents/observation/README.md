@@ -69,6 +69,12 @@ when a hosted turn crashes (`stamp_turn_fatal`), holding the sanitized, bounded 
 the most recent fatal turn error until a completed turn, normal self-termination, or
 resurrect clears it (task #7348).
 
+They also carry the recovery breaker's `permanent_reject_streak` and
+`last_permanent_reject_reason`. At the halt threshold the agent is stopped after a permanent
+provider rejection or an external-harness quota exhaustion (`quota_exhausted`): nothing
+automatic wakes it, and a new chat or an operator restart resumes it
+(`base/agents/recovery/breaker.py`). `meiva agents get` prints the halt as `recovery halted`.
+
 ## Agent capability projection
 
 Model projections take an explicit `default_model` value from their caller.

@@ -26,9 +26,8 @@ from base.lm.harness import (
     HarnessClosedError,
     HarnessSetupError,
     HarnessTurnFaultedError,
-    QuotaFault,
     TurnEngine,
-    classify_quota_fault,
+    fault_is_quota_exhaustion,
     sanitize_error_text,
 )
 from base.log import logger
@@ -79,64 +78,44 @@ def _apply_wake_polarity(
 _CLEARED: dict[str, Any] = {"harness_inputs": [], "harness_view": []}
 
 
-def _classify_quota_exhaustion(
-    ctx: MeivaContext,
-    run: ForegroundRun,
+def _is_quota_exhaustion(
     exc: HarnessTurnFaultedError | HarnessClosedError | HarnessSetupError,
-) -> QuotaFault | None:
+) -> bool:
     outcome = exc.outcome if isinstance(exc, HarnessTurnFaultedError) else None
-    last_rate_limit = run.last_rate_limit
-    now_ts = ctx.clock_factory().now().timestamp() if ctx.clock_factory is not None else None
-    return classify_quota_fault(
-        outcome=outcome,
-        fallback_text=str(exc) if outcome is None else None,
-        rate_limit_resets_at=last_rate_limit.resets_at if last_rate_limit is not None else None,
-        now_timestamp=now_ts,
+    return fault_is_quota_exhaustion(
+        outcome=outcome, fallback_text=str(exc) if outcome is None else None
     )
 
 
+# meiva:note
+# Stop and say so: the aborted turn's inputs go back to the queue, the agent is halted until a new
+# message (`harness_inbox.py::settle_quota_abort`), and the warning plus the turn's Error event are
+# the alert. When the quota returns is not this code's guess to make.
 async def _settle_quota_exhaustion(
     ctx: MeivaContext,
     agent_id: int,
     bridge: TurnEngine,
     run: ForegroundRun,
     exc: HarnessTurnFaultedError | HarnessClosedError | HarnessSetupError,
-    quota: QuotaFault,
 ) -> HarnessQuotaExhaustedError:
     turn_id = exc.turn_id if isinstance(exc, HarnessTurnFaultedError) else None
-    settlement = await run.settle_quota_abort(
-        turn_id=turn_id,
-        compute_backoff=lambda streak: quota.backoff_seconds(streak=streak + 1),
-    )
-    reset_source = settlement.reset_source or "bounded_backoff"
+    requeued = await run.settle_quota_abort(turn_id=turn_id)
     detail = (
         sanitize_error_text(f"{ctx.harness.value} harness quota exhausted: {exc}")
         or f"{ctx.harness.value} harness quota exhausted"
     )
     logger.warning(
-        "harness turn aborted due to quota exhaustion; inputs requeued and wake suppressed",
+        "harness turn aborted due to quota exhaustion; inputs requeued and the agent halted "
+        "until a new message",
         event="harness_quota_exhausted",
         agent_id=agent_id,
         harness=ctx.harness.value,
         model=bridge.model,
-        retry_after_seconds=settlement.retry_after_seconds,
-        reset_source=reset_source,
-        suppressed_until=(
-            settlement.suppressed_until.isoformat()
-            if settlement.suppressed_until is not None
-            else None
-        ),
-        requeued_inbound_ids=list(settlement.requeued_inbound_ids),
-        requeued_count=len(settlement.requeued_inbound_ids),
+        requeued_inbound_ids=list(requeued),
+        requeued_count=len(requeued),
         reason=detail,
     )
-    return HarnessQuotaExhaustedError(
-        detail,
-        retry_after_seconds=settlement.retry_after_seconds,
-        reset_source=reset_source,
-        suppressed_until=settlement.suppressed_until,
-        requeued_inbound_ids=settlement.requeued_inbound_ids,
-    )
+    return HarnessQuotaExhaustedError(detail, requeued_inbound_ids=requeued)
 
 
 async def _handle_harness_abort(
@@ -156,10 +135,9 @@ async def _handle_harness_abort(
             else "session unavailable"
         )
         await bridge.retire(reason=reason)
-    quota = _classify_quota_exhaustion(ctx, run, exc)
-    if quota is not None and not projector.has_delivered_output:
+    if _is_quota_exhaustion(exc) and not projector.has_delivered_output:
         projector.clear_open_turn()
-        return await _settle_quota_exhaustion(ctx, agent_id, bridge, run, exc, quota)
+        return await _settle_quota_exhaustion(ctx, agent_id, bridge, run, exc)
 
     produced_output = projector.has_activity
     marked = await run.retire_unconfirmed()

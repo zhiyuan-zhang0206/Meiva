@@ -77,9 +77,6 @@ from ops.lifecycle.resurrect_gates import (
     clear_wake_suppression as clear_wake_suppression,
 )
 from ops.lifecycle.resurrect_gates import (
-    quota_suppressed as quota_suppressed,
-)
-from ops.lifecycle.resurrect_gates import (
     recovery_halted as recovery_halted,
 )
 from ops.lifecycle.resurrect_gates import (
@@ -310,7 +307,6 @@ def _read_resurrect_facts(
         trigger_inbound_id=trigger_inbound_id,
         trigger_kind=trigger_inbound_kind,
         recovery_halted=recovery_halted(db, agent_id),
-        quota_suppressed=quota_suppressed(db, agent_id),
         notice_source=system_notice_source_of_trigger(db, agent_id, trigger_inbound_id),
         home=get_agent_machine(db, agent_id),
         local_machine=local_machine,
@@ -356,12 +352,6 @@ async def resurrect_if_terminated(
         case resurrect_plan.RecoveryHalted():
             _log.warning(
                 "automatic wake stopped after a permanent provider error: agent %s", agent_id
-            )
-            return status
-        case resurrect_plan.QuotaSuppressed():
-            _log.info(
-                "automatic wake deferred during active quota-exhaustion cooldown: agent %s",
-                agent_id,
             )
             return status
         case resurrect_plan.NotificationOnly(source=source):

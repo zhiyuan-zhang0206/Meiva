@@ -406,9 +406,9 @@ class PendingTurnFailure:
     # meiva:note
     # Whether the aborted turn leaves the agent a crash corpse for the reaper. A failed compaction
     # leaves the history intact and the agent alive: it idles for its next inbound. A harness
-    # quota/rate-limit abort also leaves the agent alive and idling behind a wake-suppression reset
-    # window so the reaper does not terminate it before quota resets. Every other settled abort is
-    # a fatal provider or stream failure.
+    # quota/rate-limit abort also leaves the agent alive and idling, halted until a new message
+    # (`base/agents/recovery/breaker.py`), so the reaper does not terminate it while it waits.
+    # Every other settled abort is a fatal provider or stream failure.
     @property
     def marks_crash(self) -> bool:
         return not isinstance(self.error, (CompactionFailedError, HarnessQuotaExhaustedError))

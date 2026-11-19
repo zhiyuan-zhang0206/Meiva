@@ -2543,6 +2543,8 @@ export interface components {
             harness_exit_at?: string | null;
             last_turn_fatal_at?: string | null;
             last_turn_fatal_reason?: string | null;
+            permanent_reject_streak: number;
+            last_permanent_reject_reason?: string | null;
         };
         AgentStats: {
             turn_total: number;

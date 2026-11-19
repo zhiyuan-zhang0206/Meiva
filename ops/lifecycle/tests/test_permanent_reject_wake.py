@@ -149,6 +149,58 @@ async def test_idling_owner_blocks_background_wake_until_new_chat(
 
 
 # meiva:note
+# A quota-halted agent's own requeued input never resumes it, even when it is newer than an older
+# crash stamp (`last_turn_fatal_at` is kept until a turn completes): that row was already tried, and
+# admitting it would loop the agent against the quota on every scan. A new message resumes it.
+async def test_a_quota_halt_ignores_its_requeued_input_until_a_new_message(
+    db_conn: psycopg.Connection,
+    aops_pool: AsyncConnectionPool,
+    database: Database,
+    event_bus: EventBus,
+    config_authority: ConfigAuthority,
+    model_catalog: ModelCatalog,
+    database_gate: ProcessDbGate,
+    machine_identity: MachineIdentityReader,
+) -> None:
+    from base.agents.recovery.breaker import (
+        HALT_REASON_QUOTA_EXHAUSTED,
+        QUOTA_RETRY_COUNT_FIELD,
+        admit_pending_wake,
+    )
+
+    agent = terminated(
+        db_conn,
+        config_authority=config_authority,
+        model_catalog=model_catalog,
+        database_gate=database_gate,
+        local_machine=machine_identity,
+    )
+    db_conn.execute(
+        "UPDATE agents_meta SET status='idling',"
+        "last_turn_fatal_at=clock_timestamp() - interval '10 minutes',"
+        "permanent_reject_streak=1,last_permanent_reject_reason=%s WHERE id=%s",
+        (HALT_REASON_QUOTA_EXHAUSTED, agent),
+    )
+    db_conn.execute(
+        "INSERT INTO inbound_messages(agent_id,content,kind,source,payload) "
+        "VALUES(%s,'requeued by the quota abort','chat','user',jsonb_build_object(%s::text,1))",
+        (agent, QUOTA_RETRY_COUNT_FIELD),
+    )
+    db_conn.commit()
+    assert not await admit_pending_wake(aops_pool, agent)
+    assert not await admit_pending_wake(aops_pool, agent)
+
+    insert_inbound_message(
+        db_conn, agent, "Quota is reset.", "user", bus=event_bus, database=database
+    )
+    assert await admit_pending_wake(aops_pool, agent)
+    assert db_conn.execute(
+        "SELECT permanent_reject_streak,last_permanent_reject_reason FROM agents_meta WHERE id=%s",
+        (agent,),
+    ).fetchone() == (0, None)
+
+
+# meiva:note
 # The 2026-10-27 fixed point (#5665): an operator restart waits as a *pending* inbound, so a
 # gate that only admits an already-claimed restart can never open. A human's restart admits the
 # turn; the automatic ones stay blocked, because those are what the breaker exists to stop.

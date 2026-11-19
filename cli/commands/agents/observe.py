@@ -14,6 +14,7 @@ from datetime import datetime
 
 from pydantic import BaseModel
 
+from base.agents.recovery.breaker import HALT_AFTER_CONSECUTIVE_PERMANENT_REJECTS
 from base.cluster.machine import GatewayAccess
 from cli.boundary.gateway_read import fetch, print_json, render_table
 
@@ -36,6 +37,8 @@ class _Agent(BaseModel):
     harness_exit_code: int | None
     last_turn_fatal_at: datetime | None = None
     last_turn_fatal_reason: str | None = None
+    permanent_reject_streak: int = 0
+    last_permanent_reject_reason: str | None = None
     questions_awaiting_response: list[object]
 
 
@@ -72,6 +75,11 @@ def cmd_agents_get(access: GatewayAccess, agent_id: int, *, as_json: bool) -> in
         print(f"last fatal at:     {_stamp(agent.last_turn_fatal_at)}")
     if agent.last_turn_fatal_reason is not None:
         print(f"last fatal reason: {_one_line(agent.last_turn_fatal_reason)}")
+    if agent.permanent_reject_streak >= HALT_AFTER_CONSECUTIVE_PERMANENT_REJECTS:
+        print(
+            f"recovery halted:   {agent.last_permanent_reject_reason or 'unrecorded reason'} "
+            f"(streak {agent.permanent_reject_streak}; a new chat or a restart resumes it)"
+        )
     print(f"open questions:    {len(agent.questions_awaiting_response)}")
     return 0
 

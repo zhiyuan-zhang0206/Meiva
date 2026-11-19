@@ -53,3 +53,19 @@ def test_snapshot_reports_harness_exit_and_last_turn_fatal_reason(
     assert detail.harness_exit_at is not None
     assert detail.last_turn_fatal_at is not None
     assert detail.last_turn_fatal_reason == "FatalLLMStreamError: proxy connect refused"
+
+
+def test_snapshot_reports_the_recovery_halt(db_conn: psycopg.Connection) -> None:
+    with db_conn.cursor() as cur:
+        cur.execute("INSERT INTO agents (id) VALUES (43)")
+        cur.execute(
+            "INSERT INTO agents_meta "
+            "(id, status, harness, permanent_reject_streak, last_permanent_reject_reason) "
+            "VALUES (43, 'idling', 'claude_code', 1, 'quota_exhausted')"
+        )
+    detail = select_one(db_conn, 43, catalog=None, default_model="deepseek-v4-flash")
+    assert detail is not None
+    assert (detail.permanent_reject_streak, detail.last_permanent_reject_reason) == (
+        1,
+        "quota_exhausted",
+    )
