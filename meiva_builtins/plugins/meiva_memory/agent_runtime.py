@@ -10,7 +10,11 @@
 from __future__ import annotations
 
 import asyncio
+import hashlib
+import json
 from collections.abc import Collection
+from dataclasses import dataclass
+from pathlib import Path
 
 from langchain_core.runnables import RunnableConfig
 from langgraph.runtime import Runtime
@@ -29,13 +33,26 @@ from base.agents.context import MeivaContext
 from base.api_contracts.agent_contract import Harness
 from base.host.env.agent_slices import AgentSlices
 from base.lm.catalog import ModelCatalog
-from base.lm.harness.handoff import EntryPoint, Handoff, HandoffSection, HarnessContribution
+from base.lm.harness.handoff import (
+    ContextRefresh,
+    EntryPoint,
+    Handoff,
+    HandoffSection,
+    HarnessContribution,
+    RefreshContext,
+)
 from base.log import logger
 from base.packages.plugins.extensions import ContextNote, PluginContributions
 from base.paths import memory_dir
 
-from .inheritance.inherit import inherited_memory_note
-from .notes import memory_index_note, per_agent_memory_note, personal_memory_dir
+from .inheritance.inherit import inherited_memory_note, read_workspace_inherit
+from .notes import (
+    memory_index_note,
+    per_agent_memory_note,
+    personal_memory_dir,
+    read_personal_memory_index,
+    read_shared_memory_index,
+)
 
 # The two memory indexes are declared in `contribute()` below, so `init_context` lays them down
 # with the framework's notes whenever a window is established. The ranks pin them into the
@@ -284,15 +301,78 @@ class _PassiveMemoryRecallHook(Hook):
 passive_memory_recall_before_llm = _PassiveMemoryRecallHook()
 
 
+_MEMORY_REFRESH_KEY = "meiva_memory"
+
+
+@dataclass(frozen=True, slots=True)
+class _MemoryIndexSnapshot:
+    blocks: tuple[str, ...]
+    digest: str
+    has_content: bool
+
+
+def _memory_index_snapshot(
+    home: Path,
+    workspace: Path,
+    *,
+    agent_id: int | None = None,
+) -> _MemoryIndexSnapshot:
+    shared = memory_dir(home=home)
+    personal = personal_memory_dir(workspace)
+    shared_text = read_shared_memory_index(shared)
+    personal_index = read_personal_memory_index(personal, agent_id=agent_id)
+    inherit_body = read_workspace_inherit(personal)
+
+    blocks: list[str] = []
+    if shared_text is not None:
+        blocks.extend(
+            (
+                "",
+                f"### Shared Memory Index (`{shared}/MEMORY.md`)",
+                shared_text,
+            )
+        )
+    blocks.extend(
+        (
+            "",
+            f"### Personal Memory Index (`{personal}/MEMORY.md`)",
+            f"{personal_index.body}{personal_index.maintenance_suffix}",
+        )
+    )
+    if inherit_body is not None:
+        blocks.extend(
+            (
+                "",
+                f"### Inherited Memory (`{personal}/INHERIT.md`)",
+                inherit_body,
+            )
+        )
+
+    payload = json.dumps(
+        [
+            shared_text or "",
+            personal_index.raw_text,
+            personal_index.maintenance_suffix,
+            inherit_body or "",
+        ],
+        ensure_ascii=False,
+        separators=(",", ":"),
+    )
+    digest = hashlib.sha256(payload.encode("utf-8")).hexdigest()
+    has_content = bool(shared_text or personal_index.raw_text or inherit_body)
+    return _MemoryIndexSnapshot(blocks=tuple(blocks), digest=digest, has_content=has_content)
+
+
 # meiva:note
 # An external harness reads and writes the two stores with its CLI's own file tools, so the handoff
 # names both folders by absolute path (the home and workspace of the handoff being built) and says
-# what each is for. Native agents get the same facts from the discipline section and the two index
-# notes; the section exists because an external CLI has no `meiva.files` to resolve the constants.
+# what each is for. It also embeds the current shared, personal, and workspace INHERIT.md bodies
+# using the same read/empty/length-protection helpers as the native context notes.
 # meiva:link meiva_builtins/plugins/meiva_memory/docs/memory-index-notes.md
 def _memory_handoff_section(handoff: Handoff) -> HandoffSection:
     shared = memory_dir(home=handoff.home)
     personal = personal_memory_dir(handoff.workspace)
+    snapshot = _memory_index_snapshot(handoff.home, handoff.workspace, agent_id=handoff.agent_id)
     return HandoffSection(
         "Meiva Memory",
         (
@@ -319,8 +399,27 @@ def _memory_handoff_section(handoff: Handoff) -> HandoffSection:
             f"- `{personal}/INHERIT.md` (and optional `{personal}/inherit/<slug>.md`) holds "
             "domain context and execution rules for the agents you spawn; they receive it at "
             "startup.",
+            *snapshot.blocks,
         ),
     )
+
+
+def _memory_refresh_snapshot(context: RefreshContext) -> ContextRefresh:
+    snapshot = _memory_index_snapshot(context.home, context.workspace, agent_id=context.agent_id)
+    if not snapshot.has_content:
+        return ContextRefresh(key=_MEMORY_REFRESH_KEY, digest=snapshot.digest, text="")
+    where = (
+        f" (`{context.instructions_file}` has also been updated)"
+        if context.instructions_file is not None
+        else ""
+    )
+    body = "\n".join(snapshot.blocks).lstrip("\n")
+    text = (
+        f"[Meiva notice] Memory Index refreshed{where}. "
+        "Follow the current Memory Index below for this session:\n\n"
+        f"{body}"
+    )
+    return ContextRefresh(key=_MEMORY_REFRESH_KEY, digest=snapshot.digest, text=text)
 
 
 _MEMORY_HARNESS_CONTRIBUTION = HarnessContribution(
@@ -340,6 +439,7 @@ _MEMORY_HARNESS_CONTRIBUTION = HarnessContribution(
         "local to that install, and no peer or later agent reads it.",
     ),
     sections=(_memory_handoff_section,),
+    refreshes=(_memory_refresh_snapshot,),
 )
 
 

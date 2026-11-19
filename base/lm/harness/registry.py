@@ -5,7 +5,7 @@ import json
 import os
 import re
 import tempfile
-from collections.abc import Collection
+from collections.abc import Collection, Mapping
 from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Protocol
@@ -163,6 +163,7 @@ class FileSessionRegistry:
             self.path(agent_id, harness).unlink(missing_ok=True)
             self._root.joinpath(f"{agent_id}.{harness}.floor").unlink(missing_ok=True)
         TurnTimingStore(self._root).delete_harnesses(agent_id, harnesses)
+        FileSessionDigestStore(self._root).delete_harnesses(agent_id, harnesses)
 
     def delete(self, agent_id: int) -> bool:
         _check_agent(agent_id)
@@ -178,6 +179,7 @@ class FileSessionRegistry:
                 continue
             removed = True
         TurnTimingStore(self._root).delete(agent_id)
+        FileSessionDigestStore(self._root).delete(agent_id)
         return removed
 
 
@@ -516,6 +518,91 @@ class TurnTimingStore:
         pattern = re.compile(
             rf"{agent_id}\.[a-z][a-z0-9_]*(?:\.[0-9a-f]+)?\.(turns\.jsonl|active_turn\.json)"
         )
+        for entry in self._root.iterdir():
+            if pattern.fullmatch(entry.name):
+                entry.unlink(missing_ok=True)
+
+
+class SessionDigestStore(Protocol):
+    def load(self, agent_id: int, harness: str, *, session_id: str) -> dict[str, str]: ...
+
+    def save(
+        self, agent_id: int, harness: str, *, session_id: str, digests: Mapping[str, str]
+    ) -> None: ...
+
+
+class InMemorySessionDigestStore:
+    def __init__(self) -> None:
+        self._records: dict[tuple[int, str, str], dict[str, str]] = {}
+
+    def load(self, agent_id: int, harness: str, *, session_id: str) -> dict[str, str]:
+        return dict(self._records.get((agent_id, harness, session_id), {}))
+
+    def save(
+        self, agent_id: int, harness: str, *, session_id: str, digests: Mapping[str, str]
+    ) -> None:
+        self._records[(agent_id, harness, session_id)] = dict(digests)
+
+
+# meiva:note
+# Per-`(agent_id, harness, session_id)` sidecar in `harness_sessions_dir` recording the content
+# digests already delivered into that external session's context. A missing or corrupt sidecar
+# reads as empty so upgraded legacy sessions and damaged records safely refresh on the next turn.
+class FileSessionDigestStore:
+    def __init__(self, root: Path) -> None:
+        self._root = Path(root)
+
+    def path(self, agent_id: int, harness: str, *, session_id: str) -> Path:
+        _check_turn_identity(agent_id, harness)
+        return (
+            self._root / f"{agent_id}.{harness}.{_session_digest(session_id)}.context_digests.json"
+        )
+
+    def load(self, agent_id: int, harness: str, *, session_id: str) -> dict[str, str]:
+        if not session_id:
+            return {}
+        target = self.path(agent_id, harness, session_id=session_id)
+        try:
+            raw = object_of(json.loads, target.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            return {}
+        if not is_object_dict(raw) or raw.get("session_id") != session_id:
+            return {}
+        digests = raw.get("digests")
+        if not is_object_dict(digests):
+            return {}
+        return {
+            key: value
+            for key, value in digests.items()
+            if isinstance(key, str) and isinstance(value, str)
+        }
+
+    def save(
+        self, agent_id: int, harness: str, *, session_id: str, digests: Mapping[str, str]
+    ) -> None:
+        if not session_id:
+            return
+        target = self.path(agent_id, harness, session_id=session_id)
+        target.parent.mkdir(parents=True, exist_ok=True)
+        _write_document(target, {"session_id": session_id, "digests": dict(digests)})
+
+    def delete_harnesses(self, agent_id: int, harnesses: Collection[str]) -> None:
+        _check_agent(agent_id)
+        if not self._root.is_dir():
+            return
+        for harness in harnesses:
+            pattern = re.compile(
+                rf"{agent_id}\.{re.escape(harness)}\.[0-9a-f]+\.context_digests\.json"
+            )
+            for entry in self._root.iterdir():
+                if pattern.fullmatch(entry.name):
+                    entry.unlink(missing_ok=True)
+
+    def delete(self, agent_id: int) -> None:
+        _check_agent(agent_id)
+        if not self._root.is_dir():
+            return
+        pattern = re.compile(rf"{agent_id}\.[a-z][a-z0-9_]*\.[0-9a-f]+\.context_digests\.json")
         for entry in self._root.iterdir():
             if pattern.fullmatch(entry.name):
                 entry.unlink(missing_ok=True)

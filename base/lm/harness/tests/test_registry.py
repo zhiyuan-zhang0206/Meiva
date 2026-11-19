@@ -8,6 +8,7 @@ import pytest
 
 from base.lm.harness import FileSessionRegistry, SessionRecord
 from base.lm.harness.registry import (
+    FileSessionDigestStore,
     backfill_record_fields,
     migrate_single_slot_records,
     unreadable_records,
@@ -351,3 +352,31 @@ def test_a_record_missing_background_is_reported_as_unreadable_like_one_missing_
     assert any("6985" in line and "generation" in line for line in problems)
     assert len(backfill_record_fields(root)) == 2
     assert unreadable_records(root) == []
+
+
+def test_session_digest_store_roundtrip_fallback_and_cleanup(tmp_path: Path) -> None:
+    root = tmp_path / "sessions"
+    registry = FileSessionRegistry(root)
+    store = FileSessionDigestStore(root)
+
+    assert store.load(6984, "claude_code", session_id="sess-1") == {}
+    store.save(6984, "claude_code", session_id="sess-1", digests={"meiva_memory": "abc123"})
+    store.save(6984, "codex", session_id="sess-2", digests={"meiva_memory": "def456"})
+
+    assert store.load(6984, "claude_code", session_id="sess-1") == {"meiva_memory": "abc123"}
+    assert store.load(6984, "claude_code", session_id="sess-other") == {}
+
+    sidecar = store.path(6984, "claude_code", session_id="sess-1")
+    sidecar.write_text(json.dumps({"session_id": "wrong-sid", "digests": {"a": "b"}}))
+    assert store.load(6984, "claude_code", session_id="sess-1") == {}
+
+    sidecar.write_text("{corrupt")
+    assert store.load(6984, "claude_code", session_id="sess-1") == {}
+
+    store.save(6984, "claude_code", session_id="sess-1", digests={"meiva_memory": "abc123"})
+    registry.delete_harnesses(6984, ["claude_code"])
+    assert store.load(6984, "claude_code", session_id="sess-1") == {}
+    assert store.load(6984, "codex", session_id="sess-2") == {"meiva_memory": "def456"}
+
+    assert registry.delete(6984) is False
+    assert store.load(6984, "codex", session_id="sess-2") == {}

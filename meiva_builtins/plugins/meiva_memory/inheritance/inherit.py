@@ -12,9 +12,11 @@ from base.log import logger
 from base.paths import workspace_path
 
 from .inherited_blocks import (
+    DEFAULT_INHERIT_MAX_BLOCK_CHARS,
     Ancestor,
     EntryBlocks,
     SizeCaps,
+    clip_inherit_body,
     extract_inherit_body,
     render_inherited,
     split_ancestors,
@@ -81,6 +83,29 @@ def _read_entries(ancestors: tuple[Ancestor, ...], home: Path) -> list[EntryBloc
             )
         )
     return entries
+
+
+# meiva:link meiva_builtins/plugins/meiva_memory/docs/memory-inheritance.md
+def read_workspace_inherit(
+    mem_dir: Path,
+    *,
+    max_block_chars: int = DEFAULT_INHERIT_MAX_BLOCK_CHARS,
+) -> str | None:
+    entry = mem_dir / _INHERIT_FILE
+    if not entry.is_file():
+        return None
+    try:
+        raw = entry.read_text(encoding="utf-8")
+    except OSError as exc:
+        logger.warning("[inherited-memory] unreadable entry {}: {}", entry, exc)
+        return None
+    body = extract_inherit_body(raw)
+    if not body:
+        return None
+    clipped, warning = clip_inherit_body(body, entry_path=str(entry), max_chars=max_block_chars)
+    if warning is not None:
+        logger.warning("[inherited-memory] {}", warning)
+    return clipped
 
 
 # meiva:link meiva_builtins/plugins/meiva_memory/docs/memory-inheritance.md

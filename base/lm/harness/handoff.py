@@ -83,12 +83,50 @@ SectionBuilder = Callable[["Handoff"], HandoffSection]
 
 
 @dataclass(frozen=True, slots=True)
+class RefreshContext:
+    home: Path
+    workspace: Path
+    agent_id: int
+    instructions_file: Path | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class ContextRefresh:
+    key: str
+    digest: str
+    text: str
+
+
+# meiva:note
+# A plugin's live context snapshot for an external harness session. Returning a digest lets
+# `HarnessBridge` detect pre-upgrade resumed sessions (no stored digest) or updated files on disk
+# and inject `text` once per digest change without resending the full handoff.
+RefreshBuilder = Callable[[RefreshContext], ContextRefresh | None]
+
+
+@dataclass(frozen=True, slots=True)
 class HarnessContribution:
     harnesses: frozenset[Harness]
     entries: tuple[EntryPoint, ...] = ()
     overlaps: tuple[str, ...] = ()
     discipline: tuple[str, ...] = ()
     sections: tuple[SectionBuilder, ...] = ()
+    refreshes: tuple[RefreshBuilder, ...] = ()
+
+
+def refreshes_for(
+    contributions: Iterable[HarnessContribution],
+    *,
+    harness: Harness,
+) -> tuple[RefreshBuilder, ...]:
+    seen: list[RefreshBuilder] = []
+    for item in contributions:
+        if harness not in item.harnesses:
+            continue
+        for build in item.refreshes:
+            if build not in seen:
+                seen.append(build)
+    return tuple(seen)
 
 
 DEFAULT_ENTRIES: tuple[EntryPoint, ...] = (
