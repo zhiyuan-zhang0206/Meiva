@@ -125,6 +125,7 @@ class _StatsDashboard(BaseModel):
     subscription_cost_usd: float
     openai_cost_usd: float | None
     anthropic_cost_usd: float | None
+    google_cost_usd: float | None = None
     warnings: int
     errors: int
     alert_classes_active: int
@@ -162,7 +163,8 @@ def cmd_stats(access: GatewayAccess, *, hours: int | None, as_json: bool) -> int
     )
     print(
         f"cost (usd):    api {stats.cost_usd:.2f} (openai {_usd(stats.openai_cost_usd)}, "
-        f"anthropic {_usd(stats.anthropic_cost_usd)}), subscription {stats.subscription_cost_usd:.2f}"
+        f"anthropic {_usd(stats.anthropic_cost_usd)}, google {_usd(stats.google_cost_usd)}), "
+        f"subscription {stats.subscription_cost_usd:.2f}"
     )
     print(
         f"alerts:        {stats.warnings} warnings, {stats.errors} errors; "

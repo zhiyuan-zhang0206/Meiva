@@ -20,13 +20,13 @@ describe("StatusCards tri-state (loading / data / error)", () => {
     openStatus();
     expect(await screen.findByRole("status", { name: "Status is updating" })).toBeTruthy();
     // meiva:note
-    // Eight placeholder cells (live agents + seven windowed cards) each show a
+    // Nine placeholder cells (live agents + eight windowed cards) each show a
     // spinner; none of them keeps a placeholder bar shaped like a value.
     expect(document.querySelectorAll(".animate-pulse")).toHaveLength(0);
-    expect(document.querySelectorAll(".animate-spin").length).toBeGreaterThanOrEqual(8);
+    expect(document.querySelectorAll(".animate-spin").length).toBeGreaterThanOrEqual(9);
     expect(screen.queryByText("—")).toBeNull();
   });
-  it("stats has data → live count and 6 windowed cards show real numbers", async () => {
+  it("stats has data → live count and 8 windowed cards show real numbers", async () => {
     state.agents = [makeAgent({ agent_id: 1 })];
     state.stats = {
       live_count: 5,
@@ -36,6 +36,7 @@ describe("StatusCards tri-state (loading / data / error)", () => {
       subscription_cost_usd: 0,
       openai_cost_usd: 12.34,
       anthropic_cost_usd: 5.67,
+      google_cost_usd: 1.15,
       warnings: 19_588,
       errors: 41,
       warnings_resolved: 0,
@@ -52,6 +53,11 @@ describe("StatusCards tri-state (loading / data / error)", () => {
     expect(await screen.findByText("$25.40")).toBeTruthy();
     expect(await screen.findByText("$12.34")).toBeTruthy();
     expect(await screen.findByText("$5.67")).toBeTruthy();
+    expect(await screen.findByText("$1.15")).toBeTruthy();
+    const googleCard = screen.getByText("Google API").closest("div");
+    expect(googleCard?.getAttribute("title")).toBe(
+      "Metered Google API spend over the past 24h (excludes subscription harnesses): $1.15",
+    );
     expect(await screen.findByText("19588 / 41")).toBeTruthy();
     expect(screen.queryByText("Average turn time")).toBeNull();
     expect(screen.queryByText("19,629 events")).toBeNull();
@@ -67,6 +73,7 @@ describe("StatusCards tri-state (loading / data / error)", () => {
       subscription_cost_usd: 0,
       openai_cost_usd: 1.5,
       anthropic_cost_usd: 0.5,
+      google_cost_usd: 0.25,
       warnings: 0,
       errors: 0,
       warnings_resolved: 0,
@@ -97,6 +104,7 @@ describe("StatusCards tri-state (loading / data / error)", () => {
       subscription_cost_usd: 0,
       openai_cost_usd: 0.5,
       anthropic_cost_usd: 0.25,
+      google_cost_usd: 0.1,
       warnings: 3,
       errors: 2,
       warnings_resolved: 2_500,
@@ -122,6 +130,7 @@ describe("StatusCards tri-state (loading / data / error)", () => {
       subscription_cost_usd: 0,
       openai_cost_usd: 0.5,
       anthropic_cost_usd: 0.25,
+      google_cost_usd: 0.1,
       warnings: 0,
       errors: 0,
       warnings_resolved: 2_996,
@@ -147,6 +156,7 @@ describe("StatusCards tri-state (loading / data / error)", () => {
       subscription_cost_usd: 0,
       openai_cost_usd: 0,
       anthropic_cost_usd: 0,
+      google_cost_usd: 0,
       warnings: 10_000,
       errors: 0,
       warnings_resolved: 0,
@@ -184,6 +194,7 @@ describe("StatusCards tri-state (loading / data / error)", () => {
       subscription_cost_usd: 0,
       openai_cost_usd: 0.5,
       anthropic_cost_usd: 0.25,
+      google_cost_usd: 0.1,
       warnings: 2,
       errors: 1,
       warnings_resolved: 0,
@@ -225,6 +236,7 @@ describe("StatusCards tri-state (loading / data / error)", () => {
       subscription_cost_usd: 0,
       openai_cost_usd: 0,
       anthropic_cost_usd: 0,
+      google_cost_usd: 0,
       warnings: 0,
       errors: 0,
       warnings_resolved: 0,
@@ -247,6 +259,7 @@ describe("StatusCards tri-state (loading / data / error)", () => {
       subscription_cost_usd: 0,
       openai_cost_usd: null,
       anthropic_cost_usd: null,
+      google_cost_usd: null,
       warnings: 0,
       errors: 0,
       warnings_resolved: 0,
@@ -258,7 +271,7 @@ describe("StatusCards tri-state (loading / data / error)", () => {
     wrap(<AgentSidebar {...handlers} />);
     openStatus();
     expect(await screen.findByText("$1.50")).toBeTruthy();
-    expect(await screen.findAllByText("—")).toHaveLength(2);
+    expect(await screen.findAllByText("—")).toHaveLength(3);
     expect(screen.queryByText(/NaN/)).toBeNull();
   });
 });
@@ -273,6 +286,7 @@ describe("plugin status cards", () => {
       subscription_cost_usd: 0,
       openai_cost_usd: 0,
       anthropic_cost_usd: 0,
+      google_cost_usd: 0,
       warnings: 0,
       errors: 0,
       warnings_resolved: 0,
@@ -466,6 +480,7 @@ describe("StatusCards window selector", () => {
       subscription_cost_usd: 0,
       openai_cost_usd: 4.2,
       anthropic_cost_usd: 3.1,
+      google_cost_usd: 1.4,
       warnings: 2,
       errors: 1,
       warnings_resolved: 0,
@@ -488,13 +503,14 @@ describe("StatusCards window selector", () => {
     openStatus();
     expect(await screen.findByText("5")).toBeTruthy();
     expect(await screen.findByText("$42.80")).toBeTruthy();
-    expect(await screen.findAllByText("…")).toHaveLength(7);
+    expect(await screen.findAllByText("…")).toHaveLength(8);
     expect(screen.queryByText("19.1k")).toBeNull();
     expect(screen.queryByText("80.00%")).toBeNull();
     expect(screen.queryByText("$10.50")).toBeNull();
     expect(screen.queryByText("$4.20")).toBeNull();
     expect(screen.queryByText("$3.10")).toBeNull();
-    expect(await screen.findAllByTitle("Updating for 1h…")).toHaveLength(7);
+    expect(screen.queryByText("$1.40")).toBeNull();
+    expect(await screen.findAllByTitle("Updating for 1h…")).toHaveLength(8);
   });
   it("renders all seven window options including 30d with the persisted value selected", async () => {
     state.agents = [makeAgent({ agent_id: 1 })];
@@ -518,6 +534,7 @@ describe("StatusCards window selector", () => {
       subscription_cost_usd: 0,
       openai_cost_usd: 0.5,
       anthropic_cost_usd: 0.2,
+      google_cost_usd: 0.1,
       warnings: 0,
       errors: 0,
       warnings_resolved: 0,
@@ -563,6 +580,7 @@ describe("StatusCards window selector", () => {
       subscription_cost_usd: subscription,
       openai_cost_usd: null,
       anthropic_cost_usd: null,
+      google_cost_usd: null,
       warnings: 0,
       errors: 0,
       warnings_resolved: 0,
@@ -598,6 +616,7 @@ describe("StatusCards window selector", () => {
     expect(await screen.findByText("Cost (subscription)")).toBeTruthy();
     expect(await screen.findByText("OpenAI API")).toBeTruthy();
     expect(await screen.findByText("Anthropic API")).toBeTruthy();
+    expect(await screen.findByText("Google API")).toBeTruthy();
     expect(screen.queryByText("Average turn time")).toBeNull();
   });
 });

@@ -137,6 +137,7 @@ def test_existing_agent_projection_survives_provider_failure(
     assert dashboard.json()["live_count"] == 1
     assert dashboard.json()["openai_cost_usd"] is None
     assert dashboard.json()["anthropic_cost_usd"] is None
+    assert dashboard.json()["google_cost_usd"] is None
 
 
 def test_model_requests_report_unavailable(

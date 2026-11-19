@@ -143,6 +143,7 @@ def _dashboard(plugin_stats: list[dict[str, JsonValue]]) -> dict[str, object]:
         "subscription_cost_usd": 3.0,
         "openai_cost_usd": None,
         "anthropic_cost_usd": 4.25,
+        "google_cost_usd": 1.15,
         "warnings": 3,
         "errors": 1,
         "warnings_resolved": 0,
@@ -174,7 +175,7 @@ def test_stats_prints_the_totals_and_the_plugin_cards(capsys: pytest.CaptureFixt
         "window:        last 24 hour(s)",
         "live agents:   12",
         "tokens:        in 1000, out 200, cache read 500, cache hit 50.0%",
-        "cost (usd):    api 12.50 (openai unknown, anthropic 4.25), subscription 3.00",
+        "cost (usd):    api 12.50 (openai unknown, anthropic 4.25, google 1.15), subscription 3.00",
         "alerts:        3 warnings, 1 errors; 2 classes active, 1 resolved",
         "",
     ]

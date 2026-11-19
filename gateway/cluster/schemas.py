@@ -239,7 +239,7 @@ class StatsDashboard(BaseModel):
             "description": (
                 "GET /api/stats/dashboard response — the sidebar Status popover's data pulled in one shot.\n\n"
                 "All windowed fields (`tokens` / `cost_usd` / `subscription_cost_usd` /\n"
-                "`openai_cost_usd` / `anthropic_cost_usd` / `warnings` / `errors`) aggregate over the\n"
+                "`openai_cost_usd` / `anthropic_cost_usd` / `google_cost_usd` / `warnings` / `errors`) aggregate over the\n"
                 "`applied_window_hours` horizon.\n"
                 "`window_hours` echoes the selected value — `0` means five minutes; all\n"
                 "other values are hours.\n"
@@ -255,9 +255,9 @@ class StatsDashboard(BaseModel):
                 "  usage-time price is the list value the subscription covered, not money the\n"
                 "  account is billed. Disjoint from `cost_usd`; 0 when no subscription harness ran\n"
                 "  in the window. The console renders both halves whether or not they are zero\n"
-                "- `openai_cost_usd` / `anthropic_cost_usd`: the OpenAI and Anthropic slices\n"
-                "  of `cost_usd`, resolved via the gateway model catalog (`None` only when\n"
-                "  the model catalog failed to load)\n"
+                "- `openai_cost_usd` / `anthropic_cost_usd` / `google_cost_usd`: the OpenAI,\n"
+                "  Anthropic, and Google slices of `cost_usd`, resolved via the gateway model\n"
+                "  catalog (`None` only when the model catalog failed to load)\n"
                 "- `warnings` / `errors`: event totals over the window of the classes that\n"
                 "  still need attention (critical folds into error). A class is resolved when\n"
                 "  an active dismissal cancels it or when nothing of it was recorded for\n"
@@ -291,6 +291,7 @@ class StatsDashboard(BaseModel):
     subscription_cost_usd: float = Field(ge=0)
     openai_cost_usd: float | None = Field(default=None, ge=0)
     anthropic_cost_usd: float | None = Field(default=None, ge=0)
+    google_cost_usd: float | None = Field(default=None, ge=0)
     warnings: NonNegativeInt
     errors: NonNegativeInt
     warnings_resolved: NonNegativeInt = 0
