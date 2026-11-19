@@ -52,10 +52,15 @@ class WindowPair:
         return self.session is not None or self.weekly is not None
 
 
+# meiva:note
+# `ignored` names every quota group that carried windows and still reached no card: a second group
+# of a family a card already took, or a group no family claims. The upstream payload has had one
+# group per family so far, and a new or split group would otherwise be dropped without a word.
 @dataclass(frozen=True)
 class AntigravityQuotaGroups:
     gemini: WindowPair | None = None
     claude_gpt: WindowPair | None = None
+    ignored: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)
