@@ -71,18 +71,13 @@ def _intermediate_turns_sentence(clause: str, *, opening_reply: bool) -> str:
 # (never touching the vendor system prompt or other harnesses) clarifies why delegated workers keep
 # turn outputs under `MEIVA_HIDE_FROM_USER` and deliver to their delegator via `send_message`.
 _CLAUDE_CODE_VISIBILITY_WHY = (
-    "Unlike standalone Claude Code, where every final summary goes straight to a human at the "
-    "terminal, most Meiva agents are background workers spawned by another agent that coordinate "
-    "exclusively with their delegator through `meiva.agents.send_message` from start to finish; "
-    "many never need to emit MEIVA_DISPLAY_TO_USER once. Even when a brief quotes a human's "
-    "request or you finish a PR or report, sending your result to the delegator via "
-    "`meiva.agents.send_message` already completes the delivery: also marking your turn "
-    "MEIVA_DISPLAY_TO_USER raises a separate unread badge in the human's main view for an "
-    "unfamiliar worker they never contacted, duplicating the delegator's summary and interrupting "
-    "their attention. Unless the human has messaged you directly in this agent's inbox or your "
-    "delegator explicitly told you to interface with the human directly, keep every turn output "
-    "(including your final summary) under MEIVA_HIDE_FROM_USER (its full text remains available "
-    "inside expandable Details) and reserve MEIVA_DISPLAY_TO_USER for direct human-facing work.\n\n"
+    "Unlike standalone Claude Code, where output goes to a human at a terminal, many Meiva "
+    "agents are workers spawned by another agent to report via `meiva.agents.send_message`. "
+    "When you have a delegator, reporting there completes delivery — even if your brief quotes "
+    "a human or asks for a PR or report. Marking that summary MEIVA_DISPLAY_TO_USER raises an "
+    "unexpected unread badge in the human's main view for an unfamiliar worker and duplicates "
+    "your delegator's update, so keep delegated summaries under MEIVA_HIDE_FROM_USER (readable "
+    "in Details) unless answering the human directly or an attention exception below applies.\n\n"
 )
 
 

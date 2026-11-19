@@ -295,8 +295,9 @@ def test_claude_code_handoff_appends_visibility_why_only_in_prefix_mode() -> Non
 
     assert "Unlike standalone Claude Code" in visibility_block
     assert "meiva.agents.send_message" in visibility_block
-    assert "separate unread badge" in visibility_block
-    assert "Unless the human has messaged you directly" in visibility_block
+    assert "When you have a delegator" in visibility_block
+    assert "unexpected unread badge" in visibility_block
+    assert "delegated summaries" in visibility_block
     assert "MEIVA_HIDE_FROM_USER" in visibility_block
     assert "MEIVA_DISPLAY_TO_USER" in visibility_block
     assert (
