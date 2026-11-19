@@ -141,7 +141,7 @@ export const TurnBlock = memo(function TurnBlock({
     (summary.lastLiveKind !== null && summary.lastLiveStartedAt > 0) || liveAnchor > 0;
   const measuredLabel = turnActive
     ? totalWorkedMs > 0 || hasWork || hasLiveTimer
-      ? t("workingFor", { duration: formatDuration(totalWorkedMs) })
+      ? t("workingFor", { duration: formatDuration(totalWorkedMs, { wholeSeconds: true }) })
       : t("working")
     : hasWork
       ? t("workedFor", { duration: formatDuration(summary.workedMs) })
@@ -251,7 +251,9 @@ export const PendingLiveActivityWindow = memo(function PendingLiveActivityWindow
   const hasAnchor = startedAt > 0;
   const liveNow = useNow(hasAnchor);
   const label = hasAnchor
-    ? t("workingFor", { duration: formatDuration(Math.max(liveNow - startedAt, 0)) })
+    ? t("workingFor", {
+        duration: formatDuration(Math.max(liveNow - startedAt, 0), { wholeSeconds: true }),
+      })
     : t("working");
   return (
     <div

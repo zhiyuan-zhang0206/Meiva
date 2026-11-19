@@ -297,15 +297,18 @@ describe("TurnBlock component", () => {
       const { rerender } = render(
         <TurnBlock id="turn-note" memberIds={["1.0"]} summary={noteOnly} expanded={false} turnActive lastEventAt={100_000} onToggle={vi.fn()} />,
       );
-      expect(screen.getByTestId("turn-toggle").textContent).toContain("Working for 0.1s");
+      expect(screen.getByTestId("turn-toggle").textContent).toContain("Working for 0s");
       expect(screen.getByTestId("turn-toggle").textContent).not.toContain("Working…");
 
       act(() => { vi.setSystemTime(100_040); });
       rerender(
         <TurnBlock id="turn-note" memberIds={["1.0"]} summary={noteOnly} expanded={false} turnActive lastEventAt={100_040} onToggle={vi.fn()} />,
       );
-      expect(screen.getByTestId("turn-toggle").textContent).toContain("Working for 0.1s");
+      expect(screen.getByTestId("turn-toggle").textContent).toContain("Working for 0s");
       expect(screen.getByTestId("turn-toggle").textContent).not.toContain("Working…");
+
+      act(() => { vi.advanceTimersByTime(1_000); });
+      expect(screen.getByTestId("turn-toggle").textContent).toContain("Working for 1s");
     } finally {
       vi.useRealTimers();
     }
@@ -559,15 +562,33 @@ describe("Working title Silver Glint shimmer", () => {
     expect(container.querySelector(".timeline-title-working")).toBeNull();
   });
 
-  it("applies timeline-title-working to PendingLiveActivityWindow title span only", () => {
-    render(<PendingLiveActivityWindow />);
-    const pending = screen.getByTestId("pending-live-activity-window");
-    const shimmerEl = pending.querySelector(".timeline-title-working");
-    expect(shimmerEl).not.toBeNull();
-    expect(shimmerEl?.tagName).toBe("SPAN");
-    expect(shimmerEl?.textContent).toBe("Working…");
-    expect(pending.querySelectorAll(".timeline-title-working")).toHaveLength(1);
-    expect(pending.querySelector("svg")?.classList.contains("timeline-title-working")).toBe(false);
+  it("applies timeline-title-working to PendingLiveActivityWindow title span only and formats whole seconds", () => {
+    vi.useFakeTimers();
+    try {
+      const startMs = 1_700_000_000_000;
+      vi.setSystemTime(startMs + 450);
+
+      const { rerender } = render(<PendingLiveActivityWindow />);
+      const pending = screen.getByTestId("pending-live-activity-window");
+      const shimmerEl = pending.querySelector(".timeline-title-working");
+      expect(shimmerEl).not.toBeNull();
+      expect(shimmerEl?.tagName).toBe("SPAN");
+      expect(shimmerEl?.textContent).toBe("Working…");
+      expect(pending.querySelectorAll(".timeline-title-working")).toHaveLength(1);
+      expect(pending.querySelector("svg")?.classList.contains("timeline-title-working")).toBe(false);
+
+      rerender(<PendingLiveActivityWindow startedAt={startMs} />);
+      const timedEl = pending.querySelector(".timeline-title-working");
+      expect(timedEl?.textContent).toBe("Working for 0s");
+      expect(timedEl?.textContent).not.toContain(".");
+
+      act(() => {
+        vi.advanceTimersByTime(1_000);
+      });
+      expect(pending.querySelector(".timeline-title-working")?.textContent).toBe("Working for 1s");
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("pins active shimmer animation startTime to 0 in both TurnBlock and PendingLiveActivityWindow", () => {

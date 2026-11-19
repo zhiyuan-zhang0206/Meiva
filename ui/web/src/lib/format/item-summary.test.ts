@@ -109,4 +109,18 @@ describe("formatDuration", () => {
     expect(formatDuration(72_000)).toBe("1m 12s");
     expect(formatDuration(120_000)).toBe("2m");
   });
+
+  it("wholeSeconds floors sub-second and minute durations without decimals or 60s rollover", () => {
+    expect(formatDuration(-500, { wholeSeconds: true })).toBe("0s");
+    expect(formatDuration(0, { wholeSeconds: true })).toBe("0s");
+    expect(formatDuration(100, { wholeSeconds: true })).toBe("0s");
+    expect(formatDuration(999, { wholeSeconds: true })).toBe("0s");
+    expect(formatDuration(1_000, { wholeSeconds: true })).toBe("1s");
+    expect(formatDuration(1_999, { wholeSeconds: true })).toBe("1s");
+    expect(formatDuration(59_999, { wholeSeconds: true })).toBe("59s");
+    expect(formatDuration(60_000, { wholeSeconds: true })).toBe("1m");
+    expect(formatDuration(72_999, { wholeSeconds: true })).toBe("1m 12s");
+    expect(formatDuration(119_999, { wholeSeconds: true })).toBe("1m 59s");
+    expect(formatDuration(120_000, { wholeSeconds: true })).toBe("2m");
+  });
 });

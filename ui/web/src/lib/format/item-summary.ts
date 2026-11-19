@@ -58,16 +58,26 @@ export function summarizeCode(sdkCalls?: readonly SdkCall[] | null): CodeSummary
 
 // --- formatting helpers (shared by the chip) ---
 
-/** Human duration from milliseconds: `0.1s` / `0.3s` / `8s` / `1m 12s`. Shared
- *  by the thinking chip ("Thinking for Xs") and the output chip ("ran in Xs").
- *  Values <0.1s floor at 0.1s; 0.1–1s round to 0.1s; 1–60s round to whole
- *  seconds; >=60s switches to `Nm Ss`. */
-export function formatDuration(ms: number): string {
+function formatMinuteSeconds(m: number, s: number): string {
+  return s === 0 ? `${m}m` : `${m}m ${s}s`;
+}
+
+// meiva:note
+// Human duration from milliseconds: `0.1s` / `0.3s` / `8s` / `1m 12s`. Shared
+// by the thinking chip ("Thinking for Xs") and the output chip ("ran in Xs").
+// Values <0.1s floor at 0.1s; 0.1–1s round to 0.1s; 1–60s round to whole
+// seconds; >=60s switches to `Nm Ss`. Passing `{ wholeSeconds: true }`
+// floors to whole seconds (`0s`..`59s`, `1m`, `1m 12s`) for active Working timers.
+// meiva:link ui/web/src/docs/frontend-components/timeline-view/deep-collapse.md
+export function formatDuration(ms: number, options?: { wholeSeconds?: boolean }): string {
+  if (options?.wholeSeconds) {
+    const totalSec = Math.floor(Math.max(0, ms) / 1000);
+    if (totalSec < 60) return `${totalSec}s`;
+    return formatMinuteSeconds(Math.floor(totalSec / 60), totalSec % 60);
+  }
   const totalSec = ms / 1000;
   if (totalSec < 0.1) return "0.1s";
   if (totalSec < 1) return `${Math.round(totalSec * 10) / 10}s`;
   if (totalSec < 60) return `${Math.round(totalSec)}s`;
-  const m = Math.floor(totalSec / 60);
-  const s = Math.round(totalSec % 60);
-  return s === 0 ? `${m}m` : `${m}m ${s}s`;
+  return formatMinuteSeconds(Math.floor(totalSec / 60), Math.round(totalSec % 60));
 }
