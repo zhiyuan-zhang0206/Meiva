@@ -139,6 +139,16 @@ Capabilities rather than standing as its own section.
   conversation. `MEIVA_HIDE_FROM_USER` routes working notes to Details,
   which the user can expand. Invalid or missing markers also fold into Details
   and trigger a correction note.
+  Both `user_reply_section` and `harness_user_reply_section` append
+  `## Fast acknowledgement`, controlled by `settings.agent.prompt.fast_acknowledgement`
+  (env `MEIVA_FAST_ACKNOWLEDGEMENT`, cluster default `False`, per-agent
+  `config_overlay` override): when off, it explicitly instructs agents not to
+  send empty or low-information acknowledgements (before tools or mid-task) and
+  to work silently until the final answer or a real blocker; when on, it
+  instructs agents to emit one concise `MEIVA_DISPLAY_TO_USER` (or
+  `meiva.ui.publish`) confirmation before calling tools on direct,
+  unambiguous user requests and stay silent after pure-action commands instead
+  of interrupting a second time.
 - **Core communication style** — `agent/graph/prompt/system_prompt.py:communication_style_section`,
   selected by `settings.agent.agent_communication_style` (env
   `MEIVA_AGENT_COMMUNICATION_STYLE`, default `off`): how much the agent narrates

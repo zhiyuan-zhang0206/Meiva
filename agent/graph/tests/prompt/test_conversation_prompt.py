@@ -355,3 +355,47 @@ def test_build_harness_system_prompt_leaves_non_claude_harnesses_unchanged() -> 
     )
     assert "Unlike standalone Claude Code" in claude
     assert "Unlike standalone Claude Code" not in baseline
+
+
+_FAST_ACK_MODE_PHRASES: dict[str, tuple[str, str, str]] = {
+    "prefix": (
+        f"emit one brief `{DISPLAY_TO_USER}`",
+        f"use `{HIDE_FROM_USER}` for all tool calls",
+        f"only then use `{DISPLAY_TO_USER}`",
+    ),
+    "sdk": (
+        "call `meiva.ui.publish(...)` with one concise sentence",
+        "end with `meiva.ui.publish(None)`",
+        "Do not call `meiva.ui.publish(...)` just to send an empty",
+    ),
+    "naive": (
+        "emit one brief confirmation sentence",
+        "avoid a redundant closing summary",
+        "Do not send empty or low-information acknowledgements",
+    ),
+}
+
+
+@pytest.mark.parametrize("mode", ["prefix", "sdk", "naive"])
+def test_fast_acknowledgement_off_and_on_across_modes_and_callers(mode: str) -> None:
+    off_slices = _slices(agent__user_delivery_mode=mode, agent__fast_acknowledgement=False)
+    on_slices = _slices(agent__user_delivery_mode=mode, agent__fast_acknowledgement=True)
+    off_native = user_reply_section(_inputs(off_slices))
+    off_harness = harness_user_reply_section(_inputs(off_slices))
+    on_native = user_reply_section(_inputs(on_slices))
+    on_harness = harness_user_reply_section(_inputs(on_slices))
+
+    assert (
+        off_native.split("## Fast acknowledgement", 1)[1]
+        == off_harness.split("## Fast acknowledgement", 1)[1]
+    )
+    assert (
+        on_native.split("## Fast acknowledgement", 1)[1]
+        == on_harness.split("## Fast acknowledgement", 1)[1]
+    )
+    assert off_native != on_native
+    assert off_harness != on_harness
+
+    on_phrase_1, on_phrase_2, off_phrase = _FAST_ACK_MODE_PHRASES[mode]
+    assert on_phrase_1 in on_native and on_phrase_2 in on_native
+    assert off_phrase in off_native

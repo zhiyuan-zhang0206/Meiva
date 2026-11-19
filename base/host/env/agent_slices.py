@@ -31,6 +31,7 @@ class Prompt:
     agent_communication_style: str | None
     prompt_codeact_enabled: bool
     prompt_sequential_tool_calls_enabled: bool
+    fast_acknowledgement: bool
     sdk_disable: tuple[str, ...]
     to_user_soft_limit_words: int
     to_user_limit_reminder_cadence: Cadence

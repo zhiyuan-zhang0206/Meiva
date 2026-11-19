@@ -161,8 +161,85 @@ def _build_user_reply_section(
     )
 
 
+def _fast_acknowledgement_enabled(inputs: SectionInputs) -> bool:
+    return bool(inputs.slices.prompt.fast_acknowledgement)
+
+
+def _fast_acknowledgement_section(*, enabled: bool, mode: UserDeliveryMode) -> str:
+    if mode is UserDeliveryMode.SDK:
+        if enabled:
+            return (
+                "## Fast acknowledgement\n\n"
+                "When you receive a direct, unambiguous user instruction that you can act on "
+                "immediately, make a quick sanity check and — before running tools — immediately "
+                "call `meiva.ui.publish(...)` with one concise sentence (in the user's language) "
+                "confirming you are starting. After that opening confirmation, work silently "
+                "without progress publications. If the instruction is a pure action request that "
+                "requires no post-execution report, end with `meiva.ui.publish(None)` instead of "
+                "interrupting the user a second time; otherwise publish the final result once."
+            )
+        return (
+            "## Fast acknowledgement\n\n"
+            "Do not call `meiva.ui.publish(...)` just to send an empty or low-information "
+            "acknowledgement (such as 'Got it, I'll...', 'On it', 'Delegated, will report "
+            "back', or equivalent phrases in the user's language). Users often step away right "
+            "after sending a clear instruction; a delayed or intermediate acknowledgement adds "
+            "no usable information and creates an unnecessary unread interruption. When a user "
+            "instruction is clear and unambiguous, work silently and publish only when "
+            "delivering the final result or hitting a genuine ambiguity, decision, or blocker "
+            "that needs the user's input."
+        )
+    if mode is UserDeliveryMode.NAIVE:
+        if enabled:
+            return (
+                "## Fast acknowledgement\n\n"
+                "When you receive a direct, unambiguous user instruction that you can act on "
+                "immediately, make a quick sanity check and — before calling any tool — emit one "
+                "brief confirmation sentence (in the user's language) so the user knows you have "
+                "started. Avoid mid-run narration afterwards. If the instruction is a pure action "
+                "request requiring no post-execution report, avoid a redundant closing summary; "
+                "otherwise deliver the final result once."
+            )
+        return (
+            "## Fast acknowledgement\n\n"
+            "Do not send empty or low-information acknowledgements before calling tools or after "
+            "starting/delegating work (such as 'Got it, I'll...', 'On it', 'Delegated, will "
+            "report back', or equivalent phrases in the user's language). Users often step away "
+            "right after sending a clear instruction; an intermediate acknowledgement adds no "
+            "usable information and creates unnecessary noise. Wait until you deliver the final "
+            "result or hit a genuine ambiguity, decision, or blocker requiring the user's input."
+        )
+    if enabled:
+        return (
+            "## Fast acknowledgement\n\n"
+            "When you receive a direct, unambiguous user instruction that you can act on "
+            "immediately, make a quick sanity check and — before calling any tool — immediately "
+            "emit one brief `MEIVA_DISPLAY_TO_USER` acknowledgement (one concise sentence in the "
+            "user's language confirming you are starting). This ensures the user sees immediate "
+            "confirmation before long tool work runs. Immediately after that opening "
+            "acknowledgement, use `MEIVA_HIDE_FROM_USER` for all tool calls and intermediate "
+            "work. When finished, if the instruction was a pure action/execution request that "
+            "needs no post-execution report, stay silent (`MEIVA_HIDE_FROM_USER`) instead of "
+            "interrupting the user a second time; if it asked for findings, an answer, or a "
+            "deliverable, send the final result once with `MEIVA_DISPLAY_TO_USER`."
+        )
+    return (
+        "## Fast acknowledgement\n\n"
+        "Do not send empty or low-information acknowledgements before calling tools or after "
+        "delegating/starting work (for example, 'Got it, I'll...', 'On it', 'I've delegated "
+        "this, will report back', or equivalent phrases in the user's language). Users often "
+        "step away right after sending a clear instruction; a delayed or intermediate "
+        "acknowledgement adds zero usable information and creates an unnecessary unread "
+        "interruption. When a direct user instruction is clear and unambiguous, use "
+        "`MEIVA_HIDE_FROM_USER` and execute silently until you truly finish and deliver the "
+        "final result, or encounter a genuine ambiguity, decision, or blocker that requires "
+        "the user's input — only then use `MEIVA_DISPLAY_TO_USER`."
+    )
+
+
 def user_reply_section(_inputs: SectionInputs) -> str:
     opening_reply = _opening_reply_enabled(_inputs)
+    fast_acknowledgement = _fast_acknowledgement_enabled(_inputs)
     return delivery_prompt(
         _inputs.slices.prompt.user_delivery_mode,
         _build_user_reply_section(
@@ -176,6 +253,7 @@ def user_reply_section(_inputs: SectionInputs) -> str:
             opening_reply=opening_reply,
         ),
         opening_reply=opening_reply,
+        fast_acknowledgement=fast_acknowledgement,
     )
 
 
@@ -224,6 +302,7 @@ _SILENT_BODY = (
 def harness_user_reply_section(_inputs: SectionInputs) -> str:
     opening_reply = _opening_reply_enabled(_inputs)
     visibility_why = _CLAUDE_CODE_VISIBILITY_WHY if _inputs.harness is Harness.CLAUDE_CODE else ""
+    fast_acknowledgement = _fast_acknowledgement_enabled(_inputs)
     return delivery_prompt(
         _inputs.slices.prompt.user_delivery_mode,
         _build_user_reply_section(
@@ -238,6 +317,7 @@ def harness_user_reply_section(_inputs: SectionInputs) -> str:
             visibility_why=visibility_why,
         ),
         opening_reply=opening_reply,
+        fast_acknowledgement=fast_acknowledgement,
     )
 
 
@@ -248,10 +328,17 @@ COMMUNICATION_STYLE_SECTIONS = {
 }
 
 
-def delivery_prompt(mode_value: str, ordinary: str, *, opening_reply: bool) -> str:
+def delivery_prompt(
+    mode_value: str,
+    ordinary: str,
+    *,
+    opening_reply: bool,
+    fast_acknowledgement: bool = False,
+) -> str:
     mode = UserDeliveryMode(mode_value)
+    fast_ack = _fast_acknowledgement_section(enabled=fast_acknowledgement, mode=mode)
     if mode is UserDeliveryMode.PREFIX:
-        return ordinary
+        return f"{ordinary}\n\n{fast_ack}"
     if mode is UserDeliveryMode.SDK:
         return (
             "# User delivery\n\n"
@@ -271,11 +358,12 @@ def delivery_prompt(mode_value: str, ordinary: str, *, opening_reply: bool) -> s
             "Use the user's requested language. Each publication must stand alone and state what "
             "changed and any action needed. Reading is not answering or approval. "
             "Use ask for questions; every question includes an editable Note. Optional publish "
-            "suggestions and Note suggestions are drafts, never user facts or consent."
+            "suggestions and Note suggestions are drafts, never user facts or consent.\n\n"
+            + fast_ack
         )
     start = ordinary.index("## Output visibility")
     end = ordinary.index("## User attention", start)
-    return (
+    naive = (
         ordinary[:start] + "## Delivery mechanics\n\n"
         "Ordinary assistant text in this mode is user-visible. Literal visibility "
         "labels do not hide it. Keep internal process narration in tool feedback "
@@ -284,6 +372,7 @@ def delivery_prompt(mode_value: str, ordinary: str, *, opening_reply: bool) -> s
         "Text alongside a tool call follows the same visibility rule as a standalone reply. ",
         "",
     )
+    return f"{naive}\n\n{fast_ack}"
 
 
 def delivery_style_prompt(mode: str, style: str, *, opening_reply: bool) -> str:

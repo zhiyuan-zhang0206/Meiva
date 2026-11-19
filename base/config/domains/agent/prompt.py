@@ -596,6 +596,31 @@ class AgentPromptSettings(EnvSettings):
         },
     )
 
+    fast_acknowledgement: bool = Field(
+        title="Fast acknowledgement",
+        default=False,
+        alias="MEIVA_FAST_ACKNOWLEDGEMENT",
+        description=(
+            "Send one brief visible confirmation before calling any tool on a "
+            "clear, direct user request, then execute silently. Off by default: "
+            "suppress low-information acknowledgements and stay silent until "
+            "delivering the final result or hitting a real ambiguity or blocker."
+        ),
+        json_schema_extra={
+            "capability": "common",
+            "restart_required": "agent",
+            "writable": True,
+            "sensitive": False,
+            "scope": "cluster-default",
+            "per_agent": True,
+            "lifecycle": "live",
+            "help_text": (
+                "Send a brief confirmation right when starting a clear direct request; "
+                "off stays silent until the final result or a question."
+            ),
+        },
+    )
+
     @field_validator(
         "sdk_disable",
         "sdk_expand_in_system_prompt",

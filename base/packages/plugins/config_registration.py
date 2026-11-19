@@ -258,6 +258,12 @@ def _validate_reasoning_effort_range(value: object) -> str | None:
     return f"value {value!r} is not valid; valid values: {rendered_values}"
 
 
+def _validate_bool(value: object) -> str | None:
+    if isinstance(value, bool):
+        return None
+    return f"value {value!r} must be a boolean (true or false)"
+
+
 def _range_validator(
     *,
     gt: float | None = None,
@@ -306,6 +312,7 @@ _FRAMEWORK_RANGE_VALIDATORS: dict[str, Callable[[object], str | None]] = {
     "memory_recall_inject_max": _range_validator(ge=0),
     "skill_recall_max": _range_validator(ge=0),
     "to_user_soft_limit_words": _range_validator(gt=0),
+    "fast_acknowledgement": _validate_bool,
 }
 
 

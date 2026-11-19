@@ -45,7 +45,7 @@ import { useApi } from "@/lib/transport/transport-context";
 import { isImeComposition } from "@/lib/input/enter-to-send";
 
 const COMMON_FIELDS = new Set([
-  "MEIVA_AGENT_COMMUNICATION_STYLE", "MEIVA_REASONING_EFFORT",
+  "MEIVA_AGENT_COMMUNICATION_STYLE", "MEIVA_FAST_ACKNOWLEDGEMENT", "MEIVA_REASONING_EFFORT",
 ]);
 
 const configQueryKey = (machine: MachineSelection) => ["config", machine] as const;
@@ -323,9 +323,10 @@ export default function ConfigEditor({ mode }: { mode: "general" | "advanced" | 
     filter,
   );
   const generalFields = allGroups.flatMap((group) => group.fields);
+  const communicationFields = new Set(["agent_communication_style", "fast_acknowledgement"]);
   const groupSections = mode === "general" ? [
-    { id: "config-communication", label: t("workingTogether"), fields: generalFields.filter((field) => field.name === "agent_communication_style") },
-    { id: "config-model-preferences", label: t("modelsHeading"), fields: generalFields.filter((field) => field.name !== "agent_communication_style") },
+    { id: "config-communication", label: t("workingTogether"), fields: generalFields.filter((field) => communicationFields.has(field.name)) },
+    { id: "config-model-preferences", label: t("modelsHeading"), fields: generalFields.filter((field) => !communicationFields.has(field.name)) },
   ] : allGroups;
   const shownCount = groupSections.reduce((n, g) => n + g.fields.length, 0);
 

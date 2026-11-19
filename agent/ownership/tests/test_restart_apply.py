@@ -72,3 +72,27 @@ def test_a_restart_that_keeps_the_harness_stores_only_the_overlay_and_leaves_a_p
     assert [params for _sql, params in plan.statements] == [('{"exec_timeout_seconds": 30}', 7)]
     assert plan.note is not None
     assert plan.note.content == "Restart was accepted from yourself: shorter timeout"
+
+
+def test_restart_apply_announces_fast_acknowledgement_overlay_changes() -> None:
+    ext_transition_off = restart_apply(
+        7,
+        source="self",
+        message=None,
+        resume_turn=False,
+        transition=RestartTransition("codex", {"fast_acknowledgement": False}),
+        stored_harness="codex",
+    )
+    assert ext_transition_off.note is not None
+    assert "[Config updated: fast_acknowledgement=off]" in ext_transition_off.note.content
+
+    ext_transition_on = restart_apply(
+        7,
+        source="user",
+        message="enable fast ack",
+        resume_turn=True,
+        transition=RestartTransition("claude_code", {"fast_acknowledgement": True}),
+        stored_harness="claude_code",
+    )
+    assert ext_transition_on.note is not None
+    assert "[Config updated: fast_acknowledgement=on]" in ext_transition_on.note.content
