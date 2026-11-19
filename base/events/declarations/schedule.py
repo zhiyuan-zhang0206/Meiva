@@ -32,9 +32,7 @@ class ScheduleLaunchRefused(TypedDict):
 # lost 16:31:09Z, restarted 18:16:38Z, the stall would have fired 18:31:09Z).
 #
 # The two events are two stages of one outage, not duplicates: this one says "it is down, act now",
-# `schedule_stalled` says "it is still down two hours later, nobody has acted". When the relaunch
-# was suppressed by the auto-restart budget, `schedule_auto_restart_suppressed` is emitted on the
-# same tick and names that reason.
+# `schedule_stalled` says "it is still down two hours later, nobody has acted".
 #
 # No `not_live_since` here: the stall pass writes that column, and at detection it is still unset.
 # The detection instant is this event's own timestamp.
@@ -88,20 +86,6 @@ class ScheduleConvergenceAbandoned(TypedDict):
     schedule_id: int
     reason: str
     blocked_seconds: float
-
-
-class ScheduleAutoRestart(TypedDict):
-    schedule_id: int
-    previous_generation: str
-    current_generation: str
-    restarts_in_window: int
-
-
-class ScheduleAutoRestartSuppressed(TypedDict):
-    schedule_id: int
-    previous_generation: str
-    current_generation: str
-    restarts_in_window: int
 
 
 # meiva:note
@@ -159,20 +143,6 @@ EVENTS: dict[str, EventSpec] = {
         payload=ScheduleConvergenceAbandoned,
         tier="anomaly",
         site="services/wake/schedule_manager/manager.py:_give_up telemetry.emit",
-    ),
-    "schedule_auto_restart": telemetry_event(
-        "schedule_auto_restart",
-        "a schedule's session host was replaced (host reboot, deploy stop/start, pty-sessions service restart) and the manager relaunched the schedule once in the new generation; a second silent death inside the same generation stays a terminal error",
-        payload=ScheduleAutoRestart,
-        tier="anomaly",
-        site="services/wake/schedule_manager/manager.py:_reclaim_after_host_replacement telemetry.emit",
-    ),
-    "schedule_auto_restart_suppressed": telemetry_event(
-        "schedule_auto_restart_suppressed",
-        "a schedule's session host was replaced again after the schedule already used the configured automatic relaunches of the rolling window; the schedule is recorded as an error and waits for an explicit restart",
-        payload=ScheduleAutoRestartSuppressed,
-        tier="anomaly",
-        site="services/wake/schedule_manager/manager.py:_emit_auto_restart_suppressed telemetry.emit",
     ),
     "schedule_verify_failed": telemetry_event(
         "schedule_verify_failed",

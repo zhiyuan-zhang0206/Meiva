@@ -107,11 +107,8 @@ privileges (mirrored in `db/schema.sql` and `base/cluster/authority/groups.py`):
   and eliminates single-box vs. split-runner permission skew. Fixed port slot
   `8122` already exists in `FIXED_PORTS`; runner homes require no port-record
   migration.
-- **Config capability**: `schedule_manager_health_port`,
-  `schedule_auto_restart_max_per_window`,
-  `schedule_auto_restart_window_seconds`,
-  `schedule_recovery_gate_alert_seconds`, and `schedule_stall_timeout_seconds`
-  move from `capability="gateway"` to `capability="common"`, regenerating
+- **Config capability**: `schedule_manager_health_port` and
+  `schedule_stall_timeout_seconds` move from `capability="gateway"` to `capability="common"`, regenerating
   `base/host/env/config_lite_table.json`.
 - **Partitioned loops**: `ScheduleManager` binds `machine_name` at construction:
   - `reconcile` loads `WHERE enabled AND machine = %s` and scopes stall-timer
