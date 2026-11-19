@@ -2,7 +2,7 @@
 
 import { X } from "lucide-react";
 import { useTranslations } from "next-intl";
-import type { ComponentPropsWithoutRef, RefObject } from "react";
+import type { ComponentPropsWithoutRef, ReactNode, RefObject } from "react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 
@@ -94,10 +94,18 @@ function ImageLightbox({
 // meiva:note
 // To user document images open at full size on click: the inline image is a button, and the enlarged copy is portalled to document.body (Escape, the close button, or a click on the backdrop dismisses it). Portalling is required because the document pane scrolls inside a contained box, which would clip a fixed layer.
 // meiva:link ui/web/src/docs/frontend-components/markdown-surfaces.md
-export function ZoomableImage({ src, alt, className }: {
+export function ZoomableImage({
+  src,
+  alt,
+  className,
+  buttonClassName,
+  overlay,
+}: {
   src: string;
   alt: string;
   className?: string;
+  buttonClassName?: string;
+  overlay?: ReactNode;
 }) {
   const t = useTranslations("common");
   const [open, setOpen] = useState(false);
@@ -112,9 +120,13 @@ export function ZoomableImage({ src, alt, className }: {
         onClick={() => setOpen(true)}
         aria-label={alt || t("openImage")}
         data-testid="zoomable-image"
-        className="block cursor-zoom-in rounded border-0 bg-transparent p-0"
+        className={cn(
+          "relative block cursor-zoom-in rounded border-0 bg-transparent p-0",
+          buttonClassName,
+        )}
       >
         <img src={src} alt={alt} loading="lazy" className={cn("max-w-full rounded border border-border object-contain", className)} />
+        {overlay}
       </button>
       <ImageLightbox open={open} onClose={close} src={src} alt={alt} triggerRef={buttonRef} />
     </>

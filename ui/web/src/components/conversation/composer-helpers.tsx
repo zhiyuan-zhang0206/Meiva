@@ -1,8 +1,9 @@
 "use client";
 
-import { FileText, RotateCcw } from "lucide-react";
+import { FileText, RotateCcw, ZoomIn } from "lucide-react";
 import { useTranslations } from "next-intl";
 
+import { ZoomableImage } from "@/components/content/zoomable-image";
 import { type SlashAutocompleteHandle } from "@/components/conversation/slash-autocomplete";
 import type { DeliveredUploadStatus } from "@/lib/contracts/types";
 import { cn, formatFileSize } from "@/lib/format/utils";
@@ -110,20 +111,40 @@ export function ComposerAttachmentStrip({
           key={att.key}
           data-testid="composer-attachment-card"
           data-status={att.status}
-          className="relative"
+          className="relative isolate"
         >
           {att.previewUrl ? (
-            <picture>
-              <img
-                src={att.previewUrl}
-                alt={att.name}
-                className={cn(
-                  "h-14 w-14 rounded border border-border object-cover",
-                  att.status === "uploading" && "opacity-50",
-                  att.status === "error" && "ring-1 ring-destructive",
-                )}
-              />
-            </picture>
+            <ZoomableImage
+              src={att.previewUrl}
+              alt={att.name}
+              buttonClassName="group/thumb"
+              className={cn(
+                "h-14 w-14 rounded border border-border object-cover",
+                att.status === "uploading" && "opacity-50",
+                att.status === "error" && "ring-1 ring-destructive",
+              )}
+              overlay={
+                att.status === "ready" ? (
+                  <span
+                    aria-hidden="true"
+                    data-testid="composer-thumb-zoom-overlay"
+                    className={cn(
+                      "pointer-events-none absolute inset-0 z-[15] items-center justify-center rounded bg-black/35 opacity-0 transition-opacity duration-150 group-hover/thumb:opacity-100 group-focus-visible/thumb:opacity-100",
+                      FLEX,
+                    )}
+                  >
+                    <span
+                      className={cn(
+                        "size-6 items-center justify-center rounded-full bg-black/60 text-white shadow-sm",
+                        FLEX,
+                      )}
+                    >
+                      <ZoomIn className="size-3.5" />
+                    </span>
+                  </span>
+                ) : undefined
+              }
+            />
           ) : (
             <div
               className={cn(
@@ -143,7 +164,7 @@ export function ComposerAttachmentStrip({
           {att.status !== "ready" ? (
             <span
               className={cn(
-                "absolute inset-0 items-center justify-center rounded bg-background/60 text-[10px] font-medium",
+                "pointer-events-none absolute inset-0 z-10 items-center justify-center rounded bg-background/60 text-[10px] font-medium",
                 att.status === "error" ? "text-destructive" : "text-muted-foreground",
                 FLEX,
               )}
@@ -163,7 +184,7 @@ export function ComposerAttachmentStrip({
               onClick={() => onRetry(att.key)}
               disabled={composerLocked}
               className={cn(
-                "absolute -bottom-1.5 -right-1.5 h-5 w-5 items-center justify-center rounded-full border border-border bg-background text-foreground shadow-sm hover:bg-accent pointer-coarse:after:absolute pointer-coarse:after:-inset-2",
+                "absolute -bottom-1.5 -right-1.5 z-20 h-5 w-5 items-center justify-center rounded-full border border-border bg-background text-foreground shadow-sm hover:bg-accent pointer-coarse:after:absolute pointer-coarse:after:-inset-2",
                 FLEX,
               )}
             >
@@ -176,7 +197,7 @@ export function ComposerAttachmentStrip({
             onClick={() => onRemove(att.key)}
             disabled={composerLocked}
             className={cn(
-              "absolute -right-1.5 -top-1.5 h-4 w-4 items-center justify-center rounded-full bg-foreground/80 text-background text-[10px] leading-none pointer-coarse:after:absolute pointer-coarse:after:-inset-2",
+              "absolute -right-1.5 -top-1.5 z-20 h-4 w-4 items-center justify-center rounded-full bg-foreground/80 text-background text-[10px] leading-none pointer-coarse:after:absolute pointer-coarse:after:-inset-2",
               FLEX,
             )}
           >

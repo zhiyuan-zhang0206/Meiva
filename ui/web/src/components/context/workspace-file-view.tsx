@@ -186,20 +186,25 @@ export function WorkspaceFileView({
           )}
         </div>
 
-        <div className={cn("shrink-0 items-center gap-1.5 ml-1", FLEX)}>
-          {data?.size !== undefined && (
-            <span className="text-[10px] text-muted-foreground">({formatFileSize(data.size)})</span>
-          )}
-          <button
-            title={t("refresh")}
-            aria-label={t("refresh")}
-            onClick={() => void refetch()}
-            disabled={isFetching}
-            className="rounded p-1 hover:bg-accent disabled:opacity-50"
-          >
-            <RefreshCw className={cn("size-3.5", isFetching && "animate-spin")} />
-          </button>
-        </div>
+        {(data?.size !== undefined || !isLoading) && (
+          <div className={cn("shrink-0 items-center gap-1.5 ml-1", FLEX)}>
+            {data?.size !== undefined && (
+              <span className="text-[10px] text-muted-foreground">({formatFileSize(data.size)})</span>
+            )}
+            {!isLoading ? (
+              <button
+                type="button"
+                title={t("refresh")}
+                aria-label={t("refresh")}
+                onClick={() => void refetch()}
+                disabled={isFetching}
+                className="rounded p-1 hover:bg-accent disabled:opacity-50"
+              >
+                <RefreshCw className="size-3.5" />
+              </button>
+            ) : null}
+          </div>
+        )}
 
         <div className={cn("ml-auto shrink-0 items-center", FLEX)}>
           {onInspect ? (
@@ -269,18 +274,15 @@ export function WorkspaceFileView({
             />
           </div>
         ) : isImage ? (
-          <div className={cn("items-center justify-center p-6 gap-3", FLEX, FLEX_COL)}>
+          <div className={cn("items-center justify-center p-6", FLEX, FLEX_COL)}>
             <ZoomableImage
               src={rawUrl}
               alt={data.name}
               className="max-w-full max-h-[70vh] rounded border shadow-sm object-contain"
             />
-            <span className="text-xs text-muted-foreground">
-              {data.name} ({formatFileSize(data.size)})
-            </span>
           </div>
         ) : isVideo ? (
-          <div className={cn("items-center justify-center p-6 gap-3", FLEX, FLEX_COL)}>
+          <div className={cn("items-center justify-center p-6", FLEX, FLEX_COL)}>
             <video
               controls
               preload="metadata"
@@ -290,9 +292,6 @@ export function WorkspaceFileView({
             >
               <track kind="captions" />
             </video>
-            <span className="text-xs text-muted-foreground">
-              {data.name} ({formatFileSize(data.size)})
-            </span>
           </div>
         ) : data.binary ? (
           <div className={cn("items-center justify-center p-8 gap-3 text-center", FLEX, FLEX_COL)}>
