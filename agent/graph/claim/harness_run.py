@@ -567,6 +567,7 @@ class ForegroundRun:
         self.fg = self.fg.hand(tuple(handed))
         if group is not None:
             await mark_input_group(self._ctx, self._agent_id, group.row_ids, group.key)
+        self._projector.note_input_keys([item.key for item in inputs])
         try:
             await self._bridge.deliver(inputs, compaction_note=compaction_note)
         except HarnessNotDeliveredError:

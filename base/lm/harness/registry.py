@@ -160,12 +160,13 @@ class FileSessionRegistry:
     def delete_harnesses(self, agent_id: int, harnesses: Collection[str]) -> None:
         for harness in harnesses:
             self.path(agent_id, harness).unlink(missing_ok=True)
+            self._root.joinpath(f"{agent_id}.{harness}.floor").unlink(missing_ok=True)
 
     def delete(self, agent_id: int) -> bool:
         _check_agent(agent_id)
         doomed = [self._legacy_path(agent_id)]
         if self._root.is_dir():
-            pattern = re.compile(rf"{agent_id}\.[a-z][a-z0-9_]*\.json")
+            pattern = re.compile(rf"{agent_id}\.[a-z][a-z0-9_]*\.(json|floor)")
             doomed += [entry for entry in self._root.iterdir() if pattern.fullmatch(entry.name)]
         removed = False
         for entry in doomed:
