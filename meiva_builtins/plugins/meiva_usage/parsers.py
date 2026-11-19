@@ -373,7 +373,8 @@ def parse_antigravity_quota_groups(payload: Mapping[str, object]) -> Antigravity
         gemini, claude_gpt = _parse_flat_antigravity_buckets(buckets)
 
     if gemini is None and claude_gpt is None:
-        raise UsageProbeError("Antigravity quota payload is missing rate-limit windows")
+        unclaimed = f"; groups with windows no card shows: {'; '.join(ignored)}" if ignored else ""
+        raise UsageProbeError(f"Antigravity quota payload is missing rate-limit windows{unclaimed}")
 
     return AntigravityQuotaGroups(gemini=gemini, claude_gpt=claude_gpt, ignored=ignored)
 

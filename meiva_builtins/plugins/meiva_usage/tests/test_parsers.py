@@ -299,6 +299,16 @@ def test_parse_antigravity_quota_groups_names_every_group_no_card_shows() -> Non
     assert groups.ignored == ("Gemini Pro Models (gemini)", "Mystery Models (unclassified)")
 
 
+# meiva:note
+# When upstream renames or splits its groups so that no family is recognised, the parse fails; the
+# failure is where the names of the groups that held windows are most needed, so it carries them.
+def test_parse_antigravity_quota_groups_failure_names_the_unclaimed_groups() -> None:
+    payload = {"groups": [_group("Mystery Models", "mystery", 0.2)]}
+
+    with pytest.raises(UsageProbeError, match=r"Mystery Models \(unclassified\)"):
+        parse_antigravity_quota_groups(payload)
+
+
 def test_parse_antigravity_quota_groups_one_group_per_family_ignores_nothing() -> None:
     payload = {
         "groups": [
