@@ -3,6 +3,7 @@ from __future__ import annotations
 import pytest
 
 from base.agents.model.harness_models import (
+    classify_codex_account_probe,
     parse_antigravity_models,
     parse_claude_initialize,
     parse_codex_model_list,
@@ -221,3 +222,48 @@ def test_resolve_harness_catalog_model_strips_cli_suffixes_without_clobbering_ex
     assert resolve_harness_catalog_model("claude-fable-5-2[1M]", known) == "claude-fable-5-2"
     assert resolve_harness_catalog_model("qwen3.8-max", known) == "qwen3.8-max"
     assert resolve_harness_catalog_model("gpt-oss-120b-medium", known) == "gpt-oss-120b-medium"
+
+
+def test_classify_codex_account_probe_distinguishes_dead_refresh_network_and_live() -> None:
+    dead = classify_codex_account_probe(
+        {"account": None, "requiresOpenaiAuth": True},
+        None,
+        None,
+        "2026-11-19T07:33:09Z ERROR codex_login::auth::manager: Failed to refresh token: "
+        "Your access token could not be refreshed because your refresh token was already used. "
+        "Please log out and sign in again.\n",
+    )
+    assert dead == (
+        False,
+        "Your access token could not be refreshed because your refresh token was already used. "
+        "Please log out and sign in again.",
+    )
+
+    rpc_dead = classify_codex_account_probe(
+        None,
+        "Your access token could not be refreshed. Please log out and sign in again.",
+        -32603,
+        "",
+    )
+    assert rpc_dead[0] is False
+
+    offline = classify_codex_account_probe(
+        {"account": None, "requiresOpenaiAuth": True},
+        None,
+        None,
+        "ERROR codex_login::auth::manager: Failed to refresh token: dns error",
+    )
+    assert offline[0] is None
+
+    unsupported = classify_codex_account_probe(None, "Method not found", -32601, "")
+    assert unsupported == (None, None)
+
+    assert classify_codex_account_probe(
+        {"account": {"type": "chatgpt", "email": "u@example.com"}, "requiresOpenaiAuth": True},
+        None,
+        None,
+        "",
+    ) == (True, None)
+    assert classify_codex_account_probe(
+        {"account": {"type": "apiKey"}, "requiresOpenaiAuth": True}, None, None, ""
+    ) == (True, None)

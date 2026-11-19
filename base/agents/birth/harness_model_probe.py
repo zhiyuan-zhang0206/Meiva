@@ -9,6 +9,7 @@ from typing import TypeGuard
 
 from base.agents.model.harness_models import (
     CatalogProbeResult,
+    classify_codex_account_probe,
     parse_antigravity_models,
     parse_claude_initialize,
     parse_codex_model_list,
@@ -17,7 +18,12 @@ from base.api_contracts.agent_contract import Harness
 from base.host.boundary.untyped import object_of
 from base.lm.harness.claude import SECRET_ENV_NAMES as CLAUDE_SECRET_ENV_NAMES
 from base.lm.harness.codex import JsonRpcError, TransportClosedError
-from base.lm.harness.codex.session import list_models as list_codex_models
+from base.lm.harness.codex.session import (
+    list_models as list_codex_models,
+)
+from base.lm.harness.codex.session import (
+    probe_account_and_models as probe_codex_account_and_models,
+)
 
 StdinRunner = Callable[..., "subprocess.CompletedProcess[str]"]
 ModelProber = Callable[..., CatalogProbeResult]
@@ -25,7 +31,7 @@ ModelProber = Callable[..., CatalogProbeResult]
 _MODEL_PROBE_TIMEOUT_S: dict[Harness, float] = {
     Harness.CLAUDE_CODE: 12.0,
     Harness.CODEX: 10.0,
-    Harness.ANTIGRAVITY: 12.0,
+    Harness.ANTIGRAVITY: 18.0,
 }
 
 
@@ -106,6 +112,50 @@ def _probe_codex_models(
     return parse_codex_model_list([page])
 
 
+# meiva:note
+# Verifies Codex account status (`account/read` with `refreshToken: False` plus app-server stderr)
+# alongside the model list in one session, catching already-used refresh tokens without rotating
+# valid ones or spending inference quota.
+# meiva:link base/agents/docs/harness/availability.md
+def probe_codex_status(
+    binary: str, *, home: Path, environment: Mapping[str, str], timeout: float | None = None
+) -> CatalogProbeResult:
+    budget = _MODEL_PROBE_TIMEOUT_S[Harness.CODEX] if timeout is None else timeout
+    try:
+        probe = asyncio.run(
+            probe_codex_account_and_models(binary, cwd=home, environ=environment, timeout=budget)
+        )
+    except TimeoutError:
+        return CatalogProbeResult(
+            error=f"codex app-server model probe timed out after {budget:.0f}s"
+        )
+    except (OSError, JsonRpcError, TransportClosedError) as exc:
+        return CatalogProbeResult(error=f"codex app-server model probe failed: {exc}")
+
+    signed_in, auth_detail = classify_codex_account_probe(
+        probe.account_result,
+        probe.account_error,
+        probe.account_error_code,
+        probe.stderr_text,
+    )
+    if signed_in is False:
+        return CatalogProbeResult(
+            error=auth_detail or "codex app-server reports no active account",
+            signed_in=False,
+        )
+    if probe.models_page is None:
+        return CatalogProbeResult(
+            error=auth_detail or "codex app-server returned no model list",
+            signed_in=signed_in,
+        )
+    parsed = parse_codex_model_list([probe.models_page])
+    return CatalogProbeResult(
+        models=parsed.models,
+        error=parsed.error or auth_detail,
+        signed_in=signed_in,
+    )
+
+
 def _probe_claude_models(
     binary: str, *, environment: Mapping[str, str], runner: StdinRunner
 ) -> CatalogProbeResult:
@@ -153,14 +203,16 @@ def probe_cli_models(
     environment: Mapping[str, str],
     agy_stdout: str | None = None,
     runner: StdinRunner = subprocess.run,
+    timeout: float | None = None,
 ) -> CatalogProbeResult:
     if harness is Harness.ANTIGRAVITY:
         if agy_stdout is not None:
             return parse_antigravity_models(agy_stdout)
+        budget = _MODEL_PROBE_TIMEOUT_S[Harness.ANTIGRAVITY] if timeout is None else timeout
         stdout, err = _run_cli(
             [binary, "models"],
             stdin_payload=None,
-            timeout=_MODEL_PROBE_TIMEOUT_S[Harness.ANTIGRAVITY],
+            timeout=budget,
             env=dict(environment),
             runner=runner,
         )

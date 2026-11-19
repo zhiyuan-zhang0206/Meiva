@@ -19,6 +19,81 @@ _AGY_EFFORT_RANK = {level: index for index, level in enumerate(_AGY_EFFORT_ORDER
 class CatalogProbeResult(NamedTuple):
     models: tuple[ProbedHarnessModel, ...] = ()
     error: str | None = None
+    signed_in: bool | None = None
+
+
+_CODEX_TERMINAL_AUTH_MARKERS = (
+    "refresh token was already used",
+    "refresh_token_reused",
+    "refresh token has expired",
+    "refresh_token_expired",
+    "refresh token was revoked",
+    "refresh_token_invalidated",
+    "your access token could not be refreshed",
+    "please log out and sign in again",
+    "please sign in again",
+    "plan type is required for chatgpt authentication",
+    "invalid_grant",
+)
+_CODEX_NETWORK_ERROR_MARKERS = (
+    "dns error",
+    "connection refused",
+    "timed out",
+    "failed to connect",
+    "network is unreachable",
+)
+
+
+def _clean_codex_stderr_auth_line(line: str) -> str:
+    for marker in ("Your access token could not be refreshed", "Failed to refresh token: "):
+        index = line.find(marker)
+        if index != -1:
+            detail = line[index:].removeprefix("Failed to refresh token: ").strip()
+            if detail:
+                return detail
+    return line.strip()
+
+
+def _extract_codex_auth_failure(account_error: str | None, stderr_text: str) -> str | None:
+    if account_error:
+        low_error = account_error.lower()
+        if any(marker in low_error for marker in _CODEX_TERMINAL_AUTH_MARKERS):
+            return account_error.strip()
+    for line in stderr_text.splitlines():
+        low_line = line.lower()
+        if any(marker in low_line for marker in _CODEX_TERMINAL_AUTH_MARKERS):
+            return _clean_codex_stderr_auth_line(line)
+    return None
+
+
+# meiva:note
+# Classifies a Codex app-server `account/read` and stderr probe: terminal refresh-token rejections
+# and missing accounts under `requiresOpenaiAuth` prove the session is signed out (`False`), while
+# transient network errors or unsupported `account/read` methods stay unproven (`None`).
+# meiva:link base/agents/docs/harness/availability.md
+def classify_codex_account_probe(
+    account_result: object,
+    account_error: str | None,
+    account_error_code: int | None,
+    stderr_text: str,
+) -> tuple[bool | None, str | None]:
+    failure = _extract_codex_auth_failure(account_error, stderr_text)
+    if failure is not None:
+        return False, failure
+    if account_error is not None:
+        if account_error_code == -32601:
+            return None, None
+        return None, f"codex account/read failed: {account_error}"
+    if _is_mapping(account_result):
+        account = account_result.get("account")
+        if _is_mapping(account):
+            return True, None
+        if account is None and account_result.get("requiresOpenaiAuth") is True:
+            low_stderr = stderr_text.lower()
+            if any(marker in low_stderr for marker in _CODEX_NETWORK_ERROR_MARKERS):
+                return None, "codex could not reach auth service"
+            return False, "codex app-server reports no active account"
+    return None, None
 
 
 def _is_mapping(value: object) -> TypeGuard[Mapping[str, object]]:

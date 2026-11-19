@@ -28,18 +28,23 @@ The store has to belong to the CLI: Antigravity's IDE writes
 
 The probe asks the CLI, then reads the store. It runs `claude auth status --json`,
 `codex login status` or `agy models` — the one that belongs to that
-harness — through the environment a session would be handed and under a bounded
-timeout, and falls back to the stored credential only when the CLI cannot answer:
-a timeout, a binary that will not run, or output that names no login state. Once
-sign-in is established, the probe queries the CLI's live model and effort
-catalogue in parallel across external harnesses (`agy` reuses its login stdout);
-if the model catalogue cannot be read or returns empty, the row degrades to
-`unknown` with the catalogue failure appended to `reason`. Neither path starts a
-turn or spends model quota, and a sign-in or model list nobody can prove stays
-`unknown` rather than an invented answer. When PATH misses a user-level install
-the probe still looks in the conventional bin directories, because an agent
-process starts without the interactive shell profile; `on_path=false` says that
-is how the executable was found.
+harness — through the environment a session would be handed (preserving caller
+`PATH`, `HOME`, and CLI auth/config directory variables alongside the install
+directories) and under a bounded timeout, falling back to the stored credential
+only when the CLI cannot answer: a timeout, a binary that will not run, or
+output that names no login state. If `agy models` times out while a stored
+token exists (for example during an OAuth refresh), the catalogue probe retries
+once under a bounded retry budget. Once sign-in is established, the probe queries
+the CLI's live model and effort catalogue in parallel across external harnesses
+(`agy` reuses its login stdout; `codex` also reads `account/read` and app-server
+stderr to catch invalidated or already-used refresh tokens without rotating valid
+ones and marks them `unavailable`); if the model catalogue cannot be read or
+returns empty, the row degrades to `unknown` with the catalogue failure appended
+to `reason`. Neither path starts a turn or spends model quota, and a sign-in or
+model list nobody can prove stays `unknown` rather than an invented answer. When
+PATH misses a user-level install the probe still looks in the conventional bin
+directories, because an agent process starts without the interactive shell
+profile; `on_path=false` says that is how the executable was found.
 
 Recording and validating the harness is one slice: the launchers that actually
 start a session on an external harness are separate, and they read this column

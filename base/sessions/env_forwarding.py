@@ -137,6 +137,7 @@ def managed_service_env(
     venv: Path | None = None,
 ) -> dict[str, str]:
     """Use the admitted host PATH; interactive session forwarding is separate."""
+    from base.host.env.harness_binaries import harness_child_path
     from base.host.runtime_interpreter import runtime_venv
 
     resolved_venv = runtime_venv() if venv is None else venv
@@ -144,8 +145,13 @@ def managed_service_env(
     bindir = resolved_venv / get_backend().venv_bin_dir_name()
     host_path = normalize_service_path(service_path, excluded=(bindir,))
     env["MEIVA_SERVICE_PATH"] = host_path
+    raw_home = environ.get("HOME")
+    home = Path(raw_home) if raw_home else None
     env["PATH"] = normalize_service_path(
-        os.pathsep.join((str(bindir), host_path, frontend_toolchain_path("")))
+        harness_child_path(
+            path_env=os.pathsep.join((str(bindir), host_path, frontend_toolchain_path(""))),
+            home=home,
+        )
     )
     return env
 
