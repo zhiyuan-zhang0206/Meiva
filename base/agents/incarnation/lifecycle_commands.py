@@ -45,6 +45,15 @@ def is_system_notice_source(source: str, payload: Mapping[str, object] | None) -
 # death — crash, failed launch — never wakes for leftover work at any age; that is
 # the no-replay boundary. An unmarked row (NULL, legacy) fails closed.
 #
+# This leans on a write contract elsewhere: `agent/ownership/hosted.py` applies EVERY terminate
+# command — a self-terminate (`source='self'`) included — with `termination_source='user'`,
+# so the id fence's `source <> 'self'` exemption is closed by this second half only because
+# an agent's own terminate is stamped 'user' too. `TerminationSource.EXIT` is historical and
+# nothing writes it; a writer that stamped a self-terminate with anything but 'user' would
+# make this fence refuse the wake silently. Pinned by
+# `test_self_terminate_clears_fatal_reason_and_admit_clears_stale_exit`
+# (`agent/ownership/tests/test_hosted_ownership.py`).
+#
 # Correlated against `m` and the unaliased `agents_meta` row, exactly like
 # `SYSTEM_NOTICE_SOURCE`.
 # meiva:link docs/decisions/agents/lifecycle/2026-07-21-crash-auto-resurrect.md

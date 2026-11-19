@@ -223,14 +223,22 @@ class TerminationSource(StrEnum):
     `scripts/lint/termination_source.py`.
     """
 
-    # Intentional — the user's will (force-kill, or a terminate that found the pid
-    # already dead).
+    # meiva:note
+    # Intentional — a terminate command ended the life: the user's will (force-kill, or a
+    # terminate that found the pid already dead) and every terminate command the hosted
+    # runtime applies, a self-terminate (`source='self'`) included
+    # (`agent/ownership/hosted.py`).
     USER = "user"
-    # Intentional — the agent's own graceful process-exit finalize (self-terminate,
-    # or a caught SIGTERM/SIGHUP that ran the exit finally).
+    # meiva:note
+    # Historical only — no code writes it now. It was the agent's own graceful
+    # process-exit finalize (`mark_agent_exited_op`, retired); a self-terminate is
+    # applied by `agent/ownership/hosted.py` like any terminate command and stamps
+    # USER, whatever the command's source. Old rows keep it, so the column CHECK and
+    # this enum still admit it; nothing may start writing it again.
     EXIT = "exit"
+    # meiva:note
     # Involuntary — a restarter corpse reaper found a dead pid / stale unclaimed idling
-    # row (OOM/SIGKILL/crash leaves no finally, so it never reaches EXIT).
+    # row (OOM/SIGKILL/crash leaves no finally to run).
     REAPER = "reaper"
     # Involuntary — a launch that never confirmed: the launcher's confirm poll timed
     # out, or the child's own early-boot gates rejected the

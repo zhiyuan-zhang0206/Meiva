@@ -529,6 +529,11 @@ async def test_self_terminate_clears_fatal_reason_and_admit_clears_stale_exit(
     db_conn.commit()
     applied = await apply_hosted_lifecycle(aops_pool, incarnation, resume_turn=False)
     assert applied is not None and applied.kind == "terminate"
+    # meiva:note
+    # The write contract `TRIGGER_AFTER_KILL_COMMAND` (base/agents/incarnation/lifecycle_commands.py)
+    # leans on: a self-terminate is stamped 'user', never 'exit' (a historical value no code writes),
+    # because the wake fence exempts source='self' from its id half and admits pre-death work only
+    # for termination_source='user'.
     assert db_conn.execute(
         "SELECT status, termination_source, last_turn_fatal_reason FROM agents_meta WHERE id = %s",
         (agent_id,),
