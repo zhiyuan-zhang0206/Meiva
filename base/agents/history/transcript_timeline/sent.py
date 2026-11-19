@@ -12,6 +12,7 @@ from base.agents.history.transcript_timeline.record.match import (
     CLAIM_SLACK,
     assign_inputs,
 )
+from base.agents.messages.harness_input_key import INPUT_KEY_FIELD, recorded_input_key
 from base.agents.messages.inbound import InboundKind
 from base.agents.messages.inbound_images import inbound_upload_files
 from base.agents.messages.kwargs import NoteTag
@@ -24,13 +25,12 @@ from base.log import logger
 # Which inbox rows were handed to a harness as one input, read back from the inbox, and what each of them shows on
 # the timeline. An input is sent to the CLI with an id derived from its key, and the row of the CLI's record that holds
 # it names only that id, so who said what is recovered here: the agent's inbox rows, grouped by the key the claim marked them with (a batch handed over as one input shares a key) or
-# `inbound-<id>` for a row sent alone. A row shows what the person typed (a `/command` is not expanded and no
+# the row's own key for a row sent alone (`base/agents/messages/harness_input_key.py`). A row shows what the person typed (a `/command` is not expanded and no
 # envelope is added), its sender, its images and its files. A system note or a heartbeat shows as a marker; the notes
 # only the host's own lifecycle wrote (a restart, an interrupt, a lost turn) are not shown, because the record says what
 # happened. How the rows are found is `load_sent_rows`.
 # meiva:link base/lm/harness/docs/transcript-projection.md
 
-INPUT_KEY_FIELD = "harness_input_key"
 BATCH_ROWS = 200
 MAX_ROWS = 1000
 DELIVERABLE_KINDS = (
@@ -62,8 +62,7 @@ class SentRow:
 
     @property
     def input_key(self) -> str:
-        key = self.payload.get(INPUT_KEY_FIELD) if self.payload else None
-        return key if isinstance(key, str) else f"inbound-{self.id}"
+        return recorded_input_key(self.id, self.payload)
 
 
 # meiva:note

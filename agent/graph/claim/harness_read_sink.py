@@ -32,10 +32,10 @@ from base.agents.history.transcript_timeline.record.match import CLAIM_EARLY, CL
 from base.agents.history.transcript_timeline.record.read import read_window, reasoning_refresh
 from base.agents.history.transcript_timeline.sent import (
     DELIVERABLE_KINDS,
-    INPUT_KEY_FIELD,
     load_sent_rows,
     sent_inputs,
 )
+from base.agents.messages.harness_input_key import recorded_input_key
 from base.agents.messages.inbound import InboundKind
 from base.agents.messages.reply_intent import parse_reply_visibility
 from base.agents.to_user.delivery.store import has_keyed_publication
@@ -613,10 +613,10 @@ class ReadTimelineSink:
         for row_id, kind, payload in rows:
             if kind == InboundKind.FORK.value:
                 keys.append(f"control-{row_id}")
-            elif is_object_dict(payload) and isinstance(raw := payload.get(INPUT_KEY_FIELD), str):
-                keys.append(raw)
             else:
-                keys.append(f"inbound-{row_id}")
+                keys.append(
+                    recorded_input_key(row_id, payload if is_object_dict(payload) else None)
+                )
         return keys
 
     def _parent_record_uuids(self, parent_id: int, *, home: Path) -> frozenset[str] | None:

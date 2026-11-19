@@ -11,13 +11,13 @@
 #    (`meiva-ops-llm-billing-quota`) reports the first post-arrears rejection, already too
 #    late; this check is the pre-arrears signal.
 # 10. Blocked agents: fails while at least N agents are halted by permanent provider
-#    rejections or by an exhausted external-harness quota (`agents_meta.permanent_reject_streak`
-#    at the halt threshold, the durable recovery-breaker halt in
-#    `base/agents/recovery/breaker.py`; quota halts are counted apart by their reason,
-#    `quota_exhausted`). The Grafana rule covers billing rejections as events and resolves 15
-#    minutes after the last one; this check covers every permanent class (auth / forbidden /
-#    model-not-found included) and quota exhaustion as a state: it fires while the fleet is
-#    still halted and resolves only as agents recover.
+#    rejections, by an exhausted external-harness quota or by a stalled external-harness turn
+#    (`agents_meta.permanent_reject_streak` at the halt threshold, the durable recovery-breaker
+#    halt in `base/agents/recovery/breaker.py`; harness halts are counted apart by their reason,
+#    `quota_exhausted` and `turn_stalled`). The Grafana rule covers billing rejections as events
+#    and resolves 15 minutes after the last one; this check covers every permanent class (auth /
+#    forbidden / model-not-found included), quota exhaustion and stalled turns as a state: it
+#    fires while the fleet is still halted and resolves only as agents recover.
 #
 # Both checks are fail-open on read errors: a provider API blip or an unreachable database is
 # not evidence of a drained account, matching the schema check's rule for its own DB flake.
@@ -155,16 +155,18 @@ def judge_balance(reading: BalanceReading, minimum_cny: float) -> ProviderCheck:
 
 # meiva:note
 # Check 10's reading: agents halted inside the window, by what halted them. `quota` is the
-# agents whose external harness ran out of quota (they wait for a new message); `rejected` is
-# every other halt, a permanent provider rejection.
+# agents whose external harness ran out of quota and `stalled` the ones whose harness turn went
+# silent past the stall threshold (both wait for a new message); `rejected` is every other halt,
+# a permanent provider rejection.
 @dataclass(frozen=True)
 class HaltedAgents:
     rejected: int
     quota: int
+    stalled: int = 0
 
     @property
     def total(self) -> int:
-        return self.rejected + self.quota
+        return self.rejected + self.quota + self.stalled
 
 
 # meiva:note
@@ -182,13 +184,14 @@ def judge_blocked_agents(
     detail = (
         f"  (provider blocked-agents detail: {halted.total} agent(s) halted within "
         f"{window_hours:g}h: {halted.rejected} by permanent provider rejections, "
-        f"{halted.quota} by exhausted harness quota)"
+        f"{halted.quota} by exhausted harness quota, {halted.stalled} by stalled harness turns)"
     )
     cause = (
-        "multiple agents are halted by permanent provider rejections or exhausted harness "
-        f"quota (threshold MEIVA_PROVIDER_GUARD_BLOCKED_AGENTS_MIN={minimum}); automatic "
-        "recovery stays off until a turn succeeds — resolve the provider cause (or reset / top "
-        "up the quota), then message or revive the affected agents"
+        "multiple agents are halted by permanent provider rejections, exhausted harness "
+        "quota or stalled harness turns (threshold "
+        f"MEIVA_PROVIDER_GUARD_BLOCKED_AGENTS_MIN={minimum}); automatic recovery stays off until "
+        "a turn succeeds — resolve the provider cause (or reset / top up the quota, or read the "
+        "`harness_turn_stalled` events), then message or revive the affected agents"
     )
     return ProviderCheck(
         BLOCKED_AGENTS_CHECK, f"FAIL: provider blocked agents — {cause}", (detail,)

@@ -245,6 +245,33 @@ class AgentRuntimeSettings(EnvSettings):
         },
     )
 
+    harness_turn_stall_seconds: float = Field(
+        title="External harness turn stall threshold (seconds)",
+        default=1800.0,
+        gt=0,
+        alias="MEIVA_HARNESS_TURN_STALL_SECONDS",
+        description=(
+            "How long an external harness (Claude Code, Codex, Antigravity) may send no event at all "
+            "while an input handed to it or a turn it began is still unsettled. Past it the turn is "
+            "aborted: the session is retired, the unanswered inputs go back to the queue and the "
+            "agent halts until a new message, with the `harness_turn_stalled` warning, an Error "
+            "event and health-probe check 10 as the alert. The default, 30 minutes, is three times "
+            "the longest silence a healthy turn has: Claude Code caps one foreground Bash call at 10 "
+            "minutes, and a long thinking block, a tool result or a compaction all emit events. The "
+            "margin covers a context compaction and provider retry backoff after such a call. A "
+            "false trip kills a running tool and halts the agent, so the threshold errs long; a "
+            "stalled turn is otherwise never ended (2026-11-19: 11 agents ran 47 minutes on a "
+            "dropped input until an operator killed them)."
+        ),
+        json_schema_extra={
+            "help_text": "Raise it for agents that run single tool calls longer than 10 minutes.",
+            "restart_required": "agent",
+            "writable": True,
+            "sensitive": False,
+            "scope": "cluster-pinned",
+        },
+    )
+
     db_pool_acquire_timeout_seconds: float = Field(
         title="Database connection wait timeout (seconds)",
         default=30.0,

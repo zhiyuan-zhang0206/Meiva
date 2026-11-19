@@ -162,11 +162,8 @@ async def test_a_quota_halt_ignores_its_requeued_input_until_a_new_message(
     database_gate: ProcessDbGate,
     machine_identity: MachineIdentityReader,
 ) -> None:
-    from base.agents.recovery.breaker import (
-        HALT_REASON_QUOTA_EXHAUSTED,
-        QUOTA_RETRY_COUNT_FIELD,
-        admit_pending_wake,
-    )
+    from base.agents.messages.harness_input_key import HANDBACK_COUNT_FIELD
+    from base.agents.recovery.breaker import HALT_REASON_QUOTA_EXHAUSTED, admit_pending_wake
 
     agent = terminated(
         db_conn,
@@ -184,7 +181,7 @@ async def test_a_quota_halt_ignores_its_requeued_input_until_a_new_message(
     db_conn.execute(
         "INSERT INTO inbound_messages(agent_id,content,kind,source,payload) "
         "VALUES(%s,'requeued by the quota abort','chat','user',jsonb_build_object(%s::text,1))",
-        (agent, QUOTA_RETRY_COUNT_FIELD),
+        (agent, HANDBACK_COUNT_FIELD),
     )
     db_conn.commit()
     assert not await admit_pending_wake(aops_pool, agent)

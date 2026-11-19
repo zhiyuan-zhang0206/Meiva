@@ -24,7 +24,6 @@ from agent.graph.claim.harness_foreground import (
     plan_wake,
 )
 from agent.graph.claim.harness_inbox import (
-    INPUT_KEY_FIELD,
     apply_reconciled,
     claimed_deliverable,
     commit_handed,
@@ -38,7 +37,7 @@ from agent.graph.claim.harness_inbox import (
     recovery_notes_first,
     requeue_handed,
     reserve_head_batch,
-    settle_quota_abort,
+    settle_halted_turn,
 )
 from agent.graph.claim.harness_read_sink import ReadTimelineSink
 from agent.graph.claim.harness_render import (
@@ -53,6 +52,7 @@ from agent.graph.interrupt import (
     ModelInterruptedError,
 )
 from base.agents.context import MeivaContext
+from base.agents.messages.harness_input_key import recorded_input_key, row_input_key
 from base.agents.questions.render import reinjection_text
 from base.events.live.projection import LLMDone
 from base.events.live.publisher import AgentEventPublisher
@@ -63,6 +63,7 @@ from base.lm.harness import (
     HarnessClosedError,
     HarnessNotDeliveredError,
     HarnessSetupError,
+    HarnessTurnStalledError,
     ImageBlock,
     InputInContext,
     ReasoningDelta,
@@ -117,7 +118,11 @@ class ForegroundRun:
         projector: ReadTimelineSink,
         state: _state.AgentState,
         publisher: AgentEventPublisher,
+        *,
+        stall_seconds: float,
     ) -> None:
+        if stall_seconds <= 0:
+            raise ValueError(f"stall_seconds must be positive, got {stall_seconds!r}")
         self._ctx = ctx
         self._agent_id = agent_id
         self._bridge = bridge
@@ -156,6 +161,8 @@ class ForegroundRun:
         self._resumed = False
         self._subscription: EventSubscription | None = None
         self._reading = False
+        self._stall_seconds = stall_seconds
+        self._last_heard = 0.0
 
     def _unsettled(self) -> tuple[Handed, ...]:
         return (*self.fg.handed, *self._settling)
@@ -163,7 +170,7 @@ class ForegroundRun:
     def pending_inputs(self) -> list[dict[str, str]]:
         return [{"key": handed.key, "prompt": prompt} for handed, prompt in self._synthetic]
 
-    async def settle_quota_abort(self, *, turn_id: str | None) -> tuple[int, ...]:
+    async def settle_halted_turn(self, *, turn_id: str | None, reason: str) -> tuple[int, ...]:
         if turn_id:
             committed = [
                 *self._committed_by_turn.pop(turn_id, []),
@@ -181,11 +188,11 @@ class ForegroundRun:
                 plan = await self._reconcile_after_failure(unsettled)
             except Exception:
                 logger.opt(exception=True).warning(
-                    "could not read the harness's record during quota abort; requeuing inputs",
+                    "could not read the harness's record for a halted turn; requeuing inputs",
                     event="harness_reconcile_failed",
                     agent_id=self._agent_id,
                     keys=[h.key for h in unsettled],
-                    where="after_quota_abort",
+                    where="after_halted_turn",
                 )
                 to_requeue.extend(unsettled)
             else:
@@ -195,7 +202,7 @@ class ForegroundRun:
                     to_requeue.extend(plan.commit)
                     to_requeue.extend(plan.requeue)
                     to_requeue.extend(plan.unknown)
-        requeued = await settle_quota_abort(self._ctx, self._agent_id, to_requeue)
+        requeued = await settle_halted_turn(self._ctx, self._agent_id, to_requeue, reason=reason)
         withdrawn_keys = frozenset(h.key for h in to_requeue)
         if withdrawn_keys:
             self.fg = self.fg.withdraw(withdrawn_keys)
@@ -292,8 +299,7 @@ class ForegroundRun:
     def _grouped(self, rows: Sequence[ClaimedInbound]) -> list[Handed]:
         by_key: dict[str, list[ClaimedInbound]] = {}
         for row in rows:
-            key = row.payload.get(INPUT_KEY_FIELD) if row.payload else None
-            by_key.setdefault(key if isinstance(key, str) else f"inbound-{row.id}", []).append(row)
+            by_key.setdefault(recorded_input_key(row.id, row.payload), []).append(row)
         grouped: list[Handed] = []
         for key, group in by_key.items():
             pairs = [(self._handed_of(row), is_passive(row)) for row in group]
@@ -321,6 +327,7 @@ class ForegroundRun:
     async def execute(self) -> None:
         subscription = await self._bridge.subscribe()
         self._subscription = subscription
+        self._last_heard = asyncio.get_running_loop().time()
         self.fg = replace(self.fg, generation=self._bridge.generation)
         outcome: BaseException | None = None
         try:
@@ -348,6 +355,7 @@ class ForegroundRun:
     async def _read(self, subscription: EventSubscription) -> None:
         try:
             while (event := await subscription.get()) is not None:
+                self._last_heard = asyncio.get_running_loop().time()
                 self._reading = True
                 try:
                     await self._on_event(event)
@@ -487,9 +495,7 @@ class ForegroundRun:
                 if not await self._queue_correction():
                     return
                 continue
-            timeout = backoff if backoff > 0 else DELIVERY_FALLBACK_SECONDS
-            with suppress(TimeoutError):
-                _ = await asyncio.wait_for(self._changed.wait(), timeout)
+            await self._wait_for_change(backoff if backoff > 0 else DELIVERY_FALLBACK_SECONDS)
 
     async def _settle_before_handoff(self) -> bool:
         if self._ready_to_recheck():
@@ -499,10 +505,35 @@ class ForegroundRun:
         if self._foreground_quiet() and backoff <= 0:
             _ = await self._queue_correction()
             return True
-        timeout = backoff if backoff > 0 else DELIVERY_FALLBACK_SECONDS
+        await self._wait_for_change(backoff if backoff > 0 else DELIVERY_FALLBACK_SECONDS)
+        return False
+
+    # meiva:note
+    # Every wait of the delivery loop is for the harness, so every wait is bounded by how long the
+    # harness may stay silent: while something handed over is unsettled or a turn runs, no event for
+    # `stall_seconds` ends the invocation with `HarnessTurnStalledError` (`harness_turn.py` halts
+    # the agent and alerts). The clock is the last event read or the last handover. The harness is
+    # not silent while an event it sent is being written or waits to be read: how fast this side
+    # writes is not the harness's silence. The host's progress tick does not count either, because it
+    # only says that this process is alive.
+    # meiva:link agent/graph/docs/harness-foreground.md
+    async def _wait_for_change(self, timeout: float) -> None:
+        now = asyncio.get_running_loop().time()
+        if self._reading or (self._subscription is not None and self._subscription.unread):
+            self._last_heard = now
+        if not self._foreground_quiet():
+            silent = now - self._last_heard
+            if silent >= self._stall_seconds:
+                raise HarnessTurnStalledError(
+                    f"no event from the harness for {silent:.0f}s (threshold "
+                    f"{self._stall_seconds:g}s) with "
+                    f"{len(self.fg.handed)} input(s) unsettled and {len(self.fg.turns)} turn(s) open",
+                    silent_seconds=silent,
+                    stall_seconds=self._stall_seconds,
+                )
+            timeout = min(timeout, self._stall_seconds - silent)
         with suppress(TimeoutError):
             _ = await asyncio.wait_for(self._changed.wait(), timeout)
-        return False
 
     # meiva:note
     # The invocation may end only when nothing is in flight: no input handed over and unsettled, no turn
@@ -548,7 +579,7 @@ class ForegroundRun:
 
     async def _give_back(self, rows: Sequence[ClaimedInbound]) -> None:
         await requeue_handed(
-            self._ctx, self._agent_id, [Handed(f"inbound-{r.id}", r.id) for r in rows]
+            self._ctx, self._agent_id, [Handed(row_input_key(r.id, r.payload), r.id) for r in rows]
         )
 
     def _handed_of(self, item: ClaimedInbound) -> tuple[Handed, str]:
@@ -557,7 +588,9 @@ class ForegroundRun:
         images, skipped = native_images(messages)
         if skipped:
             text = f"{text}\n\n{skipped_images_note(skipped)}"
-        entry = Handed(f"inbound-{item.id}", item.id, human=is_human_wake_item(item))
+        entry = Handed(
+            row_input_key(item.id, item.payload), item.id, human=is_human_wake_item(item)
+        )
         self._images[entry.key] = images
         return entry, text
 
@@ -635,6 +668,7 @@ class ForegroundRun:
             raise HarnessSetupError(
                 f"{self._ctx.harness.value} could not take the input: {exc}"
             ) from exc
+        self._last_heard = asyncio.get_running_loop().time()
         return True
 
     # meiva:note

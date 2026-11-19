@@ -1,16 +1,17 @@
-exports = ["delivery", "envelope.py", "external_caller.py", "guard.py", "identity.py", "inbound.py", "inbound_images.py", "inbound_provenance.py", "kwargs.py", "lifecycle_text.py", "quote.py", "reply_intent.py", "timestamp_policy.py", "token_estimate.py"]
+exports = ["delivery", "envelope.py", "external_caller.py", "guard.py", "harness_input_key.py", "identity.py", "inbound.py", "inbound_images.py", "inbound_provenance.py", "kwargs.py", "lifecycle_text.py", "quote.py", "reply_intent.py", "timestamp_policy.py", "token_estimate.py"]
 
 [uses]
 "envelope.py" = ["timestamp_policy.py"]
 "guard.py" = ["identity.py"]
 "identity.py" = ["kwargs.py"]
-"tests" = ["delivery", "envelope.py", "external_caller.py", "kwargs.py", "lifecycle_text.py", "quote.py", "reply_intent.py", "timestamp_policy.py", "token_estimate.py"]
+"tests" = ["delivery", "envelope.py", "external_caller.py", "harness_input_key.py", "kwargs.py", "lifecycle_text.py", "quote.py", "reply_intent.py", "timestamp_policy.py", "token_estimate.py"]
 
 [purity]
 "__init__.py" = "strict"
 "envelope.py" = "strict"
 "external_caller.py" = "strict"
 "guard.py" = "strict"
+"harness_input_key.py" = "strict"
 "identity.py" = "strict"
 "inbound.py" = "strict"
 "inbound_images.py" = "strict"

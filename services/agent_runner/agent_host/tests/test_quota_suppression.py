@@ -11,8 +11,9 @@ from typing import Any
 
 import psycopg
 
-from agent.graph.llm_errors import HarnessQuotaExhaustedError
-from base.agents.recovery.breaker import HALT_REASON_QUOTA_EXHAUSTED, QUOTA_RETRY_COUNT_FIELD
+from agent.graph.llm_errors import HarnessTurnHaltedError
+from base.agents.messages.harness_input_key import HANDBACK_COUNT_FIELD
+from base.agents.recovery.breaker import HALT_REASON_QUOTA_EXHAUSTED
 from base.cluster.machine.tests.identity import machine_identity as machine_identity
 from base.packages.tests.model_catalog import model_catalog as model_catalog
 from services.agent_runner.agent_host.tests.runtime.host_support import (
@@ -39,7 +40,7 @@ from services.agent_runner.agent_host.tests.runtime.host_support import (
 
 
 # meiva:note
-# A graph whose first turn ends the way `settle_quota_abort` ends one — the input back in the queue
+# A graph whose first turn ends the way `settle_halted_turn` ends one — the input back in the queue
 # with its attempt counted, the agent halted in the same transaction — and whose later turns succeed.
 class _QuotaThenWorkGraph(ScriptedGraph):
     def __init__(self, db: psycopg.Connection, agent_id: int) -> None:
@@ -55,7 +56,7 @@ class _QuotaThenWorkGraph(ScriptedGraph):
         self._db.execute(
             "UPDATE inbound_messages SET status = 'pending', claimed_at = NULL, "
             "payload = jsonb_build_object(%s::text, 1) WHERE agent_id = %s",
-            (QUOTA_RETRY_COUNT_FIELD, self._agent_id),
+            (HANDBACK_COUNT_FIELD, self._agent_id),
         )
         self._db.execute(
             "UPDATE agents_meta SET permanent_reject_streak = permanent_reject_streak + 1, "
@@ -63,8 +64,9 @@ class _QuotaThenWorkGraph(ScriptedGraph):
             (HALT_REASON_QUOTA_EXHAUSTED, self._agent_id),
         )
         self._db.commit()
-        raise HarnessQuotaExhaustedError(
+        raise HarnessTurnHaltedError(
             "claude_code harness quota exhausted: You've hit your limit · resets Nov 23",
+            reason=HALT_REASON_QUOTA_EXHAUSTED,
             requeued_inbound_ids=(),
         )
 

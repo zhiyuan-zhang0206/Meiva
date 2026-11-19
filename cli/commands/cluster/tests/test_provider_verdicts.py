@@ -125,7 +125,23 @@ def test_quota_halts_count_toward_the_threshold_and_are_named_apart() -> None:
     assert "exhausted harness quota" in check.failure
     assert check.notes[0] == (
         "  (provider blocked-agents detail: 3 agent(s) halted within 24h: "
-        "0 by permanent provider rejections, 3 by exhausted harness quota)"
+        "0 by permanent provider rejections, 3 by exhausted harness quota, "
+        "0 by stalled harness turns)"
+    )
+
+
+# meiva:note
+# A stalled harness turn halts the agent until a new message, like an exhausted quota: it counts
+# toward the same threshold and the detail line names it apart.
+def test_stalled_turn_halts_count_toward_the_threshold_and_are_named_apart() -> None:
+    check = judge_blocked_agents(HaltedAgents(rejected=0, quota=1, stalled=2), 3, 24.0)
+
+    assert check.failure is not None
+    assert "stalled harness turns" in check.failure
+    assert check.notes[0] == (
+        "  (provider blocked-agents detail: 3 agent(s) halted within 24h: "
+        "0 by permanent provider rejections, 1 by exhausted harness quota, "
+        "2 by stalled harness turns)"
     )
 
 
