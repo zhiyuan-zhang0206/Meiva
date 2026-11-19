@@ -33,7 +33,11 @@ from base.agents.context import MeivaContext
 from base.agents.messages.envelope import sender_class
 from base.agents.messages.inbound import PASSIVE_INBOUND_KEY, InboundKind
 from base.agents.messages.kwargs import MeivaMsgType
-from base.agents.messages.lifecycle_text import by_who, restart_accepted_text
+from base.agents.messages.lifecycle_text import (
+    by_who,
+    fast_acknowledgement_note,
+    restart_accepted_text,
+)
 from base.agents.messages.reply_intent import delivery_disabled_entries
 from base.api_contracts.agent_contract import Harness
 from base.deploy.lifecycle.host_exit_message import HOST_RESTART_SOURCE
@@ -413,9 +417,12 @@ async def handle_restart(
     )
     if st.restart_preserves_idle:
         now = ctx.require_clock().now()
+        accepted = restart_accepted_text(item.source, item.content or None)
+        if note := fast_acknowledgement_note(item.payload):
+            accepted = f"{accepted}\n\n{note}"
         st.new_msgs.append(
             system_note_message(
-                content=f"{restart_accepted_text(item.source, item.content or None)}",
+                content=accepted,
                 tag=NoteTag.LIFECYCLE_RESTART,
                 picked_up_at=now,
                 created_at=now,

@@ -1,9 +1,12 @@
+import asyncio
 import json
+import os
 import re
 from collections.abc import Sequence
 from dataclasses import replace
 from datetime import UTC, datetime
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any, cast
 
 import psycopg
@@ -11,14 +14,17 @@ import pytest
 from langgraph.runtime import Runtime
 from psycopg_pool import AsyncConnectionPool
 
+from agent.graph.claim.harness_read_sink import ReadTimelineSink
 from agent.graph.claim.harness_turn import harness_turn_node
 from agent.graph.claim.tests.harness_support import (
     FakeEngine,
     RuntimeFixture,
     in_a_turn,
+    input_key,
     insert_row,
     read_recorded_items,
     row_status,
+    wait_until,
 )
 from agent.graph.claim.tests.harness_support import (
     harness_runtime as harness_runtime,
@@ -42,10 +48,14 @@ from base.lm.harness import (
     AssistantText,
     BridgeEvent,
     HarnessInput,
+    InputInContext,
     TextDelta,
+    ToolUse,
+    TurnOrigin,
+    TurnStarted,
 )
 from base.lm.harness.claude.delivery import key_uuid
-from base.paths import workspace_dir
+from base.paths import meiva_home, workspace_dir
 from meiva.tests.fixtures.pin_agent import hosted_resources as hosted_resources
 
 
@@ -402,3 +412,229 @@ async def test_a_turn_with_no_record_file_to_show_for_it_fails_the_way_a_setup_f
 
     message = str(failed.value)
     assert SESSION in message and str(tmp_path / ".claude/projects") in message
+
+
+def _prepare_pre_tool_transcript(
+    harness: Harness,
+    *,
+    root: Path,
+    workspace: Path,
+    sid: str,
+) -> tuple[dict[str, str], Path]:
+    env = {
+        **os.environ,
+        "HOME": str(root),
+        "CODEX_HOME": str(root / "codex"),
+        "CLAUDE_CONFIG_DIR": str(root / ".claude"),
+    }
+    if harness is Harness.CLAUDE_CODE:
+        slug = re.sub(r"[^A-Za-z0-9]", "-", str(workspace))
+        folder = root / ".claude/projects" / slug
+        folder.mkdir(parents=True, exist_ok=True)
+        path = folder / f"{sid}.jsonl"
+        initial: list[dict[str, Any]] = [
+            {
+                "type": "user",
+                "uuid": "u0",
+                "timestamp": "2026-11-19T08:00:00Z",
+                "sessionId": sid,
+                "cwd": str(workspace),
+                "message": {"role": "user", "content": "run slow check"},
+            }
+        ]
+    elif harness is Harness.CODEX:
+        day = root / "codex/sessions/2026/11/19"
+        day.mkdir(parents=True, exist_ok=True)
+        path = day / f"rollout-2026-11-19T08-00-00-{sid}.jsonl"
+        initial = [
+            {
+                "timestamp": "2026-11-19T08:00:00Z",
+                "ordinal": 0,
+                "type": "session_meta",
+                "payload": {"id": sid, "cwd": str(workspace)},
+            },
+            {
+                "timestamp": "2026-11-19T08:00:00Z",
+                "ordinal": 1,
+                "type": "event_msg",
+                "payload": {"type": "task_started", "turn_id": "t1"},
+            },
+        ]
+    else:
+        log_dir = root / ".gemini/antigravity-cli/brain" / sid / ".system_generated/logs"
+        log_dir.mkdir(parents=True, exist_ok=True)
+        path = log_dir / "transcript_full.jsonl"
+        initial = [
+            {
+                "step_index": 0,
+                "type": "USER_INPUT",
+                "status": "DONE",
+                "created_at": "2026-11-19T08:00:00Z",
+                "content": "<USER_REQUEST>\nrun slow check\n</USER_REQUEST>",
+            }
+        ]
+    path.write_text("\n".join(json.dumps(r) for r in initial) + "\n")
+    return env, path
+
+
+def _append_pre_tool_reply(
+    harness: Harness,
+    path: Path,
+    *,
+    workspace: Path,
+    sid: str,
+    text: str,
+) -> None:
+    if harness is Harness.CLAUDE_CODE:
+        extra = [
+            {
+                "type": "assistant",
+                "uuid": "a1",
+                "timestamp": "2026-11-19T08:00:01Z",
+                "sessionId": sid,
+                "cwd": str(workspace),
+                "message": {
+                    "id": "msg1",
+                    "role": "assistant",
+                    "content": [{"type": "text", "text": text}],
+                },
+            },
+            {
+                "type": "assistant",
+                "uuid": "a2",
+                "timestamp": "2026-11-19T08:00:01Z",
+                "sessionId": sid,
+                "cwd": str(workspace),
+                "message": {
+                    "id": "msg1",
+                    "role": "assistant",
+                    "content": [
+                        {
+                            "type": "tool_use",
+                            "id": "toolu1",
+                            "name": "Bash",
+                            "input": {"command": "sleep 4"},
+                        }
+                    ],
+                },
+            },
+        ]
+    elif harness is Harness.CODEX:
+        extra = [
+            {
+                "timestamp": "2026-11-19T08:00:01Z",
+                "ordinal": 2,
+                "type": "event_msg",
+                "payload": {
+                    "type": "item_completed",
+                    "thread_id": sid,
+                    "turn_id": "t1",
+                    "started_at_ms": 1795075201000,
+                    "completed_at_ms": 1795075201100,
+                    "item": {
+                        "type": "AgentMessage",
+                        "id": "msg1",
+                        "phase": "commentary",
+                        "content": [{"type": "Text", "text": text}],
+                    },
+                },
+            },
+        ]
+    else:
+        extra = [
+            {
+                "step_index": 1,
+                "type": "PLANNER_RESPONSE",
+                "status": "DONE",
+                "created_at": "2026-11-19T08:00:01Z",
+                "content": text,
+                "tool_calls": [{"name": "run_command", "args": {"CommandLine": "sleep 4"}}],
+            }
+        ]
+    with path.open("a", encoding="utf-8") as fh:
+        for row in extra:
+            fh.write(json.dumps(row) + "\n")
+
+
+@pytest.mark.parametrize("harness", [Harness.CLAUDE_CODE, Harness.CODEX, Harness.ANTIGRAVITY])
+async def test_external_harness_publishes_pre_tool_display_before_tool_completes(
+    harness: Harness,
+    tmp_path: Path,
+    db_conn: psycopg.Connection,
+    aops_pool: AsyncConnectionPool,
+    database_gate: ProcessDbGate,
+    hosted_resources: HostedTurnResources,
+    live_events: LiveEvents,
+) -> None:
+    tid = create_agent(db_conn)
+    row_id = insert_row(db_conn, tid, "chat", "user", "run slow check")
+    sid = f"sid-{harness.value}-{tid}"
+    ack_text = "MEIVA_DISPLAY_TO_USER\nStarting slow check now."
+    workspace = workspace_dir(tid, home=meiva_home())
+    env, transcript_path = _prepare_pre_tool_transcript(
+        harness, root=tmp_path, workspace=workspace, sid=sid
+    )
+
+    base = runtime(
+        None,
+        ops_pool=aops_pool,
+        hosted_resources=hosted_resources,
+        publisher=live_events.publisher,
+        agent_id=tid,
+        database_gate=database_gate,
+    )
+    ctx = replace(
+        base.context,
+        harness=harness,
+        harness_bridge=SimpleNamespace(session_id=sid),
+        db=Database.from_settings(gate=database_gate),
+        environ=env,
+        agent=AgentSlices.resolve(
+            {"user_delivery_mode": "prefix", "fast_acknowledgement": True},
+            default_reader=defaults(),
+        ),
+    )
+    sink = ReadTimelineSink(
+        ctx,
+        tid,
+        live_events.publisher,
+        non_human_wake=False,
+        session_id=lambda: sid,
+    )
+    flusher = asyncio.create_task(sink.flush_text())
+    try:
+        _append_pre_tool_reply(
+            harness, transcript_path, workspace=workspace, sid=sid, text=ack_text
+        )
+        key = input_key(row_id)
+        for ev in (
+            TurnStarted("t1", TurnOrigin.INPUT, (key,), 1),
+            InputInContext(key, "t1", 1),
+            AssistantText("t1", ack_text),
+            ToolUse("t1", "tc1", "Bash", {"command": "sleep 4"}),
+        ):
+            await sink.on_event(ev)
+
+        def _published() -> bool:
+            db_conn.commit()
+            return bool(
+                db_conn.execute(
+                    "SELECT 1 FROM agent_publications WHERE agent_id=%s", (tid,)
+                ).fetchone()
+            )
+
+        await wait_until(_published, "pre-tool publication flushed while tool still open")
+        pubs = db_conn.execute(
+            "SELECT mode, content FROM agent_publications WHERE agent_id=%s", (tid,)
+        ).fetchall()
+        assert pubs == [("prefix", "Starting slow check now.")]
+        snapshots = [e for e in await live_events.events() if e.get("role") == "timeline_snapshot"]
+        assert snapshots and any(
+            item.get("payload") == "Starting slow check now."
+            for snap in snapshots
+            for item in snap.get("items", [])
+        )
+    finally:
+        flusher.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await flusher

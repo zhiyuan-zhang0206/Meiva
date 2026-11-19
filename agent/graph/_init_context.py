@@ -157,6 +157,11 @@ async def _establish_external_harness_context(
         set_handoff = getattr(ctx.harness_bridge, "set_handoff", None)
         if callable(set_handoff):
             set_handoff(handoff)
+    elif ctx.ops_pool is not None:
+        # meiva:note
+        # Keep the on-disk instructions file current across warm restarts and live
+        # config/overlay edits without mutating the running session's handoff object.
+        _build_grounded_handoff(ctx, agent_id=agent_id)
     indexed = (
         set(state.capabilities.indexed)
         if warm_session and not reset.tail and state.capabilities.indexed

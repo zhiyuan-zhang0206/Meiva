@@ -29,7 +29,6 @@ class ModelTuning:
     prompt_keep_it_simple_enabled: bool | None = None
     prompt_output_conciseness_enabled: bool | None = None
     prompt_ui_delivery_enabled: bool | None = None
-    prompt_opening_reply_enabled: bool | None = None
     prompt_outcome_reporting_enabled: bool | None = None
     prompt_action_caution_enabled: bool | None = None
     prompt_align_before_action_enabled: bool | None = None
@@ -61,7 +60,6 @@ DEFAULT_TUNING = ModelTuning(
     prompt_keep_it_simple_enabled=True,
     prompt_output_conciseness_enabled=False,
     prompt_ui_delivery_enabled=False,
-    prompt_opening_reply_enabled=False,
     prompt_outcome_reporting_enabled=True,
     prompt_action_caution_enabled=True,
     prompt_align_before_action_enabled=True,

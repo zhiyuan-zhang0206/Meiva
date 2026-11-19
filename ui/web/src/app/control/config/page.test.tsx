@@ -460,6 +460,27 @@ describe("Settings scope", () => {
     await waitFor(() => expect(put).toHaveBeenCalledWith({ agent_communication_style: null }, undefined));
   });
 
+  it("shows fast acknowledgement in General working-together and saves boolean updates", async () => {
+    const fastAck = {
+      ...VIEW.fields[0], name: "fast_acknowledgement", label: "Fast acknowledgement",
+      env_var: "MEIVA_FAST_ACKNOWLEDGEMENT", field_type: "bool" as const,
+      choices: null, current_value: false, default_value: false,
+    };
+    transport.getConfig.mockResolvedValue({ ...VIEW, fields: [...VIEW.fields, fastAck] });
+    const put = transport.putConfig.mockResolvedValue(OK_RESULT([fastAck.name], ["agent"]));
+    wrap(<ConfigEditor mode="general" />);
+
+    const commGroup = await screen.findByTestId("config-group-config-communication");
+    const toggle = await screen.findByTestId("toggle-fast_acknowledgement");
+    expect(commGroup.contains(toggle)).toBe(true);
+    expect(toggle.getAttribute("aria-checked")).toBe("false");
+
+    fireEvent.click(toggle);
+    await waitFor(() =>
+      expect(put).toHaveBeenCalledWith(expect.objectContaining({ fast_acknowledgement: true }), undefined),
+    );
+  });
+
   it("general settings omit machine selection and technical configuration", async () => {
     transport.getConfig.mockResolvedValue(VIEW);
     wrap(<ConfigEditor mode="general" />);

@@ -125,20 +125,26 @@ Capabilities rather than standing as its own section.
   mandatory as its first step and drops that step when this section renders
   nothing.
 - **Core communication policy** — `agent/graph/prompt/conversation.py:user_reply_section`,
-  always present: answer directly. When `settings.prompt_opening_reply_enabled`
-  (env `MEIVA_SYSTEM_PROMPT_OPENING_REPLY`, shared floor off) resolves on, the
-  section also requires a substantive reply in the same dialog before the first
-  tool call on a human request, and `off` and `silent` styles do not suppress it.
-  Ordinary assistant text follows the user's requested language, including standing
-  preferences in injected memory. Each message is self-contained, substantive
-  communication with the user. Execution updates default to milestones meaningful
-  to the user; routine operations stay in tool feedback or working notes.
-  Automated wakes and peer messages do not require courtesy replies or closing summaries;
-  every assistant text block declares its visibility on the first line.
-  `MEIVA_DISPLAY_TO_USER` routes meaningful user-facing text to the main
-  conversation. `MEIVA_HIDE_FROM_USER` routes working notes to Details,
-  which the user can expand. Invalid or missing markers also fold into Details
-  and trigger a correction note.
+  always present: answer directly. Pre-tool confirmation vs strict silent
+  execution is governed solely by `## Fast acknowledgement` (`fast_acknowledgement`,
+  env `MEIVA_FAST_ACKNOWLEDGEMENT`, cluster default `False`, per-agent
+  `config_overlay` override). Ordinary assistant text follows the user's requested
+  language, including standing preferences in injected memory. Each message is
+  self-contained, substantive communication with the user. Execution updates
+  default to milestones meaningful to the user; routine operations stay in tool
+  feedback or working notes. Automated wakes and peer messages do not require
+  courtesy replies or closing summaries; every assistant text block declares its
+  visibility on the first line. `MEIVA_DISPLAY_TO_USER` routes meaningful
+  user-facing text to the main conversation. `MEIVA_HIDE_FROM_USER` routes
+  working notes to Details, which the user can expand. Invalid or missing
+  markers also fold into Details and trigger a correction note.
+  Both `user_reply_section` and `harness_user_reply_section` append
+  `## Fast acknowledgement`: when off, it explicitly instructs agents not to send
+  empty or low-information acknowledgements (before tools or mid-task) and to
+  work silently until the final answer or a real blocker; when on, it instructs
+  agents to emit one concise `MEIVA_DISPLAY_TO_USER` (or `meiva.ui.publish`)
+  confirmation before calling tools on direct, unambiguous user requests and
+  stay silent after pure-action commands instead of interrupting a second time.
 - **Core communication style** — `agent/graph/prompt/system_prompt.py:communication_style_section`,
   selected by `settings.agent.agent_communication_style` (env
   `MEIVA_AGENT_COMMUNICATION_STYLE`, default `off`): how much the agent narrates
@@ -340,9 +346,10 @@ Review every section with these questions:
 ## Communication style (implemented, config-selected)
 
 An unconditional communication policy lives in `conversation.user_reply_section`: a
-human request gets a direct answer. With `prompt_opening_reply_enabled` on (default
-off), a short reply is also required before investigation/tools; off drops every
-sentence stating that rule.
+human request gets a direct answer, and `## Fast acknowledgement` (`fast_acknowledgement`,
+cluster default `False`, per-agent `config_overlay` override) controls whether
+a concise pre-tool confirmation is emitted on direct unambiguous requests (`True`)
+or empty acknowledgements are suppressed until results/blockers (`False`).
 It owns ordinary assistant-text reply routing, including text alongside tool calls,
 and applies to unfinished human requests resumed from handoff records. Once enough
 evidence is available, answer instead of investigating unstated response requirements.
@@ -365,8 +372,7 @@ remain visible. Internally recovered failures with unchanged goals and promises
 stay in truthful records and owner reports. Deliver each substantive result once. Routine calls, retries, file
 reads, bookkeeping and unchanged status stay in tool feedback or working notes.
 There is no fixed cadence. Updates stand alone instead of introducing a tool
-call. Direct answers, necessary questions, the substantive opening reply (when
-that rule is on) and complete final deliverables remain valid; a brief-update policy does not limit
+call. Direct answers, necessary questions and complete final deliverables remain valid; a brief-update policy does not limit
 requested explanations or necessary evidence. Automated wakes and peer messages
 require neither courtesy replies nor automatic closing summaries. The optional
 style text is owned by the same `agent/graph/prompt/conversation.py` module.
@@ -378,9 +384,8 @@ A lightweight conversation section lives in the **Meiva core** prompt
 coding-specific. It is selected by an enum, `settings.agent.agent_communication_style`,
 env `MEIVA_AGENT_COMMUNICATION_STYLE`, one of `off` (**the default**) / `oriented` /
 `concise` / `silent`. These select subsequent narration volume; `off` omits only
-that optional section. Reply routing is always present alongside language and
-milestone rules; the initial-response rule is present only when
-`prompt_opening_reply_enabled` resolves on. All are owned by
+that optional section. Reply routing is always present alongside language,
+milestone rules, and `## Fast acknowledgement` (`fast_acknowledgement`). All are owned by
 `conversation.user_reply_section`.
 
 Text alongside `execute_code` follows the configured delivery protocol. Required

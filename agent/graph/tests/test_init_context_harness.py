@@ -41,7 +41,7 @@ from base.events.live.bus import EventBus
 from base.host.env.agent_slices import AgentSlices
 from base.lm.catalog import ModelCatalog
 from base.lm.harness import HarnessInput
-from base.lm.harness.handoff import Handoff
+from base.lm.harness.handoff import Handoff, instructions_path
 from base.lm.provider_api import Decision, DecisionResult, Question
 from base.log import logger
 from base.native_process.turn_identity import HostedServiceResources
@@ -178,8 +178,19 @@ async def test_external_harness_cold_start_establishes_handoff_and_standing_note
         and len(handoffs) == 2
     )
     bridge.session_id = "warm-session-1"
-    _ = await init_context_node(AgentState(), runtime, _config(tid))
+    updated_runtime = replace(
+        runtime,
+        context=replace(
+            runtime.context,
+            agent=AgentSlices.resolve({"fast_acknowledgement": True}, default_reader=defaults()),
+        ),
+    )
+    _ = await init_context_node(AgentState(), updated_runtime, _config(tid))
     assert len(handoffs) == 2
+    on_disk = instructions_path(paths.workspace_dir(tid, home=meiva_home())).read_text()
+    assert "immediately call `meiva.ui.publish(...)` with one concise sentence" in on_disk or (
+        "emit one brief `MEIVA_DISPLAY_TO_USER`" in on_disk
+    )
 
 
 @pytest.mark.parametrize("harness", [Harness.CLAUDE_CODE, Harness.CODEX])

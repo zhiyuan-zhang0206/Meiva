@@ -13,7 +13,11 @@ from typing import Literal, LiteralString, NamedTuple
 
 from base.agents.incarnation.restart_transition import RestartTransition
 from base.agents.messages.kwargs import NoteTag
-from base.agents.messages.lifecycle_text import restart_resume_note, restart_transition_note
+from base.agents.messages.lifecycle_text import (
+    fast_acknowledgement_note,
+    restart_resume_note,
+    restart_transition_note,
+)
 from base.native_process.runtime_incarnation import RuntimeIncarnation
 
 LifecycleKind = Literal["restart", "terminate"]
@@ -162,10 +166,16 @@ def restart_apply(
         statements.append((_STORE_HARNESS, (transition.target_harness, agent_id)))
         if transition.target_harness != "meiva":
             statements.append((_MARK_HARNESS_MODEL_SELECTION, (agent_id,)))
+    note_text = restart_transition_note(
+        source,
+        message,
+        from_harness=stored_harness,
+        to_harness=transition.target_harness,
+    )
+    if update_note := fast_acknowledgement_note(transition.config_overlay):
+        note_text = f"{note_text}\n\n{update_note}" if note_text else update_note
     note = ResumeNote(
-        content=restart_transition_note(
-            source, message, from_harness=stored_harness, to_harness=transition.target_harness
-        ),
+        content=note_text,
         source=source,
         note_tag=NoteTag.LIFECYCLE_RESTART.value,
     )

@@ -96,3 +96,53 @@ def test_sane_values_are_admitted(model_catalog: ModelCatalog, field: str, value
         decision_models=model_catalog.decision_models,
         home=meiva_home(),
     )
+
+
+@pytest.mark.parametrize("enabled", [False, True])
+def test_fast_acknowledgement_overlay_inherits_or_overrides_strict_booleans(
+    model_catalog: ModelCatalog, enabled: bool
+) -> None:
+    from base.config.agent_pins import frozen_field_names
+    from base.config.tests.configuration import defaults
+    from base.host.env.agent_slices import AgentSlices
+    from base.packages.plugins.config_registration import resolve_overlay_targets
+
+    assert "fast_acknowledgement" not in frozen_field_names()
+    assert resolve_overlay_targets({"fast_acknowledgement": enabled}, home=meiva_home()) == {
+        "fast_acknowledgement": (None, "fast_acknowledgement")
+    }
+    validate_config_overlay(
+        {"fast_acknowledgement": enabled},
+        models=model_catalog.models,
+        home=meiva_home(),
+    )
+    overridden = AgentSlices.resolve(
+        {"fast_acknowledgement": enabled},
+        default_reader=defaults(agent__fast_acknowledgement=not enabled),
+    )
+    assert overridden.prompt.fast_acknowledgement is enabled
+    inherited = AgentSlices.resolve(
+        None, default_reader=defaults(agent__fast_acknowledgement=enabled)
+    )
+    assert inherited.prompt.fast_acknowledgement is enabled
+
+
+@pytest.mark.parametrize("invalid", ["true", "false", 1, 0])
+def test_fast_acknowledgement_overlay_rejects_coercible_non_booleans(
+    model_catalog: ModelCatalog, invalid: object
+) -> None:
+    with pytest.raises(InvalidConfigOverlay, match="must be a boolean"):
+        validate_config_overlay(
+            {"fast_acknowledgement": invalid},
+            models=model_catalog.models,
+            home=meiva_home(),
+        )
+
+
+def test_fast_acknowledgement_overlay_rejects_none(model_catalog: ModelCatalog) -> None:
+    with pytest.raises(InvalidConfigOverlay):
+        validate_config_overlay(
+            {"fast_acknowledgement": None},
+            models=model_catalog.models,
+            home=meiva_home(),
+        )

@@ -1,7 +1,7 @@
 # meiva:note
 # Hosted incarnation admission and settlement, replacing status-only writes.
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import datetime
 from enum import StrEnum
 from pathlib import Path
@@ -40,6 +40,7 @@ from base.agents.incarnation.restart_transition import (
     RestartTransition,
     restart_transition_of,
 )
+from base.agents.messages.lifecycle_text import fast_acknowledgement_note
 from base.db.protocols import AsyncPool, DatabaseLike
 from base.db.rows import IdRow
 from base.db.transaction import async_write_transaction
@@ -86,12 +87,20 @@ class _LifecycleCommand:
     source: str
     content: str
     transition: RestartTransition | None
+    fast_ack_note: str | None
 
     @classmethod
     def from_row(cls, row: tuple[object, ...]) -> "_LifecycleCommand":
         match row:
             case (int() as id_, str() as kind, str() as source, str() as content, payload):
-                return cls(id_, kind, source, content, restart_transition_of(payload))
+                return cls(
+                    id_,
+                    kind,
+                    source,
+                    content,
+                    restart_transition_of(payload),
+                    fast_acknowledgement_note(payload),
+                )
             case _:
                 raise TypeError("a claimed lifecycle command row has columns of unexpected types")
 
@@ -161,6 +170,18 @@ async def apply_hosted_lifecycle(
                     transition=command.transition,
                     stored_harness=stored_harness,
                 )
+                if (
+                    command.transition is None
+                    and plan.note is not None
+                    and command.fast_ack_note is not None
+                ):
+                    plan = replace(
+                        plan,
+                        note=replace(
+                            plan.note,
+                            content=f"{plan.note.content}\n\n{command.fast_ack_note}",
+                        ),
+                    )
                 for sql, params in plan.statements:
                     await conn.execute(sql, params)
                 await conn.execute(

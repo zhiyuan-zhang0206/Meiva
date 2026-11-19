@@ -14,6 +14,7 @@ from psycopg_pool import ConnectionPool
 from base.agents.inbox.insert import insert_inbound_message
 from base.agents.lifecycle import release_browser_pages
 from base.agents.messages.inbound import WakeTriggerKind, validate_wake_trigger_kind
+from base.agents.messages.lifecycle_text import fast_acknowledgement_note
 from base.agents.model.overlay_columns import split_overlay_columns
 from base.api_contracts.agent_contract import (
     AgentStatus,
@@ -585,6 +586,8 @@ async def _execute_harness_transition(
         if is_switch
         else body.message
     )
+    if update_note := fast_acknowledgement_note(body.config_overlay):
+        restart_note = f"{restart_note}\n\n{update_note}" if restart_note else update_note
     await asyncio.to_thread(
         resurrect_agent, db, bus, agent_id, resurrected_by=body.source, restart_note=restart_note
     )

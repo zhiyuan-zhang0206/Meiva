@@ -1,6 +1,10 @@
 from __future__ import annotations
 
-from base.agents.messages.lifecycle_text import restart_accepted_text, restart_resume_note
+from base.agents.messages.lifecycle_text import (
+    fast_acknowledgement_note,
+    restart_accepted_text,
+    restart_resume_note,
+)
 
 
 def test_restart_accepted_text_formats_source_and_optional_explanation() -> None:
@@ -28,3 +32,12 @@ def test_restart_resume_note_carries_optional_explanation() -> None:
         "Restart was accepted from system:restart while your turn was unfinished: "
         "Zhiyuan rolling out #9999\nIf code was running"
     )
+
+
+def test_lifecycle_text_carries_fast_acknowledgement_updates() -> None:
+    on_note = fast_acknowledgement_note({"fast_acknowledgement": True})
+    off_note = fast_acknowledgement_note({"config_overlay": {"fast_acknowledgement": False}})
+    assert on_note is not None and "[Config updated: fast_acknowledgement=on]" in on_note
+    assert off_note is not None and "[Config updated: fast_acknowledgement=off]" in off_note
+    assert fast_acknowledgement_note({"fast_acknowledgement": "true"}) is None
+    assert fast_acknowledgement_note(None) is None

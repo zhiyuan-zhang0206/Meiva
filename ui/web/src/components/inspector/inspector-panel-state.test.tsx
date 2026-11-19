@@ -57,6 +57,7 @@ describe("InspectorPanel", () => {
       liveFixture({
         config_overlay: {
           skills_to_inject_into_system_prompt: ["example_skill", "*"],
+          fast_acknowledgement: true,
           llm_model: "claude-opus-4-8",
         },
       }),
@@ -64,6 +65,8 @@ describe("InspectorPanel", () => {
     render(<InspectorPanel agentId={1} />);
     await waitFor(() => expect(screen.getByText("Configuration")).toBeTruthy());
     expect(screen.getByText('["example-skill","*"]')).toBeTruthy();
+    expect(screen.getByText("fast_acknowledgement")).toBeTruthy();
+    expect(screen.getByText("true")).toBeTruthy();
     expect(screen.queryByText(/example_skill/)).toBeNull();
     expect(screen.getByText("Claude Opus 4.8")).toBeTruthy();
   });

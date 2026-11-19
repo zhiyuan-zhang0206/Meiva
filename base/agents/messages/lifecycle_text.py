@@ -6,6 +6,39 @@
 # meiva:link agent/graph/docs/turn-interrupts.md
 
 
+from base.host.boundary.json_values import is_object_dict
+
+
+def _fast_acknowledgement_overlay_value(config: object) -> bool | None:
+    if not is_object_dict(config):
+        return None
+    overlay = config.get("config_overlay")
+    target = overlay if is_object_dict(overlay) else config
+    raw = target.get("fast_acknowledgement")
+    return raw if isinstance(raw, bool) else None
+
+
+# meiva:note
+# System-note update injected when a restart or transition explicitly sets fast_acknowledgement.
+def fast_acknowledgement_note(config: object) -> str | None:
+    enabled = _fast_acknowledgement_overlay_value(config)
+    if enabled is None:
+        return None
+    if enabled:
+        return (
+            "[Config updated: fast_acknowledgement=on] On direct, unambiguous user requests, "
+            "emit one brief `MEIVA_DISPLAY_TO_USER` confirmation before calling any tool, then "
+            "execute silently under `MEIVA_HIDE_FROM_USER` (stay silent after pure-action "
+            "commands that need no report)."
+        )
+    return (
+        "[Config updated: fast_acknowledgement=off] Do not send empty or low-information "
+        "acknowledgements ('Got it, I'll...', 'On it', 'Delegated, will report back') before "
+        "calling tools or mid-task; work silently under `MEIVA_HIDE_FROM_USER` until delivering "
+        "the final result or hitting a real question or blocker."
+    )
+
+
 # meiva:note
 # Render "by X" in lifecycle marker text. 'self' (meiva.self.terminate / restart called by the
 # agent itself) becomes "yourself", which reads more naturally than "by self"; other sources
@@ -21,9 +54,7 @@ def by_who(source: str) -> str:
 # restart notice), optionally carrying the actor's natural-language explanation.
 def restart_accepted_text(source: str, message: str | None = None) -> str:
     head = f"Restart was accepted from {by_who(source)}"
-    if message:
-        return f"{head}: {message}"
-    return head
+    return f"{head}: {message}" if message else head
 
 
 # meiva:note
@@ -59,7 +90,11 @@ def restart_resume_note(source: str, message: str | None = None) -> str:
 # the agent reads one shape whoever asked); a restart that kept its harness is the plain acceptance
 # text, because nothing was terminated mid-turn: the turn that asked for it ended first.
 def restart_transition_note(
-    source: str, message: str | None, *, from_harness: str, to_harness: str
+    source: str,
+    message: str | None,
+    *,
+    from_harness: str,
+    to_harness: str,
 ) -> str:
     if from_harness != to_harness:
         return f"[Harness switched from '{from_harness}' to '{to_harness}']\n{message or ''}"

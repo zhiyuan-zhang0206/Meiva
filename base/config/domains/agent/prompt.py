@@ -372,24 +372,6 @@ class AgentPromptSettings(EnvSettings):
         },
     )
 
-    prompt_opening_reply_enabled: bool | None = Field(
-        title="Require an opening reply before the first tool call",
-        default=None,
-        alias="MEIVA_SYSTEM_PROMPT_OPENING_REPLY",
-        description=(
-            "Require a brief substantive reply in the first response to a human "
-            "request before the first tool call, and render the sentences that "
-            "state that rule. Unset resolves the per-model default (shared "
-            "floor: off)."
-        ),
-        json_schema_extra={
-            "restart_required": "agent",
-            "writable": True,
-            "sensitive": False,
-            "scope": "cluster-pinned",
-        },
-    )
-
     prompt_user_tone_enabled: bool | None = Field(
         title="Include user communication guidance",
         default=None,
@@ -593,6 +575,31 @@ class AgentPromptSettings(EnvSettings):
             "scope": "cluster-default",
             "per_agent": True,
             "lifecycle": "live",
+        },
+    )
+
+    fast_acknowledgement: bool = Field(
+        title="Fast acknowledgement",
+        default=False,
+        alias="MEIVA_FAST_ACKNOWLEDGEMENT",
+        description=(
+            "Send one brief visible confirmation before calling any tool on a "
+            "clear, direct user request, then execute silently. Off by default: "
+            "suppress low-information acknowledgements and stay silent until "
+            "delivering the final result or hitting a real ambiguity or blocker."
+        ),
+        json_schema_extra={
+            "capability": "common",
+            "restart_required": "agent",
+            "writable": True,
+            "sensitive": False,
+            "scope": "cluster-default",
+            "per_agent": True,
+            "lifecycle": "live",
+            "help_text": (
+                "Send a brief confirmation right when starting a clear direct request; "
+                "off stays silent until the final result or a question."
+            ),
         },
     )
 
