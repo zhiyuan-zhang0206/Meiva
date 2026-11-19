@@ -16,6 +16,7 @@ from cli.commands.cluster.plans.provider_verdicts import (
     BLOCKED_AGENTS_CHECK,
     BalancePayload,
     BalanceUnreadable,
+    HaltedAgents,
     NoProviderKey,
     judge_balance,
     judge_blocked_agents,
@@ -103,8 +104,8 @@ def test_a_payload_that_is_not_shaped_like_a_balance_answer_is_a_read_error(
 
 
 def test_blocked_agents_at_the_threshold_fail_with_a_stable_message() -> None:
-    first = judge_blocked_agents(3, 3, 24.0)
-    second = judge_blocked_agents(7, 3, 24.0)
+    first = judge_blocked_agents(HaltedAgents(rejected=3, quota=0), 3, 24.0)
+    second = judge_blocked_agents(HaltedAgents(rejected=4, quota=3), 3, 24.0)
 
     assert first.check == BLOCKED_AGENTS_CHECK
     assert first.failure is not None and first.failure == second.failure
@@ -114,8 +115,22 @@ def test_blocked_agents_at_the_threshold_fail_with_a_stable_message() -> None:
     assert "7 agent(s)" in second.notes[0]
 
 
+# meiva:note
+# An exhausted harness quota stops agents as surely as a rejected key: the halts count toward the
+# same threshold, and the detail line says how many of them are waiting on quota.
+def test_quota_halts_count_toward_the_threshold_and_are_named_apart() -> None:
+    check = judge_blocked_agents(HaltedAgents(rejected=0, quota=3), 3, 24.0)
+
+    assert check.failure is not None
+    assert "exhausted harness quota" in check.failure
+    assert check.notes[0] == (
+        "  (provider blocked-agents detail: 3 agent(s) halted within 24h: "
+        "0 by permanent provider rejections, 3 by exhausted harness quota)"
+    )
+
+
 def test_blocked_agents_below_the_threshold_are_silent() -> None:
-    check = judge_blocked_agents(2, 3, 24.0)
+    check = judge_blocked_agents(HaltedAgents(rejected=1, quota=1), 3, 24.0)
 
     assert check.failure is None and check.notes == ()
 

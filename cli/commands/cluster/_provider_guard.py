@@ -21,12 +21,16 @@ import psycopg
 from psycopg.rows import class_row
 
 from base.agents.context.clients import DatabaseFactory
-from base.agents.recovery.breaker import HALT_AFTER_CONSECUTIVE_PERMANENT_REJECTS
+from base.agents.recovery.breaker import (
+    HALT_AFTER_CONSECUTIVE_PERMANENT_REJECTS,
+    HALT_REASON_QUOTA_EXHAUSTED,
+)
 from base.config import ConfigBoot
 from cli.boundary.json_body import response_value
 from cli.commands.cluster.plans.provider_verdicts import (
     BalancePayload,
     BalanceUnreadable,
+    HaltedAgents,
     NoProviderKey,
     ProviderCheck,
     judge_balance,
@@ -79,11 +83,11 @@ def provider_guard_checks(
     if guard.balance_enabled:
         checks.append(judge_balance(_read_balance(guard), guard.balance_min_cny))
     if guard.blocked_agents_enabled:
-        count = halted_agents_count(
-            guard.blocked_agents_window_hours, database_factory=database_factory
-        )
+        halted = halted_agents(guard.blocked_agents_window_hours, database_factory=database_factory)
         checks.append(
-            judge_blocked_agents(count, guard.blocked_agents_min, guard.blocked_agents_window_hours)
+            judge_blocked_agents(
+                halted, guard.blocked_agents_min, guard.blocked_agents_window_hours
+            )
         )
     return tuple(checks)
 
@@ -117,31 +121,45 @@ def fetch_balance(url: str, key: str, timeout_s: float) -> BalancePayload | Bala
 
 
 @dataclass(frozen=True)
-class _Count:
-    halted: int
+class _Counts:
+    rejected: int
+    quota: int
 
 
 # meiva:note
-# Count agents halted by permanent provider rejections inside the window.
+# Count agents halted inside the window, permanent rejections and quota exhaustion apart.
 #
 # `permanent_reject_streak >= HALT_AFTER_CONSECUTIVE_PERMANENT_REJECTS` is the recovery
 # breaker's durable "halted" flag and the single source of truth for the state (task #3617);
-# `last_turn_fatal_at` bounds it to the active wave. A completed turn clears both columns in
-# one statement, so the pair stays coherent. None when the query cannot run: the check
-# reports "cannot judge" and passes, never a guessed healthy verdict.
-def halted_agents_count(window_hours: float, *, database_factory: DatabaseFactory) -> int | None:
+# `last_permanent_reject_reason` tells a quota halt from a rejection. A rejection is a fatal
+# turn, so `last_turn_fatal_at` bounds it to the active wave. A quota halt leaves the agent idling
+# without a fatal stamp (the reaper must not take it), so the moment it went idle,
+# `status_changed_at`, bounds it instead; the agent stays in that status until a new message
+# admits a turn. A completed turn clears the streak and the reason in one statement, so the
+# readings stay coherent. None when the query cannot run: the check reports "cannot judge" and
+# passes, never a guessed healthy verdict.
+def halted_agents(window_hours: float, *, database_factory: DatabaseFactory) -> HaltedAgents | None:
+    window_s = window_hours * 3600.0
     try:
         with (
             database_factory().connect() as conn,
-            conn.cursor(row_factory=class_row(_Count)) as cur,
+            conn.cursor(row_factory=class_row(_Counts)) as cur,
         ):
             cur.execute(
-                "SELECT count(*) AS halted FROM agents_meta"
-                " WHERE permanent_reject_streak >= %s"
-                "   AND last_turn_fatal_at > now() - make_interval(secs => %s)",
-                (HALT_AFTER_CONSECUTIVE_PERMANENT_REJECTS, window_hours * 3600.0),
+                "SELECT count(*) FILTER (WHERE last_permanent_reject_reason IS DISTINCT FROM %s"
+                "   AND last_turn_fatal_at > now() - make_interval(secs => %s)) AS rejected,"
+                " count(*) FILTER (WHERE last_permanent_reject_reason = %s"
+                "   AND status_changed_at > now() - make_interval(secs => %s)) AS quota"
+                " FROM agents_meta WHERE permanent_reject_streak >= %s",
+                (
+                    HALT_REASON_QUOTA_EXHAUSTED,
+                    window_s,
+                    HALT_REASON_QUOTA_EXHAUSTED,
+                    window_s,
+                    HALT_AFTER_CONSECUTIVE_PERMANENT_REJECTS,
+                ),
             )
             row = cur.fetchone()
     except (psycopg.Error, OSError):
         return None
-    return row.halted if row is not None else None
+    return HaltedAgents(row.rejected, row.quota) if row is not None else None

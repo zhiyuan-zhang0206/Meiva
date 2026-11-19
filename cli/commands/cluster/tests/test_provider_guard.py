@@ -17,13 +17,16 @@ import psycopg
 import pytest
 from pydantic import SecretStr
 
-from base.agents.recovery.breaker import HALT_AFTER_CONSECUTIVE_PERMANENT_REJECTS
+from base.agents.recovery.breaker import (
+    HALT_AFTER_CONSECUTIVE_PERMANENT_REJECTS,
+    HALT_REASON_QUOTA_EXHAUSTED,
+)
 from base.db import Database
 from base.host.net.tests.local_http import closed_port_url
 from cli.commands.cluster._provider_guard import (
     ProviderGuardConfig,
     fetch_balance,
-    halted_agents_count,
+    halted_agents,
     provider_guard_checks,
     provider_guard_config,
 )
@@ -32,6 +35,7 @@ from cli.commands.cluster.plans.provider_verdicts import (
     BLOCKED_AGENTS_CHECK,
     BalancePayload,
     BalanceUnreadable,
+    HaltedAgents,
 )
 from cli.commands.cluster.tests.gateway_server import Reply, serving
 from cli.commands.cluster.tests.health_probe_inputs import live_agent
@@ -58,6 +62,22 @@ def _guard(**changes: Any) -> ProviderGuardConfig:
         blocked_agents_min=1,
     )
     return dataclasses.replace(base, **changes)
+
+
+def _quota_halt(conn: psycopg.Connection, *, streak: int, hours_ago: float) -> int:
+    agent_id = live_agent(conn)
+    conn.execute(
+        "UPDATE agents_meta SET permanent_reject_streak = %s, last_permanent_reject_reason = %s "
+        "WHERE id = %s",
+        (streak, HALT_REASON_QUOTA_EXHAUSTED, agent_id),
+    )
+    conn.execute(
+        "UPDATE agents_meta SET status_changed_at = now() - make_interval(secs => %s) "
+        "WHERE id = %s",
+        (hours_ago * 3600.0, agent_id),
+    )
+    conn.commit()
+    return agent_id
 
 
 def _halt(conn: psycopg.Connection, *, streak: int, hours_ago: float) -> int:
@@ -123,15 +143,31 @@ def test_only_agents_halted_by_permanent_rejections_inside_the_window_are_counte
     _halt(db_conn, streak=HALT_AFTER_CONSECUTIVE_PERMANENT_REJECTS, hours_ago=30)
     live_agent(db_conn)
 
-    assert halted_agents_count(24.0, database_factory=operator_database) == 2
-    assert halted_agents_count(48.0, database_factory=operator_database) == 3
-    assert halted_agents_count(0.5, database_factory=operator_database) == 0
+    assert halted_agents(24.0, database_factory=operator_database) == HaltedAgents(2, 0)
+    assert halted_agents(48.0, database_factory=operator_database) == HaltedAgents(3, 0)
+    assert halted_agents(0.5, database_factory=operator_database) == HaltedAgents(0, 0)
+
+
+# meiva:note
+# A quota halt has no fatal stamp (the agent idles, waiting for a new message), so it is counted
+# apart and bounded by when it went idle; a quota halt a completed turn cleared is not counted.
+def test_agents_halted_by_exhausted_quota_are_counted_apart_without_a_fatal_stamp(
+    db_conn: psycopg.Connection, operator_database: Callable[[], Database]
+) -> None:
+    _quota_halt(db_conn, streak=HALT_AFTER_CONSECUTIVE_PERMANENT_REJECTS, hours_ago=1)
+    _quota_halt(db_conn, streak=HALT_AFTER_CONSECUTIVE_PERMANENT_REJECTS + 1, hours_ago=2)
+    _quota_halt(db_conn, streak=HALT_AFTER_CONSECUTIVE_PERMANENT_REJECTS, hours_ago=30)
+    _quota_halt(db_conn, streak=HALT_AFTER_CONSECUTIVE_PERMANENT_REJECTS - 1, hours_ago=1)
+    _halt(db_conn, streak=HALT_AFTER_CONSECUTIVE_PERMANENT_REJECTS, hours_ago=1)
+
+    assert halted_agents(24.0, database_factory=operator_database) == HaltedAgents(1, 2)
+    assert halted_agents(48.0, database_factory=operator_database) == HaltedAgents(1, 3)
 
 
 def test_a_database_that_cannot_be_queried_is_none_never_a_healthy_zero(
     unreachable_database: Callable[[], Database],
 ) -> None:
-    assert halted_agents_count(24.0, database_factory=unreachable_database) is None
+    assert halted_agents(24.0, database_factory=unreachable_database) is None
 
 
 def test_the_checks_run_balance_first_and_both_report_independently(
