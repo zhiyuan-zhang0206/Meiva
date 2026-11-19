@@ -587,12 +587,14 @@
   box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.05);
 }
 
-.agent-title-working {
+.agent-title-working,
+.timeline-title-working {
   color: inherit;
 }
 
 @media (prefers-reduced-motion: no-preference) and (forced-colors: none) {
-  .agent-title-working {
+  .agent-title-working,
+  .timeline-title-working {
     --working-base: #6E727A;
     --working-mid: #35383E;
     --working-peak: #000000;
@@ -614,7 +616,8 @@
     animation: agent-title-sweep 2.7s linear infinite;
   }
 
-  .dark .agent-title-working {
+  .dark .agent-title-working,
+  .dark .timeline-title-working {
     --working-base: #9498A0;
     --working-mid: #D0D5DD;
     --working-peak: #FFFFFF;

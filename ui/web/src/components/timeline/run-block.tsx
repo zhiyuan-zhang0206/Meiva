@@ -13,7 +13,7 @@ import { Layers } from "lucide-react";
 import { useTranslations } from "next-intl";
 import { memo, type ReactNode } from "react";
 
-import { formatDuration, type SdkCall } from "@/lib/format/item-summary";
+import { formatWholeSecondsDuration, type SdkCall } from "@/lib/format/item-summary";
 import { cn } from "@/lib/format/utils";
 import {
   BAR_STICKY_TOP_CLASS,
@@ -24,6 +24,7 @@ import {
   MIN_W_0,
   OVERFLOW_HIDDEN,
 } from "@/lib/layout/layout";
+import { useSyncedShimmer } from "@/components/ui/use-synced-shimmer";
 
 import { CallBadge, DisclosureChevron, DISCLOSURE_TITLE_CLS } from "./view/card-summary/card-summary";
 import { useNow } from "./model/reasoning-clock";
@@ -102,6 +103,7 @@ export const TurnBlock = memo(function TurnBlock({
   activeTurnStartedAt = 0,
 }: TurnBlockProps) {
   const t = useTranslations("timeline");
+  const titleRef = useSyncedShimmer(Boolean(turnActive));
   const liveBlockStartedAt =
     turnActive && summary.lastLiveKind != null && summary.lastLiveStartedAt > 0
       ? summary.lastLiveStartedAt
@@ -135,14 +137,17 @@ export const TurnBlock = memo(function TurnBlock({
   const totalWorkedMs = baseWorkedMs + liveDelta;
 
   const hasWork = summary.thinking > 0 || summary.code > 0 || summary.output > 0;
-  const hasLiveTimer =
-    (summary.lastLiveKind !== null && summary.lastLiveStartedAt > 0) || liveAnchor > 0;
+  const liveDuration = turnActive ? formatWholeSecondsDuration(totalWorkedMs) : null;
+  const settledDuration =
+    !turnActive && hasWork ? formatWholeSecondsDuration(summary.workedMs) : null;
   const measuredLabel = turnActive
-    ? totalWorkedMs > 0 || hasWork || hasLiveTimer
-      ? t("workingFor", { duration: formatDuration(totalWorkedMs) })
+    ? liveDuration !== null
+      ? t("workingFor", { duration: liveDuration })
       : t("working")
     : hasWork
-      ? t("workedFor", { duration: formatDuration(summary.workedMs) })
+      ? settledDuration !== null
+        ? t("workedFor", { duration: settledDuration })
+        : t("worked")
       : t("workActivity");
 
   const timingIncomplete = useAuthoritativeTurnClock ? false : hasWork && summary.missingTiming;
@@ -198,7 +203,14 @@ export const TurnBlock = memo(function TurnBlock({
         <span className={cn("gap-0.5", FLEX, FLEX_COL, MIN_W_0, FLEX_1)}>
           <span className={cn("items-center gap-1.5 text-[13px] leading-snug", FLEX, MIN_W_0)}>
             <Layers className="size-3.5 shrink-0 opacity-70" />
-            <span className={cn(DISCLOSURE_TITLE_CLS, "whitespace-nowrap tabular-nums")}>
+            <span
+              ref={titleRef}
+              className={cn(
+                DISCLOSURE_TITLE_CLS,
+                "whitespace-nowrap tabular-nums",
+                turnActive && "timeline-title-working",
+              )}
+            >
               {workedLabel}
             </span>
             <DisclosureChevron expanded={expanded} />
@@ -238,10 +250,14 @@ export const PendingLiveActivityWindow = memo(function PendingLiveActivityWindow
   startedAt?: number;
 }) {
   const t = useTranslations("timeline");
+  const titleRef = useSyncedShimmer(true);
   const hasAnchor = startedAt > 0;
   const liveNow = useNow(hasAnchor);
-  const label = hasAnchor
-    ? t("workingFor", { duration: formatDuration(Math.max(liveNow - startedAt, 0)) })
+  const liveDuration = hasAnchor
+    ? formatWholeSecondsDuration(Math.max(liveNow - startedAt, 0))
+    : null;
+  const label = liveDuration !== null
+    ? t("workingFor", { duration: liveDuration })
     : t("working");
   return (
     <div
@@ -258,7 +274,9 @@ export const PendingLiveActivityWindow = memo(function PendingLiveActivityWindow
       >
         <span className={cn("items-center gap-1.5 text-[13px] leading-snug", FLEX, FLEX_1, MIN_W_0)}>
           <Layers className="size-3.5 shrink-0 opacity-70" />
-          <span className="truncate whitespace-nowrap tabular-nums">{label}</span>
+          <span ref={titleRef} className="truncate whitespace-nowrap tabular-nums timeline-title-working">
+            {label}
+          </span>
         </span>
       </div>
     </div>

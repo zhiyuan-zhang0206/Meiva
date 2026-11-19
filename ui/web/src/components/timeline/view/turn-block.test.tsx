@@ -297,15 +297,18 @@ describe("TurnBlock component", () => {
       const { rerender } = render(
         <TurnBlock id="turn-note" memberIds={["1.0"]} summary={noteOnly} expanded={false} turnActive lastEventAt={100_000} onToggle={vi.fn()} />,
       );
-      expect(screen.getByTestId("turn-toggle").textContent).toContain("Working for 0.1s");
-      expect(screen.getByTestId("turn-toggle").textContent).not.toContain("Working…");
+      expect(screen.getByTestId("turn-toggle").textContent).toContain("Working…");
+      expect(screen.getByTestId("turn-toggle").textContent).not.toContain("0s");
 
       act(() => { vi.setSystemTime(100_040); });
       rerender(
         <TurnBlock id="turn-note" memberIds={["1.0"]} summary={noteOnly} expanded={false} turnActive lastEventAt={100_040} onToggle={vi.fn()} />,
       );
-      expect(screen.getByTestId("turn-toggle").textContent).toContain("Working for 0.1s");
-      expect(screen.getByTestId("turn-toggle").textContent).not.toContain("Working…");
+      expect(screen.getByTestId("turn-toggle").textContent).toContain("Working…");
+      expect(screen.getByTestId("turn-toggle").textContent).not.toContain("0s");
+
+      act(() => { vi.advanceTimersByTime(1_000); });
+      expect(screen.getByTestId("turn-toggle").textContent).toContain("Working for 1s");
     } finally {
       vi.useRealTimers();
     }
@@ -491,5 +494,200 @@ describe("Plan B Turn-level timing semantics", () => {
       />,
     );
     expect(screen.getByText("Worked for 9s")).toBeTruthy();
+  });
+});
+
+describe("Working title Silver Glint shimmer", () => {
+  afterEach(cleanup);
+
+  it("applies timeline-title-working only to the active TurnBlock title span, never to icons, chevron, or summary", () => {
+    const { container, rerender } = render(
+      <TurnBlock
+        id="turn-shimmer"
+        memberIds={["1.0"]}
+        summary={sampleSummary}
+        expanded={true}
+        turnActive={true}
+        lastEventAt={1}
+        onToggle={vi.fn()}
+      >
+        <div>detail</div>
+      </TurnBlock>,
+    );
+
+    const toggle = screen.getByTestId("turn-toggle");
+    const shimmerEl = toggle.querySelector(".timeline-title-working");
+    expect(shimmerEl).not.toBeNull();
+    expect(shimmerEl?.tagName).toBe("SPAN");
+    expect(shimmerEl?.textContent).toContain("Working for");
+    expect(toggle.querySelectorAll(".timeline-title-working")).toHaveLength(1);
+    for (const svg of container.querySelectorAll("svg")) {
+      expect(svg.classList.contains("timeline-title-working")).toBe(false);
+    }
+
+    rerender(
+      <TurnBlock
+        id="turn-shimmer"
+        memberIds={["1.0"]}
+        summary={sampleSummary}
+        expanded={true}
+        turnActive={false}
+        onToggle={vi.fn()}
+      >
+        <div>detail</div>
+      </TurnBlock>,
+    );
+    expect(toggle.querySelector(".timeline-title-working")).toBeNull();
+    expect(toggle.textContent).toContain("Worked for");
+  });
+
+  it("omits timeline-title-working on settled TurnBlocks (Worked for / Work activity)", () => {
+    const activityOnly: TurnSummary = {
+      ...sampleSummary,
+      thinking: 0,
+      code: 0,
+      output: 0,
+      workedMs: 0,
+    };
+    const { container } = render(
+      <TurnBlock
+        id="turn-settled"
+        memberIds={["1.0"]}
+        summary={activityOnly}
+        expanded={false}
+        onToggle={vi.fn()}
+      />,
+    );
+    expect(screen.getByTestId("turn-toggle").textContent).toContain("Context");
+    expect(container.querySelector(".timeline-title-working")).toBeNull();
+  });
+
+  it("applies timeline-title-working to PendingLiveActivityWindow title span only and formats whole seconds", () => {
+    vi.useFakeTimers();
+    try {
+      const startMs = 1_700_000_000_000;
+      vi.setSystemTime(startMs + 450);
+
+      const { rerender } = render(<PendingLiveActivityWindow />);
+      const pending = screen.getByTestId("pending-live-activity-window");
+      const shimmerEl = pending.querySelector(".timeline-title-working");
+      expect(shimmerEl).not.toBeNull();
+      expect(shimmerEl?.tagName).toBe("SPAN");
+      expect(shimmerEl?.textContent).toBe("Working…");
+      expect(pending.querySelectorAll(".timeline-title-working")).toHaveLength(1);
+      expect(pending.querySelector("svg")?.classList.contains("timeline-title-working")).toBe(false);
+
+      rerender(<PendingLiveActivityWindow startedAt={startMs} />);
+      const timedEl = pending.querySelector(".timeline-title-working");
+      expect(timedEl?.textContent).toBe("Working…");
+      expect(timedEl?.textContent).not.toContain("0s");
+      expect(timedEl?.textContent).not.toContain(".");
+
+      act(() => {
+        vi.advanceTimersByTime(500);
+      });
+      expect(pending.querySelector(".timeline-title-working")?.textContent).toBe("Working…");
+
+      act(() => {
+        vi.advanceTimersByTime(500);
+      });
+      expect(pending.querySelector(".timeline-title-working")?.textContent).toBe("Working for 1s");
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("omits 0s and decimals on TurnBlock headers below 1s for both active and settled states", () => {
+    const subSecondSummary: TurnSummary = {
+      ...sampleSummary,
+      workedMs: 850,
+      lastLiveKind: null,
+      lastLiveStartedAt: 0,
+    };
+    const { rerender } = render(
+      <TurnBlock
+        id="turn-subsec"
+        memberIds={["s1"]}
+        summary={subSecondSummary}
+        expanded={false}
+        turnActive
+        onToggle={vi.fn()}
+      />,
+    );
+    expect(screen.getByTestId("turn-toggle").querySelector(".timeline-title-working")?.textContent).toBe("Working…");
+
+    rerender(
+      <TurnBlock
+        id="turn-subsec"
+        memberIds={["s1"]}
+        summary={subSecondSummary}
+        expanded={false}
+        turnActive={false}
+        onToggle={vi.fn()}
+      />,
+    );
+    expect(screen.getByTestId("turn-toggle").querySelector(".timeline-title-working")).toBeNull();
+    expect(screen.getByTestId("turn-toggle").textContent).toContain("Worked");
+    expect(screen.getByTestId("turn-toggle").textContent).not.toContain("0s");
+    expect(screen.getByTestId("turn-toggle").textContent).not.toContain("0.9s");
+
+    rerender(
+      <TurnBlock
+        id="turn-subsec"
+        memberIds={["s1"]}
+        summary={{ ...subSecondSummary, workedMs: 1_900 }}
+        expanded={false}
+        turnActive={false}
+        onToggle={vi.fn()}
+      />,
+    );
+    expect(screen.getByTestId("turn-toggle").textContent).toContain("Worked for 1s");
+  });
+
+  it("pins active shimmer animation startTime to 0 in both TurnBlock and PendingLiveActivityWindow", () => {
+    const prevDescriptor = Object.getOwnPropertyDescriptor(Element.prototype, "getAnimations");
+    const activeTurnAnim = { startTime: 2345 } as unknown as Animation;
+    const inactiveTurnAnim = { startTime: 6789 } as unknown as Animation;
+    const pendingAnim = { startTime: 4567 } as unknown as Animation;
+    let currentAnim = inactiveTurnAnim;
+    Element.prototype.getAnimations = () => [currentAnim];
+
+    try {
+      const { rerender } = render(
+        <TurnBlock
+          id="turn-sync"
+          memberIds={["1.0"]}
+          summary={sampleSummary}
+          expanded={false}
+          turnActive={false}
+          onToggle={vi.fn()}
+        />,
+      );
+      expect(inactiveTurnAnim.startTime).toBe(6789);
+
+      currentAnim = activeTurnAnim;
+      rerender(
+        <TurnBlock
+          id="turn-sync"
+          memberIds={["1.0"]}
+          summary={sampleSummary}
+          expanded={false}
+          turnActive={true}
+          lastEventAt={1}
+          onToggle={vi.fn()}
+        />,
+      );
+      expect(activeTurnAnim.startTime).toBe(0);
+
+      currentAnim = pendingAnim;
+      render(<PendingLiveActivityWindow />);
+      expect(pendingAnim.startTime).toBe(0);
+    } finally {
+      if (prevDescriptor) {
+        Object.defineProperty(Element.prototype, "getAnimations", prevDescriptor);
+      } else {
+        delete (Element.prototype as { getAnimations?: unknown }).getAnimations;
+      }
+    }
   });
 });

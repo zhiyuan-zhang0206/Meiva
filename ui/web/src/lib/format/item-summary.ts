@@ -58,16 +58,34 @@ export function summarizeCode(sdkCalls?: readonly SdkCall[] | null): CodeSummary
 
 // --- formatting helpers (shared by the chip) ---
 
-/** Human duration from milliseconds: `0.1s` / `0.3s` / `8s` / `1m 12s`. Shared
- *  by the thinking chip ("Thinking for Xs") and the output chip ("ran in Xs").
- *  Values <0.1s floor at 0.1s; 0.1–1s round to 0.1s; 1–60s round to whole
- *  seconds; >=60s switches to `Nm Ss`. */
+function formatWholeSecondParts(totalSec: number): string {
+  if (totalSec < 60) return `${totalSec}s`;
+  const m = Math.floor(totalSec / 60);
+  const s = totalSec % 60;
+  return s === 0 ? `${m}m` : `${m}m ${s}s`;
+}
+
+// meiva:note
+// Whole-second duration for active/settled TurnBlock and PendingLiveActivityWindow headers:
+// returns null below 1s so headers render plain "Working…" / "Worked" instead of "0s",
+// and floors >= 1s to "1s".."59s", "1m", "1m 12s" without 60s rollover.
+// meiva:link ui/web/src/docs/frontend-components/timeline-view/deep-collapse.md
+export function formatWholeSecondsDuration(ms: number): string | null {
+  const totalSec = Math.floor(Math.max(0, ms) / 1000);
+  if (totalSec < 1) return null;
+  return formatWholeSecondParts(totalSec);
+}
+
+// meiva:note
+// Human duration from milliseconds: `0.1s` / `0.3s` / `8s` / `1m 12s`. Shared
+// by the thinking chip ("Thinking for Xs") and the output chip ("ran in Xs").
+// Values <0.1s floor at 0.1s; 0.1–1s round to 0.1s; 1–60s round to whole
+// seconds; >=60s switches to `Nm Ss`.
+// meiva:link ui/web/src/docs/frontend-components/timeline-view/deep-collapse.md
 export function formatDuration(ms: number): string {
   const totalSec = ms / 1000;
   if (totalSec < 0.1) return "0.1s";
   if (totalSec < 1) return `${Math.round(totalSec * 10) / 10}s`;
   if (totalSec < 60) return `${Math.round(totalSec)}s`;
-  const m = Math.floor(totalSec / 60);
-  const s = Math.round(totalSec % 60);
-  return s === 0 ? `${m}m` : `${m}m ${s}s`;
+  return formatWholeSecondParts(Math.round(totalSec));
 }
