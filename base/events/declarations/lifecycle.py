@@ -349,6 +349,5 @@ EVENTS: dict[str, EventSpec] = {
         "triggering inbox messages were returned to pending and automatic wakes suppressed until reset/backoff",
         payload=HarnessQuotaExhausted,
         tier="anomaly",
-        persist=True,
     ),
 }

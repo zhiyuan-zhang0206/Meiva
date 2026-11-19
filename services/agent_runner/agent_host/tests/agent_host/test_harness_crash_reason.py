@@ -189,7 +189,7 @@ async def test_startup_failure_persists_sanitized_reason_and_clears_stale_exit(
 _FIXTURE_SK_SECRET = "sk-" + "fixture-key-0002"
 
 
-def _rate_limit_deliver(
+def _server_error_deliver(
     inputs: Sequence[HarnessInput], queue: asyncio.Queue[BridgeEvent | None]
 ) -> None:
     del inputs
@@ -208,8 +208,8 @@ def _rate_limit_deliver(
             cost_usd=None,
             cumulative_cost_usd=None,
             permission_denials=(),
-            errors=(f"API Error: 429 quota exhausted for {_FIXTURE_SK_SECRET}",),
-            error_code="rate_limit",
+            errors=(f"API Error: 500 upstream failure for {_FIXTURE_SK_SECRET}",),
+            error_code="server_error",
             generation=1,
         )
     )
@@ -289,7 +289,7 @@ async def test_first_turn_stream_fault_reaps_closes_child_records_exit_and_clear
         control_pool=aops_pool,
         bus=event_bus,
     )
-    failing_session = _ScriptedHarnessSession(exit_code=1, on_deliver=_rate_limit_deliver)
+    failing_session = _ScriptedHarnessSession(exit_code=1, on_deliver=_server_error_deliver)
     await _pin_cached_bridge(host, aops_pool, agent_id, _bridge_for(failing_session, agent_id))
     insert_inbound_message(
         db_conn, agent_id, "first task", "agent:1", bus=event_bus, database=database
@@ -311,8 +311,8 @@ async def test_first_turn_stream_fault_reaps_closes_child_records_exit_and_clear
         assert snap is not None
         assert (snap.status.value, snap.harness_exit_code) == ("terminated", 1)
         assert snap.last_turn_fatal_reason is not None
-        assert "rate_limit" in snap.last_turn_fatal_reason
-        assert "quota exhausted" in snap.last_turn_fatal_reason
+        assert "server_error" in snap.last_turn_fatal_reason
+        assert "upstream failure" in snap.last_turn_fatal_reason
         assert _FIXTURE_SK_SECRET not in snap.last_turn_fatal_reason
 
         # meiva:note
