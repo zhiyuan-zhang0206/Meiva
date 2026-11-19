@@ -549,3 +549,160 @@ async def test_fork_sink_without_input_keys_falls_back_to_parent_uuids_and_hide_
     assert _publications(db_conn, child_id) == [
         ("harness:claude:12121212-1212-4121-8121-121212121212", "child turn two answer")
     ]
+
+
+async def test_fork_sink_caches_parent_uuids_across_paused_polls(
+    tmp_path: Path,
+    db_conn: psycopg.Connection,
+    database_gate: ProcessDbGate,
+    live_events: LiveEvents,
+) -> None:
+    parent_session = "11111111-2222-4333-8444-555555555555"
+    child_session = "66666666-7777-4888-8999-000000000000"
+    child_id, child_folder = _fork_pair(tmp_path, db_conn, parent_session=parent_session)
+    child_ws = workspace_dir(child_id, home=tmp_path / "home")
+    child_file = child_folder / f"{child_session}.jsonl"
+    parent_file = next((tmp_path / ".claude/projects").glob(f"*/{parent_session}.jsonl"))
+
+    ctx = _fork_sink_ctx(tmp_path, database_gate)
+    sink = ReadTimelineSink(
+        ctx,
+        child_id,
+        live_events.publisher,
+        non_human_wake=False,
+        session_id=lambda: child_session,
+    )
+    child_file.write_text(
+        _claude_row(
+            row_type="user",
+            uuid_value="11111111-1111-4111-8111-111111111111",
+            prompt_id="child-prompt-1",
+            text="parent question",
+            session_id=child_session,
+            cwd=str(child_ws),
+        )
+        + _claude_row(
+            row_type="assistant",
+            uuid_value="22222222-2222-4222-8222-222222222222",
+            text="MEIVA_DISPLAY_TO_USER\nparent reply one",
+            session_id=child_session,
+            cwd=str(child_ws),
+        ),
+        encoding="utf-8",
+    )
+
+    await sink._read()
+    parent_file.unlink()
+    for _ in range(3):
+        await sink._read()
+
+    assert _publications(db_conn, child_id) == []
+
+    with child_file.open("a", encoding="utf-8") as handle:
+        handle.write(
+            _claude_row(
+                row_type="user",
+                uuid_value="77777777-7777-4777-8777-777777777777",
+                prompt_id="child-prompt-1",
+                text="child prompt",
+                session_id=child_session,
+                cwd=str(child_ws),
+            )
+            + _claude_row(
+                row_type="assistant",
+                uuid_value="44444444-5555-4666-8777-888888888888",
+                text="MEIVA_DISPLAY_TO_USER\nchild cached answer",
+                session_id=child_session,
+                cwd=str(child_ws),
+            )
+        )
+    await sink.finish()
+
+    assert _publications(db_conn, child_id) == [
+        ("harness:claude:44444444-5555-4666-8777-888888888888", "child cached answer")
+    ]
+
+
+async def test_fork_sink_fail_closed_when_unanchored_never_falls_back_to_zero(
+    tmp_path: Path,
+    db_conn: psycopg.Connection,
+    database_gate: ProcessDbGate,
+    live_events: LiveEvents,
+) -> None:
+    parent_id = agent_row(db_conn)
+    db_conn.execute("UPDATE agents_meta SET harness='claude_code' WHERE id=%s", (parent_id,))
+    child_id = create_agent(db_conn)
+    db_conn.execute(
+        "INSERT INTO agents_meta (id, spawner, born_spawner, fork_source_agent_id, "
+        "fork_source_checkpoint_id, status, harness) "
+        "VALUES (%s, %s, %s, %s, 'ckpt', 'running', 'claude_code')",
+        (child_id, f"agent:{parent_id}", f"agent:{parent_id}", parent_id),
+    )
+    db_conn.commit()
+
+    child_session = "99999999-8888-4777-8666-555555555555"
+    child_ws = workspace_dir(child_id, home=tmp_path / "home")
+    child_folder = tmp_path / ".claude/projects" / re.sub(r"[^A-Za-z0-9]", "-", str(child_ws))
+    child_folder.mkdir(parents=True)
+    child_file = child_folder / f"{child_session}.jsonl"
+    floor_file = harness_sessions_dir(home=tmp_path / "home") / f"{child_id}.claude_code.floor"
+
+    ctx = _fork_sink_ctx(tmp_path, database_gate)
+    sink = ReadTimelineSink(
+        ctx,
+        child_id,
+        live_events.publisher,
+        non_human_wake=False,
+        session_id=lambda: child_session,
+    )
+    assert sink._history_end == 0
+
+    child_file.write_text(
+        _claude_row(
+            row_type="user",
+            uuid_value="aaaaaaaa-1111-4111-8111-111111111111",
+            prompt_id="child-prompt-1",
+            text="parent question without parent record",
+            session_id=child_session,
+            cwd=str(child_ws),
+        )
+        + _claude_row(
+            row_type="assistant",
+            uuid_value="bbbbbbbb-2222-4222-8222-222222222222",
+            text="MEIVA_DISPLAY_TO_USER\nparent reply must not leak",
+            session_id=child_session,
+            cwd=str(child_ws),
+        ),
+        encoding="utf-8",
+    )
+
+    await sink._read()
+    await sink.finish()
+    assert _publications(db_conn, child_id) == []
+    assert not floor_file.exists()
+
+    with child_file.open("a", encoding="utf-8") as handle:
+        handle.write(
+            _claude_row(
+                row_type="user",
+                uuid_value=key_uuid("inbound-recovered"),
+                prompt_id="child-prompt-2",
+                text="child prompt after missing parent",
+                session_id=child_session,
+                cwd=str(child_ws),
+            )
+            + _claude_row(
+                row_type="assistant",
+                uuid_value="cccccccc-3333-4333-8333-333333333333",
+                text="MEIVA_DISPLAY_TO_USER\nchild recovered reply",
+                session_id=child_session,
+                cwd=str(child_ws),
+            )
+        )
+    await sink.finish(input_keys=["inbound-recovered"])
+
+    assert floor_file.exists()
+    assert json.loads(floor_file.read_text(encoding="utf-8"))["floor"] > 0
+    assert _publications(db_conn, child_id) == [
+        ("harness:claude:cccccccc-3333-4333-8333-333333333333", "child recovered reply")
+    ]

@@ -131,6 +131,8 @@ class ReadTimelineSink:
         self._fork_source_id: int | None = None
         self._fork_floor: int | None = None
         self._fork_floor_loaded = False
+        self._parent_uuids_loaded = False
+        self._parent_uuids: frozenset[str] | None = None
 
     def note_input_keys(self, keys: Sequence[str]) -> None:
         for key in keys:
@@ -329,9 +331,7 @@ class ReadTimelineSink:
         if file is None:
             return None, 0
         if not self._ensure_fork_floor(file):
-            end = file.complete_end()
-            self._from = end
-            return None, end
+            return None, file.complete_end()
         start = self._from if self._from is not None else self._turn_start(file)
         if self._fork_floor is not None and start < self._fork_floor:
             start = self._fork_floor
@@ -519,8 +519,7 @@ class ReadTimelineSink:
         cut = self._resolve_fork_cut(file, parent_id=parent_id, home=home)
         if cut is None:
             return False
-        if cut > 0:
-            _write_fork_floor(floor_path, session_id=sid, floor=cut)
+        _write_fork_floor(floor_path, session_id=sid, floor=cut)
         self._fork_floor = cut
         self._fork_floor_loaded = True
         return True
@@ -534,15 +533,13 @@ class ReadTimelineSink:
             if matched is not None:
                 return matched
         parent_uuids = self._parent_record_uuids(parent_id, home=home)
-        if parent_uuids is not None:
+        if parent_uuids:
             parent_end, saw_child = _parent_fork_cut(file, parent_uuids)
             if parent_end is not None:
                 return parent_end if saw_child else None
         if self._history_end > 0:
             return self._history_end
-        if self._input_keys:
-            return None
-        return 0
+        return None
 
     def _child_db_input_keys(self) -> list[str]:
         if self._ctx.db is None:
@@ -565,7 +562,10 @@ class ReadTimelineSink:
                 keys.append(f"inbound-{row_id}")
         return keys
 
-    def _parent_record_uuids(self, parent_id: int, *, home: Path) -> set[str] | None:
+    def _parent_record_uuids(self, parent_id: int, *, home: Path) -> frozenset[str] | None:
+        if self._parent_uuids_loaded:
+            return self._parent_uuids
+        self._parent_uuids_loaded = True
         registry = FileSessionRegistry(harness_sessions_dir(home=home))
         origin = registry.load(parent_id, harness=self._harness)
         if origin is None:
@@ -575,7 +575,8 @@ class ReadTimelineSink:
         )
         if parent_path is None:
             return None
-        return _read_row_uuids(parent_path)
+        self._parent_uuids = frozenset(_read_row_uuids(parent_path))
+        return self._parent_uuids
 
 
 def _row_uuid(row: Mapping[str, object]) -> str | None:
@@ -629,7 +630,7 @@ def _read_row_uuids(path: Path) -> set[str]:
     return uuids
 
 
-def _parent_fork_cut(file: RecordFile, parent_uuids: set[str]) -> tuple[int | None, bool]:
+def _parent_fork_cut(file: RecordFile, parent_uuids: frozenset[str]) -> tuple[int | None, bool]:
     saw_child = False
     pos = file.complete_end()
     while pos > 0:
