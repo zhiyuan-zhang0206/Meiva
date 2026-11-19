@@ -1,6 +1,7 @@
 # meiva:note
 # Core reply routing, explicit visibility, language, and milestone progress rules in `user_reply_section` remain active across every `COMMUNICATION_STYLE_SECTIONS` setting (`off`, `oriented`, `concise`, `silent`). When `prompt_opening_reply_enabled` resolves on (default off), the first turn on a human request that calls `execute_code` must include a brief substantive opening reply before the first tool call, and every sentence stating that rule is rendered; off drops those sentences. Intermediate turns call `execute_code` with no assistant text unless a milestone is reached. `COMMUNICATION_STYLE_SECTIONS` keys match the non-`off` `agent_communication_style` Literal members so an unknown style raises at render time.
 from base.agents.messages.reply_intent import REPLY_VISIBILITY_RULE, SDK_DELIVERY_RULE
+from base.api_contracts.agent_contract import Harness
 from base.api_contracts.user_delivery import UserDeliveryMode
 
 from .live import SectionInputs, resolved_setting
@@ -63,6 +64,28 @@ def _intermediate_turns_sentence(clause: str, *, opening_reply: bool) -> str:
     return f"After the opening reply, {clause}" if opening_reply else clause[0].upper() + clause[1:]
 
 
+# meiva:note
+# Standalone Claude Code ends every run with a summary addressed to a human at a terminal, so a
+# worker running under the `claude_code` preset tends to emit `MEIVA_DISPLAY_TO_USER` even when it
+# was spawned by another agent. Appending this causal explanation only to the `claude_code` handoff
+# (never touching the vendor system prompt or other harnesses) clarifies why delegated workers keep
+# turn outputs under `MEIVA_HIDE_FROM_USER` and deliver to their delegator via `send_message`.
+_CLAUDE_CODE_VISIBILITY_WHY = (
+    "Unlike standalone Claude Code, where every final summary goes straight to a human at the "
+    "terminal, most Meiva agents are background workers spawned by another agent that coordinate "
+    "exclusively with their delegator through `meiva.agents.send_message` from start to finish; "
+    "many never need to emit MEIVA_DISPLAY_TO_USER once. Even when a brief quotes a human's "
+    "request or you finish a PR or report, sending your result to the delegator via "
+    "`meiva.agents.send_message` already completes the delivery: also marking your turn "
+    "MEIVA_DISPLAY_TO_USER raises a separate unread badge in the human's main view for an "
+    "unfamiliar worker they never contacted, duplicating the delegator's summary and interrupting "
+    "their attention. Unless the human has messaged you directly in this agent's inbox or your "
+    "delegator explicitly told you to interface with the human directly, keep every turn output "
+    "(including your final summary) under MEIVA_HIDE_FROM_USER (its full text remains available "
+    "inside expandable Details) and reserve MEIVA_DISPLAY_TO_USER for direct human-facing work.\n\n"
+)
+
+
 def _build_user_reply_section(
     *,
     feedback_sentence: str,
@@ -70,6 +93,7 @@ def _build_user_reply_section(
     calls_tool_phrase: str,
     intermediate_turns_clause: str,
     opening_reply: bool,
+    visibility_why: str = "",
 ) -> str:
     return (
         "# Responding to human requests\n\n"
@@ -88,8 +112,7 @@ def _build_user_reply_section(
         "to correct it. Tool calls, tool results and reasoning do not need a prefix. "
         "Use the hide prefix for required process narration that does not pass the "
         "user-attention test; only the display prefix delivers it to the user.\n\n"
-        + _USER_ATTENTION_RULE
-        + "## Reply routing\n\n"
+        f"{visibility_why}" + _USER_ATTENTION_RULE + "## Reply routing\n\n"
         "Peer messages, watcher events, scheduled wakes and system notes do not require "
         "courtesy replies or automatic closing summaries. Follow their acknowledgment "
         "protocols separately (for example, reply to a peer via "
@@ -205,6 +228,7 @@ _SILENT_BODY = (
 
 def harness_user_reply_section(_inputs: SectionInputs) -> str:
     opening_reply = _opening_reply_enabled(_inputs)
+    visibility_why = _CLAUDE_CODE_VISIBILITY_WHY if _inputs.harness is Harness.CLAUDE_CODE else ""
     return delivery_prompt(
         _inputs.slices.prompt.user_delivery_mode,
         _build_user_reply_section(
@@ -216,6 +240,7 @@ def harness_user_reply_section(_inputs: SectionInputs) -> str:
                 "assistant text unless you reach a milestone."
             ),
             opening_reply=opening_reply,
+            visibility_why=visibility_why,
         ),
         opening_reply=opening_reply,
     )

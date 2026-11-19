@@ -6,6 +6,7 @@ from pathlib import Path
 
 from agent.hooks.history_dump import workspace_section_hint
 from base.agents.to_user import DOCUMENT_FILENAME
+from base.api_contracts.agent_contract import Harness
 from base.host.env.agent_slices import AgentSlices
 from base.lm.catalog import ModelCatalog
 from base.packages.plugins import activation
@@ -589,10 +590,16 @@ def build_harness_system_prompt(
     catalog: ModelCatalog,
     home: Path,
     environ: Mapping[str, str],
+    harness: Harness | None = None,
 ) -> str:
     parts = _framework_parts(
         HARNESS_FRAMEWORK_SECTIONS,
-        SectionInputs(slices, catalog, read_live_sdk(slices.prompt, home=home, environ=environ)),
+        SectionInputs(
+            slices,
+            catalog,
+            read_live_sdk(slices.prompt, home=home, environ=environ),
+            harness=harness,
+        ),
         agent_id=agent_id,
     )
     parts.extend(

@@ -545,3 +545,24 @@ async def test_a_harness_read_from_its_record_gets_its_handoff_and_stores_no_tim
     bridge.session_id = "warm-session-1"
     _ = await init_context_node(AgentState(), runtime, _config(tid))
     assert len(handoffs) == 1, "a running session already holds it"
+
+
+async def test_claude_code_wake_and_instructions_file_include_visibility_why_while_others_omit_it(
+    database_gate: ProcessDbGate,
+) -> None:
+    claude_prompt = await _wake_prompt(Harness.CLAUDE_CODE, database_gate, agent_id=4245)
+    claude_saved = _instructions_file(4245).read_text(encoding="utf-8")
+
+    for doc in (claude_prompt, claude_saved):
+        visibility = doc.split("## Output visibility\n\n", 1)[1].split("\n\n## User attention", 1)[
+            0
+        ]
+        assert "Unlike standalone Claude Code" in visibility
+        assert "meiva.agents.send_message" in visibility
+        assert "MEIVA_HIDE_FROM_USER" in visibility
+
+    for other_id, other in ((4246, Harness.CODEX), (4247, Harness.ANTIGRAVITY)):
+        other_prompt = await _wake_prompt(other, database_gate, agent_id=other_id)
+        other_saved = _instructions_file(other_id).read_text(encoding="utf-8")
+        assert "Unlike standalone Claude Code" not in other_prompt
+        assert "Unlike standalone Claude Code" not in other_saved

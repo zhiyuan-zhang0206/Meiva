@@ -195,6 +195,7 @@ def _build_grounded_handoff(ctx: MeivaContext, *, agent_id: int) -> Handoff:
         catalog=catalog,
         home=ctx.require_meiva_home(),
         environ=ctx.require_environ(),
+        harness=ctx.harness,
     )
     instruction_parts = [p for p in (prompt_body, HANDOFF_INSTRUCTION) if p]
     instruction = "\n\n".join(instruction_parts)

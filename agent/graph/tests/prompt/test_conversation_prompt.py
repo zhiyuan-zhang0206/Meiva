@@ -12,8 +12,9 @@ from agent.graph.prompt.conversation import (
 )
 from agent.graph.prompt.live import LiveSdk, SectionInputs
 from agent.graph.prompt.skill_selection import SkillView
-from agent.graph.prompt.system_prompt import build_system_prompt
+from agent.graph.prompt.system_prompt import build_harness_system_prompt, build_system_prompt
 from base.agents.messages.reply_intent import DISPLAY_TO_USER, HIDE_FROM_USER
+from base.api_contracts.agent_contract import Harness
 from base.config.tests.configuration import defaults
 from base.host.env.agent_slices import AgentSlices
 from base.packages.plugin_providers import build_model_catalog
@@ -27,9 +28,12 @@ def _slices(**changes: Any) -> AgentSlices:
     return AgentSlices.resolve(default_reader=defaults(**changes))
 
 
-def _inputs(slices: AgentSlices) -> SectionInputs:
+def _inputs(slices: AgentSlices, *, harness: Harness | None = None) -> SectionInputs:
     return SectionInputs(
-        slices, build_model_catalog(home=meiva_home()), LiveSdk(SkillView((), (), (), ()), (), ())
+        slices,
+        build_model_catalog(home=meiva_home()),
+        LiveSdk(SkillView((), (), (), ()), (), ()),
+        harness=harness,
     )
 
 
@@ -278,3 +282,75 @@ def test_attention_policy_is_shared_across_delivery_modes_and_callers(opening_re
                     if mode == "sdk"
                     else "## Delivery mechanics"
                 )
+
+
+def test_claude_code_handoff_appends_visibility_why_only_in_prefix_mode() -> None:
+    prefix_slices = _slices(
+        agent__user_delivery_mode="prefix", agent__prompt_opening_reply_enabled=True
+    )
+    claude_text = harness_user_reply_section(_inputs(prefix_slices, harness=Harness.CLAUDE_CODE))
+    visibility_block = claude_text.split("## Output visibility\n\n", 1)[1].split(
+        "\n\n## User attention", 1
+    )[0]
+
+    assert "Unlike standalone Claude Code" in visibility_block
+    assert "meiva.agents.send_message" in visibility_block
+    assert "separate unread badge" in visibility_block
+    assert "Unless the human has messaged you directly" in visibility_block
+    assert "MEIVA_HIDE_FROM_USER" in visibility_block
+    assert "MEIVA_DISPLAY_TO_USER" in visibility_block
+    assert (
+        claude_text.split("## User attention\n\n", 1)[1]
+        == _GOLDEN["harness/prefix"].split("## User attention\n\n", 1)[1]
+    )
+
+    for other in (Harness.CODEX, Harness.ANTIGRAVITY, Harness.MEIVA, None):
+        assert (
+            harness_user_reply_section(_inputs(prefix_slices, harness=other))
+            == _GOLDEN["harness/prefix"]
+        )
+    assert (
+        user_reply_section(_inputs(prefix_slices, harness=Harness.CLAUDE_CODE))
+        == _GOLDEN["native/prefix"]
+    )
+
+    for mode in ("sdk", "naive"):
+        mode_slices = _slices(
+            agent__user_delivery_mode=mode, agent__prompt_opening_reply_enabled=True
+        )
+        assert (
+            harness_user_reply_section(_inputs(mode_slices, harness=Harness.CLAUDE_CODE))
+            == _GOLDEN[f"harness/{mode}"]
+        )
+
+
+def test_build_harness_system_prompt_leaves_non_claude_harnesses_unchanged() -> None:
+    slices = _slices()
+    catalog = build_model_catalog(home=meiva_home())
+    baseline = build_harness_system_prompt(
+        EMPTY, slices, agent_id=1, catalog=catalog, home=meiva_home(), environ=ENVIRON
+    )
+    for other in (Harness.CODEX, Harness.ANTIGRAVITY):
+        assert (
+            build_harness_system_prompt(
+                EMPTY,
+                slices,
+                agent_id=1,
+                catalog=catalog,
+                home=meiva_home(),
+                environ=ENVIRON,
+                harness=other,
+            )
+            == baseline
+        )
+    claude = build_harness_system_prompt(
+        EMPTY,
+        slices,
+        agent_id=1,
+        catalog=catalog,
+        home=meiva_home(),
+        environ=ENVIRON,
+        harness=Harness.CLAUDE_CODE,
+    )
+    assert "Unlike standalone Claude Code" in claude
+    assert "Unlike standalone Claude Code" not in baseline
