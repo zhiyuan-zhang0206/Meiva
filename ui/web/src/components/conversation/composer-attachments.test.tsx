@@ -373,14 +373,7 @@ describe("Composer unified staged attachments & batch delivery", () => {
     expect(zoomTrigger.className).toContain("relative");
     expect(zoomTrigger.className).toContain("cursor-zoom-in");
     expect(zoomTrigger.className).toContain("group/thumb");
-
-    const zoomOverlay = screen.getByTestId("composer-thumb-zoom-overlay");
-    expect(zoomTrigger.contains(zoomOverlay)).toBe(true);
-    expect(zoomOverlay.className).toContain("pointer-events-none");
-    expect(zoomOverlay.className).toContain("z-[15]");
-    expect(zoomOverlay.className).toContain("group-hover/thumb:opacity-100");
-    expect(zoomOverlay.className).toContain("group-focus-visible/thumb:opacity-100");
-    expect(zoomOverlay.querySelector("svg.lucide-zoom-in")).toBeTruthy();
+    expect(screen.queryByTestId("composer-thumb-zoom-overlay")).toBeNull();
 
     const statusOverlay = screen.getByText("0%");
     expect(statusOverlay.className).toContain("pointer-events-none");
@@ -403,6 +396,14 @@ describe("Composer unified staged attachments & batch delivery", () => {
     await waitFor(() =>
       expect(screen.getByTestId("composer-attachment-card").getAttribute("data-status")).toBe("ready"),
     );
+
+    const zoomOverlay = screen.getByTestId("composer-thumb-zoom-overlay");
+    expect(zoomTrigger.contains(zoomOverlay)).toBe(true);
+    expect(zoomOverlay.className).toContain("pointer-events-none");
+    expect(zoomOverlay.className).toContain("z-[15]");
+    expect(zoomOverlay.className).toContain("group-hover/thumb:opacity-100");
+    expect(zoomOverlay.className).toContain("group-focus-visible/thumb:opacity-100");
+    expect(zoomOverlay.querySelector("svg.lucide-zoom-in")).toBeTruthy();
 
     fireEvent.click(zoomTrigger);
     expect(screen.getByTestId("image-lightbox")).toBeTruthy();
@@ -445,6 +446,7 @@ describe("Composer unified staged attachments & batch delivery", () => {
     expect(zoomTrigger.contains(removeBtn)).toBe(false);
     expect(retryBtn.className).toContain("z-20");
     expect(removeBtn.className).toContain("z-20");
+    expect(screen.queryByTestId("composer-thumb-zoom-overlay")).toBeNull();
 
     fireEvent.click(zoomTrigger);
     expect(screen.getByTestId("image-lightbox")).toBeTruthy();
@@ -458,6 +460,7 @@ describe("Composer unified staged attachments & batch delivery", () => {
     await waitFor(() =>
       expect(screen.getByTestId("composer-attachment-card").getAttribute("data-status")).toBe("ready"),
     );
+    expect(screen.getByTestId("composer-thumb-zoom-overlay")).toBeTruthy();
   });
 });
 

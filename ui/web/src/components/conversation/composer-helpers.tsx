@@ -124,23 +124,25 @@ export function ComposerAttachmentStrip({
                 att.status === "error" && "ring-1 ring-destructive",
               )}
               overlay={
-                <span
-                  aria-hidden="true"
-                  data-testid="composer-thumb-zoom-overlay"
-                  className={cn(
-                    "pointer-events-none absolute inset-0 z-[15] items-center justify-center rounded bg-black/35 opacity-0 transition-opacity duration-150 group-hover/thumb:opacity-100 group-focus-visible/thumb:opacity-100",
-                    FLEX,
-                  )}
-                >
+                att.status === "ready" ? (
                   <span
+                    aria-hidden="true"
+                    data-testid="composer-thumb-zoom-overlay"
                     className={cn(
-                      "size-6 items-center justify-center rounded-full bg-black/60 text-white shadow-sm",
+                      "pointer-events-none absolute inset-0 z-[15] items-center justify-center rounded bg-black/35 opacity-0 transition-opacity duration-150 group-hover/thumb:opacity-100 group-focus-visible/thumb:opacity-100",
                       FLEX,
                     )}
                   >
-                    <ZoomIn className="size-3.5" />
+                    <span
+                      className={cn(
+                        "size-6 items-center justify-center rounded-full bg-black/60 text-white shadow-sm",
+                        FLEX,
+                      )}
+                    >
+                      <ZoomIn className="size-3.5" />
+                    </span>
                   </span>
-                </span>
+                ) : undefined
               }
             />
           ) : (
