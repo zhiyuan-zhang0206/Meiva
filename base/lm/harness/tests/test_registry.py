@@ -8,7 +8,6 @@ import pytest
 
 from base.lm.harness import FileSessionRegistry, SessionRecord
 from base.lm.harness.registry import (
-    FileSessionDigestStore,
     backfill_record_fields,
     migrate_single_slot_records,
     unreadable_records,
@@ -354,29 +353,26 @@ def test_a_record_missing_background_is_reported_as_unreadable_like_one_missing_
     assert unreadable_records(root) == []
 
 
-def test_session_digest_store_roundtrip_fallback_and_cleanup(tmp_path: Path) -> None:
+# meiva:note
+# The digests of context a transcript was given live on its record: they survive a roundtrip, and a
+# record from before the field existed is refused until converge completes it with {} (nothing
+# given, so the session is handed the contributed context once).
+# meiva:link base/lm/harness/docs/harness.md
+def test_context_digests_roundtrip_and_an_older_record_is_backfilled_empty(tmp_path: Path) -> None:
     root = tmp_path / "sessions"
     registry = FileSessionRegistry(root)
-    store = FileSessionDigestStore(root)
+    given = replace(record(6985), context_digests={"meiva_memory.shared": "abc"})
+    registry.save(given)
+    registry.save(record(6984))
+    path = registry.path(6984, HARNESS)
+    document = json.loads(path.read_text())
+    del document["context_digests"]
+    path.write_text(json.dumps(document))
 
-    assert store.load(6984, "claude_code", session_id="sess-1") == {}
-    store.save(6984, "claude_code", session_id="sess-1", digests={"meiva_memory": "abc123"})
-    store.save(6984, "codex", session_id="sess-2", digests={"meiva_memory": "def456"})
-
-    assert store.load(6984, "claude_code", session_id="sess-1") == {"meiva_memory": "abc123"}
-    assert store.load(6984, "claude_code", session_id="sess-other") == {}
-
-    sidecar = store.path(6984, "claude_code", session_id="sess-1")
-    sidecar.write_text(json.dumps({"session_id": "wrong-sid", "digests": {"a": "b"}}))
-    assert store.load(6984, "claude_code", session_id="sess-1") == {}
-
-    sidecar.write_text("{corrupt")
-    assert store.load(6984, "claude_code", session_id="sess-1") == {}
-
-    store.save(6984, "claude_code", session_id="sess-1", digests={"meiva_memory": "abc123"})
-    registry.delete_harnesses(6984, ["claude_code"])
-    assert store.load(6984, "claude_code", session_id="sess-1") == {}
-    assert store.load(6984, "codex", session_id="sess-2") == {"meiva_memory": "def456"}
-
-    assert registry.delete(6984) is False
-    assert store.load(6984, "codex", session_id="sess-2") == {}
+    assert registry.load(6985, harness=HARNESS) == given
+    with pytest.raises(ValueError, match="misses"):
+        _ = registry.load(6984, harness=HARNESS)
+    assert backfill_record_fields(root) == [path]
+    assert backfill_record_fields(root) == []
+    loaded = registry.load(6984, harness=HARNESS)
+    assert loaded is not None and loaded.context_digests == {}

@@ -31,7 +31,7 @@ from base.lm.harness.codex.session import CodexSession
 from base.lm.harness.events import UnsolicitedSink
 from base.lm.harness.handoff import ClusterFact, Handoff, HarnessContribution, refreshes_for
 from base.lm.harness.registration import HANDLE_ENV, RegistrationStore, SecureRandom
-from base.lm.harness.registry import FileSessionDigestStore, FileSessionRegistry, SessionRegistry
+from base.lm.harness.registry import SessionRegistry
 
 # meiva:note
 # The document a fresh session wakes on. It states who the agent is and where it
@@ -247,10 +247,7 @@ def bridge_for(
         model=model,
         reasoning_effort=reasoning_effort,
     )
-    refreshes = refreshes_for((_CODEX_COMPUTER_USE, *contributions_tuple), harness=harness)
-    digest_store = (
-        FileSessionDigestStore(registry.root) if isinstance(registry, FileSessionRegistry) else None
-    )
+    refreshes = refreshes_for(contributions_tuple, harness=harness)
 
     def factory(handle: str) -> HarnessSession:
         return open_session(
@@ -276,7 +273,6 @@ def bridge_for(
         home=home,
         workspace=workspace,
         refreshes=refreshes,
-        digest_store=digest_store,
         registrations=registrations,
         registration_ttl_seconds=registration_ttl_seconds,
         clock=root.clock,

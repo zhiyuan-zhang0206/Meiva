@@ -1,6 +1,7 @@
 from __future__ import annotations
 
-from collections.abc import Callable, Iterable
+import hashlib
+from collections.abc import Callable, Iterable, Sequence
 from dataclasses import dataclass, field, replace
 from pathlib import Path
 
@@ -87,21 +88,28 @@ class RefreshContext:
     home: Path
     workspace: Path
     agent_id: int
-    instructions_file: Path | None = None
-
-
-@dataclass(frozen=True, slots=True)
-class ContextRefresh:
-    key: str
-    digest: str
-    text: str
 
 
 # meiva:note
-# A plugin's live context snapshot for an external harness session. Returning a digest lets
-# `HarnessBridge` detect pre-upgrade resumed sessions (no stored digest) or updated files on disk
-# and inject `text` once per digest change without resending the full handoff.
-RefreshBuilder = Callable[[RefreshContext], ContextRefresh | None]
+# One piece of context a plugin keeps current in an external session, read fresh before each turn.
+# `body` is the full text, given once per conversation: the handoff of a fresh session already
+# carries it, and a resumed or forked session that has not seen it yet gets it on its next turn.
+# After that a change of `body` is told by `notice` alone, one line naming the file to re-read, so
+# an append-only CLI transcript does not collect a copy of the text per edit. `key` names the piece
+# in `SessionRecord.context_digests`.
+# meiva:link base/lm/harness/docs/harness.md
+@dataclass(frozen=True, slots=True)
+class ContextRefresh:
+    key: str
+    body: str
+    notice: str
+
+    @property
+    def digest(self) -> str:
+        return hashlib.sha256(self.body.encode("utf-8")).hexdigest()
+
+
+RefreshBuilder = Callable[[RefreshContext], Sequence[ContextRefresh]]
 
 
 @dataclass(frozen=True, slots=True)

@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import asyncio
-from collections.abc import AsyncIterator, Coroutine, Sequence
+from collections.abc import AsyncIterator, Coroutine, Mapping, Sequence
 from dataclasses import dataclass, replace
 from types import TracebackType
 from typing import ClassVar, Self
@@ -142,6 +142,7 @@ class BaseHarnessSession[ConfigT: SessionConfig](ExitStatus):
         self._observed: set[str] = set()
         self._lost_background: tuple[BackgroundItem, ...] = ()
         self._live_background: tuple[BackgroundItem, ...] = ()
+        self._context_digests: dict[str, str] = {}
 
     async def start(self, *, resume: str | None = None) -> None:
         raise NotImplementedError
@@ -415,6 +416,7 @@ class BaseHarnessSession[ConfigT: SessionConfig](ExitStatus):
         self._resumed_existing = True
         self._record = record
         self._lost_background = record.background
+        self._context_digests = dict(record.context_digests)
         return record.session_id
 
     def _bind(self) -> None:
@@ -434,6 +436,7 @@ class BaseHarnessSession[ConfigT: SessionConfig](ExitStatus):
             harness=self.harness,
             generation=self._ledger.generation,
             background=(*self._lost_background, *self._live_background),
+            context_digests=dict(self._context_digests),
         )
         self._registry.save(self._record)
         self._emit(
@@ -493,6 +496,25 @@ class BaseHarnessSession[ConfigT: SessionConfig](ExitStatus):
         if self._closed or not self._observed:
             return ()
         return (BackgroundItem(BackgroundKind.TURN, "a turn the CLI started by itself is running"),)
+
+    # meiva:note
+    # The contributed context this conversation has been given (see `SessionRecord.context_digests`).
+    # A resumed session starts from its record; a fresh or forked one starts empty. Recording merges
+    # into the record at once when the session is bound, and `_bind` carries it otherwise.
+    # meiva:link base/lm/harness/docs/harness.md
+    @property
+    def context_digests(self) -> Mapping[str, str]:
+        return dict(self._context_digests)
+
+    def record_context_digests(self, digests: Mapping[str, str]) -> None:
+        merged = {**self._context_digests, **digests}
+        if merged == self._context_digests:
+            return
+        self._context_digests = merged
+        if self._registry is None or self._record is None:
+            return
+        self._record = replace(self._record, context_digests=dict(merged))
+        self._registry.save(self._record)
 
     def take_lost_background(self) -> tuple[BackgroundItem, ...]:
         lost, self._lost_background = self._lost_background, ()

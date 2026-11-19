@@ -5,8 +5,8 @@ import json
 import os
 import re
 import tempfile
-from collections.abc import Collection, Mapping
-from dataclasses import asdict, dataclass
+from collections.abc import Collection
+from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Protocol
 
@@ -26,6 +26,7 @@ _REQUIRED_FIELDS = frozenset(
         "harness",
         "generation",
         "background",
+        "context_digests",
     }
 )
 _FIELDS = _REQUIRED_FIELDS | {"resumes"}
@@ -59,6 +60,15 @@ class SessionRecord:
     # agent once. It is a small list of one-line descriptions, not a log.
     # meiva:link base/lm/harness/docs/background-work.md
     background: tuple[BackgroundItem, ...] = ()
+    # meiva:note
+    # What context this session's conversation has already been given, by contribution key: a key
+    # that is present means its full text is in the transcript, and the value is the digest of that
+    # text as last made known to it. The bridge reads it to tell a first sight (inject the text) from
+    # a change (one line naming the file) from nothing new. It lives on the record because it is a
+    # fact of this transcript: a fresh or forked session gets a new record and starts empty, and a
+    # resumed one reads it back. Required: `backfill_record_fields` completes older records with {}.
+    # meiva:link base/lm/harness/docs/harness.md
+    context_digests: dict[str, str] = field(default_factory=dict)
 
 
 class SessionRegistry(Protocol):
@@ -163,7 +173,6 @@ class FileSessionRegistry:
             self.path(agent_id, harness).unlink(missing_ok=True)
             self._root.joinpath(f"{agent_id}.{harness}.floor").unlink(missing_ok=True)
         TurnTimingStore(self._root).delete_harnesses(agent_id, harnesses)
-        FileSessionDigestStore(self._root).delete_harnesses(agent_id, harnesses)
 
     def delete(self, agent_id: int) -> bool:
         _check_agent(agent_id)
@@ -179,7 +188,6 @@ class FileSessionRegistry:
                 continue
             removed = True
         TurnTimingStore(self._root).delete(agent_id)
-        FileSessionDigestStore(self._root).delete(agent_id)
         return removed
 
 
@@ -207,7 +215,13 @@ def migrate_single_slot_records(root: Path) -> list[Path]:
         if not is_object_dict(raw):
             raise TypeError(f"session record at {entry} is not an object")
         record = record_from_payload(
-            {"harness": _PRE_FIELD_HARNESS, "generation": 0, "background": [], **raw},
+            {
+                "harness": _PRE_FIELD_HARNESS,
+                "generation": 0,
+                "background": [],
+                "context_digests": {},
+                **raw,
+            },
             source=str(entry),
         )
         if record.agent_id != int(entry.stem):
@@ -241,10 +255,11 @@ def unreadable_records(root: Path) -> list[str]:
 
 
 # meiva:note
-# Complete the records written before `generation` or `background` existed: a missing `generation`
-# becomes 0 (the first process that runs under it is generation 1) and a missing `background`
-# becomes the empty list (the true value for a process that did not track background work), each
-# written atomically in place. Both fields are required on read, so a home that was not converged
+# Complete the records written before `generation`, `background` or `context_digests` existed: a
+# missing `generation` becomes 0 (the first process that runs under it is generation 1), a missing
+# `background` becomes the empty list (the true value for a process that did not track background
+# work), and missing `context_digests` become {} (nothing recorded as given, so the session is
+# handed the contributed context once), each written atomically in place. All are required on read, so a home that was not converged
 # refuses the record instead of resuming on a guess. Idempotent; returns the files changed. A file
 # that is not a record fails naming it.
 # meiva:link base/lm/harness/docs/harness.md
@@ -262,9 +277,14 @@ def backfill_record_fields(root: Path) -> list[Path]:
             raise ValueError(f"session record at {entry} is not valid JSON") from exc
         if not is_object_dict(raw):
             raise TypeError(f"session record at {entry} is not an object")
-        if "generation" in raw and "background" in raw:
+        if "generation" in raw and "background" in raw and "context_digests" in raw:
             continue
-        completed: dict[str, object] = {"generation": 0, "background": [], **raw}
+        completed: dict[str, object] = {
+            "generation": 0,
+            "background": [],
+            "context_digests": {},
+            **raw,
+        }
         record = record_from_payload(completed, source=str(entry))
         FileSessionRegistry(root).save(record)
         changed.append(entry)
@@ -291,7 +311,9 @@ def _check_agent(agent_id: int) -> None:
 
 # meiva:note
 # The one place a stored or transferred record becomes a `SessionRecord`: the registry reads
-# its own files through it and the cross-machine transfer rebuilds the record it received.
+# its own files through it and the cross-machine transfer rebuilds the record it received. A
+# transferred record from a host older than `context_digests` names none, which is what it means:
+# nothing was recorded as given. A stored file still has to carry the field (see `_REQUIRED_FIELDS`).
 def record_from_payload(payload: dict[str, object], *, source: str) -> SessionRecord:
     try:
         return SessionRecord(
@@ -305,9 +327,19 @@ def record_from_payload(payload: dict[str, object], *, source: str) -> SessionRe
             resumes=int_field(payload, "resumes") if "resumes" in payload else 0,
             generation=int_field(payload, "generation"),
             background=decode_items(payload["background"], source=source),
+            context_digests=(
+                _digests_field(payload, "context_digests") if "context_digests" in payload else {}
+            ),
         )
     except (TypeError, ValueError) as exc:
         raise ValueError(f"session record at {source} has invalid values: {exc}") from exc
+
+
+def _digests_field(payload: dict[str, object], name: str) -> dict[str, str]:
+    raw = payload[name]
+    if not is_object_dict(raw) or not all(isinstance(value, str) for value in raw.values()):
+        raise TypeError(f"{name} must be an object of strings")
+    return {key: str(value) for key, value in raw.items()}
 
 
 @dataclass(frozen=True, slots=True)
@@ -518,91 +550,6 @@ class TurnTimingStore:
         pattern = re.compile(
             rf"{agent_id}\.[a-z][a-z0-9_]*(?:\.[0-9a-f]+)?\.(turns\.jsonl|active_turn\.json)"
         )
-        for entry in self._root.iterdir():
-            if pattern.fullmatch(entry.name):
-                entry.unlink(missing_ok=True)
-
-
-class SessionDigestStore(Protocol):
-    def load(self, agent_id: int, harness: str, *, session_id: str) -> dict[str, str]: ...
-
-    def save(
-        self, agent_id: int, harness: str, *, session_id: str, digests: Mapping[str, str]
-    ) -> None: ...
-
-
-class InMemorySessionDigestStore:
-    def __init__(self) -> None:
-        self._records: dict[tuple[int, str, str], dict[str, str]] = {}
-
-    def load(self, agent_id: int, harness: str, *, session_id: str) -> dict[str, str]:
-        return dict(self._records.get((agent_id, harness, session_id), {}))
-
-    def save(
-        self, agent_id: int, harness: str, *, session_id: str, digests: Mapping[str, str]
-    ) -> None:
-        self._records[(agent_id, harness, session_id)] = dict(digests)
-
-
-# meiva:note
-# Per-`(agent_id, harness, session_id)` sidecar in `harness_sessions_dir` recording the content
-# digests already delivered into that external session's context. A missing or corrupt sidecar
-# reads as empty so upgraded legacy sessions and damaged records safely refresh on the next turn.
-class FileSessionDigestStore:
-    def __init__(self, root: Path) -> None:
-        self._root = Path(root)
-
-    def path(self, agent_id: int, harness: str, *, session_id: str) -> Path:
-        _check_turn_identity(agent_id, harness)
-        return (
-            self._root / f"{agent_id}.{harness}.{_session_digest(session_id)}.context_digests.json"
-        )
-
-    def load(self, agent_id: int, harness: str, *, session_id: str) -> dict[str, str]:
-        if not session_id:
-            return {}
-        target = self.path(agent_id, harness, session_id=session_id)
-        try:
-            raw = object_of(json.loads, target.read_text(encoding="utf-8"))
-        except (OSError, ValueError):
-            return {}
-        if not is_object_dict(raw) or raw.get("session_id") != session_id:
-            return {}
-        digests = raw.get("digests")
-        if not is_object_dict(digests):
-            return {}
-        return {
-            key: value
-            for key, value in digests.items()
-            if isinstance(key, str) and isinstance(value, str)
-        }
-
-    def save(
-        self, agent_id: int, harness: str, *, session_id: str, digests: Mapping[str, str]
-    ) -> None:
-        if not session_id:
-            return
-        target = self.path(agent_id, harness, session_id=session_id)
-        target.parent.mkdir(parents=True, exist_ok=True)
-        _write_document(target, {"session_id": session_id, "digests": dict(digests)})
-
-    def delete_harnesses(self, agent_id: int, harnesses: Collection[str]) -> None:
-        _check_agent(agent_id)
-        if not self._root.is_dir():
-            return
-        for harness in harnesses:
-            pattern = re.compile(
-                rf"{agent_id}\.{re.escape(harness)}\.[0-9a-f]+\.context_digests\.json"
-            )
-            for entry in self._root.iterdir():
-                if pattern.fullmatch(entry.name):
-                    entry.unlink(missing_ok=True)
-
-    def delete(self, agent_id: int) -> None:
-        _check_agent(agent_id)
-        if not self._root.is_dir():
-            return
-        pattern = re.compile(rf"{agent_id}\.[a-z][a-z0-9_]*\.[0-9a-f]+\.context_digests\.json")
         for entry in self._root.iterdir():
             if pattern.fullmatch(entry.name):
                 entry.unlink(missing_ok=True)

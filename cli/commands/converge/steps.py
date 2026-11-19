@@ -120,7 +120,8 @@ def migrate_harness_session_records(ctx: ConvergeCtx) -> None:
     completed = backfill_record_fields(root)
     if completed:
         print(
-            f"harness session records: completed the generation or background field of {len(completed)}"
+            "harness session records: completed the generation, background or context_digests "
+            f"field of {len(completed)}"
         )
 
 

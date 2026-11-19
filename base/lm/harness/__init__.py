@@ -75,13 +75,7 @@ from base.lm.harness.registration import (
     RegistrationStore,
     handle_digest,
 )
-from base.lm.harness.registry import (
-    FileSessionDigestStore,
-    FileSessionRegistry,
-    SessionDigestStore,
-    SessionRecord,
-    SessionRegistry,
-)
+from base.lm.harness.registry import FileSessionRegistry, SessionRecord, SessionRegistry
 from base.lm.harness.session import (
     BackgroundItem,
     BackgroundKind,
@@ -104,7 +98,6 @@ __all__ = [
     "ContextRefresh",
     "EntryPoint",
     "EventSubscription",
-    "FileSessionDigestStore",
     "FileSessionRegistry",
     "Handoff",
     "HarnessBridge",
@@ -135,7 +128,6 @@ __all__ = [
     "RegistrationStore",
     "SessionBound",
     "SessionClosed",
-    "SessionDigestStore",
     "SessionFailed",
     "SessionFaulted",
     "SessionRecord",

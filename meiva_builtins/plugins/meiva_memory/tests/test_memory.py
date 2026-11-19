@@ -430,6 +430,9 @@ def test_handoff_applies_empty_and_length_protection_contracts(tmp_path: Path) -
     assert "[truncated at 4000 chars — full entry:" in capped_text
 
 
+# meiva:note
+# A resumed session that keeps `context_digests` the way an adapter keeps them on its record; it
+# starts with none, like a record from before the field existed or a fork's new record.
 class _ResumedMemorySession:
     def __init__(self, session_id: str) -> None:
         self.session_id: str | None = None
@@ -438,9 +441,17 @@ class _ResumedMemorySession:
         self.resumed = True
         self.exit_code: int | None = None
         self.submitted: list[str] = []
+        self.digests: dict[str, str] = {}
         self._queue: list[object] = []
         self._closed = False
         self._n = 0
+
+    @property
+    def context_digests(self) -> Mapping[str, str]:
+        return dict(self.digests)
+
+    def record_context_digests(self, digests: Mapping[str, str]) -> None:
+        self.digests.update(digests)
 
     async def start(self, *, resume: str | None = None) -> None:
         del resume
@@ -500,27 +511,17 @@ class _ResumedMemorySession:
         self._closed = True
 
 
-async def test_memory_plugin_bridge_resumed_session_self_heals_and_tracks_changes(
+async def test_a_resumed_session_gets_the_memory_text_once_and_then_one_line_per_edit(
     tmp_path: Path,
 ) -> None:
-    from datetime import UTC, datetime
     from typing import cast
 
     from base.clock.tests.fakes import system_clock
     from base.clock.tests.seeded_rng import seeded_rng
-    from base.lm.harness import (
-        FileSessionDigestStore,
-        FileSessionRegistry,
-        HarnessBridge,
-        HarnessInput,
-        HarnessSession,
-        SessionRecord,
-        TurnCompleted,
-    )
-    from base.lm.harness.handoff import instructions_path, refreshes_for
+    from base.lm.harness import HarnessBridge, HarnessInput, HarnessSession, TurnCompleted
+    from base.lm.harness.handoff import refreshes_for
     from base.lm.harness.registration import SecureRandom
     from base.lm.harness.wiring import handoff_for
-    from base.paths import harness_sessions_dir
     from meiva_builtins.plugins.meiva_memory import agent_runtime
 
     home = tmp_path / "home"
@@ -528,53 +529,27 @@ async def test_memory_plugin_bridge_resumed_session_self_heals_and_tracks_change
     shared = memory_dir(home=home)
     shared.mkdir(parents=True)
     (shared / "MEMORY.md").write_text(f"{_CHINESE_HARD_RULE}\n", encoding="utf-8")
-
     personal = workspace / "memory"
     personal.mkdir(parents=True)
     personal_index = personal / "MEMORY.md"
     personal_index.write_text("- [Initial](init.md) — initial personal\n", encoding="utf-8")
 
-    sessions_dir = harness_sessions_dir(home=home)
-    now = datetime.now(UTC).isoformat(timespec="seconds")
-    FileSessionRegistry(sessions_dir).save(
-        SessionRecord(
-            agent_id=11,
-            session_id="legacy-session-11",
-            cwd=str(workspace),
-            model="claude-sonnet-5-5",
-            created_at=now,
-            updated_at=now,
-            harness="claude_code",
-            generation=1,
-        )
-    )
-
+    contributions = agent_runtime.contribute().harness_contributions
     session = _ResumedMemorySession("legacy-session-11")
-    inst_file = instructions_path(workspace)
-    doc = handoff_for(
-        Harness.CLAUDE_CODE,
-        agent_id=11,
-        machine="m",
-        workspace=workspace,
-        home=home,
-        contributions=agent_runtime.contribute().harness_contributions,
-    ).with_reference_file(inst_file)
-
-    def _make_session(_handle: str) -> HarnessSession:
-        return cast(HarnessSession, session)
-
     bridge = HarnessBridge(
         Harness.CLAUDE_CODE,
         11,
-        _make_session,
+        lambda _handle: cast(HarnessSession, session),
         machine="m",
-        handoff=doc,
-        home=home,
-        workspace=workspace,
-        refreshes=refreshes_for(
-            agent_runtime.contribute().harness_contributions, harness=Harness.CLAUDE_CODE
+        handoff=handoff_for(
+            Harness.CLAUDE_CODE,
+            agent_id=11,
+            machine="m",
+            workspace=workspace,
+            home=home,
+            contributions=contributions,
         ),
-        digest_store=FileSessionDigestStore(sessions_dir),
+        refreshes=refreshes_for(contributions, harness=Harness.CLAUDE_CODE),
         registration_ttl_seconds=3600.0,
         clock=system_clock(),
         handle_rng=SecureRandom(seeded_rng(1)),
@@ -598,12 +573,12 @@ async def test_memory_plugin_bridge_resumed_session_self_heals_and_tracks_change
     await _run("turn-3", "k3")
     await _run("turn-4", "k4")
 
-    assert "# Role & Operating Context" not in session.submitted[0]
-    assert "[Meiva notice] Memory Index refreshed" in session.submitted[0]
-    assert f"`{inst_file}` has also been updated" in session.submitted[0]
-    assert _CHINESE_HARD_RULE in session.submitted[0]
-    assert "- [Initial](init.md) — initial personal" in session.submitted[0]
-    assert session.submitted[1] == "turn-2"
-    assert "[Meiva notice] Memory Index refreshed" in session.submitted[2]
-    assert "- [Updated](u.md) — changed rule" in session.submitted[2]
-    assert session.submitted[3] == "turn-4"
+    first, second, third, fourth = session.submitted
+    assert "# Role & Operating Context" not in first
+    assert f"[Meiva notice] Shared Memory Index (`{shared}/MEMORY.md`):" in first
+    assert _CHINESE_HARD_RULE in first
+    assert "- [Initial](init.md) — initial personal" in first
+    assert second == "turn-2"
+    assert third == f"[Meiva notice] Memory index updated: re-read `{personal_index}`.\n\nturn-3"
+    assert fourth == "turn-4"
+    assert set(session.digests) == {"meiva_memory.shared", "meiva_memory.personal"}

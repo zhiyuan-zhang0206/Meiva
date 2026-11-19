@@ -129,23 +129,18 @@ def read_personal_memory_index(
     mem_dir: Path,
     *,
     max_lines: int = DEFAULT_PERSONAL_INDEX_MAX_LINES,
-    create_if_missing: bool = True,
     agent_id: int | None = None,
 ) -> PersonalMemoryIndex:
     path = mem_dir / _MEMORY_INDEX_FILE
-    if create_if_missing:
-        try:
-            mem_dir.mkdir(parents=True, exist_ok=True)
-            if not path.is_file():
-                if agent_id is not None:
-                    logger.info(
-                        "[per-agent-memory] agent={} path={} — creating empty index",
-                        agent_id,
-                        path,
-                    )
-                path.write_text("", encoding="utf-8")
-        except OSError as exc:
-            logger.warning("[per-agent-memory] unable to initialize {}: {}", path, exc)
+    try:
+        mem_dir.mkdir(parents=True, exist_ok=True)
+        if not path.is_file():
+            logger.info(
+                "[per-agent-memory] agent={} path={} — creating empty index", agent_id, path
+            )
+            path.write_text("", encoding="utf-8")
+    except OSError as exc:
+        logger.warning("[per-agent-memory] unable to initialize {}: {}", path, exc)
     text = ""
     if path.is_file():
         try:
@@ -180,7 +175,6 @@ def per_agent_memory_note(ctx: MeivaContext) -> HumanMessage | None:
     index = read_personal_memory_index(
         mem_dir,
         max_lines=ctx.require_agent().read("agent", "memory_per_agent_index_max_lines"),
-        create_if_missing=True,
         agent_id=aid,
     )
     logger.info(

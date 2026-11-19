@@ -10,7 +10,12 @@ from pathlib import Path
 from base.api_contracts.agent_contract import Harness
 from base.lm.harness.base_session import SessionClock
 from base.lm.harness.delivery import HarnessInput, Reconciliation, ReconciliationUnavailableError
-from base.lm.harness.engine import HarnessSession, HarnessTurn, completed_turn
+from base.lm.harness.engine import (
+    ContextDigestKeeping,
+    HarnessSession,
+    HarnessTurn,
+    completed_turn,
+)
 from base.lm.harness.events import (
     BridgeEvent,
     ContextCompacted,
@@ -40,7 +45,6 @@ from base.lm.harness.registration import (
     SecureRandom,
     handle_digest,
 )
-from base.lm.harness.registry import InMemorySessionDigestStore, SessionDigestStore, SessionRecord
 from base.lm.harness.session import (
     BackgroundItem,
     BackgroundWork,
@@ -119,7 +123,6 @@ class HarnessBridge:
         home: Path | None = None,
         workspace: Path | None = None,
         refreshes: Sequence[RefreshBuilder] = (),
-        digest_store: SessionDigestStore | None = None,
         registrations: RegistrationStore | None = None,
         registration_ttl_seconds: float,
         clock: SessionClock,
@@ -140,11 +143,6 @@ class HarnessBridge:
             workspace if workspace is not None else (None if handoff is None else handoff.workspace)
         )
         self._refreshes = tuple(refreshes)
-        self._digest_store: SessionDigestStore | None = (
-            digest_store
-            if digest_store is not None
-            else (InMemorySessionDigestStore() if self._refreshes else None)
-        )
         self._context_compacted = False
         self._registrations = registrations
         self._clock = clock
@@ -166,8 +164,6 @@ class HarnessBridge:
         self._handoff_delivered = False
         self._lost: tuple[BackgroundItem, ...] = ()
         self._opening_key: str | None = None
-        self._observed_session_id: str | None = None
-        self._opening_in_context = False
         self._pending_digests: dict[str, str] = {}
         self._handoff_digests: dict[str, str] = (
             self._collect_digests() if handoff is not None else {}
@@ -205,7 +201,7 @@ class HarnessBridge:
             self._home = handoff.home
         if self._workspace is None:
             self._workspace = handoff.workspace
-        self._handoff_digests = self._collect_digests() if not self._handoff_delivered else {}
+        self._handoff_digests = self._collect_digests()
 
     @property
     def session_id(self) -> str | None:
@@ -300,50 +296,30 @@ class HarnessBridge:
 
     def _observe(self, event: BridgeEvent) -> None:
         if isinstance(event, SessionStarted):
-            self._observe_session_started(event)
+            if event.model:
+                self._model = event.model
+            try:
+                self._register(event.session_id)
+            except OSError as exc:
+                logger.warning(
+                    "could not register harness session for agent {agent_id}: {error}",
+                    agent_id=self._agent_id,
+                    error=exc,
+                )
         elif isinstance(event, ContextCompacted):
             self._context_compacted = True
         elif isinstance(event, InputInContext) and event.key == self._opening_key:
-            self._observe_opening_in_context()
+            self._handoff = None
+            self._handoff_delivered = True
+            self._handoff_digests = {}
+            self._context_compacted = False
+            self._opening_key = None
+            self._lost = ()
+            self._record_pending_digests()
         elif isinstance(event, (InputRejected, InputLost)) and event.key == self._opening_key:
             self._opening_key = None
-            self._opening_in_context = False
             self._pending_digests = {}
-        elif isinstance(event, TurnCompleted):
-            self._observe_turn_completed(event)
-
-    def _observe_session_started(self, event: SessionStarted) -> None:
-        if event.session_id:
-            self._observed_session_id = event.session_id
-        if event.model:
-            self._model = event.model
-        try:
-            self._register(event.session_id)
-        except OSError as exc:
-            logger.warning(
-                "could not register harness session for agent {agent_id}: {error}",
-                agent_id=self._agent_id,
-                error=exc,
-            )
-        if self._opening_in_context:
-            self._commit_pending_digests()
-
-    def _observe_opening_in_context(self) -> None:
-        self._handoff = None
-        self._handoff_delivered = True
-        self._handoff_digests = {}
-        self._context_compacted = False
-        self._opening_key = None
-        self._lost = ()
-        self._opening_in_context = True
-        self._commit_pending_digests()
-
-    def _observe_turn_completed(self, event: TurnCompleted) -> None:
-        if event.session_id and not self._current_session_id():
-            self._observed_session_id = event.session_id
-        if self._opening_in_context and self._pending_digests:
-            self._commit_pending_digests()
-        if reason := session_recycle_reason(event):
+        elif isinstance(event, TurnCompleted) and (reason := session_recycle_reason(event)):
             self._poisoned_session = self._session
             self._poisoned_reason = reason
 
@@ -409,139 +385,102 @@ class HarnessBridge:
             raise HarnessClosedError("this harness bridge has no live session to adopt inputs into")
         self._session.adopt(list(keys))
 
-    def _current_session_id(self, session: HarnessSession | None = None) -> str | None:
-        target = session if session is not None else self._session
-        if target is not None and target.session_id:
-            return target.session_id
-        if self._observed_session_id:
-            return self._observed_session_id
-        if target is not None:
-            record: object = getattr(target, "record", None)
-            if isinstance(record, SessionRecord) and record.session_id:
-                return record.session_id
-        return None
-
     def _collect_refreshes(self) -> list[ContextRefresh]:
         if not self._refreshes or self._home is None or self._workspace is None:
             return []
         context = RefreshContext(
-            home=self._home,
-            workspace=self._workspace,
-            agent_id=self._agent_id,
-            instructions_file=self._instructions_file,
+            home=self._home, workspace=self._workspace, agent_id=self._agent_id
         )
-        items: list[ContextRefresh] = []
-        for build in self._refreshes:
-            item = build(context)
-            if item is not None:
-                items.append(item)
-        return items
+        return [item for build in self._refreshes for item in build(context)]
 
     def _collect_digests(self) -> dict[str, str]:
         return {item.key: item.digest for item in self._collect_refreshes()}
 
-    def _pending_refresh_notice(self, session: HarnessSession) -> tuple[str, dict[str, str]]:
-        refreshes = self._collect_refreshes()
-        if not refreshes:
+    # meiva:note
+    # What the session has not been told yet: the full body of a piece it has never been given (a
+    # resumed session from before the record kept digests, or a fork, whose new record starts
+    # empty), and one notice line for a piece whose body changed since. A session that keeps no
+    # digests is told nothing: without a record the full text would be sent on every turn.
+    # meiva:link base/lm/harness/docs/harness.md
+    def _refresh_text(self, session: HarnessSession) -> tuple[str, dict[str, str]]:
+        if not isinstance(session, ContextDigestKeeping):
             return "", {}
-        sid = self._current_session_id(session)
-        stored = (
-            self._digest_store.load(self._agent_id, self.harness.value, session_id=sid)
-            if sid and self._digest_store is not None
-            else {}
-        )
-        changed = [item for item in refreshes if stored.get(item.key) != item.digest]
-        if not changed:
-            return "", {}
-        pending = {item.key: item.digest for item in changed}
-        texts = [item.text for item in changed if item.text.strip()]
+        given = session.context_digests
+        texts: list[str] = []
+        pending: dict[str, str] = {}
+        for item in self._collect_refreshes():
+            digest = item.digest
+            if given.get(item.key) == digest:
+                continue
+            pending[item.key] = digest
+            text = item.body if item.key not in given else item.notice
+            if text.strip():
+                texts.append(text)
         return "\n\n".join(texts), pending
 
-    def _commit_pending_digests(self) -> None:
-        if not self._pending_digests:
-            self._opening_in_context = False
+    def _record_pending_digests(self) -> None:
+        pending, self._pending_digests = self._pending_digests, {}
+        session = self._session
+        if not pending or not isinstance(session, ContextDigestKeeping):
             return
-        sid = self._current_session_id()
-        if not sid:
-            return
-        if self._digest_store is not None:
-            existing = self._digest_store.load(self._agent_id, self.harness.value, session_id=sid)
-            merged = {**existing, **self._pending_digests}
-            try:
-                self._digest_store.save(
-                    self._agent_id,
-                    self.harness.value,
-                    session_id=sid,
-                    digests=merged,
-                )
-            except OSError as exc:
-                logger.warning(
-                    "could not persist context digests for agent {agent_id}: {error}",
-                    agent_id=self._agent_id,
-                    error=exc,
-                )
-        self._pending_digests = {}
-        self._opening_in_context = False
+        try:
+            session.record_context_digests(pending)
+        except OSError as exc:
+            logger.warning(
+                "could not record context digests for agent {agent_id}: {error}",
+                agent_id=self._agent_id,
+                error=exc,
+            )
 
     # meiva:note
     # What a turn opens with. The first turn of a fresh session carries the handoff, unless the
     # text already starts with it. After the CLI compacted its context, the next turn instead
     # opens with a reminder to re-read the saved instructions: the first message may be a summary
-    # by now. On a resumed session whose recorded context digests are absent or stale (legacy
-    # pre-upgrade sessions, forks, or updated memory index files), the turn also opens with a
-    # concise refresh notice. Whatever rode the opening input counts as delivered only when that
-    # input is in the model's context: a refused or lost input is handed over again with it.
+    # by now. A turn of a session that has not been given a contributed piece of context yet opens
+    # with its body, and one whose piece changed since opens with a one-line notice. Whatever rode
+    # the opening input counts as delivered only when that input is in the model's context: a
+    # refused or lost input is handed over again with it.
     # meiva:link base/lm/harness/docs/harness.md
     def _opening_input(
         self, key: str, text: str, session: HarnessSession, compaction_note: str
     ) -> str:
         if self._opening_key not in (None, key):
             return text
-        if (with_handoff := self._apply_opening_handoff(key, text)) is not None:
-            return self._with_lost_work(key, with_handoff, session)
-        notices = self._opening_notices(key, text, session, compaction_note)
-        if notices:
-            prefix = f"{self._timestamp_prefix()}" + "\n\n".join(notices)
-            text = f"{prefix}\n\n{text}" if text else prefix
-        return self._with_lost_work(key, text, session)
-
-    def _apply_opening_handoff(self, key: str, text: str) -> str | None:
-        if self._handoff is None:
-            return None
-        rendered = self._handoff.render().strip()
-        already_has_handoff = text.startswith(rendered)
-        if self._handoff_delivered and not already_has_handoff:
+        if self._handoff is not None and self._handoff_delivered:
             self._handoff = None
             self._handoff_digests = {}
-            return None
-        self._opening_key = key
-        self._opening_in_context = False
-        self._pending_digests = dict(self._handoff_digests)
-        if already_has_handoff:
-            return text
-        return (
-            f"{self._timestamp_prefix()}{rendered}\n\n{text}"
-            if text
-            else f"{self._timestamp_prefix()}{rendered}"
-        )
+        if self._handoff is not None:
+            text = self._with_handoff(key, text, self._handoff)
+        else:
+            text = self._with_notices(key, text, session, compaction_note)
+        return self._with_lost_work(key, text, session)
 
-    def _opening_notices(
+    def _with_handoff(self, key: str, text: str, handoff: Handoff) -> str:
+        rendered = handoff.render().strip()
+        self._opening_key = key
+        self._pending_digests = dict(self._handoff_digests)
+        if text.startswith(rendered):
+            return text
+        lead = f"{self._timestamp_prefix()}{rendered}"
+        return f"{lead}\n\n{text}" if text else lead
+
+    def _with_notices(
         self, key: str, text: str, session: HarnessSession, compaction_note: str
-    ) -> list[str]:
+    ) -> str:
         notices: list[str] = []
         if self._context_compacted and self._instructions_file is not None and text:
-            self._opening_key = key
-            self._opening_in_context = False
             reminder = compaction_reminder(self._instructions_file)
             notices.append(f"{reminder}\n\n{compaction_note}" if compaction_note else reminder)
-        refresh_notice, pending_digests = self._pending_refresh_notice(session)
-        if pending_digests:
+        refresh, pending = self._refresh_text(session)
+        if refresh:
+            notices.append(refresh)
+        if notices or pending:
             self._opening_key = key
-            self._opening_in_context = False
-            self._pending_digests = pending_digests
-        if refresh_notice:
-            notices.append(refresh_notice)
-        return notices
+            self._pending_digests = pending
+        if not notices:
+            return text
+        lead = f"{self._timestamp_prefix()}" + "\n\n".join(notices)
+        return f"{lead}\n\n{text}" if text else lead
 
     # meiva:note
     # What the CLI lost when its process went away, told until an input carrying it is in the model's
@@ -645,8 +584,6 @@ class HarnessBridge:
             self._session = None
             self._handoff_delivered = False
             self._opening_key = None
-            self._observed_session_id = None
-            self._opening_in_context = False
             self._pending_digests = {}
             self._created_at = None
             await self._stop_pump()

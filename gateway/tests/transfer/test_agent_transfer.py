@@ -472,6 +472,7 @@ def test_transfer_reports_an_external_session_whose_transcript_cannot_move(
                 "created_at": "2026-11-01T00:00:00Z",
                 "updated_at": "2026-11-01T00:00:00Z",
                 "background": [],
+                "context_digests": {},
             }
         ),
         encoding="utf-8",
