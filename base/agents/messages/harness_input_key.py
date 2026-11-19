@@ -27,6 +27,8 @@ from __future__ import annotations
 from collections.abc import Mapping
 from typing import Final
 
+from base.host.boundary.json_values import is_object_list
+
 INPUT_KEY_FIELD: Final = "harness_input_key"
 
 # meiva:note
@@ -74,5 +76,5 @@ def recorded_input_key(row_id: int, payload: Mapping[str, object] | None) -> str
 # handback, then the key of its latest handover.
 def handed_input_keys(row_id: int, payload: Mapping[str, object] | None) -> tuple[str, ...]:
     earlier = payload.get(HANDED_KEYS_FIELD) if payload else None
-    keys = [key for key in earlier if isinstance(key, str)] if isinstance(earlier, list) else []
+    keys = [key for key in earlier if isinstance(key, str)] if is_object_list(earlier) else []
     return tuple(dict.fromkeys((*keys, recorded_input_key(row_id, payload))))
