@@ -56,12 +56,12 @@ def _stub_dir(parent: Path, name: str, **scripts: str) -> Path:
 class _World:
     """A main clone with an `origin`, the stubs, and a call log."""
 
-    def __init__(self, root: Path, *, hooks: bool = True) -> None:
+    def __init__(self, root: Path, *, hooks: bool = True, main: Path | None = None) -> None:
         self.root = root
         self.calls_file = root / "calls.log"
         self.stubs = _stub_dir(root, "stubs", uv=_UV, pnpm=_PNPM)
         self.origin = root / "origin.git"
-        self.main = root / "main-clone"
+        self.main = main or (root / "main-clone")
         self.git(root, "init", "-q", "--bare", "--initial-branch=main", str(self.origin))
         self.git(root, "init", "-q", "--initial-branch=main", str(self.main))
         self._identify(self.main)
@@ -105,7 +105,7 @@ class _World:
         env = {
             key: value
             for key, value in os.environ.items()
-            if not key.startswith(("GIT_", "UV_")) and key != "VIRTUAL_ENV"
+            if not key.startswith(("GIT_", "UV_")) and key not in {"VIRTUAL_ENV", "MEIVA_HOME"}
         }
         env.update(
             PATH=f"{self.stubs}{os.pathsep}{os.environ['PATH']}",
@@ -453,3 +453,76 @@ def test_help_prints_the_usage_header(world: _World) -> None:
     assert done.returncode == 0
     assert done.stdout.startswith("The one way to get a development worktree")
     assert "bash scripts/setup-worktree.sh <task>" in done.stdout
+
+
+def test_refuses_prod_source_under_home_and_allows_dev_clone(tmp_path: Path) -> None:
+    home = tmp_path / "home"
+    prod = _World(tmp_path / "prod", main=home / ".meiva/source")
+    dev = _World(tmp_path / "dev", main=home / "Meiva")
+
+    refused = prod.setup("7391", HOME=str(home))
+
+    assert refused.returncode == 1
+    assert not (prod.main / ".worktrees").exists()
+    assert "production source checkout" in refused.stderr
+    assert "cd ~/Meiva && bash scripts/setup-worktree.sh 7391" in refused.stderr
+    assert prod.calls() == []
+
+    ok = dev.setup("7391", HOME=str(home))
+
+    assert ok.returncode == 0, ok.stderr
+    assert ok.stdout.splitlines()[-1] == _ready_line(dev.worktree("7391"), "meiva-7391")
+
+
+def test_refuses_prod_source_via_symlinks_and_subdirectories(tmp_path: Path) -> None:
+    home = tmp_path / "home"
+    prod = _World(tmp_path / "prod", main=home / ".meiva/source")
+
+    alias = tmp_path / "prod-alias"
+    alias.symlink_to(prod.main)
+    via_alias = prod.setup("7391", cwd=alias, HOME=str(home))
+    assert via_alias.returncode == 1
+    assert not (prod.main / ".worktrees").exists()
+    assert "cd ~/Meiva && bash scripts/setup-worktree.sh 7391" in via_alias.stderr
+
+    existing_wt = prod.main / ".worktrees/old"
+    prod.git(prod.main, "worktree", "add", "-q", "--no-track", "-b", "meiva-old", str(existing_wt))
+    for args in (("7391",), ()):
+        inside_wt = prod.setup(*args, cwd=existing_wt, HOME=str(home))
+        assert inside_wt.returncode == 1
+        assert not (prod.main / ".worktrees/7391").exists()
+        assert "cd ~/Meiva && bash scripts/setup-worktree.sh" in inside_wt.stderr
+
+    nested = prod.main / "sub/nested"
+    prod.git(prod.main, "init", "-q", "--initial-branch=main", str(nested))
+    (nested / "scripts").mkdir(parents=True)
+    shutil.copy2(prod.main / "scripts/setup-worktree.sh", nested / "scripts/setup-worktree.sh")
+    inside_nested = prod.setup("7391", cwd=nested, HOME=str(home))
+    assert inside_nested.returncode == 1
+    assert not (nested / ".worktrees").exists()
+    assert "cd ~/Meiva && bash scripts/setup-worktree.sh 7391" in inside_nested.stderr
+
+    symlinked_home = tmp_path / "symlinked-home"
+    (symlinked_home / ".meiva").mkdir(parents=True)
+    real_prod = _World(tmp_path / "real", main=tmp_path / "real-prod")
+    (symlinked_home / ".meiva/source").symlink_to(real_prod.main)
+    via_target = real_prod.setup("7391", HOME=str(symlinked_home))
+    assert via_target.returncode == 1
+    assert not (real_prod.main / ".worktrees").exists()
+    assert "cd ~/Meiva && bash scripts/setup-worktree.sh 7391" in via_target.stderr
+
+
+def test_refuses_custom_meiva_home_source_and_allows_sibling_prefix(tmp_path: Path) -> None:
+    home = tmp_path / "home"
+    custom_meiva = tmp_path / "custom-meiva"
+    prod = _World(tmp_path / "prod", main=custom_meiva / "source")
+
+    refused = prod.setup("7391", HOME=str(home), MEIVA_HOME=str(custom_meiva))
+    assert refused.returncode == 1
+    assert not (prod.main / ".worktrees").exists()
+    assert "cd ~/Meiva && bash scripts/setup-worktree.sh 7391" in refused.stderr
+
+    sibling = _World(tmp_path / "sibling", main=home / ".meiva/source-dev")
+    ok = sibling.setup("7391", HOME=str(home))
+    assert ok.returncode == 0, ok.stderr
+    assert ok.stdout.splitlines()[-1] == _ready_line(sibling.worktree("7391"), "meiva-7391")

@@ -37,8 +37,34 @@ fi
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 REPO_ROOT="$(git -C "$SCRIPT_DIR" rev-parse --show-toplevel)"
+REPO_ROOT_PHYS="$(cd -P "$REPO_ROOT" && pwd -P)"
 COMMON_DIR="$(git -C "$REPO_ROOT" rev-parse --path-format=absolute --git-common-dir)"
 MAIN_ROOT="$(cd -P "$(dirname "$COMMON_DIR")" && pwd -P)"  # physical, as `git worktree list` prints it
+
+# Refuse worktree creation or bootstrapping against the production service checkout
+# ($MEIVA_HOME/source or ~/.meiva/source), including symlinks and subdirectories.
+check_not_prod_source() {
+  local prod_dir="$1"
+  [ -n "$prod_dir" ] && [ -d "$prod_dir" ] || return 0
+  local prod_phys
+  prod_phys="$(cd -P "$prod_dir" 2>/dev/null && pwd -P)" || return 0
+  case "$MAIN_ROOT/" in
+    "${prod_phys%/}/"*)
+      die "refusing to run against production source checkout ($MAIN_ROOT is in $prod_phys) — switch to your development clone instead: cd ~/Meiva && bash scripts/setup-worktree.sh ${TASK:-<task>}"
+      ;;
+  esac
+  case "$REPO_ROOT_PHYS/" in
+    "${prod_phys%/}/"*)
+      die "refusing to run inside production source checkout ($REPO_ROOT_PHYS is in $prod_phys) — switch to your development clone instead: cd ~/Meiva && bash scripts/setup-worktree.sh ${TASK:-<task>}"
+      ;;
+  esac
+}
+if [ -n "${MEIVA_HOME:-}" ]; then
+  check_not_prod_source "${MEIVA_HOME%/}/source"
+fi
+if [ -n "${HOME:-}" ]; then
+  check_not_prod_source "${HOME%/}/.meiva/source"
+fi
 
 # A shell that leaked another checkout's venv must never steer uv or the guard.
 unset VIRTUAL_ENV
