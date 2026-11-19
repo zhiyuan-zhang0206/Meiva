@@ -9,6 +9,7 @@ from collections.abc import Mapping
 from datetime import UTC, datetime, timedelta, tzinfo
 from pathlib import Path
 
+from base.log import logger
 from meiva_builtins.plugins.meiva_usage.credentials import parse_antigravity_credentials_blob
 from meiva_builtins.plugins.meiva_usage.default_config import (
     CollectorConfig,
@@ -278,6 +279,13 @@ def probe_antigravity(
     )
 
     groups = parse_antigravity_quota_groups(payload)
+    if groups.ignored:
+        logger.warning(
+            "antigravity collector {}: {} quota group(s) carried windows that no card shows: {}",
+            collector.id,
+            len(groups.ignored),
+            "; ".join(groups.ignored),
+        )
     gemini_id, claude_gpt_id = antigravity_card_ids(collector.id)
     return {
         gemini_id: _format_gemini_reading(groups.gemini, display_tz),

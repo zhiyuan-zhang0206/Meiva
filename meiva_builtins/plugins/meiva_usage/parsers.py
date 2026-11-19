@@ -309,11 +309,20 @@ def _parse_buckets_window_pair(buckets: list[object]) -> WindowPair | None:
     return pair if pair.has_any() else None
 
 
+def _antigravity_group_label(group: Mapping[str, object], kind: str | None) -> str:
+    name = next(
+        (str(group[key]) for key in ("displayName", "name", "groupId") if group.get(key)),
+        "<unnamed>",
+    )
+    return f"{name} ({kind or 'unclassified'})"
+
+
 def _parse_antigravity_groups_list(
     groups: list[object],
-) -> tuple[WindowPair | None, WindowPair | None]:
+) -> tuple[WindowPair | None, WindowPair | None, tuple[str, ...]]:
     gemini: WindowPair | None = None
     claude_gpt: WindowPair | None = None
+    ignored: list[str] = []
     for group in groups:
         if not _is_mapping(group):
             continue
@@ -328,7 +337,9 @@ def _parse_antigravity_groups_list(
             gemini = pair
         elif kind == "claude_gpt" and claude_gpt is None:
             claude_gpt = pair
-    return gemini, claude_gpt
+        else:
+            ignored.append(_antigravity_group_label(group, kind))
+    return gemini, claude_gpt, tuple(ignored)
 
 
 def _parse_flat_antigravity_buckets(
@@ -354,16 +365,17 @@ def parse_antigravity_quota_groups(payload: Mapping[str, object]) -> Antigravity
     buckets = root.get("buckets")
     gemini: WindowPair | None = None
     claude_gpt: WindowPair | None = None
+    ignored: tuple[str, ...] = ()
 
     if _is_list(groups) and groups:
-        gemini, claude_gpt = _parse_antigravity_groups_list(groups)
+        gemini, claude_gpt, ignored = _parse_antigravity_groups_list(groups)
     elif _is_list(buckets):
         gemini, claude_gpt = _parse_flat_antigravity_buckets(buckets)
 
     if gemini is None and claude_gpt is None:
         raise UsageProbeError("Antigravity quota payload is missing rate-limit windows")
 
-    return AntigravityQuotaGroups(gemini=gemini, claude_gpt=claude_gpt)
+    return AntigravityQuotaGroups(gemini=gemini, claude_gpt=claude_gpt, ignored=ignored)
 
 
 def _parse_pagination_next_page(payload: Mapping[str, object], provider_name: str) -> str | None:

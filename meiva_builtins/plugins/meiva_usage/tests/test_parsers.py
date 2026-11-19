@@ -268,6 +268,48 @@ def test_parse_antigravity_quota_groups_real_wire_payload() -> None:
     _assert_real_claude_gpt_groups(groups.claude_gpt)
 
 
+def _group(name: str, bucket_prefix: str, remaining: float) -> dict[str, object]:
+    return {
+        "displayName": name,
+        "buckets": [
+            {"bucketId": f"{bucket_prefix}-weekly", "remainingFraction": remaining},
+            {"bucketId": f"{bucket_prefix}-5h", "remainingFraction": remaining},
+        ],
+    }
+
+
+# meiva:note
+# The upstream payload has one group per family, so a second group of a family a card already took,
+# or a group no family claims, was dropped silently. Each is now named in `ignored`, and the card
+# the first group fills is unchanged.
+def test_parse_antigravity_quota_groups_names_every_group_no_card_shows() -> None:
+    payload = {
+        "groups": [
+            _group("Gemini Models", "gemini", 0.5),
+            _group("Gemini Pro Models", "gemini-pro", 0.1),
+            _group("Claude and GPT models", "3p", 0.9),
+            _group("Mystery Models", "mystery", 0.2),
+        ]
+    }
+
+    groups = parse_antigravity_quota_groups(payload)
+
+    assert groups.gemini is not None and groups.gemini.weekly is not None
+    assert groups.gemini.weekly.used_percent == 50.0
+    assert groups.ignored == ("Gemini Pro Models (gemini)", "Mystery Models (unclassified)")
+
+
+def test_parse_antigravity_quota_groups_one_group_per_family_ignores_nothing() -> None:
+    payload = {
+        "groups": [
+            _group("Gemini Models", "gemini", 0.5),
+            _group("Claude and GPT models", "3p", 0.9),
+        ]
+    }
+
+    assert parse_antigravity_quota_groups(payload).ignored == ()
+
+
 def test_parse_antigravity_quota_groups_wrapped_response_and_disabled() -> None:
     payload = {
         "response": {
