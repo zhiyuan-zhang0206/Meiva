@@ -94,6 +94,30 @@ def test_get_prints_fatal_turn_diagnostic_when_present(
     )
 
 
+def test_get_prints_the_recovery_halt_when_the_agent_is_stopped(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    body = {
+        **_agent(),
+        "harness": "claude_code",
+        "permanent_reject_streak": 1,
+        "last_permanent_reject_reason": "quota_exhausted",
+    }
+    with serving({("GET", "/api/agents/7"): Reply(body=body)}) as gateway:
+        assert cmd_agents_get(access_to(gateway.url), 7, as_json=False) == 0
+    out = capsys.readouterr().out.splitlines()
+    assert (
+        "recovery halted:   quota_exhausted (streak 1; a new chat or a restart resumes it)" in out
+    )
+
+
+def test_get_prints_no_halt_line_for_a_running_agent(capsys: pytest.CaptureFixture[str]) -> None:
+    body = {**_agent(), "permanent_reject_streak": 0, "last_permanent_reject_reason": None}
+    with serving({("GET", "/api/agents/7"): Reply(body=body)}) as gateway:
+        assert cmd_agents_get(access_to(gateway.url), 7, as_json=False) == 0
+    assert "recovery halted" not in capsys.readouterr().out
+
+
 def test_get_of_a_missing_agent_prints_the_gateways_reason_and_exits_1(
     capsys: pytest.CaptureFixture[str],
 ) -> None:

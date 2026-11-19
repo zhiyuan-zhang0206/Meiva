@@ -66,7 +66,8 @@ _FULL_COLS = (
     ", a.config_overlay, mp.last_probe_at AS machine_probe_at, "
     "mp.agent_host_online, a.last_admission_at, "
     "a.last_launch_failure_reason, a.last_launch_failure_at, a.birth_config, a.last_launch_attempt_id, a.harness, "
-    "a.harness_exit_code, a.harness_exit_at, a.last_turn_fatal_at, a.last_turn_fatal_reason"
+    "a.harness_exit_code, a.harness_exit_at, a.last_turn_fatal_at, a.last_turn_fatal_reason, "
+    "a.permanent_reject_streak, a.last_permanent_reject_reason"
 )
 _FROM = (
     "FROM agents_meta a "
@@ -169,6 +170,13 @@ class AgentSnapshot(BaseModel):
     # completed turn, normal self-termination, or resurrect; NULL when healthy.
     last_turn_fatal_at: datetime | None = None
     last_turn_fatal_reason: str | None = None
+    # meiva:note
+    # The recovery breaker (`base/agents/recovery/breaker.py`): consecutive provider rejections or
+    # harness quota exhaustions since the last completed turn, and the class of the latest one
+    # ('quota_exhausted', 'billing', ...). At or above the halt threshold the agent is stopped:
+    # nothing automatic wakes it, and a new chat or an operator restart resumes it.
+    permanent_reject_streak: int = 0
+    last_permanent_reject_reason: str | None = None
 
 
 def _is_config_map(value: object) -> TypeGuard[Mapping[str, object]]:
@@ -313,6 +321,8 @@ class _SnapshotRow:
     harness_exit_at: datetime | None
     last_turn_fatal_at: datetime | None
     last_turn_fatal_reason: str | None
+    permanent_reject_streak: int
+    last_permanent_reject_reason: str | None
 
 
 def _row_to_snapshot(
@@ -355,6 +365,8 @@ def _row_to_snapshot(
             "harness_exit_at": row.harness_exit_at,
             "last_turn_fatal_at": row.last_turn_fatal_at,
             "last_turn_fatal_reason": row.last_turn_fatal_reason,
+            "permanent_reject_streak": row.permanent_reject_streak,
+            "last_permanent_reject_reason": row.last_permanent_reject_reason,
             "observation": observation(row.machine_probe_at),
             "availability": availability(
                 status=row.status,

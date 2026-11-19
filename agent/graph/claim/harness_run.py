@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import asyncio
-from collections.abc import Callable, Sequence
+from collections.abc import Sequence
 from contextlib import suppress
 from dataclasses import replace
 from typing import Literal
@@ -25,7 +25,6 @@ from agent.graph.claim.harness_foreground import (
 )
 from agent.graph.claim.harness_inbox import (
     INPUT_KEY_FIELD,
-    QuotaAbortSettlement,
     apply_reconciled,
     claimed_deliverable,
     commit_handed,
@@ -66,7 +65,6 @@ from base.lm.harness import (
     HarnessSetupError,
     ImageBlock,
     InputInContext,
-    RateLimitObserved,
     ReasoningDelta,
     ReasoningText,
     SubagentText,
@@ -144,7 +142,6 @@ class ForegroundRun:
         self._turn_inputs: dict[str, list[str]] = {}
         self._committed_by_turn: dict[str, list[Handed]] = {}
         self._taken_back_for_abort: tuple[Handed, ...] = ()
-        self._last_rate_limit: RateLimitObserved | None = None
         self._changed = asyncio.Event()
         self._backoff_until = 0.0
         self._handoff_after_requeue = False
@@ -166,16 +163,7 @@ class ForegroundRun:
     def pending_inputs(self) -> list[dict[str, str]]:
         return [{"key": handed.key, "prompt": prompt} for handed, prompt in self._synthetic]
 
-    @property
-    def last_rate_limit(self) -> RateLimitObserved | None:
-        return self._last_rate_limit
-
-    async def settle_quota_abort(
-        self,
-        *,
-        turn_id: str | None,
-        compute_backoff: Callable[[int], tuple[float, str]],
-    ) -> QuotaAbortSettlement:
+    async def settle_quota_abort(self, *, turn_id: str | None) -> tuple[int, ...]:
         if turn_id:
             committed = [
                 *self._committed_by_turn.pop(turn_id, []),
@@ -207,17 +195,12 @@ class ForegroundRun:
                     to_requeue.extend(plan.commit)
                     to_requeue.extend(plan.requeue)
                     to_requeue.extend(plan.unknown)
-        settlement = await settle_quota_abort(
-            self._ctx,
-            self._agent_id,
-            to_requeue,
-            compute_backoff=compute_backoff,
-        )
+        requeued = await settle_quota_abort(self._ctx, self._agent_id, to_requeue)
         withdrawn_keys = frozenset(h.key for h in to_requeue)
         if withdrawn_keys:
             self.fg = self.fg.withdraw(withdrawn_keys)
             self._settling = [h for h in self._settling if h.key not in withdrawn_keys]
-        return settlement
+        return requeued
 
     # meiva:note
     # The invocation failed or was interrupted with inputs handed over and unsettled. The session is
@@ -410,8 +393,6 @@ class ForegroundRun:
                 await self._projector.on_event(event)
             case InputInContext(key=key, turn_id=turn_id):
                 self._turn_inputs.setdefault(turn_id, []).append(key)
-            case RateLimitObserved():
-                self._last_rate_limit = event
             case TurnStarted():
                 self._projector.on_turn_started(event.turn_id)
             case TurnCompleted():
@@ -438,7 +419,6 @@ class ForegroundRun:
             fallback_duration_ms=event.duration_ms,
         )
         self._committed_by_turn.pop(event.turn_id, None)
-        self._last_rate_limit = None
         if not turn.is_error:
             self._projector.reset_turn_delivery()
             self._taken_back_for_abort = ()

@@ -83,9 +83,6 @@ class HarnessCloseResidue(TypedDict):
 class HarnessQuotaExhausted(TypedDict):
     harness: str
     model: str | None
-    retry_after_seconds: float
-    reset_source: str
-    suppressed_until: str | None
     requeued_inbound_ids: list[int]
     requeued_count: int
     reason: str
@@ -346,7 +343,7 @@ EVENTS: dict[str, EventSpec] = {
     "harness_quota_exhausted": telemetry_event(
         "harness_quota_exhausted",
         "an external harness turn aborted on quota exhaustion or rate limit before delivering a reply; "
-        "triggering inbox messages were returned to pending and automatic wakes suppressed until reset/backoff",
+        "triggering inbox messages were returned to pending and the agent halted until a new message",
         payload=HarnessQuotaExhausted,
         tier="anomaly",
     ),

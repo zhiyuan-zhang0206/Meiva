@@ -63,12 +63,9 @@ def transition_terminated_to_unclaimed_idling(
     trigger_inbound_id: int | None,
     trigger_inbound_kind: WakeTriggerKind | None,
 ) -> datetime:
-    from base.agents.recovery.breaker import (
-        RECOVERY_BREAKER_CLEAR,
-        SUPPRESS_REASON_QUOTA_EXHAUSTED,
-    )
-
     if trigger_inbound_id is not None:
+        from base.agents.recovery.breaker import RECOVERY_BREAKER_CLEAR
+
         assert trigger_inbound_kind is not None  # validated at public helper boundary  # noqa: S101
         transition_row = query_one(
             cur.connection,
@@ -80,9 +77,6 @@ def transition_terminated_to_unclaimed_idling(
                 "runtime_generation = NULL, runtime_owner = NULL "
                 "WHERE id = %s AND status = %s "
                 "AND {} "
-                "AND (wake_suppress_reason IS DISTINCT FROM %s "
-                "  OR wake_suppressed_until IS NULL "
-                "  OR wake_suppressed_until <= clock_timestamp()) "
                 "AND EXISTS ("
                 "  SELECT 1 FROM inbound_messages m "
                 "  WHERE m.id = %s AND m.agent_id = agents_meta.id "
@@ -97,7 +91,6 @@ def transition_terminated_to_unclaimed_idling(
                 AgentStatus.IDLING,
                 agent_id,
                 AgentStatus.TERMINATED,
-                SUPPRESS_REASON_QUOTA_EXHAUSTED,
                 trigger_inbound_id,
                 trigger_inbound_kind,
             ),
@@ -120,12 +113,6 @@ def transition_terminated_to_unclaimed_idling(
                 "last_permanent_reject_reason=NULL, wake_suppressed_until=NULL, "
                 "wake_suppress_reason=NULL WHERE id=%s",
                 (agent_id,),
-            )
-        elif trigger_inbound_id is None:
-            cur.execute(
-                "UPDATE agents_meta SET wake_suppressed_until=NULL, "
-                "wake_suppress_reason=NULL WHERE id=%s AND wake_suppress_reason=%s",
-                (agent_id, SUPPRESS_REASON_QUOTA_EXHAUSTED),
             )
         return transition_row.status_changed_at
     cur.execute(

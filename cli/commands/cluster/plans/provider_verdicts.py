@@ -11,11 +11,13 @@
 #    (`meiva-ops-llm-billing-quota`) reports the first post-arrears rejection, already too
 #    late; this check is the pre-arrears signal.
 # 10. Blocked agents: fails while at least N agents are halted by permanent provider
-#    rejections (`agents_meta.permanent_reject_streak >= 2`, the durable recovery-breaker
-#    halt in `base/agents/recovery/breaker.py`). The Grafana rule covers billing rejections as
-#    events and resolves 15 minutes after the last one; this check covers every permanent
-#    class (auth / forbidden / model-not-found included) as a state: it fires while the fleet
-#    is still halted and resolves only as agents recover.
+#    rejections or by an exhausted external-harness quota (`agents_meta.permanent_reject_streak`
+#    at the halt threshold, the durable recovery-breaker halt in
+#    `base/agents/recovery/breaker.py`; quota halts are counted apart by their reason,
+#    `quota_exhausted`). The Grafana rule covers billing rejections as events and resolves 15
+#    minutes after the last one; this check covers every permanent class (auth / forbidden /
+#    model-not-found included) and quota exhaustion as a state: it fires while the fleet is
+#    still halted and resolves only as agents recover.
 #
 # Both checks are fail-open on read errors: a provider API blip or an unreachable database is
 # not evidence of a drained account, matching the schema check's rule for its own DB flake.
@@ -34,6 +36,7 @@ __all__ = [
     "BalancePayload",
     "BalanceReading",
     "BalanceUnreadable",
+    "HaltedAgents",
     "NoProviderKey",
     "ProviderCheck",
     "judge_balance",
@@ -151,23 +154,41 @@ def judge_balance(reading: BalanceReading, minimum_cny: float) -> ProviderCheck:
 
 
 # meiva:note
+# Check 10's reading: agents halted inside the window, by what halted them. `quota` is the
+# agents whose external harness ran out of quota (they wait for a new message); `rejected` is
+# every other halt, a permanent provider rejection.
+@dataclass(frozen=True)
+class HaltedAgents:
+    rejected: int
+    quota: int
+
+    @property
+    def total(self) -> int:
+        return self.rejected + self.quota
+
+
+# meiva:note
 # Check 10: no failure when the halted count is unreadable (the agent table could not be
 # queried: "cannot judge" passes, never a guessed healthy verdict) or under the threshold.
-def judge_blocked_agents(count: int | None, minimum: int, window_hours: float) -> ProviderCheck:
-    if count is None:
+# Both kinds of halt count toward the threshold; the detail line names each.
+def judge_blocked_agents(
+    halted: HaltedAgents | None, minimum: int, window_hours: float
+) -> ProviderCheck:
+    if halted is None:
         note = "  (provider blocked-agents check skipped: agent table unreachable)"
         return ProviderCheck(BLOCKED_AGENTS_CHECK, None, (note,))
-    if count < minimum:
+    if halted.total < minimum:
         return ProviderCheck(BLOCKED_AGENTS_CHECK, None, ())
     detail = (
-        f"  (provider blocked-agents detail: {count} agent(s) halted by permanent "
-        f"provider rejections within {window_hours:g}h)"
+        f"  (provider blocked-agents detail: {halted.total} agent(s) halted within "
+        f"{window_hours:g}h: {halted.rejected} by permanent provider rejections, "
+        f"{halted.quota} by exhausted harness quota)"
     )
     cause = (
-        "multiple agents are halted by permanent provider rejections "
-        f"(threshold MEIVA_PROVIDER_GUARD_BLOCKED_AGENTS_MIN={minimum}); automatic recovery "
-        "stays off until a turn succeeds — resolve the provider cause, then revive the "
-        "affected agents"
+        "multiple agents are halted by permanent provider rejections or exhausted harness "
+        f"quota (threshold MEIVA_PROVIDER_GUARD_BLOCKED_AGENTS_MIN={minimum}); automatic "
+        "recovery stays off until a turn succeeds — resolve the provider cause (or reset / top "
+        "up the quota), then message or revive the affected agents"
     )
     return ProviderCheck(
         BLOCKED_AGENTS_CHECK, f"FAIL: provider blocked agents — {cause}", (detail,)

@@ -7,9 +7,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Callable, Sequence
-from dataclasses import dataclass
-from datetime import datetime
+from collections.abc import Sequence
 from functools import partial
 from typing import LiteralString
 
@@ -25,13 +23,10 @@ from agent.ownership.inbound import lock_inbound_owner
 from base.agents.context import MeivaContext
 from base.agents.messages.inbound import PASSIVE_INBOUND_KEY, InboundKind, not_passive_inbound
 from base.agents.messages.kwargs import NoteTag
-from base.agents.recovery.breaker import (
-    SUPPRESS_REASON_PERMANENT_REJECT,
-    SUPPRESS_REASON_QUOTA_EXHAUSTED,
-)
-from base.db.rows import IdRow, aquery_all, aquery_one
+from base.agents.recovery.breaker import QUOTA_RETRY_COUNT_FIELD, record_quota_halt
+from base.db.rows import IdRow, aquery_all
 from base.db.transaction import async_write_transaction
-from base.lm.harness import MIN_QUOTA_BACKOFF_SECONDS, ReconciliationUnavailableError
+from base.lm.harness import ReconciliationUnavailableError
 from base.lm.harness.engine import TurnEngine
 from base.log import logger
 
@@ -47,7 +42,6 @@ DELIVERABLE_INBOUND_KINDS = (
 # harness's record about the input's key.
 # meiva:link agent/graph/docs/harness-foreground.md
 INPUT_KEY_FIELD = "harness_input_key"
-QUOTA_RETRY_COUNT_FIELD = "harness_quota_retries"
 
 _COLUMNS: LiteralString = "id,agent_id,content,kind,source,payload,created_at,claimed_at"
 
@@ -230,73 +224,22 @@ async def requeue_handed(ctx: MeivaContext, agent_id: int, handed: Sequence[Hand
         )
 
 
-@dataclass(frozen=True, slots=True)
-class _MaxRetriesRow:
-    max_retries: int
-
-
-@dataclass(frozen=True, slots=True)
-class _SuppressedRow:
-    wake_suppressed_until: datetime | None
-
-
-# meiva:note
-# Summary of the inbox requeue and wake-suppression window stamped for a quota abort.
-@dataclass(frozen=True, slots=True)
-class QuotaAbortSettlement:
-    requeued_inbound_ids: tuple[int, ...]
-    retry_after_seconds: float
-    reset_source: str | None
-    suppressed_until: datetime | None
-
-
 # meiva:note
 # On a quota/rate-limit abort with no model reply delivered yet, return the affected rows (whether still
-# claimed or prematurely marked done by InputInContext) to `pending` with an incremented retry counter,
-# and stamp a wake suppression window on `agents_meta` so automatic wakes pause until reset or backoff.
+# claimed or prematurely marked done by InputInContext) to `pending`, counting the attempt on each row
+# (`QUOTA_RETRY_COUNT_FIELD`), and halt the agent's automatic recovery in the same transaction: the agent
+# stops, nothing wakes it again for these rows, and a new message resumes it with them
+# (`base/agents/recovery/breaker.py::admit_pending_wake`). Returns the requeued ids, in handed order.
 async def settle_quota_abort(
-    ctx: MeivaContext,
-    agent_id: int,
-    handed: Sequence[Handed],
-    *,
-    compute_backoff: Callable[[int], tuple[float, str]],
-) -> QuotaAbortSettlement:
+    ctx: MeivaContext, agent_id: int, handed: Sequence[Handed]
+) -> tuple[int, ...]:
     pool = ctx.ops_pool
-    ids = list(dict.fromkeys(i for h in handed for i in h.row_ids))
     if pool is None:
-        retry_after_s, reset_source = compute_backoff(0)
-        retry_after_s = max(MIN_QUOTA_BACKOFF_SECONDS, float(retry_after_s))
-        return QuotaAbortSettlement(
-            requeued_inbound_ids=(),
-            retry_after_seconds=retry_after_s,
-            reset_source=reset_source,
-            suppressed_until=None,
-        )
-
-    kinds = list(DELIVERABLE_INBOUND_KINDS)
+        return ()
+    ids = list(dict.fromkeys(i for h in handed for i in h.row_ids))
+    requeued_ids: tuple[int, ...] = ()
     async with async_write_transaction(pool) as conn:
         await lock_inbound_owner(conn, agent_id, incarnation=ctx.original_incarnation)
-        previous_retries = 0
-        if ids:
-            retry_row = await aquery_one(
-                conn,
-                _MaxRetriesRow,
-                "SELECT COALESCE(MAX("
-                "CASE WHEN COALESCE(payload->>%s, '') ~ '^[0-9]+$' "
-                "THEN (payload->>%s)::int ELSE 0 END"
-                "), 0) AS max_retries "
-                "FROM inbound_messages "
-                "WHERE agent_id=%s AND id=ANY(%s) AND kind=ANY(%s) "
-                "AND status IN ('pending', 'claimed', 'done')",
-                (QUOTA_RETRY_COUNT_FIELD, QUOTA_RETRY_COUNT_FIELD, agent_id, ids, kinds),
-            )
-            if retry_row is not None:
-                previous_retries = retry_row.max_retries
-
-        retry_after_s, reset_source = compute_backoff(previous_retries)
-        retry_after_s = max(MIN_QUOTA_BACKOFF_SECONDS, float(retry_after_s))
-
-        requeued_ids: tuple[int, ...] = ()
         if ids:
             rows = await aquery_all(
                 conn,
@@ -317,43 +260,13 @@ async def settle_quota_abort(
                     QUOTA_RETRY_COUNT_FIELD,
                     agent_id,
                     ids,
-                    kinds,
+                    list(DELIVERABLE_INBOUND_KINDS),
                 ),
             )
             requeued_set = {row.id for row in rows}
             requeued_ids = tuple(row_id for row_id in ids if row_id in requeued_set)
-
-        suppressed_row = await aquery_one(
-            conn,
-            _SuppressedRow,
-            "UPDATE agents_meta "
-            "SET wake_suppressed_until = CASE "
-            "  WHEN wake_suppress_reason = %s AND wake_suppressed_until IS NOT NULL "
-            "  THEN GREATEST(wake_suppressed_until, clock_timestamp() + make_interval(secs => %s)) "
-            "  ELSE clock_timestamp() + make_interval(secs => %s) "
-            "END, "
-            "wake_suppress_reason = %s "
-            "WHERE id = %s AND ("
-            "  wake_suppress_reason IS DISTINCT FROM %s "
-            "  OR wake_suppressed_until IS NULL "
-            "  OR wake_suppressed_until <= clock_timestamp()"
-            ") "
-            "RETURNING wake_suppressed_until",
-            (
-                SUPPRESS_REASON_QUOTA_EXHAUSTED,
-                retry_after_s,
-                retry_after_s,
-                SUPPRESS_REASON_QUOTA_EXHAUSTED,
-                agent_id,
-                SUPPRESS_REASON_PERMANENT_REJECT,
-            ),
-        )
-    return QuotaAbortSettlement(
-        requeued_inbound_ids=requeued_ids,
-        retry_after_seconds=retry_after_s,
-        reset_source=reset_source,
-        suppressed_until=suppressed_row.wake_suppressed_until if suppressed_row else None,
-    )
+        await record_quota_halt(conn, agent_id)
+    return requeued_ids
 
 
 async def mark_input_group(

@@ -13,7 +13,7 @@ from langgraph.runtime import Runtime
 from psycopg_pool import AsyncConnectionPool
 
 from agent.db import claim_inbound_batch
-from agent.graph.claim.harness_inbox import INPUT_KEY_FIELD, QUOTA_RETRY_COUNT_FIELD
+from agent.graph.claim.harness_inbox import INPUT_KEY_FIELD
 from agent.graph.claim.harness_turn import harness_turn_node
 from agent.graph.claim.tests.harness_support import (
     FakeEngine,
@@ -31,13 +31,13 @@ from agent.graph.llm_errors import FatalLLMStreamError, HarnessQuotaExhaustedErr
 from agent.ownership.tests.ownership_support import admit_owner, agent_row
 from agent.state import AgentState
 from base.agents.recovery.breaker import (
+    HALT_REASON_QUOTA_EXHAUSTED,
+    QUOTA_RETRY_COUNT_FIELD,
     SUPPRESS_REASON_PERMANENT_REJECT,
-    SUPPRESS_REASON_QUOTA_EXHAUSTED,
 )
 from base.api_contracts.agent_contract import Harness
 from base.db.code_version_gate import ProcessDbGate
 from base.lm.harness import (
-    MIN_QUOTA_BACKOFF_SECONDS,
     BridgeEvent,
     HarnessInput,
     HarnessSetupError,
@@ -182,14 +182,17 @@ def _row_meta(db: psycopg.Connection, inbound_id: int) -> tuple[dict[str, object
     return row[0], row[1]
 
 
-def _wake_suppression(db: psycopg.Connection, agent_id: int) -> tuple[object, object]:
+# meiva:note
+# The recovery breaker's halt and the wake window: a quota abort halts the agent and writes no window.
+def _halt(db: psycopg.Connection, agent_id: int) -> tuple[object, object, object]:
     db.commit()
     row = db.execute(
-        "SELECT wake_suppress_reason, wake_suppressed_until FROM agents_meta WHERE id = %s",
+        "SELECT permanent_reject_streak, last_permanent_reject_reason, wake_suppress_reason "
+        "FROM agents_meta WHERE id = %s",
         (agent_id,),
     ).fetchone()
     assert row is not None
-    return row[0], row[1]
+    return row[0], row[1], row[2]
 
 
 def _assert_requeued_pending(
@@ -233,7 +236,7 @@ def _error_turn(
     )
 
 
-async def test_quota_abort_after_input_in_context_requeues_rows_and_stamps_reset(
+async def test_quota_abort_after_input_in_context_requeues_rows_and_halts_the_agent(
     db_conn: psycopg.Connection,
     harness_runtime: RuntimeFixture,
     loguru_records: LogRecords,
@@ -266,24 +269,18 @@ async def test_quota_abort_after_input_in_context_requeues_rows_and_stamps_reset
         await harness_turn_node(AgentState(), rt, config(agent_id))
 
     exc = failed.value
-    assert exc.retry_after_seconds == 5072.0
-    assert exc.reset_source == "parsed_reset"
     assert set(exc.requeued_inbound_ids) == {chat_id, note_id}
     _assert_requeued_pending(db_conn, (chat_id, note_id), expected_retries=1)
-
-    reason, until = _wake_suppression(db_conn, agent_id)
-    assert reason == SUPPRESS_REASON_QUOTA_EXHAUSTED
-    assert until is not None
+    assert _halt(db_conn, agent_id) == (1, HALT_REASON_QUOTA_EXHAUSTED, None)
 
     quota_logs = loguru_records.extras(event="harness_quota_exhausted", level="WARNING")
     assert len(quota_logs) == 1
     extra = quota_logs[0]
-    assert extra["retry_after_seconds"] == 5072.0
-    assert extra["reset_source"] == "parsed_reset"
     assert extra["requeued_count"] == 2
+    assert "Resets in 1h24m27s" in str(extra["reason"])
 
 
-async def test_unparseable_quota_abort_before_input_in_context_uses_bounded_backoff_and_doubles(
+async def test_repeated_quota_abort_before_input_in_context_counts_each_attempt(
     db_conn: psycopg.Connection,
     harness_runtime: RuntimeFixture,
 ) -> None:
@@ -301,7 +298,7 @@ async def test_unparseable_quota_abort_before_input_in_context_uses_bounded_back
             ),
         ]
 
-    for expected_delay, expected_retries in ((120.0, 1), (240.0, 2)):
+    for attempt in (1, 2):
         engine = FakeEngine(script=script)
         engine.records = {input_key(chat_id): Reconciliation.UNKNOWN}
         base_rt = harness_runtime(engine, agent_id=agent_id)
@@ -310,19 +307,9 @@ async def test_unparseable_quota_abort_before_input_in_context_uses_bounded_back
         with pytest.raises(HarnessQuotaExhaustedError) as failed:
             await harness_turn_node(AgentState(), rt, config(agent_id))
 
-        exc = failed.value
-        assert exc.retry_after_seconds == expected_delay
-        assert exc.retry_after_seconds >= MIN_QUOTA_BACKOFF_SECONDS
-        assert exc.reset_source == "bounded_backoff"
-        assert exc.requeued_inbound_ids == (chat_id,)
-        _assert_requeued_pending(db_conn, (chat_id,), expected_retries=expected_retries)
-
-        db_conn.execute(
-            "UPDATE agents_meta SET wake_suppressed_until = now() - interval '1 second' "
-            "WHERE id = %s",
-            (agent_id,),
-        )
-        db_conn.commit()
+        assert failed.value.requeued_inbound_ids == (chat_id,)
+        _assert_requeued_pending(db_conn, (chat_id,), expected_retries=attempt)
+        assert _halt(db_conn, agent_id) == (attempt, HALT_REASON_QUOTA_EXHAUSTED, None)
 
 
 async def test_quota_abort_on_setup_error_preserves_unclaimed_deliverables(
@@ -347,10 +334,9 @@ async def test_quota_abort_on_setup_error_preserves_unclaimed_deliverables(
     with pytest.raises(HarnessQuotaExhaustedError) as failed:
         await harness_turn_node(AgentState(), rt, config(agent_id))
 
-    assert failed.value.retry_after_seconds == 50.0
-    assert failed.value.reset_source == "parsed_reset"
     assert failed.value.requeued_inbound_ids == (chat_id,)
     assert row_status(db_conn, chat_id) == "pending"
+    assert _halt(db_conn, agent_id) == (1, HALT_REASON_QUOTA_EXHAUSTED, None)
 
 
 async def test_quota_abort_only_requeues_failed_turn_after_earlier_turn_succeeded(
@@ -394,7 +380,6 @@ async def test_quota_abort_only_requeues_failed_turn_after_earlier_turn_succeede
     with pytest.raises(HarnessQuotaExhaustedError) as failed:
         await asyncio.wait_for(node_task, 20)
 
-    assert failed.value.retry_after_seconds == MIN_QUOTA_BACKOFF_SECONDS
     assert failed.value.requeued_inbound_ids == (row2_holder[0],)
     assert row_status(db_conn, row1) == "done"
     assert row_status(db_conn, row2_holder[0]) == "pending"
@@ -421,10 +406,10 @@ async def test_non_quota_error_after_input_in_context_stays_done_and_raises_fata
 
     assert not isinstance(failed.value, HarnessQuotaExhaustedError)
     assert row_status(db_conn, chat_id) == "done"
-    assert _wake_suppression(db_conn, agent_id) == (None, None)
+    assert _halt(db_conn, agent_id) == (0, None, None)
 
 
-async def test_quota_abort_does_not_overwrite_active_permanent_provider_reject(
+async def test_quota_abort_adds_to_an_active_permanent_reject_halt_and_keeps_its_window(
     db_conn: psycopg.Connection,
     harness_runtime: RuntimeFixture,
 ) -> None:
@@ -433,7 +418,8 @@ async def test_quota_abort_does_not_overwrite_active_permanent_provider_reject(
 
     # meiva:note
     # reserve_head_batch clears wake_suppressed_until if allowed at admission, so simulate a
-    # permanent provider rejection stamped mid-turn before the quota abort settles.
+    # permanent provider rejection stamped mid-turn before the quota abort settles: the quota abort
+    # extends the same halt and leaves the breaker's own window alone.
     class ConcurrentRejectEngine(FakeEngine):
         async def deliver(
             self, inputs: Sequence[HarnessInput], *, compaction_note: str = ""
@@ -460,5 +446,8 @@ async def test_quota_abort_does_not_overwrite_active_permanent_provider_reject(
         await harness_turn_node(AgentState(), rt, config(agent_id))
 
     assert row_status(db_conn, chat_id) == "pending"
-    reason, _ = _wake_suppression(db_conn, agent_id)
-    assert reason == SUPPRESS_REASON_PERMANENT_REJECT
+    assert _halt(db_conn, agent_id) == (
+        2,
+        HALT_REASON_QUOTA_EXHAUSTED,
+        SUPPRESS_REASON_PERMANENT_REJECT,
+    )

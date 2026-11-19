@@ -9800,6 +9800,22 @@
               }
             ],
             "title": "Last Turn Fatal Reason"
+          },
+          "permanent_reject_streak": {
+            "type": "integer",
+            "title": "Permanent Reject Streak",
+            "default": 0
+          },
+          "last_permanent_reject_reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Permanent Reject Reason"
           }
         },
         "type": "object",

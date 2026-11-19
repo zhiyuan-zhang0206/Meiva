@@ -166,7 +166,8 @@ class AlertsSettings(EnvSettings):
         alias="MEIVA_PROVIDER_GUARD_BLOCKED_AGENTS_WINDOW_HOURS",
         description=(
             "Recency window for the blocked-agents check: only agents whose "
-            "last fatal turn falls inside it count. Bounds the count to the "
+            "last fatal turn (a quota halt: the moment it went idle) falls inside "
+            "it count. Bounds the count to the "
             "active wave and lets rows nobody revived age out instead of "
             "camping the check red forever — the batch-revive flow owns "
             "leftovers."

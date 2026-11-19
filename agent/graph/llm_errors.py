@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-from datetime import datetime
-
 from base.host.env.agent_slices import AgentSlices, LlmCallPolicy
 from base.lm.catalog import ModelCatalog
 from base.lm.errors import ErrorClass, classify_error, emit_provider_error
@@ -51,23 +49,13 @@ class LLMRetryBudgetExceededError(FatalLLMStreamError):
 
 
 # meiva:note
-# External harness turn aborted due to quota exhaustion or rate limiting. Subclasses
-# FatalLLMStreamError so graph/runloop abort paths settle the turn with diagnostics while
-# idling cleanly without stamping a crash corpse during wake suppression.
+# External harness turn aborted due to quota exhaustion or rate limiting, its inputs back in the
+# queue and the agent halted until a new message. Subclasses FatalLLMStreamError so graph/runloop
+# abort paths settle the turn with diagnostics, while the agent idles instead of becoming a crash
+# corpse.
 class HarnessQuotaExhaustedError(FatalLLMStreamError):
-    def __init__(
-        self,
-        message: str,
-        *,
-        retry_after_seconds: float,
-        reset_source: str,
-        suppressed_until: datetime | None = None,
-        requeued_inbound_ids: tuple[int, ...] = (),
-    ) -> None:
+    def __init__(self, message: str, *, requeued_inbound_ids: tuple[int, ...] = ()) -> None:
         super().__init__(message)
-        self.retry_after_seconds = retry_after_seconds
-        self.reset_source = reset_source
-        self.suppressed_until = suppressed_until
         self.requeued_inbound_ids = requeued_inbound_ids
 
 
