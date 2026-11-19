@@ -150,6 +150,10 @@ class StdioAppServer:
         return None if self._process is None else self._process.returncode
 
     @property
+    def stderr(self) -> asyncio.StreamReader | None:
+        return None if self._process is None else self._process.stderr
+
+    @property
     def closed(self) -> bool:
         return self._closed
 

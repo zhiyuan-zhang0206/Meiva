@@ -11,7 +11,11 @@ from typing import NamedTuple
 
 import psycopg
 
-from base.agents.birth.harness_model_probe import ModelProber, probe_cli_models
+from base.agents.birth.harness_model_probe import (
+    ModelProber,
+    probe_cli_models,
+    probe_codex_status,
+)
 from base.agents.model.harness_models import CatalogProbeResult
 from base.api_contracts.agent_contract import (
     LAUNCHABLE_HARNESSES,
@@ -48,6 +52,7 @@ class _LoginEvidence:
     signed_in: bool | None
     detail: str
     cli_stdout: str | None = None
+    timed_out: bool = False
 
 
 # meiva:note
@@ -257,18 +262,21 @@ def _claude_credentials(record: object, *, now: datetime) -> _LoginEvidence:
 # `~/.claude.json` is not that evidence — the record outlives the login — so on its
 # own it reads `unknown`, as does a missing or unreadable store.
 # meiva:link base/agents/docs/harness/harness.md
-def _claude_code_login(home: Path, *, now: datetime) -> _LoginEvidence:
-    credentials = home / ".claude" / ".credentials.json"
+def _claude_code_login(home: Path, *, now: datetime, environ: Mapping[str, str]) -> _LoginEvidence:
+    config_dir = environ.get("CLAUDE_CONFIG_DIR")
+    claude_dir = Path(config_dir) if config_dir else home / ".claude"
+    credentials = claude_dir / ".credentials.json"
     if credentials.is_file():
         return _claude_credentials(_read_json(credentials), now=now)
-    account = _read_json(home / ".claude.json")
+    claude_json = (claude_dir / ".claude.json") if config_dir else (home / ".claude.json")
+    account = _read_json(claude_json)
     if _has_value(account, "oauthAccount"):
         return _LoginEvidence(
             signed_in=None,
             detail="~/.claude.json names the account that signed in but stores no token, and "
             "that record outlives the login",
         )
-    if (home / ".claude.json").is_file():
+    if claude_json.is_file():
         return _LoginEvidence(signed_in=False, detail="~/.claude.json records no signed-in account")
     return _LoginEvidence(signed_in=None, detail="no Claude Code configuration found")
 
@@ -281,9 +289,10 @@ def _claude_code_login(home: Path, *, now: datetime) -> _LoginEvidence:
 # age. A missing or unreadable file reads `unknown`; a file holding no token reads
 # `unavailable`.
 # meiva:link base/agents/docs/harness/harness.md
-def _codex_login(home: Path) -> _LoginEvidence:
-    where = "~/.codex/auth.json"
-    auth = home / ".codex" / "auth.json"
+def _codex_login(home: Path, *, environ: Mapping[str, str]) -> _LoginEvidence:
+    codex_dir_env = environ.get("CODEX_HOME")
+    where = f"{codex_dir_env}/auth.json" if codex_dir_env else "~/.codex/auth.json"
+    auth = (Path(codex_dir_env) if codex_dir_env else home / ".codex") / "auth.json"
     if not auth.is_file():
         return _LoginEvidence(signed_in=None, detail=f"no {where}")
     record = _read_json(auth)
@@ -345,12 +354,14 @@ def _antigravity_login(home: Path) -> _LoginEvidence:
 _LOGIN_CHECKED = frozenset({Harness.CLAUDE_CODE, Harness.CODEX, Harness.ANTIGRAVITY})
 
 
-def _stored_login(harness: Harness, home: Path, *, now: datetime) -> _LoginEvidence:
+def _stored_login(
+    harness: Harness, home: Path, *, now: datetime, environ: Mapping[str, str]
+) -> _LoginEvidence:
     match harness:
         case Harness.CLAUDE_CODE:
-            return _claude_code_login(home, now=now)
+            return _claude_code_login(home, now=now, environ=environ)
         case Harness.CODEX:
-            return _codex_login(home)
+            return _codex_login(home, environ=environ)
         case Harness.ANTIGRAVITY:
             return _antigravity_login(home)
         case Harness.MEIVA:
@@ -393,8 +404,9 @@ _CLI_STATUS_ARGS: dict[Harness, tuple[str, ...]] = {
 _CLI_TIMEOUT_S: dict[Harness, float] = {
     Harness.CLAUDE_CODE: 8.0,
     Harness.CODEX: 8.0,
-    Harness.ANTIGRAVITY: 12.0,
+    Harness.ANTIGRAVITY: 18.0,
 }
+_ANTIGRAVITY_RETRY_TIMEOUT_S = 8.0
 
 CliRunner = Callable[..., "subprocess.CompletedProcess[str]"]
 
@@ -425,6 +437,7 @@ def _login_evidence(
     *,
     home: Path,
     now: datetime,
+    environ: Mapping[str, str],
 ) -> _LoginEvidence:
     if cli_evidence.signed_in is False and withheld:
         names = ", ".join(withheld)
@@ -433,7 +446,11 @@ def _login_evidence(
             detail=f"{names} is set in this process but the CLI probe does not see it, and "
             f"{cli_evidence.detail}",
         )
-    return _stored_login(harness, home, now=now) if cli_evidence.signed_in is None else cli_evidence
+    return (
+        _stored_login(harness, home, now=now, environ=environ)
+        if cli_evidence.signed_in is None
+        else cli_evidence
+    )
 
 
 def _withheld_credentials(
@@ -446,11 +463,39 @@ def _withheld_credentials(
     )
 
 
-def _cli_environment(environ: Mapping[str, str]) -> dict[str, str]:
+_PROBE_AUTH_ENV_KEYS = (
+    "CLAUDE_CONFIG_DIR",
+    "CODEX_HOME",
+    "XDG_CONFIG_HOME",
+    "XDG_DATA_HOME",
+    "XDG_STATE_HOME",
+    "XDG_CACHE_HOME",
+    "DBUS_SESSION_BUS_ADDRESS",
+)
+
+
+def _resolved_probe_home(home: Path | None, environ: Mapping[str, str]) -> Path:
+    if home is not None:
+        return home
+    env_home = environ.get("HOME")
+    if env_home:
+        return Path(env_home)
+    return resolve_user_home(None)
+
+
+def _cli_environment(
+    environ: Mapping[str, str], *, home: Path, path_env: str | None
+) -> dict[str, str]:
     from base.host.env.registry import child_env
 
     environment = child_env(environ)
-    return {**environment, "PATH": harness_child_path(path_env=environment.get("PATH"))}
+    environment["HOME"] = str(home)
+    for key in _PROBE_AUTH_ENV_KEYS:
+        value = environ.get(key)
+        if value:
+            environment[key] = value
+    environment["PATH"] = harness_child_path(path_env=path_env, home=home)
+    return environment
 
 
 def _answered_claude(done: subprocess.CompletedProcess[str]) -> _LoginEvidence:
@@ -520,13 +565,90 @@ def _cli_login(
         )
     except subprocess.TimeoutExpired:
         return _LoginEvidence(
-            signed_in=None, detail=f"`{binary} {' '.join(args)}` did not answer in time"
+            signed_in=None,
+            detail=f"`{binary} {' '.join(args)}` did not answer in time",
+            timed_out=True,
         )
     except OSError as exc:
         return _LoginEvidence(
             signed_in=None, detail=f"`{binary} {' '.join(args)}` could not run: {exc}"
         )
     return _CLI_ANSWERS[harness](done)
+
+
+def _probe_catalog_and_account(
+    harness: Harness,
+    path: str,
+    *,
+    home: Path,
+    env: Mapping[str, str],
+    cli_evidence: _LoginEvidence,
+    cli_runner: CliRunner,
+    model_prober: ModelProber,
+) -> CatalogProbeResult:
+    if (
+        harness is Harness.ANTIGRAVITY
+        and cli_evidence.cli_stdout is None
+        and model_prober is probe_cli_models
+    ):
+        if not cli_evidence.timed_out:
+            return CatalogProbeResult(error=cli_evidence.detail)
+        return probe_cli_models(
+            harness,
+            path,
+            home=home,
+            environment=env,
+            agy_stdout=None,
+            runner=cli_runner,
+            timeout=_ANTIGRAVITY_RETRY_TIMEOUT_S,
+        )
+    if harness is Harness.CODEX and model_prober is probe_cli_models:
+        return probe_codex_status(path, home=home, environment=env)
+    return model_prober(
+        harness,
+        path,
+        home=home,
+        environment=env,
+        agy_stdout=cli_evidence.cli_stdout,
+    )
+
+
+def _signed_in_probe_row(
+    harness: Harness,
+    binary: str,
+    path: str,
+    *,
+    on_path: bool,
+    installed: str,
+    evidence: _LoginEvidence,
+    probed: CatalogProbeResult,
+) -> HarnessProbe:
+    if probed.signed_in is False:
+        detail = (probed.error or "login credentials are invalid").rstrip(".")
+        return HarnessProbe(
+            harness,
+            "unavailable",
+            f"{installed}; not signed in: {detail}. Run {binary} once and sign in",
+            path,
+            on_path,
+        )
+    if probed.models:
+        return HarnessProbe(
+            harness,
+            "available",
+            f"{installed}; {evidence.detail}",
+            path,
+            on_path,
+            models=probed.models,
+        )
+    failure = probed.error or "no models returned"
+    return HarnessProbe(
+        harness,
+        "unknown",
+        f"{installed}; {evidence.detail}, but model catalogue probe failed: {failure}",
+        path,
+        on_path,
+    )
 
 
 def _probe_external(
@@ -550,41 +672,28 @@ def _probe_external(
             harness, "unavailable", f"the {binary} command was not found on PATH or in {searched}"
         )
     installed = f"installed at {path}" if on_path else f"installed at {path} (not on PATH)"
-    env = _cli_environment(environ)
+    env = _cli_environment(environ, home=home, path_env=path_env)
     withheld = _withheld_credentials(environ, env)
     cli_evidence = _cli_login(harness, path, runner=cli_runner, environment=env)
-    evidence = _login_evidence(harness, cli_evidence, withheld, home=home, now=now)
+    evidence = _login_evidence(harness, cli_evidence, withheld, home=home, now=now, environ=environ)
     if evidence.signed_in is True:
-        if (
-            harness is Harness.ANTIGRAVITY
-            and cli_evidence.cli_stdout is None
-            and model_prober is probe_cli_models
-        ):
-            probed = CatalogProbeResult(error=cli_evidence.detail)
-        else:
-            probed = model_prober(
-                harness,
-                path,
-                home=home,
-                environment=env,
-                agy_stdout=cli_evidence.cli_stdout,
-            )
-        if probed.models:
-            return HarnessProbe(
-                harness,
-                "available",
-                f"{installed}; {evidence.detail}",
-                path,
-                on_path,
-                models=probed.models,
-            )
-        failure = probed.error or "no models returned"
-        return HarnessProbe(
+        probed = _probe_catalog_and_account(
             harness,
-            "unknown",
-            f"{installed}; {evidence.detail}, but model catalogue probe failed: {failure}",
             path,
-            on_path,
+            home=home,
+            env=env,
+            cli_evidence=cli_evidence,
+            cli_runner=cli_runner,
+            model_prober=model_prober,
+        )
+        return _signed_in_probe_row(
+            harness,
+            binary,
+            path,
+            on_path=on_path,
+            installed=installed,
+            evidence=evidence,
+            probed=probed,
         )
     if evidence.signed_in is False:
         return HarnessProbe(
@@ -619,7 +728,8 @@ def probe_local_harnesses(
     cli_runner: CliRunner = subprocess.run,
     model_prober: ModelProber = probe_cli_models,
 ) -> list[HarnessProbe]:
-    resolved_home = resolve_user_home(home)
+    resolved_home = _resolved_probe_home(home, environ)
+    resolved_path_env = environ.get("PATH") if path_env is None else path_env
     resolved_bin_dirs = HARNESS_BIN_DIRS if bin_dirs is None else bin_dirs
     external = [harness for harness in Harness if harness is not Harness.MEIVA]
     with ThreadPoolExecutor(max_workers=len(external)) as pool:
@@ -628,7 +738,7 @@ def probe_local_harnesses(
                 _probe_external,
                 harness,
                 resolved_home,
-                path_env,
+                resolved_path_env,
                 resolved_bin_dirs,
                 now=now,
                 environ=environ,

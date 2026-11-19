@@ -9,8 +9,9 @@ exports = ["auth.py", "session.py", "tests", "transcript"]
 "fork.py" = ["frames.py"]
 "frames.py" = []
 "mapping.py" = []
+"probe.py" = ["auth.py", "config.py", "frames.py", "requests.py", "transport.py"]
 "requests.py" = ["frames.py", "mapping.py"]
-"session.py" = ["admission.py", "auth.py", "commands.py", "config.py", "fork.py", "frames.py", "mapping.py", "reconciliation", "requests.py", "subagents.py", "transport.py", "turns.py"]
+"session.py" = ["admission.py", "auth.py", "commands.py", "config.py", "fork.py", "frames.py", "mapping.py", "probe.py", "reconciliation", "requests.py", "subagents.py", "transport.py", "turns.py"]
 "subagents.py" = ["config.py", "frames.py", "mapping.py"]
 "transcript" = ["reconciliation"]
 "tests" = ["__init__.py", "auth.py", "frames.py", "mapping.py", "requests.py", "session.py", "transport.py", "turns.py"]
@@ -26,6 +27,7 @@ exports = ["auth.py", "session.py", "tests", "transcript"]
 "config.py" = "strict"
 "frames.py" = "strict"
 "mapping.py" = "strict"
+"probe.py" = { mode = "none", why = "spawns the codex app-server child over stdio and drains stderr under one bounded timeout; classification lives in base/agents/model/harness_models.py" }
 "requests.py" = "strict"
 "subagents.py" = "strict"
 "session.py" = { mode = "none", why = "the shell that runs one turn against the app-server: it starts the transport, awaits the requests it sends, keeps the one event stream and reaps the process tree on close; what to send and what an approval is answered with are decided in requests.py, what an inbound notification is and what a settled turn is in turns.py, and the per-turn state it applies is turns.TurnRecord" }

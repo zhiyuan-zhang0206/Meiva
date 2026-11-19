@@ -35,6 +35,7 @@ from base.lm.harness.codex.mapping import (
     text_delta,
     usage_from,
 )
+from base.lm.harness.codex.probe import probe_account_and_models as probe_account_and_models
 from base.lm.harness.codex.reconciliation.rollout import codex_home, reconcile_inputs
 from base.lm.harness.codex.requests import (
     INITIALIZED,

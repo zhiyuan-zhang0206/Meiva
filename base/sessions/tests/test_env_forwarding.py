@@ -44,6 +44,18 @@ def test_managed_service_path_preserves_tools_across_callers(tmp_path: Path, run
     assert changed != manager
 
 
+def test_managed_service_env_includes_harness_install_dirs_in_daemon_path(tmp_path: Path) -> None:
+    venv = tmp_path / "runtime"
+    bindir = venv / env_forwarding.get_backend().venv_bin_dir_name()
+    tools = tmp_path / "admitted-tools"
+    home = tmp_path / "user-home"
+    env = env_forwarding.managed_service_env(str(tools), environ={"HOME": str(home)}, venv=venv)
+    entries = env["PATH"].split(os.pathsep)
+    assert entries[:2] == [str(bindir), str(tools)]
+    assert str(home / ".local" / "bin") in entries
+    assert env["MEIVA_SERVICE_PATH"] == str(tools)
+
+
 @pytest.mark.parametrize("entry", ["relative", ".", "bad\npath", "bad\x00path"])
 def test_managed_service_path_refuses_caller_relative_entries(entry: str) -> None:
     with pytest.raises(ValueError, match="absolute directory"):
