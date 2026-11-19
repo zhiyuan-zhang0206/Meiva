@@ -5,8 +5,10 @@ import json
 import os
 import tempfile
 from collections.abc import Awaitable, Callable, Mapping, Sequence
+from datetime import datetime
 from pathlib import Path
 
+from agent.graph.claim.harness_activity import HarnessTurnTimingTracker
 from agent.graph.hooks.user_delivery import capture_keyed_items
 from base.agents.context import MeivaContext
 from base.agents.history.transcript_timeline.items import ReplyPolicy, format_tool_use
@@ -142,11 +144,28 @@ class ReadTimelineSink:
         self._fork_floor_loaded = False
         self._parent_uuids_loaded = False
         self._parent_uuids: frozenset[str] | None = None
+        self._turn_timing = HarnessTurnTimingTracker(
+            ctx,
+            agent_id,
+            publisher,
+            session_id=session_id,
+            initial_end=self._history_end,
+        )
 
     def note_input_keys(self, keys: Sequence[str]) -> None:
         for key in keys:
             if key and key not in self._input_keys:
                 self._input_keys.append(key)
+
+    def on_turn_started(self, turn_id: str) -> None:
+        raw_start = self._from if self._from is not None else self._start_offset()
+        self._turn_timing.start_turn(
+            turn_id,
+            start_offset=max(raw_start, self._fork_floor or 0),
+        )
+
+    def clear_open_turn(self) -> None:
+        self._turn_timing.clear_open_turn()
 
     @property
     def has_activity(self) -> bool:
@@ -225,6 +244,9 @@ class ReadTimelineSink:
         interrupted: bool = False,
         error: str | None = None,
         input_keys: Sequence[str] = (),
+        turn_id: str | None = None,
+        ended_at: datetime | None = None,
+        fallback_duration_ms: int = 0,
     ) -> None:
         self.note_input_keys(input_keys)
         if not self._replied and not interrupted:
@@ -233,12 +255,20 @@ class ReadTimelineSink:
                     self._check_reply(turn.text)
         self._replied = False
         clock = self._ctx.require_clock()
+        settled_at = ended_at if ended_at is not None else clock.now()
         before, deadline = self._closed_turns, clock.monotonic() + END_WAIT_SECONDS
         wait = bool(turns) or interrupted or error is not None
         while True:
             await self._read_logged()
             if not wait or self._closed_turns > before or clock.monotonic() >= deadline:
                 self._require_record(ended=wait, said=any(turn.text for turn in turns))
+                end_offset = self._from if self._from is not None else self._start_offset()
+                self._turn_timing.close_turn(
+                    turn_id=turn_id,
+                    end_offset=end_offset,
+                    ended_at=settled_at,
+                    fallback_duration_ms=fallback_duration_ms,
+                )
                 return
             await asyncio.sleep(END_POLL_SECONDS)
 
@@ -320,11 +350,14 @@ class ReadTimelineSink:
             unread=self._unread,
         )
         if updated.items:
+            self._turn_timing.refresh(updated.items)
             self._publisher.emit(
                 TimelineSnapshot(
                     agent_id=self._agent_id,
                     items=[item.item.model_dump() for item in updated.items],
                     msg_count=end,
+                    active_turn_id=self._turn_timing.active_turn_id,
+                    active_turn_started_at=self._turn_timing.active_turn_started_at,
                 ).model_dump_json()
             )
 
@@ -444,15 +477,21 @@ class ReadTimelineSink:
         sent = [*projected.items, *running]
         if not sent:
             return
+        self._turn_timing.apply(sent)
         carried = [] if self._last is None else [self._last]
         self._publisher.emit(
             TimelineSnapshot(
                 agent_id=self._agent_id,
                 items=[item.item.model_dump() for item in (*carried, *sent)],
                 msg_count=end,
+                active_turn_id=self._turn_timing.active_turn_id,
+                active_turn_started_at=self._turn_timing.active_turn_started_at,
             ).model_dump_json()
         )
         self._last = max(sent, key=lambda item: item.offset)
+        self._emit_committed_inbounds(sent)
+
+    def _emit_committed_inbounds(self, sent: Sequence[ProjectedItem]) -> None:
         for item in sent:
             inbound = item.item.inbound_id
             if (

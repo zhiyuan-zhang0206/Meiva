@@ -4181,12 +4181,16 @@ export interface components {
             image_captions?: string[] | null;
             sdk_calls?: components["schemas"]["SdkCall"][] | null;
             code_elapsed_ms?: number | null;
+            turn_id?: string | null;
+            turn_duration_ms?: number | null;
         };
         TimelineResponse: {
             items: components["schemas"]["TimelineItem"][];
             msg_count: number;
             has_more: boolean;
             reading_source?: string | null;
+            active_turn_id?: string | null;
+            active_turn_started_at?: string | null;
         };
         TimelineUploadFile: {
             name: string;

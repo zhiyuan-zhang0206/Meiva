@@ -139,6 +139,7 @@ async def _compact_outcome(
         command=Command[ClaimGoto](
             update={
                 "messages": transition["messages"],
+                "turn_timings": transition["turn_timings"],
                 "context_reset": transition["context_reset"],
                 "halted": halted,
                 "compact": state.compact.next_segment(),

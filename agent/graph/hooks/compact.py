@@ -497,6 +497,7 @@ async def auto_compact_for_llm(
         timers=runtime.context.require_clock(),
     )
     transition["compact"] = state.compact.next_segment()
+    transition["active_turn_start_idx"] = 0 if state.active_turn_id is not None else None
     emit_compact_finished(
         publisher, agent_id, compact_run_id, finished_at=now, status=CompactionStatus.SUCCESS
     )
@@ -523,6 +524,7 @@ def build_compact_transition(
         tail_msgs.extend(extra_msgs)
     return {
         "messages": [RemoveMessage(id=REMOVE_ALL_MESSAGES)],
+        "turn_timings": [],
         "context_reset": ContextReset(
             tail=tail_msgs,
             resume=resume,

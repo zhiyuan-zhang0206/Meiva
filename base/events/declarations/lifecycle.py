@@ -350,4 +350,10 @@ EVENTS: dict[str, EventSpec] = {
         payload=HarnessQuotaExhausted,
         tier="anomaly",
     ),
+    "turn_failure_timing_read_failed": telemetry_event(
+        "turn_failure_timing_read_failed",
+        "reading active turn timing state during native turn failure settlement failed; "
+        "the turn still settles its failure without recording a closing span",
+        tier="anomaly",
+    ),
 }

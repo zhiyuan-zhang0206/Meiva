@@ -345,6 +345,15 @@ class LLMDone(_Base):
     role: Literal["llm_done"] = "llm_done"
 
 
+class TurnStarted(_Base):
+    # meiva:note
+    # Authoritative Turn start anchor emitted when a Turn opens so PendingLiveActivityWindow
+    # and TurnBlock count from one continuous clock.
+    role: Literal["turn_started"] = "turn_started"
+    turn_id: str
+    started_at: str
+
+
 class TimelineSnapshot(_Base):
     """Timeline snapshot, published by the agent at each graph node
     **enter** (`agent.graph.node_log.node_lifecycle`), rendered from the
@@ -386,6 +395,8 @@ class TimelineSnapshot(_Base):
     role: Literal["timeline_snapshot"] = "timeline_snapshot"
     items: list[dict[str, object]]  # list of TimelineItem.model_dump()
     msg_count: int
+    active_turn_id: str | None = None
+    active_turn_started_at: str | None = None
 
 
 class InboundCommitted(_Base):
@@ -536,6 +547,7 @@ Event = Annotated[
     | TokenUsage
     | LLMKeepalive
     | LLMDone
+    | TurnStarted
     | TimelineSnapshot
     | AgentSpawned
     | AgentUpdated
@@ -575,6 +587,7 @@ ROLE_CLASSES: tuple[tuple[type[Event], bool], ...] = (
     (TokenUsage, False),
     (LLMKeepalive, False),
     (LLMDone, False),
+    (TurnStarted, False),
     (TimelineSnapshot, False),
     (AgentSpawned, True),
     (AgentUpdated, True),

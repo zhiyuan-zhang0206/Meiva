@@ -23,12 +23,14 @@ import {
   sortByItemId,
 } from "../fold/timeline";
 import {
+  type ActiveTurnAnchorInput,
+  type TimelineState,
   applySseEvent,
   crossedUnseenCompact,
   hasDisjointSnapshotGap,
+  parseTurnStartMs,
   retainStandingContextOnTrim,
   retireLiveCompact,
-  type TimelineState,
 } from "./timeline-store-events";
 
 export type { LiveCompact, TimelineState } from "./timeline-store-events";
@@ -66,6 +68,8 @@ export const useTimelineStore = create<TimelineState>()((set, get) => ({
   streamingCode: false,
   turnActive: false,
   liveAnchorAt: 0,
+  activeTurnId: null,
+  activeTurnStartedAt: 0,
   connectionState: "open",
   tokenUsage: 0,
   reasoningTokens: 0,
@@ -179,7 +183,7 @@ export const useTimelineStore = create<TimelineState>()((set, get) => ({
     }
   },
 
-  reloadSnapshot: (snapshot, msg_count, hasMoreOlder) => {
+  reloadSnapshot: (snapshot, msg_count, hasMoreOlder, activeTurn?: ActiveTurnAnchorInput | null) => {
     let applied = false;
     set((s) => {
       // A compact changes item coordinates. During the reset window only
@@ -213,6 +217,19 @@ export const useTimelineStore = create<TimelineState>()((set, get) => ({
           ? null
           : pendingBuffer;
       announceCompactDisplayChange(s, compactBuffer, crossedCompact ? 1 : 0);
+      const reloadTurnAnchor: Partial<TimelineState> =
+        activeTurn === undefined
+          ? {}
+          : activeTurn === null
+            ? { activeTurnId: null, activeTurnStartedAt: 0 }
+            : (() => {
+                const parsed = parseTurnStartMs(activeTurn.startedAt);
+                return parsed > 0
+                  ? { activeTurnId: activeTurn.id ?? null, activeTurnStartedAt: parsed }
+                  : activeTurn.startedAt === null
+                    ? { activeTurnId: null, activeTurnStartedAt: 0 }
+                    : {};
+              })();
       return {
         // committed ids drop out of streamingIds; still-streaming ones stay
         streamingIds: new Set([...s.streamingIds].filter((id) => !snapshotIds.has(id))),
@@ -228,6 +245,7 @@ export const useTimelineStore = create<TimelineState>()((set, get) => ({
         compactReplaceSeq: crossedCompact && s.items.length > 0 ? s.compactReplaceSeq + 1 : s.compactReplaceSeq,
         compactReplaceAgent: crossedCompact && s.items.length > 0 ? s.activeThreadId : s.compactReplaceAgent,
         liveCompact: retireLiveCompact(s.liveCompact, merged),
+        ...reloadTurnAnchor,
       };
     });
     return applied;
@@ -246,6 +264,8 @@ export const useTimelineStore = create<TimelineState>()((set, get) => ({
       streamingCode: false,
       turnActive: false,
       liveAnchorAt: 0,
+      activeTurnId: null,
+      activeTurnStartedAt: 0,
       hasMoreOlder: cached !== null && hasMoreOlder,
       olderFetchCount: 0,
       resetPending: false,
@@ -336,7 +356,7 @@ export const useTimelineStore = create<TimelineState>()((set, get) => ({
           (it.execStartedAt != null && it.exec_ms == null) ||
           (it.kind === "code_output" && it.payload === "" && it.exec_ms == null),
       );
-      if (!s.turnActive && !s.streamingCode && s.streamingIds.size === 0 && !hasLiveClock) {
+      if (!s.turnActive && !s.streamingCode && s.streamingIds.size === 0 && !hasLiveClock && s.activeTurnStartedAt === 0 && s.activeTurnId === null) {
         return {};
       }
       const cleaned = s.items.filter(
@@ -347,6 +367,8 @@ export const useTimelineStore = create<TimelineState>()((set, get) => ({
         : cleaned;
       return {
         turnActive: false,
+        activeTurnId: null,
+        activeTurnStartedAt: 0,
         streamingCode: false,
         streamingIds: new Set(),
         items,

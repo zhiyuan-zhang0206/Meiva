@@ -1,11 +1,22 @@
 from __future__ import annotations
 
+from collections.abc import Callable, Sequence
+from dataclasses import dataclass
+from datetime import datetime
+
 from base.agents.context import MeivaContext
+from base.agents.history.timeline_item import TurnTimingSpan, apply_turn_timings
+from base.agents.history.transcript_timeline.project import ProjectedItem
 from base.agents.model.harness_models import resolve_harness_catalog_model
+from base.events.live.projection import TimelineSnapshot
+from base.events.live.projection import TurnStarted as ProjectionTurnStarted
+from base.events.live.publisher import AgentEventPublisher
 from base.lm.catalog import ModelCatalog
 from base.lm.harness.engine import HarnessTurn
+from base.lm.harness.registry import TurnTimingStore
 from base.lm.usage import UsageFields, log_usage_fields
 from base.log import logger
+from base.paths import harness_sessions_dir
 
 
 # meiva:note
@@ -70,3 +81,175 @@ def log_turn_usage(ctx: MeivaContext, agent_id: int, model: str | None, turn: Ha
             tok_cached=usage.cache_read_input_tokens,
             cache_write=usage.cache_creation_input_tokens,
         )
+
+
+@dataclass(frozen=True, slots=True)
+class _OpenTurnTiming:
+    turn_id: str
+    started_at: datetime
+    started_iso: str
+    start_offset: int
+
+
+# meiva:note
+# Tracks per-Turn active timing across a single harness foreground run: opens an active marker in
+# TurnTimingStore and emits `TurnStarted`, attributes live projected items before Turn end, and
+# appends the settled duration span plus closing `TimelineSnapshot` at `finish`.
+class HarnessTurnTimingTracker:
+    def __init__(
+        self,
+        ctx: MeivaContext,
+        agent_id: int,
+        publisher: AgentEventPublisher,
+        *,
+        session_id: Callable[[], str | None],
+        initial_end: int,
+    ) -> None:
+        self._ctx = ctx
+        self._agent_id = agent_id
+        self._harness = ctx.harness.value
+        self._publisher = publisher
+        self._session_id = session_id
+        self._store = (
+            TurnTimingStore(harness_sessions_dir(home=ctx.meiva_home))
+            if ctx.meiva_home is not None
+            else None
+        )
+        self._open_turn: _OpenTurnTiming | None = None
+        self._closed_spans: list[TurnTimingSpan] = []
+        self._last_closed_end_offset = initial_end
+        self._published: dict[str, ProjectedItem] = {}
+
+    @property
+    def active_turn_id(self) -> str | None:
+        return self._open_turn.turn_id if self._open_turn is not None else None
+
+    @property
+    def active_turn_started_at(self) -> str | None:
+        return self._open_turn.started_iso if self._open_turn is not None else None
+
+    def start_turn(self, turn_id: str, *, start_offset: int) -> None:
+        if not turn_id:
+            return
+        if self._open_turn is not None and self._open_turn.turn_id == turn_id:
+            return
+        now = self._ctx.require_clock().now()
+        started_iso = now.isoformat()
+        resolved_start = max(start_offset, self._last_closed_end_offset)
+        self._open_turn = _OpenTurnTiming(
+            turn_id=turn_id,
+            started_at=now,
+            started_iso=started_iso,
+            start_offset=resolved_start,
+        )
+        self._published.clear()
+        if self._store is not None:
+            self._store.open_turn(
+                self._agent_id,
+                self._harness,
+                turn_id=turn_id,
+                started_at=started_iso,
+                start_offset=resolved_start,
+                session_id=self._session_id(),
+            )
+        self._publisher.emit(
+            ProjectionTurnStarted(
+                agent_id=self._agent_id,
+                turn_id=turn_id,
+                started_at=started_iso,
+            ).model_dump_json()
+        )
+
+    def clear_open_turn(self) -> None:
+        self._open_turn = None
+        self._published.clear()
+        if self._store is not None:
+            self._store.clear_active(self._agent_id, self._harness)
+
+    def _active_spans(self) -> list[TurnTimingSpan]:
+        spans = list(self._closed_spans)
+        if self._open_turn is not None:
+            spans.append(
+                TurnTimingSpan(
+                    turn_id=self._open_turn.turn_id,
+                    start_pos=self._open_turn.start_offset,
+                    end_pos=None,
+                    duration_ms=None,
+                )
+            )
+        return spans
+
+    def apply(self, items: Sequence[ProjectedItem]) -> None:
+        spans = self._active_spans()
+        if spans:
+            apply_turn_timings([item.item for item in items], spans)
+        if self._open_turn is not None:
+            for item in items:
+                self._published[item.item.item_id] = item
+
+    def refresh(self, items: Sequence[ProjectedItem]) -> None:
+        spans = self._active_spans()
+        if spans:
+            apply_turn_timings([item.item for item in items], spans)
+        for item in items:
+            if item.item.item_id in self._published:
+                self._published[item.item.item_id] = item
+
+    def close_turn(
+        self,
+        *,
+        turn_id: str | None,
+        end_offset: int,
+        ended_at: datetime,
+        fallback_duration_ms: int,
+    ) -> None:
+        open_turn, self._open_turn = self._open_turn, None
+        tid = turn_id or (open_turn.turn_id if open_turn is not None else None)
+        min_item_offset = min(
+            (p.offset for p in self._published.values()),
+            default=open_turn.start_offset if open_turn is not None else end_offset,
+        )
+        if open_turn is not None:
+            duration_ms = max(0, round((ended_at - open_turn.started_at).total_seconds() * 1000))
+            started_iso = open_turn.started_iso
+            base_start = min(open_turn.start_offset, min_item_offset)
+        else:
+            duration_ms = max(0, fallback_duration_ms)
+            started_iso = ended_at.isoformat()
+            base_start = min_item_offset
+        start_offset = max(self._last_closed_end_offset, base_start)
+        resolved_end = max(end_offset, start_offset)
+        if tid:
+            span = TurnTimingSpan(tid, start_offset, resolved_end, duration_ms)
+            self._closed_spans.append(span)
+            if self._store is not None:
+                self._store.close_turn(
+                    self._agent_id,
+                    self._harness,
+                    session_id=self._session_id(),
+                    turn_id=tid,
+                    start_offset=start_offset,
+                    end_offset=resolved_end,
+                    started_at=started_iso,
+                    ended_at=ended_at.isoformat(),
+                    duration_ms=duration_ms,
+                )
+        elif self._store is not None:
+            self._store.clear_active(self._agent_id, self._harness)
+
+        self._last_closed_end_offset = max(self._last_closed_end_offset, resolved_end)
+        published_items = [p.item for p in self._published.values()]
+        self._published.clear()
+        if published_items and tid:
+            apply_turn_timings(
+                published_items, (TurnTimingSpan(tid, start_offset, resolved_end, duration_ms),)
+            )
+            self._publisher.emit(
+                TimelineSnapshot(
+                    agent_id=self._agent_id,
+                    items=[item.model_dump() for item in published_items],
+                    msg_count=resolved_end,
+                    active_turn_id=None,
+                    active_turn_started_at=None,
+                ).model_dump_json()
+            )

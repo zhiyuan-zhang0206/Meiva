@@ -74,6 +74,7 @@ from base.lm.harness import (
     ToolResult,
     ToolUse,
     TurnCompleted,
+    TurnStarted,
     completed_turn,
     fault_of_event,
 )
@@ -355,6 +356,7 @@ class ForegroundRun:
                     _ = waker.cancel()
         finally:
             subscription.close()
+            self._projector.clear_open_turn()
         if outcome is not None:
             raise outcome
         if self._failure is not None:
@@ -410,6 +412,8 @@ class ForegroundRun:
                 self._turn_inputs.setdefault(turn_id, []).append(key)
             case RateLimitObserved():
                 self._last_rate_limit = event
+            case TurnStarted():
+                self._projector.on_turn_started(event.turn_id)
             case TurnCompleted():
                 await self._on_turn_completed(event)
             case _:
@@ -422,12 +426,16 @@ class ForegroundRun:
         self._changed.set()
 
     async def _on_turn_completed(self, event: TurnCompleted) -> None:
+        ended_at = self._ctx.require_clock().now()
         turn = completed_turn(event, "".join(self._streamed.pop(event.turn_id, [])))
         log_turn_usage(self._ctx, self._agent_id, self._bridge.model, turn)
         await self._projector.finish(
             (turn,),
             interrupted=turn.interrupted,
             input_keys=self._turn_inputs.pop(event.turn_id, []),
+            turn_id=event.turn_id,
+            ended_at=ended_at,
+            fallback_duration_ms=event.duration_ms,
         )
         self._committed_by_turn.pop(event.turn_id, None)
         self._last_rate_limit = None

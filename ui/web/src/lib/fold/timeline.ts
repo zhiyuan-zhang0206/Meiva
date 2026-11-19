@@ -580,12 +580,11 @@ export function applySystemEvent(
       // task board — useTasks invalidate-refetches on these; they never enter
       // the per-agent timeline.
     case "notification":
-      // meiva:note
-      // Delivered-notification log: the device transports render it, and the
-      // console's inbox is driven by questions, so it never enters a timeline.
+    case "turn_started":
     case "timeline_snapshot":
-      // Handled by store.processSseEvent before applySystemEvent —
-      // does not go through the delta reducer; uses mergeSnapshotWithStreaming directly.
+      // meiva:note
+      // Handled before applySystemEvent by store.processSseEvent (timeline_snapshot uses
+      // mergeSnapshotWithStreaming; turn_started anchors the active Turn clock).
       return items;
     /* eslint-enable no-fallthrough */
   }
@@ -773,6 +772,7 @@ export function foldEvent(t: ThreadTimelineState, ev: SystemEvent, nowMs = 1): T
   // turn lifecycle tracking
   const turnStart =
     ev.role === "inbound_arrived" ||
+    ev.role === "turn_started" ||
     ev.role === "llm_keepalive" ||
     ev.role === "chat_start" ||
     ev.role === "code_start" ||

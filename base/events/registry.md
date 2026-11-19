@@ -254,6 +254,7 @@ above (or when its name is unregistered); otherwise it stays in the JSONL mirror
 | `harness_image_not_delivered` | an image of a message could not be given to an external harness (an Antigravity turn that ended or never ran before the image could be steered in, or a refused steer); the text of the message was delivered and names the image, whose path is in the message | anomaly | — | — | events | — |
 | `agy_subagent_descriptor_unreadable` | an Antigravity sub-agent descriptor file was not the recorded shape, so that sub-agent's text and tool calls are not shown on the timeline; the turn is unaffected | observation | — | — | events | — |
 | `harness_quota_exhausted` | an external harness turn aborted on quota exhaustion or rate limit before delivering a reply; triggering inbox messages were returned to pending and automatic wakes suppressed until reset/backoff | anomaly | harness, model, retry_after_seconds, reset_source, suppressed_until, requeued_inbound_ids, requeued_count, reason | — | events | — |
+| `turn_failure_timing_read_failed` | reading active turn timing state during native turn failure settlement failed; the turn still settles its failure without recording a closing span | anomaly | — | — | events | — |
 | `llm_usage` | LLM call metering | observation | model, calls, in_total, out_total, cache_read, cache_write_5m, cache_write_1h, cache_write_30m, reasoning, latency_ms, decode_ms, cost_usd, price_miss, price_hit, price_out, price_write_5m, price_write_1h, price_write_30m, unpriced, usage_kind, attribution, source, parent_call_id | — | events | ✓ |
 | `turn_end` | one turn finished | observation | ok, duration_seconds, ended_with, ended_with_reason | — | events | ✓ |
 | `turn_end_declaration_rejected` | an agent's turn-end declaration was refused (recorded as invalid); the turn continued | anomaly | raw_ended_with, raw_ended_with_reason, problem | — | events | — |
@@ -412,6 +413,7 @@ same origin as persistent events but uses an independent schema.
 | `timeline_snapshot` | — |
 | `to_user_changed` | ✓ |
 | `token_usage` | — |
+| `turn_started` | — |
 
 ---
 

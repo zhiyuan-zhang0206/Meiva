@@ -251,14 +251,18 @@ export function useTimeline(
     const data = receipt?.data ?? timelineQuery.data;
     const completion = receipt !== null || (readRevision > selection.baseline && qualified !== selection);
     if (completion || data !== lastAppliedDataRef.current) {
-      const applied = reloadSnapshot(data.items, data.msg_count, data.has_more);
+      const activeTurn =
+        agentStatus !== undefined && agentStatus !== "running"
+          ? { id: null, startedAt: null }
+          : { id: data.active_turn_id ?? null, startedAt: data.active_turn_started_at ?? null };
+      const applied = reloadSnapshot(data.items, data.msg_count, data.has_more, activeTurn);
       if (applied) {
         lastAppliedDataRef.current = data;
         if (receipt) appliedReceipt.current = receipt;
         if (completion) setQualified(selection);
       }
     }
-  }, [timelineQuery.data, agentId, reloadSnapshot, headReceipt, readRevision, selection, qualified]);
+  }, [timelineQuery.data, agentId, agentStatus, reloadSnapshot, headReceipt, readRevision, selection, qualified]);
 
   // -- React Query error → toast + clear partial flags --
   useEffect(() => {

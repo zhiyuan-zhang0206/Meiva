@@ -80,6 +80,8 @@ interface Props {
   // through the gaps where no block is in flight (0 = unknown).
   // meiva:link ui/web/src/docs/frontend-components/timeline-view/deep-collapse.md
   lastEventAt?: number;
+  activeTurnId?: string | null;
+  activeTurnStartedAt?: number;
 
   hasMoreOlder?: boolean;
   // meiva:note
@@ -118,6 +120,8 @@ export const TimelineView = memo(function TimelineView({
   streamingCode = false,
   turnActive = false,
   lastEventAt = 0,
+  activeTurnId = null,
+  activeTurnStartedAt = 0,
   hasMoreOlder = false,
   loadingOlder = false,
   readerLoadingOlder = false,
@@ -841,6 +845,8 @@ export const TimelineView = memo(function TimelineView({
             turnActive={turnActive}
             loading={loading || reloadSearchingOlder || readerLoadingOlder}
             lastEventAt={lastEventAt}
+            activeTurnId={activeTurnId}
+            activeTurnStartedAt={activeTurnStartedAt}
             overrides={overrides}
             toggleExpanded={toggleExpanded}
             toggleTurn={handleToggleTurn}

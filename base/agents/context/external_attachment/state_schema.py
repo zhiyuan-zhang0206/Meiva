@@ -75,6 +75,10 @@ class BaseAgentState(BaseModel):
     harness_view: list[AnyMessage] = Field(default_factory=_new_any_messages)
     user_delivery_baseline: int | None = None
     turn_active: bool = False
+    active_turn_id: str | None = None
+    active_turn_started_at: str | None = None
+    active_turn_start_idx: int | None = None
+    turn_timings: list[dict[str, object]] = Field(default_factory=list)
     non_human_wake: bool = False
     exit_requested: bool = False
     restart_requested: bool = False
