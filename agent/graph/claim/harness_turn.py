@@ -17,15 +17,17 @@ from agent.graph.interrupt import (
     ModelInterruptedError,
     interrupt_halt,
 )
-from agent.graph.llm_errors import FatalLLMStreamError, HarnessQuotaExhaustedError
+from agent.graph.llm_errors import FatalLLMStreamError, HarnessTurnHaltedError
 from agent.graph.node_log import StallConfig, node_lifecycle
 from agent.nodes import CLAIM, HARNESS_TURN
 from base.agents.context import MeivaContext, agent_id_from_config
+from base.agents.recovery.breaker import HALT_REASON_QUOTA_EXHAUSTED, HALT_REASON_TURN_STALLED
 from base.events.live.publisher import AgentEventPublisher
 from base.lm.harness import (
     HarnessClosedError,
     HarnessSetupError,
     HarnessTurnFaultedError,
+    HarnessTurnStalledError,
     TurnEngine,
     fault_is_quota_exhaustion,
     sanitize_error_text,
@@ -88,34 +90,68 @@ def _is_quota_exhaustion(
 
 
 # meiva:note
+# The breaker's reason when the abort halts the agent instead of failing the turn: the harness ran out
+# of quota, or the turn stalled (`HarnessTurnStalledError`). Any other abort is a failed turn.
+def _halt_reason(
+    exc: HarnessTurnFaultedError | HarnessClosedError | HarnessSetupError,
+) -> str | None:
+    if isinstance(exc, HarnessTurnStalledError):
+        return HALT_REASON_TURN_STALLED
+    if _is_quota_exhaustion(exc):
+        return HALT_REASON_QUOTA_EXHAUSTED
+    return None
+
+
+# meiva:note
 # Stop and say so: the aborted turn's inputs go back to the queue, the agent is halted until a new
-# message (`harness_inbox.py::settle_quota_abort`), and the warning plus the turn's Error event are
-# the alert. When the quota returns is not this code's guess to make.
-async def _settle_quota_exhaustion(
+# message (`harness_inbox.py::settle_halted_turn`), and the warning plus the turn's Error event are
+# the alert. When the quota returns, or why a harness went silent, is not this code's guess to make.
+async def _settle_halted_turn(
     ctx: MeivaContext,
     agent_id: int,
     bridge: TurnEngine,
     run: ForegroundRun,
     exc: HarnessTurnFaultedError | HarnessClosedError | HarnessSetupError,
-) -> HarnessQuotaExhaustedError:
+    reason: str,
+) -> HarnessTurnHaltedError:
     turn_id = exc.turn_id if isinstance(exc, HarnessTurnFaultedError) else None
-    requeued = await run.settle_quota_abort(turn_id=turn_id)
-    detail = (
-        sanitize_error_text(f"{ctx.harness.value} harness quota exhausted: {exc}")
-        or f"{ctx.harness.value} harness quota exhausted"
-    )
-    logger.warning(
-        "harness turn aborted due to quota exhaustion; inputs requeued and the agent halted "
-        "until a new message",
-        event="harness_quota_exhausted",
-        agent_id=agent_id,
-        harness=ctx.harness.value,
-        model=bridge.model,
-        requeued_inbound_ids=list(requeued),
-        requeued_count=len(requeued),
-        reason=detail,
-    )
-    return HarnessQuotaExhaustedError(detail, requeued_inbound_ids=requeued)
+    requeued = await run.settle_halted_turn(turn_id=turn_id, reason=reason)
+    harness = ctx.harness.value
+    if isinstance(exc, HarnessTurnStalledError):
+        detail = (
+            sanitize_error_text(f"{harness} harness turn stalled: {exc}")
+            or f"{harness} harness turn stalled"
+        )
+        logger.warning(
+            "harness turn stalled; session retired, inputs requeued and the agent halted until a "
+            "new message",
+            event="harness_turn_stalled",
+            agent_id=agent_id,
+            harness=harness,
+            model=bridge.model,
+            silent_seconds=round(exc.silent_seconds, 1),
+            stall_seconds=exc.stall_seconds,
+            requeued_inbound_ids=list(requeued),
+            requeued_count=len(requeued),
+            reason=detail,
+        )
+    else:
+        detail = (
+            sanitize_error_text(f"{harness} harness quota exhausted: {exc}")
+            or f"{harness} harness quota exhausted"
+        )
+        logger.warning(
+            "harness turn aborted due to quota exhaustion; inputs requeued and the agent halted "
+            "until a new message",
+            event="harness_quota_exhausted",
+            agent_id=agent_id,
+            harness=harness,
+            model=bridge.model,
+            requeued_inbound_ids=list(requeued),
+            requeued_count=len(requeued),
+            reason=detail,
+        )
+    return HarnessTurnHaltedError(detail, reason=reason, requeued_inbound_ids=requeued)
 
 
 async def _handle_harness_abort(
@@ -125,7 +161,7 @@ async def _handle_harness_abort(
     projector: ReadTimelineSink,
     run: ForegroundRun,
     exc: HarnessTurnFaultedError | HarnessClosedError | HarnessSetupError,
-) -> HarnessQuotaExhaustedError | None:
+) -> HarnessTurnHaltedError | None:
     if isinstance(exc, HarnessTurnFaultedError) and exc.outcome is not None:
         log_turn_usage(ctx, agent_id, bridge.model, exc.outcome)
     if not isinstance(exc, HarnessTurnFaultedError) or exc.retire_session:
@@ -135,9 +171,10 @@ async def _handle_harness_abort(
             else "session unavailable"
         )
         await bridge.retire(reason=reason)
-    if _is_quota_exhaustion(exc) and not projector.has_delivered_output:
+    halt_reason = _halt_reason(exc)
+    if halt_reason is not None and not projector.has_delivered_output:
         projector.clear_open_turn()
-        return await _settle_quota_exhaustion(ctx, agent_id, bridge, run, exc)
+        return await _settle_halted_turn(ctx, agent_id, bridge, run, exc, halt_reason)
 
     produced_output = projector.has_activity
     marked = await run.retire_unconfirmed()
@@ -168,7 +205,15 @@ async def _run_harness_turn(
         session_id=session_of(ctx, agent_id, ctx.harness.value),
     )
     projector.clear_open_turn()
-    run = ForegroundRun(ctx, agent_id, bridge, projector, state, event_publisher)
+    run = ForegroundRun(
+        ctx,
+        agent_id,
+        bridge,
+        projector,
+        state,
+        event_publisher,
+        stall_seconds=ctx.require_agent().read("agent", "harness_turn_stall_seconds"),
+    )
     await settle_stale_interrupts(ctx, agent_id)
 
     try:
@@ -181,9 +226,9 @@ async def _run_harness_turn(
             update={**extra_updates, **interrupt_halt(exc.reason), **_CLEARED}, goto=CLAIM
         )
     except (HarnessTurnFaultedError, HarnessClosedError, HarnessSetupError) as exc:
-        quota_error = await _handle_harness_abort(ctx, agent_id, bridge, projector, run, exc)
-        if quota_error is not None:
-            raise quota_error from exc
+        halted = await _handle_harness_abort(ctx, agent_id, bridge, projector, run, exc)
+        if halted is not None:
+            raise halted from exc
         detail = (
             sanitize_error_text(f"{ctx.harness.value} harness turn aborted: {exc}")
             or f"{ctx.harness.value} harness turn aborted"

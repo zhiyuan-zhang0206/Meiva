@@ -98,8 +98,11 @@ timeline entry is written. See [transcript projection](transcript-projection.md)
 ## Reconciliation
 
 After a crash the live acknowledgements are gone. Each adapter can answer, from the harness's own
-durable record, `Reconciliation.IN_CONTEXT`, `PERSISTED_UNDELIVERED` or `NOT_FOUND` for a key. No
-harness de-duplicates, so only `NOT_FOUND` allows a re-delivery. Reading (effect) and judging (pure)
+durable record, `Reconciliation.IN_CONTEXT`, `PERSISTED_UNDELIVERED` or `NOT_FOUND` for a key. Only
+`NOT_FOUND` allows a re-delivery under the same key. Claude Code de-duplicates by uuid, silently: a user message
+whose uuid its session already holds is echoed and then dropped, with no turn and no result (observed on CLI
+2.1.322, in one process and after `--resume`). An input that must reach the model again after it was in the
+context therefore needs a key the harness has not seen (`base/agents/messages/harness_input_key.py`). Reading (effect) and judging (pure)
 are separate modules per adapter; the home directory is injected: the session derives it from its own
 environment (`CLAUDE_CONFIG_DIR` through the auth config or `HOME/.claude`, `CODEX_HOME` or `HOME/.codex`,
 `HOME` for Antigravity's `.gemini` tree) and an environment without `HOME` cannot answer. A batch of keys

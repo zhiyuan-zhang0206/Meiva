@@ -20,6 +20,7 @@ from pydantic import SecretStr
 from base.agents.recovery.breaker import (
     HALT_AFTER_CONSECUTIVE_PERMANENT_REJECTS,
     HALT_REASON_QUOTA_EXHAUSTED,
+    HALT_REASON_TURN_STALLED,
 )
 from base.db import Database
 from base.host.net.tests.local_http import closed_port_url
@@ -64,12 +65,18 @@ def _guard(**changes: Any) -> ProviderGuardConfig:
     return dataclasses.replace(base, **changes)
 
 
-def _quota_halt(conn: psycopg.Connection, *, streak: int, hours_ago: float) -> int:
+def _quota_halt(
+    conn: psycopg.Connection,
+    *,
+    streak: int,
+    hours_ago: float,
+    reason: str = HALT_REASON_QUOTA_EXHAUSTED,
+) -> int:
     agent_id = live_agent(conn)
     conn.execute(
         "UPDATE agents_meta SET permanent_reject_streak = %s, last_permanent_reject_reason = %s "
         "WHERE id = %s",
-        (streak, HALT_REASON_QUOTA_EXHAUSTED, agent_id),
+        (streak, reason, agent_id),
     )
     conn.execute(
         "UPDATE agents_meta SET status_changed_at = now() - make_interval(secs => %s) "
@@ -162,6 +169,26 @@ def test_agents_halted_by_exhausted_quota_are_counted_apart_without_a_fatal_stam
 
     assert halted_agents(24.0, database_factory=operator_database) == HaltedAgents(1, 2)
     assert halted_agents(48.0, database_factory=operator_database) == HaltedAgents(1, 3)
+
+
+# meiva:note
+# A stalled harness turn halts the agent the same way (idle, no fatal stamp, waiting for a new
+# message), so it is counted apart by its own reason and never as a provider rejection.
+def test_agents_halted_by_a_stalled_harness_turn_are_counted_apart(
+    db_conn: psycopg.Connection, operator_database: Callable[[], Database]
+) -> None:
+    stalled = HALT_REASON_TURN_STALLED
+    _quota_halt(
+        db_conn, streak=HALT_AFTER_CONSECUTIVE_PERMANENT_REJECTS, hours_ago=1, reason=stalled
+    )
+    _quota_halt(
+        db_conn, streak=HALT_AFTER_CONSECUTIVE_PERMANENT_REJECTS, hours_ago=30, reason=stalled
+    )
+    _quota_halt(db_conn, streak=HALT_AFTER_CONSECUTIVE_PERMANENT_REJECTS, hours_ago=1)
+    _halt(db_conn, streak=HALT_AFTER_CONSECUTIVE_PERMANENT_REJECTS, hours_ago=1)
+
+    assert halted_agents(24.0, database_factory=operator_database) == HaltedAgents(1, 1, 1)
+    assert halted_agents(48.0, database_factory=operator_database) == HaltedAgents(1, 1, 2)
 
 
 def test_a_database_that_cannot_be_queried_is_none_never_a_healthy_zero(

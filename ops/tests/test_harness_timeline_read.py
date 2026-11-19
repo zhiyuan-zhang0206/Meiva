@@ -20,6 +20,7 @@ from base.agents.history.transcript_timeline.sent import (
     BATCH_ROWS,
     MAX_ROWS,
     load_sent_rows,
+    sent_inputs,
 )
 from base.db import create_agent
 from base.lm.harness.claude.delivery import key_uuid
@@ -225,7 +226,7 @@ def test_a_row_far_back_among_many_is_found_by_its_id(db_conn: psycopg.Connectio
     found = load_sent_rows(
         db_conn, agent, until=newest, wanted={wire: InputRow(newest)}, wire_id=key_uuid
     )
-    assert [row.input_key for row in found.rows] == ["filler-1900"]
+    assert [row.input_keys for row in found.rows] == [("filler-1900",)]
     assert found.scanned <= MAX_ROWS
 
 
@@ -239,6 +240,34 @@ def test_the_hosts_own_input_with_fewer_rows_than_a_batch_raises_no_warning(
         db_conn, agent, until=at, wanted={"host-own": InputRow(at)}, wire_id=key_uuid
     )
     assert found.rows == [] and loguru_records.events("harness_timeline_inputs_unmatched") == []
+
+
+# meiva:note
+# A row a halted turn handed back was handed over again under a new key (task #7423), and the record holds
+# both handovers: the row is found under each key and shown with each, so neither input goes unmatched.
+def test_a_handed_back_row_is_found_under_every_key_it_was_handed_over_under(
+    db_conn: psycopg.Connection, loguru_records: LogRecords
+) -> None:
+    agent = create_agent(db_conn)
+    row = _claimed(db_conn, agent, "check the release", "inbound-1-handback-1")
+    db_conn.execute(
+        "UPDATE inbound_messages SET payload = payload || jsonb_build_object("
+        "'harness_quota_retries', 1, 'harness_handed_keys', jsonb_build_array('inbound-40')) WHERE id = %s",
+        (row,),
+    )
+    db_conn.commit()
+    at = datetime(2026, 11, 12, 8, 57, tzinfo=UTC)
+    wanted = {key_uuid("inbound-40"): InputRow(at), key_uuid("inbound-1-handback-1"): InputRow(at)}
+
+    found = load_sent_rows(db_conn, agent, until=at, wanted=wanted, wire_id=key_uuid)
+
+    assert [r.input_keys for r in found.rows] == [("inbound-40", "inbound-1-handback-1")]
+    grouped = sent_inputs(found.rows)
+    assert {key: [item.inbound_id for item in items] for key, items in grouped.items()} == {
+        "inbound-40": [row],
+        "inbound-1-handback-1": [row],
+    }
+    assert loguru_records.events("harness_timeline_inputs_unmatched") == []
 
 
 # meiva:note
@@ -258,7 +287,7 @@ def test_an_input_matched_by_its_text_ends_the_scan_at_its_batch(
         wanted={"agy:100": InputRow(at, "<USER_REQUEST>hello there</USER_REQUEST>")},
         wire_id=lambda key: key,
     )
-    assert [(row.id, row.input_key) for row in found.rows] == [(said, "agy:100")]
+    assert [(row.id, row.input_keys) for row in found.rows] == [(said, ("agy:100",))]
     assert found.scanned == BATCH_ROWS
     assert loguru_records.events("harness_timeline_inputs_unmatched") == []
 

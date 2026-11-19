@@ -216,6 +216,7 @@ class AgentSlices:
         field: Literal[
             "understanding_chunk_ratio",
             "node_stall_dump_seconds",
+            "harness_turn_stall_seconds",
             "exec_node_timeout_seconds",
             "exec_timeout_seconds",
             "llm_retry_max_total_seconds",

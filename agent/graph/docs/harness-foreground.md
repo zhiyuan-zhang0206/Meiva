@@ -76,9 +76,10 @@ remain separate lifecycle commands and can still interrupt a graph invocation.
 ## Inputs handed over and never acknowledged
 
 A failure, an interrupt, a host abort or a restart can leave rows `claimed` that the harness never reported as in
-its context. No harness de-duplicates, so such a row is delivered again only when the harness's own durable
-record (Claude's transcript, Codex's rollout, Antigravity's message-queue files) shows it is not there, and
-nothing is guessed when the record cannot tell. `bridge.reconcile(keys)` reads the record once and answers, per
+its context. Such a row is delivered again only when the harness's own durable record (Claude's transcript,
+Codex's rollout, Antigravity's message-queue files) shows it is not there, and nothing is guessed when the record
+cannot tell. Re-delivering a row the record already holds would not be a harmless duplicate: Claude Code drops a
+user message whose uuid its session already holds, after echoing it (see [halted turns](#halted-turns) below). `bridge.reconcile(keys)` reads the record once and answers, per
 input, `IN_CONTEXT`, `PERSISTED_UNDELIVERED`, `NOT_FOUND` or `UNKNOWN`; `plan_reconciliation` (pure, in
 `claim/harness_foreground.py`) turns the answers into one decision per input:
 
@@ -142,6 +143,32 @@ SIGKILLing the host process while a Claude Code, Codex and Antigravity session w
 four seconds, `agy`'s `start_new_session` notwithstanding). The session record keeps no pid and the host does
 not wait for the old process before it resumes, so a CLI that survives its host (stuck in a tool, for instance)
 is not detected; the facts above are the whole protection, and no process registry was added for it.
+
+## Halted turns
+
+A turn that stops before it delivered a reply halts the agent instead of failing it: the harness ran out of quota
+(HTTP 429, a usage limit), or the turn stalled, no event from the harness for the agent's
+`harness_turn_stall_seconds` (default 15 minutes) while an input it was handed or a turn it began was still
+unsettled. Nothing in the protocol ends such a wait otherwise: the host's progress tick only says that the host
+process is alive, and `harness_turn` is exempt from the node stall probe. The stall clock is the last event read
+or the last handover; an event being written or waiting to be read counts as heard.
+
+Both settle the same way (`harness_turn.py::_settle_halted_turn`, `harness_inbox.py::settle_halted_turn`): the
+session is retired (a stalled CLI cannot act on the inputs later), the turn's rows, those already marked done by
+an echo included, go back to `pending` with their handback counted (`harness_quota_retries` in the payload), and
+the recovery breaker halts the agent in the same transaction with the reason `quota_exhausted` or `turn_stalled`.
+The alert is the turn's Error event, the anomaly event (`harness_quota_exhausted` / `harness_turn_stalled`), the
+`recovery halted` line of `meiva agents get`, and health-probe check 10, which counts each reason apart. A new chat
+resumes the agent (`breaker.py::admit_pending_wake`); the handed-back rows ride with it. A stall after the turn
+already delivered output is an ordinary failed turn (`FatalLLMStreamError`): its rows are not sent twice.
+
+A handed-back row is handed over again under a new key, `inbound-<id>-handback-<n>`
+(`base/agents/messages/harness_input_key.py`). Its first key is in the harness's record already, and Claude Code
+drops a user message whose uuid (derived from the key) it already holds: it echoes the message, so the turn
+opens and the row is settled as in the context, and then runs no turn and sends no result. On 2026-11-19 that
+held 11 agents in a turn that never ended for 47 minutes, with every message behind the dropped one stuck
+(task #7423); a row that was never handed back keeps `inbound-<id>`. The keys a row was handed over under before each handback stay
+on it (`harness_handed_keys`), so the timeline still finds the row under the earlier handover the record holds.
 
 Parent: [Harness turn](harness-turn.md).
 

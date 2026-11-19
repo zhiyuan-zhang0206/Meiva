@@ -21,9 +21,14 @@ from agent.graph.hooks.user_delivery import delivery_end_reminder
 from agent.messages.reply_visibility import reply_visibility_note
 from agent.ownership.inbound import lock_inbound_owner
 from base.agents.context import MeivaContext
+from base.agents.messages.harness_input_key import (
+    HANDBACK_COUNT_FIELD,
+    HANDED_KEYS_FIELD,
+    INPUT_KEY_FIELD,
+)
 from base.agents.messages.inbound import PASSIVE_INBOUND_KEY, InboundKind, not_passive_inbound
 from base.agents.messages.kwargs import NoteTag
-from base.agents.recovery.breaker import QUOTA_RETRY_COUNT_FIELD, record_quota_halt
+from base.agents.recovery.breaker import record_harness_halt
 from base.db.rows import IdRow, aquery_all
 from base.db.transaction import async_write_transaction
 from base.lm.harness import ReconciliationUnavailableError
@@ -35,13 +40,6 @@ DELIVERABLE_INBOUND_KINDS = (
     InboundKind.SYSTEM_NOTE.value,
     InboundKind.HEARTBEAT.value,
 )
-
-# meiva:note
-# The payload field that names the one harness input a claimed row rides in, written when a batch of
-# several rows is handed over as one input, so a later run can rebuild the group before it asks the
-# harness's record about the input's key.
-# meiva:link agent/graph/docs/harness-foreground.md
-INPUT_KEY_FIELD = "harness_input_key"
 
 _COLUMNS: LiteralString = "id,agent_id,content,kind,source,payload,created_at,claimed_at"
 
@@ -225,18 +223,26 @@ async def requeue_handed(ctx: MeivaContext, agent_id: int, handed: Sequence[Hand
 
 
 # meiva:note
-# On a quota/rate-limit abort with no model reply delivered yet, return the affected rows (whether still
-# claimed or prematurely marked done by InputInContext) to `pending`, counting the attempt on each row
-# (`QUOTA_RETRY_COUNT_FIELD`), and halt the agent's automatic recovery in the same transaction: the agent
-# stops, nothing wakes it again for these rows, and a new message resumes it with them
-# (`base/agents/recovery/breaker.py::admit_pending_wake`). Returns the requeued ids, in handed order.
-async def settle_quota_abort(
-    ctx: MeivaContext, agent_id: int, handed: Sequence[Handed]
+# A harness turn that stopped with no model reply delivered yet (`HARNESS_HALT_REASONS` in
+# `base/agents/recovery/breaker.py`: an exhausted quota, a stalled turn): return the affected rows
+# (whether still claimed or already marked done by InputInContext) to `pending`, counting the
+# handback on each row (`HANDBACK_COUNT_FIELD`, which also gives the row a key the harness has not
+# recorded: `base/agents/messages/harness_input_key.py`) and keeping the key it was handed over under
+# (`HANDED_KEYS_FIELD`, so the harness's record still finds the row), and halt the agent's automatic recovery in
+# the same transaction: the agent stops, nothing wakes it again for these rows, and a new message
+# resumes it with them (`base/agents/recovery/breaker.py::admit_pending_wake`). Returns the requeued
+# ids, in handed order.
+async def settle_halted_turn(
+    ctx: MeivaContext, agent_id: int, handed: Sequence[Handed], *, reason: str
 ) -> tuple[int, ...]:
     pool = ctx.ops_pool
     if pool is None:
         return ()
-    ids = list(dict.fromkeys(i for h in handed for i in h.row_ids))
+    keys: dict[int, str] = {}
+    for entry in handed:
+        for row_id in entry.row_ids:
+            _ = keys.setdefault(row_id, entry.key)
+    ids = list(keys)
     requeued_ids: tuple[int, ...] = ()
     async with async_write_transaction(pool) as conn:
         await lock_inbound_owner(conn, agent_id, incarnation=ctx.original_incarnation)
@@ -244,28 +250,36 @@ async def settle_quota_abort(
             rows = await aquery_all(
                 conn,
                 IdRow,
-                "UPDATE inbound_messages SET status='pending', claimed_at=NULL, "
-                "payload = (COALESCE(payload, '{}'::jsonb) - %s) || jsonb_build_object("
+                "UPDATE inbound_messages m SET status='pending', claimed_at=NULL, "
+                "payload = (COALESCE(m.payload, '{}'::jsonb) - %s) || jsonb_build_object("
                 "  %s::text, "
-                "  CASE WHEN COALESCE(payload->>%s, '') ~ '^[0-9]+$' "
-                "  THEN (payload->>%s)::int + 1 ELSE 1 END"
+                "  CASE WHEN COALESCE(m.payload->>%s, '') ~ '^[0-9]+$' "
+                "  THEN (m.payload->>%s)::int + 1 ELSE 1 END, "
+                "  %s::text, "
+                "  CASE WHEN jsonb_typeof(m.payload->%s) = 'array' "
+                "  THEN m.payload->%s ELSE '[]'::jsonb END || to_jsonb(k.key)"
                 ") "
-                "WHERE agent_id=%s AND id=ANY(%s) AND kind=ANY(%s) "
-                "AND status IN ('pending', 'claimed', 'done') "
-                "RETURNING id",
+                "FROM unnest(%s::bigint[], %s::text[]) AS k(id, key) "
+                "WHERE m.id=k.id AND m.agent_id=%s AND m.kind=ANY(%s) "
+                "AND m.status IN ('pending', 'claimed', 'done') "
+                "RETURNING m.id",
                 (
                     INPUT_KEY_FIELD,
-                    QUOTA_RETRY_COUNT_FIELD,
-                    QUOTA_RETRY_COUNT_FIELD,
-                    QUOTA_RETRY_COUNT_FIELD,
-                    agent_id,
+                    HANDBACK_COUNT_FIELD,
+                    HANDBACK_COUNT_FIELD,
+                    HANDBACK_COUNT_FIELD,
+                    HANDED_KEYS_FIELD,
+                    HANDED_KEYS_FIELD,
+                    HANDED_KEYS_FIELD,
                     ids,
+                    [keys[i] for i in ids],
+                    agent_id,
                     list(DELIVERABLE_INBOUND_KINDS),
                 ),
             )
             requeued_set = {row.id for row in rows}
             requeued_ids = tuple(row_id for row_id in ids if row_id in requeued_set)
-        await record_quota_halt(conn, agent_id)
+        await record_harness_halt(conn, agent_id, reason)
     return requeued_ids
 
 

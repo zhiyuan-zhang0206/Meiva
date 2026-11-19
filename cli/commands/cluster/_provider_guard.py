@@ -24,6 +24,8 @@ from base.agents.context.clients import DatabaseFactory
 from base.agents.recovery.breaker import (
     HALT_AFTER_CONSECUTIVE_PERMANENT_REJECTS,
     HALT_REASON_QUOTA_EXHAUSTED,
+    HALT_REASON_TURN_STALLED,
+    HARNESS_HALT_REASONS,
 )
 from base.config import ConfigBoot
 from cli.boundary.json_body import response_value
@@ -124,16 +126,18 @@ def fetch_balance(url: str, key: str, timeout_s: float) -> BalancePayload | Bala
 class _Counts:
     rejected: int
     quota: int
+    stalled: int
 
 
 # meiva:note
-# Count agents halted inside the window, permanent rejections and quota exhaustion apart.
+# Count agents halted inside the window, permanent rejections and each harness halt reason apart.
 #
 # `permanent_reject_streak >= HALT_AFTER_CONSECUTIVE_PERMANENT_REJECTS` is the recovery
 # breaker's durable "halted" flag and the single source of truth for the state (task #3617);
-# `last_permanent_reject_reason` tells a quota halt from a rejection. A rejection is a fatal
-# turn, so `last_turn_fatal_at` bounds it to the active wave. A quota halt leaves the agent idling
-# without a fatal stamp (the reaper must not take it), so the moment it went idle,
+# `last_permanent_reject_reason` tells a harness halt (an exhausted quota, a stalled turn) from a
+# rejection. A rejection is a fatal turn, so `last_turn_fatal_at` bounds it to the active wave. A
+# harness halt leaves the agent idling without a fatal stamp (the reaper must not take it), so the
+# moment it went idle,
 # `status_changed_at`, bounds it instead; the agent stays in that status until a new message
 # admits a turn. A completed turn clears the streak and the reason in one statement, so the
 # readings stay coherent. None when the query cannot run: the check reports "cannot judge" and
@@ -146,15 +150,20 @@ def halted_agents(window_hours: float, *, database_factory: DatabaseFactory) -> 
             conn.cursor(row_factory=class_row(_Counts)) as cur,
         ):
             cur.execute(
-                "SELECT count(*) FILTER (WHERE last_permanent_reject_reason IS DISTINCT FROM %s"
-                "   AND last_turn_fatal_at > now() - make_interval(secs => %s)) AS rejected,"
+                "SELECT count(*) FILTER (WHERE NOT (COALESCE(last_permanent_reject_reason, '')"
+                "   = ANY(%s)) AND last_turn_fatal_at > now() - make_interval(secs => %s))"
+                "   AS rejected,"
                 " count(*) FILTER (WHERE last_permanent_reject_reason = %s"
-                "   AND status_changed_at > now() - make_interval(secs => %s)) AS quota"
+                "   AND status_changed_at > now() - make_interval(secs => %s)) AS quota,"
+                " count(*) FILTER (WHERE last_permanent_reject_reason = %s"
+                "   AND status_changed_at > now() - make_interval(secs => %s)) AS stalled"
                 " FROM agents_meta WHERE permanent_reject_streak >= %s",
                 (
-                    HALT_REASON_QUOTA_EXHAUSTED,
+                    list(HARNESS_HALT_REASONS),
                     window_s,
                     HALT_REASON_QUOTA_EXHAUSTED,
+                    window_s,
+                    HALT_REASON_TURN_STALLED,
                     window_s,
                     HALT_AFTER_CONSECUTIVE_PERMANENT_REJECTS,
                 ),
@@ -162,4 +171,4 @@ def halted_agents(window_hours: float, *, database_factory: DatabaseFactory) -> 
             row = cur.fetchone()
     except (psycopg.Error, OSError):
         return None
-    return HaltedAgents(row.rejected, row.quota) if row is not None else None
+    return HaltedAgents(row.rejected, row.quota, row.stalled) if row is not None else None

@@ -88,6 +88,19 @@ class HarnessQuotaExhausted(TypedDict):
     reason: str
 
 
+# meiva:note
+# Telemetry payload emitted by agent/graph/claim/harness_turn.py when a harness turn stalled: no event
+# for `silent_seconds`, past the agent's `harness_turn_stall_seconds` (`stall_seconds`).
+class HarnessTurnStalled(TypedDict):
+    harness: str
+    model: str | None
+    silent_seconds: float
+    stall_seconds: float
+    requeued_inbound_ids: list[int]
+    requeued_count: int
+    reason: str
+
+
 EVENTS: dict[str, EventSpec] = {
     # node / process lifecycle
     "node_enter": telemetry_event(
@@ -345,6 +358,14 @@ EVENTS: dict[str, EventSpec] = {
         "an external harness turn aborted on quota exhaustion or rate limit before delivering a reply; "
         "triggering inbox messages were returned to pending and the agent halted until a new message",
         payload=HarnessQuotaExhausted,
+        tier="anomaly",
+    ),
+    "harness_turn_stalled": telemetry_event(
+        "harness_turn_stalled",
+        "an external harness sent no event past the stall threshold while an input or a turn was "
+        "unsettled; the session was retired, unanswered inbox messages were returned to pending and "
+        "the agent halted until a new message",
+        payload=HarnessTurnStalled,
         tier="anomaly",
     ),
     "turn_failure_timing_read_failed": telemetry_event(

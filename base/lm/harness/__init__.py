@@ -6,6 +6,7 @@ from base.lm.harness.bridge import (
     HarnessNotDeliveredError,
     HarnessSetupError,
     HarnessTurnFaultedError,
+    HarnessTurnStalledError,
     fault_of_event,
 )
 from base.lm.harness.delivery import (
@@ -108,6 +109,7 @@ __all__ = [
     "HarnessSetupError",
     "HarnessTurn",
     "HarnessTurnFaultedError",
+    "HarnessTurnStalledError",
     "ImageBlock",
     "InputBlock",
     "InputInContext",

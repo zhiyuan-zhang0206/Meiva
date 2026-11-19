@@ -49,13 +49,17 @@ class LLMRetryBudgetExceededError(FatalLLMStreamError):
 
 
 # meiva:note
-# External harness turn aborted due to quota exhaustion or rate limiting, its inputs back in the
-# queue and the agent halted until a new message. Subclasses FatalLLMStreamError so graph/runloop
-# abort paths settle the turn with diagnostics, while the agent idles instead of becoming a crash
-# corpse.
-class HarnessQuotaExhaustedError(FatalLLMStreamError):
-    def __init__(self, message: str, *, requeued_inbound_ids: tuple[int, ...] = ()) -> None:
+# External harness turn that stopped before it delivered a reply, its inputs back in the queue and the
+# agent halted until a new message. `reason` is the breaker's stored halt reason
+# (`base/agents/recovery/breaker.py::HARNESS_HALT_REASONS`: an exhausted quota, a stalled turn).
+# Subclasses FatalLLMStreamError so graph/runloop abort paths settle the turn with diagnostics and the
+# turn's Error event, while the agent idles instead of becoming a crash corpse.
+class HarnessTurnHaltedError(FatalLLMStreamError):
+    def __init__(
+        self, message: str, *, reason: str, requeued_inbound_ids: tuple[int, ...] = ()
+    ) -> None:
         super().__init__(message)
+        self.reason = reason
         self.requeued_inbound_ids = requeued_inbound_ids
 
 

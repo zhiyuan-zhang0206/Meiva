@@ -1,8 +1,9 @@
 # meiva:note
-# One permanent provider rejection, or one external-harness quota exhaustion, stops background wakes.
-# A fresh chat, an operator restart or explicit operator resurrection may try again after a fix (a
-# quota reset, a top-up); successful model progress clears the durable halt. No reset time is read
-# from the provider and no timer resumes the agent. No billing batch recovery is provided.
+# One permanent provider rejection, or one external-harness turn halted without an answer (quota
+# exhaustion, a stalled turn), stops background wakes. A fresh chat, an operator restart or explicit
+# operator resurrection may try again after a fix (a quota reset, a top-up); successful model progress
+# clears the durable halt. No reset time is read from the provider and no timer resumes the agent. No
+# billing batch recovery is provided.
 
 from __future__ import annotations
 
@@ -13,6 +14,7 @@ import psycopg
 from psycopg.rows import class_row
 from psycopg_pool import AsyncConnectionPool
 
+from base.agents.messages.harness_input_key import HANDBACK_COUNT_FIELD
 from base.db.protocols import AsyncConnectionLike, AsyncPool
 from base.db.rows import aquery_one
 from base.db.transaction import async_write_transaction
@@ -30,15 +32,13 @@ HALT_SUPPRESSION_WINDOW_S = 3650 * 24 * 3600.0
 PERMANENT_REJECT_REASON_BILLING: Final = "billing"
 
 # meiva:note
-# Stored halt reason for an external harness turn that aborted on quota exhaustion / HTTP 429
-# before it delivered anything (`agent/graph/claim/harness_inbox.py::settle_quota_abort`).
+# Stored halt reasons for an external harness turn that stopped before it delivered anything, its
+# inputs handed back to the queue (`agent/graph/claim/harness_inbox.py::settle_halted_turn`): the
+# harness ran out of quota (HTTP 429 / usage limit), or the turn stalled, no harness event within
+# the agent's `harness_turn_stall_seconds`.
 HALT_REASON_QUOTA_EXHAUSTED: Final = "quota_exhausted"
-
-# meiva:note
-# The inbound payload key counting the quota-aborted turns a row was handed to. A row that carries
-# it was already tried by the halted agent, so it is never the fresh input that resumes it: a turn
-# that failed on it again would otherwise re-arm the agent for the same row, forever.
-QUOTA_RETRY_COUNT_FIELD: Final = "harness_quota_retries"
+HALT_REASON_TURN_STALLED: Final = "turn_stalled"
+HARNESS_HALT_REASONS: Final = (HALT_REASON_QUOTA_EXHAUSTED, HALT_REASON_TURN_STALLED)
 
 _COUNT_REJECTED_TURN: LiteralString = (
     "UPDATE agents_meta SET permanent_reject_streak = permanent_reject_streak + 1, "
@@ -79,16 +79,16 @@ async def record_permanent_reject_turn(
 
 
 # meiva:note
-# Halt an agent whose harness ran out of quota, inside the caller's transaction (the one that
-# requeues the aborted turn's rows, so the rows are never pending on an agent that is not halted).
-# The same streak as a permanent rejection, and the same way out: a fresh chat or an operator
-# restart (`admit_pending_wake`), then a completed turn. No wake window is written.
-async def record_quota_halt(conn: psycopg.AsyncConnection, agent_id: int) -> None:
-    row = await aquery_one(
-        conn, _StreakRow, _COUNT_REJECTED_TURN, (HALT_REASON_QUOTA_EXHAUSTED, agent_id)
-    )
+# Halt an agent whose harness turn stopped without an answer (`HARNESS_HALT_REASONS`), inside the
+# caller's transaction (the one that requeues the turn's rows, so the rows are never pending on an
+# agent that is not halted). The same streak as a permanent rejection, and the same way out: a fresh
+# chat or an operator restart (`admit_pending_wake`), then a completed turn. No wake window is written.
+async def record_harness_halt(conn: psycopg.AsyncConnection, agent_id: int, reason: str) -> None:
+    if reason not in HARNESS_HALT_REASONS:
+        raise ValueError(f"unknown harness halt reason {reason!r}")
+    row = await aquery_one(conn, _StreakRow, _COUNT_REJECTED_TURN, (reason, agent_id))
     if row is None:
-        raise RuntimeError(f"agent {agent_id} disappeared while recording a quota halt")
+        raise RuntimeError(f"agent {agent_id} disappeared while recording a {reason} halt")
 
 
 async def halt_automatic_recovery(pool: AsyncConnectionPool, agent_id: int) -> bool:
@@ -157,8 +157,8 @@ class _HaltRow:
 
 # meiva:note
 # Keep background inputs halted; a fresh peer/user chat or an operator restart can retry.
-# Fresh means written after the halt and not yet tried: a row a quota abort put back in the queue
-# (`QUOTA_RETRY_COUNT_FIELD`) waits for the next fresh chat and is then delivered with it.
+# Fresh means written after the halt and not yet tried: a row a halted turn put back in the queue
+# (`HANDBACK_COUNT_FIELD`) waits for the next fresh chat and is then delivered with it.
 #
 # The grant does not clear the streak: only a turn that actually makes progress does
 # (`agent/graph/claim/turn_stamp.py::persist_last_active`), so the breaker keeps its meaning —
@@ -190,7 +190,7 @@ async def admit_pending_wake(pool: AsyncPool, agent_id: int) -> bool:
                 "AND i.source<>'system' AND i.source NOT LIKE 'system:%%' "
                 "AND i.created_at>COALESCE(m.last_turn_fatal_at,m.status_changed_at) "
                 "AND NOT (COALESCE(i.payload,'{}'::jsonb) ? %s) LIMIT 1",
-                (agent_id, QUOTA_RETRY_COUNT_FIELD),
+                (agent_id, HANDBACK_COUNT_FIELD),
             )
         ).fetchone()
         if fresh is None:

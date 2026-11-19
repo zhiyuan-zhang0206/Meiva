@@ -351,6 +351,7 @@ family-modules = [
 [clock-lattice.independent-clocks]
 "meiva_builtins/plugins/lm_anthropic/provider.py::_CLAUDE_EXTENDED_THINKING_DEFAULT_BUDGET" = "LLM thinking-token budget, not a wall-clock constant"
 "base/agents/observation/ended_with.py::BUDGET" = "the turn-end value 'budget', not a clock: the string a turn_end record carries when a budget rail (a truncated stream or an exhausted retry budget) ended the turn"
+"base/agents/recovery/breaker.py::HALT_REASON_TURN_STALLED" = "the stored halt reason 'turn_stalled' (a string in agents_meta.last_permanent_reject_reason), not a clock; the stall threshold is the agent setting harness_turn_stall_seconds"
 "base/daemon/schedules/watcher.py::AT_SESSION_TTL_GRACE_SECONDS" = "independent: the at-watcher session's post-fire reclamation window (wake delivery + exit-notice latency); the TTL reaper's poll cadence only delays the kill beyond it — no lattice neighbour and no ordering safety depends on this value"
 "base/events/contract.py::DELIVERY_STALLED_KEYS" = "SQL key set for the delivery_stalled view, not a clock"
 "base/events/live/redis_listener.py::_CONSUME_ABANDON_GRACE" = "independent: pubsub consume-abandon window, no lattice neighbour"

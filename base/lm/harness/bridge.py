@@ -85,6 +85,20 @@ class HarnessClosedError(RuntimeError):
 
 
 # meiva:note
+# The harness sent nothing for longer than the agent's `harness_turn_stall_seconds` while an input it
+# was handed or a turn it began was still unsettled. Nothing in the protocol ends such a wait: a CLI
+# that took an input without acting on it (Claude Code drops a user message whose uuid it already
+# holds, after echoing it) or hung mid-turn would hold the invocation forever, the agent showing as
+# running. The session is retired, so a CLI that is still alive cannot act on the inputs later.
+# meiva:link agent/graph/docs/harness-foreground.md
+class HarnessTurnStalledError(HarnessTurnFaultedError):
+    def __init__(self, message: str, *, silent_seconds: float, stall_seconds: float) -> None:
+        super().__init__(message, retire_session=True, retire_reason="turn stalled")
+        self.silent_seconds = silent_seconds
+        self.stall_seconds = stall_seconds
+
+
+# meiva:note
 # A turn that never got a session, or that the session refused to accept. It is a
 # different failure from a turn that died mid-flight: nothing was sent, so there is no
 # half-written transcript to reconcile — but from the graph's side both mean the same

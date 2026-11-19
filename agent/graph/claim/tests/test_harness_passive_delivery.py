@@ -1,5 +1,7 @@
 # meiva:note
-# Passive inbox rows must not prevent control claims or bypass non-passive FIFO input.
+# Passive inbox rows must not prevent control claims or bypass non-passive FIFO input. A harness turn
+# that stops without a reply (an exhausted quota, a stalled turn) hands its rows back and halts the
+# agent, and a handed-back row is handed over again under a key the harness has not recorded.
 # meiva:link agent/graph/docs/harness-foreground.md
 
 import asyncio
@@ -13,12 +15,12 @@ from langgraph.runtime import Runtime
 from psycopg_pool import AsyncConnectionPool
 
 from agent.db import claim_inbound_batch
-from agent.graph.claim.harness_inbox import INPUT_KEY_FIELD
 from agent.graph.claim.harness_turn import harness_turn_node
 from agent.graph.claim.tests.harness_support import (
     FakeEngine,
     RuntimeFixture,
     completed,
+    in_a_turn,
     input_key,
     insert_row,
     row_status,
@@ -27,16 +29,24 @@ from agent.graph.claim.tests.harness_support import (
 from agent.graph.claim.tests.harness_support import harness_runtime as harness_runtime
 from agent.graph.claim.tests.harness_support import hosted_resources as hosted_resources
 from agent.graph.claim.tests.test_harness_turn import config
-from agent.graph.llm_errors import FatalLLMStreamError, HarnessQuotaExhaustedError
+from agent.graph.llm_errors import FatalLLMStreamError, HarnessTurnHaltedError
 from agent.ownership.tests.ownership_support import admit_owner, agent_row
 from agent.state import AgentState
+from base.agents.context import MeivaContext
+from base.agents.messages.harness_input_key import (
+    HANDBACK_COUNT_FIELD,
+    HANDED_KEYS_FIELD,
+    INPUT_KEY_FIELD,
+)
 from base.agents.recovery.breaker import (
     HALT_REASON_QUOTA_EXHAUSTED,
-    QUOTA_RETRY_COUNT_FIELD,
+    HALT_REASON_TURN_STALLED,
     SUPPRESS_REASON_PERMANENT_REJECT,
 )
 from base.api_contracts.agent_contract import Harness
+from base.config.tests.configuration import defaults
 from base.db.code_version_gate import ProcessDbGate
+from base.host.env.agent_slices import AgentSlices
 from base.lm.harness import (
     BridgeEvent,
     HarnessInput,
@@ -204,7 +214,7 @@ def _assert_requeued_pending(
         assert claimed_at is None
         assert payload is not None
         assert INPUT_KEY_FIELD not in payload
-        assert payload[QUOTA_RETRY_COUNT_FIELD] == expected_retries
+        assert payload[HANDBACK_COUNT_FIELD] == expected_retries
 
 
 def _error_turn(
@@ -265,7 +275,7 @@ async def test_quota_abort_after_input_in_context_requeues_rows_and_halts_the_ag
         ]
 
     rt = harness_runtime(FakeEngine(script=script), agent_id=agent_id)
-    with pytest.raises(HarnessQuotaExhaustedError) as failed:
+    with pytest.raises(HarnessTurnHaltedError) as failed:
         await harness_turn_node(AgentState(), rt, config(agent_id))
 
     exc = failed.value
@@ -287,9 +297,9 @@ async def test_repeated_quota_abort_before_input_in_context_counts_each_attempt(
     agent_id = agent_row(db_conn)
     chat_id = insert_row(db_conn, agent_id, "chat", "user", "retry me carefully")
 
-    def script(_inputs: Sequence[HarnessInput]) -> Sequence[BridgeEvent]:
+    def script(inputs: Sequence[HarnessInput]) -> Sequence[BridgeEvent]:
         return [
-            TurnStarted("t1", TurnOrigin.INPUT, (input_key(chat_id),), 1),
+            TurnStarted("t1", TurnOrigin.INPUT, tuple(item.key for item in inputs), 1),
             _error_turn(
                 "t1",
                 api_error_status=429,
@@ -298,15 +308,18 @@ async def test_repeated_quota_abort_before_input_in_context_counts_each_attempt(
             ),
         ]
 
+    keys = {1: input_key(chat_id), 2: f"{input_key(chat_id)}-handback-1"}
     for attempt in (1, 2):
         engine = FakeEngine(script=script)
-        engine.records = {input_key(chat_id): Reconciliation.UNKNOWN}
+        engine.records = {keys[attempt]: Reconciliation.UNKNOWN}
         base_rt = harness_runtime(engine, agent_id=agent_id)
         rt = replace(base_rt, context=replace(base_rt.context, harness=Harness.CLAUDE_CODE))
 
-        with pytest.raises(HarnessQuotaExhaustedError) as failed:
+        with pytest.raises(HarnessTurnHaltedError) as failed:
             await harness_turn_node(AgentState(), rt, config(agent_id))
 
+        assert [key for _text, key in engine.submitted] == [keys[attempt]]
+        assert failed.value.reason == HALT_REASON_QUOTA_EXHAUSTED
         assert failed.value.requeued_inbound_ids == (chat_id,)
         _assert_requeued_pending(db_conn, (chat_id,), expected_retries=attempt)
         assert _halt(db_conn, agent_id) == (attempt, HALT_REASON_QUOTA_EXHAUSTED, None)
@@ -331,7 +344,7 @@ async def test_quota_abort_on_setup_error_preserves_unclaimed_deliverables(
     base_rt = harness_runtime(engine, agent_id=agent_id)
     rt = replace(base_rt, context=replace(base_rt.context, harness=Harness.CODEX))
 
-    with pytest.raises(HarnessQuotaExhaustedError) as failed:
+    with pytest.raises(HarnessTurnHaltedError) as failed:
         await harness_turn_node(AgentState(), rt, config(agent_id))
 
     assert failed.value.requeued_inbound_ids == (chat_id,)
@@ -377,7 +390,7 @@ async def test_quota_abort_only_requeues_failed_turn_after_earlier_turn_succeede
     row2_holder.append(row2)
     engine.notify_inbound()
 
-    with pytest.raises(HarnessQuotaExhaustedError) as failed:
+    with pytest.raises(HarnessTurnHaltedError) as failed:
         await asyncio.wait_for(node_task, 20)
 
     assert failed.value.requeued_inbound_ids == (row2_holder[0],)
@@ -404,7 +417,7 @@ async def test_non_quota_error_after_input_in_context_stays_done_and_raises_fata
     with pytest.raises(FatalLLMStreamError) as failed:
         await harness_turn_node(AgentState(), rt, config(agent_id))
 
-    assert not isinstance(failed.value, HarnessQuotaExhaustedError)
+    assert not isinstance(failed.value, HarnessTurnHaltedError)
     assert row_status(db_conn, chat_id) == "done"
     assert _halt(db_conn, agent_id) == (0, None, None)
 
@@ -442,7 +455,7 @@ async def test_quota_abort_adds_to_an_active_permanent_reject_halt_and_keeps_its
         ]
 
     rt = harness_runtime(ConcurrentRejectEngine(script=script), agent_id=agent_id)
-    with pytest.raises(HarnessQuotaExhaustedError):
+    with pytest.raises(HarnessTurnHaltedError):
         await harness_turn_node(AgentState(), rt, config(agent_id))
 
     assert row_status(db_conn, chat_id) == "pending"
@@ -451,3 +464,141 @@ async def test_quota_abort_adds_to_an_active_permanent_reject_halt_and_keeps_its
         HALT_REASON_QUOTA_EXHAUSTED,
         SUPPRESS_REASON_PERMANENT_REJECT,
     )
+
+
+# meiva:note
+# Task #7423, 2026-11-19: rows a quota abort returned to the queue were handed to the resumed Claude
+# Code CLI under the key they first had, so under a uuid the CLI already held. The CLI echoes such a
+# message and then drops it: no turn, no result. The foreground waited for the turn forever, the
+# agent showed as running, and everything queued behind it was stuck. `DedupingEngine` answers the
+# way that CLI does: an input under a key it has not recorded starts a turn (the first one runs out
+# of quota when `quota_first`); an input under a key it recorded is echoed and nothing follows.
+class DedupingEngine(FakeEngine):
+    def __init__(self, *, quota_first: bool = False) -> None:
+        super().__init__(script=self._answer)
+        self.recorded: set[str] = set()
+        self._quota_first = quota_first
+        self._turns = 0
+
+    def _answer(self, inputs: Sequence[HarnessInput]) -> Sequence[BridgeEvent]:
+        keys = [item.key for item in inputs]
+        self._turns += 1
+        turn_id = f"t{self._turns}"
+        echo = [
+            TurnStarted(turn_id, TurnOrigin.INPUT, tuple(keys), 1),
+            *(InputInContext(key, turn_id, 1) for key in keys),
+        ]
+        if any(key in self.recorded for key in keys):
+            return echo
+        self.recorded.update(keys)
+        if self._quota_first and self._turns == 1:
+            limit = "You've hit your weekly limit · resets Nov 23 at 2pm (UTC)"
+            quota = _error_turn(
+                turn_id, api_error_status=429, error_code="rate_limit", errors=(limit,)
+            )
+            return [*echo, quota]
+        return in_a_turn(keys, "MEIVA_HIDE_FROM_USER\ndone", turn_id=turn_id)
+
+
+def _with_stall_seconds(rt: Runtime[MeivaContext], seconds: float) -> Runtime[MeivaContext]:
+    agent = AgentSlices.resolve({"harness_turn_stall_seconds": seconds}, default_reader=defaults())
+    return replace(rt, context=replace(rt.context, agent=agent))
+
+
+# meiva:note
+# The incident at the foreground: the input enters the context, the quota runs out, the row goes back
+# to the queue; the next run (a resurrect, a new message, or the ordinary delivery loop taking the row
+# again) hands it over under a key the CLI has not recorded, so the CLI runs a turn. Under the old key
+# the second run stalls instead.
+async def test_a_handed_back_row_is_handed_over_under_a_new_key_and_starts_a_turn(
+    db_conn: psycopg.Connection,
+    harness_runtime: RuntimeFixture,
+) -> None:
+    agent_id = agent_row(db_conn)
+    chat_id = insert_row(db_conn, agent_id, "chat", "user", "check the release")
+    engine = DedupingEngine(quota_first=True)
+    rt = _with_stall_seconds(harness_runtime(engine, agent_id=agent_id), 5.0)
+
+    with pytest.raises(HarnessTurnHaltedError) as halted:
+        await harness_turn_node(AgentState(), rt, config(agent_id))
+    assert halted.value.reason == HALT_REASON_QUOTA_EXHAUSTED
+    _assert_requeued_pending(db_conn, (chat_id,), expected_retries=1)
+    payload, _claimed_at = _row_meta(db_conn, chat_id)
+    assert payload is not None and payload[HANDED_KEYS_FIELD] == [input_key(chat_id)]
+
+    later = insert_row(db_conn, agent_id, "chat", "user", "the quota is reset, go on")
+    _ = await harness_turn_node(AgentState(), rt, config(agent_id))
+
+    first, second = engine.delivered
+    assert [item.key for item in first] == [input_key(chat_id)]
+    assert [item.key for item in second] == [f"{input_key(chat_id)}-handback-1"]
+    assert [row_status(db_conn, i) for i in (chat_id, later)] == ["done", "done"]
+
+
+# meiva:note
+# Whatever leaves a turn with nothing more to say (here the same dropped input), no event within
+# `harness_turn_stall_seconds` ends it: the session is retired, the inputs go back to the queue
+# counted, the agent halts with `turn_stalled`, and the warning names it.
+async def test_a_turn_with_no_event_past_the_threshold_halts_and_hands_its_inputs_back(
+    db_conn: psycopg.Connection,
+    harness_runtime: RuntimeFixture,
+    loguru_records: LogRecords,
+) -> None:
+    agent_id = agent_row(db_conn)
+    chat_id = insert_row(db_conn, agent_id, "chat", "user", "are you there")
+    engine = DedupingEngine()
+    engine.recorded.add(input_key(chat_id))
+    rt = _with_stall_seconds(harness_runtime(engine, agent_id=agent_id), 0.5)
+
+    async with asyncio.timeout(10):
+        with pytest.raises(HarnessTurnHaltedError) as halted:
+            await harness_turn_node(AgentState(), rt, config(agent_id))
+
+    assert halted.value.reason == HALT_REASON_TURN_STALLED
+    assert halted.value.requeued_inbound_ids == (chat_id,)
+    assert "turn stalled" in engine.retired
+    _assert_requeued_pending(db_conn, (chat_id,), expected_retries=1)
+    assert _halt(db_conn, agent_id) == (1, HALT_REASON_TURN_STALLED, None)
+    (warning,) = loguru_records.extras(event="harness_turn_stalled", level="WARNING")
+    assert warning["requeued_count"] == 1
+    assert warning["stall_seconds"] == 0.5
+
+
+# meiva:note
+# The threshold bounds silence, not the turn: a turn that keeps streaming runs past it and completes.
+async def test_a_turn_that_keeps_sending_events_outlives_the_threshold(
+    db_conn: psycopg.Connection,
+    harness_runtime: RuntimeFixture,
+) -> None:
+    agent_id = agent_row(db_conn)
+    chat_id = insert_row(db_conn, agent_id, "chat", "user", "think for a while")
+
+    class SlowEngine(FakeEngine):
+        streaming: asyncio.Task[None] | None = None
+
+        async def deliver(
+            self, inputs: Sequence[HarnessInput], *, compaction_note: str = ""
+        ) -> None:
+            self.delivered.append(list(inputs))
+            keys = tuple(item.key for item in inputs)
+
+            async def stream() -> None:
+                self.emit(
+                    TurnStarted("t1", TurnOrigin.INPUT, keys, 1),
+                    *(InputInContext(key, "t1", 1) for key in keys),
+                )
+                for _ in range(6):
+                    await asyncio.sleep(0.2)
+                    self.emit(TextDelta("t1", "."))
+                self.emit(completed("t1", "MEIVA_HIDE_FROM_USER\ndone"))
+
+            self.streaming = asyncio.get_running_loop().create_task(stream())
+
+    engine = SlowEngine()
+    rt = _with_stall_seconds(harness_runtime(engine, agent_id=agent_id), 0.5)
+
+    async with asyncio.timeout(10):
+        _ = await harness_turn_node(AgentState(), rt, config(agent_id))
+
+    assert row_status(db_conn, chat_id) == "done"
+    assert engine.retired == []

@@ -12,6 +12,10 @@ from base.agents.history.transcript_timeline.record.match import (
     CLAIM_SLACK,
     assign_inputs,
 )
+from base.agents.messages.harness_input_key import (
+    INPUT_KEY_FIELD,
+    handed_input_keys,
+)
 from base.agents.messages.inbound import InboundKind
 from base.agents.messages.inbound_images import inbound_upload_files
 from base.agents.messages.kwargs import NoteTag
@@ -24,13 +28,12 @@ from base.log import logger
 # Which inbox rows were handed to a harness as one input, read back from the inbox, and what each of them shows on
 # the timeline. An input is sent to the CLI with an id derived from its key, and the row of the CLI's record that holds
 # it names only that id, so who said what is recovered here: the agent's inbox rows, grouped by the key the claim marked them with (a batch handed over as one input shares a key) or
-# `inbound-<id>` for a row sent alone. A row shows what the person typed (a `/command` is not expanded and no
+# the row's own key for a row sent alone (`base/agents/messages/harness_input_key.py`). A row shows what the person typed (a `/command` is not expanded and no
 # envelope is added), its sender, its images and its files. A system note or a heartbeat shows as a marker; the notes
 # only the host's own lifecycle wrote (a restart, an interrupt, a lost turn) are not shown, because the record says what
 # happened. How the rows are found is `load_sent_rows`.
 # meiva:link base/lm/harness/docs/transcript-projection.md
 
-INPUT_KEY_FIELD = "harness_input_key"
 BATCH_ROWS = 200
 MAX_ROWS = 1000
 DELIVERABLE_KINDS = (
@@ -60,10 +63,12 @@ class SentRow:
     created_at: datetime | None
     claimed_at: datetime | None = None
 
+    # meiva:note
+    # The keys the record may hold this row under: a row a halted turn handed back was handed over
+    # again under a new key, and the record keeps the earlier handover too.
     @property
-    def input_key(self) -> str:
-        key = self.payload.get(INPUT_KEY_FIELD) if self.payload else None
-        return key if isinstance(key, str) else f"inbound-{self.id}"
+    def input_keys(self) -> tuple[str, ...]:
+        return handed_input_keys(self.id, self.payload)
 
 
 # meiva:note
@@ -136,7 +141,7 @@ def _matched_rows(
             for key, rows in assigned.items()
             for row in rows
         ]
-    return [row for row in found if wire_id(row.input_key) in wanted]
+    return [row for row in found if any(wire_id(key) in wanted for key in row.input_keys)]
 
 
 # meiva:note
@@ -165,7 +170,7 @@ def _matched_keys(
 ) -> set[str]:
     if any(held.text is not None for held in wanted.values()):
         return set(assign_inputs(rows, wanted))
-    return {wire_id(row.input_key) for row in rows}
+    return {wire_id(key) for row in rows for key in row.input_keys}
 
 
 # meiva:note
@@ -227,10 +232,11 @@ def _row(values: tuple[object, ...]) -> SentRow:
 def sent_inputs(rows: Sequence[SentRow]) -> dict[str, list[TimelineItem]]:
     grouped: dict[str, list[TimelineItem]] = {}
     for row in rows:
-        items = grouped.setdefault(row.input_key, [])
         item = row_item(row)
-        if item is not None:
-            items.append(item)
+        for key in row.input_keys:
+            items = grouped.setdefault(key, [])
+            if item is not None:
+                items.append(item)
     return grouped
 
 
