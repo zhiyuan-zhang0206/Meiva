@@ -247,7 +247,7 @@ class AgentRuntimeSettings(EnvSettings):
 
     harness_turn_stall_seconds: float = Field(
         title="External harness turn stall threshold (seconds)",
-        default=1800.0,
+        default=900.0,
         gt=0,
         alias="MEIVA_HARNESS_TURN_STALL_SECONDS",
         description=(
@@ -255,13 +255,15 @@ class AgentRuntimeSettings(EnvSettings):
             "while an input handed to it or a turn it began is still unsettled. Past it the turn is "
             "aborted: the session is retired, the unanswered inputs go back to the queue and the "
             "agent halts until a new message, with the `harness_turn_stalled` warning, an Error "
-            "event and health-probe check 10 as the alert. The default, 30 minutes, is three times "
-            "the longest silence a healthy turn has: Claude Code caps one foreground Bash call at 10 "
-            "minutes, and a long thinking block, a tool result or a compaction all emit events. The "
-            "margin covers a context compaction and provider retry backoff after such a call. A "
-            "false trip kills a running tool and halts the agent, so the threshold errs long; a "
-            "stalled turn is otherwise never ended (2026-11-19: 11 agents ran 47 minutes on a "
-            "dropped input until an operator killed them)."
+            "event and health-probe check 10 as the alert. The default, 15 minutes, is the longest "
+            "silence a healthy turn may have by design plus a margin: Claude Code lets one "
+            "foreground Bash call run 10 minutes without an event. Measured on 30 days of macmini "
+            "transcripts (2026-11-19), the longest silence inside a turn was 5.8 minutes for Claude "
+            "Code and 6.8 minutes for Codex and Antigravity (two longer Codex gaps ended in an "
+            "aborted, stuck turn), so 900 seconds is about 2.2 times the measured maximum. A false "
+            "trip kills a running tool and halts the agent, so it must stay above the 10-minute tool "
+            "ceiling; without it a stalled turn is never ended (2026-11-19: 11 agents ran up to 47 "
+            "minutes on a dropped input until an operator killed them)."
         ),
         json_schema_extra={
             "help_text": "Raise it for agents that run single tool calls longer than 10 minutes.",

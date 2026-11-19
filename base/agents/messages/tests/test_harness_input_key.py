@@ -5,8 +5,10 @@
 
 from base.agents.messages.harness_input_key import (
     HANDBACK_COUNT_FIELD,
+    HANDED_KEYS_FIELD,
     INPUT_KEY_FIELD,
     handback_count,
+    handed_input_keys,
     recorded_input_key,
     row_input_key,
 )
@@ -42,3 +44,15 @@ def test_a_count_that_is_not_a_count_is_no_handback() -> None:
     assert handback_count({HANDBACK_COUNT_FIELD: True}) == 0
     assert handback_count({HANDBACK_COUNT_FIELD: -1}) == 0
     assert handback_count({HANDBACK_COUNT_FIELD: "x"}) == 0
+
+
+def test_a_handed_back_row_is_known_by_every_key_it_was_handed_over_under() -> None:
+    payload = {HANDBACK_COUNT_FIELD: 2, HANDED_KEYS_FIELD: ["inbound-40", "inbound-42-handback-1"]}
+
+    assert handed_input_keys(42, payload) == (
+        "inbound-40",
+        "inbound-42-handback-1",
+        "inbound-42-handback-2",
+    )
+    assert handed_input_keys(42, None) == ("inbound-42",)
+    assert handed_input_keys(42, {HANDED_KEYS_FIELD: "not a list"}) == ("inbound-42",)

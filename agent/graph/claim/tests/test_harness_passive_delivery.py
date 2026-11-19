@@ -33,7 +33,11 @@ from agent.graph.llm_errors import FatalLLMStreamError, HarnessTurnHaltedError
 from agent.ownership.tests.ownership_support import admit_owner, agent_row
 from agent.state import AgentState
 from base.agents.context import MeivaContext
-from base.agents.messages.harness_input_key import HANDBACK_COUNT_FIELD, INPUT_KEY_FIELD
+from base.agents.messages.harness_input_key import (
+    HANDBACK_COUNT_FIELD,
+    HANDED_KEYS_FIELD,
+    INPUT_KEY_FIELD,
+)
 from base.agents.recovery.breaker import (
     HALT_REASON_QUOTA_EXHAUSTED,
     HALT_REASON_TURN_STALLED,
@@ -519,6 +523,8 @@ async def test_a_handed_back_row_is_handed_over_under_a_new_key_and_starts_a_tur
         await harness_turn_node(AgentState(), rt, config(agent_id))
     assert halted.value.reason == HALT_REASON_QUOTA_EXHAUSTED
     _assert_requeued_pending(db_conn, (chat_id,), expected_retries=1)
+    payload, _claimed_at = _row_meta(db_conn, chat_id)
+    assert payload is not None and payload[HANDED_KEYS_FIELD] == [input_key(chat_id)]
 
     later = insert_row(db_conn, agent_id, "chat", "user", "the quota is reset, go on")
     _ = await harness_turn_node(AgentState(), rt, config(agent_id))

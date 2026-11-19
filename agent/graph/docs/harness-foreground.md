@@ -148,7 +148,7 @@ is not detected; the facts above are the whole protection, and no process regist
 
 A turn that stops before it delivered a reply halts the agent instead of failing it: the harness ran out of quota
 (HTTP 429, a usage limit), or the turn stalled, no event from the harness for the agent's
-`harness_turn_stall_seconds` (default 30 minutes) while an input it was handed or a turn it began was still
+`harness_turn_stall_seconds` (default 15 minutes) while an input it was handed or a turn it began was still
 unsettled. Nothing in the protocol ends such a wait otherwise: the host's progress tick only says that the host
 process is alive, and `harness_turn` is exempt from the node stall probe. The stall clock is the last event read
 or the last handover; an event being written or waiting to be read counts as heard.
@@ -167,7 +167,8 @@ A handed-back row is handed over again under a new key, `inbound-<id>-handback-<
 drops a user message whose uuid (derived from the key) it already holds: it echoes the message, so the turn
 opens and the row is settled as in the context, and then runs no turn and sends no result. On 2026-11-19 that
 held 11 agents in a turn that never ended for 47 minutes, with every message behind the dropped one stuck
-(task #7423); a row that was never handed back keeps `inbound-<id>`.
+(task #7423); a row that was never handed back keeps `inbound-<id>`. The keys a row was handed over under before each handback stay
+on it (`harness_handed_keys`), so the timeline still finds the row under the earlier handover the record holds.
 
 Parent: [Harness turn](harness-turn.md).
 

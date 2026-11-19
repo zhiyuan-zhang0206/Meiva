@@ -21,7 +21,11 @@ from agent.graph.hooks.user_delivery import delivery_end_reminder
 from agent.messages.reply_visibility import reply_visibility_note
 from agent.ownership.inbound import lock_inbound_owner
 from base.agents.context import MeivaContext
-from base.agents.messages.harness_input_key import HANDBACK_COUNT_FIELD, INPUT_KEY_FIELD
+from base.agents.messages.harness_input_key import (
+    HANDBACK_COUNT_FIELD,
+    HANDED_KEYS_FIELD,
+    INPUT_KEY_FIELD,
+)
 from base.agents.messages.inbound import PASSIVE_INBOUND_KEY, InboundKind, not_passive_inbound
 from base.agents.messages.kwargs import NoteTag
 from base.agents.recovery.breaker import record_harness_halt
@@ -223,7 +227,8 @@ async def requeue_handed(ctx: MeivaContext, agent_id: int, handed: Sequence[Hand
 # `base/agents/recovery/breaker.py`: an exhausted quota, a stalled turn): return the affected rows
 # (whether still claimed or already marked done by InputInContext) to `pending`, counting the
 # handback on each row (`HANDBACK_COUNT_FIELD`, which also gives the row a key the harness has not
-# recorded: `base/agents/messages/harness_input_key.py`), and halt the agent's automatic recovery in
+# recorded: `base/agents/messages/harness_input_key.py`) and keeping the key it was handed over under
+# (`HANDED_KEYS_FIELD`, so the harness's record still finds the row), and halt the agent's automatic recovery in
 # the same transaction: the agent stops, nothing wakes it again for these rows, and a new message
 # resumes it with them (`base/agents/recovery/breaker.py::admit_pending_wake`). Returns the requeued
 # ids, in handed order.
@@ -233,7 +238,11 @@ async def settle_halted_turn(
     pool = ctx.ops_pool
     if pool is None:
         return ()
-    ids = list(dict.fromkeys(i for h in handed for i in h.row_ids))
+    keys: dict[int, str] = {}
+    for entry in handed:
+        for row_id in entry.row_ids:
+            _ = keys.setdefault(row_id, entry.key)
+    ids = list(keys)
     requeued_ids: tuple[int, ...] = ()
     async with async_write_transaction(pool) as conn:
         await lock_inbound_owner(conn, agent_id, incarnation=ctx.original_incarnation)
@@ -241,22 +250,30 @@ async def settle_halted_turn(
             rows = await aquery_all(
                 conn,
                 IdRow,
-                "UPDATE inbound_messages SET status='pending', claimed_at=NULL, "
-                "payload = (COALESCE(payload, '{}'::jsonb) - %s) || jsonb_build_object("
+                "UPDATE inbound_messages m SET status='pending', claimed_at=NULL, "
+                "payload = (COALESCE(m.payload, '{}'::jsonb) - %s) || jsonb_build_object("
                 "  %s::text, "
-                "  CASE WHEN COALESCE(payload->>%s, '') ~ '^[0-9]+$' "
-                "  THEN (payload->>%s)::int + 1 ELSE 1 END"
+                "  CASE WHEN COALESCE(m.payload->>%s, '') ~ '^[0-9]+$' "
+                "  THEN (m.payload->>%s)::int + 1 ELSE 1 END, "
+                "  %s::text, "
+                "  CASE WHEN jsonb_typeof(m.payload->%s) = 'array' "
+                "  THEN m.payload->%s ELSE '[]'::jsonb END || to_jsonb(k.key)"
                 ") "
-                "WHERE agent_id=%s AND id=ANY(%s) AND kind=ANY(%s) "
-                "AND status IN ('pending', 'claimed', 'done') "
-                "RETURNING id",
+                "FROM unnest(%s::bigint[], %s::text[]) AS k(id, key) "
+                "WHERE m.id=k.id AND m.agent_id=%s AND m.kind=ANY(%s) "
+                "AND m.status IN ('pending', 'claimed', 'done') "
+                "RETURNING m.id",
                 (
                     INPUT_KEY_FIELD,
                     HANDBACK_COUNT_FIELD,
                     HANDBACK_COUNT_FIELD,
                     HANDBACK_COUNT_FIELD,
-                    agent_id,
+                    HANDED_KEYS_FIELD,
+                    HANDED_KEYS_FIELD,
+                    HANDED_KEYS_FIELD,
                     ids,
+                    [keys[i] for i in ids],
+                    agent_id,
                     list(DELIVERABLE_INBOUND_KINDS),
                 ),
             )

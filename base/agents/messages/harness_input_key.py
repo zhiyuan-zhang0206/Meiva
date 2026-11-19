@@ -12,6 +12,10 @@
 # over under a key that names the count. A row returned because the harness never took it (a
 # refused, lost or undelivered input) keeps its key: the harness has no record of it.
 #
+# A handed-back row keeps every key it was handed over under (`HANDED_KEYS_FIELD`), so the harness's
+# record, which holds the earlier handovers too, still finds the row under each of them
+# (`handed_input_keys`, read by the timeline projection).
+#
 # A batch handed over as one input is named by its group key (`INPUT_KEY_FIELD`), written on the
 # claimed rows when the batch is handed over and removed whenever its rows go back to the queue. It
 # names an input already handed over, so it is read only to find that input again
@@ -30,6 +34,11 @@ INPUT_KEY_FIELD: Final = "harness_input_key"
 # quota exhaustion, a stalled turn). The stored name predates the stall abort; rows already in the
 # queue carry it, so it is kept.
 HANDBACK_COUNT_FIELD: Final = "harness_quota_retries"
+
+
+# meiva:note
+# The payload key listing the keys a row was handed over under before it was handed back, oldest first.
+HANDED_KEYS_FIELD: Final = "harness_handed_keys"
 
 
 def handback_count(payload: Mapping[str, object] | None) -> int:
@@ -58,3 +67,12 @@ def recorded_input_key(row_id: int, payload: Mapping[str, object] | None) -> str
     if isinstance(grouped, str) and grouped:
         return grouped
     return row_input_key(row_id, payload)
+
+
+# meiva:note
+# Every key the harness may have recorded the row under: the keys of the handovers before each
+# handback, then the key of its latest handover.
+def handed_input_keys(row_id: int, payload: Mapping[str, object] | None) -> tuple[str, ...]:
+    earlier = payload.get(HANDED_KEYS_FIELD) if payload else None
+    keys = [key for key in earlier if isinstance(key, str)] if isinstance(earlier, list) else []
+    return tuple(dict.fromkeys((*keys, recorded_input_key(row_id, payload))))

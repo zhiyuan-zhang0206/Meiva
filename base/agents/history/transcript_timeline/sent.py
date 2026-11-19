@@ -12,7 +12,10 @@ from base.agents.history.transcript_timeline.record.match import (
     CLAIM_SLACK,
     assign_inputs,
 )
-from base.agents.messages.harness_input_key import INPUT_KEY_FIELD, recorded_input_key
+from base.agents.messages.harness_input_key import (
+    INPUT_KEY_FIELD,
+    handed_input_keys,
+)
 from base.agents.messages.inbound import InboundKind
 from base.agents.messages.inbound_images import inbound_upload_files
 from base.agents.messages.kwargs import NoteTag
@@ -60,9 +63,12 @@ class SentRow:
     created_at: datetime | None
     claimed_at: datetime | None = None
 
+    # meiva:note
+    # The keys the record may hold this row under: a row a halted turn handed back was handed over
+    # again under a new key, and the record keeps the earlier handover too.
     @property
-    def input_key(self) -> str:
-        return recorded_input_key(self.id, self.payload)
+    def input_keys(self) -> tuple[str, ...]:
+        return handed_input_keys(self.id, self.payload)
 
 
 # meiva:note
@@ -135,7 +141,7 @@ def _matched_rows(
             for key, rows in assigned.items()
             for row in rows
         ]
-    return [row for row in found if wire_id(row.input_key) in wanted]
+    return [row for row in found if any(wire_id(key) in wanted for key in row.input_keys)]
 
 
 # meiva:note
@@ -164,7 +170,7 @@ def _matched_keys(
 ) -> set[str]:
     if any(held.text is not None for held in wanted.values()):
         return set(assign_inputs(rows, wanted))
-    return {wire_id(row.input_key) for row in rows}
+    return {wire_id(key) for row in rows for key in row.input_keys}
 
 
 # meiva:note
@@ -226,10 +232,11 @@ def _row(values: tuple[object, ...]) -> SentRow:
 def sent_inputs(rows: Sequence[SentRow]) -> dict[str, list[TimelineItem]]:
     grouped: dict[str, list[TimelineItem]] = {}
     for row in rows:
-        items = grouped.setdefault(row.input_key, [])
         item = row_item(row)
-        if item is not None:
-            items.append(item)
+        for key in row.input_keys:
+            items = grouped.setdefault(key, [])
+            if item is not None:
+                items.append(item)
     return grouped
 
 
