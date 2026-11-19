@@ -16,6 +16,7 @@ from agent.graph.hooks.compact import (
 from agent.graph.llm_errors import (
     FatalLLMStreamError,
     FatalProviderError,
+    HarnessQuotaExhaustedError,
     retry_exhausted_error,
 )
 from agent.startup import CHECKPOINT_INTERVAL_KEY
@@ -400,10 +401,14 @@ class PendingTurnFailure:
     errors: list[Error] = field(default_factory=list[Error])
 
     # meiva:note
-    # Whether the aborted turn leaves the agent a crash corpse for the reaper. A failed compaction leaves the history intact and the agent alive: it idles for its next inbound. Every other settled abort is a fatal provider or stream failure.
+    # Whether the aborted turn leaves the agent a crash corpse for the reaper. A failed compaction
+    # leaves the history intact and the agent alive: it idles for its next inbound. A harness
+    # quota/rate-limit abort also leaves the agent alive and idling behind a wake-suppression reset
+    # window so the reaper does not terminate it before quota resets. Every other settled abort is
+    # a fatal provider or stream failure.
     @property
     def marks_crash(self) -> bool:
-        return not isinstance(self.error, CompactionFailedError)
+        return not isinstance(self.error, (CompactionFailedError, HarnessQuotaExhaustedError))
 
     @classmethod
     def from_invocation_error(cls, exc: Exception) -> PendingTurnFailure | None:

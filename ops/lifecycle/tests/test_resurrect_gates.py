@@ -125,3 +125,69 @@ def test_the_recovery_gate_reads_the_stored_streak(
     assert lifecycle.recovery_halted(database, aid) is True
     with pytest.raises(AgentNotFound):
         lifecycle.recovery_halted(database, aid + 999)
+
+
+def test_quota_suppression_gate_defers_auto_resurrect_until_expiry_or_manual_resurrect(
+    db_conn: psycopg.Connection, database: Database, event_bus: EventBus
+) -> None:
+    from base.agents.messages.inbound import InboundKind
+    from base.agents.recovery.breaker import SUPPRESS_REASON_QUOTA_EXHAUSTED
+    from ops.agents.wake import (
+        ResurrectTriggerStaleError,
+        transition_terminated_to_unclaimed_idling,
+    )
+    from ops.lifecycle import resurrect_plan
+
+    aid = create_agent(db_conn)
+    db_conn.execute(
+        "INSERT INTO agents_meta (id, status, wake_suppress_reason, wake_suppressed_until) "
+        "VALUES (%s, 'terminated', %s, now() + interval '5 minutes')",
+        (aid, SUPPRESS_REASON_QUOTA_EXHAUSTED),
+    )
+    db_conn.commit()
+    iid = insert_inbound_message(
+        db_conn, aid, "hi", source="user", bus=event_bus, database=database
+    )
+
+    assert lifecycle.quota_suppressed(database, aid) is True
+    plan = resurrect_plan.plan_resurrection(
+        resurrect_plan.ResurrectFacts(
+            agent_id=aid,
+            trigger_inbound_id=iid,
+            trigger_kind=InboundKind.CHAT,
+            recovery_halted=False,
+            quota_suppressed=True,
+            notice_source=None,
+            home="test",
+            local_machine="test",
+        )
+    )
+    assert isinstance(plan, resurrect_plan.QuotaSuppressed)
+
+    with (
+        pytest.raises(ResurrectTriggerStaleError),
+        database.connect() as conn,
+        conn.cursor() as cur,
+    ):
+        transition_terminated_to_unclaimed_idling(
+            cur,
+            aid,
+            trigger_inbound_id=iid,
+            trigger_inbound_kind=InboundKind.CHAT,
+        )
+
+    # meiva:note
+    # Manual operator resurrection (trigger_inbound_id=None) clears quota suppression.
+    with database.connect() as conn, conn.cursor() as cur:
+        transition_terminated_to_unclaimed_idling(
+            cur,
+            aid,
+            trigger_inbound_id=None,
+            trigger_inbound_kind=None,
+        )
+    assert lifecycle.quota_suppressed(database, aid) is False
+    row = db_conn.execute(
+        "SELECT status, wake_suppress_reason, wake_suppressed_until FROM agents_meta WHERE id = %s",
+        (aid,),
+    ).fetchone()
+    assert row == ("idling", None, None)

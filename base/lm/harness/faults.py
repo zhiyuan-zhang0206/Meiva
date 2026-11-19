@@ -20,12 +20,21 @@
 from __future__ import annotations
 
 import re
+from collections.abc import Sequence
+from dataclasses import dataclass
 
 from base.lm.harness.engine import HarnessTurn
 from base.lm.harness.events import TurnCompleted
 
 __all__ = [
+    "DEFAULT_QUOTA_BACKOFF_SECONDS",
     "ERROR_SUMMARY_LIMIT",
+    "MAX_QUOTA_BACKOFF_SECONDS",
+    "MAX_QUOTA_RESET_SECONDS",
+    "MIN_QUOTA_BACKOFF_SECONDS",
+    "RESET_CLOCK_SKEW_BUFFER_S",
+    "QuotaFault",
+    "classify_quota_fault",
     "fault_message",
     "format_fatal_reason",
     "requires_session_recycle",
@@ -34,6 +43,11 @@ __all__ = [
 ]
 
 ERROR_SUMMARY_LIMIT = 1000
+MIN_QUOTA_BACKOFF_SECONDS = 30.0
+DEFAULT_QUOTA_BACKOFF_SECONDS = 120.0
+MAX_QUOTA_BACKOFF_SECONDS = 1800.0
+MAX_QUOTA_RESET_SECONDS = 7 * 24 * 3600.0
+RESET_CLOCK_SKEW_BUFFER_S = 5.0
 _REDACTED = "***"
 _SK_SECRET = re.compile(r"sk-[A-Za-z0-9_\-]{8,}")
 _USERINFO_PASSWORD = re.compile(r"(://[^/\s@]*:)[^/\s@]*@")
@@ -167,3 +181,176 @@ def format_fatal_reason(exc: BaseException, *, limit: int = ERROR_SUMMARY_LIMIT)
 def _known_status(turn: HarnessTurn) -> str:
     status = (turn.stop_reason or "").strip()
     return f" (status/stop_reason: {status})" if status else ""
+
+
+_QUOTA_ERROR_CODES = frozenset(
+    {
+        "rate_limit",
+        "rate_limit_error",
+        "quota_exceeded",
+        "insufficient_quota",
+        "usage_limit",
+        "usage_limit_reached",
+        "resource_exhausted",
+        "too_many_requests",
+    }
+)
+
+_QUOTA_TEXT_PHRASES = (
+    "individual quota reached",
+    "quota reached",
+    "quota exceeded",
+    "insufficient_quota",
+    "exhausted your capacity",
+    "capacity on this model",
+    "capacity_exhausted",
+    "model_capacity_exhausted",
+    "usage limit",
+    "usage_limit",
+    "rate limit",
+    "rate_limit",
+    "ratelimit",
+    "too many requests",
+    "resource_exhausted",
+    "resource has been exhausted",
+    "hit your limit",
+)
+
+_HTTP_429_RE = re.compile(
+    r"\b(?:http|api|status|error)\s*:?\s*429\b|\b429\s+too\s+many\s+requests\b",
+    re.IGNORECASE,
+)
+
+_RESET_CLAUSE_RE = re.compile(
+    r"\b(?:resets?\s+in|resets?\s+after|reset\s+in|reset\s+after|try\s+again\s+in|retry\s+(?:after|in))\s+"
+    r"((?:\d+(?:\.\d+)?\s*(?:days?|d|hours?|hrs?|h|minutes?|mins?|m|seconds?|secs?|s)(?![a-zA-Z])(?:\s*(?:,|and)?\s*)?)+)",
+    re.IGNORECASE,
+)
+
+_DURATION_UNIT_RE = re.compile(
+    r"(\d+(?:\.\d+)?)\s*(days?|d|hours?|hrs?|h|minutes?|mins?|m|seconds?|secs?|s)(?![a-zA-Z])",
+    re.IGNORECASE,
+)
+
+_UNIT_SECONDS = {
+    "d": 86400.0,
+    "day": 86400.0,
+    "days": 86400.0,
+    "h": 3600.0,
+    "hr": 3600.0,
+    "hrs": 3600.0,
+    "hour": 3600.0,
+    "hours": 3600.0,
+    "m": 60.0,
+    "min": 60.0,
+    "mins": 60.0,
+    "minute": 60.0,
+    "minutes": 60.0,
+    "s": 1.0,
+    "sec": 1.0,
+    "secs": 1.0,
+    "second": 1.0,
+    "seconds": 1.0,
+}
+
+
+# meiva:note
+# Classified quota/rate-limit failure and any parsed reset countdown.
+@dataclass(frozen=True, slots=True)
+class QuotaFault:
+    parsed_reset_seconds: float | None = None
+    reset_source: str | None = None
+
+    def backoff_seconds(self, *, streak: int = 1) -> tuple[float, str]:
+        if self.parsed_reset_seconds is not None:
+            buffered = self.parsed_reset_seconds + (
+                RESET_CLOCK_SKEW_BUFFER_S if self.parsed_reset_seconds > 0 else 0.0
+            )
+            bounded = max(MIN_QUOTA_BACKOFF_SECONDS, min(buffered, MAX_QUOTA_RESET_SECONDS))
+            return bounded, self.reset_source or "parsed_reset"
+        exponent = max(streak - 1, 0)
+        backoff = min(
+            DEFAULT_QUOTA_BACKOFF_SECONDS * (1 << min(exponent, 10)), MAX_QUOTA_BACKOFF_SECONDS
+        )
+        return max(MIN_QUOTA_BACKOFF_SECONDS, backoff), "bounded_backoff"
+
+
+# meiva:note
+# True when declared error text indicates quota exhaustion or HTTP 429 rate limiting.
+def _is_quota_error_text(text: str) -> bool:
+    lowered = text.lower()
+    if any(phrase in lowered for phrase in _QUOTA_TEXT_PHRASES):
+        return True
+    return bool(_HTTP_429_RE.search(text))
+
+
+# meiva:note
+# Parse a reset/retry countdown (in seconds) from provider error text, or return None.
+def _parse_quota_reset_seconds(text: str) -> float | None:
+    match = _RESET_CLAUSE_RE.search(text)
+    if match is None:
+        return None
+    clause = match.group(1)
+    total = 0.0
+    matched_any = False
+    for duration_match in _DURATION_UNIT_RE.finditer(clause):
+        num_str = duration_match.group(1)
+        unit = duration_match.group(2)
+        scale = _UNIT_SECONDS.get(unit.lower())
+        if scale is None:
+            continue
+        total += float(num_str) * scale
+        matched_any = True
+    return total if matched_any else None
+
+
+def _quota_reset_delay(
+    candidates: Sequence[str],
+    rate_limit_resets_at: int | None,
+    now_timestamp: float | None,
+) -> tuple[float | None, str | None]:
+    for text in candidates:
+        parsed = _parse_quota_reset_seconds(text)
+        if parsed is not None:
+            return parsed, "parsed_reset"
+    if rate_limit_resets_at is not None and now_timestamp is not None:
+        remaining = float(rate_limit_resets_at) - now_timestamp
+        if remaining > 0:
+            return remaining, "rate_limit_event"
+    return None, None
+
+
+def _declared_error_candidates(
+    outcome: HarnessTurn | None, fallback_text: str | None
+) -> tuple[int | None, str | None, list[str]]:
+    if outcome is None:
+        return None, None, [fallback_text] if fallback_text else []
+    candidates = [s for s in (*outcome.errors, outcome.stop_reason or "") if s and s.strip()]
+    return outcome.api_error_status, outcome.error_code, candidates
+
+
+# meiva:note
+# Classify whether a harness abort is due to quota exhaustion / rate-limiting. Only declared
+# error fields (`api_error_status`, `error_code`, `errors`, `stop_reason`, or a transport/setup
+# exception message when no structured outcome exists) are inspected — never assistant reply prose.
+def classify_quota_fault(
+    *,
+    outcome: HarnessTurn | None = None,
+    fallback_text: str | None = None,
+    rate_limit_resets_at: int | None = None,
+    now_timestamp: float | None = None,
+) -> QuotaFault | None:
+    api_error_status, error_code, candidates = _declared_error_candidates(outcome, fallback_text)
+    code_match = error_code is not None and error_code.strip().lower() in _QUOTA_ERROR_CODES
+    is_quota = (
+        api_error_status == 429
+        or code_match
+        or any(_is_quota_error_text(text) for text in candidates)
+    )
+    if not is_quota:
+        return None
+
+    reset_seconds, reset_source = _quota_reset_delay(
+        candidates, rate_limit_resets_at, now_timestamp
+    )
+    return QuotaFault(parsed_reset_seconds=reset_seconds, reset_source=reset_source)

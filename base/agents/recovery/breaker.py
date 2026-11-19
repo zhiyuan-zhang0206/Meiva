@@ -19,6 +19,7 @@ from base.db.transaction import async_write_transaction
 HALT_AFTER_CONSECUTIVE_PERMANENT_REJECTS = 1
 
 SUPPRESS_REASON_PERMANENT_REJECT = "permanent_provider_reject"
+SUPPRESS_REASON_QUOTA_EXHAUSTED = "quota_exhausted"
 
 # The tripped window is "until human" in practice: long enough that no
 # automatic path resumes on a mere timer, finite so the column stays
@@ -122,17 +123,34 @@ async def _operator_restart_waiting(conn: AsyncConnectionLike, agent_id: int) ->
     return row is not None and row[0] is True
 
 
+async def _operator_lifecycle_waiting(conn: AsyncConnectionLike, agent_id: int) -> bool:
+    row = await (
+        await conn.execute(
+            "SELECT EXISTS (SELECT 1 FROM inbound_messages WHERE agent_id=%s "
+            "AND kind IN ('restart','terminate') AND status IN ('pending','claimed') "
+            "AND source <> 'self' AND source NOT LIKE 'system%%')",
+            (agent_id,),
+        )
+    ).fetchone()
+    return row is not None and row[0] is True
+
+
 # meiva:note
-# The two facts `admit_pending_wake` reads from the locked agent row: the permanent-reject streak, and
-# whether an operator restart or terminate is already claimed.
+# The facts `admit_pending_wake` reads from the locked agent row: the permanent-reject streak,
+# whether an operator restart or terminate is already claimed, and whether automatic wakes are
+# suppressed for a quota-exhaustion cooldown window.
 @dataclass(frozen=True)
 class _HaltRow:
     permanent_reject_streak: int
     operator_restart_claimed: bool
+    quota_suppressed: bool
 
 
 # meiva:note
 # Keep background inputs halted; a fresh peer/user chat or an operator restart can retry.
+# When a quota-exhaustion cooldown is active (`SUPPRESS_REASON_QUOTA_EXHAUSTED`), even new
+# chat wakes stay deferred until the reset window elapses — only an operator restart or terminate
+# is admitted immediately.
 #
 # The grant does not clear the streak: only a turn that actually makes progress does
 # (`agent/graph/claim/turn_stamp.py::persist_last_active`), so the breaker keeps its meaning —
@@ -141,15 +159,20 @@ async def admit_pending_wake(pool: AsyncPool, agent_id: int) -> bool:
     async with async_write_transaction(pool) as conn:
         async with conn.cursor(row_factory=class_row(_HaltRow)) as cur:
             await cur.execute(
-                "SELECT permanent_reject_streak,EXISTS (SELECT 1 FROM inbound_messages "
+                "SELECT permanent_reject_streak,"
+                "EXISTS (SELECT 1 FROM inbound_messages "
                 "WHERE agent_id=agents_meta.id AND kind IN ('restart','terminate') "
-                "AND status='claimed') AS operator_restart_claimed "
+                "AND status='claimed') AS operator_restart_claimed,"
+                "(wake_suppress_reason = %s AND wake_suppressed_until IS NOT NULL "
+                "AND wake_suppressed_until > clock_timestamp()) AS quota_suppressed "
                 "FROM agents_meta WHERE id=%s FOR UPDATE",
-                (agent_id,),
+                (SUPPRESS_REASON_QUOTA_EXHAUSTED, agent_id),
             )
             row = await cur.fetchone()
         if row is None:
             return False
+        if row.quota_suppressed and not row.operator_restart_claimed:
+            return await _operator_lifecycle_waiting(conn, agent_id)
         if (
             row.permanent_reject_streak < HALT_AFTER_CONSECUTIVE_PERMANENT_REJECTS
             or row.operator_restart_claimed

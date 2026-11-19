@@ -17,7 +17,7 @@ from agent.graph.interrupt import (
     ModelInterruptedError,
     interrupt_halt,
 )
-from agent.graph.llm_errors import FatalLLMStreamError
+from agent.graph.llm_errors import FatalLLMStreamError, HarnessQuotaExhaustedError
 from agent.graph.node_log import StallConfig, node_lifecycle
 from agent.nodes import CLAIM, HARNESS_TURN
 from base.agents.context import MeivaContext, agent_id_from_config
@@ -26,7 +26,9 @@ from base.lm.harness import (
     HarnessClosedError,
     HarnessSetupError,
     HarnessTurnFaultedError,
+    QuotaFault,
     TurnEngine,
+    classify_quota_fault,
     sanitize_error_text,
 )
 from base.log import logger
@@ -77,6 +79,66 @@ def _apply_wake_polarity(
 _CLEARED: dict[str, Any] = {"harness_inputs": [], "harness_view": []}
 
 
+def _classify_quota_exhaustion(
+    ctx: MeivaContext,
+    run: ForegroundRun,
+    exc: HarnessTurnFaultedError | HarnessClosedError | HarnessSetupError,
+) -> QuotaFault | None:
+    outcome = exc.outcome if isinstance(exc, HarnessTurnFaultedError) else None
+    last_rate_limit = run.last_rate_limit
+    now_ts = ctx.clock_factory().now().timestamp() if ctx.clock_factory is not None else None
+    return classify_quota_fault(
+        outcome=outcome,
+        fallback_text=str(exc) if outcome is None else None,
+        rate_limit_resets_at=last_rate_limit.resets_at if last_rate_limit is not None else None,
+        now_timestamp=now_ts,
+    )
+
+
+async def _settle_quota_exhaustion(
+    ctx: MeivaContext,
+    agent_id: int,
+    bridge: TurnEngine,
+    run: ForegroundRun,
+    exc: HarnessTurnFaultedError | HarnessClosedError | HarnessSetupError,
+    quota: QuotaFault,
+) -> HarnessQuotaExhaustedError:
+    turn_id = exc.turn_id if isinstance(exc, HarnessTurnFaultedError) else None
+    settlement = await run.settle_quota_abort(
+        turn_id=turn_id,
+        compute_backoff=lambda streak: quota.backoff_seconds(streak=streak + 1),
+    )
+    reset_source = settlement.reset_source or "bounded_backoff"
+    detail = (
+        sanitize_error_text(f"{ctx.harness.value} harness quota exhausted: {exc}")
+        or f"{ctx.harness.value} harness quota exhausted"
+    )
+    logger.warning(
+        "harness turn aborted due to quota exhaustion; inputs requeued and wake suppressed",
+        event="harness_quota_exhausted",
+        agent_id=agent_id,
+        harness=ctx.harness.value,
+        model=bridge.model,
+        retry_after_seconds=settlement.retry_after_seconds,
+        reset_source=reset_source,
+        suppressed_until=(
+            settlement.suppressed_until.isoformat()
+            if settlement.suppressed_until is not None
+            else None
+        ),
+        requeued_inbound_ids=list(settlement.requeued_inbound_ids),
+        requeued_count=len(settlement.requeued_inbound_ids),
+        reason=detail,
+    )
+    return HarnessQuotaExhaustedError(
+        detail,
+        retry_after_seconds=settlement.retry_after_seconds,
+        reset_source=reset_source,
+        suppressed_until=settlement.suppressed_until,
+        requeued_inbound_ids=settlement.requeued_inbound_ids,
+    )
+
+
 async def _handle_harness_abort(
     ctx: MeivaContext,
     agent_id: int,
@@ -84,7 +146,7 @@ async def _handle_harness_abort(
     projector: ReadTimelineSink,
     run: ForegroundRun,
     exc: HarnessTurnFaultedError | HarnessClosedError | HarnessSetupError,
-) -> None:
+) -> HarnessQuotaExhaustedError | None:
     if isinstance(exc, HarnessTurnFaultedError) and exc.outcome is not None:
         log_turn_usage(ctx, agent_id, bridge.model, exc.outcome)
     if not isinstance(exc, HarnessTurnFaultedError) or exc.retire_session:
@@ -94,12 +156,17 @@ async def _handle_harness_abort(
             else "session unavailable"
         )
         await bridge.retire(reason=reason)
+    quota = _classify_quota_exhaustion(ctx, run, exc)
+    if quota is not None and not projector.has_delivered_output:
+        return await _settle_quota_exhaustion(ctx, agent_id, bridge, run, exc, quota)
+
     produced_output = projector.has_activity
     marked = await run.retire_unconfirmed()
     if produced_output:
         await projector.finish(error=str(exc))
     elif marked:
         report_lost_turn(ctx, agent_id, marked, run.last_key, exc)
+    return None
 
 
 async def _run_harness_turn(
@@ -132,7 +199,9 @@ async def _run_harness_turn(
             update={**extra_updates, **interrupt_halt(exc.reason), **_CLEARED}, goto=CLAIM
         )
     except (HarnessTurnFaultedError, HarnessClosedError, HarnessSetupError) as exc:
-        await _handle_harness_abort(ctx, agent_id, bridge, projector, run, exc)
+        quota_error = await _handle_harness_abort(ctx, agent_id, bridge, projector, run, exc)
+        if quota_error is not None:
+            raise quota_error from exc
         detail = (
             sanitize_error_text(f"{ctx.harness.value} harness turn aborted: {exc}")
             or f"{ctx.harness.value} harness turn aborted"

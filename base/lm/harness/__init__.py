@@ -54,7 +54,13 @@ from base.lm.harness.events import (
     Usage,
     is_droppable,
 )
-from base.lm.harness.faults import format_fatal_reason, sanitize_error_text
+from base.lm.harness.faults import (
+    MIN_QUOTA_BACKOFF_SECONDS,
+    QuotaFault,
+    classify_quota_fault,
+    format_fatal_reason,
+    sanitize_error_text,
+)
 from base.lm.harness.handoff import ClusterFact, EntryPoint, Handoff, HarnessContribution
 from base.lm.harness.registration import (
     HANDLE_ENV,
@@ -73,6 +79,7 @@ from base.lm.harness.session import (
 
 __all__ = [
     "HANDLE_ENV",
+    "MIN_QUOTA_BACKOFF_SECONDS",
     "AssistantText",
     "BackgroundItem",
     "BackgroundKind",
@@ -103,6 +110,7 @@ __all__ = [
     "InputReceived",
     "InputRejected",
     "InterruptConfirmed",
+    "QuotaFault",
     "RateLimitObserved",
     "ReasoningDelta",
     "ReasoningText",
@@ -129,6 +137,7 @@ __all__ = [
     "UnsolicitedOutput",
     "UnsolicitedSink",
     "Usage",
+    "classify_quota_fault",
     "completed_turn",
     "encode_items",
     "fault_of_event",

@@ -43,12 +43,19 @@ class ResurrectFacts:
     notice_source: str | None
     home: str
     local_machine: str
+    quota_suppressed: bool = False
 
 
 # meiva:note
 # A background trigger after a permanent provider rejection: only a new chat may try again.
 @dataclass(frozen=True)
 class RecoveryHalted: ...
+
+
+# meiva:note
+# An automatic trigger while an external harness quota/rate-limit cooldown is active.
+@dataclass(frozen=True)
+class QuotaSuppressed: ...
 
 
 # meiva:note
@@ -73,7 +80,7 @@ class Forward:
     run_here_if_unreachable: bool
 
 
-ResurrectPlan = RecoveryHalted | NotificationOnly | Forward
+ResurrectPlan = RecoveryHalted | QuotaSuppressed | NotificationOnly | Forward
 
 
 # meiva:note
@@ -99,6 +106,8 @@ AfterSpawn = ClearWakeSuppression | RereadStatus
 # kind that cannot wake an agent is a `ValueError`.
 def plan_resurrection(facts: ResurrectFacts) -> ResurrectPlan:
     kind = validate_wake_trigger_kind(facts.trigger_kind)
+    if facts.quota_suppressed:
+        return QuotaSuppressed()
     if kind is not InboundKind.CHAT and facts.recovery_halted:
         return RecoveryHalted()
     if facts.notice_source is not None:
