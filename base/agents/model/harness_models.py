@@ -190,33 +190,48 @@ def parse_codex_model_list(pages: Sequence[object]) -> CatalogProbeResult:
     return CatalogProbeResult(models=tuple(models))
 
 
-def _claude_model_id(entry: Mapping[str, object]) -> str | None:
+def _strip_one_million_suffix(model_id: str) -> str:
+    return model_id[:-4] if model_id.lower().endswith("[1m]") else model_id
+
+
+# meiva:note
+# One initialize entry names every model ID the CLI runs for it: the resolved model, and also the
+# `[1m]` selector when the entry carries one. `<id>[1m]` selects model `<id>` with the 1M-token
+# context window, so the bare `<id>` is runnable too — Claude Code 2.1.304 even reports the
+# suffixed form as `resolvedModel`, which is why the suffix is stripped from it.
+def _claude_model_ids(entry: Mapping[str, object]) -> tuple[str, ...]:
     value = _non_empty_str(entry.get("value"))
-    if value is not None and value.lower().endswith("[1m]"):
-        return value
     resolved = _non_empty_str(entry.get("resolvedModel"))
+    ids: list[str] = []
+    if value is not None and value.lower().endswith("[1m]"):
+        ids.append(value)
     if resolved is not None:
-        return resolved
-    return value if value != "default" else None
+        ids.append(_strip_one_million_suffix(resolved))
+    elif value is not None and value != "default":
+        ids.append(_strip_one_million_suffix(value))
+    return _dedupe_strings(ids)
 
 
-def _claude_entry_model(entry: Mapping[str, object]) -> ProbedHarnessModel | None:
-    model_id = _claude_model_id(entry)
-    if model_id is None:
-        return None
+def _claude_entry_models(entry: Mapping[str, object]) -> tuple[ProbedHarnessModel, ...]:
+    model_ids = _claude_model_ids(entry)
     raw_levels = entry.get("supportedEffortLevels")
-    if entry.get("supportsEffort") is False or not _is_list(raw_levels):
-        return ProbedHarnessModel(id=model_id)
-    efforts = _dedupe_strings([item for item in raw_levels if isinstance(item, str)])
+    efforts = (
+        _dedupe_strings([item for item in raw_levels if isinstance(item, str)])
+        if entry.get("supportsEffort") is not False and _is_list(raw_levels)
+        else ()
+    )
     if not efforts:
-        return ProbedHarnessModel(id=model_id)
+        return tuple(ProbedHarnessModel(id=model_id) for model_id in model_ids)
     default_effort = _choose_effort_default(
         efforts, entry.get("defaultEffort"), fallbacks=("high", "medium")
     )
-    return ProbedHarnessModel(
-        id=model_id,
-        reasoning_effort_options=efforts,
-        reasoning_effort_default=default_effort,
+    return tuple(
+        ProbedHarnessModel(
+            id=model_id,
+            reasoning_effort_options=efforts,
+            reasoning_effort_default=default_effort,
+        )
+        for model_id in model_ids
     )
 
 
@@ -261,8 +276,7 @@ def parse_claude_initialize(payload: object) -> CatalogProbeResult:
     for item in raw_models:
         if not _is_mapping(item):
             continue
-        parsed = _claude_entry_model(item)
-        if parsed is not None:
+        for parsed in _claude_entry_models(item):
             _merge_claude_model(by_id, order, parsed)
 
     if not order:
@@ -299,7 +313,7 @@ def _split_agy_effort_suffix(cli_id: str) -> tuple[str, str | None]:
 def resolve_harness_catalog_model(raw_model: str, known_ids: Container[str]) -> str:
     if raw_model in known_ids:
         return raw_model
-    candidate = raw_model[:-4] if raw_model.lower().endswith("[1m]") else raw_model
+    candidate = _strip_one_million_suffix(raw_model)
     if candidate in known_ids:
         return candidate
     stem, matched_effort = _split_agy_effort_suffix(candidate)

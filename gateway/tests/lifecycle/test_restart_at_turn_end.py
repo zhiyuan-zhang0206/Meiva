@@ -10,6 +10,7 @@ from __future__ import annotations
 import psycopg
 import pytest
 
+from base.agents.model.harness_models import parse_claude_initialize
 from base.api_contracts.agent_contract import Harness, HarnessBilling
 from base.cluster.machine import MachineIdentityReader
 from base.cluster.machine.tests.identity import MachineIdentitySetter
@@ -100,6 +101,73 @@ def test_a_running_external_agent_may_ask_for_a_switch_and_is_not_touched_yet(
     assert answer.json() == {"status": "enqueued"}
     assert _commands(db_conn, agent_id) == [("self", "pending")]
     assert _harness(db_conn, agent_id) == "codex"
+
+
+# meiva:note
+# The Fable row as Claude Code 2.1.322 answers `initialize`: Fable appears only as its `[1m]`
+# selector. The catalog is built from it by the real parser, as the harness probe builds it.
+def _seed_claude_code_from_initialize(client: GatewayTestClient, machine: str) -> None:
+    probed = parse_claude_initialize(
+        {
+            "models": [
+                {
+                    "value": "claude-fable-5-2[1m]",
+                    "resolvedModel": "claude-fable-5-2",
+                    "supportsEffort": True,
+                    "supportedEffortLevels": ["low", "medium", "high", "max"],
+                },
+            ]
+        }
+    )
+    client.app.state.harness_cache.store(
+        machine,
+        [
+            HarnessAvailability(
+                harness=Harness.CLAUDE_CODE,
+                status="available",
+                reason="signed in",
+                launchable=True,
+                billing=HarnessBilling.SUBSCRIPTION,
+                models=[
+                    HarnessModelOption(
+                        id=model.id,
+                        reasoning_effort_options=list(model.reasoning_effort_options),
+                        reasoning_effort_default=model.reasoning_effort_default,
+                    )
+                    for model in probed.models
+                ],
+            )
+        ],
+    )
+
+
+# meiva:note
+# Every restart of an external agent re-checks its stored model against the live catalog, so an
+# agent pinned to the bare `claude-fable-5-2` its CLI runs must pass that check even when the
+# overlay names no model at all.
+def test_a_claude_code_agent_on_the_bare_fable_id_restarts_with_an_unrelated_overlay(
+    _local_machine: MachineIdentityReader,
+    gateway_local_runner: RunnerOps,
+    db_conn: psycopg.Connection,
+) -> None:
+    with gateway_test_client(machine=_local_machine) as client:
+        _seed_claude_code_from_initialize(client, gateway_local_runner.name)
+        spawned = spawn_via_http(
+            client, {"config": {"harness": "claude_code", "llm_model": "claude-fable-5-2"}}
+        )
+        assert spawned.status_code == 201, spawned.text
+        agent_id = spawned.json()["id"]
+        _set_status(db_conn, agent_id, "running")
+
+        answer = client.post(
+            f"/api/agents/{agent_id}/restart",
+            json=_own(agent_id, config_overlay={"heartbeat_pause_max_seconds": 604800}),
+        )
+
+    assert answer.status_code == 200, answer.text
+    assert answer.json() == {"status": "enqueued"}
+    assert _commands(db_conn, agent_id) == [("self", "pending")]
+    assert _harness(db_conn, agent_id) == "claude_code"
 
 
 def test_only_the_agent_itself_may_queue_its_restart(

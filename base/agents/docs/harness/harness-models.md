@@ -29,9 +29,12 @@ timeout without starting a turn or spending model quota:
   `isDefault`.
 - `claude_code`: `claude -p --input-format stream-json --output-format stream-json --verbose --no-session-persistence`
   (`control_request` `initialize`), reading `resolvedModel` / `value`,
-  `supportsEffort`, `supportedEffortLevels`, and `defaultEffort`. A selector
-  with `[1m]` keeps the exact CLI value so the selection retains its context
-  window when passed back to Claude.
+  `supportsEffort`, `supportedEffortLevels`, and `defaultEffort`. An entry
+  whose selector carries `[1m]` contributes two IDs sharing its effort ladder:
+  the exact selector, so a selection keeps its 1M-token context window when
+  passed back to Claude, and the model behind it (`resolvedModel` with any
+  `[1m]` stripped), which the CLI also runs — Claude Code lists Fable only
+  through `claude-fable-5-2[1m]`, yet `--model claude-fable-5-2` runs.
 - `antigravity`: `agy models`, reusing stdout from the login check, stripping
   progress output and grouping `<base>-<effort>` suffixes into canonical effort
   ladders while preserving effort-less model IDs verbatim.

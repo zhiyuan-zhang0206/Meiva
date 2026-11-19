@@ -108,7 +108,7 @@ def test_parse_claude_initialize_keeps_uncatalogued_and_effortless_models() -> N
     )
 
 
-def test_parse_claude_initialize_preserves_a_separate_one_million_context_option() -> None:
+def test_parse_claude_initialize_lists_both_the_one_million_selector_and_its_model() -> None:
     result = parse_claude_initialize(
         {
             "models": [
@@ -123,7 +123,40 @@ def test_parse_claude_initialize_preserves_a_separate_one_million_context_option
         "claude-sonnet-4-6",
         "sonnet[1M]",
         "claude-fable-5-1[1m]",
+        "claude-fable-5-1",
     ]
+
+
+# meiva:note
+# The Fable rows as Claude Code 2.1.322 and 2.1.304 report them: the CLI lists Fable only through
+# its `[1m]` selector, yet `--model claude-fable-5-2` runs, so both IDs must be in the catalog.
+@pytest.mark.parametrize(
+    "resolved", ["claude-fable-5-2", "claude-fable-5-2[1m]"], ids=["2.1.322", "2.1.304"]
+)
+def test_parse_claude_initialize_keeps_the_bare_model_behind_a_one_million_selector(
+    resolved: str,
+) -> None:
+    result = parse_claude_initialize(
+        {
+            "models": [
+                {
+                    "value": "claude-fable-5-2[1m]",
+                    "resolvedModel": resolved,
+                    "supportsEffort": True,
+                    "supportedEffortLevels": ["low", "medium", "high", "max"],
+                },
+            ]
+        }
+    )
+
+    assert result.models == tuple(
+        ProbedHarnessModel(
+            id=model_id,
+            reasoning_effort_options=("low", "medium", "high", "max"),
+            reasoning_effort_default="high",
+        )
+        for model_id in ("claude-fable-5-2[1m]", "claude-fable-5-2")
+    )
 
 
 def test_parse_antigravity_models_groups_effort_suffixes_and_uncatalogued_rows() -> None:
