@@ -46,8 +46,9 @@ workspace file links activate normally (when `src` is empty or stripped by
 sanitization, the static fallback `<img>` renders without lightbox wiring;
 inline mode continues to omit `<img>` via the phrasing allowlist). The To user
 document, standalone workspace image viewer, and composer attachment thumbnails
-(`ZoomableImage`) open the same `document.body` lightbox when clicking the image
-directly.
+(`ZoomableImage`, with an optional `overlay` slot used by composer thumbnails to
+reveal a hover/focus-visible `ZoomIn` icon overlay) open the same
+`document.body` lightbox when clicking the image directly.
 
 The renderer arrives through the same chunk seam as the code highlighter
 (`components/content/lazy-chunk.ts`): the boundary reads it from
