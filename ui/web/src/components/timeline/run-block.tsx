@@ -11,7 +11,7 @@
 
 import { Layers } from "lucide-react";
 import { useTranslations } from "next-intl";
-import { memo, type ReactNode } from "react";
+import { memo, useLayoutEffect, useRef, type ReactNode } from "react";
 
 import { formatDuration, type SdkCall } from "@/lib/format/item-summary";
 import { cn } from "@/lib/format/utils";
@@ -62,6 +62,24 @@ function sameOptionalIds(a?: readonly string[], b?: readonly string[]): boolean 
   return sameIds(a, b);
 }
 
+// meiva:note
+// Pin active timeline shimmer animations to document timeline origin (startTime = 0)
+// so the sweep stays in phase with the sidebar's working titles and across the
+// PendingLiveActivityWindow -> TurnBlock handoff without restarting mid-cycle.
+// meiva:link ui/web/src/docs/frontend-components/timeline-view/deep-collapse.md
+function useSyncedWorkingShimmer(active: boolean) {
+  const titleRef = useRef<HTMLSpanElement | null>(null);
+  useLayoutEffect(() => {
+    if (!active) return;
+    const el = titleRef.current;
+    if (!el || typeof el.getAnimations !== "function") return;
+    for (const anim of el.getAnimations()) {
+      anim.startTime = 0;
+    }
+  }, [active]);
+  return titleRef;
+}
+
 function turnBlockPropsEqual(prev: TurnBlockProps, next: TurnBlockProps): boolean {
   return (
     prev.id === next.id &&
@@ -102,6 +120,7 @@ export const TurnBlock = memo(function TurnBlock({
   activeTurnStartedAt = 0,
 }: TurnBlockProps) {
   const t = useTranslations("timeline");
+  const titleRef = useSyncedWorkingShimmer(Boolean(turnActive));
   const liveBlockStartedAt =
     turnActive && summary.lastLiveKind != null && summary.lastLiveStartedAt > 0
       ? summary.lastLiveStartedAt
@@ -198,7 +217,14 @@ export const TurnBlock = memo(function TurnBlock({
         <span className={cn("gap-0.5", FLEX, FLEX_COL, MIN_W_0, FLEX_1)}>
           <span className={cn("items-center gap-1.5 text-[13px] leading-snug", FLEX, MIN_W_0)}>
             <Layers className="size-3.5 shrink-0 opacity-70" />
-            <span className={cn(DISCLOSURE_TITLE_CLS, "whitespace-nowrap tabular-nums")}>
+            <span
+              ref={titleRef}
+              className={cn(
+                DISCLOSURE_TITLE_CLS,
+                "whitespace-nowrap tabular-nums",
+                turnActive && "timeline-title-working",
+              )}
+            >
               {workedLabel}
             </span>
             <DisclosureChevron expanded={expanded} />
@@ -238,6 +264,7 @@ export const PendingLiveActivityWindow = memo(function PendingLiveActivityWindow
   startedAt?: number;
 }) {
   const t = useTranslations("timeline");
+  const titleRef = useSyncedWorkingShimmer(true);
   const hasAnchor = startedAt > 0;
   const liveNow = useNow(hasAnchor);
   const label = hasAnchor
@@ -258,7 +285,9 @@ export const PendingLiveActivityWindow = memo(function PendingLiveActivityWindow
       >
         <span className={cn("items-center gap-1.5 text-[13px] leading-snug", FLEX, FLEX_1, MIN_W_0)}>
           <Layers className="size-3.5 shrink-0 opacity-70" />
-          <span className="truncate whitespace-nowrap tabular-nums">{label}</span>
+          <span ref={titleRef} className="truncate whitespace-nowrap tabular-nums timeline-title-working">
+            {label}
+          </span>
         </span>
       </div>
     </div>

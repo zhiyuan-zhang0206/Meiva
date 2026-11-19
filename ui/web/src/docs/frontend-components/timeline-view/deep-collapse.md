@@ -32,7 +32,13 @@ The turn header's timer reads one basis — `summarizeTurn.workedMs`, the sum of
 the turn's block durations, which a turn that spans an idle gap (a restart, a
 wake-up the agent had not picked up yet) must not inflate — plus one live
 stretch. The active `TurnBlock` header ("Working for Xs" / "Working…") displays
-`totalWorkedMs` and settles into "Worked for Xs" when the turn completes.
+`totalWorkedMs` and settles into "Worked for Xs" when the turn completes. Both
+`PendingLiveActivityWindow` and active (`turnActive`) `TurnBlock` title spans
+share the sidebar's Silver Glint sweep (`.timeline-title-working` sharing
+`.agent-title-working` / `agent-title-sweep` and locking `startTime = 0` via
+`getAnimations()`), staying in phase across the handoff and settling back to
+static text without shimmer once the turn completes; the leading `Layers` icon,
+disclosure chevron, and expanded summary remain unshimmered.
 
 What the live stretch counts changed (user report 2026-11-08, an Antigravity turn
 stuck at "Working for 1m 2s" with nothing left to advance it). It used to be the

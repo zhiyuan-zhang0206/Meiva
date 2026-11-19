@@ -493,3 +493,127 @@ describe("Plan B Turn-level timing semantics", () => {
     expect(screen.getByText("Worked for 9s")).toBeTruthy();
   });
 });
+
+describe("Working title Silver Glint shimmer", () => {
+  afterEach(cleanup);
+
+  it("applies timeline-title-working only to the active TurnBlock title span, never to icons, chevron, or summary", () => {
+    const { container, rerender } = render(
+      <TurnBlock
+        id="turn-shimmer"
+        memberIds={["1.0"]}
+        summary={sampleSummary}
+        expanded={true}
+        turnActive={true}
+        lastEventAt={1}
+        onToggle={vi.fn()}
+      >
+        <div>detail</div>
+      </TurnBlock>,
+    );
+
+    const toggle = screen.getByTestId("turn-toggle");
+    const shimmerEl = toggle.querySelector(".timeline-title-working");
+    expect(shimmerEl).not.toBeNull();
+    expect(shimmerEl?.tagName).toBe("SPAN");
+    expect(shimmerEl?.textContent).toContain("Working for");
+    expect(toggle.querySelectorAll(".timeline-title-working")).toHaveLength(1);
+    for (const svg of container.querySelectorAll("svg")) {
+      expect(svg.classList.contains("timeline-title-working")).toBe(false);
+    }
+
+    rerender(
+      <TurnBlock
+        id="turn-shimmer"
+        memberIds={["1.0"]}
+        summary={sampleSummary}
+        expanded={true}
+        turnActive={false}
+        onToggle={vi.fn()}
+      >
+        <div>detail</div>
+      </TurnBlock>,
+    );
+    expect(toggle.querySelector(".timeline-title-working")).toBeNull();
+    expect(toggle.textContent).toContain("Worked for");
+  });
+
+  it("omits timeline-title-working on settled TurnBlocks (Worked for / Work activity)", () => {
+    const activityOnly: TurnSummary = {
+      ...sampleSummary,
+      thinking: 0,
+      code: 0,
+      output: 0,
+      workedMs: 0,
+    };
+    const { container } = render(
+      <TurnBlock
+        id="turn-settled"
+        memberIds={["1.0"]}
+        summary={activityOnly}
+        expanded={false}
+        onToggle={vi.fn()}
+      />,
+    );
+    expect(screen.getByTestId("turn-toggle").textContent).toContain("Context");
+    expect(container.querySelector(".timeline-title-working")).toBeNull();
+  });
+
+  it("applies timeline-title-working to PendingLiveActivityWindow title span only", () => {
+    render(<PendingLiveActivityWindow />);
+    const pending = screen.getByTestId("pending-live-activity-window");
+    const shimmerEl = pending.querySelector(".timeline-title-working");
+    expect(shimmerEl).not.toBeNull();
+    expect(shimmerEl?.tagName).toBe("SPAN");
+    expect(shimmerEl?.textContent).toBe("Working…");
+    expect(pending.querySelectorAll(".timeline-title-working")).toHaveLength(1);
+    expect(pending.querySelector("svg")?.classList.contains("timeline-title-working")).toBe(false);
+  });
+
+  it("pins active shimmer animation startTime to 0 in both TurnBlock and PendingLiveActivityWindow", () => {
+    const prevDescriptor = Object.getOwnPropertyDescriptor(Element.prototype, "getAnimations");
+    const activeTurnAnim = { startTime: 2345 } as unknown as Animation;
+    const inactiveTurnAnim = { startTime: 6789 } as unknown as Animation;
+    const pendingAnim = { startTime: 4567 } as unknown as Animation;
+    let currentAnim = inactiveTurnAnim;
+    Element.prototype.getAnimations = () => [currentAnim];
+
+    try {
+      const { rerender } = render(
+        <TurnBlock
+          id="turn-sync"
+          memberIds={["1.0"]}
+          summary={sampleSummary}
+          expanded={false}
+          turnActive={false}
+          onToggle={vi.fn()}
+        />,
+      );
+      expect(inactiveTurnAnim.startTime).toBe(6789);
+
+      currentAnim = activeTurnAnim;
+      rerender(
+        <TurnBlock
+          id="turn-sync"
+          memberIds={["1.0"]}
+          summary={sampleSummary}
+          expanded={false}
+          turnActive={true}
+          lastEventAt={1}
+          onToggle={vi.fn()}
+        />,
+      );
+      expect(activeTurnAnim.startTime).toBe(0);
+
+      currentAnim = pendingAnim;
+      render(<PendingLiveActivityWindow />);
+      expect(pendingAnim.startTime).toBe(0);
+    } finally {
+      if (prevDescriptor) {
+        Object.defineProperty(Element.prototype, "getAnimations", prevDescriptor);
+      } else {
+        delete (Element.prototype as { getAnimations?: unknown }).getAnimations;
+      }
+    }
+  });
+});
