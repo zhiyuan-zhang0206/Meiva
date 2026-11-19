@@ -29,7 +29,7 @@ from base.lm.harness.claude.session import ClaudeSession
 from base.lm.harness.codex import CodexConfig
 from base.lm.harness.codex.session import CodexSession
 from base.lm.harness.events import UnsolicitedSink
-from base.lm.harness.handoff import ClusterFact, Handoff, HarnessContribution
+from base.lm.harness.handoff import ClusterFact, Handoff, HarnessContribution, refreshes_for
 from base.lm.harness.registration import HANDLE_ENV, RegistrationStore, SecureRandom
 from base.lm.harness.registry import SessionRegistry
 
@@ -236,16 +236,18 @@ def bridge_for(
 ) -> HarnessBridge | None:
     if harness is Harness.MEIVA:
         return None
+    contributions_tuple = tuple(contributions)
     handoff = _handoff_for(
         harness,
         agent_id=agent_id,
         machine=machine,
         workspace=workspace,
         home=home,
-        contributions=contributions,
+        contributions=contributions_tuple,
         model=model,
         reasoning_effort=reasoning_effort,
     )
+    refreshes = refreshes_for(contributions_tuple, harness=harness)
 
     def factory(handle: str) -> HarnessSession:
         return open_session(
@@ -268,6 +270,9 @@ def bridge_for(
         factory,
         machine=machine,
         handoff=handoff,
+        home=home,
+        workspace=workspace,
+        refreshes=refreshes,
         registrations=registrations,
         registration_ttl_seconds=registration_ttl_seconds,
         clock=root.clock,

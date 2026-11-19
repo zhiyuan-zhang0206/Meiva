@@ -577,3 +577,67 @@ async def test_claude_code_wake_and_instructions_file_include_visibility_why_whi
         other_saved = _instructions_file(other_id).read_text(encoding="utf-8")
         assert "Unlike standalone Claude Code" not in other_prompt
         assert "Unlike standalone Claude Code" not in other_saved
+
+
+@pytest.mark.parametrize("harness", [Harness.CLAUDE_CODE, Harness.CODEX, Harness.ANTIGRAVITY])
+async def test_init_context_preserves_contributed_memory_section_across_harnesses(
+    harness: Harness,
+    unit_home: Path,
+    db_conn: psycopg.Connection[Any],
+    aops_pool: AsyncConnectionPool[Any],
+    database_gate: ProcessDbGate,
+) -> None:
+    from base.lm.harness.handoff import HandoffSection, HarnessContribution
+
+    tid = create_agent(db_conn)
+    chinese_hard_rule = "## \u26a0\ufe0f \u8bed\u8a00\uff1a\u6240\u6709\u8f93\u51fa\u7528\u4e2d\u6587\uff08\u786c\u7ea6\u675f\uff09"
+
+    def build_section(doc: Handoff) -> HandoffSection:
+        return HandoffSection(
+            "Meiva Memory",
+            (
+                f"### Shared Memory Index (`{doc.home}/vault/memory/MEMORY.md`)",
+                chinese_hard_rule,
+                f"### Personal Memory Index (`{doc.workspace}/memory/MEMORY.md`)",
+                "- [Focus](focus.md) - Active work",
+            ),
+        )
+
+    registry = ExtensionRegistry(
+        (
+            (
+                "memory_test",
+                PluginContributions(
+                    harness_contributions=(
+                        HarnessContribution(
+                            harnesses=frozenset(
+                                {Harness.CLAUDE_CODE, Harness.CODEX, Harness.ANTIGRAVITY}
+                            ),
+                            sections=(build_section,),
+                        ),
+                    )
+                ),
+            ),
+        )
+    )
+    handoffs: list[Handoff] = []
+    bridge = SimpleNamespace(session_id=None, set_handoff=handoffs.append)
+    base_rt = _runtime(
+        aops_pool,
+        registry,
+        harness=harness,
+        harness_bridge=bridge,
+        agent_id=tid,
+        database_gate=database_gate,
+    )
+    runtime = Runtime(context=replace(base_rt.context, meiva_home=unit_home))
+
+    command = await init_context_node(AgentState(), runtime, _config(tid))
+    assert command.goto == "claim"
+    assert len(handoffs) == 1
+    saved = instructions_path(paths.workspace_dir(tid, home=unit_home)).read_text(encoding="utf-8")
+    for rendered in (handoffs[0].render(), saved):
+        assert "## Meiva Memory" in rendered
+        assert chinese_hard_rule in rendered
+        assert "- [Focus](focus.md) - Active work" in rendered
+        assert "## Standing Instructions" in rendered

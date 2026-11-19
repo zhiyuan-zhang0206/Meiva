@@ -351,3 +351,28 @@ def test_a_record_missing_background_is_reported_as_unreadable_like_one_missing_
     assert any("6985" in line and "generation" in line for line in problems)
     assert len(backfill_record_fields(root)) == 2
     assert unreadable_records(root) == []
+
+
+# meiva:note
+# The digests of context a transcript was given live on its record: they survive a roundtrip, and a
+# record from before the field existed is refused until converge completes it with {} (nothing
+# given, so the session is handed the contributed context once).
+# meiva:link base/lm/harness/docs/harness.md
+def test_context_digests_roundtrip_and_an_older_record_is_backfilled_empty(tmp_path: Path) -> None:
+    root = tmp_path / "sessions"
+    registry = FileSessionRegistry(root)
+    given = replace(record(6985), context_digests={"meiva_memory.shared": "abc"})
+    registry.save(given)
+    registry.save(record(6984))
+    path = registry.path(6984, HARNESS)
+    document = json.loads(path.read_text())
+    del document["context_digests"]
+    path.write_text(json.dumps(document))
+
+    assert registry.load(6985, harness=HARNESS) == given
+    with pytest.raises(ValueError, match="misses"):
+        _ = registry.load(6984, harness=HARNESS)
+    assert backfill_record_fields(root) == [path]
+    assert backfill_record_fields(root) == []
+    loaded = registry.load(6984, harness=HARNESS)
+    assert loaded is not None and loaded.context_digests == {}

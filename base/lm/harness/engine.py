@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from collections.abc import AsyncIterator, Awaitable, Mapping, Sequence
 from dataclasses import dataclass
-from typing import Protocol
+from typing import Protocol, runtime_checkable
 
 from base.lm.harness.delivery import HarnessInput, Reconciliation
 from base.lm.harness.events import BridgeEvent, TurnCompleted, Usage
@@ -84,6 +84,19 @@ class HarnessSession(Protocol):
     # faked 0 is indistinguishable from a clean exit forever after.
     @property
     def exit_code(self) -> int | None: ...
+
+
+# meiva:note
+# Who keeps a conversation's `context_digests` (see `SessionRecord`). The check is structural, like
+# the background-work reporting: a session that cannot keep them is still a valid session, and the
+# bridge then hands it no refreshed context at all rather than the full text on every turn.
+# meiva:link base/lm/harness/docs/harness.md
+@runtime_checkable
+class ContextDigestKeeping(Protocol):
+    @property
+    def context_digests(self) -> Mapping[str, str]: ...
+
+    def record_context_digests(self, digests: Mapping[str, str]) -> None: ...
 
 
 # meiva:note

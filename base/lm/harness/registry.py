@@ -6,7 +6,7 @@ import os
 import re
 import tempfile
 from collections.abc import Collection
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Protocol
 
@@ -26,6 +26,7 @@ _REQUIRED_FIELDS = frozenset(
         "harness",
         "generation",
         "background",
+        "context_digests",
     }
 )
 _FIELDS = _REQUIRED_FIELDS | {"resumes"}
@@ -59,6 +60,15 @@ class SessionRecord:
     # agent once. It is a small list of one-line descriptions, not a log.
     # meiva:link base/lm/harness/docs/background-work.md
     background: tuple[BackgroundItem, ...] = ()
+    # meiva:note
+    # What context this session's conversation has already been given, by contribution key: a key
+    # that is present means its full text is in the transcript, and the value is the digest of that
+    # text as last made known to it. The bridge reads it to tell a first sight (inject the text) from
+    # a change (one line naming the file) from nothing new. It lives on the record because it is a
+    # fact of this transcript: a fresh or forked session gets a new record and starts empty, and a
+    # resumed one reads it back. Required: `backfill_record_fields` completes older records with {}.
+    # meiva:link base/lm/harness/docs/harness.md
+    context_digests: dict[str, str] = field(default_factory=dict)
 
 
 class SessionRegistry(Protocol):
@@ -205,7 +215,13 @@ def migrate_single_slot_records(root: Path) -> list[Path]:
         if not is_object_dict(raw):
             raise TypeError(f"session record at {entry} is not an object")
         record = record_from_payload(
-            {"harness": _PRE_FIELD_HARNESS, "generation": 0, "background": [], **raw},
+            {
+                "harness": _PRE_FIELD_HARNESS,
+                "generation": 0,
+                "background": [],
+                "context_digests": {},
+                **raw,
+            },
             source=str(entry),
         )
         if record.agent_id != int(entry.stem):
@@ -239,10 +255,11 @@ def unreadable_records(root: Path) -> list[str]:
 
 
 # meiva:note
-# Complete the records written before `generation` or `background` existed: a missing `generation`
-# becomes 0 (the first process that runs under it is generation 1) and a missing `background`
-# becomes the empty list (the true value for a process that did not track background work), each
-# written atomically in place. Both fields are required on read, so a home that was not converged
+# Complete the records written before `generation`, `background` or `context_digests` existed: a
+# missing `generation` becomes 0 (the first process that runs under it is generation 1), a missing
+# `background` becomes the empty list (the true value for a process that did not track background
+# work), and missing `context_digests` become {} (nothing recorded as given, so the session is
+# handed the contributed context once), each written atomically in place. All are required on read, so a home that was not converged
 # refuses the record instead of resuming on a guess. Idempotent; returns the files changed. A file
 # that is not a record fails naming it.
 # meiva:link base/lm/harness/docs/harness.md
@@ -260,9 +277,14 @@ def backfill_record_fields(root: Path) -> list[Path]:
             raise ValueError(f"session record at {entry} is not valid JSON") from exc
         if not is_object_dict(raw):
             raise TypeError(f"session record at {entry} is not an object")
-        if "generation" in raw and "background" in raw:
+        if "generation" in raw and "background" in raw and "context_digests" in raw:
             continue
-        completed: dict[str, object] = {"generation": 0, "background": [], **raw}
+        completed: dict[str, object] = {
+            "generation": 0,
+            "background": [],
+            "context_digests": {},
+            **raw,
+        }
         record = record_from_payload(completed, source=str(entry))
         FileSessionRegistry(root).save(record)
         changed.append(entry)
@@ -289,7 +311,9 @@ def _check_agent(agent_id: int) -> None:
 
 # meiva:note
 # The one place a stored or transferred record becomes a `SessionRecord`: the registry reads
-# its own files through it and the cross-machine transfer rebuilds the record it received.
+# its own files through it and the cross-machine transfer rebuilds the record it received. A
+# transferred record from a host older than `context_digests` names none, which is what it means:
+# nothing was recorded as given. A stored file still has to carry the field (see `_REQUIRED_FIELDS`).
 def record_from_payload(payload: dict[str, object], *, source: str) -> SessionRecord:
     try:
         return SessionRecord(
@@ -303,9 +327,19 @@ def record_from_payload(payload: dict[str, object], *, source: str) -> SessionRe
             resumes=int_field(payload, "resumes") if "resumes" in payload else 0,
             generation=int_field(payload, "generation"),
             background=decode_items(payload["background"], source=source),
+            context_digests=(
+                _digests_field(payload, "context_digests") if "context_digests" in payload else {}
+            ),
         )
     except (TypeError, ValueError) as exc:
         raise ValueError(f"session record at {source} has invalid values: {exc}") from exc
+
+
+def _digests_field(payload: dict[str, object], name: str) -> dict[str, str]:
+    raw = payload[name]
+    if not is_object_dict(raw) or not all(isinstance(value, str) for value in raw.values()):
+        raise TypeError(f"{name} must be an object of strings")
+    return {key: str(value) for key, value in raw.items()}
 
 
 @dataclass(frozen=True, slots=True)

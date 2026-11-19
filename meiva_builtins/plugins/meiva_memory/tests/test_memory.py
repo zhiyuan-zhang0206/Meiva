@@ -4,8 +4,9 @@
 # data-plane behaviour tests live in `gateway/tests/routers/test_memory_search.py`. This file
 # only tests the SDK-gateway wire and the SHARED_PATH prefix conversion.
 
+import asyncio
 import json
-from collections.abc import Iterator
+from collections.abc import AsyncIterator, Iterator, Mapping, Sequence
 from pathlib import Path
 from typing import NamedTuple
 
@@ -15,6 +16,7 @@ import pytest
 import meiva
 from base.agents.context.gateway_client.memory_search import MemorySearchResult
 from base.agents.sdk.tests.sampling_owners import fixed_sampling_owner
+from base.api_contracts.agent_contract import Harness
 from base.packages.plugin_config_images import DiskPluginConfigImages
 from base.packages.plugins.extensions import ExtensionRegistry
 from base.paths import meiva_home, memory_dir, workspace_dir
@@ -343,3 +345,240 @@ def test_an_external_harness_is_told_where_both_memories_live(tmp_path: Path) ->
     boundaries = text.index("## Tool & Environment Boundaries")
     reporting = text.index("## Collaboration & Reporting")
     assert boundaries < text.index("## Meiva Memory") < reporting
+
+
+_CHINESE_HARD_RULE = "## \u26a0\ufe0f \u8bed\u8a00\uff1a\u6240\u6709\u8f93\u51fa\u7528\u4e2d\u6587\uff08\u786c\u7ea6\u675f\uff09"
+
+
+@pytest.mark.parametrize("harness", [Harness.CLAUDE_CODE, Harness.CODEX, Harness.ANTIGRAVITY])
+def test_handoff_embeds_shared_personal_and_inherit_bodies_for_all_harnesses(
+    tmp_path: Path, harness: Harness
+) -> None:
+    from base.lm.harness.wiring import handoff_for
+    from meiva_builtins.plugins.meiva_memory import agent_runtime
+
+    home = tmp_path / "home"
+    workspace = workspace_dir(7, home=home)
+    shared = memory_dir(home=home)
+    shared.mkdir(parents=True)
+    (shared / "MEMORY.md").write_text(
+        f"# Memory \u2014 \u5171\u4eab\u7528\u6237\u7d22\u5f15\n{_CHINESE_HARD_RULE}\n- [Rule](r.md) \u2014 Keep concise\n",
+        encoding="utf-8",
+    )
+    personal = workspace / "memory"
+    personal.mkdir(parents=True)
+    (personal / "MEMORY.md").write_text(
+        "- [My Note](my-note.md) — Personal durable note\n", encoding="utf-8"
+    )
+    (personal / "INHERIT.md").write_text(
+        "---\ndescription: inherited\n---\n\nAlways verify against real code.\n",
+        encoding="utf-8",
+    )
+
+    doc = handoff_for(
+        harness,
+        agent_id=7,
+        machine="m",
+        workspace=workspace,
+        home=home,
+        contributions=agent_runtime.contribute().harness_contributions,
+    )
+    rendered = doc.render()
+
+    assert _CHINESE_HARD_RULE in rendered
+    assert "- [Rule](r.md) — Keep concise" in rendered
+    assert "- [My Note](my-note.md) — Personal durable note" in rendered
+    assert "Always verify against real code." in rendered
+    assert "description: inherited" not in rendered
+    assert f"### Shared Memory Index (`{shared}/MEMORY.md`)" in rendered
+    assert f"### Personal Memory Index (`{personal}/MEMORY.md`)" in rendered
+    assert f"### Inherited Memory (`{personal}/INHERIT.md`)" in rendered
+
+
+def test_handoff_applies_empty_and_length_protection_contracts(tmp_path: Path) -> None:
+    from base.api_contracts.agent_contract import Harness
+    from base.lm.harness.handoff import Handoff
+    from meiva_builtins.plugins.meiva_memory import agent_runtime
+
+    home = tmp_path / "home"
+    workspace = workspace_dir(8, home=home)
+    shared = memory_dir(home=home)
+    shared.mkdir(parents=True)
+    (shared / "MEMORY.md").write_text("   \n", encoding="utf-8")
+
+    empty_doc = Handoff(
+        agent_id=8, instruction="Work.", machine="m", workspace=workspace, home=home
+    ).with_contributions(
+        agent_runtime.contribute().harness_contributions, harness=Harness.CLAUDE_CODE
+    )
+    empty_text = empty_doc.render()
+    assert "### Shared Memory Index" not in empty_text
+    assert "### Inherited Memory" not in empty_text
+    assert "### Personal Memory Index" in empty_text
+    assert "(no content)" in empty_text
+    assert (workspace / "memory" / "MEMORY.md").is_file()
+
+    personal = workspace / "memory"
+    (personal / "MEMORY.md").write_text("item\n" * 201, encoding="utf-8")
+    (personal / "INHERIT.md").write_text("x" * 4050, encoding="utf-8")
+
+    capped_doc = Handoff(
+        agent_id=8, instruction="Work.", machine="m", workspace=workspace, home=home
+    ).with_contributions(agent_runtime.contribute().harness_contributions, harness=Harness.CODEX)
+    capped_text = capped_doc.render()
+    assert "This index is 201 lines, over the 200-line soft cap" in capped_text
+    assert "[truncated at 4000 chars — full entry:" in capped_text
+
+
+# meiva:note
+# A resumed session that keeps `context_digests` the way an adapter keeps them on its record; it
+# starts with none, like a record from before the field existed or a fork's new record.
+class _ResumedMemorySession:
+    def __init__(self, session_id: str) -> None:
+        self.session_id: str | None = None
+        self._sid = session_id
+        self.generation = 1
+        self.resumed = True
+        self.exit_code: int | None = None
+        self.submitted: list[str] = []
+        self.digests: dict[str, str] = {}
+        self._queue: list[object] = []
+        self._closed = False
+        self._n = 0
+
+    @property
+    def context_digests(self) -> Mapping[str, str]:
+        return dict(self.digests)
+
+    def record_context_digests(self, digests: Mapping[str, str]) -> None:
+        self.digests.update(digests)
+
+    async def start(self, *, resume: str | None = None) -> None:
+        del resume
+        self.session_id = self._sid
+
+    async def deliver(self, inputs: Sequence[object]) -> None:
+        from base.lm.harness import HarnessInput, InputInContext, TurnCompleted, Usage
+
+        for item in inputs:
+            assert isinstance(item, HarnessInput)
+            self._n += 1
+            tid = f"t{self._n}"
+            self.submitted.append(item.text)
+            self._queue.append(InputInContext(item.key, tid, 1))
+            self._queue.append(
+                TurnCompleted(
+                    turn_id=tid,
+                    session_id=self._sid,
+                    text="ok",
+                    subtype="success",
+                    is_error=False,
+                    interrupted=False,
+                    stop_reason="end_turn",
+                    num_turns=1,
+                    duration_ms=1,
+                    usage=Usage(input_tokens=1, output_tokens=1),
+                    cost_usd=0.0,
+                    cumulative_cost_usd=0.0,
+                    permission_denials=(),
+                )
+            )
+
+    async def reconcile(self, keys: Sequence[str]) -> Mapping[str, object]:
+        from base.lm.harness import Reconciliation
+
+        return dict.fromkeys(keys, Reconciliation.NOT_FOUND)
+
+    def adopt(self, keys: Sequence[str]) -> None:
+        del keys
+
+    def events(self) -> AsyncIterator[object]:
+        async def stream() -> AsyncIterator[object]:
+            while not self._closed:
+                if self._queue:
+                    yield self._queue.pop(0)
+                else:
+                    await asyncio.sleep(0.001)
+
+        return stream()
+
+    async def interrupt(self, *, turn_id: str | None = None) -> object:
+        del turn_id
+        return object()
+
+    async def close(self, *, reason: str = "closed") -> None:
+        del reason
+        self._closed = True
+
+
+async def test_a_resumed_session_gets_the_memory_text_once_and_then_one_line_per_edit(
+    tmp_path: Path,
+) -> None:
+    from typing import cast
+
+    from base.clock.tests.fakes import system_clock
+    from base.clock.tests.seeded_rng import seeded_rng
+    from base.lm.harness import HarnessBridge, HarnessInput, HarnessSession, TurnCompleted
+    from base.lm.harness.handoff import refreshes_for
+    from base.lm.harness.registration import SecureRandom
+    from base.lm.harness.wiring import handoff_for
+    from meiva_builtins.plugins.meiva_memory import agent_runtime
+
+    home = tmp_path / "home"
+    workspace = workspace_dir(11, home=home)
+    shared = memory_dir(home=home)
+    shared.mkdir(parents=True)
+    (shared / "MEMORY.md").write_text(f"{_CHINESE_HARD_RULE}\n", encoding="utf-8")
+    personal = workspace / "memory"
+    personal.mkdir(parents=True)
+    personal_index = personal / "MEMORY.md"
+    personal_index.write_text("- [Initial](init.md) — initial personal\n", encoding="utf-8")
+
+    contributions = agent_runtime.contribute().harness_contributions
+    session = _ResumedMemorySession("legacy-session-11")
+    bridge = HarnessBridge(
+        Harness.CLAUDE_CODE,
+        11,
+        lambda _handle: cast(HarnessSession, session),
+        machine="m",
+        handoff=handoff_for(
+            Harness.CLAUDE_CODE,
+            agent_id=11,
+            machine="m",
+            workspace=workspace,
+            home=home,
+            contributions=contributions,
+        ),
+        refreshes=refreshes_for(contributions, harness=Harness.CLAUDE_CODE),
+        registration_ttl_seconds=3600.0,
+        clock=system_clock(),
+        handle_rng=SecureRandom(seeded_rng(1)),
+        controller_pid=1234,
+        timestamp_prefix=lambda: "",
+    )
+
+    async def _run(text: str, key: str) -> None:
+        sub = await bridge.subscribe()
+        try:
+            await bridge.deliver([HarnessInput.of(key=key, text=text)])
+            while (ev := await sub.get()) is not None:
+                if isinstance(ev, TurnCompleted):
+                    return
+        finally:
+            sub.close()
+
+    await _run("turn-1", "k1")
+    await _run("turn-2", "k2")
+    personal_index.write_text("- [Updated](u.md) — changed rule\n", encoding="utf-8")
+    await _run("turn-3", "k3")
+    await _run("turn-4", "k4")
+
+    first, second, third, fourth = session.submitted
+    assert "# Role & Operating Context" not in first
+    assert f"[Meiva notice] Shared Memory Index (`{shared}/MEMORY.md`):" in first
+    assert _CHINESE_HARD_RULE in first
+    assert "- [Initial](init.md) — initial personal" in first
+    assert second == "turn-2"
+    assert third == f"[Meiva notice] Memory index updated: re-read `{personal_index}`.\n\nturn-3"
+    assert fourth == "turn-4"
+    assert set(session.digests) == {"meiva_memory.shared", "meiva_memory.personal"}

@@ -62,6 +62,7 @@ def test_claude_code_transfer_collect_and_apply(tmp_path: Path) -> None:
                 "model": "claude-sonnet-5-5",
                 "resumes": 3,
                 "background": [],
+                "context_digests": {},
                 "created_at": "2026-10-28T13:15:26+00:00",
                 "updated_at": "2026-10-28T20:37:10+00:00",
             }
@@ -164,6 +165,7 @@ def test_antigravity_transfer_collect_and_apply(tmp_path: Path) -> None:
                 "model": "gemini-4-argon-low",
                 "resumes": 1,
                 "background": [],
+                "context_digests": {},
                 "created_at": "2026-10-28T13:15:32+00:00",
                 "updated_at": "2026-10-28T20:33:11+00:00",
             }
@@ -251,6 +253,7 @@ def test_codex_transfer_collect_and_apply(tmp_path: Path) -> None:
                 "model": "gpt-6-astra",
                 "resumes": 1,
                 "background": [],
+                "context_digests": {},
                 "created_at": "2026-10-28T13:15:27+00:00",
                 "updated_at": "2026-10-28T20:33:10+00:00",
             }
@@ -354,6 +357,7 @@ def test_bundle_pack_and_activate_with_harness_transfer(tmp_path: Path) -> None:
                 "model": "claude-sonnet-5-5",
                 "resumes": 0,
                 "background": [],
+                "context_digests": {},
                 "created_at": "2026-11-01T00:00:00Z",
                 "updated_at": "2026-11-01T00:00:00Z",
             }

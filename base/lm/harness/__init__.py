@@ -59,7 +59,14 @@ from base.lm.harness.faults import (
     format_fatal_reason,
     sanitize_error_text,
 )
-from base.lm.harness.handoff import ClusterFact, EntryPoint, Handoff, HarnessContribution
+from base.lm.harness.handoff import (
+    ClusterFact,
+    ContextRefresh,
+    EntryPoint,
+    Handoff,
+    HarnessContribution,
+    RefreshContext,
+)
 from base.lm.harness.registration import (
     HANDLE_ENV,
     HarnessRegistration,
@@ -85,6 +92,7 @@ __all__ = [
     "BridgeEvent",
     "ClusterFact",
     "ContextCompacted",
+    "ContextRefresh",
     "EntryPoint",
     "EventSubscription",
     "FileSessionRegistry",
@@ -112,6 +120,7 @@ __all__ = [
     "ReasoningText",
     "Reconciliation",
     "ReconciliationUnavailableError",
+    "RefreshContext",
     "RegistrationStore",
     "SessionBound",
     "SessionClosed",

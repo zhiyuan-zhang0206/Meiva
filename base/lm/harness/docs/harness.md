@@ -108,6 +108,20 @@ cost the host reports (`Handoff.size_bytes()`).
 Section order, the versioned field set and the tests that pin both are defined in
 [The handoff document](handoff.md).
 
+## Context kept current in a running session
+
+A plugin can contribute `refreshes` (`HarnessContribution.refreshes`): pieces of context read
+fresh before each turn, each a `ContextRefresh` with a key, a full `body` and a one-line `notice`.
+A conversation is given each body once. A fresh session gets it inside the handoff. A resumed
+session whose record names no digest for the key (a record from before the field existed) or a
+fork (its clone is a new record) gets the body on its next turn. After that, a changed body is told
+by its notice alone, so the CLI's append-only transcript does not collect one copy per edit.
+What was given is `SessionRecord.context_digests` (key → digest of the body last made known),
+written through the session when the input that carried it is in the model's context; a refused
+or lost input carries it again. A session that does not keep digests (`ContextDigestKeeping`) is
+given no refreshes. The memory plugin uses this for the shared index, the personal index and
+`INHERIT.md`.
+
 ## Who a message belongs to
 
 The failure split, the `_claim` entry point and where unowned output goes:

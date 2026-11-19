@@ -11,6 +11,7 @@ from dataclasses import dataclass
 from base.packages.text_budget import Unit, measure
 
 _FRONTMATTER_OPEN = "---\n"
+DEFAULT_INHERIT_MAX_BLOCK_CHARS = 4000
 
 _FRAMING = (
     "Memory your ancestors chose to share with descendants (depth {depth}, "
@@ -84,19 +85,26 @@ def extract_inherit_body(text: str) -> str:
     return _frontmatter_body(text.replace("\r\n", "\n")).strip()
 
 
+def clip_inherit_body(body: str, *, entry_path: str, max_chars: int) -> tuple[str, str | None]:
+    chars = measure(body, Unit.CHARS)
+    if max_chars > 0 and chars > max_chars:
+        warning = f"block in {entry_path} is {chars} chars — truncated to {max_chars}"
+        clipped = (
+            f"{body[:max_chars].rstrip()}\n"
+            f"{_BLOCK_TRUNCATION.format(cap=max_chars, path=entry_path)}"
+        )
+        return clipped, warning
+    return body, None
+
+
 def _clip_blocks(entry: EntryBlocks, cap: int) -> tuple[str, list[str]]:
     texts: list[str] = []
     warnings: list[str] = []
     for block in entry.blocks:
-        chars = measure(block, Unit.CHARS)
-        if cap > 0 and chars > cap:
-            warnings.append(f"block in {entry.entry_path} is {chars} chars — truncated to {cap}")
-            texts.append(
-                f"{block[:cap].rstrip()}\n"
-                f"{_BLOCK_TRUNCATION.format(cap=cap, path=entry.entry_path)}"
-            )
-        else:
-            texts.append(block)
+        clipped, warning = clip_inherit_body(block, entry_path=entry.entry_path, max_chars=cap)
+        texts.append(clipped)
+        if warning is not None:
+            warnings.append(warning)
     return "\n\n".join(texts), warnings
 
 

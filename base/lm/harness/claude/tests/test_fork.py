@@ -183,3 +183,43 @@ async def test_a_source_session_kept_on_another_harness_is_not_cloned(tmp_path: 
     registry.save(_record(SOURCE, "codex", "thread-old", tmp_path))
     with pytest.raises(ForkSourceUnavailableError, match="holds no CLI session"):
         await start(tmp_path, agent_id=CHILD, registry=registry, fork_source_agent_id=SOURCE)
+
+
+# meiva:note
+# The context a transcript was given belongs to that transcript: a resume reads it back and keeps it
+# on the rebound record, while a fork's clone is a new record that starts with none, so the bridge
+# hands the fork its contributed context once.
+# meiva:link base/lm/harness/docs/harness.md
+async def test_context_digests_follow_the_transcript_and_a_fork_starts_without_them(
+    tmp_path: Path,
+) -> None:
+    registry = FileSessionRegistry(tmp_path / "sessions")
+    sdk = FakeSDK()
+    source = await start(
+        tmp_path, agent_id=SOURCE, registry=registry, session_id="sess-src", sdk=sdk
+    )
+    await source.wait_for(lambda event: isinstance(event, SessionBound))
+    source.session.record_context_digests({"meiva_memory.shared": "d1"})
+    await source.stop()
+
+    resumed = await start(
+        tmp_path, agent_id=SOURCE, registry=registry, session_id="sess-src", sdk=sdk
+    )
+    try:
+        await resumed.wait_for(lambda event: isinstance(event, SessionBound))
+        assert resumed.session.context_digests == {"meiva_memory.shared": "d1"}
+        stored = registry.load(SOURCE, harness="claude_code")
+        assert stored is not None and stored.context_digests == {"meiva_memory.shared": "d1"}
+    finally:
+        await resumed.stop()
+
+    child = await start(
+        tmp_path, agent_id=CHILD, registry=registry, sdk=sdk, fork_source_agent_id=SOURCE
+    )
+    try:
+        await child.wait_for(lambda event: isinstance(event, SessionBound))
+        assert child.session.context_digests == {}
+        clone = registry.load(CHILD, harness="claude_code")
+        assert clone is not None and clone.context_digests == {}
+    finally:
+        await child.stop()

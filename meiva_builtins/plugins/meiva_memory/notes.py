@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from dataclasses import dataclass
 from pathlib import Path
 
 from langchain_core.messages import HumanMessage
@@ -22,6 +23,28 @@ def personal_memory_dir(workspace: Path) -> Path:
 
 # meiva:link meiva_builtins/plugins/meiva_memory/docs/memory-index-notes.md
 _NO_CONTENT = "(no content)"
+DEFAULT_PERSONAL_INDEX_MAX_LINES = 200
+
+
+@dataclass(frozen=True, slots=True)
+class PersonalMemoryIndex:
+    body: str
+    raw_text: str
+    lines: int
+    maintenance_suffix: str
+    over_cap: bool
+
+
+def read_shared_memory_index(shared: Path) -> str | None:
+    path = shared / _MEMORY_INDEX_FILE
+    if not path.is_file():
+        return None
+    try:
+        text = path.read_text(encoding="utf-8").strip()
+    except OSError as exc:
+        logger.warning("[shared-memory] unreadable index {}: {}", path, exc)
+        return None
+    return text or None
 
 
 # meiva:note
@@ -48,15 +71,13 @@ def memory_index_note(ctx: MeivaContext) -> HumanMessage | None:
     slices = ctx.require_agent()
     if slices.sandbox.eval_isolation or not slices.read("agent", "memory_index_inject_enabled"):
         return None
-    path = memory_dir(home=ctx.require_meiva_home()) / _MEMORY_INDEX_FILE
-    if not path.is_file():
-        return None
-    text = path.read_text(encoding="utf-8").strip()
-    if not text:
+    shared = memory_dir(home=ctx.require_meiva_home())
+    text = read_shared_memory_index(shared)
+    if text is None:
         return None
     now = ctx.require_clock().now()
     return system_note_message(
-        content=f"{shared_index_framing(path.parent)}\n\n{text}",
+        content=f"{shared_index_framing(shared)}\n\n{text}",
         tag=NoteTag.MEMORY,
         picked_up_at=now,
         created_at=now,
@@ -104,6 +125,40 @@ def _per_agent_maintenance_suffix(text: str, *, cap: int) -> str:
     return _OVER_CAP_NOTE.format(lines=verdict.measured, cap=cap)
 
 
+def read_personal_memory_index(
+    mem_dir: Path,
+    *,
+    max_lines: int = DEFAULT_PERSONAL_INDEX_MAX_LINES,
+    agent_id: int | None = None,
+) -> PersonalMemoryIndex:
+    path = mem_dir / _MEMORY_INDEX_FILE
+    try:
+        mem_dir.mkdir(parents=True, exist_ok=True)
+        if not path.is_file():
+            logger.info(
+                "[per-agent-memory] agent={} path={} — creating empty index", agent_id, path
+            )
+            path.write_text("", encoding="utf-8")
+    except OSError as exc:
+        logger.warning("[per-agent-memory] unable to initialize {}: {}", path, exc)
+    text = ""
+    if path.is_file():
+        try:
+            text = path.read_text(encoding="utf-8").strip()
+        except OSError as exc:
+            logger.warning("[per-agent-memory] unreadable index {}: {}", path, exc)
+    body = text if text else _NO_CONTENT
+    lines = measure(text, Unit.LINES)
+    suffix = _per_agent_maintenance_suffix(text, cap=max_lines)
+    return PersonalMemoryIndex(
+        body=body,
+        raw_text=text,
+        lines=lines,
+        maintenance_suffix=suffix,
+        over_cap=bool(suffix),
+    )
+
+
 # meiva:link meiva_builtins/plugins/meiva_memory/docs/memory-index-notes.md
 def per_agent_memory_note(ctx: MeivaContext) -> HumanMessage | None:
     if not ctx.require_agent().read("agent", "memory_per_agent_inject_enabled"):
@@ -117,31 +172,23 @@ def per_agent_memory_note(ctx: MeivaContext) -> HumanMessage | None:
         return None
     ws = workspace_dir(aid, home=ctx.require_meiva_home())
     mem_dir = personal_memory_dir(ws)
-    mem_dir.mkdir(parents=True, exist_ok=True)
-    path = mem_dir / _MEMORY_INDEX_FILE
-
-    if not path.is_file():
-        logger.info("[per-agent-memory] agent={} path={} — creating empty index", aid, path)
-        path.write_text("", encoding="utf-8")
-    text = path.read_text(encoding="utf-8").strip()
-    body = text if text else _NO_CONTENT
-    lines = measure(text, Unit.LINES)
-    suffix = _per_agent_maintenance_suffix(
-        text,
-        cap=ctx.require_agent().read("agent", "memory_per_agent_index_max_lines"),
+    index = read_personal_memory_index(
+        mem_dir,
+        max_lines=ctx.require_agent().read("agent", "memory_per_agent_index_max_lines"),
+        agent_id=aid,
     )
     logger.info(
         "[per-agent-memory] agent={} path={} lines={} {} over_cap={}",
         aid,
-        path,
-        lines,
-        "injected" if text else "empty",
-        bool(suffix),
+        mem_dir / _MEMORY_INDEX_FILE,
+        index.lines,
+        "injected" if index.raw_text else "empty",
+        index.over_cap,
     )
     now = ctx.require_clock().now()
     return system_note_message(
         content=f"{personal_index_framing(mem_dir, memory_dir(home=ctx.require_meiva_home()))}"
-        f"\n\n{body}{suffix}",
+        f"\n\n{index.body}{index.maintenance_suffix}",
         tag=NoteTag.AGENT_MEMORY,
         picked_up_at=now,
         created_at=now,
