@@ -17,6 +17,7 @@ from pathlib import Path
 from types import ModuleType, SimpleNamespace
 
 from base.agents.messages.reply_intent import delivery_disabled_entries
+from base.api_contracts.agent_contract import Harness
 from base.host.env.agent_slices import AgentSlices, Prompt
 from base.lm.catalog import ModelCatalog
 from base.packages.skills.tree import Skill
@@ -49,6 +50,7 @@ class SectionInputs:
     slices: AgentSlices
     catalog: ModelCatalog
     live: LiveSdk
+    harness: Harness | None = None
 
 
 def resolved_setting(setting: str, inputs: SectionInputs) -> object:
