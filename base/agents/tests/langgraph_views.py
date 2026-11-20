@@ -12,6 +12,7 @@ from langgraph.checkpoint.base import BaseCheckpointSaver
 from langgraph.types import Command
 
 from base.host.boundary.json_values import is_object_dict, is_object_list
+from base.host.boundary.untyped import object_of
 
 __all__ = ["AsyncGraph", "NodeGraphBuilder", "command_update", "update_messages"]
 
@@ -20,7 +21,7 @@ __all__ = ["AsyncGraph", "NodeGraphBuilder", "command_update", "update_messages"
 # A node's `Command.update` read as the dict it is. A node update maps a state key to a value of that
 # key's own type, so a test narrows the value it asserts on instead of holding the `Any`.
 def command_update[Node](cmd: Command[Node]) -> dict[str, object]:
-    update = cmd.update
+    update = object_of(getattr, cmd, "update")
     assert is_object_dict(update)
     return update
 
