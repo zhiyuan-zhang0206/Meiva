@@ -37,8 +37,7 @@ import sys
 from dataclasses import dataclass
 from pathlib import Path
 
-from meizel import lint_common
-from meizel.checkout import source_tree, tracked_files
+from meizel.api import lint_common, source_tree, tracked_files
 
 from base.host.boundary.options import options
 from scripts.audit.analysis import (

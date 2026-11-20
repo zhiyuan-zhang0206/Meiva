@@ -23,8 +23,7 @@ from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
 
-from meizel.checkout import roles_at
-from meizel.roles import select_packages
+from meizel.api import roles_at, select_packages
 
 from scripts.structure import service_units
 from scripts.structure.imports import cache, executed, facts

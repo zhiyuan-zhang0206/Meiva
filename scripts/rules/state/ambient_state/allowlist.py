@@ -33,7 +33,7 @@ import re
 from collections.abc import Mapping
 from dataclasses import dataclass
 
-from meizel.allowances import Policy
+from meizel.api import Policy
 
 __all__ = ["AmbientAllowlist", "from_policy"]
 

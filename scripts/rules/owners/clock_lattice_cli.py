@@ -11,10 +11,15 @@ import sys
 from collections.abc import Iterable
 from pathlib import Path
 
-from meizel import allowances, lint_common
-from meizel.checkout import GitRepo, roles_at, source_tree
-from meizel.graph.universe import SourceTree
-from meizel.roles import select_packages
+from meizel.api import (
+    GitRepo,
+    SourceTree,
+    allowances,
+    lint_common,
+    roles_at,
+    select_packages,
+    source_tree,
+)
 
 from scripts.rules.owners import clock_lattice
 

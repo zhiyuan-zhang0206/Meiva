@@ -44,17 +44,17 @@ from typing import TypeGuard
 _REPO_ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(_REPO_ROOT))
 
-from meizel.allowances import (  # noqa: E402
+from meizel.api import (  # noqa: E402
     POLICY,
     Declaration,
+    GitRepo,
+    MeizelError,
     Policy,
     RemovalReport,
-    load,
-    parse_snapshot,
+    allowances,
     removal_report,
+    toplevel,
 )
-from meizel.checkout import GitRepo, toplevel  # noqa: E402
-from meizel.graph.model import MeizelError  # noqa: E402
 
 from base.host.boundary.options import options  # noqa: E402
 from base.host.boundary.untyped import object_of  # noqa: E402
@@ -181,7 +181,7 @@ def _policy_at(repo: GitRepo, ref: str) -> tuple[Policy | None, str]:
     text = repo.show_optional_text(ref, POLICY)
     if text is None:
         return None, f"{ref}:{POLICY} is there but cannot be read"
-    policy, problems = parse_snapshot(text)
+    policy, problems = allowances.parse_snapshot(text)
     if problems:
         return None, f"{ref}:{POLICY}: {problems[0]}"
     return policy, ""
@@ -503,7 +503,7 @@ def _policies(repo: GitRepo, against: str) -> tuple[Policy, Policy]:
     before, why = _policy_at(repo, against)
     if before is None:
         raise MeizelError(f"the comparison base {against} cannot be read: {why}")
-    return before, load(repo)
+    return before, allowances.load(repo)
 
 
 # meiva:note

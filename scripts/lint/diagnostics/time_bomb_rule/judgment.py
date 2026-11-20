@@ -11,8 +11,7 @@ import re
 from collections.abc import Callable, Iterable, Iterator
 from pathlib import Path
 
-from meizel import lint_common
-from meizel.graph.universe import SourceTree
+from meizel.api import SourceTree, lint_common
 
 from scripts.lint.diagnostics.time_bomb_rule.index import Index
 from scripts.lint.diagnostics.time_bomb_rule.sources import (

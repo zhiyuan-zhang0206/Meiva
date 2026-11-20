@@ -7,12 +7,21 @@ from pathlib import Path
 
 import meizel
 import pytest
-from meizel import allowances
-from meizel.contracts.analysis import Analysis, analyze, exempt_test_modules, load_policy
-from meizel.entry import main, open_repository
-from meizel.graph.model import Fact, FactKind
-from meizel.language.scan import typescript_files
-from meizel.roles import framework_dirs, parse_roles, select_packages
+from meizel.api import (
+    Analysis,
+    Fact,
+    FactKind,
+    allowances,
+    analyze,
+    exempt_test_modules,
+    framework_dirs,
+    load_policy,
+    main,
+    open_repository,
+    parse_roles,
+    select_packages,
+    typescript_files,
+)
 
 # meiva:note
 # This repository's own facts as the locality checker reads them. meizel is an installed dependency
@@ -41,7 +50,7 @@ def test_framework_dirs_are_the_declared_packages() -> None:
 
 
 def test_root_environment_regions_do_not_admit_independent_projects() -> None:
-    from meizel.contracts.enumerations import parse_regions
+    from meizel.api import parse_regions
 
     text = (_REPO_ROOT / "pyproject.toml").read_text(encoding="utf-8")
     regions = parse_regions({"pyproject.toml": text})

@@ -263,7 +263,7 @@ def test_base_archive_cannot_silently_omit_dependency_inputs(tmp_path: Path) -> 
     ],
 )
 def test_base_policy_is_read_by_the_policy_owner(tmp_path: Path, legacy: str) -> None:
-    from meizel.graph.model import MeizelError
+    from meizel.api import MeizelError
 
     root = _repo(tmp_path)
     _write(root, "base/leaf.py")

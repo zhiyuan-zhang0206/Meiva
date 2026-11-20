@@ -21,9 +21,7 @@ from pathlib import Path
 from types import ModuleType
 
 import pytest
-from meizel import lint_common
-from meizel.checkout import roles_at, source_tree
-from meizel.roles import framework_dirs, select_packages
+from meizel.api import framework_dirs, lint_common, roles_at, select_packages, source_tree
 
 from base.host.proc import run_bounded
 from scripts.content_lint import lint_no_cjk, lint_no_tailnet

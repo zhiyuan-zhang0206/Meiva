@@ -103,8 +103,10 @@ from pathlib import Path
 _REPO_ROOT = Path(__file__).resolve().parent.parent.parent
 sys.path.insert(0, str(_REPO_ROOT))
 
-from meizel import lint_common  # noqa: E402 - standalone script
-from meizel.checkout import source_tree  # noqa: E402
+from meizel.api import (  # noqa: E402
+    lint_common,
+    source_tree,
+)
 
 # The one location where session scope and the fixture's own blast radius coincide.
 _SESSION_PROVISIONING = "tests/fixtures/provisioning.py"

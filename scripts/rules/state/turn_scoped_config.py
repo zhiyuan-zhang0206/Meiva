@@ -11,9 +11,7 @@ from collections.abc import Callable, Iterable
 from dataclasses import dataclass
 from pathlib import Path
 
-from meizel import allowances, lint_common
-from meizel.checkout import GitRepo, source_tree
-from meizel.graph.universe import SourceTree
+from meizel.api import GitRepo, SourceTree, allowances, lint_common, source_tree
 
 from scripts.rules.state import lint_paths
 from scripts.rules.state import turn_scoped_config_plan as plan

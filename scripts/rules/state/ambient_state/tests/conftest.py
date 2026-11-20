@@ -3,8 +3,7 @@ from __future__ import annotations
 from dataclasses import replace
 from pathlib import Path
 
-from meizel import allowances
-from meizel.roles import parse_roles, select_packages
+from meizel.api import allowances, parse_roles, select_packages
 
 from scripts.rules.state.ambient_state import Config
 from scripts.rules.state.ambient_state.allowlist import from_policy

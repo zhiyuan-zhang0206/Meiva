@@ -61,8 +61,10 @@ from typing import TypeGuard
 REPO_ROOT = Path(__file__).parent.parent.parent.parent
 sys.path.insert(0, str(REPO_ROOT))
 
-from meizel import lint_common  # noqa: E402 - standalone script
-from meizel.graph.universe import SourceTree  # noqa: E402
+from meizel.api import (  # noqa: E402
+    SourceTree,
+    lint_common,
+)
 
 SCAN_DIR = "meiva_builtins/plugins"
 

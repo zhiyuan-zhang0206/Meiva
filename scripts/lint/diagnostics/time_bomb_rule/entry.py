@@ -8,20 +8,20 @@ from __future__ import annotations
 import sys
 from pathlib import Path
 
-from meizel import checkout, lint_common, roles
+from meizel.api import lint_common, roles_at, select_packages, source_tree
 
 from scripts.lint.diagnostics.time_bomb_rule.index import Index
 from scripts.lint.diagnostics.time_bomb_rule.judgment import lint_source, lint_tests
 
 _REPO_ROOT = Path(__file__).resolve().parents[4]
-_ROLES = checkout.roles_at(_REPO_ROOT)
-_SCAN_DIRS = roles.select_packages(_ROLES, "application", "standalone", "tooling")
+_ROLES = roles_at(_REPO_ROOT)
+_SCAN_DIRS = select_packages(_ROLES, "application", "standalone", "tooling")
 
 
 @lint_common.admission.scoped
 def main(argv: list[str], *, repo_root: Path | None = None) -> int:
     root = _REPO_ROOT if repo_root is None else repo_root.resolve()
-    tree = checkout.source_tree(root)
+    tree = source_tree(root)
     argv, only = lint_common.split_only(argv)
     scope = lint_common.changed_scope(tree, only)
     if argv:

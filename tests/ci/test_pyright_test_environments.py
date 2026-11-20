@@ -21,7 +21,7 @@ from pathlib import Path
 from typing import Any
 
 import pytest
-from meizel.roles import pytest_test_hosts
+from meizel.api import pytest_test_hosts
 
 from scripts.codegen import gen_pyright_test_environments as gen
 

@@ -27,19 +27,25 @@ from base.host.env.boot_actions import enter_scratch_home  # noqa: E402
 if __name__ == "__main__":
     enter_scratch_home()
 
-from meizel import allowances, lint_common  # noqa: E402
-from meizel.budgets import limits  # noqa: E402
-from meizel.checkout import GitRepo, load_universe, roles_at, source_tree  # noqa: E402
-from meizel.contracts.analysis import (  # noqa: E402
+from meizel.api import (  # noqa: E402
+    GitRepo,
+    MeizelError,
+    Sources,
+    Universe,
+    allowances,
+    framework_dirs,
+    limits,
+    lint_common,
     load_manifests,
     load_policy,
+    load_universe,
+    roles_at,
+    scan_tree,
+    select_packages,
+    source_tree,
     type_checking_in_scope,
     type_checking_violations,
 )
-from meizel.graph.model import MeizelError, Sources  # noqa: E402
-from meizel.graph.universe import Universe  # noqa: E402
-from meizel.language.scan import scan_tree  # noqa: E402
-from meizel.roles import framework_dirs, select_packages  # noqa: E402
 
 from scripts.lint.diagnostics import no_ambient_fallback  # noqa: E402
 from scripts.rules.language import path_imports  # noqa: E402

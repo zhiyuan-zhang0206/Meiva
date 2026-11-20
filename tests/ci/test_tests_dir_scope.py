@@ -6,9 +6,7 @@ from pathlib import Path
 
 import pytest
 import yaml
-from meizel import lint_common
-from meizel.checkout import roles_at, source_tree
-from meizel.roles import framework_dirs
+from meizel.api import framework_dirs, lint_common, roles_at, source_tree
 
 _REPO_ROOT = Path(__file__).resolve().parents[2]
 _FRAMEWORK_DIRS = framework_dirs(roles_at(_REPO_ROOT))

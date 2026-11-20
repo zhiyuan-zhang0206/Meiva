@@ -982,7 +982,7 @@ jobs:
             mkdir -p tmp/selected
             uv run python - <<'PY'
           from pathlib import Path
-          from meizel.checkout import lanes_at
+          from meizel.api import lanes_at
 
           static_set = lanes_at(Path(".").resolve()).static
           selected = [

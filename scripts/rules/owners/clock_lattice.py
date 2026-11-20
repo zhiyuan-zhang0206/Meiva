@@ -5,7 +5,7 @@ import re
 from collections.abc import Collection, Mapping
 from dataclasses import dataclass
 
-from meizel import allowances
+from meizel.api import allowances
 
 __all__ = [
     "Lattice",

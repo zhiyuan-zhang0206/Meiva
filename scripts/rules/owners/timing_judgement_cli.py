@@ -9,11 +9,15 @@ import sys
 from collections.abc import Mapping
 from pathlib import Path
 
-from meizel import lint_common
-from meizel.checkout import source_tree
-from meizel.graph.model import MeizelError
-from meizel.graph.universe import SourceTree
-from meizel.source_text import is_mapping, is_object_list, object_of
+from meizel.api import (
+    MeizelError,
+    SourceTree,
+    is_mapping,
+    is_object_list,
+    lint_common,
+    object_of,
+    source_tree,
+)
 
 from scripts.rules.owners import timing_judgement
 

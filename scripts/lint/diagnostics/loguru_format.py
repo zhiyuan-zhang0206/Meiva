@@ -116,9 +116,12 @@ sys.path.insert(0, str(_REPO_ROOT))
 # meiva:note
 # This entry puts the repository root on `sys.path` itself, so every import below that line is out of
 # order for ruff; the reason is the bootstrap, not a circular dependency.
-from meizel import lint_common  # noqa: E402
-from meizel.checkout import roles_at, source_tree  # noqa: E402
-from meizel.roles import select_packages  # noqa: E402
+from meizel.api import (  # noqa: E402
+    lint_common,
+    roles_at,
+    select_packages,
+    source_tree,
+)
 
 ROLES = roles_at(_REPO_ROOT)
 

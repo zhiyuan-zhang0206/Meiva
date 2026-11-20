@@ -3,7 +3,7 @@ from __future__ import annotations
 from pathlib import Path
 
 import pytest
-from meizel import allowances
+from meizel.api import allowances
 
 from scripts.rules.state import turn_scoped_config as gate
 

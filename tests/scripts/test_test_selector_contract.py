@@ -2,8 +2,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from meizel import allowances
-from meizel.checkout import GitRepo
+from meizel.api import GitRepo, allowances
 
 from scripts.ci import test_selector
 

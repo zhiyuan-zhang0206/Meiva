@@ -3,7 +3,7 @@ from __future__ import annotations
 import ast
 
 import pytest
-from meizel import allowances
+from meizel.api import allowances
 
 from scripts.rules.owners import decisions
 

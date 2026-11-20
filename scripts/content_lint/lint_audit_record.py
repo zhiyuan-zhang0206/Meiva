@@ -57,10 +57,12 @@ if __name__ == "__main__":
 # roles the root manifest declares (the scan scope below is a selection from them), and the shared
 # scan vocabulary that decides which of those files to read.
 # meiva:link scripts/docs/scripts.md
-from meizel import lint_common  # noqa: E402 - standalone script
-from meizel.checkout import source_tree  # noqa: E402
-from meizel.graph.universe import SourceTree  # noqa: E402
-from meizel.roles import framework_dirs  # noqa: E402
+from meizel.api import (  # noqa: E402
+    SourceTree,
+    framework_dirs,
+    lint_common,
+    source_tree,
+)
 
 _TREE = source_tree(_REPO_ROOT)
 _SCAN_DIRS = framework_dirs(_TREE.roles())

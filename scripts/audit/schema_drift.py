@@ -10,9 +10,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 import psycopg
-from meizel import lint_common
-from meizel.checkout import apply_plan, source_tree
-from meizel.graph.universe import EditPlan
+from meizel.api import EditPlan, apply_plan, lint_common, source_tree
 
 from base.host.boundary.options import options
 from scripts.audit.analysis import allowlist_entries, compare, live_columns, schema_columns

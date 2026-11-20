@@ -5,7 +5,7 @@ import sys
 from pathlib import Path
 
 import pytest
-from meizel.checkout import source_tree
+from meizel.api import source_tree
 
 from scripts.lint.plugins import no_plugin_wrap as gate
 

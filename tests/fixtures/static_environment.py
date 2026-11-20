@@ -5,7 +5,7 @@ from enum import StrEnum
 from pathlib import Path
 
 import pytest
-from meizel.checkout import lanes_at
+from meizel.api import lanes_at
 
 
 class TestEnvironment(StrEnum):

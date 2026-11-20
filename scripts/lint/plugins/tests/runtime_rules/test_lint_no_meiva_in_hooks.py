@@ -3,7 +3,7 @@ from __future__ import annotations
 from pathlib import Path
 
 import pytest
-from meizel.checkout import source_tree
+from meizel.api import source_tree
 
 from scripts.lint.plugins import no_meiva_in_hooks as gate
 from scripts.lint.plugins.no_meiva_in_hooks_cli import SCAN_DIRS
