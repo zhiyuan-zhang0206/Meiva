@@ -87,16 +87,16 @@ the same reason: the instant queries return one frame per day series, and
 without the join the table falls back to a per-series frame picker instead
 of one row per day.
 
-The dashboard now has 104 panel entries (93 panels + 11 row headers): core
+The dashboard now has 92 panel entries (82 panels + 10 row headers): core
 ids remain below 1000 (the four new stat tiles are 44–47), plugin ids are
 >= 1000 (the three plugin rows are 1001 / 1004 / 1007; their panels are
 1002–1013), host/data-plane panels are 2101–2112, the cost-analysis panels are
 38, 39, 41–43, the event panels are 2201–2203 (business/anomaly logs,
 event-type table, raw stream), the Fleet growth panels are 2301–2302
 (Max Agent ID + deriv rate, task #2010), and the PR-flow row is 2008 with
-panels 2401–2404 (task #2139). The Dev/CI row is 2009 with panels 2501–2505
-(task #4014): per-PR duration/run counts, failures and self-healing, workflow
-fragility, and white-run classes. The
+panels 2401–2404 (task #2139). The Dev/CI row is 2009 and holds the main-red
+suspect table (2506); the CI-run sampler panels 2501–2505 were retired with
+their producer (task #7452). The
 duplicate plugin spawn-rate panel (1006) was removed because the Fleet
 summaries cover the same information.
 

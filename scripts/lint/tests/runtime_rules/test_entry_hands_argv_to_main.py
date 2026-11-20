@@ -47,7 +47,6 @@ _ENTRIES = [
     ("scripts/ci/pull_requests/accounting.py", None),
     ("scripts/ci/pull_requests/pr_flow_export.py", None),
     ("scripts/ci/pull_requests/pyright_scope.py", None),
-    ("scripts/ci/pull_requests/runs_export.py", None),
     ("scripts/ci/shard_counts.py", None),
     ("scripts/ci/test_selector.py", None),
     ("scripts/codegen/build_android_release.py", None),

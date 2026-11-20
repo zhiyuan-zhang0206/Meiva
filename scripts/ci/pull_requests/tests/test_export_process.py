@@ -2,14 +2,12 @@ import ast
 import inspect
 import subprocess
 import textwrap
-from collections.abc import Sequence
 from datetime import UTC, datetime
 from pathlib import Path
 
 import pytest
 
 from base.clock.tests.fakes import system_clock
-from base.clock.tests.manual_timers import ManualTimers
 from base.cluster.dataplane.direct_url import ClusterDirectUrl
 from base.cluster.machine.configured import ConfiguredMachineIdentity
 from base.config import ConfigBoot
@@ -19,7 +17,7 @@ from base.native_process import code_version
 from base.native_process.loaded_commit import LoadedCommit
 from base.paths import meiva_home
 from base.telemetry import Event, EventPipeline
-from scripts.ci.pull_requests import export_process, runs_export
+from scripts.ci.pull_requests import export_process
 
 
 # meiva:note
@@ -104,52 +102,6 @@ def test_body_error_preserves_the_original_writer_error_during_close() -> None:
     with pytest.raises(OSError) as worker:
         pipeline.stop(timeout=0)
     assert worker.value is worker_error
-
-
-def test_export_entry_captures_before_fetch_or_borrows_the_supplied_writer(
-    tmp_path: Path,
-) -> None:
-    calls: list[str] = []
-    emitted: list[Event] = []
-
-    def write(events: list[Event]) -> None:
-        calls.append("emit")
-        emitted.extend(events)
-
-    pipeline = EventPipeline(now=system_clock().now, writer=write)
-    commands: list[list[str]] = []
-
-    def run_process(
-        argv: Sequence[str], *, timeout: float, capture_output: bool, text: bool
-    ) -> subprocess.CompletedProcess[str]:
-        assert timeout == 60 and capture_output and text
-        assert list(argv[:4]) == ["gh", "api", "--method", "GET"]
-        if not commands:
-            calls.append("fetch")
-        commands.append(list(argv))
-        assert "actions/runs?" in argv[4] or "pulls?" in argv[4]
-        return subprocess.CompletedProcess(argv, 0, "[]", "")
-
-    try:
-        assert (
-            runs_export.main(
-                ["--repo", "owner/repo", "--state-dir", str(tmp_path)],
-                producer=lambda: pipeline,
-                run_process=run_process,
-                timers=ManualTimers(),
-                home=tmp_path,
-            )
-            == 0
-        )
-        assert calls == ["fetch", "emit"]
-        assert not pipeline.stopped
-        assert len(commands) == 2
-        assert {event.event_name for event in emitted} == {"ci_runs_daily", "ci_runs_run"}
-        assert all(event.process == runs_export.PROCESS_NAME for event in emitted)
-        assert (tmp_path / "owner--repo.json").is_file()
-        assert (tmp_path / "snapshot.json").is_file()
-    finally:
-        pipeline.stop(timeout=2)
 
 
 # meiva:note

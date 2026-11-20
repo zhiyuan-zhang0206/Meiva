@@ -3,8 +3,17 @@
 # LogQL would resurrect an older nonempty suspect after its current slot clears.
 from __future__ import annotations
 
+from types import ModuleType
+
+from base.telemetry.metrics.core import fleet, pr_flow
 from base.telemetry.metrics.logql import EVENT_NAME_SELECTOR
 from base.telemetry.metrics.plugin_metrics import MetricSpec
+
+# meiva:note
+# The delivery-health definition modules the catalog reaches through this one (PR flow and fleet
+# growth), the way `observability.PACK_MODULES` groups its packs, so the catalog's direct fan-out
+# stays inside its budget.
+DELIVERY_MODULES: tuple[ModuleType, ...] = (fleet, pr_flow)
 
 
 def _slot(index: int) -> str:
