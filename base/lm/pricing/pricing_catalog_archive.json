@@ -506,7 +506,7 @@
       "vendor": "anthropic",
       "source_url": "https://platform.claude.com/docs/en/models/sonnet-5-5/overview",
       "source_checked_at": "2026-11-20",
-      "effective_time_note": "Anthropic's release notes (https://platform.claude.com/docs/en/release-notes/overview) date the Sonnet 5.5 cache-read cut from $0.20 to $0.10 per 1M (0.1x to 0.05x of input) to October 7, 2026 and publish no instant or timezone; Meiva activates it at the latest global occurrence of that date (UTC-12) = 2026-10-07T12:00:00Z, so ambiguous-timezone traffic never under-reports spend.",
+      "effective_time_note": "Anthropic's release notes (https://platform.claude.com/docs/en/release-notes/overview) date the Sonnet 5.5 cache-read cut from $0.20 to $0.10 per 1M (0.1x to 0.05x of input) to October 7, 2026 and publish no instant or timezone; Meiva activates it at the latest global occurrence of that date (UTC-12) = 2026-10-07T12:00:00Z, reading the date as the day the cut starts, so ambiguous-timezone traffic never under-reports spend; if the cut only took effect by the end of that date, up to about 24h of Sonnet 5.5 cache reads after the boundary are under-reported by $0.10 per 1M.",
       "periods": [
         {
           "effective_from": null,
