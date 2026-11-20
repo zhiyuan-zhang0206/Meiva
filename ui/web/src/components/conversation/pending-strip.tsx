@@ -23,8 +23,8 @@ function PendingQuoteLine({ quote }: { quote: Quote }) {
 }
 
 // meiva:note
-// A quoted message is one unit: a left rule groups its one-line quote preview, text and attachments;
-// a message without a quote keeps the compact single line.
+// Every queued message carries the same left rule; a quoted one stacks its one-line quote preview
+// above the text and attachments, an unquoted one stays a compact single line.
 function PendingRow({
   quote,
   testId,
@@ -34,15 +34,16 @@ function PendingRow({
   testId?: string;
   children: ReactNode;
 }) {
+  const rule = "ml-4 border-l-2 border-border pl-2";
   if (!quote) {
     return (
-      <li data-testid={testId} className={cn("items-center gap-1.5 pl-4", FLEX, MIN_W_0)}>
+      <li data-testid={testId} className={cn("items-center gap-1.5", rule, FLEX, MIN_W_0)}>
         {children}
       </li>
     );
   }
   return (
-    <li data-testid={testId} className={cn("ml-4 gap-0.5 border-l-2 border-border pl-2", FLEX, FLEX_COL, MIN_W_0)}>
+    <li data-testid={testId} className={cn("gap-0.5", rule, FLEX, FLEX_COL, MIN_W_0)}>
       <PendingQuoteLine quote={quote} />
       <div className={cn("items-center gap-1.5", FLEX, MIN_W_0)}>{children}</div>
     </li>

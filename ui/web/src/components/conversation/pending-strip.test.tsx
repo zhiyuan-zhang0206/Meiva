@@ -300,6 +300,6 @@ describe("PendingStrip", () => {
     expect(screen.queryByTestId("pending-quote")).toBeNull();
     const li = screen.getByText("plain").closest("li") as HTMLElement;
     expect(li.className.split(" ")).not.toContain("flex-col");
-    expect(li.className.split(" ")).toEqual(expect.arrayContaining(["items-center", "pl-4"]));
+    expect(li.className.split(" ")).toEqual(expect.arrayContaining(["items-center", "border-l-2", "pl-2"]));
   });
 });
