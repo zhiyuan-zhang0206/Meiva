@@ -43,27 +43,13 @@ MAIN_ROOT="$(cd -P "$(dirname "$COMMON_DIR")" && pwd -P)"  # physical, as `git w
 
 # Refuse worktree creation or bootstrapping against the production service checkout
 # ($MEIVA_HOME/source or ~/.meiva/source), including symlinks and subdirectories.
-check_not_prod_source() {
-  local prod_dir="$1"
-  [ -n "$prod_dir" ] && [ -d "$prod_dir" ] || return 0
-  local prod_phys
-  prod_phys="$(cd -P "$prod_dir" 2>/dev/null && pwd -P)" || return 0
-  case "$MAIN_ROOT/" in
-    "${prod_phys%/}/"*)
-      die "refusing to run against production source checkout ($MAIN_ROOT is in $prod_phys) — switch to your development clone instead: cd ~/Meiva && bash scripts/setup-worktree.sh ${TASK:-<task>}"
-      ;;
-  esac
-  case "$REPO_ROOT_PHYS/" in
-    "${prod_phys%/}/"*)
-      die "refusing to run inside production source checkout ($REPO_ROOT_PHYS is in $prod_phys) — switch to your development clone instead: cd ~/Meiva && bash scripts/setup-worktree.sh ${TASK:-<task>}"
-      ;;
-  esac
-}
-if [ -n "${MEIVA_HOME:-}" ]; then
-  check_not_prod_source "${MEIVA_HOME%/}/source"
+# shellcheck source=scripts/hooks/prod-source.sh
+. "$SCRIPT_DIR/hooks/prod-source.sh"
+if prod_phys="$(prod_source_containing "$MAIN_ROOT")"; then
+  die "refusing to run against production source checkout ($MAIN_ROOT is in $prod_phys) — switch to your development clone instead: cd ~/Meiva && bash scripts/setup-worktree.sh ${TASK:-<task>}"
 fi
-if [ -n "${HOME:-}" ]; then
-  check_not_prod_source "${HOME%/}/.meiva/source"
+if prod_phys="$(prod_source_containing "$REPO_ROOT_PHYS")"; then
+  die "refusing to run inside production source checkout ($REPO_ROOT_PHYS is in $prod_phys) — switch to your development clone instead: cd ~/Meiva && bash scripts/setup-worktree.sh ${TASK:-<task>}"
 fi
 
 # A shell that leaked another checkout's venv must never steer uv or the guard.

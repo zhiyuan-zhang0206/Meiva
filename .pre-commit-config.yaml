@@ -2,6 +2,18 @@ default_install_hook_types: [pre-commit, pre-push, commit-msg]
 default_stages: [pre-commit]
 
 repos:
+  # First, so a refused commit is not also rewritten by the fixers below. See the script's
+  # note: commit and push stages only, never a hook `git worktree add` / `checkout` runs.
+  - repo: local
+    hooks:
+      - id: refuse-prod-source
+        name: refuse commits and pushes from the production source checkout
+        entry: bash scripts/hooks/refuse-prod-source.sh
+        language: system
+        stages: [pre-commit, pre-push]
+        always_run: true
+        pass_filenames: false
+
   - repo: https://github.com/astral-sh/ruff-pre-commit
     rev: v0.16.7
     hooks:

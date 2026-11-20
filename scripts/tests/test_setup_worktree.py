@@ -22,6 +22,7 @@ _SEEDED = (
     ".python-version",
     "base/deploy/git/check_git_hooks.py",
     "scripts/setup-worktree.sh",
+    "scripts/hooks/prod-source.sh",
     "scripts/provision/check_git_hooks.py",
     "scripts/host_ops/guard_editable_venv.py",
 )
@@ -495,8 +496,7 @@ def test_refuses_prod_source_via_symlinks_and_subdirectories(tmp_path: Path) -> 
 
     nested = prod.main / "sub/nested"
     prod.git(prod.main, "init", "-q", "--initial-branch=main", str(nested))
-    (nested / "scripts").mkdir(parents=True)
-    shutil.copy2(prod.main / "scripts/setup-worktree.sh", nested / "scripts/setup-worktree.sh")
+    shutil.copytree(prod.main / "scripts", nested / "scripts")
     inside_nested = prod.setup("7391", cwd=nested, HOME=str(home))
     assert inside_nested.returncode == 1
     assert not (nested / ".worktrees").exists()
