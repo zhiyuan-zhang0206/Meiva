@@ -22,3 +22,7 @@ A pending attachment previews from an object URL, and the browser matches that
 `blob:` scheme against img-src rather than treating it as the page's own origin.
 The image directive therefore names `blob:` beside same-origin, `data:` and HTTP(S)
 sources; without it every attachment renders as a broken thumbnail.
+
+Media (`media-src`) loads from the page's own origin, object URLs and the gateway origin, which
+serves workspace video and audio through `/files/raw`. Without it the default-src rejected every
+gateway video on a page served from another origin than the gateway (user report 2026-11-21).
