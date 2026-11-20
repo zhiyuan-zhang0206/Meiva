@@ -20,7 +20,7 @@ import dynamic from "next/dynamic";
 import { useTranslations } from "next-intl";
 
 import { useBrowser } from "@/lib/browser/browser-provider";
-import { useLayoutEffect, useRef, useState } from "react";
+import { useRef, useState } from "react";
 
 import {
   ContextMenu,
@@ -181,11 +181,6 @@ export function AgentRow({
   const displayLabel = label ? `#${agent.agent_id} · ${label}` : `#${agent.agent_id}`;
   const indentPx = depth * INDENT;
   const titleRef = useSyncedShimmer(working && !editing);
-  useLayoutEffect(() => {
-    const el = titleRef.current;
-    if (!el || editing) return;
-    el.style.setProperty("--agent-indent-px", `${indentPx}px`);
-  }, [titleRef, editing, indentPx]);
 
   const submit = () => {
     onRename(draft);

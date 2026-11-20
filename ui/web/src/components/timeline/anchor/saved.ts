@@ -19,9 +19,6 @@ export interface SavedPlace {
   identity: RowIdentity;
   offset: number;
   // meiva:note
-  // Whether the send reserve is still available to the last human message.
-  sendReserve: boolean;
-  // meiva:note
   // Whether the saved offset stood in reserve space a header toggle created.
   holdReserve: boolean;
 }
@@ -49,7 +46,6 @@ export function readSessionPlace(contentKey: string | undefined, config: ReloadR
       ...(bookmark.readingLocator ? { locator: bookmark.readingLocator } : {}),
     },
     offset: bookmark.viewportTop,
-    sendReserve: bookmark.keepSendReserve === true,
     holdReserve: bookmark.usedCollapseReserve === true,
   };
 }
@@ -70,7 +66,6 @@ export function writeSessionPlace(contentKey: string | undefined, config: Reload
     viewportTop: place.offset,
     scrollTop: Math.max(0, scrollTop),
     ...(place.holdReserve ? { usedCollapseReserve: true as const } : {}),
-    ...(place.sendReserve ? { keepSendReserve: true as const } : {}),
     savedAt: now,
   }, now);
 }

@@ -8,7 +8,6 @@ import { hasSavedPlace, readMemoryPlace, readSessionPlace, rowAnchor, writeMemor
 const place = (extra: Partial<SavedPlace> = {}): SavedPlace => ({
   identity: { row: { itemId: "7.0", rank: 0 } },
   offset: -120,
-  sendReserve: false,
   holdReserve: false,
   ...extra,
 });
@@ -21,7 +20,7 @@ function enabled(now = 1000) {
 
 describe("memory place", () => {
   it("returns per entry and content", () => {
-    const saved = place({ sendReserve: true });
+    const saved = place({ holdReserve: true });
     writeMemoryPlace("entry-a", "42", saved);
     expect(readMemoryPlace("entry-a", "42")).toBe(saved);
     expect(readMemoryPlace("entry-a", "43")).toBeNull();
@@ -44,12 +43,11 @@ describe("memory place", () => {
 });
 
 describe("session place", () => {
-  it("round-trips the row, its locator, the turn flag, the offset and both reserves", () => {
+  it("round-trips the row, its locator, the turn flag, the offset and the toggle reserve", () => {
     const { config } = enabled();
     const saved = place({
       identity: { row: { itemId: "s1.cp.4.0", rank: 1, turn: true }, locator: "loc-4", coordinate: { rank: 1, msg: 4, block: 0 } },
       offset: 56,
-      sendReserve: true,
       holdReserve: true,
     });
     writeSessionPlace("42", config, saved, 1234);
@@ -58,7 +56,6 @@ describe("session place", () => {
     expect(readSessionPlace("42", config)).toEqual({
       identity: { row: { itemId: "s1.cp.4.0", rank: 1, turn: true }, locator: "loc-4" },
       offset: 56,
-      sendReserve: true,
       holdReserve: true,
     });
   });

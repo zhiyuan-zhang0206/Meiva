@@ -22,7 +22,6 @@ function inputs(overrides: Partial<PlacementInputs> = {}): PlacementInputs {
     items: rows(1, 8),
     compactBuffer: null,
     loading: false,
-    turnActive: false,
     hasMoreOlder: false,
     loadingOlder: false,
     canLoadOlder: true,
@@ -44,7 +43,6 @@ function effects() {
 const place = (id: string, offset = -40, extra: Partial<SavedPlace> = {}): SavedPlace => ({
   identity: { row: { itemId: id, rank: 0 } },
   offset,
-  sendReserve: false,
   holdReserve: false,
   ...extra,
 });
@@ -68,7 +66,7 @@ describe("opening goal", () => {
     const fx = effects();
     machine.step(inputs({ reloadRestore: config }), fx);
     expect(fx.place).toHaveBeenCalledTimes(1);
-    expect(fx.place).toHaveBeenCalledWith(at("6.0", 0), { hold: false, sendReserve: false });
+    expect(fx.place).toHaveBeenCalledWith(at("6.0", 0), { hold: false });
   });
 
   it("opens the reload bookmark when there is no memory place", () => {
@@ -76,14 +74,14 @@ describe("opening goal", () => {
     const machine = machineFor(null, config);
     const fx = effects();
     machine.step(inputs({ reloadRestore: config }), fx);
-    expect(fx.place).toHaveBeenCalledWith(at("2.0", -60), { hold: false, sendReserve: false });
+    expect(fx.place).toHaveBeenCalledWith(at("2.0", -60), { hold: false });
   });
 
   it("opens the tail for a view with no thread", () => {
     const machine = new PlacementMachine(initialGoal(null, undefined, { state: "disabled" }), BOUNDS);
     const fx = effects();
     machine.step(inputs({ threadKey: undefined, reveal: { decided: false, itemId: null } }), fx);
-    expect(fx.place).toHaveBeenCalledWith(TAIL, { hold: false, sendReserve: false });
+    expect(fx.place).toHaveBeenCalledWith(TAIL, { hold: false });
     expect(machine.snapshot().visible).toBe(true);
   });
 
@@ -95,7 +93,7 @@ describe("opening goal", () => {
     expect(fx.place).not.toHaveBeenCalled();
     expect(machine.snapshot().visible).toBe(false);
     machine.step(inputs({ reloadRestore: config }), fx);
-    expect(fx.place).toHaveBeenCalledWith(at("3.0", 10), { hold: false, sendReserve: false });
+    expect(fx.place).toHaveBeenCalledWith(at("3.0", 10), { hold: false });
     expect(machine.snapshot().visible).toBe(true);
   });
 
@@ -106,7 +104,7 @@ describe("opening goal", () => {
     machine.step(inputs({ reloadRestore: { state: "disabled" }, reveal: { decided: false, itemId: null } }), fx);
     expect(fx.place).not.toHaveBeenCalled();
     machine.step(inputs({ reveal: { decided: true, itemId: null } }), fx);
-    expect(fx.place).toHaveBeenCalledWith(TAIL, { hold: false, sendReserve: false });
+    expect(fx.place).toHaveBeenCalledWith(TAIL, { hold: false });
   });
 });
 
@@ -119,7 +117,7 @@ describe("first visit", () => {
     expect(fx.place).not.toHaveBeenCalled();
     machine.step(inputs(), fx);
     expect(fx.place).toHaveBeenCalledTimes(1);
-    expect(fx.place).toHaveBeenCalledWith(TAIL, { hold: false, sendReserve: false });
+    expect(fx.place).toHaveBeenCalledWith(TAIL, { hold: false });
     expect(machine.snapshot().visible).toBe(true);
   });
 
@@ -130,14 +128,14 @@ describe("first visit", () => {
     expect(fx.place).not.toHaveBeenCalled();
     expect(machine.snapshot().visible).toBe(false);
     machine.step(inputs({ loading: true }), fx);
-    expect(fx.place).toHaveBeenCalledWith(TAIL, { hold: false, sendReserve: false });
+    expect(fx.place).toHaveBeenCalledWith(TAIL, { hold: false });
   });
 
   it("opens the revealed row at the reading offset", () => {
     const machine = machineFor(null);
     const fx = effects();
     machine.step(inputs({ reveal: { decided: true, itemId: "5.0" } }), fx);
-    expect(fx.place).toHaveBeenCalledWith(at("5.0", READING_TOP_PX), { hold: false, sendReserve: false });
+    expect(fx.place).toHaveBeenCalledWith(at("5.0", READING_TOP_PX), { hold: false });
     expect(machine.snapshot()).toMatchObject({ visible: true, pin: { itemId: "5.0", rank: 0 } });
   });
 
@@ -145,15 +143,8 @@ describe("first visit", () => {
     const machine = machineFor(null);
     const fx = effects();
     machine.step(inputs({ hasMoreOlder: true, reveal: { decided: true, itemId: "99.0" } }), fx);
-    expect(fx.place).toHaveBeenCalledWith(TAIL, { hold: false, sendReserve: false });
+    expect(fx.place).toHaveBeenCalledWith(TAIL, { hold: false });
     expect(fx.loadOlder).not.toHaveBeenCalled();
-  });
-
-  it("arms the send reserve for a working conversation", () => {
-    const machine = machineFor(null);
-    const fx = effects();
-    machine.step(inputs({ turnActive: true }), fx);
-    expect(fx.place).toHaveBeenCalledWith(TAIL, { hold: false, sendReserve: true });
   });
 
   it("keeps a short first page hidden while the cold fill reads older pages, then opens the tail", () => {
@@ -166,7 +157,7 @@ describe("first visit", () => {
     expect(machine.snapshot().fillAllowed).toBe(true);
     filling = false;
     machine.step(inputs({ filling: () => filling, now: 1 }), fx);
-    expect(fx.place).toHaveBeenCalledWith(TAIL, { hold: false, sendReserve: false });
+    expect(fx.place).toHaveBeenCalledWith(TAIL, { hold: false });
     expect(machine.snapshot().visible).toBe(true);
   });
 
@@ -182,9 +173,9 @@ describe("first visit", () => {
     expect(machine.snapshot()).toEqual({ visible: false, searching: true, pin: null, fillAllowed: true });
     machine.step(inputs({ reveal: undecided, now: 5_000 + BOUNDS.timeoutMs - 1 }), fx);
     expect(fx.place).not.toHaveBeenCalled();
-    machine.step(inputs({ reveal: undecided, turnActive: true, now: 5_000 + BOUNDS.timeoutMs }), fx);
+    machine.step(inputs({ reveal: undecided, now: 5_000 + BOUNDS.timeoutMs }), fx);
     expect(fx.place).toHaveBeenCalledTimes(1);
-    expect(fx.place).toHaveBeenCalledWith(TAIL, { hold: false, sendReserve: true });
+    expect(fx.place).toHaveBeenCalledWith(TAIL, { hold: false });
     expect(machine.snapshot()).toEqual({ visible: true, searching: false, pin: null, fillAllowed: true });
     // meiva:note
     // A decision that arrives after the bound no longer moves the reader.
@@ -197,7 +188,7 @@ describe("first visit", () => {
     const fx = effects();
     machine.step(inputs({ reveal: { decided: false, itemId: null }, now: 0 }), fx);
     machine.step(inputs({ reveal: { decided: true, itemId: "5.0" }, now: BOUNDS.timeoutMs - 1 }), fx);
-    expect(fx.place).toHaveBeenCalledWith(at("5.0", READING_TOP_PX), { hold: false, sendReserve: false });
+    expect(fx.place).toHaveBeenCalledWith(at("5.0", READING_TOP_PX), { hold: false });
     expect(machine.snapshot().searching).toBe(false);
   });
 
@@ -206,16 +197,16 @@ describe("first visit", () => {
     const fx = effects();
     machine.step(inputs({ reveal: { decided: true, itemId: "7.0" } }), fx);
     expect(fx.place).toHaveBeenCalledTimes(1);
-    expect(fx.place).toHaveBeenCalledWith(at("3.0", -20), { hold: false, sendReserve: false });
+    expect(fx.place).toHaveBeenCalledWith(at("3.0", -20), { hold: false });
   });
 });
 
 describe("memory place", () => {
   it("lands on a retained row at once, even while the authority read is loading", () => {
-    const machine = machineFor(place("4.0", -100, { sendReserve: true, holdReserve: true }));
+    const machine = machineFor(place("4.0", -100, { holdReserve: true }));
     const fx = effects();
     machine.step(inputs({ loading: true, reveal: { decided: false, itemId: null } }), fx);
-    expect(fx.place).toHaveBeenCalledWith(at("4.0", -100), { hold: true, sendReserve: true });
+    expect(fx.place).toHaveBeenCalledWith(at("4.0", -100), { hold: true });
     expect(machine.snapshot().visible).toBe(true);
   });
 
@@ -232,7 +223,7 @@ describe("memory place", () => {
     expect(fx.loadOlder).not.toHaveBeenCalled();
     expect(machine.snapshot()).toEqual({ visible: false, searching: false, pin: null, fillAllowed: false });
     machine.step(inputs({ items: rows(30, 45) }), fx);
-    expect(fx.place).toHaveBeenCalledWith(at("40.0", -40), { hold: false, sendReserve: false });
+    expect(fx.place).toHaveBeenCalledWith(at("40.0", -40), { hold: false });
   });
 
   it("bounds the wait from the first pass that could not place the row, even behind another older read", () => {
@@ -243,7 +234,7 @@ describe("memory place", () => {
     expect(fx.loadOlder).not.toHaveBeenCalled();
     expect(machine.snapshot().searching).toBe(true);
     machine.step(inputs({ reloadRestore: config, items: rows(30, 45), hasMoreOlder: true, loadingOlder: true, now: 1_000 + BOUNDS.timeoutMs }), fx);
-    expect(fx.place).toHaveBeenCalledWith(TAIL, { hold: false, sendReserve: false });
+    expect(fx.place).toHaveBeenCalledWith(TAIL, { hold: false });
     expect(fx.dropSessionPlace).toHaveBeenCalled();
   });
 
@@ -252,7 +243,7 @@ describe("memory place", () => {
     const machine = machineFor(place("99.0"), config);
     const fx = effects();
     machine.step(inputs({ reloadRestore: config }), fx);
-    expect(fx.place).toHaveBeenCalledWith(TAIL, { hold: false, sendReserve: false });
+    expect(fx.place).toHaveBeenCalledWith(TAIL, { hold: false });
     expect(fx.dropSessionPlace).not.toHaveBeenCalled();
     expect(readReloadBookmark(session, "42", 2000)?.itemId).toBe("2.0");
   });
@@ -286,7 +277,7 @@ describe("reload bookmark search", () => {
     pass();
     expect(fx.loadOlder).toHaveBeenCalledTimes(2);
     expect(fx.place).toHaveBeenCalledTimes(1);
-    expect(fx.place).toHaveBeenCalledWith(at("2.0", -60), { hold: false, sendReserve: false });
+    expect(fx.place).toHaveBeenCalledWith(at("2.0", -60), { hold: false });
     expect(fx.cancelOlder).not.toHaveBeenCalled();
     expect(fx.dropSessionPlace).not.toHaveBeenCalled();
     expect(machine.snapshot()).toMatchObject({ visible: true, searching: false });
@@ -298,7 +289,7 @@ describe("reload bookmark search", () => {
     const fx = effects();
     machine.step(inputs({ reloadRestore: config, items: rows(13, 16), hasMoreOlder: true }), fx);
     machine.step(inputs({ reloadRestore: config, items: [row("s1.cp.2.0", { reading_locator: "loc-old-2" }), ...rows(13, 16)], hasMoreOlder: true }), fx);
-    expect(fx.place).toHaveBeenCalledWith(at("s1.cp.2.0", -60, 1), { hold: false, sendReserve: false });
+    expect(fx.place).toHaveBeenCalledWith(at("s1.cp.2.0", -60, 1), { hold: false });
   });
 
   it("does not ask again while a requested page has not started", () => {
@@ -317,7 +308,7 @@ describe("reload bookmark search", () => {
     pass();
     expect(fx.cancelOlder).toHaveBeenCalledTimes(1);
     expect(fx.dropSessionPlace).toHaveBeenCalledTimes(1);
-    expect(fx.place).toHaveBeenCalledWith(TAIL, { hold: false, sendReserve: false });
+    expect(fx.place).toHaveBeenCalledWith(TAIL, { hold: false });
     expect(machine.snapshot().visible).toBe(true);
   });
 
@@ -340,7 +331,7 @@ describe("reload bookmark search", () => {
     expect(fx.loadOlder).toHaveBeenCalledTimes(BOUNDS.maxPages);
     expect(fx.cancelOlder).toHaveBeenCalledTimes(1);
     expect(fx.dropSessionPlace).toHaveBeenCalledTimes(1);
-    expect(fx.place).toHaveBeenCalledWith(TAIL, { hold: false, sendReserve: false });
+    expect(fx.place).toHaveBeenCalledWith(TAIL, { hold: false });
   });
 
   it("stops after the item bound and opens the tail", () => {
@@ -351,7 +342,7 @@ describe("reload bookmark search", () => {
     pass();
     expect(fx.loadOlder).toHaveBeenCalledTimes(1);
     expect(fx.dropSessionPlace).toHaveBeenCalledTimes(1);
-    expect(fx.place).toHaveBeenCalledWith(TAIL, { hold: false, sendReserve: false });
+    expect(fx.place).toHaveBeenCalledWith(TAIL, { hold: false });
   });
 
   it("stops at the time bound, cancelling the page in flight", () => {
@@ -362,7 +353,7 @@ describe("reload bookmark search", () => {
     pass({ now: 100 + BOUNDS.timeoutMs, loadingOlder: true });
     expect(fx.cancelOlder).toHaveBeenCalledTimes(1);
     expect(fx.dropSessionPlace).toHaveBeenCalledTimes(1);
-    expect(fx.place).toHaveBeenCalledWith(TAIL, { hold: false, sendReserve: false });
+    expect(fx.place).toHaveBeenCalledWith(TAIL, { hold: false });
   });
 
   it("opens the tail at once when there is no older history to read", () => {
@@ -373,7 +364,7 @@ describe("reload bookmark search", () => {
     expect(fx.loadOlder).not.toHaveBeenCalled();
     expect(fx.cancelOlder).not.toHaveBeenCalled();
     expect(fx.dropSessionPlace).toHaveBeenCalledTimes(1);
-    expect(fx.place).toHaveBeenCalledWith(TAIL, { hold: false, sendReserve: false });
+    expect(fx.place).toHaveBeenCalledWith(TAIL, { hold: false });
   });
 
   it("opens the tail at once when the view cannot read older pages", () => {
@@ -404,8 +395,8 @@ describe("requested placements", () => {
     expect(fx.place).not.toHaveBeenCalled();
     machine.step(inputs({ items: rows(1, 45) }), fx);
     expect(fx.place.mock.calls).toEqual([
-      [at("40.0", -40), { hold: false, sendReserve: false }],
-      [at("5.0", READING_TOP_PX), { hold: false, sendReserve: null, smooth: false }],
+      [at("40.0", -40), { hold: false }],
+      [at("5.0", READING_TOP_PX), { hold: false, smooth: false }],
     ]);
   });
 
@@ -418,7 +409,7 @@ describe("requested placements", () => {
     machine.step(inputs(), fx);
     machine.step(inputs(), fx);
     expect(fx.place).toHaveBeenCalledTimes(1);
-    expect(fx.place).toHaveBeenCalledWith(TAIL, { hold: false, sendReserve: null, smooth: true });
+    expect(fx.place).toHaveBeenCalledWith(TAIL, { hold: false, smooth: true });
 
     machine.request(at("3.0", READING_TOP_PX), inputs());
     machine.step(inputs(), fx);
@@ -439,9 +430,9 @@ describe("a placed row that leaves the loaded rows", () => {
 
   it("moves to where its locator went", () => {
     const { machine, fx } = placed();
-    const lost = place("5.0", -30, { identity: { row: { itemId: "5.0", rank: 0 }, locator: "loc-5" }, sendReserve: true });
+    const lost = place("5.0", -30, { identity: { row: { itemId: "5.0", rank: 0 }, locator: "loc-5" } });
     machine.lost(lost, inputs({ items: [row("s1.cp.5.0", { reading_locator: "loc-5" })] }), fx);
-    expect(fx.place).toHaveBeenCalledWith(at("s1.cp.5.0", -30, 1), { hold: false, sendReserve: true });
+    expect(fx.place).toHaveBeenCalledWith(at("s1.cp.5.0", -30, 1), { hold: false });
     expect(machine.snapshot().visible).toBe(true);
   });
 
@@ -459,7 +450,7 @@ describe("a placed row that leaves the loaded rows", () => {
     expect(machine.snapshot()).toMatchObject({ visible: false, searching: true });
     machine.step(inputs({ items: rows(10, 16), hasMoreOlder: true, loadingOlder: true }), fx);
     machine.step(inputs({ items: rows(10, 16), hasMoreOlder: true }), fx);
-    expect(fx.place).toHaveBeenCalledWith(TAIL, { hold: false, sendReserve: false });
+    expect(fx.place).toHaveBeenCalledWith(TAIL, { hold: false });
     expect(fx.dropSessionPlace).not.toHaveBeenCalled();
   });
 

@@ -64,13 +64,18 @@ export function PendingStrip({
   const showDelivering = deliveringBatch?.state === "pending";
   const totalCount = queued.length + (showDelivering ? 1 : 0);
   if (totalCount === 0) return null;
+  // meiva:note
+  // The strip floats in the blank space between the last row and the composer (the timeline's
+  // footer), on an opaque surface so rows scrolled beneath it stay hidden. One queued message fits
+  // that space; each further one extends it by its own height.
+  // meiva:link ui/web/src/docs/frontend-components/timeline-view/send-anchor.md
   return (
     <div
       data-testid="pending-strip"
       style={maxWidthCss ? { maxWidth: maxWidthCss } : undefined}
-      className="mx-auto w-full px-4 py-1.5 text-xs text-muted-foreground"
+      className="pointer-events-auto mx-auto w-full bg-background px-4 text-xs text-muted-foreground"
     >
-      <div className="border-t border-border pt-1.5">
+      <div className="border-t border-border pt-1">
         <div className={cn("items-center gap-1.5 font-medium", FLEX)}>
           <Clock className="size-3 shrink-0" />
           {t("pending", { count: totalCount })}

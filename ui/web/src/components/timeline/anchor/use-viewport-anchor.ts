@@ -13,7 +13,7 @@ import { findRowNode, offsetOf, readRowAnchor, rowOf, TAIL, type RowRef, type Vi
 // anchor row back at its offset, or the viewport on the natural end for the tail. Prepends,
 // compaction, width changes, images and late heights therefore need no code of their own. Only the
 // reader moves the anchor: a scroll the writer did not cause is read back from the DOM. Placements
-// (return, reload, reveal, send, toggle, the arrow) set it.
+// (return, reload, reveal, quote, toggle, the arrow) set it.
 // meiva:link ui/web/src/docs/frontend-components/timeline-view/sticky-scroll.md
 
 export type AnchorChangeCause = "reader" | "placement";
@@ -59,8 +59,6 @@ export interface ViewportAnchor {
   // meiva:note
   // Apply the anchor: the view calls this after every commit, once placement has run.
   apply: () => void;
-  armSendReserve: (armed: boolean) => void;
-  sendReserveArmed: () => boolean;
   holdReserve: () => boolean;
   // meiva:note
   // Upward pull intent at the top: the reader is reading history, not the tail.
@@ -92,7 +90,6 @@ export function useViewportAnchor({
   const lastWrittenRef = useRef<number | null>(null);
   const touchingRef = useRef(false);
   const rideRef = useRef<{ frame: number; still: number; top: number } | null>(null);
-  const sendArmedRef = useRef(false);
   const holdRef = useRef(false);
   const [atEnd, setAtEnd] = useState(true);
   // meiva:note
@@ -131,10 +128,9 @@ export function useViewportAnchor({
   }, [naturalEnd]);
 
   // meiva:note
-  // The reserve is derived, never accumulated: while a send or a header toggle allows it, it is
-  // exactly the space below the content the current row anchor needs to sit at its offset, measured
-  // within the content so the bottom alignment of a short column does not feed back into it. The tail
-  // never needs one. An anchor row that is not mounted keeps the current height.
+  // The reserve is derived, never accumulated: while a header toggle holds it, it is exactly the space
+  // below the content the toggled header needs to stay where it was clicked, measured within the
+  // content. The tail never needs one. An anchor row that is not mounted keeps the current height.
   // meiva:link ui/web/src/docs/frontend-components/timeline-view/send-anchor.md
   const syncReserve = useCallback((vp: HTMLElement) => {
     const reserve = reserveRef.current;
@@ -142,7 +138,7 @@ export function useViewportAnchor({
     if (!reserve || !content) return;
     const anchor = anchorRef.current;
     let need = 0;
-    if ((sendArmedRef.current || holdRef.current) && anchor?.kind === "row") {
+    if (holdRef.current && anchor?.kind === "row") {
       const hit = findRowNode(vp, anchor.row);
       if (!hit) {
         need = reserve.offsetHeight;
@@ -327,9 +323,8 @@ export function useViewportAnchor({
     apply();
   }, [apply, cancelRide, finishRide, naturalEnd, refreshEnd, setAnchor, syncReserve, viewport]);
 
-  const releaseReserves = useCallback((vp: HTMLElement) => {
-    if (!sendArmedRef.current && !holdRef.current) return;
-    sendArmedRef.current = false;
+  const releaseReserve = useCallback((vp: HTMLElement) => {
+    if (!holdRef.current) return;
     holdRef.current = false;
     syncReserve(vp);
   }, [syncReserve]);
@@ -350,7 +345,7 @@ export function useViewportAnchor({
       // meiva:note
       // Moving upward to or past the natural end spends the reserve; movement inside it keeps it.
       // meiva:link ui/web/src/docs/frontend-components/timeline-view/send-anchor.md
-      if (up && top <= naturalEnd(vp) + 0.5) releaseReserves(vp);
+      if (up && top <= naturalEnd(vp) + 0.5) releaseReserve(vp);
       towardEndRef.current = !up;
       // meiva:note
       // Under a finger the movement stays unattributed: the writer folds it into the row anchor's
@@ -420,7 +415,7 @@ export function useViewportAnchor({
       if (ride) cancelAnimationFrame(ride.frame);
       rideRef.current = null;
     };
-  }, [apply, cancelRide, contentRef, derive, finishRide, naturalEnd, readRow, refreshEnd, releaseReserves, setAnchor, viewport, viewportObserverFactory, wrapperRef]);
+  }, [apply, cancelRide, contentRef, derive, finishRide, naturalEnd, readRow, refreshEnd, releaseReserve, setAnchor, viewport, viewportObserverFactory, wrapperRef]);
 
   const placeScrollTop = useCallback((top: number) => {
     const vp = viewport();
@@ -432,8 +427,6 @@ export function useViewportAnchor({
   }, [cancelRide, derive, refreshEnd, viewport, write]);
 
   const current = useCallback(() => anchorRef.current, []);
-  const armSendReserve = useCallback((armed: boolean) => { sendArmedRef.current = armed; }, []);
-  const sendReserveArmed = useCallback(() => sendArmedRef.current, []);
   const holdReserve = useCallback(() => holdRef.current, []);
   const riding = useCallback(() => rideRef.current !== null, []);
   const rekey = useCallback((row: RowRef) => {
@@ -451,7 +444,7 @@ export function useViewportAnchor({
     return distance >= -0.5 && distance <= bottomZone(vp.clientHeight, latest.current.thresholds);
   }, [naturalEnd, viewport]);
   const controls = useMemo<ViewportAnchor>(() => ({
-    viewport, current, place, apply, armSendReserve, sendReserveArmed, holdReserve, releaseTail, placeScrollTop, reserveHeight, riding, atTail, rekey, rekeySettled,
-  }), [apply, armSendReserve, atTail, current, holdReserve, place, placeScrollTop, rekey, rekeySettled, releaseTail, reserveHeight, riding, sendReserveArmed, viewport]);
+    viewport, current, place, apply, holdReserve, releaseTail, placeScrollTop, reserveHeight, riding, atTail, rekey, rekeySettled,
+  }), [apply, atTail, current, holdReserve, place, placeScrollTop, rekey, rekeySettled, releaseTail, reserveHeight, riding, viewport]);
   return { controls, atEnd };
 }

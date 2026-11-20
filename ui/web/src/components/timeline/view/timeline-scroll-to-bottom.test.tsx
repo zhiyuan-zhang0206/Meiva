@@ -16,7 +16,6 @@ import {
 vi.mock("@/components/content/markdown", () => ({ ChatMarkdown: ChatMarkdownMock }));
 vi.mock("@/components/ui/scroll-area", () => ({ ScrollArea: ScrollAreaMock }));
 import { TimelineView } from "..";
-import { READING_TOP_PX } from "../anchor/dom";
 afterEach(() => {
   vi.restoreAllMocks();
   vi.unstubAllGlobals();
@@ -190,39 +189,42 @@ describe("scroll-to-bottom control presence", () => {
 // tail.
 // meiva:link ui/web/src/docs/frontend-components/timeline-view/send-anchor.md
 describe("the arrow's target", () => {
-  it("parks the latest human message below the reading offset, then rides to the tail", () => {
+  it("rides to the tail and follows it, wherever the reader is", () => {
     const layout = timelineLayout({ rowHeight: (row) => row.dataset.itemId === "3.0" ? 2000 : 200 });
-    const rows = [
+    render(<TimelineView items={[
       chat("1.0"),
       makeItem({ item_id: "2.0", kind: "inbound_chat", source: "user", payload: "My question" }),
       chat("3.0", "A long answer"),
-    ];
-    render(<TimelineView items={rows} />);
+    ]} />);
     layout.scrollTo(0);
-    expect(layout.rowTop("2.0")).toBeGreaterThan(READING_TOP_PX);
-
-    fireEvent.click(arrow()!);
-    expect(layout.smoothTarget()).toBeNull();
-    expect(layout.rowTop("2.0")).toBe(READING_TOP_PX);
-    expect(arrow()).toBeTruthy();
-
     fireEvent.click(arrow()!);
     expect(layout.smoothTarget()).toBe(layout.naturalEnd());
     layout.finishSmooth();
     expect(layout.top()).toBe(layout.naturalEnd());
     expect(arrow()).toBeNull();
   });
+});
 
-  it("rides to the tail when the latest human message is already above the reading offset", () => {
-    const layout = timelineLayout({ rowHeight: (row) => row.dataset.itemId === "3.0" ? 2000 : 200 });
-    render(<TimelineView items={[
-      makeItem({ item_id: "2.0", kind: "inbound_chat", source: "user", payload: "My question" }),
-      chat("3.0", "A long answer"),
-    ]} />);
-    layout.scrollTo(600);
-    expect(layout.rowTop("2.0")).toBeLessThan(READING_TOP_PX);
-    fireEvent.click(arrow()!);
-    expect(layout.smoothTarget()).toBe(layout.naturalEnd());
+// meiva:note
+// The pending strip floats over the timeline's bottom edge: its height reaches the log's padding and
+// the arrow through one variable on the timeline wrapper.
+// meiva:link ui/web/src/docs/frontend-components/timeline-view/send-anchor.md
+describe("the footer", () => {
+  it("floats over the bottom edge and publishes its height on the timeline wrapper", () => {
+    const original = Object.getOwnPropertyDescriptor(HTMLElement.prototype, "offsetHeight");
+    Object.defineProperty(HTMLElement.prototype, "offsetHeight", {
+      configurable: true,
+      get(this: HTMLElement) { return this.hasAttribute("data-timeline-footer") ? 40 : 0; },
+    });
+    try {
+      render(<TimelineView items={[chat("1.0")]} footer={<div data-testid="footer-probe" />} />);
+      const footer = screen.getByTestId("footer-probe").closest<HTMLElement>("[data-timeline-footer]");
+      expect(footer).not.toBeNull();
+      expect(footer!.parentElement!.style.getPropertyValue("--timeline-footer-h")).toBe("40px");
+    } finally {
+      if (original) Object.defineProperty(HTMLElement.prototype, "offsetHeight", original);
+      else Reflect.deleteProperty(HTMLElement.prototype, "offsetHeight");
+    }
   });
 });
 

@@ -28,7 +28,6 @@ export interface ReloadReadingBookmark {
   readonly viewportTop: number;
   readonly scrollTop: number;
   readonly usedCollapseReserve?: true;
-  readonly keepSendReserve?: true;
   readonly savedAt: number;
 }
 
@@ -83,9 +82,6 @@ function isReloadReadingBookmark(value: unknown): value is ReloadReadingBookmark
   if (candidate.usedCollapseReserve !== undefined && candidate.usedCollapseReserve !== true) {
     return false;
   }
-  if (candidate.keepSendReserve !== undefined && candidate.keepSendReserve !== true) {
-    return false;
-  }
   return true;
 }
 
@@ -134,7 +130,6 @@ function sameBookmarkTarget(a: ReloadReadingBookmark, b: ReloadReadingBookmark):
     Math.abs(a.viewportTop - b.viewportTop) < 0.5 &&
     Math.abs(a.scrollTop - b.scrollTop) < 0.5 &&
     a.usedCollapseReserve === b.usedCollapseReserve &&
-    a.keepSendReserve === b.keepSendReserve &&
     Math.abs(a.savedAt - b.savedAt) < 60_000
   );
 }

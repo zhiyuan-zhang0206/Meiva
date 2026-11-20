@@ -75,4 +75,4 @@ to omit timestamps according to their timeline item metadata.
 
 - [Timeline View](timeline-view.md) — the renderer whose one scroll surface this node owns.
 - [Timeline deep collapse](deep-collapse.md) — the turns whose natural-height bodies the live-block rule keeps in place.
-- [The send anchor](send-anchor.md) — how sends, the down arrow, and the reading reserve interact.
+- [Sending and the bottom edge](send-anchor.md) — what a send does (nothing), the down arrow, the pending strip over the bottom edge, and the toggle reserve.

@@ -5,7 +5,8 @@ import { useLayoutEffect, useRef, type RefObject } from "react";
 // meiva:note
 // Pin active Silver Glint shimmer animations to document timeline origin (startTime = 0)
 // so sidebar rows and timeline working headers sweep in phase across mounts and handoffs
-// (e.g. PendingLiveActivityWindow -> TurnBlock) without restarting mid-cycle.
+// (e.g. PendingLiveActivityWindow -> TurnBlock) without restarting mid-cycle. With the sweep
+// sized to each title (globals.css), every working title crosses its own text at the same moment.
 // meiva:link ui/web/src/docs/frontend-components/timeline-view/deep-collapse.md
 export function useSyncedShimmer<T extends HTMLElement = HTMLSpanElement>(
   active: boolean,

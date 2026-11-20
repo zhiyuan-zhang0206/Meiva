@@ -16,10 +16,10 @@ materializes the prefix before restoring that anchor and remains at the reading
 position as new output arrives. Work/detail expansion choices are retained
 under the same identity. The bookmark survives resize, tail repair and trim
 until the reader scrolls or explicitly requests the bottom. A first visit starts
-at the bottom. Sending follows the [send-anchor contract](send-anchor.md).
+at the bottom. A send moves nothing: see [sending and the bottom edge](send-anchor.md).
 
-The centered down arrow takes the reader to the last human message or the
-current tail according to the [reading position](send-anchor.md). Older paging
+The centered down arrow takes the reader to the current tail ([sending and the
+bottom edge](send-anchor.md)). Older paging
 presents its top pull circle, and initial source qualification — including gating
 the inline first-step `Working…` row until the source is ready — follows
 [the loading ring contract](loading-ring.md).
@@ -60,8 +60,9 @@ default 800px) and centered inside it. The column clears the floating HeaderBar
 with 52px (44px bar + 8px clearance, derived from `BAR_HEIGHT_PX`; user ruling
 2026-08-06) so a bar-height change cannot slide the first row underneath it. The
 composer stack lives in normal flow below the surface (user ruling 2026-08-06),
-separated from the last message row by `pb-6` + `pt-0.5` (26px) and from the
-bottom viewport edge by its own band's `pb-6`, and shares the same column
+separated from the last message row by the log's bottom padding (`timeline-log`,
+24px) + `pt-0.5` (26px), with the pending strip floating in that space, and from
+the bottom viewport edge by its own band's `pb-6`, and shares the same column
 cap with one `undefined`-means-full-width convention on narrow viewports.
 
 

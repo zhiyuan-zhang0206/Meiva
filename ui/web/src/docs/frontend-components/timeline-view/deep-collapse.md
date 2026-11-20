@@ -40,7 +40,7 @@ omit durations below `1s` (`formatWholeSecondsDuration`: `null` below `1s`, then
 Both `PendingLiveActivityWindow` and active (`turnActive`) `TurnBlock` title spans
 share the sidebar's Silver Glint sweep (`.timeline-title-working` sharing
 `.agent-title-working` / `agent-title-sweep` and locking `startTime = 0` via
-`useSyncedShimmer`), staying in phase across the handoff and settling back to
+`useSyncedShimmer`), crossing their text in step with the sidebar titles, staying in phase across the handoff and settling back to
 static text without shimmer once the turn completes; the leading `Layers` icon,
 disclosure chevron, and expanded summary remain unshimmered.
 

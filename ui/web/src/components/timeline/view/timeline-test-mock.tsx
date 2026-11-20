@@ -287,7 +287,7 @@ export function timelineLayout(options: TimelineLayoutOptions = {}) {
   const leafHeight = (el: HTMLElement): number | undefined => {
     const custom = options.height?.(el);
     if (custom !== undefined) return custom;
-    if (el.hasAttribute("data-send-reserve") || el.hasAttribute("data-timeline-spacer")) {
+    if (el.hasAttribute("data-timeline-reserve") || el.hasAttribute("data-timeline-spacer")) {
       return Number.parseFloat(el.style.height) || 0;
     }
     if (el.classList.contains("timeline-item")) {
@@ -482,7 +482,7 @@ export function timelineLayout(options: TimelineLayoutOptions = {}) {
     top: () => viewport().scrollTop,
     max: () => maxTop(viewport()),
     scrollHeight: () => scrollHeightOf(viewport()),
-    reserve: () => Number.parseFloat(viewport().querySelector<HTMLElement>("[data-send-reserve]")?.style.height ?? "") || 0,
+    reserve: () => Number.parseFloat(viewport().querySelector<HTMLElement>("[data-timeline-reserve]")?.style.height ?? "") || 0,
     // meiva:note
     // The scroll offset at which the content's last row meets the viewport bottom.
     naturalEnd: () => {

@@ -315,11 +315,10 @@ describe("AgentRow lifecycle markers", () => {
     );
     const title = container.querySelector<HTMLElement>(".agent-title-working");
     expect(title?.textContent).toBe("#1");
-    expect(title?.style.getPropertyValue("--agent-indent-px")).toBe("0px");
     expect(statusDot(container)).toBeNull();
   });
 
-  it("synchronizes working title shimmer horizontal offset and animation startTime across rows", () => {
+  it("pins the working title shimmer to the shared clock at any tree depth", () => {
     const anim = { startTime: 1234 } as unknown as Animation;
     Element.prototype.getAnimations = () => [anim];
     try {
@@ -327,7 +326,7 @@ describe("AgentRow lifecycle markers", () => {
         <AgentRow {...baseProps} agent={ag(2, { status: "running" })} depth={2} ancestorsIsLast={[false, true]} />,
       );
       const title = container.querySelector<HTMLElement>(".agent-title-working");
-      expect(title?.style.getPropertyValue("--agent-indent-px")).toBe("28px");
+      expect(title).not.toBeNull();
       expect(anim.startTime).toBe(0);
     } finally {
       Element.prototype.getAnimations = () => [];

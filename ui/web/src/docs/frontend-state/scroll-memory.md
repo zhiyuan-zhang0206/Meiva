@@ -16,7 +16,7 @@ mismatch drops the position instead of restoring it onto other content.
 The home timeline keeps its own place record instead
 (`components/timeline/anchor/saved.ts`): the view anchor of the row on screen
 (`itemId`, `rank`, whether it is a whole turn, the viewport offset, its
-`reading_locator` and reserve flags) under the same entry key. Conversation
+`reading_locator` and whether it stood in a header toggle's reserve) under the same entry key. Conversation
 switches always save it, including when leaving the tail. Returning places that
 row in the first painted frame and keeps it anchored through subsequent output.
 First visits keep their default placement. Scrolling or explicitly navigating
@@ -27,8 +27,7 @@ timeline also persists a bounded per-tab bookmark map in `Browser.session`
 (`meiva.timeline.reading-bookmarks.v1`, capped at 64 agents with a 7-day TTL)
 holding the same fields plus `scrollTop` and `savedAt`. Same-page switches prefer
 the in-memory place; a full page reload opens on the session bookmark. Following
-the tail clears it, and so does a send parked from the tail (the reader is
-following their own message, so a reload opens on the latest rows). Turning the feature off bypasses all `Browser.session` reads
+the tail clears it, so a reload from the tail opens on the latest rows. Turning the feature off bypasses all `Browser.session` reads
 and writes. Terminal panes keep the shared `scroll-memory.ts` record, whose
 `followBottom` flag serves their tail following.
 

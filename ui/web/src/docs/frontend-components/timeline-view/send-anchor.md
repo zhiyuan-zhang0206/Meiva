@@ -1,44 +1,46 @@
-# Reading from the latest human message
+# Sending and the bottom edge
 
-A successful send parks its committed human message at the reading offset below
-the header (44 px plus a 12 px gap) when the reader is following the tail. A
-reader in history keeps their position. The request carries the receipt's
-inbound id so a later timeline update cannot park an unrelated reply. A scroll
-away while the row is arriving takes precedence over automatic positioning.
+A send moves nothing (user ruling 2026-11-20: keep it simple). The reader's own
+message arrives in the timeline like any other row. A reader who follows the
+tail keeps following it, and a reader in history keeps their place. No space
+opens below the conversation for the sent message.
 
-The centered down arrow jumps to the latest visible human message when that
-message is below the reading offset. The window mounts that row first if it was
-virtualized. From the reading offset or farther down, the arrow jumps to the
-current content end and resumes following when the end is farther down. If the
-reader is already in the additional space below the content, the arrow uses
-the remaining scroll range. The arrow is hidden at the scrollable end,
-including when the last human message is aligned using that space. Manually
-opening or closing a work block, live or settled, keeps its header where it
-is (user ruling 2026-11-17). Automatic expansion follows the current reading
-mode.
+The centered down arrow rides to the tail and follows it from there. It is
+hidden at the scrollable end.
 
-During a send and while the agent is working, a reserve below the conversation
-lets the reader align the last human message, including after sending from
-history. The reserve is exactly the space the current row anchor needs to sit
-at its offset, so as the reply grows it uses that space before extending the
-scrollable end, and the tail never carries any. Tail-following measures the
-natural end from the content itself.
+## The pending strip
 
-Remaining reserve keeps the current layout through streaming and completion.
-Once the reader actively scrolls upward to or past the natural end, the timeline
-removes that reserve in place, including while the agent is working. The boundary
-is the natural content height minus the viewport height, clamped to zero for a
-short conversation. Upward movement inside the reserve keeps it available;
-layout changes alone do not spend it.
+Messages waiting for the agent float over the timeline's bottom edge, just above
+the composer's rule. The strip is the timeline's footer
+(`TimelineView` `footer`). Its height is published as `--timeline-footer-h` on
+the timeline wrapper.
 
-The reader can then go down to the natural end by scrolling or using the arrow.
-Only a new successful send renews released space. Sending from history renews
-that space while keeping the reading position. Stream growth, working-state
-changes and agent switches preserve the released state. Agent switches remember
-both the reading position and whether reserve is still available. A first visit
-to a working conversation can provide space; a saved released position takes
-precedence. Opening an idle conversation for the first time uses the natural end.
+- **Fitting into the gap.** The strip sits in the blank space between the last
+  row and the composer: the log's 1.5rem bottom padding, plus the 1rem below the
+  last row (its group's padding and endRef's gap). One queued message fits that
+  space, so it appears and leaves without moving the conversation.
+- **Taller strips.** A taller strip extends the padding by the difference
+  (`max(1.5rem, footer - 1rem)`). The tail then follows the new end, and a
+  reader in history keeps their row.
+- **Hover chrome.** While messages wait, the last row is the working turn, which
+  carries no hover chrome in that space.
+- **Opacity.** The strip is opaque, so rows scrolled beneath it stay hidden.
+- **The arrow.** The arrow sits above the strip.
+
+## The toggle reserve
+
+Opening or closing a work block by hand keeps its header where it is (user
+ruling 2026-11-17). When the rows below are too short to keep it there, the
+timeline adds reserve space below the conversation.
+
+- **Size.** The reserve is exactly the space the header needs, and the tail
+  never carries any.
+- **Release.** Once the reader actively scrolls upward to or past the natural
+  end, the reserve is removed in place. Movement inside the reserve keeps it, and
+  layout changes alone do not spend it.
+- **Saved places.** A saved place remembers whether it stood in the reserve, so
+  a return or reload recreates it.
 
 ## Relationship to Other Nodes
 
-- [Timeline sticky scroll](sticky-scroll.md) — the controller and the timeline's scrollport.
+- [Timeline sticky scroll](sticky-scroll.md) — the anchor, its one writer, and the timeline's scrollport.

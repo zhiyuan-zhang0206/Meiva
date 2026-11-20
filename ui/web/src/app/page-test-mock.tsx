@@ -51,7 +51,6 @@ export const hooksState = {
   setMobileSidebarOpen: vi.fn(),
   setMobileInspectorOpen: vi.fn(),
   setInspectorHours: vi.fn(),
-  requestSendAnchor: vi.fn(),
   setSetting: vi.fn(),
   settings: { "display.timeline_width_px": 768 } as Record<string, unknown>,
   settingsLoading: false,
@@ -161,7 +160,7 @@ export function HeaderBarMock({ label, children, maxWidthCss }: ComponentProps<t
 
 // meiva:note
 // The stand-in shows the item the page asked the timeline to bring into view.
-export function TimelineViewMock({ turnActive, maxWidthCss, items, reveal }: ComponentProps<typeof TimelineViewComponent>) {
+export function TimelineViewMock({ turnActive, maxWidthCss, items, reveal, footer }: ComponentProps<typeof TimelineViewComponent>) {
   return (
     <div
       data-testid="timeline"
@@ -169,7 +168,9 @@ export function TimelineViewMock({ turnActive, maxWidthCss, items, reveal }: Com
       data-item-count={items.length}
       data-reveal={reveal?.itemId ?? ""}
       style={maxWidthCss ? { maxWidth: maxWidthCss } : undefined}
-    />
+    >
+      {footer}
+    </div>
   );
 }
 
@@ -246,7 +247,7 @@ export function homePageProps(): HomePageProps {
       isFetching: state.timelineFetching,
       retryTimeline: state.retryTimeline,
     },
-    timelineStore: { requestSendAnchor: state.requestSendAnchor, liveAnchorAt: 0 },
+    timelineStore: { liveAnchorAt: 0 },
     bfcacheId: state.bfcacheId,
     unresolvedAlerts: state.unresolvedAlerts,
     contextPanel: { open: state.contextPanelOpen, setOpen: state.contextPanelSetOpen },

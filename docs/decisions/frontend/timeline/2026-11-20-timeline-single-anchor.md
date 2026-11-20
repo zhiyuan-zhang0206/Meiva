@@ -90,3 +90,5 @@ Consequences of the rule:
   the source nor the destination.
 - A first visit whose first page does not fill the viewport waits for the cold fill
   under the ring: zero reflow at the cost of up to two older-page reads of latency.
+
+Later the same day the send park and its reserve were removed ([a send moves nothing](2026-11-20-send-moves-nothing.md)); the toggle reserve remains.

@@ -34,9 +34,12 @@ owners and the rulings behind them are in
 [Bottom rules](bottom-rules.md).
 
 Above the composer's rule, the gap between the last message row and the line is split
-between the list (`pb-6`, 24px) and the composer (`pt-0.5`, 2px) — 26px in all,
-giving the final agent message or Live Activity Window clear breathing room
-above the input bar (user ruling 2026-10-31). The list's share reaches the rule
+between the list (the log's `timeline-log` padding, 24px) and the composer
+(`pt-0.5`, 2px) — 26px in all, giving the final agent message or Live Activity
+Window clear breathing room above the input bar (user ruling 2026-10-31). The
+pending strip floats in that space (user ruling 2026-11-20): one queued message
+fits it without moving the conversation, and only a taller strip extends the
+padding by the difference. The list's share reaches the rule
 only through the log's trailing `<div>`: without it the last row overflows the
 log and the gap collapses to the composer's share alone, so the element stays
 although its ref is never read.
