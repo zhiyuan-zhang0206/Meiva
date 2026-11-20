@@ -8,10 +8,11 @@ persists exactly as upstream produced them.
 from __future__ import annotations
 
 import asyncio
-from collections.abc import Awaitable, Callable
+from collections.abc import AsyncIterator, Awaitable, Callable
 from typing import Annotated, cast
 from uuid import uuid4
 
+import pytest_asyncio
 from langchain_core.messages import AIMessage, AnyMessage, BaseMessage, HumanMessage
 from langchain_core.runnables import RunnableConfig
 from langgraph._internal._constants import PUSH
@@ -639,10 +640,26 @@ async def test_one_threads_flush_does_not_block_another_threads_save() -> None:
     assert _stored_thread_ids(saver) == ["agent-b", "agent-a"]
 
 
+# meiva:note
+# The saver reads rows by column name, so it gets a pool that really yields dict rows: the shared
+# `aops_pool` is a tuple-row pool, and declaring it as a dict-row one would only hide the mismatch
+# from the type checker on the very write path this test exercises.
+@pytest_asyncio.fixture
+async def saver_pool(db_url: str) -> AsyncIterator[AsyncConnectionPool[AsyncConnection[DictRow]]]:
+    async with AsyncConnectionPool[AsyncConnection[DictRow]](
+        db_url,
+        min_size=1,
+        max_size=2,
+        kwargs={"autocommit": True, "prepare_threshold": None, "row_factory": dict_row},
+        open=False,
+    ) as pool:
+        yield pool
+
+
 async def _row_counts(
     pool: AsyncConnectionPool[AsyncConnection[DictRow]], thread_id: str
 ) -> tuple[int, int]:
-    async with pool.connection() as conn, conn.cursor(row_factory=dict_row) as cursor:
+    async with pool.connection() as conn, conn.cursor() as cursor:
         await cursor.execute(
             "SELECT (SELECT count(*) FROM checkpoints WHERE thread_id = %s) AS checkpoints,"
             " (SELECT count(*) FROM checkpoint_writes WHERE thread_id = %s) AS writes",
@@ -662,7 +679,7 @@ async def _writes_by_position(
     pool: AsyncConnectionPool[AsyncConnection[DictRow]], thread_id: str
 ) -> list[list[tuple[str, list[str | None] | None]]]:
     serde = JsonPlusSerializer()
-    async with pool.connection() as conn, conn.cursor(row_factory=dict_row) as cursor:
+    async with pool.connection() as conn, conn.cursor() as cursor:
         await cursor.execute(
             "SELECT checkpoint_id FROM checkpoints WHERE thread_id = %s ORDER BY checkpoint_id",
             (thread_id,),
@@ -690,7 +707,7 @@ async def _writes_by_position(
 
 
 async def test_nstep_wrapper_delta_readback_matches_unwrapped_control(
-    aops_pool: AsyncConnectionPool[AsyncConnection[DictRow]],
+    saver_pool: AsyncConnectionPool[AsyncConnection[DictRow]],
 ) -> None:
     """B1 regression: a wrapped delta run must read back exactly like the control.
 
@@ -726,12 +743,12 @@ async def test_nstep_wrapper_delta_readback_matches_unwrapped_control(
     control_config: RunnableConfig = {"configurable": {"thread_id": control_thread}}
     wrapped_config: RunnableConfig = {"configurable": {"thread_id": wrapped_thread}}
 
-    control = build(AsyncPostgresSaver(aops_pool))
+    control = build(AsyncPostgresSaver(saver_pool))
     await control.ainvoke(  # pyright: ignore[reportUnknownMemberType]
         {"messages": [], "n": 0, "target": 12}, control_config, recursion_limit=200
     )
 
-    wrapped_saver = AsyncPostgresSaver(aops_pool)
+    wrapped_saver = AsyncPostgresSaver(saver_pool)
     wrap_saver_writes_with_nstep_interval(wrapped_saver, 4)
     wrapped = build(wrapped_saver)
     await wrapped.ainvoke(  # pyright: ignore[reportUnknownMemberType]
@@ -740,7 +757,7 @@ async def test_nstep_wrapper_delta_readback_matches_unwrapped_control(
     await wrapped_saver._meiva_nstep_flush(wrapped_thread)  # type: ignore[attr-defined]
 
     async def read_message_ids(config: RunnableConfig) -> list[str | None]:
-        reader = build(AsyncPostgresSaver(aops_pool))
+        reader = build(AsyncPostgresSaver(saver_pool))
         state = await reader.aget_state(config)  # pyright: ignore[reportUnknownMemberType]
         messages = object_mapping(state.values)["messages"]
         assert is_object_list(messages)
@@ -752,11 +769,11 @@ async def test_nstep_wrapper_delta_readback_matches_unwrapped_control(
 
     # No super-step may be skipped on a delta thread: the wrapped run persists
     # the same checkpoint and write rows as upstream would.
-    assert await _row_counts(aops_pool, wrapped_thread) == await _row_counts(
-        aops_pool, control_thread
+    assert await _row_counts(saver_pool, wrapped_thread) == await _row_counts(
+        saver_pool, control_thread
     )
 
     # Row level: every write row keeps its checkpoint — nothing skipped, merged,
     # or re-homed — and every messages payload keeps its content and order.
-    control_rows = await _writes_by_position(aops_pool, control_thread)
-    assert await _writes_by_position(aops_pool, wrapped_thread) == control_rows
+    control_rows = await _writes_by_position(saver_pool, control_thread)
+    assert await _writes_by_position(saver_pool, wrapped_thread) == control_rows
