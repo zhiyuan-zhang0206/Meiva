@@ -149,3 +149,21 @@ def test_identity_markers_are_scrubbed_but_a_child_can_supply_its_own_handle() -
     report = json.loads(result.stdout)
     assert report["outcome"] == dict.fromkeys(names, "absent")
     assert report["injected_harness_error"] == "HarnessAttachError"
+
+
+# meiva:note
+# A Claude Code session hides every host `MEIVA_*` key it may not see by blanking it, and a test
+# run started from that session's shell must read those blanks as unset, the way the config boot
+# does for a harness child; a blank `MEIVA_TIMEZONE` used to fail every test's config parse
+# (task #7450).
+def test_a_harness_shells_blanked_keys_are_unset_for_the_suite() -> None:
+    names = ("MEIVA_TIMEZONE", "MEIVA_INVENTED_BLANKED_KNOB")
+    result = run_bounded(
+        [sys.executable, str(_PROBE), *names],
+        env={**os.environ, **dict.fromkeys(names, ""), "MEIVA_HARNESS_HANDLE": "invented-handle"},
+        capture_output=True,
+        text=True,
+        timeout=60,
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert json.loads(result.stdout)["outcome"] == dict.fromkeys(names, "absent")
