@@ -7,7 +7,9 @@ exec-node tests in `test_state_slot.py`.
 
 import sys
 import types
-from typing import Annotated, Any, cast
+from collections.abc import Mapping
+from types import SimpleNamespace
+from typing import Annotated, TypeGuard
 
 import pytest
 from langchain_core.messages import AnyMessage
@@ -23,13 +25,41 @@ from agent.state import (
     plugin_state_schema,
     validate_plugin_state_keys,
 )
+from base.host.boundary.json_values import is_object_dict
+from base.host.boundary.untyped import object_mapping, object_of
 from base.packages.plugins.extensions import ExtensionRegistry, PluginContributions
 from base.packages.plugins.loading.registry import loaded_state_classes
 
 
-def _declared(state_cls: type[BaseAgentState], name: str) -> Any:
+def _declared(state_cls: type[BaseAgentState], name: str) -> object:
     """A class attribute `build_agent_state` stamps on the class it builds."""
-    return cast(Any, state_cls).__dict__[name]
+    return object_mapping(state_cls.__dict__)[name]
+
+
+def _declared_namespaces(state_cls: type[BaseAgentState]) -> set[str]:
+    declared = _declared(state_cls, "__plugin_namespace_fields__")
+    assert is_object_dict(declared)
+    return set(declared)
+
+
+def _is_object_frozenset(value: object) -> TypeGuard[frozenset[object]]:
+    return isinstance(value, frozenset)
+
+
+def _declared_classes(state_cls: type[BaseAgentState]) -> frozenset[type[BaseModel]]:
+    declared = _declared(state_cls, "__plugin_state_classes__")
+    assert _is_object_frozenset(declared)
+    classes: set[type[BaseModel]] = set()
+    for member in declared:
+        assert isinstance(member, type)
+        assert issubclass(member, BaseModel)
+        classes.add(member)
+    return frozenset(classes)
+
+
+def _namespace_values(namespace: object) -> Mapping[str, object]:
+    assert isinstance(namespace, SimpleNamespace)
+    return object_mapping(vars(namespace))
 
 
 def _registry(*plugins: tuple[str, type[BaseModel]]) -> ExtensionRegistry:
@@ -54,10 +84,10 @@ def test_private_fields_get_the_plugin_prefix_and_the_namespace_view_works() -> 
     assert {"demo__counter", "demo__tags"} <= set(state_cls.model_fields)
     assert "counter" not in state_cls.model_fields
     state = state_cls(demo__counter=3, demo__tags={"a"})  # pyright: ignore[reportCallIssue]
-    ns: Any = cast(Any, state).demo
-    assert (ns.counter, ns.tags) == (3, {"a"})
+    ns = _namespace_values(object_of(getattr, state, "demo"))
+    assert (ns["counter"], ns["tags"]) == (3, {"a"})
     with pytest.raises(AttributeError, match="demo"):
-        _ = cast(Any, state).other
+        _namespace_values(object_of(getattr, state, "other"))
 
 
 def test_a_registry_without_state_builds_the_base_class() -> None:
@@ -99,15 +129,15 @@ def test_two_registries_build_independent_classes() -> None:
     assert not any(name.startswith("first__") for name in second.model_fields)
     assert "second__note" in second.model_fields
     assert not any(name.startswith("second__") for name in first.model_fields)
-    assert set(_declared(first, "__plugin_namespace_fields__")) == {"first"}
-    assert set(_declared(second, "__plugin_namespace_fields__")) == {"second"}
+    assert _declared_namespaces(first) == {"first"}
+    assert _declared_namespaces(second) == {"second"}
     assert _declared(first, "__plugin_base_declared__") == frozenset()
     assert _declared(second, "__plugin_base_declared__") == frozenset({"messages"})
-    assert _declared(first, "__plugin_state_classes__") == frozenset({_Private})
-    assert _declared(second, "__plugin_state_classes__") == frozenset({_MessagesDeclaring})
+    assert _declared_classes(first) == frozenset({_Private})
+    assert _declared_classes(second) == frozenset({_MessagesDeclaring})
     # The first class still answers for its own plugin set after the second was built.
     state = first(first__counter=1)  # pyright: ignore[reportCallIssue]
-    assert cast(Any, state).first.counter == 1
+    assert _namespace_values(object_of(getattr, state, "first"))["counter"] == 1
 
 
 def test_state_key_validation_reads_the_classs_own_declared_base_fields() -> None:
@@ -139,7 +169,7 @@ def test_the_allowlist_includes_a_plugin_class_only_when_passed_it() -> None:
     assert entry in checkpoint_msgpack_allowlist((_Private,))
     # The classes a built AgentState carries are what a serializer holding that class gets.
     state_cls = build_agent_state(_registry(("demo", _Private)))
-    assert entry in checkpoint_msgpack_allowlist(_declared(state_cls, "__plugin_state_classes__"))
+    assert entry in checkpoint_msgpack_allowlist(_declared_classes(state_cls))
 
 
 def test_building_the_state_class_binds_nothing_into_the_module() -> None:

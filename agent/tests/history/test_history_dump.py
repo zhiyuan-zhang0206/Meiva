@@ -19,13 +19,14 @@ Covers the four contracts of the feature:
 import json
 import re
 import shutil
+from collections.abc import Mapping
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any, cast
 from unittest.mock import MagicMock
 
 import psycopg
 import pytest
+from langchain_core.language_models import BaseChatModel
 from langchain_core.messages import (
     AIMessage,
     AnyMessage,
@@ -45,7 +46,7 @@ from agent.graph import claim_node
 from agent.graph.hooks.compact import auto_compact_for_llm, compose_summary_message
 from agent.hooks import history_dump
 from agent.messages import NoteTag, system_note_message
-from agent.state import AgentState
+from agent.state import AgentState, ContextReset
 from agent.tests.scripted_model import ScriptedChatModel
 from base.agents.context import MeivaContext
 from base.agents.messages.timestamp_policy import TimestampPolicy
@@ -60,6 +61,8 @@ from base.config.tests.configuration import defaults
 from base.db import Database
 from base.db.code_version_gate import ProcessDbGate
 from base.events.live.bus import EventBus
+from base.host.boundary.json_values import is_object_dict, is_object_list
+from base.host.boundary.untyped import object_of, object_sequence
 from base.host.env.agent_slices import AgentSlices, HistoryDump
 from base.lm.catalog import ModelCatalog
 from base.packages.plugin_providers import build_model_catalog
@@ -82,7 +85,7 @@ def _dump(
     enabled: bool = True,
     keep: int = 5,
     tick: int = 1,
-) -> Any:
+) -> Path | None:
     return history_dump.dump_history(
         messages,
         workspace,
@@ -161,18 +164,22 @@ def _sample_messages() -> list[AnyMessage]:
     ]
 
 
-def _compact_tail(update: Any) -> list[AnyMessage]:
+def _compact_tail(update: Mapping[str, object] | None) -> list[AnyMessage]:
     """Same transport assertion as agent/tests/test_compact.py: the window is
     cleared (REMOVE_ALL sentinel alone) and what follows the head is parked in
     `context_reset.tail`. Returns the tail."""
+    assert update is not None
     msgs = update["messages"]
+    assert is_object_list(msgs)
     assert len(msgs) == 1
     assert isinstance(msgs[0], RemoveMessage)
     assert msgs[0].id == REMOVE_ALL_MESSAGES
-    return update["context_reset"].tail
+    reset = update["context_reset"]
+    assert isinstance(reset, ContextReset)
+    return reset.tail
 
 
-def _fake_llm(summary_text: str) -> Any:
+def _fake_llm(summary_text: str) -> ScriptedChatModel:
     return ScriptedChatModel(replies=[AIMessage(content=summary_text)])
 
 
@@ -180,7 +187,7 @@ _LONG_SUMMARY = "## Requests\nfollow the template. " * 60
 
 
 def _runtime_with_llm(
-    llm: Any,
+    llm: BaseChatModel,
     database_gate: ProcessDbGate,
     *,
     home: Path,
@@ -232,7 +239,7 @@ def _over_threshold_state() -> AgentState:
 def _make_runtime(
     *,
     ops_pool: AsyncConnectionPool | None = None,
-    llm: Any | None = None,
+    llm: BaseChatModel | None = None,
     database_gate: ProcessDbGate,
     home: Path,
     enabled: bool = True,
@@ -271,7 +278,8 @@ def _insert_inbound_kind(
         )
         row = cur.fetchone()
         assert row is not None
-        new_id: int = row[0]
+        new_id = object_sequence(row)[0]
+        assert isinstance(new_id, int)
     db.commit()
     return new_id
 
@@ -287,7 +295,8 @@ def test_dump_enabled_by_default() -> None:
     """The feature is on by default (the Task #1249 opt-in flipped, 2026-09-11).
     The suite's autouse fixture disables it per test, so assert the field's
     *declared* default — a silent flip back must fail here."""
-    assert AgentCompactionSettings.model_fields["history_dump_enabled"].default is True
+    field = AgentCompactionSettings.model_fields["history_dump_enabled"]
+    assert object_of(field.get_default) is True
 
 
 def test_dump_disabled_returns_none(tmp_path: Path):
@@ -361,9 +370,9 @@ def test_dump_is_replayable_jsonl(tmp_path: Path):
 
     replayed: list[BaseMessage] = []
     for line in lines:
-        decoded = json.loads(line)
-        assert isinstance(decoded, dict)
-        raw = cast("dict[str, object]", decoded)
+        decoded = object_of(json.loads, line)
+        assert is_object_dict(decoded)
+        raw = decoded
         # The documented replay recipe: wrap the raw fields in the langchain
         # type/data envelope and let messages_from_dict rebuild the message.
         replayed.extend(

@@ -26,11 +26,11 @@ from collections.abc import Callable, Iterator, Mapping
 from contextlib import redirect_stdout
 from importlib import import_module
 from types import ModuleType, SimpleNamespace
-from typing import Any
 
 import pytest
 
 import meiva
+from base.host.boundary.untyped import object_mapping, object_of
 from meiva.sdk_surface import plugins
 from meiva.sdk_surface.installation import NamespaceAdded
 
@@ -44,7 +44,7 @@ class _Installer:
         self.applied: list[NamespaceAdded] = []
 
     def namespace(
-        self, name: str, module: Any, taken: Mapping[str, str] | None = None
+        self, name: str, module: object, taken: Mapping[str, str] | None = None
     ) -> NamespaceAdded:
         added = plugins.install_namespace(PLUGIN, name, module, {} if taken is None else taken)
         self.applied.append(added)
@@ -65,6 +65,16 @@ def installer() -> Iterator[_Installer]:
         inst.undo(inst.applied.pop())
 
 
+def _installed(name: str) -> object:
+    return object_mapping(vars(meiva))[name]
+
+
+def _call(owner: object, name: str) -> object:
+    function = object_mapping(vars(owner))[name]
+    assert callable(function)
+    return function()
+
+
 def _make_module(name: str) -> ModuleType:
     """Build a temporary module to serve as plugin namespace."""
     mod = ModuleType(f"_test_{name}")
@@ -81,8 +91,8 @@ def test_install_namespace_attaches_to_meiva(installer: _Installer):
     mod = _make_module("code")
     installer.namespace("code", mod)
 
-    assert meiva.code is mod  # type: ignore[attr-defined]
-    assert meiva.code.greet() == "hello from code"  # type: ignore[attr-defined]
+    assert _installed("code") is mod
+    assert _call(_installed("code"), "greet") == "hello from code"
 
 
 def test_install_namespace_adds_to_all(installer: _Installer):
@@ -197,7 +207,7 @@ def test_install_namespace_case_sensitive_check(installer: _Installer):
     attributes are case-sensitive; plugin author writing lowercase `db_url` should not be
     ambiguously blocked by framework — it receives a real new namespace. This is by design, not a bug."""
     installer.namespace("db_url", _make_module("db_url"))
-    assert meiva.db_url.greet() == "hello from db_url"  # type: ignore[attr-defined]
+    assert _call(_installed("db_url"), "greet") == "hello from db_url"
 
 
 def test_install_namespace_taken_by_another_plugin_raises_with_plugin_name(installer: _Installer):
@@ -265,7 +275,7 @@ def test_install_after_undo_reuses_name(installer: _Installer):
     installer.undo(installer.namespace("code", _make_module("code-v1")))
 
     installer.namespace("code", _make_module("code-v2"))
-    assert meiva.code.greet() == "hello from code-v2"  # type: ignore[attr-defined]
+    assert _call(_installed("code"), "greet") == "hello from code-v2"
 
 
 def test_install_namespace_visible_via_sys_modules(installer: _Installer):
@@ -275,7 +285,7 @@ def test_install_namespace_visible_via_sys_modules(installer: _Installer):
     installer.namespace("code", mod)
 
     meiva_from_sys = sys.modules["meiva"]
-    assert meiva_from_sys.code is mod  # type: ignore[attr-defined]
+    assert object_of(getattr, meiva_from_sys, "code") is mod
 
 
 # ── importable submodule (import meiva.<name>) ─────────────────────────────
@@ -287,21 +297,21 @@ def test_import_statement_resolves_installed_namespace(installer: _Installer):
     ModuleNotFoundError while `meiva.memory.search` attribute access worked)."""
     installer.namespace("code", _make_module("code"))
 
-    namespace: dict[str, Any] = {}
+    namespace: dict[str, object] = {}
     exec("import meiva.code", namespace)
 
-    assert namespace["meiva"].code is meiva.code
-    assert meiva.code.greet() == "hello from code"
+    assert object_of(getattr, namespace["meiva"], "code") is _installed("code")
+    assert _call(_installed("code"), "greet") == "hello from code"
 
 
 def test_from_import_resolves_installed_namespace(installer: _Installer):
     """`from meiva import code` returns the installed namespace object."""
     installer.namespace("code", _make_module("code"))
 
-    namespace: dict[str, Any] = {}
+    namespace: dict[str, object] = {}
     exec("from meiva import code", namespace)
 
-    assert namespace["code"] is meiva.code
+    assert namespace["code"] is _installed("code")
 
 
 def test_importlib_import_matches_package_attribute(installer: _Installer):
@@ -320,14 +330,14 @@ def test_simple_namespace_install_is_importable_module(installer: _Installer):
     package attribute serves."""
     installer.namespace("probe", SimpleNamespace(ping=lambda: "pong", __doc__="ns plugin"))
 
-    assert isinstance(meiva.probe, ModuleType)
-    assert sys.modules["meiva.probe"] is meiva.probe
+    assert isinstance(_installed("probe"), ModuleType)
+    assert sys.modules["meiva.probe"] is _installed("probe")
 
-    namespace: dict[str, Any] = {}
+    namespace: dict[str, object] = {}
     exec("import meiva.probe as probe", namespace)
 
-    assert namespace["probe"] is meiva.probe
-    assert meiva.probe.ping() == "pong"
+    assert namespace["probe"] is _installed("probe")
+    assert _call(_installed("probe"), "ping") == "pong"
 
 
 @pytest.mark.usefixtures("sdk_model_owner")
@@ -339,7 +349,7 @@ def test_materialized_namespace_help_renders_members(installer: _Installer):
 
     buf = io.StringIO()
     with redirect_stdout(buf):
-        meiva.help(meiva.code)
+        meiva.help(_installed("code"))
 
     assert "def greet" in buf.getvalue()
 
@@ -366,4 +376,4 @@ def test_install_undo_install_import_returns_fresh_module(installer: _Installer)
 
     assert first is not second
     assert import_module("meiva.code") is second
-    assert meiva.code.greet() == "hello from code-v2"
+    assert _call(_installed("code"), "greet") == "hello from code-v2"

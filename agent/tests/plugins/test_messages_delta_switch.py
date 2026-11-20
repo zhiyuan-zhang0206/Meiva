@@ -12,12 +12,13 @@ Pins:
    read time on resume.
 """
 
-from collections.abc import Sequence
-from typing import Annotated, Any, cast
+from collections.abc import Callable, Mapping, Sequence
+from typing import Annotated, Protocol, TypedDict, get_args
 
-from langchain_core.messages import AIMessage, AnyMessage, HumanMessage
-from langchain_core.runnables import RunnableConfig
+from langchain_core.messages import AIMessage, AnyMessage, BaseMessage, HumanMessage
+from langchain_core.runnables import Runnable, RunnableConfig, RunnableLambda
 from langgraph.channels.delta import DeltaChannel
+from langgraph.checkpoint.base import BaseCheckpointSaver
 from langgraph.checkpoint.memory import InMemorySaver
 from langgraph.graph import END, START, StateGraph
 from langgraph.graph.message import add_messages
@@ -33,13 +34,16 @@ from agent.state import (
     messages_annotation_key,
     resolve_reducer,
 )
+from base.host.boundary.json_values import is_object_list
+from base.host.boundary.untyped import object_mapping, object_sequence
 
 PLUGIN_SPELLING = Annotated[list[AnyMessage], add_messages]
 GUARDED_SPELLING = Annotated[list[AnyMessage], guarded_add_messages]
 
 
 def test_base_annotation_is_the_delta_form() -> None:
-    meta = BaseAgentState.__annotations__["messages"].__metadata__
+    annotation = object_mapping(BaseAgentState.__annotations__)["messages"]
+    meta = object_sequence(get_args(annotation))[1:]
     assert len(meta) == 1
     channel = meta[0]
     assert isinstance(channel, DeltaChannel)
@@ -48,7 +52,7 @@ def test_base_annotation_is_the_delta_form() -> None:
 
 
 def test_annotation_keys_equivalent_across_spellings() -> None:
-    base_key = messages_annotation_key(BaseAgentState.__annotations__["messages"])
+    base_key = messages_annotation_key(object_mapping(BaseAgentState.__annotations__)["messages"])
     assert messages_annotation_key(PLUGIN_SPELLING) == base_key
     assert messages_annotation_key(GUARDED_SPELLING) == base_key
 
@@ -78,8 +82,8 @@ def test_accumulate_delta_concatenates_for_every_messages_spelling() -> None:
     # the parameter's Callable type cannot express that runtime contract.
     for reducer in (add_messages, guarded_add_messages, MESSAGES_DELTA_CHANNEL):
         merged = accumulate_delta(acc, new, reducer)  # pyright: ignore[reportArgumentType]
-        items = cast(list[AnyMessage], merged)
-        assert [m.id for m in items] == ["a", "b"]
+        assert is_object_list(merged)
+        assert [m.id for m in merged if isinstance(m, BaseMessage)] == ["a", "b"]
 
 
 def test_is_messages_reducer_form_membership() -> None:
@@ -99,8 +103,38 @@ class _FlippedState(BaseAgentState):
     target: int = 0
 
 
-def _build(saver: Any) -> Any:
-    def step(state: _FlippedState) -> dict[str, Any]:
+class _FlippedInput(TypedDict):
+    n: int
+    target: int
+
+
+class _CompiledGraph(Protocol):
+    async def ainvoke(
+        self, input: _FlippedInput, config: RunnableConfig
+    ) -> Mapping[str, object]: ...
+
+
+# meiva:note
+# The slice of the LangGraph builder this test drives. The library's own `add_node` and `compile`
+# overloads carry types it leaves unresolved, so the builder is held through the calls the test makes.
+class _GraphBuilder(Protocol):
+    def add_node(self, node: str, action: Runnable[_FlippedState, object]) -> object: ...
+
+    def add_edge(self, start_key: str, end_key: str) -> object: ...
+
+    def add_conditional_edges(
+        self, source: str, path: Callable[[_FlippedState], str]
+    ) -> object: ...
+
+    def compile(self, checkpointer: BaseCheckpointSaver[str]) -> _CompiledGraph: ...
+
+
+def _new_builder() -> _GraphBuilder:
+    return StateGraph(_FlippedState, input_schema=_FlippedInput)
+
+
+def _build(saver: BaseCheckpointSaver[str]) -> _CompiledGraph:
+    def step(state: _FlippedState) -> dict[str, object]:
         n = state.n
         return {
             "messages": [
@@ -113,11 +147,17 @@ def _build(saver: Any) -> Any:
     def route(state: _FlippedState) -> str:
         return "step" if state.n < state.target else END
 
-    graph: Any = StateGraph(_FlippedState)
-    graph.add_node("step", step)
+    graph = _new_builder()
+    graph.add_node("step", RunnableLambda(step))
     graph.add_edge(START, "step")
     graph.add_conditional_edges("step", route)
     return graph.compile(checkpointer=saver)
+
+
+def _message_ids(state: Mapping[str, object]) -> list[str | None]:
+    messages = state["messages"]
+    assert is_object_list(messages)
+    return [m.id for m in messages if isinstance(m, BaseMessage)]
 
 
 async def test_flipped_channel_writes_delta_and_resumes_folded() -> None:
@@ -126,16 +166,16 @@ async def test_flipped_channel_writes_delta_and_resumes_folded() -> None:
     saver = InMemorySaver()
     graph = _build(saver)
     cfg: RunnableConfig = {"configurable": {"thread_id": "switch-rt"}}
-    final = await graph.ainvoke({"n": 0, "target": 6}, cfg)
+    final = object_mapping(await graph.ainvoke({"n": 0, "target": 6}, cfg))
     assert final["n"] == 6
-    ids = [m.id for m in final["messages"]]
+    ids = _message_ids(final)
     assert ids == [f"{p}{n}" for n in range(6) for p in ("u", "a")]
 
     tup = await saver.aget_tuple(cfg)
     assert tup is not None
     assert "messages" in delta_evidence(tup.checkpoint, tup.metadata)
 
-    final2 = await graph.ainvoke({"n": 6, "target": 6}, cfg)
-    ids2 = [m.id for m in final2["messages"]]
+    final2 = object_mapping(await graph.ainvoke({"n": 6, "target": 6}, cfg))
+    ids2 = _message_ids(final2)
     assert ids2[: len(ids)] == ids
     assert len(ids2) == len(ids) + 2

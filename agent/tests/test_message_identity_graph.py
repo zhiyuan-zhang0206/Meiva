@@ -1,10 +1,11 @@
 """Real graph persistence distinguishes new messages from legacy replay UUIDs."""
 
-from typing import Annotated, Any, TypedDict
+from collections.abc import Mapping
+from typing import Annotated, Protocol, TypedDict
 
 import pytest
-from langchain_core.messages import AIMessage, HumanMessage
-from langchain_core.runnables import RunnableConfig
+from langchain_core.messages import AIMessage, AnyMessage, BaseMessage, HumanMessage
+from langchain_core.runnables import Runnable, RunnableConfig, RunnableLambda
 from langgraph.channels import DeltaChannel
 from langgraph.checkpoint.memory import InMemorySaver
 from langgraph.graph import END, START, StateGraph
@@ -18,26 +19,66 @@ from base.agents.messages.identity import normalize_stored_message_ids
 from base.agents.messages.timestamp_policy import TimestampPolicy
 from base.clock import Clock
 from base.config import settings
+from base.host.boundary.json_values import is_object_list
 
 _TIMELINE_INPUTS = TimestampPolicy.from_clock(
     Clock.from_settings(), timestamps_enabled=settings.general.message_timestamps
 )
 
 
+class _State(TypedDict):
+    messages: Annotated[
+        list[AnyMessage], DeltaChannel(guarded_delta_reducer, snapshot_frequency=1000)
+    ]
+
+
+class _Snapshot(Protocol):
+    @property
+    def values(self) -> Mapping[str, object]: ...
+
+
+class _CompiledGraph(Protocol):
+    def invoke(
+        self, input: _State, config: RunnableConfig, *, durability: Durability
+    ) -> object: ...
+
+    def get_state(self, config: RunnableConfig) -> _Snapshot: ...
+
+
+# meiva:note
+# The slice of the LangGraph builder this test drives. The library's own `add_node` and `compile`
+# overloads carry types it leaves unresolved, so the builder is held through the calls the test makes.
+class _GraphBuilder(Protocol):
+    def add_node(self, node: str, action: Runnable[_State, object]) -> object: ...
+
+    def add_edge(self, start_key: str, end_key: str) -> object: ...
+
+    def compile(self, checkpointer: InMemorySaver) -> _CompiledGraph: ...
+
+
+def _new_builder() -> _GraphBuilder:
+    return StateGraph(_State)
+
+
+def _stored_messages(app: _CompiledGraph, config: RunnableConfig) -> list[BaseMessage]:
+    stored = app.get_state(config).values["messages"]
+    assert is_object_list(stored)
+    messages = [m for m in stored if isinstance(m, BaseMessage)]
+    assert len(messages) == len(stored)
+    return messages
+
+
 @pytest.mark.parametrize("durability", ["sync", "async", "exit"])
 def test_graph_input_node_and_working_copy_output_have_persisted_ids(
     durability: Durability,
 ) -> None:
-    class State(TypedDict):
-        messages: Annotated[list[Any], DeltaChannel(guarded_delta_reducer, snapshot_frequency=1000)]
-
-    def reply(state: State) -> dict[str, Any]:
+    def reply(state: _State) -> dict[str, object]:
         direct = AIMessage(content="same text")
         working = AIMessage(content="same text")
         # Plugin working-copy/hook co-write uses the single-merge guard before
         # put_writes. It must not mark these newly created deltas as legacy.
         guarded_add_messages(state["messages"], [working])
-        update: dict[str, Any] = {}
+        update: dict[str, object] = {}
         writers: dict[str, str] = {}
         for name in ("first", "second"):
             merge_result(
@@ -48,18 +89,20 @@ def test_graph_input_node_and_working_copy_output_have_persisted_ids(
                 "before_turn",
                 BaseAgentState.model_fields,
             )
-        return {"messages": [direct, working, *update["messages"]]}
+        merged = update["messages"]
+        assert is_object_list(merged)
+        return {"messages": [direct, working, *merged]}
 
-    graph = StateGraph(State)
-    graph.add_node("reply", reply)  # pyright: ignore[reportUnknownMemberType]
+    graph = _new_builder()
+    graph.add_node("reply", RunnableLambda(reply))
     graph.add_edge(START, "reply")
     graph.add_edge("reply", END)
     saver = InMemorySaver()
-    app = graph.compile(checkpointer=saver)  # pyright: ignore[reportUnknownMemberType]
+    app = graph.compile(saver)
     config: RunnableConfig = {"configurable": {"thread_id": f"identity-{durability}"}}
-    app.invoke({"messages": [HumanMessage(content="new input")]}, config, durability=durability)  # pyright: ignore[reportUnknownMemberType]
-    first = app.get_state(config).values["messages"]
-    second = app.get_state(config).values["messages"]
+    app.invoke({"messages": [HumanMessage(content="new input")]}, config, durability=durability)
+    first = _stored_messages(app, config)
+    second = _stored_messages(app, config)
     assert len(first) == 5
     assert len({m.id for m in first}) == 5
     assert all(m.id and not m.additional_kwargs.get("meiva_ephemeral_message_id") for m in first)

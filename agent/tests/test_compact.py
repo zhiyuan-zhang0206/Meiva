@@ -1,6 +1,5 @@
 from collections.abc import Mapping, Sequence
 from pathlib import Path
-from typing import Any
 from unittest.mock import AsyncMock, MagicMock
 
 import psycopg
@@ -46,7 +45,7 @@ from base.paths import meiva_home, resolve_meiva_home
 
 
 def pinned_slices(
-    pins: Mapping[str, Any] | None = None, *, timestamps_enabled: bool | None = None
+    pins: Mapping[str, object] | None = None, *, timestamps_enabled: bool | None = None
 ) -> AgentSlices:
     return AgentSlices.resolve(
         pins,
@@ -64,12 +63,16 @@ def context_reset_of(update: Mapping[str, object]) -> ContextReset:
     return reset
 
 
-def compact_tail(update: Any) -> list[AnyMessage]:
+def compact_tail(update: Mapping[str, object] | None) -> list[AnyMessage]:
+    assert update is not None
     msgs = update["messages"]
+    assert is_object_list(msgs)
     assert len(msgs) == 1, f"expected the sentinel alone, got {len(msgs)} messages"
     assert isinstance(msgs[0], RemoveMessage)
     assert msgs[0].id == REMOVE_ALL_MESSAGES
-    return update["context_reset"].tail
+    reset = update["context_reset"]
+    assert isinstance(reset, ContextReset)
+    return reset.tail
 
 
 def compact_slices(
@@ -107,7 +110,7 @@ def _fake_llm_seq(*summaries: str) -> ScriptedChatModel:
 
 
 def runtime_with_llm(
-    llm: Any,
+    llm: BaseChatModel,
     database_gate: ProcessDbGate,
     *,
     slices: AgentSlices,
@@ -246,12 +249,8 @@ async def test_auto_compact_hook_clears_history_and_parks_summary(
     assert isinstance(reset.tail[0], HumanMessage)
     assert reset.resume == "claim"
     assert result["goto"] == "init_context"
-    [monitoring] = [
-        record
-        for record in loguru_records
-        if record["extra"].get("event") == "compaction_completed"
-    ]
-    assert monitoring["extra"] | {"msg": None} == {
+    [monitoring] = loguru_records.extras(event="compaction_completed")
+    assert monitoring | {"msg": None} == {
         "agent_id": 1,
         "compact_kind": "auto",
         "reminder_shown": False,
