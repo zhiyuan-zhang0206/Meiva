@@ -256,7 +256,7 @@ export function revealCollapsedCards() {
 //   send reserve their inline height; any other element is as tall as its children;
 // - the log has the 52px bar-clear top padding and 24px bottom padding, `space-y-3` / `space-y-1`
 //   add their gaps between in-flow children;
-// - the column sits on the viewport's bottom edge while it is shorter than the viewport.
+// - the column starts at the viewport's top edge.
 // scrollTop clamps to the scroll range, a smooth `scrollTo` waits for `finishSmooth`, and every
 // ResizeObserver is delivered on `resize()` with the model's heights.
 export interface TimelineLayoutOptions {
@@ -330,7 +330,7 @@ export function timelineLayout(options: TimelineLayoutOptions = {}) {
     const parent = el.parentElement;
     if (!parent) return 0;
     if (parent === vp) {
-      let y = Math.max(0, viewportHeight - columnHeight(vp, memo));
+      let y = 0;
       for (const sibling of vp.children) {
         if (sibling === el) break;
         if (inFlow(sibling)) y += heightOf(sibling, memo);

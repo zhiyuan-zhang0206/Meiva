@@ -2,8 +2,9 @@
 
 ## Pull gesture and request ownership
 
-The first short viewport fills at most two older pages, stopping once content
-exceeds its height. Reaching the top alone never requests history. An additional
+The first short viewport fills at most two older pages, one at a time, stopping once
+content exceeds its height. On a first visit the rows stay hidden under the loading
+ring until the fill ends, so the fill never reflows rows the reader already sees. Reaching the top alone never requests history. An additional
 upward wheel gesture at the top requests a page after accumulating 64 pixels
 of intent. Events less than 120 ms apart form one burst. The burst that arrived
 at the top and its momentum do not request a page. Remaining events from a

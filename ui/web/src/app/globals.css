@@ -290,17 +290,6 @@
   [data-slot="scroll-area-viewport"] > div {
     display: block !important;
   }
-  /* meiva:note
-     The timeline column sits on the viewport's bottom edge while it is shorter than the
-     viewport, so older rows arriving above grow upward and the newest row stays put: its
-     viewport makes Radix's wrapper a full-height column (a flex box, not the table box the
-     rule above avoids).
-     meiva:link ui/web/src/docs/frontend-components/timeline-view/sticky-scroll.md */
-  [data-slot="scroll-area-viewport"].timeline-scroll-viewport > div {
-    display: flex !important;
-    flex-direction: column;
-    min-height: 100%;
-  }
   /* On coarse-pointer touch devices, Radix's 10px overlay scrollbar track carries
      touch-action:none and jumps scrollTop on track press even at opacity:0,
      hijacking right-edge thumb swipes. Keep it purely visual on touch while

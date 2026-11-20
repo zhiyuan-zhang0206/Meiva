@@ -40,12 +40,16 @@ interface Args {
   onCancelBackgroundLoadOlder?: () => boolean;
   reveal: RevealDecision;
   anchor: ViewportAnchor;
+  filling: () => boolean;
 }
 
 export interface Placement {
   // meiva:note
   // The rows may be seen: the conversation's opening place has been reached.
   visible: boolean;
+  // meiva:note
+  // The cold fill may read older pages now.
+  fillAllowed: boolean;
   // meiva:note
   // Older pages are being read to find the opening row.
   searching: boolean;
@@ -69,14 +73,14 @@ export interface Placement {
 // meiva:link ui/web/src/docs/frontend-components/timeline-view/sticky-scroll.md
 export function usePlacement({
   threadKey, entryKey, reloadRestore, items, compactBuffer, loading, turnActive, hasMoreOlder, loadingOlder,
-  onLoadOlder, onCancelBackgroundLoadOlder, reveal, anchor,
+  onLoadOlder, onCancelBackgroundLoadOlder, reveal, anchor, filling,
 }: Args): Placement {
   const [machine] = useState(() => new PlacementMachine(initialGoal(readMemoryPlace(entryKey, threadKey), threadKey, reloadRestore), BOUNDS));
   const snapshot = useSyncExternalStore(machine.subscribe, machine.snapshot, machine.snapshot);
 
   const inputs: PlacementInputs = {
     threadKey, reloadRestore, items, compactBuffer, loading, turnActive, hasMoreOlder, loadingOlder,
-    canLoadOlder: Boolean(onLoadOlder), reveal, now: 0,
+    canLoadOlder: Boolean(onLoadOlder), reveal, now: 0, filling,
   };
   const live = useRef({ inputs, onLoadOlder, onCancelBackgroundLoadOlder });
   useLayoutEffect(() => {
@@ -178,6 +182,7 @@ export function usePlacement({
 
   return {
     visible: snapshot.visible,
+    fillAllowed: snapshot.fillAllowed,
     searching: snapshot.searching,
     // meiva:note
     // Before the first pass the machine has published nothing: the opening row is pinned from the start.

@@ -5,7 +5,7 @@ import { useTranslations } from "next-intl";
 
 import type { BackendTimelineItem, Quote } from "@/lib/contracts/types";
 import { ScrollArea } from "@/components/ui/scroll-area";
-import { isReattachedTimelineContext, parseItemIdParts, standingHeadNoteIds } from "@/lib/timeline/timeline";
+import { findOldestTimelineCursor, isReattachedTimelineContext, parseItemIdParts, standingHeadNoteIds } from "@/lib/timeline/timeline";
 import type { OlderLoadOrigin } from "@/lib/timeline/use-timeline";
 import { useTimelineStore } from "@/lib/timeline/timeline-store";
 import type { CompactTransitionBuffer } from "@/lib/layout/compact-transition";
@@ -181,6 +181,21 @@ export const TimelineView = memo(function TimelineView({
     onChange: onAnchorChange, onUnresolved, pinnedHead, onFree, onRideEnd, viewportObserverFactory,
   });
 
+  // meiva:note
+  // A first page that does not fill the viewport reads up to COLD_FILL_MAX_PAGES older pages before a
+  // first visit opens, so history never lands above rows the reader is already looking at.
+  // meiva:link ui/web/src/docs/frontend-components/timeline-view/history-paging.md
+  const coldFill = useRef<{ pages: number; open: boolean; requested: string | null; sawLoading: boolean }>({
+    pages: 0, open: true, requested: null, sawLoading: false,
+  });
+  const filling = useCallback(() => {
+    const fill = coldFill.current;
+    const viewport = controls.viewport();
+    if (!fill.open || loading || !viewport || viewport.clientHeight <= 0 || !hasMoreOlder || !onLoadOlder) return false;
+    if (viewport.scrollHeight > viewport.clientHeight) return false;
+    const inFlight = loadingOlder || (fill.requested !== null && fill.requested === (findOldestTimelineCursor(canonicalItems)?.item_id ?? null));
+    return fill.pages < COLD_FILL_MAX_PAGES || inFlight;
+  }, [canonicalItems, controls, hasMoreOlder, loading, loadingOlder, onLoadOlder]);
   const placement = usePlacement({
     threadKey,
     entryKey: scrollMemoryKey,
@@ -195,6 +210,7 @@ export const TimelineView = memo(function TimelineView({
     onCancelBackgroundLoadOlder,
     reveal,
     anchor: controls,
+    filling,
   });
   // meiva:note
   // Only a following reader releases the oldest rows (the retention rule in the paging doc): the
@@ -268,7 +284,6 @@ export const TimelineView = memo(function TimelineView({
 
   // meiva:note
   // History paging: the reader's pull or keyboard control, and a cold fill for a short first page.
-  const coldFill = useRef({ pages: 0, open: true });
   const canPullOlder = useCallback(
     () => visible && hasMoreOlder && !loadingOlder && !!onLoadOlder,
     [hasMoreOlder, loadingOlder, onLoadOlder, visible],
@@ -305,12 +320,26 @@ export const TimelineView = memo(function TimelineView({
   useLayoutEffect(() => {
     const fill = coldFill.current;
     const viewport = controls.viewport();
-    if (!fill.open || !visible || !viewport || viewport.clientHeight <= 0 || canonicalItems.length === 0 || loadingOlder) return;
+    if (!fill.open || !placement.fillAllowed || loading || !viewport || viewport.clientHeight <= 0 || canonicalItems.length === 0) return;
+    if (loadingOlder) {
+      if (fill.requested !== null) fill.sawLoading = true;
+      return;
+    }
+    const oldest = findOldestTimelineCursor(canonicalItems)?.item_id ?? null;
+    // meiva:note
+    // One page at a time: the next waits until the last one has landed (the oldest row moved); a
+    // page that ended without reaching further back ends the fill.
+    if (fill.requested !== null && fill.requested === oldest) {
+      if (fill.sawLoading) fill.open = false;
+      return;
+    }
+    fill.sawLoading = false;
     if (viewport.scrollHeight > viewport.clientHeight || fill.pages >= COLD_FILL_MAX_PAGES || !hasMoreOlder || !onLoadOlder) {
       fill.open = false;
       return;
     }
     fill.pages += 1;
+    fill.requested = oldest;
     onLoadOlder("background");
   });
 
@@ -418,16 +447,15 @@ export const TimelineView = memo(function TimelineView({
       <ScrollArea
         className="h-full text-[13px] leading-relaxed"
         viewportRef={viewportRef}
-        viewportClassName="timeline-scroll-viewport [overflow-anchor:none] overscroll-y-contain"
+        viewportClassName="[overflow-anchor:none] overscroll-y-contain"
         scrollbarActivity="input"
       >
         <div
           // meiva:note
-          // The column sits on the viewport's bottom edge while it is shorter than the viewport, so
-          // older rows arriving above it grow upward and the newest row stays put. Rows are hidden
-          // (not unmounted) until their place is resolved: the first painted frame is the destination.
+          // Rows are hidden (not unmounted) until their place is resolved: the first painted frame is
+          // the destination.
           // meiva:link ui/web/src/docs/frontend-components/timeline-view/sticky-scroll.md
-          className="mt-auto w-full"
+          className="w-full"
           style={visible ? undefined : { visibility: "hidden" }}
           data-timeline-column
         >

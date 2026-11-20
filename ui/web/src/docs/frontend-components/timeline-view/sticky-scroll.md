@@ -37,8 +37,9 @@ resolves in the loaded rows, so the first painted frame is the destination:
 
 Leaving saves the row on screen and its offset, including when leaving the tail (user ruling
 2026-10-17): a return continues reading there while newer output stays below. A reader who
-reaches the bottom follows again. A short conversation sits on the viewport's bottom edge, so
-history arriving above it grows upward and the newest row never moves.
+reaches the bottom follows again. A first page shorter than the viewport stays hidden while the
+cold fill reads its older pages ([history paging](history-paging.md)), so history never lands
+above rows already on screen.
 
 Across a full tab reload (`feature.reloadReadingRestore`, default `true`) the place is a per-agent
 `Browser.session` bookmark; a reload from the tail keeps none and opens on the latest rows.

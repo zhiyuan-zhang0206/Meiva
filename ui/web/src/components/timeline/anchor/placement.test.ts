@@ -156,22 +156,36 @@ describe("first visit", () => {
     expect(fx.place).toHaveBeenCalledWith(TAIL, { hold: false, sendReserve: true });
   });
 
+  it("keeps a short first page hidden while the cold fill reads older pages, then opens the tail", () => {
+    const machine = machineFor(null);
+    const fx = effects();
+    let filling = true;
+    machine.step(inputs({ filling: () => filling }), fx);
+    expect(fx.place).not.toHaveBeenCalled();
+    expect(machine.snapshot().visible).toBe(false);
+    expect(machine.snapshot().fillAllowed).toBe(true);
+    filling = false;
+    machine.step(inputs({ filling: () => filling, now: 1 }), fx);
+    expect(fx.place).toHaveBeenCalledWith(TAIL, { hold: false, sendReserve: false });
+    expect(machine.snapshot().visible).toBe(true);
+  });
+
   it("waits for an undecided reveal within the time bound, then opens the tail", () => {
     const machine = machineFor(null);
     const fx = effects();
     const undecided = { decided: false, itemId: null };
     machine.step(inputs({ items: [], loading: true, reveal: undecided, now: 0 }), fx);
-    expect(machine.snapshot()).toEqual({ visible: false, searching: false, pin: null });
+    expect(machine.snapshot()).toEqual({ visible: false, searching: false, pin: null, fillAllowed: true });
     // meiva:note
     // The bound runs from the moment the rows are in, not from the mount.
     machine.step(inputs({ reveal: undecided, now: 5_000 }), fx);
-    expect(machine.snapshot()).toEqual({ visible: false, searching: true, pin: null });
+    expect(machine.snapshot()).toEqual({ visible: false, searching: true, pin: null, fillAllowed: true });
     machine.step(inputs({ reveal: undecided, now: 5_000 + BOUNDS.timeoutMs - 1 }), fx);
     expect(fx.place).not.toHaveBeenCalled();
     machine.step(inputs({ reveal: undecided, turnActive: true, now: 5_000 + BOUNDS.timeoutMs }), fx);
     expect(fx.place).toHaveBeenCalledTimes(1);
     expect(fx.place).toHaveBeenCalledWith(TAIL, { hold: false, sendReserve: true });
-    expect(machine.snapshot()).toEqual({ visible: true, searching: false, pin: null });
+    expect(machine.snapshot()).toEqual({ visible: true, searching: false, pin: null, fillAllowed: true });
     // meiva:note
     // A decision that arrives after the bound no longer moves the reader.
     machine.step(inputs({ reveal: { decided: true, itemId: "5.0" }, now: 5_000 + BOUNDS.timeoutMs + 1 }), fx);
@@ -216,7 +230,7 @@ describe("memory place", () => {
     machine.step(inputs({ loading: true, hasMoreOlder: true }), fx);
     expect(fx.place).not.toHaveBeenCalled();
     expect(fx.loadOlder).not.toHaveBeenCalled();
-    expect(machine.snapshot()).toEqual({ visible: false, searching: false, pin: null });
+    expect(machine.snapshot()).toEqual({ visible: false, searching: false, pin: null, fillAllowed: false });
     machine.step(inputs({ items: rows(30, 45) }), fx);
     expect(fx.place).toHaveBeenCalledWith(at("40.0", -40), { hold: false, sendReserve: false });
   });
@@ -463,12 +477,12 @@ describe("snapshot", () => {
     const machine = machineFor(null);
     const listener = vi.fn();
     machine.subscribe(listener);
-    expect(machine.snapshot()).toEqual({ visible: false, searching: false, pin: null });
+    expect(machine.snapshot()).toEqual({ visible: false, searching: false, pin: null, fillAllowed: true });
     machine.step(inputs({ items: [], loading: true }), effects());
     expect(listener).not.toHaveBeenCalled();
     machine.step(inputs(), effects());
     expect(listener).toHaveBeenCalledTimes(1);
-    expect(machine.snapshot()).toEqual({ visible: true, searching: false, pin: null });
+    expect(machine.snapshot()).toEqual({ visible: true, searching: false, pin: null, fillAllowed: true });
     expect(machine.isPlaced()).toBe(true);
   });
 

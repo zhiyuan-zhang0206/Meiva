@@ -42,6 +42,10 @@ export interface PlacementInputs {
   canLoadOlder: boolean;
   reveal: RevealDecision;
   now: number;
+  // meiva:note
+  // A first page shorter than the viewport is still reading its older pages: opening now would
+  // reflow the rows under the reader as they land.
+  filling?: () => boolean;
 }
 
 export interface PlacementEffects {
@@ -74,6 +78,9 @@ export interface PlacementSnapshot {
   visible: boolean;
   searching: boolean;
   pin: RowRef | null;
+  // meiva:note
+  // The cold fill may read older pages: the rows are placed, or a first visit waits for them.
+  fillAllowed: boolean;
 }
 
 export function initialGoal(memory: SavedPlace | null, threadKey: string | undefined, reloadRestore: ReloadRestoreConfig): Goal {
@@ -93,7 +100,7 @@ export class PlacementMachine {
 
   constructor(goal: Goal, private readonly bounds: SearchBounds) {
     this.goal = goal;
-    this.snap = { visible: goal.kind === "placed", searching: false, pin: null };
+    this.snap = { visible: goal.kind === "placed", searching: false, pin: null, fillAllowed: goal.kind === "placed" || goal.kind === "first" };
   }
 
   subscribe = (listener: () => void) => {
@@ -183,9 +190,9 @@ export class PlacementMachine {
       }
       case "first": {
         if (loading && items.length === 0) return false;
-        if (!inputs.reveal.decided) {
+        if (!inputs.reveal.decided || inputs.filling?.() === true) {
           // meiva:note
-          // The rows are in but the reveal decision is not: wait for it, within the same time bound.
+          // The rows are in but the reveal decision or the fill is not: wait, within the same time bound.
           if (goal.readySince === undefined) {
             this.goal = { kind: "first", readySince: inputs.now };
             return false;
@@ -254,10 +261,11 @@ export class PlacementMachine {
       visible: this.goal.kind === "placed",
       searching: (this.goal.kind === "row" && !inputs.loading) || (this.goal.kind === "first" && this.goal.readySince !== undefined),
       pin: requestedRow ?? this.goalRow(inputs) ?? this.placedRow,
+      fillAllowed: this.goal.kind === "placed" || this.goal.kind === "first",
     };
     const prev = this.snap;
     const samePin = prev.pin === next.pin || (prev.pin !== null && next.pin !== null && sameRow(prev.pin, next.pin));
-    if (prev.visible === next.visible && prev.searching === next.searching && samePin) return;
+    if (prev.visible === next.visible && prev.searching === next.searching && prev.fillAllowed === next.fillAllowed && samePin) return;
     this.snap = next;
     for (const listener of this.listeners) listener();
   }

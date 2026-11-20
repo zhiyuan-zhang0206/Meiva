@@ -57,9 +57,11 @@ Consequences of the rule:
     id, then by `reading_locator`) or falls back to the tail;
   - the authority read and later merges only re-resolve, so a surviving row never
     moves.
-- **Bottom placement**:
-  - short content sits at the bottom edge, so older rows grow upward and never move
-    the newest row;
+- **Short first pages and the reserve**:
+  - a first page shorter than the viewport stays hidden while the cold fill reads
+    its (at most two) older pages, so history never lands above rows already on
+    screen; short conversations keep the top-aligned column (a bottom-aligned one
+    left a large blank above them, which the user questioned in Preview);
   - extra space below the content (the reserve) is part of an anchor that a send or
     toggle placed, and is released when the reader scrolls above the natural end.
 - **Saved positions** are the anchor itself:
@@ -86,5 +88,5 @@ Consequences of the rule:
 - Unit tests assert positions across transitions, not internal flags. E2E samples
   every painted frame of a switch or reload and fails on any frame that is neither
   the source nor the destination.
-- Short conversations render at the bottom edge, next to the composer: a visible
-  layout change that goes through Preview review.
+- A first visit whose first page does not fill the viewport waits for the cold fill
+  under the ring: zero reflow at the cost of up to two older-page reads of latency.
