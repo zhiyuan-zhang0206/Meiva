@@ -5,7 +5,7 @@ from __future__ import annotations
 
 from collections.abc import Sequence
 from dataclasses import replace
-from typing import Any, TypeGuard
+from typing import TypeGuard
 
 from langchain_core.messages import BaseMessage, SystemMessage
 from langchain_core.runnables import RunnableConfig
@@ -50,7 +50,7 @@ def _is_object_list(value: object) -> TypeGuard[list[object]]:
 _CLUSTER_QUERY_ATTEMPTS = 3
 
 
-def _query_machines(ctx: MeivaContext) -> list[tuple[Any, ...]]:
+def _query_machines(ctx: MeivaContext) -> list[tuple[object, ...]]:
     for attempt in range(1, _CLUSTER_QUERY_ATTEMPTS + 1):
         try:
             with ctx.sql.cursor() as cur:
@@ -174,7 +174,7 @@ async def _establish_external_harness_context(
         )
     )
     target = route_target(ctx, reset.resume)
-    ext_update: dict[str, Any] = {
+    ext_update: dict[str, object] = {
         **(cwd_update or {}),
         "capabilities": CapabilitiesState(indexed=indexed),
         "context_reset": ContextReset(),
@@ -397,7 +397,7 @@ async def init_context_node(
             *reset.tail,
             *await _open_questions_note(runtime.context, agent_id_from_config(config), reset),
         ]
-        update: dict[str, Any] = {
+        update: dict[str, object] = {
             **(cwd_update or {}),
             "messages": head,
             "capabilities": CapabilitiesState(indexed=indexed),

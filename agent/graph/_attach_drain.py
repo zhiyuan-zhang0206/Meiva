@@ -14,7 +14,7 @@ Two call sites share the pack:
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Any
+from typing import TypedDict
 
 from langchain_core.messages import HumanMessage
 
@@ -48,7 +48,16 @@ def build_attach_message(
     return attach_message(blocks=pack.blocks, text=pack.text, created_at=created_at)
 
 
-def build_attach_drain(state: BaseAgentState, ctx: MeivaContext) -> dict[str, Any] | None:
+# meiva:note
+# The state update the claim node applies when it drains attachments at a turn boundary: the packed
+# attach message and the emptied attach channel. A TypedDict, so `Command(update=...)` takes it as
+# a dict and its readers index typed values.
+class AttachDrainUpdate(TypedDict):
+    messages: list[HumanMessage]
+    attach: AttachState
+
+
+def build_attach_drain(state: BaseAgentState, ctx: MeivaContext) -> AttachDrainUpdate | None:
     """Build a tail-message update for files pending at a completed turn boundary.
 
     Fallback path only: the exec node normally drains attachments in its own

@@ -328,7 +328,7 @@ async def test_hook_defers_when_a_compaction_will_replace_the_window(
         state, _runtime(ops_pool=aops_pool, database_gate=database_gate), _CONFIG
     )  # type: ignore[arg-type]
     assert update is not None
-    assert "meiva.skills.beta" in update["messages"][0].content
+    assert "meiva.skills.beta" in _notes(update)[0].content
 
     ext_update = await newly_installed_skills(
         state,
@@ -341,7 +341,7 @@ async def test_hook_defers_when_a_compaction_will_replace_the_window(
         _CONFIG,
     )
     assert ext_update is not None
-    assert "meiva.skills.beta" in ext_update["messages"][0].content
+    assert "meiva.skills.beta" in _notes(ext_update)[0].content
 
 
 async def test_container_mode_writes_nothing(

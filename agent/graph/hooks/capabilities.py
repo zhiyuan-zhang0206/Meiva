@@ -30,8 +30,6 @@ this hook from destroying the compaction it rides along with.
 
 from __future__ import annotations
 
-from typing import Any
-
 from langchain_core.runnables import RunnableConfig
 from langgraph.runtime import Runtime
 
@@ -63,7 +61,7 @@ class _NewlyInstalledSkillsHook(Hook):
         runtime: Runtime[MeivaContext],
         _config: RunnableConfig,
         /,
-    ) -> dict[str, Any] | None:
+    ) -> dict[str, object] | None:
         if runtime.context.ops_pool is None:
             # Container mode (eval harness) — the same signal `init_context` uses
             # to reduce its head to the system prompt alone. An eval's context is

@@ -4,7 +4,6 @@ import asyncio
 import contextlib
 import time
 from collections.abc import AsyncGenerator, Mapping, Sequence
-from typing import Any
 
 from langchain_core.messages import BaseMessage
 
@@ -25,7 +24,7 @@ from ._stall import stall_guard
 # meiva:link agent/graph/docs/node-lifecycle.md
 SNAPSHOT_CURSOR: dict[int, int] = {}
 
-_NODE_EXIT_AGGREGATE: dict[int, list[dict[str, Any]]] = {}
+_NODE_EXIT_AGGREGATE: dict[int, list[dict[str, str | float]]] = {}
 
 _NODE_EXIT_AGGREGATE_CAP = 32
 

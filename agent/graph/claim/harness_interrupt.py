@@ -8,7 +8,6 @@ from __future__ import annotations
 import asyncio
 from collections.abc import Awaitable, Callable, Coroutine
 from contextlib import suppress
-from typing import Any
 
 from agent.graph.claim.harness_read_sink import ReadTimelineSink
 from agent.graph.interrupt import interrupt_halt as interrupt_halt
@@ -64,7 +63,7 @@ async def await_foreground(
 # meiva:link agent/graph/docs/harness-turn.md
 async def _with_interrupt(
     execute: Callable[[], Awaitable[None]],
-    request_interrupt: Callable[[], Coroutine[Any, Any, None]],
+    request_interrupt: Callable[[], Coroutine[None, None, None]],
     agent_id: int,
 ) -> None:
     outcome: BaseException | None = None

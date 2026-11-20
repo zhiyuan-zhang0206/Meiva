@@ -641,13 +641,28 @@ root = "agent/execution/tests"
 root = "agent/extensions/tests"
 
 [[tool.pyright.executionEnvironments]]
+root = "agent/graph/claim/tests"
+
+[[tool.pyright.executionEnvironments]]
 root = "agent/graph/exec/tests"
+
+[[tool.pyright.executionEnvironments]]
+root = "agent/graph/hooks/tests"
 
 [[tool.pyright.executionEnvironments]]
 root = "agent/graph/llm/tests"
 
 [[tool.pyright.executionEnvironments]]
+root = "agent/graph/node_log/tests"
+
+[[tool.pyright.executionEnvironments]]
+root = "agent/graph/tests"
+
+[[tool.pyright.executionEnvironments]]
 root = "agent/messages/tests"
+
+[[tool.pyright.executionEnvironments]]
+root = "agent/tests"
 
 [[tool.pyright.executionEnvironments]]
 root = "base/agents/context/gateway_client/tests"
@@ -1177,6 +1192,11 @@ reportExplicitAny = "error"
 
 [[tool.pyright.executionEnvironments]]
 root = "agent/graph/llm"
+reportAny = "error"
+reportExplicitAny = "error"
+
+[[tool.pyright.executionEnvironments]]
+root = "agent"
 reportAny = "error"
 reportExplicitAny = "error"
 

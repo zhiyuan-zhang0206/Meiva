@@ -5,6 +5,7 @@ import json
 import os
 import tempfile
 from collections.abc import Awaitable, Callable, Mapping, Sequence
+from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
 
@@ -40,6 +41,7 @@ from base.agents.messages.inbound import InboundKind
 from base.agents.messages.reply_intent import parse_reply_visibility
 from base.agents.to_user.delivery.store import has_keyed_publication
 from base.api_contracts.agent_contract import Harness
+from base.db.rows import query_all
 from base.events.live.projection import InboundCommitted, TimelineSnapshot
 from base.events.live.publisher import AgentEventPublisher
 from base.host.boundary.json_values import is_object_dict
@@ -93,6 +95,16 @@ from base.paths import harness_sessions_dir, workspace_dir
 DEBOUNCE_SECONDS = 0.5
 END_WAIT_SECONDS = 2.0
 END_POLL_SECONDS = 0.25
+
+
+# meiva:note
+# One inbound row as `_child_db_input_keys` reads it: the columns it selects, named as they are.
+# `payload` is the jsonb the producer wrote, narrowed where it is used.
+@dataclass(frozen=True)
+class _InboundKeyRow:
+    id: int
+    kind: str
+    payload: object
 
 
 class ReadTimelineSink:
@@ -602,20 +614,22 @@ class ReadTimelineSink:
         if self._ctx.db is None:
             return []
         with self._ctx.db.connect() as conn:
-            rows = conn.execute(
+            rows = query_all(
+                conn,
+                _InboundKeyRow,
                 "SELECT id, kind, payload FROM inbound_messages "
                 "WHERE agent_id = %s "
                 "AND (kind = %s OR (kind = ANY(%s) AND claimed_at IS NOT NULL)) "
                 "ORDER BY created_at ASC, id ASC LIMIT 20",
                 (self._agent_id, InboundKind.FORK.value, list(DELIVERABLE_KINDS)),
-            ).fetchall()
+            )
         keys: list[str] = []
-        for row_id, kind, payload in rows:
-            if kind == InboundKind.FORK.value:
-                keys.append(f"control-{row_id}")
+        for row in rows:
+            if row.kind == InboundKind.FORK.value:
+                keys.append(f"control-{row.id}")
             else:
                 keys.append(
-                    recorded_input_key(row_id, payload if is_object_dict(payload) else None)
+                    recorded_input_key(row.id, row.payload if is_object_dict(row.payload) else None)
                 )
         return keys
 

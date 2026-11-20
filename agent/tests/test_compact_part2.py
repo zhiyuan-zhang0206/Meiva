@@ -39,7 +39,7 @@ from agent.graph.hooks.compact import (
     auto_compact_for_llm,
     generate_summary,
 )
-from agent.state import AgentState, CompactState
+from agent.state import AgentState, CompactState, ContextReset
 from agent.tests.scripted_model import ScriptedChatModel
 from base.agents.context import MeivaContext
 from base.agents.messages.timestamp_policy import TimestampPolicy
@@ -314,7 +314,9 @@ async def test_auto_compact_summary_message_carries_msg_type(
     )
     assert result is not None
 
-    tail = result["context_reset"].tail
+    reset = result["context_reset"]
+    assert isinstance(reset, ContextReset)
+    tail = reset.tail
     assert isinstance(tail[0], HumanMessage)
     kwargs = tail[0].additional_kwargs
     assert kwargs.get("meiva_msg_type") == "compact_summary"

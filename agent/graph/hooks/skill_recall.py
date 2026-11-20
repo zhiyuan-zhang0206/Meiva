@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import asyncio
-from typing import Any
 
 from langchain_core.messages import AIMessage
 from langchain_core.runnables import RunnableConfig
@@ -38,13 +37,13 @@ class SkillRecallHook(Hook):
         runtime: Runtime[MeivaContext],
         config: RunnableConfig,
         /,
-    ) -> dict[str, Any] | None:
+    ) -> dict[str, object] | None:
         agent = runtime.context.require_agent()
         if not agent.skill_recall.skill_recall_enabled or agent.sandbox.eval_isolation:
             return None
 
         version = state.compact.version
-        update: dict[str, Any] = {}
+        update: dict[str, object] = {}
         read: set[str] = set(state.skill_reads)
         prompted: set[str] = set(state.skill_recall.prompted)
         if version > state.skill_recall.window:

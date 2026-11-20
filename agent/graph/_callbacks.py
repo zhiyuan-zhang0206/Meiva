@@ -44,7 +44,8 @@ Redis. `process_chunk` / `finish` are therefore synchronous.
 """
 
 import json
-from typing import Any, TypeGuard
+from collections.abc import Mapping, Sequence
+from typing import TypeGuard
 
 from langchain_core.messages import AIMessageChunk
 from langchain_core.messages.tool import ToolCallChunk
@@ -64,6 +65,7 @@ from base.events.live.projection import (
     ReasoningStart,
 )
 from base.events.live.publisher import AgentEventPublisher
+from base.host.boundary.untyped import object_of
 from base.lm.reasoning import to_canonical_reasoning
 
 
@@ -226,7 +228,9 @@ class RedisStreamHandler:
             self._args_bufs[block_idx] = self._args_bufs.get(block_idx, "") + args_frag
             self._publish_code_increment(block_idx, now)
 
-    def _process_additional_reasoning(self, additional_kwargs: dict[str, Any], now: float) -> None:
+    def _process_additional_reasoning(
+        self, additional_kwargs: Mapping[str, object], now: float
+    ) -> None:
         """Extract reasoning from `additional_kwargs["reasoning_content"]`.
 
         The community ChatMoonshot package carries reasoning in
@@ -336,7 +340,7 @@ class RedisStreamHandler:
                 ).model_dump_json()
             )
 
-    def _process_content(self, content: str | list[Any], now: float) -> None:
+    def _process_content(self, content: str | Sequence[object], now: float) -> None:
         """Process chunk.content: string (legacy / test mock, block_idx=0) or
         list-of-blocks (production). Records each text/thinking block's index in
         `_content_block_indices` so the tool-call code offset matches the
@@ -463,7 +467,7 @@ class RedisStreamHandler:
         if not buf:
             return
         try:
-            partial: object = parse_partial_json(buf)
+            partial = object_of(parse_partial_json, buf)
         except json.JSONDecodeError:
             return
         if not _is_str_object_dict(partial):

@@ -8,9 +8,11 @@ from __future__ import annotations
 
 import json
 from collections.abc import Sequence
-from typing import Any, TypeGuard
+from typing import TypeGuard
 
 from langchain_core.messages import AIMessage, ToolCall
+
+from base.host.boundary.untyped import object_of
 
 
 def _is_object_dict(value: object) -> TypeGuard[dict[object, object]]:
@@ -21,7 +23,7 @@ def _is_object_list(value: object) -> TypeGuard[list[object]]:
     return isinstance(value, list)
 
 
-def _is_str_dict(value: object) -> TypeGuard[dict[str, Any]]:
+def _is_str_dict(value: object) -> TypeGuard[dict[str, object]]:
     return _is_object_dict(value) and all(isinstance(k, str) for k in value)
 
 
@@ -52,13 +54,29 @@ def first_tool_call_code(tool_calls: Sequence[ToolCall]) -> str:
     return code if isinstance(code, str) else ""
 
 
-def _call_from_content(block: dict[str, Any]) -> ToolCall:
+def _content_call_id(block: dict[str, object]) -> str | None:
+    if "id" not in block:
+        raise TypeError("content tool_use block has no id")
+    call_id = block["id"]
+    if call_id is not None and not isinstance(call_id, str):
+        raise TypeError(f"content tool_use id must be str, got {type(call_id).__name__}")
+    return call_id
+
+
+def _call_from_content(block: dict[str, object]) -> ToolCall:
+    call_id = _content_call_id(block)
+    name = block.get("name")
+    if not isinstance(name, str):
+        raise TypeError(f"content tool_use {call_id!r}.name must be str")
     args = block.get("input")
-    if not args and block.get("partial_json"):
-        args = json.loads(block["partial_json"])
+    partial_json = block.get("partial_json")
+    if not args and partial_json:
+        if not isinstance(partial_json, str):
+            raise TypeError(f"content tool_use {call_id!r}.partial_json must be str")
+        args = object_of(json.loads, partial_json)
     if not _is_str_dict(args):
-        raise TypeError(f"content tool_use {block['id']!r}.input must be dict")
-    return ToolCall(name=block["name"], args=args, id=block["id"], type="tool_call")
+        raise TypeError(f"content tool_use {call_id!r}.input must be dict")
+    return ToolCall(name=name, args=args, id=call_id, type="tool_call")
 
 
 def normalize_tool_calls(message: AIMessage) -> AIMessage | None:
@@ -75,7 +93,7 @@ def normalize_tool_calls(message: AIMessage) -> AIMessage | None:
         for block in content:
             if not _is_str_dict(block) or block.get("type") != "tool_use":
                 continue
-            call_id = block["id"]
+            call_id = _content_call_id(block)
             if call_id in seen:
                 raise ValueError(f"Duplicate tool_call id: {call_id!r}")
             call = native[call_id] if call_id in native else _call_from_content(block)
@@ -96,9 +114,9 @@ def replace_execute_code(message: AIMessage, tool_call_id: str | None, code: str
     index = next(i for i, call in enumerate(calls) if call["id"] == tool_call_id)
     call = calls[index]
     calls[index] = {**call, "args": {**call["args"], "code": code}}
-    content: Any = message.content
+    content: object = message.content
     if _is_object_list(content):
-        blocks: list[Any] = []
+        blocks: list[object] = []
         for block in content:
             if (
                 _is_str_dict(block)

@@ -18,6 +18,7 @@ from types import ModuleType, SimpleNamespace
 
 from base.agents.messages.reply_intent import delivery_disabled_entries
 from base.api_contracts.agent_contract import Harness
+from base.host.boundary.untyped import object_of
 from base.host.env.agent_slices import AgentSlices, Prompt
 from base.lm.catalog import ModelCatalog
 from base.packages.skills.tree import Skill
@@ -175,12 +176,12 @@ def read_expand_entry(path: str) -> tuple[object | None, ExpandSkip | None]:
 
     head, _, rest = path.partition(".")
     try:
-        target: object = getattr(meiva, head)
+        target = object_of(getattr, meiva, head)
     except AttributeError:
         return None, ExpandSkip.UNRESOLVED
     for segment in rest.split(".") if rest else ():
         try:
-            target = getattr(target, segment)
+            target = object_of(getattr, target, segment)
         except AttributeError:
             return None, ExpandSkip.MISSING_MEMBER
     if not is_documentable_target(target):
