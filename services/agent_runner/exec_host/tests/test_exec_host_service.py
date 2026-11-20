@@ -18,6 +18,7 @@ from base.clock.tests.manual_timers import ManualTimers
 from base.config.tests.configuration import defaults
 from base.deploy.release import editable_install
 from base.host.env.agent_env import AGENT_BIRTH_CONFIG_ENV, AGENT_CONFIG_OVERLAY_ENV
+from base.log.tests.log_records import LogRecords
 from base.native_process import child_env
 from base.native_process.exec_kill_notice import read_notice, write_notice
 from base.native_process.os_platform import file_lock
@@ -341,9 +342,18 @@ async def test_cancel_mid_run_kills_process_group(tmp_path: Path) -> None:
             os.kill(bg_pid, 0)
 
 
+# meiva:note
+# A leader that ignores SIGTERM outlives the grace window and is SIGKILLed (under manual timers an
+# ordinary leader may too: the grace elapses in a few loop turns). The exec host serves every agent
+# on the machine and binds none to its logger, so the kill report names the request's agent itself;
+# the exec-subprocess-killed alert groups by that agent id.
 @pytest.mark.asyncio
-@pytest.mark.parametrize("startup_delay", [0.0, 2.0])
-async def test_timeout_kills_process_group(tmp_path: Path, startup_delay: float) -> None:
+@pytest.mark.parametrize(
+    ("startup_delay", "ignores_sigterm"), [(0.0, False), (2.0, False), (0.0, True)]
+)
+async def test_timeout_kills_process_group(
+    tmp_path: Path, startup_delay: float, ignores_sigterm: bool, loguru_records: LogRecords
+) -> None:
     timers = ManualTimers()
     async with _running_service(tmp_path, timers) as sock_path:
         exec_dir = exec_run_dir(tmp_path)
@@ -351,7 +361,12 @@ async def test_timeout_kills_process_group(tmp_path: Path, startup_delay: float)
         res_file = exec_dir / "1" / "res-timeout.json"
         pid_file = tmp_path / "bg-timeout.pid"
         code = (
-            "import subprocess, sys, time\n"
+            (
+                "import signal\nsignal.signal(signal.SIGTERM, signal.SIG_IGN)\n"
+                if ignores_sigterm
+                else ""
+            )
+            + "import subprocess, sys, time\n"
             "from pathlib import Path\n"
             f"time.sleep({startup_delay!r})\n"
             "p = subprocess.Popen([sys.executable, '-c', 'import time; time.sleep(60)'])\n"
@@ -401,6 +416,11 @@ async def test_timeout_kills_process_group(tmp_path: Path, startup_delay: float)
         await _wait_for_process_exit(bg_pid)
         with pytest.raises(ProcessLookupError):
             os.kill(bg_pid, 0)
+    killed = [
+        event["extra"]["agent_id"] for event in loguru_records.events("exec_subprocess_killed")
+    ]
+    assert set(killed) <= {1}
+    assert killed or not ignores_sigterm
 
 
 @pytest.mark.asyncio

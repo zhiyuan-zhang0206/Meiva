@@ -460,10 +460,11 @@ def test_inbound_consumed_unknown_rule_counts_the_event_over_a_day() -> None:
     rules = {r["uid"]: r for r in load_rules()}
     rule = rules["meiva-ops-inbound-consumed-unknown"]
     exprs = rule_query_exprs(rule, "loki")
-    assert len(exprs) == 1
-    assert "count_over_time" in exprs[0]
-    assert 'event_name="inbound_consumed_unknown"' in exprs[0]
-    assert "[24h]" in exprs[0]
+    assert len(exprs) == 2
+    for expr in exprs:
+        assert "count_over_time" in expr
+        assert 'event_name="inbound_consumed_unknown"' in expr
+        assert "[24h]" in expr
     assert rule["for"] == "10m"
     assert threshold_params(rule) == [[2]]
     assert rule["labels"] == {
@@ -498,3 +499,81 @@ def test_alert_pipeline_watchdog_and_silence_rule_agree_on_the_period() -> None:
     assert silent["execErrState"] == "OK"
     (threshold,) = threshold_params(silent)
     assert threshold == [900]
+
+
+# meiva:note
+# The Alerts page shows the summary line, so a rule about one agent must name it there. These
+# rules group by the envelope agent id. Grafana renders a label the series lacks as "[no value]",
+# so rules whose event family gained its agent id at the call site (older events carry none) guard
+# the label and render "unknown" instead.
+_PER_AGENT_RULES = {
+    "meiva-ops-llm-turn-aborted": True,
+    "meiva-ops-exec-node-timeout": True,
+    "meiva-ops-exec-subprocess-killed": True,
+    "meiva-ops-exec-child-boot-failed": False,
+    "meiva-ops-inspect-metrics-gap": False,
+    "meiva-ops-delivery-stalled": False,
+    "meiva-ops-delivery-stranded-wake": False,
+}
+_GUARDED_AGENT = "{{ with $labels.agent_id }}{{ . }}{{ else }}unknown{{ end }}"
+
+
+@pytest.mark.parametrize("uid", sorted(_PER_AGENT_RULES))
+def test_a_per_agent_rule_groups_by_and_names_its_agent(uid: str) -> None:
+    rule = {r["uid"]: r for r in load_rules()}[uid]
+    (expr,) = [" ".join(e.split()) for e in rule_query_exprs(rule, "loki")[:1]]
+    assert re.match(r"(sum|max) by \([^)]*\bagent_id\b", expr), expr
+    summary = rule["annotations"]["summary"]
+    assert "$labels.agent_id" in summary
+    assert (_GUARDED_AGENT in summary) is _PER_AGENT_RULES[uid]
+
+
+# meiva:note
+# Fleet-volume rules keep their fleet-wide threshold (one host crash or stall touches many agents at
+# once) and report how many distinct agents the volume spans: query B counts agent ids over A's
+# window, `or vector(0)` keeps it a number when no row carries an agent id, and reduce N is what
+# the summary interpolates.
+_AGENT_COUNT_RULES = (
+    "meiva-ops-sse-drop-backlog",
+    "meiva-ops-delivery-stalled-backlog",
+    "meiva-ops-inbound-consumed-unknown",
+    "meiva-ops-turn-duration-p95",
+)
+
+
+@pytest.mark.parametrize("uid", _AGENT_COUNT_RULES)
+def test_a_fleet_volume_rule_reports_its_distinct_agents(uid: str) -> None:
+    rule = {r["uid"]: r for r in load_rules()}[uid]
+    nodes = {d["refId"]: d for d in rule["data"]}
+    count = " ".join(nodes["B"]["model"]["expr"].split())
+    assert count.startswith("count(") and count.endswith(" or vector(0)"), count
+    assert re.search(r"by \([^)]*\bagent_id\b", count), count
+    windows = re.compile(r"\[(\d+[smhd])\]")
+    assert windows.findall(count) == windows.findall(nodes["A"]["model"]["expr"]), count
+    assert nodes["B"]["relativeTimeRange"] == nodes["A"]["relativeTimeRange"]
+    assert nodes["B"]["datasourceUid"] == nodes["A"]["datasourceUid"]
+    assert nodes["N"]["model"]["type"] == "reduce"
+    assert nodes["N"]["model"]["expression"] == "B"
+    assert "{{ $values.N }} agent(s)" in rule["annotations"]["summary"]
+    assert rule["condition"] == "D" and nodes["D"]["model"]["expression"] == "C"
+
+
+def test_the_turn_duration_agent_count_uses_the_alert_threshold() -> None:
+    rule = {r["uid"]: r for r in load_rules()}["meiva-ops-turn-duration-p95"]
+    (_, count) = rule_query_exprs(rule, "prometheus")
+    ((threshold,),) = threshold_params(rule)
+    assert " ".join(count.split()).endswith(f") > {threshold}) or vector(0)")
+
+
+# meiva:note
+# Grafana renders a `$labels.X` the series does not carry as "[no value]" in the summary that reaches
+# the Alerts page, so every label a rule's text names must be one its first query keeps.
+def test_notification_text_names_only_labels_the_first_query_keeps() -> None:
+    for rule in load_rules():
+        expr = " ".join(rule["data"][0]["model"]["expr"].split())
+        kept = {
+            name.strip() for part in re.findall(r"by \(([^)]*)\)", expr) for name in part.split(",")
+        }
+        text = rule["annotations"]["summary"] + rule["annotations"].get("description", "")
+        for label in re.findall(r"\$labels\.(\w+)", text):
+            assert label in kept, f"{rule['uid']} names $labels.{label} but keeps {kept}"

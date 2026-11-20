@@ -324,6 +324,7 @@ async def handle_fatal_llm_error(
         "LLM turn aborted (retry cap exhausted or provider rejected) — "
         "agent stays alive and idles for next inbound",
         event="llm_turn_aborted",
+        agent_id=agent_id,
         error_class=getattr(exc, "error_class", None),
         provider=getattr(exc, "provider", None),
         status=getattr(exc, "status", None),

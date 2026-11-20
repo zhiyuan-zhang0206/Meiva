@@ -385,6 +385,7 @@ async def test_retry_exhausted_transient_503_halts_without_opening_breaker_and_l
     assert aborts[0]["extra"]["error_class"] == "transient"
     assert aborts[0]["extra"]["provider"] == "anthropic"
     assert aborts[0]["extra"]["status"] == 503
+    assert aborts[0]["extra"]["agent_id"] == 42
     assert aborts[0]["exception"] is not None
     assert aborts[0]["exception"].value is wrapped
     assert wrapped.__cause__ is cause

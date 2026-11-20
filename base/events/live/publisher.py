@@ -272,12 +272,12 @@ class AgentEventPublisher:
         level = "WARNING" if queue_full_in_window > 0 else "INFO"
         logger.log(
             level,
-            "[event-publisher] dropped {n} SSE event(s) (agent_id={aid}, "
+            "[event-publisher] dropped {n} SSE event(s) (agent_id={agent_id}, "
             "kind={kind}, last cause: {detail}) — live view degraded, "
             "committed state unaffected",
             event="sse_drop",
             n=n,
-            aid=self._agent_id,
+            agent_id=self._agent_id,
             kind=self._last_drop_kind,
             detail=self._last_drop_detail,
             queue_size=self._queue.maxsize,
