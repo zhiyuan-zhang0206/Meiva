@@ -107,7 +107,7 @@ export function PendingStrip({
               <PendingRow key={it.id} quote={it.quote}>
                 {hideText ? null : <span className="truncate">{it.content}</span>}
                 {it.files?.length ? (
-                  <span className={cn("shrink-0 flex-wrap gap-1", FLEX)}>
+                  <span className={cn("flex-wrap gap-1", FLEX, MIN_W_0)}>
                     {it.files.map((f, idx) => (
                       <span
                         key={`${idx}:${f.url}`}
