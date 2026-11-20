@@ -17,13 +17,6 @@ export interface RunTimelineStats {
   linksMs: number;
 }
 
-declare global {
-  interface Window {
-    __runTimelineStatsWanted?: boolean;
-    __runTimelineStats?: RunTimelineStats;
-  }
-}
-
 export const runTimelineStats: RunTimelineStats = {
   relayouts: 0,
   renders: 0,
