@@ -374,8 +374,13 @@ def test_the_real_hook_selects_docs_hidden_links_and_gitlinks(
 ) -> None:
     root = pathlib.Path(lcs.__file__).parents[2]
     config = cast(dict[str, Any], yaml.safe_load((root / ".pre-commit-config.yaml").read_text()))
-    local = next(repo for repo in config["repos"] if repo["repo"] == "local")
-    selected = next(hook for hook in local["hooks"] if hook["id"] == "lint-code-structure")
+    local, selected = next(
+        (repo, hook)
+        for repo in config["repos"]
+        if repo["repo"] == "local"
+        for hook in repo["hooks"]
+        if hook["id"] == "lint-code-structure"
+    )
     # meiva:note
     # The public entry seam reveals exactly the filenames pre-commit delivers.
     config["repos"] = [{**local, "hooks": [{**selected, "entry": "/bin/echo"}]}]
