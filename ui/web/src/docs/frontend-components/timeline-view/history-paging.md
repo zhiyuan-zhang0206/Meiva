@@ -14,8 +14,8 @@ can focus the load-earlier control.
 
 The gesture does not add space to the timeline or displace its messages.
 A reader who scrolls while waiting keeps their current reading position when
-the older page is prepended. A successful prepend compensates for the new
-rows before paint. A failed or empty page leaves the list in place. A failed
+the older page is prepended: the view anchor holds the reader's row before
+paint ([sticky scroll](sticky-scroll.md)). A failed or empty page leaves the list in place. A failed
 request can be retried with a new gesture. Conversation changes discard
 gesture state. Deliberate requests continue through backend `has_more` and
 `MEIVA_TIMELINE_COMPACT_HISTORY` depth.

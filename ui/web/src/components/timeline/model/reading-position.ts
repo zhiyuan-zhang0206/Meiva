@@ -1,12 +1,4 @@
 import type { BrowserStorage } from "@/lib/browser/browser";
-import type { BackendTimelineItem } from "@/lib/contracts/types";
-import type { CompactTransitionBuffer } from "@/lib/layout/compact-transition";
-import { BAR_HEIGHT_PX } from "@/lib/layout/layout";
-import { saveScrollMemory, type SavedScroll } from "@/lib/layout/scroll-memory";
-import {
-  findOldestTimelineCursor,
-  parseItemIdParts,
-} from "@/lib/timeline/timeline";
 
 // meiva:note
 // Bounded per-tab sessionStorage cache for cross-reload reading bookmarks:
@@ -32,6 +24,7 @@ export interface ReloadReadingBookmark {
   readonly readingLocator?: string;
   readonly itemId: string;
   readonly rank: number;
+  readonly turn?: true;
   readonly viewportTop: number;
   readonly scrollTop: number;
   readonly usedCollapseReserve?: true;
@@ -46,9 +39,6 @@ export type ReloadRestoreConfig =
       readonly state: "enabled";
       readonly session: BrowserStorage;
       readonly now: () => number;
-      readonly maxOlderPages?: number;
-      readonly maxOlderItems?: number;
-      readonly searchTimeoutMs?: number;
     };
 
 function isReloadReadingBookmark(value: unknown): value is ReloadReadingBookmark {
@@ -85,6 +75,9 @@ function isReloadReadingBookmark(value: unknown): value is ReloadReadingBookmark
     candidate.readingLocator !== undefined &&
     (typeof candidate.readingLocator !== "string" || candidate.readingLocator.length === 0)
   ) {
+    return false;
+  }
+  if (candidate.turn !== undefined && candidate.turn !== true) {
     return false;
   }
   if (candidate.usedCollapseReserve !== undefined && candidate.usedCollapseReserve !== true) {
@@ -136,6 +129,7 @@ function sameBookmarkTarget(a: ReloadReadingBookmark, b: ReloadReadingBookmark):
   return (
     a.itemId === b.itemId &&
     a.rank === b.rank &&
+    a.turn === b.turn &&
     a.readingLocator === b.readingLocator &&
     Math.abs(a.viewportTop - b.viewportTop) < 0.5 &&
     Math.abs(a.scrollTop - b.scrollTop) < 0.5 &&
@@ -208,181 +202,6 @@ export function removeReloadBookmark(
   }
 }
 
-function findItemReadingLocator(
-  itemId: string,
-  rank: number,
-  canonicalItems: readonly BackendTimelineItem[],
-  compactBuffer: CompactTransitionBuffer | null,
-): string | undefined {
-  const buffered = compactBuffer?.rows.find(
-    (row) => row.rank === rank && row.item.item_id === itemId,
-  )?.item;
-  const canonical = canonicalItems.find(
-    (item) => item.item_id === itemId && (parseItemIdParts(item.item_id)?.rank ?? 0) === rank,
-  );
-  const locator = (buffered ?? canonical)?.reading_locator;
-  return typeof locator === "string" && locator.length > 0 ? locator : undefined;
-}
-
-export function matchReloadBookmark(
-  bookmark: ReloadReadingBookmark,
-  canonicalItems: readonly BackendTimelineItem[],
-  compactBuffer: CompactTransitionBuffer | null,
-): { itemId: string; rank: number } | null {
-  if (bookmark.readingLocator) {
-    const bufferedByLocator = compactBuffer?.rows.find(
-      (row) => row.item.reading_locator === bookmark.readingLocator,
-    );
-    if (bufferedByLocator) {
-      return { itemId: bufferedByLocator.item.item_id, rank: bufferedByLocator.rank };
-    }
-    const canonicalByLocator = canonicalItems.find(
-      (item) => item.reading_locator === bookmark.readingLocator,
-    );
-    if (canonicalByLocator) {
-      return {
-        itemId: canonicalByLocator.item_id,
-        rank: parseItemIdParts(canonicalByLocator.item_id)?.rank ?? 0,
-      };
-    }
-  }
-  const bufferedById = compactBuffer?.rows.find(
-    (row) =>
-      row.rank === bookmark.rank &&
-      row.item.item_id === bookmark.itemId &&
-      (!bookmark.readingLocator || !row.item.reading_locator),
-  );
-  if (bufferedById) {
-    return { itemId: bufferedById.item.item_id, rank: bufferedById.rank };
-  }
-  const canonicalById = canonicalItems.find(
-    (item) =>
-      item.item_id === bookmark.itemId &&
-      (parseItemIdParts(item.item_id)?.rank ?? 0) === bookmark.rank &&
-      (!bookmark.readingLocator || !item.reading_locator),
-  );
-  if (canonicalById) {
-    return {
-      itemId: canonicalById.item_id,
-      rank: parseItemIdParts(canonicalById.item_id)?.rank ?? 0,
-    };
-  }
-  return null;
-}
-
-export function reloadBookmarkToSavedScroll(
-  contentKey: string,
-  bookmark: ReloadReadingBookmark,
-  matched?: { itemId: string; rank: number },
-): SavedScroll {
-  return {
-    contentKey,
-    scrollTop: bookmark.scrollTop,
-    followBottom: false,
-    ...(bookmark.usedCollapseReserve ? { usedCollapseReserve: true as const } : {}),
-    ...(bookmark.keepSendReserve ? { keepSendReserve: true as const } : {}),
-    anchor: {
-      itemId: matched?.itemId ?? bookmark.itemId,
-      rank: matched?.rank ?? bookmark.rank,
-      viewportTop: bookmark.viewportTop,
-    },
-  };
-}
-
-export function oldestReloadCursorId(items: readonly BackendTimelineItem[]): string | null {
-  return findOldestTimelineCursor(items)?.item_id ?? null;
-}
-
-// meiva:note
-// Following the live tail or auto-parking on a new send clears any prior
-// cross-reload reading anchor so a subsequent reload loads the latest tail
-// page directly without triggering background `before=` backfill.
-// meiva:link ui/web/src/docs/frontend-state/scroll-memory.md
-export function clearTimelineReloadPosition(
-  contentKey: string,
-  reloadRestore: ReloadRestoreConfig,
-): void {
-  if (reloadRestore.state !== "enabled" || !contentKey) return;
-  removeReloadBookmark(reloadRestore.session, contentKey, reloadRestore.now());
-}
-
-// meiva:note
-// Persist the current visible item to per-tab sessionStorage when cross-reload
-// reading restore is enabled and the timeline actually overflows the viewport.
-// meiva:link ui/web/src/docs/frontend-state/scroll-memory.md
-export function rememberTimelineReloadPosition(
-  viewport: HTMLElement,
-  contentKey: string,
-  canonicalItems: readonly BackendTimelineItem[],
-  compactBuffer: CompactTransitionBuffer | null,
-  reloadRestore: ReloadRestoreConfig,
-  collapseReserve = 0,
-  keepSendReserve = false,
-): void {
-  if (reloadRestore.state !== "enabled") return;
-  if (viewport.scrollHeight <= viewport.clientHeight) return;
-  const rect = viewport.getBoundingClientRect();
-  const node = [...viewport.querySelectorAll<HTMLElement>(
-    ".timeline-item[data-item-id], [data-turn-expanded='false'][data-item-id]",
-  )].find((item) => {
-    const id = item.dataset.itemId;
-    if (!id || id.startsWith("_")) return false;
-    const box = item.getBoundingClientRect();
-    return box.bottom > rect.top + BAR_HEIGHT_PX && box.top < rect.bottom;
-  });
-  const itemId = node?.dataset.itemId;
-  if (!node || !itemId) return;
-  const rank = Number(node.dataset.displayRank ?? 0);
-  const readingLocator = findItemReadingLocator(itemId, rank, canonicalItems, compactBuffer);
-  const usedCollapseReserve =
-    collapseReserve > 0 &&
-    viewport.scrollTop + viewport.clientHeight > viewport.scrollHeight - collapseReserve + 1;
-  const now = reloadRestore.now();
-  saveReloadBookmark(
-    reloadRestore.session,
-    contentKey,
-    {
-      ...(readingLocator ? { readingLocator } : {}),
-      itemId,
-      rank,
-      viewportTop: node.getBoundingClientRect().top - rect.top,
-      scrollTop: Math.max(0, viewport.scrollTop),
-      ...(usedCollapseReserve ? { usedCollapseReserve: true as const } : {}),
-      ...(keepSendReserve ? { keepSendReserve: true as const } : {}),
-      savedAt: now,
-    },
-    now,
-  );
-}
-
-// meiva:note
-// Leaving a conversation always saves the visible item and offset, including
-// at the tail or between a stream chunk and its pin. Returning continues that
-// reading position while newer output remains below it.
-// meiva:link ui/web/src/docs/frontend-components/timeline-view/sticky-scroll.md
-export function rememberTimelinePosition(
-  viewport: HTMLElement, entryKey: string, contentKey: string,
-  collapseReserve = 0, keepSendReserve = false,
-) {
-  const reserveMemory = keepSendReserve ? { keepSendReserve: true as const } : {};
-  const rect = viewport.getBoundingClientRect();
-  const node = [...viewport.querySelectorAll<HTMLElement>(
-    ".timeline-item[data-item-id], [data-turn-expanded='false'][data-item-id]",
-  )].find((item) => {
-    const box = item.getBoundingClientRect();
-    return box.bottom > rect.top + BAR_HEIGHT_PX && box.top < rect.bottom;
-  });
-  saveScrollMemory(entryKey, {
-    contentKey, scrollTop: viewport.scrollTop, followBottom: false, ...reserveMemory,
-    ...(collapseReserve > 0 && viewport.scrollTop + viewport.clientHeight > viewport.scrollHeight - collapseReserve + 1
-      ? { usedCollapseReserve: true as const } : {}),
-    anchor: node?.dataset.itemId ? {
-      itemId: node.dataset.itemId, rank: Number(node.dataset.displayRank ?? 0),
-      viewportTop: node.getBoundingClientRect().top - rect.top,
-    } : undefined,
-  });
-}
-
 interface ReadingExpansion {
   items: ReadonlyMap<string, boolean>;
   turns: ReadonlyMap<string, boolean>;
@@ -396,25 +215,4 @@ export function readTimelineExpansion(key: string | undefined) {
 }
 export function rememberTimelineExpansion(key: string | undefined, value: ReadingExpansion) {
   if (key) expansions.set(key, value);
-}
-
-// meiva:note
-// Scroll keys and scrollbar drags resume normal following after a bookmark.
-// meiva:link ui/web/src/docs/frontend-components/timeline-view/sticky-scroll.md
-export function watchReadingNavigation(viewport: HTMLElement, wrapper: HTMLElement | null, resume: () => void) {
-  const keyDown = (event: KeyboardEvent) => {
-    if (["ArrowUp", "ArrowDown", "PageUp", "PageDown", "Home", "End", " "].includes(event.key)) resume();
-  };
-  const pointerDown = (event: PointerEvent) => {
-    const el = event.target as HTMLElement | null;
-    if (el?.closest('[data-slot="scroll-area-scrollbar"]') && !el.closest('[data-activity-scroll="true"]')) {
-      resume();
-    }
-  };
-  viewport.addEventListener("keydown", keyDown);
-  wrapper?.addEventListener("pointerdown", pointerDown, { capture: true });
-  return () => {
-    viewport.removeEventListener("keydown", keyDown);
-    wrapper?.removeEventListener("pointerdown", pointerDown, { capture: true });
-  };
 }

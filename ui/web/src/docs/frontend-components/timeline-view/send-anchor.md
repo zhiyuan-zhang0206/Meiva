@@ -13,13 +13,16 @@ current content end and resumes following when the end is farther down. If the
 reader is already in the additional space below the content, the arrow uses
 the remaining scroll range. The arrow is hidden at the scrollable end,
 including when the last human message is aligned using that space. Manually
-opening a live work block goes to the tail. Automatic expansion follows the
-current reading mode.
+opening or closing a work block, live or settled, keeps its header where it
+is (user ruling 2026-11-17). Automatic expansion follows the current reading
+mode.
 
 During a send and while the agent is working, a reserve below the conversation
 lets the reader align the last human message, including after sending from
-history. As the reply grows it uses that space before extending the scrollable
-end. Tail-following measures the natural end separately from the reserve.
+history. The reserve is exactly the space the current row anchor needs to sit
+at its offset, so as the reply grows it uses that space before extending the
+scrollable end, and the tail never carries any. Tail-following measures the
+natural end from the content itself.
 
 Remaining reserve keeps the current layout through streaming and completion.
 Once the reader actively scrolls upward to or past the natural end, the timeline

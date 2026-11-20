@@ -8,6 +8,7 @@
 // inside collapsible TurnBlocks / the Live Activity Window through `./card` and
 // `./row`.
 // meiva:link ui/web/src/docs/frontend-components/timeline-view/card-chrome.md
+// meiva:note
 //
 // -- Color mapping -- lives entirely in `./card`:messageCardConfig. ItemView
 // carries no per-kind border / background; it just emits the inner content
@@ -144,20 +145,17 @@ function Thumbnail({
       </button>
       {open
         ? createPortal(
+            // meiva:note
             // Full-page image viewer (user ruling 2026-08-30, QA #1085): the
             // overlay must cover the whole viewport and sit above every
             // interactive control, and the enlarged image takes 60-80% of the
             // screen (big images scale down to fit, small ones keep their
-            // natural size — contain, never stretched). It cannot be rendered
-            // inline inside the timeline row: `.timeline-item` carries
-            // `content-visibility: auto` (globals.css) and therefore
-            // paint+layout containment, which turns the row into the
-            // containing block of `fixed` descendants AND a stacking context
-            // — the backdrop was clipped to the row's box (~440x861 vs the
+            // natural size — contain, never stretched). It is mounted at
+            // document.body (same pattern the Radix dialogs use), outside the
+            // timeline's scroll container and its stacking contexts: inline,
+            // the backdrop was once clipped to the row's box (~440x861 vs the
             // 1182x839 viewport) and the z-30 scroll-to-bottom button painted
-            // above the z-50 backdrop. Mounting at document.body (same
-            // pattern the Radix dialogs use) restores viewport coverage +
-            // root stacking order.
+            // above the z-50 backdrop.
             <div
               ref={dialogRef}
               role="dialog"

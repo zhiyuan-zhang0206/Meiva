@@ -13,28 +13,23 @@ only on a return to a kept entry; a first visit keeps its own default, and a
 search-param-only switch (e.g. `?agent_id=`) shares the previous home
 visit's slot. The record carries a content key (agent / agent+session): a
 mismatch drops the position instead of restoring it onto other content.
-Conversation switches always save the visible message and viewport offset,
-including when leaving the tail. Returning restores that reading position and
-keeps it anchored through subsequent output. First visits keep their default
-bottom placement. Scrolling or explicitly navigating to the bottom resumes
-following.
-
-The shared record still supports explicit `followBottom` bookmarks and terminal
-following. The timeline save path writes false for both agent switches and
-history-entry remounts; bfcache identity chooses the bookmark, not a separate
-following policy. Restores land in a layout effect on the first commit that can
-hold them (before paint), and the mount force-pin defers to a pending restore.
+The home timeline keeps its own place record instead
+(`components/timeline/anchor/saved.ts`): the view anchor of the row on screen
+(`itemId`, `rank`, whether it is a whole turn, the viewport offset, its
+`reading_locator` and reserve flags) under the same entry key. Conversation
+switches always save it, including when leaving the tail. Returning places that
+row in the first painted frame and keeps it anchored through subsequent output.
+First visits keep their default placement. Scrolling or explicitly navigating
+to the bottom resumes following.
 
 When `feature.reloadReadingRestore` is enabled (default `true`), the home
 timeline also persists a bounded per-tab bookmark map in `Browser.session`
-(`meiva.timeline.reading-bookmarks.v1`, capped at 64 agents with a 7-day TTL).
-Each agent record stores `readingLocator` (when available), `itemId`, `rank`,
-`viewportTop`, `scrollTop`, reserve flags, and `savedAt`. Same-page switches
-prefer the in-memory `scrollMemory` entry; on a full page reload, the saved
-`Browser.session` bookmark feeds the same `bookmark-restore` pipeline on the
-single live timeline. Turning `feature.reloadReadingRestore` off bypasses all
-`Browser.session` bookmark reads and writes and falls back to in-memory
-`scroll-memory.ts` alone.
+(`meiva.timeline.reading-bookmarks.v1`, capped at 64 agents with a 7-day TTL)
+holding the same fields plus `scrollTop` and `savedAt`. Same-page switches prefer
+the in-memory place; a full page reload opens on the session bookmark. Following
+the tail clears it. Turning the feature off bypasses all `Browser.session` reads
+and writes. Terminal panes keep the shared `scroll-memory.ts` record, whose
+`followBottom` flag serves their tail following.
 
 
 Parent: [Frontend State Management](frontend-state.md).

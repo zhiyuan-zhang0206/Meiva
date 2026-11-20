@@ -62,6 +62,19 @@ export interface SeenFeed {
   seenId: number | undefined;
   messages: readonly UserMessage[];
   updatedAt: number;
+  // meiva:note
+  // The feed read failed and is not retrying: no seen position will arrive for this look.
+  failed?: boolean;
+}
+
+// meiva:note
+// Whether the look has decided where a first visit opens, and the first unseen item if it has one.
+// A first visit keeps its rows hidden until this is decided, so it never paints the tail and then
+// jumps to the reveal.
+// meiva:link ui/web/src/docs/frontend-components/timeline-view/sticky-scroll.md
+export interface SeenReveal {
+  decided: boolean;
+  itemId: string | null;
 }
 
 interface Session {
@@ -93,6 +106,7 @@ export function useSeenPosition({
   hasMoreOlder,
   loadingOlder,
   loadOlder,
+  revealWanted = true,
 }: {
   agentId: number | null;
   feed: SeenFeed;
@@ -101,13 +115,16 @@ export function useSeenPosition({
   hasMoreOlder: boolean;
   loadingOlder: boolean;
   loadOlder: () => void;
-}): RevealRequest | null {
+  // meiva:note
+  // The conversation opens on a saved place: no reveal is wanted, so no older page is read for one.
+  revealWanted?: boolean;
+}): SeenReveal {
   const api = useApi();
   const cache = useQueryClient();
   const visible = useDocumentVisible();
   const setReadingAgentId = useStore((state) => state.setReadingAgentId);
   const open = agentId !== null && visible;
-  const { seenId, messages, updatedAt } = feed;
+  const { seenId, messages, updatedAt, failed = false } = feed;
   const [looks, setLooks] = useState(0);
   const [session, setSession] = useState<Session | null>(null);
   const operationKeys = useRef(new Map<string, string>());
@@ -121,9 +138,11 @@ export function useSeenPosition({
     );
   } else if (session !== null && session.entry === null && seenId !== undefined && updatedAt > session.baseline) {
     setSession({ ...session, entry: seenId });
+  } else if (session !== null && session.entry === null && !session.decided && failed) {
+    setSession({ ...session, decided: true });
   } else if (session?.entry != null && !session.decided && !timelineLoading) {
     const target = unseenTarget(items, messages, session.entry);
-    if (!target.any) {
+    if (!target.any || !revealWanted) {
       setSession({ ...session, decided: true });
     } else if (!target.complete && hasMoreOlder && session.olderPages < REVEAL_MAX_OLDER_PAGES) {
       if (!loadingOlder && items !== session.waiting) {
@@ -188,5 +207,10 @@ export function useSeenPosition({
     };
   }, [api, cache, ready, agentId, seenId, newest, updatedAt]);
 
-  return session?.agentId === agentId ? session.reveal : null;
+  if (!open) return NOT_OPEN;
+  if (session?.agentId !== agentId) return UNDECIDED;
+  return session.decided ? { decided: true, itemId: session.reveal?.itemId ?? null } : UNDECIDED;
 }
+
+const NOT_OPEN: SeenReveal = { decided: true, itemId: null };
+const UNDECIDED: SeenReveal = { decided: false, itemId: null };

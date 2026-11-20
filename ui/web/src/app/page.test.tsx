@@ -106,7 +106,7 @@ describe("HomePage unseen deliveries", () => {
   beforeEach(() => {
     vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
     hooksState.activeId = 5;
-    hooksState.agents = [makeAgent({ agent_id: 5, status: "idling" })];
+    hooksState.agents = [makeAgent({ agent_id: 5, status: "idling", has_unread_user_messages: true })];
     hooksState.timelineItems = [makeItem({ item_id: "2.0", kind: "agent_chat", payload: "Done", source_message_id: "m1" })];
     transport.getUserMessages
       .mockResolvedValueOnce({ mode: "prefix", seen_id: 4, items: [unseen] })
