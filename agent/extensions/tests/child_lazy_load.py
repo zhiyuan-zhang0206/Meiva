@@ -37,6 +37,10 @@ def _bind_home() -> None:
     process_context.bind_context(MeivaContext(meiva_home=resolve_meiva_home(), environ=os.environ))
 
 
+# meiva:note
+# Reads a name off the `meiva` package. Its names are served by the package's lazy `__getattr__`,
+# so they have no static declaration and this scenario exists to exercise that dynamic lookup. The
+# value comes back as `object` and each caller narrows it; this is not a getattr-literal workaround.
 def _served(read: Callable[[ModuleType], object]) -> object:
     import meiva
 
