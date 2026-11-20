@@ -4,6 +4,7 @@ import {
   formatAbsolute,
   formatClockText,
   formatRelative,
+  formatResetCountdown,
   formatShort,
   formatUpcoming,
   normalizeDayPeriodSpace,
@@ -219,5 +220,30 @@ describe("formatRelative sub-minute bucket", () => {
 
   it("says 'just now' for a future instant still under a minute", () => {
     expect(formatRelative(new Date(NOW.getTime() + 30_000).toISOString(), NOW)).toBe("just now");
+  });
+});
+
+describe("formatResetCountdown", () => {
+  const MIN = 60_000;
+  const HOUR = 60 * MIN;
+  const at = (ms: number) => new Date(NOW.getTime() + ms).toISOString();
+
+  it.each([
+    ["47h59m", 47 * HOUR + 59 * MIN, "1d 23h"],
+    ["24h", 24 * HOUR, "1d"],
+    ["23h", 23 * HOUR, "23h"],
+    ["23h59m", 23 * HOUR + 59 * MIN, "23h"],
+    ["1h", HOUR, "1h"],
+    ["59m", 59 * MIN, "59m"],
+    ["1m", MIN, "1m"],
+    ["48h", 48 * HOUR, "2d"],
+    ["2d23h", 71 * HOUR, "2d"],
+    ["7d", 7 * 24 * HOUR, "7d"],
+  ])("%s remaining reads %s", (_label, ms, expected) => {
+    expect(formatResetCountdown(at(ms), NOW)).toBe(expected);
+  });
+
+  it("returns an em dash for an unparseable instant", () => {
+    expect(formatResetCountdown("nope", NOW)).toBe("—");
   });
 });

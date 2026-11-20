@@ -136,6 +136,22 @@ export function formatRelative(
   return deltaSec > 0 ? `in ${span}` : `${span} ago`;
 }
 
+// meiva:note
+// formatResetCountdown is the span inside a plugin quota card's "resets in …" line (the sidebar Status panel is the only surface). It keeps the unit that tells the viewer which day the reset lands on: under an hour `59m`, under a day `23h`, under two days `1d 23h` (`1d` on the exact day), and from two days on whole days `2d`. A bare `1d` used to hide whether 23 hours or nearly two days remained (user 2026-11-21). Floors, never rounds up; the caller owns the "soon"/"awaiting refresh" wording for a span under a minute or already past. Deliberately separate from `formatRelative`, whose `in 1d` wording the other relative-time surfaces keep.
+// meiva:link ui/web/src/lib/format/docs/time.md
+export function formatResetCountdown(iso: string, now: Date): string {
+  const t = new Date(iso).getTime();
+  if (!Number.isFinite(t)) return "—";
+  const min = Math.max(0, Math.floor((t - now.getTime()) / 60_000));
+  if (min < 60) return `${min}m`;
+  const hours = Math.floor(min / 60);
+  if (hours < 24) return `${hours}h`;
+  const days = Math.floor(hours / 24);
+  if (days >= 2) return `${days}d`;
+  const remHours = hours % 24;
+  return remHours ? `${days}d ${remHours}h` : `${days}d`;
+}
+
 const MS_PER_DAY = 86_400_000;
 const TOMORROW_DAYS = 1;
 const WEEKDAY_DAYS_MAX = 6;
