@@ -1,5 +1,5 @@
 import asyncio
-from typing import Any
+from collections.abc import Mapping
 from zoneinfo import ZoneInfoNotFoundError
 
 import pytest
@@ -13,6 +13,13 @@ from base.agents.observation.turn_progress import TurnProgress
 from base.clock import Clock
 from base.clock.tests.fakes import clock_with_unknown_timezone
 from base.events.live.tests.live_capture import LiveEvents
+from base.host.boundary.fields import (
+    optional_float_field,
+    optional_list_field,
+    str_field,
+)
+from base.host.boundary.json_values import is_object_dict
+from base.host.boundary.untyped import object_mapping, object_of
 from base.log.tests.log_records import LogRecords
 
 _TIMELINE_INPUTS = TimestampPolicy.from_clock(Clock.from_settings(), timestamps_enabled=False)
@@ -49,16 +56,37 @@ def _history(*texts: str) -> list[BaseMessage]:
     return [SystemMessage(content="prompt"), *(AIMessage(content=text) for text in texts)]
 
 
-def _records(records: LogRecords, event: str) -> list[dict[str, Any]]:
-    return [r for r in records if r["extra"].get("event") == event]
+def _records(records: LogRecords, event: str) -> list[dict[str, object]]:
+    return records.extras(event=event)
 
 
-def _snapshots(events: list[dict[str, Any]]) -> list[dict[str, Any]]:
+def _exit_nodes(exit_record: Mapping[str, object]) -> list[dict[str, object]]:
+    nodes = optional_list_field(exit_record, "nodes")
+    assert nodes is not None
+    entries = [node for node in nodes if is_object_dict(node)]
+    assert len(entries) == len(nodes)
+    return entries
+
+
+def _exit_exception(records: LogRecords) -> object:
+    (record,) = records.events("node_exit")
+    return object_mapping(record)["exception"]
+
+
+def _snapshots(events: list[dict[str, object]]) -> list[dict[str, object]]:
     return [event for event in events if event["role"] == "timeline_snapshot"]
 
 
-def _item_ids(snapshot: dict[str, Any]) -> list[str]:
-    return [item["item_id"] for item in snapshot["items"]]
+def _snapshot_items(snapshot: Mapping[str, object]) -> list[dict[str, object]]:
+    items = optional_list_field(snapshot, "items")
+    assert items is not None
+    entries = [item for item in items if is_object_dict(item)]
+    assert len(entries) == len(items)
+    return entries
+
+
+def _item_ids(snapshot: Mapping[str, object]) -> list[str]:
+    return [str_field(item, "item_id") for item in _snapshot_items(snapshot)]
 
 
 async def test_a_normal_exit_stays_buffered_until_the_turn_boundary_flush(
@@ -68,17 +96,18 @@ async def test_a_normal_exit_stays_buffered_until_the_turn_boundary_flush(
         pass
 
     enters = _records(loguru_records, "node_enter")
-    assert [(r["extra"]["node"], r["extra"]["msg_count"]) for r in enters] == [("llm", 5)]
+    assert [(r["node"], r["msg_count"]) for r in enters] == [("llm", 5)]
     assert _records(loguru_records, "node_exit") == []
 
     node_log.flush_node_exit_aggregate(1)
 
     (exit_record,) = _records(loguru_records, "node_exit")
-    assert exit_record["extra"]["count"] == 1
-    (node,) = exit_record["extra"]["nodes"]
+    assert exit_record["count"] == 1
+    (node,) = _exit_nodes(exit_record)
     assert (node["node"], node["outcome"]) == ("llm", "ok")
-    assert node["duration_seconds"] >= 0
-    assert exit_record["exception"] is None
+    duration = optional_float_field(node, "duration_seconds")
+    assert duration is not None and duration >= 0
+    assert _exit_exception(loguru_records) is None
 
 
 async def test_a_cancelled_exit_is_buffered_as_normal_flow_not_an_exception_record(
@@ -92,10 +121,8 @@ async def test_a_cancelled_exit_is_buffered_as_normal_flow_not_an_exception_reco
     node_log.flush_node_exit_aggregate(1)
 
     (exit_record,) = _records(loguru_records, "node_exit")
-    assert [(n["node"], n["outcome"]) for n in exit_record["extra"]["nodes"]] == [
-        ("llm", "cancelled")
-    ]
-    assert exit_record["level"].name == "INFO"
+    assert [(n["node"], n["outcome"]) for n in _exit_nodes(exit_record)] == [("llm", "cancelled")]
+    assert len(loguru_records.extras(event="node_exit", level="INFO")) == 1
 
 
 async def test_the_safety_cap_flushes_when_a_turn_never_reaches_claim(
@@ -106,8 +133,8 @@ async def test_the_safety_cap_flushes_when_a_turn_never_reaches_claim(
             pass
 
     (exit_record,) = _records(loguru_records, "node_exit")
-    assert exit_record["extra"]["count"] == 32
-    assert len(exit_record["extra"]["nodes"]) == 32
+    assert exit_record["count"] == 32
+    assert len(_exit_nodes(exit_record)) == 32
 
 
 async def test_an_exception_exit_logs_at_once_with_the_live_traceback(
@@ -118,11 +145,14 @@ async def test_an_exception_exit_logs_at_once_with_the_live_traceback(
             raise RuntimeError("simulated exec crash")
 
     (exit_record,) = _records(loguru_records, "node_exit")
-    assert exit_record["extra"]["outcome"] == "exception:RuntimeError"
-    assert exit_record["extra"]["agent_id"] == 1
-    assert exit_record["level"].name == "INFO"
-    assert exit_record["exception"].type is RuntimeError
-    assert "simulated exec crash" in str(exit_record["exception"].value)
+    assert exit_record["outcome"] == "exception:RuntimeError"
+    assert exit_record["agent_id"] == 1
+    assert len(loguru_records.extras(event="node_exit", level="INFO")) == 1
+    exception = _exit_exception(loguru_records)
+    assert object_of(getattr, exception, "type") is RuntimeError
+    value = object_of(getattr, exception, "value")
+    assert isinstance(value, RuntimeError)
+    assert "simulated exec crash" in str(value)
 
 
 async def test_every_exit_record_names_its_owning_agent(
@@ -136,14 +166,14 @@ async def test_every_exit_record_names_its_owning_agent(
     node_log.flush_node_exit_aggregate(1)
 
     exits = _records(loguru_records, "node_exit")
-    assert [record["extra"]["agent_id"] for record in exits] == [1, 1]
+    assert [record["agent_id"] for record in exits] == [1, 1]
 
 
 async def test_the_enter_snapshot_carries_the_full_history_length(live_events: LiveEvents) -> None:
     async with _enter(live_events, _filler(7)):
         pass
 
-    (snapshot,) = _snapshots(await live_events.events())
+    (snapshot,) = _snapshots(await live_events.object_events())
     assert snapshot["agent_id"] == 1
     assert snapshot["msg_count"] == 7
 
@@ -157,10 +187,10 @@ async def test_the_first_snapshot_carries_the_system_prompt_and_later_ones_only_
     async with _enter(live_events, [*first, AIMessage(content="second")]):
         pass
 
-    full, incremental = _snapshots(await live_events.events())
+    full, incremental = _snapshots(await live_events.object_events())
     assert full["msg_count"] == 2
     assert _item_ids(full) == ["0.0", "1.0"]
-    assert full["items"][0]["kind"] == "system_prompt"
+    assert _snapshot_items(full)[0]["kind"] == "system_prompt"
     assert incremental["msg_count"] == 3
     assert _item_ids(incremental) == ["2.0"]
 
@@ -171,7 +201,7 @@ async def test_an_enter_with_nothing_new_publishes_nothing(live_events: LiveEven
     async with _enter(live_events, _filler(7)):
         pass
 
-    assert len(_snapshots(await live_events.events())) == 1
+    assert len(_snapshots(await live_events.object_events())) == 1
 
 
 async def test_an_empty_window_publishes_nothing_and_leaves_the_cursor_so_a_shorter_history_rerenders(
@@ -181,15 +211,15 @@ async def test_an_empty_window_publishes_nothing_and_leaves_the_cursor_so_a_shor
         pass
     async with _enter(live_events, []):
         pass
-    assert len(_snapshots(await live_events.events())) == 1
+    assert len(_snapshots(await live_events.object_events())) == 1
 
     async with _enter(live_events, _history("b")):
         pass
-    assert len(_snapshots(await live_events.events())) == 0
+    assert len(_snapshots(await live_events.object_events())) == 0
 
     async with _enter(live_events, [SystemMessage(content="x")]):
         pass
-    (rerendered,) = _snapshots(await live_events.events())
+    (rerendered,) = _snapshots(await live_events.object_events())
     assert rerendered["msg_count"] == 1
 
 
@@ -201,7 +231,7 @@ async def test_a_compaction_that_shrinks_the_history_forces_a_full_window(
     async with _enter(live_events, _history("a", "b")):
         pass
 
-    _, rerendered = _snapshots(await live_events.events())
+    _, rerendered = _snapshots(await live_events.object_events())
     assert rerendered["msg_count"] == 3
     assert _item_ids(rerendered) == ["0.0", "1.0", "2.0"]
 
@@ -217,7 +247,7 @@ async def test_a_full_window_request_republishes_the_window_and_advances_the_cur
     async with _enter(live_events, messages):
         pass
 
-    first, forced = _snapshots(await live_events.events())
+    first, forced = _snapshots(await live_events.object_events())
     assert _item_ids(first) == _item_ids(forced) == ["0.0", "1.0"]
 
 
@@ -225,7 +255,7 @@ async def test_the_timeline_limit_bounds_a_full_window_snapshot(live_events: Liv
     async with _enter(live_events, _history("a", "b", "c", "d"), timeline_limit=2):
         pass
 
-    (snapshot,) = _snapshots(await live_events.events())
+    (snapshot,) = _snapshots(await live_events.object_events())
     assert snapshot["msg_count"] == 5
     assert _item_ids(snapshot) == ["3.0", "4.0"]
 
@@ -248,9 +278,9 @@ async def test_a_render_failure_leaves_the_cursor_so_the_next_enter_renders_the_
             ),
         ):
             pass
-    assert _snapshots(await live_events.events()) == []
+    assert _snapshots(await live_events.object_events()) == []
 
     async with _enter(live_events, messages):
         pass
-    (snapshot,) = _snapshots(await live_events.events())
+    (snapshot,) = _snapshots(await live_events.object_events())
     assert _item_ids(snapshot) == ["0.0", "1.0", "2.0"]
