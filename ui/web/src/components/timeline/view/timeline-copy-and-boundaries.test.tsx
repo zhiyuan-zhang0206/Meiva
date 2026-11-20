@@ -371,9 +371,11 @@ describe("turnActive transition expansion", () => {
     ];
     const { rerender } = render(<TimelineView turnActive items={items} />);
     expect(screen.getByText("first")).toBeTruthy();
-    expect(screen.getByTestId("python-code")).toBeTruthy();
+    expect(screen.getByTestId("card-toggle")).toBeTruthy();
+    expect(screen.queryByTestId("python-code")).toBeNull();
     rerender(<TimelineView items={items} />);
     expect(screen.getByText("first")).toBeTruthy();
+    expect(screen.queryByTestId("card-toggle")).toBeNull();
     expect(screen.queryByTestId("python-code")).toBeNull();
   });
 });
@@ -383,6 +385,7 @@ describe("ItemView memo comparator: streaming prop flip is visible", () => {
     setUserSettings({ "display.expand_working_block": true });
     const items = [makeItem({ kind: "agent_code", payload: "x" })];
     const { rerender } = render(<TimelineView turnActive items={items} streamingCode={false} />);
+    revealCollapsedCards();
     expect(screen.getByTestId("python-code").getAttribute("data-streaming")).toBe("0");
     rerender(<TimelineView turnActive items={items} streamingCode />);
     expect(screen.getByTestId("python-code").getAttribute("data-streaming")).toBe("1");
@@ -391,6 +394,7 @@ describe("ItemView memo comparator: streaming prop flip is visible", () => {
     setUserSettings({ "display.expand_working_block": true });
     const items = [makeItem({ kind: "agent_code", payload: "x" })];
     const { rerender } = render(<TimelineView turnActive items={items} streamingCode />);
+    revealCollapsedCards();
     expect(screen.getByTestId("python-code").getAttribute("data-streaming")).toBe("1");
     rerender(<TimelineView turnActive items={items} streamingCode={false} />);
     expect(screen.getByTestId("python-code").getAttribute("data-streaming")).toBe("0");
