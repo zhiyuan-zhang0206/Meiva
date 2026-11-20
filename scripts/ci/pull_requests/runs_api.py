@@ -2,65 +2,35 @@
 
 from __future__ import annotations
 
-import json
 import subprocess
 from dataclasses import dataclass
-from datetime import UTC, datetime, timedelta
-from typing import TypeGuard
 
 from base.clock import Timers
-from base.host.boundary.json_values import is_object_dict, is_object_list
-from base.host.boundary.untyped import object_of
 from scripts.ci.pull_requests.gh_process import GhProcess
 
 __all__ = [
     "CiRunsError",
     "FetchStats",
-    "PullRecord",
-    "RunRecord",
-    "fetch_closed_prs",
-    "fetch_runs",
-    "parse_timestamp",
     "run_gh",
 ]
 
 _GH_TIMEOUT_SECONDS = 60.0
-_PAGE_SIZE = 100
 _MAX_GH_ATTEMPTS = 4
-
-# meiva:note
-# One jq-projected GitHub workflow run (`id`, `created_at`, `conclusion`, ...): a decoded JSON object whose fields the readers in `base.host.boundary.fields` narrow.
-RunRecord = dict[str, object]
-# meiva:note
-# One jq-projected closed pull request (`number`, `head_ref`, `merged_at`, ...), read the same way.
-PullRecord = dict[str, object]
 
 
 class CiRunsError(RuntimeError):
     # meiva:note
-    # An authoritative GitHub response made this sampling pass unusable.
+    # An authoritative GitHub response made this read unusable.
     pass
 
 
 @dataclass
 class FetchStats:
     # meiva:note
-    # The per-sampler GitHub request accounting carried by the breadcrumb.
+    # The caller's GitHub request accounting: requests issued and transient retries.
 
     api_requests: int = 0
     retries: int = 0
-
-
-def parse_timestamp(value: object) -> datetime | None:
-    # meiva:note
-    # Parse a GitHub ISO timestamp as UTC; malformed optional values are absent.
-    if not isinstance(value, str) or not value:
-        return None
-    try:
-        parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
-    except ValueError:
-        return None
-    return parsed.astimezone(UTC)
 
 
 def run_gh(args: list[str], stats: FetchStats, *, run_process: GhProcess, timers: Timers) -> str:
@@ -88,98 +58,3 @@ def run_gh(args: list[str], stats: FetchStats, *, run_process: GhProcess, timers
         stats.retries += 1
         timers.sleep(2 * (attempt + 1))
     raise AssertionError("bounded gh retry loop exhausted without result")
-
-
-def _is_dict_list(value: object) -> TypeGuard[list[dict[str, object]]]:
-    return is_object_list(value) and all(is_object_dict(item) for item in value)
-
-
-def _json_list(output: str, description: str) -> list[dict[str, object]]:
-    try:
-        parsed = object_of(json.loads, output)
-    except json.JSONDecodeError as exc:
-        raise CiRunsError(f"invalid JSON from {description}") from exc
-    if not _is_dict_list(parsed):
-        raise CiRunsError(f"unexpected {description} payload")
-    return parsed
-
-
-def fetch_runs(
-    repo: str,
-    since: datetime,
-    until: datetime,
-    stats: FetchStats,
-    *,
-    run_process: GhProcess,
-    timers: Timers,
-    max_pages: int,
-) -> list[RunRecord]:
-    # meiva:note
-    # Walk runs newest-first using created<= cursors and id deduplication.
-    cursor = until
-    seen: dict[int, RunRecord] = {}
-    jq = (
-        "[.workflow_runs[] | {id, workflow_id, name, event, status, conclusion, run_attempt, "
-        "head_branch, head_sha, created_at, run_started_at, updated_at}] | @json"
-    )
-    while cursor >= since:
-        oldest: datetime | None = None
-        for page in range(1, max_pages + 1):
-            stamp = cursor.strftime("%Y-%m-%dT%H:%M:%SZ")
-            path = (
-                f"repos/{repo}/actions/runs?created=%3C%3D{stamp}&per_page={_PAGE_SIZE}&page={page}"
-            )
-            batch = _json_list(
-                run_gh([path, "--jq", jq], stats, run_process=run_process, timers=timers),
-                "workflow runs",
-            )
-            if not batch:
-                return list(seen.values())
-            for run in batch:
-                identifier = run.get("id")
-                created = parse_timestamp(run.get("created_at"))
-                if not isinstance(identifier, int) or created is None:
-                    raise CiRunsError("workflow run lacks an integer id or created_at")
-                seen[identifier] = run
-                oldest = created if oldest is None or created < oldest else oldest
-            if len(batch) < _PAGE_SIZE:
-                return list(seen.values())
-        if oldest is None or oldest < since:
-            return list(seen.values())
-        next_cursor = oldest - timedelta(seconds=1)
-        if next_cursor >= cursor:
-            raise CiRunsError("workflow-runs cursor did not move backward")
-        cursor = next_cursor
-    return list(seen.values())
-
-
-def fetch_closed_prs(
-    repo: str,
-    since: datetime,
-    stats: FetchStats,
-    *,
-    run_process: GhProcess,
-    timers: Timers,
-    max_pages: int,
-) -> list[PullRecord]:
-    # meiva:note
-    # Walk the authoritative closed-PR population newest-updated first.
-    jq = (
-        "[.[] | {number, head_ref: .head.ref, head_sha: .head.sha, created_at, updated_at, "
-        "merged_at, closed_at}] | @json"
-    )
-    records: list[PullRecord] = []
-    for page in range(1, max_pages + 1):
-        path = f"repos/{repo}/pulls?state=closed&sort=updated&direction=desc&per_page={_PAGE_SIZE}&page={page}"
-        batch = _json_list(
-            run_gh([path, "--jq", jq], stats, run_process=run_process, timers=timers),
-            "closed pull requests",
-        )
-        records.extend(batch)
-        if len(batch) < _PAGE_SIZE:
-            return records
-        stamps = [parse_timestamp(entry.get("updated_at")) for entry in batch]
-        oldest = min((stamp for stamp in stamps if stamp is not None), default=None)
-        if oldest is not None and oldest < since:
-            return records
-    raise CiRunsError(f"closed-PR walk exceeded {max_pages} pages")

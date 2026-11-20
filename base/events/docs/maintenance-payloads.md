@@ -1,6 +1,6 @@
 # Maintenance and understanding event payload semantics
 
-Daily reconciliation, PR-flow and CI-run samplers emit absolute state: every run
+Daily reconciliation and PR-flow samplers emit absolute state: every run
 re-emits its trailing window, so each numeric field becomes an OTLP
 ObservableGauge — a counter or histogram would accrue across re-emissions — and
 a field whose sample is missing stays absent rather than reporting zero.
@@ -9,10 +9,6 @@ appended_runs counts the ledger rows the reconciliation added (0 = the re-fire
 no-op). One debt_sweep_daily event per claimed 06:30 cluster-time slot reports
 scan_status as an explicit fact: the mechanical scan may fail without blocking
 the clearing worker, so the failure is never implied away by the worker action.
-
-ci_runs_run is one breadcrumb per repository: the fixed window's population and
-this run's GitHub-read budget — current observations, so gauges even though
-their names are counts.
 
 claude_auth_keepalive_round is one per machine every six hours: status is `ok`, `failed` or
 `skipped`; reason names why a round did not succeed (`claude_not_found`, `not_logged_in`,

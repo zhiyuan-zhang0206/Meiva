@@ -40,65 +40,6 @@ class PrFlowDaily(TypedDict):
     ready_to_merge_p90_seconds: NotRequired[float]
 
 
-# meiva:note
-# One absolute-state ci_runs_daily sample per complete cluster-time day and repository. Classification labels overlap; white_run_share alone deduplicates instant skips, superseded runs and abandoned PR heads in that priority order. Per-PR percentiles are absent when no completed PR has attributed runs. first_pass_pr_share is v1's run-level approximation: attributed non-noise, non-zombie runs have no red conclusion and no retry attempt.
-# meiva:link base/events/docs/maintenance-payloads.md
-class CiRunsDaily(TypedDict):
-    repo: str
-    day: str
-    runs: int
-    instant_skip_runs: int
-    watchdog_runs: int
-    proof_runs: int
-    cancelled_runs: int
-    superseded_runs: int
-    superseded_zero_runs: int
-    failed_runs: int
-    retried_failed_runs: int
-    self_healed_runs: int
-    abandoned_runs: int
-    zombie_runs: int
-    prs_completed: int
-    prs_with_runs: int
-    per_pr_duration_median_minutes: NotRequired[float]
-    per_pr_duration_p90_minutes: NotRequired[float]
-    per_pr_runs_median: NotRequired[float]
-    per_pr_runs_p90: NotRequired[float]
-    per_pr_runs_executed_median: NotRequired[float]
-    white_run_share: NotRequired[float]
-    retry_share: NotRequired[float]
-    noise_run_share: NotRequired[float]
-    first_pass_pr_share: NotRequired[float]
-
-
-# meiva:note
-# ci_workflow_window reports trailing-window absolute workflow state keyed by repository and workflow name, emitted with the same daily sampler. Execution percentiles omit zombie wall-clock artifacts and zero-execution runs rather than treating an empty population as a real zero.
-# meiva:link base/events/docs/maintenance-payloads.md
-class CiWorkflowWindow(TypedDict):
-    repo: str
-    workflow: str
-    runs: int
-    failed_runs: int
-    self_healed_runs: int
-    retried_failed_runs: int
-    cancelled_runs: int
-    superseded_runs: int
-    instant_skip_runs: int
-    prs_appeared_on: int
-    pr_appearance_share: NotRequired[float]
-    retry_share: NotRequired[float]
-    exec_median_seconds: NotRequired[float]
-    exec_p90_seconds: NotRequired[float]
-
-
-class CiRunsRun(TypedDict):
-    repo: str
-    window_days: int
-    window_runs: int
-    window_prs: int
-    api_requests: int
-
-
 class TaskReminderDigest(TypedDict):
     owner_id: int
     task_count: int
@@ -323,24 +264,6 @@ EVENTS: dict[str, EventSpec] = {
         "(absolute gauges, one sample per complete day)",
         payload=PrFlowDaily,
         site="scripts/ci/pull_requests/pr_flow_export.py:emit_events (positional emit)",
-    ),
-    "ci_runs_daily": telemetry_event(
-        "ci_runs_daily",
-        "daily CI-run aggregates",
-        payload=CiRunsDaily,
-        site="scripts/ci/pull_requests/runs_export.py:emit_snapshot (positional emit)",
-    ),
-    "ci_workflow_window": telemetry_event(
-        "ci_workflow_window",
-        "trailing workflow fragility",
-        payload=CiWorkflowWindow,
-        site="scripts/ci/pull_requests/runs_export.py:emit_snapshot (positional emit)",
-    ),
-    "ci_runs_run": telemetry_event(
-        "ci_runs_run",
-        "CI-run sampler breadcrumb",
-        payload=CiRunsRun,
-        site="scripts/ci/pull_requests/runs_export.py:emit_snapshot (positional emit)",
     ),
     # meiva:note
     # Persisted because the reminder/escalation record is the only external evidence a

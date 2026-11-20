@@ -70,7 +70,6 @@ from base.telemetry.delivery.reporting import (
     report_sink_failure,
 )
 from base.telemetry.emitter import emit, pipeline_bound
-from base.telemetry.metrics import ci_runs_metrics
 from base.telemetry.otlp.plans import (
     BASE_METRIC_DISPOSITION,
     select_metric_attributes,
@@ -134,10 +133,7 @@ _QUEUE_MAXSIZE = 2048
 # volume into connection-probe volume.
 COLLECTOR_RETRY_INTERVAL_S = 300
 
-METRIC_DISPOSITION: dict[tuple[str, str], str | None] = {
-    **BASE_METRIC_DISPOSITION,
-    **ci_runs_metrics.CI_RUN_GAUGE_DISPOSITIONS,
-}
+METRIC_DISPOSITION: dict[tuple[str, str], str | None] = {**BASE_METRIC_DISPOSITION}
 
 
 def endpoint_reachable(endpoint: str) -> bool:

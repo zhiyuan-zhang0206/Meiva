@@ -11,8 +11,8 @@ from types import ModuleType
 from typing import Protocol, TypeGuard
 
 from base.telemetry.metrics.core import (
-    ci,
     cost,
+    delivery,
     dismissed,
     events,
     host,
@@ -36,8 +36,7 @@ CORE_DEFINITION_MODULES: tuple[ModuleType, ...] = (
     main_red,
     cost,
     dismissed,
-    *ci.DELIVERY_MODULES,
-    ci,
+    *delivery.DELIVERY_MODULES,
     events,
     host,
     observability,
