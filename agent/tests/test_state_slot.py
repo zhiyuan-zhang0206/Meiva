@@ -28,14 +28,24 @@ Test coverage:
   * plugin mutating namespace view does not persist (T7)
 """
 
-import asyncio
 import random
-from typing import Annotated, Any, cast
+from collections.abc import Mapping
+from typing import Annotated, cast
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
-from langchain_core.messages import AIMessage, AnyMessage, HumanMessage, RemoveMessage
+from langchain_core.messages import (
+    AIMessage,
+    AnyMessage,
+    BaseMessage,
+    HumanMessage,
+    MessageLikeRepresentation,
+    RemoveMessage,
+    ToolMessage,
+)
 from langchain_core.runnables import RunnableConfig
+from langgraph.checkpoint.memory import InMemorySaver
+from langgraph.graph import END, START, StateGraph
 from langgraph.graph.message import REMOVE_ALL_MESSAGES, add_messages
 from langgraph.runtime import Runtime
 from psycopg_pool import AsyncConnectionPool
@@ -51,6 +61,13 @@ from agent.state import (
     PluginStateHandle,
     build_agent_state,
 )
+from agent.tests.state_slot_views import (
+    graph_builder,
+    plugin_namespace,
+    plugin_namespace_object,
+    sdk,
+    state_update,
+)
 from base.agents.context import MeivaContext
 from base.agents.context.identity import AgentIdentity
 from base.clock import SYSTEM_TIMERS, Clock
@@ -60,6 +77,8 @@ from base.config.tests.configuration import defaults
 from base.db import Database
 from base.db.code_version_gate import ProcessDbGate
 from base.events.live.bus import EventBus
+from base.host.boundary.json_values import is_object_list
+from base.host.boundary.untyped import object_mapping
 from base.host.env.agent_slices import AgentSlices
 from base.native_process.turn_identity import HostedTurnResources
 from base.packages.plugin_providers import build_model_catalog
@@ -73,11 +92,6 @@ from meiva.tests.fixtures.pin_agent import snapshot_clients
 # A fresh seeded generator for each use, so no test sees another's draws.
 def _rng() -> random.Random:
     return random.Random(0)  # noqa: S311
-
-
-assert (
-    asyncio
-)  # silence "unused" — fixture asyncio.Event implicit; explicit import prevents ruff removal
 
 
 @pytest.fixture(autouse=True)
@@ -209,12 +223,11 @@ def test_handle_update_remove_all_marker_survives_accumulation():
     handle.update({"messages": [m3]})
     handle.update({"messages": [RemoveMessage(id=REMOVE_ALL_MESSAGES)]})
 
-    acc = meiva.state_update["messages"]
-    assert acc == [m3, RemoveMessage(id=REMOVE_ALL_MESSAGES)], (
-        "REMOVE_ALL must ride along in the accumulated delta"
-    )
+    acc = state_update()["messages"]
+    expected: list[MessageLikeRepresentation] = [m3, RemoveMessage(id=REMOVE_ALL_MESSAGES)]
+    assert acc == expected, "REMOVE_ALL must ride along in the accumulated delta"
     assert handle.read().messages == []
-    assert add_messages([m1, m2], acc) == []
+    assert add_messages([m1, m2], expected) == []
 
 
 def test_handle_update_add_messages_plain_appends_unchanged():
@@ -238,10 +251,11 @@ def test_handle_update_add_messages_plain_appends_unchanged():
     handle.update({"messages": [m1]})
     handle.update({"messages": [m2]})
 
-    acc = meiva.state_update["messages"]
-    assert acc == [m1, m2]
+    acc = state_update()["messages"]
+    expected: list[MessageLikeRepresentation] = [m1, m2]
+    assert acc == expected
     assert handle.read().messages == [m1, m2]
-    assert add_messages([], acc) == [m1, m2]
+    assert add_messages([], expected) == [m1, m2]
 
 
 # ── Core-key whitelist: only `messages` is plugin-writable (Task #1159) ─────
@@ -263,7 +277,7 @@ def test_plugin_state_schema_rejects_non_messages_core_key(bad_field: str) -> No
     every turn. Pre-fix this silently registered and let the plugin write
     (and clobber) the core channel."""
 
-    ns: dict[str, Any] = {
+    ns: dict[str, object] = {
         "__annotations__": {bad_field: bool},
     }
     bad_cls = type(f"_BadState_{bad_field}", (BaseModel,), ns)
@@ -283,7 +297,7 @@ def test_plugin_state_still_allows_messages():
     handle = PluginStateHandle(_PluginState, "delta_test")
     assert handle._channel_keys["messages"] == "messages"
     state_cls = build_agent_state(_registry(delta_test=_PluginState))
-    assert cast(Any, state_cls).__plugin_base_declared__ == {"messages"}
+    assert object_mapping(state_cls.__dict__)["__plugin_base_declared__"] == {"messages"}
 
 
 async def test_exec_node_merges_plugin_messages_with_framework_toolmessage(
@@ -311,21 +325,27 @@ async def test_exec_node_merges_plugin_messages_with_framework_toolmessage(
         "from langchain_core.messages import HumanMessage\n"
         "meiva.state_update['messages'] = [HumanMessage(content='plugin note', id='p1')]\n"
     )
-    plugin_fields: dict[str, Any] = {"delta_test__sentinel": True}
-    state = state_cls(messages=[ai_message_with_code(code)], halted=False, **plugin_fields)
+    state = state_cls.model_validate(
+        {"messages": [ai_message_with_code(code)], "halted": False, "delta_test__sentinel": True}
+    )
     runtime, config = make_runtime_and_config(AsyncMock(), database_gate=database_gate)
 
     cmd = await exec_node_impl(
         state, runtime, config, process=SubprocessExecProcess(live_parent_facts(), rng=_rng())
     )
 
-    update = cast(dict[str, Any], cmd.update)
+    update = cast(dict[str, object], cmd.update)
     msgs = update["messages"]
+    assert is_object_list(msgs)
     assert len(msgs) == 2, f"expected ToolMessage + plugin message, got {msgs!r}"
-    assert msgs[0].type == "tool", f"exec ToolMessage must be kept and FIRST: {msgs[0]!r}"
-    assert msgs[0].tool_call_id == "call_1"
-    assert msgs[1].id == "p1"
-    assert msgs[1].content == "plugin note"
+    tool_message, plugin_message = msgs
+    assert isinstance(tool_message, ToolMessage), (
+        f"exec ToolMessage must be kept and FIRST: {tool_message!r}"
+    )
+    assert tool_message.tool_call_id == "call_1"
+    assert isinstance(plugin_message, BaseMessage)
+    assert plugin_message.id == "p1"
+    assert plugin_message.content == "plugin note"
 
 
 # ── Unit: state.<plugin> namespace view ───────────────────────────────────
@@ -343,24 +363,26 @@ def test_namespace_view_strips_prefix():
         data: str = ""
 
     state_cls = build_agent_state(_registry(meiva_code=MeivaCode, other_plugin=OtherPlugin))
-    # dynamic AgentState fields (`<plugin>__<field>`) are generated at runtime by build_agent_state,
-    # pyright statically sees state_cls as BaseAgentState — use dict[Any, Any] + **spread to bypass
-    # pyright keyword-arg check.
-    plugin_fields: dict[str, Any] = {
-        "meiva_code__injected_paths": {"/a/AGENTS.md", "/b/AGENTS.md"},
-        "meiva_code__token_count": 42,
-        "other_plugin__data": "x",
-    }
-    process_context.set_state(state_cls(messages=[], halted=False, **plugin_fields))
+    process_context.set_state(
+        state_cls.model_validate(
+            {
+                "messages": [],
+                "halted": False,
+                "meiva_code__injected_paths": {"/a/AGENTS.md", "/b/AGENTS.md"},
+                "meiva_code__token_count": 42,
+                "other_plugin__data": "x",
+            }
+        )
+    )
 
-    ns = meiva.state.meiva_code  # type: ignore[attr-defined]
-    assert ns.injected_paths == {"/a/AGENTS.md", "/b/AGENTS.md"}
-    assert ns.token_count == 42
+    ns = plugin_namespace("meiva_code")
+    assert ns["injected_paths"] == {"/a/AGENTS.md", "/b/AGENTS.md"}
+    assert ns["token_count"] == 42
     # other_plugin's fields do not appear (cross-plugin isolation)
-    assert not hasattr(ns, "data")
+    assert "data" not in ns
     # base fields also do not enter namespace
-    assert not hasattr(ns, "messages")
-    assert not hasattr(ns, "halted")
+    assert "messages" not in ns
+    assert "halted" not in ns
 
 
 def test_namespace_view_typo_name_raises_attribute_error():
@@ -378,7 +400,7 @@ def test_namespace_view_typo_name_raises_attribute_error():
     process_context.set_state(state_cls(messages=[], halted=False))
 
     with pytest.raises(AttributeError, match=r"meiva_code.*other"):
-        _ = meiva.state.nonexistent  # type: ignore[attr-defined]
+        plugin_namespace_object("nonexistent")
 
 
 def test_namespace_view_mutation_does_not_persist():
@@ -389,17 +411,16 @@ def test_namespace_view_mutation_does_not_persist():
         counter: int = 0
 
     state_cls = build_agent_state(_registry(plugin=P))
-    plugin_fields: dict[str, Any] = {"plugin__counter": 1}
-    process_context.set_state(state_cls(messages=[], halted=False, **plugin_fields))
+    state = state_cls.model_validate({"messages": [], "halted": False, "plugin__counter": 1})
+    process_context.set_state(state)
 
-    ns = meiva.state.plugin  # type: ignore[attr-defined]
-    assert ns.counter == 1
-    ns.counter = 999  # mutate namespace by-value copy
+    assert plugin_namespace("plugin")["counter"] == 1
+    vars(plugin_namespace_object("plugin"))["counter"] = 999  # mutate namespace by-value copy
     # original state unchanged (namespace and state are independent Python objects)
-    assert meiva.state.plugin.counter == 1  # type: ignore[attr-defined]
-    assert meiva.state.plugin__counter == 1  # type: ignore[attr-defined]
+    assert plugin_namespace("plugin")["counter"] == 1
+    assert object_mapping(state.model_dump())["plugin__counter"] == 1
     # state_update also not auto-chased — plugin must be explicit
-    assert meiva.state_update is None
+    assert sdk.state_update is None
 
 
 # ── Unit: deepcopy isolation (list / dict / set / nested) ───────────────────────
@@ -464,7 +485,7 @@ def test_deepcopy_isolates_nested_pydantic_model():
 
 def make_runtime_and_config(
     redis_client: AsyncMock,
-    pins: dict[str, Any] | None = None,
+    pins: Mapping[str, object] | None = None,
     *,
     database_gate: ProcessDbGate,
     ops_pool: AsyncConnectionPool | None = None,
@@ -744,30 +765,30 @@ def messages_plugin_state_cls() -> type[BaseAgentState]:
 # `channel_values`; the retired key is ignored on load, not an error.
 async def test_checkpoint_with_retired_core_key_still_loads():
     from langgraph.checkpoint.base.id import uuid6
-    from langgraph.checkpoint.memory import InMemorySaver
-    from langgraph.graph import END, START, StateGraph
 
-    async def node(state: BaseAgentState) -> dict[str, Any]:
+    async def node(state: BaseAgentState) -> dict[str, object]:
         return {"halted": True}
 
-    builder: Any = StateGraph(build_agent_state(_registry()))
+    builder = graph_builder(StateGraph(build_agent_state(_registry())))
     builder.add_node("node", node)
     builder.add_edge(START, "node")
     builder.add_edge("node", END)
     saver = InMemorySaver()
-    graph: Any = builder.compile(checkpointer=saver)
+    graph = builder.compile(saver)
     config: RunnableConfig = {"configurable": {"thread_id": "retired-key"}}
-    await graph.ainvoke({"messages": [HumanMessage(content="first")]}, config)
+    await graph.ainvoke(BaseAgentState(messages=[HumanMessage(content="first")]), config)
 
     saved = await saver.aget_tuple(config)
     assert saved is not None
-    checkpoint: Any = dict(saved.checkpoint)
+    checkpoint = saved.checkpoint.copy()
     checkpoint["id"] = str(uuid6())
     checkpoint["channel_values"] = {**checkpoint["channel_values"], "update_initiated": True}
     await saver.aput(saved.config, checkpoint, saved.metadata, {})
 
-    result = await graph.ainvoke({"messages": [HumanMessage(content="second")]}, config)
+    result = await graph.ainvoke(BaseAgentState(messages=[HumanMessage(content="second")]), config)
 
     assert result["halted"] is True
     assert "update_initiated" not in result
-    assert [m.content for m in result["messages"]] == ["first", "second"]
+    messages = result["messages"]
+    assert is_object_list(messages)
+    assert [m.content for m in messages if isinstance(m, BaseMessage)] == ["first", "second"]
