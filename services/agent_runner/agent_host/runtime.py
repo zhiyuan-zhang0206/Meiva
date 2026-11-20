@@ -31,6 +31,7 @@ from base.lm.harness import BackgroundWorkReporting, UnsolicitedOutput, Unsolici
 from base.lm.harness.bridge import HarnessBridge
 from base.lm.harness.engine import TurnEngine
 from base.lm.harness.handoff import HarnessContribution
+from base.lm.harness.process import CloseResidueError
 from base.lm.harness.registration import RegistrationStore, SecureRandom
 from base.lm.harness.registry import SessionRegistry
 from base.lm.harness.wiring import BridgeRootValues, bridge_for
@@ -548,6 +549,23 @@ def refresh_cached_runtime(
 
 
 # meiva:note
+# The refusal `HarnessSessions.join` raises while an agent's previous session may still hold
+# its transcript; `running` names the residue pids still alive, or is None when the failed
+# close could not say what it left.
+# meiva:link agent/graph/docs/harness-turn.md
+class HarnessCloseFenceError(RuntimeError):
+    def __init__(
+        self, agent_id: int, error: BaseException, running: tuple[int, ...] | None
+    ) -> None:
+        held = "its close failed" if running is None else f"pids {list(running)} still run"
+        super().__init__(
+            f"agent {agent_id}'s previous harness session may still hold its transcript "
+            f"({held}): {error!r}"
+        )
+        self.running = running
+
+
+# meiva:note
 # The host's one owner of session shutdown. A runtime can be dropped from any sync
 # path — idle eviction, terminate, restart, crash — while closing an external session
 # is async and must not leak the CLI child process that holds the transcript, so the
@@ -620,7 +638,12 @@ class HarnessSessions:
     # Wait for this agent's retired session to finish closing, if one is. The next turn
     # calls it before it builds a runtime, which is the only ordering that keeps one
     # resumed session id from having two CLIs at once. A cancelled waiter leaves the
-    # close running, and a failed close keeps refusing admission on every later join.
+    # close running. A failed close keeps refusing admission for as long as what it
+    # guards may still hold: a close that left processes running is asked again on each
+    # join and lifts once none of them is alive, and a close that failed any other way
+    # cannot say, so it keeps refusing (task #7074). Each refusal is a new error caused
+    # by the stored one: raising the stored error again would grow its traceback on
+    # every join and, for a stored cancellation, read as the caller being cancelled.
     # meiva:link agent/graph/docs/harness-turn.md
     async def join(self, agent_id: int) -> None:
         task = self._retiring.get(agent_id)
@@ -628,7 +651,19 @@ class HarnessSessions:
             return
         error = await asyncio.shield(task)
         if error is not None:
-            raise error
+            running = error.running() if isinstance(error, CloseResidueError) else None
+            if running != ():
+                raise HarnessCloseFenceError(agent_id, error, running) from error
+            logger.info(
+                "[{label}] {body}",
+                label="harness",
+                event="harness_close_residue_gone",
+                agent_id=agent_id,
+                body=(
+                    f"agent {agent_id}: every process its last session left running has "
+                    f"exited; admitting a new session"
+                ),
+            )
         if self._retiring.get(agent_id) is task:
             del self._retiring[agent_id]
 

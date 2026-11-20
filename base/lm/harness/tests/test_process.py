@@ -98,3 +98,17 @@ async def test_terminate_escalates_for_a_process_that_ignores_sigterm() -> None:
     finally:
         process.kill()
         process.wait()
+
+
+# meiva:note
+# A residue fence remembers each pid with its start time (task #7074), so the probe must answer the
+# same time for the same process and none once it has exited and been reaped.
+def test_a_process_keeps_its_start_time_until_it_is_gone() -> None:
+    probe = PsutilChildProbe()
+    with started(SLEEP, new_session=True) as [process]:
+        first = probe.started_at(process.pid)
+        assert first is not None
+        assert probe.started_at(process.pid) == first
+        process.kill()
+        _ = process.wait()
+        assert probe.started_at(process.pid) is None

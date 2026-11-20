@@ -227,6 +227,12 @@ EVENTS: dict[str, EventSpec] = {
         payload=HarnessCloseResidue,
         tier="anomaly",
     ),
+    "harness_close_residue_gone": telemetry_event(
+        "harness_close_residue_gone",
+        "every process a failed harness close left running has exited, so the agent's next "
+        "session is admitted",
+        tier="noise",
+    ),
     "harness_close_failed": telemetry_event(
         "harness_close_failed",
         "closing an external harness session raised",
