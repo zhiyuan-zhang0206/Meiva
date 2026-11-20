@@ -147,13 +147,13 @@ schema changes, immutable migration history and baseline verification.
 ### Locality gate (meizel)
 
 `python -m meizel check` judges every first-party dependency against the
-`meizel.toml` manifests (see [the checker](../meizel/docs/checker/checker.md)).
+`meizel.toml` manifests (see [the checker](https://github.com/zhiyuan-zhang0206/meizel/blob/main/meizel/docs/checker/checker.md)).
 A commit runs `check --changed` on the staged files, a push and CI run the whole
 `check`, and CI also compares recorded debt with the base branch.
 
 Directories that still carry recorded debt are strict-to-be: the recorded
 violations pass, anything new fails, and the debt may only shrink
-([recorded debt](../meizel/docs/checker/debt/debt.md)).
+([recorded debt](https://github.com/zhiyuan-zhang0206/meizel/blob/main/meizel/docs/checker/debt/debt.md)).
 
 - Fix a violation instead of recording it. Move the code, use the public door,
   inject the collaborator, or declare the edge in the manifest of the directory
@@ -179,8 +179,8 @@ violations pass, anything new fails, and the debt may only shrink
   the command refuses it and writes nothing. If a violation is left that neither side recorded, it
   is a real new one; fix it, or `debt record` it as a discussed exception.
 - CI fails when the recorded total grows against the base (`debt diff --on-growth=fail`).
-  The one exception is a rule change (it edits meizel's own rule code: Python under `meizel/`
-  outside tests, or `meizel.policy.toml`, whose reader tables decide what is an acquisition),
+  The one exception is a rule change (it moves the meizel pin in `uv.lock`, or edits
+  `meizel.policy.toml`, whose reader tables decide what is an acquisition),
   whose growth is split in two by the tool, not by a reader. The growth the new rules cause in
   the base's unchanged code is reported, because widening a rule grows the baselines. The growth the content causes is failed: every debt key the change records must be one
   the new rules find in the base, so a rule change cannot carry a new violation or a moved file.
@@ -191,12 +191,12 @@ violations pass, anything new fails, and the debt may only shrink
   patch-shaped codes `patch-raising-false` and `test-subclass-override` (a test class that
   overrides a method of production code). Do not add one;
   pass the dependency in as an explicit parameter
-  ([patching](../meizel/docs/checker/patching/patching.md)). When a symbol is renamed, `debt carry
+  ([patching](https://github.com/zhiyuan-zhang0206/meizel/blob/main/meizel/docs/checker/patching/patching.md)). When a symbol is renamed, `debt carry
   --rename-target OLD=NEW` moves its entries; when a function or class moves to another file,
   `debt carry --move-symbol OLD_FILE::NAME=NEW_FILE` does. A change that moves a top-level function
   or class between files also declares the move in its pull request body, one line per move
   (`Symbol-Move: <old file>::<name> -> <new file> — <why>`), so `debt diff` measures the same site
-  once instead of twice; see [the debt diff](../meizel/docs/checker/debt/diff.md). `debt sites --code <patch code>
+  once instead of twice; see [the debt diff](https://github.com/zhiyuan-zhang0206/meizel/blob/main/meizel/docs/checker/debt/diff.md). `debt sites --code <patch code>
   --target-prefix <prefix>` lists where a target is patched (file, line, form), and `debt diff
   --by-target` reports what a change paid down per target; a codemod PR pastes the latter.
 - Only a composition root reads the world. A file that takes `settings`, the environment, the
@@ -209,8 +209,8 @@ violations pass, anything new fails, and the debt may only shrink
   and the process-wide object that does (`SYSTEM_TIMERS`, `Clock`) are listed in
   `meizel.policy.toml` as readers, and using one is a read of its kind; an entry whose
   definition moved fails as `stale-reader`, so a PR that moves or renames one updates the entry
-  ([ambient reads](../meizel/docs/checker/ambient.md),
-  [readers](../meizel/docs/checker/ambient-readers.md)).
+  ([ambient reads](https://github.com/zhiyuan-zhang0206/meizel/blob/main/meizel/docs/checker/ambient.md),
+  [readers](https://github.com/zhiyuan-zhang0206/meizel/blob/main/meizel/docs/checker/ambient-readers.md)).
 - `meizel.policy.toml` lists every allowance a manifest cannot grant itself (`[external]` sites,
   `[dynamic-attrs]` sites, `[loads]` sites, default-argument injections) and every exemption of the lint rules in
   `meizel/` (ambient state, clock lattice, single owners, setenv in tests, per-agent settings,
@@ -219,7 +219,7 @@ violations pass, anything new fails, and the debt may only shrink
   file unless the task names the entry. An added entry is a line the reviewer reads in the diff;
   a removed one narrows what every gate still reports, so the PR body says why, one line per
   removal: `Policy-Removal: <table>[.<entry>] — <why it is no longer needed> — <what replaces it,
-  or the gap it leaves>` ([the policy file](../meizel/docs/checker/policy/policy.md)).
+  or the gap it leaves>` ([the policy file](https://github.com/zhiyuan-zhang0206/meizel/blob/main/meizel/docs/checker/policy/policy.md)).
 
 Before submitting, review your own diff with
 [review-contribution](../.agents/skills/review-contribution/SKILL.md). It routes

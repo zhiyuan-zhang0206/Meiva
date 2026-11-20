@@ -135,8 +135,7 @@ def _can_scope_meizel(change: ChangeSet) -> bool:
         return False
     return not any(
         name.endswith("meizel.toml")
-        or name == "meizel.policy.toml"
-        or name.startswith("meizel/")
+        or name in {"meizel.policy.toml", "uv.lock"}
         or not (change.root / name).is_file()
         for name in change.files
     )
@@ -145,7 +144,7 @@ def _can_scope_meizel(change: ChangeSet) -> bool:
 # meiva:note
 # The checker reads manifests, role lists and declarations for every change, not only a Python
 # one: a documentation-only pull request can still leave a stale export or a role list behind.
-# Incremental mode scopes facts to `--changed` when no manifest, policy or meizel source moved and
+# Incremental mode scopes facts to `--changed` when no manifest, policy or meizel pin (`uv.lock`) moved and
 # every changed path still exists on disk; otherwise it runs the whole-tree check.
 def _meizel_runs(change: ChangeSet, *, python: str) -> tuple[Run, ...]:
     if _can_scope_meizel(change):

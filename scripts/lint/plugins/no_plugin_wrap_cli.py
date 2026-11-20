@@ -13,6 +13,7 @@ _REPO_ROOT = Path(__file__).resolve().parents[3]
 sys.path.insert(0, str(_REPO_ROOT))
 
 from meizel.checkout import source_tree  # noqa: E402
+
 from scripts.lint.plugins import no_plugin_wrap  # noqa: E402
 
 if __name__ == "__main__":

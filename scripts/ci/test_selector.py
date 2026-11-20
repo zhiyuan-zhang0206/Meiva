@@ -18,14 +18,15 @@ _SCRIPT_REPOSITORY_ROOT = Path(__file__).resolve().parents[2]
 if str(_SCRIPT_REPOSITORY_ROOT) not in sys.path:
     sys.path.insert(0, str(_SCRIPT_REPOSITORY_ROOT))
 
-from base.deploy.git.repo_change import (  # noqa: E402
-    is_doc_path,
-)
-from base.host.boundary.options import options  # noqa: E402
 from meizel.checkout import lanes_at, roles_at  # noqa: E402
 from meizel.roles import all_packages, pytest_test_hosts  # noqa: E402
 from meizel.test_graph.cutoff import package_local_tests  # noqa: E402
 from meizel.test_graph.impact import TREE_SCAN_PINS as TREE_SCAN_TESTS  # noqa: E402
+
+from base.deploy.git.repo_change import (  # noqa: E402
+    is_doc_path,
+)
+from base.host.boundary.options import options  # noqa: E402
 from scripts.ci.shard_counts import (  # noqa: E402
     estimate_seconds,
     load_durations,
@@ -71,12 +72,14 @@ _GLOBAL_PREFIXES = (
 # meiva:link docs/conventions/engineering/test-selection.md
 _PROSE_SUFFIXES = (".md",)
 
-# The root meizel manifests are declarations: `[roles]` names the top-level packages the
+# meiva:note
+# The root meizel files are declarations: `[roles]` names the top-level packages the
 # selector classifies by, `[uses]`/`[debt.*]` and the policy feed the meizel checks (the
-# structure job runs them over the whole tree on every CI run). No runtime behavior reads
-# them, so a change selects the tests that read them (`_manifest_tests`) instead of the full
-# suite. Test hosts come from pyproject.toml, which stays global.
-_MANIFEST_FILES = frozenset({"meizel.toml", "meizel.policy.toml"})
+# structure job runs them over the whole tree on every CI run), and the timing baseline keys
+# the wall-clock judgements that predate the rule. No runtime behavior reads them, so a change
+# selects the tests that read them (`_manifest_tests`) instead of the full suite. Test hosts
+# come from pyproject.toml, which stays global.
+_MANIFEST_FILES = frozenset({"meizel.toml", "meizel.policy.toml", "meizel.timing_baseline.json"})
 # Repository-level configuration and tree-wide inputs: only the tree-scan tests
 # can observe them.
 _TREE_SCAN_ONLY_FILES = frozenset(
@@ -388,13 +391,13 @@ def _class_tests(path: str, path_class: PathClass, checkout: Checkout, impact: I
     return runtime
 
 
+# meiva:note
+# The tests that can observe a root meizel manifest: every test whose source names the file, and the
+# runtime and package tests of every source module that does. The readers are derived, not listed: a
+# string constant equal to the file name in any Python file under the code tops, outside docstrings
+# (a comment or docstring reads nothing).
 def _manifest_tests(manifest: str, checkout: Checkout, impact: Impact) -> set[str]:
-    """The tests that can observe a root meizel manifest: meizel's own tests, every test whose
-    source names the file, and the runtime and package tests of every source module that does.
-
-    The readers are derived, not listed: a string constant equal to the file name in any
-    Python file under the code tops, outside docstrings (a comment or docstring reads nothing)."""
-    selected = {test for test in checkout.collectable if test.startswith("meizel/")}
+    selected: set[str] = set()
     for file in python_files(checkout.repo_root):
         relative = file.relative_to(checkout.repo_root).as_posix()
         if not code_names(file, manifest, exact=True):

@@ -1,0 +1,24 @@
+name: "Make the pinned meizel importable to the runner's python3"
+description: >
+  The locality checker is a dependency pinned in pyproject.toml's dev group. Jobs that run the
+  repository's stdlib-only scripts with the runner's own python3, before or without the project
+  environment, install exactly that pinned requirement (pure Python, no dependencies) into a
+  directory of their own and put it on PYTHONPATH.
+runs:
+  using: composite
+  steps:
+    - name: Install the pinned meizel
+      shell: bash
+      run: |
+        requirement="$(python3 - <<'PY'
+        import tomllib
+
+        with open("pyproject.toml", "rb") as handle:
+            group = tomllib.load(handle)["dependency-groups"]["dev"]
+        [pin] = [item for item in group if isinstance(item, str) and item.startswith("meizel @ ")]
+        print(pin)
+        PY
+        )"
+        target="$RUNNER_TEMP/meizel-site"
+        python3 -m pip install --quiet --disable-pip-version-check --no-deps --target "$target" "$requirement"
+        echo "PYTHONPATH=$target${PYTHONPATH:+:$PYTHONPATH}" >> "$GITHUB_ENV"

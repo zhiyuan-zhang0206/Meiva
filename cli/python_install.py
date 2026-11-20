@@ -282,6 +282,8 @@ def _install_from_mirror(
     if verbose:
         common.append("--verbose")
     reinstall = ["--reinstall-package", reinstall_package] if reinstall_package else []
+    hashed, direct = split_direct_references(requirements.read_text(encoding="utf-8"))
+    requirements.write_text(hashed, encoding="utf-8")
     result = run(
         [*common, "--require-hashes", "--requirements", str(requirements), *reinstall],
         repo,
@@ -289,7 +291,27 @@ def _install_from_mirror(
     )
     if result:
         return result
+    for reference in direct:
+        result = run([*common, reference, *reinstall], repo, env)
+        if result:
+            return result
     return run([*common, "--editable", str(repo), *reinstall], repo, env)
+
+
+# meiva:note
+# A requirement the lock pins to a git commit (`name @ git+<url>@<sha>`) carries no artifact hash:
+# the full commit id already names its content, and `--require-hashes` refuses a requirement without
+# one. The export is split so the hashed pins stay hash-checked and each git pin is installed on its
+# own, by the commit the lock names; a git pin is one line with no continuation in uv's export.
+def split_direct_references(text: str) -> tuple[str, list[str]]:
+    hashed: list[str] = []
+    direct: list[str] = []
+    for line in text.splitlines(keepends=True):
+        if " @ git+" in line and not line.startswith((" ", "#")):
+            direct.append(line.strip())
+        else:
+            hashed.append(line)
+    return "".join(hashed), direct
 
 
 # meiva:note

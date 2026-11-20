@@ -7,12 +7,11 @@ import sys
 from pathlib import Path
 
 import pytest
-
 from meizel import lint_common
 from meizel.checkout import roles_at, source_tree
 from meizel.owners import clock_lattice_cli
 from meizel.roles import framework_dirs
-from meizel.tests.synthetic import STANDALONE_PROJECT
+
 from scripts.lint import async_no_sync_blocking, termination_source
 from scripts.lint.diagnostics import (
     hermetic_transactions,
@@ -24,13 +23,23 @@ from scripts.lint.diagnostics import (
 from scripts.lint.plugins import no_meiva_in_hooks_cli
 
 _REPO_ROOT = Path(__file__).resolve().parents[3]
+# meiva:note
+# The smallest standalone project the checker admits: hatchling wheel packages, a `cpu` extra,
+# strict basedpyright over its sources and tests, and pytest test paths.
+_STANDALONE_PROJECT = (
+    '[build-system]\nbuild-backend = "hatchling.build"\n'
+    '[tool.hatch.build.targets.wheel]\npackages = ["src/meiva_embedding_service"]\n'
+    "[project.optional-dependencies]\ncpu = []\n"
+    '[tool.basedpyright]\ntypeCheckingMode = "strict"\ninclude = ["src", "tests"]\n'
+    '[tool.pytest.ini_options]\ntestpaths = ["tests"]\n'
+)
 _FRAMEWORK_DIRS = framework_dirs(roles_at(_REPO_ROOT))
 
 
 @pytest.mark.parametrize(
     "scan_dirs",
     [
-        clock_lattice_cli.SCAN_DIRS,
+        clock_lattice_cli.scan_dirs_of(Path(__file__).resolve().parents[3]),
         no_meiva_in_hooks_cli.SCAN_DIRS,
         no_emoji.SCAN_DIRS,
         termination_source.SCAN_DIRS,
@@ -44,11 +53,11 @@ def test_framework_scoped_lints_cover_every_framework_dir(scan_dirs: tuple[str, 
     lint_common.scan_roots(source_tree(_REPO_ROOT), scan_dirs)
 
 
-@pytest.mark.parametrize("directory", (*_FRAMEWORK_DIRS, "scripts", "meizel"))
+@pytest.mark.parametrize("directory", (*_FRAMEWORK_DIRS, "scripts"))
 def test_time_bomb_default_scan_covers_every_framework_directory(
     tmp_path: Path, capsys: pytest.CaptureFixture[str], directory: str
 ) -> None:
-    for name in (*_FRAMEWORK_DIRS, "scripts", "meizel", "tests"):
+    for name in (*_FRAMEWORK_DIRS, "scripts", "tests"):
         (tmp_path / name).mkdir()
     target = tmp_path / directory / "tests" / "test_window.py"
     target.parent.mkdir()
@@ -61,11 +70,6 @@ def _checker_checkout(tmp_path: Path) -> Path:
     root = tmp_path / "checkout"
     root.mkdir()
     shutil.copytree(
-        _REPO_ROOT / "meizel",
-        root / "meizel",
-        ignore=shutil.ignore_patterns("__pycache__", "docs"),
-    )
-    shutil.copytree(
         _REPO_ROOT / "scripts/structure",
         root / "scripts/structure",
         ignore=shutil.ignore_patterns("__pycache__", "baseline"),
@@ -74,11 +78,11 @@ def _checker_checkout(tmp_path: Path) -> Path:
     for name in ("code_structure.py", "async_no_sync_blocking.py"):
         shutil.copyfile(_REPO_ROOT / "scripts/lint" / name, root / "scripts/lint" / name)
     files = {
-        "meizel.toml": '[roles]\nstandalone = ["engines"]\ntooling = ["meizel", "scripts"]\n',
+        "meizel.toml": '[roles]\nstandalone = ["engines"]\ntooling = ["scripts"]\n',
         "meizel.policy.toml": "",
         ".gitignore": ".venv/\nvendor/\n__pycache__/\n",
         "scripts/structure/baseline/README.md": "Empty fixture baseline.\n",
-        "engines/embed/pyproject.toml": STANDALONE_PROJECT.replace(
+        "engines/embed/pyproject.toml": _STANDALONE_PROJECT.replace(
             'include = ["src", "tests"]', 'include = ["src", "tests", "vendor"]'
         ),
         "engines/embed/uv.lock": "",

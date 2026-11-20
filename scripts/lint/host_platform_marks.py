@@ -27,11 +27,12 @@ from base.host.env.boot_actions import enter_scratch_home  # noqa: E402
 if __name__ == "__main__":
     enter_scratch_home()
 
-from base.host.boundary.untyped import object_of  # noqa: E402
 from meizel import lint_common  # noqa: E402
 from meizel.checkout import roles_at, source_tree  # noqa: E402
 from meizel.graph.universe import SourceTree  # noqa: E402
 from meizel.roles import select_packages  # noqa: E402
+
+from base.host.boundary.untyped import object_of  # noqa: E402
 
 ROLES = roles_at(_REPO_ROOT)
 

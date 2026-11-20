@@ -6,7 +6,7 @@ For top-level package ordering (`base < meiva < agent < gateway < cli`), see [im
 
 ## The three roles inside a component
 
-Every component separates **pure decisions**, **effect execution**, and **process wiring** into distinct modules so `meizel` can enforce their boundaries statically ([checker](../../../meizel/docs/checker/checker.md)):
+Every component separates **pure decisions**, **effect execution**, and **process wiring** into distinct modules so `meizel` can enforce their boundaries statically ([checker](https://github.com/zhiyuan-zhang0206/meizel/blob/main/meizel/docs/checker/checker.md)):
 
 | Role | `meizel.toml` declaration | What belongs here | What is forbidden here |
 |---|---|---|---|
@@ -23,7 +23,7 @@ When two packages need the same type, constant, or `Protocol`:
 - **Cross-layer contracts (`base`, `meiva`, `agent`, `gateway`, `cli`, `services`)** belong in `base/api_contracts/` (a `"strict-to-be"` directory in which most files, but not every one, are individually `"strict"`; check `[purity]` before relying on a file) or the lowest `base/<domain>/` package that both consumers may import under [import layering](../import-layering.md).
 - **Never import upward** or duplicate an enum/schema across layers.
 - **Keep type-owning modules `"strict"`.** If a shared `Protocol`, `StrEnum`, or dataclass currently sits in a file that also performs I/O (or whose package `__init__.py` eagerly imports storage/network modules), move the pure types into a `"strict"` module (`contracts.py`, `models.py`, `protocols.py`, or `base/api_contracts/`) and re-export them at the old path if existing callers still import from there.
-- **Avoid `Any` on collaborator boundaries.** Type `Protocol` parameters, return values, and class fields with concrete `"strict"` types or `object` when the consumer only forwards the value ([`any-collaborator`](../../../meizel/docs/checker/any-collaborator.md)). Note that `if TYPE_CHECKING:` is banned except for the reviewed entries in `[type-checking.files]` of `meizel.policy.toml`: import the real type from its lightweight `"strict"` owner.
+- **Avoid `Any` on collaborator boundaries.** Type `Protocol` parameters, return values, and class fields with concrete `"strict"` types or `object` when the consumer only forwards the value ([`any-collaborator`](https://github.com/zhiyuan-zhang0206/meizel/blob/main/meizel/docs/checker/any-collaborator.md)). Note that `if TYPE_CHECKING:` is banned except for the reviewed entries in `[type-checking.files]` of `meizel.policy.toml`: import the real type from its lightweight `"strict"` owner.
 
 ### 2. Pure decision logic vs. effect execution (`impure-call` and `impure-edge`)
 
@@ -36,7 +36,7 @@ When `meizel` reports an `impure-call` inside a module that should be `"strict"`
 
 ### 3. Ambient process reads (`ambient-read`)
 
-When code reads `settings`, `os.environ`, the command line (`sys.argv`), the clock (`time.time`, `datetime.now`), an interval clock (`time.monotonic`, `perf_counter`), paths (`resolve_meiva_home`, `Path.home`, `Path.cwd`), platform/process facts (`sys.platform`, `os.getpid`, `sys.executable`), randomness (`uuid.uuid4`, `secrets`), or process-global DB/Redis/endpoint handles ([`ambient-read`](../../../meizel/docs/checker/ambient.md)):
+When code reads `settings`, `os.environ`, the command line (`sys.argv`), the clock (`time.time`, `datetime.now`), an interval clock (`time.monotonic`, `perf_counter`), paths (`resolve_meiva_home`, `Path.home`, `Path.cwd`), platform/process facts (`sys.platform`, `os.getpid`, `sys.executable`), randomness (`uuid.uuid4`, `secrets`), or process-global DB/Redis/endpoint handles ([`ambient-read`](https://github.com/zhiyuan-zhang0206/meizel/blob/main/meizel/docs/checker/ambient.md)):
 
 - **Lift the read to the composition root** (`wiring.py`, `daemon.py`, `app.py`, `CommandRuntime.create()`) that already owns `[roots]` in `meizel.toml`.
 - **Pass a value or a frozen config dataclass down.** At a component boundary, pass a frozen `XxxConfig` containing only the fields that component reads; inside the component, pass plain values (`now: datetime`, `home: Path`, `timeout_s: float`).
@@ -61,13 +61,13 @@ When code reads `settings`, `os.environ`, the command line (`sys.argv`), the clo
   reverse that the second kind exists for. Making the coverage symmetric, or folding
   `monotonic` back into `clock`, silently licenses the wall clock at every site that only
   times a wait; that is the failure this pair prevents, so change it in
-  `meizel/contracts/ambient_read.py` (`_COVERED`) only with the red case in hand.
-- **Wrapping a read in a function does not move it.** A repository function that returns what the world decides (`meiva_home()`, `process_environment()` and the like) is listed under `[ambient-readers.<kind>]` in `meizel.policy.toml`, and a call to it is a read of that kind at the call site ([readers](../../../meizel/docs/checker/ambient-readers.md)).
+  [`meizel/contracts/ambient_read.py`](https://github.com/zhiyuan-zhang0206/meizel/blob/main/meizel/contracts/ambient_read.py) (`_COVERED`) only with the red case in hand.
+- **Wrapping a read in a function does not move it.** A repository function that returns what the world decides (`meiva_home()`, `process_environment()` and the like) is listed under `[ambient-readers.<kind>]` in `meizel.policy.toml`, and a call to it is a read of that kind at the call site ([readers](https://github.com/zhiyuan-zhang0206/meizel/blob/main/meizel/docs/checker/ambient-readers.md)).
 - **Never add an ambient fallback in the callee** (`env: Mapping[str, str] | None = None` that falls back to `os.environ`, or `now: datetime | None = None` that calls `datetime.now()`). Defaults on parameters are reserved for pure constants and tuning numbers.
 
 ### 4. Making code testable without monkeypatching (`first-party-patch`, `stdlib-patch`, `third-party-patch`)
 
-Tests never mutate module attributes, instance dictionaries, or environment variables ([patching](../../../meizel/docs/checker/patching/patching.md)). Follow the four-level hierarchy in [data in, decisions out](../python-conventions.md#data-in-decisions-out-the-forms-in-order):
+Tests never mutate module attributes, instance dictionaries, or environment variables ([patching](https://github.com/zhiyuan-zhang0206/meizel/blob/main/meizel/docs/checker/patching/patching.md)). Follow the four-level hierarchy in [data in, decisions out](../python-conventions.md#data-in-decisions-out-the-forms-in-order):
 
 1. **Pass a value** (config field, `tmp_path`, `now`, resolved binary path).
 2. **Call the pure decision function directly** and assert on the returned plan instead of spying on mock calls (`assert_called_once_with`).
@@ -90,7 +90,7 @@ Every directory's `meizel.toml` is a closed contract:
 - **`[roots]` is a closed set of true composition roots**:
   - Only process entrypoints, CLI runtime factories, and `wiring.py` modules belong in `[roots]`, with the minimal `kinds = [...]` they actually read.
   - **Never add a file to `[roots]` to silence an `[debt.ambient-read]` entry.** Repay `ambient-read` debt by lifting the read in code to an existing composition root and passing the resolved value or collaborator down.
-  - **A root that reads files declares `filesystem`; a root that owns the synchronous timer door declares `sleep`.** A read of a file or a call to `time.sleep` is an effect, so no scan records it as a read of the world and the purity rule charges it like any other call; the kind licenses it by name instead (`FILESYSTEM_READS` and `SLEEP_CALLS` in `meizel/graph/licensing.py`). Only those calls: a write, a rename, a descriptor call (`os.read`, `os.fstat`), an `open` whose mode decides and a listing given no path stay effects under `filesystem`, and `clock` alone does not license `time.sleep`.
+  - **A root that reads files declares `filesystem`; a root that owns the synchronous timer door declares `sleep`.** A read of a file or a call to `time.sleep` is an effect, so no scan records it as a read of the world and the purity rule charges it like any other call; the kind licenses it by name instead (`FILESYSTEM_READS` and `SLEEP_CALLS` in [`meizel/graph/licensing.py`](https://github.com/zhiyuan-zhang0206/meizel/blob/main/meizel/graph/licensing.py)). Only those calls: a write, a rename, a descriptor call (`os.read`, `os.fstat`), an `open` whose mode decides and a listing given no path stay effects under `filesystem`, and `clock` alone does not license `time.sleep`.
 
 ## Fast verification loop
 

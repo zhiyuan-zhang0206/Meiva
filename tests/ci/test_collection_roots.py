@@ -28,8 +28,8 @@ from pathlib import Path
 
 import pytest
 import yaml
-
 from meizel.roles import pytest_test_hosts
+
 from scripts.ci import test_selector
 
 _REPO_ROOT = Path(__file__).resolve().parents[2]

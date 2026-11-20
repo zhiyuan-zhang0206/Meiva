@@ -117,6 +117,9 @@ jobs:
         with:
           key: ${{ steps.durations.outputs.key }}
 
+      - name: Make meizel importable
+        uses: ./.github/actions/meizel
+
       - name: Classify changed paths
         id: decide
         env:
@@ -371,6 +374,9 @@ jobs:
     if: ${{ github.event_name != 'pull_request' || github.event.pull_request.draft == false }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Make meizel importable
+        uses: ./.github/actions/meizel
 
       - name: Scan for raw CJK (i18n locale files exempt)
         run: python3 scripts/content_lint/lint_no_cjk.py
@@ -802,7 +808,7 @@ jobs:
           files=()
           while IFS= read -r path; do
             case "$path" in
-              meizel.policy.toml|meizel/owners/*) full=true ;;
+              meizel.policy.toml|uv.lock) full=true ;;
               *.py) [[ -f "$path" ]] && files+=("$path") ;;
             esac
           done < "$STATIC_CHANGED_FILE"
@@ -1164,7 +1170,7 @@ jobs:
               continue
             fi
             case "$path" in
-              -*|.pre-commit-config.yaml|scripts/lint/*|scripts/structure/*|scripts/content_lint/*|meizel/owners/*)
+              -*|.pre-commit-config.yaml|scripts/lint/*|scripts/structure/*|scripts/content_lint/*|uv.lock)
                 widen=true
                 ;;
             esac
@@ -1211,7 +1217,7 @@ jobs:
               continue
             fi
             case "$path" in
-              meizel.toml|*/meizel.toml|meizel.policy.toml|meizel/*)
+              meizel.toml|*/meizel.toml|meizel.policy.toml|uv.lock)
                 full=true
                 ;;
               *.py|*.sh|*.toml|*.yaml|*.yml)
@@ -1221,7 +1227,7 @@ jobs:
           done < "$path_file"
 
           if [[ "$full" == true ]]; then
-            echo "Manifest, policy, meizel source, or file deletion detected; running full meizel check."
+            echo "Manifest, policy, meizel pin (uv.lock), or file deletion detected; running full meizel check."
             echo "MEIZEL_FULL_CHECK=true" >> "$GITHUB_ENV"
             env -u VIRTUAL_ENV uv run python -m meizel check
           elif [[ "${#changed[@]}" -gt 0 ]]; then
@@ -1255,9 +1261,15 @@ jobs:
           moves="$RUNNER_TEMP/pull-request-record.md"
           args=()
           if [ -f "$moves" ]; then args=(--symbol-moves-file "$moves"); fi
+          # A rule change waives growth: the policy, or a move of the checker's own pin. Any other
+          # `uv.lock` change (a dependency bump) leaves the checker as it was and waives nothing.
+          waive=('meizel.policy.toml')
+          if git diff "$LINT_STRUCTURE_BASELINE_BASE" HEAD -- uv.lock | grep -q '^[-+].*github\.com/zhiyuan-zhang0206/meizel'; then
+            waive+=('uv.lock')
+          fi
           env -u VIRTUAL_ENV uv run python -m meizel debt diff \
             --against "$LINT_STRUCTURE_BASELINE_BASE" --on-growth=fail \
-            --waive-if-changed ':(glob)meizel/**/*.py' 'meizel.policy.toml' ':(exclude,glob)meizel/**/tests/**' ':(exclude)meizel/state/**' ':(exclude)meizel/language/path_imports.py' ':(exclude)meizel/language/no_script_sibling_imports.py' ':(exclude)meizel/allowances.py' \
+            --waive-if-changed "${waive[@]}" \
             ${args[@]+"${args[@]}"} | tee "$RUNNER_TEMP/debt-diff.log"
           status=$?
           grep '^base import rewritten:' "$RUNNER_TEMP/debt-diff.log" >> "$GITHUB_STEP_SUMMARY" || true

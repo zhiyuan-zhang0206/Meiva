@@ -1,6 +1,6 @@
 # Changed-files mode (`--only FILE...`)
 
-The commit hooks run the per-file lints with `--only` followed by the changed files, so a commit pays for what it changed, not for the repository. The flag takes the rest of argv and is the same everywhere (`meizel/lint_common.py`: `split_only` / `changed_scope` / `restrict`, over the `SourceTree` the entry built):
+The commit hooks run the per-file lints with `--only` followed by the changed files, so a commit pays for what it changed, not for the repository. The flag takes the rest of argv and is the same everywhere ([`meizel/lint_common.py`](https://github.com/zhiyuan-zhang0206/meizel/blob/main/meizel/lint_common.py): `split_only` / `changed_scope` / `restrict`, over the `SourceTree` the entry built):
 
 - **Same verdict as a full scan.** The changed files are judged under the lint's own default scope and exemptions (the default scan restricted to them), so a file out of the lint's scope is skipped exactly as a full run skips it. Explicit path arguments keep their older meaning (judge exactly these paths).
 - **Unchanged files are not judged.** A missing path is an error, like an explicit target; an empty list means nothing changed and exits 0.

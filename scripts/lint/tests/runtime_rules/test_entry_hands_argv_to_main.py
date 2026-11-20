@@ -27,13 +27,6 @@ _ENTRIES = [
     ("meiva_builtins/skills/integrations/web-sources/rss/scripts/feed.py", None),
     ("meiva_builtins/skills/integrations/web-sources/scripts/webscrape.py", None),
     (
-        "meizel/__main__.py",
-        "meizel/entry.py",
-    ),
-    ("meizel/language/no_script_sibling_imports.py", None),
-    ("meizel/owners/clock_lattice_cli.py", None),
-    ("meizel/owners/timing_judgement_cli.py", None),
-    (
         "ops/private_files/__main__.py",
         "ops/private_files/__init__.py",
     ),

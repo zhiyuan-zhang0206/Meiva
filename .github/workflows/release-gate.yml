@@ -204,6 +204,10 @@ jobs:
         working-directory: ui/web
         run: pnpm install --frozen-lockfile
 
+      - name: Make meizel importable
+        if: matrix.lane == 'analysis'
+        uses: ./.github/actions/meizel
+
       - name: Check repository language, locks, and core-content manifests
         if: matrix.lane == 'analysis'
         run: |

@@ -28,7 +28,6 @@ import sys
 from pathlib import Path
 
 import pytest
-
 from meizel.checkout import roles_at
 from meizel.roles import select_packages
 

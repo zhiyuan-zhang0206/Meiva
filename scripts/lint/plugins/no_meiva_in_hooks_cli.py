@@ -16,6 +16,7 @@ sys.path.insert(0, str(_REPO_ROOT))
 # meiva:link scripts/docs/scripts.md
 from meizel.checkout import roles_at, source_tree  # noqa: E402
 from meizel.roles import select_packages  # noqa: E402
+
 from scripts.lint.plugins import no_meiva_in_hooks  # noqa: E402
 
 SCAN_DIRS = select_packages(

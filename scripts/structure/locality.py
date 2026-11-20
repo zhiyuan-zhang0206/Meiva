@@ -16,6 +16,7 @@ from typing import TypeGuard
 from meizel.language import path_imports
 from meizel.owners import decisions
 from meizel.state import ambient_state
+
 from scripts.structure import baseline_shards
 
 SECTIONS = ("owner_bypasses",)

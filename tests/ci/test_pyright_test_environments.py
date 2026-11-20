@@ -21,8 +21,8 @@ from pathlib import Path
 from typing import Any
 
 import pytest
-
 from meizel.roles import pytest_test_hosts
+
 from scripts.codegen import gen_pyright_test_environments as gen
 
 _REPO_ROOT = Path(__file__).resolve().parents[2]

@@ -161,7 +161,7 @@ repos:
         name: lint wall-clock judgements in tests (assert a counted fact)
         entry: .venv/bin/python -m meizel.owners.timing_judgement_cli --only
         language: system
-        files: ^(meizel/owners/timing_judgement_baseline\.json|meizel/owners/timing_judgement.*\.py|.*\.py)$
+        files: ^(meizel\.timing_baseline\.json|uv\.lock|.*\.py)$
 
       # PYTHONSAFEPATH=1 (2026-08-22 hardening) keeps a script's own directory
       # off sys.path, so a script-mode file importing a same-dir sibling without
@@ -225,7 +225,7 @@ repos:
           (?x)^(
             (tests|(
               # meizel:roles BEGIN regex-names application standalone tooling
-              agent|meiva|meiva_builtins|base|cli|gateway|ops|services|meizel|scripts
+              agent|meiva|meiva_builtins|base|cli|gateway|ops|services|scripts
               # meizel:roles END
             )(/.*)?/tests)/.*\.py
             |scripts/structure/(tests_location|tests_location_allowed|tests_location_suggest)\.py
