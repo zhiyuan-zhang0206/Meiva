@@ -59,7 +59,11 @@ mean different things.
 `TaskStartedMessage` and a terminal `TaskUpdatedMessage` keep the set of tasks the
 CLI says are running. `close()` asks the CLI to stop each one before it disconnects,
 which is also why the close path's residue check no longer reports a background
-command's children as leftovers. `interrupt()` stays what it was — it ends the
+command's children as leftovers. The CLI answers a stop on the stream the session's
+reader drains, so the stops race the reader: a reader that has already ended (the
+SDK's read failed, or the CLI closed its stdout) or ends first sends the close straight
+on to `disconnect()` instead of waiting out the SDK's control-request timeout while the
+CLI keeps running unreachable. `interrupt()` stays what it was — it ends the
 running turn, not a background task — and a task stopped that way reports `killed`
 through the update message, sometimes with no notification behind it. That case is
 cleared from the set but not delivered as a report: the report the agent would have
