@@ -120,9 +120,9 @@ above (or when its name is unregistered); otherwise it stays in the JSONL mirror
 | `shell_ttl_renewed` | shell TTL deadline renewed | observation | session_id, ttl_s, prev_expires_at, new_expires_at | — | events | — |
 | `screen_capture_notify_failed` | screenshot notify failed | anomaly | — | — | events | — |
 | `delta_message_suffix` | message history write-body transfer and retained suffix counts; excludes snapshot seed | noise | thread_id, checkpoint_ns, checkpoint_id, candidate_writes, fetched_rows, fetched_bytes, body_batches, retained_writes, reset_found | — | events | — |
-| `db_pool_acquire_timeout` | db pool acquire timeout | anomaly | — | — | events | — |
-| `db_pool_acquire_slow` | db pool acquire slow | anomaly | name, elapsed, slot_wait_ms, check_ms, check_attempts, pool_size, pool_available, requests_waiting, connections_errors | — | events | — |
-| `db_pool_restore_timeout` | db pool restore timeout | anomaly | name, budget_ms, elapsed_ms, ended_by | — | events | — |
+| `db_pool_acquire_timeout` | db pool acquire timeout; host-level, no agent_id: the pool is shared by every agent the process hosts and a borrow carries no agent, so it is attributed by machine | anomaly | — | — | events | — |
+| `db_pool_acquire_slow` | db pool acquire slow; host-level, no agent_id: the pool is shared by every agent the process hosts and a borrow carries no agent, so it is attributed by machine | anomaly | name, elapsed, slot_wait_ms, check_ms, check_attempts, pool_size, pool_available, requests_waiting, connections_errors | — | events | — |
+| `db_pool_restore_timeout` | db pool restore timeout; host-level, no agent_id: the restore runs on a pooled connection shared by every agent the process hosts, so it is attributed by machine | anomaly | name, budget_ms, elapsed_ms, ended_by | — | events | — |
 | `checkpoint_write_failed` | checkpoint write failed | anomaly | — | — | events | — |
 | `trace` | otel span export | noise | — | — | events | — |
 | `history_dump` | pre-compact history dumped to workspace | noise | — | — | events | — |
@@ -169,9 +169,9 @@ above (or when its name is unregistered); otherwise it stays in the JSONL mirror
 | `memory_search_rerank` | memory-search rerank skipped candidate notes it could not read; they are ranked out of this search | anomaly | — | — | events | — |
 | `host_stale_running_settled` | hosted boot settle restored rows a previous host instance left running without a task (crash / kill -9); carries n = rows settled | noise | — | — | events | — |
 | `host_dispatcher_subscribed` | hosted dispatcher subscribed to the inbound wake pattern | noise | — | — | events | — |
-| `host_dispatcher_reconnect` | hosted dispatcher's wake subscription dropped — reconnecting (wakes published while down are not replayed; the periodic pending scan finds them) | noise | — | — | events | — |
-| `host_dispatcher_reconnect_exhausted` | hosted dispatcher's wake subscription failed repeatedly without completing a read — exiting for supervisor recovery; carries the consecutive failure count and the last exception type | anomaly | — | — | events | — |
-| `host_dispatcher_scan_failed` | hosted dispatcher's durable pending scan failed; the wake subscription remains open and attributes carry the next scan backoff_s | anomaly | backoff_s | — | events | — |
+| `host_dispatcher_reconnect` | hosted dispatcher's wake subscription dropped — reconnecting (wakes published while down are not replayed; the periodic pending scan finds them); host-level, no agent_id: one subscription serves every hosted agent | noise | — | — | events | — |
+| `host_dispatcher_reconnect_exhausted` | hosted dispatcher's wake subscription failed repeatedly without completing a read — exiting for supervisor recovery; carries the consecutive failure count and the last exception type; host-level, no agent_id: one subscription serves every hosted agent | anomaly | — | — | events | — |
+| `host_dispatcher_scan_failed` | hosted dispatcher's durable pending scan failed; the wake subscription remains open and attributes carry the next scan backoff_s; host-level, no agent_id: the scan covers every hosted agent | anomaly | backoff_s | — | events | — |
 | `host_dispatcher_restart_required` | a hosted turn refused its bounded cancellation after a stall — the dispatcher is exiting for supervisor recovery | anomaly | — | — | events | — |
 | `host_dispatcher_bad_channel` | hosted dispatcher ignored a wake whose channel name carried no agent id | anomaly | — | — | events | — |
 | `host_config_rejected` | a hosted wake was consumed without a turn because the agent's stored model config cannot build (unknown model or missing provider key) — logged once per stored config state (fingerprint); the pending inbound is kept until the overlay is fixed | anomaly | — | — | events | — |
@@ -196,8 +196,8 @@ above (or when its name is unregistered); otherwise it stays in the JSONL mirror
 | `corpse_stamp_failed` | the corpse marker stamp failed after a hosted turn crash — the row keeps looking alive until a later stamp or a completed turn; the reaper cannot see this death | anomaly | — | — | events | — |
 | `corpse_reaper_terminated` | the corpse reaper terminated crash-marked idling rows past the grace window (termination_source='reaper') | anomaly | — | — | events | — |
 | `corpse_reaper_failed` | the beat's corpse reap pass failed — retried on the next beat; leases of healthy rows are unaffected (renewal runs first) | anomaly | — | — | events | — |
-| `host_database_beat_failed` | the agent host's database beat failed — the reaper leg timed out or the pool was unreachable; carries the consecutive failure count, the limit and whether this failure ends the host. One event per failure, and only from the beat: a log line that merely mentions the words is not this event | anomaly | machine, pool, failures, limit, will_exit, error | — | events | — |
-| `host_database_beat_recovered` | the agent host's database beat succeeded again after failing; carries how many consecutive failures it cleared, so the retry result is on the record and not only implied by the absence of further failures | noise | machine, pool, failures_cleared | — | events | — |
+| `host_database_beat_failed` | the agent host's database beat failed — the reaper leg timed out or the pool was unreachable; carries the consecutive failure count, the limit and whether this failure ends the host. One event per failure, and only from the beat: a log line that merely mentions the words is not this event; host-level, no agent_id: the beat belongs to the host process | anomaly | machine, pool, failures, limit, will_exit, error | — | events | — |
+| `host_database_beat_recovered` | the agent host's database beat succeeded again after failing; carries how many consecutive failures it cleared, so the retry result is on the record and not only implied by the absence of further failures; host-level, no agent_id: the beat belongs to the host process | noise | machine, pool, failures_cleared | — | events | — |
 | `corpse_reaper_publish_failed` | a reaped corpse's frontend snapshot publish failed — best-effort; the durable terminated flip already committed | noise | — | — | events | — |
 | `corpse_reaper_browser_release_failed` | a reaped corpse's browser-page release failed after its durable terminal transition; later lifecycle cleanup can retry it | anomaly | — | — | events | — |
 | `corpse_reaper_shell_cleanup_failed` | a reaped corpse's persistent-shell cleanup failed after its durable terminal transition; the TTL reaper retains and retries its rows | anomaly | — | — | events | — |
@@ -231,14 +231,14 @@ above (or when its name is unregistered); otherwise it stays in the JSONL mirror
 | `harness_close_unobserved` | an external harness session closed without ever observing its process tree; the close answers unknown, not settled | noise | harness, agent_id | — | events | — |
 | `harness_close_residue` | closing an external harness session left processes running after the settle window | anomaly | harness, agent_id, remaining, waited_ms | — | events | — |
 | `harness_close_failed` | closing an external harness session raised | anomaly | — | — | events | — |
-| `harness_close_failures` | external harness session closes raised while the agent host was running | anomaly | — | — | events | — |
+| `harness_close_failures` | external harness session closes raised while the agent host was running; host-level, no agent_id: one count over every hosted agent's closes | anomaly | — | — | events | — |
 | `harness_exit_record_failed` | a harness session closed cleanly but its child exit status could not be written; the agent row keeps what it had and NULL still means never observed | anomaly | — | — | events | — |
 | `harness_usage_log_failed` | an external harness turn finished but its usage could not be priced; the reply stands and the accounting row for that turn is missing | anomaly | — | — | events | — |
 | `harness_control_not_shown` | a control event of a harness whose timeline is its CLI record (an unconfirmed cancellation) has no place on that timeline and is logged instead | anomaly | — | — | events | — |
 | `harness_live_timeline_failed` | the live read of a harness's CLI record for the running turn failed; the next read tries again | anomaly | — | — | events | — |
 | `harness_record_not_found` | a harness is running but its CLI record file was not found, so nothing of the turn reaches the timeline yet | anomaly | — | — | events | — |
 | `harness_record_unreadable` | a harness session's record file is there but in a form the reader does not read, so the timeline is empty | anomaly | — | — | events | — |
-| `harness_record_row_unread` | a row of a harness CLI's record has a kind the reader does not know and is skipped; reported once for each kind | anomaly | — | — | events | — |
+| `harness_record_row_unread` | a row of a harness CLI's record has a kind the reader does not know and is skipped; reported once for each kind per process; host-level, no agent_id: the report is deduplicated across every agent the process reads records for | anomaly | — | — | events | — |
 | `harness_timing_ambiguous` | native reasoning timing has ambiguous record identities; those measurements remain unknown | anomaly | count | — | events | — |
 | `harness_timing_collection_failed` | native reasoning timing could not be collected; provider execution and the original record remain available | anomaly | — | — | events | — |
 | `harness_timing_record_unavailable` | the native timing record could not be located; provider execution is unchanged | anomaly | — | — | events | — |
@@ -326,7 +326,7 @@ above (or when its name is unregistered); otherwise it stays in the JSONL mirror
 | `checkpoint_table_sizes` | checkpoint table physical sizes and live row counts (hourly + after each blob vacuum run) | observation | blobs_bytes, checkpoints_bytes, writes_bytes, blobs_live, checkpoints_live, writes_live | — | events | — |
 | `audit_write_failed` | an audit event could not be recorded in audit_events (the record is missing; the Loki projection of the same event still went out) | anomaly | event_name, error_class, error | — | events | — |
 | `audit_machine_unknown` | audit rows written by a process that could not name its machine | anomaly | user_rows, agent_rows, window_rows, day_rows, window_seconds | — | events | — |
-| `telemetry_store_failed` | a batch of telemetry/log events did not land in telemetry_events (the JSONL mirror and Loki still hold them) | anomaly | rows, consecutive_failures, error_class, error | — | events | — |
+| `telemetry_store_failed` | a batch of telemetry/log events did not land in telemetry_events (the JSONL mirror and Loki still hold them); host-level, no agent_id: one batch mixes every agent's events | anomaly | rows, consecutive_failures, error_class, error | — | events | — |
 | `lgtm_dashboard` | a provisioned LGTM dashboard JSON could not be read or is not a JSON object; it is not provisioned this pass | anomaly | — | — | events | — |
 | `lgtm_dashboard_render_failed` | meiva-ops dashboard render failed during converge; the previous provisioning file was kept | anomaly | — | — | events | — |
 | `converge_file_preserved` | converge kept a locally modified destination instead of overwriting — the current content no longer matches the recorded render; repeats every converge until resolved | anomaly | path, key, surface | — | events | — |

@@ -332,7 +332,7 @@ def _memory_indexes(home: Path, workspace: Path, *, agent_id: int) -> tuple[_Mem
             f"{personal_index.body}{personal_index.maintenance_suffix}",
         )
     )
-    inherit_body = read_workspace_inherit(personal)
+    inherit_body = read_workspace_inherit(personal, agent_id=agent_id)
     if inherit_body is not None:
         indexes.append(
             _MemoryIndex(

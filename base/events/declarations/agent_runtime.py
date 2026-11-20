@@ -333,18 +333,23 @@ EVENTS: dict[str, EventSpec] = {
     ),
     # db resilience
     "db_pool_acquire_timeout": telemetry_event(
-        "db_pool_acquire_timeout", "db pool acquire timeout", tier="anomaly"
+        "db_pool_acquire_timeout",
+        "db pool acquire timeout; host-level, no agent_id: the pool is shared by every agent the "
+        "process hosts and a borrow carries no agent, so it is attributed by machine",
+        tier="anomaly",
     ),
     "db_pool_acquire_slow": telemetry_event(
         "db_pool_acquire_slow",
-        "db pool acquire slow",
+        "db pool acquire slow; host-level, no agent_id: the pool is shared by every agent the "
+        "process hosts and a borrow carries no agent, so it is attributed by machine",
         payload=DbPoolAcquireSlow,
         tier="anomaly",
         site="agent/db/__init__.py:LoggingConnectionPool.getconn",
     ),
     "db_pool_restore_timeout": telemetry_event(
         "db_pool_restore_timeout",
-        "db pool restore timeout",
+        "db pool restore timeout; host-level, no agent_id: the restore runs on a pooled "
+        "connection shared by every agent the process hosts, so it is attributed by machine",
         payload=DbPoolRestoreTimeout,
         tier="anomaly",
         site="base/db/pooled_session.py:restore_pooled_session",

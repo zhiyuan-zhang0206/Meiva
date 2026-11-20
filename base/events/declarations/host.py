@@ -64,20 +64,23 @@ EVENTS: dict[str, EventSpec] = {
     "host_dispatcher_reconnect": telemetry_event(
         "host_dispatcher_reconnect",
         "hosted dispatcher's wake subscription dropped — reconnecting (wakes published "
-        "while down are not replayed; the periodic pending scan finds them)",
+        "while down are not replayed; the periodic pending scan finds them); host-level, no "
+        "agent_id: one subscription serves every hosted agent",
         tier="noise",
     ),
     "host_dispatcher_reconnect_exhausted": telemetry_event(
         "host_dispatcher_reconnect_exhausted",
         "hosted dispatcher's wake subscription failed repeatedly without completing a "
         "read — exiting for supervisor recovery; carries the consecutive failure count "
-        "and the last exception type",
+        "and the last exception type; host-level, no agent_id: one subscription serves every "
+        "hosted agent",
         tier="anomaly",
     ),
     "host_dispatcher_scan_failed": telemetry_event(
         "host_dispatcher_scan_failed",
         "hosted dispatcher's durable pending scan failed; the wake subscription remains "
-        "open and attributes carry the next scan backoff_s",
+        "open and attributes carry the next scan backoff_s; host-level, no agent_id: the scan "
+        "covers every hosted agent",
         payload=HostDispatcherScanFailed,
         tier="anomaly",
     ),
@@ -263,7 +266,8 @@ EVENTS: dict[str, EventSpec] = {
         "the agent host's database beat failed — the reaper leg timed out or the pool "
         "was unreachable; carries the consecutive failure count, the limit and whether "
         "this failure ends the host. One event per failure, and only from the beat: a "
-        "log line that merely mentions the words is not this event",
+        "log line that merely mentions the words is not this event; host-level, no agent_id: "
+        "the beat belongs to the host process",
         payload=HostDatabaseBeatFailed,
         tier="anomaly",
     ),
@@ -271,7 +275,8 @@ EVENTS: dict[str, EventSpec] = {
         "host_database_beat_recovered",
         "the agent host's database beat succeeded again after failing; carries how many "
         "consecutive failures it cleared, so the retry result is on the record and not "
-        "only implied by the absence of further failures",
+        "only implied by the absence of further failures; host-level, no agent_id: the beat "
+        "belongs to the host process",
         payload=HostDatabaseBeatRecovered,
         tier="noise",
     ),

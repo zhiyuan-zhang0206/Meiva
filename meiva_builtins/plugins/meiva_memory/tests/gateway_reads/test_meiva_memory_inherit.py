@@ -15,6 +15,7 @@ from base.clock import Clock
 from base.cluster.machine import MachineIdentityReader
 from base.config.tests.configuration import defaults
 from base.host.env.agent_slices import AgentSlices
+from base.log.tests.log_records import LogRecords
 from base.packages.plugins.extensions import ExtensionRegistry
 from base.paths import meiva_home
 from base.paths.home import resolve_meiva_home
@@ -401,8 +402,11 @@ def test_content_is_deterministic(
     assert _note_text(first) == _note_text(second)
 
 
+# meiva:note
+# The shared agent host binds no agent to its logger, so the truncation warning names the agent whose
+# note was clipped itself: the ancestor's path says whose entry, the agent id says whose context.
 def test_the_size_caps_come_from_the_agents_slices(
-    wire: GatewayWire, machine_identity: MachineIdentityReader
+    wire: GatewayWire, machine_identity: MachineIdentityReader, loguru_records: LogRecords
 ) -> None:
     entry = _write_inherit(600371, "x" * 200)
     _chain(wire, 1, _row(600371, machine_identity.name()))
@@ -413,6 +417,20 @@ def test_the_size_caps_come_from_the_agents_slices(
 
     assert note is not None
     assert f"[truncated at 50 chars — full entry: {entry}]" in _note_text(note)
+    (warned,) = loguru_records.extras(level="WARNING", message="truncated to 50")
+    assert warned["agent_id"] == 1
+
+
+def test_an_external_sessions_own_inherit_md_warns_with_its_agent(
+    loguru_records: LogRecords,
+) -> None:
+    entry = _write_inherit(600372, "x" * 200)
+
+    body = inherit.read_workspace_inherit(entry.parent, agent_id=600372, max_block_chars=50)
+
+    assert body is not None and "[truncated at 50 chars" in body
+    (warned,) = loguru_records.extras(level="WARNING", message="truncated to 50")
+    assert warned["agent_id"] == 600372
 
 
 def test_the_fork_graft_builds_the_new_agents_own_chain(

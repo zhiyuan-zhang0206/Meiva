@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from datetime import UTC, datetime
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any, cast
 from unittest.mock import MagicMock
 from uuid import uuid4
@@ -21,6 +22,7 @@ from base.db import Database
 from base.db.code_version_gate import ProcessDbGate
 from base.events.live.bus import EventBus
 from base.lm.catalog import ModelCatalog
+from base.log.tests.log_records import LogRecords
 from base.packages.composer_commands import CommandCatalog
 from base.paths import meiva_home, run_dir
 from base.paths.tests.homes import unit_home as unit_home
@@ -65,6 +67,58 @@ class _PoolFactoryDb:
         return _RecordingPool(pool_name, self._closed)
 
 
+def _host(
+    clients: ClientSet,
+    model_catalog: ModelCatalog,
+    database_gate: ProcessDbGate,
+    machine_identity: ConfiguredMachineIdentity,
+) -> AgentHost:
+    return AgentHost(
+        runtime_owner=uuid4(),
+        handoff_stamping=handoff_timestamps(),
+        home=meiva_home(),
+        policy=configured_policy(),
+        pool=cast(Any, MagicMock()),
+        checkpointer=cast(Any, object()),
+        graph=cast(Any, object()),
+        machine=machine_identity,
+        catalog=model_catalog,
+        clients=clients,
+        bus=EventBus.from_settings(rng=seeded_rng(), timers=SYSTEM_TIMERS),
+        db=Database.from_settings(gate=database_gate),
+        commands=CommandCatalog.system(skills=list, home=meiva_home()),
+    )
+
+
+class _FailingBridge:
+    async def close(self, *, reason: str) -> None:
+        raise RuntimeError(f"close failed: {reason}")
+
+
+# meiva:note
+# The host runs many agents and binds none to its logger, so a session that fails to close at
+# shutdown is reported under the agent whose runtime held it.
+async def test_a_harness_session_that_fails_to_close_at_shutdown_names_its_agent(
+    model_catalog: ModelCatalog,
+    database_gate: ProcessDbGate,
+    machine_identity: ConfiguredMachineIdentity,
+    loguru_records: LogRecords,
+) -> None:
+    machine_identity.set(name="test-box")
+    pipe = EventPipeline(now=system_clock().now, writer=lambda _batch: None, batch_size=1)
+    host = _host(
+        ClientSet(pipeline_factory=lambda: pipe), model_catalog, database_gate, machine_identity
+    )
+    host._runtimes[600374] = cast(Any, SimpleNamespace(harness_bridge=_FailingBridge()))
+    try:
+        await host.aclose()
+    finally:
+        pipe.stop(timeout=1)
+
+    (failed,) = loguru_records.events("harness_close_failed")
+    assert failed["extra"]["agent_id"] == 600374
+
+
 @pytest.mark.parametrize("native_failure", [False, True])
 async def test_host_release_runs_and_first_original_failure_remains_primary(
     model_catalog: ModelCatalog,
@@ -81,21 +135,7 @@ async def test_host_release_runs_and_first_original_failure_remains_primary(
 
     pipe = EventPipeline(now=system_clock().now, writer=writer, batch_size=1)
     clients = ClientSet(pipeline_factory=lambda: pipe)
-    host = AgentHost(
-        runtime_owner=uuid4(),
-        handoff_stamping=handoff_timestamps(),
-        home=meiva_home(),
-        policy=configured_policy(),
-        pool=cast(Any, MagicMock()),
-        checkpointer=cast(Any, object()),
-        graph=cast(Any, object()),
-        machine=machine_identity,
-        catalog=model_catalog,
-        clients=clients,
-        bus=EventBus.from_settings(rng=seeded_rng(), timers=SYSTEM_TIMERS),
-        db=Database.from_settings(gate=database_gate),
-        commands=CommandCatalog.system(skills=list, home=meiva_home()),
-    )
+    host = _host(clients, model_catalog, database_gate, machine_identity)
     try:
         clients.event_pipeline().enqueue(event())
         with pytest.raises(TypeError) as writer_observed:
