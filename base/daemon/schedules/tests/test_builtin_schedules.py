@@ -31,7 +31,6 @@ class TestLoadManifest:
         assert {name: s.klass for name, s in by_name.items()} == {
             "c9-daily-report": "product",
             "debt-sweep-daily": "product",
-            "dev-ci-metrics": "product",
             "main-red-watch": "product",
             "adversarial-eval-weekly": "product",
             "self-evolution-weekly": "product",
@@ -50,7 +49,6 @@ class TestLoadManifest:
         assert {name for name, s in by_name.items() if s.default_enabled} == {
             "c9-daily-report",
             "debt-sweep-daily",
-            "dev-ci-metrics",
             "adversarial-eval-weekly",
             "self-evolution-weekly",
             "self-evolution-daily",

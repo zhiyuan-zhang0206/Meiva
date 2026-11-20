@@ -45,7 +45,7 @@ decides the same question the watch reports on: which reds `main` already has. `
 import `schedules` — `schedules` already imports `scripts`, so that edge closes a cycle — so a gate
 in `scripts/ci/` would need the vocabulary moved down, which that directory's 20-entry budget no
 longer has room for. The decision therefore lives where the vocabulary and the fact do, beside the
-watch job that reads the same runs (`ci_metrics.py`, `api_read.py`), and `ci.yml` calls it as the
+watch job that reads the same runs (`api_read.py`), and `ci.yml` calls it as the
 `e2e gate`: `python -m schedules.jobs.watch.inherited_reds`.
 
 The tests are `schedules/tests/watch/test_inherited_reds.py`, beside the watch's other tests.

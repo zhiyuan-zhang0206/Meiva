@@ -30,7 +30,6 @@ directory. The manifest is the single expression of the built-in policy
 |----------|---------|-------|---------|
 | `c9-daily-report` | cron `0 5 * * *` | product | **enabled** |
 | `debt-sweep-daily` | cron `30 6 * * *` | product | **enabled** |
-| `dev-ci-metrics` | cron `20 6 * * *` | product | **enabled** |
 | `main-red-watch` | cron `0,5,30,35 * * * *` | product | **enabled** |
 | `adversarial-eval-weekly` | cron `0 4 * * 3` | product | **enabled** |
 | `memory-arbiter` | cron `0 4,7 * * *` | product | **enabled** |
@@ -46,12 +45,8 @@ directory. The manifest is the single expression of the built-in policy
 | `qa-keepalive` | every 600 s | operator | disabled |
 | `agent-watch` | cron `*/10 * * * *` | operator | disabled |
 
-`dev-ci-metrics` only samples GitHub Actions into the Dev/CI run gauges and wakes the P0 lead when
-that sampling fails; it does not judge a workflow. A cluster may keep it stopped (the ubuntu row,
-Schedule 23, has been stopped since 2026-09-26): a stopped row loses the gauges, no alarm.
-
-`main-red-watch` answers the question the gauges do not — whether `main` is
-green — now that nothing verifies a merged tree. `ci.yml` runs on `pull_request`
+`main-red-watch` answers whether `main` is green, now that nothing verifies a
+merged tree. `ci.yml` runs on `pull_request`
 plus a nightly full run, so a merge starts no test; the six-hourly `release-gate`,
 the nightly verdict and that nightly full run are the only evidence, and on
 2026-11-01 two scheduled gate runs went red on `main` with nobody watching. The
