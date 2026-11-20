@@ -10,7 +10,6 @@ import threading
 import time
 from collections.abc import Generator
 from pathlib import Path
-from typing import Any, cast
 from uuid import UUID
 
 import pytest
@@ -23,6 +22,8 @@ from agent.execution.protocol import (
 )
 from base.agents.context.clients import ClientSet
 from base.clock.tests.fakes import system_clock
+from base.host.boundary.json_values import is_object_dict, is_object_list
+from base.host.boundary.untyped import object_of
 from base.native_process.tests.host_pipe import live_host_control
 from meiva.tests.fixtures.pin_agent import exec_context
 
@@ -51,7 +52,7 @@ class _ReceiverHandler(http.server.BaseHTTPRequestHandler):
 
 
 @pytest.fixture
-def otlp_receiver() -> Any:
+def otlp_receiver() -> Generator[http.server.ThreadingHTTPServer]:
     _POSTS.clear()
     server = http.server.ThreadingHTTPServer(("127.0.0.1", 0), _ReceiverHandler)
     thread = threading.Thread(target=server.serve_forever, daemon=True)
@@ -61,8 +62,8 @@ def otlp_receiver() -> Any:
     server.server_close()
 
 
-def _endpoint(server: Any) -> str:
-    return f"http://127.0.0.1:{server.server_address[1]}"
+def _endpoint(server: http.server.ThreadingHTTPServer) -> str:
+    return f"http://127.0.0.1:{server.server_port}"
 
 
 def _spawn(
@@ -109,52 +110,82 @@ def _spawn(
     return proc, result_path
 
 
-def _mirror_records(tmp_path: Path) -> list[dict[str, Any]]:
-    records: list[dict[str, Any]] = []
+def _mirror_records(tmp_path: Path) -> list[dict[str, object]]:
+    records: list[dict[str, object]] = []
     for path in sorted((tmp_path / "home" / "logs").glob("events-*.jsonl")):
         for line in path.read_text(encoding="utf-8").splitlines():
-            records.append(json.loads(line))
+            record = object_of(json.loads, line)
+            assert is_object_dict(record), record
+            records.append(record)
     return records
+
+
+def _attributes_of(record: dict[str, object]) -> dict[str, object]:
+    attributes = record.get("attributes")
+    if attributes is None:
+        return {}
+    assert is_object_dict(attributes), attributes
+    return attributes
 
 
 def _mirror_keys(tmp_path: Path) -> set[tuple[str, object, object]]:
     keys: set[tuple[str, object, object]] = set()
     for record in _mirror_records(tmp_path):
-        attributes = cast("dict[str, Any]", record.get("attributes") or {})
+        attributes = _attributes_of(record)
         keys.add((str(record.get("event_name")), attributes.get("envelope"), attributes.get("op")))
     return keys
 
 
-def _otlp_attributes(record: Any) -> dict[str, Any]:
-    attrs: dict[str, Any] = {}
-    for kv in record.attributes:
-        if kv.value.HasField("string_value"):
-            attrs[kv.key] = kv.value.string_value
-        elif kv.value.HasField("int_value"):
-            attrs[kv.key] = kv.value.int_value
+def _children(node: object, key: str) -> list[object]:
+    if not is_object_dict(node):
+        return []
+    items = node.get(key)
+    return items if is_object_list(items) else []
+
+
+def _otlp_attributes(record: object) -> dict[str, object]:
+    attrs: dict[str, object] = {}
+    for kv in _children(record, "attributes"):
+        assert is_object_dict(kv), kv
+        value = kv.get("value")
+        assert is_object_dict(value), value
+        key = kv.get("key")
+        assert isinstance(key, str), key
+        if "string_value" in value:
+            attrs[key] = value["string_value"]
+        elif "int_value" in value:
+            int_value = value["int_value"]
+            assert isinstance(int_value, (int, str)), int_value
+            attrs[key] = int(int_value)
     return attrs
 
 
-def _record_key(record: Any) -> tuple[str, object, object]:
+def _record_key(record: object) -> tuple[str, object, object]:
     attrs = _otlp_attributes(record)
-    payload: dict[str, Any] = {}
-    if record.body.string_value:
+    payload: dict[str, object] = {}
+    body = record.get("body") if is_object_dict(record) else None
+    body_text = body.get("string_value") if is_object_dict(body) else None
+    if body_text and isinstance(body_text, str):
         with contextlib.suppress(Exception):
-            payload = json.loads(record.body.string_value).get("attributes") or {}
+            decoded = object_of(json.loads, body_text)
+            if is_object_dict(decoded):
+                payload = _attributes_of(decoded)
     return (str(attrs.get("event_name")), payload.get("envelope"), payload.get("op"))
 
 
 def _batch_keys(raw: bytes) -> set[tuple[str, object, object]]:
+    from google.protobuf.json_format import MessageToDict
     from opentelemetry.proto.collector.logs.v1 import logs_service_pb2
 
     request = logs_service_pb2.ExportLogsServiceRequest()
     with contextlib.suppress(Exception):
         request.ParseFromString(raw)
+    document = object_of(MessageToDict, request, preserving_proto_field_name=True)
     return {
         _record_key(record)
-        for resource_logs in request.resource_logs
-        for scope_logs in resource_logs.scope_logs
-        for record in scope_logs.log_records
+        for resource_logs in _children(document, "resource_logs")
+        for scope_logs in _children(resource_logs, "scope_logs")
+        for record in _children(scope_logs, "log_records")
     }
 
 
@@ -178,7 +209,9 @@ def _poll_sent(expected: set[tuple[str, object, object]]) -> set[tuple[str, obje
         time.sleep(0.05)
 
 
-def test_done_child_delivers_result_write_record(tmp_path: Path, otlp_receiver: Any) -> None:
+def test_done_child_delivers_result_write_record(
+    tmp_path: Path, otlp_receiver: http.server.ThreadingHTTPServer
+) -> None:
     proc, result_path = _spawn(tmp_path, "print('delivery ran')", _endpoint(otlp_receiver))
     assert proc.returncode == 0, proc.stderr
     assert read_result(result_path).kind == "done"
@@ -198,7 +231,9 @@ def test_done_child_delivers_result_write_record(tmp_path: Path, otlp_receiver: 
     assert ("exec_envelope", "result", "write") in mirror_keys, f"mirror saw: {sorted(mirror_keys)}"
 
 
-def test_crashed_child_delivers_its_records(tmp_path: Path, otlp_receiver: Any) -> None:
+def test_crashed_child_delivers_its_records(
+    tmp_path: Path, otlp_receiver: http.server.ThreadingHTTPServer
+) -> None:
     proc, result_path = _spawn(
         tmp_path, "raise ValueError('delivery crash')", _endpoint(otlp_receiver)
     )
@@ -210,7 +245,7 @@ def test_crashed_child_delivers_its_records(tmp_path: Path, otlp_receiver: Any) 
 
 
 def test_boot_crash_child_delivers_the_crash_envelope_record(
-    tmp_path: Path, otlp_receiver: Any
+    tmp_path: Path, otlp_receiver: http.server.ThreadingHTTPServer
 ) -> None:
     proc, result_path = _spawn(
         tmp_path, "print('never runs')", _endpoint(otlp_receiver), corrupt_request=True

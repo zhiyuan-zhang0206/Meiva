@@ -1,4 +1,4 @@
-from typing import cast, get_args
+from typing import TypeGuard, cast, get_args
 
 import pytest
 
@@ -8,7 +8,12 @@ from agent.execution.delivery_plan import (
     plan_finalize,
     rewrites_result_after_delivery_failure,
 )
-from agent.execution.result_kind import ResultKind
+from agent.execution.result_kind import RESULT_KINDS, ResultKind
+from base.host.boundary.untyped import object_sequence
+
+
+def _is_result_kind(value: object) -> TypeGuard[ResultKind]:
+    return isinstance(value, str) and value in RESULT_KINDS
 
 
 @pytest.mark.parametrize(
@@ -29,7 +34,8 @@ def test_a_failed_delivery_rewrites_a_success_but_never_replaces_a_crash(
 
 
 def test_every_result_kind_has_a_delivery_decision() -> None:
-    for kind in get_args(ResultKind):
+    for kind in object_sequence(get_args(ResultKind)):
+        assert _is_result_kind(kind), kind
         delivers_telemetry(kind)
         rewrites_result_after_delivery_failure(kind)
 
