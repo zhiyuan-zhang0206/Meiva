@@ -31,8 +31,10 @@ resolves in the loaded rows, so the first painted frame is the destination:
 - A first visit waits for its rows and for the reveal decision. When the roster said the agent had
   no unread deliveries, the decision is the tail without waiting for the feed.
 - A saved row that is not loaded (a reload into older history, or rows replaced while away) is
-  looked up by id, then by its source `reading_locator`, then by its compact coordinate, and
-  searched for in at most 5 background older pages (250 items, 10 s). An unreachable row opens the
+  looked up by id and rank, then by its source `reading_locator`, then by its content (a compact
+  re-keys rows but keeps their text), then by its compact coordinate, and searched for in at most 5
+  background older pages (250 items, 10 s). An id is never matched across ranks: a compact's new
+  segment restarts message numbers, so the anchor takes its new rank before the rows change. An unreachable row opens the
   tail and drops its reload bookmark.
 
 Leaving saves the row on screen and its offset, including when leaving the tail (user ruling

@@ -14,16 +14,17 @@ function buffer(rows: { item: BackendTimelineItem; rank: number }[]): CompactTra
 
 describe("identify", () => {
   it("carries the loaded row's locator and coordinate", () => {
-    expect(identify({ itemId: "3.2", rank: 0 }, [row("3.2", { reading_locator: "loc-3" })], null)).toEqual({
+    expect(identify({ itemId: "3.2", rank: 0 }, [row("3.2", { reading_locator: "loc-3" })], null)).toMatchObject({
       row: { itemId: "3.2", rank: 0 },
       locator: "loc-3",
       coordinate: { rank: 0, msg: 3, block: 2 },
+      content: { kind: "agent_chat" },
     });
   });
 
   it("reads a buffered row's coordinate as the compact will place it", () => {
     const buffered = buffer([{ item: row("5.1"), rank: 1 }]);
-    expect(identify({ itemId: "5.1", rank: 1 }, [], buffered)).toEqual({
+    expect(identify({ itemId: "5.1", rank: 1 }, [], buffered)).toMatchObject({
       row: { itemId: "5.1", rank: 1 },
       coordinate: { rank: 1, msg: 4, block: 1 },
     });
@@ -31,10 +32,9 @@ describe("identify", () => {
 
   it("keeps only the row when it is not loaded at that rank, or its locator is empty", () => {
     expect(identify({ itemId: "3.0", rank: 1 }, [row("3.0", { reading_locator: "loc-3" })], null)).toEqual({ row: { itemId: "3.0", rank: 1 } });
-    expect(identify({ itemId: "3.0", rank: 0 }, [row("3.0", { reading_locator: "" })], null)).toEqual({
-      row: { itemId: "3.0", rank: 0 },
-      coordinate: { rank: 0, msg: 3, block: 0 },
-    });
+    const blank = identify({ itemId: "3.0", rank: 0 }, [row("3.0", { reading_locator: "" })], null);
+    expect(blank.locator).toBeUndefined();
+    expect(blank.coordinate).toEqual({ rank: 0, msg: 3, block: 0 });
   });
 });
 
@@ -53,11 +53,16 @@ describe("locate", () => {
     expect(locate(identity({ locator: "loc-3" }), rows, sameIdElsewhere)).toEqual({ itemId: "s2.cp.1.0", rank: 2 });
   });
 
-  it("then the same id at another rank, when only one row has it", () => {
-    const buffered = buffer([{ item: row("3.0"), rank: 1 }]);
-    expect(locate(identity({ locator: "loc-gone" }), [], buffered)).toEqual({ itemId: "3.0", rank: 1 });
-    const twice = buffer([{ item: row("3.0"), rank: 1 }, { item: row("3.0"), rank: 2 }]);
-    expect(locate(identity(), [], twice)).toBeNull();
+  it("never matches an id at another rank: a compact's new segment reuses message numbers", () => {
+    const reused = [row("3.0", { payload: "a different message" })];
+    expect(locate(identity({ row: { itemId: "3.0", rank: 1 }, content: { kind: "agent_chat", payload: "mine" } }), reused, null)).toBeNull();
+  });
+
+  it("then the row's content, nearest to its coordinate when the text repeats", () => {
+    const mine = { kind: "agent_chat", payload: "mine" };
+    const rows = [row("s1.cp.2.0", { payload: "mine" }), row("s1.cp.9.0", { payload: "mine" }), row("3.0", { payload: "other" })];
+    expect(locate(identity({ row: { itemId: "3.0", rank: 1 }, content: mine, coordinate: { rank: 1, msg: 3, block: 0 } }), rows, null))
+      .toEqual({ itemId: "s1.cp.2.0", rank: 1 });
   });
 
   it("then the compact coordinate", () => {
@@ -82,23 +87,22 @@ describe("locate", () => {
 });
 
 describe("shiftForCompact", () => {
-  it("moves a current-segment coordinate to where its canonical replacement will sit", () => {
-    const before: RowIdentity = { row: { itemId: "3.0", rank: 0 }, coordinate: { rank: 0, msg: 3, block: 0 } };
+  it("moves the row and its coordinate one rank older; its content finds the canonical replacement", () => {
+    const before: RowIdentity = {
+      row: { itemId: "3.0", rank: 0 },
+      coordinate: { rank: 0, msg: 3, block: 0 },
+      content: { kind: "agent_chat", payload: "mine" },
+    };
     const after = shiftForCompact(before, 1);
-    expect(after).toEqual({ row: before.row, coordinate: { rank: 1, msg: 2, block: 0 } });
+    expect(after.row).toEqual({ itemId: "3.0", rank: 1 });
+    expect(after.coordinate).toEqual({ rank: 1, msg: 3, block: 0 });
     // meiva:note
-    // The replacement row is found by that coordinate once the compact lands.
-    expect(locate(after, [row("s1.cp.2.0")], null)).toEqual({ itemId: "s1.cp.2.0", rank: 1 });
+    // A new rank-0 row reusing the id is not the reader's; the re-keyed one with the same text is.
+    const rows = [row("3.0", { payload: "new segment" }), row("s1.cp.3.0", { payload: "mine" })];
+    expect(locate(after, rows, null)).toEqual({ itemId: "s1.cp.3.0", rank: 1 });
   });
 
-  it("shifts only the rank of an older segment", () => {
-    const before: RowIdentity = { row: { itemId: "s1.cp.5.2", rank: 1 }, coordinate: { rank: 1, msg: 5, block: 2 } };
-    expect(shiftForCompact(before, 1).coordinate).toEqual({ rank: 2, msg: 5, block: 2 });
-  });
-
-  it("leaves an identity without a coordinate, or with no shift, unchanged", () => {
-    const bare: RowIdentity = { row: { itemId: "3.0", rank: 0 } };
-    expect(shiftForCompact(bare, 1)).toBe(bare);
+  it("leaves an identity unchanged when there is no shift", () => {
     const placed: RowIdentity = { row: { itemId: "3.0", rank: 0 }, coordinate: { rank: 0, msg: 3, block: 0 } };
     expect(shiftForCompact(placed, 0)).toBe(placed);
   });

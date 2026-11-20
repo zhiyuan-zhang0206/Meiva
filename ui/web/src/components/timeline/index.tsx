@@ -275,7 +275,7 @@ export const TimelineView = memo(function TimelineView({
       : items.find((candidate) => candidate.inbound_id === inboundId && isHumanMessage(candidate));
     if (!item) return;
     pendingPark.current = undefined;
-    placement.request({ kind: "row", row: { itemId: item.item_id, rank: rankOf(item, compactBuffer) }, offset: READING_TOP_PX });
+    placement.request({ kind: "row", row: { itemId: item.item_id, rank: rankOf(item, compactBuffer) }, offset: READING_TOP_PX }, { followsTail: true });
   }, [compactBuffer, controls, isFollowing, items, placement, sendRequest]);
 
   useLayoutEffect(() => {

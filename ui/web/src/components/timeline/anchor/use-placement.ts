@@ -58,7 +58,7 @@ export interface Placement {
   pin: RowRef | null;
   // meiva:note
   // Place the reader at a row once it is mounted (quote, send, the arrow).
-  request: (anchor: ViewAnchor, options?: { smooth?: boolean }) => void;
+  request: (anchor: ViewAnchor, options?: { smooth?: boolean; followsTail?: boolean }) => void;
   onAnchorChange: (anchor: ViewAnchor, cause: AnchorChangeCause) => void;
   onUnresolved: (row: RowRef) => void;
   onFree: () => void;
@@ -115,13 +115,16 @@ export function usePlacement({
   // remove it, and its locator and coordinate are what find it again.
   const identityRef = useRef<RowIdentity | null>(null);
   // meiva:note
-  // A compact re-keys the rows: record where the anchor row's canonical replacement will sit, before
-  // the store publishes the change.
+  // A compact re-ranks the rows before the store publishes the change: the anchor takes its new rank
+  // at once (the new segment restarts message numbers, so the old id at the old rank may name another
+  // row), and its identity is what finds the canonical row that later replaces it.
   // meiva:link ui/web/src/docs/frontend-components/timeline-view/timeline-view.md
   useLayoutEffect(() => subscribeBeforeCompactDisplayChange((change) => {
     const now = anchor.current();
     if (now?.kind !== "row") return;
-    identityRef.current = shiftForCompact(identify(now.row, change.items, change.buffer), change.rankShift);
+    const shifted = shiftForCompact(identify(now.row, change.items, change.buffer), change.rankShift);
+    identityRef.current = shifted;
+    anchor.rekey(shifted.row);
   }), [anchor]);
 
   const placeOf = useCallback((row: Extract<ViewAnchor, { kind: "row" }>, identity: RowIdentity): SavedPlace => ({
@@ -131,11 +134,21 @@ export function usePlacement({
     holdReserve: anchor.holdReserve(),
   }), [anchor]);
 
+  // meiva:note
+  // A send parked from the tail is the reader following their own message, not a place they chose:
+  // like the tail it keeps no reload bookmark, so a reload opens on the latest rows instead of
+  // searching history for the sent message. The reader's next scroll makes the place theirs.
+  // meiva:link ui/web/src/docs/frontend-state/scroll-memory.md
+  const sendParkRef = useRef<RowRef | null>(null);
+  const followingSendRef = useRef(false);
   const saveFrame = useRef(0);
   const onAnchorChange = useCallback((next: ViewAnchor, cause: AnchorChangeCause) => {
     const { items: rows, compactBuffer: buffer } = live.current.inputs;
     if (next.kind === "row") identityRef.current = identify(next.row, rows, buffer);
     if (cause === "reader") machine.readerMoved(current(), next.kind === "row" ? next.row : null);
+    const parked = sendParkRef.current;
+    followingSendRef.current = cause === "placement" && next.kind === "row" && parked !== null && sameRow(parked, next.row);
+    if (cause === "placement") sendParkRef.current = null;
     cancelAnimationFrame(saveFrame.current);
     saveFrame.current = requestAnimationFrame(() => {
       if (!machine.isPlaced()) return;
@@ -148,7 +161,7 @@ export function usePlacement({
       if (now?.kind !== "row" || !identityRef.current) return;
       const place = placeOf(now, identityRef.current);
       writeMemoryPlace(entryKey, threadKey, place);
-      writeSessionPlace(threadKey, config, place, anchor.viewport()?.scrollTop ?? 0);
+      writeSessionPlace(threadKey, config, followingSendRef.current ? null : place, anchor.viewport()?.scrollTop ?? 0);
     });
   }, [anchor, current, entryKey, machine, placeOf, threadKey]);
 
@@ -171,12 +184,13 @@ export function usePlacement({
       : identify(row.row, live.current.inputs.items, live.current.inputs.compactBuffer);
     const place = placeOf(row, identity);
     writeMemoryPlace(entryKey, threadKey, place);
-    if (now?.kind === "row") writeSessionPlace(threadKey, live.current.inputs.reloadRestore, place, vp?.scrollTop ?? 0);
+    if (now?.kind === "row" && !followingSendRef.current) writeSessionPlace(threadKey, live.current.inputs.reloadRestore, place, vp?.scrollTop ?? 0);
   }, [anchor, entryKey, machine, placeOf, threadKey]);
 
   const onFree = useCallback(() => machine.readerMoved(current(), null), [current, machine]);
 
-  const request = useCallback((target: ViewAnchor, options: { smooth?: boolean } = {}) => {
+  const request = useCallback((target: ViewAnchor, options: { smooth?: boolean; followsTail?: boolean } = {}) => {
+    sendParkRef.current = options.followsTail === true && target.kind === "row" ? target.row : null;
     machine.request(target, current(), options.smooth === true);
   }, [current, machine]);
 

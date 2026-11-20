@@ -489,11 +489,12 @@ function HomeContent({
   // meiva:link ui/web/src/docs/frontend-components/timeline-view/sticky-scroll.md
   const openedState = () => ({
     agentId: activeId,
+    rosterRow: activeAgent !== undefined,
     unread: activeAgent?.has_unread_user_messages,
     savedPlace: hasSavedTimelinePlace(`${bfcacheId}:agent:${activeId ?? "unselected"}`, activeId != null ? String(activeId) : undefined, reloadRestore),
   });
   const [openedUnread, setOpenedUnread] = useState(openedState);
-  if (openedUnread.agentId !== activeId || (openedUnread.unread === undefined && activeAgent !== undefined)) {
+  if (openedUnread.agentId !== activeId || (!openedUnread.rosterRow && activeAgent !== undefined)) {
     setOpenedUnread(openedState());
   }
   const seenReveal = useSeenPosition({

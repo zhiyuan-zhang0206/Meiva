@@ -6,13 +6,16 @@ import type { RowRef } from "./dom";
 
 // meiva:note
 // A saved row outlives its id: a compact re-keys rows and a reload reads them from another window.
-// The identity a row carries is its id and rank, then its source `reading_locator`, then its
-// canonical coordinate (rank, message, block) as a compact maps it.
+// The identity a row carries is its id and rank, then its source `reading_locator`, then its content
+// (kind and text, which a re-key keeps; ties go to the nearest canonical coordinate), then the
+// coordinate alone. An id is never matched across ranks: a compact restarts message numbers, so a
+// new row can reuse the id of the one the reader was on.
 // meiva:link ui/web/src/docs/frontend-components/timeline-view/sticky-scroll.md
 export interface RowIdentity {
   row: RowRef;
   locator?: string;
   coordinate?: CompactCoordinate;
+  content?: { kind: string; payload: string };
 }
 
 interface Candidate {
@@ -39,6 +42,7 @@ export function identify(row: RowRef, canonical: readonly BackendTimelineItem[],
     row,
     ...(typeof locator === "string" && locator.length > 0 ? { locator } : {}),
     ...(hit?.coordinate ? { coordinate: hit.coordinate } : {}),
+    ...(hit ? { content: { kind: hit.item.kind, payload: hit.item.payload } } : {}),
   };
 }
 
@@ -53,9 +57,15 @@ export function locate(identity: RowIdentity, canonical: readonly BackendTimelin
     const byLocator = rows.find((candidate) => candidate.item.reading_locator === identity.locator);
     if (byLocator) return as(byLocator);
   }
-  const sameId = rows.filter((candidate) => candidate.item.item_id === identity.row.itemId);
-  if (sameId.length === 1) return as(sameId[0]);
   const coordinate = identity.coordinate;
+  const distance = (candidate: Candidate) => coordinate && candidate.coordinate
+    ? Math.abs(candidate.coordinate.rank - coordinate.rank) * 1e6 + Math.abs(candidate.coordinate.msg - coordinate.msg) * 1e3 + Math.abs(candidate.coordinate.block - coordinate.block)
+    : 0;
+  const content = identity.content;
+  if (content && content.payload.length > 0) {
+    const same = rows.filter((candidate) => candidate.item.kind === content.kind && candidate.item.payload === content.payload);
+    if (same.length > 0) return as(same.reduce((best, candidate) => (distance(candidate) < distance(best) ? candidate : best)));
+  }
   if (coordinate) {
     const byCoordinate = rows.find((candidate) => candidate.coordinate !== null &&
       candidate.coordinate.rank === coordinate.rank && candidate.coordinate.msg === coordinate.msg && candidate.coordinate.block === coordinate.block);
@@ -69,15 +79,12 @@ export function locate(identity: RowIdentity, canonical: readonly BackendTimelin
 // canonical rows that replace them will be found.
 // meiva:link ui/web/src/docs/frontend-components/timeline-view/timeline-view.md
 export function shiftForCompact(identity: RowIdentity, rankShift: number): RowIdentity {
+  if (rankShift <= 0) return identity;
   const coordinate = identity.coordinate;
-  if (!coordinate || rankShift <= 0) return identity;
   return {
     ...identity,
-    coordinate: {
-      rank: coordinate.rank + rankShift,
-      msg: coordinate.rank === 0 ? coordinate.msg - 1 : coordinate.msg,
-      block: coordinate.block,
-    },
+    row: { ...identity.row, rank: identity.row.rank + rankShift },
+    ...(coordinate ? { coordinate: { rank: coordinate.rank + rankShift, msg: coordinate.msg, block: coordinate.block } } : {}),
   };
 }
 

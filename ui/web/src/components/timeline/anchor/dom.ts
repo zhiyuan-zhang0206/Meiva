@@ -39,8 +39,8 @@ export interface ResolvedRow {
 }
 
 // meiva:note
-// Resolve a row in the mounted DOM: the exact row, else the collapsed turn holding it, else the same
-// item at another rank (a compact re-ranks buffered rows without changing their ids).
+// Resolve a row in the mounted DOM: the exact row, else the collapsed turn holding it. A compact's
+// re-rank is applied to the anchor before the rows change, so an id is never matched across ranks.
 // meiva:link ui/web/src/docs/frontend-components/timeline-view/sticky-scroll.md
 export function findRowNode(viewport: HTMLElement, row: RowRef): ResolvedRow | null {
   const id = esc(row.itemId);
@@ -58,9 +58,7 @@ export function findRowNode(viewport: HTMLElement, row: RowRef): ResolvedRow | n
   const holder = viewport.querySelector<HTMLElement>(
     `[data-turn-expanded="false"][data-turn-member-ranks~="${esc(`${row.rank}:${row.itemId}`)}"]`,
   );
-  if (holder) return { node: holder, collapsed: true };
-  const moved = viewport.querySelectorAll<HTMLElement>(`.timeline-item[data-item-id="${id}"]`);
-  return moved.length === 1 ? { node: moved[0], collapsed: false } : null;
+  return holder ? { node: holder, collapsed: true } : null;
 }
 
 export function offsetOf(viewport: HTMLElement, node: HTMLElement): number {

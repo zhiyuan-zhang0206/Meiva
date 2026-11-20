@@ -77,6 +77,9 @@ export interface ViewportAnchor {
   // meiva:note
   // The reader follows the tail or stands inside its bottom zone (a short conversation always does).
   atTail: () => boolean;
+  // meiva:note
+  // Rename the anchor row in place (a compact re-ranks it) without moving the viewport.
+  rekey: (row: RowRef) => void;
 }
 
 export function useViewportAnchor({
@@ -430,6 +433,10 @@ export function useViewportAnchor({
   const sendReserveArmed = useCallback(() => sendArmedRef.current, []);
   const holdReserve = useCallback(() => holdRef.current, []);
   const riding = useCallback(() => rideRef.current !== null, []);
+  const rekey = useCallback((row: RowRef) => {
+    const current = anchorRef.current;
+    if (current?.kind === "row") anchorRef.current = { kind: "row", row, offset: current.offset };
+  }, []);
   const atTail = useCallback(() => {
     if (anchorRef.current?.kind === "tail") return true;
     const vp = viewport();
@@ -438,7 +445,7 @@ export function useViewportAnchor({
     return distance >= -0.5 && distance <= bottomZone(vp.clientHeight, latest.current.thresholds);
   }, [naturalEnd, viewport]);
   const controls = useMemo<ViewportAnchor>(() => ({
-    viewport, current, place, apply, armSendReserve, sendReserveArmed, holdReserve, releaseTail, placeScrollTop, reserveHeight, riding, atTail,
-  }), [apply, armSendReserve, atTail, current, holdReserve, place, placeScrollTop, releaseTail, reserveHeight, riding, sendReserveArmed, viewport]);
+    viewport, current, place, apply, armSendReserve, sendReserveArmed, holdReserve, releaseTail, placeScrollTop, reserveHeight, riding, atTail, rekey,
+  }), [apply, armSendReserve, atTail, current, holdReserve, place, placeScrollTop, rekey, releaseTail, reserveHeight, riding, sendReserveArmed, viewport]);
   return { controls, atEnd };
 }

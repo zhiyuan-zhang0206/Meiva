@@ -27,7 +27,8 @@ timeline also persists a bounded per-tab bookmark map in `Browser.session`
 (`meiva.timeline.reading-bookmarks.v1`, capped at 64 agents with a 7-day TTL)
 holding the same fields plus `scrollTop` and `savedAt`. Same-page switches prefer
 the in-memory place; a full page reload opens on the session bookmark. Following
-the tail clears it. Turning the feature off bypasses all `Browser.session` reads
+the tail clears it, and so does a send parked from the tail (the reader is
+following their own message, so a reload opens on the latest rows). Turning the feature off bypasses all `Browser.session` reads
 and writes. Terminal panes keep the shared `scroll-memory.ts` record, whose
 `followBottom` flag serves their tail following.
 
