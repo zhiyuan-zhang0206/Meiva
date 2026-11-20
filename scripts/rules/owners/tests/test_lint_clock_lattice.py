@@ -17,7 +17,7 @@ import textwrap
 from pathlib import Path
 
 import pytest
-from meizel.roles import parse_roles, select_packages
+from meizel.api import parse_roles, select_packages
 
 from scripts.rules.owners import clock_lattice
 from scripts.rules.owners import clock_lattice_cli as _lint

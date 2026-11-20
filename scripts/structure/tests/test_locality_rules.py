@@ -4,7 +4,7 @@ import ast
 import pathlib
 
 import pytest
-from meizel import allowances
+from meizel.api import allowances
 
 from scripts.rules.owners import decisions
 from scripts.structure import locality

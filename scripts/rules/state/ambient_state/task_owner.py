@@ -12,7 +12,7 @@ from collections.abc import Iterator
 from itertools import pairwise
 from typing import TypeGuard
 
-from meizel.source_text import is_object_list
+from meizel.api import is_object_list
 
 from scripts.rules.state.ambient_state.module import Module, dotted
 from scripts.rules.state.ambient_state.owner_method import (

@@ -52,7 +52,7 @@ from scripts.structure import imports
 
 __all__ = ["main"]
 
-from meizel.checkout import roles_at
+from meizel.api import roles_at
 
 _REPO_ROOT = Path(__file__).resolve().parents[2]
 

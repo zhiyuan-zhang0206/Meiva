@@ -14,7 +14,7 @@ import ast
 from collections.abc import Iterator
 from itertools import pairwise
 
-from meizel.source_text import object_of
+from meizel.api import object_of
 
 MARKER = "# timing-guard:"
 # meiva:note

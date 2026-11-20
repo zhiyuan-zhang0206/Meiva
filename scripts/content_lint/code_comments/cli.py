@@ -6,8 +6,7 @@ from collections.abc import Sequence
 from dataclasses import asdict, dataclass
 from pathlib import Path
 
-from meizel.checkout import load_universe, toplevel
-from meizel.graph.model import MeizelError
+from meizel.api import MeizelError, load_universe, toplevel
 
 from base.host.boundary.options import attribute, options
 from scripts.content_lint.code_comments import corpus as corpus_module

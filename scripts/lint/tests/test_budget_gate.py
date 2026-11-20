@@ -14,7 +14,7 @@ from typing import Any, cast
 
 import pytest
 import yaml
-from meizel.budgets import budget_plans
+from meizel.api import tracked_children
 
 from base.host.proc import run_bounded
 from scripts.lint import code_structure as lcs
@@ -53,7 +53,7 @@ def _module(path: pathlib.Path) -> None:
 
 def test_a_meizel_manifest_is_not_a_directory_entry() -> None:
     listing = "".join(f"pkg/m{i}.py\0" for i in range(3)) + "pkg/meizel.toml\0meizel.toml\0"
-    children = budget_plans.tracked_children(listing)
+    children = tracked_children(listing)
     assert children["pkg"] == {"m0.py", "m1.py", "m2.py"}
     assert children[""] == {"pkg"}
 

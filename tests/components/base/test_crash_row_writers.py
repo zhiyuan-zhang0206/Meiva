@@ -3,8 +3,7 @@ from __future__ import annotations
 import re
 from pathlib import Path
 
-from meizel.checkout import roles_at
-from meizel.roles import select_packages
+from meizel.api import roles_at, select_packages
 
 _REPO = Path(__file__).resolve().parents[3]
 

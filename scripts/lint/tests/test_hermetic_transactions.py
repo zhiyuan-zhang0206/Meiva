@@ -7,8 +7,7 @@ import textwrap
 from pathlib import Path
 
 import pytest
-from meizel.checkout import roles_at
-from meizel.roles import framework_dirs
+from meizel.api import framework_dirs, roles_at
 
 from scripts.lint.diagnostics import hermetic_transactions as _lint
 

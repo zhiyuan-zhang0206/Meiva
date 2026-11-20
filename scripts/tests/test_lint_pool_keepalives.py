@@ -3,8 +3,7 @@ from __future__ import annotations
 from pathlib import Path
 
 import pytest
-from meizel import allowances
-from meizel.entry import open_repository
+from meizel.api import allowances, open_repository
 
 from scripts.lint import pool_keepalives as _lint
 from scripts.rules.owners import decisions

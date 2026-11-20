@@ -10,8 +10,7 @@ from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 
-from meizel.checkout import python_reverse_closure_at
-from meizel.graph.model import MeizelError
+from meizel.api import MeizelError, python_reverse_closure_at
 
 from scripts.hooks.diff_checks_pytest import spell_seconds
 

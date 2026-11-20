@@ -49,8 +49,10 @@ from base.host.env.boot_actions import enter_scratch_home  # noqa: E402
 if __name__ == "__main__":
     enter_scratch_home()
 
-from meizel import lint_common  # noqa: E402
-from meizel.checkout import source_tree  # noqa: E402
+from meizel.api import (  # noqa: E402
+    lint_common,
+    source_tree,
+)
 
 from scripts.structure import tests_location_allowed  # noqa: E402
 

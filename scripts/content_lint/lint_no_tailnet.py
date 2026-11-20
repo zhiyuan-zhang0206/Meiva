@@ -57,9 +57,12 @@ sys.path.insert(0, str(_REPO_ROOT))
 # What this script reads, once at its own process entry: the checkout's filesystem as a tree, the
 # tracked names it scans, and the shared scan vocabulary that decides which of them to read.
 # meiva:link scripts/docs/scripts.md
-from meizel import lint_common  # noqa: E402 - standalone script
-from meizel.checkout import source_tree, tracked_files  # noqa: E402
-from meizel.graph.universe import SourceTree  # noqa: E402
+from meizel.api import (  # noqa: E402
+    SourceTree,
+    lint_common,
+    source_tree,
+    tracked_files,
+)
 
 # A concrete host address inside 100.64.0.0/10. The negative lookahead keeps
 # the CIDR range notation ("100.64.0.0/10") out of scope — it names the

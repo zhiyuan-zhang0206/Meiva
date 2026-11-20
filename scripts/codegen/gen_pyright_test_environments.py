@@ -74,7 +74,7 @@ from base.host.env.boot_actions import enter_scratch_home  # noqa: E402
 if __name__ == "__main__":
     enter_scratch_home()
 
-from meizel.roles import pytest_test_hosts  # noqa: E402
+from meizel.api import pytest_test_hosts  # noqa: E402
 
 from base.host.boundary.fields import str_field  # noqa: E402
 from base.host.boundary.json_values import is_object_dict, is_object_list  # noqa: E402

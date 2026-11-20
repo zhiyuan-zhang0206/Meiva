@@ -61,9 +61,14 @@ _REPO_ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(_REPO_ROOT))
 
 # meiva:link scripts/docs/scripts.md
-from meizel import allowances, lint_common  # noqa: E402
-from meizel.checkout import GitRepo, roles_at, source_tree  # noqa: E402
-from meizel.roles import select_packages  # noqa: E402
+from meizel.api import (  # noqa: E402
+    GitRepo,
+    allowances,
+    lint_common,
+    roles_at,
+    select_packages,
+    source_tree,
+)
 
 from scripts.rules.owners import decisions  # noqa: E402
 

@@ -50,9 +50,12 @@ _ROOT = Path(__file__).resolve().parent.parent.parent
 sys.path.insert(0, str(_ROOT))
 
 # meiva:link scripts/docs/scripts.md
-from meizel import lint_common  # noqa: E402
-from meizel.checkout import roles_at, source_tree  # noqa: E402
-from meizel.roles import select_packages  # noqa: E402
+from meizel.api import (  # noqa: E402
+    lint_common,
+    roles_at,
+    select_packages,
+    source_tree,
+)
 
 ROLES = roles_at(_ROOT)
 

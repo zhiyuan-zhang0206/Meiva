@@ -4,7 +4,7 @@ import textwrap
 from pathlib import Path
 
 import pytest
-from meizel.roles import framework_dirs, parse_roles
+from meizel.api import framework_dirs, parse_roles
 
 from scripts.rules.state import no_os_environ as gate
 

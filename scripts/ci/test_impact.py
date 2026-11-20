@@ -17,13 +17,17 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TypeGuard
 
-from meizel.allowances import POLICY, Policy, parse
-from meizel.checkout import GitRepo
-from meizel.contracts.sync import prepare_policy_snapshot
-from meizel.test_graph.cutoff import (
+from meizel.api import (
+    POLICY,
+    GitRepo,
+    Policy,
+    allowances,
+    prepare_policy_snapshot,
+    propagate_test_consumers,
+)
+from meizel.api import (
     package_local_tests as package_local_tests,
 )
-from meizel.test_graph.impact import propagate_test_consumers
 
 from base.host.boundary.untyped import object_of
 from scripts.structure.imports.facts import UNANCHORED_READ, Fact, FactKind, Unknown, collect
@@ -211,7 +215,7 @@ def _policy(root: Path) -> Policy:
     path = root / POLICY
     if not path.is_file():
         return Policy()
-    policy, problems = parse(path.read_text(encoding="utf-8"))
+    policy, problems = allowances.parse(path.read_text(encoding="utf-8"))
     if problems:
         raise ValueError(f"{POLICY} is invalid: {problems[0]}")
     return policy

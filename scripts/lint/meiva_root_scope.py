@@ -68,7 +68,7 @@ from pathlib import Path
 _REPO_ROOT = Path(__file__).resolve().parent.parent.parent
 sys.path.insert(0, str(_REPO_ROOT))
 
-from meizel import lint_common  # noqa: E402 - standalone script
+from meizel.api import lint_common  # noqa: E402 - standalone script
 
 # The default scan root: the root supervisor's own code.
 _DEFAULT_TARGET = "services/supervision/meiva_root"

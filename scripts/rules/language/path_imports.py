@@ -3,7 +3,7 @@ from __future__ import annotations
 import ast
 from dataclasses import dataclass
 
-from meizel import allowances, lint_common
+from meizel.api import allowances, lint_common
 
 __all__ = ["SECTION", "Scopes", "Sites", "measure", "site_message"]
 

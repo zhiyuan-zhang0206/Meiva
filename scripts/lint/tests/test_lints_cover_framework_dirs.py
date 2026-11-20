@@ -7,9 +7,7 @@ import sys
 from pathlib import Path
 
 import pytest
-from meizel import lint_common
-from meizel.checkout import roles_at, source_tree
-from meizel.roles import framework_dirs
+from meizel.api import framework_dirs, lint_common, roles_at, source_tree
 
 from scripts.lint import async_no_sync_blocking, termination_source
 from scripts.lint.diagnostics import (

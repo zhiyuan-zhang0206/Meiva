@@ -14,8 +14,11 @@ _REPO_ROOT = Path(__file__).resolve().parents[3]
 sys.path.insert(0, str(_REPO_ROOT))
 
 # meiva:link scripts/docs/scripts.md
-from meizel.checkout import roles_at, source_tree  # noqa: E402
-from meizel.roles import select_packages  # noqa: E402
+from meizel.api import (  # noqa: E402
+    roles_at,
+    select_packages,
+    source_tree,
+)
 
 from scripts.lint.plugins import no_meiva_in_hooks  # noqa: E402
 

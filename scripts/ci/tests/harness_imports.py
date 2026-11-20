@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from meizel.checkout import lanes_at
+from meizel.api import lanes_at
 
 from base import cluster, config, telemetry
 from base.clock import SYSTEM_TIMERS

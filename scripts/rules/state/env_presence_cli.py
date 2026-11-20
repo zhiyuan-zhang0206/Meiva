@@ -11,9 +11,7 @@ import ast
 import sys
 from pathlib import Path
 
-from meizel import allowances, lint_common
-from meizel.checkout import GitRepo, source_tree
-from meizel.graph.universe import SourceTree
+from meizel.api import GitRepo, SourceTree, allowances, lint_common, source_tree
 
 from scripts.rules.state import env_presence
 

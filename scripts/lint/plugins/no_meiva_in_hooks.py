@@ -15,8 +15,10 @@ _REPO_ROOT = Path(__file__).parent.parent.parent.parent
 sys.path.insert(0, str(_REPO_ROOT))
 
 # meiva:link scripts/docs/scripts.md
-from meizel import lint_common  # noqa: E402
-from meizel.graph.universe import SourceTree  # noqa: E402
+from meizel.api import (  # noqa: E402
+    SourceTree,
+    lint_common,
+)
 
 _HOOKS_DIR = "agent/hooks/"
 _FACE_NAME = "agent_runtime.py"

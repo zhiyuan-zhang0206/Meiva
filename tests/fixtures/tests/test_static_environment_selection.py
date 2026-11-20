@@ -9,7 +9,7 @@ from pathlib import Path
 
 import pytest
 import yaml
-from meizel.checkout import lanes_at
+from meizel.api import lanes_at
 
 
 @pytest.fixture

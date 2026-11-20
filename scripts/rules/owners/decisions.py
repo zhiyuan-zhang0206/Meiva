@@ -10,7 +10,7 @@ import ast
 from collections.abc import Callable, Collection, Mapping
 from dataclasses import dataclass, field
 
-from meizel import allowances
+from meizel.api import allowances
 
 __all__ = [
     "Decision",

@@ -28,8 +28,7 @@ import sys
 from pathlib import Path
 
 import pytest
-from meizel.checkout import roles_at
-from meizel.roles import select_packages
+from meizel.api import roles_at, select_packages
 
 _REPO = Path(__file__).resolve().parents[2]
 

@@ -4,7 +4,7 @@ import ast
 from collections.abc import Collection
 from dataclasses import dataclass
 
-from meizel import allowances, lint_common
+from meizel.api import allowances, lint_common
 
 from scripts.rules.state.ambient_state import bundle, scan
 from scripts.rules.state.ambient_state.allowlist import AmbientAllowlist

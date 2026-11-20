@@ -28,7 +28,7 @@ from pathlib import Path
 
 import pytest
 import yaml
-from meizel.roles import pytest_test_hosts
+from meizel.api import pytest_test_hosts
 
 from scripts.ci import test_selector
 

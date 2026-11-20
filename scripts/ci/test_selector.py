@@ -18,10 +18,15 @@ _SCRIPT_REPOSITORY_ROOT = Path(__file__).resolve().parents[2]
 if str(_SCRIPT_REPOSITORY_ROOT) not in sys.path:
     sys.path.insert(0, str(_SCRIPT_REPOSITORY_ROOT))
 
-from meizel import allowances  # noqa: E402
-from meizel.checkout import GitRepo, lanes_at, roles_at  # noqa: E402
-from meizel.roles import all_packages, pytest_test_hosts  # noqa: E402
-from meizel.test_graph.cutoff import package_local_tests  # noqa: E402
+from meizel.api import (  # noqa: E402
+    GitRepo,
+    all_packages,
+    allowances,
+    lanes_at,
+    package_local_tests,
+    pytest_test_hosts,
+    roles_at,
+)
 
 from base.deploy.git.repo_change import (  # noqa: E402
     is_doc_path,

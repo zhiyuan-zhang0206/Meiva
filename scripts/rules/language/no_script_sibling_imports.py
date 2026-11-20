@@ -11,9 +11,7 @@ import sys
 from functools import cache
 from pathlib import Path
 
-from meizel import allowances, lint_common
-from meizel.checkout import GitRepo, source_tree
-from meizel.graph.universe import SourceTree
+from meizel.api import GitRepo, SourceTree, allowances, lint_common, source_tree
 
 from scripts.rules.language import script_siblings
 
