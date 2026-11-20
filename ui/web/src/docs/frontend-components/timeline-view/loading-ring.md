@@ -14,7 +14,10 @@ relative wrapper, independent of the message column width.
 
 `TimelineView.loading` means the selected source has not completed its initial
 read or qualification handoff. It presents the initial-load ring even when retained
-rows are available; row count does not establish source readiness. An initial
+rows are available; row count does not establish source readiness. The same ring
+shows while a conversation's rows are hidden until their opening place resolves
+([sticky scroll](sticky-scroll.md)): retained rows that hold the saved place show at
+once under the ring, rows that do not stay hidden behind it. An initial
 read takes precedence over a reader's older-page ring. Both suppress the inline
 first-step `PendingLiveActivityWindow` row (`!loading` in `TimelineGroupList`,
 where `TimelineView` passes `loading || readerLoadingOlder`), so source and

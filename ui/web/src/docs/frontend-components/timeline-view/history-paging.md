@@ -2,8 +2,9 @@
 
 ## Pull gesture and request ownership
 
-The first short viewport fills at most two older pages, stopping once content
-exceeds its height. Reaching the top alone never requests history. An additional
+The first short viewport fills at most two older pages, one at a time, stopping once
+content exceeds its height. On a first visit the rows stay hidden under the loading
+ring until the fill ends, so the fill never reflows rows the reader already sees. Reaching the top alone never requests history. An additional
 upward wheel gesture at the top requests a page after accumulating 64 pixels
 of intent. Events less than 120 ms apart form one burst. The burst that arrived
 at the top and its momentum do not request a page. Remaining events from a
@@ -14,8 +15,8 @@ can focus the load-earlier control.
 
 The gesture does not add space to the timeline or displace its messages.
 A reader who scrolls while waiting keeps their current reading position when
-the older page is prepended. A successful prepend compensates for the new
-rows before paint. A failed or empty page leaves the list in place. A failed
+the older page is prepended: the view anchor holds the reader's row before
+paint ([sticky scroll](sticky-scroll.md)). A failed or empty page leaves the list in place. A failed
 request can be retried with a new gesture. Conversation changes discard
 gesture state. Deliberate requests continue through backend `has_more` and
 `MEIVA_TIMELINE_COMPACT_HISTORY` depth.

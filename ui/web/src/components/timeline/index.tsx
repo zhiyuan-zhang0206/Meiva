@@ -1,65 +1,41 @@
 "use client";
 
-import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useReducer, useRef, useState } from "react";
+import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { useTranslations } from "next-intl";
 
-import type { Quote } from "@/lib/contracts/types";
-import { QuoteNavigation, QuoteSelection, QuoteTarget } from "./view/quote/quote";
-
+import type { BackendTimelineItem, Quote } from "@/lib/contracts/types";
 import { ScrollArea } from "@/components/ui/scroll-area";
-import { parseItemIdParts } from "@/lib/timeline/timeline";
+import { findOldestTimelineCursor, isReattachedTimelineContext, parseItemIdParts, standingHeadNoteIds } from "@/lib/timeline/timeline";
 import type { OlderLoadOrigin } from "@/lib/timeline/use-timeline";
-import {
-  type StickyController,
-  createStickyController,
-  isAtBottom,
-} from "@/lib/layout/sticky";
-import type { BackendTimelineItem } from "@/lib/contracts/types";
-import { readScrollMemory, type SavedScroll } from "@/lib/layout/scroll-memory";
 import { useTimelineStore } from "@/lib/timeline/timeline-store";
 import type { CompactTransitionBuffer } from "@/lib/layout/compact-transition";
-import { BAR_CLEAR_TOP_PADDING_CLASS, BAR_HEIGHT_PX, FLEX_1, MIN_H_0, OVERFLOW_HIDDEN } from "@/lib/layout/layout";
+import { BAR_CLEAR_TOP_PADDING_CLASS, FLEX_1, MIN_H_0, OVERFLOW_HIDDEN } from "@/lib/layout/layout";
 import { cn } from "@/lib/format/utils";
 
 import { ConnectionNotice } from "@/components/notifications/connection-notice";
+import { QuoteNavigation, QuoteSelection, QuoteTarget } from "./view/quote/quote";
 import { TimelineGroupList, useTimelineGroupWindow } from "./view/group-list";
 import { CompactingBlock } from "./model/compacting-block";
-import {
-  applyBookmarkRestore,
-  resolveInitialTimelineBookmark,
-  settleRestoredPosition as settleRestoredPositionImpl,
-  useReloadBookmarkRestore,
-  type BookmarkState,
-} from "./model/bookmark-restore";
-import {
-  clearTimelineReloadPosition,
-  rememberTimelinePosition,
-  rememberTimelineReloadPosition,
-  type ReloadRestoreConfig,
-} from "./model/reading-position";
-import { useCompactTransitionAnchor } from "./model/use-compact-transition-anchor";
+import type { ReloadRestoreConfig } from "./model/reading-position";
 import { useOlderHistoryPull } from "./model/use-older-history-pull";
-import { useSendAnchor, useThreadPin } from "./model/use-viewport-arrivals";
-import { usePrependAnchor } from "./view/use-prepend-anchor";
+import { inboundKind, isSilentTimelineItem } from "./model/runs";
 import { useTimelineExpansion } from "./view/use-timeline-expansion";
-import {
-  cancelScrollToBottomRide,
-  createScrollToBottomRide,
-  startScrollToBottomRide,
-  useTimelineViewport,
-} from "./view/use-timeline-viewport";
-import { useReanchorOnWidthChange } from "./model/width-change-anchor";
 import { useStickyThresholds } from "./model/sticky-thresholds";
+import { findRowNode, offsetOf, READING_TOP_PX, readTurnAnchor, TAIL, type RowRef, type ViewAnchor } from "./anchor/dom";
+import { rankOf } from "./anchor/rows";
+import { usePlacement, type RevealDecision } from "./anchor/use-placement";
+import { useViewportAnchor, type AnchorChangeCause } from "./anchor/use-viewport-anchor";
 import { LoadOlderSpinner, LoadOlderKeyboardButton, ColdLoadSpinner, ScrollToBottomButton } from "./overlays";
 
 export type { ReloadRestoreConfig } from "./model/reading-position";
+export type { RevealDecision } from "./anchor/use-placement";
+export { hasSavedPlace as hasSavedTimelinePlace } from "./anchor/saved";
 
-const REVEAL_TOP_GAP_PX = 12;
 // meiva:note
-// Where a row the reader is meant to start reading from sits: below the fixed
-// header bar. A reveal (first unseen message) and a send anchor share it.
-// meiva:link ui/web/src/docs/frontend-components/timeline-view/send-anchor.md
-const READING_TOP_PX = BAR_HEIGHT_PX + REVEAL_TOP_GAP_PX;
+// Cold fill: a conversation whose first page does not fill the viewport reads at most this many
+// older pages in the background, so a short tail opens with history above it.
+// meiva:link ui/web/src/docs/frontend-components/timeline-view/history-paging.md
+const COLD_FILL_MAX_PAGES = 2;
 
 interface Props {
   onQuote?: (quote: Quote) => void;
@@ -67,7 +43,6 @@ interface Props {
   compactBuffer?: CompactTransitionBuffer | null;
   threadKey?: string;
   scrollMemoryKey?: string;
-  restoreReady?: boolean;
   reloadRestore?: ReloadRestoreConfig;
   viewportObserverFactory?: (callback: ResizeObserverCallback) => ResizeObserver;
 
@@ -87,7 +62,7 @@ interface Props {
   // meiva:note
   // An older page in flight is not a display state. `loadingOlder` is the
   // concurrency guard that the pull gesture, the keyboard control, the cold
-  // first-viewport fill and compact-history retention all hold;
+  // first-viewport fill and the placement search all hold;
   // `readerLoadingOlder` says the reader asked for it, and only that presents
   // the loading strip above the messages.
   // meiva:link ui/web/src/docs/frontend-components/timeline-view/history-paging.md
@@ -100,21 +75,24 @@ interface Props {
   loading?: boolean;
   maxWidthCss?: string;
   // meiva:note
-  // A request to bring one item to the upper part of the viewport, as the reader's own bookmark would: it
-  // rides the bookmark restore (hold, settle, window materialization) instead of a second scroll path,
-  // and a new `token` is a new request.
+  // Where a first visit opens: the first delivery past the reader's seen position once that is
+  // decided. A saved place always wins over it.
   // meiva:link ui/web/src/docs/frontend-components/timeline-view/sticky-scroll.md
-  reveal?: { itemId: string; token: number } | null;
+  reveal?: RevealDecision;
 }
 
 const DEFAULT_RELOAD_RESTORE: ReloadRestoreConfig = { state: "disabled" };
+const DECIDED_NO_REVEAL: RevealDecision = { decided: true, itemId: null };
+
+function isHumanMessage(item: BackendTimelineItem): boolean {
+  return item.kind === "inbound_chat" && inboundKind(item.source) === "human" && !isSilentTimelineItem(item);
+}
 
 export const TimelineView = memo(function TimelineView({
   items: canonicalItems,
   compactBuffer = null,
   threadKey,
   scrollMemoryKey,
-  restoreReady = true,
   reloadRestore = DEFAULT_RELOAD_RESTORE,
   viewportObserverFactory,
   streamingCode = false,
@@ -130,14 +108,13 @@ export const TimelineView = memo(function TimelineView({
   retainedItemsMax = 250,
   loading = false,
   maxWidthCss,
-  reveal = null,
+  reveal = DECIDED_NO_REVEAL,
   onQuote,
 }: Props) {
   const t = useTranslations("timeline");
   const [quoteRequest, setQuoteRequest] = useState<{ quote: Quote; pages: number } | null>(null);
   const [quoteStatus, setQuoteStatus] = useState<string | null>(null);
-  const [quoteReveal, setQuoteReveal] = useState<{ itemId: string; token: number } | null>(null);
-  const effectiveReveal = quoteReveal ?? reveal;
+  const [quoteTarget, setQuoteTarget] = useState<{ itemId: string; token: number } | null>(null);
   const bufferedItems = useMemo(
     () => compactBuffer?.rows.map((row) => row.item) ?? [],
     [compactBuffer],
@@ -163,523 +140,99 @@ export const TimelineView = memo(function TimelineView({
   // meiva:link ui/web/src/docs/frontend-components/home-shell-chrome/home-shell-chrome.md
   const endRef = useRef<HTMLDivElement>(null);
   const contentRef = useRef<HTMLDivElement>(null);
-  const viewportRef = useRef<HTMLElement | null>(null);
+  const viewportRef = useRef<HTMLDivElement | null>(null);
   const wrapperRef = useRef<HTMLDivElement>(null);
   // meiva:note
-  // Extra scroll space lets the last human message reach the reading offset.
-  // It sits outside the content column so it carries no row spacing.
-  // meiva:link ui/web/src/docs/frontend-components/timeline-view/sticky-scroll.md
-  const sendReserveRef = useRef<HTMLDivElement>(null);
-  const collapseReserveRef = useRef<HTMLDivElement>(null);
+  // Extra scroll space below the content: it lets the last human message (after a send) or a
+  // toggled header reach its place when the rows below are too short. Outside the content column,
+  // so it carries no row spacing.
+  // meiva:link ui/web/src/docs/frontend-components/timeline-view/send-anchor.md
+  const reserveRef = useRef<HTMLDivElement>(null);
 
-  const [initialBookmark] = useState(() =>
-    resolveInitialTimelineBookmark(
-      scrollMemoryKey ? readScrollMemory(scrollMemoryKey) : null,
-      threadKey,
-      reloadRestore,
-    ),
-  );
-  const savedPosition = initialBookmark.savedPosition;
-  const pendingRestoreRef = useRef(savedPosition);
+  const latestHuman = useMemo<RowRef | null>(() => {
+    const item = items.findLast(isHumanMessage);
+    return item ? { itemId: item.item_id, rank: rankOf(item, compactBuffer) } : null;
+  }, [items, compactBuffer]);
+  const latestHumanRef = useRef(latestHuman);
+  useLayoutEffect(() => { latestHumanRef.current = latestHuman; });
 
-  const holdRestoredPositionRef = useRef(!!pendingRestoreRef.current && !pendingRestoreRef.current.followBottom);
-  const settledRestoreRef = useRef<SavedScroll | null>(null);
-  // meiva:note
-  // Consecutive layout passes at the same content height. A bookmark beyond the reachable end is only unreachable once the content has stopped growing - before that, the height is still arriving and waiting is correct.
-  // meiva:link ui/web/src/docs/frontend-components/timeline-view/sticky-scroll.md
-  const restoreProbeRef = useRef<{ height: number; passes: number }>({ height: -1, passes: 0 });
-  const matchedAppliedSeqRef = useRef(0);
-  const bookmarkState = useRef<BookmarkState>({
-    pending: pendingRestoreRef,
-    settled: settledRestoreRef,
-    hold: holdRestoredPositionRef,
-    probe: restoreProbeRef,
-  }).current;
-  const reloadBlockingRef = useRef(false);
-  const restoreInFlight = useCallback(
-    () =>
-      reloadBlockingRef.current ||
-      pendingRestoreRef.current !== null ||
-      (settledRestoreRef.current !== null && holdRestoredPositionRef.current),
-    [],
-  );
-  const initialRestorePassRef = useRef(true);
+  const { turnOverrides, toggleTurn, overrides, toggleExpanded } = useTimelineExpansion({ scrollMemoryKey, threadKey });
+  const thresholds = useStickyThresholds();
 
-  useLayoutEffect(
-    () => () => {
-      initialRestorePassRef.current = true;
-    },
-    [],
-  );
-
-  const scrollMemoryRef = useRef<{ entryKey: string; contentKey: string } | null>(null);
-  const threadKeyRef = useRef<string | undefined>(threadKey);
-  const compactBufferRef = useRef<CompactTransitionBuffer | null>(compactBuffer);
-  const reloadRestoreRef = useRef<ReloadRestoreConfig>(reloadRestore);
-  const reloadPersistBlockedRef = useRef(loading || !restoreReady);
-
-  const loadOlderRef = useRef<((origin: OlderLoadOrigin) => void) | undefined>(onLoadOlder);
-  const hasMoreOlderRef = useRef(hasMoreOlder);
-  const loadingOlderRef = useRef(loadingOlder);
-  const itemsRef = useRef(items);
-  useLayoutEffect(() => {
-    loadOlderRef.current = onLoadOlder;
-    hasMoreOlderRef.current = hasMoreOlder;
-    loadingOlderRef.current = loadingOlder;
-    itemsRef.current = items;
-    threadKeyRef.current = threadKey;
-    compactBufferRef.current = compactBuffer;
-    reloadRestoreRef.current = reloadRestore;
-    scrollMemoryRef.current =
-      scrollMemoryKey && threadKey !== undefined
-        ? { entryKey: scrollMemoryKey, contentKey: threadKey }
-        : null;
+  const handlers = useRef<{
+    onChange: (anchor: ViewAnchor, cause: AnchorChangeCause) => void;
+    onUnresolved: (row: RowRef) => void;
+    onFree: () => void;
+    onRideEnd: () => void;
+  }>({ onChange: () => undefined, onUnresolved: () => undefined, onFree: () => undefined, onRideEnd: () => undefined });
+  const onAnchorChange = useCallback((anchor: ViewAnchor, cause: AnchorChangeCause) => handlers.current.onChange(anchor, cause), []);
+  const onUnresolved = useCallback((row: RowRef) => handlers.current.onUnresolved(row), []);
+  const onFree = useCallback(() => handlers.current.onFree(), []);
+  const onRideEnd = useCallback(() => handlers.current.onRideEnd(), []);
+  const pinnedHeadIds = useMemo(() => {
+    const notes = standingHeadNoteIds(items);
+    return new Set(items.filter((item) => isReattachedTimelineContext(item) || notes.has(item.item_id)).map((item) => item.item_id));
+  }, [items]);
+  const pinnedHeadRef = useRef(pinnedHeadIds);
+  useLayoutEffect(() => { pinnedHeadRef.current = pinnedHeadIds; });
+  const pinnedHead = useCallback((id: string) => pinnedHeadRef.current.has(id), []);
+  const { controls, atEnd } = useViewportAnchor({
+    wrapperRef, viewportRef, contentRef, reserveRef, thresholds,
+    onChange: onAnchorChange, onUnresolved, pinnedHead, onFree, onRideEnd, viewportObserverFactory,
   });
-
-  const [atBottom, setAtBottom] = useState(true);
-
-  const {
-    turnOverrides,
-    toggleTurn,
-    overrides,
-    toggleExpanded,
-  } = useTimelineExpansion({
-    scrollMemoryKey,
-    threadKey,
-  });
-
-  const stickyThresholds = useStickyThresholds();
-
-  const [controller] = useState<StickyController>(() =>
-    createStickyController(stickyThresholds),
-  );
-  useReanchorOnWidthChange({
-    wrapperRef, entriesRef: scrollMemoryRef, holdRef: holdRestoredPositionRef,
-    controller, compactBuffer, canonicalItems,
-  });
-
-  const collapseReserveHeight = useCallback(() => collapseReserveRef.current?.offsetHeight ?? 0, []);
-  const readingReserve = useCallback(() =>
-    (sendReserveRef.current?.offsetHeight ?? 0) + collapseReserveHeight(), [collapseReserveHeight]);
-  const releaseCollapseReserve = useCallback((viewport: HTMLElement) => {
-    const reserve = collapseReserveRef.current;
-    if (reserve && reserve.offsetHeight > 0 &&
-        viewport.scrollTop <= viewport.scrollHeight - reserve.offsetHeight - viewport.clientHeight + 1) {
-      reserve.style.height = "";
-    }
-  }, []);
-  const tailHeight = useCallback((viewport: HTMLElement) =>
-    Math.max(viewport.clientHeight, viewport.scrollHeight - readingReserve()), [readingReserve]);
-
-  const isFollowing = useCallback(() => !holdRestoredPositionRef.current && controller.isSticky(), [controller]);
-  const canonicalItemsRef = useRef(canonicalItems);
-  const retainedItemsMaxRef = useRef(retainedItemsMax);
-  const scrollToBottomRideRef = useRef(createScrollToBottomRide());
-
-  useEffect(() => () => cancelScrollToBottomRide(scrollToBottomRideRef.current), []);
-
-  const trimFollowing = useCallback((allowDuringRide = false) => {
-    if (!controller.isSticky() || holdRestoredPositionRef.current) return false;
-    if (!allowDuringRide && scrollToBottomRideRef.current.active) return false;
-    const store = useTimelineStore.getState();
-    if (store.items !== canonicalItemsRef.current) return false;
-    if (store.compactBuffer || store.items.length <= retainedItemsMaxRef.current) return false;
-    const before = store.items;
-    store.trimOldestWhileFollowing(retainedItemsMaxRef.current);
-    return useTimelineStore.getState().items !== before;
-  }, [controller]);
-  useLayoutEffect(() => {
-    canonicalItemsRef.current = canonicalItems;
-    retainedItemsMaxRef.current = retainedItemsMax;
-    trimFollowing();
-  }, [canonicalItems, retainedItemsMax, trimFollowing]);
 
   // meiva:note
-  // The commit that shrinks the content is the only place that knows a clamp is
-  // coming and is not itself about to re-pin: by the time the clamp's scroll
-  // event dispatches, a later commit has usually added rows again, so
-  // `scrollHeight < prevScrollHeight` no longer holds and the move reads as a
-  // user scroll-up (#5678). The controller owns the baseline this comparison
-  // runs against and drops it for a parked reader, so a reader who is not
-  // following pays no layout read here.
-  // meiva:link ui/web/src/docs/frontend-components/timeline-view/sticky-scroll.md
-  const declareShrink = useCallback(() => {
-    const viewport = viewportRef.current;
-    if (!viewport) return;
-    if (!controller.isSticky()) {
-      controller.recordContentHeight(null);
-      return;
-    }
-    controller.notifyContentShrunk({
-      scrollTop: viewport.scrollTop,
-      scrollHeight: tailHeight(viewport),
-      clientHeight: viewport.clientHeight,
-    });
-  }, [controller, tailHeight, viewportRef]);
-  useLayoutEffect(() => {
-    declareShrink();
+  // A first page that does not fill the viewport reads up to COLD_FILL_MAX_PAGES older pages before a
+  // first visit opens, so history never lands above rows the reader is already looking at.
+  // meiva:link ui/web/src/docs/frontend-components/timeline-view/history-paging.md
+  const coldFill = useRef<{ pages: number; open: boolean; requested: string | null; sawLoading: boolean }>({
+    pages: 0, open: true, requested: null, sawLoading: false,
   });
-
-  const [announcedTurnActive, setAnnouncedTurnActive] = useState(turnActive);
-  const [turnAnnouncement, setTurnAnnouncement] = useState<string | null>(null);
-  if (announcedTurnActive !== turnActive) {
-    setAnnouncedTurnActive(turnActive);
-    setTurnAnnouncement(turnActive ? t("agentResponding") : t("agentResponseComplete"));
-  }
-
-  const measureAtBottom = useCallback(() => {
-    const viewport = viewportRef.current;
-    if (!viewport) return;
-    const { scrollTop, scrollHeight, clientHeight } = viewport;
-    setAtBottom(
-      scrollToBottomRideRef.current.active ||
-      scrollHeight - scrollTop - clientHeight <= 1 ||
-      (isFollowing() && isAtBottom({ scrollTop, scrollHeight: tailHeight(viewport), clientHeight }, stickyThresholds)),
-    );
-  }, [isFollowing, stickyThresholds, tailHeight]);
-
-  const pinToBottom = useCallback(
-    (viewport: HTMLElement, freshRun = false) => {
-      const height = tailHeight(viewport);
-      viewport.scrollTop = height - viewport.clientHeight;
-      controller.notifyPinnedToBottom(
-        {
-          scrollTop: viewport.scrollTop,
-          scrollHeight: height,
-          clientHeight: viewport.clientHeight,
-        },
-        freshRun,
-      );
-    },
-    [controller, tailHeight],
-  );
-
-  const coldFillRef = useRef({ pages: 0, open: true, inFlight: false, sawLoading: false });
-  const prependEchoRef = useRef(false);
-
-  const scrollByDelta = useCallback((viewport: HTMLElement, delta: number) => {
-    viewport.scrollTop += delta;
-    prependEchoRef.current = true;
-  }, []);
-
-  const { pendingAnchorRef, captureAnchor } = usePrependAnchor({
-    viewportRef,
-    wrapperRef,
-    itemsRef,
-    items,
-    loadingOlder,
-    scrollByDelta,
-  });
-
-  const {
-    reloadBlocking,
-    reloadSearchingOlder,
-    hasSavedPosition,
-    activeSavedScroll,
-    matchedRestore,
-    cancelReloadSearch,
-  } = useReloadBookmarkRestore({
-    inMemorySaved: initialBookmark.inMemorySaved,
-    initialReloadBookmark: initialBookmark.initialReloadBookmark,
+  const filling = useCallback(() => {
+    const fill = coldFill.current;
+    const viewport = controls.viewport();
+    if (!fill.open || loading || !viewport || viewport.clientHeight <= 0 || !hasMoreOlder || !onLoadOlder) return false;
+    if (viewport.scrollHeight > viewport.clientHeight) return false;
+    const inFlight = loadingOlder || (fill.requested !== null && fill.requested === (findOldestTimelineCursor(canonicalItems)?.item_id ?? null));
+    return fill.pages < COLD_FILL_MAX_PAGES || inFlight;
+  }, [canonicalItems, controls, hasMoreOlder, loading, loadingOlder, onLoadOlder]);
+  const placement = usePlacement({
     threadKey,
+    entryKey: scrollMemoryKey,
     reloadRestore,
-    loading,
-    restoreReady,
-    canonicalItems,
+    items: canonicalItems,
     compactBuffer,
+    loading,
+    turnActive,
     hasMoreOlder,
     loadingOlder,
     onLoadOlder,
     onCancelBackgroundLoadOlder,
-    pendingRef: pendingRestoreRef,
-    settledRef: settledRestoreRef,
-    holdRef: holdRestoredPositionRef,
-    probeRef: restoreProbeRef,
-    matchedAppliedSeqRef,
-    pendingAnchorRef,
-    viewportRef,
-    wrapperRef,
-    pinToBottom,
-    trimFollowing,
+    reveal,
+    anchor: controls,
+    filling,
   });
-  useLayoutEffect(() => {
-    reloadBlockingRef.current = reloadBlocking;
-    reloadPersistBlockedRef.current = loading || !restoreReady || reloadBlocking;
-  });
-
-  const cancelPendingReloadRestore = useCallback(() => {
-    const wasBlocking = reloadBlockingRef.current;
-    reloadBlockingRef.current = false;
-    if (wasBlocking) {
-      pendingRestoreRef.current = null;
-    }
-    if (cancelReloadSearch()) {
-      loadingOlderRef.current = false;
-    }
-  }, [cancelReloadSearch]);
-
   // meiva:note
-  // A send takes the viewport from any bookmark it was settling: the reader
-  // asked for the message they just wrote, so the saved row no longer owns it.
-  // meiva:link ui/web/src/docs/frontend-components/timeline-view/sticky-scroll.md
-  const cancelBookmark = useCallback(() => {
-    cancelScrollToBottomRide(scrollToBottomRideRef.current);
-    reloadBlockingRef.current = false;
-    if (cancelReloadSearch()) {
-      loadingOlderRef.current = false;
-    }
-    pendingAnchorRef.current = null;
-    pendingRestoreRef.current = null;
-    settledRestoreRef.current = null;
-    holdRestoredPositionRef.current = false;
-  }, [cancelReloadSearch, pendingAnchorRef]);
-
-  const { latestTarget, pendingTarget, jumpToLatestHuman, cancelPendingJump, maintain: maintainSendAnchor,
-    releaseReserve: releaseSendReserve, reserveEnabled: sendReserveEnabled, isSendAnchored } = useSendAnchor({
-    items,
-    compactBuffer,
-    threadKey,
-    viewportRef,
-    wrapperRef,
-    reserveRef: sendReserveRef,
-    controller,
-    isFollowing,
-    topOffset: READING_TOP_PX,
-    turnActive,
-    savedSendReserve: hasSavedPosition ? savedPosition?.keepSendReserve === true : undefined,
-    measureAtBottom,
-    cancelBookmark,
-  });
-
-  const saveReloadPosition = useCallback((viewport: HTMLElement) => {
-    const key = threadKeyRef.current;
-    if (key === undefined || reloadPersistBlockedRef.current || restoreInFlight()) return;
-    const atTail =
-      isFollowing() ||
-      isSendAnchored() ||
-      viewport.scrollHeight <= viewport.clientHeight ||
-      controller.isAtTail(
-        {
-          scrollTop: viewport.scrollTop,
-          scrollHeight: tailHeight(viewport),
-          clientHeight: viewport.clientHeight,
-        },
-        readingReserve() > 0,
-      );
-    if (atTail) {
-      clearTimelineReloadPosition(key, reloadRestoreRef.current);
-      return;
-    }
-    rememberTimelineReloadPosition(
-      viewport,
-      key,
-      canonicalItemsRef.current,
-      compactBufferRef.current,
-      reloadRestoreRef.current,
-      collapseReserveHeight(),
-      sendReserveEnabled(),
-    );
-  }, [collapseReserveHeight, controller, isFollowing, isSendAnchored, readingReserve, restoreInFlight, sendReserveEnabled, tailHeight]);
-
-  useLayoutEffect(() => () => {
-    const mem = scrollMemoryRef.current;
-    const viewport = viewportRef.current;
-    if (viewport && !restoreInFlight()) {
-      if (mem) rememberTimelinePosition(viewport, mem.entryKey, mem.contentKey, collapseReserveHeight(), sendReserveEnabled());
-      saveReloadPosition(viewport);
-    }
-  }, [restoreInFlight, collapseReserveHeight, sendReserveEnabled, saveReloadPosition]);
-
-  const compactPin = useCompactTransitionAnchor({
-    controller,
-    viewportRef,
-    prependAnchorRef: pendingAnchorRef,
-    compactBuffer,
-  });
-
-  useLayoutEffect(() => {
-    cancelScrollToBottomRide(scrollToBottomRideRef.current);
-    coldFillRef.current = { pages: 0, open: true, inFlight: false, sawLoading: false };
-    prependEchoRef.current = false;
-  }, [threadKey]);
-  useEffect(() => {
-    const fill = coldFillRef.current;
-    if (loadingOlder) fill.sawLoading = true;
-    else if (fill.sawLoading) {
-      fill.inFlight = false;
-      fill.sawLoading = false;
-    }
-  }, [loadingOlder]);
-
-  const loadOneOlderPage = useCallback((origin: OlderLoadOrigin) => {
-    const viewport = viewportRef.current;
-    if (!viewport || !hasMoreOlderRef.current || loadingOlderRef.current) return false;
-    if (!loadOlderRef.current || pendingAnchorRef.current !== null) return false;
-    captureAnchor();
-    loadOlderRef.current(origin);
-    return true;
-  }, [captureAnchor, pendingAnchorRef]);
-  // meiva:note
-  // The pull gesture and the keyboard control are the reader's only two
-  // requests for an older page; every other backward read here is an automatic
-  // fill and stays unpresented.
+  // Only a following reader releases the oldest rows (the retention rule in the paging doc): the
+  // tail stays where it is while rows leave above it. Not during the arrow's ride, whose end would
+  // move under it; the ride's arrival trims.
   // meiva:link ui/web/src/docs/frontend-components/timeline-view/history-paging.md
-  const pullOlderPage = useCallback(() => {
-    if (reloadBlockingRef.current) cancelPendingReloadRestore();
-    return loadOneOlderPage("reader");
-  }, [cancelPendingReloadRestore, loadOneOlderPage]);
-
-  const canPullOlder = useCallback(() =>
-    hasMoreOlderRef.current && !loadingOlderRef.current && !!loadOlderRef.current && pendingAnchorRef.current === null,
-  [pendingAnchorRef]);
-  const closeColdFill = useCallback(() => { coldFillRef.current.open = false; }, []);
-  const { onWheel: pullWheel, onTouchStart: pullTouchStart, onTouchMove: pullTouchMove,
-    onTouchEnd: pullTouchEnd, onTouchCancel: cancelPullTouch,
-  } = useOlderHistoryPull(threadKey, canPullOlder, pullOlderPage, closeColdFill);
-
-  const maybeColdFill = useCallback(() => {
-    if (reloadBlockingRef.current) return;
-    const fill = coldFillRef.current;
-    const viewport = viewportRef.current;
-    if (!fill.open || !viewport || viewport.clientHeight <= 0 || itemsRef.current.length === 0) return;
-    if (viewport.scrollHeight > viewport.clientHeight || fill.pages >= 2) {
-      fill.open = false;
-      return;
-    }
-    if (fill.inFlight) return;
-    if (loadOneOlderPage("background")) {
-      fill.inFlight = true;
-      fill.pages += 1;
-    }
-  }, [loadOneOlderPage]);
-
-  const applyPendingRestore = useCallback(
-    (viewport: HTMLElement | null) => applyBookmarkRestore({
-      state: bookmarkState,
-      viewport,
-      initialPass: initialRestorePassRef.current,
-      loading: loading || !restoreReady || reloadBlocking,
-      threadKey,
-      compactBuffer,
-      canonicalItems: canonicalItemsRef.current,
-      controller,
-      tailHeight,
-      collapseReserve: collapseReserveRef.current,
-    }),
-    [bookmarkState, compactBuffer, controller, tailHeight, threadKey, loading, restoreReady, reloadBlocking],
-  );
-
-  const settleRestoredPosition = useCallback(
-    (viewport: HTMLElement | null, layoutChanged: boolean) => settleRestoredPositionImpl({
-      state: bookmarkState,
-      viewport,
-      layoutChanged,
-      threadKey,
-      compactBuffer,
-      canonicalItems: canonicalItemsRef.current,
-    }),
-    [bookmarkState, compactBuffer, threadKey],
-  );
-
-  useTimelineViewport({
-    viewportObserverFactory,
-    wrapperRef,
-    viewportRef,
-    contentRef,
-    controller,
-    stickyThresholds,
-    scrollToBottomRideRef,
-    holdRestoredPositionRef,
-    pendingRestoreRef,
-    restoreProbeRef,
-    prependEchoRef,
-    coldFillRef,
-    scrollMemoryRef,
-    restoreInFlight,
-    measureAtBottom,
-    maybeColdFill,
-    pinToBottom,
-    trimFollowing,
-    pullWheel,
-    pullTouchStart,
-    pullTouchMove,
-    pullTouchEnd,
-    cancelPullTouch,
-    applyPendingRestore,
-    settleRestoredPosition,
-    maintainSendAnchor,
-    releaseSendReserve,
-    sendReserveEnabled,
-    releaseCollapseReserve,
-    collapseReserveHeight,
-    readingReserve,
-    tailHeight,
-    cancelPendingJump,
-    reloadBlockingRef,
-    cancelPendingReloadRestore,
-    saveReloadPosition,
+  const trimWhileFollowing = useCallback(() => {
+    if (controls.current()?.kind !== "tail" || controls.riding()) return;
+    const store = useTimelineStore.getState();
+    if (store.activeThreadId === null || String(store.activeThreadId) !== threadKey) return;
+    if (store.compactBuffer || store.items.length <= retainedItemsMax) return;
+    store.trimOldestWhileFollowing(retainedItemsMax);
+  }, [controls, retainedItemsMax, threadKey]);
+  handlers.current = { onChange: placement.onAnchorChange, onUnresolved: placement.onUnresolved, onFree: placement.onFree, onRideEnd: trimWhileFollowing };
+  const visible = placement.visible;
+  // meiva:note
+  // The writer applies after placement has seen this commit's rows and before the window measures it.
+  useLayoutEffect(() => {
+    controls.apply();
   });
 
-  const [, applyReveal] = useReducer((count: number) => count + 1, 0);
-  useLayoutEffect(() => {
-    if (effectiveReveal === null || threadKey === undefined || (hasSavedPosition && quoteReveal === null)) return;
-    const item = canonicalItemsRef.current.find((candidate) => candidate.item_id === effectiveReveal.itemId);
-    if (item === undefined) return;
-    cancelBookmark();
-    pendingRestoreRef.current = {
-      contentKey: threadKey,
-      scrollTop: 0,
-      followBottom: false,
-      anchor: {
-        itemId: item.item_id,
-        rank: parseItemIdParts(item.item_id)?.rank ?? 0,
-        viewportTop: READING_TOP_PX,
-      },
-    };
-    holdRestoredPositionRef.current = true;
-    restoreProbeRef.current = { height: -1, passes: 0 };
-    applyReveal();
-  }, [effectiveReveal, quoteReveal, threadKey, hasSavedPosition, cancelBookmark, restoreProbeRef]);
-
-  useThreadPin({
-    threadKey,
-    controller,
-    viewportRef,
-    wrapperRef,
-    anchorRef: pendingAnchorRef,
-    pendingRef: pendingRestoreRef,
-    settledRef: settledRestoreRef,
-    holdRef: holdRestoredPositionRef,
-    pinToBottom,
-    setAtBottom,
-  });
-
-  useLayoutEffect(() => {
-    const viewport = viewportRef.current ??
-      wrapperRef.current?.querySelector<HTMLElement>('[data-slot="scroll-area-viewport"]') ?? null;
-    initialRestorePassRef.current = false;
-    applyPendingRestore(viewport);
-    settleRestoredPosition(viewport, false);
-    if (viewport && !restoreInFlight()) {
-      saveReloadPosition(viewport);
-    }
-  });
-
-  const prevLoadingOlderReleaseRef = useRef(loadingOlder);
-  useLayoutEffect(() => {
-    if (prevLoadingOlderReleaseRef.current && !loadingOlder) pendingAnchorRef.current = null;
-    prevLoadingOlderReleaseRef.current = loadingOlder;
-  }, [loadingOlder, pendingAnchorRef]);
-
-  const unappliedMatchedRestore =
-    matchedRestore !== null && matchedAppliedSeqRef.current !== matchedRestore.seq
-      ? matchedRestore.saved
-      : null;
-  const restoreCandidate =
-    unappliedMatchedRestore ??
-    pendingRestoreRef.current ??
-    (holdRestoredPositionRef.current ? settledRestoreRef.current : null) ??
-    activeSavedScroll;
+  const isFollowing = useCallback(() => controls.current()?.kind === "tail", [controls]);
   const { groups, groupEntries, virtualEnabled, virtualRange, rowRange } = useTimelineGroupWindow({
     canonicalItems,
     compactBuffer,
@@ -691,86 +244,155 @@ export const TimelineView = memo(function TimelineView({
     viewportRef,
     contentRef,
     isFollowing,
-    pendingAnchor: pendingAnchorRef.current,
-    compactPin,
-    restoreAnchor: pendingTarget ?? (
-      !restoreCandidate?.followBottom && restoreCandidate?.anchor
-        ? { id: restoreCandidate.anchor.itemId, rank: restoreCandidate.anchor.rank }
-        : null),
-    restoreTop: restoreCandidate?.scrollTop ?? null,
+    pin: placement.pin,
   });
 
   // meiva:note
-  // Manual expansion preserves the clicked header and releases tail following,
-  // including for active work (user ruling 2026-11-17).
-  // meiva:link ui/web/src/docs/frontend-components/timeline-view/live-block.md
-  const toggledHeaderRef = useRef<{ button: HTMLButtonElement; top: number } | null>(null);
+  // A send parks the message just written at the reading offset when the reader is at the tail
+  // (following it, or inside its bottom zone, as in any conversation shorter than the viewport); a
+  // reader in history keeps their place. Either way the reserve is renewed. The receipt's
+  // inbound id names the row, so a later update cannot park an unrelated one, and a reader who
+  // scrolls away before it arrives keeps their place.
+  // meiva:link ui/web/src/docs/frontend-components/timeline-view/send-anchor.md
+  const sendRequest = useTimelineStore((state) => state.sendAnchor);
+  const consumedSend = useRef(sendRequest.seq);
+  const pendingPark = useRef<number | null | undefined>(undefined);
   useLayoutEffect(() => {
-    const anchor = toggledHeaderRef.current;
-    toggledHeaderRef.current = null;
-    const viewport = viewportRef.current;
-    const reserve = collapseReserveRef.current;
-    if (!anchor?.button.isConnected || !viewport || !reserve) return;
+    if (sendRequest.seq !== consumedSend.current) {
+      consumedSend.current = sendRequest.seq;
+      controls.armSendReserve(true);
+      pendingPark.current = controls.atTail() ? sendRequest.inboundId : undefined;
+      controls.apply();
+    }
+    if (pendingPark.current === undefined) return;
+    if (!controls.atTail()) {
+      pendingPark.current = undefined;
+      return;
+    }
+    const inboundId = pendingPark.current;
+    const item = inboundId === null
+      ? items.findLast(isHumanMessage)
+      : items.find((candidate) => candidate.inbound_id === inboundId && isHumanMessage(candidate));
+    if (!item) return;
+    pendingPark.current = undefined;
+    placement.request({ kind: "row", row: { itemId: item.item_id, rank: rankOf(item, compactBuffer) }, offset: READING_TOP_PX }, { followsTail: true });
+  }, [compactBuffer, controls, isFollowing, items, placement, sendRequest]);
+
+  useLayoutEffect(() => {
+    if (visible) trimWhileFollowing();
+  });
+
+  // meiva:note
+  // History paging: the reader's pull or keyboard control, and a cold fill for a short first page.
+  const canPullOlder = useCallback(
+    () => visible && hasMoreOlder && !loadingOlder && !!onLoadOlder,
+    [hasMoreOlder, loadingOlder, onLoadOlder, visible],
+  );
+  const pullOlderPage = useCallback(() => {
+    if (!canPullOlder()) return false;
+    onLoadOlder?.("reader");
+    return true;
+  }, [canPullOlder, onLoadOlder]);
+  const onUpwardIntent = useCallback(() => {
+    coldFill.current.open = false;
+    controls.releaseTail();
+  }, [controls]);
+  const pull = useOlderHistoryPull(threadKey, canPullOlder, pullOlderPage, onUpwardIntent);
+  useEffect(() => {
+    const viewport = controls.viewport();
+    if (!viewport) return;
+    const onWheel = (event: WheelEvent) => pull.onWheel(event, viewport);
+    const onTouchStart = (event: TouchEvent) => pull.onTouchStart(event, viewport);
+    const onTouchMove = (event: TouchEvent) => pull.onTouchMove(event);
+    viewport.addEventListener("wheel", onWheel, { passive: false });
+    viewport.addEventListener("touchstart", onTouchStart, { passive: true });
+    viewport.addEventListener("touchmove", onTouchMove, { passive: false });
+    viewport.addEventListener("touchend", pull.onTouchEnd, { passive: true });
+    viewport.addEventListener("touchcancel", pull.onTouchCancel, { passive: true });
+    return () => {
+      viewport.removeEventListener("wheel", onWheel);
+      viewport.removeEventListener("touchstart", onTouchStart);
+      viewport.removeEventListener("touchmove", onTouchMove);
+      viewport.removeEventListener("touchend", pull.onTouchEnd);
+      viewport.removeEventListener("touchcancel", pull.onTouchCancel);
+    };
+  }, [controls, pull]);
+  useLayoutEffect(() => {
+    const fill = coldFill.current;
+    const viewport = controls.viewport();
+    if (!fill.open || !placement.fillAllowed || loading || !viewport || viewport.clientHeight <= 0 || canonicalItems.length === 0) return;
+    if (loadingOlder) {
+      if (fill.requested !== null) fill.sawLoading = true;
+      return;
+    }
+    const oldest = findOldestTimelineCursor(canonicalItems)?.item_id ?? null;
     // meiva:note
-    // A short collapsed block can leave too little scroll range to keep its
-    // header under the pointer. Keep only the extra range the placement needs.
-    // meiva:link ui/web/src/docs/frontend-components/timeline-view/deep-collapse.md
-    const top = Math.max(0, viewport.scrollTop + anchor.button.getBoundingClientRect().top - anchor.top);
-    const height = viewport.scrollTop + reserve.getBoundingClientRect().top - viewport.getBoundingClientRect().top;
-    const extra = Math.max(0, Math.ceil(top + viewport.clientHeight - height));
-    reserve.style.height = extra ? `${extra}px` : "";
-    viewport.scrollTop = top;
-    controller.notifyAnchored({ scrollTop: viewport.scrollTop, scrollHeight: viewport.scrollHeight, clientHeight: viewport.clientHeight });
-    measureAtBottom();
-  }, [controller, measureAtBottom, turnOverrides]);
+    // One page at a time: the next waits until the last one has landed (the oldest row moved); a
+    // page that ended without reaching further back ends the fill.
+    if (fill.requested !== null && fill.requested === oldest) {
+      if (fill.sawLoading) fill.open = false;
+      return;
+    }
+    fill.sawLoading = false;
+    if (viewport.scrollHeight > viewport.clientHeight || fill.pages >= COLD_FILL_MAX_PAGES || !hasMoreOlder || !onLoadOlder) {
+      fill.open = false;
+      return;
+    }
+    fill.pages += 1;
+    fill.requested = oldest;
+    onLoadOlder("background");
+  });
+
+  // meiva:note
+  // Manual expansion keeps the clicked header where it is and releases tail following, including
+  // for active work (user ruling 2026-11-17). Collapsing near the end may need reserve space to
+  // keep the header in place; the reader spends it by scrolling up past the natural end.
+  // meiva:link ui/web/src/docs/frontend-components/timeline-view/live-block.md
   const handleToggleTurn = useCallback(
     (id: string, currentlyExpanded: boolean, button: HTMLButtonElement) => {
-      cancelPendingJump();
-      cancelBookmark();
-      controller.notifyBlockExpanded();
-      toggledHeaderRef.current = { button, top: button.getBoundingClientRect().top };
+      const viewport = controls.viewport();
+      const header = viewport ? readTurnAnchor(viewport, button) : null;
+      if (header) controls.place(header, { hold: true });
       toggleTurn(id, currentlyExpanded);
     },
-    [cancelBookmark, cancelPendingJump, controller, toggleTurn],
+    [controls, toggleTurn],
   );
 
+  // meiva:note
+  // The arrow goes to the latest human message while it is below the reading offset, then to the
+  // tail (following). Inside the reserve it uses the remaining range.
+  // meiva:link ui/web/src/docs/frontend-components/timeline-view/send-anchor.md
   const handleScrollToBottom = useCallback(() => {
-    const viewport =
-      viewportRef.current ??
-      wrapperRef.current?.querySelector<HTMLElement>('[data-slot="scroll-area-viewport"]') ??
-      null;
+    const viewport = controls.viewport();
     if (!viewport) return;
-    const { scrollTop, scrollHeight, clientHeight } = viewport;
-    if (scrollHeight - scrollTop - clientHeight <= 1) {
-      measureAtBottom();
+    const end = viewport.scrollHeight - viewport.clientHeight;
+    if (end - viewport.scrollTop <= 1) return;
+    const latest = latestHumanRef.current;
+    if (latest) {
+      const hit = findRowNode(viewport, latest);
+      if (hit && !hit.collapsed) {
+        const offset = offsetOf(viewport, hit.node);
+        const reachable = controls.sendReserveArmed() || viewport.scrollTop + offset - READING_TOP_PX < end;
+        if (offset > READING_TOP_PX + 1 && reachable) {
+          controls.place({ kind: "row", row: latest, offset: READING_TOP_PX });
+          return;
+        }
+      } else if (!hit) {
+        const index = groupEntries.findIndex(({ group }) =>
+          group.kind === "single" && group.member.item.item_id === latest.itemId && group.member.rank === latest.rank);
+        if (index >= virtualRange.end) {
+          placement.request({ kind: "row", row: latest, offset: READING_TOP_PX });
+          return;
+        }
+      }
+    }
+    const natural = end - controls.reserveHeight();
+    if (viewport.scrollTop > natural + 0.5) {
+      controls.placeScrollTop(end);
       return;
     }
-
-    const latestGroupIndex = latestTarget ? groupEntries.findIndex(({ group }) =>
-      group.kind === "single" && group.member.item.item_id === latestTarget.id && group.member.rank === latestTarget.rank) : -1;
-    if (jumpToLatestHuman(viewport, latestGroupIndex >= virtualRange.end)) return;
-
-    cancelPendingJump();
-    cancelBookmark();
-    maintainSendAnchor(viewport);
-    if (viewport.scrollTop >= tailHeight(viewport) - viewport.clientHeight) {
-      viewport.scrollTop = viewport.scrollHeight;
-      controller.notifyAnchored({ scrollTop: viewport.scrollTop, scrollHeight: viewport.scrollHeight, clientHeight: viewport.clientHeight });
-      measureAtBottom();
-      return;
-    }
-    controller.requestStick();
-    setAtBottom(true);
-    startScrollToBottomRide({
-      ride: scrollToBottomRideRef.current,
-      viewport,
-      controller,
-      tailHeight,
-      pinToBottom,
-      measureAtBottom,
-      trimFollowing,
-    });
-  }, [cancelBookmark, cancelPendingJump, controller, groupEntries, jumpToLatestHuman, latestTarget, maintainSendAnchor, measureAtBottom, pinToBottom, tailHeight, trimFollowing, virtualRange.end]);
+    controls.place(TAIL, { smooth: true });
+  }, [controls, groupEntries, placement, virtualRange.end]);
 
   const navigateQuote = useCallback((quote: Quote) => {
     if (!quote.source_message_id && quote.source_inbound_id == null) {
@@ -792,7 +414,8 @@ export const TimelineView = memo(function TimelineView({
       const entry = groupEntries.find(({ group }) => group.kind === "single" ? group.member.item === item : group.members.some((member) => member.item === item));
       if (entry && !entry.runExpanded) toggleTurn(entry.groupKey, false);
       toggleExpanded(item.item_id, false);
-      setQuoteReveal((previous) => ({ itemId: item.item_id, token: (previous?.token ?? 0) + 1 }));
+      setQuoteTarget((previous) => ({ itemId: item.item_id, token: (previous?.token ?? 0) + 1 }));
+      placement.request({ kind: "row", row: { itemId: item.item_id, rank: rankOf(item, compactBuffer) }, offset: READING_TOP_PX });
       setQuoteRequest(null);
     } else if (!loadingOlder && hasMoreOlder && onLoadOlder && pages < 3) {
       setQuoteRequest({ quote, pages: pages + 1 });
@@ -801,68 +424,87 @@ export const TimelineView = memo(function TimelineView({
       setQuoteStatus(t("quoteUnavailable"));
       setQuoteRequest(null);
     }
-  }, [quoteRequest, canonicalItems, threadKey, groupEntries, toggleTurn, toggleExpanded, loadingOlder, hasMoreOlder, onLoadOlder, t]);
+  }, [quoteRequest, canonicalItems, compactBuffer, threadKey, groupEntries, placement, toggleTurn, toggleExpanded, loadingOlder, hasMoreOlder, onLoadOlder, t]);
 
+  const [announcedTurnActive, setAnnouncedTurnActive] = useState(turnActive);
+  const [turnAnnouncement, setTurnAnnouncement] = useState<string | null>(null);
+  if (announcedTurnActive !== turnActive) {
+    setAnnouncedTurnActive(turnActive);
+    setTurnAnnouncement(turnActive ? t("agentResponding") : t("agentResponseComplete"));
+  }
+
+  const showRing = loading || !visible;
   return (
     <QuoteNavigation.Provider value={navigateQuote}>
-    <QuoteTarget.Provider value={quoteReveal}>
+    <QuoteTarget.Provider value={quoteTarget}>
     <div ref={wrapperRef} className={cn("relative", FLEX_1, MIN_H_0, OVERFLOW_HIDDEN)}>
       {onQuote ? <QuoteSelection scope={wrapperRef} items={items} agentId={Number(threadKey)} onQuote={onQuote} /> : null}
       {quoteStatus ? <div role="status" className="absolute bottom-12 left-4 z-40 rounded border border-border bg-background px-3 py-2 text-sm">{quoteStatus}</div> : null}
-      <LoadOlderSpinner loadingOlder={readerLoadingOlder && !loading && !reloadSearchingOlder} />
-      {hasMoreOlder && onLoadOlder ? <LoadOlderKeyboardButton loading={loadingOlder && !reloadSearchingOlder} onClick={pullOlderPage} /> : null}
-      <ColdLoadSpinner show={loading || reloadSearchingOlder} />
+      <LoadOlderSpinner loadingOlder={readerLoadingOlder && !showRing} />
+      {hasMoreOlder && onLoadOlder ? <LoadOlderKeyboardButton loading={loadingOlder} onClick={pullOlderPage} /> : null}
+      <ColdLoadSpinner show={showRing} />
       <ConnectionNotice />
       <ScrollArea
         className="h-full text-[13px] leading-relaxed"
+        viewportRef={viewportRef}
         viewportClassName="[overflow-anchor:none] overscroll-y-contain"
         scrollbarActivity="input"
       >
         <div
-          ref={contentRef}
-          role="log"
-          data-timeline-item-count={items.length}
-          aria-live="polite"
-          aria-relevant="additions"
-          style={maxWidthCss ? { maxWidth: maxWidthCss } : undefined}
           // meiva:note
-          // pb-6 provides generous breathing room between the last message /
-          // Live Activity Window and the composer's top rule (matching ChatGPT,
-          // Gemini, and Claude web layouts), paired with endRef below so the
-          // padding applies cleanly inside the log container.
-          // meiva:link ui/web/src/docs/frontend-components/home-shell-chrome/home-shell-chrome.md
-          className={cn("mx-auto w-full px-2 pb-6 space-y-3 sm:px-4", BAR_CLEAR_TOP_PADDING_CLASS, virtualEnabled && "timeline-virtual")}
+          // Rows are hidden (not unmounted) until their place is resolved: the first painted frame is
+          // the destination.
+          // meiva:link ui/web/src/docs/frontend-components/timeline-view/sticky-scroll.md
+          className="w-full"
+          style={visible ? undefined : { visibility: "hidden" }}
+          data-timeline-column
         >
-          {turnAnnouncement ? (
-            <span key={turnAnnouncement} className="sr-only" data-testid="timeline-turn-announcement">
-              {turnAnnouncement}
-            </span>
-          ) : null}
-          <TimelineGroupList
-            items={items}
-            compactBuffer={compactBuffer}
-            streamingCode={streamingCode}
-            turnActive={turnActive}
-            loading={loading || reloadSearchingOlder || readerLoadingOlder}
-            lastEventAt={lastEventAt}
-            activeTurnId={activeTurnId}
-            activeTurnStartedAt={activeTurnStartedAt}
-            overrides={overrides}
-            toggleExpanded={toggleExpanded}
-            toggleTurn={handleToggleTurn}
-            groups={groups}
-            groupEntries={groupEntries}
-            virtualEnabled={virtualEnabled}
-            virtualRange={virtualRange}
-            rowRange={rowRange}
-          />
-          <CompactingBlock />
-          <div ref={endRef} />
+          <div
+            ref={contentRef}
+            role="log"
+            data-timeline-item-count={items.length}
+            aria-live="polite"
+            aria-relevant="additions"
+            aria-busy={!visible}
+            style={maxWidthCss ? { maxWidth: maxWidthCss } : undefined}
+            // meiva:note
+            // pb-6 provides generous breathing room between the last message /
+            // Live Activity Window and the composer's top rule (matching ChatGPT,
+            // Gemini, and Claude web layouts), paired with endRef below so the
+            // padding applies cleanly inside the log container.
+            // meiva:link ui/web/src/docs/frontend-components/home-shell-chrome/home-shell-chrome.md
+            className={cn("mx-auto w-full px-2 pb-6 space-y-3 sm:px-4", BAR_CLEAR_TOP_PADDING_CLASS, virtualEnabled && "timeline-virtual")}
+          >
+            {turnAnnouncement ? (
+              <span key={turnAnnouncement} className="sr-only" data-testid="timeline-turn-announcement">
+                {turnAnnouncement}
+              </span>
+            ) : null}
+            <TimelineGroupList
+              items={items}
+              compactBuffer={compactBuffer}
+              streamingCode={streamingCode}
+              turnActive={turnActive}
+              loading={showRing || readerLoadingOlder}
+              lastEventAt={lastEventAt}
+              activeTurnId={activeTurnId}
+              activeTurnStartedAt={activeTurnStartedAt}
+              overrides={overrides}
+              toggleExpanded={toggleExpanded}
+              toggleTurn={handleToggleTurn}
+              groups={groups}
+              groupEntries={groupEntries}
+              virtualEnabled={virtualEnabled}
+              virtualRange={virtualRange}
+              rowRange={rowRange}
+            />
+            <CompactingBlock />
+            <div ref={endRef} />
+          </div>
+          <div ref={reserveRef} data-send-reserve aria-hidden="true" />
         </div>
-        <div ref={sendReserveRef} data-send-reserve aria-hidden="true" />
-        <div ref={collapseReserveRef} data-turn-collapse-reserve aria-hidden="true" />
       </ScrollArea>
-      <ScrollToBottomButton atBottom={atBottom || reloadSearchingOlder} onClick={handleScrollToBottom} />
+      <ScrollToBottomButton atBottom={atEnd || !visible} onClick={handleScrollToBottom} />
     </div>
     </QuoteTarget.Provider>
     </QuoteNavigation.Provider>

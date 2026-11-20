@@ -1,442 +1,165 @@
-import { act, fireEvent, screen } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { ChatMarkdownMock, ScrollAreaMock, cleanupTimelineTest, historyWheel, makeItem, pullOlderAtTop, render } from "./timeline-test-mock";
+import type { BackendTimelineItem } from "@/lib/contracts/types";
+import { ChatMarkdownMock, ScrollAreaMock, cleanupTimelineTest, historyWheel, makeItem, pullOlderAtTop, render, timelineLayout } from "./timeline-test-mock";
 vi.mock("@/components/content/markdown", () => ({ ChatMarkdown: ChatMarkdownMock }));
 vi.mock("@/components/ui/scroll-area", () => ({ ScrollArea: ScrollAreaMock }));
 import { TimelineView } from "..";
 afterEach(cleanupTimelineTest);
-describe("load-older prepend anchor (#659, #817, #1272)", () => {
-  const rect = (top: number): DOMRect =>
-    ({ top, bottom: top, left: 0, right: 0, width: 0, height: 0, x: 0, y: 0, toJSON: () => ({}) });
+
+// meiva:note
+// An older page lands above the reader: the row they were reading keeps its place on screen and
+// the new rows grow upward, out of view. The layout model gives every row its height (80 unless
+// set), 12px apart below the 52px bar-clear padding.
+// meiva:link ui/web/src/docs/frontend-components/timeline-view/history-paging.md
+describe("load-older prepend keeps the reader's row (#659, #817, #1272)", () => {
   beforeEach(() => {
     vi.useFakeTimers();
   });
   afterEach(() => {
     vi.restoreAllMocks();
+    vi.unstubAllGlobals();
     vi.useRealTimers();
   });
-  const triggerAtTop = (viewport: HTMLElement) => {
-    Object.defineProperty(viewport, "scrollHeight", { value: 1200, configurable: true });
-    Object.defineProperty(viewport, "clientHeight", { value: 600, configurable: true });
-    viewport.scrollTop = 500;
-    viewport.dispatchEvent(new Event("scroll"));
-    viewport.scrollTop = 0;
-    act(() => {
-      viewport.dispatchEvent(new Event("scroll"));
-    });
-    pullOlderAtTop(viewport);
-  };
-  it("momentum arrival alone does not load, and a fresh upward gesture loads exactly once", () => {
+
+  const chat = (id: string, payload = id) => makeItem({ item_id: id, kind: "agent_chat", payload });
+  const prompt = makeItem({ item_id: "0.0", kind: "system_prompt", payload: "prompt", created_at: null });
+
+  function paging(items: BackendTimelineItem[], layout: ReturnType<typeof timelineLayout>) {
     const loadOlder = vi.fn();
-    const items = [
-      makeItem({ item_id: "0.0", kind: "system_prompt", payload: "prompt", created_at: null }),
-      makeItem({ item_id: "10.0", kind: "agent_chat", payload: "ten" }),
-    ];
-    render(<TimelineView items={items} hasMoreOlder onLoadOlder={loadOlder} />);
-    const viewport = screen.getByTestId("scroll-viewport");
-    Object.defineProperty(viewport, "scrollHeight", { value: 1200, configurable: true });
-    Object.defineProperty(viewport, "clientHeight", { value: 600, configurable: true });
-    viewport.scrollTop = 50;
-    viewport.dispatchEvent(new Event("scroll"));
+    const view = (rows: BackendTimelineItem[], loadingOlder = false) => (
+      <TimelineView items={rows} hasMoreOlder loadingOlder={loadingOlder} onLoadOlder={loadOlder} />
+    );
+    const { rerender } = render(view(items));
+    return {
+      loadOlder,
+      pullAtTop: () => {
+        layout.scrollTo(200);
+        layout.scrollTo(0);
+        pullOlderAtTop(layout.viewport());
+        expect(loadOlder).toHaveBeenCalledTimes(1);
+        rerender(view(items, true));
+      },
+      land: (rows: BackendTimelineItem[]) => rerender(view(rows)),
+    };
+  }
+
+  it("momentum arrival alone does not load, and a fresh upward gesture loads exactly once", () => {
+    const layout = timelineLayout({ rowHeight: 800 });
+    const loadOlder = vi.fn();
+    render(<TimelineView items={[prompt, chat("10.0", "ten")]} hasMoreOlder onLoadOlder={loadOlder} />);
+    layout.scrollTo(50);
     expect(loadOlder).not.toHaveBeenCalled();
-    viewport.scrollTop = 0;
-    viewport.dispatchEvent(new Event("scroll"));
-    historyWheel(viewport, -200, true);
+    layout.scrollTo(0);
+    historyWheel(layout.viewport(), -200, true);
     expect(loadOlder).not.toHaveBeenCalled();
     vi.advanceTimersByTime(150);
-    pullOlderAtTop(viewport);
+    pullOlderAtTop(layout.viewport());
     expect(loadOlder).toHaveBeenCalledTimes(1);
-    viewport.scrollTop = 0;
-    viewport.dispatchEvent(new Event("scroll"));
+    layout.scrollTo(0);
     expect(loadOlder).toHaveBeenCalledTimes(1);
   });
-  it("anchors to the first REAL content node, not the system prompt (0.0) — zero height jitter (#817)", () => {
-    const loadOlder = vi.fn();
-    const items = [
-      makeItem({ item_id: "0.0", kind: "system_prompt", payload: "prompt", created_at: null }),
-      makeItem({ item_id: "10.0", kind: "agent_chat", payload: "ten" }),
-      makeItem({ item_id: "11.0", kind: "agent_chat", payload: "eleven" }),
-    ];
-    let moved = false;
-    vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockImplementation(
-      function (this: HTMLElement) {
-        if (this.dataset.itemId === "10.0") return rect(moved ? 250 : 0);
-        return rect(0);
-      },
-    );
-    const { rerender } = render(
-      <TimelineView items={items} hasMoreOlder onLoadOlder={loadOlder} />,
-    );
-    const viewport = screen.getByTestId("scroll-viewport");
-    triggerAtTop(viewport);
-    expect(loadOlder).toHaveBeenCalledTimes(1);
-    rerender(
-      <TimelineView
-        items={[...items, makeItem({ item_id: "12.0", kind: "agent_chat", payload: "twelve" })]}
-        hasMoreOlder
-        onLoadOlder={loadOlder}
-      />,
-    );
-    expect(viewport.scrollTop).toBe(0);
-    moved = true;
-    rerender(
-      <TimelineView
-        items={[
-          items[0],
-          makeItem({ item_id: "5.0", kind: "agent_chat", payload: "five" }),
-          makeItem({ item_id: "6.0", kind: "agent_chat", payload: "six" }),
-          ...items.slice(1),
-          makeItem({ item_id: "12.0", kind: "agent_chat", payload: "twelve" }),
-        ]}
-        hasMoreOlder
-        onLoadOlder={loadOlder}
-      />,
-    );
-    expect(viewport.scrollTop).toBe(250);
+
+  it("keeps the first visible row in place and lands the older rows above the viewport", () => {
+    const layout = timelineLayout({ rowHeight: 300 });
+    const items = [chat("10.0"), chat("11.0"), chat("12.0")];
+    const history = paging(items, layout);
+    history.pullAtTop();
+    const readingTop = layout.rowTop("10.0");
+    history.land([chat("5.0"), chat("6.0"), ...items]);
+    expect(layout.rowTop("10.0")).toBe(readingTop);
+    expect(layout.top()).toBe(2 * 312);
+    expect(layout.rowTop("6.0")).toBeLessThan(0);
   });
-  it("skips re-attached standing head notes — anchor and front signal land on the first real item", () => {
-    const loadOlder = vi.fn();
-    const items = [
-      makeItem({ item_id: "0.0", kind: "system_prompt", payload: "prompt", created_at: null }),
+
+  it("uses four-part historical ids for the landing and the exact row lookup", () => {
+    const layout = timelineLayout({ rowHeight: 320 });
+    const recent = "s1.newer-boundary.1.0";
+    const items = [chat(recent, "recent historical"), chat("1.0", "one"), chat("2.0", "two")];
+    const history = paging(items, layout);
+    history.pullAtTop();
+    const readingTop = layout.rowTop(recent);
+    history.land([chat("s2.older-boundary.1.0", "older historical"), ...items]);
+    expect(layout.rowTop(recent)).toBe(readingTop);
+    expect(layout.top()).toBe(332);
+  });
+
+  it("never anchors on an ephemeral _marker row: the real row below it keeps its place", () => {
+    const layout = timelineLayout({ rowHeight: 300 });
+    const marker = makeItem({ item_id: "_marker.compact_done", kind: "system_marker", source: "lifecycle", payload: "compact_done" });
+    const items = [marker, chat("10.0", "ten"), chat("11.0", "eleven")];
+    const history = paging(items, layout);
+    history.pullAtTop();
+    const readingTop = layout.rowTop("10.0");
+    // meiva:note
+    // The marker is gone by the time the page lands; the reader's row is not.
+    history.land([chat("5.0", "five"), chat("10.0", "ten"), chat("11.0", "eleven")]);
+    expect(layout.viewport().querySelector("[data-timeline-column]")!.getAttribute("style")).toBeNull();
+    expect(layout.rowTop("10.0")).toBe(readingTop);
+  });
+
+  it("does not scroll when only the pinned prompt is in view as the page lands (#1272)", () => {
+    const layout = timelineLayout({
+      rowHeight: 300,
+      height: (element) => (element.dataset.turnId === "0.0" ? 700 : undefined),
+    });
+    const items = [prompt, chat("10.0", "ten")];
+    const history = paging(items, layout);
+    history.pullAtTop();
+    expect(layout.rowTop("10.0")).toBeGreaterThan(600);
+    history.land([prompt, chat("5.0", "five"), ...items.slice(1)]);
+    expect(layout.top()).toBe(0);
+  });
+
+  // meiva:note
+  // SUSPECTED PRODUCT BUG (reported, not fixed here): the system prompt, its standing head notes
+  // and re-attached compact summaries stay pinned at the front of every loaded window, so older
+  // pages land *below* them. `readRowAnchor` (anchor/dom.ts) only skips `_` rows, so a reader
+  // pulling at the top anchors on the pinned head turn and the landing pushes the row they were
+  // reading down by the page's height (measured: 10.0 moves 104 -> 416 for one 300px row). The
+  // deleted prepend anchor skipped these heads (#817).
+  // meiva:link ui/web/src/docs/frontend-components/timeline-view/history-paging.md
+  it.each([
+    ["the system prompt", [prompt]],
+    ["standing head notes", [
+      prompt,
       makeItem({ item_id: "1.0", kind: "system_marker", source: "exec_timeout", payload: "t" }),
       makeItem({ item_id: "2.0", kind: "system_marker", source: "memory", payload: "m" }),
-      makeItem({ item_id: "10.0", kind: "agent_chat", payload: "ten" }),
-      makeItem({ item_id: "11.0", kind: "agent_chat", payload: "eleven" }),
-    ];
-    let moved = false;
-    vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockImplementation(
-      function (this: HTMLElement) {
-        if (this.dataset.itemId === "10.0") return rect(moved ? 250 : 0);
-        return rect(0);
-      },
-    );
-    const { rerender } = render(
-      <TimelineView items={items} hasMoreOlder onLoadOlder={loadOlder} />,
-    );
-    const viewport = screen.getByTestId("scroll-viewport");
-    triggerAtTop(viewport);
-    expect(loadOlder).toHaveBeenCalledTimes(1);
-    moved = true;
-    rerender(
-      <TimelineView
-        items={[
-          items[0],
-          ...items.slice(1, 3),
-          makeItem({ item_id: "5.0", kind: "agent_chat", payload: "five" }),
-          ...items.slice(3),
-        ]}
-        hasMoreOlder
-        onLoadOlder={loadOlder}
-      />,
-    );
-    expect(viewport.scrollTop).toBe(250);
+    ]],
+    ["a re-attached compact summary", [prompt, makeItem({ item_id: "s1.boundary.0.0", kind: "inbound_compact_summary", payload: "sum" })]],
+  ])("keeps the first real row in place when an older page lands under %s (#817)", (_label, head) => {
+    const layout = timelineLayout({ rowHeight: 300 });
+    const items = [...head, chat("10.0", "ten"), chat("11.0", "eleven")];
+    const history = paging(items, layout);
+    history.pullAtTop();
+    const readingTop = layout.rowTop("10.0");
+    history.land([...head, chat("5.0", "five"), ...items.slice(head.length)]);
+    expect(layout.rowTop("10.0")).toBe(readingTop);
   });
-  it("uses four-part historical ids for the prepend landing signal and exact anchor lookup", () => {
-    const loadOlder = vi.fn();
-    const recentHistoricalId = "s1.newer-boundary.1.0";
-    const items = [
-      makeItem({ item_id: "0.0", kind: "system_prompt", payload: "prompt", created_at: null }),
-      makeItem({ item_id: recentHistoricalId, kind: "agent_chat", payload: "recent historical" }),
-      makeItem({ item_id: "1.0", kind: "agent_chat", payload: "one" }),
-    ];
-    let moved = false;
-    vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockImplementation(
-      function (this: HTMLElement) {
-        if (this.dataset.itemId === recentHistoricalId) return rect(moved ? 320 : 0);
-        return rect(0);
-      },
-    );
-    const { rerender } = render(
-      <TimelineView items={items} hasMoreOlder onLoadOlder={loadOlder} />,
-    );
-    const viewport = screen.getByTestId("scroll-viewport");
-    triggerAtTop(viewport);
-    expect(loadOlder).toHaveBeenCalledTimes(1);
-    moved = true;
-    const olderHistoricalId = "s2.older-boundary.1.0";
-    rerender(
-      <TimelineView
-        items={[
-          items[0],
-          makeItem({ item_id: olderHistoricalId, kind: "agent_chat", payload: "older historical" }),
-          ...items.slice(1),
-        ]}
-        hasMoreOlder
-        onLoadOlder={loadOlder}
-      />,
-    );
-    expect(viewport.scrollTop).toBe(320);
+
+  it("keeps the row the reader moved to while the page was in flight", () => {
+    const layout = timelineLayout({ rowHeight: 300 });
+    const items = [chat("10.0"), chat("11.0"), chat("12.0"), chat("13.0")];
+    const history = paging(items, layout);
+    history.pullAtTop();
+    layout.scrollTo(400);
+    const readingTop = layout.rowTop("12.0");
+    history.land([chat("5.0"), ...items]);
+    expect(layout.rowTop("12.0")).toBe(readingTop);
+    expect(layout.top()).toBe(400 + 312);
   });
-  it("skips pinned compact-summary context when its turn is collapsed", () => {
-    const loadOlder = vi.fn();
-    const summaryId = "s1.boundary.0.0";
-    const firstRealId = "s1.boundary.1.0";
-    const items = [
-      makeItem({ item_id: "0.0", kind: "system_prompt", payload: "prompt", created_at: null }),
-      makeItem({ item_id: summaryId, kind: "inbound_compact_summary", payload: "sum" }),
-      makeItem({ item_id: firstRealId, kind: "agent_chat", payload: "real" }),
-    ];
-    let moved = false;
-    vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockImplementation(
-      function (this: HTMLElement) {
-        if (this.dataset.itemId === firstRealId) return rect(moved ? 200 : 0);
-        return rect(0);
-      },
-    );
-    const { rerender } = render(
-      <TimelineView items={items} hasMoreOlder onLoadOlder={loadOlder} />,
-    );
-    const viewport = screen.getByTestId("scroll-viewport");
-    triggerAtTop(viewport);
-    expect(loadOlder).toHaveBeenCalledTimes(1);
-    moved = true;
-    rerender(
-      <TimelineView
-        items={[
-          items[0],
-          makeItem({ item_id: "s2.older.1.0", kind: "agent_chat", payload: "older" }),
-          ...items.slice(1),
-        ]}
-        hasMoreOlder
-        onLoadOlder={loadOlder}
-      />,
-    );
-    expect(viewport.scrollTop).toBe(200);
-  });
-  it("skips ephemeral _marker rows too — the anchor is the first real message (#817)", () => {
-    const loadOlder = vi.fn();
-    const items = [
-      makeItem({ item_id: "0.0", kind: "system_prompt", payload: "prompt", created_at: null }),
-      makeItem({ item_id: "_marker.compact_done", kind: "system_marker", source: "lifecycle", payload: "compact_done" }),
-      makeItem({ item_id: "10.0", kind: "agent_chat", payload: "ten" }),
-    ];
-    let moved = false;
-    vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockImplementation(
-      function (this: HTMLElement) {
-        if (this.dataset.itemId === "10.0") return rect(moved ? 250 : 0);
-        return rect(0);
-      },
-    );
-    const { rerender } = render(
-      <TimelineView items={items} hasMoreOlder onLoadOlder={loadOlder} />,
-    );
-    const viewport = screen.getByTestId("scroll-viewport");
-    triggerAtTop(viewport);
-    expect(loadOlder).toHaveBeenCalledTimes(1);
-    moved = true;
-    rerender(
-      <TimelineView
-        items={[
-          items[0],
-          makeItem({ item_id: "5.0", kind: "agent_chat", payload: "five" }),
-          ...items.slice(1),
-        ]}
-        hasMoreOlder
-        onLoadOlder={loadOlder}
-      />,
-    );
-    expect(viewport.scrollTop).toBe(250);
-  });
-  it("still compensates when the thread has no system prompt (front item is real)", () => {
-    const loadOlder = vi.fn();
-    const items = [
-      makeItem({ item_id: "10.0", kind: "agent_chat", payload: "ten" }),
-      makeItem({ item_id: "11.0", kind: "agent_chat", payload: "eleven" }),
-    ];
-    let moved = false;
-    vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockImplementation(
-      function (this: HTMLElement) {
-        if (this.dataset.itemId === "10.0") return rect(moved ? 180 : 0);
-        return rect(0);
-      },
-    );
-    const { rerender } = render(
-      <TimelineView items={items} hasMoreOlder onLoadOlder={loadOlder} />,
-    );
-    const viewport = screen.getByTestId("scroll-viewport");
-    triggerAtTop(viewport);
-    expect(loadOlder).toHaveBeenCalledTimes(1);
-    moved = true;
-    rerender(
-      <TimelineView
-        items={[
-          makeItem({ item_id: "5.0", kind: "agent_chat", payload: "five" }),
-          ...items,
-        ]}
-        hasMoreOlder
-        onLoadOlder={loadOlder}
-      />,
-    );
-    expect(viewport.scrollTop).toBe(180);
-  });
-  it("abandons the anchor when the content above did not grow (delta <= 0 — compact/reset, not a landing)", () => {
-    const loadOlder = vi.fn();
-    const items = [
-      makeItem({ item_id: "0.0", kind: "system_prompt", payload: "prompt", created_at: null }),
-      makeItem({ item_id: "10.0", kind: "agent_chat", payload: "ten" }),
-    ];
-    let top = 100;
-    vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockImplementation(
-      function (this: HTMLElement) {
-        if (this.dataset.itemId === "10.0") return rect(top);
-        return rect(0);
-      },
-    );
-    const { rerender } = render(
-      <TimelineView items={items} hasMoreOlder onLoadOlder={loadOlder} />,
-    );
-    const viewport = screen.getByTestId("scroll-viewport");
-    triggerAtTop(viewport);
-    expect(loadOlder).toHaveBeenCalledTimes(1);
-    top = 80;
-    rerender(
-      <TimelineView
-        items={[
-          items[0],
-          makeItem({ item_id: "5.0", kind: "agent_chat", payload: "five" }),
-          ...items.slice(1),
-        ]}
-        hasMoreOlder
-        onLoadOlder={loadOlder}
-      />,
-    );
-    expect(viewport.scrollTop).toBe(0);
-  });
-  it("anchors to the 0.0 prompt node when no real item is visible — landing does not scroll (#1272)", () => {
-    const loadOlder = vi.fn();
-    const items = [
-      makeItem({ item_id: "0.0", kind: "system_prompt", payload: "prompt", created_at: null }),
-      makeItem({ item_id: "10.0", kind: "agent_chat", payload: "ten" }),
-    ];
-    vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockImplementation(
-      function (this: HTMLElement) {
-        if (this.dataset.itemId === "0.0") return rect(0);
-        if (this.dataset.itemId === "10.0") return rect(2000);
-        return rect(0);
-      },
-    );
-    const { rerender } = render(
-      <TimelineView items={items} hasMoreOlder onLoadOlder={loadOlder} />,
-    );
-    const viewport = screen.getByTestId("scroll-viewport");
-    triggerAtTop(viewport);
-    expect(loadOlder).toHaveBeenCalledTimes(1);
-    rerender(
-      <TimelineView
-        items={[
-          items[0],
-          makeItem({ item_id: "5.0", kind: "agent_chat", payload: "five" }),
-          ...items.slice(1),
-        ]}
-        hasMoreOlder
-        onLoadOlder={loadOlder}
-      />,
-    );
-    expect(viewport.scrollTop).toBe(0);
-  });
-  it("materializes the full prepend and keeps its real height after compensation", () => {
-    const loadOlder = vi.fn();
-    const tallRect = (top: number, height: number): DOMRect =>
-      ({ top, bottom: top + height, left: 0, right: 0, width: 0, height, x: 0, y: 0, toJSON: () => ({}) });
-    const EST = 80;
-    const PROMPT = 100;
-    const CONTENT_TOP = -340;
-    const realHeights: Record<string, number> = { "5.0": 500, "6.0": 400, "7.0": 90, "8.0": 70 };
-    vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockImplementation(
-      function (this: HTMLElement) {
-        const vp = document.querySelector<HTMLElement>('[data-testid="scroll-viewport"]');
-        if (this === vp) {
-          return { top: 0, bottom: 752, left: 0, right: 0, width: 0, height: 752, x: 0, y: 0, toJSON: () => ({}) };
-        }
-        if (!vp) return rect(0);
-        const rows = [...vp.querySelectorAll<HTMLElement>(".timeline-item")];
-        const idx = rows.indexOf(this);
-        if (idx < 0) return rect(0);
-        let top = CONTENT_TOP;
-        for (let j = 0; j < idx; j++) {
-          const row = rows[j];
-          const id = row.dataset.itemId ?? "";
-          const forced = row.style.contentVisibility === "visible";
-          top += id === "0.0" ? PROMPT : forced ? (realHeights[id] ?? EST) : EST;
-        }
-        const id = this.dataset.itemId ?? "";
-        const height =
-          id === "0.0" ? PROMPT : this.style.contentVisibility === "visible" ? (realHeights[id] ?? EST) : EST;
-        return tallRect(top - vp.scrollTop, height);
-      },
-    );
-    const items = [
-      makeItem({ item_id: "0.0", kind: "system_prompt", payload: "prompt", created_at: null }),
-      makeItem({ item_id: "7.0", kind: "agent_chat", payload: "seven" }),
-      makeItem({ item_id: "8.0", kind: "agent_chat", payload: "eight" }),
-      makeItem({ item_id: "9.0", kind: "agent_chat", payload: "nine" }),
-    ];
-    const { rerender } = render(
-      <TimelineView items={items} hasMoreOlder onLoadOlder={loadOlder} />,
-    );
-    fireEvent.click(screen.getByTestId("turn-toggle"));
-    const viewport = screen.getByTestId("scroll-viewport");
-    triggerAtTop(viewport);
-    expect(loadOlder).toHaveBeenCalledTimes(1);
-    const readingTop = viewport.querySelector<HTMLElement>('[data-item-id="9.0"]')!.getBoundingClientRect().top;
-    rerender(
-      <TimelineView
-        items={[
-          items[0],
-          makeItem({ item_id: "5.0", kind: "agent_chat", payload: "five" }),
-          makeItem({ item_id: "6.0", kind: "agent_chat", payload: "six" }),
-          ...items.slice(1),
-        ]}
-        hasMoreOlder
-        onLoadOlder={loadOlder}
-      />,
-    );
-    expect(viewport.scrollTop).toBe(900);
-    expect(viewport.querySelector<HTMLElement>('[data-item-id="9.0"]')!.getBoundingClientRect().top).toBe(readingTop);
-  });
-  it("preserves the reading position when the user scrolled during the fetch (document-space delta, not the trigger-time viewport top)", () => {
-    const loadOlder = vi.fn();
-    const items = [
-      makeItem({ item_id: "0.0", kind: "system_prompt", payload: "prompt", created_at: null }),
-      makeItem({ item_id: "10.0", kind: "agent_chat", payload: "ten" }),
-      makeItem({ item_id: "11.0", kind: "agent_chat", payload: "eleven" }),
-    ];
-    let moved = false;
-    vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockImplementation(
-      function (this: HTMLElement) {
-        if (this.getAttribute("data-testid") === "scroll-viewport") {
-          return { top: 0, bottom: 752, left: 0, right: 0, width: 0, height: 752, x: 0, y: 0, toJSON: () => ({}) };
-        }
-        const vp = document.querySelector<HTMLElement>('[data-testid="scroll-viewport"]');
-        const st = vp?.scrollTop ?? 0;
-        if (this.dataset.itemId === "10.0") return rect(200 - st + (moved ? 250 : 0));
-        return rect(0);
-      },
-    );
-    const { rerender } = render(
-      <TimelineView items={items} hasMoreOlder onLoadOlder={loadOlder} />,
-    );
-    const viewport = screen.getByTestId("scroll-viewport");
-    triggerAtTop(viewport);
-    expect(loadOlder).toHaveBeenCalledTimes(1);
-    rerender(
-      <TimelineView items={items} hasMoreOlder loadingOlder onLoadOlder={loadOlder} />,
-    );
-    viewport.scrollTop = 0;
-    viewport.dispatchEvent(new Event("scroll"));
-    moved = true;
-    rerender(
-      <TimelineView
-        items={[
-          items[0],
-          makeItem({ item_id: "5.0", kind: "agent_chat", payload: "five" }),
-          ...items.slice(1),
-        ]}
-        hasMoreOlder
-        loadingOlder
-        onLoadOlder={loadOlder}
-      />,
-    );
-    expect(viewport.scrollTop).toBe(250);
+
+  it("keeps the reading row through a prepend of rows with real, uneven heights", () => {
+    const heights: Record<string, number> = { "5.0": 500, "6.0": 400, "7.0": 90, "8.0": 70, "9.0": 300 };
+    const layout = timelineLayout({ rowHeight: (row) => heights[row.dataset.itemId ?? ""] ?? 80 });
+    const items = [chat("7.0"), chat("8.0"), chat("9.0"), chat("10.0", "ten"), makeItem({ item_id: "11.0", kind: "agent_chat", payload: "x" })];
+    heights["10.0"] = 400;
+    heights["11.0"] = 400;
+    const history = paging(items, layout);
+    history.pullAtTop();
+    layout.scrollTo(200);
+    const reading = layout.rowTop("9.0");
+    history.land([chat("5.0"), chat("6.0"), ...items]);
+    expect(layout.rowTop("9.0")).toBe(reading);
+    expect(layout.top()).toBe(200 + 500 + 12 + 400 + 12);
   });
 });

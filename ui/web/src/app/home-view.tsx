@@ -19,7 +19,7 @@ import type { SharedContextPanel as ContextPanelComponent } from "@/components/c
 import { ContextPanelToggle } from "@/components/shell/context-panel-toggle";
 import type { HeaderBar as HeaderBarComponent } from "@/components/shell/header-bar";
 import { HomeLayout } from "@/components/shell/home-layout";
-import type { ReloadRestoreConfig, TimelineView as TimelineViewComponent } from "@/components/timeline";
+import { hasSavedTimelinePlace, type ReloadRestoreConfig, type TimelineView as TimelineViewComponent } from "@/components/timeline";
 import { InlineError } from "@/components/ui/inline-error";
 import { useBrowser } from "@/lib/browser/browser-provider";
 import { usePendingMessages, withoutTimelineDuplicates } from "@/lib/agents/use-pending-messages";
@@ -141,6 +141,7 @@ export interface HomePageProps {
   UploadButton: UploadButtonSlot;
 }
 
+const NO_UNREAD_REVEAL = { decided: true, itemId: null } as const;
 const NO_PUBLICATIONS: readonly UserMessage[] = [];
 
 export function HomePageView(props: HomePageProps) {
@@ -481,18 +482,35 @@ function HomeContent({
   const mobileAttention = useMobileAttention(breakpoint.isNarrow);
   const displayedItems = useMemo(() => withUserMessages(items, publications.data?.items ?? []), [items, publications.data]);
   const loadOlderForReveal = useCallback(() => loadOlder("background"), [loadOlder]);
-  const reveal = useSeenPosition({
+  // meiva:note
+  // A first visit opens on the first unseen delivery, and keeps its rows hidden until that is
+  // decided. The roster already says whether the agent had unread deliveries when it was opened;
+  // without any, the decision is the tail at once instead of after a fresh feed read.
+  // meiva:link ui/web/src/docs/frontend-components/timeline-view/sticky-scroll.md
+  const openedState = () => ({
+    agentId: activeId,
+    rosterRow: activeAgent !== undefined,
+    unread: activeAgent?.has_unread_user_messages,
+    savedPlace: hasSavedTimelinePlace(`${bfcacheId}:agent:${activeId ?? "unselected"}`, activeId != null ? String(activeId) : undefined, reloadRestore),
+  });
+  const [openedUnread, setOpenedUnread] = useState(openedState);
+  if (openedUnread.agentId !== activeId || (!openedUnread.rosterRow && activeAgent !== undefined)) {
+    setOpenedUnread(openedState());
+  }
+  const seenReveal = useSeenPosition({
     agentId: activeId,
     feed: {
       seenId: publications.data?.seen_id,
       messages: publications.data?.items ?? NO_PUBLICATIONS,
       updatedAt: publications.dataUpdatedAt,
+      failed: publications.isError && !publications.isFetching,
     },
     items: displayedItems,
     timelineLoading: isLoading,
     hasMoreOlder,
     loadingOlder,
     loadOlder: loadOlderForReveal,
+    revealWanted: !openedUnread.savedPlace,
   });
   const replySuggestion = useReplySuggestion({
     agentId: activeId,
@@ -524,7 +542,6 @@ function HomeContent({
             compactBuffer={compactBuffer}
             threadKey={activeId != null ? String(activeId) : undefined}
             scrollMemoryKey={`${bfcacheId}:agent:${activeId ?? "unselected"}`}
-            restoreReady={sourceReady}
             reloadRestore={reloadRestore}
             streamingCode={streamingCode}
             turnActive={agentBusy}
@@ -539,7 +556,7 @@ function HomeContent({
             retainedItemsMax={retainedItemsMax}
             loading={isLoading || (agentsLoading && activeId === null)}
             maxWidthCss={contentColumnMaxWidth}
-            reveal={reveal}
+            reveal={openedUnread.agentId === activeId && openedUnread.unread === false ? NO_UNREAD_REVEAL : seenReveal}
             onQuote={acceptQuote}
           />
           <HeaderBar

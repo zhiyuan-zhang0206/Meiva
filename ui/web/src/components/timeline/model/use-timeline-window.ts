@@ -1,14 +1,9 @@
 "use client";
 
 import { useCallback, useDeferredValue, useEffect, useLayoutEffect, useRef, useState } from "react";
-import type { CompactTransitionBuffer } from "@/lib/layout/compact-transition";
-import type { SavedScroll } from "@/lib/layout/scroll-memory";
-import { parseItemIdParts } from "@/lib/timeline/timeline";
-import type { BackendTimelineItem } from "@/lib/contracts/types";
 import { useDisplayLimit } from "@/lib/format/display-limits";
 import { TIMELINE_TURN_ROW_GAP_PX } from "@/lib/layout/layout";
 
-import { materializeBeforeAnchor, materializeFromAnchor } from "./materialize-prefix";
 
 // meiva:note
 // Matches space-y-3 between timeline groups; details use the shared work-row gap.
@@ -18,8 +13,6 @@ const BUFFER_VIEWPORTS = 1;
 // KEEP (task #3696 exception inventory): 24 is roughly three 8-row screens before geometry exists; it caps initial DOM mounts, not a user window.
 const BOOTSTRAP_WINDOW_ROWS = 24;
 const BOOTSTRAP_PIN_LEAD_ROWS = BOOTSTRAP_WINDOW_ROWS / 2;
-// KEEP (task #3696 exception inventory): 680px estimates one screen only until the real viewport is measured; steady behavior uses that measurement.
-const UNMEASURED_VIEWPORT_HEIGHT_PX = 680;
 // KEEP (task #3696 exception inventory): 500 keys cover twice the default 250-item follower slice before cache sweeping; this is housekeeping.
 const HEIGHT_CACHE_SWEEP_FLOOR = 500;
 const ACTIVATION_ROWS_FALLBACK = 100;
@@ -39,69 +32,6 @@ export function useTimelineWindowLimits() {
   return { activationRows, turnRows, measureRows };
 }
 
-// meiva:note
-// Locate a saved reading item, including a child whose turn is now collapsed.
-export function resolveSavedTimelineAnchor(
-  viewport: HTMLElement,
-  anchor: NonNullable<SavedScroll["anchor"]>,
-  compactBuffer: CompactTransitionBuffer | null,
-  canonicalItems: readonly BackendTimelineItem[],
-) {
-  const id = CSS.escape(anchor.itemId);
-  const rank = anchor.rank;
-  const rankId = CSS.escape(`${rank}:${anchor.itemId}`);
-  const exact = viewport.querySelector<HTMLElement>(
-    `.timeline-item[data-item-id="${id}"][data-display-rank="${rank}"], [data-turn-expanded="false"][data-item-id="${id}"][data-display-rank="${rank}"]`,
-  );
-  const collapsed = exact ? null : viewport.querySelector<HTMLElement>(
-    `[data-turn-expanded="false"][data-turn-member-ranks~="${rankId}"], [data-turn-expanded="false"][data-turn-member-ids~="${id}"][data-display-rank="${rank}"]`,
-  );
-  const buffered = compactBuffer?.rows.some((row) => row.rank === rank && row.item.item_id === anchor.itemId) === true;
-  const canonical = canonicalItems.some((item) => item.item_id === anchor.itemId &&
-    (parseItemIdParts(item.item_id)?.rank ?? 0) === rank);
-  return {
-    node: exact ?? collapsed,
-    present: buffered || canonical,
-    viewportTop: collapsed ? Math.max(52, anchor.viewportTop) : anchor.viewportTop,
-  };
-}
-
-/** Restore only when this layout can hold the reading position. */
-export function applySavedTimelineScroll(
-  viewport: HTMLElement,
-  saved: SavedScroll,
-  compactBuffer: CompactTransitionBuffer | null,
-  canonicalItems: readonly BackendTimelineItem[],
-  tailHeight = viewport.scrollHeight,
-  collapseReserve?: HTMLElement | null,
-): boolean {
-  if (viewport.scrollHeight <= viewport.clientHeight) return false;
-  const target = saved.followBottom || !saved.anchor ? null
-    : resolveSavedTimelineAnchor(viewport, saved.anchor, compactBuffer, canonicalItems);
-  if (target?.present && !target.node) return false;
-  if (target?.node) {
-    materializeBeforeAnchor(viewport, target.node);
-    materializeFromAnchor(viewport, target.node);
-  }
-  let top = saved.followBottom ? tailHeight - viewport.clientHeight : target?.node
-    ? viewport.scrollTop + target.node.getBoundingClientRect().top - viewport.getBoundingClientRect().top - target.viewportTop
-    : saved.scrollTop;
-  if (target?.node && top > viewport.scrollHeight - viewport.clientHeight) {
-    materializeFromAnchor(viewport, target.node, top);
-  }
-  const max = viewport.scrollHeight - viewport.clientHeight;
-  if (top > max) {
-    if (target?.node && !saved.usedCollapseReserve && top <= max + 1.5) {
-      top = max;
-    } else {
-      if (!saved.usedCollapseReserve || !collapseReserve || !target?.node) return false;
-      collapseReserve.style.height = `${Math.ceil(top - max + collapseReserve.offsetHeight)}px`;
-    }
-  }
-  viewport.scrollTop = Math.max(0, top);
-  return true;
-}
-
 export interface WindowGroup {
   key: string;
   rank: number;
@@ -116,18 +46,6 @@ export interface WindowRange {
   end: number;
   before: number;
   after: number;
-}
-
-function visibleRow(content: HTMLElement, rect: DOMRect): HTMLElement | null {
-  const intersects = (node: HTMLElement) => {
-    const box = node.getBoundingClientRect();
-    return box.bottom > rect.top && box.top < rect.bottom;
-  };
-  return (
-    [...content.querySelectorAll<HTMLElement>(".timeline-item, [data-turn-expanded='false'][data-turn-id]")].find(intersects) ??
-    [...content.querySelectorAll<HTMLElement>("[data-turn-id]")].find(intersects) ??
-    null
-  );
 }
 
 function groupHeightKey(group: WindowGroup): string {
@@ -190,8 +108,14 @@ interface Options {
   viewportRef: { current: HTMLElement | null };
   contentRef: { current: HTMLElement | null };
   isFollowing: () => boolean;
-  pendingAnchor: { id: string; rank: number } | null;
-  restoreTop: number | null;
+  // meiva:note
+  // A row a placement is about to land on, or the reader's row: the window mounts it before the
+  // writer reads it.
+  pin: { itemId: string; rank: number } | null;
+  // meiva:note
+  // The reader follows the tail: the window is measured from the end, so moving the tail does not
+  // move the window (a window placed from scrollTop and the tail pin would chase each other).
+  tail: boolean;
 }
 
 export function useTimelineWindow({
@@ -203,54 +127,16 @@ export function useTimelineWindow({
   viewportRef,
   contentRef,
   isFollowing,
-  pendingAnchor,
-  restoreTop,
+  pin,
+  tail,
 }: Options) {
   const [heights, setHeights] = useState(() => new Map<string, number>());
-  const [visiblePin, setVisiblePin] = useState<{ id: string; rank: number; identity: string | null } | null>(null);
-  if (isFollowing() && visiblePin !== null) setVisiblePin(null);
   const previousIdentityRef = useRef(identity);
-  const [view, setView] = useState({ top: restoreTop ?? 0, height: 0, origin: 52 });
+  const [view, setView] = useState({ top: 0, height: 0, origin: 52 });
   const viewRef = useRef(view);
-  const readingRef = useRef<{ node: HTMLElement; top: number; id: string; rank: number; identity: string | null } | null>(null);
-  const preserveRef = useRef<typeof readingRef.current>(null);
   const tracking = enabled || groups.reduce((count, group) =>
     count + Math.max(group.itemIds.length, group.expandedRows?.length ?? 1), 0) >= measureRows;
-  const rememberVisible = useCallback(() => {
-    if (isFollowing()) {
-      readingRef.current = null;
-      preserveRef.current = null;
-      return;
-    }
-    const content = contentRef.current;
-    const viewport = viewportRef.current;
-    const vpRect = viewport?.getBoundingClientRect();
-    const node = content && viewport && vpRect ? visibleRow(content, vpRect) : null;
-    const id = node?.dataset.itemId;
-    if (!node || !id) {
-      if (vpRect && vpRect.height > 0) {
-        readingRef.current = null;
-        preserveRef.current = null;
-        setVisiblePin(null);
-      }
-      return;
-    }
-    const rank = Number(node.dataset.displayRank ?? 0);
-    readingRef.current = { node, top: node.getBoundingClientRect().top, id, rank, identity };
-    setVisiblePin((previous) => previous?.id === id && previous.rank === rank && previous.identity === identity
-      ? previous : { id, rank, identity });
-  }, [contentRef, identity, isFollowing, viewportRef]);
   useLayoutEffect(() => { viewRef.current = view; }, [view]);
-  // Layout cleanup runs before React replaces rows. It covers window activation
-  // and a Details-mode change even when neither fires a scroll event.
-  useLayoutEffect(() => () => {
-    if (!tracking || isFollowing() || preserveRef.current) return;
-    preserveRef.current = readingRef.current;
-    if (!preserveRef.current) {
-      rememberVisible();
-      preserveRef.current = readingRef.current;
-    }
-  });
   useEffect(() => {
     if (previousIdentityRef.current === identity) return;
     previousIdentityRef.current = identity;
@@ -294,12 +180,10 @@ export function useTimelineWindow({
     const changed = Math.abs(previous.top - next.top) >= 1 || previous.height !== next.height ||
       Math.abs(previous.origin - next.origin) >= 1;
     if (changed) {
-      rememberVisible();
-      preserveRef.current = readingRef.current;
       viewRef.current = next;
       setView(next);
     }
-  }, [contentRef, rememberVisible, viewportRef]);
+  }, [contentRef, viewportRef]);
 
   // A compact handoff, send pin or restore moves scrollTop in an earlier
   // layout effect. Sampling every commit puts that position into the same
@@ -327,12 +211,11 @@ export function useTimelineWindow({
   }, [tracking, measureView, viewportRef]);
 
   const sizes = groups.map((group) => heights.get(groupHeightKey(group)) ?? group.estimatedHeight);
-  const pin = pendingAnchor ?? (visiblePin?.identity === identity ? visiblePin : null);
   const pinnedIndex = pin
     ? groups.findIndex((group) =>
         group.memberRankKeys
-          ? group.memberRankKeys.includes(`${pin.rank}:${pin.id}`)
-          : group.rank === pin.rank && group.itemIds.includes(pin.id),
+          ? group.memberRankKeys.includes(`${pin.rank}:${pin.itemId}`)
+          : group.rank === pin.rank && group.itemIds.includes(pin.itemId),
       )
     : -1;
   const range = (() => {
@@ -343,8 +226,16 @@ export function useTimelineWindow({
         const end = Math.min(groups.length, start + BOOTSTRAP_WINDOW_ROWS);
         return { start, end, before: span(sizes, 0, start), after: span(sizes, end, sizes.length) };
       }
-      if (restoreTop !== null) return windowForSizes(sizes, restoreTop, UNMEASURED_VIEWPORT_HEIGHT_PX, view.origin);
       const start = Math.max(0, groups.length - BOOTSTRAP_WINDOW_ROWS);
+      return { start, end: groups.length, before: span(sizes, 0, start), after: 0 };
+    }
+    if (tail) {
+      let start = groups.length;
+      let cursor = 0;
+      while (start > 0 && cursor < view.height * (1 + BUFFER_VIEWPORTS)) {
+        start--;
+        cursor += sizes[start] + GAP;
+      }
       return { start, end: groups.length, before: span(sizes, 0, start), after: 0 };
     }
     let top = view.top;
@@ -365,21 +256,29 @@ export function useTimelineWindow({
     const childSizes = rows.map((key) => heights.get(key) ?? 80);
     if (view.height <= 0) {
       const childPin = groupIndex === pinnedIndex && pin
-        ? rows.findIndex((key) => key.endsWith(`:${pin.rank}:${pin.id}`)) : -1;
+        ? rows.findIndex((key) => key.endsWith(`:${pin.rank}:${pin.itemId}`)) : -1;
       if (childPin >= 0) {
         const start = Math.max(0, childPin - BOOTSTRAP_PIN_LEAD_ROWS);
         const end = Math.min(rows.length, start + BOOTSTRAP_WINDOW_ROWS);
         return { start, end, before: span(childSizes, 0, start, TIMELINE_TURN_ROW_GAP_PX), after: span(childSizes, end, rows.length, TIMELINE_TURN_ROW_GAP_PX) };
       }
-      if (restoreTop !== null) return windowForSizes(childSizes, restoreTop, UNMEASURED_VIEWPORT_HEIGHT_PX, view.origin + 60, TIMELINE_TURN_ROW_GAP_PX);
       const start = Math.max(0, rows.length - BOOTSTRAP_WINDOW_ROWS);
+      return { start, end: rows.length, before: span(childSizes, 0, start, TIMELINE_TURN_ROW_GAP_PX), after: 0 };
+    }
+    if (tail && groupIndex === groups.length - 1) {
+      let start = rows.length;
+      let cursor = 0;
+      while (start > 0 && cursor < view.height * (1 + BUFFER_VIEWPORTS)) {
+        start--;
+        cursor += childSizes[start] + TIMELINE_TURN_ROW_GAP_PX;
+      }
       return { start, end: rows.length, before: span(childSizes, 0, start, TIMELINE_TURN_ROW_GAP_PX), after: 0 };
     }
     const groupTop = view.origin + span(sizes, 0, groupIndex) + (groupIndex ? GAP : 0);
     const childOrigin = groupTop + 60;
     let top = view.top;
     const childPin = groupIndex === pinnedIndex && pin
-      ? rows.findIndex((key) => key.endsWith(`:${pin.rank}:${pin.id}`)) : -1;
+      ? rows.findIndex((key) => key.endsWith(`:${pin.rank}:${pin.itemId}`)) : -1;
     if (childPin >= 0) {
       const pinTop = childOrigin + span(childSizes, 0, childPin, TIMELINE_TURN_ROW_GAP_PX) + (childPin ? TIMELINE_TURN_ROW_GAP_PX : 0);
       const pinBottom = pinTop + childSizes[childPin];
@@ -387,49 +286,6 @@ export function useTimelineWindow({
     }
     return windowForSizes(childSizes, top, view.height, childOrigin, TIMELINE_TURN_ROW_GAP_PX);
   };
-
-  const syncMountedHeights = useCallback(() => {
-    const content = contentRef.current;
-    if (!content) return;
-    let heightChanged = false;
-    const nextHeights = new Map(heightsRef.current);
-    for (const item of content.querySelectorAll<HTMLElement>("[data-virtual-group], [data-virtual-row]")) {
-      const groupKey = item.dataset.virtualGroup;
-      const key = groupKey
-        ? (item.querySelector('[data-turn-expanded="true"]') ? `${groupKey}:open` : groupKey)
-        : item.dataset.virtualRow;
-      if (!key) continue;
-      const height = item.getBoundingClientRect().height;
-      if (height <= 0 || Math.abs((nextHeights.get(key) ?? 0) - height) < 1) continue;
-      nextHeights.set(key, height);
-      heightChanged = true;
-    }
-    if (heightChanged) {
-      heightsRef.current = nextHeights;
-      if (isFollowingRef.current()) measureViewRef.current();
-      setHeights(nextHeights);
-    }
-  }, [contentRef]);
-
-  useLayoutEffect(() => {
-    const preserved = preserveRef.current;
-    preserveRef.current = null;
-    const viewport = viewportRef.current;
-    if (!isFollowing() && preserved?.identity === identity && viewport) {
-      const node = preserved.node.isConnected ? preserved.node :
-        contentRef.current?.querySelector<HTMLElement>(
-          `.timeline-item[data-item-id="${CSS.escape(preserved.id)}"][data-display-rank="${preserved.rank}"], [data-turn-expanded="false"][data-item-id="${CSS.escape(preserved.id)}"][data-display-rank="${preserved.rank}"]`,
-        );
-      if (node) {
-        const delta = node.getBoundingClientRect().top - preserved.top;
-        if (Math.abs(delta) >= 1) {
-          viewport.scrollTop += delta;
-          syncMountedHeights();
-        }
-      }
-    }
-    rememberVisible();
-  });
 
   // One ResizeObserver per tracking session records each mounted group's and
   // expanded row's height. Each commit only observes newly mounted nodes and
@@ -458,7 +314,6 @@ export function useTimelineWindow({
       if (!changed) return;
       const rect = viewportRef.current?.getBoundingClientRect();
       if (rect && enabledRef.current) keepFocusInTimeline(content, rect);
-      preserveRef.current = readingRef.current;
       const groups = groupsRef.current;
       if (nextHeights.size > Math.max(HEIGHT_CACHE_SWEEP_FLOOR, groups.length * 2)) {
         const live = new Set(groups.flatMap((group) => [group.key, `${group.key}:open`, ...(group.expandedRows ?? [])]));

@@ -1,5 +1,4 @@
-import { useLayoutEffect, useMemo, useRef, type ComponentProps } from "react";
-import { readScrollMemory, saveScrollMemory } from "@/lib/layout/scroll-memory";
+import { useMemo, useRef, type ComponentProps } from "react";
 import { timelineGeometry } from "@/test-support/timeline-geometry";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { act, cleanup, fireEvent, screen, waitFor } from "@testing-library/react";
@@ -9,9 +8,9 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { cleanupHomePageTest, gatewayWrapper, HomePageView, homePageProps, HomePageBound as HomePage, hooksState, makeAgent, resetHomePageTestState, wrap } from "./page-test-mock";
 
 import { resetTransport, transport } from "@/test-support/fake-api";
-import { TimelineView } from "@/components/timeline";
+import { hasSavedTimelinePlace, TimelineView } from "@/components/timeline";
 import { fakeBrowser } from "@/lib/browser/testing";
-import { USER_SETTING_DEFAULTS, type BackendTimelineItem, type TimelineResponse, type ConversationSnapshotResponse } from "@/lib/contracts/types";
+import { USER_SETTING_DEFAULTS, type BackendTimelineItem, type TimelineResponse, type ConversationSnapshotResponse, type UserMessageFeed } from "@/lib/contracts/types";
 import { useTimeline } from "@/lib/timeline/use-timeline";
 import { useTimelineStore } from "@/lib/timeline/timeline-store";
 import { fakeStreamHub, TestStreamProvider } from "@/test-support/fake-stream";
@@ -21,6 +20,26 @@ import { httpRig, noUpload, sequentialKeys } from "@/lib/transport/tests/api/api
 function composed(timeline: TimelineResponse): ConversationSnapshotResponse {
   return { timeline, pending: [], token_usage: { input_tokens: 0, output_tokens: 0,
     reasoning_tokens: 0, max_input_tokens: 0, soft_compact_tokens: 0, hard_compact_tokens: 0 } };
+}
+
+const NO_SESSION = { state: "disabled" } as const;
+const timelineViewport = () => document.querySelector<HTMLElement>('[data-slot="scroll-area-viewport"]')!;
+// meiva:note
+// Rows are mounted but hidden until the timeline has placed them.
+const rowsShown = () => timelineViewport().querySelector<HTMLElement>("[data-timeline-column]")?.style.visibility !== "hidden";
+
+// meiva:note
+// Every frame the reader could see: after each batch of DOM changes (the commit and the layout
+// effects that follow it, before the browser would paint), the scroll offset whenever rows are shown.
+function recordShownFrames() {
+  const tops: number[] = [];
+  const sample = () => {
+    const viewport = document.querySelector<HTMLElement>('[data-slot="scroll-area-viewport"]');
+    if (viewport?.querySelector(".timeline-item") && rowsShown()) tops.push(viewport.scrollTop);
+  };
+  const observer = new MutationObserver(sample);
+  observer.observe(document.body, { subtree: true, childList: true, attributes: true });
+  return { tops, sample, stop: () => observer.disconnect() };
 }
 
 afterEach(cleanupHomePageTest);
@@ -67,12 +86,20 @@ describe("home loading presentation through the selected timeline reader", () =>
   let visit = 0;
   const response = (items: BackendTimelineItem[] = [], has_more = false): TimelineResponse => ({ items, msg_count: items.length, has_more });
 
-  function Reader({ id = 42, running = true }: { id?: number; running?: boolean }) {
+  let filledTop = 0;
+  const filled = timelineGeometry({ top: () => filledTop, setTop: (value) => { filledTop = value; }, height: () => 5000, resizeCallbacks: new Set() });
+  // meiva:note
+  // A viewport the conversation fills: a short first page would start the cold fill's own older read.
+  function FilledTimeline(props: ComponentProps<typeof TimelineView>) {
+    return <div {...filled.root}><TimelineView {...props} viewportObserverFactory={filled.observer} /></div>;
+  }
+
+  function Reader({ id = 42, running = true, unread = false, fills = false }: { id?: number; running?: boolean; unread?: boolean; fills?: boolean }) {
     const timeline = useTimeline(id, () => undefined, running ? "running" : "idling");
     const props = homePageProps();
-    const agent = makeAgent({ agent_id: id, status: running ? "running" : "idling" });
+    const agent = makeAgent({ agent_id: id, status: running ? "running" : "idling", has_unread_user_messages: unread });
     return <HomePageView {...props} agents={{ ...props.agents, activeId: id, activeAgent: agent, agents: [agent] }}
-      timeline={timeline} TimelineView={TimelineView} bfcacheId={`home-loading-${visit}`} />;
+      timeline={timeline} TimelineView={fills ? FilledTimeline : TimelineView} bfcacheId={`home-loading-${visit}`} />;
   }
 
   function surface(ui: React.ReactNode) {
@@ -90,6 +117,7 @@ describe("home loading presentation through the selected timeline reader", () =>
     transport.getPendingMessages.mockResolvedValue([]);
     transport.getAgentQuestions.mockResolvedValue([]);
     useTimelineStore.getState().switchThread(null, null, false);
+    filledTop = 0;
   });
   afterEach(() => { cleanup(); client.clear(); });
 
@@ -128,8 +156,9 @@ describe("home loading presentation through the selected timeline reader", () =>
     const read = deferred<TimelineResponse>();
     transport.getTimeline.mockReturnValue(read.promise);
     transport.getConversationSnapshot.mockResolvedValue(composed(response([human], true)));
-    const view = renderWithBrowser(surface(<Reader />));
+    const view = renderWithBrowser(surface(<Reader fills />));
     await waitFor(() => expect(screen.queryByTestId("cold-load-spinner")).toBeNull());
+    expect(transport.getTimeline).not.toHaveBeenCalled();
     expect(screen.getByTestId("pending-live-activity-window").textContent).toBe("Working…");
     expect(view.container.querySelectorAll(".animate-spin")).toHaveLength(0);
     fireEvent.click(screen.getByRole("button", { name: "Load earlier messages" }));
@@ -143,6 +172,28 @@ describe("home loading presentation through the selected timeline reader", () =>
     expect(pending.textContent).toBe("Working…");
     expect(pending.querySelector(".animate-spin")).toBeNull();
     expect(screen.getByText("Selected prompt")).toBeTruthy();
+  });
+
+  it.each([
+    { unread: false, opens: "once the timeline read lands, without waiting for the seen feed" },
+    { unread: true, opens: "only once the seen feed has decided where it opens" },
+  ])("a first visit the roster marks unread=$unread shows its rows $opens", async ({ unread }) => {
+    const feed = deferred<UserMessageFeed>();
+    transport.getUserMessages.mockReturnValue(feed.promise);
+    const read = deferred<TimelineResponse>();
+    transport.getTimeline.mockReturnValue(read.promise);
+    renderWithBrowser(surface(<Reader running={false} unread={unread} />));
+    expect(screen.getByTestId("cold-load-ring")).toBeTruthy();
+    await act(() => { read.resolve(response([human])); return read.promise; });
+    await waitFor(() => expect(screen.getByText("Selected prompt")).toBeTruthy());
+    expect(transport.getUserMessages).toHaveBeenCalledWith(42, expect.anything());
+    if (unread) {
+      expect(rowsShown()).toBe(false);
+      expect(screen.getByTestId("cold-load-ring")).toBeTruthy();
+      await act(() => { feed.resolve({ mode: "prefix", seen_id: 0, items: [] }); return feed.promise; });
+    }
+    await waitFor(() => expect(screen.queryByTestId("cold-load-spinner")).toBeNull());
+    expect(rowsShown()).toBe(true);
   });
 
   it("rapid switching ignores a late old read and renders the selected work block", async () => {
@@ -403,11 +454,16 @@ const { hub } = fakeStreamHub();
 let client: QueryClient;
 let top = 0;
 let visit = 0;
+const geometry = timelineGeometry({ top: () => top, setTop: (value) => { top = value; }, height: () => 5000, resizeCallbacks: new Set() });
+
+function MeasuredTimeline(props: ComponentProps<typeof TimelineView>) {
+  return <div {...geometry.root}><TimelineView {...props} viewportObserverFactory={geometry.observer} /></div>;
+}
 
 function HomeReader() {
   const timeline = useTimeline(42, () => undefined);
   return <><button type="button" onClick={() => timeline.loadOlder("background")}>Background fixture read</button>
-    <HomePageView {...homePageProps()} timeline={timeline} TimelineView={TimelineView} /></>;
+    <HomePageView {...homePageProps()} timeline={timeline} TimelineView={MeasuredTimeline} /></>;
 }
 
 beforeEach(() => {
@@ -439,22 +495,8 @@ afterEach(() => { cleanup(); client.clear(); });
       </WallClockProvider></StreamHubProvider></ApiProvider>
     </QueryClientProvider>);
     await waitFor(() => expect(screen.queryByTestId("cold-load-spinner")).toBeNull());
-    const viewport = document.querySelector<HTMLElement>('[data-slot="scroll-area-viewport"]')!;
-    Object.defineProperties(viewport, {
-      clientHeight: { configurable: true, get: () => 600 },
-      scrollHeight: { configurable: true, get: () => 5000 },
-      scrollTop: { configurable: true, get: () => top,
-        set: (value: number) => { top = Math.max(0, Math.min(4400, value)); } },
-    });
-    for (const element of [viewport, ...viewport.querySelectorAll<HTMLElement>("[data-item-id]")]) {
-      Object.defineProperty(element, "getBoundingClientRect", {
-        configurable: true,
-        value: () => {
-          const y = element.dataset.itemId ? (Number.parseInt(element.dataset.itemId) - 1) * 300 - top : 0;
-          return { top: y, bottom: y + 300, height: 300, left: 0, right: 400, width: 400 } as DOMRect;
-        },
-      });
-    }
+    const viewport = timelineViewport();
+    expect(viewport.scrollTop).toBe(4400);
     act(() => { viewport.scrollTop = 4400; fireEvent.resize(window); fireEvent.scroll(viewport); });
     const wheel = (at: number) => {
       const event = new WheelEvent("wheel", { deltaY: -80, bubbles: true, cancelable: true });
@@ -498,25 +540,30 @@ const gateway = transport;
 const wallNow = () => Date.now();
 let client: QueryClient;
 let top = 0;
+let freshHeight = 5000;
 let geometry: ReturnType<typeof timelineGeometry>;
 let resizeCallbacks: Set<() => void>;
-function viewport() { return document.querySelector<HTMLElement>('[data-slot="scroll-area-viewport"]')!; }
+const viewport = timelineViewport;
 function resize() { act(() => { resizeCallbacks.forEach((deliver) => deliver()); }); }
 function readingOffset(id: string) {
   const node = viewport().querySelector(`.timeline-item[data-item-id="${id}"]`);
   return node ? Math.round(node.getBoundingClientRect().top - viewport().getBoundingClientRect().top) : null;
 }
+function seedCaches() {
+  client.setQueryData(["timeline", 42], response);
+  client.setQueryData(["timeline", 43], response);
+  client.setQueryData(["config", null], { fields: [] });
+  client.setQueryData(["user-settings"], { ...USER_SETTING_DEFAULTS });
+}
 beforeEach(() => {
   resetTransport();
   transport.getConfig.mockResolvedValue({ fields: [] });
   client = new QueryClient({ defaultOptions: { queries: { retry: false, staleTime: Infinity } } });
-  client.setQueryData(["timeline", 42], response);
-  client.setQueryData(["timeline", 43], response);
+  seedCaches();
   transport.getConversationSnapshot.mockResolvedValue(composed(response));
-  client.setQueryData(["config", null], { fields: [] });
-  client.setQueryData(["user-settings"], { ...USER_SETTING_DEFAULTS });
   useTimelineStore.getState().switchThread(null, null, false);
   top = 0;
+  freshHeight = 5000;
   resizeCallbacks = new Set();
   geometry = timelineGeometry({
     top: () => top, setTop: (value) => { top = value; },
@@ -528,23 +575,21 @@ afterEach(() => {
 });
 
 function MeasuredTimeline(props: ComponentProps<typeof TimelineView>) {
-  const root = useRef<HTMLDivElement>(null);
-  useLayoutEffect(() => { if (root.current) geometry.prepare(root.current); });
-  return <div ref={root}><TimelineView {...props} viewportObserverFactory={geometry.observer} /></div>;
+  return <div {...geometry.root}><TimelineView {...props} viewportObserverFactory={geometry.observer} /></div>;
 }
 
+// meiva:note
+// A viewport of its own per mount: a remounted timeline starts at scrollTop 0, as in a browser.
 function FreshMeasuredTimeline(props: ComponentProps<typeof TimelineView>) {
-  const root = useRef<HTMLDivElement>(null);
   const ownTop = useRef(0);
   const measured = useMemo(() => timelineGeometry({
     top: () => ownTop.current, setTop: (value) => { ownTop.current = value; },
-    height: () => 5000, resizeCallbacks,
+    height: () => freshHeight, resizeCallbacks,
   }), []);
-  useLayoutEffect(() => { if (root.current) measured.prepare(root.current); });
-  return <div ref={root}><TimelineView {...props} viewportObserverFactory={measured.observer} /></div>;
+  return <div {...measured.root}><TimelineView {...props} viewportObserverFactory={measured.observer} /></div>;
 }
 
-  it.each(["cold", "retained"])("keeps the departed bookmark through %s source layouts", async (source) => {
+  it.each(["cold", "retained"])("returns a departed reader to their row, showing no other position, through a %s source read", async (source) => {
     hooksState.activeId = 42;
     hooksState.agents = [makeAgent({ agent_id: 42 })];
     hooksState.bfcacheId = `home-loading-return-${source}`;
@@ -565,28 +610,43 @@ function FreshMeasuredTimeline(props: ComponentProps<typeof TimelineView>) {
     const view = renderWithBrowser(home());
     await waitFor(() => expect(screen.queryByTestId("cold-load-spinner")).toBeNull());
     act(() => { viewport().scrollTop = 700; fireEvent.scroll(viewport()); });
+    expect(readingOffset("3.0")).toBe(-100);
     hooksState.activeId = 43;
     view.rerender(home());
-    expect(readScrollMemory(`home-loading-return-${source}:agent:42`)?.scrollTop).toBe(700);
+    expect(hasSavedTimelinePlace(`home-loading-return-${source}:agent:42`, "42", NO_SESSION)).toBe(true);
     if (source === "cold") act(() => {
       client.removeQueries({ queryKey: ["timeline", 42], exact: true });
       client.removeQueries({ queryKey: ["timeline-reading-window", 42], exact: true });
     });
     let deliver: (value: TimelineResponse) => void = () => undefined;
     transport.getTimeline.mockImplementation(() => new Promise<TimelineResponse>((resolve) => { deliver = resolve; }));
+    top = 0;
+    const frames = recordShownFrames();
     hooksState.activeId = 42;
     view.rerender(home());
-    if (source === "cold") {
+    frames.sample();
+    if (source === "retained") {
+      // meiva:note
+      // The retained rows hold the saved row: the first layout already stands on it.
+      expect(rowsShown()).toBe(true);
+      expect(readingOffset("3.0")).toBe(-100);
+    } else {
+      expect(rowsShown()).toBe(false);
       await waitFor(() => expect(transport.getTimeline).toHaveBeenCalled());
       resize(); resize(); resize();
+      expect(rowsShown()).toBe(false);
       await act(async () => { deliver(response); await Promise.resolve(); });
     }
     await waitFor(() => expect(viewport().querySelectorAll(".timeline-item")).toHaveLength(16));
     await waitFor(() => expect(screen.queryByTestId("cold-load-spinner")).toBeNull());
     resize();
+    frames.sample();
+    frames.stop();
     expect(viewport().scrollTop).toBe(700);
     expect(readingOffset("3.0")).toBe(-100);
+    expect(new Set(frames.tops)).toEqual(new Set([700]));
   });
+
   it.each(["unchanged", "new", "empty", "error", "no-saved"])("qualifies cached Home only after this entry's %s authority settles", async (outcome) => {
     hooksState.activeId = 42;
     hooksState.agents = [makeAgent({ agent_id: 42, status: "idling" })];
@@ -596,14 +656,6 @@ function FreshMeasuredTimeline(props: ComponentProps<typeof TimelineView>) {
     transport.getUserMessages.mockResolvedValue({ mode: "prefix", seen_id: 0, items: [] });
     transport.getAgentQuestions.mockResolvedValue([]);
     const entryKey = `authority-${outcome}:agent:42`;
-    if (outcome !== "no-saved") saveScrollMemory(entryKey, {
-      contentKey: "42", scrollTop: 700, followBottom: false,
-      anchor: { itemId: "3.0", rank: 0, viewportTop: -100 },
-    });
-    let deliver: (value: ConversationSnapshotResponse) => void = () => undefined;
-    let fail: (reason: Error) => void = () => undefined;
-    transport.getConversationSnapshot.mockImplementation(() => new Promise<ConversationSnapshotResponse>((resolve, reject) => { deliver = resolve; fail = reject; }));
-    transport.getTimeline.mockRejectedValue(new Error("fixture authority unavailable"));
     let current: ReturnType<typeof useTimeline> | undefined;
     const { hub } = fakeStreamHub();
     function HomeReader() {
@@ -611,14 +663,42 @@ function FreshMeasuredTimeline(props: ComponentProps<typeof TimelineView>) {
       current = timeline;
       return <HomePageView {...homePageProps()} timeline={timeline} TimelineView={MeasuredTimeline} />;
     }
-    renderWithBrowser(<QueryClientProvider client={client}>
+    const home = () => <QueryClientProvider client={client}>
       <WallClockProvider wallNow={wallNow}><ApiProvider api={gateway}>
         <StreamHubProvider hub={hub}><TestStreamProvider><HomeReader /></TestStreamProvider></StreamHubProvider>
       </ApiProvider></WallClockProvider>
-    </QueryClientProvider>);
+    </QueryClientProvider>;
+    if (outcome !== "no-saved") {
+      // meiva:note
+      // An earlier visit in this page entry left the reader 100px into row 3.0.
+      const visit = renderWithBrowser(home());
+      await waitFor(() => expect(current?.sourceReady).toBe(true));
+      act(() => { viewport().scrollTop = 700; fireEvent.scroll(viewport()); });
+      visit.unmount();
+      expect(hasSavedTimelinePlace(entryKey, "42", NO_SESSION)).toBe(true);
+      client.clear();
+      seedCaches();
+      useTimelineStore.getState().switchThread(null, null, false);
+      transport.getConversationSnapshot.mockClear();
+      top = 0;
+    }
+    let deliver: (value: ConversationSnapshotResponse) => void = () => undefined;
+    let fail: (reason: Error) => void = () => undefined;
+    transport.getConversationSnapshot.mockImplementation(() => new Promise<ConversationSnapshotResponse>((resolve, reject) => { deliver = resolve; fail = reject; }));
+    transport.getTimeline.mockRejectedValue(new Error("fixture authority unavailable"));
+    const frames = recordShownFrames();
+    renderWithBrowser(home());
+    frames.sample();
     expect(current?.isLoading).toBe(true);
+    // meiva:note
+    // The first layout stands where this entry opens while its authority read is pending: the saved
+    // row for a return, the tail for a first visit.
+    const opening = outcome === "no-saved" ? 4400 : 700;
+    expect(rowsShown()).toBe(true);
+    expect(top).toBe(opening);
     resize(); resize(); resize();
-    if (outcome !== "no-saved") expect(top).toBe(0);
+    expect(top).toBe(opening);
+    if (outcome !== "no-saved") expect(readingOffset("3.0")).toBe(-100);
     await waitFor(() => expect(transport.getConversationSnapshot).toHaveBeenCalledOnce());
     const fresh = outcome === "empty" ? { items: [], msg_count: 0, has_more: false } : outcome === "new" ? {
       items: items.map((item, index) => ({ ...item, item_id: `${100 + index}.0`, payload: `Fresh ${index}` })), msg_count: 116, has_more: true,
@@ -629,18 +709,24 @@ function FreshMeasuredTimeline(props: ComponentProps<typeof TimelineView>) {
       await waitFor(() => expect(screen.getByRole("button", { name: "Retry" })).toBeTruthy());
       expect(current?.isLoading).toBe(false);
       resize(); resize(); resize();
-      expect(top).toBe(0);
-      expect(readScrollMemory(entryKey)?.scrollTop).toBe(700);
+      // meiva:note
+      // A failed authority read keeps the reader's place.
+      expect(top).toBe(700);
+      expect(readingOffset("3.0")).toBe(-100);
+      expect(hasSavedTimelinePlace(entryKey, "42", NO_SESSION)).toBe(true);
       transport.getTimeline.mockResolvedValue(response);
       fireEvent.click(screen.getByRole("button", { name: "Retry" }));
-    } else act(() => { deliver({
-      timeline: fresh, pending: [],
-      token_usage: { input_tokens: 0, output_tokens: 0, reasoning_tokens: 0,
-        max_input_tokens: 0, soft_compact_tokens: 0, hard_compact_tokens: 0 },
-    }); });
+    } else act(() => { deliver(composed(fresh)); });
     await waitFor(() => expect(current?.isLoading).toBe(false));
     resize();
-    if (outcome === "unchanged" || outcome === "error") expect(top).toBe(700);
+    frames.sample();
+    frames.stop();
+    if (outcome === "unchanged" || outcome === "error") {
+      expect(top).toBe(700);
+      expect(readingOffset("3.0")).toBe(-100);
+      expect(new Set(frames.tops)).toEqual(new Set([700]));
+    }
+    if (outcome === "no-saved") expect(new Set(frames.tops)).toEqual(new Set([4400]));
     if (outcome === "new") expect(current?.items.some((item) => item.payload === "Fresh 0")).toBe(true);
     const background = new Promise<TimelineResponse>(() => undefined);
     transport.getTimeline.mockReturnValue(background);
@@ -649,14 +735,14 @@ function FreshMeasuredTimeline(props: ComponentProps<typeof TimelineView>) {
     expect(current?.isLoading).toBe(false);
   });
 
-  it("finishes seen before the cached source, then restores bottom after the actual source applies", async () => {
+  it("keeps a reader who left at the tail on the row they left, through the seen advance and newer output", async () => {
     const authority = deferred<ConversationSnapshotResponse>();
     const empty: TimelineResponse = { items: [], msg_count: 0, has_more: false };
+    const newer: BackendTimelineItem = { ...items[0], item_id: "17.0", payload: "Newer output" };
     let holdAuthority = false;
     let unread = false;
     let seen = 0;
     let current: ReturnType<typeof useTimeline> | undefined;
-    const trace: { event: string; sourceReady: boolean; atBottom: boolean }[] = [];
     const json = (body: unknown) => new Response(JSON.stringify(body), { headers: { "content-type": "application/json" } });
     const delivery = { id: 1, agent_id: 42, mode: "prefix", source_key: "harness:1.0", content: "Reply 1",
       suggestions: [], created_at: "2026-11-10T00:00:00Z", seen: false };
@@ -682,7 +768,7 @@ function FreshMeasuredTimeline(props: ComponentProps<typeof TimelineView>) {
       const timeline = useTimeline(id, () => undefined);
       current = timeline;
       const props = homePageProps();
-      const agent = makeAgent({ agent_id: id, status: "idling" });
+      const agent = makeAgent({ agent_id: id, status: "idling", has_unread_user_messages: unread });
       return <HomePageView {...props} bfcacheId={entry}
         settings={{ settings: { ...USER_SETTING_DEFAULTS, "behavior.replySuggestions": false }, isLoading: false }}
         agents={{ ...props.agents, activeId: id, activeAgent: agent, agents: [agent] }}
@@ -697,33 +783,42 @@ function FreshMeasuredTimeline(props: ComponentProps<typeof TimelineView>) {
     const view = renderWithBrowser(surface(42));
     await waitFor(() => expect(current?.sourceReady).toBe(true));
     resize();
-    act(() => { viewport().scrollTop = 4400; fireEvent.scroll(viewport()); });
     expect(atBottom()).toBe(true);
+    expect(readingOffset("15.0")).toBe(-200);
     view.rerender(surface(43));
     await waitFor(() => expect(current?.sourceReady).toBe(true));
-    const saved = readScrollMemory(`${entry}:agent:42`);
-    expect(saved?.scrollTop).toBe(4400);
+    expect(hasSavedTimelinePlace(`${entry}:agent:42`, "42", NO_SESSION)).toBe(true);
+    // meiva:note
+    // A delivery arrived while the reader was away; the authority read of the return is held.
     unread = true; holdAuthority = true;
+    const frames = recordShownFrames();
     view.rerender(surface(42));
+    frames.sample();
+    expect(rowsShown()).toBe(true);
+    expect(readingOffset("15.0")).toBe(-200);
     await waitFor(() => expect(client.getQueryData<{ seen_id: number }>(["user-messages", 42])?.seen_id).toBe(1));
-    trace.push({ event: "seen-applied", sourceReady: current?.sourceReady === true, atBottom: atBottom() });
+    expect(current?.sourceReady).toBe(false);
     expect(screen.getByTestId("cold-load-ring")).toBeTruthy();
-    expect(readScrollMemory(`${entry}:agent:42`)).toEqual(saved);
-    act(() => { authority.resolve(composed(response)); });
+    expect(readingOffset("15.0")).toBe(-200);
+    act(() => {
+      freshHeight = 5300;
+      authority.resolve(composed({ items: [...items, newer], msg_count: 18, has_more: false }));
+    });
     await waitFor(() => expect(current?.sourceReady).toBe(true));
     await waitFor(() => expect(screen.queryByTestId("cold-load-ring")).toBeNull());
+    expect(screen.getByText("Newer output")).toBeTruthy();
     resize();
-    trace.push({ event: "source-applied", sourceReady: current?.sourceReady === true, atBottom: atBottom() });
-    expect(trace).toEqual([
-      { event: "seen-applied", sourceReady: false, atBottom: false },
-      { event: "source-applied", sourceReady: true, atBottom: true },
-    ]);
+    frames.sample();
+    frames.stop();
+    expect(readingOffset("15.0")).toBe(-200);
+    expect(atBottom()).toBe(false);
+    expect(new Set(frames.tops)).toEqual(new Set([4400]));
   });
 
 });
 
 describe("feature.reloadReadingRestore on HomePageView", () => {
-  it("short-circuits all Browser.session reading-bookmark reads and writes when feature.reloadReadingRestore is false", async () => {
+  it("short-circuits all Browser.session reading-bookmark reads and writes when feature.reloadReadingRestore is false", () => {
     let localTop = 0;
     const localCallbacks = new Set<() => void>();
     const localGeometry = timelineGeometry({
@@ -735,17 +830,13 @@ describe("feature.reloadReadingRestore on HomePageView", () => {
       resizeCallbacks: localCallbacks,
     });
     function LocalMeasuredTimeline(props: ComponentProps<typeof TimelineView>) {
-      const root = useRef<HTMLDivElement>(null);
-      useLayoutEffect(() => {
-        if (root.current) localGeometry.prepare(root.current);
-      });
       return (
-        <div ref={root}>
+        <div {...localGeometry.root}>
           <TimelineView {...props} viewportObserverFactory={localGeometry.observer} />
         </div>
       );
     }
-    const localViewport = () => document.querySelector<HTMLElement>('[data-slot="scroll-area-viewport"]')!;
+    const localViewport = timelineViewport;
     const localResize = () => {
       act(() => {
         localCallbacks.forEach((deliver) => deliver());
@@ -851,21 +942,40 @@ describe("feature.reloadReadingRestore on HomePageView", () => {
       localViewport().scrollTop = 900;
       fireEvent.scroll(localViewport());
     });
+    expect(localReadingOffset("4.0")).toBe(0);
+    disabledView.unmount();
     expect(bookmarkReads).toEqual([]);
     expect(bookmarkWrites).toEqual([]);
-    expect(readScrollMemory("reload-disabled-1:agent:42")?.scrollTop).toBe(900);
-    disabledView.unmount();
 
     // meiva:note
-    // Enabled reload reads the stored session bookmark and restores exact offset.
+    // The page's own memory still returns the reader with the reload bookmark disabled.
     localTop = 0;
+    const returnView = renderWithBrowser(renderHome(false, false, "reload-disabled-1"), {
+      browser,
+      wrapper: gatewayWrapper,
+    });
+    expect(localViewport().scrollTop).toBe(900);
+    expect(localReadingOffset("4.0")).toBe(0);
+    returnView.unmount();
+    expect(bookmarkReads).toEqual([]);
+    expect(bookmarkWrites).toEqual([]);
+
+    // meiva:note
+    // Enabled reload reads the stored session bookmark and opens on its row and offset.
+    localTop = 0;
+    const frames = recordShownFrames();
     renderWithBrowser(renderHome(true, false, "reload-enabled-2"), {
       browser,
       wrapper: gatewayWrapper,
     });
-    await waitFor(() => expect(bookmarkReads.length).toBeGreaterThan(0));
-    localResize();
+    frames.sample();
+    expect(bookmarkReads.length).toBeGreaterThan(0);
     expect(localViewport().scrollTop).toBe(700);
     expect(localReadingOffset("3.0")).toBe(-100);
+    localResize();
+    frames.sample();
+    frames.stop();
+    expect(localViewport().scrollTop).toBe(700);
+    expect(new Set(frames.tops)).toEqual(new Set([700]));
   });
 });

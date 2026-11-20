@@ -1,7 +1,7 @@
 import { act, fireEvent, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { announceBeforeCompactDisplayChange, captureCompactTransition, type CompactTransitionBuffer } from "@/lib/layout/compact-transition";
-import { ChatMarkdownMock, ScrollAreaMock, cleanupTimelineTest, historyWheel, makeItem, pullOlderAtTop, render } from "./timeline-test-mock";
+import { ChatMarkdownMock, ScrollAreaMock, cleanupTimelineTest, historyWheel, makeItem, pullOlderAtTop, render, timelineLayout } from "./timeline-test-mock";
 vi.mock("@/components/content/markdown", () => ({ ChatMarkdown: ChatMarkdownMock }));
 vi.mock("@/components/ui/scroll-area", () => ({ ScrollArea: ScrollAreaMock }));
 import { TimelineView } from "..";
@@ -38,7 +38,16 @@ describe("continuous compact history", () => {
     expect(container.querySelectorAll('[data-timeline-source="buffer"][data-display-rank="1"]')).not.toHaveLength(0);
     expect(container.querySelectorAll('[data-timeline-source="canonical"][data-item-id="1.0"]')).not.toHaveLength(0);
   });
-  it("keeps a middle reply anchored without clamping when two tall tails re-key at intrinsic placeholder height", () => {
+  // meiva:note
+  // A compact re-keys the reader's rows twice: into the buffer one rank older, then into the
+  // canonical rows that replace it. The row being read keeps its place through both.
+  // SUSPECTED PRODUCT BUG (reported, not fixed here): the buffer step passes, but only because
+  // `findRowNode` falls back to the same id at another rank; the anchor keeps the pre-compact rank.
+  // The hydration announcement then identifies that stale row against the buffer (id+rank), finds
+  // nothing, loses the coordinate, and the reader is thrown to the tail (measured: 1.0 at 31 ->
+  // its canonical row s1.next.0.0 at -689.5, scrollTop 1300 -> 1968.5, the natural end).
+  // meiva:link ui/web/src/docs/frontend-components/timeline-view/timeline-view.md
+  it("keeps a middle reply at its offset while a compact re-keys it into the buffer and then into canonical rows", () => {
     const preItems = [
       makeItem({ item_id: "s1.prev.1.0", kind: "agent_chat", payload: "FIRST_REPLY" }),
       makeItem({ item_id: "s1.prev.2.0", kind: "agent_chat", payload: "FIRST_TAIL" }),
@@ -46,95 +55,41 @@ describe("continuous compact history", () => {
       makeItem({ item_id: "1.0", kind: "agent_chat", payload: "BETWEEN_REPLY" }),
       makeItem({ item_id: "2.0", kind: "agent_chat", payload: "BETWEEN_TAIL" }),
     ];
-    const realHeights: Record<string, number> = {
-      "s1.prev.1.0": 45,
-      "s1.prev.2.0": 1158,
-      "0.0": 32,
-      "1.0": 45,
-      "2.0": 1158,
-      "s2.prev.1.0": 45,
-      "s2.prev.2.0": 1158,
-      "s1.next.0.0": 45,
-      "s1.next.1.0": 1158,
+    const heights: Record<string, number> = {
+      "s1.prev.1.0": 45, "s1.prev.2.0": 1158, "0.0": 32, "1.0": 45, "2.0": 1158,
+      "s2.prev.1.0": 45, "s2.prev.2.0": 1158, "s1.next.0.0": 45, "s1.next.1.0": 1158,
     };
+    const layout = timelineLayout({ viewportHeight: 613.5, rowHeight: (row) => heights[row.dataset.itemId ?? ""] });
     const { rerender } = render(<TimelineView items={preItems} />);
-    const viewport = screen.getByTestId("scroll-viewport");
-    const rowHeight = (el: HTMLElement): number => {
-      const id = el.dataset.itemId ?? "";
-      const full = realHeights[id] ?? 80;
-      const rekeyed = el.dataset.timelineSource === "buffer" || id.startsWith("s2.") || id.startsWith("s1.next.");
-      if (!el.classList.contains("timeline-item") || !rekeyed) return full;
-      return el.style.contentVisibility === "visible" ? full : 80;
-    };
-    const renderedRows = (): HTMLElement[] =>
-      Array.from(viewport.querySelectorAll<HTMLElement>('[role="log"] > [data-virtual-group] > *'));
-    const totalScrollHeight = (): number =>
-      80 + renderedRows().reduce((sum, el) => sum + rowHeight(el), 0) + 24;
-    let currentScrollTop = 0;
-    const clampScrollTop = (): number => {
-      currentScrollTop = Math.max(0, Math.min(currentScrollTop, totalScrollHeight() - 613.5));
-      return currentScrollTop;
-    };
-    Object.defineProperty(viewport, "clientHeight", { value: 613.5, configurable: true });
-    Object.defineProperty(viewport, "scrollHeight", { get: totalScrollHeight, configurable: true });
-    Object.defineProperty(viewport, "scrollTop", {
-      get: clampScrollTop,
-      set: (next: number) => {
-        currentScrollTop = Math.max(0, Math.min(next, totalScrollHeight() - 613.5));
-      },
-      configurable: true,
+    // meiva:note
+    // Row 1.0 is the first row below the header bar at 1300: the reader's anchor.
+    const reply = () => layout.viewport().querySelector<HTMLElement>('[data-item-id="1.0"]')!;
+    layout.scrollTo(layout.max());
+    layout.scrollTo(1300);
+    const beforeTop = reply().getBoundingClientRect().top;
+    expect(beforeTop).toBe(31);
+
+    const nextBuffer = captureCompactTransition(preItems, null, 42, 1, false)!;
+    const postItems = [makeItem({ item_id: "0.0", kind: "system_prompt", payload: "new sys" })];
+    act(() => {
+      announceBeforeCompactDisplayChange({ items: preItems, buffer: null, rankShift: 1 });
+      rerender(<TimelineView items={postItems} compactBuffer={nextBuffer} />);
     });
-    const rectSpy = vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockImplementation(function (this: HTMLElement) {
-      if (this === viewport) {
-        return { top: 56, bottom: 669.5, height: 613.5, left: 0, right: 800, width: 800, x: 0, y: 56, toJSON: () => ({}) };
-      }
-      const rows = renderedRows();
-      const idx = rows.indexOf(this);
-      if (idx >= 0) {
-        let docTop = 80;
-        for (let i = 0; i < idx; i += 1) docTop += rowHeight(rows[i]);
-        const h = rowHeight(this);
-        const top = 56 + docTop - clampScrollTop();
-        return { top, bottom: top + h, height: h, left: 0, right: 800, width: 800, x: 0, y: top, toJSON: () => ({}) };
-      }
-      return { top: 0, bottom: 0, height: 0, left: 0, right: 0, width: 0, x: 0, y: 0, toJSON: () => ({}) };
+    expect(reply().dataset.timelineSource).toBe("buffer");
+    expect(reply().getBoundingClientRect().top).toBe(beforeTop);
+
+    const canonicalItems = [
+      makeItem({ item_id: "s2.prev.1.0", kind: "agent_chat", payload: "FIRST_REPLY" }),
+      makeItem({ item_id: "s2.prev.2.0", kind: "agent_chat", payload: "FIRST_TAIL" }),
+      makeItem({ item_id: "s1.next.0.0", kind: "agent_chat", payload: "BETWEEN_REPLY" }),
+      makeItem({ item_id: "s1.next.1.0", kind: "agent_chat", payload: "BETWEEN_TAIL" }),
+      ...postItems,
+    ];
+    act(() => {
+      announceBeforeCompactDisplayChange({ items: postItems, buffer: nextBuffer, rankShift: 0 });
+      rerender(<TimelineView items={canonicalItems} />);
     });
-    try {
-      viewport.scrollTop = totalScrollHeight();
-      act(() => {
-        viewport.dispatchEvent(new Event("scroll"));
-      });
-      viewport.scrollTop = 1040;
-      act(() => {
-        viewport.dispatchEvent(new Event("scroll"));
-      });
-      const findReply = () =>
-        viewport.querySelector<HTMLElement>('[data-virtual-group] [data-item-id="1.0"][data-display-rank="0"], [data-virtual-group] [data-item-id="1.0"][data-display-rank="1"]')!;
-      const beforeTop = findReply().getBoundingClientRect().top;
-      expect(beforeTop).toBe(331);
-      const nextBuffer = captureCompactTransition(preItems, null, 42, 1, false)!;
-      const postItems = [makeItem({ item_id: "0.0", kind: "system_prompt", payload: "new sys" })];
-      act(() => {
-        announceBeforeCompactDisplayChange({ items: preItems, buffer: null, rankShift: 1 });
-        rerender(<TimelineView items={postItems} compactBuffer={nextBuffer} />);
-      });
-      expect(findReply().getBoundingClientRect().top).toBe(beforeTop);
-      const canonicalItems = [
-        makeItem({ item_id: "s2.prev.1.0", kind: "agent_chat", payload: "FIRST_REPLY" }),
-        makeItem({ item_id: "s2.prev.2.0", kind: "agent_chat", payload: "FIRST_TAIL" }),
-        makeItem({ item_id: "s1.next.0.0", kind: "agent_chat", payload: "BETWEEN_REPLY" }),
-        makeItem({ item_id: "s1.next.1.0", kind: "agent_chat", payload: "BETWEEN_TAIL" }),
-        ...postItems,
-      ];
-      act(() => {
-        announceBeforeCompactDisplayChange({ items: postItems, buffer: nextBuffer, rankShift: 0 });
-        rerender(<TimelineView items={canonicalItems} />);
-      });
-      const hydratedReply = viewport.querySelector<HTMLElement>('[data-item-id="s1.next.0.0"]')!;
-      expect(hydratedReply.getBoundingClientRect().top).toBe(beforeTop);
-    } finally {
-      rectSpy.mockRestore();
-    }
+    expect(layout.rowTop("s1.next.0.0")).toBe(beforeTop);
   });
   it("renders each segment in order without compact separators", () => {
     const items = [

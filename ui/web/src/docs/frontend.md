@@ -47,7 +47,7 @@ Meiva's web user interface — Next.js 16 (App Router) + React 19 + Tailwind CSS
 
 - [Provider composition](provider-composition.md) — root provider tree (`QueryClient`, `EventStreamProvider`, fold owner, root hosts, `VisualViewportHeightSync`)
 - [Mobile, tablet and coarse-pointer UX](mobile-and-tablet-ux.md) — orthogonal geometry vs. input/viewport physics contract across phones, iPads, and WebKit
-- [State management](frontend-state/frontend-state.md) — three mechanisms division of labor + per-thread timeline cache + sticky controller
+- [State management](frontend-state/frontend-state.md) — three mechanisms division of labor + per-thread timeline cache + timeline view anchor
 - [Data flow](frontend-data-flow/frontend-data-flow.md) — dual SSE Provider architecture + hook directory
 - [Components](frontend-components/frontend-components.md) — chat view / Fleet view / settings page components
 - [Loading states](frontend-components/loading-states.md) — the one loading indicator (a bare turning ring), no loading sentence, no skeleton

@@ -1,15 +1,13 @@
 import { useMemo, useState, type RefObject } from "react";
 
 import type { BackendTimelineItem } from "@/lib/contracts/types";
-import { canonicalBufferCoordinate, type CompactTransitionBuffer } from "@/lib/layout/compact-transition";
+import type { CompactTransitionBuffer } from "@/lib/layout/compact-transition";
 import { TIMELINE_TURN_ROW_GAP_PX } from "@/lib/layout/layout";
 import { useUserSettings } from "@/lib/state/use-user-settings";
-import { parseItemIdParts } from "@/lib/timeline/timeline";
 
 import { LiveClockGate } from "../model/reasoning-clock";
 import { classifyItem, inboundKind } from "../model/runs";
 import { groupTimelineSegments, type RankedTimelineGroup } from "../model/segments";
-import type { CompactPin } from "../model/use-compact-transition-anchor";
 import { useTimelineWindow, useTimelineWindowLimits } from "../model/use-timeline-window";
 import { TimelineRow, cardConfigFor } from "../row";
 import { PendingLiveActivityWindow, TurnBlock } from "../run-block";
@@ -145,10 +143,7 @@ export function useTimelineGroupWindow({
   viewportRef,
   contentRef,
   isFollowing,
-  pendingAnchor,
-  compactPin,
-  restoreAnchor,
-  restoreTop,
+  pin,
 }: {
   canonicalItems: BackendTimelineItem[];
   compactBuffer: CompactTransitionBuffer | null;
@@ -160,10 +155,7 @@ export function useTimelineGroupWindow({
   viewportRef: RefObject<HTMLElement | null>;
   contentRef: RefObject<HTMLDivElement | null>;
   isFollowing: () => boolean;
-  pendingAnchor: { id: string; rank: number } | null;
-  compactPin: CompactPin | null;
-  restoreAnchor: { id: string; rank: number } | null;
-  restoreTop: number | null;
+  pin: { itemId: string; rank: number } | null;
 }) {
   const { activationRows, turnRows, measureRows } = useTimelineWindowLimits();
   const { settings } = useUserSettings();
@@ -225,28 +217,6 @@ export function useTimelineGroupWindow({
     };
   }), [groupEntries]);
 
-  const compactPinnedId = compactPin && (() => {
-    const bufferedCoordinates = new Map((compactBuffer?.rows ?? []).map((row) => [
-      `${row.rank}:${row.item.item_id}`, canonicalBufferCoordinate(row),
-    ]));
-    for (const { group } of groupEntries) {
-      const members = group.kind === "single" ? [group.member] : group.members;
-      for (const member of members) {
-        const coordinate = member.source === "buffer"
-          ? bufferedCoordinates.get(`${member.rank}:${member.item.item_id}`)
-          : parseItemIdParts(member.item.item_id);
-        if (
-          coordinate?.rank === compactPin.rank &&
-          coordinate.msg === compactPin.msg &&
-          coordinate.block === compactPin.block
-        ) {
-          return { id: member.item.item_id, rank: member.rank };
-        }
-      }
-    }
-    return null;
-  })();
-
   const { range: virtualRange, rowRange } = useTimelineWindow({
     groups: virtualGroups,
     enabled: virtualEnabled,
@@ -256,8 +226,8 @@ export function useTimelineGroupWindow({
     contentRef,
     isFollowing,
     identity: threadKey ?? null,
-    pendingAnchor: pendingAnchor ?? compactPinnedId ?? restoreAnchor,
-    restoreTop,
+    pin,
+    tail: isFollowing(),
   });
 
   return { groups, groupEntries, virtualEnabled, virtualRange, rowRange, turnRows };

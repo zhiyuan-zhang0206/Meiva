@@ -1,98 +1,56 @@
 # Timeline sticky scroll
 
-## Sticky bottom and scroll ownership
-While following the tail, content growth pins the viewport down in the same
-pre-paint tick — the ResizeObserver fires after layout and before paint — so
-streamed text never paints below the fold and then scrolls into place, and
-growth with no items change (throttled markdown/highlight flushes, async images)
-rides the same signal. The follow flag has a single owner
-(`lib/layout/sticky.ts:createStickyController`): the view wires DOM events in
-(`handleScroll` / `handleWheel` / `handleLayoutChange`), performs the scrolls the
-controller requests (`requestStick` / `pinToBottom`) and reports every performed
-scroll back, which keeps the controller's baseline truthful and makes each pin's
-echo a no-op. An upward wheel gesture releases following before the next layout pass; the
-controller also tracks upward travel for scrollbar drags and handles touch
-separately. The bottom zone is pointer-dependent, with a wider zone on touch
-for bounce tolerance. The viewport disables Chrome scroll anchoring (`overflow-anchor: none`):
-a net-neutral reflow can move scrollTop on its own, a third hand the follow rule
-cannot attribute; `overscroll-y-contain` keeps an exhausted vertical gesture out
-of page-level scroll without touching scrollTop. The viewport also declares its own shrinks (`notifyContentShrunk`): after a
-commit leaves the content shorter, the browser's clamp usually reaches
-`handleScroll` only once a later commit added rows again, so the snapshot
-carries the grown height and an upward move and the height test alone reads a
-departure (#5678: a 254 px clamp from estimates replaced by measurements
-released a follower for good; #5680: 69 px read as growth against a commit-only
-baseline stranded one 107 px short).
-A pending bookmark restore lands before the pin. Loading layouts retain the
-bookmark until this selection's authority read has entered the readable timeline
-window, including when cached rows already provide layout. Home passes
-`sourceReady` through the view's independent `restoreReady` gate. An authority
-error settles the loading ring and presents retry while that gate keeps the
-bookmark pending; reader navigation still releases it. Repeated equal heights
-before readiness cannot declare it unreachable. Returning to a conversation
-restores the visible message and viewport offset saved on departure, including
-when leaving the tail. The restored reader remains anchored as output grows;
-reader navigation to the bottom resumes following. A reader at the end of the
-additional scroll space also returns to their saved row and offset. When collapsing a work block created that space, the restore
-recreates as much of it as the saved offset needs. Wheel, touch, keyboard
-scrolling and track interaction reveal the timeline scrollbar. Position restores
+## One anchor, one writer
+
+The reader's place is one value per conversation, the view anchor (`components/timeline/anchor`):
+the tail, or a row (an item, or a whole turn block) whose top edge sits a given number of pixels
+below the viewport top. One writer (`use-viewport-anchor`) applies it after every commit and on a
+ResizeObserver over the viewport and the content: the anchor row goes back to its offset, the tail
+goes to the natural end. Every layout change is therefore the same case and needs no code of its
+own: older pages prepended, a compact re-keying rows, a width change re-wrapping them, an image or a
+late height, a virtual-window spacer estimate. Chrome's own scroll anchoring stays off
+(`overflow-anchor: none`) so there is no second hand.
+
+Only the reader moves the anchor. A scroll the writer did not cause (wheel, touch, keys, scrollbar,
+find-in-page) is read back from the DOM: the tail inside the bottom zone of the natural end
+(pointer-dependent, wider on touch for bounce tolerance), otherwise the first row below the header
+bar. An upward wheel notch leaves the tail before its scroll event, so a chunk landing first cannot
+pin the reader back. While a finger is down the writer stands still. Placements only set the anchor:
+returning, reloading, the first-unseen reveal, a quote, a send, a header toggle and the down arrow
+(the one animated move, interrupted by any reader input).
+
+## Opening a conversation
+
+Each agent mounts its own view. Its opening place is the saved place (this page entry's memory,
+else the tab's reload bookmark), else the first delivery past the reader's seen position, else the
+tail (`anchor/placement.ts`). Rows render hidden under the one loading ring until that place
+resolves in the loaded rows, so the first painted frame is the destination:
+
+- Retained rows that hold the saved row open on it at once, while the authority read is still in
+  flight. The read then merges under the anchor, and a surviving row does not move.
+- A first visit waits for its rows and for the reveal decision. When the roster said the agent had
+  no unread deliveries, the decision is the tail without waiting for the feed.
+- A saved row that is not loaded (a reload into older history, or rows replaced while away) is
+  looked up by id and rank, then by its source `reading_locator`, then by its content (a compact
+  re-keys rows but keeps their text), then by its compact coordinate, and searched for in at most 5
+  background older pages (250 items, 10 s). An id is never matched across ranks: a compact's new
+  segment restarts message numbers, so the anchor takes its new rank before the rows change. An unreachable row opens the
+  tail and drops its reload bookmark.
+
+Leaving saves the row on screen and its offset, including when leaving the tail (user ruling
+2026-10-17): a return continues reading there while newer output stays below. A reader who
+reaches the bottom follows again. A first page shorter than the viewport stays hidden while the
+cold fill reads its older pages ([history paging](history-paging.md)), so history never lands
+above rows already on screen.
+
+Across a full tab reload (`feature.reloadReadingRestore`, default `true`) the place is a per-agent
+`Browser.session` bookmark; a reload from the tail keeps none and opens on the latest rows.
+
+A `reveal` (the first delivery past the seen position) is a first-visit opening place only; a saved
+place always wins over it, including when the reader returns to the bottom.
+
+Wheel, touch, keyboard scrolling and track interaction reveal the timeline scrollbar. Placements
 and layout updates keep an idle scrollbar hidden.
-
-The seen-cursor acknowledgement is independent of the selected conversation's
-source read. It may finish while `sourceReady` is still false and the bookmark
-is pending. A browser assertion about the returned viewport observes that
-agent's successful authority response and the initial loading ring settling
-before its layout frames and geometry assertion. The successful response is
-required: an authority error also settles the ring while preserving the bookmark.
-The down arrow sits at the bottom center of the conversation and uses the same
-icon while loading or generating. It takes the reader to the last human message
-or the tail according to the [reading position](send-anchor.md). A smooth ride
-to the tail can be interrupted by reader navigation. The
-bookmark owns the viewport only until it settles or the reader moves: a settled
-restore and any movement the controller classifies both release the hold, so a
-reader who scrolls after returning is no longer read as "none" (that silence
-used to switch following off for good and skipped the position save on the next
-agent switch — user report 2026-10-19). A bookmark past the end of a page
-that has stopped growing is unreachable: it lands on the reachable end and
-remains anchored until reader navigation. The composer's pending strip lives outside the scroll
-area, so the echo arrives as ordinary growth and a following reader stays on the
-tail either way. Only a following reader releases the oldest rows (the 250-row
-retention rule in the paging doc).
-
-A viewport width change is the same problem in the other direction: every row
-re-wraps, so the pixel offset that was the reader's place now points at a
-different one — opening or closing the sidebar moves that column by a sixth of
-the window. A reader who is not following has the bookmark's anchor re-applied
-after the reflow, so they stay on the row they were reading; a reader in the
-bottom zone pins as before (user report 2026-10-20).
-
-A `reveal` request (`TimelineView` prop: an item id and a token) moves the viewport the way
-a reader's own bookmark would, to the item at the upper part of the viewport (the bar height
-plus 12 px): it fills the pending restore, takes the hold, and lets the existing
-apply/settle/window-materialization path land it, so no second scroll path exists. Each
-new token is a new request, an item that is not loaded changes nothing, and the reader's
-own scrolling releases it like any bookmark. The home page uses it to show the first
-delivery past the reader's seen position on entry. A saved position takes priority
-over the automatic reveal, including when the reader returns to the bottom.
-
-Across a full tab reload (`feature.reloadReadingRestore`, default `true`), a
-per-agent `Browser.session` bookmark (`readingLocator` or stable `itemId` + `rank`
-+ `viewportTop`) resolves onto the same single `live` `TimelineView` once
-`sourceReady` settles. If the target item is already in the initial tail window,
-`bookmark-restore` restores its exact pixel offset (`followBottom: false`) while
-live streaming and `Working` rows continue normally below. If the target item is
-older than the initial window, `TimelineView` requests up to 5 background older
-pages (`250` prepended items max) via `loadOlder("background")` while keeping only
-the existing centered `ColdLoadSpinner` visible. If the target remains unreachable,
-storage is unavailable, or the reader navigates during backfill, the bookmark is
-silently dropped and the view pins to the normal tail with zero extra chrome.
-
-Images also reapply the current reading bookmark after load or error, including
-short histories below the row-measurement threshold. The viewport captures only
-image events and waits until the next animation frame so a failed upload's file
-card can commit first. It reads the latest bookmark at that frame; subsequent
-navigation, following, an active send/restore hold, or a thread unmount takes
-precedence. Multiple image events within a frame share one reapplication.
 
 ## Non-sticky headers and natural-height TurnBlock bodies
 Human-message, agent-reply, `TurnBlock`, and nested detail-card headers all stay

@@ -1,13 +1,13 @@
 // meiva:note
-// timeline.tsx component test — ItemView per-kind render + envelope split + system_marker dispatch + LifecycleChip + UnknownMarkerChip + InterruptedNotice + CopyButton. jsdom does not actually render scroll, so scroll behavior is not tested (the sticky state machine was extracted to lib/sticky.ts and is covered by sticky.test.ts). ChatMarkdown / PythonCode / ScrollArea are mocked as stubs to reduce noise and avoid the runtime complexity of react-markdown / Prism / base-ui.
+// timeline.tsx component test — ItemView per-kind render + envelope split + system_marker dispatch + LifecycleChip + UnknownMarkerChip + InterruptedNotice + CopyButton. The test DOM lays nothing out, so the scroll tests below run on the `timelineLayout` model (view/timeline-test-mock.tsx). ChatMarkdown / PythonCode / ScrollArea are mocked as stubs to reduce noise and avoid the runtime complexity of react-markdown / Prism / base-ui.
 // meiva:link ui/web/src/docs/frontend-components/timeline-view/timeline-view.md
 
 import { act, fireEvent, screen, waitFor } from "@testing-library/react";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { useTimelineStore } from "@/lib/timeline/timeline-store";
 import { fakeBrowser } from "@/lib/browser/testing";
-import { ChatMarkdownMock, ScrollAreaMock, cleanupTimelineTest, historyWheel, makeItem, pullOlderAtTop, render, settingsState } from "./view/timeline-test-mock";
+import { ChatMarkdownMock, ScrollAreaMock, cleanupTimelineTest, historyWheel, makeItem, pullOlderAtTop, render, settingsState, timelineLayout } from "./view/timeline-test-mock";
 
 vi.mock("@/components/content/markdown", () => ({ ChatMarkdown: ChatMarkdownMock }));
 vi.mock("@/components/ui/scroll-area", () => ({ ScrollArea: ScrollAreaMock }));
@@ -129,175 +129,102 @@ describe("CopyButton click behavior", () => {
 });
 
 describe("touch drag vs streaming pin (#1016)", () => {
-  // happy-dom's ResizeObserver never fires; drive the component's RO
-  // manually so the pin path is exercised deterministically.
-  let roCallback: ResizeObserverCallback | null = null;
-  let roObserved: Element[] = [];
-
-  beforeEach(() => {
-    roCallback = null;
-    roObserved = [];
-    vi.stubGlobal(
-      "ResizeObserver",
-      class {
-        constructor(cb: ResizeObserverCallback) {
-          roCallback = cb;
-        }
-        observe(el: Element) {
-          roObserved.push(el);
-        }
-        /* eslint-disable @typescript-eslint/no-empty-function -- observer teardown is a no-op in the manual stub */
-        unobserve() {}
-        disconnect() {}
-        /* eslint-enable @typescript-eslint/no-empty-function */
-        takeRecords() {
-          return [];
-        }
-      },
-    );
-  });
   afterEach(() => {
     vi.unstubAllGlobals();
   });
 
-  // Drive one RO callback with the given geometry (the component's callback
-  // reads the live viewport, so defineProperty the numbers first).
-  const fireRO = () => {
-    expect(roCallback).not.toBeNull();
-    roCallback!([], {} as ResizeObserver);
-  };
-
-  const viewportGeom = (viewport: HTMLElement, scrollHeight: number, clientHeight: number) => {
-    Object.defineProperty(viewport, "scrollHeight", { value: scrollHeight, configurable: true });
-    Object.defineProperty(viewport, "clientHeight", { value: clientHeight, configurable: true });
-  };
+  // meiva:note
+  // One reply that streams taller; the viewport is 600px and the mouse bottom zone 30px.
+  function streamingReply() {
+    let height = 1000;
+    const layout = timelineLayout({ rowHeight: () => height });
+    render(<TimelineView items={[makeItem({ item_id: "10.0", kind: "agent_chat", payload: "ten" })]} />);
+    return { layout, grow: (by: number) => { height += by; layout.resize(); } };
+  }
 
   it("a layout change during an active touch drag does not pin; release beyond the zone stops following", () => {
-    const items = [makeItem({ item_id: "10.0", kind: "agent_chat", payload: "ten" })];
-    render(<TimelineView items={items} />);
-    const viewport = screen.getByTestId("scroll-viewport");
-    // Viewport 600 tall, content 1000, user pinned at the bottom (400).
-    viewportGeom(viewport, 1000, 600);
-    viewport.scrollTop = 400;
-    viewport.dispatchEvent(new Event("scroll")); // position rule → sticky
-    fireRO(); // initial RO → pin (already at bottom, no-op)
+    const { layout, grow } = streamingReply();
+    expect(layout.top()).toBe(layout.naturalEnd());
 
-    // The user starts dragging up.
-    fireEvent.touchStart(viewport, { touches: [{ clientY: 100 }] });
-    viewport.scrollTop = 370;
-    viewport.dispatchEvent(new Event("scroll")); // 30px up — inside the zone
-    expect(viewport.scrollTop).toBe(370); // drag is honored
+    layout.touchStart();
+    const dragged = layout.naturalEnd() - 20;
+    layout.scrollTo(dragged);
+    expect(layout.top()).toBe(dragged);
+    // meiva:note
+    // A chunk lands mid-drag: the viewport stays under the finger.
+    grow(150);
+    expect(layout.top()).toBe(dragged);
+    grow(150);
+    expect(layout.top()).toBe(dragged);
 
-    // A chunk lands mid-drag (content grows to 1150): with the fix the RO
-    // must NOT pin the viewport back to the bottom under the user's finger.
-    viewportGeom(viewport, 1150, 600);
-    fireRO();
-    expect(viewport.scrollTop).toBe(370);
-
-    // Another chunk while still dragging — still no pin.
-    viewportGeom(viewport, 1300, 600);
-    fireRO();
-    expect(viewport.scrollTop).toBe(370);
-
-    // The finger lifts beyond the zone (dist = 1300 - 370 - 600 = 330) —
-    // following stops; the next chunk must not yank the reader back.
-    viewport.dispatchEvent(new Event("touchend"));
-    viewportGeom(viewport, 1450, 600);
-    fireRO();
-    expect(viewport.scrollTop).toBe(370);
+    // meiva:note
+    // The finger lifts beyond the zone: following stops and the next chunk leaves the reader.
+    layout.touchEnd();
+    grow(150);
+    expect(layout.top()).toBe(dragged);
   });
 
   it("the pin returns once the user drags back to the bottom and releases there", () => {
-    const items = [makeItem({ item_id: "10.0", kind: "agent_chat", payload: "ten" })];
-    render(<TimelineView items={items} />);
-    const viewport = screen.getByTestId("scroll-viewport");
-    viewportGeom(viewport, 1000, 600);
-    viewport.scrollTop = 400;
-    viewport.dispatchEvent(new Event("scroll"));
+    const { layout, grow } = streamingReply();
+    layout.touchStart();
+    layout.scrollTo(200);
+    layout.touchEnd();
+    grow(200);
+    expect(layout.top()).toBe(200);
 
-    fireEvent.touchStart(viewport, { touches: [{ clientY: 100 }] });
-    viewport.scrollTop = 200; // dragged far up
-    viewport.dispatchEvent(new Event("scroll")); // position rule unsticks
-    viewport.dispatchEvent(new Event("touchend"));
-
-    // Back to the bottom (re-stick via the position rule).
-    viewport.scrollTop = 400;
-    viewport.dispatchEvent(new Event("scroll"));
-    viewportGeom(viewport, 1200, 600);
-    fireRO();
-    expect(viewport.scrollTop).toBe(600);
+    layout.touchStart();
+    layout.scrollTo(layout.naturalEnd());
+    layout.touchEnd();
+    grow(200);
+    expect(layout.top()).toBe(layout.naturalEnd());
   });
 });
 
 describe("bounded timeline history (#4702)", () => {
-  let roCallback: ResizeObserverCallback | null = null;
-
-  beforeEach(() => {
-    vi.stubGlobal("ResizeObserver", class {
-      constructor(cb: ResizeObserverCallback) { roCallback = cb; }
-      /* eslint-disable @typescript-eslint/no-empty-function -- manual observer stub */
-      observe() {}
-      unobserve() {}
-      disconnect() {}
-      /* eslint-enable @typescript-eslint/no-empty-function */
-    });
-  });
   afterEach(() => {
     vi.unstubAllGlobals();
     vi.restoreAllMocks();
     useTimelineStore.getState().switchThread(null, [], false);
   });
 
-  function geometry(viewport: HTMLElement, scrollHeight: number, clientHeight = 600) {
-    Object.defineProperty(viewport, "scrollHeight", { value: scrollHeight, configurable: true });
-    Object.defineProperty(viewport, "clientHeight", { value: clientHeight, configurable: true });
-  }
-  const rowRect = (top: number): DOMRect =>
-    ({ top, bottom: top, left: 0, right: 0, width: 0, height: 0, x: 0, y: 0, toJSON: () => ({}) });
-  function layoutChange() {
-    act(() => roCallback!([], {} as ResizeObserver));
-  }
-
   it("fills a short cold viewport but layout echoes never walk more than two pages", () => {
+    const layout = timelineLayout();
     const loadOlder = vi.fn();
     const item = (id: number) => makeItem({ item_id: `${id}.0`, kind: "agent_chat", payload: `row ${id}` });
     const { rerender } = render(<TimelineView threadKey="42" items={[item(30)]}
       hasMoreOlder onLoadOlder={loadOlder} />);
-    const viewport = screen.getByTestId("scroll-viewport");
-    geometry(viewport, 300);
-    layoutChange();
+    expect(layout.scrollHeight()).toBe(600);
     expect(loadOlder).toHaveBeenCalledTimes(1); // first screen still fills
     // meiva:note
     // The fill reads history the reader never asked for, so it must not present
     // the loading strip above the messages (user report 2026-10-29).
     // meiva:link ui/web/src/docs/frontend-components/timeline-view/history-paging.md
     expect(loadOlder).toHaveBeenCalledWith("background");
-    for (let i = 0; i < 8; i++) layoutChange();
+    for (let i = 0; i < 8; i++) layout.resize();
     expect(loadOlder).toHaveBeenCalledTimes(1);
 
     rerender(<TimelineView threadKey="42" items={[item(30)]}
       hasMoreOlder loadingOlder onLoadOlder={loadOlder} />);
     rerender(<TimelineView threadKey="42" items={[item(20), item(30)]}
       hasMoreOlder onLoadOlder={loadOlder} />);
-    geometry(viewport, 450);
-    layoutChange();
+    layout.resize();
     expect(loadOlder).toHaveBeenCalledTimes(2);
     rerender(<TimelineView threadKey="42" items={[item(20), item(30)]}
       hasMoreOlder loadingOlder onLoadOlder={loadOlder} />);
     rerender(<TimelineView threadKey="42" items={[item(10), item(20), item(30)]}
       hasMoreOlder onLoadOlder={loadOlder} />);
-    geometry(viewport, 500);
-    for (let i = 0; i < 8; i++) layoutChange();
+    expect(layout.scrollHeight()).toBe(600);
+    for (let i = 0; i < 8; i++) layout.resize();
     expect(loadOlder).toHaveBeenCalledTimes(2);
   });
 
   it("does not load from layout changes when the viewport already scrolls", () => {
+    const layout = timelineLayout({ rowHeight: 1200 });
     const loadOlder = vi.fn();
     render(<TimelineView threadKey="42" items={[makeItem({ item_id: "30.0", kind: "agent_chat", payload: "tail" })]}
       hasMoreOlder onLoadOlder={loadOlder} />);
-    const viewport = screen.getByTestId("scroll-viewport");
-    geometry(viewport, 1200);
-    for (let i = 0; i < 10; i++) layoutChange();
+    expect(layout.scrollHeight()).toBeGreaterThan(600);
+    for (let i = 0; i < 10; i++) layout.resize();
     expect(loadOlder).not.toHaveBeenCalled();
   });
 
@@ -324,6 +251,7 @@ describe("bounded timeline history (#4702)", () => {
   });
 
   it("keeps a parked reader's history until they return to the bottom", () => {
+    const layout = timelineLayout();
     const rows = (first: number, last: number) => Array.from(
       { length: last - first + 1 },
       (_, i) => makeItem({ item_id: `${first + i}.0`, kind: "agent_chat", payload: `row ${first + i}` }),
@@ -334,65 +262,51 @@ describe("bounded timeline history (#4702)", () => {
       return <TimelineView threadKey="42" items={items} retainedItemsMax={200} />;
     }
     const { container } = render(<SelectedTimeline />);
-    const viewport = screen.getByTestId("scroll-viewport");
-    geometry(viewport, 1200);
-    viewport.scrollTop = 500;
-    act(() => { viewport.dispatchEvent(new Event("scroll")); });
-    viewport.scrollTop = 100;
-    act(() => { viewport.dispatchEvent(new Event("scroll")); });
+    expect(layout.top()).toBe(layout.naturalEnd());
+    layout.scrollTo(100);
     act(() => useTimelineStore.getState().prependOlder(rows(1, 200), true));
     expect(useTimelineStore.getState().items).toHaveLength(210);
     expect(container.querySelectorAll(".timeline-item").length).toBeLessThan(80);
     expect(container.querySelector("[data-timeline-spacer]")).not.toBeNull();
-    viewport.scrollTop = 600;
-    act(() => { viewport.dispatchEvent(new Event("scroll")); });
+    layout.scrollTo(layout.max());
     expect(useTimelineStore.getState().items).toHaveLength(200);
   });
 
   it("loads one page per upward gesture and ignores compensation and momentum after the page lands", () => {
-    let rowTop = 0;
-    vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockImplementation(
-      function (this: HTMLElement) {
-        const viewport = this.closest<HTMLElement>('[data-slot="scroll-area-viewport"]');
-        if (!this.getAttribute("data-item-id")) return new DOMRect(0, 0, 400, 600);
-        return rowRect(rowTop - (viewport?.scrollTop ?? 0));
-      },
-    );
+    const layout = timelineLayout({ rowHeight: (row) => row.dataset.itemId === "90.0" ? 300 : 1200 });
     const loadOlder = vi.fn();
     const item = (id: number) => makeItem({ item_id: `${id}.0`, kind: "agent_chat", payload: `row ${id}` });
     const items = [item(100)];
     const { rerender } = render(
       <TimelineView threadKey="42" items={items} hasMoreOlder onLoadOlder={loadOlder} />,
     );
-    const viewport = screen.getByTestId("scroll-viewport");
-    geometry(viewport, 1200);
-    viewport.scrollTop = 500;
-    act(() => { fireEvent.scroll(viewport); });
-    viewport.scrollTop = 0;
-    act(() => { fireEvent.scroll(viewport); });
+    const viewport = layout.viewport();
+    layout.scrollTo(500);
+    layout.scrollTo(0);
     expect(loadOlder).not.toHaveBeenCalled();
     pullOlderAtTop(viewport);
     expect(loadOlder).toHaveBeenCalledOnce();
 
+    const readingTop = layout.rowTop("100.0");
     rerender(<TimelineView threadKey="42" items={items} hasMoreOlder loadingOlder onLoadOlder={loadOlder} />);
-    rowTop = 300;
     rerender(<TimelineView threadKey="42" items={[item(90), ...items]} hasMoreOlder onLoadOlder={loadOlder} />);
-    expect(viewport.scrollTop).toBe(300);
-    act(() => { fireEvent.scroll(viewport); });
+    // meiva:note
+    // The landed page sits above the reading row, which keeps its place: 300px plus the row gap.
+    expect(layout.rowTop("100.0")).toBe(readingTop);
+    expect(layout.top()).toBe(312);
+    layout.echo();
     for (let i = 0; i < 6; i++) {
       expect(historyWheel(viewport, -100, true).defaultPrevented).toBe(true);
     }
-    expect(viewport.scrollTop).toBe(300);
+    expect(layout.top()).toBe(312);
     expect(loadOlder).toHaveBeenCalledOnce();
 
     historyWheel(viewport, 40, false);
-    rowTop = 0;
-    viewport.scrollTop = 0;
-    act(() => { fireEvent.scroll(viewport); });
+    layout.scrollTo(0);
     historyWheel(viewport, -100, true);
     expect(loadOlder).toHaveBeenCalledOnce();
     historyWheel(viewport, 40, false);
-    viewport.scrollTop = 0;
+    layout.scrollTo(0);
     pullOlderAtTop(viewport);
     expect(loadOlder).toHaveBeenCalledTimes(2);
   });

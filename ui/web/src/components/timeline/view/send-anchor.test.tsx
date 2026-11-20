@@ -1,352 +1,293 @@
-import { act, fireEvent, screen } from "@testing-library/react";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { ChatMarkdownMock, ScrollAreaMock, cleanupTimelineTest, makeItem, render } from "./timeline-test-mock";
+import { act, screen } from "@testing-library/react";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { ChatMarkdownMock, ScrollAreaMock, cleanupTimelineTest, makeItem, render, timelineLayout } from "./timeline-test-mock";
 vi.mock("@/components/content/markdown", () => ({ ChatMarkdown: ChatMarkdownMock }));
 vi.mock("@/components/ui/scroll-area", () => ({ ScrollArea: ScrollAreaMock }));
 import { useTimelineStore } from "@/lib/timeline/timeline-store";
 import { TimelineView } from "..";
-import { parkReserve, parkScrollTop } from "../model/use-viewport-arrivals";
-afterEach(cleanupTimelineTest);
-
-describe("send park decisions", () => {
-  it("places the sent row at the reading offset and never above the document start", () => {
-    expect(parkScrollTop(1300, 56)).toBe(1244);
-    expect(parkScrollTop(20, 56)).toBe(0);
-  });
-
-  it("reserves the height the reply has not written yet and gives it back as it grows", () => {
-    expect(parkReserve(1244, 600, 1400)).toBe(444);
-    expect(parkReserve(1244, 600, 1700)).toBe(144);
-    expect(parkReserve(1244, 600, 2600)).toBe(0);
-  });
+import { READING_TOP_PX } from "../anchor/dom";
+afterEach(() => {
+  vi.restoreAllMocks();
+  vi.unstubAllGlobals();
+  cleanupTimelineTest();
 });
 
 // meiva:note
-// The send anchor end to end: the page hands the timeline the inbound its
-// receipt named, the row mounts, and the reader's own message is parked a fifth
-// of the viewport down over a bottom reserve. Everything after that is the
-// point of the change - growth moves the reply, never the reader - until the
-// reader asks for the tail again.
-// meiva:link ui/web/src/docs/frontend-components/timeline-view/sticky-scroll.md
-
-let top = 0;
-let content = 0;
-let humanTop = 0;
-let viewportHeight = 0;
-let resizeCallbacks: Set<() => void>;
-
-const viewport = () => screen.getByTestId("scroll-viewport");
-const reserve = () => document.querySelector<HTMLElement>("[data-send-reserve]");
-const reservePx = () => Number.parseFloat(reserve()?.style.height ?? "0") || 0;
-function resize() { act(() => { resizeCallbacks.forEach((deliver) => deliver()); }); }
-
-beforeEach(() => {
-  top = 0;
-  content = 1000;
-  humanTop = 1300;
-  viewportHeight = 600;
-  resizeCallbacks = new Set();
-  vi.stubGlobal("ResizeObserver", class {
-    private readonly deliver: () => void;
-    constructor(callback: ResizeObserverCallback) {
-      this.deliver = () => callback([], this);
-    }
-    observe(target: Element) {
-      if (target.getAttribute("data-slot") === "scroll-area-viewport") resizeCallbacks.add(this.deliver);
-    }
-    disconnect() { resizeCallbacks.delete(this.deliver); }
-    unobserve() { resizeCallbacks.delete(this.deliver); }
-  });
-  vi.spyOn(HTMLElement.prototype, "clientHeight", "get").mockImplementation(() => viewportHeight);
-  vi.spyOn(HTMLElement.prototype, "scrollHeight", "get").mockImplementation(function (this: HTMLElement) {
-    return this.getAttribute("data-slot") === "scroll-area-viewport" ? content + reservePx() : 0;
-  });
-  vi.spyOn(HTMLElement.prototype, "offsetHeight", "get").mockImplementation(function (this: HTMLElement) {
-    return this.hasAttribute("data-send-reserve") ? reservePx() : 0;
-  });
-  vi.spyOn(HTMLElement.prototype, "scrollTop", "get").mockImplementation(() => top);
-  vi.spyOn(HTMLElement.prototype, "scrollTop", "set").mockImplementation(function (this: HTMLElement, value: number) {
-    top = Math.max(0, Math.min(value, this.scrollHeight - this.clientHeight));
-  });
-  vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockImplementation(function (this: HTMLElement) {
-    const y = this.hasAttribute("data-send-reserve") ? content - top
-      : this.dataset.itemId === "2.0" ? humanTop - top
-      : this.dataset.itemId === "1.0" ? 56 - top : 0;
-    return { top: y, bottom: y + 120, height: 120, left: 0, right: 400, width: 400 } as DOMRect;
-  });
-});
+// The send anchor end to end: the page hands the timeline the inbound its receipt named, the row
+// mounts, and a following reader's own message is parked at the reading offset over a bottom
+// reserve. Growth then moves the reply, never the reader, until the reader asks for the tail again.
+// A reader in history keeps their place; the arrow parks the message for them.
+// meiva:link ui/web/src/docs/frontend-components/timeline-view/send-anchor.md
 
 const earlier = makeItem({ item_id: "1.0", kind: "inbound_chat", payload: "envelope:earlier", inbound_id: 3, source: "user" });
 const sent = makeItem({ item_id: "2.0", kind: "inbound_chat", payload: "envelope:mine", inbound_id: 7, source: "user" });
+const reply = makeItem({ item_id: "3.0", kind: "agent_chat", payload: "reply" });
+const peer = makeItem({ item_id: "3.0", kind: "inbound_chat", payload: "envelope:peer", source: "agent:9" });
+
+// meiva:note
+// The earlier message overflows the 600px viewport; the reply's height is what streams.
+function layout() {
+  const heights: Record<string, number> = { "1.0": 1000, "2.0": 100, "3.0": 100, "4.0": 100 };
+  const model = timelineLayout({ rowHeight: (row) => heights[row.dataset.itemId ?? ""] });
+  // meiva:note
+  // The browser echoes each programmatic write with a scroll event.
+  const settle = () => model.echo();
+  const grow = (id: string, height: number) => {
+    heights[id] = height;
+    model.resize();
+  };
+  return { ...model, heights, settle, grow };
+}
+const send = (inboundId: number) => act(() => { useTimelineStore.getState().requestSendAnchor(inboundId); });
+const arrow = () => screen.queryByTestId("scroll-to-bottom");
 
 describe("send anchor", () => {
-  it("parks the sent message below the header and holds it while the reply streams", () => {
-    const view = render(<TimelineView items={[earlier]} />);
-    content = 1000;
-    expect(top).toBe(400);
-
-    act(() => { useTimelineStore.getState().requestSendAnchor(7); });
-    expect(top).toBe(400);
-    expect(reservePx()).toBe(0);
-
-    content = 1400;
-    view.rerender(<TimelineView items={[earlier, sent]} />);
+  it("parks the sent message in a short conversation opened on its first unseen delivery", () => {
+    const heights: Record<string, number> = { "1.0": 100, "2.0": 100 };
+    const model = timelineLayout({ rowHeight: (row) => heights[row.dataset.itemId ?? ""] });
+    const view = render(<TimelineView items={[earlier]} reveal={{ decided: true, itemId: "1.0" }} />);
     // meiva:note
-    // The row sits at document 1300 and the reading position is the 44px bar
-    // plus a 12px gap, so the anchored position is 1244 - reachable only
-    // because the reserve adds the 444px the reply has not written yet.
-    // meiva:link ui/web/src/docs/frontend-components/timeline-view/send-anchor.md
-    expect(top).toBe(1244);
-    expect(reservePx()).toBe(444);
-    expect(screen.queryByTestId("scroll-to-bottom")).toBeNull();
-
-    content = 1700;
-    resize();
-    expect(top).toBe(1244);
-    expect(reservePx()).toBe(144);
-
-    content = 1900;
-    resize();
-    expect(top).toBe(1244);
-    expect(reservePx()).toBe(0);
-    expect(screen.getByTestId("scroll-to-bottom")).toBeTruthy();
-
-    content = 2600;
-    resize();
-    expect(top).toBe(1244);
+    // A conversation shorter than the viewport has no scroll range: opened on a row, the reader is
+    // still at its end, so a send parks like a follower's.
+    expect(model.top()).toBe(0);
+    send(7);
+    view.rerender(<TimelineView items={[earlier, sent]} reveal={{ decided: true, itemId: "1.0" }} />);
+    model.echo();
+    expect(model.rowTop("2.0")).toBe(READING_TOP_PX);
+    expect(model.reserve()).toBeGreaterThan(0);
   });
 
-  it("keeps the sent row aligned when the composer clears and grows the viewport", () => {
+  it("parks the sent message at the reading offset and holds it while the reply streams", () => {
+    const model = layout();
     const view = render(<TimelineView items={[earlier]} />);
-    act(() => { useTimelineStore.getState().requestSendAnchor(7); });
-    content = 1400;
+    expect(model.top()).toBe(model.naturalEnd());
+
+    send(7);
+    expect(model.top()).toBe(model.naturalEnd());
+    expect(model.reserve()).toBe(0);
+
     view.rerender(<TimelineView items={[earlier, sent]} />);
-    expect(top).toBe(1244);
+    model.settle();
+    const parked = model.top();
+    expect(model.rowTop("2.0")).toBe(READING_TOP_PX);
+    // meiva:note
+    // The reserve is exactly the room the park needs: the parked place is the end of the range.
+    expect(model.reserve()).toBeGreaterThan(0);
+    expect(parked).toBe(model.max());
+    expect(arrow()).toBeNull();
 
-    viewportHeight = 634;
-    viewport().scrollTop = top;
-    expect(top).toBe(1210);
-    resize();
-    expect(top).toBe(1244);
-    expect(reservePx()).toBe(478);
+    // meiva:note
+    // The reply streams into the reserve: every pixel of growth is a pixel less reserve.
+    let reserve = model.reserve();
+    let natural = model.naturalEnd();
+    view.rerender(<TimelineView items={[earlier, sent, reply]} />);
+    expect(model.top()).toBe(parked);
+    expect(model.rowTop("2.0")).toBe(READING_TOP_PX);
+    expect(model.reserve()).toBe(reserve - (model.naturalEnd() - natural));
+
+    reserve = model.reserve();
+    natural = model.naturalEnd();
+    model.grow("3.0", 300);
+    expect(model.top()).toBe(parked);
+    expect(model.reserve()).toBe(reserve - (model.naturalEnd() - natural));
+    expect(model.reserve()).toBeGreaterThan(0);
+    expect(arrow()).toBeNull();
+
+    // meiva:note
+    // Once the reply fills the viewport the reserve is gone and the arrow offers the rest.
+    model.grow("3.0", 1200);
+    expect(model.top()).toBe(parked);
+    expect(model.rowTop("2.0")).toBe(READING_TOP_PX);
+    expect(model.reserve()).toBe(0);
+    expect(arrow()).toBeTruthy();
+
+    model.grow("3.0", 2400);
+    expect(model.top()).toBe(parked);
+    expect(model.reserve()).toBe(0);
   });
 
-  it("keeps a clicked question aligned through a layout scroll before ResizeObserver", () => {
-    const view = render(<TimelineView turnActive items={[earlier]} />);
-    act(() => { top = 100; viewport().dispatchEvent(new Event("scroll")); });
-    content = 1400;
-    view.rerender(<TimelineView turnActive items={[earlier, sent]} />);
-    act(() => { screen.getByTestId("scroll-to-bottom").click(); });
-    expect(top).toBe(1244);
-
-    humanTop += 350;
-    content = 2800;
-    act(() => { viewport().dispatchEvent(new Event("scroll")); });
-    expect(top).toBe(1594);
-
-    const scrollTo = vi.spyOn(viewport(), "scrollTo");
-    act(() => { screen.getByTestId("scroll-to-bottom").click(); });
-    expect(scrollTo).toHaveBeenCalledWith({ top: 2200, behavior: "smooth" });
-  });
-
-  it("keeps history in place on send and uses the current position for each arrow click", () => {
+  it("parks only the row the receipt named", () => {
+    const model = layout();
     const view = render(<TimelineView items={[earlier]} />);
-    act(() => { top = 100; viewport().dispatchEvent(new Event("scroll")); });
-    act(() => { useTimelineStore.getState().requestSendAnchor(7); });
-    content = 2600;
-    const peer = makeItem({ item_id: "3.0", kind: "inbound_chat", payload: "envelope:peer", source: "agent:9" });
-    view.rerender(<TimelineView items={[earlier, sent, peer]} />);
-    expect(top).toBe(100);
-
-    const arrow = screen.getByRole("button", { name: "Scroll down" });
-    act(() => { arrow.click(); });
-    expect(top).toBe(1244);
-    content = 2800;
-    resize();
-    expect(top).toBe(1244);
-
-    act(() => { top = 1500; viewport().dispatchEvent(new Event("scroll")); });
-    const scrollTo = vi.spyOn(viewport(), "scrollTo");
-    act(() => { arrow.click(); });
-    expect(scrollTo).toHaveBeenCalledWith({ top: 2200, behavior: "smooth" });
+    send(7);
+    // meiva:note
+    // Another human message (another tab's send) lands first: it is not the one this receipt named.
+    const other = { ...sent, item_id: "3.0", inbound_id: 9 };
+    view.rerender(<TimelineView items={[earlier, other]} />);
+    expect(model.top()).toBe(model.naturalEnd());
+    expect(model.reserve()).toBe(0);
+    view.rerender(<TimelineView items={[earlier, other, { ...sent, item_id: "4.0" }]} />);
+    expect(model.rowTop("4.0")).toBe(READING_TOP_PX);
   });
 
-  it("makes room to align the latest human message manually, even after a send from history", () => {
-    const view = render(<TimelineView turnActive items={[earlier]} />);
-    act(() => { top = 100; viewport().dispatchEvent(new Event("scroll")); });
-    act(() => { useTimelineStore.getState().requestSendAnchor(7); });
-    content = 1400;
-    view.rerender(<TimelineView turnActive items={[earlier, sent]} />);
-    expect(top).toBe(100);
-    expect(reservePx()).toBe(444);
+  // meiva:note
+  // SUSPECTED PRODUCT BUG (reported, not fixed here): a browser clamps scrollTop into a shorter
+  // scroll range during layout, before ResizeObserver or any scroll event. The writer counts every
+  // movement since its last write as the reader's drift, so the clamp is absorbed into the anchor's
+  // offset before the reserve can grow to hold it.
+  // meiva:link ui/web/src/docs/frontend-components/timeline-view/send-anchor.md
+  it("keeps the sent row aligned when the composer clears and the viewport grows", () => {
+    const model = layout();
+    const view = render(<TimelineView items={[earlier]} />);
+    send(7);
+    view.rerender(<TimelineView items={[earlier, sent]} />);
+    model.settle();
+    const reserve = model.reserve();
 
-    act(() => { viewport().scrollTop = viewport().scrollHeight; viewport().dispatchEvent(new Event("scroll")); });
-    expect(top).toBe(1244);
-    expect(screen.queryByTestId("scroll-to-bottom")).toBeNull();
-    content = 1500;
-    resize();
-    expect(top).toBe(1244);
-    expect(reservePx()).toBe(344);
+    model.setViewportHeight(634);
+    // meiva:note
+    // The parked place is the end of the range, so the browser clamps scrollTop into the shorter
+    // range during layout, before ResizeObserver runs and before any scroll event: not the reader.
+    model.drift(model.top());
+    model.resize();
+    expect(model.rowTop("2.0")).toBe(READING_TOP_PX);
+    expect(model.reserve()).toBe(reserve + 34);
+    expect(model.top()).toBe(model.max());
   });
 
-  it("moves down through the remaining reserve when the content end is above the reader", () => {
-    const view = render(<TimelineView turnActive items={[earlier]} />);
-    act(() => { top = 100; viewport().dispatchEvent(new Event("scroll")); });
-    content = 1400;
-    view.rerender(<TimelineView turnActive items={[earlier, sent]} />);
-    act(() => { top = 1000; viewport().dispatchEvent(new Event("scroll")); });
-    const button = screen.getByTestId("scroll-to-bottom");
+  it("keeps a reader in history in place on send; the arrow then parks the message, and next goes to the tail", () => {
+    const model = layout();
+    const view = render(<TimelineView items={[earlier]} />);
+    model.scrollTo(100);
+    send(7);
+    // meiva:note
+    // A peer agent's message lands after the send: the latest human message is still the sent one.
+    const answer = { ...reply, item_id: "4.0" };
+    view.rerender(<TimelineView items={[earlier, sent, peer, answer]} />);
+    expect(model.top()).toBe(100);
 
-    act(() => { button.click(); });
+    act(() => { arrow()!.click(); });
+    model.settle();
+    expect(model.rowTop("2.0")).toBe(READING_TOP_PX);
+    expect(model.reserve()).toBeGreaterThan(0);
+    model.grow("4.0", 300);
+    expect(model.rowTop("2.0")).toBe(READING_TOP_PX);
 
-    expect(top).toBe(1244);
-    expect(screen.queryByTestId("scroll-to-bottom")).toBeNull();
+    model.grow("4.0", 1600);
+    expect(model.reserve()).toBe(0);
+    act(() => { arrow()!.click(); });
+    expect(model.smoothTarget()).toBe(model.naturalEnd());
+    model.finishSmooth();
+    expect(model.top()).toBe(model.naturalEnd());
+    expect(arrow()).toBeNull();
   });
 
-  it.each([false, true])("consumes working space at the natural end (still working: %s)", (working) => {
-    const items = [earlier, sent];
-    content = 1400;
-    const view = render(<TimelineView items={items} turnActive threadKey="42" scrollMemoryKey="finished-reserve" />);
-    const move = (next: number, wheel: number) => {
-      act(() => {
-        viewport().dispatchEvent(new WheelEvent("wheel", { deltaY: wheel, bubbles: true }));
-        viewport().scrollTop = next;
-        viewport().dispatchEvent(new Event("scroll"));
-      });
-    };
+  it("keeps the reserve while the reader moves inside it, and releases it at the natural end", () => {
+    const model = layout();
+    const view = render(<TimelineView items={[earlier]} threadKey="42" scrollMemoryKey="send-release" />);
+    send(7);
+    view.rerender(<TimelineView items={[earlier, sent]} threadKey="42" scrollMemoryKey="send-release" />);
+    model.settle();
+    const parked = model.top();
+    const natural = model.naturalEnd();
+    expect(parked).toBeGreaterThan(natural + 100);
 
-    move(1244, 1000);
-    move(1000, -244);
-    expect(reservePx()).toBe(444);
-    move(3000, 1000);
-    expect(top).toBe(1244);
+    model.scrollTo(parked - 50);
+    expect(model.top()).toBe(parked - 50);
+    expect(model.reserve()).toBeGreaterThan(0);
+    model.scrollTo(natural + 1);
+    expect(model.top()).toBe(natural + 1);
+    expect(model.reserve()).toBeGreaterThan(0);
 
-    view.rerender(<TimelineView items={items} turnActive={working} threadKey="42" scrollMemoryKey="finished-reserve" />);
-    expect(top).toBe(1244);
-    expect(reservePx()).toBe(444);
-    move(1000, -244);
-    expect(reservePx()).toBe(444);
-    move(801, -199);
-    expect(reservePx()).toBe(444);
-    move(800, -1);
-    expect(top).toBe(800);
-    expect(reservePx()).toBe(0);
-    resize();
-    expect(reservePx()).toBe(0);
+    model.scrollTo(natural);
+    expect(model.top()).toBe(natural);
+    expect(model.reserve()).toBe(0);
+    model.resize();
+    expect(model.reserve()).toBe(0);
 
-    move(600, -200);
-    act(() => { screen.getByRole("button", { name: "Scroll down" }).click(); });
-    resize();
-    move(3000, 3000);
-    expect(top).toBe(800);
-    expect(reservePx()).toBe(0);
+    // meiva:note
+    // A return to the agent keeps the spent reserve spent.
+    model.scrollTo(natural - 200);
     view.rerender(<TimelineView key="43" items={[]} threadKey="43" />);
-    view.rerender(<TimelineView key="42" items={items} turnActive={working} threadKey="42" scrollMemoryKey="finished-reserve" />);
-    expect(top).toBe(800);
-    expect(reservePx()).toBe(0);
-
-    view.rerender(<TimelineView key="42" items={items} turnActive threadKey="42" scrollMemoryKey="finished-reserve" />);
-    expect(reservePx()).toBe(0);
-    act(() => { useTimelineStore.getState().requestSendAnchor(7); });
-    view.rerender(<TimelineView key="42" items={items} turnActive threadKey="42" scrollMemoryKey="finished-reserve" />);
-    expect(reservePx()).toBe(444);
+    view.rerender(<TimelineView key="42" items={[earlier, sent]} threadKey="42" scrollMemoryKey="send-release" />);
+    expect(model.top()).toBe(natural - 200);
+    expect(model.reserve()).toBe(0);
   });
 
-  it("a new send from history renews released space without moving the reader", () => {
-    content = 1400;
-    const view = render(<TimelineView turnActive items={[earlier, sent]} />);
-    act(() => {
-      viewport().scrollTop = 1244;
-      viewport().dispatchEvent(new Event("scroll"));
-      viewport().dispatchEvent(new WheelEvent("wheel", { deltaY: -600 }));
-      viewport().scrollTop = 700;
-      viewport().dispatchEvent(new Event("scroll"));
-    });
-    expect(reservePx()).toBe(0);
-    expect(top).toBe(700);
-    act(() => { useTimelineStore.getState().requestSendAnchor(7); });
-    view.rerender(<TimelineView turnActive items={[earlier, sent]} />);
-    expect(top).toBe(700);
-    expect(reservePx()).toBe(444);
-  });
-
-  it("releases a short conversation at zero after touch inertia, while layout alone keeps space", () => {
-    content = 300;
-    humanTop = 200;
-    render(<TimelineView turnActive items={[sent]} />);
-    expect(reservePx()).toBe(444);
-    resize();
-    act(() => { viewport().dispatchEvent(new Event("scroll")); });
-    expect(reservePx()).toBe(444);
-    act(() => {
-      viewport().scrollTop = 144;
-      viewport().dispatchEvent(new Event("scroll"));
-      fireEvent.touchStart(viewport(), { touches: [{ clientY: 100 }] });
-      fireEvent.touchEnd(viewport(), { touches: [] });
-      viewport().scrollTop = 0;
-      viewport().dispatchEvent(new Event("scroll"));
-    });
-    expect(reservePx()).toBe(0);
-    content = 350;
-    resize();
-    expect(reservePx()).toBe(0);
-  });
-
-  it("allows an upward wheel to leave a followed tail before the next output arrives", () => {
-    render(<TimelineView items={[earlier]} />);
-    expect(top).toBe(400);
-    act(() => { viewport().dispatchEvent(new WheelEvent("wheel", { deltaY: -8, bubbles: true })); });
-    act(() => { top = 392; viewport().dispatchEvent(new Event("scroll")); });
-    content = 1200;
-    resize();
-    expect(top).toBe(392);
-  });
-
-  it("follows again once the reader scrolls to the bottom", () => {
+  it("releases the reserve when touch inertia carries the reader past the natural end after the finger lifts", () => {
+    const model = layout();
     const view = render(<TimelineView items={[earlier]} />);
-    act(() => { useTimelineStore.getState().requestSendAnchor(7); });
-    content = 1400;
+    send(7);
     view.rerender(<TimelineView items={[earlier, sent]} />);
-    content = 1900;
-    resize();
-    expect(top).toBe(1244);
+    model.settle();
+    const natural = model.naturalEnd();
 
-    act(() => {
-      viewport().dispatchEvent(new WheelEvent("wheel", { deltaY: 80, bubbles: true }));
-      top = 1300;
-      viewport().dispatchEvent(new Event("scroll"));
-    });
-    content = 2400;
-    resize();
-    expect(top).toBe(1800);
+    model.touchStart();
+    model.scrollTo(model.top() - 40);
+    model.touchEnd();
+    expect(model.reserve()).toBeGreaterThan(0);
+    model.scrollTo(natural + 20);
+    expect(model.reserve()).toBeGreaterThan(0);
+    model.scrollTo(natural - 30);
+    expect(model.reserve()).toBe(0);
+    expect(model.top()).toBe(natural - 30);
   });
 
-  it("hides the arrow at the padded end and shows it when the response extends past the viewport", () => {
+  it("a new send from history renews the released space without moving the reader", () => {
+    const model = layout();
     const view = render(<TimelineView items={[earlier]} />);
-    act(() => { useTimelineStore.getState().requestSendAnchor(7); });
-    content = 1400;
+    send(7);
     view.rerender(<TimelineView items={[earlier, sent]} />);
-    expect(top).toBe(1244);
-    expect(reservePx()).toBe(444);
-    expect(screen.queryByTestId("scroll-to-bottom")).toBeNull();
+    model.settle();
+    model.scrollTo(model.naturalEnd() - 300);
+    expect(model.reserve()).toBe(0);
+    const reading = model.top();
 
-    content = 2400;
-    resize();
-    expect(top).toBe(1244);
-    expect(screen.getByTestId("scroll-to-bottom")).toBeTruthy();
+    send(7);
+    view.rerender(<TimelineView items={[earlier, sent]} />);
+    expect(model.top()).toBe(reading);
+    act(() => { arrow()!.click(); });
+    expect(model.rowTop("2.0")).toBe(READING_TOP_PX);
+    expect(model.reserve()).toBeGreaterThan(0);
+  });
+
+  it("an upward wheel leaves a followed tail before the next output arrives", () => {
+    const model = layout();
+    const view = render(<TimelineView items={[earlier, sent]} />);
+    const tail = model.top();
+    expect(tail).toBe(model.naturalEnd());
+    act(() => { model.viewport().dispatchEvent(new WheelEvent("wheel", { deltaY: -8, bubbles: true })); });
+    view.rerender(<TimelineView items={[earlier, sent, reply]} />);
+    expect(model.top()).toBe(tail);
+    model.scrollTo(tail - 8);
+    model.grow("3.0", 400);
+    expect(model.top()).toBe(tail - 8);
+  });
+
+  it("follows again once the reader scrolls back to the bottom", () => {
+    const model = layout();
+    const view = render(<TimelineView items={[earlier]} />);
+    send(7);
+    view.rerender(<TimelineView items={[earlier, sent, reply]} />);
+    model.settle();
+    model.grow("3.0", 1200);
+    const parked = model.top();
+    expect(model.top()).toBeLessThan(model.naturalEnd());
+
+    model.scrollTo(model.naturalEnd() - 10);
+    model.grow("3.0", 1800);
+    expect(model.top()).toBe(model.naturalEnd());
+    expect(model.top()).toBeGreaterThan(parked);
   });
 
   it("keeps the centered arrow when a work block starts and leaves the sent message in place", () => {
+    const heights: Record<string, number> = { "1.0": 1000, "2.0": 100 };
+    let block = 40;
+    const model = timelineLayout({
+      rowHeight: (row) => heights[row.dataset.itemId ?? ""],
+      height: (element) => element.matches("[data-turn-id]") ? block : undefined,
+    });
     const view = render(<TimelineView items={[earlier]} turnActive />);
-    act(() => { useTimelineStore.getState().requestSendAnchor(7); });
-    content = 1400;
+    send(7);
     view.rerender(<TimelineView items={[earlier, sent]} turnActive />);
+    model.echo();
     const work = makeItem({ item_id: "3.0", kind: "agent_code", payload: "print(1)" });
-    content = 2600;
     view.rerender(<TimelineView items={[earlier, sent, work]} turnActive />);
-    resize();
-    expect(top).toBe(1244);
-    expect(screen.getByRole("button", { name: "Scroll down" }).className).toContain("left-1/2");
+    block = 2000;
+    model.resize();
+    expect(model.rowTop("2.0")).toBe(READING_TOP_PX);
+    const button = screen.getByRole("button", { name: "Scroll down" });
+    expect(button.className).toContain("left-1/2");
     expect(screen.getByTestId("scroll-to-bottom-arrow")).toBeTruthy();
     expect(screen.queryByTestId("scroll-to-bottom-working")).toBeNull();
   });
