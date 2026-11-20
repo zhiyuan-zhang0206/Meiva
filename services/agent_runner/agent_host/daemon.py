@@ -680,7 +680,7 @@ async def run(
             ),
             write_restart=partial(write_exit_restart, db, bus),
             read_exit_message=partial(consume_host_exit_message, home),
-            read_planned=partial(operator_stop_in_progress, home),
+            read_planned=lambda: operator_stop_in_progress(home, now=stamping.clock.monotonic()),
             write_idle_notes=partial(write_exit_idle_notes, db, local_machine),
             clients=clients,
             instance_lock=instance_lock,
