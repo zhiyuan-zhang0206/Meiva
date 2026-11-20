@@ -71,12 +71,27 @@ def test_all_plugin_models_match_archive_at_four_instant_classes(
         assert plugin_price.periods == archive[model].periods
 
 
+def test_sonnet_5_5_cache_read_cut_boundary(model_catalog: ModelCatalog) -> None:
+    before = datetime(2026, 10, 7, 11, 59, 59, tzinfo=UTC)
+    after = datetime(2026, 10, 7, 12, tzinfo=UTC)
+    prices = model_catalog.prices
+    assert rates_at("claude-sonnet-5-5", before, 1_000, prices=prices) == Rates(
+        2.0, 0.20, 10.0, cache_write_5m=2.5, cache_write_1h=4
+    )
+    assert rates_at("claude-sonnet-5-5", after, 1_000, prices=prices) == Rates(
+        2.0, 0.10, 10.0, cache_write_5m=2.5, cache_write_1h=4
+    )
+    assert rates_at("claude-fable-5-2-fast", after, 1_000, prices=prices) == Rates(
+        16.0, 0.40, 80.0, cache_write_5m=20, cache_write_1h=32
+    )
+
+
 def test_new_model_rates_and_272k_boundary(model_catalog: ModelCatalog) -> None:
     assert rates_at("claude-opus-5-5", _FUTURE, 1_000_000, prices=model_catalog.prices) == Rates(
         4.0, 0.20, 20.0, cache_write_5m=5, cache_write_1h=8
     )
     assert rates_at("claude-sonnet-5-5", _FUTURE, 1_000_000, prices=model_catalog.prices) == Rates(
-        2.0, 0.20, 10.0, cache_write_5m=2.5, cache_write_1h=4
+        2.0, 0.10, 10.0, cache_write_5m=2.5, cache_write_1h=4
     )
     for model, tier1, tier2 in (
         (

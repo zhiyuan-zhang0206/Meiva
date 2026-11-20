@@ -39,6 +39,7 @@ def test_repo_anthropic_provider_is_enabled_and_registers_complete_contract(
         "claude-opus-5-fast",
         "claude-opus-5-5",
         "claude-opus-5-5-fast",
+        "claude-fable-5-2-fast",
         "claude-fable-5",
         "claude-fable-5-1",
         "claude-fable-5-2",
