@@ -235,8 +235,7 @@ describe("PendingStrip", () => {
   it("renders a quote card above a queued message", () => {
     render(<PendingStrip items={[item({ id: 1, content: "explain this", quote: quote() })]} />);
     const card = screen.getByTestId("pending-quote");
-    expect(card.textContent).toContain("Quoted · Agent 7");
-    expect(card.textContent).toContain("a selected passage");
+    expect(card.textContent).toBe("↳ Quoted Agent 7: a selected passage");
     expect(screen.getByText("explain this")).toBeTruthy();
     const li = card.closest("li") as HTMLElement;
     expect(li.className.split(" ")).toContain("flex-col");
@@ -273,13 +272,22 @@ describe("PendingStrip", () => {
     expect(screen.getAllByRole("img")).toHaveLength(1);
   });
 
-  it("wraps a long multi-line quote with line-clamp-2 and anywhere-wrapping", () => {
+  it("previews a long multi-line quote on a single truncated line", () => {
     const text = `${"x".repeat(300)}\nsecond line\nthird line`;
     render(<PendingStrip items={[item({ id: 1, quote: quote({ text }) })]} />);
-    const body = screen.getByTestId("pending-quote").querySelector("p") as HTMLElement;
-    expect(body.textContent).toBe(text);
-    const classes = body.className.split(" ");
-    expect(classes).toEqual(expect.arrayContaining(["line-clamp-2", "whitespace-pre-wrap", "[overflow-wrap:anywhere]"]));
+    const line = screen.getByTestId("pending-quote");
+    expect(line.className.split(" ")).toContain("truncate");
+    expect(line.textContent).toContain(text);
+    expect(line.querySelector("p")).toBeNull();
+  });
+
+  it("groups a quoted message with a left rule and separates rows with a gap", () => {
+    render(
+      <PendingStrip items={[item({ id: 1, content: "a", quote: quote() }), item({ id: 2, content: "b" })]} />,
+    );
+    const quoted = screen.getByTestId("pending-quote").closest("li") as HTMLElement;
+    expect(quoted.className.split(" ")).toEqual(expect.arrayContaining(["border-l-2", "flex-col"]));
+    expect(quoted.parentElement!.className.split(" ")).toContain("space-y-1.5");
   });
 
   it("renders no quote card and keeps the compact row when there is no quote", () => {

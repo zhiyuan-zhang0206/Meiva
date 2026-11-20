@@ -13,23 +13,18 @@ export function userPending(items: readonly PendingInbound[]): PendingInbound[] 
   return items.filter((it) => it.sender === "user" || Boolean(it.files?.length));
 }
 
-function PendingQuoteCard({ quote }: { quote: Quote }) {
+function PendingQuoteLine({ quote }: { quote: Quote }) {
   const t = useTranslations("pendingStrip");
   return (
-    <div
-      data-testid="pending-quote"
-      className={cn("rounded border border-border bg-muted/40 px-2 py-1 text-xs text-muted-foreground", MIN_W_0)}
-    >
-      <div className="truncate">{t("quoteSource", { author: quote.author })}</div>
-      <p className="line-clamp-2 whitespace-pre-wrap [overflow-wrap:anywhere] text-foreground/80">
-        {quote.text}
-      </p>
+    <div data-testid="pending-quote" className="truncate text-[11px] text-muted-foreground">
+      {t("quoteSource", { author: quote.author })} <span className="text-foreground/60">{quote.text}</span>
     </div>
   );
 }
 
 // meiva:note
-// A row with a quote stacks the quote card above the body; a row without one keeps the compact single line.
+// A quoted message is one unit: a left rule groups its one-line quote preview, text and attachments;
+// a message without a quote keeps the compact single line.
 function PendingRow({
   quote,
   testId,
@@ -47,8 +42,8 @@ function PendingRow({
     );
   }
   return (
-    <li data-testid={testId} className={cn("gap-1 pl-4", FLEX, FLEX_COL, MIN_W_0)}>
-      <PendingQuoteCard quote={quote} />
+    <li data-testid={testId} className={cn("ml-4 gap-0.5 border-l-2 border-border pl-2", FLEX, FLEX_COL, MIN_W_0)}>
+      <PendingQuoteLine quote={quote} />
       <div className={cn("items-center gap-1.5", FLEX, MIN_W_0)}>{children}</div>
     </li>
   );
@@ -79,7 +74,7 @@ export function PendingStrip({
           <Clock className="size-3 shrink-0" />
           {t("pending", { count: totalCount })}
         </div>
-        <ul className="mt-0.5 max-h-36 overflow-y-auto space-y-0.5">
+        <ul className="mt-0.5 max-h-36 overflow-y-auto space-y-1.5">
           {showDelivering ? (
             <PendingRow testId="pending-delivering-batch" quote={deliveringBatch.quote}>
               <span className="truncate">
