@@ -88,10 +88,10 @@ def test_sanitize_logs_signature_for_diagnosis(loguru_records: LogRecords) -> No
         response_metadata=_ANTHROPIC_META,
     )
     sanitize_thinking_blocks(msg)
-    infos = [r for r in loguru_records if r["level"].name == "INFO"]
+    infos = loguru_records.messages("INFO")
     assert len(infos) == 1
-    assert "sig-orphan-167" in infos[0]["message"]
-    assert "thinking block [0]" in infos[0]["message"]
+    assert "sig-orphan-167" in infos[0]
+    assert "thinking block [0]" in infos[0]
 
 
 def test_sanitize_logs_missing_placeholder_without_signature(loguru_records: LogRecords) -> None:
@@ -102,9 +102,9 @@ def test_sanitize_logs_missing_placeholder_without_signature(loguru_records: Log
         response_metadata=_ANTHROPIC_META,
     )
     sanitize_thinking_blocks(msg)
-    infos = [r for r in loguru_records if r["level"].name == "INFO"]
+    infos = loguru_records.messages("INFO")
     assert len(infos) == 1
-    assert "'<missing>'" in infos[0]["message"]
+    assert "'<missing>'" in infos[0]
     block = msg.content[0]
     assert isinstance(block, dict)
     assert block["thinking"] == ""

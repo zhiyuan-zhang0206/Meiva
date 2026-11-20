@@ -6,18 +6,21 @@ from __future__ import annotations
 import asyncio
 from collections.abc import AsyncGenerator, AsyncIterator, Mapping, Sequence
 from contextlib import asynccontextmanager
-from typing import Any, Literal
+from typing import Literal
 from unittest.mock import MagicMock
 
 from langchain_core.callbacks import AsyncCallbackManagerForLLMRun
 from langchain_core.language_models.chat_models import BaseChatModel
-from langchain_core.messages import AIMessageChunk, BaseMessage
+from langchain_core.messages import AIMessageChunk, AnyMessage, BaseMessage
 from langchain_core.outputs import ChatGenerationChunk, ChatResult
+from langchain_core.tools import BaseTool
 from langgraph.runtime import Runtime
-from pydantic import Field, SkipValidation
+from langgraph.types import Command
+from pydantic import Field, SkipValidation, TypeAdapter
 from redis.asyncio.client import PubSub
 
 from agent.graph._callbacks import RedisStreamHandler
+from agent.graph.llm.goto import LlmGoto
 from base.agents.context import MeivaContext
 from base.agents.observation.turn_progress import TurnProgress
 from base.clock import SYSTEM_TIMERS, Clock
@@ -28,6 +31,8 @@ from base.db.code_version_gate import ProcessDbGate
 from base.events.live.bus import EventBus
 from base.events.live.publisher import AgentEventPublisher
 from base.events.tests.async_pubsub_view import async_messages
+from base.host.boundary.json_values import is_object_dict, is_object_list
+from base.host.boundary.untyped import object_of
 from base.host.env.agent_slices import AgentSlices
 from base.lm.catalog import ModelCatalog
 
@@ -74,14 +79,18 @@ class ScriptedModel(BaseChatModel):
     def _llm_type(self) -> str:
         return "scripted-llm-node-test"
 
-    def bind_tools(self, tools: Sequence[Any], **kwargs: Any) -> ScriptedModel:
+    def bind_tools(self, tools: Sequence[object], **kwargs: object) -> ScriptedModel:
         del kwargs
-        return self.model_copy(update={"tools": tuple(tool.name for tool in tools)})
+        names: list[str] = []
+        for tool in tools:
+            assert isinstance(tool, BaseTool), tool
+            names.append(tool.name)
+        return self.model_copy(update={"tools": tuple(names)})
 
-    def _generate(self, *args: Any, **kwargs: Any) -> ChatResult:
+    def _generate(self, *args: object, **kwargs: object) -> ChatResult:
         raise NotImplementedError("the llm node streams the model asynchronously")
 
-    async def _agenerate(self, *args: Any, **kwargs: Any) -> ChatResult:
+    async def _agenerate(self, *args: object, **kwargs: object) -> ChatResult:
         raise AssertionError("the llm node made a non-streaming request")
 
     async def _astream(
@@ -89,7 +98,7 @@ class ScriptedModel(BaseChatModel):
         messages: list[BaseMessage],
         stop: list[str] | None = None,
         run_manager: AsyncCallbackManagerForLLMRun | None = None,
-        **kwargs: Any,
+        **kwargs: object,
     ) -> AsyncIterator[ChatGenerationChunk]:
         del stop, run_manager, kwargs
         for step in self.scripts.pop(0):
@@ -111,13 +120,35 @@ class ScriptedModel(BaseChatModel):
 def StubHandler(fail_with: BaseException | None = None) -> RedisStreamHandler:  # noqa: N802
     publisher = MagicMock(spec=AgentEventPublisher)
     if fail_with is not None:
-        publisher.emit.side_effect = fail_with
+        publisher.configure_mock(**{"emit.side_effect": fail_with})
     return RedisStreamHandler(
         event_publisher=publisher,
         agent_id=1,
         msg_idx=0,
         turn_progress=TurnProgress(),
     )
+
+
+# meiva:note
+# What the llm node returns: the update it writes to the graph state and where the graph goes next.
+NodeCommand = Command[LlmGoto]
+_ANY_MESSAGE = TypeAdapter[AnyMessage](AnyMessage)
+
+
+# meiva:note
+# What the node's Command writes to the graph state. langgraph types `Command.update` as `Any`; it is read as `object` and narrowed here, so a test asserts on a checked mapping.
+def command_update(result: NodeCommand) -> dict[str, object]:
+    update = object_of(getattr, result, "update")
+    assert is_object_dict(update), update
+    return update
+
+
+# meiva:note
+# The messages the node's Command appends to the conversation, each validated as one of the message classes.
+def command_messages(result: NodeCommand) -> list[AnyMessage]:
+    messages = command_update(result).get("messages")
+    assert is_object_list(messages), messages
+    return [_ANY_MESSAGE.validate_python(message) for message in messages]
 
 
 def sink_publisher() -> AgentEventPublisher:
@@ -129,7 +160,7 @@ def llm_runtime(
     *,
     model_catalog: ModelCatalog,
     database_gate: ProcessDbGate,
-    pins: Mapping[str, Any] | None = None,
+    pins: Mapping[str, object] | None = None,
     event_publisher: AgentEventPublisher | None = None,
 ) -> Runtime[MeivaContext]:
     return Runtime(

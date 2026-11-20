@@ -7,19 +7,23 @@ import random
 import time
 
 import pytest
-from langchain_core.messages import AnyMessage, HumanMessage
+from langchain_core.messages import HumanMessage
 from langchain_core.runnables import RunnableConfig
 
 from agent.graph.llm._backoff import Attempt
 from agent.graph.llm.node import llm_attempt, llm_node
 from agent.graph.llm.tests.llm_support import (
     ScriptedModel,
+    command_messages,
+    command_update,
     end_turn_chunk,
     llm_runtime,
     tool_call_chunk,
 )
 from agent.state import AgentState
 from base.db.code_version_gate import ProcessDbGate
+from base.host.boundary.json_values import is_object_dict
+from base.host.boundary.untyped import object_mapping, object_of
 from base.lm.catalog import ModelCatalog
 from base.log.tests.log_records import LogRecords
 
@@ -28,6 +32,24 @@ from base.log.tests.log_records import LogRecords
 # A fresh seeded generator for each use, so no test sees another's draws.
 def _rng() -> random.Random:
     return random.Random(0)  # noqa: S311
+
+
+# meiva:note
+# The exception value attached to each record logged with `event=<event>` (`logger.opt(exception=True)`), `None` for a record that carries none. loguru keeps it as a `(type, value, traceback)` record on `record["exception"]`.
+def _exception_values(records: LogRecords, event: str) -> list[BaseException | None]:
+    values: list[BaseException | None] = []
+    for record in records:
+        extra = object_of(record.get, "extra")
+        if not is_object_dict(extra) or extra.get("event") != event:
+            continue
+        exception = object_of(record.get, "exception")
+        if exception is None:
+            values.append(None)
+            continue
+        value = object_of(getattr, exception, "value")
+        assert isinstance(value, BaseException), value
+        values.append(value)
+    return values
 
 
 _STATE = AgentState(messages=[HumanMessage(content="hi")], halted=False)
@@ -53,18 +75,18 @@ async def test_turn_end_ok_false_record_carries_exception(
             Attempt(1, time.time()),
         )
 
-    turn_end_records = loguru_records.events("turn_end")
-    assert len(turn_end_records) == 1
-    rec = turn_end_records[0]
-    assert rec["extra"]["ok"] is False
-    assert (
-        rec["level"].name == "WARNING"  # pyright: ignore[reportUnknownMemberType]
-    )  # ok=False goes through warning, distinct from ok=True info
-    assert rec["exception"] is not None, (
+    turn_end_extras = loguru_records.extras(event="turn_end")
+    assert len(turn_end_extras) == 1
+    assert turn_end_extras[0]["ok"] is False
+    assert len(loguru_records.extras(event="turn_end", level="WARNING")) == 1, (
+        "ok=False goes through warning, distinct from ok=True info"
+    )
+    (exception,) = _exception_values(loguru_records, "turn_end")
+    assert exception is not None, (
         "logger.opt(exception=True) must attach an exception object — _event_sink relies on it to inject traceback"
     )
-    assert rec["exception"].type is RuntimeError  # pyright: ignore[reportUnknownMemberType]
-    assert "simulated LLM timeout" in str(rec["exception"].value)  # pyright: ignore[reportUnknownArgumentType, reportUnknownMemberType]
+    assert type(exception) is RuntimeError
+    assert "simulated LLM timeout" in str(exception)
 
 
 # meiva:note
@@ -85,13 +107,10 @@ async def test_turn_end_ok_true_record_no_exception(
         rng=_rng(),
     )
 
-    assert (
-        result.update is not None
-        and result.update["messages"][0].content == "MEIVA_DISPLAY_TO_USER\nok"
-    )
+    assert command_messages(result)[0].content == "MEIVA_DISPLAY_TO_USER\nok"
     assert loguru_records.events("turn_end") == [], "a halting attempt holds its record"
-    assert result.update["turn_end_held_seconds"] is not None
-    assert "meiva_non_human_wake" not in result.update["messages"][0].additional_kwargs
+    assert command_update(result)["turn_end_held_seconds"] is not None
+    assert "meiva_non_human_wake" not in command_messages(result)[0].additional_kwargs
 
 
 # meiva:note
@@ -108,11 +127,11 @@ async def test_turn_end_ok_true_record_emitted_when_the_loop_continues(
         rng=_rng(),
     )
 
-    assert result.update is not None and result.update.get("turn_end_held_seconds") is None
-    turn_end_records = loguru_records.events("turn_end")
-    assert len(turn_end_records) == 1
-    assert turn_end_records[0]["extra"]["ok"] is True
-    assert turn_end_records[0]["exception"] is None
+    assert command_update(result).get("turn_end_held_seconds") is None
+    turn_end_extras = loguru_records.extras(event="turn_end")
+    assert len(turn_end_extras) == 1
+    assert turn_end_extras[0]["ok"] is True
+    assert _exception_values(loguru_records, "turn_end") == [None]
 
 
 async def test_llm_node_stamps_meiva_non_human_wake_only_when_state_non_human_wake(
@@ -132,9 +151,8 @@ async def test_llm_node_stamps_meiva_non_human_wake_only_when_state_non_human_wa
         rng=_rng(),
     )
 
-    assert result.update is not None
-    ai_msg = result.update["messages"][0]
-    assert ai_msg.additional_kwargs.get("meiva_non_human_wake") is True
+    ai_msg = command_messages(result)[0]
+    assert object_mapping(ai_msg.additional_kwargs).get("meiva_non_human_wake") is True
 
 
 @pytest.mark.parametrize(
@@ -148,17 +166,13 @@ async def test_invalid_final_reply_gets_one_immediate_correction(
     runtime = llm_runtime(model, model_catalog=model_catalog, database_gate=database_gate)
     result = await llm_node(_STATE, runtime, _config_with_thread(), rng=_rng())
     assert result.goto == "before_turn"
-    assert result.update is not None
-    messages: list[AnyMessage] = result.update["messages"]
-    reply, note = messages
+    reply, note = command_messages(result)
     assert reply.content == "Unmarked."
-    assert note.additional_kwargs["meiva_note_tag"] == "reply_visibility"
+    assert object_mapping(note.additional_kwargs)["meiva_note_tag"] == "reply_visibility"
     assert "folded into Details" in note.text
 
     state = AgentState(messages=[*_STATE.messages, reply, note], halted=False)
     result = await llm_node(state, runtime, _config_with_thread(), rng=_rng())
     assert result.goto == "claim"
-    assert result.update is not None
-    assert result.update["halted"] is True
-    corrected: list[AnyMessage] = result.update["messages"]
-    assert len(corrected) == 1 + note_count
+    assert command_update(result)["halted"] is True
+    assert len(command_messages(result)) == 1 + note_count
