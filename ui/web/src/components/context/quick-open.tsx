@@ -3,7 +3,7 @@
 import { useQuery } from "@tanstack/react-query";
 import { CornerDownLeft, FileText } from "lucide-react";
 import { useTranslations } from "next-intl";
-import { useDeferredValue, useEffect, useId, useMemo, useRef, useState } from "react";
+import { useEffect, useId, useMemo, useRef, useState } from "react";
 
 import { Spinner } from "@/components/ui/spinner";
 import { useWorkspaceFileStore, type WorkspaceFileTarget } from "@/lib/context/workspace-file-store";
@@ -14,6 +14,10 @@ import { useApi } from "@/lib/transport/transport-context";
 import { fileName } from "./file-tabs";
 
 const SEARCH_LIMIT = 30;
+// meiva:note
+// A search walks the workspace on the agent's machine (bounded at 2 s); typing waits this long
+// before asking, so a burst of keys starts one walk, not one per key.
+const SEARCH_DEBOUNCE_MS = 200;
 
 interface Choice {
   key: string;
@@ -46,7 +50,11 @@ export function QuickOpen({ agentId, workspaceAgentId, onClose }: {
   const listId = useId();
   const [query, setQuery] = useState("");
   const [selected, setSelected] = useState(0);
-  const deferred = useDeferredValue(query.trim());
+  const [deferred, setDeferred] = useState("");
+  useEffect(() => {
+    const timer = setTimeout(() => setDeferred(query.trim()), SEARCH_DEBOUNCE_MS);
+    return () => clearTimeout(timer);
+  }, [query]);
   const recent = useWorkspaceFileStore((s) => s.recent);
   const inputRef = useRef<HTMLInputElement>(null);
   useEffect(() => { inputRef.current?.focus(); }, []);

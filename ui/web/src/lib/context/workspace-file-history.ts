@@ -50,12 +50,14 @@ export function useWorkspaceFileHistory(activeId: number | null): void {
 
   // meiva:note
   // Only a switch between two agents closes the file: the first selection on load (null to the
-  // address's agent) keeps the file a shared link opened.
+  // address's agent) keeps the file a shared link opened. The last agent seen is remembered across a
+  // passing null, so a switch through "no agent" still closes it.
   const previous = useRef(activeId);
   useEffect(() => {
+    if (activeId === null) return;
     const before = previous.current;
     previous.current = activeId;
-    if (before === null || activeId === null || before === activeId) return;
+    if (before === null || before === activeId) return;
     useWorkspaceFileStore.setState({ activeFile: null });
   }, [activeId]);
 }

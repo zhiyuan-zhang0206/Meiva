@@ -64,6 +64,11 @@ describe("workspace file history", () => {
     expect(store().activeFile).toEqual({ agentId: 9, path: "/w/report.md" });
     view.rerender({ id: 8 });
     expect(store().activeFile).toBeNull();
+    act(() => store().openFile({ agentId: 8, path: "/w/c.md" }));
+    view.rerender({ id: null });
+    expect(store().activeFile?.path).toBe("/w/c.md");
+    view.rerender({ id: 9 });
+    expect(store().activeFile).toBeNull();
   });
 
   it("returns home as a new entry, and drops the file from the current entry when the panel closes", () => {
