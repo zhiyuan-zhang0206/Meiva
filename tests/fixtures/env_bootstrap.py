@@ -201,6 +201,17 @@ os.environ["MEIVA_COMPACT_HISTORY_DUMP"] = "false"
 # so local runs match CI (2026-08-06, PR #1650 verification).
 os.environ.pop("MEIVA_PROCESS_PROFILE", None)
 # meiva:note
+# A shell a Claude Code session started carries every host `MEIVA_*` key it may not see as an
+# empty value: the SDK spawns the CLI over the parent's environment, so blanking is the only way
+# to hide a key (`base/lm/harness/claude/auth.py:build_env`). The config boot reads those blanks
+# as unset when it sees the session's handle (`base/host/env/dotenv_boot.py:load_meiva_env`), and
+# the handle is popped just below, so the suite applies the same reading first; otherwise a blank
+# such as `MEIVA_TIMEZONE=''` fails the first config parse of every test (task #7450).
+# meiva:link base/lm/harness/claude/docs/claude.md
+if os.environ.get("MEIVA_HARNESS_HANDLE"):
+    for _blank in [k for k, v in os.environ.items() if k.startswith("MEIVA_") and v == ""]:
+        del os.environ[_blank]
+# meiva:note
 # The suite owns its identities. Inheriting a native id or external registration handle
 # would attach SDK reads to the launcher rather than the test's isolated home. A test
 # that exercises attachment supplies its own launch markers after this bootstrap.
