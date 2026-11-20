@@ -18,6 +18,9 @@ sites = "reasons"
 family-modules = "names"
 independent-clocks = "reasons"
 
+[sections.env-presence]
+files = "reasons"
+
 [sections.no-os-environ]
 test-only-dirs = "names"
 rule-inputs = "names"

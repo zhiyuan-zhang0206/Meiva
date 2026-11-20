@@ -1,13 +1,18 @@
 exports = ["ambient_state", "machine_role.py", "no_os_environ.py", "turn_scoped_config.py"]
 
 [uses]
+"env_presence_cli.py" = ["env_presence.py"]
 "no_os_environ.py" = ["lint_paths.py", "no_os_environ_plan.py"]
 "no_os_environ_plan.py" = ["lint_paths.py"]
-"tests" = ["lint_paths.py", "no_os_environ.py", "no_os_environ_plan.py", "turn_scoped_config.py", "turn_scoped_config_plan.py"]
+"tests" = ["env_presence.py", "env_presence_cli.py", "lint_paths.py", "no_os_environ.py", "no_os_environ_plan.py", "turn_scoped_config.py", "turn_scoped_config_plan.py"]
 "turn_scoped_config.py" = ["lint_paths.py", "turn_scoped_config_plan.py"]
+
+[roots]
+"env_presence_cli.py" = { kinds = ["argv", "cwd"], why = "the __main__ guard reads argv[1:] and the working directory, the checkout it judges, once and hands both to main" }
 
 [purity]
 "." = "strict"
+"env_presence_cli.py" = { mode = "none", why = "the command-line entry of the env-presence rule: it lists the tracked files, reads the policy and each judged file and prints the findings; which files are judged as which language and what a finding says are decided in env_presence.py and the language table beside it" }
 "machine_role.py" = "strict"
 "no_os_environ.py" = { mode = "none", why = "the shell of the no_os_environ rule: it locates the repository, reads the policy, walks the scan targets, reads each judged file and prints the findings; the directories the scan reads, which files the rule judges, which of a file's lines are findings, how a path is labelled and what the finding and the summary say are decided in no_os_environ_plan.py" }
 "turn_scoped_config.py" = { mode = "none", why = "the shell of the turn-scoped-config rule: it walks the scan directories, resolves and reads each file and prints the three reports; which files the rule skips, which reads are findings, how a path is labelled and the heading of each report are decided in turn_scoped_config_plan.py and lint_paths.py" }

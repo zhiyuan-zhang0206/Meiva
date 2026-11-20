@@ -387,6 +387,9 @@ jobs:
       - name: Scan the root supervisor for permission-domain symbols
         run: python3 scripts/lint/meiva_root_scope.py
 
+      - name: Judge environment variables by their value, not their presence
+        run: python3 -m scripts.rules.state.env_presence_cli
+
       - name: Check canonical Python lock sources (stdlib only)
         run: python3 scripts/lint/locks/python_lock.py
 

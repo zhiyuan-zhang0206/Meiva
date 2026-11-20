@@ -143,9 +143,7 @@ class ProviderReport:
 
 
 def _environment_value(alias: str) -> str | None:
-    if alias in os.environ:
-        return os.environ[alias]
-    return None
+    return os.environ.get(alias)
 
 
 def _id_rows(value: object, field: str, source: str) -> list[str]:

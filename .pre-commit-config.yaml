@@ -163,6 +163,15 @@ repos:
         language: system
         files: ^(meizel\.timing_baseline\.json|uv\.lock|.*\.py)$
 
+      # An environment variable is set when it has a value: a presence test (`"X" in os.environ`,
+      # `os.getenv("X") is None`, `[ -v X ]`) reads an optional secret exported empty as configured.
+      # See scripts/rules/state/env_presence.py.
+      - id: lint-env-presence
+        name: lint environment presence tests (judge a variable by its value)
+        entry: .venv/bin/python -m scripts.rules.state.env_presence_cli --only
+        language: system
+        files: ^(meizel\.policy\.toml|uv\.lock|.*\.(py|sh|bash)|\.github/(workflows|actions)/.*\.ya?ml)$
+
       # PYTHONSAFEPATH=1 (2026-08-22 hardening) keeps a script's own directory
       # off sys.path, so a script-mode file importing a same-dir sibling without
       # restoring its directory first breaks (daily_scan.py 2026-08-23 crash).
