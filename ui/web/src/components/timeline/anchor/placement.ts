@@ -36,7 +36,6 @@ export interface PlacementInputs {
   items: readonly BackendTimelineItem[];
   compactBuffer: CompactTransitionBuffer | null;
   loading: boolean;
-  turnActive: boolean;
   hasMoreOlder: boolean;
   loadingOlder: boolean;
   canLoadOlder: boolean;
@@ -49,7 +48,7 @@ export interface PlacementInputs {
 }
 
 export interface PlacementEffects {
-  place: (anchor: ViewAnchor, options: { hold: boolean; sendReserve: boolean | null; smooth?: boolean }) => void;
+  place: (anchor: ViewAnchor, options: { hold: boolean; smooth?: boolean }) => void;
   loadOlder: () => void;
   cancelOlder: () => void;
   // meiva:note
@@ -130,7 +129,7 @@ export class PlacementMachine {
       const { anchor, smooth } = this.requested;
       this.requested = null;
       this.placedRow = anchor.kind === "row" ? anchor.row : null;
-      effects.place(anchor, { hold: false, sendReserve: null, smooth });
+      effects.place(anchor, { hold: false, smooth });
     }
     this.publish(inputs);
   }
@@ -158,7 +157,7 @@ export class PlacementMachine {
     if (this.goal.kind !== "placed") return;
     const moved = locate(place.identity, inputs.items, inputs.compactBuffer);
     if (moved) {
-      if (!sameRow(moved, place.identity.row)) effects.place(rowAnchor(place, moved), { hold: place.holdReserve, sendReserve: place.sendReserve });
+      if (!sameRow(moved, place.identity.row)) effects.place(rowAnchor(place, moved), { hold: place.holdReserve });
       return;
     }
     this.goal = { kind: "row", place, fromSession: false, search: null };
@@ -169,7 +168,7 @@ export class PlacementMachine {
     return this.goal.kind === "placed";
   }
 
-  private settle(target: ViewAnchor, options: { hold: boolean; sendReserve: boolean | null }, effects: PlacementEffects): void {
+  private settle(target: ViewAnchor, options: { hold: boolean }, effects: PlacementEffects): void {
     this.goal = { kind: "placed" };
     this.placedRow = target.kind === "row" ? target.row : null;
     effects.place(target, options);
@@ -200,20 +199,18 @@ export class PlacementMachine {
           if (inputs.now - goal.readySince < this.bounds.timeoutMs) return false;
         }
         const row = this.goalRow(inputs);
-        // meiva:note
-        // A first visit to a working conversation leaves room to align its last human message.
-        this.settle(row ? { kind: "row", row, offset: READING_TOP_PX } : TAIL, { hold: false, sendReserve: inputs.turnActive }, effects);
+        this.settle(row ? { kind: "row", row, offset: READING_TOP_PX } : TAIL, { hold: false }, effects);
         return false;
       }
       case "tail": {
         if (loading && items.length === 0) return false;
-        this.settle(TAIL, { hold: false, sendReserve: false }, effects);
+        this.settle(TAIL, { hold: false }, effects);
         return false;
       }
       case "row": {
         const row = this.goalRow(inputs);
         if (row) {
-          this.settle(rowAnchor(goal.place, row), { hold: goal.place.holdReserve, sendReserve: goal.place.sendReserve }, effects);
+          this.settle(rowAnchor(goal.place, row), { hold: goal.place.holdReserve }, effects);
           return false;
         }
         if (loading) return false;
@@ -229,7 +226,7 @@ export class PlacementMachine {
         const giveUp = () => {
           if (search) effects.cancelOlder();
           if (goal.fromSession) effects.dropSessionPlace();
-          this.settle(TAIL, { hold: false, sendReserve: false }, effects);
+          this.settle(TAIL, { hold: false }, effects);
           return false;
         };
         if (inputs.now - goal.waitingSince >= this.bounds.timeoutMs) return giveUp();

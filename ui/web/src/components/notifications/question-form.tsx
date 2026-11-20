@@ -32,20 +32,21 @@ export function answerFromDraft(question: QuestionSpec, draft: QuestionDraft): Q
 
 // meiva:note
 // Numbered choices share their frozen order with server replies and history.
-// Enter in an answer or Note activates the shared Submit action; Shift+Enter edits.
+// Enter in an answer or Note goes on: to the next question, or on the last one the shared Submit
+// action; Shift+Enter edits.
 // meiva:link ui/web/src/docs/frontend-state/shared-context/questions.md
 export function QuestionForm({
   question,
   pending,
   draft,
   onDraftChange,
-  onSubmit,
+  onEnter,
 }: {
   question: QuestionSpec;
   pending: boolean;
   draft: QuestionDraft;
   onDraftChange: (draft: QuestionDraft) => void;
-  onSubmit: () => void;
+  onEnter: () => void;
 }) {
   const t = useTranslations("questionDetail");
   const fieldId = useId();
@@ -75,7 +76,7 @@ export function QuestionForm({
     applySuggestion(field, event);
     if (event.key === "Enter" && !event.shiftKey && !isImeComposition(event)) {
       event.preventDefault();
-      if (!pending && !event.repeat) onSubmit();
+      if (!pending && !event.repeat) onEnter();
     }
   };
 

@@ -55,7 +55,6 @@ export function useComposerUploads({
   stageQueue,
   onUploadFiles,
   onDeliveringBatchChange,
-  onUploadSent,
   onUploadError,
 }: {
   agentId: number | null;
@@ -66,7 +65,6 @@ export function useComposerUploads({
   stageQueue?: StageQueueBatch | null;
   onUploadFiles?: (files: File[]) => void;
   onDeliveringBatchChange?: (batch: DeliveredUploadStatus | null) => void;
-  onUploadSent?: () => void;
   onUploadError?: (msg: string) => void;
 }) {
   const [attachments, setAttachments] = useState<StagedAttachment[]>([]);
@@ -252,7 +250,6 @@ export function useComposerUploads({
           clearActiveUploadBatch(session, agentId);
           setActiveBatchId(null);
           setActiveBatchStatus(null);
-          onUploadSent?.();
           return;
         }
         setActiveBatchStatus(status);
@@ -273,7 +270,7 @@ export function useComposerUploads({
       controller.abort();
       if (timer !== undefined) clearTimeout(timer);
     };
-  }, [agentId, activeBatchId, activeBatchStatus?.state, client, onUploadSent, session]);
+  }, [agentId, activeBatchId, activeBatchStatus?.state, client, session]);
 
   const removeAttachment = useCallback(
     (key: string) => {
@@ -326,9 +323,8 @@ export function useComposerUploads({
       }
       setActiveBatchId(accepted.batch_id);
       setActiveBatchStatus(initialPendingStatus(accepted, messageText, quote));
-      onUploadSent?.();
     },
-    [agentId, onUploadSent, session],
+    [agentId, session],
   );
 
   const restoreHeldBatch = useCallback(

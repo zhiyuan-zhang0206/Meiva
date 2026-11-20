@@ -34,7 +34,6 @@ function resetStore(): void {
     hasMoreOlder: false,
     loadingOlder: false,
     olderFetchCount: 0,
-    sendAnchor: { seq: 0, inboundId: null },
     liveCompact: null,
     compactReplaceSeq: 0,
     compactReplaceAgent: null,
@@ -76,50 +75,6 @@ describe("applyTokenUsage", () => {
     expect(s.maxContextTokens).toBe(0);
     expect(s.softCompactTokens).toBe(0);
     expect(s.hardCompactTokens).toBe(0);
-  });
-});
-
-// meiva:note
-// A send request is one event with a payload: the sequence alone cannot say
-// which message to park, and a fold that moves items must not fabricate a new
-// one - only the reader's own send does.
-// meiva:link ui/web/src/docs/frontend-state/frontend-state.md
-describe("send anchor request", () => {
-  it("requestSendAnchor stamps a new sequence and carries the stored inbound", () => {
-    act(() => {
-      useTimelineStore.setState({ sendAnchor: { seq: 5, inboundId: null } });
-      useTimelineStore.getState().requestSendAnchor(42);
-    });
-    expect(useTimelineStore.getState().sendAnchor).toEqual({ seq: 6, inboundId: 42 });
-  });
-
-  it("switchThread preserves it (hot-cache agent switch)", () => {
-    act(() => {
-      useTimelineStore.setState({ sendAnchor: { seq: 2, inboundId: null } });
-      useTimelineStore.getState().switchThread(8, [item({ payload: "x" })], false);
-    });
-    expect(useTimelineStore.getState().sendAnchor.seq).toBe(2);
-  });
-
-  it("reloadSnapshot does NOT bump it (mid-stream refresh must not move the reader)", () => {
-    act(() => {
-      useTimelineStore.setState({ sendAnchor: { seq: 4, inboundId: null } });
-      useTimelineStore.getState().reloadSnapshot([item({ item_id: "0.0", payload: "s" })], 1, false);
-    });
-    expect(useTimelineStore.getState().sendAnchor.seq).toBe(4);
-  });
-
-  it("prependOlder does NOT bump it (scroll-up load-older must not move the reader)", () => {
-    act(() => {
-      useTimelineStore.setState({
-        items: [item({ item_id: "5.0", payload: "curr" })],
-        sendAnchor: { seq: 7, inboundId: null },
-        hasMoreOlder: true,
-        loadingOlder: true,
-      });
-      useTimelineStore.getState().prependOlder([item({ item_id: "1.0", payload: "old" })], false);
-    });
-    expect(useTimelineStore.getState().sendAnchor.seq).toBe(7);
   });
 });
 

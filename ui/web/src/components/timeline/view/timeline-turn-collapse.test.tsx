@@ -73,7 +73,7 @@ describe("work block expansion", () => {
     const message = screen.getByRole("button", { name: "Agent 7" });
     expect(message.getAttribute("aria-expanded")).toBe("false");
     expect(screen.queryByText("incoming update")).toBeNull();
-    expect(screen.getByText("live thought")).toBeTruthy();
+    expect(screen.queryByText("live thought")).toBeNull();
     fireEvent.click(message);
     expect(screen.getByText("incoming update")).toBeTruthy();
 
@@ -124,7 +124,7 @@ describe("work block expansion", () => {
     expect(screen.queryByTestId("python-code")).toBeNull();
   });
 
-  it("drops a pinned inner-card collapse on a live turn when the timeline thread changes", () => {
+  it("drops a pinned inner-card expansion on a live turn when the timeline thread changes", () => {
     setUserSettings({ "display.expand_working_block": true });
     const { rerender } = render(
       <TimelineView
@@ -138,9 +138,9 @@ describe("work block expansion", () => {
     );
 
     expect(runToggle().getAttribute("aria-expanded")).toBe("true");
-    expect(screen.getByTestId("python-code").textContent).toBe("thread A code");
-    fireEvent.click(screen.getAllByTestId("card-toggle")[1]);
     expect(screen.queryByTestId("python-code")).toBeNull();
+    fireEvent.click(screen.getAllByTestId("card-toggle")[1]);
+    expect(screen.getByTestId("python-code").textContent).toBe("thread A code");
 
     rerender(
       <TimelineView
@@ -153,7 +153,7 @@ describe("work block expansion", () => {
       />,
     );
     expect(runToggle().getAttribute("aria-expanded")).toBe("true");
-    expect(screen.getByTestId("python-code").textContent).toBe("thread B code");
+    expect(screen.queryByTestId("python-code")).toBeNull();
   });
 
   it("folds a run of ≥2 secondary items into one turn block between primary messages", () => {
@@ -203,20 +203,18 @@ describe("work block expansion", () => {
     expect(screen.getByText("ping")).toBeTruthy();
   });
 
-  it("keeps a manually collapsed child collapsed when its live turn settles", () => {
+  it("keeps a manually opened child open when its live turn settles", () => {
     setUserSettings({ "display.expand_working_block": true });
     const items = [makeItem({ item_id: "1.0", kind: "agent_reasoning", payload: "live thought" })];
     const { rerender } = render(<TimelineView turnActive items={items} />);
     const card = () => screen.getByTestId("card-toggle");
-    expect(card().getAttribute("aria-expanded")).toBe("true");
-    fireEvent.click(card());
     expect(card().getAttribute("aria-expanded")).toBe("false");
+    fireEvent.click(card());
+    expect(card().getAttribute("aria-expanded")).toBe("true");
 
     rerender(<TimelineView items={items} />);
     fireEvent.click(runToggle());
-    expect(card().getAttribute("aria-expanded")).toBe("false");
-    expect(screen.queryByText("live thought")).toBeNull();
-    fireEvent.click(card());
+    expect(card().getAttribute("aria-expanded")).toBe("true");
     expect(screen.getByText("live thought")).toBeTruthy();
   });
 
@@ -233,6 +231,9 @@ describe("work block expansion", () => {
     );
     const runHeader = runToggle();
     expect(runHeader.getAttribute("aria-expanded")).toBe("true");
+    expect(screen.getAllByTestId("turn-toggle")).toHaveLength(1);
+    expect(screen.getAllByTestId("card-toggle")).toHaveLength(2);
+    revealCollapsedCards();
     expect(screen.getByText("t1-done")).toBeTruthy();
     expect(screen.getByTestId("python-code").textContent).toBe("c1-live");
   });
@@ -251,6 +252,9 @@ describe("work block expansion", () => {
     );
     const runHeader = runToggle();
     expect(runHeader.getAttribute("aria-expanded")).toBe("true");
+    expect(screen.getAllByTestId("turn-toggle")).toHaveLength(1);
+    expect(screen.getAllByTestId("card-toggle")).toHaveLength(3);
+    revealCollapsedCards();
     expect(screen.getByText("t1")).toBeTruthy();
     expect(screen.getByText("t2-live")).toBeTruthy();
   });
@@ -269,7 +273,7 @@ describe("work block expansion", () => {
     expect(screen.queryByTestId("python-code")).toBeNull();
   });
 
-  it("turnActive → live trailing turn expands ALL child blocks, while finished turns expand only agent_chat", () => {
+  it("turnActive → the live trailing turn opens its items like a finished turn: only agent_chat", () => {
     setUserSettings({ "display.expand_working_block": true });
     render(
       <TimelineView
@@ -289,9 +293,9 @@ describe("work block expansion", () => {
     expect(turns).toHaveLength(2);
     expect(turns[0].getAttribute("aria-expanded")).toBe("false");
     expect(turns[1].getAttribute("aria-expanded")).toBe("true");
-    expect(screen.getByText("live-thought")).toBeTruthy();
-    expect(screen.getByTestId("python-code").textContent).toBe("live_code = 1");
-    expect(screen.getByText("live-output")).toBeTruthy();
+    expect(screen.queryByText("live-thought")).toBeNull();
+    expect(screen.queryByTestId("python-code")).toBeNull();
+    expect(screen.queryByText("live-output")).toBeNull();
 
     fireEvent.click(turns[0]);
     expect(screen.queryByText("finished-thought")).toBeNull();
@@ -377,15 +381,15 @@ describe("work block expansion", () => {
     );
     const runHeader = runToggle();
     expect(runHeader.getAttribute("aria-expanded")).toBe("true");
-    expect(screen.getByTestId("python-code").textContent).toBe("x=1");
+    expect(screen.getAllByTestId("card-toggle")).toHaveLength(2);
 
     fireEvent.click(runToggle());
     expect(runHeader.getAttribute("aria-expanded")).toBe("false");
-    expect(screen.queryByTestId("python-code")).toBeNull();
+    expect(screen.queryByTestId("card-toggle")).toBeNull();
 
     fireEvent.click(runToggle());
     expect(runHeader.getAttribute("aria-expanded")).toBe("true");
-    expect(screen.getByTestId("python-code").textContent).toBe("x=1");
+    expect(screen.getAllByTestId("card-toggle")).toHaveLength(2);
   });
 
   it("collapse pinned mid-stream survives the turn going idle, then a click expands", () => {
@@ -408,7 +412,7 @@ describe("work block expansion", () => {
     expect(runToggle().getAttribute("aria-expanded")).toBe("true");
   });
 
-  it("within an active expanded turn, all sub-items are visible (not just last)", () => {
+  it("within an active expanded turn, every sub-item has its header and opens on click (not just last)", () => {
     setUserSettings({ "display.expand_working_block": true });
     render(
       <TimelineView
@@ -422,6 +426,9 @@ describe("work block expansion", () => {
     );
     const runHeader = runToggle();
     expect(runHeader.getAttribute("aria-expanded")).toBe("true");
+    expect(screen.getAllByTestId("card-toggle")).toHaveLength(3);
+    expect(screen.queryByText("think-first")).toBeNull();
+    revealCollapsedCards();
     expect(screen.getByText("think-first")).toBeTruthy();
     expect(screen.getByTestId("python-code").textContent).toBe("code-mid");
     expect(screen.getByText("think-last")).toBeTruthy();

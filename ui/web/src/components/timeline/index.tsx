@@ -1,6 +1,6 @@
 "use client";
 
-import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { useTranslations } from "next-intl";
 
 import type { BackendTimelineItem, Quote } from "@/lib/contracts/types";
@@ -18,14 +18,13 @@ import { TimelineGroupList, useTimelineGroupWindow } from "./view/group-list";
 import { CompactingBlock } from "./model/compacting-block";
 import type { ReloadRestoreConfig } from "./model/reading-position";
 import { useOlderHistoryPull } from "./model/use-older-history-pull";
-import { inboundKind, isSilentTimelineItem } from "./model/runs";
 import { useTimelineExpansion } from "./view/use-timeline-expansion";
 import { useStickyThresholds } from "./model/sticky-thresholds";
-import { findRowNode, offsetOf, READING_TOP_PX, readTurnAnchor, TAIL, type RowRef, type ViewAnchor } from "./anchor/dom";
+import { READING_TOP_PX, readTurnAnchor, TAIL, type RowRef, type ViewAnchor } from "./anchor/dom";
 import { rankOf } from "./anchor/rows";
 import { usePlacement, type RevealDecision } from "./anchor/use-placement";
 import { useViewportAnchor, type AnchorChangeCause } from "./anchor/use-viewport-anchor";
-import { LoadOlderSpinner, LoadOlderKeyboardButton, ColdLoadSpinner, ScrollToBottomButton } from "./overlays";
+import { LoadOlderSpinner, LoadOlderKeyboardButton, ColdLoadSpinner, FOOTER_HEIGHT_VAR, ScrollToBottomButton } from "./overlays";
 
 export type { ReloadRestoreConfig } from "./model/reading-position";
 export type { RevealDecision } from "./anchor/use-placement";
@@ -39,6 +38,12 @@ const COLD_FILL_MAX_PAGES = 2;
 
 interface Props {
   onQuote?: (quote: Quote) => void;
+  // meiva:note
+  // What floats over the bottom of the timeline, just above the composer (the pending strip). It sits
+  // in the blank space below the last row, so it appears without moving the conversation; only the
+  // part taller than that space extends the log's bottom padding.
+  // meiva:link ui/web/src/docs/frontend-components/timeline-view/send-anchor.md
+  footer?: ReactNode;
   items: BackendTimelineItem[];
   compactBuffer?: CompactTransitionBuffer | null;
   threadKey?: string;
@@ -84,10 +89,6 @@ interface Props {
 const DEFAULT_RELOAD_RESTORE: ReloadRestoreConfig = { state: "disabled" };
 const DECIDED_NO_REVEAL: RevealDecision = { decided: true, itemId: null };
 
-function isHumanMessage(item: BackendTimelineItem): boolean {
-  return item.kind === "inbound_chat" && inboundKind(item.source) === "human" && !isSilentTimelineItem(item);
-}
-
 export const TimelineView = memo(function TimelineView({
   items: canonicalItems,
   compactBuffer = null,
@@ -110,6 +111,7 @@ export const TimelineView = memo(function TimelineView({
   maxWidthCss,
   reveal = DECIDED_NO_REVEAL,
   onQuote,
+  footer,
 }: Props) {
   const t = useTranslations("timeline");
   const [quoteRequest, setQuoteRequest] = useState<{ quote: Quote; pages: number } | null>(null);
@@ -143,18 +145,10 @@ export const TimelineView = memo(function TimelineView({
   const viewportRef = useRef<HTMLDivElement | null>(null);
   const wrapperRef = useRef<HTMLDivElement>(null);
   // meiva:note
-  // Extra scroll space below the content: it lets the last human message (after a send) or a
-  // toggled header reach its place when the rows below are too short. Outside the content column,
-  // so it carries no row spacing.
+  // Extra scroll space below the content: it lets a toggled header stay where it was clicked when the
+  // rows below are too short. Outside the content column, so it carries no row spacing.
   // meiva:link ui/web/src/docs/frontend-components/timeline-view/send-anchor.md
   const reserveRef = useRef<HTMLDivElement>(null);
-
-  const latestHuman = useMemo<RowRef | null>(() => {
-    const item = items.findLast(isHumanMessage);
-    return item ? { itemId: item.item_id, rank: rankOf(item, compactBuffer) } : null;
-  }, [items, compactBuffer]);
-  const latestHumanRef = useRef(latestHuman);
-  useLayoutEffect(() => { latestHumanRef.current = latestHuman; });
 
   const { turnOverrides, toggleTurn, overrides, toggleExpanded } = useTimelineExpansion({ scrollMemoryKey, threadKey });
   const thresholds = useStickyThresholds();
@@ -182,6 +176,33 @@ export const TimelineView = memo(function TimelineView({
   });
 
   // meiva:note
+  // The footer's height drives the log's bottom padding and the arrow's offset through one CSS
+  // variable. The writer applies the anchor in the same callback: left to its own layout observer,
+  // the padding change would reach it one observation round later, after a frame with the grown
+  // strip over the last row was already laid out.
+  const footerRef = useRef<HTMLDivElement>(null);
+  const hasFooter = footer !== undefined;
+  useLayoutEffect(() => {
+    const wrapper = wrapperRef.current;
+    const node = footerRef.current;
+    if (!wrapper || !node) return;
+    const sync = () => {
+      const next = `${node.offsetHeight}px`;
+      if (wrapper.style.getPropertyValue(FOOTER_HEIGHT_VAR) === next) return;
+      wrapper.style.setProperty(FOOTER_HEIGHT_VAR, next);
+      controls.apply();
+    };
+    sync();
+    if (typeof ResizeObserver === "undefined") return () => wrapper.style.removeProperty(FOOTER_HEIGHT_VAR);
+    const observer = new ResizeObserver(sync);
+    observer.observe(node);
+    return () => {
+      observer.disconnect();
+      wrapper.style.removeProperty(FOOTER_HEIGHT_VAR);
+    };
+  }, [controls, hasFooter]);
+
+  // meiva:note
   // A first page that does not fill the viewport reads up to COLD_FILL_MAX_PAGES older pages before a
   // first visit opens, so history never lands above rows the reader is already looking at.
   // meiva:link ui/web/src/docs/frontend-components/timeline-view/history-paging.md
@@ -203,7 +224,6 @@ export const TimelineView = memo(function TimelineView({
     items: canonicalItems,
     compactBuffer,
     loading,
-    turnActive,
     hasMoreOlder,
     loadingOlder,
     onLoadOlder,
@@ -246,37 +266,6 @@ export const TimelineView = memo(function TimelineView({
     isFollowing,
     pin: placement.pin,
   });
-
-  // meiva:note
-  // A send parks the message just written at the reading offset when the reader is at the tail
-  // (following it, or inside its bottom zone, as in any conversation shorter than the viewport); a
-  // reader in history keeps their place. Either way the reserve is renewed. The receipt's
-  // inbound id names the row, so a later update cannot park an unrelated one, and a reader who
-  // scrolls away before it arrives keeps their place.
-  // meiva:link ui/web/src/docs/frontend-components/timeline-view/send-anchor.md
-  const sendRequest = useTimelineStore((state) => state.sendAnchor);
-  const consumedSend = useRef(sendRequest.seq);
-  const pendingPark = useRef<number | null | undefined>(undefined);
-  useLayoutEffect(() => {
-    if (sendRequest.seq !== consumedSend.current) {
-      consumedSend.current = sendRequest.seq;
-      controls.armSendReserve(true);
-      pendingPark.current = controls.atTail() ? sendRequest.inboundId : undefined;
-      controls.apply();
-    }
-    if (pendingPark.current === undefined) return;
-    if (!controls.atTail()) {
-      pendingPark.current = undefined;
-      return;
-    }
-    const inboundId = pendingPark.current;
-    const item = inboundId === null
-      ? items.findLast(isHumanMessage)
-      : items.find((candidate) => candidate.inbound_id === inboundId && isHumanMessage(candidate));
-    if (!item) return;
-    pendingPark.current = undefined;
-    placement.request({ kind: "row", row: { itemId: item.item_id, rank: rankOf(item, compactBuffer) }, offset: READING_TOP_PX }, { followsTail: true });
-  }, [compactBuffer, controls, isFollowing, items, placement, sendRequest]);
 
   useLayoutEffect(() => {
     if (visible) trimWhileFollowing();
@@ -359,40 +348,20 @@ export const TimelineView = memo(function TimelineView({
   );
 
   // meiva:note
-  // The arrow goes to the latest human message while it is below the reading offset, then to the
-  // tail (following). Inside the reserve it uses the remaining range.
+  // The arrow rides to the tail and follows it. Inside a toggle's reserve it uses the remaining range.
   // meiva:link ui/web/src/docs/frontend-components/timeline-view/send-anchor.md
   const handleScrollToBottom = useCallback(() => {
     const viewport = controls.viewport();
     if (!viewport) return;
     const end = viewport.scrollHeight - viewport.clientHeight;
     if (end - viewport.scrollTop <= 1) return;
-    const latest = latestHumanRef.current;
-    if (latest) {
-      const hit = findRowNode(viewport, latest);
-      if (hit && !hit.collapsed) {
-        const offset = offsetOf(viewport, hit.node);
-        const reachable = controls.sendReserveArmed() || viewport.scrollTop + offset - READING_TOP_PX < end;
-        if (offset > READING_TOP_PX + 1 && reachable) {
-          controls.place({ kind: "row", row: latest, offset: READING_TOP_PX });
-          return;
-        }
-      } else if (!hit) {
-        const index = groupEntries.findIndex(({ group }) =>
-          group.kind === "single" && group.member.item.item_id === latest.itemId && group.member.rank === latest.rank);
-        if (index >= virtualRange.end) {
-          placement.request({ kind: "row", row: latest, offset: READING_TOP_PX });
-          return;
-        }
-      }
-    }
     const natural = end - controls.reserveHeight();
     if (viewport.scrollTop > natural + 0.5) {
       controls.placeScrollTop(end);
       return;
     }
     controls.place(TAIL, { smooth: true });
-  }, [controls, groupEntries, placement, virtualRange.end]);
+  }, [controls]);
 
   const navigateQuote = useCallback((quote: Quote) => {
     if (!quote.source_message_id && quote.source_inbound_id == null) {
@@ -468,12 +437,11 @@ export const TimelineView = memo(function TimelineView({
             aria-busy={!visible}
             style={maxWidthCss ? { maxWidth: maxWidthCss } : undefined}
             // meiva:note
-            // pb-6 provides generous breathing room between the last message /
-            // Live Activity Window and the composer's top rule (matching ChatGPT,
-            // Gemini, and Claude web layouts), paired with endRef below so the
-            // padding applies cleanly inside the log container.
+            // `timeline-log` holds the bottom padding: the breathing room between the last message /
+            // Live Activity Window and the composer's top rule, which the footer may use; endRef below
+            // keeps the padding inside the log.
             // meiva:link ui/web/src/docs/frontend-components/home-shell-chrome/home-shell-chrome.md
-            className={cn("mx-auto w-full px-2 pb-6 space-y-3 sm:px-4", BAR_CLEAR_TOP_PADDING_CLASS, virtualEnabled && "timeline-virtual")}
+            className={cn("timeline-log mx-auto w-full px-2 space-y-3 sm:px-4", BAR_CLEAR_TOP_PADDING_CLASS, virtualEnabled && "timeline-virtual")}
           >
             {turnAnnouncement ? (
               <span key={turnAnnouncement} className="sr-only" data-testid="timeline-turn-announcement">
@@ -501,9 +469,14 @@ export const TimelineView = memo(function TimelineView({
             <CompactingBlock />
             <div ref={endRef} />
           </div>
-          <div ref={reserveRef} data-send-reserve aria-hidden="true" />
+          <div ref={reserveRef} data-timeline-reserve aria-hidden="true" />
         </div>
       </ScrollArea>
+      {footer === undefined ? null : (
+        <div ref={footerRef} data-timeline-footer className="pointer-events-none absolute inset-x-0 bottom-0 z-20">
+          {footer}
+        </div>
+      )}
       <ScrollToBottomButton atBottom={atEnd || !visible} onClick={handleScrollToBottom} />
     </div>
     </QuoteTarget.Provider>

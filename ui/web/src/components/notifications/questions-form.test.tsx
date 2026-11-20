@@ -153,15 +153,33 @@ describe("QuestionsForm", () => {
     expect(transport.answerQuestions).not.toHaveBeenCalled();
   });
 
-  it("does not submit or navigate from an earlier question with Enter", () => {
-    renderForm([q(1), q(2)]);
-    const answer = article(1).getByRole<HTMLTextAreaElement>("textbox");
-    fireEvent.change(answer, { target: { value: "one" } });
-    pressEnter(answer);
-    expect(answer.value).toBe("one");
-    expect(screen.getByText("1 / 2")).toBeTruthy();
-    expect(submit().disabled).toBe(true);
+  // meiva:note
+  // Enter goes on: from an earlier question to the next one with the caret in its answer, and only
+  // the last question's Enter submits (user ruling 2026-11-20).
+  // meiva:link ui/web/src/docs/frontend-state/shared-context/questions.md
+  it("moves from an earlier question to the next one with Enter, and submits only from the last", async () => {
+    transport.answerQuestions.mockResolvedValue({ kind: "settled" });
+    renderForm([q(1), q(2, { question: choice("single_select") }), q(3)]);
+    const first = article(1).getByRole<HTMLTextAreaElement>("textbox");
+    fireEvent.change(first, { target: { value: "one" } });
+    pressEnter(first);
+    expect(first.value).toBe("one");
+    expect(screen.getByText("2 / 3")).toBeTruthy();
+    expect(document.activeElement).toBe(article(2).getByRole("textbox"));
     expect(transport.answerQuestions).not.toHaveBeenCalled();
+
+    pressEnter(article(2).getByRole("textbox"));
+    expect(screen.getByText("3 / 3")).toBeTruthy();
+    const last = article(3).getByRole<HTMLTextAreaElement>("textbox");
+    expect(document.activeElement).toBe(last);
+    expect(transport.answerQuestions).not.toHaveBeenCalled();
+
+    fireEvent.change(last, { target: { value: "three" } });
+    pressEnter(last);
+    await waitFor(() => expect(transport.answerQuestions).toHaveBeenCalledWith(7, {
+      expected_ids: [1, 2, 3],
+      results: [{ id: 1, answer: { text: "one" } }, { id: 2 }, { id: 3, answer: { text: "three" } }],
+    }, expect.any(String)));
   });
 
   it.each(["text", "single_select"] as const)("accepts %s suggestions only with Tab or Right Arrow", async (type) => {

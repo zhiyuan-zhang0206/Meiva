@@ -51,7 +51,6 @@ function HomePageWiring() {
   const focusComposer = useStore((state) => state.focusComposer);
   const composerFocusToken = useStore((state) => state.composerFocusToken);
   const setMobileSidebarOpen = useStore((state) => state.setMobileSidebarOpen);
-  const requestSendAnchor = useTimelineStore((state) => state.requestSendAnchor);
   const liveAnchorAt = useTimelineStore((state) => state.liveAnchorAt);
   const activeTurnId = useTimelineStore((state) => state.activeTurnId);
   const activeTurnStartedAt = useTimelineStore((state) => state.activeTurnStartedAt);
@@ -74,8 +73,8 @@ function HomePageWiring() {
     [focusComposer, composerFocusToken, setMobileSidebarOpen],
   );
   const timelineStore = useMemo(
-    () => ({ requestSendAnchor, liveAnchorAt, activeTurnId, activeTurnStartedAt }),
-    [requestSendAnchor, liveAnchorAt, activeTurnId, activeTurnStartedAt],
+    () => ({ liveAnchorAt, activeTurnId, activeTurnStartedAt }),
+    [liveAnchorAt, activeTurnId, activeTurnStartedAt],
   );
   const contextPanel = useMemo(
     () => ({ open: contextPanelOpen, setOpen: setContextPanelOpen }),

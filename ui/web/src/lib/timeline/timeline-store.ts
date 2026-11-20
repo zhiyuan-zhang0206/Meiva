@@ -86,9 +86,7 @@ export const useTimelineStore = create<TimelineState>()((set, get) => ({
   hasMoreOlder: false,
   loadingOlder: false,
   olderFetchCount: 0,
-  sendAnchor: { seq: 0, inboundId: null },
 
-  requestSendAnchor: (inboundId) => set((s) => ({ sendAnchor: { seq: s.sendAnchor.seq + 1, inboundId } })),
   invalidateCompactEpoch: () => set((s) => {
     const compactBuffer = s.compactBuffer
       ? { ...s.compactBuffer, epoch: s.compactEpoch + 1 }

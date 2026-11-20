@@ -137,13 +137,11 @@ describe("messageCardConfig", () => {
     const cfg = messageCardConfig(item("inbound_chat", { source: "agent:42" }));
     expect(cfg!.title).toBe("Agent 42");
     expect(cfg!.fixedDefault).toBe(false);
-    expect(cfg!.expandWhileWorking).toBe(false);
   });
 
   it("keeps external agent messages collapsed in settled and live work", () => {
     const cfg = messageCardConfig(item("inbound_chat", { source: "external_agent:codex" }));
     expect(cfg?.fixedDefault).toBe(false);
-    expect(cfg?.expandWhileWorking).toBe(false);
   });
 
   it("inbound_chat unknown source → System", () => {

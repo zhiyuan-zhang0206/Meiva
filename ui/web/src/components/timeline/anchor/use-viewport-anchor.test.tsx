@@ -42,7 +42,7 @@ function harness(initial: string[], heights: Record<string, number> = {}) {
             <div ref={contentRef} role="log" className="space-y-3">
               {rows.map((id) => <div key={id} className="timeline-item" data-item-id={id} data-display-rank="0" />)}
             </div>
-            <div ref={reserveRef} data-send-reserve />
+            <div ref={reserveRef} data-timeline-reserve />
           </div>
         </div>
       </div>
@@ -54,7 +54,7 @@ function harness(initial: string[], heights: Record<string, number> = {}) {
     changes,
     rows: (rows: string[]) => view.rerender(<Harness rows={rows} />),
     place: (anchor: ViewAnchor) => act(() => controls!.place(anchor)),
-    armSendReserve: () => controls!.armSendReserve(true),
+    placeHeld: (anchor: ViewAnchor) => act(() => controls!.place(anchor, { hold: true })),
     current: () => controls!.current(),
     heights,
   };
@@ -213,14 +213,13 @@ describe("the viewport anchor writer", () => {
     expect(view.top()).toBe(1500);
   });
 
-  it("adds reserve space below the content only while a send has armed it", () => {
+  it("adds reserve space below the content only while a header toggle holds it", () => {
     const view = harness(ids(1, 20));
     view.place(rowAt("20", 56));
     expect(view.reserve()).toBe(0);
     expect(view.top()).toBe(1704);
 
-    view.armSendReserve();
-    view.place(rowAt("20", 56));
+    view.placeHeld(rowAt("20", 56));
     // meiva:note
     // Row 20 sits at 2180 in a 2304px log: 2180 - 56 + 600 - 2304 of space below the content.
     expect(view.reserve()).toBe(420);
@@ -230,8 +229,7 @@ describe("the viewport anchor writer", () => {
 
   it("releases the reserve when the reader scrolls upward to or past the natural end", () => {
     const view = harness(ids(1, 20));
-    view.armSendReserve();
-    view.place(rowAt("20", 56));
+    view.placeHeld(rowAt("20", 56));
     expect(view.reserve()).toBe(420);
 
     // meiva:note

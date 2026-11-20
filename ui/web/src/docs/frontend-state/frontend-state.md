@@ -61,7 +61,7 @@ The selected conversation store and its abortable reads have their own node:
 
 ## Sticky Bottom Controller (`lib/sticky.ts`)
 
-The follow flag, its pin/echo baselines and the send anchor have their own
+The reader's place (the view anchor) and its one writer have their own
 node: [Timeline sticky scroll](../frontend-components/timeline-view/sticky-scroll.md).
 
 ## History-Entry Scroll Memory

@@ -78,6 +78,7 @@ describe("ItemView: agent_code + agent_reasoning", () => {
         streamingCode
       />,
     );
+    revealCollapsedCards();
     expect(screen.getByTestId("python-code").getAttribute("data-streaming")).toBe("1");
   });
   it("agent_reasoning renders markdown below a 'Thinking' toggle chip", () => {

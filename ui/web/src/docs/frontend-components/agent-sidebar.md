@@ -87,10 +87,11 @@ changes never re-sort it. Each row renders as a compact inset Crisp Card pill
 idle text (`#525252` light / `#A8ABB0` dark). A running agent's title sweeps
 with a lighter monochrome Silver Glint highlight (`agent-title-sweep`) over its
 normal row base color so running items never darken or bolden relative to idle
-rows (and stays at static row emphasis under reduced motion); every working row
-shares a fixed-pixel horizontal gradient coordinate space (offset by
-`--agent-indent-px` for tree depth) and locks its CSS animation `startTime` to
-`0` so all working titles sweep in unison along the same vertical column.
+rows (and stays at static row emphasis under reduced motion). The sweep is sized
+to each title (the gradient spans twice the title's width plus the glint), and
+every working title locks its CSS animation `startTime` to `0`, so all working
+titles, in the sidebar and the timeline's Working header alike, start at their
+left edge and reach their right edge together, whatever their width or depth.
 Offline agents suppress the working title shimmer on the row without rendering a
 gray row dot, and report their offline state in the hover peek card's status slot. At the right edge a row
 shows at most one indicator, decided by `agentAttention`

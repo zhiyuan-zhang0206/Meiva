@@ -45,7 +45,10 @@ describe("Settled vs live expansion behavior", () => {
     expect(screen.queryByTestId("card-toggle")).toBeNull();
   });
 
-  it("live trailing turn expands secondary items by default and clicking card header collapses content", () => {
+  // meiva:note
+  // A live turn opens its items like a settled one (user ruling 2026-11-20): only the agent's text
+  // output starts open.
+  it("live trailing turn keeps secondary items collapsed and clicking card header reveals content", () => {
     setUserSettings({ "display.expand_working_block": true });
     render(
       <TimelineView
@@ -55,9 +58,9 @@ describe("Settled vs live expansion behavior", () => {
         ]}
       />,
     );
-    expect(screen.getByText("the open thought")).toBeTruthy();
-    fireEvent.click(screen.getByTestId("card-toggle"));
     expect(screen.queryByText("the open thought")).toBeNull();
+    fireEvent.click(screen.getByTestId("card-toggle"));
+    expect(screen.getByText("the open thought")).toBeTruthy();
   });
 });
 
@@ -124,6 +127,7 @@ describe("streamingCode last-item only", () => {
         streamingCode
       />,
     );
+    revealCollapsedCards();
     const blocks = screen.getAllByTestId("python-code");
     expect(blocks).toHaveLength(2);
     expect(blocks[0].getAttribute("data-streaming")).toBe("0");

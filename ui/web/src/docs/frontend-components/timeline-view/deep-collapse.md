@@ -9,6 +9,11 @@ title text. The expanded body uses indentation to group its contents. Primary
 message headers keep their existing flow. Individual detail headers use the same
 chevron and title highlight in normal flow.
 
+Inside an opened `TurnBlock`, live (`Working`) or settled (`Worked`) alike, every
+item starts collapsed except the agent's text output and attachments
+(`CardConfig.fixedDefault`; user ruling 2026-11-20). The live turn has no rule of
+its own.
+
 Secondary item headers omit token/line count suffixes (`Thought for Xs`, `Ran in Xs`, `System prompt`) and system markers (`Memory`, `Note`, lifecycle) use the same borderless monochrome header chrome without colored accent overrides (user ruling 2026-11-01). A turn's expanded state is a pinned map
 keyed by a reconciled turn key (`useTimelineGroupWindow` matches surviving
 members from newest to oldest within the same thread so `virtualKey` and manual
@@ -40,7 +45,7 @@ omit durations below `1s` (`formatWholeSecondsDuration`: `null` below `1s`, then
 Both `PendingLiveActivityWindow` and active (`turnActive`) `TurnBlock` title spans
 share the sidebar's Silver Glint sweep (`.timeline-title-working` sharing
 `.agent-title-working` / `agent-title-sweep` and locking `startTime = 0` via
-`useSyncedShimmer`), staying in phase across the handoff and settling back to
+`useSyncedShimmer`), crossing their text in step with the sidebar titles, staying in phase across the handoff and settling back to
 static text without shimmer once the turn completes; the leading `Layers` icon,
 disclosure chevron, and expanded summary remain unshimmered.
 

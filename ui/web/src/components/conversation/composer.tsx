@@ -81,7 +81,6 @@ interface Props {
   onUploadFiles?: (files: File[]) => void;
   stageQueue?: StageQueueBatch | null;
   onDeliveringBatchChange?: (batch: DeliveredUploadStatus | null) => void;
-  onUploadSent?: () => void;
   onUploadError?: (msg: string) => void;
   filesUploading?: boolean;
   focusToken?: number;
@@ -101,7 +100,6 @@ export function Composer({
   onUploadFiles,
   stageQueue = null,
   onDeliveringBatchChange,
-  onUploadSent,
   onUploadError,
   filesUploading = false,
   focusToken,
@@ -176,7 +174,6 @@ export function Composer({
     stageQueue,
     onUploadFiles,
     onDeliveringBatchChange,
-    onUploadSent,
     onUploadError,
   });
 

@@ -24,7 +24,7 @@ function layoutOf(element: Element): Layout | undefined {
 }
 
 function reserveOf(element: Element): number {
-  const reserve = element.querySelector<HTMLElement>("[data-send-reserve]");
+  const reserve = element.querySelector<HTMLElement>("[data-timeline-reserve]");
   return reserve ? Number.parseFloat(reserve.style.height) || 0 : 0;
 }
 

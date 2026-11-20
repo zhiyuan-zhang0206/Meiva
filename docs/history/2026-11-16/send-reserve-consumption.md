@@ -18,3 +18,5 @@ reader request presents its ring through delayed completion, prevents duplicate
 requests and permits another pull when loading settles without new rows.
 Automatic fill remains unpresented. These controls exercise DOM events and
 component state; they do not establish native mobile momentum behavior.
+
+Superseded on 2026-11-20: the send reserve and the send park were removed ([a send moves nothing](../../decisions/frontend/timeline/2026-11-20-send-moves-nothing.md)).

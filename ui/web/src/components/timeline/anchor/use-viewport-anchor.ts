@@ -6,6 +6,7 @@ import { BAR_HEIGHT_PX } from "@/lib/layout/layout";
 import { bottomZone, type StickyThresholds } from "@/lib/layout/sticky";
 
 import { findRowNode, offsetOf, readRowAnchor, rowOf, TAIL, type RowRef, type ViewAnchor } from "./dom";
+import { rideClock, rideDuration, rideProgress } from "./ride";
 
 // meiva:note
 // The one writer of the timeline's scrollTop. The anchor is the reader's place; after every commit
@@ -13,7 +14,7 @@ import { findRowNode, offsetOf, readRowAnchor, rowOf, TAIL, type RowRef, type Vi
 // anchor row back at its offset, or the viewport on the natural end for the tail. Prepends,
 // compaction, width changes, images and late heights therefore need no code of their own. Only the
 // reader moves the anchor: a scroll the writer did not cause is read back from the DOM. Placements
-// (return, reload, reveal, send, toggle, the arrow) set it.
+// (return, reload, reveal, quote, toggle, the arrow) set it.
 // meiva:link ui/web/src/docs/frontend-components/timeline-view/sticky-scroll.md
 
 export type AnchorChangeCause = "reader" | "placement";
@@ -21,10 +22,6 @@ export type AnchorChangeCause = "reader" | "placement";
 // meiva:note
 // A row inside a collapsed turn is shown through the block: keep the block below the header bar.
 const COLLAPSED_MIN_OFFSET_PX = BAR_HEIGHT_PX + 8;
-// meiva:note
-// The native smooth scroll has no completion event where `scrollend` is missing (WebKit): a ride
-// that stops moving for this many frames has arrived.
-const RIDE_STILL_FRAMES = 3;
 
 interface Args {
   wrapperRef: RefObject<HTMLDivElement | null>;
@@ -59,8 +56,6 @@ export interface ViewportAnchor {
   // meiva:note
   // Apply the anchor: the view calls this after every commit, once placement has run.
   apply: () => void;
-  armSendReserve: (armed: boolean) => void;
-  sendReserveArmed: () => boolean;
   holdReserve: () => boolean;
   // meiva:note
   // Upward pull intent at the top: the reader is reading history, not the tail.
@@ -91,8 +86,7 @@ export function useViewportAnchor({
   const anchorRef = useRef<ViewAnchor | null>(null);
   const lastWrittenRef = useRef<number | null>(null);
   const touchingRef = useRef(false);
-  const rideRef = useRef<{ frame: number; still: number; top: number } | null>(null);
-  const sendArmedRef = useRef(false);
+  const rideRef = useRef<{ frame: number; from: number; start: number; duration: number } | null>(null);
   const holdRef = useRef(false);
   const [atEnd, setAtEnd] = useState(true);
   // meiva:note
@@ -131,10 +125,9 @@ export function useViewportAnchor({
   }, [naturalEnd]);
 
   // meiva:note
-  // The reserve is derived, never accumulated: while a send or a header toggle allows it, it is
-  // exactly the space below the content the current row anchor needs to sit at its offset, measured
-  // within the content so the bottom alignment of a short column does not feed back into it. The tail
-  // never needs one. An anchor row that is not mounted keeps the current height.
+  // The reserve is derived, never accumulated: while a header toggle holds it, it is exactly the space
+  // below the content the toggled header needs to stay where it was clicked, measured within the
+  // content. The tail never needs one. An anchor row that is not mounted keeps the current height.
   // meiva:link ui/web/src/docs/frontend-components/timeline-view/send-anchor.md
   const syncReserve = useCallback((vp: HTMLElement) => {
     const reserve = reserveRef.current;
@@ -142,7 +135,7 @@ export function useViewportAnchor({
     if (!reserve || !content) return;
     const anchor = anchorRef.current;
     let need = 0;
-    if ((sendArmedRef.current || holdRef.current) && anchor?.kind === "row") {
+    if (holdRef.current && anchor?.kind === "row") {
       const hit = findRowNode(vp, anchor.row);
       if (!hit) {
         need = reserve.offsetHeight;
@@ -235,18 +228,17 @@ export function useViewportAnchor({
   const finishRide = useCallback(() => {
     const ride = rideRef.current;
     if (!ride) return;
-    cancelAnimationFrame(ride.frame);
+    rideClock.cancel(ride.frame);
     rideRef.current = null;
     apply();
     latest.current.onRideEnd?.();
   }, [apply]);
 
-  const cancelRide = useCallback((vp: HTMLElement) => {
+  const cancelRide = useCallback(() => {
     const ride = rideRef.current;
     if (!ride) return;
-    cancelAnimationFrame(ride.frame);
+    rideClock.cancel(ride.frame);
     rideRef.current = null;
-    vp.scrollTo({ top: vp.scrollTop, behavior: "instant" });
   }, []);
 
   // meiva:note
@@ -297,7 +289,7 @@ export function useViewportAnchor({
 
   const place = useCallback((anchor: ViewAnchor, options: { smooth?: boolean; hold?: boolean } = {}) => {
     const vp = viewport();
-    if (vp) cancelRide(vp);
+    cancelRide();
     if (options.hold !== undefined) holdRef.current = options.hold;
     freeRef.current = false;
     setAnchor(anchor, "placement");
@@ -305,31 +297,32 @@ export function useViewportAnchor({
     // meiva:note
     // A placement replaces the reader's place outright: no movement since the last write is theirs.
     lastWrittenRef.current = vp.scrollTop;
+    // meiva:note
+    // The ride steers toward the live natural end every frame, so rows that mount or re-measure on
+    // the way (virtual spacers) move the goal, never the deadline.
     if (options.smooth && anchor.kind === "tail") {
       syncReserve(vp);
       const target = naturalEnd(vp);
       if (Math.abs(vp.scrollTop - target) > 1) {
-        lastWrittenRef.current = target;
+        const ride = { frame: 0, from: vp.scrollTop, start: rideClock.now(), duration: rideDuration(target - vp.scrollTop) };
         const tick = () => {
-          const ride = rideRef.current;
-          if (!ride) return;
-          ride.still = Math.abs(vp.scrollTop - ride.top) < 0.5 ? ride.still + 1 : 0;
-          ride.top = vp.scrollTop;
-          if (ride.still >= RIDE_STILL_FRAMES) finishRide();
-          else ride.frame = requestAnimationFrame(tick);
+          if (rideRef.current !== ride) return;
+          const progress = rideProgress(rideClock.now() - ride.start, ride.duration);
+          write(vp, ride.from + (naturalEnd(vp) - ride.from) * progress);
+          if (progress >= 1) finishRide();
+          else ride.frame = rideClock.frame(tick);
         };
-        rideRef.current = { frame: requestAnimationFrame(tick), still: 0, top: vp.scrollTop };
-        vp.scrollTo({ top: target, behavior: "smooth" });
+        rideRef.current = ride;
+        ride.frame = rideClock.frame(tick);
         refreshEnd(vp);
         return;
       }
     }
     apply();
-  }, [apply, cancelRide, finishRide, naturalEnd, refreshEnd, setAnchor, syncReserve, viewport]);
+  }, [apply, cancelRide, finishRide, naturalEnd, refreshEnd, setAnchor, syncReserve, viewport, write]);
 
-  const releaseReserves = useCallback((vp: HTMLElement) => {
-    if (!sendArmedRef.current && !holdRef.current) return;
-    sendArmedRef.current = false;
+  const releaseReserve = useCallback((vp: HTMLElement) => {
+    if (!holdRef.current) return;
     holdRef.current = false;
     syncReserve(vp);
   }, [syncReserve]);
@@ -350,7 +343,7 @@ export function useViewportAnchor({
       // meiva:note
       // Moving upward to or past the natural end spends the reserve; movement inside it keeps it.
       // meiva:link ui/web/src/docs/frontend-components/timeline-view/send-anchor.md
-      if (up && top <= naturalEnd(vp) + 0.5) releaseReserves(vp);
+      if (up && top <= naturalEnd(vp) + 0.5) releaseReserve(vp);
       towardEndRef.current = !up;
       // meiva:note
       // Under a finger the movement stays unattributed: the writer folds it into the row anchor's
@@ -363,12 +356,9 @@ export function useViewportAnchor({
       lastWrittenRef.current = vp.scrollTop;
       refreshEnd(vp);
     };
-    const onScrollEnd = (event: Event) => {
-      if (event.target === vp) finishRide();
-    };
     const onWheel = (event: WheelEvent) => {
       if (event.ctrlKey || event.deltaY === 0 || Math.abs(event.deltaY) < Math.abs(event.deltaX)) return;
-      cancelRide(vp);
+      cancelRide();
       // meiva:note
       // An upward notch leaves the tail before its scroll event: a chunk landing first must not pin.
       if (event.deltaY < -2 && anchorRef.current?.kind === "tail") {
@@ -378,11 +368,11 @@ export function useViewportAnchor({
     };
     const onInput = (event: Event) => {
       if (event instanceof KeyboardEvent && !["ArrowUp", "ArrowDown", "PageUp", "PageDown", "Home", "End", " "].includes(event.key)) return;
-      cancelRide(vp);
+      cancelRide();
     };
     const onTouchStart = () => {
       touchingRef.current = true;
-      cancelRide(vp);
+      cancelRide();
     };
     const onTouchEnd = () => {
       touchingRef.current = false;
@@ -390,7 +380,6 @@ export function useViewportAnchor({
       lastWrittenRef.current = vp.scrollTop;
     };
     vp.addEventListener("scroll", onScroll, { passive: true });
-    vp.addEventListener("scrollend", onScrollEnd);
     vp.addEventListener("wheel", onWheel, { passive: true });
     vp.addEventListener("keydown", onInput);
     vp.addEventListener("pointerdown", onInput);
@@ -399,7 +388,7 @@ export function useViewportAnchor({
     vp.addEventListener("touchcancel", onTouchEnd, { passive: true });
     const scrollbar = wrapperRef.current;
     const onScrollbar = (event: PointerEvent) => {
-      if ((event.target as HTMLElement | null)?.closest('[data-slot="scroll-area-scrollbar"]')) cancelRide(vp);
+      if ((event.target as HTMLElement | null)?.closest('[data-slot="scroll-area-scrollbar"]')) cancelRide();
     };
     scrollbar?.addEventListener("pointerdown", onScrollbar, { capture: true });
     const observer = viewportObserverFactory ? viewportObserverFactory(() => apply()) : new ResizeObserver(() => apply());
@@ -407,7 +396,6 @@ export function useViewportAnchor({
     if (contentRef.current) observer.observe(contentRef.current);
     return () => {
       vp.removeEventListener("scroll", onScroll);
-      vp.removeEventListener("scrollend", onScrollEnd);
       vp.removeEventListener("wheel", onWheel);
       vp.removeEventListener("keydown", onInput);
       vp.removeEventListener("pointerdown", onInput);
@@ -416,24 +404,20 @@ export function useViewportAnchor({
       vp.removeEventListener("touchcancel", onTouchEnd);
       scrollbar?.removeEventListener("pointerdown", onScrollbar, { capture: true });
       observer.disconnect();
-      const ride = rideRef.current;
-      if (ride) cancelAnimationFrame(ride.frame);
-      rideRef.current = null;
+      cancelRide();
     };
-  }, [apply, cancelRide, contentRef, derive, finishRide, naturalEnd, readRow, refreshEnd, releaseReserves, setAnchor, viewport, viewportObserverFactory, wrapperRef]);
+  }, [apply, cancelRide, contentRef, derive, naturalEnd, readRow, refreshEnd, releaseReserve, setAnchor, viewport, viewportObserverFactory, wrapperRef]);
 
   const placeScrollTop = useCallback((top: number) => {
     const vp = viewport();
     if (!vp) return;
-    cancelRide(vp);
+    cancelRide();
     write(vp, top);
     derive(vp, true);
     refreshEnd(vp);
   }, [cancelRide, derive, refreshEnd, viewport, write]);
 
   const current = useCallback(() => anchorRef.current, []);
-  const armSendReserve = useCallback((armed: boolean) => { sendArmedRef.current = armed; }, []);
-  const sendReserveArmed = useCallback(() => sendArmedRef.current, []);
   const holdReserve = useCallback(() => holdRef.current, []);
   const riding = useCallback(() => rideRef.current !== null, []);
   const rekey = useCallback((row: RowRef) => {
@@ -451,7 +435,7 @@ export function useViewportAnchor({
     return distance >= -0.5 && distance <= bottomZone(vp.clientHeight, latest.current.thresholds);
   }, [naturalEnd, viewport]);
   const controls = useMemo<ViewportAnchor>(() => ({
-    viewport, current, place, apply, armSendReserve, sendReserveArmed, holdReserve, releaseTail, placeScrollTop, reserveHeight, riding, atTail, rekey, rekeySettled,
-  }), [apply, armSendReserve, atTail, current, holdReserve, place, placeScrollTop, rekey, rekeySettled, releaseTail, reserveHeight, riding, sendReserveArmed, viewport]);
+    viewport, current, place, apply, holdReserve, releaseTail, placeScrollTop, reserveHeight, riding, atTail, rekey, rekeySettled,
+  }), [apply, atTail, current, holdReserve, place, placeScrollTop, rekey, rekeySettled, releaseTail, reserveHeight, riding, viewport]);
   return { controls, atEnd };
 }

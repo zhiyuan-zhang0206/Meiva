@@ -33,7 +33,6 @@ interface Args {
   items: readonly BackendTimelineItem[];
   compactBuffer: CompactTransitionBuffer | null;
   loading: boolean;
-  turnActive: boolean;
   hasMoreOlder: boolean;
   loadingOlder: boolean;
   onLoadOlder?: (origin: OlderLoadOrigin) => void;
@@ -58,7 +57,7 @@ export interface Placement {
   pin: RowRef | null;
   // meiva:note
   // Place the reader at a row once it is mounted (quote, send, the arrow).
-  request: (anchor: ViewAnchor, options?: { smooth?: boolean; followsTail?: boolean }) => void;
+  request: (anchor: ViewAnchor, options?: { smooth?: boolean }) => void;
   onAnchorChange: (anchor: ViewAnchor, cause: AnchorChangeCause) => void;
   onUnresolved: (row: RowRef) => void;
   onFree: () => void;
@@ -72,14 +71,14 @@ export interface Placement {
 // than at newer output.
 // meiva:link ui/web/src/docs/frontend-components/timeline-view/sticky-scroll.md
 export function usePlacement({
-  threadKey, entryKey, reloadRestore, items, compactBuffer, loading, turnActive, hasMoreOlder, loadingOlder,
+  threadKey, entryKey, reloadRestore, items, compactBuffer, loading, hasMoreOlder, loadingOlder,
   onLoadOlder, onCancelBackgroundLoadOlder, reveal, anchor, filling,
 }: Args): Placement {
   const [machine] = useState(() => new PlacementMachine(initialGoal(readMemoryPlace(entryKey, threadKey), threadKey, reloadRestore), BOUNDS));
   const snapshot = useSyncExternalStore(machine.subscribe, machine.snapshot, machine.snapshot);
 
   const inputs: PlacementInputs = {
-    threadKey, reloadRestore, items, compactBuffer, loading, turnActive, hasMoreOlder, loadingOlder,
+    threadKey, reloadRestore, items, compactBuffer, loading, hasMoreOlder, loadingOlder,
     canLoadOlder: Boolean(onLoadOlder), reveal, now: 0, filling,
   };
   const live = useRef({ inputs, onLoadOlder, onCancelBackgroundLoadOlder });
@@ -89,10 +88,7 @@ export function usePlacement({
   const current = useCallback((): PlacementInputs => ({ ...live.current.inputs, now: Date.now() }), []);
 
   const effects = useMemo<PlacementEffects>(() => ({
-    place: (target, { hold, sendReserve, smooth }) => {
-      if (sendReserve !== null) anchor.armSendReserve(sendReserve);
-      anchor.place(target, { hold, smooth });
-    },
+    place: (target, { hold, smooth }) => anchor.place(target, { hold, smooth }),
     loadOlder: () => live.current.onLoadOlder?.("background"),
     cancelOlder: () => { live.current.onCancelBackgroundLoadOlder?.(); },
     dropSessionPlace: () => writeSessionPlace(threadKey, live.current.inputs.reloadRestore, null, 0),
@@ -138,25 +134,14 @@ export function usePlacement({
   const placeOf = useCallback((row: Extract<ViewAnchor, { kind: "row" }>, identity: RowIdentity): SavedPlace => ({
     identity,
     offset: row.offset,
-    sendReserve: anchor.sendReserveArmed(),
     holdReserve: anchor.holdReserve(),
   }), [anchor]);
 
-  // meiva:note
-  // A send parked from the tail is the reader following their own message, not a place they chose:
-  // like the tail it keeps no reload bookmark, so a reload opens on the latest rows instead of
-  // searching history for the sent message. The reader's next scroll makes the place theirs.
-  // meiva:link ui/web/src/docs/frontend-state/scroll-memory.md
-  const sendParkRef = useRef<RowRef | null>(null);
-  const followingSendRef = useRef(false);
   const saveFrame = useRef(0);
   const onAnchorChange = useCallback((next: ViewAnchor, cause: AnchorChangeCause) => {
     const { items: rows, compactBuffer: buffer } = live.current.inputs;
     if (next.kind === "row") identityRef.current = identify(next.row, rows, buffer);
     if (cause === "reader") machine.readerMoved(current(), next.kind === "row" ? next.row : null);
-    const parked = sendParkRef.current;
-    followingSendRef.current = cause === "placement" && next.kind === "row" && parked !== null && sameRow(parked, next.row);
-    if (cause === "placement") sendParkRef.current = null;
     cancelAnimationFrame(saveFrame.current);
     saveFrame.current = requestAnimationFrame(() => {
       if (!machine.isPlaced()) return;
@@ -169,7 +154,7 @@ export function usePlacement({
       if (now?.kind !== "row" || !identityRef.current) return;
       const place = placeOf(now, identityRef.current);
       writeMemoryPlace(entryKey, threadKey, place);
-      writeSessionPlace(threadKey, config, followingSendRef.current ? null : place, anchor.viewport()?.scrollTop ?? 0);
+      writeSessionPlace(threadKey, config, place, anchor.viewport()?.scrollTop ?? 0);
     });
   }, [anchor, current, entryKey, machine, placeOf, threadKey]);
 
@@ -177,7 +162,7 @@ export function usePlacement({
     const now = anchor.current();
     const identity = identityRef.current && sameRow(identityRef.current.row, row) ? identityRef.current : { row };
     const offset = now?.kind === "row" ? now.offset : READING_TOP_PX;
-    machine.lost({ identity, offset, sendReserve: anchor.sendReserveArmed(), holdReserve: anchor.holdReserve() }, current(), effects);
+    machine.lost({ identity, offset, holdReserve: anchor.holdReserve() }, current(), effects);
   }, [anchor, current, effects, machine]);
 
   useLayoutEffect(() => () => {
@@ -192,13 +177,12 @@ export function usePlacement({
       : identify(row.row, live.current.inputs.items, live.current.inputs.compactBuffer);
     const place = placeOf(row, identity);
     writeMemoryPlace(entryKey, threadKey, place);
-    if (now?.kind === "row" && !followingSendRef.current) writeSessionPlace(threadKey, live.current.inputs.reloadRestore, place, vp?.scrollTop ?? 0);
+    if (now?.kind === "row") writeSessionPlace(threadKey, live.current.inputs.reloadRestore, place, vp?.scrollTop ?? 0);
   }, [anchor, entryKey, machine, placeOf, threadKey]);
 
   const onFree = useCallback(() => machine.readerMoved(current(), null), [current, machine]);
 
-  const request = useCallback((target: ViewAnchor, options: { smooth?: boolean; followsTail?: boolean } = {}) => {
-    sendParkRef.current = options.followsTail === true && target.kind === "row" ? target.row : null;
+  const request = useCallback((target: ViewAnchor, options: { smooth?: boolean } = {}) => {
     machine.request(target, current(), options.smooth === true);
   }, [current, machine]);
 

@@ -48,7 +48,6 @@ function resetStore(): void {
     hasMoreOlder: false,
     loadingOlder: false,
     olderFetchCount: 0,
-    sendAnchor: { seq: 0, inboundId: null },
     liveCompact: null,
     compactReplaceSeq: 0,
     compactReplaceAgent: null,
@@ -524,7 +523,6 @@ describe("create() initial defaults (fresh module)", () => {
     expect(s.reasoningTokens).toBe(0);
     expect(s.maxContextTokens).toBe(0);
     expect(s.activeThreadId).toBeNull();
-    expect(s.sendAnchor).toEqual({ seq: 0, inboundId: null });
     expect(s.hasMoreOlder).toBe(false);
     expect(s.loadingOlder).toBe(false);
     expect(s.olderFetchCount).toBe(0);

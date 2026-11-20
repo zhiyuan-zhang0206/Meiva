@@ -133,7 +133,7 @@ def test_repo_policy_allowance_counts_are_pinned() -> None:
 # The numbers are published in the checker document in the same change, so a repayment or a new site
 # moves both; a ledger that drops without a line saying why is what this file refuses.
 DOCUMENTED = {
-    "ui/web/src/app/page-test-mock.tsx": 111,
+    "ui/web/src/app/page-test-mock.tsx": 105,
     "ui/web/src/components/agent-sidebar/sidebar-test-mock.tsx": 141,
     "ui/web/src/components/inspector/inspector-test-mock.tsx": 4,
 }

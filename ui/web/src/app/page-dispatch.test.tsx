@@ -321,34 +321,6 @@ describe("Spawn flow", () => {
   });
 });
 
-// meiva:note
-// A send hands the timeline the message the gateway stored, so it can park that
-// message instead of re-pinning to the bottom; the view does the placing.
-// meiva:link ui/web/src/docs/frontend-state/frontend-state.md
-describe("send hands the timeline its own message", () => {
-  it("send succeeds → requestSendAnchor carries the stored inbound", async () => {
-    hooksState.activeId = 5;
-    hooksState.agents = [makeAgent({ agent_id: 5, status: "idling" })];
-    wrap(<HomePage />);
-    fireEvent.click(screen.getByTestId("composer-send"));
-    await waitFor(() =>
-      expect(transport.sendMessage).toHaveBeenCalledWith(5, "hi", expect.any(String), undefined),
-    );
-    await act(() => Promise.resolve());
-    expect(hooksState.requestSendAnchor).toHaveBeenCalledWith(11);
-  });
-  it("send fails → requestSendAnchor NOT called", async () => {
-    hooksState.activeId = 5;
-    hooksState.agents = [makeAgent({ agent_id: 5, status: "idling" })];
-    transport.sendMessage.mockRejectedValueOnce(new Error("boom"));
-    wrap(<HomePage />);
-    fireEvent.click(screen.getByTestId("composer-send"));
-    await waitFor(() => expect(transport.sendMessage).toHaveBeenCalled());
-    await act(() => Promise.resolve());
-    expect(hooksState.requestSendAnchor).not.toHaveBeenCalled();
-  });
-});
-
 describe("UploadButton receives activeId", () => {
   it("activeId=null → upload-button data-agent-id 'null'", () => {
     wrap(<HomePage />);
@@ -400,8 +372,6 @@ describe("multi-command dispatch", () => {
       expect.any(String),
       undefined,
     );
-    await act(() => Promise.resolve());
-    expect(hooksState.requestSendAnchor).toHaveBeenCalledTimes(1);
   });
   it("sends command arguments verbatim in that one message", async () => {
     hooksState.activeId = 5;
@@ -428,16 +398,6 @@ describe("multi-command dispatch", () => {
       expect.any(String),
       undefined,
     );
-  });
-  it("does not ask for the tail when the send fails", async () => {
-    hooksState.activeId = 5;
-    hooksState.agents = [makeAgent({ agent_id: 5, status: "idling" })];
-    transport.sendMessage.mockRejectedValueOnce(new Error("boom"));
-    wrap(<HomePage />);
-    fireEvent.click(screen.getByTestId("composer-send-multi"));
-    await waitFor(() => expect(transport.sendMessage).toHaveBeenCalled());
-    await act(() => Promise.resolve());
-    expect(hooksState.requestSendAnchor).not.toHaveBeenCalled();
   });
 });
 

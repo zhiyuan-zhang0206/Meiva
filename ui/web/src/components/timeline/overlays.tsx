@@ -28,6 +28,12 @@ function LoadingRing({ testId, className }: {
   );
 }
 
+// meiva:note
+// The height of what floats over the timeline's bottom edge (the pending strip), set on the timeline
+// wrapper; the log's padding and the arrow keep clear of it.
+// meiva:link ui/web/src/docs/frontend-components/timeline-view/send-anchor.md
+export const FOOTER_HEIGHT_VAR = "--timeline-footer-h";
+
 const FLOATING_DISC_SURFACE_CLASS = cn(
   "size-9 rounded-full bg-background border border-border shadow-md items-center justify-center text-muted-foreground",
   FLEX,
@@ -108,8 +114,10 @@ export function ScrollToBottomButton({ atBottom, onClick }: { atBottom: boolean;
       onClick={onClick}
       aria-label={t("scrollDown")}
       data-testid="scroll-to-bottom"
+      data-scroll-to-bottom
+      style={{ bottom: `calc(1rem + var(${FOOTER_HEIGHT_VAR}, 0px))` }}
       className={cn(
-        "absolute bottom-4 left-1/2 -translate-x-1/2 z-30",
+        "absolute left-1/2 -translate-x-1/2 z-30",
         FLOATING_DISC_SURFACE_CLASS,
         "hover:shadow-lg hover:text-foreground transition-colors duration-300 ease-out",
       )}

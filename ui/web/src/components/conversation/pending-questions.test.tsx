@@ -31,6 +31,7 @@ it("opens expanded by default above the composer and retains independent drafts 
   renderQuestions(<PendingQuestions agentId={7} questions={questions} failed={false} maxWidthCss="768px" />);
   const region = screen.getByTestId("pending-questions");
   expect(region.className).toContain("relative");
+  expect(region.getAttribute("data-question-panel")).toBe("open");
   expect(region.style.maxWidth).toBe("768px");
   const toggle = screen.getByRole("button", { name: "2 questions waiting" });
   expect(toggle.getAttribute("aria-expanded")).toBe("true");
@@ -55,6 +56,7 @@ it("opens expanded by default above the composer and retains independent drafts 
   expect(viewport.contains(screen.getByRole("button", { name: "Submit" }))).toBe(false);
   fireEvent.click(toggle);
   expect(toggle.getAttribute("aria-expanded")).toBe("false");
+  expect(region.getAttribute("data-question-panel")).toBe("closed");
   expect(screen.queryByRole("textbox")).toBeNull();
   expect(screen.getByText("2 questions waiting")).toBeTruthy();
   expect(screen.getByText("11/7 13:10").closest("time")).toBe(stamp);

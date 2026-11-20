@@ -81,13 +81,6 @@ type InspectorView = ReturnType<typeof useInspectorOpen>;
 type SettingsView = Pick<ReturnType<typeof useUserSettings>, "settings" | "isLoading">;
 interface TimelineStoreView {
   // meiva:note
-  // Asks the timeline to park the message the reader just sent a fixed share
-  // down the viewport and stop following the stream, instead of re-pinning to
-  // the bottom. The inbound id names that message; null when the receipt
-  // carried none.
-  // meiva:link ui/web/src/docs/frontend-components/timeline-view/sticky-scroll.md
-  requestSendAnchor: (inboundId: number | null) => void;
-  // meiva:note
   // Page-clock time of the last event the selected thread received (0 = none). The running turn's
   // live clock anchors on it between blocks, so "Working for" keeps counting through the gap
   // between a committed block and the next one instead of freezing (user report 2026-11-08).
@@ -427,13 +420,12 @@ function HomeContent({
     ): Promise<boolean> => {
       if (activeId == null) return false;
       try {
-        const receipt = await client.sendMessage(
+        await client.sendMessage(
           activeId,
           content,
           clientMessageId,
           quote,
         );
-        timelineStore.requestSendAnchor(receipt.inbound_id ?? null);
         return true;
       } catch (e: unknown) {
         if (e instanceof MessageDeliveryUnknownError) {
@@ -444,7 +436,7 @@ function HomeContent({
         return false;
       }
     },
-    [activeId, client, showError, timelineStore, t],
+    [activeId, client, showError, t],
   );
 
   const handleUploadError = useCallback(
@@ -558,6 +550,13 @@ function HomeContent({
             maxWidthCss={contentColumnMaxWidth}
             reveal={openedUnread.agentId === activeId && openedUnread.unread === false ? NO_UNREAD_REVEAL : seenReveal}
             onQuote={acceptQuote}
+            footer={
+              <PendingStrip
+                items={visiblePendingMessages}
+                deliveringBatch={deliveringBatch}
+                maxWidthCss={composerMaxWidth}
+              />
+            }
           />
           <HeaderBar
             label={activeLabel}
@@ -580,11 +579,6 @@ function HomeContent({
             {contextAvailable && <ContextPanelToggle open={false} onToggle={openContext} />}
           </HeaderBar>
           <div className="relative z-20 bg-background">
-            <PendingStrip
-              items={visiblePendingMessages}
-              deliveringBatch={deliveringBatch}
-              maxWidthCss={composerMaxWidth}
-            />
             {activeAgent?.harness === "meiva" && activeAgent.supports_vision === null && (
               <p role="status" className="px-3 py-2 text-sm text-muted-foreground">
                 {t("modelCapabilitiesUnavailable")}
@@ -601,7 +595,6 @@ function HomeContent({
                 onStop={handleStop}
                 stageQueue={stageQueue}
                 onDeliveringBatchChange={setDeliveringBatch}
-                onUploadSent={() => timelineStore.requestSendAnchor(null)}
                 onUploadError={handleUploadError}
                 focusToken={store.composerFocusToken}
                 agentId={activeId}

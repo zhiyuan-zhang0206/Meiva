@@ -11,7 +11,7 @@ import { ApiProvider, WallClockProvider } from "@/lib/transport/transport-contex
 import { fakeBrowser } from "@/lib/browser/testing";
 import { TimelineView, type RevealDecision } from "..";
 import { READING_TOP_PX } from "./dom";
-import { readMemoryPlace, writeMemoryPlace, type SavedPlace } from "./saved";
+import { writeMemoryPlace, type SavedPlace } from "./saved";
 import {
   readReloadBookmark,
   RELOAD_BOOKMARK_MAX_AGENTS,
@@ -48,9 +48,6 @@ const items: BackendTimelineItem[] = Array.from({ length: 16 }, (_, index) => ({
   source: null, created_at: null, inbound_id: null, show_timestamp: false,
 }));
 const response: TimelineResponse = { items, msg_count: 17, has_more: false };
-const human = (id: string, inboundId: number | null = null): BackendTimelineItem => ({
-  ...items[0], item_id: id, kind: "inbound_chat", source: "user", payload: `Question ${id}`, inbound_id: inboundId,
-});
 // meiva:note
 // Geometry: every row is 300px tall and sits at its position among the mounted rows (so a prepend
 // pushes the rows below it down), shifted by `aboveSettle`; the log is `height` tall, the reserve
@@ -107,7 +104,7 @@ const shell = () => <QueryClientProvider client={client}><div>Shell page</div></
 function viewport() { return screen.getByTestId("history-viewport"); }
 function column() { return viewport().querySelector<HTMLElement>("[data-timeline-column]")!; }
 function rowsShown() { return column().style.visibility !== "hidden"; }
-function reserve() { return viewport().querySelector<HTMLElement>("[data-send-reserve]")!; }
+function reserve() { return viewport().querySelector<HTMLElement>("[data-timeline-reserve]")!; }
 function readingOffset(id: string) {
   const node = viewport().querySelector(`.timeline-item[data-item-id="${CSS.escape(id)}"]`);
   return node ? Math.round(node.getBoundingClientRect().top - viewport().getBoundingClientRect().top) : null;
@@ -118,7 +115,7 @@ function readerScroll(to: number) { act(() => { viewport().scrollTop = to; fireE
 // Anchor saves are batched to the next frame.
 async function nextFrame() { await act(() => new Promise<void>((resolve) => requestAnimationFrame(() => resolve()))); }
 const place = (itemId: string, offset: number, extra: Partial<SavedPlace> = {}): SavedPlace => ({
-  identity: { row: { itemId, rank: 0 } }, offset, sendReserve: false, holdReserve: false, ...extra,
+  identity: { row: { itemId, rank: 0 } }, offset, holdReserve: false, ...extra,
 });
 const rect = (y: number, h: number) => ({ top: y, bottom: y + h, height: h, left: 0, right: 400, width: 400, x: 0, y }) as DOMRect;
 function rowIndex(node: HTMLElement) {
@@ -151,7 +148,7 @@ beforeEach(() => {
   vi.spyOn(HTMLElement.prototype, "clientHeight", "get").mockReturnValue(600);
   vi.spyOn(HTMLElement.prototype, "scrollHeight", "get").mockImplementation(function (this: HTMLElement) {
     if (!this.querySelectorAll(".timeline-item").length) return 600;
-    return height + [...this.querySelectorAll<HTMLElement>("[data-send-reserve]")]
+    return height + [...this.querySelectorAll<HTMLElement>("[data-timeline-reserve]")]
       .reduce((total, node) => total + node.offsetHeight, 0);
   });
   vi.spyOn(HTMLElement.prototype, "offsetHeight", "get").mockImplementation(function (this: HTMLElement) {
@@ -164,7 +161,7 @@ beforeEach(() => {
   vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockImplementation(function (this: HTMLElement) {
     if (this.dataset.slot === "scroll-area-viewport") return rect(0, 600);
     if (this.getAttribute("role") === "log") return rect(-top, height);
-    if (this.hasAttribute("data-send-reserve")) return rect(height - top, this.offsetHeight);
+    if (this.hasAttribute("data-timeline-reserve")) return rect(height - top, this.offsetHeight);
     if (this.dataset.itemId) return rect(rowIndex(this) * 300 - top + aboveSettle, 300);
     return rect(0, 300);
   });
@@ -402,41 +399,7 @@ function tabs(agentId: number, entry: string, turnActive = false) {
   );
 }
 
-describe("send and toggle reserves across a return", () => {
-  const withQuestion = () => {
-    const rows = [...items, human("17.0")];
-    client.setQueryData(["timeline", 42], { ...response, items: rows });
-    height = 5300;
-  };
-
-  it.each([true, false])("returns a send-parked message with its reserve, or a reader who left it without (kept: %s)", (keep) => {
-    withQuestion();
-    const entry = `combined-reserve-${keep}`;
-    const { rerender } = renderWithBrowser(tabs(42, entry, true));
-    act(() => { useTimelineStore.getState().requestSendAnchor(null); });
-    expect(readingOffset("17.0")).toBe(READING_TOP_PX);
-    expect(viewport().scrollTop).toBe(4744);
-    expect(reserve().style.height).toBe("44px");
-    if (!keep) {
-      act(() => {
-        fireEvent.wheel(viewport(), { deltaY: -344 });
-        viewport().scrollTop = 4400;
-        fireEvent.scroll(viewport());
-      });
-      expect(reserve().style.height).toBe("0px");
-    }
-    const expected = top;
-    rerender(tabs(43, entry));
-    expect(readMemoryPlace(`${entry}:agent:42`, "42")?.sendReserve).toBe(keep);
-    top = 0;
-    rerender(tabs(42, entry, true));
-    expect(top).toBe(expected);
-    expect(readingOffset(keep ? "17.0" : "15.0")).toBe(keep ? READING_TOP_PX : -200);
-    expect(screen.queryByTestId("scroll-to-bottom") === null).toBe(keep);
-    act(() => { height = 7000; resizeCallbacks.forEach((deliver) => deliver()); });
-    expect(top).toBe(expected);
-  });
-
+describe("a toggle reserve and growth below a returned reader", () => {
   it("recreates the space a header toggle used for a saved place beyond the shortened conversation", () => {
     writeMemoryPlace("agent-collapse-space:agent:42", "42", place("16.0", -100, { holdReserve: true }));
     const { rerender } = renderWithBrowser(tabs(43, "agent-collapse-space"));
@@ -447,33 +410,30 @@ describe("send and toggle reserves across a return", () => {
     expect(reserve().style.height).toBe("200px");
   });
 
-  it("a send leaves a returned reader in history at their place", () => {
+  it("leaves a returned reader in history at their place while the conversation grows", () => {
     height = 900;
     writeMemoryPlace("history-send", "42", place("3.0", -100));
     renderWithBrowser(conversation(42, "history-send"));
     resize();
-    act(() => { useTimelineStore.getState().requestSendAnchor(null); });
     act(() => { height = 5000; resizeCallbacks.forEach((deliver) => deliver()); });
     expect(viewport().scrollTop).toBe(700);
   });
 
-  it("a send keeps a returned row at the bottom in place", () => {
+  it("keeps a returned row at the bottom in place while the conversation grows", () => {
     useTimelineStore.getState().switchThread(42, items, false);
     writeMemoryPlace("history-tail-send", "42", place("15.0", -200));
     renderWithBrowser(conversation(42, "history-tail-send"));
     expect(viewport().scrollTop).toBe(4400);
-    act(() => { useTimelineStore.getState().requestSendAnchor(null); });
     act(() => { height = 6000; resizeCallbacks.forEach((deliver) => deliver()); });
     expect(viewport().scrollTop).toBe(4400);
   });
 
-  it("follows again once a returned reader scrolls back into the bottom zone, through a send", () => {
+  it("follows again once a returned reader scrolls back into the bottom zone", () => {
     useTimelineStore.getState().switchThread(42, items, false);
     writeMemoryPlace("history-hold-release", "42", place("3.0", -100));
     renderWithBrowser(conversation(42, "history-hold-release"));
     expect(viewport().scrollTop).toBe(700);
     readerScroll(4390);
-    act(() => { useTimelineStore.getState().requestSendAnchor(null); });
     act(() => { height = 6000; resizeCallbacks.forEach((deliver) => deliver()); });
     expect(viewport().scrollTop).toBe(5400);
   });
@@ -1087,7 +1047,7 @@ describe("virtualized restore", () => {
       const log = content();
       if (this === vp) return rect(0, 600);
       if (this === log) return rect(-top, contentHeight());
-      if (this.hasAttribute("data-send-reserve")) return rect(contentHeight() - top, 0);
+      if (this.hasAttribute("data-timeline-reserve")) return rect(contentHeight() - top, 0);
       const group = this.matches("[data-virtual-group]") ? this : this.closest<HTMLElement>("[data-virtual-group]");
       if (!group || !log) return rect(0, 0);
       let y = 52;
