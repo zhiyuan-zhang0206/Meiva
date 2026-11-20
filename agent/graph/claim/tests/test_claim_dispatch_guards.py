@@ -16,11 +16,11 @@ from agent.graph.claim.tests.claim_support import (
     make_runtime,
     scalar_int,
     thread_config,
-    update_of,
 )
 from agent.state import AgentState
 from base.agents.inbox.insert import insert_inbound_message
 from base.agents.messages.lifecycle_text import interrupt_note
+from base.agents.tests.langgraph_views import command_update
 from base.agents.tests.units import spawn_agent
 from base.cluster.machine import MachineIdentityReader
 from base.cluster.machine.tests.identity import machine_identity as machine_identity
@@ -207,7 +207,7 @@ async def test_claim_drops_compact_but_takes_a_restart_for_external_harness(
         ]
         cmd_restart = await settle_claimed_batch(ext_ctx, initial_state, tid, restart_batch)
         assert cmd_restart.goto == END
-        update = update_of(cmd_restart)
+        update = command_update(cmd_restart)
         assert update.get("restart_requested") is True
         assert update.get("exit_requested") is False
         assert update.get("halted") is False
@@ -299,7 +299,7 @@ async def test_a_stops_passive_note_enters_the_history_and_the_agent_stays_idle(
     first = await claim_node(AgentState(messages=earlier, halted=True), runtime, thread_config(tid))
 
     assert first.goto == "claim", "no model turn"
-    first_update = update_of(first)
+    first_update = command_update(first)
     assert first_update["halted"] is True
     raised = first_update["messages"]
     assert is_object_list(raised)

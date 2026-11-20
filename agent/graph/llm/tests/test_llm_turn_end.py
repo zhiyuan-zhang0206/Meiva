@@ -15,12 +15,12 @@ from agent.graph.llm.node import llm_attempt, llm_node
 from agent.graph.llm.tests.llm_support import (
     ScriptedModel,
     command_messages,
-    command_update,
     end_turn_chunk,
     llm_runtime,
     tool_call_chunk,
 )
 from agent.state import AgentState
+from base.agents.tests.langgraph_views import command_update
 from base.db.code_version_gate import ProcessDbGate
 from base.host.boundary.json_values import is_object_dict
 from base.host.boundary.untyped import object_mapping, object_of

@@ -12,7 +12,7 @@ from langgraph.types import Command
 from psycopg_pool import AsyncConnectionPool
 
 from agent.state import ContextReset
-from agent.tests.command_update import command_update
+from base.agents.tests.langgraph_views import command_update
 from base.agents.tests.units import spawn_agent
 from base.cluster.machine import MachineIdentityReader
 from base.cluster.machine.tests.identity import machine_identity as machine_identity

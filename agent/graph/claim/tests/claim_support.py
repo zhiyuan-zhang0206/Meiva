@@ -2,7 +2,7 @@
 
 import asyncio
 import os
-from collections.abc import AsyncIterator, Callable, Hashable, Mapping, Sequence
+from collections.abc import AsyncIterator, Callable, Mapping, Sequence
 from pathlib import Path
 from unittest.mock import MagicMock
 
@@ -15,7 +15,6 @@ from langchain_core.outputs import ChatGenerationChunk, ChatResult
 from langchain_core.runnables import Runnable, RunnableConfig
 from langchain_core.tools import BaseTool
 from langgraph.runtime import Runtime
-from langgraph.types import Command
 from psycopg_pool import AsyncConnectionPool
 
 import meiva
@@ -31,7 +30,6 @@ from base.events.live.bus import EventBus
 from base.events.live.publisher import AgentEventPublisher
 from base.host.boundary.fields import str_field
 from base.host.boundary.json_values import is_object_dict, is_object_list
-from base.host.boundary.untyped import object_of
 from base.host.env.agent_slices import AgentSlices
 from base.packages.composer_commands import CommandCatalog
 from base.packages.plugin_providers import build_model_catalog
@@ -45,7 +43,6 @@ __all__ = [
     "scalar_int",
     "thread_config",
     "timeline_items",
-    "update_of",
 ]
 
 
@@ -92,12 +89,6 @@ class SummaryModel(BaseChatModel):
 
 def make_fake_llm(summary: str = "synthetic compaction summary") -> SummaryModel:
     return SummaryModel(summary=summary)
-
-
-def update_of[N: Hashable](command: Command[N]) -> dict[str, object]:
-    update = object_of(getattr, command, "update")
-    assert is_object_dict(update)
-    return update
 
 
 def snapshot_items(events: Sequence[Mapping[str, object]]) -> list[Mapping[str, object]]:

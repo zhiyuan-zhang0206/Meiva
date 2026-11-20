@@ -13,11 +13,11 @@ from langchain_core.messages import HumanMessage
 from langgraph.types import Command
 
 from agent.graph.claim.harness_read_sink import ReadTimelineSink
-from agent.graph.claim.tests.claim_support import update_of
 from agent.graph.claim.turn_end import settle_turn_end
 from agent.nodes import BEFORE_TURN, END
 from agent.state import AgentState
 from base.agents.context import MeivaContext
+from base.agents.tests.langgraph_views import command_update
 from base.api_contracts.agent_contract import Harness
 from base.clock import SYSTEM_TIMERS, Clock, ClockConfig
 from base.config.tests.configuration import defaults
@@ -59,7 +59,7 @@ def test_held_call_becomes_no_input_at_the_turn_end(loguru_records: LogRecords) 
     assert record["duration_seconds"] == 2.5
     assert record["ok"] is True
     assert record["agent_id"] == 7
-    assert update_of(command)["turn_end_held_seconds"] is None, (
+    assert command_update(command)["turn_end_held_seconds"] is None, (
         "the held call must not reach the next turn"
     )
 
@@ -99,7 +99,7 @@ def test_a_continuing_turn_emits_the_record_without_a_reason(loguru_records: Log
 
     (record,) = _records(loguru_records)
     assert "ended_with" not in record, "a turn that continues has not ended, so it has no reason"
-    assert update_of(command)["ended_with"] is None, (
+    assert command_update(command)["ended_with"] is None, (
         "a stale declaration must not reach the next round"
     )
 

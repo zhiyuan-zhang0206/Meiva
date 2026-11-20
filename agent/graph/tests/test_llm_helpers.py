@@ -28,9 +28,10 @@ from agent.graph import llm_node
 from agent.graph.interrupt.tests.queued_commands import queue_command
 from agent.graph.llm.tests.llm_support import ScriptedModel, sink_publisher
 from agent.graph.prompt.system_prompt import capture_meiva_overview, get_meiva_overview
-from agent.graph.tests.node_output import messages_of, typed_events, update_of
+from agent.graph.tests.node_output import messages_of, typed_events
 from agent.state import AgentState
 from base.agents.context import MeivaContext
+from base.agents.tests.langgraph_views import command_update
 from base.clock import SYSTEM_TIMERS, Clock
 from base.clock.tests.seeded_rng import seeded_rng
 from base.config import settings
@@ -261,7 +262,7 @@ async def test_cancel_branch_publishes_cancelled_and_returns_halted(
     # (b) Command shape: goto=after_exec + halted=True
     assert isinstance(result, Command)
     assert result.goto == "claim"
-    assert update_of(result)["halted"] is True
+    assert command_update(result)["halted"] is True
     # (c) cancel path does not call handler.finish() —— no llm_done / token_usage emit
     roles = [e.role for e in events]
     assert "llm_done" not in roles, (
@@ -322,7 +323,7 @@ async def test_stream_normal_completion_no_cancelled_event(
     # (b) Command shape: end_turn + no tool_calls → halted=True goto=after_exec
     assert isinstance(result, Command)
     assert result.goto == "claim"
-    assert update_of(result)["halted"] is True
+    assert command_update(result)["halted"] is True
     # (c) finish() called → LLMDone emitted
     assert "llm_done" in [e.role for e in events], (
         "stream-normal branch must call handler.finish() and emit LLMDone"
@@ -361,7 +362,7 @@ async def test_reasoning_tokens_without_action_end_the_turn(
 
     assert isinstance(result, Command)
     assert result.goto == "claim"
-    assert update_of(result)["halted"] is True
+    assert command_update(result)["halted"] is True
     msgs = messages_of(result)
     assert len(msgs) == 1
     assert isinstance(msgs[0], AIMessage)
@@ -400,7 +401,7 @@ async def test_empty_completed_response_ends_normally(
     )
 
     assert isinstance(result, Command)
-    assert update_of(result)["halted"] is True
+    assert command_update(result)["halted"] is True
     assert len(loguru_records.extras(event="halt")) == 1
     assert len(loguru_records.extras(event="halt", level="INFO")) == 1
 
@@ -492,9 +493,9 @@ async def test_cancel_event_set_before_first_chunk_returns_halted_no_publish_don
 
     assert isinstance(result, Command)
     assert result.goto == "claim"
-    assert update_of(result)["halted"] is True
+    assert command_update(result)["halted"] is True
     # clean discard: no message committed
-    assert update_of(result).get("messages", []) == []
+    assert command_update(result).get("messages", []) == []
     # Cancelled event emitted
     assert _has_cancelled_event(events, agent_id)
     # handler.finish() not called → no LLMDone
@@ -535,7 +536,7 @@ async def test_thinking_blocks_without_action_end_the_turn(
 
     assert isinstance(result, Command)
     assert result.goto == "claim"
-    assert update_of(result)["halted"] is True
+    assert command_update(result)["halted"] is True
     msgs = messages_of(result)
     assert len(msgs) == 1
     assert isinstance(msgs[0], AIMessage)
@@ -576,7 +577,7 @@ async def test_deepseek_reasoning_content_without_action_ends_the_turn(
 
     assert isinstance(result, Command)
     assert result.goto == "claim"
-    assert update_of(result)["halted"] is True
+    assert command_update(result)["halted"] is True
     msgs = messages_of(result)
     assert len(msgs) == 1
     assert isinstance(msgs[0], AIMessage)

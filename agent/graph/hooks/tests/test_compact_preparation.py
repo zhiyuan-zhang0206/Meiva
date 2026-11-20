@@ -15,10 +15,10 @@ from agent.hooks import Hook, make_hook_runner
 from agent.messages import InboundTimes, inbound_message
 from agent.state import AgentState, CompactState
 from base.agents.context import MeivaContext
+from base.agents.tests.langgraph_views import command_update
 from base.clock import Clock
 from base.config.tests.configuration import defaults
-from base.host.boundary.json_values import is_object_dict, is_object_list
-from base.host.boundary.untyped import object_of
+from base.host.boundary.json_values import is_object_list
 from base.host.env.agent_slices import AgentSlices
 from base.lm.catalog import ModelCatalog
 from base.log.tests.log_records import LogRecords
@@ -155,8 +155,7 @@ async def test_soft_reminder_composes_with_another_message_writer(compact_first:
         ]
     )
     command = await runner(state, _runtime(), {})
-    update = object_of(getattr, command, "update")
-    assert is_object_dict(update)
+    update = command_update(command)
     assert command.goto == "llm"
     messages = update["messages"]
     assert is_object_list(messages)

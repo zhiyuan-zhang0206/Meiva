@@ -17,6 +17,7 @@ from agent.state import AgentState
 from base.agents.context import MeivaContext
 from base.agents.context.identity import AgentIdentity
 from base.agents.messages.kwargs import ExecStatus, read_meiva_kwargs
+from base.agents.tests.langgraph_views import command_update
 from base.clock import SYSTEM_TIMERS, Clock
 from base.clock.tests.seeded_rng import seeded_rng
 from base.config import settings
@@ -25,7 +26,7 @@ from base.config.tests.configuration import defaults
 from base.db import Database
 from base.events.live.bus import EventBus
 from base.events.live.tests.live_capture import idle_publisher
-from base.host.boundary.json_values import is_object_dict, is_object_list
+from base.host.boundary.json_values import is_object_list
 from base.host.boundary.untyped import object_of
 from base.host.env.agent_env import AGENT_BIRTH_CONFIG_ENV, AGENT_CONFIG_OVERLAY_ENV
 from base.host.env.agent_slices import AgentSlices
@@ -194,8 +195,7 @@ async def _execution_message(context: MeivaContext, code: str) -> ToolMessage:
         {"configurable": {"thread_id": str(agent_id)}},
         process=SubprocessExecProcess(live_parent_facts(), rng=_rng()),
     )
-    update: object = command.update
-    assert is_object_dict(update)
+    update = command_update(command)
     assert update["halted"] is False
     messages = update["messages"]
     assert is_object_list(messages)

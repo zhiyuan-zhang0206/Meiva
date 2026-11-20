@@ -9,11 +9,11 @@ from agent.graph.llm.node import llm_node
 from agent.graph.llm.tests.llm_support import (
     ScriptedModel,
     command_messages,
-    command_update,
     end_turn_chunk,
     llm_runtime,
 )
 from agent.state import AgentState
+from base.agents.tests.langgraph_views import command_update
 from base.db.code_version_gate import ProcessDbGate
 from base.lm.catalog import ModelCatalog
 from base.log.tests.log_records import LogRecords

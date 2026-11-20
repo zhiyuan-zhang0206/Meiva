@@ -11,13 +11,14 @@ from agent.db import ClaimedInbound
 from agent.graph.claim._dispatch import BatchState, resolve_non_human_wake
 from agent.graph.claim._routing import Routing
 from agent.graph.claim.node import claim_node_impl, settle_claimed_batch
-from agent.graph.claim.tests.claim_support import make_runtime, thread_config, update_of
+from agent.graph.claim.tests.claim_support import make_runtime, thread_config
 from agent.graph.claim.turn_stamp import persist_last_active
 from agent.messages import NoteTag
 from agent.state import AgentState
 from base.agents.history.transcript_timeline.items import ReplyPolicy
 from base.agents.history.transcript_timeline.project import RecordProjector
 from base.agents.messages.kwargs import read_meiva_kwargs
+from base.agents.tests.langgraph_views import command_update
 from base.agents.tests.units import spawn_agent
 from base.cluster.machine import MachineIdentityReader
 from base.cluster.machine.tests.identity import machine_identity as machine_identity
@@ -182,7 +183,7 @@ async def test_claim_node_impl_idle_reset_and_handoff_resume_polarity(
         runtime,
         cfg,
     )
-    assert update_of(cmd_end).get("non_human_wake") is False
+    assert command_update(cmd_end).get("non_human_wake") is False
 
     cmd_restart = await claim_node_impl(
         AgentState(
@@ -195,7 +196,7 @@ async def test_claim_node_impl_idle_reset_and_handoff_resume_polarity(
         runtime,
         cfg,
     )
-    assert "non_human_wake" not in update_of(cmd_restart)
+    assert "non_human_wake" not in command_update(cmd_restart)
 
 
 async def test_settle_claimed_batch_appends_recency_reminder_only_on_fresh_non_human_wake(

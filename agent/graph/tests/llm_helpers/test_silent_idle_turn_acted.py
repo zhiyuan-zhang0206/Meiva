@@ -11,11 +11,11 @@ from langgraph.types import Command
 from agent.graph.llm.goto import LlmGoto
 from agent.graph.llm.node import llm_node
 from agent.graph.llm.tests.llm_support import ScriptedModel, sink_publisher
-from agent.graph.tests.node_output import update_of
 from agent.graph.tests.test_llm_helpers import make_runtime
 from agent.messages import exec_output_message
 from agent.state import AgentState
 from base.agents.messages.kwargs import ExecStatus
+from base.agents.tests.langgraph_views import command_update
 from base.db.code_version_gate import ProcessDbGate
 from base.log.tests.log_records import LogRecords
 from base.native_process.turn_identity import HostedTurnResources
@@ -96,7 +96,7 @@ async def _llm_turn(
 # meiva:note
 # The verdict is read through one place: every test asserts the same field of the same shape.
 def _halted(result: Command[LlmGoto]) -> object:
-    return update_of(result).get("halted")
+    return command_update(result).get("halted")
 
 
 @pytest.mark.parametrize("status", list(ExecStatus))

@@ -16,6 +16,7 @@ from langgraph.graph import END, START, StateGraph
 from psycopg.rows import TupleRow
 from psycopg_pool import ConnectionPool
 
+from base.agents.tests.langgraph_views import NodeGraphBuilder
 from base.api_contracts.reading import (
     NativeReadingLocator,
     RecordReadingLocator,
@@ -430,12 +431,9 @@ class DeltaRunnable(Protocol):
     def invoke(self, input: DeltaState, config: RunnableConfig) -> object: ...
 
 
-class DeltaBuilder(Protocol):
-    def add_node(
-        self, name: str, action: Callable[[DeltaState], dict[str, list[BaseMessage]]]
-    ) -> object: ...
-    def add_edge(self, start_key: str, end_key: str) -> object: ...
-    def compile(self, *, checkpointer: PostgresSaver) -> DeltaRunnable: ...
+type DeltaBuilder = NodeGraphBuilder[
+    Callable[[DeltaState], dict[str, list[BaseMessage]]], DeltaRunnable
+]
 
 
 def test_reading_source_reconstructs_a_real_delta_channel_checkpoint(

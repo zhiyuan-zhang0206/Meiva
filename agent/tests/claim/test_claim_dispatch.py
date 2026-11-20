@@ -16,8 +16,8 @@ from agent.graph.claim.tests.cursor_fixture import fresh_snapshot_cursor as fres
 from agent.state import AgentState
 from agent.tests.claim.claim_status_support import committed_publishes, first_int, set_agent_status
 from agent.tests.claim.claim_status_support import running_agent as running_agent
-from agent.tests.command_update import command_update, update_messages
 from base.agents.inbox.insert import insert_inbound_message
+from base.agents.tests.langgraph_views import command_update, update_messages
 from base.agents.tests.units import spawn_agent
 from base.cluster.machine import MachineIdentityReader
 from base.cluster.machine.tests.identity import machine_identity as machine_identity

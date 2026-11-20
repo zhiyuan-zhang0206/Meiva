@@ -13,7 +13,6 @@ from agent.graph.exec.node import exec_node_impl
 from agent.graph.exec.process import SubprocessExecProcess
 from agent.graph.exec.tests.process_inputs import live_parent_facts
 from agent.state import AttachEntry, AttachState, BaseAgentState
-from agent.tests.command_update import command_update, update_messages
 from agent.tests.test_state_slot import (
     ai_message_with_code,
     make_runtime_and_config,
@@ -22,6 +21,7 @@ from agent.tests.test_state_slot import (
 from agent.tests.test_state_slot import (
     reset_state_slot as reset_state_slot,
 )
+from base.agents.tests.langgraph_views import command_update, update_messages
 from base.db.code_version_gate import ProcessDbGate
 from base.host.boundary.json_values import is_object_dict
 from meiva.sdk_surface import process_context

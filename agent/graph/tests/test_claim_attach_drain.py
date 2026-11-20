@@ -15,11 +15,11 @@ from agent.graph._attach_drain import build_attach_drain
 from agent.graph._attach_merge import merge_attachments
 from agent.graph.claim.node import claim_node_impl
 from agent.graph.llm.tests.llm_support import sink_publisher
-from agent.graph.tests.node_output import update_of
 from agent.nodes import CLAIM
 from agent.state import AttachEntry, AttachState, BaseAgentState
 from base.agents.context import MeivaContext
 from base.agents.messages.kwargs import MeivaMsgType
+from base.agents.tests.langgraph_views import command_update
 from base.agents.tests.units import spawn_agent
 from base.clock import SYSTEM_TIMERS, Clock
 from base.clock.tests.seeded_rng import seeded_rng
@@ -146,7 +146,7 @@ async def test_claim_drains_before_turn_boundary_wait(
     command = await claim_node_impl(state, runtime, config)
 
     assert command.goto == CLAIM
-    assert update_of(command)["attach"] == AttachState()
+    assert command_update(command)["attach"] == AttachState()
 
 
 async def test_claim_does_not_drain_mid_turn(
@@ -180,7 +180,7 @@ async def test_claim_does_not_drain_mid_turn(
     command = await claim_node_impl(state, runtime, config)
 
     assert command.goto == "before_turn"
-    assert "attach" not in update_of(command)
+    assert "attach" not in command_update(command)
 
 
 def test_merge_preserves_order_and_last_label_wins(tmp_path: Path) -> None:

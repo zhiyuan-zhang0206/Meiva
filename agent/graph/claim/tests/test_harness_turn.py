@@ -16,7 +16,7 @@ from agent.graph.claim.harness_interrupt import interrupt_engine
 from agent.graph.claim.harness_render import pending_messages, render_messages
 from agent.graph.claim.harness_turn import harness_turn_node
 from agent.graph.claim.lost_turn import report_lost_turn
-from agent.graph.claim.tests.claim_support import scalar, scalar_int, timeline_items, update_of
+from agent.graph.claim.tests.claim_support import scalar, scalar_int, timeline_items
 from agent.graph.claim.tests.harness_support import (
     FakeEngine,
     RuntimeFixture,
@@ -34,6 +34,7 @@ from agent.state import AgentState
 from base.agents.context import MeivaContext
 from base.agents.history.timeline_item import TimelineItem
 from base.agents.history.transcript_timeline.items import format_tool_use
+from base.agents.tests.langgraph_views import command_update
 from base.agents.tests.units import spawn_agent
 from base.api_contracts.agent_contract import Harness
 from base.cluster.machine import MachineIdentityReader
@@ -109,7 +110,7 @@ async def test_a_turn_submits_the_pending_messages_and_commits_the_reply(
         state, harness_runtime(engine, agent_id=agent_id), config(agent_id)
     )
     assert command.goto == "claim"
-    update = update_of(command)
+    update = command_update(command)
     [(prompt, key)] = engine.submitted
     assert prompt == "do it"
     assert key == "inbound-7"
@@ -165,7 +166,7 @@ async def test_an_unpriceable_usage_keeps_the_reply_and_reports_the_gap(
     command = await harness_turn_node(
         state, harness_runtime(engine, agent_id=agent_id), config(agent_id)
     )
-    update = update_of(command)
+    update = command_update(command)
     assert update["harness_inputs"] == []
     assert update["halted"] is True
     warned = loguru_records.events("harness_usage_log_failed")
@@ -572,7 +573,7 @@ async def test_terminate_interrupt_preserves_projected_tool_call_messages(
     [(prompt, key)] = engine.submitted
     assert prompt == "[Heartbeat]: check in"
     assert key == "window-4"
-    assert update_of(command) == {"halted": True, "harness_inputs": [], "harness_view": []}
+    assert command_update(command) == {"halted": True, "harness_inputs": [], "harness_view": []}
 
 
 def test_report_lost_turn_logs_turn_fault_lost_inbound(loguru_records: LogRecords) -> None:
@@ -622,7 +623,7 @@ async def test_an_own_terminate_ends_an_invocation_whose_turn_cannot_finish(
         db_conn.commit()
         command = await node
     assert command.goto == "claim"
-    assert update_of(command)["halted"] is True
+    assert command_update(command)["halted"] is True
     row = db_conn.execute(
         "SELECT status FROM inbound_messages WHERE id=%s", (terminate,)
     ).fetchone()

@@ -13,9 +13,10 @@ from psycopg_pool import AsyncConnectionPool
 from agent.graph.interrupt.tests.queued_commands import queue_command
 from agent.graph.llm.node import llm_node
 from agent.graph.llm.tests.llm_support import ScriptedModel, sink_publisher
-from agent.graph.tests.node_output import messages_of, typed_events, update_of
+from agent.graph.tests.node_output import messages_of, typed_events
 from agent.graph.tests.test_llm_helpers import make_runtime
 from agent.state import AgentState
+from base.agents.tests.langgraph_views import command_update
 from base.db import create_agent
 from base.db.code_version_gate import ProcessDbGate
 from base.events.live.projection import Cancelled, Event
@@ -87,7 +88,7 @@ async def test_llm_node_cancel_event_race_discards_partial(
 
     assert isinstance(result, Command)
     assert result.goto == "claim"
-    update = update_of(result)
+    update = command_update(result)
     assert update["halted"] is True
     # Clean discard: no partial AIMessage, no marker
     assert update.get("messages", []) == []
@@ -195,7 +196,7 @@ async def test_llm_node_cancel_event_race_discards_partial_tool_call(
 
     assert isinstance(result, Command)
     assert result.goto == "claim"
-    update = update_of(result)
+    update = command_update(result)
     assert update["halted"] is True
     # Entirely discarded: neither partial AIMessage nor supplemental tool_result
     assert update.get("messages", []) == []
@@ -238,7 +239,7 @@ async def test_llm_node_cancel_event_race_no_partial_returns_halted(
 
     assert isinstance(result, Command)
     assert result.goto == "claim"
-    update = update_of(result)
+    update = command_update(result)
     assert update["halted"] is True
     assert update.get("messages", []) == []
 

@@ -14,6 +14,7 @@ from langgraph.graph import END, START
 from langgraph.types import Overwrite
 
 from agent.state import AgentState, SkillRecallState
+from base.agents.tests.langgraph_views import NodeGraphBuilder
 from base.host.boundary.json_values import is_object_list
 from base.host.boundary.untyped import object_of
 
@@ -26,12 +27,7 @@ class Compiled(Protocol):
     async def ainvoke(self, input: AgentState, /) -> object: ...
 
 
-class ChainBuilder(Protocol):
-    def add_node(self, node: str, action: ChainNode, /) -> object: ...
-
-    def add_edge(self, start_key: str, end_key: str, /) -> object: ...
-
-    def compile(self) -> Compiled: ...
+type ChainBuilder = NodeGraphBuilder[ChainNode, Compiled]
 
 
 async def run_chain(

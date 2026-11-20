@@ -21,7 +21,6 @@ from agent.graph.hooks.compact import (
 from agent.hooks import Hook
 from agent.messages import InboundTimes, inbound_message
 from agent.state import AgentState, CompactState, ContextReset
-from agent.tests.command_update import command_update
 from agent.tests.test_compact import (
     COMPACT_SECTIONS,
     LONG_SUMMARY,
@@ -38,6 +37,7 @@ from agent.tests.test_compact import (
 from agent.tests.test_compact import meiva_compact_loaded as meiva_compact_loaded
 from base.agents.context import MeivaContext
 from base.agents.messages.timestamp_policy import TimestampPolicy
+from base.agents.tests.langgraph_views import command_update
 from base.agents.tests.units import spawn_agent
 from base.clock import SYSTEM_TIMERS, Clock
 from base.clock.tests.seeded_rng import seeded_rng
