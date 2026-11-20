@@ -3,8 +3,8 @@
 from __future__ import annotations
 
 import time
+from collections.abc import Mapping
 from dataclasses import asdict
-from typing import Any
 
 import pytest
 from langchain_core.messages import AIMessageChunk, HumanMessage
@@ -14,8 +14,10 @@ from agent.graph.llm._backoff import Attempt
 from agent.graph.llm._stream import consume_llm
 from agent.graph.llm.node import llm_attempt
 from agent.graph.llm.tests.llm_support import (
+    NodeCommand,
     ScriptedModel,
     StubHandler,
+    command_messages,
     end_turn_chunk,
     llm_runtime,
 )
@@ -33,8 +35,11 @@ _STATE = AgentState(messages=[HumanMessage(content="hi")], halted=False)
 
 
 async def _one_try(
-    model: ScriptedModel, pins: dict[str, Any], model_catalog: ModelCatalog, gate: ProcessDbGate
-) -> Any:
+    model: ScriptedModel,
+    pins: Mapping[str, object],
+    model_catalog: ModelCatalog,
+    gate: ProcessDbGate,
+) -> NodeCommand:
     runtime = llm_runtime(model, model_catalog=model_catalog, database_gate=gate, pins=pins)
     return await llm_attempt(_STATE, runtime, _CONFIG, Attempt(1, time.time()))
 
@@ -81,7 +86,7 @@ async def test_normal_stream_completes_no_stall_timeout(
 
     result = await _one_try(model, pins, model_catalog, database_gate)
 
-    assert result.update["messages"][0].content == "ok"
+    assert command_messages(result)[0].content == "ok"
 
 
 # meiva:note

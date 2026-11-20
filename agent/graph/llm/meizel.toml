@@ -4,7 +4,7 @@ exports = ["goto.py", "node.py", "tests"]
 "_cancel.py" = ["goto.py"]
 "_retry.py" = ["_backoff.py"]
 "node.py" = ["_backoff.py", "_cancel.py", "_retry.py", "_stream.py", "goto.py"]
-"tests" = ["_backoff.py", "_retry.py", "_stream.py", "node.py"]
+"tests" = ["_backoff.py", "_retry.py", "_stream.py", "goto.py", "node.py"]
 
 [purity]
 "__init__.py" = "strict"

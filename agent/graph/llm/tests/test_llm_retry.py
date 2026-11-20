@@ -5,7 +5,6 @@ from __future__ import annotations
 import asyncio
 import random
 from dataclasses import replace
-from typing import Any
 
 import httpx2
 import openai
@@ -18,7 +17,13 @@ from agent.graph.hooks.compact import CompactionFailedError
 from agent.graph.llm import node
 from agent.graph.llm._backoff import WAIT_JITTER_SPAN_S
 from agent.graph.llm._retry import record_remaining, retry_policy, retry_wait
-from agent.graph.llm.tests.llm_support import ScriptedModel, end_turn_chunk, llm_runtime
+from agent.graph.llm.tests.llm_support import (
+    NodeCommand,
+    ScriptedModel,
+    command_messages,
+    end_turn_chunk,
+    llm_runtime,
+)
 from agent.graph.llm_errors import (
     FatalLLMStreamError,
     FatalProviderError,
@@ -56,7 +61,7 @@ _QUICK = {
 }
 
 
-def _policy(agent_id: int = _ZERO_PHASE, **pins: Any):
+def _policy(agent_id: int = _ZERO_PHASE, **pins: object):
     agent = AgentSlices.resolve({"llm_model": _MODEL, **pins}, default_reader=defaults())
 
     return retry_policy(agent, build_model_catalog(home=meiva_home()), agent_id)
@@ -150,7 +155,7 @@ def test_the_model_caps_the_number_of_tries(model_catalog: ModelCatalog) -> None
         },
     )
 
-    def cap(model: str, **pins: Any) -> int:
+    def cap(model: str, **pins: object) -> int:
         agent = AgentSlices.resolve({"llm_model": model, **pins}, default_reader=defaults())
         return retry_policy(agent, catalog, 1).max_attempts
 
@@ -185,8 +190,8 @@ async def _node_run(
     database_gate: ProcessDbGate,
     thread: str = "1000",
     seed: int = 0,
-    **pins: Any,
-) -> Any:
+    **pins: object,
+) -> NodeCommand:
     runtime = llm_runtime(
         model, model_catalog=model_catalog, database_gate=database_gate, pins={**_QUICK, **pins}
     )
@@ -201,7 +206,7 @@ async def test_the_node_retries_a_transient_failure_and_returns_the_next_success
 
     result = await _node_run(model, model_catalog=model_catalog, database_gate=database_gate)
 
-    assert result.update["messages"][0].content == "recovered"
+    assert command_messages(result)[0].content == "recovered"
     assert model.scripts == []
     retries = loguru_records.events("llm_retry")
     assert [record["extra"]["outcome"] for record in retries] == ["succeeded"]
@@ -217,7 +222,7 @@ async def test_the_node_recovers_from_the_captured_openai_stream_overload(
     )
     model = ScriptedModel(scripts=[[error], [end_turn_chunk("recovered")]])
     result = await _node_run(model, model_catalog=model_catalog, database_gate=database_gate)
-    assert result.update["messages"][0].content == "recovered"
+    assert command_messages(result)[0].content == "recovered"
     assert model.scripts == []
 
 
@@ -229,20 +234,18 @@ async def test_the_node_draws_its_retry_jitter_from_the_generator_it_is_given(
     waits: list[float] = []
     for seed in (31, 43):
         model = ScriptedModel(scripts=[[ModelConnectionError("a")], [end_turn_chunk("ok")]])
-        mark = len(loguru_records)
+        mark = len(loguru_records.extras(message="Retrying the llm node"))
         await _node_run(
             model,
             model_catalog=model_catalog,
             database_gate=database_gate,
             seed=seed,
         )
-        retried = [
-            record["extra"]["wait"]
-            for record in loguru_records[mark:]
-            if record["message"].startswith("Retrying the llm node")
-        ]
+        retried = loguru_records.extras(message="Retrying the llm node")[mark:]
         assert len(retried) == 1
-        waits.append(retried[0])
+        wait = retried[0]["wait"]
+        assert isinstance(wait, float), wait
+        waits.append(wait)
 
     drawn = [_seeded(seed).uniform(0, WAIT_JITTER_SPAN_S) for seed in (31, 43)]
     assert waits[1] - waits[0] == pytest.approx(drawn[1] - drawn[0])

@@ -1,13 +1,18 @@
 from __future__ import annotations
 
 import random
-from typing import Any, cast
 
 import pytest
 from langchain_core.messages import AIMessage, AIMessageChunk, HumanMessage, ToolMessage
 
 from agent.graph.llm.node import llm_node
-from agent.graph.llm.tests.llm_support import ScriptedModel, end_turn_chunk, llm_runtime
+from agent.graph.llm.tests.llm_support import (
+    ScriptedModel,
+    command_messages,
+    command_update,
+    end_turn_chunk,
+    llm_runtime,
+)
 from agent.state import AgentState
 from base.db.code_version_gate import ProcessDbGate
 from base.lm.catalog import ModelCatalog
@@ -72,11 +77,9 @@ async def test_completion_after_tool_result_ends_without_forced_output(
         {"configurable": {"thread_id": "1"}},
         rng=random.Random(0),  # noqa: S311
     )
-    assert isinstance(result.update, dict)
-    update = cast(dict[str, Any], result.update)
     assert result.goto == "claim"
-    assert update["halted"] is True
-    messages: list[Any] = update["messages"]
+    assert command_update(result)["halted"] is True
+    messages = command_messages(result)
     assert len(messages) == 1
     final = messages[0]
     assert isinstance(final, AIMessage)
@@ -86,6 +89,5 @@ async def test_completion_after_tool_result_ends_without_forced_output(
     assert len(model.scripts) == 1
     assert not loguru_records.events("silent_idle")
     assert len(loguru_records.events("llm_usage")) == 1
-    halts = loguru_records.events("halt")
-    assert len(halts) == 1
-    assert halts[0]["level"].name == "INFO"
+    assert len(loguru_records.extras(event="halt")) == 1
+    assert len(loguru_records.extras(event="halt", level="INFO")) == 1
