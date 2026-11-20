@@ -1,7 +1,7 @@
 "use client";
 
 import { useQuery } from "@tanstack/react-query";
-import { ChevronLeft, ChevronRight } from "lucide-react";
+import { ChevronDown, ChevronLeft, ChevronRight } from "lucide-react";
 import { useTranslations } from "next-intl";
 import { useEffect, useRef, useState } from "react";
 
@@ -34,11 +34,10 @@ interface Root {
 }
 
 // meiva:note
-// How the address bar names a root: an agent's workspace by its number, the home directory as `~`,
-// and the machine's own root as `/`.
+// The address bar names a root by its real path: the workspace's directory, the home directory as
+// `~`, the machine's root as `/` (user ruling 2026-11-21: an agent number says nothing there).
 function rootLabel(root: Root): string {
-  if (root.kind === "workspace" && root.agent_id !== null) return `#${root.agent_id}`;
-  return root.kind === "home" ? "~" : "/";
+  return root.kind === "home" ? "~" : root.path;
 }
 
 // meiva:note
@@ -104,10 +103,11 @@ function FolderMenu({ agentId, start, onClose }: { agentId: number; start: Folde
 
 // meiva:note
 // The side panel's address bar (user rulings 2026-11-21). Its root is the workspace the file lies
-// in (`#63`), else the home directory (`~`), else the machine's root (`/`). Each segment drops down
-// its folder; clicking the bar's empty end turns it into a text field holding the path, where Enter
-// opens what was typed (a folder opens its drop-down, a file opens as a tab) and Escape gives up.
-// The full-page viewer shows the tree on the left instead.
+// in, else the home directory (`~`), else the machine's root (`/`), each shown by its path. As in a
+// file manager, each `›` drops down the folder to its left (the last one, the file's neighbours);
+// clicking the bar's empty end turns it into a text field holding the path, where Enter opens what
+// was typed (a folder opens its drop-down, a file opens as a tab) and Escape gives up. The
+// full-page viewer shows the tree on the left instead.
 // meiva:link ui/web/src/docs/frontend-state/shared-context/shared-context.md
 export function PathBar({ agentId, documentModifiedAt }: { agentId: number; documentModifiedAt: string | null | undefined }) {
   const t = useTranslations("toUser");
@@ -124,8 +124,8 @@ export function PathBar({ agentId, documentModifiedAt }: { agentId: number; docu
   const absolute = file.data?.path ?? null;
   // meiva:note
   // Until the gateway names the root (or when the path does not resolve), the bar roots the path as
-  // it was written: `~/…` at `~`, an absolute path at `/`, anything else in the owner's workspace.
-  const writtenRoot = requestPath.startsWith("~") ? "~" : requestPath.startsWith("/") ? "/" : `#${ownerAgentId}`;
+  // it was written: `~/…` at `~`, an absolute path at `/`, a workspace-relative one at no root.
+  const writtenRoot = requestPath.startsWith("~") ? "~" : requestPath.startsWith("/") ? "/" : null;
   const parts = root && absolute ? below(root, absolute) : requestPath.replace(/^~/, "").split("/").filter(Boolean);
   const folders = parts.slice(0, -1);
   const folderPath = (count: number) => (root ? `${root.path.replace(/\/$/, "")}/${folders.slice(0, count).join("/")}` : null);
@@ -202,29 +202,57 @@ export function PathBar({ agentId, documentModifiedAt }: { agentId: number; docu
     );
   }
 
-  return (
-    <div ref={barRef} data-testid="path-bar" className={cn(BAR_CLASS, "gap-0.5 font-mono text-[11px] text-muted-foreground", MIN_W_0)}>
-      <div className="relative shrink-0">
-        <button type="button" aria-haspopup="menu" aria-expanded={open?.at === 0} onClick={() => toggle(0, root?.path ?? null)} className={segment}>
-          {root ? rootLabel(root) : writtenRoot}
-        </button>
-        {open?.at === 0 ? <FolderMenu agentId={agentId} start={open.start} onClose={() => setOpen(null)} /> : null}
-      </div>
+  const menu = (at: number) => (open?.at === at ? <FolderMenu agentId={agentId} start={open.start} onClose={() => setOpen(null)} /> : null);
+  const dropDown = (at: number, path: string | null, name: string) => (
+    <span className="relative shrink-0">
+      <button
+        type="button"
+        aria-label={t("filesFolderContents", { name })}
+        aria-haspopup="menu"
+        aria-expanded={open?.at === at}
+        onClick={() => toggle(at, path)}
+        className={cn("rounded p-0.5 hover:bg-accent hover:text-foreground", open?.at === at ? "bg-accent text-foreground" : "opacity-60")}
+      >
+        {open?.at === at ? <ChevronDown aria-hidden className="size-3" /> : <ChevronRight aria-hidden className="size-3" />}
+      </button>
+      {menu(at)}
+    </span>
+  );
+  const rootName = root ? rootLabel(root) : writtenRoot;
+
+  const crumbs = (
+    <>
+      {rootName === null ? null : (
+        <>
+          <button type="button" dir="rtl" aria-haspopup="menu" aria-expanded={open?.at === 0} onClick={() => toggle(0, root?.path ?? null)} className={cn(segment, "max-w-56 shrink truncate", MIN_W_0)}>
+            <bdi>{rootName}</bdi>
+          </button>
+          {dropDown(0, root?.path ?? null, rootName)}
+        </>
+      )}
       {folders.map((name, index) => (
         // meiva:note
         // Folder segments give up width before the file name does: a deep path in a narrow panel
         // truncates its folders rather than overflowing the bar.
-        <div key={`${index}:${name}`} className={cn("relative items-center", MIN_W_0, FLEX)}>
-          <ChevronRight aria-hidden className="size-3 shrink-0 opacity-50" />
+        <div key={`${index}:${name}`} className={cn("items-center gap-0.5", MIN_W_0, FLEX)}>
           <button type="button" aria-haspopup="menu" aria-expanded={open?.at === index + 1} onClick={() => toggle(index + 1, folderPath(index + 1))} className={cn(segment, "min-w-[2ch] max-w-32 truncate")}>
             {name}
           </button>
-          {open?.at === index + 1 ? <FolderMenu agentId={agentId} start={open.start} onClose={() => setOpen(null)} /> : null}
+          {dropDown(index + 1, folderPath(index + 1), name)}
         </div>
       ))}
-      <ChevronRight aria-hidden className="size-3 shrink-0 opacity-50" />
       <span className={cn("shrink-0 truncate px-1 text-foreground", MIN_W_0)}>{parts[parts.length - 1]}</span>
       {shown?.lineRange ? <span data-testid="file-line-range-badge" className="shrink-0 rounded bg-primary/20 px-1.5 text-[10px] text-primary">#L{shown.lineRange}</span> : null}
+    </>
+  );
+
+  // meiva:note
+  // The path appears once the gateway has answered, so it is never drawn from what was asked and
+  // then redrawn from the real root. A long root keeps its end (`…/workspaces/63`) when the panel
+  // is narrow: it is laid out right to left, with the path itself isolated so it reads left to right.
+  return (
+    <div ref={barRef} data-testid="path-bar" className={cn(BAR_CLASS, "gap-0.5 font-mono text-[11px] text-muted-foreground", MIN_W_0)}>
+      {file.isPending ? null : crumbs}
       <button
         type="button"
         aria-label={t("filesEditPath")}

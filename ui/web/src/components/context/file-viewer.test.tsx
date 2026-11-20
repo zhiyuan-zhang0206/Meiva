@@ -77,12 +77,19 @@ describe("path bar", () => {
     store().openFile({ agentId: 7, path: "project/src/main.py" });
     renderWithBrowser(<PathBar agentId={7} documentModifiedAt={null} />, { wrapper: Wrapper });
     await waitFor(() => expect(screen.getByTestId("path-bar").textContent).toContain("2.0 KB"));
-    expect(screen.getByRole("button", { name: "#7" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "/w" })).toBeTruthy();
 
     fireEvent.click(screen.getByRole("button", { name: "project" }));
     fireEvent.click(await screen.findByRole("menuitem", { name: "src" }));
     fireEvent.click(await screen.findByRole("menuitem", { name: "util.py" }));
     expect(store().activeFile).toEqual({ agentId: 7, path: "/w/project/src/util.py" });
+    expect(screen.queryByTestId("path-menu")).toBeNull();
+
+    // meiva:note
+    // The `›` after a folder drops that folder down: the last one lists the file's neighbours.
+    fireEvent.click(await screen.findByRole("button", { name: "Contents of src" }));
+    expect(screen.getByRole("button", { name: "Contents of src" }).getAttribute("aria-expanded")).toBe("true");
+    fireEvent.click(await screen.findByRole("menuitem", { name: "util.py" }));
     expect(screen.queryByTestId("path-menu")).toBeNull();
   });
 
@@ -104,9 +111,8 @@ describe("path bar", () => {
     transport.getWorkspaceFile.mockRejectedValue(new Error("not found"));
     store().openFile({ agentId: 7, path: "~/missing/a.md" });
     renderWithBrowser(<PathBar agentId={7} documentModifiedAt={null} />, { wrapper: Wrapper });
-    await waitFor(() => expect(transport.getWorkspaceFile).toHaveBeenCalled());
     const bar = screen.getByTestId("path-bar");
-    expect([...bar.querySelectorAll("button[aria-haspopup]")].map((b) => b.textContent)).toEqual(["~", "missing"]);
+    await waitFor(() => expect([...bar.querySelectorAll("button[aria-haspopup]")].map((b) => b.textContent).filter(Boolean)).toEqual(["~", "missing"]));
   });
 
   // meiva:note
@@ -135,10 +141,10 @@ describe("path bar", () => {
     await waitFor(() => expect(store().activeFile).toEqual({ agentId: 7, path: "/etc/hosts" }));
   });
 
-  it("shows when the to-user document last changed on the document tab", () => {
+  it("shows when the to-user document last changed on the document tab", async () => {
     renderWithBrowser(<PathBar agentId={7} documentModifiedAt={new Date(Date.now() - 5 * 60_000).toISOString()} />, { wrapper: Wrapper });
     const bar = screen.getByTestId("path-bar");
-    expect(bar.textContent).toContain("to_user.md");
+    await waitFor(() => expect(bar.textContent).toContain("to_user.md"));
     expect(bar.textContent).toMatch(/Updated/);
   });
 });
