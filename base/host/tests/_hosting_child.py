@@ -18,7 +18,10 @@ import sys
 import time
 from pathlib import Path
 
+from base.host.atomic_io import SYSTEM_FS, AtomicWriter
 from base.host.proc import hosting_exec_domain
+
+_WRITER = AtomicWriter(SYSTEM_FS)
 
 
 def predicate() -> None:
@@ -68,15 +71,24 @@ def exit_with() -> None:
     sys.exit(int(sys.argv[3]))
 
 
+# meiva:note
+# The parent test polls `path.exists()` and then reads it. A plain `write_text` truncates the
+# file before it writes, so that poll can land between the two and read an empty file
+# (`int('')` -> ValueError, the 8152 flake). Writing a sibling and renaming it makes the
+# appearance of `path` and the arrival of its whole content one event.
+def report_pid(path: Path, pid: int, *, writer: AtomicWriter = _WRITER) -> None:
+    writer.write_text(path, str(pid), sync_file=False)
+
+
 def parent_long() -> None:
     child = subprocess.Popen([sys.executable, "base/host/tests/_hosting_child.py", "sleep"])
-    Path(sys.argv[2]).write_text(str(child.pid))
+    report_pid(Path(sys.argv[2]), child.pid)
     time.sleep(300.0)
 
 
 def parent_short() -> None:
     child = subprocess.Popen([sys.executable, "base/host/tests/_hosting_child.py", "noop"])
-    Path(sys.argv[2]).write_text(str(child.pid))
+    report_pid(Path(sys.argv[2]), child.pid)
     time.sleep(300.0)
 
 
