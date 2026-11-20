@@ -3,12 +3,12 @@
 import { ArrowLeft, ScanSearch } from "lucide-react";
 import { FLEX, FLEX_1, FLEX_COL, MIN_H_0, MIN_W_0 } from "@/lib/layout/layout";
 import { useTranslations } from "next-intl";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
 import { InspectorPanel } from "@/components/inspector/inspector-panel";
-import { FileTabs } from "./file-tabs";
 import { FileTree } from "./file-tree";
-import { QuickOpen } from "./quick-open";
+import { PanelBar } from "./panel-bar";
+import { PathBar } from "./path-bar";
 import { ToUserDocumentView } from "./to-user-document";
 import { WorkspaceFileView } from "./workspace-file-view";
 import { useWorkspaceFileStore } from "@/lib/context/workspace-file-store";
@@ -16,6 +16,11 @@ import type { useToUser } from "@/lib/context/use-to-user";
 import { useInspectorOpen } from "@/lib/inspector/inspector-panel-store";
 import { cn } from "@/lib/format/utils";
 
+// meiva:note
+// The right panel is a file viewer (user rulings 2026-11-20 / 2026-11-21): one bar of tabs and
+// controls aligned with the conversation's header, then the file picker — a path bar in the side
+// panel, a tree on the left once the viewer fills the page — then the file on show, or the
+// inspector while that mode is on.
 // meiva:link ui/web/src/docs/frontend-state/shared-context/shared-context.md
 export function SharedContextPanel({ agentId, document, mobile, onClose, onCollapse }: {
   agentId: number;
@@ -28,6 +33,7 @@ export function SharedContextPanel({ agentId, document, mobile, onClose, onColla
   const tInspector = useTranslations("inspector");
   const { open: inspecting, toggle: toggleInspector } = useInspectorOpen();
   const activeFile = useWorkspaceFileStore((s) => s.activeFile);
+  const maximized = useWorkspaceFileStore((s) => s.maximized) && !mobile;
   const isViewingFile = activeFile !== null && activeFile.agentId === agentId;
   const documentScroll = useRef<HTMLDivElement>(null);
   const readingPosition = useRef(0);
@@ -35,20 +41,13 @@ export function SharedContextPanel({ agentId, document, mobile, onClose, onColla
     if (!inspecting) readingPosition.current = documentScroll.current?.scrollTop ?? 0;
     toggleInspector();
   };
-  const resetReadingPosition = useCallback(() => {
-    readingPosition.current = 0;
-    if (documentScroll.current) documentScroll.current.scrollTop = 0;
-  }, []);
   useEffect(() => {
     if (!inspecting && documentScroll.current) documentScroll.current.scrollTop = readingPosition.current;
   }, [inspecting]);
-  const [quickOpen, setQuickOpen] = useState(false);
-  const [treeOpen, setTreeOpen] = useState(false);
   // meiva:note
   // The tree browses another agent's workspace only for the conversation that chose it.
   const [workspaceChoice, setWorkspaceChoice] = useState<{ conversation: number; workspace: number } | null>(null);
   const workspaceAgentId = workspaceChoice?.conversation === agentId ? workspaceChoice.workspace : agentId;
-  const setWorkspaceAgentId = (workspace: number) => setWorkspaceChoice({ conversation: agentId, workspace });
   return (
     <aside
       className={cn(
@@ -76,56 +75,40 @@ export function SharedContextPanel({ agentId, document, mobile, onClose, onColla
           <ScanSearch className="size-3.5" />
         </button>
       </header>}
-      {inspecting ? null : (
-        <FileTabs
-          agentId={agentId}
-          mobile={mobile}
-          treeOpen={treeOpen}
-          onToggleTree={() => setTreeOpen((open) => !open)}
-          onQuickOpen={() => setQuickOpen(true)}
-        />
-      )}
-      {quickOpen && !inspecting ? (
-        <QuickOpen agentId={agentId} workspaceAgentId={workspaceAgentId} onClose={() => setQuickOpen(false)} />
-      ) : null}
+      <PanelBar
+        agentId={agentId}
+        mobile={mobile}
+        inspecting={inspecting}
+        onInspect={mobile ? undefined : toggleInspection}
+        onCollapse={onCollapse}
+      />
+      {inspecting || maximized ? null : <PathBar agentId={agentId} documentModifiedAt={document.data?.modified_at} />}
       <div className={cn(MIN_H_0, FLEX_1, FLEX)}>
-      {treeOpen && !inspecting ? (
-        <FileTree agentId={agentId} workspaceAgentId={workspaceAgentId} onWorkspaceChange={setWorkspaceAgentId} />
-      ) : null}
-      <div className={cn(MIN_W_0, MIN_H_0, FLEX_1, FLEX, FLEX_COL)}>
-      {isViewingFile && !inspecting ? (
-        <WorkspaceFileView
-          key={`${agentId}:${activeFile.path}:${activeFile.lineRange ?? ""}`}
-          agentId={agentId}
-          target={activeFile}
-          mobile={mobile}
-          inspecting={inspecting}
-          onInspect={mobile ? undefined : toggleInspection}
-          onCollapse={onCollapse}
-        />
-      ) : (
-        <ToUserDocumentView
-          key={agentId}
-          agentId={agentId}
-          document={document.data}
-          failure={document.error}
-          pending={document.isFetching}
-          refresh={() => void document.refetch()}
-          mobile={mobile}
-          inspecting={inspecting}
-          bodyHidden={inspecting}
-          onNavigate={resetReadingPosition}
-          onInspect={mobile ? undefined : toggleInspection}
-          onCollapse={onCollapse}
-          viewportRef={documentScroll}
-        />
-      )}
-      {inspecting && (
-        <div data-testid="shared-inspector" className={cn(MIN_H_0, FLEX_1, FLEX)}>
-          <InspectorPanel agentId={agentId} />
+        {maximized && !inspecting ? (
+          <FileTree
+            agentId={agentId}
+            workspaceAgentId={workspaceAgentId}
+            onWorkspaceChange={(workspace) => setWorkspaceChoice({ conversation: agentId, workspace })}
+          />
+        ) : null}
+        <div className={cn(MIN_W_0, MIN_H_0, FLEX_1, FLEX, FLEX_COL)}>
+          {inspecting ? (
+            <div data-testid="shared-inspector" className={cn(MIN_H_0, FLEX_1, FLEX)}>
+              <InspectorPanel agentId={agentId} />
+            </div>
+          ) : isViewingFile ? (
+            <WorkspaceFileView key={`${agentId}:${activeFile.path}:${activeFile.lineRange ?? ""}`} agentId={agentId} target={activeFile} />
+          ) : (
+            <ToUserDocumentView
+              key={agentId}
+              agentId={agentId}
+              document={document.data}
+              failure={document.error}
+              pending={document.isFetching}
+              viewportRef={documentScroll}
+            />
+          )}
         </div>
-      )}
-      </div>
       </div>
     </aside>
   );

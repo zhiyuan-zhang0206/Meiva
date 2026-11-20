@@ -1,8 +1,7 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { act, cleanup, fireEvent, screen, within } from "@testing-library/react";
+import { cleanup, fireEvent, screen } from "@testing-library/react";
 import { renderWithBrowser } from "@/test-support/render";
 import { afterEach, beforeAll, describe, expect, it, vi, beforeEach } from "vitest";
-import type { FakeBrowser } from "@/lib/browser/testing";
 import { fakeBrowser } from "@/lib/browser/testing";
 import type { ToUserDocument } from "@/lib/contracts/types";
 import { ApiError } from "@/lib/transport/api";
@@ -10,10 +9,9 @@ import { WallClockProvider } from "@/lib/transport/transport-context";
 
 import { preloadChatMarkdown } from "@/components/content/markdown";
 import { useWorkspaceFileStore } from "@/lib/context/workspace-file-store";
-import { BAR_DIVIDER_CLASS, BAR_MIN_HEIGHT_CLASS } from "@/lib/layout/layout";
 import { ToUserDocumentView } from "./to-user-document";
 
-import { resetTransport, transport } from "@/test-support/fake-api";
+import { resetTransport } from "@/test-support/fake-api";
 beforeEach(() => {
   resetTransport();
 });
@@ -23,9 +21,9 @@ beforeAll(async () => {
 });
 
 // meiva:note
-// The file names the panel puts in the address bar: the workspace-relative path of the linked
-// document, and the absolute path of a file outside the workspace.
-// meiva:link ui/web/src/docs/frontend-state/navigation-history.md
+// The files the document links to: a workspace-relative Markdown document and image, and a file
+// outside the workspace by its absolute path. Each opens as a tab of the panel.
+// meiva:link ui/web/src/docs/frontend-state/shared-context/shared-context.md
 const plot = "reports/plot.png";
 const details = "reports/details.md";
 const report = "/tmp/file.pdf";
@@ -38,56 +36,22 @@ function document(content: string, modifiedAt: string | null = null): ToUserDocu
 }
 const HOME = "http://fake.local/?agent_id=7";
 
-function show(
-  value: ToUserDocument,
-  { mobile = false, linked, onInspect, onCollapse, onNavigate, inspecting = false, browser = fakeBrowser({ href: HOME }) }: { mobile?: boolean; linked?: ToUserDocument | Error; onInspect?: () => void; onCollapse?: () => void; onNavigate?: () => void; inspecting?: boolean; browser?: FakeBrowser } = {},
-) {
+function show(value: ToUserDocument, { failure = null }: { failure?: unknown } = {}) {
   const qc = new QueryClient({ defaultOptions: { queries: { retry: false, staleTime: Infinity } } });
-  if (linked !== undefined) {
-    if (!(linked instanceof Error)) qc.setQueryData(["to-user", 7, details], linked);
-    transport.getToUser.mockImplementation(() =>
-      linked instanceof Error ? Promise.reject(linked) : Promise.resolve(linked),
-    );
-  } else {
-    transport.getToUser.mockImplementation(() => new Promise(() => undefined));
-  }
-  // meiva:note
-  // The status bar ages the document on the page's clock; the real one keeps these asserts (the
-  // presence of the "updated" label) as they were.
   return renderWithBrowser(
     <WallClockProvider wallNow={() => Date.now()}>
       <QueryClientProvider client={qc}>
-        <ToUserDocumentView
-          agentId={7}
-          document={value}
-          failure={null}
-          pending={false}
-          refresh={vi.fn()}
-          mobile={mobile}
-          inspecting={inspecting}
-          onInspect={onInspect}
-          onCollapse={onCollapse}
-          onNavigate={onNavigate}
-        />
+        <ToUserDocumentView agentId={7} document={value} failure={failure} pending={false} />
       </QueryClientProvider>
     </WallClockProvider>,
-    { browser },
+    { browser: fakeBrowser({ href: HOME }) },
   );
-}
-
-function chain(browser: FakeBrowser): string[] {
-  const where = browser.navigation.location();
-  if (where === null) throw new Error("the fake page always has an address");
-  return new URL(where.href).searchParams.getAll("file");
-}
-
-function travel(browser: FakeBrowser, to: string): void {
-  act(() => browser.traverse(to));
 }
 
 afterEach(() => {
   cleanup();
   vi.clearAllMocks();
+  useWorkspaceFileStore.setState({ activeFile: null, tabs: {}, recent: [], navigator: null });
 });
 
 describe("To user Markdown", () => {
@@ -112,176 +76,31 @@ describe("To user Markdown", () => {
     expect(screen.getByRole("img", { name: "raw plot" }).getAttribute("src")).toContain(`/api/agents/7/to-user/resource?file=${plot}&v=asset-v1`);
   });
   it("keeps modifier clicks as ordinary resource downloads", () => {
-    const { browser } = show(document("[Details](details.md)"));
+    show(document("[Details](details.md)"));
     const link = screen.getByRole("link", { name: "Details" });
     link.addEventListener("click", (event) => event.preventDefault());
     fireEvent.click(link, { ctrlKey: true });
-    expect(chain(browser)).toEqual([]);
-    expect(transport.getToUser).not.toHaveBeenCalled();
+    expect(useWorkspaceFileStore.getState().activeFile).toBeNull();
   });
-  it("opens non-markdown registered file links in the workspace file viewer", () => {
-    useWorkspaceFileStore.getState().closeFile();
-    show(document("[report](file:///tmp/file.pdf)"));
+  // meiva:note
+  // Every linked file opens as a tab, a Markdown document included (user ruling 2026-11-21: the
+  // panel's home is its first tab, so the document keeps no chain of its own).
+  it("opens a linked Markdown document and any other linked file as a tab", () => {
+    show(document("[Details](details.md)\n\n[report](file:///tmp/file.pdf)"));
+    fireEvent.click(screen.getByRole("link", { name: "Details" }));
+    expect(useWorkspaceFileStore.getState().activeFile).toEqual({ agentId: 7, path: details, lineRange: undefined });
     fireEvent.click(screen.getByRole("link", { name: "report" }));
-    expect(useWorkspaceFileStore.getState().activeFile).toEqual({
-      agentId: 7,
-      path: report,
-      lineRange: undefined,
-    });
+    expect(useWorkspaceFileStore.getState().activeFile).toEqual({ agentId: 7, path: report, lineRange: undefined });
+    expect(useWorkspaceFileStore.getState().tabs[7].map((tab) => tab.path)).toEqual([details, report]);
   });
-  it("draws the panel title rule on the shared column title bar", () => {
+  it("is only the reading area: no bar, home, back or refresh of its own", () => {
     show(document("body"));
-    const tokens = screen.getByTestId("document-bar").className.split(/\s+/);
-    expect(tokens).toEqual(expect.arrayContaining(["relative", BAR_MIN_HEIGHT_CLASS]));
-    expect(tokens).toEqual(expect.arrayContaining(BAR_DIVIDER_CLASS.split(" ")));
-    expect(tokens).not.toContain("border-b");
+    expect(screen.queryByTestId("document-bar")).toBeNull();
+    for (const name of ["Home", "Back", "Refresh"]) expect(screen.queryByRole("button", { name })).toBeNull();
   });
   it("shows migration guidance when only a legacy HTML document remains", () => {
     show({ content: null, version: null, modified_at: null, legacy_html: true });
     expect(screen.getByText("Awaiting Markdown.")).toBeTruthy();
-  });
-});
-
-describe("To user navigation history", () => {
-  const root = () => document("[Details](details.md)");
-  const nested = () => document("# Nested document");
-
-  it("puts the opened document in the URL and follows Back and Forward to it", () => {
-    const onNavigate = vi.fn();
-    const { browser } = show(root(), { linked: nested(), onNavigate });
-    expect(onNavigate).toHaveBeenCalledTimes(1);
-    fireEvent.click(screen.getByRole("link", { name: "Details" }));
-    expect(onNavigate).toHaveBeenCalledTimes(2);
-    expect(chain(browser)).toEqual([details]);
-    expect(screen.getByRole("heading", { name: "Nested document" })).toBeTruthy();
-
-    travel(browser, "http://fake.local/?agent_id=7");
-    expect(onNavigate).toHaveBeenCalledTimes(3);
-    expect(chain(browser)).toEqual([]);
-    expect(screen.getByRole("link", { name: "Details" })).toBeTruthy();
-
-    travel(browser, `http://fake.local/?agent_id=7&file=${details}`);
-    expect(onNavigate).toHaveBeenCalledTimes(4);
-    expect(chain(browser)).toEqual([details]);
-    expect(screen.getByRole("heading", { name: "Nested document" })).toBeTruthy();
-  });
-
-  // meiva:note
-  // Why the chain carries file names: the address bar says which file is open, so the reader can
-  // trust and edit the link instead of looking at a digest (user 2026-11-07).
-  // meiva:link ui/web/src/docs/frontend-state/navigation-history.md
-  it("names the open file in the address bar", () => {
-    const { browser } = show(root(), { linked: nested() });
-    fireEvent.click(screen.getByRole("link", { name: "Details" }));
-    expect(browser.navigation.location()?.href).toBe("http://fake.local/?agent_id=7&file=reports/details.md");
-  });
-
-  it("restores a shared link's chain but not a chain left by another agent", () => {
-    const shared = fakeBrowser({ href: `http://fake.local/?agent_id=7&file=${details}` });
-    show(root(), { linked: nested(), browser: shared });
-    expect(screen.getByRole("heading", { name: "Nested document" })).toBeTruthy();
-
-    travel(shared, `http://fake.local/?agent_id=8&file=${details}`);
-    expect(screen.queryByRole("heading", { name: "Nested document" })).toBeNull();
-  });
-
-  // meiva:note
-  // A link shared before 2026-11-07 carries the digest chain; it still opens the document it names,
-  // and the panel's own navigation writes the readable parameter back into the entry.
-  // meiva:link ui/web/src/docs/frontend-state/navigation-history.md
-  it("still opens a link that carries the old digest chain", async () => {
-    const legacy = `http://fake.local/?agent_id=7&reference=${"a".repeat(64)}`;
-    const { browser } = show(root(), { linked: nested(), browser: fakeBrowser({ href: legacy }) });
-    expect(await screen.findByRole("heading", { name: "Nested document" })).toBeTruthy();
-    fireEvent.click(screen.getByRole("button", { name: "Home" }));
-    expect(browser.navigation.location()?.href).toBe("http://fake.local/?agent_id=7");
-  });
-
-  it("walks browser history from the panel's back control, falling back to the parent", () => {
-    const { browser } = show(root(), { linked: nested() });
-    fireEvent.click(screen.getByRole("link", { name: "Details" }));
-    fireEvent.click(screen.getByRole("button", { name: "Back" }));
-    expect(browser.actions.backs).toBe(1);
-
-    cleanup();
-    const deep = fakeBrowser({ href: `http://fake.local/?agent_id=7&file=${details}` });
-    show(root(), { linked: nested(), browser: deep });
-    fireEvent.click(screen.getByRole("button", { name: "Back" }));
-    expect(deep.actions.backs).toBe(0);
-    expect(chain(deep)).toEqual([]);
-    expect(screen.getByRole("link", { name: "Details" })).toBeTruthy();
-  });
-});
-
-describe("To user document bar", () => {
-  it("orders the bar as shared context, then the update time with refresh, with the inspector alone at the right", () => {
-    show(document("# Status", "2026-10-17T06:00:00Z"), { onInspect: vi.fn() });
-    const status = screen.getByTestId("document-status");
-    const bar = screen.getByTestId("document-bar");
-    expect(bar.firstElementChild?.getAttribute("aria-label")).toBe("Home");
-    expect(screen.getByText("Shared context").nextElementSibling).toBe(status);
-    expect(within(status).getByText(/^Updated /)).toBeTruthy();
-    expect(within(status).getByRole("button", { name: "Refresh" })).toBeTruthy();
-    const trigger = screen.getByTestId("open-inspector");
-    expect(trigger.parentElement?.className).toContain("ml-auto");
-    expect(bar.lastElementChild).toBe(trigger.parentElement);
-  });
-
-  it("names the mode in the bar and turns the magnifier into its exit", () => {
-    // meiva:note
-    // Inspector is a mode: while it is on, the bar says what the panel is
-    // showing and the same button that entered it is the way out (user
-    // 2026-10-20), instead of a second close control inside the panel.
-    // meiva:link ui/web/src/docs/frontend-state/shared-context/shared-context.md
-    show(document("# Status"), { onInspect: vi.fn(), inspecting: true });
-    expect(screen.getByText("Inspector")).toBeTruthy();
-    expect(screen.queryByText("Shared context")).toBeNull();
-    const trigger = screen.getByTestId("open-inspector");
-    expect(trigger.getAttribute("aria-pressed")).toBe("true");
-    expect(trigger.getAttribute("aria-label")).toBe("Close inspector");
-  });
-
-  it("leaves only the mode's own controls in the bar while the inspector is on", () => {
-    // meiva:note
-    // The bar is the inspector mode's one control surface: the document's own
-    // navigation (home, back) and its refresh read the document body the mode
-    // hides, so they leave with it (user 2026-10-20).
-    // meiva:link ui/web/src/docs/frontend-state/shared-context/shared-context.md
-    show(document("# Status", "2026-10-17T06:00:00Z"), {
-      onInspect: vi.fn(),
-      onCollapse: vi.fn(),
-      inspecting: true,
-    });
-    expect(screen.queryByRole("button", { name: "home" })).toBeNull();
-    expect(screen.queryByRole("button", { name: "refresh" })).toBeNull();
-    expect(screen.queryByTestId("document-status")).toBeNull();
-    expect(screen.getByTestId("open-inspector")).toBeTruthy();
-    expect(screen.getByTestId("context-panel-collapse")).toBeTruthy();
-  });
-
-  it("marks the inspector toggle with a selected background and gives it no hover wash", () => {
-    // meiva:note
-    // bg-accent is 97% lightness in the light theme — a pressed state painted
-    // with it reads as unpressed (user 2026-10-20). Hovering the toggle changes
-    // nothing at all: the pointer cursor is the only hover feedback (user
-    // 2026-10-21).
-    // meiva:link ui/web/src/components/context/to-user-document.tsx
-    show(document("hello"), { onInspect: vi.fn(), inspecting: true });
-    const classes = screen.getByTestId("open-inspector").className.split(/\s+/);
-    expect(classes).toContain("bg-foreground/20");
-    expect(classes.filter((name) => name.startsWith("hover:bg-"))).toEqual([]);
-  });
-
-  it("leaves the idle inspector toggle without a hover wash too", () => {
-    show(document("hello"), { onInspect: vi.fn() });
-    const classes = screen.getByTestId("open-inspector").className.split(/\s+/);
-    expect(classes.filter((name) => name.startsWith("hover:bg-"))).toEqual([]);
-  });
-
-  it("labels the document section in the mobile reading view", () => {
-    show(document("# Status"), { mobile: true });
-    expect(within(screen.getByTestId("document-bar")).getByText("Shared context")).toBeTruthy();
-    expect(screen.getByTestId("document-status")).toBeTruthy();
   });
 });
 
@@ -295,60 +114,22 @@ it("opens a document image at full size and closes it on Escape", async () => {
   expect(screen.queryByTestId("image-lightbox")).toBeNull();
 });
 
-it("offers the inspector trigger only when the panel wires it, and reports presses", () => {
-  const onInspect = vi.fn();
-  const view = show(document("hello"));
-  expect(screen.queryByTestId("open-inspector")).toBeNull();
-  view.unmount();
-
-  show(document("hello"), { onInspect });
-  fireEvent.click(screen.getByTestId("open-inspector"));
-  expect(onInspect).toHaveBeenCalledOnce();
-});
-
-describe("shared-context column collapse", () => {
-  it("closes the column from its own bar when the host offers it", () => {
-    const onCollapse = vi.fn();
-    show(document("hello"), { onCollapse });
-    fireEvent.click(screen.getByTestId("context-panel-collapse"));
-    expect(onCollapse).toHaveBeenCalledTimes(1);
-  });
-
-  it("renders no collapse control without the host callback or on mobile", () => {
-    show(document("hello"));
-    expect(screen.queryByTestId("context-panel-collapse")).toBeNull();
-    cleanup();
-    show(document("hello"), { onCollapse: vi.fn(), mobile: true });
-    expect(screen.queryByTestId("context-panel-collapse")).toBeNull();
-  });
-});
-
 describe("To user refusals", () => {
   // meiva:note
-  // One test, two classes: a refusal the server called permanent reads differently from
-  // one it called temporary, and only the permanent one hands over the file itself — the
-  // copy follows the response's code, never the status (user 2026-10-28).
+  // A refusal the server called permanent reads differently from one it called temporary: the copy
+  // follows the response's code, never the status (user 2026-10-28).
   // meiva:link ui/web/src/docs/frontend-state/shared-context/shared-context.md
-  it("tells a permanent refusal from one worth retrying, and hands over the file", async () => {
-    show(document("[Details](details.md)"), {
-      linked: new ApiError(413, "too large", { code: "to_user_document_too_large", retryable: false }),
+  it("tells a permanent refusal from one worth retrying", () => {
+    show({ content: null, version: null, modified_at: null, legacy_html: false }, {
+      failure: new ApiError(413, "too large", { code: "to_user_document_too_large", retryable: false }),
     });
-    fireEvent.click(screen.getByRole("link", { name: "Details" }));
-    const refused = (await screen.findByTestId("document-failure")).textContent;
-    expect(refused).toContain("too large to show here");
-    expect(screen.getByRole("link", { name: "Open the file itself" }).getAttribute("href")).toContain(
-      `/api/agents/7/to-user/resource?file=${details}`,
-    );
-
+    expect(screen.getByTestId("document-failure").textContent).toContain("too large to show here");
     cleanup();
-    window.history.replaceState(null, "", "/?agent_id=7");
-    show(document("[Details](details.md)"), {
-      linked: new ApiError(503, "unavailable", { code: "http_503", retryable: true }),
+    show({ content: null, version: null, modified_at: null, legacy_html: false }, {
+      failure: new ApiError(503, "unavailable", { code: "http_503", retryable: true }),
     });
-    fireEvent.click(screen.getByRole("link", { name: "Details" }));
-    const retryable = (await screen.findByTestId("document-failure")).textContent;
+    const retryable = screen.getByTestId("document-failure").textContent;
     expect(retryable).toContain("unavailable");
     expect(retryable).not.toContain("too large to show here");
-    expect(screen.queryByRole("link", { name: "Open the file itself" })).toBeNull();
   });
 });

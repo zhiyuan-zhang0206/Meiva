@@ -68,23 +68,28 @@ and videos; HTML and HTM open as source code, and other binary files offer downl
 Each file the viewer opens is a browser history entry, so Back and Forward move
 between viewed files ([panel navigation history](../navigation-history.md)).
 
-The panel is a tabbed file viewer (user ruling 2026-11-20; decision record
+The panel is a file viewer (user rulings 2026-11-20 and 2026-11-21; decision record
 `docs/decisions/frontend/documents/2026-11-21-shared-context-file-viewer.md`):
 
-- **Tabs.** The conversation's to-user document is the first, permanent tab ("Shared context").
-  Every file opened in the conversation becomes a closable tab, and the tab list lives for the
-  browser tab's lifetime.
-- **Quick open** (search button):
-  - with nothing typed, it lists recently opened files;
-  - typed text searches file names in the workspace the tree shows (`/files/search`);
-  - typed text that reads as a path opens as is.
-- **File tree** (folder button). It lists the conversation's workspace (`/files/list`, each folder
-  read when first opened). Typing another agent's number browses that agent's workspace, with the
-  read access links already have.
-- **Fill the page.** The viewer can take the conversation's place on desktop; the sidebar stays.
-- **What renders in place:** Markdown, images, video, audio, PDF (the browser's viewer), and source
+- **One bar of tabs and controls.** The bar has the conversation header's height, so their rules
+  meet in one line.
+  - The to-user document is the first, permanent tab, and it is the panel's home. Every linked or
+    picked file, Markdown documents included, is a closable tab. The tab list lives for the browser
+    tab's lifetime.
+  - On the right sit fill the page, the inspector toggle, and collapse.
+  - There is no Home, Back or Refresh button: Back and Forward are the browser's.
+- **Auto-refresh.** The file on show is re-read every 10 s while the page is visible; media are not.
+- **Picking a file.**
+  - The side panel has a path bar like a file manager's address bar (`#63 › project › src › main.py`).
+    Each folder drops down its entries: a folder opens in place, a file opens as a tab.
+  - The root drops down another agent's number, to browse that agent's workspace with the read
+    access links already have.
+  - Once the viewer fills the page, the tree takes the path bar's place on the left.
+- **Width.** The panel can be dragged far to the left. The conversation keeps a 280 px minimum.
+- **Fill the page.** On desktop the viewer can take the conversation's place; the sidebar stays.
+- **What renders in place.** Markdown, images, video, audio, PDF (the browser's viewer) and source
   code with line ranges. Other binary files offer a download.
-- **No type icons.** File names show without a type icon.
+- **Labels.** File names show without a type icon.
 Normal Markdown links are directly clickable in conversation messages and `to_user.md`;
 explicit `.meiva/workspaces/<id>/...` references keep the viewer attached to the
 active conversation's panel while routing content/raw reads and nested relative

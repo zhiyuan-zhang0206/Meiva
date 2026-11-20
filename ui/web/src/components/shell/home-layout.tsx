@@ -52,6 +52,10 @@ const MOBILE_COLUMNS: ColumnFrame = {
 };
 
 const INSPECTOR_LAYOUT_ID = "meiva.home.context.desktop";
+// meiva:note
+// The right panel may be dragged far to the left (user ruling 2026-11-21: not stopped at half);
+// the conversation keeps only a narrow strip, wide enough for its header and composer controls.
+const TIMELINE_MIN_WIDTH = "280px";
 const INSPECTOR_OPEN_SIZES = ["57.143%", "42.857%"] as const;
 
 // v4 stores a group's layout as { <panelId>: percent }, so panel ids are part
@@ -112,7 +116,7 @@ function DesktopMain({ main, inspector, parts }: Pick<Props, "main" | "inspector
       <Panel
         id={PANEL_TIMELINE}
         defaultSize={mainDefaultSize}
-        minSize={inspectorVisible ? "50%" : "100%"}
+        minSize={inspectorVisible ? TIMELINE_MIN_WIDTH : "100%"}
         className={cn(FLEX, MIN_H_0, MIN_W_0)}
       >
         {main}

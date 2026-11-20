@@ -24,17 +24,17 @@ afterEach(() => {
 });
 
 describe("workspace file history", () => {
-  it("pushes an entry per opened file, keeps the to-user chain, and replaces a new line range in place", () => {
+  it("pushes an entry per opened file, drops an old to-user chain, and replaces a new line range in place", () => {
     const page = fakeBrowser({ href: `${ORIGIN}/?agent_id=7&file=notes.md` });
     mount(page);
     act(() => store().openFile({ agentId: 7, path: "/w/src/main.py" }));
-    expect(page.href()).toBe(`${ORIGIN}/?agent_id=7&file=notes.md&view=/w/src/main.py&view_agent=7`);
+    expect(page.href()).toBe(`${ORIGIN}/?agent_id=7&view=/w/src/main.py&view_agent=7`);
     expect(page.actions.pushed).toHaveLength(1);
     expect(Reflect.get(page.actions.pushed[0].state as object, PUSHED_ENTRY)).toBe(true);
 
     act(() => store().openFile({ agentId: 7, path: "/w/src/main.py", lineRange: "10-20" }));
     expect(page.actions.pushed).toHaveLength(1);
-    expect(page.href()).toBe(`${ORIGIN}/?agent_id=7&file=notes.md&view=/w/src/main.py&view_agent=7&lines=10-20`);
+    expect(page.href()).toBe(`${ORIGIN}/?agent_id=7&view=/w/src/main.py&view_agent=7&lines=10-20`);
 
     act(() => store().openFile({ agentId: 7, path: "/w/docs/readme.md" }));
     expect(page.actions.pushed).toHaveLength(2);
@@ -123,5 +123,15 @@ describe("workspace file history", () => {
 
     act(() => page.traverse(`${ORIGIN}/?agent_id=7&view=/w/d.py&view_agent=7`));
     expect(store().tabs[7].map((tab) => tab.path)).toEqual(["/w/b.py", "/w/c.py", "/w/d.py"]);
+  });
+
+  // meiva:note
+  // A link from before the panel had tabs named its document by the to-user `file` chain; it opens
+  // the last file of that chain as a tab.
+  it("opens the last file of an old to-user chain link as a tab", () => {
+    const page = fakeBrowser({ href: `${ORIGIN}/?agent_id=7&file=reports/a.md&file=reports/b.md` });
+    mount(page);
+    expect(store().activeFile).toEqual({ agentId: 7, path: "reports/b.md" });
+    expect(store().tabs[7].map((tab) => tab.path)).toEqual(["reports/b.md"]);
   });
 });

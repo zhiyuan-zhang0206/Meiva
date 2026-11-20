@@ -9,13 +9,14 @@ import { resetTransport, transport } from "@/test-support/fake-api";
 import { TestStreamProvider } from "@/test-support/fake-stream";
 import { renderWithBrowser } from "@/test-support/render";
 
-import { FileTabs } from "./file-tabs";
 import { FileTree } from "./file-tree";
-import { QuickOpen } from "./quick-open";
+import { PanelBar } from "./panel-bar";
+import { PathBar } from "./path-bar";
 
 // meiva:note
-// The panel as a file viewer (user ruling 2026-11-20): tabs per conversation, quick open over the
-// workspace, and a tree that can browse another agent's workspace.
+// The panel as a file viewer (user rulings 2026-11-20 / 2026-11-21): one bar of tabs and controls,
+// a path bar whose folders drop down like a file manager's, and a tree for the full-page viewer that
+// can browse another agent's workspace.
 // meiva:link ui/web/src/docs/frontend-state/shared-context/shared-context.md
 let qc: QueryClient;
 function Wrapper({ children }: { children: ReactNode }) {
@@ -37,15 +38,18 @@ beforeEach(() => {
 });
 afterEach(cleanup);
 
-describe("file tabs", () => {
-  it("shows the document first, then each opened file without a type icon, and closes a tab", () => {
+describe("panel bar", () => {
+  it("shows the document first, then each opened file without a type icon, and holds the panel's controls", () => {
     store().openFile({ agentId: 7, path: "/w/src/main.py" });
     store().openFile({ agentId: 7, path: "/w/notes.md" });
-    renderWithBrowser(<FileTabs agentId={7} mobile={false} treeOpen={false} onToggleTree={() => undefined} onQuickOpen={() => undefined} />, { wrapper: Wrapper });
+    const inspected: string[] = [];
+    renderWithBrowser(<PanelBar agentId={7} mobile={false} inspecting={false} onInspect={() => inspected.push("inspect")} onCollapse={() => inspected.push("collapse")} />, { wrapper: Wrapper });
     const tabs = screen.getAllByRole("tab");
     expect(tabs.map((tab) => tab.textContent)).toEqual(["Shared context", "main.py", "notes.md"]);
     expect(tabs[2].getAttribute("aria-selected")).toBe("true");
     expect(tabs[2].querySelector("svg")).toBeNull();
+    expect(screen.queryByRole("button", { name: "Home" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Refresh" })).toBeNull();
 
     fireEvent.click(screen.getByRole("button", { name: "Close notes.md" }));
     expect(store().activeFile?.path).toBe("/w/src/main.py");
@@ -53,34 +57,49 @@ describe("file tabs", () => {
     expect(store().activeFile).toBeNull();
     fireEvent.click(screen.getByRole("button", { name: "Fill the page" }));
     expect(store().maximized).toBe(true);
+    fireEvent.click(screen.getByTestId("open-inspector"));
+    fireEvent.click(screen.getByTestId("context-panel-collapse"));
+    expect(inspected).toEqual(["inspect", "collapse"]);
   });
 });
 
-describe("quick open", () => {
-  it("lists recent files, searches the workspace, and opens a typed path as is", async () => {
-    store().openFile({ agentId: 7, path: "/w/old.md" });
-    transport.searchWorkspaceFiles.mockResolvedValue({ query: "rep", results: [{ path: "/w/reports/report.md", name: "report.md", relative: "reports/report.md" }], truncated: false });
-    const closed: string[] = [];
-    renderWithBrowser(<QuickOpen agentId={7} workspaceAgentId={7} onClose={() => closed.push("closed")} />, { wrapper: Wrapper });
-    expect(screen.getByRole("option").textContent).toContain("old.md");
+describe("path bar", () => {
+  it("names the file's folders and drops each one down to open another file", async () => {
+    transport.getWorkspaceFile.mockResolvedValue({ path: "project/src/main.py", name: "main.py", extension: ".py", content: "x", size: 2048, binary: false, modified_at: "2026-11-20T12:00:00Z" });
+    transport.listWorkspaceDir.mockImplementation((agentId: number, path?: string) => Promise.resolve(
+      path === "project"
+        ? { path: "/w/project", parent: "/w", entries: [entry("src", "dir", "/w/project"), entry("README.md", "file", "/w/project")], truncated: false }
+        : path === "/w/project/src"
+          ? { path: "/w/project/src", parent: "/w/project", entries: [entry("util.py", "file", "/w/project/src")], truncated: false }
+          : { path: agentId === 7 ? "/w" : "/v", parent: null, entries: agentId === 7 ? [entry("project", "dir")] : [entry("b.md", "file", "/v")], truncated: false },
+    ));
+    store().openFile({ agentId: 7, path: "project/src/main.py" });
+    renderWithBrowser(<PathBar agentId={7} documentModifiedAt={null} />, { wrapper: Wrapper });
+    const bar = screen.getByTestId("path-bar");
+    expect(bar.textContent).toContain("#7");
+    expect(bar.textContent).toContain("project");
+    expect(bar.textContent).toContain("main.py");
+    await waitFor(() => expect(bar.textContent).toContain("2.0 KB"));
 
-    const input = screen.getByRole("combobox");
-    fireEvent.change(input, { target: { value: "rep" } });
-    await waitFor(() => expect(screen.getByRole("option").textContent).toContain("report.md"));
-    expect(transport.searchWorkspaceFiles).toHaveBeenCalledWith(7, "rep", 30, expect.anything());
-    fireEvent.keyDown(input, { key: "Enter" });
-    expect(store().activeFile).toEqual({ agentId: 7, path: "/w/reports/report.md" });
-    expect(closed).toEqual(["closed"]);
+    fireEvent.click(screen.getByRole("button", { name: "project" }));
+    fireEvent.click(await screen.findByRole("menuitem", { name: "src" }));
+    fireEvent.click(await screen.findByRole("menuitem", { name: "util.py" }));
+    expect(store().activeFile).toEqual({ agentId: 7, path: "/w/project/src/util.py" });
+    expect(screen.queryByTestId("path-menu")).toBeNull();
+
+    fireEvent.click(screen.getByRole("button", { name: "#7" }));
+    const number = await screen.findByRole("textbox", { name: "Agent number" });
+    fireEvent.change(number, { target: { value: "405" } });
+    fireEvent.submit(number.closest("form")!);
+    fireEvent.click(await screen.findByRole("menuitem", { name: "b.md" }));
+    expect(store().activeFile).toEqual({ agentId: 7, path: "/v/b.md" });
   });
 
-  it("offers a typed path first and opens it with Enter", () => {
-    transport.searchWorkspaceFiles.mockResolvedValue({ query: "~/x/a.py", results: [], truncated: false });
-    renderWithBrowser(<QuickOpen agentId={7} workspaceAgentId={7} onClose={() => undefined} />, { wrapper: Wrapper });
-    const input = screen.getByRole("combobox");
-    fireEvent.change(input, { target: { value: "~/x/a.py" } });
-    expect(screen.getAllByRole("option")[0].textContent).toContain("Open ~/x/a.py");
-    fireEvent.keyDown(input, { key: "Enter" });
-    expect(store().activeFile).toEqual({ agentId: 7, path: "~/x/a.py" });
+  it("shows when the to-user document last changed on the document tab", () => {
+    renderWithBrowser(<PathBar agentId={7} documentModifiedAt={new Date(Date.now() - 5 * 60_000).toISOString()} />, { wrapper: Wrapper });
+    const bar = screen.getByTestId("path-bar");
+    expect(bar.textContent).toContain("to_user.md");
+    expect(bar.textContent).toMatch(/Updated/);
   });
 });
 

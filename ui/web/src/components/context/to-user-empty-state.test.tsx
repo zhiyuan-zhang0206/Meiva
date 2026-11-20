@@ -43,8 +43,6 @@ function renderEmpty(messages: typeof en, locale: "en" | "zh") {
             document={{ content: null, version: null, modified_at: null, legacy_html: false, resources: {} }}
             failure={null}
             pending={false}
-            refresh={vi.fn()}
-            mobile={false}
           />
         </NextIntlClientProvider>
       </QueryClientProvider>
@@ -66,9 +64,8 @@ describe("To user empty state", () => {
     expect(screen.getByText("No content")).toBeTruthy();
     expect(transport.getToUser).not.toHaveBeenCalled();
     const { browser } = view;
-    expect(browser.actions.traversals).toBe(1);
-    view.unmount();
     expect(browser.actions.traversals).toBe(0);
+    view.unmount();
     for (const client of clients) {
       expect(client.getQueryCache().getAll().every((query) => query.getObserversCount() === 0)).toBe(true);
     }

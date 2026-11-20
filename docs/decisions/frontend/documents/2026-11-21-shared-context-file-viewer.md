@@ -18,13 +18,20 @@ agents' workspaces, and kept the inspector behind its toggle.
 - Every file on show is in the address (`view`, `view_agent`, `lines`, after the to-user chain).
   Opening or selecting a file is a browser history entry; Back and Forward move between files; a
   reloaded or shared address opens the same file. The viewer has no history of its own.
-- Quick open searches file names in the workspace the tree shows, opens a typed path as is, and
-  lists recently opened files.
-- A file tree beside the viewer lists the conversation's workspace; typing another agent's number
-  browses that agent's, with the read access links already have. The gateway gains
-  `/files/list` and `/files/search` under the same resolution, boundary and cross-machine rules as
-  `/files/content`.
-- The viewer can fill the page in place of the conversation (desktop); the sidebar stays.
+- **One bar.** Tabs and controls share a single bar at the conversation header's height (after the
+  first preview: "the edges do not line up").
+  - The to-user document tab is home, and a linked Markdown document opens as a tab too.
+  - There is no Home, Back or Refresh: the browser's Back and Forward cover navigation, and the file
+    on show re-reads itself every 10 s.
+- **Picking a file.** File picking works like a file manager.
+  - In the side panel, a path bar whose folders drop down their entries.
+  - Once the viewer fills the page, a tree on the left.
+  - The root of either takes another agent's number to browse that agent's workspace.
+  - The gateway gains `/files/list` under the same resolution, boundary and cross-machine rules as
+    `/files/content`.
+- **Width.** The panel can be dragged far to the left: the conversation keeps 280 px, not half the
+  width.
+- **Fill the page.** On desktop the viewer can take the conversation's place; the sidebar stays.
 - Audio and PDF render in place; `/files/raw` answers Range requests on both the local and the
   forwarded path; the page CSP admits media from the gateway.
 
@@ -35,6 +42,8 @@ agents' workspaces, and kept the inspector behind its toggle.
   its entry budget).
 - **Inspector as a tab.** The user kept it behind its toggle.
 - **CSV as a table.** Not wanted; CSV stays text.
+- **Quick-open search over file names.** Built for the first preview; the user did not want it.
+  The endpoint and the UI are removed.
 
 ## Consequences
 
