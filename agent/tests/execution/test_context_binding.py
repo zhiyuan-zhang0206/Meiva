@@ -20,6 +20,8 @@ from agent.execution.protocol import (
 from base.agents.context import MeivaContext
 from base.agents.context.identity import AgentIdentity
 from base.agents.sdk.tally import SdkCallTally
+from base.host.boundary.json_values import is_object_list
+from base.host.boundary.untyped import object_of
 from base.packages.plugin_providers import build_model_catalog
 from base.paths import meiva_home
 from meiva.tests.fixtures.pin_agent import snapshot_clients
@@ -106,7 +108,9 @@ def test_concurrent_children_bind_imports_threads_and_state_independently(tmp_pa
             if process.poll() is None:
                 process.kill()
                 process.communicate()
-    first_pid, seen, thread_owner = json.loads(first_stdout.strip().splitlines()[-1])
+    reported = object_of(json.loads, first_stdout.strip().splitlines()[-1])
+    assert is_object_list(reported)
+    first_pid, seen, thread_owner = reported
     second_pid, second_id, second_halted = second_stdout.strip().splitlines()[-1].split()
     assert first_payload.kind == second_payload.kind == "done"
     assert first_pid != int(second_pid) != os.getpid()

@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import json
 from collections.abc import Iterator, Sequence
-from typing import Annotated, Any
+from typing import Annotated
 
 from langchain_core.callbacks import CallbackManagerForLLMRun
 from langchain_core.language_models.chat_models import BaseChatModel
@@ -23,13 +23,15 @@ class ScriptedChatModel(BaseChatModel):
 
     replies: Annotated[list[AIMessage | Exception], SkipValidation]
     requests: list[list[BaseMessage]] = Field(default_factory=list[list[BaseMessage]])
-    bound_tools: list[list[Any]] = Field(default_factory=list[list[Any]])
+    bound_tools: list[list[object]] = Field(default_factory=list[list[object]])
 
     @property
     def _llm_type(self) -> str:
         return "scripted"
 
-    def bind_tools(self, tools: Sequence[Any], *, tool_choice: str | None = None, **kwargs: Any):  # pyright: ignore[reportIncompatibleMethodOverride]
+    def bind_tools(
+        self, tools: Sequence[object], *, tool_choice: str | None = None, **kwargs: object
+    ):  # pyright: ignore[reportIncompatibleMethodOverride]
         # meiva:note
         # The model binds nothing: it remembers the tools and answers as itself, so the request
         # a caller sends after binding is the one recorded.
@@ -41,7 +43,7 @@ class ScriptedChatModel(BaseChatModel):
         messages: list[BaseMessage],
         stop: list[str] | None = None,
         run_manager: CallbackManagerForLLMRun | None = None,
-        **kwargs: Any,
+        **kwargs: object,
     ) -> ChatResult:
         reply = self._next_reply(messages)
         return ChatResult(generations=[ChatGeneration(message=reply)])
@@ -53,7 +55,7 @@ class ScriptedChatModel(BaseChatModel):
         messages: list[BaseMessage],
         stop: list[str] | None = None,
         run_manager: CallbackManagerForLLMRun | None = None,
-        **kwargs: Any,
+        **kwargs: object,
     ) -> Iterator[ChatGenerationChunk]:
         reply = self._next_reply(messages)
         calls = reply.tool_calls

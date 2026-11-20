@@ -13,7 +13,6 @@ import tempfile
 import time
 from collections.abc import Callable
 from pathlib import Path
-from typing import Any
 
 from base.clock.tests.fakes import system_clock
 
@@ -29,7 +28,7 @@ def zero_record_exit() -> list[str]:
     )
 
 
-def identity_child_record() -> dict[str, Any]:
+def identity_child_record() -> dict[str, object]:
     """The real identity-child arm path, then the exporter check.
 
     `init_logger` is the exact arm seam (file sink + event-pipeline sink + deferred OTLP arm);
@@ -40,13 +39,13 @@ def identity_child_record() -> dict[str, Any]:
 
     import agent.execution.child as exec_child
     from base.agents.context.clients import ClientSet
-    from base.telemetry.delivery.receipts import DrainStatus
+    from base.telemetry.delivery.receipts import DrainStatus, Event
     from base.telemetry.otlp import telemetry_otlp_exporting
-    from base.telemetry.otlp.telemetry_otlp import default_exporter
+    from base.telemetry.otlp.telemetry_otlp import OtlpBackend, default_exporter
 
-    backends: list[Any] = []
+    backends: list[OtlpBackend] = []
 
-    def writer(events: list[Any], backend: Any) -> None:
+    def writer(events: list[Event], backend: OtlpBackend) -> None:
         backends.append(backend)
         backend.export_batch(events)
 

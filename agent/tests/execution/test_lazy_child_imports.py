@@ -49,6 +49,9 @@ from typing import cast
 
 import pytest
 
+from base.host.boundary.json_values import is_object_dict
+from base.host.boundary.untyped import object_of
+
 _REPO_ROOT = Path(__file__).resolve().parents[3]
 _PROBES = Path(__file__).with_name("child_lazy_imports.py")
 
@@ -87,7 +90,9 @@ def _run_probe(probe: str, *args: str) -> dict[str, object]:
         check=False,
     )
     assert proc.returncode == 0, proc.stderr
-    return json.loads(proc.stdout.strip().splitlines()[-1])
+    report = object_of(json.loads, proc.stdout.strip().splitlines()[-1])
+    assert is_object_dict(report)
+    return report
 
 
 def test_agent_graph_init_stays_lazy_for_light_submodules() -> None:

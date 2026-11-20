@@ -11,8 +11,9 @@ import json
 import sys
 from collections.abc import Callable
 from pathlib import Path
-from typing import Any
+from typing import SupportsIndex
 
+from base.host.boundary.untyped import object_of
 from base.paths import meiva_home
 
 _LANGCHAIN = ("langchain", "langgraph", "langsmith")
@@ -22,7 +23,7 @@ def _langchain_modules() -> list[str]:
     return sorted(name for name in sys.modules if name.startswith(_LANGCHAIN))
 
 
-def graph_light() -> dict[str, Any]:
+def graph_light() -> dict[str, object]:
     import agent.execution.protocol  # noqa: F401  # pyright: ignore[reportUnusedImport]
 
     heavy = sorted(
@@ -39,7 +40,7 @@ def graph_light() -> dict[str, Any]:
     return {"heavy": heavy, "langchain": len(_langchain_modules())}
 
 
-def stateless_request() -> dict[str, Any]:
+def stateless_request() -> dict[str, object]:
     import tempfile
 
     from agent.execution.protocol import read_request
@@ -69,7 +70,7 @@ def stateless_request() -> dict[str, Any]:
     return {"state": payload.state, "loaded": serde}
 
 
-def process_boot_import() -> dict[str, Any]:
+def process_boot_import() -> dict[str, object]:
     import agent.process_boot  # noqa: F401  # pyright: ignore[reportUnusedImport]
 
     loaded = sorted(
@@ -80,7 +81,7 @@ def process_boot_import() -> dict[str, Any]:
     return {"loaded": loaded, "langchain": len(_langchain_modules())}
 
 
-def registry_leaf() -> dict[str, Any]:
+def registry_leaf() -> dict[str, object]:
     import base.lm.registry  # noqa: F401  # pyright: ignore[reportUnusedImport]
 
     loaded = sorted(
@@ -91,26 +92,30 @@ def registry_leaf() -> dict[str, Any]:
     return {"loaded": loaded}
 
 
-def provider_registration_surface() -> dict[str, Any]:
+def provider_registration_surface() -> dict[str, object]:
     import base.lm.provider_api  # noqa: F401  # pyright: ignore[reportUnusedImport]
 
     return {"heavy": _langchain_modules()}
 
 
-def provider_plugin_load() -> dict[str, Any]:
+def provider_plugin_load() -> dict[str, object]:
     from base.packages.plugin_providers import build_model_catalog
 
     catalog = build_model_catalog(home=meiva_home())
     return {"bindings": len(catalog.bindings), "heavy": _langchain_modules()}
 
 
-def graph_reexports() -> dict[str, Any]:
+def graph_reexports() -> dict[str, object]:
     import agent.graph as graph_package
 
-    exported: Any = graph_package  # `from agent.graph import x` reads the same lazy `__getattr__`
-    functions = [exported.build_graph, exported.claim_node, exported.exec_node, exported.llm_node]
+    functions = [
+        graph_package.build_graph,
+        graph_package.claim_node,
+        graph_package.exec_node,
+        graph_package.llm_node,
+    ]
     return {
-        "identity": exported.build_graph.__module__ == "agent.graph._build",
+        "identity": graph_package.build_graph.__module__ == "agent.graph._build",
         "callable": all(callable(fn) for fn in functions),
     }
 
@@ -124,7 +129,7 @@ def _plugin_modules(suffix: str) -> list[str]:
     )
 
 
-def plugin_surface_load() -> dict[str, Any]:
+def plugin_surface_load() -> dict[str, object]:
     import meiva
 
     meiva.ensure_plugins_loaded(surface=True)
@@ -141,7 +146,7 @@ def plugin_surface_load() -> dict[str, Any]:
     }
 
 
-def plugin_surface_upgrade() -> dict[str, Any]:
+def plugin_surface_upgrade() -> dict[str, object]:
     import meiva
 
     meiva.ensure_plugins_loaded(surface=True)
@@ -154,7 +159,7 @@ def plugin_surface_upgrade() -> dict[str, Any]:
     }
 
 
-def stateful_request_raw(req: str) -> dict[str, Any]:
+def stateful_request_raw(req: str) -> dict[str, object]:
     from agent.execution.protocol import read_request
 
     payload = read_request(Path(req))
@@ -166,7 +171,7 @@ def stateful_request_raw(req: str) -> dict[str, Any]:
     }
 
 
-def _snapshot(tag: str) -> dict[str, Any]:
+def _snapshot(tag: str) -> dict[str, object]:
     from meiva.sdk_surface import process_context
 
     # Child imports may continue while the report is filtered. Observe one table.
@@ -185,12 +190,17 @@ def _snapshot(tag: str) -> dict[str, Any]:
 class _ImportingModuleName(str):
     """A `sys.modules` key that imports something when the snapshot filters it."""
 
-    def startswith(self, prefix: Any, *args: Any) -> bool:  # pyright: ignore[reportIncompatibleMethodOverride]
+    def startswith(
+        self,
+        prefix: str | tuple[str, ...],
+        start: SupportsIndex | None = None,
+        end: SupportsIndex | None = None,
+    ) -> bool:
         sys.modules["lazy_child_snapshot_added"] = None  # pyright: ignore[reportArgumentType]
-        return super().startswith(prefix, *args)
+        return super().startswith(prefix, start, end)
 
 
-def child_state_lazy(req: str, mutate_module_names: str) -> dict[str, Any]:
+def child_state_lazy(req: str, mutate_module_names: str) -> dict[str, object]:
     import meiva
     from agent.execution import child as exec_child
     from agent.execution.protocol import read_request
@@ -209,11 +219,11 @@ def child_state_lazy(req: str, mutate_module_names: str) -> dict[str, Any]:
         del sys.modules["lazy_child_snapshot_added"]
     else:
         armed = _snapshot("armed")
-    meiva.state.materialize()
+    object_of(getattr, child.meiva.state, "halted")
     return {"boot": boot, "armed": armed, "touched": _snapshot("touched")}
 
 
-def child_cwd_set_first_touch(req: str, arg: str) -> dict[str, Any]:
+def child_cwd_set_first_touch(req: str, arg: str) -> dict[str, object]:
     import meiva
     from agent.execution import child as exec_child
     from agent.execution.protocol import read_request
@@ -223,7 +233,7 @@ def child_cwd_set_first_touch(req: str, arg: str) -> dict[str, Any]:
     meiva.ensure_plugins_loaded()
     exec_child.build_state_slot(child, payload, home=meiva_home())
 
-    out: dict[str, Any] = {}
+    out: dict[str, object] = {}
     try:
         meiva.cwd.set(arg)  # the very first state touch — no warm-up read
         out["set"] = "ok"
@@ -234,7 +244,7 @@ def child_cwd_set_first_touch(req: str, arg: str) -> dict[str, Any]:
     return out
 
 
-PROBES: dict[str, Callable[..., dict[str, Any]]] = {
+PROBES: dict[str, Callable[..., dict[str, object]]] = {
     "graph_light": graph_light,
     "stateless_request": stateless_request,
     "process_boot_import": process_boot_import,

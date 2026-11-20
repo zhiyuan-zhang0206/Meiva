@@ -1,12 +1,13 @@
 """Delta-written threads read back through the agent's message reducer: reconstruction, resume, self-heal, snapshot tips, rebuilds, forks and startup reconcile."""
 
-from collections.abc import Callable, Sequence
-from typing import Annotated, Any, TypedDict, cast
+from collections.abc import Mapping
+from typing import Annotated, TypedDict, cast
 
 import psycopg
 from langchain_core.messages import (
     AIMessage,
     AnyMessage,
+    BaseMessage,
     HumanMessage,
     RemoveMessage,
     SystemMessage,
@@ -16,6 +17,7 @@ from langgraph.channels.delta import DeltaChannel
 from langgraph.checkpoint.serde.types import _DeltaSnapshot
 from langgraph.graph import END, START, StateGraph
 from langgraph.graph.message import REMOVE_ALL_MESSAGES, add_messages
+from langgraph.types import StateSnapshot
 from psycopg.rows import DictRow
 from psycopg_pool import AsyncConnectionPool
 
@@ -35,6 +37,9 @@ from base.agents.history.delta_read_compat import (
 )
 from base.db import Database, create_agent
 from base.db.code_version_gate import ProcessDbGate
+from base.host.boundary.json_values import is_object_list
+from base.host.boundary.untyped import object_mapping
+from base.log.tests.log_records import LogRecords
 
 
 def _saver(pool: AsyncConnectionPool) -> AsyncPostgresSaver:
@@ -49,15 +54,12 @@ def _delta_app(saver: AsyncPostgresSaver, *, snapshot_frequency: int = 1000):
     class S(TypedDict):
         messages: Annotated[
             list[AnyMessage],
-            DeltaChannel(
-                cast(Callable[[Any, Sequence[Any]], Any], guarded_delta_reducer),
-                snapshot_frequency=snapshot_frequency,
-            ),
+            DeltaChannel(guarded_delta_reducer, snapshot_frequency=snapshot_frequency),
         ]
         n: int
         target: int
 
-    def step(state: S) -> dict[str, Any]:
+    def step(state: S) -> dict[str, object]:
         n = state["n"]
         return {
             "messages": [
@@ -83,7 +85,7 @@ def _vanilla_app(saver: AsyncPostgresSaver):
         n: int
         target: int
 
-    def step(state: S) -> dict[str, Any]:
+    def step(state: S) -> dict[str, object]:
         n = state["n"]
         return {
             "messages": [
@@ -103,15 +105,31 @@ def _vanilla_app(saver: AsyncPostgresSaver):
     return graph.compile(checkpointer=saver)  # pyright: ignore[reportUnknownMemberType]
 
 
+def _millis(span: Mapping[str, object], field: str) -> float:
+    value = span.get(field, 0)
+    assert isinstance(value, int | float)
+    return value
+
+
 def _config(thread_id: str, checkpoint_id: str | None = None) -> RunnableConfig:
-    configurable: dict[str, Any] = {"thread_id": thread_id, "checkpoint_ns": ""}
+    configurable: dict[str, object] = {"thread_id": thread_id, "checkpoint_ns": ""}
     if checkpoint_id is not None:
         configurable["checkpoint_id"] = checkpoint_id
     return {"configurable": configurable}
 
 
-def _ids(messages: Sequence[Any]) -> list[str]:
-    return [m.id for m in messages]
+def _ids(messages: object) -> list[str]:
+    assert is_object_list(messages)
+    ids: list[str] = []
+    for message in messages:
+        assert isinstance(message, BaseMessage)
+        assert isinstance(message.id, str)
+        ids.append(message.id)
+    return ids
+
+
+def _state_ids(snapshot: StateSnapshot) -> list[str]:
+    return _ids(object_mapping(snapshot.values)["messages"])
 
 
 async def _checkpoint_ids(pool: AsyncConnectionPool, thread_id: str) -> list[str]:
@@ -130,23 +148,23 @@ async def test_delta_thread_reconstructs_resumes_and_self_heals(
     delta = _delta_app(saver)
     cfg = _config("drc-f1000")
     await delta.ainvoke({"messages": [], "n": 0, "target": 6}, cfg, recursion_limit=60)  # pyright: ignore[reportUnknownMemberType]
-    truth = _ids((await delta.aget_state(cfg)).values["messages"])
+    truth = _state_ids(await delta.aget_state(cfg))
     assert len(truth) == 12
 
     wrap_saver_reads_with_delta_reconstruction(saver)
     vanilla = _vanilla_app(saver)
-    got = _ids((await vanilla.aget_state(cfg)).values["messages"])
+    got = _state_ids(await vanilla.aget_state(cfg))
     assert got == truth
     # The startup reconciler reads through `aget` — same patched entry point.
     via_aget = await saver.aget(cfg)
     assert via_aget is not None
-    assert len(via_aget["channel_values"]["messages"]) == len(truth)
+    assert _ids(object_mapping(via_aget["channel_values"])["messages"]) == truth
 
     # A vanilla write resumes from the reconstructed history, and the new
     # checkpoint materializes a full messages blob (the store self-heals).
     await vanilla.ainvoke({"n": 6, "target": 7}, cfg, recursion_limit=60)  # pyright: ignore[reportUnknownMemberType, reportArgumentType]
-    after_vanilla = _ids((await vanilla.aget_state(cfg)).values["messages"])
-    after_delta = _ids((await delta.aget_state(cfg)).values["messages"])
+    after_vanilla = _state_ids(await vanilla.aget_state(cfg))
+    after_delta = _state_ids(await delta.aget_state(cfg))
     assert after_vanilla == after_delta == [*truth, "u6", "a6"]
     async with aops_pool.connection() as conn, conn.cursor() as cur:
         await cur.execute(
@@ -161,7 +179,7 @@ async def test_delta_thread_reconstructs_resumes_and_self_heals(
 
 
 async def test_delta_read_span_has_phase_fields(
-    aops_pool: AsyncConnectionPool, loguru_records: list[Any]
+    aops_pool: AsyncConnectionPool, loguru_records: LogRecords
 ) -> None:
     saver = _saver(aops_pool)
     cfg = _config("drc-span")
@@ -170,23 +188,23 @@ async def test_delta_read_span_has_phase_fields(
     checkpoint = await saver.aget(cfg)
     assert checkpoint is not None
     spans = [
-        record["extra"]
-        for record in loguru_records
-        if record["extra"].get("event") == "delta_read_compat"
-        and record["extra"].get("checkpoint_id") == checkpoint["id"]
+        extra
+        for extra in loguru_records.extras(event="delta_read_compat")
+        if extra.get("checkpoint_id") == checkpoint["id"]
     ]
     assert spans
     span = spans[-1]
     assert all(
-        span[field] >= 0 for field in ("tuple_read_ms", "history_read_ms", "fold_ms", "elapsed_ms")
+        _millis(span, field) >= 0
+        for field in ("tuple_read_ms", "history_read_ms", "fold_ms", "elapsed_ms")
     )
-    assert span["elapsed_ms"] >= span["tuple_read_ms"]
+    assert _millis(span, "elapsed_ms") >= _millis(span, "tuple_read_ms")
     assert span["outcome"] == "success"
     assert "decode_ms" not in span and "reset_decode_ms" not in span
 
 
 async def test_recovery_cache_invalidates_on_graph_state_update(
-    aops_pool: AsyncConnectionPool, loguru_records: list[Any]
+    aops_pool: AsyncConnectionPool, loguru_records: LogRecords
 ) -> None:
     saver = _saver(aops_pool)
     graph = _delta_app(saver)
@@ -195,14 +213,13 @@ async def test_recovery_cache_invalidates_on_graph_state_update(
     previous = await AsyncPostgresSaver.aget_tuple(saver, config)
     assert previous is not None
     wrap_saver_reads_with_delta_reconstruction(saver)
-    baseline = len(loguru_records)
+    baseline = len(loguru_records.extras(event="delta_read_compat"))
 
     def walks() -> int:
         return sum(
             1
-            for record in loguru_records[baseline:]
-            if record["extra"].get("event") == "delta_read_compat"
-            and record["extra"].get("history_read_ms", 0) > 0
+            for extra in loguru_records.extras(event="delta_read_compat")[baseline:]
+            if _millis(extra, "history_read_ms") > 0
         )
 
     with recovery_reconstruction_scope(saver, "drc-state-write") as scope:
@@ -226,7 +243,7 @@ async def test_snapshot_tip_unwraps_and_mid_chain_walks(
     delta = _delta_app(saver, snapshot_frequency=2)
     cfg = _config("drc-snap")
     await delta.ainvoke({"messages": [], "n": 0, "target": 9}, cfg, recursion_limit=60)  # pyright: ignore[reportUnknownMemberType]
-    truth = _ids((await delta.aget_state(cfg)).values["messages"])
+    truth = _state_ids(await delta.aget_state(cfg))
 
     # Precondition: the newest checkpoint is a snapshot step, so its stored
     # value is a `_DeltaSnapshot` — the unwrap branch, not the walk.
@@ -237,7 +254,7 @@ async def test_snapshot_tip_unwraps_and_mid_chain_walks(
 
     wrap_saver_reads_with_delta_reconstruction(saver)
     vanilla = _vanilla_app(saver)
-    got = _ids((await vanilla.aget_state(cfg)).values["messages"])
+    got = _state_ids(await vanilla.aget_state(cfg))
     assert got == truth
     unwrapped = await saver.aget_tuple(cfg)
     assert unwrapped is not None
@@ -247,8 +264,8 @@ async def test_snapshot_tip_unwraps_and_mid_chain_walks(
     # snapshot seed plus the write tail.
     ids = await _checkpoint_ids(aops_pool, "drc-snap")
     mid = ids[5]
-    truth_mid = _ids((await delta.aget_state(_config("drc-snap", mid))).values["messages"])
-    got_mid = _ids((await vanilla.aget_state(_config("drc-snap", mid))).values["messages"])
+    truth_mid = _state_ids(await delta.aget_state(_config("drc-snap", mid)))
+    got_mid = _state_ids(await vanilla.aget_state(_config("drc-snap", mid)))
     assert got_mid == truth_mid
     assert 0 < len(truth_mid) < len(truth)
 
@@ -265,7 +282,7 @@ async def test_count_reconstructs_snapshot_tip(
     delta = _delta_app(saver, snapshot_frequency=2)
     cfg = _config(str(agent_id))
     await delta.ainvoke({"messages": [], "n": 0, "target": 9}, cfg, recursion_limit=60)  # pyright: ignore[reportUnknownMemberType]
-    truth = _ids((await delta.aget_state(cfg)).values["messages"])
+    truth = _state_ids(await delta.aget_state(cfg))
 
     # Precondition: the newest checkpoint is a snapshot step (extension blob).
     raw = await saver.aget_tuple(cfg)
@@ -295,12 +312,12 @@ async def test_remove_all_rebuild_folds(aops_pool: AsyncConnectionPool) -> None:
         },
     )
     await delta.ainvoke({"n": 6, "target": 8}, cfg, recursion_limit=60)  # pyright: ignore[reportUnknownMemberType, reportArgumentType]
-    truth = _ids((await delta.aget_state(cfg)).values["messages"])
+    truth = _state_ids(await delta.aget_state(cfg))
     assert truth == ["rb0", "u6", "a6", "u7", "a7"]
 
     wrap_saver_reads_with_delta_reconstruction(saver)
     vanilla = _vanilla_app(saver)
-    got = _ids((await vanilla.aget_state(cfg)).values["messages"])
+    got = _state_ids(await vanilla.aget_state(cfg))
     assert got == truth
 
 
@@ -321,7 +338,7 @@ async def test_gateway_readers_reconstruct_delta_threads(
         cfg,
         recursion_limit=60,
     )
-    truth = _ids((await delta.aget_state(cfg)).values["messages"])
+    truth = _state_ids(await delta.aget_state(cfg))
     assert truth[0] == "sys" and len(truth) == 13
 
     # Stamp a mid checkpoint as a compact boundary (the segment-reader shape).
@@ -333,7 +350,7 @@ async def test_gateway_readers_reconstruct_delta_threads(
             " WHERE thread_id = %s AND checkpoint_id = %s",
             (thread, boundary),
         )
-    truth_at_boundary = _ids((await delta.aget_state(_config(thread, boundary))).values["messages"])
+    truth_at_boundary = _state_ids(await delta.aget_state(_config(thread, boundary)))
 
     # The boundary is synthetic (no compaction happened), so both segments
     # carry the full prefix; the stitch appends the latest segment with its
@@ -369,7 +386,7 @@ async def test_fork_copies_the_delta_write_chain(
     delta = _delta_app(saver)
     cfg = _config(str(source))
     await delta.ainvoke({"messages": [], "n": 0, "target": 6}, cfg, recursion_limit=60)  # pyright: ignore[reportUnknownMemberType]
-    truth = _ids((await delta.aget_state(cfg)).values["messages"])
+    truth = _state_ids(await delta.aget_state(cfg))
     tip = (await _checkpoint_ids(aops_pool, str(source)))[-1]
 
     with db_conn.cursor() as cur:
@@ -377,11 +394,11 @@ async def test_fork_copies_the_delta_write_chain(
     db_conn.commit()
 
     forked_cfg = _config(str(target))
-    forked_truth = _ids((await delta.aget_state(forked_cfg)).values["messages"])
+    forked_truth = _state_ids(await delta.aget_state(forked_cfg))
     assert forked_truth == truth
     wrap_saver_reads_with_delta_reconstruction(saver)
     vanilla = _vanilla_app(saver)
-    assert _ids((await vanilla.aget_state(forked_cfg)).values["messages"]) == truth
+    assert _state_ids(await vanilla.aget_state(forked_cfg)) == truth
 
 
 async def test_fork_at_a_boundary_replicates_the_source_state(
@@ -445,8 +462,8 @@ async def test_fork_at_a_boundary_replicates_the_source_state(
     )
     await delta.ainvoke({"n": 4, "target": 5}, cfg, recursion_limit=60)  # pyright: ignore[reportUnknownMemberType, reportArgumentType]
 
-    src_b1 = _ids((await delta.aget_state(_config(str(source), b1))).values["messages"])
-    src_b2 = _ids((await delta.aget_state(_config(str(source), b2))).values["messages"])
+    src_b1 = _state_ids(await delta.aget_state(_config(str(source), b1)))
+    src_b2 = _state_ids(await delta.aget_state(_config(str(source), b2)))
     assert src_b1 == ["u0", "a0", "u1", "a1"]
     assert src_b2 == ["sum0", "tail0", "u2", "a2", "u3", "a3"]
 
@@ -457,11 +474,11 @@ async def test_fork_at_a_boundary_replicates_the_source_state(
 
     # Native delta read: fork@B1's window is the whole chain (no boundary
     # below); fork@B2's is [B1..B2].
-    assert _ids((await delta.aget_state(_config(str(t_b1)))).values["messages"]) == src_b1
-    assert _ids((await delta.aget_state(_config(str(t_b2)))).values["messages"]) == src_b2
+    assert _state_ids(await delta.aget_state(_config(str(t_b1)))) == src_b1
+    assert _state_ids(await delta.aget_state(_config(str(t_b2)))) == src_b2
 
     # Compat read of the same replicas.
     wrap_saver_reads_with_delta_reconstruction(saver)
     vanilla = _vanilla_app(saver)
-    assert _ids((await vanilla.aget_state(_config(str(t_b1)))).values["messages"]) == src_b1
-    assert _ids((await vanilla.aget_state(_config(str(t_b2)))).values["messages"]) == src_b2
+    assert _state_ids(await vanilla.aget_state(_config(str(t_b1)))) == src_b1
+    assert _state_ids(await vanilla.aget_state(_config(str(t_b2)))) == src_b2
