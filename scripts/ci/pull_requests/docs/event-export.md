@@ -13,9 +13,9 @@ the telemetry binding retains the actual pipeline for final process draining.
 An export error stays primary if writer cleanup also fails, with the original
 worker error retained by the pipeline for repeated collection.
 
-The Dev/CI metrics schedule passes its existing ClientSet producer into the
-CI-run sampler. The sampler borrows that writer without capturing another image,
-creating another gate, or closing the schedule's resources. Both invocation paths
+A caller that already owns a writer may pass it to the CI-run sampler as
+`producer`. The sampler borrows that writer without capturing another image,
+creating another gate, or closing the caller's resources. Both invocation paths
 retain the exporter process dimension. Dry runs create neither image nor writer;
 failed authoritative collection still aborts before persistence and emission.
 
@@ -25,10 +25,10 @@ no partial report. Consumers run as that same user. This tightens the earlier
 umask-dependent temporary-file mode without changing the JSON representation.
 
 GitHub command transport is required at each sampler entry and fetch boundary.
-The script and schedule roots supply standard-library subprocess.run, retaining
+The script root and the watch schedules supply standard-library subprocess.run, retaining
 60-second command timeouts, inherited environment/cwd and each sampler's rc policy.
 CI-run retries use the required Timers port with the existing bounded backoff;
-the schedule's direct workflow query uses the same raw transport without loading
+a watch schedule's direct workflow query (`schedules/jobs/watch/api_read.py`) uses the same raw transport without loading
 clock configuration. Page limits remain independent: CI-run cursors continue,
 closed-PR population exhaustion fails, and PR-flow timeline exhaustion is reported
 as truncation. Collection, cache writes and event emission run their real owners.
@@ -39,6 +39,6 @@ not apply to CI-run files. Neither sampler claims a transaction across report fi
 
 `runs_api.py` owns the CI-run sampler's read-only GitHub populations, retry
 accounting and wire timestamp decoder. `runs_export.py` retains cache, metric
-aggregation and orchestration and calls that owner directly. The schedule's
-workflow alert query also calls the real read owner; its daily-loop root binds
-the standard process transport and timers without changing the slot callback shape.
+aggregation and orchestration and calls that owner directly. A watch schedule's
+workflow query also calls the real read owner; its root binds the standard
+process transport and timers without changing the slot callback shape.

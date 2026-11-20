@@ -4,7 +4,7 @@ exports = ["adversarial_batch.py", "adversarial_scenario.py", "adversarial_worke
 "dry_import_child.py" = ["schedules"]
 
 [uses]
-"watch" = ["agent_directory.py", "entry.py", "telemetry_event.py"]
+"watch" = ["entry.py", "telemetry_event.py"]
 "harness" = ["entry.py", "telemetry_event.py"]
 "adversarial_batch.py" = ["adversarial_scenario.py", "adversarial_workers.py", "agent_directory.py"]
 "adversarial_workers.py" = ["agent_directory.py"]

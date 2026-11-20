@@ -4,7 +4,6 @@
 "c9-daily-report-schedule.py" = ["jobs", "plans"]
 "db-write-stall-watch-schedule.py" = ["jobs"]
 "debt-sweep-daily-schedule.py" = ["jobs", "plans"]
-"dev-ci-metrics-schedule.py" = ["jobs", "plans"]
 "jobs" = ["plans"]
 "memory-steward-schedule.py" = ["jobs", "plans"]
 "model-update-tracker-schedule.py" = ["jobs", "plans"]
@@ -23,7 +22,6 @@
 "c9-daily-report-schedule.py" = { kinds = ["environ", "home", "platform"], why = "Schedule process entry reads the home it runs under, its report recipient and scheduler identity before constructing one C9Report run; builds the host of this process with Host.system()" }
 "db-write-stall-watch-schedule.py" = { kinds = ["clock", "home"], why = "Schedule process entry reads the home it runs under and supplies one stall-watch run with a wall-clock reader" }
 "debt-sweep-daily-schedule.py" = { kinds = ["clock", "environ", "home", "argv"], why = "Schedule process entry reads the home it runs under, its worker label, report recipient, scheduler identity and start instant before constructing the debt-sweep job; it also reads its command line (argv) once, as the process entry" }
-"dev-ci-metrics-schedule.py" = { kinds = ["clock", "environ", "home"], why = "Schedule process entry reads the home it runs under, its report recipient, scheduler identity and start instant before constructing the CI metrics job" }
 "memory-steward-schedule.py" = { kinds = ["environ", "home"], why = "Schedule process entry reads the home it runs under and its scheduler identity before dispatching one memory-maintenance run" }
 "model-update-tracker-schedule.py" = { kinds = ["environ", "home", "pid"], why = "Schedule process entry reads the home it runs under, its subprocess environment, report recipient and scheduler identity before constructing one ModelTracker run; it also names its own interpreter (sys.executable) for the command it builds" }
 "qa-keepalive-schedule.py" = { kinds = ["environ", "clock", "home"], why = "Schedule process entry reads the home it runs under, the site values (health URL, probed host, owner) and supplies the keeper with a clock, so every round is a function of one instant" }
