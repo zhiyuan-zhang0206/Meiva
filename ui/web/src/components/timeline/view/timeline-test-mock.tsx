@@ -5,6 +5,8 @@ import { renderWithBrowser, type BrowserRenderOptions } from "@/test-support/ren
 import type { ReactElement, ReactNode } from "react";
 import { onTestFinished, vi } from "vitest";
 
+import { RIDE_MAX_MS, rideClock } from "../anchor/ride";
+
 import { createLazyChunk } from "@/components/content/lazy-chunk";
 import { PythonCodeHighlighterProvider } from "@/components/content/python-code";
 import { USER_SETTING_DEFAULTS, type BackendTimelineItem } from "@/lib/contracts/types";
@@ -257,8 +259,8 @@ export function revealCollapsedCards() {
 // - the log has the 52px bar-clear top padding and 24px bottom padding, `space-y-3` / `space-y-1`
 //   add their gaps between in-flow children;
 // - the column starts at the viewport's top edge.
-// scrollTop clamps to the scroll range, a smooth `scrollTo` waits for `finishSmooth`, and every
-// ResizeObserver is delivered on `resize()` with the model's heights.
+// scrollTop clamps to the scroll range, the arrow's ride waits for `finishSmooth` (its frames and
+// clock are the model's), and every ResizeObserver is delivered on `resize()` with the model's heights.
 export interface TimelineLayoutOptions {
   viewportHeight?: number;
   rowHeight?: number | ((row: HTMLElement) => number | undefined);
@@ -273,7 +275,14 @@ const LOG_PAD_BOTTOM = 24;
 export function timelineLayout(options: TimelineLayoutOptions = {}) {
   let viewportHeight = options.viewportHeight ?? 600;
   let top = 0;
-  let smooth: number | null = null;
+  const rideFrames = new Map<number, () => void>();
+  let rideFrameId = 0;
+  let rideNow = 0;
+  const realRideClock = { ...rideClock };
+  rideClock.frame = (callback) => { rideFrameId += 1; rideFrames.set(rideFrameId, callback); return rideFrameId; };
+  rideClock.cancel = (id) => { rideFrames.delete(id); };
+  rideClock.now = () => rideNow;
+  onTestFinished(() => { Object.assign(rideClock, realRideClock); });
   const writes: number[] = [];
   const observers: { callback: ResizeObserverCallback; targets: Set<Element>; instance: ResizeObserver }[] = [];
 
@@ -404,7 +413,6 @@ export function timelineLayout(options: TimelineLayoutOptions = {}) {
         original.scrollTop.set.call(this, value);
         return;
       }
-      smooth = null;
       writes.push(value);
       top = clamp(this, value);
     },
@@ -447,11 +455,6 @@ export function timelineLayout(options: TimelineLayoutOptions = {}) {
       const [first] = args;
       const target = typeof first === "object" && first !== null ? (first as ScrollToOptions).top : (args[1] as number | undefined);
       if (target === undefined) return;
-      if (typeof first === "object" && (first as ScrollToOptions).behavior === "smooth") {
-        smooth = target;
-        return;
-      }
-      smooth = null;
       top = clamp(this, target);
     },
   });
@@ -474,6 +477,13 @@ export function timelineLayout(options: TimelineLayoutOptions = {}) {
     `.timeline-item[data-item-id="${CSS.escape(itemId)}"], [data-turn-id][data-item-id="${CSS.escape(itemId)}"]`,
   );
 
+  const naturalEnd = () => {
+    const vp = viewport();
+    const content = vp.querySelector<HTMLElement>('[role="log"]');
+    const memo = new Map<Element, number>();
+    return content ? Math.max(0, docTop(content, vp, memo) + heightOf(content, memo) - viewportHeight) : 0;
+  };
+
   return {
     viewport,
     // meiva:note
@@ -485,12 +495,7 @@ export function timelineLayout(options: TimelineLayoutOptions = {}) {
     reserve: () => Number.parseFloat(viewport().querySelector<HTMLElement>("[data-timeline-reserve]")?.style.height ?? "") || 0,
     // meiva:note
     // The scroll offset at which the content's last row meets the viewport bottom.
-    naturalEnd: () => {
-      const vp = viewport();
-      const content = vp.querySelector<HTMLElement>('[role="log"]');
-      const memo = new Map<Element, number>();
-      return content ? Math.max(0, docTop(content, vp, memo) + heightOf(content, memo) - viewportHeight) : 0;
-    },
+    naturalEnd,
     // meiva:note
     // A row's top edge relative to the viewport top.
     rowTop: (itemId: string) => {
@@ -506,7 +511,6 @@ export function timelineLayout(options: TimelineLayoutOptions = {}) {
       const vp = viewport();
       act(() => {
         top = clamp(vp, next);
-        smooth = null;
         fire(vp);
       });
     },
@@ -544,16 +548,31 @@ export function timelineLayout(options: TimelineLayoutOptions = {}) {
         }
       });
     },
-    smoothTarget: () => smooth,
     // meiva:note
-    // The smooth scroll arrives: the position reaches its target, then `scrollend`.
+    // Where a running ride is heading (the live natural end), or null when no ride runs.
+    smoothTarget: () => (rideFrames.size > 0 ? naturalEnd() : null),
+    // meiva:note
+    // One frame of the ride, `ms` after the previous one.
+    rideStep: (ms: number) => {
+      act(() => {
+        rideNow += ms;
+        const pending = [...rideFrames];
+        rideFrames.clear();
+        for (const [, callback] of pending) callback();
+      });
+    },
+    // meiva:note
+    // The ride's deadline passes: its last frame lands on the end, then the browser echoes the write.
     finishSmooth: () => {
       const vp = viewport();
       act(() => {
-        if (smooth !== null) top = clamp(vp, smooth);
-        smooth = null;
+        rideNow += RIDE_MAX_MS;
+        while (rideFrames.size > 0) {
+          const pending = [...rideFrames];
+          rideFrames.clear();
+          for (const [, callback] of pending) callback();
+        }
         fire(vp);
-        vp.dispatchEvent(new Event("scrollend"));
       });
     },
   };

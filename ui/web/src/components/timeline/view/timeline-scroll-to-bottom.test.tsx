@@ -86,6 +86,12 @@ describe("scroll-to-bottom control presence", () => {
     fireEvent.click(arrow()!);
     const target = layout.smoothTarget()!;
     expect(target).toBeGreaterThan(2000);
+    // meiva:note
+    // Rows mount and land at their real heights under the moving ride; it steers to the live end.
+    for (let wave = 0; wave < 4; wave += 1) {
+      layout.rideStep(150);
+      layout.resize();
+    }
     layout.finishSmooth();
     for (let wave = 0; wave < 4; wave += 1) {
       layout.resize();
@@ -94,7 +100,6 @@ describe("scroll-to-bottom control presence", () => {
 
     expect(layout.viewport().querySelector('[data-timeline-spacer="after"]')).toBeNull();
     expect(layout.viewport().querySelector('.timeline-item[data-item-id="80.0"]')).not.toBeNull();
-    expect(layout.top()).not.toBe(target);
     expect(layout.top()).toBe(layout.naturalEnd());
     expect(layout.max() - layout.top()).toBeLessThanOrEqual(1);
     expect(arrow()).toBeNull();

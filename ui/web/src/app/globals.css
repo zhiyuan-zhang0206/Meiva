@@ -488,6 +488,14 @@
    whitespace.
    meiva:link ui/web/src/docs/frontend-components/timeline-view/bounded-window.md */
 /* meiva:note
+   An open question panel rises over the timeline's bottom edge, where the arrow floats: while the
+   panel is open the arrow steps aside instead of covering the question (user ruling 2026-11-20).
+   meiva:link ui/web/src/docs/frontend-state/shared-context/questions.md */
+[data-testid="timeline-surface"]:has([data-question-panel="open"]) [data-scroll-to-bottom] {
+  display: none;
+}
+
+/* meiva:note
    The log's bottom padding is the 1.5rem breathing room above the composer's rule. A footer
    floating over that edge (the pending strip, height in --timeline-footer-h) may also use the 1rem
    blank below the last row (its group's padding and endRef's gap; while messages wait, the last

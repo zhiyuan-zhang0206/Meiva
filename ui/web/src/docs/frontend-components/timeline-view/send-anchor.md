@@ -6,7 +6,18 @@ tail keeps following it, and a reader in history keeps their place. No space
 opens below the conversation for the sent message.
 
 The centered down arrow rides to the tail and follows it from there. It is
-hidden at the scrollable end.
+hidden at the scrollable end, and while the question panel is open.
+
+The ride is timed by the timeline, not by the browser's smooth scroll, whose
+duration grows with the distance without bound (user ruling 2026-11-20):
+
+- **Duration.** It grows linearly with the distance, 4px per ms, and is capped
+  at one second, so the reader reaches the bottom within a second however far up
+  they were. A short hop still takes 120ms, so it reads as motion.
+- **Moving end.** Each frame steers toward the live natural end, so rows that
+  mount or re-measure on the way move the goal, never the deadline.
+- **Interruption.** Wheel, touch, keys or the scrollbar stop the ride where it
+  is.
 
 ## The pending strip
 

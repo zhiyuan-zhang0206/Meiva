@@ -114,6 +114,7 @@ export function ScrollToBottomButton({ atBottom, onClick }: { atBottom: boolean;
       onClick={onClick}
       aria-label={t("scrollDown")}
       data-testid="scroll-to-bottom"
+      data-scroll-to-bottom
       style={{ bottom: `calc(1rem + var(${FOOTER_HEIGHT_VAR}, 0px))` }}
       className={cn(
         "absolute left-1/2 -translate-x-1/2 z-30",

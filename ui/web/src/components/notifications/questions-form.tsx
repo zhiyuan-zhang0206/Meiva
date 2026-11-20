@@ -21,6 +21,8 @@ import { useStore } from "@/lib/state/store";
 import { QuestionForm, answerFromDraft } from "./question-form";
 
 // meiva:note
+// Enter on a question that is not the last moves to the next one and puts the caret in its answer;
+// Enter on the last one is Submit (user ruling 2026-11-20).
 // Submit on the last page resolves the whole open set in question ID order.
 // Empty drafts are sent as ID-only results. If the set changes, the server
 // returns the latest questions and the caller keeps drafts that are still open.
@@ -66,6 +68,14 @@ export function QuestionsForm({
 
   const index = Math.max(0, ordered.findIndex((q) => q.id === selectedId));
   const question = ordered.at(index);
+  const rootRef = useRef<HTMLDivElement>(null);
+  const focusAnswer = useRef(false);
+  const shownId = question?.id;
+  useEffect(() => {
+    if (!focusAnswer.current) return;
+    focusAnswer.current = false;
+    rootRef.current?.querySelector<HTMLTextAreaElement>("article textarea")?.focus();
+  }, [shownId]);
   if (!question) return null;
   const nextQuestion = ordered.at(index + 1);
   const draft = draftOf(question.id);
@@ -105,15 +115,24 @@ export function QuestionsForm({
     }
   };
 
+  const enter = () => {
+    if (!nextQuestion) {
+      void submit();
+      return;
+    }
+    focusAnswer.current = true;
+    setSelectedId(nextQuestion.id);
+  };
+
   return (
-    <div className={cn("text-[13px]", className)}>
+    <div ref={rootRef} className={cn("text-[13px]", className)}>
       <div hidden={!expanded}>
         <ScrollArea key={question.id} viewportClassName={cn(QUESTION_REGION_MAX_HEIGHT_CLASS, "overscroll-y-contain")}>
           <QuestionRow
             question={question}
             draft={draft}
             pending={pending}
-            onSubmit={() => void submit()}
+            onEnter={enter}
             onDraftChange={(nextDraft) => setQuestionDraft(agentId, question.id, nextDraft)}
           />
         </ScrollArea>
@@ -184,13 +203,13 @@ function QuestionRow({
   draft,
   pending,
   onDraftChange,
-  onSubmit,
+  onEnter,
 }: {
   question: QuestionItem;
   draft: QuestionDraft;
   pending: boolean;
   onDraftChange: (draft: QuestionDraft) => void;
-  onSubmit: () => void;
+  onEnter: () => void;
 }) {
   return (
     <article aria-label={question.title} className="space-y-3 px-4 pb-3 pt-3.5">
@@ -207,7 +226,7 @@ function QuestionRow({
         pending={pending}
         draft={draft}
         onDraftChange={onDraftChange}
-        onSubmit={onSubmit}
+        onEnter={onEnter}
       />
     </article>
   );
