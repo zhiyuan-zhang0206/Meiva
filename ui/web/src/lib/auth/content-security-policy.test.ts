@@ -125,6 +125,19 @@ describe("buildContentSecurityPolicy", () => {
     );
   });
 
+  // meiva:note
+  // Workspace videos and audio are served by the gateway (`/files/raw`); with no media-src the
+  // default-src rejected every one of them on a page served from another origin.
+  it("lets media load from the gateway, the page and object URLs only", () => {
+    const policy = buildContentSecurityPolicy({
+      nonce: "request-nonce",
+      gatewayOrigin: "https://gateway.example.test:8443",
+      isDevelopment: false,
+    });
+
+    expect(directive(policy, "media-src")).toBe("media-src 'self' blob: https://gateway.example.test:8443");
+  });
+
   it("keeps the development allowances Next.js needs", () => {
     const policy = buildContentSecurityPolicy({
       nonce: "request-nonce",

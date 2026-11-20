@@ -48,6 +48,9 @@ export function browserFacingRequestUrl(request: Request): URL {
 
 // meiva:note
 // Production script policy uses a nonce and strict-dynamic without unsafe-eval or unsafe-inline. Style elements require the nonce while style attributes allow unsafe-inline. Connections are limited to the current page's own origin and the gateway HTTP and WebSocket origins.
+// Media (workspace video and audio) loads from the page's own origin, object URLs and the gateway,
+// which serves `/files/raw`: without a media-src the default-src blocked every gateway video when
+// the gateway is another origin than the page (user report 2026-11-21: videos never played).
 // meiva:link ui/web/src/lib/auth/docs/content-security-policy.md
 export function buildContentSecurityPolicy({
   nonce,
@@ -72,6 +75,7 @@ export function buildContentSecurityPolicy({
     "style-src-attr 'unsafe-inline'",
     "img-src 'self' data: blob: http: https:",
     "font-src 'self' data:",
+    `media-src 'self' blob: ${resolvedGatewayOrigin}`,
     `connect-src 'self' ${resolvedGatewayOrigin} ${webSocketOrigin(resolvedGatewayOrigin)}`,
     "frame-src 'self' http: https:",
     "frame-ancestors 'none'",
