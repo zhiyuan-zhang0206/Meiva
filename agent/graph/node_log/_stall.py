@@ -3,7 +3,8 @@ import contextlib
 import faulthandler
 import sys
 from collections.abc import Collection, Generator
-from typing import Any, TextIO
+from types import AsyncGeneratorType, CoroutineType, FrameType
+from typing import TextIO
 
 from ._plan import StallConfig, stall_probe
 
@@ -13,19 +14,35 @@ from ._plan import StallConfig, stall_probe
 # on. `Task.get_stack()` stops at the outermost suspension point, which cannot name the blocked
 # call.
 # meiva:link agent/graph/docs/node-lifecycle.md
-def awaiter_chain_lines(task: asyncio.Task[Any]) -> list[str]:
+def awaiter_chain_lines(task: asyncio.Task[object]) -> list[str]:
     lines: list[str] = []
-    awaitable: Any = task.get_coro()
+    awaitable: object | None = task.get_coro()
     while awaitable is not None:
-        frame = getattr(awaitable, "cr_frame", None) or getattr(awaitable, "ag_frame", None)
+        frame = _frame_of(awaitable)
         if frame is not None:
             code = frame.f_code
             lines.append(f'  File "{code.co_filename}", line {frame.f_lineno}, in {code.co_name}')
-        awaitable = getattr(awaitable, "cr_await", None) or getattr(awaitable, "ag_await", None)
+        awaitable = _awaited_by(awaitable)
     return lines
 
 
-def render_task_dump(tasks: Collection[asyncio.Task[Any]]) -> str:
+def _frame_of(awaitable: object) -> FrameType | None:
+    if isinstance(awaitable, CoroutineType):
+        return awaitable.cr_frame
+    if isinstance(awaitable, AsyncGeneratorType):
+        return awaitable.ag_frame
+    return None
+
+
+def _awaited_by(awaitable: object) -> object | None:
+    if isinstance(awaitable, CoroutineType):
+        return awaitable.cr_await
+    if isinstance(awaitable, AsyncGeneratorType):
+        return awaitable.ag_await
+    return None
+
+
+def render_task_dump(tasks: Collection[asyncio.Task[object]]) -> str:
     out = [f"=== asyncio task await chains (stall probe, {len(tasks)} tasks) ==="]
     for task in tasks:
         out.append(f"--- task {task.get_name()} ---")

@@ -3,7 +3,7 @@ __description__ = "Auto-compact history when token count exceeds threshold"
 
 from collections.abc import Callable, Sequence
 from datetime import datetime
-from typing import Any
+from typing import NotRequired, TypedDict
 
 from langchain_core.language_models.chat_models import BaseChatModel
 from langchain_core.messages import AIMessage, AnyMessage, HumanMessage, SystemMessage
@@ -348,7 +348,7 @@ async def auto_compact_for_llm(
     state: AgentState,
     runtime: Runtime[MeivaContext],
     config: RunnableConfig,
-) -> dict[str, Any] | None:
+) -> dict[str, object] | None:
     if _summary_awaits_reply(state.messages):
         return None
     occupancy = _context_occupancy(state.messages)
@@ -463,14 +463,13 @@ async def auto_compact_for_llm(
         runtime.context.require_agent().history_dump,
         now=now,
     )
-    summary_kwargs: dict[str, Any] = {
-        "additional_kwargs": {
-            "meiva_msg_type": MeivaMsgType.COMPACT_SUMMARY.value,
-            "meiva_created_at": now.isoformat(),
-        },
+    summary_extras: dict[str, object] = {
+        "meiva_msg_type": MeivaMsgType.COMPACT_SUMMARY.value,
+        "meiva_created_at": now.isoformat(),
     }
     if compact_run_id is not None:
-        summary_kwargs["additional_kwargs"]["meiva_compact_id"] = compact_run_id
+        summary_extras["meiva_compact_id"] = compact_run_id
+    summary_kwargs: dict[str, object] = {"additional_kwargs": summary_extras}
     transition = build_compact_transition(
         summary,
         resume=CLAIM,
@@ -501,7 +500,21 @@ async def auto_compact_for_llm(
     emit_compact_finished(
         publisher, agent_id, compact_run_id, finished_at=now, status=CompactionStatus.SUCCESS
     )
-    return transition
+    return dict(transition)
+
+
+# meiva:note
+# The state update that replaces the working context with a summary: the messages channel cleared,
+# the turn timings reset, the `context_reset` that `init_context` serves, and the `goto` that sends
+# the graph there. The auto-compact hook adds the next compact segment and the active-turn anchor.
+# A TypedDict, so the claim node and the hook read each key as the type it was written with.
+class CompactTransition(TypedDict):
+    messages: list[RemoveMessage]
+    turn_timings: list[dict[str, object]]
+    context_reset: ContextReset
+    goto: NodeName
+    compact: NotRequired[CompactState]
+    active_turn_start_idx: NotRequired[int | None]
 
 
 # meiva:link agent/graph/docs/context-window/replacement.md
@@ -511,8 +524,8 @@ def build_compact_transition(
     inputs: TimestampPolicy,
     resume: NodeName,
     extra_msgs: list[AnyMessage] | None = None,
-    summary_kwargs: dict[str, Any] | None = None,
-) -> dict[str, Any]:
+    summary_kwargs: dict[str, object] | None = None,
+) -> CompactTransition:
     summary_msg_kwargs = summary_kwargs or {}
     tail_msgs: list[AnyMessage] = [
         HumanMessage(
@@ -607,7 +620,7 @@ def compact_reminder_update(
     extensions: ExtensionRegistry,
     open_questions: Sequence[OpenQuestion],
     now: datetime,
-) -> dict[str, Any] | None:
+) -> dict[str, object] | None:
     if not reminder_due(state, agent, catalog=catalog):
         return None
     compact: CompactState = state.compact
@@ -642,7 +655,7 @@ class _CompactReminderHook(Hook):
         runtime: Runtime[MeivaContext],
         _config: RunnableConfig,
         /,
-    ) -> dict[str, Any] | None:
+    ) -> dict[str, object] | None:
         if runtime.context.harness is not Harness.MEIVA:
             return None
         agent = runtime.context.require_agent()

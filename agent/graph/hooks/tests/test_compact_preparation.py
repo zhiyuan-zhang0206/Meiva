@@ -16,6 +16,7 @@ from agent.state import AgentState, CompactState
 from base.agents.context import MeivaContext
 from base.clock import Clock
 from base.config.tests.configuration import defaults
+from base.host.boundary.json_values import is_object_list
 from base.host.env.agent_slices import AgentSlices
 from base.lm.catalog import ModelCatalog
 from base.log.tests.log_records import LogRecords
@@ -75,7 +76,11 @@ async def test_contributors_run_once_in_order_and_rearm_in_the_next_window() -> 
     result = await compact_reminder(state, runtime, {})
     assert result is not None
     assert calls == ["first", "empty", "second"]
-    [note] = result["messages"]
+    messages = result["messages"]
+    assert is_object_list(messages)
+    [note] = messages
+    assert isinstance(note, HumanMessage)
+    assert isinstance(note.content, str)
     assert "to_user.md" in note.content
     assert "[fleet]\nPersist" in note.content
     assert note.content.index("[fleet]") < note.content.index("[evolution]")

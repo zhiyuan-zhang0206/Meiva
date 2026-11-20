@@ -13,7 +13,7 @@ from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
-from typing import Any, TypeGuard
+from typing import TypeGuard
 
 from langchain_core.messages import HumanMessage
 
@@ -28,6 +28,8 @@ from base.agents.messages.inbound_images import (
 from base.agents.messages.quote import payload_quote, quoted_context
 from base.agents.messages.timestamp_policy import TimestampPolicy
 from base.agents.upload_delivery.paths import UploadClient, fetch_upload_b64
+from base.host.boundary.fields import str_field
+from base.host.boundary.json_values import is_object_dict
 from base.log import logger
 
 
@@ -115,7 +117,7 @@ def _is_object_dict(value: object) -> TypeGuard[dict[object, object]]:
 
 
 def _attach_upload_files(
-    message: HumanMessage, agent_id: int, payload: Mapping[str, Any] | None
+    message: HumanMessage, agent_id: int, payload: Mapping[str, object] | None
 ) -> None:
     upload_files = inbound_upload_files(agent_id, payload)
     if upload_files:
@@ -135,7 +137,7 @@ def _build_chat_inbound_with_uploads(
 ) -> HumanMessage:
     raw_text = expand_command(item.content)
     head = inbound_head(item.source, created_at=item.created_at, inputs=envelope_inputs)
-    content: list[dict[str, Any]] = [
+    content: list[dict[str, object]] = [
         {"type": "text", "text": head + raw_text + inbound_tail(item.source)}
     ]
     image_urls: list[str] = []
@@ -214,21 +216,24 @@ def _build_chat_inbound(
         )
         _attach_upload_files(message, item.agent_id, item.payload)
         return message
-    blocks: list[dict[str, Any]] = [
+    blocks: list[dict[str, object]] = [
         {str(k): v for k, v in b.items()} for b in raw_blocks if _is_object_dict(b)
     ]
 
     text = "\n".join(str(b["text"]) for b in blocks if b.get("type") == "text")
     raw_text = expand_command(text)
     head = inbound_head(item.source, created_at=item.created_at, inputs=envelope_inputs)
-    content: list[dict[str, Any]] = [
+    content: list[dict[str, object]] = [
         {"type": "text", "text": head + raw_text + inbound_tail(item.source)}
     ]
     image_urls: list[str] = []
     for b in blocks:
         if b.get("type") != "image_url":
             continue
-        url = b["image_url"]["url"]
+        image_url = b.get("image_url")
+        if not is_object_dict(image_url):
+            raise TypeError(f"content image_url block must carry an image_url object, got {b!r}")
+        url = str_field(image_url, "url")
         parsed = parse_upload_url(url)
         if parsed is None:
             content.append({"type": "text", "text": f"[image reference {url!r} unreadable]"})

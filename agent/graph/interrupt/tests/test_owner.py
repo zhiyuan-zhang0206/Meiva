@@ -122,14 +122,13 @@ async def test_exit_abandons_a_wedged_watcher_within_the_bound_and_names_where_i
         await pool.parked.wait()
     elapsed = asyncio.get_running_loop().time() - started
     assert elapsed < 2.0, f"exit took {elapsed:.2f}s — the bounded handoff did not bound"
-    (abandoned,) = [r for r in loguru_records if "retained by its service" in r["message"]]
-    assert abandoned["level"].name == "INFO"
-    assert "wedged await chain" in abandoned["message"]
-    assert "in pending_interrupt_reason" in abandoned["message"]
+    (abandoned,) = [m for m in loguru_records.messages("INFO") if "retained by its service" in m]
+    assert "wedged await chain" in abandoned
+    assert "in pending_interrupt_reason" in abandoned
 
     release.set()
     await asyncio.sleep(0.01)
-    (fate,) = [r["message"] for r in loguru_records if "retained interrupt watcher" in r["message"]]
+    (fate,) = [m for m in loguru_records.messages() if "retained interrupt watcher" in m]
     assert "cancelled" in fate
 
 

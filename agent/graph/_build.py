@@ -24,7 +24,6 @@
 
 
 import random
-from typing import Any
 
 from langchain_core.runnables import RunnableConfig
 from langgraph.checkpoint.base import BaseCheckpointSaver
@@ -58,7 +57,7 @@ from .llm.node import llm_node
 
 
 def build_graph(
-    checkpointer: BaseCheckpointSaver[Any] | None,
+    checkpointer: BaseCheckpointSaver[str] | None,
     extensions: ExtensionRegistry,
     *,
     parent: ParentFacts,

@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Any, Literal
+from typing import Literal
 
 from langchain_core.runnables import RunnableConfig
 from langgraph.runtime import Runtime
@@ -71,13 +71,13 @@ async def harness_turn_node(
 def _apply_wake_polarity(
     state: _state.AgentState,
     projector: ReadTimelineSink,
-    updates: dict[str, Any],
+    updates: dict[str, object],
 ) -> None:
     if state.non_human_wake and not projector.non_human_wake:
         updates["non_human_wake"] = False
 
 
-_CLEARED: dict[str, Any] = {"harness_inputs": [], "harness_view": []}
+_CLEARED: dict[str, object] = {"harness_inputs": [], "harness_view": []}
 
 
 def _is_quota_exhaustion(
@@ -195,7 +195,7 @@ async def _run_harness_turn(
 ) -> Command[HarnessGoto]:
     bridge = ctx.require_harness_bridge()
     ctx.turn_progress.mark(agent_id)
-    extra_updates: dict[str, Any] = {}
+    extra_updates: dict[str, object] = {}
 
     projector = ReadTimelineSink(
         ctx,

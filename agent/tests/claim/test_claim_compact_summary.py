@@ -156,4 +156,5 @@ def test_replacement_summary_keeps_its_classifier_with_both_timestamp_states() -
             message.content
             == f"<system_note>\n{COMPACT_SUMMARY_HEADER}\n\n{prefix}Remember the whole body.\n</system_note>"
         )
+        assert isinstance(message.content, str)
         assert is_compact_summary_text(message.content)

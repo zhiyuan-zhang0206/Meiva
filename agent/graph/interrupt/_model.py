@@ -1,6 +1,5 @@
 import asyncio
-from collections.abc import Coroutine
-from typing import Any
+from collections.abc import Awaitable
 
 from base.agents.messages.inbound import InterruptReason
 
@@ -44,7 +43,7 @@ class ModelInterruptedError(Exception):
 # to cancellation. The owned operation settles before control returns to claim; the host's
 # external stop boundary owns escalation if a provider refuses to unwind.
 async def interruptible_model[T](
-    operation: Coroutine[Any, Any, T],
+    operation: Awaitable[T],
     event: asyncio.Event,
 ) -> T:
     # meiva:note

@@ -25,7 +25,7 @@ from agent.graph.hooks.compact import (
     compose_summary_message,
 )
 from agent.hooks import Hook
-from agent.state import AgentState, CompactState
+from agent.state import AgentState, CompactState, ContextReset
 from agent.tests.scripted_model import ScriptedChatModel
 from base.agents.context import MeivaContext
 from base.agents.messages.timestamp_policy import TimestampPolicy
@@ -37,6 +37,7 @@ from base.db.code_version_gate import ProcessDbGate
 from base.events.live.bus import EventBus
 from base.events.live.publisher import AgentEventPublisher
 from base.events.live.tests.live_capture import LiveEvents
+from base.host.boundary.json_values import is_object_list
 from base.host.env.agent_slices import AgentSlices
 from base.log.tests.log_records import LogRecords
 from base.packages.plugin_providers import build_model_catalog
@@ -55,6 +56,12 @@ def pinned_slices(
             else defaults(general__message_timestamps=timestamps_enabled)
         ),
     )
+
+
+def context_reset_of(update: Mapping[str, object]) -> ContextReset:
+    reset = update["context_reset"]
+    assert isinstance(reset, ContextReset)
+    return reset
 
 
 def compact_tail(update: Any) -> list[AnyMessage]:
@@ -227,11 +234,12 @@ async def test_auto_compact_hook_clears_history_and_parks_summary(
     assert result is not None
     assert len(fake_llm.requests) == 1
     new_msgs = result["messages"]
+    assert is_object_list(new_msgs)
     assert len(new_msgs) == 1
     assert isinstance(new_msgs[0], RemoveMessage)
     assert new_msgs[0].id == REMOVE_ALL_MESSAGES
 
-    reset = result["context_reset"]
+    reset = context_reset_of(result)
     assert [m.content for m in reset.tail] == [
         compose_summary_message(LONG_SUMMARY, inputs=TimestampPolicy.off())
     ]
@@ -319,7 +327,7 @@ async def test_auto_compact_hook_retries_short_then_accepts_long(database_gate: 
 
     assert result is not None
     assert len(llm.requests) == 2
-    assert result["context_reset"].tail[0].content == compose_summary_message(
+    assert context_reset_of(result).tail[0].content == compose_summary_message(
         LONG_SUMMARY, inputs=TimestampPolicy.off()
     )
 
@@ -351,7 +359,7 @@ async def test_auto_compact_hook_emits_compact_done_on_success(
     assert finished["status"] == "success"
     assert started["compact_id"] == finished["compact_id"]
     assert started["started_at"] and finished["finished_at"]
-    tail = result["context_reset"].tail
+    tail = context_reset_of(result).tail
     assert tail[0].additional_kwargs["meiva_compact_id"] == started["compact_id"]
 
 
@@ -407,7 +415,9 @@ async def test_compact_reminder_zero_to_one(
         fake_config(),
     )
     assert result is not None
-    assert result["compact"].version == 1
+    compact = result["compact"]
+    assert isinstance(compact, CompactState)
+    assert compact.version == 1
     assert "messages" in result
 
 
@@ -428,7 +438,9 @@ async def test_compact_reminder_increments_from_existing(
         fake_config(),
     )
     assert result is not None
-    assert result["compact"].version == 6
+    compact = result["compact"]
+    assert isinstance(compact, CompactState)
+    assert compact.version == 6
 
 
 def reminder_state(
