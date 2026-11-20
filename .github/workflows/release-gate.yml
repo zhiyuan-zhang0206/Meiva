@@ -630,6 +630,9 @@ jobs:
         with:
           ref: ${{ needs.precheck.outputs.sha }}
           fetch-depth: 0
+          # GITHUB_TOKEN can never carry the workflows permission, and a release commit
+          # that touches .github/workflows/ cannot be tagged with it.
+          token: ${{ secrets.RELEASE_PUSH_TOKEN }}
 
       - name: Fetch release and channel tags
         run: git fetch --tags --force origin
