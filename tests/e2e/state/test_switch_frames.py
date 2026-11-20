@@ -11,7 +11,7 @@ from __future__ import annotations
 import contextlib
 import re
 import time
-from typing import Any, cast
+from typing import TypedDict, cast
 
 import httpx
 import pytest
@@ -68,21 +68,33 @@ _FIRST_ROW = """v => {
 _AUTHORITY_DELAY_S = 1.2
 
 
+class Frame(TypedDict, total=False):
+    rows: bool
+    hidden: bool
+    id: str
+    offset: float
+
+
+class Place(TypedDict):
+    id: str
+    offset: float
+
+
 def _sidebar_row(page: Page, agent_id: int):
     return page.locator("li.agent-row-item").get_by_role(
         "button", name=re.compile(rf"^#{agent_id}\b")
     )
 
 
-def _assert_destination(
-    frames: list[dict[str, Any]], ids: set[str], saved: dict[str, Any], what: str
-) -> int:
+def _assert_destination(frames: list[Frame], ids: set[str], saved: Place, what: str) -> int:
     landed = 0
     for index, frame in enumerate(frames):
-        if not frame.get("rows") or frame.get("hidden") or frame.get("id") not in ids:
+        row = frame.get("id")
+        offset = frame.get("offset", 0.0)
+        if not frame.get("rows") or frame.get("hidden") or row is None or row not in ids:
             continue
-        assert frame["id"] == saved["id"] and abs(frame["offset"] - saved["offset"]) <= 1, (
-            f"{what}: frame {index} painted {frame['id']}@{frame['offset']:.1f}, "
+        assert row == saved["id"] and abs(offset - saved["offset"]) <= 1, (
+            f"{what}: frame {index} painted {row}@{offset:.1f}, "
             f"expected {saved['id']}@{saved['offset']:.1f}"
         )
         landed += 1
@@ -122,11 +134,11 @@ def _stub_conversation(page: Page, agent: int) -> set[str]:
     _ = page.route(
         re.compile(rf"/api/agents/{agent}/user-messages\?"), lambda route: route.fulfill(json=feed)
     )
-    return {message["item_id"] for message in messages}
+    return {str(message["item_id"]) for message in messages}
 
 
-def _frames(page: Page) -> list[dict[str, Any]]:
-    return cast(list[dict[str, Any]], page.evaluate("() => window.__frames"))
+def _frames(page: Page) -> list[Frame]:
+    return cast(list[Frame], page.evaluate("() => window.__frames"))
 
 
 @pytest.mark.scenario("tests.e2e.fakes.scenarios.message_flow:build")
@@ -138,7 +150,7 @@ def test_switch_back_and_reload_paint_only_the_saved_place(e2e_env: E2EEnv) -> N
     _ = resp.raise_for_status()
     other = cast(dict[str, int], resp.json())["id"]
     ids = _stub_conversation(page, agent)
-    page.add_init_script(_FRAME_PROBE)
+    _ = page.add_init_script(_FRAME_PROBE)
     settle_ms = int(_AUTHORITY_DELAY_S * 1000)
 
     try:
@@ -152,13 +164,13 @@ def test_switch_back_and_reload_paint_only_the_saved_place(e2e_env: E2EEnv) -> N
         viewport.hover()
         page.mouse.wheel(0, -1500)
         page.wait_for_timeout(600)
-        saved = cast(dict[str, Any] | None, viewport.evaluate(_FIRST_ROW))
+        saved = cast(Place | None, viewport.evaluate(_FIRST_ROW))
         assert saved is not None and saved["id"] in ids, "the reader is not on a row in history"
 
         _sidebar_row(page, other).click()
         page.wait_for_url(re.compile(rf"[?&]agent_id={other}\b"))
         page.wait_for_timeout(500)
-        _ = page.evaluate("() => { window.__frames.length = 0; }")
+        _ = cast(object, page.evaluate("() => { window.__frames.length = 0; }"))
         _sidebar_row(page, agent).click()
         page.wait_for_url(re.compile(rf"[?&]agent_id={agent}\b"))
         page.wait_for_timeout(settle_ms + 800)
