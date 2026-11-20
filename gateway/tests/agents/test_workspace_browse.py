@@ -1,19 +1,17 @@
 # meiva:note
-# The workspace viewer's tree and quick-open as the browser sees them: one directory at a time
-# under the same roots and refusals as a file read, a bounded name search, and a forwarded raw
-# read that answers byte ranges so media can seek. Reads on another machine go through a real
+# The workspace viewer's tree as the browser sees it: one directory at a time under the same roots
+# and refusals as a file read, and a forwarded raw read that answers byte ranges so media can
+# seek. Reads on another machine go through a real
 # HTTP listener answering as the owning runner does.
 # meiva:link gateway/agents/docs/to-user-resources.md
 
 import json
 from collections.abc import Iterator
 from pathlib import Path
-from typing import override
 
 import psycopg
 import pytest
 
-from base.clock.tests.manual_timers import ManualTimers
 from base.db import create_agent
 from base.paths import workspace_path
 from gateway.tests.auth.gateway_config import GatewayTestClient, gateway_test_client
@@ -21,7 +19,7 @@ from gateway.tests.support.runner_ops.workspace_ops import (
     register_runner,
     remote_workspace_ops_server,
 )
-from ops.to_user import list_workspace_dir, search_workspace_files
+from ops.to_user import list_workspace_dir
 
 
 @pytest.fixture
@@ -177,110 +175,6 @@ def test_listing_climbs_only_inside_the_custom_cwd(
     assert top.json()["parent"] is None
 
 
-_SEARCH_TREE = {
-    "src/components/FileTree.tsx": b"",
-    "src/file_tree_utils.py": b"",
-    "docs/tree.md": b"",
-    "fileTREE.md": b"",
-    ".env": b"",
-    "node_modules/pkg/filetree.js": b"",
-    "__pycache__/filetree.pyc": b"",
-    ".git/filetree": b"",
-    ".venv/lib/filetree.py": b"",
-    ".next/filetree.js": b"",
-    ".github/filetree.yml": b"",
-}
-
-
-def test_search_ranks_substring_hits_before_subsequence_hits(
-    client: GatewayTestClient, db_conn: psycopg.Connection
-) -> None:
-    agent = _agent_on(db_conn, "macmini")
-    ws = Path(workspace_path(client.app.state.gateway_process.home, agent))
-    _tree(ws, _SEARCH_TREE)
-
-    response = client.get(f"/api/agents/{agent}/files/search", params={"q": "FileTree"})
-    assert response.status_code == 200
-    body = response.json()
-    assert body["query"] == "FileTree"
-    assert body["truncated"] is False
-    assert [hit["relative"] for hit in body["results"]] == [
-        "fileTREE.md",
-        "src/components/FileTree.tsx",
-        "src/file_tree_utils.py",
-    ]
-    first = body["results"][0]
-    assert first["name"] == "fileTREE.md"
-    assert first["path"] == str(ws.resolve() / "fileTREE.md")
-
-    dotfile = client.get(f"/api/agents/{agent}/files/search", params={"q": ".env"})
-    assert [hit["relative"] for hit in dotfile.json()["results"]] == [".env"]
-
-    limited = client.get(f"/api/agents/{agent}/files/search", params={"q": "filetree", "limit": 1})
-    assert [hit["relative"] for hit in limited.json()["results"]] == ["fileTREE.md"]
-    assert limited.json()["truncated"] is True
-
-    scoped = client.get(f"/api/agents/{agent}/files/search", params={"q": "tree", "path": "docs"})
-    assert [hit["relative"] for hit in scoped.json()["results"]] == ["tree.md"]
-
-    assert client.get(f"/api/agents/{agent}/files/search").status_code == 422
-    assert client.get(f"/api/agents/{agent}/files/search?q=").status_code == 422
-    assert client.get(f"/api/agents/{agent}/files/search?q=x&limit=0").status_code == 422
-
-
-def test_search_never_leaves_its_root(
-    client: GatewayTestClient, db_conn: psycopg.Connection, tmp_path: Path
-) -> None:
-    agent = _agent_on(db_conn, "macmini")
-    ws = Path(workspace_path(client.app.state.gateway_process.home, agent))
-    _tree(ws, {"kept_secret.txt": b""})
-    outside = tmp_path / "outside"
-    _tree(outside, {"other_secret.txt": b""})
-    (ws / "escape").symlink_to(outside, target_is_directory=True)
-    (ws / "escape_secret.txt").symlink_to(outside / "other_secret.txt")
-    (ws / "loop").symlink_to(ws, target_is_directory=True)
-
-    found = client.get(f"/api/agents/{agent}/files/search", params={"q": "secret"})
-    assert [hit["relative"] for hit in found.json()["results"]] == ["kept_secret.txt"]
-
-    for forbidden in ("..", "/etc", str(outside), "escape"):
-        response = client.get(
-            f"/api/agents/{agent}/files/search", params={"q": "secret", "path": forbidden}
-        )
-        assert response.status_code == 403, forbidden
-
-
-# meiva:note
-# Every reading of these timers is a second later than the last, so the walk's deadline passes
-# after the first directories it opens.
-class _SecondPerReading(ManualTimers):
-    @override
-    def monotonic(self) -> float:
-        self.advance(1.0)
-        return super().monotonic()
-
-
-def test_search_stops_at_its_file_and_time_bounds(tmp_path: Path) -> None:
-    home = tmp_path / "home"
-    ws = workspace_path(home, 7)
-    _tree(ws, {f"d{depth}/" * depth + f"note{depth}.md": b"" for depth in range(1, 6)})
-    _tree(ws, {"note0.md": b""})
-
-    whole = search_workspace_files(home, 7, "", "note", limit=50, timers=ManualTimers())
-    assert len(whole.results) == 6
-    assert whole.truncated is False
-
-    by_count = search_workspace_files(
-        home, 7, "", "note", limit=50, timers=ManualTimers(), max_files=2
-    )
-    assert len(by_count.results) == 2
-    assert by_count.truncated is True
-
-    by_time = search_workspace_files(home, 7, "", "note", limit=50, timers=_SecondPerReading())
-    assert by_time.truncated is True
-    assert len(by_time.results) < 6
-
-
 _CLIP = bytes(range(256)) * 4
 _CLIP_SIZE = len(_CLIP)
 
@@ -300,7 +194,7 @@ def remote_owner(
         yield owner, workspace_path(remote_home, owner)
 
 
-def test_forwarded_listing_and_search(
+def test_forwarded_listing(
     client: GatewayTestClient, db_conn: psycopg.Connection, remote_owner: tuple[int, Path]
 ) -> None:
     owner, ws_remote = remote_owner
@@ -321,11 +215,6 @@ def test_forwarded_listing_and_search(
 
     refused = client.get(f"/api/agents/{owner}/files/list", params={"path": "../.."})
     assert refused.status_code == 403
-
-    found = client.get(f"/api/agents/{owner}/files/search", params={"q": "clp"}).json()
-    assert [(hit["relative"], hit["path"]) for hit in found["results"]] == [
-        ("media/clip.mp4", str(ws_remote / "media" / "clip.mp4"))
-    ]
 
 
 # meiva:note

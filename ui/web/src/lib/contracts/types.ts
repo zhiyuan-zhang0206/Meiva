@@ -65,7 +65,6 @@ export {
   type ToUserDocument,
   type WorkspaceDirListing,
   type WorkspaceFileResponse,
-  type WorkspaceFileSearch,
   type UserSettingListResponse,
   type UserSettingRow,
 } from "./types-settings";

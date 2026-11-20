@@ -16,23 +16,19 @@ from pydantic import BaseModel, ValidationError
 from starlette.background import BackgroundTask
 
 from base.agents.to_user import (
-    DEFAULT_SEARCH_LIMIT,
-    MAX_SEARCH_LIMIT,
-    MAX_SEARCH_QUERY_LENGTH,
     ToUserDocument,
     ToUserReadFailure,
     ToUserReadRequest,
     WorkspaceDirListing,
     WorkspaceFileRequest,
     WorkspaceFileResponse,
-    WorkspaceFileSearch,
 )
 from base.cluster.machine import gateway_auth_headers
 from base.cluster.machines import MachineGatewayUrlMissing, MachineNotRegistered, lookup
 from base.db.rows import query_one
 from base.paths import workspace_path
 from gateway.agents.eval_guard import deny_isolated_result_read
-from gateway.http.config import gateway_clock, gateway_config, gateway_rpc, gateway_state
+from gateway.http.config import gateway_config, gateway_rpc, gateway_state
 from gateway.http.middleware.error_envelope import error_response
 from ops.cluster.rpc import ClusterOpFailed, ClusterOpUnreachable
 from ops.to_user import (
@@ -42,7 +38,6 @@ from ops.to_user import (
     parse_explicit_workspace_path,
     read_workspace_file_content,
     resolve_existing_workspace_file,
-    search_workspace_files,
 )
 
 router = APIRouter()
@@ -364,7 +359,7 @@ def _forward_status(status: int) -> int:
 
 
 # meiva:note
-# Unset fields stay off the wire, so a runner that predates `list`/`search`/`byte_range` still
+# Unset fields stay off the wire, so a runner that predates `list`/`byte_range` still
 # accepts the content and raw reads it already knew.
 def forwarded_body(query: WorkspaceFileRequest) -> dict[str, object]:
     return query.model_dump(exclude_none=True)
@@ -579,41 +574,3 @@ async def list_workspace_files(
         agent_id=target.agent_id, path=target.path, mode="list", custom_cwd=target.custom_cwd
     )
     return await _forward_workspace_json(request, target.ops_url, query, WorkspaceDirListing)
-
-
-# meiva:note
-# Quick-open: files under a directory (default the agent's workspace root) whose relative path
-# matches `q`, bounded as `search_workspace_files` states.
-# meiva:link gateway/agents/docs/to-user-resources.md
-@router.get("/api/agents/{agent_id}/files/search", response_model=WorkspaceFileSearch)
-async def search_workspace(
-    agent_id: int,
-    request: Request,
-    q: Annotated[str, Query(min_length=1, max_length=MAX_SEARCH_QUERY_LENGTH)],
-    limit: Annotated[int, Query(ge=1, le=MAX_SEARCH_LIMIT)] = DEFAULT_SEARCH_LIMIT,
-    path: Annotated[
-        str | None,
-        Query(description="Directory to search under; defaults to the workspace root"),
-    ] = None,
-) -> WorkspaceFileSearch:
-    target = await _workspace_target(request, agent_id, path or None, allow_root=True)
-    if target.ops_url is None:
-        return await _read_locally(
-            search_workspace_files,
-            gateway_state(request).gateway_process.home,
-            target.agent_id,
-            target.path,
-            q,
-            limit=limit,
-            timers=gateway_clock(request).timers,
-            custom_cwd=target.custom_cwd,
-        )
-    query = WorkspaceFileRequest(
-        agent_id=target.agent_id,
-        path=target.path,
-        mode="search",
-        custom_cwd=target.custom_cwd,
-        query=q,
-        limit=limit,
-    )
-    return await _forward_workspace_json(request, target.ops_url, query, WorkspaceFileSearch)

@@ -11,7 +11,6 @@ import httpx
 import pytest
 
 from base.agents.to_user import read_document, to_user_limits
-from base.clock.tests.manual_timers import ManualTimers
 from base.config import settings
 from base.daemon.http_transport import start_daemon_http
 from base.db import Database, create_agent
@@ -157,7 +156,6 @@ async def _workspace_file_client(
             machine="source-host",
             home=unit_home,
             limits=LIMITS,
-            timers=ManualTimers(),
             executor=op_executor,
             dispatch_sem=asyncio.Semaphore(1),
             requests=requests,
@@ -218,9 +216,9 @@ async def test_workspace_file_route_content_and_raw(
 
 # meiva:note
 # The forwarded reads the viewer adds: a byte range answers `206` with its `Content-Range` header
-# through the daemon transport, and a listing or search answers JSON.
+# through the daemon transport, and a listing answers JSON.
 @pytest.mark.asyncio
-async def test_workspace_file_route_ranges_listing_and_search(
+async def test_workspace_file_route_ranges_and_listing(
     database: Database, unit_home: Path, op_executor: ThreadPoolExecutor
 ) -> None:
     async with _workspace_file_client(database, unit_home, op_executor) as (client, agent_id):
@@ -235,14 +233,3 @@ async def test_workspace_file_route_ranges_listing_and_search(
         list_resp = await client.post("/to-user/workspace-file", json=forwarded | {"mode": "list"})
         names = [entry["name"] for entry in list_resp.json()["entries"]]
         assert names == ["src", "hello.py", "icon.png"]
-
-        search_resp = await client.post(
-            "/to-user/workspace-file", json=forwarded | {"mode": "search", "query": "hello"}
-        )
-        relatives = [hit["relative"] for hit in search_resp.json()["results"]]
-        assert relatives == ["hello.py", "src/hello_test.py"]
-
-        queryless = await client.post(
-            "/to-user/workspace-file", json=forwarded | {"mode": "search"}
-        )
-        assert queryless.status_code == 422

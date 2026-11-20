@@ -14,7 +14,6 @@ from base.agents.to_user import (
     read_failure,
     read_resource,
 )
-from base.clock import Timers
 from base.daemon.http_transport import RouteAnswer
 from ops.to_user import WorkspaceFileError, answer_workspace_file, owned_workspace
 from services.agent_runner.agent_ops import in_flight
@@ -78,13 +77,12 @@ def workspace_file_response(
     machine: str,
     home: Path,
     limits: ToUserLimits,
-    timers: Timers,
 ) -> RouteAnswer:
 
     try:
         request = WorkspaceFileRequest.model_validate_json(body)
         owned_workspace(pool, request.agent_id, machine, home=home)
-        return answer_workspace_file(request, home=home, limits=limits, timers=timers)
+        return answer_workspace_file(request, home=home, limits=limits)
     except ValidationError:
         return 422, b"Invalid workspace file request", "text/plain"
     except WorkspaceFileError as exc:
@@ -102,7 +100,6 @@ async def workspace_file_route(
     machine: str,
     home: Path,
     limits: ToUserLimits,
-    timers: Timers,
     executor: ThreadPoolExecutor,
     dispatch_sem: asyncio.Semaphore,
     requests: in_flight.RequestTokens,
@@ -120,7 +117,6 @@ async def workspace_file_route(
                     machine=machine,
                     home=home,
                     limits=limits,
-                    timers=timers,
                 ),
             )
             in_flight.track_worker(future, workers=workers)

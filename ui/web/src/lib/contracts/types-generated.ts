@@ -319,22 +319,6 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/agents/{agent_id}/files/search": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get: operations["search_workspace_api_agents__agent_id__files_search_get"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
     "/api/keyed/v1/agents/{agent_id}/retry-launch": {
         parameters: {
             query?: never;
@@ -4375,16 +4359,6 @@ export interface components {
             binary: boolean;
             modified_at: string;
         };
-        WorkspaceFileSearch: {
-            query: string;
-            results: components["schemas"]["WorkspaceSearchHit"][];
-            truncated: boolean;
-        };
-        WorkspaceSearchHit: {
-            path: string;
-            name: string;
-            relative: string;
-        };
     };
     responses: never;
     parameters: never;
@@ -4959,39 +4933,6 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["WorkspaceDirListing"];
-                };
-            };
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    search_workspace_api_agents__agent_id__files_search_get: {
-        parameters: {
-            query: {
-                q: string;
-                limit?: number;
-                path?: string | null;
-            };
-            header?: never;
-            path: {
-                agent_id: number;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["WorkspaceFileSearch"];
                 };
             };
             422: {
