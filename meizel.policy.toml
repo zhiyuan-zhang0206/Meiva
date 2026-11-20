@@ -581,6 +581,77 @@ max-public-symbols = ["6"]
 max-params = ["6"]
 max-attr-hops = ["3"]
 
+# test-graph: what test selection knows about this repository's tests. The fixtures, markers and
+# modules that need native Postgres, Redis or a host service put a test in the native lane; the
+# tree-scan pins always run; a change to a global path runs everything, a change to the frontend
+# outside Python runs nothing; `tests/e2e/` is selected by its own job; and the Markdown under the
+# documentation roots is documentation only.
+[test-graph]
+native-fixtures = [
+    "provisioned_db",
+    "provisioned_redis",
+    "_db_stall_guard",
+    "_clean_db",
+    "_clean_redis",
+    "gateway_data_plane",
+    "cluster_defaults_unset",
+    "db_url",
+    "database_version",
+    "database_gate",
+    "database",
+    "redis_url",
+    "event_bus",
+    "db_conn",
+    "adb_conn",
+    "aops_pool",
+    "aredis_inbound_listener",
+    "postgres_access",
+    "redis_access",
+]
+native-markers = ["requires_host", "flaky", "native_permissions_helper"]
+native-modules = [
+    "base/deploy/tests/containers.py",
+    "base/deploy/tests/pgbouncer.py",
+    "scripts/ci/migration_smoke.py",
+    "scripts/ci/pgvector_runtime_smoke.py",
+    "scripts/ci/vendor_pg_runtime.py",
+]
+pytester-native-tokens = [
+    "provisioned_db",
+    "provisioned_redis",
+    "gateway_data_plane",
+    "db_url",
+    "database",
+    "redis_url",
+    "event_bus",
+    "db_conn",
+    "adb_conn",
+    "aops_pool",
+    "postgres_access",
+    "redis_access",
+    "containers",
+]
+tree-scan-pins = [
+    "scripts/ci/pull_requests/tests/test_ci_job_rerun.py",
+    "tests/harness/test_ci_rerun_workflow.py",
+    "scripts/ci/pull_requests/tests/test_ci_monitor.py",
+    "tests/contracts/test_db_check_enum_sync.py",
+    "tests/harness/test_pool_keepalives.py",
+    "tests/harness/test_env_guard_canary.py",
+    "scripts/ci/tests/test_harness_imports.py",
+    "tests/components/cli/test_main_dispatch_contract.py",
+    "tests/components/base/test_crash_row_writers.py",
+    "tests/integration/test_impersonation_audit_root_inventory.py",
+    "tests/scripts/test_alert_single_path.py",
+]
+global-files = [".github/workflows/ci.yml"]
+global-prefixes = [".github/actions/"]
+frontend-prefixes = ["ui/"]
+excluded-prefixes = ["tests/e2e/"]
+doc-dirs = ["docs", "future"]
+doc-excluded-roots = ["schedules"]
+doc-excluded-names = ["AGENTS.md", "SKILL.md"]
+
 [typescript]
 inlined-env-roots = [
     "ui/web/src/",

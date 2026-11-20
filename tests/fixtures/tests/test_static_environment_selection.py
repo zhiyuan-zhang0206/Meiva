@@ -15,6 +15,11 @@ from meizel.checkout import lanes_at
 @pytest.fixture
 def owned_tree(tmp_path: Path) -> Path:
     (tmp_path / "pytest.ini").write_text("[pytest]\n", encoding="utf-8")
+    # meiva:note
+    # The native fixtures are the repository's to declare, as this repository's policy declares them.
+    (tmp_path / "meizel.policy.toml").write_text(
+        '[test-graph]\nnative-fixtures = ["db_url", "redis_url"]\n', encoding="utf-8"
+    )
     (tmp_path / "conftest.py").write_text(
         "pytest_plugins = [\n"
         "    'tests.fixtures.env_bootstrap',\n"

@@ -2,6 +2,9 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from meizel import allowances
+from meizel.checkout import GitRepo
+
 from scripts.ci import test_selector
 
 _REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -16,5 +19,5 @@ def test_tree_scan_pins_cover_the_real_repo_lint_family_and_are_never_stale() ->
     }
     assert lint_files, "the lint family must be discoverable"
     assert lint_files <= pinned
-    for path in test_selector.TREE_SCAN_TESTS:
+    for path in allowances.load(GitRepo(_REPO_ROOT)).names("test-graph", "tree-scan-pins"):
         assert path in pinned, f"{path} is stale (missing on disk)"
