@@ -582,10 +582,10 @@ def test_notification_text_names_only_labels_the_first_query_keeps() -> None:
 # meiva:note
 # A release wave cuts running turns on purpose; the host marks those aborts `cause=planned_restart`
 # and the turn-aborted alert leaves exactly that value out, so an abort without a cause still alerts.
+# The value is the one `agent.turn.runloop.PLANNED_RESTART` emits (pinned beside the emitter in
+# `test_circuit_breaker.py`).
 def test_the_turn_aborted_alert_leaves_out_only_planned_restarts() -> None:
-    from agent.turn.runloop import PLANNED_RESTART
-
     rule = {r["uid"]: r for r in load_rules()}["meiva-ops-llm-turn-aborted"]
     (expr,) = [" ".join(e.split()) for e in rule_query_exprs(rule, "loki")]
-    assert f'| attributes_cause != "{PLANNED_RESTART}" [30m]' in expr
+    assert '| attributes_cause != "planned_restart" [30m]' in expr
     assert expr.count("attributes_cause") == 1
