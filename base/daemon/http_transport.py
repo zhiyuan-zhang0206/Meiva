@@ -15,6 +15,12 @@ from collections.abc import Awaitable, Callable, Mapping
 from base.host.net.auth import verify_bearer_digest
 
 RouteHandler = Callable[[bytes], Awaitable[tuple[int, bytes, str]]]
+
+# meiva:note
+# What the transport serves: a route answers status, body and content type, and may add response
+# headers (a byte-range answer's `Content-Range`) as a fourth element. Every `RouteHandler` is one.
+RouteAnswer = tuple[int, bytes, str] | tuple[int, bytes, str, Mapping[str, str]]
+ServedRoute = Callable[[bytes], Awaitable[RouteAnswer]]
 _MAX_BODY_BYTES = 64 * 1024
 _log = logging.getLogger("base.daemon.http_transport")
 
@@ -42,19 +48,25 @@ def _content_length(header_lines: list[bytes]) -> int:
     return 0
 
 
-def _build_response(status: int, body: bytes, content_type: str) -> bytes:
+def _build_response(
+    status: int, body: bytes, content_type: str, headers: Mapping[str, str] | None = None
+) -> bytes:
     reason = {
         200: "OK",
+        206: "Partial Content",
         400: "Bad Request",
         401: "Unauthorized",
         404: "Not Found",
+        416: "Range Not Satisfiable",
         500: "Internal Server Error",
         503: "Service Unavailable",
     }.get(status, "Unknown")
+    extra = "".join(f"{name}: {value}\r\n" for name, value in (headers or {}).items())
     return (
         f"HTTP/1.1 {status} {reason}\r\n".encode("ascii")
         + f"Content-Type: {content_type}\r\n".encode("ascii")
         + f"Content-Length: {len(body)}\r\n".encode("ascii")
+        + extra.encode("ascii")
         + b"Connection: close\r\n\r\n"
         + body
     )
@@ -66,7 +78,7 @@ async def _routed_response(
     method: str,
     path: str,
     *,
-    routes: Mapping[tuple[str, str], RouteHandler],
+    routes: Mapping[tuple[str, str], ServedRoute],
     health_response: Callable[[], tuple[int, bytes]],
     auth_digests: frozenset[str] | None,
 ) -> bytes:
@@ -94,8 +106,10 @@ async def _routed_response(
             401, json.dumps({"error": "unauthorized"}).encode(), "application/json"
         )
     try:
-        status, resp_body, ctype = await routes[(method, path)](body_bytes)
-        return _build_response(status, resp_body, ctype)
+        answer = await routes[(method, path)](body_bytes)
+        if len(answer) == 4:
+            return _build_response(answer[0], answer[1], answer[2], answer[3])
+        return _build_response(answer[0], answer[1], answer[2])
     except Exception as exc:
         _log.exception("[http_transport] route %s %s handler raised", method, path)
         return _build_response(
@@ -108,7 +122,7 @@ async def start_daemon_http(
     host: str,
     port: int,
     health_response: Callable[[], tuple[int, bytes]],
-    extra_routes: Mapping[tuple[str, str], RouteHandler] | None = None,
+    extra_routes: Mapping[tuple[str, str], ServedRoute] | None = None,
     auth_digests: frozenset[str] | None = None,
 ) -> asyncio.Server:
     """Bind only the explicitly supplied routes and health response."""

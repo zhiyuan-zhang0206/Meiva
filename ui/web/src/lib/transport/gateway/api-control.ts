@@ -55,7 +55,9 @@ import type {
   UserSettingListResponse,
   UserSettingRow,
   WireFleetGraph,
+  WorkspaceDirListing,
   WorkspaceFileResponse,
+  WorkspaceFileSearch,
 } from "../../contracts/types";
 import { toUserPath } from "./routes/agent-routes";
 import { configPath, harnessAvailabilityPath, inventoryPath, resolvedConfigPath, settingPath } from "./routes/config-routes";
@@ -119,6 +121,32 @@ export function createControlApi(http: Http) {
     ): Promise<WorkspaceFileResponse> => {
       const query = new URLSearchParams({ path });
       return f(`/api/agents/${agentId}/files/content?${query}`, { signal }).then(ok<WorkspaceFileResponse>);
+    },
+
+    // meiva:note
+    // One directory of the viewer's tree; no `path` lists the agent's workspace root.
+    listWorkspaceDir: (
+      agentId: number,
+      path?: string,
+      signal?: AbortSignal,
+    ): Promise<WorkspaceDirListing> => {
+      const query = path === undefined ? "" : `?${new URLSearchParams({ path })}`;
+      return f(`/api/agents/${agentId}/files/list${query}`, { signal }).then(ok<WorkspaceDirListing>);
+    },
+
+    // meiva:note
+    // Quick-open over the agent's workspace root, or under the directory `path` names.
+    searchWorkspaceFiles: (
+      agentId: number,
+      query: string,
+      limit?: number,
+      signal?: AbortSignal,
+      path?: string,
+    ): Promise<WorkspaceFileSearch> => {
+      const params = new URLSearchParams({ q: query });
+      if (limit !== undefined) params.set("limit", String(limit));
+      if (path !== undefined) params.set("path", path);
+      return f(`/api/agents/${agentId}/files/search?${params}`, { signal }).then(ok<WorkspaceFileSearch>);
     },
     getFleetGraph: (opts?: { hours?: number; decayLambda?: number }): Promise<WireFleetGraph> => {
       return f(fleetGraphPath(opts)).then(ok<WireFleetGraph>);

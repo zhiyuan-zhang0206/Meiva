@@ -2,6 +2,7 @@ import asyncio
 import contextlib
 import logging
 import mimetypes
+from collections.abc import AsyncIterator, Callable
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Annotated
@@ -10,30 +11,38 @@ from urllib.parse import quote
 import httpx
 import psycopg
 from fastapi import APIRouter, HTTPException, Query, Request
-from fastapi.responses import FileResponse, JSONResponse, Response
-from pydantic import ValidationError
+from fastapi.responses import FileResponse, JSONResponse, Response, StreamingResponse
+from pydantic import BaseModel, ValidationError
+from starlette.background import BackgroundTask
 
 from base.agents.to_user import (
+    DEFAULT_SEARCH_LIMIT,
+    MAX_SEARCH_LIMIT,
+    MAX_SEARCH_QUERY_LENGTH,
     ToUserDocument,
     ToUserReadFailure,
     ToUserReadRequest,
+    WorkspaceDirListing,
     WorkspaceFileRequest,
     WorkspaceFileResponse,
+    WorkspaceFileSearch,
 )
 from base.cluster.machine import gateway_auth_headers
 from base.cluster.machines import MachineGatewayUrlMissing, MachineNotRegistered, lookup
 from base.db.rows import query_one
 from base.paths import workspace_path
 from gateway.agents.eval_guard import deny_isolated_result_read
-from gateway.http.config import gateway_config, gateway_rpc, gateway_state
+from gateway.http.config import gateway_clock, gateway_config, gateway_rpc, gateway_state
 from gateway.http.middleware.error_envelope import error_response
 from ops.cluster.rpc import ClusterOpFailed, ClusterOpUnreachable
 from ops.to_user import (
     WorkspaceFileError,
     clean_file_path,
+    list_workspace_dir,
     parse_explicit_workspace_path,
     read_workspace_file_content,
     resolve_existing_workspace_file,
+    search_workspace_files,
 )
 
 router = APIRouter()
@@ -166,21 +175,25 @@ def response_policy(media_type: str) -> tuple[str, str]:
     return ("inline" if passive else "attachment"), _PASSIVE_POLICY
 
 
-def resource_response(content: bytes, name: str) -> Response:
-
+# meiva:note
+# The media type a file name implies and the headers every served file carries: its disposition
+# and the passive CSP, never cached, never sniffed into another type.
+def passive_headers(name: str) -> tuple[str, dict[str, str]]:
     media_type = mimetypes.guess_type(name)[0] or "application/octet-stream"
     disposition, policy = response_policy(media_type)
-    return Response(
-        content,
-        media_type=media_type,
-        headers={
-            "Content-Disposition": f"{disposition}; filename*=UTF-8''{quote(name, safe='')}",
-            "Cache-Control": "no-store",
-            "X-Content-Type-Options": "nosniff",
-            "Content-Security-Policy": policy,
-            "Referrer-Policy": "no-referrer",
-        },
-    )
+    return media_type, {
+        "Content-Disposition": f"{disposition}; filename*=UTF-8''{quote(name, safe='')}",
+        "Cache-Control": "no-store",
+        "X-Content-Type-Options": "nosniff",
+        "Content-Security-Policy": policy,
+        "Referrer-Policy": "no-referrer",
+    }
+
+
+def resource_response(content: bytes, name: str) -> Response:
+
+    media_type, headers = passive_headers(name)
+    return Response(content, media_type=media_type, headers=headers)
 
 
 async def fetch_resource(
@@ -267,21 +280,25 @@ def _query_agent_cwd(conn: psycopg.Connection, agent_id: int) -> str | None:
 # Eval isolation is checked against the caller first; then an explicit
 # `.meiva/workspaces/<owner>/<subpath>` reference switches placement lookup to `<owner>`
 # with `custom_cwd=None` so cross-agent links resolve on `<owner>`'s machine regardless
-# of which agent's conversation opened the link.
+# of which agent's conversation opened the link. A directory read (`allow_root`) may name the
+# workspace root itself, and no path at all names the agent's own workspace root (`""`).
 # meiva:link gateway/agents/docs/to-user-resources.md
 def _resolve_workspace_file_request(
-    request: Request, agent_id: int, raw_path: str
+    request: Request, agent_id: int, raw_path: str | None, *, allow_root: bool = False
 ) -> tuple[int, str, str, str, str | None]:
     deny_isolated_result_read(request)
     home = gateway_state(request).gateway_process.home
-    try:
-        cleaned = clean_file_path(raw_path)
-        explicit = parse_explicit_workspace_path(raw_path, home=home)
-    except WorkspaceFileError as exc:
-        raise HTTPException(exc.status_code, exc.detail) from exc
+    cleaned = ""
+    explicit = None
+    if raw_path is not None:
+        try:
+            cleaned = clean_file_path(raw_path)
+            explicit = parse_explicit_workspace_path(raw_path, home=home, allow_root=allow_root)
+        except WorkspaceFileError as exc:
+            raise HTTPException(exc.status_code, exc.detail) from exc
 
     target_agent_id = explicit[0] if explicit is not None else agent_id
-    target_path = explicit[1] if explicit is not None else raw_path
+    target_path = explicit[1] if explicit is not None else (raw_path or "")
     cleaned_name = Path(explicit[1] if explicit is not None else cleaned).name
     include_cwd = explicit is None
 
@@ -314,49 +331,181 @@ async def _resolve_agent_ops_url(
         raise HTTPException(503, "The agent's machine is unavailable") from exc
 
 
-async def fetch_workspace_file_content(
+# meiva:note
+# Where one workspace read happens: `ops_url` is None when the gateway host holds the files.
+@dataclass(frozen=True)
+class _WorkspaceTarget:
+    agent_id: int
+    path: str
+    name: str
+    custom_cwd: str | None
+    ops_url: str | None
+
+
+async def _workspace_target(
+    request: Request, agent_id: int, raw_path: str | None, *, allow_root: bool = False
+) -> _WorkspaceTarget:
+    target_agent_id, target_path, name, machine, custom_cwd = await asyncio.to_thread(
+        _resolve_workspace_file_request, request, agent_id, raw_path, allow_root=allow_root
+    )
+    ops_url = await _resolve_agent_ops_url(request, target_agent_id, machine, custom_cwd)
+    return _WorkspaceTarget(target_agent_id, target_path, name, custom_cwd, ops_url)
+
+
+async def _read_locally[**P, T](read: Callable[P, T], *args: P.args, **kwargs: P.kwargs) -> T:
+    try:
+        return await asyncio.to_thread(read, *args, **kwargs)
+    except WorkspaceFileError as exc:
+        raise HTTPException(exc.status_code, exc.detail) from exc
+
+
+def _forward_status(status: int) -> int:
+    return status if status in (400, 403, 404, 413, 422, 503) else 502
+
+
+# meiva:note
+# Unset fields stay off the wire, so a runner that predates `list`/`search`/`byte_range` still
+# accepts the content and raw reads it already knew.
+def forwarded_body(query: WorkspaceFileRequest) -> dict[str, object]:
+    return query.model_dump(exclude_none=True)
+
+
+async def fetch_workspace_json[Answer: BaseModel](
     client: httpx.AsyncClient,
     url: str,
     query: WorkspaceFileRequest,
     headers: dict[str, str],
-) -> WorkspaceFileResponse:
-    response = await client.post(url, json=query.model_dump(), headers=headers)
+    answer: type[Answer],
+) -> Answer:
+    response = await client.post(url, json=forwarded_body(query), headers=headers)
     if response.status_code != 200:
-        status = (
-            response.status_code if response.status_code in (400, 403, 404, 413, 422, 503) else 502
-        )
         detail = response.text.strip() or "Workspace file could not be read"
-        raise HTTPException(status, detail)
-    return WorkspaceFileResponse.model_validate_json(response.content)
+        raise HTTPException(_forward_status(response.status_code), detail)
+    return answer.model_validate_json(response.content)
 
 
-async def fetch_workspace_file_raw(
+async def _forward_workspace_json[Answer: BaseModel](
+    request: Request, ops_url: str, query: WorkspaceFileRequest, answer: type[Answer]
+) -> Answer:
+    access = gateway_state(request).gateway_access
+    try:
+        async with httpx.AsyncClient(
+            timeout=httpx.Timeout(30, connect=3), trust_env=False
+        ) as client:
+            return await fetch_workspace_json(
+                client,
+                f"{ops_url.rstrip('/')}/to-user/workspace-file",
+                query,
+                gateway_auth_headers(access),
+                answer,
+            )
+    except httpx.HTTPError as exc:
+        raise HTTPException(503, "The agent's machine is unavailable") from exc
+
+
+# meiva:note
+# Open the owning runner's answer to a raw read without reading its body. `200`, `206` and `416`
+# are the file's answer and relay as they are; anything else becomes the gateway's refusal. A
+# whole file larger than `limit` is refused from its declared length before a byte is relayed.
+# A runner that predates `byte_range` refuses the field as `422`; the read is then asked again
+# without it, and the browser gets the whole file as it did before ranges were forwarded.
+async def open_workspace_file_raw(
     client: httpx.AsyncClient,
     url: str,
     query: WorkspaceFileRequest,
     headers: dict[str, str],
     *,
     limit: int,
-) -> bytes:
-    async with client.stream("POST", url, json=query.model_dump(), headers=headers) as response:
-        if response.status_code != 200:
-            raw_err = await response.aread()
-            status = (
-                response.status_code
-                if response.status_code in (400, 403, 404, 413, 422, 503)
-                else 502
-            )
-            detail = (
-                raw_err.decode("utf-8", errors="replace").strip()
-                or "Workspace file could not be read"
-            )
-            raise HTTPException(status, detail)
-        content = bytearray()
-        async for chunk in response.aiter_bytes():
-            content.extend(chunk)
-            if len(content) > limit:
-                raise HTTPException(413, f"Referenced file exceeds the {limit}-byte resource limit")
-        return bytes(content)
+) -> httpx.Response:
+    try:
+        return await _open_raw_once(client, url, query, headers, limit=limit)
+    except HTTPException as refused:
+        if refused.status_code != 422 or query.byte_range is None:
+            raise
+    whole = query.model_copy(update={"byte_range": None})
+    return await _open_raw_once(client, url, whole, headers, limit=limit)
+
+
+async def _open_raw_once(
+    client: httpx.AsyncClient,
+    url: str,
+    query: WorkspaceFileRequest,
+    headers: dict[str, str],
+    *,
+    limit: int,
+) -> httpx.Response:
+    upstream = await client.send(
+        client.build_request("POST", url, json=forwarded_body(query), headers=headers),
+        stream=True,
+    )
+    if upstream.status_code not in (200, 206, 416):
+        raw_err = await upstream.aread()
+        await upstream.aclose()
+        detail = raw_err.decode("utf-8", errors="replace").strip()
+        raise HTTPException(
+            _forward_status(upstream.status_code), detail or "Workspace file could not be read"
+        )
+    declared = upstream.headers.get_list("content-length")
+    if declared and declared[0].isdigit() and int(declared[0]) > limit:
+        await upstream.aclose()
+        raise HTTPException(413, f"Referenced file exceeds the {limit}-byte resource limit")
+    return upstream
+
+
+async def relay_body(upstream: httpx.Response, *, limit: int) -> AsyncIterator[bytes]:
+    relayed = 0
+    try:
+        async for chunk in upstream.aiter_bytes():
+            relayed += len(chunk)
+            if relayed > limit:
+                return
+            yield chunk
+    finally:
+        await upstream.aclose()
+
+
+# meiva:note
+# The forwarded raw read streams the runner's answer through instead of buffering it: the
+# browser's `Range` travels as `byte_range`, and the runner's `Content-Range` and length come
+# back with the file's own type and the passive headers.
+async def _stream_workspace_raw(
+    request: Request, target: _WorkspaceTarget, ops_url: str
+) -> Response:
+    query = WorkspaceFileRequest(
+        agent_id=target.agent_id,
+        path=target.path,
+        mode="raw",
+        custom_cwd=target.custom_cwd,
+        byte_range=request.headers.get("range"),
+    )
+    limit = gateway_config(request).to_user.max_resource_bytes
+    client = httpx.AsyncClient(timeout=httpx.Timeout(30, connect=3), trust_env=False)
+    try:
+        upstream = await open_workspace_file_raw(
+            client,
+            f"{ops_url.rstrip('/')}/to-user/workspace-file",
+            query,
+            gateway_auth_headers(gateway_state(request).gateway_access),
+            limit=limit,
+        )
+    except httpx.HTTPError as exc:
+        await client.aclose()
+        raise HTTPException(503, "The agent's machine is unavailable") from exc
+    except HTTPException:
+        await client.aclose()
+        raise
+    media_type, headers = passive_headers(target.name)
+    headers["Accept-Ranges"] = "bytes"
+    for name in ("content-length", "content-range"):
+        if name in upstream.headers:
+            headers[name] = upstream.headers[name]
+    return StreamingResponse(
+        relay_body(upstream, limit=limit),
+        status_code=upstream.status_code,
+        headers=headers,
+        media_type=media_type,
+        background=BackgroundTask(client.aclose),
+    )
 
 
 @router.get("/api/agents/{agent_id}/files/content", response_model=WorkspaceFileResponse)
@@ -367,39 +516,19 @@ async def get_workspace_file_content(
         str, Query(description="Workspace or cwd relative path, absolute path, or file:// URL")
     ],
 ) -> WorkspaceFileResponse:
-    target_agent_id, target_path, _, machine, custom_cwd = await asyncio.to_thread(
-        _resolve_workspace_file_request, request, agent_id, path
-    )
-    ops_url = await _resolve_agent_ops_url(request, target_agent_id, machine, custom_cwd)
-    if ops_url is None:
-        home = gateway_state(request).gateway_process.home
-        try:
-            return await asyncio.to_thread(
-                read_workspace_file_content,
-                home,
-                target_agent_id,
-                target_path,
-                custom_cwd=custom_cwd,
-            )
-        except WorkspaceFileError as exc:
-            raise HTTPException(exc.status_code, exc.detail) from exc
-
+    target = await _workspace_target(request, agent_id, path)
+    if target.ops_url is None:
+        return await _read_locally(
+            read_workspace_file_content,
+            gateway_state(request).gateway_process.home,
+            target.agent_id,
+            target.path,
+            custom_cwd=target.custom_cwd,
+        )
     query = WorkspaceFileRequest(
-        agent_id=target_agent_id, path=target_path, mode="content", custom_cwd=custom_cwd
+        agent_id=target.agent_id, path=target.path, mode="content", custom_cwd=target.custom_cwd
     )
-    access = gateway_state(request).gateway_access
-    try:
-        async with httpx.AsyncClient(
-            timeout=httpx.Timeout(30, connect=3), trust_env=False
-        ) as client:
-            return await fetch_workspace_file_content(
-                client,
-                f"{ops_url.rstrip('/')}/to-user/workspace-file",
-                query,
-                gateway_auth_headers(access),
-            )
-    except httpx.HTTPError as exc:
-        raise HTTPException(503, "The agent's machine is unavailable") from exc
+    return await _forward_workspace_json(request, target.ops_url, query, WorkspaceFileResponse)
 
 
 @router.get("/api/agents/{agent_id}/files/raw", response_model=None)
@@ -410,55 +539,81 @@ async def get_workspace_file_raw(
         str, Query(description="Workspace or cwd relative path, absolute path, or file:// URL")
     ],
 ) -> Response:
-    target_agent_id, target_path, cleaned_name, machine, custom_cwd = await asyncio.to_thread(
-        _resolve_workspace_file_request, request, agent_id, path
+    target = await _workspace_target(request, agent_id, path)
+    if target.ops_url is not None:
+        return await _stream_workspace_raw(request, target, target.ops_url)
+    file, _ = await _read_locally(
+        resolve_existing_workspace_file,
+        gateway_state(request).gateway_process.home,
+        target.agent_id,
+        target.path,
+        custom_cwd=target.custom_cwd,
     )
-    ops_url = await _resolve_agent_ops_url(request, target_agent_id, machine, custom_cwd)
-    if ops_url is None:
-        home = gateway_state(request).gateway_process.home
-        try:
-            target, _ = await asyncio.to_thread(
-                resolve_existing_workspace_file,
-                home,
-                target_agent_id,
-                target_path,
-                custom_cwd=custom_cwd,
-            )
-        except WorkspaceFileError as exc:
-            raise HTTPException(exc.status_code, exc.detail) from exc
-        stat = target.stat()
-        media_type = mimetypes.guess_type(target.name)[0] or "application/octet-stream"
-        disposition, policy = response_policy(media_type)
-        headers = {
-            "Content-Disposition": f"{disposition}; filename*=UTF-8''{quote(target.name, safe='')}",
-            "Cache-Control": "no-store",
-            "X-Content-Type-Options": "nosniff",
-            "Content-Security-Policy": policy,
-            "Referrer-Policy": "no-referrer",
-        }
-        return FileResponse(
-            path=target,
-            stat_result=stat,
-            media_type=media_type,
-            headers=headers,
-        )
+    media_type, headers = passive_headers(file.name)
+    return FileResponse(path=file, stat_result=file.stat(), media_type=media_type, headers=headers)
 
+
+# meiva:note
+# One directory of a workspace for the viewer's tree; no `path` lists the agent's workspace root.
+# The same roots and refusals as a file read apply, and the root itself may be listed.
+# meiva:link gateway/agents/docs/to-user-resources.md
+@router.get("/api/agents/{agent_id}/files/list", response_model=WorkspaceDirListing)
+async def list_workspace_files(
+    agent_id: int,
+    request: Request,
+    path: Annotated[
+        str | None,
+        Query(description="Directory: workspace or cwd relative, absolute, or file:// URL"),
+    ] = None,
+) -> WorkspaceDirListing:
+    target = await _workspace_target(request, agent_id, path or None, allow_root=True)
+    if target.ops_url is None:
+        return await _read_locally(
+            list_workspace_dir,
+            gateway_state(request).gateway_process.home,
+            target.agent_id,
+            target.path,
+            custom_cwd=target.custom_cwd,
+        )
     query = WorkspaceFileRequest(
-        agent_id=target_agent_id, path=target_path, mode="raw", custom_cwd=custom_cwd
+        agent_id=target.agent_id, path=target.path, mode="list", custom_cwd=target.custom_cwd
     )
-    access = gateway_state(request).gateway_access
-    to_user = gateway_config(request).to_user
-    try:
-        async with httpx.AsyncClient(
-            timeout=httpx.Timeout(30, connect=3), trust_env=False
-        ) as client:
-            content = await fetch_workspace_file_raw(
-                client,
-                f"{ops_url.rstrip('/')}/to-user/workspace-file",
-                query,
-                gateway_auth_headers(access),
-                limit=to_user.max_resource_bytes,
-            )
-    except httpx.HTTPError as exc:
-        raise HTTPException(503, "The agent's machine is unavailable") from exc
-    return resource_response(content, cleaned_name)
+    return await _forward_workspace_json(request, target.ops_url, query, WorkspaceDirListing)
+
+
+# meiva:note
+# Quick-open: files under a directory (default the agent's workspace root) whose relative path
+# matches `q`, bounded as `search_workspace_files` states.
+# meiva:link gateway/agents/docs/to-user-resources.md
+@router.get("/api/agents/{agent_id}/files/search", response_model=WorkspaceFileSearch)
+async def search_workspace(
+    agent_id: int,
+    request: Request,
+    q: Annotated[str, Query(min_length=1, max_length=MAX_SEARCH_QUERY_LENGTH)],
+    limit: Annotated[int, Query(ge=1, le=MAX_SEARCH_LIMIT)] = DEFAULT_SEARCH_LIMIT,
+    path: Annotated[
+        str | None,
+        Query(description="Directory to search under; defaults to the workspace root"),
+    ] = None,
+) -> WorkspaceFileSearch:
+    target = await _workspace_target(request, agent_id, path or None, allow_root=True)
+    if target.ops_url is None:
+        return await _read_locally(
+            search_workspace_files,
+            gateway_state(request).gateway_process.home,
+            target.agent_id,
+            target.path,
+            q,
+            limit=limit,
+            timers=gateway_clock(request).timers,
+            custom_cwd=target.custom_cwd,
+        )
+    query = WorkspaceFileRequest(
+        agent_id=target.agent_id,
+        path=target.path,
+        mode="search",
+        custom_cwd=target.custom_cwd,
+        query=q,
+        limit=limit,
+    )
+    return await _forward_workspace_json(request, target.ops_url, query, WorkspaceFileSearch)

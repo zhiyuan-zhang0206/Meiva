@@ -371,3 +371,18 @@ describe("operation identities", () => {
     expect(requests()).toHaveLength(0);
   });
 });
+
+describe("workspace browsing", () => {
+  it("lists the root without a path and encodes a directory, a query, a limit and a scope", async () => {
+    await api().listWorkspaceDir(7);
+    await api().listWorkspaceDir(7, "/w/my dir");
+    await api().searchWorkspaceFiles(7, "file tree");
+    await api().searchWorkspaceFiles(7, "a&b", 20, undefined, "src");
+    expect(requests().map((request) => [request.method, request.path])).toEqual([
+      ["GET", "/api/agents/7/files/list"],
+      ["GET", "/api/agents/7/files/list?path=%2Fw%2Fmy+dir"],
+      ["GET", "/api/agents/7/files/search?q=file+tree"],
+      ["GET", "/api/agents/7/files/search?q=a%26b&limit=20&path=src"],
+    ]);
+  });
+});
