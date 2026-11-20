@@ -25,7 +25,12 @@ from meizel.state import turn_scoped_config as rule  # noqa: E402 - standalone s
 def main(argv: list[str]) -> int:
     from base.config import per_agent_field_names
 
-    return rule.main(argv, per_agent_field_names=per_agent_field_names)
+    return rule.main(
+        argv,
+        per_agent_field_names=per_agent_field_names,
+        repo_root=_REPO_ROOT,
+        policy_root=_REPO_ROOT,
+    )
 
 
 if __name__ == "__main__":

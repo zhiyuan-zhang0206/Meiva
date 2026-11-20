@@ -25,7 +25,6 @@
 # never reports as clean.
 # An added entry is reported and never asked about: a widening is what the reviewer reads in the
 # diff, not a declaration to write.
-# meiva:link meizel/docs/checker/policy/policy.md
 
 
 from __future__ import annotations
@@ -45,8 +44,6 @@ from typing import TypeGuard
 _REPO_ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(_REPO_ROOT))
 
-from base.host.boundary.options import options  # noqa: E402
-from base.host.boundary.untyped import object_of  # noqa: E402
 from meizel.allowances import (  # noqa: E402
     POLICY,
     Declaration,
@@ -58,6 +55,9 @@ from meizel.allowances import (  # noqa: E402
 )
 from meizel.checkout import GitRepo, toplevel  # noqa: E402
 from meizel.graph.model import MeizelError  # noqa: E402
+
+from base.host.boundary.options import options  # noqa: E402
+from base.host.boundary.untyped import object_of  # noqa: E402
 from scripts.ci.test_impact import member_numbers  # noqa: E402
 
 _SEPARATOR = " \u2014 "

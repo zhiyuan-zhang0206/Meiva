@@ -16,7 +16,6 @@ _UNIT_TESTS = [
     "base/lm/tests/test_catalog.py",
     "cli/commands/tests/helper.py",
     "agent/graph/exec/tests/resources/test_output_pipe.py",
-    "meizel/tests/test_roles.py",
     "scripts/ci/tests/conftest.py",
 ]
 _NOT_UNIT_TESTS = [

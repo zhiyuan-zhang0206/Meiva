@@ -152,6 +152,9 @@ dev = [
     "pytest-split",
     "pytest-random-order>=1.2.0",  # opt-in only (--random-order): the nightly random-order run, .github/workflows/random-order.yml
     "beautifulsoup4>=4.12.3",  # HTML parsing for scripts/model_registry/update_model_pricing.py
+    # The locality checker, pinned to a release of its own repository; its rule data (`meizel.toml`,
+    # `meizel.policy.toml`, `meizel.timing_baseline.json`) stays here.
+    "meizel @ git+https://github.com/zhiyuan-zhang0206/meizel@decefdfd962b4b8534bf15d467b8a846061dc534",
 ]
 
 [tool.ruff]
@@ -313,7 +316,6 @@ check-typed-exception = true
 # take the changed paths as arguments, which are the diff's own file names, so S603 has
 # nothing to flag here.
 "scripts/hooks/diff_checks.py" = ["S603"]
-"meizel/**" = ["ANN", "T20"]
 # The typed S110 findings in scripts/tests were outside the retired lint's
 # production scan; preserve that boundary.
 "scripts/codegen/gen_config_lite_table.py" = ["S110"]
@@ -401,7 +403,6 @@ testpaths = [
     "gateway/**/tests",
     "ops/**/tests",
     "services/**/tests",
-    "meizel/**/tests",
     "scripts/**/tests",
     "schedules/**/tests",
     # meizel:roles END
@@ -565,7 +566,6 @@ include = [
     "gateway",
     "ops",
     "services",
-    "meizel",
     "scripts",
     "tests",
     # meizel:roles END
@@ -1565,11 +1565,6 @@ extraPaths = ["meiva_builtins/skills/integrations/web-sources/scripts"]
 
 [[tool.pyright.executionEnvironments]]
 root = "meiva_builtins/skills/practice"
-reportAny = "error"
-reportExplicitAny = "error"
-
-[[tool.pyright.executionEnvironments]]
-root = "meizel/contracts"
 reportAny = "error"
 reportExplicitAny = "error"
 

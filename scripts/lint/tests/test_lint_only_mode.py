@@ -21,14 +21,14 @@ from pathlib import Path
 from types import ModuleType
 
 import pytest
-
-from base.host.proc import run_bounded
 from meizel import lint_common
 from meizel.checkout import roles_at, source_tree
 from meizel.language import no_script_sibling_imports
 from meizel.owners import clock_lattice, clock_lattice_cli
 from meizel.roles import framework_dirs, select_packages
 from meizel.state import no_os_environ, turn_scoped_config
+
+from base.host.proc import run_bounded
 from scripts.content_lint import lint_no_cjk, lint_no_tailnet
 from scripts.lint import (
     async_no_sync_blocking,
@@ -159,7 +159,9 @@ CASES = [
         no_os_environ,
         "base/tests/test_x.py",
         'def test_x(monkeypatch):\n    monkeypatch.setenv("A", "x")\n',
-        call=partial(no_os_environ.main, managed_aliases=lambda: frozenset({"A"})),
+        call=partial(
+            no_os_environ.main, managed_aliases=lambda: frozenset({"A"}), policy_root=_REPO_ROOT
+        ),
     ),
     Case(
         turn_scoped_config,
@@ -167,7 +169,11 @@ CASES = [
         "from base.config import settings\nx = settings.agent.fixture_field\n",
         # The rule asks its caller which fields are per-agent; a field of its own keeps the
         # case independent of whatever the application's config registry holds today.
-        call=partial(turn_scoped_config.main, per_agent_field_names=lambda: {"fixture_field"}),
+        call=partial(
+            turn_scoped_config.main,
+            per_agent_field_names=lambda: {"fixture_field"},
+            policy_root=_REPO_ROOT,
+        ),
     ),
     Case(
         clock_lattice_cli,
@@ -246,7 +252,6 @@ def fake_repo(tmp_path: Path) -> Path:
     for rel in (
         *_FRAMEWORK_DIRS,
         "scripts",
-        "meizel",
         "tests",
         "base/lm",
         "meiva_builtins/plugins",

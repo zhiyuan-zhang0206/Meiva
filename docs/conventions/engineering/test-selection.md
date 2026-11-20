@@ -122,8 +122,7 @@ matching row decides.
 The root meizel manifests are declarations: `[roles]` names the top-level packages the
 selector classifies by, and `[uses]`, `[debt.*]` and the policy feed the meizel checks, which
 the structure job runs over the whole tree on every CI run. No runtime behavior reads them,
-so a change selects the tests that can observe them: every collectable test under `meizel/`,
-every test whose code holds the file name as a string constant (outside docstrings), and the
+so a change selects the tests that can observe them: every test whose code holds the file name as a string constant (outside docstrings), and the
 runtime and package tests of each source module that does. The readers are derived by that
 scan, never listed. The test hosts come from `pyproject.toml`, which stays global.
 

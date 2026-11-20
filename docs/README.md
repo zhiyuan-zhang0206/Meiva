@@ -20,7 +20,7 @@ Index of Meiva's package and domain documentation. Each package documents its de
 | [MCP Integrations](mcps/mcps.md) | MCP integration — built-in chrome + external servers installed via `meiva mcp install` (e.g., x), invoked via daemon subprocesses |
 | [Test Suite](../tests/docs/tests.md) | Test suite — pytest unit / integration / e2e tests covering all modules |
 | [Scripts](../scripts/docs/scripts.md) | Operations scripts — lint / build / install / provision / CI / release toolset |
-| [meizel/ — Locality Rules](../meizel/docs/meizel.md) | Locality rules — shared lint scope, file and directory budgets, Python language restrictions |
+| [meizel/ — Locality Rules](https://github.com/zhiyuan-zhang0206/meizel/blob/main/meizel/docs/meizel.md) | Locality rules — shared lint scope, file and directory budgets, Python language restrictions |
 
 ## Maintenance
 

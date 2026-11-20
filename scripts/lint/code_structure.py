@@ -1,6 +1,5 @@
 # meiva:link docs/conventions/python-conventions.md
 # meiva:link scripts/lint/docs/lint.md
-# meiva:link meizel/docs/ambient-state.md
 
 from __future__ import annotations
 
@@ -45,6 +44,7 @@ from meizel.owners import decisions  # noqa: E402
 from meizel.roles import framework_dirs, select_packages  # noqa: E402
 from meizel.state import ambient_state, machine_role  # noqa: E402
 from meizel.state.ambient_state import allowlist as ambient_allowlist  # noqa: E402
+
 from scripts.lint.diagnostics import no_ambient_fallback  # noqa: E402
 from scripts.structure import baseline_shards, locality  # noqa: E402
 from scripts.structure.budgets import quality_budget  # noqa: E402

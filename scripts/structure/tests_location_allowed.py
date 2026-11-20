@@ -136,6 +136,10 @@ ALLOWED: dict[str, tuple[Category, str]] = {
         "contract",
         "tests the PATH_SCOPES plugin, tests/fixtures/path_scopes.py",
     ),
+    "tests/ci/test_tests_dir_scope.py": (
+        "contract",
+        "checks the .pre-commit-config.yaml hook file patterns and the default scans of the lints against the whole tree's test directories",
+    ),
     "tests/ci/test_pgbouncer_pin.py": (
         "contract",
         "keeps .github/actions/install-pg-redis and scripts/provision/database.sh on one PgBouncer pin",
@@ -319,6 +323,10 @@ ALLOWED: dict[str, tuple[Category, str]] = {
     "tests/harness/test_helperproc.py": (
         "contract",
         "helper process wire contract and execution isolation driven over temporary sockets and child processes",
+    ),
+    "tests/contracts/test_meizel_data.py": (
+        "contract",
+        "pins this repository's checker data (meizel.toml roles against pyproject.toml, the meizel.policy.toml allowance counts, approved patch sites and TypeScript test doubles); the checker is an installed dependency",
     ),
     "tests/contracts/test_lint_contextvars_allowlist.py": (
         "contract",

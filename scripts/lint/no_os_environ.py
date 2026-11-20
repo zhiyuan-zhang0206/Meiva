@@ -35,7 +35,12 @@ def main(
     repo_root: Path | None = None,
     managed_aliases: Callable[[], frozenset[str]] = settings_managed_aliases,
 ) -> int:
-    return rule.main(argv, managed_aliases=managed_aliases, repo_root=repo_root)
+    return rule.main(
+        argv,
+        managed_aliases=managed_aliases,
+        repo_root=_REPO_ROOT if repo_root is None else repo_root,
+        policy_root=_REPO_ROOT,
+    )
 
 
 if __name__ == "__main__":

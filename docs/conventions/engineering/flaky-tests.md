@@ -252,7 +252,7 @@ time deterministically with fake timers; never assume a machine will reach a
 state by a fixed wall-clock instant.
 
 **Lintability — lintable now.** The
-[clock-lattice lint](../../../meizel/owners/clock_lattice.py) rejects
+[clock-lattice lint](https://github.com/zhiyuan-zhang0206/meizel/blob/main/meizel/owners/clock_lattice.py) rejects
 lattice-vocabulary constants outside approved lattice modules, while
 `base/deploy/tests/test_timing_topology.py` verifies the declared relations.
 Pinned-count gates remain a review heuristic.
@@ -349,11 +349,11 @@ a hang` on the line, with a bound far outside any real duration. A hang guard at
 budget is a flake with a comment.
 
 **Lintability — lintable now.**
-[`meizel/owners/timing_judgement.py`](../../../meizel/owners/timing_judgement.py) reports
+[`meizel/owners/timing_judgement.py`](https://github.com/zhiyuan-zhang0206/meizel/blob/main/meizel/owners/timing_judgement.py) reports
 every wall-clock comparison in an `assert`; the sites that predate the rule are keyed in
-`meizel/owners/timing_judgement_baseline.json`, so the gate reds only on new ones. The
+`meizel.timing_baseline.json` at the repository root, so the gate reds only on new ones. The
 rule's parts, and who owns the decision when it fires, are in
-[the rule's own document](../../../meizel/docs/lint/timing-judgement.md).
+[the rule's own document](https://github.com/zhiyuan-zhang0206/meizel/blob/main/meizel/docs/lint/timing-judgement.md).
 
 ## 11. Do not race a timer to produce the state you assert on
 

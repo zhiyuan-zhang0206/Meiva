@@ -3,10 +3,10 @@ from __future__ import annotations
 from pathlib import Path
 
 import pytest
-
 from meizel import allowances
 from meizel.entry import open_repository
 from meizel.owners import decisions
+
 from scripts.lint import pool_keepalives as _lint
 
 
@@ -104,7 +104,7 @@ def test_default_scope_is_what_rule_5_does_not_see() -> None:
         "postgres-dial"
     ].allowed
     scanned = {path.relative_to(root).as_posix() for path in _lint.default_targets()}
-    assert scanned == {"scripts", "meizel", *allowed}
+    assert scanned == {"scripts", *allowed}
 
 
 def test_explicit_missing_target_is_an_error(
