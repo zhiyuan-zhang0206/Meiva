@@ -90,6 +90,10 @@ The panel is a file viewer (user rulings 2026-11-20 and 2026-11-21; decision rec
 - **What renders in place.** Markdown, images, video, audio, PDF (the browser's viewer) and source
   code with line ranges. Other binary files offer a download.
 - **Labels.** File names show without a type icon.
+- **What a linked file may be.** A file the to-user document links to opens like any other file:
+  it must lie in an agent's workspace or the agent's working directory. A linked Markdown document
+  outside both, which the earlier document chain rendered through the to-user resource route, shows
+  "can't be shown". This narrowing is deliberate (2026-11-21): every tab reads through one route.
 Normal Markdown links are directly clickable in conversation messages and `to_user.md`;
 explicit `.meiva/workspaces/<id>/...` references keep the viewer attached to the
 active conversation's panel while routing content/raw reads and nested relative

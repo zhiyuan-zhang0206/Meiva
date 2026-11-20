@@ -129,7 +129,7 @@ export function PathBar({ agentId, documentModifiedAt }: { agentId: number; docu
     ? (documentModifiedAt ? t("updated", { time: formatRelative(documentModifiedAt, now) }) : null)
     : (file.data ? formatFileSize(file.data.size) : null);
   return (
-    <div ref={barRef} data-testid="path-bar" className={cn("relative shrink-0 items-center gap-0.5 border-b px-2 py-1 font-mono text-[11px] text-muted-foreground", FLEX)}>
+    <div ref={barRef} data-testid="path-bar" className={cn("relative shrink-0 items-center gap-0.5 border-b px-2 py-1 font-mono text-[11px] text-muted-foreground", MIN_W_0, FLEX)}>
       <div className="relative">
         <button type="button" aria-haspopup="menu" aria-expanded={open === 0} onClick={() => setOpen(open === 0 ? null : 0)} className={segment}>
           #{ownerAgentId}
@@ -137,9 +137,12 @@ export function PathBar({ agentId, documentModifiedAt }: { agentId: number; docu
         {open === 0 ? <FolderMenu agentId={agentId} start={{ workspace: ownerAgentId, path: undefined }} onClose={() => setOpen(null)} /> : null}
       </div>
       {inWorkspace ? folders.map((name, index) => (
-        <div key={`${index}:${name}`} className={cn("relative items-center", FLEX)}>
+        // meiva:note
+        // Folder segments give up width before the file name does: a deep path in a narrow panel
+        // truncates its folders rather than overflowing the bar.
+        <div key={`${index}:${name}`} className={cn("relative items-center", MIN_W_0, FLEX)}>
           <ChevronRight aria-hidden className="size-3 shrink-0 opacity-50" />
-          <button type="button" aria-haspopup="menu" aria-expanded={open === index + 1} onClick={() => setOpen(open === index + 1 ? null : index + 1)} className={segment}>
+          <button type="button" aria-haspopup="menu" aria-expanded={open === index + 1} onClick={() => setOpen(open === index + 1 ? null : index + 1)} className={cn(segment, "min-w-[2ch] max-w-32 truncate")}>
             {name}
           </button>
           {open === index + 1 ? (

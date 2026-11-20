@@ -109,11 +109,18 @@ export function WorkspaceFileView({ agentId, target }: WorkspaceFileViewProps) {
   const parsedRange = useMemo(() => parseLineRange(target.lineRange), [target.lineRange]);
   const firstHighlightedLineRef = useRef<HTMLDivElement>(null);
 
+  // meiva:note
+  // The highlighted lines are brought into view once, when the file first arrives: the periodic
+  // re-read must not pull a reader who scrolled away back to them.
+  const scrolledToRange = useRef(false);
+  const hasData = data !== undefined;
   useEffect(() => {
+    if (scrolledToRange.current || !hasData) return;
     if (parsedRange && firstHighlightedLineRef.current) {
+      scrolledToRange.current = true;
       firstHighlightedLineRef.current.scrollIntoView({ block: "center", behavior: "smooth" });
     }
-  }, [parsedRange, data]);
+  }, [parsedRange, hasData]);
 
   const fallbackName = requestPath.split("/").pop() ?? requestPath;
   const fallbackDot = fallbackName.lastIndexOf(".");
