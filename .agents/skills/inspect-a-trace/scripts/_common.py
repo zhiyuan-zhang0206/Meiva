@@ -8,7 +8,7 @@
 # chicken-and-egg step: `resolve_meiva_home` cannot run until `base` is on
 # `sys.path`, and `base` cannot be located without first deciding where to
 # look. A script-mode sibling import needs its own guard under
-# `PYTHONSAFEPATH=1` (see `meizel.language.no_script_sibling_imports`) — both
+# `PYTHONSAFEPATH=1` (see `scripts.rules.language.no_script_sibling_imports`) — both
 # callers insert their own directory onto `sys.path` before importing this
 # module.
 

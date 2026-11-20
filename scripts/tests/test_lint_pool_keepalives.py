@@ -5,9 +5,9 @@ from pathlib import Path
 import pytest
 from meizel import allowances
 from meizel.entry import open_repository
-from meizel.owners import decisions
 
 from scripts.lint import pool_keepalives as _lint
+from scripts.rules.owners import decisions
 
 
 def _violations(src: str) -> list[tuple[int, str]]:

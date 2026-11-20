@@ -2,7 +2,7 @@
 # End-to-end coverage of the ambient-state rule (Rule 9) through lcs.main(): a new site fails,
 # the frozen baseline must match reality in both directions, the base-revision guard is
 # shrink-only, a new lint cannot introduce baseline exemptions, and a stale list
-# entry fails. Rule semantics live in the checker's own tests (meizel.state.ambient_state).
+# entry fails. Rule semantics live in the checker's own tests (scripts.rules.state.ambient_state).
 
 from __future__ import annotations
 
@@ -11,12 +11,31 @@ import pathlib
 import subprocess
 
 import pytest
-from meizel.state import ambient_state
 
 from scripts.lint import code_structure as lcs
+from scripts.rules.state import ambient_state
 from scripts.structure import baseline_shards
 
 LINT_STUB = ambient_state.LINT
+
+# meiva:note
+# The shape of the `[ambient-state]` tables, as this repository's `meizel.policy.toml` declares it
+# under `[sections]`: a fixture checkout states it the same way.
+_AMBIENT_SECTIONS = (
+    "[sections.ambient-state]\n"
+    'sink-callees = "names"\n'
+    'sink-callee-suffixes = "names"\n'
+    'wiring-callees = "names"\n'
+    'pure-callees = "names"\n'
+    'pure-chain-callees = "names"\n'
+    'skill-script-patterns = "names"\n'
+    'config-modules = "names"\n'
+    'config-readers = "names"\n'
+    'sink-facades = "reasons"\n'
+    'pure-repo-callees = "reasons"\n'
+    'sites = "reasons"\n'
+    "\n"
+)
 
 
 def _write(root: pathlib.Path, name: str, content: str) -> pathlib.Path:
@@ -159,7 +178,8 @@ def test_tests_skill_scripts_and_main_blocks_are_not_scanned(
     _write(
         _repo,
         "meizel.policy.toml",
-        '[ambient-state]\nskill-script-patterns = ["^meiva_builtins/skills/"]\n',
+        _AMBIENT_SECTIONS
+        + '[ambient-state]\nskill-script-patterns = ["^meiva_builtins/skills/"]\n',
     )
     _write(_repo, "base/tests/test_state.py", "_REGISTRY = {}\n")
     _write(_repo, "meiva_builtins/skills/web/scripts/run.py", "_REGISTRY = {}\nmain()\n")
@@ -339,7 +359,8 @@ def test_a_list_entry_whose_site_is_gone_fails_the_gate(
     _write(
         _repo,
         "meizel.policy.toml",
-        '[ambient-state.sites]\n"base/state.py::hidden-singleton:table" = "static"\n',
+        _AMBIENT_SECTIONS
+        + '[ambient-state.sites]\n"base/state.py::hidden-singleton:table" = "static"\n',
     )
     _write(_repo, "base/state.py", "from functools import cache\n\n@cache\ndef table(): ...\n")
     assert lcs.main([], repo_root=_repo, baseline_base="HEAD", parse_ast=ast.parse) == 0
@@ -358,7 +379,8 @@ def test_a_list_entry_for_a_deleted_file_fails_the_gate(
     _write(
         _repo,
         "meizel.policy.toml",
-        '[ambient-state.sink-facades]\n"base/log/sink.py" = "the log sink\'s buffer"\n',
+        _AMBIENT_SECTIONS
+        + '[ambient-state.sink-facades]\n"base/log/sink.py" = "the log sink\'s buffer"\n',
     )
 
     assert lcs.main([], repo_root=_repo, baseline_base="HEAD", parse_ast=ast.parse) == 1

@@ -17,7 +17,7 @@
 # `base.db.pool()` merges those kwargs for every sync pool and
 # `base.db.async_pool()` for every async one (the agent host passes its
 # `LoggingConnectionPool` in as the pool class). In the governed packages the
-# structure gate's Rule 5 (`postgres-dial`, `meizel.owners.decisions`)
+# structure gate's Rule 5 (`postgres-dial`, `scripts.rules.owners.decisions`)
 # already rejects any pool built outside `base/db/connections.py`, with no
 # frozen exceptions left. This lint covers only what that rule does not see:
 # `scripts/` (not a governed package) and the modules the decision allows to dial
@@ -63,8 +63,9 @@ sys.path.insert(0, str(_REPO_ROOT))
 # meiva:link scripts/docs/scripts.md
 from meizel import allowances, lint_common  # noqa: E402
 from meizel.checkout import GitRepo, roles_at, source_tree  # noqa: E402
-from meizel.owners import decisions  # noqa: E402
 from meizel.roles import select_packages  # noqa: E402
+
+from scripts.rules.owners import decisions  # noqa: E402
 
 ROLES = roles_at(_REPO_ROOT)
 

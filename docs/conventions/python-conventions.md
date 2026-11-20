@@ -98,7 +98,7 @@ by the existing SDK surface metadata and Installation; do not introduce another 
 - **Rule 6 — no path imports under `meiva_builtins/`.** A skill or plugin
   module may not edit `sys.path`, call `site.addsitedir`, or load a module
   by file path (`spec_from_file_location`, `SourceFileLoader`,
-  `runpy.run_path`); [`meizel/language/path_imports.py`](https://github.com/zhiyuan-zhang0206/meizel/blob/main/meizel/language/path_imports.py) finds them. Shared
+  `runpy.run_path`); [`scripts/rules/language/path_imports.py`](../../scripts/rules/language/path_imports.py) finds them. Shared
   code moves into a governed package the script imports normally, and a
   script that needs it runs on the checkout's venv python. One narrow
   exception: a script under `meiva_builtins/skills/<group>/<skill>/` may run a
@@ -109,7 +109,7 @@ by the existing SDK surface metadata and Installation; do not introduce another 
   skill, `meiva_builtins/skills/` itself, or `meiva_builtins/plugins/`), or any
   file-loader call regardless of its argument, is still a violation. The
   Every measured path-import site fails directly, with no baseline allowance.
-- **Rule 5 — single decision owners.** [`meizel/owners/decisions.py:decision_table`](https://github.com/zhiyuan-zhang0206/meizel/blob/main/meizel/owners/decisions.py)
+- **Rule 5 — single decision owners.** [`scripts/rules/owners/decisions.py:decision_table`](../../scripts/rules/owners/decisions.py)
   names design decisions with exactly one owning module — today,
   `postgres-dial` (`base/db/connections.py`). Any other module making that
   decision is a bypass; fix it by routing through the owner. A site that
@@ -134,9 +134,9 @@ written once in `scripts/structure/baseline_shards.py` and printed by every guar
 
 Every structure violation carries the same four parts: the rule and the repair, why the
 rule exists, what the author of the site now owns, and the document that states it. The
-reason is written once in the rule's own module — [`meizel/owners/decisions.py`](https://github.com/zhiyuan-zhang0206/meizel/blob/main/meizel/owners/decisions.py),
-[`meizel/language/path_imports.py`](https://github.com/zhiyuan-zhang0206/meizel/blob/main/meizel/language/path_imports.py), [`meizel/language/scan.py`](https://github.com/zhiyuan-zhang0206/meizel/blob/main/meizel/language/scan.py),
-[`meizel/state/ambient_state/`](https://github.com/zhiyuan-zhang0206/meizel/blob/main/meizel/state/ambient_state), [`meizel/budgets/budget_plans.py`](https://github.com/zhiyuan-zhang0206/meizel/blob/main/meizel/budgets/budget_plans.py),
+reason is written once in the rule's own module — [`scripts/rules/owners/decisions.py`](../../scripts/rules/owners/decisions.py),
+[`scripts/rules/language/path_imports.py`](../../scripts/rules/language/path_imports.py), [`meizel/language/scan.py`](https://github.com/zhiyuan-zhang0206/meizel/blob/main/meizel/language/scan.py),
+[`scripts/rules/state/ambient_state/`](../../scripts/rules/state/ambient_state), [`meizel/budgets/budget_plans.py`](https://github.com/zhiyuan-zhang0206/meizel/blob/main/meizel/budgets/budget_plans.py),
 `scripts/structure/budgets/quality_budget.py`, `scripts/structure/baseline_shards.py`,
 `scripts/structure/tests_location.py` — and every site that breaks that rule prints it. A new
 rule brings its reason with it.
@@ -196,7 +196,7 @@ A Thread
 requires an explicit service/process owner with admission, stop, retained handles
 and completion/error collection; free-floating `create_task` or thread work is
 forbidden. Rule 9 of `scripts/lint/code_structure.py`
-([`meizel/state/ambient_state/`](https://github.com/zhiyuan-zhang0206/meizel/blob/main/meizel/state/ambient_state)) enforces both: new sites fail, today's are
+([`scripts/rules/state/ambient_state/`](../../scripts/rules/state/ambient_state)) enforces both: new sites fail, today's are
 frozen in the `ambient_state` baseline section as `path::rule:name -> site count`
 (exact, shrink-only), and the only things let through are the closed, reasoned lists
 in the `[ambient-state]` tables of `meizel.policy.toml` — write-only facades, framework wiring

@@ -256,14 +256,13 @@ def test_base_archive_cannot_silently_omit_dependency_inputs(tmp_path: Path) -> 
 @pytest.mark.parametrize(
     "legacy",
     [
-        '[ambient-state]\ndb-modules = ["base.db"]\ndb-primitives = ["connect"]\n'
-        'db-handles = ["base.db:Database"]\nbus-handles = ["base.bus:EventBus"]\n'
-        'endpoint-handles = ["base.endpoints:ServiceEndpoints"]\n',
-        "[ambient-state]\nunknown = []\n",
+        '[sections.ambient-state]\nconfig-modules = "names"\n\n'
+        '[ambient-state]\nconfig-modules = ["base.config"]\n',
+        '[sections.purity]\nfiles = "reasons"\n',
         "[ambient-state]\ndb-handles = [3]\n",
     ],
 )
-def test_base_policy_uses_the_owner_snapshot_decoder(tmp_path: Path, legacy: str) -> None:
+def test_base_policy_is_read_by_the_policy_owner(tmp_path: Path, legacy: str) -> None:
     from meizel.graph.model import MeizelError
 
     root = _repo(tmp_path)
@@ -275,7 +274,7 @@ def test_base_policy_uses_the_owner_snapshot_decoder(tmp_path: Path, legacy: str
     _git(root, "-c", "user.name=Test", "-c", "user.email=test@example.com", "commit", "-qm", "base")
     _write(root, "tests/consumer/test_old.py", "def test_old(): pass\n")
     _write(root, "meizel.policy.toml")
-    if "unknown" in legacy or "[3]" in legacy:
+    if "sections.purity" in legacy or "[3]" in legacy:
         with pytest.raises(MeizelError, match="cannot read the manifests"):
             test_selector.select_tests(["base/leaf.py"], repo_root=root, base_ref="HEAD")
     else:

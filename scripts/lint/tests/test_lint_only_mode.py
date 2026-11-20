@@ -23,10 +23,7 @@ from types import ModuleType
 import pytest
 from meizel import lint_common
 from meizel.checkout import roles_at, source_tree
-from meizel.language import no_script_sibling_imports
-from meizel.owners import clock_lattice, clock_lattice_cli
 from meizel.roles import framework_dirs, select_packages
-from meizel.state import no_os_environ, turn_scoped_config
 
 from base.host.proc import run_bounded
 from scripts.content_lint import lint_no_cjk, lint_no_tailnet
@@ -46,6 +43,9 @@ from scripts.lint.diagnostics import (
     time_bomb,
 )
 from scripts.lint.plugins import no_plugin_wrap
+from scripts.rules.language import no_script_sibling_imports
+from scripts.rules.owners import clock_lattice, clock_lattice_cli
+from scripts.rules.state import no_os_environ, turn_scoped_config
 
 _REPO_ROOT = Path(__file__).resolve().parents[3]
 _FRAMEWORK_DIRS = framework_dirs(roles_at(_REPO_ROOT))

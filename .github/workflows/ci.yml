@@ -798,7 +798,7 @@ jobs:
 
       - name: Lint clock lattice
         if: ${{ github.event_name != 'pull_request' }}
-        run: uv run python -m meizel.owners.clock_lattice_cli
+        run: uv run python -m scripts.rules.owners.clock_lattice_cli
 
       - name: Lint clock lattice (incremental PR)
         if: ${{ github.event_name == 'pull_request' }}
@@ -808,14 +808,14 @@ jobs:
           files=()
           while IFS= read -r path; do
             case "$path" in
-              meizel.policy.toml|uv.lock) full=true ;;
+              meizel.policy.toml|uv.lock|scripts/rules/*) full=true ;;
               *.py) [[ -f "$path" ]] && files+=("$path") ;;
             esac
           done < "$STATIC_CHANGED_FILE"
           if [[ "$full" == true ]]; then
-            uv run python -m meizel.owners.clock_lattice_cli
+            uv run python -m scripts.rules.owners.clock_lattice_cli
           elif [[ "${#files[@]}" -gt 0 ]]; then
-            uv run python -m meizel.owners.clock_lattice_cli --only "${files[@]}"
+            uv run python -m scripts.rules.owners.clock_lattice_cli --only "${files[@]}"
           else
             echo "No changed Python files; skipping clock lattice check."
           fi
@@ -1170,7 +1170,7 @@ jobs:
               continue
             fi
             case "$path" in
-              -*|.pre-commit-config.yaml|scripts/lint/*|scripts/structure/*|scripts/content_lint/*|uv.lock)
+              -*|.pre-commit-config.yaml|scripts/lint/*|scripts/structure/*|scripts/content_lint/*|scripts/rules/*|uv.lock)
                 widen=true
                 ;;
             esac
