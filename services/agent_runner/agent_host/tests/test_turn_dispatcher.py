@@ -358,3 +358,17 @@ class TestUncancellableTurn:
         )
         assert report["agent_id"] == 12
         assert report["last_active_at"] is None
+
+
+# meiva:note
+# The stop records whether an operator asked for it; only a stopped scheduler can be in a planned
+# stop, so a recorded `planned` means nothing until admission is closed.
+async def test_a_planned_stop_is_read_only_after_admission_closes_with_it() -> None:
+    planned = TurnScheduler(Recorder(), timers=SYSTEM_TIMERS)
+    assert planned.in_planned_stop() is False
+    assert planned.stop_admission(planned=True) == frozenset()
+    assert planned.in_planned_stop() is True
+
+    unplanned = TurnScheduler(Recorder(), timers=SYSTEM_TIMERS)
+    unplanned.stop_admission(planned=False)
+    assert unplanned.in_planned_stop() is False

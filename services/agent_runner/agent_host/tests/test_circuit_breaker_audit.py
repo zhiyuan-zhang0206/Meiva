@@ -70,6 +70,7 @@ async def test_the_breaker_open_event_is_recorded_in_audit_events(
             clock_factory=Clock.from_settings,
         ),
         agent_id=agent_id,
+        planned_stop=False,
         circuit=None,
     )
 
@@ -124,6 +125,7 @@ async def test_a_failed_audit_write_is_reported_and_does_not_undo_the_open_break
                 clock_factory=Clock.from_settings,
             ),
             agent_id=agent_id,
+            planned_stop=False,
             circuit=None,
         )
 

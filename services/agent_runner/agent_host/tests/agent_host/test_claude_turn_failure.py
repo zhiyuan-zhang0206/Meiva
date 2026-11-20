@@ -79,7 +79,9 @@ async def test_a_turn_with_no_record_file_names_the_session_and_where_it_looked_
 
     with pytest.raises(FatalLLMStreamError) as failed:
         _ = await harness_turn_node(AgentState(), rt, config(agent_id))
-    _ = await handle_fatal_llm_error(failed.value, rt.context, agent_id, circuit=None)
+    _ = await handle_fatal_llm_error(
+        failed.value, rt.context, agent_id, planned_stop=False, circuit=None
+    )
 
     errors = [e for e in map(json.loads, await live_events.payloads()) if e.get("role") == "error"]
     [content] = [e["content"] for e in errors]

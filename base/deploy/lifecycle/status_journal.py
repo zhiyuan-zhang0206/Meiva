@@ -324,6 +324,21 @@ def read(home: Path) -> LifecycleOp | None:
     )
 
 
+# meiva:note
+# Whether an operator's stop or restart (`meiva stop` / `meiva restart`, which a fleet update runs on
+# each host) is underway on this home: its journal is open and its writer is alive. Root's own
+# health replacement of a unit writes no journal, so a signal it sends reads False here.
+# meiva:link services/agent_runner/agent_host/lifecycle/docs/graceful-exit.md
+def operator_stop_in_progress(home: Path) -> bool:
+    op = read(home)
+    return (
+        op is not None
+        and not op.complete
+        and op.operation in ("stop", "restart")
+        and writer_alive(op)
+    )
+
+
 def status_path(home: Path) -> Path:
     """The journal path, for printing the pointer line."""
     return journal_path(home)

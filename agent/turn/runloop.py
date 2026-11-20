@@ -47,6 +47,11 @@ from base.telemetry.audit_events import prepare_event_log, record_audit_reported
 _RECURSION_LIMIT_INF = 2**31 - 1
 
 # meiva:note
+# The `cause` an `llm_turn_aborted` event carries when an operator's stop or restart cut the
+# turn; the `meiva-ops-llm-turn-aborted` alert excludes exactly this value.
+PLANNED_RESTART = "planned_restart"
+
+# meiva:note
 # A turn aborted by a fatal error ends without a turn_end value; dropping the fields here
 # keeps a declaration from the aborted turn out of the next one. Clearing the harness inputs
 # ensures an aborted harness turn leaves no stale synthetic input in the checkpoint (#8634).
@@ -310,12 +315,16 @@ async def _apply_provider_failure(
 # opens the checkpoint heartbeat circuit. A fresh explicit chat may retry after
 # the underlying cause is fixed; original code execution is not resumed.
 # emit_reports=False computes state without repeating notifications.
+# `planned_stop` is the host's own fact that an operator's stop or restart is ending it:
+# the abort is then the stop's cut, and the event carries `cause=planned_restart` so the
+# alert can leave it out; any other abort carries no cause.
 async def handle_fatal_llm_error(
     exc: FatalLLMStreamError | FatalProviderError,
     ctx: MeivaContext,
     agent_id: int,
     *,
     circuit: CircuitState | None,
+    planned_stop: bool,
     occurred_at: datetime | None = None,
     emit_reports: bool = True,
     deferred: list[Error] | None = None,
@@ -329,6 +338,7 @@ async def handle_fatal_llm_error(
         provider=getattr(exc, "provider", None),
         status=getattr(exc, "status", None),
         context_overflow=getattr(exc, "context_overflow", None),
+        **({"cause": PLANNED_RESTART} if planned_stop else {}),
     )
     reason = (
         circuit_reason(status=exc.status, context_overflow=exc.context_overflow)
@@ -489,6 +499,8 @@ async def settle_turn_failure(
     ctx: MeivaContext,
     agent_id: int,
     pending: PendingTurnFailure,
+    *,
+    planned_stop: bool,
 ) -> None:
     """Prepare the abort once; its host publishes errors after durable turn settlement."""
 
@@ -530,6 +542,7 @@ async def settle_turn_failure(
                 circuit=circuit,
                 emit_reports=emit_reports,
                 deferred=pending.errors,
+                planned_stop=planned_stop,
             )
         pending.prepared_update.update(await _close_failed_turn_timing(graph, config, ctx))
     # meiva:note

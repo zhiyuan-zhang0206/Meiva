@@ -159,6 +159,7 @@ class AgentHost:
         self._machine_identity = machine
         self._machine = machine.name()
         self._wake: Callable[[int], object] | None = None
+        self._in_planned_stop: Callable[[], bool] | None = None
         self._owner = runtime_owner
         self._runtimes: OrderedDict[int, AgentRuntime] = OrderedDict()
         # meiva:note
@@ -490,6 +491,17 @@ class AgentHost:
         self._wake = wake
 
     # meiva:note
+    # The scheduler's answer to "is this host in an exit an operator asked for", read when a turn's
+    # abort is settled. A host built without a scheduler (tests) has no planned stop.
+    def bind_planned_stop(self, in_planned_stop: Callable[[], bool]) -> None:
+        if self._in_planned_stop is not None:
+            raise RuntimeError("this host already has a planned-stop reader bound")
+        self._in_planned_stop = in_planned_stop
+
+    def _planned_stop(self) -> bool:
+        return self._in_planned_stop is not None and self._in_planned_stop()
+
+    # meiva:note
     # An inbound wake for an agent whose invocation is running reaches its external harness engine, so
     # the graph delivers the new input without polling the queue.
     # meiva:link agent/graph/docs/harness-turn.md
@@ -645,6 +657,7 @@ class AgentHost:
                             ctx,
                             config,
                             prepared,
+                            planned_stop=self._planned_stop(),
                         )
                     outcome = await finish_completed_invocation(
                         self._control_pool,

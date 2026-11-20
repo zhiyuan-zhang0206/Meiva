@@ -81,6 +81,7 @@ from base.deploy.lifecycle.host_exit_message import (
     consume_host_exit_message,
     write_host_exit_message,
 )
+from base.deploy.lifecycle.status_journal import operator_stop_in_progress
 from base.deploy.release import editable_install
 from base.deploy.timing import assert_clock_lattice, clock_values
 from base.events.live.bus import EventBus, EventBusConfig
@@ -439,6 +440,7 @@ async def serve_host_lifecycle(
     serve_dispatch: Coroutine[object, object, None],
     write_restart: Callable[[int, str | None], Awaitable[OwedRestart]],
     read_exit_message: Callable[[], str | None],
+    read_planned: Callable[[], bool],
     write_idle_notes: Callable[[str, frozenset[int]], Awaitable[int]] | None,
     clients: ClientSet | None = None,
     instance_lock: int | None = None,
@@ -462,6 +464,7 @@ async def serve_host_lifecycle(
                 progress=host.turn_progress,
                 write_restart=write_restart,
                 read_exit_message=read_exit_message,
+                read_planned=read_planned,
                 write_idle_notes=write_idle_notes,
             )
         finally:
@@ -622,6 +625,7 @@ async def run(
             on_active_wake=host.notify_inbound,
         )
         host.bind_wake(scheduler.wake)
+        host.bind_planned_stop(scheduler.in_planned_stop)
         wait_s = float(config.view.agent.db_notify_wait_timeout_seconds)
         handed_off = True
         await serve_host_lifecycle(
@@ -676,6 +680,7 @@ async def run(
             ),
             write_restart=partial(write_exit_restart, db, bus),
             read_exit_message=partial(consume_host_exit_message, home),
+            read_planned=partial(operator_stop_in_progress, home),
             write_idle_notes=partial(write_exit_idle_notes, db, local_machine),
             clients=clients,
             instance_lock=instance_lock,
