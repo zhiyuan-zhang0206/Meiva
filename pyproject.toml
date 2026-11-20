@@ -154,7 +154,7 @@ dev = [
     "beautifulsoup4>=4.12.3",  # HTML parsing for scripts/model_registry/update_model_pricing.py
     # The locality checker, pinned to a release of its own repository; its rule data (`meizel.toml`,
     # `meizel.policy.toml`, `meizel.timing_baseline.json`) stays here.
-    "meizel @ git+https://github.com/zhiyuan-zhang0206/meizel@14d5787f5f7b400bce73d340fcdff00724c9bbc1",
+    "meizel @ git+https://github.com/zhiyuan-zhang0206/meizel@26388ceda8f6314595e38ba29cf37df2a59536d5",
 ]
 
 [tool.ruff]
