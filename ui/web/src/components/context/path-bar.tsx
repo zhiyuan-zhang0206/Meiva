@@ -114,7 +114,8 @@ export function PathBar({ agentId, documentModifiedAt }: { agentId: number; docu
   useEffect(() => {
     if (open === null) return;
     const close = (event: MouseEvent | KeyboardEvent) => {
-      if (event instanceof KeyboardEvent ? event.key === "Escape" : !barRef.current?.contains(event.target as Node)) setOpen(null);
+      const outside = event.target instanceof Node && !barRef.current?.contains(event.target);
+      if (event instanceof KeyboardEvent ? event.key === "Escape" : outside) setOpen(null);
     };
     document.addEventListener("mousedown", close);
     document.addEventListener("keydown", close);
