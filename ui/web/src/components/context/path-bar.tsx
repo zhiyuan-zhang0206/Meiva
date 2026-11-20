@@ -27,9 +27,10 @@ interface Folder {
 // (user report 2026-11-21); its rule is the panel's divider, inset at both ends like every other.
 const BAR_CLASS = cn("relative h-8 shrink-0 items-center px-2", BAR_DIVIDER_CLASS, FLEX);
 // meiva:note
-// The drop-down's width (`w-72`): it opens under what was clicked but never past the bar's right end.
+// The drop-down's width (`w-72`): it opens under what was clicked but keeps the bar's padding from
+// either end.
 const MENU_WIDTH_PX = 288;
-const TYPED_MENU_LEFT_PX = 8;
+const MENU_EDGE_PX = 8;
 
 interface Root {
   kind: "workspace" | "home" | "machine";
@@ -167,12 +168,12 @@ export function PathBar({ agentId, documentModifiedAt }: { agentId: number; docu
     // exists; any other refusal opens the folder's drop-down, which reports it.
     try {
       const listing = await client.listWorkspaceDir(ownerAgentId, text);
-      setOpen({ start: { machineAgent: ownerAgentId, path: listing.path }, at: -1, left: TYPED_MENU_LEFT_PX });
+      setOpen({ start: { machineAgent: ownerAgentId, path: listing.path }, at: -1, left: MENU_EDGE_PX });
     } catch (error) {
       if (error instanceof ApiError && error.status === 404) {
         useWorkspaceFileStore.getState().openFile({ agentId, machineAgentId: ownerAgentId, path: text });
       } else {
-        setOpen({ start: { machineAgent: ownerAgentId, path: text }, at: -1, left: TYPED_MENU_LEFT_PX });
+        setOpen({ start: { machineAgent: ownerAgentId, path: text }, at: -1, left: MENU_EDGE_PX });
       }
     }
   };
@@ -184,7 +185,7 @@ export function PathBar({ agentId, documentModifiedAt }: { agentId: number; docu
   const toggle = (at: number, path: string | null, anchor: HTMLElement) => {
     if (path === null) return;
     const bar = barRef.current?.getBoundingClientRect();
-    const left = bar ? Math.max(0, Math.min(anchor.getBoundingClientRect().left - bar.left, bar.width - MENU_WIDTH_PX)) : 0;
+    const left = bar ? Math.max(MENU_EDGE_PX, Math.min(anchor.getBoundingClientRect().left - bar.left, bar.width - MENU_WIDTH_PX - MENU_EDGE_PX)) : MENU_EDGE_PX;
     setOpen(open?.at === at ? null : { start: { machineAgent: ownerAgentId, path }, at, left });
   };
 
