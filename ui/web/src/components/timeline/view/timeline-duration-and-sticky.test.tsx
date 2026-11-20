@@ -390,12 +390,6 @@ describe("TimelineView expanded work block height", () => {
   // reach that place, so reserve space below it holds the header there until the reader scrolls
   // up to the natural end.
   // meiva:link ui/web/src/docs/frontend-components/timeline-view/live-block.md
-  // meiva:note
-  // SUSPECTED PRODUCT BUG (reported, not fixed here): a browser clamps scrollTop into a shorter
-  // scroll range during layout, before ResizeObserver or any scroll event. The writer counts every
-  // movement since its last write as the reader's drift, so the clamp is absorbed into the anchor's
-  // offset before the hold reserve can grow to keep the collapsed header (measured: 164 -> 524).
-  // meiva:link ui/web/src/docs/frontend-components/timeline-view/live-block.md
   it("keeps a collapsed tail header in place over reserve space the reader spends by scrolling up", () => {
     const layout = timelineLayout({ rowHeight: (row) => row.dataset.itemId === "1.0" ? 1000 : 300 });
     render(<TimelineView items={[
@@ -489,10 +483,8 @@ describe("TimelineView header scrolling scope", () => {
     for (const title of titles) expect(container.contains(title)).toBe(true);
   });
   // meiva:note
-  // SUSPECTED PRODUCT BUG (reported, not fixed here): a browser clamps scrollTop into a shorter
-  // scroll range during layout, before ResizeObserver or any scroll event. The writer counts every
-  // movement since its last write as the reader's drift, so the clamp is absorbed into the anchor's
-  // offset before the hold reserve can grow to keep the collapsed header (measured: scrollTop 300 -> 152).
+  // Collapsing shortens the scroll range and the browser clamps scrollTop during layout. The writer does
+  // not count that clamp as reader drift, so the collapsed header stays where the reader clicked it.
   // meiva:link ui/web/src/docs/frontend-components/timeline-view/live-block.md
   it("collapses an expanded work block at the current reading position", () => {
     const layout = timelineLayout({ rowHeight: 300 });

@@ -24,19 +24,36 @@ interface Candidate {
   coordinate: CompactCoordinate | null;
 }
 
+function canonicalCandidate(item: BackendTimelineItem): Candidate {
+  const parts = parseItemIdParts(item.item_id);
+  return { item, rank: parts?.rank ?? 0, coordinate: parts ? { rank: parts.rank, msg: parts.msg, block: parts.block } : null };
+}
+
 function candidates(canonical: readonly BackendTimelineItem[], buffer: CompactTransitionBuffer | null): Candidate[] {
   const rows: Candidate[] = (buffer?.rows ?? []).map((row) => ({ item: row.item, rank: row.rank, coordinate: canonicalBufferCoordinate(row) }));
-  for (const item of canonical) {
-    const parts = parseItemIdParts(item.item_id);
-    rows.push({ item, rank: parts?.rank ?? 0, coordinate: parts ? { rank: parts.rank, msg: parts.msg, block: parts.block } : null });
-  }
+  for (const item of canonical) rows.push(canonicalCandidate(item));
   return rows;
 }
 
 const real = (candidate: Candidate) => !candidate.item.item_id.startsWith("_");
 
+// meiva:note
+// The loaded row a ref names, in the order `candidates` lists them. Identify runs on every reader
+// scroll that moves the anchor, so it compares ids and parses only the rows that match.
+function find(row: RowRef, canonical: readonly BackendTimelineItem[], buffer: CompactTransitionBuffer | null): Candidate | undefined {
+  for (const held of buffer?.rows ?? []) {
+    if (held.item.item_id === row.itemId && held.rank === row.rank) return { item: held.item, rank: held.rank, coordinate: canonicalBufferCoordinate(held) };
+  }
+  for (const item of canonical) {
+    if (item.item_id !== row.itemId) continue;
+    const candidate = canonicalCandidate(item);
+    if (candidate.rank === row.rank) return candidate;
+  }
+  return undefined;
+}
+
 export function identify(row: RowRef, canonical: readonly BackendTimelineItem[], buffer: CompactTransitionBuffer | null): RowIdentity {
-  const hit = candidates(canonical, buffer).find((candidate) => candidate.item.item_id === row.itemId && candidate.rank === row.rank);
+  const hit = find(row, canonical, buffer);
   const locator = hit?.item.reading_locator;
   return {
     row,

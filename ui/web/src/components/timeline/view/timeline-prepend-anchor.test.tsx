@@ -111,12 +111,9 @@ describe("load-older prepend keeps the reader's row (#659, #817, #1272)", () => 
   });
 
   // meiva:note
-  // SUSPECTED PRODUCT BUG (reported, not fixed here): the system prompt, its standing head notes
-  // and re-attached compact summaries stay pinned at the front of every loaded window, so older
-  // pages land *below* them. `readRowAnchor` (anchor/dom.ts) only skips `_` rows, so a reader
-  // pulling at the top anchors on the pinned head turn and the landing pushes the row they were
-  // reading down by the page's height (measured: 10.0 moves 104 -> 416 for one 300px row). The
-  // deleted prepend anchor skipped these heads (#817).
+  // The system prompt, its standing head notes and re-attached compact summaries stay pinned at the
+  // front of every loaded window, so older pages land below them. The reader's anchor skips these
+  // heads, so a page landing at the top keeps the row being read in place.
   // meiva:link ui/web/src/docs/frontend-components/timeline-view/history-paging.md
   it.each([
     ["the system prompt", [prompt]],

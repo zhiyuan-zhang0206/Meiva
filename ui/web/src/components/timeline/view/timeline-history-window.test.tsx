@@ -237,12 +237,8 @@ describe("deep history DOM window", () => {
   });
 
   // meiva:note
-  // SUSPECTED PRODUCT BUG (reported, not fixed here): with the window active, an older page that
-  // lands while the reader is parked in history leaves the window on the old scrollTop, which now
-  // holds the new oldest rows; the reader's anchor row is unmounted, nothing pins it (`pin` only
-  // covers placements, and `lost` ignores a row that is still loaded), so the writer cannot hold it.
-  // Measured: rows 31-45 -> 1-15 at the same scrollTop 200; the same with 120 rows at the default
-  // activation and a pull at the top (row 51 at 52 -> rows from 1.0 at 52).
+  // An older page that lands while the reader is parked in history puts new rows above their row. The
+  // window keeps the reader's row mounted (its pin follows the reader), so the writer holds it in place.
   // meiva:link ui/web/src/docs/frontend-components/timeline-view/history-paging.md
   it("keeps the reader's row and never jumps to the bottom when older history prepends after scrolling up", () => {
     displayLimits.set("MEIVA_TIMELINE_WINDOW_ACTIVATION_ROWS", 20);
@@ -428,12 +424,8 @@ describe("deep history DOM window", () => {
   });
 
   // meiva:note
-  // SUSPECTED PRODUCT BUG (reported, not fixed here): before the rows' ResizeObserver reports, the
-  // window positions rows at its 80px estimate. With the tail anchored, every commit the writer
-  // pins the natural end (real heights), the window re-measures that position in estimated space
-  // and swaps the mounted rows, which moves the natural end again: a synchronous layout-effect
-  // loop (measured: writes alternate 10916 <-> 11236 for 120 rows of 160px) until React throws
-  // "Maximum update depth exceeded". 80-100px rows converge; 160px and taller do not.
+  // Rows taller than the window's estimate: while the tail is followed the window measures its range
+  // from the end, so pinning the natural end does not swap the mounted rows into a layout loop.
   // meiva:link ui/web/src/docs/frontend-components/timeline-view/bounded-window.md
   it("opens a long tail of rows taller than the window's estimate on the tail", () => {
     const layout = timelineLayout({ rowHeight: 160 });
@@ -443,11 +435,15 @@ describe("deep history DOM window", () => {
     expect(layout.top()).toBe(layout.naturalEnd());
   });
 
+  // meiva:note
+  // One jump, not a walk: the window under a position is what this pins, and walking 1200 rows in
+  // viewport steps renders the timeline about 95 times, which outlasts the test timeout on a loaded
+  // CI runner. Reading through history in steps is pinned by the tests around this one.
   it("mounts only the viewport and nearby rows while retaining the full scroll space", async () => {
     const layout = timelineLayout({ viewportHeight: 720 });
     render(<TimelineView items={chats(1, 1200)} threadKey="deep-history" />);
     layout.resize();
-    stepTo(layout, 48_000);
+    layout.scrollTo(48_000);
     expect(layout.top()).toBe(48_000);
     await waitFor(() => {
       expect(layout.viewport().querySelectorAll(".timeline-item").length).toBeLessThan(60);
@@ -457,10 +453,8 @@ describe("deep history DOM window", () => {
   });
 
   // meiva:note
-  // SUSPECTED PRODUCT BUG (reported, not fixed here): a reader scroll that lands where no row is
-  // mounted yet (scrollbar drag, Home, find-in-page into a virtual spacer) reads no row back, so the
-  // previous anchor stays; the commit that mounts rows there then writes the old anchor back and
-  // the reader is thrown to the tail (measured: 48000 -> 109876 on 1200 rows).
+  // A reader scroll that lands where no row is mounted (scrollbar drag, Home, find-in-page into a
+  // virtual spacer) leaves the anchor free: nothing is written until rows mount there.
   // meiva:link ui/web/src/docs/frontend-components/timeline-view/sticky-scroll.md
   it("keeps a jump into unmounted history where the reader put it", () => {
     const layout = timelineLayout({ viewportHeight: 720 });

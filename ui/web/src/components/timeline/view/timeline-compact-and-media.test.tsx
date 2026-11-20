@@ -41,11 +41,6 @@ describe("continuous compact history", () => {
   // meiva:note
   // A compact re-keys the reader's rows twice: into the buffer one rank older, then into the
   // canonical rows that replace it. The row being read keeps its place through both.
-  // SUSPECTED PRODUCT BUG (reported, not fixed here): the buffer step passes, but only because
-  // `findRowNode` falls back to the same id at another rank; the anchor keeps the pre-compact rank.
-  // The hydration announcement then identifies that stale row against the buffer (id+rank), finds
-  // nothing, loses the coordinate, and the reader is thrown to the tail (measured: 1.0 at 31 ->
-  // its canonical row s1.next.0.0 at -689.5, scrollTop 1300 -> 1968.5, the natural end).
   // meiva:link ui/web/src/docs/frontend-components/timeline-view/timeline-view.md
   it("keeps a middle reply at its offset while a compact re-keys it into the buffer and then into canonical rows", () => {
     const preItems = [

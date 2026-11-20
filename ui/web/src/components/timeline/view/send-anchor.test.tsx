@@ -121,10 +121,9 @@ describe("send anchor", () => {
   });
 
   // meiva:note
-  // SUSPECTED PRODUCT BUG (reported, not fixed here): a browser clamps scrollTop into a shorter
-  // scroll range during layout, before ResizeObserver or any scroll event. The writer counts every
-  // movement since its last write as the reader's drift, so the clamp is absorbed into the anchor's
-  // offset before the reserve can grow to hold it.
+  // A browser clamps scrollTop into a shorter scroll range during layout, before ResizeObserver or any
+  // scroll event. The writer does not count that clamp as reader drift, so the sent row keeps its
+  // offset while the reserve grows to hold it.
   // meiva:link ui/web/src/docs/frontend-components/timeline-view/send-anchor.md
   it("keeps the sent row aligned when the composer clears and the viewport grows", () => {
     const model = layout();
