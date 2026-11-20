@@ -41,9 +41,12 @@ export function quoteFromRange(range: Range, scope: Element, items: readonly Bac
   const text = range.toString();
   if (!item || item.partial || !text.trim()) return null;
   if (!["inbound_chat", "agent_chat", "agent_code", "agent_reasoning", "code_output", "system_marker"].includes(item.kind)) return null;
+  // meiva:note
+  // The conversation's own agent is named without its number: a quote can only come from the
+  // conversation it is sent in, so the number says nothing (user report 2026-11-21).
   return {
     source_agent_id: agentId, source_item_id: item.item_id,
-    author: item.kind === "inbound_chat" ? (messageCardConfig(item)?.title ?? item.source ?? "User") : `Agent #${agentId}`,
+    author: item.kind === "inbound_chat" ? (messageCardConfig(item)?.title ?? item.source ?? "User") : "Agent",
     created_at: item.created_at ?? "", text,
     source_message_id: item.source_message_id, source_inbound_id: item.source_inbound_id ?? item.inbound_id,
     source_block_idx: item.source_block_idx,

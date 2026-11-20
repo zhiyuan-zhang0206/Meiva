@@ -50,7 +50,7 @@ function fixture() {
 describe("selected text quotes", () => {
   it("retains exact selected text and durable provenance", () => {
     const { root, range } = fixture();
-    expect(quoteFromRange(range, root, [item], 12)).toMatchObject({ text: "exact\nselection", source_agent_id: 12, source_message_id: "durable-message", source_block_idx: 0 });
+    expect(quoteFromRange(range, root, [item], 12)).toMatchObject({ text: "exact\nselection", source_agent_id: 12, author: "Agent", source_message_id: "durable-message", source_block_idx: 0 });
   });
   it("quotes a marker body fragment with stable provenance while excluding its title", () => {
     const { root, range } = fixture();
