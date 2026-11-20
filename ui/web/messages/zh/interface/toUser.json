@@ -29,5 +29,7 @@
   "filesTruncated": "只显示前 {count} 项",
   "filesEmptyFolder": "空文件夹",
   "filesPdf": "PDF 文档",
-  "filesAudio": "音频"
+  "filesAudio": "音频",
+  "filesPath": "路径",
+  "filesEditPath": "编辑路径"
 }

@@ -64,35 +64,65 @@ describe("panel bar", () => {
 });
 
 describe("path bar", () => {
-  it("names the file's folders and drops each one down to open another file", async () => {
-    transport.getWorkspaceFile.mockResolvedValue({ path: "project/src/main.py", name: "main.py", extension: ".py", content: "x", size: 2048, binary: false, modified_at: "2026-11-20T12:00:00Z" });
-    transport.listWorkspaceDir.mockImplementation((agentId: number, path?: string) => Promise.resolve(
-      path === "project"
-        ? { path: "/w/project", parent: "/w", entries: [entry("src", "dir", "/w/project"), entry("README.md", "file", "/w/project")], truncated: false }
-        : path === "/w/project/src"
-          ? { path: "/w/project/src", parent: "/w/project", entries: [entry("util.py", "file", "/w/project/src")], truncated: false }
-          : { path: agentId === 7 ? "/w" : "/v", parent: null, entries: agentId === 7 ? [entry("project", "dir")] : [entry("b.md", "file", "/v")], truncated: false },
+  const root = { kind: "workspace" as const, path: "/w", agent_id: 7 };
+  const listing = (path: string, entries: ReturnType<typeof entry>[]) => ({ path, root, parent: null, entries, truncated: false });
+  it("roots the path at the file's workspace and drops each folder down to open another file", async () => {
+    transport.getWorkspaceFile.mockResolvedValue({ path: "/w/project/src/main.py", root, name: "main.py", extension: ".py", content: "x", size: 2048, binary: false, modified_at: "2026-11-20T12:00:00Z" });
+    transport.listWorkspaceDir.mockImplementation((_agentId: number, path?: string) => Promise.resolve(
+      path === "/w/project"
+        ? listing("/w/project", [entry("src", "dir", "/w/project"), entry("README.md", "file", "/w/project")])
+        : listing("/w/project/src", [entry("util.py", "file", "/w/project/src")]),
     ));
     store().openFile({ agentId: 7, path: "project/src/main.py" });
     renderWithBrowser(<PathBar agentId={7} documentModifiedAt={null} />, { wrapper: Wrapper });
-    const bar = screen.getByTestId("path-bar");
-    expect(bar.textContent).toContain("#7");
-    expect(bar.textContent).toContain("project");
-    expect(bar.textContent).toContain("main.py");
-    await waitFor(() => expect(bar.textContent).toContain("2.0 KB"));
+    await waitFor(() => expect(screen.getByTestId("path-bar").textContent).toContain("2.0 KB"));
+    expect(screen.getByRole("button", { name: "#7" })).toBeTruthy();
 
     fireEvent.click(screen.getByRole("button", { name: "project" }));
     fireEvent.click(await screen.findByRole("menuitem", { name: "src" }));
     fireEvent.click(await screen.findByRole("menuitem", { name: "util.py" }));
     expect(store().activeFile).toEqual({ agentId: 7, path: "/w/project/src/util.py" });
     expect(screen.queryByTestId("path-menu")).toBeNull();
+  });
 
-    fireEvent.click(screen.getByRole("button", { name: "#7" }));
-    const number = await screen.findByRole("textbox", { name: "Agent number" });
-    fireEvent.change(number, { target: { value: "405" } });
-    fireEvent.submit(number.closest("form")!);
+  it("names a file under the home directory from ~ and one elsewhere from /", async () => {
+    transport.getWorkspaceFile.mockResolvedValueOnce({ path: "/home/u/notes/a.md", root: { kind: "home", path: "/home/u", agent_id: null }, name: "a.md", extension: ".md", content: "x", size: 1, binary: false, modified_at: "2026-11-20T12:00:00Z" });
+    store().openFile({ agentId: 7, path: "~/notes/a.md" });
+    const view = renderWithBrowser(<PathBar agentId={7} documentModifiedAt={null} />, { wrapper: Wrapper });
+    expect(await screen.findByRole("button", { name: "~" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "notes" })).toBeTruthy();
+    view.unmount();
+    transport.getWorkspaceFile.mockResolvedValueOnce({ path: "/etc/hosts", root: { kind: "machine", path: "/", agent_id: null }, name: "hosts", extension: "", content: "x", size: 1, binary: false, modified_at: "2026-11-20T12:00:00Z" });
+    store().openFile({ agentId: 7, path: "/etc/hosts" });
+    renderWithBrowser(<PathBar agentId={7} documentModifiedAt={null} />, { wrapper: Wrapper });
+    expect(await screen.findByRole("button", { name: "/" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "etc" })).toBeTruthy();
+  });
+
+  // meiva:note
+  // A normal address bar: clicking its empty end edits the path; Enter opens a file as a tab, or a
+  // folder as its drop-down; Escape gives up.
+  it("edits the path in place and opens what Enter names", async () => {
+    transport.getWorkspaceFile.mockResolvedValue({ path: "/home/u/a.md", root: { kind: "home", path: "/home/u", agent_id: null }, name: "a.md", extension: ".md", content: "x", size: 1, binary: false, modified_at: "2026-11-20T12:00:00Z" });
+    transport.listWorkspaceDir.mockImplementation((_agentId: number, path?: string) => (path === "~/docs" || path === "/home/u/docs"
+      ? Promise.resolve({ path: "/home/u/docs", root: { kind: "home" as const, path: "/home/u", agent_id: null }, parent: "/home/u", entries: [entry("b.md", "file", "/home/u/docs")], truncated: false })
+      : Promise.reject(new Error("not a directory"))));
+    store().openFile({ agentId: 7, path: "~/a.md" });
+    renderWithBrowser(<PathBar agentId={7} documentModifiedAt={null} />, { wrapper: Wrapper });
+    await screen.findByRole("button", { name: "~" });
+    fireEvent.click(screen.getByRole("button", { name: "Edit the path" }));
+    const input = screen.getByRole<HTMLInputElement>("textbox", { name: "Path" });
+    expect(input.value).toBe("~/a.md");
+    fireEvent.change(input, { target: { value: "~/docs" } });
+    fireEvent.keyDown(input, { key: "Enter" });
     fireEvent.click(await screen.findByRole("menuitem", { name: "b.md" }));
-    expect(store().activeFile).toEqual({ agentId: 7, path: "/v/b.md" });
+    expect(store().activeFile).toEqual({ agentId: 7, path: "/home/u/docs/b.md" });
+
+    fireEvent.click(screen.getByRole("button", { name: "Edit the path" }));
+    const again = screen.getByRole<HTMLInputElement>("textbox", { name: "Path" });
+    fireEvent.change(again, { target: { value: "/etc/hosts" } });
+    fireEvent.keyDown(again, { key: "Enter" });
+    await waitFor(() => expect(store().activeFile).toEqual({ agentId: 7, path: "/etc/hosts" }));
   });
 
   it("shows when the to-user document last changed on the document tab", () => {
@@ -107,8 +137,8 @@ describe("file tree", () => {
   it("opens folders on demand, opens files in this conversation, and switches to another agent's workspace", async () => {
     transport.listWorkspaceDir.mockImplementation((agentId: number, path?: string) => Promise.resolve(
       path === "/w/src"
-        ? { path: "/w/src", parent: "/w", entries: [entry("main.py", "file", "/w/src")], truncated: false }
-        : { path: agentId === 7 ? "/w" : "/v", parent: null, entries: agentId === 7 ? [entry("src", "dir"), entry("a.md", "file")] : [entry("b.md", "file", "/v")], truncated: false },
+        ? { path: "/w/src", root: { kind: "workspace" as const, path: "/w", agent_id: 7 }, parent: "/w", entries: [entry("main.py", "file", "/w/src")], truncated: false }
+        : { path: agentId === 7 ? "/w" : "/v", root: { kind: "workspace" as const, path: agentId === 7 ? "/w" : "/v", agent_id: agentId }, parent: null, entries: agentId === 7 ? [entry("src", "dir"), entry("a.md", "file")] : [entry("b.md", "file", "/v")], truncated: false },
     ));
     const switched: number[] = [];
     const view = renderWithBrowser(<FileTree agentId={7} workspaceAgentId={7} onWorkspaceChange={(id) => switched.push(id)} />, { wrapper: Wrapper });

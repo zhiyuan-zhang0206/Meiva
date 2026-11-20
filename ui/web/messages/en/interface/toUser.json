@@ -29,5 +29,7 @@
   "filesTruncated": "Showing the first {count}",
   "filesEmptyFolder": "Empty folder",
   "filesPdf": "PDF document",
-  "filesAudio": "Audio"
+  "filesAudio": "Audio",
+  "filesPath": "Path",
+  "filesEditPath": "Edit the path"
 }

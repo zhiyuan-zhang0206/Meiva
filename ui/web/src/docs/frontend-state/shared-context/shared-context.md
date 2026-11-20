@@ -79,21 +79,25 @@ The panel is a file viewer (user rulings 2026-11-20 and 2026-11-21; decision rec
   - On the right sit fill the page, the inspector toggle, and collapse.
   - There is no Home, Back or Refresh button: Back and Forward are the browser's.
 - **Auto-refresh.** The file on show is re-read every 10 s while the page is visible; media are not.
-- **Picking a file.**
-  - The side panel has a path bar like a file manager's address bar (`#63 › project › src › main.py`).
-    Each folder drops down its entries: a folder opens in place, a file opens as a tab.
-  - The root drops down another agent's number, to browse that agent's workspace with the read
-    access links already have.
-  - Once the viewer fills the page, the tree takes the path bar's place on the left.
+- **Picking a file.** The side panel has an address bar (user rulings 2026-11-21).
+  - **Its root.** The root is the workspace the file lies in (`#63`), otherwise the home directory
+    (`~`), otherwise the machine's root (`/`). The gateway reports the root with each file and listing.
+  - **Folder drop-downs.** Each folder segment drops down its entries: a folder opens in place, a file
+    opens as a tab.
+  - **Editing.** Clicking the bar's empty end turns it into a text field holding the path, selected.
+    Enter opens what was typed: a folder opens its drop-down, a file opens as a tab. Escape gives up.
+  - **Full page.** Once the viewer fills the page, the tree takes the address bar's place on the
+    left. The tree's root takes another agent's number to browse that agent's workspace.
+- **Reach.** What the viewer may read is `settings.to_user.file_access`: `all` (the default) lets it
+  read any file on the machine; `workspaces` limits it to agent workspaces and the agent's working
+  directory (decision record `docs/decisions/frontend/documents/2026-11-21-file-viewer-reach.md`).
 - **Width.** The panel can be dragged far to the left. The conversation keeps a 280 px minimum.
 - **Fill the page.** On desktop the viewer can take the conversation's place; the sidebar stays.
 - **What renders in place.** Markdown, images, video, audio, PDF (the browser's viewer) and source
   code with line ranges. Other binary files offer a download.
 - **Labels.** File names show without a type icon.
-- **What a linked file may be.** A file the to-user document links to opens like any other file:
-  it must lie in an agent's workspace or the agent's working directory. A linked Markdown document
-  outside both, which the earlier document chain rendered through the to-user resource route, shows
-  "can't be shown". This narrowing is deliberate (2026-11-21): every tab reads through one route.
+- **Linked files.** A file the to-user document links to opens like any other file, under the same
+  reach.
 Normal Markdown links are directly clickable in conversation messages and `to_user.md`;
 explicit `.meiva/workspaces/<id>/...` references keep the viewer attached to the
 active conversation's panel while routing content/raw reads and nested relative
