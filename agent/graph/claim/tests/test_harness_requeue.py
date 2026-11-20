@@ -26,6 +26,7 @@ from agent.graph.claim.tests.harness_support import (
     in_a_turn,
     input_key,
     insert_row,
+    publications,
     row_status,
     runtime,
     timeline_inbound_ids,
@@ -247,15 +248,6 @@ def _claude_row(
     return json.dumps(payload) + "\n"
 
 
-def _publications(db_conn: psycopg.Connection, agent_id: int) -> list[tuple[str, str]]:
-    db_conn.commit()
-    rows = db_conn.execute(
-        "SELECT source_key, content FROM agent_publications WHERE agent_id=%s ORDER BY id",
-        (agent_id,),
-    ).fetchall()
-    return [(str(key), str(content)) for key, content in rows]
-
-
 def _fork_pair(
     tmp_path: Path, db_conn: psycopg.Connection, *, parent_session: str
 ) -> tuple[int, Path]:
@@ -384,7 +376,7 @@ async def test_fork_sink_init_before_jsonl_materialization_never_publishes_paren
         encoding="utf-8",
     )
     await sink._read()
-    assert _publications(db_conn, child_id) == [], "parent prefix alone must not publish"
+    assert publications(db_conn, child_id) == [], "parent prefix alone must not publish"
 
     with child_file.open("a", encoding="utf-8") as handle:
         handle.write(
@@ -406,7 +398,7 @@ async def test_fork_sink_init_before_jsonl_materialization_never_publishes_paren
         )
     await sink.finish(input_keys=["inbound-1"])
 
-    assert _publications(db_conn, child_id) == [
+    assert publications(db_conn, child_id) == [
         ("harness:claude:44444444-4444-4444-8444-444444444444", "child reply one")
     ]
 
@@ -454,7 +446,7 @@ async def test_fork_sink_init_before_jsonl_materialization_never_publishes_paren
         )
     await later_sink.finish(input_keys=["inbound-2"])
 
-    assert _publications(db_conn, child_id) == [
+    assert publications(db_conn, child_id) == [
         ("harness:claude:44444444-4444-4444-8444-444444444444", "child reply one"),
         ("harness:claude:55555555-5555-4555-8555-555555555555", "child reply two"),
     ]
@@ -516,7 +508,7 @@ async def test_fork_sink_without_input_keys_falls_back_to_parent_uuids_and_hide_
         encoding="utf-8",
     )
     await sink.finish()
-    assert _publications(db_conn, child_id) == []
+    assert publications(db_conn, child_id) == []
 
     turn_2_sink = ReadTimelineSink(
         ctx,
@@ -546,7 +538,7 @@ async def test_fork_sink_without_input_keys_falls_back_to_parent_uuids_and_hide_
         )
     await turn_2_sink.finish()
 
-    assert _publications(db_conn, child_id) == [
+    assert publications(db_conn, child_id) == [
         ("harness:claude:12121212-1212-4121-8121-121212121212", "child turn two answer")
     ]
 
@@ -596,7 +588,7 @@ async def test_fork_sink_caches_parent_uuids_across_paused_polls(
     for _ in range(3):
         await sink._read()
 
-    assert _publications(db_conn, child_id) == []
+    assert publications(db_conn, child_id) == []
 
     with child_file.open("a", encoding="utf-8") as handle:
         handle.write(
@@ -618,7 +610,7 @@ async def test_fork_sink_caches_parent_uuids_across_paused_polls(
         )
     await sink.finish()
 
-    assert _publications(db_conn, child_id) == [
+    assert publications(db_conn, child_id) == [
         ("harness:claude:44444444-5555-4666-8777-888888888888", "child cached answer")
     ]
 
@@ -678,7 +670,7 @@ async def test_fork_sink_fail_closed_when_unanchored_never_falls_back_to_zero(
 
     await sink._read()
     await sink.finish()
-    assert _publications(db_conn, child_id) == []
+    assert publications(db_conn, child_id) == []
     assert not floor_file.exists()
 
     with child_file.open("a", encoding="utf-8") as handle:
@@ -703,6 +695,6 @@ async def test_fork_sink_fail_closed_when_unanchored_never_falls_back_to_zero(
 
     assert floor_file.exists()
     assert json.loads(floor_file.read_text(encoding="utf-8"))["floor"] > 0
-    assert _publications(db_conn, child_id) == [
+    assert publications(db_conn, child_id) == [
         ("harness:claude:cccccccc-3333-4333-8333-333333333333", "child recovered reply")
     ]

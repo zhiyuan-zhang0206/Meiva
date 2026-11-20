@@ -5,7 +5,7 @@ import psycopg
 from psycopg_pool import AsyncConnectionPool
 
 from agent.graph.claim._dispatch import fork_marker_text
-from agent.graph.claim.tests.claim_support import make_runtime, thread_config
+from agent.graph.claim.tests.claim_support import make_runtime, snapshot_items, thread_config
 from agent.graph.claim.tests.cursor_fixture import fresh_snapshot_cursor as fresh_snapshot_cursor
 from agent.state import AgentState
 from base.agents.tests.units import spawn_agent
@@ -83,11 +83,14 @@ async def test_claim_node_idle_enter_publishes_full_window_snapshot(
             tid,
         ),
     )
-    snaps = [event for event in await live_events.events() if event["role"] == "timeline_snapshot"]
+    snaps = [
+        event for event in await live_events.object_events() if event["role"] == "timeline_snapshot"
+    ]
     assert len(snaps) == 1
     assert snaps[0]["msg_count"] == 1
-    assert [it["item_id"] for it in snaps[0]["items"]] == ["0.0"]
-    assert snaps[0]["items"][0]["kind"] == "system_prompt"
+    items = snapshot_items(snaps)
+    assert [it["item_id"] for it in items] == ["0.0"]
+    assert items[0]["kind"] == "system_prompt"
 
 
 def test_claim_will_idle_shares_the_impl_and_wrapper_contract() -> None:

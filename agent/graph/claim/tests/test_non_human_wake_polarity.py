@@ -11,7 +11,7 @@ from agent.db import ClaimedInbound
 from agent.graph.claim._dispatch import BatchState, resolve_non_human_wake
 from agent.graph.claim._routing import Routing
 from agent.graph.claim.node import claim_node_impl, settle_claimed_batch
-from agent.graph.claim.tests.claim_support import make_runtime, thread_config
+from agent.graph.claim.tests.claim_support import make_runtime, thread_config, update_of
 from agent.graph.claim.turn_stamp import persist_last_active
 from agent.messages import NoteTag
 from agent.state import AgentState
@@ -182,8 +182,7 @@ async def test_claim_node_impl_idle_reset_and_handoff_resume_polarity(
         runtime,
         cfg,
     )
-    assert cmd_end.update is not None
-    assert cmd_end.update.get("non_human_wake") is False
+    assert update_of(cmd_end).get("non_human_wake") is False
 
     cmd_restart = await claim_node_impl(
         AgentState(
@@ -196,8 +195,7 @@ async def test_claim_node_impl_idle_reset_and_handoff_resume_polarity(
         runtime,
         cfg,
     )
-    assert cmd_restart.update is not None
-    assert "non_human_wake" not in cmd_restart.update
+    assert "non_human_wake" not in update_of(cmd_restart)
 
 
 async def test_settle_claimed_batch_appends_recency_reminder_only_on_fresh_non_human_wake(

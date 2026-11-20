@@ -22,7 +22,7 @@ from psycopg_pool import AsyncConnectionPool, PoolTimeout
 
 from agent.graph.claim.harness_turn import harness_turn_node
 from agent.graph.claim.node import claim_node
-from agent.graph.claim.tests.claim_support import make_runtime
+from agent.graph.claim.tests.claim_support import make_runtime, scalar_int
 from agent.graph.claim.tests.harness_support import (
     FakeEngine,
     FakeSubscription,
@@ -689,8 +689,7 @@ def test_the_migration_moves_only_old_reservations_of_external_agents(
             "VALUES (%s, 'x', %s, 'user', %s::jsonb, 'pending', now()) RETURNING id",
             (agent_id, kind, '{"note_tag": "agent_reply"}' if kind == "system_note" else None),
         ).fetchone()
-        assert row is not None
-        return row[0]
+        return scalar_int(row)
 
     moved = [reserved(external, "chat"), reserved(external, "system_note")]
     untouched = [reserved(native, "chat"), reserved(external, "interrupt")]

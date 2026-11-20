@@ -14,7 +14,7 @@ import base64
 from collections.abc import Iterator
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
-from typing import Any, cast
+from pathlib import Path
 
 import httpx
 import pytest
@@ -26,6 +26,8 @@ from base.agents.messages.kwargs import read_meiva_kwargs
 from base.agents.messages.timestamp_policy import TimestampPolicy
 from base.clock import Clock
 from base.config import settings
+from base.host.boundary.fields import str_field
+from base.host.boundary.json_values import is_object_dict
 from base.packages.composer_commands import CommandCatalog
 from base.paths import meiva_home
 
@@ -37,11 +39,13 @@ _ENVELOPE_INPUTS = TimestampPolicy.from_clock(
 )
 
 
-def _blocks(msg: HumanMessage) -> list[dict[str, Any]]:
+def _blocks(msg: HumanMessage) -> list[dict[str, object]]:
     """The message's content as a list of blocks (langchain types it broadly as
     str | list[str | dict]; a multimodal inbound is always the dict-list case)."""
     assert isinstance(msg.content, list)
-    return cast("list[dict[str, Any]]", msg.content)
+    blocks = [block for block in msg.content if is_object_dict(block)]
+    assert len(blocks) == len(msg.content)
+    return blocks
 
 
 def _inbound(content: str, payload: dict[str, object] | None = None) -> ClaimedInbound:
@@ -127,10 +131,12 @@ def test_multimodal_inbound_inlines_base64_and_keeps_url(
 
     text_block, image_block = _blocks(msg)
     assert text_block["type"] == "text"
-    assert "what is this?" in text_block["text"]  # envelope-wrapped
+    assert "what is this?" in str_field(text_block, "text")  # envelope-wrapped
     # Standard image_url data URI format (decodable by Claude, Gemini, GPT alike).
     assert image_block["type"] == "image_url"
-    data_uri = cast("str", image_block["image_url"]["url"])
+    image_url = image_block["image_url"]
+    assert is_object_dict(image_url)
+    data_uri = str_field(image_url, "url")
     assert data_uri.startswith("data:image/png;base64,")
     assert base64.standard_b64decode(data_uri.removeprefix("data:image/png;base64,")) == raw
     # The reference url rides on additional_kwargs for the timeline thumbnail —
@@ -153,7 +159,7 @@ def test_non_image_reference_degrades_without_constructing_gateway() -> None:
     )
     blocks = _blocks(msg)
     assert all(block["type"] == "text" for block in blocks)
-    assert any("unavailable" in block["text"] for block in blocks)
+    assert any("unavailable" in str_field(block, "text") for block in blocks)
     assert "meiva_image_urls" not in msg.additional_kwargs
 
 
@@ -201,7 +207,7 @@ def test_missing_image_degrades_to_text_note(gateway: tuple[httpx.Client, Upload
     blocks = _blocks(msg)
     # No image block; the missing image became a text note, delivery survived.
     assert all(b["type"] == "text" for b in blocks)
-    assert any("unavailable" in b["text"] for b in blocks)
+    assert any("unavailable" in str_field(b, "text") for b in blocks)
     # No image was successfully inlined → the urls key is omitted entirely.
     assert "meiva_image_urls" not in msg.additional_kwargs
 
@@ -320,16 +326,14 @@ def test_upload_note_inbound_carries_meiva_upload_files() -> None:
 
 
 def test_user_image_uploads_inbound_renders_multimodal_message_and_harness_prompt(
-    tmp_path: Any,
+    tmp_path: Path,
 ) -> None:
-    from pathlib import Path
-
     from agent.graph.claim.harness_render import render_message
     from base.agents.history.timeline import build_timeline_items
 
     batch_id = "b" * 32
     png_bytes = b"\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR"
-    img_path = Path(tmp_path) / "screen.png"
+    img_path = tmp_path / "screen.png"
     img_path.write_bytes(png_bytes)
     row = ClaimedInbound(
         id=10,

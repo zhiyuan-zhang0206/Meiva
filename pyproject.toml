@@ -635,7 +635,10 @@ reportUnusedCallResult = "warning"
 # leaves that file, that is when reportAny is a global error.
 # BEGIN GENERATED pyright tests environments (scripts/codegen/gen_pyright_test_environments.py; edit nothing between the markers)
 [[tool.pyright.executionEnvironments]]
-root = "agent/graph/claim/tests"
+root = "agent/extensions/tests"
+
+[[tool.pyright.executionEnvironments]]
+root = "agent/graph/hooks/tests"
 
 [[tool.pyright.executionEnvironments]]
 root = "agent/graph/node_log/tests"

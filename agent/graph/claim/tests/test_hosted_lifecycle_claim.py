@@ -15,6 +15,7 @@ from agent.graph.claim._dispatch import BatchState, dispatch_batch, handle_resta
 from agent.graph.claim._routing import Routing
 from agent.state import AgentState
 from base.agents.context import MeivaContext
+from base.agents.messages.kwargs import read_meiva_kwargs
 from base.clock import Clock, ClockConfig
 from base.clock.tests.manual_timers import ManualTimers
 from base.config.tests.configuration import defaults
@@ -69,9 +70,9 @@ async def test_the_acceptance_marker_is_stamped_with_the_contexts_clock() -> Non
     )
 
     [marker] = batch.new_msgs
-    stamps = marker.model_dump()["additional_kwargs"]
-    assert stamps["meiva_created_at"] == timers.now().isoformat()
-    assert stamps["meiva_picked_up_at"] == timers.now().isoformat()
+    stamps = read_meiva_kwargs(marker)
+    assert stamps.get("meiva_created_at") == timers.now().isoformat()
+    assert stamps.get("meiva_picked_up_at") == timers.now().isoformat()
 
 
 # meiva:note
@@ -103,9 +104,9 @@ async def test_a_system_note_row_keeps_its_arrival_and_is_picked_up_by_the_conte
     )
 
     [note] = batch.new_msgs
-    stamps = note.model_dump()["additional_kwargs"]
-    assert stamps["meiva_created_at"] == arrival.isoformat()
-    assert stamps["meiva_picked_up_at"] == timers.now().isoformat()
+    stamps = read_meiva_kwargs(note)
+    assert stamps.get("meiva_created_at") == arrival.isoformat()
+    assert stamps.get("meiva_picked_up_at") == timers.now().isoformat()
 
 
 @pytest.mark.parametrize(

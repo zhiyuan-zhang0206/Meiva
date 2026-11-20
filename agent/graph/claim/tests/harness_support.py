@@ -20,6 +20,7 @@ from langchain_core.runnables import RunnableConfig
 from langgraph.runtime import Runtime
 from psycopg_pool import AsyncConnectionPool
 
+from agent.graph.claim.tests.claim_support import scalar, scalar_int
 from base.agents.context import HostedTurnResources, MeivaContext
 from base.agents.history.timeline_item import TimelineItem
 from base.agents.history.transcript_timeline.items import ReplyPolicy, format_tool_use
@@ -32,6 +33,7 @@ from base.db import Database
 from base.db.code_version_gate import ProcessDbGate
 from base.events.live.bus import EventBus
 from base.events.live.publisher import AgentEventPublisher
+from base.host.boundary.untyped import object_sequence
 from base.host.env.agent_slices import AgentSlices
 from base.lm.harness import (
     AssistantText,
@@ -278,15 +280,28 @@ def insert_row(
         (agent_id, content, kind, source, payload),
     ).fetchone()
     db.commit()
-    assert row is not None
-    return row[0]
+    return scalar_int(row)
+
+
+def publications(db: psycopg.Connection, agent_id: int) -> list[tuple[str, str]]:
+    db.commit()
+    rows = db.execute(
+        "SELECT source_key, content FROM agent_publications WHERE agent_id=%s ORDER BY id",
+        (agent_id,),
+    ).fetchall()
+    found: list[tuple[str, str]] = []
+    for row in rows:
+        key, content = object_sequence(row)
+        assert isinstance(key, str)
+        assert isinstance(content, str)
+        found.append((key, content))
+    return found
 
 
 def row_status(db: psycopg.Connection, inbound_id: int) -> object:
     db.commit()
     row = db.execute("SELECT status FROM inbound_messages WHERE id=%s", (inbound_id,)).fetchone()
-    assert row is not None
-    return row[0]
+    return scalar(row)
 
 
 async def wait_until(condition: Callable[[], bool], what: str) -> None:

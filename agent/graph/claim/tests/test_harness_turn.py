@@ -3,7 +3,6 @@ from __future__ import annotations
 import asyncio
 from collections.abc import Sequence
 from dataclasses import replace
-from unittest.mock import MagicMock
 
 import psycopg
 import pytest
@@ -17,6 +16,7 @@ from agent.graph.claim.harness_interrupt import interrupt_engine
 from agent.graph.claim.harness_render import pending_messages, render_messages
 from agent.graph.claim.harness_turn import harness_turn_node
 from agent.graph.claim.lost_turn import report_lost_turn
+from agent.graph.claim.tests.claim_support import scalar, scalar_int, timeline_items, update_of
 from agent.graph.claim.tests.harness_support import (
     FakeEngine,
     RuntimeFixture,
@@ -31,9 +31,11 @@ from agent.graph.claim.tests.harness_support import hosted_resources as hosted_r
 from agent.graph.llm_errors import FatalLLMStreamError
 from agent.ownership.tests.ownership_support import agent_row
 from agent.state import AgentState
+from base.agents.context import MeivaContext
 from base.agents.history.timeline_item import TimelineItem
 from base.agents.history.transcript_timeline.items import format_tool_use
 from base.agents.tests.units import spawn_agent
+from base.api_contracts.agent_contract import Harness
 from base.cluster.machine import MachineIdentityReader
 from base.config.service_read import ConfigAuthority
 from base.db import Database
@@ -65,8 +67,9 @@ def _last_message_text(db: psycopg.Connection, agent_id: int) -> str | None:
     row = db.execute(
         "SELECT last_message_text FROM agents_meta WHERE id = %s", (agent_id,)
     ).fetchone()
-    assert row is not None
-    return row[0]
+    value = scalar(row)
+    assert value is None or isinstance(value, str)
+    return value
 
 
 def inbound(text: str, inbound_id: int) -> HumanMessage:
@@ -106,12 +109,12 @@ async def test_a_turn_submits_the_pending_messages_and_commits_the_reply(
         state, harness_runtime(engine, agent_id=agent_id), config(agent_id)
     )
     assert command.goto == "claim"
-    assert command.update is not None
+    update = update_of(command)
     [(prompt, key)] = engine.submitted
     assert prompt == "do it"
     assert key == "inbound-7"
-    assert command.update["harness_inputs"] == []
-    assert command.update["halted"] is True
+    assert update["harness_inputs"] == []
+    assert update["halted"] is True
 
 
 async def test_a_turn_with_nothing_pending_ends_without_calling_the_engine(
@@ -135,9 +138,9 @@ async def test_a_turn_logs_usage_under_the_harness(
     engine = FakeEngine(usage=Usage(input_tokens=1200, output_tokens=34))
     state = AgentState(harness_inputs=[{"key": "inbound-7", "prompt": "do it"}])
     await harness_turn_node(state, harness_runtime(engine, agent_id=agent_id), config(agent_id))
-    usage = loguru_records.events("llm_usage")
+    usage = loguru_records.extras(event="llm_usage")
     assert len(usage) == 1
-    extras = usage[0]["extra"]
+    extras = usage[0]
     assert extras["source"] == "antigravity"
     assert extras["in_total"] == 1200
     assert extras["model"] == "claude-sonnet-5-5"
@@ -162,9 +165,9 @@ async def test_an_unpriceable_usage_keeps_the_reply_and_reports_the_gap(
     command = await harness_turn_node(
         state, harness_runtime(engine, agent_id=agent_id), config(agent_id)
     )
-    assert command.update is not None
-    assert command.update["harness_inputs"] == []
-    assert command.update["halted"] is True
+    update = update_of(command)
+    assert update["harness_inputs"] == []
+    assert update["halted"] is True
     warned = loguru_records.events("harness_usage_log_failed")
     assert len(warned) == 1
     assert warned[0]["extra"]["agent_id"] == agent_id
@@ -352,9 +355,9 @@ async def test_intra_turn_events_project_to_live_sse_and_committed_messages(
         config(agent_id),
     )
     assert command.update == {"halted": True, "harness_inputs": [], "harness_view": []}
-    events = await live_events.events()
+    events = await live_events.object_events()
     assert events[-1]["role"] == "llm_done"
-    latest = {item["item_id"]: item for event in events for item in event.get("items", [])}
+    latest = timeline_items(events)
     assert [(item["kind"], item["payload"]) for item in latest.values()] == [
         ("agent_code", "ls -la"),
         ("code_output", "README.md"),
@@ -389,8 +392,8 @@ async def test_consecutive_assistant_text_blocks_project_to_distinct_ai_messages
         config(agent_id),
     )
     assert command.update == {"halted": True, "harness_inputs": [], "harness_view": []}
-    events = await live_events.events()
-    latest = {item["item_id"]: item for event in events for item in event.get("items", [])}
+    events = await live_events.object_events()
+    latest = timeline_items(events)
     assert [(item["payload"], item["user_facing"]) for item in latest.values()] == [
         ("First message", False),
         ("Second message", True),
@@ -527,8 +530,8 @@ async def test_harness_turn_projects_recorded_reasoning_tools_and_reply(
         config(agent_id),
     )
     assert command.update == {"halted": True, "harness_inputs": [], "harness_view": []}
-    events = await live_events.events()
-    latest = {item["item_id"]: item for event in events for item in event.get("items", [])}
+    events = await live_events.object_events()
+    latest = timeline_items(events)
     assert [(item["kind"], item["payload"]) for item in latest.values()] == [
         ("agent_reasoning", "Planning tool call"),
         ("agent_code", "echo ok"),
@@ -569,17 +572,15 @@ async def test_terminate_interrupt_preserves_projected_tool_call_messages(
     [(prompt, key)] = engine.submitted
     assert prompt == "[Heartbeat]: check in"
     assert key == "window-4"
-    assert command.update is not None
-    assert command.update == {"halted": True, "harness_inputs": [], "harness_view": []}
+    assert update_of(command) == {"halted": True, "harness_inputs": [], "harness_view": []}
 
 
 def test_report_lost_turn_logs_turn_fault_lost_inbound(loguru_records: LogRecords) -> None:
-    ctx = MagicMock()
-    ctx.harness.value = "antigravity"
+    report_lost_turn(
+        MeivaContext(harness=Harness.ANTIGRAVITY), 7, [7379], "turn-1", RuntimeError("boom")
+    )
 
-    report_lost_turn(ctx, 7, [7379], "turn-1", RuntimeError("boom"))
-
-    [extra] = [e["extra"] for e in loguru_records.events("turn_fault_lost_inbound")]
+    [extra] = loguru_records.extras(event="turn_fault_lost_inbound")
     assert extra["inbound_ids"] == [7379]
     assert extra["turn_key"] == "turn-1"
     assert extra["harness"] == "antigravity"
@@ -602,8 +603,7 @@ async def test_an_own_terminate_ends_an_invocation_whose_turn_cannot_finish(
             (agent_id, kind, source),
         ).fetchone()
         db_conn.commit()
-        assert row is not None
-        return row[0]
+        return scalar_int(row)
 
     agent_id = agent_row(db_conn)
     key = f"inbound-{insert('chat', 'user')}"
@@ -622,7 +622,7 @@ async def test_an_own_terminate_ends_an_invocation_whose_turn_cannot_finish(
         db_conn.commit()
         command = await node
     assert command.goto == "claim"
-    assert command.update is not None and command.update["halted"] is True
+    assert update_of(command)["halted"] is True
     row = db_conn.execute(
         "SELECT status FROM inbound_messages WHERE id=%s", (terminate,)
     ).fetchone()
@@ -700,8 +700,7 @@ async def test_a_wake_after_a_compaction_carries_the_questions_and_the_hook_note
         "INSERT INTO inbound_messages (agent_id, content, kind, source) VALUES (%s, 'why is the build red?', 'chat', 'user') RETURNING id",
         (agent,),
     ).fetchone()
-    assert inserted is not None
-    row = inserted[0]
+    row = scalar_int(inserted)
     db_conn.commit()
     engine = FakeEngine()
     engine.context_compacted = True
