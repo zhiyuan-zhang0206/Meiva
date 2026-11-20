@@ -1,8 +1,8 @@
 exports = ["catalog.py"]
 
 [uses]
-"catalog.py" = ["main_red.py", "cost.py", "dismissed.py", "events.py", "host.py", "observability.py", "panels.py"]
-"main_red.py" = ["fleet.py", "pr_flow.py"]
+"catalog.py" = ["main_red.py", "cost.py", "delivery.py", "dismissed.py", "events.py", "host.py", "observability.py", "panels.py"]
+"delivery.py" = ["fleet.py", "pr_flow.py"]
 "observability.py" = ["exec_envelope.py", "frontend.py"]
 "tests" = ["catalog.py", "exec_envelope.py", "frontend.py", "observability.py"]
 
