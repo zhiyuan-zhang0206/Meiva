@@ -134,3 +134,34 @@ def test_snapshot_checkpoint_read_failure_matches_timeline_unavailability(
     assert problem.pop("trace_id")
     assert standalone.pop("trace_id")
     assert problem == standalone
+
+
+def test_snapshot_pending_carries_quote_like_the_standalone_endpoint(
+    db_conn: psycopg.Connection, test_client: TestClient, database: Database, event_bus: EventBus
+) -> None:
+    tid = create_agent(db_conn)
+    _put_checkpoint(tid, [_usage_message(1, 1, 0)])
+    insert_inbound_message(
+        db_conn,
+        tid,
+        "quoted question",
+        source="user",
+        payload={
+            "quote": {
+                "source_agent_id": tid,
+                "source_item_id": "item-1",
+                "author": "Agent",
+                "text": "selected text",
+            }
+        },
+        bus=event_bus,
+        database=database,
+    )
+    insert_inbound_message(db_conn, tid, "plain", source="user", bus=event_bus, database=database)
+
+    snap = test_client.get(f"/api/agents/{tid}/conversation-snapshot").json()
+    assert snap["pending"] == test_client.get(f"/api/agents/{tid}/pending").json()
+    quoted, plain = snap["pending"]
+    assert quoted["quote"]["text"] == "selected text"
+    assert quoted["quote"]["author"] == "Agent"
+    assert plain["quote"] is None

@@ -15405,6 +15405,16 @@
             ],
             "title": "Files"
           },
+          "quote": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Quote"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "created_at": {
             "type": "string",
             "format": "date-time",

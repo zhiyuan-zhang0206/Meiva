@@ -2,7 +2,7 @@ import { cleanup, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it } from "vitest";
 
 import { PendingStrip, userPending } from "./pending-strip";
-import type { PendingInbound } from "@/lib/contracts/types";
+import type { DeliveredUploadStatus, PendingInbound, Quote } from "@/lib/contracts/types";
 
 afterEach(cleanup);
 
@@ -13,6 +13,42 @@ function item(over: Partial<PendingInbound> & { id: number }): PendingInbound {
     content: "hello",
     images: null,
     created_at: "2026-05-28T00:00:00Z",
+    ...over,
+  };
+}
+
+function quote(over: Partial<Quote> = {}): Quote {
+  return {
+    source_agent_id: 7,
+    source_item_id: "item-1",
+    author: "Agent 7",
+    text: "a selected passage",
+    ...over,
+  };
+}
+
+function batch(over: Partial<DeliveredUploadStatus> = {}): DeliveredUploadStatus {
+  return {
+    batch_id: "a".repeat(32),
+    state: "pending",
+    reason: null,
+    directory: "/tmp/a",
+    message_text: "analyze this",
+    files: [
+      {
+        ordinal: 0,
+        name: "data.csv",
+        staged_id: "b".repeat(32),
+        size: 128,
+        sha256: "c".repeat(64),
+        content_type: "text/csv",
+      },
+    ],
+    inbound_id: null,
+    source: { machine: "m1", home: "/tmp" },
+    target: { machine: "m1", home: "/tmp" },
+    attempts: 0,
+    next_attempt_at: null,
     ...over,
   };
 }
@@ -194,5 +230,76 @@ describe("PendingStrip", () => {
     expect(screen.getByTestId("pending-delivering-batch")).toBeTruthy();
     expect(screen.getByText("analyze this")).toBeTruthy();
     expect(screen.getByText("data.csv")).toBeTruthy();
+  });
+
+  it("renders a quote card above a queued message", () => {
+    render(<PendingStrip items={[item({ id: 1, content: "explain this", quote: quote() })]} />);
+    const card = screen.getByTestId("pending-quote");
+    expect(card.textContent).toBe("↳ Quoted Agent 7: a selected passage");
+    expect(screen.getByText("explain this")).toBeTruthy();
+    const li = card.closest("li") as HTMLElement;
+    expect(li.className.split(" ")).toContain("flex-col");
+    expect(li.firstElementChild).toBe(card);
+  });
+
+  it("renders the quote card on an in-flight delivering batch", () => {
+    render(<PendingStrip items={[]} deliveringBatch={batch({ quote: quote({ text: "from the batch" }) })} />);
+    const row = screen.getByTestId("pending-delivering-batch");
+    const card = screen.getByTestId("pending-quote");
+    expect(row.contains(card)).toBe(true);
+    expect(card.textContent).toContain("from the batch");
+    expect(screen.getByText("analyze this")).toBeTruthy();
+    expect(screen.getByText("data.csv")).toBeTruthy();
+  });
+
+  it("keeps the quote card with text, file chips and thumbnails of the same message", () => {
+    render(
+      <PendingStrip
+        items={[
+          item({
+            id: 1,
+            content: "look at this",
+            quote: quote(),
+            images: ["/api/agents/7/uploads/a.png"],
+            files: [{ name: "report.pdf", size: 2048, content_type: "application/pdf", url: "/api/keyed/v1/agents/7/uploads/b/objects/0" }],
+          }),
+        ]}
+      />,
+    );
+    expect(screen.getAllByTestId("pending-quote")).toHaveLength(1);
+    expect(screen.getByText("look at this")).toBeTruthy();
+    expect(screen.getByText("report.pdf")).toBeTruthy();
+    expect(screen.getAllByRole("img")).toHaveLength(1);
+  });
+
+  it("previews a long multi-line quote on a single truncated line", () => {
+    const text = `${"x".repeat(300)}\nsecond line\nthird line`;
+    render(<PendingStrip items={[item({ id: 1, quote: quote({ text }) })]} />);
+    const line = screen.getByTestId("pending-quote");
+    expect(line.className.split(" ")).toContain("truncate");
+    expect(line.textContent).toContain(text);
+    expect(line.querySelector("p")).toBeNull();
+  });
+
+  it("groups a quoted message with a left rule and separates rows with a gap", () => {
+    render(
+      <PendingStrip items={[item({ id: 1, content: "a", quote: quote() }), item({ id: 2, content: "b" })]} />,
+    );
+    const quoted = screen.getByTestId("pending-quote").closest("li") as HTMLElement;
+    expect(quoted.className.split(" ")).toEqual(expect.arrayContaining(["border-l-2", "flex-col"]));
+    expect(quoted.parentElement!.className.split(" ")).toContain("space-y-1.5");
+  });
+
+  it("renders no quote card and keeps the compact row when there is no quote", () => {
+    render(
+      <PendingStrip
+        items={[item({ id: 1, content: "plain", quote: null }), item({ id: 2, content: "plain too" })]}
+        deliveringBatch={batch()}
+      />,
+    );
+    expect(screen.queryByTestId("pending-quote")).toBeNull();
+    const li = screen.getByText("plain").closest("li") as HTMLElement;
+    expect(li.className.split(" ")).not.toContain("flex-col");
+    expect(li.className.split(" ")).toEqual(expect.arrayContaining(["items-center", "border-l-2", "pl-2"]));
   });
 });

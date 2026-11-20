@@ -24,6 +24,7 @@ from base.agents.inbox.rows import list_pending_inbounds
 from base.agents.messages.envelope import sender_class
 from base.agents.messages.inbound import InboundKind
 from base.agents.messages.inbound_images import inbound_image_urls, inbound_upload_files
+from base.agents.messages.quote import payload_quote
 from base.agents.model.harness_models import resolve_harness_catalog_model
 from base.agents.model.model_overrides import agent_overrides
 from base.config.service_read import ConfigAuthority
@@ -407,6 +408,7 @@ def get_pending_messages(agent_id: int, request: Request) -> list[PendingInbound
             content=r.content,
             images=inbound_image_urls(agent_id, r.payload),
             files=inbound_upload_files(agent_id, r.payload),
+            quote=payload_quote(r.payload),
             created_at=r.created_at,
         )
         for r in rows
