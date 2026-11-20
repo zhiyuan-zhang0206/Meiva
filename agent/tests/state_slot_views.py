@@ -26,17 +26,29 @@ def state_update() -> dict[str, object]:
     return value
 
 
+def _namespace(value: object) -> SimpleNamespace:
+    assert isinstance(value, SimpleNamespace)
+    return value
+
+
 # meiva:note
-# `meiva.state.<plugin>`: the namespace view the state class builds for a plugin name, read through
-# the `__getattr__` that `build_agent_state` puts on the class it returns.
-def plugin_namespace_object(plugin: str) -> SimpleNamespace:
-    namespace = object_of(getattr, sdk.state, plugin)
-    assert isinstance(namespace, SimpleNamespace)
-    return namespace
+# `meiva.state.meiva_code`, `meiva.state.plugin` and `meiva.state.nonexistent`: the namespace views
+# the state class builds, read through the `__getattr__` that `build_agent_state` puts on it. One
+# reader per plugin name the tests use, so every attribute name is a literal.
+def meiva_code_namespace() -> Mapping[str, object]:
+    return object_mapping(vars(_namespace(object_of(getattr, sdk.state, "meiva_code"))))
 
 
-def plugin_namespace(plugin: str) -> Mapping[str, object]:
-    return object_mapping(vars(plugin_namespace_object(plugin)))
+def plugin_namespace_object() -> SimpleNamespace:
+    return _namespace(object_of(getattr, sdk.state, "plugin"))
+
+
+def plugin_namespace() -> Mapping[str, object]:
+    return object_mapping(vars(plugin_namespace_object()))
+
+
+def nonexistent_namespace() -> SimpleNamespace:
+    return _namespace(object_of(getattr, sdk.state, "nonexistent"))
 
 
 class GraphInput(TypedDict):

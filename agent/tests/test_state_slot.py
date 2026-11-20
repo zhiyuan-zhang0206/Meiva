@@ -65,6 +65,8 @@ from agent.tests.state_slot_views import (
     GraphInput,
     command_update,
     graph_builder,
+    meiva_code_namespace,
+    nonexistent_namespace,
     plugin_namespace,
     plugin_namespace_object,
     sdk,
@@ -377,7 +379,7 @@ def test_namespace_view_strips_prefix():
         )
     )
 
-    ns = plugin_namespace("meiva_code")
+    ns = meiva_code_namespace()
     assert ns["injected_paths"] == {"/a/AGENTS.md", "/b/AGENTS.md"}
     assert ns["token_count"] == 42
     # other_plugin's fields do not appear (cross-plugin isolation)
@@ -402,7 +404,7 @@ def test_namespace_view_typo_name_raises_attribute_error():
     process_context.set_state(state_cls(messages=[], halted=False))
 
     with pytest.raises(AttributeError, match=r"meiva_code.*other"):
-        plugin_namespace_object("nonexistent")
+        nonexistent_namespace()
 
 
 def test_namespace_view_mutation_does_not_persist():
@@ -416,10 +418,10 @@ def test_namespace_view_mutation_does_not_persist():
     state = state_cls.model_validate({"messages": [], "halted": False, "plugin__counter": 1})
     process_context.set_state(state)
 
-    assert plugin_namespace("plugin")["counter"] == 1
-    vars(plugin_namespace_object("plugin"))["counter"] = 999  # mutate namespace by-value copy
+    assert plugin_namespace()["counter"] == 1
+    vars(plugin_namespace_object())["counter"] = 999  # mutate namespace by-value copy
     # original state unchanged (namespace and state are independent Python objects)
-    assert plugin_namespace("plugin")["counter"] == 1
+    assert plugin_namespace()["counter"] == 1
     assert object_mapping(state.model_dump())["plugin__counter"] == 1
     # state_update also not auto-chased — plugin must be explicit
     assert sdk.state_update is None
