@@ -10,6 +10,7 @@ from pathlib import Path
 
 import psutil
 
+from base.host.boundary.untyped import object_of
 from base.native_process.exec_domain import ExecProcessDomain
 from base.native_process.process_control import SYSTEM_PROCESS_CONTROL
 
@@ -65,7 +66,9 @@ async def test_a_killed_host_takes_the_group_with_it(tmp_path: Path) -> None:
         [sys.executable, "-I", str(_HOST), str(out)], stdout=subprocess.PIPE, text=True
     )
     assert host.stdout is not None
-    leader = int(host.stdout.readline())
+    first_line = object_of(host.stdout.readline)
+    assert isinstance(first_line, str), first_line
+    leader = int(first_line)
     try:
         member, _ = await _read_output(out)
         host.kill()
