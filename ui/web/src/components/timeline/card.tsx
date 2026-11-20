@@ -43,10 +43,10 @@ export interface CardConfig {
   readonly titleKey?: string;
   readonly titleValues?: Record<string, string | number>;
   // meiva:note
-  // Default body visibility within an opened settled TurnBlock.
+  // Default body visibility within an opened TurnBlock, live or settled alike (user ruling
+  // 2026-11-20): only the agent's text output and attachments open by default.
   // meiva:link ui/web/src/docs/frontend-components/timeline-view/deep-collapse.md
   readonly fixedDefault: boolean;
-  readonly expandWhileWorking?: false;
   // meiva:note
   // Whether the card stamps the item's timestamp in its right-aligned hover footer.
   // meiva:link ui/web/src/docs/frontend-components/timeline-view/card-chrome.md
@@ -131,7 +131,6 @@ export function messageCardConfig(item: BackendTimelineItem): CardConfig | null 
           titleKey: "timeline.agent",
           titleValues: { id: (item.source ?? "").slice("agent:".length) },
           fixedDefault: false,
-          expandWhileWorking: false,
           showTimestamp: true,
           copy: true,
         };
@@ -145,7 +144,6 @@ export function messageCardConfig(item: BackendTimelineItem): CardConfig | null 
           titleKey: "timeline.externalAgent",
           titleValues: { name },
           fixedDefault: false,
-          expandWhileWorking: false,
           showTimestamp: true,
           copy: true,
         };

@@ -273,7 +273,6 @@ export function TimelineGroupList({
     index: number,
     source: "buffer" | "canonical",
     rank: number,
-    forceExpand = false,
   ) => {
     const renderKey = source === "buffer"
       ? `buffer:${compactBuffer?.epoch}:${rank}:${item.item_id}`
@@ -298,7 +297,7 @@ export function TimelineGroupList({
     }
 
     const isPrimary = classifyItem(item) === "primary";
-    const defaultExpanded = isPrimary || config.fixedDefault || (forceExpand && config.expandWhileWorking !== false);
+    const defaultExpanded = isPrimary || config.fixedDefault;
     const expanded = overrides.get(item.item_id) ?? defaultExpanded;
     const copyable = expanded && !item.partial;
 
@@ -343,7 +342,6 @@ export function TimelineGroupList({
 
             const first = group.members[0];
             const turnId = first.item.item_id;
-            const forceChildExpand = isLiveTurn;
             const rows = rowRange(virtualRange.start + offset);
             return (
               <TurnBlock
@@ -369,7 +367,7 @@ export function TimelineGroupList({
                     const rowKey = `${virtualKey}:${m.source}:${m.rank}:${m.item.item_id}`;
                     return (
                       <div key={rowKey} data-virtual-row={rowKey}>
-                        {renderRow(m.item, m.index, m.source, m.rank, forceChildExpand)}
+                        {renderRow(m.item, m.index, m.source, m.rank)}
                       </div>
                     );
                   })
