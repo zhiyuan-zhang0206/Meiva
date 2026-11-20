@@ -55,6 +55,7 @@ _REPO_MODEL_VENDORS = {
     "claude-opus-5-fast": "anthropic",
     "claude-opus-5-5": "anthropic",
     "claude-opus-5-5-fast": "anthropic",
+    "claude-fable-5-2-fast": "anthropic",
     "claude-sonnet-5": "anthropic",
     "claude-sonnet-5-5": "anthropic",
     "deepseek-flash": "deepseek",

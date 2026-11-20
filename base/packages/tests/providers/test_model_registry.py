@@ -439,6 +439,7 @@ def test_image_media_types_match_the_verified_model_matrix(*, model_catalog: Mod
         "claude-opus-5-fast",
         "claude-opus-5-5",
         "claude-opus-5-5-fast",
+        "claude-fable-5-2-fast",
         "claude-fable-5",
         "claude-fable-5-1",
         "claude-fable-5-2",

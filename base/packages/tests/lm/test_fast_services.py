@@ -75,11 +75,19 @@ def test_openai_wire_model_and_service_tier(
 
 
 @pytest.mark.parametrize("fast", [False, True])
+@pytest.mark.parametrize(
+    ("standard", "effort"), [("claude-opus-5-5", "medium"), ("claude-fable-5-2", "high")]
+)
 def test_anthropic_wire_model_speed_and_beta(
-    monkeypatch: pytest.MonkeyPatch, fast: bool, *, model_catalog: ModelCatalog
+    monkeypatch: pytest.MonkeyPatch,
+    fast: bool,
+    standard: str,
+    effort: str,
+    *,
+    model_catalog: ModelCatalog,
 ) -> None:
     model = build_chat_model(
-        "claude-opus-5-5-fast" if fast else "claude-opus-5-5",
+        f"{standard}-fast" if fast else standard,
         catalog=model_catalog,
         keys=ProviderKeys({"ANTHROPIC_API_KEY": "test-key"}),
         llm_override="",
@@ -88,8 +96,8 @@ def test_anthropic_wire_model_speed_and_beta(
     assert isinstance(model, ThinkingTokensChatAnthropic)
     # Exercise the SDK's actual wire conversion despite its incomplete typing.
     payload = model._get_request_payload([HumanMessage(content="Hello")])  # pyright: ignore[reportUnknownMemberType]
-    assert payload["model"] == "claude-opus-5-5"
-    assert _section(payload, "output_config")["effort"] == "medium"
+    assert payload["model"] == standard
+    assert _section(payload, "output_config")["effort"] == effort
     if fast:
         assert payload["speed"] == "fast"
         assert "fast-mode-2026-02-01" in cast("list[str]", payload["betas"])

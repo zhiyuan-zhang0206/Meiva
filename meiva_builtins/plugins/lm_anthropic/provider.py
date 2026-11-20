@@ -310,6 +310,16 @@ def contribute() -> PluginContributions:
                         source_checked_at="2026-10-08",
                         vendor="anthropic",
                     ),
+                    "claude-fable-5-2": PriceRates(
+                        cache_miss=16,
+                        cache_hit=0.4,
+                        output=80,
+                        cache_write_5m=20.00,
+                        cache_write_1h=32,
+                        source_url="https://platform.claude.com/docs/en/about-claude/pricing",
+                        source_checked_at="2026-11-20",
+                        vendor="anthropic",
+                    ),
                 },
             ),
         )

@@ -505,11 +505,12 @@
     "claude-sonnet-5-5": {
       "vendor": "anthropic",
       "source_url": "https://platform.claude.com/docs/en/models/sonnet-5-5/overview",
-      "source_checked_at": "2026-10-08",
+      "source_checked_at": "2026-11-20",
+      "effective_time_note": "Anthropic's release notes (https://platform.claude.com/docs/en/release-notes/overview) date the Sonnet 5.5 cache-read cut from $0.20 to $0.10 per 1M (0.1x to 0.05x of input) to October 7, 2026 and publish no instant or timezone; Meiva activates it at the latest global occurrence of that date (UTC-12) = 2026-10-07T12:00:00Z, so ambiguous-timezone traffic never under-reports spend.",
       "periods": [
         {
           "effective_from": null,
-          "effective_until": null,
+          "effective_until": "2026-10-07T12:00:00Z",
           "tiers": [
             {
               "input_tokens_min": 0,
@@ -517,6 +518,24 @@
               "rates": {
                 "input": "2.0",
                 "cache_read": "0.20",
+                "output": "10.0",
+                "cache_write_5m": "2.500",
+                "cache_write_1h": "4.0"
+              },
+              "utc_daily_overrides": []
+            }
+          ]
+        },
+        {
+          "effective_from": "2026-10-07T12:00:00Z",
+          "effective_until": null,
+          "tiers": [
+            {
+              "input_tokens_min": 0,
+              "input_tokens_max": null,
+              "rates": {
+                "input": "2.0",
+                "cache_read": "0.10",
                 "output": "10.0",
                 "cache_write_5m": "2.500",
                 "cache_write_1h": "4.0"
@@ -1760,6 +1779,31 @@
                 "output": "40",
                 "cache_write_5m": "10.00",
                 "cache_write_1h": "16"
+              },
+              "utc_daily_overrides": []
+            }
+          ]
+        }
+      ]
+    },
+    "claude-fable-5-2-fast": {
+      "vendor": "anthropic",
+      "source_url": "https://platform.claude.com/docs/en/about-claude/pricing",
+      "source_checked_at": "2026-11-20",
+      "periods": [
+        {
+          "effective_from": null,
+          "effective_until": null,
+          "tiers": [
+            {
+              "input_tokens_min": 0,
+              "input_tokens_max": null,
+              "rates": {
+                "input": "16",
+                "cache_read": "0.4",
+                "output": "80",
+                "cache_write_5m": "20.00",
+                "cache_write_1h": "32"
               },
               "utc_daily_overrides": []
             }

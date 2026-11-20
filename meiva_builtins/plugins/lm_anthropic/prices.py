@@ -20,13 +20,45 @@ PRICES = {
     ),
     "claude-sonnet-5-5": PriceRates(
         cache_miss=2.0,
-        cache_hit=0.20,
+        cache_hit=0.10,
         output=10.0,
         cache_write_5m=2.500,
         cache_write_1h=4.0,
         source_url="https://platform.claude.com/docs/en/models/sonnet-5-5/overview",
-        source_checked_at="2026-10-08",
+        source_checked_at="2026-11-20",
         vendor="anthropic",
+        periods=(
+            PricePeriod(
+                effective_from=None,
+                effective_until="2026-10-07T12:00:00Z",
+                tiers=(
+                    PriceTier(
+                        input_tokens_min=0,
+                        input_tokens_max=None,
+                        cache_miss="2.0",
+                        cache_hit="0.20",
+                        output="10.0",
+                        cache_write_5m="2.500",
+                        cache_write_1h="4.0",
+                    ),
+                ),
+            ),
+            PricePeriod(
+                effective_from="2026-10-07T12:00:00Z",
+                effective_until=None,
+                tiers=(
+                    PriceTier(
+                        input_tokens_min=0,
+                        input_tokens_max=None,
+                        cache_miss="2.0",
+                        cache_hit="0.10",
+                        output="10.0",
+                        cache_write_5m="2.500",
+                        cache_write_1h="4.0",
+                    ),
+                ),
+            ),
+        ),
     ),
     "claude-haiku-5-5": PriceRates(
         cache_miss=0.10,

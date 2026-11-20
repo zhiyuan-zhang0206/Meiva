@@ -6,7 +6,7 @@ The provider plugins and `pricing_catalog_archive.json` hold these reviewed rate
 
 Fast service IDs have independently declared prices, even when their wire model
 is shared with Standard. The following USD per million token rates were checked
-2026-10-07 (2026-10-28 for `gpt-6.1-terra-fast`, 2026-11-18 for the GPT-6.2 rows) against [OpenAI pricing](https://developers.openai.com/api/docs/pricing)
+2026-10-07 (2026-10-28 for `gpt-6.1-terra-fast`, 2026-11-18 for the GPT-6.2 rows, 2026-11-20 for `claude-fable-5-2-fast`) against [OpenAI pricing](https://developers.openai.com/api/docs/pricing)
 and [Anthropic pricing](https://platform.claude.com/docs/en/about-claude/pricing).
 Triples are input / cache read / output. OpenAI's long-context rate prices the
 whole request when input exceeds 272,000 tokens.
@@ -25,10 +25,11 @@ whole request when input exceeds 272,000 tokens.
 | `gpt-5.6-luna-fast` | 0.40 / 0.04 / 2.40 | 0.80 / 0.08 / 3.60 |
 | `claude-opus-5-fast` | 10 / 1 / 50 | Same |
 | `claude-opus-5-5-fast` | 8 / 0.40 / 40 | Same |
+| `claude-fable-5-2-fast` | 16 / 0.40 / 80 | Same |
 
 The actual response service receipt controls billing. OpenAI may downgrade a
 Fast request to Standard; missing or unknown Fast receipts fail rather than
-guessing its price. Claude Fast remains subject to vendor access approval.
+guessing its price. Claude Opus 5 Fast remains subject to vendor access approval; Fable 5.2 and Opus 5.5 Fast need none (default Fast rate limit on the Start, Build and Scale tiers).
 Anthropic cache writes are still outside Meiva's three-rate accounting model.
 
 ## Decision models
@@ -45,7 +46,7 @@ not charged, so cache hit and miss carry the same rate. Both ids have archive ro
 - **claude-fable-5-2** costs $8 input / $0.20 cache read (0.025x) / $40 output per 1M tokens ($10 5m / $16 1h cache writes; [Anthropic pricing](https://www.anthropic.com/pricing), checked 2026-11-16). `claude-fable-5` and `claude-fable-5-1` remain spawnable and are display-superseded.
 - **gemini-4-carbon and gemini-4-argon** share Google's launch rate of $2 input / $0.10 implicit cache read / $10 output per 1M tokens through 2026-11-30, rising to $4 / $0.20 / $20 from 2026-12-01 (activated at `2026-11-30T10:00:00Z`, UTC+14); **gemini-4-hydrogen** is flat at $1.50 / $0.075 / $7.50 per 1M tokens ([Gemini pricing](https://ai.google.dev/gemini-api/docs/pricing), checked 2026-11-16).
 - **claude-opus-5-5** costs $4 input / $0.20 cache read / $20 output per 1M tokens ([Anthropic pricing](https://www.anthropic.com/pricing), checked 2026-09-25). Cache writes cost $5 for 5m and $8 for 1h per 1M; Meiva bills the reported write TTL separately from ordinary input. `claude-opus-5` remains spawnable but is display-superseded by Opus 5.5.
-- **claude-sonnet-5-5** costs $2 input / $0.20 cache read / $10 output per 1M tokens ([official model page](https://platform.claude.com/docs/en/models/sonnet-5-5/overview), checked 2026-09-30). Cache writes cost $2.50 for 5m and $4 for 1h per 1M; Meiva bills the reported write TTL separately from ordinary input. `claude-sonnet-5` remains spawnable but is display-superseded.
+- **claude-sonnet-5-5** costs $2 input / $0.10 cache read (0.05x) / $10 output per 1M tokens ([official model page](https://platform.claude.com/docs/en/models/sonnet-5-5/overview), checked 2026-11-20). Anthropic's [release notes](https://platform.claude.com/docs/en/release-notes/overview) date the cache-read cut from $0.20 to October 7, 2026 without a timezone, so the archive and plugin carry two periods that flip at `2026-10-07T12:00:00Z` (UTC-12, the latest global start of that date, so a date-only decrease never under-reports spend); earlier events keep $0.20. Cache writes cost $2.50 for 5m and $4 for 1h per 1M; Meiva bills the reported write TTL separately from ordinary input. `claude-sonnet-5` remains spawnable but is display-superseded.
 - **gpt-6-sol** costs $2 input / $0.20 cached / $10 output per 1M for up to 272K input tokens, then $4 / $0.40 / $15 for the full request ([official model page](https://developers.openai.com/api/docs/models/gpt-6-sol), checked 2026-09-25). Cache writes cost $2.50 per 1M and are not modeled. `gpt-5.6-sol` and `gpt-6-sol` remain spawnable but are display-superseded by their next Sol model.
 - **kimi-k3.1-pro** costs $2 input / $0.20 cached input / $10 output per 1M tokens ($2 5m / $4 1h cache writes), and **kimi-k3.1-pro-highspeed** $4 / $0.20 / $20 ($4 5m / $8 1h cache writes; [Moonshot pricing](https://platform.moonshot.ai/docs/pricing), checked 2026-10-24). Both carry the 1,048,576-token K3-series context window; Highspeed is the same model served 2-3x faster, and its cached input stays at the standard price. `kimi-k3` remains spawnable at $3 / $0.30 / $15 ($3 5m / $6 1h cache writes) but is display-superseded by K3.1 Pro, the post-trained successor ([kimi-k3.1-pro blog](https://www.kimi.ai/blog/kimi-k3-1-pro), checked 2026-10-24). Moonshot Chat Completions reports automatic 5m cache writes in `usage.prompt_tokens_details.cache_write_tokens`, which maps to `cache_write_5m`.
 - **gpt-6.2-sol** costs $2 input / $0.10 cached / $10 output per 1M for up to 272K input tokens, then $4 / $0.20 / $15 for the full request, and **gpt-6.2-astra** $8 / $0.40 / $40, then $16 / $0.80 / $60 ([gpt-6.2-sol](https://developers.openai.com/api/docs/models/gpt-6.2-sol) and [gpt-6.2-astra](https://developers.openai.com/api/docs/models/gpt-6.2-astra) model pages and [OpenAI pricing](https://developers.openai.com/api/docs/pricing), checked 2026-11-18). Both accept `low` through `max` and reject `none` and `minimal` (live-checked 2026-11-18). Cache writes cost $2.50 and $10 per 1M (30m) and are not modeled; Fast service bills 2x these rates. Ultrafast (3x Standard through 2027-02-28, 6x from 2027-03-01 Pacific) and the discounted background completion windows (30% / 40% below Standard) have no Meiva service id. `gpt-6.1-sol` and `gpt-6-astra` remain spawnable at their own published rates but are display-superseded by the GPT-6.2 tier of the same name, which OpenAI's [models page](https://developers.openai.com/api/docs/models) now features in their place.
