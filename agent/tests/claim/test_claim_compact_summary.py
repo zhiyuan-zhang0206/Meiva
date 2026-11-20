@@ -89,7 +89,7 @@ async def test_claim_compact_summary_with_no_existing_system_message(
         ),
     )
 
-    tail = compact_tail(cmd.update)
+    tail = compact_tail(cmd)
     assert not any(isinstance(m, SystemMessage) for m in cmd.update["messages"])  # type: ignore[index]
     assert not any(isinstance(m, SystemMessage) for m in tail)
     assert [m.content for m in tail] == [

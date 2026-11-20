@@ -21,6 +21,7 @@ from agent.graph.hooks.compact import (
 from agent.hooks import Hook
 from agent.messages import InboundTimes, inbound_message
 from agent.state import AgentState, CompactState, ContextReset
+from agent.tests.command_update import command_update
 from agent.tests.test_compact import (
     COMPACT_SECTIONS,
     LONG_SUMMARY,
@@ -279,8 +280,8 @@ async def test_compact_summary_preserves_agent_continuity(
         state, make_runtime(aops_pool, database_gate=database_gate), make_config(tid)
     )
     assert cmd.goto == "init_context"
-    assert cmd.update is not None
-    reset = cmd.update["context_reset"]
+    update = command_update(cmd)
+    reset = update["context_reset"]
     assert isinstance(reset, ContextReset)
     resume = reset.resume
     assert resume == BEFORE_TURN, (
@@ -371,12 +372,8 @@ async def test_compact_summary_emits_compact_done(
 
     emitted = await live_events.payloads()
     assert any('"compact_done"' in e for e in emitted), f"no CompactDone emitted; saw {emitted}"
-    [monitoring] = [
-        record
-        for record in loguru_records
-        if record["extra"].get("event") == "compaction_completed"
-    ]
-    assert monitoring["extra"] | {"msg": None} == {
+    [monitoring] = loguru_records.extras(event="compaction_completed")
+    assert monitoring | {"msg": None} == {
         "agent_id": tid,
         "compact_kind": "compact_summary",
         "reminder_shown": reminded,
@@ -437,8 +434,8 @@ async def test_consecutive_compacts_both_processed(
     assert [m.content for m in tail2] == [
         compose_summary_message("second compact summary", inputs=TimestampPolicy.off())
     ]
-    assert cmd2.update is not None
-    reset = cmd2.update["context_reset"]
+    update = command_update(cmd2)
+    reset = update["context_reset"]
     assert isinstance(reset, ContextReset)
     assert reset.resume != END
 
@@ -555,8 +552,8 @@ async def test_terminate_preserves_pending_summary_without_wiping_history(
     await apply_hosted_lifecycle(aops_pool, old, resume_turn=False)
 
     assert cmd.goto == END
-    assert cmd.update is not None
-    assert "context_reset" not in cmd.update
+    update = command_update(cmd)
+    assert "context_reset" not in update
     assert state.messages == initial_msgs
     assert db_conn.execute(
         "SELECT kind,status FROM inbound_messages WHERE agent_id=%s ORDER BY id",
@@ -606,10 +603,10 @@ async def test_compact_in_same_batch_as_restart(
     await apply_hosted_lifecycle(aops_pool, old, resume_turn=False)
 
     assert cmd.goto == END
-    assert cmd.update is not None
-    assert "context_reset" not in cmd.update
+    update = command_update(cmd)
+    assert "context_reset" not in update
     assert state.messages == initial_msgs
-    rows = db_conn.execute(
+    rows: list[tuple[object, ...]] = db_conn.execute(
         "SELECT id,kind,status FROM inbound_messages WHERE agent_id=%s ORDER BY id",
         (tid,),
     ).fetchall()

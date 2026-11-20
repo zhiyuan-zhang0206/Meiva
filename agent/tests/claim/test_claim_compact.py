@@ -1,7 +1,6 @@
 """The claim node's compact inbounds: summary, request, retries, supersession and the batches they share with chat and restart."""
 
 from collections.abc import Callable
-from typing import Any, cast
 
 import httpx
 import psycopg
@@ -24,10 +23,12 @@ from agent.state import AgentState, CompactState
 from agent.tests.claim.claim_status_support import (
     await_status,
     compact_tail,
+    first_int,
     pair_compact_cycles,
     set_agent_status,
 )
 from agent.tests.claim.claim_status_support import running_agent as running_agent
+from agent.tests.command_update import command_update, update_messages
 from agent.tests.scripted_model import ScriptedChatModel
 from base.agents.inbox.insert import insert_inbound_message
 from base.agents.messages.timestamp_policy import TimestampPolicy
@@ -80,7 +81,7 @@ async def _insert_inbound_kind_async(
         )
         row = await cur.fetchone()
     assert row is not None, f"_insert_inbound_kind_async: no RETURNING for agent {agent_id}"
-    return row[0]
+    return first_int(row)
 
 
 def scripted_llm(summary: str = "synthetic compaction summary") -> ScriptedChatModel:
@@ -130,7 +131,7 @@ async def test_claim_compact_summary_replaces_messages_with_remove_sentinel(
     )
 
     assert fake_llm.requests == []
-    tail = compact_tail(cmd.update)
+    tail = compact_tail(cmd)
     assert isinstance(tail[0], HumanMessage)
     assert tail[0].content == compose_summary_message(summary_text, inputs=TimestampPolicy.off())  # pyright: ignore[reportUnknownMemberType]
 
@@ -215,7 +216,7 @@ async def test_claim_compact_request_calls_backend_llm(
         ),
     )
 
-    tail = compact_tail(cmd.update)
+    tail = compact_tail(cmd)
     assert tail[0].content == compose_summary_message(
         "LLM-generated summary", inputs=TimestampPolicy.off()
     )  # pyright: ignore[reportUnknownMemberType]
@@ -265,7 +266,7 @@ async def test_claim_compact_request_emits_live_run_pair_with_durable_anchor(
     assert started["mode"] == "request"
     assert finished["status"] == "success"
     assert cmd.goto == "init_context"
-    tail = compact_tail(cmd.update)
+    tail = compact_tail(cmd)
     assert tail[0].additional_kwargs["meiva_compact_id"] == started["compact_id"]  # pyright: ignore[reportUnknownMemberType]
 
 
@@ -317,7 +318,7 @@ async def test_claim_two_compact_requests_second_replaces_first(
     pairs = await pair_compact_cycles(live_events)
     assert [p[1]["status"] for p in pairs] == ["replaced", "success"]
     assert len(llm.requests) == 2
-    tail = compact_tail(cmd.update)
+    tail = compact_tail(cmd)
     assert tail[0].content == compose_summary_message(
         "second summary", inputs=TimestampPolicy.off()
     )  # pyright: ignore[reportUnknownMemberType]
@@ -372,7 +373,7 @@ async def test_claim_compact_summary_supersedes_pending_request_and_closes_it_re
     assert started["mode"] == "request"
     assert finished["status"] == "replaced"
     assert len(llm.requests) == 1
-    tail = compact_tail(cmd.update)
+    tail = compact_tail(cmd)
     assert tail[0].content == compose_summary_message(
         "agent-authored summary", inputs=TimestampPolicy.off()
     )  # pyright: ignore[reportUnknownMemberType]
@@ -423,8 +424,9 @@ async def test_claim_cancel_beats_pending_compact_and_closes_it_replaced(
     assert started["mode"] == "request"
     assert finished["status"] == "replaced"
     assert cmd.goto == "claim"
-    assert cmd.update["halted"] is True  # type: ignore[index]
-    assert cmd.update is not None and "context_reset" not in cmd.update
+    update = command_update(cmd)
+    assert update["halted"] is True
+    assert "context_reset" not in update
 
 
 async def test_claim_compact_request_empty_conversation_consumed_as_noop(
@@ -507,7 +509,7 @@ async def test_claim_compact_request_retries_then_succeeds(
     )
 
     assert len(llm.requests) == 2
-    tail = compact_tail(cmd.update)
+    tail = compact_tail(cmd)
     assert tail[0].content == compose_summary_message(
         "retried summary", inputs=TimestampPolicy.off()
     )  # pyright: ignore[reportUnknownMemberType]
@@ -559,7 +561,7 @@ async def test_claim_compact_summary_with_chat_in_same_batch_defers_chat(
     )
 
     # The compact is a clean wipe: the parked tail is the summary alone.
-    tail = compact_tail(cmd.update)
+    tail = compact_tail(cmd)
     assert len(tail) == 1  # pyright: ignore[reportUnknownArgumentType]
     assert tail[0].content == compose_summary_message(summary_text, inputs=TimestampPolicy.off())  # pyright: ignore[reportUnknownMemberType]
     assert cmd.goto == "init_context"
@@ -622,7 +624,7 @@ async def test_claim_compact_summary_finalizes_claimed_history(
     )
 
     # Compact still a clean wipe: the parked tail is the summary alone.
-    tail = compact_tail(cmd.update)
+    tail = compact_tail(cmd)
     assert len(tail) == 1  # pyright: ignore[reportUnknownArgumentType]
     assert tail[0].content == compose_summary_message("agent summary", inputs=TimestampPolicy.off())  # pyright: ignore[reportUnknownMemberType]
     # ...and the claimed history is finalized: a post-compact restart must not
@@ -712,7 +714,7 @@ async def test_claim_compact_summary_batched_with_restart_applies_and_keeps_idle
 
     # Already-authored data is retained for the successor, not applied by an exiting owner.
     assert cmd.goto == END
-    restart_messages = cast(list[AnyMessage], cast(dict[str, Any], cmd.update)["messages"])
+    restart_messages = update_messages(command_update(cmd))
     assert (
         len(restart_messages) == 1
         and "Restart was accepted" in restart_messages[0].model_dump()["content"]

@@ -1,11 +1,10 @@
 """The claim node's chat dispatch, short path, inbound-committed publishes and container mode."""
 
 from collections.abc import Callable
-from typing import cast
 
 import psycopg
 import pytest
-from langchain_core.messages import AnyMessage, HumanMessage, SystemMessage
+from langchain_core.messages import HumanMessage, SystemMessage
 from langgraph.graph import END
 from langgraph.types import Command
 from psycopg_pool import AsyncConnectionPool
@@ -15,8 +14,9 @@ from agent.graph import claim_node
 from agent.graph.claim.tests.claim_support import insert_inbound_kind, make_runtime, thread_config
 from agent.graph.claim.tests.cursor_fixture import fresh_snapshot_cursor as fresh_snapshot_cursor
 from agent.state import AgentState
-from agent.tests.claim.claim_status_support import committed_publishes, set_agent_status
+from agent.tests.claim.claim_status_support import committed_publishes, first_int, set_agent_status
 from agent.tests.claim.claim_status_support import running_agent as running_agent
+from agent.tests.command_update import command_update, update_messages
 from base.agents.inbox.insert import insert_inbound_message
 from base.agents.tests.units import spawn_agent
 from base.cluster.machine import MachineIdentityReader
@@ -126,9 +126,7 @@ async def test_claim_inbound_batch_stamps_claimed_at(
             "VALUES (%s, %s, 'terminate', 'system') RETURNING id",
             (tid, "bye"),
         )
-        term_row = cur.fetchone()
-        assert term_row is not None
-        term_id = term_row[0]
+        term_id = first_int(cur.fetchone())
     db_conn.commit()
 
     rows = await claim_inbound_batch(
@@ -193,8 +191,8 @@ async def test_claim_chat_kind_appends_humanmessage_with_envelope(
 
     assert isinstance(cmd, Command)
     assert cmd.goto == "before_turn"
-    assert cmd.update is not None
-    msgs = cast("list[AnyMessage]", cmd.update["messages"])
+    update = command_update(cmd)
+    msgs = update_messages(update)
     # Claim appends the batch and nothing else — the standing head (SystemMessage
     # plus the context notes) is laid down by `init_context` before claim runs.
     assert len(msgs) == 1
@@ -202,7 +200,7 @@ async def test_claim_chat_kind_appends_humanmessage_with_envelope(
     # User envelope: a bare "[ts]" header (base/agents/messages/envelope.py).
     assert str(msgs[0].content).startswith("[")
     assert "hello" in msgs[0].content
-    assert cmd.update["halted"] is False  # type: ignore[index]
+    assert update["halted"] is False
 
 
 async def test_claim_chat_expands_slash_command(
@@ -275,9 +273,9 @@ async def test_claim_multiple_chat_inbounds_all_appended_in_fifo_order(
         ),
     )
 
-    assert cmd.update is not None
+    update = command_update(cmd)
 
-    msgs = cast("list[AnyMessage]", cmd.update["messages"])
+    msgs = update_messages(update)
     # Claim appends the batch alone — the head is `init_context`'s.
     assert len(msgs) == 3
     contents = [m.content for m in msgs]
@@ -638,8 +636,8 @@ async def test_claim_chat_message_carries_source_metadata(
             tid,
         ),
     )
-    assert cmd.update is not None
-    msgs = cast("list[AnyMessage]", cmd.update["messages"])
+    update = command_update(cmd)
+    msgs = update_messages(update)
     chat_msg = msgs[0]
     assert isinstance(chat_msg, HumanMessage)
     assert chat_msg.additional_kwargs.get("meiva_source") == "user"

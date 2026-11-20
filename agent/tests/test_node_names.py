@@ -3,6 +3,7 @@ from typing import get_args
 import pytest
 
 from agent.nodes import NodeName, node_name
+from base.host.boundary.untyped import object_sequence
 
 
 # meiva:note
@@ -10,7 +11,7 @@ from agent.nodes import NodeName, node_name
 # value into one of those targets is held to it, so a node added without a row fails here instead of
 # in a turn that cannot route.
 def test_the_routing_table_covers_every_graph_node() -> None:
-    for name in get_args(NodeName):
+    for name in object_sequence(get_args(NodeName)):
         assert node_name(name) == name
 
 

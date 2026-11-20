@@ -13,7 +13,6 @@ from collections.abc import Sequence
 from dataclasses import replace
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any
 
 import psycopg
 import pytest
@@ -23,6 +22,7 @@ from psycopg_pool import AsyncConnectionPool
 from agent.graph.claim.harness_turn import harness_turn_node
 from agent.graph.claim.tests.harness_support import (
     FakeEngine,
+    Script,
     config,
     in_a_turn,
     insert_row,
@@ -42,6 +42,8 @@ from base.db.code_version_gate import ProcessDbGate
 from base.events.live.bus import EventBus
 from base.events.live.tests.live_capture import LiveEvents
 from base.events.live.tests.live_capture import live_events as live_events
+from base.host.boundary.fields import str_field
+from base.host.boundary.json_values import is_object_dict, is_object_list
 from base.host.env.agent_slices import AgentSlices
 from base.lm.harness import BridgeEvent, HarnessInput
 from base.log.tests.log_records import LogRecords
@@ -61,7 +63,7 @@ class RecordingCodex:
         self.path = path
         self.turns = 0
 
-    def _row(self, kind: str, payload: dict[str, Any]) -> str:
+    def _row(self, kind: str, payload: dict[str, object]) -> str:
         stamp = datetime.now(UTC).isoformat().replace("+00:00", "Z")
         return json.dumps({"timestamp": stamp, "ordinal": 0, "type": kind, "payload": payload})
 
@@ -71,7 +73,7 @@ class RecordingCodex:
         ms = int(datetime.now(UTC).timestamp() * 1000)
         times = {"started_at_ms": ms, "completed_at_ms": ms}
 
-        def item(payload: dict[str, Any]) -> str:
+        def item(payload: dict[str, object]) -> str:
             return self._row(
                 "event_msg",
                 {"type": "item_completed", "turn_id": turn, "item": payload, **times},
@@ -114,7 +116,7 @@ def _codex_agent(db_conn: psycopg.Connection) -> int:
     return agent_id
 
 
-def _engine(script: Any = None) -> FakeEngine:
+def _engine(script: Script | None = None) -> FakeEngine:
     engine = FakeEngine(script=script or (lambda _inputs: []))
     engine.session_id = SESSION
     return engine
@@ -144,16 +146,22 @@ def _wired(
 
 def _publications(db_conn: psycopg.Connection, agent_id: int) -> list[tuple[str, str]]:
     db_conn.commit()
-    rows = db_conn.execute(
+    rows: list[tuple[object, ...]] = db_conn.execute(
         "SELECT source_key, content FROM agent_publications WHERE agent_id=%s ORDER BY id",
         (agent_id,),
     ).fetchall()
-    return [(str(key), str(content)) for key, content in rows]
+    return [(str(key), str(content)) for key, content, *_ in rows]
 
 
-def _assert_page_saw_the_message(events: list[dict[str, Any]], row: int) -> None:
+def _assert_page_saw_the_message(events: list[dict[str, object]], row: int) -> None:
     snapshots = [e for e in events if e.get("role") == "timeline_snapshot"]
-    shown = {item["item_id"]: item for e in snapshots for item in e["items"]}
+    shown: dict[str, dict[str, object]] = {}
+    for snapshot in snapshots:
+        items = snapshot["items"]
+        assert is_object_list(items)
+        for item in items:
+            assert is_object_dict(item)
+            shown[str_field(item, "item_id")] = item
     first = next(iter(shown.values()))
     assert (first["kind"], first["inbound_id"]) == ("inbound_chat", row)
     assert all(re.fullmatch(r"h\d+\.\d+", item_id) for item_id in shown)

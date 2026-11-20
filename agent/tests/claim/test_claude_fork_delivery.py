@@ -6,7 +6,6 @@ from collections.abc import Sequence
 from dataclasses import replace
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any
 
 import psycopg
 from langgraph.runtime import Runtime
@@ -15,6 +14,7 @@ from psycopg_pool import AsyncConnectionPool
 from agent.graph.claim.harness_turn import harness_turn_node
 from agent.graph.claim.tests.harness_support import (
     FakeEngine,
+    Script,
     config,
     in_a_turn,
     insert_row,
@@ -45,7 +45,7 @@ from base.paths import harness_sessions_dir, workspace_dir
 from meiva.tests.fixtures.pin_agent import hosted_resources as hosted_resources
 
 
-def _engine(session_id: str, script: Any = None) -> FakeEngine:
+def _engine(session_id: str, script: Script | None = None) -> FakeEngine:
     engine = FakeEngine(script=script or (lambda _inputs: []))
     engine.session_id = session_id
     return engine
@@ -75,11 +75,11 @@ def _claude_context(
 
 def _publications(db_conn: psycopg.Connection, agent_id: int) -> list[tuple[str, str]]:
     db_conn.commit()
-    rows = db_conn.execute(
+    rows: list[tuple[object, ...]] = db_conn.execute(
         "SELECT source_key, content FROM agent_publications WHERE agent_id=%s ORDER BY id",
         (agent_id,),
     ).fetchall()
-    return [(str(key), str(content)) for key, content in rows]
+    return [(str(key), str(content)) for key, content, *_ in rows]
 
 
 def _claude_row(

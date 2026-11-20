@@ -4,7 +4,6 @@ Split from `agent/tests/test_compact.py`, which holds the shared helpers and the
 """
 
 from datetime import UTC, datetime
-from typing import Any
 
 import pytest
 from langchain_core.messages import (
@@ -26,6 +25,7 @@ from base.agents.history.closing_request import METADATA_KEY as CLOSING_METADATA
 from base.agents.history.closing_request import ClosingRequest
 from base.agents.messages.timestamp_policy import TimestampPolicy
 from base.clock import SYSTEM_TIMERS
+from base.host.boundary.json_values import is_object_dict
 from base.lm.catalog import ModelCatalog
 from base.log.tests.log_records import LogRecords
 from base.packages.plugin_providers import build_model_catalog
@@ -41,7 +41,8 @@ async def _checkpoint(pool: AsyncConnectionPool, checkpoint_id: str) -> None:
         )
 
 
-async def _metadata(pool: AsyncConnectionPool, checkpoint_id: str) -> dict[str, Any]:
+async def _metadata(pool: AsyncConnectionPool, checkpoint_id: str) -> dict[str, object]:
+    row: tuple[object, ...] | None
     async with pool.connection() as conn:
         row = await (
             await conn.execute(
@@ -50,7 +51,9 @@ async def _metadata(pool: AsyncConnectionPool, checkpoint_id: str) -> dict[str, 
             )
         ).fetchone()
     assert row is not None
-    return row[0]
+    metadata = row[0]
+    assert is_object_dict(metadata)
+    return metadata
 
 
 async def test_stamp_compact_boundary_writes_the_closing_request(
@@ -113,8 +116,7 @@ async def test_generate_summary_reports_the_compaction_call_as_agent_usage(
         == "a complete summary"
     )
 
-    [record] = [record for record in loguru_records if record["extra"].get("event") == "llm_usage"]
-    extra = record["extra"]
+    [extra] = loguru_records.extras(event="llm_usage")
     assert (extra["model"], extra["usage_kind"]) == ("deepseek-flash", "agent")
     assert (extra["in_total"], extra["out_total"], extra["cache_read"]) == (1_000, 100, 800)
 

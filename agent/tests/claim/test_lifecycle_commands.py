@@ -24,9 +24,13 @@ from base.native_process.runtime_incarnation import RuntimeIncarnation
 
 
 def _status(conn: psycopg.Connection, command_id: int) -> str:
-    row = conn.execute("SELECT status FROM inbound_messages WHERE id=%s", (command_id,)).fetchone()
+    row: tuple[object, ...] | None = conn.execute(
+        "SELECT status FROM inbound_messages WHERE id=%s", (command_id,)
+    ).fetchone()
     assert row is not None
-    return row[0]
+    status = row[0]
+    assert isinstance(status, str)
+    return status
 
 
 def test_request_cannot_prepopulate_reserved_result(

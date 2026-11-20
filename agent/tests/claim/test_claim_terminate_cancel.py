@@ -3,11 +3,10 @@
 
 from collections.abc import Callable
 from dataclasses import replace
-from typing import Any, cast
 
 import psycopg
 import pytest
-from langchain_core.messages import AnyMessage, HumanMessage, SystemMessage
+from langchain_core.messages import HumanMessage, SystemMessage
 from langgraph.graph import END
 from langgraph.runtime import Runtime
 from psycopg_pool import AsyncConnectionPool
@@ -23,6 +22,7 @@ from agent.graph.claim.tests.cursor_fixture import fresh_snapshot_cursor as fres
 from agent.state import AgentState
 from agent.tests.claim.claim_status_support import await_status, set_agent_status
 from agent.tests.claim.claim_status_support import running_agent as running_agent
+from agent.tests.command_update import command_update, update_messages
 from base.agents.inbox.insert import insert_inbound_message
 from base.agents.tests.units import spawn_agent
 from base.cluster.machine import MachineIdentityReader
@@ -60,10 +60,9 @@ async def test_claim_terminate_kind_appends_lifecycle_marker_and_routes_to_end(
         ),
     )
     assert cmd.goto == END
-    assert cmd.update is not None
-    assert cmd.update["exit_requested"] is True
-    assert cmd.update is not None
-    msgs = cast("list[AnyMessage]", cmd.update["messages"])
+    update = command_update(cmd)
+    assert update["exit_requested"] is True
+    msgs = update_messages(update)
     # Claim appends the lifecycle marker alone; the head belongs to `init_context`.
     assert len(msgs) == 1
     lifecycle = msgs[0]
@@ -225,9 +224,9 @@ async def test_claim_hosted_still_dispatches_an_available_batch(
     )
 
     assert cmd.goto == "before_turn"
-    assert cmd.update is not None
-    assert cmd.update["turn_active"] is True
-    assert cmd.update.get("turn_idle") in (None, False)  # type: ignore[union-attr]
+    update = command_update(cmd)
+    assert update["turn_active"] is True
+    assert update.get("turn_idle") in (None, False)
 
 
 # meiva:note
@@ -264,9 +263,9 @@ async def test_claim_interrupt_kind_halts_to_idle_without_marker(
     )
     assert cmd.goto == "claim"
     assert cmd.goto != END
-    assert cmd.update is not None
-    assert cmd.update["halted"] is True
-    assert cmd.update["messages"] == []
+    update = command_update(cmd)
+    assert update["halted"] is True
+    assert update["messages"] == []
 
 
 # meiva:note
@@ -320,9 +319,9 @@ async def test_claim_interrupt_with_chat_cobatch_wakes_to_process_chat(
     )
 
     assert cmd.goto == "before_turn"
-    assert cmd.update is not None
-    assert cmd.update["halted"] is False
-    msgs = cast("list[AnyMessage]", cmd.update["messages"])
+    update = command_update(cmd)
+    assert update["halted"] is False
+    msgs = update_messages(update)
     assert len(msgs) == 1
     assert isinstance(msgs[0], HumanMessage)
     assert "please also do X" in msgs[0].content
@@ -366,9 +365,9 @@ async def test_claim_interrupt_before_chat_cobatch_wakes_to_process_chat(
     )
 
     assert cmd.goto == "before_turn"
-    assert cmd.update is not None
-    assert cmd.update["halted"] is False
-    msgs = cast("list[AnyMessage]", cmd.update["messages"])
+    update = command_update(cmd)
+    assert update["halted"] is False
+    msgs = update_messages(update)
     assert len(msgs) == 1
     assert isinstance(msgs[0], HumanMessage)
     assert "new instruction" in msgs[0].content
@@ -402,8 +401,8 @@ async def test_claim_interrupt_batched_with_terminate_terminate_wins(
         ),
     )
     assert cmd.goto == END
-    assert cmd.update is not None
-    msgs = cast("list[AnyMessage]", cmd.update["messages"])
+    update = command_update(cmd)
+    msgs = update_messages(update)
     assert any(
         isinstance(m, HumanMessage)
         and isinstance(m.content, str)
@@ -440,11 +439,10 @@ async def test_claim_lifecycle_marker_drops_timestamp_when_disabled(
             tid,
         ),
     )
-    assert cmd.update is not None
-    content = cmd.update["messages"][-1].content
-    assert content.startswith(  # pyright: ignore[reportUnknownMemberType]
-        "<system_note>\nTermination was accepted from user"
-    )
+    update = command_update(cmd)
+    content = update_messages(update)[-1].content
+    assert isinstance(content, str)
+    assert content.startswith("<system_note>\nTermination was accepted from user")
 
 
 async def test_claim_terminate_self_renders_by_yourself(
@@ -468,8 +466,8 @@ async def test_claim_terminate_self_renders_by_yourself(
         ),
     )
     assert cmd.goto == END
-    assert cmd.update is not None
-    msgs = cast("list[AnyMessage]", cmd.update["messages"])
+    update = command_update(cmd)
+    msgs = update_messages(update)
     lifecycle = msgs[0]
     assert "Termination was accepted from yourself" in lifecycle.content
 
@@ -506,8 +504,8 @@ async def test_claim_self_terminate_retains_peer_chat_for_successor(
     )
 
     assert cmd.goto == END
-    assert cmd.update is not None
-    msgs = cast("list[AnyMessage]", cmd.update["messages"])
+    update = command_update(cmd)
+    msgs = update_messages(update)
     assert len(msgs) == 1
     assert isinstance(msgs[0], HumanMessage)
     assert "Termination was accepted" in msgs[0].content
@@ -543,8 +541,8 @@ async def test_claim_self_terminate_retains_older_user_chat(
     )
 
     assert cmd.goto == END
-    assert cmd.update is not None
-    msgs = cast("list[AnyMessage]", cmd.update["messages"])
+    update = command_update(cmd)
+    msgs = update_messages(update)
     assert any("Termination was accepted" in m.content for m in msgs)
     assert db_conn.execute(
         "SELECT status,content FROM inbound_messages WHERE id=%s", (chat_id,)
@@ -578,8 +576,8 @@ async def test_claim_external_terminate_retains_newer_chat(
     )
 
     assert cmd.goto == END
-    assert cmd.update is not None
-    msgs = cast("list[AnyMessage]", cmd.update["messages"])
+    update = command_update(cmd)
+    msgs = update_messages(update)
     assert any("Termination was accepted" in m.content for m in msgs)
     assert db_conn.execute(
         "SELECT status,content FROM inbound_messages WHERE id=%s", (chat_id,)
@@ -617,8 +615,8 @@ async def test_claim_external_terminate_with_older_chat_still_dies(
     )
 
     assert cmd.goto == END
-    assert cmd.update is not None
-    msgs = cast("list[AnyMessage]", cmd.update["messages"])
+    update = command_update(cmd)
+    msgs = update_messages(update)
     assert any("Termination was accepted from user" in m.content for m in msgs)
     assert db_conn.execute(
         "SELECT status,content FROM inbound_messages WHERE agent_id=%s AND kind='chat'", (tid,)
@@ -647,10 +645,9 @@ async def test_claim_restart_kind_hosted_ends_turn_and_stays_runnable(
     )
 
     assert cmd.goto == END
-    assert cmd.update is not None
-    assert cmd.update["restart_requested"] is True
-    assert cmd.update["exit_requested"] is False
-    update = cast(dict[str, Any], cmd.update)
+    update = command_update(cmd)
+    assert update["restart_requested"] is True
+    assert update["exit_requested"] is False
     assert update["messages"] == []
     assert update["halted"] is False
     await await_status(aops_pool, tid, "running")
@@ -723,8 +720,8 @@ async def test_claim_interrupt_batched_with_restart_idle_restart_silent(
     )
 
     assert cmd.goto == END
-    assert cmd.update is not None
-    assert cmd.update["halted"] is True
+    update = command_update(cmd)
+    assert update["halted"] is True
     assert db_conn.execute(
         "SELECT status FROM inbound_messages WHERE agent_id=%s AND kind='interrupt'", (tid,)
     ).fetchone() == ("pending",)
@@ -787,8 +784,8 @@ async def test_claim_terminate_external_source_renders_source_verbatim(
         ),
     )
     assert cmd.goto == END
-    assert cmd.update is not None
-    msgs = cast("list[AnyMessage]", cmd.update["messages"])
+    update = command_update(cmd)
+    msgs = update_messages(update)
     assert isinstance(msgs[0].content, str)
     assert "Termination was accepted from agent:42" in msgs[0].content
     # anti-regression: must not contain 'yourself' (mutation that changed != to == made all sources go through self)
