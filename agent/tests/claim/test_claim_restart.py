@@ -1,11 +1,10 @@
 """The claim node's restart, restart-completed and system-note inbounds and their serial order with terminate."""
 
 from collections.abc import Callable
-from typing import cast
 
 import psycopg
 import pytest
-from langchain_core.messages import AnyMessage, HumanMessage, SystemMessage
+from langchain_core.messages import HumanMessage, SystemMessage
 from langgraph.graph import END
 from psycopg_pool import AsyncConnectionPool
 
@@ -17,11 +16,9 @@ from agent.graph.claim.tests.claim_support import (
 )
 from agent.graph.claim.tests.cursor_fixture import fresh_snapshot_cursor as fresh_snapshot_cursor
 from agent.state import AgentState
-from agent.tests.claim.claim_status_support import (
-    committed_publishes,
-    set_agent_status,
-)
+from agent.tests.claim.claim_status_support import committed_publishes, first_int, set_agent_status
 from agent.tests.claim.claim_status_support import running_agent as running_agent
+from agent.tests.command_update import command_update, update_messages
 from base.agents.inbox.insert import insert_inbound_message
 from base.agents.tests.units import spawn_agent
 from base.cluster.machine import MachineIdentityReader
@@ -62,9 +59,7 @@ async def test_claim_system_note_kind_appends_system_note_and_continues(
                 '{"note_tag": "task", "task_id": 1}',
             ),
         )
-        row = cur.fetchone()
-        assert row is not None
-        inbound_id = int(row[0])
+        inbound_id = first_int(cur.fetchone())
     db_conn.commit()
 
     cmd = await claim_node(
@@ -76,8 +71,8 @@ async def test_claim_system_note_kind_appends_system_note_and_continues(
     )
 
     assert cmd.goto == "before_turn"
-    assert cmd.update is not None
-    msgs = cast("list[AnyMessage]", cmd.update["messages"])
+    update = command_update(cmd)
+    msgs = update_messages(update)
     assert len(msgs) == 1
     note = msgs[0]
     assert isinstance(note, HumanMessage)
@@ -129,8 +124,8 @@ async def test_claim_co_batched_task_notes_preserve_task_links(
     )
 
     assert cmd.goto == "before_turn"
-    assert cmd.update is not None
-    notes = cast(list[AnyMessage], cmd.update["messages"])
+    update = command_update(cmd)
+    notes = update_messages(update)
     assert [note.additional_kwargs.get("meiva_task_id") for note in notes] == [1, 2]
 
 
@@ -250,9 +245,9 @@ async def test_claim_restart_preserves_chat_for_successor(
     )
 
     assert cmd.goto == END
-    assert cmd.update["halted"] is True  # type: ignore[index]
-    assert cmd.update is not None
-    msgs = cast("list[AnyMessage]", cmd.update["messages"])
+    update = command_update(cmd)
+    assert update["halted"] is True
+    msgs = update_messages(update)
     restart_messages = msgs
     assert (
         len(restart_messages) == 1

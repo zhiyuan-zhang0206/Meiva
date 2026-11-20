@@ -1,17 +1,18 @@
 """Claim-node test support shared by the topic files: agent status writes and waits, the hosted-owner fixture, the committed-publish filter and the compact-tail reader."""
 
 import asyncio
-from collections.abc import Mapping
+import json
 from dataclasses import replace
-from typing import Any
 
 import psycopg
 import pytest
 from langchain_core.messages import AnyMessage
 from langgraph.graph.message import REMOVE_ALL_MESSAGES
+from langgraph.types import Command
 from psycopg_pool import AsyncConnectionPool
 
 from agent.state import ContextReset
+from agent.tests.command_update import command_update
 from base.agents.tests.units import spawn_agent
 from base.cluster.machine import MachineIdentityReader
 from base.cluster.machine.tests.identity import machine_identity as machine_identity
@@ -19,17 +20,38 @@ from base.config.service_read import ConfigAuthority
 from base.db import Database
 from base.db.code_version_gate import ProcessDbGate
 from base.events.live.tests.live_capture import LiveEvents
+from base.host.boundary.fields import str_field
+from base.host.boundary.json_values import is_object_dict, is_object_list
+from base.host.boundary.untyped import object_of
 from base.lm.catalog import ModelCatalog
 from meiva.sdk_surface import process_context
 
-__all__ = ["committed_publishes", "compact_tail", "running_agent", "set_agent_status"]
+__all__ = [
+    "committed_publishes",
+    "compact_tail",
+    "first_int",
+    "running_agent",
+    "set_agent_status",
+]
 
 
 # meiva:note
 # The InboundCommitted payloads among the published live events. node_lifecycle emits a
 # timeline_snapshot on every enter; only the committed-inbound behavior is wanted here.
-async def committed_publishes(live: LiveEvents) -> list[dict[str, Any]]:
-    return [event for event in await live.events() if event.get("role") == "inbound_committed"]
+async def committed_publishes(live: LiveEvents) -> list[dict[str, object]]:
+    return [event for event in await _published(live) if event.get("role") == "inbound_committed"]
+
+
+# meiva:note
+# The published live events as JSON objects whose values are `object`, so a reader narrows each
+# field it asserts on instead of holding the `Any` that `json.loads` returns.
+async def _published(live: LiveEvents) -> list[dict[str, object]]:
+    events: list[dict[str, object]] = []
+    for payload in await live.payloads():
+        event = object_of(json.loads, payload)
+        assert is_object_dict(event)
+        events.append(event)
+    return events
 
 
 async def await_status(pool: AsyncConnectionPool, agent_id: int, expected: str) -> None:
@@ -110,15 +132,26 @@ async def running_agent(
     yield lambda: agent_id
 
 
-def compact_tail(update: Mapping[str, Any] | None) -> list[AnyMessage]:
+# meiva:note
+# The first column of a fetched row as an `int`: psycopg types a tuple row `tuple[Any, ...]`, so the
+# cell is checked instead of held unchecked.
+def first_int(row: tuple[object, ...] | None) -> int:
+    assert row is not None
+    cell = row[0]
+    assert isinstance(cell, int)
+    return cell
+
+
+def compact_tail[Node](cmd: Command[Node]) -> list[AnyMessage]:
     """Assert the transport a compaction now uses — the window is cleared and
     rebuilding the standing head is handed to `init_context` — and return the
     parked tail, which is what this claim batch decided belongs behind it."""
     from langchain_core.messages.modifier import RemoveMessage as _Rm
 
-    assert update is not None
+    update = command_update(cmd)
     msgs = update["messages"]
-    assert len(msgs) == 1, f"expected the sentinel alone, got {len(msgs)} messages"  # pyright: ignore[reportUnknownArgumentType]
+    assert is_object_list(msgs)
+    assert len(msgs) == 1, f"expected the sentinel alone, got {len(msgs)} messages"
     assert isinstance(msgs[0], _Rm)
     assert msgs[0].id == REMOVE_ALL_MESSAGES  # pyright: ignore[reportUnknownMemberType]
     reset = update["context_reset"]
@@ -128,13 +161,13 @@ def compact_tail(update: Mapping[str, Any] | None) -> list[AnyMessage]:
 
 # meiva:note
 # Every published event for `role`, in publish order.
-def _events_with_role(events: list[dict[str, Any]], role: str) -> list[dict[str, Any]]:
+def _events_with_role(events: list[dict[str, object]], role: str) -> list[dict[str, object]]:
     return [event for event in events if event.get("role") == role]
 
 
 async def pair_compact_cycles(
     live: LiveEvents,
-) -> list[tuple[dict[str, Any], dict[str, Any]]]:
+) -> list[tuple[dict[str, object], dict[str, object]]]:
     """Pair every compact_started with its exactly-one compact_finished.
 
     Task #3323's completeness invariant: a started run reaches exactly one
@@ -142,12 +175,12 @@ async def pair_compact_cycles(
     ticking block would hang forever. Returns (started, finished) pairs in
     start order.
     """
-    events = await live.events()
+    events = await _published(live)
     started = _events_with_role(events, "compact_started")
     finished = _events_with_role(events, "compact_finished")
-    by_id = {e["compact_id"]: e for e in finished}
+    by_id = {str_field(e, "compact_id"): e for e in finished}
     assert len(finished) == len(by_id), f"duplicate terminal for one run: {finished}"
-    assert {e["compact_id"] for e in started} == set(by_id), (
+    assert {str_field(e, "compact_id") for e in started} == set(by_id), (
         f"unpaired compact runs: started={started}, finished={finished}"
     )
-    return [(s, by_id[s["compact_id"]]) for s in started]
+    return [(s, by_id[str_field(s, "compact_id")]) for s in started]

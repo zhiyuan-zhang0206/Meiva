@@ -1,12 +1,17 @@
 # meiva:note
 # A compact request the model cannot satisfy leaves the history, the agent and the rest of its batch intact.
 
-from typing import cast
 
 import httpx
 import psycopg
 import pytest
-from langchain_core.messages import AIMessage, AnyMessage, HumanMessage, SystemMessage
+from langchain_core.messages import (
+    AIMessage,
+    AnyMessage,
+    BaseMessage,
+    HumanMessage,
+    SystemMessage,
+)
 from psycopg_pool import AsyncConnectionPool
 
 from agent.graph import claim_node
@@ -14,6 +19,7 @@ from agent.graph.claim.tests.claim_support import insert_inbound_kind, make_runt
 from agent.graph.hooks.compact import COMPACT_MAX_ATTEMPTS
 from agent.state import AgentState
 from agent.tests.claim.claim_status_support import compact_tail, pair_compact_cycles
+from agent.tests.command_update import command_update, update_messages
 from agent.tests.scripted_model import ScriptedChatModel
 from base.agents.inbox.insert import insert_inbound_message
 from base.agents.messages.kwargs import NoteTag, read_meiva_kwargs
@@ -24,6 +30,7 @@ from base.db import Database
 from base.db.code_version_gate import ProcessDbGate
 from base.events.live.bus import EventBus
 from base.events.live.tests.live_capture import LiveEvents
+from base.host.boundary.fields import str_field
 from base.lm.catalog import ModelCatalog
 
 
@@ -35,8 +42,8 @@ def _history(*, halted: bool = True) -> AgentState:
     return AgentState(messages=messages, halted=halted)
 
 
-def _failure_notes(update: dict[str, object]) -> list[AnyMessage]:
-    messages = cast("list[AnyMessage]", update["messages"])
+def _failure_notes(update: dict[str, object]) -> list[BaseMessage]:
+    messages = update_messages(update)
     return [
         message
         for message in messages
@@ -78,12 +85,12 @@ async def test_compact_request_failing_on_every_attempt_idles_with_a_note(
     )
 
     assert len(llm.requests) == COMPACT_MAX_ATTEMPTS
-    assert cmd.update is not None
-    [note] = _failure_notes(cmd.update)
+    update = command_update(cmd)
+    [note] = _failure_notes(update)
     assert "ModelConnectionError: wire lost" in str(note.content)
     assert "history was not changed" in str(note.content)
-    assert len(cmd.update["messages"]) == 1
-    assert cmd.update["halted"] is True
+    assert len(update_messages(update)) == 1
+    assert update["halted"] is True
     assert cmd.goto == "claim"
     [(started, finished)] = await pair_compact_cycles(live_events)
     assert started["mode"] == "request"
@@ -119,10 +126,10 @@ async def test_compact_request_with_a_truncated_summary_fails_without_replacing_
     )
 
     assert len(llm.requests) == 1
-    assert cmd.update is not None
-    [note] = _failure_notes(cmd.update)
+    update = command_update(cmd)
+    [note] = _failure_notes(update)
     assert "LLMStreamTruncatedError" in str(note.content)
-    assert "context_reset" not in cmd.update
+    assert "context_reset" not in update
     assert cmd.goto == "claim"
 
 
@@ -197,12 +204,12 @@ async def test_compact_request_failure_still_delivers_the_chat_claimed_beside_it
         thread_config(tid),
     )
 
-    assert cmd.update is not None
-    messages = cmd.update["messages"]
-    assert len(_failure_notes(cmd.update)) == 1
+    update = command_update(cmd)
+    messages = update_messages(update)
+    assert len(_failure_notes(update)) == 1
     assert any("answer me anyway" in str(message.content) for message in messages)
     assert cmd.goto == "before_turn"
-    assert cmd.update["halted"] is False
+    assert update["halted"] is False
 
 
 # meiva:note
@@ -232,10 +239,10 @@ async def test_compact_request_failure_in_a_running_turn_wakes_the_agent_to_read
         thread_config(tid),
     )
 
-    assert cmd.update is not None
-    assert len(_failure_notes(cmd.update)) == 1
+    update = command_update(cmd)
+    assert len(_failure_notes(update)) == 1
     assert cmd.goto == "before_turn"
-    assert cmd.update["halted"] is False
+    assert update["halted"] is False
 
 
 # meiva:note
@@ -275,7 +282,9 @@ async def test_compact_request_failing_after_a_successful_one_keeps_the_earlier_
     )
 
     assert cmd.goto == "init_context"
-    tail = compact_tail(cmd.update)
+    tail = compact_tail(cmd)
     assert "first summary" in str(tail[0].content)
-    statuses = sorted(finished["status"] for _, finished in await pair_compact_cycles(live_events))
+    statuses = sorted(
+        str_field(finished, "status") for _, finished in await pair_compact_cycles(live_events)
+    )
     assert statuses == ["failure", "success"]

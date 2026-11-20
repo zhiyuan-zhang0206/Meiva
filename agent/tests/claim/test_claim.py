@@ -19,11 +19,10 @@
 from collections.abc import Callable
 from dataclasses import replace
 from datetime import UTC, datetime
-from typing import cast
 
 import psycopg
 import pytest
-from langchain_core.messages import AnyMessage, BaseMessage, HumanMessage, SystemMessage
+from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
 from langgraph.graph import END
 from langgraph.runtime import Runtime
 from psycopg_pool import AsyncConnectionPool
@@ -31,7 +30,6 @@ from psycopg_pool import AsyncConnectionPool
 from agent.graph import claim_node
 from agent.graph.claim.tests.claim_support import (
     insert_inbound_kind,
-    make_fake_llm,
     make_runtime,
     thread_config,
 )
@@ -40,6 +38,8 @@ from agent.messages import NoteTag, system_note_message
 from agent.state import AgentState
 from agent.tests.claim.claim_status_support import compact_tail
 from agent.tests.claim.claim_status_support import running_agent as running_agent
+from agent.tests.command_update import command_update, update_messages
+from agent.tests.scripted_model import ScriptedChatModel
 from base.agents.context import MeivaContext
 from base.agents.messages.timestamp_policy import TimestampPolicy
 from base.agents.tests.units import spawn_agent
@@ -97,8 +97,8 @@ async def test_claim_resurrect_kind_appends_marker_and_continues(
     )
 
     assert cmd.goto == "before_turn"
-    assert cmd.update is not None
-    msgs = cast("list[AnyMessage]", cmd.update["messages"])
+    update = command_update(cmd)
+    msgs = update_messages(update)
     assert len(msgs) == 1
     lifecycle = msgs[0]
     assert isinstance(lifecycle, HumanMessage)
@@ -135,9 +135,9 @@ async def test_claim_resurrect_batch_appends_only_latest_marker(
         ),
     )
 
-    assert cmd.update is not None
+    update = command_update(cmd)
 
-    msgs = cast("list[AnyMessage]", cmd.update["messages"])
+    msgs = update_messages(update)
     assert len(msgs) == 1
     assert "You have been resurrected by user" in msgs[0].content
     with db_conn.cursor() as cur:
@@ -213,8 +213,8 @@ async def test_claim_resurrect_then_terminate_still_dies(
     )
 
     assert cmd.goto == END
-    assert cmd.update is not None
-    contents = [str(m.content) for m in cast("list[AnyMessage]", cmd.update["messages"])]
+    update = command_update(cmd)
+    contents = [str(m.content) for m in update_messages(update)]
     assert any("Termination was accepted from user" in c for c in contents)
     assert not any("resurrected" in c for c in contents)
     assert db_conn.execute(
@@ -254,7 +254,7 @@ async def test_claim_auto_resurrect_compact_request_batch_compacts_and_wakes(
         ]
     )
 
-    fake_llm = make_fake_llm("LLM-generated summary")
+    fake_llm = ScriptedChatModel(replies=[AIMessage(content="LLM-generated summary")])
     cmd = await claim_node(
         state,
         make_runtime(
@@ -267,7 +267,7 @@ async def test_claim_auto_resurrect_compact_request_batch_compacts_and_wakes(
 
     assert cmd.goto == "init_context"
     assert cmd.update["context_reset"].resume == "before_turn"  # type: ignore[index]
-    msgs = compact_tail(cmd.update)
+    msgs = compact_tail(cmd)
     assert msgs[0].content == compose_summary_message(
         "LLM-generated summary", inputs=TimestampPolicy.off()
     )
@@ -350,8 +350,8 @@ async def test_claim_fork_kind_appends_identity_marker_and_continues(
     )
 
     assert cmd.goto == "before_turn"
-    assert cmd.update is not None
-    msgs = cast("list[AnyMessage]", cmd.update["messages"])
+    update = command_update(cmd)
+    msgs = update_messages(update)
     from agent.messages.guard import guarded_add_messages
 
     assert len(msgs) == 2
@@ -362,7 +362,7 @@ async def test_claim_fork_kind_appends_identity_marker_and_continues(
     lifecycle = msgs[0]
     merged = guarded_add_messages(
         [SystemMessage(content="sys"), HumanMessage(content="inherited")],
-        cast(list[BaseMessage], msgs),
+        msgs,
     )
     assert [m.content for m in merged[:2]] == ["sys", "inherited"]
     assert isinstance(lifecycle, HumanMessage)
@@ -416,7 +416,7 @@ async def test_claim_fork_preserves_the_inherited_prefix(
     assert cmd.goto == "before_turn"
     from agent.messages.guard import guarded_add_messages
 
-    delta = cast(list[BaseMessage], (cmd.update or {})["messages"])
+    delta = update_messages(command_update(cmd))
     merged = guarded_add_messages(list(inherited), delta)
     assert [m.id for m in merged[: len(inherited)]] == [m.id for m in inherited]
     assert [m.content for m in merged[: len(inherited)]] == [m.content for m in inherited]

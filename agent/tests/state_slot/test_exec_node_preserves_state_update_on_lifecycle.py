@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import random
 from pathlib import Path
-from typing import Any, cast
+from typing import cast
 from unittest.mock import AsyncMock
 
 from langchain_core.messages import HumanMessage
@@ -13,6 +13,7 @@ from agent.graph.exec.node import exec_node_impl
 from agent.graph.exec.process import SubprocessExecProcess
 from agent.graph.exec.tests.process_inputs import live_parent_facts
 from agent.state import AttachEntry, AttachState, BaseAgentState
+from agent.tests.command_update import command_update, update_messages
 from agent.tests.test_state_slot import (
     ai_message_with_code,
     make_runtime_and_config,
@@ -22,6 +23,7 @@ from agent.tests.test_state_slot import (
     reset_state_slot as reset_state_slot,
 )
 from base.db.code_version_gate import ProcessDbGate
+from base.host.boundary.json_values import is_object_dict
 from meiva.sdk_surface import process_context
 
 
@@ -60,7 +62,7 @@ async def test_exec_node_preserves_state_update_on_lifecycle(*, database_gate: P
         process=SubprocessExecProcess(live_parent_facts(), rng=_rng()),
     )
 
-    update = cast(dict[str, object], cmd.update)
+    update = command_update(cmd)
     assert update.get("plugin__last_action") == "about-to-terminate"
     assert update["halted"] is True
     assert not process_context.in_exec_turn()
@@ -81,8 +83,8 @@ async def test_exec_node_keeps_plugin_notes_after_toolmessage(*, database_gate: 
         state, runtime, config, process=SubprocessExecProcess(live_parent_facts(), rng=_rng())
     )
 
-    update = cast(dict[str, Any], cmd.update)
-    msgs = update["messages"]
+    update = command_update(cmd)
+    msgs = update_messages(update)
     assert [m.type for m in msgs] == ["tool", "human"], (
         f"expected [tool, plugin], got {[m.type for m in msgs]}"
     )
@@ -118,10 +120,10 @@ async def test_exec_node_checkpoints_child_attachment(
         state, runtime, config, process=SubprocessExecProcess(live_parent_facts(), rng=_rng())
     )
 
-    update = cast(dict[str, Any], cmd.update)
+    update = command_update(cmd)
     # Pending is drained (cleared) in the same update — nothing parked.
     assert update["attach"] == AttachState()
-    messages = update["messages"]
+    messages = update_messages(update)
     assert len(messages) == 2
     attach_msg = messages[-1]
     assert isinstance(attach_msg, HumanMessage)
@@ -131,10 +133,11 @@ async def test_exec_node_checkpoints_child_attachment(
     # capability), so the pack is caption-only — no media block.
     content = attach_msg.content
     assert isinstance(content, list)
-    assert [cast("dict[str, Any]", b)["type"] for b in content] == ["text", "text"]
-    assert "Files attached during this turn" in cast("dict[str, Any]", content[0])["text"]
-    caption_block = cast("dict[str, Any]", content[1])
-    assert "render.png" in caption_block["text"]
+    blocks = [block for block in content if is_object_dict(block)]
+    assert len(blocks) == len(content)
+    assert [block["type"] for block in blocks] == ["text", "text"]
+    assert "Files attached during this turn" in str(blocks[0]["text"])
+    assert "render.png" in str(blocks[1]["text"])
 
 
 # meiva:note
@@ -173,7 +176,7 @@ async def test_exec_node_compact_path_drops_notes_and_findings(
         state, runtime, config, process=SubprocessExecProcess(live_parent_facts(), rng=_rng())
     )
 
-    update = cast(dict[str, object], cmd.update)
+    update = command_update(cmd)
     assert update.get("messages") == [], (
         f"compact path must write no messages back, got {update.get('messages')!r}"
     )
