@@ -46,10 +46,11 @@ directory. The manifest is the single expression of the built-in policy
 | `qa-keepalive` | every 600 s | operator | disabled |
 | `agent-watch` | cron `*/10 * * * *` | operator | disabled |
 
-`dev-ci-metrics` also watches the timed workflows a pull request never blocks: it
-messages the P0 lead when one of them fails two runs in a row (`_SCHEDULED_WORKFLOWS`), because a red nightly is otherwise silent.
+`dev-ci-metrics` only samples GitHub Actions into the Dev/CI run gauges and wakes the P0 lead when
+that sampling fails; it does not judge a workflow. A cluster may keep it stopped (the ubuntu row,
+Schedule 23, has been stopped since 2026-09-26): a stopped row loses the gauges, no alarm.
 
-`main-red-watch` answers the other half of that question — whether `main` is
+`main-red-watch` answers the question the gauges do not — whether `main` is
 green — now that nothing verifies a merged tree. `ci.yml` runs on `pull_request`
 plus a nightly full run, so a merge starts no test; the six-hourly `release-gate`,
 the nightly verdict and that nightly full run are the only evidence, and on
@@ -121,6 +122,18 @@ macOS or historical secret scans — would retire the card while the red stood. 
 carry that fact (`covers_full_suite`), and non-full-suite green runs also check
 `RunFacts.green_jobs` against `entry.job` so a multi-cron workflow run where one
 audit job succeeded while the other was `skipped` never closes the skipped job's card.
+
+Every workflow with a `schedule:` trigger is read here, and a test fails when a new one is not: a
+red timed run is otherwise silent, because no pull request waits on it. Four of them exist only to
+raise an alarm — `scheduled-audits.yml`, `update-model-pricing.yml`,
+`audit-branch-protection.yml` and the daily `random-order.yml` run (`_ALARM_WORKFLOWS`). Each red
+they can name opens a card on its **first** sighting: the two-run wait tells a flaky test from a
+broken one, and an order-dependent test found under one seed does not fail again under the next.
+They are outside the full-suite set, so a green `release-gate` or nightly never closes their cards;
+each closes on the green of its own job. Each has a liveness stream too (nightly threshold, or
+`WEEKLY_STALE_AFTER` for the Monday branch-protection audit), so a cron that stopped arriving is a
+card rather than silence. `audit-branch-protection.yml` keeps opening its own GitHub issue as well;
+no router sends an unlabeled issue anywhere, so the card is the signal that reaches the lead.
 
 - **product** schedules (adversarial evaluation, self-evolution, memory, model
   tracking, debt clearing, CI observability, trace shipping, harness CLI convergence) are Meiva's own

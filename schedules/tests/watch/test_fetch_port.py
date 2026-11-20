@@ -150,3 +150,94 @@ def test_scheduled_audits_is_watched_with_liveness_and_per_job_greens() -> None:
     assert "AUDIT_CHECK_STEPS" in fetch_body
     assert "RunFacts.green_job_names" in fetch_body
     assert "green_jobs=green_jobs" in fetch_body
+
+
+def test_the_timed_alarm_workflows_are_watched_and_confirm_on_first_sight() -> None:
+    module = ast.parse(_ENTRY.read_text())
+    constants = {
+        target.id: ast.literal_eval(node.value)
+        for node in module.body
+        if isinstance(node, ast.Assign)
+        for target in node.targets
+        if isinstance(target, ast.Name) and isinstance(node.value, ast.Constant)
+    }
+    assert constants["_MODEL_PRICING"] == "update-model-pricing.yml"
+    assert constants["_BRANCH_PROTECTION"] == "audit-branch-protection.yml"
+    assert constants["_RANDOM_ORDER"] == "random-order.yml"
+
+    def assigned(name: str) -> str:
+        return ast.unparse(
+            next(
+                node.value
+                for node in module.body
+                if isinstance(node, ast.Assign)
+                and any(isinstance(t, ast.Name) and t.id == name for t in node.targets)
+            )
+        )
+
+    alarms = assigned("_ALARM_WORKFLOWS")
+    full_suite = assigned("_FULL_SUITE_WORKFLOWS")
+    for name in ("_SCHEDULED_AUDITS", "_MODEL_PRICING", "_BRANCH_PROTECTION", "_RANDOM_ORDER"):
+        assert name in alarms
+        assert name not in full_suite
+
+    watch_call = next(
+        node
+        for node in ast.walk(_function(_ENTRY, "watch_round"))
+        if isinstance(node, ast.Call)
+        and isinstance(node.func, ast.Name)
+        and node.func.id == "watch_once"
+    )
+    workflows_kw = ast.unparse(
+        next(kw.value for kw in watch_call.keywords if kw.arg == "workflows")
+    )
+    liveness_kw = ast.unparse(next(kw.value for kw in watch_call.keywords if kw.arg == "liveness"))
+    for name in ("_MODEL_PRICING", "_BRANCH_PROTECTION", "_RANDOM_ORDER"):
+        assert name in workflows_kw
+    assert "LivenessStream('model-pricing', _MODEL_PRICING, NIGHTLY_STALE_AFTER)" in liveness_kw
+    assert "LivenessStream('random-order', _RANDOM_ORDER, NIGHTLY_STALE_AFTER)" in liveness_kw
+    assert (
+        "LivenessStream('branch-protection-audit', _BRANCH_PROTECTION, WEEKLY_STALE_AFTER)"
+        in liveness_kw
+    )
+
+    fetch_body = ast.unparse(_function(_ENTRY, "fetch_runs"))
+    assert "workflow in _ALARM_WORKFLOWS and failure.kind == FAILURE_TEST" in fetch_body
+
+
+# meiva:note
+# YAML 1.1 reads a workflow's `on:` key as the boolean True, so the triggers are looked up by it.
+def test_every_workflow_with_a_schedule_trigger_is_read_by_the_watch() -> None:
+    import yaml
+
+    module = ast.parse(_ENTRY.read_text())
+    constants = {
+        target.id: node.value.value
+        for node in module.body
+        if isinstance(node, ast.Assign)
+        for target in node.targets
+        if isinstance(target, ast.Name) and isinstance(node.value, ast.Constant)
+    }
+    watch_call = next(
+        node
+        for node in ast.walk(_function(_ENTRY, "watch_round"))
+        if isinstance(node, ast.Call)
+        and isinstance(node.func, ast.Name)
+        and node.func.id == "watch_once"
+    )
+    workflows_kw = next(kw.value for kw in watch_call.keywords if kw.arg == "workflows")
+    watched = {
+        constants[element.id]
+        for element in ast.walk(workflows_kw)
+        if isinstance(element, ast.Name) and element.id in constants
+    }
+    timed = set()
+    for path in sorted((_ENTRY.parents[3] / ".github" / "workflows").glob("*.yml")):
+        triggers = yaml.safe_load(path.read_text()).get(True)
+        if isinstance(triggers, dict) and "schedule" in triggers:
+            timed.add(path.name)
+
+    assert timed - watched == set(), (
+        "a workflow with a `schedule:` trigger that main-red-watch does not read is a red nobody "
+        f"sees: {sorted(timed - watched)}"
+    )
