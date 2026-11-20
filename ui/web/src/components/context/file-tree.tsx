@@ -6,7 +6,7 @@ import { useTranslations } from "next-intl";
 import { useState } from "react";
 
 import { Spinner } from "@/components/ui/spinner";
-import { useWorkspaceFileStore } from "@/lib/context/workspace-file-store";
+import { sameFile, useWorkspaceFileStore } from "@/lib/context/workspace-file-store";
 import { cn } from "@/lib/format/utils";
 import { BAR_DIVIDER_CLASS, FLEX, FLEX_COL, MIN_H_0, MIN_W_0 } from "@/lib/layout/layout";
 import { useApi } from "@/lib/transport/transport-context";
@@ -43,7 +43,7 @@ function TreeFolder({ agentId, workspaceAgentId, path, depth }: {
       {listing.data.entries.map((entry) => {
         const isDir = entry.kind === "dir";
         const expanded = open.has(entry.path);
-        const selected = !isDir && activeFile?.path === entry.path;
+        const selected = !isDir && sameFile(activeFile, { agentId, machineAgentId: workspaceAgentId, path: entry.path });
         return (
           <li key={entry.path} role="treeitem" aria-expanded={isDir ? expanded : undefined} aria-selected={selected}>
             <button
