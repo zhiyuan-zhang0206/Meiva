@@ -388,6 +388,52 @@ input consumers from the same impact graph, using these functions for estimated
 minutes. Census estimates describe static coupling; they are not measured CI
 execution times or proof that a selected subset is faster.
 
+## Test result cache (shadow)
+
+Selection is driven by a diff: it answers "what did this pull request change", so a test whose inputs
+did not change since it last passed still runs again after a rebase, a revert or a re-push. The test
+result cache answers the other question, by content: a test file whose inputs have the same content as
+when it last passed can reuse that pass. `meizel test-cache` (see the checker's
+[test result cache](https://github.com/zhiyuan-zhang0206/meizel/blob/main/meizel/docs/meizel.md#test-result-cache))
+holds the key, the store and the report; this repository supplies the closures.
+
+**It only reports.** Two non-required jobs of `ci.yml`, `test-cache-plan` and `test-cache-report`, run
+the static lane through the cache without changing which tests run or what gates. The plan job
+(beside the tests) keys every static-lane test of the run and asks which keys a recorded pass covers;
+the report job (after the static tests) sets that plan against the junit reports and writes
+`would_skip`, `would_skip_passed`, `would_skip_but_failed`, the seconds saved by `.test_durations` and
+the uncacheable counts to the job summary and to the `test-cache-report` artifact. **`would_skip_but_failed`
+must stay empty**: a test the cache would have skipped that failed when it ran is a missed input, and
+the job fails (it still does not gate) with an error naming the tests.
+
+**The closure of a test is the inverse of this selector.** `scripts/audit/input_closures.py` computes, for
+every file of the tree, the tests `select_tests` picks when that file is the only change, with the
+same class rules (`path_tests`, `is_data_change`); a file is in a test's closure exactly when changing
+it alone selects the test. So the cache is never bolder than selection. A global or unmapped file is in
+every closure, the files that only data readers can observe are in the closure of the tests that may
+read data unseen, and a test the selector adds to every selection (the tree-scan family, a dynamic
+import) is keyed by the whole tree: it hits only a tree that differs in no file.
+`scripts/audit/tests/test_input_closures.py` checks the inverse file by file against `select_tests`.
+
+**A deleted or added file changes the key.** A key hashes every `(path, content digest)` pair of the
+closure, and the closure is computed from the tree being run, so a file that left a closure (deleted,
+or no longer imported) or joined it (added, or newly imported) is a different set of pairs and a
+miss; the key does not depend on the file list only through content.
+
+**What is never cached.** A native-lane test, a `flaky` test and a failure; a pass expires after 14
+days. What a key does not cover (environment variables, the clock, the network, state shared between
+test files) is the cache's residual risk; the shadow report is how it is measured, and a test that
+needs one is marked `flaky` or declared under `[test-cache]` in `meizel.policy.toml`.
+
+**Where the passes live.** An `actions/cache` entry (`test-pass-<run id>-<attempt>`, one JSON line per
+pass) restored by prefix and saved after the report. A pull request writes its own scope and reads
+`main`'s, so no pull request can seed `main`; the nightly full run on `main` is what seeds the cache
+every pull request reads, because `ci.yml` has no push trigger. Recording passes is a write: while the cache only reports, a pull request writes its own scope, but
+once a cache can gate, only `main` (the nightly and the manual full run) may record, because a pull
+request could otherwise record a pass for a tree that `main` will later read. Before the cache decides anything the
+shadow must show no `would_skip_but_failed` over enough runs; flipping it from a report to a skip is
+a separate decision.
+
 ## Skipping e2e for changes outside the e2e inputs
 
 e2e is the integration net for product behavior, and an incremental pull request does not run

@@ -375,8 +375,7 @@ def referencing_tests(root: str, checkout: Checkout) -> set[str]:
     }
 
 
-def _path_tests(path: str, path_class: PathClass, checkout: Checkout, impact: Impact) -> set[str]:
-    """What one changed path contributes to the candidate subset."""
+def path_tests(path: str, path_class: PathClass, checkout: Checkout, impact: Impact) -> set[str]:
     return _class_tests(path, path_class, checkout, impact) | _doc_readers(path, checkout)
 
 
@@ -460,7 +459,7 @@ def _owner_tests(changed: dict[str, PathClass], checkout: Checkout, impact: Impa
     """The union of what each changed path contributes (rules by class)."""
     selected: set[str] = set()
     for path, path_class in changed.items():
-        selected.update(_path_tests(path, path_class, checkout, impact))
+        selected.update(path_tests(path, path_class, checkout, impact))
     return selected
 
 
@@ -605,7 +604,7 @@ def _runtime_candidates(
 ) -> tuple[set[str], int, tuple[str, ...]] | SelectionResult:
     impact = build_impact(checkout.repo_root, checkout.collectable)
     reverse_map = impact.tests_by_input
-    data_changed = any(_is_data_change(path, kind) for path, kind in classes.items())
+    data_changed = any(is_data_change(path, kind) for path, kind in classes.items())
     diagnostics = list(
         unknown_diagnostics(blocking_gaps(impact, data_changed=data_changed), tree="head")
     )
@@ -660,7 +659,7 @@ def _runtime_candidates(
 # Markdown (prose; the skill and OKF readers are pinned), a declaration or baseline, or a path in
 # a class that names its readers. The merge queue runs the full suite.
 # meiva:link docs/conventions/engineering/test-selection.md
-def _is_data_change(path: str, kind: PathClass) -> bool:
+def is_data_change(path: str, kind: PathClass) -> bool:
     modeled = (
         path.endswith((".py", ".md"))
         or Path(path).name in _DECLARATION_NAMES
