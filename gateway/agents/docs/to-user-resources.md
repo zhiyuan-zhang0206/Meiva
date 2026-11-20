@@ -42,6 +42,37 @@ references across machines and host usernames. Subpaths that traverse above the
 workspace root with `..`, as well as absolute filesystem paths outside the
 target agent's allowed roots, are refused with `403`.
 
+`/files/raw` answers HTTP byte ranges on both paths, so media elements can seek
+and Safari can play at all. On the gateway host `FileResponse` serves them; a
+forwarded read carries the browser's `Range` to the runner as `byte_range`, the
+runner answers that slice (`206`, or `416` past the end, with its
+`Content-Range`, at most 8 MiB per answer, which the media element follows with
+its next range) and the gateway streams the answer through instead of buffering
+it. A request without a range, or with one HTTP lets a server ignore (several
+ranges, another unit), gets the whole file under `max_resource_bytes`; so does a
+ranged read whose runner predates `byte_range` and refuses it.
+
+## Workspace browsing
+
+The panel's file viewer reads directories and names through the same
+resolution, roots and refusals, and the same forwarding to the owning runner
+(`mode="list"`/`"search"` on `/to-user/workspace-file`):
+
+- `GET /api/agents/{id}/files/list?path=<dir>` lists one directory; without
+  `path` it lists the agent's workspace root. The root itself may be listed (a
+  file read may not name it), and `parent` is null at a root the viewer may not
+  climb out of. Directories come first, then files, each by name; a symlinked
+  child appears only when its target stays inside an allowed root. At most 1,000
+  entries come back (`truncated` says more exist), because the tree renders a row
+  per entry and the forwarded answer is one JSON body; search reaches the rest.
+- `GET /api/agents/{id}/files/search?q=<text>&limit=<n>&path=<dir>` is
+  quick-open: a case-insensitive match of `q` against paths relative to `path`
+  (default the workspace root), substring hits ranked before in-order
+  subsequence hits. The walk never enters dot-directories, `node_modules` or
+  `__pycache__`, never follows a directory symlink, and stops after 50,000 files
+  or 2 seconds, so one keystroke stays interactive on a large tree; `truncated`
+  marks a stopped walk or more matches than `limit` (default 50, at most 200).
+
 ## Durable user communication
 
 `to_user.md` is an editable overview. Unread display/publication messages and

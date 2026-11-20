@@ -8,8 +8,9 @@ from base.agents.to_user import ToUserReadRequest, WorkspaceFileRequest, Workspa
 from base.config import settings
 from gateway.agents.to_user.document import (
     fetch_resource,
-    fetch_workspace_file_content,
-    fetch_workspace_file_raw,
+    fetch_workspace_json,
+    open_workspace_file_raw,
+    relay_body,
     resource_request,
     resource_response,
 )
@@ -153,29 +154,103 @@ async def test_workspace_file_proxy_content_and_raw() -> None:
         return httpx.Response(200, content=b"print(42)\n")
 
     async with httpx.AsyncClient(transport=httpx.MockTransport(serve)) as client:
-        res = await fetch_workspace_file_content(
+        res = await fetch_workspace_json(
             client,
             "http://runner/to-user/workspace-file",
             WorkspaceFileRequest(agent_id=1, path="src/main.py", mode="content"),
             {"Authorization": "Bearer test"},
+            WorkspaceFileResponse,
         )
         assert res == expected_payload
 
-        raw = await fetch_workspace_file_raw(
+        upstream = await open_workspace_file_raw(
             client,
             "http://runner/to-user/workspace-file",
             WorkspaceFileRequest(agent_id=1, path="src/main.py", mode="raw"),
             {"Authorization": "Bearer test"},
             limit=settings.to_user.max_resource_bytes,
         )
-        assert raw == b"print(42)\n"
+        relayed = b"".join(
+            [
+                chunk
+                async for chunk in relay_body(upstream, limit=settings.to_user.max_resource_bytes)
+            ]
+        )
+        assert relayed == b"print(42)\n"
 
         with pytest.raises(HTTPException) as exc_info:
-            await fetch_workspace_file_content(
+            await fetch_workspace_json(
                 client,
                 "http://runner/to-user/workspace-file",
                 WorkspaceFileRequest(agent_id=1, path="missing.py", mode="content"),
                 {"Authorization": "Bearer test"},
+                WorkspaceFileResponse,
             )
         assert exc_info.value.status_code == 404
         assert "missing.py" in str(exc_info.value.detail)
+
+
+# meiva:note
+# A runner that predates a request field refuses any field it does not know, so the forwarded
+# body carries only the fields this read sets.
+@pytest.mark.asyncio
+async def test_forwarded_reads_carry_only_the_fields_they_set() -> None:
+    sent: list[set[str]] = []
+
+    def serve(request: httpx.Request) -> httpx.Response:
+        sent.append(WorkspaceFileRequest.model_validate_json(request.content).model_fields_set)
+        return httpx.Response(200, content=b"x", headers={"content-length": "1"})
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(serve)) as client:
+        upstream = await open_workspace_file_raw(
+            client,
+            "http://runner/to-user/workspace-file",
+            WorkspaceFileRequest(agent_id=1, path="clip.mp4", mode="raw"),
+            {},
+            limit=settings.to_user.max_resource_bytes,
+        )
+        await upstream.aclose()
+    assert sent == [{"agent_id", "path", "mode"}]
+
+
+@pytest.mark.asyncio
+async def test_a_whole_forwarded_file_over_the_limit_is_refused_before_relaying() -> None:
+    def serve(_: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, content=b"0123456789")
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(serve)) as client:
+        with pytest.raises(HTTPException) as error:
+            await open_workspace_file_raw(
+                client,
+                "http://runner/to-user/workspace-file",
+                WorkspaceFileRequest(agent_id=1, path="clip.mp4", mode="raw"),
+                {},
+                limit=4,
+            )
+    assert error.value.status_code == 413
+
+
+# meiva:note
+# A runner that predates `byte_range` refuses the field; the media still plays, as a whole file.
+@pytest.mark.asyncio
+async def test_a_runner_without_ranges_still_serves_the_whole_file() -> None:
+    sent: list[str | None] = []
+
+    def serve(request: httpx.Request) -> httpx.Response:
+        query = WorkspaceFileRequest.model_validate_json(request.content)
+        sent.append(query.byte_range)
+        if query.byte_range is not None:
+            return httpx.Response(422, text="Invalid workspace file request")
+        return httpx.Response(200, content=b"whole")
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(serve)) as client:
+        upstream = await open_workspace_file_raw(
+            client,
+            "http://runner/to-user/workspace-file",
+            WorkspaceFileRequest(agent_id=1, path="clip.mp4", mode="raw", byte_range="bytes=0-1"),
+            {},
+            limit=settings.to_user.max_resource_bytes,
+        )
+        assert upstream.status_code == 200
+        assert await upstream.aread() == b"whole"
+    assert sent == ["bytes=0-1", None]

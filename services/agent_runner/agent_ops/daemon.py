@@ -614,6 +614,7 @@ async def serve_ops_daemon(
                     machine=our_machine,
                     home=home,
                     limits=to_user_limits_from_read_model(authority),
+                    timers=SYSTEM_TIMERS,
                     executor=executor,
                     dispatch_sem=dispatch_sem,
                     requests=requests,
