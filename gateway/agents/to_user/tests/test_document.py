@@ -4,7 +4,12 @@ import httpx
 import pytest
 from fastapi import HTTPException
 
-from base.agents.to_user import ToUserReadRequest, WorkspaceFileRequest, WorkspaceFileResponse
+from base.agents.to_user import (
+    FileRoot,
+    ToUserReadRequest,
+    WorkspaceFileRequest,
+    WorkspaceFileResponse,
+)
 from base.config import settings
 from gateway.agents.to_user.document import (
     fetch_resource,
@@ -130,7 +135,8 @@ async def test_missing_file_and_oversize_fail_explicitly() -> None:
 @pytest.mark.asyncio
 async def test_workspace_file_proxy_content_and_raw() -> None:
     expected_payload = WorkspaceFileResponse(
-        path="src/main.py",
+        path="/srv/ws/src/main.py",
+        root=FileRoot(kind="machine", path="/", agent_id=None),
         name="main.py",
         extension=".py",
         content="print(42)\n",
@@ -231,15 +237,16 @@ async def test_a_whole_forwarded_file_over_the_limit_is_refused_before_relaying(
 
 
 # meiva:note
-# A runner that predates `byte_range` refuses the field; the media still plays, as a whole file.
+# A runner that predates `byte_range` or `file_access` refuses the field; the media still plays,
+# as a whole file under the reach that runner knows.
 @pytest.mark.asyncio
-async def test_a_runner_without_ranges_still_serves_the_whole_file() -> None:
-    sent: list[str | None] = []
+async def test_a_runner_without_ranges_or_reach_still_serves_the_whole_file() -> None:
+    sent: list[set[str]] = []
 
     def serve(request: httpx.Request) -> httpx.Response:
-        query = WorkspaceFileRequest.model_validate_json(request.content)
-        sent.append(query.byte_range)
-        if query.byte_range is not None:
+        fields = WorkspaceFileRequest.model_validate_json(request.content).model_fields_set
+        sent.append(fields)
+        if fields - {"agent_id", "path", "mode"}:
             return httpx.Response(422, text="Invalid workspace file request")
         return httpx.Response(200, content=b"whole")
 
@@ -247,10 +254,15 @@ async def test_a_runner_without_ranges_still_serves_the_whole_file() -> None:
         upstream = await open_workspace_file_raw(
             client,
             "http://runner/to-user/workspace-file",
-            WorkspaceFileRequest(agent_id=1, path="clip.mp4", mode="raw", byte_range="bytes=0-1"),
+            WorkspaceFileRequest(
+                agent_id=1, path="clip.mp4", mode="raw", byte_range="bytes=0-1", file_access="all"
+            ),
             {},
             limit=settings.to_user.max_resource_bytes,
         )
         assert upstream.status_code == 200
         assert await upstream.aread() == b"whole"
-    assert sent == ["bytes=0-1", None]
+    assert sent == [
+        {"agent_id", "path", "mode", "byte_range", "file_access"},
+        {"agent_id", "path", "mode"},
+    ]

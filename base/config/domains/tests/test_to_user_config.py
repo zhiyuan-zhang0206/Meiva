@@ -10,6 +10,7 @@ def test_limits_default_to_the_widened_bounds() -> None:
     assert config.max_references == 1024
     assert config.max_chain_depth == 16
     assert config.max_resource_bytes == 64 * 1024 * 1024
+    assert config.file_access == "all"
 
 
 @pytest.mark.parametrize(
@@ -24,3 +25,10 @@ def test_every_limit_must_be_positive(field: str) -> None:
 def test_environment_alias_overrides_the_widened_default() -> None:
     config = ToUserSettings.from_environment({"MEIVA_TO_USER_MAX_REFERENCES": "7"})
     assert config.max_references == 7
+
+
+def test_file_access_takes_only_its_two_modes() -> None:
+    config = ToUserSettings.from_environment({"MEIVA_TO_USER_FILE_ACCESS": "workspaces"})
+    assert config.file_access == "workspaces"
+    with pytest.raises(ValidationError, match="file_access"):
+        ToUserSettings.model_validate({"file_access": "anywhere"})

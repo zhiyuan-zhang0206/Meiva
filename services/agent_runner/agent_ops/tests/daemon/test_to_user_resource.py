@@ -146,6 +146,7 @@ async def _workspace_file_client(
     (workspace / "icon.png").write_bytes(b"\x89PNG\r\n\x1a\nraw")
     (workspace / "src").mkdir()
     (workspace / "src" / "hello_test.py").write_text("", encoding="utf-8")
+    (unit_home / "account").mkdir()
 
     requests: RequestTokens = set()
     workers: WorkerFutures = set()
@@ -155,6 +156,7 @@ async def _workspace_file_client(
             pool=pool,
             machine="source-host",
             home=unit_home,
+            user_home=unit_home / "account",
             limits=LIMITS,
             executor=op_executor,
             dispatch_sem=asyncio.Semaphore(1),
@@ -216,7 +218,8 @@ async def test_workspace_file_route_content_and_raw(
 
 # meiva:note
 # The forwarded reads the viewer adds: a byte range answers `206` with its `Content-Range` header
-# through the daemon transport, and a listing answers JSON.
+# through the daemon transport, and a listing answers JSON, reaching the account home when the
+# gateway sends `all`.
 @pytest.mark.asyncio
 async def test_workspace_file_route_ranges_and_listing(
     database: Database, unit_home: Path, op_executor: ThreadPoolExecutor
@@ -233,3 +236,9 @@ async def test_workspace_file_route_ranges_and_listing(
         list_resp = await client.post("/to-user/workspace-file", json=forwarded | {"mode": "list"})
         names = [entry["name"] for entry in list_resp.json()["entries"]]
         assert names == ["src", "hello.py", "icon.png"]
+
+        home_resp = await client.post(
+            "/to-user/workspace-file",
+            json=forwarded | {"mode": "list", "path": "~", "file_access": "all"},
+        )
+        assert home_resp.json()["root"]["kind"] == "home"

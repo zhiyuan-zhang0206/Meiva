@@ -76,13 +76,14 @@ def workspace_file_response(
     pool: ConnectionPool,
     machine: str,
     home: Path,
+    user_home: Path,
     limits: ToUserLimits,
 ) -> RouteAnswer:
 
     try:
         request = WorkspaceFileRequest.model_validate_json(body)
         owned_workspace(pool, request.agent_id, machine, home=home)
-        return answer_workspace_file(request, home=home, limits=limits)
+        return answer_workspace_file(request, home=home, user_home=user_home, limits=limits)
     except ValidationError:
         return 422, b"Invalid workspace file request", "text/plain"
     except WorkspaceFileError as exc:
@@ -99,6 +100,7 @@ async def workspace_file_route(
     pool: ConnectionPool,
     machine: str,
     home: Path,
+    user_home: Path,
     limits: ToUserLimits,
     executor: ThreadPoolExecutor,
     dispatch_sem: asyncio.Semaphore,
@@ -116,6 +118,7 @@ async def workspace_file_route(
                     pool=pool,
                     machine=machine,
                     home=home,
+                    user_home=user_home,
                     limits=limits,
                 ),
             )
