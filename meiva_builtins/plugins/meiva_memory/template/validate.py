@@ -267,7 +267,7 @@ def validate_file(
 
 def note_char_cap() -> int:
     """The commit hook's per-note character cap: same variable, same default."""
-    return int(os.environ.get("MEIVA_MEMORY_NOTE_CAP", "8000"))
+    return int(os.environ.get("MEIVA_MEMORY_NOTE_CAP") or "8000")
 
 
 def is_note_name(fname: str) -> bool:
@@ -529,7 +529,7 @@ def _template_provenance(
     changed: list[str],
 ) -> dict[str, str]:
     identity = hashlib.sha256(json.dumps([rows, changed], sort_keys=True).encode()).hexdigest()
-    override = "default" if os.environ.get("MEIVA_MEMORY_NOTE_CAP") is None else "explicit override"
+    override = "explicit override" if os.environ.get("MEIVA_MEMORY_NOTE_CAP") else "default"
     return {
         "producer": "meiva-memory-template/v1",
         "source_revision": "sha256:" + hashlib.sha256(Path(__file__).read_bytes()).hexdigest(),

@@ -25,6 +25,15 @@ policy reader. They read their exemptions from tables in `meizel.policy.toml`, a
   - `machine_role.py` is Rule 3, the retired ambient machine-role reader.
   - `no_os_environ.py` stops a test from setting a variable that `Settings` models.
   - `turn_scoped_config.py` forbids per-agent config through a process global.
+  - `env_presence.py` judges an environment variable by its value, never by its presence:
+    `"X" in os.environ`, `os.getenv("X") is None`, a `KeyError` handler around `os.environ["X"]`
+    and a shell `[ -v X ]` all read an optional secret that is exported empty as configured. Its CLI
+    (`env_presence_cli.py`) judges production Python, shell scripts and the workflow and action
+    files, and its exemptions are under `[env-presence] files`.
+    What it does not cover: `os.environ.get(NAME, default)` (and `os.getenv(NAME, default)`) keeps an
+    empty value instead of the default, so it is the same mistake in a shape the rule cannot tell from
+    a deliberate default; write `os.environ.get(NAME) or default`. In a shell, `${X-default}` and
+    `${X+x}` test presence the same way; use `${X:-default}` and `${X:+x}`.
 
   Both config rules are effect shells. The `*_plan.py` modules decide what is scanned and what a
   finding says, and `lint_paths.py` owns the two decisions they share. Their launchers in
