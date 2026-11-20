@@ -307,6 +307,7 @@ describe("plugin status cards", () => {
         { label: "7d", resets_at: new Date(SCENARIO_NOW + 86400_000 * 2).toISOString() },
         { label: "expired", resets_at: new Date(SCENARIO_NOW).toISOString() },
         { label: "soon", resets_at: new Date(SCENARIO_NOW + 30_000).toISOString() },
+        { label: "1d+", resets_at: new Date(SCENARIO_NOW + (47 * 60 + 59) * 60_000).toISOString() },
       ],
     }]);
     vi.useFakeTimers({ toFake: ["setInterval", "clearInterval"] });
@@ -317,6 +318,7 @@ describe("plugin status cards", () => {
     expect(await screen.findByText("7d · resets in 2d")).toBeTruthy();
     expect(await screen.findByText("expired · awaiting refresh")).toBeTruthy();
     expect(await screen.findByText("soon · resets soon")).toBeTruthy();
+    expect(await screen.findByText("1d+ · resets in 1d 23h")).toBeTruthy();
     expect(screen.getByText("5h · resets in 2m").getAttribute("title")).toMatch(/2026-05-20/);
     try {
       clock += 120_000;

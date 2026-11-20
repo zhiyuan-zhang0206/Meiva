@@ -18,6 +18,7 @@ import { PluginNavIcons } from "@/components/plugins/plugin-nav";
 import { WindowSelect } from "@/components/agents/window-select";
 import { errMsg as formatErrMsg } from "@/lib/contracts/errors";
 import { formatTokensCompact } from "@/lib/format/format-number";
+import { formatResetCountdown } from "@/lib/format/time";
 import {
   formatRelativeTime,
   STATS_WINDOW_LABELS,
@@ -367,7 +368,7 @@ function PluginStatCard({ card, now }: { card: PluginStatCardModel; now: Date })
           ? t("pluginStatAwaitingRefresh")
           : remainingMs < 60_000
             ? t("pluginStatResetSoon")
-            : t("pluginStatResetIn", { time: formatRelativeTime(reset.resets_at, now) });
+            : t("pluginStatResetIn", { time: formatResetCountdown(reset.resets_at, now) });
         return (
           <span key={reset.label} title={formatAbsolute(reset.resets_at)} className="text-xs leading-5 text-muted-foreground">
             {reset.label} · {text}
