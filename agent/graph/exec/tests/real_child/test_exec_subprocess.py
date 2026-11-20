@@ -32,6 +32,7 @@ from agent.graph.exec.tests.process_inputs import real_parent
 from base.clock import Clock, ClockConfig, Timers
 from base.host.env.dotenv_file import upsert_env
 from base.host.proc import kill_process_tree
+from base.log.tests.log_records import LogRecords
 from base.native_process.exec_domain import ExecProcessDomain
 from base.native_process.process_control import SYSTEM_PROCESS_CONTROL
 from base.paths import logs_dir, resolve_meiva_home
@@ -364,6 +365,31 @@ async def test_subprocess_timeout(tmp_path: Path) -> None:
     )
     assert isinstance(result, ExecTimedOut)
     assert "started" in result.output
+
+
+# meiva:note
+# A child that ignores SIGTERM outlives the grace window and is SIGKILLed. The shared agent host binds
+# no agent to its logger, so the kill report names the run's agent itself; the
+# exec-subprocess-killed alert groups by that agent id.
+async def test_a_timed_out_child_that_ignores_sigterm_is_reported_with_its_agent(
+    tmp_path: Path, loguru_records: LogRecords
+) -> None:
+    ready = tmp_path / "started.ready"
+    code = (
+        "import pathlib, signal, time\n"
+        "signal.signal(signal.SIGTERM, signal.SIG_IGN)\n"
+        f"pathlib.Path({str(ready)!r}).write_text('ok', encoding='utf-8')\n"
+        "time.sleep(60)\n"
+    )
+    result = await run_exec_child(
+        tmp_path,
+        code,
+        timeout=30.0,
+        timers=_ExpireAfterReadyTimers(ready.exists, advance_s=31.0),
+    )
+    assert isinstance(result, ExecTimedOut)
+    (killed,) = loguru_records.events("exec_subprocess_killed")
+    assert killed["extra"]["agent_id"] == AGENT_ID
 
 
 async def test_subprocess_cancel(tmp_path: Path) -> None:

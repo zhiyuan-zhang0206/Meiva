@@ -44,7 +44,7 @@ def test_queue_full_emit_reports_sse_drop_event(loguru_records: LogRecords) -> N
     assert kw["event"] == "sse_drop"
     assert kw["kind"] == "queue_full"
     assert kw["n"] == 1
-    assert kw["aid"] == 42
+    assert kw["agent_id"] == 42
     assert kw["queue_size"] == 2
 
     pub._last_warn = 0.0

@@ -241,13 +241,15 @@ groups:
           metric: event_drop_rate
           team: meiva-ops
         annotations:
-          summary: "{{ $values.C }} real SSE/event-log drops in 10 minutes (threshold 100)"
+          summary: "{{ $values.C }} real SSE/event-log drops in 10 minutes across {{ $values.N }} agent(s) (threshold 100)"
           description: >-
             Events with event_name ∈ sse_drop / event_log_drop summed payload.n to
             {{ $values.C }} in the last 10 minutes (real drops; each report row
             carries the real drop count n since the previous report). SSE drops =
             degraded live view; event_log_drop = lost log-sink queue rows. Check
-            the affected agent's event publisher / log-sink queue.
+            the affected agent's event publisher / log-sink queue. {{ $values.N }}
+            counts the distinct agent ids among the drop rows; a drop from a shared
+            process carries none, so it adds to the total but not to the count.
         data:
           - refId: A
             datasourceUid: loki
@@ -277,6 +279,34 @@ groups:
                 uid: __expr__
               type: reduce
               expression: A
+              reducer: mean
+          - refId: B
+            datasourceUid: loki
+            queryType: ""
+            model:
+              refId: B
+              datasource:
+                type: loki
+                uid: loki
+              editorMode: code
+              expr: >-
+                count(sum by (agent_id) (count_over_time({service_name="unknown_service", event_name=~"sse_drop|event_log_drop", agent_id=~".+"} | json | cluster=".meiva" |
+                category="telemetry" [10m]))) or vector(0)
+              instant: true
+              queryType: instant
+            relativeTimeRange:
+              from: 600
+              to: 0
+          - refId: N
+            datasourceUid: __expr__
+            queryType: ""
+            model:
+              refId: N
+              datasource:
+                type: __expr__
+                uid: __expr__
+              type: reduce
+              expression: B
               reducer: mean
           - refId: D
             datasourceUid: __expr__
@@ -388,12 +418,13 @@ groups:
           metric: delivery_stall_rate
           team: meiva-ops
         annotations:
-          summary: "{{ $values.C }} fresh delivery stalls in 10 minutes (age_s < 600, threshold 50)"
+          summary: "{{ $values.C }} fresh delivery stalls in 10 minutes across {{ $values.N }} agent(s) (age_s < 600, threshold 50)"
           description: >-
             Events with event_name=delivery_stalled and age_s < 600 (fresh, not
             historical) reached {{ $values.C }} in the last 10 minutes. Old stalls
             (age_s in days) do not indicate a new failure; fresh stalls mean the
-            delivery pipeline just got blocked.
+            delivery pipeline just got blocked. The stalls belong to {{ $values.N }}
+            distinct agents; meiva-ops-delivery-stalled names each one.
         data:
           - refId: A
             datasourceUid: loki
@@ -423,6 +454,35 @@ groups:
                 uid: __expr__
               type: reduce
               expression: A
+              reducer: mean
+          - refId: B
+            datasourceUid: loki
+            queryType: ""
+            model:
+              refId: B
+              datasource:
+                type: loki
+                uid: loki
+              editorMode: code
+              expr: >-
+                count(sum by (agent_id) (count_over_time({service_name="unknown_service", event_name="delivery_stalled", agent_id=~".+"} | json | cluster=".meiva" |
+                category="telemetry" |
+                attributes_age_s < 600 [10m]))) or vector(0)
+              instant: true
+              queryType: instant
+            relativeTimeRange:
+              from: 600
+              to: 0
+          - refId: N
+            datasourceUid: __expr__
+            queryType: ""
+            model:
+              refId: N
+              datasource:
+                type: __expr__
+                uid: __expr__
+              type: reduce
+              expression: B
               reducer: mean
           - refId: D
             datasourceUid: __expr__
@@ -2772,14 +2832,16 @@ groups:
           metric: db_pool_acquire_slow
           team: meiva-ops
         annotations:
-          summary: "{{ $values.C }} agent DB pool borrows took >=10s on {{ $labels.machine }} in 10m"
+          summary: "{{ $values.C }} DB pool borrows took >=10s in the shared agent host on {{ $labels.machine }} in 10m (host-wide pool, no single agent)"
           description: >-
-            Each agent process on {{ $labels.machine }} emits one db_pool_acquire_slow event (WARNING) per
+            The agent host on {{ $labels.machine }} emits one db_pool_acquire_slow event (WARNING) per
             successful connection borrow that took at least 10s: a stalled host, Postgres/PgBouncer
-            reconnecting, or a saturated client pool. The event carries elapsed, slot_wait_ms, check_ms and
-            the pool state (pool_size, pool_available, requests_waiting, connections_errors) — check_ms ~=
-            elapsed means a stalled reset check on the host, slot_wait_ms ~= elapsed means pool saturation.
-            One host stall slows every agent's pool at once, so the rule groups by machine and Grafana
+            reconnecting, or a saturated client pool. The pools (`attributes_name` agent-host /
+            agent-host-control) are shared by every agent the host runs, and a borrow carries no agent
+            identity, so the alert names the machine, not an agent. The event carries elapsed, slot_wait_ms,
+            check_ms and the pool state (pool_size, pool_available, requests_waiting, connections_errors) —
+            check_ms ~= elapsed means a stalled reset check on the host, slot_wait_ms ~= elapsed means pool
+            saturation. One host stall slows every agent at once, so the rule groups by machine and Grafana
             notification grouping replaces the old per-host cooldown marker.
         data:
           - refId: A
@@ -3918,7 +3980,9 @@ groups:
       # `llm_turn_aborted` is the end state after retries; `llm_provider_error` only matches 429 and
       # billing rejections, so every PERMANENT rejection (400/401/403/404/422) ended a turn with
       # nothing watching. A separate rule rather than widening that one: its two rules carry the
-      # vendor grouping and the 429/billing split this one must not disturb.
+      # vendor grouping and the 429/billing split this one must not disturb. Grouped by agent so each
+      # alert names the agent whose turn was lost; an event without an agent id (emitted before the
+      # call site passed one) renders as "unknown".
       - uid: meiva-ops-llm-turn-aborted
         title: "LLM turn aborted after retries"
         condition: D
@@ -3933,7 +3997,7 @@ groups:
           metric: llm_turn_aborted
           team: meiva-ops
         annotations:
-          summary: "an agent turn was aborted after retries"
+          summary: "agent {{ with $labels.agent_id }}{{ . }}{{ else }}unknown{{ end }}: turn aborted after retries ({{ $values.C }} in 30m)"
           description: >-
             A turn failed every retry and was aborted (llm_turn_aborted). The `llm_provider_error`
             rules only match rate limits and billing rejections, so a permanent rejection
@@ -3950,7 +4014,7 @@ groups:
                 uid: loki
               editorMode: code
               expr: >-
-                sum(count_over_time({event_name="llm_turn_aborted"}
+                sum by (agent_id) (count_over_time({event_name="llm_turn_aborted"}
                 | json | cluster=".meiva" | category="telemetry" [30m]))
               instant: true
               queryType: instant
@@ -4060,7 +4124,8 @@ groups:
 
       # meiva:note
       # One timeout is ordinary for a long loop; a stream of them on one machine means work is being
-      # cut rather than finished. The event carries no attributes, so there is nothing to group by.
+      # cut rather than finished. The event carries no attributes; it groups by the envelope's agent
+      # id so the alert names the agent whose call was cut.
       - uid: meiva-ops-exec-node-timeout
         title: "Exec node hit its timeout"
         condition: D
@@ -4075,7 +4140,7 @@ groups:
           metric: exec_node_timeout
           team: meiva-ops
         annotations:
-          summary: "an execute_code call hit the node timeout"
+          summary: "agent {{ with $labels.agent_id }}{{ . }}{{ else }}unknown{{ end }}: an execute_code call hit the node timeout ({{ $values.C }} in 30m)"
           description: >-
             A node-level timeout fired (exec_node_timeout): the call was killed after its wall-clock
             budget. A single one is ordinary for a long loop; repetitions on one machine mean the
@@ -4091,7 +4156,7 @@ groups:
                 uid: loki
               editorMode: code
               expr: >-
-                sum(count_over_time({event_name="exec_node_timeout"}
+                sum by (agent_id) (count_over_time({event_name="exec_node_timeout"}
                 | json | cluster=".meiva" | category="telemetry" [30m]))
               instant: true
               queryType: instant
@@ -4130,8 +4195,8 @@ groups:
 
       # meiva:note
       # A child that outlived the signal grace period may have left partial output or a held
-      # resource. Grouped by nothing on purpose: `pid` is high cardinality and would split one
-      # shutdown defect into an alert per process.
+      # resource. Grouped by agent, not by `pid`: pid is high cardinality and would split one
+      # shutdown defect into an alert per process, while the agent is the owner to look at.
       - uid: meiva-ops-exec-subprocess-killed
         title: "Exec child ignored SIGTERM and was killed"
         condition: D
@@ -4146,7 +4211,7 @@ groups:
           metric: exec_subprocess_killed
           team: meiva-ops
         annotations:
-          summary: "an exec child survived the grace period and was SIGKILLed"
+          summary: "agent {{ with $labels.agent_id }}{{ . }}{{ else }}unknown{{ end }}: an exec child survived the grace period and was SIGKILLed ({{ $values.C }} in 1h)"
           description: >-
             A child process outlived the signal grace period and was SIGKILLed
             (exec_subprocess_killed): it may have left partial output behind. `attributes_pid` and
@@ -4163,7 +4228,7 @@ groups:
                 uid: loki
               editorMode: code
               expr: >-
-                sum(count_over_time({event_name="exec_subprocess_killed"}
+                sum by (agent_id) (count_over_time({event_name="exec_subprocess_killed"}
                 | json | cluster=".meiva" | category="telemetry" [1h]))
               instant: true
               queryType: instant
@@ -4232,7 +4297,7 @@ groups:
           metric: inbound_consumed_unknown
           team: meiva-ops
         annotations:
-          summary: "{{ $values.C }} claimed inbound(s) consumed without running in 24h (threshold 2)"
+          summary: "{{ $values.C }} claimed inbound(s) consumed without running in 24h across {{ $values.N }} agent(s) (threshold 2)"
           description: >-
             A host crash or aborted turn left claimed inbound rows that the next
             cold admission consumed without executing: the message is gone and
@@ -4241,6 +4306,8 @@ groups:
             row's payload carries consumed_without_execution). One is an
             acceptable crash cost; more than a couple a day means hosts are
             dying often enough to deserve a look before users report silence.
+            The threshold stays fleet-wide (one host crash drops several agents'
+            inbounds at once); {{ $values.N }} is how many distinct agents lost one.
         data:
           - refId: A
             datasourceUid: loki
@@ -4269,6 +4336,34 @@ groups:
                 uid: __expr__
               type: reduce
               expression: A
+              reducer: mean
+          - refId: B
+            datasourceUid: loki
+            queryType: ""
+            model:
+              refId: B
+              datasource:
+                type: loki
+                uid: loki
+              editorMode: code
+              expr: >-
+                count(sum by (agent_id) (count_over_time({service_name="unknown_service", event_name="inbound_consumed_unknown", agent_id=~".+"} | json | cluster=".meiva" |
+                category="telemetry" [24h]))) or vector(0)
+              instant: true
+              queryType: instant
+            relativeTimeRange:
+              from: 86400
+              to: 0
+          - refId: N
+            datasourceUid: __expr__
+            queryType: ""
+            model:
+              refId: N
+              datasource:
+                type: __expr__
+                uid: __expr__
+              type: reduce
+              expression: B
               reducer: mean
           - refId: D
             datasourceUid: __expr__
@@ -4721,12 +4816,14 @@ groups:
           team: meiva-ops
           notify_im: "false"
         annotations:
-          summary: "Turn duration p95 at {{ $values.C }} s (threshold 75 s, 2x 24h baseline)"
+          summary: "Turn duration p95 at {{ $values.C }} s (threshold 75 s, 2x 24h baseline); {{ $values.N }} agent(s) individually above 75 s"
           description: >-
             The agent-wide turn duration p95 (meiva_turn_end_duration_seconds
             histogram, 10m rate) stayed above 75s — 2x the 2026-08-23 24h
             baseline of 37.6s — for 10 minutes. Signals collective slowdown
-            ("runs slower and slower"), not a single long task.
+            ("runs slower and slower"), not a single long task. {{ $values.N }} is
+            how many agents' own 10m p95 is above 75s: one agent means its own long
+            turns skew the fleet p95, many means the slowdown is shared.
         data:
           - refId: A
             datasourceUid: prometheus
@@ -4755,6 +4852,34 @@ groups:
                 uid: __expr__
               type: reduce
               expression: A
+              reducer: mean
+          - refId: B
+            datasourceUid: prometheus
+            queryType: ""
+            model:
+              refId: B
+              datasource:
+                type: prometheus
+                uid: prometheus
+              editorMode: code
+              expr: >-
+                count(histogram_quantile(0.95, sum by (le, agent_id)
+                (rate(meiva_turn_end_duration_seconds_bucket[10m]))) > 75) or vector(0)
+              instant: true
+              range: false
+            relativeTimeRange:
+              from: 600
+              to: 0
+          - refId: N
+            datasourceUid: __expr__
+            queryType: ""
+            model:
+              refId: N
+              datasource:
+                type: __expr__
+                uid: __expr__
+              type: reduce
+              expression: B
               reducer: mean
           - refId: D
             datasourceUid: __expr__

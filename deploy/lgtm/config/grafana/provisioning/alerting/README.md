@@ -112,15 +112,24 @@ References: [Grafana evaluation](https://grafana.com/docs/grafana/latest/alertin
 
 ## Rule conditions
 
+The Alerts page shows a rule's summary line, so a rule about one agent groups by the envelope
+`agent_id` stream label and names it there; a fleet-volume rule keeps its fleet-wide threshold and
+its summary adds how many distinct agents the volume spans (a query `B` counting agent ids over the
+same window, `or vector(0)`, reduced as `N`). The shared agent host binds no agent to its logger, so
+an event carries an agent id only when its call site passes `agent_id=`. A rule whose event family
+gained its agent id at the call site renders the label through
+`{{ with $labels.agent_id }}{{ . }}{{ else }}unknown{{ end }}`, because Grafana prints a missing label
+as `[no value]`. Pinned by `tests/scripts/test_alert_rules.py`.
+
 Application layer — the Loki event stream plus the LLM latency histogram:
 
 | uid | Group | Metric | Condition | `for` | Severity |
 |-----|-------|--------|-----------|-------|----------|
 | `meiva-ops-warning-error-spike` | `meiva-ops` | WARNING+ERROR+CRITICAL spike | 5m count > 3× prior-15m rate AND ≥ 30 (Loki) | 5m | error |
-| `meiva-ops-sse-drop-backlog` | `meiva-ops` | sse_drop + event_log_drop backlog | SUM(payload.n) in 10m > 100 (Loki unwrap) | 5m | warning |
+| `meiva-ops-sse-drop-backlog` | `meiva-ops` | sse_drop + event_log_drop backlog | SUM(payload.n) in 10m > 100 (Loki unwrap); summary adds the distinct agent count | 5m | warning |
 | `meiva-ops-llm-latency-p95` | `meiva-ops` | llm_usage latency p95 | histogram p95 in 10m > 60000 ms (Prometheus) | 10m | error |
-| `meiva-ops-delivery-stalled-backlog` | `meiva-ops` | delivery_stalled fresh backlog | fresh (age_s<600) count in 10m > 50 (Loki) | 5m | warning |
-| `meiva-ops-inbound-consumed-unknown` | `meiva-ops-slow` | inbound consumed without execution evidence | `inbound_consumed_unknown` count in 24h > 2 (Loki) | 10m | warning |
+| `meiva-ops-delivery-stalled-backlog` | `meiva-ops` | delivery_stalled fresh backlog | fresh (age_s<600) count in 10m > 50 (Loki); summary adds the distinct agent count | 5m | warning |
+| `meiva-ops-inbound-consumed-unknown` | `meiva-ops-slow` | inbound consumed without execution evidence | `inbound_consumed_unknown` count in 24h > 2 (Loki); summary adds the distinct agent count | 10m | warning |
 | `meiva-ops-events-freshness` | `meiva-ops` | event stream stalled | no events in Loki for 5m (absent_over_time) | 5m | error |
 | `meiva-ops-root-health-stale` | `meiva-ops` | root health round freshness | a machine+home+process expecting rounds within 24h has its last completed round >3m stale, or none since startup (Prometheus) | 0m | error |
 | `meiva-ops-gateway-metrics-silent` | `meiva-ops` | gateway_latency heartbeat | no samples in Prometheus for 5m (absent_over_time) | 5m | error |
@@ -128,7 +137,7 @@ Application layer — the Loki event stream plus the LLM latency histogram:
 | `meiva-ops-llm-billing-quota` | `meiva-ops-slow` | LLM key out of credit / quota | llm_provider_error with billing=true in 15m > 0 (Loki) | 0m | critical |
 | `meiva-ops-gateway-latency-route-warning` | `meiva-ops-slow` | Gateway latency: fast route p95 | p95 > 3s for 5m (Loki, LLM-bound + inherently-slow routes excluded) | 5m | warning |
 | `meiva-ops-gateway-latency-route-error` | `meiva-ops-slow` | Gateway latency: fast route p95 | p95 > 10s for 5m (same route filter) | 5m | error |
-| `meiva-ops-turn-duration-p95` | `meiva-ops-slow` | Turn duration p95 (collective slowdown) | histogram p95 > 75s for 10m (Prometheus, 24h baseline 37.6s × 2) | 10m | warning |
+| `meiva-ops-turn-duration-p95` | `meiva-ops-slow` | Turn duration p95 (collective slowdown) | histogram p95 > 75s for 10m (Prometheus, 24h baseline 37.6s × 2); summary adds how many agents' own p95 is above 75s | 10m | warning |
 | `meiva-ops-gw-latency-slow-warning` | `meiva-ops-slow` | Gateway latency: slow route p95 | p95 > 5s for 5m (Loki, slow route class) | 5m | warning |
 | `meiva-ops-gw-latency-slow-error` | `meiva-ops-slow` | Gateway latency: slow route p95 | p95 > 10s for 5m (same route class) | 5m | error |
 | `meiva-ops-tempo-backend-down` | `meiva-ops-slow` | Tempo backend reachable | up{job="tempo"}=0 for 1h (Prometheus) | 1h | warning |
@@ -311,7 +320,7 @@ and trailing window carry the debounce. A condition that stops resolves itself w
 | `meiva-ops-impersonation-notice-failed` | `impersonation_terminal_notice_failed` per lease | 0s | warning | the ended-lease notice's durable retry ledger (a failed single submission is now reported, not retried) |
 | `meiva-ops-delivery-stalled` | `delivery_stalled` per agent | 1m | warning | the deploy-window hold and settle grace |
 | `meiva-ops-delivery-stranded-wake` | `delivery_stranded_wake` per agent (inbound id in the summary) | 0s | warning | nothing: an automatic wake that revives an owner a user had just killed had no notification path (2026-10-25 review of #7066) |
-| `meiva-ops-db-pool-acquire-slow` | `db_pool_acquire_slow` per machine | 2m | warning | the per-host cooldown marker |
+| `meiva-ops-db-pool-acquire-slow` | `db_pool_acquire_slow` per machine (the agent host's shared pools; a borrow carries no agent) | 2m | warning | the per-host cooldown marker |
 | `meiva-ops-root-unit-restart-failed` / `-absent` / `-breaker-open` | `root_unit_failure_state` per `attributes_kind`, per machine and unit | 0m | error / error / critical | the root unit episode store and its posts; `-absent` adds the state nothing recorded a cause for (task #6345) |
 | `meiva-ops-root-unit-not-revivable` | `root_unit_not_revivable` >1 in 2m | 0m | error | `terminal_escalate_rounds` |
 | `meiva-ops-root-unit-stop-escalated` | `root_unit_stop_escalated` >0 in 10m | 0m | error | nothing: a stop that outlived its window gave up silently and left a half-dead unit (2026-10-18) |
@@ -320,10 +329,10 @@ and trailing window carry the debounce. A condition that stops resolves itself w
 | `meiva-ops-root-diagnostic-browser-reach` | `root_diagnostic` verdict `down` / `unavailable` / `port-taken`, >2 samples in 16m | 0m | warning | the per-probe consecutive-failure thresholds; its cadence (300s) is why one debounce covers both classes over ~10-15 minutes |
 | `meiva-ops-root-diagnostic-task-telemetry` | `root_diagnostic` verdict `down`, >1 hourly sample in 6h | 0m | warning | nothing: the daemon delivered over 100 reminder digests a day while a storage filter dropped every task_reminder_digest / task_escalation row (2026-10-03 → 10-25). Only `down` counts — an unreadable database is the recovery probe's finding, not this one |
 | `meiva-ops-schedule-not-progressing` | `schedule_not_progressing` (10m) | 0m | warning | nothing: the schedule's own next-round deadline is the FIRST level of a stall, and only `schedule_stalled` (two hours later) ever had a rule (#6400) |
-| `meiva-ops-llm-turn-aborted` | `llm_turn_aborted` (30m) | 0m | warning | nothing: `llm_provider_error` matches only 429 and billing rejections, so every permanent 400/401/403/404/422 ended a turn unheard (#6400) |
+| `meiva-ops-llm-turn-aborted` | `llm_turn_aborted` per agent (30m) | 0m | warning | nothing: `llm_provider_error` matches only 429 and billing rejections, so every permanent 400/401/403/404/422 ended a turn unheard (#6400) |
 | `meiva-ops-llm-usage-metering-failed` | `llm_usage_metering_failed` per model (1h) | 0m | warning | nothing: the call ran and its `llm_usage` row was dropped, so the spend happened and the ledger never saw it (#6400) |
-| `meiva-ops-exec-node-timeout` | `exec_node_timeout` (30m) | 0m | warning | nothing: the node timeout killed the call and no rule read the event (#6400) |
-| `meiva-ops-exec-subprocess-killed` | `exec_subprocess_killed` (1h) | 0m | warning | nothing: a child that outlived the signal grace may have left partial output behind (#6400) |
+| `meiva-ops-exec-node-timeout` | `exec_node_timeout` per agent (30m) | 0m | warning | nothing: the node timeout killed the call and no rule read the event (#6400) |
+| `meiva-ops-exec-subprocess-killed` | `exec_subprocess_killed` per agent (1h) | 0m | warning | nothing: a child that outlived the signal grace may have left partial output behind (#6400) |
 | `meiva-ops-alert-pipeline-watchdog` | Prometheus `vector(1)` — always firing | 0s | warning | synthetic heartbeat: it exists only so R28 has something whose absence means something. Its route repeats every 5m and does not fall through, so it costs one webhook POST per period |
 | `meiva-ops-alert-pipeline-silent` | `time() - meiva_alerts_last_ingest_timestamp_seconds` > 900 (three watchdog periods) | 5m | error | nothing: a rotated webhook token or a misrouted contact point silences **every** rule at once, and no rule rode a path that could report it (2026-11-04). Routes to the gateway webhook |
 
