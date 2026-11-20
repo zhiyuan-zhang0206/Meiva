@@ -18,6 +18,7 @@ from pathlib import Path
 import psutil
 import pytest
 
+from base.host.atomic_io import SYSTEM_FS, AtomicWriter, Fs
 from base.host.proc import (
     ProcessObservation,
     child_state,
@@ -30,6 +31,7 @@ from base.host.proc import (
 from base.host.proc import (
     timeout_stderr_tail as proc_timeout_stderr_tail,
 )
+from base.host.tests._hosting_child import report_pid
 from base.native_process.ownership import OwnedProcess, capture_tree
 
 
@@ -147,6 +149,29 @@ def _grandchild_pid(pid_file: Path) -> int:
     within milliseconds of launch, so a timeout of seconds always sees it."""
     assert pid_file.exists(), "fixture never reported its grandchild pid"
     return int(pid_file.read_text())
+
+
+# meiva:note
+# The 8152 flake: the tests poll `pid_file.exists()` and then `int()` its content, and a reader
+# landing between "the file exists" and "its content is there" is timing-dependent. So this stops
+# the writer at that instant instead: when the content is fully written but not yet published
+# (the rename), the pid file must not exist at all. A writer that truncates the final path first
+# (`Path.write_text`) never reaches the rename and fails here.
+def test_report_pid_never_exposes_a_partial_pid_file(tmp_path: Path) -> None:
+    pid_file = tmp_path / "grandchild.pid"
+    at_publish: list[bool] = []
+
+    def replace(source: Path, target: Path) -> None:
+        assert target == pid_file
+        assert source.read_text() == "4242", "content must be complete before it is published"
+        at_publish.append(pid_file.exists())
+        SYSTEM_FS.replace(source, target)
+
+    writer = AtomicWriter(Fs(replace=replace, fsync=SYSTEM_FS.fsync, fchmod=SYSTEM_FS.fchmod))
+    report_pid(pid_file, 4242, writer=writer)
+
+    assert at_publish == [False], "pid file visible before its content was complete"
+    assert pid_file.read_text() == "4242"
 
 
 def _dead(pid: int) -> bool:
