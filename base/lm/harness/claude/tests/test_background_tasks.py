@@ -109,6 +109,60 @@ async def test_close_stops_the_tasks_the_cli_still_runs(tmp_path: Path) -> None:
         await harness.stop()
 
 
+# meiva:note
+# A stop is answered on the stream the reader drains. Once the SDK's read has failed, nothing can
+# answer it, and waiting for one left the CLI running unreachable for the SDK's whole control
+# timeout (task #7254): the close goes straight on to `disconnect()` instead.
+# meiva:link base/lm/harness/claude/docs/background-tasks.md
+async def test_a_close_after_the_stream_failed_disconnects_without_asking_for_stops(
+    tmp_path: Path,
+) -> None:
+    harness = await start(tmp_path)
+    asked: list[str] = []
+
+    async def unanswered_stop(task_id: str) -> None:
+        asked.append(task_id)
+        await asyncio.Event().wait()
+
+    try:
+        harness.client.push(fake.TaskStartedMessage(subtype="task_started", data={}, task_id="t1"))
+        harness.client.fail_stream(ValueError("JSON message exceeded maximum buffer size"))
+        await harness.wait_for(lambda event: isinstance(event, SessionFailed))
+        harness.client.stop_task = unanswered_stop
+        await harness.session.close(reason="test done")
+        assert asked == []
+        assert harness.client.disconnected
+    finally:
+        await harness.stop()
+
+
+# meiva:note
+# The same race the other way round: the stream fails while the stops are still waiting for their
+# answer, and the close stops waiting the moment the reader ends.
+# meiva:link base/lm/harness/claude/docs/background-tasks.md
+async def test_a_stream_that_fails_while_stops_wait_releases_the_close(tmp_path: Path) -> None:
+    harness = await start(tmp_path)
+    stopping = asyncio.Event()
+
+    async def unanswered_stop(task_id: str) -> None:
+        del task_id
+        stopping.set()
+        await asyncio.Event().wait()
+
+    try:
+        harness.client.push(fake.TaskStartedMessage(subtype="task_started", data={}, task_id="t1"))
+        await _eventually(lambda: bool(harness.session.background_work()))
+        harness.client.stop_task = unanswered_stop
+        closing = asyncio.create_task(harness.session.close(reason="test done"))
+        await stopping.wait()
+        assert not closing.done()
+        harness.client.fail_stream(ValueError("JSON message exceeded maximum buffer size"))
+        await closing
+        assert harness.client.disconnected
+    finally:
+        await harness.stop()
+
+
 async def _eventually(predicate: Callable[[], bool]) -> None:
     for _ in range(1000):
         if predicate():

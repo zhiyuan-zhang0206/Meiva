@@ -233,9 +233,7 @@ class ClaudeSession(BaseHarnessSession[BridgeConfig]):
         self._scheduled = ScheduledWork()
         self._open = None
         if client is not None and live:
-            await asyncio.gather(
-                *(client.stop_task(task_id) for task_id in live), return_exceptions=True
-            )
+            await self._stop_while_read(client, live)
         await self._close_tasks()
         if self._client is not None:
             # meiva:note
@@ -253,6 +251,24 @@ class ClaudeSession(BaseHarnessSession[BridgeConfig]):
             clock=self._clock,
         )
         self._finish_close(reason)
+
+    # meiva:note
+    # The CLI answers a stop on the stream the reader drains, so once the reader has ended (the
+    # SDK's own read failed, or the CLI's stdout closed) no answer can arrive: the SDK would wait
+    # out its control-request timeout, about a minute, while the CLI keeps running a turn whose
+    # registration the bridge has already retired (task #7254). The stops therefore race the
+    # reader, and a reader that has ended, or ends first, sends the close straight on to
+    # `disconnect()`; whatever the stops did not end is then the residue check's to report.
+    # meiva:link base/lm/harness/claude/docs/background-tasks.md
+    async def _stop_while_read(self, client: ClaudeClientProtocol, task_ids: list[str]) -> None:
+        reader = self._reader
+        if reader is None or reader.done():
+            return
+        async with asyncio.TaskGroup() as group:
+            stops = group.create_task(_ask_stops(client, task_ids))
+            _ = await asyncio.wait({stops, reader}, return_when=asyncio.FIRST_COMPLETED)
+            if not stops.done():
+                _ = stops.cancel()
 
     @property
     def cli_pid(self) -> int | None:
@@ -733,6 +749,15 @@ class ClaudeSession(BaseHarnessSession[BridgeConfig]):
         if self._client is None:
             raise SessionClosedError("session is not started")
         return self._client
+
+
+# meiva:note
+# A stop that fails is not the close's failure (see `close`), so each answer, error or not, is
+# collected and the residue check that follows reports whatever kept running.
+async def _ask_stops(client: ClaudeClientProtocol, task_ids: list[str]) -> None:
+    _ = await asyncio.gather(
+        *(client.stop_task(task_id) for task_id in task_ids), return_exceptions=True
+    )
 
 
 __all__ = [

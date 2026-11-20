@@ -199,6 +199,13 @@ class Finish:
 _END = object()
 
 
+# meiva:note
+# What the SDK's own reader dying looks like from the session: the message stream raises.
+@dataclass(frozen=True)
+class _StreamFailure:
+    error: Exception
+
+
 class FakeClaudeSDKClient:
     def __init__(self, options: ClaudeAgentOptions, *, sdk: FakeSDK) -> None:
         self.options = options
@@ -392,6 +399,8 @@ class FakeClaudeSDKClient:
             message = await self._queue.get()
             if message is _END:
                 return
+            if isinstance(message, _StreamFailure):
+                raise message.error
             yield message
 
     async def __aenter__(self) -> FakeClaudeSDKClient:
@@ -411,6 +420,9 @@ class FakeClaudeSDKClient:
     # meiva:link base/lm/harness/claude/docs/background-tasks.md
     def push(self, message: Any) -> None:
         self._emit(message)
+
+    def fail_stream(self, error: Exception) -> None:
+        self._emit(_StreamFailure(error))
 
 
 class FakeSDK:
