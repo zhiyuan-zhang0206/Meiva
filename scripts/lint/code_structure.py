@@ -44,6 +44,7 @@ from meizel.api import (  # noqa: E402
     select_packages,
     source_tree,
     type_checking_in_scope,
+    type_checking_lines,
     type_checking_violations,
 )
 
@@ -381,7 +382,7 @@ class _TypeContext:
         return [
             f"{rel}:{line}: {message}"
             for line, message in type_checking_violations(
-                scan.type_checking, rel, self.allowed, self.packages
+                type_checking_lines(scan), rel, self.allowed, self.packages
             )
         ]
 
