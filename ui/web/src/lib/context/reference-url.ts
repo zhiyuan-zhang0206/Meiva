@@ -14,7 +14,7 @@ export const PUSHED_ENTRY = "meivaToUserEntry";
 export const VIEW_PARAM = "view";
 export const VIEW_AGENT_PARAM = "view_agent";
 export const VIEW_LINES_PARAM = "lines";
-const VIEW_PARAMS = [VIEW_PARAM, VIEW_AGENT_PARAM, VIEW_LINES_PARAM];
+export const VIEW_PARAMS: readonly string[] = [VIEW_PARAM, VIEW_AGENT_PARAM, VIEW_LINES_PARAM];
 
 export interface ViewTarget {
   agentId: number;
@@ -86,8 +86,4 @@ export function withView(href: string, target: ViewTarget | null): string {
   ];
   url.search = [...kept, ...view].join("&");
   return url.toString();
-}
-
-export function withoutView(url: URL): void {
-  for (const param of VIEW_PARAMS) url.searchParams.delete(param);
 }
