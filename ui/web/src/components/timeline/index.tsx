@@ -150,27 +150,6 @@ export const TimelineView = memo(function TimelineView({
   // meiva:link ui/web/src/docs/frontend-components/timeline-view/send-anchor.md
   const reserveRef = useRef<HTMLDivElement>(null);
 
-  // meiva:note
-  // The footer's height drives the log's bottom padding and the arrow's offset through one CSS
-  // variable, so a strip that appears or grows changes layout once, before paint, and the writer's
-  // layout observer keeps the reader's place through it.
-  const footerRef = useRef<HTMLDivElement>(null);
-  const hasFooter = footer !== undefined;
-  useLayoutEffect(() => {
-    const wrapper = wrapperRef.current;
-    const node = footerRef.current;
-    if (!wrapper || !node) return;
-    const sync = () => wrapper.style.setProperty(FOOTER_HEIGHT_VAR, `${node.offsetHeight}px`);
-    sync();
-    if (typeof ResizeObserver === "undefined") return () => wrapper.style.removeProperty(FOOTER_HEIGHT_VAR);
-    const observer = new ResizeObserver(sync);
-    observer.observe(node);
-    return () => {
-      observer.disconnect();
-      wrapper.style.removeProperty(FOOTER_HEIGHT_VAR);
-    };
-  }, [hasFooter]);
-
   const { turnOverrides, toggleTurn, overrides, toggleExpanded } = useTimelineExpansion({ scrollMemoryKey, threadKey });
   const thresholds = useStickyThresholds();
 
@@ -195,6 +174,33 @@ export const TimelineView = memo(function TimelineView({
     wrapperRef, viewportRef, contentRef, reserveRef, thresholds,
     onChange: onAnchorChange, onUnresolved, pinnedHead, onFree, onRideEnd, viewportObserverFactory,
   });
+
+  // meiva:note
+  // The footer's height drives the log's bottom padding and the arrow's offset through one CSS
+  // variable. The writer applies the anchor in the same callback: left to its own layout observer,
+  // the padding change would reach it one observation round later, after a frame with the grown
+  // strip over the last row was already laid out.
+  const footerRef = useRef<HTMLDivElement>(null);
+  const hasFooter = footer !== undefined;
+  useLayoutEffect(() => {
+    const wrapper = wrapperRef.current;
+    const node = footerRef.current;
+    if (!wrapper || !node) return;
+    const sync = () => {
+      const next = `${node.offsetHeight}px`;
+      if (wrapper.style.getPropertyValue(FOOTER_HEIGHT_VAR) === next) return;
+      wrapper.style.setProperty(FOOTER_HEIGHT_VAR, next);
+      controls.apply();
+    };
+    sync();
+    if (typeof ResizeObserver === "undefined") return () => wrapper.style.removeProperty(FOOTER_HEIGHT_VAR);
+    const observer = new ResizeObserver(sync);
+    observer.observe(node);
+    return () => {
+      observer.disconnect();
+      wrapper.style.removeProperty(FOOTER_HEIGHT_VAR);
+    };
+  }, [controls, hasFooter]);
 
   // meiva:note
   // A first page that does not fill the viewport reads up to COLD_FILL_MAX_PAGES older pages before a
