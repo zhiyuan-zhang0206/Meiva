@@ -12,9 +12,11 @@ import json
 import os
 import sys
 from collections.abc import Callable
+from operator import attrgetter
 from pathlib import Path
-from typing import Any
+from types import ModuleType
 
+from base.host.boundary.untyped import object_of
 from base.paths import meiva_home
 
 
@@ -35,6 +37,24 @@ def _bind_home() -> None:
     process_context.bind_context(MeivaContext(meiva_home=resolve_meiva_home(), environ=os.environ))
 
 
+# meiva:note
+# Reads a name off the `meiva` package. Its names are served by the package's lazy `__getattr__`,
+# so they have no static declaration and this scenario exists to exercise that dynamic lookup. The
+# value comes back as `object` and each caller narrows it; this is not a getattr-literal workaround.
+def _served(read: Callable[[ModuleType], object]) -> object:
+    import meiva
+
+    return read(meiva)
+
+
+def _pong() -> str:
+    ping = _served(attrgetter("lazytasks.ping"))
+    assert callable(ping)
+    result = object_of(ping)
+    assert isinstance(result, str)
+    return result
+
+
 def _executions(counter: Path) -> int:
     return len(counter.read_text(encoding="utf-8").splitlines()) if counter.exists() else 0
 
@@ -53,7 +73,7 @@ def _attribute_error(read: Callable[[], object]) -> str | None:
     return None
 
 
-def _repeated_failure(attempts: list[Callable[[], object]]) -> dict[str, Any]:
+def _repeated_failure(attempts: list[Callable[[], object]]) -> dict[str, object]:
     errors: list[BaseException] = []
     for attempt in attempts:
         try:
@@ -67,62 +87,55 @@ def _repeated_failure(attempts: list[Callable[[], object]]) -> dict[str, Any]:
     }
 
 
-def loads_at_import(counter: Path) -> dict[str, Any]:
-    import meiva
+def loads_at_import(counter: Path) -> dict[str, object]:
 
     return {
         "installed_after_import": _installed(),
-        "pong": meiva.lazytasks.ping(),
+        "pong": _pong(),
         "executions": _executions(counter),
     }
 
 
-def loads_on_first_miss(counter: Path) -> dict[str, Any]:
+def loads_on_first_miss(counter: Path) -> dict[str, object]:
     _as_exec_entry()
-    import meiva
 
     after_import = _installed()
     return {
         "installed_after_import": after_import,
-        "pong": meiva.lazytasks.ping(),
+        "pong": _pong(),
         "installed": _installed(),
         "executions": _executions(counter),
     }
 
 
-def latched_after_first_load(counter: Path) -> dict[str, Any]:
+def latched_after_first_load(counter: Path) -> dict[str, object]:
     _as_exec_entry()
-    import meiva
 
-    _ = meiva.lazytasks
-    second = _attribute_error(lambda: meiva.still_unknown)
+    _ = _served(attrgetter("lazytasks"))
+    second = _attribute_error(lambda: _served(attrgetter("still_unknown")))
     return {"second_miss": second, "executions": _executions(counter)}
 
 
-def unknown_name(counter: Path) -> dict[str, Any]:
-    import meiva
+def unknown_name(counter: Path) -> dict[str, object]:
 
     return {
-        "error": _attribute_error(lambda: meiva.nope_xyz),
+        "error": _attribute_error(lambda: _served(attrgetter("nope_xyz"))),
         "installed": _installed(),
         "executions": _executions(counter),
     }
 
 
-def private_name(counter: Path) -> dict[str, Any]:
+def private_name(counter: Path) -> dict[str, object]:
     _as_exec_entry()
-    import meiva
 
-    private = "_some_private"
     return {
-        "error": _attribute_error(lambda: getattr(meiva, private)),
+        "error": _attribute_error(lambda: _served(attrgetter("_some_private"))),
         "installed": _installed(),
         "executions": _executions(counter),
     }
 
 
-def agent_process(counter: Path) -> dict[str, Any]:
-    import meiva
+def agent_process(counter: Path) -> dict[str, object]:
     from base.agents.context import MeivaContext
     from base.agents.context.identity import AgentIdentity
     from meiva.sdk_surface import process_context
@@ -131,19 +144,21 @@ def agent_process(counter: Path) -> dict[str, Any]:
         MeivaContext(identity=AgentIdentity(agent_id=7, owns_loop=True), environ=os.environ)
     )
     return {
-        "error": _attribute_error(lambda: meiva.nope_xyz),
+        "error": _attribute_error(lambda: _served(attrgetter("nope_xyz"))),
         "executions": _executions(counter),
     }
 
 
-def forwarded_setting(counter: Path) -> dict[str, Any]:
+def forwarded_setting(counter: Path) -> dict[str, object]:
     _as_exec_entry()
-    import meiva
 
-    return {"db_url_is_str": isinstance(meiva.DB_URL, str), "executions": _executions(counter)}
+    return {
+        "db_url_is_str": isinstance(_served(attrgetter("DB_URL")), str),
+        "executions": _executions(counter),
+    }
 
 
-def ensure_twice(counter: Path) -> dict[str, Any]:
+def ensure_twice(counter: Path) -> dict[str, object]:
     import meiva
 
     _bind_home()
@@ -152,7 +167,7 @@ def ensure_twice(counter: Path) -> dict[str, Any]:
     return {"installed": _installed(), "executions": _executions(counter)}
 
 
-def unreadable_plugin_config(counter: Path) -> dict[str, Any]:
+def unreadable_plugin_config(counter: Path) -> dict[str, object]:
     import meiva
     from meiva.sdk_surface import install
 
@@ -166,22 +181,21 @@ def unreadable_plugin_config(counter: Path) -> dict[str, Any]:
     }
 
 
-def unreadable_config_on_lookup(counter: Path) -> dict[str, Any]:
+def unreadable_config_on_lookup(counter: Path) -> dict[str, object]:
     _as_exec_entry()
-    import meiva
 
     return {
         **_repeated_failure(
             [
-                lambda: meiva.missing_after_failure,
-                lambda: meiva.missing_after_failure,
+                lambda: _served(attrgetter("missing_after_failure")),
+                lambda: _served(attrgetter("missing_after_failure")),
             ]
         ),
         "executions": _executions(counter),
     }
 
 
-def faces_failure(counter: Path) -> dict[str, Any]:
+def faces_failure(counter: Path) -> dict[str, object]:
     import meiva
     from base.packages.plugins.enable_config import local_config_path
     from meiva.sdk_surface.installation import installed
@@ -205,7 +219,7 @@ def faces_failure(counter: Path) -> dict[str, Any]:
     }
 
 
-SCENARIOS: dict[str, Callable[[Path], dict[str, Any]]] = {
+SCENARIOS: dict[str, Callable[[Path], dict[str, object]]] = {
     "loads_at_import": loads_at_import,
     "loads_on_first_miss": loads_on_first_miss,
     "latched_after_first_load": latched_after_first_load,
