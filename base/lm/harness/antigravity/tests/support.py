@@ -39,6 +39,9 @@ class ScriptedProbe(ChildProbe):
     def is_alive(self, pid: int) -> bool:
         return pid in self.alive
 
+    def started_at(self, pid: int) -> float | None:
+        return 0.0 if pid in self.alive else None
+
     def kill(self, pid: int, sig: int) -> None:
         self.signals.append((pid, sig))
         if pid in self.immortal:

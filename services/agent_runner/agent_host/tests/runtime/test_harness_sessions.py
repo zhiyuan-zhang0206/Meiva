@@ -202,7 +202,7 @@ async def test_failed_close_keeps_rejecting_joins_without_cancelling_another_age
 
 class ResidueProbe:
     def __init__(self, *alive: int) -> None:
-        self.alive = set(alive)
+        self.started = dict.fromkeys(alive, 1.0)
 
     def descendants(self, pid: int) -> dict[int, str]:
         del pid
@@ -213,23 +213,27 @@ class ResidueProbe:
         return {}
 
     def is_alive(self, pid: int) -> bool:
-        return pid in self.alive
+        return pid in self.started
+
+    def started_at(self, pid: int) -> float | None:
+        return self.started.get(pid)
 
     def kill(self, pid: int, sig: int) -> None:
         del sig
-        self.alive.discard(pid)
+        _ = self.started.pop(pid, None)
 
 
 # meiva:note
 # The defect of task #7074: a close that left a process running fenced the agent for the life of
 # the host, so every later wake crashed on the same stored error until the agent was reaped. The
 # fence guards one thing, a previous CLI that may still hold the transcript; it refuses while a
-# residue pid is alive and admits the next session once none is.
+# residue process is alive and admits the next session once none is; a residue pid that now belongs
+# to a process started later (103 below) counts as exited.
 async def test_a_residue_fence_lifts_once_the_residue_has_exited(
     tmp_path: Path, loguru_records: LogRecords
 ) -> None:
-    probe = ResidueProbe(101, 102)
-    residue = CloseResidueError("codex", 7, (101, 102), probe)
+    probe = ResidueProbe(101, 102, 103)
+    residue = CloseResidueError("codex", 7, {101: 1.0, 102: 1.0, 103: 1.0}, probe)
     engine = ClosingEngine(residue)
     engine.release.set()
     owner = HarnessSessions(
@@ -240,13 +244,14 @@ async def test_a_residue_fence_lifts_once_the_residue_has_exited(
         owner.retire(7, runtime(engine))
         with pytest.raises(HarnessCloseFenceError) as raised:
             await owner.join(7)
-        assert raised.value.running == (101, 102)
+        assert raised.value.running == (101, 102, 103)
         assert raised.value.__cause__ is residue
-        probe.alive.discard(101)
+        del probe.started[101]
+        probe.started[103] = 2.0
         with pytest.raises(HarnessCloseFenceError) as raised:
             await owner.join(7)
         assert raised.value.running == (102,)
-        probe.alive.discard(102)
+        del probe.started[102]
         await owner.join(7)
         assert len(loguru_records.events("harness_close_residue_gone")) == 1
         await owner.join(7)

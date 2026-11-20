@@ -19,6 +19,8 @@ class ChildProbe(Protocol):
 
     def is_alive(self, pid: int) -> bool: ...
 
+    def started_at(self, pid: int) -> float | None: ...
+
     def kill(self, pid: int, sig: int) -> None: ...
 
 
@@ -78,6 +80,15 @@ class PsutilChildProbe:
             return process.is_running() and process.status() != psutil.STATUS_ZOMBIE
         except psutil.Error:
             return False
+
+    # meiva:note
+    # When the process now holding `pid` started, or None when none does. Together with the pid
+    # it names one process: a pid the system handed to a later process answers a different time.
+    def started_at(self, pid: int) -> float | None:
+        try:
+            return psutil.Process(pid).create_time()
+        except psutil.Error:
+            return None
 
     def kill(self, pid: int, sig: int) -> None:
         try:
@@ -234,22 +245,30 @@ def watch_tree(probe: ChildProbe, pid: int | None) -> dict[int, str]:
 # meiva:note
 # A close that left processes running names them, together with the probe that saw them, so whoever
 # fences the next session on that agent can ask again later instead of trusting a snapshot taken at
-# the end of the settle window: the fence holds while one of these pids is alive and lifts once none
-# is (task #7074). A pid the system reused for an unrelated process keeps the fence up; that errs
-# toward refusing a second CLI, never toward admitting one.
+# the end of the settle window: the fence holds while one of these processes is alive and lifts once
+# none is (task #7074). Each is remembered as its pid and start time, so a pid the system has since
+# handed to an unrelated process counts as exited rather than holding the fence up.
 # meiva:link base/lm/harness/docs/harness.md
 class CloseResidueError(RuntimeError):
     def __init__(
-        self, harness: str, agent_id: int | None, remaining: tuple[int, ...], probe: ChildProbe
+        self,
+        harness: str,
+        agent_id: int | None,
+        remaining: Mapping[int, float | None],
+        probe: ChildProbe,
     ) -> None:
         super().__init__(
             f"{harness} session for agent {agent_id} left {len(remaining)} process(es) running"
         )
-        self.remaining = remaining
+        self.remaining = dict(remaining)
         self._probe = probe
 
     def running(self) -> tuple[int, ...]:
-        return tuple(pid for pid in self.remaining if self._probe.is_alive(pid))
+        return tuple(
+            pid
+            for pid, started in self.remaining.items()
+            if self._probe.is_alive(pid) and self._probe.started_at(pid) == started
+        )
 
 
 # meiva:note
@@ -311,4 +330,6 @@ async def settle_close(
         remaining=len(remaining),
         waited_ms=round(waited_ms, 1),
     )
-    raise CloseResidueError(harness, agent_id, tuple(remaining), probe)
+    raise CloseResidueError(
+        harness, agent_id, {pid: probe.started_at(pid) for pid in remaining}, probe
+    )
