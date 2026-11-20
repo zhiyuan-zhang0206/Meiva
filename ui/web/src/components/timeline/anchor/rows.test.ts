@@ -65,6 +65,11 @@ describe("locate", () => {
       .toEqual({ itemId: "s1.cp.2.0", rank: 1 });
   });
 
+  it("names no row by a repeated text without a coordinate to choose by", () => {
+    const rows = [row("4.0", { payload: "continue" }), row("8.0", { payload: "continue" })];
+    expect(locate(identity({ row: { itemId: "3.0", rank: 1 }, content: { kind: "agent_chat", payload: "continue" } }), rows, null)).toBeNull();
+  });
+
   it("then the compact coordinate", () => {
     const rows = [row("s1.cp.2.0"), row("s1.cp.2.1")];
     expect(locate(identity({ coordinate: { rank: 1, msg: 2, block: 1 } }), rows, null)).toEqual({ itemId: "s1.cp.2.1", rank: 1 });

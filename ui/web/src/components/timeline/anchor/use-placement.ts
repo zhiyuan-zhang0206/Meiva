@@ -98,7 +98,14 @@ export function usePlacement({
     dropSessionPlace: () => writeSessionPlace(threadKey, live.current.inputs.reloadRestore, null, 0),
   }), [anchor, threadKey]);
 
+  // meiva:note
+  // The rows a compact announcement saw: once a commit brings others, the re-keyed rows are in view.
+  const rekeyItemsRef = useRef<readonly BackendTimelineItem[] | null>(null);
   useLayoutEffect(() => {
+    if (rekeyItemsRef.current !== null && rekeyItemsRef.current !== items) {
+      rekeyItemsRef.current = null;
+      anchor.rekeySettled();
+    }
     machine.step(current(), effects);
   });
 
@@ -124,6 +131,7 @@ export function usePlacement({
     if (now?.kind !== "row") return;
     const shifted = shiftForCompact(identify(now.row, change.items, change.buffer), change.rankShift);
     identityRef.current = shifted;
+    rekeyItemsRef.current = live.current.inputs.items;
     anchor.rekey(shifted.row);
   }), [anchor]);
 

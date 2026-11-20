@@ -64,7 +64,10 @@ export function locate(identity: RowIdentity, canonical: readonly BackendTimelin
   const content = identity.content;
   if (content && content.payload.length > 0) {
     const same = rows.filter((candidate) => candidate.item.kind === content.kind && candidate.item.payload === content.payload);
-    if (same.length > 0) return as(same.reduce((best, candidate) => (distance(candidate) < distance(best) ? candidate : best)));
+    // meiva:note
+    // A repeated text ("continue") names its row only with a coordinate to choose by.
+    if (same.length === 1) return as(same[0]);
+    if (same.length > 1 && coordinate) return as(same.reduce((best, candidate) => (distance(candidate) < distance(best) ? candidate : best)));
   }
   if (coordinate) {
     const byCoordinate = rows.find((candidate) => candidate.coordinate !== null &&

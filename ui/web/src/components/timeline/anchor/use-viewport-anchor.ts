@@ -78,8 +78,10 @@ export interface ViewportAnchor {
   // The reader follows the tail or stands inside its bottom zone (a short conversation always does).
   atTail: () => boolean;
   // meiva:note
-  // Rename the anchor row in place (a compact re-ranks it) without moving the viewport.
+  // Rename the anchor row in place (a compact re-ranks it) without moving the viewport. Until the
+  // view commits the re-keyed rows (rekeySettled), a row that cannot be found is not reported lost.
   rekey: (row: RowRef) => void;
+  rekeySettled: () => void;
 }
 
 export function useViewportAnchor({
@@ -97,6 +99,7 @@ export function useViewportAnchor({
   // The reader is in rows that are not mounted (a scrollbar or Home jump into a virtual spacer):
   // nothing is written until rows mount there and the place can be read.
   const freeRef = useRef(false);
+  const rekeyPendingRef = useRef(false);
   const towardEndRef = useRef(true);
   const latest = useRef({ thresholds, onChange, onUnresolved, pinnedHead, onFree, onRideEnd });
   useLayoutEffect(() => {
@@ -214,7 +217,7 @@ export function useViewportAnchor({
     } else {
       const hit = findRowNode(vp, anchor.row);
       if (!hit) {
-        latest.current.onUnresolved(anchor.row);
+        if (!rekeyPendingRef.current) latest.current.onUnresolved(anchor.row);
         refreshEnd(vp);
         return;
       }
@@ -435,8 +438,11 @@ export function useViewportAnchor({
   const riding = useCallback(() => rideRef.current !== null, []);
   const rekey = useCallback((row: RowRef) => {
     const current = anchorRef.current;
-    if (current?.kind === "row") anchorRef.current = { kind: "row", row, offset: current.offset };
+    if (current?.kind !== "row") return;
+    anchorRef.current = { kind: "row", row, offset: current.offset };
+    rekeyPendingRef.current = true;
   }, []);
+  const rekeySettled = useCallback(() => { rekeyPendingRef.current = false; }, []);
   const atTail = useCallback(() => {
     if (anchorRef.current?.kind === "tail") return true;
     const vp = viewport();
@@ -445,7 +451,7 @@ export function useViewportAnchor({
     return distance >= -0.5 && distance <= bottomZone(vp.clientHeight, latest.current.thresholds);
   }, [naturalEnd, viewport]);
   const controls = useMemo<ViewportAnchor>(() => ({
-    viewport, current, place, apply, armSendReserve, sendReserveArmed, holdReserve, releaseTail, placeScrollTop, reserveHeight, riding, atTail, rekey,
-  }), [apply, armSendReserve, atTail, current, holdReserve, place, placeScrollTop, rekey, releaseTail, reserveHeight, riding, sendReserveArmed, viewport]);
+    viewport, current, place, apply, armSendReserve, sendReserveArmed, holdReserve, releaseTail, placeScrollTop, reserveHeight, riding, atTail, rekey, rekeySettled,
+  }), [apply, armSendReserve, atTail, current, holdReserve, place, placeScrollTop, rekey, rekeySettled, releaseTail, reserveHeight, riding, sendReserveArmed, viewport]);
   return { controls, atEnd };
 }
