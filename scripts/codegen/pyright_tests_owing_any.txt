@@ -9,7 +9,6 @@
 # line that either side of a local merge still holds.
 agent/extensions/tests
 agent/graph/claim/tests
-agent/graph/hooks/tests
 agent/graph/node_log/tests
 agent/graph/tests
 agent/tests

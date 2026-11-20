@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 from datetime import UTC, datetime
-from typing import Any
 
 import pytest
 from langchain_core.messages import AnyMessage, HumanMessage, SystemMessage
@@ -74,7 +73,7 @@ def test_a_raised_force_threshold_is_what_keeps_a_long_conversation_going() -> N
 
 
 def test_an_agent_reminder_threshold_below_the_conversation_injects_the_reminder() -> None:
-    update: dict[str, Any] | None = compact_reminder_update(
+    update = compact_reminder_update(
         _state(),
         _agent(compact_reminder_fraction=_TINY_FRACTION),
         catalog=build_model_catalog(home=meiva_home()),
@@ -84,5 +83,6 @@ def test_an_agent_reminder_threshold_below_the_conversation_injects_the_reminder
         inputs=TimestampPolicy.off(),
     )
     assert update is not None
-    compact: CompactState = update["compact"]
+    compact = update["compact"]
+    assert isinstance(compact, CompactState)
     assert compact.reminder_shown

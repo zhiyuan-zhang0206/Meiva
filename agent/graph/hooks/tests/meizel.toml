@@ -1,5 +1,6 @@
-exports = ["cancel_fixture.py", "scripted_model.py"]
+exports = ["cancel_fixture.py", "hook_test_support.py", "scripted_model.py"]
 
 [uses]
 "test_compact_fail_fast.py" = ["scripted_model.py"]
 "test_compact_fast_usage.py" = ["scripted_model.py"]
+"test_skill_recall_hook.py" = ["hook_test_support.py"]

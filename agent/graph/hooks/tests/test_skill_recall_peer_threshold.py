@@ -7,8 +7,9 @@
 
 from __future__ import annotations
 
-import json
 from pathlib import Path
+
+from pydantic import TypeAdapter
 
 from base.config import settings
 
@@ -16,10 +17,9 @@ from base.config import settings
 # The replay rows: one per peer message, the top skill's probability and whether the message
 # asked the recipient to do work.
 ROWS: tuple[tuple[float, int], ...] = tuple(
-    (score, work)
-    for score, work in json.loads(Path(__file__).with_name("peer_recall_replay.json").read_text())[
-        "rows"
-    ]
+    TypeAdapter(dict[str, list[tuple[float, int]]]).validate_json(
+        Path(__file__).with_name("peer_recall_replay.json").read_text()
+    )["rows"]
 )
 
 

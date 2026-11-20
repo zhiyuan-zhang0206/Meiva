@@ -1,8 +1,9 @@
 from datetime import UTC, datetime
-from typing import Any, cast
+from typing import cast
 
 import pytest
-from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
+from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, SystemMessage
+from langchain_core.runnables import RunnableConfig
 from langgraph.runtime import Runtime
 
 from agent.graph.hooks.compact import (
@@ -16,7 +17,8 @@ from agent.state import AgentState, CompactState
 from base.agents.context import MeivaContext
 from base.clock import Clock
 from base.config.tests.configuration import defaults
-from base.host.boundary.json_values import is_object_list
+from base.host.boundary.json_values import is_object_dict, is_object_list
+from base.host.boundary.untyped import object_of
 from base.host.env.agent_slices import AgentSlices
 from base.lm.catalog import ModelCatalog
 from base.log.tests.log_records import LogRecords
@@ -113,7 +115,13 @@ async def test_contributors_do_not_run_below_soft_or_above_hard() -> None:
 
 
 class _PeerReminder(Hook):
-    async def __call__(self, state: Any, runtime: Any, config: Any, /) -> dict[str, Any]:
+    async def __call__(
+        self,
+        state: AgentState,
+        runtime: Runtime[MeivaContext],
+        config: RunnableConfig,
+        /,
+    ) -> dict[str, object] | None:
         return {"messages": [HumanMessage(content="Reply to the peer when needed.")]}
 
 
@@ -147,11 +155,19 @@ async def test_soft_reminder_composes_with_another_message_writer(compact_first:
         ]
     )
     command = await runner(state, _runtime(), {})
-    update = cast(dict[str, Any], command.update)
+    update = object_of(getattr, command, "update")
+    assert is_object_dict(update)
     assert command.goto == "llm"
-    assert len(update["messages"]) == 2
-    assert update["compact"].reminder_shown
-    assert any("meiva.self.compact(summary)" in m.content for m in update["messages"])
+    messages = update["messages"]
+    assert is_object_list(messages)
+    assert len(messages) == 2
+    compact = update["compact"]
+    assert isinstance(compact, CompactState)
+    assert compact.reminder_shown
+    assert any(
+        isinstance(m, BaseMessage) and "meiva.self.compact(summary)" in str(m.content)
+        for m in messages
+    )
 
 
 @pytest.mark.parametrize(
@@ -168,13 +184,9 @@ def test_completion_attributes_only_the_current_windows_reminder(
         compact_kind="compact_summary",
         compact=CompactState(version=version, reminder_shown=shown, reminder_seen_version=seen),
     )
-    events = [
-        record
-        for record in loguru_records
-        if record["extra"].get("event") == "compaction_completed"
-    ]
+    events = loguru_records.extras(event="compaction_completed")
     assert events
-    assert events[-1]["extra"]["reminder_shown"] is expected
+    assert events[-1]["reminder_shown"] is expected
 
 
 @pytest.mark.parametrize("kind", ["compact_summary", "compact_request"])

@@ -9,6 +9,7 @@ from agent.graph.hooks import compact
 from agent.state import AgentState
 from agent.state_channels import CompactState
 from base.clock import SYSTEM_TIMERS
+from base.host.boundary.untyped import object_sequence
 from base.log.tests.log_records import LogRecords
 
 _AGENT = 9
@@ -48,7 +49,9 @@ async def _stamped(pool: AsyncConnectionPool, checkpoint_id: str) -> bool:
         )
         row = await cur.fetchone()
     assert row is not None
-    return bool(row[0])
+    stamped = object_sequence(row)[0]
+    assert isinstance(stamped, bool)
+    return stamped
 
 
 async def test_stamp_enqueues_the_closing_chunk_against_the_stamped_checkpoint(
