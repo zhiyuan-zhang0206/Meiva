@@ -39,6 +39,8 @@ from agent.state import (
 )
 from base.agents.context.external_attachment import plugin_state_codec
 from base.agents.history.checkpoint_serializer import PreSplitCheckpointEnvelopeError
+from base.host.boundary.json_values import is_object_list
+from base.host.boundary.untyped import object_of
 
 _SERDE_LOGGER = "langgraph.checkpoint.serde.jsonplus"
 
@@ -73,7 +75,7 @@ def _warning_messages(caplog: pytest.LogCaptureFixture) -> list[str]:
 def test_allowlist_round_trip_is_silent(state: object, caplog: pytest.LogCaptureFixture) -> None:
     serde = _allowlist_serde()
     with caplog.at_level(logging.WARNING, logger=_SERDE_LOGGER):
-        restored = serde.loads_typed(serde.dumps_typed(state))
+        restored = object_of(serde.loads_typed, serde.dumps_typed(state))
     assert type(restored) is type(state)
     assert restored == state
     assert _warning_messages(caplog) == []
@@ -216,7 +218,7 @@ def test_allowlist_blocks_unregistered_type_to_dict(caplog: pytest.LogCaptureFix
 
     serde = _allowlist_serde()
     with caplog.at_level(logging.WARNING, logger=_SERDE_LOGGER):
-        restored = serde.loads_typed(serde.dumps_typed(UnknownState(x=5)))
+        restored = object_of(serde.loads_typed, serde.dumps_typed(UnknownState(x=5)))
     # blocked → the raw kwargs dict, plus a "Blocked deserialization" warning
     assert restored == {"x": 5}
     assert any("Blocked deserialization" in m for m in _warning_messages(caplog))
@@ -272,10 +274,12 @@ def test_build_checkpoint_serde_and_attachment_codec_skip_retired_native_work_ta
 def test_allowlist_keeps_set_and_messages(caplog: pytest.LogCaptureFixture) -> None:
     serde = _allowlist_serde()
     with caplog.at_level(logging.WARNING, logger=_SERDE_LOGGER):
-        restored_set = serde.loads_typed(serde.dumps_typed({"a", "b"}))
-        restored_msgs = serde.loads_typed(
-            serde.dumps_typed([HumanMessage(content="hi"), AIMessage(content="yo")])
+        restored_set = object_of(serde.loads_typed, serde.dumps_typed({"a", "b"}))
+        restored_msgs = object_of(
+            serde.loads_typed,
+            serde.dumps_typed([HumanMessage(content="hi"), AIMessage(content="yo")]),
         )
     assert restored_set == {"a", "b"}
+    assert is_object_list(restored_msgs)
     assert [type(m) for m in restored_msgs] == [HumanMessage, AIMessage]
     assert _warning_messages(caplog) == []
