@@ -58,7 +58,6 @@ export function SharedContextPanel({ agentId, document, mobile, onClose, onColla
         </button>
         <button
           type="button"
-          title={tInspector(inspecting ? "closeInspector" : "openInspector")}
           aria-label={tInspector(inspecting ? "closeInspector" : "openInspector")}
           aria-pressed={inspecting}
           onClick={toggleInspection}

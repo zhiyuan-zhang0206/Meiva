@@ -209,9 +209,7 @@ export function StatusCards({
             {t("statusPanel")}
           </span>
           {fetching ? (
-            <span title={t("statusPanelUpdating")}>
-              <Spinner className="size-3" label={t("statusPanelUpdating")} />
-            </span>
+            <Spinner className="size-3" label={t("statusPanelUpdating")} />
           ) : null}
           {failedWithoutData ? (
             <button
@@ -450,7 +448,6 @@ export function SidebarFooter({ activeAgentId }: { activeAgentId: number | null 
             href="/control"
             prefetch={true}
             aria-label={navT("control")}
-            title={navT("control")}
             className={SIDEBAR_ICON_CLASS}
             onNavigate={() => markNavIntent(browser.navigation, "/control")}
           >
@@ -480,7 +477,6 @@ function SidebarNavButton({
   return (
     <SidebarIconButton
       label={label}
-      title={label}
       onClick={() => {
         markNavIntent(browser.navigation, href);
         onClick();

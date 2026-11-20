@@ -32,7 +32,6 @@ export function PluginNavIcons({ location }: { location: NavLocation }) {
             key={`${entry.plugin}/${entry.page}`}
             href={pluginPageRoute(entry.plugin, entry.page)}
             aria-label={`${entry.label} (${entry.plugin})`}
-            title={`${entry.label} (${entry.plugin})`}
             className="rounded p-1.5 text-muted-foreground transition-colors hover:bg-sidebar-accent hover:text-foreground"
           >
             <Icon className="size-4" />

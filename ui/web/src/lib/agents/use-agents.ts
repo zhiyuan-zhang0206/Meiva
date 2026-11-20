@@ -7,7 +7,7 @@ import { useCallback, useEffect, useRef } from "react";
 
 import type { BrowserStorage } from "../browser/browser";
 import { useBrowser } from "../browser/browser-provider";
-import { FILE_PARAM, LEGACY_PARAM } from "../context/reference-url";
+import { FILE_PARAM, LEGACY_PARAM, withoutView } from "../context/reference-url";
 import { errMsg } from "../contracts/errors";
 import type { AgentRoster } from "../contracts/types";
 import { AGENT_DETAIL_QUERY_KEY, AGENTS_QUERY_KEY } from "../fold/agents";
@@ -114,6 +114,7 @@ export function useAgents(showError: (msg: string) => void) {
       else url.searchParams.set("agent_id", selected);
       url.searchParams.delete(FILE_PARAM);
       url.searchParams.delete(LEGACY_PARAM);
+      withoutView(url);
     }
     const push = !traversal.current && previous != null && id != null && previous !== id;
     traversal.current = false;

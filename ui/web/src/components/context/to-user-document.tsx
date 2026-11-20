@@ -14,7 +14,7 @@ import { ZoomableImage } from "@/components/content/zoomable-image";
 import type { BrowserNavigation } from "@/lib/browser/browser";
 import { useBrowser } from "@/lib/browser/browser-provider";
 import type { ToUserDocument } from "@/lib/contracts/types";
-import { fileQuery, readFiles, withFiles } from "@/lib/context/reference-url";
+import { fileQuery, PUSHED_ENTRY, readFiles, withFiles } from "@/lib/context/reference-url";
 import { useToUser } from "@/lib/context/use-to-user";
 import { cn } from "@/lib/format/utils";
 import { useWallDate } from "@/lib/format/now/use-wall-date";
@@ -22,7 +22,6 @@ import { formatRelative } from "@/lib/format/time";
 import { COLUMN_TITLE_BAR_WRAP_CLASS, FLEX, FLEX_1, FLEX_COL, MIN_H_0 } from "@/lib/layout/layout";
 import { API_BASE } from "@/lib/transport/api-base";
 
-const PUSHED_ENTRY = "meivaToUserEntry";
 
 function asRecord(state: unknown): object {
   return typeof state === "object" && state !== null ? state : {};
@@ -150,10 +149,10 @@ export function ToUserDocumentView({ agentId, document, failure, pending, refres
       <div data-testid="document-bar" className={cn("shrink-0 flex-wrap items-center gap-x-2 gap-y-1 px-3 py-1 text-[11px] text-muted-foreground", COLUMN_TITLE_BAR_WRAP_CLASS, FLEX)}>
         {inspecting ? null : (
           <>
-            <button title={t("home")} aria-label={t("home")} className="rounded p-1 hover:bg-accent" onClick={() => { if (files.length) show([], "push"); }}>
+            <button aria-label={t("home")} className="rounded p-1 hover:bg-accent" onClick={() => { if (files.length) show([], "push"); }}>
               <House className="size-3.5" />
             </button>
-            {files.length > 0 && <button title={t("back")} aria-label={t("back")} className="rounded p-1 hover:bg-accent" onClick={goBack}>
+            {files.length > 0 && <button aria-label={t("back")} className="rounded p-1 hover:bg-accent" onClick={goBack}>
               <ArrowLeft className="size-3.5" />
             </button>}
           </>
@@ -162,7 +161,7 @@ export function ToUserDocumentView({ agentId, document, failure, pending, refres
         {inspecting ? null : (
           <div data-testid="document-status" className={cn("shrink-0 items-center gap-1.5", FLEX)}>
             {current?.modified_at && <span className="whitespace-nowrap">{t("updated", { time: formatRelative(current.modified_at, now) })}</span>}
-            <button title={t("refresh")} aria-label={t("refresh")} onClick={() => { if (files.length) void linked.refetch(); else refresh(); }} disabled={loading} className="rounded p-1 hover:bg-accent disabled:opacity-50">
+            <button aria-label={t("refresh")} onClick={() => { if (files.length) void linked.refetch(); else refresh(); }} disabled={loading} className="rounded p-1 hover:bg-accent disabled:opacity-50">
               <RefreshCw className="size-3.5" />
             </button>
           </div>
@@ -172,7 +171,6 @@ export function ToUserDocumentView({ agentId, document, failure, pending, refres
             <button
               type="button"
               data-testid="open-inspector"
-              title={inspecting ? tInspector("closeInspector") : tInspector("openInspector")}
               aria-label={inspecting ? tInspector("closeInspector") : tInspector("openInspector")}
               aria-pressed={inspecting}
               onClick={onInspect}
@@ -185,7 +183,6 @@ export function ToUserDocumentView({ agentId, document, failure, pending, refres
             <button
               type="button"
               data-testid="context-panel-collapse"
-              title={t("hideContextPanel")}
               aria-label={t("hideContextPanel")}
               onClick={onCollapse}
               className="rounded p-1 hover:bg-accent"

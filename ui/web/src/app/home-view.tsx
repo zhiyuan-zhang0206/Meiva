@@ -27,6 +27,7 @@ import type { useAgents } from "@/lib/agents/use-agents";
 import type { useSidebarCollapsed } from "@/lib/agents/sidebar";
 import { useReplySuggestion } from "@/lib/composer/use-reply-suggestion";
 import { useToUser } from "@/lib/context/use-to-user";
+import { useWorkspaceFileHistory } from "@/lib/context/workspace-file-history";
 import { useWorkspaceFileStore } from "@/lib/context/workspace-file-store";
 import type { AgentRow, DeliveredUploadStatus, UserMessage } from "@/lib/contracts/types";
 import { errMsg } from "@/lib/contracts/errors";
@@ -189,6 +190,7 @@ export function HomePageView(props: HomePageProps) {
   // is closed still shows it, because otherwise the mode would be on with
   // nothing to inspect. On mobile the inspector keeps its own sheet.
   // meiva:link ui/web/src/docs/frontend-state/shared-context/shared-context.md
+  useWorkspaceFileHistory(activeId);
   const activeWorkspaceFile = useWorkspaceFileStore((s) => s.activeFile);
   const showContext = isLarge
     ? activeId != null && (contextPanel.open || inspector.open || activeWorkspaceFile != null)

@@ -98,7 +98,7 @@ export function WorkspaceFileView({
   const t = useTranslations("toUser");
   const tInspector = useTranslations("inspector");
   const client = useApi();
-  const { history, closeFile, goBack, openFile } = useWorkspaceFileStore();
+  const { home, goBack, openFile } = useWorkspaceFileStore();
 
   const { ownerAgentId, requestPath } = useMemo(
     () => resolveWorkspaceFile(target.path, agentId),
@@ -147,16 +147,14 @@ export function WorkspaceFileView({
         )}
       >
         <button
-          title="Return to to_user.md"
           aria-label="Return to to_user.md"
           className="rounded p-1 hover:bg-accent"
-          onClick={closeFile}
+          onClick={home}
         >
           <House className="size-3.5" />
         </button>
         <button
-          title={history.length > 0 ? "Back" : "Return to to_user.md"}
-          aria-label={history.length > 0 ? "Back" : "Return to to_user.md"}
+          aria-label="Back"
           className="rounded p-1 hover:bg-accent"
           onClick={goBack}
         >
@@ -194,7 +192,6 @@ export function WorkspaceFileView({
             {!isLoading ? (
               <button
                 type="button"
-                title={t("refresh")}
                 aria-label={t("refresh")}
                 onClick={() => void refetch()}
                 disabled={isFetching}
@@ -211,7 +208,6 @@ export function WorkspaceFileView({
             <button
               type="button"
               data-testid="open-inspector"
-              title={inspecting ? tInspector("closeInspector") : tInspector("openInspector")}
               aria-label={inspecting ? tInspector("closeInspector") : tInspector("openInspector")}
               aria-pressed={inspecting}
               onClick={onInspect}
@@ -224,7 +220,6 @@ export function WorkspaceFileView({
             <button
               type="button"
               data-testid="context-panel-collapse"
-              title={t("hideContextPanel")}
               aria-label={t("hideContextPanel")}
               onClick={onCollapse}
               className="rounded p-1 hover:bg-accent"

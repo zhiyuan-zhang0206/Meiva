@@ -239,9 +239,11 @@ describe("WorkspaceFileView", () => {
       { wrapper: TestWrapper },
     );
 
-    const homeBtn = screen.getByTitle("Return to to_user.md");
+    const homeBtn = screen.getByRole("button", { name: "Return to to_user.md" });
+    expect(homeBtn.getAttribute("title")).toBeNull();
     fireEvent.click(homeBtn);
     expect(useWorkspaceFileStore.getState().activeFile).toBeNull();
+    expect(screen.getByRole("button", { name: "Back" })).toBeTruthy();
   });
 
   it("routes explicit cross-agent workspace paths to the owning agent for content and raw media", async () => {

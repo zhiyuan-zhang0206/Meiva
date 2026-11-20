@@ -1,6 +1,6 @@
 "use client";
 
-import { FileText } from "lucide-react";
+import { PanelRight } from "lucide-react";
 import { useTranslations } from "next-intl";
 
 import { ICON_SIZE_CLASS } from "@/lib/layout/layout";
@@ -8,9 +8,8 @@ import { ICON_SIZE_CLASS } from "@/lib/layout/layout";
 const pressedClass = "p-1 rounded shrink-0 hover:bg-sidebar-accent";
 
 // meiva:note
-// The right region is a panel of the main area, not a sidebar: only the agent tree
-// is chrome. Its button is the document glyph, because that is what the panel
-// shows (the active agent's to-user document + inspector), not a collapsing rail.
+// The collapsed right panel reopens from the same right-panel glyph its own header
+// uses to close it, mirroring the left sidebar's PanelLeft (user ruling 2026-11-20).
 // meiva:link ui/web/src/docs/frontend-components/home-shell-chrome/home-shell-chrome.md
 export function ContextPanelToggle({ open, onToggle }: { open: boolean; onToggle: () => void }) {
   const t = useTranslations("sidebar");
@@ -23,7 +22,7 @@ export function ContextPanelToggle({ open, onToggle }: { open: boolean; onToggle
       data-testid="context-panel-toggle"
       className={`${pressedClass} ${open ? "text-foreground" : "text-muted-foreground"}`}
     >
-      <FileText className={ICON_SIZE_CLASS} />
+      <PanelRight className={ICON_SIZE_CLASS} />
     </button>
   );
 }

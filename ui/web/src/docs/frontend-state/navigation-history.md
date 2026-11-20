@@ -26,3 +26,18 @@ entry in place and must not leave a duplicate behind it. External links keep ope
 non-Markdown resources keep their own document.
 
 The panel's document chain lives in the URL as `?agent_id=…&file=…`: opening a linked document pushes a history entry, a popstate traversal restores the chain it selects, and the panel's Back control calls `history.back()` for entries it pushed while a chain without history rewrites its own entry instead of leaving the app. Selecting another agent drops the previous chain.
+
+A workspace file open in the viewer is in the URL too (user ruling 2026-11-20), after the chain it
+was opened from: `&view=<path>&view_agent=<owner>&lines=<range>`.
+
+- **Opening.** Opening a file, from the panel, a conversation message or a link inside another file,
+  pushes an entry. Only a new line range in the same file replaces the entry.
+- **Browser Back and Forward.** These move between viewed files and back to the document.
+- **Panel controls.** The panel's Back is the browser's Back for entries it pushed. Its Home pushes
+  an entry without the file.
+- **Closing the panel.** Closing drops the file from the current entry.
+- **Opening a link.** A reloaded or shared address opens the same file.
+- **Switching agents.** Selecting another agent drops the file, as it drops the chain.
+
+`useWorkspaceFileHistory` (mounted once by the home view) is the binding between the viewer's store
+and the page history.

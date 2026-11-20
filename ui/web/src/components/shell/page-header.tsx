@@ -32,7 +32,6 @@ export function PageHeader({
         href={backHref}
         className="shrink-0 rounded p-1 text-muted-foreground hover:bg-sidebar-accent hover:text-foreground"
         aria-label={backLabel}
-        title={backLabel}
       >
         <ArrowLeft className="size-5" aria-hidden />
       </Link>

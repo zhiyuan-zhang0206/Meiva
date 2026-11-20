@@ -65,6 +65,8 @@ document, 1024 local references and 16 linked-document hops by default. The
 response that serves those files returns HTML as an attachment under the passive
 CSP without script permission. The workspace viewer renders only Markdown, images
 and videos; HTML and HTM open as source code, and other binary files offer download.
+Each file the viewer opens is a browser history entry, so Back and Forward move
+between viewed files ([panel navigation history](../navigation-history.md)).
 Normal Markdown links are directly clickable in conversation messages and `to_user.md`;
 explicit `.meiva/workspaces/<id>/...` references keep the viewer attached to the
 active conversation's panel while routing content/raw reads and nested relative

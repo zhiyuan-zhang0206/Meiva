@@ -42,7 +42,6 @@ export function RunTimelineAxis({
           <button
             type="button"
             aria-label={t("zoomIn")}
-            title={t("zoomIn")}
             onClick={() => zoomButton(BUTTON_ZOOM)}
             className={cn(buttonVariants({ size: "sm", variant: "ghost" }), "h-5 px-1.5 text-xs")}
           >
@@ -51,7 +50,6 @@ export function RunTimelineAxis({
           <button
             type="button"
             aria-label={t("zoomOut")}
-            title={t("zoomOut")}
             onClick={() => zoomButton(1 / BUTTON_ZOOM)}
             className={cn(buttonVariants({ size: "sm", variant: "ghost" }), "h-5 px-1.5 text-xs")}
           >
@@ -60,7 +58,6 @@ export function RunTimelineAxis({
           <button
             type="button"
             aria-label={t("zoomReset")}
-            title={t("zoomReset")}
             disabled={atBase}
             onClick={() => onView(base)}
             className={cn(buttonVariants({ size: "sm", variant: "ghost" }), "h-5 px-1.5 text-xs")}

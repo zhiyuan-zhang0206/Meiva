@@ -53,7 +53,6 @@ export function RunTimelineLegend({
                 type="button"
                 aria-pressed={on}
                 data-testid={`run-timeline-legend-${kind}`}
-                title={t("legendToggle", { kind: classLabel[kind] })}
                 onClick={() => onHighlight(on ? null : { cls: kind, source: null })}
                 className={cn(
                   FLEX,
@@ -85,7 +84,6 @@ export function RunTimelineLegend({
                 type="button"
                 aria-pressed={on}
                 data-testid={`run-timeline-link-legend-${kind}`}
-                title={t("linkLegendToggle", { kind: linkLabels[kind] })}
                 onClick={() => onToggleLinkKind(kind)}
                 className={cn(FLEX, "items-center gap-1 rounded px-1.5 py-0.5 hover:bg-muted hover:text-foreground", !on && "opacity-50")}
               >
