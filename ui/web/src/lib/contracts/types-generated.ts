@@ -3025,6 +3025,11 @@ export interface components {
             content_hash: string;
         };
         FeedbackOutcome: "accepted" | "edited" | "rejected";
+        FileRoot: {
+            kind: "workspace" | "home" | "machine";
+            path: string;
+            agent_id: number | null;
+        };
         FleetGraphEdge: {
             from_agent: number;
             to_agent: number;
@@ -4346,12 +4351,14 @@ export interface components {
         };
         WorkspaceDirListing: {
             path: string;
+            root: components["schemas"]["FileRoot"];
             parent: string | null;
             entries: components["schemas"]["WorkspaceDirEntry"][];
             truncated: boolean;
         };
         WorkspaceFileResponse: {
             path: string;
+            root: components["schemas"]["FileRoot"];
             name: string;
             extension: string;
             content: string;

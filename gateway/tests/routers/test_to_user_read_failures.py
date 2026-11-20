@@ -6,6 +6,7 @@
 
 import json
 from collections.abc import Iterator
+from dataclasses import replace
 from pathlib import Path
 
 import psycopg
@@ -13,7 +14,7 @@ import pytest
 
 from base.db import create_agent
 from base.paths import workspace_path
-from gateway.tests.auth.gateway_config import GatewayTestClient, gateway_test_client
+from gateway.tests.auth.gateway_config import GatewayTestClient, gateway_test_client, reconfigure
 from gateway.tests.support.runner_ops.workspace_ops import (
     register_runner,
     remote_workspace_ops_server,
@@ -241,9 +242,17 @@ def test_get_workspace_file_in_custom_cwd(
     assert resp_ws.json()["content"] == "in workspace"
 
 
+# meiva:note
+# The `workspaces` reach: agent workspaces and the agent's cwd, nothing else.
+def _workspaces_only(client: GatewayTestClient) -> None:
+    to_user = client.app.state.gateway_config.to_user
+    _ = reconfigure(client, to_user=replace(to_user, file_access="workspaces"))
+
+
 def test_get_workspace_file_traversal_forbidden(
     client: GatewayTestClient, db_conn: psycopg.Connection
 ) -> None:
+    _workspaces_only(client)
     agent = _home_machine_agent(db_conn, "macmini")
     ws = Path(workspace_path(client.app.state.gateway_process.home, agent))
     ws.mkdir(parents=True, exist_ok=True)
@@ -315,7 +324,9 @@ def test_cross_agent_workspace_file_routes_same_machine_and_remote_machine(
     _ = (ws_remote / "deliver" / "remote.md").write_text("# Remote peer report\n", encoding="utf-8")
     _ = (ws_remote / "deliver" / "user-positions-before-after.png").write_bytes(png_bytes)
 
-    with remote_workspace_ops_server(remote_home, remote_owner) as remote_ops_url:
+    with remote_workspace_ops_server(
+        remote_home, remote_owner, user_home=tmp_path / "company-mini-account"
+    ) as remote_ops_url:
         register_runner(db_conn, "company-mini", remote_ops_url)
 
         remote_content = client.get(
@@ -337,6 +348,7 @@ def test_cross_agent_workspace_file_routes_same_machine_and_remote_machine(
 def test_cross_agent_traversal_and_system_paths_return_403(
     client: GatewayTestClient, db_conn: psycopg.Connection
 ) -> None:
+    _workspaces_only(client)
     agent_a = _home_machine_agent(db_conn, "macmini")
     agent_b = _home_machine_agent(db_conn, "macmini")
     Path(workspace_path(client.app.state.gateway_process.home, agent_a)).mkdir(

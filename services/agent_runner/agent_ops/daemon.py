@@ -613,6 +613,7 @@ async def serve_ops_daemon(
                     pool=pool,
                     machine=our_machine,
                     home=home,
+                    user_home=Path.home(),
                     limits=to_user_limits_from_read_model(authority),
                     executor=executor,
                     dispatch_sem=dispatch_sem,

@@ -1,9 +1,9 @@
 # meiva:note
 # Another machine's ops listener for the workspace reads the gateway forwards. It answers
 # `POST /to-user/workspace-file` for one agent with `ops.to_user.answer_workspace_file` (the same
-# answer the runner's route sends) over a real HTTP round trip, from a home that is not the
-# gateway's, so a test sees what crossed the wire: the forwarded body, the status, the
-# `Content-Range`. A request for any other agent answers 404, so a read routed to the wrong
+# answer the runner's route sends) over a real HTTP round trip, from a Meiva home and an account
+# home that are not the gateway's, so a test sees what crossed the wire: the forwarded body, the
+# status, the `Content-Range`, the root a path bar starts from. A request for any other agent answers 404, so a read routed to the wrong
 # machine fails loudly.
 
 import threading
@@ -21,7 +21,9 @@ from ops.to_user import WorkspaceFileError, answer_workspace_file
 
 
 @contextmanager
-def remote_workspace_ops_server(remote_home: Path, expected_agent_id: int) -> Generator[str]:
+def remote_workspace_ops_server(
+    remote_home: Path, expected_agent_id: int, *, user_home: Path
+) -> Generator[str]:
     limits = to_user_limits(settings.to_user)
 
     class _Handler(BaseHTTPRequestHandler):
@@ -38,7 +40,9 @@ def remote_workspace_ops_server(remote_home: Path, expected_agent_id: int) -> Ge
                 _ = self.wfile.write(b"Wrong agent routed to remote machine")
                 return
             try:
-                answer = answer_workspace_file(req, home=remote_home, limits=limits)
+                answer = answer_workspace_file(
+                    req, home=remote_home, user_home=user_home, limits=limits
+                )
             except WorkspaceFileError as exc:
                 self.send_response(exc.status_code)
                 self.send_header("Content-Type", "text/plain")

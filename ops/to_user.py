@@ -2,6 +2,7 @@ import contextlib
 import itertools
 import mimetypes
 import os
+import posixpath
 import re
 from dataclasses import dataclass
 from datetime import UTC, datetime
@@ -13,6 +14,7 @@ from psycopg_pool import ConnectionPool
 from pydantic import BaseModel
 
 from base.agents.to_user import (
+    FileRoot,
     ToUserDocument,
     ToUserLimits,
     WorkspaceDirEntry,
@@ -22,6 +24,7 @@ from base.agents.to_user import (
     read_document,
     read_failure,
 )
+from base.config.domains.to_user import FileAccess
 from base.daemon.http_transport import RouteAnswer
 from base.paths import WORKSPACES_DIR_NAME, workspace_path, workspaces_path
 
@@ -254,29 +257,105 @@ def resolve_workspace_file_path(
     return _resolve_relative_path(clean, allowed_roots, primary_dir, allow_root=allow_root)
 
 
+# meiva:note
+# What one read may reach on the machine that owns the path: its Meiva home (agent workspaces
+# live under it), the account home (`~` and the `home` root), and the gateway's `file_access`.
+@dataclass(frozen=True)
+class FileReach:
+    home: Path
+    user_home: Path
+    access: FileAccess
+
+
+# meiva:note
+# `..` in an absolute path is resolved by its text before a workspace name is read from it, so in
+# `all` reach a path that leaves one workspace names wherever it lands, not the workspace it left.
+def lexical_path(clean: str) -> str:
+    return posixpath.normpath(clean) if clean.startswith("/") else clean
+
+
+# meiva:note
+# Any path in `all` reach: an explicit workspace path lands in that workspace on this machine,
+# `~` in the account home, an absolute path where it names, and a relative one under the agent's
+# working directory or else its workspace, as a workspace read resolves it.
+def _reach_any(reach: FileReach, agent_id: int, raw_path: str, custom_cwd: str | None) -> Path:
+    clean = lexical_path(clean_file_path(raw_path or "."))
+    explicit = parse_explicit_workspace_path(clean, home=reach.home, allow_root=True)
+    if explicit is not None:
+        return (workspace_path(reach.home, explicit[0]) / explicit[1]).resolve()
+    if clean == "~" or clean.startswith("~/"):
+        return (reach.user_home / clean[2:]).resolve()
+    if clean.startswith("/"):
+        return Path(clean).resolve()
+    _, primary_dir = agent_allowed_roots(reach.home, agent_id, custom_cwd)
+    candidates = [
+        (primary_dir / clean).resolve(),
+        (workspace_path(reach.home, agent_id).resolve() / clean).resolve(),
+    ]
+    return next((path for path in candidates if path.exists()), candidates[0])
+
+
+def _reach_workspaces(
+    reach: FileReach, agent_id: int, raw_path: str, custom_cwd: str | None, *, allow_root: bool
+) -> tuple[Path, list[Path]]:
+    explicit = parse_explicit_workspace_path(raw_path, home=reach.home, allow_root=allow_root)
+    if explicit is None:
+        roots, primary_dir = agent_allowed_roots(reach.home, agent_id, custom_cwd)
+        return resolve_workspace_file_path(
+            roots, primary_dir, raw_path, allow_root=allow_root
+        ), roots
+    if explicit[0] != agent_id:
+        raise WorkspaceFileError(403, "Access denied: path is outside the agent workspace and cwd")
+    ws_root = workspace_path(reach.home, agent_id).resolve()
+    target = _resolve_relative_path(explicit[1] or ".", [ws_root], ws_root, allow_root=allow_root)
+    return target, [ws_root]
+
+
+# meiva:note
+# The resolved path and the roots it may not leave: None in `all` reach, where only the
+# filesystem bounds it.
+def _reach(
+    reach: FileReach, agent_id: int, raw_path: str, custom_cwd: str | None, *, allow_root: bool
+) -> tuple[Path, list[Path] | None]:
+    if reach.access == "workspaces":
+        return _reach_workspaces(reach, agent_id, raw_path, custom_cwd, allow_root=allow_root)
+    try:
+        return _reach_any(reach, agent_id, raw_path, custom_cwd), None
+    except (OSError, RuntimeError) as exc:
+        raise WorkspaceFileError(404, f"Path {raw_path!r} not found") from exc
+
+
+# meiva:note
+# Where the path bar starts for `target`: the agent workspace it is inside, else the account home,
+# else the filesystem root.
+def file_root(target: Path, reach: FileReach) -> FileRoot:
+    workspaces = workspaces_path(reach.home).resolve()
+    if target.is_relative_to(workspaces) and target != workspaces:
+        owner = target.relative_to(workspaces).parts[0]
+        if owner.isdigit() and not owner.startswith("0"):
+            return FileRoot(kind="workspace", path=str(workspaces / owner), agent_id=int(owner))
+    user_home = reach.user_home.resolve()
+    if target.is_relative_to(user_home):
+        return FileRoot(kind="home", path=str(user_home), agent_id=None)
+    return FileRoot(kind="machine", path=target.anchor, agent_id=None)
+
+
+# meiva:note
+# A regular file the account can read; anything else (a directory, socket, FIFO or device) is
+# not a file to serve, in either reach.
 def resolve_existing_workspace_file(
-    home: Path,
+    reach: FileReach,
     agent_id: int,
     raw_path: str,
     *,
     custom_cwd: str | None = None,
-) -> tuple[Path, list[Path]]:
-    explicit = parse_explicit_workspace_path(raw_path, home=home)
-    if explicit is not None:
-        owner_agent_id, rel_subpath = explicit
-        if owner_agent_id != agent_id:
-            raise WorkspaceFileError(
-                403, "Access denied: path is outside the agent workspace and cwd"
-            )
-        ws_root = workspace_path(home, agent_id).resolve()
-        allowed_roots = [ws_root]
-        target = _resolve_relative_path(rel_subpath, allowed_roots, ws_root)
-    else:
-        allowed_roots, primary_dir = agent_allowed_roots(home, agent_id, custom_cwd)
-        target = resolve_workspace_file_path(allowed_roots, primary_dir, raw_path)
-    if not target.exists() or not target.is_file():
+) -> Path:
+    target, _ = _reach(reach, agent_id, raw_path, custom_cwd, allow_root=False)
+    if not target.is_file():
         raise WorkspaceFileError(404, f"File {raw_path!r} not found")
-    return target, allowed_roots
+    if not os.access(target, os.R_OK):
+        raise WorkspaceFileError(403, f"Permission denied: {raw_path!r}")
+    return target
 
 
 def _read_file_payload(
@@ -302,30 +381,21 @@ def _read_file_payload(
         return "", True
 
 
-def _relative_display_path(target: Path, allowed_roots: list[Path]) -> str:
-    for root in allowed_roots:
-        if target.is_relative_to(root):
-            return str(target.relative_to(root)).replace("\\", "/")
-    return target.name
-
-
 def read_workspace_file_content(
-    home: Path,
+    reach: FileReach,
     agent_id: int,
     raw_path: str,
     *,
     custom_cwd: str | None = None,
 ) -> WorkspaceFileResponse:
-    target, allowed_roots = resolve_existing_workspace_file(
-        home, agent_id, raw_path, custom_cwd=custom_cwd
-    )
+    target = resolve_existing_workspace_file(reach, agent_id, raw_path, custom_cwd=custom_cwd)
     stat = target.stat()
     ext = target.suffix.lower()
     mime, _ = mimetypes.guess_type(target.name)
     content, binary = _read_file_payload(target, ext, stat.st_size, mime)
-    rel_path = _relative_display_path(target, allowed_roots)
     return WorkspaceFileResponse(
-        path=rel_path,
+        path=str(target),
+        root=file_root(target, reach),
         name=target.name,
         extension=ext,
         content=content,
@@ -336,14 +406,14 @@ def read_workspace_file_content(
 
 
 def read_workspace_file_raw(
-    home: Path,
+    reach: FileReach,
     agent_id: int,
     raw_path: str,
     *,
     custom_cwd: str | None = None,
     max_bytes: int,
 ) -> bytes:
-    target, _ = resolve_existing_workspace_file(home, agent_id, raw_path, custom_cwd=custom_cwd)
+    target = resolve_existing_workspace_file(reach, agent_id, raw_path, custom_cwd=custom_cwd)
     stat = target.stat()
     if stat.st_size > max_bytes:
         raise WorkspaceFileError(
@@ -374,34 +444,24 @@ MAX_RANGE_ANSWER_BYTES = 8 * 1024 * 1024
 
 
 def resolve_workspace_dir(
-    home: Path,
+    reach: FileReach,
     agent_id: int,
     raw_path: str,
     *,
     custom_cwd: str | None = None,
-) -> tuple[Path, list[Path]]:
-    allowed_roots, primary_dir = agent_allowed_roots(home, agent_id, custom_cwd)
-    workspace_dir = workspace_path(home, agent_id).resolve()
-    if not raw_path:
-        target = workspace_dir
+) -> tuple[Path, list[Path] | None]:
+    if raw_path:
+        target, roots = _reach(reach, agent_id, raw_path, custom_cwd, allow_root=True)
     else:
-        explicit = parse_explicit_workspace_path(raw_path, home=home, allow_root=True)
-        if explicit is None:
-            target = resolve_workspace_file_path(
-                allowed_roots, primary_dir, raw_path, allow_root=True
-            )
-        elif explicit[0] != agent_id:
-            raise WorkspaceFileError(
-                403, "Access denied: path is outside the agent workspace and cwd"
-            )
-        else:
-            allowed_roots = [workspace_dir]
-            target = _resolve_relative_path(
-                explicit[1] or ".", allowed_roots, workspace_dir, allow_root=True
-            )
+        target = workspace_path(reach.home, agent_id).resolve()
+        roots = (
+            None
+            if reach.access == "all"
+            else agent_allowed_roots(reach.home, agent_id, custom_cwd)[0]
+        )
     if not target.is_dir():
         raise WorkspaceFileError(404, f"Directory {raw_path or '.'!r} not found")
-    return target, allowed_roots
+    return target, roots
 
 
 def _inside_roots(path: Path, roots: list[Path]) -> bool:
@@ -409,11 +469,15 @@ def _inside_roots(path: Path, roots: list[Path]) -> bool:
 
 
 # meiva:note
-# A symlinked child is listed only when its target stays inside an allowed root, the same rule a
-# read of it would apply; sockets, FIFOs and dangling links are not listed.
-def _listed_kind(item: os.DirEntry[str], roots: list[Path]) -> EntryKind | None:
+# Under bounding roots a symlinked child is listed only when its target stays inside one, the
+# same rule a read of it would apply; sockets, FIFOs and dangling links are never listed.
+def _listed_kind(item: os.DirEntry[str], roots: list[Path] | None) -> EntryKind | None:
     try:
-        if item.is_symlink() and not _inside_roots(Path(item.path).resolve(), roots):
+        if (
+            roots is not None
+            and item.is_symlink()
+            and not _inside_roots(Path(item.path).resolve(), roots)
+        ):
             return None
         if item.is_dir():
             return "dir"
@@ -440,17 +504,19 @@ def _listed_entry(directory: Path, name: str, kind: EntryKind) -> WorkspaceDirEn
 
 
 def list_workspace_dir(
-    home: Path,
+    reach: FileReach,
     agent_id: int,
     raw_path: str,
     *,
     custom_cwd: str | None = None,
     max_entries: int = MAX_LISTING_ENTRIES,
 ) -> WorkspaceDirListing:
-    target, roots = resolve_workspace_dir(home, agent_id, raw_path, custom_cwd=custom_cwd)
+    target, roots = resolve_workspace_dir(reach, agent_id, raw_path, custom_cwd=custom_cwd)
     try:
         with os.scandir(target) as scan:
             items = list(itertools.islice(scan, MAX_LISTING_SCAN + 1))
+    except PermissionError as exc:
+        raise WorkspaceFileError(403, f"Permission denied: {raw_path or '.'!r}") from exc
     except OSError as exc:
         raise WorkspaceFileError(422, "Workspace directory could not be read") from exc
     truncated = len(items) > MAX_LISTING_SCAN
@@ -466,9 +532,11 @@ def list_workspace_dir(
         if (entry := _listed_entry(target, name, kind)) is not None
     ]
     parent = target.parent
+    climbs = parent != target and (roots is None or _inside_roots(parent, roots))
     return WorkspaceDirListing(
         path=str(target),
-        parent=str(parent) if parent != target and _inside_roots(parent, roots) else None,
+        root=file_root(target, reach),
+        parent=str(parent) if climbs else None,
         entries=entries,
         truncated=truncated or len(kinds) > max_entries,
     )
@@ -523,7 +591,7 @@ def _suffix_range(last: str, size: int) -> tuple[int, int] | None:
 
 
 def read_workspace_file_range(
-    home: Path,
+    reach: FileReach,
     agent_id: int,
     raw_path: str,
     *,
@@ -531,7 +599,7 @@ def read_workspace_file_range(
     max_bytes: int,
     custom_cwd: str | None = None,
 ) -> ByteRangeAnswer | None:
-    target, _ = resolve_existing_workspace_file(home, agent_id, raw_path, custom_cwd=custom_cwd)
+    target = resolve_existing_workspace_file(reach, agent_id, raw_path, custom_cwd=custom_cwd)
     size = target.stat().st_size
     try:
         span = _parse_byte_range(byte_range, size)
@@ -558,25 +626,28 @@ def _json(payload: BaseModel) -> RouteAnswer:
 
 
 # meiva:note
-# The runner's answer to one forwarded workspace read, as the ops listener sends it; a refusal
-# raises `WorkspaceFileError`. A `raw` read with a `byte_range` answers that slice (`206`/`416`
-# with its `Content-Range`) unless the range is one HTTP lets a server ignore, which falls through
-# to the whole file under the resource cap.
+# The runner's answer to one forwarded workspace read, as the ops listener sends it, under the
+# reach the gateway sent; a refusal raises `WorkspaceFileError`. A `raw` read with a `byte_range`
+# answers that slice (`206`/`416` with its `Content-Range`) unless the range is one HTTP lets a
+# server ignore, which falls through to the whole file under the resource cap.
 def answer_workspace_file(
-    request: WorkspaceFileRequest, *, home: Path, limits: ToUserLimits
+    request: WorkspaceFileRequest, *, home: Path, user_home: Path, limits: ToUserLimits
 ) -> RouteAnswer:
+    reach = FileReach(home=home, user_home=user_home, access=request.file_access)
     custom_cwd = request.custom_cwd
     if request.mode == "content":
         return _json(
-            read_workspace_file_content(home, request.agent_id, request.path, custom_cwd=custom_cwd)
+            read_workspace_file_content(
+                reach, request.agent_id, request.path, custom_cwd=custom_cwd
+            )
         )
     if request.mode == "list":
         return _json(
-            list_workspace_dir(home, request.agent_id, request.path, custom_cwd=custom_cwd)
+            list_workspace_dir(reach, request.agent_id, request.path, custom_cwd=custom_cwd)
         )
     if request.byte_range is not None:
         answer = read_workspace_file_range(
-            home,
+            reach,
             request.agent_id,
             request.path,
             byte_range=request.byte_range,
@@ -591,6 +662,10 @@ def answer_workspace_file(
                 {"Content-Range": answer.content_range},
             )
     raw = read_workspace_file_raw(
-        home, request.agent_id, request.path, custom_cwd=custom_cwd, max_bytes=limits.resource_bytes
+        reach,
+        request.agent_id,
+        request.path,
+        custom_cwd=custom_cwd,
+        max_bytes=limits.resource_bytes,
     )
     return 200, raw, "application/octet-stream"

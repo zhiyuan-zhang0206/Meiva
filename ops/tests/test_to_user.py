@@ -13,6 +13,7 @@ from base.agents.to_user import DOCUMENT_FILENAME, to_user_limits
 from base.config import settings
 from base.db import Database, create_agent
 from ops.to_user import (
+    FileReach,
     WorkspaceFileError,
     owned_workspace,
     read_to_user,
@@ -86,11 +87,16 @@ def test_the_document_is_read_from_the_home_machines_workspace(
     assert document.version is not None
 
 
+def _workspaces_reach(served_home: Path, tmp_path: Path) -> FileReach:
+    return FileReach(home=served_home, user_home=tmp_path / "account", access="workspaces")
+
+
 def test_out_of_bounds_absolute_paths_raise_403_instead_of_404(tmp_path: Path) -> None:
     served_home = tmp_path / "served-home"
     workspace = served_home / "workspaces" / "10"
     workspace.mkdir(parents=True)
     _ = (workspace / "inside.txt").write_text("allowed", encoding="utf-8")
+    reach = _workspaces_reach(served_home, tmp_path)
 
     for forbidden in (
         "/etc/passwd",
@@ -98,7 +104,7 @@ def test_out_of_bounds_absolute_paths_raise_403_instead_of_404(tmp_path: Path) -
         "/Users/other/.meiva/workspaces/20/a.png",
     ):
         with pytest.raises(WorkspaceFileError) as exc_info:
-            _ = read_workspace_file_content(served_home, 10, forbidden)
+            _ = read_workspace_file_content(reach, 10, forbidden)
         assert exc_info.value.status_code == 403
 
 
@@ -115,18 +121,24 @@ def test_explicit_same_owner_workspace_path_resolves_across_host_prefixes_and_bl
     (custom_cwd / "deliver").mkdir(parents=True)
     _ = (custom_cwd / "deliver" / "report.md").write_text("from cwd", encoding="utf-8")
 
+    reach = _workspaces_reach(served_home, tmp_path)
     result = read_workspace_file_content(
-        served_home,
+        reach,
         10,
         "file:///Users/zhiyuan-output/.meiva/workspaces/10/deliver/report.md#L1",
         custom_cwd=str(custom_cwd),
     )
     assert result.content == "from workspace"
-    assert result.path == "deliver/report.md"
+    assert result.path == str((deliver / "report.md").resolve())
+    assert result.root.model_dump() == {
+        "kind": "workspace",
+        "path": str(workspace.resolve()),
+        "agent_id": 10,
+    }
 
     with pytest.raises(WorkspaceFileError) as exc_info:
         _ = read_workspace_file_content(
-            served_home,
+            reach,
             10,
             "/Users/zhiyuan-output/.meiva/workspaces/10/deliver/../../20/secret.md",
         )

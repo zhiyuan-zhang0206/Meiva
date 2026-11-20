@@ -1,12 +1,19 @@
 # meiva:note
-# The four read-side guards are `settings.to_user` fields, cluster-pinned and consumed by both the ops listener and the gateway. max_document_bytes (1 MiB) guards against reading the wrong file as a document, not against writing — the soft word limit shapes the panel. max_references (1024) caps the per-reference stat probes of a pathological document. max_chain_depth (16) stops runaway or circular reference chains. max_resource_bytes (64 MiB) bounds one served file and with it the gateway's per-request buffering. Every bound must be positive; the first-version values were 256 KiB / 256 / 8 / 20 MiB.
+# The four read-side guards are `settings.to_user` fields, cluster-pinned and consumed by both the ops listener and the gateway. max_document_bytes (1 MiB) guards against reading the wrong file as a document, not against writing — the soft word limit shapes the panel. max_references (1024) caps the per-reference stat probes of a pathological document. max_chain_depth (16) stops runaway or circular reference chains. max_resource_bytes (64 MiB) bounds one served file and with it the gateway's per-request buffering. Every bound must be positive; the first-version values were 256 KiB / 256 / 8 / 20 MiB. file_access ("all") is how far the panel's file viewer reaches on the owning machine.
 # meiva:link base/config/docs/to-user-limits.md
 from __future__ import annotations
+
+from typing import Literal
 
 from pydantic import Field
 from pydantic.config import JsonDict
 
 from base.config.base import EnvSettings
+
+# meiva:note
+# How far the panel's file viewer reads on the machine that owns a path: `all` any path the
+# account can read, `workspaces` only agent workspaces and the agent's working directory.
+FileAccess = Literal["all", "workspaces"]
 
 _TO_USER_FIELD: JsonDict = {
     "restart_required": "all",
@@ -74,6 +81,22 @@ class ToUserSettings(EnvSettings):
             "in workspaces already reach 30-40 MiB — and since the gateway buffers "
             "the body in memory, this is also the per-request memory bound. The "
             "first-version bound was 20 MiB."
+        ),
+        json_schema_extra=_TO_USER_FIELD,
+    )
+
+    file_access: FileAccess = Field(
+        title="File viewer reach",
+        default="all",
+        alias="MEIVA_TO_USER_FILE_ACCESS",
+        description=(
+            "Which paths the panel's file viewer may read, list and serve on the "
+            "machine that owns them. `all`: any path the account can read (absolute, "
+            "`~/...`, or relative to the agent's working directory or workspace). "
+            "`workspaces`: only agent workspaces and the agent's working directory; "
+            "anything else is refused with 403. Non-regular files and the size limits "
+            "are refused in both modes. The gateway decides and tells the owning "
+            "runner with each forwarded read."
         ),
         json_schema_extra=_TO_USER_FIELD,
     )
