@@ -12,7 +12,6 @@ import yaml
 from pydantic import BaseModel
 
 from base.host.boundary.untyped import object_of
-from meizel.tests.synthetic import commit, git
 
 
 class _Hook(BaseModel):
@@ -34,6 +33,16 @@ class _PreCommitConfig(BaseModel):
 
 ROOT = Path(__file__).resolve().parents[2]
 MEIZEL_PUSH = ROOT / "scripts/hooks/prepush-meizel.sh"
+
+
+# meiva:note
+# Fixed git argv against a fixture repository the test owns.
+def git(root: Path, *args: str) -> None:
+    subprocess.run(["git", "-C", str(root), *args], check=True, capture_output=True)  # noqa: S603
+
+
+def commit(root: Path, message: str) -> None:
+    git(root, "-c", "user.name=t", "-c", "user.email=t@example.invalid", "commit", "-qm", message)
 
 
 def _init_probe_repo(path: Path) -> None:

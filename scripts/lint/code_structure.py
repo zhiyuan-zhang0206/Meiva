@@ -1,6 +1,5 @@
 # meiva:link docs/conventions/python-conventions.md
 # meiva:link scripts/lint/docs/lint.md
-# meiva:link meizel/docs/ambient-state.md
 
 from __future__ import annotations
 
@@ -39,13 +38,14 @@ from meizel.contracts.analysis import (  # noqa: E402
 )
 from meizel.graph.model import MeizelError, Sources  # noqa: E402
 from meizel.graph.universe import Universe  # noqa: E402
-from meizel.language import path_imports  # noqa: E402
 from meizel.language.scan import scan_tree  # noqa: E402
-from meizel.owners import decisions  # noqa: E402
 from meizel.roles import framework_dirs, select_packages  # noqa: E402
-from meizel.state import ambient_state, machine_role  # noqa: E402
-from meizel.state.ambient_state import allowlist as ambient_allowlist  # noqa: E402
+
 from scripts.lint.diagnostics import no_ambient_fallback  # noqa: E402
+from scripts.rules.language import path_imports  # noqa: E402
+from scripts.rules.owners import decisions  # noqa: E402
+from scripts.rules.state import ambient_state, machine_role  # noqa: E402
+from scripts.rules.state.ambient_state import allowlist as ambient_allowlist  # noqa: E402
 from scripts.structure import baseline_shards, locality  # noqa: E402
 from scripts.structure.budgets import quality_budget  # noqa: E402
 
@@ -559,11 +559,11 @@ def main(
     targets, directory_targets = _budget_scopes(argv, repo_root)
     # meiva:note
     # Rule 5's table, read once per run from the checkout being judged: the decisions a policy
-    # declares and the exemptions it grants are values, so `meizel/owners/decisions.py` opens
+    # declares and the exemptions it grants are values, so `scripts.rules.owners.decisions` opens
     # nothing and a synthetic root is judged by its own policy.
     # meiva:note
     # Rule 9's closed lists, read once per run beside Rule 5's table and for the same reason: the
-    # lists are a value the rule takes, so `meizel/state/ambient_state` opens nothing and a
+    # lists are a value the rule takes, so `scripts.rules.state.ambient_state` opens nothing and a
     # synthetic root is judged by its own policy.
     try:
         policy = allowances.load(GitRepo(repo_root))

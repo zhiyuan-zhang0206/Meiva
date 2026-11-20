@@ -21,6 +21,7 @@ from pydantic import (
 from base.agents.messages.envelope import InboundSender, validate_source
 from base.agents.messages.inbound_images import TimelineUploadFile
 from base.agents.messages.kwargs import NoteTag
+from base.agents.messages.quote import Quote
 from base.agents.observation.snapshot import AgentSnapshot
 from base.api_contracts.agent_contract import AgentStatus
 from base.api_contracts.question import QuestionAnswer, QuestionSpec
@@ -167,6 +168,7 @@ class PendingInbound(BaseModel):
     content: str
     images: list[str] | None
     files: list[TimelineUploadFile] | None = None
+    quote: Quote | None = None
     created_at: datetime
 
 

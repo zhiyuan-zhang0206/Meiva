@@ -1,17 +1,17 @@
-"""The module index and reference collector behind the tests-location proof and test selection.
-
-A test file's first-party references are collected from import statements (also inside functions),
-string targets of `importlib.import_module` / `importorskip` and friends, paths below the
-repository root naming a source file (`ROOT / "scripts" / "lint" / "x.py"`) and imports in source
-strings the file runs. Evidence that exists only because the file patches something, or only
-because it carries sample data, does not count: a patched module is not the subject, and a path
-counts only as a chain from the repository root. `imports/executed.py` retains unknown inputs and
-`placement_evidence.py` owns root paths.
-
-What this module no longer does is decide a home or a layer: placing a test by the former import-linter
-contracts, and judging private patches by that placement, were replaced by meizel
-(`meizel/docs/checker/checker.meiva.okf.md`).
-"""
+# meiva:note
+# The module index and reference collector behind the tests-location proof and test selection.
+#
+# A test file's first-party references are collected from import statements (also inside functions),
+# string targets of `importlib.import_module` / `importorskip` and friends, paths below the
+# repository root naming a source file (`ROOT / "scripts" / "lint" / "x.py"`) and imports in source
+# strings the file runs. Evidence that exists only because the file patches something, or only
+# because it carries sample data, does not count: a patched module is not the subject, and a path
+# counts only as a chain from the repository root. `imports/executed.py` retains unknown inputs and
+# `placement_evidence.py` owns root paths.
+#
+# What this module no longer does is decide a home or a layer: placing a test by the former import-linter
+# contracts, and judging private patches by that placement, were replaced by meizel
+# (the checker document, https://github.com/zhiyuan-zhang0206/meizel/blob/main/meizel/docs/checker/checker.md).
 
 from __future__ import annotations
 
@@ -25,6 +25,7 @@ from pathlib import Path, PurePosixPath
 
 from meizel.checkout import roles_at
 from meizel.roles import select_packages
+
 from scripts.structure import service_units
 from scripts.structure.imports import cache, executed, facts
 

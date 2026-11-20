@@ -9,7 +9,7 @@
 # rest.
 #
 # DELIBERATE TWIN, not an accident and not an oversight. The same shape is copied in
-# `meizel/source_text.py` -- the checker runs from pre-commit and from `check.sh` inside a bare
+# `meizel.source_text` -- the checker runs from pre-commit and from `check.sh` inside a bare
 # checkout, where no `base` package exists -- and in `cli/fleet_update/untyped.py`, whose package is
 # copied to a bare operator checkout and probed under `python -S`, where it may import no other
 # first-party module. Neither copy may import this one, so the three move together: a change to the

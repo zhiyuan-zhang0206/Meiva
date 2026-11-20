@@ -172,7 +172,7 @@ async def _poll_child(
 # meiva:note
 # Give a signalled leader its grace window to exit on its own.
 async def _await_leader_exit(
-    domain: ExecProcessDomain, leader: psutil.Process, timers: Timers
+    domain: ExecProcessDomain, leader: psutil.Process, timers: Timers, agent_id: int | None
 ) -> None:
     deadline = timers.monotonic() + KILL_GRACE_S
     while not _leader_exited(leader):
@@ -184,6 +184,7 @@ async def _await_leader_exit(
                 pid=domain.proc.pid,
                 grace=KILL_GRACE_S,
                 event="exec_subprocess_killed",
+                agent_id=agent_id if agent_id is not None else "-",
             )
             return
         await timers.asleep(_POLL_INTERVAL_S)
@@ -274,7 +275,7 @@ async def _run_local_child(
             domain, leader, stream, chunk_publisher, cancel_event, timeout, reader, timers
         )
         if cancelled or timed_out:
-            await _await_leader_exit(domain, leader, timers)
+            await _await_leader_exit(domain, leader, timers, agent_id)
         _close_domain(domain)
         await reader.finish(_OUTPUT_DRAIN_TIMEOUT_S)
         _close_output(reader)

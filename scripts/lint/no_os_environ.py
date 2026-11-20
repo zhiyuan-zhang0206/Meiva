@@ -1,10 +1,10 @@
-"""Launcher of `meizel.state.no_os_environ`: runtime config goes through `Settings`.
-
-Run: `.venv/bin/python scripts/lint/no_os_environ.py [path ...]`. The rule, its allowlist
-and its rationale live in `meizel/state/no_os_environ.py`; this launcher only binds the
-application's config registry (the env names `Settings` owns, which Rule 2 reads) and
-enters a scratch home before that registry is imported.
-"""
+# meiva:note
+# Launcher of `scripts.rules.state.no_os_environ`: runtime config goes through `Settings`.
+#
+# Run: `.venv/bin/python scripts/lint/no_os_environ.py [path ...]`. The rule, its allowlist
+# and its rationale live in `scripts.rules.state.no_os_environ`; this launcher only binds the
+# application's config registry (the env names `Settings` owns, which Rule 2 reads) and
+# enters a scratch home before that registry is imported.
 
 from __future__ import annotations
 
@@ -19,7 +19,7 @@ from base.host.env.boot_actions import enter_scratch_home  # noqa: E402
 if __name__ == "__main__":
     enter_scratch_home()
 
-from meizel.state import no_os_environ as rule  # noqa: E402 - standalone script
+from scripts.rules.state import no_os_environ as rule  # noqa: E402 - standalone script
 
 
 def settings_managed_aliases() -> frozenset[str]:
@@ -35,7 +35,12 @@ def main(
     repo_root: Path | None = None,
     managed_aliases: Callable[[], frozenset[str]] = settings_managed_aliases,
 ) -> int:
-    return rule.main(argv, managed_aliases=managed_aliases, repo_root=repo_root)
+    return rule.main(
+        argv,
+        managed_aliases=managed_aliases,
+        repo_root=_REPO_ROOT if repo_root is None else repo_root,
+        policy_root=_REPO_ROOT,
+    )
 
 
 if __name__ == "__main__":

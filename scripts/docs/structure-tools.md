@@ -1,6 +1,6 @@
 # Structure Sweeper Tools
 
-`scripts/structure/{quality_budget,locality}.py`, `meizel/language/path_imports.py` and the `meizel/state/ambient_state/` package are the
+`scripts/structure/{quality_budget,locality}.py`, [`scripts/rules/language/path_imports.py`](../rules/language/path_imports.py) and the [`scripts/rules/state/ambient_state/`](../rules/state/ambient_state) package are the
 pre-commit `lint-code-structure` gate's own scanner modules — see
 [scripts/lint/ — Code and AST Safety Lints](../lint/docs/lint.md) — and
 `placement.py`, `placement_evidence.py` and `imports/` are the reference and import-fact
@@ -53,7 +53,7 @@ architecture checker or Python interpreter.
 
 Debt class, evidence bar, and the graduation path (a leaked decision with a
 confirmed single owner becomes a Rule 5 `postgres-dial`-style entry in
-`meizel/owners/decisions.py:decision_table`, guarded by the
+[`scripts/rules/owners/decisions.py:decision_table`](../rules/owners/decisions.py), guarded by the
 lint from then on) live in the sweeper's own repo skill:
 `docs/conventions/engineering/tech-debt.md`, locality inspection guidance.
 

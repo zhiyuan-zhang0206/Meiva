@@ -51,6 +51,7 @@ if __name__ == "__main__":
 
 from meizel import lint_common  # noqa: E402
 from meizel.checkout import source_tree  # noqa: E402
+
 from scripts.structure import tests_location_allowed  # noqa: E402
 
 _CATEGORIES = ("contract", "integration")

@@ -75,9 +75,10 @@ _REPO = Path(__file__).resolve().parent.parent.parent
 if str(_REPO) not in sys.path:
     sys.path.insert(0, str(_REPO))
 
-from base.host.boundary.options import options  # noqa: E402
 from meizel import lint_common  # noqa: E402
 from meizel.checkout import source_tree, tracked_files  # noqa: E402
+
+from base.host.boundary.options import options  # noqa: E402
 from scripts.audit.analysis import (  # noqa: E402
     GENERATED_FILES,
     Repo,

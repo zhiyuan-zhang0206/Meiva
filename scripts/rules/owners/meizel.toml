@@ -1,0 +1,17 @@
+exports = ["clock_lattice.py", "clock_lattice_cli.py", "decisions.py", "timing_judgement_cli.py"]
+
+[uses]
+"clock_lattice_cli.py" = ["clock_lattice.py"]
+"timing_judgement_cli.py" = ["timing_judgement.py"]
+"tests" = ["clock_lattice.py", "clock_lattice_cli.py", "decisions.py", "timing_judgement.py", "timing_judgement_cli.py"]
+
+[roots]
+"clock_lattice_cli.py" = { kinds = ["argv", "cwd"], why = "the __main__ guard reads argv[1:] and the working directory, the checkout it judges, once and hands both to main" }
+"timing_judgement_cli.py" = { kinds = ["argv", "cwd"], why = "the __main__ guard reads argv[1:] and the working directory, the checkout it judges, once and hands both to main" }
+
+[purity]
+"." = "strict"
+"clock_lattice.py" = "strict"
+"clock_lattice_cli.py" = { mode = "none", why = "the command-line entry of the clock-lattice rule: it reads the roles this repository declares, the policy, the family modules, the exempted files and the checkout's file set, and hands them to scripts/rules/owners/clock_lattice.py, which decides everything else" }
+"timing_judgement_cli.py" = { mode = "none", why = "the command-line entry of the timing-judgement rule: it finds the test files and reads the baseline, and scripts/rules/owners/timing_judgement.py decides everything else" }
+"decisions.py" = "strict"

@@ -204,6 +204,10 @@ jobs:
         working-directory: ui/web
         run: pnpm install --frozen-lockfile
 
+      - name: Make meizel importable
+        if: matrix.lane == 'analysis'
+        uses: ./.github/actions/meizel
+
       - name: Check repository language, locks, and core-content manifests
         if: matrix.lane == 'analysis'
         run: |
@@ -221,7 +225,7 @@ jobs:
           uv run ruff check
           uv run ruff format --check
           uv run python scripts/content_lint/lint_migrations.py
-          uv run python -m meizel.owners.clock_lattice_cli
+          uv run python -m scripts.rules.owners.clock_lattice_cli
 
       - name: Apply migrations to fresh DB + trigger smoke
         if: matrix.lane == 'analysis'

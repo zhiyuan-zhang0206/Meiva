@@ -7,7 +7,7 @@
 # jitter and the process timers the ACL-transition retry measures its window on) and passes it down. The module-level `get_async_redis()` / `sync_redis()` /
 # `publish_best_effort*` in `base.events.live.redis_client` remain as the process default that
 # reads the live settings at each call, a shim that the `ambient-bus` rule
-# (meizel/state/ambient_state) bans package by package.
+# (scripts.rules.state.ambient_state) bans package by package.
 #
 # The transport decisions (resilience kwargs, auth-retry, the best-effort publish discipline) stay
 # in `redis_client`; this class only binds one `EventBusConfig` to them.

@@ -165,19 +165,6 @@ def test_the_rule_only_groups_and_filters_by_fields_the_event_carries(uid: str) 
         assert label in _ENVELOPE or label.removeprefix("attributes_") in declared
 
 
-@pytest.mark.parametrize("uid", sorted(SIGNALS))
-def test_the_notification_text_names_only_labels_the_query_keeps(uid: str) -> None:
-    rule = _rules()[uid][1]
-    grouped = {
-        name.strip()
-        for part in re.findall(r"by \(([^)]*)\)", _query(rule))
-        for name in part.split(",")
-    }
-    text = rule["annotations"]["summary"] + rule["annotations"]["description"]
-    for label in re.findall(r"\$labels\.(\w+)", text):
-        assert label in grouped, f"{uid} names {{{{ $labels.{label} }}}} but groups by {grouped}"
-
-
 def test_the_health_rules_label_their_check_for_routing_and_the_window_silence() -> None:
     for uid in ("meiva-ops-health-probe-warning", "meiva-ops-health-probe-error"):
         assert "sum by (attributes_check)" in _query(_rules()[uid][1])

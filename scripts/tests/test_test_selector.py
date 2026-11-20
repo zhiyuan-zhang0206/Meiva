@@ -16,9 +16,9 @@ from pathlib import Path
 from time import perf_counter
 
 import pytest
+from meizel.checkout import roles_at
 from pydantic import BaseModel, TypeAdapter
 
-from meizel.checkout import roles_at
 from scripts.ci import shard_counts, test_selector
 from scripts.ci.test_impact import python_files
 

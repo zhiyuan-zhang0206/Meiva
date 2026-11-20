@@ -3454,6 +3454,7 @@ export interface components {
             content: string;
             images: string[] | null;
             files?: components["schemas"]["TimelineUploadFile"][] | null;
+            quote?: components["schemas"]["Quote"] | null;
             created_at: string;
         };
         PermissionItemRow: {

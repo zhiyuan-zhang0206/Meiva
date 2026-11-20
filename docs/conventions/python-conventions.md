@@ -90,7 +90,7 @@ use which, and a name another file uses is public. Reaching a private name or mo
 `private-name` / `private-module`; entering a directory through a child it does not export is
 `not-exported`; a dependency nobody declared is `undeclared-edge`; patching anything is a
 `*-patch` diagnostic. Existing violations are recorded debt that may only shrink. See
-[the checker](../../meizel/docs/checker/checker.md) and the
+[the checker](https://github.com/zhiyuan-zhang0206/meizel/blob/main/meizel/docs/checker/checker.md) and the
 [contributing guide](../contributing.md#locality-gate-meizel). Use an existing capability,
 pass the required dependency explicitly, or verify public behavior. Agent visibility remains owned
 by the existing SDK surface metadata and Installation; do not introduce another SDK member list.
@@ -98,7 +98,7 @@ by the existing SDK surface metadata and Installation; do not introduce another 
 - **Rule 6 — no path imports under `meiva_builtins/`.** A skill or plugin
   module may not edit `sys.path`, call `site.addsitedir`, or load a module
   by file path (`spec_from_file_location`, `SourceFileLoader`,
-  `runpy.run_path`); `meizel/language/path_imports.py` finds them. Shared
+  `runpy.run_path`); [`scripts/rules/language/path_imports.py`](../../scripts/rules/language/path_imports.py) finds them. Shared
   code moves into a governed package the script imports normally, and a
   script that needs it runs on the checkout's venv python. One narrow
   exception: a script under `meiva_builtins/skills/<group>/<skill>/` may run a
@@ -109,7 +109,7 @@ by the existing SDK surface metadata and Installation; do not introduce another 
   skill, `meiva_builtins/skills/` itself, or `meiva_builtins/plugins/`), or any
   file-loader call regardless of its argument, is still a violation. The
   Every measured path-import site fails directly, with no baseline allowance.
-- **Rule 5 — single decision owners.** `meizel/owners/decisions.py:decision_table`
+- **Rule 5 — single decision owners.** [`scripts/rules/owners/decisions.py:decision_table`](../../scripts/rules/owners/decisions.py)
   names design decisions with exactly one owning module — today,
   `postgres-dial` (`base/db/connections.py`). Any other module making that
   decision is a bypass; fix it by routing through the owner. A site that
@@ -134,9 +134,9 @@ written once in `scripts/structure/baseline_shards.py` and printed by every guar
 
 Every structure violation carries the same four parts: the rule and the repair, why the
 rule exists, what the author of the site now owns, and the document that states it. The
-reason is written once in the rule's own module — `meizel/owners/decisions.py`,
-`meizel/language/path_imports.py`, `meizel/language/scan.py`,
-`meizel/state/ambient_state/`, `meizel/budgets/budget_plans.py`,
+reason is written once in the rule's own module — [`scripts/rules/owners/decisions.py`](../../scripts/rules/owners/decisions.py),
+[`scripts/rules/language/path_imports.py`](../../scripts/rules/language/path_imports.py), [`meizel/language/scan.py`](https://github.com/zhiyuan-zhang0206/meizel/blob/main/meizel/language/scan.py),
+[`scripts/rules/state/ambient_state/`](../../scripts/rules/state/ambient_state), [`meizel/budgets/budget_plans.py`](https://github.com/zhiyuan-zhang0206/meizel/blob/main/meizel/budgets/budget_plans.py),
 `scripts/structure/budgets/quality_budget.py`, `scripts/structure/baseline_shards.py`,
 `scripts/structure/tests_location.py` — and every site that breaks that rule prints it. A new
 rule brings its reason with it.
@@ -196,7 +196,7 @@ A Thread
 requires an explicit service/process owner with admission, stop, retained handles
 and completion/error collection; free-floating `create_task` or thread work is
 forbidden. Rule 9 of `scripts/lint/code_structure.py`
-(`meizel/state/ambient_state/`) enforces both: new sites fail, today's are
+([`scripts/rules/state/ambient_state/`](../../scripts/rules/state/ambient_state)) enforces both: new sites fail, today's are
 frozen in the `ambient_state` baseline section as `path::rule:name -> site count`
 (exact, shrink-only), and the only things let through are the closed, reasoned lists
 in the `[ambient-state]` tables of `meizel.policy.toml` — write-only facades, framework wiring
@@ -543,7 +543,7 @@ A test does not replace a name in another module (`monkeypatch.setattr`,
 control something, the production code takes it as a parameter, a constructor argument
 for a class or a required keyword for a function, and the test passes a fake or a
 value. Every patch is recorded meizel debt that may only shrink
-([patching](../../meizel/docs/checker/patching/patching.md)), and a new one fails the
+([patching](https://github.com/zhiyuan-zhang0206/meizel/blob/main/meizel/docs/checker/patching/patching.md)), and a new one fails the
 check.
 
 Why:
@@ -637,7 +637,7 @@ implementations of ports, then passes them down as arguments.
 
 That is checked, not held by reviewers: a file that is not a root and reaches one of
 those is an `ambient-read` of `meizel check`
-([ambient reads](../../meizel/docs/checker/ambient.md)). A root declares itself
+([ambient reads](https://github.com/zhiyuan-zhang0206/meizel/blob/main/meizel/docs/checker/ambient.md)). A root declares itself
 under `[roots]` in its directory's `meizel.toml` with the kinds it reads (`settings`, `db`,
 `bus`, `argv`, `environ`, `clock`, `home`, `cwd`, `platform`, `pid`, `random`) and a reason. The existing reads are recorded debt of the directory
 that holds them and may only shrink; a file under `purity = "strict"` has none. This reverses
@@ -671,7 +671,7 @@ A `time.monotonic_ns()`, `perf_counter()`, `id(obj)` or `itertools.count()` read
 identity or randomness: two processes started together draw the same value and a restart repeats it.
 Spending one in an f-string, a `uuid5`, a seed, a remainder or a bit mask, and a private
 `def _monotonic(): return time.monotonic()` that nothing injects, is `fake-entropy`
-([fake entropy](../../meizel/docs/checker/fake-entropy.md)); a duration (`end - start`) is
+([fake entropy](https://github.com/zhiyuan-zhang0206/meizel/blob/main/meizel/docs/checker/fake-entropy.md)); a duration (`end - start`) is
 the plain use of an interval clock.
 
 ### Existing patches
@@ -683,7 +683,7 @@ patched thing injectable, convert the tests of that component in the same change
 it serves the debt that remains and is not a pattern for a new test.
 
 Three kinds of test-support file patch on purpose and are listed under `[approved-patches.files]`
-in `meizel.policy.toml` ([patching](../../meizel/docs/checker/patching/patching.md)): an autouse guard
+in `meizel.policy.toml` ([patching](https://github.com/zhiyuan-zhang0206/meizel/blob/main/meizel/docs/checker/patching/patching.md)): an autouse guard
 that keeps the suite off the host, the entry of a subprocess a test starts, and the global setup of
 the test runner. A test module is never listed; adding an entry is a decision the reviewer reads in
 `policy diff`.
@@ -710,7 +710,7 @@ met:
 - asserting how a mock was called (`assert_called_once_with`, `call_args`,
   `call_count`): see form 2 above.
 
-Both codes are recorded debt like a patch ([patching](../../meizel/docs/checker/patching/patching.md)):
+Both codes are recorded debt like a patch ([patching](https://github.com/zhiyuan-zhang0206/meizel/blob/main/meizel/docs/checker/patching/patching.md)):
 the existing sites stay until their component is converted, and a new one fails the check.
 A fault has two legitimate routes. A real resource makes it: revoke `INSERT` or `UPDATE`,
 a read-only transaction, a closed pool, a held lock, a trigger that raises, a renamed
@@ -752,7 +752,7 @@ why.
 Production `typing.cast` calls are a recorded `type-cast` ratchet: validate or
 narrow a value at its boundary rather than asserting its type. Meizel resolves
 the callable's import identity, and existing calls may only retain their recorded
-count. See [type assertion ratchet](../../meizel/docs/checker/type-cast.md)
+count. See [type assertion ratchet](https://github.com/zhiyuan-zhang0206/meizel/blob/main/meizel/docs/checker/type-cast.md)
 for source scope and baseline boundaries. This does not ban legitimate `object`
 raw inputs or introduce a general prohibition on every `Any` annotation.
 

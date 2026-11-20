@@ -37,9 +37,10 @@ import sys
 from dataclasses import dataclass
 from pathlib import Path
 
-from base.host.boundary.options import options
 from meizel import lint_common
 from meizel.checkout import source_tree, tracked_files
+
+from base.host.boundary.options import options
 from scripts.audit.analysis import (
     is_text,
     module_pair,

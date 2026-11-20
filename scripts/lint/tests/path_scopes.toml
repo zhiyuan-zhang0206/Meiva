@@ -1,15 +1,5 @@
 # Fixture modules (tests/path_scoped/) that govern this directory's tests: "." is the
 # directory itself, otherwise the test files named here (tests/fixtures/path_scopes.py).
-"meizel.tests.synthetic" = [
-    "test_ambient_state_gate.py",
-    "test_baseline_shard_validity_gate.py",
-    "test_budget_gate.py",
-    "test_lint_code_structure.py",
-    "test_lint_only_mode.py",
-    "test_locality_gate.py",
-    "test_rename_aware_baseline.py",
-    "test_tests_dir_scope.py",
-]
 "meiva.tests.fixtures.sdk" = [
     "test_lint_agent_docstrings.py",
     "test_lint_only_mode.py"

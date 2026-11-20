@@ -250,17 +250,11 @@ def _manifest_repo(tmp_path: Path) -> Path:
         repo_root,
         "pyproject.toml",
         "[tool.pytest.ini_options]\n"
-        'testpaths = ["tests", "base/**/tests", "cli/**/tests", "scripts/**/tests",'
-        ' "meizel/**/tests"]\n',
+        'testpaths = ["tests", "base/**/tests", "cli/**/tests", "scripts/**/tests"]\n',
     )
     files = {
         "meizel.toml": "[roles]\n",
         "meizel.policy.toml": "",
-        "meizel/__init__.py": "",
-        "meizel/graph/__init__.py": "",
-        "meizel/graph/universe.py": 'MANIFEST = "meizel.toml"\n',
-        "meizel/roles.py": "from meizel.graph import universe\n",
-        "meizel/tests/test_roles.py": "from meizel import roles\n\ndef test_roles(): pass\n",
         "scripts/lint/reader.py": 'POLICY = "meizel.policy.toml"\n',
         "scripts/lint/tests/test_reader.py": "from scripts.lint import reader\n",
         "base/lm/engine.py": '"""Mentions meizel.toml in prose only."""\n',
@@ -277,7 +271,6 @@ def test_a_root_meizel_manifest_runs_its_readers_not_the_full_suite(
     result = _select(_manifest_repo(tmp_path), manifest)
 
     assert (result.decision, result.reason) == ("SELECTED", "owner-tests"), result.as_json()
-    assert "meizel/tests/test_roles.py" in result.tests
     assert _LINT in result.tests
     if manifest == "meizel.policy.toml":
         assert "scripts/lint/tests/test_reader.py" in result.tests

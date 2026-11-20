@@ -12,6 +12,7 @@ from pathlib import Path
 
 from meizel.checkout import python_reverse_closure_at
 from meizel.graph.model import MeizelError
+
 from scripts.hooks.diff_checks_pytest import spell_seconds
 
 RECEIPT_VERSION = "diff-checks/v1"

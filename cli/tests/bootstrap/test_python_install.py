@@ -174,6 +174,8 @@ def test_environment_creation_names_the_checkout_python_pin(
         argv: list[str], repo: Path, env: dict[str, str], *, discard_stdout: bool = False
     ) -> int:
         calls.append(argv)
+        if "--output-file" in argv:
+            Path(argv[argv.index("--output-file") + 1]).write_text("", encoding="utf-8")
         return 0
 
     assert (
@@ -576,3 +578,28 @@ def test_loading_installer_without_running_main_preserves_import_path(tmp_path: 
         check=False,
     )
     assert result.returncode == 0, result.stderr
+
+
+# meiva:note
+# A git pin has no artifact hash, so the mirror install takes it out of the hash-checked
+# requirements and installs it by the commit the lock names; every hashed pin, continuation lines
+# included, stays in the file `--require-hashes` reads.
+def test_a_git_pin_is_installed_apart_from_the_hashed_requirements() -> None:
+    from cli import python_install
+
+    exported = (
+        "anyio==4.9.0 \\\n"
+        "    --hash=sha256:aaaa\n"
+        "    # via httpx\n"
+        "meizel @ git+https://example.invalid/meizel@0123456789abcdef0123456789abcdef01234567\n"
+        "zipp==3.23.0 \\\n"
+        "    --hash=sha256:bbbb\n"
+    )
+    hashed, direct = python_install.split_direct_references(exported)
+    assert direct == [
+        "meizel @ git+https://example.invalid/meizel@0123456789abcdef0123456789abcdef01234567"
+    ]
+    assert hashed == (
+        "anyio==4.9.0 \\\n    --hash=sha256:aaaa\n    # via httpx\n"
+        "zipp==3.23.0 \\\n    --hash=sha256:bbbb\n"
+    )

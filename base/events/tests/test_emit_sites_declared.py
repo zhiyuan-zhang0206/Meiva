@@ -30,7 +30,7 @@ def _production_files() -> list[Path]:
     return [
         _REPO / name
         for name in tracked
-        if "/tests/" not in name and not name.startswith(("tests/", "scripts/", "meizel/"))
+        if "/tests/" not in name and not name.startswith(("tests/", "scripts/"))
     ]
 
 

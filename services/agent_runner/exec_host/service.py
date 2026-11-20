@@ -265,7 +265,7 @@ async def _wait_client_control(
 
 
 async def _await_leader_exit(
-    domain: ExecProcessDomain, leader: psutil.Process, *, timers: Timers
+    domain: ExecProcessDomain, leader: psutil.Process, agent_id: int | None, *, timers: Timers
 ) -> None:
     deadline = timers.monotonic() + KILL_GRACE_S
     while not _leader_exited(leader):
@@ -277,6 +277,7 @@ async def _await_leader_exit(
                 pid=domain.proc.pid,
                 grace=KILL_GRACE_S,
                 event="exec_subprocess_killed",
+                agent_id=agent_id if agent_id is not None else "-",
             )
             return
         await timers.asleep(_POLL_INTERVAL_S)
@@ -406,7 +407,7 @@ class ExecHostService:
                 domain, leader, pipe, parsed, (reader, writer), cancel_event
             )
             if cancelled or timed_out:
-                await _await_leader_exit(domain, leader, timers=self._timers)
+                await _await_leader_exit(domain, leader, parsed.agent_id, timers=self._timers)
             _close_domain(domain)
             await pipe.finish(_OUTPUT_DRAIN_TIMEOUT_S, timers=self._timers)
             _close_output(pipe)

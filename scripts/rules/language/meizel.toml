@@ -1,0 +1,14 @@
+exports = ["no_script_sibling_imports.py", "path_imports.py"]
+
+[uses]
+"no_script_sibling_imports.py" = ["script_siblings.py"]
+"tests" = ["no_script_sibling_imports.py", "path_imports.py", "script_siblings.py"]
+
+[roots]
+"no_script_sibling_imports.py" = { kinds = ["argv", "cwd"], why = "the __main__ guard reads argv[1:] and the working directory, the checkout it judges, once and hands both to main" }
+
+[purity]
+"." = "strict"
+"no_script_sibling_imports.py" = { mode = "none", why = "the command-line entry of the PYTHONSAFEPATH sibling-import guard: it enumerates the files a run judges, reads them, states which modules sit beside each one, and prints what the rule found; scripts/rules/language/script_siblings.py decides script mode, guard order, sibling resolution and the repair" }
+"path_imports.py" = "strict"
+"script_siblings.py" = "strict"

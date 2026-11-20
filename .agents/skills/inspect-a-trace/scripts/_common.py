@@ -1,16 +1,16 @@
-"""Bootstrap helper shared by `read_trace.py` / `fetch_trace.py`: locate the
-Meiva source root so `base` is importable, before either script can import
-`base.paths.home.resolve_meiva_home` to resolve `$MEIVA_HOME` itself.
-
-Kept in its own file (rather than duplicated in both scripts, which is how
-this landed originally) so there is exactly one place that resolves this
-chicken-and-egg step: `resolve_meiva_home` cannot run until `base` is on
-`sys.path`, and `base` cannot be located without first deciding where to
-look. A script-mode sibling import needs its own guard under
-`PYTHONSAFEPATH=1` (see `meizel/language/no_script_sibling_imports.py`) — both
-callers insert their own directory onto `sys.path` before importing this
-module.
-"""
+# meiva:note
+# Bootstrap helper shared by `read_trace.py` / `fetch_trace.py`: locate the
+# Meiva source root so `base` is importable, before either script can import
+# `base.paths.home.resolve_meiva_home` to resolve `$MEIVA_HOME` itself.
+#
+# Kept in its own file (rather than duplicated in both scripts, which is how
+# this landed originally) so there is exactly one place that resolves this
+# chicken-and-egg step: `resolve_meiva_home` cannot run until `base` is on
+# `sys.path`, and `base` cannot be located without first deciding where to
+# look. A script-mode sibling import needs its own guard under
+# `PYTHONSAFEPATH=1` (see `scripts.rules.language.no_script_sibling_imports`) — both
+# callers insert their own directory onto `sys.path` before importing this
+# module.
 
 from __future__ import annotations
 
