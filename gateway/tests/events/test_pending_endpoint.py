@@ -255,3 +255,37 @@ def test_pending_upload_note_carries_upload_files_and_deterministic_id_order(
         }
     ]
     assert items[1]["files"] is None
+
+
+QUOTE_PAYLOAD: dict[str, object] = {
+    "source_agent_id": 7,
+    "source_item_id": "item-1",
+    "author": "Agent 7",
+    "text": "a selected passage",
+}
+
+
+def test_pending_carries_the_persisted_quote_and_null_without_one(
+    db_conn: psycopg.Connection, database: Database, event_bus: EventBus
+) -> None:
+    tid = _seed_agent(db_conn)
+    insert_inbound_message(
+        db_conn,
+        tid,
+        "with quote",
+        source="user",
+        payload={"quote": QUOTE_PAYLOAD},
+        bus=event_bus,
+        database=database,
+    )
+    insert_inbound_message(db_conn, tid, "plain", source="user", bus=event_bus, database=database)
+
+    with gateway_test_client() as client:
+        items = client.get(f"/api/agents/{tid}/pending").json()
+
+    assert [it["content"] for it in items] == ["with quote", "plain"]
+    quoted, plain = items
+    assert quoted["quote"]["author"] == "Agent 7"
+    assert quoted["quote"]["text"] == "a selected passage"
+    assert quoted["quote"]["source_agent_id"] == 7
+    assert plain["quote"] is None

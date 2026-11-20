@@ -1,15 +1,57 @@
 "use client";
 
 import { Clock, FileText } from "lucide-react";
+import type { ReactNode } from "react";
 import { useTranslations } from "next-intl";
 
 import { assetUrl } from "@/lib/transport/api";
-import { FLEX, MIN_W_0 } from "@/lib/layout/layout";
-import type { DeliveredUploadStatus, PendingInbound } from "@/lib/contracts/types";
+import { FLEX, FLEX_COL, MIN_W_0 } from "@/lib/layout/layout";
+import type { DeliveredUploadStatus, PendingInbound, Quote } from "@/lib/contracts/types";
 import { cn, formatFileSize } from "@/lib/format/utils";
 
 export function userPending(items: readonly PendingInbound[]): PendingInbound[] {
   return items.filter((it) => it.sender === "user" || Boolean(it.files?.length));
+}
+
+function PendingQuoteCard({ quote }: { quote: Quote }) {
+  const t = useTranslations("pendingStrip");
+  return (
+    <div
+      data-testid="pending-quote"
+      className={cn("rounded border border-border bg-muted/40 px-2 py-1 text-xs text-muted-foreground", MIN_W_0)}
+    >
+      <div className="truncate">{t("quoteSource", { author: quote.author })}</div>
+      <p className="line-clamp-2 whitespace-pre-wrap [overflow-wrap:anywhere] text-foreground/80">
+        {quote.text}
+      </p>
+    </div>
+  );
+}
+
+// meiva:note
+// A row with a quote stacks the quote card above the body; a row without one keeps the compact single line.
+function PendingRow({
+  quote,
+  testId,
+  children,
+}: {
+  quote: Quote | null | undefined;
+  testId?: string;
+  children: ReactNode;
+}) {
+  if (!quote) {
+    return (
+      <li data-testid={testId} className={cn("items-center gap-1.5 pl-4", FLEX, MIN_W_0)}>
+        {children}
+      </li>
+    );
+  }
+  return (
+    <li data-testid={testId} className={cn("gap-1 pl-4", FLEX, FLEX_COL, MIN_W_0)}>
+      <PendingQuoteCard quote={quote} />
+      <div className={cn("items-center gap-1.5", FLEX, MIN_W_0)}>{children}</div>
+    </li>
+  );
 }
 
 export function PendingStrip({
@@ -37,12 +79,9 @@ export function PendingStrip({
           <Clock className="size-3 shrink-0" />
           {t("pending", { count: totalCount })}
         </div>
-        <ul className="mt-0.5 max-h-24 overflow-y-auto space-y-0.5">
+        <ul className="mt-0.5 max-h-36 overflow-y-auto space-y-0.5">
           {showDelivering ? (
-            <li
-              data-testid="pending-delivering-batch"
-              className={cn("items-center gap-1.5 pl-4", FLEX, MIN_W_0)}
-            >
+            <PendingRow testId="pending-delivering-batch" quote={deliveringBatch.quote}>
               <span className="truncate">
                 {deliveringBatch.message_text ||
                   t("delivering", { count: deliveringBatch.files.length })}
@@ -61,7 +100,7 @@ export function PendingStrip({
                   </span>
                 ))}
               </span>
-            </li>
+            </PendingRow>
           ) : null}
           {queued.map((it, index) => {
             const prevHasFiles = index > 0 && Boolean(queued[index - 1]?.files?.length);
@@ -70,7 +109,7 @@ export function PendingStrip({
               ((Boolean(it.files?.length) || prevHasFiles) && it.content === "[files]") ||
               (it.source === "system:upload" && Boolean(it.files?.length));
             return (
-              <li key={it.id} className={cn("items-center gap-1.5 pl-4", FLEX, MIN_W_0)}>
+              <PendingRow key={it.id} quote={it.quote}>
                 {hideText ? null : <span className="truncate">{it.content}</span>}
                 {it.files?.length ? (
                   <span className={cn("shrink-0 flex-wrap gap-1", FLEX)}>
@@ -107,7 +146,7 @@ export function PendingStrip({
                     ))}
                   </span>
                 ) : null}
-              </li>
+              </PendingRow>
             );
           })}
         </ul>

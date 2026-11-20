@@ -1,5 +1,6 @@
 {
   "pending": "{count} pending",
   "imageAlt": "pending image",
-  "delivering": "Delivering {count} file(s)…"
+  "delivering": "Delivering {count} file(s)…",
+  "quoteSource": "Quoted · {author}"
 }
