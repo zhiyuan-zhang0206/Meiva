@@ -1,22 +1,39 @@
 """A real PostgreSQL reload must observe the result after a retried final flush."""
 
 import asyncio
-from collections.abc import Awaitable, Callable
+from collections.abc import AsyncIterator, Awaitable, Callable
 from pathlib import Path
 from typing import Literal
 from uuid import uuid4
 
 import pytest
+import pytest_asyncio
 from langchain_core.runnables import RunnableConfig
 from langgraph.checkpoint.base import ChannelVersions, Checkpoint, CheckpointMetadata
 from langgraph.checkpoint.postgres.aio import AsyncPostgresSaver
 from langgraph.graph import END, START, StateGraph
 from psycopg import AsyncConnection
-from psycopg.rows import DictRow
+from psycopg.rows import DictRow, dict_row
 from psycopg_pool import AsyncConnectionPool
 from typing_extensions import TypedDict
 
 from agent.startup import wrap_saver_writes_with_nstep_interval
+
+
+# meiva:note
+# The saver reads rows by column name, so it gets a pool that really yields dict rows: the shared
+# `aops_pool` is a tuple-row pool, and declaring it as a dict-row one would only hide the mismatch
+# from the type checker on the very write path this test exercises.
+@pytest_asyncio.fixture
+async def saver_pool(db_url: str) -> AsyncIterator[AsyncConnectionPool[AsyncConnection[DictRow]]]:
+    async with AsyncConnectionPool[AsyncConnection[DictRow]](
+        db_url,
+        min_size=1,
+        max_size=2,
+        kwargs={"autocommit": True, "prepare_threshold": None, "row_factory": dict_row},
+        open=False,
+    ) as pool:
+        yield pool
 
 
 class _EffectState(TypedDict):
@@ -48,11 +65,11 @@ class _FaultSaver(AsyncPostgresSaver):
 
 @pytest.mark.parametrize("failure", [None, "before_save", "after_save"])
 async def test_final_flush_retry_is_durable_and_idempotent(
-    aops_pool: AsyncConnectionPool[AsyncConnection[DictRow]],
+    saver_pool: AsyncConnectionPool[AsyncConnection[DictRow]],
     tmp_path: Path,
     failure: Literal["before_save", "after_save"] | None,
 ) -> None:
-    saver = _FaultSaver(aops_pool)
+    saver = _FaultSaver(saver_pool)
     saver.attempts = []
     await saver.setup()
     wrap_saver_writes_with_nstep_interval(saver, 4)
@@ -95,7 +112,7 @@ async def test_final_flush_retry_is_durable_and_idempotent(
 
     # This independently constructed graph cannot see the wrapper's in-memory
     # tail. The completed effect is initially absent from its durable snapshot.
-    cold_graph = builder.compile(checkpointer=AsyncPostgresSaver(aops_pool))  # pyright: ignore[reportUnknownMemberType]
+    cold_graph = builder.compile(checkpointer=AsyncPostgresSaver(saver_pool))  # pyright: ignore[reportUnknownMemberType]
     assert (await cold_graph.aget_state(config)).values["count"] == 0
     saver.attempts.clear()
     saver.failure = failure

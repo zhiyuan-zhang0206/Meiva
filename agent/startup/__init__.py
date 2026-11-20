@@ -17,7 +17,7 @@
 from __future__ import annotations
 
 import asyncio
-from collections.abc import Callable, Sequence
+from collections.abc import Awaitable, Callable, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
 from weakref import WeakValueDictionary
@@ -34,13 +34,6 @@ from base.agents.to_user.delivery.ports import AskUser
 from base.host.boundary.untyped import object_mapping, object_of
 from base.log import logger
 from base.native_process.runtime_incarnation import RuntimeIncarnation
-
-# meiva:note
-# LangGraph's `PUSH` channel name, read once: `langgraph.constants` resolves it through a module
-# `__getattr__` typed `Any`, so `object_of` hands back `object` and no unchecked value binds to a name.
-# A write whose key is this channel is a push, which does not advance the step. The site is listed in
-# `[ambient-state.sites]`: the value is a constant fixed by the library, not state this module sets.
-_PUSH: object = object_of(getattr, graph_constants, "PUSH")
 
 
 def wrap_saver_writes_with_loud_failure(
@@ -265,6 +258,12 @@ def wrap_saver_writes_with_nstep_interval(
         return
 
     orig_aput, orig_aput_writes = checkpointer.aput, checkpointer.aput_writes
+    # meiva:note
+    # LangGraph's `PUSH` channel name, read once per installed wrapper: `langgraph.constants`
+    # resolves it through a module `__getattr__` typed `Any`, so `object_of` hands back `object` and
+    # no unchecked value binds to a name. A write whose key is this channel is a push, which does
+    # not advance the step.
+    push: object = object_of(getattr, graph_constants, "PUSH")
     states: dict[str, _NstepCheckpointState] = {}
     # Flushes and graph writes serialize within one thread. Waiters keep their
     # lock alive; idle thread locks disappear instead of retaining every agent
@@ -346,7 +345,7 @@ def wrap_saver_writes_with_nstep_interval(
 
             write_step = (
                 state.last_aput_step
-                if any(key == _PUSH for key, _value in writes)
+                if any(key == push for key, _value in writes)
                 else state.last_aput_step + 1
             )
             if write_step % current_interval == 0:
@@ -371,9 +370,27 @@ def wrap_saver_writes_with_nstep_interval(
                 # checkpoint cannot be discarded by this completed flush.
                 del states[thread_id]
 
-    checkpointer.aput = _throttled_aput  # type: ignore[method-assign]
-    checkpointer.aput_writes = _throttled_aput_writes  # type: ignore[method-assign]
-    checkpointer._meiva_nstep_flush = _flush_final  # type: ignore[attr-defined]
+    _install_nstep_writes(checkpointer, _throttled_aput, _throttled_aput_writes, _flush_final)
+
+
+# meiva:note
+# Put the throttled writes and the final flush on the saver. Installing them is its own step so the
+# factory's statement budget pays for the closures it defines, not for the assignments that bind them.
+# The saver's methods are replaced on this one instance and the flush hook is an attribute the class
+# does not declare, which is what the checker refuses on each line.
+def _install_nstep_writes(
+    checkpointer: AsyncPostgresSaver,
+    aput: Callable[
+        [RunnableConfig, Checkpoint, CheckpointMetadata, ChannelVersions], Awaitable[RunnableConfig]
+    ],
+    aput_writes: Callable[
+        [RunnableConfig, Sequence[tuple[str, object]], str, str], Awaitable[None]
+    ],
+    flush: Callable[[str], Awaitable[None]],
+) -> None:
+    checkpointer.aput = aput  # pyright: ignore[reportAttributeAccessIssue]
+    checkpointer.aput_writes = aput_writes  # pyright: ignore[reportAttributeAccessIssue]
+    checkpointer._meiva_nstep_flush = flush  # pyright: ignore[reportAttributeAccessIssue]
 
 
 async def consume_claimed_inbounds(
