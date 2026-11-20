@@ -1255,9 +1255,15 @@ jobs:
           moves="$RUNNER_TEMP/pull-request-record.md"
           args=()
           if [ -f "$moves" ]; then args=(--symbol-moves-file "$moves"); fi
+          # A rule change waives growth: the policy, or a move of the checker's own pin. Any other
+          # `uv.lock` change (a dependency bump) leaves the checker as it was and waives nothing.
+          waive=('meizel.policy.toml')
+          if git diff "$LINT_STRUCTURE_BASELINE_BASE" HEAD -- uv.lock | grep -q '^[-+].*github\.com/zhiyuan-zhang0206/meizel'; then
+            waive+=('uv.lock')
+          fi
           env -u VIRTUAL_ENV uv run python -m meizel debt diff \
             --against "$LINT_STRUCTURE_BASELINE_BASE" --on-growth=fail \
-            --waive-if-changed 'uv.lock' 'meizel.policy.toml' \
+            --waive-if-changed "${waive[@]}" \
             ${args[@]+"${args[@]}"} | tee "$RUNNER_TEMP/debt-diff.log"
           status=$?
           grep '^base import rewritten:' "$RUNNER_TEMP/debt-diff.log" >> "$GITHUB_STEP_SUMMARY" || true

@@ -1,10 +1,10 @@
-"""Launcher of `meizel.state.turn_scoped_config`: no per-agent config through a process global.
-
-Run: `.venv/bin/python scripts/lint/turn_scoped_config.py [path ...]`. The rule and its
-rationale live in `meizel/state/turn_scoped_config.py`; this launcher only binds the
-application's config registry (which fields are per-agent) and enters a scratch home
-before that registry is imported.
-"""
+# meiva:note
+# Launcher of `meizel.state.turn_scoped_config`: no per-agent config through a process global.
+#
+# Run: `.venv/bin/python scripts/lint/turn_scoped_config.py [path ...]`. The rule and its
+# rationale live in `meizel.state.turn_scoped_config`; this launcher only binds the
+# application's config registry (which fields are per-agent) and enters a scratch home
+# before that registry is imported.
 
 from __future__ import annotations
 

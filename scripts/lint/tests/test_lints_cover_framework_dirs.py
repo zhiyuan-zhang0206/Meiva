@@ -11,7 +11,6 @@ from meizel import lint_common
 from meizel.checkout import roles_at, source_tree
 from meizel.owners import clock_lattice_cli
 from meizel.roles import framework_dirs
-from meizel.tests.synthetic import STANDALONE_PROJECT
 
 from scripts.lint import async_no_sync_blocking, termination_source
 from scripts.lint.diagnostics import (
@@ -24,6 +23,16 @@ from scripts.lint.diagnostics import (
 from scripts.lint.plugins import no_meiva_in_hooks_cli
 
 _REPO_ROOT = Path(__file__).resolve().parents[3]
+# meiva:note
+# The smallest standalone project the checker admits: hatchling wheel packages, a `cpu` extra,
+# strict basedpyright over its sources and tests, and pytest test paths.
+_STANDALONE_PROJECT = (
+    '[build-system]\nbuild-backend = "hatchling.build"\n'
+    '[tool.hatch.build.targets.wheel]\npackages = ["src/meiva_embedding_service"]\n'
+    "[project.optional-dependencies]\ncpu = []\n"
+    '[tool.basedpyright]\ntypeCheckingMode = "strict"\ninclude = ["src", "tests"]\n'
+    '[tool.pytest.ini_options]\ntestpaths = ["tests"]\n'
+)
 _FRAMEWORK_DIRS = framework_dirs(roles_at(_REPO_ROOT))
 
 
@@ -73,7 +82,7 @@ def _checker_checkout(tmp_path: Path) -> Path:
         "meizel.policy.toml": "",
         ".gitignore": ".venv/\nvendor/\n__pycache__/\n",
         "scripts/structure/baseline/README.md": "Empty fixture baseline.\n",
-        "engines/embed/pyproject.toml": STANDALONE_PROJECT.replace(
+        "engines/embed/pyproject.toml": _STANDALONE_PROJECT.replace(
             'include = ["src", "tests"]', 'include = ["src", "tests", "vendor"]'
         ),
         "engines/embed/uv.lock": "",

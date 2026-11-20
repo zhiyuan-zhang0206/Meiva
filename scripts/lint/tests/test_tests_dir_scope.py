@@ -13,9 +13,9 @@ import pathlib
 import subprocess
 
 import pytest
-
 from meizel.language import path_imports
 from meizel.state import ambient_state
+
 from scripts.lint import code_structure as lcs
 from scripts.structure import baseline_shards
 

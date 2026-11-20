@@ -74,11 +74,12 @@ from base.host.env.boot_actions import enter_scratch_home  # noqa: E402
 if __name__ == "__main__":
     enter_scratch_home()
 
+from meizel.roles import pytest_test_hosts  # noqa: E402
+
 from base.host.boundary.fields import str_field  # noqa: E402
 from base.host.boundary.json_values import is_object_dict, is_object_list  # noqa: E402
 from base.host.boundary.options import options  # noqa: E402
 from base.host.boundary.untyped import object_of  # noqa: E402
-from meizel.roles import pytest_test_hosts  # noqa: E402
 
 BEGIN = (
     "# BEGIN GENERATED pyright tests environments "

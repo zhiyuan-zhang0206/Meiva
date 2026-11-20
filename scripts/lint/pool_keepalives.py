@@ -1,53 +1,53 @@
-"""Forbid building a psycopg connection pool without TCP keepalives — where
-the structure gate's `postgres-dial` rule cannot see it.
-
-Run: `.venv/bin/python scripts/lint/pool_keepalives.py [path ...]` (defaults to
-the scope below; an explicit path that does not exist is an error (stderr +
-exit 1) rather than a silent no-op). Also run automatically via pre-commit hook.
-
-## Why
-
-Pool connections are **long-lived**, which is what makes a missing keepalive
-invisible until it costs minutes. `base/db/connections.py:PG_KEEPALIVE_KWARGS` documents the
-mechanism: a laptop-grade runner that sleeps or changes networks wakes holding
-dead TCP flows, and a query already in flight on a borrowed half-dead socket has
-no application-level bound — it waits out the OS TCP-retransmit timeout.
-
-`base.db.pool()` merges those kwargs for every sync pool and
-`base.db.async_pool()` for every async one (the agent host passes its
-`LoggingConnectionPool` in as the pool class). In the governed packages the
-structure gate's Rule 5 (`postgres-dial`, `meizel/owners/decisions.py`)
-already rejects any pool built outside `base/db/connections.py`, with no
-frozen exceptions left. This lint covers only what that rule does not see:
-`scripts/` (not a governed package) and the modules the decision allows to dial
-Postgres directly. A construction there must at least spell out
-`{..., **PG_KEEPALIVE_KWARGS}`: `PG_KEEPALIVE_KWARGS` stays the single
-definition of the *values* even where a site is not the single definition of
-the *call*.
-
-Without a check the invariant is "each call site remembered", which is exactly
-the state that produced the defect: the sync pools in `base/log/__init__.py`,
-`gateway/app.py` and `services/agent_runner/agent_ops/daemon.py` all wrote
-`kwargs={"prepare_threshold": None}` and stopped there, and PR #940's sweep of the
-bare `psycopg.connect` sites left them untouched because they are a different
-failure mode (a pool borrow is already capped by the pool's acquire timeout, so
-they never produced the boot-hang that PR fixed).
-
-## The rule
-
-Every call to a class whose name ends in `ConnectionPool` must pass a `kwargs=`
-dict containing `**PG_KEEPALIVE_KWARGS`. AST-based, so it sees through
-`AsyncConnectionPool[psycopg.AsyncConnection](...)` subscripts and subclasses
-(`LoggingConnectionPool`) without regex guesswork.
-
-Exempt: the decision's owner, `base/db/connections.py` (the definition of the
-posture — it builds the merged dict literal every other site inherits), and
-test/eval-fixture code under `tests/`, where a throwaway pool against a local
-test Postgres has nothing to survive. `ConnectionPool.check_connection(...)` and
-bare type annotations are not constructions and are not flagged.
-
-Error format `file:line: <message>` + non-zero exit.
-"""
+# meiva:note
+# Forbid building a psycopg connection pool without TCP keepalives — where
+# the structure gate's `postgres-dial` rule cannot see it.
+#
+# Run: `.venv/bin/python scripts/lint/pool_keepalives.py [path ...]` (defaults to
+# the scope below; an explicit path that does not exist is an error (stderr +
+# exit 1) rather than a silent no-op). Also run automatically via pre-commit hook.
+#
+# ## Why
+#
+# Pool connections are **long-lived**, which is what makes a missing keepalive
+# invisible until it costs minutes. `base/db/connections.py:PG_KEEPALIVE_KWARGS` documents the
+# mechanism: a laptop-grade runner that sleeps or changes networks wakes holding
+# dead TCP flows, and a query already in flight on a borrowed half-dead socket has
+# no application-level bound — it waits out the OS TCP-retransmit timeout.
+#
+# `base.db.pool()` merges those kwargs for every sync pool and
+# `base.db.async_pool()` for every async one (the agent host passes its
+# `LoggingConnectionPool` in as the pool class). In the governed packages the
+# structure gate's Rule 5 (`postgres-dial`, `meizel.owners.decisions`)
+# already rejects any pool built outside `base/db/connections.py`, with no
+# frozen exceptions left. This lint covers only what that rule does not see:
+# `scripts/` (not a governed package) and the modules the decision allows to dial
+# Postgres directly. A construction there must at least spell out
+# `{..., **PG_KEEPALIVE_KWARGS}`: `PG_KEEPALIVE_KWARGS` stays the single
+# definition of the *values* even where a site is not the single definition of
+# the *call*.
+#
+# Without a check the invariant is "each call site remembered", which is exactly
+# the state that produced the defect: the sync pools in `base/log/__init__.py`,
+# `gateway/app.py` and `services/agent_runner/agent_ops/daemon.py` all wrote
+# `kwargs={"prepare_threshold": None}` and stopped there, and PR #940's sweep of the
+# bare `psycopg.connect` sites left them untouched because they are a different
+# failure mode (a pool borrow is already capped by the pool's acquire timeout, so
+# they never produced the boot-hang that PR fixed).
+#
+# ## The rule
+#
+# Every call to a class whose name ends in `ConnectionPool` must pass a `kwargs=`
+# dict containing `**PG_KEEPALIVE_KWARGS`. AST-based, so it sees through
+# `AsyncConnectionPool[psycopg.AsyncConnection](...)` subscripts and subclasses
+# (`LoggingConnectionPool`) without regex guesswork.
+#
+# Exempt: the decision's owner, `base/db/connections.py` (the definition of the
+# posture — it builds the merged dict literal every other site inherits), and
+# test/eval-fixture code under `tests/`, where a throwaway pool against a local
+# test Postgres has nothing to survive. `ConnectionPool.check_connection(...)` and
+# bare type annotations are not constructions and are not flagged.
+#
+# Error format `file:line: <message>` + non-zero exit.
 
 from __future__ import annotations
 

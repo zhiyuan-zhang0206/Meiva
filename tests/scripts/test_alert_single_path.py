@@ -3,9 +3,10 @@ from __future__ import annotations
 import ast
 from pathlib import Path
 
-from base.config.service_read import ConfigAuthority
 from meizel.checkout import roles_at
 from meizel.roles import select_packages
+
+from base.config.service_read import ConfigAuthority
 
 _REPO = Path(__file__).resolve().parents[2]
 _ROOTS = select_packages(roles_at(_REPO), "application", "templates")

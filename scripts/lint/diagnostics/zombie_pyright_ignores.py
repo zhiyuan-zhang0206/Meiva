@@ -43,10 +43,11 @@ from base.host.env.boot_actions import enter_scratch_home  # noqa: E402
 if __name__ == "__main__":
     enter_scratch_home()
 
-from base.host.boundary.options import options  # noqa: E402
-from base.host.boundary.untyped import object_of  # noqa: E402
 from meizel import lint_common  # noqa: E402
 from meizel.checkout import source_tree  # noqa: E402
+
+from base.host.boundary.options import options  # noqa: E402
+from base.host.boundary.untyped import object_of  # noqa: E402
 
 _PYPROJECT_PATH = _REPO_ROOT / "pyproject.toml"
 _PYRIGHT_PATH = _REPO_ROOT / ".venv/bin/basedpyright"

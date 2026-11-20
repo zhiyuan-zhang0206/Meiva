@@ -95,11 +95,11 @@
 
 # ---------------------------------------------------------------------------------------------
 # Lint-rule allowances. A rule lets a file, a site or a name through only where it is listed
-# here, with the reason beside it. Each table is read by one rule (meizel/allowances.py owns the
+# here, with the reason beside it. Each table is read by one rule (meizel.allowances owns the
 # format); `python -m meizel policy diff` reports every change to any of them.
 # ---------------------------------------------------------------------------------------------
 
-# ambient (meizel/contracts/ambient_read.py): the kinds of state this repository keeps itself, and
+# ambient (meizel.contracts.ambient_read): the kinds of state this repository keeps itself, and
 # the names through which each is reached. Each key below declares one kind (the checker has no
 # such kinds of its own): a manifest's [state] and [roots] may name it, and an [ambient-readers.<kind>]
 # table may list readers of it. A module declares under [state] in its meizel.toml that it holds
@@ -125,7 +125,7 @@ bus = [
     "EventBus.from_settings()",
 ]
 
-# ambient-readers (meizel/contracts/ambient_read.py): repository functions and objects that read the
+# ambient-readers (meizel.contracts.ambient_read): repository functions and objects that read the
 # world on their caller's behalf, by kind. A call to one (or, without parentheses, an import or
 # attribute read of one) is an acquisition of that kind at the use, so a wrapper around `os.environ`,
 # `Path.home()` or the process settings does not hide the read behind a root that may make it. Each
@@ -137,7 +137,7 @@ bus = [
 # A call that passes that parameter a value is not an acquisition - the caller supplied what the
 # world would have answered - while an explicit `None` and a call that leaves it out both are. A name that is only imported where it is listed, or is gone, fails as
 # stale. What belongs here, and what is not followed:
-# meizel/docs/checker/ambient-readers.meiva.okf.md. Changing the list is a rule change.
+# https://github.com/zhiyuan-zhang0206/meizel/blob/main/meizel/docs/checker/ambient-readers.md. Changing the list is a rule change.
 [ambient-readers.environ]
 "base.host.env.registry.process_environment()" = "returns the live os.environ"
 "base.host.git.gitenv.git_env()" = { why = "copies the live os.environ when no mapping is passed", unless = "environ" }
@@ -172,7 +172,7 @@ bus = [
 "base.clock.Clock.from_settings()" = "reads the clock configuration from the process settings; the clock it builds runs on the system timers"
 "base.packages.plugins.flags.read_declared_flag()" = "reads a field of the process settings"
 
-# ambient-state (meizel/state/ambient_state): what module-level state may be let through.
+# ambient-state (meizel.state.ambient_state): what module-level state may be let through.
 # Callees that build a write-only handle, framework wiring, or a constant fixed by its literals.
 [ambient-state]
 sink-callees = [
@@ -336,7 +336,7 @@ config-readers = [
 "base/host/env/registry.py::hidden-singleton:session_forward_keys" = "a static view of the env registry"
 "base/native_process/pidfd.py::hidden-singleton:pidfd_libc" = "a ctypes loader of the pidfd syscalls: code, not state"
 
-# clock-lattice (meizel/owners/clock_lattice): where lattice vocabulary may be defined, and the
+# clock-lattice (meizel.owners.clock_lattice): where lattice vocabulary may be defined, and the
 # constants that use it without being part of the lattice (`path::NAME`).
 [clock-lattice]
 family-modules = [
@@ -361,7 +361,7 @@ family-modules = [
 "services/desktop/computer/config.py::_MIN_STALL_S" = "not a clock: a sanity floor on the operator-configured loop-stall window (settings.daemon.computer_use_loop_stall_s) — it only keeps a below-floor misconfiguration from restart-looping a healthy daemon, no lattice neighbour"
 "services/upkeep/ttl_reaper/shells.py::STALE_ROW_GRACE" = "independent: the stale sweep's exemption window for a young tracking row — the host's session listing can lag the row's creation, so a younger row is never judged; not a deadline and no lattice neighbour or ordering depends on it"
 
-# single-owner (meizel/owners/decisions): modules that bypass a decision's one owner, per decision.
+# single-owner (meizel.owners.decisions): modules that bypass a decision's one owner, per decision.
 [single-owner]
 postgres-dial-owners = [
     "base/db/connections.py",
@@ -375,7 +375,7 @@ postgres-dial-owners = [
 "base/host/db_authority/unit.py" = "probes an installed unit capability's own runner login at the served endpoint, the credential under test"
 "cli/commands/data_plane/cluster_instance.py" = "proves the running postmaster demands a password by dialing a role that cannot exist, with no credential"
 
-# no-os-environ (meizel/state/no_os_environ): environment variables that tests may set live, and
+# no-os-environ (meizel.state.no_os_environ): environment variables that tests may set live, and
 # the test files that exercise the settings-free boundary. Production files that read the
 # environment are declared under [roots] in their directory's meizel.toml.
 [no-os-environ]
@@ -408,7 +408,7 @@ rule-inputs = [
 "cli/tests/bootstrap/test_start_identity.py" = "Exercises the settings-free birth boundary; environment is the actual input before Settings exists."
 "tests/components/cli/test_start_repo_guard.py" = "Verifies checkout/home routing before Settings can be constructed."
 
-# turn-scoped-config (meizel/state/turn_scoped_config): files that read per-agent fields off the
+# turn-scoped-config (meizel.state.turn_scoped_config): files that read per-agent fields off the
 # singleton by design, and the two files that are the plugin-config mechanism.
 [turn-scoped-config]
 scan-dirs = [
@@ -432,7 +432,7 @@ rule-inputs = [
 "base/packages/plugins/config_registration.py" = "the plugin-config mechanism itself: the registry owns the process-global map, the view layers an agent's overrides over it"
 "base/packages/plugins/config_view.py" = "the plugin-config mechanism itself: the registry owns the process-global map, the view layers an agent's overrides over it"
 
-# type-checking (meizel/language/type_checking): files allowed an `if TYPE_CHECKING:` block.
+# type-checking (meizel.language.type_checking): files allowed an `if TYPE_CHECKING:` block.
 [type-checking.files]
 "agent/graph/__init__.py" = "PEP 562 lazy re-export: the node set is a heavy import on paths (the exec child) that never use the names; TYPE_CHECKING restores the real signatures for static checkers without putting them back on the import path (task #3585)."
 "agent/process_boot.py" = "Exec-child start path (task #3585): `agent/tests/execution/test_lazy_child_imports.py` probes that importing this module leaves the LM stack unloaded, while `boot_agent_scope` answers the caller's `AgentRuntime.llm` — the chat-model class is annotation-only here, and the model itself is built by `base.lm.factory` at that call site."
@@ -461,7 +461,7 @@ rule-inputs = [
 "cli/main.py" = "Settings-free entry: importing cli.main must not import base.log or base.config (the cli/tests/bootstrap defer_logging probe); the producer-factory and database-opener types of run_command are annotation-only here."
 "cli/database/__init__.py" = "`meiva --help` must not load the configuration chain: Database, DbConfig, ProcessDbGate and ClusterDirectUrl are annotation-only in the OpenDatabase alias."
 
-# approved-patches (meizel/contracts/analysis): test-support files that patch on purpose, none of whose
+# approved-patches (meizel.contracts.analysis): test-support files that patch on purpose, none of whose
 # patches is recorded. Only fixture infrastructure qualifies: a guard that keeps the suite off the host, the
 # entry of a subprocess the test starts, the global setup of the test runner. Production code and test modules
 # never do; a test that patches is converted. A file that patches nothing any more is `stale-approval`.

@@ -9,11 +9,10 @@ import meizel
 import pytest
 from meizel import allowances
 from meizel.contracts.analysis import Analysis, analyze, exempt_test_modules, load_policy
-from meizel.entry import open_repository
+from meizel.entry import main, open_repository
 from meizel.graph.model import Fact, FactKind
 from meizel.language.scan import typescript_files
 from meizel.roles import framework_dirs, parse_roles, select_packages
-from meizel.tests.synthetic import run, seat
 
 # meiva:note
 # This repository's own facts as the locality checker reads them. meizel is an installed dependency
@@ -79,7 +78,7 @@ APPROVED_PATCH_SITES = {
 def test_the_patch_sites_of_the_approved_files_are_pinned(
     capsys: pytest.CaptureFixture[str],
 ) -> None:
-    assert run(ROOT, "debt", "approved", "--json") == 0
+    assert main(["--repo", str(ROOT), "--jobs", "1", "debt", "approved", "--json"]) == 0
     found = {item["path"]: item["sites"] for item in json.loads(capsys.readouterr().out)}
     assert found == APPROVED_PATCH_SITES
 
@@ -150,7 +149,7 @@ PRODUCTION = {
 # control becomes a CI test.
 @pytest.fixture(scope="module")
 def analysis() -> Analysis:
-    universe = seat(ROOT)
+    universe = open_repository(ROOT).universe()
     policy, _ = load_policy(universe)
     scope = (
         None

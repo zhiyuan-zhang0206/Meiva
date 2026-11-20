@@ -14,9 +14,9 @@ from typing import Any, cast
 
 import pytest
 import yaml
+from meizel.budgets import budget_plans
 
 from base.host.proc import run_bounded
-from meizel.budgets import budget_plans
 from scripts.lint import code_structure as lcs
 from scripts.structure import baseline_shards
 

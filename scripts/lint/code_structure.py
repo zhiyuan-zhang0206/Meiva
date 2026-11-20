@@ -559,11 +559,11 @@ def main(
     targets, directory_targets = _budget_scopes(argv, repo_root)
     # meiva:note
     # Rule 5's table, read once per run from the checkout being judged: the decisions a policy
-    # declares and the exemptions it grants are values, so `meizel/owners/decisions.py` opens
+    # declares and the exemptions it grants are values, so `meizel.owners.decisions` opens
     # nothing and a synthetic root is judged by its own policy.
     # meiva:note
     # Rule 9's closed lists, read once per run beside Rule 5's table and for the same reason: the
-    # lists are a value the rule takes, so `meizel/state/ambient_state` opens nothing and a
+    # lists are a value the rule takes, so `meizel.state.ambient_state` opens nothing and a
     # synthetic root is judged by its own policy.
     try:
         policy = allowances.load(GitRepo(repo_root))

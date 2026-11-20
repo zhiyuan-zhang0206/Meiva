@@ -6,7 +6,6 @@ from pathlib import Path
 
 import pytest
 import yaml
-
 from meizel import lint_common
 from meizel.checkout import roles_at, source_tree
 from meizel.roles import framework_dirs

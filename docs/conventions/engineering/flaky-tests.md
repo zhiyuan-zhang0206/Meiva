@@ -21,7 +21,7 @@ reports are allowed; ordinary test jobs must execute tests. See the
 | Serialize timing races without causal investigation | not lintable (operational) | Existing: serial-group admission and exit policy |
 | Assume runner-load readiness | lintable with new rule | New: fake-timer-loop heuristic; bounded waits |
 | Pin wall-clock values or counts | lintable now | Existing: clock-lattice lint and topology tests |
-| Judge a duration by the real wall clock | lintable now | New: `meizel/owners/timing_judgement.py` (a bound loose enough not to flake passes the defect it names) |
+| Judge a duration by the real wall clock | lintable now | New: [`meizel/owners/timing_judgement.py`](https://github.com/zhiyuan-zhang0206/meizel/blob/main/meizel/owners/timing_judgement.py) (a bound loose enough not to flake passes the defect it names) |
 | Generate visual references outside the comparison runner | not lintable (operational) | Runner-native check and refresh workflow |
 | Race a timer against a deadline to reach the asserted branch | not lintable (operational) | Operational: section 11 (establish the input, do not win the race) |
 

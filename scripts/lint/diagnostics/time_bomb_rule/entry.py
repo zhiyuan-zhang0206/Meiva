@@ -9,6 +9,7 @@ import sys
 from pathlib import Path
 
 from meizel import checkout, lint_common, roles
+
 from scripts.lint.diagnostics.time_bomb_rule.index import Index
 from scripts.lint.diagnostics.time_bomb_rule.judgment import lint_source, lint_tests
 

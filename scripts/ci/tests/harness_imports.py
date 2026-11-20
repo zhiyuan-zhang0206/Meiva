@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from meizel.checkout import lanes_at
+
 from base import cluster, config, telemetry
 from base.clock import SYSTEM_TIMERS
 from base.clock.tests.fakes import system_clock
@@ -31,7 +33,6 @@ from base.native_process.loaded_commit import LoadedCommit
 from base.native_process.os_platform import Platform, raise_fd_limit
 from base.packages.plugins.config_registration import plugin_bootstrap_config
 from base.paths import meiva_home
-from meizel.checkout import lanes_at
 from scripts.structure.imports.fixture_scopes import (
     SCOPE_FILE,
     Scope,
