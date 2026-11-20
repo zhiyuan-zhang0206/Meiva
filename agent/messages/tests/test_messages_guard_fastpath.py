@@ -1,5 +1,5 @@
-from collections.abc import Callable
-from typing import Any, cast
+import types
+from collections.abc import Callable, Sequence
 
 import pytest
 from langchain_core.messages import (
@@ -7,6 +7,7 @@ from langchain_core.messages import (
     AIMessageChunk,
     AnyMessage,
     HumanMessage,
+    MessageLikeRepresentation,
     RemoveMessage,
 )
 from langgraph.graph.message import REMOVE_ALL_MESSAGES
@@ -18,7 +19,7 @@ from agent.messages.guard import (
 )
 from base.agents.messages import guard
 
-StateBuilder = Callable[[], tuple[list[Any], list[Any]]]
+StateBuilder = Callable[[], tuple[Sequence[object], Sequence[object]]]
 
 
 def _msgs(*specs: tuple[str, str]) -> list[AnyMessage]:
@@ -29,11 +30,16 @@ def _ids(messages: list[AnyMessage]) -> list[str | None]:
     return [m.id for m in messages]
 
 
-def _dump(messages: list[AnyMessage]) -> list[dict[str, Any]]:
+def _dump(messages: list[AnyMessage]) -> list[dict[str, object]]:
     return [m.model_dump() for m in messages]
 
 
-def _fast_path_disabled(*_args: Any, **_kwargs: Any) -> None:
+def _builder_id(build: object) -> str:
+    assert isinstance(build, types.FunctionType)
+    return build.__name__
+
+
+def _fast_path_disabled(*_args: object, **_kwargs: object) -> None:
     pass
 
 
@@ -45,35 +51,35 @@ def _fold(build: StateBuilder, *, fast: bool) -> list[AnyMessage]:
         return guarded_delta_reducer(*build())
 
 
-def _append_single() -> tuple[list[AnyMessage], list[Any]]:
+def _append_single() -> tuple[list[AnyMessage], Sequence[object]]:
     return _msgs(("b0", "zero"), ("b1", "one")), [[HumanMessage(content="n0", id="n0")]]
 
 
-def _append_batch() -> tuple[list[AnyMessage], list[Any]]:
+def _append_batch() -> tuple[list[AnyMessage], Sequence[object]]:
     return _msgs(("b0", "zero")), [
         [HumanMessage(content="n0", id="n0"), AIMessage(content="n1", id="n1")]
     ]
 
 
-def _append_duplicate_ids_in_one_write() -> tuple[list[AnyMessage], list[Any]]:
+def _append_duplicate_ids_in_one_write() -> tuple[list[AnyMessage], Sequence[object]]:
     return _msgs(("b0", "zero")), [
         [HumanMessage(content="v1", id="dup"), HumanMessage(content="v2", id="dup")]
     ]
 
 
-def _append_to_empty_history() -> tuple[list[AnyMessage], list[Any]]:
+def _append_to_empty_history() -> tuple[list[AnyMessage], Sequence[object]]:
     return [], [[HumanMessage(content="n0", id="n0")]]
 
 
-def _bare_message_write() -> tuple[list[AnyMessage], list[Any]]:
+def _bare_message_write() -> tuple[list[AnyMessage], Sequence[object]]:
     return _msgs(("b0", "zero")), [HumanMessage(content="n0", id="n0")]
 
 
-def _empty_write() -> tuple[list[AnyMessage], list[Any]]:
+def _empty_write() -> tuple[list[AnyMessage], Sequence[object]]:
     return _msgs(("b0", "zero")), [[]]
 
 
-def _append_then_modify_last_then_append() -> tuple[list[AnyMessage], list[Any]]:
+def _append_then_modify_last_then_append() -> tuple[list[AnyMessage], Sequence[object]]:
     return _msgs(("b0", "zero"), ("b1", "one")), [
         [HumanMessage(content="n0", id="n0")],
         [HumanMessage(content="n0-fixed", id="n0")],
@@ -81,7 +87,7 @@ def _append_then_modify_last_then_append() -> tuple[list[AnyMessage], list[Any]]
     ]
 
 
-def _wipe_then_append() -> tuple[list[AnyMessage], list[Any]]:
+def _wipe_then_append() -> tuple[list[AnyMessage], Sequence[object]]:
     base = _msgs(("b0", "zero"), ("b1", "one"))
     return base, [
         [
@@ -93,17 +99,17 @@ def _wipe_then_append() -> tuple[list[AnyMessage], list[Any]]:
     ]
 
 
-def _delta_form_current_then_append() -> tuple[list[Any], list[Any]]:
+def _delta_form_current_then_append() -> tuple[Sequence[object], Sequence[object]]:
     base = _msgs(("b0", "zero"), ("b1", "one"))
-    delta_current: list[Any] = [RemoveMessage(id="b1"), *base]
+    delta_current: list[object] = [RemoveMessage(id="b1"), *base]
     return delta_current, [[HumanMessage(content="n0", id="n0")]]
 
 
-def _chunk_write() -> tuple[list[AnyMessage], list[Any]]:
+def _chunk_write() -> tuple[list[AnyMessage], Sequence[object]]:
     return _msgs(("b0", "zero")), [[AIMessageChunk(content="chunk", id="ck0")]]
 
 
-def _dict_write() -> tuple[list[AnyMessage], list[Any]]:
+def _dict_write() -> tuple[list[AnyMessage], Sequence[object]]:
     return _msgs(("b0", "zero")), [[{"role": "user", "content": "raw", "id": "d0"}]]
 
 
@@ -122,7 +128,7 @@ _ACCEPT_BUILDERS = [
 ]
 
 
-@pytest.mark.parametrize("build", _ACCEPT_BUILDERS, ids=lambda f: f.__name__)
+@pytest.mark.parametrize("build", _ACCEPT_BUILDERS, ids=_builder_id)
 def test_fold_result_matches_slow_path(build: StateBuilder) -> None:
     fast = _fold(build, fast=True)
     slow = _fold(build, fast=False)
@@ -130,27 +136,27 @@ def test_fold_result_matches_slow_path(build: StateBuilder) -> None:
     assert _ids(fast) == _ids(slow)
 
 
-def _edit_middle_message() -> tuple[list[AnyMessage], list[Any]]:
+def _edit_middle_message() -> tuple[list[AnyMessage], Sequence[object]]:
     base = _msgs(("b0", "zero"), ("b1", "one"), ("b2", "two"))
     return base, [[HumanMessage(content="CHANGED", id="b1")]]
 
 
-def _targeted_removal() -> tuple[list[AnyMessage], list[Any]]:
+def _targeted_removal() -> tuple[list[AnyMessage], Sequence[object]]:
     base = _msgs(("b0", "zero"), ("b1", "one"), ("b2", "two"))
     return base, [[RemoveMessage(id="b0")]]
 
 
-def _delete_last_and_append() -> tuple[list[AnyMessage], list[Any]]:
+def _delete_last_and_append() -> tuple[list[AnyMessage], Sequence[object]]:
     base = _msgs(("b0", "zero"), ("b1", "one"))
     return base, [[RemoveMessage(id="b1"), HumanMessage(content="new", id="n0")]]
 
 
-def _wipe_reorder_survivors() -> tuple[list[AnyMessage], list[Any]]:
+def _wipe_reorder_survivors() -> tuple[list[AnyMessage], Sequence[object]]:
     base = _msgs(("b0", "zero"), ("b1", "one"))
     return base, [[RemoveMessage(id=REMOVE_ALL_MESSAGES), base[1], base[0]]]
 
 
-def _wipe_alter_survivor() -> tuple[list[AnyMessage], list[Any]]:
+def _wipe_alter_survivor() -> tuple[list[AnyMessage], Sequence[object]]:
     base = _msgs(("b0", "zero"), ("b1", "one"))
     tampered = HumanMessage(content="TAMPERED", id="b0")
     return base, [[RemoveMessage(id=REMOVE_ALL_MESSAGES), tampered]]
@@ -165,7 +171,7 @@ def _wipe_alter_survivor() -> tuple[list[AnyMessage], list[Any]]:
         _wipe_reorder_survivors,
         _wipe_alter_survivor,
     ],
-    ids=lambda f: f.__name__,
+    ids=_builder_id,
 )
 def test_violations_raise_with_and_without_fast_path(build: StateBuilder) -> None:
     with pytest.raises(MessagesMutationError):
@@ -175,10 +181,10 @@ def test_violations_raise_with_and_without_fast_path(build: StateBuilder) -> Non
 
 
 def test_pure_appends_never_consult_the_full_validators() -> None:
-    def forbidden(*args: Any, **kwargs: Any) -> None:
+    def forbidden(*args: object, **kwargs: object) -> None:
         raise AssertionError("full-path validation ran for a pure append")
 
-    writes: list[Any] = [
+    writes: list[object] = [
         [HumanMessage(content="n0", id="n0")],
         [HumanMessage(content="n1", id="n1")],
     ]
@@ -202,26 +208,26 @@ def test_fast_append_keeps_survivor_identity_and_never_mutates_the_base() -> Non
 
 
 def test_split_fold_equals_one_shot_fold_with_fast_path() -> None:
-    xs: list[Any] = [[HumanMessage(content="n0", id="n0")]]
-    ys: list[Any] = [[HumanMessage(content="n1", id="n1")]]
+    xs: list[object] = [[HumanMessage(content="n0", id="n0")]]
+    ys: list[object] = [[HumanMessage(content="n1", id="n1")]]
     one_shot = guarded_delta_reducer(_msgs(("b0", "zero")), xs + ys)
     split = guarded_delta_reducer(guarded_delta_reducer(_msgs(("b0", "zero")), xs), ys)
     assert _dump(split) == _dump(one_shot)
 
 
 def test_split_fold_with_a_slow_write_still_matches() -> None:
-    xs: list[Any] = [
+    xs: list[object] = [
         [HumanMessage(content="n0", id="n0")],
         [HumanMessage(content="n0-fixed", id="n0")],
     ]
-    ys: list[Any] = [[HumanMessage(content="n1", id="n1")]]
+    ys: list[object] = [[HumanMessage(content="n1", id="n1")]]
     one_shot = guarded_delta_reducer(_msgs(("b0", "zero")), xs + ys)
     split = guarded_delta_reducer(guarded_delta_reducer(_msgs(("b0", "zero")), xs), ys)
     assert _dump(split) == _dump(one_shot)
 
 
 def test_replaying_the_same_writes_is_deterministic() -> None:
-    def build_writes() -> list[Any]:
+    def build_writes() -> list[object]:
         return [
             [HumanMessage(content="n0", id="n0")],
             [HumanMessage(content="n0-fixed", id="n0")],
@@ -236,7 +242,7 @@ def test_replaying_the_same_writes_is_deterministic() -> None:
 
 
 def test_missing_ids_stay_on_the_slow_path() -> None:
-    def build() -> tuple[list[AnyMessage], list[Any]]:
+    def build() -> tuple[list[AnyMessage], Sequence[object]]:
         return _msgs(("b0", "zero")), [
             [HumanMessage(content="anonymous")],
             [HumanMessage(content="n0", id="n0")],
@@ -267,12 +273,14 @@ def test_single_apply_matches_add_messages_for_append_shapes() -> None:
     ]
     for delta in deltas:
         merged = guarded_add_messages(base, delta)
-        expected = cast(list[AnyMessage], guard.add_messages(cast(Any, base), cast(Any, delta)))
-        assert _dump(merged) == _dump(expected)
+        expected = guard.add_messages(
+            list[MessageLikeRepresentation](base), list[MessageLikeRepresentation](delta)
+        )
+        assert merged == expected
 
 
 def test_unknown_id_removal_declines_fast_path_and_matches_add_messages() -> None:
-    def hold() -> list[Any]:
+    def hold() -> list[MessageLikeRepresentation]:
         return [RemoveMessage(id="not-present")]
 
     with pytest.raises(ValueError, match="ID that doesn't exist"):
@@ -280,11 +288,11 @@ def test_unknown_id_removal_declines_fast_path_and_matches_add_messages() -> Non
     with pytest.raises(ValueError, match="ID that doesn't exist"):
         guarded_add_messages(_msgs(("b0", "zero")), hold())
     with pytest.raises(ValueError, match="ID that doesn't exist"):
-        guard.add_messages(cast(Any, _msgs(("b0", "zero"))), cast(Any, hold()))
+        guard.add_messages(list[MessageLikeRepresentation](_msgs(("b0", "zero"))), hold())
 
 
 def test_wipe_alone_declines_fast_path() -> None:
-    def build() -> tuple[list[Any], list[Any]]:
+    def build() -> tuple[Sequence[object], Sequence[object]]:
         return _msgs(("b0", "zero")), [[RemoveMessage(id=REMOVE_ALL_MESSAGES)]]
 
     folded = guarded_delta_reducer(*build())

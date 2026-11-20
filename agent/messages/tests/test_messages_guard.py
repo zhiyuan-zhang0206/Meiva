@@ -1,10 +1,9 @@
-from typing import Any, cast
-
 import pytest
 from langchain_core.messages import (
     AIMessage,
     AnyMessage,
     HumanMessage,
+    MessageLikeRepresentation,
     RemoveMessage,
     ToolMessage,
 )
@@ -39,8 +38,10 @@ def test_append_to_empty_history_passes():
 
 def test_append_behavior_matches_add_messages():
     before = _msgs(("a", "hi"), ("b", "there"))
-    delta: list[AnyMessage] = [HumanMessage(content="!", id="c")]
-    assert guarded_add_messages(before, delta) == add_messages(cast(Any, before), cast(Any, delta))
+    delta: list[MessageLikeRepresentation] = [HumanMessage(content="!", id="c")]
+    assert guarded_add_messages(before, delta) == add_messages(
+        list[MessageLikeRepresentation](before), delta
+    )
 
 
 def test_modify_last_passes():

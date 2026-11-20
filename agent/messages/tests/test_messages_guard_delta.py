@@ -15,12 +15,14 @@ and a forbidden edit raises through ``aupdate_state`` before anything is
 persisted.
 """
 
-from typing import Annotated, Any, TypedDict
+from collections.abc import Mapping, Sequence
+from typing import Annotated, Protocol, TypedDict
 
 import pytest
 from langchain_core.messages import (
     AIMessage,
     AnyMessage,
+    BaseMessage,
     HumanMessage,
     RemoveMessage,
     ToolMessage,
@@ -33,19 +35,22 @@ from langgraph.graph.message import (
     REMOVE_ALL_MESSAGES,
     _messages_delta_reducer,
 )
+from langgraph.types import StateSnapshot
 
 from agent.messages.guard import (
     MessagesMutationError,
     guarded_add_messages,
     guarded_delta_reducer,
 )
+from base.host.boundary.json_values import is_object_list
+from base.host.boundary.untyped import object_mapping
 
 
 def _msgs(*specs: tuple[str, str]) -> list[AnyMessage]:
     return [HumanMessage(content=c, id=i) for i, c in specs]
 
 
-def _ids(messages: list[AnyMessage]) -> list[str | None]:
+def _ids(messages: Sequence[BaseMessage]) -> list[str | None]:
     return [m.id for m in messages]
 
 
@@ -198,7 +203,47 @@ def test_stock_delta_reducer_has_no_invariant():
 # -- Graph-level: DeltaChannel messages reducer over InMemorySaver -----------
 
 
-def _build_app(saver: InMemorySaver, snapshot_frequency: int):
+class _Input(TypedDict, total=False):
+    messages: list[AnyMessage]
+    n: int
+    target: int
+
+
+class _Runner(Protocol):
+    async def ainvoke(
+        self, input: _Input, config: RunnableConfig, *, recursion_limit: int
+    ) -> object: ...
+
+    async def aget_state(self, config: RunnableConfig) -> StateSnapshot: ...
+
+    async def aupdate_state(
+        self, config: RunnableConfig, values: Mapping[str, object]
+    ) -> RunnableConfig: ...
+
+
+class _App:
+    def __init__(self, runner: _Runner) -> None:
+        self._runner = runner
+
+    async def start(self, cfg: RunnableConfig, target: int) -> None:
+        await self._runner.ainvoke(_Input(messages=[], n=0, target=target), cfg, recursion_limit=40)
+
+    async def advance(self, cfg: RunnableConfig, target: int) -> None:
+        await self._runner.ainvoke(_Input(target=target), cfg, recursion_limit=40)
+
+    async def read(self, cfg: RunnableConfig) -> list[BaseMessage]:
+        snapshot = await self._runner.aget_state(cfg)
+        stored = object_mapping(snapshot.values)["messages"]
+        assert is_object_list(stored)
+        messages = [m for m in stored if isinstance(m, BaseMessage)]
+        assert len(messages) == len(stored)
+        return messages
+
+    async def update(self, cfg: RunnableConfig, values: Mapping[str, object]) -> None:
+        await self._runner.aupdate_state(cfg, values)
+
+
+def _build_app(saver: InMemorySaver, snapshot_frequency: int) -> _App:
     class S(TypedDict):
         messages: Annotated[
             list[AnyMessage],
@@ -207,7 +252,7 @@ def _build_app(saver: InMemorySaver, snapshot_frequency: int):
         n: int
         target: int
 
-    def step(state: S) -> dict[str, Any]:
+    def step(state: S) -> dict[str, object]:
         n = state["n"]
         return {
             "messages": [
@@ -217,7 +262,7 @@ def _build_app(saver: InMemorySaver, snapshot_frequency: int):
             "n": n + 1,
         }
 
-    graph = StateGraph(S)
+    graph = StateGraph(S, input_schema=_Input)
     graph.add_node("step", step)  # pyright: ignore[reportUnknownMemberType]
     graph.add_edge(START, "step")
 
@@ -225,55 +270,42 @@ def _build_app(saver: InMemorySaver, snapshot_frequency: int):
         return "step" if state["n"] < state["target"] else END
 
     graph.add_conditional_edges("step", route)  # pyright: ignore[reportUnknownMemberType]
-    return graph.compile(checkpointer=saver)  # pyright: ignore[reportUnknownMemberType]
-
-
-async def _start(app: Any, cfg: RunnableConfig, target: int) -> None:
-    await app.ainvoke({"messages": [], "n": 0, "target": target}, cfg, recursion_limit=40)
-
-
-async def _advance(app: Any, cfg: RunnableConfig, target: int) -> None:
-    await app.ainvoke({"target": target}, cfg, recursion_limit=40)
-
-
-async def _read(app: Any, cfg: RunnableConfig) -> list[AnyMessage]:
-    state = await app.aget_state(cfg)
-    return list(state.values["messages"])
+    return _App(graph.compile(checkpointer=saver))  # pyright: ignore[reportUnknownMemberType]
 
 
 async def test_graph_append_replays_from_storage():
     saver = InMemorySaver()
     cfg: RunnableConfig = {"configurable": {"thread_id": "guard-delta-append"}}
     app = _build_app(saver, snapshot_frequency=1000)
-    await _start(app, cfg, 3)
+    await app.start(cfg, 3)
     fresh = _build_app(saver, snapshot_frequency=1000)  # new compile folds from storage
-    assert _ids(await _read(fresh, cfg)) == ["u0", "a0", "u1", "a1", "u2", "a2"]
+    assert _ids(await fresh.read(cfg)) == ["u0", "a0", "u1", "a1", "u2", "a2"]
 
 
 async def test_graph_tail_edit_survives_replay_and_continuation():
     saver = InMemorySaver()
     cfg: RunnableConfig = {"configurable": {"thread_id": "guard-delta-edit"}}
     app = _build_app(saver, snapshot_frequency=1000)
-    await _start(app, cfg, 2)
-    await app.aupdate_state(cfg, {"messages": [AIMessage(content="a1 fixed", id="a1")]})
+    await app.start(cfg, 2)
+    await app.update(cfg, {"messages": [AIMessage(content="a1 fixed", id="a1")]})
     fresh = _build_app(saver, snapshot_frequency=1000)
-    assert [(m.id, m.content) for m in await _read(fresh, cfg)] == [
+    assert [(m.id, m.content) for m in await fresh.read(cfg)] == [
         ("u0", "u0"),
         ("a0", "a0"),
         ("u1", "u1"),
         ("a1", "a1 fixed"),
     ]
-    await _advance(_build_app(saver, snapshot_frequency=1000), cfg, 3)
+    await _build_app(saver, snapshot_frequency=1000).advance(cfg, 3)
     fresh2 = _build_app(saver, snapshot_frequency=1000)
-    assert _ids(await _read(fresh2, cfg)) == ["u0", "a0", "u1", "a1", "u2", "a2"]
+    assert _ids(await fresh2.read(cfg)) == ["u0", "a0", "u1", "a1", "u2", "a2"]
 
 
 async def test_graph_full_wipe_reset_survives_replay_and_continuation():
     saver = InMemorySaver()
     cfg: RunnableConfig = {"configurable": {"thread_id": "guard-delta-wipe"}}
     app = _build_app(saver, snapshot_frequency=1000)
-    await _start(app, cfg, 2)
-    await app.aupdate_state(
+    await app.start(cfg, 2)
+    await app.update(
         cfg,
         {
             "messages": [
@@ -283,10 +315,10 @@ async def test_graph_full_wipe_reset_survives_replay_and_continuation():
         },
     )
     fresh = _build_app(saver, snapshot_frequency=1000)
-    assert [(m.id, m.content) for m in await _read(fresh, cfg)] == [("s1", "fresh start")]
-    await _advance(_build_app(saver, snapshot_frequency=1000), cfg, 3)
+    assert [(m.id, m.content) for m in await fresh.read(cfg)] == [("s1", "fresh start")]
+    await _build_app(saver, snapshot_frequency=1000).advance(cfg, 3)
     fresh2 = _build_app(saver, snapshot_frequency=1000)
-    assert [(m.id, m.content) for m in await _read(fresh2, cfg)] == [
+    assert [(m.id, m.content) for m in await fresh2.read(cfg)] == [
         ("s1", "fresh start"),
         ("u2", "u2"),
         ("a2", "a2"),
@@ -297,11 +329,11 @@ async def test_graph_forbidden_edit_raises_before_persisting():
     saver = InMemorySaver()
     cfg: RunnableConfig = {"configurable": {"thread_id": "guard-delta-violation"}}
     app = _build_app(saver, snapshot_frequency=1000)
-    await _start(app, cfg, 2)
+    await app.start(cfg, 2)
     with pytest.raises(MessagesMutationError):
-        await app.aupdate_state(cfg, {"messages": [AIMessage(content="changed", id="u1")]})
+        await app.update(cfg, {"messages": [AIMessage(content="changed", id="u1")]})
     fresh = _build_app(saver, snapshot_frequency=1000)
-    assert _ids(await _read(fresh, cfg)) == ["u0", "a0", "u1", "a1"]
+    assert _ids(await fresh.read(cfg)) == ["u0", "a0", "u1", "a1"]
 
 
 async def test_graph_snapshot_boundaries_do_not_change_replay():
@@ -311,11 +343,11 @@ async def test_graph_snapshot_boundaries_do_not_change_replay():
     saver = InMemorySaver()
     cfg: RunnableConfig = {"configurable": {"thread_id": "guard-delta-snap"}}
     app = _build_app(saver, snapshot_frequency=2)
-    await _start(app, cfg, 6)
-    await app.aupdate_state(cfg, {"messages": [AIMessage(content="a5 fixed", id="a5")]})
-    await _advance(_build_app(saver, snapshot_frequency=2), cfg, 7)
+    await app.start(cfg, 6)
+    await app.update(cfg, {"messages": [AIMessage(content="a5 fixed", id="a5")]})
+    await _build_app(saver, snapshot_frequency=2).advance(cfg, 7)
     fresh = _build_app(saver, snapshot_frequency=2)
-    messages = await _read(fresh, cfg)
+    messages = await fresh.read(cfg)
     assert messages[-1].id == "a6"
     assert any(m.id == "a5" and m.content == "a5 fixed" for m in messages)
     assert len(messages) == 14

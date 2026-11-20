@@ -15,7 +15,6 @@ agent/graph/hooks/tests
 agent/graph/llm/tests
 agent/graph/node_log/tests
 agent/graph/tests
-agent/messages/tests
 agent/tests
 base/agents
 base/cluster

@@ -7,11 +7,13 @@ from __future__ import annotations
 from datetime import UTC, datetime
 
 import pytest
+from langchain_core.messages import BaseMessage
 from langgraph.checkpoint.serde.jsonplus import JsonPlusSerializer
 
 from agent.messages import InboundTimes, exec_output_message, inbound_message, system_note_message
 from base.agents.messages.kwargs import ExecStatus, MeivaMsgType, NoteTag, read_meiva_kwargs
 from base.agents.messages.timestamp_policy import TimestampPolicy
+from base.host.boundary.untyped import object_of
 
 _PICKED_UP_AT = datetime(2026, 1, 1, tzinfo=UTC)
 
@@ -37,12 +39,15 @@ def test_stored_discriminator_is_plain_str() -> None:
         created_at=datetime.now(UTC),
     )
 
-    assert type(inbound.additional_kwargs["meiva_msg_type"]) is str  # pyright: ignore[reportUnknownArgumentType, reportUnknownMemberType]
-    assert inbound.additional_kwargs["meiva_msg_type"] == MeivaMsgType.INBOUND  # pyright: ignore[reportUnknownMemberType]
-    assert type(note.additional_kwargs["meiva_msg_type"]) is str  # pyright: ignore[reportUnknownArgumentType, reportUnknownMemberType]
-    assert type(note.additional_kwargs["meiva_note_tag"]) is str  # pyright: ignore[reportUnknownArgumentType, reportUnknownMemberType]
-    assert note.additional_kwargs["meiva_note_tag"] == NoteTag.MEMORY  # pyright: ignore[reportUnknownMemberType]
-    assert type(exec_out.additional_kwargs["meiva_msg_type"]) is str  # pyright: ignore[reportUnknownArgumentType, reportUnknownMemberType]
+    inbound_kwargs = read_meiva_kwargs(inbound)
+    note_kwargs = read_meiva_kwargs(note)
+    exec_kwargs = read_meiva_kwargs(exec_out)
+    assert type(inbound_kwargs.get("meiva_msg_type")) is str
+    assert inbound_kwargs.get("meiva_msg_type") == MeivaMsgType.INBOUND
+    assert type(note_kwargs.get("meiva_msg_type")) is str
+    assert type(note_kwargs.get("meiva_note_tag")) is str
+    assert note_kwargs.get("meiva_note_tag") == NoteTag.MEMORY
+    assert type(exec_kwargs.get("meiva_msg_type")) is str
 
 
 def test_checkpoint_roundtrip_no_custom_type() -> None:
@@ -52,8 +57,9 @@ def test_checkpoint_roundtrip_no_custom_type() -> None:
     note = system_note_message(
         content="n", tag=NoteTag.SECURITY, picked_up_at=_PICKED_UP_AT, inputs=TimestampPolicy.off()
     )
-    restored = serde.loads_typed(serde.dumps_typed(note))
-    tag = restored.additional_kwargs["meiva_note_tag"]
+    restored = object_of(serde.loads_typed, serde.dumps_typed(note))
+    assert isinstance(restored, BaseMessage)
+    tag = read_meiva_kwargs(restored).get("meiva_note_tag")
     assert type(tag) is str
     assert tag == NoteTag.SECURITY
 
@@ -69,7 +75,7 @@ def test_exec_output_sdk_calls_present_empty_and_omitted() -> None:
         body_start=0,
         created_at=datetime.now(UTC),
     )
-    assert sized.additional_kwargs["sdk_calls"] == [{"method": "files.read", "count": 3}]  # pyright: ignore[reportUnknownMemberType]
+    assert read_meiva_kwargs(sized).get("sdk_calls") == [{"method": "files.read", "count": 3}]
 
     empty = exec_output_message(
         content="ok",
@@ -79,7 +85,7 @@ def test_exec_output_sdk_calls_present_empty_and_omitted() -> None:
         body_start=0,
         created_at=datetime.now(UTC),
     )
-    assert empty.additional_kwargs["sdk_calls"] == []  # pyright: ignore[reportUnknownMemberType]
+    assert read_meiva_kwargs(empty).get("sdk_calls") == []
 
     unknown = exec_output_message(
         content="ok",
@@ -88,7 +94,7 @@ def test_exec_output_sdk_calls_present_empty_and_omitted() -> None:
         body_start=0,
         created_at=datetime.now(UTC),
     )
-    assert "sdk_calls" not in unknown.additional_kwargs  # pyright: ignore[reportUnknownMemberType]
+    assert "sdk_calls" not in read_meiva_kwargs(unknown)
 
 
 def test_exec_output_sdk_calls_survive_checkpoint_roundtrip() -> None:
@@ -102,8 +108,9 @@ def test_exec_output_sdk_calls_survive_checkpoint_roundtrip() -> None:
         body_start=0,
         created_at=datetime.now(UTC),
     )
-    restored = serde.loads_typed(serde.dumps_typed(msg))
-    assert restored.additional_kwargs["sdk_calls"] == [{"method": "files.read", "count": 3}]  # pyright: ignore[reportUnknownMemberType]
+    restored = object_of(serde.loads_typed, serde.dumps_typed(msg))
+    assert isinstance(restored, BaseMessage)
+    assert read_meiva_kwargs(restored).get("sdk_calls") == [{"method": "files.read", "count": 3}]
 
 
 def test_exec_output_records_status_start_and_body_offset() -> None:
