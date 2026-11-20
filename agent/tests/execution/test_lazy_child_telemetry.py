@@ -17,7 +17,9 @@ import os
 import subprocess
 import sys
 from pathlib import Path
-from typing import Any, cast
+
+from base.host.boundary.json_values import is_object_dict
+from base.host.boundary.untyped import object_of
 
 _REPO_ROOT = Path(__file__).resolve().parents[3]
 
@@ -55,7 +57,7 @@ def _run_probe(probe: str) -> object:
         check=False,
     )
     assert proc.returncode == 0, proc.stderr
-    return json.loads(proc.stdout.strip().splitlines()[-1])
+    return object_of(json.loads, proc.stdout.strip().splitlines()[-1])
 
 
 def test_zero_record_exit_does_not_import_telemetry_or_otel() -> None:
@@ -74,7 +76,8 @@ def test_identity_child_record_holds_without_exporter_imports() -> None:
     life so the exporter memory is never paid at boot (task #3816 M4b). The
     record is still delivered: it sits in the backend's bounded hold (`held`).
     """
-    result = cast("dict[str, Any]", _run_probe("identity_child_record"))
+    result = _run_probe("identity_child_record")
+    assert is_object_dict(result)
     assert result["deferred"] is True, "the identity child must arm the deferral"
     assert result["unfinished"] is True, "the boot record must have reached the deferred hold"
     assert result["forbidden"] == [], (

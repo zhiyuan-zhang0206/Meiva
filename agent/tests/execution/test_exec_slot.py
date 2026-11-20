@@ -1,10 +1,10 @@
 from pathlib import Path
-from typing import Annotated, Any
+from typing import Annotated
 
 import pytest
 from pydantic import BaseModel, Field
 
-import meiva
+import agent.execution.child as exec_child
 from agent.state import (
     BaseAgentState,
     CompactState,
@@ -36,25 +36,27 @@ def test_in_exec_turn_follows_the_bound_slot():
 
 
 def test_state_slots_do_not_exist_outside_an_exec_turn():
-    for read in (lambda: meiva.state, lambda: meiva.state_update):
+    sdk = exec_child.import_runtime(0.0).meiva
+    for read in (lambda: sdk.state, lambda: sdk.state_update):
         with pytest.raises(
             process_context.PluginStateOutsideTurnError, match="only inside execute_code"
         ):
             read()
     assert isinstance(process_context.PluginStateOutsideTurnError("x"), AttributeError)
-    assert not hasattr(meiva, "state")
-    assert not hasattr(meiva, "state_update")
+    assert not hasattr(sdk, "state")
+    assert not hasattr(sdk, "state_update")
 
 
 def test_state_slots_are_readable_once_bound_and_gone_after_unbind():
     process_context.set_state(BaseAgentState())
     process_context.set_state_update({})
-    assert meiva.state_update == {}
+    sdk = exec_child.import_runtime(0.0).meiva
+    assert sdk.state_update == {}
     process_context.unbind_exec_turn()
     with pytest.raises(process_context.PluginStateOutsideTurnError):
-        _ = meiva.state
+        _ = sdk.state
     with pytest.raises(process_context.PluginStateOutsideTurnError):
-        _ = meiva.state_update
+        _ = sdk.state_update
 
 
 def test_state_cannot_be_assigned_none():
@@ -86,8 +88,8 @@ def test_handle_view_and_delta_are_pure_over_the_graph_state():
     state_cls = build_agent_state(
         ExtensionRegistry((("demo", PluginContributions(state=(_SeenState,))),))
     )
-    fields: dict[str, Any] = {"demo__counter": 5, "demo__seen": {"a"}}
-    graph_state = state_cls(messages=[], halted=False, **fields)
+    fields: dict[str, object] = {"demo__counter": 5, "demo__seen": {"a"}}
+    graph_state = state_cls.model_validate({"messages": [], "halted": False, **fields})
     handle = PluginStateHandle(_SeenState, "demo")
 
     assert not process_context.in_exec_turn()

@@ -1,11 +1,12 @@
 from __future__ import annotations
 
 import json
+import math
 import os
 import subprocess
 import sys
+from collections.abc import Mapping
 from pathlib import Path
-from typing import Any, cast
 from uuid import UUID
 
 import pytest
@@ -18,6 +19,8 @@ from agent.execution.protocol import (
     read_result,
     write_request,
 )
+from base.host.boundary.json_values import is_object_dict
+from base.host.boundary.untyped import object_of
 from base.log.tests.log_records import LogRecords
 from base.native_process.tests.host_pipe import live_host_control
 from meiva.tests.fixtures.pin_agent import exec_context
@@ -57,12 +60,12 @@ def spawn_real_child(
     code: str,
     *,
     timeout_s: float = 60.0,
-    state: dict[str, Any] | None = None,
+    state: Mapping[str, object] | None = None,
     config_overlay: dict[str, object] | None = None,
     birth_config: dict[str, object] | None = None,
     write_request_file: bool = True,
     launcher_env: dict[str, str] | None = None,
-    context: dict[str, Any] | None = None,
+    context: Mapping[str, object] | None = None,
 ) -> tuple[subprocess.CompletedProcess[str], Path, Path]:
     exec_dir = tmp_path / "exec"
     request_path = make_request_path(exec_dir, agent_id=AGENT_ID, request_id=UUID(int=1))
@@ -121,7 +124,7 @@ def test_child_context_matches_the_hosts_context(tmp_path: Path) -> None:
     proc, _request, result = spawn_real_child(tmp_path, code, context=host.describe())
     assert proc.returncode == 0, proc.stderr
     assert read_result(result).kind == "done"
-    seen = json.loads(proc.stdout.strip().splitlines()[-1])
+    seen = object_of(json.loads, proc.stdout.strip().splitlines()[-1])
     assert seen == [AGENT_ID, True, "schedule:3", True, [AGENT_ID] * 3]
 
 
@@ -313,34 +316,43 @@ print("__HELP_OUTPUTS__" + json.dumps(outputs, sort_keys=True))
     output_line = next(
         line for line in proc.stdout.splitlines() if line.startswith("__HELP_OUTPUTS__")
     )
-    outputs = json.loads(output_line.removeprefix("__HELP_OUTPUTS__"))
+    outputs = object_of(json.loads, output_line.removeprefix("__HELP_OUTPUTS__"))
+    assert is_object_dict(outputs)
 
     _assert_help_shim_installed_beside_builtin(outputs)
     _assert_meiva_targets_render_meiva_help(outputs)
     _assert_foreign_targets_render_builtin_help(outputs)
 
 
-def _assert_help_shim_installed_beside_builtin(outputs: dict[str, Any]) -> None:
+def _captured_output(outputs: dict[str, object], key: str) -> str:
+    entry = outputs[key]
+    assert is_object_dict(entry)
+    text = entry["output"]
+    assert isinstance(text, str)
+    return text
+
+
+def _assert_help_shim_installed_beside_builtin(outputs: dict[str, object]) -> None:
     assert outputs["shim_is_global_builtin"] is False
     assert outputs["global_builtin_type"] == "_sitebuiltins._Helper"
 
 
-def _assert_meiva_targets_render_meiva_help(outputs: dict[str, Any]) -> None:
+def _assert_meiva_targets_render_meiva_help(outputs: dict[str, object]) -> None:
     assert outputs["meiva_files"] == outputs["expected_meiva_files"]
     assert outputs["agent_status"] == outputs["expected_agent_status"]
     assert outputs["two_meiva"] == outputs["expected_two_meiva"]
 
 
-def _assert_foreign_targets_render_builtin_help(outputs: dict[str, Any]) -> None:
+def _assert_foreign_targets_render_builtin_help(outputs: dict[str, object]) -> None:
     assert outputs["str"] == outputs["expected_str"]
     assert outputs["os_path"] == outputs["expected_os_path"]
     assert outputs["no_args"] == outputs["expected_no_args"]
-    assert "Welcome to Python" in outputs["no_args"]["output"]
+    assert "Welcome to Python" in _captured_output(outputs, "no_args")
     assert outputs["keyword"] == outputs["expected_keyword"]
     assert outputs["mixed"] == {
         "error": None,
-        "output": f"{outputs['expected_meiva_files']['output']}\n"
-        f"{outputs['expected_os_path']['output']}",
+        "output": f"{_captured_output(outputs, 'expected_meiva_files')}\n"
+        f"{_captured_output(outputs, 'expected_os_path')}",
     }
 
 
@@ -456,11 +468,10 @@ def test_child_boot_timing_emits_ready_duration(loguru_records: LogRecords) -> N
         exec_child.import_runtime(100.0), clients=ClientSet(), now=100.25
     )
 
-    [record] = [
-        record for record in loguru_records if record["extra"].get("event") == "exec_child_boot"
-    ]
-    approx = cast(Any, pytest.approx)
-    assert record["extra"]["duration_ms"] == approx(250.0)
+    [record] = loguru_records.extras(event="exec_child_boot")
+    duration = record["duration_ms"]
+    assert isinstance(duration, float)
+    assert math.isclose(duration, 250.0)
 
 
 def test_child_watchdog_hard_exits_124(tmp_path: Path) -> None:

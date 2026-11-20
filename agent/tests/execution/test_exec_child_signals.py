@@ -4,6 +4,7 @@ import subprocess
 import sys
 import time
 from pathlib import Path
+from typing import IO
 from uuid import UUID
 
 import pytest
@@ -16,6 +17,10 @@ from agent.execution.protocol import (
 )
 from agent.tests.execution.test_exec_child import AGENT_ID, child_env
 from meiva.tests.fixtures.pin_agent import exec_context
+
+
+def _text_stream(stream: IO[str]) -> IO[str]:
+    return stream
 
 
 def test_child_sigterm_writes_timed_out_envelope(tmp_path: Path) -> None:
@@ -42,15 +47,16 @@ def test_child_sigterm_writes_timed_out_envelope(tmp_path: Path) -> None:
         env=env,
     )
     assert proc.stdout is not None
+    stdout = _text_stream(proc.stdout)
     deadline = time.monotonic() + 30
     out = ""
     while "before sleep" not in out:
         if time.monotonic() > deadline:
             proc.kill()
             pytest.fail(f"child never reached the sleep; output so far: {out!r}")
-        out += proc.stdout.readline()
+        out += stdout.readline()
     os.kill(proc.pid, signal.SIGTERM)
-    out += proc.stdout.read()
+    out += stdout.read()
     assert proc.wait(timeout=60) == 0
     assert "before sleep" in out
     payload = read_result(result_path)
