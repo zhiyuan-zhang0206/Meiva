@@ -239,9 +239,10 @@ def test_turn_duration_rule_uses_prometheus_histogram() -> None:
     rules = {r["uid"]: r for r in load_rules()}
     rule = rules["meiva-ops-turn-duration-p95"]
     exprs = rule_query_exprs(rule, "prometheus")
-    assert len(exprs) == 1
-    assert "meiva_turn_end_duration_seconds_bucket" in exprs[0]
-    assert "histogram_quantile(0.95" in exprs[0]
+    assert len(exprs) == 2, "the p95 and its per-agent count"
+    for expr in exprs:
+        assert "meiva_turn_end_duration_seconds_bucket" in expr
+        assert "histogram_quantile(0.95" in expr
     assert threshold_params(rule) == [[75]]
     assert rule["for"] == "10m"
     assert rule["labels"]["notify_im"] == "false"
