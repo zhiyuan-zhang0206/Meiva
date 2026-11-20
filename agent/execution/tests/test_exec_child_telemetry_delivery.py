@@ -154,7 +154,9 @@ def _otlp_attributes(record: object) -> dict[str, object]:
         if "string_value" in value:
             attrs[key] = value["string_value"]
         elif "int_value" in value:
-            attrs[key] = value["int_value"]
+            int_value = value["int_value"]
+            assert isinstance(int_value, (int, str)), int_value
+            attrs[key] = int(int_value)
     return attrs
 
 
