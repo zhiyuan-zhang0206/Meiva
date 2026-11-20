@@ -231,7 +231,7 @@ def test_every_workflow_with_a_schedule_trigger_is_read_by_the_watch() -> None:
         for element in ast.walk(workflows_kw)
         if isinstance(element, ast.Name) and element.id in constants
     }
-    timed = set()
+    timed: set[str] = set()
     for path in sorted((_ENTRY.parents[3] / ".github" / "workflows").glob("*.yml")):
         triggers = yaml.safe_load(path.read_text()).get(True)
         if isinstance(triggers, dict) and "schedule" in triggers:
