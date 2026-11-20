@@ -34,6 +34,7 @@ from agent.state import (
     messages_annotation_key,
     resolve_reducer,
 )
+from base.agents.tests.langgraph_views import AsyncGraph, NodeGraphBuilder
 from base.host.boundary.json_values import is_object_list
 from base.host.boundary.untyped import object_mapping, object_sequence
 
@@ -108,25 +109,15 @@ class _FlippedInput(TypedDict):
     target: int
 
 
-class _CompiledGraph(Protocol):
-    async def ainvoke(
-        self, input: _FlippedInput, config: RunnableConfig
-    ) -> Mapping[str, object]: ...
+type _CompiledGraph = AsyncGraph[_FlippedInput]
 
 
 # meiva:note
-# The slice of the LangGraph builder this test drives. The library's own `add_node` and `compile`
-# overloads carry types it leaves unresolved, so the builder is held through the calls the test makes.
-class _GraphBuilder(Protocol):
-    def add_node(self, node: str, action: Runnable[_FlippedState, object]) -> object: ...
-
-    def add_edge(self, start_key: str, end_key: str) -> object: ...
-
+# The shared builder view plus the one extra call this test makes, a conditional edge.
+class _GraphBuilder(NodeGraphBuilder[Runnable[_FlippedState, object], _CompiledGraph], Protocol):
     def add_conditional_edges(
         self, source: str, path: Callable[[_FlippedState], str]
     ) -> object: ...
-
-    def compile(self, checkpointer: BaseCheckpointSaver[str]) -> _CompiledGraph: ...
 
 
 def _new_builder() -> _GraphBuilder:

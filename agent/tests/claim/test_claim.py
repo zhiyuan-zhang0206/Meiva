@@ -38,10 +38,10 @@ from agent.messages import NoteTag, system_note_message
 from agent.state import AgentState
 from agent.tests.claim.claim_status_support import compact_tail
 from agent.tests.claim.claim_status_support import running_agent as running_agent
-from agent.tests.command_update import command_update, update_messages
 from agent.tests.scripted_model import ScriptedChatModel
 from base.agents.context import MeivaContext
 from base.agents.messages.timestamp_policy import TimestampPolicy
+from base.agents.tests.langgraph_views import command_update, update_messages
 from base.agents.tests.units import spawn_agent
 from base.cluster.machine import MachineIdentityReader
 from base.cluster.machine.tests.identity import machine_identity as machine_identity

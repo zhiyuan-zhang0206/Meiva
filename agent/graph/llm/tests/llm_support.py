@@ -23,6 +23,7 @@ from agent.graph._callbacks import RedisStreamHandler
 from agent.graph.llm.goto import LlmGoto
 from base.agents.context import MeivaContext
 from base.agents.observation.turn_progress import TurnProgress
+from base.agents.tests.langgraph_views import command_update
 from base.clock import SYSTEM_TIMERS, Clock
 from base.clock.tests.seeded_rng import seeded_rng
 from base.config.tests.configuration import defaults
@@ -31,8 +32,7 @@ from base.db.code_version_gate import ProcessDbGate
 from base.events.live.bus import EventBus
 from base.events.live.publisher import AgentEventPublisher
 from base.events.tests.async_pubsub_view import async_messages
-from base.host.boundary.json_values import is_object_dict, is_object_list
-from base.host.boundary.untyped import object_of
+from base.host.boundary.json_values import is_object_list
 from base.host.env.agent_slices import AgentSlices
 from base.lm.catalog import ModelCatalog
 
@@ -133,14 +133,6 @@ def StubHandler(fail_with: BaseException | None = None) -> RedisStreamHandler:  
 # What the llm node returns: the update it writes to the graph state and where the graph goes next.
 NodeCommand = Command[LlmGoto]
 _ANY_MESSAGE = TypeAdapter[AnyMessage](AnyMessage)
-
-
-# meiva:note
-# What the node's Command writes to the graph state. langgraph types `Command.update` as `Any`; it is read as `object` and narrowed here, so a test asserts on a checked mapping.
-def command_update(result: NodeCommand) -> dict[str, object]:
-    update = object_of(getattr, result, "update")
-    assert is_object_dict(update), update
-    return update
 
 
 # meiva:note

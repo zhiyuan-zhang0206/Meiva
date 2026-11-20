@@ -19,10 +19,10 @@ from agent.graph.claim.tests.claim_support import insert_inbound_kind, make_runt
 from agent.graph.hooks.compact import COMPACT_MAX_ATTEMPTS
 from agent.state import AgentState
 from agent.tests.claim.claim_status_support import compact_tail, pair_compact_cycles
-from agent.tests.command_update import command_update, update_messages
 from agent.tests.scripted_model import ScriptedChatModel
 from base.agents.inbox.insert import insert_inbound_message
 from base.agents.messages.kwargs import NoteTag, read_meiva_kwargs
+from base.agents.tests.langgraph_views import command_update, update_messages
 from base.agents.tests.units import spawn_agent
 from base.cluster.machine import MachineIdentityReader
 from base.config.service_read import ConfigAuthority

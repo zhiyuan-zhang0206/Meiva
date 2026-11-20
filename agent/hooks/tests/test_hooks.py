@@ -10,22 +10,22 @@ own come from `framework_hooks()`.
 from unittest.mock import MagicMock
 
 import pytest
-from langchain_core.messages import BaseMessage, HumanMessage
+from langchain_core.messages import HumanMessage
 from langchain_core.runnables import RunnableConfig
 from langgraph.runtime import Runtime
 from langgraph.types import Command
 
 from agent.hooks import Hook, make_hook_runner
-from agent.nodes import NodeName
 from agent.state import AgentState
 from base.agents.context import MeivaContext
+from base.agents.tests.langgraph_views import command_update, update_messages
 from base.clock import SYSTEM_TIMERS, Clock
 from base.clock.tests.seeded_rng import seeded_rng
 from base.config.tests.configuration import defaults
 from base.db import Database
 from base.db.code_version_gate import ProcessDbGate
 from base.events.live.bus import EventBus
-from base.host.boundary.json_values import is_object_dict, is_object_list
+from base.host.boundary.json_values import is_object_dict
 from base.host.env.agent_slices import AgentSlices
 from base.log.tests.log_records import LogRecords
 from base.packages.plugin_providers import build_model_catalog
@@ -74,26 +74,6 @@ class _RecordHook(Hook):
     ) -> dict[str, object] | None:
         self._calls.append(self._tag)
         return None
-
-
-# meiva:note
-# A runner pass's update, narrowed: LangGraph types `Command.update` as `Any`, and a hook update is
-# `dict[str, object]` (the channel values differ by key).
-def _state_update(cmd: Command[NodeName]) -> dict[str, object]:
-    update = cmd.update
-    assert is_object_dict(update)
-    return update
-
-
-# meiva:note
-# The `messages` arm of an update as messages. `add_messages` answers whatever the hooks wrote, so
-# each element is checked rather than assumed.
-def _messages_of(update: dict[str, object]) -> list[BaseMessage]:
-    written = update["messages"]
-    assert is_object_list(written)
-    messages = [message for message in written if isinstance(message, BaseMessage)]
-    assert len(messages) == len(written)
-    return messages
 
 
 def _empty_state() -> AgentState:
@@ -172,7 +152,7 @@ async def test_runner_reducer_key_co_write_allowed(database_gate: ProcessDbGate)
 
     cmd = await runner(_empty_state(), _empty_runtime(database_gate=database_gate), _empty_config())
     # Both messages should be in the update (reducer merged them)
-    msgs = _messages_of(_state_update(cmd))
+    msgs = update_messages(command_update(cmd))
     assert [m.content for m in msgs] == ["from hook a", "from hook b"]
 
 

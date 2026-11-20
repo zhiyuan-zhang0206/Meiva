@@ -63,7 +63,6 @@ from agent.state import (
 )
 from agent.tests.state_slot_views import (
     GraphInput,
-    command_update,
     graph_builder,
     meiva_code_namespace,
     nonexistent_namespace,
@@ -74,6 +73,7 @@ from agent.tests.state_slot_views import (
 )
 from base.agents.context import MeivaContext
 from base.agents.context.identity import AgentIdentity
+from base.agents.tests.langgraph_views import command_update
 from base.clock import SYSTEM_TIMERS, Clock
 from base.clock.tests.seeded_rng import seeded_rng
 from base.cluster.machine.tests.identity import machine_identity as machine_identity

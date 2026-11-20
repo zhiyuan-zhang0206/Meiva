@@ -23,13 +23,14 @@ from agent.graph.claim.tests.harness_support import FakeEngine
 from agent.graph.claim.tests.harness_support import runtime as record_runtime
 from agent.graph.hooks.framework import hooks_at
 from agent.graph.hooks.node import hook_node
-from agent.graph.tests.node_output import first_prompt, update_of
+from agent.graph.tests.node_output import first_prompt
 from agent.messages import NoteTag, system_note_message
 from agent.state import AgentState, CapabilitiesState, ContextReset, SkillRecallState
 from base import paths
 from base.agents.context import MeivaContext
 from base.agents.context.identity import AgentIdentity
 from base.agents.messages.timestamp_policy import TimestampPolicy
+from base.agents.tests.langgraph_views import command_update
 from base.api_contracts.agent_contract import Harness
 from base.clock import SYSTEM_TIMERS, Clock
 from base.clock.tests.seeded_rng import seeded_rng
@@ -152,7 +153,7 @@ async def test_external_harness_cold_start_establishes_handoff_and_standing_note
     )
     command = await init_context_node(AgentState(), runtime, _config(tid))
 
-    assert "messages" not in update_of(command)
+    assert "messages" not in command_update(command)
     assert len(handoffs) == 1
     head_text = handoffs[0].render()
     assert all(
@@ -180,7 +181,7 @@ async def test_external_harness_cold_start_establishes_handoff_and_standing_note
             "Custom plugin standing note.",
         )
     )
-    first_update = update_of(command)
+    first_update = command_update(command)
     assert (
         isinstance(first_update["capabilities"], CapabilitiesState)
         and first_update["context_reset"] == ContextReset()
@@ -217,11 +218,11 @@ async def test_external_context_reset_preserves_the_tail_behind_handoff(
         _config(42),
     )
 
-    assert "messages" not in update_of(command)
+    assert "messages" not in command_update(command)
     prompt = first_prompt(command)
     assert "# Role & Operating Context — Agent #42" in prompt
     assert prompt.endswith("The real compact summary")
-    assert update_of(command)["context_reset"] == ContextReset()
+    assert command_update(command)["context_reset"] == ContextReset()
     assert command.goto == "before_turn"
 
 
@@ -322,7 +323,7 @@ async def test_existing_external_history_and_cursor_are_not_rewritten(
         _config(42),
     )
 
-    assert "messages" not in update_of(command)
+    assert "messages" not in command_update(command)
     assert state.messages[0].content == "Legacy local prompt"
 
 
@@ -333,7 +334,7 @@ async def test_the_built_in_loop_writes_no_cursor(
         AgentState(), _runtime(None, database_gate=database_gate), _config(42)
     )
 
-    update = update_of(command)
+    update = command_update(command)
     assert "messages" in update
     assert "harness_inputs" not in update
 
@@ -465,7 +466,7 @@ async def test_antigravity_claim_before_turn_harness_turn_recalls_skill_and_prep
 
     claim_cmd = await claim_node(AgentState(), runtime, cfg)
     assert claim_cmd.goto == "before_turn"
-    claim_update = update_of(claim_cmd)
+    claim_update = command_update(claim_cmd)
     harness_view = claim_update["harness_view"]
     assert is_object_list(harness_view)
     assert len(harness_view) == 1
@@ -476,7 +477,7 @@ async def test_antigravity_claim_before_turn_harness_turn_recalls_skill_and_prep
     )
     bt_cmd = await before_turn_fn(state_after_claim, runtime, cfg)
     assert bt_cmd.goto == "harness_turn"
-    bt_update = update_of(bt_cmd)
+    bt_update = command_update(bt_cmd)
     assert "please use beta to draft the release notes" in scorer_calls[0]
     assert bt_update["skill_recall"] == SkillRecallState(prompted={"beta"}, window=0)
     assert "meiva.skills.beta" in first_prompt(bt_cmd)

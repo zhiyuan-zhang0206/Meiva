@@ -42,8 +42,7 @@ from agent.messages.guard import (
     guarded_add_messages,
     guarded_delta_reducer,
 )
-from base.host.boundary.json_values import is_object_list
-from base.host.boundary.untyped import object_mapping
+from base.agents.tests.langgraph_views import update_messages
 
 
 def _msgs(*specs: tuple[str, str]) -> list[AnyMessage]:
@@ -233,11 +232,7 @@ class _App:
 
     async def read(self, cfg: RunnableConfig) -> list[BaseMessage]:
         snapshot = await self._runner.aget_state(cfg)
-        stored = object_mapping(snapshot.values)["messages"]
-        assert is_object_list(stored)
-        messages = [m for m in stored if isinstance(m, BaseMessage)]
-        assert len(messages) == len(stored)
-        return messages
+        return update_messages(snapshot.values)
 
     async def update(self, cfg: RunnableConfig, values: Mapping[str, object]) -> None:
         await self._runner.aupdate_state(cfg, values)

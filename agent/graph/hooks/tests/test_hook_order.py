@@ -9,10 +9,9 @@ from agent.hooks import Hook, make_hook_runner
 from agent.hooks.repair import repair_dangling_tool_pairing, unpaired_tool_calls
 from agent.state import BaseAgentState, PluginStateHandle, build_agent_state, guarded_add_messages
 from base.agents.context import MeivaContext
+from base.agents.tests.langgraph_views import command_update
 from base.clock import Clock
 from base.config.tests.configuration import defaults
-from base.host.boundary.json_values import is_object_dict
-from base.host.boundary.untyped import object_of
 from base.host.env.agent_slices import AgentSlices
 from base.packages.plugins.extensions import ExtensionRegistry, HookPoint, PluginContributions
 
@@ -89,8 +88,7 @@ async def test_repair_preserves_the_plugin_note_and_state_across_turns() -> None
     config: RunnableConfig = {"configurable": {"thread_id": "1"}}
 
     command = await run(state, runtime, config)
-    update = object_of(getattr, command, "update")
-    assert is_object_dict(update)
+    update = command_update(command)
     messages = guarded_add_messages(state.messages, update["messages"])
     committed = state.model_copy(update={**update, "messages": messages})
 

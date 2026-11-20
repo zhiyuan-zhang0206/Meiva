@@ -15,7 +15,7 @@ from psycopg_pool import AsyncConnectionPool
 
 from agent.graph.claim.harness_read_sink import ReadTimelineSink
 from agent.graph.claim.harness_turn import harness_turn_node
-from agent.graph.claim.tests.claim_support import snapshot_items, timeline_items, update_of
+from agent.graph.claim.tests.claim_support import snapshot_items, timeline_items
 from agent.graph.claim.tests.harness_support import (
     FakeEngine,
     RuntimeFixture,
@@ -37,6 +37,7 @@ from agent.ownership.tests.ownership_support import agent_row
 from agent.state import AgentState
 from base.agents.context import HostedTurnResources, MeivaContext
 from base.agents.history.transcript_timeline.items import ReplyPolicy
+from base.agents.tests.langgraph_views import command_update
 from base.api_contracts.agent_contract import Harness
 from base.clock import SYSTEM_TIMERS
 from base.clock.tests.seeded_rng import seeded_rng
@@ -119,7 +120,7 @@ async def test_harness_turn_does_not_inject_visibility_rule_and_corrects_once_on
         state, harness_runtime(engine_valid, agent_id=agent_id), config(agent_id)
     )
     assert cmd_valid.goto == "claim"
-    assert update_of(cmd_valid)["harness_inputs"] == []
+    assert command_update(cmd_valid)["harness_inputs"] == []
     [(prompt, _)] = engine_valid.submitted
     assert prompt == "hello from user"
 

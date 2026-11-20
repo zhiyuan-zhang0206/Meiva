@@ -23,9 +23,9 @@ from agent.graph.hooks.compact import auto_compact_will_fire, compact_reminder
 from agent.graph.hooks.tests.scripted_model import HangingSummarizer, ScriptedModel
 from agent.graph.interrupt.tests.queued_commands import queue_command
 from agent.graph.llm.node import llm_node
-from agent.graph.tests.node_output import reducer_messages_of, update_of
 from agent.state import AgentState, CompactState, checkpoint_msgpack_allowlist
 from base.agents.context import MeivaContext
+from base.agents.tests.langgraph_views import command_update, update_messages
 from base.agents.tests.units import spawn_agent
 from base.clock import SYSTEM_TIMERS, Clock
 from base.clock.tests.seeded_rng import seeded_rng
@@ -169,9 +169,9 @@ def _apply[N](state: AgentState, command: Command[N]) -> AgentState:
     # meiva:note
     # Applies a node's update the way the graph's reducers do: messages append through
     # `add_messages`, every other key replaces. `Command.update` is typed loosely upstream.
-    update = dict(update_of(command))
+    update = dict(command_update(command))
     if "messages" in update:
-        update["messages"] = add_messages(list(state.messages), [*reducer_messages_of(command)])
+        update["messages"] = add_messages(list(state.messages), [*update_messages(update)])
     return state.model_copy(update=update)
 
 

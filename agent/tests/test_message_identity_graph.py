@@ -17,6 +17,7 @@ from agent.state import BaseAgentState
 from base.agents.history.timeline import build_timeline_items
 from base.agents.messages.identity import normalize_stored_message_ids
 from base.agents.messages.timestamp_policy import TimestampPolicy
+from base.agents.tests.langgraph_views import NodeGraphBuilder, update_messages
 from base.clock import Clock
 from base.config import settings
 from base.host.boundary.json_values import is_object_list
@@ -45,15 +46,7 @@ class _CompiledGraph(Protocol):
     def get_state(self, config: RunnableConfig) -> _Snapshot: ...
 
 
-# meiva:note
-# The slice of the LangGraph builder this test drives. The library's own `add_node` and `compile`
-# overloads carry types it leaves unresolved, so the builder is held through the calls the test makes.
-class _GraphBuilder(Protocol):
-    def add_node(self, node: str, action: Runnable[_State, object]) -> object: ...
-
-    def add_edge(self, start_key: str, end_key: str) -> object: ...
-
-    def compile(self, checkpointer: InMemorySaver) -> _CompiledGraph: ...
+type _GraphBuilder = NodeGraphBuilder[Runnable[_State, object], _CompiledGraph]
 
 
 def _new_builder() -> _GraphBuilder:
@@ -61,11 +54,7 @@ def _new_builder() -> _GraphBuilder:
 
 
 def _stored_messages(app: _CompiledGraph, config: RunnableConfig) -> list[BaseMessage]:
-    stored = app.get_state(config).values["messages"]
-    assert is_object_list(stored)
-    messages = [m for m in stored if isinstance(m, BaseMessage)]
-    assert len(messages) == len(stored)
-    return messages
+    return update_messages(app.get_state(config).values)
 
 
 @pytest.mark.parametrize("durability", ["sync", "async", "exit"])
