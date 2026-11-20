@@ -16,7 +16,6 @@ from typing import override
 import psycopg
 
 from base.agents.to_user import WorkspaceFileRequest, to_user_limits
-from base.clock.tests.manual_timers import ManualTimers
 from base.config import settings
 from ops.to_user import WorkspaceFileError, answer_workspace_file
 
@@ -39,9 +38,7 @@ def remote_workspace_ops_server(remote_home: Path, expected_agent_id: int) -> Ge
                 _ = self.wfile.write(b"Wrong agent routed to remote machine")
                 return
             try:
-                answer = answer_workspace_file(
-                    req, home=remote_home, limits=limits, timers=ManualTimers()
-                )
+                answer = answer_workspace_file(req, home=remote_home, limits=limits)
             except WorkspaceFileError as exc:
                 self.send_response(exc.status_code)
                 self.send_header("Content-Type", "text/plain")

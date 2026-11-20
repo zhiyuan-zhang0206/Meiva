@@ -54,24 +54,16 @@ ranged read whose runner predates `byte_range` and refuses it.
 
 ## Workspace browsing
 
-The panel's file viewer reads directories and names through the same
-resolution, roots and refusals, and the same forwarding to the owning runner
-(`mode="list"`/`"search"` on `/to-user/workspace-file`):
-
-- `GET /api/agents/{id}/files/list?path=<dir>` lists one directory; without
-  `path` it lists the agent's workspace root. The root itself may be listed (a
-  file read may not name it), and `parent` is null at a root the viewer may not
-  climb out of. Directories come first, then files, each by name; a symlinked
-  child appears only when its target stays inside an allowed root. At most 1,000
-  entries come back (`truncated` says more exist), because the tree renders a row
-  per entry and the forwarded answer is one JSON body; search reaches the rest.
-- `GET /api/agents/{id}/files/search?q=<text>&limit=<n>&path=<dir>` is
-  quick-open: a case-insensitive match of `q` against paths relative to `path`
-  (default the workspace root), substring hits ranked before in-order
-  subsequence hits. The walk never enters dot-directories, `node_modules` or
-  `__pycache__`, never follows a directory symlink, and stops after 50,000 files
-  or 2 seconds, so one keystroke stays interactive on a large tree; `truncated`
-  marks a stopped walk or more matches than `limit` (default 50, at most 200).
+`GET /api/agents/{id}/files/list?path=<dir>` lists one directory for the panel's
+file viewer, through the same resolution, roots and refusals as a file read and
+the same forwarding to the owning runner (`mode="list"` on
+`/to-user/workspace-file`). Without `path` it lists the agent's workspace root.
+The root itself may be listed (a file read may not name it), and `parent` is
+null at a root the viewer may not climb out of. Directories come first, then
+files, each by name; a symlinked child appears only when its target stays inside
+an allowed root. At most 1,000 entries come back (`truncated` says more exist),
+because the tree renders a row per entry and the forwarded answer is one JSON
+body.
 
 ## Durable user communication
 

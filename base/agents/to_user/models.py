@@ -44,26 +44,17 @@ class ToUserReadRequest(BaseModel):
 
 
 # meiva:note
-# The longest quick-open query, and how many results one search returns by default and at most.
-MAX_SEARCH_QUERY_LENGTH = 256
-DEFAULT_SEARCH_LIMIT = 50
-MAX_SEARCH_LIMIT = 200
-
-
-# meiva:note
-# One read the gateway forwards to the machine that owns the workspace. `list` and `search` read
-# an empty `path` as the workspace root; `query`/`limit` belong to `search` and `byte_range` (the
-# browser's `Range` header, verbatim) to `raw`. The gateway sends unset fields as absent, so a
-# runner that predates a field still accepts the reads it already knew.
+# One read the gateway forwards to the machine that owns the workspace. `list` reads an empty
+# `path` as the workspace root; `byte_range` (the browser's `Range` header, verbatim) belongs to
+# `raw`. The gateway sends unset fields as absent, so a runner that predates a field still accepts
+# the reads it already knew.
 # meiva:link gateway/agents/docs/to-user-resources.md
 class WorkspaceFileRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
     agent_id: int = Field(gt=0)
     path: str = Field(max_length=MAX_FILE_LENGTH)
-    mode: Literal["content", "raw", "list", "search"]
+    mode: Literal["content", "raw", "list"]
     custom_cwd: str | None = None
-    query: str | None = Field(default=None, min_length=1, max_length=MAX_SEARCH_QUERY_LENGTH)
-    limit: int | None = Field(default=None, ge=1, le=MAX_SEARCH_LIMIT)
     byte_range: str | None = Field(default=None, max_length=256)
 
 
@@ -96,21 +87,4 @@ class WorkspaceDirListing(BaseModel):
     path: str
     parent: str | None
     entries: list[WorkspaceDirEntry]
-    truncated: bool
-
-
-class WorkspaceSearchHit(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-    path: str
-    name: str
-    relative: str
-
-
-# meiva:note
-# `truncated` says matches may be missing: the scan stopped at its bound, or more files matched
-# than the limit returned.
-class WorkspaceFileSearch(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-    query: str
-    results: list[WorkspaceSearchHit]
     truncated: bool
