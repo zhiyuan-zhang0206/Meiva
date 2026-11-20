@@ -653,9 +653,6 @@ root = "agent/graph/node_log/tests"
 root = "agent/graph/tests"
 
 [[tool.pyright.executionEnvironments]]
-root = "agent/messages/tests"
-
-[[tool.pyright.executionEnvironments]]
 root = "agent/tests"
 
 [[tool.pyright.executionEnvironments]]
