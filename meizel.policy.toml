@@ -1,3 +1,45 @@
+# sections: the tables of this repository's own rules (`scripts/rules/`), section by section, with the
+# shape each is written in. The checker reads and reviews them like its own tables (`policy diff`, the
+# `Policy-Removal` gate) without knowing what they mean; `"*"` is a reasons table per governed name.
+[sections.ambient-state]
+sink-callees = "names"
+sink-callee-suffixes = "names"
+wiring-callees = "names"
+pure-callees = "names"
+pure-chain-callees = "names"
+skill-script-patterns = "names"
+config-modules = "names"
+config-readers = "names"
+sink-facades = "reasons"
+pure-repo-callees = "reasons"
+sites = "reasons"
+
+[sections.clock-lattice]
+family-modules = "names"
+independent-clocks = "reasons"
+
+[sections.no-os-environ]
+test-only-dirs = "names"
+rule-inputs = "names"
+provider-key-vars = "reasons"
+live-read-vars = "reasons"
+files = "reasons"
+
+[sections.path-imports]
+scope = "names"
+skills-scope = "names"
+
+[sections.single-owner]
+"*" = "reasons"
+postgres-dial-owners = "names"
+
+[sections.turn-scoped-config]
+scan-dirs = "names"
+extra-files = "names"
+rule-inputs = "names"
+files = "reasons"
+plugin-mechanism-files = "reasons"
+
 [external]
 "agent/execution/child.py" = "executes the agent-authored code of one execute_code call"
 "agent/graph/tests/test_agent_traceback.py" = "executes agent-style code to check how its traceback is rendered"
@@ -20,6 +62,8 @@
 "gateway/inspect/_plugin_metrics.py" = "loads discovered plugins, built-in or user-installed; core does not depend on them"
 "gateway/inspect/_plugin_widgets.py" = "loads discovered plugins, built-in or user-installed; core does not depend on them"
 "gateway/schedules/router.py" = "compiles a user-written schedule script to reject syntax errors"
+"scripts/rules/state/ambient_state/tests/test_task_owner.py" = "executes sample source the lint rule is exercised on"
+"scripts/rules/state/ambient_state/tests/test_thread_owner.py" = "executes sample source the lint rule is exercised on"
 "scripts/audit/module_moves.py" = "imports the old and new module names the operator passes on the command line"
 "scripts/ci/tests/test_watch_pr.py" = "executes the watcher template the workflow embeds"
 "scripts/host_ops/update_schedule_script.py" = "compiles a user-written schedule script before replacing the stored copy"
@@ -172,7 +216,7 @@ bus = [
 "base.clock.Clock.from_settings()" = "reads the clock configuration from the process settings; the clock it builds runs on the system timers"
 "base.packages.plugins.flags.read_declared_flag()" = "reads a field of the process settings"
 
-# ambient-state (meizel.state.ambient_state): what module-level state may be let through.
+# ambient-state (scripts.rules.state.ambient_state): what module-level state may be let through.
 # Callees that build a write-only handle, framework wiring, or a constant fixed by its literals.
 [ambient-state]
 sink-callees = [
@@ -336,7 +380,7 @@ config-readers = [
 "base/host/env/registry.py::hidden-singleton:session_forward_keys" = "a static view of the env registry"
 "base/native_process/pidfd.py::hidden-singleton:pidfd_libc" = "a ctypes loader of the pidfd syscalls: code, not state"
 
-# clock-lattice (meizel.owners.clock_lattice): where lattice vocabulary may be defined, and the
+# clock-lattice (scripts.rules.owners.clock_lattice): where lattice vocabulary may be defined, and the
 # constants that use it without being part of the lattice (`path::NAME`).
 [clock-lattice]
 family-modules = [
@@ -361,7 +405,7 @@ family-modules = [
 "services/desktop/computer/config.py::_MIN_STALL_S" = "not a clock: a sanity floor on the operator-configured loop-stall window (settings.daemon.computer_use_loop_stall_s) — it only keeps a below-floor misconfiguration from restart-looping a healthy daemon, no lattice neighbour"
 "services/upkeep/ttl_reaper/shells.py::STALE_ROW_GRACE" = "independent: the stale sweep's exemption window for a young tracking row — the host's session listing can lag the row's creation, so a younger row is never judged; not a deadline and no lattice neighbour or ordering depends on it"
 
-# single-owner (meizel.owners.decisions): modules that bypass a decision's one owner, per decision.
+# single-owner (scripts.rules.owners.decisions): modules that bypass a decision's one owner, per decision.
 [single-owner]
 postgres-dial-owners = [
     "base/db/connections.py",
@@ -375,7 +419,7 @@ postgres-dial-owners = [
 "base/host/db_authority/unit.py" = "probes an installed unit capability's own runner login at the served endpoint, the credential under test"
 "cli/commands/data_plane/cluster_instance.py" = "proves the running postmaster demands a password by dialing a role that cannot exist, with no credential"
 
-# no-os-environ (meizel.state.no_os_environ): environment variables that tests may set live, and
+# no-os-environ (scripts.rules.state.no_os_environ): environment variables that tests may set live, and
 # the test files that exercise the settings-free boundary. Production files that read the
 # environment are declared under [roots] in their directory's meizel.toml.
 [no-os-environ]
@@ -408,7 +452,7 @@ rule-inputs = [
 "cli/tests/bootstrap/test_start_identity.py" = "Exercises the settings-free birth boundary; environment is the actual input before Settings exists."
 "tests/components/cli/test_start_repo_guard.py" = "Verifies checkout/home routing before Settings can be constructed."
 
-# turn-scoped-config (meizel.state.turn_scoped_config): files that read per-agent fields off the
+# turn-scoped-config (scripts.rules.state.turn_scoped_config): files that read per-agent fields off the
 # singleton by design, and the two files that are the plugin-config mechanism.
 [turn-scoped-config]
 scan-dirs = [

@@ -21,7 +21,7 @@ reports are allowed; ordinary test jobs must execute tests. See the
 | Serialize timing races without causal investigation | not lintable (operational) | Existing: serial-group admission and exit policy |
 | Assume runner-load readiness | lintable with new rule | New: fake-timer-loop heuristic; bounded waits |
 | Pin wall-clock values or counts | lintable now | Existing: clock-lattice lint and topology tests |
-| Judge a duration by the real wall clock | lintable now | New: [`meizel/owners/timing_judgement.py`](https://github.com/zhiyuan-zhang0206/meizel/blob/main/meizel/owners/timing_judgement.py) (a bound loose enough not to flake passes the defect it names) |
+| Judge a duration by the real wall clock | lintable now | New: [`scripts/rules/owners/timing_judgement.py`](../../../scripts/rules/owners/timing_judgement.py) (a bound loose enough not to flake passes the defect it names) |
 | Generate visual references outside the comparison runner | not lintable (operational) | Runner-native check and refresh workflow |
 | Race a timer against a deadline to reach the asserted branch | not lintable (operational) | Operational: section 11 (establish the input, do not win the race) |
 
@@ -252,7 +252,7 @@ time deterministically with fake timers; never assume a machine will reach a
 state by a fixed wall-clock instant.
 
 **Lintability — lintable now.** The
-[clock-lattice lint](https://github.com/zhiyuan-zhang0206/meizel/blob/main/meizel/owners/clock_lattice.py) rejects
+[clock-lattice lint](../../../scripts/rules/owners/clock_lattice.py) rejects
 lattice-vocabulary constants outside approved lattice modules, while
 `base/deploy/tests/test_timing_topology.py` verifies the declared relations.
 Pinned-count gates remain a review heuristic.
@@ -349,11 +349,11 @@ a hang` on the line, with a bound far outside any real duration. A hang guard at
 budget is a flake with a comment.
 
 **Lintability — lintable now.**
-[`meizel/owners/timing_judgement.py`](https://github.com/zhiyuan-zhang0206/meizel/blob/main/meizel/owners/timing_judgement.py) reports
+[`scripts/rules/owners/timing_judgement.py`](../../../scripts/rules/owners/timing_judgement.py) reports
 every wall-clock comparison in an `assert`; the sites that predate the rule are keyed in
 `meizel.timing_baseline.json` at the repository root, so the gate reds only on new ones. The
 rule's parts, and who owns the decision when it fires, are in
-[the rule's own document](https://github.com/zhiyuan-zhang0206/meizel/blob/main/meizel/docs/lint/timing-judgement.md).
+[the rule's own document](../../../scripts/rules/docs/timing-judgement.md).
 
 ## 11. Do not race a timer to produce the state you assert on
 

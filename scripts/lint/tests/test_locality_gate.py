@@ -11,9 +11,9 @@ import pathlib
 import subprocess
 
 import pytest
-from meizel.owners import decisions
 
 from scripts.lint import code_structure as lcs
+from scripts.rules.owners import decisions
 from scripts.structure import baseline_shards, locality
 
 

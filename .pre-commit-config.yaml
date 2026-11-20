@@ -159,7 +159,7 @@ repos:
       # live in scripts/lint/timing_judgement_baseline.json. See scripts/lint/timing_judgement.py.
       - id: lint-timing-judgement
         name: lint wall-clock judgements in tests (assert a counted fact)
-        entry: .venv/bin/python -m meizel.owners.timing_judgement_cli --only
+        entry: .venv/bin/python -m scripts.rules.owners.timing_judgement_cli --only
         language: system
         files: ^(meizel\.timing_baseline\.json|uv\.lock|.*\.py)$
 
@@ -169,7 +169,7 @@ repos:
       # The lint enforces the restore-before-import guard; see the script header.
       - id: lint-no-script-sibling-imports
         name: lint script sibling imports (PYTHONSAFEPATH guard)
-        entry: .venv/bin/python -m meizel.language.no_script_sibling_imports --only
+        entry: .venv/bin/python -m scripts.rules.language.no_script_sibling_imports --only
         language: system
         types: [python]
 
@@ -503,7 +503,7 @@ repos:
       - id: lint-clock-lattice
         name: lint clock lattice (lattice-vocabulary clocks only in the family modules)
         language: system
-        entry: .venv/bin/python -m meizel.owners.clock_lattice_cli --only
+        entry: .venv/bin/python -m scripts.rules.owners.clock_lattice_cli --only
         files: ^(meizel\.policy\.toml|.*\.py)$
 
       # A test that exactly asserts a value derived from a repo fixed-instant

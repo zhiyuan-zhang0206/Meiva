@@ -13,10 +13,9 @@ import re
 from pathlib import Path
 from typing import TypeGuard
 
-from meizel.language import path_imports
-from meizel.owners import decisions
-from meizel.state import ambient_state
-
+from scripts.rules.language import path_imports
+from scripts.rules.owners import decisions
+from scripts.rules.state import ambient_state
 from scripts.structure import baseline_shards
 
 SECTIONS = ("owner_bypasses",)

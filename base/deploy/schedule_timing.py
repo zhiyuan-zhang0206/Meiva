@@ -9,7 +9,7 @@
 #
 # Registered in `base/deploy/timing.py::CLOCKS` with the
 # `NO_PROGRESS_TIMEOUT_S < SCHEDULE_STALL_ALERT_AFTER_S` constraint;
-# `meizel.owners.clock_lattice` treats this module as a family module, so
+# `scripts.rules.owners.clock_lattice` treats this module as a family module, so
 # lattice vocabulary may live here and only here.
 #
 # Deliberately separate from `base/deploy/timing.py`: the schedule manager runs under

@@ -1,8 +1,8 @@
 # meiva:note
-# Launcher of `meizel.state.no_os_environ`: runtime config goes through `Settings`.
+# Launcher of `scripts.rules.state.no_os_environ`: runtime config goes through `Settings`.
 #
 # Run: `.venv/bin/python scripts/lint/no_os_environ.py [path ...]`. The rule, its allowlist
-# and its rationale live in `meizel.state.no_os_environ`; this launcher only binds the
+# and its rationale live in `scripts.rules.state.no_os_environ`; this launcher only binds the
 # application's config registry (the env names `Settings` owns, which Rule 2 reads) and
 # enters a scratch home before that registry is imported.
 
@@ -19,7 +19,7 @@ from base.host.env.boot_actions import enter_scratch_home  # noqa: E402
 if __name__ == "__main__":
     enter_scratch_home()
 
-from meizel.state import no_os_environ as rule  # noqa: E402 - standalone script
+from scripts.rules.state import no_os_environ as rule  # noqa: E402 - standalone script
 
 
 def settings_managed_aliases() -> frozenset[str]:

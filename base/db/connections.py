@@ -328,7 +328,7 @@ def connect(
 # module still resolves a home and imports settings at load, so a process
 # that must do neither — the restricted restore worker, the throwaway-Postgres
 # tooling — dials on its own; see the `postgres-dial` allowed map in
-# meizel.owners.decisions.)
+# scripts.rules.owners.decisions.)
 #
 # The door owns the transport posture, the same as `connect()`'s:
 # `prepare_threshold=None`, `PG_KEEPALIVE_KWARGS`, and the statement ceiling

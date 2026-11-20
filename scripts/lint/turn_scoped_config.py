@@ -1,8 +1,8 @@
 # meiva:note
-# Launcher of `meizel.state.turn_scoped_config`: no per-agent config through a process global.
+# Launcher of `scripts.rules.state.turn_scoped_config`: no per-agent config through a process global.
 #
 # Run: `.venv/bin/python scripts/lint/turn_scoped_config.py [path ...]`. The rule and its
-# rationale live in `meizel.state.turn_scoped_config`; this launcher only binds the
+# rationale live in `scripts.rules.state.turn_scoped_config`; this launcher only binds the
 # application's config registry (which fields are per-agent) and enters a scratch home
 # before that registry is imported.
 
@@ -19,7 +19,7 @@ if __name__ == "__main__":
 _REPO_ROOT = Path(__file__).resolve().parent.parent.parent
 sys.path.insert(0, str(_REPO_ROOT))
 
-from meizel.state import turn_scoped_config as rule  # noqa: E402 - standalone script
+from scripts.rules.state import turn_scoped_config as rule  # noqa: E402 - standalone script
 
 
 def main(argv: list[str]) -> int:

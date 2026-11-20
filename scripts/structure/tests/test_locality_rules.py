@@ -5,8 +5,8 @@ import pathlib
 
 import pytest
 from meizel import allowances
-from meizel.owners import decisions
 
+from scripts.rules.owners import decisions
 from scripts.structure import locality
 
 
@@ -17,7 +17,10 @@ def _parse(source: str) -> ast.Module:
 # meiva:note
 # The decisions this module measures against are the caller's value, as in the gate: the policy read
 # here names one owner and grants nothing, so no test depends on the real exemption list.
-_POLICY = '[single-owner]\npostgres-dial-owners = ["base/db/connections.py"]\n'
+_POLICY = (
+    '[sections.single-owner]\n"*" = "reasons"\npostgres-dial-owners = "names"\n\n'
+    '[single-owner]\npostgres-dial-owners = ["base/db/connections.py"]\n'
+)
 _TABLE = decisions.decision_table(allowances.parse(_POLICY)[0])
 
 

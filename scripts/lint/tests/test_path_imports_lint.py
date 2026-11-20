@@ -14,7 +14,10 @@ _SKILL = "meiva_builtins/skills/demo/reference/run.py"
 # meiva:note
 # The rule reads the policy of the checkout it judges, so a fixture checkout states the two lists
 # `meizel.policy.toml` owns instead of borrowing this repository's.
-_POLICY = '[path-imports]\nscope = ["meiva_builtins/"]\nskills-scope = ["meiva_builtins/skills/"]\n'
+_POLICY = (
+    '[sections.path-imports]\nscope = "names"\nskills-scope = "names"\n\n'
+    '[path-imports]\nscope = ["meiva_builtins/"]\nskills-scope = ["meiva_builtins/skills/"]\n'
+)
 
 
 def _write(root: pathlib.Path, name: str, content: str) -> None:

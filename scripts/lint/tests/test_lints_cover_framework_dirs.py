@@ -9,7 +9,6 @@ from pathlib import Path
 import pytest
 from meizel import lint_common
 from meizel.checkout import roles_at, source_tree
-from meizel.owners import clock_lattice_cli
 from meizel.roles import framework_dirs
 
 from scripts.lint import async_no_sync_blocking, termination_source
@@ -21,6 +20,7 @@ from scripts.lint.diagnostics import (
     time_bomb,
 )
 from scripts.lint.plugins import no_meiva_in_hooks_cli
+from scripts.rules.owners import clock_lattice_cli
 
 _REPO_ROOT = Path(__file__).resolve().parents[3]
 # meiva:note
