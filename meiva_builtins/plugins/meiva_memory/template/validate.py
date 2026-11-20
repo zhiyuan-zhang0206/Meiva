@@ -267,7 +267,7 @@ def validate_file(
 
 def note_char_cap() -> int:
     """The commit hook's per-note character cap: same variable, same default."""
-    return int(os.environ.get("MEIVA_MEMORY_NOTE_CAP", "8000"))
+    return int(os.environ.get("MEIVA_MEMORY_NOTE_CAP") or "8000")
 
 
 def is_note_name(fname: str) -> bool:
