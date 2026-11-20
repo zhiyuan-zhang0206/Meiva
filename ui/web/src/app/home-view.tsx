@@ -276,11 +276,16 @@ export function HomePageView(props: HomePageProps) {
             isLarge
               ? () => {
                   useWorkspaceFileStore.getState().closeFile();
+                  useWorkspaceFileStore.getState().setMaximized(false);
                   contextPanel.setOpen(false);
                   if (inspector.open) inspector.toggle();
                 }
               : undefined
           }
+          // meiva:note
+          // Filling the page hides the conversation and its header bar, where a collapsed sidebar
+          // reopens: the panel's own bar carries that control then.
+          onOpenSidebar={isLarge && viewerMaximized && sidebar.collapsed ? () => sidebar.setCollapsed(false) : undefined}
         />
       </ErrorBoundary>
     ) : null;

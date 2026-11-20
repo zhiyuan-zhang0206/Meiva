@@ -22,12 +22,13 @@ import { cn } from "@/lib/format/utils";
 // panel, a tree on the left once the viewer fills the page — then the file on show, or the
 // inspector while that mode is on.
 // meiva:link ui/web/src/docs/frontend-state/shared-context/shared-context.md
-export function SharedContextPanel({ agentId, document, mobile, onClose, onCollapse }: {
+export function SharedContextPanel({ agentId, document, mobile, onClose, onCollapse, onOpenSidebar }: {
   agentId: number;
   document: ReturnType<typeof useToUser>;
   mobile: boolean;
   onClose: () => void;
   onCollapse?: () => void;
+  onOpenSidebar?: () => void;
 }) {
   const t = useTranslations("toUser");
   const tInspector = useTranslations("inspector");
@@ -81,6 +82,7 @@ export function SharedContextPanel({ agentId, document, mobile, onClose, onColla
         inspecting={inspecting}
         onInspect={mobile ? undefined : toggleInspection}
         onCollapse={onCollapse}
+        onOpenSidebar={onOpenSidebar}
       />
       {inspecting || maximized ? null : <PathBar agentId={agentId} documentModifiedAt={document.data?.modified_at} />}
       <div className={cn(MIN_H_0, FLEX_1, FLEX)}>

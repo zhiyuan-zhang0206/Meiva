@@ -1,6 +1,6 @@
 "use client";
 
-import { Maximize2, Minimize2, PanelRight, ScanSearch, X } from "lucide-react";
+import { Maximize2, Minimize2, PanelLeft, PanelRight, ScanSearch, X } from "lucide-react";
 import { useTranslations } from "next-intl";
 
 import { useWorkspaceFileStore, type WorkspaceFileTarget } from "@/lib/context/workspace-file-store";
@@ -28,13 +28,15 @@ const iconButton = "shrink-0 rounded p-1 text-muted-foreground hover:bg-accent h
 // collapsing the panel. Selecting a tab is a history entry like opening a file; Back and Forward
 // are the browser's.
 // meiva:link ui/web/src/docs/frontend-state/shared-context/shared-context.md
-export function PanelBar({ agentId, mobile, inspecting, onInspect, onCollapse }: {
+export function PanelBar({ agentId, mobile, inspecting, onInspect, onCollapse, onOpenSidebar }: {
   agentId: number;
   mobile: boolean;
   inspecting: boolean;
   onInspect?: () => void;
   onCollapse?: () => void;
+  onOpenSidebar?: () => void;
 }) {
+  const tNav = useTranslations("nav");
   const t = useTranslations("toUser");
   const tInspector = useTranslations("inspector");
   const tabs = useWorkspaceFileStore((s) => s.tabs[agentId] ?? EMPTY);
@@ -44,6 +46,11 @@ export function PanelBar({ agentId, mobile, inspecting, onInspect, onCollapse }:
   const shownFile = activeFile?.agentId === agentId ? activeFile : null;
   return (
     <div data-testid="panel-bar" className={cn("shrink-0 items-center gap-1 px-2", COLUMN_TITLE_BAR_CLASS, FLEX)}>
+      {onOpenSidebar ? (
+        <button type="button" aria-label={tNav("openSidebar")} onClick={onOpenSidebar} className={iconButton}>
+          <PanelLeft aria-hidden className="size-3.5" />
+        </button>
+      ) : null}
       {inspecting ? (
         <span className="px-1 text-[11px] text-muted-foreground">{tInspector("title")}</span>
       ) : (
