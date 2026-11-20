@@ -34,8 +34,14 @@ file on the machine by default, with the narrower boundary kept as a setting.
 ## Consequences
 
 - Anyone signed in to the gateway can read any file the gateway's and runners'
-  accounts can read, including credentials under the home directory.
-  `workspaces` is the switch for a cluster that should not allow that.
+  accounts can read, including credentials under the home directory (`~/.ssh`
+  and the like) on every machine. That includes every agent holding cluster
+  credentials, not only people: an agent reads another machine's files through
+  the same routes, and the evaluation guard that keeps isolated agents out
+  trusts the caller to name itself. `workspaces` is the switch for a cluster
+  that should not allow that.
+- `st_size` does not bound a read: procfs and sysfs files report 0 and stream
+  far more, so every read stops one byte past its limit.
 - During a rolling update, content and listing reads forwarded to a runner that
   predates the field fail until it updates. Raw reads are asked again without
   the newer fields, and are served within workspace reach.

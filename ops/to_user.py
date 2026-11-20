@@ -358,6 +358,17 @@ def resolve_existing_workspace_file(
     return target
 
 
+# meiva:note
+# Reads stop one byte past the limit: `st_size` does not bound a file, since procfs and sysfs files
+# report 0 and can stream far more (`/proc/self/pagemap`; review of PR #9115, 2026-11-21).
+def _read_at_most(target: Path, limit: int, refusal: str) -> bytes:
+    with target.open("rb") as handle:
+        raw = handle.read(limit + 1)
+    if len(raw) > limit:
+        raise WorkspaceFileError(413, refusal)
+    return raw
+
+
 def _read_file_payload(
     target: Path,
     ext: str,
@@ -374,7 +385,7 @@ def _read_file_payload(
     if size > MAX_WORKSPACE_FILE_BYTES:
         raise WorkspaceFileError(413, "File exceeds the 1MB size limit")
 
-    raw_bytes = target.read_bytes()
+    raw_bytes = _read_at_most(target, MAX_WORKSPACE_FILE_BYTES, "File exceeds the 1MB size limit")
     try:
         return raw_bytes.decode("utf-8"), False
     except UnicodeDecodeError:
@@ -419,12 +430,9 @@ def read_workspace_file_raw(
         raise WorkspaceFileError(
             413, f"Referenced file exceeds the {max_bytes}-byte resource limit"
         )
-    raw = target.read_bytes()
-    if len(raw) > max_bytes:
-        raise WorkspaceFileError(
-            413, f"Referenced file exceeds the {max_bytes}-byte resource limit"
-        )
-    return raw
+    return _read_at_most(
+        target, max_bytes, f"Referenced file exceeds the {max_bytes}-byte resource limit"
+    )
 
 
 # meiva:note
