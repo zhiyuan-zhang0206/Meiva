@@ -18,10 +18,10 @@ _SCRIPT_REPOSITORY_ROOT = Path(__file__).resolve().parents[2]
 if str(_SCRIPT_REPOSITORY_ROOT) not in sys.path:
     sys.path.insert(0, str(_SCRIPT_REPOSITORY_ROOT))
 
-from meizel.checkout import lanes_at, roles_at  # noqa: E402
+from meizel import allowances  # noqa: E402
+from meizel.checkout import GitRepo, lanes_at, roles_at  # noqa: E402
 from meizel.roles import all_packages, pytest_test_hosts  # noqa: E402
 from meizel.test_graph.cutoff import package_local_tests  # noqa: E402
-from meizel.test_graph.impact import TREE_SCAN_PINS as TREE_SCAN_TESTS  # noqa: E402
 
 from base.deploy.git.repo_change import (  # noqa: E402
     is_doc_path,
@@ -253,15 +253,16 @@ def lane_tests(repo_root: Path, lane: str) -> frozenset[str]:
 
 # meiva:note
 # Repository-wide scan tests that every SELECTED subset includes: the `test_lint_*.py` family, the
-# explicit `TREE_SCAN_TESTS`, and the tests marked `pytest.mark.registry`, which assert that a table
+# tests `meizel.policy.toml` pins under `[test-graph] tree-scan-pins`, and the tests marked `pytest.mark.registry`, which assert that a table
 # equals what the tracked files hold: a call site in any file can change their verdict.
 def tree_scan_tests(repo_root: Path) -> set[str]:
     collectable = collectable_test_paths(repo_root)
+    pinned = set(allowances.load(GitRepo(repo_root)).names("test-graph", "tree-scan-pins"))
     return {
         path
         for path in collectable
         if _TREE_SCAN_FILE_PATTERN.fullmatch(Path(path).name) is not None
-        or path in TREE_SCAN_TESTS
+        or path in pinned
         or _REGISTRY_MARKER in (repo_root / path).read_text(encoding="utf-8", errors="replace")
     }
 
