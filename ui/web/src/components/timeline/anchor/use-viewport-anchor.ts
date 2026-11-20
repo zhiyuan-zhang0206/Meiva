@@ -74,6 +74,9 @@ export interface ViewportAnchor {
   // meiva:note
   // The arrow's smooth ride to the tail is under way.
   riding: () => boolean;
+  // meiva:note
+  // The reader follows the tail or stands inside its bottom zone (a short conversation always does).
+  atTail: () => boolean;
 }
 
 export function useViewportAnchor({
@@ -427,8 +430,15 @@ export function useViewportAnchor({
   const sendReserveArmed = useCallback(() => sendArmedRef.current, []);
   const holdReserve = useCallback(() => holdRef.current, []);
   const riding = useCallback(() => rideRef.current !== null, []);
+  const atTail = useCallback(() => {
+    if (anchorRef.current?.kind === "tail") return true;
+    const vp = viewport();
+    if (!vp) return false;
+    const distance = naturalEnd(vp) - vp.scrollTop;
+    return distance >= -0.5 && distance <= bottomZone(vp.clientHeight, latest.current.thresholds);
+  }, [naturalEnd, viewport]);
   const controls = useMemo<ViewportAnchor>(() => ({
-    viewport, current, place, apply, armSendReserve, sendReserveArmed, holdReserve, releaseTail, placeScrollTop, reserveHeight, riding,
-  }), [apply, armSendReserve, current, holdReserve, place, placeScrollTop, releaseTail, reserveHeight, riding, sendReserveArmed, viewport]);
+    viewport, current, place, apply, armSendReserve, sendReserveArmed, holdReserve, releaseTail, placeScrollTop, reserveHeight, riding, atTail,
+  }), [apply, armSendReserve, atTail, current, holdReserve, place, placeScrollTop, releaseTail, reserveHeight, riding, sendReserveArmed, viewport]);
   return { controls, atEnd };
 }

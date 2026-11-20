@@ -232,8 +232,9 @@ export const TimelineView = memo(function TimelineView({
   });
 
   // meiva:note
-  // A send parks the message just written at the reading offset when the reader is following the
-  // tail; a reader in history keeps their place. Either way the reserve is renewed. The receipt's
+  // A send parks the message just written at the reading offset when the reader is at the tail
+  // (following it, or inside its bottom zone, as in any conversation shorter than the viewport); a
+  // reader in history keeps their place. Either way the reserve is renewed. The receipt's
   // inbound id names the row, so a later update cannot park an unrelated one, and a reader who
   // scrolls away before it arrives keeps their place.
   // meiva:link ui/web/src/docs/frontend-components/timeline-view/send-anchor.md
@@ -244,11 +245,11 @@ export const TimelineView = memo(function TimelineView({
     if (sendRequest.seq !== consumedSend.current) {
       consumedSend.current = sendRequest.seq;
       controls.armSendReserve(true);
-      pendingPark.current = isFollowing() ? sendRequest.inboundId : undefined;
+      pendingPark.current = controls.atTail() ? sendRequest.inboundId : undefined;
       controls.apply();
     }
     if (pendingPark.current === undefined) return;
-    if (!isFollowing()) {
+    if (!controls.atTail()) {
       pendingPark.current = undefined;
       return;
     }

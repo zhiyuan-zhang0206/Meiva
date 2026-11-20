@@ -42,6 +42,21 @@ const send = (inboundId: number) => act(() => { useTimelineStore.getState().requ
 const arrow = () => screen.queryByTestId("scroll-to-bottom");
 
 describe("send anchor", () => {
+  it("parks the sent message in a short conversation opened on its first unseen delivery", () => {
+    const heights: Record<string, number> = { "1.0": 100, "2.0": 100 };
+    const model = timelineLayout({ rowHeight: (row) => heights[row.dataset.itemId ?? ""] });
+    const view = render(<TimelineView items={[earlier]} reveal={{ decided: true, itemId: "1.0" }} />);
+    // meiva:note
+    // A conversation shorter than the viewport has no scroll range: opened on a row, the reader is
+    // still at its end, so a send parks like a follower's.
+    expect(model.top()).toBe(0);
+    send(7);
+    view.rerender(<TimelineView items={[earlier, sent]} reveal={{ decided: true, itemId: "1.0" }} />);
+    model.echo();
+    expect(model.rowTop("2.0")).toBe(READING_TOP_PX);
+    expect(model.reserve()).toBeGreaterThan(0);
+  });
+
   it("parks the sent message at the reading offset and holds it while the reply streams", () => {
     const model = layout();
     const view = render(<TimelineView items={[earlier]} />);
