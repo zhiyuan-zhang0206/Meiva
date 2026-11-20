@@ -70,6 +70,9 @@ def test_changed_scope(tmp_path: Path) -> None:
     ):
         (tmp_path / rel).parent.mkdir(parents=True, exist_ok=True)
         (tmp_path / rel).write_text("x = 1\n")
+    (tmp_path / "meizel.policy.toml").write_text(
+        '[lint]\ntooling = ["scripts/content_lint/", "scripts/lint/", "scripts/rules/", "scripts/structure/"]\n'
+    )
     tree = source_tree(tmp_path)
     assert lint_common.changed_scope(tree, None) is None
     assert lint_common.changed_scope(tree, ["base/a.py"]) == {"base/a.py"}
@@ -255,6 +258,10 @@ def fake_repo(tmp_path: Path) -> Path:
         "meiva_builtins/plugins",
     ):
         (root / rel).mkdir(parents=True, exist_ok=True)
+    (root / "meizel.policy.toml").write_text(
+        '[lint]\ntooling = ["scripts/content_lint/", "scripts/lint/", "scripts/rules/", "scripts/structure/"]\n',
+        encoding="utf-8",
+    )
     return root
 
 
@@ -301,6 +308,7 @@ def test_code_structure_turns_changed_files_into_explicit_targets(
     directory = tmp_path / "scripts/structure/baseline"
     directory.mkdir(parents=True)
     (directory / "README.md").write_text("Structure baseline shards.\n")
+    (tmp_path / "meizel.policy.toml").write_text('[lint]\ntooling = ["scripts/structure/"]\n')
     for args in (
         ("init", "--quiet"),
         ("add", "-A"),

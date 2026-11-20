@@ -584,6 +584,17 @@ max-public-symbols = ["6"]
 max-params = ["6"]
 max-attr-hops = ["3"]
 
+# lint: the code of this repository's own lints. A change under one of these prefixes can move the
+# verdict of a file nobody touched, so it widens every `--only` run of a lint built on
+# `meizel.api.lint_common` to the full scan (the policy and `uv.lock` always do).
+[lint]
+tooling = [
+    "scripts/content_lint/",
+    "scripts/lint/",
+    "scripts/rules/",
+    "scripts/structure/",
+]
+
 # test-graph: what test selection knows about this repository's tests. The fixtures, markers and
 # modules that need native Postgres, Redis or a host service put a test in the native lane; the
 # tree-scan pins always run; a change to a global path runs everything, a change to the frontend
