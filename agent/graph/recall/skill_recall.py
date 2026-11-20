@@ -174,6 +174,7 @@ async def recall_skills(
             label=_LABEL,
             body=f"skip: {len(candidates)} candidate skills do not fit one request ({exc})",
             event="skill_recall",
+            agent_id=agent_id,
         )
         return None
     except DecisionError as exc:
@@ -182,6 +183,7 @@ async def recall_skills(
             label=_LABEL,
             body=f"skip: decision call failed ({type(exc).__name__}: {exc})",
             event="skill_recall",
+            agent_id=agent_id,
         )
         return None
     scores = {identifier: d.probability("true") for identifier, d in decisions.items()}
@@ -194,6 +196,7 @@ async def recall_skills(
         label=_LABEL,
         body=f"scored {len(candidates)} skills, offering {picked or 'none'}",
         event="skill_recall",
+        agent_id=agent_id,
         candidates=len(candidates),
         offered=picked,
     )
@@ -270,6 +273,7 @@ async def peer_gate_passes(
             label=_LABEL,
             body=f"peer gate failed, no skill note this turn ({type(exc).__name__}: {exc})",
             event="skill_recall",
+            agent_id=agent_id,
             stage="peer_gate",
             outcome="failed",
             latency_ms=_elapsed_ms(started, now()),
@@ -283,6 +287,7 @@ async def peer_gate_passes(
         label=_LABEL,
         body=f"peer gate {'passes' if passed else 'skips'} (work={work:.2f})",
         event="skill_recall",
+        agent_id=agent_id,
         stage="peer_gate",
         outcome="passed" if passed else "skipped",
         latency_ms=_elapsed_ms(started, now()),

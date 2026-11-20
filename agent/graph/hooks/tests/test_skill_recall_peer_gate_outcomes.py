@@ -114,6 +114,7 @@ async def test_a_decided_gate_records_its_outcome_latency_and_work(
     latency = event["latency_ms"]
     assert isinstance(latency, float) and latency > 0
     assert "reason" not in event
+    assert event["agent_id"] == 7798
     assert loguru_records.messages("WARNING") == []
 
 
@@ -131,6 +132,7 @@ async def test_a_failed_gate_records_the_innermost_cause_at_warning(
     latency = event["latency_ms"]
     assert isinstance(latency, float) and latency > 0
     assert "work" not in event
+    assert event["agent_id"] == 7798
     assert loguru_records.extras(event="skill_recall", level="WARNING") == [event]
 
 

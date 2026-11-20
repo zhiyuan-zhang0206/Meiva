@@ -234,7 +234,8 @@ EVENTS: dict[str, EventSpec] = {
     ),
     "harness_close_failures": telemetry_event(
         "harness_close_failures",
-        "external harness session closes raised while the agent host was running",
+        "external harness session closes raised while the agent host was running; host-level, "
+        "no agent_id: one count over every hosted agent's closes",
         tier="anomaly",
     ),
     "harness_exit_record_failed": telemetry_event(
@@ -272,7 +273,9 @@ EVENTS: dict[str, EventSpec] = {
     ),
     "harness_record_row_unread": telemetry_event(
         "harness_record_row_unread",
-        "a row of a harness CLI's record has a kind the reader does not know and is skipped; reported once for each kind",
+        "a row of a harness CLI's record has a kind the reader does not know and is skipped; "
+        "reported once for each kind per process; host-level, no agent_id: the report is "
+        "deduplicated across every agent the process reads records for",
         tier="anomaly",
     ),
     "harness_timing_ambiguous": telemetry_event(

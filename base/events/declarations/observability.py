@@ -314,7 +314,8 @@ EVENTS: dict[str, EventSpec] = {
     "telemetry_store_failed": telemetry_event(
         "telemetry_store_failed",
         "a batch of telemetry/log events did not land in telemetry_events (the JSONL mirror "
-        "and Loki still hold them)",
+        "and Loki still hold them); host-level, no agent_id: one batch mixes every agent's "
+        "events",
         payload=TelemetryStoreFailed,
         tier="anomaly",
         site='base/telemetry/event_store.py:_Writer._failed telemetry.emit("telemetry", ...)',

@@ -15,14 +15,17 @@ from base.agents.messages.timestamp_policy import TimestampPolicy
 from base.config.tests.configuration import defaults
 from base.host.env.agent_slices import AgentSlices
 from base.lm.provider_api import DecisionBinding, DecisionBuildContext
+from base.log.tests.log_records import LogRecords
 from base.packages.plugin_providers import build_model_catalog
 from base.packages.tests.model_catalog import inert_keys
 from base.paths import meiva_home
 
 
+# meiva:note
+# The shared agent host binds no agent to its logger, so the skip warning names its agent itself.
 @pytest.mark.parametrize("count", [0, 1001])
 async def test_default_provider_question_capacity_safely_skips_recall_without_http(
-    count: int,
+    count: int, loguru_records: LogRecords
 ) -> None:
     catalog = build_model_catalog(home=meiva_home())
     provider = catalog.decision_provider_of("gemini-decision-1")
@@ -62,10 +65,12 @@ async def test_default_provider_question_capacity_safely_skips_recall_without_ht
         agent=AgentSlices.resolve({}, default_reader=defaults()),
         catalog=catalog,
         keys=inert_keys(catalog),
-        agent_id=1,
+        agent_id=600373,
         created_at=datetime(2026, 11, 12, tzinfo=UTC),
         inputs=TimestampPolicy.off(),
     )
     assert result is None
     assert builds == (["gemini-decision-1"] if count else [])
     assert requests == []
+    skips = loguru_records.extras(event="skill_recall", level="WARNING")
+    assert [skip["agent_id"] for skip in skips] == ([600373] if count else [])

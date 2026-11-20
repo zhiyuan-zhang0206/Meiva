@@ -36,7 +36,12 @@ def _ancestor_chain(agent_id: int, ctx: MeivaContext) -> tuple[Ancestor, ...] | 
     try:
         rows = object_sequence(gateway_client.get_born_chain(agent_id, context=ctx))
     except (GatewayUnavailable, httpx.HTTPStatusError) as exc:
-        logger.warning("[inherited-memory] born-chain read failed (agent {}): {}", agent_id, exc)
+        logger.warning(
+            "[inherited-memory] born-chain read failed (agent {}): {}",
+            agent_id,
+            exc,
+            agent_id=agent_id,
+        )
         return None
     return tuple(_ancestor(row) for row in rows)
 
@@ -89,6 +94,7 @@ def _read_entries(ancestors: tuple[Ancestor, ...], home: Path) -> list[EntryBloc
 def read_workspace_inherit(
     mem_dir: Path,
     *,
+    agent_id: int,
     max_block_chars: int = DEFAULT_INHERIT_MAX_BLOCK_CHARS,
 ) -> str | None:
     entry = mem_dir / _INHERIT_FILE
@@ -97,14 +103,14 @@ def read_workspace_inherit(
     try:
         raw = entry.read_text(encoding="utf-8")
     except OSError as exc:
-        logger.warning("[inherited-memory] unreadable entry {}: {}", entry, exc)
+        logger.warning("[inherited-memory] unreadable entry {}: {}", entry, exc, agent_id=agent_id)
         return None
     body = extract_inherit_body(raw)
     if not body:
         return None
     clipped, warning = clip_inherit_body(body, entry_path=str(entry), max_chars=max_block_chars)
     if warning is not None:
-        logger.warning("[inherited-memory] {}", warning)
+        logger.warning("[inherited-memory] {}", warning, agent_id=agent_id)
     return clipped
 
 
@@ -129,7 +135,10 @@ def inherited_memory_note(ctx: MeivaContext) -> HumanMessage | None:
     try:
         this_machine = ctx.require_machine().name()
     except MachineNameMissing:
-        logger.warning("[inherited-memory] this host has no machine name — inheritance skipped")
+        logger.warning(
+            "[inherited-memory] this host has no machine name — inheritance skipped",
+            agent_id=aid,
+        )
         return None
     split = split_ancestors(chain, depth=depth, this_machine=this_machine)
     rendered = render_inherited(
@@ -144,7 +153,7 @@ def inherited_memory_note(ctx: MeivaContext) -> HumanMessage | None:
     if rendered is None:
         return None
     for warning in rendered.warnings:
-        logger.warning("[inherited-memory] {}", warning)
+        logger.warning("[inherited-memory] {}", warning, agent_id=aid)
 
     content = rendered.text
     logger.info(

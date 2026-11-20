@@ -518,9 +518,9 @@ class AgentHost:
     # earlier (a dropped runtime) are joined here through their own owner.
     # meiva:link agent/graph/docs/harness-turn.md
     async def _close_runtimes(self) -> None:
-        runtimes = list(self._runtimes.values())
+        runtimes = list(self._runtimes.items())
         self._runtimes.clear()
-        for runtime in runtimes:
+        for agent_id, runtime in runtimes:
             bridge = runtime.harness_bridge
             if bridge is None:
                 continue
@@ -530,6 +530,7 @@ class AgentHost:
                 logger.exception(
                     "closing an external harness session failed during shutdown",
                     event="harness_close_failed",
+                    agent_id=agent_id,
                 )
         await self._sessions.aclose()
 
