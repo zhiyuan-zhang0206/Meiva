@@ -10,11 +10,12 @@ Covers `agent/hooks/repair.py`: the shared helper and the before_llm hook, which
 is the only repair pass (there is no boot-time pass).
 """
 
+from collections.abc import Sequence
 from datetime import UTC, datetime
-from typing import Any, cast
+from typing import cast
 
 import pytest
-from langchain_core.messages import AIMessage, AnyMessage, HumanMessage, ToolMessage
+from langchain_core.messages import AIMessage, AnyMessage, BaseMessage, HumanMessage, ToolMessage
 from langchain_core.messages.modifier import RemoveMessage
 from langgraph.graph.message import REMOVE_ALL_MESSAGES, add_messages
 from langgraph.runtime import Runtime
@@ -46,11 +47,18 @@ def _ai_tool_use(*ids: str) -> AIMessage:
     )
 
 
-def _full_rebuild(repairs: list[Any]) -> list[Any]:
+def _full_rebuild(repairs: object) -> list[BaseMessage]:
     """Assert the only allowed repair shape and return its rebuilt history."""
+    assert is_object_list(repairs)
     assert isinstance(repairs[0], RemoveMessage)
     assert repairs[0].id == REMOVE_ALL_MESSAGES
-    return repairs[1:]
+    rebuilt = repairs[1:]
+    assert all(isinstance(message, BaseMessage) for message in rebuilt)
+    return [message for message in rebuilt if isinstance(message, BaseMessage)]
+
+
+def _tool_call_ids(messages: Sequence[BaseMessage]) -> list[str | None]:
+    return [m.tool_call_id if isinstance(m, ToolMessage) else None for m in messages]
 
 
 def _interrupted_tool_result(tool_call_id: str, message_id: str) -> ToolMessage:
@@ -142,6 +150,7 @@ def test_duplicate_results_drop_a_synthetic_after_a_real() -> None:
     use = _ai_tool_use("c1")
     real = ToolMessage(content="real output", tool_call_id="c1", id="t-real")
     synthetic = _full_rebuild(dangling_tool_pairing_repairs([use], created_at=_CREATED_AT))[-1]
+    assert isinstance(synthetic, ToolMessage)
 
     repairs = dangling_tool_pairing_repairs([use, real, synthetic], created_at=_CREATED_AT)
 
@@ -194,7 +203,7 @@ def test_repairs_every_dangling_tool_call_at_tail() -> None:
     original = _ai_tool_use("c1", "c2")
     rebuilt = _full_rebuild(dangling_tool_pairing_repairs([original], created_at=_CREATED_AT))
     assert rebuilt[0] is original
-    assert [r.tool_call_id for r in rebuilt[1:]] == ["c1", "c2"]
+    assert _tool_call_ids(rebuilt[1:]) == ["c1", "c2"]
 
 
 def test_partially_paired_tail_appends_only_missing() -> None:
@@ -243,7 +252,7 @@ def test_buried_partial_pairing_inserts_after_existing_tool_run() -> None:
         "ToolMessage",
         "HumanMessage",
     ]
-    assert rebuilt[2].tool_call_id == "c2"
+    assert _tool_call_ids(rebuilt)[2] == "c2"
 
 
 def test_rebuild_applies_through_real_add_messages_reducer() -> None:
@@ -363,7 +372,7 @@ def test_multiple_buried_danglings_all_repaired() -> None:
     ]
     repairs = dangling_tool_pairing_repairs(msgs, created_at=_CREATED_AT)
     rebuilt = _full_rebuild(repairs)
-    assert [getattr(m, "tool_call_id", None) for m in rebuilt] == [
+    assert _tool_call_ids(rebuilt) == [
         None,
         "c1",
         None,
@@ -377,7 +386,7 @@ def test_multiple_buried_danglings_all_repaired() -> None:
 
 
 class _FakeState:
-    def __init__(self, messages: list[Any]) -> None:
+    def __init__(self, messages: list[AnyMessage]) -> None:
         self.messages = messages
         self.pending_exec_notes: list[AnyMessage] = []
         self.turn_timings: list[dict[str, object]] = []
@@ -387,7 +396,7 @@ class _FakeState:
 _CONFIG = {"configurable": {"thread_id": "236"}}
 
 
-async def _run_hook(state: _FakeState) -> dict[str, Any] | None:
+async def _run_hook(state: _FakeState) -> dict[str, object] | None:
     return await repair_dangling_tool_pairing(state, _RUNTIME, _CONFIG)  # type: ignore[arg-type]
 
 
@@ -447,7 +456,7 @@ async def test_hook_appends_notes_after_all_tool_results(first_finished: bool) -
     update = await _run_hook(state)
     assert update is not None
     repaired = _full_rebuild(update["messages"])
-    assert [message.tool_call_id for message in repaired[1:3]] == ["c1", "c2"]
+    assert _tool_call_ids(repaired[1:3]) == ["c1", "c2"]
     assert repaired[-1] == note
     assert update["pending_exec_notes"] == []
 

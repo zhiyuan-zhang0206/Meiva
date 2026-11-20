@@ -9,16 +9,22 @@ from collections.abc import Mapping
 from dataclasses import replace
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any
 
 import pytest
 from langchain_core.messages import AIMessage, AnyMessage, HumanMessage
-from langgraph.graph import END, START, StateGraph
+from langchain_core.runnables import RunnableConfig
+from langgraph.graph import StateGraph
 from langgraph.runtime import Runtime
-from langgraph.types import Overwrite
 
 from agent.graph.hooks.framework import framework_hooks
 from agent.graph.hooks.skill_recall import SkillRecallHook
+from agent.graph.hooks.tests.hook_test_support import (
+    note_text,
+    notes,
+    overwritten,
+    recall_record,
+    run_chain,
+)
 from agent.graph.recall.skill_recall import (
     FALSE_IF,
     PEER_GATE_PREAMBLE,
@@ -26,7 +32,7 @@ from agent.graph.recall.skill_recall import (
     TRUE_IF,
 )
 from agent.messages import InboundTimes, inbound_message
-from agent.state import CompactState, SkillRecallState, build_agent_state
+from agent.state import AgentState, CompactState, SkillRecallState, build_agent_state
 from base import paths
 from base.agents.context import MeivaContext
 from base.agents.messages.kwargs import NoteTag, read_meiva_kwargs
@@ -46,6 +52,7 @@ from base.lm.provider_api import (
     Question,
     YesNo,
 )
+from base.log.tests.log_records import LogRecords
 from base.packages.extensions import install_registry
 from base.packages.extensions.install_registry import InstalledPackage
 from base.packages.plugin_providers import build_model_catalog
@@ -64,7 +71,7 @@ def _inbound(content: str, source: str, inbound_id: int) -> HumanMessage:
     )
 
 
-_CONFIG: Any = {"configurable": {"thread_id": "1042"}}
+_CONFIG: RunnableConfig = {"configurable": {"thread_id": "1042"}}
 _MODEL = "gemini-decision-1"
 
 
@@ -121,8 +128,13 @@ def _catalog(binding: _Scorer, *, spec: DecisionModelSpec | None = None) -> Mode
     )
 
 
-def _runtime(database: Database, catalog: ModelCatalog, **pins: Any) -> Runtime[MeivaContext]:
-    harness = pins.pop("harness", Harness.MEIVA)
+def _runtime(
+    database: Database,
+    catalog: ModelCatalog,
+    *,
+    harness: Harness = Harness.MEIVA,
+    **pins: object,
+) -> Runtime[MeivaContext]:
     return Runtime(
         context=MeivaContext(
             meiva_home=meiva_home(),
@@ -178,30 +190,29 @@ def _tail(source: str, text: str = "please draft the release notes") -> list[Any
     ]
 
 
-def _state(messages: list[AnyMessage], **fields: Any) -> Any:
-    return build_agent_state(EMPTY)(messages=messages, **fields)
+def _state(messages: list[AnyMessage], **fields: object) -> AgentState:
+    return build_agent_state(EMPTY).model_validate({"messages": messages, **fields})
 
 
 async def _run(
     database: Database,
-    state: Any,
+    state: AgentState,
     scorer: _Scorer,
     *,
     spec: DecisionModelSpec | None = None,
-    **pins: Any,
-) -> dict[str, Any] | None:
+    harness: Harness = Harness.MEIVA,
+    **pins: object,
+) -> dict[str, object] | None:
     return await SkillRecallHook()(
-        state, _runtime(database, _catalog(scorer, spec=spec), **pins), _CONFIG
+        state, _runtime(database, _catalog(scorer, spec=spec), harness=harness, **pins), _CONFIG
     )
 
 
-def _offered(update: dict[str, Any] | None) -> list[str]:
+def _offered(update: Mapping[str, object] | None) -> list[str]:
     """Skill paths named by the note in `update`, in the order listed."""
-    assert update is not None
-    (note,) = update["messages"]
     return [
         line.split("`")[1].removeprefix("meiva.skills.")
-        for line in note.content.splitlines()
+        for line in note_text(update).splitlines()
         if line.startswith("- `meiva.skills.")
     ]
 
@@ -230,8 +241,7 @@ async def test_fires_on_a_person_or_a_schedule(
 
     assert len(scorer.calls) == 1
     assert _offered(update) == ["beta"]
-    assert update is not None
-    note: HumanMessage = update["messages"][0]
+    (note,) = notes(update)
     assert read_meiva_kwargs(note).get("meiva_note_tag") == NoteTag.SKILL_RECALL.value
 
 
@@ -447,15 +457,14 @@ async def test_the_note_lists_each_skill_in_the_index_line_shape(
 ) -> None:
     _install(skills_dir, "alpha", "Alpha does alpha things", skills=skills_dir)
     update = await _run(database, _state(_tail("user")), _Scorer({"alpha": 0.9}))
-    assert update is not None
-    (note,) = update["messages"]
-    assert "- `meiva.skills.alpha` — Alpha does alpha things" in note.content
-    assert "meiva.help(meiva.skills.<path>)" in note.content
+    text = note_text(update)
+    assert "- `meiva.skills.alpha` — Alpha does alpha things" in text
+    assert "meiva.help(meiva.skills.<path>)" in text
 
 
 async def test_one_note_however_many_skills(three_skills: Path, database: Database) -> None:
     update = await _run(database, _state(_tail("user")), _Scorer({"alpha": 0.9, "beta": 0.9}))
-    assert update is not None and len(update["messages"]) == 1
+    assert len(notes(update)) == 1
     assert _offered(update) == ["alpha", "beta"]
 
 
@@ -465,12 +474,13 @@ async def test_an_offered_skill_is_recorded_and_not_offered_again(
     scorer = _Scorer({"alpha": 0.9, "beta": 0.9, "gamma": 0.9})
     first = await _run(database, _state(_tail("user")), scorer, skill_recall_max=2)
     assert first is not None
-    assert first["skill_recall"] == SkillRecallState(prompted={"alpha", "beta"}, window=0)
+    assert recall_record(first) == SkillRecallState(prompted={"alpha", "beta"}, window=0)
     next_state = _state(_tail("user"), skill_recall=first["skill_recall"])
     second = await _run(database, next_state, scorer, skill_recall_max=2)
     assert set(scorer.calls[1][1]) == {"gamma"}
     assert _offered(second) == ["gamma"]
-    assert second is not None and second["skill_recall"].prompted == {"alpha", "beta", "gamma"}
+    assert second is not None
+    assert recall_record(second).prompted == {"alpha", "beta", "gamma"}
 
 
 async def test_a_compaction_resets_the_record_and_the_skills_come_back(
@@ -489,9 +499,8 @@ async def test_a_compaction_resets_the_record_and_the_skills_come_back(
 
     assert update is not None
     assert set(scorer.calls[0][1]) == {"alpha", "beta", "gamma"}
-    assert isinstance(update["skill_reads"], Overwrite)
-    assert update["skill_reads"].value == []
-    assert update["skill_recall"] == SkillRecallState(prompted={"alpha", "beta", "gamma"}, window=1)
+    assert overwritten(update, "skill_reads") == []
+    assert recall_record(update) == SkillRecallState(prompted={"alpha", "beta", "gamma"}, window=1)
 
 
 async def test_a_compaction_resets_the_record_even_when_nothing_is_offered(
@@ -513,8 +522,8 @@ async def test_a_compaction_resets_the_record_even_when_nothing_is_offered(
     assert scorer.calls == []
     assert update is not None
     assert "messages" not in update
-    assert update["skill_reads"].value == []
-    assert update["skill_recall"] == SkillRecallState(prompted=set(), window=2)
+    assert overwritten(update, "skill_reads") == []
+    assert recall_record(update) == SkillRecallState(prompted=set(), window=2)
 
 
 async def test_an_unchanged_window_writes_nothing_when_nothing_is_offered(
@@ -550,13 +559,13 @@ async def test_eval_isolation_means_no_call(three_skills: Path, database: Databa
 
 
 async def test_a_provider_failure_is_not_an_error_and_offers_nothing(
-    three_skills: Path, loguru_records: Any, database: Database
+    three_skills: Path, loguru_records: LogRecords, database: Database
 ) -> None:
     scorer = _Scorer({}, error=DecisionRequestError("503 from the provider"))
 
     assert await _run(database, _state(_tail("user")), scorer) is None
     assert len(scorer.calls) == 1
-    assert any("503 from the provider" in r["message"] for r in loguru_records)
+    assert any("503 from the provider" in message for message in loguru_records.messages())
 
 
 async def test_a_failure_still_applies_the_compaction_reset(
@@ -573,11 +582,11 @@ async def test_a_failure_still_applies_the_compaction_reset(
 
     assert update is not None
     assert "messages" not in update
-    assert update["skill_recall"] == SkillRecallState(window=1)
+    assert recall_record(update) == SkillRecallState(window=1)
 
 
 async def test_a_catalog_too_large_for_one_request_is_logged_and_not_truncated(
-    three_skills: Path, loguru_records: Any, database: Database
+    three_skills: Path, loguru_records: LogRecords, database: Database
 ) -> None:
     scorer = _Scorer({"alpha": 0.9})
 
@@ -587,18 +596,18 @@ async def test_a_catalog_too_large_for_one_request_is_logged_and_not_truncated(
 
     assert update is None
     assert scorer.calls == []
-    assert any("do not fit one request" in r["message"] for r in loguru_records)
+    assert any("do not fit one request" in message for message in loguru_records.messages())
 
 
 async def test_exceeding_the_deadline_is_not_an_error_and_offers_nothing(
-    three_skills: Path, loguru_records: Any, database: Database
+    three_skills: Path, loguru_records: LogRecords, database: Database
 ) -> None:
     scorer = _Scorer({"alpha": 0.9}, delay=5.0)
 
     update = await _run(database, _state(_tail("user")), scorer, skill_recall_deadline_seconds=0.05)
 
     assert update is None
-    assert any("deadline" in r["message"] for r in loguru_records)
+    assert any("deadline" in message for message in loguru_records.messages())
 
 
 async def test_the_deadline_is_independent_of_memory_recalls(
@@ -632,31 +641,28 @@ async def test_reads_from_execs_exclude_skills_until_a_compaction_clears_them(
     runtime = _runtime(database, _catalog(scorer))
     state_cls = build_agent_state(EMPTY)
 
-    async def exec_reads_alpha(_state: Any) -> dict[str, Any]:
+    async def exec_reads_alpha(state: AgentState) -> dict[str, object]:
         return {"skill_reads": ["alpha"]}
 
-    async def recall(state: Any) -> dict[str, Any] | None:
+    async def recall(state: AgentState) -> dict[str, object] | None:
         return await SkillRecallHook()(state, runtime, _CONFIG)
 
-    async def compaction(_state: Any) -> dict[str, Any]:
+    async def compaction(state: AgentState) -> dict[str, object]:
         return {"compact": CompactState(version=1)}
 
-    graph: Any = StateGraph(state_cls)
     steps = [
         ("read", exec_reads_alpha),
         ("recall_one", recall),
         ("compact", compaction),
         ("recall_two", recall),
     ]
-    previous = START
-    for name, node in steps:
-        graph.add_node(name, node)
-        graph.add_edge(previous, name)
-        previous = name
-    graph.add_edge(previous, END)
 
     final = state_cls.model_validate(
-        await graph.compile().ainvoke(state_cls(messages=_tail("user")))
+        await run_chain(
+            StateGraph(state_cls, context_schema=MeivaContext),
+            steps,
+            state_cls(messages=_tail("user")),
+        )
     )
 
     assert [set(questions) for _state_text, questions in scorer.calls] == [

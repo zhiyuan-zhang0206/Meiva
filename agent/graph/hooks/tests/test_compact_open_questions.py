@@ -5,9 +5,8 @@
 from __future__ import annotations
 
 from datetime import UTC, datetime
-from typing import Any
 
-from langchain_core.messages import AnyMessage, HumanMessage, SystemMessage
+from langchain_core.messages import AnyMessage, BaseMessage, HumanMessage, SystemMessage
 
 from agent.graph.hooks.compact import compact_reminder_update
 from agent.state import AgentState
@@ -15,6 +14,7 @@ from base.agents.messages.timestamp_policy import TimestampPolicy
 from base.agents.questions.model import OpenQuestion
 from base.api_contracts.question import QuestionType, TextQuestion
 from base.config.tests.configuration import defaults
+from base.host.boundary.json_values import is_object_list
 from base.host.env.agent_slices import AgentSlices
 from base.packages.plugin_providers import build_model_catalog
 from base.packages.plugins.extensions import EMPTY
@@ -38,7 +38,7 @@ def _state() -> AgentState:
 
 
 def _reminder(questions: list[OpenQuestion]) -> str:
-    update: dict[str, Any] | None = compact_reminder_update(
+    update = compact_reminder_update(
         _state(),
         _agent(compact_reminder_fraction=_TINY),
         catalog=build_model_catalog(home=meiva_home()),
@@ -48,7 +48,10 @@ def _reminder(questions: list[OpenQuestion]) -> str:
         inputs=TimestampPolicy.off(),
     )
     assert update is not None
-    [note] = update["messages"]
+    messages = update["messages"]
+    assert is_object_list(messages)
+    [note] = messages
+    assert isinstance(note, BaseMessage)
     return str(note.content)
 
 

@@ -1,5 +1,3 @@
-from typing import Any, cast
-
 import pytest
 from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
 from langchain_core.runnables import RunnableConfig
@@ -13,6 +11,8 @@ from agent.state import BaseAgentState, PluginStateHandle, build_agent_state, gu
 from base.agents.context import MeivaContext
 from base.clock import Clock
 from base.config.tests.configuration import defaults
+from base.host.boundary.json_values import is_object_dict
+from base.host.boundary.untyped import object_of
 from base.host.env.agent_slices import AgentSlices
 from base.packages.plugins.extensions import ExtensionRegistry, HookPoint, PluginContributions
 
@@ -32,7 +32,7 @@ class NoticeHook(Hook):
         runtime: Runtime[MeivaContext],
         config: RunnableConfig,
         /,
-    ) -> dict[str, Any] | None:
+    ) -> dict[str, object] | None:
         noticed = self.handle.view(state).noticed
         self.observed.append(
             (
@@ -89,8 +89,8 @@ async def test_repair_preserves_the_plugin_note_and_state_across_turns() -> None
     config: RunnableConfig = {"configurable": {"thread_id": "1"}}
 
     command = await run(state, runtime, config)
-    assert isinstance(command.update, dict)
-    update = cast("dict[str, Any]", command.update)
+    update = object_of(getattr, command, "update")
+    assert is_object_dict(update)
     messages = guarded_add_messages(state.messages, update["messages"])
     committed = state.model_copy(update={**update, "messages": messages})
 

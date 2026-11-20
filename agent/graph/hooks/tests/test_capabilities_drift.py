@@ -16,7 +16,7 @@ import os
 import shutil
 from collections.abc import Mapping
 from pathlib import Path
-from typing import Any, cast
+from typing import cast
 
 import pytest
 from langchain_core.messages import AnyMessage, HumanMessage, SystemMessage
@@ -52,7 +52,7 @@ ENVIRON = dict(os.environ)
 _CONFIG: RunnableConfig = {"configurable": {"thread_id": "1042"}}
 
 
-def _slices(pins: Mapping[str, Any] | None = None) -> AgentSlices:
+def _slices(pins: Mapping[str, object] | None = None) -> AgentSlices:
     return AgentSlices.resolve(
         {"skills_to_inject_into_system_prompt": ["*"], **(pins or {})},
         default_reader=defaults(),
@@ -64,7 +64,7 @@ def _runtime(
     *,
     ops_pool: AsyncConnectionPool | None,
     database_gate: ProcessDbGate,
-    pins: Mapping[str, Any] | None = None,
+    pins: Mapping[str, object] | None = None,
     harness: Harness = Harness.MEIVA,
 ) -> Runtime[MeivaContext]:
     return Runtime(
@@ -116,7 +116,7 @@ async def _run_hook(
     database_gate: ProcessDbGate,
     ops_pool: AsyncConnectionPool,
     *,
-    pins: Mapping[str, Any] | None = None,
+    pins: Mapping[str, object] | None = None,
 ) -> dict[str, object] | None:
     return await newly_installed_skills(
         _state(indexed),
