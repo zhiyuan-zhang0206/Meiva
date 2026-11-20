@@ -273,6 +273,11 @@ def test_a_changed_rule_input_widens_only_to_every_test(
     repo: pathlib.Path, capsys: pytest.CaptureFixture[str], rule_input: str
 ) -> None:
     _track(repo, "tests/components/base/test_a.py")
+    _track(
+        repo,
+        "meizel.policy.toml",
+        '[lint]\ntooling = ["scripts/content_lint/", "scripts/lint/", "scripts/rules/", "scripts/structure/"]\n',
+    )
     _track(repo, rule_input, "# a rule input\n")
     status, out, _ = _run(repo, capsys, ["--only", rule_input])
     assert status == 1

@@ -164,7 +164,12 @@ def test_only_scope_and_tooling_widening(repo: Path) -> None:
     _write(repo, "docs/bad.md", f"{_cgnat_ip(64)}\n")
     _write(repo, "docs/clean.md", "clean\n")
     _write(repo, "scripts/content_lint/tool.py", "")
-    subprocess.run(["git", "add", "docs", "scripts"], cwd=repo, check=True)
+    _write(
+        repo,
+        "meizel.policy.toml",
+        '[lint]\ntooling = ["scripts/content_lint/", "scripts/lint/", "scripts/rules/", "scripts/structure/"]\n',
+    )
+    subprocess.run(["git", "add", "docs", "scripts", "meizel.policy.toml"], cwd=repo, check=True)
     assert gate.main(["--only", "docs/bad.md"], repo_root=repo) == 1
     assert gate.main(["--only", "docs/clean.md"], repo_root=repo) == 0
     assert gate.main(["--only"], repo_root=repo) == 0
