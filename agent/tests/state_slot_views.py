@@ -1,11 +1,14 @@
 from collections.abc import Awaitable, Mapping
 from types import SimpleNamespace
-from typing import Protocol
+from typing import Protocol, TypedDict
 
+from langchain_core.messages import HumanMessage
 from langchain_core.runnables import RunnableConfig
 from langgraph.checkpoint.memory import InMemorySaver
+from langgraph.types import Command
 
 from agent.execution.child import import_runtime
+from agent.graph.exec.node import ExecGoto
 from agent.state import BaseAgentState
 from base.host.boundary.json_values import is_object_dict
 from base.host.boundary.untyped import object_mapping, object_of
@@ -24,13 +27,10 @@ def state_update() -> dict[str, object]:
 
 
 # meiva:note
-# `meiva.state.<plugin>`: the namespace view the state class builds for a plugin name, through the
-# `__getattr__` that `build_agent_state` puts on the class it returns.
+# `meiva.state.<plugin>`: the namespace view the state class builds for a plugin name, read through
+# the `__getattr__` that `build_agent_state` puts on the class it returns.
 def plugin_namespace_object(plugin: str) -> SimpleNamespace:
-    state = sdk.state
-    view = object_mapping(type(state).__dict__)["__getattr__"]
-    assert callable(view)
-    namespace = object_of(view, state, plugin)
+    namespace = object_of(getattr, sdk.state, plugin)
     assert isinstance(namespace, SimpleNamespace)
     return namespace
 
@@ -39,10 +39,12 @@ def plugin_namespace(plugin: str) -> Mapping[str, object]:
     return object_mapping(vars(plugin_namespace_object(plugin)))
 
 
+class GraphInput(TypedDict):
+    messages: list[HumanMessage]
+
+
 class _Graph(Protocol):
-    async def ainvoke(
-        self, input: BaseAgentState, config: RunnableConfig
-    ) -> Mapping[str, object]: ...
+    async def ainvoke(self, input: GraphInput, config: RunnableConfig) -> Mapping[str, object]: ...
 
 
 class _NodeFunction(Protocol):
@@ -62,3 +64,12 @@ class GraphBuilder(Protocol):
 # view names the three calls the test makes with the types it passes.
 def graph_builder(builder: GraphBuilder) -> GraphBuilder:
     return builder
+
+
+# meiva:note
+# What a node's Command writes to the graph state. langgraph types `Command.update` as `Any`; it is
+# read as `object` and narrowed here, so a test asserts on a checked mapping.
+def command_update(command: Command[ExecGoto]) -> dict[str, object]:
+    update = object_of(getattr, command, "update")
+    assert is_object_dict(update), update
+    return update

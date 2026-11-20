@@ -11,3 +11,6 @@ exports = ["agent_tests.py", "claim", "scripted_model.py"]
 "test_compact.py" = ["scripted_model.py"]
 "test_compact_part2.py" = ["scripted_model.py"]
 "test_state_slot.py" = ["state_slot_views.py"]
+
+[dynamic-attrs]
+"state_slot_views.py" = "the tests read plugin slots of meiva.state whose names are test parameters, through the state class's own __getattr__"

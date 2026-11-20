@@ -62,6 +62,8 @@ from agent.state import (
     build_agent_state,
 )
 from agent.tests.state_slot_views import (
+    GraphInput,
+    command_update,
     graph_builder,
     plugin_namespace,
     plugin_namespace_object,
@@ -334,7 +336,7 @@ async def test_exec_node_merges_plugin_messages_with_framework_toolmessage(
         state, runtime, config, process=SubprocessExecProcess(live_parent_facts(), rng=_rng())
     )
 
-    update = cast(dict[str, object], cmd.update)
+    update = command_update(cmd)
     msgs = update["messages"]
     assert is_object_list(msgs)
     assert len(msgs) == 2, f"expected ToolMessage + plugin message, got {msgs!r}"
@@ -546,7 +548,7 @@ async def test_exec_node_merges_plugin_state_update_into_command(database_gate: 
         process=SubprocessExecProcess(live_parent_facts(), rng=_rng()),
     )
 
-    update = cast(dict[str, object], cmd.update)
+    update = command_update(cmd)
     assert update.get("plugin__counter") == 7
     assert "messages" in update
     assert "halted" in update
@@ -567,7 +569,7 @@ async def test_exec_node_commits_the_skill_reads_the_sdk_writes(database_gate: P
         state, runtime, config, process=SubprocessExecProcess(live_parent_facts(), rng=_rng())
     )
 
-    assert cast(dict[str, object], cmd.update)["skill_reads"] == ["alpha"]
+    assert command_update(cmd)["skill_reads"] == ["alpha"]
 
 
 async def test_exec_node_never_binds_the_slot_in_the_parent(database_gate: ProcessDbGate):
@@ -632,7 +634,7 @@ async def test_plugin_cannot_overwrite_base_field_via_meiva_state(database_gate:
     # real state unchanged
     assert state.halted is False
     # Command update.halted is framework-calculated (_ExecDone hardcodes False), not plugin-injected
-    update = cast(dict[str, object], cmd.update)
+    update = command_update(cmd)
     assert update["halted"] is False
     # but plugin's explicit state_update["plugin__sentinel"] successfully commits
     assert update.get("plugin__sentinel") is True
@@ -707,7 +709,7 @@ async def test_state_update_multiple_plugins_no_conflict(database_gate: ProcessD
         process=SubprocessExecProcess(live_parent_facts(), rng=_rng()),
     )
 
-    update = cast(dict[str, object], cmd.update)
+    update = command_update(cmd)
     assert update.get("plugin_a__x") == 10
     assert update.get("plugin_b__y") == "hello"
 
@@ -769,14 +771,14 @@ async def test_checkpoint_with_retired_core_key_still_loads():
     async def node(state: BaseAgentState) -> dict[str, object]:
         return {"halted": True}
 
-    builder = graph_builder(StateGraph(build_agent_state(_registry())))
+    builder = graph_builder(StateGraph(build_agent_state(_registry()), input_schema=GraphInput))
     builder.add_node("node", node)
     builder.add_edge(START, "node")
     builder.add_edge("node", END)
     saver = InMemorySaver()
     graph = builder.compile(saver)
     config: RunnableConfig = {"configurable": {"thread_id": "retired-key"}}
-    await graph.ainvoke(BaseAgentState(messages=[HumanMessage(content="first")]), config)
+    await graph.ainvoke(GraphInput(messages=[HumanMessage(content="first")]), config)
 
     saved = await saver.aget_tuple(config)
     assert saved is not None
@@ -785,7 +787,7 @@ async def test_checkpoint_with_retired_core_key_still_loads():
     checkpoint["channel_values"] = {**checkpoint["channel_values"], "update_initiated": True}
     await saver.aput(saved.config, checkpoint, saved.metadata, {})
 
-    result = await graph.ainvoke(BaseAgentState(messages=[HumanMessage(content="second")]), config)
+    result = await graph.ainvoke(GraphInput(messages=[HumanMessage(content="second")]), config)
 
     assert result["halted"] is True
     assert "update_initiated" not in result
