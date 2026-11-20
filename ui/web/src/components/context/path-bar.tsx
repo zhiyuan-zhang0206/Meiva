@@ -214,7 +214,7 @@ export function PathBar({ agentId, documentModifiedAt }: { agentId: number; docu
         onClick={() => setEditing(root && absolute ? typedPath(root, absolute) : requestPath)}
         className={cn("h-5 cursor-text self-stretch", MIN_W_0, FLEX_1)}
       />
-      {open?.at === -1 ? <div className="absolute left-2 top-0"><FolderMenu agentId={agentId} start={open.start} onClose={() => setOpen(null)} /></div> : null}
+      {open?.at === -1 ? <div className="absolute left-2 top-full"><FolderMenu agentId={agentId} start={open.start} onClose={() => setOpen(null)} /></div> : null}
       {detail ? <span className="shrink-0 whitespace-nowrap pl-2 font-sans text-[10px]">{detail}</span> : null}
     </div>
   );
