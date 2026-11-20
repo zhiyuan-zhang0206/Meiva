@@ -35,13 +35,6 @@ from base.host.boundary.untyped import object_mapping, object_of
 from base.log import logger
 from base.native_process.runtime_incarnation import RuntimeIncarnation
 
-# meiva:note
-# LangGraph's `PUSH` channel name, read once: `langgraph.constants` resolves it through a module
-# `__getattr__` typed `Any`, so `object_of` hands back `object` and no unchecked value binds to a name.
-# A write whose key is this channel is a push, which does not advance the step. The site is listed in
-# `[ambient-state.sites]`: the value is a constant fixed by the library, not state this module sets.
-_PUSH: object = object_of(getattr, graph_constants, "PUSH")
-
 
 def wrap_saver_writes_with_loud_failure(
     checkpointer: AsyncPostgresSaver, agent_id: int | None = None
@@ -265,6 +258,12 @@ def wrap_saver_writes_with_nstep_interval(
         return
 
     orig_aput, orig_aput_writes = checkpointer.aput, checkpointer.aput_writes
+    # meiva:note
+    # LangGraph's `PUSH` channel name, read once per installed wrapper: `langgraph.constants`
+    # resolves it through a module `__getattr__` typed `Any`, so `object_of` hands back `object` and
+    # no unchecked value binds to a name. A write whose key is this channel is a push, which does
+    # not advance the step.
+    push: object = object_of(getattr, graph_constants, "PUSH")
     states: dict[str, _NstepCheckpointState] = {}
     # Flushes and graph writes serialize within one thread. Waiters keep their
     # lock alive; idle thread locks disappear instead of retaining every agent
@@ -346,7 +345,7 @@ def wrap_saver_writes_with_nstep_interval(
 
             write_step = (
                 state.last_aput_step
-                if any(key == _PUSH for key, _value in writes)
+                if any(key == push for key, _value in writes)
                 else state.last_aput_step + 1
             )
             if write_step % current_interval == 0:
@@ -371,8 +370,10 @@ def wrap_saver_writes_with_nstep_interval(
                 # checkpoint cannot be discarded by this completed flush.
                 del states[thread_id]
 
-    checkpointer.aput = _throttled_aput  # type: ignore[method-assign]
-    checkpointer.aput_writes = _throttled_aput_writes  # type: ignore[method-assign]
+    checkpointer.aput, checkpointer.aput_writes = (  # type: ignore[method-assign]
+        _throttled_aput,
+        _throttled_aput_writes,
+    )
     checkpointer._meiva_nstep_flush = _flush_final  # type: ignore[attr-defined]
 
 
