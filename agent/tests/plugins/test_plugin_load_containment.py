@@ -22,13 +22,13 @@ import json
 import sys
 from collections.abc import Iterator
 from pathlib import Path
-from typing import Any, cast
 
 import pytest
 
 from base import paths
 from base.agents.sdk.tests.sampling_owners import fixed_sampling_owner
 from base.config.service_read import ConfigAuthority
+from base.host.boundary.untyped import object_of
 from base.lm.pricing.archive import load_archive
 from base.log.tests.log_records import LogRecords
 from base.packages.plugins.enable_config import write_local
@@ -151,8 +151,8 @@ def test_boot_loader_contains_broken_plugins_and_keeps_going(
     assert "plugins.good.plugin" in sys.modules
     for broken in ("broken_relative", "broken_syntax", "broken_raise"):
         assert f"plugins.{broken}.plugin" not in sys.modules, broken
-    failed = [r for r in loguru_records if "failed to load" in r["message"]]
-    assert sorted(r["message"].split()[2] for r in failed) == [
+    failed = [m for m in loguru_records.messages() if "failed to load" in m]
+    assert sorted(m.split()[2] for m in failed) == [
         "broken_raise",
         "broken_relative",
         "broken_syntax",
@@ -176,7 +176,7 @@ def test_a_package_relative_sibling_import_resolves_and_a_reload_keeps_the_modul
 
     load_extensions(sampling=fixed_sampling_owner(), home=unit_home)
     first = sys.modules["plugins.codex_usage.plugin"]
-    assert first.MARK == "x"
+    assert object_of(getattr, first, "MARK") == "x"
 
     load_extensions(sampling=fixed_sampling_owner(), home=unit_home)
 
@@ -201,11 +201,7 @@ def test_host_boot_restart_loop_survives_a_broken_plugin(
         )  # each call stands in for one host boot
 
     assert "plugins.codex_usage.plugin" not in sys.modules
-    reports = [
-        r
-        for r in loguru_records
-        if "codex_usage" in r["message"] and "failed to load" in r["message"]
-    ]
+    reports = [m for m in loguru_records.messages() if "codex_usage" in m and "failed to load" in m]
     assert len(reports) == 3
 
 
@@ -233,7 +229,7 @@ def test_the_loader_binds_the_class_a_config_face_declares(unit_home: Path) -> N
     try:
         loaded = load_extensions(sampling=fixed_sampling_owner(), home=unit_home)
         assert [name for name, _ in loaded.registry.plugins] == ["faced"]
-        assert cast(Any, settings.plugins.faced).knob == 7
+        assert object_of(getattr, object_of(getattr, settings.plugins, "faced"), "knob") == 7
         with pytest.raises(RuntimeError, match="no ModelCatalog"):
             settings.model_catalog()
         with pytest.raises(RuntimeError, match="no ConfigAuthority"):

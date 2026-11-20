@@ -8,7 +8,6 @@
 # its own, once its tests are clean: .gitattributes merges this file with merge=union, which keeps a
 # line that either side of a local merge still holds.
 agent/graph/node_log/tests
-agent/tests
 base/agents
 base/cluster
 base/config

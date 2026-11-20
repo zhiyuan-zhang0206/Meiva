@@ -15,9 +15,9 @@ After compact, history = `[RemoveAll, SystemMessage, HumanMessage(header+summary
 summary is complete memory; framework no longer appends any original messages (no tail).
 """
 
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from pathlib import Path
-from typing import Any, cast
+from typing import cast
 from unittest.mock import AsyncMock, MagicMock
 
 import psycopg
@@ -49,13 +49,14 @@ from base.config.tests.configuration import defaults
 from base.db import Database
 from base.db.code_version_gate import ProcessDbGate
 from base.events.live.bus import EventBus
+from base.host.boundary.json_values import is_object_list
 from base.host.env.agent_slices import AgentSlices
 from base.packages.plugin_providers import build_model_catalog
 from base.packages.plugins.extensions import EMPTY
 from base.paths import meiva_home, resolve_meiva_home
 
 
-def _compact_tail(update: Any) -> list[AnyMessage]:
+def _compact_tail(update: Mapping[str, object]) -> list[AnyMessage]:
     """Assert the transport every compaction now shares — the window is cleared
     and rebuilding the standing head is handed to `init_context` — and return the
     parked tail, which is what the compaction itself decided.
@@ -67,15 +68,20 @@ def _compact_tail(update: Any) -> list[AnyMessage]:
     here.
     """
     msgs = update["messages"]
+    assert is_object_list(msgs)
     assert len(msgs) == 1, f"expected the sentinel alone, got {len(msgs)} messages"
     assert isinstance(msgs[0], RemoveMessage)
     assert msgs[0].id == REMOVE_ALL_MESSAGES
-    return update["context_reset"].tail
+    reset = update["context_reset"]
+    assert isinstance(reset, ContextReset)
+    return reset.tail
 
 
 # meiva:note
 # A model that answers the compaction summary call (the same tool binding as the main llm node, streamed) with `summary_text`, or with an explicitly passed response.
-def _fake_llm(summary_text: str = "fake summary", *, response: AIMessage | None = None) -> Any:
+def _fake_llm(
+    summary_text: str = "fake summary", *, response: AIMessage | None = None
+) -> ScriptedChatModel:
     return ScriptedChatModel(
         replies=[response if response is not None else AIMessage(content=summary_text)]
     )
@@ -88,11 +94,11 @@ _LONG_SUMMARY = "## Requests\nfollow the template. " * 60
 
 # meiva:note
 # A model whose successive compaction calls answer each of `summaries` in turn (AIMessage content), so a test can drive the auto-compact retry loop across attempts (short, then long); the last reply repeats.
-def _fake_llm_seq(*summaries: str) -> Any:
+def _fake_llm_seq(*summaries: str) -> ScriptedChatModel:
     return ScriptedChatModel(replies=[AIMessage(content=text) for text in summaries])
 
 
-def _runtime_with_llm(llm: Any, database_gate: ProcessDbGate) -> Runtime[MeivaContext]:
+def _runtime_with_llm(llm: BaseChatModel, database_gate: ProcessDbGate) -> Runtime[MeivaContext]:
     # These unit tests have no DB. ops_pool=None is the container-mode value:
     # the post-compact checkpoint trim treats it as a no-op (real-pool trimming is covered by
     # base/agents/history/tests/test_compact_boundary.py and the aops_pool compact tests below).
