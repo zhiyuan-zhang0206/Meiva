@@ -22,6 +22,8 @@ from base.events.live.bus import EventBus
 from base.events.live.projection import EVENT_ADAPTER
 from base.events.live.publisher import AgentEventPublisher
 from base.events.live.tests.rng import seeded_auth_retry
+from base.host.boundary.json_values import is_object_dict
+from base.host.boundary.untyped import object_of
 
 __all__ = [
     "LiveEvents",
@@ -64,11 +66,22 @@ class LiveEvents:
     async def events(self) -> list[dict[str, Any]]:
         return [json.loads(payload) for payload in await self.payloads()]
 
+    # meiva:note
+    # `events()` with every event a dict whose values are `object`, so a test narrows what it reads.
+    async def object_events(self) -> list[dict[str, object]]:
+        decoded = [object_of(json.loads, payload) for payload in await self.payloads()]
+        events = [event for event in decoded if is_object_dict(event)]
+        assert len(events) == len(decoded), "a live event was not a JSON object"
+        return events
+
     async def roles(self) -> list[str]:
         return [event["role"] for event in await self.events()]
 
     async def typed(self) -> list[Any]:
         return [EVENT_ADAPTER.validate_json(payload) for payload in await self.payloads()]
+
+    async def of_type[EventT](self, kind: type[EventT]) -> list[EventT]:
+        return [event for event in await self.typed() if isinstance(event, kind)]
 
 
 @pytest_asyncio.fixture

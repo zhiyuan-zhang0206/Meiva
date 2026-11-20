@@ -2,12 +2,11 @@ import asyncio
 import json
 import os
 import re
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from dataclasses import replace
 from datetime import UTC, datetime
 from pathlib import Path
 from types import SimpleNamespace
-from typing import Any, cast
 
 import psycopg
 import pytest
@@ -16,12 +15,15 @@ from psycopg_pool import AsyncConnectionPool
 
 from agent.graph.claim.harness_read_sink import ReadTimelineSink
 from agent.graph.claim.harness_turn import harness_turn_node
+from agent.graph.claim.tests.claim_support import snapshot_items, timeline_items, update_of
 from agent.graph.claim.tests.harness_support import (
     FakeEngine,
     RuntimeFixture,
+    Script,
     in_a_turn,
     input_key,
     insert_row,
+    publications,
     read_recorded_items,
     row_status,
     wait_until,
@@ -43,6 +45,8 @@ from base.db import Database, create_agent
 from base.db.code_version_gate import ProcessDbGate
 from base.events.live.bus import EventBus
 from base.events.live.tests.live_capture import LiveEvents
+from base.host.boundary.json_values import is_object_dict, is_object_list
+from base.host.boundary.untyped import object_of
 from base.host.env.agent_slices import AgentSlices
 from base.lm.harness import (
     AssistantText,
@@ -115,8 +119,7 @@ async def test_harness_turn_does_not_inject_visibility_rule_and_corrects_once_on
         state, harness_runtime(engine_valid, agent_id=agent_id), config(agent_id)
     )
     assert cmd_valid.goto == "claim"
-    assert cmd_valid.update is not None
-    assert cmd_valid.update["harness_inputs"] == []
+    assert update_of(cmd_valid)["harness_inputs"] == []
     [(prompt, _)] = engine_valid.submitted
     assert prompt == "hello from user"
 
@@ -204,10 +207,11 @@ BASIC_USER = "3c3d2de5-c479-52b7-91a6-fce4e4d26db9"
 def _recorded_reply() -> str:
     texts: list[str] = []
     for line in FIXTURE.read_text().splitlines():
-        row = cast("dict[str, Any]", json.loads(line))
-        message = cast("dict[str, Any]", row.get("message") or {})
-        for block in cast("list[dict[str, Any]]", message.get("content") or []):
-            if isinstance(block, dict) and block.get("type") == "text":
+        row = object_of(json.loads, line)
+        message = row.get("message") if is_object_dict(row) else None
+        blocks = message.get("content") if is_object_dict(message) else None
+        for block in blocks if is_object_list(blocks) else []:
+            if is_object_dict(block) and block.get("type") == "text":
                 texts.append(str(block["text"]))
     return texts[-1]
 
@@ -292,10 +296,8 @@ async def test_a_claude_turn_reaches_the_page_the_user_and_the_inbox_through_the
 
     assert command.goto == "claim"
     assert row_status(db_conn, row) == "done", "the input is settled without a timeline write"
-    _assert_page_saw_the_message(
-        [json.loads(payload) for payload in await live_events.payloads()], row
-    )
-    published = _publications(db_conn, agent_id)
+    _assert_page_saw_the_message(await live_events.object_events(), row)
+    published = publications(db_conn, agent_id)
     assert len(published) == 1 and published[0][1] == REPLY_TEXT
     assert re.fullmatch(r"harness:claude:[0-9a-f-]{36}", published[0][0])
     restarted = FakeEngine(script=lambda _inputs: [])
@@ -304,12 +306,12 @@ async def test_a_claude_turn_reaches_the_page_the_user_and_the_inbox_through_the
         tmp_path, restarted, aops_pool, hosted_resources, database_gate, live_events, agent_id
     )
     _ = await harness_turn_node(AgentState(), again, config(agent_id))
-    assert _publications(db_conn, agent_id) == published
+    assert publications(db_conn, agent_id) == published
 
 
-def _assert_page_saw_the_message(events: list[dict[str, Any]], row: int) -> None:
+def _assert_page_saw_the_message(events: Sequence[Mapping[str, object]], row: int) -> None:
     snapshots = [e for e in events if e.get("role") == "timeline_snapshot"]
-    shown = {item["item_id"]: item for e in snapshots for item in e["items"]}
+    shown = timeline_items(snapshots)
     first = next(iter(shown.values()))
     assert (first["kind"], first["inbound_id"]) == ("inbound_chat", row), (
         "the pending strip can clear"
@@ -317,15 +319,6 @@ def _assert_page_saw_the_message(events: list[dict[str, Any]], row: int) -> None
     assert all(re.fullmatch(r"h\d+\.\d+", item_id) for item_id in shown)
     committed = [e["inbound_id"] for e in events if e.get("role") == "inbound_committed"]
     assert committed == [row]
-
-
-def _publications(db_conn: psycopg.Connection, agent_id: int) -> list[tuple[str, str]]:
-    db_conn.commit()
-    rows = db_conn.execute(
-        "SELECT source_key, content FROM agent_publications WHERE agent_id=%s ORDER BY id",
-        (agent_id,),
-    ).fetchall()
-    return [(str(key), str(content)) for key, content in rows]
 
 
 def _claude_agent(tmp_path: Path, db_conn: psycopg.Connection) -> tuple[int, Path]:
@@ -338,7 +331,7 @@ def _claude_agent(tmp_path: Path, db_conn: psycopg.Connection) -> tuple[int, Pat
     return agent_id, folder
 
 
-def _engine(script: Any = None) -> FakeEngine:
+def _engine(script: Script | None = None) -> FakeEngine:
     engine = FakeEngine(script=script or (lambda _inputs: []))
     engine.session_id = SESSION
     return engine
@@ -361,7 +354,7 @@ async def test_the_switch_from_the_old_keys_does_not_resend_and_what_follows_is_
         (agent_id, REPLY_TEXT),
     )
     db_conn.commit()
-    old = _publications(db_conn, agent_id)
+    old = publications(db_conn, agent_id)
 
     def run(engine: FakeEngine):
         rt = _record_wired(
@@ -370,22 +363,22 @@ async def test_the_switch_from_the_old_keys_does_not_resend_and_what_follows_is_
         return harness_turn_node(AgentState(), rt, config(agent_id))
 
     _ = await run(_engine())
-    assert _publications(db_conn, agent_id) == old, (
+    assert publications(db_conn, agent_id) == old, (
         "the reply the old keys delivered is not sent again"
     )
     for _turn in range(2):
         _ = insert_row(db_conn, agent_id, "chat", "user", "again")
         _ = await run(_engine(cli))
-    new = _publications(db_conn, agent_id)
+    new = publications(db_conn, agent_id)
     assert [content for _key, content in new] == [REPLY_TEXT] * 3, (
         "two replies with the same text both arrive"
     )
     assert len({key for key, _content in new}) == 3
     cli.write("inbound-200")
     _ = await run(_engine())
-    assert len(_publications(db_conn, agent_id)) == 4
+    assert len(publications(db_conn, agent_id)) == 4
     _ = await run(_engine())
-    assert len(_publications(db_conn, agent_id)) == 4, "and only once"
+    assert len(publications(db_conn, agent_id)) == 4, "and only once"
 
 
 async def test_a_turn_with_no_record_file_to_show_for_it_fails_the_way_a_setup_failure_does(
@@ -432,7 +425,7 @@ def _prepare_pre_tool_transcript(
         folder = root / ".claude/projects" / slug
         folder.mkdir(parents=True, exist_ok=True)
         path = folder / f"{sid}.jsonl"
-        initial: list[dict[str, Any]] = [
+        initial: list[dict[str, object]] = [
             {
                 "type": "user",
                 "uuid": "u0",
@@ -628,11 +621,11 @@ async def test_external_harness_publishes_pre_tool_display_before_tool_completes
             "SELECT mode, content FROM agent_publications WHERE agent_id=%s", (tid,)
         ).fetchall()
         assert pubs == [("prefix", "Starting slow check now.")]
-        snapshots = [e for e in await live_events.events() if e.get("role") == "timeline_snapshot"]
+        snapshots = [
+            e for e in await live_events.object_events() if e.get("role") == "timeline_snapshot"
+        ]
         assert snapshots and any(
-            item.get("payload") == "Starting slow check now."
-            for snap in snapshots
-            for item in snap.get("items", [])
+            item.get("payload") == "Starting slow check now." for item in snapshot_items(snapshots)
         )
     finally:
         flusher.cancel()

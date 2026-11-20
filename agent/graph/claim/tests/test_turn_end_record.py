@@ -13,6 +13,7 @@ from langchain_core.messages import HumanMessage
 from langgraph.types import Command
 
 from agent.graph.claim.harness_read_sink import ReadTimelineSink
+from agent.graph.claim.tests.claim_support import update_of
 from agent.graph.claim.turn_end import settle_turn_end
 from agent.nodes import BEFORE_TURN, END
 from agent.state import AgentState
@@ -58,8 +59,7 @@ def test_held_call_becomes_no_input_at_the_turn_end(loguru_records: LogRecords) 
     assert record["duration_seconds"] == 2.5
     assert record["ok"] is True
     assert record["agent_id"] == 7
-    assert command.update is not None
-    assert command.update["turn_end_held_seconds"] is None, (
+    assert update_of(command)["turn_end_held_seconds"] is None, (
         "the held call must not reach the next turn"
     )
 
@@ -99,8 +99,9 @@ def test_a_continuing_turn_emits_the_record_without_a_reason(loguru_records: Log
 
     (record,) = _records(loguru_records)
     assert "ended_with" not in record, "a turn that continues has not ended, so it has no reason"
-    assert command.update is not None
-    assert command.update["ended_with"] is None, "a stale declaration must not reach the next round"
+    assert update_of(command)["ended_with"] is None, (
+        "a stale declaration must not reach the next round"
+    )
 
 
 # meiva:note
@@ -182,7 +183,7 @@ def _setup_plan_b_sink(
 
 
 async def _last_snapshot(live_events: LiveEvents) -> TimelineSnapshot:
-    snaps = [ev for ev in await live_events.typed() if isinstance(ev, TimelineSnapshot)]
+    snaps = await live_events.of_type(TimelineSnapshot)
     assert snaps
     return snaps[-1]
 

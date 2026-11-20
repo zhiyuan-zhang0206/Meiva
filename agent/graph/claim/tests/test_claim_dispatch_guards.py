@@ -14,7 +14,9 @@ from agent.graph.claim.tests.claim_support import (
     await_inbound_visible,
     insert_inbound_kind,
     make_runtime,
+    scalar_int,
     thread_config,
+    update_of,
 )
 from agent.state import AgentState
 from base.agents.inbox.insert import insert_inbound_message
@@ -26,6 +28,7 @@ from base.config.service_read import ConfigAuthority
 from base.db import Database
 from base.db.code_version_gate import ProcessDbGate
 from base.events.live.bus import EventBus
+from base.host.boundary.json_values import is_object_list
 from base.lm.catalog import ModelCatalog
 
 
@@ -204,8 +207,7 @@ async def test_claim_drops_compact_but_takes_a_restart_for_external_harness(
         ]
         cmd_restart = await settle_claimed_batch(ext_ctx, initial_state, tid, restart_batch)
         assert cmd_restart.goto == END
-        update = cmd_restart.update
-        assert update is not None
+        update = update_of(cmd_restart)
         assert update.get("restart_requested") is True
         assert update.get("exit_requested") is False
         assert update.get("halted") is False
@@ -288,18 +290,21 @@ async def test_a_stops_passive_note_enters_the_history_and_the_agent_stays_idle(
             '\'{"note_tag": "lifecycle_interrupt", "passive": true}\'::jsonb) RETURNING id',
             (tid, interrupt_note("user", with_message=False)),
         )
-        row = cur.fetchone()
-    assert row is not None
+        inbound_id = scalar_int(cur.fetchone())
     db_conn.commit()
-    await await_inbound_visible(aops_pool, row[0])
+    await await_inbound_visible(aops_pool, inbound_id)
     runtime = make_runtime(ops_pool=aops_pool, database_gate=database_gate)
     earlier: list[AnyMessage] = [SystemMessage(content="sys"), HumanMessage(content="earlier")]
 
     first = await claim_node(AgentState(messages=earlier, halted=True), runtime, thread_config(tid))
 
     assert first.goto == "claim", "no model turn"
-    assert first.update is not None and first.update["halted"] is True
-    noted = cast("list[AnyMessage]", first.update["messages"])
+    first_update = update_of(first)
+    assert first_update["halted"] is True
+    raised = first_update["messages"]
+    assert is_object_list(raised)
+    noted: list[AnyMessage] = [m for m in raised if isinstance(m, HumanMessage)]
+    assert len(noted) == len(raised)
     assert len(noted) == 1 and "interrupted by user." in str(noted[0].content)
 
     second = await claim_node(

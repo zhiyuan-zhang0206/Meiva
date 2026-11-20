@@ -16,6 +16,7 @@ from langgraph.runtime import Runtime
 from psycopg_pool import AsyncConnectionPool
 
 from agent.graph.claim.harness_turn import harness_turn_node
+from agent.graph.claim.tests.claim_support import scalar, scalar_int
 from agent.graph.claim.tests.harness_support import (
     FakeEngine,
     in_a_turn,
@@ -117,8 +118,7 @@ def _claimed_group(db: psycopg.Connection, agent_id: int, key: str) -> list[int]
             "jsonb_build_object('harness_input_key', %s::text)) RETURNING id",
             (agent_id, text, key),
         ).fetchone()
-        assert row is not None
-        ids.append(row[0])
+        ids.append(scalar_int(row))
     db.commit()
     return ids
 
@@ -159,7 +159,7 @@ def _payload_keys(db: psycopg.Connection, rows: Sequence[int]) -> list[object]:
         "SELECT payload->'harness_input_key' FROM inbound_messages WHERE id=ANY(%s) ORDER BY id",
         (list(rows),),
     ).fetchall()
-    return [row[0] for row in found]
+    return [scalar(row) for row in found]
 
 
 def _hint_and_note(chat: int) -> AgentState:

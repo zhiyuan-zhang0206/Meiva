@@ -2,19 +2,24 @@
 
 import asyncio
 import os
+from collections.abc import AsyncIterator, Callable, Hashable, Mapping, Sequence
 from pathlib import Path
-from typing import Any
 from unittest.mock import MagicMock
 
 import psycopg
+from langchain_core.callbacks import AsyncCallbackManagerForLLMRun, CallbackManagerForLLMRun
+from langchain_core.language_models.base import LanguageModelInput
 from langchain_core.language_models.chat_models import BaseChatModel
-from langchain_core.messages import AIMessage
-from langchain_core.runnables import RunnableConfig
+from langchain_core.messages import AIMessage, BaseMessage
+from langchain_core.outputs import ChatGenerationChunk, ChatResult
+from langchain_core.runnables import Runnable, RunnableConfig
+from langchain_core.tools import BaseTool
 from langgraph.runtime import Runtime
+from langgraph.types import Command
 from psycopg_pool import AsyncConnectionPool
 
 import meiva
-from agent.graph.hooks.tests.scripted_model import ScriptedModel
+from agent.graph.hooks.tests.scripted_model import asks_for_summary, closing_chunk
 from base.agents.context import MeivaContext
 from base.agents.context.identity import AgentIdentity
 from base.clock import SYSTEM_TIMERS, Clock
@@ -24,19 +29,101 @@ from base.db import Database
 from base.db.code_version_gate import ProcessDbGate
 from base.events.live.bus import EventBus
 from base.events.live.publisher import AgentEventPublisher
+from base.host.boundary.fields import str_field
+from base.host.boundary.json_values import is_object_dict, is_object_list
+from base.host.boundary.untyped import object_of
 from base.host.env.agent_slices import AgentSlices
 from base.packages.composer_commands import CommandCatalog
 from base.packages.plugin_providers import build_model_catalog
 from base.packages.plugins.extensions import EMPTY, ExtensionRegistry
 from base.paths import meiva_home, resolve_meiva_home
 
-__all__ = ["insert_inbound_kind", "make_runtime", "thread_config"]
+__all__ = [
+    "insert_inbound_kind",
+    "make_runtime",
+    "scalar",
+    "scalar_int",
+    "thread_config",
+    "timeline_items",
+    "update_of",
+]
 
 
 # meiva:note
-# A model that answers one compaction summary, as a streamed call (the call shape of generate_summary, which binds the same tool as the main llm node).
-def make_fake_llm(summary: str = "synthetic compaction summary") -> Any:
-    return ScriptedModel(AIMessage(content=summary))
+# A model that answers one compaction summary, as a streamed call (the call shape of generate_summary, which binds the same tool as the main llm node). Any other generation is an assertion failure.
+class SummaryModel(BaseChatModel):
+    summary: str
+    summary_requests: int = 0
+
+    @property
+    def _llm_type(self) -> str:
+        return "scripted-summary"
+
+    def bind_tools(
+        self,
+        tools: Sequence[dict[str, object] | type | Callable[..., object] | BaseTool],
+        *,
+        tool_choice: str | None = None,
+        **kwargs: object,
+    ) -> Runnable[LanguageModelInput, AIMessage]:
+        return self
+
+    def _generate(
+        self,
+        messages: list[BaseMessage],
+        stop: list[str] | None = None,
+        run_manager: CallbackManagerForLLMRun | None = None,
+        **kwargs: object,
+    ) -> ChatResult:
+        raise AssertionError("the claim node never makes a non-streaming request")
+
+    async def _astream(
+        self,
+        messages: list[BaseMessage],
+        stop: list[str] | None = None,
+        run_manager: AsyncCallbackManagerForLLMRun | None = None,
+        **kwargs: object,
+    ) -> AsyncIterator[ChatGenerationChunk]:
+        if not asks_for_summary(messages):
+            raise AssertionError("an ordinary generation nobody scripted")
+        self.summary_requests += 1
+        yield ChatGenerationChunk(message=closing_chunk(AIMessage(content=self.summary)))
+
+
+def make_fake_llm(summary: str = "synthetic compaction summary") -> SummaryModel:
+    return SummaryModel(summary=summary)
+
+
+def update_of[N: Hashable](command: Command[N]) -> dict[str, object]:
+    update = object_of(getattr, command, "update")
+    assert is_object_dict(update)
+    return update
+
+
+def snapshot_items(events: Sequence[Mapping[str, object]]) -> list[Mapping[str, object]]:
+    found: list[Mapping[str, object]] = []
+    for event in events:
+        items = event.get("items", [])
+        assert is_object_list(items)
+        for item in items:
+            assert is_object_dict(item)
+            found.append(item)
+    return found
+
+
+def timeline_items(events: Sequence[Mapping[str, object]]) -> dict[str, Mapping[str, object]]:
+    return {str_field(item, "item_id"): item for item in snapshot_items(events)}
+
+
+def scalar(row: tuple[object, ...] | None) -> object:
+    assert row is not None
+    return row[0]
+
+
+def scalar_int(row: tuple[object, ...] | None) -> int:
+    value = scalar(row)
+    assert isinstance(value, int)
+    return value
 
 
 # meiva:note
@@ -93,9 +180,7 @@ def insert_inbound_kind(
             "VALUES (%s, %s, %s, %s) RETURNING id",
             (tid, content, kind, source),
         )
-        row = cur.fetchone()
-        assert row is not None
-        new_id: int = row[0]
+        new_id = scalar_int(cur.fetchone())
     db.commit()
     return new_id
 

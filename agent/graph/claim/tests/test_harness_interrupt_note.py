@@ -6,7 +6,6 @@
 from __future__ import annotations
 
 import asyncio
-from unittest.mock import MagicMock
 
 import psycopg
 from psycopg_pool import AsyncConnectionPool
@@ -29,6 +28,7 @@ from agent.ownership.tests.ownership_support import agent_row
 from agent.state import AgentState
 from base.db.code_version_gate import ProcessDbGate
 from base.events.live.bus import EventBus
+from base.events.live.tests.live_capture import LiveEvents
 from base.lm.harness import InputInContext, TurnOrigin, TurnStarted
 from base.native_process.turn_identity import HostedTurnResources
 
@@ -181,7 +181,8 @@ async def test_a_note_that_is_not_passive_is_left_to_its_message(
     assert row_status(db_conn, note) == "pending"
 
 
-def test_announce_interrupt_emits_cancelled_and_leaves_pending_note_untouched(
+async def test_announce_interrupt_emits_cancelled_and_leaves_pending_note_untouched(
+    live_events: LiveEvents,
     db_conn: psycopg.Connection,
     aops_pool: AsyncConnectionPool,
     hosted_resources: HostedTurnResources,
@@ -190,12 +191,11 @@ def test_announce_interrupt_emits_cancelled_and_leaves_pending_note_untouched(
 ) -> None:
     agent_id = agent_row(db_conn)
     note = insert_row(db_conn, agent_id, "system_note", "user", _NOTE, payload=_PASSIVE_NOTE)
-    publisher = MagicMock()
     rt = runtime(
         silent_engine(),
         ops_pool=aops_pool,
         hosted_resources=hosted_resources,
-        publisher=publisher,
+        publisher=live_events.publisher,
         agent_id=agent_id,
         database_gate=database_gate,
         event_bus=event_bus,
@@ -203,7 +203,7 @@ def test_announce_interrupt_emits_cancelled_and_leaves_pending_note_untouched(
 
     announce_interrupt(rt.context, agent_id)
 
-    assert "cancelled" in str(publisher.emit.call_args).lower()
+    assert any("cancelled" in payload.lower() for payload in await live_events.payloads())
     assert row_status(db_conn, note) == "pending"
     row = db_conn.execute("SELECT payload FROM inbound_messages WHERE id=%s", (note,)).fetchone()
     assert row is not None and row[0] == {"note_tag": "lifecycle_interrupt", "passive": True}

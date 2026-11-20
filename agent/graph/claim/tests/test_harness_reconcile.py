@@ -25,7 +25,7 @@ from agent.graph.claim.harness_foreground import (
 from agent.graph.claim.harness_inbox import claimed_deliverable, recovery_notes_first
 from agent.graph.claim.harness_turn import harness_turn_node
 from agent.graph.claim.node import claim_node
-from agent.graph.claim.tests.claim_support import make_runtime
+from agent.graph.claim.tests.claim_support import make_runtime, scalar, scalar_int
 from agent.graph.claim.tests.harness_support import (
     FakeEngine,
     RuntimeFixture,
@@ -71,15 +71,13 @@ def h_insert(db: psycopg.Connection, agent_id: int, content: str, *, claimed: bo
         (agent_id, content, "claimed" if claimed else "pending", claimed),
     ).fetchone()
     db.commit()
-    assert row is not None
-    return row[0]
+    return scalar_int(row)
 
 
 def h_status(db: psycopg.Connection, inbound_id: int) -> object:
     db.commit()
     row = db.execute("SELECT status FROM inbound_messages WHERE id=%s", (inbound_id,)).fetchone()
-    assert row is not None
-    return row[0]
+    return scalar(row)
 
 
 def h_key(inbound_id: int) -> str:
@@ -108,8 +106,7 @@ async def h_deferred(db: psycopg.Connection, inbound_id: int) -> bool:
         "SELECT payload->>'harness_reconcile_deferred' FROM inbound_messages WHERE id=%s",
         (inbound_id,),
     ).fetchone()
-    assert row is not None
-    return row[0] == "true"
+    return scalar(row) == "true"
 
 
 def h_silent() -> FakeEngine:
@@ -522,8 +519,7 @@ async def test_a_restart_note_goes_ahead_of_the_messages_that_were_returned_to_t
         (agent_id,),
     ).fetchone()
     db_conn.commit()
-    assert row is not None
-    note = row[0]
+    note = scalar_int(row)
     engine = FakeEngine()
     engine.records = {}
     rt = harness_runtime(engine, agent_id=agent_id)

@@ -20,6 +20,7 @@ import psycopg
 import pytest
 
 import meiva
+from agent.graph.claim.tests.claim_support import scalar
 from base import telemetry
 from base.agents.tests.units import spawn_agent
 from base.clock.tests.fakes import system_clock
@@ -29,6 +30,8 @@ from base.config import set_field, settings
 from base.config.service_read import ConfigAuthority
 from base.db import Database
 from base.db.code_version_gate import ProcessDbGate
+from base.host.boundary.json_values import is_object_dict
+from base.host.boundary.untyped import object_of, object_sequence
 from base.lm.catalog import ModelCatalog
 from base.packages.tests.model_catalog import AddModels
 from base.paths import meiva_home
@@ -203,7 +206,7 @@ class TestRestart:
             )
             row = cur.fetchone()
         assert row is not None
-        kind, source, payload = row
+        kind, source, payload = object_sequence(row)
         assert kind == "restart"
         assert source == "self"
         assert payload == {"config_overlay": {"auto_compact_fraction": 0.7}}
@@ -437,9 +440,8 @@ class TestPauseHeartbeat:
                 (meiva.self.AGENT_ID,),
             )
             trail_rows = cur.fetchall()
-        assert window_row is not None
-        assert window_row[0] == pytest.approx(1800, abs=5)
-        assert [float(row[0]) for row in trail_rows] == [1800.0]
+        assert scalar(window_row) == pytest.approx(1800, abs=5)
+        assert [scalar(row) for row in trail_rows] == [1800]
         # The event row lives in the JSONL mirror (the PG events copy was retired at
         # the LGTM cutover, task #1197 close-C, and dropped with the archive
         # cleanup, task #1281/#1823).
@@ -452,18 +454,21 @@ class TestPauseHeartbeat:
         day = _dt.now(_UTC).strftime("%Y%m%d")
         path = logs_dir(home=config_authority.env_path.parent) / f"events-{day}.jsonl"
         assert path.exists(), "mirror file missing"
-        event_row = None
+        event_row: dict[str, object] | None = None
         for line in reversed(path.read_text(encoding="utf-8").splitlines()):
-            obj = _json.loads(line)
+            obj = object_of(_json.loads, line)
             if (
-                obj.get("event_name") == "heartbeat_paused"
+                is_object_dict(obj)
+                and obj.get("event_name") == "heartbeat_paused"
                 and obj.get("agent_id") == meiva.self.AGENT_ID
                 and obj.get("category") == "telemetry"
             ):
                 event_row = obj
                 break
         assert event_row is not None
-        duration_s = event_row["attributes"]["duration_s"]
+        attributes = event_row["attributes"]
+        assert is_object_dict(attributes)
+        duration_s = attributes["duration_s"]
         # int since the emit cast (task #4011): the metric kind rides the runtime type.
         assert duration_s == 1800 and isinstance(duration_s, int)
 
@@ -533,8 +538,7 @@ class TestPauseHeartbeat:
                     (meiva.self.AGENT_ID,),
                 )
                 window_row = cur.fetchone()
-            assert window_row is not None
-            assert window_row[0] == pytest.approx(3600, abs=5)
+            assert scalar(window_row) == pytest.approx(3600, abs=5)
             with pytest.raises(ValueError, match=r"at most"):
                 meiva.self.pause_heartbeat(3601)
         finally:
@@ -586,10 +590,10 @@ class TestMeivaDBAutocommit:
         as encountered in the smoke flow).
         """
         # Deliberately trigger an SQL error
-        with pytest.raises(psycopg.errors.UndefinedTable), meiva.DB.cursor() as cur:
+        with pytest.raises(psycopg.errors.UndefinedTable), meiva.context.sql.cursor() as cur:
             cur.execute("SELECT * FROM nonexistent_table_xyz")
 
         # Immediately use meiva.DB after the error — under autocommit the conn is back to IDLE, should not error again
-        with meiva.DB.cursor() as cur:
+        with meiva.context.sql.cursor() as cur:
             cur.execute("SELECT 1")
             assert cur.fetchone() == (1,)
