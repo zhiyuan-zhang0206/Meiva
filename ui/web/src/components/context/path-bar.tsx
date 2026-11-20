@@ -26,6 +26,10 @@ interface Folder {
 // One height whether the bar shows the path or edits it, so clicking it does not move the file below
 // (user report 2026-11-21); its rule is the panel's divider, inset at both ends like every other.
 const BAR_CLASS = cn("relative h-8 shrink-0 items-center px-2", BAR_DIVIDER_CLASS, FLEX);
+// meiva:note
+// The drop-down's width (`w-72`): it opens under what was clicked but never past the bar's right end.
+const MENU_WIDTH_PX = 288;
+const TYPED_MENU_LEFT_PX = 8;
 
 interface Root {
   kind: "workspace" | "home" | "machine";
@@ -130,7 +134,7 @@ export function PathBar({ agentId, documentModifiedAt }: { agentId: number; docu
   const folders = parts.slice(0, -1);
   const folderPath = (count: number) => (root ? `${root.path.replace(/\/$/, "")}/${folders.slice(0, count).join("/")}` : null);
 
-  const [open, setOpen] = useState<{ start: Folder; at: number } | null>(null);
+  const [open, setOpen] = useState<{ start: Folder; at: number; left: number } | null>(null);
   const [editing, setEditing] = useState<string | null>(null);
   const barRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
@@ -163,12 +167,12 @@ export function PathBar({ agentId, documentModifiedAt }: { agentId: number; docu
     // exists; any other refusal opens the folder's drop-down, which reports it.
     try {
       const listing = await client.listWorkspaceDir(ownerAgentId, text);
-      setOpen({ start: { machineAgent: ownerAgentId, path: listing.path }, at: -1 });
+      setOpen({ start: { machineAgent: ownerAgentId, path: listing.path }, at: -1, left: TYPED_MENU_LEFT_PX });
     } catch (error) {
       if (error instanceof ApiError && error.status === 404) {
         useWorkspaceFileStore.getState().openFile({ agentId, machineAgentId: ownerAgentId, path: text });
       } else {
-        setOpen({ start: { machineAgent: ownerAgentId, path: text }, at: -1 });
+        setOpen({ start: { machineAgent: ownerAgentId, path: text }, at: -1, left: TYPED_MENU_LEFT_PX });
       }
     }
   };
@@ -177,9 +181,11 @@ export function PathBar({ agentId, documentModifiedAt }: { agentId: number; docu
   const detail = shown === null
     ? (documentModifiedAt ? t("updated", { time: formatRelative(documentModifiedAt, now) }) : null)
     : (file.data ? formatFileSize(file.data.size) : null);
-  const toggle = (at: number, path: string | null) => {
+  const toggle = (at: number, path: string | null, anchor: HTMLElement) => {
     if (path === null) return;
-    setOpen(open?.at === at ? null : { start: { machineAgent: ownerAgentId, path }, at });
+    const bar = barRef.current?.getBoundingClientRect();
+    const left = bar ? Math.max(0, Math.min(anchor.getBoundingClientRect().left - bar.left, bar.width - MENU_WIDTH_PX)) : 0;
+    setOpen(open?.at === at ? null : { start: { machineAgent: ownerAgentId, path }, at, left });
   };
 
   if (editing !== null) {
@@ -202,21 +208,17 @@ export function PathBar({ agentId, documentModifiedAt }: { agentId: number; docu
     );
   }
 
-  const menu = (at: number) => (open?.at === at ? <FolderMenu agentId={agentId} start={open.start} onClose={() => setOpen(null)} /> : null);
   const dropDown = (at: number, path: string | null, name: string) => (
-    <span className="relative shrink-0">
-      <button
-        type="button"
-        aria-label={t("filesFolderContents", { name })}
-        aria-haspopup="menu"
-        aria-expanded={open?.at === at}
-        onClick={() => toggle(at, path)}
-        className={cn("rounded p-0.5 hover:bg-accent hover:text-foreground", open?.at === at ? "bg-accent text-foreground" : "opacity-60")}
-      >
-        {open?.at === at ? <ChevronDown aria-hidden className="size-3" /> : <ChevronRight aria-hidden className="size-3" />}
-      </button>
-      {menu(at)}
-    </span>
+    <button
+      type="button"
+      aria-label={t("filesFolderContents", { name })}
+      aria-haspopup="menu"
+      aria-expanded={open?.at === at}
+      onClick={(event) => toggle(at, path, event.currentTarget)}
+      className={cn("shrink-0 rounded p-0.5 hover:bg-accent hover:text-foreground", open?.at === at ? "bg-accent text-foreground" : "opacity-60")}
+    >
+      {open?.at === at ? <ChevronDown aria-hidden className="size-3" /> : <ChevronRight aria-hidden className="size-3" />}
+    </button>
   );
   const rootName = root ? rootLabel(root) : writtenRoot;
 
@@ -224,7 +226,7 @@ export function PathBar({ agentId, documentModifiedAt }: { agentId: number; docu
     <>
       {rootName === null ? null : (
         <>
-          <button type="button" dir="rtl" aria-haspopup="menu" aria-expanded={open?.at === 0} onClick={() => toggle(0, root?.path ?? null)} className={cn(segment, "max-w-56 shrink truncate", MIN_W_0)}>
+          <button type="button" dir="rtl" aria-haspopup="menu" aria-expanded={open?.at === 0} onClick={(event) => toggle(0, root?.path ?? null, event.currentTarget)} className={cn(segment, "max-w-56 shrink truncate", MIN_W_0)}>
             <bdi>{rootName}</bdi>
           </button>
           {dropDown(0, root?.path ?? null, rootName)}
@@ -235,7 +237,7 @@ export function PathBar({ agentId, documentModifiedAt }: { agentId: number; docu
         // Folder segments give up width before the file name does: a deep path in a narrow panel
         // truncates its folders rather than overflowing the bar.
         <div key={`${index}:${name}`} className={cn("items-center gap-0.5", MIN_W_0, FLEX)}>
-          <button type="button" aria-haspopup="menu" aria-expanded={open?.at === index + 1} onClick={() => toggle(index + 1, folderPath(index + 1))} className={cn(segment, "min-w-[2ch] max-w-32 truncate")}>
+          <button type="button" aria-haspopup="menu" aria-expanded={open?.at === index + 1} onClick={(event) => toggle(index + 1, folderPath(index + 1), event.currentTarget)} className={cn(segment, "min-w-[2ch] max-w-32 truncate")}>
             {name}
           </button>
           {dropDown(index + 1, folderPath(index + 1), name)}
@@ -259,7 +261,11 @@ export function PathBar({ agentId, documentModifiedAt }: { agentId: number; docu
         onClick={() => setEditing(root && absolute ? typedPath(root, absolute) : requestPath)}
         className={cn("h-5 cursor-text self-stretch", MIN_W_0, FLEX_1)}
       />
-      {open?.at === -1 ? <div className="absolute left-2 top-full"><FolderMenu agentId={agentId} start={open.start} onClose={() => setOpen(null)} /></div> : null}
+      {open ? (
+        <div className="absolute top-full" style={{ left: open.left }}>
+          <FolderMenu key={`${open.at}:${open.start.path}`} agentId={agentId} start={open.start} onClose={() => setOpen(null)} />
+        </div>
+      ) : null}
       {detail ? <span className="shrink-0 whitespace-nowrap pl-2 font-sans text-[10px]">{detail}</span> : null}
     </div>
   );
