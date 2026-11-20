@@ -23,10 +23,12 @@ import os
 import subprocess
 import sys
 from pathlib import Path
-from typing import Any
 
 import pytest
 
+from base.host.boundary.fields import optional_object_field, str_field
+from base.host.boundary.json_values import is_object_dict
+from base.host.boundary.untyped import object_of
 from base.packages.plugins.enable_config import discover_plugins, local_config_path, write_local
 
 _REPO_ROOT = Path(__file__).resolve().parents[3]
@@ -96,7 +98,7 @@ def counter(unit_home: Path) -> Path:
 # meiva:note
 # The probe runs a fixed argv from this file; `sys.executable` is the test's own interpreter, so
 # the subprocess call carries no shell and no caller input.
-def run(scenario: str, counter: Path, unit_home: Path, *, launched: bool) -> dict[str, Any]:
+def run(scenario: str, counter: Path, unit_home: Path, *, launched: bool) -> dict[str, object]:
     env = {key: value for key, value in os.environ.items() if key not in _LAUNCH_MARKERS}
     env.update({"MEIVA_HOME": str(unit_home), "MEIVA_CONFIG_FETCH": "skip"})
     if launched:
@@ -111,7 +113,9 @@ def run(scenario: str, counter: Path, unit_home: Path, *, launched: bool) -> dic
         check=False,
     )
     assert proc.returncode == 0, proc.stderr[-3000:]
-    return json.loads(proc.stdout.strip().splitlines()[-1])
+    report = object_of(json.loads, proc.stdout.strip().splitlines()[-1])
+    assert is_object_dict(report)
+    return report
 
 
 def test_a_launched_child_loads_its_plugins_at_import(counter: Path, unit_home: Path) -> None:
@@ -134,7 +138,7 @@ def test_lazy_load_fires_on_the_first_miss_when_the_entry_did_not_load(
 def test_lazy_load_latches_once(counter: Path, unit_home: Path) -> None:
     report = run("latched_after_first_load", counter, unit_home, launched=True)
     assert report["executions"] == 1
-    assert "has no attribute 'still_unknown'" in report["second_miss"]
+    assert "has no attribute 'still_unknown'" in str_field(report, "second_miss")
 
 
 def test_no_lazy_load_without_agent_id(counter: Path, unit_home: Path) -> None:
@@ -146,7 +150,7 @@ def test_no_lazy_load_without_agent_id(counter: Path, unit_home: Path) -> None:
 
 def test_no_lazy_load_in_agent_process(counter: Path, unit_home: Path) -> None:
     report = run("agent_process", counter, unit_home, launched=False)
-    assert "has no attribute 'nope_xyz'" in report["error"]
+    assert "has no attribute 'nope_xyz'" in str_field(report, "error")
     assert report["executions"] == 0
 
 
@@ -191,7 +195,9 @@ def test_faces_failure_is_not_marked_successful_and_repeats_original_error(
     counter: Path, unit_home: Path
 ) -> None:
     report = run("faces_failure", counter, unit_home, launched=False)
-    assert report["faces"]["raised"] == 3
-    assert report["faces"]["same_error"] is True
+    faces = optional_object_field(report, "faces")
+    assert faces is not None
+    assert faces["raised"] == 3
+    assert faces["same_error"] is True
     assert report["still_the_surface"] is True
     assert report["executions"] == 1
