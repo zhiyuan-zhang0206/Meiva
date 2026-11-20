@@ -51,8 +51,19 @@ export interface WorkspaceFileStore {
 
 const RECENT_MAX = 20;
 
-const sameFile = (a: WorkspaceFileTarget | null, b: WorkspaceFileTarget) =>
-  a !== null && a.agentId === b.agentId && a.path === b.path;
+// meiva:note
+// The agent whose machine reads the file: the conversation's own unless the target names another.
+export const machineOf = (target: WorkspaceFileTarget) => target.machineAgentId ?? target.agentId;
+
+export const sameFile = (a: WorkspaceFileTarget | null, b: WorkspaceFileTarget) =>
+  a !== null && a.agentId === b.agentId && machineOf(a) === machineOf(b) && a.path === b.path;
+
+// meiva:note
+// A machine that is the conversation's own is not named, so one file has one form.
+function plain(target: WorkspaceFileTarget): WorkspaceFileTarget {
+  if (target.machineAgentId !== target.agentId) return target;
+  return { agentId: target.agentId, path: target.path, ...(target.lineRange ? { lineRange: target.lineRange } : {}) };
+}
 
 function withTab(tabs: Record<number, WorkspaceFileTarget[]>, target: WorkspaceFileTarget) {
   const list = tabs[target.agentId] ?? [];
@@ -62,7 +73,7 @@ function withTab(tabs: Record<number, WorkspaceFileTarget[]>, target: WorkspaceF
 }
 
 function withRecent(recent: WorkspaceFileTarget[], target: WorkspaceFileTarget) {
-  return [target, ...recent.filter((file) => !(file.agentId === target.agentId && file.path === target.path))].slice(0, RECENT_MAX);
+  return [target, ...recent.filter((file) => !sameFile(file, target))].slice(0, RECENT_MAX);
 }
 
 export const useWorkspaceFileStore = create<WorkspaceFileStore>((set, get) => ({
@@ -72,7 +83,8 @@ export const useWorkspaceFileStore = create<WorkspaceFileStore>((set, get) => ({
   maximized: false,
   navigator: null,
 
-  openFile: (target) => {
+  openFile: (opened) => {
+    const target = plain(opened);
     const { activeFile, tabs, recent, navigator } = get();
     set({ activeFile: target, tabs: withTab(tabs, target), recent: withRecent(recent, target) });
     navigator?.show(target, sameFile(activeFile, target) ? "replace" : "push");

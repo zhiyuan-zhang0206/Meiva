@@ -8,7 +8,7 @@ import { useState } from "react";
 import { Spinner } from "@/components/ui/spinner";
 import { useWorkspaceFileStore } from "@/lib/context/workspace-file-store";
 import { cn } from "@/lib/format/utils";
-import { FLEX, FLEX_COL, MIN_H_0, MIN_W_0 } from "@/lib/layout/layout";
+import { BAR_DIVIDER_CLASS, FLEX, FLEX_COL, MIN_H_0, MIN_W_0 } from "@/lib/layout/layout";
 import { useApi } from "@/lib/transport/transport-context";
 
 // meiva:note
@@ -58,7 +58,7 @@ function TreeFolder({ agentId, workspaceAgentId, path, depth }: {
                     return next;
                   });
                 }
-                else useWorkspaceFileStore.getState().openFile({ agentId, path: entry.path });
+                else useWorkspaceFileStore.getState().openFile({ agentId, machineAgentId: workspaceAgentId, path: entry.path });
               }}
               className={cn(
                 "w-full items-center gap-1 rounded-sm py-0.5 pr-2 text-left text-[12px] hover:bg-accent/60",
@@ -102,7 +102,7 @@ export function FileTree({ agentId, workspaceAgentId, onWorkspaceChange }: {
   return (
     <nav data-testid="file-tree" aria-label={t("filesWorkspace", { id: workspaceAgentId })} className={cn("w-56 shrink-0 border-r", MIN_H_0, FLEX, FLEX_COL)}>
       <form
-        className={cn("shrink-0 items-center gap-1 border-b px-2 py-1 text-[11px] text-muted-foreground", FLEX)}
+        className={cn("relative h-8 shrink-0 items-center gap-1 px-2 text-[11px] text-muted-foreground", BAR_DIVIDER_CLASS, FLEX)}
         onSubmit={(event) => {
           event.preventDefault();
           const id = Number(draft.replace(/^#/, ""));

@@ -96,8 +96,8 @@ export function WorkspaceFileView({ agentId, target }: WorkspaceFileViewProps) {
   const { openFile } = useWorkspaceFileStore();
 
   const { ownerAgentId, requestPath } = useMemo(
-    () => resolveWorkspaceFile(target.path, agentId),
-    [target.path, agentId],
+    () => resolveWorkspaceFile(target.path, target.machineAgentId ?? agentId),
+    [target.path, target.machineAgentId, agentId],
   );
 
   const { data, error, isLoading, refetch } = useQuery({
@@ -173,6 +173,7 @@ export function WorkspaceFileView({ agentId, target }: WorkspaceFileViewProps) {
               onOpenFile={(nextPath, nextLines) =>
                 openFile({
                   agentId,
+                  machineAgentId: ownerAgentId,
                   path: resolveWorkspaceReference(target.path, nextPath),
                   lineRange: nextLines,
                 })

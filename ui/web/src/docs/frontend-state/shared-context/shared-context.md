@@ -83,9 +83,11 @@ The panel is a file viewer (user rulings 2026-11-20 and 2026-11-21; decision rec
   - **Its root.** The root is the workspace the file lies in (`#63`), otherwise the home directory
     (`~`), otherwise the machine's root (`/`). The gateway reports the root with each file and listing.
   - **Folder drop-downs.** Each folder segment drops down its entries: a folder opens in place, a file
-    opens as a tab.
+    opens as a tab. The bar reads from the machine of the file on show, and a file opened from it
+    keeps that machine, even above another agent's workspace.
   - **Editing.** Clicking the bar's empty end turns it into a text field holding the path, selected.
     Enter opens what was typed: a folder opens its drop-down, a file opens as a tab. Escape gives up.
+    The bar keeps one height either way, and its rule is the panel's inset divider.
   - **Full page.** Once the viewer fills the page, the tree takes the address bar's place on the
     left. The tree's root takes another agent's number to browse that agent's workspace.
 - **Reach.** What the viewer may read is `settings.to_user.file_access`: `all` (the default) lets it

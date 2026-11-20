@@ -3,7 +3,7 @@
 import { Maximize2, Minimize2, PanelLeft, PanelRight, ScanSearch, X } from "lucide-react";
 import { useTranslations } from "next-intl";
 
-import { useWorkspaceFileStore, type WorkspaceFileTarget } from "@/lib/context/workspace-file-store";
+import { machineOf, sameFile, useWorkspaceFileStore, type WorkspaceFileTarget } from "@/lib/context/workspace-file-store";
 import { cn } from "@/lib/format/utils";
 import { COLUMN_TITLE_BAR_CLASS, FLEX, MIN_W_0 } from "@/lib/layout/layout";
 
@@ -59,10 +59,10 @@ export function PanelBar({ agentId, mobile, inspecting, onInspect, onCollapse, o
             <span className="whitespace-nowrap">{t("filesSharedContext")}</span>
           </button>
           {tabs.map((tab) => {
-            const active = shownFile?.path === tab.path;
+            const active = sameFile(shownFile, tab);
             const name = fileName(tab.path);
             return (
-              <div key={tab.path} className={tabClass(active)}>
+              <div key={`${machineOf(tab)}:${tab.path}`} className={tabClass(active)}>
                 <button type="button" role="tab" aria-selected={active} onClick={() => selectTab(tab)} className={cn("items-center", MIN_W_0, FLEX)}>
                   <span className="max-w-40 truncate" title={tab.path}>{name}</span>
                 </button>

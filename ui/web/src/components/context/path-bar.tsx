@@ -11,7 +11,8 @@ import { useWorkspaceFileStore } from "@/lib/context/workspace-file-store";
 import { useWallDate } from "@/lib/format/now/use-wall-date";
 import { formatRelative } from "@/lib/format/time";
 import { cn, formatFileSize } from "@/lib/format/utils";
-import { FLEX, FLEX_1, MIN_W_0 } from "@/lib/layout/layout";
+import { BAR_DIVIDER_CLASS, FLEX, FLEX_1, MIN_W_0 } from "@/lib/layout/layout";
+import { ApiError } from "@/lib/transport/api";
 import { useApi } from "@/lib/transport/transport-context";
 
 interface Folder {
@@ -20,6 +21,11 @@ interface Folder {
   // An absolute directory on the machine of `machineAgent`.
   path: string;
 }
+
+// meiva:note
+// One height whether the bar shows the path or edits it, so clicking it does not move the file below
+// (user report 2026-11-21); its rule is the panel's divider, inset at both ends like every other.
+const BAR_CLASS = cn("relative h-8 shrink-0 items-center px-2", BAR_DIVIDER_CLASS, FLEX);
 
 interface Root {
   kind: "workspace" | "home" | "machine";
@@ -81,7 +87,7 @@ function FolderMenu({ agentId, start, onClose }: { agentId: number; start: Folde
                 setTrail([...trail, { machineAgent: folder.machineAgent, path: entry.path }]);
                 return;
               }
-              useWorkspaceFileStore.getState().openFile({ agentId, path: entry.path });
+              useWorkspaceFileStore.getState().openFile({ agentId, machineAgentId: folder.machineAgent, path: entry.path });
               onClose();
             }}
             className={cn("w-full items-center justify-between gap-2 px-3 py-1 text-left text-[12px] hover:bg-accent", FLEX)}
@@ -109,14 +115,18 @@ export function PathBar({ agentId, documentModifiedAt }: { agentId: number; docu
   const now = useWallDate();
   const activeFile = useWorkspaceFileStore((s) => s.activeFile);
   const shown = activeFile?.agentId === agentId ? activeFile : null;
-  const { ownerAgentId, requestPath } = resolveWorkspaceFile(shown?.path ?? "to_user.md", agentId);
+  const { ownerAgentId, requestPath } = resolveWorkspaceFile(shown?.path ?? "to_user.md", shown?.machineAgentId ?? agentId);
   const file = useQuery({
     queryKey: ["workspace-file", ownerAgentId, requestPath],
     queryFn: ({ signal }) => client.getWorkspaceFile(ownerAgentId, requestPath, signal),
   });
   const root: Root | null = file.data?.root ?? null;
   const absolute = file.data?.path ?? null;
-  const parts = root && absolute ? below(root, absolute) : requestPath.split("/").filter(Boolean);
+  // meiva:note
+  // Until the gateway names the root (or when the path does not resolve), the bar roots the path as
+  // it was written: `~/…` at `~`, an absolute path at `/`, anything else in the owner's workspace.
+  const writtenRoot = requestPath.startsWith("~") ? "~" : requestPath.startsWith("/") ? "/" : `#${ownerAgentId}`;
+  const parts = root && absolute ? below(root, absolute) : requestPath.replace(/^~/, "").split("/").filter(Boolean);
   const folders = parts.slice(0, -1);
   const folderPath = (count: number) => (root ? `${root.path.replace(/\/$/, "")}/${folders.slice(0, count).join("/")}` : null);
 
@@ -148,11 +158,18 @@ export function PathBar({ agentId, documentModifiedAt }: { agentId: number; docu
     const text = typed.trim();
     if (!text) return;
     setEditing(null);
+    // meiva:note
+    // What is not a folder (the listing's 404) opens as a file, whose view reports whether it
+    // exists; any other refusal opens the folder's drop-down, which reports it.
     try {
       const listing = await client.listWorkspaceDir(ownerAgentId, text);
       setOpen({ start: { machineAgent: ownerAgentId, path: listing.path }, at: -1 });
-    } catch {
-      useWorkspaceFileStore.getState().openFile({ agentId, path: text });
+    } catch (error) {
+      if (error instanceof ApiError && error.status === 404) {
+        useWorkspaceFileStore.getState().openFile({ agentId, machineAgentId: ownerAgentId, path: text });
+      } else {
+        setOpen({ start: { machineAgent: ownerAgentId, path: text }, at: -1 });
+      }
     }
   };
 
@@ -167,7 +184,7 @@ export function PathBar({ agentId, documentModifiedAt }: { agentId: number; docu
 
   if (editing !== null) {
     return (
-      <div ref={barRef} data-testid="path-bar" className={cn("relative shrink-0 items-center border-b px-2 py-1", FLEX)}>
+      <div ref={barRef} data-testid="path-bar" className={BAR_CLASS}>
         <input
           ref={inputRef}
           aria-label={t("filesPath")}
@@ -179,17 +196,17 @@ export function PathBar({ agentId, documentModifiedAt }: { agentId: number; docu
             if (event.key === "Enter") { event.preventDefault(); void go(editing); }
             else if (event.key === "Escape") { event.preventDefault(); setEditing(null); }
           }}
-          className="w-full rounded border border-input bg-transparent px-1.5 py-0.5 font-mono text-[11px] text-foreground outline-none focus:border-ring"
+          className="h-6 w-full rounded border border-input bg-transparent px-[3px] font-mono text-[11px] text-foreground outline-none focus:border-ring"
         />
       </div>
     );
   }
 
   return (
-    <div ref={barRef} data-testid="path-bar" className={cn("relative shrink-0 items-center gap-0.5 border-b px-2 py-1 font-mono text-[11px] text-muted-foreground", MIN_W_0, FLEX)}>
+    <div ref={barRef} data-testid="path-bar" className={cn(BAR_CLASS, "gap-0.5 font-mono text-[11px] text-muted-foreground", MIN_W_0)}>
       <div className="relative shrink-0">
         <button type="button" aria-haspopup="menu" aria-expanded={open?.at === 0} onClick={() => toggle(0, root?.path ?? null)} className={segment}>
-          {root ? rootLabel(root) : `#${ownerAgentId}`}
+          {root ? rootLabel(root) : writtenRoot}
         </button>
         {open?.at === 0 ? <FolderMenu agentId={agentId} start={open.start} onClose={() => setOpen(null)} /> : null}
       </div>

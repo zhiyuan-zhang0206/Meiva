@@ -56,12 +56,14 @@ describe("workspace file history", () => {
     expect(store().activeFile).toEqual({ agentId: 7, path: "/w/b.py", lineRange: "3" });
   });
 
+  // meiva:note
+  // `view_agent` names the machine that reads the file; the conversation is `agent_id`.
   it("opens the file a shared or reloaded address names, and keeps it through the first agent selection", () => {
     const page = fakeBrowser({ href: `${ORIGIN}/?agent_id=7&view=/w/report.md&view_agent=9` });
     const view = mount(page, null);
-    expect(store().activeFile).toEqual({ agentId: 9, path: "/w/report.md" });
+    expect(store().activeFile).toEqual({ agentId: 7, path: "/w/report.md", machineAgentId: 9 });
     view.rerender({ id: 7 });
-    expect(store().activeFile).toEqual({ agentId: 9, path: "/w/report.md" });
+    expect(store().activeFile).toEqual({ agentId: 7, path: "/w/report.md", machineAgentId: 9 });
     view.rerender({ id: 8 });
     expect(store().activeFile).toBeNull();
     act(() => store().openFile({ agentId: 8, path: "/w/c.md" }));

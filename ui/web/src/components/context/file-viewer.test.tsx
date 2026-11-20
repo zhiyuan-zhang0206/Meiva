@@ -4,6 +4,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import type { ReactNode } from "react";
 
 import { useWorkspaceFileStore } from "@/lib/context/workspace-file-store";
+import { ApiError } from "@/lib/transport/api";
 import { WallClockProvider } from "@/lib/transport/transport-context";
 import { resetTransport, transport } from "@/test-support/fake-api";
 import { TestStreamProvider } from "@/test-support/fake-stream";
@@ -99,6 +100,15 @@ describe("path bar", () => {
     expect(screen.getByRole("button", { name: "etc" })).toBeTruthy();
   });
 
+  it("roots a path that does not resolve as it was written", async () => {
+    transport.getWorkspaceFile.mockRejectedValue(new Error("not found"));
+    store().openFile({ agentId: 7, path: "~/missing/a.md" });
+    renderWithBrowser(<PathBar agentId={7} documentModifiedAt={null} />, { wrapper: Wrapper });
+    await waitFor(() => expect(transport.getWorkspaceFile).toHaveBeenCalled());
+    const bar = screen.getByTestId("path-bar");
+    expect([...bar.querySelectorAll("button[aria-haspopup]")].map((b) => b.textContent)).toEqual(["~", "missing"]);
+  });
+
   // meiva:note
   // A normal address bar: clicking its empty end edits the path; Enter opens a file as a tab, or a
   // folder as its drop-down; Escape gives up.
@@ -106,7 +116,7 @@ describe("path bar", () => {
     transport.getWorkspaceFile.mockResolvedValue({ path: "/home/u/a.md", root: { kind: "home", path: "/home/u", agent_id: null }, name: "a.md", extension: ".md", content: "x", size: 1, binary: false, modified_at: "2026-11-20T12:00:00Z" });
     transport.listWorkspaceDir.mockImplementation((_agentId: number, path?: string) => (path === "~/docs" || path === "/home/u/docs"
       ? Promise.resolve({ path: "/home/u/docs", root: { kind: "home" as const, path: "/home/u", agent_id: null }, parent: "/home/u", entries: [entry("b.md", "file", "/home/u/docs")], truncated: false })
-      : Promise.reject(new Error("not a directory"))));
+      : Promise.reject(new ApiError(404, "not a directory", { code: "http_404", retryable: false }))));
     store().openFile({ agentId: 7, path: "~/a.md" });
     renderWithBrowser(<PathBar agentId={7} documentModifiedAt={null} />, { wrapper: Wrapper });
     await screen.findByRole("button", { name: "~" });
@@ -151,7 +161,7 @@ describe("file tree", () => {
     expect(switched).toEqual([405]);
     view.rerender(<FileTree agentId={7} workspaceAgentId={405} onWorkspaceChange={() => undefined} />);
     fireEvent.click(await screen.findByRole("button", { name: "b.md" }));
-    expect(store().activeFile).toEqual({ agentId: 7, path: "/v/b.md" });
+    expect(store().activeFile).toEqual({ agentId: 7, machineAgentId: 405, path: "/v/b.md" });
     expect(transport.listWorkspaceDir).toHaveBeenCalledWith(405, undefined, expect.anything());
   });
 });

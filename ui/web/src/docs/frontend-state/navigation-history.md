@@ -29,7 +29,9 @@ A link from before the panel had tabs carries a to-user chain (`?agent_id=…&fi
 opens the chain's last file as a tab; the panel's next navigation writes the entry with `view`.
 
 A file open in the viewer is in the URL (user ruling 2026-11-20):
-`&view=<path>&view_agent=<owner>&lines=<range>`.
+`&view=<path>&view_agent=<machine>&lines=<range>`. The conversation is `agent_id`; `view_agent` is
+the agent whose machine reads a path outside every workspace, normally the same agent, another one
+when the address bar browsed up from another agent's workspace.
 
 - **Opening.** Opening a file, from the panel, a conversation message or a link inside another file,
   pushes an entry. Only a new line range in the same file replaces the entry.

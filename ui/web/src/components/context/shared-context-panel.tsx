@@ -11,7 +11,7 @@ import { PanelBar } from "./panel-bar";
 import { PathBar } from "./path-bar";
 import { ToUserDocumentView } from "./to-user-document";
 import { WorkspaceFileView } from "./workspace-file-view";
-import { useWorkspaceFileStore } from "@/lib/context/workspace-file-store";
+import { machineOf, useWorkspaceFileStore } from "@/lib/context/workspace-file-store";
 import type { useToUser } from "@/lib/context/use-to-user";
 import { useInspectorOpen } from "@/lib/inspector/inspector-panel-store";
 import { cn } from "@/lib/format/utils";
@@ -99,7 +99,7 @@ export function SharedContextPanel({ agentId, document, mobile, onClose, onColla
               <InspectorPanel agentId={agentId} />
             </div>
           ) : isViewingFile ? (
-            <WorkspaceFileView key={`${agentId}:${activeFile.path}:${activeFile.lineRange ?? ""}`} agentId={agentId} target={activeFile} />
+            <WorkspaceFileView key={`${agentId}:${machineOf(activeFile)}:${activeFile.path}:${activeFile.lineRange ?? ""}`} agentId={agentId} target={activeFile} />
           ) : (
             <ToUserDocumentView
               key={agentId}

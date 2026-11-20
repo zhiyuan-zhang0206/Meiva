@@ -275,6 +275,7 @@ describe("WorkspaceFileView", () => {
     fireEvent.click(screen.getByRole("link", { name: "Open chart" }));
     expect(useWorkspaceFileStore.getState().activeFile).toEqual({
       agentId: 7516,
+      machineAgentId: 7765,
       path: "/Users/zhiyuan-output/.meiva/workspaces/7765/deliver/user-positions-before-after.png",
       lineRange: undefined,
     });
@@ -282,6 +283,7 @@ describe("WorkspaceFileView", () => {
     fireEvent.click(screen.getByRole("link", { name: "Parent notes" }));
     expect(useWorkspaceFileStore.getState().activeFile).toEqual({
       agentId: 7516,
+      machineAgentId: 7765,
       path: "/Users/zhiyuan-output/.meiva/workspaces/7765/notes.md",
       lineRange: "12",
     });

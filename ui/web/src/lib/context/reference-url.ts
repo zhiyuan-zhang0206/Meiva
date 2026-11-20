@@ -9,7 +9,8 @@ export const PUSHED_ENTRY = "meivaToUserEntry";
 // meiva:note
 // A workspace file open in the panel is part of the address too (user ruling 2026-11-20: the
 // browser's Back and Forward move between viewed files), after the to-user chain it was opened from:
-// `?agent_id=405&file=notes.md&view=/abs/path/report.py&view_agent=405&lines=10-20`.
+// `?agent_id=405&file=notes.md&view=/abs/path/report.py&view_agent=405&lines=10-20`, where
+// `view_agent` is the agent whose machine reads the file.
 // meiva:link ui/web/src/docs/frontend-state/navigation-history.md
 export const VIEW_PARAM = "view";
 export const VIEW_AGENT_PARAM = "view_agent";
@@ -17,9 +18,15 @@ export const VIEW_LINES_PARAM = "lines";
 export const VIEW_PARAMS: readonly string[] = [VIEW_PARAM, VIEW_AGENT_PARAM, VIEW_LINES_PARAM];
 
 export interface ViewTarget {
+  // meiva:note
+  // The conversation whose tabs hold the file.
   agentId: number;
   path: string;
   lineRange?: string;
+  // meiva:note
+  // The agent whose machine reads a path outside every workspace, when not the conversation's own:
+  // a folder of another agent's machine, browsed up to its `~` or `/` (review of PR #9115).
+  machineAgentId?: number;
 }
 
 // meiva:note
@@ -48,10 +55,12 @@ export function fileQuery(files: readonly string[]): string {
 export function readView(url: URL): ViewTarget | null {
   const chain = url.searchParams.getAll(FILE_PARAM);
   const path = url.searchParams.get(VIEW_PARAM) ?? chain.at(-1);
-  const agentId = Number(url.searchParams.get(VIEW_AGENT_PARAM) ?? url.searchParams.get("agent_id"));
+  const agentId = Number(url.searchParams.get("agent_id") ?? url.searchParams.get(VIEW_AGENT_PARAM));
   if (!path || !Number.isInteger(agentId) || agentId <= 0) return null;
   const lineRange = url.searchParams.get(VIEW_LINES_PARAM);
-  return { agentId, path, ...(lineRange ? { lineRange } : {}) };
+  const machine = Number(url.searchParams.get(VIEW_AGENT_PARAM));
+  const elsewhere = Number.isInteger(machine) && machine > 0 && machine !== agentId;
+  return { agentId, path, ...(lineRange ? { lineRange } : {}), ...(elsewhere ? { machineAgentId: machine } : {}) };
 }
 
 // meiva:note
@@ -64,7 +73,7 @@ export function withView(href: string, target: ViewTarget | null): string {
     .filter((part) => part !== "" && ![...VIEW_PARAMS, FILE_PARAM, LEGACY_PARAM].includes(part.split("=")[0]));
   const view = target === null ? [] : [
     `${VIEW_PARAM}=${encodeFile(target.path)}`,
-    `${VIEW_AGENT_PARAM}=${target.agentId}`,
+    `${VIEW_AGENT_PARAM}=${target.machineAgentId ?? target.agentId}`,
     ...(target.lineRange ? [`${VIEW_LINES_PARAM}=${encodeFile(target.lineRange)}`] : []),
   ];
   url.search = [...kept, ...view].join("&");
