@@ -122,7 +122,7 @@ async def test_a_cancelled_exit_is_buffered_as_normal_flow_not_an_exception_reco
 
     (exit_record,) = _records(loguru_records, "node_exit")
     assert [(n["node"], n["outcome"]) for n in _exit_nodes(exit_record)] == [("llm", "cancelled")]
-    assert len(loguru_records.extras(event="node_exit", level="INFO")) == 1
+    assert loguru_records.extras(event="node_exit", level="INFO") == [exit_record]
 
 
 async def test_the_safety_cap_flushes_when_a_turn_never_reaches_claim(
@@ -147,7 +147,7 @@ async def test_an_exception_exit_logs_at_once_with_the_live_traceback(
     (exit_record,) = _records(loguru_records, "node_exit")
     assert exit_record["outcome"] == "exception:RuntimeError"
     assert exit_record["agent_id"] == 1
-    assert len(loguru_records.extras(event="node_exit", level="INFO")) == 1
+    assert loguru_records.extras(event="node_exit", level="INFO") == [exit_record]
     exception = _exit_exception(loguru_records)
     assert object_of(getattr, exception, "type") is RuntimeError
     value = object_of(getattr, exception, "value")
