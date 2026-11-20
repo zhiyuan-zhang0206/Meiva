@@ -2,8 +2,7 @@ from __future__ import annotations
 
 from pathlib import Path
 from types import SimpleNamespace
-from typing import Any, cast
-from unittest.mock import MagicMock
+from typing import cast
 
 import psycopg
 from langchain_core.language_models.chat_models import BaseChatModel
@@ -13,7 +12,10 @@ from langgraph.runtime import Runtime
 from psycopg_pool import AsyncConnectionPool
 
 from agent.graph._attach_drain import build_attach_drain
+from agent.graph._attach_merge import merge_attachments
 from agent.graph.claim.node import claim_node_impl
+from agent.graph.llm.tests.llm_support import sink_publisher
+from agent.graph.tests.node_output import update_of
 from agent.nodes import CLAIM
 from agent.state import AttachEntry, AttachState, BaseAgentState
 from base.agents.context import MeivaContext
@@ -27,7 +29,10 @@ from base.config.tests.configuration import defaults
 from base.db import Database
 from base.db.code_version_gate import ProcessDbGate
 from base.events.live.bus import EventBus
+from base.host.boundary.json_values import is_object_dict
+from base.host.boundary.untyped import object_mapping, object_sequence
 from base.host.env.agent_slices import AgentSlices
+from base.lm.attach.constants import ATTACH_MAX_FILE_BYTES
 from base.lm.catalog import ModelCatalog
 from base.packages.plugin_providers import build_model_catalog
 from base.paths import meiva_home
@@ -45,7 +50,7 @@ def _context(
     return MeivaContext(
         ops_pool=ops_pool,
         llm=cast("BaseChatModel", SimpleNamespace(model_name=model_name)),
-        event_publisher=MagicMock(),
+        event_publisher=sink_publisher(),
         agent=AgentSlices.resolve(default_reader=defaults()),
         db=Database.from_settings(gate=database_gate),
         bus=EventBus.from_settings(rng=seeded_rng(), timers=SYSTEM_TIMERS),
@@ -54,10 +59,11 @@ def _context(
     )
 
 
-def _blocks(message: HumanMessage) -> list[dict[str, Any]]:
-    content = cast(Any, message).content
-    assert isinstance(content, list)
-    return cast("list[dict[str, Any]]", content)
+def _blocks(message: HumanMessage) -> list[dict[str, object]]:
+    content = object_sequence(message.content)
+    blocks = [block for block in content if is_object_dict(block)]
+    assert len(blocks) == len(content)
+    return blocks
 
 
 def test_drain_builds_one_native_image_message(
@@ -75,11 +81,11 @@ def test_drain_builds_one_native_image_message(
     assert drain["attach"] == AttachState()
     message = drain["messages"][0]
     assert isinstance(message, HumanMessage)
-    assert cast(Any, message).additional_kwargs["meiva_msg_type"] == MeivaMsgType.ATTACH.value
+    assert object_mapping(message.additional_kwargs)["meiva_msg_type"] == MeivaMsgType.ATTACH.value
     blocks = _blocks(message)
     assert [b["type"] for b in blocks] == ["text", "text", "image_url"]
-    assert "Files attached during this turn" in blocks[0]["text"]
-    assert "after fix" in blocks[1]["text"]
+    assert "Files attached during this turn" in str(blocks[0]["text"])
+    assert "after fix" in str(blocks[1]["text"])
     assert blocks[2]["type"] == "image_url"
 
 
@@ -97,7 +103,7 @@ def test_drain_keeps_text_only_models_informed(
     assert isinstance(message, HumanMessage)
     blocks = _blocks(message)
     assert [b["type"] for b in blocks] == ["text", "text"]
-    assert "your model cannot receive image" in blocks[1]["text"]
+    assert "your model cannot receive image" in str(blocks[1]["text"])
 
 
 def test_drain_is_noop_without_pending_attachments(database_gate: ProcessDbGate) -> None:
@@ -140,8 +146,7 @@ async def test_claim_drains_before_turn_boundary_wait(
     command = await claim_node_impl(state, runtime, config)
 
     assert command.goto == CLAIM
-    assert command.update is not None
-    assert cast("dict[str, Any]", command.update)["attach"] == AttachState()
+    assert update_of(command)["attach"] == AttachState()
 
 
 async def test_claim_does_not_drain_mid_turn(
@@ -175,5 +180,60 @@ async def test_claim_does_not_drain_mid_turn(
     command = await claim_node_impl(state, runtime, config)
 
     assert command.goto == "before_turn"
-    assert command.update is not None
-    assert "attach" not in cast("dict[str, Any]", command.update)
+    assert "attach" not in update_of(command)
+
+
+def test_merge_preserves_order_and_last_label_wins(tmp_path: Path) -> None:
+    first = tmp_path / "first.png"
+    second = tmp_path / "second.png"
+    first.write_bytes(b"first")
+    second.write_bytes(b"second")
+    pending = AttachState(pending=[AttachEntry(path=str(first.resolve()), label="old")])
+
+    merged = merge_attachments(
+        pending,
+        [
+            {"path": str(second), "label": "second"},
+            {"path": str(first), "label": "new"},
+        ],
+    )
+
+    assert merged.pending == [
+        AttachEntry(path=str(first.resolve()), label="new"),
+        AttachEntry(path=str(second.resolve()), label="second"),
+    ]
+
+
+def test_merge_drops_invalid_or_tampered_entries(tmp_path: Path) -> None:
+    image = tmp_path / "image.png"
+    image.write_bytes(b"image")
+    directory = tmp_path / "directory"
+    directory.mkdir()
+    text = tmp_path / "notes.txt"
+    text.write_text("text", encoding="utf-8")
+    oversized = tmp_path / "large.png"
+    with oversized.open("wb") as stream:
+        stream.truncate(ATTACH_MAX_FILE_BYTES + 1)
+
+    merged = merge_attachments(
+        AttachState(),
+        [
+            {"path": str(image), "label": "ok"},
+            {"path": str(tmp_path / "missing.png"), "label": None},
+            {"path": str(directory), "label": None},
+            {"path": str(text), "label": None},
+            {"path": str(oversized), "label": None},
+            {"path": str(image), "label": 1},
+            {"label": None},
+        ],
+    )
+
+    assert merged.pending == [AttachEntry(path=str(image.resolve()), label="ok")]
+
+
+def test_merge_ignores_non_list_envelope_without_losing_pending(tmp_path: Path) -> None:
+    image = tmp_path / "image.png"
+    image.write_bytes(b"image")
+    pending = AttachState(pending=[AttachEntry(path=str(image.resolve()), label=None)])
+
+    assert merge_attachments(pending, "tampered").pending == pending.pending

@@ -12,13 +12,15 @@ from collections.abc import Callable, Mapping
 from dataclasses import replace
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any, cast
+from typing import cast
 from unittest.mock import AsyncMock, MagicMock
 
 import psycopg
 import pytest
+from langchain_core.language_models.chat_models import BaseChatModel
 from langchain_core.messages import AIMessage, AnyMessage, HumanMessage, SystemMessage
 from langchain_core.runnables import RunnableConfig
+from langgraph.checkpoint.serde.jsonplus import JsonPlusSerializer
 from langgraph.runtime import Runtime
 from psycopg.types.json import Jsonb
 from psycopg_pool import AsyncConnectionPool
@@ -27,7 +29,9 @@ from agent.graph._init_context import init_context_node
 from agent.graph.hooks.question_context import (
     read_agent_open_questions,
 )
-from agent.graph.hooks.tests.scripted_model import ScriptedModel
+from agent.graph.hooks.tests.scripted_model import closing_chunk
+from agent.graph.llm.tests.llm_support import ScriptedModel
+from agent.graph.tests.node_output import messages_of
 from agent.nodes import CLAIM
 from agent.state import AgentState, CapabilitiesState, ContextReset
 from base.agents.context import MeivaContext
@@ -41,6 +45,7 @@ from base.db import Database, create_agent
 from base.db.code_version_gate import ProcessDbGate
 from base.events.live.bus import EventBus
 from base.host.boundary.json_values import is_object_list
+from base.host.boundary.untyped import object_mapping, object_of, object_sequence
 from base.host.env.agent_slices import AgentSlices
 from base.lm.catalog import ModelCatalog
 from base.log.tests.log_records import LogRecords
@@ -79,11 +84,10 @@ def _runtime(
     *,
     resources: HostedTurnResources | None = None,
     harness: Harness = Harness.MEIVA,
-    harness_bridge: Any = None,
     agent_id: int | None = None,
     database_gate: ProcessDbGate,
-    pins: Mapping[str, Any] | None = None,
-    llm: Any = None,
+    pins: Mapping[str, object] | None = None,
+    llm: BaseChatModel | None = None,
 ) -> Runtime[MeivaContext]:
     """`ops_pool=None` takes the container path."""
     return Runtime(
@@ -94,7 +98,6 @@ def _runtime(
             identity=AgentIdentity(agent_id=agent_id, owns_loop=True),
             clients=snapshot_clients(),
             harness=harness,
-            harness_bridge=harness_bridge,
             hosted_resources=resources,
             ops_pool=ops_pool,
             llm=llm if llm is not None else AsyncMock(),
@@ -241,8 +244,7 @@ async def test_a_broken_sdk_expand_entry_is_named_once_in_the_head(
 
     head = await init_context_node(AgentState(), runtime, _config(tid))
 
-    assert head.update is not None
-    msgs: list[AnyMessage] = head.update["messages"]
+    msgs = messages_of(head)
     tags = _tags(msgs)
     assert "sdk_expand" in tags
     content = str(msgs[tags.index("sdk_expand")].content)
@@ -536,7 +538,7 @@ async def test_a_compaction_in_the_same_pass_keeps_its_summary_and_its_head(
     # force-compact ceiling — one turn, both triggers.
     _install_skill("beta", "Beta desc")
     summary_text = "compacted summary " * 100
-    fake_llm = ScriptedModel(AIMessage(content=summary_text))
+    fake_llm = ScriptedModel(scripts=[[closing_chunk(AIMessage(content=summary_text))]])
 
     state = AgentState(
         messages=[
@@ -623,7 +625,6 @@ async def test_a_compaction_in_the_same_pass_keeps_its_summary_and_its_head(
 
 def test_parked_tail_survives_the_checkpoint_round_trip() -> None:
     from langchain_core.messages import HumanMessage
-    from langgraph.checkpoint.serde.jsonplus import JsonPlusSerializer
 
     serde = JsonPlusSerializer()
     parked = ContextReset(
@@ -636,15 +637,16 @@ def test_parked_tail_survives_the_checkpoint_round_trip() -> None:
         resume="before_turn",
     )
 
-    restored = serde.loads_typed(serde.dumps_typed(parked))
+    restored = object_of(serde.loads_typed, serde.dumps_typed(parked))
 
+    assert isinstance(restored, ContextReset)
     assert [m.content for m in restored.tail] == [
         "the summary",
         "a chat co-batched with the compact",
     ]
     # The kwargs are what the timeline classifies the summary by — a bare
     # HumanMessage would render as a user turn.
-    assert restored.tail[0].additional_kwargs["meiva_msg_type"] == "compact_summary"
+    assert object_mapping(restored.tail[0].additional_kwargs)["meiva_msg_type"] == "compact_summary"
     assert restored.resume == "before_turn"
 
 
@@ -654,19 +656,24 @@ def test_parked_tail_survives_the_checkpoint_round_trip() -> None:
 # as `None` would silently disarm the check for the rest of the window.
 
 
+def _round_trip(serde: JsonPlusSerializer, state: CapabilitiesState) -> CapabilitiesState:
+    restored = object_of(serde.loads_typed, serde.dumps_typed(state))
+    assert isinstance(restored, CapabilitiesState)
+    return restored
+
+
 def test_capabilities_snapshot_survives_the_checkpoint_round_trip() -> None:
-    from langgraph.checkpoint.serde.jsonplus import JsonPlusSerializer
 
     serde = JsonPlusSerializer()
 
     recorded = CapabilitiesState(indexed={"alpha", "web-ai:deep-research"})
-    restored = serde.loads_typed(serde.dumps_typed(recorded))
+    restored = _round_trip(serde, recorded)
     assert restored.indexed == {"alpha", "web-ai:deep-research"}
 
     # "never recorded" has to stay distinguishable from "recorded as empty":
     # they take opposite branches in the drift check.
-    assert serde.loads_typed(serde.dumps_typed(CapabilitiesState())).indexed is None
-    assert serde.loads_typed(serde.dumps_typed(CapabilitiesState(indexed=set()))).indexed == set()
+    assert _round_trip(serde, CapabilitiesState()).indexed is None
+    assert _round_trip(serde, CapabilitiesState(indexed=set())).indexed == set()
 
 
 _TEXT = Jsonb({"type": "text"})
@@ -680,7 +687,9 @@ def _ask(conn: psycopg.Connection, agent_id: int, title: str, resolution: str | 
         (agent_id, title, _TEXT, resolution, resolution, resolution),
     ).fetchone()
     assert row is not None
-    return int(row[0])
+    agent_question_id = object_sequence(row)[0]
+    assert isinstance(agent_question_id, int)
+    return agent_question_id
 
 
 async def _rebuilt(

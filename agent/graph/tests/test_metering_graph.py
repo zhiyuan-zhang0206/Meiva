@@ -3,6 +3,7 @@ from __future__ import annotations
 import pytest
 
 from base.agents.sdk.tests.sampling_owners import fixed_sampling_owner
+from base.host.boundary.untyped import object_of
 from base.paths import meiva_home
 from meiva.sdk_surface import meiva_module, metering
 
@@ -26,7 +27,7 @@ def test_a_plugin_load_is_undone_by_the_autouse_teardown(request: pytest.Fixture
     metered = {
         fq
         for p, a, fq in metering.read_surface(meiva_module()).routines
-        if is_recorder(getattr(p, a))
+        if is_recorder(object_of(getattr, p, a))
     }
     assert metered, "the leak this guards is gone"
     assert is_recorder(meiva.mcps.call_funnel.call_raw)
@@ -38,5 +39,5 @@ def test_a_plugin_load_is_undone_by_the_autouse_teardown(request: pytest.Fixture
     assert not [
         fq
         for p, a, fq in metering.read_surface(meiva_module()).routines
-        if is_recorder(getattr(p, a))
+        if is_recorder(object_of(getattr, p, a))
     ]

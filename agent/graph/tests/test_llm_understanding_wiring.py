@@ -1,8 +1,6 @@
 """The llm node carries the understanding cut on whichever command ends the turn."""
 
 import random
-from collections.abc import AsyncIterator
-from unittest.mock import MagicMock
 
 import psycopg
 import pytest
@@ -13,6 +11,7 @@ from langgraph.types import Command
 from psycopg_pool import AsyncConnectionPool
 
 from agent.graph import llm_node
+from agent.graph.llm.tests.llm_support import ScriptedModel, sink_publisher
 from agent.state import AgentState
 from agent.state_channels import CompactState
 from base.agents.context import MeivaContext
@@ -36,11 +35,6 @@ def _rng() -> random.Random:
     return random.Random(0)  # noqa: S311
 
 
-async def _aiter(chunks: list[AIMessageChunk]) -> AsyncIterator[AIMessageChunk]:
-    for c in chunks:
-        yield c
-
-
 def _runtime(
     chunks: list[AIMessageChunk],
     database_gate: ProcessDbGate,
@@ -48,15 +42,12 @@ def _runtime(
     agent_id: int,
     hosted_resources: HostedTurnResources,
 ) -> Runtime[MeivaContext]:
-    llm = MagicMock()
-    llm.bind_tools.return_value = llm
-    llm.astream.return_value = _aiter(chunks)
     return Runtime(
         context=MeivaContext(
             hosted_resources=hosted_resources,
             ops_pool=ops_pool,
-            llm=llm,
-            event_publisher=MagicMock(),
+            llm=ScriptedModel(scripts=[chunks]),
+            event_publisher=sink_publisher(),
             agent=AgentSlices.resolve(
                 {
                     "llm_model": _MODEL,

@@ -1,14 +1,16 @@
 from __future__ import annotations
 
 import os
-from collections.abc import Iterator
+import socket
+from collections.abc import Callable, Iterator
 from dataclasses import replace
 from pathlib import Path
-from typing import Any, cast
 
 import psycopg
 import pytest
+from langchain_core.messages import HumanMessage
 from psycopg import OperationalError
+from psycopg_pool import AsyncConnectionPool
 
 from agent.graph.prompt.context_notes import (
     agent_id_note,
@@ -35,6 +37,8 @@ from base.cluster.machine.configured import ConfiguredMachineIdentity
 from base.config import ConfigBoot, settings
 from base.config.tests.configuration import defaults
 from base.db import Database
+from base.db.code_version_gate import ProcessDbGate
+from base.host.boundary.untyped import object_mapping
 from base.host.env.agent_slices import AgentSlices
 from base.paths import resolve_meiva_home
 from base.paths.tests.homes import point_home
@@ -71,7 +75,7 @@ def _context(
 
 
 @pytest.fixture
-def labelled_agent(db_conn: psycopg.Connection[Any]) -> None:
+def labelled_agent(db_conn: psycopg.Connection) -> None:
     db_conn.execute("INSERT INTO agents (id, label) VALUES (29, '  memory\n  steward ')")
     db_conn.commit()
 
@@ -85,9 +89,9 @@ def clients(database: Database) -> Iterator[ClientSet]:
         owned.close()
 
 
-def _content(note: Any) -> str:
+def _content(note: HumanMessage | None) -> str:
     assert note is not None
-    assert note.additional_kwargs["meiva_note_tag"] == NoteTag.AGENT_ID
+    assert object_mapping(note.additional_kwargs)["meiva_note_tag"] == NoteTag.AGENT_ID
     content = str(note.content)
     assert content.startswith("<system_note>\n") and content.endswith("\n</system_note>")
     return content[len("<system_note>\n") : -len("\n</system_note>")]
@@ -300,96 +304,68 @@ def test_note_propagates_a_label_failure() -> None:
         agent_id_note(_context(ClientSet(database=_unreachable)))
 
 
+# meiva:note
+# The dial the database handle makes, recorded: every connection it opened, in order.
+class _RecordingDial:
+    def __init__(self) -> None:
+        self.connections: list[psycopg.Connection] = []
+
+    def __call__(self, *args: object, **kwargs: object) -> psycopg.Connection:
+        dial: Callable[..., psycopg.Connection] = psycopg.connect
+        connection = dial(*args, **kwargs)
+        self.connections.append(connection)
+        return connection
+
+
+# meiva:note
+# A half-open connection: the socket is shut down underneath psycopg, which has not noticed, so the
+# next statement on it fails the way it does after a network outage.
+def _cut_socket(connection: psycopg.Connection) -> None:
+    with socket.socket(fileno=os.dup(connection.fileno())) as duplicate:
+        duplicate.shutdown(socket.SHUT_RDWR)
+
+
 @pytest.mark.usefixtures("labelled_agent")
-def test_own_label_recovers_from_a_half_open_cached_connection(database: Database) -> None:
-    closed_stale = 0
-
-    class _HalfOpenCursor:
-        def __enter__(self) -> _HalfOpenCursor:
-            return self
-
-        def __exit__(self, *_exc: object) -> None:
-            return None
-
-        def execute(self, *_args: object) -> None:
-            raise OperationalError(
-                "consuming input failed: could not receive data from server: Operation timed out"
-            )
-
-    class _HalfOpenConn:
-        closed = False
-        broken = False
-
-        def cursor(self) -> _HalfOpenCursor:
-            return _HalfOpenCursor()
-
-        def close(self) -> None:
-            nonlocal closed_stale
-            closed_stale += 1
-            self.closed = True
-
-    calls = 0
-
-    class _FlakyThenRealDb:
-        def connect(self, *, autocommit: bool = False) -> Any:
-            nonlocal calls
-            calls += 1
-            if calls == 1:
-                return _HalfOpenConn()
-            return database.connect(autocommit=autocommit)
-
-    owned = ClientSet(database=cast(Any, _FlakyThenRealDb))
+def test_own_label_recovers_from_a_half_open_cached_connection(
+    database_gate: ProcessDbGate,
+) -> None:
+    dials = _RecordingDial()
+    database = Database.from_settings(gate=database_gate, dial=dials)
+    owned = ClientSet(database=lambda: database)
     try:
         _ = owned.sql._get()
+        [stale] = dials.connections
+        _cut_socket(stale)
         assert own_label(_context(owned), 29) == "memory steward"
-        assert closed_stale == 1
-        assert calls == 2
+        assert stale.closed
+        assert len(dials.connections) == 2
     finally:
         owned.close()
 
 
-def test_own_label_does_not_retry_statement_timeout() -> None:
-    attempts = 0
-
-    class _SlowCursor:
-        def __enter__(self) -> _SlowCursor:
-            return self
-
-        def __exit__(self, *_exc: object) -> None:
-            return None
-
-        def execute(self, *_args: object) -> None:
-            nonlocal attempts
-            attempts += 1
-            raise psycopg.errors.QueryCanceled("canceling statement due to statement timeout")
-
-    class _SlowConn:
-        closed = False
-        broken = False
-
-        def cursor(self) -> _SlowCursor:
-            return _SlowCursor()
-
-        def close(self) -> None:
-            self.closed = True
-
-    class _SlowDb:
-        def connect(self, *, autocommit: bool = False) -> Any:
-            del autocommit
-            return _SlowConn()
-
-    owned = ClientSet(database=cast(Any, _SlowDb))
-    with pytest.raises(psycopg.errors.QueryCanceled):
-        own_label(_context(owned), 29)
-    assert attempts == 1
+@pytest.mark.usefixtures("labelled_agent")
+def test_own_label_does_not_retry_statement_timeout(
+    db_conn: psycopg.Connection, database_gate: ProcessDbGate
+) -> None:
+    dials = _RecordingDial()
+    database = Database.from_settings(gate=database_gate, dial=dials)
+    owned = ClientSet(database=lambda: database)
+    try:
+        _ = owned.sql.execute("SET statement_timeout = 100")
+        db_conn.execute("LOCK TABLE agents IN ACCESS EXCLUSIVE MODE")
+        with pytest.raises(psycopg.errors.QueryCanceled):
+            own_label(_context(owned), 29)
+        assert len(dials.connections) == 1
+    finally:
+        db_conn.rollback()
+        owned.close()
 
 
 def test_cluster_facts_retries_after_a_half_open_sql_connection(
-    db_conn: psycopg.Connection[Any],
-    database: Database,
+    db_conn: psycopg.Connection,
+    aops_pool: AsyncConnectionPool,
+    database_gate: ProcessDbGate,
 ) -> None:
-    from types import SimpleNamespace
-
     from agent.graph._init_context import cluster_facts
 
     db_conn.execute(
@@ -398,38 +374,21 @@ def test_cluster_facts_retries_after_a_half_open_sql_connection(
         "ON CONFLICT (name) DO UPDATE SET description = EXCLUDED.description"
     )
     db_conn.commit()
-    calls = 0
-
-    class _HalfOpenCursor:
-        def __enter__(self) -> _HalfOpenCursor:
-            return self
-
-        def __exit__(self, *_exc: object) -> None:
-            return None
-
-        def execute(self, *_args: object) -> None:
-            raise OperationalError("consuming input failed: Operation timed out")
-
-    def _connect(*, autocommit: bool = False) -> Any:
-        nonlocal calls
-        calls += 1
-        if calls == 1:
-            return SimpleNamespace(
-                closed=False, broken=False, cursor=_HalfOpenCursor, close=lambda: None
-            )
-        return database.connect(autocommit=autocommit)
-
-    owned = ClientSet(database=cast(Any, lambda: SimpleNamespace(connect=_connect)))
+    dials = _RecordingDial()
+    database = Database.from_settings(gate=database_gate, dial=dials)
+    owned = ClientSet(database=lambda: database)
     try:
         _ = owned.sql._get()
+        [stale] = dials.connections
+        _cut_socket(stale)
         ctx = MeivaContext(
             identity=AgentIdentity(agent_id=29, owns_loop=True),
-            ops_pool=cast(Any, object()),
+            ops_pool=aops_pool,
             clients=owned,
         )
         facts = cluster_facts(ctx)
         assert any(f.machine == "company-mini" and "Mini runner" in f.role for f in facts)
-        assert calls == 2
+        assert len(dials.connections) == 2
     finally:
         owned.close()
 

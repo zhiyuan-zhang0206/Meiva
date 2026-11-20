@@ -1,5 +1,5 @@
 import os
-from typing import Any, cast
+from typing import cast
 
 import pytest
 
@@ -22,7 +22,7 @@ from base.paths import meiva_home
 ENVIRON = dict(os.environ)
 
 
-def _slices(**changes: Any) -> AgentSlices:
+def _slices(**changes: object) -> AgentSlices:
     return AgentSlices.resolve(default_reader=defaults(**changes))
 
 

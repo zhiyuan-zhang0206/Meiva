@@ -11,6 +11,7 @@ import json
 import sys
 from collections.abc import Iterator
 from pathlib import Path
+from types import FunctionType, ModuleType
 from uuid import uuid4
 
 import pytest
@@ -18,6 +19,7 @@ import pytest
 from base import paths
 from base.agents.context.clients import ClientSet
 from base.agents.sdk.tests.sampling_owners import fixed_sampling_owner
+from base.host.boundary.untyped import object_mapping
 from base.log.tests.log_records import LogRecords
 from base.packages.plugins.enable_config import write_local
 from base.paths import meiva_home
@@ -26,6 +28,12 @@ from base.telemetry.tests.capture.event_capture import emitted_events as emitted
 
 # Every dotted name `load_extensions` can register a plugin module under.
 _PLUGIN_MODULE_PREFIXES = ("meiva_builtins.plugins.", "plugins.")
+
+
+# meiva:note
+# A module global read as `object`: `ModuleType` answers attribute reads with `Any`.
+def _attr(module: ModuleType, name: str) -> object:
+    return object_mapping(vars(module))[name]
 
 
 @pytest.fixture(autouse=True)
@@ -201,7 +209,8 @@ def test_a_repeat_load_reuses_the_module_object_so_a_patch_still_lands(unit_home
     _loader.load_extensions(sampling=fixed_sampling_owner(), home=unit_home)
     dotted = "plugins.demo.plugin"
     first = sys.modules[dotted]
-    stale_probe = first.probe  # the reference an earlier importer would be holding
+    stale_probe = _attr(first, "probe")  # the reference an earlier importer would be holding
+    assert isinstance(stale_probe, FunctionType)
 
     _loader.load_extensions(sampling=fixed_sampling_owner(), home=unit_home)
 
@@ -232,7 +241,7 @@ def test_a_different_file_under_the_same_name_gets_a_fresh_module(
     _loader.load_extensions(sampling=fixed_sampling_owner(), home=unit_home)
     dotted = "plugins.demo.plugin"
     first = sys.modules[dotted]
-    assert first.GHOST == "first file"
+    assert _attr(first, "GHOST") == "first file"
 
     other_home = tmp_path / "other_home"
     other_home.mkdir()
@@ -380,7 +389,7 @@ def test_broken_external_plugin_skipped_and_others_load(
         "meiva_ledger" in r["message"] and "failed to load" in r["message"] for r in loguru_records
     )
     # loud: a plugin_load_failed event carrying the plugin + the exception
-    attrs = emitted_events.attributes("plugin_load_failed")
+    attrs = [e.attributes for e in emitted_events.named("plugin_load_failed")]
     assert [a["plugin"] for a in attrs] == ["meiva_ledger"]
     # the missing sibling surfaces as an ImportError-family exception
     error = str(attrs[0]["error"])
@@ -443,7 +452,7 @@ def test_external_plugin_relative_import_resolves_when_plugins_prefix_is_shadowe
 
     _loader.load_extensions(sampling=fixed_sampling_owner(), home=unit_home)  # must not raise
 
-    assert sys.modules["plugins.meiva_ledger.plugin"].MARK == 7
+    assert _attr(sys.modules["plugins.meiva_ledger.plugin"], "MARK") == 7
     assert sys.modules["plugins.meiva_ledger"].__path__ == [str(pdir)]
 
 
@@ -468,14 +477,14 @@ def test_dangling_config_entry_reported_and_skipped(
 
     assert "plugins.audit.plugin" in sys.modules
     assert missing not in loaded.config.plugins
-    attrs = emitted_events.attributes("plugin_load_failed")
+    attrs = [e.attributes for e in emitted_events.named("plugin_load_failed")]
     assert [a["plugin"] for a in attrs] == [missing, missing]
     assert all(str(a["error"]).startswith("DanglingPlugin: ") for a in attrs)
     assert all(missing in str(a["error"]) for a in attrs)
 
     reloaded = _loader.load_extensions(sampling=fixed_sampling_owner(), home=unit_home)
     assert missing not in reloaded.config.plugins
-    repeated = emitted_events.attributes("plugin_load_failed")
+    repeated = [e.attributes for e in emitted_events.named("plugin_load_failed")]
     assert [a["plugin"] for a in repeated] == [missing] * 4
     assert all(str(a["error"]).startswith("DanglingPlugin: ") for a in repeated)
     assert all(missing in str(a["error"]) for a in repeated)

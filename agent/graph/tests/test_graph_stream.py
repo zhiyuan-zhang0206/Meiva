@@ -1,5 +1,3 @@
-# pyright: reportOptionalSubscript=false
-# Command.update type dict | None; tests always have update field, narrowing too verbose
 """agent/graph.py streaming behavior tests (async).
 
 mock `BaseChatModel.astream` returns async chunk iterator + AsyncMock redis, validate:
@@ -13,13 +11,14 @@ Assert using `EVENT_ADAPTER.validate_json` deserialization——same code path a
 if any side field changes, the other side test will turn red."""
 
 import random
-from collections.abc import AsyncIterator, Mapping
+from collections.abc import Mapping
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, cast
+from typing import TYPE_CHECKING, cast
 from unittest.mock import MagicMock
 
 import psycopg
-from langchain_core.messages import AIMessage, AIMessageChunk, AnyMessage, BaseMessage, HumanMessage
+from langchain_core.language_models.chat_models import BaseChatModel
+from langchain_core.messages import AIMessage, AIMessageChunk, HumanMessage
 from langchain_core.runnables import RunnableConfig
 from langgraph.runtime import Runtime
 from langgraph.types import Command
@@ -29,6 +28,8 @@ from agent.graph import exec_node, llm_node
 from agent.graph.exec.output import overflow_dir
 from agent.graph.exec.process import SubprocessExecProcess
 from agent.graph.exec.tests.process_inputs import live_parent_facts
+from agent.graph.llm.tests.llm_support import ScriptedModel
+from agent.graph.tests.node_output import messages_of, typed_events
 from agent.state import AgentState
 from base.agents.context import MeivaContext
 from base.agents.context.identity import AgentIdentity
@@ -41,7 +42,7 @@ from base.config.tests.configuration import defaults
 from base.db import Database
 from base.db.code_version_gate import ProcessDbGate
 from base.events.live.bus import EventBus
-from base.events.live.projection import ExecOutput, ExecStart
+from base.events.live.projection import ExecOutput, ExecStart, TokenUsage
 from base.events.live.tests.live_capture import LiveEvents
 from base.host.env.agent_slices import AgentSlices
 from base.lm.catalog import ModelCatalog
@@ -52,8 +53,6 @@ from meiva.tests.fixtures.pin_agent import hosted_resources as hosted_resources
 from meiva.tests.fixtures.pin_agent import snapshot_clients
 
 if TYPE_CHECKING:
-    from langchain_core.language_models.chat_models import BaseChatModel
-
     from base.events.live.publisher import AgentEventPublisher
 
 
@@ -72,22 +71,20 @@ def _rng() -> random.Random:
 def _make_runtime(
     hosted_resources: HostedTurnResources,
     *,
-    llm: object | None = None,
+    llm: BaseChatModel | None = None,
     event_publisher: object | None = None,
     database_gate: ProcessDbGate,
     ops_pool: AsyncConnectionPool | None = None,
     agent_id: int = 7,
-    config_defaults: Mapping[str, Any] | None = None,
+    config_defaults: Mapping[str, object] | None = None,
 ) -> Runtime[MeivaContext]:
     if llm is None:
-        llm = MagicMock()
-    if isinstance(llm, MagicMock):
-        llm.bind_tools.return_value = llm
+        llm = ScriptedModel()
     ctx = MeivaContext(
         meiva_home=resolve_meiva_home(),
         hosted_resources=hosted_resources,
         ops_pool=ops_pool,
-        llm=cast("BaseChatModel", llm),
+        llm=llm,
         event_publisher=cast(
             "AgentEventPublisher", event_publisher if event_publisher is not None else MagicMock()
         ),
@@ -111,14 +108,6 @@ def _ai_with_code(code: str) -> AIMessage:
     )
 
 
-async def _aiter(chunks: list[AIMessageChunk]) -> AsyncIterator[AIMessageChunk]:
-    """Helper: wrap list into async iterator -- assign fake_llm.astream.return_value
-    this generator so `async for` can consume. Each test creates a new generator,
-    not reusing across tests (generators are single-use)."""
-    for c in chunks:
-        yield c
-
-
 async def test_llm_node_collects_chunks_into_final_message(
     hosted_resources: HostedTurnResources,
     database_gate: ProcessDbGate,
@@ -129,19 +118,20 @@ async def test_llm_node_collects_chunks_into_final_message(
     via RedisStreamHandler (agent/graph/_callbacks.py) inline dispatch inside _stream loop;
     this test only verifies node's chunk-to-AIMessage merging semantics.
     """
-    fake_llm = MagicMock()
     # Last chunk carries usage_metadata——real provider stream tail has this shape,
     # llm_node internally assert final_msg.usage_metadata must exist (fail-fast guard new generated
     # AIMessage metadata not empty).
-    fake_llm.astream.return_value = _aiter(
-        [
-            AIMessageChunk(content="hello "),
-            AIMessageChunk(content="from "),
-            AIMessageChunk(
-                content="agent",
-                response_metadata={"model_provider": "anthropic", "stop_reason": "end_turn"},
-                usage_metadata={"input_tokens": 1, "output_tokens": 1, "total_tokens": 2},
-            ),
+    fake_llm = ScriptedModel(
+        scripts=[
+            [
+                AIMessageChunk(content="hello "),
+                AIMessageChunk(content="from "),
+                AIMessageChunk(
+                    content="agent",
+                    response_metadata={"model_provider": "anthropic", "stop_reason": "end_turn"},
+                    usage_metadata={"input_tokens": 1, "output_tokens": 1, "total_tokens": 2},
+                ),
+            ]
         ]
     )
     state = AgentState(messages=[HumanMessage(content="hello")], halted=False)
@@ -155,7 +145,7 @@ async def test_llm_node_collects_chunks_into_final_message(
     )
 
     assert isinstance(result, Command)
-    assert result.update["messages"][0].content == "hello from agent"  # pyright: ignore[reportUnknownMemberType]
+    assert messages_of(result)[0].content == "hello from agent"
 
 
 # meiva:note
@@ -196,16 +186,16 @@ async def test_llm_node_stamps_last_active_at_with_text(
         machine=machine_identity,
     )
     _mark_corpse(db_conn, agent_id)
-    fake_llm = MagicMock()
-    fake_llm.bind_tools.return_value = fake_llm
-    fake_llm.astream.return_value = _aiter(
-        [
-            AIMessageChunk(content="hello "),
-            AIMessageChunk(
-                content="world",
-                response_metadata={"model_provider": "anthropic", "stop_reason": "end_turn"},
-                usage_metadata={"input_tokens": 1, "output_tokens": 1, "total_tokens": 2},
-            ),
+    fake_llm = ScriptedModel(
+        scripts=[
+            [
+                AIMessageChunk(content="hello "),
+                AIMessageChunk(
+                    content="world",
+                    response_metadata={"model_provider": "anthropic", "stop_reason": "end_turn"},
+                    usage_metadata={"input_tokens": 1, "output_tokens": 1, "total_tokens": 2},
+                ),
+            ]
         ]
     )
     runtime = _make_runtime(
@@ -251,22 +241,27 @@ async def test_llm_node_stamps_last_active_at_on_tool_only_turn(
         machine=machine_identity,
     )
     _mark_corpse(db_conn, agent_id)
-    fake_llm = MagicMock()
-    fake_llm.bind_tools.return_value = fake_llm
-    fake_llm.astream.return_value = _aiter(
-        [
-            AIMessageChunk(content=""),
-            AIMessageChunk(
-                content="",
-                tool_call_chunks=[
-                    {"name": "execute_code", "args": '{"code":"x"}', "id": "call_1", "index": 0},
-                ],
-            ),
-            AIMessageChunk(
-                content="",
-                response_metadata={"model_provider": "anthropic", "stop_reason": "tool_use"},
-                usage_metadata={"input_tokens": 1, "output_tokens": 1, "total_tokens": 2},
-            ),
+    fake_llm = ScriptedModel(
+        scripts=[
+            [
+                AIMessageChunk(content=""),
+                AIMessageChunk(
+                    content="",
+                    tool_call_chunks=[
+                        {
+                            "name": "execute_code",
+                            "args": '{"code":"x"}',
+                            "id": "call_1",
+                            "index": 0,
+                        },
+                    ],
+                ),
+                AIMessageChunk(
+                    content="",
+                    response_metadata={"model_provider": "anthropic", "stop_reason": "tool_use"},
+                    usage_metadata={"input_tokens": 1, "output_tokens": 1, "total_tokens": 2},
+                ),
+            ]
         ]
     )
     runtime = _make_runtime(
@@ -303,43 +298,44 @@ async def test_llm_node_dispatches_chunks_to_handler_with_anthropic_shape(
     False, see langchain_anthropic/chat_models.py:1267) — entire stream publish
     path broken. This test uses real anthropic chunk shape to guard inline dispatch path.
     """
-    fake_llm = MagicMock()
-    fake_llm.astream.return_value = _aiter(
-        [
-            # message_start: empty content
-            AIMessageChunk(content=[]),
-            # thinking_delta
-            AIMessageChunk(content=[{"type": "thinking", "thinking": "planning", "index": 0}]),
-            # text_delta
-            AIMessageChunk(content=[{"type": "text", "text": "hi", "index": 1}]),
-            # tool_use start: content=[tool_use block] + tool_call_chunks=[args=""]
-            AIMessageChunk(
-                content=[
-                    {
-                        "type": "tool_use",
-                        "id": "call_1",
-                        "name": "execute_code",
-                        "input": {},
-                        "index": 2,
-                    }
-                ],
-                tool_call_chunks=[
-                    {"name": "execute_code", "args": "", "id": "call_1", "index": 2},
-                ],
-            ),
-            # input_json_delta: tool_call_chunks carry partial JSON delta
-            AIMessageChunk(
-                content=[],
-                tool_call_chunks=[
-                    {"name": None, "args": '{"code":"x"}', "id": None, "index": 2},
-                ],
-            ),
-            # tail message_delta with usage info
-            AIMessageChunk(
-                content=[],
-                response_metadata={"model_provider": "anthropic", "stop_reason": "tool_use"},
-                usage_metadata={"input_tokens": 1, "output_tokens": 1, "total_tokens": 2},
-            ),
+    fake_llm = ScriptedModel(
+        scripts=[
+            [
+                # message_start: empty content
+                AIMessageChunk(content=[]),
+                # thinking_delta
+                AIMessageChunk(content=[{"type": "thinking", "thinking": "planning", "index": 0}]),
+                # text_delta
+                AIMessageChunk(content=[{"type": "text", "text": "hi", "index": 1}]),
+                # tool_use start: content=[tool_use block] + tool_call_chunks=[args=""]
+                AIMessageChunk(
+                    content=[
+                        {
+                            "type": "tool_use",
+                            "id": "call_1",
+                            "name": "execute_code",
+                            "input": {},
+                            "index": 2,
+                        }
+                    ],
+                    tool_call_chunks=[
+                        {"name": "execute_code", "args": "", "id": "call_1", "index": 2},
+                    ],
+                ),
+                # input_json_delta: tool_call_chunks carry partial JSON delta
+                AIMessageChunk(
+                    content=[],
+                    tool_call_chunks=[
+                        {"name": None, "args": '{"code":"x"}', "id": None, "index": 2},
+                    ],
+                ),
+                # tail message_delta with usage info
+                AIMessageChunk(
+                    content=[],
+                    response_metadata={"model_provider": "anthropic", "stop_reason": "tool_use"},
+                    usage_metadata={"input_tokens": 1, "output_tokens": 1, "total_tokens": 2},
+                ),
+            ]
         ]
     )
     state = AgentState(messages=[HumanMessage(content="hi")], halted=False)
@@ -357,7 +353,7 @@ async def test_llm_node_dispatches_chunks_to_handler_with_anthropic_shape(
         rng=_rng(),
     )
 
-    roles = [e.role for e in await live_events.typed()]
+    roles = [e.role for e in await typed_events(live_events)]
     # Three independent streams all trigger *Start, finally LLMDone sent by finish()
     assert "reasoning_start" in roles
     assert "reasoning_delta" in roles
@@ -381,20 +377,21 @@ async def test_llm_node_publishes_reasoning_tokens(
     published TokenUsage event end-to-end (gemini/openai reasoning-token
     surfacing — not just the model/UI layers). Drives the real _llm_node_impl
     publish path with a gemini-shaped final chunk."""
-    fake_llm = MagicMock()
-    fake_llm.astream.return_value = _aiter(
-        [
-            AIMessageChunk(content=[{"type": "text", "text": "ok", "index": 0}]),
-            AIMessageChunk(
-                content=[],
-                response_metadata={"model_provider": "google_genai", "finish_reason": "STOP"},
-                usage_metadata={
-                    "input_tokens": 5,
-                    "output_tokens": 200,
-                    "total_tokens": 205,
-                    "output_token_details": {"reasoning": 180},
-                },
-            ),
+    fake_llm = ScriptedModel(
+        scripts=[
+            [
+                AIMessageChunk(content=[{"type": "text", "text": "ok", "index": 0}]),
+                AIMessageChunk(
+                    content=[],
+                    response_metadata={"model_provider": "google_genai", "finish_reason": "STOP"},
+                    usage_metadata={
+                        "input_tokens": 5,
+                        "output_tokens": 200,
+                        "total_tokens": 205,
+                        "output_token_details": {"reasoning": 180},
+                    },
+                ),
+            ]
         ]
     )
     state = AgentState(messages=[HumanMessage(content="hi")], halted=False)
@@ -412,7 +409,7 @@ async def test_llm_node_publishes_reasoning_tokens(
         rng=_rng(),
     )
 
-    usage = [e for e in await live_events.typed() if e.role == "token_usage"]
+    usage = [e for e in await typed_events(live_events) if isinstance(e, TokenUsage)]
     assert len(usage) == 1
     assert usage[0].reasoning_tokens == 180
     assert usage[0].output_tokens == 200
@@ -427,19 +424,20 @@ async def test_llm_node_preserves_usage_metadata(
     test will turn red."""
     # Last chunk carries usage_metadata——real Anthropic stream has this
     # shape (usage in message_delta event, lands on last chunk)
-    fake_llm = MagicMock()
-    fake_llm.astream.return_value = _aiter(
-        [
-            AIMessageChunk(content="print(1)"),
-            AIMessageChunk(
-                content="",
-                response_metadata={"model_provider": "anthropic", "stop_reason": "end_turn"},
-                usage_metadata={
-                    "input_tokens": 42,
-                    "output_tokens": 7,
-                    "total_tokens": 49,
-                },
-            ),
+    fake_llm = ScriptedModel(
+        scripts=[
+            [
+                AIMessageChunk(content="print(1)"),
+                AIMessageChunk(
+                    content="",
+                    response_metadata={"model_provider": "anthropic", "stop_reason": "end_turn"},
+                    usage_metadata={
+                        "input_tokens": 42,
+                        "output_tokens": 7,
+                        "total_tokens": 49,
+                    },
+                ),
+            ]
         ]
     )
     state = AgentState(messages=[HumanMessage(content="go")], halted=False)
@@ -453,7 +451,8 @@ async def test_llm_node_preserves_usage_metadata(
     )
 
     assert isinstance(result, Command)
-    msg = cast("list[AIMessage]", result.update["messages"])[0]
+    msg = messages_of(result)[0]
+    assert isinstance(msg, AIMessage)
     assert msg.content == "print(1)"
     assert msg.usage_metadata == {"input_tokens": 42, "output_tokens": 7, "total_tokens": 49}
 
@@ -482,7 +481,7 @@ async def test_exec_node_publishes_exec_start_and_output(
         process=SubprocessExecProcess(live_parent_facts(), rng=_rng()),
     )
 
-    events = await live_events.typed()
+    events = await typed_events(live_events)
     exec_starts = [e for e in events if isinstance(e, ExecStart)]
     # item_id = f"{exec_msg_idx}.0" where exec_msg_idx = len(state.messages) = 1
     assert exec_starts == [ExecStart(agent_id=7, item_id="1.0")]
@@ -515,7 +514,7 @@ async def test_exec_node_output_uses_wrap_code_output_envelope(
     )
 
     assert isinstance(result, Command)
-    msg = cast("list[BaseMessage]", result.update["messages"])[0]
+    msg = messages_of(result)[0]
     assert isinstance(msg.content, str)
     content = msg.content
     # New format
@@ -559,7 +558,7 @@ async def test_exec_node_protects_archives_referenced_by_its_current_state(
         config,
         process=SubprocessExecProcess(live_parent_facts(), rng=_rng()),
     )
-    prior_output = cast("list[AnyMessage]", first.update["messages"])[0]
+    prior_output = messages_of(first)[0]
     directory = overflow_dir(7, home=resolve_meiva_home())
     archive = next(directory.glob("crop_*.txt"))
     state = AgentState(
@@ -573,7 +572,7 @@ async def test_exec_node_protects_archives_referenced_by_its_current_state(
         state, runtime, config, process=SubprocessExecProcess(live_parent_facts(), rng=_rng())
     )
 
-    assert new_body in result.update["messages"][0].content  # pyright: ignore[reportUnknownMemberType]
+    assert new_body in messages_of(result)[0].content
     assert archive.read_text() == old_body
     assert list(directory.glob("crop_*.txt")) == [archive]
 

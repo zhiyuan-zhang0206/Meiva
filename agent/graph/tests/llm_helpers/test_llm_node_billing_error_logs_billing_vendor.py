@@ -1,25 +1,23 @@
-# pyright: reportOptionalSubscript=false
 """Llm helpers cases: llm node billing error logs billing vendor."""
 
 from __future__ import annotations
 
 import random
 import time
-from collections.abc import AsyncIterator
-from typing import Any
-from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 from langchain_core.messages import AIMessageChunk, HumanMessage
+from langchain_core.outputs import ChatResult
+from pydantic import SkipValidation
 
 from agent.graph import llm_node
 from agent.graph.llm.node import Attempt, llm_attempt
+from agent.graph.llm.tests.llm_support import ScriptedModel, sink_publisher
 from agent.graph.tests.test_llm_helpers import (
     CONFIG,
     FakeAnthropicError,
     FakeOpenAIError,
     FakeProviderStatusError,
-    astream_raising,
     fatal,
     make_runtime,
 )
@@ -39,6 +37,16 @@ def _rng() -> random.Random:
     return random.Random(0)  # noqa: S311
 
 
+# meiva:note
+# A configured-fatal error type triggers `_consume_llm`'s one non-streaming fallback; the fallback
+# fails the same way, so the error survives to the classify block instead of the fallback masking it.
+class _FallbackFailsModel(ScriptedModel):
+    fallback_error: SkipValidation[BaseException]
+
+    async def _agenerate(self, *args: object, **kwargs: object) -> ChatResult:
+        raise self.fallback_error
+
+
 async def test_llm_node_billing_error_logs_billing_vendor_and_model(
     hosted_resources: HostedTurnResources,
     loguru_records: LogRecords,
@@ -48,8 +56,7 @@ async def test_llm_node_billing_error_logs_billing_vendor_and_model(
     """Provider 402 logs the billing flag, vendor, and model for alert routing."""
     from agent.graph.llm_errors import FatalProviderError
 
-    fake_llm = MagicMock()
-    fake_llm.astream.return_value = astream_raising(FakeProviderStatusError(402))
+    fake_llm = ScriptedModel(scripts=[[FakeProviderStatusError(402)]])
     state = AgentState(messages=[HumanMessage(content="hi")], halted=False)
 
     with pytest.raises(FatalProviderError) as exc_info:
@@ -58,7 +65,7 @@ async def test_llm_node_billing_error_logs_billing_vendor_and_model(
             make_runtime(
                 resources=hosted_resources,
                 llm=fake_llm,
-                event_publisher=MagicMock(),
+                event_publisher=sink_publisher(),
                 database_gate=database_gate,
                 pins={"llm_model": "deepseek-flash"},
             ),
@@ -68,9 +75,9 @@ async def test_llm_node_billing_error_logs_billing_vendor_and_model(
 
     assert "out of credit or quota" in str(exc_info.value)
     assert "vendor=deepseek" in str(exc_info.value)
-    classify_logs = [r for r in loguru_records if r["extra"].get("event") == "llm_provider_error"]
+    classify_logs = loguru_records.extras(event="llm_provider_error")
     assert len(classify_logs) == 1
-    extra = classify_logs[0]["extra"]
+    extra = classify_logs[0]
     assert extra["billing"] is True
     assert extra["status"] == 402
     assert extra["vendor"] == "deepseek"
@@ -85,14 +92,13 @@ async def test_llm_node_transient_provider_error_propagates_for_retry(
     reserved for permanent classes; a transient blip must keep retrying."""
     from agent.graph.llm_errors import FatalProviderError
 
-    fake_llm = MagicMock()
-    fake_llm.astream.return_value = astream_raising(FakeProviderStatusError(500))
+    fake_llm = ScriptedModel(scripts=[[FakeProviderStatusError(500)]])
     state = AgentState(messages=[HumanMessage(content="hi")], halted=False)
 
     runtime = make_runtime(
         resources=hosted_resources,
         llm=fake_llm,
-        event_publisher=MagicMock(),
+        event_publisher=sink_publisher(),
         database_gate=database_gate,
     )
     with pytest.raises(FakeProviderStatusError) as exc_info:
@@ -113,12 +119,7 @@ async def test_llm_node_configured_fatal_error_type_fails_fast(
     exc = FakeProviderStatusError(
         429, {"error": {"type": "engine_overloaded_error", "message": "overloaded"}}
     )
-    fake_llm = MagicMock()
-    fake_llm.astream.return_value = astream_raising(exc)
-    # A configured-fatal error type triggers _consume_llm's one non-streaming
-    # fallback; make ainvoke fail the same way so the error survives to the
-    # classify block instead of the fallback masking it.
-    fake_llm.ainvoke = AsyncMock(side_effect=exc)
+    fake_llm = _FallbackFailsModel(scripts=[[exc]], fallback_error=exc)
     state = AgentState(messages=[HumanMessage(content="hi")], halted=False)
 
     with pytest.raises(FatalProviderError) as exc_info:
@@ -127,7 +128,7 @@ async def test_llm_node_configured_fatal_error_type_fails_fast(
             make_runtime(
                 resources=hosted_resources,
                 llm=fake_llm,
-                event_publisher=MagicMock(),
+                event_publisher=sink_publisher(),
                 database_gate=database_gate,
                 pins={"llm_fatal_provider_error_types": "engine_overloaded_error"},
             ),
@@ -146,19 +147,21 @@ async def test_retried_llm_node_records_total_retry_duration(
 ) -> None:
     """A success after retry exports the full sequence duration as telemetry."""
 
-    async def _text_turn() -> AsyncIterator[AIMessageChunk]:
-        yield AIMessageChunk(
-            content="done",
-            response_metadata={"model_provider": "anthropic", "stop_reason": "end_turn"},
-            usage_metadata={"input_tokens": 1, "output_tokens": 1, "total_tokens": 2},
-        )
-
-    fake_llm = MagicMock()
-    fake_llm.astream.return_value = _text_turn()
+    fake_llm = ScriptedModel(
+        scripts=[
+            [
+                AIMessageChunk(
+                    content="done",
+                    response_metadata={"model_provider": "anthropic", "stop_reason": "end_turn"},
+                    usage_metadata={"input_tokens": 1, "output_tokens": 1, "total_tokens": 2},
+                ),
+            ]
+        ]
+    )
     runtime = make_runtime(
         resources=hosted_resources,
         llm=fake_llm,
-        event_publisher=MagicMock(),
+        event_publisher=sink_publisher(),
         database_gate=database_gate,
     )
 
@@ -169,11 +172,10 @@ async def test_retried_llm_node_records_total_retry_duration(
         Attempt(2, time.time() - 3.0),
     )
 
-    retry_logs = [
-        record for record in loguru_records if record["extra"].get("event") == "llm_retry"
-    ]
-    assert retry_logs[-1]["extra"]["outcome"] == "succeeded"
-    assert retry_logs[-1]["extra"]["duration_seconds"] >= 3.0
+    retry_log = loguru_records.extras(event="llm_retry")[-1]
+    duration = retry_log["duration_seconds"]
+    assert retry_log["outcome"] == "succeeded"
+    assert isinstance(duration, float) and duration >= 3.0
 
 
 def test_parse_provider_error_type_openai_shape() -> None:
@@ -276,14 +278,14 @@ def test_is_fatal_provider_error_type_empty_config() -> None:
     assert fatal("engine_overloaded_error", "") is False
 
 
-def test_is_fatal_provider_error_type_no_body(**changes: Any) -> None:
+def test_is_fatal_provider_error_type_no_body() -> None:
     """Exception without body (generic exception) returns False."""
     from agent.graph.llm_errors import is_fatal_provider_error_type
 
     assert (
         is_fatal_provider_error_type(
             ConnectionError("net"),
-            AgentSlices.resolve(default_reader=defaults(**changes)).llm_policy,
+            AgentSlices.resolve(default_reader=defaults()).llm_policy,
         )
         is False
     )
@@ -304,31 +306,35 @@ async def test_llm_usage_event_carries_latency_ms(
     llm_usage record with a positive latency_ms in its payload extras.
     """
 
-    async def _one_chunk() -> AsyncIterator[AIMessageChunk]:
-        yield AIMessageChunk(
-            content="hi",
-            response_metadata={"model_provider": "anthropic", "stop_reason": "end_turn"},
-            usage_metadata={"input_tokens": 10, "output_tokens": 5, "total_tokens": 15},
-        )
-
-    fake_llm = MagicMock()
-    fake_llm.astream.return_value = _one_chunk()
+    fake_llm = ScriptedModel(
+        scripts=[
+            [
+                AIMessageChunk(
+                    content="hi",
+                    response_metadata={"model_provider": "anthropic", "stop_reason": "end_turn"},
+                    usage_metadata={"input_tokens": 10, "output_tokens": 5, "total_tokens": 15},
+                ),
+            ]
+        ]
+    )
     state = AgentState(messages=[HumanMessage(content="hi")], halted=False)
     await llm_node(
         state,
         make_runtime(
             resources=hosted_resources,
             llm=fake_llm,
-            event_publisher=MagicMock(),
+            event_publisher=sink_publisher(),
             database_gate=database_gate,
         ),
         CONFIG,
         rng=_rng(),
     )
 
-    usage = [r for r in loguru_records if r["extra"].get("event") == "llm_usage"]
+    usage = loguru_records.extras(event="llm_usage")
     assert len(usage) == 1, "exactly one llm_usage record per completed call"
-    lat = usage[0]["extra"]["latency_ms"]
-    assert lat is not None and lat > 0, f"latency_ms should be a positive ms float, got {lat!r}"
-    assert usage[0]["extra"]["model"] == "deepseek-flash"
-    assert usage[0]["extra"]["agent_id"] == 7
+    lat = usage[0]["latency_ms"]
+    assert isinstance(lat, float) and lat > 0, (
+        f"latency_ms should be a positive ms float, got {lat!r}"
+    )
+    assert usage[0]["model"] == "deepseek-flash"
+    assert usage[0]["agent_id"] == 7

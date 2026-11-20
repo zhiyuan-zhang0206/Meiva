@@ -3,12 +3,13 @@ from __future__ import annotations
 import asyncio
 import os
 import random
-from typing import Any, cast
+from collections.abc import Sequence
+from typing import cast
 
 import psycopg
 import pytest
 from langchain_core.language_models.chat_models import BaseChatModel
-from langchain_core.messages import AIMessage, AIMessageChunk, HumanMessage
+from langchain_core.messages import AIMessage, AIMessageChunk, BaseMessage, HumanMessage
 from langchain_core.runnables import RunnableConfig
 from langgraph.checkpoint.serde.jsonplus import JsonPlusSerializer
 from langgraph.graph.message import add_messages
@@ -22,6 +23,7 @@ from agent.graph.hooks.compact import auto_compact_will_fire, compact_reminder
 from agent.graph.hooks.tests.scripted_model import HangingSummarizer, ScriptedModel
 from agent.graph.interrupt.tests.queued_commands import queue_command
 from agent.graph.llm.node import llm_node
+from agent.graph.tests.node_output import reducer_messages_of, update_of
 from agent.state import AgentState, CompactState, checkpoint_msgpack_allowlist
 from base.agents.context import MeivaContext
 from base.agents.tests.units import spawn_agent
@@ -33,7 +35,10 @@ from base.config.tests.configuration import defaults
 from base.db import Database, create_agent
 from base.db.code_version_gate import ProcessDbGate
 from base.events.live.bus import EventBus
+from base.events.live.publisher import AgentEventPublisher
 from base.events.live.tests.live_capture import LiveEvents
+from base.host.boundary.json_values import is_object_list
+from base.host.boundary.untyped import object_mapping, object_of
 from base.host.env.agent_slices import AgentSlices
 from base.lm.catalog import ModelCatalog
 from base.native_process.stop_timing import RESTART_INTERRUPT_GRACE_S
@@ -61,7 +66,7 @@ def _runtime(
     *,
     hosted_resources: HostedTurnResources,
     ops_pool: AsyncConnectionPool,
-    event_publisher: object,
+    event_publisher: AgentEventPublisher,
     database_gate: ProcessDbGate,
 ) -> Runtime[MeivaContext]:
     return Runtime(
@@ -72,7 +77,7 @@ def _runtime(
             ops_pool=ops_pool,
             llm=cast(BaseChatModel, model),
             rng=seeded_rng(),
-            event_publisher=cast(Any, event_publisher),
+            event_publisher=event_publisher,
             agent=AgentSlices.resolve(
                 {"auto_compact_fraction": 1e-6, "compact_reminder_fraction": 1e-6},
                 default_reader=defaults(),
@@ -142,21 +147,31 @@ async def test_auto_compaction_cancels_at_llm_node_without_replacing_context(
         (tid,),
     ).fetchall() == [("pending", None)]
     compact_events = [
-        event for event in await live_events.events() if event["role"].startswith("compact_")
+        event
+        for event in map(object_mapping, await live_events.events())
+        if str(event["role"]).startswith("compact_")
     ]
     assert [event["role"] for event in compact_events] == ["compact_started", "compact_finished"]
     assert compact_events[1]["status"] == "replaced"
     assert compact_events[0]["compact_id"] == compact_events[1]["compact_id"]
 
 
-def _apply(state: AgentState, command: Command[Any]) -> AgentState:
+def _round_tripped(messages: Sequence[BaseMessage]) -> list[BaseMessage]:
+    serde = JsonPlusSerializer(allowed_msgpack_modules=checkpoint_msgpack_allowlist())
+    restored = object_of(serde.loads_typed, serde.dumps_typed(list(messages)))
+    assert is_object_list(restored)
+    round_tripped = [message for message in restored if isinstance(message, BaseMessage)]
+    assert len(round_tripped) == len(restored)
+    return round_tripped
+
+
+def _apply[N](state: AgentState, command: Command[N]) -> AgentState:
     # meiva:note
     # Applies a node's update the way the graph's reducers do: messages append through
     # `add_messages`, every other key replaces. `Command.update` is typed loosely upstream.
-    assert isinstance(command.update, dict)
-    update = dict(cast("dict[str, Any]", command.update))  # pyright: ignore[reportUnknownMemberType]
+    update = dict(update_of(command))
     if "messages" in update:
-        update["messages"] = add_messages(list(state.messages), update["messages"])
+        update["messages"] = add_messages(list(state.messages), [*reducer_messages_of(command)])
     return state.model_copy(update=update)
 
 
@@ -207,10 +222,7 @@ async def test_compaction_returns_through_claim_then_generates_before_compacting
 
     # meiva:note
     # A real checkpoint round trip and a cancel must preserve the exemption.
-    serde = JsonPlusSerializer(allowed_msgpack_modules=checkpoint_msgpack_allowlist())
-    state = state.model_copy(
-        update={"messages": serde.loads_typed(serde.dumps_typed(state.messages))}
-    )
+    state = state.model_copy(update={"messages": _round_tripped(state.messages)})
     catalog = build_model_catalog(home=meiva_home())
     assert not auto_compact_will_fire(state, runtime.context.require_agent(), catalog=catalog)
     queue_command(db_conn, tid, "interrupt")

@@ -9,14 +9,13 @@ import random
 # an agent on an external harness reaches `harness_turn` instead of the native turn
 # nodes. Both run a real compiled graph rather than reading `_build.py`.
 # meiva:link agent/graph/docs/graph.md
-from collections.abc import AsyncIterator, Callable
+from collections.abc import AsyncIterator, Callable, Mapping
 from dataclasses import replace
-from typing import Any
-from unittest.mock import MagicMock
 
 import psycopg
 import pytest
 from langchain_core.messages import HumanMessage, SystemMessage
+from langgraph.graph.state import CompiledStateGraph
 from pydantic import BaseModel
 
 import agent.state as agent_state
@@ -25,6 +24,7 @@ from agent.graph.claim.node import route_target
 from agent.graph.claim.tests.harness_support import FakeEngine
 from agent.graph.claim.tests.harness_support import runtime as record_runtime
 from agent.graph.exec.tests.process_inputs import live_parent_facts
+from agent.graph.llm.tests.llm_support import ScriptedModel, end_turn_chunk, sink_publisher
 from agent.ownership.tests.ownership_support import agent_row
 from agent.state import AgentState, ContextReset
 from base.agents.context import MeivaContext
@@ -33,6 +33,7 @@ from base.clock import Clock
 from base.config.tests.configuration import defaults
 from base.db.code_version_gate import ProcessDbGate
 from base.events.live.bus import EventBus
+from base.host.boundary.untyped import object_mapping
 from base.host.env.agent_slices import AgentSlices
 from base.packages.plugin_providers import build_model_catalog
 from base.packages.plugins.extensions import EMPTY, ExtensionRegistry, PluginContributions
@@ -66,23 +67,15 @@ def test_every_node_receives_the_plugins_state_channels() -> None:
 NATIVE_NODES = frozenset({"llm", "exec"})
 
 
-async def _empty_stream(*_a: object, **_kw: object) -> AsyncIterator[Any]:
-    for item in ():
-        yield item
-
-
 def make_context(harness: Harness, engine: FakeEngine | None) -> MeivaContext:
-    llm = MagicMock()
-    llm.bind_tools.return_value = llm
-    llm.astream.side_effect = _empty_stream
     return MeivaContext(
         meiva_home=resolve_meiva_home(),
         environ=os.environ,
         harness=harness,
         harness_bridge=engine,
-        llm=llm,
+        llm=ScriptedModel(scripts=[[end_turn_chunk()]]),
         rng=_rng(),
-        event_publisher=MagicMock(),
+        event_publisher=sink_publisher(),
         agent=AgentSlices.resolve(default_reader=defaults()),
         catalog=build_model_catalog(home=meiva_home()),
         clock_factory=Clock.from_settings,
@@ -143,15 +136,20 @@ async def executed_nodes(
 # `astream` is typed as an overload set that is partially unknown under this repo's
 # strict test rules; the one ignore keeps the driver readable at the call site.
 # meiva:link agent/graph/docs/graph.md
-def _stream(
-    graph: Any, state: AgentState, context: MeivaContext, *, agent_id: int = 6984
-) -> AsyncIterator[dict[str, Any]]:
-    return graph.astream(  # pyright: ignore[reportUnknownMemberType]
+async def _stream(
+    graph: CompiledStateGraph[AgentState, MeivaContext, AgentState, AgentState],
+    state: AgentState,
+    context: MeivaContext,
+    *,
+    agent_id: int = 6984,
+) -> AsyncIterator[Mapping[str, object]]:
+    async for chunk in graph.astream(  # pyright: ignore[reportUnknownMemberType]
         state,
         {"configurable": {"thread_id": str(agent_id)}},
         context=context,
         stream_mode="updates",
-    )
+    ):
+        yield object_mapping(chunk)
 
 
 async def test_unmarked_harness_reply_gets_one_correction_turn(

@@ -22,6 +22,7 @@ Tests directly call `process_chunk(chunk)` + `finish()` + assert emitted args.
 from langchain_core.messages import AIMessageChunk
 
 from agent.graph._callbacks import RedisStreamHandler
+from agent.graph.tests.node_output import typed_events
 from base.agents.observation.turn_progress import TurnProgress
 from base.events.live.projection import (
     ChatDelta,
@@ -102,7 +103,7 @@ async def test_streams_code_coalesced_from_partial_json(live_events: LiveEvents)
     _process(handler, _tool_args_chunk('nt(2)"}'))
 
     _flush(handler)
-    events = await live_events.typed()
+    events = await typed_events(live_events)
     assert events == [
         CodeStart(agent_id=42, item_id=CODE_ID),
         CodeDelta(agent_id=42, item_id=CODE_ID, content="print(2)"),
@@ -116,7 +117,7 @@ async def test_decodes_json_escapes(live_events: LiveEvents):
 
     _process(handler, _tool_args_chunk('{"code":"print(\\"hi\\")\\n"}'))
     _flush(handler)
-    events = await live_events.typed()
+    events = await typed_events(live_events)
     deltas = [e for e in events if isinstance(e, CodeDelta)]
     assert "".join(d.content for d in deltas) == 'print("hi")\n'
 
@@ -130,7 +131,7 @@ async def test_text_block_publishes_chat_streaming(live_events: LiveEvents):
     _process(handler, _text_chunk("user"))
 
     _flush(handler)
-    events = await live_events.typed()
+    events = await typed_events(live_events)
     assert events == [
         ChatStart(agent_id=42, item_id=TEXT_ID),
         ChatDelta(agent_id=42, item_id=TEXT_ID, content="hello user"),
@@ -148,7 +149,7 @@ async def test_string_content_publishes_chat_streaming(live_events: LiveEvents):
     _process(handler, AIMessageChunk(content="user"))
 
     _flush(handler)
-    events = await live_events.typed()
+    events = await typed_events(live_events)
     assert events == [
         ChatStart(agent_id=42, item_id=TEXT_ID),
         ChatDelta(agent_id=42, item_id=TEXT_ID, content="hello user"),
@@ -163,7 +164,7 @@ async def test_empty_text_block_no_chat_publish(live_events: LiveEvents):
     _process(handler, _tool_args_chunk('{"code":"x"}'))
 
     _flush(handler)
-    events = await live_events.typed()
+    events = await typed_events(live_events)
     assert all(not isinstance(e, ChatStart | ChatDelta) for e in events)
 
 
@@ -177,7 +178,7 @@ async def test_streams_reasoning_progressively(live_events: LiveEvents):
     _process(handler, _thinking_chunk("OK"))
 
     _flush(handler)
-    events = await live_events.typed()
+    events = await typed_events(live_events)
     assert events == [
         ReasoningStart(agent_id=42, item_id=TEXT_ID),
         ReasoningDelta(agent_id=42, item_id=TEXT_ID, content="Let me think... OK"),
@@ -230,7 +231,7 @@ async def test_signature_delta_skipped(live_events: LiveEvents):
     _process(handler, _signature_chunk("opaque-sig-bytes"))
 
     _flush(handler)
-    events = await live_events.typed()
+    events = await typed_events(live_events)
     assert events == [
         ReasoningStart(agent_id=42, item_id=TEXT_ID),
         ReasoningDelta(agent_id=42, item_id=TEXT_ID, content="Let me think"),
@@ -248,7 +249,7 @@ async def test_reasoning_then_code_independent_streams(live_events: LiveEvents):
 
     code_id = f"{MSG_IDX}.1"
     _flush(handler)
-    events = await live_events.typed()
+    events = await typed_events(live_events)
     assert ReasoningStart(agent_id=42, item_id=TEXT_ID) in events
     assert ReasoningDelta(agent_id=42, item_id=TEXT_ID, content="planning...") in events
     assert CodeStart(agent_id=42, item_id=code_id) in events
@@ -270,7 +271,7 @@ async def test_finish_flushes_remaining_code_and_publishes_llm_done(live_events:
     handler.finish(0.0)
 
     _flush(handler)
-    events = await live_events.typed()
+    events = await typed_events(live_events)
     assert events == [
         CodeStart(agent_id=42, item_id=CODE_ID),
         CodeDelta(agent_id=42, item_id=CODE_ID, content="x"),
@@ -332,7 +333,7 @@ async def test_finish_publishes_llm_done_even_when_no_code(live_events: LiveEven
     handler.finish(0.0)
 
     _flush(handler)
-    events = await live_events.typed()
+    events = await typed_events(live_events)
     assert events == [
         ChatStart(agent_id=42, item_id=TEXT_ID),
         ChatDelta(agent_id=42, item_id=TEXT_ID, content="just chatting"),
@@ -354,7 +355,7 @@ async def test_multi_block_chunk_dispatches_both(live_events: LiveEvents):
     )
     _process(handler, chunk)
     _flush(handler)
-    events = await live_events.typed()
+    events = await typed_events(live_events)
     # Starts are immediate (frontend needs the item), deltas coalesce and
     # flush after the window — reasoning key first-appended, so it flushes first.
     assert events == [
@@ -375,7 +376,7 @@ async def test_handler_agent_id_carried_per_instance(live_events: LiveEvents):
     _process(h2, _tool_args_chunk('{"code":"b"}'))
     _flush(h1)
     _flush(h2)
-    events = await live_events.typed()
+    events = await typed_events(live_events)
     starts = [e for e in events if isinstance(e, CodeStart)]
     deltas = [e for e in events if isinstance(e, CodeDelta)]
     assert {s.agent_id for s in starts} == {1, 2}
@@ -399,7 +400,7 @@ async def test_anthropic_thinking_text_then_tool_offsets_code(live_events: LiveE
 
     code_id = f"{MSG_IDX}.2"
     _flush(handler)
-    events = await live_events.typed()
+    events = await typed_events(live_events)
     assert CodeStart(agent_id=7, item_id=code_id) in events
     assert CodeDelta(agent_id=7, item_id=code_id, content="go()") in events
 
@@ -413,7 +414,7 @@ async def test_gemini_text_then_tool_index_none_offsets_code(live_events: LiveEv
     _process(handler, _text_chunk("Let me compute that.", index=0))
     _process(handler, _gemini_tool_chunk('{"code": "print(2 + 3)"}', "call-0"))
     _flush(handler)
-    events = await live_events.typed()
+    events = await typed_events(live_events)
     assert ChatStart(agent_id=8, item_id=TEXT_ID) in events
     code_id = f"{MSG_IDX}.1"
     assert CodeStart(agent_id=8, item_id=code_id) in events
@@ -434,7 +435,7 @@ async def test_gemini_thinking_then_text_then_tool_publishes_reasoning(live_even
     _process(handler, _text_chunk("Day 8.", index=1))
     _process(handler, _gemini_tool_chunk('{"code": "print(8)"}', "call-0"))
     _flush(handler)
-    events = await live_events.typed()
+    events = await typed_events(live_events)
     reasoning = [e for e in events if isinstance(e, ReasoningStart | ReasoningDelta)]
     assert reasoning == [
         ReasoningStart(agent_id=8, item_id=TEXT_ID),
@@ -459,7 +460,7 @@ async def test_gemini_multiple_tools_index_none_distinct_blocks(live_events: Liv
     _process(handler, _gemini_tool_chunk('{"code": "print(2)"}', "c1"))
     _process(handler, _gemini_tool_chunk('{"code": "print(3)"}', "c2"))
     _flush(handler)
-    events = await live_events.typed()
+    events = await typed_events(live_events)
     deltas = [e for e in events if isinstance(e, CodeDelta)]
     assert {(d.item_id, d.content) for d in deltas} == {
         (f"{MSG_IDX}.0", "print(1)"),
@@ -490,7 +491,7 @@ async def test_openai_string_content_then_incremental_tool_args(live_events: Liv
             ),
         )
     _flush(handler)
-    events = await live_events.typed()
+    events = await typed_events(live_events)
     code_id = f"{MSG_IDX}.1"
     assert ChatStart(agent_id=11, item_id=TEXT_ID) in events
     code_deltas = [e for e in events if isinstance(e, CodeDelta)]
@@ -527,7 +528,7 @@ async def test_openai_responses_reasoning_summary_publishes_reasoning(live_event
     _process(handler, _text_chunk("The answer is 8.", index=1))
     _process(handler, _tool_args_chunk('{"code":"print(8)"}', index=2))
     _flush(handler)
-    events = await live_events.typed()
+    events = await typed_events(live_events)
     reasoning = [e for e in events if isinstance(e, ReasoningStart | ReasoningDelta)]
     assert reasoning == [
         ReasoningStart(agent_id=11, item_id=TEXT_ID),
@@ -569,14 +570,14 @@ async def test_without_reset_streaming_duplicates_content(live_events: LiveEvent
     h = RedisStreamHandler(pub, 42, MSG_IDX, turn_progress=TurnProgress())
     _process(h, _text_chunk("Hello"))
     _flush(h)
-    first_events = await live_events.typed()
+    first_events = await typed_events(live_events)
     assert first_events == [
         ChatStart(agent_id=42, item_id=TEXT_ID),
         ChatDelta(agent_id=42, item_id=TEXT_ID, content="Hello"),
     ]
     _process(h, _text_chunk("Hello"))
     _flush(h)
-    assert await live_events.typed() == [
+    assert await typed_events(live_events) == [
         ChatDelta(agent_id=42, item_id=TEXT_ID, content="Hello"),
     ]
 
@@ -590,7 +591,7 @@ async def test_non_human_wake_carries_polarity_on_chat_events_and_survives_reset
 
     _process(h, _text_chunk("Internal note"))
     _flush(h)
-    assert await live_events.typed() == [
+    assert await typed_events(live_events) == [
         ChatStart(agent_id=42, item_id=TEXT_ID, non_human_wake=True),
         ChatDelta(agent_id=42, item_id=TEXT_ID, content="Internal note", non_human_wake=True),
     ]
@@ -598,7 +599,7 @@ async def test_non_human_wake_carries_polarity_on_chat_events_and_survives_reset
     h.reset()
     _process(h, AIMessageChunk(content="Retry note"))
     _flush(h)
-    assert await live_events.typed() == [
+    assert await typed_events(live_events) == [
         ChatStart(agent_id=42, item_id=TEXT_ID, non_human_wake=True),
         ChatDelta(agent_id=42, item_id=TEXT_ID, content="Retry note", non_human_wake=True),
     ]
