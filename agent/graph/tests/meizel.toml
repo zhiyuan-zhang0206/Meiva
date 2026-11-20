@@ -1,7 +1,14 @@
 exports = ["cancel_fixture.py", "test_llm_helpers.py"]
 
 [uses]
-"llm_helpers" = ["test_llm_helpers.py"]
+"llm_helpers" = ["node_output.py", "test_llm_helpers.py"]
+"test_callbacks.py" = ["node_output.py"]
+"test_claim_attach_drain.py" = ["node_output.py"]
+"test_compact_interrupt.py" = ["node_output.py"]
+"test_graph_stream.py" = ["node_output.py"]
+"test_init_context.py" = ["node_output.py"]
+"test_init_context_harness.py" = ["node_output.py"]
+"test_llm_helpers.py" = ["node_output.py"]
 
 [external]
 "test_agent_traceback.py" = "executes agent-style code to check how its traceback is rendered"

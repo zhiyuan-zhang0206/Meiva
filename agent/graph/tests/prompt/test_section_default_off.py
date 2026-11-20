@@ -1,5 +1,4 @@
 import os
-from typing import Any
 
 from agent.graph.prompt.system_prompt import build_system_prompt
 from base.config.tests.configuration import defaults
@@ -11,11 +10,11 @@ from base.paths import meiva_home
 ENVIRON = dict(os.environ)
 
 
-def _slices(**changes: Any) -> AgentSlices:
+def _slices(**changes: object) -> AgentSlices:
     return AgentSlices.resolve(default_reader=defaults(**changes))
 
 
-def _full_prompt(**changes: Any) -> str:
+def _full_prompt(**changes: object) -> str:
     return build_system_prompt(
         EMPTY,
         _slices(**changes),

@@ -12,7 +12,7 @@ import json
 from collections.abc import Callable, Iterator
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any, NamedTuple
+from typing import NamedTuple
 
 import httpx
 import pytest
@@ -29,6 +29,14 @@ from base.agents.context.identity import AgentIdentity
 from base.clock import SYSTEM_TIMERS, Clock, ClockConfig
 from base.config import FIELD_INFOS
 from base.config.tests.configuration import defaults
+from base.host.boundary.fields import (
+    int_field,
+    optional_list_field,
+    str_field,
+    typed_optional_float_field,
+)
+from base.host.boundary.json_values import is_object_dict
+from base.host.boundary.untyped import object_mapping, object_of
 from base.host.env.agent_slices import AgentSlices
 from base.log.tests.log_records import LogRecords
 from base.packages.plugin_providers import build_model_catalog
@@ -80,14 +88,15 @@ class _MemoryGateway:
     def respond(self, request: httpx.Request) -> httpx.Response:
         assert request.method == "POST"
         assert request.url.path == "/api/memory/search"
-        body = json.loads(request.content)
+        body = object_of(json.loads, request.content)
+        assert is_object_dict(body)
         self.asked.append(
             _Asked(
-                body["k"],
-                frozenset(body.get("exclude", ())),
-                body.get("deadline_seconds"),
-                body["purpose"],
-                body["query"],
+                int_field(body, "k"),
+                frozenset(str(item) for item in optional_list_field(body, "exclude") or ()),
+                typed_optional_float_field(body, "deadline_seconds"),
+                str_field(body, "purpose"),
+                str_field(body, "query"),
                 request.extensions["timeout"]["read"],
             )
         )
@@ -145,7 +154,7 @@ def _conversation() -> list[AnyMessage]:
     ]
 
 
-def _agent(**changes: Any) -> AgentSlices:
+def _agent(**changes: object) -> AgentSlices:
     return AgentSlices.resolve(
         default_reader=defaults(**{"agent__passive_memory_recall_enabled": True, **changes})
     )
@@ -180,7 +189,7 @@ async def _recall(
     context: MeivaContext,
     root: Path,
     injected: set[str] | None = None,
-    **changes: Any,
+    **changes: object,
 ) -> recall.PassiveRecall | None:
     return await recall.passive_memory_recall(
         _conversation(),
@@ -224,7 +233,9 @@ async def test_renders_path_score_description_and_matched_passage(
 
     assert result is not None
     content = _content(result)
-    created = datetime.fromisoformat(str(result.note.additional_kwargs["meiva_created_at"]))
+    created = datetime.fromisoformat(
+        str(object_mapping(result.note.additional_kwargs)["meiva_created_at"])
+    )
     stamp = _clock().format_timestamp(created) + " " if timestamps_enabled else ""
     assert content.startswith(f"<system_note>\n{stamp}")
     if not timestamps_enabled:
@@ -455,10 +466,11 @@ async def test_http_error_degrades_to_no_recall_and_logs_error(
     assert await _recall(context, memory_root) is None
     assert len(search.asked) == 1
 
-    (error,) = [r for r in loguru_records if r["level"].name == "ERROR"]
-    assert error["extra"]["event"] == "passive_recall"
-    assert "500" in error["message"]
-    assert "/api/memory/search" in error["message"]
+    (message,) = loguru_records.messages("ERROR")
+    (error,) = loguru_records.extras(level="ERROR")
+    assert error["event"] == "passive_recall"
+    assert "500" in message
+    assert "/api/memory/search" in message
 
 
 async def test_modelled_outage_degrades_without_an_error_log(

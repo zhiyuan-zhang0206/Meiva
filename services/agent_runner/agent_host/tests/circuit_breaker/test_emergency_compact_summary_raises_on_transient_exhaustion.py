@@ -12,6 +12,7 @@ from langchain_core.messages import AIMessageChunk
 from psycopg_pool import AsyncConnectionPool
 
 from agent.graph import llm_node
+from agent.graph.llm.tests.llm_support import ScriptedModel, end_turn_chunk, sink_publisher
 from agent.graph.llm_errors import FatalProviderError
 from agent.graph.tests.cancel_fixture import CancelPool, InterruptEvent
 from agent.graph.tests.test_llm_helpers import CONFIG as _LLM_CONFIG
@@ -55,15 +56,7 @@ async def test_llm_node_closes_circuit_on_success(
     """A successful LLM call is the circuit-healed signal — the breaker closes
     so heartbeats resume routing normally."""
 
-    async def _fast_complete() -> Any:
-        yield AIMessageChunk(
-            content="hi",
-            response_metadata={"model_provider": "anthropic", "stop_reason": "end_turn"},
-            usage_metadata={"input_tokens": 1, "output_tokens": 1, "total_tokens": 2},
-        )
-
-    fake_llm = MagicMock()
-    fake_llm.astream.return_value = _fast_complete()
+    fake_llm = ScriptedModel(scripts=[[end_turn_chunk("hi")]])
     state = overflow_state(breaker_reason="context_overflow")
 
     cmd = await llm_node(
@@ -71,7 +64,7 @@ async def test_llm_node_closes_circuit_on_success(
         _llm_make_runtime(
             resources=hosted_resources,
             llm=fake_llm,
-            event_publisher=MagicMock(),
+            event_publisher=sink_publisher(),
             database_gate=database_gate,
         ),
         _LLM_CONFIG,
@@ -93,12 +86,7 @@ async def test_llm_node_cancel_does_not_close_circuit(
     re-arm the doomed heartbeat calls)."""
     import asyncio
 
-    async def _stream_then_hang() -> Any:
-        yield AIMessageChunk(content="partial")
-        await asyncio.Future()  # hang until cancelled
-
-    fake_llm = MagicMock()
-    fake_llm.astream.return_value = _stream_then_hang()
+    fake_llm = ScriptedModel(scripts=[[AIMessageChunk(content="partial"), "hang"]])
     state = overflow_state(breaker_reason="billing")
 
     async def _trigger() -> None:
@@ -111,7 +99,7 @@ async def test_llm_node_cancel_does_not_close_circuit(
         _llm_make_runtime(
             resources=hosted_resources,
             llm=fake_llm,
-            event_publisher=MagicMock(),
+            event_publisher=sink_publisher(),
             database_gate=database_gate,
             ops_pool=cast(Any, CancelPool(fake_cancel_event)),
         ),

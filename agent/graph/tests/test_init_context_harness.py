@@ -7,8 +7,6 @@ from collections.abc import Mapping, Sequence
 from dataclasses import replace
 from datetime import UTC, datetime
 from pathlib import Path
-from types import SimpleNamespace
-from typing import Any
 from unittest.mock import AsyncMock, MagicMock
 
 import psycopg
@@ -25,6 +23,7 @@ from agent.graph.claim.tests.harness_support import FakeEngine
 from agent.graph.claim.tests.harness_support import runtime as record_runtime
 from agent.graph.hooks.framework import hooks_at
 from agent.graph.hooks.node import hook_node
+from agent.graph.tests.node_output import first_prompt, update_of
 from agent.messages import NoteTag, system_note_message
 from agent.state import AgentState, CapabilitiesState, ContextReset, SkillRecallState
 from base import paths
@@ -38,9 +37,11 @@ from base.config.tests.configuration import defaults
 from base.db import Database, create_agent
 from base.db.code_version_gate import ProcessDbGate
 from base.events.live.bus import EventBus
+from base.host.boundary.json_values import is_object_list
 from base.host.env.agent_slices import AgentSlices
 from base.lm.catalog import ModelCatalog
 from base.lm.harness import HarnessInput
+from base.lm.harness.engine import TurnEngine
 from base.lm.harness.handoff import Handoff, instructions_path
 from base.lm.provider_api import Decision, DecisionResult, Question
 from base.log import logger
@@ -62,16 +63,25 @@ from meiva.tests.fixtures.pin_agent import snapshot_clients
 _PICKED_UP_AT = datetime(2026, 1, 1, tzinfo=UTC)
 
 
+class _HandoffBridge(FakeEngine):
+    def __init__(self) -> None:
+        super().__init__()
+        self.handoffs: list[Handoff] = []
+
+    def set_handoff(self, handoff: Handoff) -> None:
+        self.handoffs.append(handoff)
+
+
 def _config(tid: int) -> RunnableConfig:
     return {"configurable": {"thread_id": str(tid)}}
 
 
 def _runtime(
-    ops_pool: AsyncConnectionPool[Any] | None,
+    ops_pool: AsyncConnectionPool | None,
     extensions: ExtensionRegistry = EMPTY,
     *,
     harness: Harness = Harness.MEIVA,
-    harness_bridge: Any = None,
+    harness_bridge: TurnEngine | None = None,
     agent_id: int | None = None,
     database_gate: ProcessDbGate,
 ) -> Runtime[MeivaContext]:
@@ -100,8 +110,8 @@ def _runtime(
 @pytest.mark.parametrize("harness", [Harness.ANTIGRAVITY])
 async def test_external_harness_cold_start_establishes_handoff_and_standing_notes(
     harness: Harness,
-    db_conn: psycopg.Connection[Any],
-    aops_pool: AsyncConnectionPool[Any],
+    db_conn: psycopg.Connection,
+    aops_pool: AsyncConnectionPool,
     database_gate: ProcessDbGate,
 ) -> None:
     tid = create_agent(db_conn)
@@ -130,8 +140,8 @@ async def test_external_harness_cold_start_establishes_handoff_and_standing_note
         )
     )
 
-    handoffs: list[Handoff] = []
-    bridge = SimpleNamespace(session_id=None, set_handoff=handoffs.append)
+    bridge = _HandoffBridge()
+    handoffs = bridge.handoffs
     runtime = _runtime(
         aops_pool,
         registry,
@@ -142,7 +152,7 @@ async def test_external_harness_cold_start_establishes_handoff_and_standing_note
     )
     command = await init_context_node(AgentState(), runtime, _config(tid))
 
-    assert command.update is not None and "messages" not in command.update
+    assert "messages" not in update_of(command)
     assert len(handoffs) == 1
     head_text = handoffs[0].render()
     assert all(
@@ -161,8 +171,7 @@ async def test_external_harness_cold_start_establishes_handoff_and_standing_note
         runtime,
         _config(tid),
     )
-    assert reset.update is not None
-    note_texts = reset.update["harness_inputs"][0]["prompt"]
+    note_texts = first_prompt(reset)
     assert all(
         s in note_texts
         for s in (
@@ -171,9 +180,10 @@ async def test_external_harness_cold_start_establishes_handoff_and_standing_note
             "Custom plugin standing note.",
         )
     )
+    first_update = update_of(command)
     assert (
-        isinstance(command.update["capabilities"], CapabilitiesState)
-        and command.update["context_reset"] == ContextReset()
+        isinstance(first_update["capabilities"], CapabilitiesState)
+        and first_update["context_reset"] == ContextReset()
         and command.goto == "claim"
         and len(handoffs) == 2
     )
@@ -207,12 +217,11 @@ async def test_external_context_reset_preserves_the_tail_behind_handoff(
         _config(42),
     )
 
-    assert command.update is not None
-    assert "messages" not in command.update
-    prompt = command.update["harness_inputs"][0]["prompt"]
+    assert "messages" not in update_of(command)
+    prompt = first_prompt(command)
     assert "# Role & Operating Context — Agent #42" in prompt
     assert prompt.endswith("The real compact summary")
-    assert command.update["context_reset"] == ContextReset()
+    assert update_of(command)["context_reset"] == ContextReset()
     assert command.goto == "before_turn"
 
 
@@ -224,8 +233,7 @@ async def _wake_prompt(harness: Harness, database_gate: ProcessDbGate, agent_id:
         _runtime(None, harness=harness, database_gate=database_gate),
         _config(agent_id),
     )
-    assert command.update is not None
-    return command.update["harness_inputs"][0]["prompt"]
+    return first_prompt(command)
 
 
 def _instructions_file(agent_id: int = 42) -> Path:
@@ -314,8 +322,7 @@ async def test_existing_external_history_and_cursor_are_not_rewritten(
         _config(42),
     )
 
-    assert command.update is not None
-    assert "messages" not in command.update
+    assert "messages" not in update_of(command)
     assert state.messages[0].content == "Legacy local prompt"
 
 
@@ -326,16 +333,16 @@ async def test_the_built_in_loop_writes_no_cursor(
         AgentState(), _runtime(None, database_gate=database_gate), _config(42)
     )
 
-    assert command.update is not None
-    assert "messages" in command.update
-    assert "harness_inputs" not in command.update
+    update = update_of(command)
+    assert "messages" in update
+    assert "harness_inputs" not in update
 
 
 def _make_antigravity_recall_runtime(
     *,
     tid: int,
     unit_home: Path,
-    aops_pool: AsyncConnectionPool[Any],
+    aops_pool: AsyncConnectionPool,
     event_bus: EventBus,
     database_gate: ProcessDbGate,
     scorer_calls: list[str],
@@ -361,7 +368,7 @@ def _make_antigravity_recall_runtime(
     provider = base_catalog.decision_provider_of("gemini-decision-1")
     assert provider is not None
 
-    def _build_scorer(_ctx: Any) -> _Scorer:
+    def _build_scorer(_ctx: MeivaContext) -> _Scorer:
         return _Scorer()
 
     catalog = replace(
@@ -411,9 +418,7 @@ def _make_antigravity_recall_runtime(
     )
 
 
-def _seed_beta_skill_and_inbound(
-    unit_home: Path, db_conn: psycopg.Connection[Any], tid: int
-) -> None:
+def _seed_beta_skill_and_inbound(unit_home: Path, db_conn: psycopg.Connection, tid: int) -> None:
     skills = paths.skills_dir(unit_home)
     (skills / "beta").mkdir(parents=True, exist_ok=True)
     (skills / "beta" / "SKILL.md").write_text(
@@ -437,8 +442,8 @@ def _seed_beta_skill_and_inbound(
 
 async def test_antigravity_claim_before_turn_harness_turn_recalls_skill_and_prepends_prompt(
     unit_home: Path,
-    db_conn: psycopg.Connection[Any],
-    aops_pool: AsyncConnectionPool[Any],
+    db_conn: psycopg.Connection,
+    aops_pool: AsyncConnectionPool,
     event_bus: EventBus,
     database_gate: ProcessDbGate,
 ) -> None:
@@ -460,22 +465,23 @@ async def test_antigravity_claim_before_turn_harness_turn_recalls_skill_and_prep
 
     claim_cmd = await claim_node(AgentState(), runtime, cfg)
     assert claim_cmd.goto == "before_turn"
-    assert claim_cmd.update is not None
-    assert len(claim_cmd.update["harness_view"]) == 1
+    claim_update = update_of(claim_cmd)
+    harness_view = claim_update["harness_view"]
+    assert is_object_list(harness_view)
+    assert len(harness_view) == 1
 
-    state_after_claim = AgentState(**claim_cmd.update)
+    state_after_claim = AgentState.model_validate(claim_update)
     before_turn_fn = hook_node(
         "before_turn", lambda _s: "harness_turn", hooks_at("before_turn", EMPTY)
     )
     bt_cmd = await before_turn_fn(state_after_claim, runtime, cfg)
     assert bt_cmd.goto == "harness_turn"
-    assert bt_cmd.update is not None
+    bt_update = update_of(bt_cmd)
     assert "please use beta to draft the release notes" in scorer_calls[0]
-    assert bt_cmd.update["skill_recall"] == SkillRecallState(prompted={"beta"}, window=0)
-    notes: list[dict[str, Any]] = bt_cmd.update["harness_inputs"]
-    assert "meiva.skills.beta" in notes[0]["prompt"]
+    assert bt_update["skill_recall"] == SkillRecallState(prompted={"beta"}, window=0)
+    assert "meiva.skills.beta" in first_prompt(bt_cmd)
 
-    state_after_bt = state_after_claim.model_copy(update=bt_cmd.update)
+    state_after_bt = state_after_claim.model_copy(update=dict(bt_update))
     assert state_after_bt.messages == []
     service = HostedServiceResources()
     try:
@@ -506,8 +512,7 @@ async def test_external_context_reset_lists_the_open_questions_after_the_tail(
         _runtime(None, harness=Harness.CLAUDE_CODE, database_gate=database_gate),
         _config(tid),
     )
-    assert command.update is not None
-    assert "still unanswered" not in command.update["harness_inputs"][0]["prompt"]
+    assert "still unanswered" not in first_prompt(command)
 
     row = db_conn.execute(
         "INSERT INTO agent_questions (agent_id, title, question) "
@@ -525,8 +530,7 @@ async def test_external_context_reset_lists_the_open_questions_after_the_tail(
         _runtime(None, harness=Harness.CLAUDE_CODE, database_gate=database_gate),
         _config(tid),
     )
-    assert command.update is not None
-    prompt = command.update["harness_inputs"][0]["prompt"]
+    prompt = first_prompt(command)
     assert f'#{row[0]} "Which database?"' in prompt
     assert prompt.index("THE-SUMMARY") < prompt.index("still unanswered")
 
@@ -534,13 +538,13 @@ async def test_external_context_reset_lists_the_open_questions_after_the_tail(
 @pytest.mark.parametrize("harness", [Harness.CLAUDE_CODE, Harness.CODEX, Harness.ANTIGRAVITY])
 async def test_a_harness_read_from_its_record_gets_its_handoff_and_stores_no_timeline_rows(
     harness: Harness,
-    db_conn: psycopg.Connection[Any],
-    aops_pool: AsyncConnectionPool[Any],
+    db_conn: psycopg.Connection,
+    aops_pool: AsyncConnectionPool,
     database_gate: ProcessDbGate,
 ) -> None:
     tid = create_agent(db_conn)
-    handoffs: list[Handoff] = []
-    bridge = SimpleNamespace(session_id=None, set_handoff=handoffs.append)
+    bridge = _HandoffBridge()
+    handoffs = bridge.handoffs
     runtime = _runtime(
         aops_pool,
         ExtensionRegistry(()),
@@ -583,8 +587,8 @@ async def test_claude_code_wake_and_instructions_file_include_visibility_why_whi
 async def test_init_context_preserves_contributed_memory_section_across_harnesses(
     harness: Harness,
     unit_home: Path,
-    db_conn: psycopg.Connection[Any],
-    aops_pool: AsyncConnectionPool[Any],
+    db_conn: psycopg.Connection,
+    aops_pool: AsyncConnectionPool,
     database_gate: ProcessDbGate,
 ) -> None:
     from base.lm.harness.handoff import HandoffSection, HarnessContribution
@@ -620,8 +624,8 @@ async def test_init_context_preserves_contributed_memory_section_across_harnesse
             ),
         )
     )
-    handoffs: list[Handoff] = []
-    bridge = SimpleNamespace(session_id=None, set_handoff=handoffs.append)
+    bridge = _HandoffBridge()
+    handoffs = bridge.handoffs
     base_rt = _runtime(
         aops_pool,
         registry,

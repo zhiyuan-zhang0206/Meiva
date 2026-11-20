@@ -1,4 +1,3 @@
-# pyright: reportOptionalSubscript=false
 """Mutmut gap tests for `agent/graph/llm/node.py` (baseline PR #302).
 
 `capture_meiva_overview` in `_base_prompt.py` captures `meiva.help(meiva)` stdout.
@@ -11,16 +10,15 @@ from __future__ import annotations
 
 import asyncio
 import random
-from collections.abc import AsyncIterator, Mapping
-from typing import TYPE_CHECKING, Any, cast
-from unittest.mock import MagicMock
+from collections.abc import Mapping, Sequence
 
 import anthropic
 import httpx2
 import openai
 import psycopg
 import pytest
-from langchain_core.messages import AIMessage, AIMessageChunk, BaseMessage, HumanMessage
+from langchain_core.language_models.chat_models import BaseChatModel
+from langchain_core.messages import AIMessage, AIMessageChunk, HumanMessage
 from langchain_core.runnables import RunnableConfig
 from langgraph.runtime import ExecutionInfo, Runtime
 from langgraph.types import Command
@@ -28,7 +26,9 @@ from psycopg_pool import AsyncConnectionPool
 
 from agent.graph import llm_node
 from agent.graph.interrupt.tests.queued_commands import queue_command
+from agent.graph.llm.tests.llm_support import ScriptedModel, sink_publisher
 from agent.graph.prompt.system_prompt import capture_meiva_overview, get_meiva_overview
+from agent.graph.tests.node_output import messages_of, typed_events, update_of
 from agent.state import AgentState
 from base.agents.context import MeivaContext
 from base.clock import SYSTEM_TIMERS, Clock
@@ -38,7 +38,8 @@ from base.config.tests.configuration import defaults
 from base.db import Database, create_agent
 from base.db.code_version_gate import ProcessDbGate
 from base.events.live.bus import EventBus
-from base.events.live.projection import Cancelled
+from base.events.live.projection import Cancelled, Event
+from base.events.live.publisher import AgentEventPublisher
 from base.events.live.tests.live_capture import LiveEvents
 from base.host.env.agent_slices import AgentSlices, LlmCallPolicy
 from base.log.tests.log_records import LogRecords
@@ -46,11 +47,6 @@ from base.native_process.turn_identity import HostedTurnResources
 from base.packages.plugin_providers import build_model_catalog
 from base.paths import meiva_home
 from meiva.tests.fixtures.pin_agent import hosted_resources as hosted_resources
-
-if TYPE_CHECKING:
-    from langchain_core.language_models.chat_models import BaseChatModel
-
-    from base.events.live.publisher import AgentEventPublisher
 
 
 # meiva:note
@@ -141,12 +137,15 @@ def test_get_meiva_overview_advertises_installed_plugin_namespace() -> None:
 
     from meiva.sdk_surface import plugins
 
+    def ping() -> str:
+        return "pong"
+
+    ping.__doc__ = "Return pong."
     fake_ns = SimpleNamespace(
         __doc__="Fake plugin namespace just for this test.",
         __all_for_meiva__=["ping"],
-        ping=lambda: "pong",
+        ping=ping,
     )
-    fake_ns.ping.__doc__ = "Return pong."
 
     added = plugins.install_namespace("fake-plugin", "fake_late", fake_ns, {})
     try:
@@ -175,24 +174,20 @@ def test_get_meiva_overview_advertises_installed_plugin_namespace() -> None:
 def make_runtime(
     *,
     resources: HostedTurnResources,
-    llm: object | None = None,
-    event_publisher: object | None = None,
+    llm: BaseChatModel | None = None,
+    event_publisher: AgentEventPublisher | None = None,
     execution_info: ExecutionInfo | None = None,
     database_gate: ProcessDbGate,
-    pins: Mapping[str, Any] | None = None,
+    pins: Mapping[str, object] | None = None,
     ops_pool: AsyncConnectionPool | None = None,
 ) -> Runtime[MeivaContext]:
     if llm is None:
-        llm = MagicMock()
-    if isinstance(llm, MagicMock):
-        llm.bind_tools.return_value = llm
+        llm = ScriptedModel()
     ctx = MeivaContext(
         hosted_resources=resources,
         ops_pool=ops_pool,
-        llm=cast("BaseChatModel", llm),
-        event_publisher=cast(
-            "AgentEventPublisher", event_publisher if event_publisher is not None else MagicMock()
-        ),
+        llm=llm,
+        event_publisher=event_publisher if event_publisher is not None else sink_publisher(),
         agent=AgentSlices.resolve(pins, default_reader=defaults()),
         db=Database.from_settings(gate=database_gate),
         bus=EventBus.from_settings(rng=seeded_rng(), timers=SYSTEM_TIMERS),
@@ -205,7 +200,7 @@ def make_runtime(
 
 # meiva:note
 # Whether the published events contain a Cancelled(agent_id=...).
-def _has_cancelled_event(events: list[Any], agent_id: int) -> bool:
+def _has_cancelled_event(events: Sequence[Event], agent_id: int) -> bool:
     return any(isinstance(e, Cancelled) and e.agent_id == agent_id for e in events)
 
 
@@ -228,12 +223,14 @@ async def test_cancel_branch_publishes_cancelled_and_returns_halted(
     no halted Command — this test verifies both the Cancelled event and the Command shape.
     """
 
-    async def _stream_then_hang() -> AsyncIterator[AIMessageChunk]:
-        yield AIMessageChunk(content="partial")
-        await asyncio.Future()  # hang forever
-
-    fake_llm = MagicMock()
-    fake_llm.astream.return_value = _stream_then_hang()
+    fake_llm = ScriptedModel(
+        scripts=[
+            [
+                AIMessageChunk(content="partial"),
+                "hang",
+            ]
+        ]
+    )
     agent_id = create_agent(db_conn)
     state = AgentState(messages=[HumanMessage(content="hi")], halted=False)
 
@@ -255,7 +252,7 @@ async def test_cancel_branch_publishes_cancelled_and_returns_halted(
         rng=_rng(),
     )
     await trigger
-    events = await live_events.typed()
+    events = await typed_events(live_events)
 
     # (a) Cancelled event emitted (cancel branch-exclusive side effect)
     assert _has_cancelled_event(events, agent_id), (
@@ -264,7 +261,7 @@ async def test_cancel_branch_publishes_cancelled_and_returns_halted(
     # (b) Command shape: goto=after_exec + halted=True
     assert isinstance(result, Command)
     assert result.goto == "claim"
-    assert result.update["halted"] is True
+    assert update_of(result)["halted"] is True
     # (c) cancel path does not call handler.finish() —— no llm_done / token_usage emit
     roles = [e.role for e in events]
     assert "llm_done" not in roles, (
@@ -290,15 +287,17 @@ async def test_stream_normal_completion_no_cancelled_event(
     scenario.
     """
 
-    async def _fast_complete() -> AsyncIterator[AIMessageChunk]:
-        yield AIMessageChunk(
-            content="MEIVA_DISPLAY_TO_USER\nhi",
-            response_metadata={"model_provider": "anthropic", "stop_reason": "end_turn"},
-            usage_metadata={"input_tokens": 1, "output_tokens": 1, "total_tokens": 2},
-        )
-
-    fake_llm = MagicMock()
-    fake_llm.astream.return_value = _fast_complete()
+    fake_llm = ScriptedModel(
+        scripts=[
+            [
+                AIMessageChunk(
+                    content="MEIVA_DISPLAY_TO_USER\nhi",
+                    response_metadata={"model_provider": "anthropic", "stop_reason": "end_turn"},
+                    usage_metadata={"input_tokens": 1, "output_tokens": 1, "total_tokens": 2},
+                ),
+            ]
+        ]
+    )
     state = AgentState(messages=[HumanMessage(content="hi")], halted=False)
 
     # meiva:note
@@ -314,7 +313,7 @@ async def test_stream_normal_completion_no_cancelled_event(
         CONFIG,
         rng=_rng(),
     )
-    events = await live_events.typed()
+    events = await typed_events(live_events)
 
     # (a) no Cancelled event
     assert not _has_cancelled_event(events, agent_id=7), (
@@ -323,7 +322,7 @@ async def test_stream_normal_completion_no_cancelled_event(
     # (b) Command shape: end_turn + no tool_calls → halted=True goto=after_exec
     assert isinstance(result, Command)
     assert result.goto == "claim"
-    assert result.update["halted"] is True
+    assert update_of(result)["halted"] is True
     # (c) finish() called → LLMDone emitted
     assert "llm_done" in [e.role for e in events], (
         "stream-normal branch must call handler.finish() and emit LLMDone"
@@ -335,15 +334,17 @@ async def test_stream_normal_completion_no_cancelled_event(
 async def test_reasoning_tokens_without_action_end_the_turn(
     hosted_resources: HostedTurnResources, database_gate: ProcessDbGate
 ) -> None:
-    async def _empty_complete() -> AsyncIterator[AIMessageChunk]:
-        yield AIMessageChunk(
-            content="",
-            response_metadata={"model_provider": "anthropic", "stop_reason": "end_turn"},
-            usage_metadata={"input_tokens": 1, "output_tokens": 1, "total_tokens": 2},
-        )
-
-    fake_llm = MagicMock()
-    fake_llm.astream.return_value = _empty_complete()
+    fake_llm = ScriptedModel(
+        scripts=[
+            [
+                AIMessageChunk(
+                    content="",
+                    response_metadata={"model_provider": "anthropic", "stop_reason": "end_turn"},
+                    usage_metadata={"input_tokens": 1, "output_tokens": 1, "total_tokens": 2},
+                ),
+            ]
+        ]
+    )
     state = AgentState(messages=[HumanMessage(content="hi")], halted=False)
 
     result = await llm_node(
@@ -351,7 +352,7 @@ async def test_reasoning_tokens_without_action_end_the_turn(
         make_runtime(
             resources=hosted_resources,
             llm=fake_llm,
-            event_publisher=MagicMock(),
+            event_publisher=sink_publisher(),
             database_gate=database_gate,
         ),
         CONFIG,
@@ -360,8 +361,8 @@ async def test_reasoning_tokens_without_action_end_the_turn(
 
     assert isinstance(result, Command)
     assert result.goto == "claim"
-    assert result.update["halted"] is True
-    msgs = cast("list[BaseMessage]", result.update["messages"])
+    assert update_of(result)["halted"] is True
+    msgs = messages_of(result)
     assert len(msgs) == 1
     assert isinstance(msgs[0], AIMessage)
 
@@ -373,15 +374,17 @@ async def test_empty_completed_response_ends_normally(
     loguru_records: LogRecords,
     database_gate: ProcessDbGate,
 ) -> None:
-    async def _empty_complete() -> AsyncIterator[AIMessageChunk]:
-        yield AIMessageChunk(
-            content="",
-            response_metadata={"model_provider": "anthropic", "stop_reason": "end_turn"},
-            usage_metadata={"input_tokens": 1, "output_tokens": 0, "total_tokens": 1},
-        )
-
-    fake_llm = MagicMock()
-    fake_llm.astream.return_value = _empty_complete()
+    fake_llm = ScriptedModel(
+        scripts=[
+            [
+                AIMessageChunk(
+                    content="",
+                    response_metadata={"model_provider": "anthropic", "stop_reason": "end_turn"},
+                    usage_metadata={"input_tokens": 1, "output_tokens": 0, "total_tokens": 1},
+                ),
+            ]
+        ]
+    )
     state = AgentState(messages=[HumanMessage(content="hi")], halted=False)
 
     result = await llm_node(
@@ -389,7 +392,7 @@ async def test_empty_completed_response_ends_normally(
         make_runtime(
             resources=hosted_resources,
             llm=fake_llm,
-            event_publisher=MagicMock(),
+            event_publisher=sink_publisher(),
             database_gate=database_gate,
         ),
         CONFIG,
@@ -397,10 +400,9 @@ async def test_empty_completed_response_ends_normally(
     )
 
     assert isinstance(result, Command)
-    assert result.update["halted"] is True
-    halts = [r for r in loguru_records if r["extra"].get("event") == "halt"]
-    assert len(halts) == 1
-    assert halts[0]["level"].name == "INFO"
+    assert update_of(result)["halted"] is True
+    assert len(loguru_records.extras(event="halt")) == 1
+    assert len(loguru_records.extras(event="halt", level="INFO")) == 1
 
 
 # ───────────── extra actionable mutation kill ─────────────
@@ -460,12 +462,13 @@ async def test_cancel_event_set_before_first_chunk_returns_halted_no_publish_don
     generation is discarded, Command(halted=True, goto=after_exec) does not commit any
     message, and handler.finish() is not called (no LLMDone)."""
 
-    async def _hang_forever() -> AsyncIterator[AIMessageChunk]:
-        await asyncio.Future()
-        yield  # type: ignore[unreachable]  # pragma: no cover
-
-    fake_llm = MagicMock()
-    fake_llm.astream.return_value = _hang_forever()
+    fake_llm = ScriptedModel(
+        scripts=[
+            [
+                "hang",
+            ]
+        ]
+    )
     agent_id = create_agent(db_conn)
     state = AgentState(messages=[HumanMessage(content="hi")], halted=False)
 
@@ -485,14 +488,13 @@ async def test_cancel_event_set_before_first_chunk_returns_halted_no_publish_don
         _config(agent_id),
         rng=_rng(),
     )
-    events = await live_events.typed()
+    events = await typed_events(live_events)
 
     assert isinstance(result, Command)
     assert result.goto == "claim"
-    assert result.update is not None
-    assert result.update["halted"] is True
+    assert update_of(result)["halted"] is True
     # clean discard: no message committed
-    assert result.update.get("messages", []) == []
+    assert update_of(result).get("messages", []) == []
     # Cancelled event emitted
     assert _has_cancelled_event(events, agent_id)
     # handler.finish() not called → no LLMDone
@@ -504,15 +506,19 @@ async def test_cancel_event_set_before_first_chunk_returns_halted_no_publish_don
 async def test_thinking_blocks_without_action_end_the_turn(
     hosted_resources: HostedTurnResources, database_gate: ProcessDbGate
 ) -> None:
-    async def _thinking_only_chunk() -> AsyncIterator[AIMessageChunk]:
-        yield AIMessageChunk(
-            content=[{"type": "thinking", "thinking": "Let me reason...", "signature": "sig-x"}],
-            response_metadata={"model_provider": "anthropic", "stop_reason": "end_turn"},
-            usage_metadata={"input_tokens": 10, "output_tokens": 0, "total_tokens": 10},
-        )
-
-    fake_llm = MagicMock()
-    fake_llm.astream.return_value = _thinking_only_chunk()
+    fake_llm = ScriptedModel(
+        scripts=[
+            [
+                AIMessageChunk(
+                    content=[
+                        {"type": "thinking", "thinking": "Let me reason...", "signature": "sig-x"}
+                    ],
+                    response_metadata={"model_provider": "anthropic", "stop_reason": "end_turn"},
+                    usage_metadata={"input_tokens": 10, "output_tokens": 0, "total_tokens": 10},
+                ),
+            ]
+        ]
+    )
     state = AgentState(messages=[HumanMessage(content="hi")], halted=False)
 
     result = await llm_node(
@@ -520,7 +526,7 @@ async def test_thinking_blocks_without_action_end_the_turn(
         make_runtime(
             resources=hosted_resources,
             llm=fake_llm,
-            event_publisher=MagicMock(),
+            event_publisher=sink_publisher(),
             database_gate=database_gate,
         ),
         CONFIG,
@@ -529,8 +535,8 @@ async def test_thinking_blocks_without_action_end_the_turn(
 
     assert isinstance(result, Command)
     assert result.goto == "claim"
-    assert result.update["halted"] is True
-    msgs = cast("list[BaseMessage]", result.update["messages"])
+    assert update_of(result)["halted"] is True
+    msgs = messages_of(result)
     assert len(msgs) == 1
     assert isinstance(msgs[0], AIMessage)
 
@@ -540,16 +546,20 @@ async def test_thinking_blocks_without_action_end_the_turn(
 async def test_deepseek_reasoning_content_without_action_ends_the_turn(
     hosted_resources: HostedTurnResources, database_gate: ProcessDbGate
 ) -> None:
-    async def _ds_reasoning_only() -> AsyncIterator[AIMessageChunk]:
-        yield AIMessageChunk(
-            content="",
-            response_metadata={"model_provider": "anthropic", "stop_reason": "end_turn"},
-            usage_metadata={"input_tokens": 5, "output_tokens": 0, "total_tokens": 5},
-            additional_kwargs={"reasoning_content": "Let me analyze the request step by step..."},
-        )
-
-    fake_llm = MagicMock()
-    fake_llm.astream.return_value = _ds_reasoning_only()
+    fake_llm = ScriptedModel(
+        scripts=[
+            [
+                AIMessageChunk(
+                    content="",
+                    response_metadata={"model_provider": "anthropic", "stop_reason": "end_turn"},
+                    usage_metadata={"input_tokens": 5, "output_tokens": 0, "total_tokens": 5},
+                    additional_kwargs={
+                        "reasoning_content": "Let me analyze the request step by step..."
+                    },
+                ),
+            ]
+        ]
+    )
     state = AgentState(messages=[HumanMessage(content="hi")], halted=False)
 
     result = await llm_node(
@@ -557,7 +567,7 @@ async def test_deepseek_reasoning_content_without_action_ends_the_turn(
         make_runtime(
             resources=hosted_resources,
             llm=fake_llm,
-            event_publisher=MagicMock(),
+            event_publisher=sink_publisher(),
             database_gate=database_gate,
         ),
         CONFIG,
@@ -566,8 +576,8 @@ async def test_deepseek_reasoning_content_without_action_ends_the_turn(
 
     assert isinstance(result, Command)
     assert result.goto == "claim"
-    assert result.update["halted"] is True
-    msgs = cast("list[BaseMessage]", result.update["messages"])
+    assert update_of(result)["halted"] is True
+    msgs = messages_of(result)
     assert len(msgs) == 1
     assert isinstance(msgs[0], AIMessage)
 
@@ -589,15 +599,6 @@ class FakeProviderStatusError(openai.APIStatusError):
         super().__init__(f"HTTP {status_code}", response=response, body=body)
 
 
-def astream_raising(exc: Exception) -> AsyncIterator[AIMessageChunk]:
-    async def _gen() -> AsyncIterator[AIMessageChunk]:
-        for chunk in tuple[AIMessageChunk, ...]():
-            yield chunk
-        raise exc
-
-    return _gen()
-
-
 async def test_llm_node_permanent_provider_error_fails_fast_with_structured_fields(
     hosted_resources: HostedTurnResources,
     loguru_records: LogRecords,
@@ -611,8 +612,7 @@ async def test_llm_node_permanent_provider_error_fails_fast_with_structured_fiel
     burning the ~16-min backoff budget and dying."""
     from agent.graph.llm_errors import FatalProviderError
 
-    fake_llm = MagicMock()
-    fake_llm.astream.return_value = astream_raising(FakeProviderStatusError(400))
+    fake_llm = ScriptedModel(scripts=[[FakeProviderStatusError(400)]])
     state = AgentState(messages=[HumanMessage(content="hi")], halted=False)
 
     with pytest.raises(FatalProviderError) as exc_info:
@@ -621,7 +621,7 @@ async def test_llm_node_permanent_provider_error_fails_fast_with_structured_fiel
             make_runtime(
                 resources=hosted_resources,
                 llm=fake_llm,
-                event_publisher=MagicMock(),
+                event_publisher=sink_publisher(),
                 database_gate=database_gate,
             ),
             CONFIG,
@@ -630,14 +630,14 @@ async def test_llm_node_permanent_provider_error_fails_fast_with_structured_fiel
 
     assert exc_info.value.error_class == "permanent"
     assert exc_info.value.status == 400
-    classify_logs = [r for r in loguru_records if r["extra"].get("event") == "llm_provider_error"]
+    classify_logs = loguru_records.extras(event="llm_provider_error")
     assert len(classify_logs) == 1, "exactly one structured classification log per failed call"
-    assert classify_logs[0]["extra"]["error_class"] == "permanent"
-    assert classify_logs[0]["extra"]["status"] == 400
-    assert classify_logs[0]["extra"]["fatal"] is True
+    assert classify_logs[0]["error_class"] == "permanent"
+    assert classify_logs[0]["status"] == 400
+    assert classify_logs[0]["fatal"] is True
     # Every provider failure records an explicit billing verdict.
-    assert classify_logs[0]["extra"]["billing"] is False
-    assert classify_logs[0]["extra"]["model"] == settings.lm.llm_model
+    assert classify_logs[0]["billing"] is False
+    assert classify_logs[0]["model"] == settings.lm.llm_model
 
 
 # ────────────────────────────────────────────────────────────

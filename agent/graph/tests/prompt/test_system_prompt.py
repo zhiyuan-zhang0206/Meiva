@@ -13,7 +13,7 @@ the stable production P95 module set.
 """
 
 from collections.abc import Callable
-from typing import Any, cast
+from typing import cast
 
 import pytest
 
@@ -55,7 +55,7 @@ def _live(disabled: tuple[str, ...] = ()) -> LiveSdk:
     return LiveSdk(SkillView(("*",), (), disabled, ()), (), ())
 
 
-def _slices(expand: list[str], **changes: Any) -> AgentSlices:
+def _slices(expand: list[str], **changes: object) -> AgentSlices:
     return AgentSlices.resolve(
         default_reader=defaults(agent__sdk_expand_in_system_prompt=expand, **changes)
     )

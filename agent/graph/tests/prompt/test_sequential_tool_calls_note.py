@@ -1,5 +1,4 @@
 import os
-from typing import Any
 
 import pytest
 
@@ -16,7 +15,7 @@ ENVIRON = dict(os.environ)
 _SENTENCE = "Several tool calls in one response run one at a time, in the order given"
 
 
-def _prompt(**changes: Any) -> str:
+def _prompt(**changes: object) -> str:
     return build_system_prompt(
         EMPTY,
         AgentSlices.resolve(default_reader=defaults(**changes)),

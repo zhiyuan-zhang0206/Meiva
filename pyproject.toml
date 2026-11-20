@@ -638,9 +638,6 @@ reportUnusedCallResult = "warning"
 root = "agent/graph/node_log/tests"
 
 [[tool.pyright.executionEnvironments]]
-root = "agent/graph/tests"
-
-[[tool.pyright.executionEnvironments]]
 root = "agent/tests"
 
 [[tool.pyright.executionEnvironments]]

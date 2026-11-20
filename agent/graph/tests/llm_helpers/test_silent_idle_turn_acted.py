@@ -1,18 +1,17 @@
 from __future__ import annotations
 
 import random
-from collections.abc import AsyncIterator
 from datetime import UTC, datetime
-from typing import Any
-from unittest.mock import MagicMock
 
 import pytest
-from langchain_core.messages import AIMessage, AIMessageChunk, HumanMessage
+from langchain_core.messages import AIMessage, AIMessageChunk, AnyMessage, HumanMessage
 from langchain_core.runnables import RunnableConfig
 from langgraph.types import Command
 
 from agent.graph.llm.goto import LlmGoto
 from agent.graph.llm.node import llm_node
+from agent.graph.llm.tests.llm_support import ScriptedModel, sink_publisher
+from agent.graph.tests.node_output import update_of
 from agent.graph.tests.test_llm_helpers import make_runtime
 from agent.messages import exec_output_message
 from agent.state import AgentState
@@ -34,19 +33,22 @@ def _rng() -> random.Random:
 CONFIG: RunnableConfig = {"configurable": {"thread_id": "7"}}
 
 
-def _reasoning_only(output_tokens: int) -> AsyncIterator[AIMessageChunk]:
-    async def _gen() -> AsyncIterator[AIMessageChunk]:
-        yield AIMessageChunk(
-            content="",
-            response_metadata={"model_provider": "anthropic", "stop_reason": "end_turn"},
-            usage_metadata={
-                "input_tokens": 10,
-                "output_tokens": output_tokens,
-                "total_tokens": 10 + output_tokens,
-            },
-        )
-
-    return _gen()
+def _reasoning_only(output_tokens: int) -> ScriptedModel:
+    return ScriptedModel(
+        scripts=[
+            [
+                AIMessageChunk(
+                    content="",
+                    response_metadata={"model_provider": "anthropic", "stop_reason": "end_turn"},
+                    usage_metadata={
+                        "input_tokens": 10,
+                        "output_tokens": output_tokens,
+                        "total_tokens": 10 + output_tokens,
+                    },
+                )
+            ]
+        ]
+    )
 
 
 # meiva:note
@@ -54,8 +56,8 @@ def _reasoning_only(output_tokens: int) -> AsyncIterator[AIMessageChunk]:
 # outcome under test is the one the exec node writes, not a shape invented here.
 def _turn_that_ran_a_tool(
     status: ExecStatus = ExecStatus.COMPLETED, *, next_user_message: bool = False
-) -> list[Any]:
-    messages: list[Any] = [
+) -> list[AnyMessage]:
+    messages: list[AnyMessage] = [
         HumanMessage(content="check the deploy"),
         AIMessage(content="", tool_calls=[{"name": "execute_code", "args": {}, "id": "c1"}]),
         exec_output_message(
@@ -72,20 +74,18 @@ def _turn_that_ran_a_tool(
 
 
 async def _llm_turn(
-    messages: list[Any],
+    messages: list[AnyMessage],
     *,
     output_tokens: int,
     database_gate: ProcessDbGate,
     hosted_resources: HostedTurnResources,
 ) -> Command[LlmGoto]:
-    fake_llm = MagicMock()
-    fake_llm.astream.return_value = _reasoning_only(output_tokens)
     return await llm_node(
         AgentState(messages=messages, halted=False),
         make_runtime(
             resources=hosted_resources,
-            llm=fake_llm,
-            event_publisher=MagicMock(),
+            llm=_reasoning_only(output_tokens),
+            event_publisher=sink_publisher(),
             database_gate=database_gate,
         ),
         CONFIG,
@@ -94,11 +94,9 @@ async def _llm_turn(
 
 
 # meiva:note
-# `Command.update` is Optional in strict mode, so the verdict is read through one place: every test
-# asserts the same field of the same shape instead of repeating a cast at each site.
-def _halted(result: Command[LlmGoto]) -> Any:
-    update: dict[str, Any] = result.update or {}
-    return update.get("halted")
+# The verdict is read through one place: every test asserts the same field of the same shape.
+def _halted(result: Command[LlmGoto]) -> object:
+    return update_of(result).get("halted")
 
 
 @pytest.mark.parametrize("status", list(ExecStatus))

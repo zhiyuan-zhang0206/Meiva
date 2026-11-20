@@ -12,7 +12,6 @@ fourth member, 'off', which is a gate like any other and renders nothing.
 import os
 import re
 from collections.abc import Callable
-from typing import Any
 
 import pytest
 
@@ -35,6 +34,7 @@ from agent.graph.prompt.system_prompt import (
     user_tone_section,
 )
 from base.config.tests.configuration import defaults
+from base.host.boundary.untyped import object_sequence
 from base.host.env.agent_slices import AgentSlices
 from base.lm.catalog import ModelCatalog
 from base.log.tests.log_records import LogRecords
@@ -45,11 +45,11 @@ from base.paths import meiva_home
 ENVIRON = dict(os.environ)
 
 
-def _slices(**changes: Any) -> AgentSlices:
+def _slices(**changes: object) -> AgentSlices:
     return AgentSlices.resolve(default_reader=defaults(**changes))
 
 
-def _inputs(**changes: Any) -> SectionInputs:
+def _inputs(**changes: object) -> SectionInputs:
     live = LiveSdk(SkillView(("*",), (), (), ()), (), ())
     return SectionInputs(_slices(**changes), build_model_catalog(home=meiva_home()), live)
 
@@ -396,7 +396,7 @@ def test_every_narrating_style_renders_a_distinct_section() -> None:
     annotation = AgentSettings.model_fields["agent_communication_style"].annotation
     # The field is None-sentinel'd (`Literal[...] | None` — unset resolves the
     # per-model default); unwrap the union to the Literal member set.
-    literal = next(a for a in get_args(annotation) if a is not type(None))
+    literal = next(a for a in object_sequence(get_args(annotation)) if a is not type(None))
     members = set(get_args(literal))
     assert set(COMMUNICATION_STYLE_SECTIONS) == members - {"off"}
     assert len(set(COMMUNICATION_STYLE_SECTIONS.values())) == len(COMMUNICATION_STYLE_SECTIONS)
@@ -755,14 +755,15 @@ def test_plugin_prompt_section_records_an_activation(loguru_records: LogRecords)
 
     contribution = f"## Loud\n\nsomething for {first_model}."
     assert contribution in prompt
-    (event,) = (r["extra"] for r in loguru_records.events("plugin_activation"))
+    (event,) = loguru_records.extras(event="plugin_activation")
     assert (event["plugin"], event["surface"], event["identifier"]) == (
         "myplugin",
         "systemPromptSections",
         "loud_section",
     )
     assert event["model"] == slices.brain.llm_model
-    assert event["detail"].startswith(f"chars={len(contribution)} sha=")
+    detail = event["detail"]
+    assert isinstance(detail, str) and detail.startswith(f"chars={len(contribution)} sha=")
 
 
 def test_long_running_operation_without_fleet():

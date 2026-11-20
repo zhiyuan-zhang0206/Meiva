@@ -2,9 +2,7 @@
 
 import asyncio
 import random
-from collections.abc import AsyncIterator
-from typing import Any
-from unittest.mock import MagicMock
+from collections.abc import Sequence
 
 import psycopg
 from langchain_core.messages import AIMessageChunk, HumanMessage
@@ -14,11 +12,13 @@ from psycopg_pool import AsyncConnectionPool
 
 from agent.graph.interrupt.tests.queued_commands import queue_command
 from agent.graph.llm.node import llm_node
+from agent.graph.llm.tests.llm_support import ScriptedModel, sink_publisher
+from agent.graph.tests.node_output import messages_of, typed_events, update_of
 from agent.graph.tests.test_llm_helpers import make_runtime
 from agent.state import AgentState
 from base.db import create_agent
 from base.db.code_version_gate import ProcessDbGate
-from base.events.live.projection import Cancelled
+from base.events.live.projection import Cancelled, Event
 from base.events.live.tests.live_capture import LiveEvents
 from base.native_process.stop_timing import RESTART_INTERRUPT_GRACE_S
 from base.native_process.turn_identity import HostedTurnResources
@@ -35,11 +35,7 @@ def _config(agent_id: int) -> RunnableConfig:
     return {"configurable": {"thread_id": str(agent_id)}}
 
 
-def _committed_messages(update: dict[str, Any]) -> list[Any]:
-    return update.get("messages", [])
-
-
-def _has_cancelled(events: list[Any], agent_id: int) -> bool:
+def _has_cancelled(events: Sequence[Event], agent_id: int) -> bool:
     return any(isinstance(e, Cancelled) and e.agent_id == agent_id for e in events)
 
 
@@ -66,13 +62,15 @@ async def test_llm_node_cancel_event_race_discards_partial(
     database_gate: ProcessDbGate,
 ) -> None:
 
-    async def _stream_then_hang():
-        yield AIMessageChunk(content="par")
-        yield AIMessageChunk(content="tial code")
-        await asyncio.Future()
-
-    fake_llm = MagicMock()
-    fake_llm.astream.return_value = _stream_then_hang()
+    fake_llm = ScriptedModel(
+        scripts=[
+            [
+                AIMessageChunk(content="par"),
+                AIMessageChunk(content="tial code"),
+                "hang",
+            ]
+        ]
+    )
     agent_id = create_agent(db_conn)
     state = AgentState(messages=[HumanMessage(content="hi")], halted=False)
 
@@ -89,12 +87,11 @@ async def test_llm_node_cancel_event_race_discards_partial(
 
     assert isinstance(result, Command)
     assert result.goto == "claim"
-    update = result.update
-    assert update is not None
+    update = update_of(result)
     assert update["halted"] is True
     # Clean discard: no partial AIMessage, no marker
-    assert _committed_messages(update) == []
-    assert _has_cancelled(await live_events.typed(), agent_id)
+    assert update.get("messages", []) == []
+    assert _has_cancelled(await typed_events(live_events), agent_id)
 
 
 # meiva:note
@@ -108,12 +105,14 @@ async def test_llm_node_restart_interrupt_discards_partial_and_marks_the_turn_un
     database_gate: ProcessDbGate,
 ) -> None:
 
-    async def _stream_then_hang():
-        yield AIMessageChunk(content="half a sentence")
-        await asyncio.Future()
-
-    fake_llm = MagicMock()
-    fake_llm.astream.return_value = _stream_then_hang()
+    fake_llm = ScriptedModel(
+        scripts=[
+            [
+                AIMessageChunk(content="half a sentence"),
+                "hang",
+            ]
+        ]
+    )
     agent_id = create_agent(db_conn)
     state = AgentState(messages=[HumanMessage(content="hi")], halted=False)
 
@@ -123,7 +122,7 @@ async def test_llm_node_restart_interrupt_discards_partial_and_marks_the_turn_un
     runtime = make_runtime(
         resources=hosted_resources,
         llm=fake_llm,
-        event_publisher=MagicMock(),
+        event_publisher=sink_publisher(),
         database_gate=database_gate,
         ops_pool=aops_pool,
     )
@@ -152,32 +151,34 @@ async def test_llm_node_cancel_event_race_discards_partial_tool_call(
     database_gate: ProcessDbGate,
 ) -> None:
 
-    async def _stream_tool_call_then_hang():
-        yield AIMessageChunk(content=[{"type": "text", "text": "I'll run that.", "index": 0}])
-        yield AIMessageChunk(
-            content=[
-                {
-                    "type": "tool_use",
-                    "id": "call_cancelled",
-                    "name": "execute_code",
-                    "input": {},
-                    "index": 1,
-                }
-            ],
-            tool_call_chunks=[
-                {"name": "execute_code", "args": "", "id": "call_cancelled", "index": 1},
-            ],
-        )
-        yield AIMessageChunk(
-            content=[],
-            tool_call_chunks=[
-                {"name": None, "args": '{"code": "print(1)', "id": None, "index": 1},
-            ],
-        )
-        await asyncio.Future()
-
-    fake_llm = MagicMock()
-    fake_llm.astream.return_value = _stream_tool_call_then_hang()
+    fake_llm = ScriptedModel(
+        scripts=[
+            [
+                AIMessageChunk(content=[{"type": "text", "text": "I'll run that.", "index": 0}]),
+                AIMessageChunk(
+                    content=[
+                        {
+                            "type": "tool_use",
+                            "id": "call_cancelled",
+                            "name": "execute_code",
+                            "input": {},
+                            "index": 1,
+                        }
+                    ],
+                    tool_call_chunks=[
+                        {"name": "execute_code", "args": "", "id": "call_cancelled", "index": 1},
+                    ],
+                ),
+                AIMessageChunk(
+                    content=[],
+                    tool_call_chunks=[
+                        {"name": None, "args": '{"code": "print(1)', "id": None, "index": 1},
+                    ],
+                ),
+                "hang",
+            ]
+        ]
+    )
     agent_id = create_agent(db_conn)
     state = AgentState(messages=[HumanMessage(content="hi")], halted=False)
 
@@ -194,12 +195,11 @@ async def test_llm_node_cancel_event_race_discards_partial_tool_call(
 
     assert isinstance(result, Command)
     assert result.goto == "claim"
-    update = result.update
-    assert update is not None
+    update = update_of(result)
     assert update["halted"] is True
     # Entirely discarded: neither partial AIMessage nor supplemental tool_result
-    assert _committed_messages(update) == []
-    assert _has_cancelled(await live_events.typed(), agent_id)
+    assert update.get("messages", []) == []
+    assert _has_cancelled(await typed_events(live_events), agent_id)
 
 
 # meiva:note
@@ -215,12 +215,13 @@ async def test_llm_node_cancel_event_race_no_partial_returns_halted(
     database_gate: ProcessDbGate,
 ) -> None:
 
-    async def _hang_immediately():
-        await asyncio.Future()
-        yield  # pragma: no cover
-
-    fake_llm = MagicMock()
-    fake_llm.astream.return_value = _hang_immediately()
+    fake_llm = ScriptedModel(
+        scripts=[
+            [
+                "hang",
+            ]
+        ]
+    )
     agent_id = create_agent(db_conn)
     state = AgentState(messages=[HumanMessage(content="hi")], halted=False)
 
@@ -233,13 +234,13 @@ async def test_llm_node_cancel_event_race_no_partial_returns_halted(
         ops_pool=aops_pool,
     )
     result = await llm_node(state, runtime, _config(agent_id), rng=_rng())
-    assert _has_cancelled(await live_events.typed(), agent_id)
+    assert _has_cancelled(await typed_events(live_events), agent_id)
 
     assert isinstance(result, Command)
     assert result.goto == "claim"
-    assert result.update is not None
-    assert result.update["halted"] is True
-    assert _committed_messages(result.update) == []
+    update = update_of(result)
+    assert update["halted"] is True
+    assert update.get("messages", []) == []
 
 
 # meiva:note
@@ -250,25 +251,31 @@ async def test_llm_node_cancel_event_race_normal_completion(
     database_gate: ProcessDbGate,
 ) -> None:
 
-    async def _fast_stream() -> AsyncIterator[AIMessageChunk]:
-        # tool_use must have non-empty tool_calls (validator enforces "protocol consistency"
-        # to prevent recurrence of 169)
-        yield AIMessageChunk(
-            content="print('hi')",
-            response_metadata={"model_provider": "anthropic", "stop_reason": "tool_use"},
-            usage_metadata={"input_tokens": 1, "output_tokens": 1, "total_tokens": 2},
-            tool_call_chunks=[
-                {"name": "execute_code", "args": '{"code": "x"}', "id": "call_1", "index": 0},
-            ],
-        )
-
-    fake_llm = MagicMock()
-    fake_llm.astream.return_value = _fast_stream()
+    # meiva:note
+    # A tool_use must carry non-empty tool_calls: the validator enforces protocol consistency.
+    fake_llm = ScriptedModel(
+        scripts=[
+            [
+                AIMessageChunk(
+                    content="print('hi')",
+                    response_metadata={"model_provider": "anthropic", "stop_reason": "tool_use"},
+                    usage_metadata={"input_tokens": 1, "output_tokens": 1, "total_tokens": 2},
+                    tool_call_chunks=[
+                        {
+                            "name": "execute_code",
+                            "args": '{"code": "x"}',
+                            "id": "call_1",
+                            "index": 0,
+                        },
+                    ],
+                ),
+            ]
+        ]
+    )
     state = AgentState(messages=[HumanMessage(content="go")], halted=False)
 
     runtime = make_runtime(resources=hosted_resources, llm=fake_llm, database_gate=database_gate)
     result = await llm_node(state, runtime, _config(7), rng=_rng())
 
     assert isinstance(result, Command)
-    assert result.update is not None
-    assert result.update["messages"][0].content == "print('hi')"  # pyright: ignore[reportUnknownMemberType]
+    assert messages_of(result)[0].content == "print('hi')"
