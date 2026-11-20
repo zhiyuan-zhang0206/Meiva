@@ -35,6 +35,7 @@ __all__ = [
     "STATE_INFRA",
     "STATE_SUSPECTED",
     "WATCH_STALE_AFTER",
+    "WEEKLY_STALE_AFTER",
     "Card",
     "Entry",
     "Failure",
@@ -122,6 +123,10 @@ _INFRA_MARKERS = (
 # with a make-up run to dispatch, which `release_gate_slot` owns, and one threshold for that one
 # workflow should not live in two modules.
 NIGHTLY_STALE_AFTER = timedelta(hours=27)
+# meiva:note
+# The weekly cron's threshold: one week plus a day, the same one-cycle-and-a-bit margin the nightly
+# one keeps over its 24 hours.
+WEEKLY_STALE_AFTER = timedelta(days=8)
 
 _CANDIDATE_LIMIT = 20
 
@@ -378,11 +383,20 @@ GATE_CHECK_STEPS = frozenset(
     }
 )
 
+# meiva:note
+# The steps of the alarm workflows (`_ALARM_WORKFLOWS`) that are themselves the checks: the two
+# audits of `scheduled-audits.yml`; the two steps of `update-model-pricing.yml` that read the
+# vendors' pages and write the catalog; and the step of `audit-branch-protection.yml` that ends the
+# run red on drift or on an audit that could not measure (the audit step itself is
+# `continue-on-error`, so it never reports red).
 # meiva:link docs/history/2026-11-15/scheduled-audits-gitleaks-watch.md
 AUDIT_CHECK_STEPS = frozenset(
     {
         "Audit dependencies and pinned binaries",
         "Scan every ref's history",
+        "Reconcile official pricing",
+        "Sync plugin runtime prices",
+        "Alert on drift or on an audit that could not measure",
     }
 )
 

@@ -1,125 +1,21 @@
 # meiva:note
-# What the daily CI metrics schedule decides: which day it reports, how many runs and failures
-# that day holds, and which timed workflows have been red long enough to wake the P0 lead.
-#
-# Timed workflows do not block a pull request, so a red one is silent by default: the nightly
-# duration refresh failed 6 of 8 runs and nothing said so (task #5479), and the pricing refresh
-# failed 10 in a row the same way (task #5496). Two consecutive failures is already "this
-# pipeline is broken", not "one bad night". Each watched workflow carries what stays wrong while
-# it is red, because the alert has to say what it costs.
+# What the daily CI metrics schedule decides: which day it reports and how many runs and failures
+# that day holds. Whether a timed workflow is red is not decided here: `main-red-watch` reads every
+# timed workflow's runs and owns that alarm (task #7006).
 # meiva:link schedules/README.md
 
 from __future__ import annotations
 
-import json
-from collections.abc import Mapping, Sequence
-from dataclasses import dataclass
+from collections.abc import Mapping
 from datetime import datetime, timedelta
 from typing import TypeGuard
 from zoneinfo import ZoneInfo
 
-__all__ = [
-    "Alert",
-    "WatchedWorkflow",
-    "WorkflowRun",
-    "consecutive_failures",
-    "day_counts",
-    "failure_message",
-    "parse_workflow_runs",
-    "plan_alert",
-    "previous_day",
-]
-
-_CONSECUTIVE_FAILURES_ALERT = 2
-
-
-@dataclass(frozen=True)
-class WatchedWorkflow:
-    file: str
-    cost: str
-
-
-# meiva:note
-# A broken timed workflow: how many runs in a row failed and the message for the P0 lead.
-@dataclass(frozen=True)
-class Alert:
-    streak: int
-    message: str
-
-
-@dataclass(frozen=True)
-class WorkflowRun:
-    conclusion: str | None
-    html_url: str | None
-    created_at: str | None
-
-
-def _is_raw_dict(value: object) -> TypeGuard[dict[object, object]]:
-    return isinstance(value, dict)
-
-
-def _is_str_dict(value: object) -> TypeGuard[dict[str, object]]:
-    return _is_raw_dict(value) and all(isinstance(key, str) for key in value)
-
-
-def _is_object_list(value: object) -> TypeGuard[list[object]]:
-    return isinstance(value, list)
+__all__ = ["day_counts", "failure_message", "previous_day"]
 
 
 def _is_str_mapping(value: object) -> TypeGuard[Mapping[str, object]]:
     return isinstance(value, Mapping)
-
-
-def parse_workflow_runs(payload: str, workflow: str) -> tuple[WorkflowRun, ...]:
-    listing: object = json.loads(payload)
-    runs = listing.get("workflow_runs") if _is_str_dict(listing) else None
-    if not _is_object_list(runs):
-        raise TypeError(f"{workflow}: the runs listing carried no workflow_runs")
-    return tuple(_run(item, workflow) for item in runs)
-
-
-def _run(item: object, workflow: str) -> WorkflowRun:
-    if not _is_str_dict(item):
-        raise TypeError(f"{workflow}: a workflow run is not an object")
-    return WorkflowRun(
-        _text(item.get("conclusion")),
-        _text(item.get("html_url")),
-        _text(item.get("created_at")),
-    )
-
-
-def _text(value: object) -> str | None:
-    return value if isinstance(value, str) else None
-
-
-# meiva:note
-# Newest first: a streak ends at the first run that did not fail. A run still in progress
-# (conclusion None) is not a failure and must not inflate the streak.
-def consecutive_failures(runs: Sequence[WorkflowRun]) -> int:
-    streak = 0
-    for run in runs:
-        if run.conclusion != "failure":
-            break
-        streak += 1
-    return streak
-
-
-# meiva:note
-# The alert that wakes the P0 lead, or None while the workflow is not broken yet.
-def plan_alert(workflow: WatchedWorkflow, runs: Sequence[WorkflowRun]) -> Alert | None:
-    streak = consecutive_failures(runs)
-    if streak < _CONSECUTIVE_FAILURES_ALERT:
-        return None
-    newest = runs[0]
-    return Alert(
-        streak,
-        f"Scheduled workflow {workflow.file} failed {streak} runs in a row. It does not "
-        "block a pull request, so a red run is silent by default: while it keeps "
-        f"failing, {workflow.cost}.\n"
-        f"Newest run: {newest.html_url} ({newest.created_at})\n"
-        "Find the failing step; the fix is accepted only after two consecutive "
-        "successful nights.",
-    )
 
 
 # meiva:note

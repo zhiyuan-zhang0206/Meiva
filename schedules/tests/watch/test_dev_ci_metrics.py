@@ -1,8 +1,8 @@
 # meiva:note
 # The daily Dev/CI metrics run.
 #
-# Which timed workflows are broken and what the P0 lead is told are decisions over values. The
-# shell is run against a program standing in for `gh` (`fake_gh.py`, a real child process), the
+# Which day is reported and what the P0 lead is told when sampling fails are decisions over values.
+# The shell is run against a program standing in for `gh` (`fake_gh.py`, a real child process), the
 # real CI exporter writing its cache and snapshot under `tmp_path`, and a gateway on a loopback
 # port that records the messages sent to the P0 lead.
 
@@ -28,18 +28,8 @@ from base.telemetry.tests.capture.event_capture import EmittedEvents
 from base.telemetry.tests.capture.event_capture import emitted_events as emitted_events
 from meiva.gateway_client import use_client
 from schedules.jobs.entry import cluster_timezone
-from schedules.jobs.watch.ci_metrics import CiMetrics, alert_broken_workflows, collect_ci_metrics
-from schedules.plans.ci_workflows import (
-    Alert,
-    WatchedWorkflow,
-    WorkflowRun,
-    consecutive_failures,
-    day_counts,
-    failure_message,
-    parse_workflow_runs,
-    plan_alert,
-    previous_day,
-)
+from schedules.jobs.watch.ci_metrics import CiMetrics, collect_ci_metrics
+from schedules.plans.ci_workflows import day_counts, failure_message, previous_day
 from schedules.plans.directory_plan import ReportRecipient
 from scripts.ci.pull_requests.gh_process import GhProcess
 from schedules.tests.support.gateway_directory import (
@@ -53,60 +43,6 @@ from schedules.tests.support.schedule_support import borrowed_inputs
 _ROOT = Path(__file__).resolve().parents[3]
 _FAKE_GH = Path(__file__).resolve().parents[1] / "children" / "fake_gh.py"
 _LEAD = ReportRecipient("dev-ci-metrics", "MEIVA_CI_METRICS_REPORT_AGENT", "lead", None)
-_DURATIONS = WatchedWorkflow("refresh-test-durations.yml", "CI keeps splitting shards badly")
-_PRICING = WatchedWorkflow("update-model-pricing.yml", "the price catalog drifts")
-
-
-def _runs(*conclusions: str | None) -> tuple[WorkflowRun, ...]:
-    return tuple(
-        WorkflowRun(conclusion, f"https://example.test/{index}", f"2026-09-0{index + 1}")
-        for index, conclusion in enumerate(conclusions)
-    )
-
-
-# meiva:note
-# Newest first: a streak ends at the first run that did not fail. A run still in progress
-# (conclusion None) is not a failure and must not inflate the streak.
-def test_consecutive_failures_counts_only_the_leading_failures() -> None:
-    assert consecutive_failures(_runs("failure", "failure", "success", "failure")) == 2
-    assert consecutive_failures(_runs("success")) == 0
-    assert consecutive_failures(_runs(None, "failure")) == 0
-    assert consecutive_failures(()) == 0
-
-
-def test_two_failures_in_a_row_make_an_alert_that_names_the_cost_and_the_newest_run() -> None:
-    alert = plan_alert(_DURATIONS, _runs("failure", "failure", "success"))
-
-    assert alert == Alert(
-        2,
-        "Scheduled workflow refresh-test-durations.yml failed 2 runs in a row. It does not "
-        "block a pull request, so a red run is silent by default: while it keeps failing, "
-        "CI keeps splitting shards badly.\n"
-        "Newest run: https://example.test/0 (2026-09-01)\n"
-        "Find the failing step; the fix is accepted only after two consecutive successful nights.",
-    )
-
-
-def test_one_failure_is_not_yet_an_alert() -> None:
-    assert plan_alert(_DURATIONS, _runs("failure", "success")) is None
-    assert plan_alert(_DURATIONS, ()) is None
-
-
-def test_a_runs_listing_is_read_into_runs() -> None:
-    payload = json.dumps(
-        {"workflow_runs": [{"conclusion": "failure", "html_url": "u", "created_at": "t"}, {}]}
-    )
-
-    assert parse_workflow_runs(payload, "w.yml") == (
-        WorkflowRun("failure", "u", "t"),
-        WorkflowRun(None, None, None),
-    )
-
-
-@pytest.mark.parametrize("payload", ['{"other": 1}', "[]", '{"workflow_runs": "x"}'])
-def test_a_listing_without_runs_is_refused(payload: str) -> None:
-    with pytest.raises(TypeError, match=r"w\.yml: the runs listing carried no workflow_runs"):
-        parse_workflow_runs(payload, "w.yml")
 
 
 def test_the_reported_day_is_the_cluster_day_before_the_slot() -> None:
@@ -141,8 +77,8 @@ def test_manifest_cron_is_the_collection_slot() -> None:
     assert "06:20 cluster time" in entry["description"]
 
 
-def _gh(workflows: dict[str, Sequence[str | None] | Literal["invalid"]], *, fail: bool = False):
-    env = {**os.environ, "FAKE_GH_WORKFLOWS": json.dumps(workflows)}
+def _gh(*, fail: bool = False):
+    env = {**os.environ}
     if fail:
         env["FAKE_GH_FAIL"] = "1"
 
@@ -170,7 +106,6 @@ def _job(state_dir: Path, run_process: GhProcess) -> CiMetrics:
     return CiMetrics(
         tz=cluster_timezone(),
         recipient=_LEAD,
-        watched=(_DURATIONS, _PRICING),
         state_dir=state_dir,
         run_process=run_process,
         timers=SYSTEM_TIMERS,
@@ -184,37 +119,6 @@ def _messages(requests: list[GatewayRequest]) -> list[str]:
 _PAGES = (DirectoryPage("lead", None, (AgentRowSpec(17, "lead", "idling"),), None),)
 
 
-def test_a_broken_timed_workflow_messages_the_p0__lead_once(
-    sdk_environment: MeivaContext, tmp_path: Path, capsys: pytest.CaptureFixture[str]
-) -> None:
-    run_process = _gh(
-        {_DURATIONS.file: ["failure", "failure"], _PRICING.file: ["failure", "success"]}
-    )
-
-    with serve_gateway(_PAGES) as gateway, gateway.client() as client, use_client(client):
-        alert_broken_workflows("owner/repo", _job(tmp_path, run_process))
-
-    [message] = _messages(gateway.requests)
-    assert message.startswith("Scheduled workflow refresh-test-durations.yml failed 2 runs")
-    assert (
-        "dev-ci-metrics: refresh-test-durations.yml failed 2 runs in a row"
-        in capsys.readouterr().out
-    )
-
-
-def test_an_unreadable_listing_is_logged_and_the_next_workflow_is_still_checked(
-    sdk_environment: MeivaContext, tmp_path: Path, capsys: pytest.CaptureFixture[str]
-) -> None:
-    run_process = _gh({_DURATIONS.file: "invalid", _PRICING.file: ["failure", "failure"]})
-
-    with serve_gateway(_PAGES) as gateway, gateway.client() as client, use_client(client):
-        alert_broken_workflows("owner/repo", _job(tmp_path, run_process))
-
-    [message] = _messages(gateway.requests)
-    assert message.startswith("Scheduled workflow update-model-pricing.yml failed 2 runs")
-    assert "refresh-test-durations.yml runs unreadable: JSONDecodeError" in capsys.readouterr().out
-
-
 def test_a_quiet_collection_reports_the_previous_day_and_emits_the_snapshot(
     database: Database,
     machine_identity: MachineIdentityReader,
@@ -223,7 +127,7 @@ def test_a_quiet_collection_reports_the_previous_day_and_emits_the_snapshot(
     tmp_path: Path,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
-    run_process = _gh({_DURATIONS.file: ["success"], _PRICING.file: ["success"]})
+    run_process = _gh()
     inputs = borrowed_inputs(database, emitted_events.producer, machine_identity, _ROOT)
 
     with serve_gateway(_PAGES) as gateway, gateway.client() as client, use_client(client):
@@ -246,7 +150,7 @@ def test_a_failing_exporter_wakes_the_p0_lead_with_the_failure(
 
     with serve_gateway(_PAGES) as gateway, gateway.client() as client, use_client(client):
         collect_ci_metrics(
-            datetime.now(UTC), None, job=_job(tmp_path, _gh({}, fail=True)), inputs=inputs
+            datetime.now(UTC), None, job=_job(tmp_path, _gh(fail=True)), inputs=inputs
         )
 
     [message] = _messages(gateway.requests)

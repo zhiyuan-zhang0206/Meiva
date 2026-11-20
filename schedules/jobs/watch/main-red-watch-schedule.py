@@ -48,6 +48,8 @@ from schedules.jobs.telemetry_event import emit_system_event
 from schedules.plans.schedule_identity import parse_scheduled_for
 from schedules.jobs.watch.main_red_liveness import liveness_once
 from schedules.plans.watch.main_red import (
+    FAILURE_CHECK,
+    FAILURE_TEST,
     FAILURE_UNNAMED,
     JunitEvidence,
     parse_failures,
@@ -58,6 +60,7 @@ from schedules.plans.watch.main_red import (
     GATE_CHECK_STEPS,
     NIGHTLY_STALE_AFTER,
     RunFacts,
+    WEEKLY_STALE_AFTER,
 )
 from schedules.plans.watch.junit import ArtifactMatch, failing_case_ids, match_artifact
 from schedules.plans.watch.junit_publications import attempt_started_at, current_publications
@@ -79,6 +82,18 @@ _NIGHTLY = "refresh-test-durations.yml"
 _CI_NIGHTLY = "ci.yml"
 _MAIN_PUSH = "main-push.yml"
 _SCHEDULED_AUDITS = "scheduled-audits.yml"
+_MODEL_PRICING = "update-model-pricing.yml"
+_BRANCH_PROTECTION = "audit-branch-protection.yml"
+_RANDOM_ORDER = "random-order.yml"
+# meiva:note
+# The workflows that exist only to raise an alarm: no pull request waits on them and nothing else
+# reads their result, so a red run is already the finding and the watch is its only reader. Every
+# red it can name opens a card on first sight (`FAILURE_CHECK`): the two-strike wait exists to tell
+# a flaky test from a broken one, and none of these has a flaky test to tell apart - the random
+# order run is the one that finds order-dependent tests, which by nature do not fail twice under
+# two seeds. They stay out of `_FULL_SUITE_WORKFLOWS`: a green random-order run must not close a
+# card for a test that fails only in some order, and each card closes on its own job's green.
+_ALARM_WORKFLOWS = frozenset({_SCHEDULED_AUDITS, _MODEL_PRICING, _BRANCH_PROTECTION, _RANDOM_ORDER})
 # meiva:note
 # The jobs inside a workflow that run part of the tree rather than the population. A failure they
 # report is not full-suite evidence even though the run it arrived in is: `ci.yml`'s nightly verdict
@@ -374,7 +389,7 @@ def fetch_runs(
                 GATE_CHECK_STEPS
                 if workflow == _MAIN_PUSH
                 else AUDIT_CHECK_STEPS
-                if workflow == _SCHEDULED_AUDITS
+                if workflow in _ALARM_WORKFLOWS
                 else frozenset[str]()
             )
             for job in failed:
@@ -384,7 +399,13 @@ def fetch_runs(
                     # The coverage flag travels with the failure, not only with the run: a job that
                     # runs part of the tree reports reds no other job in the workflow can retire by
                     # passing (`_PARTIAL_JOBS`).
-                    replace(failure, covers_full_suite=name not in _PARTIAL_JOBS)
+                    replace(
+                        failure,
+                        covers_full_suite=name not in _PARTIAL_JOBS,
+                        kind=FAILURE_CHECK
+                        if workflow in _ALARM_WORKFLOWS and failure.kind == FAILURE_TEST
+                        else failure.kind,
+                    )
                     for failure in _job_failures(
                         job,
                         run_id=int(item.get("id") or 0),
@@ -658,7 +679,16 @@ def watch_round(
             image=inputs.image,
             home=inputs.home,
         ),
-        workflows=(_RELEASE_GATE, _NIGHTLY, _CI_NIGHTLY, _MAIN_PUSH, _SCHEDULED_AUDITS),
+        workflows=(
+            _RELEASE_GATE,
+            _NIGHTLY,
+            _CI_NIGHTLY,
+            _MAIN_PUSH,
+            _SCHEDULED_AUDITS,
+            _MODEL_PRICING,
+            _BRANCH_PROTECTION,
+            _RANDOM_ORDER,
+        ),
         compare=partial(compare_commits, run_process=run_process),
         attempt_of=partial(latest_attempt_jobs, run_process=run_process),
         blind_min_streams=settings.daemon.main_red_watch_blind_streams,
@@ -675,6 +705,9 @@ def watch_round(
                 ),
             ),
             LivenessStream("scheduled-audits", _SCHEDULED_AUDITS, NIGHTLY_STALE_AFTER),
+            LivenessStream("model-pricing", _MODEL_PRICING, NIGHTLY_STALE_AFTER),
+            LivenessStream("random-order", _RANDOM_ORDER, NIGHTLY_STALE_AFTER),
+            LivenessStream("branch-protection-audit", _BRANCH_PROTECTION, WEEKLY_STALE_AFTER),
         ),
     )
     uncertified, channel_latest = _uncertified_commits(run_process)

@@ -787,14 +787,18 @@ def test_a_card_named_by_shard_says_the_match_was_heuristic() -> None:
 
 
 # meiva:link docs/history/2026-11-15/scheduled-audits-gitleaks-watch.md
-def test_the_audit_step_names_exist_in_the_workflow() -> None:
+def test_the_audit_step_names_exist_in_the_alarm_workflows() -> None:
     from pathlib import Path
 
     import yaml
 
     root = Path(__file__).resolve().parents[3]
-    workflow = yaml.safe_load((root / ".github" / "workflows" / "scheduled-audits.yml").read_text())
-    names = {step.get("name") for job in workflow["jobs"].values() for step in job.get("steps", [])}
+    names: set[object] = set()
+    for file in ("scheduled-audits.yml", "update-model-pricing.yml", "audit-branch-protection.yml"):
+        workflow = yaml.safe_load((root / ".github" / "workflows" / file).read_text())
+        names |= {
+            step.get("name") for job in workflow["jobs"].values() for step in job.get("steps", [])
+        }
 
     assert names >= AUDIT_CHECK_STEPS, AUDIT_CHECK_STEPS - names
 
