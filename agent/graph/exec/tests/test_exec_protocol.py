@@ -19,7 +19,7 @@ import stat
 import time
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any, TypeGuard
+from typing import TypeGuard
 from uuid import UUID
 
 import pytest
@@ -45,31 +45,41 @@ from base.clock.tests.fakes import system_clock
 from base.cluster.machine import MachineIdentityReader
 from base.cluster.machine.tests.identity import machine_identity as machine_identity
 from base.db import Database
+from base.host.boundary.json_values import is_object_dict
+from base.host.boundary.untyped import object_of
 from base.paths import meiva_home, resolve_meiva_home
 from meiva.tests.fixtures.pin_agent import exec_context
 
 _NOW = datetime(2026, 10, 27, 12, 0, tzinfo=UTC)
 
 
-def _context_description(agent_id: int | None) -> dict[str, Any]:
+def _context_description(agent_id: int | None) -> dict[str, object]:
     return exec_context(agent_id).describe()
 
 
-def _exec_envelope_events() -> list[dict[str, Any]]:
-    """Read the durable telemetry mirror's exec-envelope rows."""
+def _load_json(text: str) -> dict[str, object]:
+    value = object_of(json.loads, text)
+    assert is_object_dict(value)
+    return value
+
+
+# meiva:note
+# The attributes of the durable telemetry mirror's exec-envelope rows.
+def _exec_envelope_attributes() -> list[dict[str, object]]:
     from base.paths import logs_dir
 
     path = logs_dir(home=resolve_meiva_home()) / f"events-{datetime.now(UTC):%Y%m%d}.jsonl"
     if not path.exists():
         return []
-    events: list[dict[str, Any]] = []
+    events: list[dict[str, object]] = []
     for line in path.read_text(encoding="utf-8").splitlines():
         try:
-            row = json.loads(line)
-        except ValueError:
+            row = _load_json(line)
+        except (ValueError, AssertionError):
             continue
-        if row.get("event_name") == "exec_envelope":
-            events.append(row)
+        attributes = row.get("attributes")
+        if row.get("event_name") == "exec_envelope" and is_object_dict(attributes):
+            events.append(attributes)
     return events
 
 
@@ -133,7 +143,7 @@ def test_typed_blob_set_round_trip() -> None:
 # ── request envelope ──────────────────────────────────────────────────────
 
 
-def _make_state_dump() -> dict[str, Any]:
+def _make_state_dump() -> dict[str, object]:
     msg = AIMessage(
         content="snapshot message",
         tool_calls=[
@@ -175,7 +185,7 @@ def test_request_envelope_transfers_emit_size_and_serialize_time(
     from base.log import logger
     from base.telemetry.process_logging import add_event_sink
 
-    events_before = len(_exec_envelope_events())
+    events_before = len(_exec_envelope_attributes())
     pipeline = telemetry.build_pipeline(
         now=system_clock().now,
         database=lambda: database,
@@ -207,17 +217,17 @@ def test_request_envelope_transfers_emit_size_and_serialize_time(
             deadline = time.monotonic() + 2.0
             while time.monotonic() < deadline:
                 telemetry.flush()
-                if len(_exec_envelope_events()) >= events_before + 2:
+                if len(_exec_envelope_attributes()) >= events_before + 2:
                     break
                 time.sleep(0.05)
     finally:
         logger.remove(sink_id)
         pipeline.stop(timeout=2)
 
-    events = _exec_envelope_events()[events_before:]
+    events = _exec_envelope_attributes()[events_before:]
     assert len(events) >= 2
-    request_events = [event for event in events if event["attributes"]["envelope"] == "request"]
-    by_op = {event["attributes"]["op"]: event["attributes"] for event in request_events}
+    request_events = [event for event in events if event["envelope"] == "request"]
+    by_op = {str(event["op"]): event for event in request_events}
     assert set(by_op) >= {"write", "read"}
     for attrs in by_op.values():
         assert attrs["size_bytes"] == path.stat().st_size
@@ -239,7 +249,7 @@ def test_request_envelope_without_state(tmp_path: Path) -> None:
     assert payload.agent_id is None
     assert payload.state is None
     # no state keys in the raw JSON
-    raw = json.loads(path.read_text(encoding="utf-8"))
+    raw = _load_json(path.read_text(encoding="utf-8"))
     assert "state_b64" not in raw
 
 
@@ -253,7 +263,7 @@ def test_request_envelope_rejects_version_drift(tmp_path: Path) -> None:
         state=None,
         incarnation=None,
     )
-    raw = json.loads(path.read_text(encoding="utf-8"))
+    raw = _load_json(path.read_text(encoding="utf-8"))
     raw["v"] = REQUEST_VERSION + 99
     path.write_text(json.dumps(raw), encoding="utf-8")
     with pytest.raises(ValueError, match="version"):
@@ -294,7 +304,7 @@ def test_result_envelope_minimal(tmp_path: Path) -> None:
 def test_result_envelope_without_sdk_calls_reads_as_old_format(tmp_path: Path) -> None:
     path = make_result_path(tmp_path, agent_id=7, result_id=UUID(int=1))
     write_result(path, ResultPayload(kind="done"))
-    raw = json.loads(path.read_text(encoding="utf-8"))
+    raw = _load_json(path.read_text(encoding="utf-8"))
     del raw["sdk_calls"]
     path.write_text(json.dumps(raw), encoding="utf-8")
 
@@ -304,7 +314,7 @@ def test_result_envelope_without_sdk_calls_reads_as_old_format(tmp_path: Path) -
 def test_result_envelope_rejects_unknown_kind(tmp_path: Path) -> None:
     path = make_result_path(tmp_path, agent_id=7, result_id=UUID(int=1))
     write_result(path, ResultPayload(kind="done"))
-    raw = json.loads(path.read_text(encoding="utf-8"))
+    raw = _load_json(path.read_text(encoding="utf-8"))
     raw["kind"] = "exploded"
     path.write_text(json.dumps(raw), encoding="utf-8")
     with pytest.raises(ValueError, match="unknown kind"):
@@ -314,7 +324,7 @@ def test_result_envelope_rejects_unknown_kind(tmp_path: Path) -> None:
 def test_result_envelope_rejects_version_drift(tmp_path: Path) -> None:
     path = make_result_path(tmp_path, agent_id=7, result_id=UUID(int=1))
     write_result(path, ResultPayload(kind="done"))
-    raw = json.loads(path.read_text(encoding="utf-8"))
+    raw = _load_json(path.read_text(encoding="utf-8"))
     raw["v"] = RESULT_VERSION + 99
     path.write_text(json.dumps(raw), encoding="utf-8")
     with pytest.raises(ValueError, match="version"):

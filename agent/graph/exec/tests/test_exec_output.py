@@ -417,17 +417,15 @@ def test_dispatch_boot_crash_emits_the_boot_failed_event(
 
     boot_exc = ExecChildError("BootstrapFetchError", "down", None)
     _dispatch(_boot_crash(boot_exc, False), limits, output_now, agent_id=42)
-    boot = [r for r in loguru_records if r["extra"].get("event") == "exec_child_boot_failed"]
-    assert len(boot) == 1
-    assert boot[0]["level"].name == "WARNING"
-    assert boot[0]["extra"]["agent_id"] == 42
-    assert boot[0]["extra"]["exc_type"] == "BootstrapFetchError"
-    assert boot[0]["extra"]["exc_msg"] == "down"
+    (boot,) = loguru_records.extras(event="exec_child_boot_failed", level="WARNING")
+    assert boot["agent_id"] == 42
+    assert boot["exc_type"] == "BootstrapFetchError"
+    assert boot["exc_msg"] == "down"
 
     loguru_records.clear()
     unknown_exc = ExecChildError("exec_subprocess_aborted", "gone", None)
     _dispatch(_boot_crash(unknown_exc, None), limits, output_now, agent_id=42)
-    assert not [r for r in loguru_records if r["extra"].get("event") == "exec_child_boot_failed"]
+    assert not loguru_records.extras(event="exec_child_boot_failed")
 
 
 @pytest.mark.parametrize(
@@ -460,10 +458,8 @@ def test_dispatch_aborted_subprocess_surfaces_returncode_to_agent_and_telemetry(
     assert "the exec child exited without writing a result envelope" in text
     assert expected_detail in text
 
-    failed = [r for r in loguru_records if r["extra"].get("event") == "exec_failed"]
-    assert len(failed) == 1
-    assert expected_detail in str(failed[0]["extra"]["body"])
-    assert expected_detail in failed[0]["message"]
+    (failed,) = loguru_records.extras(event="exec_failed", message=expected_detail)
+    assert expected_detail in str(failed["body"])
 
 
 def test_archive_stamp_is_the_callers_instant_in_the_callers_zone(

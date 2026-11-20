@@ -7,19 +7,24 @@
 import asyncio
 import os
 import select
-import subprocess
+from typing import IO, Protocol
 
 from base.clock import Timers
 
-from ._stream import StreamingTextIO
+
+class _PipedProcess(Protocol):
+    @property
+    def stdout(self) -> IO[bytes] | None: ...
+
+
+class OutputSink(Protocol):
+    def write(self, s: str, /) -> int: ...
 
 
 class ExecOutputPipe:
     """One merged output pipe; EOF, rather than a timed wait, settles it."""
 
-    def __init__(
-        self, proc: subprocess.Popen[bytes], stream: StreamingTextIO, timers: Timers
-    ) -> None:
+    def __init__(self, proc: _PipedProcess, stream: OutputSink, timers: Timers) -> None:
         if proc.stdout is None:
             raise RuntimeError("exec child has no output pipe")
         self.stdout = proc.stdout

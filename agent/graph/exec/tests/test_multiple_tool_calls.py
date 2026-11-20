@@ -1,18 +1,23 @@
 import json
 import random
-from functools import partial
+from collections.abc import Awaitable, Mapping
+from dataclasses import dataclass
 from pathlib import Path
-from typing import Annotated, Any
+from typing import Annotated, Protocol
 
 import pytest
-from langchain_core.messages import AIMessage, AnyMessage, HumanMessage, ToolMessage
+from langchain_core.messages import AIMessage, AnyMessage, BaseMessage, HumanMessage, ToolMessage
 from langchain_core.runnables import RunnableConfig
+from langgraph.checkpoint.base import BaseCheckpointSaver
+from langgraph.config import get_config
+from langgraph.graph import END, START, StateGraph
 from langgraph.graph.message import add_messages
 from langgraph.runtime import Runtime
+from langgraph.types import Command, StateSnapshot
 from pydantic import BaseModel, Field
 
 from agent.execution.protocol import ResultPayload
-from agent.graph.exec.node import ExecDone, exec_node_impl
+from agent.graph.exec.node import ExecDone, ExecGoto, exec_node_impl
 from agent.graph.exec.process import ExecProcess, SubprocessExecProcess
 from agent.graph.exec.tests.process_inputs import (
     ReportingExecProcess,
@@ -32,6 +37,8 @@ from base.db.code_version_gate import ProcessDbGate
 from base.events.live.bus import EventBus
 from base.events.live.publisher import AgentEventPublisher
 from base.events.live.tests.live_capture import LiveEvents, idle_publisher
+from base.host.boundary.json_values import is_object_dict, is_object_list
+from base.host.boundary.untyped import object_mapping
 from base.host.env.agent_slices import AgentSlices
 from base.log.tests.log_records import LogRecords
 from base.packages.plugin_providers import build_model_catalog
@@ -46,19 +53,99 @@ def _rng() -> random.Random:
     return random.Random(0)  # noqa: S311
 
 
-def _graph(state_cls: type[AgentState], *, process: ExecProcess, **compile_options: Any) -> Any:
-    from langgraph.graph import END, START, StateGraph
+# meiva:note
+# The slice of langgraph's builder and compiled graph these tests use. Its stubs leave `add_node`,
+# `compile` and `ainvoke` partly unknown, so a graph is handed through these protocols once and
+# read only through the signatures declared here.
+class _RuntimeNode(Protocol):
+    def __call__(
+        self, state: AgentState, *, runtime: Runtime[MeivaContext]
+    ) -> Awaitable[object]: ...
 
-    builder: Any = StateGraph(state_cls, context_schema=MeivaContext)
-    builder.add_node("exec", partial(exec_node_impl, process=process), input_schema=state_cls)
 
-    def claim(_state: object) -> dict[str, object]:
+class _Compiled(Protocol):
+    def ainvoke(
+        self, input: AgentState | None, config: RunnableConfig, *, context: MeivaContext
+    ) -> Awaitable[object]: ...
+
+    def aget_state(self, config: RunnableConfig) -> Awaitable[StateSnapshot]: ...
+
+
+class _Builder(Protocol):
+    def add_node(
+        self, node: str, action: _RuntimeNode, *, input_schema: type[AgentState]
+    ) -> object: ...
+
+    def add_edge(self, start_key: str, end_key: str) -> object: ...
+
+    def compile(
+        self, checkpointer: BaseCheckpointSaver[str] | None, *, interrupt_after: list[str] | None
+    ) -> _Compiled: ...
+
+
+def _wire(
+    builder: _Builder,
+    state_cls: type[AgentState],
+    process: ExecProcess,
+    checkpointer: BaseCheckpointSaver[str] | None,
+    interrupt_after: list[str] | None,
+) -> _Compiled:
+    async def execute(state: AgentState, *, runtime: Runtime[MeivaContext]) -> Command[ExecGoto]:
+        return await exec_node_impl(state, runtime, get_config(), process=process)
+
+    async def claim(state: AgentState, *, runtime: Runtime[MeivaContext]) -> dict[str, object]:
         return {}
 
-    builder.add_node("claim", claim)
-    builder.add_edge(START, "exec")
-    builder.add_edge("claim", END)
-    return builder.compile(**compile_options)
+    _ = builder.add_node("exec", execute, input_schema=state_cls)
+    _ = builder.add_node("claim", claim, input_schema=state_cls)
+    _ = builder.add_edge(START, "exec")
+    _ = builder.add_edge("claim", END)
+    return builder.compile(checkpointer, interrupt_after=interrupt_after)
+
+
+def _graph(
+    state_cls: type[AgentState],
+    *,
+    process: ExecProcess,
+    checkpointer: BaseCheckpointSaver[str] | None = None,
+    interrupt_after: list[str] | None = None,
+) -> _Compiled:
+    builder = StateGraph(state_cls, context_schema=MeivaContext)
+    return _wire(builder, state_cls, process, checkpointer, interrupt_after)
+
+
+# meiva:note
+# What a graph run left in the state: its channels by name, with the message list read as
+# messages. The first message is the assistant turn the calls came from, the rest are the results
+# and notes the exec node committed.
+@dataclass(frozen=True)
+class _Run:
+    values: Mapping[str, object]
+
+    @property
+    def messages(self) -> list[BaseMessage]:
+        return _messages_of(self.values)
+
+    def results(self, stop: int | None = None) -> list[ToolMessage]:
+        return _tool_results(self.messages[1:stop])
+
+
+def _messages_of(values: Mapping[str, object]) -> list[BaseMessage]:
+    messages = values["messages"]
+    assert is_object_list(messages)
+    assert all(isinstance(message, BaseMessage) for message in messages)
+    return [message for message in messages if isinstance(message, BaseMessage)]
+
+
+def _tool_results(messages: list[BaseMessage]) -> list[ToolMessage]:
+    results = [message for message in messages if isinstance(message, ToolMessage)]
+    assert len(results) == len(messages)
+    return results
+
+
+def _run_of(raw: object) -> _Run:
+    assert is_object_dict(raw)
+    return _Run(raw)
 
 
 async def _run_calls(
@@ -67,10 +154,10 @@ async def _run_calls(
     config: RunnableConfig,
     *,
     process: ExecProcess,
-) -> dict[str, Any]:
-    return await _graph(type(state), process=process).ainvoke(
-        dict(state), context=runtime.context, config=config
-    )
+) -> _Run:
+    graph = _graph(type(state), process=process)
+    raw: object = await graph.ainvoke(state, context=runtime.context, config=config)
+    return _run_of(raw)
 
 
 async def test_calls_execute_separately_without_rewriting_assistant() -> None:
@@ -98,12 +185,10 @@ async def test_calls_execute_separately_without_rewriting_assistant() -> None:
     )
 
     assert ai.model_dump() == original
-    assert command is not None
-    messages = command["messages"][1:]
-    assert all(isinstance(message, ToolMessage) for message in messages)
+    messages = command.results()
     assert [message.tool_call_id for message in messages] == ["call-a", "call-b"]
-    assert "first()" in messages[0].content
-    assert "second()" in messages[1].content
+    assert "first()" in messages[0].text
+    assert "second()" in messages[1].text
 
 
 class _MessagesPlugin(BaseModel):
@@ -175,12 +260,11 @@ async def test_real_children_do_not_share_globals(database_gate: ProcessDbGate) 
         {"configurable": {"thread_id": "7"}},
         process=SubprocessExecProcess(live_parent_facts(), rng=_rng()),
     )
-    assert result is not None
-    _, first, second = result["messages"]
+    first, second = result.results()
     assert first.tool_call_id == "call-0"
     assert second.tool_call_id == "call-1"
-    assert "first" in first.content
-    assert "False" in second.content
+    assert "first" in first.text
+    assert "False" in second.text
 
 
 async def test_exception_does_not_skip_later_call(database_gate: ProcessDbGate) -> None:
@@ -190,10 +274,9 @@ async def test_exception_does_not_skip_later_call(database_gate: ProcessDbGate) 
         {"configurable": {"thread_id": "7"}},
         process=SubprocessExecProcess(live_parent_facts(), rng=_rng()),
     )
-    assert result is not None
-    _, first, second = result["messages"]
-    assert "ValueError: first failed" in first.content
-    assert "second ran" in second.content
+    first, second = result.results()
+    assert "ValueError: first failed" in first.text
+    assert "second ran" in second.text
 
 
 async def test_plugin_reducers_commit_between_calls() -> None:
@@ -217,11 +300,10 @@ async def test_plugin_reducers_commit_between_calls() -> None:
         state, _node_runtime(), {"configurable": {"thread_id": "7"}}, process=process
     )
     assert state.total == 10
-    assert result is not None
-    first, second = result["messages"][1:]
-    assert "total=10" in first.content
-    assert "total=11" in second.content
-    assert result["total"] == 12
+    first, second = result.results()
+    assert "total=10" in first.text
+    assert "total=11" in second.text
+    assert result.values["total"] == 12
 
 
 async def test_notes_and_media_follow_all_results_and_stream_ids_match(
@@ -257,9 +339,11 @@ async def test_notes_and_media_follow_all_results_and_stream_ids_match(
         process=process,
     )
 
-    assert result is not None
-    messages = result["messages"][1:]
-    assert [message.tool_call_id for message in messages[:2]] == ["call-0", "call-1"]
+    messages = result.messages[1:]
+    assert [message.tool_call_id for message in _tool_results(messages[:2])] == [
+        "call-0",
+        "call-1",
+    ]
     assert messages[2] == note
     media = messages[3]
     assert isinstance(media, HumanMessage) and len(messages) == 4
@@ -294,14 +378,13 @@ async def test_lifecycle_pairs_skipped_calls_and_timeout_continues(outcome: str)
         {"configurable": {"thread_id": "7"}},
         process=process,
     )
-    assert result is not None
     if outcome == "compact":
-        assert len(result["messages"]) == 1
+        assert len(result.messages) == 1
     else:
-        _, first, second = result["messages"]
+        first, second = result.results()
         assert [first.tool_call_id, second.tool_call_id] == ["call-0", "call-1"]
-        assert ("second" if outcome == "timeout" else "Not executed") in second.content
-    assert result["halted"] is (outcome != "timeout")
+        assert ("second" if outcome == "timeout" else "Not executed") in second.text
+    assert result.values["halted"] is (outcome != "timeout")
 
 
 # meiva:note
@@ -320,8 +403,8 @@ async def test_a_turn_end_declaration_reaches_the_state(database_gate: ProcessDb
         process=SubprocessExecProcess(live_parent_facts(), rng=_rng()),
     )
 
-    assert result["ended_with"] == "deferred:time"
-    assert result["ended_with_reason"] == "night, continue after 09:00"
+    assert result.values["ended_with"] == "deferred:time"
+    assert result.values["ended_with_reason"] == "night, continue after 09:00"
 
 
 # meiva:note
@@ -338,9 +421,9 @@ async def test_a_turn_end_declaration_outside_the_set_is_recorded_invalid(
         process=SubprocessExecProcess(live_parent_facts(), rng=_rng()),
     )
 
-    assert result["ended_with"] == "invalid"
-    assert [m.type for m in result["messages"]] == ["ai", "tool"], "the turn must run to the end"
-    (record,) = [r["extra"] for r in loguru_records.events("turn_end_declaration_rejected")]
+    assert result.values["ended_with"] == "invalid"
+    assert [m.type for m in result.messages] == ["ai", "tool"], "the turn must run to the end"
+    (record,) = loguru_records.extras(event="turn_end_declaration_rejected")
     assert record["raw_ended_with"] == "finished for today"
     assert record["problem"] is not None
 
@@ -357,8 +440,8 @@ async def test_a_waiting_declaration_without_its_object_is_recorded_invalid(
         process=SubprocessExecProcess(live_parent_facts(), rng=_rng()),
     )
 
-    assert result["ended_with"] == "invalid"
-    (record,) = [r["extra"] for r in loguru_records.events("turn_end_declaration_rejected")]
+    assert result.values["ended_with"] == "invalid"
+    (record,) = loguru_records.extras(event="turn_end_declaration_rejected")
     assert record["raw_ended_with"] == "waiting:"
     assert "names no object" in str(record["problem"])
 
@@ -375,11 +458,10 @@ async def test_unknown_tool_does_not_consume_sibling_code() -> None:
     result = await _run_calls(
         state, _node_runtime(), {"configurable": {"thread_id": "7"}}, process=process
     )
-    assert result is not None
-    _, first, second = result["messages"]
-    assert "unknown tool" in first.content
-    assert "print('runs')" in second.content
-    assert "must not run" not in first.content + second.content
+    first, second = result.results()
+    assert "unknown tool" in first.text
+    assert "print('runs')" in second.text
+    assert "must not run" not in first.text + second.text
 
 
 def _config() -> RunnableConfig:
@@ -444,13 +526,14 @@ async def test_exec_recovers_missing_content_call_without_syntax_plugin(
         _config(),
         process=SubprocessExecProcess(live_parent_facts(), rng=_rng()),
     )
-    assert result is not None
-    fixed_ai, first, second = result["messages"]
+    fixed_ai = result.messages[0]
+    assert isinstance(fixed_ai, AIMessage)
+    first, second = result.results()
     assert len(fixed_ai.tool_calls) == 2
     assert first.tool_call_id == "call_00"
     assert second.tool_call_id == "call_01"
-    assert "skills" in first.content
-    assert "agents" in second.content
+    assert "skills" in first.text
+    assert "agents" in second.text
 
 
 def _ai_with_hallucinated_tool_name() -> AIMessage:
@@ -479,12 +562,11 @@ async def test_exec_node_feeds_back_on_unknown_tool_name(database_gate: ProcessD
         process=SubprocessExecProcess(live_parent_facts(), rng=_rng()),
     )
 
-    assert result is not None
-    assert result["halted"] is False
-    _, tool_msg = result["messages"]
+    assert result.values["halted"] is False
+    (tool_msg,) = result.results()
     assert tool_msg.tool_call_id == "call_99"
-    assert "meiva.files.edit" in tool_msg.content
-    assert "execute_code" in tool_msg.content
+    assert "meiva.files.edit" in tool_msg.text
+    assert "execute_code" in tool_msg.text
 
 
 async def test_exec_node_feeds_back_when_code_key_missing(database_gate: ProcessDbGate) -> None:
@@ -504,10 +586,9 @@ async def test_exec_node_feeds_back_when_code_key_missing(database_gate: Process
         process=SubprocessExecProcess(live_parent_facts(), rng=_rng()),
     )
 
-    assert result is not None
-    _, tool_msg = result["messages"]
+    (tool_msg,) = result.results()
     assert tool_msg.tool_call_id == "call_88"
-    assert "execute_code" in tool_msg.content
+    assert "execute_code" in tool_msg.text
 
 
 async def test_langgraph_owns_each_call_state_transition() -> None:
@@ -529,10 +610,10 @@ async def test_langgraph_owns_each_call_state_transition() -> None:
 
     state = DecimalState(total=7, messages=_state("first()", "second()").messages)
     result = await _run_calls(state, _node_runtime(), _config(), process=process)
-    first, second = result["messages"][1:]
-    assert "total=7" in first.content
-    assert "total=71" in second.content
-    assert result["total"] == 712
+    first, second = result.results()
+    assert "total=7" in first.text
+    assert "total=71" in second.text
+    assert result.values["total"] == 712
 
 
 async def test_checkpoint_resume_keeps_results_and_deferred_notes() -> None:
@@ -558,23 +639,22 @@ async def test_checkpoint_resume_keeps_results_and_deferred_notes() -> None:
     )
     config = _config()
     runtime = _node_runtime()
-    await graph.ainvoke(dict(_state("first()", "second()")), config=config, context=runtime.context)
+    _ = await graph.ainvoke(_state("first()", "second()"), config, context=runtime.context)
     checkpoint = await graph.aget_state(config)
     assert checkpoint.next == ("exec",)
-    assert len(checkpoint.values["messages"]) == 2
-    assert checkpoint.values["messages"][-1].tool_call_id == "call-0"
-    assert checkpoint.values["pending_exec_notes"] == [note]
+    saved = _Run(object_mapping(checkpoint.values))
+    assert len(saved.messages) == 2
+    last = saved.messages[-1]
+    assert isinstance(last, ToolMessage) and last.tool_call_id == "call-0"
+    assert saved.values["pending_exec_notes"] == [note]
 
-    result = await graph.ainvoke(None, config=config, context=runtime.context)
-    assert [message.tool_call_id for message in result["messages"][1:3]] == [
-        "call-0",
-        "call-1",
-    ]
-    assert result["messages"][3:] == [note]
-    assert result["pending_exec_notes"] == []
-    first, second = result["messages"][1:3]
-    assert "pending_exec_notes=[]" in first.content
-    assert "context from first call" in second.content
+    result = _run_of(await graph.ainvoke(None, config, context=runtime.context))
+    first, second = result.results(3)
+    assert [first.tool_call_id, second.tool_call_id] == ["call-0", "call-1"]
+    assert result.messages[3:] == [note]
+    assert result.values["pending_exec_notes"] == []
+    assert "pending_exec_notes=[]" in first.text
+    assert "context from first call" in second.text
     assert "sdk_calls" not in read_meiva_kwargs(first)
     assert read_meiva_kwargs(second).get("sdk_calls") == []
 
@@ -594,14 +674,14 @@ async def test_write_uids_survive_child_replay_and_distinguish_writes(
     replay = await _run_calls(state, runtime, _config(), process=process)
     writes = [
         line.removeprefix("uids ").split()
-        for message in first["messages"][1:]
-        for line in str(message.content).splitlines()
+        for message in first.results()
+        for line in message.text.splitlines()
         if line.startswith("uids ")
     ]
     replayed = [
         line.removeprefix("uids ").split()
-        for message in replay["messages"][1:]
-        for line in str(message.content).splitlines()
+        for message in replay.results()
+        for line in message.text.splitlines()
         if line.startswith("uids ")
     ]
     assert [len(call) for call in writes] == [2, 2]

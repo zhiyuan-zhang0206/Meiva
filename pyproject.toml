@@ -641,9 +641,6 @@ root = "agent/extensions/tests"
 root = "agent/graph/claim/tests"
 
 [[tool.pyright.executionEnvironments]]
-root = "agent/graph/exec/tests"
-
-[[tool.pyright.executionEnvironments]]
 root = "agent/graph/hooks/tests"
 
 [[tool.pyright.executionEnvironments]]

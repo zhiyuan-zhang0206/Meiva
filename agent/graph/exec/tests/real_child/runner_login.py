@@ -1,5 +1,3 @@
-from typing import Any
-
 import psycopg
 import pytest
 
@@ -15,7 +13,7 @@ from base.db.test_db_guard import assert_test_db_url
 # private test database only.
 # meiva:link agent/graph/exec/docs/subprocess-tests.md
 @pytest.fixture
-def runner_db_url(db_conn: psycopg.Connection[Any]) -> str:
+def runner_db_url(db_conn: psycopg.Connection) -> str:
     url = settings.data_plane.db_url
     assert_test_db_url(url, context="real agent exec fixture")
     password = "impersonation-test-runner-password"  # noqa: S105

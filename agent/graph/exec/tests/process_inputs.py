@@ -4,7 +4,6 @@ import sys
 from collections.abc import Awaitable, Mapping, Sequence
 from dataclasses import dataclass, replace
 from pathlib import Path
-from typing import Any
 
 from langgraph.runtime import Runtime
 from psycopg_pool import AsyncConnectionPool
@@ -101,8 +100,22 @@ def live_parent_facts() -> ParentFacts:
 # meiva:note
 # This process as a spawning parent, minus the editable-install guard: whether the machine's
 # checkout records are healthy is the guard's own tests' subject, not a real child's.
-def real_parent(**changes: Any) -> ParentFacts:
-    return replace(live_parent_facts(), **{"source_root": None, **changes})
+def real_parent(
+    *,
+    environ: Mapping[str, str] | None = None,
+    cwd: Path | None = None,
+    executable: str | None = None,
+    source_root: Path | None = None,
+    editable_roots: tuple[Path, ...] | None = None,
+) -> ParentFacts:
+    facts = live_parent_facts()
+    return ParentFacts(
+        environ=facts.environ if environ is None else environ,
+        cwd=facts.cwd if cwd is None else cwd,
+        executable=facts.executable if executable is None else executable,
+        source_root=source_root,
+        editable_roots=facts.editable_roots if editable_roots is None else editable_roots,
+    )
 
 
 # meiva:note
@@ -112,7 +125,7 @@ def real_parent(**changes: Any) -> ParentFacts:
 def exec_runtime(
     *,
     database_gate: ProcessDbGate,
-    ops_pool: AsyncConnectionPool[Any] | None = None,
+    ops_pool: AsyncConnectionPool | None = None,
     hosted_resources: HostedTurnResources | None = None,
     event_publisher: AgentEventPublisher | None = None,
     agent: AgentSlices | None = None,
