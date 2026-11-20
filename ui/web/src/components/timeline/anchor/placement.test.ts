@@ -221,6 +221,18 @@ describe("memory place", () => {
     expect(fx.place).toHaveBeenCalledWith(at("40.0", -40), { hold: false, sendReserve: false });
   });
 
+  it("bounds the wait from the first pass that could not place the row, even behind another older read", () => {
+    const { config } = sessionWith("2.0");
+    const machine = machineFor(null, config);
+    const fx = effects();
+    machine.step(inputs({ reloadRestore: config, items: rows(30, 45), hasMoreOlder: true, loadingOlder: true, now: 1_000 }), fx);
+    expect(fx.loadOlder).not.toHaveBeenCalled();
+    expect(machine.snapshot().searching).toBe(true);
+    machine.step(inputs({ reloadRestore: config, items: rows(30, 45), hasMoreOlder: true, loadingOlder: true, now: 1_000 + BOUNDS.timeoutMs }), fx);
+    expect(fx.place).toHaveBeenCalledWith(TAIL, { hold: false, sendReserve: false });
+    expect(fx.dropSessionPlace).toHaveBeenCalled();
+  });
+
   it("falls back to the tail without touching the reload bookmark when the row is gone", () => {
     const { config, session } = sessionWith("2.0");
     const machine = machineFor(place("99.0"), config);

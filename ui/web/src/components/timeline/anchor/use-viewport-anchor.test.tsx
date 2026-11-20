@@ -173,6 +173,31 @@ describe("the viewport anchor writer", () => {
     expect(view.top()).toBe(view.naturalEnd());
   });
 
+  it("keeps a follower following through a sub-zone twitch or nudge", () => {
+    const view = harness(ids(1, 20));
+    view.place(TAIL);
+    act(() => { view.viewport().dispatchEvent(new WheelEvent("wheel", { deltaY: -1, bubbles: true })); });
+    view.scrollTo(view.naturalEnd() - 2);
+    expect(view.current()).toEqual(TAIL);
+    view.scrollTo(view.naturalEnd() - 20);
+    expect(view.current()).toEqual(TAIL);
+    view.rows(ids(1, 22));
+    expect(view.top()).toBe(view.naturalEnd());
+  });
+
+  it("keeps the row under a held finger in place when older rows land above it", () => {
+    const view = harness(ids(10, 30));
+    view.place(TAIL);
+    view.scrollTo(1000);
+    view.touchStart();
+    view.scrollTo(900);
+    const row = view.rowTop("15");
+    view.rows([...ids(1, 9), ...ids(10, 30)]);
+    expect(view.rowTop("15")).toBe(row);
+    view.touchEnd();
+    expect(view.rowTop("15")).toBe(row);
+  });
+
   it("does nothing while a touch is held, and reads the place where the finger lifts", () => {
     const view = harness(ids(1, 20));
     view.place(TAIL);

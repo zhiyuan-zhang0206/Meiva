@@ -61,14 +61,13 @@ interface Search {
   // not rows streaming in at the tail meanwhile.
   baseline: string;
   sawLoading: boolean;
-  startedAt: number;
 }
 
 type Goal =
   | { kind: "settings" }
   | { kind: "first"; readySince?: number }
   | { kind: "tail" }
-  | { kind: "row"; place: SavedPlace; fromSession: boolean; search: Search | null }
+  | { kind: "row"; place: SavedPlace; fromSession: boolean; search: Search | null; waitingSince?: number }
   | { kind: "placed" };
 
 export interface PlacementSnapshot {
@@ -211,6 +210,13 @@ export class PlacementMachine {
           return false;
         }
         if (loading) return false;
+        // meiva:note
+        // The time bound runs from the first pass that could not place the row, also while another
+        // older read is still in flight and the search has not begun.
+        if (goal.waitingSince === undefined) {
+          this.goal = { ...goal, waitingSince: inputs.now };
+          return true;
+        }
         const oldest = findOldestTimelineCursor(items)?.item_id ?? null;
         const search = goal.search;
         const giveUp = () => {
@@ -219,7 +225,7 @@ export class PlacementMachine {
           this.settle(TAIL, { hold: false, sendReserve: false }, effects);
           return false;
         };
-        if (search && inputs.now - search.startedAt >= this.bounds.timeoutMs) return giveUp();
+        if (inputs.now - goal.waitingSince >= this.bounds.timeoutMs) return giveUp();
         if (search?.requested === oldest) {
           if (inputs.loadingOlder) {
             if (!search.sawLoading) this.goal = { ...goal, search: { ...search, sawLoading: true } };
@@ -235,7 +241,7 @@ export class PlacementMachine {
         const prepended = baseline === null ? 0 : Math.max(0, items.findIndex((item) => item.item_id === baseline));
         const budget = pages < this.bounds.maxPages && prepended < this.bounds.maxItems;
         if (!budget || !inputs.hasMoreOlder || !inputs.canLoadOlder || oldest === null || baseline === null) return giveUp();
-        this.goal = { ...goal, search: { pages: pages + 1, requested: oldest, baseline, sawLoading: false, startedAt: search?.startedAt ?? inputs.now } };
+        this.goal = { ...goal, search: { pages: pages + 1, requested: oldest, baseline, sawLoading: false } };
         effects.loadOlder();
         return false;
       }

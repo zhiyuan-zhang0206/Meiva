@@ -175,7 +175,12 @@ export function useViewportAnchor({
       return;
     }
     let anchor = anchorRef.current;
-    if (!vp || !anchor || touchingRef.current || rideRef.current) {
+    // meiva:note
+    // While a finger is down it owns the position: the tail is not pinned under it. A row anchor still
+    // takes the finger's movement as the reader's and compensates only rows changing above it (an
+    // older page landing mid-drag), so content never jumps under the finger.
+    // meiva:link ui/web/src/docs/frontend-components/timeline-view/sticky-scroll.md
+    if (!vp || !anchor || rideRef.current || (touchingRef.current && anchor.kind === "tail")) {
       if (vp) refreshEnd(vp);
       return;
     }
@@ -247,7 +252,15 @@ export function useViewportAnchor({
     const natural = naturalEnd(vp);
     const inReserve = reserveHeight() > 0 && vp.scrollTop > natural + 0.5;
     const distance = natural - vp.scrollTop;
-    if (!inReserve && (distance <= 1 || (towardEnd && distance <= bottomZone(vp.clientHeight, latest.current.thresholds)))) {
+    // meiva:note
+    // Inside the bottom zone a follower keeps following: a resting-finger twitch, a sub-zone nudge or
+    // an iOS bounce does not release the tail (a deliberate wheel notch already did, before its scroll
+    // event). A reader who is not following reaches the tail only by moving down into the zone, or
+    // by reaching the end.
+    // meiva:link ui/web/src/docs/frontend-components/timeline-view/sticky-scroll.md
+    const zone = distance <= bottomZone(vp.clientHeight, latest.current.thresholds);
+    const following = anchorRef.current?.kind === "tail";
+    if (!inReserve && (distance <= 1 || (zone && (following || towardEnd)))) {
       freeRef.current = false;
       setAnchor(TAIL, "reader");
       return;
@@ -330,7 +343,14 @@ export function useViewportAnchor({
       // meiva:link ui/web/src/docs/frontend-components/timeline-view/send-anchor.md
       if (up && top <= naturalEnd(vp) + 0.5) releaseReserves(vp);
       towardEndRef.current = !up;
-      if (!touchingRef.current) derive(vp, !up);
+      // meiva:note
+      // Under a finger the movement stays unattributed: the writer folds it into the row anchor's
+      // offset (keeping rows that change above in place) and the release reads the place back.
+      if (touchingRef.current) {
+        refreshEnd(vp);
+        return;
+      }
+      derive(vp, !up);
       lastWrittenRef.current = vp.scrollTop;
       refreshEnd(vp);
     };
