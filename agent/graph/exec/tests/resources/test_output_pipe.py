@@ -1,18 +1,29 @@
 import asyncio
 import os
-from types import SimpleNamespace
-from typing import Any
+from dataclasses import dataclass
+from typing import IO
 
 import pytest
 
-from agent.graph.exec._output_pipe import ExecOutputPipe
+from agent.graph.exec._output_pipe import ExecOutputPipe, OutputSink
 from agent.graph.exec._stream import StreamingTextIO
 from base.clock import SYSTEM_TIMERS
 
 
-def pipe(stream: Any = None) -> tuple[ExecOutputPipe, int]:
+def text_of(reader: ExecOutputPipe) -> StreamingTextIO:
+    stream = reader.stream
+    assert isinstance(stream, StreamingTextIO)
+    return stream
+
+
+@dataclass(frozen=True)
+class _Process:
+    stdout: IO[bytes] | None
+
+
+def pipe(stream: OutputSink | None = None) -> tuple[ExecOutputPipe, int]:
     source, destination = os.pipe()
-    process: Any = SimpleNamespace(stdout=os.fdopen(source, "rb"))
+    process = _Process(stdout=os.fdopen(source, "rb"))
     return ExecOutputPipe(
         process, stream or StreamingTextIO(max_chars=64), timers=SYSTEM_TIMERS
     ), destination
@@ -23,14 +34,14 @@ async def test_partial_output_streams_before_writer_eof() -> None:
     try:
         os.write(destination, b"partial before exit\xff")
         reader.pump()
-        assert reader.stream.getvalue() == "partial before exit\ufffd"
+        assert text_of(reader).getvalue() == "partial before exit\ufffd"
         assert not reader.closed
         os.write(destination, b" final tail")
         os.close(destination)
         destination = -1
         await reader.finish(1)
         assert reader.closed
-        assert reader.stream.getvalue() == "partial before exit\ufffd final tail"
+        assert text_of(reader).getvalue() == "partial before exit\ufffd final tail"
     finally:
         reader.close()
         if destination != -1:
@@ -43,10 +54,10 @@ async def test_readiness_drains_output_between_invocation_poll_beats() -> None:
     try:
         os.write(destination, b"ready")
         for _ in range(10):
-            if reader.stream.getvalue():
+            if text_of(reader).getvalue():
                 break
             await asyncio.sleep(0)
-        assert reader.stream.getvalue() == "ready"
+        assert text_of(reader).getvalue() == "ready"
         assert not reader.closed
     finally:
         os.close(destination)
@@ -57,7 +68,7 @@ async def test_readiness_error_is_returned_to_the_actual_tail_owner() -> None:
     original = RuntimeError("stream failed")
 
     class FailingStream:
-        def write(self, s: str) -> int:
+        def write(self, s: str, /) -> int:
             raise original
 
     reader, destination = pipe(FailingStream())
@@ -89,7 +100,7 @@ async def test_tail_timeout_keeps_actual_pipe_unresolved_until_late_eof() -> Non
         destination = -1
         await reader.finish(1)
         assert reader.closed
-        assert reader.stream.getvalue() == "late"
+        assert text_of(reader).getvalue() == "late"
     finally:
         reader.close()
         if destination != -1:
@@ -103,7 +114,7 @@ def test_emergency_tail_does_not_need_an_event_loop() -> None:
     try:
         reader.finish_now(1)
         assert reader.closed
-        assert reader.stream.getvalue() == "tail"
+        assert text_of(reader).getvalue() == "tail"
     finally:
         reader.close()
 
@@ -115,15 +126,15 @@ async def test_output_cap_does_not_prevent_eof_settlement() -> None:
     try:
         await reader.finish(1)
         assert reader.closed
-        assert reader.stream.getvalue().startswith("a" * 32)
-        assert reader.stream.getvalue().endswith("a" * 32)
-        assert "960 chars dropped" in reader.stream.getvalue()
-        assert reader.stream.cap() is not None
+        assert text_of(reader).getvalue().startswith("a" * 32)
+        assert text_of(reader).getvalue().endswith("a" * 32)
+        assert "960 chars dropped" in text_of(reader).getvalue()
+        assert text_of(reader).cap() is not None
     finally:
         reader.close()
 
 
 def test_missing_pipe_fails_at_launch_boundary() -> None:
-    process: Any = SimpleNamespace(stdout=None)
+    process = _Process(stdout=None)
     with pytest.raises(RuntimeError, match="no output pipe"):
         ExecOutputPipe(process, StreamingTextIO(max_chars=64), timers=SYSTEM_TIMERS)

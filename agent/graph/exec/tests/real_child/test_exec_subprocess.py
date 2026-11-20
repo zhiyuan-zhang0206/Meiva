@@ -7,10 +7,9 @@ import re
 import sys
 import threading
 import time
-from collections.abc import Callable, Coroutine
+from collections.abc import Callable, Coroutine, Mapping
 from dataclasses import replace
 from pathlib import Path
-from typing import Any
 from uuid import UUID
 
 import psutil
@@ -71,7 +70,7 @@ async def run_exec_child(
     *,
     timeout: float = 30.0,
     cancel_after: float | None = None,
-    state: dict[str, Any] | None = None,
+    state: Mapping[str, object] | None = None,
     chunk_publisher: ExecOutputChunkPublisher | None = None,
     parent: ParentFacts | None = None,
     timers: Timers | None = None,

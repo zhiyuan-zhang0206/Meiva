@@ -7,7 +7,6 @@ import asyncio
 from collections.abc import Awaitable, Callable
 from contextlib import asynccontextmanager
 from pathlib import Path
-from typing import Any
 from uuid import UUID
 
 import pytest
@@ -51,7 +50,7 @@ async def test_run_in_subprocess_routes_through_exec_host_socket_and_streams_out
 ) -> None:
     exec_dir = tmp_path / "run" / "exec"
     sock_path = exec_host_socket(exec_dir)
-    received_requests: list[dict[str, Any]] = []
+    received_requests: list[dict[str, object]] = []
     seen_code: list[str] = []
 
     async def handle(reader: asyncio.StreamReader, writer: asyncio.StreamWriter) -> None:
@@ -141,7 +140,7 @@ async def test_run_in_subprocess_forwards_cancel_over_exec_host_socket(tmp_path:
     exec_dir = tmp_path / "run" / "exec"
     sock_path = exec_host_socket(exec_dir)
     started = asyncio.Event()
-    received_cancel: list[dict[str, Any]] = []
+    received_cancel: list[dict[str, object]] = []
 
     async def handle(reader: asyncio.StreamReader, writer: asyncio.StreamWriter) -> None:
         try:

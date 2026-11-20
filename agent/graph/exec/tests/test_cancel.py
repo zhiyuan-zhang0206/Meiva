@@ -134,7 +134,7 @@ async def test_exec_node_cancel_event_returns_cancelled_command(
     assert "[cancelled by user]" in content
     assert "partial work" in content
     assert cast(dict[str, object], result.update)["halted"] is True
-    roles = [event["role"] for event in await live_events.events()]
+    roles = await live_events.roles()
     assert [role for role in roles if role in {"exec_start", "cancelled", "exec_output"}] == [
         "exec_start",
         "cancelled",
@@ -255,7 +255,7 @@ async def test_exec_node_compaction_writes_nothing_back(
     update = cast(dict[str, object], result.update)
     assert update["halted"] is True
     assert update["messages"] == []
-    roles = [event["role"] for event in await live_events.events()]
+    roles = await live_events.roles()
     assert "exec_start" in roles
     assert "exec_output" not in roles
 
@@ -296,10 +296,8 @@ async def test_exec_node_ordinary_exception_logs_exec_failed_at_info(
     )
 
     assert cast(dict[str, object], result.update)["halted"] is False
-    failed = [r for r in loguru_records if r["extra"].get("event") == "exec_failed"]
-    assert len(failed) == 1
-    assert failed[0]["level"].name == "INFO"
-    assert "ValueError" in failed[0]["message"]
+    assert len(loguru_records.extras(event="exec_failed")) == 1
+    assert len(loguru_records.extras(event="exec_failed", level="INFO", message="ValueError")) == 1
 
 
 _TOOL_CALL_AIMESSAGE = AIMessage(

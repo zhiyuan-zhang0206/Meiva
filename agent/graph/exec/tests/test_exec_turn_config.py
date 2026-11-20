@@ -3,7 +3,6 @@ import json
 import random
 from dataclasses import replace
 from pathlib import Path
-from typing import Any, cast
 
 import pytest
 from langchain_core.messages import AIMessage, ToolMessage
@@ -26,6 +25,8 @@ from base.config.tests.configuration import defaults
 from base.db import Database
 from base.events.live.bus import EventBus
 from base.events.live.tests.live_capture import idle_publisher
+from base.host.boundary.json_values import is_object_dict, is_object_list
+from base.host.boundary.untyped import object_of
 from base.host.env.agent_env import AGENT_BIRTH_CONFIG_ENV, AGENT_CONFIG_OVERLAY_ENV
 from base.host.env.agent_slices import AgentSlices
 from base.lm.catalog import ModelCatalog
@@ -116,7 +117,9 @@ async def test_concurrent_turn_configs_reach_real_children_without_cross_talk(
         )
         assert isinstance(result, ExecDone), result
         line = next(line for line in result.output.splitlines() if line.startswith("CONFIG="))
-        return json.loads(line.removeprefix("CONFIG="))
+        config = object_of(json.loads, line.removeprefix("CONFIG="))
+        assert is_object_list(config)
+        return config
 
     tasks: list[asyncio.Task[list[object]]] = []
     for agent_id, model, timeout, marker in (
@@ -191,9 +194,12 @@ async def _execution_message(context: MeivaContext, code: str) -> ToolMessage:
         {"configurable": {"thread_id": str(agent_id)}},
         process=SubprocessExecProcess(live_parent_facts(), rng=_rng()),
     )
-    update = cast(dict[str, Any], command.update)
+    update: object = command.update
+    assert is_object_dict(update)
     assert update["halted"] is False
-    message = update["messages"][0]
+    messages = update["messages"]
+    assert is_object_list(messages)
+    message = messages[0]
     assert isinstance(message, ToolMessage)
     return message
 
