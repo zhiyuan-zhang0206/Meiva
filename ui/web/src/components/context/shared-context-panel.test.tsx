@@ -103,11 +103,16 @@ afterEach(() => {
   vi.restoreAllMocks();
 });
 
-it("shows the document as the panel's body without a view switcher", () => {
+// meiva:note
+// The panel's tabs are files (user ruling 2026-11-20): the document is the first one; the inspector
+// stays behind its toggle, never a tab.
+it("shows the document as the first file tab and keeps the inspector out of the tabs", () => {
   renderPanelView();
   expect(screen.getByText("No content")).toBeTruthy();
   expect(screen.queryByTestId("shared-inspector")).toBeNull();
-  expect(screen.queryByRole("tablist")).toBeNull();
+  const tabs = screen.getAllByRole("tab");
+  expect(tabs.map((tab) => tab.textContent)).toEqual(["Shared context"]);
+  expect(tabs[0].getAttribute("aria-selected")).toBe("true");
 });
 
 it("renders WorkspaceFileView when activeFile is set for this agent", async () => {

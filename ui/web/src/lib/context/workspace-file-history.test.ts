@@ -20,7 +20,7 @@ function mount(page: FakeBrowser, activeId: number | null = 7) {
 }
 
 afterEach(() => {
-  useWorkspaceFileStore.setState({ activeFile: null, navigator: null });
+  useWorkspaceFileStore.setState({ activeFile: null, navigator: null, tabs: {}, recent: [], maximized: false });
 });
 
 describe("workspace file history", () => {
@@ -89,5 +89,34 @@ describe("workspace file history", () => {
     expect(page.actions.backs).toBe(0);
     expect(store().activeFile).toBeNull();
     expect(page.href()).toBe(`${ORIGIN}/?agent_id=7`);
+  });
+
+  // meiva:note
+  // Every file opened in a conversation is a tab there; selecting one is an entry like opening it,
+  // and closing the one on show moves to its neighbour in place.
+  it("keeps opened files as tabs, selects them as entries and closes to the neighbour in place", () => {
+    const page = fakeBrowser({ href: `${ORIGIN}/?agent_id=7` });
+    mount(page);
+    act(() => store().openFile({ agentId: 7, path: "/w/a.py" }));
+    act(() => store().openFile({ agentId: 7, path: "/w/b.py" }));
+    act(() => store().openFile({ agentId: 7, path: "/w/c.py" }));
+    expect(store().tabs[7].map((tab) => tab.path)).toEqual(["/w/a.py", "/w/b.py", "/w/c.py"]);
+    expect(store().recent.map((tab) => tab.path)).toEqual(["/w/c.py", "/w/b.py", "/w/a.py"]);
+
+    act(() => store().selectTab(store().tabs[7][0]));
+    expect(store().activeFile?.path).toBe("/w/a.py");
+    expect(page.actions.pushed).toHaveLength(4);
+
+    act(() => store().closeTab(store().tabs[7][0]));
+    expect(store().activeFile?.path).toBe("/w/b.py");
+    expect(page.actions.pushed).toHaveLength(4);
+    expect(page.href()).toContain("view=/w/b.py");
+
+    act(() => store().selectTab(null));
+    expect(store().activeFile).toBeNull();
+    expect(store().tabs[7]).toHaveLength(2);
+
+    act(() => page.traverse(`${ORIGIN}/?agent_id=7&view=/w/d.py&view_agent=7`));
+    expect(store().tabs[7].map((tab) => tab.path)).toEqual(["/w/b.py", "/w/c.py", "/w/d.py"]);
   });
 });

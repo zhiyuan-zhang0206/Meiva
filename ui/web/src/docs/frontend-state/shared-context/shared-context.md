@@ -67,6 +67,24 @@ CSP without script permission. The workspace viewer renders only Markdown, image
 and videos; HTML and HTM open as source code, and other binary files offer download.
 Each file the viewer opens is a browser history entry, so Back and Forward move
 between viewed files ([panel navigation history](../navigation-history.md)).
+
+The panel is a tabbed file viewer (user ruling 2026-11-20; decision record
+`docs/decisions/frontend/documents/2026-11-21-shared-context-file-viewer.md`):
+
+- **Tabs.** The conversation's to-user document is the first, permanent tab ("Shared context").
+  Every file opened in the conversation becomes a closable tab, and the tab list lives for the
+  browser tab's lifetime.
+- **Quick open** (search button):
+  - with nothing typed, it lists recently opened files;
+  - typed text searches file names in the workspace the tree shows (`/files/search`);
+  - typed text that reads as a path opens as is.
+- **File tree** (folder button). It lists the conversation's workspace (`/files/list`, each folder
+  read when first opened). Typing another agent's number browses that agent's workspace, with the
+  read access links already have.
+- **Fill the page.** The viewer can take the conversation's place on desktop; the sidebar stays.
+- **What renders in place:** Markdown, images, video, audio, PDF (the browser's viewer), and source
+  code with line ranges. Other binary files offer a download.
+- **No type icons.** File names show without a type icon.
 Normal Markdown links are directly clickable in conversation messages and `to_user.md`;
 explicit `.meiva/workspaces/<id>/...` references keep the viewer attached to the
 active conversation's panel while routing content/raw reads and nested relative

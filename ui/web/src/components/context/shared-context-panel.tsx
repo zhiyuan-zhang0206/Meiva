@@ -1,11 +1,14 @@
 "use client";
 
 import { ArrowLeft, ScanSearch } from "lucide-react";
-import { FLEX, FLEX_1, FLEX_COL, MIN_H_0 } from "@/lib/layout/layout";
+import { FLEX, FLEX_1, FLEX_COL, MIN_H_0, MIN_W_0 } from "@/lib/layout/layout";
 import { useTranslations } from "next-intl";
-import { useCallback, useEffect, useRef } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 
 import { InspectorPanel } from "@/components/inspector/inspector-panel";
+import { FileTabs } from "./file-tabs";
+import { FileTree } from "./file-tree";
+import { QuickOpen } from "./quick-open";
 import { ToUserDocumentView } from "./to-user-document";
 import { WorkspaceFileView } from "./workspace-file-view";
 import { useWorkspaceFileStore } from "@/lib/context/workspace-file-store";
@@ -39,6 +42,13 @@ export function SharedContextPanel({ agentId, document, mobile, onClose, onColla
   useEffect(() => {
     if (!inspecting && documentScroll.current) documentScroll.current.scrollTop = readingPosition.current;
   }, [inspecting]);
+  const [quickOpen, setQuickOpen] = useState(false);
+  const [treeOpen, setTreeOpen] = useState(false);
+  // meiva:note
+  // The tree browses another agent's workspace only for the conversation that chose it.
+  const [workspaceChoice, setWorkspaceChoice] = useState<{ conversation: number; workspace: number } | null>(null);
+  const workspaceAgentId = workspaceChoice?.conversation === agentId ? workspaceChoice.workspace : agentId;
+  const setWorkspaceAgentId = (workspace: number) => setWorkspaceChoice({ conversation: agentId, workspace });
   return (
     <aside
       className={cn(
@@ -66,6 +76,23 @@ export function SharedContextPanel({ agentId, document, mobile, onClose, onColla
           <ScanSearch className="size-3.5" />
         </button>
       </header>}
+      {inspecting ? null : (
+        <FileTabs
+          agentId={agentId}
+          mobile={mobile}
+          treeOpen={treeOpen}
+          onToggleTree={() => setTreeOpen((open) => !open)}
+          onQuickOpen={() => setQuickOpen(true)}
+        />
+      )}
+      {quickOpen && !inspecting ? (
+        <QuickOpen agentId={agentId} workspaceAgentId={workspaceAgentId} onClose={() => setQuickOpen(false)} />
+      ) : null}
+      <div className={cn(MIN_H_0, FLEX_1, FLEX)}>
+      {treeOpen && !inspecting ? (
+        <FileTree agentId={agentId} workspaceAgentId={workspaceAgentId} onWorkspaceChange={setWorkspaceAgentId} />
+      ) : null}
+      <div className={cn(MIN_W_0, MIN_H_0, FLEX_1, FLEX, FLEX_COL)}>
       {isViewingFile && !inspecting ? (
         <WorkspaceFileView
           key={`${agentId}:${activeFile.path}:${activeFile.lineRange ?? ""}`}
@@ -98,6 +125,8 @@ export function SharedContextPanel({ agentId, document, mobile, onClose, onColla
           <InspectorPanel agentId={agentId} />
         </div>
       )}
+      </div>
+      </div>
     </aside>
   );
 }

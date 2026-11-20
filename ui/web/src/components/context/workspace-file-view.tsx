@@ -5,13 +5,13 @@
 "use client";
 
 import { useQuery } from "@tanstack/react-query";
-import { ArrowLeft, Download, FileCode, FileText, Film, House, ImageIcon, PanelRight, RefreshCw, ScanSearch } from "lucide-react";
+import { ArrowLeft, Download, House, PanelRight, RefreshCw, ScanSearch } from "lucide-react";
 import { useTranslations } from "next-intl";
 import { Highlight, type PrismTheme } from "prism-react-renderer";
 import { useEffect, useMemo, useRef } from "react";
 
 import { CopyButton } from "@/components/content/copy-button";
-import { isImageExtension, isVideoExtension, parseLineRange } from "@/components/content/file-path-utils";
+import { isAudioExtension, isImageExtension, isVideoExtension, parseLineRange } from "@/components/content/file-path-utils";
 import { ChatMarkdown } from "@/components/content/markdown";
 import {
   markdownImageUrl,
@@ -126,6 +126,8 @@ export function WorkspaceFileView({
   const isMarkdown = ext === ".md" || ext === ".markdown";
   const isImage = isImageExtension(ext);
   const isVideo = isVideoExtension(ext);
+  const isAudio = isAudioExtension(ext);
+  const isPdf = ext === ".pdf";
   const rawUrl = `${API_BASE}/api/agents/${ownerAgentId}/files/raw?path=${encodeURIComponent(data?.path ?? requestPath)}`;
 
   const language = EXTENSION_LANGUAGE_MAP[ext] || "text";
@@ -162,15 +164,6 @@ export function WorkspaceFileView({
         </button>
 
         <div className={cn("items-center gap-1.5 font-mono text-foreground font-medium", FLEX)}>
-          {isImage ? (
-            <ImageIcon className="size-3.5 opacity-70" />
-          ) : isVideo ? (
-            <Film className="size-3.5 opacity-70" />
-          ) : isMarkdown ? (
-            <FileText className="size-3.5 opacity-70" />
-          ) : (
-            <FileCode className="size-3.5 opacity-70" />
-          )}
           <span className="truncate max-w-[200px]" title={target.path}>
             {data?.name ?? target.path.split("/").pop()}
           </span>
@@ -288,6 +281,16 @@ export function WorkspaceFileView({
               <track kind="captions" />
             </video>
           </div>
+        ) : isAudio ? (
+          <div className={cn("items-center justify-center p-6", FLEX, FLEX_COL)}>
+            <audio controls preload="metadata" src={rawUrl} data-testid="workspace-audio-player" aria-label={t("filesAudio")} className="w-full max-w-xl">
+              <track kind="captions" />
+            </audio>
+          </div>
+        ) : isPdf ? (
+          // meiva:note
+          // The browser's own PDF viewer, in a frame the gateway serves under its passive policy.
+          <iframe src={rawUrl} title={data.name} data-testid="workspace-pdf" className="h-[calc(100vh-8rem)] w-full border-0" />
         ) : data.binary ? (
           <div className={cn("items-center justify-center p-8 gap-3 text-center", FLEX, FLEX_COL)}>
             <div className="text-sm font-medium">{data.name}</div>

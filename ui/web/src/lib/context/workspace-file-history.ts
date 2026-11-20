@@ -24,8 +24,8 @@ export function useWorkspaceFileHistory(activeId: number | null): void {
       const where = navigation.location();
       return where === null ? null : readView(new URL(where.href));
     };
+    useWorkspaceFileStore.getState().restore(read());
     useWorkspaceFileStore.setState({
-      activeFile: read(),
       navigator: {
         show(target, mode) {
           const where = navigation.location();
@@ -41,7 +41,7 @@ export function useWorkspaceFileHistory(activeId: number | null): void {
         },
       },
     });
-    const stop = navigation.onTraverse(() => useWorkspaceFileStore.setState({ activeFile: read() }));
+    const stop = navigation.onTraverse(() => useWorkspaceFileStore.getState().restore(read()));
     return () => {
       stop();
       useWorkspaceFileStore.setState({ navigator: null });

@@ -192,6 +192,9 @@ export function HomePageView(props: HomePageProps) {
   // meiva:link ui/web/src/docs/frontend-state/shared-context/shared-context.md
   useWorkspaceFileHistory(activeId);
   const activeWorkspaceFile = useWorkspaceFileStore((s) => s.activeFile);
+  // meiva:note
+  // The file viewer fills the page in place of the conversation (desktop only); the sidebar stays.
+  const viewerMaximized = useWorkspaceFileStore((s) => s.maximized);
   const showContext = isLarge
     ? activeId != null && (contextPanel.open || inspector.open || activeWorkspaceFile != null)
     : mobileContextOpen || inspector.open || activeWorkspaceFile != null;
@@ -295,8 +298,8 @@ export function HomePageView(props: HomePageProps) {
             isLarge={isLarge}
             sidebarCollapsed={sidebar.collapsed}
             sidebar={sidebarColumn}
-            main={mainColumn}
-            inspector={inspectorColumn}
+            main={isLarge && viewerMaximized && inspectorColumn !== null ? inspectorColumn : mainColumn}
+            inspector={isLarge && viewerMaximized && inspectorColumn !== null ? null : inspectorColumn}
           />
         </div>
       </div>
