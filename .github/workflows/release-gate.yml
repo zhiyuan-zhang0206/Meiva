@@ -630,12 +630,16 @@ jobs:
         with:
           ref: ${{ needs.precheck.outputs.sha }}
           fetch-depth: 0
-          # GITHUB_TOKEN can never carry the workflows permission, and a release commit
-          # that touches .github/workflows/ cannot be tagged with it.
-          token: ${{ secrets.RELEASE_PUSH_TOKEN }}
+          # The mint step runs the certified commit's own certify.py, so no credential
+          # stays in .git/config; each step that talks to the remote passes one explicitly.
+          persist-credentials: false
 
       - name: Fetch release and channel tags
-        run: git fetch --tags --force origin
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          auth="$(printf x-access-token:%s "$GH_TOKEN" | base64 -w0)"
+          git -c "http.https://github.com/.extraheader=AUTHORIZATION: basic $auth" fetch --tags --force origin
 
       - name: Record the verification source
         env:
@@ -698,12 +702,17 @@ jobs:
           SHA: ${{ steps.mint.outputs.sha }}
           TAG_ACTION: ${{ steps.mint.outputs.tag_action }}
           ADVANCE_LATEST: ${{ steps.mint.outputs.advance_latest }}
+          # GITHUB_TOKEN can never carry the workflows permission, and a release commit
+          # that touches .github/workflows/ cannot be tagged with it.
+          PUSH_TOKEN: ${{ secrets.RELEASE_PUSH_TOKEN }}
         run: |
+          auth="$(printf x-access-token:%s "$PUSH_TOKEN" | base64 -w0)"
+          push() { git -c "http.https://github.com/.extraheader=AUTHORIZATION: basic $auth" push "$@"; }
           if [ "$TAG_ACTION" = "create" ]; then
-            git push origin "refs/tags/$VERSION"
+            push origin "refs/tags/$VERSION"
           fi
           if [ "$ADVANCE_LATEST" = "true" ]; then
-            git push --force origin refs/tags/channel/latest:refs/tags/channel/latest
+            push --force origin refs/tags/channel/latest:refs/tags/channel/latest
           fi
           echo "Certified commit \`$SHA\` as \`$VERSION\`." >> "$GITHUB_STEP_SUMMARY"
 
