@@ -95,9 +95,11 @@ in `FileSessionRegistry`.
   the agent wakes on it through this same path.
 - Retirement is asynchronous (`HarnessSessions.retire`), and the next turn awaits
   `join` before starting a replacement CLI. Cancelling a waiter does not cancel the
-  close; close errors remain fenced across later joins, and observed process residue
-  raises after the settle window. An unobserved process tree logs
-  `harness_close_unobserved`.
+  close. Observed process residue raises after the settle window, and that fence is
+  re-checked on every later join: it refuses while one of the residue pids is alive
+  and lifts (`harness_close_residue_gone`) once none is. Any other close error stays
+  fenced across later joins. Each refusal is a fresh `HarnessCloseFenceError` caused
+  by the stored error. An unobserved process tree logs `harness_close_unobserved`.
 - Missing SDKs or refused submissions raise `HarnessSetupError` and settle on the
   same fatal-stream path.
 - A foreground interrupt calls `interrupt` via `subscribe_interrupt` and logs the

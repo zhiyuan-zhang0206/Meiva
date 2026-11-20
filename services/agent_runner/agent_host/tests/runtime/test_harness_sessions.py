@@ -11,8 +11,13 @@ from base.api_contracts.agent_contract import Harness
 from base.clock.tests.fakes import system_clock
 from base.lm.harness import EventSubscription, HarnessInput, Reconciliation, RegistrationStore
 from base.lm.harness.antigravity import AgyTransport, AntigravityConfig
+from base.lm.harness.process import CloseResidueError
 from base.log.tests.log_records import LogRecords
-from services.agent_runner.agent_host.runtime import AgentRuntime, HarnessSessions
+from services.agent_runner.agent_host.runtime import (
+    AgentRuntime,
+    HarnessCloseFenceError,
+    HarnessSessions,
+)
 
 
 class ClosingEngine:
@@ -142,7 +147,9 @@ async def test_cancelled_join_preserves_the_close_and_the_next_admission_fence(
                 await owner.join(1)
                 assert later.closed
             else:
-                assert await replacement is error
+                refused = await replacement
+                assert isinstance(refused, HarnessCloseFenceError)
+                assert refused.__cause__ is error
     finally:
         engine.release.set()
         await owner.aclose()
@@ -166,10 +173,14 @@ async def test_failed_close_keeps_rejecting_joins_without_cancelling_another_age
         with pytest.raises(RuntimeError, match="already has a retiring harness session"):
             owner.retire(1, runtime(failed))
         failed.release.set()
+        refusals: list[HarnessCloseFenceError] = []
         for _ in range(2):
-            with pytest.raises(error_type) as raised:
+            with pytest.raises(HarnessCloseFenceError) as raised:
                 await owner.join(1)
-            assert raised.value is error
+            assert raised.value.__cause__ is error
+            assert raised.value.running is None
+            refusals.append(raised.value)
+        assert refusals[0] is not refusals[1], "each refusal is new, so no traceback grows"
         assert not other.cancelled
         other.release.set()
         await owner.join(2)
@@ -184,9 +195,69 @@ async def test_failed_close_keeps_rejecting_joins_without_cancelling_another_age
     assert "1 session close(s) raised" in summary["message"]
     assert "CLI transport did not close" in summary["message"]
     assert owner.failures == [error]
-    with pytest.raises(error_type) as raised:
+    with pytest.raises(HarnessCloseFenceError) as raised:
         await owner.join(1)
-    assert raised.value is error
+    assert raised.value.__cause__ is error
+
+
+class ResidueProbe:
+    def __init__(self, *alive: int) -> None:
+        self.alive = set(alive)
+
+    def descendants(self, pid: int) -> dict[int, str]:
+        del pid
+        return {}
+
+    def tool_processes(self, pid: int) -> dict[int, str]:
+        del pid
+        return {}
+
+    def is_alive(self, pid: int) -> bool:
+        return pid in self.alive
+
+    def kill(self, pid: int, sig: int) -> None:
+        del sig
+        self.alive.discard(pid)
+
+
+# meiva:note
+# The defect of task #7074: a close that left a process running fenced the agent for the life of
+# the host, so every later wake crashed on the same stored error until the agent was reaped. The
+# fence guards one thing, a previous CLI that may still hold the transcript; it refuses while a
+# residue pid is alive and admits the next session once none is.
+async def test_a_residue_fence_lifts_once_the_residue_has_exited(
+    tmp_path: Path, loguru_records: LogRecords
+) -> None:
+    probe = ResidueProbe(101, 102)
+    residue = CloseResidueError("codex", 7, (101, 102), probe)
+    engine = ClosingEngine(residue)
+    engine.release.set()
+    owner = HarnessSessions(
+        RegistrationStore(tmp_path), record_exit=ExitRecorder(), clock=system_clock()
+    )
+    await owner.start()
+    try:
+        owner.retire(7, runtime(engine))
+        with pytest.raises(HarnessCloseFenceError) as raised:
+            await owner.join(7)
+        assert raised.value.running == (101, 102)
+        assert raised.value.__cause__ is residue
+        probe.alive.discard(101)
+        with pytest.raises(HarnessCloseFenceError) as raised:
+            await owner.join(7)
+        assert raised.value.running == (102,)
+        probe.alive.discard(102)
+        await owner.join(7)
+        assert len(loguru_records.events("harness_close_residue_gone")) == 1
+        await owner.join(7)
+        later = ClosingEngine()
+        later.release.set()
+        owner.retire(7, runtime(later))
+        await owner.join(7)
+        assert later.closed
+        assert owner.failures == [residue]
+    finally:
+        await owner.aclose()
 
 
 # meiva:note

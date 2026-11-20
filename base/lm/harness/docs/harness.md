@@ -32,9 +32,10 @@ invariants the host relies on:
    falling back to a fresh session;
 8. a faulted or closed session stops being usable: the bridge retires it instead of
    delivering to it again;
-9. `close()` returns only after the session's process tree is gone, or raises when the
-   adapter's settle window still observes residue. An unobservable tree remains
-   explicitly unknown; it is not proof that every descendant exited.
+9. `close()` returns only after the session's process tree is gone, or raises
+   `CloseResidueError` when the adapter's settle window still observes residue; the
+   error names the pids and can be asked again whether any still runs. An unobservable
+   tree remains explicitly unknown; it is not proof that every descendant exited.
 
 ## What an interrupt stops
 

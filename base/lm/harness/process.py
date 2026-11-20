@@ -232,6 +232,27 @@ def watch_tree(probe: ChildProbe, pid: int | None) -> dict[int, str]:
 
 
 # meiva:note
+# A close that left processes running names them, together with the probe that saw them, so whoever
+# fences the next session on that agent can ask again later instead of trusting a snapshot taken at
+# the end of the settle window: the fence holds while one of these pids is alive and lifts once none
+# is (task #7074). A pid the system reused for an unrelated process keeps the fence up; that errs
+# toward refusing a second CLI, never toward admitting one.
+# meiva:link base/lm/harness/docs/harness.md
+class CloseResidueError(RuntimeError):
+    def __init__(
+        self, harness: str, agent_id: int | None, remaining: tuple[int, ...], probe: ChildProbe
+    ) -> None:
+        super().__init__(
+            f"{harness} session for agent {agent_id} left {len(remaining)} process(es) running"
+        )
+        self.remaining = remaining
+        self._probe = probe
+
+    def running(self) -> tuple[int, ...]:
+        return tuple(pid for pid in self.remaining if self._probe.is_alive(pid))
+
+
+# meiva:note
 # Closing a session has to answer the question `interrupt()` answers: is the process
 # tree actually gone? The transport's close asks the CLI to exit and the SDK reaps the
 # CLI itself, but a tool's grandchildren can outlive both — and a session that is
@@ -290,6 +311,4 @@ async def settle_close(
         remaining=len(remaining),
         waited_ms=round(waited_ms, 1),
     )
-    raise RuntimeError(
-        f"{harness} session for agent {agent_id} left {len(remaining)} process(es) running"
-    )
+    raise CloseResidueError(harness, agent_id, tuple(remaining), probe)

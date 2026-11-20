@@ -230,6 +230,7 @@ above (or when its name is unregistered); otherwise it stays in the JSONL mirror
 | `harness_close_settled` | an external harness session closed and none of its observed processes survived | noise | harness, agent_id, waited_ms | — | events | — |
 | `harness_close_unobserved` | an external harness session closed without ever observing its process tree; the close answers unknown, not settled | noise | harness, agent_id | — | events | — |
 | `harness_close_residue` | closing an external harness session left processes running after the settle window | anomaly | harness, agent_id, remaining, waited_ms | — | events | — |
+| `harness_close_residue_gone` | every process a failed harness close left running has exited, so the agent's next session is admitted | noise | — | — | events | — |
 | `harness_close_failed` | closing an external harness session raised | anomaly | — | — | events | — |
 | `harness_close_failures` | external harness session closes raised while the agent host was running; host-level, no agent_id: one count over every hosted agent's closes | anomaly | — | — | events | — |
 | `harness_exit_record_failed` | a harness session closed cleanly but its child exit status could not be written; the agent row keeps what it had and NULL still means never observed | anomaly | — | — | events | — |
