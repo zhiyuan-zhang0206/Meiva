@@ -20,8 +20,9 @@
 # - a status the gateway *chose* to send is still terminal on the first dial.
 #
 # The dials are real: a scripted loopback HTTP server answers them, a bound-but-not-listening
-# socket refuses them, and the retry interval is a few milliseconds so the budget is reached in
-# real time that is still short.
+# socket refuses them. Where a test is about the loop's own waiting (how long it waits, or
+# that it does not wait at all) it reads that off manual timers, not the wall clock of a
+# shared runner; only the restart-hole test needs real time, for the listener to open.
 
 
 from __future__ import annotations
@@ -32,7 +33,10 @@ from collections.abc import Generator
 from contextlib import contextmanager
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
+import pytest
+
 from base.clock import SYSTEM_TIMERS
+from base.clock.tests.manual_timers import ManualTimers
 from base.deploy.progress_timeout import GATEWAY_PREFLIGHT_BUDGET_S, NO_PROGRESS_TIMEOUT_S
 from cli.commands import _repo
 from cli.commands.cluster.tests.gateway_server import access_to
@@ -102,43 +106,47 @@ def test_a_gateway_that_comes_back_inside_the_budget_is_not_declined() -> None:
 # meiva:note
 # The budget must not become a way to survive a gateway that really died — that
 # needs the watchdog's own round, and waiting for it here would turn a legible
-# INCOMPLETE into a slow one. It fails, having spent no more than the budget.
+# INCOMPLETE into a slow one. It fails, having waited no more than the budget.
+#
+# The dials are real, but the budget is read off manual timers: what the loop owes is
+# that its own waiting stops at the deadline, and a wall-clock bound around real dials
+# measured the shared CI runner instead (task #7418: 1.2078 s against a 1.2 s bound).
 def test_a_dead_gateway_still_fails_and_inside_the_bound() -> None:
     from base.host.net.tests.local_http import closed_port_url
 
     budget_s = 0.2
-    started = time.monotonic()
+    timers = ManualTimers()
     url = closed_port_url()
     rc = _repo.probe_gateway_or_die(
         url,
         access=access_to(url),
         budget_s=budget_s,
         retry_interval_s=INTERVAL_S,
-        timers=SYSTEM_TIMERS,
+        timers=timers,
     )
 
     assert rc == 1
-    assert time.monotonic() - started < budget_s + 1.0
+    assert all(0 < wait <= INTERVAL_S for wait in timers.sleeps)
+    assert sum(timers.sleeps) == pytest.approx(budget_s)
 
 
 # meiva:note
 # Every healthy `meiva start` and every healthy self-update runs this. It must be
 # one probe and zero waiting, exactly as before the budget existed.
 def test_a_reachable_gateway_costs_one_dial_and_no_sleep() -> None:
+    timers = ManualTimers()
     with serve({PROBE_PATH: Reply(status=200, body=b"{}")}) as gateway:
-        started = time.monotonic()
         rc = _repo.probe_gateway_or_die(
             gateway.url,
             access=access_to(gateway.url),
             budget_s=BUDGET_S,
             retry_interval_s=10.0,
-            timers=SYSTEM_TIMERS,
+            timers=timers,
         )
-        elapsed = time.monotonic() - started
 
     assert rc == 0
     assert len(gateway.received) == 1
-    assert elapsed < 5.0
+    assert timers.sleeps == []
 
 
 # meiva:note
