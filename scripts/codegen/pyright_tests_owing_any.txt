@@ -7,8 +7,6 @@
 # Add a prefix in the pull request that adds the covering entry. Remove one in a pull request of
 # its own, once its tests are clean: .gitattributes merges this file with merge=union, which keeps a
 # line that either side of a local merge still holds.
-agent/extensions/tests
-agent/execution/tests
 agent/graph/claim/tests
 agent/graph/hooks/tests
 agent/graph/node_log/tests
