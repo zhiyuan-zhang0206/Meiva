@@ -74,7 +74,7 @@ def latest_checkpoint_id(cur: psycopg.Cursor[tuple[object, ...]], agent_id: int)
             break
 
     cur.execute(
-        "SELECT checkpoint_id FROM checkpoints WHERE thread_id = %s "
+        "SELECT checkpoint_id FROM checkpoints WHERE thread_id = %s AND checkpoint_ns = '' "
         "ORDER BY checkpoint_id DESC LIMIT 1 OFFSET %s",
         (str(agent_id), skip_count),
     )

@@ -12,11 +12,13 @@ from gateway.tests.lifecycle.creation.test_sdk_strong_creation import sdk
 from gateway.tests.lifecycle.creation.test_sdk_strong_creation import wire as wire
 
 
-def _checkpoint(conn: psycopg.Connection, agent_id: int, checkpoint_id: str) -> None:
+def _checkpoint(
+    conn: psycopg.Connection, agent_id: int, checkpoint_id: str, *, checkpoint_ns: str = ""
+) -> None:
     conn.execute(
-        "INSERT INTO checkpoints (thread_id, checkpoint_id, checkpoint, metadata) "
-        "VALUES (%s,%s,%s,%s)",
-        (str(agent_id), checkpoint_id, Jsonb({"channel_versions": {}}), Jsonb({})),
+        "INSERT INTO checkpoints (thread_id, checkpoint_ns, checkpoint_id, checkpoint, metadata) "
+        "VALUES (%s,%s,%s,%s,%s)",
+        (str(agent_id), checkpoint_ns, checkpoint_id, Jsonb({"channel_versions": {}}), Jsonb({})),
     )
     conn.commit()
 
@@ -75,3 +77,27 @@ def test_sdk_fork_lost_response_retains_original_child_and_checkpoint(
     assert db_conn.execute(
         "SELECT count(*) FROM audit_events WHERE event_name='fork'"
     ).fetchone() == (1,)
+
+
+def test_keyed_fork_uses_the_latest_root_checkpoint(
+    client: GatewayTestClient, db_conn: psycopg.Connection, wire: AppTransport
+) -> None:
+    parent = client.post(
+        PATH,
+        json={"machine": "local-test", "config": {"llm_model": "deepseek-flash"}},
+        headers={**HEADERS, "Idempotency-Key": "parent"},
+    )
+    assert parent.status_code == 201, parent.text
+    parent_id = parent.json()["id"]
+    _checkpoint(db_conn, parent_id, "root-checkpoint")
+    _checkpoint(db_conn, parent_id, "zz-subgraph-checkpoint", checkpoint_ns="subgraph")
+
+    child_id = sdk(fork_from=parent_id, idempotency_key="root-fork")
+
+    assert db_conn.execute(
+        "SELECT fork_source_checkpoint_id FROM agents_meta WHERE id = %s", (child_id,)
+    ).fetchone() == ("root-checkpoint",)
+    assert db_conn.execute(
+        "SELECT checkpoint_ns, checkpoint_id FROM checkpoints WHERE thread_id = %s",
+        (str(child_id),),
+    ).fetchall() == [("", "root-checkpoint")]

@@ -56,6 +56,7 @@ def _put_checkpoint(
     *,
     metadata: dict[str, object] | None = None,
     version: str,
+    checkpoint_ns: str = "",
 ) -> str:
     checkpoint = empty_checkpoint()
     checkpoint["channel_values"] = {"messages": list(messages)}
@@ -63,7 +64,7 @@ def _put_checkpoint(
     with PostgresSaver.from_conn_string(settings.data_plane.db_url) as saver:
         saver.setup()
         saved = saver.put(
-            config={"configurable": {"thread_id": thread_id, "checkpoint_ns": ""}},
+            config={"configurable": {"thread_id": thread_id, "checkpoint_ns": checkpoint_ns}},
             checkpoint=checkpoint,
             metadata=cast(
                 CheckpointMetadata,
@@ -383,3 +384,29 @@ def test_a_malformed_anchor_is_no_anchor() -> None:
     assert ClosingRequest.from_metadata({"input_tokens": 0}) is None
     assert ClosingRequest.from_metadata("nope") is None
     assert ClosingRequest.from_metadata({"input_tokens": 9}) == ClosingRequest(9, 0, None)
+
+
+def test_history_boundaries_stay_in_the_root_namespace(
+    db_conn: psycopg.Connection, database_gate: ProcessDbGate
+) -> None:
+    boundary = _put_checkpoint(
+        "17",
+        [HumanMessage(content="root before compact")],
+        metadata={"compact_boundary": True},
+        version="1",
+    )
+    _put_checkpoint("17", [HumanMessage(content="root after compact")], version="2")
+    _put_checkpoint(
+        "17",
+        [HumanMessage(content="subgraph boundary")],
+        metadata={"compact_boundary": True},
+        version="3",
+        checkpoint_ns="subgraph",
+    )
+    db = _db(database_gate=database_gate)
+    assert list_compact_boundary_checkpoint_ids(db, 17) == [boundary]
+    assert list_compact_boundary_checkpoint_ids(db, 17, limit=1) == [boundary]
+    assert _contents(load_checkpoint_history_full(db, 17).messages) == [
+        "root before compact",
+        "root after compact",
+    ]
