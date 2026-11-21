@@ -39,6 +39,12 @@ from base.host.boundary.untyped import object_of
 from base.log import logger
 from base.paths import run_dir
 
+# meiva:note
+# Boot timestamps are wall-clock values whose platform representation can shift slightly.
+# Allow five seconds of jitter so a small timestamp change does not turn a planned stop into
+# an abort alert; this distinguishes boot epochs only outside that tolerance, not by boot ID.
+_BOOT_TIME_TOLERANCE_S = 5.0
+
 
 def _is_obj_list(value: object) -> TypeGuard[list[object]]:
     return isinstance(value, list)
@@ -87,6 +93,7 @@ class LifecycleOp:
     complete: bool = False
     result: dict[str, object] | None = None
     resumed_from: ResumedFrom | None = None
+    boot_time: float | None = None
 
 
 def journal_path(home: Path) -> Path:
@@ -155,6 +162,7 @@ def begin(home: Path, operation: str, *, pid: int, deadline: float | None = None
                 pid=pid,
                 started_at=time.monotonic(),
                 deadline=deadline,
+                boot_time=psutil.boot_time(),
                 phases=op.phases,
                 resumed_from=ResumedFrom(
                     pid=op.pid, operation=op.operation, started_at=op.started_at
@@ -169,6 +177,7 @@ def begin(home: Path, operation: str, *, pid: int, deadline: float | None = None
             pid=pid,
             started_at=time.monotonic(),
             deadline=deadline,
+            boot_time=psutil.boot_time(),
         ),
     )
     return True
@@ -306,6 +315,8 @@ def read(home: Path) -> LifecycleOp | None:
         started_at = _number(raw.get("started_at", 0.0))
         deadline_raw = raw.get("deadline")
         deadline = None if deadline_raw is None else _number(deadline_raw)
+        boot_time_raw = raw.get("boot_time")
+        boot_time = None if boot_time_raw is None else _number(boot_time_raw)
     except (KeyError, TypeError, ValueError):
         # A parseable-but-wrong-shape journal (missing identity fields, bad
         # types) is as unreadable as a corrupt one: readers on the
@@ -321,6 +332,31 @@ def read(home: Path) -> LifecycleOp | None:
         complete=bool(raw.get("complete", False)),
         result=optional_object_field(raw, "result"),
         resumed_from=resumed_from,
+        boot_time=boot_time,
+    )
+
+
+# meiva:note
+# Whether an operator's stop or restart (`meiva stop` / `meiva restart`, which a fleet update runs on
+# each host) is underway on this home: its journal is open, `now` (the host's monotonic clock, the
+# scale `begin` stamps) is before the deadline recorded in this same boot, and its writer is alive.
+# Root's own health replacement of a unit writes no journal, so a signal it sends reads False here.
+# The deadline is what keeps a journal left open by a writer killed mid-operation from reading as
+# underway once that operation's budget is over, even when its pid has been reused: an operation
+# that recorded no deadline or boot identity is never underway. A reboot resets the monotonic
+# clock and can reuse the writer pid, so a previous boot's deadline cannot suppress alerts.
+# meiva:link services/agent_runner/agent_host/lifecycle/docs/graceful-exit.md
+def operator_stop_in_progress(home: Path, *, now: float) -> bool:
+    op = read(home)
+    return (
+        op is not None
+        and not op.complete
+        and op.operation in ("stop", "restart")
+        and op.boot_time is not None
+        and abs(op.boot_time - psutil.boot_time()) < _BOOT_TIME_TOLERANCE_S
+        and op.deadline is not None
+        and now < op.deadline
+        and writer_alive(op)
     )
 
 

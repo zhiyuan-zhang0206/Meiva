@@ -54,6 +54,18 @@ class TurnEnd(TypedDict):
 
 
 # meiva:note
+# A turn that failed every retry and was aborted. `cause` is present only when the host knew why
+# the turn was cut: `planned_restart` when an operator's stop or restart (a release wave) ended the
+# turn's CLI. An abort without a cause is unexplained and is what the alert reports.
+class LlmTurnAborted(TypedDict):
+    error_class: str | None
+    provider: str | None
+    status: int | None
+    context_overflow: bool | None
+    cause: NotRequired[Literal["planned_restart"]]
+
+
+# meiva:note
 # An agent declared how its turn ended and the record could not use the value: the turn
 # carries on and its record says `invalid` instead of the declaration, while the text the
 # agent wrote rides here. A rising count is feedback on the vocabulary — the set does not
@@ -118,6 +130,7 @@ EVENTS: dict[str, EventSpec] = {
     "llm_turn_aborted": telemetry_event(
         "llm_turn_aborted",
         "turn aborted after retries",
+        payload=LlmTurnAborted,
         family=LLM_ERROR_FAMILY,
         tier="anomaly",
         persist=True,

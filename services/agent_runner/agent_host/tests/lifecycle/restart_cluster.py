@@ -196,6 +196,7 @@ class Cluster:
         drain_s: float = 30,
         wakes: bool = False,
         exit_message: str | None = None,
+        planned: bool = False,
     ) -> Host:
         checkpointer = await build_checkpointer(self.pool, checkpoint_interval=1)
         host = AgentHost(
@@ -222,6 +223,7 @@ class Cluster:
         scheduler = TurnScheduler(host.run_turn, timers=SYSTEM_TIMERS)
         if wakes:
             host.bind_wake(scheduler.wake)
+        host.bind_planned_stop(scheduler.in_planned_stop)
         graceful = GracefulExit(
             turns=scheduler,
             progress=host.turn_progress,
@@ -232,6 +234,7 @@ class Cluster:
                 if exit_message is not None
                 else partial(consume_host_exit_message, meiva_home())
             ),
+            read_planned=lambda: planned,
             write_idle_notes=partial(write_exit_idle_notes, self.database, self.machine.name()),
         )
         return Host(host, scheduler, graceful, checkpointer)

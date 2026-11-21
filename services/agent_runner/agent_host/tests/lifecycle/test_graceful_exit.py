@@ -14,6 +14,7 @@ import sys
 from typing import Any
 
 import psycopg
+import pytest
 from langchain_core.messages import BaseMessage
 
 from base.agents.observation.turn_progress import TurnProgress
@@ -39,10 +40,10 @@ _RESUMED = f"{_ACCEPTED} while your turn was unfinished."
 
 
 async def _in_flight_turn(
-    cluster: Cluster, *, drain_s: float, steps: list[Step] | None = None
+    cluster: Cluster, *, drain_s: float, steps: list[Step] | None = None, planned: bool = False
 ) -> tuple[int, Script, Host]:
     agent_id, script = cluster.spawn(chat="hello", steps=steps)
-    served = await cluster.host(drain_s=drain_s, wakes=True)
+    served = await cluster.host(drain_s=drain_s, wakes=True, planned=planned)
     served.scheduler.wake(agent_id)
     await asyncio.wait_for(script.entered.wait(), 30)
     return agent_id, script, served
@@ -166,14 +167,18 @@ async def test_a_turn_past_the_drain_budget_is_named_and_its_restart_waits_for_t
 # The 2026-11-11 rollout: an external harness's CLI dies with the host, so its turn fails before it
 # reaches the restart the exit wrote. The restart stays pending and the turn is stamped as a crash;
 # the next host takes the restart in a fresh invocation, which must still read an unfinished turn,
-# or the agent idles with no note and the corpse reaper terminates it.
+# or the agent idles with no note and the corpse reaper terminates it. When an operator's stop or
+# restart asked for the exit, the abort says so (`cause=planned_restart`) and its alert leaves it
+# out; the same death in an exit root asked for (a host it saw down) carries no cause and alerts.
+@pytest.mark.parametrize("planned", [True, False])
 async def test_a_turn_that_dies_with_the_host_is_resumed_by_the_restart_the_next_host_takes(
-    cluster: Cluster,
+    cluster: Cluster, loguru_records: LogRecords, planned: bool
 ) -> None:
     agent_id, script, first = await _in_flight_turn(
         cluster,
         drain_s=30,
         steps=[Step(partial="half a sentence", holds=True, fails=True), Step(text="resumed")],
+        planned=planned,
     )
     serving = first.serve()
     first.graceful.request()
@@ -181,6 +186,10 @@ async def test_a_turn_that_dies_with_the_host_is_resumed_by_the_restart_the_next
     script.release.set()
     await asyncio.wait_for(serving, 30)
     await first.close()
+
+    [aborted] = loguru_records.events("llm_turn_aborted")
+    assert aborted["extra"]["agent_id"] == agent_id
+    assert aborted["extra"].get("cause") == ("planned_restart" if planned else None)
 
     [restart] = cluster.inbound(agent_id, "restart")
     assert (restart.source, restart.status) == (RESTART_SOURCE, "pending")
@@ -227,7 +236,7 @@ class _Turns:
     def task_for(self, agent_id: int) -> asyncio.Task[None] | None:
         return self._tasks.get(agent_id)
 
-    def stop_admission(self) -> frozenset[int]:
+    def stop_admission(self, *, planned: bool) -> frozenset[int]:
         return frozenset(self._tasks)
 
 
@@ -241,6 +250,7 @@ async def _drain_with(
         write_restart=write_restart,
         drain_s=drain_s,
         read_exit_message=lambda: None,
+        read_planned=lambda: False,
         write_idle_notes=None,
     )
     graceful.request()

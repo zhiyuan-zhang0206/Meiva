@@ -33,6 +33,7 @@ from base.sessions.hosting import hosting_supervised_session
 from base.telemetry import EventPipeline
 from cli.commands import _repo
 from cli.commands.converge.spec import ConvergeStep
+from cli.commands.data_plane.stop_waits import deadline_after
 from cli.commands.lifecycle import root_driver, root_readiness, start
 from cli.commands.lifecycle.root_control.snapshot import root_units
 from cli.commands.lifecycle.start import readiness_preflight
@@ -221,7 +222,17 @@ def run_restart(
     # When an outer operation's journal is still running, this restart records phases into it
     # and leaves the finish to that caller (`conclude`).
     home = run.command.home
-    owns_journal = status_journal.begin(home, "restart", pid=run.command.pid)
+    # meiva:note
+    # The journal's deadline is the restart's stated budget (stop leg, then start readiness): the
+    # agent host reads an open restart as an operator's planned stop only before it.
+    owns_journal = status_journal.begin(
+        home,
+        "restart",
+        pid=run.command.pid,
+        deadline=deadline_after(
+            run.command.timers, run.request.timeout + run.request.start_timeout
+        ).at,
+    )
     print(
         budget_line(
             run.request.timeout, run.request.start_timeout, str(status_journal.status_path(home))

@@ -43,7 +43,7 @@ RESTART_SOURCE = HOST_RESTART_SOURCE
 class TurnTasks(Protocol):
     def task_for(self, agent_id: int) -> asyncio.Task[None] | None: ...
 
-    def stop_admission(self) -> frozenset[int]: ...
+    def stop_admission(self, *, planned: bool) -> frozenset[int]: ...
 
 
 # meiva:note
@@ -116,6 +116,7 @@ class GracefulExit:
         write_restart: Callable[[int, str | None], Awaitable[OwedRestart]],
         drain_s: float,
         read_exit_message: Callable[[], str | None],
+        read_planned: Callable[[], bool],
         write_idle_notes: Callable[[str, frozenset[int]], Awaitable[int]] | None,
     ) -> None:
         self._turns = turns
@@ -123,6 +124,7 @@ class GracefulExit:
         self._write_restart = write_restart
         self._drain_s = drain_s
         self._read_exit_message = read_exit_message
+        self._read_planned = read_planned
         self._write_idle_notes = write_idle_notes
         self._serving: asyncio.Task[object] | None = None
         self._requested = False
@@ -135,13 +137,14 @@ class GracefulExit:
     # meiva:note
     # Close admission and stop dispatch; `serve` then drains. Idempotent. Closing
     # admission and taking the snapshot is one synchronous step: no turn can start after
-    # it, so the snapshot is exactly the turns owed a restart.
+    # it, so the snapshot is exactly the turns owed a restart. Whether an operator asked
+    # for the exit is read once here, when the signal arrives, and kept with the stop.
     def request(self) -> None:
         if self._requested:
             logger.info("graceful exit already in progress", event="host_exit_repeated")
             return
         self._requested = True
-        self._owed = self._turns.stop_admission()
+        self._owed = self._turns.stop_admission(planned=self._read_planned())
         if self._serving is not None:
             self._serving.cancel()
 
@@ -267,6 +270,7 @@ async def serve_until_exit(
     progress: TurnProgress,
     write_restart: Callable[[int, str | None], Awaitable[OwedRestart]],
     read_exit_message: Callable[[], str | None],
+    read_planned: Callable[[], bool],
     write_idle_notes: Callable[[str, frozenset[int]], Awaitable[int]] | None,
 ) -> None:
     graceful = GracefulExit(
@@ -275,6 +279,7 @@ async def serve_until_exit(
         write_restart=write_restart,
         drain_s=HOST_GRACEFUL_EXIT_DRAIN_S,
         read_exit_message=read_exit_message,
+        read_planned=read_planned,
         write_idle_notes=write_idle_notes,
     )
     with sigterm_requests_exit("agent_host", graceful.request):

@@ -272,10 +272,16 @@ def test_put_non_dict_half_422(db_conn: psycopg.Connection) -> None:
 # The inventory routes read the registry through `request.app.state.db_pool`: swap in
 # another pool and it is the one that serves the requests.
 #
-# The upload recovery worker is switched off for this app: it borrows from the same pool on its own
-# five-second cadence, so it would be counted here as if a route had used the retired pool. It is a
-# different tenant with its own test (`test_a_round_uses_the_pool_the_app_holds_now`), which is why
-# the counts below stay exact instead of becoming a lower bound.
+# The upload recovery worker is switched off for this app: it re-reads `state.db_pool` on its own
+# five-second cadence, so it would be counted here as if a route had used the swapped-in pool.
+#
+# The original pool is deliberately not asserted on. The notification outbox loop holds the pool the
+# app started with and borrows from it once at start and then every two seconds, so that pool's
+# count moves whenever the test straddles a sweep: a run on a loaded CI shard saw 2 become 3 that
+# way, and holding the test past two seconds reproduces it every time. The exact count on
+# `other_pool` carries the same claim: the routes serve every request from the pool
+# `app.state.db_pool` holds now, and a route that kept using the original one would leave this
+# count short of four.
 def test_inventory_borrows_from_the_apps_own_pool(
     db_conn: psycopg.Connection, database: Database
 ) -> None:
@@ -294,8 +300,6 @@ def test_inventory_borrows_from_the_apps_own_pool(
         gateway_test_client(config=gateway_test_config(upload_recovery_enabled=False)) as client,
         database.pool(max_size=2) as other_pool,
     ):
-        original_pool = client.app.state.db_pool
-        original_borrowed = original_pool.get_stats().get("requests_num", 0)
         client.app.state.db_pool = other_pool
         borrowed = other_pool.get_stats().get("requests_num", 0)
         for url in ["/api/inventory", f"/api/inventory?machine={REMOTE}"]:
@@ -305,4 +309,3 @@ def test_inventory_borrows_from_the_apps_own_pool(
         assert response.status_code == 200, response.text
         assert response.json()["applied"] is True
         assert other_pool.get_stats()["requests_num"] - borrowed == 4
-        assert original_pool.get_stats().get("requests_num", 0) == original_borrowed

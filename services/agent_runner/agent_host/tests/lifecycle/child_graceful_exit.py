@@ -33,7 +33,7 @@ class _Turns:
     def task_for(self, agent_id: int) -> asyncio.Task[None] | None:
         return self._tasks.get(agent_id)
 
-    def stop_admission(self) -> frozenset[int]:
+    def stop_admission(self, *, planned: bool) -> frozenset[int]:
         return frozenset(self._tasks)
 
 
@@ -70,6 +70,7 @@ async def _run() -> dict[str, Any]:
         progress=TurnProgress(),
         write_restart=write_restart,
         read_exit_message=lambda: None,
+        read_planned=lambda: False,
         write_idle_notes=None,
     )
     return {"restarts_for": restarts_for, "turn_settled": task.done(), "repeats": repeats}

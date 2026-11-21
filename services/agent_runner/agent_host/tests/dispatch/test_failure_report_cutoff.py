@@ -152,9 +152,13 @@ async def test_error_visible_after_cutoff_allows_immediate_new_chat(
             await initial_turn.ainvoke(
                 BaseAgentState(halted=True), config, context=ctx, interrupt_before=["init_context"]
             )
-            outcome = await finish_pending_failure(graph, saver, agent_id, ctx, config, pending)
+            outcome = await finish_pending_failure(
+                graph, saver, agent_id, ctx, config, pending, planned_stop=False
+            )
             assert len(pending.errors) == 2
-            outcome = await finish_pending_failure(graph, saver, agent_id, ctx, config, pending)
+            outcome = await finish_pending_failure(
+                graph, saver, agent_id, ctx, config, pending, planned_stop=False
+            )
             assert len(pending.errors) == 2
             assert not await admit_pending_wake(aops_pool, agent_id)
             await publisher.aclose()

@@ -3982,7 +3982,9 @@ groups:
       # nothing watching. A separate rule rather than widening that one: its two rules carry the
       # vendor grouping and the 429/billing split this one must not disturb. Grouped by agent so each
       # alert names the agent whose turn was lost; an event without an agent id (emitted before the
-      # call site passed one) renders as "unknown".
+      # call site passed one) renders as "unknown". An abort the host attributes to an operator's
+      # stop or restart (`cause="planned_restart"`, a release wave cutting the turn's CLI) is left
+      # out: the user ruled release interruptions not a problem. An abort without a cause still alerts.
       - uid: meiva-ops-llm-turn-aborted
         title: "LLM turn aborted after retries"
         condition: D
@@ -4015,7 +4017,7 @@ groups:
               editorMode: code
               expr: >-
                 sum by (agent_id) (count_over_time({event_name="llm_turn_aborted"}
-                | json | cluster=".meiva" | category="telemetry" [30m]))
+                | json | cluster=".meiva" | category="telemetry" | attributes_cause != "planned_restart" [30m]))
               instant: true
               queryType: instant
             relativeTimeRange:

@@ -13,6 +13,22 @@ signal ignored, so a retry cannot abort the exit it started.
    stops a finished turn from looping into another, and returns the agents whose
    turn task still runs. The dispatcher and its sibling loops are cancelled.
    A refused wake loses nothing: its inbound stays pending in Postgres.
+   The same step records whether an operator asked for the exit: the exit reads
+   `status_journal.operator_stop_in_progress` once, when the signal arrives — true
+   while a `meiva stop` / `meiva restart` journal (`run/lifecycle-op.json`, which a
+   fleet update's per-host stop also writes) is open, before the deadline that
+   operation recorded (the stop's timeout; the restart's stop plus start budget), and
+   its writer is alive. The journal must also record this machine's current boot
+   time (within five seconds of timestamp jitter): a previous boot's monotonic
+   deadline is not comparable after a reboot, even if its writer pid was reused. Journals without boot identity do not mark
+   an exit as planned. The deadline keeps a journal left open by a killed writer
+   from reading as planned once its budget is over. Root's
+   health replacement of a host it observed down sends the same SIGTERM but writes
+   no journal, and the plugin watcher's own restart writes none either, so those
+   exits are not planned. A turn that aborts during a planned exit (typically the
+   external harness's CLI killed with the host) emits `llm_turn_aborted` with
+   `cause=planned_restart`, which `meiva-ops-llm-turn-aborted` leaves out; an abort
+   in any other exit, or outside one, carries no cause and alerts.
 2. **One lifecycle command per running turn (and passive notes when explained).**
    `serve_until_exit` consumes `$MEIVA_HOME/run/host-exit-message.json` once
    (`base/deploy/lifecycle/host_exit_message.py`; staged by `meiva stop`/`restart`

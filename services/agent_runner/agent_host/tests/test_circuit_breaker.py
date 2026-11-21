@@ -28,7 +28,7 @@ from agent.graph.llm_errors import (
     retry_exhausted_error,
 )
 from agent.state import AgentState, CircuitState
-from agent.turn.runloop import handle_fatal_llm_error
+from agent.turn.runloop import PLANNED_RESTART, handle_fatal_llm_error
 from base.agents.context import MeivaContext
 from base.agents.tests.units import spawn_agent
 from base.clock import SYSTEM_TIMERS, Clock
@@ -71,7 +71,7 @@ async def test_fatal_provider_error_opens_circuit_breaker(
         context_overflow=True,
     )
     update = await handle_fatal_llm_error(
-        exc, breaker_ctx(database_gate=database_gate), agent_id=42, circuit=None
+        exc, breaker_ctx(database_gate=database_gate), agent_id=42, planned_stop=False, circuit=None
     )
 
     assert update["halted"] is True
@@ -95,7 +95,7 @@ async def test_fatal_provider_error_billing_reason(*, database_gate: ProcessDbGa
         status=402,
     )
     update = await handle_fatal_llm_error(
-        exc, breaker_ctx(database_gate=database_gate), agent_id=42, circuit=None
+        exc, breaker_ctx(database_gate=database_gate), agent_id=42, planned_stop=False, circuit=None
     )
 
     circuit = update["circuit"]
@@ -131,7 +131,7 @@ async def test_fatal_provider_error_emits_blocked_recovery_details(
         status=400,
     )
 
-    await handle_fatal_llm_error(exc, ctx, agent_id=42, circuit=None)
+    await handle_fatal_llm_error(exc, ctx, agent_id=42, planned_stop=False, circuit=None)
 
     emitted = json.loads(publisher.payloads[-1])
     assert emitted["role"] == "error"
@@ -221,6 +221,7 @@ async def test_permanent_provider_error_reports_metadata_to_nearest_alive_ancest
             commands=CommandCatalog.system(skills=list, home=meiva_home()),
         ),
         agent_id=child_id,
+        planned_stop=False,
         circuit=None,
         occurred_at=occurred_at,
     )
@@ -300,6 +301,7 @@ async def test_context_overflow_halts_background_wakes_and_reports_to_an_ancesto
             commands=CommandCatalog.system(skills=list, home=meiva_home()),
         ),
         agent_id=child_id,
+        planned_stop=False,
         circuit=None,
     )
 
@@ -315,7 +317,7 @@ async def test_fatal_llm_stream_error_does_not_open_breaker(
     it only halts the turn; the breaker stays untouched."""
     exc = FatalLLMStreamError("retry cap exhausted")
     update = await handle_fatal_llm_error(
-        exc, breaker_ctx(database_gate=database_gate), agent_id=42, circuit=None
+        exc, breaker_ctx(database_gate=database_gate), agent_id=42, planned_stop=False, circuit=None
     )
 
     assert update == {"halted": True}
@@ -340,7 +342,11 @@ async def test_stream_corrupted_and_stop_reason_aborts_halt_without_opening_brea
     except FatalLLMStreamError as raised:
         captured = raised
     update = await handle_fatal_llm_error(
-        captured, breaker_ctx(database_gate=database_gate), agent_id=42, circuit=None
+        captured,
+        breaker_ctx(database_gate=database_gate),
+        agent_id=42,
+        planned_stop=False,
+        circuit=None,
     )
 
     assert update == {"halted": True}
@@ -375,7 +381,11 @@ async def test_retry_exhausted_transient_503_halts_without_opening_breaker_and_l
         cause = raw
 
     update = await handle_fatal_llm_error(
-        wrapped, breaker_ctx(database_gate=database_gate), agent_id=42, circuit=None
+        wrapped,
+        breaker_ctx(database_gate=database_gate),
+        agent_id=42,
+        planned_stop=False,
+        circuit=None,
     )
 
     assert update == {"halted": True}
@@ -386,6 +396,7 @@ async def test_retry_exhausted_transient_503_halts_without_opening_breaker_and_l
     assert aborts[0]["extra"]["provider"] == "anthropic"
     assert aborts[0]["extra"]["status"] == 503
     assert aborts[0]["extra"]["agent_id"] == 42
+    assert "cause" not in aborts[0]["extra"]
     assert aborts[0]["exception"] is not None
     assert aborts[0]["exception"].value is wrapped
     assert wrapped.__cause__ is cause
@@ -409,6 +420,7 @@ async def test_fatal_provider_error_does_not_reopen_already_open_breaker(
         exc,
         breaker_ctx(database_gate=database_gate),
         agent_id=42,
+        planned_stop=False,
         circuit=CircuitState(open=True, reason="billing", opened_at=opened_at),
     )
 
@@ -611,3 +623,28 @@ async def test_heartbeat_normal_when_breaker_closed(
 
 
 # ── recovery circuit breaker (task #3617) ────────────────────────────────────
+
+
+# meiva:note
+# An abort the host attributes to an operator's stop or restart carries `cause=planned_restart`,
+# the one value the turn-aborted alert excludes.
+async def test_an_abort_during_a_planned_stop_names_its_cause(
+    loguru_records: LogRecords,
+    *,
+    database_gate: ProcessDbGate,
+) -> None:
+    try:
+        _raise_transient_503()
+    except anthropic.InternalServerError as raw:
+        wrapped = retry_exhausted_error(raw)
+
+    await handle_fatal_llm_error(
+        wrapped,
+        breaker_ctx(database_gate=database_gate),
+        agent_id=42,
+        planned_stop=True,
+        circuit=None,
+    )
+
+    (aborted,) = loguru_records.events("llm_turn_aborted")
+    assert aborted["extra"]["cause"] == PLANNED_RESTART == "planned_restart"

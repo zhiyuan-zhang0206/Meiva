@@ -261,7 +261,7 @@ above (or when its name is unregistered); otherwise it stays in the JSONL mirror
 | `turn_end` | one turn finished | observation | ok, duration_seconds, ended_with, ended_with_reason | — | events | ✓ |
 | `turn_end_declaration_rejected` | an agent's turn-end declaration was refused (recorded as invalid); the turn continued | anomaly | raw_ended_with, raw_ended_with_reason, problem | — | events | — |
 | `llm_usage_metering_failed` | direct model call accounting failed (the call ran; its llm_usage row is dropped) | anomaly | model, error_type, failures | — | events | ✓ |
-| `llm_turn_aborted` | turn aborted after retries | anomaly | — | LLM_ERROR | events | ✓ |
+| `llm_turn_aborted` | turn aborted after retries | anomaly | error_class, provider, status, context_overflow, cause | LLM_ERROR | events | ✓ |
 | `recovery_breaker_halt` | recovery circuit breaker tripped — consecutive permanent provider rejections halted every automatic recovery path until a turn succeeds (task #3617) | anomaly | — | — | events | — |
 | `compact_turn_aborted` | turn aborted because compaction failed | anomaly | — | — | events | — |
 | `llm_provider_error` | LLM provider failure | anomaly | error_class, provider, status, error_type, fatal, billing, vendor, model | LLM_ERROR | events | ✓ |

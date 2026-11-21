@@ -101,7 +101,9 @@ async def test_compaction_abort_leaves_no_corpse_marker_and_still_reports(
             await initial_turn.ainvoke(
                 BaseAgentState(halted=True), config, context=ctx, interrupt_before=["init_context"]
             )
-            outcome = await finish_pending_failure(graph, saver, agent_id, ctx, config, pending)
+            outcome = await finish_pending_failure(
+                graph, saver, agent_id, ctx, config, pending, planned_stop=False
+            )
             assert outcome.aborted and not outcome.crashed
             assert len(pending.errors) == 1
             persisted = (await graph.aget_state(config)).values

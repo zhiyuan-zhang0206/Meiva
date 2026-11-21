@@ -10,11 +10,12 @@ import http.client
 import json
 import os
 import random
+import signal
 import socket
 import subprocess
 import sys
 from collections.abc import Iterator
-from contextlib import closing
+from contextlib import closing, suppress
 from dataclasses import dataclass
 from pathlib import Path
 from time import monotonic, sleep
@@ -270,6 +271,7 @@ def _start_daemon(
         "MEIVA_HOME": str(home),
         "MEIVA_CONFIG_FETCH": "skip",
         "MEIVA_TASK_MAINTENANCE_HEALTH_PORT": str(endpoint.health_port),
+        "PYTHONFAULTHANDLER": "1",
     }
     env.pop(SERVICE_PLUGIN_CONFIG_ENV, None)
     if delivered is not None:
@@ -295,10 +297,24 @@ def _await_started(running: _DaemonProcess) -> str:
     return running.output()
 
 
+# meiva:note
+# The child runs with `PYTHONFAULTHANDLER=1` (set in `_start_daemon`) so SIGABRT makes it print its
+# thread stacks. A daemon that is still alive 30 s after SIGTERM is reported with its own log and, through
+# faulthandler on SIGABRT, the stack of every thread: a CI shard once lost this wait with nothing but
+# `TimeoutExpired`, and a hang that cannot be reproduced locally is only diagnosable from the run
+# that hit it.
 def _stop(running: _DaemonProcess) -> int:
     running.process.terminate()
     try:
         return running.process.wait(timeout=30)
+    except subprocess.TimeoutExpired:
+        running.process.send_signal(signal.SIGABRT)
+        with suppress(subprocess.TimeoutExpired):
+            running.process.wait(timeout=5)
+        raise AssertionError(
+            f"the daemon was still running 30 s after SIGTERM; its output, ending in the stack "
+            f"of every thread:\n{running.output()}"
+        ) from None
     finally:
         running.process.kill()
         running.process.wait()

@@ -4,7 +4,8 @@ import json
 import multiprocessing
 import os
 import shutil
-import time
+import sys
+import threading
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
 from multiprocessing.connection import Connection
@@ -210,25 +211,44 @@ async def test_workspace_replaced_by_file_during_scan_is_a_removal(
             watcher.cancel()
 
 
-async def scale_probe(root: Path, bus_config: EventBusConfig) -> dict[str, float | int]:
+# meiva:note
+# Which thread each directory scan of `root` ran on, read from the interpreter's own audit event so
+# the production module is not patched. The probe runs in a spawned child that exits right after,
+# which is why a hook that can never be removed is acceptable here.
+def _record_scan_threads(root: Path) -> list[int]:
+    scanned_on: list[int] = []
+
+    def hook(event: str, args: tuple[Any, ...]) -> None:
+        scanned = args[0] if event == "os.scandir" else None
+        if isinstance(scanned, (str, os.PathLike)) and os.fspath(scanned) == os.fspath(root):
+            scanned_on.append(threading.get_ident())
+
+    sys.addaudithook(hook)
+    return scanned_on
+
+
+# meiva:note
+# The property under test is that the watcher never scans 3688 workspaces on the event loop's own
+# thread, so the probe counts where the scans ran instead of timing how long the loop went quiet: a
+# wall-clock gap also records a stall of the whole process (a loaded runner paused this child for
+# 0.6 s while it used the same 0.45 s of CPU as an idle run), which says nothing about the watcher.
+async def scale_probe(root: Path, bus_config: EventBusConfig) -> dict[str, int]:
 
     for index in range(3688):
         workspace = root / str(index)
         workspace.mkdir()
         (workspace / "to_user.md").write_text("existing markdown")
+    scanned_on = _record_scan_threads(root)
+    loop_thread = threading.get_ident()
     bus = EventBus(bus_config, rng=seeded_rng(), timers=SYSTEM_TIMERS)
     loop = asyncio.get_running_loop()
-    gaps: list[float] = []
-    started = previous = loop.time()
-    cpu_started = time.process_time()
+    started = loop.time()
     async with subscribed(bus) as events, asyncio.TaskGroup() as group:
         watcher = group.create_task(watch_to_user(root, bus))
         try:
             while loop.time() - started < 3:
                 await asyncio.sleep(0.02)
                 now = loop.time()
-                gaps.append(now - previous)
-                previous = now
                 if now - started >= 0.7 and not (root / "4000").exists():
                     assert events.empty()
                     (root / "4000").mkdir()
@@ -240,9 +260,8 @@ async def scale_probe(root: Path, bus_config: EventBusConfig) -> dict[str, float
             watcher.cancel()
     return {
         "roots": 3688,
-        "max_loop_gap": max(gaps),
-        "elapsed": loop.time() - started,
-        "cpu_seconds": time.process_time() - cpu_started,
+        "scans_off_the_loop_thread": sum(ident != loop_thread for ident in scanned_on),
+        "scans_on_the_loop_thread": sum(ident == loop_thread for ident in scanned_on),
     }
 
 
@@ -271,5 +290,5 @@ def test_production_scale_keeps_loop_responsive_and_stops(
         receiver.close()
         worker.close()
     assert sample["roots"] == 3688
-    assert sample["max_loop_gap"] < 0.5, sample
-    assert sample["elapsed"] < 5, sample
+    assert sample["scans_off_the_loop_thread"] > 0, sample
+    assert sample["scans_on_the_loop_thread"] == 0, sample

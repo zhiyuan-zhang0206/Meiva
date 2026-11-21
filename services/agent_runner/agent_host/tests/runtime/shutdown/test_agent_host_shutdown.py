@@ -175,7 +175,7 @@ class _SchedulerRecorder:
         _ = agent_id
         return None
 
-    def stop_admission(self) -> frozenset[int]:
+    def stop_admission(self, *, planned: bool) -> frozenset[int]:
         return frozenset()
 
     async def aclose(self) -> None:
@@ -262,6 +262,7 @@ def _run_shutdown(failure: str, *, home: Path) -> None:
                     serve_dispatch=serve_dispatch(home / "plugins"),
                     write_restart=_noop_restart,
                     read_exit_message=lambda: None,
+                    read_planned=lambda: False,
                     write_idle_notes=None,
                     pidfile=pidfile,
                 )

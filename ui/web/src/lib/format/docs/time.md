@@ -5,7 +5,10 @@ reads. Views see browser-local time — the viewer's zone, deliberately unlike t
 cluster timezone an agent sees. Four shapes, one job each: `formatAbsolute`
 (full precision in local time, without appending a timezone name), `formatShort` (compact rows),
 `formatRelative` (one signed wording, `in 4m` / `5m ago`) and `formatUpcoming`
-(an upcoming instant with its day context).
+(an upcoming instant with its day context). `formatResetCountdown` is the one
+exception to `formatRelative`: the quota "resets in …" span in the sidebar Status
+panel, which keeps the hours below two days (`59m` / `23h` / `1d 23h`, then `2d`)
+so a bare `1d` cannot hide 23 versus 47 hours (user 2026-11-21).
 
 ## Clock format and date format
 
