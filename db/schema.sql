@@ -386,15 +386,17 @@ COMMENT ON TABLE maintenance_state IS
 
 -- Full (non-partial) (agent_id, created_at DESC): select_all's LATERAL
 -- MAX(created_at) per agent is an index-only scan on it (the partial
--- pending index below cannot serve MAX over all kinds; audit P1-1).
+-- active index below cannot serve MAX over all kinds; audit P1-1).
 CREATE INDEX inbound_messages_agent_id_created_at_idx
     ON inbound_messages (agent_id, created_at DESC);
 
--- Used by claim_inbound_batch / wait_for_inbound — query pending rows filtered by agent_id.
--- In the new design all kinds are claimed by claim without filtering by kind; one partial
--- index covers all hot path queries.
-CREATE INDEX idx_inbound_per_agent_pending ON inbound_messages (agent_id, created_at)
-    WHERE status = 'pending';
+-- Cover active (pending + claimed) per-agent inbox scans (`claim_inbound_batch`,
+-- `wait_for_inbound`, `_claim_lifecycle_command`, `peek_head_batch`,
+-- `claimed_deliverable`, `reserve_head_batch`) so `status = 'pending'`,
+-- `status = 'claimed'`, and `status IN ('pending', 'claimed')` never heap-scan
+-- historical `done` rows. Replaces the subsumed `idx_inbound_per_agent_pending`.
+CREATE INDEX idx_inbound_per_agent_active ON inbound_messages (agent_id, created_at, id)
+    WHERE status IN ('pending', 'claimed');
 
 -- Watchdog scan: order pending inbounds across all agents by created_at.
 CREATE INDEX idx_inbound_pending_created_at ON inbound_messages (created_at)

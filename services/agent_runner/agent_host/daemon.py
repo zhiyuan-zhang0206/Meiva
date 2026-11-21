@@ -285,6 +285,7 @@ async def build_checkpointer(
     checkpoint_interval: int,
     expected_owner: UUID | None = None,
     machine: str | None = None,
+    blob_cache_max_bytes: int | None = None,
 ) -> AsyncPostgresSaver:
     """One saver for the whole host, over the workload pool.
 
@@ -309,6 +310,7 @@ async def build_checkpointer(
         serde=build_checkpoint_serde(plugin_state_classes),
         expected_owner=expected_owner,
         machine=machine,
+        blob_cache_max_bytes=blob_cache_max_bytes,
     )
     wrap_saver_writes_with_loud_failure(checkpointer)
     wrap_saver_writes_with_nstep_interval(checkpointer, checkpoint_interval)
@@ -584,6 +586,7 @@ async def run(
             checkpoint_interval=config.view.agent.checkpoint_interval,
             expected_owner=runtime_owner,
             machine=local_machine,
+            blob_cache_max_bytes=config.view.daemon.host_checkpoint_blob_cache_mb * 1024 * 1024,
         )
         policy = host_policy(
             config,
