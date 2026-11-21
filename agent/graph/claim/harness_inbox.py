@@ -68,9 +68,11 @@ _HEAD_ROWS: LiteralString = (
 
 # meiva:note
 # The head batch, or nothing when every row in it is passive. Composed from literal fragments only.
+# A single CTE avoids scanning `_HEAD_ROWS` (and its control-row barrier check) twice per query.
 _HEAD_IDS: LiteralString = (
-    f"SELECT h.id FROM ({_HEAD_ROWS}) h "  # noqa: S608
-    f"WHERE EXISTS (SELECT 1 FROM ({_HEAD_ROWS}) x WHERE {not_passive_inbound('x')})"
+    f"WITH head AS ({_HEAD_ROWS}) "  # noqa: S608
+    f"SELECT h.id FROM head h "
+    f"WHERE EXISTS (SELECT 1 FROM head x WHERE {not_passive_inbound('x')})"
 )
 
 

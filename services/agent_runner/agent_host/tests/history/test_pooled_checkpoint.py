@@ -221,3 +221,107 @@ async def test_failed_cursor_returns_a_clean_reusable_pool_connection(
         loaded = await saver.aget_tuple(saved)
         assert loaded is not None
         assert loaded.checkpoint["channel_values"]["value"] == ["persisted"]
+
+
+async def test_blob_cache_skips_unchanged_blobs_on_second_read(
+    adb_conn: AsyncConnection,
+) -> None:
+    from langgraph.checkpoint.serde.types import _DeltaSnapshot
+
+    async with _pool(2) as pool:
+        saver = PooledPostgresSaver(pool, blob_cache_max_bytes=1024 * 1024)
+        cp1 = empty_checkpoint()
+        cp1["channel_values"] = {
+            "messages": _DeltaSnapshot(["m1", "m2", "m3"]),
+            "memory": {"notes": "x" * 2000},
+            "step_tag": "v1",
+        }
+        cp1["channel_versions"] = {"messages": "1", "memory": "1", "step_tag": "1"}
+        cfg1 = await saver.aput(
+            _config("blob-cache-t1"),
+            cp1,
+            {"source": "input", "step": 0},
+            {"messages": "1", "memory": "1", "step_tag": "1"},
+        )
+
+        first = await saver.aget_tuple(cfg1)
+        assert first is not None
+        assert first.checkpoint["channel_values"]["messages"].value == ["m1", "m2", "m3"]
+        after_first = saver.blob_cache_stats()
+        assert after_first.fetched_blobs == 2
+        assert after_first.hits == 0
+        assert after_first.total_bytes > 2000
+
+        second = await saver.aget_tuple(_config("blob-cache-t1"))
+        assert second is not None
+        after_second = saver.blob_cache_stats()
+        assert after_second.fetched_blobs == 2
+        assert after_second.hits == 2
+        assert second.checkpoint["channel_values"]["messages"].value == ["m1", "m2", "m3"]
+        assert second.checkpoint["channel_values"]["memory"] == {"notes": "x" * 2000}
+
+
+async def test_blob_cache_fetches_updated_channel_and_drops_on_delete(
+    adb_conn: AsyncConnection,
+) -> None:
+    from langgraph.checkpoint.serde.types import _DeltaSnapshot
+
+    async with _pool(2) as pool:
+        saver = PooledPostgresSaver(pool, blob_cache_max_bytes=1024 * 1024)
+        cp1 = empty_checkpoint()
+        cp1["channel_values"] = {
+            "messages": _DeltaSnapshot(["m1", "m2"]),
+            "memory": {"notes": "v1"},
+        }
+        cp1["channel_versions"] = {"messages": "1", "memory": "1"}
+        cfg1 = await saver.aput(
+            _config("blob-cache-t2"),
+            cp1,
+            {"source": "input", "step": 0},
+            {"messages": "1", "memory": "1"},
+        )
+        assert await saver.aget_tuple(cfg1) is not None
+
+        cp2 = empty_checkpoint()
+        cp2["channel_values"] = {
+            "messages": _DeltaSnapshot(["m1", "m2"]),
+            "memory": {"notes": "v2"},
+        }
+        cp2["channel_versions"] = {"messages": "1", "memory": "2"}
+        await saver.aput(cfg1, cp2, {"source": "loop", "step": 1}, {"memory": "2"})
+
+        updated = await saver.aget_tuple(_config("blob-cache-t2"))
+        assert updated is not None
+        stats = saver.blob_cache_stats()
+        assert stats.fetched_blobs == 3
+        assert stats.hits == 1
+        assert updated.checkpoint["channel_values"]["messages"].value == ["m1", "m2"]
+        assert updated.checkpoint["channel_values"]["memory"] == {"notes": "v2"}
+
+        await saver.adelete_thread("blob-cache-t2")
+        assert saver.blob_cache_stats().total_bytes == 0
+
+
+async def test_blob_cache_eviction_and_disabled(adb_conn: AsyncConnection) -> None:
+    async with _pool(2) as pool:
+        tiny = PooledPostgresSaver(pool, blob_cache_max_bytes=512)
+        cp3 = empty_checkpoint()
+        cp3["channel_values"] = {"a": "x" * 300, "b": "y" * 300}
+        cp3["channel_versions"] = {"a": "1", "b": "1"}
+        await tiny.aput(
+            _config("blob-cache-evict"),
+            cp3,
+            {"source": "input", "step": 0},
+            {"a": "1", "b": "1"},
+        )
+        evict_read = await tiny.aget_tuple(_config("blob-cache-evict"))
+        assert evict_read is not None
+        assert evict_read.checkpoint["channel_values"]["a"] == "x" * 300
+        assert evict_read.checkpoint["channel_values"]["b"] == "y" * 300
+        assert tiny._blob_cache.total_bytes <= 512
+
+        disabled = PooledPostgresSaver(pool, blob_cache_max_bytes=0)
+        off_read = await disabled.aget_tuple(_config("blob-cache-evict"))
+        assert off_read is not None
+        assert off_read.checkpoint["channel_values"]["a"] == "x" * 300
+        assert disabled._blob_cache.total_bytes == 0

@@ -396,6 +396,12 @@ CREATE INDEX inbound_messages_agent_id_created_at_idx
 CREATE INDEX idx_inbound_per_agent_pending ON inbound_messages (agent_id, created_at)
     WHERE status = 'pending';
 
+-- Cover active (pending + claimed) per-agent inbox scans (`_claim_lifecycle_command`,
+-- `peek_head_batch`, `claimed_deliverable`, `reserve_head_batch`) so `status = 'claimed'`
+-- and `status IN ('pending', 'claimed')` never heap-scan historical `done` rows.
+CREATE INDEX idx_inbound_per_agent_active ON inbound_messages (agent_id, created_at, id)
+    WHERE status IN ('pending', 'claimed');
+
 -- Watchdog scan: order pending inbounds across all agents by created_at.
 CREATE INDEX idx_inbound_pending_created_at ON inbound_messages (created_at)
     WHERE status = 'pending';

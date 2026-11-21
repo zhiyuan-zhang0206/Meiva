@@ -89,6 +89,22 @@ class DaemonSettings(
         },
     )
 
+    host_checkpoint_blob_cache_mb: int = Field(
+        title="Checkpoint immutable blob cache limit (MiB)",
+        default=64,
+        ge=0,
+        alias="MEIVA_HOST_CHECKPOINT_BLOB_CACHE_MB",
+        description="Hosted agent-runner: memory cap in MiB for the per-host LRU cache of immutable checkpoint_blobs rows keyed by (thread_id, checkpoint_ns, channel, version). Default 64 MiB holds ~32 active agents' ~2 MiB message snapshots (matching host_agent_cache_size=32) so warm and post-TTL wakes skip re-downloading unchanged blobs over WAN/Tailscale; set 0 to disable.",
+        json_schema_extra={
+            "help_text": "Set 0 to disable checkpoint blob caching.",
+            "capability": "agent-runner",
+            "restart_required": "all",
+            "writable": True,
+            "sensitive": False,
+            "scope": "cluster-pinned",
+        },
+    )
+
     host_agent_idle_ttl_seconds: float = Field(
         title="Idle agent runtime retention (seconds)",
         default=900.0,
