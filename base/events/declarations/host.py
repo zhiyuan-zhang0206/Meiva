@@ -359,4 +359,19 @@ EVENTS: dict[str, EventSpec] = {
         "the code it was loaded with while its plist is already gone",
         tier="anomaly",
     ),
+    "workspace_hygiene_reminded": telemetry_event(
+        "workspace_hygiene_reminded",
+        "agent-host scanned an agent's local workspace after a normal turn settled to idle, "
+        "found one or more non-excluded directories above workspace_hygiene_max_items_per_dir "
+        "past cooldown, and enqueued a workspace_hygiene system_note; carries overflow_dirs, "
+        "top_dir and top_count",
+        tier="observation",
+    ),
+    "workspace_hygiene_check_failed": telemetry_event(
+        "workspace_hygiene_check_failed",
+        "the best-effort post-turn workspace hygiene check raised after a hosted turn settled "
+        "to idle; logged and ignored so turn settlement and the agent's next wake stay "
+        "unaffected",
+        tier="anomaly",
+    ),
 }

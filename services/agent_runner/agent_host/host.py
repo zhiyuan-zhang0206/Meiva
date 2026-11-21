@@ -64,7 +64,7 @@ from base.native_process.turn_identity import HostedServiceResources, HostedTurn
 from base.packages.composer_commands import CommandCatalog
 from base.packages.plugins.config_view import resolve_agent_plugin_pins
 from base.packages.plugins.extensions import EMPTY, ExtensionRegistry
-from base.paths import harness_registrations_dir, harness_sessions_dir
+from base.paths import harness_registrations_dir, harness_sessions_dir, workspace_path
 from base.telemetry.tracing import turn_span
 from services.agent_runner.agent_host.invocation import (
     InvocationHooks,
@@ -78,6 +78,9 @@ from services.agent_runner.agent_host.lifecycle.shells import (
     reap_and_announce_corpses,
 )
 from services.agent_runner.agent_host.lifecycle.shutdown import close_host_resources
+from services.agent_runner.agent_host.lifecycle.workspace_hygiene import (
+    check_and_remind_workspace_hygiene,
+)
 from services.agent_runner.agent_host.runtime import (
     AgentRuntime,
     HarnessSessions,
@@ -352,6 +355,27 @@ class AgentHost:
                     incarnation,
                     outcome,
                 )
+            await self._check_workspace_hygiene(agent_id, outcome)
+
+    async def _check_workspace_hygiene(self, agent_id: int, outcome: TurnOutcome) -> None:
+        if not outcome.completed_idle or outcome.crashed or outcome.aborted or outcome.exited:
+            return
+        try:
+            await check_and_remind_workspace_hygiene(
+                agent_id=agent_id,
+                workspace_root=workspace_path(self._home, agent_id),
+                policy=self._policy.workspace_hygiene,
+                now_epoch=self._handoff_stamping.clock.now().timestamp(),
+                pool=self._pool,
+                db=self._db,
+                bus=self._bus,
+            )
+        except Exception:
+            logger.opt(exception=True).warning(
+                "workspace hygiene check failed for agent {agent_id} — ignoring",
+                event="workspace_hygiene_check_failed",
+                agent_id=agent_id,
+            )
 
     # meiva:note
     # Build a cold or stale model runtime from this turn's slices, or retain its cache.
@@ -672,6 +696,8 @@ class AgentHost:
                         ),
                     )
                     if outcome is not None:
+                        if outcome.completed_idle and turn <= 1:
+                            outcome.completed_idle = False
                         return outcome
                 except Exception as exc:
                     emit_error_event(

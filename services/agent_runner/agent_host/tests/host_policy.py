@@ -15,7 +15,12 @@ from base.native_process.stop_timing import CANCEL_UNWIND_TIMEOUT_S
 from base.packages.plugin_providers import build_model_catalog
 from base.packages.tests.model_catalog import inert_keys
 from base.paths import meiva_home
-from services.agent_runner.agent_host.runtime import HostCachePolicy, HostPolicy, StallTiming
+from services.agent_runner.agent_host.runtime import (
+    HostCachePolicy,
+    HostPolicy,
+    StallTiming,
+    WorkspaceHygienePolicy,
+)
 
 
 # meiva:note
@@ -48,6 +53,11 @@ def configured_policy(**changes: Any) -> HostPolicy:
                 scan_interval_s=daemon.host_turn_progress_scan_interval_seconds,
                 no_progress_timeout_s=daemon.host_turn_no_progress_timeout_seconds,
                 unwind_timeout_s=CANCEL_UNWIND_TIMEOUT_S,
+            ),
+            workspace_hygiene=WorkspaceHygienePolicy(
+                enabled=daemon.workspace_hygiene_enabled,
+                max_items_per_dir=daemon.workspace_hygiene_max_items_per_dir,
+                remind_cooldown_seconds=daemon.workspace_hygiene_remind_cooldown_seconds,
             ),
         ),
         **changes,

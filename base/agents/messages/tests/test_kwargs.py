@@ -49,6 +49,7 @@ def test_note_tag_value_set() -> None:
         "exec_timeout",
         "timezone",
         "sdk_expand",
+        "workspace_hygiene",
     }
 
 

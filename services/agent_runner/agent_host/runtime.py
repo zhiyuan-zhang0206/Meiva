@@ -48,8 +48,18 @@ __all__ = [
     "HostStats",
     "StallTiming",
     "TurnOutcome",
+    "WorkspaceHygienePolicy",
     "admit_stored_model",
 ]
+
+
+# meiva:note
+# Per-turn local workspace directory hygiene thresholds read once at host boot (task #7521).
+@dataclass(frozen=True)
+class WorkspaceHygienePolicy:
+    enabled: bool = True
+    max_items_per_dir: int = 20
+    remind_cooldown_seconds: int = 86400
 
 
 # meiva:note
@@ -115,6 +125,7 @@ class HostPolicy:
     # facts it hands its exec children. The `meiva` console script a takeover relay starts is
     # installed beside it, so anything that needs that program derives it from this value.
     python: Path
+    workspace_hygiene: WorkspaceHygienePolicy = field(default_factory=WorkspaceHygienePolicy)
 
     def resolve_slices(
         self,
