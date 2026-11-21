@@ -23,21 +23,11 @@ export function useTimelineInitialImageGate(threadKey: string | undefined, place
     threadKey,
     store: new ImageGateStore(INITIAL_IMAGE_GATE_TIMEOUT_MS),
   }));
-  const [revealState, setRevealState] = useState<{
-    threadKey: string | undefined;
-    revealed: boolean;
-  }>({
-    threadKey,
-    revealed: false,
-  });
 
   let activeStore = gateState.store;
-  let initialRevealed = revealState.threadKey === threadKey ? revealState.revealed : false;
   if (gateState.threadKey !== threadKey) {
     activeStore = new ImageGateStore(INITIAL_IMAGE_GATE_TIMEOUT_MS);
     setGateState({ threadKey, store: activeStore });
-    setRevealState({ threadKey, revealed: false });
-    initialRevealed = false;
   }
 
   useEffect(() => () => activeStore.dispose(), [activeStore]);
@@ -48,16 +38,21 @@ export function useTimelineInitialImageGate(threadKey: string | undefined, place
     activeStore.getSnapshot,
   );
   const imagesSettled = !snap.hasPending || snap.timedOut;
-  const visible = placementVisible && (initialRevealed || imagesSettled);
+  const visible = placementVisible && (snap.initialRevealed || imagesSettled);
 
-  if (visible && !initialRevealed) {
-    setRevealState({ threadKey, revealed: true });
-    initialRevealed = true;
-  }
+  // meiva:note
+  // Latch `initialRevealed` in `useEffect` (never during render) so every child
+  // `useLayoutEffect` image registration completes in the same commit before the
+  // initial reveal gate can lock open.
+  useEffect(() => {
+    if (visible && !snap.initialRevealed) {
+      activeStore.markInitialRevealed();
+    }
+  }, [activeStore, snap.initialRevealed, visible]);
 
   const scopeValue = useMemo<TimelineImageScopeValue>(
-    () => ({ initialRevealed, initialGate: activeStore }),
-    [initialRevealed, activeStore],
+    () => ({ initialRevealed: snap.initialRevealed, initialGate: activeStore }),
+    [snap.initialRevealed, activeStore],
   );
 
   return { visible, scopeValue };

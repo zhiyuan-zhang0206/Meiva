@@ -77,6 +77,36 @@ def _webp_dimensions(data: bytes) -> tuple[int, int] | None:
     return None
 
 
+_EXIF_TRANSPOSE_ORIENTATIONS = frozenset({5, 6, 7, 8})
+_EXIF_ORIENTATION_TAG = 0x0112
+
+
+def _exif_orientation(segment: bytes) -> int | None:
+    if len(segment) < 14 or not segment.startswith(b"Exif\x00\x00"):
+        return None
+    tiff = segment[6:]
+    if tiff[:2] == b"II":
+        byteorder = "little"
+    elif tiff[:2] == b"MM":
+        byteorder = "big"
+    else:
+        return None
+    if len(tiff) < 8:
+        return None
+    ifd_offset = int.from_bytes(tiff[4:8], byteorder)
+    if ifd_offset + 2 > len(tiff):
+        return None
+    entry_count = int.from_bytes(tiff[ifd_offset : ifd_offset + 2], byteorder)
+    for idx in range(entry_count):
+        base = ifd_offset + 2 + idx * 12
+        if base + 12 > len(tiff):
+            break
+        tag = int.from_bytes(tiff[base : base + 2], byteorder)
+        if tag == _EXIF_ORIENTATION_TAG:
+            return int.from_bytes(tiff[base + 8 : base + 10], byteorder)
+    return None
+
+
 def _next_jpeg_marker(data: bytes, pos: int) -> tuple[int, int] | None:
     size = len(data)
     while pos < size and data[pos] != 0xFF:
@@ -88,11 +118,19 @@ def _next_jpeg_marker(data: bytes, pos: int) -> tuple[int, int] | None:
     return data[pos], pos + 1
 
 
+def _sof_dimensions(data: bytes, pos: int, orientation: int | None) -> tuple[int, int] | None:
+    height, width = struct.unpack(">HH", data[pos + 3 : pos + 7])
+    if orientation in _EXIF_TRANSPOSE_ORIENTATIONS:
+        width, height = height, width
+    return _positive_size(width, height)
+
+
 def _jpeg_dimensions(data: bytes) -> tuple[int, int] | None:
     if len(data) < 4 or data[:2] != b"\xff\xd8":
         return None
     pos = 2
     size = len(data)
+    orientation: int | None = None
     while (found := _next_jpeg_marker(data, pos)) is not None:
         marker, pos = found
         if marker in (0xD8, 0xD9, 0x01) or 0xD0 <= marker <= 0xD7:
@@ -102,9 +140,10 @@ def _jpeg_dimensions(data: bytes) -> tuple[int, int] | None:
         seg_len = struct.unpack(">H", data[pos : pos + 2])[0]
         if seg_len < 2 or pos + seg_len > size:
             return None
-        if marker in _JPEG_SOF_MARKERS and seg_len >= 7:
-            height, width = struct.unpack(">HH", data[pos + 3 : pos + 7])
-            return (width, height) if width > 0 and height > 0 else None
+        if marker == 0xE1 and orientation is None:
+            orientation = _exif_orientation(data[pos + 2 : pos + seg_len])
+        elif marker in _JPEG_SOF_MARKERS and seg_len >= 7:
+            return _sof_dimensions(data, pos, orientation)
         pos += seg_len
     return None
 

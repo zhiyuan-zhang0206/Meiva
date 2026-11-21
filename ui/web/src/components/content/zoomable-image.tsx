@@ -29,18 +29,19 @@ import {
 export interface ImageGateSnapshot {
   readonly hasPending: boolean;
   readonly timedOut: boolean;
+  readonly initialRevealed: boolean;
 }
 
 // meiva:note
 // Tracks unknown-dimension Markdown images in flight for either a timeline's initial
 // cold-load reveal or a single message's post-reveal atomic batch. Subscribers only
-// re-render when `hasPending` or `timedOut` transitions, and a bounded safety timeout
-// guarantees a broken or hung URL never blocks rendering indefinitely.
+// re-render when `hasPending`, `timedOut`, or `initialRevealed` transitions, and a
+// bounded safety timeout guarantees a broken or hung URL never blocks rendering.
 export class ImageGateStore {
   private readonly pending = new Set<string>();
   private readonly listeners = new Set<() => void>();
   private timer: ReturnType<typeof setTimeout> | null = null;
-  private snap: ImageGateSnapshot = { hasPending: false, timedOut: false };
+  private snap: ImageGateSnapshot = { hasPending: false, timedOut: false, initialRevealed: false };
 
   constructor(private readonly timeoutMs: number) {}
 
@@ -58,7 +59,7 @@ export class ImageGateStore {
     this.pending.add(id);
     if (wasEmpty) {
       this.startTimer();
-      this.publish(true, false);
+      this.publish(true, false, this.snap.initialRevealed);
     }
     return () => {
       this.settle(id);
@@ -69,8 +70,13 @@ export class ImageGateStore {
     if (!this.pending.delete(id)) return;
     if (this.pending.size === 0) {
       this.clearTimer();
-      this.publish(false, false);
+      this.publish(false, false, this.snap.initialRevealed);
     }
+  }
+
+  markInitialRevealed(): void {
+    if (this.snap.initialRevealed) return;
+    this.publish(this.snap.hasPending, this.snap.timedOut, true);
   }
 
   dispose(): void {
@@ -84,7 +90,7 @@ export class ImageGateStore {
     this.timer = setTimeout(() => {
       this.timer = null;
       if (this.pending.size > 0) {
-        this.publish(true, true);
+        this.publish(true, true, this.snap.initialRevealed);
       }
     }, this.timeoutMs);
   }
@@ -96,9 +102,15 @@ export class ImageGateStore {
     }
   }
 
-  private publish(hasPending: boolean, timedOut: boolean): void {
-    if (this.snap.hasPending === hasPending && this.snap.timedOut === timedOut) return;
-    this.snap = { hasPending, timedOut };
+  private publish(hasPending: boolean, timedOut: boolean, initialRevealed: boolean): void {
+    if (
+      this.snap.hasPending === hasPending &&
+      this.snap.timedOut === timedOut &&
+      this.snap.initialRevealed === initialRevealed
+    ) {
+      return;
+    }
+    this.snap = { hasPending, timedOut, initialRevealed };
     for (const listener of this.listeners) listener();
   }
 }
@@ -239,7 +251,11 @@ type MarkdownZoomableImageProps = Omit<ComponentPropsWithoutRef<"img">, "src"> &
   src?: string;
 };
 
-const IDLE_GATE_SNAPSHOT: ImageGateSnapshot = { hasPending: false, timedOut: false };
+const IDLE_GATE_SNAPSHOT: ImageGateSnapshot = {
+  hasPending: false,
+  timedOut: false,
+  initialRevealed: false,
+};
 const NOOP_GATE_SUBSCRIBE = () => () => undefined;
 const GET_IDLE_GATE_SNAPSHOT = () => IDLE_GATE_SNAPSHOT;
 
@@ -435,7 +451,7 @@ function TimelineMarkdownImg({
         ? "pointer-events-none absolute size-0 opacity-0"
         : cn(
             "block cursor-zoom-in [a_&]:cursor-pointer",
-            slotDims ? "h-full w-full object-contain" : "h-auto max-w-full",
+            slotDims ? "absolute inset-0 h-full w-full object-contain" : "h-auto max-w-full",
             mode === "known" && "transition-opacity duration-150",
             showKnownSpinner ? "opacity-0" : "opacity-100",
             className,
@@ -449,15 +465,24 @@ function TimelineMarkdownImg({
         data-testid={waitingForBatch ? "timeline-image-batch-pending" : "timeline-image-slot"}
         style={
           !waitingForBatch && slotDims
-            ? { width: `${slotDims.width}px`, aspectRatio: `${slotDims.width} / ${slotDims.height}` }
+            ? {
+                width: `${slotDims.width}px`,
+                aspectRatio: `${slotDims.width} / ${slotDims.height}`,
+              }
             : undefined
         }
         className={
           waitingForBatch
             ? "relative inline-flex items-center align-middle"
             : cn(
-                "relative my-1 inline-flex max-w-full align-middle",
-                slotDims && cn("rounded border border-border bg-muted/30", OVERFLOW_HIDDEN),
+                "relative my-1 align-middle",
+                slotDims
+                  ? cn(
+                      "inline-block max-w-full rounded border border-border",
+                      showKnownSpinner && "bg-muted/30",
+                      OVERFLOW_HIDDEN,
+                    )
+                  : "inline-flex max-w-full",
               )
         }
       >

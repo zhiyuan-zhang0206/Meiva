@@ -194,11 +194,13 @@ function Thumbnail({
         className={
           box
             ? cn(
-                "relative block max-w-[min(16rem,100%)] max-h-48 self-start rounded border border-border bg-muted/30 cursor-zoom-in p-0",
+                "relative block max-w-[min(16rem,100%)] max-h-48 self-start rounded border border-border cursor-zoom-in p-0",
+                !loaded && !failed && "bg-muted/30",
                 OVERFLOW_HIDDEN,
               )
             : cn(
-                "relative block h-48 w-64 max-w-[min(16rem,100%)] self-start rounded border border-border bg-muted/25 cursor-zoom-in p-0",
+                "relative block h-48 w-64 max-w-[min(16rem,100%)] self-start rounded border border-border cursor-zoom-in p-0",
+                !loaded && !failed && "bg-muted/25",
                 OVERFLOW_HIDDEN,
               )
         }

@@ -1,7 +1,9 @@
-import { act, fireEvent, screen } from "@testing-library/react";
+import { act, fireEvent, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 
-import { preloadChatMarkdown } from "@/components/content/markdown";
+import { createLazyChunk } from "@/components/content/lazy-chunk";
+import { ChatMarkdownRendererProvider, preloadChatMarkdown } from "@/components/content/markdown";
+import { MarkdownZoomableImage } from "@/components/content/zoomable-image";
 import {
   INITIAL_IMAGE_GATE_TIMEOUT_MS,
   ITEM_IMAGE_BATCH_TIMEOUT_MS,
@@ -72,12 +74,18 @@ describe("TimelineView image placeholders and zero-jitter loading", () => {
 
     const mdSlot = container.querySelector<HTMLElement>('[data-testid="timeline-image-slot"]')!;
     expect(mdSlot.tagName).toBe("SPAN");
+    expect(mdSlot.className).toContain("inline-block");
+    expect(mdSlot.className).toContain("max-w-full");
+    expect(mdSlot.className).toContain("bg-muted/30");
     expect(mdSlot.style.width).toBe("400px");
     expect(mdSlot.style.aspectRatio).toBe("400 / 200");
     expect(mdSlot.querySelector('[data-testid="timeline-image-placeholder"]')).not.toBeNull();
     const mdImg = mdSlot.querySelector("img")!;
+    expect(mdImg.className).toContain("absolute");
+    expect(mdImg.className).toContain("inset-0");
     fireImageLoad(mdImg, 400, 200);
     expect(mdSlot.querySelector('[data-testid="timeline-image-placeholder"]')).toBeNull();
+    expect(mdSlot.className).not.toContain("bg-muted/30");
     expect(mdSlot.style.width).toBe("400px");
     expect(mdSlot.style.aspectRatio).toBe("400 / 200");
   });
@@ -147,6 +155,63 @@ describe("TimelineView image placeholders and zero-jitter loading", () => {
     expect(slots).toHaveLength(2);
     expect(slots[0].style.width).toBe("500px");
     expect(slots[1].style.width).toBe("600px");
+  });
+
+  it("holds the initial reveal while ChatMarkdown chunk is pending for image-bearing content", async () => {
+    type ChunkRenderer = Parameters<typeof ChatMarkdownRendererProvider>[0]["value"] extends {
+      peek: () => infer R | null;
+    }
+      ? R
+      : never;
+    const FakeImageMarkdown = (() => (
+      <div className="chat-md">
+        <p>
+          <MarkdownZoomableImage src="https://example.com/lazy-chunk.png" alt="lazy" />
+        </p>
+      </div>
+    )) as unknown as ChunkRenderer;
+
+    let resolveRenderer!: (value: ChunkRenderer) => void;
+    const deferredChunk = createLazyChunk<ChunkRenderer>({
+      name: "test-deferred-markdown",
+      importModule: () =>
+        new Promise<ChunkRenderer>((resolve) => {
+          resolveRenderer = resolve;
+        }),
+    });
+
+    const { container } = render(
+      <ChatMarkdownRendererProvider value={deferredChunk}>
+        <TimelineView
+          threadKey="14"
+          items={[
+            makeItem({
+              item_id: "1.0",
+              kind: "agent_chat",
+              payload: "Look at ![lazy](https://example.com/lazy-chunk.png)",
+            }),
+          ]}
+        />
+      </ChatMarkdownRendererProvider>,
+    );
+
+    const column = container.querySelector<HTMLElement>("[data-timeline-column]")!;
+    expect(screen.getByTestId("chat-markdown-plain")).toBeTruthy();
+    expect(column.style.visibility).toBe("hidden");
+    expect(screen.getByTestId("cold-load-spinner")).toBeTruthy();
+
+    await act(async () => {
+      resolveRenderer(FakeImageMarkdown);
+      await Promise.resolve();
+    });
+
+    await waitFor(() => expect(container.querySelector("img")).not.toBeNull());
+    expect(column.style.visibility).toBe("hidden");
+    expect(screen.getByTestId("cold-load-spinner")).toBeTruthy();
+
+    fireImageLoad(container.querySelector("img")!, 480, 320);
+    expect(column.style.visibility).toBe("");
+    expect(screen.queryByTestId("cold-load-spinner")).toBeNull();
   });
 
   it("reveals initial cold load after the safety timeout even if an unknown-size image hangs", () => {

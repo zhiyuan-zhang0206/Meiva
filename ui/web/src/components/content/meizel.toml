@@ -14,7 +14,7 @@ exports = ["code-highlighter-preloader.tsx", "copy-button.tsx", "file-path-utils
 "markdown-image-url.test.ts" = ["markdown-image-url.ts"]
 "markdown-image-url.ts" = []
 "markdown.test.tsx" = ["fixtures", "lazy-chunk.ts", "markdown-renderer.tsx", "markdown.tsx", "python-code.tsx", "zoomable-image.tsx"]
-"markdown.tsx" = ["lazy-chunk.ts", "markdown-renderer.tsx"]
+"markdown.tsx" = ["lazy-chunk.ts", "markdown-renderer.tsx", "zoomable-image.tsx"]
 "python-code.test.tsx" = ["lazy-chunk.ts", "python-code.tsx"]
 "python-code.tsx" = ["copy-button.tsx", "lazy-chunk.ts"]
 

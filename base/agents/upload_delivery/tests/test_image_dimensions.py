@@ -104,3 +104,44 @@ def test_partition_delivered_uploads_falls_back_to_delivered_path_when_staged_mi
     assert file_uploads == []
     assert len(image_uploads) == 1
     assert (image_uploads[0]["width"], image_uploads[0]["height"]) == (400, 200)
+
+
+def test_partition_delivered_uploads_swaps_exif_rotated_portrait_jpeg(tmp_path: Path) -> None:
+    storage_dir = tmp_path / "staged-exif"
+    buf = BytesIO()
+    img = Image.new("RGB", (800, 400), color=(40, 80, 120))
+    exif = img.getexif()
+    exif[274] = 6
+    img.save(buf, format="JPEG", exif=exif)
+    jpg_bytes = buf.getvalue()
+
+    staged_id = "9" * 32
+    sp = staged_path(storage_dir, staged_id)
+    sp.parent.mkdir(parents=True, exist_ok=True)
+    _ = sp.write_bytes(jpg_bytes)
+
+    manifest = Manifest(
+        batch_id="c" * 32,
+        agent_id=7,
+        sent_at="2026-11-21T22:00:00+00:00",
+        directory="20261121-220000",
+        objects=[
+            Object(
+                ordinal=0,
+                name="portrait.jpg",
+                staged_id=staged_id,
+                size=len(jpg_bytes),
+                sha256="c" * 64,
+                content_type="image/jpeg",
+            )
+        ],
+    )
+
+    image_uploads, _ = partition_delivered_uploads(
+        manifest,
+        ["/remote/workspaces/7/uploads/20261121-220000/portrait.jpg"],
+        storage_directory=str(storage_dir),
+    )
+
+    assert len(image_uploads) == 1
+    assert (image_uploads[0]["width"], image_uploads[0]["height"]) == (400, 800)

@@ -93,3 +93,26 @@ def test_attach_item_extracts_dimensions_for_each_data_uri() -> None:
     assert len(items) == 1
     assert items[0].images == [uri_ok, uri_bad]
     assert items[0].image_dimensions == [ImageDimensions(width=500, height=250), None]
+
+
+def test_attach_item_swaps_dimensions_for_exif_rotated_jpeg_data_uri() -> None:
+    buf = BytesIO()
+    img = Image.new("RGB", (600, 300), color=(30, 60, 90))
+    exif = img.getexif()
+    exif[274] = 6
+    img.save(buf, format="JPEG", exif=exif)
+    uri = "data:image/jpeg;base64," + base64.standard_b64encode(buf.getvalue()).decode("ascii")
+
+    msg = HumanMessage(
+        content=[
+            {"type": "text", "text": "Files attached during this turn:"},
+            {"type": "text", "text": "- [1] vertical.jpg"},
+            {"type": "image_url", "image_url": {"url": uri}},
+        ],
+        additional_kwargs={"meiva_msg_type": MeivaMsgType.ATTACH.value},
+    )
+
+    items, _ = build_timeline_items([msg], inputs=_policy())
+
+    assert len(items) == 1
+    assert items[0].image_dimensions == [ImageDimensions(width=300, height=600)]
