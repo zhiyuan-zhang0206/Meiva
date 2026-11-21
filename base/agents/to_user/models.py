@@ -3,8 +3,6 @@ from typing import Annotated, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from base.config.domains.to_user import FileAccess
-
 DOCUMENT_FILENAME = "to_user.md"
 
 # meiva:note
@@ -59,7 +57,10 @@ class WorkspaceFileRequest(BaseModel):
     mode: Literal["content", "raw", "list"]
     custom_cwd: str | None = None
     byte_range: str | None = Field(default=None, max_length=256)
-    file_access: FileAccess = "workspaces"
+    # meiva:note
+    # The values of `base.config.domains.to_user.FileAccess`, spelled out: the models stay importable
+    # without the config layer (and `pydantic_settings`), which the exec child's lite boot must not load.
+    file_access: Literal["all", "workspaces"] = "workspaces"
 
 
 # meiva:note

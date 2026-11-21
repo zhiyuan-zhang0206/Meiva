@@ -16,9 +16,9 @@ from ops.to_user import (
     FileReach,
     WorkspaceFileError,
     owned_workspace,
+    read_at_most,
     read_to_user,
     read_workspace_file_content,
-    read_workspace_file_raw,
 )
 
 # meiva:note
@@ -147,16 +147,14 @@ def test_explicit_same_owner_workspace_path_resolves_across_host_prefixes_and_bl
 
 
 # meiva:note
-# procfs files report a size of 0 and stream far more (`pagemap` runs to hundreds of GiB): the
-# read is cut at the limit, not trusted to `st_size`. Linux only.
-@pytest.mark.skipif(not Path("/proc/self/pagemap").is_file(), reason="needs Linux procfs")
+# The shared reader takes no reported size at all: a file that reports 0 (procfs) is still cut
+# at the byte limit. A real file exercises both one byte over the limit and the exact boundary.
 def test_reads_stop_at_the_limit_whatever_the_reported_size(tmp_path: Path) -> None:
-    reach = FileReach(home=tmp_path / "served-home", user_home=tmp_path / "account", access="all")
-    assert Path("/proc/self/pagemap").stat().st_size == 0
+    stream = tmp_path / "stream.txt"
+    payload = b"x" * 17
+    _ = stream.write_bytes(payload)
 
-    with pytest.raises(WorkspaceFileError) as content_error:
-        _ = read_workspace_file_content(reach, 10, "/proc/self/pagemap")
-    assert content_error.value.status_code == 413
-    with pytest.raises(WorkspaceFileError) as raw_error:
-        _ = read_workspace_file_raw(reach, 10, "/proc/self/status", max_bytes=16)
-    assert raw_error.value.status_code == 413
+    with pytest.raises(WorkspaceFileError) as error:
+        _ = read_at_most(stream, 16, "File exceeds the size limit")
+    assert error.value.status_code == 413
+    assert read_at_most(stream, 17, "File exceeds the size limit") == payload
