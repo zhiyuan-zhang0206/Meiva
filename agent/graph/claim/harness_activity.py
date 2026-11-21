@@ -13,7 +13,7 @@ from base.events.live.projection import TurnStarted as ProjectionTurnStarted
 from base.events.live.publisher import AgentEventPublisher
 from base.lm.catalog import ModelCatalog
 from base.lm.harness.engine import HarnessTurn
-from base.lm.harness.registry import TurnTimingStore
+from base.lm.harness.registry import TurnTimingStore, timeline_turn_id
 from base.lm.usage import UsageFields, log_usage_fields
 from base.log import logger
 from base.paths import harness_sessions_dir
@@ -122,7 +122,11 @@ class HarnessTurnTimingTracker:
 
     @property
     def active_turn_id(self) -> str | None:
-        return self._open_turn.turn_id if self._open_turn is not None else None
+        return (
+            timeline_turn_id(self._open_turn.turn_id, self._open_turn.started_iso)
+            if self._open_turn is not None
+            else None
+        )
 
     @property
     def active_turn_started_at(self) -> str | None:
@@ -155,7 +159,7 @@ class HarnessTurnTimingTracker:
         self._publisher.emit(
             ProjectionTurnStarted(
                 agent_id=self._agent_id,
-                turn_id=turn_id,
+                turn_id=timeline_turn_id(turn_id, started_iso),
                 started_at=started_iso,
             ).model_dump_json()
         )
@@ -171,7 +175,7 @@ class HarnessTurnTimingTracker:
         if self._open_turn is not None:
             spans.append(
                 TurnTimingSpan(
-                    turn_id=self._open_turn.turn_id,
+                    turn_id=timeline_turn_id(self._open_turn.turn_id, self._open_turn.started_iso),
                     start_pos=self._open_turn.start_offset,
                     end_pos=None,
                     duration_ms=None,
@@ -219,8 +223,10 @@ class HarnessTurnTimingTracker:
             base_start = min_item_offset
         start_offset = max(self._last_closed_end_offset, base_start)
         resolved_end = max(end_offset, start_offset)
+        timing_id: str | None = None
         if tid:
-            span = TurnTimingSpan(tid, start_offset, resolved_end, duration_ms)
+            timing_id = timeline_turn_id(tid, started_iso)
+            span = TurnTimingSpan(timing_id, start_offset, resolved_end, duration_ms)
             self._closed_spans.append(span)
             if self._store is not None:
                 self._store.close_turn(
@@ -240,9 +246,10 @@ class HarnessTurnTimingTracker:
         self._last_closed_end_offset = max(self._last_closed_end_offset, resolved_end)
         published_items = [p.item for p in self._published.values()]
         self._published.clear()
-        if published_items and tid:
+        if published_items and timing_id:
             apply_turn_timings(
-                published_items, (TurnTimingSpan(tid, start_offset, resolved_end, duration_ms),)
+                published_items,
+                (TurnTimingSpan(timing_id, start_offset, resolved_end, duration_ms),),
             )
             self._publisher.emit(
                 TimelineSnapshot(
