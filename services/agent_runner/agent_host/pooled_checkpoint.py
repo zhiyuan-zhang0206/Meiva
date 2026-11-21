@@ -36,7 +36,7 @@ from base.native_process.runtime_incarnation import StaleIncarnationError
 # Default 64 MiB byte cap mirrors `DaemonSettings.host_checkpoint_blob_cache_mb` (32 warm agents x ~2 MiB).
 _DEFAULT_BLOB_CACHE_MAX_BYTES = 64 * 1024 * 1024
 
-_SELECT_COLUMNS: LiteralString = """
+SELECT_COLUMNS: LiteralString = """
 select
     thread_id,
     checkpoint,
@@ -99,8 +99,8 @@ _WHERE_BY_ID: LiteralString = "WHERE thread_id = %s AND checkpoint_ns = %s AND c
 _WHERE_LATEST: LiteralString = (
     "WHERE thread_id = %s AND checkpoint_ns = %s ORDER BY checkpoint_id DESC LIMIT 1"
 )
-_SELECT_BY_ID: LiteralString = _SELECT_COLUMNS + _WHERE_BY_ID
-_SELECT_LATEST: LiteralString = _SELECT_COLUMNS + _WHERE_LATEST
+_SELECT_BY_ID: LiteralString = SELECT_COLUMNS + _WHERE_BY_ID
+_SELECT_LATEST: LiteralString = SELECT_COLUMNS + _WHERE_LATEST
 _SELECT_EXCLUDING_BY_ID: LiteralString = _SELECT_EXCLUDING_CACHED_COLUMNS + _WHERE_BY_ID
 _SELECT_EXCLUDING_LATEST: LiteralString = _SELECT_EXCLUDING_CACHED_COLUMNS + _WHERE_LATEST
 
@@ -200,11 +200,18 @@ class BlobCacheStats:
 # meiva:note
 # Byte-bounded LRU cache for immutable `checkpoint_blobs` rows.
 #
-# Postgres `checkpoint_blobs` has PRIMARY KEY `(thread_id, checkpoint_ns, channel, version)` and is
-# only ever written with `ON CONFLICT DO NOTHING`, so a non-empty `(thread_id, checkpoint_ns,
-# channel, version)` payload never changes. Indexing by `(thread_id, checkpoint_ns, channel)` keeps
-# only the latest observed version per channel so the exclusion array passed to Postgres stays
-# bounded to the thread's channel count (~20 entries) and total memory stays under `max_bytes`.
+# Immutability rests on two preconditions:
+# 1. Postgres `checkpoint_blobs` has PRIMARY KEY `(thread_id, checkpoint_ns, channel, version)`
+#    and is only ever written with `ON CONFLICT DO NOTHING`, so an existing row is never mutated.
+# 2. A `thread_id` never reuses a previously deleted `version` string: LangGraph's
+#    `get_next_version` appends a random suffix, agent IDs are never reused, forks
+#    (`checkpoint_copy.py`) write to a new `thread_id`, and `blob_vacuum` only reclaims dead
+#    tuples without deleting rows. Bypassing this saver with raw SQL delete + same-version
+#    reinsert would violate precondition (2) and serve a stale cached blob.
+#
+# Indexing by `(thread_id, checkpoint_ns, channel)` keeps only the latest observed version per
+# channel so the exclusion array passed to Postgres stays bounded to the thread's channel count
+# (~20 entries) and total memory stays under `max_bytes`.
 class _CheckpointBlobCache:
     def __init__(self, max_bytes: int) -> None:
         self._max_bytes = max(0, max_bytes)
@@ -614,6 +621,7 @@ class PooledPostgresSaver(HistoryAsyncPostgresSaver):
             await self._verify_owner(conn, thread_id, for_delete=True)
             lease = AsyncPostgresSaver(conn=conn, serde=self.serde)
             await lease.adelete_thread(thread_id)
+        self._blob_cache.drop_thread(thread_id)
 
     @asynccontextmanager
     async def _cursor(self, *, pipeline: bool = False) -> AsyncGenerator[AsyncCursor[DictRow]]:

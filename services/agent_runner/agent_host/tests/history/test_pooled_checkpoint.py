@@ -6,6 +6,7 @@ from typing import Literal, cast
 import pytest
 from langchain_core.runnables import RunnableConfig
 from langgraph.checkpoint.base import Checkpoint, empty_checkpoint
+from langgraph.checkpoint.postgres.base import BasePostgresSaver
 from langgraph.constants import PUSH
 from psycopg import AsyncConnection, errors
 from psycopg.pq import PipelineStatus, TransactionStatus
@@ -15,7 +16,11 @@ from psycopg_pool import AsyncConnectionPool
 from agent.checkpoint import flush_checkpoint
 from base.config import settings
 from services.agent_runner.agent_host.daemon import build_checkpointer
-from services.agent_runner.agent_host.pooled_checkpoint import PooledPostgresSaver
+from services.agent_runner.agent_host.pooled_checkpoint import (
+    SELECT_COLUMNS,
+    BlobCacheStats,
+    PooledPostgresSaver,
+)
 
 _LOCK_KEY = 918273
 
@@ -44,8 +49,8 @@ class _ReadGatedSaver(PooledPostgresSaver):
     )
 
 
-def _config(thread_id: str) -> RunnableConfig:
-    return {"configurable": {"thread_id": thread_id, "checkpoint_ns": ""}}
+def _config(thread_id: str, checkpoint_ns: str = "") -> RunnableConfig:
+    return {"configurable": {"thread_id": thread_id, "checkpoint_ns": checkpoint_ns}}
 
 
 def _checkpoint() -> Checkpoint:
@@ -300,28 +305,133 @@ async def test_blob_cache_fetches_updated_channel_and_drops_on_delete(
 
         await saver.adelete_thread("blob-cache-t2")
         assert saver.blob_cache_stats().total_bytes == 0
+        assert await saver.aget_tuple(_config("blob-cache-t2")) is None
+        assert await saver.aget_tuple(cfg1) is None
 
 
 async def test_blob_cache_eviction_and_disabled(adb_conn: AsyncConnection) -> None:
     async with _pool(2) as pool:
-        tiny = PooledPostgresSaver(pool, blob_cache_max_bytes=512)
+        cap = 700
+        tiny = PooledPostgresSaver(pool, blob_cache_max_bytes=cap)
         cp3 = empty_checkpoint()
-        cp3["channel_values"] = {"a": "x" * 300, "b": "y" * 300}
-        cp3["channel_versions"] = {"a": "1", "b": "1"}
+        expected = {
+            "a": {"v": "x" * 300},
+            "b": {"v": "y" * 300},
+            "c": {"v": "z" * 300},
+        }
+        cp3["channel_values"] = expected
+        cp3["channel_versions"] = {"a": "1", "b": "1", "c": "1"}
         await tiny.aput(
             _config("blob-cache-evict"),
             cp3,
             {"source": "input", "step": 0},
-            {"a": "1", "b": "1"},
+            {"a": "1", "b": "1", "c": "1"},
         )
-        evict_read = await tiny.aget_tuple(_config("blob-cache-evict"))
-        assert evict_read is not None
-        assert evict_read.checkpoint["channel_values"]["a"] == "x" * 300
-        assert evict_read.checkpoint["channel_values"]["b"] == "y" * 300
-        assert tiny._blob_cache.total_bytes <= 512
+        first = await tiny.aget_tuple(_config("blob-cache-evict"))
+        assert first is not None
+        assert first.checkpoint["channel_values"] == expected
+        stats1 = tiny.blob_cache_stats()
+        assert stats1.fetched_blobs == 3
+        assert stats1.hits == 0
+        assert 300 < stats1.total_bytes <= cap
+
+        second = await tiny.aget_tuple(_config("blob-cache-evict"))
+        assert second is not None
+        assert second.checkpoint["channel_values"] == expected
+        stats2 = tiny.blob_cache_stats()
+        assert stats2.fetched_blobs == 4
+        assert stats2.hits == 2
+        assert 300 < stats2.total_bytes <= cap
 
         disabled = PooledPostgresSaver(pool, blob_cache_max_bytes=0)
         off_read = await disabled.aget_tuple(_config("blob-cache-evict"))
         assert off_read is not None
-        assert off_read.checkpoint["channel_values"]["a"] == "x" * 300
-        assert disabled._blob_cache.total_bytes == 0
+        assert off_read.checkpoint["channel_values"] == expected
+        assert disabled.blob_cache_stats() == BlobCacheStats(hits=0, fetched_blobs=0, total_bytes=0)
+
+
+async def test_blob_cache_isolates_namespaces_with_same_version(
+    adb_conn: AsyncConnection,
+) -> None:
+    async with _pool(2) as pool:
+        saver = PooledPostgresSaver(pool, blob_cache_max_bytes=1024 * 1024)
+        root_cp = empty_checkpoint()
+        root_cp["channel_values"] = {"payload": {"from": "root"}}
+        root_cp["channel_versions"] = {"payload": "1"}
+        await saver.aput(
+            _config("blob-cache-ns", ""),
+            root_cp,
+            {"source": "input", "step": 0},
+            {"payload": "1"},
+        )
+
+        sub_cp = empty_checkpoint()
+        sub_cp["channel_values"] = {"payload": {"from": "sub"}}
+        sub_cp["channel_versions"] = {"payload": "1"}
+        await saver.aput(
+            _config("blob-cache-ns", "sub:1"),
+            sub_cp,
+            {"source": "input", "step": 0},
+            {"payload": "1"},
+        )
+
+        root_first = await saver.aget_tuple(_config("blob-cache-ns", ""))
+        assert root_first is not None
+        assert root_first.checkpoint["channel_values"]["payload"] == {"from": "root"}
+
+        sub_first = await saver.aget_tuple(_config("blob-cache-ns", "sub:1"))
+        assert sub_first is not None
+        assert sub_first.checkpoint["channel_values"]["payload"] == {"from": "sub"}
+        assert saver.blob_cache_stats().fetched_blobs == 2
+        assert saver.blob_cache_stats().hits == 0
+
+        root_second = await saver.aget_tuple(_config("blob-cache-ns", ""))
+        sub_second = await saver.aget_tuple(_config("blob-cache-ns", "sub:1"))
+        assert root_second is not None
+        assert sub_second is not None
+        assert root_second.checkpoint["channel_values"]["payload"] == {"from": "root"}
+        assert sub_second.checkpoint["channel_values"]["payload"] == {"from": "sub"}
+        assert saver.blob_cache_stats().fetched_blobs == 2
+        assert saver.blob_cache_stats().hits == 2
+
+
+async def test_blob_cache_historical_checkpoint_id_reads_old_value(
+    adb_conn: AsyncConnection,
+) -> None:
+    async with _pool(2) as pool:
+        saver = PooledPostgresSaver(pool, blob_cache_max_bytes=1024 * 1024)
+        cp1 = empty_checkpoint()
+        cp1["channel_values"] = {"payload": {"gen": 1}}
+        cp1["channel_versions"] = {"payload": "1"}
+        cfg1 = await saver.aput(
+            _config("blob-cache-hist"),
+            cp1,
+            {"source": "input", "step": 0},
+            {"payload": "1"},
+        )
+
+        cp2 = empty_checkpoint()
+        cp2["channel_values"] = {"payload": {"gen": 2}}
+        cp2["channel_versions"] = {"payload": "2"}
+        await saver.aput(
+            cfg1,
+            cp2,
+            {"source": "loop", "step": 1},
+            {"payload": "2"},
+        )
+
+        latest_first = await saver.aget_tuple(_config("blob-cache-hist"))
+        assert latest_first is not None
+        assert latest_first.checkpoint["channel_values"]["payload"] == {"gen": 2}
+
+        historical = await saver.aget_tuple(cfg1)
+        assert historical is not None
+        assert historical.checkpoint["channel_values"]["payload"] == {"gen": 1}
+
+        latest_second = await saver.aget_tuple(_config("blob-cache-hist"))
+        assert latest_second is not None
+        assert latest_second.checkpoint["channel_values"]["payload"] == {"gen": 2}
+
+
+def test_select_columns_matches_upstream_sql() -> None:
+    assert SELECT_COLUMNS == BasePostgresSaver.SELECT_SQL
