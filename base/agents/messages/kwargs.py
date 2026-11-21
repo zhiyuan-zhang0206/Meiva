@@ -72,6 +72,7 @@ class NoteTag(StrEnum):
     TIMEZONE = "timezone"
     SDK_EXPAND = "sdk_expand"
     WORKSPACE_HYGIENE = "workspace_hygiene"
+    PERSONAL_DREAM = "personal_dream"
 
 
 class MeivaUsage(TypedDict, total=False):

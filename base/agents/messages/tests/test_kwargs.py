@@ -50,6 +50,7 @@ def test_note_tag_value_set() -> None:
         "timezone",
         "sdk_expand",
         "workspace_hygiene",
+        "personal_dream",
     }
 
 

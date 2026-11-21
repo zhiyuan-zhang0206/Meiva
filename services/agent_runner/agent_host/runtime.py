@@ -46,6 +46,7 @@ __all__ = [
     "HostCachePolicy",
     "HostPolicy",
     "HostStats",
+    "PersonalDreamPolicy",
     "StallTiming",
     "TurnOutcome",
     "WorkspaceHygienePolicy",
@@ -60,6 +61,16 @@ class WorkspaceHygienePolicy:
     enabled: bool = True
     max_items_per_dir: int = 20
     remind_cooldown_seconds: int = 86400
+
+
+# meiva:note
+# Per-turn local personal memory Self-Dream thresholds read once at host boot (task #7522).
+@dataclass(frozen=True)
+class PersonalDreamPolicy:
+    enabled: bool = True
+    cooldown_seconds: int = 604800
+    index_max_lines: int = 150
+    max_files: int = 40
 
 
 # meiva:note
@@ -126,6 +137,7 @@ class HostPolicy:
     # installed beside it, so anything that needs that program derives it from this value.
     python: Path
     workspace_hygiene: WorkspaceHygienePolicy = field(default_factory=WorkspaceHygienePolicy)
+    personal_dream: PersonalDreamPolicy = field(default_factory=PersonalDreamPolicy)
 
     def resolve_slices(
         self,

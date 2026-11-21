@@ -211,6 +211,8 @@ above (or when its name is unregistered); otherwise it stays in the JSONL mirror
 | `launchd_retirement` | launchctl print still lists a job after its bootout; the retired job keeps running the code it was loaded with while its plist is already gone | anomaly | — | — | events | — |
 | `workspace_hygiene_reminded` | agent-host scanned an agent's local workspace after a normal turn settled to idle, found one or more non-excluded directories above workspace_hygiene_max_items_per_dir past cooldown, and enqueued a workspace_hygiene system_note; carries overflow_dirs, top_dir and top_count | observation | — | — | events | — |
 | `workspace_hygiene_check_failed` | the best-effort post-turn workspace hygiene check raised after a hosted turn settled to idle; logged and ignored so turn settlement and the agent's next wake stay unaffected | anomaly | — | — | events | — |
+| `personal_dream_reminded` | agent-host inspected an agent's local `<workspace>/memory/` after a normal turn settled to idle, matched Personal Self-Dream capacity or active-change criteria past cooldown, and enqueued a personal_dream system_note; carries reason, index_lines and file_count | observation | — | — | events | — |
+| `personal_dream_check_failed` | the best-effort post-turn personal Self-Dream check raised after a hosted turn settled to idle; logged and ignored so turn settlement and the agent's next wake stay unaffected | anomaly | — | — | events | — |
 | `node_enter` | LangGraph node entered — sink-filtered out of the event stream (PR #1758); log files only | noise | — | — | file | — |
 | `node_exit` | LangGraph node exited | noise | count, nodes | — | events | — |
 | `service_started` | gateway/daemon started | noise | name, pid | — | events | ✓ |

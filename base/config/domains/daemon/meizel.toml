@@ -2,5 +2,5 @@ purity = "strict"
 exports = ["settings.py"]
 
 [uses]
-"settings.py" = ["delivery_watchdog_fields.py", "main_red_watch_fields.py", "workspace_hygiene_fields.py"]
+"settings.py" = ["delivery_watchdog_fields.py", "main_red_watch_fields.py", "personal_dream_fields.py", "workspace_hygiene_fields.py"]
 "tests" = ["settings.py"]
