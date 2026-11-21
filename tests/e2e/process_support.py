@@ -8,7 +8,6 @@ import os
 import re
 import shutil
 import signal
-import socket
 import subprocess
 import sys
 import time
@@ -49,7 +48,6 @@ __all__ = [
     "scan_e2e_processes",
     "sweep_stale_e2e_processes",
     "truncate_with_deadlock_retry",
-    "wait_for_port",
 ]
 
 
@@ -128,22 +126,6 @@ def dead_server_evidence() -> str:
             f"exit code {code}; log tail:\n{proc_log_tail(log_path)}"
         )
     return "\n\n".join(parts)
-
-
-def wait_for_port(host: str, port: int, timeout: float = 30.0, *, label: str) -> None:
-    """Poll TCP connect (host, port) until success or timeout; raises RuntimeError otherwise."""
-    deadline = time.monotonic() + timeout
-    last_err: OSError | None = None
-    while time.monotonic() < deadline:
-        try:
-            with socket.create_connection((host, port), timeout=1.0):
-                return
-        except OSError as e:
-            last_err = e
-            time.sleep(0.2)
-    raise RuntimeError(
-        f"Waiting for {label} ({host}:{port}) timed out after {timeout}s; last error: {last_err!r}"
-    )
 
 
 _SIGKILL_GRACE_SEC = 2.0
