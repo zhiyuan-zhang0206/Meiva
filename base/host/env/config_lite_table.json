@@ -567,6 +567,9 @@
     "web_search_timeout_seconds": "web",
     "webhook_token": "alerts",
     "wedged_agent_inbound_age_seconds": "daemon",
+    "workspace_hygiene_enabled": "daemon",
+    "workspace_hygiene_max_items_per_dir": "daemon",
+    "workspace_hygiene_remind_cooldown_seconds": "daemon",
     "workspace_in_system_prompt": "agent",
     "xiaomi_api_key": "lm",
     "zhipu_api_key": "lm"
@@ -960,6 +963,9 @@
     "web_search_timeout_seconds": "MEIVA_WEB_SEARCH_TIMEOUT_SECONDS",
     "webhook_token": "MEIVA_ALERTS_WEBHOOK_TOKEN",
     "wedged_agent_inbound_age_seconds": "MEIVA_WEDGED_AGENT_INBOUND_AGE_SECONDS",
+    "workspace_hygiene_enabled": "MEIVA_WORKSPACE_HYGIENE_ENABLED",
+    "workspace_hygiene_max_items_per_dir": "MEIVA_WORKSPACE_HYGIENE_MAX_ITEMS_PER_DIR",
+    "workspace_hygiene_remind_cooldown_seconds": "MEIVA_WORKSPACE_HYGIENE_REMIND_COOLDOWN_SECONDS",
     "workspace_in_system_prompt": "MEIVA_WORKSPACE_IN_SYSTEM_PROMPT",
     "xiaomi_api_key": "MIMO_API_KEY",
     "zhipu_api_key": "GLM_API_KEY"
@@ -1353,6 +1359,9 @@
     "web_search_timeout_seconds": "cluster-pinned",
     "webhook_token": "cluster-pinned",
     "wedged_agent_inbound_age_seconds": "cluster-pinned",
+    "workspace_hygiene_enabled": "cluster-pinned",
+    "workspace_hygiene_max_items_per_dir": "cluster-pinned",
+    "workspace_hygiene_remind_cooldown_seconds": "cluster-pinned",
     "workspace_in_system_prompt": "cluster-pinned",
     "xiaomi_api_key": "cluster-pinned",
     "zhipu_api_key": "cluster-pinned"
@@ -1746,6 +1755,9 @@
     "web_search_timeout_seconds": "agent-runner",
     "webhook_token": "gateway",
     "wedged_agent_inbound_age_seconds": "agent-runner",
+    "workspace_hygiene_enabled": "agent-runner",
+    "workspace_hygiene_max_items_per_dir": "agent-runner",
+    "workspace_hygiene_remind_cooldown_seconds": "agent-runner",
     "workspace_in_system_prompt": "agent-runner",
     "xiaomi_api_key": "agent-runner",
     "zhipu_api_key": "agent-runner"

@@ -23,7 +23,14 @@ from base.api_contracts.agent_contract import TurnFailureReport
 #
 #     A hosted failure report is awaited only after its own durable settlement.
 class TurnOutcome:
-    __slots__ = ("aborted", "crashed", "exited", "failure_report", "fatal_reason")
+    __slots__ = (
+        "aborted",
+        "completed_idle",
+        "crashed",
+        "exited",
+        "failure_report",
+        "fatal_reason",
+    )
 
     def __init__(
         self,
@@ -31,11 +38,13 @@ class TurnOutcome:
         exited: bool,
         crashed: bool,
         aborted: bool = False,
+        completed_idle: bool = False,
         failure_report: TurnFailureReport | None = None,
         fatal_reason: str | None = None,
     ) -> None:
         self.exited = exited
         self.crashed = crashed
         self.aborted = aborted
+        self.completed_idle = completed_idle
         self.failure_report = failure_report
         self.fatal_reason = fatal_reason

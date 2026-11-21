@@ -21,7 +21,12 @@ from base.native_process.stop_timing import CANCEL_UNWIND_TIMEOUT_S
 from base.telemetry.process_logging import init_gateway_process
 from meiva.sdk_surface.installation import Installation
 from services.agent_runner.agent_host.pools import PoolBounds
-from services.agent_runner.agent_host.runtime import HostCachePolicy, HostPolicy, StallTiming
+from services.agent_runner.agent_host.runtime import (
+    HostCachePolicy,
+    HostPolicy,
+    StallTiming,
+    WorkspaceHygienePolicy,
+)
 
 __all__ = [
     "boot_process",
@@ -77,6 +82,11 @@ def host_policy(
             scan_interval_s=daemon.host_turn_progress_scan_interval_seconds,
             no_progress_timeout_s=daemon.host_turn_no_progress_timeout_seconds,
             unwind_timeout_s=CANCEL_UNWIND_TIMEOUT_S,
+        ),
+        workspace_hygiene=WorkspaceHygienePolicy(
+            enabled=daemon.workspace_hygiene_enabled,
+            max_items_per_dir=daemon.workspace_hygiene_max_items_per_dir,
+            remind_cooldown_seconds=daemon.workspace_hygiene_remind_cooldown_seconds,
         ),
     )
 

@@ -1,11 +1,13 @@
-exports = ["cleanup_failures.py", "configuration.py", "graceful_exit.py", "instance.py", "shells.py", "shutdown.py", "switch_note.py"]
+exports = ["cleanup_failures.py", "configuration.py", "graceful_exit.py", "instance.py", "shells.py", "shutdown.py", "switch_note.py", "workspace_hygiene.py", "workspace_hygiene_policy.py"]
 
 [uses]
 "shells.py" = ["cleanup_failures.py", "switch_note.py"]
+"workspace_hygiene.py" = ["workspace_hygiene_policy.py"]
 
 [purity]
 "__init__.py" = "strict"
 "cleanup_failures.py" = "strict"
+"workspace_hygiene_policy.py" = "strict"
 
 [roots]
 "configuration.py" = { kinds = ["clock", "settings"], why = "Agent host bootstrap constructs the process configuration owner and the process clock (from SYSTEM_TIMERS) the host stamps handoffs and group checks with; the entry hands it the home and the process-disable list it read" }

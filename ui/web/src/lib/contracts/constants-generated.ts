@@ -45,4 +45,5 @@ export const NOTE_TAGS = [
   "exec_timeout",
   "timezone",
   "sdk_expand",
+  "workspace_hygiene",
 ] as const;

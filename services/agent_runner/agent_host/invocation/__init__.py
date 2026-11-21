@@ -154,7 +154,7 @@ async def finish_completed_invocation(
                 hooks.wake_resumed(agent_id)
             return TurnOutcome(exited=follow_up.exited, crashed=False)
         case SettleIdle():
-            return TurnOutcome(exited=False, crashed=False)
+            return TurnOutcome(exited=False, crashed=False, completed_idle=True)
         case CarryOn():
             return None
         case _:

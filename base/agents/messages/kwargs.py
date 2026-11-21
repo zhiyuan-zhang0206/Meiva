@@ -71,6 +71,7 @@ class NoteTag(StrEnum):
     EXEC_TIMEOUT = "exec_timeout"
     TIMEZONE = "timezone"
     SDK_EXPAND = "sdk_expand"
+    WORKSPACE_HYGIENE = "workspace_hygiene"
 
 
 class MeivaUsage(TypedDict, total=False):
