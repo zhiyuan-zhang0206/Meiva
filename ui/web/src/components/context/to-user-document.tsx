@@ -1,8 +1,6 @@
 "use client";
 
-import { ArrowLeft, House, PanelRight, RefreshCw, ScanSearch } from "lucide-react";
 import { useTranslations } from "next-intl";
-import { useCallback, useEffect, useState } from "react";
 
 import { ChatMarkdown } from "@/components/content/markdown";
 import { isFilePath } from "@/components/content/file-path-utils";
@@ -11,26 +9,12 @@ import { InlineError } from "@/components/ui/inline-error";
 import { Spinner } from "@/components/ui/spinner";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { ZoomableImage } from "@/components/content/zoomable-image";
-import type { BrowserNavigation } from "@/lib/browser/browser";
-import { useBrowser } from "@/lib/browser/browser-provider";
 import type { ToUserDocument } from "@/lib/contracts/types";
-import { fileQuery, readFiles, withFiles } from "@/lib/context/reference-url";
-import { useToUser } from "@/lib/context/use-to-user";
+import { fileQuery } from "@/lib/context/reference-url";
 import { cn } from "@/lib/format/utils";
-import { useWallDate } from "@/lib/format/now/use-wall-date";
-import { formatRelative } from "@/lib/format/time";
-import { COLUMN_TITLE_BAR_WRAP_CLASS, FLEX, FLEX_1, FLEX_COL, MIN_H_0 } from "@/lib/layout/layout";
+import { FLEX, FLEX_1, FLEX_COL, MIN_H_0 } from "@/lib/layout/layout";
 import { API_BASE } from "@/lib/transport/api-base";
 
-const PUSHED_ENTRY = "meivaToUserEntry";
-
-function asRecord(state: unknown): object {
-  return typeof state === "object" && state !== null ? state : {};
-}
-
-function pushedEntry(navigation: BrowserNavigation): boolean {
-  return Reflect.get(asRecord(navigation.state()), PUSHED_ENTRY) === true;
-}
 
 type RefusalText = "unavailable" | "tooLarge" | "missing" | "unreadable";
 
@@ -54,147 +38,33 @@ function refusalOf(error: unknown): { text: RefusalText; raw: boolean } {
 }
 
 // meiva:note
-// The inspector trigger is optional: `onInspect` decides whether the bar renders
-// it at all, and `inspecting` drives its pressed state.
-//
-// The file chain comes from the page's address, so a frame with no page (a server render) has no
-// chain to read and the panel opens on the document the route itself loaded. A pushed file entry
-// is marked, so the panel's own Back calls history.back() for it instead of rewriting a deep link
-// that has no in-app entry to return to.
-// meiva:link ui/web/src/docs/frontend-state/navigation-history.md
-export function ToUserDocumentView({ agentId, document, failure, pending, refresh, mobile, inspecting = false, bodyHidden = false, onInspect, onCollapse, onNavigate, viewportRef }: {
+// The conversation's to-user document: the panel's first tab, and only its reading area. The panel
+// bar above it owns the tabs and controls, and the path bar its name and update time. A link to
+// another file of the workspace opens that file as a tab (Markdown included), so every file is a
+// browser history entry and the document itself is the one place Home leads to.
+// meiva:link ui/web/src/docs/frontend-state/shared-context/shared-context.md
+export function ToUserDocumentView({ agentId, document, failure, pending, bodyHidden = false, viewportRef }: {
   agentId: number;
   document: ToUserDocument | undefined;
   failure: unknown;
   pending: boolean;
-  refresh: () => void;
-  mobile: boolean;
-  inspecting?: boolean;
   bodyHidden?: boolean;
-  onInspect?: () => void;
-  onCollapse?: () => void;
-  onNavigate?: () => void;
   viewportRef?: React.RefObject<HTMLDivElement | null>;
 }) {
   const t = useTranslations("toUser");
-  const tInspector = useTranslations("inspector");
-  const navigation = useBrowser().navigation;
-  const now = useWallDate();
-  const [files, setFiles] = useState<string[]>(() => {
-    const where = navigation.location();
-    return where === null ? [] : readFiles(new URL(where.href), agentId);
-  });
-  const linked = useToUser(files.length ? agentId : null, files);
-  const current = files.length ? linked.data : document;
-  const loading = files.length ? linked.isFetching : pending;
-  const error = files.length ? linked.error : failure;
-  const failed = error != null;
-  const refusal = failed ? refusalOf(error) : null;
-  // meiva:note
-  // The chain as one value: a file name may itself contain `/`, so the joined form is not a key.
-  // meiva:link ui/web/src/docs/frontend-state/navigation-history.md
-  const fileKey = JSON.stringify(files);
-  useEffect(() => { onNavigate?.(); }, [fileKey, onNavigate]);
+  const current = document;
+  const loading = pending;
+  const failed = failure != null;
+  const refusal = failed ? refusalOf(failure) : null;
   const content = current?.content;
-  const show = useCallback((next: string[], mode: "push" | "replace") => {
-    setFiles(next);
-    const where = navigation.location();
-    if (where === null) return;
-    const url = withFiles(where.href, next);
-    if (mode === "push") {
-      navigation.push(url, { ...asRecord(navigation.state()), [PUSHED_ENTRY]: true });
-    } else {
-      navigation.replace(url, navigation.state());
-    }
-  }, [navigation]);
-
-  useEffect(() => {
-    const restore = () => {
-      const where = navigation.location();
-      if (where !== null) setFiles(readFiles(new URL(where.href), agentId));
-    };
-    return navigation.onTraverse(restore);
-  }, [agentId, navigation]);
-
-  const goBack = () => {
-    if (pushedEntry(navigation)) navigation.back();
-    else show(files.slice(0, -1), "replace");
-  };
-
   const resources = new Map(Object.entries(current?.resources ?? {}).map(([href, resource]) => {
     const version = resource.version ? `&v=${resource.version}` : "";
     const fragment = href.includes("#") ? href.slice(href.indexOf("#")) : "";
-    const chain = fileQuery([...files, resource.file]);
-    return [href, { ...resource, url: `${API_BASE}/api/agents/${agentId}/to-user/resource?${chain}${version}${fragment}` }];
+    return [href, { ...resource, url: `${API_BASE}/api/agents/${agentId}/to-user/resource?${fileQuery([resource.file])}${version}${fragment}` }];
   }));
   const byUrl = new Map([...resources.values()].map((resource) => [resource.url, resource]));
-  // meiva:note
-  // The same file the panel could not render, served as bytes: the resource route
-  // bounds it by its own budget, so a document too large to display stays reachable.
-  const rawUrl = `${API_BASE}/api/agents/${agentId}/to-user/resource?${fileQuery(files)}`;
-  // meiva:note
-  // This section owns the column's title bar and its reading area; the caller
-  // owns the question, which sits below this area as the column's own bottom
-  // region, and Inspector, so navigating the keyed body cannot discard an
-  // unfinished answer while the bar above the area stays put.
-  // meiva:link ui/web/src/docs/frontend-state/shared-context/shared-context.md
-  // meiva:note
-  // The inspector toggle changes nothing on hover: on a 14px icon the
-  // background wash reads as a shadow, and the pointer cursor already says the
-  // button is live (user 2026-10-21). Its pressed background while the mode is
-  // on stays.
-  // meiva:link ui/web/src/components/context/to-user-document.tsx
-  const inspectorToggleClass = cn("rounded p-1", inspecting && "bg-foreground/20 text-foreground");
-  return mobile && inspecting ? null : (
+  return (
     <section className={cn(FLEX, MIN_H_0, FLEX_COL, bodyHidden ? "shrink-0" : FLEX_1)} aria-label={t("sharedContext")}>
-      <div data-testid="document-bar" className={cn("shrink-0 flex-wrap items-center gap-x-2 gap-y-1 px-3 py-1 text-[11px] text-muted-foreground", COLUMN_TITLE_BAR_WRAP_CLASS, FLEX)}>
-        {inspecting ? null : (
-          <>
-            <button title={t("home")} aria-label={t("home")} className="rounded p-1 hover:bg-accent" onClick={() => { if (files.length) show([], "push"); }}>
-              <House className="size-3.5" />
-            </button>
-            {files.length > 0 && <button title={t("back")} aria-label={t("back")} className="rounded p-1 hover:bg-accent" onClick={goBack}>
-              <ArrowLeft className="size-3.5" />
-            </button>}
-          </>
-        )}
-        <span className="shrink-0 whitespace-nowrap">{inspecting ? tInspector("title") : t("sharedContext")}</span>
-        {inspecting ? null : (
-          <div data-testid="document-status" className={cn("shrink-0 items-center gap-1.5", FLEX)}>
-            {current?.modified_at && <span className="whitespace-nowrap">{t("updated", { time: formatRelative(current.modified_at, now) })}</span>}
-            <button title={t("refresh")} aria-label={t("refresh")} onClick={() => { if (files.length) void linked.refetch(); else refresh(); }} disabled={loading} className="rounded p-1 hover:bg-accent disabled:opacity-50">
-              <RefreshCw className="size-3.5" />
-            </button>
-          </div>
-        )}
-        <div className={cn("ml-auto shrink-0 items-center", FLEX)}>
-          {onInspect ? (
-            <button
-              type="button"
-              data-testid="open-inspector"
-              title={inspecting ? tInspector("closeInspector") : tInspector("openInspector")}
-              aria-label={inspecting ? tInspector("closeInspector") : tInspector("openInspector")}
-              aria-pressed={inspecting}
-              onClick={onInspect}
-              className={inspectorToggleClass}
-            >
-              <ScanSearch className="size-3.5" />
-            </button>
-          ) : null}
-          {onCollapse && !mobile ? (
-            <button
-              type="button"
-              data-testid="context-panel-collapse"
-              title={t("hideContextPanel")}
-              aria-label={t("hideContextPanel")}
-              onClick={onCollapse}
-              className="rounded p-1 hover:bg-accent"
-            >
-              <PanelRight className="size-3.5" />
-            </button>
-          ) : null}
-        </div>
-      </div>
       <ScrollArea data-testid="shared-document" hidden={bodyHidden} viewportRef={viewportRef} className={cn(MIN_H_0, FLEX_1)}>
         {bodyHidden ? null : (
           <>
@@ -203,14 +73,11 @@ export function ToUserDocumentView({ agentId, document, failure, pending, refres
                 {loading ? <Spinner className="size-4" label={t("loading")} /> : refusal ? (
                   <div data-testid="document-failure" className="space-y-1">
                     <InlineError>{t(refusal.text)}</InlineError>
-                    {refusal.raw && files.length > 0 ? (
-                      <a className="underline hover:text-foreground text-xs" href={rawUrl} target="_blank" rel="noopener noreferrer">{t("openRaw")}</a>
-                    ) : null}
                   </div>
                 ) : current?.legacy_html ? t("legacyHtml") : t("empty")}
               </div>
             ) : (
-              <div key={fileKey} data-testid="document-content" className="px-5 py-3.5 text-[13px] leading-[21px] text-foreground/90 dark:text-[#dfdcd6] [&>.chat-md>:first-child]:mt-0">
+              <div data-testid="document-content" className="px-5 py-3.5 text-[13px] leading-[21px] text-foreground/90 dark:text-[#dfdcd6] [&>.chat-md>:first-child]:mt-0">
                 <ChatMarkdown content={content} resolveUrl={(href) => {
                   const resource = resources.get(href);
                   return resource?.url ?? (/^(https?:|mailto:|#)/i.test(href) ? href : "about:blank");
@@ -225,11 +92,6 @@ export function ToUserDocumentView({ agentId, document, failure, pending, refres
                     const external = !href?.startsWith("#");
                     return <a href={href} target={external ? "_blank" : undefined} rel={external ? "noopener noreferrer" : undefined} onClick={(event) => {
                       if (event.metaKey || event.ctrlKey || event.shiftKey || event.altKey || event.button !== 0) return;
-                      if (resource?.markdown) {
-                        event.preventDefault();
-                        show([...files, resource.file], "push");
-                        return;
-                      }
                       if (href) {
                         const fragment = href.includes("#") ? href.slice(href.indexOf("#")) : "";
                         const targetPath = resource ? `${resource.file}${fragment}` : href;

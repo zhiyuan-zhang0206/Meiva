@@ -371,3 +371,14 @@ describe("operation identities", () => {
     expect(requests()).toHaveLength(0);
   });
 });
+
+describe("workspace browsing", () => {
+  it("lists the root without a path and encodes a directory", async () => {
+    await api().listWorkspaceDir(7);
+    await api().listWorkspaceDir(7, "/w/my dir");
+    expect(requests().map((request) => [request.method, request.path])).toEqual([
+      ["GET", "/api/agents/7/files/list"],
+      ["GET", "/api/agents/7/files/list?path=%2Fw%2Fmy+dir"],
+    ]);
+  });
+});

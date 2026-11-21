@@ -303,6 +303,22 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/agents/{agent_id}/files/list": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["list_workspace_files_api_agents__agent_id__files_list_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/keyed/v1/agents/{agent_id}/retry-launch": {
         parameters: {
             query?: never;
@@ -3009,6 +3025,11 @@ export interface components {
             content_hash: string;
         };
         FeedbackOutcome: "accepted" | "edited" | "rejected";
+        FileRoot: {
+            kind: "workspace" | "home" | "machine";
+            path: string;
+            agent_id: number | null;
+        };
         FleetGraphEdge: {
             from_agent: number;
             to_agent: number;
@@ -4321,8 +4342,23 @@ export interface components {
             input?: unknown;
             ctx?: Record<string, never>;
         };
+        WorkspaceDirEntry: {
+            name: string;
+            path: string;
+            kind: "dir" | "file";
+            size: number | null;
+            modified_at: string;
+        };
+        WorkspaceDirListing: {
+            path: string;
+            root: components["schemas"]["FileRoot"];
+            parent: string | null;
+            entries: components["schemas"]["WorkspaceDirEntry"][];
+            truncated: boolean;
+        };
         WorkspaceFileResponse: {
             path: string;
+            root: components["schemas"]["FileRoot"];
             name: string;
             extension: string;
             content: string;
@@ -4873,6 +4909,37 @@ export interface operations {
                 };
                 content: {
                     "application/json": unknown;
+                };
+            };
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_workspace_files_api_agents__agent_id__files_list_get: {
+        parameters: {
+            query?: {
+                path?: string | null;
+            };
+            header?: never;
+            path: {
+                agent_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["WorkspaceDirListing"];
                 };
             };
             422: {

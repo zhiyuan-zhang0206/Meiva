@@ -5,27 +5,21 @@
 # meiva:link gateway/agents/docs/to-user-read-failures.md
 
 import json
-import threading
-from collections.abc import Generator, Iterator
-from contextlib import contextmanager
-from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from collections.abc import Iterator
+from dataclasses import replace
 from pathlib import Path
-from typing import override
 
 import psycopg
 import pytest
 
-from base.agents.to_user import WorkspaceFileRequest
-from base.config import settings
 from base.db import create_agent
 from base.paths import workspace_path
-from gateway.tests.auth.gateway_config import GatewayTestClient, gateway_test_client
-from ops.cluster.rpc import ClusterOpFailed, ClusterOpUnreachable
-from ops.to_user import (
-    WorkspaceFileError,
-    read_workspace_file_content,
-    read_workspace_file_raw,
+from gateway.tests.auth.gateway_config import GatewayTestClient, gateway_test_client, reconfigure
+from gateway.tests.support.runner_ops.workspace_ops import (
+    register_runner,
+    remote_workspace_ops_server,
 )
+from ops.cluster.rpc import ClusterOpFailed, ClusterOpUnreachable
 
 
 # meiva:note
@@ -186,7 +180,33 @@ def test_get_workspace_file_raw_video_range_request(
     )
     assert range_resp.status_code == 206
     assert range_resp.content == b"01234"
-    assert range_resp.headers["content-range"].startswith("bytes 0-4/")
+    assert range_resp.headers["content-range"] == "bytes 0-4/20"
+    assert range_resp.headers["accept-ranges"] == "bytes"
+
+    whole = client.get(f"/api/agents/{agent}/files/raw?path=clip.mp4")
+    assert whole.status_code == 200
+    assert whole.headers["accept-ranges"] == "bytes"
+
+
+# meiva:note
+# The viewer shows a PDF in an <iframe>/<embed> and plays audio in <audio>, so both render inline
+# under the passive policy rather than downloading.
+@pytest.mark.parametrize(
+    ("name", "media_type"), [("report.pdf", "application/pdf"), ("voice.mp3", "audio/mpeg")]
+)
+def test_pdf_and_audio_render_inline_under_the_passive_policy(
+    client: GatewayTestClient, db_conn: psycopg.Connection, name: str, media_type: str
+) -> None:
+    agent = _home_machine_agent(db_conn, "macmini")
+    ws = Path(workspace_path(client.app.state.gateway_process.home, agent))
+    ws.mkdir(parents=True, exist_ok=True)
+    _ = (ws / name).write_bytes(b"payload")
+
+    response = client.get(f"/api/agents/{agent}/files/raw?path={name}")
+    assert response.status_code == 200
+    assert response.headers["content-type"] == media_type
+    assert response.headers["content-disposition"].startswith("inline;")
+    assert response.headers["content-security-policy"].startswith("sandbox;")
 
 
 def test_get_workspace_file_in_custom_cwd(
@@ -222,9 +242,17 @@ def test_get_workspace_file_in_custom_cwd(
     assert resp_ws.json()["content"] == "in workspace"
 
 
+# meiva:note
+# The `workspaces` reach: agent workspaces and the agent's cwd, nothing else.
+def _workspaces_only(client: GatewayTestClient) -> None:
+    to_user = client.app.state.gateway_config.to_user
+    _ = reconfigure(client, to_user=replace(to_user, file_access="workspaces"))
+
+
 def test_get_workspace_file_traversal_forbidden(
     client: GatewayTestClient, db_conn: psycopg.Connection
 ) -> None:
+    _workspaces_only(client)
     agent = _home_machine_agent(db_conn, "macmini")
     ws = Path(workspace_path(client.app.state.gateway_process.home, agent))
     ws.mkdir(parents=True, exist_ok=True)
@@ -258,65 +286,6 @@ def test_get_workspace_file_too_large_413(
 def test_get_workspace_file_unknown_agent_404(client: GatewayTestClient) -> None:
     response = client.get("/api/agents/9999999/files/content?path=file.txt")
     assert response.status_code == 404
-
-
-@contextmanager
-def _remote_workspace_ops_server(remote_home: Path, expected_agent_id: int) -> Generator[str]:
-    class _Handler(BaseHTTPRequestHandler):
-        def do_POST(self) -> None:
-            if self.path != "/to-user/workspace-file":
-                self.send_response(404)
-                self.end_headers()
-                return
-            length = int(self.headers.get("Content-Length", "0"))
-            raw_body = self.rfile.read(length)
-            req = WorkspaceFileRequest.model_validate_json(raw_body)
-            if req.agent_id != expected_agent_id:
-                self.send_response(404)
-                self.end_headers()
-                _ = self.wfile.write(b"Wrong agent routed to remote machine")
-                return
-            try:
-                if req.mode == "content":
-                    payload = read_workspace_file_content(
-                        remote_home, req.agent_id, req.path, custom_cwd=req.custom_cwd
-                    )
-                    out = payload.model_dump_json().encode("utf-8")
-                    content_type = "application/json"
-                else:
-                    out = read_workspace_file_raw(
-                        remote_home,
-                        req.agent_id,
-                        req.path,
-                        custom_cwd=req.custom_cwd,
-                        max_bytes=settings.to_user.max_resource_bytes,
-                    )
-                    content_type = "application/octet-stream"
-            except WorkspaceFileError as exc:
-                self.send_response(exc.status_code)
-                self.send_header("Content-Type", "text/plain")
-                self.end_headers()
-                _ = self.wfile.write(exc.detail.encode("utf-8"))
-                return
-            self.send_response(200)
-            self.send_header("Content-Type", content_type)
-            self.end_headers()
-            _ = self.wfile.write(out)
-
-        @override
-        def log_message(self, format: str, *args: object) -> None:
-            return
-
-    server = ThreadingHTTPServer(("127.0.0.1", 0), _Handler)
-    thread = threading.Thread(target=server.serve_forever, daemon=True)
-    thread.start()
-    try:
-        host, port = server.server_address[:2]
-        yield f"http://{host}:{port}"
-    finally:
-        server.shutdown()
-        server.server_close()
-        thread.join(timeout=5)
 
 
 def test_cross_agent_workspace_file_routes_same_machine_and_remote_machine(
@@ -355,13 +324,10 @@ def test_cross_agent_workspace_file_routes_same_machine_and_remote_machine(
     _ = (ws_remote / "deliver" / "remote.md").write_text("# Remote peer report\n", encoding="utf-8")
     _ = (ws_remote / "deliver" / "user-positions-before-after.png").write_bytes(png_bytes)
 
-    with _remote_workspace_ops_server(remote_home, remote_owner) as remote_ops_url:
-        _ = db_conn.execute(
-            "INSERT INTO machines (name, role, gateway_url) VALUES ('company-mini', %s, %s) "
-            "ON CONFLICT (name) DO UPDATE SET gateway_url = EXCLUDED.gateway_url",
-            (["agent-runner"], remote_ops_url),
-        )
-        db_conn.commit()
+    with remote_workspace_ops_server(
+        remote_home, remote_owner, user_home=tmp_path / "company-mini-account"
+    ) as remote_ops_url:
+        register_runner(db_conn, "company-mini", remote_ops_url)
 
         remote_content = client.get(
             f"/api/agents/{viewer_agent}/files/content"
@@ -382,6 +348,7 @@ def test_cross_agent_workspace_file_routes_same_machine_and_remote_machine(
 def test_cross_agent_traversal_and_system_paths_return_403(
     client: GatewayTestClient, db_conn: psycopg.Connection
 ) -> None:
+    _workspaces_only(client)
     agent_a = _home_machine_agent(db_conn, "macmini")
     agent_b = _home_machine_agent(db_conn, "macmini")
     Path(workspace_path(client.app.state.gateway_process.home, agent_a)).mkdir(

@@ -103,11 +103,16 @@ afterEach(() => {
   vi.restoreAllMocks();
 });
 
-it("shows the document as the panel's body without a view switcher", () => {
+// meiva:note
+// The panel's tabs are files (user ruling 2026-11-20): the document is the first one; the inspector
+// stays behind its toggle, never a tab.
+it("shows the document as the first file tab and keeps the inspector out of the tabs", () => {
   renderPanelView();
   expect(screen.getByText("No content")).toBeTruthy();
   expect(screen.queryByTestId("shared-inspector")).toBeNull();
-  expect(screen.queryByRole("tablist")).toBeNull();
+  const tabs = screen.getAllByRole("tab");
+  expect(tabs.map((tab) => tab.textContent)).toEqual(["Shared context"]);
+  expect(tabs[0].getAttribute("aria-selected")).toBe("true");
 });
 
 it("renders WorkspaceFileView when activeFile is set for this agent", async () => {
@@ -132,14 +137,14 @@ it("renders WorkspaceFileView when activeFile is set for this agent", async () =
 
 it("swaps the body under a bar that stays, instead of laying a sheet over it", async () => {
   // meiva:note
-  // The mode owns the panel: the document bar (which names the mode and carries
+  // The mode owns the panel: the panel bar (which names the mode and carries
   // the pressed magnifier that leaves it) stays as the one control surface, and
   // the body below it is replaced. An overlay that covered the bar left the
   // mode with no visible exit (user report 2026-10-20).
   snapshot.inspectorOpen = true;
   renderPanelView();
   expect(await screen.findByTestId("shared-inspector")).toBeTruthy();
-  expect(screen.getByTestId("document-bar")).toBeTruthy();
+  expect(screen.getByTestId("panel-bar").textContent).toContain("Inspector");
   expect(screen.getByTestId("shared-inspector")).toBeTruthy();
   expect(screen.queryByText("No content")).toBeNull();
   expect(screen.queryByTestId("question-bar")).toBeNull();
@@ -156,10 +161,9 @@ it("keeps questions out of the right panel and restores reading position across 
   expect(await screen.findByTestId("shared-inspector")).toBeTruthy();
   expect(screen.queryByTestId("question-region")).toBeNull();
   expect(screen.queryByRole("textbox")).toBeNull();
-  body.scrollTop = 0;
   snapshot.inspectorOpen = false;
   rerender(<SharedContextPanel {...props} />);
-  expect(body.scrollTop).toBe(420);
+  expect(readingArea().scrollTop).toBe(420);
   expect(screen.queryByTestId("question-region")).toBeNull();
 });
 
@@ -167,16 +171,10 @@ function readingArea(): HTMLDivElement {
   return screen.getByTestId("shared-document").querySelector<HTMLDivElement>('[data-slot="scroll-area-viewport"]')!;
 }
 
-it("starts a new agent or referenced document at the top of the shared reading area", () => {
+it("starts a new agent's document at the top of the shared reading area", () => {
   const props = { agentId: 7, document: documentQuery(), mobile: false, onClose: vi.fn() };
-  const { rerender, browser } = renderPanel(<SharedContextPanel {...props} />);
-  const body = readingArea();
-  body.scrollTop = 420;
-  act(() => {
-    browser.traverse("http://fake.local/?agent_id=7&file=reports%2Fdetails.md");
-  });
-  expect(body.scrollTop).toBe(0);
-  body.scrollTop = 500;
+  const { rerender } = renderPanel(<SharedContextPanel {...props} />);
+  readingArea().scrollTop = 500;
   rerender(<SharedContextPanel {...props} agentId={8} />);
   // meiva:note
   // The document is keyed by agent, so switching agents rebuilds the reading
@@ -220,13 +218,12 @@ it.each([false, true])("pins the title bar outside the reading viewport, so a sc
   snapshot.inspectorOpen = inspector;
   renderPanelView();
   if (inspector) expect(await screen.findByTestId("shared-inspector")).toBeTruthy();
-  const bar = screen.getByTestId("document-bar");
-  const readingArea = screen.getByTestId("shared-document");
-  const viewport = readingArea.querySelector<HTMLDivElement>('[data-slot="scroll-area-viewport"]')!;
-  expect(viewport.contains(bar)).toBe(false);
+  const bar = screen.getByTestId("panel-bar");
+  const readingArea = screen.getByTestId(inspector ? "shared-inspector" : "shared-document");
+  expect(readingArea.contains(bar)).toBe(false);
   expect(follows(bar, readingArea)).toBe(true);
   if (!inspector) {
-    expect(viewport.contains(screen.getByText("No content"))).toBe(true);
+    expect(readingArea.contains(screen.getByText("No content"))).toBe(true);
     expect(screen.queryByRole("region", { name: "Ask" })).toBeNull();
   }
 });

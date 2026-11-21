@@ -81,7 +81,7 @@ from urllib.parse import urlsplit
 from base.cluster.port_preflight import ListenerDiscoveryError, strict_listeners_on
 from base.daemon import health_schema
 from base.daemon.http_transport import RouteHandler as RouteHandler
-from base.daemon.http_transport import start_daemon_http
+from base.daemon.http_transport import ServedRoute, start_daemon_http
 from base.daemon.loop_health import LivenessGroup
 from base.daemon.loop_health import LoopProgress as LoopProgress
 from base.host.boundary.untyped import object_of
@@ -218,7 +218,7 @@ async def start_health_server(
     *,
     home: Path,
     host: str = "127.0.0.1",
-    extra_routes: Mapping[tuple[str, str], RouteHandler] | None = None,
+    extra_routes: Mapping[tuple[str, str], ServedRoute] | None = None,
     liveness: Liveness | LivenessGroup | None = None,
     components: list[dict[str, object]] | Callable[[], list[dict[str, object]]] | None = None,
     extra: dict[str, object] | Callable[[], dict[str, object]] | None = None,

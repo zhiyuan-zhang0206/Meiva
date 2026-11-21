@@ -1,7 +1,9 @@
 import asyncio
 import hashlib
 import json
+from collections.abc import AsyncGenerator
 from concurrent.futures import ThreadPoolExecutor
+from contextlib import asynccontextmanager
 from functools import partial
 from pathlib import Path
 
@@ -123,10 +125,14 @@ async def test_a_refused_document_read_reports_its_class(
     assert gone["result"]["reason"] == "gone"
 
 
-@pytest.mark.asyncio
-async def test_workspace_file_route_content_and_raw(
+# meiva:note
+# The runner's real `/to-user/workspace-file` listener for one agent on `source-host`, behind the
+# daemon transport and its bearer check; yields an authorized client and the agent's id. The
+# admission sets are empty again once the reads finish.
+@asynccontextmanager
+async def _workspace_file_client(
     database: Database, unit_home: Path, op_executor: ThreadPoolExecutor
-) -> None:
+) -> AsyncGenerator[tuple[httpx.AsyncClient, int]]:
     with database.connect() as conn:
         agent_id = create_agent(conn)
         conn.execute(
@@ -138,6 +144,9 @@ async def test_workspace_file_route_content_and_raw(
     workspace.mkdir(parents=True)
     (workspace / "hello.py").write_text("print('remote')\n", encoding="utf-8")
     (workspace / "icon.png").write_bytes(b"\x89PNG\r\n\x1a\nraw")
+    (workspace / "src").mkdir()
+    (workspace / "src" / "hello_test.py").write_text("", encoding="utf-8")
+    (unit_home / "account").mkdir()
 
     requests: RequestTokens = set()
     workers: WorkerFutures = set()
@@ -147,6 +156,7 @@ async def test_workspace_file_route_content_and_raw(
             pool=pool,
             machine="source-host",
             home=unit_home,
+            user_home=unit_home / "account",
             limits=LIMITS,
             executor=op_executor,
             dispatch_sem=asyncio.Semaphore(1),
@@ -166,33 +176,69 @@ async def test_workspace_file_route_content_and_raw(
                 base_url=f"http://127.0.0.1:{port}", trust_env=False
             ) as client:
                 client.headers["Authorization"] = "Bearer test-token"
-                content_resp = await client.post(
-                    "/to-user/workspace-file",
-                    json={"agent_id": agent_id, "path": "hello.py#L1", "mode": "content"},
-                )
-                assert content_resp.status_code == 200
-                body = content_resp.json()
-                assert body["name"] == "hello.py"
-                assert body["content"] == "print('remote')\n"
-                assert body["binary"] is False
-
-                raw_resp = await client.post(
-                    "/to-user/workspace-file",
-                    json={"agent_id": agent_id, "path": "icon.png", "mode": "raw"},
-                )
-                assert raw_resp.status_code == 200
-                assert raw_resp.content == b"\x89PNG\r\n\x1a\nraw"
-
-                traversal_resp = await client.post(
-                    "/to-user/workspace-file",
-                    json={"agent_id": agent_id, "path": "../../etc/passwd", "mode": "content"},
-                )
-                assert traversal_resp.status_code == 403
-
-                missing_resp = await client.post(
-                    "/to-user/workspace-file",
-                    json={"agent_id": agent_id, "path": "missing.py", "mode": "content"},
-                )
-                assert missing_resp.status_code == 404
+                yield client, agent_id
     assert not requests
     assert not workers
+
+
+@pytest.mark.asyncio
+async def test_workspace_file_route_content_and_raw(
+    database: Database, unit_home: Path, op_executor: ThreadPoolExecutor
+) -> None:
+    async with _workspace_file_client(database, unit_home, op_executor) as (client, agent_id):
+        content_resp = await client.post(
+            "/to-user/workspace-file",
+            json={"agent_id": agent_id, "path": "hello.py#L1", "mode": "content"},
+        )
+        assert content_resp.status_code == 200
+        body = content_resp.json()
+        assert body["name"] == "hello.py"
+        assert body["content"] == "print('remote')\n"
+        assert body["binary"] is False
+
+        raw_resp = await client.post(
+            "/to-user/workspace-file",
+            json={"agent_id": agent_id, "path": "icon.png", "mode": "raw"},
+        )
+        assert raw_resp.status_code == 200
+        assert raw_resp.content == b"\x89PNG\r\n\x1a\nraw"
+
+        traversal_resp = await client.post(
+            "/to-user/workspace-file",
+            json={"agent_id": agent_id, "path": "../../etc/passwd", "mode": "content"},
+        )
+        assert traversal_resp.status_code == 403
+
+        missing_resp = await client.post(
+            "/to-user/workspace-file",
+            json={"agent_id": agent_id, "path": "missing.py", "mode": "content"},
+        )
+        assert missing_resp.status_code == 404
+
+
+# meiva:note
+# The forwarded reads the viewer adds: a byte range answers `206` with its `Content-Range` header
+# through the daemon transport, and a listing answers JSON, reaching the account home when the
+# gateway sends `all`.
+@pytest.mark.asyncio
+async def test_workspace_file_route_ranges_and_listing(
+    database: Database, unit_home: Path, op_executor: ThreadPoolExecutor
+) -> None:
+    async with _workspace_file_client(database, unit_home, op_executor) as (client, agent_id):
+        forwarded = {"agent_id": agent_id, "path": ""}
+        range_resp = await client.post(
+            "/to-user/workspace-file",
+            json=forwarded | {"path": "icon.png", "mode": "raw", "byte_range": "bytes=1-3"},
+        )
+        assert (range_resp.status_code, range_resp.content) == (206, b"PNG")
+        assert range_resp.headers["content-range"] == "bytes 1-3/11"
+
+        list_resp = await client.post("/to-user/workspace-file", json=forwarded | {"mode": "list"})
+        names = [entry["name"] for entry in list_resp.json()["entries"]]
+        assert names == ["src", "hello.py", "icon.png"]
+
+        home_resp = await client.post(
+            "/to-user/workspace-file",
+            json=forwarded | {"mode": "list", "path": "~", "file_access": "all"},
+        )
+        assert home_resp.json()["root"]["kind"] == "home"

@@ -27,6 +27,7 @@ import type { useAgents } from "@/lib/agents/use-agents";
 import type { useSidebarCollapsed } from "@/lib/agents/sidebar";
 import { useReplySuggestion } from "@/lib/composer/use-reply-suggestion";
 import { useToUser } from "@/lib/context/use-to-user";
+import { useWorkspaceFileHistory } from "@/lib/context/workspace-file-history";
 import { useWorkspaceFileStore } from "@/lib/context/workspace-file-store";
 import type { AgentRow, DeliveredUploadStatus, UserMessage } from "@/lib/contracts/types";
 import { errMsg } from "@/lib/contracts/errors";
@@ -189,7 +190,11 @@ export function HomePageView(props: HomePageProps) {
   // is closed still shows it, because otherwise the mode would be on with
   // nothing to inspect. On mobile the inspector keeps its own sheet.
   // meiva:link ui/web/src/docs/frontend-state/shared-context/shared-context.md
+  useWorkspaceFileHistory(activeId);
   const activeWorkspaceFile = useWorkspaceFileStore((s) => s.activeFile);
+  // meiva:note
+  // The file viewer fills the page in place of the conversation (desktop only); the sidebar stays.
+  const viewerMaximized = useWorkspaceFileStore((s) => s.maximized);
   const showContext = isLarge
     ? activeId != null && (contextPanel.open || inspector.open || activeWorkspaceFile != null)
     : mobileContextOpen || inspector.open || activeWorkspaceFile != null;
@@ -271,11 +276,16 @@ export function HomePageView(props: HomePageProps) {
             isLarge
               ? () => {
                   useWorkspaceFileStore.getState().closeFile();
+                  useWorkspaceFileStore.getState().setMaximized(false);
                   contextPanel.setOpen(false);
                   if (inspector.open) inspector.toggle();
                 }
               : undefined
           }
+          // meiva:note
+          // Filling the page hides the conversation and its header bar, where a collapsed sidebar
+          // reopens: the panel's own bar carries that control then.
+          onOpenSidebar={isLarge && viewerMaximized && sidebar.collapsed ? () => sidebar.setCollapsed(false) : undefined}
         />
       </ErrorBoundary>
     ) : null;
@@ -293,8 +303,8 @@ export function HomePageView(props: HomePageProps) {
             isLarge={isLarge}
             sidebarCollapsed={sidebar.collapsed}
             sidebar={sidebarColumn}
-            main={mainColumn}
-            inspector={inspectorColumn}
+            main={isLarge && viewerMaximized && inspectorColumn !== null ? inspectorColumn : mainColumn}
+            inspector={isLarge && viewerMaximized && inspectorColumn !== null ? null : inspectorColumn}
           />
         </div>
       </div>

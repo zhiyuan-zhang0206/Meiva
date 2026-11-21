@@ -75,7 +75,6 @@ export function AgentGroupHeader({
         <button
           type="button"
           aria-label={t("removeAgent", { id: agentId })}
-          title={t("removeAgent", { id: agentId })}
           data-testid={`agent-view-remove-${agentId}`}
           onClick={() => onRemove(agentId)}
           className={cn(buttonVariants({ size: "sm", variant: "ghost" }), "h-5 px-1")}

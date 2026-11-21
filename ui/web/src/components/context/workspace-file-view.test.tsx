@@ -1,4 +1,4 @@
-import { cleanup, fireEvent, screen, waitFor, within } from "@testing-library/react";
+import { cleanup, fireEvent, screen, waitFor } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { afterEach, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import type { ReactNode } from "react";
@@ -51,7 +51,6 @@ describe("WorkspaceFileView", () => {
       <WorkspaceFileView
         agentId={1}
         target={{ agentId: 1, path: "src/main.py", lineRange: "2-3" }}
-        mobile={false}
       />,
       { wrapper: TestWrapper },
     );
@@ -60,7 +59,6 @@ describe("WorkspaceFileView", () => {
       expect(screen.getByTestId("workspace-code-content")).toBeTruthy();
     });
 
-    expect(screen.getByTestId("file-line-range-badge").textContent).toBe("#L2-3");
 
     const line2 = screen.getByText("line2").closest("[data-line-number]");
     expect(line2?.getAttribute("data-line-number")).toBe("2");
@@ -89,7 +87,6 @@ describe("WorkspaceFileView", () => {
       <WorkspaceFileView
         agentId={1}
         target={{ agentId: 1, path: "docs/spec.md" }}
-        mobile={false}
       />,
       { wrapper: TestWrapper },
     );
@@ -100,26 +97,26 @@ describe("WorkspaceFileView", () => {
     expect(screen.getByText("Important")).toBeTruthy();
   });
 
-  it("hides the top refresh button while loading and shows spinner only in content", () => {
+  it("shows only the content spinner while loading, with no bar or refresh of its own", () => {
     transport.getWorkspaceFile.mockImplementation(() => new Promise<never>(() => undefined));
 
     renderWithBrowser(
       <WorkspaceFileView
         agentId={1}
         target={{ agentId: 1, path: "assets/logo.png" }}
-        mobile={false}
       />,
       { wrapper: TestWrapper },
     );
 
-    const bar = screen.getByTestId("workspace-file-bar");
-    expect(within(bar).queryByRole("button", { name: "Refresh" })).toBeNull();
-    expect(bar.querySelector(".animate-spin")).toBeNull();
-    const spinner = screen.getByRole("status", { name: "Loading…" });
-    expect(bar.contains(spinner)).toBe(false);
+    // meiva:note
+    // The view has no bar of its own (the panel bar and path bar own the controls); a load shows
+    // only the content spinner.
+    expect(screen.queryByTestId("workspace-file-bar")).toBeNull();
+    expect(screen.queryByRole("button", { name: "Refresh" })).toBeNull();
+    expect(screen.getByRole("status", { name: "Loading…" })).toBeTruthy();
   });
 
-  it("renders images through ZoomableImage using raw media url without duplicate footer metadata or spinning refresh", async () => {
+  it("renders images through ZoomableImage using the raw media url", async () => {
     transport.getWorkspaceFile.mockResolvedValue({
       path: "assets/logo.png",
       name: "logo.png",
@@ -134,7 +131,6 @@ describe("WorkspaceFileView", () => {
       <WorkspaceFileView
         agentId={1}
         target={{ agentId: 1, path: "assets/logo.png" }}
-        mobile={false}
       />,
       { wrapper: TestWrapper },
     );
@@ -144,21 +140,10 @@ describe("WorkspaceFileView", () => {
       expect(img.getAttribute("src")).toContain("/api/agents/1/files/raw?path=assets%2Flogo.png");
     });
 
-    const bar = screen.getByTestId("workspace-file-bar");
-    expect(within(bar).getByText("logo.png")).toBeTruthy();
-    expect(within(bar).getByText("(100 B)")).toBeTruthy();
-    expect(screen.getAllByText(/logo\.png/)).toHaveLength(1);
-    expect(screen.queryByText("logo.png (100 B)")).toBeNull();
-
-    const refreshBtn = within(bar).getByRole<HTMLButtonElement>("button", { name: "Refresh" });
-    expect(refreshBtn.querySelector(".animate-spin")).toBeNull();
-    transport.getWorkspaceFile.mockImplementation(() => new Promise<never>(() => undefined));
-    fireEvent.click(refreshBtn);
-    await waitFor(() => expect(refreshBtn.disabled).toBe(true));
-    expect(refreshBtn.querySelector(".animate-spin")).toBeNull();
+    expect(screen.queryByRole("button", { name: "Refresh" })).toBeNull();
   });
 
-  it("renders video files using video player with raw media url without duplicate footer metadata", async () => {
+  it("renders video files in the video player from the raw media url", async () => {
     transport.getWorkspaceFile.mockResolvedValue({
       path: "media/demo.mp4",
       name: "demo.mp4",
@@ -173,7 +158,6 @@ describe("WorkspaceFileView", () => {
       <WorkspaceFileView
         agentId={1}
         target={{ agentId: 1, path: "media/demo.mp4" }}
-        mobile={false}
       />,
       { wrapper: TestWrapper },
     );
@@ -183,11 +167,6 @@ describe("WorkspaceFileView", () => {
       expect(video.getAttribute("src")).toContain("/api/agents/1/files/raw?path=media%2Fdemo.mp4");
     });
 
-    const bar = screen.getByTestId("workspace-file-bar");
-    expect(within(bar).getByText("demo.mp4")).toBeTruthy();
-    expect(within(bar).getByText("(10.0 KB)")).toBeTruthy();
-    expect(screen.getAllByText(/demo\.mp4/)).toHaveLength(1);
-    expect(screen.queryByText("demo.mp4 (10.0 KB)")).toBeNull();
   });
 
   it.each([".html", ".htm"])("renders %s files as source code", async (extension) => {
@@ -205,7 +184,6 @@ describe("WorkspaceFileView", () => {
       <WorkspaceFileView
         agentId={1}
         target={{ agentId: 1, path: "research/learning-library.html" }}
-        mobile={false}
       />,
       { wrapper: TestWrapper },
     );
@@ -213,35 +191,6 @@ describe("WorkspaceFileView", () => {
     const code = await screen.findByTestId("workspace-code-content");
     expect(code.textContent).toContain("<h1>Interactive Report</h1>");
     expect(container.querySelector("iframe")).toBeNull();
-  });
-
-  it("allows returning to to_user.md or going back in history", () => {
-    transport.getWorkspaceFile.mockResolvedValue({
-      path: "test.py",
-      name: "test.py",
-      extension: ".py",
-      content: "x = 1\n",
-      size: 6,
-      binary: false,
-      modified_at: "2026-11-07T12:00:00Z",
-    });
-
-    const store = useWorkspaceFileStore.getState();
-    store.openFile({ agentId: 1, path: "file1.py" });
-    store.openFile({ agentId: 1, path: "file2.py" });
-
-    renderWithBrowser(
-      <WorkspaceFileView
-        agentId={1}
-        target={{ agentId: 1, path: "file2.py" }}
-        mobile={false}
-      />,
-      { wrapper: TestWrapper },
-    );
-
-    const homeBtn = screen.getByTitle("Return to to_user.md");
-    fireEvent.click(homeBtn);
-    expect(useWorkspaceFileStore.getState().activeFile).toBeNull();
   });
 
   it("routes explicit cross-agent workspace paths to the owning agent for content and raw media", async () => {
@@ -262,7 +211,6 @@ describe("WorkspaceFileView", () => {
           agentId: 7516,
           path: "/Users/zhiyuan-output/.meiva/workspaces/7765/deliver/user-positions-before-after.png",
         }}
-        mobile={false}
       />,
       { wrapper: TestWrapper },
     );
@@ -306,7 +254,6 @@ describe("WorkspaceFileView", () => {
           agentId: 7516,
           path: "/Users/zhiyuan-output/.meiva/workspaces/7765/deliver/REPORT.md",
         }}
-        mobile={false}
       />,
       { wrapper: TestWrapper },
     );
@@ -328,6 +275,7 @@ describe("WorkspaceFileView", () => {
     fireEvent.click(screen.getByRole("link", { name: "Open chart" }));
     expect(useWorkspaceFileStore.getState().activeFile).toEqual({
       agentId: 7516,
+      machineAgentId: 7765,
       path: "/Users/zhiyuan-output/.meiva/workspaces/7765/deliver/user-positions-before-after.png",
       lineRange: undefined,
     });
@@ -335,6 +283,7 @@ describe("WorkspaceFileView", () => {
     fireEvent.click(screen.getByRole("link", { name: "Parent notes" }));
     expect(useWorkspaceFileStore.getState().activeFile).toEqual({
       agentId: 7516,
+      machineAgentId: 7765,
       path: "/Users/zhiyuan-output/.meiva/workspaces/7765/notes.md",
       lineRange: "12",
     });

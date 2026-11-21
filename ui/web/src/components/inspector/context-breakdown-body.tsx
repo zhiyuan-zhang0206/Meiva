@@ -264,7 +264,6 @@ function BreakdownContent({
               <button
                   type="button"
                   aria-pressed={active}
-                  title={t("categoryToggle", { category: categoryName(c.key) })}
                   data-testid={`context-breakdown-category-${c.key}`}
                   onClick={() => categoryHighlight.onToggle(c.key)}
                   className={cn(

@@ -63,6 +63,7 @@ export {
   type TaskRow,
   type TaskSummaryRow,
   type ToUserDocument,
+  type WorkspaceDirListing,
   type WorkspaceFileResponse,
   type UserSettingListResponse,
   type UserSettingRow,

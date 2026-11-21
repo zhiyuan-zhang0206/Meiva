@@ -58,6 +58,20 @@ Glyphs that are not controls keep their own optical size: an inline mark inside
 a text row (the pending strip's clock, the send button's filled stop square) is
 an annotation, and 16px would break the line it sits in.
 
+## Tooltips
+
+A hover tooltip (`title`) must say something the control does not already show (user ruling
+2026-11-20). Allowed:
+
+- the full text of a truncated label;
+- the absolute time behind a short one;
+- an error's detail;
+- why a control is disabled;
+- what a status number means.
+
+A tooltip that repeats a button's label or its icon's meaning is not used. Icon-only buttons carry
+their name in `aria-label` alone, so assistive technology still reads it.
+
 ## Edge-pinned controls
 
 A control that belongs to the viewport's edge belongs to the bar, not to the

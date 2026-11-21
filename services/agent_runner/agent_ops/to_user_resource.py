@@ -14,12 +14,8 @@ from base.agents.to_user import (
     read_failure,
     read_resource,
 )
-from ops.to_user import (
-    WorkspaceFileError,
-    owned_workspace,
-    read_workspace_file_content,
-    read_workspace_file_raw,
-)
+from base.daemon.http_transport import RouteAnswer
+from ops.to_user import WorkspaceFileError, answer_workspace_file, owned_workspace
 from services.agent_runner.agent_ops import in_flight
 
 # meiva:note
@@ -75,24 +71,19 @@ async def resource_route(
 
 
 def workspace_file_response(
-    body: bytes, *, pool: ConnectionPool, machine: str, home: Path, limits: ToUserLimits
-) -> tuple[int, bytes, str]:
+    body: bytes,
+    *,
+    pool: ConnectionPool,
+    machine: str,
+    home: Path,
+    user_home: Path,
+    limits: ToUserLimits,
+) -> RouteAnswer:
 
     try:
         request = WorkspaceFileRequest.model_validate_json(body)
         owned_workspace(pool, request.agent_id, machine, home=home)
-        if request.mode == "content":
-            payload = read_workspace_file_content(
-                home, request.agent_id, request.path, custom_cwd=request.custom_cwd
-            )
-            return 200, payload.model_dump_json().encode("utf-8"), "application/json"
-        raw = read_workspace_file_raw(
-            home,
-            request.agent_id,
-            request.path,
-            custom_cwd=request.custom_cwd,
-            max_bytes=limits.resource_bytes,
-        )
+        return answer_workspace_file(request, home=home, user_home=user_home, limits=limits)
     except ValidationError:
         return 422, b"Invalid workspace file request", "text/plain"
     except WorkspaceFileError as exc:
@@ -101,7 +92,6 @@ def workspace_file_response(
         return 404, str(exc).encode("utf-8"), "text/plain"
     except OSError:
         return 422, b"Workspace file could not be read", "text/plain"
-    return 200, raw, "application/octet-stream"
 
 
 async def workspace_file_route(
@@ -110,12 +100,13 @@ async def workspace_file_route(
     pool: ConnectionPool,
     machine: str,
     home: Path,
+    user_home: Path,
     limits: ToUserLimits,
     executor: ThreadPoolExecutor,
     dispatch_sem: asyncio.Semaphore,
     requests: in_flight.RequestTokens,
     workers: in_flight.WorkerFutures,
-) -> tuple[int, bytes, str]:
+) -> RouteAnswer:
 
     with in_flight.admitted(requests=requests):
         async with dispatch_sem:
@@ -127,6 +118,7 @@ async def workspace_file_route(
                     pool=pool,
                     machine=machine,
                     home=home,
+                    user_home=user_home,
                     limits=limits,
                 ),
             )

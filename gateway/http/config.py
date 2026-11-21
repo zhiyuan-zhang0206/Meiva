@@ -6,7 +6,7 @@ import random
 from collections.abc import Awaitable, Callable, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Annotated, Literal, get_args, get_type_hints
+from typing import Annotated, Literal, get_args, get_origin, get_type_hints
 from urllib.parse import urlsplit
 
 from fastapi import Depends, Request
@@ -28,6 +28,7 @@ from base.cluster.machine import GatewayAccess, MachineIdentityReader
 from base.cluster.machine.configured import ConfiguredMachineIdentity
 from base.cluster.rate_limit import LoginRateLimiter
 from base.config import ConfigBoot
+from base.config.domains.to_user import FileAccess
 from base.config.service_read import ConfigAuthority
 from base.daemon.endpoints import ServiceEndpoints
 from base.db import Database
@@ -112,11 +113,12 @@ class AlertSettings:
 
 # meiva:note
 # What a `to_user` document read may cost: the longest resource chain it follows and the
-# largest resource it fetches.
+# largest resource it fetches; and how far the file viewer reads on the owning machine.
 @dataclass(frozen=True)
 class ToUserLimits:
     max_chain_depth: int
     max_resource_bytes: int
+    file_access: FileAccess
 
 
 # meiva:note
@@ -362,6 +364,7 @@ def gateway_config_from_boot(
         to_user=ToUserLimits(
             max_chain_depth=view.to_user.max_chain_depth,
             max_resource_bytes=view.to_user.max_resource_bytes,
+            file_access=view.to_user.file_access,
         ),
         grafana=GrafanaProxy(
             enabled=gateway.grafana_proxy_enabled,
@@ -418,7 +421,8 @@ _PLACEHOLDERS: dict[object, object] = {int: 0, float: 0.0, bool: False, str: ""}
 
 # meiva:note
 # One group filled with placeholders: `0`, `0.0`, `False` or `""` by field type, `None` for an
-# optional field. A field of any other type fails here rather than getting a made-up value.
+# optional field, a `Literal`'s first member. A field of any other type fails here rather than
+# getting a made-up value.
 def _placeholders[G](group: type[G]) -> G:
     values: dict[str, object] = {}
     hints: dict[str, object] = get_type_hints(group)
@@ -427,6 +431,8 @@ def _placeholders[G](group: type[G]) -> G:
             values[name] = _PLACEHOLDERS[hint]
         elif type(None) in get_args(hint):
             values[name] = None
+        elif get_origin(hint) is Literal:
+            values[name] = get_args(hint)[0]
         else:
             raise TypeError(f"{group.__name__}.{name} has no placeholder for {hint!r}")
     return group(**values)

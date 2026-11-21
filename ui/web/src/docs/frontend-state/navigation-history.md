@@ -25,4 +25,22 @@ two selected agents pushes, because the agent the app opens on rewrites its own
 entry in place and must not leave a duplicate behind it. External links keep opening in a new tab and
 non-Markdown resources keep their own document.
 
-The panel's document chain lives in the URL as `?agent_id=…&file=…`: opening a linked document pushes a history entry, a popstate traversal restores the chain it selects, and the panel's Back control calls `history.back()` for entries it pushed while a chain without history rewrites its own entry instead of leaving the app. Selecting another agent drops the previous chain.
+A link from before the panel had tabs carries a to-user chain (`?agent_id=…&file=…&file=…`). It
+opens the chain's last file as a tab; the panel's next navigation writes the entry with `view`.
+
+A file open in the viewer is in the URL (user ruling 2026-11-20):
+`&view=<path>&view_agent=<machine>&lines=<range>`. The conversation is `agent_id`; `view_agent` is
+the agent whose machine reads a path outside every workspace, normally the same agent, another one
+when the address bar browsed up from another agent's workspace.
+
+- **Opening.** Opening a file, from the panel, a conversation message or a link inside another file,
+  pushes an entry. Only a new line range in the same file replaces the entry.
+- **Browser Back and Forward.** These move between viewed files and back to the document.
+- **Panel controls.** The panel has no Back or Home of its own. Its first tab, the to-user document,
+  is home, and selecting a tab is an entry like opening a file.
+- **Closing the panel.** Closing drops the file from the current entry.
+- **Opening a link.** A reloaded or shared address opens the same file.
+- **Switching agents.** Selecting another agent drops the file, as it drops the chain.
+
+`useWorkspaceFileHistory` (mounted once by the home view) is the binding between the viewer's store
+and the page history.

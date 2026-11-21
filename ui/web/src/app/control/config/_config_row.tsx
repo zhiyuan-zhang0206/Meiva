@@ -272,7 +272,6 @@ export function ConfigRow({
                   variant="ghost"
                   size="sm"
                   onClick={onStartEdit}
-                  title={t("editSetting", { name: label })}
                   disabled={busy}
                   className="h-7 px-1"
                   aria-label={`Replace ${label}`}

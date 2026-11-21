@@ -65,6 +65,44 @@ document, 1024 local references and 16 linked-document hops by default. The
 response that serves those files returns HTML as an attachment under the passive
 CSP without script permission. The workspace viewer renders only Markdown, images
 and videos; HTML and HTM open as source code, and other binary files offer download.
+Each file the viewer opens is a browser history entry, so Back and Forward move
+between viewed files ([panel navigation history](../navigation-history.md)).
+
+The panel is a file viewer (user rulings 2026-11-20 and 2026-11-21; decision record
+`docs/decisions/frontend/documents/2026-11-21-shared-context-file-viewer.md`):
+
+- **One bar of tabs and controls.** The bar has the conversation header's height, so their rules
+  meet in one line.
+  - The to-user document is the first, permanent tab, and it is the panel's home. Every linked or
+    picked file, Markdown documents included, is a closable tab. The tab list lives for the browser
+    tab's lifetime.
+  - On the right sit fill the page, the inspector toggle, and collapse.
+  - There is no Home, Back or Refresh button: Back and Forward are the browser's.
+- **Auto-refresh.** The file on show is re-read every 10 s while the page is visible; media are not.
+- **Picking a file.** The side panel has an address bar (user rulings 2026-11-21).
+  - **Its root.** The root is the workspace the file lies in, otherwise the home directory (`~`),
+    otherwise the machine's root (`/`), each shown by its real path (a workspace as its directory,
+    never as an agent number). The gateway reports the root with each file and listing, and the
+    path shows once it has.
+  - **Folder drop-downs.** The path reads as one, `/` between its parts (no arrows, user ruling
+    2026-11-21). Clicking a part drops down that folder's entries, so the file's own folder lists its
+    neighbours. In the list a folder opens in place and a file opens as a tab. The bar reads from the machine of the file on show, and
+    a file opened from it keeps that machine, even above another agent's workspace.
+  - **Editing.** Clicking the bar's empty end turns it into a text field holding the path, selected.
+    Enter opens what was typed: a folder opens its drop-down, a file opens as a tab. Escape gives up.
+    The bar keeps one height either way, and its rule is the panel's inset divider.
+  - **Full page.** Once the viewer fills the page, the tree takes the address bar's place on the
+    left. The tree's root takes another agent's number to browse that agent's workspace.
+- **Reach.** What the viewer may read is `settings.to_user.file_access`: `all` (the default) lets it
+  read any file on the machine; `workspaces` limits it to agent workspaces and the agent's working
+  directory (decision record `docs/decisions/frontend/documents/2026-11-21-file-viewer-reach.md`).
+- **Width.** The panel can be dragged far to the left. The conversation keeps a 280 px minimum.
+- **Fill the page.** On desktop the viewer can take the conversation's place; the sidebar stays.
+- **What renders in place.** Markdown, images, video, audio, PDF (the browser's viewer) and source
+  code with line ranges. Other binary files offer a download.
+- **Labels.** File names show without a type icon.
+- **Linked files.** A file the to-user document links to opens like any other file, under the same
+  reach.
 Normal Markdown links are directly clickable in conversation messages and `to_user.md`;
 explicit `.meiva/workspaces/<id>/...` references keep the viewer attached to the
 active conversation's panel while routing content/raw reads and nested relative

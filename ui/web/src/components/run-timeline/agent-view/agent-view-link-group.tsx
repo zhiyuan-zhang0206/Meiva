@@ -55,7 +55,6 @@ export function LinkRowGroup({
         <button
           type="button"
           aria-label={t("closeGroup", { title })}
-          title={t("closeGroup", { title })}
           data-testid={`agent-view-${variant}-close`}
           onClick={onClose}
           className={cn(buttonVariants({ size: "sm", variant: "ghost" }), "h-5 px-1")}

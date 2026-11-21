@@ -7,8 +7,11 @@ from base.agents.to_user.limits import (
 )
 from base.agents.to_user.models import (
     DOCUMENT_FILENAME,
+    FileRoot,
     ToUserDocument,
     ToUserReadRequest,
+    WorkspaceDirEntry,
+    WorkspaceDirListing,
     WorkspaceFileRequest,
     WorkspaceFileResponse,
 )
@@ -16,11 +19,14 @@ from base.agents.to_user.resources import read_resource, resolve_file
 
 __all__ = [
     "DOCUMENT_FILENAME",
+    "FileRoot",
     "ToUserDocument",
     "ToUserFileTooLarge",
     "ToUserLimits",
     "ToUserReadFailure",
     "ToUserReadRequest",
+    "WorkspaceDirEntry",
+    "WorkspaceDirListing",
     "WorkspaceFileRequest",
     "WorkspaceFileResponse",
     "ensure_document",

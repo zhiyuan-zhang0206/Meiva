@@ -15,3 +15,12 @@ that answers `workspace_in_system_prompt` and the panel's word limit, so a
 per-agent pin applies if one exists; the ops listener takes the same four
 fields from its own read model. Either way a click on a linked file meets the
 bound the panel was rendered under.
+
+`file_access` (default `all`) is how far the panel's file viewer reads on the
+machine that owns a path: `all` reaches any path the account can read, and
+`workspaces` keeps today's boundary of agent workspaces plus the agent's working
+directory. The gateway reads it and sends it with every read it forwards, so the
+owning runner applies the gateway's decision; neither mode serves a non-regular
+file or lifts a size limit
+([reach decision](../../../docs/decisions/frontend/documents/2026-11-21-file-viewer-reach.md),
+[the reads](../../../gateway/agents/docs/to-user-resources.md#workspace-file-reads)).

@@ -1,10 +1,36 @@
 export const FILE_PARAM = "file";
 
 // meiva:note
-// The digest parameter panel links carried before 2026-11-07. A shared link outlives the spelling
-// of the address bar, so a chain of digests is still read — the owning machine resolves it — and
-// the panel's next navigation rewrites the entry with `file`.
+// History entries the shared-context panel pushed carry this flag in their state: the panel's Back
+// is then the browser's Back, and an entry it did not push is rewritten in place instead.
 // meiva:link ui/web/src/docs/frontend-state/navigation-history.md
+export const PUSHED_ENTRY = "meivaToUserEntry";
+
+// meiva:note
+// A workspace file open in the panel is part of the address too (user ruling 2026-11-20: the
+// browser's Back and Forward move between viewed files), after the to-user chain it was opened from:
+// `?agent_id=405&file=notes.md&view=/abs/path/report.py&view_agent=405&lines=10-20`, where
+// `view_agent` is the agent whose machine reads the file.
+// meiva:link ui/web/src/docs/frontend-state/navigation-history.md
+export const VIEW_PARAM = "view";
+export const VIEW_AGENT_PARAM = "view_agent";
+export const VIEW_LINES_PARAM = "lines";
+export const VIEW_PARAMS: readonly string[] = [VIEW_PARAM, VIEW_AGENT_PARAM, VIEW_LINES_PARAM];
+
+export interface ViewTarget {
+  // meiva:note
+  // The conversation whose tabs hold the file.
+  agentId: number;
+  path: string;
+  lineRange?: string;
+  // meiva:note
+  // The agent whose machine reads a path outside every workspace, when not the conversation's own:
+  // a folder of another agent's machine, browsed up to its `~` or `/` (review of PR #9115).
+  machineAgentId?: number;
+}
+
+// meiva:note
+// The digest parameter panel links carried before 2026-11-07; an agent switch still strips it.
 export const LEGACY_PARAM = "reference";
 
 // meiva:note
@@ -21,21 +47,35 @@ export function fileQuery(files: readonly string[]): string {
   return files.map((file) => `${FILE_PARAM}=${encodeFile(file)}`).join("&");
 }
 
-export function readFiles(url: URL, agentId: number): string[] {
-  if (Number(url.searchParams.get("agent_id")) !== agentId) return [];
-  const files = url.searchParams.getAll(FILE_PARAM);
-  return files.length ? files : url.searchParams.getAll(LEGACY_PARAM);
+
+
+// meiva:note
+// The file the address names: `view`, or for a link from before the panel had tabs the last file of
+// its to-user `file` chain (each was a workspace file the document linked to).
+export function readView(url: URL): ViewTarget | null {
+  const chain = url.searchParams.getAll(FILE_PARAM);
+  const path = url.searchParams.get(VIEW_PARAM) ?? chain.at(-1);
+  const agentId = Number(url.searchParams.get("agent_id") ?? url.searchParams.get(VIEW_AGENT_PARAM));
+  if (!path || !Number.isInteger(agentId) || agentId <= 0) return null;
+  const lineRange = url.searchParams.get(VIEW_LINES_PARAM);
+  const machine = Number(url.searchParams.get(VIEW_AGENT_PARAM));
+  const elsewhere = Number.isInteger(machine) && machine > 0 && machine !== agentId;
+  return { agentId, path, ...(lineRange ? { lineRange } : {}), ...(elsewhere ? { machineAgentId: machine } : {}) };
 }
 
 // meiva:note
-// The chain is replaced in place so the rest of the address keeps its own spelling, and the
-// files stay last: a pushed entry then reads `?agent_id=…&file=…&file=…`.
-export function withFiles(href: string, files: readonly string[]): string {
+// The view is replaced in place and written last; an old to-user `file` chain is dropped with it.
+export function withView(href: string, target: ViewTarget | null): string {
   const url = new URL(href);
   const kept = url.search
     .replace(/^\?/, "")
     .split("&")
-    .filter((part) => part !== "" && ![FILE_PARAM, LEGACY_PARAM].includes(part.split("=")[0]));
-  url.search = [...kept, ...(files.length ? [fileQuery(files)] : [])].join("&");
+    .filter((part) => part !== "" && ![...VIEW_PARAMS, FILE_PARAM, LEGACY_PARAM].includes(part.split("=")[0]));
+  const view = target === null ? [] : [
+    `${VIEW_PARAM}=${encodeFile(target.path)}`,
+    `${VIEW_AGENT_PARAM}=${target.machineAgentId ?? target.agentId}`,
+    ...(target.lineRange ? [`${VIEW_LINES_PARAM}=${encodeFile(target.lineRange)}`] : []),
+  ];
+  url.search = [...kept, ...view].join("&");
   return url.toString();
 }
