@@ -240,8 +240,6 @@ export function TimelineGroupList({
   turnActive,
   loading = false,
   lastEventAt = 0,
-  activeTurnId = null,
-  activeTurnStartedAt = 0,
   overrides,
   toggleExpanded,
   toggleTurn,
@@ -257,8 +255,6 @@ export function TimelineGroupList({
   turnActive: boolean;
   loading?: boolean;
   lastEventAt?: number;
-  activeTurnId?: string | null;
-  activeTurnStartedAt?: number;
   overrides: ReadonlyMap<string, boolean>;
   toggleExpanded: (id: string, currentlyExpanded: boolean) => void;
   toggleTurn: (id: string, currentlyExpanded: boolean, button: HTMLButtonElement) => void;
@@ -326,6 +322,19 @@ export function TimelineGroupList({
       (lastGroup.kind === "single" &&
         lastGroup.member.item.kind === "inbound_chat" &&
         inboundKind(lastGroup.member.item.source) === "human"));
+  // meiva:note
+  // Before the work block's first item arrives, anchor the pending live header on the triggering
+  // human prompt's timestamp so reloads and bridge restarts keep the same reading; an empty
+  // timeline falls back to the page's live event anchor.
+  // meiva:link ui/web/src/docs/frontend-components/timeline-view/deep-collapse.md
+  const pendingStartedAt = (() => {
+    if (!showPendingActivityWindow) return 0;
+    if (lastGroup?.kind === "single" && lastGroup.member.item.created_at) {
+      const parsed = Date.parse(lastGroup.member.item.created_at);
+      if (Number.isFinite(parsed) && parsed > 0) return parsed;
+    }
+    return lastEventAt > 0 ? lastEventAt : 0;
+  })();
 
   return (
     <>
@@ -355,8 +364,6 @@ export function TimelineGroupList({
                 onToggle={toggleTurn}
                 turnActive={turnActive && isLastTurn}
                 lastEventAt={lastEventAt}
-                activeTurnId={activeTurnId}
-                activeTurnStartedAt={activeTurnStartedAt}
                 liveWindow={isLiveTurn}
                 timelineSource={first.source}
                 displayRank={first.rank}
@@ -384,7 +391,7 @@ export function TimelineGroupList({
         })}
         {showPendingActivityWindow ? (
           <div className="py-1">
-            <PendingLiveActivityWindow startedAt={activeTurnStartedAt} />
+            <PendingLiveActivityWindow startedAt={pendingStartedAt} />
           </div>
         ) : null}
       </LiveClockGate>

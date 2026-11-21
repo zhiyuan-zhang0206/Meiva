@@ -496,7 +496,6 @@ async def auto_compact_for_llm(
         timers=runtime.context.require_clock(),
     )
     transition["compact"] = state.compact.next_segment()
-    transition["active_turn_start_idx"] = 0 if state.active_turn_id is not None else None
     emit_compact_finished(
         publisher, agent_id, compact_run_id, finished_at=now, status=CompactionStatus.SUCCESS
     )
@@ -505,16 +504,14 @@ async def auto_compact_for_llm(
 
 # meiva:note
 # The state update that replaces the working context with a summary: the messages channel cleared,
-# the turn timings reset, the `context_reset` that `init_context` serves, and the `goto` that sends
-# the graph there. The auto-compact hook adds the next compact segment and the active-turn anchor.
+# the `context_reset` that `init_context` serves, and the `goto` that sends the graph there. The
+# auto-compact hook adds the next compact segment.
 # A TypedDict, so the claim node and the hook read each key as the type it was written with.
 class CompactTransition(TypedDict):
     messages: list[RemoveMessage]
-    turn_timings: list[dict[str, object]]
     context_reset: ContextReset
     goto: NodeName
     compact: NotRequired[CompactState]
-    active_turn_start_idx: NotRequired[int | None]
 
 
 # meiva:link agent/graph/docs/context-window/replacement.md
@@ -537,7 +534,6 @@ def build_compact_transition(
         tail_msgs.extend(extra_msgs)
     return {
         "messages": [RemoveMessage(id=REMOVE_ALL_MESSAGES)],
-        "turn_timings": [],
         "context_reset": ContextReset(
             tail=tail_msgs,
             resume=resume,

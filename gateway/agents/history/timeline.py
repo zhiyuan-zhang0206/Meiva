@@ -47,7 +47,7 @@ from gateway.agents.history.paging import (
     window_or_cross,
 )
 from gateway.agents.history.read_inputs import TimelineRead
-from gateway.agents.history.record_timeline import fetch_record_window_sync, record_window_for
+from gateway.agents.history.record_timeline import record_window_for
 from gateway.http.config import gateway_state
 from gateway.message_admission.cursor import (
     MAX_CURSOR_LENGTH,
@@ -82,8 +82,6 @@ class TimelineResponse(BaseModel):
     msg_count: int
     has_more: bool
     reading_source: str | None = Field(default=None, exclude_if=_missing_reading_metadata)
-    active_turn_id: str | None = Field(default=None, exclude_if=_missing_reading_metadata)
-    active_turn_started_at: str | None = Field(default=None, exclude_if=_missing_reading_metadata)
 
 
 class RetainedTimelineResponse(BaseModel):
@@ -333,8 +331,6 @@ def _head_response(
         msg_count=msg_count,
         has_more=window.has_more,
         reading_source=encode_reading_source(native_source_identity(source, agent_id)),
-        active_turn_id=source.active_turn_id,
-        active_turn_started_at=source.active_turn_started_at,
     )
 
 
@@ -421,20 +417,10 @@ def _external_harness_response(
     before: str | None,
     cursor: TimelineCursor | None,
 ) -> TimelineResponse:
-    if before is not None and (cursor is None or not cursor.is_harness or cursor.checkpoint_id):
-        harness_items, harness_count, record_more = record_window_for(
-            request, agent_id, harness, limit, before, cursor
-        )
-        return TimelineResponse(items=harness_items, msg_count=harness_count, has_more=record_more)
-    offset = None if before is None or cursor is None else cursor.msg_idx
-    window = fetch_record_window_sync(request, agent_id, harness, limit=limit, before=offset)
-    return TimelineResponse(
-        items=window.items,
-        msg_count=window.size,
-        has_more=window.has_more,
-        active_turn_id=window.active_turn_id if before is None else None,
-        active_turn_started_at=window.active_turn_started_at if before is None else None,
+    harness_items, harness_count, record_more = record_window_for(
+        request, agent_id, harness, limit, before, cursor
     )
+    return TimelineResponse(items=harness_items, msg_count=harness_count, has_more=record_more)
 
 
 def _meiva_harness_response(

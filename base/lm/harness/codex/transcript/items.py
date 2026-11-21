@@ -202,15 +202,24 @@ def _user(item: Obj, place: _Place) -> list[AnyEntry]:
 
 # meiva:note
 # `AgentText` has no phase, so Codex's `commentary` / `final_answer` distinction is dropped.
+# Completion timestamps match native Meiva and Claude Code so timeline work blocks measure end - start uniformly.
 def _agent(item: Obj, place: _Place) -> list[AnyEntry]:
-    return [AgentText(**place.common("agent"), text=text(item, "text"), message_ref=place.id)]
+    return [
+        AgentText(
+            **place.common("agent", at_ms=place.completed_ms),
+            text=text(item, "text"),
+            message_ref=place.id,
+        )
+    ]
 
 
 def _reasoning(item: Obj, place: _Place) -> list[AnyEntry]:
     readable = opt_strings(item, "summary") or opt_strings(item, "content")
     return [
         Reasoning(
-            **place.common("reasoning"), text="\n".join(readable), duration_ms=place.elapsed_ms()
+            **place.common("reasoning", at_ms=place.completed_ms),
+            text="\n".join(readable),
+            duration_ms=place.elapsed_ms(),
         )
     ]
 

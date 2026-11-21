@@ -51,12 +51,13 @@ describe("work block expansion", () => {
   });
 
   it("starts live work collapsed and reveals its summary and details on click", () => {
+    const now = Date.now();
     render(
       <TimelineView
         turnActive
         items={[
-          makeItem({ item_id: "1.0", kind: "inbound_chat", source: "agent:7", payload: "incoming update" }),
-          makeItem({ item_id: "1.1", kind: "agent_reasoning", payload: "live thought", reasoning_ms: 5_000 }),
+          makeItem({ item_id: "1.0", kind: "inbound_chat", source: "agent:7", payload: "incoming update", created_at: new Date(now - 5_000).toISOString() }),
+          makeItem({ item_id: "1.1", kind: "agent_reasoning", payload: "live thought", created_at: new Date(now).toISOString(), reasoning_ms: 5_000 }),
         ]}
       />,
     );

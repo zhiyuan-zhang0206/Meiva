@@ -3,12 +3,11 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import time
-from collections.abc import AsyncGenerator, Mapping, Sequence
+from collections.abc import AsyncGenerator, Sequence
 
 from langchain_core.messages import BaseMessage
 
 from base.agents.history.timeline import build_timeline_items, tail_window
-from base.agents.history.timeline_item import TurnTimingContext
 from base.agents.messages.timestamp_policy import TimestampPolicy
 from base.agents.observation.turn_progress import TurnProgress
 from base.events.live.projection import TimelineSnapshot
@@ -81,26 +80,16 @@ async def node_lifecycle(
     timeline_limit: int,
     full_window: bool = False,
     publish_timeline: bool = True,
-    turn_timings: Sequence[Mapping[str, object]] = (),
-    active_turn_id: str | None = None,
-    active_turn_started_at: str | None = None,
-    active_turn_start_idx: int | None = None,
 ) -> AsyncGenerator[None]:
     turn_progress.mark(agent_id)
     with stall_guard(node_name, stall):
         if publish_timeline:
             cursor = SNAPSHOT_CURSOR.get(agent_id, 0)
             mode = window_mode(message_count=len(messages), cursor=cursor, full_window=full_window)
-            timing = TurnTimingContext(
-                timings=turn_timings,
-                active_turn_id=active_turn_id,
-                active_turn_start_idx=active_turn_start_idx,
-            )
             if mode is WindowMode.FULL:
                 items, msg_count = build_timeline_items(
                     messages,
                     inputs=timeline_inputs,
-                    timing=timing,
                 )
                 window, _ = tail_window(items, timeline_limit)
             else:
@@ -108,7 +97,6 @@ async def node_lifecycle(
                     messages,
                     start=cursor,
                     inputs=timeline_inputs,
-                    timing=timing,
                 )
             # meiva:note
             # An empty window publishes nothing and leaves the cursor, so a render that produced
@@ -119,8 +107,6 @@ async def node_lifecycle(
                         agent_id=agent_id,
                         items=[it.model_dump() for it in window],
                         msg_count=msg_count,
-                        active_turn_id=active_turn_id,
-                        active_turn_started_at=active_turn_started_at,
                     ).model_dump_json()
                 )
                 SNAPSHOT_CURSOR[agent_id] = len(messages)

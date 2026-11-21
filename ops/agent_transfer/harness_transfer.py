@@ -15,16 +15,10 @@ from dataclasses import asdict
 from pathlib import Path
 
 from base import paths
-from base.host.atomic_io import write_text_atomic
 from base.host.boundary.json_values import is_object_dict, is_object_list
 from base.host.boundary.untyped import object_of
 from base.lm.harness import encode_items
-from base.lm.harness.registry import (
-    FileSessionRegistry,
-    SessionRecord,
-    TurnTimingStore,
-    record_from_payload,
-)
+from base.lm.harness.registry import FileSessionRegistry, SessionRecord, record_from_payload
 from ops.rpc_schemas.transfer import HarnessTransferFile, HarnessTransferPayload
 
 _log = logging.getLogger(__name__)
@@ -304,11 +298,6 @@ def _collect_one(
         _collect_codex_files(u_home, record.session_id, files, extra)
     if not files and not extra:
         return None
-    turns_file = TurnTimingStore(paths.harness_sessions_dir(home=home)).turns_path(
-        record.agent_id, record.harness, session_id=record.session_id
-    )
-    if turns_file.is_file():
-        extra["meiva_turns_jsonl"] = turns_file.read_text(encoding="utf-8")
     return HarnessTransferPayload(
         harness=record.harness, session_record=session_record, files=files, extra=extra
     )
@@ -564,14 +553,3 @@ def apply_harness_transfer(
     FileSessionRegistry(paths.harness_sessions_dir(home=home)).save(
         record_from_payload(record, source="the transfer bundle")
     )
-    turns_jsonl = payload.extra.get("meiva_turns_jsonl")
-    sid = record.get("session_id")
-    if isinstance(turns_jsonl, str) and turns_jsonl:
-        write_text_atomic(
-            TurnTimingStore(paths.harness_sessions_dir(home=home)).turns_path(
-                effective_agent_id,
-                payload.harness,
-                session_id=sid if isinstance(sid, str) and sid else None,
-            ),
-            turns_jsonl,
-        )

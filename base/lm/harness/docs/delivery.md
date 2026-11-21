@@ -58,15 +58,6 @@ and the graph's `Foreground` drops one that arrives after a later generation beg
 | `TurnCompleted(turn_id, ..., generation)` | The turn ended; exactly one per turn. |
 | `InterruptConfirmed(turn_id)` | The harness reported the turn interrupted. |
 
-Turn IDs such as `turn-1` are local to a bridge, not permanent transcript IDs: a
-recreated bridge may reuse them in a later generation. Timeline timing therefore
-qualifies the raw delivery ID with its persisted `started_at` (`raw@started_at`).
-`HarnessTurnTimingTracker` uses that identity for live events and snapshots;
-`TurnTimingStore.load` derives the same identity from both active and closed
-sidecars, including existing records. Sidecars retain raw delivery IDs on disk.
-This keeps distinct measured spans distinct on reload without changing delivery,
-cancellation, generation fencing, or adding a second durable turn counter.
-
 A turn ending does not settle an input: only `InputInContext`, `InputRejected` or `InputLost` does.
 A harness-started turn is a first-class turn: its text, tools and end are attributed to it, never to
 a neighbouring turn, and an input delivered meanwhile is handed to that turn or refused, never started beside it.

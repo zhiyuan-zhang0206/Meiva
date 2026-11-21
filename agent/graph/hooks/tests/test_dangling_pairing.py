@@ -389,8 +389,6 @@ class _FakeState:
     def __init__(self, messages: list[AnyMessage]) -> None:
         self.messages = messages
         self.pending_exec_notes: list[AnyMessage] = []
-        self.turn_timings: list[dict[str, object]] = []
-        self.active_turn_start_idx: int | None = None
 
 
 _CONFIG = {"configurable": {"thread_id": "236"}}

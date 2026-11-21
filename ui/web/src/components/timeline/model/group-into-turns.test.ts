@@ -225,16 +225,16 @@ describe("groupIntoTurns", () => {
     expect(formatTurnSummary(turn.summary)).toBe("1 turn · 2 system notes · 2 agent messages");
   });
 
-  it("summarizeTurn keeps an earlier concurrent live execution clock when a later tool finishes", () => {
+  it("summarizeTurn keeps the earliest item start when concurrent tools run", () => {
     const items = [
-      { ...item("agent_code"), item_id: "6.0", code_elapsed_ms: 10 },
-      { ...item("code_output"), item_id: "7.0", payload: "", execStartedAt: 123_456 },
-      { ...item("agent_code"), item_id: "8.0", code_elapsed_ms: 5 },
-      { ...item("code_output"), item_id: "9.0", payload: "usage", exec_ms: 12 },
+      { ...item("agent_code"), item_id: "6.0", created_at: "2026-11-21T10:00:00.010Z", code_elapsed_ms: 10 },
+      { ...item("code_output"), item_id: "7.0", payload: "", created_at: "2026-11-21T10:00:01.000Z", execStartedAt: Date.parse("2026-11-21T10:00:01.000Z") },
+      { ...item("agent_code"), item_id: "8.0", created_at: "2026-11-21T10:00:02.005Z", code_elapsed_ms: 5 },
+      { ...item("code_output"), item_id: "9.0", payload: "usage", created_at: "2026-11-21T10:00:03.000Z", exec_ms: 12 },
     ];
     const summary = summarizeTurn(items);
-    expect(summary.lastLiveKind).toBe("output");
-    expect(summary.lastLiveStartedAt).toBe(123_456);
+    expect(summary.startedAtMs).toBe(Date.parse("2026-11-21T10:00:00.000Z"));
+    expect(summary.endedAtMs).toBe(Date.parse("2026-11-21T10:00:03.000Z"));
   });
 
   it("skips ephemeral machinery markers and [files] companions without splitting turns", () => {

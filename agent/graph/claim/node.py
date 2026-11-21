@@ -42,8 +42,6 @@ file split by axis under Task #1006. cc 70 → ~8-10 per module.
 
 from __future__ import annotations
 
-from collections.abc import Mapping
-
 from langchain_core.messages import AIMessage, ToolMessage
 from langchain_core.runnables import RunnableConfig
 from langgraph.runtime import Runtime
@@ -58,12 +56,7 @@ from agent.messages import has_conversation
 from agent.nodes import BEFORE_TURN, CLAIM, END
 from agent.ownership.inbound import RuntimeOwnershipLostError
 from base.agents.context import MeivaContext, agent_id_from_config
-from base.agents.history.timeline_item import (
-    close_turn_timing_update,
-    open_turn_timing_update,
-)
 from base.api_contracts.agent_contract import Harness
-from base.host.boundary.json_values import is_object_dict, is_object_list
 
 from ._decide import decide
 from ._dispatch import (
@@ -83,8 +76,6 @@ from ._present import (
     publish_claimed_timeline_snapshot,
     publish_end_timeline_snapshot,
     publish_inbound_committed,
-    publish_turn_closed_timeline_snapshot,
-    publish_turn_started,
 )
 from ._routing import ClaimGoto, resolve_routing, route_target
 from .harness_inbox import claimed_deliverable, peek_head_batch
@@ -158,28 +149,15 @@ async def claim_node_impl(
                 # invocation's claim does the long wait. exit_requested stays
                 # False: this END means "turn over", not "process exit".
                 idle_reset = {} if state.interrupted_by_restart else {"non_human_wake": False}
-                close_update = _close_active_turn_if_meiva(ctx, state, agent_id)
-                return Command[ClaimGoto](
-                    update={"turn_active": False, **idle_reset, **close_update}, goto=END
-                )
+                return Command[ClaimGoto](update={"turn_active": False, **idle_reset}, goto=END)
             # The host owns the idle agent and its subscription. End this
             # invocation; the dispatcher creates another task on the next wake.
             idle_reset = {} if state.interrupted_by_restart else {"non_human_wake": False}
-            close_update = _close_active_turn_if_meiva(ctx, state, agent_id)
             return Command[ClaimGoto](
-                update={"turn_active": False, "turn_idle": True, **idle_reset, **close_update},
-                goto=END,
+                update={"turn_active": False, "turn_idle": True, **idle_reset}, goto=END
             )
-        resume_update: dict[str, object] = {"halted": False, "turn_active": True}
-        if ctx.harness is Harness.MEIVA and state.active_turn_id is None:
-            open_update, tid, started_iso = open_turn_timing_update(
-                start_idx=len(state.messages),
-                started_at=ctx.require_clock().now(),
-            )
-            resume_update.update(open_update)
-            publish_turn_started(ctx, agent_id, turn_id=tid, started_at=started_iso)
         return Command[ClaimGoto](
-            update=resume_update,
+            update={"halted": False, "turn_active": True},
             goto=route_target(ctx, BEFORE_TURN),
         )
 
@@ -254,141 +232,6 @@ def _settle_external_harness_batch(
 # Command, publish the end snapshot, and stamp the turn and exit channels. It takes the batch as a
 # value, so the dispatch and veto rules are exercised with claimed rows of any kind without a claim
 # in front of them.
-def _close_active_turn_if_meiva(
-    ctx: MeivaContext,
-    state: _state.AgentState,
-    agent_id: int,
-    *,
-    publish_snapshot: bool = True,
-) -> dict[str, object]:
-    if ctx.harness is not Harness.MEIVA:
-        return {}
-    close_update = close_turn_timing_update(
-        active_turn_id=state.active_turn_id,
-        active_turn_started_at=state.active_turn_started_at,
-        active_turn_start_idx=state.active_turn_start_idx,
-        turn_timings=state.turn_timings,
-        end_idx=len(state.messages),
-        ended_at=ctx.require_clock().now(),
-    )
-    if (
-        publish_snapshot
-        and close_update
-        and state.active_turn_start_idx is not None
-        and isinstance(timings := close_update.get("turn_timings"), list)
-    ):
-        publish_turn_closed_timeline_snapshot(
-            ctx,
-            state,
-            agent_id,
-            turn_timings=timings,  # pyright: ignore[reportUnknownArgumentType]
-            start_idx=state.active_turn_start_idx,
-        )
-    return close_update
-
-
-def _apply_compact_turn_timing(
-    ctx: MeivaContext,
-    state: _state.AgentState,
-    agent_id: int,
-    st: BatchState,
-    update: dict[str, object],
-) -> None:
-    now = ctx.require_clock().now()
-    halted = bool(update.get("halted", False))
-    if halted or st.next_goto == END:
-        if state.active_turn_id is not None:
-            update["active_turn_id"] = None
-            update["active_turn_started_at"] = None
-            update["active_turn_start_idx"] = None
-        return
-    if state.active_turn_id is None or st.committed_chat_ids:
-        open_update, tid, started_iso = open_turn_timing_update(start_idx=0, started_at=now)
-        update.update(open_update)
-        publish_turn_started(ctx, agent_id, turn_id=tid, started_at=started_iso)
-    else:
-        update["active_turn_start_idx"] = 0
-
-
-def _apply_meiva_batch_turn_timing(
-    ctx: MeivaContext,
-    state: _state.AgentState,
-    agent_id: int,
-    st: BatchState,
-    outcome_goto: object,
-    update: dict[str, object],
-) -> None:
-    if ctx.harness is not Harness.MEIVA:
-        return
-    if st.compact_payload is not None:
-        _apply_compact_turn_timing(ctx, state, agent_id, st, update)
-        return
-    halted = bool(update.get("halted", False))
-    should_close = state.active_turn_id is not None and (
-        outcome_goto == END or halted or state.halted or bool(st.committed_chat_ids)
-    )
-    currently_open = state.active_turn_id is not None
-    if should_close:
-        close_update = _close_active_turn_if_meiva(
-            ctx, state, agent_id, publish_snapshot=(outcome_goto != END)
-        )
-        update.update(close_update)
-        currently_open = False
-    if outcome_goto not in (END, CLAIM) and not halted and not currently_open:
-        open_update, tid, started_iso = open_turn_timing_update(
-            start_idx=len(state.messages) + len(st.new_msgs),
-            started_at=ctx.require_clock().now(),
-        )
-        update.update(open_update)
-        publish_turn_started(ctx, agent_id, turn_id=tid, started_at=started_iso)
-
-
-# meiva:note
-# BatchState.new_msgs and LangGraph update payloads carry dynamically narrowed list values;
-# pyright ignores stay localized to the two snapshot publisher boundaries here.
-async def _publish_meiva_batch_snapshots(
-    ctx: MeivaContext,
-    state: _state.AgentState,
-    agent_id: int,
-    st: BatchState,
-    update: Mapping[str, object],
-    *,
-    publish_claimed: bool = True,
-    publish_end: bool,
-) -> None:
-    if ctx.harness is not Harness.MEIVA:
-        return
-    raw_timings = update.get("turn_timings", state.turn_timings)
-    timings: list[dict[str, object]] = (
-        [e for e in raw_timings if is_object_dict(e)]
-        if is_object_list(raw_timings)
-        else state.turn_timings
-    )
-    if publish_claimed:
-        raw_tid = update.get("active_turn_id", state.active_turn_id)
-        raw_started = update.get("active_turn_started_at", state.active_turn_started_at)
-        raw_start_idx = update.get("active_turn_start_idx", state.active_turn_start_idx)
-        publish_claimed_timeline_snapshot(
-            ctx,
-            state,
-            agent_id,
-            st.new_msgs,  # pyright: ignore[reportUnknownArgumentType, reportUnknownMemberType]
-            turn_timings=timings,
-            active_turn_id=raw_tid if isinstance(raw_tid, str) else None,
-            active_turn_started_at=raw_started if isinstance(raw_started, str) else None,
-            active_turn_start_idx=raw_start_idx if isinstance(raw_start_idx, int) else None,
-        )
-        await publish_inbound_committed(ctx, agent_id, st.committed_chat_ids)
-    if publish_end:
-        publish_end_timeline_snapshot(
-            ctx,
-            state,
-            agent_id,
-            st.new_msgs,  # pyright: ignore[reportUnknownArgumentType, reportUnknownMemberType]
-            turn_timings=timings,
-        )
-
-
 async def settle_claimed_batch(
     ctx: MeivaContext,
     state: _state.AgentState,
@@ -398,22 +241,22 @@ async def settle_claimed_batch(
     routing = await resolve_routing(ctx, agent_id, batch)
     st = BatchState()
     await dispatch_batch(ctx, state, agent_id, batch, routing, st)
-    if st.compact_payload is not None:
-        await _publish_meiva_batch_snapshots(
-            ctx, state, agent_id, st, {}, publish_claimed=True, publish_end=False
-        )
+    if ctx.harness is Harness.MEIVA:
+        publish_claimed_timeline_snapshot(ctx, state, agent_id, st.new_msgs)  # pyright: ignore[reportUnknownArgumentType, reportUnknownMemberType]
+        await publish_inbound_committed(ctx, agent_id, st.committed_chat_ids)
     outcome = await decide(ctx, state, agent_id, st, routing)
+    if outcome.publish_end_snapshot and ctx.harness is Harness.MEIVA:
+        publish_end_timeline_snapshot(ctx, state, agent_id, st.new_msgs)  # pyright: ignore[reportUnknownArgumentType, reportUnknownMemberType]
+    # meiva:note
+    # A dispatched batch means this invocation is mid-turn: stamp turn_active so a later claim
+    # pass that finds nothing to do ends the invocation (the turn boundary) instead of blocking.
+    # exit_requested carries the process-exit intent to the runloop and restart_requested the
+    # hosted restart intent (drop the runtime, no exit-notify). Both key on the dispatch verdict
+    # (st.next_goto == END: a terminate or restart won the batch), not on the command's own goto:
+    # a compact co-batched with a terminate routes through INIT_CONTEXT first and only then
+    # reaches END via reset.resume. The two channels are mutually exclusive by construction:
+    # restart_requested is only ever set by the hosted restart branch, which never flips the row.
     update = dict(outcome.command.update or {})  # pyright: ignore[reportUnknownArgumentType, reportUnknownMemberType]
-    _apply_meiva_batch_turn_timing(ctx, state, agent_id, st, outcome.command.goto, update)
-    await _publish_meiva_batch_snapshots(
-        ctx,
-        state,
-        agent_id,
-        st,
-        update,
-        publish_claimed=(st.compact_payload is None),
-        publish_end=outcome.publish_end_snapshot,
-    )
     resolved_non_human_wake = resolve_non_human_wake(state, batch, routing, st)
     if not state.turn_active or state.halted:
         update["user_delivery_baseline"] = await delivery_baseline(ctx, agent_id)
@@ -474,10 +317,6 @@ async def claim_node(
         timeline_inputs=runtime.context.timestamp_policy(),
         timeline_limit=runtime.context.require_agent().read("display", "timeline_default_limit"),
         publish_timeline=runtime.context.harness is Harness.MEIVA,
-        turn_timings=state.turn_timings,
-        active_turn_id=state.active_turn_id if state.turn_active else None,
-        active_turn_started_at=state.active_turn_started_at if state.turn_active else None,
-        active_turn_start_idx=state.active_turn_start_idx if state.turn_active else None,
     ):
         command = await claim_node_impl(state, runtime, config)
     # meiva:note

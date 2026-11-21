@@ -351,12 +351,13 @@ export function clearCodeClocks(items: BackendTimelineItem[], nowMs = 1): Backen
 }
 
 export function freezeExecClocks(items: BackendTimelineItem[], nowMs = 1): BackendTimelineItem[] {
+  const now = new Date(nowMs).toISOString();
   return items.map((it) => {
     if (it.kind === "code_output" && it.exec_ms == null) {
       const startedAt = it.execStartedAt;
       if (startedAt != null && !Number.isNaN(startedAt)) {
         const { execStartedAt: _, ...rest } = it;
-        return { ...rest, execElapsedMs: Math.max(nowMs - startedAt, 0) };
+        return { ...rest, created_at: now, execElapsedMs: Math.max(nowMs - startedAt, 0) };
       }
     }
     return it;
@@ -580,11 +581,9 @@ export function applySystemEvent(
       // task board — useTasks invalidate-refetches on these; they never enter
       // the per-agent timeline.
     case "notification":
-    case "turn_started":
     case "timeline_snapshot":
       // meiva:note
-      // Handled before applySystemEvent by store.processSseEvent (timeline_snapshot uses
-      // mergeSnapshotWithStreaming; turn_started anchors the active Turn clock).
+      // Handled before applySystemEvent by store.processSseEvent (mergeSnapshotWithStreaming).
       return items;
     /* eslint-enable no-fallthrough */
   }
@@ -772,7 +771,6 @@ export function foldEvent(t: ThreadTimelineState, ev: SystemEvent, nowMs = 1): T
   // turn lifecycle tracking
   const turnStart =
     ev.role === "inbound_arrived" ||
-    ev.role === "turn_started" ||
     ev.role === "llm_keepalive" ||
     ev.role === "chat_start" ||
     ev.role === "code_start" ||

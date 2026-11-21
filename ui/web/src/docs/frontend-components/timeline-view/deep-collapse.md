@@ -33,22 +33,35 @@ right-aligned below the expanded body on copyable secondary messages — see
 
 The collapsed turn strip shows a single status line. Expanded turns show the counts of turns, messages and other items on a separate line beneath the status, followed by SDK-call chips and the detail rows where present. While `turnActive` is true, the trailing `TurnBlock` is the live window (`data-live-activity-window="true"`, using the timeline as its scrollport). Before the first work item arrives, an active qualified source shows an unboxed inline `PendingLiveActivityWindow` (`Working…` header row without a disclosure chevron) when the timeline is empty or ends on a human prompt. Its suppression during source and reader loading is owned by [the loading ring](loading-ring.md).
 
-The Plan B timer sums each closed Turn's measured `turn_duration_ms` once by
-its opaque `turn_id`. While active, it adds elapsed time from the authoritative
-`active_turn_started_at`, unless that exact Turn has already closed. A work block
-can contain several Turns; idle gaps between them never contribute. Legacy items
-without Turn timing retain the measured/frozen item-duration fallback. A settled
-block with missing timing shows plain "Worked", without a per-block warning icon.
+The work-block timer measures the block's wall-clock span rather than summing
+per-turn active durations (user ruling 2026-11-21):
 
-External harness delivery IDs such as `turn-1` can repeat after a bridge restart.
-The backend qualifies timeline IDs with the persisted start (`raw@started_at`),
-identically for live events, cold reads and paging, including old timing sidecars.
-The frontend must treat the qualified ID as opaque: distinct measured spans must
-not collapse merely because their bridge-local counters match.
+- **Working** = `now` − the start of the first event item in this work block.
+  If earlier turns finished without a user-visible reply and a new turn starts
+  in the same work block, the live timer continues from the first item's start
+  across the intervening time.
+- **Worked** = the end of the last settled event item in the block − the start
+  of its first event item.
+
+Item boundaries come from the timestamps and durations timeline items already
+carry (`created_at` plus `reasoning_ms` / `code_elapsed_ms` / `exec_ms`, where
+committed items with a duration stamp `created_at` at completion so start is
+`created_at - duration`, and live SSE items carry `*StartedAt`). Standing
+context items (`system_prompt` and `system_marker` with `show_timestamp: false`)
+are excluded so re-attached head notes never shift a block's start. Before the
+first item of a live work block arrives, `PendingLiveActivityWindow` anchors on
+the triggering human prompt's `created_at` (or `liveAnchorAt` on an empty
+timeline). Because the calculation depends only on the timeline items themselves,
+live and settled readings agree across reloads, reconnects and rebuilt harness
+bridges without per-turn timing sidecars or turn-ID deduplication.
 
 The active header remains "Working…" / "Working for Xs" and settles to "Worked" /
-"Worked for Xs". The duration formatter currently omits values below one second;
-detail chips retain sub-second precision.
+"Worked for Xs". Values below one second omit the duration deliberately so the
+header shows plain "Working…" / "Worked"; detail chips retain sub-second
+precision. When a block's start or end timestamp is truly missing, the header
+shows plain "Worked" ("Working…" while active, or `liveAnchorAt` fallback when
+live) with no duration and no per-block warning icon.
+
 Both `PendingLiveActivityWindow` and active (`turnActive`) `TurnBlock` title spans
 share the sidebar's Silver Glint sweep (`.timeline-title-working` sharing
 `.agent-title-working` / `agent-title-sweep` and locking `startTime = 0` via
@@ -56,15 +69,6 @@ share the sidebar's Silver Glint sweep (`.timeline-title-working` sharing
 static text without shimmer once the turn completes; the leading `Layers` icon,
 disclosure chevron, and expanded summary remain unshimmered.
 
-When authoritative Turn timing is unavailable, the legacy live fallback uses
-the in-flight block's start, or the browser's `liveAnchorAt` between steps. This
-fallback does not replace an available authoritative Turn start; messages, tool
-completions, reconnects and reloads must not re-anchor an existing measured Turn.
-
 ## Relationship to Other Nodes
 
 - [Timeline View](timeline-view.md) — the renderer whose turn grouping and expansion this node owns.
-
-A work header with missing timing shows plain "Worked" ("Working…" while active). The numeric subtotal remains internal. Browser-frozen
-durations count until the canonical snapshot replaces them; a reload without
-provider durations exposes the missing timing. A true zero is a measurement.
