@@ -36,6 +36,14 @@ EXEMPTIONS = {
         "pull_request",
     ): "Its input is the pull request description, which no paths filter can express; the "
     "workflow only comments and never fails a check.",
+    (
+        "cache-warm.yml",
+        "push",
+    ): "Runs on every `main` push with `concurrency.cancel-in-progress: true`: its `decide` "
+    "job gates the dependency warm-up jobs (`python`, `node`, `native`) on the seven "
+    "dependency cache-key paths changed since the last successful run, while "
+    "`test-cache-plan` / `test-cache-seed` / `test-cache-save` incrementally seed "
+    "`test-pass-main-*` and skip pytest when there are zero misses.",
 }
 
 

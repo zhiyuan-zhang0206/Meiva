@@ -9,8 +9,9 @@ what judge a change before it lands on `main`. A dispatch carries no pull-reques
 context, so `classify` defaults to a full run and the structure guard compares against the
 merge-base with `origin/main`; jobs that exist only for a pull request stay skipped by
 their own `event_name` guards. The post-merge Release Train (`workflows/release-gate.yml`) certifies
-full-suite builds every 6 hours. Shard timings, the test-count baseline and warm caches
-have other owners ([Repository Automation](repository-automation.md)).
+full-suite builds every 6 hours. Shard timings, the test-count baseline, warm
+dependency caches and incremental `main` static test-cache seeding
+(`workflows/cache-warm.yml`) have other owners ([Repository Automation](repository-automation.md)).
 
 Sharded fan-out behind stable check names, every job capped by
 `timeout-minutes` so a hang cannot run to GitHub's global limit. A `classify`

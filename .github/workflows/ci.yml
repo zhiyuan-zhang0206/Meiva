@@ -2238,9 +2238,11 @@ jobs:
 
   # The test result cache, in shadow: nothing below changes which tests run or what gates. The plan
   # job keys every static-lane test by the content of the files it reads and asks which keys a
-  # recorded pass covers; the report job, after the static tests, sets that plan against how the
-  # tests ended (`would_skip_but_failed` must stay empty), records the passes, and saves them for the
-  # next run. The nightly full run on `main` seeds the cache every pull request reads.
+  # recorded `main` pass covers; the report job, after the static tests, sets that plan against how
+  # the tests ended (`would_skip_but_failed` must stay empty). Only `refs/heads/main` runs save
+  # `test-pass-main-*` (nightly full runs write a fresh baseline without importing stale entries;
+  # incremental seeding on push lives in `cache-warm.yml`); pull requests read `main`'s cache
+  # without writing PR-scoped entries that would shadow newer `main` seeds.
   # See docs/conventions/engineering/test-selection.md.
   test-cache-plan:
     name: test cache plan (shadow)
@@ -2285,8 +2287,8 @@ jobs:
         uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: tmp/test-cache/passes.jsonl
-          key: test-pass-none-${{ github.run_id }}
-          restore-keys: test-pass-
+          key: test-pass-main-none-${{ github.run_id }}
+          restore-keys: test-pass-main-
 
       - name: Download the selected test list
         if: ${{ github.event_name == 'pull_request' && needs.classify.outputs.decision == 'SELECTED' }}
@@ -2381,9 +2383,16 @@ jobs:
           status=0
           "${meizel[@]}" test-cache report --plan tmp/test-cache/plan.json "${reports[@]}" \
             --durations tmp/test-cache/durations.json > tmp/test-cache/report.json || status=$?
-          "${meizel[@]}" test-cache import tmp/test-cache/passes.jsonl
-          "${meizel[@]}" test-cache record --plan tmp/test-cache/plan.json "${reports[@]}" --run "$RUN_ID"
-          "${meizel[@]}" test-cache export > tmp/test-cache/passes.jsonl
+          if [[ "${GITHUB_REF}" == "refs/heads/main" ]]; then
+            # Full runs on `main` write a fresh baseline without importing stale entries.
+            "${meizel[@]}" test-cache record --plan tmp/test-cache/plan.json "${reports[@]}" --run "$RUN_ID"
+            "${meizel[@]}" test-cache export > tmp/test-cache/passes.jsonl
+            if [[ ! -s tmp/test-cache/passes.jsonl ]]; then
+              rm -f tmp/test-cache/passes.jsonl
+            fi
+          else
+            rm -f tmp/test-cache/passes.jsonl
+          fi
           python3 - <<'PY' >> "$GITHUB_STEP_SUMMARY"
           import json
 
@@ -2404,12 +2413,12 @@ jobs:
           exit 0
 
       - name: Save the recorded passes
-        if: ${{ !cancelled() && hashFiles('tmp/test-cache/passes.jsonl') != '' }}
+        if: ${{ !cancelled() && github.ref == 'refs/heads/main' && hashFiles('tmp/test-cache/passes.jsonl') != '' }}
         continue-on-error: true
         uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: tmp/test-cache/passes.jsonl
-          key: test-pass-${{ github.run_id }}-${{ github.run_attempt }}
+          key: test-pass-main-${{ github.run_id }}-${{ github.run_attempt }}
 
       - name: Upload the report
         if: ${{ always() }}

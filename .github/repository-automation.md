@@ -35,12 +35,28 @@ left to manual triage.
 
 CI runs on pull requests only, and a hosted cache written by a PR run is visible
 to that PR alone; only the default branch's caches are shared. This workflow runs
-on pushes to main that touch a cache-key input (`uv.lock`, `.python-version`,
-`.pre-commit-config.yaml`, `ui/web/pnpm-lock.yaml`, the Postgres runtime pin,
-or `.github/actions/`) and on manual dispatch. It runs the same install steps as
-`ci.yml` with the same keys (uv, pre-commit environments, pnpm store, Postgres/Redis
-packages, the vendored Postgres runtime, Playwright), so the next PRs restore
-warm caches instead of each building its own. It runs no tests.
+on every push to `main` and on manual dispatch, with
+`concurrency.cancel-in-progress: true` so newer merges supersede in-flight runs.
+
+- **Dependency caches (`decide` -> `python`, `node`, `native`)**: `decide` checks
+  whether any of the seven cache-key inputs (`uv.lock`, `.python-version`,
+  `.pre-commit-config.yaml`, `ui/web/pnpm-lock.yaml`,
+  `base/cluster/dataplane/runtime_binaries.py`, `.github/actions/**`, or
+  `.github/workflows/cache-warm.yml`) changed since the last successful
+  `cache-warm.yml` run on `main` (so a cancelled intermediate run cannot drop a
+  dependency warm-up; `workflow_dispatch` always warms). When matched, the
+  install jobs run the same steps and keys as `ci.yml` (uv, pre-commit
+  environments, pnpm store, Postgres/Redis packages, the vendored Postgres
+  runtime, Playwright).
+- **Static-lane test result cache (`test-cache-plan` -> `test-cache-seed` ->
+  `test-cache-save`)**: restores the latest `test-pass-main-` cache and computes
+  cacheable misses with the exact same runner container digest and pytest
+  arguments as `ci.yml`'s `test-cache-plan`; when misses exist, `test-cache-seed`
+  runs only the missing static tests and `test-cache-save` merges their passes
+  back into `test-pass-main-<run_id>-<attempt>` (zero misses skip pytest). Pull
+  requests in `ci.yml` read `test-pass-main-` without writing PR-scoped entries,
+  and nightly full runs on `main` write a fresh baseline without importing stale
+  entries.
 
 ## `workflows/ci-runner-image.yml`
 
