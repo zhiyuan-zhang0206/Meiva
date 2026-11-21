@@ -24,6 +24,7 @@ from services.agent_runner.agent_host.pools import PoolBounds
 from services.agent_runner.agent_host.runtime import (
     HostCachePolicy,
     HostPolicy,
+    PersonalDreamPolicy,
     StallTiming,
     WorkspaceHygienePolicy,
 )
@@ -87,6 +88,12 @@ def host_policy(
             enabled=daemon.workspace_hygiene_enabled,
             max_items_per_dir=daemon.workspace_hygiene_max_items_per_dir,
             remind_cooldown_seconds=daemon.workspace_hygiene_remind_cooldown_seconds,
+        ),
+        personal_dream=PersonalDreamPolicy(
+            enabled=daemon.personal_dream_enabled,
+            cooldown_seconds=daemon.personal_dream_cooldown_seconds,
+            index_max_lines=daemon.personal_dream_index_max_lines,
+            max_files=daemon.personal_dream_max_files,
         ),
     )
 

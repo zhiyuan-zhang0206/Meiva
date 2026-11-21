@@ -74,12 +74,18 @@ from services.agent_runner.agent_host.invocation import (
     finish_pending_failure,
 )
 from services.agent_runner.agent_host.invocation.driver import drive_context
+from services.agent_runner.agent_host.lifecycle.personal_dream import (
+    check_and_remind_personal_dream,
+)
 from services.agent_runner.agent_host.lifecycle.shells import (
     reap_and_announce_corpses,
 )
 from services.agent_runner.agent_host.lifecycle.shutdown import close_host_resources
 from services.agent_runner.agent_host.lifecycle.workspace_hygiene import (
     check_and_remind_workspace_hygiene,
+)
+from services.agent_runner.agent_host.lifecycle.workspace_hygiene_policy import (
+    HygieneCheckOutcome,
 )
 from services.agent_runner.agent_host.runtime import (
     AgentRuntime,
@@ -355,17 +361,20 @@ class AgentHost:
                     incarnation,
                     outcome,
                 )
-            await self._check_workspace_hygiene(agent_id, outcome)
+            await self._run_post_turn_checks(agent_id, outcome)
 
-    async def _check_workspace_hygiene(self, agent_id: int, outcome: TurnOutcome) -> None:
+    async def _run_post_turn_checks(self, agent_id: int, outcome: TurnOutcome) -> None:
         if not outcome.completed_idle or outcome.crashed or outcome.aborted or outcome.exited:
             return
+        ws = workspace_path(self._home, agent_id)
+        now_epoch = self._handoff_stamping.clock.now().timestamp()
+        hygiene_outcome: HygieneCheckOutcome | None = None
         try:
-            await check_and_remind_workspace_hygiene(
+            hygiene_outcome = await check_and_remind_workspace_hygiene(
                 agent_id=agent_id,
-                workspace_root=workspace_path(self._home, agent_id),
+                workspace_root=ws,
                 policy=self._policy.workspace_hygiene,
-                now_epoch=self._handoff_stamping.clock.now().timestamp(),
+                now_epoch=now_epoch,
                 pool=self._pool,
                 db=self._db,
                 bus=self._bus,
@@ -374,6 +383,25 @@ class AgentHost:
             logger.opt(exception=True).warning(
                 "workspace hygiene check failed for agent {agent_id} — ignoring",
                 event="workspace_hygiene_check_failed",
+                agent_id=agent_id,
+            )
+        if hygiene_outcome is HygieneCheckOutcome.REMINDED:
+            return
+        try:
+            await check_and_remind_personal_dream(
+                agent_id=agent_id,
+                workspace_root=ws,
+                shared_memory_path=self._home / "vault" / "memory",
+                policy=self._policy.personal_dream,
+                now_epoch=now_epoch,
+                pool=self._pool,
+                db=self._db,
+                bus=self._bus,
+            )
+        except Exception:
+            logger.opt(exception=True).warning(
+                "personal dream check failed for agent {agent_id} — ignoring",
+                event="personal_dream_check_failed",
                 agent_id=agent_id,
             )
 

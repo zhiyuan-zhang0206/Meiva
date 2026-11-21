@@ -7,12 +7,14 @@ from pydantic import Field
 from base.config.base import EnvSettings
 from base.config.domains.daemon.delivery_watchdog_fields import DeliveryWatchdogFields
 from base.config.domains.daemon.main_red_watch_fields import MainRedWatchFields
+from base.config.domains.daemon.personal_dream_fields import PersonalDreamFields
 from base.config.domains.daemon.workspace_hygiene_fields import WorkspaceHygieneFields
 
 
 class DaemonSettings(
     DeliveryWatchdogFields,
     MainRedWatchFields,
+    PersonalDreamFields,
     WorkspaceHygieneFields,
     EnvSettings,
 ):

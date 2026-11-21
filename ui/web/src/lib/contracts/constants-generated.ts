@@ -46,4 +46,5 @@ export const NOTE_TAGS = [
   "timezone",
   "sdk_expand",
   "workspace_hygiene",
+  "personal_dream",
 ] as const;

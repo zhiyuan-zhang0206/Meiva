@@ -374,4 +374,19 @@ EVENTS: dict[str, EventSpec] = {
         "unaffected",
         tier="anomaly",
     ),
+    "personal_dream_reminded": telemetry_event(
+        "personal_dream_reminded",
+        "agent-host inspected an agent's local `<workspace>/memory/` after a normal turn "
+        "settled to idle, matched Personal Self-Dream capacity or active-change criteria past "
+        "cooldown, and enqueued a personal_dream system_note; carries reason, index_lines and "
+        "file_count",
+        tier="observation",
+    ),
+    "personal_dream_check_failed": telemetry_event(
+        "personal_dream_check_failed",
+        "the best-effort post-turn personal Self-Dream check raised after a hosted turn settled "
+        "to idle; logged and ignored so turn settlement and the agent's next wake stay "
+        "unaffected",
+        tier="anomaly",
+    ),
 }
