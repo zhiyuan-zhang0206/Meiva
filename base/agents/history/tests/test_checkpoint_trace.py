@@ -134,7 +134,7 @@ async def test_latest_and_trace_reads_stay_in_the_root_namespace(
     )
     db = _db(database_gate=database_gate)
     assert latest_checkpoint_id(db, 19) == root
-    async with AsyncConnectionPool(settings.data_plane.db_url) as pool:
+    async with AsyncConnectionPool[psycopg.AsyncConnection](settings.data_plane.db_url) as pool:
         assert await alatest_checkpoint_id(pool, "19") == root
     checkpoint_id, messages = load_checkpoint_messages_by_trace(db, 19, trace_id)
     assert checkpoint_id == root
