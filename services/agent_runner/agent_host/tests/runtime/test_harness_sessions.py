@@ -66,6 +66,9 @@ class ClosingEngine:
     async def wait_inbound(self, timeout: float) -> None:
         raise AssertionError("these tests never wait")
 
+    def silence_floor_monotonic(self, turn_ids: object) -> float | None:
+        return None
+
     async def interrupt(self) -> object:
         raise AssertionError("retirement must close the session")
 
@@ -361,6 +364,9 @@ class TransportBackedEngine:
 
     async def wait_inbound(self, timeout: float) -> None:
         raise AssertionError("these tests never wait")
+
+    def silence_floor_monotonic(self, turn_ids: object) -> float | None:
+        return None
 
     async def interrupt(self) -> object:
         raise AssertionError("this engine is never interrupted")

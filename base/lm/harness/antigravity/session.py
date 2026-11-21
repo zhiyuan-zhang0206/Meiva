@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import asyncio
-from collections.abc import Callable, Mapping, Sequence
+from collections.abc import Callable, Collection, Mapping, Sequence
 from dataclasses import replace
 from pathlib import Path
 
@@ -113,7 +113,7 @@ class AgySession(BaseHarnessSession[AntigravityConfig]):
         self._phantom: PhantomTurn | None = None
         self._acked_start = False
         self._last_turn: str | None = None
-        self._schedules = Schedules()
+        self._schedules = Schedules(max_timer_seconds=config.max_schedule_timer_seconds)
         self._subagents = SubagentReader(home)
 
     def _read_records(
@@ -140,7 +140,7 @@ class AgySession(BaseHarnessSession[AntigravityConfig]):
         if self._closed:
             return
         self._closed = True
-        self._schedules = Schedules()
+        self._schedules = Schedules(max_timer_seconds=self.config.max_schedule_timer_seconds)
         self._sent_turn = None
         self._phantom = None
         self._observed.clear()
@@ -393,8 +393,12 @@ class AgySession(BaseHarnessSession[AntigravityConfig]):
         turn = turn_id or (self._active.turn_id if self._active is not None else self._phantom_id())
         if turn is None or not self._session_id:
             return
-        for event in self._subagents.poll(self._session_id, turn):
+        events = self._subagents.poll(self._session_id, turn)
+        if not events:
+            return
+        for event in events:
             self._emit(event)
+        self._schedules = self._schedules.on_wakeup(turn, monotonic_now=self._monotonic())
 
     def _needs_poll(self) -> bool:
         unsettled = self._ledger.keys_in(InputPhase.SENT) + self._ledger.keys_in(
@@ -416,6 +420,9 @@ class AgySession(BaseHarnessSession[AntigravityConfig]):
             for client_id in snap.client_message_ids():
                 if self._ledger.phase(client_id) in (InputPhase.SENT, InputPhase.RECEIVED):
                     self._apply(self._ledger.in_context(client_id, turn))
+                    self._schedules = self._schedules.on_input(
+                        turn, monotonic_now=self._monotonic()
+                    )
         if action is PhantomAction.CLOSE:
             self._close_phantom(snap)
 
@@ -478,6 +485,7 @@ class AgySession(BaseHarnessSession[AntigravityConfig]):
             )
         )
         self._observed.discard(phantom.turn_id)
+        self._schedules = self._schedules.clear_turn(phantom.turn_id)
 
     async def _on_stream_end(self, transport: AgyTransport) -> None:
         if transport is not self._transport:
@@ -527,6 +535,9 @@ class AgySession(BaseHarnessSession[AntigravityConfig]):
         if done is not None and done.text:
             ticket.parts.append(done.text)
             self._emit(done)
+            self._schedules = self._schedules.on_assistant_text(
+                ticket.turn_id, monotonic_now=self._monotonic()
+            )
 
     # meiva:note
     # The `schedule` tool's calls, followed from the step stream (see `schedules.py` for what that
@@ -535,18 +546,29 @@ class AgySession(BaseHarnessSession[AntigravityConfig]):
     # meiva:link base/lm/harness/antigravity/docs/antigravity.md
     def _track_schedule(self, event: object) -> None:
         before = self._schedules
+        mono = self._monotonic()
         if isinstance(event, ToolUse):
-            self._schedules = before.tool_used(event.tool_use_id, event.name, event.tool_input)
+            self._schedules = before.tool_used(
+                event.tool_use_id,
+                event.name,
+                event.tool_input,
+                turn_id=event.turn_id,
+                monotonic_now=mono,
+            )
         elif isinstance(event, ToolResult):
             self._schedules = before.tool_returned(
-                event.tool_use_id, is_error=event.is_error, now=self._clock.now().timestamp()
+                event.tool_use_id,
+                is_error=event.is_error,
+                now=self._clock.now().timestamp(),
+                content=event.content,
+                monotonic_now=mono,
             )
-        if self._schedules != before:
+        if self._schedules.items != before.items:
             self._persist_background(self._schedules.pending_at(self._clock.now().timestamp()))
 
     def _lose_schedules(self) -> None:
         lost = self._schedules.pending_at(self._clock.now().timestamp())
-        self._schedules = Schedules()
+        self._schedules = Schedules(max_timer_seconds=self.config.max_schedule_timer_seconds)
         self._lose_background(lost)
 
     def background_work(self) -> BackgroundWork:
@@ -554,6 +576,11 @@ class AgySession(BaseHarnessSession[AntigravityConfig]):
             return BackgroundWork()
         now = self._clock.now().timestamp()
         return BackgroundWork((*self._schedules.pending_at(now), *self._observed_turn_items()))
+
+    def silence_floor_monotonic(self, turn_ids: Collection[str]) -> float | None:
+        if self._closed:
+            return None
+        return self._schedules.silence_floor_monotonic(turn_ids)
 
     # meiva:note
     # A step with an index below `_floor` was already attributed (a phantom turn closed from the
@@ -655,6 +682,7 @@ class AgySession(BaseHarnessSession[AntigravityConfig]):
         )
         if fields.interrupted:
             self._emit(InterruptConfirmed(ticket.turn_id, self.generation))
+        self._schedules = self._schedules.clear_turn(ticket.turn_id)
         self._complete(ticket)
 
 

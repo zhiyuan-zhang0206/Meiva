@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from collections.abc import AsyncIterator, Awaitable, Mapping, Sequence
+from collections.abc import AsyncIterator, Awaitable, Collection, Mapping, Sequence
 from dataclasses import dataclass
 from typing import Protocol, runtime_checkable
 
@@ -100,6 +100,18 @@ class ContextDigestKeeping(Protocol):
 
 
 # meiva:note
+# Who knows when open turns are legitimately waiting in silence (for example, an Antigravity
+# one-shot `schedule(DurationSeconds=...)` timer holding its outer turn open). Returns the
+# monotonic clock floor that bounds silence for `turn_ids`, or None when no declared wait covers
+# all of them. Checked structurally on `HarnessSession` so adapters without in-turn silent waits
+# need no boilerplate and the graph never reaches into an adapter's tools.
+# meiva:link agent/graph/docs/harness-foreground.md
+@runtime_checkable
+class SilenceFloorReporting(Protocol):
+    def silence_floor_monotonic(self, turn_ids: Collection[str]) -> float | None: ...
+
+
+# meiva:note
 # What the graph reads of a subscription: the next event, or None once the stream has ended, and a way
 # to stop watching. `pump.Subscription` is the implementation.
 # meiva:link base/lm/harness/docs/delivery.md
@@ -142,6 +154,7 @@ class TurnEngine(Protocol):
     def close(self, *, reason: str = "closed") -> Awaitable[None]: ...
     def notify_inbound(self) -> None: ...
     def wait_inbound(self, timeout: float) -> Awaitable[None]: ...
+    def silence_floor_monotonic(self, turn_ids: Collection[str]) -> float | None: ...
 
     # meiva:note
     # The same three states as the adapter's `exit_code`, asked of the engine the

@@ -143,6 +143,7 @@ class ReadTimelineSink:
         self._busy = asyncio.Lock()
         self._active = False
         self._delivered_output = False
+        self._delivered_reply = False
         self._closed_turns = 0
         self._invalid = False
         self._history_end = self._start_offset()
@@ -172,8 +173,13 @@ class ReadTimelineSink:
     def has_delivered_output(self) -> bool:
         return self._delivered_output
 
+    @property
+    def has_delivered_reply(self) -> bool:
+        return self._delivered_reply
+
     def reset_turn_delivery(self) -> None:
         self._delivered_output = False
+        self._delivered_reply = False
 
     def take_invalid_reply(self) -> bool:
         invalid, self._invalid = self._invalid, False
@@ -190,6 +196,8 @@ class ReadTimelineSink:
         if isinstance(event, (AssistantText, TextDelta, SubagentText, ToolUse, ToolResult)):
             self._delivered_output = True
         if isinstance(event, AssistantText):
+            if event.text.strip():
+                self._delivered_reply = True
             self._check_reply(event.text)
         self._dirty.set()
 

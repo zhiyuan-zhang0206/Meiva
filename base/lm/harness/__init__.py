@@ -21,6 +21,7 @@ from base.lm.harness.engine import (
     EventSubscription,
     HarnessSession,
     HarnessTurn,
+    SilenceFloorReporting,
     TurnEngine,
     completed_turn,
 )
@@ -131,6 +132,7 @@ __all__ = [
     "SessionRecord",
     "SessionRegistry",
     "SessionStarted",
+    "SilenceFloorReporting",
     "SubagentText",
     "TextBlock",
     "TextDelta",

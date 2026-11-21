@@ -106,6 +106,77 @@ def _halt_reason(
 # Stop and say so: the aborted turn's inputs go back to the queue, the agent is halted until a new
 # message (`harness_inbox.py::settle_halted_turn`), and the warning plus the turn's Error event are
 # the alert. When the quota returns, or why a harness went silent, is not this code's guess to make.
+def _build_halted_error(
+    ctx: MeivaContext,
+    agent_id: int,
+    bridge: TurnEngine,
+    exc: HarnessTurnFaultedError | HarnessClosedError | HarnessSetupError,
+    reason: str,
+    *,
+    requeued: tuple[int, ...],
+    after_output: bool = False,
+    breaker_halted: bool = True,
+) -> HarnessTurnHaltedError:
+    harness = ctx.harness.value
+    if isinstance(exc, HarnessTurnStalledError):
+        detail = (
+            sanitize_error_text(f"{harness} harness turn stalled: {exc}")
+            or f"{harness} harness turn stalled"
+        )
+        if after_output and not breaker_halted:
+            msg = (
+                "harness turn stalled after delivering a reply; session retired and the agent "
+                "idles without requeuing answered inputs"
+            )
+        elif after_output:
+            msg = (
+                "harness turn stalled after partial output without a reply; session retired "
+                "and the agent halted without requeuing delivered inputs"
+            )
+        else:
+            msg = (
+                "harness turn stalled; session retired, inputs requeued and the agent halted "
+                "until a new message"
+            )
+        logger.warning(
+            msg,
+            event="harness_turn_stalled",
+            agent_id=agent_id,
+            harness=harness,
+            model=bridge.model,
+            silent_seconds=round(exc.silent_seconds, 1),
+            stall_seconds=exc.stall_seconds,
+            requeued_inbound_ids=list(requeued),
+            requeued_count=len(requeued),
+            breaker_halted=breaker_halted,
+            reason=detail,
+        )
+    else:
+        detail = (
+            sanitize_error_text(f"{harness} harness quota exhausted: {exc}")
+            or f"{harness} harness quota exhausted"
+        )
+        msg = (
+            "harness turn aborted due to quota exhaustion after delivering output; agent halted "
+            "without requeuing delivered inputs"
+            if after_output
+            else "harness turn aborted due to quota exhaustion; inputs requeued and the agent "
+            "halted until a new message"
+        )
+        logger.warning(
+            msg,
+            event="harness_quota_exhausted",
+            agent_id=agent_id,
+            harness=harness,
+            model=bridge.model,
+            requeued_inbound_ids=list(requeued),
+            requeued_count=len(requeued),
+            breaker_halted=breaker_halted,
+            reason=detail,
+        )
+    return HarnessTurnHaltedError(detail, reason=reason, requeued_inbound_ids=requeued)
+
+
 async def _settle_halted_turn(
     ctx: MeivaContext,
     agent_id: int,
@@ -116,42 +187,7 @@ async def _settle_halted_turn(
 ) -> HarnessTurnHaltedError:
     turn_id = exc.turn_id if isinstance(exc, HarnessTurnFaultedError) else None
     requeued = await run.settle_halted_turn(turn_id=turn_id, reason=reason)
-    harness = ctx.harness.value
-    if isinstance(exc, HarnessTurnStalledError):
-        detail = (
-            sanitize_error_text(f"{harness} harness turn stalled: {exc}")
-            or f"{harness} harness turn stalled"
-        )
-        logger.warning(
-            "harness turn stalled; session retired, inputs requeued and the agent halted until a "
-            "new message",
-            event="harness_turn_stalled",
-            agent_id=agent_id,
-            harness=harness,
-            model=bridge.model,
-            silent_seconds=round(exc.silent_seconds, 1),
-            stall_seconds=exc.stall_seconds,
-            requeued_inbound_ids=list(requeued),
-            requeued_count=len(requeued),
-            reason=detail,
-        )
-    else:
-        detail = (
-            sanitize_error_text(f"{harness} harness quota exhausted: {exc}")
-            or f"{harness} harness quota exhausted"
-        )
-        logger.warning(
-            "harness turn aborted due to quota exhaustion; inputs requeued and the agent halted "
-            "until a new message",
-            event="harness_quota_exhausted",
-            agent_id=agent_id,
-            harness=harness,
-            model=bridge.model,
-            requeued_inbound_ids=list(requeued),
-            requeued_count=len(requeued),
-            reason=detail,
-        )
-    return HarnessTurnHaltedError(detail, reason=reason, requeued_inbound_ids=requeued)
+    return _build_halted_error(ctx, agent_id, bridge, exc, reason, requeued=requeued)
 
 
 async def _handle_harness_abort(
@@ -181,6 +217,29 @@ async def _handle_harness_abort(
         await projector.finish(error=str(exc))
     elif marked:
         report_lost_turn(ctx, agent_id, marked, run.last_key, exc)
+    if halt_reason is not None:
+        # meiva:note
+        # Requeuing delivered inputs and tripping the recovery breaker are separate decisions:
+        # quota exhaustion always trips the breaker so background wakes cannot hammer an
+        # exhausted account, and a stall after partial tool/delta output without any completed
+        # assistant reply trips it too. A stall after a completed AssistantText reply settles
+        # cleanly without tripping the breaker or marking a crash corpse, because an open
+        # background command or timer should not strand a responsive agent.
+        should_halt_breaker = (
+            halt_reason == HALT_REASON_QUOTA_EXHAUSTED or not projector.has_delivered_reply
+        )
+        if should_halt_breaker:
+            await run.record_halt(reason=halt_reason)
+        return _build_halted_error(
+            ctx,
+            agent_id,
+            bridge,
+            exc,
+            halt_reason,
+            requeued=(),
+            after_output=True,
+            breaker_halted=should_halt_breaker,
+        )
     return None
 
 

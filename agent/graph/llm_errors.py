@@ -49,11 +49,14 @@ class LLMRetryBudgetExceededError(FatalLLMStreamError):
 
 
 # meiva:note
-# External harness turn that stopped before it delivered a reply, its inputs back in the queue and the
-# agent halted until a new message. `reason` is the breaker's stored halt reason
-# (`base/agents/recovery/breaker.py::HARNESS_HALT_REASONS`: an exhausted quota, a stalled turn).
-# Subclasses FatalLLMStreamError so graph/runloop abort paths settle the turn with diagnostics and the
-# turn's Error event, while the agent idles instead of becoming a crash corpse.
+# External harness turn settled via the halt path (`reason` in `HARNESS_HALT_REASONS`:
+# `quota_exhausted` or `turn_stalled`). When raised before any delivered output, the turn's inputs
+# are requeued (`requeued_inbound_ids`) and the recovery breaker halts background wakes until a
+# new message. When raised after delivered output, already-delivered inputs are not requeued
+# (`requeued_inbound_ids=()`), while quota exhaustion and stalls without a completed assistant
+# reply still trip the recovery breaker; a stall after a completed assistant reply settles without
+# tripping the breaker. Subclasses FatalLLMStreamError so graph/runloop abort paths emit
+# diagnostics and the turn's Error event while idling cleanly without marking a crash corpse.
 class HarnessTurnHaltedError(FatalLLMStreamError):
     def __init__(
         self, message: str, *, reason: str, requeued_inbound_ids: tuple[int, ...] = ()

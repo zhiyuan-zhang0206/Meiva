@@ -160,6 +160,7 @@ class ForegroundRun:
         self._resumed = False
         self._subscription: EventSubscription | None = None
         self._reading = False
+        self._clock = ctx.require_clock()
         self._stall_seconds = stall_seconds
         self._last_heard = 0.0
 
@@ -207,6 +208,9 @@ class ForegroundRun:
             self.fg = self.fg.withdraw(withdrawn_keys)
             self._settling = [h for h in self._settling if h.key not in withdrawn_keys]
         return requeued
+
+    async def record_halt(self, *, reason: str) -> None:
+        _ = await settle_halted_turn(self._ctx, self._agent_id, (), reason=reason)
 
     # meiva:note
     # The invocation failed or was interrupted with inputs handed over and unsettled. The session is
@@ -326,7 +330,7 @@ class ForegroundRun:
     async def execute(self) -> None:
         subscription = await self._bridge.subscribe()
         self._subscription = subscription
-        self._last_heard = asyncio.get_running_loop().time()
+        self._last_heard = self._clock.monotonic()
         self.fg = replace(self.fg, generation=self._bridge.generation)
         outcome: BaseException | None = None
         try:
@@ -353,7 +357,7 @@ class ForegroundRun:
     async def _read(self, subscription: EventSubscription) -> None:
         try:
             while (event := await subscription.get()) is not None:
-                self._last_heard = asyncio.get_running_loop().time()
+                self._last_heard = self._clock.monotonic()
                 self._reading = True
                 try:
                     await self._on_event(event)
@@ -388,6 +392,8 @@ class ForegroundRun:
             case AssistantText(turn_id=turn_id, text=text):
                 self._streamed.setdefault(turn_id, []).append(text)
                 await self._projector.on_event(event)
+                if text.strip():
+                    await persist_last_active(self._ctx, self._agent_id, text)
             case (
                 ReasoningDelta()
                 | ReasoningText()
@@ -510,11 +516,13 @@ class ForegroundRun:
     # only says that this process is alive.
     # meiva:link agent/graph/docs/harness-foreground.md
     async def _wait_for_change(self, timeout: float) -> None:
-        now = asyncio.get_running_loop().time()
+        now = self._clock.monotonic()
         if self._reading or (self._subscription is not None and self._subscription.unread):
             self._last_heard = now
         if not self._foreground_quiet():
-            silent = now - self._last_heard
+            floor = self._bridge.silence_floor_monotonic(self.fg.turns)
+            heard = max(self._last_heard, floor) if floor is not None else self._last_heard
+            silent = now - heard
             if silent >= self._stall_seconds:
                 raise HarnessTurnStalledError(
                     f"no event from the harness for {silent:.0f}s (threshold "
@@ -660,7 +668,7 @@ class ForegroundRun:
             raise HarnessSetupError(
                 f"{self._ctx.harness.value} could not take the input: {exc}"
             ) from exc
-        self._last_heard = asyncio.get_running_loop().time()
+        self._last_heard = self._clock.monotonic()
         return True
 
     # meiva:note

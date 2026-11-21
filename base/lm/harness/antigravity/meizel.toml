@@ -2,6 +2,7 @@ exports = ["mapping.py", "rpc.py", "session.py", "tests", "timing_store.py", "tr
 
 [uses]
 "__init__.py" = ["config.py", "handoff_rules.py", "mapping.py", "rpc.py", "session.py", "transport.py"]
+"config.py" = ["schedules.py"]
 "handoff_rules.py" = []
 "mapping.py" = ["subagents.py"]
 "reconciliation" = ["trajectory.py"]

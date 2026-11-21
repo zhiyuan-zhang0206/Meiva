@@ -188,6 +188,7 @@ interior structure from tag nesting.
 | `cancel_settle_seconds` | 5 | how long an interrupt waits for the CLI and its children before escalating to SIGTERM/SIGKILL and reporting residue |
 | `image_follow_seconds` | 30 | how long an image sent as a follow-up steer waits for its turn to be running before it is given up on and reported (`session._follow_with_images`) |
 | `max_buffered_events` | 256 | text deltas are droppable under lag; control events never are |
+| `max_schedule_timer_seconds` | `86400` (`UNBOUNDED_SCHEDULE_SECONDS`) | upper bound for extending the foreground stall-watchdog silence floor on one explicit timed `schedule(DurationSeconds=...)` call so a malformed huge duration cannot disable stall detection indefinitely |
 | `skip_permissions` | `False` | headless cannot prompt; a command outside the configured policy is denied, which the adapter reports as failure. Opting in trades that denial for auto-approval |
 | `MAX_FRAME_BYTES` (`transport.py`) | `256 MiB` | one NDJSON `step_update` or `result` line can carry a multi-megabyte tool result or accumulated turn state; `AgyTransport` reads 64 KiB chunks into a `bytearray` without `StreamReader.readline()`'s 8 MiB separator limit while capping one frame at 256 MiB so an unterminated stream from a wedged child cannot grow memory without bound |
 
@@ -215,11 +216,17 @@ the three differences above.
 ## Scheduled work
 
 `agy` has a `schedule` tool (cron jobs and timers). The step stream shows the call and its
-success. A timer call (`DurationSeconds`, `Prompt`) blocks inside its turn and its result
-arrives when it fires, so it adds nothing after the turn. A call without a duration
-(cron-like) shows neither firing nor cancellation, so `schedules.py` holds it as pending for
-one day. An interrupt kills `agy` and the schedules with it; the
-respawn hands them to the next turn's note as lost. See
+result. On `agy` 1.5.5 a timer call (`DurationSeconds`, `Prompt`) blocked inside the tool call
+until it fired; on `agy` 1.5.14 it returns immediately as a background task handle (`task id: ...`)
+while holding the outer turn open and silent until the timer fires or is cancelled early by
+`TimerCondition` or `manage_task(Action="kill")`. In both forms the wait stays inside the open
+turn so `pending_at` adds no post-turn item, while `schedules.py` tracks active per-turn timer
+deadlines (capped by `AntigravityConfig.max_schedule_timer_seconds`) and exposes them through
+`AgySession.silence_floor_monotonic()` so the foreground stall watchdog does not abort a turn
+legitimately waiting for a declared timer, evicting expired, killed, closed, or early-woken
+conditional timers immediately. A call without a duration (cron-like) shows neither firing nor
+cancellation, so `schedules.py` holds it as pending for one day. An interrupt kills `agy` and
+the schedules with it; the respawn hands them to the next turn's note as lost. See
 [background work](../../docs/background-work.md).
 
 ## Native reasoning measurements
