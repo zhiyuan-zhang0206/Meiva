@@ -106,25 +106,31 @@ def _halt_reason(
 # Stop and say so: the aborted turn's inputs go back to the queue, the agent is halted until a new
 # message (`harness_inbox.py::settle_halted_turn`), and the warning plus the turn's Error event are
 # the alert. When the quota returns, or why a harness went silent, is not this code's guess to make.
-async def _settle_halted_turn(
+def _build_halted_error(
     ctx: MeivaContext,
     agent_id: int,
     bridge: TurnEngine,
-    run: ForegroundRun,
     exc: HarnessTurnFaultedError | HarnessClosedError | HarnessSetupError,
     reason: str,
+    *,
+    requeued: tuple[int, ...],
+    after_output: bool = False,
 ) -> HarnessTurnHaltedError:
-    turn_id = exc.turn_id if isinstance(exc, HarnessTurnFaultedError) else None
-    requeued = await run.settle_halted_turn(turn_id=turn_id, reason=reason)
     harness = ctx.harness.value
     if isinstance(exc, HarnessTurnStalledError):
         detail = (
             sanitize_error_text(f"{harness} harness turn stalled: {exc}")
             or f"{harness} harness turn stalled"
         )
+        msg = (
+            "harness turn stalled after delivering output; session retired and the agent idles "
+            "without requeuing answered inputs"
+            if after_output
+            else "harness turn stalled; session retired, inputs requeued and the agent halted "
+            "until a new message"
+        )
         logger.warning(
-            "harness turn stalled; session retired, inputs requeued and the agent halted until a "
-            "new message",
+            msg,
             event="harness_turn_stalled",
             agent_id=agent_id,
             harness=harness,
@@ -140,9 +146,15 @@ async def _settle_halted_turn(
             sanitize_error_text(f"{harness} harness quota exhausted: {exc}")
             or f"{harness} harness quota exhausted"
         )
+        msg = (
+            "harness turn aborted due to quota exhaustion after delivering output; agent idles "
+            "without requeuing answered inputs"
+            if after_output
+            else "harness turn aborted due to quota exhaustion; inputs requeued and the agent "
+            "halted until a new message"
+        )
         logger.warning(
-            "harness turn aborted due to quota exhaustion; inputs requeued and the agent halted "
-            "until a new message",
+            msg,
             event="harness_quota_exhausted",
             agent_id=agent_id,
             harness=harness,
@@ -152,6 +164,19 @@ async def _settle_halted_turn(
             reason=detail,
         )
     return HarnessTurnHaltedError(detail, reason=reason, requeued_inbound_ids=requeued)
+
+
+async def _settle_halted_turn(
+    ctx: MeivaContext,
+    agent_id: int,
+    bridge: TurnEngine,
+    run: ForegroundRun,
+    exc: HarnessTurnFaultedError | HarnessClosedError | HarnessSetupError,
+    reason: str,
+) -> HarnessTurnHaltedError:
+    turn_id = exc.turn_id if isinstance(exc, HarnessTurnFaultedError) else None
+    requeued = await run.settle_halted_turn(turn_id=turn_id, reason=reason)
+    return _build_halted_error(ctx, agent_id, bridge, exc, reason, requeued=requeued)
 
 
 async def _handle_harness_abort(
@@ -181,6 +206,10 @@ async def _handle_harness_abort(
         await projector.finish(error=str(exc))
     elif marked:
         report_lost_turn(ctx, agent_id, marked, run.last_key, exc)
+    if halt_reason is not None:
+        return _build_halted_error(
+            ctx, agent_id, bridge, exc, halt_reason, requeued=(), after_output=True
+        )
     return None
 
 

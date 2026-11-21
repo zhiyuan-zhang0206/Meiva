@@ -90,6 +90,32 @@ HarnessGoto = Literal["claim"]
 DELIVERY_FALLBACK_SECONDS = 15.0
 REDELIVER_BACKOFF_SECONDS = 2.0
 POOL_RETRY_SECONDS = 1.0
+# meiva:note
+# Upper bound for extending the silence threshold when the harness explicitly calls a timed
+# `schedule(DurationSeconds=...)` tool that blocks inside the turn (Antigravity timers). Matches
+# `UNBOUNDED_SCHEDULE_SECONDS` (24h) in `base/lm/harness/antigravity/schedules.py` so a malformed
+# huge duration can never disable the stall watchdog indefinitely.
+_MAX_SCHEDULE_TIMER_WAIT_SECONDS = 24 * 3600.0
+
+
+def _schedule_timer_seconds(name: str, tool_input: dict[str, object]) -> float | None:
+    if name != "schedule":
+        return None
+    for key, value in tool_input.items():
+        if key.lower() != "durationseconds":
+            continue
+        if isinstance(value, bool):
+            return None
+        parsed: float | None = None
+        if isinstance(value, int | float):
+            parsed = float(value)
+        elif isinstance(value, str):
+            stripped = value.strip()
+            if stripped.isdigit():
+                parsed = float(stripped)
+        if parsed is not None and parsed > 0:
+            return min(parsed, _MAX_SCHEDULE_TIMER_WAIT_SECONDS)
+    return None
 
 
 # meiva:note
@@ -162,6 +188,7 @@ class ForegroundRun:
         self._reading = False
         self._stall_seconds = stall_seconds
         self._last_heard = 0.0
+        self._active_timers: dict[str, float] = {}
 
     def _unsettled(self) -> tuple[Handed, ...]:
         return (*self.fg.handed, *self._settling)
@@ -388,6 +415,8 @@ class ForegroundRun:
             case AssistantText(turn_id=turn_id, text=text):
                 self._streamed.setdefault(turn_id, []).append(text)
                 await self._projector.on_event(event)
+                if text.strip():
+                    await persist_last_active(self._ctx, self._agent_id, text)
             case (
                 ReasoningDelta()
                 | ReasoningText()
@@ -396,6 +425,7 @@ class ForegroundRun:
                 | ToolUse()
                 | ToolResult()
             ):
+                self._track_timer(event)
                 await self._projector.on_event(event)
             case InputInContext(key=key, turn_id=turn_id):
                 self._turn_inputs.setdefault(turn_id, []).append(key)
@@ -404,11 +434,20 @@ class ForegroundRun:
             case _:
                 pass
         self.fg, settlements = self.fg.on_event(event)
+        if not self.fg.turns:
+            self._active_timers.clear()
         self._settling.extend(s.handed for s in settlements)
         for settlement in settlements:
             await self._settle(settlement)
             self._settling.remove(settlement.handed)
         self._changed.set()
+
+    def _track_timer(self, event: BridgeEvent) -> None:
+        if isinstance(event, ToolUse):
+            if (wait := _schedule_timer_seconds(event.name, event.tool_input)) is not None:
+                self._active_timers[event.tool_use_id] = asyncio.get_running_loop().time() + wait
+        elif isinstance(event, ToolResult) and event.is_error:
+            _ = self._active_timers.pop(event.tool_use_id, None)
 
     async def _on_turn_completed(self, event: TurnCompleted) -> None:
         turn = completed_turn(event, "".join(self._streamed.pop(event.turn_id, [])))
@@ -514,7 +553,8 @@ class ForegroundRun:
         if self._reading or (self._subscription is not None and self._subscription.unread):
             self._last_heard = now
         if not self._foreground_quiet():
-            silent = now - self._last_heard
+            timer_deadline = max(self._active_timers.values(), default=0.0)
+            silent = now - max(self._last_heard, timer_deadline)
             if silent >= self._stall_seconds:
                 raise HarnessTurnStalledError(
                     f"no event from the harness for {silent:.0f}s (threshold "
