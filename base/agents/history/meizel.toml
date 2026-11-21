@@ -1,7 +1,7 @@
 exports = ["checkpoint.py", "checkpoint_copy.py", "checkpoint_postgres_walks.py", "checkpoint_segment.py", "checkpoint_serde.py", "checkpoint_serializer.py", "closing_request.py", "compact_boundary.py", "context_breakdown.py", "context_response.py", "delta_read_compat.py", "hierarchy", "message_tokens.py", "timeline.py", "timeline_item.py", "transcript_timeline"]
 
 [uses]
-"checkpoint.py" = ["checkpoint_postgres_walks.py", "checkpoint_serde.py", "checkpoint_serializer.py", "closing_request.py", "delta_read_compat.py", "timeline_item.py"]
+"checkpoint.py" = ["checkpoint_postgres_walks.py", "checkpoint_serde.py", "checkpoint_serializer.py", "closing_request.py", "delta_read_compat.py"]
 "checkpoint_segment.py" = ["checkpoint.py", "checkpoint_postgres_walks.py", "checkpoint_serde.py", "checkpoint_serializer.py", "closing_request.py", "delta_read_compat.py"]
 "checkpoint_serializer.py" = ["checkpoint_serde.py"]
 "compact_boundary.py" = ["closing_request.py"]

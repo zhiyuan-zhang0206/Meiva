@@ -20621,28 +20621,6 @@
               }
             ],
             "title": "Code Elapsed Ms"
-          },
-          "turn_id": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Turn Id"
-          },
-          "turn_duration_ms": {
-            "anyOf": [
-              {
-                "type": "integer"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Turn Duration Ms"
           }
         },
         "type": "object",
@@ -20681,28 +20659,6 @@
               }
             ],
             "title": "Reading Source"
-          },
-          "active_turn_id": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Active Turn Id"
-          },
-          "active_turn_started_at": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Active Turn Started At"
           }
         },
         "type": "object",

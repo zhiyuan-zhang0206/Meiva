@@ -82,3 +82,41 @@ def test_native_duration_revises_only_same_reasoning_id_and_survives_cold_restar
     assert lost.items[0].item.item_id == reasoning.item_id
     assert lost.items[0].item.reasoning_ms is None
     assert record_file("codex", path).revision() == 0
+
+
+def test_native_duration_advances_reasoning_created_at_to_completion_time(tmp_path: Path) -> None:
+    path = tmp_path / "transcript_full.jsonl"
+    row: dict[str, object] = {
+        "type": "PLANNER_RESPONSE",
+        "status": "DONE",
+        "step_index": 0,
+        "created_at": "2026-11-17T05:30:00Z",
+        "thinking": "synthetic thought",
+        "content": "MEIVA_DISPLAY_TO_USER\nanswer",
+        "tool_calls": [],
+    }
+    path.write_text(json.dumps(row) + "\n")
+    native = parse_trajectory(
+        {
+            "status": "CASCADE_RUN_STATUS_IDLE",
+            "numTotalSteps": 1,
+            "trajectory": {
+                "steps": [
+                    {
+                        "type": "CORTEX_STEP_TYPE_PLANNER_RESPONSE",
+                        "status": "CORTEX_STEP_STATUS_DONE",
+                        "metadata": {"createdAt": "2026-11-17T05:30:00.123456789Z"},
+                        "plannerResponse": {
+                            "thinking": "synthetic thought",
+                            "thinkingDuration": "30.265829s",
+                        },
+                    }
+                ]
+            },
+        }
+    )
+    store_timings(path, native)
+    items = window(record_file("antigravity", path), harness="antigravity").timeline_items
+    reasoning = next(item for item in items if item.kind == "agent_reasoning")
+    assert reasoning.reasoning_ms == 30265
+    assert reasoning.created_at == "2026-11-17T05:30:30.265000+00:00"

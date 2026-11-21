@@ -74,16 +74,22 @@ describe("detail-block duration display", () => {
     expect(screen.getByTestId("card-toggle").textContent).toContain("Thinking for");
     expect(container.textContent).not.toContain("Waiting for model");
   });
-  it("a system-only active turn with zero elapsed work renders 'Working…'", () => {
+  it("a system-only active turn below 1s renders 'Working for 1s'", () => {
     render(
       <TimelineView
         turnActive
         items={[
-          makeItem({ item_id: "1.0", kind: "inbound_chat", source: "schedule:1", payload: "wake" }),
+          makeItem({
+            item_id: "1.0",
+            kind: "inbound_chat",
+            source: "schedule:1",
+            payload: "wake",
+            created_at: new Date().toISOString(),
+          }),
         ]}
       />,
     );
-    expect(runToggle().textContent).toContain("Working…");
+    expect(runToggle().textContent).toContain("Working for 1s");
   });
   it("completed single-code-block turn shows 'Worked for' and the rounds count", () => {
     render(
@@ -120,7 +126,7 @@ describe("detail-block duration display", () => {
     fireEvent.click(header);
     expect(screen.getByText("1 system note")).toBeTruthy();
   });
-  it("completed work turn with missing duration shows plain Worked", () => {
+  it("completed work turn with sub-1s wall-clock span shows Worked for 1s while detail chip keeps plain Thinking", () => {
     render(
       <TimelineView
         items={[
@@ -136,13 +142,13 @@ describe("detail-block duration display", () => {
       />,
     );
     const header = runToggle();
-    expect(header.textContent).toBe("Worked");
+    expect(header.textContent).toBe("Worked for 1s");
     expect(screen.queryByRole("img")).toBeNull();
     fireEvent.click(header);
     expect(screen.getByTestId("card-toggle").textContent).toBe("Thinking");
     expect(screen.getByTestId("card-toggle").textContent).not.toContain("Thinking for");
   });
-  it("live timer excludes the idle gap the turn spans, so it does not drop at turn end", () => {
+  it("live and settled headers share the work block's wall-clock span from its first item", () => {
     const now = Date.now();
     const items = [
       makeItem({ item_id: "1.0", kind: "agent_chat", payload: "hi" }),
@@ -158,15 +164,14 @@ describe("detail-block duration display", () => {
         kind: "agent_code",
         payload: "x = 1",
         code_elapsed_ms: 17_000,
-        created_at: new Date(now - 1_000).toISOString(),
+        created_at: new Date(now).toISOString(),
       }),
     ];
     const { container, rerender } = render(<TimelineView turnActive items={items} />);
-    expect(runToggle().textContent).toContain("Working for 17s");
-    expect(runToggle().textContent).not.toContain("6m");
+    expect(runToggle().textContent).toContain("Working for 6m");
     rerender(<TimelineView items={items} />);
     expect(container.querySelector('[data-live-activity-window="true"]')).toBeNull();
-    expect(runToggle().textContent).toContain("Worked for 17s");
+    expect(runToggle().textContent).toContain("Worked for 6m");
   });
   it("live timer adds the streaming block's elapsed to the committed total", () => {
     setUserSettings({ "display.expand_working_block": true });
@@ -197,7 +202,7 @@ describe("detail-block duration display", () => {
     expect(header).toContain("Working for 13s");
     expect(header).toContain("1 turn");
   });
-  it("live timer shows on a turn with no stamped member at all", () => {
+  it("shows plain Working… on an unstamped live block without lastEventAt", () => {
     render(
       <TimelineView
         turnActive
@@ -213,19 +218,25 @@ describe("detail-block duration display", () => {
         ]}
       />,
     );
-    expect(runToggle().textContent).toContain("Working for 4s");
+    expect(runToggle().textContent).toContain("Working…");
   });
   it("renders PendingLiveActivityWindow when turnActive is true right after a human message", () => {
     render(
       <TimelineView
         turnActive
         items={[
-          makeItem({ item_id: "1.0", kind: "inbound_chat", source: "user", payload: "do it" }),
+          makeItem({
+            item_id: "1.0",
+            kind: "inbound_chat",
+            source: "user",
+            payload: "do it",
+            created_at: new Date().toISOString(),
+          }),
         ]}
       />,
     );
     const pending = screen.getByTestId("pending-live-activity-window");
-    expect(pending.textContent).toBe("Working…");
+    expect(pending.textContent).toBe("Working for 1s");
     expect(pending.querySelector("svg")).toBeTruthy();
     expect(pending.querySelector(".animate-spin")).toBeNull();
   });

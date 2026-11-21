@@ -80,5 +80,3 @@ class HarnessTimelineWindow(BaseModel):
     )
     older_cursor: str | None = Field(default=None, exclude_if=_missing_reading_metadata)
     newer_cursor: str | None = Field(default=None, exclude_if=_missing_reading_metadata)
-    active_turn_id: str | None = Field(default=None, exclude_if=_missing_reading_metadata)
-    active_turn_started_at: str | None = Field(default=None, exclude_if=_missing_reading_metadata)

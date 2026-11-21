@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
+from datetime import datetime, timedelta
 from pathlib import Path
 
 from base.host.boundary.json_values import is_object_dict, is_object_list
@@ -92,16 +93,16 @@ class EntryParser:
             return self._generic(file, text, at)
         if status != "DONE":
             return [_unknown(key, order, f"{kind}.status")]
-        return self._done(file, text, at)
+        return self._done(file, text, stamp, at)
 
-    def _done(self, file: FileRow, text: str, at: str) -> list[AnyEntry]:
+    def _done(self, file: FileRow, text: str, stamp: datetime, at: str) -> list[AnyEntry]:
         row = file.row
         kind = row.get("type")
         key, order = f"agy:{file.offset}", Order(file.offset)
         if kind == "USER_INPUT":
             return [HumanInput(key=key, order=order, at=at, wire_id=key, text=user_text(text))]
         if kind == "PLANNER_RESPONSE":
-            return self._planner(file.offset, row, at)
+            return self._planner(file.offset, row, stamp, at)
         if kind == "SYSTEM_MESSAGE":
             try:
                 notice = classify(text)
@@ -148,18 +149,30 @@ class EntryParser:
             )
         ]
 
-    def _planner(self, offset: int, row: Mapping[str, object], at: str) -> list[AnyEntry]:
+    def _planner(
+        self, offset: int, row: Mapping[str, object], stamp: datetime, at: str
+    ) -> list[AnyEntry]:
         key = f"agy:{offset}"
         found: list[AnyEntry] = []
         thinking, text = row.get("thinking"), row.get("content")
         if isinstance(thinking, str) and thinking.strip():
+            # meiva:note
+            # Antigravity's PLANNER_RESPONSE.created_at is the step start; advance Reasoning.at by
+            # thinkingDuration when known so committed reasoning items uniformly carry their
+            # completion time (`start = created_at - reasoning_ms`, `end = created_at`).
+            duration_ms = _reasoning_ms(row)
+            reasoning_at = (
+                (stamp + timedelta(milliseconds=duration_ms)).isoformat()
+                if duration_ms is not None
+                else at
+            )
             found.append(
                 Reasoning(
                     key=f"{key}:thinking",
                     order=Order(offset),
-                    at=at,
+                    at=reasoning_at,
                     text=thinking.strip(),
-                    duration_ms=_reasoning_ms(row),
+                    duration_ms=duration_ms,
                 )
             )
         if isinstance(text, str) and text.strip():

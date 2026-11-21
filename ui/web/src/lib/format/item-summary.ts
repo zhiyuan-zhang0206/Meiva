@@ -67,12 +67,12 @@ function formatWholeSecondParts(totalSec: number): string {
 
 // meiva:note
 // Whole-second duration for active/settled TurnBlock and PendingLiveActivityWindow headers:
-// returns null below 1s so headers render plain "Working…" / "Worked" instead of "0s",
-// and floors >= 1s to "1s".."59s", "1m", "1m 12s" without 60s rollover.
+// clamps values below 1s to "1s" (user ruling 2026-11-21) so timestamped sub-second blocks
+// render "Working for 1s" / "Worked for 1s" instead of "0s", and floors >= 1s to
+// "1s".."59s", "1m", "1m 12s" without 60s rollover.
 // meiva:link ui/web/src/docs/frontend-components/timeline-view/deep-collapse.md
-export function formatWholeSecondsDuration(ms: number): string | null {
-  const totalSec = Math.floor(Math.max(0, ms) / 1000);
-  if (totalSec < 1) return null;
+export function formatWholeSecondsDuration(ms: number): string {
+  const totalSec = Math.max(1, Math.floor(Math.max(0, ms) / 1000));
   return formatWholeSecondParts(totalSec);
 }
 

@@ -8,9 +8,6 @@ importers keep working.
 
 from __future__ import annotations
 
-from collections.abc import Callable, Mapping, Sequence
-from dataclasses import dataclass
-from datetime import datetime
 from typing import Literal
 
 from pydantic import BaseModel, Field
@@ -18,7 +15,6 @@ from pydantic import BaseModel, Field
 from base.agents.messages.inbound_images import TimelineUploadFile
 from base.agents.messages.quote import Quote
 from base.agents.sdk.tally import SdkCall
-from base.host.boundary.json_values import is_object_dict, is_object_list
 
 
 def _missing_reading_locator(value: object) -> bool:
@@ -126,8 +122,6 @@ class TimelineItem(BaseModel):
     # elsewhere). Read from the AIMessage's meiva_code_ms_by_block (keyed by code
     # block_idx). Drives the detail-block chip "Wrote code for Xs".
     code_elapsed_ms: int | None = None
-    turn_id: str | None = None
-    turn_duration_ms: int | None = None
 
 
 class ReadingWindow(BaseModel):
@@ -136,184 +130,3 @@ class ReadingWindow(BaseModel):
     anchor_item_id: str | None = None
     older_cursor: str | None = None
     newer_cursor: str | None = None
-
-
-@dataclass(frozen=True, slots=True)
-class TurnTimingSpan:
-    turn_id: str
-    start_pos: int
-    end_pos: int | None = None
-    duration_ms: int | None = None
-
-
-@dataclass(frozen=True, slots=True)
-class TurnTimingContext:
-    timings: Sequence[Mapping[str, object]] | Sequence[TurnTimingSpan] = ()
-    active_turn_id: str | None = None
-    active_turn_started_at: str | None = None
-    active_turn_start_idx: int | None = None
-    index_shift: int = 0
-
-
-def _valid_int(value: object) -> int | None:
-    return value if isinstance(value, int) and not isinstance(value, bool) else None
-
-
-def extract_checkpoint_turn_timing(
-    channel_values: Mapping[str, object],
-    *,
-    current: bool,
-    index_shift: int = 0,
-) -> TurnTimingContext:
-    raw_timings = channel_values.get("turn_timings")
-    spans = (
-        parse_turn_timing_spans(
-            [e for e in raw_timings if is_object_dict(e)],
-            index_shift=index_shift,
-        )
-        if is_object_list(raw_timings)
-        else ()
-    )
-    if not current or channel_values.get("turn_active") is not True:
-        return TurnTimingContext(timings=spans)
-    raw_id = channel_values.get("active_turn_id")
-    raw_started = channel_values.get("active_turn_started_at")
-    raw_start_idx = _valid_int(channel_values.get("active_turn_start_idx"))
-    if isinstance(raw_id, str) and raw_id and isinstance(raw_started, str) and raw_started:
-        return TurnTimingContext(
-            timings=spans,
-            active_turn_id=raw_id,
-            active_turn_started_at=raw_started,
-            active_turn_start_idx=raw_start_idx,
-        )
-    return TurnTimingContext(timings=spans)
-
-
-def parse_turn_timing_spans(
-    raw_timings: Sequence[Mapping[str, object]],
-    *,
-    index_shift: int = 0,
-) -> tuple[TurnTimingSpan, ...]:
-    spans: list[TurnTimingSpan] = []
-    for raw in raw_timings:
-        turn_id = raw.get("turn_id")
-        start_idx = _valid_int(raw.get("start_idx"))
-        end_idx = _valid_int(raw.get("end_idx"))
-        duration_ms = _valid_int(raw.get("duration_ms"))
-        if (
-            isinstance(turn_id, str)
-            and turn_id
-            and start_idx is not None
-            and end_idx is not None
-            and duration_ms is not None
-        ):
-            spans.append(
-                TurnTimingSpan(
-                    turn_id=turn_id,
-                    start_pos=start_idx + index_shift,
-                    end_pos=end_idx + index_shift,
-                    duration_ms=max(duration_ms, 0),
-                )
-            )
-    spans.sort(key=lambda s: s.start_pos)
-    return tuple(spans)
-
-
-def item_position(item: TimelineItem) -> int | None:
-    head = item.item_id.split(".", 1)[0].removeprefix("h")
-    return int(head) if head.isdigit() else None
-
-
-def apply_turn_timings(
-    items: Sequence[TimelineItem],
-    spans: Sequence[TurnTimingSpan],
-    *,
-    pos_fn: Callable[[TimelineItem], int | None] = item_position,
-) -> None:
-    if not items or not spans:
-        return
-    ordered = sorted(spans, key=lambda s: s.start_pos)
-    span_idx = 0
-    num_spans = len(ordered)
-    for item in items:
-        if item.kind in (
-            "system_prompt",
-            "inbound_chat",
-            "inbound_compact_summary",
-            "compact_boundary",
-        ):
-            continue
-        pos = pos_fn(item)
-        if pos is None:
-            continue
-        while span_idx < num_spans:
-            end_pos = ordered[span_idx].end_pos
-            if end_pos is not None and pos >= end_pos:
-                span_idx += 1
-            else:
-                break
-        if span_idx >= num_spans:
-            break
-        span = ordered[span_idx]
-        if pos >= span.start_pos and (span.end_pos is None or pos < span.end_pos):
-            item.turn_id = span.turn_id
-            item.turn_duration_ms = span.duration_ms
-
-
-def open_turn_timing_update(
-    *,
-    start_idx: int,
-    started_at: datetime,
-    turn_id: str | None = None,
-) -> tuple[dict[str, object], str, str]:
-    tid = turn_id or f"meiva-{start_idx}-{int(started_at.timestamp() * 1_000_000)}"
-    started_iso = started_at.isoformat()
-    return (
-        {
-            "active_turn_id": tid,
-            "active_turn_started_at": started_iso,
-            "active_turn_start_idx": start_idx,
-        },
-        tid,
-        started_iso,
-    )
-
-
-def close_turn_timing_update(
-    *,
-    active_turn_id: str | None,
-    active_turn_started_at: str | None,
-    active_turn_start_idx: int | None,
-    turn_timings: Sequence[Mapping[str, object]],
-    end_idx: int,
-    ended_at: datetime,
-) -> dict[str, object]:
-    if active_turn_id is None and active_turn_started_at is None and active_turn_start_idx is None:
-        return {}
-    timings: list[dict[str, object]] = [dict(entry) for entry in turn_timings]
-    start_idx = _valid_int(active_turn_start_idx)
-    if (
-        isinstance(active_turn_id, str)
-        and active_turn_id
-        and isinstance(active_turn_started_at, str)
-        and active_turn_started_at
-        and start_idx is not None
-    ):
-        started = datetime.fromisoformat(active_turn_started_at)
-        duration_ms = max(0, round((ended_at - started).total_seconds() * 1000))
-        timings.append(
-            {
-                "turn_id": active_turn_id,
-                "start_idx": start_idx,
-                "end_idx": max(end_idx, start_idx),
-                "started_at": active_turn_started_at,
-                "ended_at": ended_at.isoformat(),
-                "duration_ms": duration_ms,
-            }
-        )
-    return {
-        "active_turn_id": None,
-        "active_turn_started_at": None,
-        "active_turn_start_idx": None,
-        "turn_timings": timings,
-    }

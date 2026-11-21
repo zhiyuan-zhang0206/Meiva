@@ -113,11 +113,11 @@ describe("formatDuration", () => {
 });
 
 describe("formatWholeSecondsDuration", () => {
-  it("returns null below 1s and floors >= 1s to whole seconds without 60s rollover", () => {
-    expect(formatWholeSecondsDuration(-500)).toBeNull();
-    expect(formatWholeSecondsDuration(0)).toBeNull();
-    expect(formatWholeSecondsDuration(100)).toBeNull();
-    expect(formatWholeSecondsDuration(999)).toBeNull();
+  it("displays sub-1s durations as 1s and floors >= 1s to whole seconds without 60s rollover", () => {
+    expect(formatWholeSecondsDuration(-500)).toBe("1s");
+    expect(formatWholeSecondsDuration(0)).toBe("1s");
+    expect(formatWholeSecondsDuration(100)).toBe("1s");
+    expect(formatWholeSecondsDuration(999)).toBe("1s");
     expect(formatWholeSecondsDuration(1_000)).toBe("1s");
     expect(formatWholeSecondsDuration(1_999)).toBe("1s");
     expect(formatWholeSecondsDuration(59_999)).toBe("59s");

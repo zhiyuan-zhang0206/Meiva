@@ -12,7 +12,6 @@ import { orderSdkCalls, type SdkCall } from "@/lib/format/item-summary";
 import enMessages from "../../../../messages/en";
 
 import { classifyMarker, isSilentMarker } from "./marker-classify";
-import { isLiveCode, isLiveExecution, isLiveReasoning, itemLiveStartedAt } from "./reasoning-clock";
 
 export type TurnTranslator = (
   key: string,
@@ -126,45 +125,103 @@ export interface TurnSummary {
   readonly memories: number;
   readonly agentMessages: number;
   readonly systemNotes: number;
-  readonly thinkingMs: number;
-  readonly codeMs: number;
-  readonly execMs: number;
   // meiva:note
-  // Sum of committed/frozen block durations (thinkingMs + codeMs + execMs),
-  // excluding idle wall-clock gaps across restarts or wake-ups; shared by both
-  // "Working for X" (plus live delta) and settled "Worked for X".
-  // meiva:link ui/web/src/docs/frontend-components/timeline-view/timeline-view.md
-  readonly workedMs: number;
-  readonly closedTurnsWorkedMs?: number;
-  readonly closedTurnIds?: readonly string[];
-  readonly missingTiming: boolean;
-  readonly lastLiveKind: "reasoning" | "code" | "output" | null;
-  readonly lastLiveStartedAt: number;
+  // Wall-clock boundaries (epoch ms) of this work block: start of its first event
+  // item and end of its last settled event item, or null when missing. Active
+  // "Working for X" counts `now - startedAtMs`; settled "Worked for X" counts
+  // `endedAtMs - startedAtMs` (user ruling 2026-11-21).
+  // meiva:link ui/web/src/docs/frontend-components/timeline-view/deep-collapse.md
+  readonly startedAtMs: number | null;
+  readonly endedAtMs: number | null;
   readonly sdkCalls: readonly SdkCall[];
 }
 
-function itemOwnMs(it: BackendTimelineItem): number | null {
-  switch (it.kind) {
-    case "agent_reasoning":
-      return it.reasoning_ms ?? it.reasoningElapsedMs ?? null;
-    case "agent_code":
-      return it.code_elapsed_ms ?? it.codeElapsedMs ?? null;
-    case "code_output":
-      return it.exec_ms ?? it.execElapsedMs ?? null;
-    default:
-      return 0;
+function parseTimestampMs(iso: string | null | undefined): number | null {
+  if (!iso) return null;
+  const ms = Date.parse(iso);
+  return Number.isFinite(ms) && ms > 0 ? ms : null;
+}
+
+function isStandingContextItem(it: BackendTimelineItem): boolean {
+  return (
+    it.kind === "system_prompt" ||
+    (it.kind === "system_marker" && !it.show_timestamp)
+  );
+}
+
+// meiva:note
+// Derive an item's wall-clock start from the fields timeline items already carry:
+// live SSE items carry explicit `*StartedAt` anchors; committed items with a duration
+// (`reasoning_ms`, `code_elapsed_ms`, `exec_ms`) stamp `created_at` at completion so
+// start is `created_at - duration`; frontend-frozen reasoning/code keep `created_at`
+// at start; instantaneous items start at `created_at`.
+// meiva:link ui/web/src/docs/frontend-components/timeline-view/deep-collapse.md
+function itemStartMs(it: BackendTimelineItem): number | null {
+  if (it.kind === "agent_reasoning") {
+    if (it.reasoningStartedAt != null && Number.isFinite(it.reasoningStartedAt)) {
+      return it.reasoningStartedAt;
+    }
+    const created = parseTimestampMs(it.created_at);
+    if (created === null) return null;
+    if (it.reasoning_ms != null && Number.isFinite(it.reasoning_ms)) {
+      return created - Math.max(0, it.reasoning_ms);
+    }
+    return created;
   }
+  if (it.kind === "agent_code") {
+    if (it.codeStartedAt != null && Number.isFinite(it.codeStartedAt)) {
+      return it.codeStartedAt;
+    }
+    const created = parseTimestampMs(it.created_at);
+    if (created === null) return null;
+    if (it.code_elapsed_ms != null && Number.isFinite(it.code_elapsed_ms)) {
+      return created - Math.max(0, it.code_elapsed_ms);
+    }
+    return created;
+  }
+  if (it.kind === "code_output") {
+    if (it.execStartedAt != null && Number.isFinite(it.execStartedAt)) {
+      return it.execStartedAt;
+    }
+    const created = parseTimestampMs(it.created_at);
+    if (created === null) return null;
+    const duration = it.exec_ms ?? it.execElapsedMs;
+    if (duration != null && Number.isFinite(duration)) {
+      return created - Math.max(0, duration);
+    }
+    return created;
+  }
+  return parseTimestampMs(it.created_at);
+}
+
+function itemEndMs(it: BackendTimelineItem): number | null {
+  const created = parseTimestampMs(it.created_at);
+  if (created === null) return null;
+  if (it.kind === "agent_reasoning") {
+    if (it.reasoning_ms != null && Number.isFinite(it.reasoning_ms)) {
+      return created;
+    }
+    if (it.reasoningElapsedMs != null && Number.isFinite(it.reasoningElapsedMs)) {
+      return created + Math.max(0, it.reasoningElapsedMs);
+    }
+    return created;
+  }
+  if (it.kind === "agent_code") {
+    if (it.code_elapsed_ms != null && Number.isFinite(it.code_elapsed_ms)) {
+      return created;
+    }
+    if (it.codeElapsedMs != null && Number.isFinite(it.codeElapsedMs)) {
+      return created + Math.max(0, it.codeElapsedMs);
+    }
+    return created;
+  }
+  return created;
 }
 
 export function summarizeTurn(items: readonly BackendTimelineItem[]): TurnSummary {
-  let missingTiming = false;
   let thinking = 0;
   let code = 0;
   let output = 0;
-  let thinkingMs = 0;
-  let codeMs = 0;
-  let execMs = 0;
-  let unattributedOwnMs = 0;
   let systemPrompts = 0;
   let compactSummaries = 0;
   let memories = 0;
@@ -172,52 +229,12 @@ export function summarizeTurn(items: readonly BackendTimelineItem[]): TurnSummar
   let systemNotes = 0;
   const sdkCounts = new Map<string, number>();
 
-  const closedTurnDurations = new Map<string, number>();
   for (const it of items) {
     if (it.llmWaiting) continue;
-    if (
-      typeof it.turn_id === "string" &&
-      it.turn_id.length > 0 &&
-      typeof it.turn_duration_ms === "number" &&
-      Number.isFinite(it.turn_duration_ms) &&
-      !closedTurnDurations.has(it.turn_id)
-    ) {
-      closedTurnDurations.set(it.turn_id, Math.max(0, it.turn_duration_ms));
-    }
-  }
-  let closedTurnsWorkedMs = 0;
-  for (const durationMs of closedTurnDurations.values()) {
-    closedTurnsWorkedMs += durationMs;
-  }
-
-  for (const it of items) {
-    if (it.llmWaiting) continue;
-    const ownMs = itemOwnMs(it);
-    const hasClosedTurnDuration =
-      typeof it.turn_id === "string" && closedTurnDurations.has(it.turn_id);
-    // meiva:note
-    // A missing provider measurement is unknown ONLY when the enclosing Turn also
-    // carries no authoritative `turn_duration_ms` (e.g. legacy pre-Plan-B blocks or
-    // unsettled incomplete items). Never infer work across idle gaps.
-    // meiva:link ui/web/src/docs/frontend-components/timeline-view/deep-collapse.md
-    if (
-      !hasClosedTurnDuration &&
-      ownMs === null &&
-      !isLiveReasoning(it) &&
-      !isLiveCode(it) &&
-      !isLiveExecution(it)
-    ) {
-      missingTiming = true;
-    }
-    if (!hasClosedTurnDuration && ownMs !== null) {
-      unattributedOwnMs += ownMs;
-    }
     if (it.kind === "agent_reasoning") {
       thinking += 1;
-      thinkingMs += ownMs ?? 0;
     } else if (it.kind === "agent_code") {
       code += 1;
-      codeMs += ownMs ?? 0;
       if (it.sdk_calls) {
         for (const c of it.sdk_calls) {
           sdkCounts.set(c.method, (sdkCounts.get(c.method) ?? 0) + c.count);
@@ -225,7 +242,6 @@ export function summarizeTurn(items: readonly BackendTimelineItem[]): TurnSummar
       }
     } else if (it.kind === "code_output") {
       output += 1;
-      execMs += ownMs ?? 0;
     } else if (it.kind === "system_prompt") {
       systemPrompts += 1;
     } else if (it.kind === "inbound_compact_summary" || it.kind === "inbound_compact_request") {
@@ -248,28 +264,33 @@ export function summarizeTurn(items: readonly BackendTimelineItem[]): TurnSummar
   const sdkCalls = orderSdkCalls(
     [...sdkCounts.entries()].map(([method, count]) => ({ method, count })),
   );
-  const closedTurnIds = [...closedTurnDurations.keys()];
-  const workedMs = closedTurnsWorkedMs + unattributedOwnMs;
-  let lastLiveKind: "reasoning" | "code" | "output" | null = null;
-  let lastLiveStartedAt = 0;
-  for (let i = items.length - 1; i >= 0; i--) {
-    const it = items[i];
-    if (isLiveReasoning(it)) {
-      lastLiveKind = "reasoning";
-      lastLiveStartedAt = itemLiveStartedAt(it) ?? it.reasoningStartedAt ?? 0;
-      break;
-    }
-    if (isLiveCode(it)) {
-      lastLiveKind = "code";
-      lastLiveStartedAt = itemLiveStartedAt(it) ?? it.codeStartedAt ?? 0;
-      break;
-    }
-    if (isLiveExecution(it)) {
-      lastLiveKind = "output";
-      lastLiveStartedAt = itemLiveStartedAt(it) ?? it.execStartedAt ?? 0;
-      break;
+  const eventItems = items.filter((it) => !isStandingContextItem(it));
+  const settledEventItems = eventItems.filter((it) => !it.llmWaiting);
+
+  let startedAtMs: number | null = null;
+  if (eventItems.length > 0) {
+    const firstStart = itemStartMs(eventItems[0]);
+    if (firstStart !== null) {
+      startedAtMs = firstStart;
+      for (let i = 1; i < eventItems.length; i++) {
+        const s = itemStartMs(eventItems[i]);
+        if (s !== null && s < startedAtMs) startedAtMs = s;
+      }
     }
   }
+
+  let endedAtMs: number | null = null;
+  if (settledEventItems.length > 0) {
+    const lastEnd = itemEndMs(settledEventItems[settledEventItems.length - 1]);
+    if (lastEnd !== null) {
+      endedAtMs = lastEnd;
+      for (let i = 0; i < settledEventItems.length - 1; i++) {
+        const e = itemEndMs(settledEventItems[i]);
+        if (e !== null && e > endedAtMs) endedAtMs = e;
+      }
+    }
+  }
+
   return {
     total: items.length,
     thinking,
@@ -281,28 +302,16 @@ export function summarizeTurn(items: readonly BackendTimelineItem[]): TurnSummar
     memories,
     agentMessages,
     systemNotes,
-    thinkingMs,
-    codeMs,
-    execMs,
+    startedAtMs,
+    endedAtMs,
     sdkCalls,
-    workedMs,
-    closedTurnsWorkedMs,
-    closedTurnIds,
-    missingTiming,
-    lastLiveKind,
-    lastLiveStartedAt,
   };
 }
 
 export function turnSummaryEqual(a: TurnSummary, b: TurnSummary): boolean {
   if (a === b) return true;
   for (const key of Object.keys(a) as (keyof TurnSummary)[]) {
-    if (key !== "sdkCalls" && key !== "closedTurnIds" && a[key] !== b[key]) return false;
-  }
-  const aIds = a.closedTurnIds ?? [];
-  const bIds = b.closedTurnIds ?? [];
-  if (aIds.length !== bIds.length || aIds.some((id, index) => id !== bIds[index])) {
-    return false;
+    if (key !== "sdkCalls" && a[key] !== b[key]) return false;
   }
   return (
     a.sdkCalls.length === b.sdkCalls.length &&

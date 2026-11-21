@@ -58,8 +58,8 @@ describe("classifyItem", () => {
     expect(classifyItem(waiting)).toBe("secondary");
     const summary = summarizeTurn([waiting]);
     expect(summary.thinking).toBe(0);
-    expect(summary.lastLiveKind).toBe("reasoning");
-    expect(summary.lastLiveStartedAt).toBe(1000);
+    expect(summary.startedAtMs).toBe(1000);
+    expect(summary.endedAtMs).toBeNull();
   });
 
   it("agent_chat and human inbound are primary; non-user-facing agent_chat is secondary", () => {
@@ -166,52 +166,157 @@ describe("summarizeTurn / formatTurnSummary", () => {
   });
 });
 
-describe("summarizeTurn — timing aggregation", () => {
-  it("sums committed reasoning_ms across thinking blocks, codeElapsedMs across code blocks, execMs across output blocks", () => {
+describe("summarizeTurn — wall-clock block span", () => {
+  it("computes start from the first item's start (subtracting committed duration) and end from the last item's end", () => {
+    const t0 = Date.parse("2026-11-21T10:00:00.000Z");
     const run = [
-      item("agent_reasoning", null, undefined, { reasoning_ms: 8_000 }),
-      item("agent_code", null, undefined, { codeElapsedMs: 3_000 }),
-      item("code_output", null, undefined, { exec_ms: 1_500 }),
-      item("agent_reasoning", null, undefined, { reasoning_ms: 4_000 }),
-      item("agent_code", null, undefined, { codeElapsedMs: 2_500 }),
-      item("code_output", null, undefined, { exec_ms: 2_500 }),
+      item("agent_reasoning", null, "1.0", {
+        created_at: new Date(t0 + 8_000).toISOString(),
+        reasoning_ms: 8_000,
+      }),
+      item("agent_code", null, "1.1", {
+        created_at: new Date(t0 + 11_000).toISOString(),
+        code_elapsed_ms: 3_000,
+      }),
+      item("code_output", null, "2.0", {
+        created_at: new Date(t0 + 15_000).toISOString(),
+        exec_ms: 4_000,
+      }),
     ];
     const s = summarizeTurn(run);
-    expect(s.thinkingMs).toBe(12_000);
-    expect(s.codeMs).toBe(5_500);
-    expect(s.execMs).toBe(4_000);
+    expect(s.startedAtMs).toBe(t0);
+    expect(s.endedAtMs).toBe(t0 + 15_000);
   });
 
-  it("codeMs is zero when no agent_code items carry codeElapsedMs", () => {
-    const run = [item("agent_code", null, undefined, {})];
-    expect(summarizeTurn(run).codeMs).toBe(0);
+  it("measures a single committed reasoning/code/output item via created_at - duration to created_at", () => {
+    const end = Date.parse("2026-11-21T10:00:10.000Z");
+    const reasoning = summarizeTurn([
+      item("agent_reasoning", null, "a", { created_at: new Date(end).toISOString(), reasoning_ms: 6_000 }),
+    ]);
+    expect(reasoning.startedAtMs).toBe(end - 6_000);
+    expect(reasoning.endedAtMs).toBe(end);
+
+    const code = summarizeTurn([
+      item("agent_code", null, "b", { created_at: new Date(end).toISOString(), code_elapsed_ms: 5_000 }),
+    ]);
+    expect(code.startedAtMs).toBe(end - 5_000);
+    expect(code.endedAtMs).toBe(end);
+
+    const output = summarizeTurn([
+      item("code_output", null, "c", { created_at: new Date(end).toISOString(), exec_ms: 4_000 }),
+    ]);
+    expect(output.startedAtMs).toBe(end - 4_000);
+    expect(output.endedAtMs).toBe(end);
   });
 
-  // Regression (symptom: turn header never showed "Wrote code for Xs" after a
-  // snapshot commit): summarizeTurn only read the frontend-frozen
-  // codeElapsedMs, which every snapshot merge drops — the committed backend
-  // code_elapsed_ms (#755) was ignored here even though the per-card summary
-  // already used it.
-  it("codeMs prefers the committed backend code_elapsed_ms over the frontend-frozen codeElapsedMs", () => {
-    const committed = [item("agent_code", null, undefined, { code_elapsed_ms: 7_000 })];
-    expect(summarizeTurn(committed).codeMs).toBe(7_000);
-    const both = [
-      item("agent_code", null, undefined, { code_elapsed_ms: 7_000, codeElapsedMs: 1_000 }),
+  it("handles frontend-frozen reasoningElapsedMs / codeElapsedMs (created_at at start) and execElapsedMs (created_at at end)", () => {
+    const start = Date.parse("2026-11-21T10:00:00.000Z");
+    const frozenReasoning = summarizeTurn([
+      item("agent_reasoning", null, "a", {
+        created_at: new Date(start).toISOString(),
+        reasoningElapsedMs: 3_000,
+      }),
+    ]);
+    expect(frozenReasoning.startedAtMs).toBe(start);
+    expect(frozenReasoning.endedAtMs).toBe(start + 3_000);
+
+    const frozenCode = summarizeTurn([
+      item("agent_code", null, "b", {
+        created_at: new Date(start).toISOString(),
+        codeElapsedMs: 2_000,
+      }),
+    ]);
+    expect(frozenCode.startedAtMs).toBe(start);
+    expect(frozenCode.endedAtMs).toBe(start + 2_000);
+
+    const frozenExec = summarizeTurn([
+      item("code_output", null, "c", {
+        created_at: new Date(start + 7_000).toISOString(),
+        execElapsedMs: 7_000,
+      }),
+    ]);
+    expect(frozenExec.startedAtMs).toBe(start);
+    expect(frozenExec.endedAtMs).toBe(start + 7_000);
+  });
+
+  it("spans across multiple hidden turns and intervening idle time within one work block", () => {
+    const t0 = Date.parse("2026-11-21T10:00:00.000Z");
+    const run = [
+      item("agent_code", "Bash", "h10.0", { created_at: new Date(t0).toISOString() }),
+      item("code_output", null, "h20.0", { created_at: new Date(t0 + 10_000).toISOString(), exec_ms: 10_000 }),
+      item("agent_chat", null, "h30.0", { user_facing: false, created_at: new Date(t0 + 15_000).toISOString() }),
+      item("inbound_chat", "agent:228", "h40.0", { created_at: new Date(t0 + 315_000).toISOString() }),
+      item("agent_code", "Bash", "h50.0", { created_at: new Date(t0 + 320_000).toISOString() }),
+      item("code_output", null, "h60.0", { created_at: new Date(t0 + 335_000).toISOString(), exec_ms: 15_000 }),
     ];
-    expect(summarizeTurn(both).codeMs).toBe(7_000);
-  });
-
-  it("falls back to the frozen reasoningElapsedMs when reasoning_ms was never committed (interrupted stream)", () => {
-    const run = [item("agent_reasoning", null, undefined, { reasoningElapsedMs: 3_000 })];
-    expect(summarizeTurn(run).thinkingMs).toBe(3_000);
-  });
-
-  it("a turn with no reasoning/execution items has zero timing and zero rounds", () => {
-    const run = [item("inbound_chat", "agent:1"), item("system_marker", "heartbeat")];
     const s = summarizeTurn(run);
-    expect(s.thinkingMs).toBe(0);
-    expect(s.execMs).toBe(0);
-    expect(s.turns).toBe(0);
+    expect(s.startedAtMs).toBe(t0);
+    expect(s.endedAtMs).toBe(t0 + 335_000);
+  });
+
+  it("excludes standing context items (system_prompt and show_timestamp=false system_marker) from the block span", () => {
+    const oldSpawn = Date.parse("2026-11-18T00:00:00.000Z");
+    const workStart = Date.parse("2026-11-21T10:00:00.000Z");
+    const s = summarizeTurn([
+      item("system_prompt", null, "0.0", { created_at: null }),
+      item("system_marker", "agent_id", "1.0", {
+        created_at: new Date(oldSpawn).toISOString(),
+        show_timestamp: false,
+      }),
+      item("agent_reasoning", null, "10.0", {
+        created_at: new Date(workStart + 4_000).toISOString(),
+        reasoning_ms: 4_000,
+      }),
+    ]);
+    expect(s.startedAtMs).toBe(workStart);
+    expect(s.endedAtMs).toBe(workStart + 4_000);
+  });
+
+  it("returns null start or end when the first or last event item lacks a timestamp", () => {
+    const t = "2026-11-21T10:00:00.000Z";
+    const missingBoth = summarizeTurn([
+      item("agent_code", null, "a", { created_at: null }),
+      item("code_output", null, "b", { created_at: null }),
+    ]);
+    expect(missingBoth.startedAtMs).toBeNull();
+    expect(missingBoth.endedAtMs).toBeNull();
+
+    const missingStart = summarizeTurn([
+      item("agent_code", null, "a", { created_at: null }),
+      item("code_output", null, "b", { created_at: t }),
+    ]);
+    expect(missingStart.startedAtMs).toBeNull();
+    expect(missingStart.endedAtMs).toBe(Date.parse(t));
+
+    const missingEnd = summarizeTurn([
+      item("agent_code", null, "a", { created_at: t }),
+      item("code_output", null, "b", { created_at: null }),
+    ]);
+    expect(missingEnd.startedAtMs).toBe(Date.parse(t));
+    expect(missingEnd.endedAtMs).toBeNull();
+  });
+
+  it("takes the latest end across out-of-order parallel tool completions", () => {
+    const t0 = Date.parse("2026-11-21T10:00:00.000Z");
+    const s = summarizeTurn([
+      item("agent_code", "Bash", "1.0", { created_at: new Date(t0).toISOString() }),
+      item("code_output", null, "2.0", { created_at: new Date(t0 + 15_000).toISOString(), exec_ms: 15_000 }),
+      item("code_output", null, "3.0", { created_at: new Date(t0 + 5_000).toISOString(), exec_ms: 5_000 }),
+    ]);
+    expect(s.startedAtMs).toBe(t0);
+    expect(s.endedAtMs).toBe(t0 + 15_000);
+  });
+
+  it("a system-note-only turn summarizes as '1 system note' (never blank)", () => {
+    const one = summarizeTurn([item("system_marker", "sdk_hint")]);
+    expect(one.systemNotes).toBe(1);
+    expect(formatTurnSummary(one)).toBe("1 system note");
+    const several = summarizeTurn([
+      item("system_marker", "lifecycle_restart"),
+      item("inbound_chat", "system"),
+    ]);
+    expect(several.systemNotes).toBe(2);
+    expect(formatTurnSummary(several)).toBe("2 system notes");
   });
 });
 
@@ -283,127 +388,20 @@ describe("summarizeTurn — SDK call aggregation", () => {
   });
 });
 
-describe("summarizeTurn — workedMs", () => {
-  // workedMs is now thinkingMs + codeMs + execMs — the sum of each work
-  // block's backend-measured duration, not wall-clock between items.
-  // This naturally excludes system notes / restart markers (itemOwnMs
-  // returns 0 for them) and works even when the first item lacks created_at
-  // (e.g. a streaming block whose duration is measured by the frontend clock).
-
-  it("workedMs = thinkingMs + codeMs + execMs", () => {
-    const run = [
-      item("agent_reasoning", null, "a", { reasoning_ms: 8_000 }),
-      item("agent_code", null, "b", { code_elapsed_ms: 3_000 }),
-      item("code_output", null, "c", { exec_ms: 1_500 }),
-      item("agent_reasoning", null, "d", { reasoning_ms: 4_000 }),
-      item("agent_code", null, "e", { code_elapsed_ms: 2_500 }),
-      item("code_output", null, "f", { exec_ms: 2_500 }),
-    ];
-    const s = summarizeTurn(run);
-    // 8+3+1.5+4+2.5+2.5 = 21.5s
-    expect(s.workedMs).toBe(21_500);
-  });
-
-  it("returns zero workedMs when no item carries duration data", () => {
-    const run = [
-      item("agent_reasoning", null, "a"),
-      item("agent_code", null, "b"),
-      item("code_output", null, "c"),
-    ];
-    expect(summarizeTurn(run).workedMs).toBe(0);
-  });
-
-  // Regression (symptom: a single code block never showed "Worked for Xs"
-  // under the old wall-clock logic because created_at marks a block's
-  // START — first→last created_at is 0 for a single-block turn). With the
-  // duration-sum approach, the block's own code_elapsed_ms becomes workedMs.
-  it("single-block turn works for as long as the block itself ran", () => {
-    const s = summarizeTurn([
-      item("agent_code", null, "a", { code_elapsed_ms: 5_000 }),
-    ]);
-    expect(s.workedMs).toBe(5_000);
-  });
-
-  it("falls back to frozen frontend clocks when backend durations are absent", () => {
-    const s = summarizeTurn([
-      item("agent_reasoning", null, "a", { reasoningElapsedMs: 3_000 }),
-      item("agent_code", null, "b", { codeElapsedMs: 2_000 }),
-    ]);
-    expect(s.workedMs).toBe(5_000);
-  });
-
-  // Regression (symptom: agent restart inserted a system marker at T0, then
-  // the agent started working at T1 — the old wall-clock logic included the
-  // idle gap, showing "Worked for T1-T0" even though the agent did nothing
-  // during that gap). With the duration-sum approach, system notes contribute
-  // 0 ms (itemOwnMs returns 0), so workedMs reflects only actual work.
-  it("system notes / restart markers contribute zero to workedMs", () => {
-    const run = [
-      item("system_marker", "lifecycle_restart", "a", {
-        created_at: "2026-07-21T00:00:00.000Z", // T0: restart (not work)
-      }),
-      item("agent_reasoning", null, "b", {
-        created_at: "2026-07-21T00:05:00.000Z",
-        reasoning_ms: 10_000,
-      }),
-      item("agent_code", null, "c", {
-        created_at: "2026-07-21T00:05:15.000Z",
-        code_elapsed_ms: 5_000,
-      }),
-      item("code_output", null, "d", {
-        created_at: "2026-07-21T00:05:22.000Z",
-        exec_ms: 2_000,
-      }),
-    ];
-    const s = summarizeTurn(run);
-    // 10 + 5 + 2 = 17s of actual work. Not 324s (wall-clock from T0).
-    expect(s.workedMs).toBe(17_000);
-  });
-
-  // Timestamps are not an input to workedMs at all. #1007 had to teach the
-  // summary to find the first STAMPED member because the live clock counted
-  // wall-clock from it; the live clock now counts the same block durations as
-  // the completed clock, so an unstamped turn is not a special case — the
-  // behavioral guard for it lives in timeline.test.tsx (a turn whose members
-  // all lack created_at still shows a live timer).
-  it("ignores created_at entirely — an unstamped turn still measures its work", () => {
-    const s = summarizeTurn([
-      item("system_prompt", null, "0.0", { created_at: null }),
-      item("agent_reasoning", null, "1.0", { created_at: null, reasoning_ms: 4_000 }),
-    ]);
-    expect(s.workedMs).toBe(4_000);
-  });
-
-  // Regression (symptom: a turn of only system notes rendered a completely
-  // blank header): the systemNotes bucket guarantees a non-empty summary line
-  // for any non-empty turn.
-  it("a system-note-only turn summarizes as '1 system note' (never blank)", () => {
-    const one = summarizeTurn([item("system_marker", "sdk_hint")]);
-    expect(one.systemNotes).toBe(1);
-    expect(formatTurnSummary(one)).toBe("1 system note");
-    const several = summarizeTurn([
-      item("system_marker", "lifecycle_restart"),
-      item("inbound_chat", "system"),
-    ]);
-    expect(several.systemNotes).toBe(2);
-    expect(formatTurnSummary(several)).toBe("2 system notes");
-  });
-});
-
 describe("summarizeTurn — external harness items", () => {
-  it("tracks unanswered external harness tool calls", () => {
+  it("uses created_at as start for an unanswered external harness tool call", () => {
+    const ts = "2026-10-25T01:02:03.000Z";
     const s = summarizeTurn([
       item("agent_code", "Bash", "2.0", {
-        created_at: "2026-10-25T01:02:03.000Z",
+        created_at: ts,
         activity_pending: true,
       }),
     ]);
     expect(s.code).toBe(1);
-    expect(s.lastLiveKind).toBe("code");
-    expect(s.lastLiveStartedAt).toBe(Date.parse("2026-10-25T01:02:03.000Z"));
+    expect(s.startedAtMs).toBe(Date.parse(ts));
   });
 
-  it("clears live kind once external harness items are settled", () => {
+  it("computes wall-clock span across settled external harness items", () => {
     const s = summarizeTurn([
       item("agent_reasoning", null, "1.0", {
         created_at: "2026-10-25T01:02:03.000Z",
@@ -411,64 +409,14 @@ describe("summarizeTurn — external harness items", () => {
       }),
       item("agent_code", "Bash", "2.0", {
         created_at: "2026-10-25T01:02:05.500Z",
-        code_elapsed_ms: 500,
         activity_pending: null,
       }),
       item("code_output", "Bash", "3.0", {
         created_at: "2026-10-25T01:02:06.000Z",
-        exec_ms: 3_000,
+        exec_ms: 500,
       }),
     ]);
-    expect(s.workedMs).toBe(6_000);
-    expect(s.lastLiveKind).toBeNull();
-    expect(s.lastLiveStartedAt).toBe(0);
-  });
-});
-
-describe("work timing coverage", () => {
-  it("distinguishes absent measurements from real zero across work kinds", () => {
-    const kinds = ["agent_reasoning", "agent_code", "code_output"] as const;
-    for (const kind of kinds) {
-      const missing = summarizeTurn([item(kind)]);
-      expect(missing.missingTiming).toBe(true);
-      const zero = summarizeTurn([item(kind, null, "zero", {
-        reasoning_ms: 0, code_elapsed_ms: 0, exec_ms: 0,
-      })]);
-      expect(zero.missingTiming).toBe(false);
-      expect(zero.workedMs).toBe(0);
-    }
-  });
-
-  it("retains only recorded durations in mixed work across restart idle", () => {
-    const summary = summarizeTurn([
-      item("agent_reasoning", null, "r", { reasoning_ms: 10 }),
-      item("agent_reasoning"),
-      item("agent_code", null, "c", { code_elapsed_ms: 20 }),
-      item("agent_code"),
-      item("code_output", null, "o", { exec_ms: 70 }),
-      item("system_marker", "restart", "idle", { created_at: "2026-11-17T00:00:00Z" }),
-      item("code_output"),
-    ]);
-    expect(summary.workedMs).toBe(100);
-    expect(summary.missingTiming).toBe(true);
-  });
-
-  it("tracks live, frozen, committed and reloaded missing measurements", () => {
-    for (const [kind, start, elapsed, committed] of [
-      ["agent_reasoning", "reasoningStartedAt", "reasoningElapsedMs", "reasoning_ms"],
-      ["agent_code", "codeStartedAt", "codeElapsedMs", "code_elapsed_ms"],
-      ["code_output", "execStartedAt", "execElapsedMs", "exec_ms"],
-    ] as const) {
-      expect(summarizeTurn([item(kind, null, "live", { [start]: 1000 })]).missingTiming).toBe(false);
-      const frozen = summarizeTurn([item(kind, null, "frozen", { [elapsed]: 100 })]);
-      expect(frozen.workedMs).toBe(100);
-      expect(frozen.missingTiming).toBe(false);
-      const saved = summarizeTurn([item(kind, null, "saved", { [committed]: 100 })]);
-      expect(saved.workedMs).toBe(100);
-      expect(saved.missingTiming).toBe(false);
-      const reload = summarizeTurn([item(kind)]);
-      expect(reload.workedMs).toBe(0);
-      expect(reload.missingTiming).toBe(true);
-    }
+    expect(s.startedAtMs).toBe(Date.parse("2026-10-25T01:02:00.500Z"));
+    expect(s.endedAtMs).toBe(Date.parse("2026-10-25T01:02:06.000Z"));
   });
 });
