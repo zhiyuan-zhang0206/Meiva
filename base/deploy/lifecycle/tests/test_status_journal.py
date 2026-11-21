@@ -33,6 +33,7 @@ def test_begin_phase_finish_round_trip(home: Path) -> None:
     assert op is not None
     assert op.operation == "stop"
     assert op.pid == _ENTRY_PID
+    assert op.boot_time == psutil.boot_time()
     assert op.complete is True
     assert op.result == {"rc": 0, "error": None}
     assert [p.name for p in op.phases] == ["drain"]
@@ -119,6 +120,8 @@ def test_wrong_shape_journal_reads_as_absent(home: Path) -> None:
     assert journal.read(home) is None
     path.write_text(json.dumps({"operation": "stop", "pid": 1, "deadline": "soon"}))
     assert journal.read(home) is None
+    path.write_text(json.dumps({"operation": "stop", "pid": 1, "boot_time": "yesterday"}))
+    assert journal.read(home) is None
 
 
 def test_journal_survives_an_unfinished_process(home: Path) -> None:
@@ -160,6 +163,7 @@ def test_begin_takes_over_a_dead_writers_journal(home: Path) -> None:
         pass
     raw = json.loads(journal.status_path(home).read_text())
     raw["pid"] = _reaped_pid()
+    raw["boot_time"] = psutil.boot_time() - 86400
     journal.status_path(home).write_text(json.dumps(raw))
 
     assert journal.begin(home, "restart", pid=_ENTRY_PID) is True
@@ -167,6 +171,7 @@ def test_begin_takes_over_a_dead_writers_journal(home: Path) -> None:
     assert op is not None
     assert op.operation == "restart" and op.complete is False
     assert op.pid == _ENTRY_PID != os.getpid()
+    assert op.boot_time == psutil.boot_time()
     assert op.resumed_from is not None
     assert op.resumed_from.pid == raw["pid"]
     assert op.resumed_from.operation == "restart"
@@ -227,3 +232,35 @@ def test_operator_stop_in_progress_reads_an_open_live_stop_or_restart(home: Path
     journal.journal_path(home).unlink()
     journal.begin(home, "stop", pid=_reaped_pid(), deadline=now + 60)
     assert journal.operator_stop_in_progress(home, now=now) is False
+
+
+@pytest.mark.parametrize("operation", ["stop", "restart"])
+@pytest.mark.parametrize("boot_time", [None, psutil.boot_time() - 86400])
+def test_operator_stop_rejects_a_previous_or_unknown_boot(
+    home: Path, operation: str, boot_time: float | None
+) -> None:
+    now = time.monotonic()
+    journal.begin(home, operation, pid=_ENTRY_PID, deadline=now + 86400)
+    path = journal.journal_path(home)
+    raw = json.loads(path.read_text())
+    if boot_time is None:
+        del raw["boot_time"]
+    else:
+        raw["boot_time"] = boot_time
+    path.write_text(json.dumps(raw))
+    op = journal.read(home)
+    assert op is not None
+    assert journal.writer_alive(op) is True
+    assert op.deadline is not None and now < op.deadline
+    assert journal.operator_stop_in_progress(home, now=now) is False
+
+
+@pytest.mark.parametrize("offset", [-1.0, 1.0])
+def test_operator_stop_tolerates_small_boot_timestamp_changes(home: Path, offset: float) -> None:
+    now = time.monotonic()
+    journal.begin(home, "stop", pid=_ENTRY_PID, deadline=now + 60)
+    path = journal.journal_path(home)
+    raw = json.loads(path.read_text())
+    raw["boot_time"] = psutil.boot_time() + offset
+    path.write_text(json.dumps(raw))
+    assert journal.operator_stop_in_progress(home, now=now) is True

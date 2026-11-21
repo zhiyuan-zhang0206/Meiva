@@ -18,8 +18,11 @@ signal ignored, so a retry cannot abort the exit it started.
    while a `meiva stop` / `meiva restart` journal (`run/lifecycle-op.json`, which a
    fleet update's per-host stop also writes) is open, before the deadline that
    operation recorded (the stop's timeout; the restart's stop plus start budget), and
-   its writer is alive. The deadline keeps a journal left open by a killed writer from
-   reading as planned once its budget is over, even if its pid was reused. Root's
+   its writer is alive. The journal must also record this machine's current boot
+   time (within five seconds of timestamp jitter): a previous boot's monotonic
+   deadline is not comparable after a reboot, even if its writer pid was reused. Journals without boot identity do not mark
+   an exit as planned. The deadline keeps a journal left open by a killed writer
+   from reading as planned once its budget is over. Root's
    health replacement of a host it observed down sends the same SIGTERM but writes
    no journal, and the plugin watcher's own restart writes none either, so those
    exits are not planned. A turn that aborts during a planned exit (typically the
