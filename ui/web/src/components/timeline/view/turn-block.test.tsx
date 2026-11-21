@@ -382,6 +382,41 @@ describe("Plan B Turn-level timing semantics", () => {
     expect(summary.missingTiming).toBe(false);
   });
 
+  it("replays distinct measured spans from the 7663 bridge-restart sample", () => {
+    vi.useFakeTimers();
+    // meiva:note
+    // IDs/item durations come from the production sample. Start suffixes and the
+    // active clock are reconstructed; the frontend treats timeline IDs as opaque.
+    const start = Date.parse("2026-11-21T10:21:11+00:00");
+    const closed = [
+      planBItem("agent_code", "h37201426.0", { turn_id: "turn-2@first", turn_duration_ms: 8_787 }),
+      planBItem("agent_code", "h37215160.0", { turn_id: "turn-3@first", turn_duration_ms: 52_641 }),
+      planBItem("agent_code", "h37279293.1", { turn_id: "turn-4@first", turn_duration_ms: 163_718 }),
+      planBItem("agent_code", "h37392047.0", { turn_id: "turn-5@first", turn_duration_ms: 29_610 }),
+      planBItem("agent_code", "h37475788.0", { turn_id: "turn-1@earlier", turn_duration_ms: 15_204 }),
+    ];
+    const live = planBItem("agent_code", "h37566384.0", { turn_id: "turn-1@restarted" });
+    vi.setSystemTime(start + 38_837);
+    const { rerender } = render(
+      <TurnBlock id={closed[0].item_id} memberIds={[...closed, live].map((it) => it.item_id)}
+        summary={summarizeTurn([...closed, live])} expanded={false} onToggle={vi.fn()}
+        turnActive activeTurnId={live.turn_id} activeTurnStartedAt={start} />,
+    );
+    expect(screen.getByText("Working for 5m 8s")).toBeTruthy();
+    act(() => { vi.advanceTimersByTime(1_000); });
+    expect(screen.getByText("Working for 5m 9s")).toBeTruthy();
+    const settled = [...closed,
+      { ...live, turn_duration_ms: 38_837 },
+      planBItem("agent_code", "h37620948.0", { turn_id: "turn-2@restarted", turn_duration_ms: 6_467 }),
+    ];
+    expect(summarizeTurn(settled).workedMs).toBe(315_264);
+    rerender(
+      <TurnBlock id={closed[0].item_id} memberIds={settled.map((it) => it.item_id)}
+        summary={summarizeTurn(settled)} expanded={false} onToggle={vi.fn()} />,
+    );
+    expect(screen.getByText("Worked for 5m 15s")).toBeTruthy();
+  });
+
   it("retains missingTiming=true on legacy items lacking both turn_duration_ms and item duration", () => {
     const legacy = [planBItem("agent_code", "h0.0"), planBItem("code_output", "h1.0")];
     const summary = summarizeTurn(legacy);

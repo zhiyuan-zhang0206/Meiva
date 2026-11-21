@@ -200,20 +200,29 @@ async def test_read_sink_plan_b_turn_timing_live_to_settled(
     sink.on_turn_started("t-agy-1")
     started = await live_events.typed()
     assert len(started) == 1 and isinstance(started[0], ProjectionTurnStarted)
-    assert started[0].turn_id == "t-agy-1" and started[0].started_at == t0.isoformat()
+    assert (
+        started[0].turn_id == f"t-agy-1@{t0.isoformat()}"
+        and started[0].started_at == t0.isoformat()
+    )
 
     spans_mid, active_mid = store.load(100, "antigravity", session_id=session)
-    assert spans_mid == () and active_mid is not None and active_mid.turn_id == "t-agy-1"
+    assert (
+        spans_mid == ()
+        and active_mid is not None
+        and active_mid.turn_id == f"t-agy-1@{t0.isoformat()}"
+    )
 
     _write_agy_step(record_path)
     current[0] += timedelta(seconds=3)
     await sink._read()
     mid_snap = await _last_snapshot(live_events)
     assert (
-        mid_snap.active_turn_id == "t-agy-1" and mid_snap.active_turn_started_at == t0.isoformat()
+        mid_snap.active_turn_id == f"t-agy-1@{t0.isoformat()}"
+        and mid_snap.active_turn_started_at == t0.isoformat()
     )
     assert all(
-        it["turn_id"] == "t-agy-1" and it["turn_duration_ms"] is None for it in mid_snap.items
+        it["turn_id"] == f"t-agy-1@{t0.isoformat()}" and it["turn_duration_ms"] is None
+        for it in mid_snap.items
     )
 
     current[0] += timedelta(seconds=3, milliseconds=500)
@@ -239,9 +248,46 @@ async def test_read_sink_plan_b_turn_timing_live_to_settled(
         it for it in closing.items if it["kind"] in ("agent_reasoning", "agent_code", "code_output")
     ]
     assert work and all(
-        it["turn_id"] == "t-agy-1" and it["turn_duration_ms"] == 6500 for it in work
+        it["turn_id"] == f"t-agy-1@{t0.isoformat()}" and it["turn_duration_ms"] == 6500
+        for it in work
     )
 
     spans_after, active_after = store.load(100, "antigravity", session_id=session)
     assert active_after is None and len(spans_after) == 1
-    assert spans_after[0].turn_id == "t-agy-1" and spans_after[0].duration_ms == 6500
+    assert (
+        spans_after[0].turn_id == f"t-agy-1@{t0.isoformat()}" and spans_after[0].duration_ms == 6500
+    )
+
+
+async def test_recreated_bridge_does_not_reuse_timeline_turn_identity(
+    tmp_path: Path,
+    live_events: LiveEvents,
+) -> None:
+    session = "agy-recreated-bridge"
+    current = [datetime(2026, 11, 21, 9, 21, 50, tzinfo=UTC)]
+    sink, store, record_path = _setup_plan_b_sink(tmp_path, live_events, session, current)
+    sink.on_turn_started("turn-1")
+    first_events = await live_events.of_type(ProjectionTurnStarted)
+    first_id = first_events[-1].turn_id
+    _write_agy_step(record_path)
+    await sink._read()
+    current[0] += timedelta(milliseconds=15_204)
+    await sink.finish((), turn_id="turn-1", ended_at=current[0])
+    first_spans, _ = store.load(100, "antigravity", session_id=session)
+    assert first_spans[0].turn_id == first_id
+    assert first_spans[0].duration_ms == 15_204
+
+    current[0] += timedelta(hours=1)
+    recreated, _, _ = _setup_plan_b_sink(tmp_path, live_events, session, current)
+    recreated.on_turn_started("turn-1")
+    second_events = await live_events.of_type(ProjectionTurnStarted)
+    second_id = second_events[-1].turn_id
+    assert second_id != first_id
+    _, active = store.load(100, "antigravity", session_id=session)
+    assert active is not None and active.turn_id == second_id
+    current[0] += timedelta(milliseconds=38_837)
+    await recreated.finish((), turn_id="turn-1", ended_at=current[0])
+    spans, active = store.load(100, "antigravity", session_id=session)
+    assert active is None
+    assert [span.turn_id for span in spans] == [first_id, second_id]
+    assert sum(span.duration_ms for span in spans) == 54_041

@@ -483,7 +483,7 @@ def test_plan_b_turn_timing_cold_and_paginated_reads(
     store.open_turn(
         agent,
         "claude_code",
-        turn_id="turn-2",
+        turn_id="turn-1",
         started_at="2026-11-12T09:30:00+00:00",
         start_offset=split,
         session_id=SESSION,
@@ -492,16 +492,16 @@ def test_plan_b_turn_timing_cold_and_paginated_reads(
     window = read_harness_timeline(
         _request(agent), pool=pool, home=home, unread=UnreadRows(), environ={"HOME": str(tmp_path)}
     )
-    assert window.active_turn_id == "turn-2"
+    assert window.active_turn_id == "turn-1@2026-11-12T09:30:00+00:00"
     assert window.active_turn_started_at == "2026-11-12T09:30:00+00:00"
-    _assert_turn_duration(window.items, "turn-1", 5000)
-    _assert_turn_duration(window.items, "turn-2", None)
+    _assert_turn_duration(window.items, "turn-1@2026-11-12T08:57:00+00:00", 5000)
+    _assert_turn_duration(window.items, "turn-1@2026-11-12T09:30:00+00:00", None)
 
     store.close_turn(
         agent,
         "claude_code",
         session_id=SESSION,
-        turn_id="turn-2",
+        turn_id="turn-1",
         start_offset=split,
         end_offset=record_file_size,
         started_at="2026-11-12T09:30:00+00:00",
@@ -513,7 +513,7 @@ def test_plan_b_turn_timing_cold_and_paginated_reads(
     )
     assert settled.active_turn_id is None
     assert settled.active_turn_started_at is None
-    _assert_turn_duration(settled.items, "turn-2", 7000)
+    _assert_turn_duration(settled.items, "turn-1@2026-11-12T09:30:00+00:00", 7000)
 
     tail_first_offset = int(settled.items[-1].item_id.split(".")[0][1:])
     paged = read_harness_timeline(
@@ -523,4 +523,4 @@ def test_plan_b_turn_timing_cold_and_paginated_reads(
         unread=UnreadRows(),
         environ={"HOME": str(tmp_path)},
     )
-    _assert_turn_duration(paged.items, "turn-1", 5000)
+    _assert_turn_duration(paged.items, "turn-1@2026-11-12T08:57:00+00:00", 5000)

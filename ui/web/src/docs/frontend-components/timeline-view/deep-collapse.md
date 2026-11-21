@@ -33,15 +33,22 @@ right-aligned below the expanded body on copyable secondary messages — see
 
 The collapsed turn strip shows a single status line. Expanded turns show the counts of turns, messages and other items on a separate line beneath the status, followed by SDK-call chips and the detail rows where present. While `turnActive` is true, the trailing `TurnBlock` is the live window (`data-live-activity-window="true"`, using the timeline as its scrollport). Before the first work item arrives, an active qualified source shows an unboxed inline `PendingLiveActivityWindow` (`Working…` header row without a disclosure chevron) when the timeline is empty or ends on a human prompt. Its suppression during source and reader loading is owned by [the loading ring](loading-ring.md).
 
-The turn header's timer reads one basis — `summarizeTurn.workedMs`, the sum of
-the turn's block durations, which a turn that spans an idle gap (a restart, a
-wake-up the agent had not picked up yet) must not inflate — plus one live
-stretch. The active `TurnBlock` header ("Working for Xs" / "Working…") displays
-`totalWorkedMs` and settles into "Worked" / "Worked for Xs" when the turn
-completes. Both active ("Working…" / "Working for Xs") and settled
-("Worked" / "Worked for Xs") `TurnBlock` and `PendingLiveActivityWindow` headers
-omit durations below `1s` (`formatWholeSecondsDuration`: `null` below `1s`, then
-`1s`, `2s`, ..., `1m 12s`), keeping sub-second precision only for detail chips.
+The Plan B timer sums each closed Turn's measured `turn_duration_ms` once by
+its opaque `turn_id`. While active, it adds elapsed time from the authoritative
+`active_turn_started_at`, unless that exact Turn has already closed. A work block
+can contain several Turns; idle gaps between them never contribute. Legacy items
+without Turn timing retain the measured/frozen item-duration fallback. A settled
+block with missing timing shows plain "Worked", without a per-block warning icon.
+
+External harness delivery IDs such as `turn-1` can repeat after a bridge restart.
+The backend qualifies timeline IDs with the persisted start (`raw@started_at`),
+identically for live events, cold reads and paging, including old timing sidecars.
+The frontend must treat the qualified ID as opaque: distinct measured spans must
+not collapse merely because their bridge-local counters match.
+
+The active header remains "Working…" / "Working for Xs" and settles to "Worked" /
+"Worked for Xs". The duration formatter currently omits values below one second;
+detail chips retain sub-second precision.
 Both `PendingLiveActivityWindow` and active (`turnActive`) `TurnBlock` title spans
 share the sidebar's Silver Glint sweep (`.timeline-title-working` sharing
 `.agent-title-working` / `agent-title-sweep` and locking `startTime = 0` via
@@ -49,18 +56,10 @@ share the sidebar's Silver Glint sweep (`.timeline-title-working` sharing
 static text without shimmer once the turn completes; the leading `Layers` icon,
 disclosure chevron, and expanded summary remain unshimmered.
 
-What the live stretch counts changed (user report 2026-11-08, an Antigravity turn
-stuck at "Working for 1m 2s" with nothing left to advance it). It used to be the
-in-flight block's elapsed time only, so between two blocks — a tool result
-committed, the model thinking before its next token, a harness step transition —
-nothing was live and the number froze for as long as the gap lasted. The anchor
-is now the in-flight block's start while one runs, and otherwise
-`liveAnchorAt` — the page's own clock of the last event the thread received
-(`useTimelineStore.liveAnchorAt`), which is precisely the moment the current
-unaccounted stretch began. It comes from the browser's clock, never an
-agent-host timestamp, so a skew between the two cannot move the number; it resets
-on a thread switch. While a turn is open the number therefore only moves forward,
-and it lands on the measured sum when the next block commits.
+When authoritative Turn timing is unavailable, the legacy live fallback uses
+the in-flight block's start, or the browser's `liveAnchorAt` between steps. This
+fallback does not replace an available authoritative Turn start; messages, tool
+completions, reconnects and reloads must not re-anchor an existing measured Turn.
 
 ## Relationship to Other Nodes
 

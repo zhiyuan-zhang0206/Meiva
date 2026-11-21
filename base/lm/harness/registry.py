@@ -358,6 +358,23 @@ class StoredTurnSpan:
     duration_ms: int
 
 
+# meiva:note
+# Bridge-local turn-N counters restart when the bridge is recreated. Qualify the
+# timeline identity with the persisted start so live and historical spans agree,
+# including sidecars written before this rule; raw delivery IDs stay unchanged.
+# meiva:link base/lm/harness/docs/delivery.md
+def timeline_turn_id(turn_id: str, started_at: str) -> str:
+    return f"{turn_id}@{started_at}"
+
+
+def _parse_timing_identity(raw: dict[str, object]) -> str | None:
+    turn_id = raw.get("turn_id")
+    started_at = raw.get("started_at")
+    if isinstance(turn_id, str) and turn_id and isinstance(started_at, str) and started_at:
+        return timeline_turn_id(turn_id, started_at)
+    return None
+
+
 def _parse_closed_turn_row(raw_line: str, session_id: str) -> StoredTurnSpan | None:
     line = raw_line.strip()
     if not line:
@@ -368,13 +385,12 @@ def _parse_closed_turn_row(raw_line: str, session_id: str) -> StoredTurnSpan | N
         return None
     if not is_object_dict(raw) or raw.get("session_id") != session_id:
         return None
-    tid = raw.get("turn_id")
+    tid = _parse_timing_identity(raw)
     start_offset = raw.get("start_offset")
     end_offset = raw.get("end_offset")
     duration_ms = raw.get("duration_ms")
     if (
-        isinstance(tid, str)
-        and tid
+        tid is not None
         and isinstance(start_offset, int)
         and not isinstance(start_offset, bool)
         and isinstance(end_offset, int)
@@ -526,7 +542,7 @@ class TurnTimingStore:
         if rec_sid is not None and session_id is not None and rec_sid != session_id:
             return None
         return ActiveTurnRecord(
-            turn_id=tid,
+            turn_id=timeline_turn_id(tid, started_at),
             started_at=started_at,
             start_offset=max(start_offset, 0),
             session_id=rec_sid if isinstance(rec_sid, str) else None,
