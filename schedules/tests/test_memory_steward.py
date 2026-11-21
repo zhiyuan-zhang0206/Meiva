@@ -69,3 +69,20 @@ def test_dream_instructions_use_the_vault_layout() -> None:
     assert "git -C ~/.meiva/vault worktree prune" in job
     assert "~/.meiva/memory" not in job
     assert "$FH/memory" not in job
+
+
+def test_dream_instructions_include_self_evolution_feedback_loop() -> None:
+    source = Path(__file__).parents[1] / "memory-steward-schedule.py"
+    tree = ast.parse(source.read_text())
+    job = next(
+        node.value
+        for node in ast.walk(tree)
+        if isinstance(node, ast.Constant)
+        and isinstance(node.value, str)
+        and node.value.startswith("Daily Meiva Dream consolidation")
+    )
+
+    assert "inbound retirement notices from `#1289`" in job
+    assert "never create `archive/`" in job
+    assert "meiva.agents.send_message(1289, ...)" in job
+    assert "pool/three-tier-dream-evolution-loop.md" in job

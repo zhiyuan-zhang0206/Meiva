@@ -80,7 +80,7 @@ green, and remove/prune the temporary worktree immediately afterwards.
    reviewed SHA-256, status, shared destination and review date, closing the
    loop so unchanged notes do not recur nightly.
 
-3. **Phase 2 — Gather Signal (Three Incremental Sources):**
+3. **Phase 2 — Gather Signal (Four Incremental Sources):**
    - Run the deterministic Phase 2 probe helper first against the worktree:
      ```bash
      ~/.meiva/source/.venv/bin/python ~/.meiva/source/meiva_builtins/plugins/meiva_memory/skills/consolidation/scripts/dream_gather.py --pool "$W/memory"
@@ -106,6 +106,9 @@ green, and remove/prune the temporary worktree immediately afterwards.
    - **Per-Agent Workspace Memory (`~/.meiva/workspaces/*/memory/`)**: Scan agent
      workspace memory directories (and legacy `MEMORY.md` files) to harvest
      durable, reusable cross-agent rules and facts into the shared pool.
+   - **Inbound Self-Evolution Notices (`#1289 -> #1609`)**: Read pending retirement
+     notices from `#1289` reporting pitfall rules now enforced in code (see
+     [Self-Evolution feedback loop](#self-evolution-feedback-loop)).
 
 4. **Phase 3 — Consolidation (Canonical One-Topic-One-File, State Overwrite & Auto-OKF):**
    - **One topic, one canonical file**: Keep a single dateless canonical note per
@@ -128,6 +131,39 @@ green, and remove/prune the temporary worktree immediately afterwards.
      - `stale_after`: Optional quoted `"YYYY-MM-DD"` expiration date for temporary rules.
    - **De-relativize time**: Convert relative time words (`"today"`, `"yesterday"`,
      `"this morning"`) into explicit ISO dates (`YYYY-MM-DD`).
+   - **Self-Evolution feedback loop (`#1609 <-> #1289`)**: Process verified inbound
+     retirement notices from `#1289` and emit outbound high-signal leads when
+     recurring pitfalls warrant code-level enforcement (details below).
+
+### Self-Evolution feedback loop
+
+Minimal two-way text protocol over `meiva.agents.send_message` between the Memory
+Arbiter (`#1609`) and the Self-Evolution owner (`#1289`) — no extra tables or
+services, and direct event wake-up independent of other schedules (exact localized
+message headers live in shared memory `pool/three-tier-dream-evolution-loop.md`):
+
+- **Outbound (`#1609 -> #1289`, high-signal recurring-rule leads)**:
+  - *When to send*: during 04:00 Cluster Dream consolidation when cross-agent
+    nominations repeat the same pitfall, or a standing shared redline is still
+    repeatedly violated. Skip if the same Vault path has no new recurrence; stay
+    silent (do not message `#1289`) when no high-signal lead exists.
+  - *Format*: send via `meiva.agents.send_message(1289, ...)` with the 4 fields:
+    1. **Rule / pitfall topic**: brief statement of the recurring rule or failure mode.
+    2. **Recurrence & verifiable anchors**: repeat count, involved agents, and 1-2
+       traceable anchors (`agent id`, date, PR, or commit).
+    3. **Source note**: Vault `memory/...md` path or current nomination source.
+    4. **Candidate hard-enforcement direction**: one-line hook / lint / CI / runtime
+       checkpoint suggestion.
+- **Inbound (`#1289 -> #1609`, code-enforced memory retirement)**:
+  - *4 fields carried by `#1289`*: (1) superseded Vault `memory/...md` path and
+    section/heading, (2) enforcing code and merge/rollout anchor (PR + `main`
+    commit; runtime/plugin checks also state deployed cluster release and date),
+    (3) one-line enforcement summary, and (4) disposition (`git rm` whole note /
+    delete pitfall section / condense to a 1-line mechanism pointer).
+  - *Verification before retiring*: confirm the anchor is genuinely live — merged
+    on `main` for CI/lint/static gates, and deployed to the live cluster release
+    for runtime/server/plugin enforcement — before deleting or trimming the old
+    note. Never create an `archive/` directory.
 
 5. **Phase 4 — Prune & Index:**
    - Keep `MEMORY.md` conflict-free, self-consistent, and concise under the
