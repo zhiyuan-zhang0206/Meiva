@@ -6,14 +6,22 @@
 from __future__ import annotations
 
 import asyncio
+from collections.abc import Sequence
+from dataclasses import replace
+from datetime import UTC, datetime, timedelta
 
 import psycopg
+import pytest
+from langgraph.runtime import Runtime
 from psycopg_pool import AsyncConnectionPool
 
 from agent.graph.claim.harness_interrupt import announce_interrupt
 from agent.graph.claim.harness_turn import harness_turn_node
 from agent.graph.claim.tests.harness_support import (
+    FakeEngine,
+    RuntimeFixture,
     completed,
+    config,
     in_a_turn,
     input_key,
     insert_row,
@@ -22,15 +30,30 @@ from agent.graph.claim.tests.harness_support import (
     silent_engine,
     wait_until,
 )
-from agent.graph.claim.tests.test_harness_turn import config, runtime
-from agent.graph.claim.tests.test_harness_turn import hosted_resources as hosted_resources
+from agent.graph.claim.tests.harness_support import harness_runtime as harness_runtime
+from agent.graph.claim.tests.harness_support import hosted_resources as hosted_resources
+from agent.graph.claim.tests.test_harness_turn import runtime
+from agent.graph.interrupt import ModelInterruptedError
+from agent.graph.llm_errors import FatalLLMStreamError
 from agent.ownership.tests.ownership_support import agent_row
 from agent.state import AgentState
+from base.agents.messages.inbound import InterruptReason
+from base.clock import SYSTEM_TIMERS, Clock, ClockConfig
 from base.db.code_version_gate import ProcessDbGate
 from base.events.live.bus import EventBus
+from base.events.live.projection import TimelineSnapshot
 from base.events.live.tests.live_capture import LiveEvents
-from base.lm.harness import InputInContext, TurnOrigin, TurnStarted
+from base.lm.harness import (
+    HarnessInput,
+    InputInContext,
+    ReasoningText,
+    TurnFaulted,
+    TurnOrigin,
+    TurnStarted,
+)
+from base.lm.harness.registry import TurnTimingStore
 from base.native_process.turn_identity import HostedTurnResources
+from base.paths import harness_sessions_dir
 
 _NOTE = "Your running turn was interrupted by user."
 _PASSIVE_NOTE = '{"note_tag": "lifecycle_interrupt", "passive": true}'
@@ -207,3 +230,60 @@ async def test_announce_interrupt_emits_cancelled_and_leaves_pending_note_untouc
     assert row_status(db_conn, note) == "pending"
     row = db_conn.execute("SELECT payload FROM inbound_messages WHERE id=%s", (note,)).fetchone()
     assert row is not None and row[0] == {"note_tag": "lifecycle_interrupt", "passive": True}
+
+
+@pytest.mark.parametrize("lifecycle_interrupt", [False, True])
+async def test_aborted_work_settles_before_foreground_timing_is_cleared(
+    db_conn: psycopg.Connection,
+    harness_runtime: RuntimeFixture,
+    live_events: LiveEvents,
+    lifecycle_interrupt: bool,
+) -> None:
+    agent_id = agent_row(db_conn)
+    current = [datetime(2026, 11, 21, 10, tzinfo=UTC)]
+    clock = Clock(
+        ClockConfig(timezone="UTC", authoritative_timezone=None, message_timestamp_weekday=False),
+        timers=SYSTEM_TIMERS,
+        now=lambda: current[0],
+    )
+
+    class AbortingEngine(FakeEngine):
+        async def deliver(
+            self, inputs: Sequence[HarnessInput], *, compaction_note: str = ""
+        ) -> None:
+            self.emit(
+                TurnStarted("t1", TurnOrigin.INPUT, tuple(item.key for item in inputs), 1),
+                ReasoningText("t1", "measured work"),
+            )
+            await wait_until(
+                lambda: (
+                    store.load(agent_id, "antigravity", session_id=self.session_id)[1] is not None
+                ),
+                "turn timing never opened",
+            )
+            current[0] += timedelta(seconds=120)
+            if lifecycle_interrupt:
+                raise ModelInterruptedError(InterruptReason.RESTART)
+            self.emit(TurnFaulted("t1", "provider disconnected"))
+
+    engine = AbortingEngine()
+    initial = harness_runtime(engine, agent_id=agent_id, publisher=live_events.publisher)
+    ctx = replace(initial.context, clock_factory=lambda: clock)
+    store = TurnTimingStore(harness_sessions_dir(home=ctx.require_meiva_home()))
+    state = AgentState(harness_inputs=[{"key": "inbound-7", "prompt": "work"}])
+    if lifecycle_interrupt:
+        command = await harness_turn_node(state, Runtime(context=ctx), config(agent_id))
+        assert command.goto == "claim"
+    else:
+        with pytest.raises(FatalLLMStreamError, match="provider disconnected"):
+            await harness_turn_node(state, Runtime(context=ctx), config(agent_id))
+
+    spans, active = store.load(agent_id, "antigravity", session_id=engine.session_id)
+    assert active is None
+    assert len(spans) == 1
+    assert spans[0].duration_ms == 120_000
+    snapshots = await live_events.of_type(TimelineSnapshot)
+    settled = [item for snap in snapshots for item in snap.items if item.get("turn_duration_ms")]
+    assert settled and all(item["turn_duration_ms"] == 120_000 for item in settled)
+    current[0] += timedelta(hours=5)
+    assert store.load(agent_id, "antigravity", session_id=engine.session_id) == (spans, None)

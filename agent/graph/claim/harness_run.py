@@ -346,7 +346,6 @@ class ForegroundRun:
                     _ = waker.cancel()
         finally:
             subscription.close()
-            self._projector.clear_open_turn()
         if outcome is not None:
             raise outcome
         if self._failure is not None:

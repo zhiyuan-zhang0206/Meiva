@@ -250,8 +250,15 @@ async def _run_harness_turn(
                 agent_id=agent_id,
             )
         raise
+    else:
+        await projector.finish(interrupted=run.interrupted)
+    finally:
+        # meiva:note
+        # Failure and lifecycle interruption settle the measured turn in their handlers.
+        # Keep its timing alive until then; reader teardown alone is not settlement.
+        # meiva:link agent/graph/docs/harness-turn.md
+        projector.clear_open_turn()
 
-    await projector.finish(interrupted=run.interrupted)
     _apply_wake_polarity(state, projector, extra_updates)
     if run.interrupted:
         announce_interrupt(ctx, agent_id)
