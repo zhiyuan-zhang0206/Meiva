@@ -16,6 +16,7 @@ from scripts.hooks.diff_checks_cache import (
     record_closure,
 )
 from scripts.hooks.diff_checks_fields import ChangeSet, Run, kinds, reverse_closure, scope_of
+from scripts.hooks.diff_checks_literals import MAX_LITERAL_AUTO_TESTS
 
 # meiva:note
 # The whole-tree pyright error count the base commit carries, measured with the command CI runs
@@ -307,6 +308,7 @@ def render_plan(
     *,
     skip_tests: bool,
     mode: CheckMode,
+    skip_literal_tests: bool = False,
 ) -> list[str]:
     lines = [
         f"change: {len(change.files)} files against {change.base} "
@@ -320,4 +322,9 @@ def render_plan(
     lines.append("  selector: scripts/ci/test_selector.py --json (the files it chooses)")
     if not skip_tests:
         lines.append("  tests: the files the selector chooses")
+    elif not skip_literal_tests:
+        lines.append(
+            "  literal-tests: deleted-literal scan of selected tests "
+            f"(auto-run up to {MAX_LITERAL_AUTO_TESTS} files)"
+        )
     return lines

@@ -101,7 +101,11 @@ The `tests=` field in `diff_checks.py` reports three states: `RAN(<n>files)` wit
 counted `passed`/`failed`/`errors`, `skipped(<why>)` when the change needs no test run,
 and `broken(<why>)` when pytest wrote no report (`no-report`) or produced fewer results
 than files were selected (`short-run`). A `broken` run exits non-zero rather than
-passing as green.
+passing as green. When `--skip-tests` is passed, `literal-tests=` scans the selected test
+files for distinctive literals and backtick identifiers removed from production hunks and
+automatically runs pytest when `1..10` files match (`MAX_LITERAL_AUTO_TESTS`), failing the
+receipt if any matched test fails; above 10 files it prints a stderr preview without running
+locally, and `--skip-literal-tests` opts out explicitly.
 
 A `Co-authored-by: Meiva #<id>` line in the description lands as written. GitHub also
 appends the `Co-Authored-By:` trailers whose value parses as `Name <email>`, taken from

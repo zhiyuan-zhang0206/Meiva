@@ -1,13 +1,14 @@
-exports = ["diff_checks.py", "diff_checks_pytest.py", "diff_checks_pytest_child.py", "diff_checks_scratch.py", "tests"]
+exports = ["diff_checks.py", "diff_checks_literals.py", "diff_checks_pytest.py", "diff_checks_pytest_child.py", "diff_checks_scratch.py", "tests"]
 
 [uses]
-"diff_checks.py" = ["diff_checks_cache.py", "diff_checks_fields.py", "diff_checks_plan.py", "diff_checks_pytest.py", "diff_checks_pytest_child.py", "diff_checks_scratch.py"]
+"diff_checks.py" = ["diff_checks_cache.py", "diff_checks_fields.py", "diff_checks_literals.py", "diff_checks_plan.py", "diff_checks_pytest.py", "diff_checks_pytest_child.py", "diff_checks_scratch.py"]
 "diff_checks_fields.py" = ["diff_checks_pytest.py"]
-"diff_checks_plan.py" = ["diff_checks_cache.py", "diff_checks_fields.py"]
+"diff_checks_literals.py" = ["diff_checks_pytest.py"]
+"diff_checks_plan.py" = ["diff_checks_cache.py", "diff_checks_fields.py", "diff_checks_literals.py"]
 "diff_checks_pytest.py" = []
 "diff_checks_pytest_child.py" = []
 "diff_checks_scratch.py" = ["diff_checks_pytest_child.py"]
-"tests" = ["diff_checks.py", "diff_checks_cache.py", "diff_checks_plan.py", "diff_checks_pytest.py", "diff_checks_pytest_child.py", "diff_checks_scratch.py"]
+"tests" = ["diff_checks.py", "diff_checks_cache.py", "diff_checks_literals.py", "diff_checks_plan.py", "diff_checks_pytest.py", "diff_checks_pytest_child.py", "diff_checks_scratch.py"]
 
 [roots]
 "diff_checks_scratch.py" = { kinds = ["pid"], why = "one run owns a fresh private directory and validates effective user ownership before deleting it" }

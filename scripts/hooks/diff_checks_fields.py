@@ -92,6 +92,7 @@ FIELD_ORDER = (
     "passed",
     "failed",
     "errors",
+    "literal-tests",
     "blind",
     "fallback",
     "vitest-app",
