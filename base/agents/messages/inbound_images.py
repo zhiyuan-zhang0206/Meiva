@@ -23,6 +23,10 @@ IMAGE_MIME: dict[str, str] = {
 }
 
 
+def _missing_dimension(value: object) -> bool:
+    return value is None
+
+
 class TimelineUploadFile(BaseModel):
     model_config = ConfigDict(frozen=True, extra="forbid")
 
@@ -30,8 +34,8 @@ class TimelineUploadFile(BaseModel):
     size: int = Field(ge=0)
     content_type: str = Field(min_length=1)
     url: str = Field(min_length=1)
-    width: int | None = Field(default=None, gt=0)
-    height: int | None = Field(default=None, gt=0)
+    width: int | None = Field(default=None, gt=0, exclude_if=_missing_dimension)
+    height: int | None = Field(default=None, gt=0, exclude_if=_missing_dimension)
 
 
 def parse_upload_url(url: str) -> tuple[int, str] | None:
