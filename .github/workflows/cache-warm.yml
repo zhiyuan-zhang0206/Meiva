@@ -89,8 +89,8 @@ jobs:
           cache_dependency_path: ui/web/pnpm-lock.yaml
 
       - name: Install frontend deps
-        working-directory: ui/web
-        run: pnpm install --frozen-lockfile
+        timeout-minutes: 5
+        uses: ./.github/actions/pnpm-install
 
   native:
     name: Warm native runtime caches (Postgres, Redis, Playwright)
