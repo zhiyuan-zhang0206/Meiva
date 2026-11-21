@@ -31,6 +31,5 @@
   "filesPdf": "PDF 文档",
   "filesAudio": "音频",
   "filesPath": "路径",
-  "filesEditPath": "编辑路径",
-  "filesFolderContents": "{name} 的内容"
+  "filesEditPath": "编辑路径"
 }

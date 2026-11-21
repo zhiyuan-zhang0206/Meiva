@@ -31,6 +31,5 @@
   "filesPdf": "PDF document",
   "filesAudio": "Audio",
   "filesPath": "Path",
-  "filesEditPath": "Edit the path",
-  "filesFolderContents": "Contents of {name}"
+  "filesEditPath": "Edit the path"
 }

@@ -84,9 +84,9 @@ The panel is a file viewer (user rulings 2026-11-20 and 2026-11-21; decision rec
     otherwise the machine's root (`/`), each shown by its real path (a workspace as its directory,
     never as an agent number). The gateway reports the root with each file and listing, and the
     path shows once it has.
-  - **Folder drop-downs.** As in a file manager, each `›` drops down the folder to its left, so the
-    last one lists the file's neighbours; a folder's name opens the same list. In the list a folder
-    opens in place and a file opens as a tab. The bar reads from the machine of the file on show, and
+  - **Folder drop-downs.** The path reads as one, `/` between its parts (no arrows, user ruling
+    2026-11-21). Clicking a part drops down that folder's entries, so the file's own folder lists its
+    neighbours. In the list a folder opens in place and a file opens as a tab. The bar reads from the machine of the file on show, and
     a file opened from it keeps that machine, even above another agent's workspace.
   - **Editing.** Clicking the bar's empty end turns it into a text field holding the path, selected.
     Enter opens what was typed: a folder opens its drop-down, a file opens as a tab. Escape gives up.

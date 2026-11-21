@@ -86,9 +86,10 @@ describe("path bar", () => {
     expect(screen.queryByTestId("path-menu")).toBeNull();
 
     // meiva:note
-    // The `›` after a folder drops that folder down: the last one lists the file's neighbours.
-    fireEvent.click(await screen.findByRole("button", { name: "Contents of src" }));
-    expect(screen.getByRole("button", { name: "Contents of src" }).getAttribute("aria-expanded")).toBe("true");
+    // The path reads as one, `/` between its parts; the file's own folder lists its neighbours.
+    await waitFor(() => expect(screen.getByTestId("path-bar").textContent).toContain("/w/project/src/main.py"));
+    fireEvent.click(screen.getByRole("button", { name: "src" }));
+    expect(screen.getByRole("button", { name: "src" }).getAttribute("aria-expanded")).toBe("true");
     fireEvent.click(await screen.findByRole("menuitem", { name: "util.py" }));
     expect(screen.queryByTestId("path-menu")).toBeNull();
   });
