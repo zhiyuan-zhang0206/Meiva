@@ -112,16 +112,18 @@ for arbitrarily long or concurrent runs.
   `python -m uvicorn --fd` entry; normal gateway lifespan is unchanged. Each previous fixture process
   must exit before replacement; readiness requires HTTP plus the new PID/birth's native listener.
   Fixed-port listener diagnostics retain native identities and unknown visibility on failure.
-  Next cannot inherit a socket, so its frontend port is a reservation from a block below the kernel's
-  ephemeral range, held through the build and released immediately before `next start`.
-  Worker slots wrap modulo 64; simultaneous holders in the same slot skip candidates
-  still reserved by another socket. Release-to-bind is not an inherited-FD handoff
-  and does not guarantee uninterrupted exclusion. The ops and agent-host daemons take their health
-  ports from the same reserved block, one sub-block per daemon kind, released right before the daemon
-  is spawned: a kernel-assigned health port can be handed to any other `bind(0)` or connection source
-  port while the daemon boots, which killed an ops daemon with EADDRINUSE (2026-10-17). The ops
-  daemon dials the agent host's port to cancel a turn, so that port is reserved by its own fixture
-  (`agent_host_health_reservation`) before either daemon starts and is handed to both. Postgres/Redis
+  Next cannot inherit a socket, so frontend and daemon health ports use the existing
+  host-wide `base.host.env.port_lease.lease_ports` authority. Every allocation is
+  a distinct, currently bindable port below the kernel's ephemeral range, held by
+  a process-lifetime lease shared across worktrees and xdist workers. A reservation
+  socket excludes unrelated listeners through the build, and is released just before
+  spawning the server; the lease survives that handoff and subsequent daemon restarts.
+  Other E2E sessions therefore cannot reuse the port while this pytest process lives.
+  Unrelated programs do not honor the lease: readiness requires the managed child or
+  a descendant to own the native listening socket. A foreign listener fails immediately
+  with its port and observed PID/name; an exited child reports its exit code without
+  waiting for the readiness timeout. The ops daemon receives the agent host's health
+  port from `agent_host_health_reservation` before either daemon starts. Postgres/Redis
   use base/deploy/tests/containers.py
   for independent native clusters per worker. This gateway FD path targets the existing POSIX E2E CI.
 - **dev and e2e can run simultaneously** — ports/databases/channels are all separate

@@ -1,4 +1,4 @@
-exports = ["scenario_recording.py", "scenarios"]
+exports = ["scenario_recording.py", "scenarios", "port_server.py"]
 
 [uses]
 "scenario_recording.py" = ["scripted_model.py"]

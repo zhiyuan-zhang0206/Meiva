@@ -11,8 +11,8 @@ from pathlib import Path
 import pytest
 
 from tests.e2e._credentials import current_credentials
-from tests.e2e._ports import reserve_health_port
-from tests.e2e.process_support import SERVING_READER, managed_proc, wait_for_port
+from tests.e2e._ports import reserve_health_port, wait_for_port
+from tests.e2e.process_support import SERVING_READER, managed_proc
 
 
 @contextmanager
@@ -29,8 +29,8 @@ def _gateway_service(gate: str, label: str, module: str) -> Generator[None]:
         env=env,
         label=label,
         log_path=str(log),
-    ):
-        wait_for_port("127.0.0.1", port, timeout=30.0, label=label)
+    ) as proc:
+        wait_for_port("127.0.0.1", port, timeout=30.0, process=proc, label=label)
         yield
 
 

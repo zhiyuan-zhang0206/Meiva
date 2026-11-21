@@ -22,10 +22,10 @@ from base.sessions.pty.tests.pty_service import service_socket
 from base.sessions.tests.poll_until import poll_until
 from tests.e2e._credentials import gateway_get, gateway_post
 from tests.e2e._db import chat_and_wait, wait_for_status
-from tests.e2e._ports import GATEWAY_SOCKET, GATEWAY_URL
+from tests.e2e._ports import GATEWAY_SOCKET, GATEWAY_URL, wait_for_port
 from tests.e2e.fakes.scenario_recording import model_inputs, reset_record
 from tests.e2e.fakes.scenarios import shell_effects as world
-from tests.e2e.process_support import managed_proc, registered_server, wait_for_port
+from tests.e2e.process_support import managed_proc, registered_server
 
 Call = list[dict[str, Any]]
 
@@ -212,7 +212,10 @@ def test_session_survives_agent_host_and_gateway_restarts(
 
     with _restarted_server("agent-host") as host_env:
         wait_for_port(
-            "127.0.0.1", int(host_env["MEIVA_AGENT_HOST_HEALTH_PORT"]), label="restarted agent host"
+            "127.0.0.1",
+            int(host_env["MEIVA_AGENT_HOST_HEALTH_PORT"]),
+            process=registered_server("agent-host").process,
+            label="restarted agent host",
         )
         usable("host-restart")
         with _restarted_server("gateway", pass_gateway_fd=True):

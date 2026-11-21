@@ -70,6 +70,7 @@ from tests.e2e._ports import (
     GATEWAY_URL,
     PortReservation,
     reserve_health_port,
+    wait_for_port,
 )
 from tests.e2e._truncate import truncate_with_deadlock_retry
 from tests.e2e.fixture_environment import E2EEnv
@@ -83,7 +84,6 @@ from tests.e2e.process_support import (
     proc_log_tail,
     require_native_listener,
     sweep_stale_e2e_processes,
-    wait_for_port,
 )
 from tests.e2e.process_support import pty_sessions_proc as pty_sessions_proc
 from tests.fixtures.gateway_config import post_spawn
@@ -399,8 +399,8 @@ def frontend_proc() -> Iterator[None]:
             label="frontend",
             log_path=str(_LOG_DIR / f"frontend-{_E2E_SUFFIX}.log"),
             receipt_path=_LOG_DIR / f"cleanup-{_E2E_SUFFIX}.jsonl",
-        ):
-            wait_for_port("127.0.0.1", FRONTEND_PORT, timeout=30.0, label="frontend")
+        ) as proc:
+            wait_for_port("127.0.0.1", FRONTEND_PORT, timeout=30.0, process=proc, label="frontend")
             yield
     finally:
         with contextlib.suppress(OSError):
@@ -624,7 +624,9 @@ def agent_host_proc(
     agent_host_health_reservation.release()
     with managed_proc(cmd, env=env, label="agent-host", log_path=str(log_path)) as proc:
         try:
-            wait_for_port("127.0.0.1", agent_host_health_port, timeout=30.0, label="agent-host")
+            wait_for_port(
+                "127.0.0.1", agent_host_health_port, timeout=30.0, process=proc, label="agent-host"
+            )
         except RuntimeError as e:
             code = proc.poll()
             state = f"exited with code {code}" if code is not None else "still running"
@@ -679,8 +681,8 @@ def ops_proc(gateway_proc: str, agent_host_health_reservation: PortReservation) 
         env=env,
         label="ops",
         log_path=str(log_path),
-    ):
-        wait_for_port("127.0.0.1", ops_port, timeout=30.0, label="ops")
+    ) as proc:
+        wait_for_port("127.0.0.1", ops_port, timeout=30.0, process=proc, label="ops")
         yield
 
 
