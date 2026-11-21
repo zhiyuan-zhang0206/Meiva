@@ -372,7 +372,7 @@ CREATE TABLE inbound_messages (
 
 -- Every new system_note inbound must carry a non-blank string note_tag so claim
 -- dispatch never crashes on a poison-pill row; NOT VALID preserves legacy done rows.
-ALTER TABLE public.inbound_messages
+ALTER TABLE inbound_messages
     ADD CONSTRAINT inbound_messages_system_note_tag_check
     CHECK (
         kind <> 'system_note'

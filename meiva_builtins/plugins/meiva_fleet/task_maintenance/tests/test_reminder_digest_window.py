@@ -152,7 +152,7 @@ def test_window_follows_the_payload_not_the_wording(
             (
                 owner,
                 "Completely different wording, no prefix",
-                Jsonb({"note_kind": "task_check_in"}),
+                Jsonb({"note_tag": "task", "note_kind": "task_check_in"}),
             ),
         )
     db_conn.commit()
@@ -179,7 +179,7 @@ def test_reroute_payload_does_not_throttle_the_owner(
             (
                 owner,
                 "Task check-in — 1 task(s) reached their reminder interval",
-                Jsonb({"note_kind": "task_reroute"}),
+                Jsonb({"note_tag": "task", "note_kind": "task_reroute"}),
             ),
         )
     db_conn.commit()
