@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from collections.abc import Mapping, Sequence
+from collections.abc import Mapping
 from datetime import datetime
 from pathlib import Path
 
@@ -8,7 +8,7 @@ import zstandard
 from psycopg_pool import ConnectionPool
 
 from base.agents.history.timeline import reading_target, reading_window
-from base.agents.history.timeline_item import TimelineItem, TurnTimingSpan, apply_turn_timings
+from base.agents.history.timeline_item import TimelineItem
 from base.agents.history.transcript_timeline.items import ReplyPolicy, format_tool_use
 from base.agents.history.transcript_timeline.record.harness import (
     compressed_file,
@@ -33,45 +33,12 @@ from base.api_contracts.reading import (
     encode_reading_locator,
     encode_reading_source,
 )
-from base.lm.harness.registry import ActiveTurnRecord, FileSessionRegistry, TurnTimingStore
+from base.lm.harness.registry import FileSessionRegistry
 from base.lm.harness.session.transcript.entries import InputRow
 from base.lm.harness.session.transcript.record_file import RecordFile, UnreadRows, ZstdRecordFile
 from base.log import logger
 from base.paths import harness_sessions_dir
 from ops.rpc_schemas import HarnessTimelineReadRequest, HarnessTimelineWindow
-
-
-def _load_harness_timings(
-    sessions_dir: Path,
-    agent_id: int,
-    harness: str,
-    *,
-    session_id: str | None,
-) -> tuple[list[TurnTimingSpan], ActiveTurnRecord | None]:
-    closed_spans, active_turn = TurnTimingStore(sessions_dir).load(
-        agent_id,
-        harness,
-        session_id=session_id,
-    )
-    timing_spans = [
-        TurnTimingSpan(
-            turn_id=span.turn_id,
-            start_pos=span.start_offset,
-            end_pos=span.end_offset,
-            duration_ms=span.duration_ms,
-        )
-        for span in closed_spans
-    ]
-    if active_turn is not None:
-        timing_spans.append(
-            TurnTimingSpan(
-                turn_id=active_turn.turn_id,
-                start_pos=active_turn.start_offset,
-                end_pos=None,
-                duration_ms=None,
-            )
-        )
-    return timing_spans, active_turn
 
 
 # meiva:note
@@ -93,16 +60,11 @@ def read_harness_timeline(
 ) -> HarnessTimelineWindow:
     if not reads_timeline_from_record(request.harness):
         raise ValueError(f"the timeline of harness {request.harness!r} is not read from its record")
-    sessions_dir = harness_sessions_dir(home=home)
-    record = FileSessionRegistry(sessions_dir).load(request.agent_id, harness=request.harness)
+    record = FileSessionRegistry(harness_sessions_dir(home=home)).load(
+        request.agent_id, harness=request.harness
+    )
     if record is None:
         return _empty(request)
-    timing_spans, active_turn = _load_harness_timings(
-        sessions_dir,
-        request.agent_id,
-        request.harness,
-        session_id=record.session_id,
-    )
     path = session_file(request.harness, environ, Path(record.cwd), record.session_id)
     file: RecordFile
     if path is not None:
@@ -127,14 +89,7 @@ def read_harness_timeline(
 
     try:
         if request.reading_locator is not None:
-            return _reading_window(
-                request,
-                file,
-                record.session_id,
-                load_sent,
-                unread,
-                timing_spans=timing_spans,
-            )
+            return _reading_window(request, file, record.session_id, load_sent, unread)
         window = read_window(
             file,
             harness=request.harness,
@@ -156,7 +111,6 @@ def read_harness_timeline(
         _report_unreadable(request, environ, record.session_id, reason=str(error))
         return _empty(request)
     items = _with_record_locators(window.timeline_items, request, record.session_id)
-    apply_turn_timings(items, timing_spans)
     verified = (
         request.anchor_item_id
         if any(item.item_id == request.anchor_item_id for item in items)
@@ -168,8 +122,6 @@ def read_harness_timeline(
         size=window.size,
         anchor_item_id=verified,
         anchor_applied=request.anchor_item_id is not None,
-        active_turn_id=active_turn.turn_id if active_turn is not None else None,
-        active_turn_started_at=active_turn.started_at if active_turn is not None else None,
     )
 
 
@@ -220,8 +172,6 @@ def _reading_window(
     session: str,
     load_sent: LoadSent,
     unread: UnreadRows,
-    *,
-    timing_spans: Sequence[TurnTimingSpan] = (),
 ) -> HarnessTimelineWindow:
     if request.reading_locator is None or request.reading_direction is None:
         raise ValueError("A source reading selector is required")
@@ -255,7 +205,6 @@ def _reading_window(
         )
         contextual = window.with_call_context(selected.items)
         selected_items = _with_record_locators(contextual, request, session)
-        apply_turn_timings(selected_items, timing_spans)
         return HarnessTimelineWindow(
             items=selected_items,
             has_more=selected.older_cursor is not None,

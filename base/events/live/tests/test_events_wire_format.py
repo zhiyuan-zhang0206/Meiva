@@ -34,7 +34,6 @@ from base.events.live.projection import (
     TaskUpdated,
     TokenUsage,
     ToUserChanged,
-    TurnStarted,
 )
 
 FROZEN_WIRE: list[tuple[type, str, dict[str, Any]]] = [
@@ -113,11 +112,6 @@ FROZEN_WIRE: list[tuple[type, str, dict[str, Any]]] = [
     (TokenUsage, "token_usage", {"input_tokens": 1234, "output_tokens": 56, "reasoning_tokens": 0}),
     (LLMKeepalive, "llm_keepalive", {"msg_idx": 5, "content": ""}),
     (LLMDone, "llm_done", {}),
-    (
-        TurnStarted,
-        "turn_started",
-        {"turn_id": "turn-1", "started_at": "2026-11-19T07:00:00+00:00"},
-    ),
     (
         ExecOutputChunk,
         "exec_output_chunk",

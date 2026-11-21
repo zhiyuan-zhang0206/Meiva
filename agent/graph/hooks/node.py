@@ -119,14 +119,6 @@ def hook_node(
                 "display", "timeline_default_limit"
             ),
             publish_timeline=not is_external,
-            turn_timings=hook_state.turn_timings,
-            active_turn_id=hook_state.active_turn_id if hook_state.turn_active else None,
-            active_turn_started_at=(
-                hook_state.active_turn_started_at if hook_state.turn_active else None
-            ),
-            active_turn_start_idx=(
-                hook_state.active_turn_start_idx if hook_state.turn_active else None
-            ),
         ):
             cmd = await runner(hook_state, runtime, config)
             cmd_update: object = cmd.update

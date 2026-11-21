@@ -133,16 +133,17 @@ describe("timeline loading presentation", () => {
   });
 
   it("an older reader request owns the ring while a human prompt awaits its first step", () => {
-    const { container, rerender } = render(<TimelineView items={[human]} readerLoadingOlder turnActive />);
+    const freshHuman = makeItem({ kind: "inbound_chat", source: "user", payload: "Please continue", created_at: new Date().toISOString() });
+    const { container, rerender } = render(<TimelineView items={[freshHuman]} readerLoadingOlder turnActive />);
     expect(container.querySelectorAll(".animate-spin")).toHaveLength(1);
     expect(screen.queryByTestId("pending-live-activity-window")).toBeNull();
-    rerender(<TimelineView items={[human]} turnActive />);
+    rerender(<TimelineView items={[freshHuman]} turnActive />);
     const pending = screen.getByTestId("pending-live-activity-window");
     expect(container.querySelectorAll(".animate-spin")).toHaveLength(0);
     expect(pending.querySelector("svg")).toBeTruthy();
     expect(pending.querySelector(".animate-spin")).toBeNull();
     expect(pending.querySelector("button")).toBeNull();
-    expect(pending.textContent).toBe("Working…");
+    expect(pending.textContent).toBe("Working for 1s");
   });
 
   it("a retained prompt stays readable under the initial source qualification ring", () => {
@@ -157,7 +158,7 @@ describe("timeline loading presentation", () => {
   });
 
   it("real work remains expandable while a reader load is in progress", () => {
-    render(<TimelineView items={[human, makeItem({ item_id: "2.0", kind: "agent_reasoning", payload: "Actual reasoning", reasoning_ms: 2000 })]} readerLoadingOlder turnActive />);
+    render(<TimelineView items={[human, makeItem({ item_id: "2.0", kind: "agent_reasoning", payload: "Actual reasoning", created_at: new Date().toISOString(), reasoning_ms: 2000 })]} readerLoadingOlder turnActive />);
     const header = screen.getByTestId("turn-toggle");
     expect(header.textContent).toContain("Working for 2s");
     fireEvent.click(header);

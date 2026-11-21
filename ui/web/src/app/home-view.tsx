@@ -82,13 +82,10 @@ type InspectorView = ReturnType<typeof useInspectorOpen>;
 type SettingsView = Pick<ReturnType<typeof useUserSettings>, "settings" | "isLoading">;
 interface TimelineStoreView {
   // meiva:note
-  // Page-clock time of the last event the selected thread received (0 = none). The running turn's
-  // live clock anchors on it between blocks, so "Working for" keeps counting through the gap
-  // between a committed block and the next one instead of freezing (user report 2026-11-08).
+  // Page-clock time of the last event the selected thread received (0 = none). Fallback anchor
+  // when a live work block or pending activity window has no timestamped items yet.
   // meiva:link ui/web/src/docs/frontend-components/timeline-view/deep-collapse.md
   liveAnchorAt: number;
-  activeTurnId?: string | null;
-  activeTurnStartedAt?: number;
 }
 type TimelineViewState = Pick<
   UseTimelineResult,
@@ -548,8 +545,6 @@ function HomeContent({
             streamingCode={streamingCode}
             turnActive={agentBusy}
             lastEventAt={timelineStore.liveAnchorAt}
-            activeTurnId={timelineStore.activeTurnId ?? null}
-            activeTurnStartedAt={timelineStore.activeTurnStartedAt ?? 0}
             hasMoreOlder={hasMoreOlder}
             loadingOlder={loadingOlder}
             readerLoadingOlder={readerLoadingOlder}

@@ -190,49 +190,6 @@ def dangling_tool_pairing_repairs(
     return [*rebuilt, *pending_notes]
 
 
-def _remap_index_map(
-    orig_len: int,
-    redundant_indices: set[int],
-    inserts: dict[int, list[ToolMessage]],
-) -> list[int]:
-    mapping = [0] * (orig_len + 1)
-    new_idx = 0
-    survivor_idx = 0
-    for orig_idx in range(orig_len):
-        mapping[orig_idx] = new_idx
-        if orig_idx in redundant_indices:
-            continue
-        new_idx += 1 + len(inserts.get(survivor_idx, ()))
-        survivor_idx += 1
-    mapping[orig_len] = new_idx
-    return mapping
-
-
-def _remap_turn_timings(
-    state: _state.AgentState,
-    index_map: list[int],
-) -> dict[str, object]:
-    update: dict[str, object] = {}
-    max_orig = len(index_map) - 1
-    if state.turn_timings:
-        remapped: list[dict[str, object]] = []
-        for entry in state.turn_timings:
-            s_idx = entry.get("start_idx")
-            e_idx = entry.get("end_idx")
-            if isinstance(s_idx, int) and isinstance(e_idx, int):
-                new_s = index_map[min(max(s_idx, 0), max_orig)]
-                new_e = index_map[min(max(e_idx, 0), max_orig)]
-                remapped.append({**entry, "start_idx": new_s, "end_idx": max(new_e, new_s)})
-            else:
-                remapped.append(dict(entry))
-        update["turn_timings"] = remapped
-    if isinstance(state.active_turn_start_idx, int):
-        update["active_turn_start_idx"] = index_map[
-            min(max(state.active_turn_start_idx, 0), max_orig)
-        ]
-    return update
-
-
 class _RepairDanglingToolPairingHook(Hook):
     """Built-in before_llm hook repairing dangling tool_use/tool_result pairs.
 
@@ -249,9 +206,6 @@ class _RepairDanglingToolPairingHook(Hook):
     ) -> dict[str, object] | None:
         if runtime.context.harness is not Harness.MEIVA:
             return None
-        redundant_indices = set(redundant_tool_results(state.messages))
-        survivors = [m for i, m in enumerate(state.messages) if i not in redundant_indices]
-        dangling = unpaired_tool_calls(survivors)
         repairs = dangling_tool_pairing_repairs(
             state.messages,
             created_at=runtime.context.require_clock().now(),
@@ -264,20 +218,7 @@ class _RepairDanglingToolPairingHook(Hook):
             event="dangling_tool_pairing_repaired",
             agent_id=agent_id_from_config(config),
         )
-        result: dict[str, object] = {"messages": repairs, "pending_exec_notes": []}
-        if redundant_indices or dangling:
-            inserts: dict[int, list[ToolMessage]] = {}
-            for i, ids in dangling:
-                j = i + 1
-                while j < len(survivors) and isinstance(survivors[j], ToolMessage):
-                    j += 1
-                inserts[j - 1] = [
-                    _synthetic_tool_result(t, created_at=runtime.context.require_clock().now())
-                    for t in ids
-                ]
-            index_map = _remap_index_map(len(state.messages), redundant_indices, inserts)
-            result.update(_remap_turn_timings(state, index_map))
-        return result
+        return {"messages": repairs, "pending_exec_notes": []}
 
 
 # Module-level singleton — the instance `framework_hooks()` hands the graph build.

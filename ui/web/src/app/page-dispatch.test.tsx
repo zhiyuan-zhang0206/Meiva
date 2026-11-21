@@ -211,7 +211,7 @@ describe("home loading presentation through the selected timeline reader", () =>
     await act(() => { oldRead.resolve(response([{ ...human, payload: "Old source" }])); return oldRead.promise; });
     expect(screen.queryByText("Old source")).toBeNull();
     expect(screen.getByTestId("cold-load-ring")).toBeTruthy();
-    await act(() => { selectedRead.resolve(response([human, { ...human, item_id: "2.0", kind: "agent_reasoning", source: null, payload: "Selected work", reasoning_ms: 2000 }])); return selectedRead.promise; });
+    await act(() => { selectedRead.resolve(response([human, { ...human, item_id: "2.0", kind: "agent_reasoning", source: null, payload: "Selected work", created_at: new Date().toISOString(), reasoning_ms: 2000 }])); return selectedRead.promise; });
     await waitFor(() => expect(screen.queryByTestId("cold-load-spinner")).toBeNull());
     expect(screen.getByTestId("turn-toggle").textContent).toContain("Working for 2s");
     fireEvent.click(screen.getByTestId("turn-toggle"));

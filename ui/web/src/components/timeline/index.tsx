@@ -56,12 +56,10 @@ interface Props {
   turnActive?: boolean;
 
   // meiva:note
-  // Page-clock time of the thread's last received event; anchors the running turn's live clock
-  // through the gaps where no block is in flight (0 = unknown).
+  // Page-clock fallback anchor when a live work block or pending activity window has no
+  // timestamped items yet (0 = unknown).
   // meiva:link ui/web/src/docs/frontend-components/timeline-view/deep-collapse.md
   lastEventAt?: number;
-  activeTurnId?: string | null;
-  activeTurnStartedAt?: number;
 
   hasMoreOlder?: boolean;
   // meiva:note
@@ -99,8 +97,6 @@ export const TimelineView = memo(function TimelineView({
   streamingCode = false,
   turnActive = false,
   lastEventAt = 0,
-  activeTurnId = null,
-  activeTurnStartedAt = 0,
   hasMoreOlder = false,
   loadingOlder = false,
   readerLoadingOlder = false,
@@ -455,8 +451,6 @@ export const TimelineView = memo(function TimelineView({
               turnActive={turnActive}
               loading={showRing || readerLoadingOlder}
               lastEventAt={lastEventAt}
-              activeTurnId={activeTurnId}
-              activeTurnStartedAt={activeTurnStartedAt}
               overrides={overrides}
               toggleExpanded={toggleExpanded}
               toggleTurn={handleToggleTurn}

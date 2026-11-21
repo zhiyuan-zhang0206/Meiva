@@ -173,17 +173,14 @@ async def _handle_harness_abort(
         await bridge.retire(reason=reason)
     halt_reason = _halt_reason(exc)
     if halt_reason is not None and not projector.has_delivered_output:
-        projector.clear_open_turn()
         return await _settle_halted_turn(ctx, agent_id, bridge, run, exc, halt_reason)
 
     produced_output = projector.has_activity
     marked = await run.retire_unconfirmed()
     if produced_output:
         await projector.finish(error=str(exc))
-    else:
-        projector.clear_open_turn()
-        if marked:
-            report_lost_turn(ctx, agent_id, marked, run.last_key, exc)
+    elif marked:
+        report_lost_turn(ctx, agent_id, marked, run.last_key, exc)
     return None
 
 
@@ -204,7 +201,6 @@ async def _run_harness_turn(
         non_human_wake=state.non_human_wake,
         session_id=session_of(ctx, agent_id, ctx.harness.value),
     )
-    projector.clear_open_turn()
     run = ForegroundRun(
         ctx,
         agent_id,
@@ -250,15 +246,8 @@ async def _run_harness_turn(
                 agent_id=agent_id,
             )
         raise
-    else:
-        await projector.finish(interrupted=run.interrupted)
-    finally:
-        # meiva:note
-        # Failure and lifecycle interruption settle the measured turn in their handlers.
-        # Keep its timing alive until then; reader teardown alone is not settlement.
-        # meiva:link agent/graph/docs/harness-turn.md
-        projector.clear_open_turn()
 
+    await projector.finish(interrupted=run.interrupted)
     _apply_wake_polarity(state, projector, extra_updates)
     if run.interrupted:
         announce_interrupt(ctx, agent_id)

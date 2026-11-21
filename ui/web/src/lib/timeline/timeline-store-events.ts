@@ -27,17 +27,6 @@ export interface LiveCompact {
   finishedAt: string | null;
 }
 
-export function parseTurnStartMs(startedAt: string | null | undefined): number {
-  if (!startedAt) return 0;
-  const parsed = Date.parse(startedAt);
-  return Number.isFinite(parsed) && parsed > 0 ? parsed : 0;
-}
-
-export interface ActiveTurnAnchorInput {
-  readonly id?: string | null;
-  readonly startedAt?: string | null;
-}
-
 export interface TimelineState {
   items: BackendTimelineItem[];
   snapshotReady: boolean;
@@ -49,15 +38,10 @@ export interface TimelineState {
   streamingCode: boolean;
   turnActive: boolean;
   // meiva:note
-  // When this thread last received a timeline event (the page's own wall clock), 0 = none yet.
-  // The live "Working for" clock anchors on it while no block is in flight: between two blocks
-  // nothing else advances, and the header used to freeze at its last number (user report
-  // 2026-11-08). It never carries an agent-host timestamp, so a clock skew between the agent's
-  // machine and the browser cannot move the number.
+  // Page-clock time of the thread's last received event (0 = none yet). Used only as a live
+  // fallback when a running work block has no timestamped items yet.
   // meiva:link ui/web/src/docs/frontend-components/timeline-view/deep-collapse.md
   liveAnchorAt: number;
-  activeTurnId: string | null;
-  activeTurnStartedAt: number;
   connectionState: ConnectionState;
   tokenUsage: number;
 
@@ -99,7 +83,6 @@ export interface TimelineState {
     snapshot: BackendTimelineItem[],
     msg_count: number,
     hasMoreOlder: boolean,
-    activeTurn?: ActiveTurnAnchorInput | null,
   ) => boolean;
 
   switchThread: (agentId: number | null, cached: BackendTimelineItem[] | null, hasMoreOlder: boolean, buffer?: CompactTransitionBuffer | null) => void;
@@ -338,25 +321,6 @@ export function applySseEvent(state: TimelineState, ev: SystemEvent, nowMs = 1):
         resetPending: true,
       };
     }
-    if (ev.role === "turn_started") {
-      const startedMs = parseTurnStartMs(ev.started_at);
-      return {
-        turnActive: true,
-        liveAnchorAt: nowMs,
-        activeTurnId: ev.turn_id,
-        activeTurnStartedAt: startedMs > 0 ? startedMs : nowMs,
-      };
-    }
-    const snapTurnPatch: Partial<TimelineState> =
-      ev.role === "timeline_snapshot" && ev.active_turn_started_at !== undefined
-        ? (() => {
-            const snapAnchorMs = parseTurnStartMs(ev.active_turn_started_at);
-            return {
-              activeTurnId: snapAnchorMs > 0 ? (ev.active_turn_id ?? null) : null,
-              activeTurnStartedAt: snapAnchorMs,
-            };
-          })()
-        : {};
     // The first nonempty compact snapshot replaces the selected segment.
     if (ev.role === "timeline_snapshot") {
       const snapItems = [...ev.items];
@@ -372,7 +336,7 @@ export function applySseEvent(state: TimelineState, ev: SystemEvent, nowMs = 1):
             (it.kind === "system_prompt" && parseItemIdParts(it.item_id)?.rank === 0),
         ) && crossedUnseenCompact(state.items, snapItems);
       if (state.resetPending || crossedCompact) {
-        if (snapItems.length === 0) return snapTurnPatch;
+        if (snapItems.length === 0) return {};
         const epoch = state.compactEpoch + 1;
         return {
           items: snapItems,
@@ -385,7 +349,6 @@ export function applySseEvent(state: TimelineState, ev: SystemEvent, nowMs = 1):
           compactReplaceAgent: ev.agent_id,
           hasMoreOlder: state.hasMoreOlder,
           liveCompact: retireLiveCompact(state.liveCompact, snapItems),
-          ...snapTurnPatch,
         };
       }
     }
@@ -433,12 +396,6 @@ export function applySseEvent(state: TimelineState, ev: SystemEvent, nowMs = 1):
         : preserveLiveAnchor
           ? state.liveAnchorAt
           : nowMs;
-    const turnPatch: Partial<TimelineState> =
-      ev.role === "timeline_snapshot"
-        ? snapTurnPatch
-        : !next.turnActive
-          ? { activeTurnId: null, activeTurnStartedAt: 0 }
-          : {};
     // Unchanged fields keep their references (foldEvent carries them via
     // ...t / no-op reducers), so per-field Zustand selectors short-circuit.
     return {
@@ -449,7 +406,6 @@ export function applySseEvent(state: TimelineState, ev: SystemEvent, nowMs = 1):
       liveAnchorAt: nextLiveAnchorAt,
       hasMoreOlder: next.hasMoreOlder,
       liveCompact: retireLiveCompact(state.liveCompact, next.items),
-      ...turnPatch,
     };
   }
 

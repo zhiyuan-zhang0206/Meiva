@@ -24,7 +24,7 @@ from base.agents.history.transcript_timeline.sent import (
 )
 from base.db import create_agent
 from base.lm.harness.claude.delivery import key_uuid
-from base.lm.harness.registry import FileSessionRegistry, SessionRecord, TurnTimingStore
+from base.lm.harness.registry import FileSessionRegistry, SessionRecord
 from base.lm.harness.session.transcript.entries import InputRow
 from base.lm.harness.session.transcript.record_file import UnreadRows
 from base.log.tests.log_records import LogRecords
@@ -435,92 +435,3 @@ def _paged_items(read: Callable[[int | None, int], HarnessTimelineWindow]) -> li
     else:
         pytest.fail("page cursor did not finish")
     return actual
-
-
-def _work_offsets(items: list[TimelineItem]) -> list[int]:
-    return sorted(
-        {
-            int(it.item_id.split(".")[0][1:])
-            for it in items
-            if it.kind in ("agent_reasoning", "agent_code", "code_output")
-        }
-    )
-
-
-def _assert_turn_duration(items: list[TimelineItem], turn_id: str, duration_ms: int | None) -> None:
-    matched = [it for it in items if it.turn_id == turn_id]
-    assert matched
-    assert all(it.turn_duration_ms == duration_ms for it in matched)
-
-
-def test_plan_b_turn_timing_cold_and_paginated_reads(
-    tmp_path: Path, db_conn: psycopg.Connection, pool: ConnectionPool
-) -> None:
-    agent = create_agent(db_conn)
-    _claimed(db_conn, agent, "Think briefly, then use Bash", "k1")
-    home = _session(tmp_path, agent, write_file=True)
-
-    baseline = read_harness_timeline(
-        _request(agent), pool=pool, home=home, unread=UnreadRows(), environ={"HOME": str(tmp_path)}
-    )
-    work_offsets = _work_offsets(baseline.items)
-    assert len(work_offsets) >= 2
-    split = work_offsets[-1]
-    record_file_size = max(work_offsets) + 4096
-
-    store = TurnTimingStore(harness_sessions_dir(home=home))
-    store.close_turn(
-        agent,
-        "claude_code",
-        session_id=SESSION,
-        turn_id="turn-1",
-        start_offset=0,
-        end_offset=split,
-        started_at="2026-11-12T08:57:00+00:00",
-        ended_at="2026-11-12T08:57:05+00:00",
-        duration_ms=5000,
-    )
-    store.open_turn(
-        agent,
-        "claude_code",
-        turn_id="turn-1",
-        started_at="2026-11-12T09:30:00+00:00",
-        start_offset=split,
-        session_id=SESSION,
-    )
-
-    window = read_harness_timeline(
-        _request(agent), pool=pool, home=home, unread=UnreadRows(), environ={"HOME": str(tmp_path)}
-    )
-    assert window.active_turn_id == "turn-1@2026-11-12T09:30:00+00:00"
-    assert window.active_turn_started_at == "2026-11-12T09:30:00+00:00"
-    _assert_turn_duration(window.items, "turn-1@2026-11-12T08:57:00+00:00", 5000)
-    _assert_turn_duration(window.items, "turn-1@2026-11-12T09:30:00+00:00", None)
-
-    store.close_turn(
-        agent,
-        "claude_code",
-        session_id=SESSION,
-        turn_id="turn-1",
-        start_offset=split,
-        end_offset=record_file_size,
-        started_at="2026-11-12T09:30:00+00:00",
-        ended_at="2026-11-12T09:30:07+00:00",
-        duration_ms=7000,
-    )
-    settled = read_harness_timeline(
-        _request(agent), pool=pool, home=home, unread=UnreadRows(), environ={"HOME": str(tmp_path)}
-    )
-    assert settled.active_turn_id is None
-    assert settled.active_turn_started_at is None
-    _assert_turn_duration(settled.items, "turn-1@2026-11-12T09:30:00+00:00", 7000)
-
-    tail_first_offset = int(settled.items[-1].item_id.split(".")[0][1:])
-    paged = read_harness_timeline(
-        _request(agent, before=tail_first_offset),
-        pool=pool,
-        home=home,
-        unread=UnreadRows(),
-        environ={"HOME": str(tmp_path)},
-    )
-    _assert_turn_duration(paged.items, "turn-1@2026-11-12T08:57:00+00:00", 5000)

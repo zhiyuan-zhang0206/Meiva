@@ -45,12 +45,9 @@ interface TurnBlockProps {
   timelineSource?: "buffer" | "canonical";
   displayRank?: number;
   // meiva:note
-  // Page-clock time of the thread's last received event; anchors the live clock while no block is
-  // in flight. 0 = unknown, and the clock falls back to the in-flight block alone.
+  // Page-clock fallback when a running work block has no timestamped items yet (0 = unknown).
   // meiva:link ui/web/src/docs/frontend-components/timeline-view/deep-collapse.md
   lastEventAt?: number;
-  activeTurnId?: string | null;
-  activeTurnStartedAt?: number;
 }
 
 function sameIds(a: readonly string[], b: readonly string[]): boolean {
@@ -71,8 +68,6 @@ function turnBlockPropsEqual(prev: TurnBlockProps, next: TurnBlockProps): boolea
     prev.onToggle === next.onToggle &&
     prev.turnActive === next.turnActive &&
     prev.lastEventAt === next.lastEventAt &&
-    prev.activeTurnId === next.activeTurnId &&
-    prev.activeTurnStartedAt === next.activeTurnStartedAt &&
     prev.liveWindow === next.liveWindow &&
     prev.children === next.children &&
     prev.timelineSource === next.timelineSource &&
@@ -99,48 +94,31 @@ export const TurnBlock = memo(function TurnBlock({
   timelineSource = "canonical",
   displayRank,
   lastEventAt = 0,
-  activeTurnId = null,
-  activeTurnStartedAt = 0,
 }: TurnBlockProps) {
   const t = useTranslations("timeline");
   const titleRef = useSyncedShimmer(Boolean(turnActive));
-  const liveBlockStartedAt =
-    turnActive && summary.lastLiveKind != null && summary.lastLiveStartedAt > 0
-      ? summary.lastLiveStartedAt
-      : 0;
-  const useAuthoritativeTurnClock = Boolean(turnActive) && activeTurnStartedAt > 0;
-  const activeAlreadyClosed =
-    activeTurnId != null && (summary.closedTurnIds?.includes(activeTurnId) ?? false);
   // meiva:note
-  // Anchoring on the active Turn's authoritative `started_at` keeps the live counter
-  // continuous from `PendingLiveActivityWindow` through every step (`Working for Xs`)
-  // and ensures prior Turns in the same Work Block only contribute their closed
-  // durations without idle/sleep gaps between Turns. When no Turn anchor exists (e.g.
-  // isolated unit renders), fall back to the block's live clock or `lastEventAt`.
+  // Work-block wall-clock span (user ruling 2026-11-21): Working = now - start of the first item
+  // in this work block; Worked = end of the last item - start of the first item. Falls back to
+  // `lastEventAt` while active only if no item in the block carries a start timestamp yet.
   // meiva:link ui/web/src/docs/frontend-components/timeline-view/deep-collapse.md
-  const liveAnchor = useAuthoritativeTurnClock
-    ? activeTurnStartedAt
-    : liveBlockStartedAt > 0
-      ? liveBlockStartedAt
-      : turnActive
-        ? lastEventAt
-        : 0;
-  const liveNow = useNow(Boolean(turnActive) && liveAnchor > 0);
-
-  const liveDelta =
-    turnActive && liveAnchor > 0 && !(useAuthoritativeTurnClock && activeAlreadyClosed)
-      ? Math.max(liveNow - liveAnchor, 0)
-      : 0;
-  const baseWorkedMs = useAuthoritativeTurnClock
-    ? (summary.closedTurnsWorkedMs ?? summary.workedMs)
-    : summary.workedMs;
-  const totalWorkedMs = baseWorkedMs + liveDelta;
+  const liveAnchor = turnActive
+    ? (summary.startedAtMs ?? (lastEventAt > 0 ? lastEventAt : null))
+    : null;
+  const liveNow = useNow(Boolean(turnActive) && liveAnchor !== null);
 
   const hasWork = summary.thinking > 0 || summary.code > 0 || summary.output > 0;
-  const liveDuration = turnActive ? formatWholeSecondsDuration(totalWorkedMs) : null;
+  const liveDuration =
+    turnActive && liveAnchor !== null
+      ? formatWholeSecondsDuration(Math.max(liveNow - liveAnchor, 0))
+      : null;
+  const settledSpanMs =
+    !turnActive && hasWork && summary.startedAtMs !== null && summary.endedAtMs !== null
+      ? Math.max(summary.endedAtMs - summary.startedAtMs, 0)
+      : null;
   const settledDuration =
-    !turnActive && hasWork ? formatWholeSecondsDuration(summary.workedMs) : null;
-  const measuredLabel = turnActive
+    settledSpanMs !== null ? formatWholeSecondsDuration(settledSpanMs) : null;
+  const workedLabel = turnActive
     ? liveDuration !== null
       ? t("workingFor", { duration: liveDuration })
       : t("working")
@@ -149,11 +127,6 @@ export const TurnBlock = memo(function TurnBlock({
         ? t("workedFor", { duration: settledDuration })
         : t("worked")
       : t("workActivity");
-
-  const timingIncomplete = useAuthoritativeTurnClock ? false : hasWork && summary.missingTiming;
-  const workedLabel = timingIncomplete
-    ? turnActive ? t("working") : t("worked")
-    : measuredLabel;
 
   const actionSummary = expanded ? formatTurnSummary(summary, (key, values) =>
     t(key as Parameters<typeof t>[0], values),

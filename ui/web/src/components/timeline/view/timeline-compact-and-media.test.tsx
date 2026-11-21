@@ -139,19 +139,19 @@ describe("continuous compact history", () => {
   });
   it("merges adjacent secondary items across compact summaries, historical segments, and silent markers into one single TurnBlock", () => {
     const items = [
-      makeItem({ item_id: "s1.prev.0.0", kind: "system_marker", source: "memory", payload: "mem 1" }),
-      makeItem({ item_id: "s1.prev.0.1", kind: "system_marker", source: "timezone", payload: "tz" }),
-      makeItem({ item_id: "s1.prev.1.0", kind: "inbound_compact_summary", payload: "summary 1" }),
-      makeItem({ item_id: "s1.prev.2.0", kind: "agent_reasoning", payload: "t1", reasoning_ms: 4_000 }),
-      makeItem({ item_id: "s1.prev.2.1", kind: "agent_code", payload: "x = 1", code_elapsed_ms: 2_000 }),
-      makeItem({ item_id: "s1.prev.2.2", kind: "code_output", payload: "ok", exec_ms: 1_000 }),
-      makeItem({ item_id: "_marker.compact_done", kind: "system_marker", source: null, payload: "compact_done" }),
-      makeItem({ item_id: "0.0", kind: "system_prompt", payload: "sys" }),
-      makeItem({ item_id: "1.0", kind: "inbound_compact_summary", payload: "summary 2" }),
-      makeItem({ item_id: "2.0", kind: "system_marker", source: "memory", payload: "mem 2" }),
-      makeItem({ item_id: "3.0", kind: "agent_reasoning", payload: "t2", reasoning_ms: 3_000 }),
-      makeItem({ item_id: "3.1", kind: "agent_chat", payload: "internal note", user_facing: false }),
-      makeItem({ item_id: "4.0", kind: "agent_chat", payload: "final user reply", user_facing: true }),
+      makeItem({ item_id: "s1.prev.0.0", kind: "system_marker", source: "memory", payload: "mem 1", created_at: "2026-05-15T12:00:00Z" }),
+      makeItem({ item_id: "s1.prev.0.1", kind: "system_marker", source: "timezone", payload: "tz", created_at: "2026-05-15T12:00:00Z" }),
+      makeItem({ item_id: "s1.prev.1.0", kind: "inbound_compact_summary", payload: "summary 1", created_at: "2026-05-15T12:00:00Z" }),
+      makeItem({ item_id: "s1.prev.2.0", kind: "agent_reasoning", payload: "t1", created_at: "2026-05-15T12:00:04Z", reasoning_ms: 4_000 }),
+      makeItem({ item_id: "s1.prev.2.1", kind: "agent_code", payload: "x = 1", created_at: "2026-05-15T12:00:06Z", code_elapsed_ms: 2_000 }),
+      makeItem({ item_id: "s1.prev.2.2", kind: "code_output", payload: "ok", created_at: "2026-05-15T12:00:07Z", exec_ms: 1_000 }),
+      makeItem({ item_id: "_marker.compact_done", kind: "system_marker", source: null, payload: "compact_done", created_at: "2026-05-15T12:00:07Z" }),
+      makeItem({ item_id: "0.0", kind: "system_prompt", payload: "sys", created_at: "2026-05-15T12:00:07Z" }),
+      makeItem({ item_id: "1.0", kind: "inbound_compact_summary", payload: "summary 2", created_at: "2026-05-15T12:00:07Z" }),
+      makeItem({ item_id: "2.0", kind: "system_marker", source: "memory", payload: "mem 2", created_at: "2026-05-15T12:00:07Z" }),
+      makeItem({ item_id: "3.0", kind: "agent_reasoning", payload: "t2", created_at: "2026-05-15T12:00:10Z", reasoning_ms: 3_000 }),
+      makeItem({ item_id: "3.1", kind: "agent_chat", payload: "internal note", user_facing: false, created_at: "2026-05-15T12:00:10Z" }),
+      makeItem({ item_id: "4.0", kind: "agent_chat", payload: "final user reply", user_facing: true, created_at: "2026-05-15T12:00:10Z" }),
     ];
     const { container } = render(<TimelineView items={items} />);
     const turns = container.querySelectorAll("[data-turn-id]");
