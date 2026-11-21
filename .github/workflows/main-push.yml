@@ -68,8 +68,8 @@ jobs:
           cache_dependency_path: ui/web/pnpm-lock.yaml
 
       - name: Install frontend deps (TypeScript source parser)
-        working-directory: ui/web
-        run: pnpm install --frozen-lockfile
+        timeout-minutes: 5
+        uses: ./.github/actions/pnpm-install
 
       - name: Locality gate (full meizel check)
         run: env -u VIRTUAL_ENV uv run python -m meizel check

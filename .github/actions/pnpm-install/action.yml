@@ -11,11 +11,17 @@ runs:
         # 120s for cold downloads, then kill the entire timeout process group;
         # a 10s TERM grace prevents a stuck child from blocking the retry.
         for attempt in 1 2; do
-          if timeout --verbose --kill-after=10s 120s pnpm install --frozen-lockfile; then
-            exit 0
-          else
-            status=$?
+          timeout --verbose --kill-after=10s 120s pnpm install --frozen-lockfile &
+          pid=$!
+          if wait "$pid"; then status=0; else status=$?; fi
+          # timeout creates a process group, but on normal exit it leaves
+          # descendants alive. Close inherited output pipes before returning.
+          if pgrep -g "$pid" >/dev/null; then
+            echo "::warning::Frontend install left processes in group ${pid} (exit ${status})"
+            ps -eo pid,ppid,pgid,stat,etime,args || true
+            kill -KILL -- "-$pid" || true
           fi
+          if [ "$status" -eq 0 ]; then exit 0; fi
           echo "::warning::Frontend install attempt ${attempt}/2 failed (exit ${status})"
           ps -eo pid,ppid,pgid,stat,etime,args || true
         done

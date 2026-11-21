@@ -11,16 +11,16 @@ _ROOT = Path(__file__).resolve().parents[3]
 _ACTION = _ROOT / ".github/actions/pnpm-install/action.yml"
 
 
-def test_ci_frontend_installs_share_the_bounded_action() -> None:
-    workflow = yaml.safe_load((_ROOT / ".github/workflows/ci.yml").read_text())
-    installs = [
-        step
-        for job in workflow["jobs"].values()
-        for step in job.get("steps", [])
-        if step.get("name", "").startswith("Install frontend deps")
-    ]
-    assert len(installs) == 8
-    assert all(step["uses"] == "./.github/actions/pnpm-install" for step in installs)
+def test_all_workflow_frontend_installs_share_the_bounded_action() -> None:
+    installs = []
+    for path in sorted((_ROOT / ".github/workflows").glob("*.yml")):
+        workflow = yaml.safe_load(path.read_text())
+        for job in workflow.get("jobs", {}).values():
+            for step in job.get("steps", []):
+                assert "pnpm install --frozen-lockfile" not in step.get("run", ""), path
+                if step.get("uses") == "./.github/actions/pnpm-install":
+                    installs.append(step)
+    assert len(installs) == 20
     assert all(step["timeout-minutes"] == 5 for step in installs)
 
 
@@ -32,6 +32,7 @@ def test_ci_frontend_installs_share_the_bounded_action() -> None:
         ("failure", 42, 2),
         ("hang", 124, 2),
         ("ignore-term", 137, 2),
+        ("exit-leak", 0, 1),
     ],
 )
 def test_install_executes_bounded_attempts(
@@ -51,6 +52,7 @@ def test_install_executes_bounded_attempts(
         "  failure) exit 42 ;;\n"
         "  hang) echo 'Done in 0.1s using pnpm'; sleep 30 ;;\n"
         "  ignore-term) trap '' TERM; sleep 30 ;;\n"
+        "  exit-leak) sleep 30 & echo 'Done but child holds stdout'; exit 0 ;;\n"
         "esac\n"
     )
     pnpm.chmod(0o755)

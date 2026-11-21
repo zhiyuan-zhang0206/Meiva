@@ -201,8 +201,8 @@ jobs:
           key: ui-web-node-modules-${{ runner.os }}-${{ hashFiles('ui/web/pnpm-lock.yaml') }}
 
       - name: Install frontend deps (TypeScript parser and codegen)
-        working-directory: ui/web
-        run: pnpm install --frozen-lockfile
+        timeout-minutes: 5
+        uses: ./.github/actions/pnpm-install
 
       - name: Make meizel importable
         if: matrix.lane == 'analysis'
@@ -297,8 +297,8 @@ jobs:
           key: ui-web-node-modules-${{ runner.os }}-${{ hashFiles('ui/web/pnpm-lock.yaml') }}
 
       - name: Install frontend deps (TypeScript source parser)
-        working-directory: ui/web
-        run: pnpm install --frozen-lockfile
+        timeout-minutes: 5
+        uses: ./.github/actions/pnpm-install
 
       - name: Run static pytest contracts
         id: pytest-static
@@ -341,8 +341,8 @@ jobs:
           key: ui-web-node-modules-${{ runner.os }}-${{ hashFiles('ui/web/pnpm-lock.yaml') }}
 
       - name: Install frontend deps
-        working-directory: ui/web
-        run: pnpm install --frozen-lockfile
+        timeout-minutes: 5
+        uses: ./.github/actions/pnpm-install
 
       - name: Generate Next.js route types (typedRoutes)
         working-directory: ui/web
@@ -455,8 +455,8 @@ jobs:
           key: ui-web-node-modules-${{ runner.os }}-${{ hashFiles('ui/web/pnpm-lock.yaml') }}
 
       - name: Install frontend deps (TypeScript source parser)
-        working-directory: ui/web
-        run: pnpm install --frozen-lockfile
+        timeout-minutes: 5
+        uses: ./.github/actions/pnpm-install
 
       - name: Run the backend suite
         run: >
@@ -518,8 +518,8 @@ jobs:
           key: ui-web-node-modules-${{ runner.os }}-${{ hashFiles('ui/web/pnpm-lock.yaml') }}
 
       - name: Install frontend deps
-        working-directory: ui/web
-        run: pnpm install --frozen-lockfile
+        timeout-minutes: 5
+        uses: ./.github/actions/pnpm-install
 
       - name: Restore Playwright chromium cache
         id: playwright-cache

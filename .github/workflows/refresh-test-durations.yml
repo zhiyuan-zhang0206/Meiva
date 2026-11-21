@@ -86,8 +86,8 @@ jobs:
           key: ui-web-node-modules-${{ runner.os }}-${{ hashFiles('ui/web/pnpm-lock.yaml') }}
 
       - name: Install frontend deps (TypeScript comment parser)
-        working-directory: ui/web
-        run: pnpm install --frozen-lockfile
+        timeout-minutes: 5
+        uses: ./.github/actions/pnpm-install
 
       - name: Measure static shard
         run: >
@@ -165,8 +165,8 @@ jobs:
           cache_dependency_path: ui/web/pnpm-lock.yaml
 
       - name: Install frontend deps (TypeScript comment parser)
-        working-directory: ui/web
-        run: pnpm install --frozen-lockfile
+        timeout-minutes: 5
+        uses: ./.github/actions/pnpm-install
 
       # The junit comes from the first attempt only: a retry is a measurement device, and the
       # nightly verdict must not inherit a first-attempt failure washed green by it.
@@ -239,8 +239,8 @@ jobs:
         uses: ./.github/actions/vendor-pg-runtime
 
       - name: Install frontend deps
-        working-directory: ui/web
-        run: pnpm install --frozen-lockfile
+        timeout-minutes: 5
+        uses: ./.github/actions/pnpm-install
 
       # Same restore/save split as the e2e-shard job's browser cache (see ci.yml).
       - name: Restore Playwright chromium cache
