@@ -10,10 +10,14 @@ just-claimed inbound. `TimelineItem` lives in `timeline_item.py` (file line
 budget); this module re-exports it.
 
 Inbound and attach messages render text only: a historical multimodal inbound's
-base64 image blocks are dropped (thumbnails ride on `meiva_image_urls`), while
+base64 image blocks are dropped (thumbnails ride on `meiva_image_urls`, with 1:1
+intrinsic pixel sizes projected onto `TimelineItem.image_dimensions` from
+`meiva_image_dimensions` or legacy inlined data URIs so thumbnails reserve their
+final frame before decode), while
 delivered upload batches (`system:upload`) carry structured file metadata on
-`meiva_uploaded_files` (projected as `TimelineItem.files`); an attach's
-data-URI images ride on `images` with per-image captions. The system prompt is
+`meiva_upload_files` (projected as `TimelineItem.files`, including optional
+`width`/`height` for image uploads); an attach's
+data-URI images ride on `images` with per-image captions and `image_dimensions`. The system prompt is
 item 0, `created_at=None`. A compact item prefixes the payload with the
 wall-clock ts when the timestamp policy is on and carries the producing run as
 `compact_id`. Signature-only / redacted thinking blocks render nothing. The note timestamp split is its own node: [Note timestamp policy](note-timestamp-policy.md).

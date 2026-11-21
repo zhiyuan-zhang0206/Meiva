@@ -25,6 +25,7 @@ import { rankOf } from "./anchor/rows";
 import { usePlacement, type RevealDecision } from "./anchor/use-placement";
 import { useViewportAnchor, type AnchorChangeCause } from "./anchor/use-viewport-anchor";
 import { LoadOlderSpinner, LoadOlderKeyboardButton, ColdLoadSpinner, FOOTER_HEIGHT_VAR, ScrollToBottomButton } from "./overlays";
+import { TimelineImageScope, useTimelineInitialImageGate } from "./model/image-loading";
 
 export type { ReloadRestoreConfig } from "./model/reading-position";
 export type { RevealDecision } from "./anchor/use-placement";
@@ -241,7 +242,7 @@ export const TimelineView = memo(function TimelineView({
     store.trimOldestWhileFollowing(retainedItemsMax);
   }, [controls, retainedItemsMax, threadKey]);
   handlers.current = { onChange: placement.onAnchorChange, onUnresolved: placement.onUnresolved, onFree: placement.onFree, onRideEnd: trimWhileFollowing };
-  const visible = placement.visible;
+  const { visible, scopeValue: imageScope } = useTimelineInitialImageGate(threadKey, placement.visible);
   // meiva:note
   // The writer applies after placement has seen this commit's rows and before the window measures it.
   useLayoutEffect(() => {
@@ -400,6 +401,7 @@ export const TimelineView = memo(function TimelineView({
 
   const showRing = loading || !visible;
   return (
+    <TimelineImageScope value={imageScope}>
     <QuoteNavigation.Provider value={navigateQuote}>
     <QuoteTarget.Provider value={quoteTarget}>
     <div ref={wrapperRef} className={cn("relative", FLEX_1, MIN_H_0, OVERFLOW_HIDDEN)}>
@@ -475,5 +477,6 @@ export const TimelineView = memo(function TimelineView({
     </div>
     </QuoteTarget.Provider>
     </QuoteNavigation.Provider>
+    </TimelineImageScope>
   );
 });

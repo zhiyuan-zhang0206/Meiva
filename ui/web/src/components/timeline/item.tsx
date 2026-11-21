@@ -21,22 +21,30 @@
 
 import { FileText } from "lucide-react";
 import { useTranslations } from "next-intl";
-import { Fragment, memo, useEffect, useRef, useState } from "react";
+import { Fragment, memo, useCallback, useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 
 import { ChatMarkdown } from "@/components/content/markdown";
 import { PythonCode } from "@/components/content/python-code";
+import { Spinner } from "@/components/ui/spinner";
 import { assetUrl } from "@/lib/transport/api";
 import type { BackendTimelineItem, TimelineUploadFile } from "@/lib/contracts/types";
 import { SSE_EVENT_WINDOW_MS } from "@/lib/contracts/constants-generated";
+import {
+  getCachedImageDimensions,
+  normalizeImageDimensions,
+  setCachedImageDimensions,
+  type ImageDimensions,
+} from "@/lib/timeline/image-dimensions-cache";
 import { useThrottledStreaming } from "@/lib/timeline/use-throttled-streaming";
 import { cn, formatFileSize, isRasterImageType } from "@/lib/format/utils";
 
+import { TimelineItemImageBatch } from "./model/image-loading";
 import { EphemeralSystemMarker, MarkerBody } from "./markers";
 import { classifyMarker } from "./model/marker-classify";
 import { inboundKind } from "./model/runs";
 import { isLiveReasoning } from "./model/reasoning-clock";
-import { FLEX } from "@/lib/layout/layout";
+import { FLEX, OVERFLOW_HIDDEN } from "@/lib/layout/layout";
 
 // Cap how often a streaming item re-parses its content (markdown / Prism).
 // One re-parse per SSE event window (~25 FPS) reads as live while removing the
@@ -71,6 +79,17 @@ export function copyPayloadFor(item: BackendTimelineItem): string {
   return item.payload;
 }
 
+const THUMBNAIL_MAX_WIDTH = 256;
+const THUMBNAIL_MAX_HEIGHT = 192;
+
+function computeThumbnailBox(dims: ImageDimensions): ImageDimensions {
+  const scale = Math.min(1, THUMBNAIL_MAX_WIDTH / dims.width, THUMBNAIL_MAX_HEIGHT / dims.height);
+  return {
+    width: Math.max(1, Math.round(dims.width * scale)),
+    height: Math.max(1, Math.round(dims.height * scale)),
+  };
+}
+
 // meiva:note
 // Attach items (attachMode) render through AttachContent: the backend caption
 // lines interleave with their thumbnails (label → image → label → image), the
@@ -81,10 +100,12 @@ export function copyPayloadFor(item: BackendTimelineItem): string {
 function Thumbnail({
   src,
   alt,
+  dimensions,
   onError,
 }: {
   src: string;
   alt: string;
+  dimensions?: { readonly width: number; readonly height: number } | null;
   onError?: () => void;
 }) {
   // Click-to-zoom overlay: no navigation (user ruling 2026-08-27 — the old
@@ -94,8 +115,38 @@ function Thumbnail({
   // node), background scroll is locked, and closing returns focus to the
   // trigger button (QA review #831 nit).
   const [open, setOpen] = useState(false);
+  const [lockedLayout, setLockedLayout] = useState<{ src: string; dims: ImageDimensions | null }>(
+    () => ({
+      src,
+      dims: normalizeImageDimensions(dimensions) ?? getCachedImageDimensions(src),
+    }),
+  );
+  const [loadedSrc, setLoadedSrc] = useState<string | null>(null);
+  const [failedSrc, setFailedSrc] = useState<string | null>(null);
   const buttonRef = useRef<HTMLButtonElement>(null);
   const dialogRef = useRef<HTMLDivElement>(null);
+  const imgRef = useRef<HTMLImageElement | null>(null);
+
+  let resolvedDims = lockedLayout.dims;
+  if (lockedLayout.src !== src) {
+    resolvedDims = normalizeImageDimensions(dimensions) ?? getCachedImageDimensions(src);
+    setLockedLayout({ src, dims: resolvedDims });
+  }
+
+  const loaded = loadedSrc === src;
+  const failed = failedSrc === src;
+
+  const attachImgRef = useCallback(
+    (node: HTMLImageElement | null) => {
+      imgRef.current = node;
+      if (node && node.complete && node.naturalWidth > 0 && node.naturalHeight > 0) {
+        setCachedImageDimensions(src, node.naturalWidth, node.naturalHeight);
+        setLoadedSrc((prev) => (prev === src ? prev : src));
+      }
+    },
+    [src],
+  );
+
   useEffect(() => {
     if (!open) return;
     const prevOverflow = document.body.style.overflow;
@@ -106,6 +157,7 @@ function Thumbnail({
       if (e.key === "Escape") {
         setOpen(false);
       } else if (e.key === "Tab") {
+        // meiva:note
         // Focus trap: keep Tab inside the modal instead of escaping to the
         // background content behind the overlay.
         e.preventDefault();
@@ -119,10 +171,13 @@ function Thumbnail({
       trigger?.focus();
     };
   }, [open]);
+
   // meiva:note
-  // Uploads carry no reliable dimensions before decode. Let the image size the
-  // trigger at its natural ratio, capped by the pane and thumbnail bounds. Late
-  // media growth is observed by the timeline's existing resize tracking.
+  // Lock the thumbnail frame on first paint so network decode causes 0px vertical
+  // shift: known dimensions (server metadata or session cache) reserve the exact
+  // scaled aspect box; legacy uploads without dimensions stay inside a fixed
+  // 256x192 box for the current mount while caching natural dimensions for later mounts.
+  const box = resolvedDims ? computeThumbnailBox(resolvedDims) : null;
   return (
     <>
       <button
@@ -131,16 +186,56 @@ function Thumbnail({
         onClick={() => setOpen(true)}
         aria-label={alt}
         data-testid="attach-thumbnail"
-        className="block w-fit max-w-[min(16rem,100%)] self-start cursor-zoom-in rounded border-0 bg-transparent p-0"
+        style={
+          box && resolvedDims
+            ? { width: `${box.width}px`, aspectRatio: `${resolvedDims.width} / ${resolvedDims.height}` }
+            : undefined
+        }
+        className={
+          box
+            ? cn(
+                "relative block max-w-[min(16rem,100%)] max-h-48 self-start rounded border border-border bg-muted/30 cursor-zoom-in p-0",
+                OVERFLOW_HIDDEN,
+              )
+            : cn(
+                "relative block h-48 w-64 max-w-[min(16rem,100%)] self-start rounded border border-border bg-muted/25 cursor-zoom-in p-0",
+                OVERFLOW_HIDDEN,
+              )
+        }
       >
+        {!loaded && !failed ? (
+          <span
+            data-testid="timeline-image-placeholder"
+            aria-hidden="true"
+            className={cn("pointer-events-none absolute inset-0 items-center justify-center", FLEX)}
+          >
+            <Spinner className="size-4" />
+          </span>
+        ) : null}
         {/* eslint-disable-next-line @next/next/no-img-element -- user upload / attach media, not a static asset */}
         <img
+          ref={attachImgRef}
           src={src}
           alt={alt}
+          width={resolvedDims?.width}
+          height={resolvedDims?.height}
           crossOrigin="use-credentials"
-          loading="lazy"
-          onError={onError}
-          className="block h-auto max-h-48 max-w-full rounded border border-border object-contain"
+          loading="eager"
+          onLoad={(event) => {
+            const el = event.currentTarget;
+            if (el.naturalWidth > 0 && el.naturalHeight > 0) {
+              setCachedImageDimensions(src, el.naturalWidth, el.naturalHeight);
+            }
+            setLoadedSrc(src);
+          }}
+          onError={() => {
+            setFailedSrc(src);
+            onError?.();
+          }}
+          className={cn(
+            "block h-full w-full object-contain transition-opacity duration-150",
+            loaded ? "opacity-100" : "opacity-0",
+          )}
         />
       </button>
       {open
@@ -193,18 +288,22 @@ function Thumbnail({
 function AttachContent({
   payload,
   images,
+  imageDimensions,
   imageCaptions,
 }: {
   payload: string;
   images: string[] | null;
+  imageDimensions: (ImageDimensions | null)[] | null;
   imageCaptions: string[] | null;
 }) {
   const t = useTranslations("timeline");
   const lines = payload.split("\n");
   let imgIdx = 0;
   const rows = lines.map((line, i) => {
-    const hasImage = imageCaptions?.[imgIdx] === line;
+    const currentIdx = imgIdx;
+    const hasImage = imageCaptions?.[currentIdx] === line;
     const src = hasImage && images != null ? images[imgIdx++] : null;
+    const dims = hasImage ? (imageDimensions?.[currentIdx] ?? null) : null;
     // meiva:note
     // The backend always opens the payload with its notice line, and the envelope framing
     // is stripped before it reaches the timeline.
@@ -224,7 +323,7 @@ function AttachContent({
         </div>
         {src ? (
           <div className="mt-1">
-            <Thumbnail src={src} alt={t("attachedImage")} />
+            <Thumbnail src={src} alt={t("attachedImage")} dimensions={dims} />
           </div>
         ) : null}
       </Fragment>
@@ -233,14 +332,20 @@ function AttachContent({
   // Safety net: an image whose caption never matched a line (defensive — the
   // backend contract guarantees alignment) still renders, so no thumbnail is
   // ever dropped.
-  const trailing = images?.slice(imgIdx) ?? [];
+  const trailingStart = imgIdx;
+  const trailing = images?.slice(trailingStart) ?? [];
   return (
     <div className="space-y-1.5">
       {rows}
       {trailing.length ? (
         <div className={cn("items-start flex-wrap gap-2", FLEX)}>
-          {trailing.map((src) => (
-            <Thumbnail key={src} src={src} alt={t("attachedImage")} />
+          {trailing.map((src, offset) => (
+            <Thumbnail
+              key={src}
+              src={src}
+              alt={t("attachedImage")}
+              dimensions={imageDimensions?.[trailingStart + offset] ?? null}
+            />
           ))}
         </div>
       ) : null}
@@ -256,7 +361,15 @@ function UploadedFileCard({ file }: { file: TimelineUploadFile }) {
     isRasterImageType(file.content_type) && file.size <= MAX_INLINE_IMAGE_BYTES;
   const resolvedUrl = assetUrl(file.url);
   if (canPreviewImage && !imgFailed) {
-    return <Thumbnail src={resolvedUrl} alt={file.name} onError={() => setImgFailed(true)} />;
+    const dims = normalizeImageDimensions({ width: file.width, height: file.height });
+    return (
+      <Thumbnail
+        src={resolvedUrl}
+        alt={file.name}
+        dimensions={dims}
+        onError={() => setImgFailed(true)}
+      />
+    );
   }
   return (
     <div
@@ -285,6 +398,7 @@ function UploadedFileCard({ file }: { file: TimelineUploadFile }) {
 function EnvelopeContent({
   payload,
   images,
+  imageDimensions = null,
   files,
   source = null,
   attachMode = false,
@@ -297,6 +411,7 @@ function EnvelopeContent({
   // meiva:note
   // Gateway-relative multimodal images resolve through assetUrl.
   images?: string[] | null;
+  imageDimensions?: (ImageDimensions | null)[] | null;
   files?: TimelineUploadFile[] | null;
   source?: string | null;
   /** Attach items render their caption lines interleaved with thumbnails. */
@@ -326,14 +441,20 @@ function EnvelopeContent({
       <AttachContent
         payload={payload}
         images={images ?? null}
+        imageDimensions={imageDimensions ?? null}
         imageCaptions={imageCaptions?.length ? imageCaptions : null}
       />
     );
   }
   const imageRow = images?.length ? (
     <div className={cn(!imagesFirst && showBody && "mt-2", "items-start flex-wrap gap-2", FLEX)}>
-      {images.map((src) => (
-        <Thumbnail key={src} src={resolveImageSrc(src)} alt={t("attachedImage")} />
+      {images.map((src, idx) => (
+        <Thumbnail
+          key={src}
+          src={resolveImageSrc(src)}
+          alt={t("attachedImage")}
+          dimensions={imageDimensions?.[idx] ?? null}
+        />
       ))}
     </div>
   ) : null;
@@ -401,26 +522,48 @@ export const ItemView = memo(function ItemView({
   switch (item.kind) {
     case "inbound_chat": {
       return (
-        <EnvelopeContent
-          payload={item.payload}
-          images={item.images}
-          files={item.files}
-          source={item.source}
-          imagesFirst={inboundKind(item.source) === "human"}
-          markdown
-        />
+        <TimelineItemImageBatch>
+          <EnvelopeContent
+            payload={item.payload}
+            images={item.images}
+            imageDimensions={item.image_dimensions}
+            files={item.files}
+            source={item.source}
+            imagesFirst={inboundKind(item.source) === "human"}
+            markdown
+          />
+        </TimelineItemImageBatch>
       );
     }
     case "inbound_compact_summary":
-      return <EnvelopeContent payload={item.payload} images={item.images} markdown />;
+      return (
+        <TimelineItemImageBatch>
+          <EnvelopeContent
+            payload={item.payload}
+            images={item.images}
+            imageDimensions={item.image_dimensions}
+            markdown
+          />
+        </TimelineItemImageBatch>
+      );
     case "inbound_compact_request":
-      return <EnvelopeContent payload={item.payload} images={item.images} markdown />;
+      return (
+        <TimelineItemImageBatch>
+          <EnvelopeContent
+            payload={item.payload}
+            images={item.images}
+            imageDimensions={item.image_dimensions}
+            markdown
+          />
+        </TimelineItemImageBatch>
+      );
 
     case "attach":
       return (
         <EnvelopeContent
           payload={item.payload}
           images={item.images}
+          imageDimensions={item.image_dimensions}
           attachMode
           imageCaptions={item.image_captions}
         />
@@ -428,10 +571,12 @@ export const ItemView = memo(function ItemView({
 
     case "agent_chat":
       return (
-        <div>
-          <ChatMarkdown content={streamingPayload} />
-          {item.partial && !item.interrupted ? <StreamingCursor /> : null}
-        </div>
+        <TimelineItemImageBatch>
+          <div>
+            <ChatMarkdown content={streamingPayload} />
+            {item.partial && !item.interrupted ? <StreamingCursor /> : null}
+          </div>
+        </TimelineItemImageBatch>
       );
 
     case "agent_code":
@@ -449,9 +594,11 @@ export const ItemView = memo(function ItemView({
 
     case "agent_reasoning":
       return (
-        <div className="text-[12.5px] leading-relaxed text-muted-foreground/90">
-          <ChatMarkdown content={streamingPayload} />
-        </div>
+        <TimelineItemImageBatch>
+          <div className="text-[12.5px] leading-relaxed text-muted-foreground/90">
+            <ChatMarkdown content={streamingPayload} />
+          </div>
+        </TimelineItemImageBatch>
       );
 
     case "code_output":
@@ -459,9 +606,11 @@ export const ItemView = memo(function ItemView({
 
     case "system_prompt":
       return (
-        <div className="text-[12px] leading-relaxed text-muted-foreground/90">
-          <ChatMarkdown content={item.payload} />
-        </div>
+        <TimelineItemImageBatch>
+          <div className="text-[12px] leading-relaxed text-muted-foreground/90">
+            <ChatMarkdown content={item.payload} />
+          </div>
+        </TimelineItemImageBatch>
       );
 
     case "system_marker": {
@@ -471,7 +620,11 @@ export const ItemView = memo(function ItemView({
       if (cls.kind === "ephemeral") {
         return <EphemeralSystemMarker source={item.source} payload={item.payload} />;
       }
-      return <MarkerBody payload={item.payload} markdown />;
+      return (
+        <TimelineItemImageBatch>
+          <MarkerBody payload={item.payload} markdown />
+        </TimelineItemImageBatch>
+      );
     }
   }
 

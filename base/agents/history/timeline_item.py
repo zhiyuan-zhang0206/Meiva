@@ -12,6 +12,7 @@ from typing import Literal
 
 from pydantic import BaseModel, Field
 
+from base.agents.messages.image_dimensions import ImageDimensions
 from base.agents.messages.inbound_images import TimelineUploadFile
 from base.agents.messages.quote import Quote
 from base.agents.sdk.tally import SdkCall
@@ -107,6 +108,7 @@ class TimelineItem(BaseModel):
     # elsewhere): inbound_chat = gateway-relative urls from meiva_image_urls
     # (via assetUrl); attach = data URIs from content blocks (rendered raw).
     images: list[str] | None = None
+    image_dimensions: list[ImageDimensions | None] | None = None
     files: list[TimelineUploadFile] | None = None
     # Per-image caption lines on an `attach` item, aligned 1:1 with `images`:
     # the backend-generated "- [N] name (mime, size) — \"label\"" line that

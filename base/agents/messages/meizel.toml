@@ -1,9 +1,10 @@
-exports = ["delivery", "envelope.py", "external_caller.py", "guard.py", "harness_input_key.py", "identity.py", "inbound.py", "inbound_images.py", "inbound_provenance.py", "kwargs.py", "lifecycle_text.py", "quote.py", "reply_intent.py", "timestamp_policy.py", "token_estimate.py"]
+exports = ["delivery", "envelope.py", "external_caller.py", "guard.py", "harness_input_key.py", "identity.py", "image_dimensions.py", "inbound.py", "inbound_images.py", "inbound_provenance.py", "kwargs.py", "lifecycle_text.py", "quote.py", "reply_intent.py", "timestamp_policy.py", "token_estimate.py"]
 
 [uses]
 "envelope.py" = ["timestamp_policy.py"]
 "guard.py" = ["identity.py"]
 "identity.py" = ["kwargs.py"]
+"inbound_images.py" = ["image_dimensions.py"]
 "tests" = ["delivery", "envelope.py", "external_caller.py", "harness_input_key.py", "kwargs.py", "lifecycle_text.py", "quote.py", "reply_intent.py", "timestamp_policy.py", "token_estimate.py"]
 
 [purity]
@@ -13,6 +14,7 @@ exports = ["delivery", "envelope.py", "external_caller.py", "guard.py", "harness
 "guard.py" = "strict"
 "harness_input_key.py" = "strict"
 "identity.py" = "strict"
+"image_dimensions.py" = "strict"
 "inbound.py" = "strict"
 "inbound_images.py" = "strict"
 "inbound_provenance.py" = "strict"

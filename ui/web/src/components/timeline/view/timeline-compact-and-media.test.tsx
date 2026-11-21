@@ -448,7 +448,7 @@ describe("ItemView: attach interleaving + lightbox (user 2026-08-27)", () => {
       }),
     );
     expect(screen.queryByTestId("attach-lightbox")).toBeNull();
-    expect(screen.getAllByTestId("attach-thumbnail")[0].querySelector("img")?.getAttribute("loading")).toBe("lazy");
+    expect(screen.getAllByTestId("attach-thumbnail")[0].querySelector("img")?.getAttribute("loading")).toBe("eager");
     fireEvent.click(screen.getAllByTestId("attach-thumbnail")[0]);
     const lightbox = screen.getByTestId("attach-lightbox");
     expect(lightbox.querySelector("img")?.getAttribute("src")).toBe(IMG1);
@@ -513,17 +513,18 @@ describe("ItemView: attach interleaving + lightbox (user 2026-08-27)", () => {
     expect(img?.className).toContain("max-w-[80vw]");
     expect(img?.className).toContain("object-contain");
   });
-  it("fits the thumbnail button to an in-flow image constrained by the pane", () => {
+  it("locks unknown-dimension thumbnail buttons to a fixed 256x192 box constrained by the pane", () => {
     renderAttach(makeItem({ kind: "attach", payload, images: [IMG1], image_captions: [LINE1] }));
     const thumb = screen.getByTestId("attach-thumbnail");
-    expect(thumb.className).toContain("w-fit");
+    expect(thumb.className.split(/\s+/)).toContain("h-48");
+    expect(thumb.className.split(/\s+/)).toContain("w-64");
     expect(thumb.className).toContain("max-w-[min(16rem,100%)]");
-    expect(thumb.className).not.toContain("h-48");
     const img = thumb.querySelector("img")!;
     expect(img.className).not.toContain("absolute");
     expect(img.className).toContain("block");
-    expect(img.className).toContain("max-h-48");
-    expect(img.className).toContain("max-w-full");
+    expect(img.className).toContain("h-full");
+    expect(img.className).toContain("w-full");
+    expect(img.className).toContain("object-contain");
   });
   it("legacy attach (images without image_captions) still renders thumbnails without navigation", () => {
     renderAttach(

@@ -7,6 +7,7 @@ from pathlib import Path
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
+from base.agents.messages.image_dimensions import ImageDimensions
 from base.host.boundary.json_values import is_object_dict, is_object_list
 
 # meiva:note
@@ -29,6 +30,8 @@ class TimelineUploadFile(BaseModel):
     size: int = Field(ge=0)
     content_type: str = Field(min_length=1)
     url: str = Field(min_length=1)
+    width: int | None = Field(default=None, gt=0)
+    height: int | None = Field(default=None, gt=0)
 
 
 def parse_upload_url(url: str) -> tuple[int, str] | None:
@@ -90,6 +93,30 @@ def inbound_image_urls(agent_id: int, payload: Mapping[str, object] | None) -> l
     return urls or None
 
 
+def _stored_image_dimensions(item: _StoredUploadFile) -> ImageDimensions | None:
+    if item.width is None or item.height is None:
+        return None
+    return ImageDimensions(width=item.width, height=item.height)
+
+
+def inbound_image_dimensions(
+    agent_id: int, payload: Mapping[str, object] | None
+) -> list[ImageDimensions | None] | None:
+    del agent_id
+    raw_images = payload.get("image_uploads") if payload else None
+    if not is_object_list(raw_images):
+        return None
+    dims = [
+        _stored_image_dimensions(item)
+        for raw in raw_images
+        if (item := _validate_stored_file(raw)) is not None
+        and image_mime_for(item.name, item.content_type) is not None
+    ]
+    if not dims or not any(entry is not None for entry in dims):
+        return None
+    return dims
+
+
 class _StoredUploadFile(BaseModel):
     model_config = ConfigDict(frozen=True, strict=True)
 
@@ -99,6 +126,8 @@ class _StoredUploadFile(BaseModel):
     batch_id: str = Field(min_length=32, max_length=32)
     ordinal: int = Field(ge=0)
     path: str | None = None
+    width: int | None = Field(default=None, gt=0)
+    height: int | None = Field(default=None, gt=0)
 
 
 def _validate_stored_file(raw: object) -> _StoredUploadFile | None:
@@ -117,6 +146,8 @@ def _parse_upload_file(agent_id: int, raw: object) -> TimelineUploadFile | None:
         size=item.size,
         content_type=item.content_type,
         url=f"/api/agents/{agent_id}/uploads/{item.batch_id}/{item.ordinal}",
+        width=item.width,
+        height=item.height,
     )
 
 

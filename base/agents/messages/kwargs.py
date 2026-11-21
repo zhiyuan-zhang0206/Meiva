@@ -104,6 +104,7 @@ class MeivaMessageKwargs(TypedDict, total=False):
     meiva_picked_up_at: str
     meiva_compact_id: str
     meiva_image_urls: list[str]
+    meiva_image_dimensions: list[dict[str, int] | None]
     meiva_image_uploads: list[dict[str, object]]
     meiva_upload_files: list[dict[str, object]]
     meiva_note_tag: str

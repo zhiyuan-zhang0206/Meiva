@@ -11,6 +11,7 @@ import { createLazyChunk } from "@/components/content/lazy-chunk";
 import { PythonCodeHighlighterProvider } from "@/components/content/python-code";
 import { USER_SETTING_DEFAULTS, type BackendTimelineItem } from "@/lib/contracts/types";
 import { SETTINGS_QUERY_KEY } from "@/lib/state/use-user-settings";
+import { clearCachedImageDimensions } from "@/lib/timeline/image-dimensions-cache";
 import { ApiProvider, WallClockProvider } from "@/lib/transport/transport-context";
 import { transport } from "@/test-support/fake-api";
 
@@ -203,6 +204,7 @@ syncDisplayLimitsCache();
 
 export function cleanupTimelineTest() {
   cleanup();
+  clearCachedImageDimensions();
   resetUserSettings();
   displayLimits.clear();
   syncSettingsCache();
@@ -234,6 +236,7 @@ export function makeItem(
     execStartedAt: overrides.execStartedAt,
     exec_ms: overrides.exec_ms,
     images: overrides.images ?? null,
+    image_dimensions: overrides.image_dimensions ?? null,
     files: overrides.files ?? null,
     image_captions: overrides.image_captions ?? null,
     sdk_calls: overrides.sdk_calls,
