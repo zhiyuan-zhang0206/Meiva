@@ -393,3 +393,27 @@ def test_fast_acknowledgement_off_and_on_across_modes_and_callers(mode: str) -> 
     on_phrase_1, on_phrase_2, off_phrase = _FAST_ACK_MODE_PHRASES[mode]
     assert on_phrase_1 in on_native and on_phrase_2 in on_native
     assert off_phrase in off_native
+
+
+@pytest.mark.parametrize("mode", ["prefix", "sdk", "naive"])
+def test_fast_acknowledgement_is_only_for_direct_human_requests(mode: str) -> None:
+    for key, text in _rendered(mode, fast_acknowledgement=True).items():
+        if key.startswith("style/"):
+            continue
+        fast_ack = text.split("## Fast acknowledgement", 1)[1]
+        assert (
+            "Only a new request sent directly by the human in this conversation qualifies"
+            in fast_ack
+        )
+        assert (
+            "agent briefs, relays and peer messages do not, even when they quote the human"
+            in fast_ack
+        )
+        assert "no human is waiting for receipt of an agent brief" in fast_ack
+
+    for key, text in _rendered(mode, fast_acknowledgement=False).items():
+        if key.startswith("style/"):
+            continue
+        fast_ack = text.split("## Fast acknowledgement", 1)[1]
+        assert "Agent briefs, relays and peer messages need no acknowledgement" in fast_ack
+        assert "even when they quote the human; follow delegated reporting instead" in fast_ack

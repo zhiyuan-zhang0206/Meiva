@@ -10,7 +10,9 @@ _USER_ATTENTION_RULE = (
     "## User attention\n\n"
     "First identify the actual trigger: a human request, a peer message, or a "
     "scheduled/system wake. A peer or background trigger does not itself require "
-    "a user-visible reply. Resuming an unfinished human request still carries "
+    "a user-visible reply. Agent briefs and relays are peer messages, even when "
+    "they quote the human; no human is waiting for a receipt. "
+    "Resuming an unfinished human request still carries "
     "the obligation to answer it.\n\n"
     "Before making information visible, establish why it deserves the user's "
     "attention: it answers their request, delivers a usable result they requested, "
@@ -24,7 +26,8 @@ _USER_ATTENTION_RULE = (
     "that you resolved with the goal and promises unchanged belongs in truthful "
     "working records and reports to the responsible agent.\n\n"
     "Then choose the recipient and delivery protocol. Send necessary delegated "
-    "progress and results to the agreed delegator; user-only decisions reach "
+    "progress and results to the agreed delegator via `meiva.agents.send_message`; "
+    "user-only decisions reach "
     "the user. Without a delegator, apply the same attention test before "
     "delivering directly. Required process narration is a generation obligation, "
     "not a reason to expose it to the user.\n\n"
@@ -77,7 +80,9 @@ def _build_user_reply_section(
         "Text without a valid prefix is folded into Details. A system note may ask you "
         "to correct it. Tool calls, tool results and reasoning do not need a prefix. "
         "Use the hide prefix for required process narration that does not pass the "
-        "user-attention test; only the display prefix delivers it to the user.\n\n"
+        "user-attention test; only the display prefix delivers it to the user. "
+        "Keep delegated summaries under MEIVA_HIDE_FROM_USER: delivery to the delegator "
+        "is complete, and displaying them would duplicate their user update.\n\n"
         f"{visibility_why}" + _USER_ATTENTION_RULE + "## Reply routing\n\n"
         "Peer messages, watcher events, scheduled wakes and system notes do not require "
         "courtesy replies or automatic closing summaries. Follow their acknowledgment "
@@ -137,7 +142,11 @@ def _fast_acknowledgement_section(*, enabled: bool, mode: UserDeliveryMode) -> s
         if enabled:
             return (
                 "## Fast acknowledgement\n\n"
-                "When you receive a direct, unambiguous user instruction that you can act on "
+                "Only a new request sent directly by the human in this conversation qualifies; "
+                "agent briefs, relays and peer messages do not, even when they quote the human. "
+                "The acknowledgement lets a human watching the screen know you received "
+                "their request; no human is waiting for receipt of an agent brief. "
+                "When that human request is unambiguous and you can act on it "
                 "immediately, make a quick sanity check and — before running tools — immediately "
                 "call `meiva.ui.publish(...)` with one concise sentence (in the user's language) "
                 "confirming you are starting. After that opening confirmation, work silently "
@@ -147,6 +156,8 @@ def _fast_acknowledgement_section(*, enabled: bool, mode: UserDeliveryMode) -> s
             )
         return (
             "## Fast acknowledgement\n\n"
+            "Agent briefs, relays and peer messages need no acknowledgement, even when "
+            "they quote the human; follow delegated reporting instead. "
             "Do not call `meiva.ui.publish(...)` just to send an empty or low-information "
             "acknowledgement (such as 'Got it, I'll...', 'On it', 'Delegated, will report "
             "back', or equivalent phrases in the user's language). Users often step away right "
@@ -160,7 +171,11 @@ def _fast_acknowledgement_section(*, enabled: bool, mode: UserDeliveryMode) -> s
         if enabled:
             return (
                 "## Fast acknowledgement\n\n"
-                "When you receive a direct, unambiguous user instruction that you can act on "
+                "Only a new request sent directly by the human in this conversation qualifies; "
+                "agent briefs, relays and peer messages do not, even when they quote the human. "
+                "The acknowledgement lets a human watching the screen know you received "
+                "their request; no human is waiting for receipt of an agent brief. "
+                "When that human request is unambiguous and you can act on it "
                 "immediately, make a quick sanity check and — before calling any tool — emit one "
                 "brief confirmation sentence (in the user's language) so the user knows you have "
                 "started. Avoid mid-run narration afterwards. If the instruction is a pure action "
@@ -169,6 +184,8 @@ def _fast_acknowledgement_section(*, enabled: bool, mode: UserDeliveryMode) -> s
             )
         return (
             "## Fast acknowledgement\n\n"
+            "Agent briefs, relays and peer messages need no acknowledgement, even when "
+            "they quote the human; follow delegated reporting instead. "
             "Do not send empty or low-information acknowledgements before calling tools or after "
             "starting/delegating work (such as 'Got it, I'll...', 'On it', 'Delegated, will "
             "report back', or equivalent phrases in the user's language). Users often step away "
@@ -179,11 +196,14 @@ def _fast_acknowledgement_section(*, enabled: bool, mode: UserDeliveryMode) -> s
     if enabled:
         return (
             "## Fast acknowledgement\n\n"
-            "When you receive a direct, unambiguous user instruction that you can act on "
+            "Only a new request sent directly by the human in this conversation qualifies; "
+            "agent briefs, relays and peer messages do not, even when they quote the human. "
+            "The acknowledgement lets a human watching the screen know you received "
+            "their request; no human is waiting for receipt of an agent brief. "
+            "When that human request is unambiguous and you can act on it "
             "immediately, make a quick sanity check and — before calling any tool — immediately "
             "emit one brief `MEIVA_DISPLAY_TO_USER` acknowledgement (one concise sentence in the "
-            "user's language confirming you are starting). This ensures the user sees immediate "
-            "confirmation before long tool work runs. Immediately after that opening "
+            "user's language confirming you are starting). Immediately after that opening "
             "acknowledgement, use `MEIVA_HIDE_FROM_USER` for all tool calls and intermediate "
             "work. When finished, if the instruction was a pure action/execution request that "
             "needs no post-execution report, stay silent (`MEIVA_HIDE_FROM_USER`) instead of "
@@ -192,6 +212,8 @@ def _fast_acknowledgement_section(*, enabled: bool, mode: UserDeliveryMode) -> s
         )
     return (
         "## Fast acknowledgement\n\n"
+        "Agent briefs, relays and peer messages need no acknowledgement, even when "
+        "they quote the human; follow delegated reporting instead. "
         "Do not send empty or low-information acknowledgements before calling tools or after "
         "delegating/starting work (for example, 'Got it, I'll...', 'On it', 'I've delegated "
         "this, will report back', or equivalent phrases in the user's language). Users often "
