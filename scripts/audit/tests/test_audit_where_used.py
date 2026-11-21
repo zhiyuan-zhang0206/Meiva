@@ -386,3 +386,17 @@ def test_limit_error_refuses_a_report_that_lists_nothing() -> None:
     assert limit_error(1) is None
     assert limit_error(0) == "--limit must be at least 1"
     assert limit_error(-3) == "--limit must be at least 1"
+
+
+def test_render_footer_warns_that_one_hop_is_not_full_test_surface_without_affecting_json(
+    audit_checkout: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    rendered = render(_report("pkg.engine"), None)
+    footer = rendered.splitlines()[-1]
+    assert "1-hop" in footer
+    assert "diff_checks" in footer
+    assert "test_selector" in footer
+
+    assert shell.main(["pkg.engine", "--json"], repo_root=audit_checkout) == 0
+    payload = TypeAdapter(list[_Report]).validate_json(capsys.readouterr().out)
+    assert payload[0].target["path"] == "pkg/engine.py"

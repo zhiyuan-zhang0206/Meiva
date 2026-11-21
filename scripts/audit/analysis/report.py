@@ -221,7 +221,10 @@ def render(report: Report, limit: int | None) -> str:
     hidden = (
         f"{report.hidden} references from inside the target are hidden. " if report.hidden else ""
     )
-    lines.append(f"{hidden}Static references only: runtime-built names are not seen.")
+    lines.append(
+        f"{hidden}Static references only: runtime-built names are not seen. "
+        "1-hop references are not the full test surface; use diff_checks / test_selector for test selection."
+    )
     return "\n".join(lines)
 
 

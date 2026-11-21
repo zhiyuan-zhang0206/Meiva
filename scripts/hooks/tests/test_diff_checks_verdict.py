@@ -24,6 +24,7 @@ _CLEAN = {
     "passed": "20tests(1s)",
     "failed": "0tests",
     "errors": "0tests",
+    "literal-tests": "n/a(covered-by-tests)",
     "blind": "n/a(no-changed-file-was-invisible)",
     "fallback": "n/a(the-selection-was-not-blind)",
     "vitest-app": "n/a(no-web-tree-file)",
@@ -87,6 +88,12 @@ _BLIND = {
             "incomplete",
         ),
         ({"debt": "unreadable(no-table)(1s)", "failed": "2tests"}, False, "fail"),
+        ({"literal-tests": "0hits"}, False, "pass"),
+        ({"literal-tests": "ok(2files,15passed)(2s)"}, False, "pass"),
+        ({"literal-tests": "over-cap(14files>10)"}, False, "pass"),
+        ({"literal-tests": "skipped(--skip-literal-tests)"}, False, "pass"),
+        ({"literal-tests": "failed(2files,1failed,0errors)(2s)"}, False, "fail"),
+        ({"literal-tests": "broken(no-report)"}, False, "incomplete"),
     ],
 )
 def test_the_receipt_states_one_verdict_for_every_way_a_field_can_read(

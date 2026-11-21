@@ -56,6 +56,16 @@ from scripts.hooks.diff_checks_fields import (  # noqa: E402
     reverse_closure,
     scope_of,
 )
+from scripts.hooks.diff_checks_literals import (  # noqa: E402
+    MAX_LITERAL_AUTO_TESTS,
+    LiteralScan,
+    candidate_test_files,
+    extract_deleted_literals,
+    find_literal_test_hits,
+    format_literal_tests_field,
+    format_over_cap_notice,
+    is_production_literal_source,
+)
 from scripts.hooks.diff_checks_plan import (  # noqa: E402
     PYRIGHT_ERROR_BASELINE,
     ScheduledGroup,
@@ -81,10 +91,12 @@ from scripts.hooks.diff_checks_scratch import (  # noqa: E402
 
 __all__ = [
     "FIELD_ORDER",
+    "MAX_LITERAL_AUTO_TESTS",
     "PYRIGHT_ERROR_BASELINE",
     "RECEIPT_VERSION",
     "ChangeSet",
     "CheckMode",
+    "LiteralScan",
     "PytestCounts",
     "Run",
     "Selection",
@@ -92,6 +104,9 @@ __all__ = [
     "changed_files",
     "check",
     "child_environment",
+    "diff_text_for",
+    "extract_deleted_literals",
+    "find_literal_test_hits",
     "main",
     "open_cache_context",
     "parse_args",
@@ -114,6 +129,36 @@ def _git(root: Path, *arguments: str) -> str:
 def changed_files(base: str, root: Path) -> tuple[str, ...]:
     listing = _git(root, "diff", "--name-only", f"{base}...HEAD")
     return tuple(line.strip() for line in listing.splitlines() if line.strip())
+
+
+def diff_text_for(change: ChangeSet) -> str:
+    if not change.files or not change.root.is_dir():
+        return ""
+    sources = tuple(path for path in change.files if is_production_literal_source(path))
+    if not sources:
+        return ""
+    try:
+        result = subprocess.run(
+            [
+                "git",
+                "diff",
+                "-U0",
+                "--no-color",
+                "--no-ext-diff",
+                f"{change.base}...HEAD",
+                "--",
+                *sources,
+            ],
+            cwd=change.root,
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            check=False,
+        )
+    except OSError:
+        return ""
+    return result.stdout if result.returncode == 0 else ""
 
 
 # meiva:note
@@ -391,6 +436,54 @@ def _run_pytest(
         return counts, code != 0 or counts.broken
 
 
+def _run_literal_tests(
+    change: ChangeSet,
+    selection: Selection,
+    *,
+    skip_literal_tests: bool,
+    read_diff: Callable[[ChangeSet], str],
+    execute: Callable[[Sequence[str], Path], tuple[int, str, float]],
+    mode: CheckMode,
+    cache: CacheContext | None,
+    python: str,
+) -> tuple[str, bool]:
+    if skip_literal_tests:
+        return "skipped(--skip-literal-tests)", False
+    literals = extract_deleted_literals(read_diff(change))
+    if not literals:
+        return "0hits", False
+    candidates = candidate_test_files(
+        change.root,
+        change.files,
+        selection.tests,
+        blind=selection.blind,
+        decision=selection.decision,
+    )
+    scan = find_literal_test_hits(change.root, literals, candidates)
+    if not scan.hits:
+        return "0hits", False
+    if len(scan.hits) > MAX_LITERAL_AUTO_TESTS:
+        print(format_over_cap_notice(scan.hits), file=sys.stderr)
+        return f"over-cap({len(scan.hits)}files>{MAX_LITERAL_AUTO_TESTS})", False
+    print(
+        f"diff-checks literal-tests: auto-running {len(scan.hits)} hit file(s): "
+        f"{', '.join(scan.hits)}",
+        file=sys.stderr,
+    )
+    counts, pytest_failed = _run_pytest(
+        change,
+        scan.hits,
+        execute=execute,
+        mode=mode,
+        cache=cache,
+        python=python,
+    )
+    return (
+        format_literal_tests_field(len(scan.hits), counts, pytest_failed=pytest_failed),
+        pytest_failed,
+    )
+
+
 def check(
     change: ChangeSet,
     *,
@@ -401,6 +494,8 @@ def check(
     mode: CheckMode = "incremental",
     cache: CacheContext | None = None,
     execute_pytest: Callable[[Sequence[str], Path], tuple[int, str, float]] | None = None,
+    skip_literal_tests: bool = False,
+    read_diff: Callable[[ChangeSet], str] | None = None,
 ) -> tuple[dict[str, str], bool]:
     groups = schedule_groups(change, mode=mode, cache=cache, python=python)
     values: dict[str, str] = {"scope": scope_of(change)}
@@ -425,6 +520,20 @@ def check(
         values["passed"] = "n/a(no-test-ran)"
         values["failed"] = "n/a(no-test-ran)"
         values["errors"] = "n/a(no-test-ran)"
+        if skip_tests:
+            literal_field, literal_failed = _run_literal_tests(
+                change,
+                selection,
+                skip_literal_tests=skip_literal_tests,
+                read_diff=read_diff or diff_text_for,
+                execute=execute_pytest or execute,
+                mode=mode,
+                cache=cache,
+                python=python,
+            )
+            values["literal-tests"] = literal_field
+            return values, failed or literal_failed
+        values["literal-tests"] = "n/a(selector-chose-none)"
         return values, failed
     counts, pytest_failed = _run_pytest(
         change,
@@ -435,6 +544,7 @@ def check(
         python=python,
     )
     values.update(counts.values)
+    values["literal-tests"] = "n/a(covered-by-tests)"
     return values, failed or pytest_failed
 
 
@@ -444,9 +554,16 @@ def plan(
     skip_tests: bool,
     python: str,
     mode: CheckMode = "incremental",
+    skip_literal_tests: bool = False,
 ) -> list[str]:
     groups = schedule_groups(change, mode=mode, python=python)
-    return render_plan(change, groups, skip_tests=skip_tests, mode=mode)
+    return render_plan(
+        change,
+        groups,
+        skip_tests=skip_tests,
+        mode=mode,
+        skip_literal_tests=skip_literal_tests,
+    )
 
 
 # meiva:note
@@ -458,6 +575,7 @@ class Options:
     no_cache: bool
     changed_files: Path | None
     skip_tests: bool
+    skip_literal_tests: bool
     dry_run: bool
     repo_root: Path
 
@@ -481,7 +599,19 @@ def parse_args(argv: Sequence[str]) -> Options:
         type=Path,
         help="a newline-separated list to use instead of the git diff (re-running a past change)",
     )
-    parser.add_argument("--skip-tests", action="store_true", help="select tests, run none of them")
+    parser.add_argument(
+        "--skip-tests",
+        action="store_true",
+        help=(
+            "select tests, skip the full test run (still auto-runs deleted-literal hits "
+            f"up to {MAX_LITERAL_AUTO_TESTS} files unless --skip-literal-tests is set)"
+        ),
+    )
+    parser.add_argument(
+        "--skip-literal-tests",
+        action="store_true",
+        help="skip the deleted-literal test scan and auto-run under --skip-tests",
+    )
     parser.add_argument("--dry-run", action="store_true", help="print the plan and run nothing")
     parser.add_argument("--repo-root", type=Path, default=REPOSITORY_ROOT)
     return options(parser.parse_args(argv), Options)
@@ -512,7 +642,17 @@ def main(argv: Sequence[str]) -> int:
         print(f"{RECEIPT_VERSION} @{sha} no-changes")
         return 0
     if arguments.dry_run:
-        print("\n".join(plan(change, skip_tests=arguments.skip_tests, mode=mode, python=python)))
+        print(
+            "\n".join(
+                plan(
+                    change,
+                    skip_tests=arguments.skip_tests,
+                    mode=mode,
+                    python=python,
+                    skip_literal_tests=arguments.skip_literal_tests,
+                )
+            )
+        )
         return 0
     cache = (
         None
@@ -523,6 +663,7 @@ def main(argv: Sequence[str]) -> int:
     values, failed = check(
         change,
         skip_tests=arguments.skip_tests,
+        skip_literal_tests=arguments.skip_literal_tests,
         execute=judged,
         execute_pytest=partial(run_pytest_child, environment=child_environment(os.environ)),
         mode=mode,
