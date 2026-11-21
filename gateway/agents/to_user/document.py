@@ -252,7 +252,11 @@ async def get_resource(
     return resource_response(content, resource.name)
 
 
-def _query_agent_cwd(conn: psycopg.Connection, agent_id: int) -> str | None:
+# meiva:note
+# The working directory belongs to the root graph, not a subgraph. Binding its namespace
+# also lets (thread_id, checkpoint_ns, checkpoint_id) stop at the latest row instead of
+# scanning and sorting the agent's entire checkpoint history on every file read.
+def query_agent_cwd(conn: psycopg.Connection, agent_id: int) -> str | None:
     with contextlib.suppress(psycopg.Error):
         row = query_one(
             conn,
@@ -263,7 +267,7 @@ def _query_agent_cwd(conn: psycopg.Connection, agent_id: int) -> str | None:
                 checkpoint -> 'channel_values' ->> 'cwd'
             ) AS cwd
             FROM checkpoints
-            WHERE thread_id = %s
+            WHERE thread_id = %s AND checkpoint_ns = ''
             ORDER BY checkpoint_id DESC
             LIMIT 1
             """,
@@ -316,7 +320,7 @@ def _resolve_workspace_file_request(
         )
         if row is None:
             raise HTTPException(404, "Agent not found")
-        custom_cwd = _query_agent_cwd(conn, target_agent_id) if include_cwd else None
+        custom_cwd = query_agent_cwd(conn, target_agent_id) if include_cwd else None
     return target_agent_id, target_path, cleaned_name, row.machine, custom_cwd
 
 

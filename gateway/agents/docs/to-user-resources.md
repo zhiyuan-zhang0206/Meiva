@@ -38,7 +38,10 @@ caller evaluation isolation, an explicit `.meiva/workspaces/<owner>/<subpath>`
 (or `<home>/workspaces/<owner>/<subpath>`) reference switches placement and file
 resolution to `<owner>`'s workspace (`custom_cwd=None`), resolving cross-agent
 references across machines and host usernames; any other path is read on the
-agent's own machine.
+agent's own machine. The working directory comes from the latest root-namespace
+checkpoint (`checkpoint_ns = ''`), never a subgraph's working directory. The
+namespace predicate also keeps this lookup on the checkpoint primary key's
+ordered, single-row read as an agent's history grows.
 
 How far a read reaches is the cluster setting `settings.to_user.file_access`
 ([to-user limits](../../../base/config/docs/to-user-limits.md)). The gateway
