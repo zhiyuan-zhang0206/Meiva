@@ -40,6 +40,14 @@ HEADED=1 .venv/bin/pytest tests/e2e/flow/test_message_flow.py -v
 On failure, full tracebacks are in `tmp/e2e-logs/{gateway,frontend}.log` and
 `~/.meiva/logs/agent-*.log`. CI failures also upload artifacts.
 
+A failed `test_two_compact_painted_history_transition` also writes
+`tmp/e2e-logs/compact-transition-frames-<pid>-<agent-id>.json`. It contains the
+full sampled frame list, the failing frame index and its two neighboring frames
+on each side when a per-frame assertion fails. Every frame includes timeline-root
+connectivity, item IDs, timeline sources and display ranks. Earlier failures
+(such as a settle timeout) retain all frames without selecting a failing frame.
+The existing e2e-logs CI artifact includes this recording.
+
 `tmp/e2e-logs/cleanup-<worker-pid>_<timestamp>.jsonl` records the existing
 residue sweep's observations, owner liveness decisions, selected targets and
 guarded signal attempts/results. The frontend's exact managed-process teardown
