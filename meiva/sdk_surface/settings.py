@@ -41,6 +41,9 @@ from .installation import (
 def rng() -> random.Random:
     context = process_context.ambient_context()
     if context is None:
+        from meiva.sdk_surface import sdk_disable
+
+        sdk_disable.raise_load_failure()
         raise RuntimeError("this process binds no MeivaContext, so it carries no random generator")
     return context.require_rng()
 
@@ -54,6 +57,9 @@ def clock() -> Clock:
         return context.require_clock()
     installation = installed()
     if installation is None or installation.clock is None:
+        from meiva.sdk_surface import sdk_disable
+
+        sdk_disable.raise_load_failure()
         raise RuntimeError("the SDK installation carries no Clock")
     return installation.clock
 
@@ -70,6 +76,9 @@ def config_authority() -> ConfigAuthority:
     carried = None if installation is None else installation.authority
     authority = carried if isinstance(carried, ConfigAuthority) else None
     if authority is None:
+        from meiva.sdk_surface import sdk_disable
+
+        sdk_disable.raise_load_failure()
         raise RuntimeError("the SDK installation carries no ConfigAuthority")
     return authority
 
