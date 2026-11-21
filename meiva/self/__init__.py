@@ -109,9 +109,11 @@ class _Cursor(Protocol):
 # bound context, then on an attached capture's registration and, once `cur` is given, on the
 # harness stored for the agent. The decision is `lifecycle_plans`; this reads the three places.
 def _assert_native_self_action(action: str, cur: _Cursor | None = None) -> None:
-    from meiva.sdk_surface import agent_identity
+    from meiva.sdk_surface import agent_identity, sdk_disable
 
     ctx = process_context.ambient_context()
+    if ctx is None:
+        sdk_disable.raise_load_failure()
     capture = None if ctx is None else ctx.sdk_capture
     refused = lifecycle_plans.harness_refusal(
         action,
@@ -339,9 +341,9 @@ def pause_heartbeat(duration: float) -> None:
     duration = coerce_typed(duration, "duration", (int, float))
     from meiva.sdk_surface import agent_identity
 
-    seconds = plans.pause_duration(duration, _settings.agent_setting("heartbeat_pause_max_seconds"))
     agent_id = agent_identity.require_agent_id()
     ctx = process_context.current_context()
+    seconds = plans.pause_duration(duration, _settings.agent_setting("heartbeat_pause_max_seconds"))
     with ctx.sql.cursor() as cur:
         _run(cur, plans.heartbeat_pause_statements(agent_id, seconds))
         from base.telemetry import emit

@@ -50,10 +50,14 @@ def is_launched_child() -> bool:
 
 # meiva:note
 # The harness this process runs under: read here, decided by `identity_plan.harness_name`, so the
-# rule stays under purity analysis while the read does not.
+# rule stays under purity analysis while the read does not. When no context is bound, a recorded
+# load/attach failure propagates instead of silently falling back to the native harness name.
 def process_harness_name() -> str:
     resolved = process_context.ambient_context()
     if resolved is None:
+        from meiva.sdk_surface import sdk_disable
+
+        sdk_disable.raise_load_failure()
         return Harness.MEIVA.value
     capture = resolved.sdk_capture
     registration = None if capture is None else object_of(getattr, capture, "_registration", None)
@@ -184,14 +188,6 @@ def require_actor(context: MeivaContext | None = None) -> str:
     )
 
 
-# meiva:note
-# Refuse a native-only `meiva.self` action when running on an external harness.
-def _assert_native_harness(action: str) -> None:
-    refused = native_harness_refusal(process_harness_name(), action)
-    if refused is not None:
-        raise RuntimeError(refused)
-
-
 def assert_self_action(action: str) -> None:
     """Refuse a lifecycle self-action unless this process is a bootstrapped agent
     process — one that both owns the turn loop and has an established identity.
@@ -204,7 +200,15 @@ def assert_self_action(action: str) -> None:
         RuntimeError: this process does not own the agent turn loop (a launched
             background script), or has no established identity.
     """
-    _assert_native_harness(action)
-    refused = self_action_refusal(caller_facts(_bound(), harness=process_harness_name()), action)
+    harness = process_harness_name()
+    native_refused = native_harness_refusal(harness, action)
+    if native_refused is not None:
+        raise RuntimeError(native_refused)
+    bound = _bound()
+    if bound is None:
+        from meiva.sdk_surface import sdk_disable
+
+        sdk_disable.raise_load_failure()
+    refused = self_action_refusal(caller_facts(bound, harness=harness), action)
     if refused is not None:
         raise RuntimeError(refused)
