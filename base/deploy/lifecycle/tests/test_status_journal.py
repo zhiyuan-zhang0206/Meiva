@@ -253,3 +253,14 @@ def test_operator_stop_rejects_a_previous_or_unknown_boot(
     assert journal.writer_alive(op) is True
     assert op.deadline is not None and now < op.deadline
     assert journal.operator_stop_in_progress(home, now=now) is False
+
+
+@pytest.mark.parametrize("offset", [-1.0, 1.0])
+def test_operator_stop_tolerates_small_boot_timestamp_changes(home: Path, offset: float) -> None:
+    now = time.monotonic()
+    journal.begin(home, "stop", pid=_ENTRY_PID, deadline=now + 60)
+    path = journal.journal_path(home)
+    raw = json.loads(path.read_text())
+    raw["boot_time"] = psutil.boot_time() + offset
+    path.write_text(json.dumps(raw))
+    assert journal.operator_stop_in_progress(home, now=now) is True

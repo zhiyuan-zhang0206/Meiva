@@ -39,6 +39,12 @@ from base.host.boundary.untyped import object_of
 from base.log import logger
 from base.paths import run_dir
 
+# meiva:note
+# Boot timestamps are wall-clock values whose platform representation can shift slightly.
+# Allow five seconds of jitter so a small timestamp change does not turn a planned stop into
+# an abort alert; this distinguishes boot epochs only outside that tolerance, not by boot ID.
+_BOOT_TIME_TOLERANCE_S = 5.0
+
 
 def _is_obj_list(value: object) -> TypeGuard[list[object]]:
     return isinstance(value, list)
@@ -346,7 +352,8 @@ def operator_stop_in_progress(home: Path, *, now: float) -> bool:
         op is not None
         and not op.complete
         and op.operation in ("stop", "restart")
-        and op.boot_time == psutil.boot_time()
+        and op.boot_time is not None
+        and abs(op.boot_time - psutil.boot_time()) < _BOOT_TIME_TOLERANCE_S
         and op.deadline is not None
         and now < op.deadline
         and writer_alive(op)
