@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import json
 import os
+import traceback
 from collections.abc import Iterator
 from pathlib import Path
 from typing import Any
@@ -66,15 +68,21 @@ _FRAMES_JS = """
   };
   function sample() {
     const text = root.textContent ?? '';
-    frames.push({ phase: state.phase,
+    const rows = [...root.querySelectorAll('[data-display-rank]')];
+    frames.push({ frameIndex: frames.length, phase: state.phase,
+      rootConnected: root.isConnected,
       first: text.includes('TRANSITION_FIRST_REPLY'),
       between: text.includes('TRANSITION_BETWEEN_REPLY'),
       firstTop: state.replyTop('TRANSITION_FIRST_REPLY'),
       betweenTop: state.replyTop('TRANSITION_BETWEEN_REPLY'),
       firstNarration: text.includes('TRANSITION_FIRST_NARRATION'),
       secondNarration: text.includes('TRANSITION_SECOND_NARRATION'),
-      ranks: [...new Set([...root.querySelectorAll('[data-display-rank]')]
-        .map((node) => node.getAttribute('data-display-rank')))] });
+      ranks: [...new Set(rows.map((node) => node.getAttribute('data-display-rank')))],
+      items: rows.map((node) => ({
+        id: node.getAttribute('data-item-id'),
+        source: node.getAttribute('data-timeline-source'),
+        rank: node.getAttribute('data-display-rank'),
+      })) });
     if (state.active) requestAnimationFrame(sample);
   }
   window.__compactTransitionFrames = state;
@@ -216,6 +224,43 @@ def _assert_retained_frames(
     assert before_requests
 
 
+def _save_frame_failure(env: E2EEnv, error: Exception) -> None:
+    frames: list[dict[str, Any]] = env.page.evaluate(
+        "() => { const state = window.__compactTransitionFrames; state.active = false; return state.frames; }"
+    )
+    failed_frame = next(
+        (
+            stack.f_locals.get("frame")
+            for stack, _ in traceback.walk_tb(error.__traceback__)
+            if stack.f_code is _assert_phase_frames.__code__
+        ),
+        None,
+    )
+    failed_index = next(
+        (index for index, frame in enumerate(frames) if frame == failed_frame), None
+    )
+    log_dir = Path(__file__).resolve().parents[3] / "tmp" / "e2e-logs"
+    log_dir.mkdir(parents=True, exist_ok=True)
+    path = log_dir / f"compact-transition-frames-{os.getpid()}-{env.agent_id}.json"
+    path.write_text(
+        json.dumps(
+            {
+                "failure": repr(error),
+                "failedFrameIndex": failed_index,
+                "surroundingFrames": (
+                    frames[max(0, failed_index - 2) : failed_index + 3]
+                    if failed_index is not None
+                    else []
+                ),
+                "frames": frames,
+            },
+            indent=2,
+        )
+        + "\n"
+    )
+    error.add_note(f"Compact transition frame recording: {path}")
+
+
 @pytest.mark.scenario("tests.e2e.fakes.scenarios.compact_transition:build")
 def test_two_compact_painted_history_transition(transition_env: E2EEnv, database: Database) -> None:
     env = transition_env
@@ -223,18 +268,25 @@ def test_two_compact_painted_history_transition(transition_env: E2EEnv, database
     _send(env, "first message", FIRST_REPLY)
     _send(env, "first tail message", FIRST_TAIL)
     env.page.evaluate(_FRAMES_JS)
-    first_position = _place_nonsticky_reply(env, FIRST_REPLY)
-    env.page.evaluate("window.__compactTransitionFrames.phase = 'first'")
-    _compact(env, FIRST_NARRATION, database=database)
-    _assert_settled_anchor(env, "1,0", FIRST_REPLY, first_position)
-    env.page.evaluate("window.__compactTransitionFrames.phase = 'between'")
-    _send(env, "between message", BETWEEN_REPLY)
-    _send(env, "between tail message", BETWEEN_TAIL)
-    between_position = _place_nonsticky_reply(env, BETWEEN_REPLY)
-    env.page.evaluate("window.__compactTransitionFrames.phase = 'second'")
-    _compact(env, SECOND_NARRATION, database=database)
-    _assert_settled_anchor(env, "2,1,0", BETWEEN_REPLY, between_position)
-    frames: list[dict[str, Any]] = env.page.evaluate(
-        "() => { const state = window.__compactTransitionFrames; state.active = false; return state.frames; }"
-    )
-    _assert_retained_frames(frames, first_position, between_position, before_requests)
+    try:
+        first_position = _place_nonsticky_reply(env, FIRST_REPLY)
+        env.page.evaluate("window.__compactTransitionFrames.phase = 'first'")
+        _compact(env, FIRST_NARRATION, database=database)
+        _assert_settled_anchor(env, "1,0", FIRST_REPLY, first_position)
+        env.page.evaluate("window.__compactTransitionFrames.phase = 'between'")
+        _send(env, "between message", BETWEEN_REPLY)
+        _send(env, "between tail message", BETWEEN_TAIL)
+        between_position = _place_nonsticky_reply(env, BETWEEN_REPLY)
+        env.page.evaluate("window.__compactTransitionFrames.phase = 'second'")
+        _compact(env, SECOND_NARRATION, database=database)
+        _assert_settled_anchor(env, "2,1,0", BETWEEN_REPLY, between_position)
+        frames: list[dict[str, Any]] = env.page.evaluate(
+            "() => { const state = window.__compactTransitionFrames; state.active = false; return state.frames; }"
+        )
+        _assert_retained_frames(frames, first_position, between_position, before_requests)
+    except Exception as error:
+        try:
+            _save_frame_failure(env, error)
+        except Exception as diagnostic_error:
+            error.add_note(f"Could not save compact transition frames: {diagnostic_error!r}")
+        raise
