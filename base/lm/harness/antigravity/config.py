@@ -1,7 +1,10 @@
 from __future__ import annotations
 
+import math
 from dataclasses import dataclass
 from pathlib import Path
+
+from base.lm.harness.antigravity.schedules import UNBOUNDED_SCHEDULE_SECONDS
 
 # meiva:note
 # The full model id from `agy models`, never an alias or a display name: the CLI
@@ -40,6 +43,20 @@ class AntigravityConfig:
     # How long an image waits for its turn to be running before it is given up on (see the session).
     image_follow_seconds: float = 30.0
     max_buffered_events: int = 256
+    # meiva:note
+    # Upper bound for extending the foreground stall-watchdog silence floor for one explicit timed
+    # `schedule(DurationSeconds=...)` call; defaults to `UNBOUNDED_SCHEDULE_SECONDS` (24h).
+    max_schedule_timer_seconds: float = UNBOUNDED_SCHEDULE_SECONDS
+
+    def __post_init__(self) -> None:
+        if (
+            not math.isfinite(self.max_schedule_timer_seconds)
+            or self.max_schedule_timer_seconds <= 0
+        ):
+            raise ValueError(
+                "max_schedule_timer_seconds must be a finite positive number, "
+                f"got {self.max_schedule_timer_seconds!r}"
+            )
 
     def command(self, *, resume: str | None) -> tuple[str, ...]:
         argv = [

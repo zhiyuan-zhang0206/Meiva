@@ -115,6 +115,7 @@ def _build_halted_error(
     *,
     requeued: tuple[int, ...],
     after_output: bool = False,
+    breaker_halted: bool = True,
 ) -> HarnessTurnHaltedError:
     harness = ctx.harness.value
     if isinstance(exc, HarnessTurnStalledError):
@@ -122,13 +123,21 @@ def _build_halted_error(
             sanitize_error_text(f"{harness} harness turn stalled: {exc}")
             or f"{harness} harness turn stalled"
         )
-        msg = (
-            "harness turn stalled after delivering output; session retired and the agent idles "
-            "without requeuing answered inputs"
-            if after_output
-            else "harness turn stalled; session retired, inputs requeued and the agent halted "
-            "until a new message"
-        )
+        if after_output and not breaker_halted:
+            msg = (
+                "harness turn stalled after delivering a reply; session retired and the agent "
+                "idles without requeuing answered inputs"
+            )
+        elif after_output:
+            msg = (
+                "harness turn stalled after partial output without a reply; session retired "
+                "and the agent halted without requeuing delivered inputs"
+            )
+        else:
+            msg = (
+                "harness turn stalled; session retired, inputs requeued and the agent halted "
+                "until a new message"
+            )
         logger.warning(
             msg,
             event="harness_turn_stalled",
@@ -139,6 +148,7 @@ def _build_halted_error(
             stall_seconds=exc.stall_seconds,
             requeued_inbound_ids=list(requeued),
             requeued_count=len(requeued),
+            breaker_halted=breaker_halted,
             reason=detail,
         )
     else:
@@ -147,8 +157,8 @@ def _build_halted_error(
             or f"{harness} harness quota exhausted"
         )
         msg = (
-            "harness turn aborted due to quota exhaustion after delivering output; agent idles "
-            "without requeuing answered inputs"
+            "harness turn aborted due to quota exhaustion after delivering output; agent halted "
+            "without requeuing delivered inputs"
             if after_output
             else "harness turn aborted due to quota exhaustion; inputs requeued and the agent "
             "halted until a new message"
@@ -161,6 +171,7 @@ def _build_halted_error(
             model=bridge.model,
             requeued_inbound_ids=list(requeued),
             requeued_count=len(requeued),
+            breaker_halted=breaker_halted,
             reason=detail,
         )
     return HarnessTurnHaltedError(detail, reason=reason, requeued_inbound_ids=requeued)
@@ -207,8 +218,27 @@ async def _handle_harness_abort(
     elif marked:
         report_lost_turn(ctx, agent_id, marked, run.last_key, exc)
     if halt_reason is not None:
+        # meiva:note
+        # Requeuing delivered inputs and tripping the recovery breaker are separate decisions:
+        # quota exhaustion always trips the breaker so background wakes cannot hammer an
+        # exhausted account, and a stall after partial tool/delta output without any completed
+        # assistant reply trips it too. A stall after a completed AssistantText reply settles
+        # cleanly without tripping the breaker or marking a crash corpse, because an open
+        # background command or timer should not strand a responsive agent.
+        should_halt_breaker = (
+            halt_reason == HALT_REASON_QUOTA_EXHAUSTED or not projector.has_delivered_reply
+        )
+        if should_halt_breaker:
+            await run.record_halt(reason=halt_reason)
         return _build_halted_error(
-            ctx, agent_id, bridge, exc, halt_reason, requeued=(), after_output=True
+            ctx,
+            agent_id,
+            bridge,
+            exc,
+            halt_reason,
+            requeued=(),
+            after_output=True,
+            breaker_halted=should_halt_breaker,
         )
     return None
 

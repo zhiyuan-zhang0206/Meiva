@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import base64
-from collections.abc import Callable, Mapping, Sequence
+from collections.abc import Callable, Collection, Mapping, Sequence
 from contextlib import suppress
 from datetime import timedelta
 from pathlib import Path
@@ -14,6 +14,7 @@ from base.lm.harness.engine import (
     ContextDigestKeeping,
     HarnessSession,
     HarnessTurn,
+    SilenceFloorReporting,
     completed_turn,
 )
 from base.lm.harness.events import (
@@ -536,6 +537,17 @@ class HarnessBridge:
         if session is None or not isinstance(session, BackgroundWorkReporting):
             return BackgroundWork()
         return session.background_work()
+
+    # meiva:note
+    # Monotonic clock floor while open turns are legitimately waiting in silence inside the CLI
+    # (for example, an Antigravity timed `schedule`). Adapters without in-turn silent waits return
+    # None, so the foreground stall watchdog bounds them strictly by the last received event.
+    # meiva:link agent/graph/docs/harness-foreground.md
+    def silence_floor_monotonic(self, turn_ids: Collection[str]) -> float | None:
+        session = self._session
+        if session is None or not isinstance(session, SilenceFloorReporting):
+            return None
+        return session.silence_floor_monotonic(turn_ids)
 
     # meiva:note
     # Interrupt whatever the foreground is running. The target is the session's own running turn,

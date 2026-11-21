@@ -160,11 +160,15 @@ the recovery breaker halts the agent in the same transaction with the reason `qu
 The alert is the turn's Error event, the anomaly event (`harness_quota_exhausted` / `harness_turn_stalled`), the
 `recovery halted` line of `meiva agents get`, and health-probe check 10, which counts each reason apart. A new chat
 resumes the agent (`breaker.py::admit_pending_wake`); the handed-back rows ride with it. A stall or quota abort after
-the turn already delivered output still settles as `HarnessTurnHaltedError` with no rows handed back
-(`requeued_inbound_ids=()`): its rows are not sent twice, the timeline finishes flushing what was produced, and the
-agent idles without stamping `last_turn_fatal_at` so the corpse reaper does not terminate it. A turn that calls an
-explicit timed `schedule(DurationSeconds=...)` tool extends the silence clock floor to the timer's due time (capped at
-24 hours) so waiting for the timer is not misclassified as a stall while silence past the due time still triggers it.
+the turn already delivered output (`has_delivered_output`) never requeues already-delivered rows
+(`requeued_inbound_ids=()`) and still finishes flushing the timeline before raising `HarnessTurnHaltedError`
+(never stamping `last_turn_fatal_at` for the corpse reaper): quota exhaustion and stalls after partial output without
+a completed `AssistantText` reply still trip the recovery breaker so background wakes cannot loop, whereas a stall
+after a completed `AssistantText` reply settles without tripping the breaker so an open background wait does not
+strand a responsive agent. When an adapter knows an open turn is legitimately silent (for example, Antigravity's
+explicit timed `schedule(DurationSeconds=...)` tool), `TurnEngine.silence_floor_monotonic()` supplies the per-turn
+monotonic floor so the foreground stall watchdog waits until past the timer's due time without reaching into any
+adapter's tools.
 
 A handed-back row is handed over again under a new key, `inbound-<id>-handback-<n>`
 (`base/agents/messages/harness_input_key.py`). Its first key is in the harness's record already, and Claude Code

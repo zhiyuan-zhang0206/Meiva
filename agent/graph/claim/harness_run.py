@@ -90,32 +90,6 @@ HarnessGoto = Literal["claim"]
 DELIVERY_FALLBACK_SECONDS = 15.0
 REDELIVER_BACKOFF_SECONDS = 2.0
 POOL_RETRY_SECONDS = 1.0
-# meiva:note
-# Upper bound for extending the silence threshold when the harness explicitly calls a timed
-# `schedule(DurationSeconds=...)` tool that blocks inside the turn (Antigravity timers). Matches
-# `UNBOUNDED_SCHEDULE_SECONDS` (24h) in `base/lm/harness/antigravity/schedules.py` so a malformed
-# huge duration can never disable the stall watchdog indefinitely.
-_MAX_SCHEDULE_TIMER_WAIT_SECONDS = 24 * 3600.0
-
-
-def _schedule_timer_seconds(name: str, tool_input: dict[str, object]) -> float | None:
-    if name != "schedule":
-        return None
-    for key, value in tool_input.items():
-        if key.lower() != "durationseconds":
-            continue
-        if isinstance(value, bool):
-            return None
-        parsed: float | None = None
-        if isinstance(value, int | float):
-            parsed = float(value)
-        elif isinstance(value, str):
-            stripped = value.strip()
-            if stripped.isdigit():
-                parsed = float(stripped)
-        if parsed is not None and parsed > 0:
-            return min(parsed, _MAX_SCHEDULE_TIMER_WAIT_SECONDS)
-    return None
 
 
 # meiva:note
@@ -186,9 +160,9 @@ class ForegroundRun:
         self._resumed = False
         self._subscription: EventSubscription | None = None
         self._reading = False
+        self._clock = ctx.require_clock()
         self._stall_seconds = stall_seconds
         self._last_heard = 0.0
-        self._active_timers: dict[str, float] = {}
 
     def _unsettled(self) -> tuple[Handed, ...]:
         return (*self.fg.handed, *self._settling)
@@ -234,6 +208,9 @@ class ForegroundRun:
             self.fg = self.fg.withdraw(withdrawn_keys)
             self._settling = [h for h in self._settling if h.key not in withdrawn_keys]
         return requeued
+
+    async def record_halt(self, *, reason: str) -> None:
+        _ = await settle_halted_turn(self._ctx, self._agent_id, (), reason=reason)
 
     # meiva:note
     # The invocation failed or was interrupted with inputs handed over and unsettled. The session is
@@ -353,7 +330,7 @@ class ForegroundRun:
     async def execute(self) -> None:
         subscription = await self._bridge.subscribe()
         self._subscription = subscription
-        self._last_heard = asyncio.get_running_loop().time()
+        self._last_heard = self._clock.monotonic()
         self.fg = replace(self.fg, generation=self._bridge.generation)
         outcome: BaseException | None = None
         try:
@@ -380,7 +357,7 @@ class ForegroundRun:
     async def _read(self, subscription: EventSubscription) -> None:
         try:
             while (event := await subscription.get()) is not None:
-                self._last_heard = asyncio.get_running_loop().time()
+                self._last_heard = self._clock.monotonic()
                 self._reading = True
                 try:
                     await self._on_event(event)
@@ -425,7 +402,6 @@ class ForegroundRun:
                 | ToolUse()
                 | ToolResult()
             ):
-                self._track_timer(event)
                 await self._projector.on_event(event)
             case InputInContext(key=key, turn_id=turn_id):
                 self._turn_inputs.setdefault(turn_id, []).append(key)
@@ -434,20 +410,11 @@ class ForegroundRun:
             case _:
                 pass
         self.fg, settlements = self.fg.on_event(event)
-        if not self.fg.turns:
-            self._active_timers.clear()
         self._settling.extend(s.handed for s in settlements)
         for settlement in settlements:
             await self._settle(settlement)
             self._settling.remove(settlement.handed)
         self._changed.set()
-
-    def _track_timer(self, event: BridgeEvent) -> None:
-        if isinstance(event, ToolUse):
-            if (wait := _schedule_timer_seconds(event.name, event.tool_input)) is not None:
-                self._active_timers[event.tool_use_id] = asyncio.get_running_loop().time() + wait
-        elif isinstance(event, ToolResult) and event.is_error:
-            _ = self._active_timers.pop(event.tool_use_id, None)
 
     async def _on_turn_completed(self, event: TurnCompleted) -> None:
         turn = completed_turn(event, "".join(self._streamed.pop(event.turn_id, [])))
@@ -549,12 +516,13 @@ class ForegroundRun:
     # only says that this process is alive.
     # meiva:link agent/graph/docs/harness-foreground.md
     async def _wait_for_change(self, timeout: float) -> None:
-        now = asyncio.get_running_loop().time()
+        now = self._clock.monotonic()
         if self._reading or (self._subscription is not None and self._subscription.unread):
             self._last_heard = now
         if not self._foreground_quiet():
-            timer_deadline = max(self._active_timers.values(), default=0.0)
-            silent = now - max(self._last_heard, timer_deadline)
+            floor = self._bridge.silence_floor_monotonic(self.fg.turns)
+            heard = max(self._last_heard, floor) if floor is not None else self._last_heard
+            silent = now - heard
             if silent >= self._stall_seconds:
                 raise HarnessTurnStalledError(
                     f"no event from the harness for {silent:.0f}s (threshold "
@@ -700,7 +668,7 @@ class ForegroundRun:
             raise HarnessSetupError(
                 f"{self._ctx.harness.value} could not take the input: {exc}"
             ) from exc
-        self._last_heard = asyncio.get_running_loop().time()
+        self._last_heard = self._clock.monotonic()
         return True
 
     # meiva:note

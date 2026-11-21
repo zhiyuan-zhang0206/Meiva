@@ -7,7 +7,7 @@ from __future__ import annotations
 import asyncio
 import json
 import os
-from collections.abc import AsyncGenerator, Callable, Mapping, Sequence
+from collections.abc import AsyncGenerator, Callable, Collection, Mapping, Sequence
 from contextlib import suppress
 from dataclasses import dataclass
 from datetime import UTC, datetime
@@ -176,6 +176,7 @@ class FakeEngine:
         self.subscriptions: set[FakeSubscription] = set()
         self.subscribe_count = 0
         self._inbound = asyncio.Event()
+        self.silence_floor: Callable[[Collection[str]], float | None] | None = None
         # meiva:note
         # The events of a turn the CLI began while nothing was subscribed: the next subscription is primed
         # with them, the way the real pump primes it, and the engine reports it as not yet presented.
@@ -257,6 +258,9 @@ class FakeEngine:
         with suppress(TimeoutError):
             await asyncio.wait_for(self._inbound.wait(), timeout)
         self._inbound.clear()
+
+    def silence_floor_monotonic(self, turn_ids: Collection[str]) -> float | None:
+        return None if self.silence_floor is None else self.silence_floor(turn_ids)
 
 
 def rejecting(reason: str = "no active turn to steer") -> Script:
