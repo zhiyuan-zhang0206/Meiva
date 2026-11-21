@@ -2,8 +2,10 @@ from pathlib import Path
 
 import psycopg
 import pytest
+from psycopg import sql
 from psycopg_pool import ConnectionPool
 
+from base.agents.incarnation.lifecycle_commands import TRIGGER_AFTER_KILL_COMMAND
 from base.db import Database
 from base.events.live.bus import EventBus
 from base.lm.catalog import ModelCatalog
@@ -71,7 +73,7 @@ async def test_external_restart_preserves_schedules(
         "SELECT kind, status FROM inbound_messages WHERE agent_id=%s "
         "AND kind IN ('restart', 'terminate') ORDER BY id",
         (owner,),
-    ).fetchall() == [("restart", "done")]
+    ).fetchall() == [("terminate", "done")]
     assert db_conn.execute(
         "SELECT count(*) FROM inbound_messages WHERE agent_id=%s AND source='system:schedules'",
         (owner,),
@@ -129,3 +131,88 @@ def test_real_death_after_an_old_restart_cancels_and_leaves_owner_notice(
         "SELECT status FROM inbound_messages WHERE agent_id=%s AND source='system:schedules'",
         (owner,),
     ).fetchall() == [("pending",)]
+
+
+def test_pending_restart_cannot_exempt_a_true_force_termination(
+    db_conn: psycopg.Connection,
+    db_pool: ConnectionPool,
+    lifecycle_agent_id: int,
+) -> None:
+    owner = lifecycle_agent_id
+    sid = _schedule(db_conn, owner)
+    db_conn.execute(
+        "INSERT INTO inbound_messages (agent_id, content, kind, source) "
+        "VALUES (%s, '', 'restart', 'user')",
+        (owner,),
+    )
+    db_conn.commit()
+    lifecycle.force_terminate_transaction(owner, db_pool, source="user")
+    assert _state(db_conn, sid) == (False, "cancelled", None)
+    assert db_conn.execute(
+        "SELECT status, payload->'lifecycle_result'->>'outcome' FROM inbound_messages "
+        "WHERE agent_id=%s AND kind='restart'",
+        (owner,),
+    ).fetchone() == ("done", "superseded")
+
+
+def test_preserving_restart_fences_older_pending_chat(
+    db_conn: psycopg.Connection,
+    db_pool: ConnectionPool,
+    lifecycle_agent_id: int,
+) -> None:
+    owner = lifecycle_agent_id
+    sid = _schedule(db_conn, owner)
+    db_conn.execute(
+        "INSERT INTO inbound_messages (agent_id, content, kind, source) "
+        "VALUES (%s, 'old chat', 'chat', 'agent:1')",
+        (owner,),
+    )
+    db_conn.commit()
+    lifecycle.force_terminate_transaction(owner, db_pool, source="user", preserve_shells=True)
+    assert _state(db_conn, sid)[0:2] == (True, "scheduled")
+    eligible = db_conn.execute(
+        sql.SQL(
+            "SELECT count(*) FROM inbound_messages m JOIN agents_meta "
+            "ON agents_meta.id=m.agent_id WHERE m.agent_id=%s AND m.kind='chat' "
+            "AND m.status='pending' AND ({fence})"
+        ).format(fence=sql.SQL(TRIGGER_AFTER_KILL_COMMAND)),
+        (owner,),
+    ).fetchone()
+    assert eligible == (0,)
+
+
+def test_release_setting_does_not_leak_and_works_inside_savepoint(
+    db_conn: psycopg.Connection,
+    db_pool: ConnectionPool,
+    lifecycle_agent_id: int,
+) -> None:
+    owner = lifecycle_agent_id
+    sid = _schedule(db_conn, owner)
+    lifecycle.force_terminate_transaction(owner, db_pool, source="user", preserve_shells=True)
+    with db_pool.connection() as conn:
+        assert conn.execute(
+            "SELECT COALESCE(current_setting('meiva.lifecycle_release', true), '')"
+        ).fetchone() == ("",)
+    db_conn.execute(
+        "UPDATE agents_meta SET status='idling', termination_source=NULL WHERE id=%s",
+        (owner,),
+    )
+    db_conn.commit()
+    with db_conn.transaction():
+        db_conn.execute("SELECT set_config('meiva.lifecycle_release', 'restart', true)")
+        with db_conn.transaction():
+            db_conn.execute(
+                "UPDATE agents_meta SET status='terminated', termination_source='user' WHERE id=%s",
+                (owner,),
+            )
+    assert _state(db_conn, sid)[0:2] == (True, "scheduled")
+    db_conn.execute(
+        "UPDATE agents_meta SET status='idling', termination_source=NULL WHERE id=%s",
+        (owner,),
+    )
+    db_conn.execute(
+        "UPDATE agents_meta SET status='terminated', termination_source='user' WHERE id=%s",
+        (owner,),
+    )
+    db_conn.commit()
+    assert _state(db_conn, sid) == (False, "cancelled", None)

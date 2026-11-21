@@ -714,14 +714,12 @@ class TestRestart:
 
         with db_conn.cursor() as cur:
             cur.execute(
-                "SELECT kind, status, payload FROM inbound_messages WHERE agent_id = %s "
-                "AND kind IN ('restart', 'terminate')",
+                "SELECT payload FROM inbound_messages WHERE agent_id = %s AND kind = 'terminate'",
                 (agent_id,),
             )
-            commands = cur.fetchall()
-        assert commands
-        assert all(kind == "restart" and status == "done" for kind, status, _ in commands)
+            payloads = [row[0] for row in cur.fetchall()]
+        assert payloads
         assert all(
             not isinstance(payload, dict) or "kill_all_shell_sessions" not in payload
-            for _, _, payload in commands
+            for payload in payloads
         )

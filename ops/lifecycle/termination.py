@@ -247,8 +247,6 @@ def force_terminate_transaction(
         # meiva:note
         # Older commands are closed visibly, never silently dropped; the force's
         # own command is simply done, since this transaction executed it.
-        # Preserving restarts record their actual intent before the terminated
-        # write, so lifecycle triggers can distinguish it in this transaction.
         cur.execute(
             "UPDATE inbound_messages SET status='done', "
             "payload=COALESCE(payload,'{}'::jsonb)||%s "
@@ -261,8 +259,15 @@ def force_terminate_transaction(
             ),
         )
         cur.execute(
-            "UPDATE inbound_messages SET status='done', kind=%s WHERE id=%s",
-            ("restart" if preserve_shells else "terminate", terminate_inbound_id),
+            "UPDATE inbound_messages SET status='done' WHERE id=%s", (terminate_inbound_id,)
+        )
+        # meiva:note
+        # Carry the existing preserving-restart intent only across this write.
+        # Keep the terminate command intact: it fences pre-restart chat from
+        # auto-resurrecting the agent before its new harness/config is stored.
+        cur.execute(
+            "SELECT set_config('meiva.lifecycle_release', %s, true)",
+            ("restart" if preserve_shells else "terminate",),
         )
         cur.execute(
             # meiva:note
@@ -273,6 +278,7 @@ def force_terminate_transaction(
             "heartbeat_paused_until = NULL WHERE id = %s",
             (agent_id,),
         )
+        cur.execute("SELECT set_config('meiva.lifecycle_release', '', true)")
         prepared_event = _stage_termination_event(
             conn,
             agent_id=agent_id,

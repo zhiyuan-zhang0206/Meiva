@@ -37,9 +37,10 @@ cluster credential.
 terminated, a database lifecycle trigger disables every unfinished matching
 schedule, records `cancelled`, and clears its next fire. The schedule manager then
 terminates any active no-PTY process and closes its open run. `keep` makes the
-schedule independent of owner termination. A preserving restart records its
-executed `restart` command in the same transaction before releasing the runtime;
-the trigger exempts that release, not an earlier restart. Native hosted restarts
+schedule independent of owner termination. A preserving restart carries its
+release intent through a transaction-local setting only across the runtime
+release write. The trigger exempts that release, not an earlier restart. Its
+terminate command stays intact to fence automatic resurrection by older chats. Native hosted restarts
 remain idling transitions. A real termination (including a reaped crash) leaves
 one passive owner-only system note listing the cancelled schedule ids and names.
 It does not wake the owner and remains pending for its next resurrection.
