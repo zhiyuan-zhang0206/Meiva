@@ -261,6 +261,14 @@ def force_terminate_transaction(
         cur.execute(
             "UPDATE inbound_messages SET status='done' WHERE id=%s", (terminate_inbound_id,)
         )
+        # meiva:note
+        # Carry the existing preserving-restart intent only across this write.
+        # Keep the terminate command intact: it fences pre-restart chat from
+        # auto-resurrecting the agent before its new harness/config is stored.
+        cur.execute(
+            "SELECT set_config('meiva.lifecycle_release', %s, true)",
+            ("restart" if preserve_shells else "terminate",),
+        )
         cur.execute(
             # meiva:note
             # termination_source='user': a force-kill is the user's will to end the
@@ -270,6 +278,7 @@ def force_terminate_transaction(
             "heartbeat_paused_until = NULL WHERE id = %s",
             (agent_id,),
         )
+        cur.execute("SELECT set_config('meiva.lifecycle_release', '', true)")
         prepared_event = _stage_termination_event(
             conn,
             agent_id=agent_id,

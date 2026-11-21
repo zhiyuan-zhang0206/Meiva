@@ -430,6 +430,15 @@ async def test_apply_hosted_lifecycle_threads_restart_message_into_resume_note(
     from agent.ownership.hosted import apply_hosted_lifecycle
 
     agent_id = _agent(db_conn)
+    schedule = db_conn.execute(
+        "INSERT INTO schedules (name, script, command, machine, owner_agent_id, "
+        "trigger_kind, interval_seconds, enabled, status, next_launch_at) "
+        "VALUES ('native-restart', 'pass', 'python run.py', 'host-test', %s, 'every', "
+        "60, true, 'scheduled', now() + interval '1 hour') RETURNING id, next_launch_at",
+        (agent_id,),
+    ).fetchone()
+    assert schedule is not None
+    db_conn.commit()
     incarnation = await admit_hosted_runtime(aops_pool, agent_id, "host-test", uuid4(), db=database)
     assert incarnation is not None
     row = db_conn.execute(
@@ -454,6 +463,9 @@ async def test_apply_hosted_lifecycle_threads_restart_message_into_resume_note(
     assert note_row is not None
     assert note_row[1:] == ("system:restart", "pending")
     assert "Zhiyuan rolling out #9999" in note_row[0]
+    assert db_conn.execute(
+        "SELECT enabled, status, next_launch_at FROM schedules WHERE id=%s", (schedule[0],)
+    ).fetchone() == (True, "scheduled", schedule[1])
 
 
 async def test_stamp_turn_fatal_sanitizes_reason_and_survives_reap(
