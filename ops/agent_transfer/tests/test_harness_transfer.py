@@ -14,6 +14,7 @@ from pathlib import Path
 from base import paths
 from base.lm.harness import BackgroundItem, BackgroundKind
 from base.lm.harness.registry import FileSessionRegistry, SessionRecord
+from ops.agent_transfer.agy_protobuf import path_to_file_uri
 from ops.agent_transfer.archive_io import pack_workspace, stage_and_activate_workspace
 from ops.agent_transfer.budget import WorkspaceTransferLimits
 from ops.agent_transfer.harness_transfer import (
@@ -477,3 +478,161 @@ def test_every_harness_with_a_transcript_moves_and_the_rest_is_named(tmp_path: P
     src = FileSessionRegistry(paths.harness_sessions_dir(home=src_home))
     src.delete_harnesses(agent_id, [p.harness for p in carried])
     assert sorted(r.harness for r in src.records(agent_id)) == ["codex", "meiva"]
+
+
+def _pb_varint(value: int) -> bytes:
+    out = bytearray()
+    while True:
+        chunk = value & 0x7F
+        value >>= 7
+        if value:
+            out.append(chunk | 0x80)
+        else:
+            out.append(chunk)
+            return bytes(out)
+
+
+def _pb_len(field_num: int, payload: bytes) -> bytes:
+    return _pb_varint((field_num << 3) | 2) + _pb_varint(len(payload)) + payload
+
+
+def _pb_str(field_num: int, text: str) -> bytes:
+    return _pb_len(field_num, text.encode("utf-8"))
+
+
+def _build_agy_meta_blob(uri: str, session_id: str) -> bytes:
+    return (
+        _pb_len(1, _pb_str(1, uri) + _pb_str(2, f"{uri}/subrepo"))
+        + _pb_str(6, session_id)
+        + _pb_str(7, uri)
+        + _pb_str(18, "default-cli-project")
+    )
+
+
+def _seed_agy_wal_db(db_path: Path, meta_blob: bytes) -> sqlite3.Connection:
+    conn = sqlite3.connect(db_path)
+    _ = conn.execute("PRAGMA journal_mode=WAL")
+    _ = conn.execute("PRAGMA wal_autocheckpoint=0")
+    _ = conn.execute("CREATE TABLE trajectory_metadata_blob (id TEXT PRIMARY KEY, data BLOB)")
+    _ = conn.execute("CREATE TABLE steps (idx INTEGER PRIMARY KEY, step_payload BLOB)")
+    _ = conn.execute(
+        "INSERT INTO trajectory_metadata_blob (id, data) VALUES (?, ?)",
+        ("main", meta_blob),
+    )
+    _ = conn.execute(
+        "INSERT INTO steps (idx, step_payload) VALUES (?, ?)", (0, b"wal-step-payload")
+    )
+    conn.commit()
+    return conn
+
+
+def _seed_agy_summary_db(summary_db: Path, session_id: str, uri: str, meta_blob: bytes) -> None:
+    summary_blob = _pb_str(4, "traj-1") + _pb_len(9, _pb_str(1, uri)) + _pb_len(17, meta_blob)
+    with sqlite3.connect(summary_db) as sconn:
+        _ = sconn.execute(
+            "CREATE TABLE conversation_summaries "
+            "(conversation_id TEXT PRIMARY KEY, workspace_uris TEXT NOT NULL, raw_summary BLOB)"
+        )
+        _ = sconn.execute(
+            "INSERT INTO conversation_summaries (conversation_id, workspace_uris, raw_summary) "
+            "VALUES (?, ?, ?)",
+            (session_id, json.dumps([uri]), summary_blob),
+        )
+        sconn.commit()
+
+
+def _assert_rewritten_agy_target(
+    dst_agy: Path,
+    dst_summary_db: Path,
+    *,
+    session_id: str,
+    dst_cwd: str,
+    dst_uri: str,
+) -> None:
+    expected_meta = _build_agy_meta_blob(dst_uri, session_id)
+    dst_db = dst_agy / "conversations" / f"{session_id}.db"
+    assert dst_db.is_file()
+    assert not (dst_agy / "conversations" / f"{session_id}.db-shm").exists()
+    with sqlite3.connect(dst_db) as dconn:
+        new_meta = dconn.execute(
+            "SELECT data FROM trajectory_metadata_blob WHERE id = 'main'"
+        ).fetchone()[0]
+        step_row = dconn.execute("SELECT step_payload FROM steps WHERE idx = 0").fetchone()
+    assert step_row == (b"wal-step-payload",)
+    assert new_meta == expected_meta
+    assert (dst_agy / "conversations" / f"{session_id}.pb").read_bytes() == (
+        _pb_str(2, session_id) + _pb_len(6, expected_meta)
+    )
+    with sqlite3.connect(dst_summary_db) as sconn:
+        ws_json, new_raw_summary = sconn.execute(
+            "SELECT workspace_uris, raw_summary FROM conversation_summaries WHERE conversation_id = ?",
+            (session_id,),
+        ).fetchone()
+    assert json.loads(ws_json) == [dst_uri]
+    assert new_raw_summary == (
+        _pb_str(4, "traj-1") + _pb_len(9, _pb_str(1, dst_uri)) + _pb_len(17, expected_meta)
+    )
+    dst_jsonl = (
+        dst_agy / "brain" / session_id / ".system_generated" / "logs" / "transcript.jsonl"
+    ).read_text(encoding="utf-8")
+    assert json.loads(dst_jsonl.strip()) == {"workspaceUris": [dst_uri], "cwd": dst_cwd}
+
+
+# meiva:note
+# Regression for #7528 / #7507: cross-machine transfer between hosts with different-length user
+# home paths must rewrite Antigravity's persisted SQLite `trajectory_metadata_blob` (and any
+# pre-existing target `conversation_summaries.db` row) with recomputed protobuf varint lengths,
+# snapshot WAL frames into a single portable `.db` without carrying `.db-shm`, and also rewrite
+# legacy `.pb` trajectory metadata when present.
+# meiva:link gateway/agents/docs/agent-transfer.md
+def test_antigravity_transfer_rewrites_sqlite_metadata_and_summary_across_different_length_homes(
+    tmp_path: Path,
+) -> None:
+    src_user = tmp_path / "alice"
+    dst_user = tmp_path / "bob_much_longer_home"
+    src_home, dst_home = src_user / ".meiva", dst_user / ".meiva"
+    agent_id = 7507
+    session_id = "3880748b-ba0c-49f9-b21c-f8a82ca7bf91"
+    src_cwd = str(paths.workspace_path(src_home, agent_id))
+    dst_cwd = str(paths.workspace_path(dst_home, agent_id))
+    assert len(src_cwd) != len(dst_cwd)
+    src_uri, dst_uri = path_to_file_uri(src_cwd), path_to_file_uri(dst_cwd)
+
+    _write_record(src_home, agent_id, "antigravity", session_id, src_cwd)
+    src_agy = src_user / ".gemini" / "antigravity-cli"
+    conv_dir = src_agy / "conversations"
+    conv_dir.mkdir(parents=True, exist_ok=True)
+    brain_logs = src_agy / "brain" / session_id / ".system_generated" / "logs"
+    brain_logs.mkdir(parents=True, exist_ok=True)
+    _ = (brain_logs / "transcript.jsonl").write_text(
+        json.dumps({"workspaceUris": [src_uri], "cwd": src_cwd}) + "\n", encoding="utf-8"
+    )
+
+    src_meta = _build_agy_meta_blob(src_uri, session_id)
+    wal_conn = _seed_agy_wal_db(conv_dir / f"{session_id}.db", src_meta)
+    assert (conv_dir / f"{session_id}.db-wal").is_file()
+    _ = (conv_dir / f"{session_id}.pb").write_bytes(_pb_str(2, session_id) + _pb_len(6, src_meta))
+
+    dst_agy = dst_user / ".gemini" / "antigravity-cli"
+    dst_agy.mkdir(parents=True, exist_ok=True)
+    dst_summary_db = dst_agy / "conversation_summaries.db"
+    _seed_agy_summary_db(dst_summary_db, session_id, src_uri, src_meta)
+
+    carried, left_behind = collect_harness_transfers(
+        home=src_home, agent_id=agent_id, user_home=src_user
+    )
+    wal_conn.close()
+
+    assert left_behind == []
+    (payload,) = carried
+    relpaths = {f.relpath for f in payload.files}
+    assert f"antigravity-cli/conversations/{session_id}.db" in relpaths
+    assert f"antigravity-cli/conversations/{session_id}.db-shm" not in relpaths
+    assert f"antigravity-cli/conversations/{session_id}.db-wal" not in relpaths
+
+    apply_harness_transfer(
+        home=dst_home, payload=payload, to_machine="macbook-air", user_home=dst_user
+    )
+    _assert_rewritten_agy_target(
+        dst_agy, dst_summary_db, session_id=session_id, dst_cwd=dst_cwd, dst_uri=dst_uri
+    )

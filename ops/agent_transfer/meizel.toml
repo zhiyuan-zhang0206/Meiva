@@ -2,16 +2,19 @@ exports = ["__init__.py", "archive_io.py", "budget.py", "harness_transfer.py", "
 
 [uses]
 "__init__.py" = ["budget.py", "bundle_plan.py", "errors.py"]
+"agy_protobuf.py" = []
+"agy_transfer.py" = ["agy_protobuf.py"]
 "archive_io.py" = ["budget.py", "bundle_plan.py", "errors.py"]
 "budget.py" = ["errors.py"]
 "bundle_plan.py" = ["budget.py", "errors.py"]
-"harness_transfer.py" = []
+"harness_transfer.py" = ["agy_transfer.py"]
 "limits.py" = ["budget.py"]
 "operations.py" = ["archive_io.py", "budget.py", "errors.py", "harness_transfer.py"]
-"tests" = ["archive_io.py", "budget.py", "bundle_plan.py", "errors.py", "harness_transfer.py", "operations.py"]
+"tests" = ["agy_protobuf.py", "archive_io.py", "budget.py", "bundle_plan.py", "errors.py", "harness_transfer.py", "operations.py"]
 
 [purity]
 "__init__.py" = "strict"
+"agy_protobuf.py" = "strict"
 "budget.py" = "strict"
 "bundle_plan.py" = "strict"
 "errors.py" = "strict"

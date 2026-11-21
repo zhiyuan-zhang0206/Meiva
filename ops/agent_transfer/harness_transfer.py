@@ -19,6 +19,7 @@ from base.host.boundary.json_values import is_object_dict, is_object_list
 from base.host.boundary.untyped import object_of
 from base.lm.harness import encode_items
 from base.lm.harness.registry import FileSessionRegistry, SessionRecord, record_from_payload
+from ops.agent_transfer.agy_transfer import apply_antigravity_transfer, collect_antigravity_files
 from ops.rpc_schemas.transfer import HarnessTransferFile, HarnessTransferPayload
 
 _log = logging.getLogger(__name__)
@@ -67,45 +68,6 @@ def _collect_claude_files(
                     )
                 except OSError:
                     _log.warning("failed to read claude session file %s", fp, exc_info=True)
-
-
-def _collect_antigravity_files(
-    u_home: Path,
-    session_id: str,
-    files: list[HarnessTransferFile],
-) -> None:
-    for dir_name in ("antigravity-cli", "antigravity"):
-        agy_root = u_home / ".gemini" / dir_name
-        brain_dir = agy_root / "brain" / session_id
-        if brain_dir.is_dir():
-            for root, _, filenames in os.walk(brain_dir):
-                for fn in sorted(filenames):
-                    fp = Path(root) / fn
-                    try:
-                        rel = fp.relative_to(u_home / ".gemini").as_posix()
-                        files.append(
-                            HarnessTransferFile(
-                                relpath=rel,
-                                content_b64=base64.b64encode(fp.read_bytes()).decode("ascii"),
-                            )
-                        )
-                    except OSError:
-                        _log.warning("failed to read agy brain file %s", fp, exc_info=True)
-
-        conv_dir = agy_root / "conversations"
-        if conv_dir.is_dir():
-            for cp in sorted(conv_dir.glob(f"{session_id}.*")):
-                if cp.is_file():
-                    try:
-                        rel = cp.relative_to(u_home / ".gemini").as_posix()
-                        files.append(
-                            HarnessTransferFile(
-                                relpath=rel,
-                                content_b64=base64.b64encode(cp.read_bytes()).decode("ascii"),
-                            )
-                        )
-                    except OSError:
-                        _log.warning("failed to read agy conv file %s", cp, exc_info=True)
 
 
 # meiva:note
@@ -293,11 +255,12 @@ def _collect_one(
     if record.harness == "claude_code":
         _collect_claude_files(u_home, from_cwd, record.session_id, files, extra)
     elif record.harness == "antigravity":
-        _collect_antigravity_files(u_home, record.session_id, files)
+        collect_antigravity_files(u_home, record.session_id, files)
     else:
         _collect_codex_files(u_home, record.session_id, files, extra)
     if not files and not extra:
         return None
+    _ = extra.setdefault("from_cwd", from_cwd)
     return HarnessTransferPayload(
         harness=record.harness, session_record=session_record, files=files, extra=extra
     )
@@ -319,26 +282,6 @@ def _apply_claude_transfer(
         if rel.startswith(prefix):
             rel = f"projects/{to_slug}/" + rel[len(prefix) :]
         target_fp = target_claude_dir / rel
-        target_fp.parent.mkdir(parents=True, exist_ok=True)
-        content = base64.b64decode(f.content_b64)
-        if target_fp.name.endswith(".jsonl"):
-            text = content.decode("utf-8", errors="replace")
-            if from_cwd:
-                text = text.replace(from_cwd, to_cwd)
-            _ = target_fp.write_text(text, encoding="utf-8")
-        else:
-            _ = target_fp.write_bytes(content)
-
-
-def _apply_antigravity_transfer(
-    u_home: Path,
-    payload: HarnessTransferPayload,
-    from_cwd: str,
-    to_cwd: str,
-) -> None:
-    target_gemini_dir = u_home / ".gemini"
-    for f in payload.files:
-        target_fp = target_gemini_dir / f.relpath
         target_fp.parent.mkdir(parents=True, exist_ok=True)
         content = base64.b64decode(f.content_b64)
         if target_fp.name.endswith(".jsonl"):
@@ -517,7 +460,7 @@ def _dispatch_harness_apply(
         case "claude_code":
             _apply_claude_transfer(u_home, payload, from_cwd, to_cwd)
         case "antigravity":
-            _apply_antigravity_transfer(u_home, payload, from_cwd, to_cwd)
+            apply_antigravity_transfer(u_home, payload, from_cwd, to_cwd)
         case "codex":
             _apply_codex_transfer(u_home, payload, from_cwd, to_cwd)
         case _:
@@ -542,7 +485,7 @@ def apply_harness_transfer(
         return
 
     to_cwd = str(paths.workspace_path(home, effective_agent_id))
-    from_cwd = str(payload.session_record.get("cwd") or "")
+    from_cwd = str(payload.session_record.get("cwd") or payload.extra.get("from_cwd") or "")
     u_home = user_home if user_home is not None else home.parent
 
     _dispatch_harness_apply(payload.harness, u_home, payload, from_cwd, to_cwd)
