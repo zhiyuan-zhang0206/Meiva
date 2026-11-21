@@ -12,16 +12,16 @@ _ACTION = _ROOT / ".github/actions/pnpm-install/action.yml"
 
 
 def test_all_workflow_frontend_installs_share_the_bounded_action() -> None:
-    installs = []
+    installs = 0
     for path in sorted((_ROOT / ".github/workflows").glob("*.yml")):
         workflow = yaml.safe_load(path.read_text())
         for job in workflow.get("jobs", {}).values():
             for step in job.get("steps", []):
                 assert "pnpm install --frozen-lockfile" not in step.get("run", ""), path
                 if step.get("uses") == "./.github/actions/pnpm-install":
-                    installs.append(step)
-    assert len(installs) == 20
-    assert all(step["timeout-minutes"] == 5 for step in installs)
+                    assert step["timeout-minutes"] == 5
+                    installs += 1
+    assert installs == 20
 
 
 @pytest.mark.parametrize(

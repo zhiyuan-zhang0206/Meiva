@@ -213,12 +213,7 @@ def test_measurement_jobs_frontend_dependencies() -> None:
             assert node["with"]["node-version"] == 22
             pnpm = _step(steps, "Install pnpm")
             assert pnpm["uses"].startswith("pnpm/action-setup@")
-        installs = [
-            step
-            for step in steps
-            if step.get("working-directory") == "ui/web"
-            and step.get("run") == "pnpm install --frozen-lockfile"
-        ]
+        installs = [step for step in steps if step.get("uses") == "./.github/actions/pnpm-install"]
         assert len(installs) == 1, f"{job_name} must install ui/web deps exactly once"
 
 
