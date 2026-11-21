@@ -370,6 +370,21 @@ CREATE TABLE inbound_messages (
     autovacuum_vacuum_cost_delay = 2
 );
 
+-- Every new system_note inbound must carry a non-blank string note_tag so claim
+-- dispatch never crashes on a poison-pill row; NOT VALID preserves legacy done rows.
+ALTER TABLE inbound_messages
+    ADD CONSTRAINT inbound_messages_system_note_tag_check
+    CHECK (
+        kind <> 'system_note'
+        OR (
+            payload IS NOT NULL
+            AND jsonb_typeof(payload) = 'object'
+            AND (payload -> 'note_tag') IS NOT NULL
+            AND jsonb_typeof(payload -> 'note_tag') = 'string'
+            AND btrim(payload ->> 'note_tag') <> ''
+        )
+    ) NOT VALID;
+
 COMMENT ON COLUMN inbound_messages.claimed_at IS
     'When the claim node grabbed this row (pending -> claimed for chat on the built-in harness, pending -> done for lifecycle kinds), or when an external harness was handed it (pending -> claimed for chat, system_note and heartbeat; it leaves claimed only when the harness reports it in context, or back to pending with this column NULL when it refused or lost it). NULL = never claimed. Pickup latency = claimed_at - created_at.';
 
@@ -1261,7 +1276,8 @@ BEGIN
                 NEW.id,
                 'Owner termination cancelled these schedules '
                 || '(on_owner_terminate=cancel):' || E'\n' || cancelled_schedules,
-                'system_note', 'system:schedules', '{"passive": true}'::jsonb
+                'system_note', 'system:schedules',
+                '{"note_tag": "lifecycle_terminate", "passive": true}'::jsonb
             );
         END IF;
     END IF;

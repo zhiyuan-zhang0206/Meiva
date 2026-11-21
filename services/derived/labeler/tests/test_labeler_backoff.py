@@ -126,7 +126,7 @@ def test_select_unlabeled_prompts_from_task_system_note(db_conn: psycopg.Connect
         cur.execute(
             "INSERT INTO inbound_messages (agent_id, content, kind, source, payload) "
             "VALUES (%s, %s, 'system_note', 'system', %s::jsonb)",
-            (b, "impersonation rolled back", '{"impersonation_id": "x"}'),
+            (b, "impersonation rolled back", '{"note_tag": "context", "impersonation_id": "x"}'),
         )
     db_conn.commit()
 

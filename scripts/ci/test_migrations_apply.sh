@@ -225,6 +225,23 @@ BEGIN
     ) THEN
         RAISE EXCEPTION 'termination changed the owner-independent schedule';
     END IF;
+    IF NOT EXISTS (
+        SELECT 1 FROM inbound_messages
+        WHERE agent_id = (SELECT max(id) FROM agents)
+          AND kind = 'system_note'
+          AND source = 'system:schedules'
+          AND payload ->> 'note_tag' = 'lifecycle_terminate'
+          AND (payload -> 'passive') = 'true'::jsonb
+    ) THEN
+        RAISE EXCEPTION 'termination schedule notice is missing note_tag=lifecycle_terminate or passive=true';
+    END IF;
+    BEGIN
+        INSERT INTO inbound_messages (agent_id, content, kind, source, payload)
+        VALUES ((SELECT max(id) FROM agents), 'bad note', 'system_note', 'system', '{"passive": true}'::jsonb);
+        RAISE EXCEPTION 'inbound_messages accepted a system_note without note_tag';
+    EXCEPTION WHEN check_violation THEN
+        NULL;
+    END;
 END $$;
 
 -- Check resurrection only after termination.

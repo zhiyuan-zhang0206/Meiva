@@ -39,6 +39,7 @@ def test_the_trigger_gate_reads_the_rows_kind_source_and_payload(
         "note",
         source="system",
         kind="system_note",
+        payload={"note_tag": "context"},
         bus=event_bus,
         database=database,
     )

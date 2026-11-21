@@ -32,12 +32,14 @@ def _inbound(
     source: str = "user",
     status: str = "pending",
 ) -> int:
+    payload = '{"note_tag": "context"}' if kind == "system_note" else None
     with db.cursor() as cur:
         cur.execute(
-            "INSERT INTO inbound_messages (agent_id, content, kind, source, status, created_at, "
-            "claimed_at) VALUES (%s, %s, %s, %s, %s, now() - make_interval(mins => %s), "
+            "INSERT INTO inbound_messages (agent_id, content, kind, source, status, payload, "
+            "created_at, claimed_at) VALUES (%s, %s, %s, %s, %s, %s::jsonb, "
+            "now() - make_interval(mins => %s), "
             "CASE WHEN %s = 'pending' THEN NULL ELSE now() END) RETURNING id",
-            (agent_id, content, kind, source, status, minutes_ago, status),
+            (agent_id, content, kind, source, status, payload, minutes_ago, status),
         )
         row = cur.fetchone()
         assert row is not None

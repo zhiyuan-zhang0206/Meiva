@@ -6,6 +6,7 @@ from psycopg import sql
 from psycopg_pool import ConnectionPool
 
 from base.agents.incarnation.lifecycle_commands import TRIGGER_AFTER_KILL_COMMAND
+from base.agents.messages.kwargs import NoteTag
 from base.db import Database
 from base.events.live.bus import EventBus
 from base.lm.catalog import ModelCatalog
@@ -117,7 +118,11 @@ def test_real_death_after_an_old_restart_cancels_and_leaves_owner_notice(
     ).fetchall()
     assert len(notes) == 1
     assert notes[0][0] == owner
-    assert notes[0][2:] == ("system_note", "pending", {"passive": True})
+    assert notes[0][2:] == (
+        "system_note",
+        "pending",
+        {"note_tag": NoteTag.LIFECYCLE_TERMINATE.value, "passive": True},
+    )
     for sid in cancelled:
         assert f"- #{sid}: owned-cancel" in notes[0][1]
     assert f"#{kept}:" not in notes[0][1]
