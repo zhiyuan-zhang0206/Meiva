@@ -85,40 +85,34 @@ See [arbiter workflow](references/arbiter.md#workspace-promotion-closed-loop) fo
      cron times are caught.
    - *Host environment & embedded probes*: check machine configuration and execute
      `<!-- fact-check: <cmd> -->` directives.
-3. **Per-Agent Workspace Memory (`~/.meiva/workspaces/*/memory/`)**: Review the
-   `## Workspace Memory Candidates` section reported by `dream_gather.py`
-   (which deterministically scans `workspaces/*/memory/*.md` and
-   `workspaces/*/memory/inherit/*.md` with non-empty content, using
-   hash-ledger review state across all ages) alongside any legacy `MEMORY.md` remnants to extract durable,
-   reusable cross-agent rules and facts into the shared pool.
+3. **Per-Agent Workspace Memory (`~/.meiva/workspaces/*/memory/`)**: Review
+   `## Workspace Memory Candidates` from `dream_gather.py` (deterministic hash-ledger
+   scan of `workspaces/*/memory/*.md` and `inherit/*.md`) and legacy `MEMORY.md`
+   remnants to extract durable cross-agent rules into the shared pool.
+4. **Inbound Self-Evolution Notices (`#1289 -> #1609`)**: Collect retirement notices
+   from `#1289` naming pitfall notes superseded by landed code enforcement.
 
 ### Phase 3 — Consolidation (Canonical One-Topic-One-File, State Overwrite & Auto-OKF)
-- **One topic, one canonical file (dateless naming)**: Maintain a single dateless
-  canonical note per rule or topic slot (e.g. `meiva/rulings/merge/meiva-merge-policy.md`,
-  or root standing files like `collaboration-preferences.md`), rather than
-  accumulating date-suffixed fragments (`*-2026xxxx.md`).
-- **State overwrite in place & `git rm` superseded fragments**: When a ruling is
-  revised, amended, or overturned, or when World Truth Probes reveal drift,
-  overwrite the canonical note in place with the current truth and `git rm`
-  superseded, reversed, or fragmented historical notes (git history preserves the
-  audit trail). Never leave conflicting old notes in the pool or stack chronological
-  patch disclaimers at the bottom of stale notes.
-- **Dream-Time Auto-OKF Maintenance**: While working agents write pure Markdown
-  without YAML frontmatter or write-time validation, the Arbiter populates and refreshes canonical
-  OKF provenance & lifecycle fields on consolidated canonical notes (and strips
-  retired `type`, `meiva_agent`, `meiva_machine`, and `tags` boilerplate):
-  - `description`: One-line high-density summary for `MEMORY.md` pointers and previews.
-  - Inline Markdown file links in the body: provenance for subsequent Dream runs.
-    `/repos/meiva/<file>` maps to `~/.meiva/source`; `/repos/monsora/<file>`
-    maps to `~/MonsoraV2` when present, with Vault `repos/<alias>` as fallback.
-    Global manifests (`pyproject.toml`, `meizel.toml`, `meizel.policy.toml`,
-    `.pre-commit-config.yaml`) retain their drift-noise handling.
-  - `verified`: Quoted `"YYYY-MM-DD"` date when the note was verified against World Truth.
-  - `stale_after`: Optional quoted `"YYYY-MM-DD"` expiration date for temporary
-    freezes or transition rules.
-- **De-relativize time**: Convert relative time expressions (`"today"`,
-  `"this morning"`, `"recently"`, `"next week"`) into explicit ISO dates
-  (`YYYY-MM-DD`).
+- **One topic, one canonical file (dateless naming)**: Maintain one dateless
+  canonical note per topic slot (e.g. `meiva/rulings/merge/meiva-merge-policy.md`,
+  `collaboration-preferences.md`), rather than date-suffixed fragments (`*-2026xxxx.md`).
+- **State overwrite in place & `git rm` superseded fragments**: On ruling changes or
+  World Truth drift, overwrite the canonical note in place and `git rm` superseded or
+  fragmented notes (git history keeps the audit trail; never stack stale disclaimers).
+- **Dream-Time Auto-OKF Maintenance**: Working agents write pure Markdown without
+  frontmatter; the Arbiter refreshes canonical OKF fields (`description`, inline body
+  file links mapping `/repos/meiva/` -> `~/.meiva/source` and `/repos/monsora/` ->
+  `~/MonsoraV2` with Vault `repos/<alias>` fallback, quoted `verified`, optional
+  `stale_after`) and strips legacy `type`/`meiva_agent`/`meiva_machine`/`tags` boilerplate.
+  Global manifests (`pyproject.toml`, `meizel.toml`, `meizel.policy.toml`,
+  `.pre-commit-config.yaml`) keep their drift-noise handling.
+- **De-relativize time**: Replace relative words (`"today"`, `"recently"`) with
+  explicit ISO dates (`YYYY-MM-DD`).
+- **Self-Evolution Loop (`#1609 <-> #1289`)**: Verify `#1289` enforcement anchors
+  (`main` for CI/static gates; deployed release for runtime/plugin checks) before
+  retiring/trimming superseded pitfall notes (no `archive/`); send high-signal
+  recurring-pitfall leads to `#1289` via `meiva.agents.send_message(1289, ...)` (silent
+  when none). See [arbiter workflow](references/arbiter.md#self-evolution-feedback-loop).
 
 ### Phase 4 — Prune & Index
 - Keep `MEMORY.md` zero-conflict, self-consistent, and concise as a routing index:
