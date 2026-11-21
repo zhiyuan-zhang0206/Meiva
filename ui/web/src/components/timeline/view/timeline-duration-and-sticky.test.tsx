@@ -74,7 +74,7 @@ describe("detail-block duration display", () => {
     expect(screen.getByTestId("card-toggle").textContent).toContain("Thinking for");
     expect(container.textContent).not.toContain("Waiting for model");
   });
-  it("a system-only active turn below 1s renders 'Working…'", () => {
+  it("a system-only active turn below 1s renders 'Working for 1s'", () => {
     render(
       <TimelineView
         turnActive
@@ -89,7 +89,7 @@ describe("detail-block duration display", () => {
         ]}
       />,
     );
-    expect(runToggle().textContent).toContain("Working…");
+    expect(runToggle().textContent).toContain("Working for 1s");
   });
   it("completed single-code-block turn shows 'Worked for' and the rounds count", () => {
     render(
@@ -126,7 +126,7 @@ describe("detail-block duration display", () => {
     fireEvent.click(header);
     expect(screen.getByText("1 system note")).toBeTruthy();
   });
-  it("completed work turn with missing duration shows plain Worked", () => {
+  it("completed work turn with sub-1s wall-clock span shows Worked for 1s while detail chip keeps plain Thinking", () => {
     render(
       <TimelineView
         items={[
@@ -142,7 +142,7 @@ describe("detail-block duration display", () => {
       />,
     );
     const header = runToggle();
-    expect(header.textContent).toBe("Worked");
+    expect(header.textContent).toBe("Worked for 1s");
     expect(screen.queryByRole("img")).toBeNull();
     fireEvent.click(header);
     expect(screen.getByTestId("card-toggle").textContent).toBe("Thinking");
@@ -236,7 +236,7 @@ describe("detail-block duration display", () => {
       />,
     );
     const pending = screen.getByTestId("pending-live-activity-window");
-    expect(pending.textContent).toBe("Working…");
+    expect(pending.textContent).toBe("Working for 1s");
     expect(pending.querySelector("svg")).toBeTruthy();
     expect(pending.querySelector(".animate-spin")).toBeNull();
   });

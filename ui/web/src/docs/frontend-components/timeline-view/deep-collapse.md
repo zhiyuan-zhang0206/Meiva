@@ -56,11 +56,11 @@ live and settled readings agree across reloads, reconnects and rebuilt harness
 bridges without per-turn timing sidecars or turn-ID deduplication.
 
 The active header remains "Working…" / "Working for Xs" and settles to "Worked" /
-"Worked for Xs". Values below one second omit the duration deliberately so the
-header shows plain "Working…" / "Worked"; detail chips retain sub-second
-precision. When a block's start or end timestamp is truly missing, the header
-shows plain "Worked" ("Working…" while active, or `liveAnchorAt` fallback when
-live) with no duration and no per-block warning icon.
+"Worked for Xs". Timestamped spans below one second display as "1s" ("Working
+for 1s" / "Worked for 1s", user ruling 2026-11-21); detail chips retain
+sub-second precision. When a block's start or end timestamp is truly missing,
+the header shows plain "Worked" ("Working…" while active, or `liveAnchorAt`
+fallback when live) with no duration and no per-block warning icon.
 
 Both `PendingLiveActivityWindow` and active (`turnActive`) `TurnBlock` title spans
 share the sidebar's Silver Glint sweep (`.timeline-title-working` sharing

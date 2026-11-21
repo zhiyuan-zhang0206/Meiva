@@ -91,10 +91,10 @@ describe("TurnBlock missing timing", () => {
     expect(screen.queryByRole("img")).toBeNull();
   });
 
-  it.each([0, 6000])("formats complete wall-clock span %ims", (spanMs) => {
+  it.each([0, 400, 6000])("formats complete wall-clock span %ims", (spanMs) => {
     render(<TurnBlock id="complete" memberIds={["1"]} expanded={false} onToggle={vi.fn()}
       summary={{ ...baseSummary, startedAtMs: 1_700_000_000_000, endedAtMs: 1_700_000_000_000 + spanMs }} />);
-    expect(screen.getByTestId("turn-toggle").textContent).toBe(spanMs === 0 ? "Worked" : "Worked for 6s");
+    expect(screen.getByTestId("turn-toggle").textContent).toBe(spanMs < 1000 ? "Worked for 1s" : "Worked for 6s");
     expect(screen.queryByRole("img")).toBeNull();
   });
 });

@@ -259,7 +259,7 @@ describe("TurnBlock component", () => {
     }
   });
 
-  it("never flickers between 'Working…' and 'Working for' when lastEventAt updates on an unstamped non-work turn", () => {
+  it("keeps 'Working for 1s' steady without flickering or showing 0s when lastEventAt updates on an unstamped non-work turn", () => {
     vi.useFakeTimers();
     try {
       vi.setSystemTime(100_000);
@@ -278,18 +278,18 @@ describe("TurnBlock component", () => {
       const { rerender } = render(
         <TurnBlock id="turn-note" memberIds={["1.0"]} summary={noteOnly} expanded={false} turnActive lastEventAt={100_000} onToggle={vi.fn()} />,
       );
-      expect(screen.getByTestId("turn-toggle").textContent).toContain("Working…");
+      expect(screen.getByTestId("turn-toggle").textContent).toContain("Working for 1s");
       expect(screen.getByTestId("turn-toggle").textContent).not.toContain("0s");
 
       act(() => { vi.setSystemTime(100_040); });
       rerender(
         <TurnBlock id="turn-note" memberIds={["1.0"]} summary={noteOnly} expanded={false} turnActive lastEventAt={100_040} onToggle={vi.fn()} />,
       );
-      expect(screen.getByTestId("turn-toggle").textContent).toContain("Working…");
+      expect(screen.getByTestId("turn-toggle").textContent).toContain("Working for 1s");
       expect(screen.getByTestId("turn-toggle").textContent).not.toContain("0s");
 
-      act(() => { vi.advanceTimersByTime(1_000); });
-      expect(screen.getByTestId("turn-toggle").textContent).toContain("Working for 1s");
+      act(() => { vi.advanceTimersByTime(2_000); });
+      expect(screen.getByTestId("turn-toggle").textContent).toContain("Working for 2s");
     } finally {
       vi.useRealTimers();
     }
@@ -624,25 +624,25 @@ describe("Working title Silver Glint shimmer", () => {
 
       rerender(<PendingLiveActivityWindow startedAt={startMs} />);
       const timedEl = pending.querySelector(".timeline-title-working");
-      expect(timedEl?.textContent).toBe("Working…");
+      expect(timedEl?.textContent).toBe("Working for 1s");
       expect(timedEl?.textContent).not.toContain("0s");
       expect(timedEl?.textContent).not.toContain(".");
 
       act(() => {
         vi.advanceTimersByTime(500);
       });
-      expect(pending.querySelector(".timeline-title-working")?.textContent).toBe("Working…");
+      expect(pending.querySelector(".timeline-title-working")?.textContent).toBe("Working for 1s");
 
       act(() => {
-        vi.advanceTimersByTime(500);
+        vi.advanceTimersByTime(1_500);
       });
-      expect(pending.querySelector(".timeline-title-working")?.textContent).toBe("Working for 1s");
+      expect(pending.querySelector(".timeline-title-working")?.textContent).toBe("Working for 2s");
     } finally {
       vi.useRealTimers();
     }
   });
 
-  it("omits 0s and decimals on TurnBlock headers below 1s for both active and settled states", () => {
+  it("displays sub-1s durations as 1s on TurnBlock headers for both active and settled states", () => {
     vi.useFakeTimers();
     try {
       vi.setSystemTime(SAMPLE_START + 850);
@@ -661,7 +661,7 @@ describe("Working title Silver Glint shimmer", () => {
           onToggle={vi.fn()}
         />,
       );
-      expect(screen.getByTestId("turn-toggle").querySelector(".timeline-title-working")?.textContent).toBe("Working…");
+      expect(screen.getByTestId("turn-toggle").querySelector(".timeline-title-working")?.textContent).toBe("Working for 1s");
 
       rerender(
         <TurnBlock
@@ -674,7 +674,7 @@ describe("Working title Silver Glint shimmer", () => {
         />,
       );
       expect(screen.getByTestId("turn-toggle").querySelector(".timeline-title-working")).toBeNull();
-      expect(screen.getByTestId("turn-toggle").textContent).toContain("Worked");
+      expect(screen.getByTestId("turn-toggle").textContent).toBe("Worked for 1s");
       expect(screen.getByTestId("turn-toggle").textContent).not.toContain("0s");
       expect(screen.getByTestId("turn-toggle").textContent).not.toContain("0.9s");
 

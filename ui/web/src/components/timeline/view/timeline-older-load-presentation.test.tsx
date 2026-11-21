@@ -143,7 +143,7 @@ describe("timeline loading presentation", () => {
     expect(pending.querySelector("svg")).toBeTruthy();
     expect(pending.querySelector(".animate-spin")).toBeNull();
     expect(pending.querySelector("button")).toBeNull();
-    expect(pending.textContent).toBe("Working…");
+    expect(pending.textContent).toBe("Working for 1s");
   });
 
   it("a retained prompt stays readable under the initial source qualification ring", () => {
