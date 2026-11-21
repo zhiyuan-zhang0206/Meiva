@@ -40,9 +40,11 @@ class WorkspaceHygieneFields:
             "Hosted agent-runner: soft cap on direct non-excluded files and subdirectories "
             "inside any scanned directory of an agent's workspace before a hygiene reminder is "
             "sent. Mirrors Meizel's 20-entry directory ceiling so flat agent workspaces do not "
-            "accumulate hundreds of stale scripts and reports; excluded system paths "
-            "(dot-entries, root memory/ and uploads/, meiva_instructions.md, nested git repos, "
-            "and build/dependency directories) do not count toward this cap."
+            "accumulate hundreds of stale scripts and reports. Dot-entries, root memory/ and "
+            "uploads/, meiva_instructions.md, and build/dependency directories are excluded from "
+            "both counting and recursion; nested git repositories and symlinks are not recursed "
+            "into (their interiors are never flagged), while each still counts as one direct "
+            "entry in its parent directory."
         ),
         json_schema_extra={
             "capability": "agent-runner",

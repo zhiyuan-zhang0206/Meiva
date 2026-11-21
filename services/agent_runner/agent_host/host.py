@@ -366,7 +366,7 @@ class AgentHost:
                 workspace_root=workspace_path(self._home, agent_id),
                 policy=self._policy.workspace_hygiene,
                 now_epoch=self._handoff_stamping.clock.now().timestamp(),
-                pool=self._control_pool,
+                pool=self._pool,
                 db=self._db,
                 bus=self._bus,
             )

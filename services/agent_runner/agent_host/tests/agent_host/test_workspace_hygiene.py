@@ -235,6 +235,44 @@ def test_should_remind_cooldown_boundaries() -> None:
     assert should_remind(last_reminded_at=1000.0, now_epoch=87400.0, cooldown_seconds=86400) is True
 
 
+def test_read_last_reminded_at_rejects_corrupt_utf8_json_and_non_finite_values(
+    tmp_path: Path,
+) -> None:
+    state = hygiene_state_path(tmp_path)
+
+    for raw_text in (
+        "{not valid json",
+        "[]",
+        '{"last_reminded_at": true}',
+        '{"last_reminded_at": "1000"}',
+        '{"last_reminded_at": NaN}',
+        '{"last_reminded_at": Infinity}',
+        '{"last_reminded_at": -Infinity}',
+    ):
+        state.write_text(raw_text, encoding="utf-8")
+        assert read_last_reminded_at(tmp_path) is None
+
+    state.write_bytes(b"\xff\xfe\xfd")
+    assert read_last_reminded_at(tmp_path) is None
+
+
+def test_hygiene_handles_permission_error_on_state_file_and_subdir(tmp_path: Path) -> None:
+    state = hygiene_state_path(tmp_path)
+    state.write_text('{"last_reminded_at": 1000.0}', encoding="utf-8")
+    locked_dir = tmp_path / "locked"
+    _populate_files(locked_dir, 25)
+
+    state.chmod(0o000)
+    locked_dir.chmod(0o000)
+    try:
+        assert read_last_reminded_at(tmp_path) is None
+        result = scan_workspace_overflows(tmp_path, max_items_per_dir=20)
+        assert result.overflows == ()
+    finally:
+        state.chmod(0o600)
+        locked_dir.chmod(0o700)
+
+
 async def test_hygiene_check_reminds_and_enforces_24h_cooldown(
     tmp_path: Path,
     db_conn: psycopg.Connection[Any],

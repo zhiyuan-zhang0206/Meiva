@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import math
 import os
 from collections import deque
 from dataclasses import dataclass
@@ -161,7 +162,8 @@ def read_last_reminded_at(workspace_root: Path) -> float | None:
     value = raw.get("last_reminded_at")
     if isinstance(value, bool) or not isinstance(value, (int, float)):
         return None
-    return float(value)
+    timestamp = float(value)
+    return timestamp if math.isfinite(timestamp) else None
 
 
 # meiva:note
