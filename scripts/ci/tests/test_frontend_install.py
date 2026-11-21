@@ -21,7 +21,7 @@ def test_all_workflow_frontend_installs_share_the_bounded_action() -> None:
                 if step.get("uses") == "./.github/actions/pnpm-install":
                     assert step["timeout-minutes"] == 5
                     installs += 1
-    assert installs == 20
+    assert installs == 21
 
 
 @pytest.mark.parametrize(

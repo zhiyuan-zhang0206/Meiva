@@ -1,28 +1,27 @@
-name: Warm dependency caches
+name: Warm dependency and test caches
 
 # Hosted Actions caches are scoped by ref: a cache written by a pull-request run is
 # visible only to that PR, while the default branch's caches are readable by every
 # PR. CI runs on pull requests only (main has no push run), so nothing else writes
-# default-branch caches. When an input of a cache key changes on main (a lockfile,
-# the pre-commit config, the pinned Postgres runtime, an install action), this
-# workflow rebuilds the affected caches there, so later PRs restore them instead of
-# each starting cold. Each job runs the same install steps as ci.yml with the same
-# keys; the actions save their own caches on a miss.
+# default-branch caches on push.
+#
+# This workflow maintains two kinds of `main` caches:
+# 1. Dependency caches (`python`, `node`, `native`): rebuilt whenever any dependency
+#    cache-key input changed since the last successful `cache-warm.yml` run on `main`
+#    (or on manual dispatch), so a cancelled intermediate run never drops a dependency
+#    warm-up.
+# 2. Static-lane test result cache (`test-cache-plan` -> `test-cache-seed` ->
+#    `test-cache-save`): incrementally seeds `test-pass-main-*` by running only static
+#    tests whose content-addressed key is missing from the restored `main` cache, and
+#    skips pytest entirely when there are zero misses.
 
 on:
   push:
     branches: [main]
-    paths:
-      - uv.lock
-      - .python-version
-      - .pre-commit-config.yaml
-      - ui/web/pnpm-lock.yaml
-      - base/cluster/dataplane/runtime_binaries.py
-      - .github/actions/**
-      - .github/workflows/cache-warm.yml
   workflow_dispatch:
 
 permissions:
+  actions: read
   contents: read
 
 env:
@@ -33,11 +32,78 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  decide:
+    name: Decide cache warm scope
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    if: github.ref == 'refs/heads/main'
+    outputs:
+      warm_deps: ${{ steps.decide.outputs.warm_deps }}
+      durations_key: ${{ steps.durations.outputs.key }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 50
+
+      - name: Resolve the test durations
+        id: durations
+        uses: ./.github/actions/resolve-test-durations
+
+      - name: Check whether dependency cache inputs changed since last green run
+        id: decide
+        env:
+          GH_TOKEN: ${{ github.token }}
+          EVENT_NAME: ${{ github.event_name }}
+          EVENT_BEFORE: ${{ github.event.before }}
+        run: |
+          set -euo pipefail
+          if [[ "${EVENT_NAME}" == "workflow_dispatch" ]]; then
+            echo "warm_deps=true" >> "$GITHUB_OUTPUT"
+            echo "workflow_dispatch: warming dependency caches"
+            exit 0
+          fi
+
+          prev_sha="$(
+            gh api "repos/${GITHUB_REPOSITORY}/actions/workflows/cache-warm.yml/runs?branch=main&status=completed&per_page=20" \
+              --jq '[.workflow_runs[] | select(.conclusion == "success")][0].head_sha // ""' \
+              2>/dev/null || true
+          )"
+
+          base_sha=""
+          if [[ -n "${prev_sha}" && "${prev_sha}" != "0000000000000000000000000000000000000000" ]] \
+            && git cat-file -e "${prev_sha}^{commit}" 2>/dev/null; then
+            base_sha="${prev_sha}"
+          elif [[ -n "${EVENT_BEFORE}" && "${EVENT_BEFORE}" != "0000000000000000000000000000000000000000" ]] \
+            && git cat-file -e "${EVENT_BEFORE}^{commit}" 2>/dev/null; then
+            base_sha="${EVENT_BEFORE}"
+          fi
+
+          if [[ -z "${base_sha}" ]]; then
+            echo "warm_deps=true" >> "$GITHUB_OUTPUT"
+            echo "No reachable baseline commit in local history; warming dependency caches"
+            exit 0
+          fi
+
+          warm_deps="false"
+          while IFS= read -r path; do
+            case "${path}" in
+              uv.lock|.python-version|.pre-commit-config.yaml|ui/web/pnpm-lock.yaml|base/cluster/dataplane/runtime_binaries.py|.github/actions/*|.github/workflows/cache-warm.yml)
+                warm_deps="true"
+                echo "Dependency input changed since ${base_sha}: ${path}"
+                break
+                ;;
+            esac
+          done < <(git diff --name-only "${base_sha}..HEAD")
+
+          echo "warm_deps=${warm_deps}" >> "$GITHUB_OUTPUT"
+          echo "warm_deps=${warm_deps} (compared ${base_sha}..HEAD)"
+
   python:
     name: Warm Python caches (uv, pre-commit)
+    needs: [decide]
     runs-on: ubuntu-24.04
     timeout-minutes: 20
-    if: github.ref == 'refs/heads/main'
+    if: ${{ github.ref == 'refs/heads/main' && needs.decide.outputs.warm_deps == 'true' }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
@@ -70,9 +136,10 @@ jobs:
 
   node:
     name: Warm pnpm cache
+    needs: [decide]
     runs-on: ubuntu-24.04
     timeout-minutes: 15
-    if: github.ref == 'refs/heads/main'
+    if: ${{ github.ref == 'refs/heads/main' && needs.decide.outputs.warm_deps == 'true' }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
@@ -94,9 +161,10 @@ jobs:
 
   native:
     name: Warm native runtime caches (Postgres, Redis, Playwright)
+    needs: [decide]
     runs-on: ubuntu-24.04
     timeout-minutes: 30
-    if: github.ref == 'refs/heads/main'
+    if: ${{ github.ref == 'refs/heads/main' && needs.decide.outputs.warm_deps == 'true' }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
@@ -136,3 +204,269 @@ jobs:
       - name: Install Playwright system deps
         uses: ./.github/actions/install-playwright-deps
         timeout-minutes: 15
+
+  test-cache-plan:
+    name: Plan missing static test cache entries
+    needs: [decide]
+    runs-on: ubuntu-24.04
+    container:
+      image: ghcr.io/zhiyuan-zhang0206/meiva-ci-runner@sha256:a17652b71203a57be18bd343938fc20d8227ccb40010aba8067a08b0e74b3029
+      options: --init --shm-size=2g
+    defaults:
+      run:
+        shell: bash
+    timeout-minutes: 10
+    if: github.ref == 'refs/heads/main'
+    outputs:
+      has_work: ${{ steps.plan.outputs.has_work }}
+      shards: ${{ steps.plan.outputs.shards }}
+      groups: ${{ steps.plan.outputs.groups }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Restore the test durations
+        uses: ./.github/actions/restore-test-durations
+        with:
+          key: ${{ needs.decide.outputs.durations_key }}
+
+      - name: Cache uv wheels
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.cache/uv
+          key: uv-container-${{ runner.os }}-${{ hashFiles('uv.lock') }}
+          restore-keys: |
+            uv-container-${{ runner.os }}-
+
+      - name: Install Python deps
+        uses: ./.github/actions/uv-sync
+
+      - name: Restore the recorded passes
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: tmp/test-cache/passes.jsonl
+          key: test-pass-main-none-${{ github.run_id }}
+          restore-keys: test-pass-main-
+
+      - name: Plan missing static-lane tests
+        id: plan
+        run: |
+          set -euo pipefail
+          mkdir -p tmp/test-cache
+          [[ -f tmp/test-cache/passes.jsonl ]] || : > tmp/test-cache/passes.jsonl
+          uv run python -m meizel test-cache import tmp/test-cache/passes.jsonl
+          uv run python -m scripts.audit.input_closures closures --out tmp/test-cache/closures.json
+          # The arguments and the image are part of every key: they must match ci.yml's test-cache-plan.
+          uv run python -m meizel test-cache plan --lane static \
+            --closures-file tmp/test-cache/closures.json \
+            --pytest-arg=--test-environment=static \
+            --pytest-arg=-W --pytest-arg=error::pytest.PytestUnhandledThreadExceptionWarning \
+            --env "image=$(grep -o 'meiva-ci-runner@sha256:[0-9a-f]*' .github/workflows/cache-warm.yml | head -1)" \
+            > tmp/test-cache/plan.json
+          uv run python -m meizel test-cache export > tmp/test-cache/passes.jsonl
+          python3 - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+
+          plan = json.loads(Path("tmp/test-cache/plan.json").read_text(encoding="utf-8"))
+          miss_tests = [test for test in plan["run"] if test in plan["keys"]]
+          Path("tmp/test-cache/miss-tests.txt").write_text(
+              "".join(f"{test}\n" for test in miss_tests), encoding="utf-8"
+          )
+          count = len(miss_tests)
+          if count == 0:
+              has_work, shards, groups = "false", 0, []
+          elif count <= 150:
+              has_work, shards, groups = "true", 1, [1]
+          elif count <= 400:
+              has_work, shards, groups = "true", 2, [1, 2]
+          elif count <= 800:
+              has_work, shards, groups = "true", 4, [1, 2, 3, 4]
+          else:
+              has_work, shards, groups = "true", 8, [1, 2, 3, 4, 5, 6, 7, 8]
+
+          with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as out:
+              out.write(f"has_work={has_work}\n")
+              out.write(f"shards={shards}\n")
+              out.write(f"groups={json.dumps(groups)}\n")
+
+          print(
+              f"test-cache-seed plan: cacheable={len(plan['keys'])} "
+              f"skippable={len(plan['skippable'])} miss={count} "
+              f"uncacheable={len(plan['uncacheable'])} unbounded={len(plan['unbounded'])} "
+              f"shards={shards}"
+          )
+          PY
+
+      - name: Upload the seed plan
+        if: ${{ !cancelled() }}
+        continue-on-error: true
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: test-cache-seed-plan
+          path: |
+            tmp/test-cache/plan.json
+            tmp/test-cache/passes.jsonl
+            tmp/test-cache/miss-tests.txt
+          if-no-files-found: ignore
+
+  test-cache-seed:
+    name: Seed static test cache (${{ matrix.group }}/${{ needs.test-cache-plan.outputs.shards }})
+    needs: [decide, test-cache-plan]
+    if: ${{ needs.test-cache-plan.outputs.has_work == 'true' }}
+    runs-on: ubuntu-24.04
+    container:
+      image: ghcr.io/zhiyuan-zhang0206/meiva-ci-runner@sha256:a17652b71203a57be18bd343938fc20d8227ccb40010aba8067a08b0e74b3029
+      options: --init --shm-size=2g
+    defaults:
+      run:
+        shell: bash
+    timeout-minutes: 25
+    strategy:
+      fail-fast: false
+      matrix:
+        group: ${{ fromJSON(needs.test-cache-plan.outputs.groups) }}
+    env:
+      MEIVA_DB_URL: postgresql://unused@127.0.0.1:1/unused
+      MEIVA_REDIS_URL: redis://127.0.0.1:1/0
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Restore the test durations
+        uses: ./.github/actions/restore-test-durations
+        with:
+          key: ${{ needs.decide.outputs.durations_key }}
+
+      - name: Cache uv wheels
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.cache/uv
+          key: uv-container-${{ runner.os }}-${{ hashFiles('uv.lock') }}
+          restore-keys: |
+            uv-container-${{ runner.os }}-
+
+      - name: Install Python deps
+        uses: ./.github/actions/uv-sync
+
+      - name: Cache frontend node_modules
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ui/web/node_modules
+          key: ui-web-node-modules-${{ runner.os }}-${{ hashFiles('ui/web/pnpm-lock.yaml') }}
+
+      - name: Install frontend deps (TypeScript source parser)
+        timeout-minutes: 5
+        uses: ./.github/actions/pnpm-install
+
+      - name: Download the seed plan
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: test-cache-seed-plan
+          path: tmp/test-cache
+
+      - name: Run missing static tests
+        env:
+          SHARDS: ${{ needs.test-cache-plan.outputs.shards }}
+          GROUP: ${{ matrix.group }}
+        run: |
+          set -euo pipefail
+          mkdir -p tmp
+          mapfile -t miss_targets < tmp/test-cache/miss-tests.txt
+          if [[ "${#miss_targets[@]}" -eq 0 ]]; then
+            echo "No missing static tests to run."
+            exit 0
+          fi
+          base_args=(
+            --test-environment=static
+            -q -n 4 --dist=loadfile
+            -W error::pytest.PytestUnhandledThreadExceptionWarning
+            --junit-xml=tmp/junit-seed-${GROUP}.xml
+            -o junit_family=xunit1
+          )
+          if [[ "${SHARDS}" -gt 1 ]]; then
+            base_args+=(
+              --splits "${SHARDS}"
+              --group "${GROUP}"
+              --splitting-algorithm least_duration
+            )
+          fi
+          uv run pytest "${base_args[@]}" "${miss_targets[@]}"
+
+      - name: Upload seed junit report
+        if: ${{ !cancelled() }}
+        continue-on-error: true
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: test-cache-seed-junit-${{ matrix.group }}
+          path: tmp/junit-seed-${{ matrix.group }}.xml
+          if-no-files-found: ignore
+
+  test-cache-save:
+    name: Save seeded test cache
+    needs: [test-cache-plan, test-cache-seed]
+    if: ${{ !cancelled() && needs.test-cache-plan.outputs.has_work == 'true' && needs.test-cache-plan.result == 'success' }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Download the seed plan
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: test-cache-seed-plan
+          path: tmp/test-cache
+
+      - name: Download seed junit reports
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          pattern: test-cache-seed-junit-*
+          path: tmp/junit
+          merge-multiple: true
+
+      - name: Record newly passed tests and export cache
+        env:
+          RUN_ID: ${{ github.run_id }}
+        run: |
+          set -euo pipefail
+          [[ -s tmp/test-cache/plan.json ]] || { echo "no plan this run"; exit 0; }
+          shopt -s nullglob
+          reports=()
+          for report in tmp/junit/*.xml; do reports+=(--junit "$report"); done
+          [[ "${#reports[@]}" -gt 0 ]] || { echo "no seed junit reports this run"; exit 0; }
+          before_count=0
+          if [[ -f tmp/test-cache/passes.jsonl ]]; then
+            before_count="$(wc -l < tmp/test-cache/passes.jsonl | tr -d ' ')"
+          else
+            : > tmp/test-cache/passes.jsonl
+          fi
+          miss_count=0
+          if [[ -f tmp/test-cache/miss-tests.txt ]]; then
+            miss_count="$(wc -l < tmp/test-cache/miss-tests.txt | tr -d ' ')"
+          fi
+          python3 -m venv tmp/meizel-venv
+          # The pin of the checker is the one `pyproject.toml` names.
+          pin="$(grep -o 'meizel @ git+[^"]*' pyproject.toml | head -1)"
+          tmp/meizel-venv/bin/pip install --quiet "$pin"
+          meizel=(tmp/meizel-venv/bin/python -m meizel --repo .)
+          "${meizel[@]}" test-cache import tmp/test-cache/passes.jsonl
+          record_out="$("${meizel[@]}" test-cache record --plan tmp/test-cache/plan.json "${reports[@]}" --run "$RUN_ID")"
+          echo "$record_out"
+          "${meizel[@]}" test-cache export > tmp/test-cache/passes.jsonl
+          after_count="$(wc -l < tmp/test-cache/passes.jsonl | tr -d ' ')"
+          if [[ ! -s tmp/test-cache/passes.jsonl ]]; then
+            rm -f tmp/test-cache/passes.jsonl
+          fi
+          {
+            echo "### Test result cache seed (main)"
+            echo "- prior entries: ${before_count}"
+            echo "- missing static tests planned: ${miss_count}"
+            echo "- record output: ${record_out}"
+            echo "- exported entries: ${after_count}"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Save the seeded passes
+        if: ${{ !cancelled() && hashFiles('tmp/test-cache/passes.jsonl') != '' }}
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: tmp/test-cache/passes.jsonl
+          key: test-pass-main-${{ github.run_id }}-${{ github.run_attempt }}

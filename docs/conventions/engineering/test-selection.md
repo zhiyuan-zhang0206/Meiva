@@ -425,14 +425,14 @@ days. What a key does not cover (environment variables, the clock, the network, 
 test files) is the cache's residual risk; the shadow report is how it is measured, and a test that
 needs one is marked `flaky` or declared under `[test-cache]` in `meizel.policy.toml`.
 
-**Where the passes live.** An `actions/cache` entry (`test-pass-<run id>-<attempt>`, one JSON line per
-pass) restored by prefix and saved after the report. A pull request writes its own scope and reads
-`main`'s, so no pull request can seed `main`; the nightly full run on `main` is what seeds the cache
-every pull request reads, because `ci.yml` has no push trigger. Recording passes is a write: while the cache only reports, a pull request writes its own scope, but
-once a cache can gate, only `main` (the nightly and the manual full run) may record, because a pull
-request could otherwise record a pass for a tree that `main` will later read. Before the cache decides anything the
-shadow must show no `would_skip_but_failed` over enough runs; flipping it from a report to a skip is
-a separate decision.
+**Where the passes live.** An `actions/cache` entry (`test-pass-main-<run id>-<attempt>`, one JSON line per
+pass) restored by prefix `test-pass-main-`. Only `refs/heads/main` writes this cache:
+`cache-warm.yml` incrementally seeds missing static-lane passes on pushes to `main` (and
+manual dispatch), while the nightly full run of `ci.yml` on `main` records a fresh baseline without
+importing stale entries. Pull requests read `main`'s cache without saving PR-scoped entries, so a
+PR's older run can never shadow a newer `main` seed and no pull request can record a pass. Before
+the cache decides anything the shadow must show no `would_skip_but_failed` over enough runs;
+flipping it from a report to a skip is a separate decision.
 
 ## Skipping e2e for changes outside the e2e inputs
 
