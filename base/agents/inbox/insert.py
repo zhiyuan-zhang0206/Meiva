@@ -8,11 +8,13 @@ import psycopg
 from base import telemetry
 from base.agents.inbox.wake import publish_inbound_wake
 from base.agents.messages.envelope import validate_source
+from base.agents.messages.inbound import InboundKind
 from base.agents.messages.inbound_provenance import (
     InboundProvenance,
     content_sha256,
     source_assertion_match,
 )
+from base.agents.messages.kwargs import NoteTag
 from base.api_contracts.caller_identity import caller_payload
 from base.db import Database
 from base.db.rows import IdRow, query_one
@@ -32,6 +34,20 @@ def _reject_reserved_payload(payload: dict[str, object] | None) -> None:
         raise ValueError("resurrection_retry is reserved for the pending resurrection owner")
     if {"resurrection_launch", "resurrection_launch_attempts"} & payload.keys():
         raise ValueError("resurrection launch evidence is reserved for the lifecycle owner")
+
+
+def _validate_system_note_payload(kind: str, payload: dict[str, object] | None) -> None:
+    if kind != InboundKind.SYSTEM_NOTE.value:
+        return
+    if not payload:
+        raise ValueError("system_note inbound requires a payload with 'note_tag'")
+    raw = payload.get("note_tag")
+    if not isinstance(raw, str):
+        raise TypeError(f"system_note inbound 'note_tag' must be a NoteTag value, got {raw!r}")
+    try:
+        _ = NoteTag(raw)
+    except ValueError as exc:
+        raise ValueError(f"system_note inbound 'note_tag' {raw!r} is not a NoteTag value") from exc
 
 
 def _lineage_event(kind: str, source: str) -> tuple[str | None, int | None]:
@@ -141,6 +157,7 @@ def insert_inbound_message_in_transaction(
     :func:`publish_inbound_wake`.
     """
     _reject_reserved_payload(payload)
+    _validate_system_note_payload(kind, payload)
     payload = caller_payload(source, payload)
     source_verified_by = provenance.source_verified_by if provenance is not None else None
     source_transport = provenance.source_transport if provenance is not None else None

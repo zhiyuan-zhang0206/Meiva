@@ -661,8 +661,9 @@ def test_dead_letter_stale_pending_terminated_preserves_passive_lifecycle_notes(
     )
     with db_conn.cursor() as cur:
         cur.execute(
-            "INSERT INTO inbound_messages (agent_id, content, kind, source, created_at) "
-            "VALUES (%s, 'plain note', 'system_note', 'system', now() - make_interval(secs => %s)) "
+            "INSERT INTO inbound_messages (agent_id, content, kind, source, payload, created_at) "
+            "VALUES (%s, 'plain note', 'system_note', 'system', "
+            '\'{"note_tag": "context"}\'::jsonb, now() - make_interval(secs => %s)) '
             "RETURNING id",
             (aid, _THRESHOLD_S + 60),
         )

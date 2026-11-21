@@ -60,10 +60,11 @@ def message(
     hours_ago: float = 1,
     content: str = "hi",
 ) -> int:
+    payload = '{"note_tag": "task"}' if kind == "system_note" else None
     row = conn.execute(
-        "INSERT INTO inbound_messages (agent_id, content, kind, source) "
-        "VALUES (%s, %s, %s, %s) RETURNING id",
-        (receiver, content, kind, f"agent:{sender}"),
+        "INSERT INTO inbound_messages (agent_id, content, kind, source, payload) "
+        "VALUES (%s, %s, %s, %s, %s::jsonb) RETURNING id",
+        (receiver, content, kind, f"agent:{sender}", payload),
     ).fetchone()
     assert row is not None
     inbound_id = int(row[0])
