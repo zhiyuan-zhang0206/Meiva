@@ -365,7 +365,7 @@ def list_compact_boundary_checkpoint_ids(
         raise ValueError(f"compact boundary limit must be positive, got {limit}")
     query = (
         "SELECT checkpoint_id FROM checkpoints"
-        " WHERE thread_id = %s AND metadata->>'compact_boundary' = 'true'"
+        " WHERE thread_id = %s AND checkpoint_ns = '' AND metadata->>'compact_boundary' = 'true'"
         " ORDER BY checkpoint_id DESC"
     )
     try:
@@ -397,7 +397,7 @@ def latest_checkpoint_id(db: Database, agent_id: int) -> str | None:
             row = query_one(
                 conn,
                 _LatestRow,
-                "SELECT max(checkpoint_id) AS latest FROM checkpoints WHERE thread_id = %s",
+                "SELECT max(checkpoint_id) AS latest FROM checkpoints WHERE thread_id = %s AND checkpoint_ns = ''",
                 (str(agent_id),),
             )
     except Exception as exc:
@@ -623,7 +623,7 @@ def load_checkpoint_history_full(db: Database, agent_id: int) -> FullHistory:
                 conn,
                 _BoundaryRow,
                 "SELECT checkpoint_id, metadata -> %s::text AS anchor FROM checkpoints"
-                " WHERE thread_id = %s AND metadata->>'compact_boundary' = 'true'"
+                " WHERE thread_id = %s AND checkpoint_ns = '' AND metadata->>'compact_boundary' = 'true'"
                 " ORDER BY checkpoint_id ASC",
                 (METADATA_KEY, str(agent_id)),
             )
@@ -716,7 +716,7 @@ def load_checkpoint_messages_by_trace(
                 conn,
                 _CheckpointIdRow,
                 "SELECT checkpoint_id FROM checkpoints"
-                " WHERE thread_id = %s AND metadata->>'trace_id' = %s"
+                " WHERE thread_id = %s AND checkpoint_ns = '' AND metadata->>'trace_id' = %s"
                 " ORDER BY checkpoint_id DESC LIMIT 1",
                 (str(agent_id), trace_id),
             )
@@ -752,7 +752,7 @@ async def alatest_checkpoint_id(
         return None
     async with pool.connection() as conn, conn.cursor() as cur:
         await cur.execute(
-            "SELECT max(checkpoint_id) FROM checkpoints WHERE thread_id = %s",
+            "SELECT max(checkpoint_id) FROM checkpoints WHERE thread_id = %s AND checkpoint_ns = ''",
             (thread_id,),
         )
         row = await cur.fetchone()

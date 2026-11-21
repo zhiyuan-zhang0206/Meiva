@@ -21,3 +21,8 @@ unrounded so segment boundaries cannot change accumulation; span subtraction
 rounds dollars at the existing nine-decimal precision.
 
 Exact segment reads preserve heads and anchors; immutable segment offsets and unrounded usage prefixes keep window and full-history costs identical.
+
+Conversation history, retained boundary lists and trace lookups read the root
+checkpoint namespace (`checkpoint_ns = ''`), matching the graph state readers.
+Latest-checkpoint queries constrain both `thread_id` and `checkpoint_ns` so the
+composite checkpoint key can serve their ordering without a per-thread sort.

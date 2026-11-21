@@ -11,7 +11,9 @@ from langgraph.checkpoint.postgres import PostgresSaver
 from psycopg_pool import AsyncConnectionPool
 
 from base.agents.history.checkpoint import (
+    alatest_checkpoint_id,
     attach_trace_to_checkpoint,
+    latest_checkpoint_id,
     load_checkpoint_messages_by_trace,
 )
 from base.config import settings
@@ -29,6 +31,7 @@ def _put_checkpoint(
     *,
     metadata: dict[str, object] | None = None,
     version: str = "1",
+    checkpoint_ns: str = "",
 ) -> str:
     ckpt = empty_checkpoint()
     ckpt["channel_values"] = {"messages": messages}
@@ -36,7 +39,7 @@ def _put_checkpoint(
     with PostgresSaver.from_conn_string(settings.data_plane.db_url) as saver:
         saver.setup()
         saved = saver.put(
-            config={"configurable": {"thread_id": thread_id, "checkpoint_ns": ""}},
+            config={"configurable": {"thread_id": thread_id, "checkpoint_ns": checkpoint_ns}},
             checkpoint=ckpt,
             metadata=cast(
                 CheckpointMetadata,
@@ -115,3 +118,24 @@ def test_load_by_trace_picks_newest_when_multiple(
     assert cid == newer
     assert cid != older
     assert loaded[0].content == "v2"
+
+
+@pytest.mark.asyncio
+async def test_latest_and_trace_reads_stay_in_the_root_namespace(
+    db_conn: psycopg.Connection, database_gate: ProcessDbGate
+) -> None:
+    trace_id = "f" * 32
+    root = _put_checkpoint("19", [HumanMessage(content="root")], metadata={"trace_id": trace_id})
+    _put_checkpoint(
+        "19",
+        [HumanMessage(content="subgraph")],
+        metadata={"trace_id": trace_id},
+        checkpoint_ns="subgraph",
+    )
+    db = _db(database_gate=database_gate)
+    assert latest_checkpoint_id(db, 19) == root
+    async with AsyncConnectionPool[psycopg.AsyncConnection](settings.data_plane.db_url) as pool:
+        assert await alatest_checkpoint_id(pool, "19") == root
+    checkpoint_id, messages = load_checkpoint_messages_by_trace(db, 19, trace_id)
+    assert checkpoint_id == root
+    assert [message.content for message in messages] == ["root"]
