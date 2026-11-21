@@ -85,9 +85,13 @@ async def finish_pending_failure(
     ctx: MeivaContext,
     config: RunnableConfig,
     pending: PendingTurnFailure,
+    *,
+    planned_stop: bool,
 ) -> TurnOutcome:
     async with database_phase():
-        await settle_turn_failure(graph, checkpointer, config, ctx, agent_id, pending)
+        await settle_turn_failure(
+            graph, checkpointer, config, ctx, agent_id, pending, planned_stop=planned_stop
+        )
         await attach_trace_checkpoint_ref(graph, ctx, agent_id)
     fatal_reason = format_fatal_reason(pending.error) if pending.marks_crash else None
     return TurnOutcome(

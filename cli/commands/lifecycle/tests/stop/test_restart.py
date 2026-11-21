@@ -156,6 +156,8 @@ def test_a_leg_refusal_is_said_on_stderr_once_and_returns_its_code(
 # meiva:note
 # A home with no persisted setup cannot register or probe: the restart is declined before
 # anything stops, the journal is closed with the reason, and the host is still serving.
+# The journal carries the restart's budget as its deadline: the agent host reads an open restart
+# as an operator's planned stop only before it.
 def test_a_restart_whose_probes_fail_is_declined_and_stops_nothing(
     home: Path,
     capsys: pytest.CaptureFixture[str],
@@ -169,6 +171,7 @@ def test_a_restart_whose_probes_fail_is_declined_and_stops_nothing(
     assert "refusing restart: preflight probes failed — host still serving" in err
     journal = finished_journal(home)
     assert journal.complete
+    assert journal.deadline is not None
     result = journal_result(journal)
     assert result["rc"] == RESTART_DECLINED_EXIT_CODE
     assert result["error"] == "preflight probes failed"

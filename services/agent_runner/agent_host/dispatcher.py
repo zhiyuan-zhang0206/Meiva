@@ -176,6 +176,7 @@ class TurnScheduler:
         self._pending: set[int] = set()
         self._closed = False
         self._stopping = False
+        self._planned_stop = False
         self._restart_required = False
 
     @property
@@ -199,11 +200,20 @@ class TurnScheduler:
     # The graceful exit's first step: start no turn from now on and return the agents
     # whose turn task still runs; those turns finish and do not loop again. A wake
     # refused from here on loses nothing: its inbound stays pending in Postgres for the
-    # next host's scan.
+    # next host's scan. `planned` records whether an operator's stop or restart asked
+    # for this exit, as opposed to root replacing a host it observed down.
     # meiva:link services/agent_runner/agent_host/lifecycle/docs/graceful-exit.md
-    def stop_admission(self) -> frozenset[int]:
+    def stop_admission(self, *, planned: bool) -> frozenset[int]:
         self._stopping = True
+        self._planned_stop = planned
         return self.active_agents
+
+    # meiva:note
+    # Whether this host is in an exit an operator's stop or restart asked for. A turn that
+    # aborts during it was cut by the stop, not by a fault: `llm_turn_aborted` says so and
+    # its alert leaves it out.
+    def in_planned_stop(self) -> bool:
+        return self._stopping and self._planned_stop
 
     def wake(self, agent_id: int) -> asyncio.Task[None] | None:
         """Record a wake and return its turn task for caller accounting.

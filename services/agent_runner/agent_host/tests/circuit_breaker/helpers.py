@@ -97,6 +97,7 @@ async def reject_turn(
             clock_factory=Clock.from_settings,
         ),
         agent_id=agent_id,
+        planned_stop=False,
         circuit=None,
         occurred_at=datetime(2026, 9, 16, 6, 0, tzinfo=UTC),
     )

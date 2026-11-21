@@ -204,3 +204,26 @@ def test_journal_write_failure_never_breaks_the_operation(
 
     assert journal.read(home) is None
     assert any("journal write failed" in str(record["message"]) for record in loguru_records)
+
+
+# meiva:note
+# An operator's stop or restart is underway only while its journal is open, before the deadline it
+# recorded, and its writer lives: no journal (root's own health replacement writes none), a finished
+# one, one past its deadline (a writer killed mid-operation, whose pid may since have been reused),
+# one with no deadline, or one whose writer is gone all read as not underway.
+def test_operator_stop_in_progress_reads_an_open_live_stop_or_restart(home: Path) -> None:
+    now = time.monotonic()
+    assert journal.operator_stop_in_progress(home, now=now) is False
+    for operation in ("stop", "restart"):
+        journal.journal_path(home).unlink(missing_ok=True)
+        journal.begin(home, operation, pid=_ENTRY_PID, deadline=now + 60)
+        assert journal.operator_stop_in_progress(home, now=now) is True
+        assert journal.operator_stop_in_progress(home, now=now + 61) is False
+        journal.finish(home, 0)
+        assert journal.operator_stop_in_progress(home, now=now) is False
+    journal.journal_path(home).unlink()
+    journal.begin(home, "stop", pid=_ENTRY_PID)
+    assert journal.operator_stop_in_progress(home, now=now) is False
+    journal.journal_path(home).unlink()
+    journal.begin(home, "stop", pid=_reaped_pid(), deadline=now + 60)
+    assert journal.operator_stop_in_progress(home, now=now) is False
