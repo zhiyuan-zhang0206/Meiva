@@ -1,7 +1,7 @@
 # meiva:note
-# Post-turn local personal memory scanner, cooldown state store, and system_note delivery for
-# Personal Self-Dream (task #7522). Runs on the agent's own host after a normal turn settles to
-# idle; never scans or wakes sleeping agents. Pure rules and message formatting live in
+# Post-turn local personal memory scanner, cooldown/watermark state store, and system_note
+# delivery for Personal Self-Dream (task #7522). Runs on the agent's own host after a normal turn
+# settles to idle; never scans or wakes sleeping agents. Pure rules and message formatting live in
 # `personal_dream_policy.py`.
 
 from __future__ import annotations
@@ -35,6 +35,7 @@ from services.agent_runner.agent_host.lifecycle.personal_dream_policy import (
     PERSONAL_MEMORY_DIRNAME,
     PERSONAL_MEMORY_INDEX_FILENAME,
     PersonalDreamOutcome,
+    PersonalDreamState,
     PersonalMemoryScan,
     build_personal_dream_inbound_payload,
     evaluate_personal_dream,
@@ -45,16 +46,25 @@ from services.agent_runner.agent_host.lifecycle.personal_dream_policy import (
 from services.agent_runner.agent_host.runtime import PersonalDreamPolicy
 
 __all__ = [
+    "PersonalDreamGuard",
     "check_and_remind_personal_dream",
+    "inspect_personal_dream_guard",
     "is_personal_dream_turn_or_pending",
     "personal_dream_state_path",
     "personal_memory_path",
-    "read_last_reminded_at",
+    "read_personal_dream_state",
     "scan_personal_memory",
-    "write_last_reminded_at",
+    "write_personal_dream_state",
 ]
 
 _STATE_TMP_SUFFIX = ".tmp"
+
+# meiva:note
+# Upper bound for one multi-row `reserve_head_batch` UPDATE stamping rows with `clock_timestamp()`.
+# Paired with `lc.created_at <= m.claimed_at`, this recognizes same-batch rows whose per-row
+# `clock_timestamp()` differs by microseconds/milliseconds without matching a later turn's row
+# inserted after the previous batch was claimed.
+_CLAIM_BATCH_TOLERANCE_SECONDS = 5.0
 
 
 def personal_dream_state_path(workspace_root: Path) -> Path:
@@ -233,54 +243,82 @@ def scan_personal_memory(
     )
 
 
+def _parse_finite_float(value: object) -> float | None:
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        return None
+    try:
+        parsed = float(value)
+    except OverflowError:
+        return None
+    return parsed if math.isfinite(parsed) else None
+
+
 # meiva:note
-# Read the persisted last-reminder unix timestamp, or None when absent/invalid.
-def read_last_reminded_at(workspace_root: Path) -> float | None:
+# Read the persisted Personal Self-Dream state, or None when absent/invalid. Backward-compatible
+# with legacy state files carrying only `last_reminded_at`: missing `awaiting_dream_turn` defaults
+# to False and missing `baseline_mtime` defaults to None (falling back to `last_reminded_at`).
+def read_personal_dream_state(workspace_root: Path) -> PersonalDreamState | None:
     path = personal_dream_state_path(workspace_root)
     try:
         raw = object_of(json.loads, path.read_text(encoding="utf-8"))
-    except (OSError, ValueError):
+    except (OSError, ValueError, OverflowError):
         return None
     if not is_object_dict(raw):
         return None
-    value = raw.get("last_reminded_at")
-    if isinstance(value, bool) or not isinstance(value, (int, float)):
+    last_reminded = _parse_finite_float(raw.get("last_reminded_at"))
+    if last_reminded is None:
         return None
-    timestamp = float(value)
-    return timestamp if math.isfinite(timestamp) else None
+    awaiting_raw = raw.get("awaiting_dream_turn")
+    awaiting = awaiting_raw if isinstance(awaiting_raw, bool) else False
+    baseline = _parse_finite_float(raw.get("baseline_mtime"))
+    return PersonalDreamState(
+        last_reminded_at=last_reminded,
+        awaiting_dream_turn=awaiting,
+        baseline_mtime=baseline,
+    )
 
 
 # meiva:note
-# Persist the last-reminder unix timestamp atomically inside the workspace.
-def write_last_reminded_at(workspace_root: Path, timestamp: float) -> None:
+# Persist Personal Self-Dream cooldown and watermark state atomically inside the workspace.
+def write_personal_dream_state(workspace_root: Path, state: PersonalDreamState) -> None:
     path = personal_dream_state_path(workspace_root)
     tmp_path = path.with_name(f"{path.name}{_STATE_TMP_SUFFIX}")
-    payload = json.dumps({"last_reminded_at": timestamp})
+    payload = json.dumps(
+        {
+            "last_reminded_at": state.last_reminded_at,
+            "awaiting_dream_turn": state.awaiting_dream_turn,
+            "baseline_mtime": state.baseline_mtime,
+        }
+    )
     tmp_path.write_text(payload, encoding="utf-8")
     tmp_path.replace(path)
 
 
 @dataclass(frozen=True)
-class _PersonalDreamGuardRow:
+class PersonalDreamGuard:
     latest_was_personal_dream: bool
     has_pending: bool
 
 
 # meiva:note
-# Return True if the latest claimed batch was a Personal Self-Dream reminder or one is already
-# pending. Uses PostgreSQL's own `claimed_at` batch watermark so there is zero host-vs-DB clock
-# skew and identical semantics across native `meiva` and external harnesses.
-async def is_personal_dream_turn_or_pending(
+# Inspect whether the latest claimed batch contained a Personal Self-Dream reminder or one is
+# already pending. Uses PostgreSQL timestamps exclusively (zero host-vs-DB clock skew). Handles
+# both native `now()` batch claims (identical `claimed_at`) and external harness
+# `reserve_head_batch` claims (`clock_timestamp()` advancing per row within one UPDATE) by
+# matching rows claimed within `_CLAIM_BATCH_TOLERANCE_SECONDS` of `lc.claimed_at` when the
+# latest row already existed (`lc.created_at <= m.claimed_at`), avoiding false positives across
+# fast back-to-back turns.
+async def inspect_personal_dream_guard(
     pool: AsyncConnectionPool[psycopg.AsyncConnection],
     agent_id: int,
-) -> bool:
+) -> PersonalDreamGuard:
     tag = NoteTag.PERSONAL_DREAM.value
     async with pool.connection() as conn:
         row = await aquery_one(
             conn,
-            _PersonalDreamGuardRow,
+            PersonalDreamGuard,
             "WITH latest_claim AS ("
-            "  SELECT claimed_at "
+            "  SELECT created_at, claimed_at "
             "  FROM inbound_messages "
             "  WHERE agent_id = %s "
             "    AND status IN ('claimed', 'done') "
@@ -294,7 +332,15 @@ async def is_personal_dream_turn_or_pending(
             "    SELECT 1 FROM inbound_messages m, latest_claim lc "
             "    WHERE m.agent_id = %s "
             "      AND m.status IN ('claimed', 'done') "
-            "      AND m.claimed_at = lc.claimed_at "
+            "      AND m.claimed_at IS NOT NULL "
+            "      AND ("
+            "        m.claimed_at = lc.claimed_at "
+            "        OR ("
+            "          m.claimed_at <= lc.claimed_at "
+            "          AND lc.created_at <= m.claimed_at "
+            "          AND lc.claimed_at - m.claimed_at <= make_interval(secs => %s)"
+            "        )"
+            "      ) "
             "      AND m.kind = 'system_note' "
             "      AND m.payload ->> 'note_tag' = %s"
             "  ) AS latest_was_personal_dream, "
@@ -305,11 +351,19 @@ async def is_personal_dream_turn_or_pending(
             "      AND p.kind = 'system_note' "
             "      AND p.payload ->> 'note_tag' = %s"
             "  ) AS has_pending",
-            (agent_id, agent_id, tag, agent_id, tag),
+            (agent_id, agent_id, _CLAIM_BATCH_TOLERANCE_SECONDS, tag, agent_id, tag),
         )
     if row is None:
-        return False
-    return row.latest_was_personal_dream or row.has_pending
+        return PersonalDreamGuard(latest_was_personal_dream=False, has_pending=False)
+    return row
+
+
+async def is_personal_dream_turn_or_pending(
+    pool: AsyncConnectionPool[psycopg.AsyncConnection],
+    agent_id: int,
+) -> bool:
+    guard = await inspect_personal_dream_guard(pool, agent_id)
+    return guard.latest_was_personal_dream or guard.has_pending
 
 
 def _insert_personal_dream_reminder(
@@ -329,8 +383,48 @@ def _insert_personal_dream_reminder(
 
 
 # meiva:note
+# Settle `awaiting_dream_turn=True` once the Dream turn completes:
+# - Dream turn completed with no new pending note: advance `last_reminded_at` to `now_epoch`,
+#   capture post-Dream `scan.latest_mtime` as `baseline_mtime`, clear `awaiting_dream_turn`, and
+#   return `SKIPPED_SELF_TRIGGER` (prevents the Dream turn's own edits from triggering Condition B
+#   after cooldown expires).
+# - Reminder still pending: keep `awaiting_dream_turn=True` and return `SKIPPED_SELF_TRIGGER`.
+# - Neither Dream turn nor pending (e.g. Dream turn aborted or reminder was cancelled): clear
+#   `awaiting_dream_turn=False` so subsequent cooldown turns return to 0 DB queries, and return the
+#   updated state for normal evaluation.
+async def _resolve_awaiting_dream_turn(
+    *,
+    agent_id: int,
+    workspace_root: Path,
+    scan: PersonalMemoryScan,
+    state: PersonalDreamState,
+    now_epoch: float,
+    pool: AsyncConnectionPool[psycopg.AsyncConnection],
+) -> tuple[PersonalDreamOutcome | None, PersonalDreamState]:
+    guard = await inspect_personal_dream_guard(pool, agent_id)
+    if guard.latest_was_personal_dream and not guard.has_pending:
+        settled = PersonalDreamState(
+            last_reminded_at=now_epoch,
+            awaiting_dream_turn=False,
+            baseline_mtime=scan.latest_mtime,
+        )
+        write_personal_dream_state(workspace_root, settled)
+        return PersonalDreamOutcome.SKIPPED_SELF_TRIGGER, settled
+    if guard.has_pending:
+        return PersonalDreamOutcome.SKIPPED_SELF_TRIGGER, state
+    cleared = PersonalDreamState(
+        last_reminded_at=state.last_reminded_at,
+        awaiting_dream_turn=False,
+        baseline_mtime=state.baseline_mtime,
+    )
+    write_personal_dream_state(workspace_root, cleared)
+    return None, cleared
+
+
+# meiva:note
 # Scan the local `<workspace>/memory/` after a normal turn and enqueue a Personal Self-Dream
-# reminder when capacity or active-change criteria match past cooldown.
+# reminder when capacity or active-change criteria match past cooldown. Normal turns inside
+# cooldown (`awaiting_dream_turn=False`) perform 0 DB queries.
 async def check_and_remind_personal_dream(
     *,
     agent_id: int,
@@ -346,10 +440,23 @@ async def check_and_remind_personal_dream(
         return PersonalDreamOutcome.DISABLED
 
     scan = scan_personal_memory(workspace_root)
+    state = read_personal_dream_state(workspace_root)
+    if state is not None and state.awaiting_dream_turn:
+        settled_outcome, state = await _resolve_awaiting_dream_turn(
+            agent_id=agent_id,
+            workspace_root=workspace_root,
+            scan=scan,
+            state=state,
+            now_epoch=now_epoch,
+            pool=pool,
+        )
+        if settled_outcome is not None:
+            return settled_outcome
+
     if scan.is_empty:
         return PersonalDreamOutcome.EMPTY
 
-    last_reminded = read_last_reminded_at(workspace_root)
+    last_reminded = state.last_reminded_at if state is not None else None
     if not is_cooldown_elapsed(
         last_reminded_at=last_reminded,
         now_epoch=now_epoch,
@@ -359,7 +466,7 @@ async def check_and_remind_personal_dream(
 
     decision = evaluate_personal_dream(
         scan,
-        last_reminded_at=last_reminded,
+        state=state,
         now_epoch=now_epoch,
         cooldown_seconds=policy.cooldown_seconds,
         index_max_lines=policy.index_max_lines,
@@ -382,7 +489,14 @@ async def check_and_remind_personal_dream(
         shared_memory_path=shared_display,
     )
     await asyncio.to_thread(_insert_personal_dream_reminder, db, bus, agent_id, content)
-    write_last_reminded_at(workspace_root, now_epoch)
+    write_personal_dream_state(
+        workspace_root,
+        PersonalDreamState(
+            last_reminded_at=now_epoch,
+            awaiting_dream_turn=True,
+            baseline_mtime=scan.latest_mtime,
+        ),
+    )
     logger.info(
         "personal Self-Dream reminder enqueued for agent {agent_id} "
         "(reason={reason}, index_lines={index_lines}, file_count={file_count})",

@@ -19,6 +19,7 @@ __all__ = [
     "PERSONAL_MEMORY_INDEX_FILENAME",
     "PersonalDreamDecision",
     "PersonalDreamOutcome",
+    "PersonalDreamState",
     "PersonalDreamTriggerReason",
     "PersonalMemoryScan",
     "build_personal_dream_inbound_payload",
@@ -80,6 +81,19 @@ class PersonalDreamDecision:
     active_changes: bool
 
 
+# meiva:note
+# Persisted per-agent Personal Self-Dream cooldown and filesystem watermark state stored in
+# `<workspace>/.meiva_personal_dream.json`. `awaiting_dream_turn` marks that a reminder was
+# enqueued and its Dream turn has not yet completed; once the Dream turn settles, the host
+# advances `last_reminded_at` and records the post-Dream `baseline_mtime` so the Dream turn's own
+# edits to `memory/` never trigger Condition B after cooldown expires.
+@dataclass(frozen=True)
+class PersonalDreamState:
+    last_reminded_at: float
+    awaiting_dream_turn: bool = False
+    baseline_mtime: float | None = None
+
+
 class PersonalDreamOutcome(StrEnum):
     DISABLED = "disabled"
     EMPTY = "empty"
@@ -109,36 +123,59 @@ def is_cooldown_elapsed(
     return (now_epoch - last_reminded_at) >= cooldown_seconds
 
 
+def _has_active_changes(
+    scan: PersonalMemoryScan,
+    *,
+    state: PersonalDreamState | None,
+    now_epoch: float,
+    cooldown_seconds: int,
+) -> bool:
+    if scan.earliest_mtime is None or scan.latest_mtime is None:
+        return False
+    if state is None:
+        return (now_epoch - scan.earliest_mtime) >= cooldown_seconds and (
+            now_epoch - scan.latest_mtime
+        ) <= cooldown_seconds
+    watermark = state.baseline_mtime if state.baseline_mtime is not None else state.last_reminded_at
+    return scan.latest_mtime > watermark
+
+
+def _select_trigger_reason(
+    *, capacity_hit: bool, active_changes: bool
+) -> PersonalDreamTriggerReason | None:
+    if capacity_hit and active_changes:
+        return PersonalDreamTriggerReason.CAPACITY_AND_ACTIVITY
+    if capacity_hit:
+        return PersonalDreamTriggerReason.CAPACITY
+    if active_changes:
+        return PersonalDreamTriggerReason.ACTIVITY
+    return None
+
+
 # meiva:note
 # Decide whether Personal Self-Dream should trigger after a normal turn:
 # - Empty personal memory (`index_lines == 0` and `file_count == 0`) never triggers.
 # - Active cooldown (`now - last_reminded_at < cooldown_seconds`) never triggers.
 # - Condition A (capacity): `index_lines > index_max_lines` or `file_count > max_files`.
 # - Condition B (active changes):
-#   * First time (`last_reminded_at is None`): oldest personal memory has existed for at least
+#   * First time (`state is None`): oldest personal memory has existed for at least
 #     `cooldown_seconds` AND latest modification occurred within the last `cooldown_seconds`
 #     (prevents firing immediately when an agent writes its very first note).
-#   * Subsequent times (`last_reminded_at is not None`, cooldown already elapsed):
-#     `latest_mtime > last_reminded_at`.
+#   * Subsequent times (`state is not None`, cooldown already elapsed):
+#     `latest_mtime > watermark`, where `watermark` is `baseline_mtime` (same filesystem mtime
+#     clock domain captured after the Dream turn settled) or `last_reminded_at` for legacy state
+#     files that predate `baseline_mtime`.
 def evaluate_personal_dream(
     scan: PersonalMemoryScan,
     *,
-    last_reminded_at: float | None,
+    state: PersonalDreamState | None,
     now_epoch: float,
     cooldown_seconds: int,
     index_max_lines: int,
     max_files: int,
 ) -> PersonalDreamDecision:
-    if scan.is_empty:
-        return PersonalDreamDecision(
-            should_trigger=False,
-            reason=None,
-            index_over_limit=False,
-            files_over_limit=False,
-            active_changes=False,
-        )
-
-    if not is_cooldown_elapsed(
+    last_reminded_at = state.last_reminded_at if state is not None else None
+    if scan.is_empty or not is_cooldown_elapsed(
         last_reminded_at=last_reminded_at,
         now_epoch=now_epoch,
         cooldown_seconds=cooldown_seconds,
@@ -154,25 +191,13 @@ def evaluate_personal_dream(
     index_over_limit = scan.index_lines > index_max_lines
     files_over_limit = scan.file_count > max_files
     capacity_hit = index_over_limit or files_over_limit
-
-    if scan.earliest_mtime is None or scan.latest_mtime is None:
-        active_changes = False
-    elif last_reminded_at is None:
-        active_changes = (now_epoch - scan.earliest_mtime) >= cooldown_seconds and (
-            now_epoch - scan.latest_mtime
-        ) <= cooldown_seconds
-    else:
-        active_changes = scan.latest_mtime > last_reminded_at
-
-    if capacity_hit and active_changes:
-        reason: PersonalDreamTriggerReason | None = PersonalDreamTriggerReason.CAPACITY_AND_ACTIVITY
-    elif capacity_hit:
-        reason = PersonalDreamTriggerReason.CAPACITY
-    elif active_changes:
-        reason = PersonalDreamTriggerReason.ACTIVITY
-    else:
-        reason = None
-
+    active_changes = _has_active_changes(
+        scan,
+        state=state,
+        now_epoch=now_epoch,
+        cooldown_seconds=cooldown_seconds,
+    )
+    reason = _select_trigger_reason(capacity_hit=capacity_hit, active_changes=active_changes)
     return PersonalDreamDecision(
         should_trigger=reason is not None,
         reason=reason,
@@ -232,7 +257,8 @@ def format_personal_dream_reminder(
         "Please run a quick 4-step Personal Self-Dream pass:",
         f"1. Compare your personal `memory/` against the latest shared "
         f"`{shared_memory_path}/MEMORY.md` and current reality; delete outdated or retired "
-        "entries and orphan note files.",
+        "entries and orphan note files (keep `INHERIT.md` and the `inherit/` directory — "
+        "they are descendant inheritance files, not orphans).",
         "2. Merge duplicate or overlapping personal notes on the same topic.",
         f"3. Promote cross-agent reusable lessons as plain Markdown files into "
         f"`{shared_memory_path}/` (synced every 2 minutes via `land/<machine>` PR to "
