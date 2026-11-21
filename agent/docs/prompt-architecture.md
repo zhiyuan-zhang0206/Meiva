@@ -143,8 +143,8 @@ Capabilities rather than standing as its own section.
   empty or low-information acknowledgements (before tools or mid-task) and to
   work silently until the final answer or a real blocker; when on, it instructs
   agents to emit one concise `MEIVA_DISPLAY_TO_USER` (or `meiva.ui.publish`)
-  confirmation before calling tools on direct, unambiguous user requests and
-  stay silent after pure-action commands instead of interrupting a second time.
+  confirmation before calling tools on new, unambiguous requests sent directly
+  by the human in the conversation (not agent briefs or relays), and stay silent after pure-action commands instead of interrupting a second time.
 - **Core communication style** — `agent/graph/prompt/system_prompt.py:communication_style_section`,
   selected by `settings.agent.agent_communication_style` (env
   `MEIVA_AGENT_COMMUNICATION_STYLE`, default `off`): how much the agent narrates
@@ -348,7 +348,8 @@ Review every section with these questions:
 An unconditional communication policy lives in `conversation.user_reply_section`: a
 human request gets a direct answer, and `## Fast acknowledgement` (`fast_acknowledgement`,
 cluster default `False`, per-agent `config_overlay` override) controls whether
-a concise pre-tool confirmation is emitted on direct unambiguous requests (`True`)
+a concise pre-tool confirmation is emitted on new, unambiguous requests sent
+directly by the human in the conversation, not agent briefs or relays (`True`)
 or empty acknowledgements are suppressed until results/blockers (`False`).
 It owns ordinary assistant-text reply routing, including text alongside tool calls,
 and applies to unfinished human requests resumed from handoff records. Once enough

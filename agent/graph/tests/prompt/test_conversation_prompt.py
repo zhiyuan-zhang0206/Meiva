@@ -293,10 +293,10 @@ def test_claude_code_handoff_appends_visibility_why_only_in_prefix_mode(
     )[0]
 
     assert "Unlike standalone Claude Code" in visibility_block
-    assert "meiva.agents.send_message" in visibility_block
-    assert "When you have a delegator" in visibility_block
+    assert "worker reports to its delegator" in visibility_block
+    assert "when your brief quotes a human or asks for a PR or report" in visibility_block
+    assert visibility_block.count("Keep delegated summaries") == 1
     assert "unexpected unread badge" in visibility_block
-    assert "delegated summaries" in visibility_block
     assert "MEIVA_HIDE_FROM_USER" in visibility_block
     assert "MEIVA_DISPLAY_TO_USER" in visibility_block
     assert (
@@ -393,3 +393,50 @@ def test_fast_acknowledgement_off_and_on_across_modes_and_callers(mode: str) -> 
     on_phrase_1, on_phrase_2, off_phrase = _FAST_ACK_MODE_PHRASES[mode]
     assert on_phrase_1 in on_native and on_phrase_2 in on_native
     assert off_phrase in off_native
+
+
+@pytest.mark.parametrize("mode", ["prefix", "sdk", "naive"])
+def test_fast_acknowledgement_is_only_for_direct_human_requests(mode: str) -> None:
+    for key, text in _rendered(mode, fast_acknowledgement=True).items():
+        if key.startswith("style/"):
+            continue
+        fast_ack = text.split("## Fast acknowledgement", 1)[1]
+        assert (
+            "Only a new request sent directly by the human in this conversation qualifies"
+            in fast_ack
+        )
+        assert (
+            "agent briefs, relays and peer messages do not, even when they quote the human"
+            in fast_ack
+        )
+        assert "no human is waiting for receipt of an agent brief" in fast_ack
+
+
+@pytest.mark.parametrize("fast_acknowledgement", [False, True])
+@pytest.mark.parametrize("mode", ["prefix", "sdk", "naive"])
+def test_delegated_reporting_uses_peer_routing_and_hidden_summaries(
+    mode: str, fast_acknowledgement: bool
+) -> None:
+    slices = _slices(
+        agent__user_delivery_mode=mode, agent__fast_acknowledgement=fast_acknowledgement
+    )
+    for text in (user_reply_section(_inputs(slices)), harness_user_reply_section(_inputs(slices))):
+        attention = text.split("## User attention\n\n", 1)[1].split("\n\n##", 1)[0]
+        assert (
+            "Agent briefs and relays are peer messages, even when they quote the human; "
+            "no human is waiting for a receipt" in attention
+        )
+        assert (
+            "progress and results to the agreed delegator via `meiva.agents.send_message`"
+            in attention
+        )
+        if mode == "prefix":
+            visibility = text.split("## Output visibility\n\n", 1)[1].split(
+                "\n\n## User attention", 1
+            )[0]
+            assert "Keep delegated summaries under MEIVA_HIDE_FROM_USER" in visibility
+            assert "displaying them would duplicate their user update" in visibility
+            assert (
+                "Exceptions: answering the human directly or an attention exception below"
+                in visibility
+            )

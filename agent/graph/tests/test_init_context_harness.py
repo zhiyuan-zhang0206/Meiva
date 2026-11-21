@@ -574,7 +574,8 @@ async def test_claude_code_wake_and_instructions_file_include_visibility_why_whi
             0
         ]
         assert "Unlike standalone Claude Code" in visibility
-        assert "meiva.agents.send_message" in visibility
+        assert "worker reports to its delegator" in visibility
+        assert "via `meiva.agents.send_message`" in doc
         assert "MEIVA_HIDE_FROM_USER" in visibility
 
     for other_id, other in ((4246, Harness.CODEX), (4247, Harness.ANTIGRAVITY)):
