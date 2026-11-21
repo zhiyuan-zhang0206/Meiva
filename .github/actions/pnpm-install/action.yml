@@ -1,0 +1,23 @@
+name: Install frontend deps with bounded retry
+description: Run the frozen frontend install with two bounded attempts.
+runs:
+  using: composite
+  steps:
+    - name: Install frontend deps
+      shell: bash
+      working-directory: ui/web
+      run: |
+        # Healthy cached installs took 8-13s in the two incident runs. Allow
+        # 120s for cold downloads, then kill the entire timeout process group;
+        # a 10s TERM grace prevents a stuck child from blocking the retry.
+        for attempt in 1 2; do
+          if timeout --verbose --kill-after=10s 120s pnpm install --frozen-lockfile; then
+            exit 0
+          else
+            status=$?
+          fi
+          echo "::warning::Frontend install attempt ${attempt}/2 failed (exit ${status})"
+          ps -eo pid,ppid,pgid,stat,etime,args || true
+        done
+        echo "::error::Frontend install failed after two bounded attempts"
+        exit "$status"

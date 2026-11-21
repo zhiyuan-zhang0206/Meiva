@@ -952,8 +952,8 @@ jobs:
           key: ui-web-node-modules-${{ runner.os }}-${{ hashFiles('ui/web/pnpm-lock.yaml') }}
 
       - name: Install frontend deps (TypeScript source parser)
-        working-directory: ui/web
-        run: pnpm install --frozen-lockfile
+        timeout-minutes: 5
+        uses: ./.github/actions/pnpm-install
 
       - name: Download the selected test list
         if: ${{ github.event_name == 'pull_request' && needs.classify.outputs.decision == 'SELECTED' }}
@@ -1130,8 +1130,8 @@ jobs:
           cache_dependency_path: ui/web/pnpm-lock.yaml
 
       - name: Install frontend deps (source parser and codegen)
-        working-directory: ui/web
-        run: pnpm install --frozen-lockfile
+        timeout-minutes: 5
+        uses: ./.github/actions/pnpm-install
 
       - name: Check source notes and changed-file migration
         run: bash scripts/content_lint/code_comments/check.sh changed "${LINT_STRUCTURE_BASELINE_BASE:?missing comparison base}"
@@ -1402,8 +1402,8 @@ jobs:
           key: ui-web-node-modules-${{ runner.os }}-${{ hashFiles('ui/web/pnpm-lock.yaml') }}
 
       - name: Install frontend deps (TypeScript source parser)
-        working-directory: ui/web
-        run: pnpm install --frozen-lockfile
+        timeout-minutes: 5
+        uses: ./.github/actions/pnpm-install
 
       - name: Run pytest shard
         id: pytest-shard
@@ -1587,8 +1587,8 @@ jobs:
           key: ui-web-node-modules-${{ runner.os }}-${{ hashFiles('ui/web/pnpm-lock.yaml') }}
 
       - name: Install frontend deps (TypeScript source parser)
-        working-directory: ui/web
-        run: pnpm install --frozen-lockfile
+        timeout-minutes: 5
+        uses: ./.github/actions/pnpm-install
 
       - name: Download the selected test list
         uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
@@ -2458,8 +2458,8 @@ jobs:
           cache_dependency_path: ui/web/pnpm-lock.yaml
 
       - name: Install frontend deps
-        working-directory: ui/web
-        run: pnpm install --frozen-lockfile
+        timeout-minutes: 5
+        uses: ./.github/actions/pnpm-install
 
       - name: Generate Next.js route types (typedRoutes)
         working-directory: ui/web
@@ -2592,8 +2592,8 @@ jobs:
           key: ui-web-node-modules-${{ runner.os }}-${{ hashFiles('ui/web/pnpm-lock.yaml') }}
 
       - name: Install frontend deps
-        working-directory: ui/web
-        run: pnpm install --frozen-lockfile
+        timeout-minutes: 5
+        uses: ./.github/actions/pnpm-install
 
       - name: Restore Playwright chromium cache
         id: playwright-cache
@@ -2684,8 +2684,8 @@ jobs:
           key: ui-web-node-modules-${{ runner.os }}-${{ hashFiles('ui/web/pnpm-lock.yaml') }}
 
       - name: Install frontend deps
-        working-directory: ui/web
-        run: pnpm install --frozen-lockfile
+        timeout-minutes: 5
+        uses: ./.github/actions/pnpm-install
 
       - name: Restore Playwright chromium cache
         id: playwright-cache
@@ -2779,8 +2779,8 @@ jobs:
           key: ui-web-node-modules-${{ runner.os }}-${{ hashFiles('ui/web/pnpm-lock.yaml') }}
 
       - name: Install frontend deps
-        working-directory: ui/web
-        run: pnpm install --frozen-lockfile
+        timeout-minutes: 5
+        uses: ./.github/actions/pnpm-install
 
       - name: Restore Playwright chromium cache
         id: playwright-cache

@@ -53,3 +53,33 @@ Full Pyright uses `--threads 2`; `time` records wall/CPU cost. Threads reject
 `pyproject.toml` owns scope and diagnostics.
 
 Parent: [.github](README.md).
+
+## Frontend install hangs
+
+All frontend dependency installs in this workflow use
+[`pnpm-install`](actions/pnpm-install/action.yml): the same frozen lockfile is
+attempted twice, with a process-group deadline per attempt and a step-level
+backstop. No cache deletion, dependency re-resolution, or package-manager upgrade
+is part of recovery. The existing [failed-job rerun](workflows/ci-rerun.yml)
+also covers a runner/container transport hang that prevents the shell retry from
+running at all.
+
+On 2026-11-19, [run 44536029204, attempt 1, e2e 4/4](https://github.com/zhiyuan-zhang0206/Meiva/actions/runs/44536029204/attempts/1)
+printed pnpm 11.9.0's `Done in 12.6s` at 13:43:18Z, then remained in the install
+step until cancellation at 14:22:21Z. (The initial incident description named
+3/4; the job API and logs identify 4/4.) On 2026-11-21,
+[run 44886023185, attempt 1, Backend static contracts 6/8](https://github.com/zhiyuan-zhang0206/Meiva/actions/runs/44886023185/attempts/1)
+printed `Done in 12.2s` at 08:42:31Z and was cancelled at 09:06:32Z. The successful
+e2e 4/4 retry took 8.1s; static 2/8 in the second incident's original attempt
+took 8.8s and advanced immediately. Both failures used the same runner image,
+plain `pnpm install --frozen-lockfile`, and pnpm version as healthy jobs.
+
+The frontend has no root lifecycle/postinstall script. Its workspace uses the
+hoisted linker, disables the global virtual store and automatic pre-run installs,
+and denies the two listed native fallback builds. No lifecycle script or store
+server appears in either failed log. There is no process snapshot from the
+cancelled runners: `Done` alone does not prove pnpm exited, and the logs cannot
+distinguish a live Node handle, a descendant retaining output pipes, or a Docker
+exec/runner transport stall. Therefore this is bounded recovery, not a claimed
+root-cause fix. Failed attempts now print a process snapshot for diagnosis; the
+step backstop limits even a transport stall instead of consuming the job cap.
