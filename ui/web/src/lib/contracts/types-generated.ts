@@ -3104,6 +3104,10 @@ export interface components {
             required_missing: number;
             items: components["schemas"]["PermissionItemRow"][];
         };
+        ImageDimensions: {
+            width: number;
+            height: number;
+        };
         InboundHistoryItem: {
             id: number;
             kind: components["schemas"]["InboundKind"];
@@ -4202,6 +4206,7 @@ export interface components {
             show_timestamp: boolean;
             user_facing: boolean;
             images?: string[] | null;
+            image_dimensions?: (components["schemas"]["ImageDimensions"] | null)[] | null;
             files?: components["schemas"]["TimelineUploadFile"][] | null;
             image_captions?: string[] | null;
             sdk_calls?: components["schemas"]["SdkCall"][] | null;
@@ -4218,6 +4223,8 @@ export interface components {
             size: number;
             content_type: string;
             url: string;
+            width?: number | null;
+            height?: number | null;
         };
         ToUserDocument: {
             content: string | null;

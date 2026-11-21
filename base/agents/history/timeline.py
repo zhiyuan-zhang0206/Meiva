@@ -15,6 +15,11 @@ from langchain_core.messages import (
 from base.agents.history.timeline_item import ReadingWindow
 from base.agents.history.timeline_item import TimelineItem as TimelineItem
 from base.agents.messages.envelope import inbound_body
+from base.agents.messages.image_dimensions import (
+    ImageDimensions,
+    dimensions_for_data_uris,
+    parse_image_dimensions_list,
+)
 from base.agents.messages.inbound_images import kwargs_upload_files
 from base.agents.messages.kwargs import (
     MeivaMessageKwargs,
@@ -218,6 +223,20 @@ def _system_prompt_item(msg_idx: int, content: str) -> TimelineItem:
     )
 
 
+def _inbound_image_dimensions(
+    raw_content: MessageContent,
+    kwargs: MeivaMessageKwargs,
+    expected_len: int,
+) -> list[ImageDimensions | None] | None:
+    parsed = parse_image_dimensions_list(kwargs.get("meiva_image_dimensions"))
+    if parsed is not None and len(parsed) == expected_len:
+        return parsed
+    data_uris = _attach_images(raw_content)
+    if data_uris is None or len(data_uris) != expected_len:
+        return None
+    return dimensions_for_data_uris(data_uris)
+
+
 def _inbound_item(
     msg_idx: int,
     raw_content: MessageContent,
@@ -230,7 +249,10 @@ def _inbound_item(
             raise ValueError(
                 f"inbound meiva_inbound_id must be a positive int, got {embedded_id!r}"
             )
-    images = kwargs.get("meiva_image_urls")
+    images = kwargs.get("meiva_image_urls") or None
+    image_dimensions = (
+        _inbound_image_dimensions(raw_content, kwargs, len(images)) if images else None
+    )
     return TimelineItem(
         item_id=f"{msg_idx}.0",
         kind="inbound_chat",
@@ -243,7 +265,8 @@ def _inbound_item(
         quote=Quote.model_validate(kwargs["meiva_quote"]) if "meiva_quote" in kwargs else None,
         created_at=kwargs_read_time(kwargs),
         inbound_id=embedded_id,
-        images=images if images else None,
+        images=images,
+        image_dimensions=image_dimensions,
         files=kwargs_upload_files(kwargs.get("meiva_upload_files")),
     )
 
@@ -315,6 +338,7 @@ def _attach_image_captions(content: MessageContent) -> list[str] | None:
 
 
 def _attach_item(msg_idx: int, raw_content: MessageContent, created_at: str | None) -> TimelineItem:
+    images = _attach_images(raw_content)
     return TimelineItem(
         item_id=f"{msg_idx}.0",
         kind="attach",
@@ -322,7 +346,8 @@ def _attach_item(msg_idx: int, raw_content: MessageContent, created_at: str | No
         payload=_inbound_text(raw_content),
         created_at=created_at,
         inbound_id=None,
-        images=_attach_images(raw_content),
+        images=images,
+        image_dimensions=dimensions_for_data_uris(images),
         image_captions=_attach_image_captions(raw_content),
     )
 

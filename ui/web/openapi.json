@@ -13227,6 +13227,27 @@
         ],
         "title": "HostPermissionsPayload"
       },
+      "ImageDimensions": {
+        "properties": {
+          "width": {
+            "type": "integer",
+            "exclusiveMinimum": 0.0,
+            "title": "Width"
+          },
+          "height": {
+            "type": "integer",
+            "exclusiveMinimum": 0.0,
+            "title": "Height"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "width",
+          "height"
+        ],
+        "title": "ImageDimensions"
+      },
       "InboundHistoryItem": {
         "properties": {
           "id": {
@@ -20569,6 +20590,27 @@
             ],
             "title": "Images"
           },
+          "image_dimensions": {
+            "anyOf": [
+              {
+                "items": {
+                  "anyOf": [
+                    {
+                      "$ref": "#/components/schemas/ImageDimensions"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Image Dimensions"
+          },
           "files": {
             "anyOf": [
               {
@@ -20691,6 +20733,30 @@
             "type": "string",
             "minLength": 1,
             "title": "Url"
+          },
+          "width": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "exclusiveMinimum": 0.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Width"
+          },
+          "height": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "exclusiveMinimum": 0.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Height"
           }
         },
         "additionalProperties": false,

@@ -34,8 +34,14 @@ inside these labels.
 Queue-row titles render the same formatting but keep link labels inert inside
 the row-selection button; links remain active in the question detail.
 
-Default Markdown images render directly as a phrasing `<img>` inside `<p>`
+Default Markdown images outside the timeline render directly as a phrasing `<img>` inside `<p>`
 (`MarkdownZoomableImage`) with no wrapper `<span>` or corner hover button.
+Inside a `TimelineImageScope`, `MarkdownZoomableImage` wraps images in phrasing `<span>` slots
+so known-dimension images (HTML `width`/`height` or session-cached natural dimensions) reserve
+their aspect box with a centered `<Spinner />` before decode, while unknown-dimension images either
+hold the initial cold-load reveal until settled (bounded at 2.5s) or preload hidden at `0×0` inside
+their `TimelineItemImageBatch` and reveal together in one commit (bounded at 3s) so multi-image
+messages never step-shift the timeline.
 Standalone images carry `cursor-zoom-in` and open the shared `document.body`
 lightbox portal (`data-testid="image-lightbox"`, dismissed via `Escape`, the
 close button, or clicking the `cursor-zoom-out` backdrop) when clicked directly;

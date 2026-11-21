@@ -1,4 +1,4 @@
-exports = ["timeline-store.ts", "timeline-width.ts", "timeline.ts", "use-throttled-streaming.ts", "use-timeline.ts"]
+exports = ["image-dimensions-cache.ts", "timeline-store.ts", "timeline-width.ts", "timeline.ts", "use-throttled-streaming.ts", "use-timeline.ts"]
 
 [uses]
 "tests" = ["timeline-store.ts", "timeline.ts", "use-timeline.ts"]

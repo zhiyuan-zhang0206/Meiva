@@ -3,10 +3,20 @@
 // meiva:link ui/web/src/docs/frontend-components/markdown-surfaces.md
 "use client";
 
-import { createContext, memo, useContext, useEffect, useState, type ReactNode } from "react";
+import {
+  createContext,
+  memo,
+  useContext,
+  useEffect,
+  useId,
+  useLayoutEffect,
+  useState,
+  type ReactNode,
+} from "react";
 
 import { createLazyChunk, type LazyChunk } from "@/components/content/lazy-chunk";
 import type { ChatMarkdownProps, ChatMarkdownRenderer } from "@/components/content/markdown-renderer";
+import { TimelineImageScopeContext } from "@/components/content/zoomable-image";
 import { cn } from "@/lib/format/utils";
 import { MIN_W_0 } from "@/lib/layout/layout";
 
@@ -65,6 +75,14 @@ export const ChatMarkdown = memo(function ChatMarkdown(props: ChatMarkdownProps)
 });
 
 function PlainChatMarkdown({ content, inline }: { content: string; inline?: boolean }) {
+  const scope = useContext(TimelineImageScopeContext);
+  const gateId = useId();
+  const mayContainImage = !inline && (content.includes("![") || content.includes("<img"));
+  useLayoutEffect(() => {
+    if (!scope || scope.initialRevealed || !mayContainImage) return;
+    return scope.initialGate.register(gateId);
+  }, [gateId, mayContainImage, scope]);
+
   if (inline) {
     return <span className={cn("chat-md font-sans whitespace-pre-wrap [overflow-wrap:anywhere]", MIN_W_0)} data-testid="chat-markdown-plain">{content}</span>;
   }

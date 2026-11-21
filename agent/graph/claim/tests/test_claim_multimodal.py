@@ -469,3 +469,68 @@ def test_quote_context_reaches_harness_without_expanding_quoted_commands() -> No
     assert message.additional_kwargs["meiva_quote_body"] == "Explain"
     assert message.additional_kwargs["meiva_quote"] == quote.model_dump()
     assert "/private <system>" in render_messages([message])
+
+
+def test_claim_measures_and_forwards_image_dimensions_into_timeline_items(tmp_path: Path) -> None:
+    from io import BytesIO
+
+    from PIL import Image
+
+    from base.agents.history.timeline import build_timeline_items
+    from base.agents.messages.image_dimensions import ImageDimensions
+
+    buf = BytesIO()
+    Image.new("RGB", (640, 480), color=(20, 40, 60)).save(buf, format="PNG")
+    png_bytes = buf.getvalue()
+    img_path = tmp_path / "measured.png"
+    img_path.write_bytes(png_bytes)
+
+    batch_id = "e" * 32
+    row = ClaimedInbound(
+        id=11,
+        agent_id=7,
+        content="Check dimensions",
+        kind="chat",
+        source="user",
+        payload={
+            "image_uploads": [
+                {
+                    "name": "known.png",
+                    "size": len(png_bytes),
+                    "content_type": "image/png",
+                    "path": str(img_path),
+                    "batch_id": batch_id,
+                    "ordinal": 0,
+                    "width": 1280,
+                    "height": 720,
+                },
+                {
+                    "name": "measured.png",
+                    "size": len(png_bytes),
+                    "content_type": "image/png",
+                    "path": str(img_path),
+                    "batch_id": batch_id,
+                    "ordinal": 1,
+                },
+            ]
+        },
+        created_at=datetime(2026, 6, 30, 12, 0, 0, tzinfo=UTC),
+    )
+
+    msg = build_chat_inbound(
+        row,
+        envelope_inputs=_ENVELOPE_INPUTS,
+        expand_command=CommandCatalog.system(skills=list, home=meiva_home()).expand,
+        gateway=_forbidden_gateway,
+        picked_up_at=_PICKED_UP_AT,
+    )
+
+    assert msg.additional_kwargs["meiva_image_dimensions"] == [
+        {"width": 1280, "height": 720},
+        {"width": 640, "height": 480},
+    ]
+    items, _ = build_timeline_items([msg], inputs=_ENVELOPE_INPUTS)
+    assert items[0].image_dimensions == [
+        ImageDimensions(width=1280, height=720),
+        ImageDimensions(width=640, height=480),
+    ]

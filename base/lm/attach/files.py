@@ -6,7 +6,9 @@
 
 from __future__ import annotations
 
+import base64
 import stat
+from io import BytesIO
 from pathlib import Path
 
 from base.host.boundary.untyped import object_of
@@ -26,7 +28,12 @@ from base.lm.attach.packing import (
 )
 from base.lm.catalog import ModelCatalog
 
-__all__ = ["image_dimensions", "pack_attachments"]
+__all__ = [
+    "image_dimensions",
+    "image_dimensions_from_bytes",
+    "image_dimensions_from_data_uri",
+    "pack_attachments",
+]
 
 
 def pack_attachments(
@@ -79,17 +86,57 @@ def _stat(entry_path: str) -> StatObserved:
     )
 
 
+_EXIF_ORIENTATION_TAG = 274
+_EXIF_TRANSPOSE_ORIENTATIONS = frozenset({5, 6, 7, 8})
+
+
+def _oriented_size(width: int, height: int, orientation: object) -> tuple[int, int] | None:
+    if width <= 0 or height <= 0:
+        return None
+    if isinstance(orientation, int) and orientation in _EXIF_TRANSPOSE_ORIENTATIONS:
+        return (height, width)
+    return (width, height)
+
+
 # meiva:note
-# Read only image metadata (`(width, height)` in pixels), or None when the file cannot be opened as
-# an image; attach packing and `meiva.understand` both read image dimensions here.
+# Read only image metadata (`(width, height)` in pixels, EXIF-orientation adjusted), or None when
+# the file cannot be opened as an image; attach packing, upload delivery and `meiva.understand`
+# read image dimensions here.
 def image_dimensions(path: Path) -> tuple[int, int] | None:
     from PIL import Image, UnidentifiedImageError
 
     try:
         with Image.open(path) as image:
-            return image.size
+            width, height = image.size
+            orientation = image.getexif().get(_EXIF_ORIENTATION_TAG)
     except (Image.DecompressionBombError, OSError, UnidentifiedImageError, ValueError):
         return None
+    return _oriented_size(width, height, orientation)
+
+
+def image_dimensions_from_bytes(data: bytes) -> tuple[int, int] | None:
+    from PIL import Image, UnidentifiedImageError
+
+    try:
+        with Image.open(BytesIO(data)) as image:
+            width, height = image.size
+            orientation = image.getexif().get(_EXIF_ORIENTATION_TAG)
+    except (Image.DecompressionBombError, OSError, UnidentifiedImageError, ValueError):
+        return None
+    return _oriented_size(width, height, orientation)
+
+
+def image_dimensions_from_data_uri(uri: str) -> tuple[int, int] | None:
+    if not uri.startswith("data:image/"):
+        return None
+    header, sep, body = uri.partition(",")
+    if not sep or ";base64" not in header.lower():
+        return None
+    try:
+        data = base64.b64decode(body, validate=False)
+    except (ValueError, TypeError):
+        return None
+    return image_dimensions_from_bytes(data)
 
 
 def _read(path: Path) -> ReadObserved:

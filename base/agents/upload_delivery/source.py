@@ -28,13 +28,14 @@ from base.agents.upload_delivery.models import (
     request_hash,
 )
 from base.agents.upload_delivery.naming import delivered_names, send_directory, upload_note
-from base.agents.upload_delivery.paths import agent_upload_dir
+from base.agents.upload_delivery.paths import agent_upload_dir, staged_path
 from base.agents.upload_delivery.staging import claim_for_batch, staged_object
 from base.agents.upload_delivery.storage import lock_agent
 from base.api_contracts.agent_contract import AgentNotFound
 from base.db.rows import IdRow, query_all, query_one
 from base.db.transaction import ConnectionSource, write_transaction
 from base.host.db_authority.unit import UnitIdentity
+from base.lm.attach.files import image_dimensions
 from base.paths import WORKSPACES_DIR_NAME
 
 MAX_COPY_ATTEMPTS = 3
@@ -448,7 +449,7 @@ class _StoredProvenance(BaseModel):
 
 # meiva:note
 # The batch `complete` locks (`SELECT inbound_id, target_unit, manifest, provenance, state,
-# source_unit, message ...`); the jsonb columns are validated by the reader.
+# source_unit, message, storage_directory ...`); the jsonb columns are validated by the reader.
 @dataclass(frozen=True)
 class _CompleteRow:
     inbound_id: int | None
@@ -458,6 +459,7 @@ class _CompleteRow:
     state: str
     source_unit: object
     message: object
+    storage_directory: str | None = None
 
 
 def _verify_complete_row(row: _CompleteRow | None, request: ReceiveRequest) -> _CompleteRow:
@@ -474,11 +476,34 @@ def _verify_complete_row(row: _CompleteRow | None, request: ReceiveRequest) -> _
     return row
 
 
-def _partition_delivered_uploads(
-    manifest: Manifest, paths: list[str]
+def _measure_delivered_image(
+    storage_directory: str | None, staged_id: str, delivered_path: str
+) -> tuple[int, int] | None:
+    candidates: list[Path] = []
+    if storage_directory:
+        candidates.append(staged_path(Path(storage_directory), staged_id))
+    candidates.append(Path(delivered_path))
+    for candidate in candidates:
+        try:
+            if not candidate.is_file():
+                continue
+        except OSError:
+            continue
+        dims = image_dimensions(candidate)
+        if dims is not None:
+            return dims
+    return None
+
+
+def partition_delivered_uploads(
+    manifest: Manifest,
+    paths: list[str],
+    *,
+    storage_directory: str | None = None,
 ) -> tuple[list[dict[str, object]], list[dict[str, object]]]:
-    upload_files: list[dict[str, object]] = [
-        {
+    upload_files: list[dict[str, object]] = []
+    for item, path in zip(manifest.objects, paths, strict=True):
+        entry: dict[str, object] = {
             "name": item.name,
             "size": item.size,
             "content_type": item.content_type,
@@ -486,8 +511,13 @@ def _partition_delivered_uploads(
             "batch_id": manifest.batch_id,
             "ordinal": item.ordinal,
         }
-        for item, path in zip(manifest.objects, paths, strict=True)
-    ]
+        if image_mime_for(item.name, item.content_type) is not None or (
+            item.content_type.lower().startswith("image/")
+        ):
+            dims = _measure_delivered_image(storage_directory, item.staged_id, path)
+            if dims is not None:
+                entry["width"], entry["height"] = dims
+        upload_files.append(entry)
     image_uploads = [
         entry
         for entry in upload_files
@@ -514,7 +544,8 @@ def complete(pool: ConnectionSource, request: ReceiveRequest, proof: CopyProof) 
             query_one(
                 conn,
                 _CompleteRow,
-                "SELECT inbound_id, target_unit, manifest, provenance, state, source_unit, message "
+                "SELECT inbound_id, target_unit, manifest, provenance, state, source_unit, "
+                "message, storage_directory "
                 "FROM upload_delivery_batches "
                 "WHERE batch_id=%s AND protocol=%s AND ready_at IS NOT NULL FOR UPDATE",
                 (manifest.batch_id, PROTOCOL),
@@ -538,7 +569,9 @@ def complete(pool: ConnectionSource, request: ReceiveRequest, proof: CopyProof) 
                 for item, path in zip(manifest.objects, paths, strict=True)
             ],
         )
-        image_uploads, file_uploads = _partition_delivered_uploads(manifest, paths)
+        image_uploads, file_uploads = partition_delivered_uploads(
+            manifest, paths, storage_directory=row.storage_directory
+        )
         note_receipt, _ = insert_chat_inbound_in_transaction(
             conn,
             agent_id=manifest.agent_id,

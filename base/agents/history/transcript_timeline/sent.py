@@ -16,8 +16,12 @@ from base.agents.messages.harness_input_key import (
     INPUT_KEY_FIELD,
     handed_input_keys,
 )
+from base.agents.messages.image_dimensions import ImageDimensions
 from base.agents.messages.inbound import InboundKind
-from base.agents.messages.inbound_images import inbound_upload_files
+from base.agents.messages.inbound_images import (
+    inbound_image_dimensions,
+    inbound_upload_files,
+)
 from base.agents.messages.kwargs import NoteTag
 from base.agents.messages.quote import payload_quote
 from base.host.boundary.json_values import is_object_dict, is_object_list
@@ -244,6 +248,7 @@ def row_item(row: SentRow) -> TimelineItem | None:
     created = None if row.created_at is None else row.created_at.isoformat()
     if row.kind == InboundKind.CHAT.value:
         images = _image_urls(row)
+        image_dimensions = _image_dimensions(row, images) if images else None
         return TimelineItem(
             item_id="pending",
             kind="inbound_chat",
@@ -253,6 +258,7 @@ def row_item(row: SentRow) -> TimelineItem | None:
             created_at=created,
             inbound_id=row.id,
             images=images or None,
+            image_dimensions=image_dimensions,
             files=inbound_upload_files(row.agent_id, row.payload),
         )
     tag = _note_tag(row)
@@ -274,6 +280,47 @@ def _note_tag(row: SentRow) -> str:
     if not isinstance(tag, str):
         raise TypeError(f"system_note inbound {row.id} has no 'note_tag'")
     return tag
+
+
+def _pos_int(val: object) -> int | None:
+    return val if isinstance(val, int) and not isinstance(val, bool) and val > 0 else None
+
+
+def _upload_entry_dimensions(raw: object) -> tuple[bool, ImageDimensions | None]:
+    if not is_object_dict(raw):
+        return False, None
+    batch, ordinal = raw.get("batch_id"), raw.get("ordinal")
+    if not (isinstance(batch, str) and len(batch) == _BATCH_ID_LENGTH and isinstance(ordinal, int)):
+        return False, None
+    w, h = _pos_int(raw.get("width")), _pos_int(raw.get("height"))
+    return True, ImageDimensions(width=w, height=h) if w is not None and h is not None else None
+
+
+def _block_has_image_url(block: object) -> bool:
+    if not is_object_dict(block) or block.get("type") != "image_url":
+        return False
+    image = block.get("image_url")
+    return is_object_dict(image) and isinstance(image.get("url"), str)
+
+
+def _image_dimensions(row: SentRow, images: Sequence[str]) -> list[ImageDimensions | None] | None:
+    direct = inbound_image_dimensions(row.agent_id, row.payload)
+    if direct is not None and len(direct) == len(images):
+        return direct
+    payload = row.payload or {}
+    uploads = payload.get("image_uploads")
+    blocks = payload.get("content_blocks")
+    dims: list[ImageDimensions | None] = [
+        entry_dims
+        for raw in (uploads if is_object_list(uploads) else [])
+        for valid, entry_dims in (_upload_entry_dimensions(raw),)
+        if valid
+    ]
+    if is_object_list(blocks):
+        dims.extend(None for block in blocks if _block_has_image_url(block))
+    if len(dims) != len(images) or not any(entry is not None for entry in dims):
+        return None
+    return dims
 
 
 def _image_urls(row: SentRow) -> list[str]:
