@@ -25,6 +25,7 @@ from scripts.hooks.diff_checks import (
     plan,
     run_child,
 )
+from scripts.hooks.diff_checks_cache import CACHE_FILENAME, CacheContext
 from scripts.hooks.diff_checks_literals import (
     candidate_test_files,
     find_literal_test_hits,
@@ -408,3 +409,121 @@ def test_diff_text_for_handles_missing_root_and_test_only_changes(tmp_path: Path
         )
         == ""
     )
+
+
+def test_short_or_overlong_backticks_never_flip_pairing_for_subsequent_identifiers() -> None:
+    overlong = "x" * 130
+    diff = (
+        "diff --git a/pkg/prompt.py b/pkg/prompt.py\n"
+        "--- a/pkg/prompt.py\n"
+        "+++ b/pkg/prompt.py\n"
+        "@@ -1,3 +1,1 @@\n"
+        '-    "pass `id` and `off` or `cwd` before calling `meiva.agents.send_message`"\n'
+        f'-    "empty `` or `{overlong}` followed by `to_machine`"\n'
+        '+    "rewritten"\n'
+    )
+    literals = extract_deleted_literals(diff)
+
+    assert "meiva.agents.send_message" in literals
+    assert "to_machine" in literals
+    assert "id" not in literals
+    assert "off" not in literals
+    assert "cwd" not in literals
+    assert overlong not in literals
+    assert " and " not in literals
+    assert " or " not in literals
+    assert " before calling " not in literals
+    assert " followed by " not in literals
+
+
+def test_blind_fallback_does_not_exceed_cap_when_selection_already_at_cap(
+    tmp_path: Path,
+) -> None:
+    for rel in ("pkg/mod.py", "pkg/tests/test_one.py", "pkg/tests/test_two.py"):
+        path = tmp_path / rel
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text("def test_x() -> None:\n    assert True\n")
+
+    candidates = candidate_test_files(
+        tmp_path,
+        ("pkg/mod.py",),
+        ("pkg/tests/test_one.py",),
+        blind=("pkg/mod.py",),
+        decision="BLIND",
+        max_fallback_files=1,
+    )
+    assert candidates == ("pkg/tests/test_one.py",)
+
+
+def test_literal_tests_cache_is_isolated_from_skip_literal_tests_and_replays_green_run(
+    tmp_path: Path,
+) -> None:
+    (tmp_path / "pkg/tests").mkdir(parents=True)
+    (tmp_path / "pkg/mod.py").write_text('NEW = "v2"\n')
+    (tmp_path / "pkg/tests/test_hit.py").write_text('assert "cached_removed_token" in "x"\n')
+    cache = CacheContext(
+        cache_path=tmp_path / CACHE_FILENAME,
+        head_tree="tree-lit-1",
+        base_sha="base-111",
+        python_digest="py-lit-1",
+    )
+    diff = (
+        "diff --git a/pkg/mod.py b/pkg/mod.py\n"
+        "--- a/pkg/mod.py\n"
+        "+++ b/pkg/mod.py\n"
+        "@@ -1 +1 @@\n"
+        '-OLD = "cached_removed_token"\n'
+        '+NEW = "v2"\n'
+    )
+    change = ChangeSet(root=tmp_path, base="origin/main", files=("pkg/mod.py",))
+    pytest_calls = 0
+
+    def execute(argv: Sequence[str], _root: Path) -> tuple[int, str, float]:
+        nonlocal pytest_calls
+        if "-m" in argv and "pytest" in argv:
+            pytest_calls += 1
+            _write_report(argv, passed=5)
+            return 0, "", 2.0
+        return 0, "0 errors, 0 warnings\nmeizel: ok (1 fact edges, 1 manifests)\n", 1.0
+
+    skipped_vals, skipped_failed = check(
+        change,
+        skip_tests=True,
+        skip_literal_tests=True,
+        execute=execute,
+        choose=lambda _c: Selection("SELECTED", ("pkg/tests/test_hit.py",), ()),
+        cache=cache,
+        read_diff=lambda _c: diff,
+        python=_PYTHON,
+    )
+    assert skipped_failed is False
+    assert skipped_vals["literal-tests"] == "skipped(--skip-literal-tests)"
+    assert pytest_calls == 0
+
+    first_vals, first_failed = check(
+        change,
+        skip_tests=True,
+        skip_literal_tests=False,
+        execute=execute,
+        choose=lambda _c: Selection("SELECTED", ("pkg/tests/test_hit.py",), ()),
+        cache=cache,
+        read_diff=lambda _c: diff,
+        python=_PYTHON,
+    )
+    assert first_failed is False
+    assert first_vals["literal-tests"] == "ok(1files,5passed)(2s)"
+    assert pytest_calls == 1
+
+    replayed_vals, replayed_failed = check(
+        change,
+        skip_tests=True,
+        skip_literal_tests=False,
+        execute=execute,
+        choose=lambda _c: Selection("SELECTED", ("pkg/tests/test_hit.py",), ()),
+        cache=cache,
+        read_diff=lambda _c: diff,
+        python=_PYTHON,
+    )
+    assert replayed_failed is False
+    assert replayed_vals["literal-tests"] == "ok(1files,5passed)(0s)"
+    assert pytest_calls == 1

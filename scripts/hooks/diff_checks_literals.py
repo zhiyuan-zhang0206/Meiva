@@ -61,7 +61,7 @@ _MAX_FALLBACK_SCAN_FILES = 300
 # test modules are a few tens of KiB.
 _MAX_TEST_FILE_BYTES = 1_048_576
 
-_BACKTICK_RE = re.compile(r"`([^`\n]{4,120})`")
+_BACKTICK_RE = re.compile(r"`([^`\n]*)`")
 _STRING_RE = re.compile(
     r"""(?<!\\)(?:"([^"\\\n]*(?:\\.[^"\\\n]*)*)"|'([^'\\\n]*(?:\\.[^'\\\n]*)*)')"""
 )
@@ -319,6 +319,8 @@ def _bounded_package_tests(
     already: set[str],
     max_files: int = _MAX_FALLBACK_SCAN_FILES,
 ) -> None:
+    if len(already) >= max_files:
+        return
     for package_root in _fallback_package_roots(changed_files):
         base = root / package_root
         if not base.is_dir():

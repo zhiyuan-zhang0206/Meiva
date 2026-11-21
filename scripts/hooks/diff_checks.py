@@ -137,22 +137,27 @@ def diff_text_for(change: ChangeSet) -> str:
     sources = tuple(path for path in change.files if is_production_literal_source(path))
     if not sources:
         return ""
-    result = subprocess.run(
-        [
-            "git",
-            "diff",
-            "-U0",
-            "--no-color",
-            "--no-ext-diff",
-            f"{change.base}...HEAD",
-            "--",
-            *sources,
-        ],
-        cwd=change.root,
-        capture_output=True,
-        text=True,
-        check=False,
-    )
+    try:
+        result = subprocess.run(
+            [
+                "git",
+                "diff",
+                "-U0",
+                "--no-color",
+                "--no-ext-diff",
+                f"{change.base}...HEAD",
+                "--",
+                *sources,
+            ],
+            cwd=change.root,
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            check=False,
+        )
+    except OSError:
+        return ""
     return result.stdout if result.returncode == 0 else ""
 
 
