@@ -47,13 +47,10 @@ _USER_ATTENTION_RULE = (
 # (never touching the vendor system prompt or other harnesses) clarifies why delegated workers keep
 # turn outputs under `MEIVA_HIDE_FROM_USER` and deliver to their delegator via `send_message`.
 _CLAUDE_CODE_VISIBILITY_WHY = (
-    "Unlike standalone Claude Code, where output goes to a human at a terminal, many Meiva "
-    "agents are workers spawned by another agent to report via `meiva.agents.send_message`. "
-    "When you have a delegator, reporting there completes delivery — even if your brief quotes "
-    "a human or asks for a PR or report. Marking that summary MEIVA_DISPLAY_TO_USER raises an "
-    "unexpected unread badge in the human's main view for an unfamiliar worker and duplicates "
-    "your delegator's update, so keep delegated summaries under MEIVA_HIDE_FROM_USER (readable "
-    "in Details) unless answering the human directly or an attention exception below applies.\n\n"
+    "Unlike standalone Claude Code, where output goes to a human at a terminal, a Meiva "
+    "worker reports to its delegator. The delegated visibility rule above still applies "
+    "when your brief quotes a human or asks for a PR or report; the terminal-facing "
+    "summary habit would otherwise raise an unexpected unread badge for an unfamiliar worker.\n\n"
 )
 
 
@@ -82,7 +79,8 @@ def _build_user_reply_section(
         "Use the hide prefix for required process narration that does not pass the "
         "user-attention test; only the display prefix delivers it to the user. "
         "Keep delegated summaries under MEIVA_HIDE_FROM_USER: delivery to the delegator "
-        "is complete, and displaying them would duplicate their user update.\n\n"
+        "is complete, and displaying them would duplicate their user update. "
+        "Exceptions: answering the human directly or an attention exception below.\n\n"
         f"{visibility_why}" + _USER_ATTENTION_RULE + "## Reply routing\n\n"
         "Peer messages, watcher events, scheduled wakes and system notes do not require "
         "courtesy replies or automatic closing summaries. Follow their acknowledgment "
@@ -156,8 +154,6 @@ def _fast_acknowledgement_section(*, enabled: bool, mode: UserDeliveryMode) -> s
             )
         return (
             "## Fast acknowledgement\n\n"
-            "Agent briefs, relays and peer messages need no acknowledgement, even when "
-            "they quote the human; follow delegated reporting instead. "
             "Do not call `meiva.ui.publish(...)` just to send an empty or low-information "
             "acknowledgement (such as 'Got it, I'll...', 'On it', 'Delegated, will report "
             "back', or equivalent phrases in the user's language). Users often step away right "
@@ -184,8 +180,6 @@ def _fast_acknowledgement_section(*, enabled: bool, mode: UserDeliveryMode) -> s
             )
         return (
             "## Fast acknowledgement\n\n"
-            "Agent briefs, relays and peer messages need no acknowledgement, even when "
-            "they quote the human; follow delegated reporting instead. "
             "Do not send empty or low-information acknowledgements before calling tools or after "
             "starting/delegating work (such as 'Got it, I'll...', 'On it', 'Delegated, will "
             "report back', or equivalent phrases in the user's language). Users often step away "
@@ -212,8 +206,6 @@ def _fast_acknowledgement_section(*, enabled: bool, mode: UserDeliveryMode) -> s
         )
     return (
         "## Fast acknowledgement\n\n"
-        "Agent briefs, relays and peer messages need no acknowledgement, even when "
-        "they quote the human; follow delegated reporting instead. "
         "Do not send empty or low-information acknowledgements before calling tools or after "
         "delegating/starting work (for example, 'Got it, I'll...', 'On it', 'I've delegated "
         "this, will report back', or equivalent phrases in the user's language). Users often "
