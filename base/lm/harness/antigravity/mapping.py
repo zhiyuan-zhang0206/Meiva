@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from collections import deque
-from collections.abc import Iterable, Iterator, Mapping, Sequence
+from collections.abc import Callable, Iterable, Iterator, Mapping, Sequence
 from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Protocol
@@ -270,7 +270,9 @@ class ForegroundBoundary:
             return True
         if step.index < self.next_row:
             return False
-        if self.cancelled or self.degraded:
+        if self.degraded:
+            return True
+        if self.cancelled:
             return step.final
         return self.accounted and type(tokens) is int and tokens > 0
 
@@ -334,13 +336,14 @@ class OutputProjection:
     def background_replies(
         self, transcript: TranscriptSnapshot, session_id: str | None, subagents: ChildLookup
     ) -> Iterator[NativeReply]:
-        steps = (
-            step
-            for step in self.steps(transcript.rows)
-            if isinstance(self._route(step), BackgroundNotice)
-        )
         yield from native_replies(
-            transcript, self.offset, steps, session_id, subagents, self._answered_at
+            transcript,
+            self.offset,
+            self.steps(transcript.rows),
+            session_id,
+            subagents,
+            self._answered_at,
+            route=self._route,
         )
 
     def has_pending_reply(
@@ -543,6 +546,7 @@ class NativeReply:
     transcript: TranscriptSnapshot
     offset: int
     steps: Sequence[PlannerRow]
+    incomplete_span: bool = False
 
     @property
     def timer_prompt(self) -> str | None:
@@ -582,7 +586,7 @@ class NativeReply:
                 permission_denials=(),
                 steps=steps,
                 generation=generation,
-                usage_uncertain=not complete_usage,
+                usage_uncertain=self.incomplete_span or not complete_usage,
             ),
         )
 
@@ -633,8 +637,11 @@ def native_replies(
     session_id: str | None,
     subagents: ChildLookup,
     answered_at: dict[int, int],
+    *,
+    route: Callable[[PlannerRow], str | BackgroundNotice | None] | None = None,
 ) -> Iterator[NativeReply]:
     pending: dict[BackgroundNotice, list[PlannerRow]] = {}
+    unresolved: set[int] = set()
     for step in steps:
         notice = step.notice
         if (
@@ -643,9 +650,17 @@ def native_replies(
             or not notice.belongs_to(session_id, subagents)
         ):
             continue
+        if route is not None:
+            owner = route(step)
+            if owner is None:
+                unresolved.add(notice.index)
+            if owner != notice:
+                continue
         span = pending.setdefault(notice, [])
         span.append(step)
         if step.final:
             answered_at[notice.index] = step.index
-            yield NativeReply(notice, transcript, offset, tuple(span))
+            yield NativeReply(
+                notice, transcript, offset, tuple(span), incomplete_span=notice.index in unresolved
+            )
             del pending[notice]

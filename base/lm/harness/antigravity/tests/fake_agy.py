@@ -225,10 +225,28 @@ def resumed_command_completion(transcript: Path, request: int, command: str) -> 
     frame({"id": request, "result": {"stopReason": "end_turn", "usage": usage}})
 
     if unresolved:
-        after_release(Path("release-native"), lambda: send_late_native(transcript))
+        after_release(
+            Path("release-native"),
+            lambda: send_late_native(transcript, with_tool=Path("include-native-tool").exists()),
+        )
 
 
-def send_late_native(transcript: Path) -> None:
+def record_native_tool(transcript: Path) -> None:
+    args = {"CommandLine": "echo native"}
+    record(
+        transcript,
+        {
+            **planner_row(None, tokens=125),
+            "tool_calls": [{"name": "run_command", "args": args}],
+        },
+    )
+    update("tool_call", toolCallId="native-tool", name="run_command", rawInput=args)
+    update("tool_call_update", toolCallId="native-tool", status="completed")
+
+
+def send_late_native(transcript: Path, *, with_tool: bool = False) -> None:
+    if with_tool:
+        record_native_tool(transcript)
     record(transcript, planner_row("LATE NATIVE REPLY", tokens=237))
     message("LATE NATIVE REPLY")
     update("usage_update", used=2, size=10)
@@ -305,6 +323,8 @@ def plain_prompt(transcript: Path, request: int, command: str) -> None:
         _ = declare_child(transcript)
     if command == "late-native":
         send_late_native(transcript)
+    if command == "tool-then-foreground":
+        record_native_tool(transcript)
     native = command.startswith("native-")
     reply = "FOREGROUND" if native else "OK"
     record(transcript, planner_row(reply))

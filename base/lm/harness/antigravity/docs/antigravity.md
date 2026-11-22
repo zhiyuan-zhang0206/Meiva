@@ -67,9 +67,9 @@ output, the adapter buffers unkeyed assistant and new tool frames until the
 corresponding completed planner rows identify the owner. A Hub notice identifies
 a detached task. During overlap, planner rows after the notice stay provisional
 until a unique ordered foreground span matches the prompt's ACP usage receipts.
-Assigning a provisional row also requires a separate terminal planner row for
-the detached reply. Candidate sets larger than ten rows stay unresolved to
-bound the session reader's work. The completion of a shell command launched within
+Assigning a provisional row normally requires a separate terminal planner row
+for the detached reply. The session reader searches at most ten provisional rows
+for an ordered subset. The completion of a shell command launched within
 the same marked input before its terminal planner row is a tool result in that
 input. The command's provider-generated launch row carries the task ID and step
 index, and the Hub completion envelope carries the same task ID. A completion
@@ -97,12 +97,15 @@ deadline, a successful ACP response with its current input marker in the
 transcript can settle with only attributed foreground output. The adapter logs
 `agy_acp_attribution_degraded`, flags usage as uncertain, and leaves unresolved
 planner rows quarantined for native attribution. A pending notice from a
-degraded input can receive a detached terminal after closure and before the next
-input marker. Otherwise the notice stays provisional across markers until a
-verified detached terminal precedes the marker. A new input with exactly one
-terminal can prove its foreground span using exact ACP receipt coverage when
-every provisional row comes from a carried notice. The notice remains pending
-for a separate native reply. Missing input evidence retains the attribution failure.
+degraded input can receive the detached planner steps appended after closure
+and before the next input marker. Native usage is uncertain when unresolved
+earlier steps could belong to that reply. Otherwise the notice stays
+provisional across markers until a verified detached terminal precedes the
+marker. A new input with one terminal can confirm the unique ordered subset
+that matches its ACP receipt when every provisional row comes from a carried
+notice. Above the subset limit, only the whole span is tested. The notice
+remains pending for a separate native reply. Missing input evidence retains
+the attribution failure.
 
 The matcher first consumes contiguous text and then joins compatible fragments
 across remaining interleaved frames. Identical text for a single owner consumes

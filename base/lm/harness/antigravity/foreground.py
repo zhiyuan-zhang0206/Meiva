@@ -211,33 +211,40 @@ def _witnesses(
 ) -> Iterator[tuple[PlannerRow, ...]]:
     if not reports or not all(has_planner_tokens(step.row) for step in (*known, *possible)):
         return
-    if (span := _sole_carried_span(known, possible, reports, keys)) is not None:
-        yield span
-        return
+    sole_carried_terminal = _has_sole_carried_terminal(known, possible)
+    for extra in _receipt_candidates(possible, sole_carried_terminal=sole_carried_terminal):
+        span = tuple(sorted((*known, *extra), key=lambda step: step.index))
+        if _matches_reports(span, reports, keys):
+            yield span
+
+
+def _receipt_candidates(
+    possible: tuple[PlannerRow, ...], *, sole_carried_terminal: bool
+) -> Iterator[tuple[PlannerRow, ...]]:
     if len(possible) > MAX_AMBIGUOUS_PLANNER_ROWS:
+        if sole_carried_terminal:
+            yield possible
         return
     terminals = {step.index for step in possible if step.final}
     for count in range(len(possible) + 1):
         for extra in combinations(possible, count):
-            if extra and not terminals.difference(step.index for step in extra):
-                continue
-            span = tuple(sorted((*known, *extra), key=lambda step: step.index))
-            if _matches_reports(span, reports, keys):
-                yield span
+            if (
+                sole_carried_terminal
+                or not extra
+                or terminals.difference(step.index for step in extra)
+            ):
+                yield extra
 
 
-def _sole_carried_span(
+def _has_sole_carried_terminal(
     known: tuple[PlannerRow, ...],
     possible: tuple[PlannerRow, ...],
-    reports: Sequence[PromptUsage],
-    keys: Sequence[str],
-) -> tuple[PlannerRow, ...] | None:
-    if not possible or not all(step.carries_notice for step in possible):
-        return None
-    span = tuple(sorted((*known, *possible), key=lambda step: step.index))
-    if sum(step.terminal for step in span) == 1 and _matches_reports(span, reports, keys):
-        return span
-    return None
+) -> bool:
+    return (
+        bool(possible)
+        and all(step.carries_notice for step in possible)
+        and sum(step.terminal for step in (*known, *possible)) == 1
+    )
 
 
 def _matches_reports(

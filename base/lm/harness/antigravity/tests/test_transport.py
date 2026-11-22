@@ -324,6 +324,8 @@ def _assistant_texts(harness: Harness, turn_id: str) -> list[str]:
         ("unresolved-attribution", "", True, 6, 6, "after-marker"),
         ("unresolved-attribution", "", True, 6, 6, "none"),
         ("unresolved-attribution", "", True, 6, 6, "before-marker"),
+        ("unresolved-attribution", "", True, 6, 6, "before-marker-with-tool"),
+        ("unresolved-attribution", "", True, 6, 6, "tool-after-marker"),
     ],
 )
 async def test_resumed_multi_step_command_completion(
@@ -361,10 +363,15 @@ async def _assert_reused_prompt(
     harness: Harness, first_turn_id: str, *, native_timing: str
 ) -> None:
     pid = harness.session.cli_pid
-    if native_timing == "before-marker":
+    if native_timing.startswith("before-marker"):
+        if native_timing.endswith("-with-tool"):
+            harness.release("include-native-tool")
         harness.release("release-native")
         await harness.wait_for_marker("native-written")
-    followup = "late-native" if native_timing == "after-marker" else "next"
+    followup = {
+        "after-marker": "late-native",
+        "tool-after-marker": "tool-then-foreground",
+    }.get(native_timing, "next")
     await harness.session.deliver([HarnessInput.of("second", followup)])
     second = await harness.wait_for(
         lambda event: (
@@ -379,13 +386,26 @@ async def _assert_reused_prompt(
     assert again.text == "OK" and not again.usage_uncertain and harness.session.cli_pid == pid
     assert _assistant_texts(harness, second.turn_id) == ["OK"]
     if native_timing != "none":
-        native = await harness.wait_for(
-            lambda event: isinstance(event, TurnStarted) and event.origin is TurnOrigin.HARNESS
-        )
-        assert native.cause is HarnessCause.BACKGROUND_TASK
-        assert _assistant_texts(harness, native.turn_id) == ["LATE NATIVE REPLY"]
+        if native_timing == "tool-after-marker":
+            harness.release("release-native")
+        await _assert_native_reply(harness, with_tool="tool" in native_timing)
     else:
         assert [event.origin for event in harness.events if isinstance(event, TurnStarted)] == [
             TurnOrigin.INPUT,
             TurnOrigin.INPUT,
         ]
+
+
+async def _assert_native_reply(harness: Harness, *, with_tool: bool) -> None:
+    native = await harness.wait_for(
+        lambda event: isinstance(event, TurnStarted) and event.origin is TurnOrigin.HARNESS
+    )
+    assert native.cause is HarnessCause.BACKGROUND_TASK
+    assert _assistant_texts(harness, native.turn_id) == ["LATE NATIVE REPLY"]
+    if with_tool:
+        completed = await harness.wait_for(
+            lambda event: isinstance(event, TurnCompleted) and event.turn_id == native.turn_id
+        )
+        assert completed.steps == (Usage(155, 3, 0, 30), Usage(267, 3, 0, 30))
+        assert completed.num_turns == 2 and completed.usage == Usage(422, 6, 0, 60)
+        assert completed.usage_uncertain
