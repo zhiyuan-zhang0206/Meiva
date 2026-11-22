@@ -1,23 +1,27 @@
 exports = ["mapping.py", "rpc.py", "session.py", "tests", "timing_store.py", "trajectory.py", "transcript", "transport.py"]
 
 [uses]
-"__init__.py" = ["config.py", "handoff_rules.py", "mapping.py", "rpc.py", "session.py", "transport.py"]
+"acp.py" = []
+"foreground.py" = ["acp.py", "mapping.py", "subagents.py"]
+"__init__.py" = ["config.py", "handoff_rules.py", "rpc.py", "session.py", "transport.py"]
 "config.py" = ["schedules.py"]
 "handoff_rules.py" = []
-"mapping.py" = ["subagents.py"]
-"reconciliation" = ["trajectory.py"]
-"transcript" = ["reconciliation", "timing.py", "timing_store.py"]
+"mapping.py" = ["acp.py"]
+"reconciliation" = ["acp.py", "mapping.py", "trajectory.py"]
+"transcript" = ["acp.py", "reconciliation", "timing.py", "timing_store.py"]
 "schedules.py" = []
-"session.py" = ["config.py", "mapping.py", "reconciliation", "schedules.py", "subagent_files.py", "trajectory.py", "transport.py"]
+"session.py" = ["timing_refresh.py", "foreground.py", "acp.py", "config.py", "mapping.py", "reconciliation", "schedules.py", "subagent_files.py", "transport.py"]
 "subagent_files.py" = ["mapping.py", "subagents.py"]
 "subagents.py" = []
 "trajectory.py" = ["timing.py"]
 "timing.py" = []
+"timing_refresh.py" = ["transport.py"]
 "timing_store.py" = ["timing.py", "trajectory.py"]
 "transport.py" = ["config.py", "rpc.py", "trajectory.py", "timing_store.py", "transcript"]
-"tests" = ["config.py", "mapping.py", "schedules.py", "session.py", "subagent_files.py", "subagents.py", "timing.py", "timing_store.py", "trajectory.py", "transcript", "transport.py"]
+"tests" = ["mapping.py", "foreground.py", "acp.py", "config.py", "schedules.py", "session.py", "subagent_files.py", "subagents.py", "timing.py", "timing_store.py", "trajectory.py", "transcript", "transport.py"]
 
 [purity]
+"acp.py" = "strict"
 "config.py" = "strict"
 "schedules.py" = "strict"
 "subagents.py" = "strict"

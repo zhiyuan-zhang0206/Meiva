@@ -52,6 +52,7 @@ from base.lm.harness.session import (
     BackgroundItem,
     BackgroundWork,
     BackgroundWorkReporting,
+    InputsNotWrittenError,
     LostBackgroundReporting,
     lost_work_note,
 )
@@ -116,7 +117,9 @@ class HarnessSetupError(RuntimeError):
 # queue and be delivered again, unlike a failure after the hand-over, where whether they arrived is unknown.
 # meiva:link base/lm/harness/docs/delivery.md
 class HarnessNotDeliveredError(HarnessSetupError):
-    pass
+    def __init__(self, message: str, *, keys: frozenset[str] | None = None) -> None:
+        super().__init__(message)
+        self.keys = keys
 
 
 class HarnessBridge:
@@ -381,7 +384,10 @@ class HarnessBridge:
         batch[0] = batch[0].with_lead_text(
             lambda text: self._opening_input(key, text, session, compaction_note)
         )
-        await session.deliver(batch)
+        try:
+            await session.deliver(batch)
+        except InputsNotWrittenError as exc:
+            raise HarnessNotDeliveredError(str(exc), keys=exc.keys) from exc
 
     # meiva:note
     # What the harness's own durable record says about inputs handed to an earlier process. It reads

@@ -256,6 +256,12 @@ EVENTS: dict[str, EventSpec] = {
         "agent row keeps what it had and NULL still means never observed",
         tier="anomaly",
     ),
+    "harness_usage_uncertain": telemetry_event(
+        "harness_usage_uncertain",
+        "an external harness reported incomplete or ambiguous usage, so the turn carries "
+        "observed counters without an exact accounting row",
+        tier="anomaly",
+    ),
     "harness_usage_log_failed": telemetry_event(
         "harness_usage_log_failed",
         "an external harness turn finished but its usage could not be priced; the reply stands "
@@ -354,13 +360,6 @@ EVENTS: dict[str, EventSpec] = {
         "the host evicted a hosted runtime whose external CLI still held background work, because "
         "the cache was over its size bound with nothing idle left to evict; its next input "
         "carries a note naming what was lost",
-        tier="anomaly",
-    ),
-    "harness_image_not_delivered": telemetry_event(
-        "harness_image_not_delivered",
-        "an image of a message could not be given to an external harness (an Antigravity turn that "
-        "ended or never ran before the image could be steered in, or a refused steer); the text of "
-        "the message was delivered and names the image, whose path is in the message",
         tier="anomaly",
     ),
     "agy_subagent_descriptor_unreadable": telemetry_event(

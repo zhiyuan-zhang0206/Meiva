@@ -21,6 +21,7 @@ from base.lm.harness import (
     Handoff,
     HarnessBridge,
     HarnessClosedError,
+    HarnessNotDeliveredError,
     HarnessRegistration,
     HarnessSetupError,
     HarnessTurnFaultedError,
@@ -39,6 +40,7 @@ from base.lm.harness.claude.session import ClaudeSession
 from base.lm.harness.codex.session import CodexSession
 from base.lm.harness.delivery import HarnessInput, Reconciliation
 from base.lm.harness.registration import SecureRandom
+from base.lm.harness.session import InputsNotWrittenError
 from base.lm.harness.tests.bridge_support import run_turn
 from base.lm.harness.tests.roots import bridge_root_values
 from base.lm.harness.wiring import HANDOFF_INSTRUCTION, bridge_for, open_session
@@ -153,7 +155,11 @@ class FakeSession:
 
 
 class RefusingSession(FakeSession):
+    unwritten: frozenset[str] | None = None
+
     def accept(self, text: str, *, key: str | None = None) -> None:
+        if self.unwritten is not None:
+            raise InputsNotWrittenError("session closed before writing input", self.unwritten)
         raise RuntimeError("queue is full")
 
 
@@ -387,6 +393,20 @@ async def test_a_refused_submission_fails_the_turn_and_retires_the_session() -> 
     assert session.closed, "a session that refused a submission is not reused"
 
 
+async def test_delivery_reports_only_keys_known_not_to_have_reached_stdio() -> None:
+    session = RefusingSession()
+    session.unwritten = frozenset({"inbound-2"})
+    bridge = make_bridge(session)
+    try:
+        with pytest.raises(HarnessNotDeliveredError) as failure:
+            await bridge.deliver(
+                [HarnessInput.of("inbound-1", "attempted"), HarnessInput.of("inbound-2", "waiting")]
+            )
+        assert failure.value.keys == {"inbound-2"}
+    finally:
+        await bridge.close()
+
+
 async def test_close_closes_the_session_and_refuses_later_turns() -> None:
     session = FakeSession()
     bridge = make_bridge(session)
@@ -405,7 +425,7 @@ async def test_close_closes_the_session_and_refuses_later_turns() -> None:
     [
         (Harness.CLAUDE_CODE, "claude-opus-5-5", "low"),
         (Harness.CODEX, "gpt-6.1-sol", "xhigh"),
-        (Harness.ANTIGRAVITY, "gemini-4-argon-low", "low"),
+        (Harness.ANTIGRAVITY, "gemini-4-argon-high", "low"),
     ],
 )
 def test_execution_selection_reaches_the_adapter(
@@ -435,11 +455,11 @@ def test_execution_selection_reaches_the_adapter(
     assert isinstance(session, (ClaudeSession, CodexSession, AgySession))
     session._unsolicited(UnsolicitedOutput(source="probe", text="hello"))
     assert received == [UnsolicitedOutput(source="probe", text="hello")]
-    assert session.config.model == model
     if isinstance(session, AgySession):
-        command = session.config.command(resume=None)
-        assert command[command.index("--model") + 1] == model
+        assert session.config.model == "gemini-4-argon-low"
+        assert session.config.command()[:2] == ("agy", "acp")
     else:
+        assert session.config.model == model
         assert session.config.reasoning_effort == effort
 
 

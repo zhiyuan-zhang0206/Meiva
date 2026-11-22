@@ -1,271 +1,18 @@
 from __future__ import annotations
 
-import json
-from collections.abc import Mapping
-from dataclasses import dataclass, field
+import re
+from collections import deque
+from collections.abc import Iterator, Sequence
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 
 from base.host.boundary.json_values import is_object_dict, is_object_list
-from base.host.boundary.untyped import object_of
+from base.host.boundary.jsonl import read_jsonl_rows
 from base.host.env.harness_binaries import resolve_user_home
-from base.lm.harness.antigravity.subagents import INVOKE_SUBAGENT
-from base.lm.harness.events import (
-    AssistantText,
-    BridgeEvent,
-    ReasoningText,
-    SessionStarted,
-    TextDelta,
-    ToolResult,
-    ToolUse,
-    Usage,
-)
+from base.lm.harness.antigravity.acp import content_text, input_marker, received_markers
 
 
-# meiva:note
-# One `result` event, decoded. `denied_actions` is the only structured signal
-# that a tool call was refused: the CLI still reports `status: SUCCESS` and
-# exits 0, so a caller that reads `status` alone records a silent no-op as a
-# successful turn.
-@dataclass(frozen=True, slots=True)
-class ResultFields:
-    session_id: str | None
-    status: str
-    text: str
-    error: str | None
-    num_turns: int
-    duration_ms: int
-    usage: Usage = field(default_factory=Usage)
-    denied_actions: tuple[str, ...] = ()
-
-    @property
-    def denied(self) -> bool:
-        return bool(self.denied_actions)
-
-    @property
-    def interrupted(self) -> bool:
-        return self.error == "interrupted"
-
-    @property
-    def is_error(self) -> bool:
-        return self.status != "SUCCESS" or self.error is not None or self.denied
-
-    @property
-    def subtype(self) -> str:
-        if self.denied:
-            return "denied"
-        if self.interrupted:
-            return "interrupted"
-        return self.status.lower()
-
-
-def map_init(payload: Mapping[str, object]) -> SessionStarted:
-    init = _mapping(payload.get("init"))
-    return SessionStarted(
-        session_id=_text(payload.get("conversation_id")) or "",
-        model=_text(init.get("model")),
-        cwd=_text(init.get("cwd")),
-        api_key_source=_text(init.get("permission_mode")),
-    )
-
-
-# meiva:note
-# Translate one `step_update`; text accumulation stays with the session.
-def map_step_update(
-    update: Mapping[str, object], *, turn_id: str, home: Path | None = None
-) -> tuple[BridgeEvent, ...]:
-    step_type = _text(update.get("step_type"))
-    if step_type == "agent_response":
-        return _map_agent_response_step(update, turn_id=turn_id, home=home)
-    if step_type == "tool":
-        return _map_tool_step(update, turn_id=turn_id, home=home)
-    return ()
-
-
-def _map_agent_response_step(
-    update: Mapping[str, object], *, turn_id: str, home: Path | None = None
-) -> tuple[BridgeEvent, ...]:
-    state = _text(update.get("state"))
-    delta = _text(update.get("text_delta"))
-    step_index = _int(update.get("step_index"))
-    conversation_id = _text(update.get("conversation_id"))
-    events: list[BridgeEvent] = []
-    if state == "DONE":
-        thinking = _text(update.get("thinking")) or (
-            _transcript_thinking(conversation_id, step_index, before_tool=False, home=home)
-            if conversation_id
-            else None
-        )
-        if thinking:
-            events.append(ReasoningText(turn_id=turn_id, text=thinking))
-    if delta:
-        events.append(TextDelta(turn_id=turn_id, text=delta))
-    return tuple(events)
-
-
-def _map_tool_step(
-    update: Mapping[str, object], *, turn_id: str, home: Path | None = None
-) -> tuple[BridgeEvent, ...]:
-    state = _text(update.get("state"))
-    step_index = _int(update.get("step_index"))
-    conversation_id = _text(update.get("conversation_id"))
-    info = _mapping(update.get("tool_info"))
-    name = _text(update.get("tool_name")) or _text(info.get("name")) or "unknown"
-    tool_use_id = f"{turn_id}#{update.get('step_index', 0)}"
-    if name == INVOKE_SUBAGENT:
-        # meiva:note
-        # The stream shows the call's `tool` step as ACTIVE and never DONE (the `subagent` steps after it carry
-        # nothing). `SubagentReader` writes the call, with its child's conversation id and its output.
-        # meiva:link base/lm/harness/docs/subagent-text.md
-        return ()
-    if state == "ACTIVE":
-        params = dict(_mapping(info.get("parameters")))
-        if conversation_id:
-            params = {
-                **params,
-                **transcript_tool_args(conversation_id, step_index, name, home=home),
-            }
-        thinking = _text(update.get("thinking")) or (
-            _transcript_thinking(conversation_id, step_index, before_tool=True, home=home)
-            if conversation_id
-            else None
-        )
-        tool_use = ToolUse(
-            turn_id=turn_id,
-            tool_use_id=tool_use_id,
-            name=name,
-            tool_input=params,
-        )
-        if thinking:
-            return (ReasoningText(turn_id=turn_id, text=thinking), tool_use)
-        return (tool_use,)
-    if state == "DONE":
-        content = _tool_content(info)
-        if conversation_id:
-            transcript_out = transcript_tool_output(conversation_id, step_index, home=home)
-            if transcript_out and len(transcript_out) >= len(content):
-                content = transcript_out
-        return (
-            ToolResult(
-                turn_id=turn_id,
-                tool_use_id=tool_use_id,
-                is_error=_tool_failed(info),
-                content=content,
-            ),
-        )
-    return ()
-
-
-def assistant_text(
-    update: Mapping[str, object], *, turn_id: str, text: str
-) -> AssistantText | None:
-    if _text(update.get("step_type")) != "agent_response" or _text(update.get("state")) != "DONE":
-        return None
-    return AssistantText(turn_id=turn_id, text=text)
-
-
-# meiva:note
-# `input_tokens` is the whole prompt here too: the CLI's recorded `total_tokens`
-# is input + output, with `cache_read_tokens` inside the input figure rather than
-# beside it. Stated so the next reader does not add the cache count twice; see
-# `Usage` in `base/lm/harness/events.py`.
-# meiva:link base/lm/harness/docs/harness.md
-def parse_usage(payload: object) -> Usage:
-    usage = _mapping(payload)
-    raw_in = _int(usage.get("input_tokens"))
-    raw_out = _int(usage.get("output_tokens"))
-    thinking = _int(usage.get("thinking_tokens"))
-    cache_read = _int(usage.get("cache_read_tokens"))
-    total = _int(usage.get("total_tokens"))
-    # meiva:note
-    # `agy` bills thinking tokens as output and reports them separately; fold
-    # them in so a turn's output figure stays comparable with the other
-    # harnesses. When the CLI reports `total_tokens == input_tokens + output_tokens`
-    # or `cache_read_tokens > input_tokens`, `input_tokens` is the uncached portion
-    # and `cache_read_tokens` sits outside it.
-    input_tokens = (
-        raw_in + cache_read
-        if cache_read > raw_in or (cache_read > 0 and total > 0 and total == raw_in + raw_out)
-        else raw_in
-    )
-    return Usage(
-        input_tokens=input_tokens,
-        output_tokens=raw_out + thinking,
-        cache_read_input_tokens=cache_read,
-    )
-
-
-def parse_result(payload: Mapping[str, object], *, home: Path | None = None) -> ResultFields:
-    raw_denied = payload.get("denied_actions")
-    denied_items = raw_denied if is_object_list(raw_denied) else []
-    denied = tuple(_denial_label(entry) for entry in denied_items if is_object_dict(entry))
-    duration = payload.get("duration_seconds")
-    session_id = _text(payload.get("conversation_id"))
-    status = _text(payload.get("status")) or "UNKNOWN"
-    error = _text(payload.get("error"))
-    if (
-        status != "SUCCESS"
-        and error != "interrupted"
-        and _transcript_turn_recovered(session_id, home=home)
-    ):
-        status = "SUCCESS"
-        error = None
-    if status == "SUCCESS" and error is not None and error != "interrupted":
-        error = None
-    return ResultFields(
-        session_id=session_id,
-        status=status,
-        text=_text(payload.get("response")) or "",
-        error=error,
-        num_turns=_int(payload.get("num_turns")),
-        duration_ms=int(float(duration) * 1000.0) if isinstance(duration, int | float) else 0,
-        usage=parse_usage(payload.get("usage")),
-        denied_actions=denied,
-    )
-
-
-def _transcript_turn_recovered(conversation_id: str | None, *, home: Path | None = None) -> bool:
-    if not conversation_id:
-        return False
-    rows = transcript_rows(conversation_id, home=home)
-    if not rows:
-        return False
-    for row in reversed(rows):
-        step_type = _text(row.get("type"))
-        step_status = _text(row.get("status"))
-        if step_type == "ERROR_MESSAGE" or step_status in {"ERROR", "FAILED", "CANCELED"}:
-            return False
-        if step_type == "PLANNER_RESPONSE" and step_status == "DONE":
-            return True
-        if step_type == "USER_INPUT":
-            break
-    return False
-
-
-def _denial_label(entry: object) -> str:
-    item = _mapping(entry)
-    action = _text(item.get("action")) or "unknown"
-    display = _text(item.get("display_name")) or ""
-    return f"{action}:{display}".rstrip(":")
-
-
-def _tool_failed(info: Mapping[str, object]) -> bool:
-    # meiva:note
-    # `agy` does not mark a failing shell command: a non-zero exit arrives as
-    # plain output text. Only a tool-level error field is trustworthy here.
-    return bool(info.get("error") or info.get("Error"))
-
-
-def _tool_content(info: Mapping[str, object]) -> str:
-    for key in ("output", "Output", "combinedOutput", "combined_output"):
-        value = info.get(key)
-        if isinstance(value, str):
-            return value
-        if value is not None:
-            return json.dumps(value, ensure_ascii=False)
-    return ""
-
-
-def transcript_rows(conversation_id: str, *, home: Path | None = None) -> list[dict[str, object]]:
+def transcript_path(conversation_id: str, *, home: Path | None = None) -> Path | None:
     log_dir = (
         resolve_user_home(home)
         / ".gemini"
@@ -277,102 +24,301 @@ def transcript_rows(conversation_id: str, *, home: Path | None = None) -> list[d
     )
     for filename in ("transcript_full.jsonl", "transcript.jsonl"):
         path = log_dir / filename
-        if not path.is_file():
-            continue
-        try:
-            rows: list[dict[str, object]] = []
-            for line in path.read_text(encoding="utf-8", errors="replace").splitlines():
-                if not line.strip():
-                    continue
-                parsed = object_of(json.loads, line)
-                if is_object_dict(parsed):
-                    rows.append(parsed)
-            return rows
-        except (OSError, json.JSONDecodeError):
-            continue
-    return []
-
-
-def transcript_tool_args(
-    conversation_id: str, step_index: int, name: str, *, home: Path | None = None
-) -> dict[str, object]:
-    rows = transcript_rows(conversation_id, home=home)
-    for row in reversed(rows):
-        idx = _int(row.get("step_index"))
-        if step_index > 0 and idx > step_index:
-            continue
-        raw_calls = row.get("tool_calls")
-        calls = raw_calls if is_object_list(raw_calls) else []
-        if not calls:
-            continue
-        if step_index > idx > 0:
-            call_offset = step_index - idx - 1
-            if 0 <= call_offset < len(calls):
-                tc = _mapping(calls[call_offset])
-                if _text(tc.get("name")) == name:
-                    return dict(_mapping(tc.get("args")))
-        for raw_tc in calls:
-            tc = _mapping(raw_tc)
-            if _text(tc.get("name")) == name:
-                return dict(_mapping(tc.get("args")))
-        break
-    return {}
-
-
-def transcript_tool_output(
-    conversation_id: str, step_index: int, *, home: Path | None = None
-) -> str:
-    for row in transcript_rows(conversation_id, home=home):
-        if _int(row.get("step_index")) == step_index:
-            content = _text(row.get("content"))
-            if content:
-                return content
-    return ""
-
-
-# meiva:note
-# The assistant's answers from step `first_step` on, read from the conversation transcript: the text of
-# each `PLANNER_RESPONSE` row that made no tool call. It is how a turn seen only through the trajectory
-# gets its text, because the trajectory reply of a text-only step was not observed to carry one.
-def answer_texts(
-    conversation_id: str, first_step: int, *, home: Path | None = None
-) -> tuple[str, ...]:
-    texts: list[str] = []
-    for row in transcript_rows(conversation_id, home=home):
-        if _int(row.get("step_index")) < first_step or _text(row.get("type")) != "PLANNER_RESPONSE":
-            continue
-        content = _text(row.get("content"))
-        if content and not row.get("tool_calls"):
-            texts.append(content.strip())
-    return tuple(texts)
-
-
-def _transcript_thinking(
-    conversation_id: str, step_index: int, *, before_tool: bool, home: Path | None = None
-) -> str | None:
-    target_idx = step_index - 1 if before_tool else step_index
-    if target_idx < 0:
-        return None
-    for row in transcript_rows(conversation_id, home=home):
-        if _int(row.get("step_index")) != target_idx:
-            continue
-        if _text(row.get("type")) != "PLANNER_RESPONSE":
-            continue
-        if not before_tool and row.get("tool_calls"):
-            return None
-        thinking = _text(row.get("thinking"))
-        if thinking and thinking.strip():
-            return thinking.strip()
+        if path.is_file():
+            return path
     return None
 
 
-def _mapping(value: object) -> dict[str, object]:
-    return value if is_object_dict(value) else {}
+def transcript_rows(conversation_id: str, *, home: Path | None = None) -> list[dict[str, object]]:
+    path = transcript_path(conversation_id, home=home)
+    if path is None:
+        return []
+    try:
+        return read_jsonl_rows(path)
+    except (OSError, ValueError):
+        return []
 
 
-def _text(value: object) -> str | None:
-    return value if isinstance(value, str) and value else None
+@dataclass(frozen=True, slots=True)
+class PlannerRow:
+    index: int
+    row: dict[str, object]
+    input_key: str | None
+    notice: BackgroundNotice | None
+
+    @property
+    def final(self) -> bool:
+        return bool(self.row.get("content")) and not self.row.get("tool_calls")
 
 
-def _int(value: object) -> int:
-    return int(value) if isinstance(value, int | float) else 0
+def planner_rows(rows: Sequence[dict[str, object]], keys: Sequence[str]) -> Iterator[PlannerRow]:
+    marks = {input_marker(key): key for key in keys}
+    foreground: str | None = None
+    background: BackgroundNotice | None = None
+    for index, row in enumerate(rows):
+        kind = row.get("type")
+        if kind == "USER_INPUT":
+            foreground = next(
+                (marks[mark] for mark in received_markers((row,)) if mark in marks), None
+            )
+            background = None
+        elif kind == "SYSTEM_MESSAGE" and (notice := _background_notice(row, index)) is not None:
+            background = notice
+        elif kind == "PLANNER_RESPONSE" and row.get("status") == "DONE":
+            yield PlannerRow(index, row, foreground, background)
+
+
+_SENDER = re.compile(r"^\[Message\] (?:timestamp=\S+ )?sender=(\S+)([^\n]*)", re.MULTILINE)
+
+
+@dataclass(frozen=True, slots=True)
+class BackgroundNotice:
+    sender: str
+    prompt: str
+    index: int
+
+    def is_task_for(self, session_id: str | None) -> bool:
+        return bool(session_id and self.sender.startswith(session_id + "/task-"))
+
+
+def _background_notice(row: dict[str, object], index: int) -> BackgroundNotice | None:
+    content = row.get("content")
+    match = _SENDER.search(content) if isinstance(content, str) else None
+    if match is None or match[1] == "system":
+        return None
+    _, separator, prompt = match[2].partition(" content=")
+    if separator and isinstance(content, str):
+        prompt += content[match.end() :].partition("</SYSTEM_MESSAGE>")[0]
+    return BackgroundNotice(match[1], prompt.strip(), index)
+
+
+@dataclass(frozen=True, slots=True)
+class ProjectedFrame:
+    frame: dict[str, object]
+    input_key: str | None
+    notice: BackgroundNotice | None
+    reply: str = ""
+    text_finished: bool = False
+
+    def timer_notice(self, session_id: str | None) -> BackgroundNotice | None:
+        if self.reply and self.notice is not None and self.notice.is_task_for(session_id):
+            return self.notice
+        return None
+
+
+Frame = dict[str, object]
+Evidence = tuple[int, str, int]
+
+
+@dataclass(frozen=True, slots=True)
+class ForegroundBoundary:
+    next_row: int
+    accounted: bool
+    cancelled: bool
+
+    def excludes(self, step: PlannerRow, notice: BackgroundNotice) -> bool:
+        tokens = step.row.get("input_tokens")
+        if notice.index >= self.next_row:
+            return True
+        if step.index < self.next_row:
+            return False
+        if self.cancelled:
+            return step.final
+        return self.accounted and type(tokens) is int and tokens > 0
+
+
+@dataclass(slots=True)
+class OutputProjection:
+    offset: int
+    keys: list[str] = field(default_factory=list[str])
+    pending: deque[Frame] = field(default_factory=deque[Frame])
+    confirmed: set[int] = field(default_factory=set[int])
+    excluded: set[int] = field(default_factory=set[int])
+    _boundaries: dict[str, ForegroundBoundary] = field(
+        default_factory=dict[str, ForegroundBoundary]
+    )
+    seen: set[Evidence] = field(default_factory=set[Evidence])
+    _tool_owners: dict[str, ProjectedFrame] = field(default_factory=dict[str, ProjectedFrame])
+
+    def owns(self, step: PlannerRow) -> bool:
+        return step.input_key is not None and (step.notice is None or step.index in self.confirmed)
+
+    def steps(self, rows: Sequence[Frame]) -> tuple[PlannerRow, ...]:
+        return tuple(planner_rows(rows[self.offset :], self.keys))
+
+    def confirm_span(self, span: Sequence[PlannerRow], candidates: Sequence[PlannerRow]) -> None:
+        selected = {step.index for step in span}
+        self.confirmed.update(selected)
+        self.excluded.update(step.index for step in candidates if step.index not in selected)
+
+    def close_foreground(
+        self, keys: Sequence[str], row_count: int, *, accounted: bool, cancelled: bool = False
+    ) -> None:
+        boundary = ForegroundBoundary(row_count - self.offset, accounted, cancelled)
+        self._boundaries.update(dict.fromkeys(keys, boundary))
+
+    def _route(self, step: PlannerRow) -> str | BackgroundNotice | None:
+        if self.owns(step):
+            return step.input_key
+        notice = step.notice
+        if notice is None:
+            return None
+        boundary = self._boundaries.get(step.input_key) if step.input_key is not None else None
+        if step.input_key is None or step.index in self.excluded:
+            return notice
+        return notice if boundary is not None and boundary.excludes(step, notice) else None
+
+    def expects_tool(self, tool_id: object) -> bool:
+        return isinstance(tool_id, str) and (
+            tool_id in self._tool_owners
+            or any(item.get("toolCallId") == tool_id for item in self.pending)
+        )
+
+    def project(self, rows: Sequence[Frame]) -> Iterator[ProjectedFrame]:
+        steps = self.steps(rows)
+        while self.pending:
+            count = len(self.pending)
+            yield from self._project_pass(steps, interleave=False)
+            if len(self.pending) != count:
+                continue
+            yield from self._project_pass(steps, interleave=True)
+            if len(self.pending) == count:
+                return
+
+    def _project_pass(
+        self, steps: Sequence[PlannerRow], *, interleave: bool
+    ) -> Iterator[ProjectedFrame]:
+        consumed: set[int] = set()
+        frames = list(self.pending)
+        for index in range(len(frames)):
+            if index in consumed:
+                continue
+            match = self._match(index, frames, consumed, steps, interleave=interleave)
+            if match is not None:
+                event, indices = match
+                consumed.update(indices)
+                yield event
+        self.pending = deque(frame for i, frame in enumerate(frames) if i not in consumed)
+
+    def _match(
+        self,
+        index: int,
+        frames: Sequence[Frame],
+        consumed: set[int],
+        steps: Sequence[PlannerRow],
+        *,
+        interleave: bool,
+    ) -> tuple[ProjectedFrame, tuple[int, ...]] | None:
+        frame = frames[index]
+        kind = frame.get("sessionUpdate")
+        tool_id = frame.get("toolCallId")
+        if kind == "tool_call_update" and isinstance(tool_id, str):
+            owner = self._tool_owners.get(tool_id)
+            return (replace(owner, frame=frame), (index,)) if owner is not None else None
+        if kind == "tool_call" and isinstance(tool_id, str):
+            item = self._take_tool(frame, tool_id, steps)
+            return (item, (index,)) if item is not None else None
+        field_name = "thinking" if kind == "agent_thought_chunk" else "content"
+        return self._take_text(index, frames, consumed, steps, field_name, interleave=interleave)
+
+    def _owner(
+        self, step: PlannerRow, frame: Frame, *, text_finished: bool = False
+    ) -> ProjectedFrame | None:
+        owner = self._route(step)
+        if isinstance(owner, str):
+            return ProjectedFrame(frame, owner, None, text_finished=text_finished)
+        if owner is not None:
+            reply = content_text(frame.get("content")) if text_finished and step.final else ""
+            return ProjectedFrame(frame, None, owner, reply, text_finished)
+        return None
+
+    def _take_tool(
+        self, frame: Frame, tool_id: str, steps: Sequence[PlannerRow]
+    ) -> ProjectedFrame | None:
+        matches = [
+            (step, evidence)
+            for step in steps
+            for index, call in enumerate(_calls(step.row))
+            if (evidence := (step.index, "tool", index)) not in self.seen
+            and _matches_call(frame, call)
+        ]
+        if len(matches) != 1:
+            return None
+        step, evidence = matches[0]
+        owner = self._owner(step, frame)
+        if owner is not None:
+            self.seen.add(evidence)
+            self._tool_owners[tool_id] = owner
+        return owner
+
+    def _take_text(
+        self,
+        index: int,
+        frames: Sequence[Frame],
+        consumed: set[int],
+        steps: Sequence[PlannerRow],
+        name: str,
+        *,
+        interleave: bool,
+    ) -> tuple[ProjectedFrame, tuple[int, ...]] | None:
+        kind = frames[index].get("sessionUpdate")
+        first = content_text(frames[index].get("content"))
+        options = [
+            (step, value.strip())
+            for step in steps
+            if (step.index, name, 0) not in self.seen
+            and isinstance(value := step.row.get(name), str)
+            and value.strip().startswith(first.strip())
+        ]
+        if not options:
+            return None
+        step, value = options[0]
+        route = self._route(step)
+        if route is None or any(self._route(other) != route for other, _ in options[1:]):
+            return None
+        indices = _text_chunks(index, first, value, frames, consumed, interleave=interleave)
+        if indices:
+            frame = {"sessionUpdate": kind, "content": {"type": "text", "text": value}}
+            owner = self._owner(step, frame, text_finished=name == "content")
+            if owner is not None:
+                self.seen.add((step.index, name, 0))
+                return owner, indices
+        return None
+
+
+def _text_chunks(
+    index: int,
+    first: str,
+    expected: str,
+    frames: Sequence[Frame],
+    consumed: set[int],
+    *,
+    interleave: bool,
+) -> tuple[int, ...]:
+    kind = frames[index].get("sessionUpdate")
+    text = first
+    indices = [index]
+    for current in range(index + 1, len(frames)):
+        if text.strip() == expected:
+            return tuple(indices)
+        if current in consumed or frames[current].get("sessionUpdate") != kind:
+            continue
+        candidate = text + content_text(frames[current].get("content"))
+        if expected.startswith(candidate.strip()):
+            text = candidate
+            indices.append(current)
+        elif not interleave:
+            break
+    return tuple(indices) if text.strip() == expected else ()
+
+
+def _calls(row: dict[str, object]) -> Iterator[dict[str, object]]:
+    calls = row.get("tool_calls")
+    if is_object_list(calls):
+        yield from (call for call in calls if is_object_dict(call))
+
+
+def _matches_call(frame: dict[str, object], call: dict[str, object]) -> bool:
+    return (frame.get("name") or frame.get("title")) == call.get("name") and (
+        frame.get("rawInput", frame.get("args")) or {}
+    ) == (call.get("args") or {})

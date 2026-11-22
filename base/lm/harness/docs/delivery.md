@@ -18,17 +18,13 @@ What rides in front of the first message (the handoff, the compaction reminder) 
 text block (`with_lead_text`). Claude Code takes the blocks as the `content` of one user message
 (a single text block is sent as a plain string), Codex as the items of one `input` array; both were
 recorded accepting several text blocks and alternating images with the echo (`uuid` / `clientId`)
-arriving as usual (`multi_block_input.json` in each adapter's fixtures). Antigravity's stdin protocol has
-one content string and takes an image only as a separate RPC, so it keeps its flattened behavior: the
-text blocks joined by blank lines, the images as before (a CLI protocol limit).
+arriving as usual (`multi_block_input.json` in each adapter's fixtures). Antigravity sends the blocks
+in a single ACP `session/prompt` for both new turns and steers.
 
-Images reach all three CLIs as images: Claude as an `image` content block, Codex as an `image` input with a data URL,
-Antigravity as `media` through `SendUserCascadeMessage` (an idle conversation takes the text first and the image
-as a second input, see the [Antigravity notes](../antigravity/docs/antigravity.md)). The graph builds `images` from
-the inlined `image_url` blocks of the message and keeps the path listing in the text. The graph bounds them: 5 MB
-per image (the Anthropic API's per-image limit, the smallest of the three providers) and 15 MB of raw bytes per
-input (a wake's rows are one input, so the total counts all their images; base64 makes that about 20 MB, Gemini's inline request limit); an image over a bound is not sent inline,
-and the text says so.
+The graph obtains inline images from the message's `image_url` blocks and bounds them to 5 MB
+per image (Anthropic's per-image limit) and 15 MB of raw bytes per input (about 20 MB base64,
+Gemini's inline request limit). A row with all images delivered inline omits the redundant
+image-path note. A row with a missing or oversize image keeps the fallback paths.
 
 `deliver(inputs)` returns when the batch has been handed to the foreground, in order. It never
 returns "did it work": a refusal is an `InputRejected` event, a protocol failure raises. Whether an
@@ -71,7 +67,7 @@ a neighbouring turn, and an input delivered meanwhile is handed to that turn or 
   provides `_idle()` (no running turn of ours, no harness-started turn, no hold), the gate only the Codex
   adapter uses to start a turn of ours (`_deliver_one`: steer when a turn runs, else `turn/start` when idle,
   else refuse). Claude's `deliver()` writes every input to the CLI at once, whatever its turn state, and the
-  echo says what became of it; Antigravity routes on the CLI's trajectory status (`route`), not on `_idle()`.
+  echo says what became of it; Antigravity attaches new prompt requests to the current foreground turn when one is active.
 - Adapters only translate protocol frames to ledger calls.
 
 ## The bridge's event pump
@@ -108,8 +104,7 @@ environment (`CLAUDE_CONFIG_DIR` through the auth config or `HOME/.claude`, `COD
 `HOME` for Antigravity's `.gemini` tree) and an environment without `HOME` cannot answer. A batch of keys
 is judged with one read of the record (`reconcile_inputs`); a JSONL record's half-written last line (no trailing
 newline, a process killed mid-write) is skipped, a bad line anywhere else is an error. `Reconciliation.UNKNOWN`
-is Antigravity's answer for an input absent from its message queue: only steered inputs are queued, an input that
-started a turn on stdin leaves no file whether or not it ran.
+is Antigravity's answer for an input absent from both the ACP transcript and the legacy input queue.
 
 The session answers for the session its registry record names, so no CLI has to run:
 `session.reconcile(keys)` (and `HarnessBridge.reconcile`, which also answers for the session it just retired)
@@ -126,6 +121,6 @@ with the answers is in [foreground input and cancellation](../../../../agent/gra
 |---|---|---|---|
 | Codex | `turn/steer` or `turn/start` response (strong) | `item/completed(userMessage, clientId)` | refusal and loss are events |
 | Claude Code | the write (weak) | echo of our uuid (`replay-user-messages`) | an input that misses the turn becomes a turn of its own |
-| Antigravity | stdin write or HTTP 200 (weak) | trajectory step with our `clientMessageId`, or the first stdout user-input step | an input for an idle conversation starts a turn on stdin; a late one is refused; phantom turns are observed from the trajectory |
+| Antigravity | ACP prompt write (weak) | user echo or transcript carrying the input marker, or the latest non-cancelled prompt result for that input | the latest request owns the foreground boundary across steers |
 
 `HarnessSession` has `deliver()` once all three implement it.

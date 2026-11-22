@@ -1,233 +1,129 @@
 # Antigravity (agy) session bridge
 
-`base/lm/harness/antigravity/` turns one Google Antigravity CLI (`agy`) process
-into the runtime's turn engine. It reuses the shared contract modules
-(`events`, `handoff`, `registry`, `process`) unchanged: what is special about
-`agy` lives in this package.
+The bridge drives one Google Antigravity CLI conversation through
+[Agent Client Protocol v1](https://agentclientprotocol.com/protocol/v1/overview).
+It requires `agy` 1.5.14 or later. The minimum version is the first verified
+here to keep a running tool and both inputs through a mid-turn prompt.
 
-## The transport is not ACP
+## Conversation and delivery
 
-`agy` 1.4.2 has no Agent Client Protocol server. From 1.5.6, `agy acp` provides an
-ACP stdio server; this adapter does not use it yet and still drives headless
-print mode. The migration plan is
-[Antigravity on ACP with a private injection RPC](../../../../../future/agent/antigravity-acp-hybrid.md).
-The earlier ACP surface was a separate
-Google binary (`agy_acp_server.par`, release 1.3.0, ~926 MB unpacked) with its
-own Google sign-in; it is not installed by `agy` and not used here. The CLI's own
-programmatic surface is headless print mode:
+`agy acp` exchanges newline-delimited JSON-RPC over stdio. The adapter sends
+`initialize` and either `session/new` or `session/load`. The load response ends history playback. Live frames arriving while the model is being selected are queued. It always reapplies the configured model and reasoning effort
+with the combined model ID in `session/set_model`.
 
-```
-agy --input-format stream-json --output-format stream-json --model <id> [--conversation <id>]
-```
+Each input is one `session/prompt` with ordered text and base64 image blocks.
+A steer sends another prompt within the foreground turn. On 1.5.14 the previous
+request can return `end_turn` immediately while its command keeps running. The
+latest request governs the foreground turn boundary. Earlier replies contribute
+delivery and usage evidence. A reply from another process generation or a
+request outside the current turn cannot end the current turn.
 
-One process serves the whole session. stdin takes one JSON object per line,
-`{"event":"user","message":{"content":"…"}}`; stdout emits `init`, `step_update`
-and `result`. While a turn is running, the CLI's `printmode.runStreamInput` loop
-blocks inside `pollResponse` until `IsCascadeRunning` becomes false, so stdin is
-not read again until the turn completes. Mid-turn input
-therefore talks directly to the child process's in-process Connect JSON-RPC
-`LanguageServerService` on localhost: `AgyTransport` sets
-`ANTIGRAVITY_SERVER_CSRF_TOKEN` in the child environment, discovers the child's
-listening HTTP port via `psutil`, and invokes `SendUserCascadeMessage`
-(`{"cascadeId": <conversation_id>, "items": [{"text": "…"}], "clientMessageId": <our key>,
-"media": [{"mimeType": …, "inlineData": <base64>}]}`), which queues a
-`CORTEX_STEP_TYPE_USER_INPUT` step into the running `AgentExecutor` (`messages.Hub`)
-so `pollResponse` streams the steered continuation out on stdout within the same
-turn.
+A write emits a weak receipt. ACP has no durable client input ID, so the
+adapter includes a leading HTML comment containing a digest of the input key
+in the text. A matching user chunk or `USER_INPUT` transcript row confirms
+delivery. The latest non-cancelled prompt result also confirms that prompt.
+The timeline removes the comment from the displayed input. Recovery reads the
+transcript with the shared JSONL reader and can still consult the private
+message queue for inputs written before this migration. An input absent from
+both records has an unknown outcome if a write may have started. A failed
+dispatch that never reached the write hands its specific input keys back to the
+inbox for requeueing. An earlier, potentially written prompt in the same batch
+still goes through reconciliation.
 
-## Delivery, acknowledgements and the phantom turn
+## Interrupt and permission handling
 
-Non-public interfaces, agy 1.5.5 (`rpc.AGY_VERSION_PREMISE`). `SendUserCascadeMessage`,
-`GetCascadeTrajectory`, the `clientMessageId` / `media` fields and the message-queue files come from
-the binary's proto descriptors and from experiments, not from a published API. The server answers 200
-for an unknown or misspelt field (`images`, `items[].image` and snake_case names were accepted and
-ignored) and for a message sent when no turn runs, so an HTTP 200 is only a weak receipt. A reply of
-an unexpected shape or an unknown run status raises `AgyInterfaceError`; it is never read as "idle".
+`session/cancel` is a notification. The matching `cancelled` result confirms the
+interrupt, closes outstanding foreground tool entries, and keeps the process
+available for the next prompt. The adapter reports whether observed tool
+processes settle. Prompt writes have a deadline, and cancel can proceed while
+stdin is backpressured. A write failure or unconfirmed cancel retires the
+process generation. Closing the transport aborts stdin, closes stdout and
+stderr, and joins the reader tasks. The process-tree cleanup checks process
+identity and covers observed descendants and members of the CLI's private
+POSIX session. Broken-generation cleanup also checks same-user processes that
+retain the generation's unique inherited environment marker. This identifies a child that creates its own session and
+outlives the CLI. On Linux and macOS the marker scan uses psutil's process
+environment reader. If a process clears its environment or the platform
+denies access, process-tree and POSIX session observations remain available. A residue fence
+prevents reopening while an observed process still holds the generation.
+Losing the process requires a new ACP handshake and `session/load` before
+another prompt.
 
-`deliver()` asks `GetCascadeTrajectory` (`status` RUNNING / IDLE, `numTotalSteps`, `trajectory.steps`)
-before each input (`trajectory.route`). RUNNING is steered with our id. Top-level IDLE is not sufficient
-evidence that provider work finished: agy 1.5.9 enters reactive-IDLE while a background step remains
-live. That state is steerable through `SendUserCascadeMessage`, so IDLE plus an active ticket and a
-`RUNNING` or `GENERATING` trajectory step is also steered. IDLE with no turn of ours starts a turn on stdin; IDLE with
-an active ticket but no visible live step is refused (`InputRejected`) so the durable inbox owns the
-later retry while the adapter waits for the outer `result`.
+The client rejects `session/request_permission` with the offered rejection
+option, or cancels the permission request when no such option is available.
+The tool's `failed` status and the permission label reach the turn report.
+The explicit `skip_permissions` setting asks the CLI to auto-approve.
 
-The routing rule is grounded in two live agy 1.5.9 probes. A background-command trajectory stayed IDLE
-for 5.3 seconds with one step RUNNING, then resumed the same turn. In a second run, RPC injection during
-that state added the input with its `clientMessageId` in 114 ms and completed its planner response while
-the background step was still RUNNING; both answers arrived in the same outer `result`. Writing the same
-input to stdin did not wake the CLI: it was read only after the old outer `result`. The compact background
-snapshots are in `tests/fixtures/background_idle_trajectory.json`.
+## Background updates and sidecar reads
 
-Only stdout `result` is an outer-turn terminal signal. Neither one IDLE snapshot nor an unchanged silent
-window completes or closes a ticket. An input sent through RPC to a fully idle conversation would run a **phantom
-turn**: agy runs it, stdout shows nothing (130 s observed), and at the next stdin input its steps are
-printed again and its answer is folded into that turn's `result`.
+The stdio reader runs for the whole session. In-flight tool results keep the
+ownership of the original call even when they arrive after the prompt ends.
+ACP v1 update frames carry a session ID. While a detached timer can produce
+output, the adapter buffers unkeyed assistant and new tool frames until the
+corresponding completed planner rows identify the owner. A Hub notice identifies
+a detached task. During overlap, planner rows after the notice stay provisional
+until a unique ordered foreground span matches the prompt's ACP usage receipts.
+Assigning a provisional row also requires a separate terminal planner row for
+the detached reply. Candidate sets larger than ten rows stay unresolved to
+bound the session reader's work. An earlier text block cannot close a turn
+while its planner span contradicts complete ACP usage receipts. Closing a
+verified foreground records the transcript boundary and the accounted span.
+A late timer reply requires a separate task notice after that boundary or
+planner evidence excluded from the verified foreground span. A confirmed
+cancellation also allows an already registered timer to deliver a separate
+terminal planner row added after the cancellation boundary. A planner row
+already present at cancellation cannot acquire timer ownership by reaching
+DONE afterward.
 
-Acknowledgements. ACK 1 is weak (stdin write, HTTP 200). ACK 2 is the trajectory step whose
-`userInput.clientMessageId` is our key (polled every 0.5 s while an input is unsettled), or, for a turn
-started on stdin, the first user-input step on stdout (no id is echoed there, so it is matched by
-order; a CLI that prints none is acknowledged by the turn's first activity). A phantom turn that
-still happens (the conversation was running when asked and idle when written to) is observed from the
-trajectory: a running conversation with no turn of ours opens `TurnStarted(HARNESS,
-QUEUED_INPUT_REVIVED)`, an idle one closes it with the answers read from the transcript, and the steps
-already attributed are ignored when stdout replays them, so the next turn's text is its own (its
-`result` still carries the combined usage). Frames of an earlier process generation are dropped.
-
-Known limits. An image can only ride on a running turn (`media`): the stdin protocol has no image field. An
-input with an image for an idle conversation therefore starts its turn with the text alone (which says the
-image follows) and the image is steered into that turn as a second input, `<key>:images`, once the trajectory
-reports the turn running (`AntigravityConfig.image_follow_seconds`, 30 s). Verified on a live agy: a turn
-running `sleep 45` took a steered red image (answer "Red"), and an idle delivery of a blue image answered
-"Blue" with the two acknowledgements `k1` then `k1:images`. The second key settles only itself; if the turn ends
-or never runs in time, the image is not sent, `harness_image_not_delivered` is logged and the second key is
-rejected, so the text of the message still stands and names the image. The trajectory reply of a text-only step was
-not observed to carry the text, so the phantom turn's answer comes from the transcript file.
-`deliveryStrategy=WHEN_IDLE` was tried once, never against an idle conversation, so nothing here relies on it.
-
-Sub-agents. `invoke_subagent` creates a sibling conversation that the stream-json output never mentions;
-`SubagentReader` reads the parent's `subagents/` descriptors and the child's transcript file and the
-session reports them as sub-agent text and tool calls ([sub-agent text](../../docs/subagent-text.md)).
-
-Reconciliation (`reconciliation/`): the durable queue is
-`brain/<conversation>/.system_generated/messages/` (not the transcript). Its `<uuid>.json` files have
-two observed shapes: `SendUserCascadeMessage` entries carry a base64 protobuf `stepPayload`, while
-internal `messages.Hub` notices carry string `content` and a nonempty string `sender` other than
-`user` (system notices, background task completions/timers, or peer messages). Reconciliation skips
-hub notices only when `stepPayload` is absent, since they carry no Meiva `clientMessageId`.
-Non-object entries, missing payloads without that hub shape, and non-string payloads raise
-`AgyInterfaceError`, including user entries with only text. An input message listed in
-`read.json` is delivered (IN_CONTEXT); a stored one, listed in `undelivered/` or not, will be delivered
-by the CLI before the next stdin input and must not be sent again (PERSISTED_UNDELIVERED); no file with
-the clientMessageId means UNKNOWN (stdin inputs leave no queue file). Only the two protobuf levels
-that hold the id are parsed.
-
-There are no request ids on stdin/stdout, so **a cancel cannot be a
-request**: the adapter sends `SIGINT`, and the CLI answers with a final `result`
-(`status: ERROR`, `error: interrupted`) and exits 1. `interrupt()` therefore
-retires the process; the next turn respawns it with `--conversation`, which keeps
-the transcript while the process is replaced. Hosted foreground Cancel leaves
-the CLI running and reports that the provider lacks a foreground-only control.
-
-## Harness differences, absorbed here
-
-| Difference | Where it is absorbed |
-|---|---|
-| Headless cannot prompt: a tool that needs a permission the configured policy does not grant is **auto-denied**, yet the turn still reports `status: SUCCESS` and exits 0 | `mapping.ResultFields.is_error` is true when `denied_actions` is non-empty; `TurnCompleted.permission_denials` carries the entries. A caller that only reads `status` records a silent no-op as success |
-| Every `run_command` is a fresh shell: `cd` and `export` do not survive into the next call | `handoff_rules.SHELL_SEMANTICS`, appended to the handoff by `build_handoff()` |
-| `run_command` runs non-interactively with stdin closed (`/dev/null`) under modern GNU bash | `wiring.session_environ` sets `SHELL` to the non-interactive bash wrapper script; commands reading stdin receive immediate EOF |
-| A background process started with `&` is killed when the turn ends | same: the handoff tells the agent to use `setsid nohup …` or tmux |
-| `run_command` caps `WaitMsBeforeAsync` at 10s, while cold `import meiva` attachment + plugin loading takes several seconds | same: the handoff tells the agent to pass `WaitMsBeforeAsync=10000` and batch synchronous `meiva.*` calls in one `"$MEIVA_PYTHON" -c` invocation |
-
-The shape that makes the first row a silent failure, captured from `agy` 1.4.2 with a
-`request-review` profile asked to run `echo hi > file`:
-
-```json
-{"event":"result","result":{"conversation_id":"…","status":"SUCCESS","response":"",
- "num_turns":1,"usage":{"input_tokens":11907,"output_tokens":71,"thinking_tokens":0,
- "cache_read_tokens":0,"total_tokens":11978},
- "denied_actions":[{"action":"command","display_name":"RunCommand"}]}}
-```
-
-Nothing ran, the exit code is 0, and `denied_actions` is the only structured
-signal. The adapter turns that into `subtype="denied"`, `is_error=True`,
-`permission_denials=("command:RunCommand",)`.
-
-The first row is enforced in code and pinned by `test_denied.py`; the shell/runtime rules are
-behaviour of the CLI that the adapter cannot change, so they are disclosed in the
-text the agent reads, and `test_handoff.py` pins that the text is present (and
-absent from a plain `Handoff`).
-
-## Who a frame belongs to
-
-`agy` names no turns: `init`, `step_update` and `result` carry no request id, and the
-NDJSON stream is the only channel. A `result` is therefore ours only when this
-session wrote a turn out (`_sent_turn`, set before the write) and has not seen it
-end; anything else is the CLI's own work and becomes
-`UnsolicitedOutput(source="result")`. Mid-turn the two are indistinguishable at the
-protocol level, so the reply is built from the turn's own streamed text — the parts
-already closed plus whatever the in-flight step streamed — and the frame's
-`response` only fills a gap. That is what keeps a foreign `result` from replacing
-the reply it interrupted. The read loop also accepts frames only from the transport
-that still owns the session, so late frames from a replaced process cannot complete
-or fail a later ticket.
-
-A stream that ends names the turn it was serving when one was running
-(`TurnFaulted`) and the session when none was (`SessionFailed`).
-
-The rule and the three events are [[base/lm/harness/docs/attribution.md|Who
-a provider message belongs to]]; `tests/test_unsolicited.py` pins this half —
-including the residual risk that a `result` arriving mid-turn is acted on, because
-nothing in the protocol can tell the two apart.
-
-## Literal request tags
-
-The CLI does not escape request delimiters inside user text. Splitting on every
-apparent request block can therefore discard parts of a message and prevent its
-inbox identity from matching the record. The reader removes only the outer
-request frame and preserves interior delimiters, including apparent queued
-request separators. Each queued body stays contiguous for identity matching.
-Unknown or incomplete framing stays intact. An unescaped body that imitates an
-entire provider frame is intrinsically ambiguous; the reader does not infer
-interior structure from tag nesting.
-
-## Modules
-
-| Module | Owns |
-|---|---|
-| `transport.py` | `AgyTransport`: spawn, NDJSON framing, SIGINT with process assertions, stderr tail |
-| `session.py` | `AgySession`: ordered inbound queue, one event stream, totals, respawn after interrupt |
-| `mapping.py` | pure `init` / `step_update` / `result` → event translation |
-| `handoff_rules.py` | `build_handoff()` and the two shell-semantics rules |
-| `config.py` | `AntigravityConfig` and the argv it builds |
-
-## Config bounds
-
-| Field | Default | Reason |
-|---|---|---|
-| `cancel_settle_seconds` | 5 | how long an interrupt waits for the CLI and its children before escalating to SIGTERM/SIGKILL and reporting residue |
-| `image_follow_seconds` | 30 | how long an image sent as a follow-up steer waits for its turn to be running before it is given up on and reported (`session._follow_with_images`) |
-| `max_buffered_events` | 256 | text deltas are droppable under lag; control events never are |
-| `max_schedule_timer_seconds` | `86400` (`UNBOUNDED_SCHEDULE_SECONDS`) | upper bound for extending the foreground stall-watchdog silence floor on one explicit timed `schedule(DurationSeconds=...)` call so a malformed huge duration cannot disable stall detection indefinitely |
-| `skip_permissions` | `False` | headless cannot prompt; a command outside the configured policy is denied, which the adapter reports as failure. Opting in trades that denial for auto-approval |
-| `MAX_FRAME_BYTES` (`transport.py`) | `256 MiB` | one NDJSON `step_update` or `result` line can carry a multi-megabyte tool result or accumulated turn state; `AgyTransport` reads 64 KiB chunks into a `bytearray` without `StreamReader.readline()`'s 8 MiB separator limit while capping one frame at 256 MiB so an unterminated stream from a wedged child cannot grow memory without bound |
-
-## Interrupt, measured on the real CLI
-
-`SIGINT` delivery, tool-tree reaping on `interrupt()` and `close()`, and
-`--conversation` respawn recovery are documented in
-[Antigravity interrupt and process-tree reaping](interrupt.md).
-
-## Usage and cost
-
-`agy` reports `input_tokens`, `output_tokens`, `thinking_tokens` and
-`cache_read_tokens`; thinking is billed as output, so it is folded into
-`Usage.output_tokens` to keep the figure comparable with the other harnesses.
-The CLI reports no price, so `cost_usd` stays `None` and is not accumulated —
-an unknown cost is not the same as a zero one.
-
-## Tests
-
-`tests/fake_agy.py` is spawned exactly like the CLI and speaks the same framing,
-including the SIGINT exit path and a real child process, so the cancel assertions
-run against a real process tree. The suite pins the seven shared invariants plus
-the three differences above.
-
-## Scheduled work
-
-`agy` has a `schedule` tool (cron jobs and timers). The step stream shows the call and its
-result. On `agy` 1.5.5 a timer call (`DurationSeconds`, `Prompt`) blocked inside the tool call
-until it fired; on `agy` 1.5.14 it returns immediately as a background task handle (`task id: ...`)
-while holding the outer turn open and silent until the timer fires or is cancelled early by
-`TimerCondition` or `manage_task(Action="kill")`. In both forms the wait stays inside the open
-turn so `pending_at` adds no post-turn item, while `schedules.py` tracks active per-turn timer
-deadlines (capped by `AntigravityConfig.max_schedule_timer_seconds`) and exposes them through
-`AgySession.silence_floor_monotonic()` so the foreground stall watchdog does not abort a turn
-legitimately waiting for a declared timer, evicting expired, killed, closed, or early-woken
-conditional timers immediately. A call without a duration (cron-like) shows neither firing nor
-cancellation, so `schedules.py` holds it as pending for one day. An interrupt kills `agy` and
-the schedules with it; the respawn hands them to the next turn's note as lost. See
+The matcher first consumes contiguous text and then joins compatible fragments
+across remaining interleaved frames. Identical text for a single owner consumes
+that owner's earliest unused row. After terminal ACP and a verified planner
+span, the adapter can recover missing foreground text from that span. Foreground
+completion is independent of unmatched timer chunks. A task-confirmed timer
+reply goes through `UnsolicitedOutput` to the bridge wake sink. Usage updates
+can trigger a transcript read. A future timer still allows foreground input.
+A due or triggered timer holds new dispatch and keeps the process alive, and
+an unverified reply at its deadline retires the generation. Cron-like
+calls retain the existing one-day bound. Timers also supply the foreground
+watchdog's silence floor while a prompt is active. See
 [background work](../../docs/background-work.md).
+
+The local, read-only `GetCascadeTrajectory` RPC remains the source of live
+background-wait state. Top-level IDLE with live background work and without a
+live planner step is reactive waiting. An idle trajectory can also corroborate
+a tracked schedule. The same RPC supplies native timing. Sub-agent output
+continues to come from descriptors and child transcript files because ACP
+1.5.14 does not stream it. See [sub-agent text](../../docs/subagent-text.md).
+
+## Usage
+
+The ACP result reports uncached input, cache read and write, visible output,
+and thought tokens. Meiva combines the input counters and bills thought as
+output. A result can omit usage on cancel or steer, while a later result may
+cover several planner steps. A single prompt's usage is authoritative. For a
+steered turn, the adapter checks ordered receipt spans against planner rows
+bounded by its input markers and final streamed answer. A disjoint set of
+receipts must cover the owned rows in sequence. A cumulative final receipt
+must cover the span, and each available earlier receipt must match a proper
+prefix. If a superseded request omitted usage, the terminal cumulative receipt
+can still verify a unique span with planner evidence for each foreground
+input. Disjoint billing requires every request receipt.
+Planner rows attributed to a detached task are excluded. With incomplete
+evidence, the completion carries available counters and a usage uncertainty
+flag. The graph logs `harness_usage_uncertain` and skips the exact cost row.
+The CLI supplies no price.
+
+## Bounds
+
+| Setting | Default | Purpose |
+|---|---|---|
+| `startup_request_seconds` | 30 s | Bounds each initialization, session setup and model selection request, which otherwise could leave the host waiting on a dead stdio peer. |
+| `prompt_write_seconds` | 5 s | Bounds stdout-independent stdin backpressure for prompt delivery. |
+| `background_reply_seconds` | 30 s | Covers provider generation after a detached timer fires. In the measured trace the delay was 5.65 s. |
+| `cancel_settle_seconds` | 5 s | Bounds the wait for a cancel confirmation and the following wait for tracked tools, and bounds each close escalation interval. |
+| `max_buffered_events` | 256 | Allows dropping deltas when readers lag while retaining control events. |
+| `max_schedule_timer_seconds` | 86400 s | Caps the wait declared by any one schedule so malformed durations cannot disable stall detection indefinitely. |
+| `MAX_FRAME_BYTES` | 256 MiB | Allows multi-megabyte tool results and caps memory for an unterminated frame. |
 
 ## Native reasoning measurements
 
@@ -235,9 +131,9 @@ The transcript omits `plannerResponse.thinkingDuration` even when the native tra
 `AgyTransport.trajectory()` collects only completed planner measurements into a separate atomic
 `logs/meiva-thinking-timing.json` with verified offsets, identity digests and native milliseconds
 without rewriting the vendor transcript or storing thought text. `AgySession` also schedules a
-single-flight, throttled background trajectory refresh on completed `agent_response` steps,
-non-interrupted turn completion, and when `ReadTimelineSink` reads newly persisted unmeasured
-`PLANNER_RESPONSE` rows while stdout is silent (reactive-IDLE). Matching requires a unique index,
+single-flight, throttled background trajectory refresh on ACP usage updates, turn completion,
+and when `ReadTimelineSink` reads newly persisted unmeasured
+`PLANNER_RESPONSE` rows during reactive waiting. Matching requires a unique index,
 creation second and thought digest. Duplicate identities remain unknown with a diagnostic. Tool
 status spans are not substituted for native reasoning duration: real observations show that
 `thinkingDuration` differs from GENERATING-to-DONE time.

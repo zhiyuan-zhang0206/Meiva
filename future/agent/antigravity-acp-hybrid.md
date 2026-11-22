@@ -9,9 +9,10 @@ document owns what changes and why. Facts below were probed on agy 1.5.6 on
 
 ## Status
 
-Not started. The migration begins after the message-semantics questions in
-[Open questions](#open-questions-that-gate-the-migration) are decided, because
-they fix what the adapter has to deliver.
+Historical 1.5.6 design. The 1.5.14 probes changed the implementation choice:
+concurrent ACP prompts preserve running tools and both inputs. The
+[current bridge](../../base/lm/harness/antigravity/docs/antigravity.md)
+uses ACP for delivery and retains the read-only local trajectory RPC.
 
 ## Current state and what hurts
 

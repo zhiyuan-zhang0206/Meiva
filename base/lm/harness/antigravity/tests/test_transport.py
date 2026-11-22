@@ -1,147 +1,130 @@
 from __future__ import annotations
 
-import json
+import asyncio
+import os
 import sys
 from pathlib import Path
+from uuid import uuid4
+
+import pytest
 
 from base.clock.tests.fakes import system_clock
 from base.lm.harness.antigravity.config import AntigravityConfig
-from base.lm.harness.antigravity.timing_store import timing_path
-from base.lm.harness.antigravity.transcript.file import AntigravityRecordFile
-from base.lm.harness.antigravity.transcript.window import EntryParser
-from base.lm.harness.antigravity.transport import AgyTransport
-from base.lm.harness.session.transcript.entries import Reasoning
-from base.lm.harness.session.transcript.record_file import UnreadRows
+from base.lm.harness.antigravity.transport import MAX_FRAME_BYTES, AgyTransport
+from base.lm.harness.process import PsutilChildProbe
 
 FAKE_CLI = Path(__file__).with_name("fake_agy.py")
 
 
-def test_the_command_line_pins_the_stream_protocol(tmp_path: Path) -> None:
-    argv = AntigravityConfig(cwd=tmp_path).command(resume=None)
-    assert argv[:1] == ("agy",)
-    assert "--input-format" in argv and "stream-json" in argv
-    assert "--output-format" in argv
-    assert argv[argv.index("--model") + 1] == "gemini-4-argon-high"
-    assert "--conversation" not in argv
-    assert "--dangerously-skip-permissions" not in argv
-
-
-def test_resume_and_skip_permissions_are_passed_through(tmp_path: Path) -> None:
-    argv = AntigravityConfig(
-        cwd=tmp_path, skip_permissions=True, executable=("fake", "--flag")
-    ).command(resume="conv-9")
-    assert argv[:2] == ("fake", "--flag")
-    index = argv.index("--conversation")
-    assert argv[index + 1] == "conv-9"
-    assert "--dangerously-skip-permissions" in argv
-
-
-async def test_pump_stdout_handles_frame_above_eight_mib_and_trailing_eof(
-    tmp_path: Path,
-) -> None:
-    payload_bytes = 10 * 1024 * 1024
-    trailing_bytes = 128 * 1024
-    plan_file = tmp_path / "plan.json"
-    plan_file.write_text(
-        json.dumps(
-            {
-                "conversation_id": "conv-big",
-                "raw_stream": {
-                    "blob_bytes": payload_bytes,
-                    "trailing_eof_bytes": trailing_bytes,
-                },
-            }
-        ),
-        encoding="utf-8",
-    )
-    config = AntigravityConfig(cwd=tmp_path, executable=(sys.executable, str(FAKE_CLI)))
-    transport = AgyTransport(
+def _transport(
+    config: AntigravityConfig, *, max_frame_bytes: int = MAX_FRAME_BYTES
+) -> AgyTransport:
+    return AgyTransport(
         config,
-        environ={"FAKE_AGY_PLAN": str(plan_file)},
+        environ={"HOME": str(config.cwd)},
+        owner_uid=os.getuid(),
+        generation_id=uuid4().hex,
         clock=system_clock(),
+        max_frame_bytes=max_frame_bytes,
     )
-    await transport.start(resume=None)
+
+
+def test_argv_selects_acp_and_preserves_permission_policy(tmp_path: Path) -> None:
+    assert AntigravityConfig(cwd=tmp_path).command() == ("agy", "acp")
+    config = AntigravityConfig(
+        cwd=tmp_path,
+        executable=("fake",),
+        skip_permissions=True,
+        extra_args=("--stdio",),
+    )
+    assert config.command() == ("fake", "acp", "--dangerously-skip-permissions", "--stdio")
+
+
+async def test_startup_rejects_earlier_cli_that_preempts_steer(tmp_path: Path) -> None:
+    config = AntigravityConfig(
+        cwd=tmp_path,
+        executable=(sys.executable, str(FAKE_CLI)),
+        extra_args=("--test-legacy",),
+    )
+    transport = _transport(config)
+    await transport.start()
     try:
-        seen = [event async for event in transport.events()]
-        assert [event["event"] for event in seen] == ["init", "step_update", "result"]
-        assert transport.conversation_id == "conv-big"
-        blob = seen[1]["blob"]
-        assert isinstance(blob, str) and len(blob) == payload_bytes
-        tail_blob = seen[2]["blob"]
-        assert isinstance(tail_blob, str) and len(tail_blob) == trailing_bytes
-        assert transport.stderr_tail == ()
+        with pytest.raises(RuntimeError, match=r"lossless ACP steering requires agy 1\.5\.14"):
+            _ = await transport.open_session(resume=None)
     finally:
         await transport.close()
 
 
-async def test_pump_stdout_records_limit_error_when_frame_exceeds_max_frame_bytes(
-    tmp_path: Path,
-) -> None:
-    plan_file = tmp_path / "plan-overflow.json"
-    plan_file.write_text(
-        json.dumps({"conversation_id": "conv-cap", "raw_stream": {"blob_bytes": 16384}}),
-        encoding="utf-8",
+async def test_cli_that_cannot_start_acp_reports_version_exit_and_stderr(tmp_path: Path) -> None:
+    config = AntigravityConfig(
+        cwd=tmp_path,
+        executable=(sys.executable, str(FAKE_CLI)),
+        extra_args=("--test-no-acp",),
     )
-    config = AntigravityConfig(cwd=tmp_path, executable=(sys.executable, str(FAKE_CLI)))
-    transport = AgyTransport(
-        config,
-        environ={"FAKE_AGY_PLAN": str(plan_file)},
-        clock=system_clock(),
-        max_frame_bytes=4096,
-    )
-    await transport.start(resume=None)
+    transport = _transport(config)
+    await transport.start()
     try:
-        seen = [event async for event in transport.events()]
-        assert [event["event"] for event in seen] == ["init"]
-        assert "stdout line exceeded the reader limit" in transport.stderr_tail
+        with pytest.raises(
+            RuntimeError, match=r"(?s)requires agy 1\.5\.14.*exit=2.*unknown command acp"
+        ):
+            _ = await transport.open_session(resume=None)
     finally:
         await transport.close()
 
 
-async def test_existing_trajectory_rpc_collects_native_timing_without_another_rpc(
+@pytest.mark.parametrize("overflow", [False, True])
+async def test_stdout_assembles_large_and_unterminated_frames(
+    tmp_path: Path, overflow: bool
+) -> None:
+    config = AntigravityConfig(
+        cwd=tmp_path,
+        executable=(sys.executable, str(FAKE_CLI)),
+        extra_args=("--test-large-frames",),
+    )
+    transport = _transport(config, max_frame_bytes=4096 if overflow else 12 * 1024**2)
+    await transport.start()
+    try:
+        assert await transport.open_session(resume=None) == "conv-frames"
+        async with asyncio.timeout(5):
+            frames = [frame async for frame in transport.events()]
+        if overflow:
+            assert frames == []
+            assert any("stream line exceeded" in line for line in transport.stderr_tail)
+        else:
+            assert frames == [
+                {"jsonrpc": "2.0", "blob": "x" * (10 * 1024**2)},
+                {"jsonrpc": "2.0", "tail": "end"},
+            ]
+    finally:
+        await transport.close()
+
+
+async def test_close_recovers_an_unsampled_child_that_created_its_own_session(
     tmp_path: Path,
 ) -> None:
-    plan = tmp_path / "plan.json"
-    plan.write_text(json.dumps({"conversation_id": "conv-timing", "turns": []}))
-    path = (
-        tmp_path
-        / ".gemini/antigravity-cli/brain/conv-timing/.system_generated/logs/transcript_full.jsonl"
+    config = AntigravityConfig(
+        cwd=tmp_path,
+        executable=(sys.executable, str(FAKE_CLI)),
+        extra_args=("--test-child",),
+        cancel_settle_seconds=0.5,
     )
-    path.parent.mkdir(parents=True)
-    raw = (
-        json.dumps(
-            {
-                "type": "PLANNER_RESPONSE",
-                "status": "DONE",
-                "step_index": 0,
-                "created_at": "2026-11-17T05:30:00Z",
-                "thinking": "synthetic thought",
-            }
+    transport = _transport(config)
+    await transport.start()
+    try:
+        assert await transport.open_session(resume=None) == "conv-acp"
+        transport.prompt(
+            transport.next_request_id(),
+            [{"type": "text", "text": "marker\neof"}],
+            before_write=lambda: None,
         )
-        + "\n"
-    )
-    path.write_text(raw)
-    calls = tmp_path / "calls.jsonl"
-    transport = AgyTransport(
-        AntigravityConfig(cwd=tmp_path, executable=(sys.executable, str(FAKE_CLI))),
-        environ={
-            "HOME": str(tmp_path),
-            "FAKE_AGY_PLAN": str(plan),
-            "FAKE_AGY_TRAJECTORY_CALLS": str(calls),
-            "FAKE_AGY_TRAJECTORY_FIXTURE": str(
-                Path(__file__).with_name("fixtures") / "native_thinking_timing.json"
-            ),
-        },
-        clock=system_clock(),
-    )
-    await transport.start(resume="conv-timing")
-    try:
-        measured = await transport.trajectory()
-        assert measured.steps[0].thinking_ms == 30265
-        assert timing_path(path).is_file()
-        assert len(calls.read_text().splitlines()) == 1
-        entries = EntryParser(UnreadRows()).entries(AntigravityRecordFile(path).rows_after(0).rows)
-        assert isinstance(entries[0], Reasoning) and entries[0].duration_ms == 30265
-        assert path.read_text() == raw
+        async with asyncio.timeout(3):
+            while transport.returncode is None:
+                await asyncio.sleep(0.005)
+        assert transport.returncode == 0
+        pid = int((tmp_path / "child.pid").read_text())
+        probe = PsutilChildProbe()
+        assert probe.is_alive(pid)
+        await transport.close(broken=True)
+        assert not probe.is_alive(pid)
     finally:
-        await transport.close()
+        await transport.close(broken=True)

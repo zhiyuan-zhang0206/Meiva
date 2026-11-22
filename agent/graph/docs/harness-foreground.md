@@ -52,7 +52,7 @@ subscription is primed with it. The run projects the turn like any other, with n
 The turn is presented once, by whichever run reads its start ([background work](../../../base/lm/harness/docs/background-work.md)).
 
 Images of a message go to the harness as images (`HarnessInput.images`, built from the message's inlined
-`image_url` blocks by `native_images`), with the "Attached images" path listing left in the text. Bounds and the
+`image_url` blocks by `native_images`), with the "Attached images" path listing retained for rows whose images could not all be inlined. Bounds and the
 per-CLI delivery are in [harness delivery](../../../base/lm/harness/docs/delivery.md).
 
 Inputs without an inbox row (a restart or resurrect note, a fork marker, a continuation after a context
@@ -88,15 +88,13 @@ input, `IN_CONTEXT`, `PERSISTED_UNDELIVERED`, `NOT_FOUND` or `UNKNOWN`; `plan_re
 | `IN_CONTEXT` | `done`, like an ACK 2 (`commit_reconciled`) |
 | `NOT_FOUND` | back to `pending` at its original position, delivered again in order |
 | `PERSISTED_UNDELIVERED` (Antigravity's queue holds it) | stays `claimed`; the session adopts it and the harness's later facts settle it |
-| `UNKNOWN` (Antigravity: no queue file for it) | consumed as unconfirmed, never sent again |
+| `UNKNOWN` (Antigravity: no matching receipt) | consumed as unconfirmed, never sent again |
 | no record exists (no session record, file gone) | consumed as unconfirmed (event `harness_reconcile_failed`) |
 | a record exists but could not be read (I/O, an interface change) | stays `claimed` and the error propagates; the next wake reconciles again |
 
-Antigravity's queue only holds inputs steered into a running turn. An input sent while the conversation was idle
-starts a turn on stdin, carries no id and leaves no file (observed on a live agy: no queue directory at all after
-an idle input ran), so its absence proves nothing and is `UNKNOWN`, not `NOT_FOUND`. A Claude transcript or Codex
-rollout whose last line is half written (a process killed mid-write, no trailing newline) is read without that
-line; a bad line anywhere else is an error.
+Antigravity reads ACP delivery receipts from the conversation transcript and retains the legacy
+queue reader for inputs already stored by older sessions. An absent receipt has an unknown outcome.
+The JSONL readers skip an unterminated partial final line and surface malformed complete lines as errors.
 
 There are two entry points, both in `ForegroundRun`:
 

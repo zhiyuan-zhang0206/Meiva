@@ -10,9 +10,6 @@ from base.lm.harness.antigravity.schedules import (
     UNBOUNDED_SCHEDULE_SECONDS,
     Schedules,
 )
-from base.lm.harness.antigravity.tests.support import start
-from base.lm.harness.events import ToolResult, ToolUse
-from base.lm.harness.registry import FileSessionRegistry
 from base.lm.harness.session import BackgroundKind
 
 NOW = 1_794_329_400.0
@@ -42,37 +39,32 @@ def test_a_timer_with_a_duration_adds_nothing_after_its_blocking_call_returns() 
         assert not work.pending_at(NOW)
 
 
+def test_detached_timer_keeps_the_process_after_due_and_through_its_reply() -> None:
+    work = Schedules(reply_wait_seconds=30).tool_used(
+        "timer",
+        "schedule",
+        {"DurationSeconds": 5, "Prompt": "ping"},
+        turn_id="turn",
+        monotonic_now=100,
+    )
+    work = work.finish_turn("turn", now=NOW, monotonic_now=100)
+    assert work.reply_deadline(NOW + 4) is None
+    assert work.reply_deadline(NOW + 5) == NOW + 35
+    assert work.pending_at(NOW + 6)
+
+    work = work.tool_returned("timer", is_error=False, now=NOW + 8)
+    assert work.pending_at(NOW + 14)
+    assert work.reply_deadline(NOW + 14) == NOW + 38
+    assert work.reply_finished("session/task-1", "unrelated") is work
+    work = work.reply_finished("session/task-2", "ping")
+    assert not work.pending_at(NOW + 14)
+    assert work.reply_deadline(NOW + 14) is None
+
+
 def test_a_failed_or_other_tool_call_schedules_nothing() -> None:
     assert not _scheduled({"Prompt": "x"}, is_error=True).pending_at(NOW)
     other = Schedules().tool_used("t", "run_command", {"x": 1})
     assert other == Schedules()
-
-
-async def test_a_session_counts_schedules_and_loses_them_when_its_process_is_replaced(
-    tmp_path: Path,
-) -> None:
-    registry = FileSessionRegistry(tmp_path / "registry")
-    harness = await start(tmp_path, agent_id=7, registry=registry)
-    try:
-        assert not harness.session.background_work()
-        harness.session._handle({"event": "init", "conversation_id": "conv-1", "init": {}})
-        harness.session._track_schedule(
-            ToolUse(turn_id="t", tool_use_id="s1", name="schedule", tool_input={"Prompt": "ping"})
-        )
-        harness.session._track_schedule(
-            ToolResult(turn_id="t", tool_use_id="s1", is_error=False, content="ok")
-        )
-        [item] = harness.session.background_work().items
-        assert item.kind is BackgroundKind.SCHEDULE
-        stored = registry.load(7, harness="antigravity")
-        assert stored is not None and len(stored.background) == 1
-
-        harness.session._lose_schedules()
-
-        assert not harness.session.background_work()
-        assert [i.kind for i in harness.session.take_lost_background()] == [BackgroundKind.SCHEDULE]
-    finally:
-        await harness.stop()
 
 
 def test_timer_duration_parsing_caps_bounds_and_rejects_non_finite_values(tmp_path: Path) -> None:
@@ -220,27 +212,6 @@ def test_conditional_timer_evicts_on_early_wakeup_and_floors_are_isolated_per_tu
         uncond.on_assistant_text("t1", monotonic_now=mono + 65.0).silence_floor_monotonic(("t1",))
         is None
     )
-    assert uncond.clear_turn("t1").silence_floor_monotonic(("t1",)) is None
-
-
-async def test_session_reports_and_clears_silence_floor_for_schedule_timers(tmp_path: Path) -> None:
-    registry = FileSessionRegistry(tmp_path / "registry")
-    harness = await start(tmp_path, agent_id=8, registry=registry)
-    try:
-        assert harness.session.silence_floor_monotonic(("t1",)) is None
-        harness.session._track_schedule(
-            ToolUse(
-                turn_id="t1",
-                tool_use_id="s1",
-                name="schedule",
-                tool_input={"DurationSeconds": "30.5", "Prompt": "check"},
-            )
-        )
-        floor = harness.session.silence_floor_monotonic(("t1",))
-        assert floor is not None and floor > harness.session._monotonic()
-        harness.session._track_schedule(
-            ToolResult(turn_id="t1", tool_use_id="s1", is_error=True, content="invalid")
-        )
-        assert harness.session.silence_floor_monotonic(("t1",)) is None
-    finally:
-        await harness.stop()
+    assert (
+        uncond.finish_turn("t1", now=0, monotonic_now=mono).silence_floor_monotonic(("t1",)) is None
+    )

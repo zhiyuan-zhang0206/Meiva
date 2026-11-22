@@ -404,8 +404,9 @@ async def test_a_failure_in_the_foreground_gives_the_handed_inputs_an_explicit_o
     )
 
 
+@pytest.mark.parametrize("explicit_keys", [False, True])
 async def test_an_input_that_cannot_reach_the_session_goes_back_to_the_queue(
-    db_conn: psycopg.Connection, aops_pool: AsyncConnectionPool, harness_runtime: RuntimeFixture
+    db_conn: psycopg.Connection, harness_runtime: RuntimeFixture, explicit_keys: bool
 ) -> None:
     agent_id = agent_row(db_conn)
     row = insert_row(db_conn, agent_id, "chat", "user", "work")
@@ -414,15 +415,17 @@ async def test_an_input_that_cannot_reach_the_session_goes_back_to_the_queue(
         async def deliver(
             self, inputs: Sequence[HarnessInput], *, compaction_note: str = ""
         ) -> None:
-            raise HarnessNotDeliveredError("session could not start")
+            assert input_key(row) in {entry.key for entry in inputs}
+            keys = frozenset({input_key(row)}) if explicit_keys else None
+            raise HarnessNotDeliveredError("session closed before writing input", keys=keys)
 
-    rt = harness_runtime(Unstartable(), agent_id=agent_id)
+    engine = Unstartable()
     with pytest.raises(FatalLLMStreamError):
-        await harness_turn_node(AgentState(), rt, config(agent_id))
-    assert row_status(db_conn, row) == "pending", "never handed over, so delivered again later"
-    async with aops_pool.connection() as conn:
-        items = await read_recorded_items(conn, agent_id)
-    assert not any("could not be confirmed" in item.payload for item in items)
+        await harness_turn_node(
+            AgentState(), harness_runtime(engine, agent_id=agent_id), config(agent_id)
+        )
+    assert row_status(db_conn, row) == "pending"
+    assert not engine.reconciled
 
 
 async def test_a_settlement_that_arrives_after_its_turn_ended_is_still_written(
@@ -668,7 +671,8 @@ async def test_a_message_with_an_image_hands_the_harness_the_image_itself(
     [[sent]] = engine.delivered
     assert [image.mime_type for image in sent.images] == ["image/png"]
     assert base64.b64decode(sent.images[0].data_base64) == png
-    assert "what is this" in sent.text and str(path) in sent.text, "the path stays listed"
+    assert "what is this" in sent.text and str(path) not in sent.text
+    assert "Attached images:" not in sent.text
     assert row_status(db_conn, row) == "done"
 
 

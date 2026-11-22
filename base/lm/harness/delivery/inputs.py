@@ -44,10 +44,8 @@ InputBlock = TextBlock | ImageBlock
 
 # meiva:note
 # What one input holds is an ordered sequence of blocks, text and images: a wake's messages each
-# become a text block with the images that belong to the message right behind it. An adapter that
-# can carry blocks (Claude Code, Codex) sends them as they are; one that cannot (Antigravity's stdin
-# takes a single string and an image only as a separate RPC) reads the flattened views, `text` (the
-# text blocks joined by a blank line) and `images` (every image, in order).
+# become a text block with the images that belong to the message right behind it. Each adapter
+# sends the ordered blocks through its native protocol.
 @dataclass(frozen=True, slots=True)
 class HarnessInput:
     key: str

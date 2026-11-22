@@ -1,5 +1,8 @@
 # Antigravity interrupt and process-tree reaping
 
+Historical evidence from the print-mode adapter. Current cancellation uses
+[ACP session/cancel](antigravity.md#interrupt-and-permission-handling).
+
 Part of [Antigravity (agy) session bridge](antigravity.md).
 
 `SIGINT` stops `agy` but not its tool tree. In a live run the turn was asked to

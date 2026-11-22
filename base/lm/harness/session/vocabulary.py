@@ -13,6 +13,7 @@ from typing import Protocol
 
 __all__ = [
     "EVENT_STREAM_END",
+    "InputsNotWrittenError",
     "SessionClock",
     "SessionClosedError",
     "SessionConfig",
@@ -23,6 +24,12 @@ EVENT_STREAM_END = object()
 
 class SessionClosedError(RuntimeError):
     pass
+
+
+class InputsNotWrittenError(SessionClosedError):
+    def __init__(self, reason: str, keys: frozenset[str]) -> None:
+        super().__init__(reason)
+        self.keys = keys
 
 
 class SessionClock(Protocol):

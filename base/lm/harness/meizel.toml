@@ -2,7 +2,7 @@ exports = ["antigravity", "base_session.py", "bridge.py", "claude", "codex", "en
 
 [uses]
 "__init__.py" = ["bridge.py", "delivery", "engine.py", "events.py", "faults.py", "handoff.py", "registration.py", "registry.py", "session"]
-"antigravity" = ["base_session.py", "cancel.py", "delivery", "events.py", "handoff.py", "process.py", "registry.py", "session"]
+"antigravity" = ["base_session.py", "cancel.py", "delivery", "events.py", "handoff.py", "process.py", "session"]
 "base_session.py" = ["delivery", "events.py", "process.py", "registry.py", "session"]
 "bridge.py" = ["base_session.py", "delivery", "engine.py", "events.py", "faults.py", "handoff.py", "pump.py", "registration.py", "session"]
 "claude" = ["__init__.py", "base_session.py", "cancel.py", "delivery", "events.py", "faults.py", "process.py", "registry.py", "session"]
@@ -29,4 +29,4 @@ exports = ["antigravity", "base_session.py", "bridge.py", "claude", "codex", "en
 "handoff.py" = "strict"
 
 [roots]
-"wiring.py" = { kinds = ["clock", "environ", "pid"], why = "builds one harness session (a bridge, a handoff, a session object) from the values the caller hands down; a Claude session's child environment is every key of the live environment blanked and then the explicit slice on top, which needs the live key list the way base/host/git/gitenv.py does for a git child; it also names its own interpreter (sys.executable) for the command it builds, and the zone the Claude CLI child will read a cron expression in (its TZ, else the host process's local zone)" }
+"wiring.py" = { kinds = ["clock", "environ", "pid", "random"], why = "builds one harness session (a bridge, a handoff, a session object) from the values the caller hands down; a Claude session's child environment is every key of the live environment blanked and then the explicit slice on top, which needs the live key list the way base/host/git/gitenv.py does for a git child; it also names its own interpreter (sys.executable) for the command it builds, and the zone the Claude CLI child will read a cron expression in (its TZ, else the host process's local zone); each Antigravity CLI generation is launched with the owning user ID and a fresh environment marker for descendant cleanup" }

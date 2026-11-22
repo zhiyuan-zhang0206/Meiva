@@ -134,6 +134,7 @@ class ForegroundRun:
         self._prompts: dict[str, str] = {}
         self._folded: dict[str, tuple[tuple[Handed, str], ...]] = {}
         self._images: dict[str, tuple[ImageBlock, ...]] = {}
+        self._inline_image_text: dict[str, str] = {}
         for raw in state.harness_inputs:
             key, prompt = str(raw["key"]), str(raw["prompt"])
             if not prompt.strip():
@@ -606,10 +607,12 @@ class ForegroundRun:
         return self.fg.quiet and not self._settling and not self._reading and not waiting
 
     # meiva:note
-    # The session could not take the batch, so none of it was handed over: rows go back to the queue and
-    # synthetic inputs back to the front of the pending ones, to be delivered when a session can.
+    # Inputs known not to have reached the session go back to the queue and synthetic inputs
+    # go back to the front of the pending ones, to be delivered when a session can.
     # meiva:link agent/graph/docs/harness-foreground.md
-    async def _take_back(self, handed: Sequence[Handed]) -> None:
+    async def _take_back(self, batch: Sequence[Handed], keys: frozenset[str] | None) -> None:
+        handed = [entry for entry in batch if keys is None or entry.key in keys]
+        self._taken_back_for_abort = (*self._taken_back_for_abort, *handed)
         self.fg = self.fg.withdraw(frozenset(h.key for h in handed))
         await requeue_handed(self._ctx, self._agent_id, handed)
         self._synthetic[:0] = [(h, self._prompts[h.key]) for h in handed if h.inbound_id is None]
@@ -649,6 +652,9 @@ class ForegroundRun:
             row_input_key(item.id, item.payload), item.id, human=is_human_wake_item(item)
         )
         self._images[entry.key] = images
+        self._inline_image_text.pop(entry.key, None)
+        if images and not skipped:
+            self._inline_image_text[entry.key] = render_messages(messages, inline_images=True)
         return entry, text
 
     async def _render(self, rows: Sequence[ClaimedInbound]) -> list[tuple[Handed, str]]:
@@ -695,6 +701,7 @@ class ForegroundRun:
                 for row, (entry, text) in zip(rows, rendered, strict=True)
             ],
             self._images,
+            inline_image_text=self._inline_image_text,
             hook_notes_key=HOOK_NOTES_KEY,
         )
         handed, inputs, settled_now, group = (
@@ -722,9 +729,8 @@ class ForegroundRun:
         self._projector.note_input_keys([item.key for item in inputs])
         try:
             await self._bridge.deliver(inputs, compaction_note=compaction_note)
-        except HarnessNotDeliveredError:
-            self._taken_back_for_abort = (*self._taken_back_for_abort, *handed)
-            await self._take_back(handed)
+        except HarnessNotDeliveredError as exc:
+            await self._take_back(handed, exc.keys)
             raise
         except (HarnessClosedError, HarnessSetupError, ModelInterruptedError):
             raise
