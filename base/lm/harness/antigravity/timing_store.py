@@ -5,7 +5,7 @@ import hashlib
 import json
 import os
 from pathlib import Path
-from typing import Annotated, Literal
+from typing import Annotated, BinaryIO, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
@@ -18,6 +18,7 @@ from base.log import logger
 
 MAX_SIDECAR_BYTES = 8 * 1024 * 1024
 _MAX_ROW_BYTES = 16 * 1024 * 1024
+_SCAN_CHUNK_BYTES = 64 * 1024
 
 
 class Measurement(BaseModel):
@@ -42,6 +43,37 @@ def timing_path(record: Path) -> Path:
     return record.with_name("meiva-thinking-timing.json")
 
 
+def _record_matches(stat: os.stat_result, data: TimingRecord, *, allow_growth: bool) -> bool:
+    if (data.device, data.inode) != (stat.st_dev, stat.st_ino) or stat.st_size < data.size:
+        return False
+    if stat.st_size == data.size and stat.st_mtime_ns != data.modified_ns:
+        return False
+    return allow_growth or stat.st_size == data.size
+
+
+def _drop_colliding_appended_entries(record: Path, data: TimingRecord) -> TimingRecord:
+    colliding = _appended_identities(record, from_size=data.size)
+    if not colliding:
+        return data
+    kept = {pos: value for pos, value in data.entries.items() if value.fingerprint not in colliding}
+    return data if len(kept) == len(data.entries) else data.model_copy(update={"entries": kept})
+
+
+def _validate_loaded_timings(
+    record: Path, data: TimingRecord, *, allow_growth: bool
+) -> TimingRecord | None:
+    stat = record.stat()
+    if not _record_matches(stat, data, allow_growth=allow_growth):
+        return None
+    if len({value.fingerprint for value in data.entries.values()}) != len(data.entries):
+        raise_invalid_identity()
+    if any(int(pos) >= data.size for pos in data.entries):
+        return None
+    if stat.st_size > data.size and data.entries:
+        return _drop_colliding_appended_entries(record, data)
+    return data
+
+
 def load_timings(record: Path, *, allow_growth: bool = False) -> TimingRecord | None:
     try:
         with timing_path(record).open("rb") as handle:
@@ -51,14 +83,7 @@ def load_timings(record: Path, *, allow_growth: bool = False) -> TimingRecord | 
         data = TimingRecord.model_validate(
             object_of(json.loads, raw, object_pairs_hook=_unique_object)
         )
-        stat = record.stat()
-        if (data.device, data.inode) != (stat.st_dev, stat.st_ino) or stat.st_size < data.size:
-            return None
-        if not allow_growth and (stat.st_size != data.size or stat.st_mtime_ns != data.modified_ns):
-            return None
-        if len({value.fingerprint for value in data.entries.values()}) != len(data.entries):
-            raise_invalid_identity()
-        return data
+        return _validate_loaded_timings(record, data, allow_growth=allow_growth)
     except FileNotFoundError:
         return None
     except (OSError, ValueError, ValidationError) as exc:
@@ -159,6 +184,50 @@ def row_identities(record: Path) -> dict[str, int | None]:
             key = timing_key(row.get("step_index"), row.get("created_at"), row.get("thinking"))
             if key is not None:
                 found[key] = None if key in found else offset
+    return found
+
+
+def _line_start_at_or_before(handle: BinaryIO, offset: int) -> int:
+    if offset <= 0:
+        return 0
+    _ = handle.seek(offset - 1)
+    if handle.read(1) == b"\n":
+        return offset
+    pos = offset - 1
+    scanned = 0
+    while pos > 0 and scanned < _MAX_ROW_BYTES:
+        low = max(0, pos - min(_SCAN_CHUNK_BYTES, _MAX_ROW_BYTES - scanned))
+        _ = handle.seek(low)
+        chunk = handle.read(pos - low)
+        cut = chunk.rfind(b"\n")
+        if cut >= 0:
+            return low + cut + 1
+        scanned += len(chunk)
+        pos = low
+    if pos == 0:
+        return 0
+    raise ValueError("native record row exceeds timing collector limit")
+
+
+def _appended_identities(record: Path, *, from_size: int) -> set[str]:
+    found: set[str] = set()
+    with record.open("rb") as handle:
+        start = _line_start_at_or_before(handle, from_size)
+        _ = handle.seek(start)
+        while True:
+            line = handle.readline(_MAX_ROW_BYTES + 1)
+            if not line:
+                break
+            if len(line) > _MAX_ROW_BYTES:
+                raise ValueError("native record row exceeds timing collector limit")
+            if not line.endswith(b"\n"):
+                break
+            row = object_of(json.loads, line)
+            if not is_object_dict(row) or row.get("type") != "PLANNER_RESPONSE":
+                continue
+            key = timing_key(row.get("step_index"), row.get("created_at"), row.get("thinking"))
+            if key is not None:
+                found.add(key)
     return found
 
 

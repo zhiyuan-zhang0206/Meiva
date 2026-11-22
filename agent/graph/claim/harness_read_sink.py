@@ -53,7 +53,7 @@ from base.lm.harness import (
     ToolResult,
     ToolUse,
 )
-from base.lm.harness.engine import HarnessTurn
+from base.lm.harness.engine import HarnessTurn, TimingRefreshing
 from base.lm.harness.registry import FileSessionRegistry
 from base.lm.harness.session.transcript.entries import InputRow
 from base.lm.harness.session.transcript.record_file import (
@@ -91,6 +91,7 @@ from base.paths import harness_sessions_dir, workspace_dir
 # meiva:link agent/graph/docs/harness-turn.md
 
 DEBOUNCE_SECONDS = 0.5
+RECORD_POLL_SECONDS = 1.0
 END_WAIT_SECONDS = 2.0
 END_POLL_SECONDS = 0.25
 
@@ -114,17 +115,26 @@ class ReadTimelineSink:
         *,
         non_human_wake: bool,
         session_id: Callable[[], str | None],
+        poll_seconds: float = RECORD_POLL_SECONDS,
+        debounce_seconds: float = DEBOUNCE_SECONDS,
+        request_timing_refresh: Callable[[], None] | None = None,
     ) -> None:
         self._ctx = ctx
         self._agent_id = agent_id
         self._publisher = publisher
         self._non_human_wake = non_human_wake
         self._session_id = session_id
+        self._poll_seconds = poll_seconds
+        self._debounce_seconds = debounce_seconds
+        if request_timing_refresh is None and isinstance(ctx.harness_bridge, TimingRefreshing):
+            request_timing_refresh = ctx.harness_bridge.request_timing_refresh
+        self._request_timing_refresh = request_timing_refresh
         self._harness = ctx.harness.value
         mode = ctx.require_agent().prompt.user_delivery_mode
         self._policy = ReplyPolicy(explicit_visibility=mode == "prefix", delivery_mode=mode)
         self._timing_revision: int | None = None
         self._timing_start: int | None = None
+        self._timing_needed = False
         self._replied = False
         self._warned = False
         self._projector = RecordProjector(
@@ -147,6 +157,9 @@ class ReadTimelineSink:
         self._closed_turns = 0
         self._invalid = False
         self._history_end = self._start_offset()
+        self._seen_stat: tuple[int, ...] | None = (
+            None if self._file is None else self._file.watch_signature()
+        )
         self._floor: int | None = None
         self._input_keys: list[str] = []
         self._fork_source_loaded = False
@@ -231,12 +244,31 @@ class ReadTimelineSink:
         self._dirty.set()
         return result
 
+    # meiva:note
+    # Stdout events mark `_dirty` immediately; the bounded timeout fallback checks only cheap
+    # `os.stat()` metadata on the record file (and timing sidecar) so a CLI that writes completed
+    # rows to disk while stdout is silent (such as Antigravity reactive-IDLE with RPC steer) still
+    # reaches SSE and publications without reading the file or opening the database when idle.
     async def flush_text(self) -> None:
         while True:
-            _ = await self._dirty.wait()
-            await asyncio.sleep(DEBOUNCE_SECONDS)
+            try:
+                _ = await asyncio.wait_for(self._dirty.wait(), timeout=self._poll_seconds)
+            except TimeoutError:
+                if not await asyncio.to_thread(self._has_disk_change):
+                    continue
+                self._dirty.clear()
+                await self._read_logged()
+                continue
+            await asyncio.sleep(self._debounce_seconds)
             self._dirty.clear()
             await self._read_logged()
+
+    def _has_disk_change(self) -> bool:
+        file = self._resolve()
+        if file is None:
+            return False
+        current = file.watch_signature()
+        return current is not None and current != self._seen_stat
 
     async def finish(
         self,
@@ -304,16 +336,20 @@ class ReadTimelineSink:
             )
 
     async def _read(self) -> None:
+        needs_timing = False
         async with self._busy:
             projected, end = await asyncio.to_thread(self._project_new)
+            needs_timing, self._timing_needed = self._timing_needed, False
             if projected is None:
                 await self._refresh_timing(end)
                 self._warn_unfound()
-                return
-            self._closed_turns += projected.turns_closed
-            self._publish(projected, end)
-            await self._deliver(projected.items)
-            await self._refresh_timing(end)
+            else:
+                self._closed_turns += projected.turns_closed
+                self._publish(projected, end)
+                await self._deliver(projected.items)
+                await self._refresh_timing(end)
+        if needs_timing and self._request_timing_refresh is not None:
+            self._request_timing_refresh()
 
     # meiva:note
     # Timing facts revise only reasoning items, with their existing row IDs. This projector gets
@@ -365,10 +401,13 @@ class ReadTimelineSink:
     # Sample supplemental facts before reading rows: a commit during later delivery must still
     # differ from the revision that produced the first projection.
     def _project_new(self) -> tuple[Projected | None, int]:
+        self._timing_needed = False
         file = self._resolve()
         if file is None:
             return None, 0
+        seen = file.watch_signature()
         if not self._ensure_fork_floor(file):
+            self._seen_stat = seen
             return None, file.complete_end()
         start = self._from if self._from is not None else self._turn_start(file)
         if self._fork_floor is not None and start < self._fork_floor:
@@ -380,12 +419,16 @@ class ReadTimelineSink:
         block = file.rows_after(start)
         self._from = block.end
         if not block.rows:
+            self._seen_stat = seen
             return None, block.end
+        self._timing_needed = _needs_timing_refresh(self._harness, block.rows)
         self._register_sent(block.rows)
         entries = self._parser.entries(block.rows)
-        return self._projector.feed(
+        projected = self._projector.feed(
             entries, tail=self._parser.pending_calls, release_held=False
-        ), block.end
+        )
+        self._seen_stat = seen
+        return projected, block.end
 
     def _turn_start(self, file: RecordFile) -> int:
         window = read_window(
@@ -620,6 +663,15 @@ class ReadTimelineSink:
             return None
         self._parent_uuids = frozenset(_read_row_uuids(parent_path))
         return self._parent_uuids
+
+
+def _needs_timing_refresh(harness: str, rows: Sequence[FileRow]) -> bool:
+    if harness != Harness.ANTIGRAVITY.value:
+        return False
+    return any(
+        row.row.get("type") == "PLANNER_RESPONSE" and row.row.get("meiva_reasoning_ms") is None
+        for row in rows
+    )
 
 
 def _row_uuid(row: Mapping[str, object]) -> str | None:

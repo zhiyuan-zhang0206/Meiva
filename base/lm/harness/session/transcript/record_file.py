@@ -98,6 +98,13 @@ class RecordFile:
     def revision(self) -> int:
         return 0
 
+    def watch_signature(self) -> tuple[int, ...] | None:
+        try:
+            stat = self._path.stat()
+        except OSError:
+            return None
+        return (stat.st_dev, stat.st_ino, stat.st_size, stat.st_mtime_ns)
+
     def size(self) -> int:
         return self._path.stat().st_size
 

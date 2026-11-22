@@ -232,19 +232,24 @@ the schedules with it; the respawn hands them to the next turn's note as lost. S
 ## Native reasoning measurements
 
 The transcript omits `plannerResponse.thinkingDuration` even when the native trajectory supplies it.
-Existing trajectory reads collect only completed planner measurements; this adds no polling or RPC.
-A separate atomic `logs/meiva-thinking-timing.json` keeps verified offsets, identity digests and native
-milliseconds without rewriting the vendor transcript or storing thought text. Matching requires a
-unique index, creation second and thought digest. Duplicate identities remain unknown with a diagnostic.
-Tool status spans are not substituted for native reasoning duration: real observations show that
+`AgyTransport.trajectory()` collects only completed planner measurements into a separate atomic
+`logs/meiva-thinking-timing.json` with verified offsets, identity digests and native milliseconds
+without rewriting the vendor transcript or storing thought text. `AgySession` also schedules a
+single-flight, throttled background trajectory refresh on completed `agent_response` steps,
+non-interrupted turn completion, and when `ReadTimelineSink` reads newly persisted unmeasured
+`PLANNER_RESPONSE` rows while stdout is silent (reactive-IDLE). Matching requires a unique index,
+creation second and thought digest. Duplicate identities remain unknown with a diagnostic. Tool
+status spans are not substituted for native reasoning duration: real observations show that
 `thinkingDuration` differs from GENERATING-to-DONE time.
 
-Timing is provisional until a later existing snapshot observes the completed step. A missing,
-corrupt or stale sidecar leaves the original conversation readable and its timing unknown. Appended
-record bytes invalidate the sidecar for readers until the collector rechecks uniqueness. A source
-revision refresh publishes only reasoning items at their original IDs; it never replays replies,
-inputs, tool execution or delivery. The UI shows plain Worked while any work measurement is absent.
-Invalid present terminal durations and corrupt sidecars use existing cluster warning events.
-Invalid duration diagnostics follow the collector's existing native-facts and record watermark
-change gate; historical sidecar parse diagnostics retain their reader revision gate.
-Missing or null durations remain silent. This slice does not claim complete work duration collection.
+Timing is provisional until a snapshot observes the completed step. A missing, corrupt or replaced
+sidecar leaves the original conversation readable and its timing unknown. When the transcript grows
+by appending new rows (`stat.st_size > data.size` on the same `(device, inode)`), readers retain
+previously verified measurements for offsets `< data.size` and invalidate only entries whose
+identity fingerprint collides with a row in the appended tail; same-size rewrites, truncations, and
+inode replacements still invalidate the sidecar. A source revision refresh publishes only reasoning
+items at their original IDs; it never replays replies, inputs, tool execution or delivery. The UI
+shows plain Worked while any work measurement is absent. Invalid present terminal durations and
+corrupt sidecars use existing cluster warning events. Invalid duration diagnostics follow the
+collector's existing native-facts and record watermark change gate; historical sidecar parse
+diagnostics retain their reader revision gate. Missing or null durations remain silent.

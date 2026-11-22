@@ -7,6 +7,7 @@ import json
 import signal
 from collections import deque
 from collections.abc import AsyncIterator, Callable, Iterable, Mapping, Sequence
+from pathlib import Path
 
 import psutil
 
@@ -257,6 +258,18 @@ class AgyTransport:
             server=server,
         )
 
+    def _timing_record(self, conversation_id: str | None = None) -> Path | None:
+        target = conversation_id or self._conversation_id
+        if not target or self._environ is None or not self._environ.get("HOME"):
+            return None
+        return session_file(self._environ, target)
+
+    def has_timing_record(self, *, conversation_id: str | None = None) -> bool:
+        try:
+            return self._timing_record(conversation_id) is not None
+        except OSError:
+            return False
+
     # meiva:note
     # The live state of the conversation: `GetCascadeTrajectory` exposes both the top-level run status
     # and child-step statuses while stdout is silent. An unexpected shape raises `AgyInterfaceError`.
@@ -267,11 +280,7 @@ class AgyTransport:
         )
         trajectory = parse_trajectory(payload)
         try:
-            record = (
-                session_file(self._environ, target_conversation)
-                if self._environ is not None and self._environ.get("HOME")
-                else None
-            )
+            record = self._timing_record(target_conversation)
             if record is not None:
                 await asyncio.to_thread(store_timings, record, trajectory)
         except OSError:
