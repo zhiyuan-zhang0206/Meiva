@@ -2,7 +2,7 @@ import { act, render } from "@testing-library/react";
 import { useLayoutEffect, useRef } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { POINTER_STICKY_THRESHOLDS } from "@/lib/layout/sticky";
+import { POINTER_STICKY_THRESHOLDS, TOUCH_STICKY_THRESHOLDS, type StickyThresholds } from "@/lib/layout/sticky";
 
 import { timelineLayout } from "../view/timeline-test-mock";
 import { TAIL, type ViewAnchor } from "./dom";
@@ -17,8 +17,16 @@ import { useViewportAnchor, type AnchorChangeCause, type ViewportAnchor } from "
 const ids = (from: number, to: number) => Array.from({ length: to - from + 1 }, (_, i) => String(from + i));
 const rowAt = (itemId: string, offset: number): ViewAnchor => ({ kind: "row", row: { itemId, rank: 0 }, offset });
 
-function harness(initial: string[], heights: Record<string, number> = {}) {
-  const layout = timelineLayout({ rowHeight: (row) => heights[row.dataset.itemId ?? ""] ?? 100 });
+function harness(
+  initial: string[],
+  heights: Record<string, number> = {},
+  options: { thresholds?: StickyThresholds; viewportHeight?: number } = {},
+) {
+  const thresholds = options.thresholds ?? POINTER_STICKY_THRESHOLDS;
+  const layout = timelineLayout({
+    viewportHeight: options.viewportHeight,
+    rowHeight: (row) => heights[row.dataset.itemId ?? ""] ?? 100,
+  });
   const changes: { anchor: ViewAnchor; cause: AnchorChangeCause }[] = [];
   const onChange = (anchor: ViewAnchor, cause: AnchorChangeCause) => changes.push({ anchor, cause });
   let controls: ViewportAnchor | null = null;
@@ -28,7 +36,7 @@ function harness(initial: string[], heights: Record<string, number> = {}) {
     const contentRef = useRef<HTMLDivElement>(null);
     const reserveRef = useRef<HTMLDivElement>(null);
     const anchor = useViewportAnchor({
-      wrapperRef, viewportRef, contentRef, reserveRef, thresholds: POINTER_STICKY_THRESHOLDS,
+      wrapperRef, viewportRef, contentRef, reserveRef, thresholds,
       onChange, onUnresolved: () => undefined,
     }).controls;
     controls = anchor;
@@ -173,16 +181,131 @@ describe("the viewport anchor writer", () => {
     expect(view.top()).toBe(view.naturalEnd());
   });
 
-  it("keeps a follower following through a sub-zone twitch or nudge", () => {
+  it("keeps a follower following on sub-pixel resting jitter, and leaves on any upward scroll away from the end", () => {
     const view = harness(ids(1, 20));
     view.place(TAIL);
     act(() => { view.viewport().dispatchEvent(new WheelEvent("wheel", { deltaY: -1, bubbles: true })); });
-    view.scrollTo(view.naturalEnd() - 2);
+    view.scrollTo(view.naturalEnd() - 1);
     expect(view.current()).toEqual(TAIL);
-    view.scrollTo(view.naturalEnd() - 20);
+    view.rows(ids(1, 21));
+    expect(view.top()).toBe(view.naturalEnd());
+
+    const away = view.naturalEnd() - 5;
+    view.scrollTo(away);
+    expect(view.current()?.kind).toBe("row");
+    view.rows(ids(1, 22));
+    expect(view.top()).toBe(away);
+  });
+
+  it.each([3, 5, 10, 20])("mobile touch scroll-up of %ipx inside the wide touch bottom zone never snaps back to tail", (delta) => {
+    const view = harness(ids(1, 20), {}, { thresholds: TOUCH_STICKY_THRESHOLDS, viewportHeight: 770 });
+    view.place(TAIL);
+    const tail = view.naturalEnd();
+    expect(view.top()).toBe(tail);
+
+    view.touchStart(500);
+    view.touchMove(500 + delta);
+    expect(view.current()?.kind).toBe("row");
+    view.scrollTo(tail - delta);
+    view.touchEnd();
+    expect(view.current()?.kind).toBe("row");
+    expect(view.top()).toBe(tail - delta);
+
+    view.writes.length = 0;
+    view.rows(ids(1, 22));
+    view.heights["22"] = 300;
+    view.resize();
+    expect(view.current()?.kind).toBe("row");
+    expect(view.top()).toBe(tail - delta);
+    expect(view.writes).toEqual([]);
+  });
+
+  it("releases tail on touchmove upward drag before scroll arrives, ignoring horizontal swipes and 1px taps", () => {
+    const view = harness(ids(1, 20), {}, { thresholds: TOUCH_STICKY_THRESHOLDS, viewportHeight: 770 });
+    view.place(TAIL);
+
+    view.touchStart(500, 100);
+    view.touchMove(501, 100);
+    view.touchEnd();
+    expect(view.current()).toEqual(TAIL);
+
+    view.touchStart(500, 100);
+    view.touchMove(504, 140);
+    view.touchEnd();
+    expect(view.current()).toEqual(TAIL);
+
+    view.touchStart(500, 100);
+    view.touchMove(503, 100);
+    expect(view.current()?.kind).toBe("row");
+    const left = view.top();
+    view.rows(ids(1, 22));
+    expect(view.top()).toBe(left);
+    view.scrollTo(left - 6);
+    view.touchEnd();
+    expect(view.current()?.kind).toBe("row");
+    expect(view.top()).toBe(left - 6);
+  });
+
+  it("does not re-stick to tail during sub-pixel upward deceleration or a tiny thumb-lift roll on touch", () => {
+    const view = harness(ids(1, 20), {}, { thresholds: TOUCH_STICKY_THRESHOLDS, viewportHeight: 770 });
+    view.place(TAIL);
+    const tail = view.naturalEnd();
+
+    view.touchStart(500);
+    view.touchMove(510);
+    for (let step = 1; step <= 18; step += 1) {
+      view.scrollTo(tail - step * 0.4);
+    }
+    const liftedAt = tail - 18 * 0.4 + 2;
+    view.scrollTo(liftedAt);
+    view.touchEnd();
+    expect(view.current()?.kind).toBe("row");
+
+    view.scrollTo(liftedAt - 2);
+    view.scrollTo(liftedAt - 2.4);
+    view.scrollTo(liftedAt - 2.7);
+    expect(view.current()?.kind).toBe("row");
+    const settled = view.top();
+    view.rows(ids(1, 22));
+    view.resize();
+    expect(view.top()).toBe(settled);
+  });
+
+  it("re-sticks to tail on mobile when scrolling back down into the touch bottom zone or reaching the end", () => {
+    const view = harness(ids(1, 20), {}, { thresholds: TOUCH_STICKY_THRESHOLDS, viewportHeight: 770 });
+    view.place(TAIL);
+    const tail = view.naturalEnd();
+
+    view.touchStart(500);
+    view.touchMove(510);
+    view.scrollTo(tail - 10);
+    view.touchEnd();
+    expect(view.current()?.kind).toBe("row");
+
+    view.scrollTo(tail - 300);
+    view.touchStart(300);
+    view.touchMove(120);
+    view.scrollTo(tail - 100);
+    view.touchEnd();
     expect(view.current()).toEqual(TAIL);
     view.rows(ids(1, 22));
     expect(view.top()).toBe(view.naturalEnd());
+  });
+
+  it("keeps upward touch direction when older rows prepend mid-drag inside the touch bottom zone", () => {
+    const view = harness(ids(10, 30), {}, { thresholds: TOUCH_STICKY_THRESHOLDS, viewportHeight: 770 });
+    view.place(TAIL);
+    const tail = view.naturalEnd();
+
+    view.touchStart(500);
+    view.touchMove(512);
+    view.scrollTo(tail - 12);
+    const row = view.rowTop("24");
+    view.rows([...ids(1, 9), ...ids(10, 30)]);
+    expect(view.rowTop("24")).toBe(row);
+    view.touchEnd();
+    expect(view.current()?.kind).toBe("row");
+    expect(view.rowTop("24")).toBe(row);
   });
 
   it("keeps the row under a held finger in place when older rows land above it", () => {

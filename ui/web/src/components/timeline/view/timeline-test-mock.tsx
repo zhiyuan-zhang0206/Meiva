@@ -535,7 +535,12 @@ export function timelineLayout(options: TimelineLayoutOptions = {}) {
       });
       return event;
     },
-    touchStart: () => { act(() => { fireEvent.touchStart(viewport(), { touches: [{ clientY: 300 }] }); }); },
+    touchStart: (clientY = 300, clientX = 100) => {
+      act(() => { fireEvent.touchStart(viewport(), { touches: [{ clientX, clientY }] }); });
+    },
+    touchMove: (clientY: number, clientX = 100) => {
+      act(() => { fireEvent.touchMove(viewport(), { touches: [{ clientX, clientY }] }); });
+    },
     touchEnd: () => { act(() => { fireEvent.touchEnd(viewport(), { touches: [] }); }); },
     // meiva:note
     // Deliver every ResizeObserver with the model's current heights.
