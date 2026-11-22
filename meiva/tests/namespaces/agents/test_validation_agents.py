@@ -113,8 +113,11 @@ class TestAgentsEntries:
         self, gateway_requests: list[httpx.Request]
     ) -> None:
         result = agents.send_system_note(
-            7, ("note",), tag=("context",), idempotency_key="note-intent"
-        )  # pyright: ignore[reportArgumentType]
+            7,
+            ("note",),  # pyright: ignore[reportArgumentType]
+            tag=("context",),  # pyright: ignore[reportArgumentType]
+            idempotency_key="note-intent",
+        )
         assert result == 81
         [request] = gateway_requests
         assert (request.method, request.url.path) == ("POST", "/api/agents/7/system-note")
@@ -172,8 +175,11 @@ class TestAgentsEntries:
             ),  # pyright: ignore[reportArgumentType]
             pytest.param(
                 lambda: agents.send_system_note(
-                    ("7",), "hi", tag="context", idempotency_key=str(uuid4())
-                ),  # pyright: ignore[reportArgumentType]
+                    ("7",),  # pyright: ignore[reportArgumentType]
+                    "hi",
+                    tag="context",
+                    idempotency_key=str(uuid4()),
+                ),
                 "agent_id must be int",
                 id="send_system_note-id",
             ),  # pyright: ignore[reportArgumentType]

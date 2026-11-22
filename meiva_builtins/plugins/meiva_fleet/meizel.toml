@@ -1,8 +1,8 @@
-exports = ["default_config.py", "plugin.py", "tests"]
+exports = ["default_config.py", "tests"]
 
 [uses]
 "agent_runtime.py" = ["default_config.py"]
-"tests" = ["agent_runtime.py", "default_config.py", "plugin.py"]
+"tests" = ["agent_runtime.py", "default_config.py"]
 
 [purity]
 "__init__.py" = "strict"
