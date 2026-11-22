@@ -28,10 +28,6 @@
   "openaiCost": "OpenAI API",
   "anthropicCost": "Anthropic API",
   "googleCost": "Google API",
-  "liveAlerts": "Alerts",
-  "liveAlertsAllClear": "No active Grafana alerts",
-  "liveAlertsDetail": "{unresolved} unresolved ({critical} critical, {error} error, {warning} warning)",
-  "diagnostics": "Diagnostics",
   "switchFlat": "Switch to flat list",
   "switchTree": "Switch to tree view",
   "tree": "Tree",
@@ -61,7 +57,6 @@
   "anthropicCostTitleDetail": "Metered Anthropic API spend over the past {win} (excludes subscription harnesses): ${amount}",
   "googleCostTitle": "Metered Google API spend over the past {win} (excludes subscription harnesses)",
   "googleCostTitleDetail": "Metered Google API spend over the past {win} (excludes subscription harnesses): ${amount}",
-  "diagnosticsTitle": "Active error and anomaly diagnostic classes over the past {win}",
   "noMatch": "No agents match “{query}”",
   "searchAgent": "Search agent",
   "archive": "Agent history",
@@ -81,9 +76,5 @@
   "themeLight": "Light",
   "themeDark": "Dark",
   "display": "Display",
-  "emptyAgents": "No agents yet.",
-  "diagnosticsTitleDetail": "{classes} active ({events} events) on {sha}; {archived} archived",
-  "diagnosticsTitleDetailNoSha": "{classes} active ({events} events); {archived} archived",
-  "diagnosticsAllClear": "No active diagnostic issues on this release",
-  "diagnosticsAllClearArchived": "No active diagnostic issues on this release ({archived} archived)"
+  "emptyAgents": "No agents yet."
 }

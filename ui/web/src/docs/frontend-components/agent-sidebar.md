@@ -35,8 +35,11 @@ below:
   such as provider balances and subscription quota windows).
 - **Windowed `Usage` section** (below the rule, headed by `Usage` and its own
   `WindowSelect` offering `5m` / `1h` / `6h` / `24h` / `3d` / `7d` / `30d`): a
-  2-column grid of `Tokens`, `Cache hit`, `Cost (API)`, `Cost (subscription)`,
-  `Warnings / errors`, and metered `OpenAI API`, `Anthropic API`, and `Google API` spend slices.
+  2-column core grid (`Tokens`, `Cache hit`, `Cost (API)`, `Cost (subscription)`)
+  followed by a 3-column metered API row (`OpenAI API`, `Anthropic API`, `Google API`).
+  Unresolved Grafana alerts live solely on the footer bell badge (hidden at zero)
+  and `/insights#alerts`, and internal telemetry diagnostics stay off the popover
+  (user ruling 2026-11-22).
   The two cost cards are the same disjoint split the Inspector shows, by the
   billing mode of the harness that ran each call: `Cost (API)` is the fee the
   account is billed (subscription harnesses excluded, so monthly API credit

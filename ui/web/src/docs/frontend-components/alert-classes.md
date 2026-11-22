@@ -1,22 +1,18 @@
-# Alerts and Diagnostics in the Status Popover
+# Alerts and Diagnostics Boundaries
 
-The Status popover (`agent-sidebar/footer.tsx`) keeps formal Grafana Live Alerts and
-windowed telemetry Diagnostics strictly separate:
+Live Grafana alerts and internal telemetry diagnostics stay separated and off the
+sidebar Status popover (user ruling 2026-11-22):
 
-- **Live Alerts (top section, not windowed)**: displays `alerts` (`unresolved`, `critical`,
-  `error`, `warning`) from `GET /api/stats/dashboard`, which reads the same unresolved non-watchdog
-  `alerts` table rows as `/api/alerts`, the header badge, and Insights Alerts. Clicking
-  navigates to `/insights#alerts`.
-- **Diagnostics (Usage section, windowed)**: displays `diagnostics` (`active_classes`, `archived_classes`,
-  `active_events`, `archived_events`, `errors`, `warnings`, `deployed_sha`) over the selected window. `errors` folds `critical` events;
-  `warnings` includes only explicitly declared `tier="anomaly"` events. Classes from
-  earlier releases (`deployed_sha`) or quiet for `diagnostic_quiet_seconds` auto-archive
-  without manual dismissal. Diagnostics never drive alert badges.
+- **Live Alerts**: surfaced only when `unresolved > 0` via the sidebar footer bell
+  badge (and collapsed rail restore button) and the full list at `/insights#alerts`.
+  `GET /api/alerts` and the SSE stream own ordering, filters, and uncapped counts;
+  all unresolved instances remain visible regardless of age while the history
+  window selects recently resolved episodes by recovery time. Grouping and
+  recovery belong to Grafana / Alertmanager, not frontend time buckets.
+- **Diagnostics**: structured error/anomaly classes in `telemetry_events`
+  (`deployed_sha` scoped, auto-archived on release cutover or after
+  `diagnostic_quiet_seconds`, with no manual dismissal) remain available through
+  `GET /api/stats/diagnostics` and `meiva stats` for debugging, and never feed
+  alert badges or clutter the Status popover.
 
 The backend contract: [Diagnostics](../../../../../gateway/cluster/docs/alert-classes-api.md).
-
-Formal Grafana alerts have their own header badge and Insights history. Their
-SSE stream invalidates TanStack Query snapshots, so the server owns ordering,
-filters and uncapped counts. All unresolved instances remain visible regardless
-of age; the history window selects recently resolved episodes by recovery time.
-Grouping and recovery belong to Grafana / Alertmanager, not frontend time buckets.
