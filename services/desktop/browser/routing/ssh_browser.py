@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import asyncio
 from collections.abc import Awaitable, Callable, Mapping
-from contextlib import AsyncExitStack, suppress
+from contextlib import AbstractAsyncContextManager, AsyncExitStack, suppress
 from pathlib import Path
 from typing import Protocol
 from urllib.parse import urlsplit
@@ -50,11 +50,15 @@ class SshBrowser:
         timers: Timers,
         tasks: asyncio.TaskGroup,
         connect_timeout_s: float,
+        stage_upload: Callable[
+            [RemoteHostConfig, str, str], AbstractAsyncContextManager[str]
+        ] = stage_ssh_upload,
     ) -> None:
         self.config = config
         self._timers = timers
         self._tasks = tasks
         self._timeout_s = connect_timeout_s
+        self._stage_upload = stage_upload
         self._queue: asyncio.Queue[tuple[BrowserAction, asyncio.Future[object]]] = asyncio.Queue()
         self._task: asyncio.Task[Exception | None] | None = None
         self._pages: set[int] = set()
@@ -256,6 +260,33 @@ class SshBrowser:
         elif name == "select_page":
             self._current = page_number(args.get("pageId"))
 
+    async def _upload(
+        self,
+        session: BrowserToolSession,
+        uploads: list[AsyncExitStack],
+        files: CallerFiles,
+        original_path: str,
+    ) -> object:
+        if len(uploads) >= 8:
+            raise ValueError("SSH Chrome reached the connection's upload staging limit")
+        async with AsyncExitStack() as staging:
+            path = await staging.enter_async_context(
+                self._stage_upload(
+                    self.config, str(files.args["filePath"]), files.inputs["filePath"]
+                )
+            )
+            try:
+                result = await self._paged_call(
+                    session, "upload_file", {**files.args, "filePath": path}
+                )
+            except TimeoutError:
+                uploads.append(staging.pop_all())
+                raise
+            if not result.is_error:
+                uploads.append(staging.pop_all())
+            result = replace_paths(result, {path: original_path})
+            return remote_result("upload_file", files.args, result)["mcp"]
+
     async def call_tool(
         self,
         name: str,
@@ -267,28 +298,7 @@ class SshBrowser:
 
         async def call(session: ClientSession, uploads: list[AsyncExitStack]) -> object:
             if files.inputs:
-                if len(uploads) >= 8:
-                    raise ValueError("SSH Chrome reached the connection's upload staging limit")
-                async with AsyncExitStack() as staging:
-                    path = await staging.enter_async_context(
-                        stage_ssh_upload(
-                            self.config,
-                            str(files.args["filePath"]),
-                            files.inputs["filePath"],
-                        )
-                    )
-                    try:
-                        result = await self._paged_call(
-                            session, name, {**files.args, "filePath": path}
-                        )
-                    except TimeoutError:
-                        uploads.append(staging.pop_all())
-                        raise
-                    if not result.is_error:
-                        uploads.append(staging.pop_all())
-                    return replace_paths(result, {path: str(args["filePath"])}).model_dump(
-                        mode="json"
-                    )
+                return await self._upload(session, uploads, files, str(args["filePath"]))
             safe_args = {key: value for key, value in files.args.items() if key != "filePath"}
             result = await self._paged_call(session, name, safe_args)
             artifact = remote_result(name, files.args, result)

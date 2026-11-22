@@ -1,10 +1,13 @@
 import asyncio
 import os
+from collections.abc import AsyncGenerator
+from contextlib import AsyncExitStack, asynccontextmanager
 from itertools import count
 from pathlib import Path
 
 import pytest
 from mcp.types import CallToolResult, TextContent
+from pydantic import field_serializer
 
 from base.agents.context.browser_identity import (
     PURPOSE,
@@ -299,3 +302,64 @@ async def test_inline_remote_snapshot_sends_only_the_budgeted_text(tmp_path: Pat
     result = CallToolResult.model_validate(reply["mcp"])
     assert result.structured_content is None
     assert result.content == [TextContent(type="text", text="snapshot")]
+
+
+class UploadReply(CallToolResult):
+    @field_serializer("structured_content")
+    def refuse_structured_serialization(self, _value: object) -> object:
+        pytest.fail("The upstream snapshot tree must never be serialized")
+
+
+@pytest.mark.parametrize("oversized", [False, True])
+async def test_ssh_upload_applies_the_remote_reply_boundary(
+    tmp_path: Path, oversized: bool
+) -> None:
+    staged_path = "/remote/upload.abc/input.txt"
+
+    @asynccontextmanager
+    async def stage(_config: RemoteHostConfig, name: str, encoded: str) -> AsyncGenerator[str]:
+        assert name == "input.txt"
+        assert encoded == "dXBsb2Fk"
+        yield staged_path
+
+    class UploadChrome(ChromeFixture):
+        async def call_tool(self, name: str, arguments: dict[str, object]) -> CallToolResult:
+            if name != "upload_file":
+                return await super().call_tool(name, arguments)
+            assert arguments == {
+                "pageId": 10,
+                "uid": "1",
+                "filePath": staged_path,
+                "includeSnapshot": True,
+            }
+            snapshot = "é" * (MAX_FILE_BYTES // 2 + 1) if oversized else "snapshot"
+            return UploadReply(
+                content=[TextContent(type="text", text=f"Uploaded {staged_path}\n{snapshot}")],
+                structured_content={"snapshot": {"raw": "duplicate tree"}},
+            )
+
+    config = RemoteHostConfig("sample", "linux", "sample")
+    _ = (tmp_path / "input.txt").write_bytes(b"upload")
+    args: dict[str, object] = {"uid": "1", "filePath": "input.txt", "includeSnapshot": True}
+    upstream = UploadChrome(10)
+    files = CallerFiles(tmp_path, "upload_file", args)
+    async with asyncio.TaskGroup() as tasks:
+        browser = SshBrowser(
+            config, tasks=tasks, timers=system_clock(), connect_timeout_s=1, stage_upload=stage
+        )
+        _ = await browser._paged_call(upstream, "new_page", {})
+        uploads: list[AsyncExitStack] = []
+        try:
+            if oversized:
+                with pytest.raises(ValueError, match="8 MiB reply budget"):
+                    _ = await browser._upload(upstream, uploads, files, "input.txt")
+            else:
+                reply = await browser._upload(upstream, uploads, files, "input.txt")
+                result = CallToolResult.model_validate(reply)
+                assert result.structured_content is None
+                assert result.content == [
+                    TextContent(type="text", text="Uploaded input.txt\nsnapshot")
+                ]
+        finally:
+            for stack in uploads:
+                await stack.aclose()

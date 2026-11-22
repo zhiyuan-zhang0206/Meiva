@@ -129,8 +129,7 @@ def scoped_structured_page_list(
 
 
 def structured_fields(result: CallToolResult) -> dict[str, object]:
-    raw = object_of(result.model_dump, mode="json", by_alias=True, include={"structured_content"})
-    fields = raw.get("structuredContent") if is_object_dict(raw) else None
+    fields = object_of(getattr, result, "structured_content")
     return fields if is_object_dict(fields) else {}
 
 
