@@ -7,7 +7,7 @@
 "conftest.py" = ["tests"]
 "gateway" = ["agent", "meiva", "meiva_builtins", "base", "ops", "services"]
 "ops" = ["base"]
-"schedules" = ["base", "meiva", "meiva_builtins", "scripts"]
+"schedules" = ["base", "meiva", "scripts"]
 "scripts" = ["agent", "meiva", "base", "cli", "gateway", "services"]
 "services" = ["meiva", "base", "ops"]
 "services/agent_runner/exec_host/tests/test_startup_preserves_exec.py" = ["agent/execution/protocol.py", "agent/graph/exec/process.py", "agent/graph/exec/tests/process_inputs.py"]

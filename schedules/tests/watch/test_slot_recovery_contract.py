@@ -22,12 +22,12 @@ def seed(path: Path, gap: str | None = OLD.isoformat()) -> None:
         WatchState(
             {
                 "ci.yml::other": Entry(
-                    "ci.yml::other", "confirmed", "old", OLD, "old", OLD, 2, task_id=9000
+                    "ci.yml::other", "confirmed", "old", OLD, "old", OLD, 2, issue_number=9000
                 )
             },
             {"refresh-test-durations.yml": "independent"},
             {},
-            slot=SlotLedger(gap_id=gap, task_id=6817),
+            slot=SlotLedger(gap_id=gap, issue_number=6817),
             greens={"ci.yml": "retained"},
         ),
     )
@@ -70,7 +70,7 @@ def test_an_existing_gap_waits_without_new_scheduled_evidence(
     opened, closed = invoke(path, facts)
     state = load_state(path)
     assert opened == closed == []
-    assert state.slot.task_id == 6817 and state.slot.gap_id == OLD.isoformat()
+    assert state.slot.issue_number == 6817 and state.slot.gap_id == OLD.isoformat()
     assert state.greens == {"ci.yml": "retained"}
     assert state.watermarks == {"refresh-test-durations.yml": "independent"}
 
@@ -111,8 +111,8 @@ def test_a_verified_arrival_resolves_independently_of_its_result(
     assert [identifier for identifier, _ in closed] == [6817]
     assert "scheduled" in closed[0][1]
     state = load_state(path)
-    assert state.slot.task_id is None
-    assert state.entries["ci.yml::other"].task_id == 9000
+    assert state.slot.issue_number is None
+    assert state.entries["ci.yml::other"].issue_number == 9000
     assert state.watermarks == {"refresh-test-durations.yml": "independent"}
 
 
@@ -122,7 +122,7 @@ def test_unverifiable_legacy_gap_identity_does_not_resolve(tmp_path: Path, gap: 
     seed(path, gap)
     opened, closed = invoke(path, SlotFacts(NOW, False, 3))
     assert opened == closed == []
-    assert load_state(path).slot.task_id == 6817
+    assert load_state(path).slot.issue_number == 6817
 
 
 def test_a_recorded_no_run_gap_ends_on_its_first_verified_arrival(tmp_path: Path) -> None:
@@ -138,7 +138,7 @@ def test_suppression_without_an_existing_gap_opens_nothing(
 ) -> None:
     path = tmp_path / "state.json"
     assert invoke(path, facts) == ([], [])
-    assert load_state(path).slot.task_id is None
+    assert load_state(path).slot.issue_number is None
 
 
 def test_a_new_arrival_already_stale_names_a_distinct_next_gap(tmp_path: Path) -> None:
@@ -174,4 +174,4 @@ def test_retry_started_at_does_not_advance_a_scheduled_arrival(tmp_path: Path) -
     seed(path)
     assert starts == (OLD,)
     assert invoke(path, SlotFacts(starts[0], True, 3, scheduled_starts=starts)) == ([], [])
-    assert load_state(path).slot.task_id == 6817
+    assert load_state(path).slot.issue_number == 6817

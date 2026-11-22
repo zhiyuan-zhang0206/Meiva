@@ -26,7 +26,6 @@ from schedules.jobs.watch.main_red_watch import (
     already_read,
     job_attempt_verdict,
     listing_attempt,
-    card_operation_key,
     STATE_FILE,
     WatchState,
     load_state,
@@ -181,7 +180,7 @@ def test_the_second_red_on_another_commit_opens_one_card_and_the_third_opens_non
     entries = load_state(tmp_path / STATE_FILE).entries
     (entry,) = entries.values()
     assert entry.red_count == 3
-    assert entry.task_id == 900
+    assert entry.issue_number == 900
 
 
 # meiva:note
@@ -470,7 +469,7 @@ def test_a_red_nightly_full_run_opens_a_card_and_its_silence_is_reported(tmp_pat
     )
     assert len(opened) == 1
     assert "ci.yml" in opened[0].fingerprint
-    assert "opened card 900" in line
+    assert "opened issue #900" in line
 
     silent = watch_once(
         state_path=tmp_path / "other" / STATE_FILE,
@@ -758,7 +757,7 @@ def test_a_missing_slot_opens_one_card_across_rounds(tmp_path: Path) -> None:
 
     assert len(opened) == 1, "the second round must not open a second card"
     assert note is not None
-    assert load_state(tmp_path / STATE_FILE).slot.task_id == 701
+    assert load_state(tmp_path / STATE_FILE).slot.issue_number == 701
 
 
 def test_a_scheduled_run_closes_the_slot_card(tmp_path: Path) -> None:
@@ -768,8 +767,8 @@ def test_a_scheduled_run_closes_the_slot_card(tmp_path: Path) -> None:
     _slot_round(tmp_path, hours_ago=13.5, opened=opened, closed=closed)
     _slot_round(tmp_path, hours_ago=0.5, opened=opened, closed=closed)
 
-    assert [task for task, _reason in closed] == [701]
-    assert load_state(tmp_path / STATE_FILE).slot.task_id is None
+    assert [issue for issue, _reason in closed] == [701]
+    assert load_state(tmp_path / STATE_FILE).slot.issue_number is None
 
 
 # meiva:note
@@ -786,7 +785,7 @@ def test_nothing_uncertified_does_not_resolve_an_existing_scheduled_gap(
 
     assert len(opened) == 1
     assert closed == []
-    assert load_state(tmp_path / STATE_FILE).slot.task_id == 701
+    assert load_state(tmp_path / STATE_FILE).slot.issue_number == 701
     assert note is not None and "waiting" in note
 
 
@@ -931,34 +930,6 @@ def test_a_slot_round_keeps_the_memory_of_the_last_green(tmp_path: Path) -> None
     )
 
     assert load_state(path).greens == {"release-gate.yml": "a" * 40}
-
-
-# meiva:note
-# The create key names the occurrence, never the wording. Reworded text under the same occurrence
-# has to replay: the round that retries a failed create rebuilds the card from the same facts, and
-# a key that followed the text would turn that retry into a second, refused create.
-def test_the_create_key_follows_the_occurrence_not_the_wording() -> None:
-    card = Card("release-gate.yml/tests/test_a.py::test_x", "title", "body", "2026-11-04T16:00:00")
-
-    reworded = replace(card, title="another title", body="another body")
-
-    assert card_operation_key(reworded) == card_operation_key(card)
-    assert card_operation_key(replace(card, episode="2026-11-05T16:00:00")) != card_operation_key(
-        card
-    )
-
-
-# meiva:note
-# A test id can be longer than the registry's 128-character key limit on its own, so the key hashes
-# what it names instead of pasting it: the same card always produces the same key, and no card can
-# produce one the registry refuses.
-def test_the_create_key_fits_the_registry_limit_for_any_test_id() -> None:
-    card = Card("release-gate.yml/" + "tests/test_a.py::test_x" * 20, "title", "body", "episode")
-
-    key = card_operation_key(card)
-
-    assert 1 <= len(key) <= 128
-    assert card_operation_key(card) == key
 
 
 # meiva:note
@@ -1188,7 +1159,7 @@ def test_an_unfinished_attempt_waits_instead_of_deciding(tmp_path: Path) -> None
     entries = load_state(tmp_path / STATE_FILE).entries
     (entry,) = entries.values()
     assert entry.state == STATE_CONFIRMED
-    assert entry.task_id is None
+    assert entry.issue_number is None
 
 
 # meiva:note
@@ -1336,7 +1307,7 @@ def test_a_card_closes_when_its_own_run_is_re_run_green(tmp_path: Path) -> None:
     )
 
     assert closed == [(900, "red ended: e2e full matrix (1/4) passed in attempt 2 of run 702")]
-    assert "closed card 900" in line
+    assert "closed issue #900" in line
     assert port.calls == [702], "the card is asked about the run that last reported its red"
     assert load_state(tmp_path / STATE_FILE).entries == {}, "the entry goes with the card"
 
@@ -1475,7 +1446,7 @@ def test_a_suspect_without_a_later_run_reports_no_recheck_opportunity(tmp_path: 
             "review_run_id": 0,
             "review_outcome": "no-opportunity",
             "review_detail": "",
-            "task_id": None,
+            "issue_number": None,
         }
     ]
 

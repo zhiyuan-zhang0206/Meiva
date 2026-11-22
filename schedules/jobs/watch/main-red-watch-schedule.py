@@ -25,7 +25,6 @@ from pathlib import Path
 from zoneinfo import ZoneInfo
 
 import meiva
-from meiva_builtins.plugins.meiva_fleet import task_registry
 from base.clock import Deadline, SYSTEM_TIMERS
 from base.daemon.schedules.inputs import ScheduleInputs
 from base.host.boundary.json_values import is_object_dict, is_object_list
@@ -33,6 +32,7 @@ from base.config import settings
 from base.paths.home import resolve_meiva_home
 from schedules.jobs.entry import cluster_timezone, open_schedule_entry
 from schedules.jobs.watch.api_read import read_api
+from schedules.jobs.watch.main_red_issues import GithubIssueTracker
 from schedules.jobs.watch.main_red_slot import slot_round
 from schedules.jobs.watch.release_gate_reads import read_scheduled_starts
 from schedules.jobs.watch.main_red_junit import JunitReader
@@ -40,7 +40,6 @@ from schedules.jobs.watch.main_red_watch import (
     LivenessStream,
     already_read,
     STATE_FILE,
-    card_operation_key,
     listing_attempt,
     watch_once,
 )
@@ -53,9 +52,7 @@ from schedules.plans.watch.main_red import (
     FAILURE_UNNAMED,
     JunitEvidence,
     parse_failures,
-    STALE_WATCH_TITLE,
     AUDIT_CHECK_STEPS,
-    Card,
     Failure,
     GATE_CHECK_STEPS,
     NIGHTLY_STALE_AFTER,
@@ -535,7 +532,7 @@ def _slot_note(
     uncertified: int | None,
     channel_latest: str | None,
     run_process: RunProcess,
-    report_agent: int,
+    tracker: GithubIssueTracker,
 ) -> str | None:
     try:
         starts = read_scheduled_starts(
@@ -547,8 +544,8 @@ def _slot_note(
             state_path=state_path,
             now=datetime.now(UTC),
             facts=None,
-            open_card=partial(_open_card, report_agent=report_agent),
-            close_card=_close_card,
+            open_card=tracker.open_card,
+            close_card=tracker.close_card,
             unreadable=f"{type(exc).__name__}: {exc}",
         )
     return slot_round(
@@ -562,8 +559,8 @@ def _slot_note(
             scheduled_starts=starts,
             cadence=RELEASE_GATE_SLOT_CADENCE,
         ),
-        open_card=partial(_open_card, report_agent=report_agent),
-        close_card=_close_card,
+        open_card=tracker.open_card,
+        close_card=tracker.close_card,
     )
 
 
@@ -601,53 +598,12 @@ def _uncertified_commits(run_process: RunProcess) -> tuple[int | None, str | Non
     return (ahead if isinstance(ahead, int) else None), (sha if isinstance(sha, str) else None)
 
 
-def _open_card(card: Card, report_agent: int) -> int:
-    return int(
-        task_registry.create_in_context(
-            meiva.context,
-            title=card.title,
-            description=card.body,
-            parent=1,
-            owner=report_agent,
-            priority="P1",
-            operation_key=card_operation_key(card),
-        ).id
-    )
-
-
 # meiva:note
-# The liveness card closes by title because a closed card is a statement about the watch, not about
-# one occurrence of it: whichever round lands again answers the report, and `_open_card` has
-# already made the next stale period a card of its own.
-def _close_liveness_card(report_agent: int) -> None:
-    for task in meiva.tasks.list(owner=report_agent, status="in_progress"):
-        if task.title == STALE_WATCH_TITLE:
-            task_registry.update_in_context(
-                meiva.context,
-                task.id,
-                status="done",
-                results="watch reporting again: a round landed",
-                operation_key=f"main-red-close-{task.id}",
-            )
-
-
-# meiva:note
-# The one-shot notice the watch owes whoever acts on its cards: when it takes its first suspect, the
-# question of whether that suspect can ever be re-checked becomes real, and the person who would act
-# on the answer hears it once (405, 2026-11-08). Every later round already has a suspect and stays
-# quiet -- this is a transition, not a status.
+# The notice the watch owes whoever acts on its alerts: new `main-red` GitHub Issues (with link)
+# and the one-shot first-suspect notice reach the report lead via agent messaging rather than
+# retired `meiva.tasks`.
 def _notify_lead(text: str, report_agent: int) -> None:
     meiva.agents.send_message(report_agent, text)
-
-
-def _close_card(task_id: int, reason: str) -> None:
-    task_registry.update_in_context(
-        meiva.context,
-        task_id,
-        status="done",
-        results=reason,
-        operation_key=f"main-red-close-{task_id}",
-    )
 
 
 def watch_round(
@@ -655,6 +611,8 @@ def watch_round(
 ) -> None:
     state_path = _state_path(home)
     run_process = subprocess.run
+    notify = partial(_notify_lead, report_agent=report_agent)
+    tracker = GithubIssueTracker(_REPO, run_process=run_process, notify=notify)
     case_reader = JunitReader(
         _artifacts_path(),
         run_process,
@@ -667,9 +625,9 @@ def watch_round(
         read_case=case_reader,
         review_history=case_reader.history,
         last_start=partial(_last_run_start, run_process=run_process),
-        open_card=partial(_open_card, report_agent=report_agent),
-        close_card=_close_card,
-        notify=partial(_notify_lead, report_agent=report_agent),
+        open_card=tracker.open_card,
+        close_card=tracker.close_card,
+        notify=notify,
         emit=lambda payload: emit_system_event(
             _EVENT_NAME,
             payload,
@@ -716,7 +674,7 @@ def watch_round(
         uncertified=uncertified,
         channel_latest=channel_latest,
         run_process=run_process,
-        report_agent=report_agent,
+        tracker=tracker,
     )
     if slot_note is not None:
         line = f"{line} | {slot_note}"
@@ -730,11 +688,16 @@ def liveness_tick(
     slot: datetime, _payload: object, *, inputs: ScheduleInputs, home: Path, report_agent: int
 ) -> None:
     del home
+    tracker = GithubIssueTracker(
+        _REPO,
+        run_process=subprocess.run,
+        notify=partial(_notify_lead, report_agent=report_agent),
+    )
     liveness_once(
         slot,
         database=inputs.database(),
-        open_card=partial(_open_card, report_agent=report_agent),
-        close_card=partial(_close_liveness_card, report_agent),
+        open_card=tracker.open_card,
+        close_card=tracker.close_liveness_cards,
     )
 
 

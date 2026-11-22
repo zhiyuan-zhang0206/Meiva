@@ -357,7 +357,7 @@ def test_a_partial_job_red_is_retired_by_its_own_green() -> None:
         _partial_red(_MACOS, "bbb222", "2026-11-09T21:47:00+00:00", _WATCH_WORK),
     )
     (entry,) = dict(confirmed.entries).values()
-    assert entry.task_id is None
+    assert entry.issue_number is None
 
     own_green = apply_run(
         dict(confirmed.entries), _partial_green(_MACOS, "ccc333", "2026-11-10T21:47:00+00:00")
@@ -871,7 +871,7 @@ def test_a_skipped_audit_job_in_a_green_run_does_not_close_the_red_card() -> Non
         ),
     )
     (key, opened_entry) = sunday_red.entries[0]
-    entries = {key: replace(opened_entry, task_id=7005)}
+    entries = {key: replace(opened_entry, issue_number=7005)}
 
     monday_dep_jobs = RunFacts.green_job_names(
         (

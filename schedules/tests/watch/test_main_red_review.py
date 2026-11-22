@@ -50,7 +50,7 @@ def round_once(
         fetch=lambda _workflow, _when, _attempt: runs,
         last_start=lambda _workflow: FIRST,
         open_card=open_card,
-        close_card=lambda task_id, _why: closed.append(task_id),
+        close_card=lambda issue_number, _why: closed.append(issue_number),
         emit=events.append,
         workflows=("ci.yml",),
         liveness=(),
@@ -79,7 +79,7 @@ def test_first_opportunity_is_classified_and_cards_once(
     assert entry.review_outcome == outcome
     assert entry.review_run_id == 11
     assert entry.opportunities == 1
-    assert entry.task_id == 101
+    assert entry.issue_number == 101
     assert events[-1]["suspects"]
     round_once(tmp_path, (later, red()), outcome, cards, closed, events)
     assert len(cards) == 1

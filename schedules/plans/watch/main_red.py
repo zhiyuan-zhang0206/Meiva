@@ -217,8 +217,8 @@ class RunFacts:
 
 
 # meiva:note
-# One fingerprint's history on `main`. `task_id` is written when the red is confirmed and kept
-# after it resolves, so a later red of the same case can be traced back to the card it opened.
+# One fingerprint's history on `main`. `issue_number` is written when the red opens a GitHub Issue
+# and kept while it remains open, so a later green run knows which Issue to close.
 @dataclass(frozen=True)
 class Entry:
     fingerprint: str
@@ -230,7 +230,7 @@ class Entry:
     red_count: int
     last_green_sha: str | None = None
     last_green_at: datetime | None = None
-    task_id: int | None = None
+    issue_number: int | None = None
     kind: str = FAILURE_TEST
     # meiva:note
     # The job that reported this red, from the run that first named it. A re-run advances one job and
@@ -351,7 +351,7 @@ class Card:
 
 # meiva:note
 # What one round changes: the new entry table, the fingerprints that just became confirmed, the
-# task ids whose red ended, and the lines that explain why nothing was reported.
+# GitHub Issue numbers whose red ended, and the lines that explain why nothing was reported.
 @dataclass(frozen=True)
 class Plan:
     entries: tuple[tuple[str, Entry], ...]
@@ -509,8 +509,8 @@ def _resolve_green(
             continue
         if not _green_ran_the_red(run, entry):
             continue
-        if entry.task_id is not None:
-            closes.append(entry.task_id)
+        if entry.issue_number is not None:
+            closes.append(entry.issue_number)
         del plan_entries[name]
     return tuple(closes)
 
@@ -521,8 +521,8 @@ def apply_run(entries: dict[str, Entry], run: RunFacts, *, preserve_suspects: bo
     confirmed: list[Entry] = []
     if run.conclusion == "success":
         closes = _resolve_green(plan_entries, run, preserve_suspects=preserve_suspects)
-        for task_id in closes:
-            notes.append(f"green run {run.head_sha} closes card {task_id}")
+        for issue_number in closes:
+            notes.append(f"green run {run.head_sha} closes issue #{issue_number}")
         return Plan(tuple(plan_entries.items()), (), closes, tuple(notes))
     for failure in _unique(run.failures):
         if failure.kind == FAILURE_INFRA:

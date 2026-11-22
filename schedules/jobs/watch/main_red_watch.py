@@ -5,8 +5,8 @@
 #
 # Nothing here decides whether a red is real; that is the plan's judgement. This file owns the two
 # things the plan cannot know: which runs were already read (a watermark per workflow, so a
-# thirty-minute cadence does not re-download logs), and what a card is made of on this cluster (a
-# task owned by the P0 lead).
+# thirty-minute cadence does not re-download logs), and the state ledger that maps open reds to
+# their GitHub Issues (`issue_number`).
 #
 # A round reads several streams and each read can fail on its own: a renamed or disabled workflow
 # answers 404, a busy API answers 502. One unreadable stream becomes one named note and the round
@@ -16,7 +16,6 @@
 
 from __future__ import annotations
 
-import hashlib
 import json
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, field, replace
@@ -69,7 +68,6 @@ __all__ = [
     "SlotLedger",
     "WatchState",
     "already_read",
-    "card_operation_key",
     "first_suspect",
     "job_attempt_verdict",
     "listing_attempt",
@@ -84,14 +82,8 @@ __all__ = [
 STATE_FILE = "main-red-watch.json"
 
 
-# meiva:note
-# The create key for one card: what it watches and which occurrence it reports, hashed to a fixed
-# width so a long test id cannot push the key past the registry's 128-character limit. The text is
-# deliberately not an input -- a card whose wording moves within one occurrence must replay instead
-# of failing, and only a new occurrence may claim a new key.
-def card_operation_key(card: Card) -> str:
-    material = f"{card.fingerprint}\x00{card.episode}".encode()
-    return f"main-red-{hashlib.sha256(material).hexdigest()[:24]}"
+def _parse_issue_number(raw: object) -> int | None:
+    return raw if isinstance(raw, int) and not isinstance(raw, bool) and raw > 0 else None
 
 
 # meiva:note
@@ -111,12 +103,12 @@ class LivenessStream(NamedTuple):
 # entries of the reds being tracked, the newest run read per workflow, and when this watch first
 # saw each workflow at all.
 # meiva:note
-# What the slot check remembers between rounds: the gap its card belongs to and that card's id, so
-# one missing slot stays one card however many rounds notice it.
+# What the slot check remembers between rounds: the gap its issue belongs to and that issue's
+# number, so one missing slot stays one issue however many rounds notice it.
 @dataclass(frozen=True)
 class SlotLedger:
     gap_id: str | None = None
-    task_id: int | None = None
+    issue_number: int | None = None
     # meiva:note
     # How many consecutive rounds could not read the slot leg at all. Without it a failing `gh`
     # looks exactly like a gate that keeps its schedule: the round stays alive, the heartbeat keeps
@@ -143,18 +135,18 @@ class WatchState:
 
 
 # meiva:note
-# The slot ledger is a boundary read: the file may predate it, or carry a value a hand edit broke.
-# Each field is accepted only in its own type, so a malformed ledger costs one round's memory of
-# the gap rather than the whole state file.
+# The slot ledger is a boundary read: the file may predate it, carry a legacy `task_id` from
+# before the GitHub Issues migration, or hold a value a hand edit broke. Legacy `task_id` values
+# belong to a different ID space (retired Meiva tasks) and are intentionally ignored rather than
+# mapped into `issue_number`, so recovery never closes an unrelated GitHub Issue.
 def _load_slot(raw: object) -> SlotLedger:
     if not is_object_dict(raw):
         return SlotLedger()
     gap = raw.get("gap_id")
-    task = raw.get("task_id")
     rounds = raw.get("unreadable_rounds")
     return SlotLedger(
         gap_id=gap if isinstance(gap, str) else None,
-        task_id=task if isinstance(task, int) and not isinstance(task, bool) else None,
+        issue_number=_parse_issue_number(raw.get("issue_number")),
         unreadable_rounds=(
             rounds if isinstance(rounds, int) and not isinstance(rounds, bool) and rounds > 0 else 0
         ),
@@ -278,7 +270,11 @@ def load_state(path: Path) -> WatchState:
                 if value.get("last_green_at")
                 else None
             ),
-            task_id=value.get("task_id"),
+            # meiva:note
+            # Legacy state files carry `task_id` from the retired `meiva.tasks` tracker. Those
+            # integers are Meiva task ids, never GitHub Issue numbers, so they are ignored here
+            # rather than copied into `issue_number`.
+            issue_number=_parse_issue_number(value.get("issue_number")),
             # meiva:note
             # A ledger written before the class existed carries no `kind`; those entries were all
             # named cases, which is the default, so an upgrade never re-reads an old red as new.
@@ -331,7 +327,7 @@ def save_state(path: Path, state: WatchState) -> None:
                 "red_count": entry.red_count,
                 "last_green_sha": entry.last_green_sha,
                 "last_green_at": entry.last_green_at.isoformat() if entry.last_green_at else None,
-                "task_id": entry.task_id,
+                "issue_number": entry.issue_number,
                 "kind": entry.kind,
                 "job": entry.job,
                 "run_id": entry.run_id,
@@ -350,7 +346,7 @@ def save_state(path: Path, state: WatchState) -> None:
         "greens": dict(state.greens),
         "slot": {
             "gap_id": state.slot.gap_id,
-            "task_id": state.slot.task_id,
+            "issue_number": state.slot.issue_number,
             "unreadable_rounds": state.slot.unreadable_rounds,
         },
         "blind": save_blind(state.blind),
@@ -493,7 +489,7 @@ def _recheck_open_cards(
     for entry in list(entries.values()):
         if entry.state == STATE_SUSPECTED or entry.review_run_id:
             continue
-        if entry.task_id is None or not entry.job or not entry.run_id:
+        if entry.issue_number is None or not entry.job or not entry.run_id:
             continue
         try:
             attempt, jobs = attempt_of(entry.run_id)
@@ -504,12 +500,12 @@ def _recheck_open_cards(
         if verdict != ATTEMPT_GREEN:
             continue
         close_card(
-            entry.task_id,
+            entry.issue_number,
             f"red ended: {entry.job} passed in attempt {attempt} of run {entry.run_id}",
         )
         del entries[entry.fingerprint]
         closed += 1
-        notes.append(f"closed card {entry.task_id}: {entry.job} attempt {attempt} green")
+        notes.append(f"closed issue #{entry.issue_number}: {entry.job} attempt {attempt} green")
     return closed
 
 
@@ -543,7 +539,7 @@ def _apply_one_run(
     unnamed = sum(1 for failure in run.failures if failure.kind == FAILURE_UNNAMED)
     opened = 0
     for entry in plan.confirmed:
-        if entry.task_id is not None:
+        if entry.issue_number is not None:
             continue
         decision = _attempt_decision(entry, run, attempt_of, notes)
         if decision == ATTEMPT_PENDING:
@@ -558,13 +554,13 @@ def _apply_one_run(
         card, candidate_note = _confirmed_card(entry, run, compare, greens.get(run.workflow))
         if candidate_note is not None:
             notes.append(candidate_note)
-        task_id = open_card(card)
-        entries[entry.fingerprint] = replace(entries[entry.fingerprint], task_id=task_id)
+        issue_number = open_card(card)
+        entries[entry.fingerprint] = replace(entries[entry.fingerprint], issue_number=issue_number)
         opened += 1
-        notes.append(f"opened card {task_id} for {entry.fingerprint}")
-    for task_id in plan.closes:
-        close_card(task_id, "red ended: resolved by a green run")
-        notes.append(f"closed card {task_id}")
+        notes.append(f"opened issue #{issue_number} for {entry.fingerprint}")
+    for issue_number in plan.closes:
+        close_card(issue_number, "red ended: resolved by a green run")
+        notes.append(f"closed issue #{issue_number}")
     return entries, opened, infra, unnamed
 
 

@@ -5,6 +5,7 @@ exports = [
     "release_gate_slot.py",
     "stall_rule.py",
     "main_red.py",
+    "main_red_issues.py",
     "workflow_graph.py",
     "junit.py",
     "junit_cases.py",
@@ -18,6 +19,7 @@ exports = [
 "release_gate_slot.py" = "strict"
 "stall_rule.py" = "strict"
 "main_red.py" = "strict"
+"main_red_issues.py" = "strict"
 "workflow_graph.py" = "strict"
 "junit.py" = "strict"
 "junit_cases.py" = "strict"
@@ -26,5 +28,6 @@ exports = [
 [uses]
 "junit.py" = ["junit_cases.py", "junit_publications.py"]
 "main_red.py" = ["junit_cases.py"]
+"main_red_issues.py" = ["main_red.py"]
 "release_gate_slot.py" = ["main_red.py"]
 "blind_window.py" = ["main_red.py"]

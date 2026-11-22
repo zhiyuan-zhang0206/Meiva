@@ -69,15 +69,15 @@ def slot_round(
         now=now,
         since=since,
         stale_after=RELEASE_GATE_SLOT_STALE_AFTER,
-        open_gap=(ledger.gap_id or "") if ledger.task_id is not None else None,
+        open_gap=(ledger.gap_id or "") if ledger.issue_number is not None else None,
     )
     if decision.action == SlotAction.RECOVERED:
-        assert ledger.task_id is not None
-        close_card(ledger.task_id, f"release-gate slot: {decision.note}")
+        assert ledger.issue_number is not None
+        close_card(ledger.issue_number, f"release-gate slot: {decision.note}")
         slot = SlotLedger()
     elif decision.action == SlotAction.OPEN:
         assert decision.card is not None
-        slot = SlotLedger(gap_id=decision.gap_id, task_id=open_card(decision.card))
+        slot = SlotLedger(gap_id=decision.gap_id, issue_number=open_card(decision.card))
     else:
         assert decision.action == SlotAction.WAIT
         slot = replace(ledger, unreadable_rounds=0)
