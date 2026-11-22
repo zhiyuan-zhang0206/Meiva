@@ -82,6 +82,10 @@ describe("StatusCards tri-state (loading / data / error)", () => {
     expect(googleCard?.getAttribute("title")).toBe(
       "Metered Google API spend over the past 24h (excludes subscription harnesses): $1.15",
     );
+    const usageGrid = googleCard?.parentElement;
+    expect(usageGrid?.className).toContain("grid-cols-2");
+    expect(usageGrid?.children).toHaveLength(7);
+    expect(document.querySelector(".grid-cols-3")).toBeNull();
     expect(screen.queryByTestId("status-live-alerts")).toBeNull();
     expect(screen.queryByTestId("status-diagnostics-card")).toBeNull();
     expect(screen.queryByText("Alerts")).toBeNull();

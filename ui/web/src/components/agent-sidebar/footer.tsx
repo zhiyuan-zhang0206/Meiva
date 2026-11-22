@@ -284,13 +284,9 @@ export function StatusCards({
             className="bg-transparent text-[10px] text-muted-foreground hover:text-foreground rounded px-1 py-0.5 cursor-pointer focus:outline-none"
           />
         </div>
-        <div className="space-y-1 px-3 pb-2.5">
-          <div className="grid grid-cols-2 gap-1">
-            {coreCards.map(renderUsageCard)}
-          </div>
-          <div className="grid grid-cols-3 gap-1">
-            {providerCards.map(renderUsageCard)}
-          </div>
+        <div className="grid grid-cols-2 gap-1 px-3 pb-2.5">
+          {coreCards.map(renderUsageCard)}
+          {providerCards.map(renderUsageCard)}
         </div>
       </div>
     </div>
