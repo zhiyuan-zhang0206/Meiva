@@ -120,10 +120,10 @@ listen on the target's loopback interface (port 9222 by default). SSH uses the
 configured login and host key. Run Chrome under that login for file uploads.
 
 Use an agent workspace path for file uploads and saved screenshots. Remote
-snapshots return inline text only, capped at 8 MiB before forwarding. A call transfers up to 8 MiB of files. Submit an
-attached file within ten minutes on a cluster target or before the SSH client
-connection ends. See the [Chrome MCP reference](../../../../mcps/docs/chrome/chrome.md)
-for the supported file tools.
+snapshots return inline text only, capped at 8 MiB before forwarding. A call
+transfers up to 8 MiB of files. Submit an attached file within ten minutes on
+a cluster target or before the SSH client connection ends. Run
+`help(meiva.mcps.chrome)` for the available tools.
 
 ## When to Fix Behavior in a Wrapper Instead
 
