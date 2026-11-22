@@ -156,6 +156,27 @@ async def test_llm_node_stamps_meiva_non_human_wake_only_when_state_non_human_wa
 
 
 @pytest.mark.parametrize(
+    "valid_text",
+    [
+        "MEIVA_HIDE_FROM_USER Waiting for final verification.",
+        "MEIVA_DISPLAY_TO_USER\u4f60\u597d",
+        "MEIVA_HIDE_FROM_USERWaiting...",
+        "MEIVA_HIDE_FROM_USER",
+        "MEIVA_DISPLAY_TO_USER\r\n   ",
+    ],
+)
+async def test_relaxed_visibility_prefixes_halt_without_correction(
+    model_catalog: ModelCatalog, database_gate: ProcessDbGate, valid_text: str
+) -> None:
+    model = ScriptedModel(scripts=[[end_turn_chunk(valid_text)]])
+    runtime = llm_runtime(model, model_catalog=model_catalog, database_gate=database_gate)
+    result = await llm_node(_STATE, runtime, _config_with_thread(), rng=_rng())
+    assert result.goto == "claim"
+    assert command_update(result)["halted"] is True
+    assert len(command_messages(result)) == 1
+
+
+@pytest.mark.parametrize(
     ("retry_text", "note_count"),
     [("MEIVA_DISPLAY_TO_USER\nHere is the answer.", 0), ("Still unmarked.", 1)],
 )

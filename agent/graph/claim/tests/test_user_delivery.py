@@ -128,6 +128,18 @@ async def test_harness_turn_does_not_inject_visibility_rule_and_corrects_once_on
     [(prompt, _)] = engine_valid.submitted
     assert prompt == "hello from user"
 
+    for relaxed_reply in (
+        "MEIVA_HIDE_FROM_USER Waiting for verification.",
+        "MEIVA_DISPLAY_TO_USER\u4f60\u597d",
+        "MEIVA_HIDE_FROM_USER",
+    ):
+        engine_relaxed = FakeEngine(reply=relaxed_reply)
+        cmd_relaxed = await harness_turn_node(
+            state, harness_runtime(engine_relaxed, agent_id=agent_id), config(agent_id)
+        )
+        assert cmd_relaxed.goto == "claim"
+        assert len(engine_relaxed.submitted) == 1
+
     engine_invalid = FakeEngine(reply="unprefixed reply")
     cmd_invalid = await harness_turn_node(
         state, harness_runtime(engine_invalid, agent_id=agent_id), config(agent_id)

@@ -29,19 +29,36 @@ REPLY_VISIBILITY_CORRECTION = (
 )
 
 
-def _resolve_prefix_reply(text: str) -> tuple[str, bool] | None:
-    header, separator, body = text.partition("\n")
-    header = header.removesuffix("\r")
-    if header in (DISPLAY_TO_USER, HIDE_FROM_USER):
-        return (body, header == DISPLAY_TO_USER) if body.strip() else ("", False)
-    if not separator and (DISPLAY_TO_USER.startswith(text) or HIDE_FROM_USER.startswith(text)):
-        return "", False
-    return None
+def _strip_header_separator(rest: str) -> str:
+    idx = 0
+    while idx < len(rest) and rest[idx] in (" ", "\t"):
+        idx += 1
+    if idx < len(rest) and rest[idx] == "\r":
+        idx += 1
+        if idx < len(rest) and rest[idx] == "\n":
+            idx += 1
+    elif idx < len(rest) and rest[idx] == "\n":
+        idx += 1
+    return rest[idx:]
 
 
 def parse_reply_visibility(text: str) -> tuple[str, bool] | None:
-    resolved = _resolve_prefix_reply(text)
-    return resolved if resolved is not None and resolved[0] else None
+    trimmed = text.lstrip()
+    for marker, visible in ((DISPLAY_TO_USER, True), (HIDE_FROM_USER, False)):
+        if trimmed.startswith(marker):
+            body = _strip_header_separator(trimmed[len(marker) :])
+            return (body, visible) if body.strip() else ("", False)
+    return None
+
+
+def _resolve_prefix_reply(text: str) -> tuple[str, bool] | None:
+    parsed = parse_reply_visibility(text)
+    if parsed is not None:
+        return parsed
+    trimmed = text.lstrip()
+    if DISPLAY_TO_USER.startswith(trimmed) or HIDE_FROM_USER.startswith(trimmed):
+        return "", False
+    return None
 
 
 # meiva:note
@@ -53,17 +70,7 @@ def strip_user_reply_prefix(text: str) -> tuple[bool, str]:
     trimmed = text.lstrip()
     if not trimmed.startswith(USER_REPLY_HEADER):
         return False, text
-    rest = trimmed[len(USER_REPLY_HEADER) :]
-    idx = 0
-    while idx < len(rest) and rest[idx] in (" ", "\t"):
-        idx += 1
-    if idx < len(rest) and rest[idx] == "\r":
-        idx += 1
-        if idx < len(rest) and rest[idx] == "\n":
-            idx += 1
-    elif idx < len(rest) and rest[idx] == "\n":
-        idx += 1
-    return True, rest[idx:]
+    return True, _strip_header_separator(trimmed[len(USER_REPLY_HEADER) :])
 
 
 # meiva:note
