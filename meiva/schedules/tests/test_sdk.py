@@ -29,6 +29,7 @@ def _row(**changes: object) -> dict[str, object]:
         "updated_at": "2026-11-17T00:00:00Z",
         "machine": "macmini",
         "owner_agent_id": 42,
+        "created_by_agent_id": 42,
         "trigger_kind": "every",
         "run_at": None,
         "cron_expr": None,
@@ -43,18 +44,19 @@ def _row(**changes: object) -> dict[str, object]:
 
 
 @contextmanager
-def _gateway() -> Generator[list[tuple[str, str, object | None]]]:
+def _gateway(*, agent_id: int | None = 42) -> Generator[list[tuple[str, str, object | None]]]:
     sent: list[tuple[str, str, object | None]] = []
 
     def handle(request: httpx.Request) -> httpx.Response:
         body = None if not request.content else json.loads(request.content)
         sent.append((request.method, request.url.path, body))
+        row_data = _row(owner_agent_id=agent_id, created_by_agent_id=agent_id)
         if request.method == "GET" and request.url.path == "/api/schedules":
-            return httpx.Response(200, json=[_row()])
-        return httpx.Response(201 if request.method == "POST" else 200, json=_row())
+            return httpx.Response(200, json=[row_data])
+        return httpx.Response(201 if request.method == "POST" else 200, json=row_data)
 
     context = MeivaContext(
-        identity=AgentIdentity(agent_id=42, owns_loop=True),
+        identity=AgentIdentity(agent_id=agent_id, owns_loop=agent_id is not None),
         clients=ClientSet(
             gateway_url="http://gateway",
             factories={
@@ -91,6 +93,7 @@ def test_every_defaults_owner_to_the_current_agent() -> None:
         row = schedules.every(60, name="nightly", script="print('hi')\n")
 
     assert row.id == 7
+    assert row.created_by_agent_id == 42
     assert sent[0][0:2] == ("POST", "/api/schedules")
     assert sent[0][2] == {
         "name": "nightly",
@@ -100,6 +103,7 @@ def test_every_defaults_owner_to_the_current_agent() -> None:
         "script": "print('hi')\n",
         "interval_seconds": 60,
         "owner_agent_id": 42,
+        "created_by_agent_id": 42,
     }
 
 
@@ -121,6 +125,19 @@ def test_at_serializes_timezone_aware_instant_and_system_owner() -> None:
     assert body["message"] == "wake up"
     assert body["target_agent_id"] == 9
     assert "owner_agent_id" not in body
+    assert body["created_by_agent_id"] == 42
+
+
+def test_system_schedule_outside_agent_context_omits_creator() -> None:
+    with _gateway(agent_id=None) as sent:
+        row = schedules.every(60, name="ops-check", script="print('ok')\n", owner_agent_id=None)
+
+    assert row.owner_agent_id is None
+    assert row.created_by_agent_id is None
+    body = sent[0][2]
+    assert isinstance(body, dict)
+    assert "owner_agent_id" not in body
+    assert "created_by_agent_id" not in body
 
 
 def test_list_get_and_lifecycle_actions_use_first_class_routes() -> None:

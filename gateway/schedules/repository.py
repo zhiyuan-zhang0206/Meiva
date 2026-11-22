@@ -18,6 +18,7 @@ SCHEDULE_BASE_COLS = (
     "s.created_at, s.updated_at, s.machine, s.owner_plugin"
 )
 OWNER_COL = "s.owner_agent_id"
+CREATED_BY_COL = "s.created_by_agent_id"
 TRIGGER_COLS = (
     "s.trigger_kind, s.run_at, s.cron_expr, s.interval_seconds, s.timezone, "
     "s.timeout_seconds, s.on_owner_terminate, s.next_launch_at"
@@ -32,15 +33,16 @@ JOIN_CLAUSE = (
     "LEFT JOIN machine_probe mp ON mp.machine_name = s.machine"
 )
 SUMMARY_QUERY = (
-    f"SELECT {SCHEDULE_BASE_COLS}, {PLACEMENT_COLS}, {OWNER_COL}, {TRIGGER_COLS} "
+    f"SELECT {SCHEDULE_BASE_COLS}, {PLACEMENT_COLS}, {OWNER_COL}, {TRIGGER_COLS}, {CREATED_BY_COL} "
     f"{JOIN_CLAUSE} ORDER BY s.id DESC"
 )
 # meiva:note
-# Trigger columns stay last. The operator repair script indexes ScheduleFullRow positionally
-# across installed gateway versions, so inserting a column before script would shift old fields.
+# Trigger and provenance columns stay last. The operator repair script indexes ScheduleFullRow
+# positionally across installed gateway versions, so inserting a column before script would shift
+# old fields.
 FULL_QUERY = (
-    f"SELECT {SCHEDULE_BASE_COLS}, s.script, {PLACEMENT_COLS}, {OWNER_COL}, {TRIGGER_COLS} "
-    f"{JOIN_CLAUSE} WHERE s.id = %s"
+    f"SELECT {SCHEDULE_BASE_COLS}, s.script, {PLACEMENT_COLS}, {OWNER_COL}, {TRIGGER_COLS}, "
+    f"{CREATED_BY_COL} {JOIN_CLAUSE} WHERE s.id = %s"
 )
 MACHINE_PLACEMENT_QUERY = sql.SQL(
     "SELECT {} FROM (SELECT %s::text AS target) t "
@@ -81,6 +83,7 @@ def summary(row: ScheduleSummaryRow | ScheduleFullRow) -> ScheduleSummary:
         machine=row.machine,
         owner_plugin=row.owner_plugin,
         owner_agent_id=row.owner_agent_id,
+        created_by_agent_id=row.created_by_agent_id,
         trigger_kind=row.trigger_kind,
         run_at=row.run_at,
         cron_expr=row.cron_expr,
@@ -109,6 +112,7 @@ def view(row: ScheduleFullRow) -> ScheduleView:
         machine=projected.machine,
         owner_plugin=projected.owner_plugin,
         owner_agent_id=projected.owner_agent_id,
+        created_by_agent_id=projected.created_by_agent_id,
         trigger_kind=projected.trigger_kind,
         run_at=projected.run_at,
         cron_expr=projected.cron_expr,

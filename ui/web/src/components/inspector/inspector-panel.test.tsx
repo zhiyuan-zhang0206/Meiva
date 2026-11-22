@@ -428,4 +428,107 @@ describe("InspectorPanel", () => {
     await waitFor(() => expect(screen.getByText("Persistent shells")).toBeTruthy());
     expect(screen.queryByRole("link", { name: "Open run timeline" })).toBeNull();
   });
+
+  it("hides Schedules section when the agent has no associated schedules", async () => {
+    getAgentInspectLive.mockResolvedValue(liveFixture({ schedules: [] }));
+    render(<InspectorPanel agentId={1} />);
+    await waitFor(() => expect(screen.getByText("Persistent shells")).toBeTruthy());
+    expect(screen.queryByText("Schedules")).toBeNull();
+  });
+
+  it("renders owned and cluster-level schedules with scope badge, status, and deep links", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(new Date("2026-06-14T12:00:00Z"));
+    getAgentInspectLive.mockResolvedValue(
+      liveFixture({
+        schedules: [
+          {
+            id: 11,
+            name: "cluster-watchdog",
+            enabled: true,
+            status: "running",
+            trigger_kind: "cron",
+            cron_expr: "*/5 * * * *",
+            interval_seconds: null,
+            run_at: null,
+            next_launch_at: "2026-06-14T12:05:00Z",
+            owner_agent_id: null,
+            created_by_agent_id: 1,
+            machine: "gateway",
+          },
+          {
+            id: 12,
+            name: "broken-sync",
+            enabled: true,
+            status: "error",
+            trigger_kind: "every",
+            cron_expr: null,
+            interval_seconds: 300,
+            run_at: null,
+            next_launch_at: null,
+            owner_agent_id: 1,
+            created_by_agent_id: 1,
+            machine: "test-host",
+          },
+          {
+            id: 10,
+            name: "daily-digest",
+            enabled: true,
+            status: "scheduled",
+            trigger_kind: "every",
+            cron_expr: null,
+            interval_seconds: 3600,
+            run_at: null,
+            next_launch_at: "2026-06-14T13:00:00Z",
+            owner_agent_id: 1,
+            created_by_agent_id: 1,
+            machine: "test-host",
+          },
+          {
+            id: 13,
+            name: "paused-job",
+            enabled: false,
+            status: "stopped",
+            trigger_kind: "at",
+            cron_expr: null,
+            interval_seconds: null,
+            run_at: "2026-06-15T00:00:00Z",
+            next_launch_at: null,
+            owner_agent_id: 1,
+            created_by_agent_id: 1,
+            machine: "test-host",
+          },
+        ],
+      }),
+    );
+    render(<InspectorPanel agentId={1} />);
+
+    await waitFor(() => expect(screen.getByText("Schedules")).toBeTruthy());
+    const section = screen.getByText("Schedules").closest("section");
+    expect(section).not.toBeNull();
+    expect(within(section!).getByText("4")).toBeTruthy();
+
+    const clusterLink = within(section!).getByText("cluster-watchdog").closest("a");
+    expect(clusterLink?.getAttribute("href")).toBe("/control/schedules?schedule=11");
+    expect(within(clusterLink!).getByTestId("schedule-scope-cluster").textContent).toBe("Cluster");
+    expect(within(clusterLink!).getByText("Running")).toBeTruthy();
+    expect(clusterLink?.getAttribute("title")).toContain("cron */5 * * * *");
+    expect(clusterLink?.getAttribute("title")).toContain("gateway");
+
+    const errorLink = within(section!).getByText("broken-sync").closest("a");
+    expect(errorLink?.getAttribute("href")).toBe("/control/schedules?schedule=12");
+    expect(within(errorLink!).queryByTestId("schedule-scope-cluster")).toBeNull();
+    expect(within(errorLink!).getByTestId("schedule-dot-error")).toBeTruthy();
+    expect(within(errorLink!).getByText("Error")).toBeTruthy();
+
+    const ownedLink = within(section!).getByText("daily-digest").closest("a");
+    expect(ownedLink?.getAttribute("href")).toBe("/control/schedules?schedule=10");
+    expect(within(ownedLink!).queryByTestId("schedule-scope-cluster")).toBeNull();
+    expect(within(ownedLink!).getByTestId("schedule-dot-scheduled")).toBeTruthy();
+
+    const stoppedLink = within(section!).getByText("paused-job").closest("a");
+    expect(stoppedLink?.getAttribute("href")).toBe("/control/schedules?schedule=13");
+    expect(within(stoppedLink!).getByTestId("schedule-dot-stopped")).toBeTruthy();
+    expect(within(stoppedLink!).getByText("Stopped")).toBeTruthy();
+  });
 });

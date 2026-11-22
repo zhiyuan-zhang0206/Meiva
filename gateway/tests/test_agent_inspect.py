@@ -125,6 +125,7 @@ def test_inspect_live_returns_only_window_independent_fields(
         "shells_available",
         "spawned_at",
         "shells",
+        "schedules",
         "config_overlay",
         "heartbeat",
     }
@@ -132,6 +133,7 @@ def test_inspect_live_returns_only_window_independent_fields(
     assert body["machine"] == "runner-a"
     assert body["status"] == "idling"
     assert body["shells_available"] is True
+    assert body["schedules"] == []
     assert body["observation"]["runtime_owner"] == "unknown"
     assert body["config_overlay"] == {"llm_model": "claude-opus-4-8"}
     assert body["shells"] == [
@@ -612,3 +614,101 @@ def test_inspect_plugin_surfaces_answer_404_for_an_unknown_agent(
     db_conn.commit()
     with gateway_test_client() as client:
         assert client.get(f"/api/agents/999999/inspect/{surface}").status_code == 404
+
+
+def test_inspect_live_returns_owned_and_created_schedules_ordered_and_isolated(
+    db_conn: psycopg.Connection,
+) -> None:
+    agent_a = _insert_agent(db_conn, status="idling")
+    agent_b = _insert_agent(db_conn, status="idling")
+    soon = datetime.now(UTC) + timedelta(minutes=5)
+    later = datetime.now(UTC) + timedelta(minutes=30)
+
+    def _insert_sched(
+        name: str,
+        *,
+        status: str,
+        enabled: bool = True,
+        owner: int | None = None,
+        creator: int | None = None,
+        trigger_kind: str = "every",
+        interval_seconds: int | None = 60,
+        cron_expr: str | None = None,
+        next_launch_at: datetime | None = None,
+    ) -> int:
+        with db_conn.cursor() as cur:
+            cur.execute(
+                "INSERT INTO schedules "
+                "(name, script, command, enabled, status, machine, owner_agent_id, "
+                " created_by_agent_id, trigger_kind, interval_seconds, cron_expr, next_launch_at) "
+                "VALUES (%s, 'pass', 'python schedule.py', %s, %s, 'gateway', %s, %s, %s, %s, %s, %s) "
+                "RETURNING id",
+                (
+                    name,
+                    enabled,
+                    status,
+                    owner,
+                    creator,
+                    trigger_kind,
+                    interval_seconds,
+                    cron_expr,
+                    next_launch_at,
+                ),
+            )
+            row = cur.fetchone()
+        assert row is not None
+        return row[0]
+
+    stopped_id = _insert_sched(
+        "a-stopped", status="stopped", enabled=False, owner=agent_a, creator=agent_a
+    )
+    sched_later_id = _insert_sched(
+        "a-sched-later",
+        status="scheduled",
+        owner=agent_a,
+        creator=agent_a,
+        next_launch_at=later,
+    )
+    sched_soon_id = _insert_sched(
+        "a-sched-soon",
+        status="scheduled",
+        owner=None,
+        creator=agent_a,
+        trigger_kind="cron",
+        interval_seconds=None,
+        cron_expr="0 9 * * *",
+        next_launch_at=soon,
+    )
+    error_id = _insert_sched("a-error", status="error", owner=agent_a, creator=agent_a)
+    running_cluster_id = _insert_sched(
+        "a-cluster-running",
+        status="running",
+        owner=None,
+        creator=agent_a,
+        next_launch_at=later,
+    )
+    _insert_sched("b-owned", status="running", owner=agent_b, creator=agent_b)
+    _insert_sched("b-cluster", status="scheduled", owner=None, creator=agent_b)
+    _insert_sched("system-pure", status="scheduled", owner=None, creator=None)
+    db_conn.commit()
+
+    with gateway_test_client() as client:
+        response = client.get(f"/api/agents/{agent_a}/inspect/live")
+
+    assert response.status_code == 200, response.text
+    schedules = response.json()["schedules"]
+    assert [s["id"] for s in schedules] == [
+        running_cluster_id,
+        error_id,
+        sched_soon_id,
+        sched_later_id,
+        stopped_id,
+    ]
+    assert schedules[0]["owner_agent_id"] is None
+    assert schedules[0]["created_by_agent_id"] == agent_a
+    assert schedules[2]["owner_agent_id"] is None
+    assert schedules[2]["created_by_agent_id"] == agent_a
+    assert schedules[2]["trigger_kind"] == "cron"
+    assert schedules[2]["cron_expr"] == "0 9 * * *"
+    assert schedules[3]["owner_agent_id"] == agent_a
+    assert schedules[3]["created_by_agent_id"] == agent_a

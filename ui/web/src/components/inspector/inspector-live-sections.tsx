@@ -3,6 +3,7 @@
 import { modelLabel } from "@/lib/contracts/models";
 
 import {
+  CalendarClock,
   HeartPulse,
   SlidersHorizontal,
   Terminal,
@@ -15,6 +16,7 @@ import { useAgentRoster } from "@/lib/agents/use-agents";
 import type {
   AgentInspectLive,
   HeartbeatInfo,
+  InspectorScheduleInfo,
   ShellInfo,
 } from "@/lib/contracts/types";
 import { formatRelative, formatUptime } from "@/lib/format/time";
@@ -22,6 +24,7 @@ import { useNow } from "@/lib/format/now/use-now";
 import { useTimeFormat } from "@/lib/format/use-time-format";
 import { cn } from "@/lib/format/utils";
 import { harnessLabel } from "@/lib/harness/harness";
+import { scheduleHref } from "@/lib/inspector/inspector-widgets";
 import { useWallNow } from "@/lib/transport/transport-context";
 
 import { formatInterval, InspectReadError } from "./inspector-cost-section";
@@ -92,6 +95,129 @@ function ShellRow({
     <li>
       <Link
         href={`/shell/${agentId}/${shell.id}`}
+        className={`${rowClass} hover:bg-sidebar-accent`}
+      >
+        {content}
+      </Link>
+    </li>
+  );
+}
+
+type InspectorKey = Parameters<ReturnType<typeof useTranslations<"inspector">>>[0];
+
+const SCHEDULE_STATUS_KEY: Readonly<Record<string, InspectorKey | undefined>> = {
+  running: "scheduleStatusRunning",
+  scheduled: "scheduleStatusScheduled",
+  error: "scheduleStatusError",
+  stopped: "scheduleStatusStopped",
+  completed: "scheduleStatusCompleted",
+  cancelled: "scheduleStatusCancelled",
+};
+
+function scheduleDotClass(status: string): string {
+  if (status === "running") return "bg-sky-500 animate-pulse";
+  if (status === "scheduled") return "bg-emerald-500";
+  if (status === "error") return "bg-destructive";
+  return "bg-muted-foreground/50";
+}
+
+function scheduleTriggerLabel(schedule: InspectorScheduleInfo): string {
+  if (schedule.trigger_kind === "cron" && schedule.cron_expr) {
+    return `cron ${schedule.cron_expr}`;
+  }
+  if (schedule.trigger_kind === "every" && schedule.interval_seconds != null) {
+    return `every ${formatInterval(schedule.interval_seconds)}`;
+  }
+  if (schedule.trigger_kind === "at" && schedule.run_at) {
+    return `at ${schedule.run_at}`;
+  }
+  return schedule.trigger_kind;
+}
+
+export function SchedulesSection({ inspect }: { inspect: AgentInspectLive }) {
+  const schedules = inspect.schedules ?? [];
+  const now = useNow(1_000, useWallNow());
+  const t = useTranslations("inspector");
+  if (schedules.length === 0) return null;
+
+  return (
+    <Section
+      icon={<CalendarClock className="size-3" />}
+      title={t("sectionSchedules")}
+      badge={String(schedules.length)}
+    >
+      <ul className="space-y-1">
+        {schedules.map((s) => (
+          <ScheduleItemRow key={s.id} schedule={s} now={now} />
+        ))}
+      </ul>
+    </Section>
+  );
+}
+
+function ScheduleItemRow({
+  schedule,
+  now,
+}: {
+  schedule: InspectorScheduleInfo;
+  now: Date;
+}) {
+  const t = useTranslations("inspector");
+  const { formatFuture } = useTimeFormat();
+  const validId = Number.isFinite(schedule.id) && schedule.id > 0;
+  const isCluster = schedule.owner_agent_id == null;
+  const statusKey = SCHEDULE_STATUS_KEY[schedule.status];
+  const statusLabel = statusKey ? t(statusKey) : schedule.status;
+  const rightLabel =
+    schedule.status === "scheduled" && schedule.next_launch_at != null
+      ? formatFuture(schedule.next_launch_at, now)
+      : statusLabel;
+  const tooltipParts = [
+    schedule.name,
+    scheduleTriggerLabel(schedule),
+    statusLabel,
+    schedule.machine,
+  ];
+  if (isCluster) tooltipParts.push(t("scheduleScopeCluster"));
+  const tooltip = tooltipParts.join(" · ");
+
+  const rowClass =
+    "flex items-center gap-2 rounded border border-black/[0.06] dark:border-white/[0.08] bg-sidebar-accent/40 dark:bg-[#33322C] px-2.5 py-1.5 font-mono text-[11px] leading-[16px]";
+  const content = (
+    <>
+      <span
+        aria-hidden
+        data-testid={`schedule-dot-${schedule.status}`}
+        className={cn("size-1.5 shrink-0 rounded-full", scheduleDotClass(schedule.status))}
+      />
+      <span className="truncate text-foreground dark:text-[#f0ede7]">{schedule.name}</span>
+      {isCluster ? (
+        <span
+          data-testid="schedule-scope-cluster"
+          className="shrink-0 rounded bg-muted px-1 py-0.5 text-[9.5px] leading-none text-muted-foreground"
+        >
+          {t("scheduleScopeCluster")}
+        </span>
+      ) : null}
+      <span className="ml-auto shrink-0 tabular-nums text-muted-foreground">{rightLabel}</span>
+    </>
+  );
+
+  if (!validId) {
+    return (
+      <li>
+        <span className={rowClass} title={tooltip}>
+          {content}
+        </span>
+      </li>
+    );
+  }
+
+  return (
+    <li>
+      <Link
+        href={scheduleHref(schedule.id)}
+        title={tooltip}
         className={`${rowClass} hover:bg-sidebar-accent`}
       >
         {content}

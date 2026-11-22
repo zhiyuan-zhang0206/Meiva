@@ -16,7 +16,7 @@ import {
 import type { Route } from "next";
 import { useTranslations } from "next-intl";
 import { useRouter } from "next/navigation";
-import { useCallback, useState } from "react";
+import { useCallback, useState, useSyncExternalStore } from "react";
 
 import { Button } from "@/components/ui/button";
 import { Spinner } from "@/components/ui/spinner";
@@ -30,6 +30,7 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
+import { useBrowser } from "@/lib/browser/browser-provider";
 import { errMsg } from "@/lib/contracts/errors";
 import { useStore } from "@/lib/state/store";
 import type { ScheduleCreate } from "@/lib/contracts/types";
@@ -50,6 +51,15 @@ function scheduleFilter(value: string): ScheduleFilter | null {
   }
   return null;
 }
+
+function readScheduleQueryId(search: string): number | null {
+  const raw = new URLSearchParams(search).get("schedule");
+  if (raw === null || !/^\d+$/.test(raw)) return null;
+  const parsed = Number.parseInt(raw, 10);
+  return Number.isSafeInteger(parsed) && parsed > 0 ? parsed : null;
+}
+
+const subscribeNoop = () => () => undefined;
 
 const EMPTY_FORM: ScheduleCreate = {
   name: "",
@@ -150,7 +160,18 @@ export function SchedulesPageView({ navigate }: SchedulesPageViewProps) {
     onError: onErr("Create"),
   });
 
-  const [expandedId, setExpandedId] = useState<number | null>(null);
+  const { navigation } = useBrowser();
+  const deepLinkId = useSyncExternalStore(
+    subscribeNoop,
+    () => {
+      const where = navigation.location();
+      return where === null ? null : readScheduleQueryId(where.search);
+    },
+    () => null,
+  );
+  const [userExpandedId, setUserExpandedId] = useState<number | null | undefined>(undefined);
+  const expandedId = userExpandedId !== undefined ? userExpandedId : deepLinkId;
+  const highlightedId = deepLinkId;
   const [filter, setFilter] = useState<ScheduleFilter>("all");
 
   if (isLoading) {
@@ -274,13 +295,19 @@ export function SchedulesPageView({ navigate }: SchedulesPageViewProps) {
                 <ScheduleRow
                   key={s.id}
                   schedule={s}
+                  highlighted={highlightedId === s.id}
                   pending={[startMutation, stopMutation, restartMutation, deleteMutation].some((mutation) => mutation.isPending && mutation.variables === s.id)}
                   expanded={expandedId === s.id}
-                  onExpand={() => setExpandedId((id) => (id === s.id ? null : s.id))}
+                  onExpand={() =>
+                    setUserExpandedId((prev) => {
+                      const current = prev !== undefined ? prev : deepLinkId;
+                      return current === s.id ? null : s.id;
+                    })
+                  }
                   // meiva:note
                   // Edit must ENSURE the row is expanded (toggle semantics
                   // collapsed an already-expanded row's details — Task #1051).
-                  onEnsureExpanded={() => setExpandedId(s.id)}
+                  onEnsureExpanded={() => setUserExpandedId(s.id)}
                   onToggle={() =>
                     (s.enabled ? stopMutation : startMutation).mutate(s.id)
                   }

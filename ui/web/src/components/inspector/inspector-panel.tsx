@@ -34,6 +34,7 @@ import {
 import {
   ConfigOverlaySection,
   LivenessSection,
+  SchedulesSection,
   ShellsSection,
 } from "./inspector-live-sections";
 import { useApi } from "@/lib/transport/transport-context";
@@ -210,6 +211,7 @@ export function InspectorPanel({ agentId }: { agentId: number }) {
   if (liveData) {
     sections.push(
       { order: INSPECT_SECTION_ORDER.shells, tie: 0, key: "shells", node: <ShellsSection inspect={liveData} /> },
+      { order: INSPECT_SECTION_ORDER.schedules, tie: 0, key: "schedules", node: <SchedulesSection inspect={liveData} /> },
       { order: INSPECT_SECTION_ORDER.configOverlay, tie: 0, key: "config-overlay", node: <ConfigOverlaySection inspect={liveData} /> },
     );
   }

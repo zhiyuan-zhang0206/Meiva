@@ -3,6 +3,7 @@ from __future__ import annotations
 import psycopg
 from fastapi.testclient import TestClient
 
+from base.api_contracts.idempotency import keyed_headers
 from base.db import create_agent
 from gateway.tests.schedules.api_support import schedule_client
 
@@ -88,3 +89,120 @@ def test_message_payload_targets_owner(db_conn: psycopg.Connection) -> None:
 
     assert response.status_code == 201, response.text
     assert f"meiva.agents.send_message({owner}, 'wake up')" in response.json()["script"]
+
+
+def test_cluster_schedule_records_creator_and_preserves_cluster_placement(
+    db_conn: psycopg.Connection,
+) -> None:
+    creator = _owner(db_conn, "creator-machine")
+    with schedule_client() as client:
+        owned_resp = _post(
+            client, "agent-owned", owner_agent_id=creator, created_by_agent_id=creator
+        )
+        cluster_resp = _post(
+            client,
+            "cluster-created-by-agent",
+            owner_agent_id=None,
+            created_by_agent_id=creator,
+        )
+        assert owned_resp.status_code == 201, owned_resp.text
+        assert cluster_resp.status_code == 201, cluster_resp.text
+        cluster_id = cluster_resp.json()["id"]
+
+        assert (owned_resp.json()["owner_agent_id"], owned_resp.json()["created_by_agent_id"]) == (
+            creator,
+            creator,
+        )
+        assert (
+            cluster_resp.json()["owner_agent_id"],
+            cluster_resp.json()["created_by_agent_id"],
+            cluster_resp.json()["on_owner_terminate"],
+        ) == (None, creator, "keep")
+        assert cluster_resp.json()["machine"] != "creator-machine"
+
+        listed = {row["id"]: row for row in client.get("/api/schedules").json()}
+        assert (
+            listed[cluster_id]["owner_agent_id"],
+            listed[cluster_id]["created_by_agent_id"],
+        ) == (
+            None,
+            creator,
+        )
+        assert client.get(f"/api/schedules/{cluster_id}").json()["created_by_agent_id"] == creator
+
+
+def test_terminating_creator_cancels_owned_schedule_but_keeps_cluster_schedule(
+    db_conn: psycopg.Connection,
+) -> None:
+    creator = _owner(db_conn, "creator-machine")
+    with schedule_client() as client:
+        owned_id = _post(
+            client, "agent-owned", owner_agent_id=creator, created_by_agent_id=creator
+        ).json()["id"]
+        cluster_id = _post(
+            client,
+            "cluster-created-by-agent",
+            owner_agent_id=None,
+            created_by_agent_id=creator,
+        ).json()["id"]
+
+    db_conn.execute(
+        "UPDATE agents_meta SET status = 'terminated' WHERE id = %s",
+        (creator,),
+    )
+    db_conn.commit()
+
+    owned_state = db_conn.execute(
+        "SELECT enabled, status FROM schedules WHERE id = %s",
+        (owned_id,),
+    ).fetchone()
+    cluster_state = db_conn.execute(
+        "SELECT enabled, status, owner_agent_id, created_by_agent_id FROM schedules WHERE id = %s",
+        (cluster_id,),
+    ).fetchone()
+    assert owned_state == (False, "cancelled")
+    assert cluster_state == (True, "scheduled", None, creator)
+
+
+def test_missing_created_by_agent_is_rejected(db_conn: psycopg.Connection) -> None:
+    with schedule_client() as client:
+        response = _post(client, "missing-creator", created_by_agent_id=999_999)
+
+    assert response.status_code == 400
+    assert response.json()["detail"] == "created_by_agent_id does not exist"
+
+
+def test_idempotent_create_replay_preserves_created_by_agent_id(
+    db_conn: psycopg.Connection,
+) -> None:
+    creator = _owner(db_conn)
+    headers = keyed_headers("create-with-provenance")
+    with schedule_client() as client:
+        first = client.post(
+            "/api/schedules",
+            json={
+                "name": "replay-cluster",
+                "trigger_kind": "every",
+                "interval_seconds": 60,
+                "script": "print(1)\n",
+                "created_by_agent_id": creator,
+            },
+            headers=headers,
+        )
+        replay = client.post(
+            "/api/schedules",
+            json={
+                "name": "replay-cluster",
+                "trigger_kind": "every",
+                "interval_seconds": 60,
+                "script": "print(1)\n",
+                "created_by_agent_id": creator,
+            },
+            headers=headers,
+        )
+
+    assert first.status_code == 201
+    assert replay.status_code == 201
+    assert replay.json()["id"] == first.json()["id"]
+    assert replay.json()["owner_agent_id"] is None
+    assert replay.json()["created_by_agent_id"] == creator

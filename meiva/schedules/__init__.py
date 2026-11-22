@@ -45,6 +45,7 @@ class Schedule(BaseModel):
     updated_at: datetime
     machine: str
     owner_agent_id: int | None
+    created_by_agent_id: int | None = None
     trigger_kind: TriggerKind
     run_at: datetime | None
     cron_expr: str | None
@@ -87,6 +88,7 @@ def _create(
     if (script is None) == (message is None):
         raise ValueError("exactly one of script or message is required")
     owner = _owner(owner_agent_id)
+    creator_id = meiva.sdk_surface.agent_identity.agent_id()
     if message is not None and target_agent_id is None and owner is None:
         raise ValueError("message requires target_agent_id or an owner agent")
     body: dict[str, object] = {
@@ -107,6 +109,7 @@ def _create(
         "description": description,
         "machine": machine,
         "owner_agent_id": owner,
+        "created_by_agent_id": creator_id,
     }
     body.update((key, value) for key, value in optional.items() if value is not None)
     return Schedule.model_validate(gateway_client.schedule_create(body))

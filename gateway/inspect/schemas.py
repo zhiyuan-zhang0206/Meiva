@@ -154,6 +154,23 @@ class HeartbeatInfo(BaseModel):
     last_pause: HeartbeatLastPause | None = None
 
 
+class InspectorScheduleInfo(BaseModel):
+    model_config = ConfigDict(frozen=True)
+
+    id: int
+    name: str
+    enabled: bool
+    status: str
+    trigger_kind: Literal["at", "cron", "every"]
+    cron_expr: str | None = None
+    interval_seconds: int | None = None
+    run_at: datetime | None = None
+    next_launch_at: datetime | None = None
+    owner_agent_id: int | None = None
+    created_by_agent_id: int | None = None
+    machine: str
+
+
 class AgentInspectLive(BaseModel):
     """GET /api/agents/{id}/inspect/live response — the inspector's cheap,
     window-independent skeleton.
@@ -175,6 +192,7 @@ class AgentInspectLive(BaseModel):
     shells_available: bool | None = None
     spawned_at: datetime
     shells: list[ShellInfo]
+    schedules: list[InspectorScheduleInfo] = Field(default_factory=list[InspectorScheduleInfo])
     config_overlay: dict[str, object]
     heartbeat: HeartbeatInfo
 
