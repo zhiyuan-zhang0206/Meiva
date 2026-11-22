@@ -322,11 +322,14 @@ def test_server_capability_ok_when_host_has_a_display() -> None:
     ) == (True, None)
 
 
-def test_computer_use_mounts_on_headless_linux_when_remote_hosts_exist(unit_home: Path) -> None:
+@pytest.mark.parametrize("shared", ["computer_use", "browser"])
+def test_desktop_mcp_mounts_on_headless_linux_when_remote_hosts_exist(
+    unit_home: Path, shared: str
+) -> None:
     host = fake_host(platform=_LINUX)
     spec: dict[str, object] = {
         "command": ".venv/bin/python",
-        "shared": "computer_use",
+        "shared": shared,
         "requires": {"display": True},
     }
     assert cfg_mod.server_capability(spec, host=host, home=unit_home)[0] is False
@@ -335,12 +338,6 @@ def test_computer_use_mounts_on_headless_linux_when_remote_hosts_exist(unit_home
     )
     cfg_mod.assert_requirements(spec, host=host, home=unit_home)
     assert cfg_mod.server_capability(spec, host=host, home=unit_home) == (True, None)
-    chrome_spec: dict[str, object] = {
-        "command": "x",
-        "shared": "browser",
-        "requires": {"display": True},
-    }
-    assert cfg_mod.server_capability(chrome_spec, host=host, home=unit_home)[0] is False
 
 
 def test_server_url_none_for_stdio_server() -> None:
