@@ -328,6 +328,7 @@ def _assistant_texts(harness: Harness, turn_id: str) -> list[str]:
         ("unresolved-attribution", "", True, 6, 6, "tool-after-marker"),
         ("unresolved-attribution", "", True, 6, 6, "usage-collision"),
         ("unresolved-attribution", "", True, 6, 6, "usage-collision-early"),
+        ("unresolved-attribution", "", True, 6, 6, "usage-collision-interleaved"),
         ("unresolved-attribution", "", True, 6, 6, "foreground-preamble"),
     ],
 )
@@ -376,6 +377,7 @@ async def _assert_reused_prompt(
         "tool-after-marker": "tool-then-foreground",
         "usage-collision": "usage-collision",
         "usage-collision-early": "usage-collision-early",
+        "usage-collision-interleaved": "usage-collision-interleaved",
         "foreground-preamble": "foreground-preamble",
     }.get(native_timing, "next")
     await harness.session.deliver([HarnessInput.of("second", followup)])

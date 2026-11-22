@@ -505,6 +505,52 @@ def _text_chunks(
     return tuple(indices) if text.strip() == expected else ()
 
 
+def corroborates_assistant_chunks(
+    frames: Sequence[Frame], foreground: Sequence[str], detached: Sequence[str]
+) -> bool:
+    text_frames = {
+        index for index, frame in enumerate(frames) if content_text(frame.get("content")).strip()
+    }
+    if not foreground or not text_frames:
+        return False
+    consumed: set[int] = set()
+    cursor = 0
+    for text in foreground[:-1]:
+        indices = _find_text_chunks(frames, text, consumed, start=cursor)
+        if not indices:
+            return False
+        consumed.update(indices)
+        cursor = indices[-1] + 1
+    terminal = _find_text_chunks(
+        frames, foreground[-1], consumed, start=cursor, through=max(text_frames)
+    )
+    if not terminal:
+        return False
+    consumed.update(terminal)
+    for text in detached:
+        consumed.update(_find_text_chunks(frames, text, consumed))
+    return text_frames <= consumed
+
+
+def _find_text_chunks(
+    frames: Sequence[Frame],
+    expected: str,
+    consumed: set[int],
+    *,
+    start: int = 0,
+    through: int | None = None,
+) -> tuple[int, ...]:
+    for interleave in (False, True):
+        for index in range(start, len(frames)):
+            first = content_text(frames[index].get("content"))
+            if index in consumed or not expected.startswith(first.strip()):
+                continue
+            indices = _text_chunks(index, first, expected, frames, consumed, interleave=interleave)
+            if indices and (through is None or indices[-1] == through):
+                return indices
+    return ()
+
+
 def _calls(row: dict[str, object]) -> Iterator[dict[str, object]]:
     calls = row.get("tool_calls")
     if is_object_list(calls):

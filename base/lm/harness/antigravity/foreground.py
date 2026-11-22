@@ -6,10 +6,11 @@ from dataclasses import dataclass, field, replace
 from itertools import combinations
 
 from base.host.boundary.json_values import is_object_dict
-from base.lm.harness.antigravity.acp import ToolCall, content_text, input_marker, received_markers
+from base.lm.harness.antigravity.acp import ToolCall, input_marker, received_markers
 from base.lm.harness.antigravity.mapping import (
     OutputProjection,
     PlannerRow,
+    corroborates_assistant_chunks,
     has_planner_tokens,
     planner_rows,
     planner_step_usage,
@@ -205,7 +206,7 @@ MAX_AMBIGUOUS_PLANNER_ROWS = 10
 
 @dataclass(frozen=True, slots=True)
 class _StopText:
-    chunks: tuple[str, ...] = ()
+    chunks: tuple[dict[str, object], ...] = ()
     seen: frozenset[int] = frozenset()
 
     def corroborates(self, span: Sequence[PlannerRow], scope: Sequence[PlannerRow]) -> bool:
@@ -213,33 +214,15 @@ class _StopText:
         if not self.chunks or not terminal.final or terminal.index in self.seen:
             return False
         selected = {step.index for step in span}
-        positions = {0}
-        for step, text in _planner_text(scope):
-            if step.index > terminal.index:
-                break
-            if step.index in self.seen:
-                continue
-            matched = {
-                end
-                for start in positions
-                if (end := _chunk_prefix_end(self.chunks, start, text)) is not None
-            }
-            positions = matched if step.index in selected else positions | matched
-            if not positions:
-                return False
-        return any(not any(chunk.strip() for chunk in self.chunks[end:]) for end in positions)
-
-
-def _chunk_prefix_end(chunks: tuple[str, ...], start: int, expected: str) -> int | None:
-    value = ""
-    for index in range(start, len(chunks)):
-        value += chunks[index]
-        text = value.strip()
-        if text == expected:
-            return index + 1
-        if not expected.startswith(text):
-            break
-    return None
+        foreground = tuple(
+            text for step, text in _planner_text(span) if step.index not in self.seen
+        )
+        detached = tuple(
+            text
+            for step, text in _planner_text(scope)
+            if step.index not in selected and step.index not in self.seen
+        )
+        return corroborates_assistant_chunks(self.chunks, foreground, detached)
 
 
 def _witnesses(
@@ -387,7 +370,7 @@ class PromptTurn:
         self.stop_reason = reason
         self._stop_text = _StopText(
             chunks=tuple(
-                content_text(frame.get("content"))
+                frame
                 for frame in projection.pending
                 if frame.get("sessionUpdate") == "agent_message_chunk"
             ),

@@ -106,9 +106,10 @@ that matches its ACP receipt when every provisional row comes from a carried
 notice. A carried terminal requires corroboration from the unassigned ACP
 assistant chunks received before the prompt result when it is the only
 available terminal or receipts leave tied carried candidates. The reader
-matches the candidate span's text in order and can account for earlier
-detached text against other planner rows. Unmatched text after the terminal
-keeps the candidate provisional. Above the subset limit, only the whole span is
+matches the candidate span's text in order using the same interleaved chunk
+matcher as live projection. The candidate terminal must match through the last
+text chunk, and other planner rows must account for all skipped text. Above the
+subset limit, only the whole span is
 tested. The notice remains pending for a separate native reply. Missing input evidence retains
 the attribution failure.
 

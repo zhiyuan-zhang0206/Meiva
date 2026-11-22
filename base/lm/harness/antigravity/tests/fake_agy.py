@@ -306,18 +306,20 @@ def cancel_prompt(transcript: Path, request: int) -> None:
     result(request, "cancelled", usage=False)
 
 
-def late_foreground_with_usage_collision(transcript: Path, request: int, *, early: bool) -> None:
+def late_foreground_with_usage_collision(transcript: Path, request: int, timing: str) -> None:
     record_native_tool(transcript)
     record(transcript, planner_row("LATE NATIVE REPLY"))
-    if early:
+    if timing == "usage-collision-early":
         message("LATE NATIVE REPLY")
     message("O")
+    if timing == "usage-collision-interleaved":
+        message("LATE NATIVE REPLY")
     message("K")
     result(request)
     frame({"id": "collision-receipt", "method": "test/sync", "params": {}})
 
     def write_foreground() -> None:
-        if not early:
+        if timing == "usage-collision":
             message("LATE NATIVE REPLY")
         record(transcript, planner_row("OK"))
         update("usage_update", used=2, size=10)
@@ -371,7 +373,7 @@ def plain_prompt(transcript: Path, request: int, command: str) -> None:
         foreground_with_preamble(transcript, request)
         return
     if command.startswith("usage-collision"):
-        late_foreground_with_usage_collision(transcript, request, early=command.endswith("-early"))
+        late_foreground_with_usage_collision(transcript, request, command)
         return
     native = command.startswith("native-")
     reply = "FOREGROUND" if native else "OK"
