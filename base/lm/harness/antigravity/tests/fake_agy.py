@@ -306,6 +306,22 @@ def cancel_prompt(transcript: Path, request: int) -> None:
     result(request, "cancelled", usage=False)
 
 
+def late_foreground_with_usage_collision(transcript: Path, request: int) -> None:
+    record_native_tool(transcript)
+    record(transcript, planner_row("LATE NATIVE REPLY"))
+    message("O")
+    message("K")
+    result(request)
+    frame({"id": "collision-receipt", "method": "test/sync", "params": {}})
+
+    def write_foreground() -> None:
+        message("LATE NATIVE REPLY")
+        record(transcript, planner_row("OK"))
+        update("usage_update", used=2, size=10)
+
+    after_release(Path("release-foreground"), write_foreground)
+
+
 def plain_prompt(transcript: Path, request: int, command: str) -> None:
     if command in {"resumed-command-completion", "unresolved-attribution"}:
         resumed_command_completion(transcript, request, command)
@@ -325,6 +341,9 @@ def plain_prompt(transcript: Path, request: int, command: str) -> None:
         send_late_native(transcript)
     if command == "tool-then-foreground":
         record_native_tool(transcript)
+    if command == "usage-collision":
+        late_foreground_with_usage_collision(transcript, request)
+        return
     native = command.startswith("native-")
     reply = "FOREGROUND" if native else "OK"
     record(transcript, planner_row(reply))
@@ -578,6 +597,8 @@ def main() -> None:
                 original = None
         elif method == "session/prompt":
             original, permission_prompt = handle_prompt(transcript, data, original)
+        elif request == "collision-receipt":
+            Path("collision-receipt-read").touch()
         elif request == "permission-1":
             assert permission_prompt is not None
             assert data["result"]["outcome"] == {"outcome": "selected", "optionId": "deny"}

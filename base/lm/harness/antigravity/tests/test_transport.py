@@ -326,6 +326,7 @@ def _assistant_texts(harness: Harness, turn_id: str) -> list[str]:
         ("unresolved-attribution", "", True, 6, 6, "before-marker"),
         ("unresolved-attribution", "", True, 6, 6, "before-marker-with-tool"),
         ("unresolved-attribution", "", True, 6, 6, "tool-after-marker"),
+        ("unresolved-attribution", "", True, 6, 6, "usage-collision"),
     ],
 )
 async def test_resumed_multi_step_command_completion(
@@ -371,6 +372,7 @@ async def _assert_reused_prompt(
     followup = {
         "after-marker": "late-native",
         "tool-after-marker": "tool-then-foreground",
+        "usage-collision": "usage-collision",
     }.get(native_timing, "next")
     await harness.session.deliver([HarnessInput.of("second", followup)])
     second = await harness.wait_for(
@@ -380,6 +382,9 @@ async def _assert_reused_prompt(
             and event.turn_id != first_turn_id
         )
     )
+    if native_timing == "usage-collision":
+        await harness.wait_for_marker("collision-receipt-read")
+        harness.release("release-foreground")
     again = await harness.wait_for(
         lambda event: isinstance(event, TurnCompleted) and event.turn_id == second.turn_id
     )

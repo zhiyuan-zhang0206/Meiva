@@ -598,7 +598,7 @@ class AgySession(BaseHarnessSession[AntigravityConfig]):
         if (projection := self._projection) is None:
             self._finish_turn(turn, reason, rows)
         else:
-            turn.stop_reason = reason
+            turn.record_stop(reason, projection)
             turn.stop_deadline = self._monotonic() + self.config.background_reply_seconds
             self._replay(projection, transcript)
 

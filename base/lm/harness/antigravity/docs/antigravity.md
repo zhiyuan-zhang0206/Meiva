@@ -103,8 +103,11 @@ earlier steps could belong to that reply. Otherwise the notice stays
 provisional across markers until a verified detached terminal precedes the
 marker. A new input with one terminal can confirm the unique ordered subset
 that matches its ACP receipt when every provisional row comes from a carried
-notice. Above the subset limit, only the whole span is tested. The notice
-remains pending for a separate native reply. Missing input evidence retains
+notice. A carried terminal requires corroboration from the unassigned ACP
+assistant text received before the prompt result when it is the only available
+terminal or receipts leave tied carried candidates. The reader joins text
+chunks before checking them. Above the subset limit, only the whole span is
+tested. The notice remains pending for a separate native reply. Missing input evidence retains
 the attribution failure.
 
 The matcher first consumes contiguous text and then joins compatible fragments

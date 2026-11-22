@@ -6,7 +6,7 @@ from dataclasses import dataclass, field, replace
 from itertools import combinations
 
 from base.host.boundary.json_values import is_object_dict
-from base.lm.harness.antigravity.acp import ToolCall, input_marker, received_markers
+from base.lm.harness.antigravity.acp import ToolCall, content_text, input_marker, received_markers
 from base.lm.harness.antigravity.mapping import (
     OutputProjection,
     PlannerRow,
@@ -208,14 +208,43 @@ def _witnesses(
     possible: tuple[PlannerRow, ...],
     reports: Sequence[PromptUsage],
     keys: Sequence[str],
+    stop_text: str,
 ) -> Iterator[tuple[PlannerRow, ...]]:
     if not reports or not all(has_planner_tokens(step.row) for step in (*known, *possible)):
         return
     sole_carried_terminal = _has_sole_carried_terminal(known, possible)
     for extra in _receipt_candidates(possible, sole_carried_terminal=sole_carried_terminal):
         span = tuple(sorted((*known, *extra), key=lambda step: step.index))
-        if _matches_reports(span, reports, keys):
-            yield span
+        if not _matches_reports(span, reports, keys):
+            continue
+        if (
+            sole_carried_terminal
+            and span[-1].carries_notice
+            and not _matches_stop_text(span[-1], stop_text)
+        ):
+            continue
+        yield span
+
+
+def _matches_stop_text(step: PlannerRow, stop_text: str) -> bool:
+    value = step.row.get("content")
+    return bool(stop_text) and isinstance(value, str) and value.strip() == stop_text
+
+
+def _unique_receipt_span(
+    witnesses: Iterator[tuple[PlannerRow, ...]], stop_text: str
+) -> tuple[PlannerRow, ...] | None:
+    first = next(witnesses, None)
+    if first is None:
+        return None
+    second = next(witnesses, None)
+    if second is None:
+        return first
+    tied = (first, second, *witnesses)
+    if not all(span[-1].carries_notice for span in tied):
+        return None
+    matched = [span for span in tied if _matches_stop_text(span[-1], stop_text)]
+    return matched[0] if len(matched) == 1 else None
 
 
 def _receipt_candidates(
@@ -283,6 +312,7 @@ class PromptTurn:
     _verified_text: tuple[str, ...] = ()
     _verified_usage_partial: bool = False
     _projection_degraded: bool = False
+    _stop_text: str = ""
 
     def record_text(self, text: str) -> Iterator[ReasoningText | TextDelta]:
         yield from self._flush_thoughts()
@@ -316,6 +346,15 @@ class PromptTurn:
         self._verified_text = ()
         self._verified_usage_partial = False
         self._projection_degraded = False
+        self._stop_text = ""
+
+    def record_stop(self, reason: str, projection: OutputProjection) -> None:
+        self.stop_reason = reason
+        self._stop_text = "".join(
+            content_text(frame.get("content"))
+            for frame in projection.pending
+            if frame.get("sessionUpdate") == "agent_message_chunk"
+        ).strip()
 
     def require_projection(self, *, required: bool) -> OutputProjection | None:
         return OutputProjection(self.transcript_offset, fences_replay=True) if required else None
@@ -364,9 +403,9 @@ class PromptTurn:
             and (not reports or (projection.fences_replay and not possible))
         ):
             return known, tuple(step for step in possible if step.index > known[-1].index)
-        witnesses = _witnesses(known, possible, reports, self.keys)
-        span = next(witnesses, None)
-        if span is None or next(witnesses, None) is not None:
+        witnesses = _witnesses(known, possible, reports, self.keys, self._stop_text)
+        span = _unique_receipt_span(witnesses, self._stop_text)
+        if span is None:
             return None
         chosen = {step.index for step in span}
         return span, tuple(step for step in possible if step.index not in chosen)
