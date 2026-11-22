@@ -28,6 +28,24 @@ class _MirroringExporter(Protocol):
     _mirror_dir: Path
 
 
+def _turn_end() -> telemetry.Event:
+    return telemetry.Event(
+        ts=datetime(2026, 9, 15, 23, 59, 59, tzinfo=UTC),
+        trace_id=None,
+        span_id=None,
+        agent_id=71,
+        machine="test",
+        cluster="test",
+        process="test",
+        category="telemetry",
+        event_name="turn_end",
+        level="info",
+        source="system",
+        target_agent_id=None,
+        attributes={"ok": True, "duration_seconds": 2.5},
+    )
+
+
 def test_projection_failure_keeps_jsonl_and_otlp_and_never_emits_recursively(
     tmp_path: Path,
     database: Database,
@@ -49,21 +67,7 @@ def test_projection_failure_keeps_jsonl_and_otlp_and_never_emits_recursively(
         home=tmp_path,
         endpoint=lambda: "http://127.0.0.1:4318",
     )
-    event = telemetry.Event(
-        ts=datetime(2026, 9, 15, 23, 59, 59, tzinfo=UTC),
-        trace_id=None,
-        span_id=None,
-        agent_id=71,
-        machine="test",
-        cluster="test",
-        process="test",
-        category="telemetry",
-        event_name="turn_end",
-        level="info",
-        source="system",
-        target_agent_id=None,
-        attributes={"ok": True, "duration_seconds": 2.5},
-    )
+    event = _turn_end()
     db_conn.execute("LOCK TABLE agent_metric_observations IN ACCESS EXCLUSIVE MODE")
     with telemetry_otlp.bind_exporter(exporter):
         pipeline = telemetry.build_pipeline(
@@ -87,6 +91,17 @@ def test_projection_failure_keeps_jsonl_and_otlp_and_never_emits_recursively(
     assert str(telemetry.event_row(event)["id"]) in mirror[0].read_text()
     assert any("[observed-metrics] projection failed" in msg for msg in loguru_records.messages())
     assert len(emitted_events) == 0, "diagnostics must bypass the emitter"
+
+
+def test_api_only_process_mirrors_and_exports_without_database(tmp_path: Path) -> None:
+    event = _turn_end()
+    exported: list[telemetry.Event] = []
+    telemetry.write_batch(
+        [event], database=None, export=exported.extend, target_dir=tmp_path, now=event.ts
+    )
+    assert exported == [event]
+    (mirror,) = tmp_path.glob("events-*.jsonl")
+    assert str(telemetry.event_row(event)["id"]) in mirror.read_text(encoding="utf-8")
 
 
 # meiva:note

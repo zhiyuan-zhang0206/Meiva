@@ -1087,6 +1087,22 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/cluster/machine-endpoints": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["get_cluster_machine_endpoints_api_cluster_machine_endpoints_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/cluster/roster": {
         parameters: {
             query?: never;
@@ -6240,6 +6256,27 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ClusterStatus"];
+                };
+            };
+        };
+    };
+    get_cluster_machine_endpoints_api_cluster_machine_endpoints_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: string | null;
+                    };
                 };
             };
         };

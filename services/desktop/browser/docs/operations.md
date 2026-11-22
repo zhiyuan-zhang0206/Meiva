@@ -162,6 +162,12 @@ while their session is active. The shared runner bearer authenticates the
 transport. The browser RPC and proof redemption have separate bounded
 admission, acquired before request body buffering.
 
+The MCP daemon discovers peer endpoints from the gateway's registered runner
+endpoints using the launcher-provided machine API token. The directory read
+excludes administratively paused and intentionally stopped runners and
+does not probe any machine. The browser executor
+writes telemetry to its local JSONL mirror and configured OTLP exporter.
+
 Remote uploads stay staged while Chrome can still read the selected file.
 The runner gives an upload a ten-minute retention window and retains up to
 32 outstanding uploads to cap disk consumption at 256 MiB. Each RPC
