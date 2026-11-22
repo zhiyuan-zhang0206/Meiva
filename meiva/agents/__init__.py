@@ -421,7 +421,10 @@ def terminate(
 ) -> TerminateOutcome:
     """End an agent after its current step.
 
-    `message` is stored, without a reply, for when the agent is revived.
+    `message` is stored on the agent (without causing another turn before exit)
+    for its termination record and any later resurrection, and is included in the
+    `agent_terminated` system note sent to its nearest living ancestor (skipped
+    only when you are that exact nearest living ancestor, preventing self-echo).
     `force=True` interrupts work; an `enqueued` result confirms acceptance, not
     exit. A terminated agent wakes on any new message. Every termination closes
     its shell sessions and watchers silently; `kill_all_shell_sessions=True`

@@ -47,4 +47,5 @@ export const NOTE_TAGS = [
   "sdk_expand",
   "workspace_hygiene",
   "personal_dream",
+  "agent_terminated",
 ] as const;

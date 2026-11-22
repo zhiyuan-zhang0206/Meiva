@@ -45,7 +45,13 @@ def test_restart_statements_leave_the_overlay_untouched() -> None:
 def test_a_terminate_writes_one_self_sourced_inbound_for_the_target() -> None:
     statement = terminate_statement(7)
     assert "'terminate', 'self'" in statement.sql
-    assert statement.params == (7,)
+    assert statement.params == (7, "")
+
+
+def test_a_terminate_with_message_stores_stripped_content() -> None:
+    statement = terminate_statement(7, "  done with step 1  ")
+    assert "'terminate', 'self'" in statement.sql
+    assert statement.params == (7, "done with step 1")
 
 
 def test_a_compact_writes_the_summary_inbound_for_the_agent() -> None:

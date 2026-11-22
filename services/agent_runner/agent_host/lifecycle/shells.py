@@ -10,7 +10,9 @@ from agent.ownership.hosted import (
     LifecycleKind,
     apply_hosted_lifecycle,
 )
+from base.agents.inbox.wake import publish_inbound_wake_async
 from base.agents.lifecycle import release_browser_pages
+from base.agents.messages.termination_notice import AncestorTerminationNotice
 from base.db.protocols import AsyncPool
 from base.db.transaction import async_write_transaction
 from base.events.live.announce import publish_agent_updated
@@ -80,13 +82,28 @@ async def close_terminated_agent_shells(
 # failure (a cancellation included) is raised after all attempts; each later one is attached to
 # it as a note and logged at ERROR.
 async def finish_termination(
-    pool: AsyncPool, bus: EventBus, agent_id: int, shell_cutoff: int | None, *, home: Path
+    pool: AsyncPool,
+    bus: EventBus,
+    agent_id: int,
+    shell_cutoff: int | None,
+    *,
+    home: Path,
+    ancestor_notification: AncestorTerminationNotice | None = None,
 ) -> None:
     failures: list[CleanupFailure] = []
     try:
         await publish_agent_updated(bus, agent_id)
     except BaseException as error:
         failures.append(CleanupFailure("publication", error))
+    if ancestor_notification is not None:
+        try:
+            await publish_inbound_wake_async(
+                bus,
+                ancestor_notification.ancestor_id,
+                str(ancestor_notification.inbound_id),
+            )
+        except BaseException as error:
+            failures.append(CleanupFailure("ancestor_wake", error))
     try:
         await release_browser_pages(agent_id, home=home)
     except BaseException as error:
@@ -128,7 +145,14 @@ async def apply_lifecycle_command(
     if applied is None:
         return None
     if applied.kind == "terminate":
-        await finish_termination(pool, bus, applied.agent_id, applied.shell_cutoff, home=home)
+        await finish_termination(
+            pool,
+            bus,
+            applied.agent_id,
+            applied.shell_cutoff,
+            home=home,
+            ancestor_notification=applied.ancestor_notification,
+        )
     elif applied.switch is not None:
         if history is not None:
             await record_switch_note(
@@ -167,6 +191,19 @@ async def reap_and_announce_corpses(
                 event="corpse_reaper_publish_failed",
                 agent_id=corpse.agent_id,
             )
+        if corpse.ancestor_notification is not None:
+            try:
+                await publish_inbound_wake_async(
+                    bus,
+                    corpse.ancestor_notification.ancestor_id,
+                    str(corpse.ancestor_notification.inbound_id),
+                )
+            except Exception:
+                logger.exception(
+                    "corpse reap ancestor wake publish failed",
+                    agent_id=corpse.agent_id,
+                    ancestor_id=corpse.ancestor_notification.ancestor_id,
+                )
         try:
             await release_browser_pages(corpse.agent_id, home=home)
         except Exception:

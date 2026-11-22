@@ -10,9 +10,14 @@ from psycopg.types.json import Jsonb
 from psycopg_pool import ConnectionPool
 
 from base import telemetry
+from base.agents.inbox.termination_notice import (
+    AncestorTerminationNotice,
+    notify_nearest_living_ancestor_sync,
+)
 from base.agents.inbox.wake import publish_inbound_wake
 from base.agents.incarnation.lifecycle_commands import KILL_ALL_SHELL_SESSIONS
 from base.agents.messages.envelope import validate_source
+from base.agents.messages.termination_notice import TERMINATION_MESSAGE_PAYLOAD_KEY
 from base.api_contracts.agent_contract import AgentNotFound, AgentStatus
 from base.db import Database
 from base.db.rows import IdRow, query_one
@@ -23,6 +28,19 @@ from base.log import logger
 from base.paths import harness_registrations_dir
 from base.telemetry.audit_events import prepare_event_log, record_audit
 from ops.rpc_schemas.terminate import HarnessAttachment
+
+
+def _terminate_command_payload(
+    *,
+    kill_all_shell_sessions: bool,
+    termination_message: str | None,
+) -> Jsonb | None:
+    payload: dict[str, object] = {}
+    if kill_all_shell_sessions:
+        payload[KILL_ALL_SHELL_SESSIONS] = True
+    if termination_message is not None and termination_message.strip():
+        payload[TERMINATION_MESSAGE_PAYLOAD_KEY] = termination_message.strip()
+    return Jsonb(payload) if payload else None
 
 
 # meiva:note
@@ -36,6 +54,7 @@ def insert_termination_pair(
     source: str,
     message: str | None,
     kill_all_shell_sessions: bool = False,
+    termination_message: str | None = None,
 ) -> tuple[int | None, int]:
     message_id: int | None = None
     if message is not None:
@@ -50,6 +69,9 @@ def insert_termination_pair(
         if message_row is None:
             raise RuntimeError("termination message INSERT returned no id")
         message_id = message_row.id
+    resolved_termination_message = (
+        termination_message if termination_message is not None else message
+    )
     terminate_row = query_one(
         conn,
         IdRow,
@@ -58,7 +80,10 @@ def insert_termination_pair(
         (
             agent_id,
             source,
-            Jsonb({KILL_ALL_SHELL_SESSIONS: True}) if kill_all_shell_sessions else None,
+            _terminate_command_payload(
+                kill_all_shell_sessions=kill_all_shell_sessions,
+                termination_message=resolved_termination_message,
+            ),
         ),
     )
     if terminate_row is None:
@@ -119,7 +144,12 @@ def _insert_termination_inbounds(
             exc=exc,
         )
     _, terminate_id = insert_termination_pair(
-        conn, agent_id, source=source, message=None, kill_all_shell_sessions=kill
+        conn,
+        agent_id,
+        source=source,
+        message=None,
+        kill_all_shell_sessions=kill,
+        termination_message=message,
     )
     message_id: int | None = None
     try:
@@ -150,10 +180,13 @@ def _stage_termination_event(
     source: str,
     inbound_id: int,
     kill_all_shell_sessions: bool,
+    message: str | None = None,
 ) -> telemetry.Event:
     payload: dict[str, object] = {"inbound_id": inbound_id}
     if kill_all_shell_sessions:
         payload[KILL_ALL_SHELL_SESSIONS] = True
+    if message is not None and message.strip():
+        payload["message"] = message.strip()
     event = prepare_event_log(
         event_type="terminate", agent_id=agent_id, source=source, payload=payload
     )
@@ -194,6 +227,7 @@ def enqueue_termination_inbounds(
             source=source,
             inbound_id=terminate_id,
             kill_all_shell_sessions=kill_all_shell_sessions,
+            message=message,
         )
     telemetry.emit_prepared(prepared_event)
     publish_force_terminate_inbound(db, bus, agent_id, terminate_id, source)
@@ -214,7 +248,7 @@ def enqueue_termination_inbounds(
 #     was queued before the latest explicit force carries a smaller inbound id and
 #     cannot revive the agent, even when the force found it already terminated and
 #     changed no status.
-def force_terminate_transaction(
+def force_terminate_with_notice(
     agent_id: int,
     db_pool: ConnectionPool,
     *,
@@ -223,7 +257,8 @@ def force_terminate_transaction(
     kill_all_shell_sessions: bool = False,
     require_quiescent: bool = False,
     preserve_shells: bool = False,
-) -> tuple[AgentStatus, int, int | None]:
+) -> tuple[AgentStatus, int, int | None, AncestorTerminationNotice | None]:
+    ancestor_notice: AncestorTerminationNotice | None = None
     with db_pool.connection() as conn, conn.cursor() as cur:
         conn.execute("SET TRANSACTION READ WRITE")
         cur.execute(
@@ -279,15 +314,45 @@ def force_terminate_transaction(
             (agent_id,),
         )
         cur.execute("SELECT set_config('meiva.lifecycle_release', '', true)")
+        if old_status is not AgentStatus.TERMINATED and not preserve_shells:
+            ancestor_notice = notify_nearest_living_ancestor_sync(
+                conn,
+                terminated_agent_id=agent_id,
+                source=source,
+                message=message,
+            )
         prepared_event = _stage_termination_event(
             conn,
             agent_id=agent_id,
             source=source,
             inbound_id=terminate_inbound_id,
             kill_all_shell_sessions=kill_all_shell_sessions,
+            message=message,
         )
     telemetry.emit_prepared(prepared_event)
-    return old_status, terminate_inbound_id, None if preserve_shells else row[1]
+    return old_status, terminate_inbound_id, None if preserve_shells else row[1], ancestor_notice
+
+
+def force_terminate_transaction(
+    agent_id: int,
+    db_pool: ConnectionPool,
+    *,
+    source: str,
+    message: str | None = None,
+    kill_all_shell_sessions: bool = False,
+    require_quiescent: bool = False,
+    preserve_shells: bool = False,
+) -> tuple[AgentStatus, int, int | None]:
+    old_status, terminate_inbound_id, cutoff, _notice = force_terminate_with_notice(
+        agent_id,
+        db_pool,
+        source=source,
+        message=message,
+        kill_all_shell_sessions=kill_all_shell_sessions,
+        require_quiescent=require_quiescent,
+        preserve_shells=preserve_shells,
+    )
+    return old_status, terminate_inbound_id, cutoff
 
 
 # meiva:note
@@ -309,13 +374,15 @@ def force_mark_terminated(
     source: str = "user",
     message: str | None = None,
 ) -> None:
-    _, inbound_id, _cutoff = force_terminate_transaction(
+    _, inbound_id, _cutoff, ancestor_notice = force_terminate_with_notice(
         agent_id,
         db_pool,
         source=source,
         message=message,
     )
     publish_force_terminate_inbound(db, bus, agent_id, inbound_id, source)
+    if ancestor_notice is not None:
+        publish_inbound_wake(db, bus, ancestor_notice.ancestor_id, str(ancestor_notice.inbound_id))
 
 
 # meiva:note

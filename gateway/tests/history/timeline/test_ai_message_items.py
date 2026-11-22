@@ -209,6 +209,7 @@ class TestAiMessageItems:
             NoteTag.COMPACT_FAILED,
             NoteTag.WORKSPACE_HYGIENE,
             NoteTag.PERSONAL_DREAM,
+            NoteTag.AGENT_TERMINATED,
         }
         hidden = {
             NoteTag.MEMORY,

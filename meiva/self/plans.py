@@ -25,7 +25,7 @@ _INSERT_RESTART = (
 )
 _INSERT_TERMINATE = (
     "INSERT INTO inbound_messages (agent_id, content, kind, source) "
-    "VALUES (%s, '', 'terminate', 'self')"
+    "VALUES (%s, %s, 'terminate', 'self')"
 )
 _INSERT_COMPACT = (
     "INSERT INTO inbound_messages (agent_id, content, kind) VALUES (%s, %s, 'compact_summary')"
@@ -68,8 +68,8 @@ def restart_statements(
     )
 
 
-def terminate_statement(target_id: int) -> SqlStatement:
-    return SqlStatement(_INSERT_TERMINATE, (target_id,))
+def terminate_statement(target_id: int, message: str | None = None) -> SqlStatement:
+    return SqlStatement(_INSERT_TERMINATE, (target_id, message.strip() if message else ""))
 
 
 def compact_statement(agent_id: int, summary: str) -> SqlStatement:

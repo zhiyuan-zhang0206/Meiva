@@ -12,6 +12,7 @@ from typing import assert_never
 from psycopg_pool import ConnectionPool
 
 from base.agents.inbox.insert import insert_inbound_message
+from base.agents.inbox.wake import publish_inbound_wake
 from base.agents.lifecycle import release_browser_pages
 from base.agents.messages.inbound import WakeTriggerKind, validate_wake_trigger_kind
 from base.agents.messages.lifecycle_text import fast_acknowledgement_note
@@ -229,7 +230,7 @@ def terminate_force_blocking(
     db_pool: ConnectionPool,
 ) -> tuple[AgentStatus, int, int | None]:
     """Commit the force fence before publishing its wake and lifecycle hint."""
-    old_status, inbound_id, cutoff = force_terminate_transaction(
+    old_status, inbound_id, cutoff, ancestor_notice = termination.force_terminate_with_notice(
         agent_id,
         db_pool,
         source=body.source,
@@ -237,6 +238,8 @@ def terminate_force_blocking(
         kill_all_shell_sessions=body.kill_all_shell_sessions,
     )
     publish_force_terminate_inbound(db, bus, agent_id, inbound_id, body.source)
+    if ancestor_notice is not None:
+        publish_inbound_wake(db, bus, ancestor_notice.ancestor_id, str(ancestor_notice.inbound_id))
     publish_agent_updated_sync(bus, agent_id)
     return old_status, inbound_id, cutoff
 
