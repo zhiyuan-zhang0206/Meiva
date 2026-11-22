@@ -269,6 +269,23 @@ def test_format_summary_for_active_skip_and_shadow_modes() -> None:
     assert "- seconds saved (by `.test_durations`): 20" in active
     assert "- recorded: 1" in active
 
+    active_with_zero_report = test_cache.format_summary(
+        plan=plan,
+        report={
+            "would_skip": 2,
+            "would_skip_passed": 0,
+            "would_skip_failed": [],
+            "would_skip_not_run": ["tests/a.py", "tests/b.py"],
+            "saved_seconds": 0.0,
+        },
+        durations=durations,
+        skip_enabled=True,
+        canary=False,
+        recorded=1,
+        label="active skip",
+    )
+    assert "- seconds saved (by `.test_durations`): 20" in active_with_zero_report
+
     report: dict[str, object] = {
         "would_skip": 2,
         "would_skip_passed": 2,

@@ -145,7 +145,6 @@ def _format_active_summary(
     *,
     skippable: Sequence[str],
     run_count: int,
-    report: Mapping[str, object] | None,
     durations: Mapping[str, float],
     recorded: int,
     uncacheable: int,
@@ -153,10 +152,6 @@ def _format_active_summary(
     label: str,
 ) -> str:
     saved = sum(float(durations.get(path, 0.0)) for path in skippable)
-    if report is not None:
-        report_saved = report.get("saved_seconds")
-        if isinstance(report_saved, (int, float)):
-            saved = float(report_saved)
     lines = [
         f"### Test result cache ({label or 'active skip'})",
         f"- skipped: {len(skippable)}",
@@ -217,7 +212,6 @@ def format_summary(
         return _format_active_summary(
             skippable=skippable,
             run_count=len(run_list),
-            report=report,
             durations=durations,
             recorded=recorded,
             uncacheable=uncacheable,
