@@ -46,12 +46,38 @@ def test_message_envelope_wins_over_quoted_reminder_text() -> None:
     assert "Saw" in notice.text
 
 
+def test_unwrapped_message_envelope_quoting_reminder_is_not_swallowed() -> None:
+    content = (
+        "[Message] timestamp=2026-11-22T00:00:00Z sender=child-conv priority=HIGH "
+        "content=Quoted <SYSTEM_MESSAGE>\nReminder: work efficiently.\n</SYSTEM_MESSAGE>"
+    )
+    notice = classify(content)
+    assert notice is not None
+    assert notice.sender == "child-conv"
+    assert notice.cause is HarnessCause.BACKGROUND_TASK
+    assert "Reminder: work efficiently." in notice.text
+
+
 @pytest.mark.parametrize(
     "content",
     [
         "DO_NOT_LOG_SYNTHETIC_BODY",
         "<SYSTEM_MESSAGE>\nUnknown CLI frame without envelope\n</SYSTEM_MESSAGE>",
         "<SYSTEM_MESSAGE>\nReminder:\n</SYSTEM_MESSAGE>",
+        "<SYSTEM_MESSAGE>\nReminder:   \n</SYSTEM_MESSAGE>",
+        (
+            "<SYSTEM_MESSAGE>\nUnknownNewDirective: action\n</SYSTEM_MESSAGE>\n\n"
+            "<SYSTEM_MESSAGE>\nReminder: work efficiently.\n</SYSTEM_MESSAGE>"
+        ),
+        (
+            "<SYSTEM_MESSAGE>\nReminder:\n</SYSTEM_MESSAGE>\n"
+            "<SYSTEM_MESSAGE>\nUnknownNewDirective: action\n</SYSTEM_MESSAGE>"
+        ),
+        (
+            "<SYSTEM_MESSAGE>\nReminder: work efficiently.\n</SYSTEM_MESSAGE>\n"
+            "<SYSTEM_MESSAGE>\nUnknownNewDirective: action\n</SYSTEM_MESSAGE>"
+        ),
+        "<SYSTEM_MESSAGE>Reminder: <SYSTEM_MESSAGE>nested</SYSTEM_MESSAGE>",
     ],
 )
 def test_unknown_system_messages_still_raise(content: str) -> None:

@@ -21,7 +21,12 @@ from base.lm.harness.events import HarnessCause
 # meiva:link base/lm/harness/docs/subagent-text.md
 
 _RESTART_MARKER = "have been stopped due to server restart"
-_REMINDER_BLOCK = re.compile(r"<SYSTEM_MESSAGE>\s*Reminder:\s*\S.*?</SYSTEM_MESSAGE>", re.DOTALL)
+_REMINDER_BLOCK = re.compile(
+    r"\A(?:The following is a <SYSTEM_MESSAGE>[^\n]*\n)?"
+    r"\s*<SYSTEM_MESSAGE>\s*Reminder:[ \t]*(?!\s*</?SYSTEM_MESSAGE>)\S"
+    r"(?:(?!</?SYSTEM_MESSAGE>).)*</SYSTEM_MESSAGE>\s*\Z",
+    re.DOTALL,
+)
 _ENVELOPE = re.compile(
     r"\A\[Message\] timestamp=(\S+) sender=(\S+) priority=(\S+) content=(.*)\Z", re.DOTALL
 )
@@ -42,13 +47,12 @@ def classify(content: str) -> SystemNotice | None:
     wrapped = re.search(
         r"<SYSTEM_MESSAGE>\s*(\[Message\].*?)\s*</SYSTEM_MESSAGE>", content, re.DOTALL
     )
-    if wrapped is not None:
-        content = wrapped.group(1)
-    elif _REMINDER_BLOCK.search(content) is not None:
-        return None
-    found = _ENVELOPE.match(content)
+    envelope = wrapped.group(1) if wrapped is not None else content
+    found = _ENVELOPE.match(envelope)
     if found is None:
-        raise UnrecognisedError(f"system_message:{content.split(maxsplit=1)[0]}")
+        if wrapped is None and _REMINDER_BLOCK.match(content) is not None:
+            return None
+        raise UnrecognisedError(f"system_message:{envelope.split(maxsplit=1)[0]}")
     sender, text = found.group(2), found.group(4).strip()
     if sender == "system":
         return None
