@@ -31,6 +31,12 @@ class HarnessTimingAmbiguous(TypedDict):
     count: int
 
 
+class AgyAcpAttributionDegraded(TypedDict):
+    turn_id: str
+    unresolved_rows: int
+    pending_frames: int
+
+
 class NodeExitEntry(TypedDict):
     """One node's exit inside an aggregated per-turn `node_exit` event."""
 
@@ -207,6 +213,13 @@ EVENTS: dict[str, EventSpec] = {
         "a frame of an earlier harness process arrived after a later generation began and was "
         "dropped before it could settle an input or end a turn",
         tier="noise",
+    ),
+    "agy_acp_attribution_degraded": telemetry_event(
+        "agy_acp_attribution_degraded",
+        "an Antigravity ACP prompt reached its attribution deadline after completion and settled "
+        "with only attributed output",
+        payload=AgyAcpAttributionDegraded,
+        tier="anomaly",
     ),
     "harness_input_requeued": telemetry_event(
         "harness_input_requeued",
