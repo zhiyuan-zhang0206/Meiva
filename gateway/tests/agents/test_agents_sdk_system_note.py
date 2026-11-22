@@ -114,8 +114,11 @@ class TestSendSystemNote:
         # concatenation plus trailing comma.
         content: object = ("Context was refreshed.",)
         inbound_id = meiva.agents.send_system_note(
-            peer_id, content, tag="context", idempotency_key=str(uuid4())
-        )  # pyright: ignore[reportArgumentType]
+            peer_id,
+            content,  # pyright: ignore[reportArgumentType]
+            tag="context",
+            idempotency_key=str(uuid4()),
+        )
         assert isinstance(inbound_id, int)
         with db_conn.cursor() as cur:
             cur.execute("SELECT content FROM inbound_messages WHERE agent_id = %s", (peer_id,))
@@ -144,8 +147,11 @@ class TestSendSystemNote:
         content: object = ("Context was ", "refreshed.")
         with pytest.raises(TypeError, match="content must be a string"):
             meiva.agents.send_system_note(
-                peer_id, content, tag="context", idempotency_key=str(uuid4())
-            )  # pyright: ignore[reportArgumentType]
+                peer_id,
+                content,  # pyright: ignore[reportArgumentType]
+                tag="context",
+                idempotency_key=str(uuid4()),
+            )
 
     def test_send_system_note_to_nonexistent_raises(
         self,
