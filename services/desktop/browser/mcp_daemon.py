@@ -681,9 +681,7 @@ class BrowserMcpEntryWiring:
     default_ttl_seconds: float
     clock: Clock
     gateway_access: GatewayAccess
-
-    def connect_timeout_seconds(self) -> float:
-        return self.config.view.sandbox.mcp_connect_timeout_seconds
+    connect_timeout_seconds: Callable[[], float]
 
 
 # meiva:note
@@ -704,6 +702,7 @@ def build_entry_wiring(
         default_ttl_seconds=float(config.view.daemon.chrome_page_default_ttl_seconds),
         clock=Clock(clock_config_from_boot(config), timers=SYSTEM_TIMERS),
         gateway_access=gateway_access_from_boot(config),
+        connect_timeout_seconds=lambda: config.view.sandbox.mcp_connect_timeout_seconds,
     )
 
 
