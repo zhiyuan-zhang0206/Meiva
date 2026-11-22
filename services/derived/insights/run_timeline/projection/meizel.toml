@@ -1,7 +1,7 @@
 exports = ["derive.py", "jobs.py", "model.py", "reader.py", "rows.py", "source.py"]
 
 [purity]
-"backfill.py" = { mode = "none", why = "the operator command that prepares the projection of the named agents: it boots the configuration, opens the database and drains index_next for each agent; what it accepts is decided by request_rules.py" }
+"backfill.py" = { mode = "off", why = "the operator command that prepares the projection of the named agents: it boots the configuration, opens the database and drains index_next for each agent; what it accepts is decided by request_rules.py" }
 "derive.py" = "strict"
 "jobs.py" = "strict"
 "model.py" = "strict"

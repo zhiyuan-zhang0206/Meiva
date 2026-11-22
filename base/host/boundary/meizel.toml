@@ -8,4 +8,4 @@ exports = ["fields.py", "json_values.py", "jsonl.py", "options.py", "process.py"
 [purity]
 "json_values.py" = "strict"
 "untyped.py" = "strict"
-"jsonl.py" = { mode = "none", why = "reads a JSONL file from disk and parses its rows; callers decide what the rows mean" }
+"jsonl.py" = { mode = "off", why = "reads a JSONL file from disk and parses its rows; callers decide what the rows mean" }

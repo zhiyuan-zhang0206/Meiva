@@ -10,7 +10,7 @@ exports = ["corpse_reap.py", "hosted.py", "inbound.py", "tests"]
 "." = "strict"
 "__init__.py" = "strict"
 "audit_payloads.py" = "strict"
-"corpse_reap.py" = { mode = "none", why = "the shell that reaps crash-dead hosted rows: one UPDATE ... RETURNING takes the rows past their grace and this host's, then it writes each row's audit event and logs; the audit payload is audit_payloads.reaped_payload and the reaped value is lifecycle_plan.ReapedCorpse" }
-"hosted.py" = { mode = "none", why = "the shell that runs the hosted-runtime lifecycle against Postgres: it admits a turn, settles a running row, stamps a turn's fatal marker and applies a claimed restart or terminate command, each in one transaction, then writes the audit rows and emits their events; what to do is decided in lifecycle_plan.py and audit_payloads.py" }
-"inbound.py" = { mode = "none", why = "the shell that takes an agent's runtime row lock for an inbound queue mutation and refuses when the caller no longer owns the row; whether the row is owned is decided by lifecycle_plan.owns_inbound_row" }
+"corpse_reap.py" = { mode = "off", why = "the shell that reaps crash-dead hosted rows: one UPDATE ... RETURNING takes the rows past their grace and this host's, then it writes each row's audit event and logs; the audit payload is audit_payloads.reaped_payload and the reaped value is lifecycle_plan.ReapedCorpse" }
+"hosted.py" = { mode = "off", why = "the shell that runs the hosted-runtime lifecycle against Postgres: it admits a turn, settles a running row, stamps a turn's fatal marker and applies a claimed restart or terminate command, each in one transaction, then writes the audit rows and emits their events; what to do is decided in lifecycle_plan.py and audit_payloads.py" }
+"inbound.py" = { mode = "off", why = "the shell that takes an agent's runtime row lock for an inbound queue mutation and refuses when the caller no longer owns the row; whether the row is owned is decided by lifecycle_plan.owns_inbound_row" }
 "lifecycle_plan.py" = "strict"

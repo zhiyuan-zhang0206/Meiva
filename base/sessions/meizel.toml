@@ -14,7 +14,7 @@ exports = ["backend.py", "coding_session_owner.py", "coding_session_owner_record
 [purity]
 "__init__.py" = "strict"
 "log_prefix.py" = "strict"
-"log_writer.py" = { mode = "none", why = "writes a transcript's identity into the file that starts it: it opens the path exclusively (append when the file already exists), stamps the created file's own mtime, writes the bytes log_prefix.session_log_header renders, and hands the descriptor back; the line itself is decided in log_prefix.py" }
+"log_writer.py" = { mode = "off", why = "writes a transcript's identity into the file that starts it: it opens the path exclusively (append when the file already exists), stamps the created file's own mtime, writes the bytes log_prefix.session_log_header renders, and hands the descriptor back; the line itself is decided in log_prefix.py" }
 
 [roots]
 "coding_session_owner.py" = { kinds = ["pid"], why = "the socket directory is keyed by the uid that owns it (`os.getuid()`) so every session of the user computes the same path; a caller-supplied uid would let one user's session address another's directory" }

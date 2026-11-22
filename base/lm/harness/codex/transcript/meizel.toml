@@ -22,4 +22,4 @@ exports = ["window.py"]
 "rollout.py" = "strict"
 "scalars.py" = "strict"
 "shapes.py" = "strict"
-"window.py" = { mode = "none", why = "the file shell of a read-time timeline of a Codex thread: it finds the rollout file and names where its rows are inputs; the strict rollout parser decides what a row means" }
+"window.py" = { mode = "off", why = "the file shell of a read-time timeline of a Codex thread: it finds the rollout file and names where its rows are inputs; the strict rollout parser decides what a row means" }

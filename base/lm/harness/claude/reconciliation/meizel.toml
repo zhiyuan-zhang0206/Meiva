@@ -10,4 +10,4 @@ exports = ["transcript.py"]
 "." = "strict"
 "__init__.py" = "strict"
 "judge.py" = "strict"
-"transcript.py" = { mode = "none", why = "the read half of Claude reconciliation: it globs the session transcript under the injected Claude home and parses its lines; what the rows mean is decided in judge.py" }
+"transcript.py" = { mode = "off", why = "the read half of Claude reconciliation: it globs the session transcript under the injected Claude home and parses its lines; what the rows mean is decided in judge.py" }

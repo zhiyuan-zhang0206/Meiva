@@ -155,7 +155,7 @@ schema changes, immutable migration history and baseline verification.
 A commit runs `check --changed` on the staged files, a push and CI run the whole
 `check`, and CI also compares recorded debt with the base branch.
 
-Directories that still carry recorded debt are strict-to-be: the recorded
+Directories that still carry recorded debt are ratchet: the recorded
 violations pass, anything new fails, and the debt may only shrink
 ([recorded debt](https://github.com/zhiyuan-zhang0206/meizel/blob/main/meizel/docs/checker/debt/debt.md)).
 

@@ -7,6 +7,6 @@
 
 [purity]
 "." = "strict"
-"agent.py" = { mode = "none", why = "the command line shell: it puts the checkout on sys.path, reads the gateway access from settings, posts the request the pure module builds, and prints the id the gateway answers with; the route, headers and id parsing are in spawn_request.py" }
-"gateway.py" = { mode = "none", why = "the launch wrapper: it puts the checkout on sys.path and calls gateway.app.main(); it decides nothing of its own" }
+"agent.py" = { mode = "off", why = "the command line shell: it puts the checkout on sys.path, reads the gateway access from settings, posts the request the pure module builds, and prints the id the gateway answers with; the route, headers and id parsing are in spawn_request.py" }
+"gateway.py" = { mode = "off", why = "the launch wrapper: it puts the checkout on sys.path and calls gateway.app.main(); it decides nothing of its own" }
 "spawn_request.py" = "strict"
